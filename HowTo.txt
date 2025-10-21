@@ -1,0 +1,15 @@
+How to forma a price field for ag-grid:
+{ 
+    field: "price",
+    editable: true,
+    singleClickEdit: false,
+    valueFormatter: (params) => { return '£' + params.value.toLocaleString(); },
+    // Keep track of edits using 'tableDirty' variable
+	onCellValueChanged: (event) => {
+  		console.log(`New Cell Value: ${event.newValue}, Old value: ${event.oldValue}`)
+	    if (event.newValue != event.oldValue) {
+		    tableDirty = true
+		    console.log('Value changed');
+	    }
+	},
+},

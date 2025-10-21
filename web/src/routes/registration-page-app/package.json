@@ -1,0 +1,28 @@
+{
+  "name": "registration-page-app",
+  "version": "1.0.0",
+  "description": "A registration page app with options to register using Google, GitHub, and email.",
+  "main": "src/routes/registration/+page.svelte",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "svelte": "^3.44.0",
+    "svelte-routing": "^1.5.0",
+    "firebase": "^9.6.1",
+    "github-auth": "^1.0.0"
+  },
+  "devDependencies": {
+    "vite": "^2.6.4",
+    "svelte-preprocess": "^4.9.4"
+  },
+  "keywords": [
+    "svelte",
+    "registration",
+    "authentication"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

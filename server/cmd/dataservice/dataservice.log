@@ -1,0 +1,56 @@
+2025/10/18 06:01:04 Connected to PostgreSQL database
+2025/10/18 06:01:04 Statement executed successfully
+2025/10/18 06:01:04 === Creating table success:CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, user_name VARCHAR(255) NOT NULL, date_of_birth DATE, email VARCHAR(255) NOT NULL UNIQUE, phone_number VARCHAR(20), education VARCHAR(100), is_married BOOLEAN DEFAULT FALSE, number_of_kids INTEGER DEFAULT 0, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)
+2025/10/18 06:01:04 Create Customer Table ... Success
+2025/10/18 06:01:04 To connect to MySQL with connStr:root:rainsome123!@#@tcp(192.168.0.20:3306)/miner?tls=false&parseTime=true&loc=Local&timeout=30s&readTimeout=30s&writeTimeout=30s
+2025/10/18 06:01:05 Connected to MySQL database
+2025/10/18 06:01:05 To create process status table (main)
+2025/10/18 06:01:05 Create process_status table with stmt (MID_001_043):CREATE TABLE IF NOT EXISTS process_status (id SERIAL PRIMARY KEY, status_name VARCHAR(32) NOT NULL, status_value VARCHAR(32) NOT NULL, rcd_count INTEGER DEFAULT 0, tags VARCHAR(255) NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)
+2025/10/18 06:01:06 Statement executed successfully
+2025/10/18 06:01:06 Creating 'process_status' table success (MID_001_048)
+2025/10/18 06:01:06 To create process status table (main)... done
+2025/10/18 06:01:06 Starting periodic execution of SQL statement every 86400 seconds (MID_005_023).
+2025/10/18 06:01:06 Executing SQL statement (MID_005_041): SELECT status, count(*) as count FROM xk_parse_file_process GROUP BY status
+2025/10/18 06:01:07 Generated record: {StatusName:status StatusValue:success RcdCount:165700 Tags:test}
+2025/10/18 06:01:07 Generated record: {StatusName:status StatusValue: RcdCount:39878 Tags:test}
+2025/10/18 06:01:07 Generated record: {StatusName:status StatusValue:failed RcdCount:2871 Tags:test}
+2025/10/18 06:01:07 Generated record: {StatusName:status StatusValue:null RcdCount:1435 Tags:test}
+2025/10/18 06:01:07 Generated record: {StatusName:status StatusValue:processing RcdCount:201 Tags:test}
+2025/10/18 06:01:07 Generated record: {StatusName:status StatusValue:waiting RcdCount:3035 Tags:test}
+2025/10/18 06:01:07 Generated record: {StatusName:status StatusValue:no data RcdCount:787 Tags:test}
+2025/10/18 06:01:07 Generated record: {StatusName:status StatusValue:file not found RcdCount:473 Tags:test}
+2025/10/18 06:01:08 Inserted 8 process status records into process_status table (MID_005_081).
+2025/10/18 06:01:08 Executing SQL statement (MID_005_041): SELECT data_proc_status, count(*) as count FROM xk_parse_file_process GROUP BY data_proc_status
+2025/10/18 06:01:09 Generated record: {StatusName:data_proc_status StatusValue:success RcdCount:159134 Tags:test}
+2025/10/18 06:01:09 Generated record: {StatusName:data_proc_status StatusValue:no data RcdCount:1505 Tags:test}
+2025/10/18 06:01:09 Generated record: {StatusName:data_proc_status StatusValue:null RcdCount:51508 Tags:test}
+2025/10/18 06:01:09 Generated record: {StatusName:data_proc_status StatusValue: RcdCount:275 Tags:test}
+2025/10/18 06:01:09 Generated record: {StatusName:data_proc_status StatusValue:no data 1 RcdCount:1805 Tags:test}
+2025/10/18 06:01:09 Generated record: {StatusName:data_proc_status StatusValue:no-data RcdCount:37 Tags:test}
+2025/10/18 06:01:09 Generated record: {StatusName:data_proc_status StatusValue:failed RcdCount:86 Tags:test}
+2025/10/18 06:01:09 Generated record: {StatusName:data_proc_status StatusValue:no-data-1 RcdCount:30 Tags:test}
+2025/10/18 06:01:10 Inserted 8 process status records into process_status table (MID_005_081).
+2025/10/18 06:01:10 Executing SQL statement (MID_005_041): SELECT chunk_proc_status, count(*) as count FROM xk_parse_file_process GROUP BY chunk_proc_status
+2025/10/18 06:01:11 Generated record: {StatusName:chunk_proc_status StatusValue:success RcdCount:159137 Tags:test}
+2025/10/18 06:01:11 Generated record: {StatusName:chunk_proc_status StatusValue: RcdCount:55098 Tags:test}
+2025/10/18 06:01:11 Generated record: {StatusName:chunk_proc_status StatusValue:no data RcdCount:33 Tags:test}
+2025/10/18 06:01:11 Generated record: {StatusName:chunk_proc_status StatusValue:failed RcdCount:26 Tags:test}
+2025/10/18 06:01:11 Generated record: {StatusName:chunk_proc_status StatusValue:null RcdCount:86 Tags:test}
+2025/10/18 06:01:12 Inserted 5 process status records into process_status table (MID_005_081).
+2025/10/18 06:01:12 Executing SQL statement (MID_005_041): SELECT embedding_proc_status, count(*) as count FROM xk_parse_file_process GROUP BY embedding_proc_status
+2025/10/18 06:01:13 Generated record: {StatusName:embedding_proc_status StatusValue:success RcdCount:158892 Tags:test}
+2025/10/18 06:01:13 Generated record: {StatusName:embedding_proc_status StatusValue: RcdCount:3727 Tags:test}
+2025/10/18 06:01:13 Generated record: {StatusName:embedding_proc_status StatusValue:null RcdCount:51498 Tags:test}
+2025/10/18 06:01:13 Generated record: {StatusName:embedding_proc_status StatusValue:error-embedding-exception RcdCount:92 Tags:test}
+2025/10/18 06:01:13 Generated record: {StatusName:embedding_proc_status StatusValue:no-chunk-data RcdCount:2 Tags:test}
+2025/10/18 06:01:13 Generated record: {StatusName:embedding_proc_status StatusValue:error-no-chunk-data RcdCount:11 Tags:test}
+2025/10/18 06:01:13 Generated record: {StatusName:embedding_proc_status StatusValue:no data RcdCount:4 Tags:test}
+2025/10/18 06:01:13 Generated record: {StatusName:embedding_proc_status StatusValue:error-caught-exception RcdCount:154 Tags:test}
+2025/10/18 06:01:14 Inserted 8 process status records into process_status table (MID_005_081).
+2025/10/18 06:01:14 Executing SQL statement (MID_005_041): SELECT es_proc_status, count(*) as count FROM xk_parse_file_process GROUP BY es_proc_status
+2025/10/18 06:01:15 Generated record: {StatusName:es_proc_status StatusValue:success RcdCount:155944 Tags:test}
+2025/10/18 06:01:15 Generated record: {StatusName:es_proc_status StatusValue:no-data RcdCount:29 Tags:test}
+2025/10/18 06:01:15 Generated record: {StatusName:es_proc_status StatusValue: RcdCount:58315 Tags:test}
+2025/10/18 06:01:15 Generated record: {StatusName:es_proc_status StatusValue:no data RcdCount:7 Tags:test}
+2025/10/18 06:01:15 Generated record: {StatusName:es_proc_status StatusValue:null RcdCount:85 Tags:test}
+2025/10/18 06:01:17 Inserted 5 process status records into process_status table (MID_005_081).
