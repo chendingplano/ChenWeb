@@ -30,8 +30,9 @@ type Config struct {
 		MySQLPassword  		string `mapstructure:"mysql_password"`
 		MySQLDBName    		string `mapstructure:"mysql_db_name"`
 		SessionsTableName 	string `mapstructure:"table_name_login_sessions"`
+		UsersTableName 		string `mapstructure:"table_name_users"`
 		MaxConnections 		int    `mapstructure:"max_connections"`
-		needCreateTables	bool   `mapstructure:"need_create_tables"`
+		NeedCreateTables	string `mapstructure:"need_create_tables"`
 	} `mapstructure:"database"`
 
 	Auth struct {
@@ -43,7 +44,7 @@ type Config struct {
 var GlobalConfig Config
 
 func LoadConfig(configPath string) error {
-	log.Printf("Loading config from %s (MID_CFG_042)", configPath)
+	log.Printf("Loading config from %s (MID_CFG_047)", configPath)
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("toml")
 
@@ -67,6 +68,9 @@ func LoadConfig(configPath string) error {
 		return fmt.Errorf("unable to decode config (MID_CFG_064): %w", err)
 	}
 
+	log.Printf("Config load success (MID_CFG_071), database_type:%s, need_create_tables:%s",
+	 		GlobalConfig.Database.DatabaseType,
+			GlobalConfig.Database.NeedCreateTables)
 	if GlobalConfig.Database.DatabaseType == "" {
 		err1 := fmt.Errorf("unable to decode config (MID_CFG_064)")
 		log.Fatal(err1)
@@ -79,7 +83,7 @@ func LoadConfig(configPath string) error {
 		panic(err1)
 	}
 
-	log.Printf("Loading config from %s (MID_CFG_042) ... Success!", configPath)
+	log.Printf("Loading config from %s (MID_CFG_084) ... Success!", configPath)
 	return nil
 }
 
@@ -91,6 +95,11 @@ func GetDatabaseType() string {
 	return GlobalConfig.Database.DatabaseType
 }
 
+func AosGetUsersTableName() string {
+	return GlobalConfig.Database.UsersTableName
+}
+
 func NeedCreateTables() bool {
-	return GlobalConfig.Database.needCreateTables
+	log.Printf("NeedCreateTables:%s", GlobalConfig.Database.NeedCreateTables)
+	return GlobalConfig.Database.NeedCreateTables == "true"
 }

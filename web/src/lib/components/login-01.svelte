@@ -1,8 +1,10 @@
 <script lang="ts">
-  let email = "";
-  let password = "";
-  let mode = "login"
-  let name = ""
+	import { fromTheme } from "tailwind-merge";
+
+  let email = $state("");
+  let password = $state("");
+  let mode = $state("login")
+  let name = $state("")
 
   async function handleEmailLogin() {
     const res = await fetch("http://localhost:8080/auth/email/login", {
@@ -28,33 +30,95 @@
       body: JSON.stringify({ name, email, password })
     });
     if (res.ok) {
-      alert("Account created! Please log in.");
+      const msg = "An email has been sent to your email:" + email +
+          ". Please check your email and click the link to activate your account." +
+          "Note: if you cannot find the email, check the Junk Mail section! (MID_LGN_035)"
+      alert(msg)
       mode = "login";
     } else {
       alert(await res.text());
     }
   }
 
+    async function handleForgotPassword() {
+    const res = await fetch("http://localhost:8080/auth/email/forgot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email })
+    });
+    if (res.ok) {
+      alert("A password reset link has been sent to your email.");
+      mode = "login";
+    } else {
+      alert(await res.text());
+    }
+  }
+
+  function switchToLogin() {
+    mode = "login";
+  }
+
+  function switchToSignup() {
+    mode = "signup";
+  }
+
+  function switchToForgot() {
+    mode = "forgot";
+  }
 </script>
-<div class="form-container" on:submit|preventDefault={handleEmailLogin}>
-      <p class="title">Welcome to DeepDocs</p>
-      <form class="form">
-        <input type="email" class="input" placeholder="Email">
-        <input type="password" class="input" placeholder="Password">
+
+<div class="form-container">
+    <p class="title">
+      {mode === "login" ? "Welcome to DeepDocs" : "Create an Account"}
+    </p>
+
+    {#if mode === "login"}
+      <!-- Login Form -->
+      <form class="form" onsubmit={handleEmailLogin}>
+        <input bind:value={email} type="email" class="input" placeholder="Email" required />
+        <input bind:value={password} type="password" class="input" placeholder="Password" required />
         <p class="page-link">
-          <span class="page-link-label">Forgot Password?</span>
+          <button type="button" class="page-link-label" onclick={switchToForgot}>Forgot Password?</button>
         </p>
         <button class="form-btn">Log in</button>
       </form>
+
       <p class="sign-up-label">
         Don't have an account?
-        <span class="sign-up-link" on:click={() => (mode = "signup")}>Sign up</span>
+        <button class="sign-up-link" onclick={switchToSignup}>Sign up</button>
       </p>
-      <div class="buttons-container">
+    {:else if mode === "signup"}
+      <!-- Sign Up Form -->
+      <form class="form" onsubmit={handleEmailSignup}>
+        <input bind:value={name} type="text" class="input" placeholder="Full name" required />
+        <input bind:value={email} type="email" class="input" placeholder="Email" required />
+        <input bind:value={password} type="password" class="input" placeholder="Password" required />
+        <button class="form-btn">Sign up</button>
+      </form>
+
+      <p class="sign-up-label">
+        Already have an account?
+        <!--span class="sign-up-link" onclick={switchToLogin}>Log in</span-->
+        <button class="sign-up-link" onclick={switchToLogin}>Log in</button>
+      </p>
+    {:else if mode == "forgot"}
+      <!-- Forgot Password -->
+      <form class="form" onsubmit={handleForgotPassword}>
+        <input bind:value={email} type="email" class="input" placeholder="Enter your email" required />
+        <button class="form-btn">Send Reset Link</button>
+      </form>
+
+      <p class="sign-up-label">
+        Remember your password?
+        <button class="sign-up-link" onclick={switchToLogin}>Log in</button>
+      </p>
+    {/if}
+
+    <div class="buttons-container">
         <button
           type="button"
-          class="google-login-button"
-          on:click={() => { window.location.href = 'http://localhost:8080/auth/google/login'; }}>
+          class="github-login-button"
+          onclick={() => { window.location.href = 'http://localhost:8080/auth/github/login'; }}>
           <svg stroke="currentColor" fill="currentColor" stroke-width="0" class="apple-icon" viewBox="0 0 1024 1024" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg">
             <!--path d="M747.4 535.7c-.4-68.2 30.5-119.6 92.9-157.5-34.9-50-87.7-77.5-157.3-82.8-65.9-5.2-138 38.4-164.4 38.4-27.9 0-91.7-36.6-141.9-36.6C273.1 298.8 163 379.8 163 544.6c0 48.7 8.9 99 26.7 150.8 23.8 68.2 109.6 235.3 199.1 232.6 46.8-1.1 79.9-33.2 140.8-33.2 59.1 0 89.7 33.2 141.9 33.2 90.3-1.3 167.9-153.2 190.5-221.6-121.1-57.1-114.6-167.2-114.6-170.7zm-105.1-305c50.7-60.2 46.1-115 44.6-134.7-44.8 2.6-96.6 30.5-126.1 64.8-32.5 36.8-51.6 82.3-47.5 133.6 48.4 3.7 92.6-21.2 129-63.7z"></path> -->
             <path d="M511.6 76.3c-240.8 0-436.2 195.4-436.2 436.2 0 192.8 125.2 356.6 298.7 414.4 21.8 4 29.8-9.5 29.8-21.1 0-10.5-.4-45.3-.6-82.1-121.5 26.4-147.2-51.4-147.2-51.4-19.8-50.3-48.4-63.7-48.4-63.7-39.6-27.1 3-26.6 3-26.6 43.8 3.1 66.8 45 66.8 45 38.9 66.7 102 47.5 126.8 36.3 4-28.2 15.2-47.5 27.6-58.4-97-11-199-48.5-199-216 0-47.7 17-86.7 44.9-117.3-4.5-11-19.5-55.5 4.2-115.7 0 0 36.7-11.8 120.2 44.8 34.9-9.7 72.3-14.6 109.5-14.8 37.1.2 74.6 5.1 109.5 14.8 83.4-56.6 120.1-44.8 120.1-44.8 23.8 60.2 8.8 104.7 4.3 115.7 27.9 30.6 44.8 69.6 44.8 117.3 0 167.9-102.1 204.9-199.3 215.7 15.6 13.5 29.5 40.1 29.5 81.1 0 58.6-.5 105.9-.5 120.4 0 11.7 7.9 25.3 30 21 173.4-57.8 298.6-221.6 298.6-414.3 0-240.8-195.4-436.2-436.2-436.2z"></path>
@@ -64,8 +128,8 @@
 
         <button
           type="button"
-          class="github-login-button"
-          on:click={() => { window.location.href = 'http://localhost:8080/auth/google/login'; }}
+          class="google-login-button"
+          onclick={() => { window.location.href = 'http://localhost:8080/auth/google/login'; }}
         >
           <svg stroke="currentColor" fill="currentColor" stroke-width="0" version="1.1" x="0px" y="0px" class="google-icon" viewBox="0 0 48 48" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg">
             <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12

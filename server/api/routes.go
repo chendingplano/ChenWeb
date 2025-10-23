@@ -17,7 +17,7 @@ import (
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
 	"github.com/chendingplano/deepdoc/server/api/SubmitHandlers"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
-	"github.com/chendingplano/deepdoc/server/middleware"
+	middleware "github.com/chendingplano/deepdoc/server/auth-middleware"
 	"github.com/labstack/echo/v4"
 )
 
@@ -120,7 +120,6 @@ func RegisterRoutes() (*echo.Echo, error) {
     	})
     	return c.NoContent(http.StatusNoContent)
 	})
-
 
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")

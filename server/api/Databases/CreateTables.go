@@ -83,3 +83,34 @@ func AosCreateLoginSessionsTable(db *sql.DB, db_type string) error {
 }
 
 
+func AosCreateUsersTable(db *sql.DB, db_type string) error {
+    // Assuming the syntax for mysql and pg is the same
+    stmt := "CREATE TABLE IF NOT EXISTS " + config.AosGetUsersTableName() + "(" +
+            "user_name VARCHAR(128) NOT NULL PRIMARY KEY, " +
+            "password VARCHAR(128) DEFAULT NULL, " +
+            "user_id_type VARCHAR(32), " +
+            "user_real_name VARCHAR(128) DEFAULT NULL, " +
+            "user_email VARCHAR(255) DEFAULT NULL, " +
+            "user_mobile VARCHAR(64) DEFAULT NULL, " +
+            "user_type VARCHAR(32) DEFAULT NULL, " +
+            "user_status VARCHAR(32) DEFAULT NULL, " +
+            "v_token VARCHAR(40) DEFAULT NULL, " +
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+            "INDEX idx_created_at (created_at) " +
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
+
+    log.Printf("Create users table (MID_001_100):%s", stmt)
+    err := ExecuteStatement(db, stmt)
+    if err != nil {
+        error_msg := fmt.Errorf("failed creating table (MID_001_045), err: %w, stmt:%s", err, stmt)
+        log.Printf("***** Alarm: %s", error_msg.Error())
+        return error_msg
+    }
+
+    log.Printf("Creating '%s' table success (MID_001_048)", config.AosGetUsersTableName())
+
+    return nil
+}
+
+
+

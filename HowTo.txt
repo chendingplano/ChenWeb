@@ -1,4 +1,4 @@
-How to forma a price field for ag-grid:
+How to form a price field for ag-grid:
 { 
     field: "price",
     editable: true,
@@ -13,3 +13,48 @@ How to forma a price field for ag-grid:
 	    }
 	},
 },
+
+How To add a Remote call 
+------------------------
+We use "Email Sign Up" as an example.
+  - In the Login Page (.svelte), define the function handleEmailSignup in the <script> section in the same field
+  - There should be a form: <form onsubmit={handleEmailSignup}>. Clicking Submit will call handleEmailSignup(...)
+  - The form should have fields: User Name, Email, Password. These should bind to user_name, email and password,
+    which should be $state variables.
+  - handleEmailSignup(...) must be an async function. It fetches (POST) through a link, such as:
+    const res = await fetch("http://localhost:8080/auth/email/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, password })
+    });
+  - Backend needs to register "http://localhost:8080/auth/email/signup" with a Go function
+  - Backend needs to implement the Go function
+
+Struct in Go
+------------
+When defining a type in Go, we can specify how the struct converts to/from JSON
+through json.Marshal(xxx) and json.Unmarshal(xxx). The backtick-quoted strings are optional.
+If not specified, field names are used as key names in JSON. Using backtick-quoted strings
+offers the folloing:
+  - Omit fields conditionally: json:"_, omitempty"
+  - Omit fields unconditionally
+
+Example:
+type User struct {
+    UserName string `json:"user_name"`
+    Password string `json:"-"`
+    Age      int    `json:"age,omitempty"`
+}
+- UserName is converted to "user_name" in JSON
+- Omit the field Password
+- Omit Age if it is 0 (empty). Otherwise, use the key 'age'
+
+http Status Code 
+----------------
+http.StatusOk 					200
+http.StatusBadRequest 			400		
+http.StatusNotFound 			404		Resource not found
+http.StatusUnauthorized 		401		Unauthorized
+http.StatusForbidden 			403		Unauthorized
+http.StatusConflict				409
+http.StatusInternalServerError	500		

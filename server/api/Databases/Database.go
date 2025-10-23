@@ -103,16 +103,18 @@ func AosCreateTables() error {
     // This function creates all the tables.
     var db *sql.DB
     database_type := config.GetDatabaseType()
-    if database_type == sg_mysql_name {
-        db = MySql_DB_miner
-    } else if database_type == sg_pg_name {
-        db = PG_DB_miner
-    } else {
-        return fmt.Errorf("***** Unrecognized database type (MID_DBS_124): %s", database_type)
+    switch database_type {
+    case sg_mysql_name:
+         db = MySql_DB_miner
+    case sg_pg_name:
+         db = PG_DB_miner
+    default:
+         return fmt.Errorf("***** Unrecognized database type (MID_DBS_124): %s", database_type)
     }
 
     AosCreateCustomerTable(db, database_type)
     AosCreateLoginSessionsTable(db, database_type)
+    AosCreateUsersTable(db, database_type)
     return nil
 }
 
@@ -207,9 +209,10 @@ func SaveSession(
             user_reg_id string,
             expiry time.Time) error {
     db_type := config.GlobalConfig.Database.DatabaseType
+    var stmt string
     switch db_type {
     case sg_mysql_name:
-         stmt := fmt.Sprintf(`INSERT INTO %s (login_method, session_id, status,
+         stmt = fmt.Sprintf(`INSERT INTO %s (login_method, session_id, status,
                     user_name, user_name_type, user_reg_id, expires_at)
               VALUES (?, ?, ?, ?, ?, ?, ?)
               ON DUPLICATE KEY UPDATE 
@@ -217,16 +220,9 @@ func SaveSession(
               status = "active",
               expires_at = VALUES(expires_at)`, config.AosGetLoginSessionsTableName())
     
-         _, err := MySql_DB_miner.Exec(stmt, login_method, session_id, "active",
-                user_name, user_name_type, user_reg_id, expiry)
-         if err != nil {
-            error_msg := fmt.Sprintf("failed to save session (mysql) (MID_DBS_195): %v, stmt:%s", err, stmt)
-            log.Printf("***** Alarm %s", error_msg)
-            return fmt.Errorf("***** Alarm:%s", error_msg)
-         }
-         return nil
+
     case sg_pg_name:
-         stmt := fmt.Sprintf(`INSERT INTO %s (login_method, session_id, status,
+         stmt = fmt.Sprintf(`INSERT INTO %s (login_method, session_id, status,
                     user_name, user_name_type, user_re_id, expires_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON DUPLICATE KEY UPDATE 
@@ -234,37 +230,40 @@ func SaveSession(
             status = "active",
             expires_at = VALUES(expires_at)`, config.AosGetLoginSessionsTableName())
     
-         _, err := PG_DB_miner.Exec(stmt, login_method, session_id, "active",
-            user_name, user_name_type, user_reg_id, expiry)
-         if err != nil {
-            error_msg := fmt.Sprintf("failed to save session (pg) (MID_DBS_213): %v, stmt:%s", err, stmt)
-            log.Printf("***** Alarm %s", error_msg)
-            return fmt.Errorf("***** Alarm:%s", error_msg)
-         }
-         return nil
     default:
          return fmt.Errorf("unsupported database type (MID_DBS_234): %s", db_type)
     }
+
+    _, err := MySql_DB_miner.Exec(stmt, login_method, session_id, "active",
+                user_name, user_name_type, user_reg_id, expiry)
+    if err != nil {
+        error_msg := fmt.Sprintf("failed to save session (mysql) (MID_DBS_195): %v, stmt:%s", err, stmt)
+        log.Printf("***** Alarm %s", error_msg)
+        return fmt.Errorf("***** Alarm:%s", error_msg)
+    }
+    return nil
 }
 
 func IsValidSession(session_id string) (bool, error) {
     db_type := config.GlobalConfig.Database.DatabaseType
+    tablename := config.AosGetLoginSessionsTableName()
     log.Printf("Check IsValidSession (MID_DBS_251), db_type:%s", db_type)
+    var query string
     var db *sql.DB
     switch db_type {
     case sg_mysql_name:
          db = MySql_DB_miner
+         query = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE session_id = ? AND expires_at > NOW()", tablename)
 
     case sg_pg_name:
          db = PG_DB_miner
+         query = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE session_id = $1 AND expires_at > NOW()", tablename)
 
     default:
          log.Printf("***** Alarm unrecognized database type (MID_DBS_234): %s", db_type)
          return false, fmt.Errorf("unsupported database type (MID_DBS_234): %s", db_type)
     }
 
-    tablename := config.AosGetLoginSessionsTableName()
-    query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE session_id = ? AND expires_at > NOW()", tablename)
     var count int
     err := db.QueryRow(query, session_id).Scan(&count)
     if err != nil {
@@ -274,4 +273,306 @@ func IsValidSession(session_id string) (bool, error) {
     }
     log.Printf("Check session (MID_DBS_271), stmt: %s, count:%d", query, count)
     return count > 0, nil
+}
+
+func UserExists(user_name string) bool {
+    // This function checks whether 'user_name' is used in the users table.
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var query string
+    var db *sql.DB
+    switch db_type {
+    case sg_mysql_name:
+         query = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE user_name = ?", tablename)
+         db = MySql_DB_miner
+
+    case sg_pg_name:
+         query = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE user_name = $1", tablename)
+         db = MySql_DB_miner
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_153): %s", db_type)
+         log.Printf("***** Alarm: %s", err.Error())
+         return false
+    }
+
+    var count int
+    err := db.QueryRow(query, user_name).Scan(&count)
+    if err != nil {
+        error_msg := fmt.Errorf("failed to validate session (MID_DBS_288): %w", err)
+        log.Printf("***** Alarm:%s", error_msg)
+        return false
+    }
+    log.Printf("Check user name (MID_DBS_292), stmt: %s, count:%d", query, count)
+    return count > 0
+}
+
+func GetUserByEmail(user_email string) (DataStructures.UserInfo, error) {
+    // This function checks whether 'user_email' is used in the users table.
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var query string
+    var db *sql.DB
+    var user_info DataStructures.UserInfo
+    selected_fields := "user_name, password, user_id_type, user_real_name, user_email, user_mobile, " +
+        "user_type, user_status, v_token"
+    switch db_type {
+    case sg_mysql_name:
+         query = fmt.Sprintf("SELECT %s FROM %s WHERE user_email = ?", selected_fields, tablename)
+         db = MySql_DB_miner
+
+    case sg_pg_name:
+         query = fmt.Sprintf("SELECT %s FROM %s WHERE user_email = $1", selected_fields, tablename)
+         db = MySql_DB_miner
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_326): %s", db_type)
+         log.Printf("***** Alarm: %s", err.Error())
+         return user_info, err
+    }
+
+    err := db.QueryRow(query, user_email).Scan(
+            &user_info.UserName,
+            &user_info.Password,
+            &user_info.UserIdType,
+            &user_info.RealName,
+            &user_info.Email,
+            &user_info.PhoneNumber,
+            &user_info.UserType,
+            &user_info.Status,
+            &user_info.VToken)
+    if err != nil {
+        err := fmt.Errorf("failed to retrieve user info (MID_DBS_345): %w", err)
+        log.Printf("***** Alarm:%s", err)
+        return user_info, err
+    }
+    log.Printf("User info retrieved (MID_DBS_349), user: %s, status:%s", user_info.UserName, user_info.Status)
+    return user_info, nil
+}
+
+func GetUserStatus(user_name string) string {
+    // This function checks whether 'user_name' is used in the users table.
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var query string
+    var db *sql.DB
+    switch db_type {
+    case sg_mysql_name:
+         query = fmt.Sprintf("SELECT user_status FROM %s WHERE user_name = ?", tablename)
+         db = MySql_DB_miner
+
+    case sg_pg_name:
+         query = fmt.Sprintf("SELECT user_status FROM %s WHERE user_name = $1", tablename)
+         db = MySql_DB_miner
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_326): %s", db_type)
+         log.Printf("***** Alarm: %s", err.Error())
+         return ""
+    }
+
+    var user_status string
+    err := db.QueryRow(query, user_name).Scan(&user_status)
+    if err != nil {
+        error_msg := fmt.Errorf("failed to retrieve user status (MID_DBS_334): %w", err)
+        log.Printf("***** Alarm:%s", error_msg)
+        return ""
+    }
+    log.Printf("User status (MID_DBS_338), user: %s, status:%s", user_name, user_status)
+    return user_status
+}
+
+func GetUserPasswordByEmail(user_email string) string {
+    // This function checks whether 'user_name' is used in the users table.
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var query string
+    var db *sql.DB
+    switch db_type {
+    case sg_mysql_name:
+         query = fmt.Sprintf("SELECT password FROM %s WHERE user_email = ?", tablename)
+         db = MySql_DB_miner
+
+    case sg_pg_name:
+         query = fmt.Sprintf("SELECT password FROM %s WHERE user_email = $1", tablename)
+         db = MySql_DB_miner
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_358): %s", db_type)
+         log.Printf("***** Alarm: %s", err.Error())
+         return ""
+    }
+
+    var user_status string
+    err := db.QueryRow(query, user_email).Scan(&user_status)
+    if err != nil {
+        error_msg := fmt.Errorf("failed to retrieve user status (MID_DBS_366): %w", err)
+        log.Printf("***** Alarm:%s", error_msg)
+        return ""
+    }
+    log.Printf("User password retrieved (MID_DBS_370), email: %s", user_email)
+    return user_status
+}
+
+func AddUser(user_info DataStructures.UserInfo) (bool, error) {
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var db *sql.DB
+    var stmt string
+    switch db_type {
+    case sg_mysql_name:
+         db = MySql_DB_miner
+         stmt = fmt.Sprintf("INSERT INTO %s (user_name, password, user_id_type, user_real_name, user_email, user_mobile, user_type, user_status, v_token) " +
+        				 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", tablename)
+
+    case sg_pg_name:
+         db = PG_DB_miner
+         stmt = fmt.Sprintf("INSERT INTO %s (user_name, password, user_id_type, user_real_name, user_email, user_mobile, user_type, user_status, v_token) " +
+        				 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)", tablename)
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_313): %s", db_type)
+         log.Printf("***** Alarm:%s", err.Error())
+         return false, err
+    }
+
+    _, err := db.Exec(stmt, user_info.UserName,
+                    user_info.Password,
+                    user_info.UserIdType,
+                    user_info.RealName,
+                    user_info.Email,
+                    user_info.PhoneNumber,
+                    user_info.UserType,
+                    user_info.Status,
+                    user_info.VToken)
+
+    if err != nil {
+        error_msg := fmt.Sprintf("failed to save session (pg) (MID_DBS_213): %v, stmt:%s", err, stmt)
+        log.Printf("***** Alarm %s", error_msg)
+        return false, fmt.Errorf("***** Alarm:%s", error_msg)
+    }
+
+    return true, nil
+}
+
+func LookupUserByToken(token string) (DataStructures.UserInfo, error) {
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var db *sql.DB
+    var query string
+    var user_info DataStructures.UserInfo
+    switch db_type {
+    case sg_mysql_name:
+         db = MySql_DB_miner
+         query = fmt.Sprintf("SELECT user_name, user_email FROM %s WHERE v_token = ?", tablename)
+
+    case sg_pg_name:
+         db = PG_DB_miner
+         query = fmt.Sprintf("SELECT user_name, user_email FROM %s WHERE v_token = $1", tablename)
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_474): %s", db_type)
+         log.Printf("***** Alarm:%s", err.Error())
+         return user_info, err
+    }
+
+    err := db.QueryRow(query, token).Scan(&user_info.UserName, &user_info.Email)
+    if err != nil {
+        error_msg := fmt.Errorf("failed to retrieve user by token (MID_DBS_482), token:%s, err: %w", token, err)
+        log.Printf("***** Alarm:%s", error_msg.Error())
+        return user_info, error_msg
+    }
+    log.Printf("Lookup User by Token success (MID_DBS_382), token:%s, user_name:%s, email:%s",
+            token, user_info.UserName, user_info.Email)
+    return user_info, nil
+}
+
+func UpdateVTokenByEmail(user_email string, token string) error {
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var db *sql.DB
+    var stmt string
+    switch db_type {
+    case sg_mysql_name:
+         db = MySql_DB_miner
+         stmt = fmt.Sprintf("UPDATE %s SET v_token = ? WHERE user_email = ?", tablename)
+
+    case sg_pg_name:
+         db = PG_DB_miner
+         stmt = fmt.Sprintf("UPDATE %s SET v_token = 12 WHERE user_email = $2", tablename)
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_504): %s", db_type)
+         log.Printf("***** Alarm:%s", err.Error())
+         return err
+    }
+
+    _, err := db.Exec(stmt, token, user_email)
+    if err != nil {
+        error_msg := fmt.Errorf("failed to update table (MID_DBS_511), stmt:%s, err: %w", stmt, err)
+        log.Printf("***** Alarm:%s", error_msg.Error())
+        return error_msg
+    }
+    log.Printf("Update token success (MID_DBS_515), user_email:%s, token:%s", user_email, token)
+    return nil
+}
+
+func MarkUserVerified(user_name string) error {
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var db *sql.DB
+    var stmt string
+    switch db_type {
+    case sg_mysql_name:
+         db = MySql_DB_miner
+         stmt = fmt.Sprintf("UPDATE %s SET user_status = ? WHERE user_name = ?", tablename)
+
+    case sg_pg_name:
+         db = PG_DB_miner
+         stmt = fmt.Sprintf("UPDATE %s SET user_status = $1 WHERE user_name = $2", tablename)
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_401): %s", db_type)
+         log.Printf("***** Alarm:%s", err.Error())
+         return err
+    }
+
+    _, err := db.Exec(stmt, "active", user_name)
+    if err != nil {
+        error_msg := fmt.Errorf("failed to update table (MID_DBS_404), stmt:%s, err: %w", stmt, err)
+        log.Printf("***** Alarm:%s", error_msg.Error())
+        return error_msg
+    }
+    log.Printf("Mark user verified success (MID_DBS_408), user_name:%s", user_name)
+    return nil
+}
+
+func UpdatePasswordByUserName(user_name string, password string) error {
+    tablename := config.AosGetUsersTableName()
+    db_type := config.GlobalConfig.Database.DatabaseType
+    var db *sql.DB
+    var stmt string
+    switch db_type {
+    case sg_mysql_name:
+         db = MySql_DB_miner
+         stmt = fmt.Sprintf("UPDATE %s SET password = ? WHERE user_name = ?", tablename)
+
+    case sg_pg_name:
+         db = PG_DB_miner
+         stmt = fmt.Sprintf("UPDATE %s SET password = $1 WHERE user_name = $2", tablename)
+
+    default:
+         err := fmt.Errorf("unsupported database type (MID_DBS_565): %s", db_type)
+         log.Printf("***** Alarm:%s", err.Error())
+         return err
+    }
+
+    _, err := db.Exec(stmt, password, user_name)
+    if err != nil {
+        error_msg := fmt.Errorf("failed to update password (MID_DBS_572), stmt:%s, err: %w", stmt, err)
+        log.Printf("***** Alarm:%s", error_msg.Error())
+        return error_msg
+    }
+    log.Printf("Update password success (MID_DBS_576), user_name:%s", user_name)
+    return nil
 }

@@ -19,7 +19,9 @@ mysql_password = "plano4628"
 mysql_db_name = "miner"
 max_connections = 10
 table_name_login_sessions = "login_sessions"
+table_name_users = "users"
 database_type = "mysql"
+need_create_tables = "false"
 
 [auth]
 jwt_secret = "super-secret-key"

@@ -1,5 +1,5 @@
 // server/middleware/auth.go
-package middleware
+package authmiddleware
 
 import (
 	"log"

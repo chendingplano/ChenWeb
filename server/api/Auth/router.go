@@ -32,4 +32,15 @@ func RegisterRoutes(e *echo.Echo) {
 		HandleEmailLogin(c.Response(), c.Request())
 		return nil
 	})
+
+	e.POST("/auth/email/signup", func(c echo.Context) error {
+		HandleEmailSignup(c)
+		return nil
+	})
+
+	e.GET("/auth/email/verify", HandleEmailVerify)
+
+	e.POST("/auth/email/forgot", HandleForgotPassword)
+	e.GET("/auth/email/reset", HandleResetLink)      // user clicks link in email
+	e.POST("/auth/email/reset/confirm", HandleResetPasswordConfirm) // user submits new password
 }

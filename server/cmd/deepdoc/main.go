@@ -8,6 +8,8 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/Auth"
 	"github.com/chendingplano/deepdoc/server/api/Databases"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
@@ -27,16 +29,25 @@ func main() {
 	 	panic(err)
 	}
 
+	// ✅ Enable CORS
+    e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+        AllowOrigins: []string{"http://localhost:5173"}, // frontend
+        AllowMethods: []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
+        AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+    }))
+
 	log.Printf("To Init DB")
 	Databases.InitDB()
 
 	// Create necessary tables
 	if config.NeedCreateTables() {
-		log.Printf("To Create Tables")
+		log.Printf("To Create Tables (MID_DDM_036)")
 		err = Databases.AosCreateTables()
 		if err != nil {
 			log.Fatal("***** Alarm: Failed creating tables (MID_DDM_030)", err)
 		}
+	} else {
+		log.Printf("Not creating tables (MID_DDM_041)")
 	}
 
 	Auth.RegisterRoutes(e)
