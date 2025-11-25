@@ -3,10 +3,15 @@ module github.com/chendingplano/deepdoc
 go 1.25.0
 
 require (
-	github.com/go-sql-driver/mysql v1.9.3
+	github.com/chendingplano/shared/go v0.0.0
 	github.com/labstack/echo/v4 v4.13.4
 	github.com/lib/pq v1.10.9
-	golang.org/x/oauth2 v0.32.0
+)
+
+require (
+	github.com/go-sql-driver/mysql v1.9.3 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
+	golang.org/x/oauth2 v0.32.0 // indirect
 )
 
 require (
@@ -24,7 +29,6 @@ require (
 	github.com/gohugoio/hugo v0.149.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/labstack/gommon v0.4.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -35,7 +39,7 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/spf13/viper v1.21.0 // indirect
+	github.com/spf13/viper v1.21.0
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tdewolff/parse/v2 v2.8.3 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
@@ -48,5 +52,7 @@ require (
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 )
+
+replace github.com/chendingplano/shared/go => ../Shared/go
 
 tool github.com/air-verse/air
