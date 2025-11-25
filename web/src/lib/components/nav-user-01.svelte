@@ -1,0 +1,114 @@
+<script lang="ts">
+	import * as Avatar from "$lib/components/ui/avatar/index.js";
+	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+	import * as Sidebar from "$lib/components/ui/sidebar/index.js";
+	import { useSidebar } from "$lib/components/ui/sidebar/index.js";
+	import BadgeCheckIcon from "@lucide/svelte/icons/badge-check";
+	import BellIcon from "@lucide/svelte/icons/bell";
+	import ChevronsUpDownIcon from "@lucide/svelte/icons/chevrons-up-down";
+	import CreditCardIcon from "@lucide/svelte/icons/credit-card";
+	import LogOutIcon from "@lucide/svelte/icons/log-out";
+	import SparklesIcon from "@lucide/svelte/icons/sparkles";
+    import type { Icon } from "@tabler/icons-svelte";
+    import type {Sidebar01MenuItem, UserMenuItem} from "$lib/types/menu"
+	import { Item } from "./ui/command";
+
+    let {
+		user,
+        onMenuSelect
+	}: {
+		user: { name: string; email: string; avatar: string };
+		// onMenuSelect: (user: { name: string; email: string; avatar: string}) => void;
+		onMenuSelect: (item:Sidebar01MenuItem) => void;
+	} = $props();
+
+	function handleSelect(item: UserMenuItem) {
+        onMenuSelect(item)
+    }
+
+	function handleDropdownMenuSelect(item_type: string) {
+		// Call the parent’s callback if provided
+        const menu_item : UserMenuItem = {
+            id:         `${user.name}-${item_type}`.toLowerCase().replace(' ', '-'),
+            title:      item_type,
+            type:       "user",
+            name:       user.name,
+            email:      user.email,
+            avatar:     user.avatar
+        };
+		onMenuSelect(menu_item);
+	}
+	const sidebar = useSidebar();
+</script>
+
+<Sidebar.Menu>
+	<Sidebar.MenuItem>
+		<DropdownMenu.Root>
+			<DropdownMenu.Trigger>
+				{#snippet child({ props })}
+					<Sidebar.MenuButton
+						size="lg"
+						class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+						{...props}
+					>
+						<Avatar.Root class="size-8 rounded-lg">
+							<Avatar.Image src={user.avatar} alt={user.name} />
+							<Avatar.Fallback class="rounded-lg">CN</Avatar.Fallback>
+						</Avatar.Root>
+						<div class="grid flex-1 text-left text-sm leading-tight">
+							<span class="truncate font-medium">{user.name}</span>
+							<span class="truncate text-xs">{user.email}</span>
+						</div>
+						<ChevronsUpDownIcon class="ml-auto size-4" />
+					</Sidebar.MenuButton>
+				{/snippet}
+			</DropdownMenu.Trigger>
+			<DropdownMenu.Content
+				class="w-(--bits-dropdown-menu-anchor-width) min-w-56 rounded-lg"
+				side={sidebar.isMobile ? "bottom" : "right"}
+				align="end"
+				sideOffset={4}
+			>
+				<DropdownMenu.Label class="p-0 font-normal">
+					<div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+						<Avatar.Root class="size-8 rounded-lg">
+							<Avatar.Image src={user.avatar} alt={user.name} />
+							<Avatar.Fallback class="rounded-lg">CN</Avatar.Fallback>
+						</Avatar.Root>
+						<div class="grid flex-1 text-left text-sm leading-tight">
+							<span class="truncate font-medium">{user.name}</span>
+							<span class="truncate text-xs">{user.email}</span>
+						</div>
+					</div>
+				</DropdownMenu.Label>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Group>
+					<DropdownMenu.Item onclick={() => handleDropdownMenuSelect("Upgrade to Pro")}>
+						<SparklesIcon />
+						Upgrade to Pro
+					</DropdownMenu.Item>
+				</DropdownMenu.Group>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Group>
+					<DropdownMenu.Item onclick={() => handleDropdownMenuSelect("Account")}>
+						<BadgeCheckIcon />
+						Account
+					</DropdownMenu.Item>
+					<DropdownMenu.Item onclick={() => handleDropdownMenuSelect("Billing")}>
+						<CreditCardIcon />
+						Billing
+					</DropdownMenu.Item>
+					<DropdownMenu.Item onclick={() => handleDropdownMenuSelect("Notifications")}>
+						<BellIcon />
+						Notifications
+					</DropdownMenu.Item>
+				</DropdownMenu.Group>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item onclick={() => handleDropdownMenuSelect("Log out")}>
+					<LogOutIcon />
+					Log out
+				</DropdownMenu.Item>
+			</DropdownMenu.Content>
+		</DropdownMenu.Root>
+	</Sidebar.MenuItem>
+</Sidebar.Menu>

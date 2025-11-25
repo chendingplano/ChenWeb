@@ -3,6 +3,10 @@
     "@svar-ui/svelte-core": "^2.3.1",
     "@svar-ui/svelte-editor": "^2.3.0",
     "@svar-ui/svelte-grid": "^2.3.0",
-    "scribe.js-ocr": "^0.9.0"
+    "scribe.js-ocr": "^0.9.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0"
   }
 }

@@ -14,7 +14,7 @@
 </script>
 
 <div class="google-register">
-    <h2>Register with Google</h2>
+    <h2>Register with Google AA</h2>
     <button on:click={handleGoogleRegister} disabled={isLoading}>
         {isLoading ? 'Redirecting...' : 'Register with Google'}
     </button>

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chendingplano/deepdoc/server/api/Databases"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
 // RunSQLPeriodically executes the given SQL statement repeatedly with a sleep interval between executions.
@@ -48,7 +48,7 @@ func generateStatusRecords(
     stmt := fmt.Sprintf("SELECT %s, count(*) as count FROM %s GROUP BY %s", status_name, process_table_name, status_name)
     log.Printf("Executing SQL statement (MID_005_041): %s\n", stmt)
 
-    rows, err := Databases.MySql_DB_miner.Query(stmt)
+    rows, err := ApiTypes.MySql_DB_miner.Query(stmt)
     if err != nil {
 		// log.Printf("***** Failed querying DB (MID_005_037): %v, stmt: %s", err, stmt)
         return fmt.Errorf("***** Alarm failed query DB (MID_005_038): %w, stmt:%s", err, stmt)
@@ -110,7 +110,7 @@ func generateStatusRecords(
         args = append(args, record.StatusName, record.StatusValue, record.RcdCount, record.Tags)
     }
 
-    _, err1 := Databases.MySql_DB_miner.Exec(insert_stmt, args...)
+    _, err1 := ApiTypes.MySql_DB_miner.Exec(insert_stmt, args...)
     if err1 != nil {
         log.Printf("***** Failed inserting process status records (MID_005_080): %v, stmt: %s", err1, insert_stmt)
         return fmt.Errorf("***** Alarm failed query DB (MID_005_038): %w, stmt:%s", err, insert_stmt)

@@ -1,4 +1,32 @@
+1. Packages and Directories
+---------------------------
+  - Each sub-directory under server/api defines a package
+  - Go prefers lowercase single-word package names
+
+2. Package names
+----------------
+  - Any file that contains a func main() must use the package 'main'
+  - Files in a directory that has main.go must all use the package 'main'
+
+3. Working directory
+--------------------
+cd ~/Workspace/ChenWeb
+go run server/cmd/dataservice/main.go
+
+In the above example, the Go working directory is ~/Workspace/ChenWeb.
+
+4. .env
+-------
+The .env is created in the Go root directory, or the directory in which
+go.mod resides. In my environment, it is ~/Workspace/ChenWeb.
+
+5. direnv
+---------
+After made some changes, say editted .envrc, you need to run:
+  direnv allow /Users/cding/Workspace/ChenWeb/.envrc
+
 How to form a price field for ag-grid:
+-------------------------------------
 { 
     field: "price",
     editable: true,
@@ -58,3 +86,2895 @@ http.StatusUnauthorized 		401		Unauthorized
 http.StatusForbidden 			403		Unauthorized
 http.StatusConflict				409
 http.StatusInternalServerError	500		
+
+How to Run Docker
+-----------------
+Start the service:
+  colima start
+Then pull the image
+
+Converting JavaScript to svelte
+-------------------------------
+Below is a JavaScript code snippie. What it does is:
+  - Get the information from 'node'
+  - Use the information to create a div to show the contents.
+  - When detailsContainer is retrieved, Browser will delete all its children.
+    It then (re)creates the div. 
+        function showNodeInfo(node: nodeType) {
+            const detailsContainer = document.getElementById('node-details');
+            const xLevel = knowledgeSystem.dimensions.x.levels[node.position.x];
+            const yLevel = knowledgeSystem.dimensions.y.levels[node.position.y];
+            const zLevel = knowledgeSystem.dimensions.z.levels[node.position.z];
+
+            detailsContainer.innerHTML = `
+                <div class="node-info">
+                    <h3>${node.title}</h3>
+                    <div class="position-info">
+                        <strong>位置信息：</strong><br>
+                        X轴(${knowledgeSystem.dimensions.x.name}):${xLevel}<br>
+                        Y轴(${knowledgeSystem.dimensions.y.name}):${yLevel}<br>
+                        Z轴(${knowledgeSystem.dimensions.z.name}):${zLevel}
+                    </div>
+                    <p><strong>描述：</strong>${node.description}</p>
+                    <div class="tags">
+                        ${node.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+                    </div>
+                </div>
+            `;
+        }
+In Svelte, we need to change the code in two parts:
+  - create a state variable 'nodeSelected'
+  - the function 'showNodeInfo(...)' breaks in two parts. The first 
+    part updates nodeSelected. The second part is <div class="node-info"> {#if ...}</div>,
+    making the div controlled by nodeSelected.
+
+<script>
+   ...
+   type NodeType {
+    title: string,
+    descript: string,
+    position: {
+      x: number,
+      y: number,
+      z: number
+    },
+    tags: string[]
+   }
+
+   function showNodeInfo(node: NodeType) {
+      const xLevel = knowledgeSystem.dimensions.x.levels[node.position.x];
+      const yLevel = knowledgeSystem.dimensions.y.levels[node.position.y];
+      const zLevel = knowledgeSystem.dimensions.z.levels[node.position.z];
+
+      node
+   }
+
+index.ts File 
+-------------
+In src/lib/components, there is an index.ts file. This file is called a barrel
+file. It serves as the entry point for 'components'. Its primary purpose is
+to simplify and consolidate imports for the directory.
+For instance, one can simply:
+  import {LoginForm} from $components
+This assumes components/index.ts has a line:
+  export { default as LoginForm } from './ui/login-form/login-form.svelte';
+
+How the Login Works
+-------------------
+  - First of all, login is done through a Login page, which is a route
+    (meaning it should be defined in src/routes/login and can be accessed
+    by localhost:ddd/login)
+  - In the main page, such as ChenWeb/web/src/routes/sidebar-01/+page.svelte,
+    it has a function to handle logout. That function will call:
+      goto('/login')
+    to bring up the login page.
+  - Anywhere when it detects trying to access a URL that requires login but
+    the user has not logged in yet, it can call goto('/login')
+
+The login page should have a few options, such as:
+  - Login through Email
+  - Login through Google
+  - Login through GitHub
+An example can be found in ChenWeb/web/src/lib/components/login-01.svelt.
+For "Login through Google", there should be a button, whose onclick will
+look like:
+  onclick={() => { window.location.href = 'http://localhost:8080/auth/google/login'; }}
+
+It is important to configure the route. In the above example (ChenWeb), the route is
+configured by Shared/server/api/Auth/router.go. For login through Google, there are
+two routing entries:
+
+	e.GET("/auth/google/login", func(c echo.Context) error {
+		HandleGoogleLogin(c.Response(), c.Request())
+		return nil
+	})
+
+	e.GET("/auth/google/callback", func(c echo.Context) error {
+		HandleGoogleCallback(c.Response(), c.Request())
+		return nil
+	})
+
+These two functions (HandleGoogleLogin(...) and HandleGoogleCallback(...)) are
+defined in Auth/google.go.
+
+This means that for any login page, if we want to login through Google, all
+we need to do is to have a button with:
+  onclick={() => { window.location.href = 'http://localhost:8080/auth/google/login'; }}
+
+and make sure to call Auth.RegisterRoutes(e), where 'e' is Echo in the corresponding main.go. 
+In main.go, the first call to RegisterRoutes() should be called without 'e'. The call will 
+return 'e', which can be used for all the subsequent calls to RegisterRoutes(e). 'e' is Echo.
+
+In general, anything that is accessed through URLs need to register routes.
+
+How to Configure the Default Port
+---------------------------------
+Vite by default uses port 5173. This can be changed by specifying the port, such as:
+  e.Start(":8080")
+where e is created by echo.New()
+If no port is specified, it defaults to 5173.
+
+How to Handle CORS
+------------------
+If echo is started on port 8080 but some are accessed through 5173, this is a cross-site 
+issue. We need to  configure CORS in the corresponding main.go as:
+    e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+        AllowOrigins: []string{"http://localhost:5173"}, // frontend
+        AllowMethods: []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
+        AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+    }))
+
+How to Create a PostgreSQL User
+-------------------------------
+  CREATE USER admin WITH SUPERUSER PASSWORD 'plano4628';
+The above command creates 'admin' with the password 'plano4628'
+
+PostgreSQL Commands
+-------------------
+\l, \l+       List databases, or SELECT datname FROM pg_database WHERE datistemplate = false;
+\c miner      use miner
+\dt           list tables in the current db
+use <dbname>  use db
+
+Go Package Name Conventions
+---------------------------
+  - Package names should be short, lowercase, and without underscores and mixed caps.
+  - Directory names normally match package names
+  - File names normally use lower cases
+  - File names may contain underscores, but many prefer no underscores in Go
+
+Import issue
+------------
+When import { Label } from '$lib/components/ui/label', where 'label' has multiple files:
+  - Vite imports index.ts (or js)
+  - SveltKit will most likely report "module not found"
+
+Handle Timestamp field
+----------------------
+For PostgreSQL, if field data type is timestamp, it does not accept empty strings.
+For timestamp field, we can either treat it as timestamp field in Go. In that case,
+use the time time.Time. Or if we want to convert timestamp field into strings,
+do the following:
+SELECT 
+  id,
+  COALESCE(user_id, ''),
+  COALESCE(file_url, ''),
+  COALESCE(valid, ''),
+  COALESCE(TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS'), ''),
+  COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI:SS'), '')
+FROM documents
+LIMIT 200;
+
+When Go returns results to frontend, fields with time.Time is changed to
+strings using RFC 3339, or something like:
+  "2025-10-29T01:34:21Z"
+The data type for these fields are string, not time.Time.
+
+When Go returns results:
+  c.JSON(http.StatusOK, rows) 
+Go's JSON package will convert 'rows' into JSONs, such as:
+{
+  "id": "abc",
+  "userID": "user123",
+  "fileURL": "/files/xyz.pdf",
+  "valid": "true",
+  "createdAt": "2025-10-29T01:34:21Z",
+  "updatedAt": "2025-10-29T01:34:21Z"
+}
+
+Frontend now needs to handle the values, converting strings into date types,
+such as:
+<script lang="ts">
+  import type { Document } from '$lib/types';
+
+  let doc: Document;
+
+  // Convert string to Date for formatting
+  $: createdDate = new Date(doc.createdAt);
+</script>
+
+<p>Created: {createdDate.toLocaleString()}</p>
+
+Note: Go’s time.Time uses UTC by default (Z suffix). If the frontend is in a different timezone, 
+new Date() will auto-convert to local time — which is usually what we want.
+
+If the above standard way is not what we want, we can define CustomDate format, such as:
+
+  type JSONTime time.Time
+
+  func (t JSONTime) MarshalJSON() ([]byte, error) {
+    // Format as "2025-10-29 01:34:21" (PostgreSQL default)
+    return []byte(time.Time(t).Format(`"2006-01-02 15:04:05"`)), nil
+  }
+
+  type Document struct {
+    ID        string    `json:"id"`
+    UserID    string    `json:"userID"`
+    FileURL   string    `json:"fileURL"`
+    Valid     string    `json:"valid"`
+    CreatedAt JSONTime  `json:"createdAt"`
+    UpdatedAt JSONTime  `json:"updatedAt"`
+  }
+
+How to Handle Auth for API calls
+--------------------------------
+  When frontend sends request to the backend, the browser will automatically
+  attach cookies to the request, but the fetch MUST be configured correctly:
+  async function fetchDocuments() {
+  try {
+    const res = await fetch('/api/v1/documents', {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+      credentials: 'include' // ← REQUIRED for cookies to be sent
+    });
+
+    // ... rest unchanged
+  } catch (err) {
+    console.error('Failed to fetch documents:', err);
+  }
+}
+
+It is important to include "credentials: 'include'.
+
+When the requests reaches the backend (Go), the AuthMiddleware
+(defined in Shared/server/auth-middleware/auth.go) will check
+the auth (i.e., whether the user has logged in). It currently
+does:
+  - If the requested is static asset (such as .js, ...), pass
+  - Otherwise, it checks whether the user has logged in.
+    If not, it re-directs to the default page ("/")
+
+In addition, CORS must be configured as (in main.go):
+  e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+    AllowOrigins: []string{"http://localhost:5173"},
+    AllowCredentials: true, // ← required
+  })) 
+
+and cookies MUST be set as:
+  c.SetCookie(&http.Cookie{
+    Name:     "session_id",
+    Value:    sessionID,
+    Path:     "/",
+    HttpOnly: true,
+    Secure:   false, // true in production (HTTPS)
+    SameSite: http.SameSiteLaxMode,
+  })
+
+How to Retrieve Data by User ID 
+-------------------------------
+Retrieving data is done by a Go function, such as api/database/retrieve_documents.
+  func func RetrieveDocuments(c echo.Context) error {
+  	// Query the database for dashboard data
+  	userID, ok := c.Request().Context().Value("userID").(string)
+  	if !ok || userID == "" {
+  		// This should never happen if middleware is correct, but be safe
+  		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "User not authenticated"})
+  	}
+
+    ...
+    stmt += "where user_id = xxx"
+
+How to Select (Query)
+---------------------
+Go has two functions to query the database:
+  - Query(...)  return *sql.Rows
+  - QueryRow    return *sql.Row
+When using Query(...), we should hold the rows and close it by calling rows.Close():
+  rows, err := db.Query(...)
+  defer rows.Close()
+When using QueryRow(...), there is no need to close it. It is, however, important do
+not use QueryRow(...) unless the query will return at most one record. Otherwise,
+it may lead to connection leak (normally it will not since Go handles the case properly,
+but it is advised not to rely on it because anything can happen!)
+
+When QueryRow(...) returns no record and you try to scan it, it will generate a
+  row, err := db.QueryRow(...)
+  if err != nil {
+    <failed the query>
+  }
+
+  err1 := row.Scan(...)
+  if err1 != nil {
+    It failed the scan. If it selected no record, calling its scan will generate
+    a sql.ErrNoRows error.
+  }
+
+  Unlike Query(...), QueryRow(...) does not return *sql.Rows. When you call the 
+  row's Scan function, it will automatically close the result. If you do not 
+  call its Close() function, it will be garbage collected.
+
+  QueryRow(...) is syntactic sugar over Query(...). Internally, it ensures the
+  connection is released.
+
+How to Return Response and Retrieve the Response
+------------------------------------------------
+Send response in Go:
+  if !authenticated {
+		return c.JSON(http.StatusUnauthorized, echo.Map{
+			"error": "User not authenticated",
+			"loc": "(MID_AME_016)"})
+	}
+
+	return c.JSON(http.StatusOK, echo.Map{
+		    "authenticated": true,
+        	"user_name": user_name,
+			"loc": "(MID_AME_023)",
+    		})
+It sends a JSON of different shapes, depending on OK or not.
+
+In frontend, 
+  if (res.ok) {
+    const data = await res.json(); // success shape
+    // You can use 'data'
+  } else if (res.status === 401) {
+    const err = await res.json(); // error shape
+    // You can use 'err'
+  } else {
+    // handle other errors (500, etc.)
+  }
+
+  How to Send Response to Frontend
+  --------------------------------
+  There are two methods:
+
+  Method 1:
+  func a-go-function(...) error {
+    ...
+    return c.JSON(http.StatusOK, echo.Map{
+		    "authenticated": true,
+        	"user_name": user_name,
+			"loc": "(MID_AME_023)",
+    		})
+  }
+
+  net/http Constants
+  ------------------
+  Informational (1xx)
+  Constant 	Value
+  http.StatusContinue	100
+  http.StatusSwitchingProtocols	101
+
+  Success (2xx)
+  Constant 	Value
+  http.StatusOK	200
+  http.StatusCreated	201
+  http.StatusAccepted	202
+  http.StatusNoContent	204
+
+  Redirection (3xx)
+  Constant 	Value
+  http.StatusMultipleChoices	300
+  http.StatusMovedPermanently	301
+  http.StatusFound	302
+  http.StatusNotModified	304
+  http.StatusTemporaryRedirect	307
+  http.StatusPermanentRedirect	308
+
+  Client Error (4xx)
+  Constant 	Value
+  http.StatusBadRequest	400
+  http.StatusUnauthorized	401
+  http.StatusForbidden	403
+  http.StatusNotFound	404
+  http.StatusMethodNotAllowed	405
+  http.StatusRequestTimeout	408
+  http.StatusConflict	409
+  http.StatusTeapot	418
+  http.StatusTooManyRequests	429
+
+  Server Error (5xx)
+  Constant 	Value
+  http.StatusInternalServerError	500
+  http.StatusNotImplemented	501
+  http.StatusBadGateway	502
+  http.StatusServiceUnavailable	503
+  http.StatusGatewayTimeout	504
+
+What Is index.ts For?
+---------------------
+When we build a library, the library is defined in a directory. The directory
+may contain multiple files. When others use the library, we do not want callers
+know the internal file structures. "index.ts" is used as the entrance point
+for the library so that callers only need to import from its directory.
+As an example, Shared/src/lib has an index.ts, which has the line:
+  export { isAuthenticated, setIsAuthenticated, clearAuthCache } from './utils/auth.js';
+Callers can import:
+  import { isAuthenticated } from '@chendingplano/shared';
+
+Svelte's svelte-package (used when you run "bun run build") works as follows:
+  - Starts from src/lib/index.ts
+  - Buddles only the code that is exported from index.ts
+  - Output it to dist/
+So if you do not export a function in index.ts, it won't appear in dist/, and others
+cannot see it even if you do have it in the files.
+
+What is tsconfig.json?
+----------------------
+Shared/tsconfig.json:
+When "moduleResolution" is defined as "buddle" in tsconfig.json, you do not need
+the extensions in import, such as:
+  import { isAuthenticated } from './utils/auth';
+
+What Is Hydration?
+------------------
+Hydration is the process that restores the server-side rendered application on the
+client (browser). This includes things like reusing the server rendered DOM structures,
+persisting the application state, transferring data that was retrieved by the server.
+
+Hydration Error
+---------------
+If user.avatar is only set on the client (e.g., from a store that initializes after mount),
+  - Server renders: <img src="undefined"/> // It will fallback, if fallback is defined
+  - Client renders: <img src="https://../log.svg"/> -> will show the logo 
+This leads DOM structure mismatches, leading to Hydration error! The source of the problem
+is that the logo is not available on the server. Frontend (browsers) may use store to
+persist resources. Store is not accessible on the server, leading to hydration problem.
+
+How to Fix Hydration Error - Case Study 
+---------------------------------------
+1. The hint is: a button inside a button, which is incorrect HTML.
+2. The difficulty is to locate the source.
+3. ChatGPT suggested to search for <Button
+4. The application is (app). Start from tax/web/src/routes/(app)/layout.svelte
+5. (app)/layout.svelte:
+  <Sidebar.Provider
+    style="--sidebar-width: calc(var(--spacing) * 72); --header-height: calc(var(--spacing) * 12);">
+  <AppSidebar variant="inset" />
+  <Sidebar.Inset>
+    <SiteHeader />
+    {@render children()}
+  </Sidebar.Inset>
+  </Sidebar.Provider>
+By commentting out components, located the problem is caused by <SiteHeader>
+6. <SiteHeader> is defined in src/lib/components/layout/app-sidebar/site-header.svelte
+7. site-header.svelte used to be:
+  <header
+      ...
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <Button variant="ghost" onclick={authStore.logout}>
+              <LogoutIcon />
+            </Button>
+          </Tooltip.Trigger>
+          <Tooltip.Content>
+            <p>Log Out</p>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    </div>
+  </header>
+  
+  ChatGPT recommended to change it to:
+      <Tooltip.Provider>
+      <Tooltip.Root>
+        <div class="flex items-center">
+          <Tooltip.Trigger>
+            <div class="flex items-center">
+              <LogoutIcon />
+            </div>
+          </Tooltip.Trigger>
+          <Button variant="ghost" on:click={authStore.logout}>
+            <LogoutIcon />
+          </Button>
+        </div>
+        <Tooltip.Content>
+          <p>Log Out</p>
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  It added <div> to break button inside button.
+
+How to Pass props to Component 
+------------------------------
+  <LoginForm isSignup/>
+This is a shorthand for:
+  <LoginForm isSignup={true}/>
+
+In general:
+  <Component <prop_name>/>            => <Component <prop_name>={true}
+  <Component <prop_name>={value}/>    => Pass the value for <prop_name>
+  <Component <prop_name>="text"/>     => Pass the text (string), so the prop is a string with the 'text'
+  <Component />                       => The prop is either undefined or default by the component
+
+$bindable
+---------
+If a component defines a prop as $bindable, its parent can bind
+this prop so that when the value of this prop changes, the parent
+can see the changes.
+
+Example:
+Below defines a component:
+<script lang="ts">
+	import { Avatar as AvatarPrimitive } from "bits-ui";
+	import { cn } from "$lib/utils.js";
+
+	let {
+		ref = $bindable(null),
+		loadingStatus = $bindable("loading"),
+		class: className,
+		...restProps
+	}: AvatarPrimitive.RootProps = $props();
+</script>
+
+<AvatarPrimitive.Root
+	bind:ref
+	bind:loadingStatus
+	data-slot="avatar"
+	class={cn("relative flex size-8 shrink-0 overflow-hidden rounded-full", className)}
+	{...restProps}
+/>
+
+Below is its parent. It has an HTML element 'avatarEl' and a variable 'status'.
+These two are bound to the component's 'ref' and 'loadingStatus'. The binding
+is two-way: parent passes the value to the bound props; the component can change
+their values, such as changing 'status' from true to false. The parent can see
+the changes.
+
+<script lang="ts">
+  let avatarEl: HTMLElement;
+  let status: "loading" | "loaded" | "error";
+</script>
+
+<Avatar
+  bind:ref={avatarEl}
+  bind:loadingStatus={status}
+  class="border-2 border-blue-500"
+  alt="User"
+/>
+{#if status === "loading"} Loading... {/if}
+
+We may treat bindable props as parameters so that parents (or the module that uses
+the component) and pass values to it (not bindable) or pass value to it and get
+the changes back (bindable).
+
+How to Run npm run build
+------------------------
+Since we are using bun, run:
+  bun run build
+
+How to run pnpm
+---------------
+  pnpm dlx shadcn-svelte@latest add sidebar-07
+
+Do the following:
+  cd ChenWeb/web
+  bunx shadcn-svelte@latest add sidebar-07
+
+bunx is Bun's version of npx / pnmp dlx. When running:
+  bunx shadcn-svelte@latest add sidebar-07
+it does the following:
+  - bunx expects the package has CLI (or has "bin" entry in its package.json)
+    If a package does not have CLI, bunx will fail
+  - Download the shadcn-svelte package into a temporary cache (note: it caches
+    the package. Once finished, the cache is gone. There is no issue of removing it)
+  - Locate the CLI binaries defined in "bin"
+  - bunx runs the binary using your parameters (such as 'add sidebar-07')
+  - Remove it afterward (sort of, it actually does not remove because the package is cached only)
+
+Not all packages have CLI. Below are packages that have CLI:
+Package	        CLI
+-----------------------------
+shadcn-svelte	  shadcn-svelte
+vite	          vite
+eslint	        eslint
+tailwindcss	    tailwindcss
+create-svelte	  create-svelte
+prisma	        prisma
+-----------------------------
+
+Will bunx Install the Dependences
+---------------------------------
+bunx itself does not install the dependencies. Instead:
+  - bunx runs its CLI, installs the component (such as sidebar-07)
+  - shadcn-svelte edits your Sveltekit project
+  - shadcn-svelte runs 'bun add ...' to add all the dependencies
+In other word, bunx itself does not install the dependencies, but the package does.
+
+What Are the Differences between bunx and bun exec
+--------------------------------------------------
+bunx does the following:
+  - Downloads the npm package (if needed)
+  - Runs its CLI
+  - Does not require the package insalled in your project
+
+bun exec
+  - It does not download anything
+  - It assumes the package has been downloaded
+  - It does not execute a package by a package name
+
+How to Install a Shadcn Component
+---------------------------------
+Step 1: 
+  bunx shadcn-svelte/latest init
+Run this command only when your project has never initialized shadcn-svelte.
+
+Step 2:
+  bunx shadcn-svelte/latest add [component]
+This command installs the component and all its dependencies.
+
+How to Use a Function in Shared
+-------------------------------
+We will use an actual example to show how to make a function in Shared 
+available for applications to use it.
+
+  - In ~/Workspace/Shared/src/lib/utils/auth.js, it defines a function "isAuthenticated"
+  - In ~/Workspace/Shared/src/lib/index.js, export it 
+  - In ~/Workspace/Shared, run "bun run build", which will compile the code into
+    ~/Workspace/Shared/dist/utils/index.js
+  - In ~/Workspace/tax/web/src/routes/(app)/+layout.svelte:
+    import { isAuthenticated } from '@chendingplano/shared';
+  - In ~/Workspace/tax/web/package.json:
+    "dependences": {
+      ...
+      "@chendingplano/shared": "file:../../Shared"
+    }
+  - In ~/Workspace/tax/web, run:
+    bun install
+    
+Route Group
+-----------
+Example: ~/Workspace/tax/web/src/routes/(auth)
+  - (auth) denotes a route group (by SvelteKit)
+  - (auth) is not part of the URL (or it does not affect URLs), so:
+    ~/Workspace/tax/web/src/routes/(auth)/login/+page.svelte    => served at /login
+    ~/Workspace/tax/web/src/routes/(auth)/signup/+page.svelte   => served at /signup
+  - The file +layout.svelte wraps all pages inside (auth). It applies to /login,
+    /signup and any other pages defined in a sub-directory.
+  - It does not apply to routes outside the group.
+
+How to Use <slot>
+-----------------
+SvelteKit uses +layout.svelte to define a template or pattern.
+Pages inside the directory plugs their content to the specified slot.
+Normally, there shall be only one <slot> in a +layout.svelt file.
+But technically, you may have multiple named slots, such as:
+  <slot name="header" />
+  <main><slot /></main>
+  <slot name="footer" />
+Then a child may have:
+  <!-- +page.svelte -->
+  <div slot="header">Page-specific header</div>
+  <p>Main content</p>
+  <div slot="footer">Page-specific footer</div>
+But in generally, stay with one slot.
+
+What is ".$types.js"
+--------------------
+It is automatically generated by SvelteKit at build/dev time.
+./$types.js (and its TypeScript counterpart ./$types.d.ts) is a virtual module generated per route directory by SvelteKit.
+It contains type definitions for:
+  - PageLoad, PageServerLoad
+  - LayoutLoad, LayoutServerLoad
+  - Actions
+  - PageData, LayoutData
+  - etc.
+These types are inferred from your actual +page.ts, +layout.ts, +page.server.ts, etc.
+(Refer to tax/web/src/routes/(auth)/signup)
+
+layout.svelte and Components
+----------------------------
+Let's use an example:
+  tax/web/src/routes/(app)
+    layout.svelte
+    dashboard/+page.svelte
+    chat/+page.svelte
+    ...
+  In layout.svelte:
+    let {children} = $props()
+
+  {@render children()}
+
+Svelte children() is dynamic. When clicking "dashboard", "dashboard/+page.svelte" is
+added to layout.svelte children. When "chat/+page.svelte" is clicked, its
+children contains the chat, not the dashboard.
+
+Note that layout.svelte defines a template or framework. Its children
+plugs their contents into the template.
+
+How to Send Response with Context
+---------------------------------
+Refer to Shared/server/auth/email.Go
+Method 1:
+func HandleEmailVerify(c echo.Context) error {
+    ...
+		redirect_url := AuthInfo.HomeURL
+		if redirect_url == "" {
+			log.Printf("***** Alarm missing home_url config (SHD_GGL_094)")
+			redirect_url = "localhost:5173"
+		}
+
+		response := map[string]string{
+    	"name": user_info.UserName, // or user.Email if that's what you use
+    	"email": user_info.Email,
+			"redirect_url": redirect_url,
+			"loc": "SHD_EML_210",
+		}
+		w := c.Response()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+		return nil
+	}
+
+Method 2:
+func HandleEmailVerify(c echo.Context) error {
+    ...
+		if user_status != "user not found" {
+			msg := "user already exists (SHD_EML_224)"
+			log.Printf("%s", msg)
+			return c.JSON(http.StatusOK, map[string]string{"message": msg})
+		}
+
+Important:
+Aspect                    Method 1                                Method 2
+---------------------------------------------------------------------------------------------------------------------- 
+Integration with Echo     ❌ Bypasses Echo’s response handling    ✅ Fully integrated
+Header handling           You must set Content-Type manually      ✅ Automatically sets Content-Type: application/json
+Status code handling      You call WriteHeader() directly         ✅ Safe: respects middleware, error handling
+Response already sent?    ❌ Risk of writing after headers sent   ✅ Echo prevents double-write
+                          (panic or silent failure)
+Error handling            ❌ If Encode() fails, you may not       ✅ Echo handles encoding errors gracefully
+                          handle it cleanly
+Middleware compatibility  ❌ May break response-wrapping          ✅ Works with all Echo middleware
+                          middleware (e.g., logging, compression)
+Code clarity              More verbose                            Clean and idiomatic
+---------------------------------------------------------------------------------------------------------------------- 
+
+How to Pass Config Data to Frontend
+-----------------------------------
+One way to retrieve config items in frontend is to fetch
+it from the backend. Refer to "How to Send Response with Context".
+
+How to Embed Data in Request
+----------------------------
+Assuming a page wants to send a request to the backend with certain data.
+This is an example:
+      const res = await fetch('http://localhost:8080/auth/email/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+It sends a request to /auth/email/verify, with a JSON {token}
+
+The receiver:
+  type EmailVerifyRequest struct {
+	  Token string `json:"token"`
+  }
+
+	var req EmailVerifyRequest
+	if err := c.Bind(&req); err != nil {
+		log.Printf("Failed to bind request body: %v (SHD_EML_199)", err)
+		return c.String(http.StatusBadRequest, "Invalid request body (SHD_EML_199)")
+	}
+
+  token := req.Token
+
+How Backend Handle Authentication
+---------------------------------
+  - Each app should have a line:
+    In its first RegisterRoutes() such as tax/server/api/router.go:
+      e, err := api.RegisterRoutes()
+  - api.RegisterRoutes():
+    should have a line:
+      e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {...}
+    This function is called whenever a request is received by the backend.
+  - The function does:
+    a. Check whether the request needs authentication. Static resources
+       such as .js, .ts, etc., do not need authentication. 
+    b. If the resource requires login, it uses Shared/server/auth-middleware/auth.go
+       function AuthMiddleware().
+       Note that this is a helper function, called for each request.
+       It checks whether the requester
+       has logged in by retrieving the cookie/token, check the cookie
+       vadility, and set userID (should be user_name) to the context.
+       		ctx := context.WithValue(c.Request().Context(), "userID", user_name)
+		      c.SetRequest(c.Request().WithContext(ctx))
+		      log.Printf("User authenicated, proceed (SHD_MAT_045):%s", path)
+		      return next(c)
+    c. If the resource requires login but the request has not logged in
+       yet, if it is an HTML request, redirect it to /login.
+       Otherwise, returns an error.
+  - If it passes HandlerFunc, the backend routes the request to the 
+    corresponding handler, if it is a valid route. Otherwise, it returns
+    an error code (normally 404).
+  - The handler can retrieve the userID (user_name), such as tax/server/api/database/retrieve_documents.go:
+    func RetrieveDocuments(c echo.Context) error 
+      userID, ok := c.Request().Context().Value("userID").(string)
+      ...
+  - 
+
+How to Retrieve UserID from Request
+-----------------------------------
+When a Go function receives a request, if it needs to get user ID:
+	userID, ok := c.Request().Context().Value("userID").(string)
+	if !ok || userID == "" {
+		// This should never happen if middleware is correct, but be safe
+		log.Printf("***** Alarm Failed retrieving user (SHOULD NEVER HAPPEN) (MID_RDC_041)")
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "User not authenticated"})
+	}
+
+'userID' is set by Shared/server/auth-middleware/auth.go. Refer to "How Backend Handle Authentication"
+for information about how userID is set.
+'userID' is 'user_name' in 'users' table. We can use 'userID' to retrieve user information by:
+  GetUserByUserName(...)
+
+How to Get Cookie
+-----------------
+cookie, err := c.Cookie("session_id")
+
+How to Handle Nullable strings
+------------------------------
+In Go, we can define a string variable as:
+  - var sv string   // Non-nullable string
+  - var sv *string  // Nullable String
+
+When scanning data from a select statement:
+  - If the database value is null but the corresponding field type is not
+    a nullable string, the driver will report an error.
+  - The same is true for other data types.
+
+In general, when a value connects to a database field, it is important
+to handle the null because data types in programming languages normally
+do not have the concept of null, but pointers can be null.
+
+There is a special data type in sql, sql.NullString, which is a structure
+that has two member data: .Valid and .String:
+  var my_nullable_str sql.NullString
+
+How to Define Prop
+------------------
+Method 1:
+  <script>
+    export let onClick = () => {};
+    export let title = 'Hello';
+  </script>
+✅ Defines a public prop that parent components can pass.
+✅ Supports default values (evaluated once when the component is created).
+✅ Works in all Svelte versions (v3, v4, v5).
+✅ Fully reactive: if the parent changes the prop, the child sees the update.
+✅ Can be written to (two-way binding with bind:prop).
+This is what you should use 99% of the time, especially in libraries.
+
+Method 2:
+  <script>
+    const { onClick = () => {}, title = 'Hello' } = $props();
+  </script>
+🔸 Does not declare props — it only reads whatever was passed.
+🔸 Best used when you want to destructure many props at once or build highly dynamic wrappers.
+🔸 No default values at the declaration level (you must handle them in destructuring).
+🔸 Cannot be used with bind: (since props aren’t explicitly declared).
+🔸 Only available in Svelte 5+.
+
+How to Create a library
+-----------------------
+1. Shared is a library. It contains both Svelte code and Go code. Its file structure is:
+├── go/
+│   ├── go.mod
+│   ├── go.sum (will be generated)
+│   ├── api/
+│   └── auth-middleware/
+├── svelte/
+│   ├── package.json
+│   ├── src/lib/
+│   └── (optional) svelte.config.js
+└── README.md
+All Go code goes to "go" sub-directory and Svelte code to 'svelte' sub-directory.
+
+2. Initialize go/
+ch ~/Workspace/Shared/go
+go mod init github.com/chendingplano/shared/go
+If the directory already has go.mod, you can remove it and run the init.
+
+3. Build
+(in ~/Workspace/Shared/go)
+go build ./...
+
+4. Remove SvelteKit Files
+A library MUST contain only Svelte files. SvelteKit is a development tool.
+It should be used for applications only, not for libraries.
+
+If you’re not using Tailwind CSS in the library itself, you can delete svelte.config.js.
+Otherwise, svelte.config.js should contain:
+  import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+
+  export default {
+    preprocess: vitePreprocess()
+  };
+
+5. Build
+(~/Workspace/Shared/svelte/)
+bun install
+bun run build
+
+6. Link
+# Link the shared Svelte lib for local dev
+cd ~/Workspace/Shared/svelte
+bun link
+
+cd ~/Workspace/ChenWeb
+bun link @chendingplano/shared
+
+7. go.mod
+Make sure ChenWeb/go.mod contains:
+module chenweb
+
+go 1.23
+
+require github.com/chendingplano/shared/go v0.0.0
+
+replace github.com/chendingplano/shared/go => ../Shared/go
+
+How to Declare Frontend Data Types 
+----------------------------------
+Normally frontend data types are defined in 
+  <project_name>/web/lib/types
+    index.ts (or types.ts)
+    api.ts
+    documents.ts
+    ...
+
+They are imported by:
+  import type { ApiResponse } from '$lib/types/api';
+
+How to Share Data Types between Go and TypeScript
+-------------------------------------------------
+Assume there is a data structure in Go:
+  type DocumentsRecord struct {
+  	ID 						string 	`json:"id"`
+  	UserId				string 	`json:"user_id"`
+  	FileURL				string 	`json:"file_url"`
+  	Valid 				string 	`json:"valid"`
+  	CreatedAt			time.Time `json:"created_at"`
+  	UpdatedAt 		time.Time `json:"updated_at"`
+  }
+
+The TypeScript data type (should be in the types/ directory):
+  export interface DocumentsRecord {
+  	id: string;
+  	user_id: string;
+  	file_url: string;
+  	valid: string;
+  	created_at: string;   // or Date, see below
+  	updated_at: string;
+  }
+IMPORTANT: the field names MUST match the JSON field names!!!
+IMPORTANT: Make sure the two are kept in sync. When Go changes its
+data type definition, DO NOT FORGET UPDATE THE TYPESCRIPT data type!!!
+
+How to Import Data Types in Shared
+----------------------------------
+If there is a file:
+  Shared/svelte/src/lib/types/documents
+Then:
+  - Export the data types in Shared/svelte/src/lib/index.ts, such as:
+    // Re-export types for public consumption
+    export type { DocumentsRecord } from './types/documents';
+    export type { UserInfo } from './types/auth';
+
+    // Re-export components/utils too
+    export { default as EmailVerifyPage } from './components/EmailVerifyPage.svelte';
+  - Applications, such as tax or ChenWeb, can consume it as:
+    import type { DocumentsRecord } from '@chendingplano/shared';
+
+How State Variables Work in Functions 
+-------------------------------------
+Below is an example (Shared/svelte/lib/stores/auth.svelte.ts):
+function createAuthStore(): AuthStore {
+  // Initialize state from current PocketBase auth store
+  let isLoggedIn = $state(pb.authStore.record !== null);
+  let user = $state(pb.authStore.record);
+  ...
+This function defines two state variables: isLoggedIn and user.
+Unlike normal local variables in functions, state variables are not local.
+They are reactive variables live outside functions.
+
+What Is a Component
+-------------------
+Every '.svelte' defines a component, regardless of where it is.
+
+A component:
+  - A self-contained UI unit defined in a .svelte file
+  - A component has:
+    * Markup: <div> ...
+    * Reactive logic: <script> with let, $state, etc.
+    * Styles: <style>
+    * Public API: export let ...
+  - It compiles to a JavaScript class
+  - When export { default as EmailVerifyPage } from './components/EmailVerifyPage.svelte';
+    it means to export the component (the whole file)
+
+State Variables in Functions
+----------------------------
+It is possible to define state variables in functions, such as:
+(File: Shared/svelte/src/lib/stores/auth.svelte.ts)
+function createAuthStore(): AuthStore {
+  // Initialize state from current PocketBase auth store
+  let isLoggedIn = $state<boolean>(false);
+  let user = $state<UserInfo | null>(null);
+  let error_msg = $state<string | null>(null);
+  let status = $state<'login' | 'register' | 'forgot' | 'loggedin' | 'error' | 'pending'>('login');
+
+These state variables are similar to member data in C++/Java, but not quite.
+They are actually not member data. TypeScript/JavaScript uses closure-based encapsulation.
+The returned object has only getter methods.
+
+Closures are new concept. We can view closures as a way of wrapping execution environment
+(or stack). When:
+  authStore1 = createAuthStore()
+  authStore2 = createAuthStore()
+It will create two execution stacks (or closures). authStore1.isLoggedIn and authStore2.isLoggedIn
+are two different variables.
+
+What is $: {...}
+----------------
+Below is an example:
+<script>
+  import { authStore } from 'shared-svelte';
+  import { goto } from '$app/navigation';
+
+  // Reactively watch auth state
+  $: {
+    if (!$authStore.isLoggedIn && $page.url.pathname !== '/login') {
+      goto('/login');
+    }
+  }
+</script>
+
+$: is a Svelte syntax. It means: execute the code in {...} when any of the 
+state variables changes its value.
+  - $authStore.isLoggedIn accesses its isLoggedIn state variable (note the $)
+  - $page.url.pathname: is SvelteKit’s built-in reactive page info.
+
+How Promise Works
+-----------------
+For lengthy operations, we want to define them as async function,
+such as:
+  async function register(...): Promise<void> {...}
+To call this function:
+(Shared/svelte/src/lib/stores/auth.svelte.ts)
+    async function handleRegister() {
+    if (password !== passwordConfirm) {
+      errorMessage = 'Passwords do not match';
+      return;
+    }
+
+    isSubmitting = true;
+    errorMessage = '';
+
+    try {
+      await authStore.register({
+        email,
+        password,
+        passwordConfirm,
+        firstName,
+        lastName
+      });
+      
+      // Registration successful!
+      // The authStore will automatically update isLoggedIn and user
+      console.log('Registration successful');
+    } catch (error) {
+      // Handle registration errors
+      errorMessage = error instanceof Error ? error.message : 'Registration failed';
+    } finally {
+      isSubmitting = false;
+    }
+  }
+
+When it calls "await authStore.register(...)", it pauses the current stack,
+returns the control to the event loop so that the system can handle other
+events. When the function finishes (i.e., returns), it resumes the interrupted
+execution.
+
+You may also use authStore.register(...).then(() => {...}).catch(err => {...}).
+This is called 'call and forget', such as:
+  ...
+  authStore.register(...)
+    .then(() => {...})
+    .catch(err => {...})
+  console.log("register started")   // This line runs immediately
+
+Using await is more natural unless we want to run multiple such functions
+simultaneously.
+
+If the promise returns a value, such as Promise<boolean>:
+  const result : boolean = await authStore.register(...)
+or
+  authStore.register(...).then((result:boolean) => {...})
+
+How to Create an Async Function with a Promise
+----------------------------------------------
+Example 1:
+Promise<void>: the function should have some async actions, or actions that may
+take time to finish. Use await on these actions (or functions).
+  async function login(email: string, password: string): Promise<void> {
+    // Simulate an async operation (e.g., API call)
+    await fetch('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    // No return value → resolves to `undefined` (compatible with `void`)
+  }
+
+Example 2:
+Promise<boolean>:
+  async function login(email: string, password: string): Promise<boolean> {
+    const response = await fetch('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    return response.ok; // Returns a boolean → Promise resolves to boolean (matches declared type)
+  }
+
+How to Solve "Cannot write file '/Users/cding/Workspace/Shared/svelte/dist/index.js'" problem
+---------------------------------------------------------------------------------------------
+In tsconfig.json, add:
+{
+	"extends": "./.svelte-kit/tsconfig.json",
+	"compilerOptions": {
+		"allowJs": true,
+		"checkJs": true,
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"skipLibCheck": true,
+		"sourceMap": true,
+		"strict": true,
+		"module": "ES2022",
+		"moduleResolution": "bundler",
+		"noEmit": true  // 👈 ADD THIS
+	}
+}
+
+How echoContext Works
+---------------------
+There are three methods to transfer values between frontend and backend:
+  - URL (path and query)
+  - Request body
+  - Request Header 
+Go Echo adds an additional method, mainly used to pass information among
+Go objects.
+
+How to Set Values to c.echo.Context
+-----------------------------------
+(Refer to Shared/go/api/auth-middleware)
+    // Add (UserContextKey, user_name) to its context
+		ctx := context.WithValue(c.Request().Context(), ApiUtils.UserContextKey, user_name)
+
+    // Set (update) the context
+		c.SetRequest(c.Request().WithContext(ctx))
+		log.Printf("User authenicated, proceed (SHD_MAT_045):%s", path)
+
+How to Retrieve Values from c.Echo.Context
+------------------------------------------
+It uses c.Request().Context().Value(key) to retrieve values from context.
+
+Example:
+  func RetrieveDocuments(c echo.Context) error {
+	  userID, ok := c.Request().Context().Value("userID").(string)
+	  if !ok || userID == "" {
+      ...
+    }
+	}
+
+The function "c.Request().Context()" retrieves the context from its request.
+It then retrieves a value from it:
+  val := c.Request.Context().Value(userContextKey)
+
+IMPORTANT: Go retrieves the value based on not only key value but key data type, too. In this
+example, the key value is "user_name" and its data type is userContextKey. If there are
+no parameters named "user_name" or their data types are not 'userContextKey', it will
+return nil.
+
+The syntax:
+  userID, ok := c.Request().Context().Value("userID").(string)
+adds an assert (string) and returns val and ok == true if the assert is true.
+Otherwise, it returns nil, ok == false.
+
+What is a Go Channel
+--------------------
+Channels manage the communications of goroutines. A channel is a typed, synchronized
+pipe between two goroutines. Key properties of channels:
+  - Typed: A channel is declared with a type. It can only carry values of that type.
+  - Unbuffered: sender will block on sending a value until there is a receiver. In
+    other word, unbuffered channels do not internally cache values. All communications
+    are synchronous.
+  - Buffered: one can create a channel is a buffer, such as ch := make(chan int, 5),
+    which creates a channel of data type int with a buffer of max size 5. Sending values
+    to this channel will not block until the buffer is full. When that happens, sending
+    will be blocked until the cache is available.
+  - Closed: A channel can be explicitly closed by close(ch). Once closed, no more values
+    can be sent to the channel, but the pending values are still available.
+
+What Is Select
+--------------
+Select allows a goroutine to monitor multiple challens simultaneously for either sending
+and receiving.
+func (c *ActivityLogCache) flush_loop() {
+  ...
+  select {
+  case <-channel_01:
+       // It cares only about events, not the event values
+       ...
+  case <-channel_02:
+       // It cares only about events, not the event values
+       ...
+  case v := <-channel_03:
+       // Retrieve values from channel_03
+       ...
+  case channel_4 <- <value>:
+       // Send a value to channel_4
+       ...  
+  }
+}
+
+What is goroutine
+-----------------
+Goroutines are light and user-land 'threads'. They are managed by Go runtime, much 
+lighter than OS threads, which has their stacks and participates context switching.
+It is possible to run thousands or even millions of goroutines simultaneously.
+
+Each goroutine has a function, either an anonymous function or a named function.
+  go func() {...}   // Anonymous function
+
+How sync.WaitGroup Works
+------------------------
+sync.WaitGroup implements a counter. It is used to manage goroutines. It works as:
+  - It is normally initialized as a member data of struct, such as:
+    type ActivityLogCache struct {
+      ...
+      wg sync.WaitGroup
+    }
+  - When start a new goroutine in the group, call:
+    wg.Add(1)
+  - You can add N routines:
+    wg.Add(n)
+  - When a goroutine finishes:
+    wg.Done()
+  - Wait on a WaitGroup:
+    wg.Wait()
+    It will not return until all goroutines are finished (i.e., its counter comes to 0)
+
+Example:
+import (
+    "log"
+    "sync"
+)
+
+func main() {
+    var wg sync.WaitGroup
+
+    // Track 2 goroutines
+    wg.Add(2)
+
+    // Launch goroutine 1
+    go func() {
+        defer wg.Done() // Decrement counter when done
+        log.Println("Goroutine 1 running...")
+        time.Sleep(1 * time.Second)
+    }()
+
+    // Launch goroutine 2
+    go func() {
+        defer wg.Done() // Decrement counter when done
+        log.Println("Goroutine 2 running...")
+        time.Sleep(2 * time.Second)
+    }()
+
+    // Block until both goroutines complete
+    wg.Wait()
+    log.Println("All goroutines finished!")
+}
+
+Call-by-value or call-by-reference
+----------------------------------
+Go does not support call-by-reference, directly. All parameters are passed
+as call-by-value. That is, a copy of the parameter is made. Changes to 
+parameters do not affect the original parameter.
+
+We can simulate call-by-reference by passing pointers.
+The function below is call-by-value:
+  func (c *ActivityLogCache) AddToCache(record ActivityLogDef) {...}
+It will make a copy of 'record'.
+  func (c *ActivityLogCache) AddToCache(record *ActivityLogDef) {...}
+The parameter 'record' is now a pointer. It won't copy the value.
+
+IMPORTANT: For cache, it is important to make a copy of the record instead of 
+storing the pointers.
+
+How defer Functions Work
+------------------------
+A function can have multiple defer statements. The execution order of the
+deferred functions is the reverse order in which they appear.
+
+Defer functions are executed after the sorrounding functions return.
+This means that defer functions cannot change the returned values.
+If something happens in a deferred function, we can logged it, but
+cannot send them back.
+
+Another important thing to notice is that a deferred function can read
+local variables. If it does read local variables, it is important to
+keep the variable name the same. For instance, if the purpose of a deferred
+function is to rollback a transaction:
+  tx, err := db.Begin()
+  ...
+  defer func() {
+    if tx && err != nil {
+      tx.Rollback()
+    }
+  }
+  err1 := tx.Commit()
+
+This can cause problem if it begins a transaction successfully (i.e., err is nil)
+but failed the commit, the error returned by the commit is not err but err1.
+The deferred function only handles err, not err1. This can cause the transaction
+not committed.
+
+To avoid this problem, make sure all errors use 'err'. DO NOT NAME NEW err!
+
+How to Handle Printf Format Specifiers
+--------------------------------------
+%d: for all integral values
+%o: octal (base 8) integral values
+%x: hex (or %X) integral values
+%b: Binary (base 2)
+%v: Generic value
+
+How to Retrieve URL from echo.Context
+-------------------------------------
+func handler(c echo.Context) error {
+    // Retrieve the parsed URL struct
+    parsedURL := c.URL()
+
+    // Extract components from the parsed URL
+    path := parsedURL.Path     // e.g., "/api/logs"
+    query := parsedURL.Query() // e.g., url.Values{"page": []string{"1"}, "size": []string{"10"}}
+    host := parsedURL.Host     // e.g., "localhost:8080"
+    scheme := parsedURL.Scheme // e.g., "http"
+
+Or retrieve it through its Request:
+func handler(c echo.Context) error {
+    req := c.Request() // Get the underlying http.Request
+
+    // Full URL string (scheme + host + path + query)
+    fullURL := req.URL.String() // e.g., "http://localhost:8080/api/logs?page=1&size=10"
+    fmt.Printf("Full URL: %s\n", fullURL)
+
+    // Path (without host/scheme/query)
+    path := req.URL.Path // Same as parsedURL.Path from method 1
+
+    return c.String(http.StatusOK, "Full URL retrieved")
+}
+
+Components of URL
+The url.URL struct (returned by c.URL()) contains the following fields/methods:
+
+Scheme: Protocol (e.g., "http", "https").
+Host: Hostname:port (e.g., "localhost:8080").
+Path: Path component (e.g., "/api/logs").
+RawPath: Unescaped path (rarely needed).
+Query() url.Values: Returns query parameters as a map of []string (e.g., {"page": ["1"], "size": ["10"]}).
+
+How to Retrieve Specific Parameter from URL
+-------------------------------------------
+To get a specific query parameter from url, use url.Query().Get("<name>")
+func handler(c echo.Context) error {
+    parsedURL := c.URL()
+    page := parsedURL.Query().Get("page") // Returns "1" if query is "page=1&size=10"
+    fmt.Printf("Page parameter: %s\n", page)
+
+    return c.String(http.StatusOK, "Query parameter extracted")
+}
+
+How to Get Original Client URL
+------------------------------
+If you Echo server runs a proxy (e.g., Nginx, Cloudflare), the host, and schema
+in req.URL reflect the proxy's details, not the original ones. Check proxy headers
+like x-Forwarded-proto or x-Forwarded-host.
+
+func handler(c echo.Context) error {
+    req := c.Request()
+
+    // Get original scheme (if proxy sets X-Forwarded-Proto)
+    forwardedProto := req.Header.Get(echo.HeaderXForwardedProto)
+    if forwardedProto != "" {
+        scheme = forwardedProto
+    }
+
+    // Get original host (if proxy sets X-Forwarded-Host)
+    forwardedHost := req.Header.Get(echo.HeaderXForwardedHost)
+    if forwardedHost != "" {
+        host = forwardedHost
+    }
+
+    // Rebuild the full URL with original scheme/host
+    originalURL := fmt.Sprintf("%s://%s%s?%s", scheme, host, req.URL.Path, req.URL.Query())
+    fmt.Printf("Original URL (behind proxy): %s\n", originalURL)
+
+    return c.String(http.StatusOK, "Original URL retrieved")
+}
+
+How Go Handle JSON
+------------------
+In Go, structs are defined in the following fashion:
+type RequestInfo struct {
+  FullURL			    string		  `json:"full_url"`
+  PATH 			      string     	`json:"path"`
+	Scheme			    string    	`json:"scheme"`
+	Host			      string    	`json:"host"`
+	Query 			    string    	`json:"query"`
+	OriginalScheme 	string    	`json:"original_scheme"`
+	OriginalHost 	  string    	`json:"original_host"`
+}
+
+json:"xxx" is called struct tag.
+
+1. Strings to Go JSON Object:
+-----------------------------
+  The data type of JSON documents in Go is 'interface{}'.
+  The data type of JSON documents in TypeScript is {[key:string]:any}
+  The function below converts a string into a JSON object (interface{})
+
+  func convertToJSON(json_str string) (interface{}, error) {
+    var jsonData interface{}
+    err := json.Unmarshal([]byte(json_str), &jsonData)  // Deserialization: string -> Go object
+    if err != nil {
+        return nil, fmt.Errorf("Deserialization error: %v\n", err)
+    }
+    return jsonData, nil
+  }
+  When using interface{}, the jsonData variable will contain a Go representation of the JSON data. 
+    - JSON objects become map[string]interface{}
+    - arrays become []interface{}
+    - strings remain string
+    - numbers become float64
+
+2. Strings to Go JSON Struct:
+-----------------------------
+  import (
+    "encoding/json"
+    "fmt"
+  )
+
+  var decodedReq RequestInfo
+  err := json.Unmarshal([]byte(jsonData), &decodedReq)  // Convert JSON string to struct
+  if err != nil {
+      fmt.Printf("Deserialization error: %v\n", err)
+      return
+  }
+  // decodedReq now contains the populated struct
+
+3. omitempty
+------------
+Use this to omit fields whose values are 'empty' (string: empty, integer: 0)
+
+How to Convert Strings to TypeScript JSON object
+------------------------------------------------
+Use JSON.parse(json_str)
+
+We provide two utility functions in Shared/svelte/lib/utils/UtilFuncs.ts:
+    SafeJsonParseAsObject(json_string: string)
+    ParseObjectOrArray(json_string: string)
+
+JSON Documents in TypeScript
+----------------------------
+You can declare a JSON object in one of the following two ways:
+  - Record<string, unknown/any/other data type>
+  - [key:string]: unknown/any/other data type
+
+Example:
+  type MyObj = {
+    name: string;
+    [key: string]: any;
+  };
+This is a map that has 'name' and any addition properties whose keys are string and values 
+can be any. This is another way of defining a JSON object with common properties and 
+extentable with additional keys.
+
+Note that using any or unknown will yield different results:
+  - TypeScript does not check types if the type is any
+  - TypeScript will report error if you access any attribute of unknown type without 
+    first checking the type, such as:
+      if (typeof MyObj['account_number'] === 'string') {
+        // Now you can access MyObj['account_numebr'] as string.
+      }
+
+How to Resolve "xxx is not used"
+--------------------------------
+In the Go code below, it complains "session_log_once" is not used, but it is actually used (session_log_once.Do(...)).
+  var (
+    session_log_singleton *SessionLogCache
+    session_log_once sync.Once // Ensures InitCache runs once
+  )
+  ...
+  func InitSessionLogCache(db_type string,
+    table_name string,
+    db *sql.DB) error {
+    session_log_once.Do(func() {
+    session_log_singleton = newSessionLogCache(db_type, table_name, db)
+    session_log_singleton.start()
+    })
+    return nil
+  }
+
+In Go, if a variable is defined at package level, the variable is considered
+not used if the variable is accessed in member functions but none of these
+member functions are ever called. In the above example, the reason is that
+'session_log_once' is used in InitSessionLogCache(...) only but this
+function is never called.
+
+How to Declare (not Define) a Function Variables
+------------------------------------------------
+Below declares a function variable. The function takes 
+one parameter (userInfo). The parameter defaults to null.
+The function does not return anything (void)
+    setUserInfo: (userInfo: UserInfo | null) => void;
+
+Below declares a function variable (login). The function takes two
+parameters (email: string, password: string) and returns a Promise<void>
+    login: (email: string, password: string) => Promise<void>;
+
+How to Define a Function Variable
+---------------------------------
+The format is:
+  const func_var = (parms) => {<func_body>}
+
+Below defines a function variable. The function takes one parameter (UserInfo).
+The parameter can be null. The function body is in the {...}.
+
+const setUserInfoSet = (userInfo: UserInfo | null) => {
+  const { status, isAdmin } = $authStore;
+  const newState: AuthStoreState = {
+    user: userInfo,
+    isLoggedIn: userInfo !== null,
+    isAdmin: userInfo?.role === 'admin' || false,
+    status: status, // Must explicitly preserve `status`
+  };
+  authStore.set(newState);
+};
+
+How to Set authStore/UserInfo
+-----------------------------
+Email signup involves:
+1. In a login-form page, such as tax/web/src/routes/(auth)/login/+page.svelte,
+   it should have a function to do the signup:
+   const res = await fetch("http://localhost:8080/auth/email/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ first_name, last_name, email, password })
+   });
+2. The backend receives the request, create a pending user, and send a link to the email
+   The link currently: http://localhost:5173/verifyemail?token=%s 
+   this means that the app should have a routes/verifyemail/+page.svelte page.
+   TODO: need to make it configurable so that apps can use their own verification page.
+3. The user clicks on the link
+5. The routes/verifyemail/+page.svelte calls shared/svelte/lib/components/EmailVerifyPage.svelte
+   (unless the app wants to implement the verify on its own)
+6. The EmailVerifyPage.svelte should call shared/svelte/lib/stores/auth.svelte.ts
+   to set userInfo.
+
+How 'svelte/store' Works
+------------------------
+Svelte offers a utility 'svelte/store' to manage reactive states across components. Below 
+is an example:
+
+Step 1: Define the store
+Assume the store is 'AuthStoreSTate'. It contains all the state variables for the store.
+  import { writable } from 'svelte/store';
+  import type { UserInfo } from './user-info.js'; // Assume this type is defined
+
+  interface AuthStoreState {
+    isLoggedIn: boolean;
+    status: string;
+    user: UserInfo | null;
+    isAdmin: boolean;
+  }
+
+Step 2: Create the Store interface
+----------------------------------
+  interface AuthStore {
+    subscribe: (run: (state: AuthStoreState) => void, invalidate?: (state: AuthStoreState) => void) => () => void;
+    setUserInfo: (userInfo: UserInfo | null) => void;
+    login: (email: string, password: string) => Promise<void>;
+    logout: () => void;
+    register: (userData: { /* ... */ }) => Promise<void>;
+  }
+It defines a store 'AuthStore'.
+
+Step 3: Initialize the Store
+  function createAuthStore(): AuthStore {
+    // Initialize the writable store with the state object
+    const { subscribe, set, update } = writable<AuthStoreState>({
+      isLoggedIn: false,
+      status: 'login',
+      user: null,
+      isAdmin: false,
+    });
+
+Note that this is the function to create an instance of AuthStore.
+The first thing this function does is to initialize its store by
+setting the store member initial values. The function writable<AuthStoreState>({...})
+returns three functions: subscribe, set and update. Use these functions
+to subscribe, set and update its store variables.
+
+Step 4: Define a function to let other components update its store variables:
+    // Method to set user info (uses `update` to preserve other state properties)
+    const setUserInfo = (userInfo: UserInfo | null) => {
+      // `update` ensures we use the latest state (avoids race conditions)
+      update(currentState => ({
+        ...currentState, // Preserve existing properties (isLoggedIn, status, isAdmin)
+        user: userInfo,   // Override `user`
+        isLoggedIn: userInfo !== null, // Override `isLoggedIn` based on `userInfo`
+        isAdmin: userInfo?.role === 'admin' || false, // Example: Update `isAdmin`
+      }));
+    };
+
+How $ Operator Works
+--------------------
+Example:
+ const { status, isAdmin } = $authStore;
+
+The $ prefix in a variable declaration is Svelte-specific syntax that:
+  - Automatically subscribe the variable to the store (authStore)
+  - Ensure the variable hold the current state value of the store
+  - Mark the variable as reactive.
+  - $authStore represents the current state object of the authStore (type AuthStoreState)
+  - Destructuring (const {status, isAdmin}) extracts status and isAdmin from this state object.
+  - These extracted variables inherit the reactivity of $authStore
+
+If without $:
+  const {status, isAdmin} = authStore
+  - authStore is the store instance, Not the state
+  - 
+
+How Arrow Function Works
+------------------------
+Arrow functions (=> <function>) can be written in two ways:
+  - Shorthand (Expression Body)
+  - Block (Statement Body)
+
+Shorthand (Expression Body)
+---------------------------
+This applies to functions whose function body is only one expression. You can
+omit the curly braces and return keyword, such as:
+  const func = (parm) => expression;  // Implicit return 
+This function variable assumes the function takes 'parm' as its parameters and 
+returns 'expression'.
+
+Block (Statement Body)
+----------------------
+  const func = (parm) => {
+    <implementation of the function>
+    <may return>
+  }
+
+Example:
+const setUserInfo = (userInfo: UserInfo | null) => {
+  update(currentState => ({
+    ...currentState,
+    user: userInfo,
+    isLoggedIn: userInfo !== null,
+    isAdmin: userInfo?.role === 'admin' || false,
+  }));
+};
+
+Note that this example uses Shorthand, which means it does not have the curly
+braces and return. The function body is an expression in (...), which in this
+example is ({object initialize}). Note that the the curly braces is not for
+statements but for initializing a data object and then returns the data object.
+
+If we want to do something (Statement body), it can be written as:
+const setUserInfo = (userInfo: UserInfo | null) => {
+  update(currentState => {
+    <do something>
+    ...
+    return {
+      ..currentState,
+      user: userInfo,
+      isLoggedIn: userInfo !== null,
+      isAdmin: userInfo?.role === 'admin' || false,
+    }
+  });
+}
+
+How Generic Types Work
+----------------------
+Example:
+  type DocumentsResponse<Texpand = unknown> = Required<DocumentsRecord> & BaseSystemFields<Texpand>
+It defines a new data type DocumentsResponse. The data type includes:
+  - All fields from DocumentsRecord
+  - Required<T> is a utility that converts all fields in T to be required (i.e., removing the ?
+    from its definition)
+  - All fields in BaseSystemFields + a field named 'expanded T'
+  - If Texpand is not specified, it defaults to unknown
+
+Data Types with Expanded Field
+------------------------------
+When we want to have a base type with customized expansion, we can use:
+  your_data_type<Texpand>
+
+Values of typeof
+----------------
+Possible values of typeof in JavaScript:
+  'undefined' (for undefined).
+  'boolean' (for booleans).
+  'number' (for numbers).
+  'string' (for strings).
+  'symbol' (for symbols).
+  'function' (for functions).
+  'object' (for objects, arrays, null, etc.).
+
+What Is Type Guard
+------------------
+Example:
+  interface ExpandedData {
+    author: string;
+    version: number;
+  }
+  function isExpandedData(value: unknown): value is ExpandedData {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      "author" in value &&
+      typeof value.author === "string" &&
+      "version" in value &&
+      typeof value.version === "number"
+    );
+    }
+
+- "value is ExpandedData" is a type assertion
+- The function serves as a Type Guard, which means that if the function
+  returns true, the data type of the parameter 'value' is ExpandedData.
+
+Below shows how to use it:
+  const maybeExpandedData: unknown = { author: "Charlie", version: 3 };
+
+  if (isExpandedData(maybeExpandedData)) {
+    // TypeScript now knows 'maybeExpandedData' is of type 'ExpandedData'
+    console.log(maybeExpandedData.author); // Safe operation
+  }
+
+What Are the Differences between type and interface
+---------------------------------------------------
+Both can define and name types.
+
+type
+----
+type can define any type, including:
+  - Primitive types:          type Id = string
+  - Union types (enum types): type status = 'pending' | 'success' | 'failed'
+  - Intersection types:       type A = {x:number} & {y:string}
+  - Tuple types:              type T = [number, string]
+  - Function types:           type F = (parm1:string, parm2:number) => boolean
+  - Alias types:              type MyNumber = number
+  - type can extend
+
+interface
+---------
+  - interface can only define object types, including member data and member functions
+  - interface can extend another interface
+
+Type Aliases and Member Function Declarations
+---------------------------------------------
+type alias:
+  type myfunc = (parm1:string, parm2:number) => Promise<boolean>
+  'myfunc' is a type alias for function that takes two parameters and returns
+  a promise of boolean value.
+
+interface is used to define classes. Member functions are defined as:
+  myclass {
+    mem_data1: string,
+    print():void        // print is a member function that takes no parameters and returns nothing.
+  }
+
+How to Expand a Data Type
+-------------------------
+We often want to define a data type that has some fields in common and 
+lets callers to extend it to customized types.
+Below is an example:
+  // Base type (non-generic)
+  type CommonDataType = {
+    name: string,
+    phone: string,
+    age: number
+  };
+
+  // Expanded type (explicit)
+  type MyExpanded = {
+    address: string,
+    ssn: string
+  };
+
+  // Generic type that merges BaseMyDataType with any expandable type T
+  type MyDataType<T> = CommonDataType & T;
+
+In this example:
+  - CommonDataType defines the common part
+  - MyDataType<T> defines a new data type that combines CommonDataType
+    with the customized data type T.
+
+var a:MyDataType<MyExpanded> = {
+  name:"xxx",
+  phone:"xxx",
+  age:23,
+  address:"xxx",
+  ssn:"xxx"
+}
+
+How to Resolve Merged Types
+---------------------------
+When extending a type with another, JavaScript merges their fields together.
+If duplicate names are found, JavaScript will merge the type. As an example,
+if 'name' appears in both CommonDataType and MyExpanded and their types are both
+'string', they are merged into one field with type 'string'.
+
+If CommonDataType.name is string but MyExpanded.name is number, TypeScript
+will merge them: string & number = never.
+
+Note that 'never' is a TypeScript type only (static type only). Any operation on
+a 'never' type variable will cause a compile-time error. The 'never' type is, however,
+stripped off when the code is converted to JavaScript. 
+
+Required vs. Optional Fields in Extending Types
+-----------------------------------------------
+When composing a type by combining two or more types, the Required always
+take precedence over optional.
+
+What Is Type Assert
+-------------------
+TypeScript offers type assert using "as", such as:
+  var abc = {
+    name: "Alice" as string
+  }
+
+There are two concepts regarding types: Compile Time Types and Runtime Types.
+TypeScript offers compile time types, which means that it checks the types at
+compile time. Some types exist in compile time only. In the above example,
+"as string" is a compile time type. It does not change the fact that 'name' type
+is 'string', even if one asserts it with another type, such as:
+  var abc = {
+    name: "Alice" as number
+  }
+
+Assume:
+type Customer {
+  name: string,
+  age: number
+}
+
+var c1 Customer {
+  name: "Alice",    // a string
+  age: 15           // a number
+}
+
+var c2 Customer {
+  name: "Alice" as number,    // No compile error, but name is still string
+  age: "abc" as number,       // Compiler thinks "abc" is number, no errors. But will
+                              // have errors at runtime.
+}
+
+The type assert is similar to cast in C++. C++ cast, however, physically converts
+the type, while TypeScript only suppress the compiling error. 
+
+IMPORTANT: use type assert with care, and use it rarely!
+
+JavaScript Types
+----------------
+JavaScript is dynamically typed. The type is dynamically determined by the value it holds.
+TypeScript adds static type checking, which is, unfortunately, missed in JavaScript.
+When declaring variables, it can be declared in JavaScript style or TypeScript style:
+  var foo1          // JavaScript, no static type checking
+  var foo2: string  // TypeScript, with static type checking
+
+  foo1 = "abc"      // type: string
+  foo2 = "abc"      // type: string
+
+  foo1 = 123        // type: number
+  foo2 = 123        // static type check error!
+
+How to Debug Library in Chrome
+------------------------------
+Need to stop at the files in dist, not the original files!
+
+How Lib Path Aliases Defined
+----------------------------
+When we see something like:
+  import { LoginForm } from '$components';
+$components is an alias. It should be defined in svelte.config.js or vite.config.js
+
+Note that $components is only the path. You need to check $components/index.js to
+determine the localtion of the symbol "LoginForm".
+
+How [key:string]:ChartData Works
+--------------------------------
+It defines an index signature. It means that the struct is an associated array.
+Any member whose type is string must be associated with ChartData. If we define:
+  interface MyInterface {
+    status: boolean;
+    error_msg: string;
+    [key:string]: ChartData
+  }
+Compiler will report errors. The correct syntax is:
+  interface MyInterface {
+    status: boolean;
+    error_msg: string;
+    map_data: {[key:string]:ChartData}
+  }
+
+What Is a Decorator
+-------------------
+Docorator is a Python design pattern. It works as a wrapper on a function.
+Below is an example:
+def log_decorator(func):
+    def wrapper(*args, **kwargs):  # Wrapper function wraps the original
+        print(f"Calling function: {func.__name__}")  # Pre-function logic
+        result = func(*args, **kwargs)  # Execute original function
+        print(f"Function {func.__name__} completed.")  # Post-function logic
+        return result  # Return original result
+    return wrapper  # Decorator returns the wrapper
+
+Use the decorator:
+@log_decorator
+def greet(name):
+    print(f"Hello, {name}!")
+  
+The prints are:
+  Calling function: greet
+  Hellow, {name}
+  Function greet completed
+
+Example:
+  from tenacity import retry, stop_after_attempt, wait_exponential
+  @retry(
+  stop=stop_after_attempt(3),
+  wait=wait_exponential(multiplier=1, min=4, max=60)
+  )
+  async def call_llm_api(prompt):
+  response = await client.chat.completions.create(...)
+  return response
+
+This function uses @retry decorator, which uses tenacity's retry, stop_after_attemp,
+wait_exponential. The decorator should look like:
+  def retry(num_attempts, min, max, multiplier, func):
+      def wrapper(*args, **kwargs):  # Wrapper function wraps the original
+          // First attempt
+          result = func(*args, **kwargs)  # Execute original function
+          if result:
+            return result
+
+          // Second attempt
+          <the wait logic>
+          result = func(*args, **kwargs)  # Execute original function
+          if result:
+            return result
+          ...
+      return wrapper  # Decorator returns the wrapper
+
+Optional/Mandatory props
+------------------------
+When defining props, you can specify them mandatory or optional (name followed by ?).
+Below is an example:
+	let {
+		items,
+		onselect
+	}: {
+		items: {...}[];
+		onselect: (item: { title: string; url: string; icon?: Icon }) => void;
+	} = $props();
+Both 'items' and 'onselect' are mandatory.
+
+	let {
+		items,
+		onselect
+	}: {
+		items: {...}[];
+		onselect?: (item: { title: string; url: string; icon?: Icon }) => void;
+	} = $props();
+'items' is mandatory but 'onselect' is optional.
+
+When calling a mandatory function, you can call it directly:
+	function handleSelect(item: { title: string; url: string; icon?: Icon }) {
+		onselect(item);
+	}
+
+But if it is an optional function, you need to check it:
+	function handleSelect(item: { title: string; url: string; icon?: Icon }) {
+		onselect?.(item);
+	}
+
+Svelte Version 4 and 5
+----------------------
+Prior to Svelte 5, props are specified using 'export let':
+  export let <prop_name> <data_type> [ = default-value]
+such as:
+  export let componentName: string = "Resource";  // Optional
+  export let fetchRequest : JimoRequestInfo       // Mandatory
+
+In Svelte 5 (recommended):
+
+
+How to Define/Create Menus 
+--------------------------
+First of all, we need to design the menu system data structure.
+We assume all menu items are processed by a main page, which should
+have a function such as:
+  <script lang="ts">
+    ...
+    function handleMenuSelect(menu_item:???)
+  </script>
+The function accepts one parameter. We need to design the parameter data type
+to handle different types of menu items.
+
+There are a few methods in TypeScript to handle diversify data structures.
+The most common pattern is to use Unions.
+  type BasicMenuItem = {
+    id:     string,
+    title:  string,
+    icon:   Icon,
+  }
+
+  type NavigationMenuItem = {
+    type:   'navigation',
+    url:    string
+  }
+
+  type ActionMenuItem = {
+    type:   'action',
+    action: () => void
+  }
+
+  type DataMenuItem = BaseMenuItem & {
+    type: 'data';
+    data: any; // or a more specific type
+  };
+    
+  type MenuItem = NavigationMenuItem | ActionMenuItem | DataMenuItem;
+    
+  let { menuItems }: { menuItems: MenuItem[] } = $props();
+  let activeView = $state<MenuItem | null>(null);
+    
+  function handleMenuSelect(item: MenuItem) {
+        switch (item.type) {
+            case 'navigation':
+                activeView = item.title;
+                // Navigate to URL
+                break;
+            case 'action':
+                item.action();
+                break;
+            case 'data':
+                activeView = item.title;
+                // Handle data-specific logic
+                console.log('Data:', item.data);
+                break;
+        }
+  }
+
+We will use routes/sidebar-07 as an example. sidebar-07 has two level menus.
+The first level is a menu container. The second level are actual menu items.
+  sidebar-07
+    app-sidebar-07
+      - TeamSwitcher
+        -
+      - NavMain
+      - NavProjects
+      - NavUser
+
+How Svelte Routing Works
+------------------------
+Svelte uses file-based routing convention:
+  - web/src/routes: each sub-directory defines a route. Its +page.svelte 
+    is the page for the route.
+  - web/src/routes/+page.svelte is the default route, or the route for 
+    localhost:port
+
+How to Setup the Root Route
+---------------------------
+Edit project/web/src/routes/+page.svelte. Below is an example:
+<script lang="ts">
+	import { onMount } from 'svelte';
+  	import { goto } from '$app/navigation';
+
+  	onMount(() => {
+    	goto('/sidebar-01', { replaceState: true });
+  	});
+</script>
+
+What Is Reactive Statement
+--------------------------
+In Svelte, reactive statements are the ones that will re-run automatically
+when any of the variables such a function references changes.
+Reactive statements are declared by $:
+  let count = 0
+  let multiplier = 2
+
+  $: sum = count * multiplier
+
+How func(next echo.HandlerFunc) echo.HandlerFunc Works
+------------------------------------------------------
+This is the Go notation of:
+  (<function-inputs>) => <function-return-type>
+
+In Go, a function is specified in form of:
+  func(<func-input>) <func-output>
+
+What Is HMR 
+-----------
+HMR (Hot Module Replacement) is a development feature that allows you to see changes
+in your browser instantly without a full page reload. Under the hood, it uses WebSocket.
+The configuration:
+  hmr: {
+   		// Connect HMR WebSocket to :5173 directly
+   		host: 'localhost',
+   		port: 5173,
+   		protocol: 'ws'
+  },
+configures the WebSocket: host, port and the protocol ('ws' for web socket)
+
+How Production/Development Environments Work
+--------------------------------------------
+In a production environment:
+1. It will not use HMR
+2. All accesses will go through port 8080 or 80 depending on the port the Go Echo listens to.
+3. The port 5173 is purely for development.
+4. It is important to note that port 5173 may by pass something (some of the Echo middleware 
+   check) that the production environment will always do. To test these features in development
+   environments, you need to run it on the production port.
+
+How to Create a UI for a Table
+------------------------------
+Please create a Prompt Store UI:
+1. Prompts are stored in the following table:
+   Table Name: prompt_store, with the following fields:
+        PromptID        int64     # A unique sequence number
+        PromptName 		string    # Prompt name, unique, a string of letters, digts and underscores only
+        PromptDesc		string    # Prompt description
+        PromptContent	string    # Prompt content
+        Status          string    # Prompt status, enum: Active, Deleted, Suspended
+        PromptPurpose	string    # Prompt purpose
+        PromptSource 	string    # Prompt source, enum: Upload, User Entered, Web Crawled
+        PromptKeywords	string    # Keywords for the prompt, used for searching
+        PromptTags		string    # Tags for the prompt, used for searching
+        Creator			string    # The user who created the prompt
+        Updater			string    # The user who last updated the prompt
+        CreatorLoc      string    # The caller (program location) that inserts the record
+        UpdaterLoc      string    # The caller (program location) that last updates the record
+        CreatedAt       *string   # The record creation time
+        UpdatedAt       *string   # The record last update time
+2. Record Viewer: this page views prompts. It includes a query area. Users can query
+   prompts by PromptID, PromptName, PromptDesc (use like), PromptContent (use like),
+   Status, PromptKeywords, PromptTags, Creator, Updater, CreatedAt and UpdatedAt.
+3. Add new prompt: it should be a form.
+4. Upload prompts: it should be a form and a component to let users upload files
+5. Delete records
+
+How ? ... ?? ... Works
+----------------------
+First of all, let's look at (cond) ? <true-part> : <false-part>
+If cond is truthy use <true-part>; otherwise falsy (null, undefined, false, 0, NaN, "")
+
+(cond) ? <true-part> ?? <false-part>
+The differences are <cond> is false if it is null or undefined. 
+
+How ?? Works
+------------
+  const v = def.default ?? ""
+
+It means:
+  - If def.default is not null and not undefined, return def.default.
+  - Otherwise, return ""
+
+What Does "Object.entries(query)" Do
+------------------------------------
+Object.entries(...) takes an object and returns an array of string-keyed property
+pairs: [key, value]. 
+
+How to Fix 'A form label must be associated with a control'
+-----------------------------------------------------------
+Example:
+    <div class="query-field">
+      <label>Prompt ID:</label>
+      <input 
+        type="text" 
+        bind:value={query.PromptID}
+        placeholder="Enter Prompt ID"
+      />
+    </div>
+
+It will generate the error because 'label' is not properly related to a control
+(in this case, the input).
+    <div class="query-field">
+      <label for="prompt_id>Prompt ID:</label>    // Add the for
+      <input 
+        id="prompt_id"                            // Add the 'id' property
+        type="text" 
+        bind:value={query.PromptID}
+        placeholder="Enter Prompt ID"
+      />
+    </div>
+
+How Style selector Works
+------------------------
+.form-group input.error {
+  ...
+}
+
+It applies to elements that are decendent of class:"form-group" and the elements are input.
+.form-group .error {
+  ...
+}
+
+It is similar to the above except that it applies to any element, not just input.
+
+What Is astro
+-------------
+Astro is a web framework that takes a unique approach by allowing you to build websites using 
+multiple UI frameworks (including Svelte, Vue, and React) within the same project.
+
+Framework Agnostic: 
+  Astro lets you use components written in React, Vue, Svelte, Solid, or other frameworks within a single project. 
+  You're not locked into one. In your example, the main page structure uses Astro's own syntax (.astro file), 
+  but it incorporates Vue components (.vue files) for the header, footer, and main content viewer.
+
+Island Architecture: 
+  Astro uses an "Island Architecture" where interactive components (like your AppHeader, PromptRecordViewer, 
+  and AppFooter) are delivered as isolated "islands" of interactivity. Non-interactive parts of the page are 
+  rendered statically. This often leads to faster loading times compared to traditional SPA frameworks because 
+  less JavaScript needs to be shipped to the browser initially.
+
+Static Site Generation (SSG) & Server-Side Rendering (SSR): 
+  Astro primarily focuses on building static sites (SSG) but also supports SSR. It pre-renders your pages to 
+  HTML at build time, which can improve performance and SEO. This contrasts with Svelte, Vue, or React when 
+  used traditionally as SPA frameworks, where rendering often happens client-side in the browser.
+
+UI Frameworks: 
+  Svelte, Vue, and React are primarily concerned with building user interfaces and managing component state. 
+  They typically run entirely in the browser (though they support SSR via frameworks like Next.js for React 
+  or Nuxt.js for Vue). Astro uses these as components but manages the overall application structure, routing, 
+  and rendering strategy differently, often reducing client-side JavaScript bundle size.
+
+In summary: While Svelte, Vue, and React are UI libraries/frameworks for building components and interfaces, 
+Astro is a web framework that can use those UI frameworks as building blocks but provides its own rendering 
+model focused on performance and flexibility in choosing your component technology.
+
+How preventDefault Works
+------------------------
+Example:
+  <form on:submit|preventDefault={handleSubmit}>
+     ...
+  </form>
+
+'preventDefault' is a Svelte's event modifier. Svelte provides the following event modifiers:
+  preventDefault:             Automatically calls event.preventDefault()
+  stopPropagation:            Automatically calls event.stopPropagation()
+  stopImmediatePropagation:   Automatically calls event.stopImmediatePropagation()
+  once:                       The handler will only run once
+  self:                       Only triggers if the event originates from the element itself, not child elements
+
+The vertical bar is Svelte's way of applying event modifiers to events.
+
+Differences between on:<event> and on<event>
+--------------------------------------------
+on<event> is the standard HTML way to handle events. It espects a string containing JavaScript code.
+on:<event> is Svelte's way to handle events. It expects a function, not a string.
+
+In Svelte, we should always use on:<event>
+
+However, in Svelte 5, it reversed the syntax. Svelte 5 requires using on<event>, not on:<event>.
+
+Event modifiers no longer work in Svelte 5. In other word,
+  <form onsubmit|preventDefault={handleSubmit}>
+will not work. If we need to handle the event modifiers, do it in the function, such as:
+  func handleSubmit(event: Event)
+  {
+    ...
+  }
+
+Note that the form can be specified in one of the following ways:
+  <form onsubmit={handleSubmit}>
+or:
+  <form onsubmit={(e) => handleSubmit(e)}
+
+How to Use HTTP Request verbs
+-----------------------------
+  GET     means "retrieve data"
+  POST    means "create a new resource"
+  PUT     means "update/replaces a resource"
+  DELETE  means "remove a resource"
+
+How Unit Types Work
+-------------------
+In C++, we use a member data to tell the actual type.
+In Go, it can retrieve type name. Below is an example:
+  'condition' data type = AtomicCondition | ComplexCondition
+    switch cond := condition.(type) {   // retrieve the data type name
+    case AtomicCondition:
+         return buildAtomicCondition(cond)
+
+    case ComplexCondition:
+         return buildComplexCondition(cond)
+
+    case map[string]interface{}: // Note that map[string]interface{} is a data type (for JSON)
+         // Handle if condition comes as map (from JSON unmarshaling)
+         if op, exists := cond["operator"]; exists {
+            if _, isLogicalOp := op.(string); isLogicalOp {
+                // This is likely a ComplexCondition
+                return buildComplexConditionFromMap(cond)
+            }
+         }
+         // Otherwise treat as AtomicCondition
+         return buildAtomicConditionFromMap(cond)
+
+    default:
+        return "", fmt.Errorf("unknown condition type: %T", condition)
+    }
+
+How to Query Jimo
+-----------------
+1. Send Request:
+   - Create an instance of ApiTypes.JimoRequestInfo
+      const req = {
+        request_type:   "db_opr",
+        opr:            "query",
+        resource_name:  "prompt_store",
+        conditions:     <conditions> (JSON string), 
+      }
+
+      is_loading = true
+      const resp = await fetch("/shared_api/v1/jimo_req", {
+            method: "GET",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(req),
+            credentials: 'include'
+            });
+      if (!resp.ok) {
+        console.log('Failed to fetch chart data (CWB_PST_044)');
+        is_loading = false
+        no_data = true
+        return
+      }
+
+2. The route is handled by Shared/go/RequestHandlers/HandleJimoRequest.go
+
+3. Handler:
+   - Get the resource definition from the resource store
+   - Must have resource_def.ResourceType
+   - Must have resource_def.ResourceDef (JSON object)
+   - ResourceDef json:
+     {
+        "db_name":"xxx",
+        "table_name":"xxx",
+        "selected_field_names":["xxx",...],
+        "field_data_types":["xxx",...],
+     }
+
+How Conditional Style Works
+---------------------------
+Example:
+  class:error={errors.PromptName}
+
+This (Svelte) is a conditional style binding.
+
+Svelte translates:
+  class:error={errors.PromptName}
+into:
+  class:error = {errors.PromptName? true : false}
+
+The above is implemented by the following JavaScript code:
+  if (errors.PromptName) {
+    element.classList.add("error");
+  } else {
+    element.classList.remove("error");
+  }
+
+Intuitively:
+  if errors.PromptName is truthy:
+    <input class="error">
+  else:
+    <input class="">
+
+How to Loop over an Array of JSON
+---------------------------------
+  const dataset = [
+    {...},
+    {...},
+    ...
+  ]
+  for (const data of dataset) {
+      const value = newResource[data.id];
+      const validation = data.validation;
+      ...
+  }
+
+  How to Define Dynamic Types in TypeScript
+  -----------------------------------------
+  You can define a generic type as:
+    Record<string, unknown>
+  or 
+    Record<string, any>
+
+  Record<string, unknown>
+  -----------------------
+  This is safe. It tells TypeScript that Record is a 
+
+How const Works in TypeScript
+-----------------------------
+  Example:
+    const UserFormData = {
+        type: "select",
+        required: true,
+        default: ""
+    } as const
+
+When "UserFormData" is interpreted by TypeScript:
+  - It infers the data type of the above literal to:
+    {
+      type: string,
+      required: boolean,
+      default: string
+    }
+    This is widened types.
+    The leading const is kind of defeating the meaning.
+    It is possible to modify the value, such as:
+      UserFormData.type = "input"
+    The leading const disallows:
+      UserFormData = {}
+  - If it is declared as const UserFormData = {...} as const,
+    TypeScript will infer the type as narrowed type:
+      {
+        readonly type: "select";
+        readonly required: true;
+        readonly default: "";
+      }
+    Now it is not allowed to alter its values, such as:
+      UserFormData.selet = "input"    // disallowed
+    
+How to Handle Generic Data Types 
+--------------------------------
+Example:
+  const { schema } = $props<{ schema: Record<string, FormFieldDef>; }>(); 
+  
+  let model = $state<Record<string, unknown>> ( 
+      Object.fromEntries(Object.entries(schema).map(([key, def]) => [ key, def.default ?? "" ]) ) ); 
+      
+In this example, 'schema is clearly declared as Record<string, FormFieldDef>. 
+But 'Object.entries(schema)' will widen the data type of 'schema' to:
+  [string, unknown][]
+This results in accessing the value 'def' will generate compiling errors.
+  'def' is of type 'unknown'.
+
+One way to solve this problem is to tell TypeScript the data types, such as:
+  let model = $state<Record<string, unknown>> (
+    Object.fromEntries(Object.entries(schema).map(([key, def])) => {
+      const field = def as FormFieldDef
+      return [ key, field.default ?? ""]
+    }))
+
+How to Handle Generic Data Types in <div>
+-----------------------------------------
+Example:
+  <div class="form-container"> 
+    {#each Object.entries(schema) as [field, def]} 
+      {@const Comp = FormItemMap[def.type]} 
+        <Comp bind:value={model[field]} 
+          label={def.label} 
+          required={def.required} 
+          helpText={def.helpText} 
+          options={def.options} /> 
+    {/each} 
+    <button onclick={submit}>Submit</button> </div>
+
+The above will have the errors:
+  'def' is of type 'unknown'.
+The reason is the same: TypeScript converts Object.entries(schema) to [string, unknown][].
+This time, we can't simply modifies this code. Instead, we need to create a new variable 'items':
+    const items = (Object.entries(schema) as [string, FormFieldDef][])
+    .map(([field, def]) => ({
+        field,
+        def,
+        Comp: FormItemMap[def.type]
+    }));
+
+then changes the {#each ...} to use items instead of schema:
+    {#each items as item}
+    <item.Comp
+        bind:value={model[item.field]}
+        label={item.def.label}
+        required={item.def.required}
+        helpText={item.def.helpText}
+        options={item.def.options}
+    />
+    {/each}
+
+How Object.entries() Works
+--------------------------
+  schema: Record<string, FormFieldDef>
+
+  Object.entries(schema).map(([key, def]) => {...}
+
+  - Object.entries(schema) generates a list of [key, def] ()
+  - For each entry, map(...) iterates over the entries to call
+    the function {...} with the parameter [key, def] for each entry.
+
+If def is a Zod object, the above won't work. It should use Zod's shape:
+    const shape = schema.shape;  // Get the shape object
+    Object.entries(shape).map(([key, def]) => {
+    // Process each field definition
+    });
+In other word, schema.shape converts Zod data structure into a normal JavaScript
+object.
+
+How to Use Zod to Validate Data
+-------------------------------
+  - The data is a free-form JSON: data: any = {};
+  - Create a Zod data structure
+  - Call the Zod data structure's function safeParse(data)
+
+Below is an example.
+  import z from 'zod'
+
+  const MyCustomData = z.object(
+      name: z.string(),
+      age: z.number().optional
+  )
+
+  const result = MyCustomData.safeParse(data)
+  if (result.success) {
+      const validated_data = result.data
+  } else {
+      console.log("Failed parsing:" + result.error.flattern()) 
+  }
+
+Note that Zod offers two parsing functions: parse(data) and safeParse(data).
+The latter does not throw exception but returns a structure that has two
+members: success (boolean) and data ({})
+
+How to Make Zod Dynamic
+-----------------------
+Making Zod dynamic means we can let users define their schemas through web pages,
+serialize the zod object to database, load the schema back to memory, convert
+it to a zod object, and use it to validate data.
+Below are the steps:
+
+Step 1: zod-to-json-schema
+    import { z } from "zod";
+    import { zodToJsonSchema } from "zod-to-json-schema";
+
+    const FormFieldSchema = z.object({
+      name: z.string(),
+      age: z.number().int().min(0),
+    });
+
+    const json = zodToJsonSchema(FormFieldSchema);
+    console.log(JSON.stringify(json));
+
+Step 2: Save to DB
+It needs to convert JSON object to string:
+
+Step 2: JSON to Zod
+    import { jsonSchemaToZod } from "json-schema-to-zod";
+
+const jsonFromDB = ...;
+const zodString = jsonSchemaToZod(jsonFromDB);  // returns code string
+const dynamicSchema = eval(zodString);
+
+dynamicSchema.parse({ name: "Alice", age: 30 });
+  
+How Object.fromEntries Work
+---------------------------
+Example:
+    let model = $state<Record<string, unknown>>(
+        Object.fromEntries(
+            Object.entries(schema).map(([key, def]) => {
+                const field = def as FormFieldDef
+                return [key, field.default ?? ""]
+            }
+        )));
+
+The purpose of the above code is to construct a map (i.e., Record<string, unknown>)
+from schema, which is a map (Record<string, FormFieldDef>):
+  - Object.entries(schema) returns a list of the entries in schema: an array of [key, def]
+  - map iterates on the entries in the list, convert it to [key, field.default | ""],
+    which is an array.
+  - Object.fromEntries(array) constructs a map from an array.
+
+How writable Works
+------------------
+'writable' is a Svelte feature. It creates a reactive store.
+  import { writable, type Writable } from 'svelte/store';
+  const my_store = writable('list')
+
+It creates a store 'my_store'. Its value is 'list'. Its value type is 'string' (inferred).
+A store offers two functions: set(...), update(...), and subscribe(...). Any component that 
+subsribes a store will be re-rendered whenever the store changes. $<store-name> is the
+shorthand of subscribing a store.
+
+Below shows how to use it:
+
+Simple Case (the store has only one value)
+    <!-- In a Svelte component -->
+    <script>
+      import { InMemStoreCurrentView } from './stores.js';
+    </script>
+
+    <!-- Read current value -->
+    <p>Current view: {$InMemStoreCurrentView}</p>
+
+    <!-- Update value -->
+    <button on:click={() => $InMemStoreCurrentView = 'grid'}>
+        Switch to grid
+    </button>
+
+Or:
+    InMemStoreCurrentView.set('grid');
+    // or
+    InMemStoreCurrentView.update(view => view === 'list' ? 'grid' : 'list');
+
+Note that update(func) takes a function as its input. The function:
+  (exist_value) => {...}
+
+The function MUST return a value that serves as the new value of the store.
+In case of:
+   InMemStoreCurrentView.update(view => view === 'list' ? 'grid' : 'list'); 
+
+  view => view === 'list' ? 'grid' : 'list 
+
+is a function. The function's input is 'view', the store's current value.
+The function returns a string, either 'list' or 'grid', depending on
+its current value.
+
+Important: if a store's update(func) is conditional, such as:
+  InMemStoreCurrentView.update(view => view !== 'list' ? 'list' : 'list');
+
+When the update(...) is called, it may not actually change anything. 
+Its subscribers, if any, will not re-render if a update(...) call did not 
+change anything (important).
+
+More complicated Case: a map store.
+  export const InMemStoreCrtRecords: Writable<any> = writable({});
+
+To access a member:
+    <script>
+      import { InMemStoreCrtRecords } from './stores';
+    </script>
+
+    {#if $InMemStoreCrtRecords['rec123']}
+      <p>Name: {$InMemStoreCrtRecords['rec123'].name}</p>
+    {/if}
+
+Subscribe it:
+    let currentRecords;
+    const unsubscribe = InMemStoreCrtRecords.subscribe(value => {
+      currentRecords = value;
+    });
+
+    // Now use currentRecords['rec123']...
+    // Don’t forget to unsubscribe when done!
+
+Update:
+    InMemStoreCrtRecords.update(records => ({
+      ...records,
+      rec123: {
+        ...records.rec123,
+        name: 'New Name'
+      }
+    }));
+
+// DON’T do this:
+    const current = $InMemStoreCrtRecords;
+    current.rec123.name = 'New Name'; // ❌ No reactivity!
+
+Helper Function
+---------------
+Create a helper function for a store is very helpful:
+    function updateRecord(id: string, updates: Partial<RecordType>) {
+      InMemStoreCrtRecords.update(records => ({
+        ...records,
+        [id]: {
+          ...records[id],
+          ...updates
+        }
+      }));
+    }
+
+This function intents to update the record identified by the value of 'id'
+in the store 'InMemStoreCrtRecords', with the new values 'updates'.
+Note that updating means:
+  - Add a new attribute if it does not exist
+  - Override the attribute if it exists
+
+The notation '[id]' means: the attribute whose name is the value of 'id'.
+If you write (id without []):
+    function updateRecord(id: string, updates: Partial<RecordType>) {
+      InMemStoreCrtRecords.update(records => ({
+        ...records,
+        id: {
+          ...records[id],
+          ...updates
+        }
+      }));
+    }
+it means the attribute whose name is 'id'.
+Similarly, records[id] does not mean records['id']. It means the value of 'id'.
+
+How to Prevent TypeScript Widen Types
+-------------------------------------
+Example:
+    <script lang="ts">
+        import {InitInMemStore, StoreMap} from "$lib/stores/store"
+
+            let componentStores = StoreMap.get("my_store");
+        if (!componentStores) {
+            InitInMemStore("my_store")
+            componentStores = StoreMap.get("my_store")
+        }
+
+        // Access the stores for this component
+        const { InMemStoreCrtRecords, InMemStoreCurrentView } = componentStores;
+        ...
+    </script>
+
+The above code will have a compile error:
+  Property 'InMemStoreCrtRecords' does not exist on type '{ InMemStoreCrtRecords: Writable<any>; 
+    InMemStoreCurrentView: Writable<string>; } | undefined'.
+
+The reason is that TypeScript assumes the type of componentStores can be undefined. If it is
+undefined, there are no 'InMemStoreCrtRecords'. So it generates the error.
+
+We as human develpers 'believes' it should not be 'undefined', but this is only our 
+belief. If we want to tell TypeScript our belief, do the following:
+    <script lang="ts">
+        import {InitInMemStore, StoreMap} from "$lib/stores/store"
+
+        let componentStores = StoreMap.get("my_store");
+        if (!componentStores) {
+            InitInMemStore("my_store")
+            componentStores = StoreMap.get("my_store")!     // Very important, '!' tells everything.
+        }
+
+        // Access the stores for this component
+        const { InMemStoreCrtRecords, InMemStoreCurrentView } = componentStores;
+        ...
+    </script>
+
+How to Access Store Attributes
+------------------------------
+Example:
+    <script lang="ts">
+        import {get} from 'svelte/store'
+        import {InitInMemStore, StoreMap} from "$lib/stores/store"
+
+        let componentStores = StoreMap.get("my_store");
+        if (!componentStores) {
+            InitInMemStore("my_store")
+            componentStores = StoreMap.get("my_store")!     // Very important, '!' tells everything.
+        }
+
+        // Access the stores for this component
+        const { InMemStoreCrtRecords, InMemStoreCurrentView } = componentStores;
+        console.log("LimitStart:" + InMemStoreCrtRecords.LimitStart)    // Wrong, cannot access 'LimitStart'
+
+        const current = get(InMemStoreCrtRecords)
+        console.log("LimitStart:" + current.LimitStart)                 // OK
+
+        console.log("LimitStart:" + $InMemStoreCrtRecords.LimitStart)   // OK
+    </script> 
+
+The reason why you cannot use "InMemStoreCrtRecords.LimitStart" is because 
+'InMemStoreCrtRecords' is an object (kind of 'program') for the store. It is 
+an object like:
+    {
+      subscribe: (fn) => { ... },
+      set: (value) => { ... },
+      update: (fn) => { ... }
+    }
+It is not the actual store.
+
+The statement:
+    const current = get(InMemStoreCrtRecords) retrieves the store by the object.
+    Note that this is not reactive.
+
+If you want to be reactive, use $InMemStoreCrtRecords. This means that '$' 
+converts the object to the store.
+
+How to Get All Keys from a Map
+------------------------------
+    export function GetAllStoreNames() {
+        return Array.from(StoreMap.keys());
+    }
+
+  StoreMap is a map: {[key:string], any}
+
+How to use 'satisfies'
+----------------------
+satisfies is an alternative to an explicit variable type annotation. It tells TypeScript 
+that your assignment should be at least assignable to the provided type. It’s kind of like 
+a type-safe way to cast values.
+
+    const person1 = {
+      name: "Jerred",
+    } satisfies {name: "Jerred" };
+
+How to Install a Package in Go
+------------------------------
+Example:
+  The package is: "github.com/shopspring/decimal"
+
+Run "go get" in server directory:
+  go get github.com/shopspring/decimal
+
+How to Bind a Child Component to Parent
+---------------------------------------
+When a parent creates children by data, we need to get the children
+objects so that the parent can call children's functions.
+This is done by bind:this = {childComponents[i]}, such as the following:
+  <script lang="ts">
+    ...
+    let itemComponents: any[] = []
+  </script>
+
+  <div class="form-grid">
+    {#each items as item, i}
+      <svelte:component
+        this={item.Comp}
+        bind:this={itemComponents[i]}
+        itemDef={item}
+        bind:formData={formData}
+      />
+    {/each}
+  </div>
+
+In this example, the parent creates children by the data 'items'.
+The child component instances are stored in itemComponents. Note
+that you do not need to manually add the component instances to
+itemComponents. Svelte does it automatically when it executes:
+        bind:this={itemComponents[i]}
+
+How to Check a Member Exists in a JSON object
+---------------------------------------------
+In TypeScript:
+  if (Object.hasOwn(json_doc, "member_name")) {
+    return "exist"
+  }
+
+How to Access Store Members
+---------------------------
+In Svelte 5, you cannot access members of a store directly.
+You must subscribe to the store and then access its members.
+You can subscribe a store by calling subscribe(...) or use
+the simple notation of "$".
+
+1. Use subscribe(...)
+    const unsubscribe = InMemStore.subscribe((value) => {
+        console.log('Current CrtRecord:', value.CrtRecord);
+        // React to changes here
+    });
+
+    // Later, unsubscribe to avoid memory leaks
+    unsubscribe();
+
+    Once subscribed to a store, the store (i.e., 'value' in the above example)
+    is reactive.
+
+    When you do not need it anymore, make sure you call unsubscribe().
+
+2. Use $:
+    const InMemStore  = GetStoreByName("prompt_store") as Writable<InMemStoreDef>
+    crt_record = $InMemStore.CrtRecord    // CrtRecord is a member of InMemStoreDef

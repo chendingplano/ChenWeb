@@ -74,7 +74,8 @@
 			</Sidebar.MenuItem>
 		{/each}
 		<Sidebar.MenuItem>
-			<Sidebar.MenuButton class="text-sidebar-foreground/70">
+			<Sidebar.MenuButton class="text-sidebar-foreground/70"
+					onclick={() => handleSelect({title:"document-more", url:""})}>
 				<DotsIcon class="text-sidebar-foreground/70" />
 				<span>More</span>
 			</Sidebar.MenuButton>

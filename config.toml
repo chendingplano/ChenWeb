@@ -1,27 +1,41 @@
 # config.toml
 app_name = "DeepDoc"
 debug = true
+home_url = "http://localhost:5173/sidebar-01"
 
 [server]
 port = 8080
 host = "localhost"
 
 [database]
+create_mysql = "false"
+create_pg = "true"
 pg_host = "127.0.0.1"
-pg_port = 12345
-pg_user_name = "xxx"
-pg_password = "xxx"
+pg_port = 5432
+pg_user_name = "admin"
+pg_password = "plano4628"
 pg_db_name = "miner"
-mysql_host = "127.0.0.1"
+mysql_host = "192.168.0.20"
 mysql_port = 3306
-mysql_user_name = "admin"
-mysql_password = "plano4628"
+mysql_user_name = "root"
+mysql_password = "rainsome123!@#"
 mysql_db_name = "miner"
 max_connections = 10
-table_name_login_sessions = "login_sessions"
-table_name_users = "users"
-database_type = "mysql"
-need_create_tables = "false"
+database_type = "pg"
+need_create_tables = "true"
+
+[system_table_names]
+table_name_login_sessions   = "login_sessions"
+table_name_users            = "users"
+table_name_activity_log     = "activity_log"
+table_name_id_mgr           = "id_mgr"
+table_name_session_log      = "session_log"
+table_name_email_store      = "email_store"
+table_name_prompt_store     = "prompt_store"
+
+[app_table_names]
+table_name_documents        = "documents"
+table_name_process_status   = "process_status"
 
 [auth]
 jwt_secret = "super-secret-key"

@@ -3,15 +3,20 @@ package main
 import (
 	"log"
 
-	"github.com/chendingplano/deepdoc/server/api/Databases"
+	"github.com/chendingplano/deepdoc/server/api/database"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/chendingplano/shared/go/api/databaseutil"
 )
 
 func main() {
-	Databases.InitDB()
+	err := config.LoadConfig("./config.toml")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	databaseutil.InitDB(config.MySQLConfig, config.PGConfig)
 	log.Printf("To create process status table (main)")
-	db_type := config.GetDatabaseType()
-	Databases.AosCreateProcessStatusTable(Databases.MySql_DB_miner, db_type)
+	database.CreateTables()
 
 	sleepSeconds := 3600 * 24
 	tags := "test"

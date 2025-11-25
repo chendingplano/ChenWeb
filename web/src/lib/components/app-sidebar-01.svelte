@@ -14,22 +14,20 @@
 	import SearchIcon from "@tabler/icons-svelte/icons/search";
 	import SettingsIcon from "@tabler/icons-svelte/icons/settings";
 	import UsersIcon from "@tabler/icons-svelte/icons/users";
-	import NavDocuments from "./nav-documents.svelte";
-	import NavMain from "./nav-main.svelte";
-	import NavSecondary from "./nav-secondary.svelte";
-	import NavUser from "./nav-user.svelte";
+	import NavDocuments from "./nav-documents-01.svelte";
+	import type {Sidebar01MenuItem} from "$lib/types/menu";
+	import NavMain from "./nav-main-01.svelte";
+	import NavSecondary from "./nav-secondary-01.svelte";
+	import NavUser from "./nav-user-01.svelte";
 	import * as Sidebar from "$lib/components/ui/sidebar/index.js";
 	import type { ComponentProps } from "svelte";
 	import type { Icon } from "@tabler/icons-svelte";
-
-	// Add event dispatcher
-  	import { createEventDispatcher } from 'svelte';
-  	const dispatch = createEventDispatcher();
 
 	const data = {
 		user: {
 			name: "Chen Ding",
 			email: "chending@example.com",
+			avatar: "/avatars/shadcn.jpg",
 		},
 		navMain: [
 			{
@@ -142,12 +140,16 @@
 		],
 	};
 
-	let { ...restProps }: ComponentProps<typeof Sidebar.Root> = $props();
+	let { onMenuSelect,
+		  ...restProps
+	    }: ComponentProps<typeof Sidebar.Root> & {
+		onMenuSelect: (item: Sidebar01MenuItem) => void 
+	} = $props();
 
-	// Handler to forward selection
-  	function handleSelect(item:{title: string, url: string, icon?: Icon}) {
-    	dispatch('select', item); // emit 'select' event with item
-  	}
+	// function handleSelection(item: { title: string; url: string; icon?: Icon }) {
+	function handleSelection(item: Sidebar01MenuItem) {
+        onMenuSelect(item);
+    }
 </script>
 
 <Sidebar.Root collapsible="offcanvas" {...restProps}>
@@ -166,11 +168,11 @@
 		</Sidebar.Menu>
 	</Sidebar.Header>
 	<Sidebar.Content>
-		<NavMain items={data.navMain} onselect={handleSelect} />
-		<NavDocuments items={data.documents} onselect={handleSelect} />
-		<NavSecondary items={data.navSecondary} onItemSelect={handleSelect} class="mt-auto" />
+		<NavMain items={data.navMain} onMenuSelect={handleSelection}/>
+		<NavDocuments items={data.documents} onMenuSelect={handleSelection}/>
+		<NavSecondary items={data.navSecondary} onMenuSelect={handleSelection} class="mt-auto" />
 	</Sidebar.Content>
 	<Sidebar.Footer>
-		<NavUser user={data.user} onselect={handleSelect}/>
+		<NavUser user={data.user} onMenuSelect={handleSelection}/>
 	</Sidebar.Footer>
 </Sidebar.Root>

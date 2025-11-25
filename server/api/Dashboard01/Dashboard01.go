@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/chendingplano/deepdoc/server/api/Databases"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
 )
 
@@ -93,7 +93,7 @@ func RetrieveDataForDashboard01(c echo.Context) error {
 	stmt += " LIMIT 100"
 
 	log.Printf("Constructed query: %s (MID_001_060)", stmt)
-	rows, err := Databases.MySql_DB_miner.Query(stmt)
+	rows, err := ApiTypes.MySql_DB_miner.Query(stmt)
 	if err != nil {
 		log.Printf("DB error: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{

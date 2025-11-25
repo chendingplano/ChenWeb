@@ -1,46 +1,89 @@
 <script lang="ts">
+	import { redirect } from "@sveltejs/kit";
 	import { fromTheme } from "tailwind-merge";
+  import { appAuthStore } from '@chendingplano/shared';
+	import { pass } from "three/tsl";
 
+  // This page implements three modes: login, signup, forgot password
+  // (or three pages). This is controlled by the "mode" variable.
+
+  let user_name = $state("");
+  let first_name = $state("");
+  let last_name = $state("");
   let email = $state("");
   let password = $state("");
   let mode = $state("login")
-  let name = $state("")
 
   async function handleEmailLogin() {
-    const res = await fetch("http://localhost:8080/auth/email/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password })
-    });
+    try {
+      const res = await fetch("http://localhost:5173/auth/email/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
 
-    if (res.ok) {
-      const data = await res.json();
-      alert("Login successful!");
-      window.location.href = `/sidebar-01?name=${encodeURIComponent(data.name)}`;
-    } else {
-      const msg = await res.text();
-      alert(`Login failed: ${msg}`);
+      if (res.ok) {
+        const data = await res.json();
+        let redirect_url = data.redirect_url || '/sidebar-01';
+        redirect_url += `?name=${encodeURIComponent(data.name)}`;
+        // alert("Login successful!");
+        // window.location.href = `/sidebar-01?name=${encodeURIComponent(data.name)}`;
+        window.location.href = redirect_url;
+      } else {
+        const msg = await res.text();
+        alert(`Login failed: ${msg}`);
+      }
+    } catch (err) {
+      alert(`Network error: ${err}`);
     }
   }
 
   async function handleEmailSignup() {
+    /*
     const res = await fetch("http://localhost:8080/auth/email/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, password })
     });
+
+    const data = await res.json();
     if (res.ok) {
-      const msg = "An email has been sent to your email:" + email +
-          ". Please check your email and click the link to activate your account." +
-          "Note: if you cannot find the email, check the Junk Mail section! (MID_LGN_035)"
-      alert(msg)
-      mode = "login";
+      if (data.message?.includes("user already exists")) {
+        alert(data.message); // ← shows "user already exists (MID_EML_224)"
+      } else {
+        const msg = "An email has been sent to your email:" + email +
+            ". Please check your email and click the link to activate your account." +
+            "Note: if you cannot find the email, check the Junk Mail section! (MID_LGN_035)"
+        alert(msg)
+        mode = "login";
+      }
     } else {
       alert(await res.text());
     }
   }
+    */
+    /*   async function register(userData: {
+    email: string;
+    password: string;
+    passwordConfirm: string;
+    firstName: string;
+    lastName: string;
+  }): Promise<void> */
 
-    async function handleForgotPassword() {
+    // await authStore.register(name, email, password);
+    if (user_name) {
+      console.log("User Name:", user_name);
+      alert(`Sign up with user name: ${user_name} is currently disabled for demo purposes.`);
+    } else if (email) {
+      console.log("Email:", email);
+      const passwordConfirm = password;
+      await appAuthStore.register({email, password, passwordConfirm, first_name, last_name});
+    } else {
+      alert("Please provide a user name or email to sign up.");
+    }
+  }
+
+  async function handleForgotPassword() {
     const res = await fetch("http://localhost:8080/auth/email/forgot", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -90,8 +133,10 @@
     {:else if mode === "signup"}
       <!-- Sign Up Form -->
       <form class="form" onsubmit={handleEmailSignup}>
-        <input bind:value={name} type="text" class="input" placeholder="Full name" required />
-        <input bind:value={email} type="email" class="input" placeholder="Email" required />
+        <input bind:value={user_name} type="text" class="input" placeholder="user name" />
+        <input bind:value={first_name} type="text" class="input" placeholder="First name" />
+        <input bind:value={last_name} type="text" class="input" placeholder="Last name" />
+        <input bind:value={email} type="email" class="input" placeholder="Email" />
         <input bind:value={password} type="password" class="input" placeholder="Password" required />
         <button class="form-btn">Sign up</button>
       </form>
@@ -142,14 +187,13 @@
             <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571
 	c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"></path>
           </svg>
-          <span>Log in with Google</span>
+          <span>Log in with Google AAA</span>
         </button>
       </div>
 </div>
 <style>
   .form-container {
     width: 350px;
-    height: 500px;
     background-color: #fff;
     box-shadow: rgba(0, 0, 0, 0.35) 0px 5px 15px;
     border-radius: 10px;

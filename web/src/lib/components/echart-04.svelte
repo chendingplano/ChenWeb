@@ -2,6 +2,10 @@
   import { Chart } from 'svelte-echarts';
   import type { EChartsOption } from 'echarts';
   import type { BarSeriesOption } from 'echarts/charts';
+  import type { 
+    ProcessStatusResponse,
+    ChartData 
+  } from '$lib/types/types';
   import * as echarts from 'echarts';
   import { init, use } from 'echarts/core';
   import { BarChart } from 'echarts/charts';
@@ -32,6 +36,7 @@
   let categories = $state<string[]>([]);
   let seriesData = $state<{ name: string; data: number[] }[]>([]);
   let {chartType} = $props();
+  let noData = $state(true)
 
   // Label style config
   const labelOption: NonNullable<BarSeriesOption>['label'] = {
@@ -50,16 +55,39 @@
   onMount(async () => {
   try {
     const res = await fetch('/api/v1/echart-data/demo-04');
-    if (!res.ok) throw new Error('Failed to fetch chart data (MID_ED3_108)');
+    if (!res.ok) {
+      console.log('Failed to fetch chart data (CWB_ED3_108)');
+      loading = false
+      noData = true
+      return
+    }
 
     // Parse JSON returned from Go API
-    const json_value = await res.json();
+    const json_value = await res.json() as ProcessStatusResponse;
+    if (!json_value.status)
+    {
+      console.log('Failed retrieving data (CWB_ED3_067), error:' + 
+        json_value.error_msg + ", loc:" + json_value.loc)
+      loading = false
+      noData = true
+      return
+    }
+
+    if (json_value.num_records <= 0) {
+        console.log('No data in the database (CWB_ED3_078)')
+        loading = false
+        noData = true
+        return
+    }
 
     // Select one specific chart type
-    const chartData = json_value[chartType];
+    const chartData = json_value.map_data[chartType] as ChartData;
 
     if (!chartData) {
-      throw new Error(`Chart type '${chartType}' not found in response`);
+      console.log('***** Internal Error (CWB_ED3_077)')
+      loading = false;
+      noData = true
+      return
     }
 
     // Extract categories and series
@@ -71,7 +99,7 @@
 
     } catch (e: any) {
         error = e.message ?? String(e);
-        console.error('Error loading chart data:', e);
+        console.error('Error loading chart data (CWB_ED3_097):', e);
     } finally {
         loading = false;
     }
@@ -142,6 +170,13 @@
       <p>Loading chart data...</p>
     {:else if error}
       <p style="color:red">{error}</p>
+    {:else if noData}
+      <h2 style="font-size: 1.4rem; font-weight: bold; margin-bottom: 0.5rem;">
+      Chart '{chartType}'
+      </h2>
+      <p style="font-size: 1rem; color: #666; margin-top: 0;">
+        Chart '{chartType}' has no data
+      </p>
     {:else}
       <Chart {init} {options} style="width: 100%; height: 100%;"/>
     {/if}
