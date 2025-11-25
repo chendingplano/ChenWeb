@@ -1,0 +1,28 @@
+{
+  "name": "@chendingplano/svelte-form-components",
+  "version": "1.0.0",
+  "description": "Reusable Svelte form components",
+  "type": "module",
+  "svelte": "./dist/index.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/**/*"
+  ],
+  "scripts": {
+    "build": "svelte-package -o dist",
+    "dev": "svelte-package -o dist --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@sveltejs/package": "^2.5.6",
+    "svelte": "^5.0.0"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "keywords": ["svelte", "form", "components", "ui"],
+  "author": "Chen Ding",
+  "license": "MIT"
+}
