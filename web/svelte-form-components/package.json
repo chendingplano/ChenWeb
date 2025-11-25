@@ -1,12 +1,12 @@
 {
   "name": "@chendingplano/svelte-form-components",
-  "version": "1.0.0",
-  "description": "Reusable Svelte form components",
-  "type": "module",
   "svelte": "./dist/index.js",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "version": "1.0.0",
+  "description": "Reusable Svelte form components",
+  "type": "module",
   "files": [
     "dist/**/*"
   ],
@@ -26,3 +26,4 @@
   "author": "Chen Ding",
   "license": "MIT"
 }
+

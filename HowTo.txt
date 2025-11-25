@@ -2668,14 +2668,14 @@ Step 1: zod-to-json-schema
 Step 2: Save to DB
 It needs to convert JSON object to string:
 
-Step 2: JSON to Zod
+Step 3: JSON to Zod
     import { jsonSchemaToZod } from "json-schema-to-zod";
 
-const jsonFromDB = ...;
-const zodString = jsonSchemaToZod(jsonFromDB);  // returns code string
-const dynamicSchema = eval(zodString);
+    const jsonFromDB = ...;
+    const zodString = jsonSchemaToZod(jsonFromDB);  // returns code string
+    const dynamicSchema = eval(zodString);
 
-dynamicSchema.parse({ name: "Alice", age: 30 });
+    dynamicSchema.parse({ name: "Alice", age: 30 });
   
 How Object.fromEntries Work
 ---------------------------
