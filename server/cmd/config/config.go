@@ -37,18 +37,10 @@ type Config struct {
 		NeedCreateTables	string `mapstructure:"need_create_tables"`
 	} `mapstructure:"database"`
 
-	SystemTableNames struct {
-		TableName_Sessions 			string `mapstructure:"table_name_login_sessions"`
-		TableName_SessionLog 		string `mapstructure:"table_name_session_log"`
-		TableName_Users 			string `mapstructure:"table_name_users"`
-		TableName_IDMgr 			string `mapstructure:"table_name_id_mgr"`
-		TableName_ActivityLog 		string `mapstructure:"table_name_activity_log"`
-		TableName_EmailStore		string `mapstructure:"table_name_email_store"`
-		TableName_PromptStore		string `mapstructure:"table_name_prompt_store"`
-	} `mapstructure:"system_table_names"`
-
 	AppTableNames struct {
 		TableName_ProcessStatus 	string `mapstructure:"table_name_process_status"`
+		TableName_Schedules 		string `mapstructure:"table_name_schedules"`
+		TableName_Documents 		string `mapstructure:"table_name_documents"`
 	} `mapstructure:"app_table_names"`
 
 	Auth struct {
@@ -105,8 +97,8 @@ func LoadConfig(configPath string) error {
 	ApiTypes.DatabaseInfo.DBType 				= GlobalConfig.Database.DatabaseType
 	ApiTypes.DatabaseInfo.PGDBName 				= GlobalConfig.Database.PGDBName
 	ApiTypes.DatabaseInfo.MySQLDBName 			= GlobalConfig.Database.MySQLDBName
-	ApiTypes.DatabaseInfo.PGDBHandle 			=	ApiTypes.PG_DB_miner
-	ApiTypes.DatabaseInfo.MySQLDBHandle 		=	ApiTypes.MySql_DB_miner
+	ApiTypes.DatabaseInfo.PGDBHandle 			= ApiTypes.PG_DB_miner
+	ApiTypes.DatabaseInfo.MySQLDBHandle 		= ApiTypes.MySql_DB_miner
 	ApiTypes.DatabaseInfo.HomeURL 				= GlobalConfig.HomeURL
 
 	log.Printf("(CWB_CFG_115) Config load success, database_type:%s, need_create_tables:%s",
@@ -139,16 +131,8 @@ func LoadConfig(configPath string) error {
 	return nil
 }
 
-func GetLoginSessionsTableName() string {
-	return GlobalConfig.SystemTableNames.TableName_Sessions
-}
-
 func GetDatabaseType() string {
 	return GlobalConfig.Database.DatabaseType
-}
-
-func GetUsersTableName() string {
-	return GlobalConfig.SystemTableNames.TableName_Users
 }
 
 func NeedCreateTables() bool {

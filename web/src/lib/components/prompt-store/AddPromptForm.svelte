@@ -59,7 +59,7 @@
 
         if (response.ok) {
             const errorData = await response.json() as JimoResponse;
-            alert("Prompt added to the database (CWB_PST_080+" + errorData.loc + ")")
+            alert("Prompt added to the database (CWB_APF_080:" + errorData.loc + ")")
 
             $InMemStore = {
                 ...$InMemStore,

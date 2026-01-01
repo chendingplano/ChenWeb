@@ -24,18 +24,10 @@ max_connections = 10
 database_type = "pg"
 need_create_tables = "true"
 
-[system_table_names]
-table_name_login_sessions   = "login_sessions"
-table_name_users            = "users"
-table_name_activity_log     = "activity_log"
-table_name_id_mgr           = "id_mgr"
-table_name_session_log      = "session_log"
-table_name_email_store      = "email_store"
-table_name_prompt_store     = "prompt_store"
-
 [app_table_names]
 table_name_documents        = "documents"
 table_name_process_status   = "process_status"
+table_name_schedules        = "schedules"
 
 [auth]
 jwt_secret = "super-secret-key"

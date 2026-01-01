@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/databaseutil"
 	_ "github.com/lib/pq"
@@ -126,37 +127,40 @@ const (
 	`
 )	
 	
-func CreateDocumentsTable(
-            db *sql.DB, 
-            db_type string,
-            table_name string) error {
+func CreateDocumentsTable() error {
+	db_type := ApiTypes.DatabaseInfo.DBType
+	table_name := config.GlobalConfig.AppTableNames.TableName_Documents
     var stmt string
+	var db *sql.DB
 	const common_fields = 
-            "doc_id 		BIGINT 			NOT NULL PRIMARY KEY COMMENT '" + DocumentsField_DocID + "', " +
-            "user_id 		VARCHAR(128) 	DEFAULT NULL COMMENT '" + DocumentsField_UserID + "', " +
-            "doc_name		VARCHAR(256) 	DEFAULT NULL COMMENT '" + DocumentsField_DocName + "', " +
-            "doc_no 		VARCHAR(256) 	DEFAULT NULL COMMENT '" + DocumentsField_DocNo + "', " +
-            "doc_desc 		TEXT 			DEFAULT NULL COMMENT '" + DocumentsField_DocDesc+ "', " +
-            "doc_summary 	TEXT 			DEFAULT NULL COMMENT '" + DocumentsField_DocSummary+ "', " +
-            "doc_keywords	TEXT 			DEFAULT NULL COMMENT '" + DocumentsField_DocKeywords+ "', " +
-            "doc_tags 		TEXT 			DEFAULT NULL COMMENT '" + DocumentsField_DocTags+ "', " +
-            "file_url 		TEXT		 	NOT NULL COMMENT '" + DocumentsField_FileURL+ "', " +
-            "image_url 		TEXT			DEFAULT NULL COMMENT '" + DocumentsField_ImageURL + "', " +
-            "Doc_type		VARCHAR(32) 	NOT NULL COMMENT '" + DocumentsField_DocType + "', " +
-            "doc_source		VARCHAR(128) 	DEFAULT NULL COMMENT '" + DocumentsField_DocSource+ "', " +
-            "doc_scope		VARCHAR(32) 	NOT NULL COMMENT '" + DocumentsField_DocScope + "', " +
-            "doc_status		VARCHAR(32) 	NOT NULL COMMENT '" + DocumentsField_DocStatus+ "', " +
-            "process_status	VARCHAR(32) 	NOT NULL COMMENT '" + DocumentsField_ProcessStatus+ "', " +
-            "created_at 	TIMESTAMP 		DEFAULT CURRENT_TIMESTAMP COMMENT '" + DocumentsField_CreatedAt+ "', " +
-            "updated_at 	TIMESTAMP 		DEFAULT CURRENT_TIMESTAMP COMMENT '" + DocumentsField_UpdatedAt+ "'"
+            "user_id 		VARCHAR(128) 	DEFAULT NULL, " +
+            "doc_name		VARCHAR(256) 	DEFAULT NULL, " +
+            "doc_no 		VARCHAR(256) 	DEFAULT NULL, " +
+            "doc_desc 		TEXT 			DEFAULT NULL, " +
+            "doc_summary 	TEXT 			DEFAULT NULL, " +
+            "doc_keywords	TEXT 			DEFAULT NULL, " +
+            "doc_tags 		TEXT 			DEFAULT NULL, " +
+            "file_url 		TEXT		 	NOT NULL, " +
+            "image_url 		TEXT			DEFAULT NULL, " +
+            "Doc_type		VARCHAR(32) 	NOT NULL, " +
+            "doc_source		VARCHAR(128) 	DEFAULT NULL, " +
+            "doc_scope		VARCHAR(32) 	NOT NULL, " +
+            "doc_status		VARCHAR(32) 	NOT NULL, " +
+            "process_status	VARCHAR(32) 	NOT NULL, " +
+            "created_at 	TIMESTAMP 		DEFAULT CURRENT_TIMESTAMP, " +
+            "updated_at 	TIMESTAMP 		DEFAULT CURRENT_TIMESTAMP"
 
     switch db_type {
     case ApiTypes.MysqlName:
-         stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" + common_fields +
+         stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" +
+		 	    "doc_id BIGINT AUTO_INCREMENT PRIMARY KEY, " + common_fields +
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
+		 db = ApiTypes.DatabaseInfo.MySQLDBHandle
 
     case ApiTypes.PgName:
-         stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" + common_fields + ")"
+         stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" + 
+		 		"doc_id BIGSERIAL PRIMARY KEY, " + common_fields + ")"
+		 db = ApiTypes.DatabaseInfo.PGDBHandle
 
     default:
         err := fmt.Errorf("database type not supported:%s (CWB_DOC_044)", db_type)

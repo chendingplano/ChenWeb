@@ -16,8 +16,12 @@
 
     // 2. Validation Function (Exposed to Parent)
     export function checkValue(): string {
-        if (itemDef.required && !itemDef.value) {
-            return "Field '" + itemDef.label + "' is required.";
+        if (!itemDef.required) {
+            return ''
+        }
+        const value = formData[itemDef.fieldName]?.toString() ?? '';
+        if (!value) {
+            return "Field '" + itemDef.label + "' is required (CWB_FST_024).";
         }
         
         return '';
@@ -65,10 +69,6 @@
         id={itemDef.id}
         bind:value={formData[itemDef.fieldName]}
         class:error={!!itemDef.error}
-        onchange={() => {
-            // Auto-clear error when user makes a selection
-            if(itemDef.value) itemDef.error = ''; 
-        }}
     >
         <option value="">Select an option</option>
         {#each itemDef.options as option}

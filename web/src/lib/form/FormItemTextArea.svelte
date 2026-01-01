@@ -66,9 +66,6 @@
         placeholder={itemDef.placeholder}
         class:error={!!itemDef.error}
         rows={itemDef.rows || 4}
-        onchange={() => {
-            if (formData[itemDef.fieldName]) itemDef.error = '';
-        }}
     ></textarea>
 
     {#if itemDef.error}

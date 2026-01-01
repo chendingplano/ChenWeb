@@ -13,13 +13,10 @@
     let showTooltip = $state(false);
     let tooltipPosition = $state({ x: 0, y: 0 });
 
-    // 1. Direct Binding: We bind directly to itemDef.value.
-    // Because itemDef is an object reference passed from the parent,
-    // updating properties on it updates the parent's state automatically.
-
-    // 2. Validation Function (Exposed to Parent)
+    // 1. Validation Function (Exposed to Parent)
     export function checkValue(): string {
         const value = formData[itemDef.fieldName]?.toString() ?? '';
+        const pattern = itemDef.pattern
 
         // Required check
         if (itemDef.required && !value.trim()) {
@@ -27,15 +24,16 @@
         }
 
         // Regex pattern check
-        if (itemDef.pattern && value) {
+        if (pattern && typeof pattern === 'string' && value) {
             try {
-                const regex = new RegExp(itemDef.pattern);
+                console.log("Pattern:" + pattern)
+                const regex = new RegExp(pattern);
                 if (!regex.test(value)) {
-                    return "Field '" + itemDef.label + "' incorrect: " + 
+                    return "Field '" + itemDef.label + "' incorrect (CWB_FIN_035): " + 
                         (itemDef.patternError || 'Invalid format.');
                 }
             } catch (e) {
-                console.warn('Invalid regex pattern:', itemDef.pattern);
+                console.warn('Invalid regex pattern:', pattern);
                 return ("Field '" + itemDef.label + "' incorrect: Validation error.");
             }
         } 
@@ -86,10 +84,6 @@
         bind:value={formData[itemDef.fieldName]}
         placeholder={itemDef.placeholder}
         class:error={!!itemDef.error}
-        onchange={() => {
-            // Auto-clear error when user makes a selection
-            if(formData[itemDef.fieldName]) itemDef.error = ''; 
-        }}
     />
   
     {#if itemDef.error}

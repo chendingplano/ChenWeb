@@ -62,13 +62,6 @@
     }
   }
     */
-    /*   async function register(userData: {
-    email: string;
-    password: string;
-    passwordConfirm: string;
-    firstName: string;
-    lastName: string;
-  }): Promise<void> */
 
     // await authStore.register(name, email, password);
     if (user_name) {

@@ -32,13 +32,6 @@
     return true;
   }
 
-  // Auto-clear error when user selects something
-  function handleChange() {
-    if (selectedValues.length > 0) {
-      itemDef.error = '';
-    }
-  }
-
   // Tooltip handlers
   function handleMouseEnter(e: MouseEvent) {
     showTooltip = true;
@@ -64,7 +57,6 @@
     const select = e.target as HTMLSelectElement;
     const values = Array.from(select.selectedOptions).map(opt => opt.value);
     formData[itemDef.fieldName] = values;
-    handleChange();
   }
 </script>
 

@@ -1,34 +1,26 @@
-<script lang="ts">
-	import FormItemSelect from '$lib/form/FormItemSelect.svelte';
-	import FormItemInput from '$lib/form/FormItemInput.svelte';
-	import type {ComponentDef} from '$lib/form/FormTypes';
-	import AutoForm from '$lib/form/AutoForm.svelte';
-
-	// --------------------------------
-	// 1. Form item component map
-	// --------------------------------
-	const formItemMap: Record<string, unknown> = {
-		select: FormItemSelect,
-		input: FormItemInput
-	};
-
-	// --------------------------------
-	// 2. Form state
-	// --------------------------------
-	let myFormItem = $state<ComponentDef[]>([
+//////////////////////////////////////////////////////////
+// Description:
+//   It defines the form page for table: prompts
+// Created: 2025/11/25 by Chen Ding
+//////////////////////////////////////////////////////////
+export const PromptStoreFormPage = {
+    pageName:"prompt_form",
+    pageType:"form",
+    storeName:"prompt_store",
+    components:[
         {
-            fieldName: 'promptName',
+            fieldName: 'prompt_name',
             label: 'Prompt Name',
             type: "input",
             placeholder:"e.g., creative_writing_assistant",
             required: true,
             helpText: 'Only letters, numbers, and underscores allowed',
-            pattern: "/^[a-zA-Z0-9_]+$/",
+            pattern: "^[a-zA-Z0-9_]+$",
             patternError: "Only letters, digits, and underscores allowed",
             error: ''
         },
         {
-            fieldName: 'promptDesc',
+            fieldName: 'prompt_desc',
             label: 'Prompt Description',
             type: "textarea",
             placeholder:"Brief description of the prompt's purpose",
@@ -37,7 +29,7 @@
             error: ''
         },
         {
-            fieldName: 'promptContent',
+            fieldName: 'prompt_content',
             label: 'Prompt Content',
             type: "textarea",
             placeholder:"Enter the full prompt content...",
@@ -47,7 +39,7 @@
             error: ''
         },
         {
-            fieldName: 'status',
+            fieldName: 'prompt_status',
             label: 'Status',
             type: "select",
             placeholder:"",
@@ -57,7 +49,7 @@
             error: ''
         },
         {
-            fieldName: 'PromptPurpose',
+            fieldName: 'prompt_purpose',
             label: 'Purpose',
             type: "select",
             placeholder:"The purpose of the prompt",
@@ -67,17 +59,17 @@
             error: ''
         },
         {
-            fieldName: 'Source',
+            fieldName: 'prompt_source',
             label: 'Source',
             type: "checkbox_group",
             placeholder:"Where the prompt come from",
             required: false,
             helpText: "Please select the prompt sources. You may select multiple sources.",
-            options: ["User Wriate", "Crawled", "Uploaded", "Recommended"],
+            options: ["Manual", "Crawled", "Uploaded", "Recommended"],
             error: ''
         },
         {
-            fieldName: 'Keywords',
+            fieldName: 'prompt_keywords',
             label: 'Keywords',
             type: "input",
             placeholder:"comma separated keywords",
@@ -86,7 +78,7 @@
             error: ''
         },
         {
-            fieldName: 'Tags',
+            fieldName: 'prompt_tags',
             label: 'Tags',
             type: "input",
             placeholder:"comma separated tags",
@@ -94,59 +86,5 @@
             helpText: "Tags for better search. Separate tags with commas.",
             error: ''
         },
-	]);
-
-	// --------------------------------
-	// 3. Child refs map (one per form item)
-	// --------------------------------
-	let formData = $state<Record<string, any>>({});
-
-	// --------------------------------
-	// 4. Submit handler
-	// --------------------------------
-	function handleSubmit() {
-		let allValid = true;
-
-		for (const item of myFormItem) {
-			if (typeof item.fieldName === "string") {
-				const ref = formData[item.fieldName];
-				if (ref?.checkValue) {
-					const ok = ref.checkValue();
-					if (!ok) allValid = false;
-				}
-			}
-		}
-
-		if (allValid) {
-			alert(`Form Submitted!  Country: ${formData}`);
-		} else {
-			console.log("Validation failed");
-		}
-	}
-</script>
-
-<main>
-	<h1>Form Example (Dynamic Rendering)</h1>
-
-    <!--
-	{#each myFormItem as itemDef}
-		{#if typeof itemDef.type === 'string' && typeof itemDef.id === 'string'}
-			<svelte:component
-				this={formItemMap[itemDef.type]}
-				bind:itemDef
-				bind:this={componentRefs[itemDef.id]}
-			/>
-		{/if}
-	{/each}
-
-	<div style="margin-top: 20px;">
-		<button onclick={handleSubmit}>Submit</button>
-	</div>
-    -->
-    <AutoForm bind:schema={myFormItem}
-              bind:formData={formData}/>
-
-	<pre style="background: #f4f4f4; padding: 10px; margin-top: 20px;">
-	Parent State: {JSON.stringify(formData, null, 2)}
-	</pre>
-</main>
+    ]
+}

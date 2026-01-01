@@ -1,17 +1,5 @@
 import type { Component } from "svelte";
 
-export type FormItem<T> = {
-    id:         string;
-    key:        string;     // corresponds to schema key
-    type:       string;     // "input" | "select" | "number" | ...
-    label:      string;
-    required:   boolean;
-    helpText?:  string;
-    options?:   T[];
-    value:      T;
-    error?:     string;
-} & Record<string, unknown>;
-
 export type ComponentDef = {
     fieldName:      string;
     type:           string;
@@ -27,7 +15,13 @@ export type ComponentDef = {
 export type PageDef = {
     pageName:       string;
     pageType:       string;
-    storeName:      string;
-    storeLabel?:    string;
     components:     ComponentDef[];
+}
+
+class AosPageMgr {
+    constructor() {} 
+
+    getPage(page_name: string): PageDef | null{
+        return null
+    }
 }

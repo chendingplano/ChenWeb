@@ -41,9 +41,9 @@
     type:   'null'
   }
 
-  let { children } = $props();
-  let activeView = $state<Sidebar01MenuItem>(null_menu_item)
-  let recordSelected = $state<IProcessTableRow | null>(null); 
+  let { children }    = $props();
+  let activeView      = $state<Sidebar01MenuItem>(null_menu_item)
+  let recordSelected  = $state<IProcessTableRow | null>(null); 
 
   async function handleLogout() {
     try {

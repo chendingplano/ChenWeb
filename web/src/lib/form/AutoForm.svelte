@@ -1,26 +1,35 @@
 <script lang="ts">
     import { FormItemMap } from "./FormItemMap";
-    import type {ComponentDef} from "./FormTypes"
+    import type {PageDef, ComponentDef} from "./FormTypes"
     import type {JimoResponse} from '@chendingplano/shared'
-    import {StoreMap} from '@chendingplano/shared'
+    import {GetStoreByName} from '@chendingplano/shared'
     import {db_store} from "@chendingplano/shared"
+    import { onMount } from 'svelte';
 
-    let { storeName, schema = $bindable(), formData = $bindable()}:
+    let { pageDef }:
         {
-            storeName: string,
-            schema: ComponentDef[];
-            formData: {[key: string]: unknown}
+            pageDef: PageDef,
         } = $props()
-    const storeRecord = StoreMap.get(storeName)
-    const InMemStoreCrtRecords = storeRecord?.InMemStoreCrtRecords
-    const InMemStoreCrtRecord = storeRecord?.InMemStoreCrtRecord
-    const InMemStoreCrtView = storeRecord?.InMemStoreCrtView
 
-    let loadedComponents = $state<(any | null)[]>(Array(schema.length).fill(null));
+    const storeName = pageDef.storeName
+    const formItems = pageDef.components as ComponentDef[]
+    const InMemStore = GetStoreByName(storeName)
+    const storeLabel = pageDef.storeLabel || storeName
+    const selectedFieldNames = formItems.map((form_item) => {
+        if (!form_item.fieldName) {
+            alert("Missing fieldName (CWB_AFM_018):" + form_item)
+        }
+        else {
+          return form_item.fieldName
+        }
+    })
 
-    let model = $state<Record<string, unknown>>(
+    let formData = $state<Record<string, unknown>>({})
+    let loadedComponents = $state<(any | null)[]>(Array(formItems.length).fill(null));
+
+    let defaultFormData = $state<Record<string, unknown>>(
         Object.fromEntries(
-            Object.entries(schema).map(([key, def]) => {
+            Object.entries(formItems).map(([key, def]) => {
                 const field = def as ComponentDef
                 return [key, field.default ?? ""]
             }
@@ -28,7 +37,7 @@
 
     let maxFormWidth = "1200px"
 
-    let items = $state(schema.map(def => ({
+    let items = $state(formItems.map(def => ({
         ...def,
     })));
 
@@ -49,6 +58,10 @@
     let error_str       = $state('');
     let isSubmitting    = $state(false);
   
+    onMount(() => {
+        console.log("In AutoForm (CWB_AFM_061)")
+    })
+
     function validateForm() {
         let hasError = false;
         error_str = '';
@@ -84,15 +97,14 @@
         formData.updater_loc = "CWB_APF_078"
         const response = await db_store.saveRecord("prompt_store", formData) as JimoResponse
         if (response.status) {
-            alert("Prompt added to the database (CWB_PST_080+" + response.loc + ")")
-            $InMemStoreCrtRecords= {
-                ...$InMemStoreCrtRecords,
-                CachedPrompts: [...$InMemStoreCrtRecords.CachedPrompts, formData]
+            alert("Prompt added to the database (CWB_AFM_098:" + response.loc + ")")
+            $InMemStore = {
+                ...$InMemStore,
+                CachedRecords: [...$InMemStore.CachedRecords, formData],
+                CrtView: 'list',
+                CrtRecord: {}
             }
 
-            if (InMemStoreCrtView) {
-                InMemStoreCrtView.set('list');
-            }
             isSubmitting = false
             return
         }
@@ -101,7 +113,7 @@
         isSubmitting = false
           
         // Reset form
-        formData = {}
+        formData = defaultFormData
     }
 
     function resetFormData() {
@@ -117,7 +129,7 @@
 </script>
 
 <div class="form-container" style="--form-max-width: {maxFormWidth}">
-  <h2>Add New Prompt</h2>
+  <h2>Add New {storeLabel}</h2>
   
   <form onsubmit={handleSubmit}>
     <div class="form-grid">
@@ -150,13 +162,13 @@
         class="submit-btn"
         disabled={isSubmitting}
       >
-        {isSubmitting ? 'Creating...' : 'Create Prompt'}
+        {isSubmitting ? 'Creating...' : `Create ${storeLabel}`}
       </button>
     </div>
   </form>
 </div>
 
-<pre>{JSON.stringify(model, null, 2)}</pre>
+<pre>{JSON.stringify(formData, null, 2)}</pre>
 
 <style>
   :root {
@@ -175,6 +187,10 @@
     color: #333;
     border-bottom: 2px solid #007bff;
     padding-bottom: 10px;
+    align-content: center;
+    text-align: center;
+    font-size:large;
+    font-style: bold;
   }
   
   /* Make it one-column on small screens */

@@ -23,7 +23,6 @@ func ExitApp() {
 	libmanager.ExitLib()
 }
 
-
 func main() {
 	// Make sure main.go is run in ChenWeb
 	err := config.LoadConfig("./config.toml")
@@ -38,22 +37,21 @@ func main() {
 		config.GlobalConfig.Server.Host,
 		config.GlobalConfig.Server.Port)
 
-
 	e := echo.New()
 
 	// ✅ Enable CORS
 	log.Printf("Configure CORS (CWB_DDM_045)")
-    e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-        AllowOrigins: []string{"http://localhost:5173"}, // frontend
-        AllowMethods: []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
-        AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins:     []string{"http://localhost:5173"}, // frontend
+		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 		AllowCredentials: true,
-    }))
+	}))
 
 	log.Printf("Register api Routes (CWB_DDM_052)")
 	err = api.RegisterRoutes(e)
 	if err != nil {
-	 	panic(err)
+		panic(err)
 	}
 
 	log.Printf("To Init DB")
@@ -85,7 +83,7 @@ func main() {
 	}
 
 	// Init the library
-	libmanager.InitLib()
+	libmanager.InitLib("../Shared/libconfig.toml")
 
 	// Create tables
 	if config.NeedCreateTables() {

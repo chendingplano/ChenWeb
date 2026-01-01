@@ -68,24 +68,127 @@ offers the folloing:
   - Omit fields unconditionally
 
 Example:
-type User struct {
-    UserName string `json:"user_name"`
-    Password string `json:"-"`
-    Age      int    `json:"age,omitempty"`
-}
-- UserName is converted to "user_name" in JSON
-- Omit the field Password
-- Omit Age if it is 0 (empty). Otherwise, use the key 'age'
+    type User struct {
+        UserName string `json:"user_name"`
+        Password string `json:"-"`
+        Age      int    `json:"age,omitempty"`
+    }
+    - UserName is converted to "user_name" in JSON
+    - Omit the field Password
+    - Omit Age if it is 0 (empty). Otherwise, use the key 'age'
 
-http Status Code 
-----------------
-http.StatusOk 					200
+    Example:
+    type User struct {
+        UserName string `json:"user_name"`
+        Age      int    `json:"age"`
+    }
+
+    // Marshal
+    user := User{UserName: "alice", Age: 30}
+    data, _ := json.Marshal(user) // {"user_name":"alice","age":30}
+
+    // Unmarshal  
+    var user User
+    json.Unmarshal(data, &user)
+
+Marshal and Unmarshal
+---------------------
+  - Marshal converts objects to string
+  - Unmarshal converts strings to objects
+  
+Unmarshal in Go
+---------------
+Converting from strings to Go object is a common operation. There are three
+ways to do so.
+
+Method 1: Define the struct:
+  Use this method if we know the types.
+    import (
+      "encoding/json"
+    )
+    
+    type User struct {
+        UserName string `json:"user_name"`
+        Password string `json:"-"`
+        Age      int    `json:"age,omitempty"`
+    }
+
+    // Marshal
+    user := User{UserName: "alice", Age: 30}
+    data, _ := json.Marshal(user) // {"user_name":"alice","age":30}
+
+    // Unmarshal  
+    var user User
+    json.Unmarshal(data, &user)
+
+
+Method 2: Use map[string]interface{}
+  Use this method if we know it is a JSON but do not know the struct.
+  In other word, it handles dynamic JSON, or JSON that can have any members.
+
+  Example:
+    data := map[string]interface{}{
+        "user_name": "alice",
+        "age":       30,
+    }
+
+    // Marshal
+    jsonData, _ := json.Marshal(data)
+
+    // Unmarshal
+    var result map[string]interface{}
+    json.Unmarshal(jsonData, &result)
+
+Method 3: Use interface{}
+  Use this method if we do not even know whether it is a JSON or not.
+  Note that interface{} is 'any', or it can be anything.
+
+  Example:
+      var var1 interface{}
+      var var2 interface{}
+      json.Unmarshal([]byte(`{"user_name":"alice","age":30}`), &var1)
+      json.Unmarshal([]byte(`{"12345"}`), &var2)
+
+  'var1' type is map[string]interface{} and 'var2' is int64.
+
+How Go Unmarshel Data Types
+---------------------------
+JSON object → map[string]interface{}
+JSON array → []interface{}
+JSON string → string
+JSON number → float64 ⚠️
+JSON true/false → bool
+JSON null → nil
+
+Note that Go does not convert values to int. If you want it to be int:
+  Method 1:
+  var myvar int
+  json.Unmarshal([]byte("1234"), &myvar)
+
+  Method 2:
+  Use interface{}, check and convert (safer)
+  var myvar interface{}
+  json.Unmarshal([]byte("1234"), &myvar)
+  if myfloat, ok := myvar.(float64); ok {
+    myint := int(myfloat)
+  }
+  
+http Status Code in Go
+----------------------
+http.StatusOk 					    200
 http.StatusBadRequest 			400		
-http.StatusNotFound 			404		Resource not found
+http.StatusNotFound 			  404		Resource not found
 http.StatusUnauthorized 		401		Unauthorized
-http.StatusForbidden 			403		Unauthorized
-http.StatusConflict				409
+http.StatusForbidden 			  403		Unauthorized
+http.StatusConflict				  409
 http.StatusInternalServerError	500		
+
+http Status Codes in TypeScript
+-------------------------------
+import { StatusCodes } from 'http-status-codes';
+  StatusCodes.OK          // 200
+  StatusCodes.NOT_FOUND:  // 404
+  StatusCodes.INTERNAL_SERVER_ERROR: // 500
 
 How to Run Docker
 -----------------
@@ -1389,11 +1492,10 @@ Go does not support call-by-reference, directly. All parameters are passed
 as call-by-value. That is, a copy of the parameter is made. Changes to 
 parameters do not affect the original parameter.
 
-We can simulate call-by-reference by passing pointers.
-The function below is call-by-value:
-  func (c *ActivityLogCache) AddToCache(record ActivityLogDef) {...}
-It will make a copy of 'record'.
+We can simulate call-by-reference by passing pointers (through '*').
+Example:
   func (c *ActivityLogCache) AddToCache(record *ActivityLogDef) {...}
+
 The parameter 'record' is now a pointer. It won't copy the value.
 
 IMPORTANT: For cache, it is important to make a copy of the record instead of 
@@ -1870,6 +1972,17 @@ interface
 ---------
   - interface can only define object types, including member data and member functions
   - interface can extend another interface
+
+What Are the Differences between type and interface in Go
+---------------------------------------------------------
+  - A type defines a type of objects, which have member data and (optionall) member functions.
+    An interface is similar to Java Interface. It has only member functions. No member data.
+    An interface is purely a 'contract': a collection of member functions. Any object that
+    implements the member functions of an interface can be used where the interface is required.
+  - You can create an instance of type, such as: 
+      person := Person // Person is a type
+    But you cannot create an instance of an interface:
+      person := Person // Person is an interface
 
 Type Aliases and Member Function Declarations
 ---------------------------------------------
@@ -2954,6 +3067,27 @@ In TypeScript:
     return "exist"
   }
 
+How to Check a Member Exists in a JSON object in Go
+---------------------------------------------------
+Below is an example:
+    data := map[string]interface{}{
+        "name":    "Alice",
+        "age":     30,
+        "active":  true,
+        "tags":    []string{"user", "admin"},
+    }
+
+    // Check if "name" exists and is a string
+    if val, exists := data["name"]; exists {
+        if name, ok := val.(string); ok {
+            fmt.Println("Name:", name) // ✅ safe
+        } else {
+            fmt.Println("'name' is not a string")
+        }
+    } else {
+        fmt.Println("'name' is missing")
+    }
+
 How to Access Store Members
 ---------------------------
 In Svelte 5, you cannot access members of a store directly.
@@ -2978,3 +3112,1096 @@ the simple notation of "$".
 2. Use $:
     const InMemStore  = GetStoreByName("prompt_store") as Writable<InMemStoreDef>
     crt_record = $InMemStore.CrtRecord    // CrtRecord is a member of InMemStoreDef
+
+How +layout Works
+-----------------
++layout.svelte is a special file in Svelte. If a directory in src/routes or any of
+its subdirectories have a +layout.svelte, the file is normally used to manage
+the common part of all pages in the directory. +layout.svelte is not mandatory.
+But if it exists, it must contain a <slot/>. Otherwise, contents won't show.
+
+People use +layout.svelte to manage pages. Below is an example.
+src/routes/
+├── +layout.svelte                    # Site-wide layout (global header, footer, etc.)
+├── +page.svelte                      # Home page
+├── about/
+│   └── +page.svelte                  # About page (uses root layout)
+├── dashboard/                        # Dashboard section
+│   ├── +layout.svelte                # Dashboard-specific layout (sidebar, etc.)
+│   ├── +page.svelte                  # Dashboard home
+│   ├── settings/
+│   │   ├── +layout.svelte            # Settings-specific layout (if needed)
+│   │   └── +page.svelte              # Settings page
+│   └── profile/
+│       └── +page.svelte              # Profile page (shares dashboard layout)
+└── admin/                            # Admin section
+    ├── +layout.svelte                # Admin-specific layout (admin sidebar, etc.)
+    ├── +page.svelte                  # Admin home
+    └── users/
+        └── +page.svelte              # Users page (shares admin layout)
+
+How to Install a Frontend Package
+---------------------------------
+Example:
+In a ts file:
+  import {Writable} from 'svelte/store'
+
+Got the following error:
+Cannot find module 'svelte/store' or its corresponding type declarations.
+
+The reason is that the project does not know anything about 'svelte/store'.
+
+Run the following command in the project root directory:
+  bun add svelte
+
+What Are interface{}, any, and unknown in Go
+--------------------------------------------
+interface{} is a generic type in Go. 'any' is an alias of interface{}. interface{} and any 
+are 100% compatible. 'any' is just syntactic suger and introduced in Go 1.18.
+
+Note that unknown is not Go's type. It is TypeScript type.
+
+What Are the Differences between map[string]interface{} and map[string]struct{} in Go
+-------------------------------------------------------------------------------------
+map[string]interface{} implements a map that maps keys to values of any type. It uses
+more memory. Each value requires <type-information> + data memory. 
+
+map[string]struct{} implements Set. It does not store values, thus uses less memory.
+
+=======================================================================================
+Aspect        map[string]interface{}                  map[string]struct
+=======================================================================================
+Purpose       Key-value store with arbitrary values   Set (keys only)
+Value size    Variable (carries type info + data)     0 bytes (empty struct)
+Memory usage  Higher overhead                         Minimal overhead
+Use case      JSON data, dynamic objects              Membership testing, deduplication
+operations    Get/set values of any type              Check existence, add/remove keys
+=======================================================================================
+
+How to Handle Arrays in PostgreSQL
+----------------------------------
+In PostgreSQL:
+  - Arrays are defined as VARCHAR(nn)[], TEXT[], ...
+  - Insert uses ARRAY(['xxx', 'xxx', ...]) or ('{xxx, xxx, ...}')
+
+Below is an example:
+    -- Create table with string array
+    CREATE TABLE example (
+        id SERIAL PRIMARY KEY,
+        tags TEXT[],
+        categories VARCHAR(50)[]
+    );
+
+    -- Insert values
+    INSERT INTO example (tags, categories) 
+    VALUES (ARRAY['tag1', 'tag2', 'tag3'], ARRAY['cat1', 'cat2']);
+
+    -- Or using PostgreSQL syntax
+    INSERT INTO example (tags, categories) 
+    VALUES ('{tag1,tag2,tag3}', '{cat1,cat2}');
+
+MySQL does not directly support arrays, you can treat arrays
+as strings, such as:
+    CREATE TABLE example (
+        id INT PRIMARY KEY,
+        tags VARCHAR(255)
+    );
+
+    INSERT INTO example (tags) VALUES ('tag1,tag2,tag3');
+
+Or use JSON:
+    CREATE TABLE example (
+        id INT PRIMARY KEY,
+        tags JSON
+    );
+
+    INSERT INTO example (tags) VALUES ('["tag1", "tag2", "tag3"]');
+
+Go:
+    import "github.com/lib/pq"
+
+    // In your struct
+    type Example struct {
+        ID   int
+        Tags []string `db:"tags"`
+    }
+
+    // When inserting
+    stmt, _ := db.Prepare("INSERT INTO example (tags) VALUES ($1)")
+    tags := []string{"tag1", "tag2", "tag3"}
+    _, err := stmt.Exec(pq.Array(tags))
+
+For prepared statements:
+  - Determine whether a field is an array of text
+  - Check the value type: string, string array, array of generric type ([]interface{}), nil, 
+
+Below is an example:
+		log.Printf("processing array-string field:%s (SHD_DUP_095)", f.FieldName)
+    var stringArray []string
+        
+    switch v := val.(type) {
+    case []string:
+      	  stringArray = v
+
+    case []interface{}:
+       	  // Convert []interface{} to []string
+       	  stringArray = make([]string, len(v))
+       	  for i, item := range v {
+              if item != nil {
+                 	stringArray[i] = fmt.Sprintf("%v", item)
+             	 } else {
+                 	stringArray[i] = ""
+             	 }
+         	  }
+
+    case string:
+      	  // If it's a single string, you might want to treat it as single-element array
+       	  stringArray = []string{v}
+
+ 	  case nil:
+       	  stringArray = []string{}
+
+    default:
+     		  // Try to handle other types that might represent arrays
+     		  stringArray = []string{fmt.Sprintf("%v", v)}
+     }
+        
+     args = append(args, pq.Array(stringArray))
+     placeholders = append(placeholders, fmt.Sprintf("$%d", paramCounter))
+     paramCounter++
+
+How to Append Elements to Arrays in TypeScript
+----------------------------------------------
+Use push:
+    var update_entries: Record<string, string>[] = []   // Initialize to an empty array
+
+    update_entries.push({user_name:"abc", email:"aaa@my.domain})
+
+How to Get Min/Max in Go
+------------------------
+import "math"
+
+// Integer types
+math.MaxInt8    // 127
+math.MinInt8    // -128
+math.MaxInt16   // 32767
+math.MinInt16   // -32768
+math.MaxInt32   // 2147483647
+math.MinInt32   // -2147483648
+math.MaxInt64   // 9223372036854775807
+math.MinInt64   // -9223372036854775808
+
+How to Return a Value in Insert Statement
+-----------------------------------------
+PostgreSQL can use BIGSERIAL to automatically generate sequence numbers.
+We can use 'RETURNING <field_name>' to return its value in an insert statement:
+  INSERT INTO your_table (column1, column2, ...)
+  VALUES (value1, value2, ...)
+  RETURNING prompt_id;
+
+How to Inline Document Go Code
+------------------------------
+Write comments on top of a function (no empty lines between the comments
+and the function)
+Example:
+// InsertBatch inserts multiple records into the given table and returns
+// the auto-generated prompt_id values for the inserted rows.
+//
+// Parameters:
+//   - tx: an active database transaction
+//   - tableName: name of the target table (must be sanitized to avoid SQL injection)
+//   - columns: list of column names to insert into (e.g., []string{"title", "content"})
+//   - values: a slice of rows, where each row is a slice of interface{} values
+//
+// Returns:
+//   - A slice of int64 containing the generated prompt_id values, in the same order
+//     as the input rows.
+//   - An error if the insertion fails.
+//
+// Note: This function uses fmt.Sprintf to interpolate table and column names,
+// so callers must ensure they are not derived from untrusted input.
+func InsertBatch(
+	user_name string,
+	db *sql.DB,
+	tableName string,
+  ...) (...) {
+    ...
+  }
+
+How to Compose a Type in Go
+---------------------------
+Go does not support the '&' operator. We can embed a type in another type, such as:
+  type Base struct {
+    ID    int64
+    Name  string
+  }
+
+  type Extended struct {
+    Base
+    CreatedAt   int64
+  }
+
+How to Scan String Array from PostgreSQL
+----------------------------------------
+When to read data from PostgreSQL string array, there are two methods:
+  - []string
+  - pg.StringArray
+
+pg.StringArray has a []string internally, but it implements:
+  - Scanner interface so that data can be scanned directly to pgStringArray
+  - Valuer interface so that it can be inserted into SQL queries
+
+  func (a *StringArray) Scan(src interface{})
+  func (a *StringArray) Value()
+
+But modern pg driver can scan both []string and pg.StringArray
+Examples
+  var tag1 []string
+  var tag2 pgStringArray
+
+  rows.Scan(&tag1)    // OK
+  rows.Scan(&tag2)    // OK 
+
+could not import github.com/chendingplano/shared/go/api/sysdatastores
+(missing metadata for import of "github.com/chendingplano/shared/go/api/sysdatastores")
+---------------------------------------------------------------------------------------
+This is normally a temporary problem. Run the following in the directory the 'go.mod' resides:
+  go mod tidy
+
+What Is Vite
+------------
+Vite is a frontend build tool. Its core functions:
+  - Serves your Svelte app during development
+  - File Watching: watches .svelte, .js and .ts files
+  - Once files are changed, it communites with browsers through WebSocket
+  - HMR (Hot Module Replacement): it updates only the affected modules,
+    used together with file watching.
+
+What Is SvelteKit
+-----------------
+  - Routing: file-based routing (web/src/routes)
+  - SSR: renders pages on server first
+
+How to Restart nix
+------------------
+sudo /nix/var/nix/profiles/default/bin/nix-daemon &
+
+How to Tell I Am using SvelteKit 2 or Plain SvelteKit
+-----------------------------------------------------
+Look at svelte.config.js, If you see something like:
+    import adapter from '@sveltejs/adapter-auto';
+
+    export default {
+      kit: {
+        adapter: adapter()
+      }
+    };
+
+
+    or anything containing a kit: block →
+You are using SvelteKit 2. The key presence:
+  - kit
+  - a kit adapter
+
+If the file looks like this (no kit block):
+    import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+
+    export default {
+      preprocess: vitePreprocess()
+    };
+You are using plain Svelte 5 (no Kit).
+
+SvelteKit adds the abilities:
+  - File-based routing (src/routes)
+
+
+How to Solve SSR Issue
+----------------------
+[WEB] 3:34:50 PM [vite] (ssr) Error when evaluating SSR module /src/routes/calendar/+page.svelte: [vite] 
+The requested module '@event-calendar/core' does not provide an export named 'Calendar'
+[WEB]       at analyzeImportedModDifference (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:457:36)
+[WEB]       at SSRCompatModuleRunner.processImport (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:1006:54)
+[WEB]       at SSRCompatModuleRunner.cachedRequest (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:1031:59)
+[WEB]       at async eval (/Users/cding/Workspace/ChenWeb/web/src/routes/calendar/+page.svelte:5:31)
+[WEB]       at async ESModulesEvaluator.runInlinedModule (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:906:3)
+[WEB]       at async SSRCompatModuleRunner.directRequest (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:1113:59)
+[WEB]       at async SSRCompatModuleRunner.directRequest (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/chunks/dep-Chhhsdoe.js:18607:22)
+[WEB]       at async SSRCompatModuleRunner.cachedRequest (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:1031:73)
+[WEB]       at async SSRCompatModuleRunner.import (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:992:10)
+[WEB]       at async instantiateModule (file:///Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/chunks/dep-Chhhsdoe.js:18580:10)
+[WEB]
+[WEB] [500] GET /calendar
+[WEB] SyntaxError: [vite] The requested module '@event-calendar/core' does not provide an export named 'Calendar'
+[WEB]     at analyzeImportedModDifference (file:/Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:457:36)
+[WEB]     at SSRCompatModuleRunner.processImport (file:/Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:1006:54)
+[WEB]     at SSRCompatModuleRunner.cachedRequest (file:/Users/cding/Workspace/ChenWeb/web/node_modules/vite/dist/node/module-runner.js:1031:59)
+[WEB]     at async eval (src/routes/calendar/+page.svelte:5:31)
+
+This is a runtime error. SvelteKit/Vite tries to resolve code on the server at runtime but failed.
+What the error says is that the code tries to import a named export 'Calendar' but not found in the package.
+
+To solve this problem, we need to disable its SSR. Below is an example:
+    <script lang="ts">
+      import { onMount } from 'svelte';
+
+      let Calendar = $state<any>(null);
+      let TimeGrid = $state<any>(null);
+      let options = $state({
+        view: 'timeGridWeek',
+        events: [
+          // your events
+        ]
+      });
+
+      onMount(async () => {
+        const mod = await import('@event-calendar/core');
+        Calendar = mod.Calendar;
+        TimeGrid = mod.TimeGrid;
+      });
+    </script>
+
+    {#if Calendar}
+      <Calendar plugins={[TimeGrid]} {options} />
+    {/if}
+
+Instead of statically import 'Calendar', it dynamically loaded (through onMount).
+The onMount function runs in browsers. As for whether 'mod' has a valid mod.Calendar
+and mod.TimeGrid, it is up to the provider. If it works as documented, it should have it.
+
+What Does SuperForm() Return
+----------------------------
+The superForm() function returns an object that includes (among other things):
+
+form: a reactive store-like object containing:
+.data — the current form field values
+.errors — validation errors
+.constraints — HTML5 validation attributes
+.tainted — which fields have been touched
+.valid — whether the form is valid
+enhance — an action for progressive enhancement on <form use:enhance>
+
+Passing Properties - What Does {<a-name>} Mean
+----------------------------------------------
+When passing props to a child, we can say {<a-name>}, which is the shorthand
+of: <a-name>={<a-name>}.
+Below is an example:
+    <script>
+      let id = "my-input";
+      let value = "hello";
+      let disabled = true;
+    </script>
+
+    <Input {id} {value} {disabled} />
+
+This is equivalent to:
+    <Input id={id} value={value} disabled={disabled}
+
+How to Create Symbolic Links
+----------------------------
+ln -s <source> <target>
+
+How to Get the Last Day of a Month in JavaScript
+------------------------------------------------
+    const currentDate = new Date(2025, 11, 5); // December 5, 2025 (months are 0-indexed in JS)
+    const year = currentDate.getFullYear();    // 2025
+    const month = currentDate.getMonth();      // 11 (December)
+    const lastDay = new Date(year, month + 1, 0).getDate();
+
+In JavaScript, day 0 means the last day of the previous month.
+Since Date(year, month + 1, 0) is month 13, its previous month is December,
+and 0 means the last day of that month:
+    lastDay should be 31.
+
+Reactive Objects (State Variables) vs. Plain Object
+---------------------------------------------------
+When you declare a state variable, such as:
+  let selectedTime = $state<TimeSlot | null>(null)
+Svelte will create a state variable, or wraps the value with
+a reactive proxy. The proxy is not just the value but have other
+properties for Svelte to handle the reactivity.
+
+If the state variable is later on assigned, be careful. 
+  func handleTimeSelected(time: TimeSlot) {
+      selectedTime = time;  // This will generate an error.
+  }
+
+The reason why it will generate an error is because 'time' is a plain
+object (or instance) of type 'TimeSlot', while 'selectedTime' is a 
+proxy object. 
+
+How to Define Enums in TypeScript
+---------------------------------
+Example:
+export const CustomHttpStatus = {
+    NotLoggedIn:      550,
+    ...
+} as const;
+
+How to Parse Http Response
+--------------------------
+Http Responses are streamed back, which means that contents can only
+be read once. 
+The code below calls 'const text = await resp.text()'.
+    if (!resp.ok) {
+        const text = await resp.text(); // 👈 FIRST read: consumes the response body
+        if (resp.status !== 550) {
+            // ... return error
+        }
+        // ⚠️ But if status IS 550, you FALL THROUGH to the JSON parsing!
+    }
+
+Once this function is called, the response content was retrieved and is gone.
+You cannot call it again, such as:
+    const json_value = await resp.json() as JimoResponse
+
+The intent is that if resp.status != 555, report the error. Otherwise, 
+I know the results should be a JSON doc. It calls 'await resp.json()' again.
+This is an error.
+
+We can either defer calling 'resp.text()' or let JSON parse the content returned
+by 'resp.text()'.
+
+How to Add a New Routing Path
+-----------------------------
+When working in DEV mode, the URL is localhost:5173, but the backend is localhost:8080.
+When sending an http request to the backend, the backend looks for routes on localhost:5173.
+But routes are not registered on localhost:5173. They are registered on localhost:8080.
+
+When this happens, we need to config vite.config.js to proxy the root, such as:
+ChenWeb/web/vite.config.ts:
+	server: {
+		port: 5173,
+    	hmr: {
+      		// Connect HMR WebSocket to :5173 directly
+      		host: 'localhost',
+      		port: 5173,
+      		protocol: 'ws'
+    	},
+    	proxy: {
+      		'/api': {
+        		  target: 'http://localhost:8080',
+        		  changeOrigin: true,
+        		  secure: false,
+      		},
+			    '/auth': {
+				      target: 'http://localhost:8080',
+				      changeOrigin: true,
+				      secure: false,
+	  		  },
+			    '/shared_api': {
+        		  target: 'http://localhost:8080',
+        		  changeOrigin: true,
+			    }
+    	}
+  	},
+
+The 'server' configuration tells:
+  - The server is at localhost:5173,
+  - It proxies '/api', '/auth' and '/shared_api' to 'localhost:8080'
+
+Note: need to configure the Use function, too:
+Each application should configure its echo.HandlerFunc, such as the one 
+in ChenWeb/server/api/routes.go:
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			path := c.Request().URL.Path
+
+			// Public endpoints.
+			// IMPORTANT: need to load from a configuration file!
+			publicPaths := map[string]bool{
+            	"/":              true,
+            	"/login":         true,
+            	"/example-login": true,
+            	// Add other public pages here
+        	}
+
+			// Let Echo handle / so we can redirect it
+            if publicPaths[path] {
+				log.Printf("Public URL:%s (CWB_RTS_080)", path)
+            	return next(c)
+        	}
+
+			// Paths not starting with "/api", "/auth", "/shared_api", or "/_" are treated as frontend routes
+        	if !strings.HasPrefix(path, "/api") &&              // handle '/api'
+               !strings.HasPrefix(path, "/auth") &&           // handle '/auth'
+               !strings.HasPrefix(path, "/shared_api") &&     // handle 'shared_api'
+               path != "/_" &&
+               !strings.HasPrefix(path, "/_/") {
+  ...
+
+Do not add too many root routes, such as '/api', '/auth', and '/shared_api' because
+each requires at least two configurations, one in vite.config.ts and one in the routes.go.
+
+We can, theoretically and practically, use just one root: '/api'. The root can then
+have sub-categories, such as:
+  /api/rag
+  /api/auth
+  /api/shared_api
+  /api/whatever
+
+Buttons and Submit
+------------------
+In HTML, any button inside a <form> that does not have type = "button" (or type="reset")
+will be treated as a submit button. If you do not want a button to behave like a submit,
+make sure you type it correctly.
+
+How to Configure a Component to be Import-Capable
+-------------------------------------------------
+  - Create an index.ts, if not yet
+  - Add export { default as <your-component-name> } from './<the-file-name>.svelte'
+  - To import it:
+    import {<your-component-name>} from '$lib/<the-path>/index.js'
+
+ Cannot use relative URL (/auth/me) with global fetch — use `event.fetch`
+ ------------------------------------------------------------------------
+ When a component is created in the frontend, its server side may not be 
+ ready yet. If the component tries to fetch onMount, the backend may generate
+ this error.
+
+ To prevent this, add a condition.
+ Below is an example (Shared/web/src/lib/stores/auth.svelte.ts):
+    function createAuthStore() {
+      ...
+      const checkAuthStatus = async () => {
+          ...
+          const response = await fetch('/auth/me', ...)
+          ...
+      }
+
+      // Don't call 'checkAuthStatus()' immediately:
+      checkAuthStatus()     // Don't do this
+      if (typeof window !== 'undefined') {
+          // This means this code is running in a browser, not SSR.
+          checkAuthStatus() // Now, it should be okey
+      }
+    }
+
+How to Check a String Variable is a valid non-empty String in TypeScript
+------------------------------------------------------------------------
+Check its type and length:
+    function isValidNonEmptyString(str: unknown): str is string {
+      return typeof str === 'string' && str.length > 0;
+    }
+
+    // Usage
+    const myString = "hello";
+    if (isValidNonEmptyString(myString)) {
+      // myString is now typed as string (not unknown)
+      console.log(myString.toUpperCase());
+    }
+
+Go Data Type system
+-------------------
+  - interface{} (or any since Go 18) covers all data types in Go
+  - Go data type classifications include:
+    1. Basic Types
+       - Boolean: bool
+       - Numeric: int, int64, float64, complex128
+       - String: string
+    2. Composite/Reference Types
+       - Arrays: [4]int
+       - Slices: []int
+       - Maps: map[string]int
+       - Structs: struct{ Name string }
+       - Pointers: *int
+       - Functions: func() int
+       - Channels: chan int
+       - Interfaces: interface{}
+    3. Interface Types
+       - Empty interface: interface{}
+
+About interface{}
+  - interface{} accepts any data type, or any type can be assigned to interface{}
+  - The interface{} stores both the value and its concrete type
+  - To use the value of interface{}, you must assert it to a concrete type:
+    var x interface{} = 42
+    if num, ok := x.(int); ok {
+        result := num + 1
+    }
+
+Subcript to Events 
+------------------
+PocketBase supports subscription (or listens to) events:
+  - A collection (or a table) may have 'create', 'update', 'delete' events
+  - Anyone can subscribe to these events
+  - When one client performs an action on the collection, such as add, delete 
+    or modify records, Pocketbase broadcasts the event to all its subscribers
+    (through Web Socket, I believe).
+  - A client that subscribes to the events of the collection is called back.
+    It can use the event to update its local pages.
+  - When a client exits, it should call a function to unsubscribe the event.
+
+Below is an example:
+    let unsubscribeFunc = () => {};
+    pb.collection('documents')
+      .subscribe('*', (e) => {
+        processDocumentUpdate(e.record, e.action as actionType);
+      })
+      .then((unsubscribe) => {
+        unsubscribeFunc = unsubscribe;
+      });
+
+    return () => {
+      unsubscribeFunc();
+    };
+
+This code subscribes to all the events on the collection 'documents'.
+The 'subscribe' function will return an unsubscribe function.
+
+How to Serve Files
+------------------
+  - Assume files are stored in rootdir/data
+  - Files can be stored in sub-directories
+  - Configure vite.config.ts, to add:
+      '/files': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false
+      }
+    where 'files' serve as the root of file url, such as:
+    localhost:5173/files/username/filename
+  - In router.go:
+    func RegisterRoutes() (*echo.Echo, error) {
+        ...
+        e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+           ...
+           if !strings.HasPrefix(path, "/api") &&
+              !strings.HasPrefix(path, "/files") && ...
+        })
+  - Add the route:
+    In router.go:
+        e.GET("/files/:customerId/:filename", func(c echo.Context) error {...})
+
+    Note: ":customerId" expects a string as a variable that identifies the user
+    ":filename" is a variable that identifies the file.
+
+How to Compose and/or Expand a Type in TypeScript
+-------------------------------------------------
+TypeScript is pretty powerful in composing types.
+The operator '&' can be used to compose two or more types into one.
+    type MyType1 = {
+        field1: string
+    }
+
+    type MyType2 = {
+        field2: string
+    }
+
+    type MyComposedType = {
+        field3: string
+    } & MyType1 & MyType2
+
+In addition, we may define:
+    type ExpandType<T> = unknown extends T
+        ? { expand?: unknown }
+        : { expand: T }
+to 'expand' a type by adding a new attribute named 'expand'.
+Note: the only case 'unknown extends T' is true is T is itself unknown.
+The above expression simply says:
+    type ExpandType<T> is {expand?: unknown} if T is unknown.
+    Otherwise, it is {expand: T}
+The "?" in {expand?: unknown} is the author's opinion. It reflects the fact that if T is unknown, the type of 'expand' is unknown, or uncertain. The attribute 'expand' is thus viewed as optional. If T is a concrete type, it is 'certain'. The attribute 'expand' is, therefore, not optional but required. 
+The choice of '?' is opinionated, but it is a common practice.
+
+Below is an example.
+    type ExpandType<T> = unknown extends T
+        ? { expand?: unknown }
+        : { expand: T }
+
+    // System fields
+    export type BaseSystemFields<T = unknown> = {
+    	id:             string
+    	tableName:      string
+    } & ExpandType<T>
+
+    type DocumentRcd = {
+        file_url: string
+        user_name: string
+    }
+
+    type PossibleAdditionalFields = {
+        phone_number string
+    }
+
+    export type DocumentRecord<Texpand = unknown> = Required<DocumentRcd> & BaseSystemFields<Texpand>
+
+    const my_record : DocumentRecord<PossibleAdditionalFields> = {...}
+
+my_record will be:
+    {
+        file_url:   string    // from DocumentRcd
+        user_name:  string    // from DocumentRcd
+        id:         string    // from BaseSystemFields
+        tableName:  string    // from BaseSystemFields
+        expand:
+        {
+            phone_number: string  // from PossibleAdditionalFields
+        }
+    }
+
+If:
+    const my_record : DocumentRecord<unknown> = {...}
+my_record will be:
+    {
+        file_url:   string    // from DocumentRcd
+        user_name:  string    // from DocumentRcd
+        id:         string    // from BaseSystemFields
+        tableName:  string    // from BaseSystemFields
+        expand?:    unknown
+    }
+
+How TypeScript Handles Duplicated Field Names in Composing Types
+----------------------------------------------------------------
+  - Types Compatible: pick the narrow one:
+    field1: string | number
+    field1: number
+    result: field1: number
+  - Types Not Compatible: type = never!!!
+    field1: string
+    field1: number
+    result: field1: never
+  - Types Are Identical: de-duplicate
+    field1: string
+    field1: string
+    result: field1: string
+  - The above applies recursively
+
+How to Check An Array Is Not Empty in TypeScript
+------------------------------------------------
+if (Array.isArray(myArray) && myArray.length > 0) {
+  // It's a real array and has at least one element
+}
+
+How to Prevent SSR
+------------------
+Add the following line in a file that you do not want to run it in the backend:
+  export ssr = false
+
+By default, ssr = true
+
+How to Cast and Assert a Type in Go
+-----------------------------------
+Example:
+const (
+    GreaterThan     Operator = ">"
+    GreaterEqual    Operator = ">="
+    Equal           Operator = "="
+    LessEqual       Operator = "<="
+    LessThan        Operator = "<"
+    NotEqual        Operator = "<>"
+    Contain         Operator = "contain"
+    Prefix          Operator = "prefix"
+)
+
+type CondDef struct {
+    FieldName       string      `json:"field_name"`
+    Opr             string      `json:"opr"`
+    Value           interface{} `json:"value"`
+}
+
+To cast Opr (string) to Operator:
+  opr := Operator(cond.Opr)
+
+This is different from cond.Opr.(Operator), which is Type Assertion.
+You cannot assert a type unless it is interface{}, any or other interfaces.
+Since condOpr type is string, we cannot type assert it.
+
+How to Compose a Complex Type in TypeScript
+-------------------------------------------
+Below is an example from Pochetbase:
+export type TemplateQuestionsRecord = {
+	  id:         string
+	  order:      number
+	  question:   RecordIdString
+	  required?:  boolean
+	  template:   RecordIdString
+	  updated:    IsoAutoDateString
+	  created:    IsoAutoDateString
+}
+
+export type QuestionsResponse<Tchoices = unknown, Texpand = unknown> = 
+    Required<QuestionsRecord<Tchoices>> & BaseSystemFields<Texpand>
+
+export type BaseSystemFields<T = unknown> = {
+	  id:             RecordIdString
+	  collectionId:   string
+	  collectionName: Collections
+} & ExpandType<T>
+
+export type TemplateQuestionsResponse<Texpand = unknown> = Required<TemplateQuestionsRecord> & BaseSystemFields<Texpand>
+
+type TemplateQuestionLink = TemplateQuestionsResponse<{ question: QuestionsResponse }>;
+
+What is TemplateQuestionLink?
+- TgemplateQuestionLink = Required<TemplateQuestionsRecord> & BaseSystemFields<{question: QuestionResponse}>
+=>
+  {
+	  id:         string
+	  order:      number
+	  question:   RecordIdString
+	  required?:  boolean
+	  template:   RecordIdString
+	  updated:    IsoAutoDateString
+	  created:    IsoAutoDateString
+  } BaseSystemFields<{question: QuestionResponse}>
+=> 
+  {
+    // From TemplateQuestionRecord
+	  id:             string
+	  order:          number
+	  question:       RecordIdString
+	  required?:      boolean
+	  template:       RecordIdString
+	  updated:        IsoAutoDateString
+	  created:        IsoAutoDateString
+
+    // From BaseSystemFields
+	  collectionId:   string
+	  collectionName: Collections
+
+    // From ExpandType<T>
+    expand: 
+    {
+        question: QuestionResponse
+    }
+  }
+
+How to Use a Library from Another Project
+-----------------------------------------
+Assume tax needs to use Shared:
+  in Shared/svelte, run:
+    bun link
+
+  in tax/web, run:
+    bun link @chendingplano/shared
+  
+Then in tax/, we can use symbols defined in Shared/, such as:
+  import { db_store } from '@chendingplano/shared';
+
+How to Compose Struct
+---------------------
+// The shape of CollectionRequest:
+// If CollectionRequest:
+//  {
+//      <all attributes in CollectionRequestsRecord, required>
+//      reminderRecipientEmails: string[],
+//      <attributes from BaseSystemFields>
+//      expand?: unknown
+// }
+//
+// If CollectionRequest<{project: ProjectsResponse}>;
+//  {
+//      <all attributes in CollectionRequestsRecord, required>
+//      reminderRecipientEmails: string[],
+//      <attributes from BaseSystemFields>
+//      expand?: {
+//          <properties from ProjectsResponse>
+//      }
+// }
+// In other word, it is CollectionRequestsRecord + BaseSystemFields + ProjectsResponse
+// If CollectionRequest<{project: ProjectsResponse}>;
+
+	id:                         string
+	project:                    RecordIdString
+	taxYear:                    number
+	sent?:                      boolean
+	dueDate?:                   IsoDateString
+	lastActivity?:              IsoDateString
+	scope:                      CollectionRequestsScopeOptions
+	template?:                  RecordIdString
+	disclaimerAcceptedAt?:      IsoDateString
+	status:                     CollectionRequestsStatusOptions
+	reminderRecipientEmails?:   null | TreminderRecipientEmails
+	scheduledSendAt?:           IsoDateString
+	sendToAllContacts?:         boolean
+	created:                    IsoAutoDateString
+	updated:                    IsoAutoDateString
+  reminderRecipientEmails
+
+  	id: 			RecordIdString
+	collectionId: 	string
+	collectionName: Collections
+
+  project: {
+    	id:                 string
+	assignedPreparer?:  RecordIdString
+	ballInCourt:        ProjectsBallInCourtOptions
+	client:             RecordIdString
+	created:            IsoAutoDateString
+	dueDate?:           IsoDateString
+	isOpen?:            boolean
+	projectName:        string
+	projectStage:       ProjectsProjectStageOptions
+	projectStatus:      ProjectsProjectStatusOptions
+	projectType:        ProjectsProjectTypeOptions
+	startDate?:         IsoDateString
+	updated:            IsoAutoDateString
+  }
+}
+
+Bug: global is not defined
+--------------------------
+The browser (Chrome) reported errors:
+app.js:115 ReferenceError: global is not defined
+    at node_modules/@iarna/toml/lib/create-date.js (@iarna_toml.js?v=16dff8dc:189:20)
+    at __require (chunk-G3PMV62Z.js?v=16dff8dc:8:50)
+    at node_modules/@iarna/toml/lib/toml-parser.js (@iarna_toml.js?v=16dff8dc:259:22)
+    at __require (chunk-G3PMV62Z.js?v=16dff8dc:8:50)
+    at node_modules/@iarna/toml/parse-string.js (@iarna_toml.js?v=16dff8dc:1589:22)
+    at __require (chunk-G3PMV62Z.js?v=16dff8dc:8:50)
+    at node_modules/@iarna/toml/parse.js (@iarna_toml.js?v=16dff8dc:1736:23)
+    at __require (chunk-G3PMV62Z.js?v=16dff8dc:8:50)
+    at node_modules/@iarna/toml/toml.js (@iarna_toml.js?v=16dff8dc:2007:22)
+    at __require (chunk-G3PMV62Z.js?v=16dff8dc:8:50)
+
+Claude helped find the reasons:
+Now I can see the issue! The error ReferenceError: global is not defined is coming from the @iarna/toml package (line 68 in package.json). This package is trying to access the Node.js global object, which doesn't exist in the browser environment. Let me search for where this package is being imported. That is, it tries to find who is trying to import the file.
+
+This is done by:
+Grep "@iarna/toml" (in /Users/cding/Workspace/Shared)
+
+Root Cause
+The @iarna/toml package at line 2 of UtilFuncs.ts is imported at the module level. When Vite bundles this for the browser, the TOML library tries to access Node.js's global object, which doesn't exist in browsers, causing the error and preventing onMount() from being called.
+
+The solution is to add a Vite configuration to polyfill the global object for browser compatibility.
+This is done by adding 'global: 'globalThis' in tax/vite.config.ts:
+import devtoolsJson from 'vite-plugin-devtools-json';
+import tailwindcss from '@tailwindcss/vite';
+import { sveltekit } from '@sveltejs/kit/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [tailwindcss(), sveltekit(), devtoolsJson()],
+  define: {
+    __SVELTE_VERSION__: JSON.stringify('5.0.0'),
+    global: 'globalThis',
+  },
+
+Summary
+Root Cause Analysis
+  - The error ReferenceError: global is not defined was preventing the dashboard page from loading and thus onMount() was never called. Chain of events:
+  - The dashboard page imports from @chendingplano/shared package
+  - The shared package's UtilFuncs.ts:2 imports @iarna/toml at module level
+  - @iarna/toml is a Node.js library that references the global object
+  - In browsers, global doesn't exist (only window and globalThis do)
+  - This causes a runtime error before any component code executes
+Since the error occurs during module initialization, onMount() never gets a chance to run
+
+The config: global: 'globalthis' in vite.config.ts tells Vite to replace all references to global with globalThis (which exists in both Node.js and browser)
+
+Notes  
+-----
+table-questionnaire-questions.ts
+
+Differences Between echo.Context and Pocketbase
+-----------------------------------------------
+echo is the default (backend) struct. Pocketbase uses:  *core.RequestEvent
+Default:
+  func HandleGoogleLogin(c echo.Context) error {...}
+Pocketbase:
+  func HandleGoogleLoginPocketbase(e *core.RequestEvent) error {...}
+
+Since Pocketbase changed the context type, the ways of retrieving
+values from the context are different. Below is a comparison between
+the two:
+
+Echo (c)              PocketBase (e)
+=============================================================================
+c.Request()           e.Request
+c.Response()          e.Response
+c.QueryParam("x")     e.Request.URL.Query().Get("x")
+c.FormValue("x")      e.Request.FormValue("x") (after e.Request.ParseForm())
+c.JSON(200, data)     e.Json(200, data)
+c.String(200, "ok")   e.String(200, "ok")
+c.Redirect(307, url)  http.Redirect(e.Response, e.Request, url, http.
+                      StatusTemporaryRedirect)
+=============================================================================
+
+Pocketbase Registers Routes
+---------------------------
+func RegisterRoutes(r *router.Router[*core.RequestEvent]) {
+	r.GET("/auth/google/login", auth.HandleGoogleLogin)
+	r.GET("/auth/google/callback", auth.HandleGoogleCallback)
+  ...
+}
+
+Function signature MUST be:
+func MyRouteHandler(r *core.RequestEvent) {
+  ...
+}
+
+Differences between json.Unmarshal(...) and json.NewDecoder(...) 
+----------------------------------------------------------------
+Both parse inputs to JSON docs. Unmarshal(...) requires reading 
+all contents into memory before parsing it, which NewDecoder(...)
+requires an io.Reader and reads data in stream.
+In addition, it can parse multiple JSON documents:
+  func (c echo.Context) {
+      r := c.Request()
+      req JimoRequest
+      reqs []JimoRequest
+      while true {
+          if err := json.NewDecoder(r.Body).Decode(req); err == nil {
+              reqs.push(req)
+          } else {
+              // Finished reading.
+              berak
+          }
+      }
+  }
+
+Use json.Unmarshal for small JSON docs. Otherwise, use json.NewDecoder.
+
+How to Handle echo.Context.Body
+-------------------------------
+IMPORTANT: echo.Context.Body is not the body. It is an io.Reader (
+actually, it is an io.ReadClose)
+
+There are two methods to retrieve body:
+  func myfunc(c echo.Context) {
+      // body is []byte. It is safe. No need to close it.
+      // It reads all data in request.
+      body, err := io.ReadAll(c.Request().Body)
+
+      // 
+      jimo_request ApiTypes.JimoRequest
+      json.NewDecoder(c.Request().Body).Decode(&jimo_request)
+  }
+
+Types of Request and Response
+-----------------------------
+Request (echo.Context.Request()):
+  Data Type: *http.Request
+   method: c.Request().Method
+      url: c.Request().URL
+  headers: c.Request().Header
+  body, _: io.ReadAll(c.Request().Body)
+
+Response:
+  Data Type: *echo.Response (Echo's wrapper around http.ResponseWriter)
+  
+{
+    "day": "31 12:00:00.000Z",
+    "hour": "14",
+    "minute": "30",
+    "month": "12",
+    "year": "2025"
+}
+
+How to Get env var in Go
+------------------------
+import (
+    "fmt"
+    "os"
+)
+
+func main() {
+    // Get an environment variable
+    value := os.Getenv("MY_VAR")
+    fmt.Println("MY_VAR =", value)
+
+    // Check if it exists (os.Getenv returns empty string if not set)
+    if value == "" {
+        fmt.Println("MY_VAR is not set")
+    }
+}

@@ -3,7 +3,7 @@
   import {onMount} from 'svelte'
   import QueryArea from './QueryArea.svelte';
   import PromptList from './PromptList.svelte';
-  import AddPromptForm from './AddPromptForm.svelte';
+  import AddPromptForm from './AddPromptForm2.svelte';
   import UploadPrompts from './UploadPrompts.svelte';
   import {GetStoreByName} from "@chendingplano/shared"
   import type {JimoRequest} from '@chendingplano/shared';
@@ -133,8 +133,9 @@
       onclick={() => {
         $InMemStore = {
           ...$InMemStore,
-          CrtView: 'add'
+          CrtView: 'list'
         }
+        console.log("'list' button clicked (CWB_PST_134), CrtView:" + $InMemStore.CrtView)
       }}
     >
       View Prompts

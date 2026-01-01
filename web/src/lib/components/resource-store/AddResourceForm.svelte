@@ -107,7 +107,7 @@
 
         if (response.ok) {
             const errorData = await response.json();
-            alert("Prompt added to the database (CWB_PST_080+" + errorData.loc + ")")
+            alert("Prompt added to the database (CWB_ARF_080:" + errorData.loc + ")")
             $InMemStore = {
                 ...$InMemStore,
                 CachedRecords: [...$InMemStore.CachedRecords, $InMemStore.CrtRecord],
@@ -117,13 +117,13 @@
         }
         else {
           if (response.status === 401) {
-            alert("Operation rejected (401):" + response.statusText + " (CWB_APF_092)")
+            alert("Operation rejected (401):" + response.statusText + " (CWB_ARF_092)")
             isSubmitting = false
             return
           }
 
           if (response.status === 404) {
-            alert("Route not found (404):" + response.statusText + " (CWB_APF_098)")
+            alert("Route not found (404):" + response.statusText + " (CWB_ARF_098)")
             isSubmitting = false
             return
           }

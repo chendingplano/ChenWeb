@@ -6,5 +6,6 @@ import (
 
 func CreateTables() error {
     appdatastores.CreateProcessStatusTable()
+    appdatastores.CreateDocumentsTable()
     return nil
 }
