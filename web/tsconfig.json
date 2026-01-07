@@ -9,14 +9,7 @@
 		"skipLibCheck": true,
 		"sourceMap": true,
 		"strict": true,
-		"moduleResolution": "bundler"
-	},
-	"paths": {
-		"@/*": ["src/*"],
-		"$lib/*": ["src/lib/*"],
-		"$types/*": ["src/types/*"],
-		"$components/": ["src/lib/components/form"],
-		"$components/*": ["src/lib/components/form/*"],
+		"moduleResolution": "bundler",
 	},
 	"include": ["src/**/*", "src/types/**/*"]
 	// Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias

@@ -19,3 +19,4 @@ node_modules
 *.tar
 *.gz
 *.pt
+tax/pb_data

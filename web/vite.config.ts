@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
+// Read from .env (or process.env)
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8088';
+
 export default defineConfig({
 	plugins: [
 		tailwindcss(),
@@ -14,6 +17,9 @@ export default defineConfig({
 			outdir: './src/lib/paraglide'
 		})
 	],
+	worker: {
+		format: 'es'
+	},
 	server: {
 		port: 5173,
     	hmr: {
@@ -24,17 +30,17 @@ export default defineConfig({
     	},
     	proxy: {
       		'/api': {
-        		target: 'http://localhost:8080',
+        		target: API_BASE_URL,
         		changeOrigin: true,
         		secure: false,
       		},
 			'/auth': {
-				target: 'http://localhost:8080',
+				target: API_BASE_URL,
 				changeOrigin: true,
 				secure: false,
 	  		},
 			'/shared_api': {
-        		target: 'http://localhost:8080',
+        		target: API_BASE_URL,
         		changeOrigin: true,
 			}
     	}

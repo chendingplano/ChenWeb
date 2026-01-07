@@ -1,16 +1,16 @@
 <script lang="ts">
 	let currentPage = 'Intro';
 
-	let expandedMenus = {
+	let expandedMenus: Record<string, boolean> = {
 		Configuration: false,
 		Run: false
 	};
 
-	function handleMenuItemClick(itemName) {
+	function handleMenuItemClick(itemName: string) {
 		currentPage = itemName;
 	}
 
-	function toggleMenu(menuName) {
+	function toggleMenu(menuName: string) {
 		expandedMenus[menuName] = !expandedMenus[menuName];
 	}
 </script>

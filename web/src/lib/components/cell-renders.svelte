@@ -1,10 +1,12 @@
-// About This File:
-// This file contains custom cell renderers. They are used as implementation examples.
 <script>
-	import { string } from "zod/v4";
-
+	import { string } from 'zod/v4';
 </script>
 
+// About This File: // This file contains custom cell renderers. They are used as implementation
+examples.
+<!--
+The code snippets below are React components and functions.
+To use them in Svelte, you would need to adapt them accordingly!
 // Source: https://www.ag-grid.com/react-data-grid/deep-dive/
 // Custom Cell Renderer (Display logos based on cell value)
 const CompanyLogoRenderer = (params: CustomCellRendererProps) => (
@@ -75,3 +77,41 @@ const dateFormatter = (params: ValueFormatterParams): string => {
     day: "numeric",
   });
 };
+
+Below is what ChatGPT recommended:
+<script lang="ts">
+  import type { CustomCellRendererProps } from 'ag-grid-community';
+
+  export let params: CustomCellRendererProps;
+</script>
+
+<span
+  style="display: flex; height: 100%; width: 100%; align-items: center;"
+>
+  {#if params.value}
+    <img
+      alt="{params.value} Flag"
+      src="https://www.ag-grid.com/example-assets/space-company-logos/{params.value.toLowerCase()}.png"
+      style="display: block; width: 25px; height: auto; max-height: 50%; margin-right: 12px; filter: brightness(1.1);"
+    />
+  {/if}
+
+  <p
+    style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
+  >
+    {params.value}
+  </p>
+</span>
+
+Save it as CompanyLogoRenderer.svelte.
+
+Below is how to use it in Ag-Grid in Svelte: 
+import CompanyLogoRenderer from './CompanyLogoRenderer.svelte';
+
+const columnDefs = [
+  {
+    field: 'company',
+    cellRenderer: CompanyLogoRenderer
+  }
+];
+-->

@@ -12,24 +12,237 @@ import (
 	_ "github.com/lib/pq"
 )
 
+func CreateDocumentsTable() error {
+	db_type := ApiTypes.DatabaseInfo.DBType
+	table_name := config.GlobalConfig.AppTableNames.TableName_Documents
+	var stmt string
+	var db *sql.DB
+	const common_fields = "user_id 		VARCHAR(128) 	DEFAULT NULL, " +
+		"doc_name		VARCHAR(256) 	DEFAULT NULL, " +
+		"doc_no 		VARCHAR(256) 	DEFAULT NULL, " +
+		"doc_desc 		TEXT 			DEFAULT NULL, " +
+		"doc_summary 	TEXT 			DEFAULT NULL, " +
+		"doc_keywords	TEXT 			DEFAULT NULL, " +
+		"doc_tags 		TEXT 			DEFAULT NULL, " +
+		"file_url 		TEXT		 	NOT NULL, " +
+		"image_url 		TEXT			DEFAULT NULL, " +
+		"Doc_type		VARCHAR(32) 	NOT NULL, " +
+		"doc_source		VARCHAR(128) 	DEFAULT NULL, " +
+		"doc_scope		VARCHAR(32) 	NOT NULL, " +
+		"doc_status		VARCHAR(32) 	NOT NULL, " +
+		"process_status	VARCHAR(32) 	NOT NULL, " +
+		"created_at 	TIMESTAMP 		DEFAULT CURRENT_TIMESTAMP, " +
+		"updated_at 	TIMESTAMP 		DEFAULT CURRENT_TIMESTAMP"
+
+	switch db_type {
+	case ApiTypes.MysqlName:
+		stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" +
+			"doc_id BIGINT AUTO_INCREMENT PRIMARY KEY, " + common_fields +
+			") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
+		db = ApiTypes.DatabaseInfo.MySQLDBHandle
+
+	case ApiTypes.PgName:
+		stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" +
+			"doc_id BIGSERIAL PRIMARY KEY, " + common_fields + ")"
+		db = ApiTypes.DatabaseInfo.PGDBHandle
+
+	default:
+		err := fmt.Errorf("database type not supported:%s (CWB_DOC_044)", db_type)
+		log.Printf("***** Alarm:%s", err.Error())
+		return err
+	}
+
+	err := databaseutil.ExecuteStatement(db, stmt)
+	if err != nil {
+		error_msg := fmt.Errorf("failed creating table (CWB_DOC_051), err: %w, stmt:%s", err, stmt)
+		log.Printf("***** Alarm: %s", error_msg.Error())
+		return error_msg
+	}
+
+	log.Printf("Creating table '%s' success (CWB_DOC_056)", table_name)
+
+	return nil
+}
+
+/*
 type TableDocumentsDef struct {
-	DocID 			string `json:"doc_id"`
-	UserID 		   *string `json:"user_id"`
-	DocName 	   *string `json:"doc_name"`
-	DocNo 		   *string `json:"doc_no"`
-	DocDesc 	   *string `json:"doc_desc"`
-	DocSummary 	   *string `json:"doc_summary"`
-	DocKeywords    *string `json:"doc_keywords"`
-	DocTags 	   *string `json:"doc_tags"`
-	FileURL 		string `json:"file_url"`
-	ImageURL	   *string `json:"image_url"`
-	DocType 		string `json:"doc_type"`
-	DocSource 	   *string `json:"doc_source"`
-	DocScope 		string `json:"doc_scope"`
-	DocStatus 		string `json:"doc_status"`
-	ProcessStatus 	string `json:"process_status"`
-	CreatedAt 	   *string `json:"created_at"`
-	UpdatedAt 	   *string `json:"updated_at"`
+	DocID         string  `json:"doc_id"`
+	UserID        *string `json:"user_id"`
+	DocName       *string `json:"doc_name"`
+	DocNo         *string `json:"doc_no"`
+	DocDesc       *string `json:"doc_desc"`
+	DocSummary    *string `json:"doc_summary"`
+	DocKeywords   *string `json:"doc_keywords"`
+	DocTags       *string `json:"doc_tags"`
+	FileURL       string  `json:"file_url"`
+	ImageURL      *string `json:"image_url"`
+	DocType       string  `json:"doc_type"`
+	DocSource     *string `json:"doc_source"`
+	DocScope      *string `json:"doc_scope"`
+	DocStatus     string  `json:"doc_status"`
+	ProcessStatus *string `json:"process_status"`
+	CreatedAt     *string `json:"created_at"`
+	UpdatedAt     *string `json:"updated_at"`
+}
+*/
+
+type TableDocumentsDef struct {
+	DocID         string `json:"doc_id"`
+	UserID        string `json:"user_id"`
+	DocName       string `json:"doc_name"`
+	DocNo         string `json:"doc_no"`
+	DocDesc       string `json:"doc_desc"`
+	DocSummary    string `json:"doc_summary"`
+	DocKeywords   string `json:"doc_keywords"`
+	DocTags       string `json:"doc_tags"`
+	FileURL       string `json:"file_url"`
+	ImageURL      string `json:"image_url"`
+	DocType       string `json:"doc_type"`
+	DocSource     string `json:"doc_source"`
+	DocScope      string `json:"doc_scope"`
+	DocStatus     string `json:"doc_status"`
+	ProcessStatus string `json:"process_status"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+var TableDocumentsFieldDefs = []ApiTypes.FieldDef{
+	{
+		FieldName:   "doc_id",
+		DataType:    "string",
+		Required:    true,
+		ReadOnly:    true,
+		ElementType: "",
+		Desc:        "Identifies a doc",
+	},
+	{
+		FieldName:   "user_id",
+		DataType:    "string",
+		Required:    true,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "foreign key, identifies a user who owns the doc",
+	},
+	{
+		FieldName:   "doc_name",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the name of a document",
+	},
+	{
+		FieldName:   "doc_no",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the number (code) of a document",
+	},
+	{
+		FieldName:   "doc_desc",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the description of a document",
+	},
+	{
+		FieldName:   "doc_summary",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the summary of a document",
+	},
+	{
+		FieldName:   "doc_keywords",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the keywords for a document",
+	},
+	{
+		FieldName:   "doc_tags",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the tags for a document",
+	},
+	{
+		FieldName:   "file_url",
+		DataType:    "string",
+		Required:    true,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the file URL for a document",
+	},
+	{
+		FieldName:   "image_url",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the file URL for a document",
+	},
+	{
+		FieldName:   "doc_type",
+		DataType:    "string",
+		Required:    true,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the type of a document",
+	},
+	{
+		FieldName:   "doc_source",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the source of a document",
+	},
+	{
+		FieldName:   "doc_scope",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the scope of a document",
+	},
+	{
+		FieldName:   "doc_status",
+		DataType:    "string",
+		Required:    true,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the status of a document",
+	},
+	{
+		FieldName:   "process_status",
+		DataType:    "string",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the processing status of a document",
+	},
+	{
+		FieldName:   "create_at",
+		DataType:    "timestamp",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the time when the record was created",
+	},
+	{
+		FieldName:   "update_at",
+		DataType:    "timestamp",
+		Required:    false,
+		ReadOnly:    false,
+		ElementType: "",
+		Desc:        "the time when the record was last updated",
+	},
 }
 
 const (
@@ -125,60 +338,7 @@ const (
 	DocumentsField_UpdatedAt = `
 		Field 'updated_at': mandatory, the last updated time.
 	`
-)	
-	
-func CreateDocumentsTable() error {
-	db_type := ApiTypes.DatabaseInfo.DBType
-	table_name := config.GlobalConfig.AppTableNames.TableName_Documents
-    var stmt string
-	var db *sql.DB
-	const common_fields = 
-            "user_id 		VARCHAR(128) 	DEFAULT NULL, " +
-            "doc_name		VARCHAR(256) 	DEFAULT NULL, " +
-            "doc_no 		VARCHAR(256) 	DEFAULT NULL, " +
-            "doc_desc 		TEXT 			DEFAULT NULL, " +
-            "doc_summary 	TEXT 			DEFAULT NULL, " +
-            "doc_keywords	TEXT 			DEFAULT NULL, " +
-            "doc_tags 		TEXT 			DEFAULT NULL, " +
-            "file_url 		TEXT		 	NOT NULL, " +
-            "image_url 		TEXT			DEFAULT NULL, " +
-            "Doc_type		VARCHAR(32) 	NOT NULL, " +
-            "doc_source		VARCHAR(128) 	DEFAULT NULL, " +
-            "doc_scope		VARCHAR(32) 	NOT NULL, " +
-            "doc_status		VARCHAR(32) 	NOT NULL, " +
-            "process_status	VARCHAR(32) 	NOT NULL, " +
-            "created_at 	TIMESTAMP 		DEFAULT CURRENT_TIMESTAMP, " +
-            "updated_at 	TIMESTAMP 		DEFAULT CURRENT_TIMESTAMP"
-
-    switch db_type {
-    case ApiTypes.MysqlName:
-         stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" +
-		 	    "doc_id BIGINT AUTO_INCREMENT PRIMARY KEY, " + common_fields +
-            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
-		 db = ApiTypes.DatabaseInfo.MySQLDBHandle
-
-    case ApiTypes.PgName:
-         stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" + 
-		 		"doc_id BIGSERIAL PRIMARY KEY, " + common_fields + ")"
-		 db = ApiTypes.DatabaseInfo.PGDBHandle
-
-    default:
-        err := fmt.Errorf("database type not supported:%s (CWB_DOC_044)", db_type)
-        log.Printf("***** Alarm:%s", err.Error())
-        return err
-    }
-
-    err := databaseutil.ExecuteStatement(db, stmt)
-    if err != nil {
-        error_msg := fmt.Errorf("failed creating table (CWB_DOC_051), err: %w, stmt:%s", err, stmt)
-        log.Printf("***** Alarm: %s", error_msg.Error())
-        return error_msg
-    }
-
-    log.Printf("Creating table '%s' success (CWB_DOC_056)", table_name)
-
-    return nil
-}
+)
 
 // AddDocumentsRecord inserts a new document record into the documents table
 func AddDocumentsRecord(db *sql.DB, tableName string, record TableDocumentsDef) error {
@@ -333,29 +493,29 @@ func QueryDocuments(db *sql.DB, tableName string, conditions []QueryCondition, l
 // GenerateRandomRecords generates N random document records for testing purposes
 func GenerateRandomRecords(numRecords int) []TableDocumentsDef {
 	documentNames := []string{
-		"Product Requirements Document", 
-		"Technical Specification", 
+		"Product Requirements Document",
+		"Technical Specification",
 		"User Manual",
-		"API Documentation", 
-		"System Architecture Design", 
+		"API Documentation",
+		"System Architecture Design",
 		"Test Plan",
-		"Project Proposal", 
-		"Budget Report", 
+		"Project Proposal",
+		"Budget Report",
 		"Marketing Strategy",
-		"Research Paper", 
-		"Compliance Guidelines", 
+		"Research Paper",
+		"Compliance Guidelines",
 		"Security Policy",
-		"Employee Handbook", 
-		"Training Materials", 
+		"Employee Handbook",
+		"Training Materials",
 		"Release Notes",
-		"Business Plan", 
-		"Financial Statement", 
+		"Business Plan",
+		"Financial Statement",
 		"Quality Assurance Report",
-		"Installation Guide", 
-		"Configuration Manual", 
+		"Installation Guide",
+		"Configuration Manual",
 		"Troubleshooting Guide",
-		"Meeting Minutes", 
-		"Contract Agreement", 
+		"Meeting Minutes",
+		"Contract Agreement",
 		"Service Level Agreement",
 	}
 
@@ -418,26 +578,26 @@ func GenerateRandomRecords(numRecords int) []TableDocumentsDef {
 	for i := 0; i < numRecords; i++ {
 		docID := fmt.Sprintf("%d", i+1)
 		userID := generateUUID()
-		
+
 		// Generate random document name
 		docName := documentNames[i%len(documentNames)]
 		if i >= len(documentNames) {
 			docName = fmt.Sprintf("%s v%d", documentNames[i%len(documentNames)], (i/len(documentNames))+1)
 		}
-		
+
 		// Generate doc_no in format: <random-number>_<year>:<revision>
-		randomNum := 10000 + (i * 137) % 90000 // deterministic pseudo-random
+		randomNum := 10000 + (i*137)%90000 // deterministic pseudo-random
 		year := 2020 + (i % 5)
 		revision := 1 + (i % 5)
 		docNo := fmt.Sprintf("%d_%d:%d", randomNum, year, revision)
-		
+
 		// Generate description
 		docDesc := descriptions[i%len(descriptions)]
-		
+
 		// Generate summary
-		docSummary := fmt.Sprintf("This document contains %s with detailed information and guidelines.", 
+		docSummary := fmt.Sprintf("This document contains %s with detailed information and guidelines.",
 			documentNames[i%len(documentNames)])
-		
+
 		// Generate keywords
 		keywordSet := keywords[i%len(keywords)]
 		docKeywords := ""
@@ -447,7 +607,7 @@ func GenerateRandomRecords(numRecords int) []TableDocumentsDef {
 			}
 			docKeywords += kw
 		}
-		
+
 		// Generate tags
 		tagSet := tags[i%len(tags)]
 		docTags := ""
@@ -457,38 +617,36 @@ func GenerateRandomRecords(numRecords int) []TableDocumentsDef {
 			}
 			docTags += tag
 		}
-		
+
 		// Generate URLs
 		fileURL := fmt.Sprintf("https://storage.example.com/documents/%s.pdf", docID)
 		imageURL := fmt.Sprintf("https://storage.example.com/thumbnails/%s.png", docID)
-		
+
 		docType := docTypes[i%len(docTypes)]
 		docSource := docSources[i%len(docSources)]
 		docScope := docScopes[i%len(docScopes)]
 		docStatus := docStatuses[i%len(docStatuses)]
 		processStatus := processStatuses[i%len(processStatuses)]
-		
+
 		records[i] = TableDocumentsDef{
 			DocID:         docID,
-			UserID:        &userID,
-			DocName:       &docName,
-			DocNo:         &docNo,
-			DocDesc:       &docDesc,
-			DocSummary:    &docSummary,
-			DocKeywords:   &docKeywords,
-			DocTags:       &docTags,
+			UserID:        userID,
+			DocName:       docName,
+			DocNo:         docNo,
+			DocDesc:       docDesc,
+			DocSummary:    docSummary,
+			DocKeywords:   docKeywords,
+			DocTags:       docTags,
 			FileURL:       fileURL,
-			ImageURL:      &imageURL,
+			ImageURL:      imageURL,
 			DocType:       docType,
-			DocSource:     &docSource,
+			DocSource:     docSource,
 			DocScope:      docScope,
 			DocStatus:     docStatus,
 			ProcessStatus: processStatus,
-			CreatedAt:     nil, // Will be set by database
-			UpdatedAt:     nil, // Will be set by database
 		}
 	}
-	
+
 	log.Printf("Generated %d random document records (CWB_DOC_111)", numRecords)
 	return records
 }

@@ -758,6 +758,12 @@ How to Run npm run build
 Since we are using bun, run:
   bun run build
 
+The bun equivalent of npm install -D baseline-browser-mapping@latest is:
+  bun add -d baseline-browser-mapping@latest
+The rule is:
+  - 'install' == 'add'
+  - 'D' == 'd'
+
 How to run pnpm
 ---------------
   pnpm dlx shadcn-svelte@latest add sidebar-07
@@ -4205,3 +4211,141 @@ func main() {
         fmt.Println("MY_VAR is not set")
     }
 }
+
+How to Run Sqlite
+-----------------
+sqlite3 pb_data/data.db
+
+How to Start Qwen CLI
+---------------------
+qwen
+
+How to Clean the svelte-ket Cache
+---------------------------------
+  - cd ChenWeb/web
+  - rm -rf node_modules/.vite
+  - rm -rf .svelte-kit
+
+What Does Vite Do
+-----------------
+It does six things:
+  - Run a (development) server on port 5173
+  - Dynamic compile files, individually on demand
+  - Hot Module Replacement
+  - Dependency pre-bundle
+  - Compile-time Constants
+  - Proxy 
+
+Vite is specially designed to improve development efficiency. Running the Vite
+server should improve page latency. 
+
+Compiling files means:
+  - Convert .svelte files to JS and HTML
+  - Convert TypeScript code to JavaScript code
+  - Convert Tailwind to CSS 
+In other word, the run-time should see only JS and HTML.
+
+Hot Module Replacement is one of the most important features of Vite. Instead
+of replacing the entire application when you modify one file (such as one .svelte file),
+it just compiles that file, replace it with the existing one, and update it in browser.
+
+Proxy means when you send something in browser, if it sends to 5173 and it should
+be handled by the backend, it proxy the request to the backend port (such as 8080).
+
+How Browser Download Files
+--------------------------
+Vite does not create one, huge file. Instead, when you run:
+  npm run build or bun run build
+it creates many files, and does many optimization. For instance, one .svelte
+file is converted to one native file so that when we open the page, it downloads
+only that file, not the entire app, plus some common files, which are mostly cached.
+
+The cached files include:
+  - index.html 
+  - some basic common libraries (small enough)
+  - +layout, which is normally not big.
+  - CSS 
+
+Vite will optimize CSS to extract shared CSS into separate files so that they can
+be downloaded on demand and cashed and shared with others.
+
+Differences between Proxy and Reverse Proxy
+-------------------------------------------
+Proxy:
+  It sits between frontend and server and acts as the frontend.
+  Server does not see the real 'frontend' but only the proxy.
+  We can use proxy to:
+    - Hide frontend IP addresses and ports 
+    - Filter (reject) certain requests, such as a company can control
+      which Internet sites should be blocked/allowed.
+
+Reverse Proxy
+  It also sits between frontend and backend, but acts as the server.
+  Frontend sees only the reverse proxy, which routes requests to
+  real servers. Load balance happens here. 
+  In addition to load balance, it can also do many things, such as caching,
+  controls, etc.
+
+Why (Forward) Proxy Cannot Do Load balance
+------------------------------------------
+In most cases, clients demand servers, or the requests clients sent normally
+target specific servers. Forward proxy should not (normally) change it.
+Reverse proxy, on the other hand, acts as the server. It is, therefore, possible
+for reverse proxy to load balance requests to different servers.
+
+When doing load balance, the algorithm it uses matters because many calls 
+are stateful.
+
+Temp
+----
+// if (typeof window !== 'undefined') {
+// const use_auth_store = import.meta.env.VITE_USE_AUTH_STORE;
+// if (use_auth_store === "true") {
+//     checkAuthStatus();
+// }
+
+Client-User Binding
+-------------------
+In this page, when a user selects one or more records (there is a checkbox in the page) and presses the button "Invite to Portal" (Line 636), it will call the function "inviteSelectedClient(...)" (Line 417). Please help me implement this function:
+
+1. The process should be in the backend
+
+2. The system uses Pocketbase and PostgreSQL. Most tables are in Pocketbase unless they are explicitly specified as PostgreSQL in the following context.
+
+3. Below is the way how to retrieve var db *sql.DB:
+  import (
+      ...
+      "github.com/chendingplano/shared/go/api/ApiTypes"
+  )
+
+  db := ApiTypes.PG_DB_miner (db is *sql.DB, the handle for PostgreSQL ) 
+
+4. For each record, retrieve its email (there is a field named 'email'). If it is not a valid email, report errors
+
+5. Check whether the user with the email is in the table 'users', which is a Pocketbase collection. The file Shared/go/api/RequestHandlers/RequestContextPocket.go has a function to retrieve users by email (GetUserInfoByEmail(reqID string, email string)).
+
+6. If the user does not exist, create one by calling RequestContextPocket.go::UpsertUser(...), with: user_email = <email>, status="active", auth_type="email", user_id_type="email".
+
+7. Dynamically generate a token for each row, and call RequestContextPocket.go::UpdateTokenByEmail(reqID, <the-email>, <the-token>)
+
+8. Set the token to the Clients row (Clients are stored in PostgreSQL), i.e., set the token to the field v_token.
+
+9. Send an email to the email with a link <domain_name>/api/v1/client-user-confirm (similar to signup link), so that when the user clicks the link, it routes the request to tax/server/api/handlers/client-user-binding.go (to be created).
+
+10. The client-user-binding.go uses the token to retrieve the user (through RequestContextPocket.go::GetUserInfoByToken( ...), which returns ApiTypes.UserInfo (defined in ~/Workspace/Shared/go/api/ApiTypes/ApiTypes.go).
+
+11. If no user is found, it is an error. Report the error and ignore the current row. Otherwise, check whether the user has set the password (ApiTypes.UserInfo.Password). If not, open up a page to set the password (similar to the page to reset password). Save the password back to "users" (a Pocketbase collection) by RequestContextPocket::UpsertUser(...).
+
+12. Retrieve user_id from ApiTypes.UserInfo.UserId.
+
+13. Use the token to retrieve the PostgreSQL table "clients" (db name is "tax") by token using the following statement:
+  SELECT id as client_id FROM clients where v_token = "<the-token>"
+
+ If not found, it is an error. Otherwise, it retrieved client_id
+
+14. Insert a record to client_members, which is a PostgrelSQL table. This is a relation table that connects clients and users. It has the following fields:
+  - id (string, need to generate a uuid)
+  - client_id (string)
+  - user_id (string)
+  - created (timestamp, default to NOW())
+  - updated (timestamp, default to NOW())

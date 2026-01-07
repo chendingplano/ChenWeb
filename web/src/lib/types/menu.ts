@@ -41,3 +41,9 @@ export type ApiItem = BasicMenuItem & {
 
 export type Sidebar01MenuItem = NavigationMenuItem | NullMenuItem | UserMenuItem;
 export type Sidebar07MenuItem = NavigationMenuItem | NullMenuItem | UserMenuItem | TeamMenuItem;
+
+export enum TableNames {
+    Documents = "",
+    "Projects" = "projects",
+    "Tasks" = "tasks",
+}

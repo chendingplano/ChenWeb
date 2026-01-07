@@ -1,6 +1,5 @@
 // src/lib/types.ts
 
-/*
 export type Field =
   | 'record_uuid'
   | 'doc_name'
@@ -9,7 +8,6 @@ export type Field =
   | 'file_url'
   | 'status'
   | 'data_proc_status';
-  */
 
 export type FieldType = string
 export type Operator =

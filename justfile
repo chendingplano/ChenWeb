@@ -39,6 +39,9 @@ dev-server:
 dev-web:
   cd web && bun dev
 
+check:
+  cd web && bunx svelte-check --tsconfig ./tsconfig.json
+
 debug-server:
   cd server/cmd/deepdoc && dlv debug
 

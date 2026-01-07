@@ -1,28 +1,21 @@
 # config.toml
 app_name = "DeepDoc"
 debug = true
-home_url = "http://localhost:5173/sidebar-01"
 
 [server]
-port = 8080
+port = 8088
 host = "localhost"
 
 [database]
-create_mysql = "false"
-create_pg = "true"
+create_mysql = false
+create_pg = true
 pg_host = "127.0.0.1"
 pg_port = 5432
-pg_user_name = "admin"
-pg_password = "plano4628"
-pg_db_name = "miner"
 mysql_host = "192.168.0.20"
 mysql_port = 3306
-mysql_user_name = "root"
-mysql_password = "rainsome123!@#"
-mysql_db_name = "miner"
 max_connections = 10
 database_type = "pg"
-need_create_tables = "true"
+need_create_tables = true
 
 [app_table_names]
 table_name_documents        = "documents"

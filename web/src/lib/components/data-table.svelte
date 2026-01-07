@@ -1,3 +1,4 @@
+<!--
 <script lang="ts" module>
 	export const columns: ColumnDef<Dashboard01Schema>[] = [
 		{
@@ -546,3 +547,4 @@
 		<span class="sr-only">Drag to reorder</span>
 	</Button>
 {/snippet}
+-->

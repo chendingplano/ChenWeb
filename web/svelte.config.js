@@ -1,4 +1,4 @@
-import adapter from '@sveltejs/adapter-static';
+import adapter from '@sveltejs/adapter-node';
 import { resolve } from 'node:path';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
@@ -7,9 +7,12 @@ const config = {
 	// Consult https://svelte.dev/docs/kit/integrations
 	// for more information about preprocessors
 	preprocess: vitePreprocess(),
-	kit: { 
+	kit: {
 		adapter: adapter(),
 		alias: {
+			'@': resolve('./src'),
+			'$types': resolve('./src/lib/types'),
+			'$types/*': resolve('./src/lib/types/*'),
 			'@svar/core': resolve('../libs/svelte-core/svelte/src'),
 			'@svar/editor': resolve('../libs/svelte-editor/svelte/src'),
 			'@svar/grid': resolve('../libs/svelte-grid/svelte/src')
