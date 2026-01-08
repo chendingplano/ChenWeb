@@ -3,7 +3,6 @@ package confighandler
 import (
 	"net/http"
 
-	"github.com/chendingplano/deepdoc/server/api/api_util"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/labstack/echo/v4"
 )
@@ -12,7 +11,6 @@ import (
 type ConfigResponse struct {
 	AppName       string              `json:"app_name"`
 	Debug         bool                `json:"debug"`
-	HomeURL       string              `json:"home_url"`
 	Server        ServerConfig        `json:"server"`
 	Database      DatabaseConfig      `json:"database"`
 	AppTableNames AppTableNamesConfig `json:"app_table_names"`
@@ -58,11 +56,9 @@ type AuthConfig struct {
 func GetConfig(c echo.Context) error {
 	cfg := config.GlobalConfig
 
-	var default_home_url = api_util.GetDefahotHomeURL()
 	response := ConfigResponse{
 		AppName: cfg.AppName,
 		Debug:   cfg.Debug,
-		HomeURL: default_home_url,
 		Server: ServerConfig{
 			Port: cfg.Server.Port,
 			Host: cfg.Server.Host,
