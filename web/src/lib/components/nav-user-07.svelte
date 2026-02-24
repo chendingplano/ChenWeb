@@ -1,40 +1,42 @@
 <script lang="ts">
-	import * as Avatar from "$lib/components/ui/avatar/index.js";
-	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-	import * as Sidebar from "$lib/components/ui/sidebar/index.js";
-	import { useSidebar } from "$lib/components/ui/sidebar/index.js";
-	import BadgeCheckIcon from "@lucide/svelte/icons/badge-check";
-	import BellIcon from "@lucide/svelte/icons/bell";
-	import ChevronsUpDownIcon from "@lucide/svelte/icons/chevrons-up-down";
-	import CreditCardIcon from "@lucide/svelte/icons/credit-card";
-	import LogOutIcon from "@lucide/svelte/icons/log-out";
-	import SparklesIcon from "@lucide/svelte/icons/sparkles";
-    import type {Sidebar07MenuItem, UserMenuItem} from "$lib/types/menu"
+	import * as Avatar from '$lib/components/ui/avatar/index.js';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
+	import BadgeCheckIcon from '@lucide/svelte/icons/badge-check';
+	import BellIcon from '@lucide/svelte/icons/bell';
+	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
+	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
+	import LogOutIcon from '@lucide/svelte/icons/log-out';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import type { Sidebar07MenuItem, UserMenuItem } from '$lib/types/menu';
 
-    type UserType = {
-        name:       string,
-        email:      string,
-        avatar:     string
-    }
+	type UserType = {
+		name: string;
+		email: string;
+		avatar: string;
+	};
 
-	let { user, onMenuSelect }: { 
-        user: UserType ;
-        onMenuSelect: (menu_item: UserMenuItem) => void;
-    } = $props();
+	let {
+		user,
+		onMenuSelect
+	}: {
+		user: UserType;
+		onMenuSelect: (menu_item: UserMenuItem) => void;
+	} = $props();
 	const sidebar = useSidebar();
 
-    function handleDropdownSelect(user_type: string) {
-        const menu_item : UserMenuItem = {
-            id:         "user_" + user_type,
-            type:       "user",
-            title:      "user_" + user_type,
-            name:       user.name,
-            email:      user.email,
-            avatar:     user.avatar,
-        }
-        onMenuSelect(menu_item)
-    }
-
+	function handleDropdownSelect(user_type: string) {
+		const menu_item: UserMenuItem = {
+			id: 'user_' + user_type,
+			type: 'user',
+			title: 'user_' + user_type,
+			name: user.name,
+			email: user.email,
+			avatar: user.avatar
+		};
+		onMenuSelect(menu_item);
+	}
 </script>
 
 <Sidebar.Menu>
@@ -61,7 +63,7 @@
 			</DropdownMenu.Trigger>
 			<DropdownMenu.Content
 				class="w-(--bits-dropdown-menu-anchor-width) min-w-56 rounded-lg"
-				side={sidebar.isMobile ? "bottom" : "right"}
+				side={sidebar.isMobile ? 'bottom' : 'right'}
 				align="end"
 				sideOffset={4}
 			>
@@ -79,30 +81,30 @@
 				</DropdownMenu.Label>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Group>
-					<DropdownMenu.Item onclick={() => handleDropdownSelect("Upgrade to Pro")}>
+					<DropdownMenu.Item onclick={() => handleDropdownSelect('Upgrade to Pro')}>
 						<SparklesIcon />
 						Upgrade to Pro
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Group>
-					<DropdownMenu.Item onclick={() => handleDropdownSelect("Account")}>
+					<DropdownMenu.Item onclick={() => handleDropdownSelect('Account')}>
 						<BadgeCheckIcon />
 						Account
 					</DropdownMenu.Item>
-					<DropdownMenu.Item onclick={() => handleDropdownSelect("Billing")}>
+					<DropdownMenu.Item onclick={() => handleDropdownSelect('Billing')}>
 						<CreditCardIcon />
 						Billing
 					</DropdownMenu.Item>
-					<DropdownMenu.Item onclick={() => handleDropdownSelect("Notifications")}>
+					<DropdownMenu.Item onclick={() => handleDropdownSelect('Notifications')}>
 						<BellIcon />
 						Notifications
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />
-				<DropdownMenu.Item onclick={() => handleDropdownSelect("Log out")}>
+				<DropdownMenu.Item onclick={() => handleDropdownSelect('Log out')}>
 					<LogOutIcon />
-					Log out
+					Log out 02
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>

@@ -12,7 +12,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func CreateDocumentsTable() error {
+func CreateDocumentsTable(logger ApiTypes.JimoLogger) error {
 	db_type := ApiTypes.DatabaseInfo.DBType
 	table_name := config.GlobalConfig.AppTableNames.TableName_Documents
 	var stmt string
@@ -48,18 +48,16 @@ func CreateDocumentsTable() error {
 
 	default:
 		err := fmt.Errorf("database type not supported:%s (CWB_DOC_044)", db_type)
-		log.Printf("***** Alarm:%s", err.Error())
 		return err
 	}
 
 	err := databaseutil.ExecuteStatement(db, stmt)
 	if err != nil {
 		error_msg := fmt.Errorf("failed creating table (CWB_DOC_051), err: %w, stmt:%s", err, stmt)
-		log.Printf("***** Alarm: %s", error_msg.Error())
 		return error_msg
 	}
 
-	log.Printf("Creating table '%s' success (CWB_DOC_056)", table_name)
+	logger.Info("Creating table success", "tablename", table_name)
 
 	return nil
 }

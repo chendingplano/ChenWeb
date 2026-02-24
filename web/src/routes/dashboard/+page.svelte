@@ -15,6 +15,7 @@
 	let error = $state<string>('');
 
 	onMount(async () => {
+		/*
 		try {
 			console.log('Fetching dashboard data (CWB_DBD_019)...');
 			const config = await loadConfig();
@@ -23,15 +24,6 @@
 				.from(config.app_table_names.table_name_process_status)
 				.execute();
 
-			/*
-			const res = await fetch('/api/v1/dashboard-01-data');
-			if (!res.ok) {
-				alert('Failed to fetch data');
-				return;
-			}
-			console.log('Fetch data success (CWB_DBD_019)');
-			data = await res.json();
-			*/
 			console.log('Dashboard data loaded successfully (CWB_DBD_035)');
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Unknown error';
@@ -39,6 +31,7 @@
 		} finally {
 			loading = false;
 		}
+		*/
 	});
 </script>
 

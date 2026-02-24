@@ -4,7 +4,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/spf13/viper"
@@ -47,15 +46,17 @@ type Config struct {
 		JWTSecret            string `mapstructure:"jwt_secret"`
 		SessionDurationHours int    `mapstructure:"session_duration_hours"`
 	} `mapstructure:"auth"`
+
+	Migration ApiTypes.MigrationConfig `mapstructure:"migration"`
 }
 
 var GlobalConfig Config
 var MySQLConfig ApiTypes.DBConfig
 var PGConfig ApiTypes.DBConfig
 
-func LoadConfig(ctx context.Context, configPath string) error {
+func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath string) error {
 	call_flow := ctx.Value(ApiTypes.CallFlowKey).(string)
-	log.Printf("Loading config from %s (CWB_CFG_047)", configPath)
+	logger.Info("Loading config", "filePath", configPath)
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("toml")
 
@@ -94,34 +95,24 @@ func LoadConfig(ctx context.Context, configPath string) error {
 	ApiTypes.DatabaseInfo.DBType = GlobalConfig.Database.DatabaseType
 	ApiTypes.DatabaseInfo.PGDBName = GlobalConfig.Database.PGDBName
 	ApiTypes.DatabaseInfo.MySQLDBName = GlobalConfig.Database.MySQLDBName
-	ApiTypes.DatabaseInfo.PGDBHandle = ApiTypes.PG_DB_miner
-	ApiTypes.DatabaseInfo.MySQLDBHandle = ApiTypes.MySql_DB_miner
+	ApiTypes.DatabaseInfo.MySQLDBHandle = ApiTypes.MySql_DB_Project
+	ApiTypes.DatabaseInfo.MySQLMigrateDBHandle = ApiTypes.MySql_DB_Shared
+	ApiTypes.DatabaseInfo.MySQLAutoTesterDBHandle = ApiTypes.MySql_DB_AutoTester
 
-	log.Printf("(%s->CWB_CFG_115) Config load success, database_type:%s, need_create_tables:%t, pg:%t, mysql:%t",
-		call_flow,
-		GlobalConfig.Database.DatabaseType,
-		GlobalConfig.Database.NeedCreateTables,
-		GlobalConfig.Database.CreatePG,
-		GlobalConfig.Database.CreateMySQL,
+	ApiTypes.DatabaseInfo.PGDBHandle = ApiTypes.PG_DB_Project
+	ApiTypes.DatabaseInfo.PGMigrateDBHandle = ApiTypes.PG_DB_Shared
+	ApiTypes.DatabaseInfo.PGAutoTesterDBHandle = ApiTypes.PG_DB_AutoTester
+
+	logger.Info("Config load success",
+		"db_type", GlobalConfig.Database.DatabaseType,
+		"create_type", GlobalConfig.Database.NeedCreateTables,
+		"create_pg", GlobalConfig.Database.CreatePG,
+		"create_mysql", GlobalConfig.Database.CreateMySQL,
 	)
-
-	/*
-		if PGConfig.CreateFlag && ApiTypes.DatabaseInfo.PGDBHandle == nil {
-			error_msg := fmt.Sprintf("(%s->CWB_CFG_125) pg db not set", call_flow)
-			log.Printf("***** Alarm:%s", error_msg)
-			panic(error_msg)
-		}
-
-		if MySQLConfig.CreateFlag && ApiTypes.DatabaseInfo.MySQLDBHandle == nil {
-			error_msg := fmt.Sprintf("(%s->CWB_CFG_129) mysql db is set", call_flow)
-			log.Printf("***** Alarm:%s", error_msg)
-			panic(error_msg)
-		}
-	*/
 
 	if GlobalConfig.Database.DatabaseType == "" {
 		err1 := fmt.Errorf("unable to decode config (%s->CWB_CFG_064)", call_flow)
-		log.Fatal(err1)
+		logger.Error("unable to decode config", "configPath", configPath)
 		panic(err1)
 	}
 
@@ -129,11 +120,11 @@ func LoadConfig(ctx context.Context, configPath string) error {
 	if !ApiTypes.IsValidDBType(db_type) {
 		err1 := fmt.Errorf("unsupported database type (%s->CWB_CFG_076): %s, Allowed:postgres|mysql",
 			call_flow, GlobalConfig.Database.DatabaseType)
-		log.Printf("***** Alarm %s", err1)
+		logger.Error("db_type not supported", "db_type", db_type)
 		panic(err1)
 	}
 
-	log.Printf("Loading config from %s (CWB_CFG_096) ... Success!", configPath)
+	logger.Info("Loading config Success!", "configPath", configPath)
 	return nil
 }
 

@@ -5,7 +5,6 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -18,7 +17,9 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
-	authmiddleware "github.com/chendingplano/shared/go/auth-middleware"
+	"github.com/chendingplano/shared/go/api/EchoFactory"
+	"github.com/chendingplano/shared/go/api/loggerutil"
+	authmiddleware "github.com/chendingplano/shared/go/authmiddleware"
 	"github.com/labstack/echo/v4"
 )
 
@@ -31,38 +32,35 @@ func RegisterRoutes(e *echo.Echo) error {
 	// development server or serving embedded static files.
 	// This function should be called first during server initialization.
 	// Other route registrations (such as Auth) can be done afterwards.
-	log.Printf("Register API routes (MID_RTS_033)")
+	logger := loggerutil.CreateDefaultLogger("CWB_0206153400")
+	logger.Info("Register API routes")
 
 	is_dev := os.Getenv("APP_ENV") != "production"
-	useEmbedFrontend := os.Getenv("USE_EMBED_FRONTEND") != ""
-	log.Printf("useEmbedFrontend (MID_RTS_037):%v, is_dev:%v",
-		useEmbedFrontend, is_dev)
+	useEmbedFrontend := os.Getenv("USE_EMBED_FRONTEND") == "true"
+	logger.Info("useEmbedFrontend", "useEmbedFrontend", useEmbedFrontend, "is_dev", is_dev)
 
 	var frontendHandler http.Handler
 	if !useEmbedFrontend {
-		frontendURLEnv := os.Getenv("APP_DOMAIN_NAME")
+		frontendURLEnv := os.Getenv("VITE_DEV_ONLY_URL")
 		if frontendURLEnv == "" {
-			error_msg := "missing APP_DOMAIN_NAME env var (CWB_RTR_046)"
-			log.Printf("***** Alarm:%s", error_msg)
+			error_msg := "missing VITE_DEV_ONLY_URL env var (CWB_RTR_046)"
 			return fmt.Errorf("%s", error_msg)
 		}
 
 		frontendURL, err := url.Parse(frontendURLEnv)
-		log.Printf("FrontendURL (CWB_RTS_047):%s", frontendURL)
+		logger.Info("FrontendURL", "frontendURL", frontendURL)
 		if err != nil {
-			error_msg := fmt.Errorf("failed to parse FRONTEND_URL env %s: %w (MID_RTS_042)", frontendURLEnv, err)
-			log.Printf("***** Alarm:%s, original error:%+v", error_msg, err)
+			error_msg := fmt.Errorf("failed to parse VITE_DEV_ONLY_URL env %s: %w (MID_RTS_042)", frontendURLEnv, err)
 			return error_msg
 		}
 
 		proxy := httputil.NewSingleHostReverseProxy(frontendURL)
 		frontendHandler = proxy
 	} else {
-		log.Printf("Production deployment (MID_RTS_057)")
+		logger.Info("Production deployment")
 		webBuildFS, err := fs.Sub(webBuild, "webbuild")
 		if err != nil {
 			error_msg := fmt.Errorf("failed to get webbuild subtree: %w (MID_RTS_050)", err)
-			log.Printf("***** Alarm:%s, original error:%+v (MID_RTS_061)", error_msg, err)
 			return error_msg
 		}
 		fileServer := http.FileServerFS(webBuildFS)
@@ -71,6 +69,7 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			rc := EchoFactory.NewFromEcho(c, "CWB_RTR_076")
 			path := c.Request().URL.Path
 			ctx := c.Request().Context()
 			new_ctx := context.WithValue(ctx, ApiTypes.CallFlowKey, "CWB_RTS_072")
@@ -88,18 +87,19 @@ func RegisterRoutes(e *echo.Echo) error {
 				"/login":          true,
 				"/example-login":  true,
 				"/oauth/callback": true, // Public route for password reset and OAuth callbacks
+				"/verify-2fa":     true, // 2FA verification page (user has AAL1 session but needs AAL2)
 				// Add other public pages here
 			}
 
 			// Let Echo handle / so we can redirect it
 			if path == "/" {
-				log.Printf("Root path, let Echo handle redirect (CWB_RTS_080)")
+				logger.Info("Root path, let Echo handle redirect")
 				return next(c)
 			}
 
 			// Other public paths should be served by frontend
 			if publicPaths[path] {
-				log.Printf("Public frontend URL:%s (CWB_RTS_085)", path)
+				logger.Info("Public frontend URL", "path", path)
 				frontendHandler.ServeHTTP(c.Response(), c.Request())
 				return nil
 			}
@@ -126,17 +126,20 @@ func RegisterRoutes(e *echo.Echo) error {
 				// Check if it's a public path
 				// Protected frontend route → check auth
 				// IMPORTANT: need cache!
-				// log.Printf("Auth check for path: %s (MID_RTS_095)", c.Request().URL.Path)
-				user_info, err := authmiddleware.IsAuthenticated(c, "MID_RTS_096")
+				user_info, err := authmiddleware.IsAuthenticated(rc)
 				if err != nil {
 					// Redirect to login (for browser) or 401 (for API-like requests)
-					log.Printf("Not logged in. err:%v, Redirect to /login, path:%s (CWB_RTS_109)", err, path)
+					logger.Info("Not logged in. Redirect to", "error", err, "path", path)
 					if authmiddleware.IsHTMLRequest(c) {
 						return c.Redirect(http.StatusFound, "/login")
 					}
 					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Login required"})
 				}
-				log.Printf("Authentication passed, user email:%s (CWB_RTS_115):%s", user_info.Email, path)
+
+				if user_info != nil {
+					logger.Info("Authentication passed", "user email", user_info.Email, "path", path)
+				}
+
 				frontendHandler.ServeHTTP(c.Response(), c.Request())
 				return nil
 			}
@@ -146,7 +149,7 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	e.DELETE("/auth/logout", func(c echo.Context) error {
 		// Clear the session cookie
-		log.Printf("Handle logout (MID_RTS_123)")
+		logger.Info("Handle logout")
 		c.SetCookie(&http.Cookie{
 			Name:     "session_id",
 			Value:    "",

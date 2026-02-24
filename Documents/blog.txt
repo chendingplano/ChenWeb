@@ -1,0 +1,772 @@
+玩转 OpenCode(四)：办公牛马四件套——Word/Excel/PDF/PPT，强大的文档处理能力
+
+一、先看效果：多Skill协作实战
+
+二、本篇能力全景
+
+三、办公四件套的核心思想
+
+四、Word文档处理（docx）
+
+五、Excel表格处理（xlsx）
+
+六、PDF文档处理（pdf）
+
+七、PPT演示文稿处理（pptx）
+
+八、实战案例（完整流程）
+
+九、命令参考（进阶）
+
+十、常见问题
+
+十一、下期预告
+
+写在前面
+前几篇我们搞定了环境搭建、Skills原理、图像服务。
+
+但日常工作中，最高频的需求其实是——处理文档。
+
+💡特别说明：本篇介绍的 docx、xlsx、pdf、pptx 四个 Skill 都是 官方技能（来自 awesome-claude-code），不是我自己写的。但我觉得特别好用，所以整理分享给大家，一起学习它们的设计思路——如何用"精简SKILL.md + 脚本"模式处理复杂的办公文档。
+写Word报告、做Excel数据分析、填PDF表单、做PPT汇报...
+
+这些办公室牛马活儿，每天占据大量时间。
+
+但现在，一句话就能搞定。
+
+本篇我们来玩办公四件套——Word、Excel、PDF、PPT，让AI成为你的文档处理专家。
+
+一、先看效果：多Skill协作实战
+上一篇我们展示了图像服务，能为新闻、文章配图。
+
+这一篇，我们让多个Skill协作，实现更复杂的办公场景：
+
+调研资料（deep-research）
+       ↓
+生成Word报告（docx）+ 配图（image-service）
+       ↓
+提取数据做Excel分析（xlsx）
+       ↓
+生成汇报PPT（pptx）
+       ↓
+导出PDF存档（pdf）
+1.1 一句话触发
+帮我调研"大模型Agent架构"，输出一份完整的Word报告，带配图，再根据报告做一份10页的汇报PPT
+1.2 执行过程
+AI会自动调用多个Skill协作：
+
+Step 1：深度调研（deep-research）
+
+正在搜索"大模型Agent架构"相关资料...
+找到 15 篇相关文章
+整理核心内容中...
+Step 2：生成Word报告（docx）
+
+创建 Word 文档...
+- 封面页
+- 目录
+- 第一章：技术背景
+- 第二章：主流架构对比
+- 第三章：应用案例
+- 第四章：发展趋势
+保存到：调研报告/大模型Agent架构.docx
+Step 3：生成配图（image-service）
+
+为报告生成架构图...
+- architecture.png（架构图）
+- comparison.png（对比图）
+- workflow.png（流程图）
+Step 4：生成汇报PPT（pptx）
+
+创建 PPT 演示文稿...
+- 封面
+- 目录
+- 10页内容
+- 总结页
+生成缩略图验证布局...
+保存到：调研报告/大模型Agent架构-汇报.pptx
+1.3 产出结构
+调研报告/
+├── 大模型Agent架构.docx      # Word报告
+├── 大模型Agent架构-汇报.pptx  # 汇报PPT
+├── images/
+│   ├── architecture.png       # 架构图
+│   ├── comparison.png         # 对比图
+│   └── workflow.png           # 流程图
+└── thumbnails.jpg             # PPT缩略图（验证用）
+1.4 背后的Skill调用链
+用户: "帮我调研xxx，输出Word报告和PPT"
+        ↓
+    ┌─────────────────┐
+    │  deep-research  │  → 联网搜索，整理资料
+    └────────┬────────┘
+             ↓
+    ┌─────────────────┐
+    │      docx       │  → 生成Word文档
+    └────────┬────────┘
+             ↓
+    ┌─────────────────┐
+    │  image-service  │  → 生成配图
+    └────────┬────────┘
+             ↓
+    ┌─────────────────┐
+    │      pptx       │  → 生成PPT + 缩略图验证
+    └─────────────────┘
+这就是办公四件套的威力——一句话串联多个Skill，从调研到产出一条龙。
+
+二、本篇能力全景
+2.1 核心能力矩阵
+Skill
+能力
+典型场景
+docx	
+Word文档创建、编辑、修订追踪、批注
+报告、合同、论文
+xlsx	
+Excel创建、公式计算、格式化、图表
+数据分析、财务模型
+pdf	
+文本提取、合并拆分、表单填写、创建
+表单处理、文档归档
+pptx	
+PPT创建、模板套用、编辑、缩略图
+汇报、演示、培训
+2.2 协同场景
+办公四件套不只是单独使用，更强大的是与其他Skill协同：
+
+协同组合
+场景
+产出
+deep-research + docx	
+技术调研
+带配图的调研报告
+docx + pptx	
+报告转PPT
+一份内容两种形态
+xlsx + pptx	
+数据汇报
+数据驱动的演示文稿
+pdf + xlsx	
+表格提取
+PDF表格转Excel
+csv-data-summarizer + xlsx	
+数据分析
+完整分析报告
+三、办公四件套的核心思想
+第2篇我们讲过，Skill有两种模式：
+
+纯SKILL.md模式：所有逻辑写在文档里，每次都吃Token
+SKILL.md + 脚本模式：文档只写流程，复杂逻辑固化到脚本
+办公四件套全部采用第二种——"精简SKILL.md + 脚本"模式。
+
+为什么？因为办公文档处理涉及复杂的文件格式（OOXML、PDF结构），用脚本处理更稳定。
+
+3.1 四件套的目录结构
+.opencode/skills/
+├── docx/                        # Word处理
+│   ├── SKILL.md                 # 技能定义（精简版）
+│   ├── docx-js.md               # 创建文档参考
+│   ├── ooxml.md                 # 编辑文档参考
+│   ├── scripts/                 # 文档操作脚本
+│   │   ├── document.py          # Document库
+│   │   └── utilities.py         # 工具函数
+│   └── ooxml/scripts/           # 解包/打包脚本
+│       ├── unpack.py            # 解压docx
+│       ├── pack.py              # 打包docx
+│       └── validate.py          # 验证文档
+│
+├── xlsx/                        # Excel处理
+│   ├── SKILL.md                 # 技能定义
+│   └── recalc.py                # 公式重算脚本（关键！）
+│
+├── pdf/                         # PDF处理
+│   ├── SKILL.md                 # 技能定义
+│   ├── forms.md                 # 表单填写参考
+│   ├── reference.md             # 高级功能参考
+│   └── scripts/                 # PDF处理脚本
+│       ├── check_fillable_fields.py    # 检测可填字段
+│       ├── extract_form_field_info.py  # 提取表单信息
+│       ├── fill_fillable_fields.py     # 填写表单
+│       ├── convert_pdf_to_images.py    # PDF转图片
+│       └── create_validation_image.py  # 创建验证图
+│
+└── pptx/                        # PPT处理
+    ├── SKILL.md                 # 技能定义
+    ├── html2pptx.md             # HTML转PPT参考
+    ├── ooxml.md                 # OOXML编辑参考
+    └── scripts/                 # PPT处理脚本
+        ├── thumbnail.py         # 生成缩略图网格
+        ├── inventory.py         # 提取文本清单
+        ├── rearrange.py         # 重排幻灯片
+        ├── replace.py           # 替换文本
+        └── html2pptx.js         # HTML转PPT
+每个Skill都是"SKILL.md + 参考文档 + 脚本"的组合。
+
+用户只需要说一句自然语言，AI自己判断用哪个工作流、读哪个参考文档、执行哪个脚本。
+
+3.2 SKILL.md的结构模式
+四个Skill的SKILL.md都遵循相同的结构：
+
+┌─────────────────────────────────────┐
+│  ① 头部元数据（name + description）   │  ← 触发匹配的关键
+├─────────────────────────────────────┤
+│  ② 概述                             │  ← 一句话说清能干嘛
+├─────────────────────────────────────┤
+│  ③ 工作流决策树                      │  ← 不同场景用不同工作流
+├─────────────────────────────────────┤
+│  ④ 各工作流详细步骤                   │  ← 每步做什么、调用什么脚本
+├─────────────────────────────────────┤
+│  ⑤ 依赖说明                          │  ← 需要哪些工具
+└─────────────────────────────────────┘
+核心理念：SKILL.md只做导航，复杂逻辑交给脚本。
+
+四、Word文档处理（docx）
+4.1 Skill概览
+💡 获取方式：docx 是官方技能，可从 awesome-claude-code 获取。
+目录结构：
+
+docx/
+├── SKILL.md              # 技能定义
+├── docx-js.md            # 创建文档参考（~500行）
+├── ooxml.md              # 编辑文档参考（~600行）
+├── scripts/              # 文档操作脚本
+└── ooxml/scripts/        # 解包/打包脚本
+4.2 看看这个Skill的SKILL.md
+---
+name: docx
+description: 全面的Word文档处理技能。支持修订追踪、批注、格式保留、文本提取。当需要处理专业文档（.docx文件）时使用。
+---
+
+# Word 文档创建、编辑和分析
+
+## 概述
+用户可能要求你创建、编辑或分析 .docx 文件的内容。
+.docx 文件本质上是一个包含 XML 文件和其他资源的 ZIP 压缩包。
+
+## 工作流决策树
+
+### 读取/分析内容
+使用下方的"文本提取"或"原始 XML 访问"章节
+
+### 创建新文档
+使用"创建新 Word 文档"工作流
+
+### 编辑现有文档
+- **自己的文档 + 简单修改** → 使用"基础 OOXML 编辑"工作流
+- **他人的文档** → 使用"修订工作流"（推荐默认）
+- **法律、学术、商业文档** → 使用"修订工作流"（必需）
+
+## 读取和分析内容
+
+### 文本提取
+使用 pandoc 将文档转换为 markdown：
+> pandoc --track-changes=all path-to-file.docx -o output.md
+
+### 原始 XML 访问
+解压文档读取原始 XML：
+> python ooxml/scripts/unpack.py <office_file> <output_dir>
+
+关键文件结构：
+* word/document.xml - 主文档内容
+* word/comments.xml - 批注
+* word/media/ - 嵌入的图片和媒体
+
+## 创建新 Word 文档
+
+### 工作流
+1. **必须** - 完整阅读 docx-js.md（~500行）
+2. 使用 Document、Paragraph、TextRun 组件创建 JS 文件
+3. 使用 Packer.toBuffer() 导出为 .docx
+
+## 编辑现有 Word 文档
+
+### 工作流
+1. **必须** - 完整阅读 ooxml.md（~600行）
+2. 解压文档: python ooxml/scripts/unpack.py <file> <dir>
+3. 使用 Document 库创建并运行 Python 脚本
+4. 打包文档: python ooxml/scripts/pack.py <dir> <file>
+
+## 修订工作流（专业场景）
+
+用于法律、学术、商业文档的修订追踪：
+1. 获取 markdown 表示
+2. 识别和分组更改
+3. 解压文档，记录建议的 RSID
+4. 分批实现更改（每批3-10个）
+5. 打包文档
+6. 最终验证
+
+## 依赖
+- pandoc: 用于文本提取
+- docx: 用于创建新文档（npm install -g docx）
+- LibreOffice: 用于 PDF 转换
+4.3 三种场景的使用方式
+场景1：读取分析
+读取这份Word文档的内容，整理成markdown格式
+这份Word文档讲了什么？帮我总结一下
+执行流程：
+
+用户: "读取这份Word"
+    ↓
+AI 调用 pandoc 转换为 markdown
+    ↓
+返回文档内容
+场景2：创建新文档
+创建一份Word文档《项目汇报》，包含：
+1. 项目背景（一段介绍）
+2. 主要成果（3个要点）
+3. 下一步计划
+执行流程：
+
+用户: "创建Word文档"
+    ↓
+AI 读取 docx-js.md 参考
+    ↓
+创建 JavaScript 文件
+    ↓
+使用 docx 库生成 .docx
+    ↓
+产出: 项目汇报.docx
+场景3：修订追踪（专业场景）
+帮我审阅这份合同，用修订模式标记出需要修改的地方：
+1. 付款期限改为60天
+2. 违约金比例改为10%
+执行流程：
+
+用户: "用修订模式修改合同"
+    ↓
+AI 读取 ooxml.md 参考
+    ↓
+解压文档: python ooxml/scripts/unpack.py contract.docx unpacked/
+    ↓
+创建 Python 脚本，使用 Document 库添加修订标记
+    ↓
+打包文档: python ooxml/scripts/pack.py unpacked/ contract-reviewed.docx
+    ↓
+产出: contract-reviewed.docx（带修订追踪）
+五、Excel表格处理（xlsx）
+5.1 Skill概览
+💡 核心理念：用公式，不用硬编码！
+目录结构：
+
+xlsx/
+├── SKILL.md              # 技能定义
+└── recalc.py             # 公式重算脚本（关键！）
+5.2 看看这个Skill的SKILL.md
+---
+name: xlsx
+description: 全面的Excel电子表格处理技能。支持公式、格式化、数据分析和可视化。当需要处理电子表格文件（.xlsx、.xlsm、.csv、.tsv等）时使用。
+---
+
+# Excel 创建、编辑和分析
+
+## 输出要求
+
+### 零公式错误
+每个 Excel 必须交付时确保零公式错误（#REF!、#DIV/0!、#VALUE!、#N/A、#NAME?）
+
+### 财务模型颜色编码标准
+- **蓝色文字**: 硬编码输入（用户会更改的假设值）
+- **黑色文字**: 所有公式和计算
+- **绿色文字**: 从其他工作表引用的链接
+- **红色文字**: 外部链接
+
+## 关键：使用公式，而非硬编码值
+
+### ❌ 错误 - 硬编码计算值
+total = df['Sales'].sum()
+sheet['B10'] = total  # 硬编码 5000
+
+### ✅ 正确 - 使用 Excel 公式
+sheet['B10'] = '=SUM(B2:B9)'
+
+## 常见工作流
+1. **选择工具**: pandas 用于数据，openpyxl 用于公式/格式
+2. **创建/加载**: 创建新工作簿或加载现有文件
+3. **修改**: 添加/编辑数据、公式和格式
+4. **保存**: 写入文件
+5. **重算公式（必须）**: python recalc.py output.xlsx
+6. **验证并修复错误**: 检查 error_summary 获取具体错误
+
+## 重算公式
+openpyxl 创建的 Excel 包含公式字符串但没有计算值。
+使用 recalc.py 重算：
+> python recalc.py <excel文件> [超时秒数]
+
+脚本功能：
+- 自动设置 LibreOffice 宏
+- 重算所有工作表中的所有公式
+- 扫描所有单元格查找 Excel 错误
+- 返回包含详细错误位置的 JSON
+5.3 为什么强调公式？
+用公式的Excel是活的：改一个数，全表联动重算
+硬编码的Excel是死的：改了源数据，结果不变
+recalc.py 的作用：
+
+openpyxl 创建的 Excel 只有公式字符串，没有计算值。打开时需要 Excel/LibreOffice 计算一次。
+
+recalc.py 通过调用 LibreOffice 自动完成这个计算过程，并检测公式错误。
+
+5.4 使用示例
+创建Excel
+创建一个Excel销售报表：
+- 列：月份、销售额、成本、利润
+- 利润用公式计算（销售额-成本）
+- 底部加汇总行
+- 表头加粗、蓝色背景
+执行流程：
+
+用户: "创建Excel销售报表"
+    ↓
+AI 使用 openpyxl 创建工作簿
+    ↓
+添加数据和公式: sheet['D2'] = '=B2-C2'
+    ↓
+添加格式: 表头加粗、蓝色背景
+    ↓
+保存文件
+    ↓
+重算公式: python recalc.py sales.xlsx
+    ↓
+检查结果: {"status": "success", "total_errors": 0}
+    ↓
+产出: sales.xlsx（公式已计算）
+财务模型
+创建财务模型Excel，遵循行业标准：
+- 蓝色文字：可调的假设值
+- 黑色文字：公式计算结果
+- 绿色文字：从其他Sheet引用
+AI会自动应用颜色规范，让你的财务模型看起来很专业。
+
+5.5 recalc.py 核心实现
+def recalc(filename, timeout=30):
+    """
+    使用 LibreOffice 重算 Excel 公式并检测错误
+    """
+    # 1. 设置 LibreOffice 宏（首次运行）
+    setup_libreoffice_macro()
+
+    # 2. 调用 LibreOffice 重算
+    cmd = [
+        'soffice', '--headless', '--norestore',
+        'vnd.sun.star.script:Standard.Module1.RecalculateAndSave?...',
+        abs_path
+    ]
+    subprocess.run(cmd, capture_output=True)
+
+    # 3. 扫描所有单元格查找错误
+    wb = load_workbook(filename, data_only=True)
+    excel_errors = ['#VALUE!', '#DIV/0!', '#REF!', '#NAME?', '#NULL!', '#NUM!', '#N/A']
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        for row in ws.iter_rows():
+            for cell in row:
+                for err in excel_errors:
+                    if err in str(cell.value):
+                        # 记录错误位置
+                        error_details[err].append(f"{sheet_name}!{cell.coordinate}")
+
+    # 4. 返回结果
+    return {
+        'status': 'success' if total_errors == 0 else 'errors_found',
+        'total_errors': total_errors,
+        'error_summary': {...}
+    }
+六、PDF文档处理（pdf）
+6.1 Skill概览
+目录结构：
+
+pdf/
+├── SKILL.md              # 技能定义
+├── forms.md              # 表单填写参考（详细流程）
+├── reference.md          # 高级功能参考
+└── scripts/              # PDF处理脚本
+    ├── check_fillable_fields.py      # 检测可填字段
+    ├── extract_form_field_info.py    # 提取表单信息
+    ├── fill_fillable_fields.py       # 填写表单
+    ├── fill_pdf_form_with_annotations.py  # 注释方式填表
+    ├── convert_pdf_to_images.py      # PDF转图片
+    └── create_validation_image.py    # 创建验证图
+6.2 看看这个Skill的SKILL.md
+---
+name: pdf
+description: 全面的PDF处理工具包。支持提取文本和表格、创建新PDF、合并/拆分文档、处理表单。
+           当需要填写PDF表单或批量处理、生成、分析PDF文档时使用此技能。
+---
+
+# PDF 处理指南
+
+## 概述
+本指南涵盖 PDF 处理的核心操作。
+- 高级功能请参见 reference.md
+- 填写表单请参见 forms.md
+
+## 快速开始
+from pypdf import PdfReader, PdfWriter
+
+# 读取 PDF
+reader = PdfReader("document.pdf")
+print(f"页数: {len(reader.pages)}")
+
+# 提取文本
+for page in reader.pages:
+    text += page.extract_text()
+
+## Python 库
+
+### pypdf - 基础操作
+- 合并 PDF
+- 拆分 PDF
+- 提取元数据
+- 旋转页面
+
+### pdfplumber - 文本和表格提取
+- 提取带布局的文本
+- 提取表格（转Excel）
+
+### reportlab - 创建 PDF
+- 基础 PDF 创建
+- 多页 PDF
+
+## 快速参考
+| 任务 | 推荐工具 |
+|------|----------|
+| 合并 PDF | pypdf |
+| 拆分 PDF | pypdf |
+| 提取文本 | pdfplumber |
+| 提取表格 | pdfplumber |
+| 创建 PDF | reportlab |
+| 填写表单 | 参见 forms.md |
+6.3 表单填写流程（forms.md）
+这是 pdf Skill 最实用的功能——填写PDF表单。
+
+关键区分：
+
+有可填字段的PDF：直接填入值
+没有可填字段的PDF：通过注释方式添加文本
+流程：
+
+用户: "填写这份PDF表单"
+    ↓
+Step 1: 检测是否有可填字段
+> python scripts/check_fillable_fields.py form.pdf
+    ↓
+┌──────────────┬──────────────────────────────────┐
+│ 有可填字段   │ 无可填字段                        │
+├──────────────┼──────────────────────────────────┤
+│ 提取字段信息 │ PDF转图片分析                     │
+│ 填写字段值   │ 确定填写位置                      │
+│ 输出新PDF    │ 创建注释层填写                    │
+└──────────────┴──────────────────────────────────┘
+    ↓
+产出: filled-form.pdf
+6.4 使用示例
+合并PDF
+把这3份PDF合并成一个，按顺序排列
+执行流程：
+
+from pypdf import PdfWriter, PdfReader
+
+writer = PdfWriter()
+for pdf_file in ["doc1.pdf", "doc2.pdf", "doc3.pdf"]:
+    reader = PdfReader(pdf_file)
+    for page in reader.pages:
+        writer.add_page(page)
+
+with open("merged.pdf", "wb") as output:
+    writer.write(output)
+提取表格
+提取这份PDF里的所有表格，保存成Excel
+执行流程：
+
+import pdfplumber
+import pandas as pd
+
+with pdfplumber.open("document.pdf") as pdf:
+    all_tables = []
+    for page in pdf.pages:
+        tables = page.extract_tables()
+        for table in tables:
+            df = pd.DataFrame(table[1:], columns=table[0])
+            all_tables.append(df)
+
+combined_df = pd.concat(all_tables)
+combined_df.to_excel("extracted_tables.xlsx", index=False)
+填写表单
+填写这份PDF表单：
+- 姓名：张三
+- 日期：2026年1月27日
+- 金额：50000元
+执行流程：
+
+Step 1: 检测可填字段
+> python scripts/check_fillable_fields.py contract.pdf
+> 发现 8 个可填字段
+
+Step 2: 提取字段信息
+> python scripts/extract_form_field_info.py contract.pdf field_info.json
+
+Step 3: 创建填写数据
+> field_values.json:
+[
+  {"field_id": "name", "value": "张三"},
+  {"field_id": "date", "value": "2026年1月27日"},
+  {"field_id": "amount", "value": "50000元"}
+]
+
+Step 4: 填写表单
+> python scripts/fill_fillable_fields.py contract.pdf field_values.json filled.pdf
+
+产出: filled.pdf
+七、PPT演示文稿处理（pptx）
+PPT是四件套里最复杂的，因为涉及视觉设计。
+
+7.1 Skill概览
+目录结构：
+
+pptx/
+├── SKILL.md              # 技能定义
+├── html2pptx.md          # HTML转PPT参考
+├── ooxml.md              # OOXML编辑参考
+└── scripts/
+    ├── thumbnail.py      # 生成缩略图网格（关键！）
+    ├── inventory.py      # 提取文本清单
+    ├── rearrange.py      # 重排幻灯片
+    ├── replace.py        # 替换文本
+    └── html2pptx.js      # HTML转PPT
+7.2 看看这个Skill的SKILL.md
+---
+name: pptx
+description: PPT演示文稿处理技能。当需要处理演示文稿（.pptx文件）时使用：
+创建新PPT、修改编辑内容、调整布局、添加批注或演讲者备注等演示任务。
+---
+
+# PPT 创建、编辑和分析
+
+## 概述
+用户可能要求你创建、编辑或分析 .pptx 文件的内容。.pptx 文件本质上是一个包含 XML 文件的 ZIP 压缩包。
+
+## 读取和分析内容
+
+### 文本提取
+> python -m markitdown path-to-file.pptx
+
+### 原始 XML 访问
+> python ooxml/scripts/unpack.py <office_file> <output_dir>
+
+## 创建新 PPT（不使用模板）
+
+使用 html2pptx 工作流：
+
+### 设计原则
+1. **考虑主题**: 什么语气、行业、情绪？
+2. **检查品牌**: 考虑品牌颜色和身份
+3. **将配色与内容匹配**
+4. **只使用网页安全字体**: Arial、Helvetica、Times New Roman...
+
+### 工作流
+1. **必须** - 完整阅读 html2pptx.md
+2. 为每张幻灯片创建 HTML 文件（720pt × 405pt for 16:9）
+3. 使用 html2pptx.js 转换为 PowerPoint
+4. **视觉验证**: 生成缩略图检查布局
+   > python scripts/thumbnail.py output.pptx
+
+## 使用模板创建新 PPT
+
+### 工作流
+1. 提取模板文本并创建缩略图网格
+2. 分析模板并保存清单到文件
+3. 基于模板清单创建大纲
+4. 使用 rearrange.py 复制、重排幻灯片
+5. 使用 inventory.py 提取所有文本
+6. 生成替换文本并保存到 JSON
+7. 使用 replace.py 应用替换
+
+## 创建缩略图网格
+> python scripts/thumbnail.py template.pptx [output_prefix] [--cols N]
+
+功能:
+- 创建幻灯片缩略图网格
+- 默认 5 列，每个网格最多 30 张幻灯片
+- 幻灯片从零索引
+7.3 三种场景的使用方式
+场景1：从零创建PPT
+帮我做一个《AI发展趋势》PPT：
+- 封面：标题+渐变背景
+- 目录：4个章节
+- 每个章节2-3页内容
+- 风格：科技感，蓝紫色调
+执行流程：
+
+用户: "创建AI趋势PPT"
+    ↓
+AI 读取 html2pptx.md 参考
+    ↓
+创建 HTML 幻灯片文件（每页一个）
+    ↓
+使用 html2pptx.js 转换为 PPT
+    ↓
+生成缩略图验证:
+> python scripts/thumbnail.py output.pptx
+    ↓
+检查布局，修复问题
+    ↓
+产出: AI发展趋势.pptx + thumbnails.jpg
+场景2：基于模板创建
+用这个模板做一份PPT，保持模板风格，内容替换成：
+- 封面：2026年度计划
+- 第一章：回顾2025
+- 第二章：目标设定
+执行流程：
+
+Step 1: 分析模板
+> python -m markitdown template.pptx > template-content.md
+> python scripts/thumbnail.py template.pptx
+
+Step 2: 创建清单
+> python scripts/inventory.py template.pptx inventory.json
+
+Step 3: 重排幻灯片
+> python scripts/rearrange.py template.pptx working.pptx 0,5,10,15
+
+Step 4: 提取文本
+> python scripts/inventory.py working.pptx text-inventory.json
+
+Step 5: 替换内容
+> python scripts/replace.py working.pptx replacement.json output.pptx
+
+Step 6: 验证
+> python scripts/thumbnail.py output.pptx
+场景3：编辑现有PPT
+把这份PPT第3页的标题改成"新版方案"
+执行流程：
+
+解压PPT → 修改 XML → 打包PPT
+7.4 thumbnail.py 核心实现
+生成PPT缩略图网格是视觉验证的关键：
+
+def main():
+    # 1. 将PPT转换为PDF
+    subprocess.run(['soffice', '--headless', '--convert-to', 'pdf', pptx_path])
+
+    # 2. 将PDF转换为图片
+    subprocess.run(['pdftoppm', '-jpeg', '-r', '100', pdf_path, 'slide'])
+
+    # 3. 创建网格布局
+    grid = Image.new("RGB", (grid_w, grid_h), "white")
+
+    for i, img_path in enumerate(slide_images):
+        # 添加编号标签
+        draw.text((x, y), str(i), fill="black", font=font)
+
+        # 粘贴缩略图
+        with Image.open(img_path) as img:
+            img.thumbnail((width, height))
+            grid.paste(img, (tx, ty))
+
+    # 4. 保存网格图
+    grid.save("thumbnails.jpg", quality=95)
+输出示例：
+
+thumbnails.jpg  # 5列网格，每张幻灯片带编号

@@ -4111,17 +4111,16 @@ Since Pocketbase changed the context type, the ways of retrieving
 values from the context are different. Below is a comparison between
 the two:
 
-Echo (c)              PocketBase (e)
-=============================================================================
-c.Request()           e.Request
-c.Response()          e.Response
-c.QueryParam("x")     e.Request.URL.Query().Get("x")
-c.FormValue("x")      e.Request.FormValue("x") (after e.Request.ParseForm())
-c.JSON(200, data)     e.Json(200, data)
-c.String(200, "ok")   e.String(200, "ok")
-c.Redirect(307, url)  http.Redirect(e.Response, e.Request, url, http.
+| Echo (c)              | PocketBase (e) |
+|-----------------------|----------------|
+| c.Request()           | e.Request |
+| c.Response()          | e.Response |
+| c.QueryParam("x")     | e.Request.URL.Query().Get("x") |
+| c.FormValue("x")      | e.Request.FormValue("x") (after e.Request.ParseForm()) |
+| c.JSON(200, data)     | e.Json(200, data) |
+| c.String(200, "ok")   | e.String(200, "ok") |
+| c.Redirect(307, url)  | http.Redirect(e.Response, e.Request, url, http. |
                       StatusTemporaryRedirect)
-=============================================================================
 
 Pocketbase Registers Routes
 ---------------------------
@@ -4296,14 +4295,6 @@ for reverse proxy to load balance requests to different servers.
 When doing load balance, the algorithm it uses matters because many calls 
 are stateful.
 
-Temp
-----
-// if (typeof window !== 'undefined') {
-// const use_auth_store = import.meta.env.VITE_USE_AUTH_STORE;
-// if (use_auth_store === "true") {
-//     checkAuthStatus();
-// }
-
 Client-User Binding
 -------------------
 In this page, when a user selects one or more records (there is a checkbox in the page) and presses the button "Invite to Portal" (Line 636), it will call the function "inviteSelectedClient(...)" (Line 417). Please help me implement this function:
@@ -4318,7 +4309,7 @@ In this page, when a user selects one or more records (there is a checkbox in th
       "github.com/chendingplano/shared/go/api/ApiTypes"
   )
 
-  db := ApiTypes.PG_DB_miner (db is *sql.DB, the handle for PostgreSQL ) 
+  db := ApiTypes.PG_DB_Project (db is *sql.DB, the handle for PostgreSQL ) 
 
 4. For each record, retrieve its email (there is a field named 'email'). If it is not a valid email, report errors
 
@@ -4349,3 +4340,322 @@ In this page, when a user selects one or more records (there is a checkbox in th
   - user_id (string)
   - created (timestamp, default to NOW())
   - updated (timestamp, default to NOW())
+
+How to Create Context
+---------------------
+ctx := context.Background()
+ctx := context.TODO()
+ctx := context.WithTimeout()
+  Don't forget 'defer cancel()'
+
+ctx := context.WithCancel()
+  Don't forget 'defer cancel()'
+  
+ctx := context.WithDeadline()
+    deadline := time.Now().Add(5 * time.Second)
+    ctx, cancel := context.WithDeadline(context.Background(), deadline)
+    defer cancel()
+
+Snippet Error
+-------------
+Below are the errors:
+Argument of type '({ client }: { client: ClientRow; }) => ReturnType<import("svelte").Snippet>' is not assignable to parameter of type 'Snippet<[{ client: ClientRow; }]>'.
+  Type '{ '{@render ...} must be called with a Snippet': "import type { Snippet } from 'svelte'"; } & typeof SnippetReturn' is not assignable to type '{ '{@render ...} must be called with a Snippet': "import type { Snippet } from 'svelte'"; } & typeof SnippetReturn'. Two different types with this name exist, but they are unrelated.
+    Type '{ '{@render ...} must be called with a Snippet': "import type { Snippet } from 'svelte'"; } & unique symbol' is not assignable to type 'unique symbol'.ts(2345)
+
+Claude:
+The renderSnippet function expects Snippet<[TProps]> type, but the snippets defined in the file are using Svelte 5 snippet syntax with destructured parameters like {#snippet ClientNameCell({ client }: { client: ClientRow })}.
+
+The problem is a type incompatibility between how Svelte 5 snippets are declared and the Snippet<[TProps]> type expected by renderSnippet. In Svelte 5, when you declare {#snippet Foo({ a, b }: { a: string, b: number })}, the snippet receives a single object parameter, but TypeScript sees the snippet as having a different internal type representation.
+
+The fix is to cast the snippets when passing them to renderSnippet.
+
+The fix is in tax/web/src/lib/components/tables/client-data-table.svelte.
+
+How to Cast any type to a Specific Type in TypeScript
+-----------------------------------------------------
+const asSnippet = <T,>(snippet: unknown) => snippet as Snippet<[T]>;
+
+- asSnippet is a function
+- <T,> declares a generic type T (',' is optional)
+- The function's parameter is (snippet: unknown)
+- It cast snippet to Snippet<[T]>
+
+Outstanding Problems
+--------------------
+1. /Users/cding/Workspace/tax/web/src/routes/(admin)/admin/clients/+page.svelte:
+           <ClientDataTable
+          data={filteredClients}
+          onDeleteClients={handleClientsDeleted}
+          onEditClient={handleEditClient}
+          onSendBookingLink={handleSendBookingLink}
+        />
+  <ClientDataTable> does not have "onSendBookingLink"
+
+2. Moved /Users/cding/Workspace/tax/web/src/lib/stores/auth.svelte.ts to porting/
+
+Differences among e.Request().PathValue("id"), e.Param("id) and e.QueryParm("id")
+---------------------------------------------------------------------------------
+1. e.Request().PathValue("id")
+This is from Go’s standard library (net/http), introduced with the new router in Go 1.22.
+
+id := e.Request().PathValue("id")
+
+A path parameter extracted by Go’s built-in router, e.g.:
+GET /admin/users/42
+
+Route (Go stdlib style):
+http.HandleFunc("GET /admin/users/{id}", handler)
+
+Key characteristics:
+- Uses Go’s native routing (not Echo’s router)
+- Only works if the route was defined using the new Go 1.22+ pattern syntax
+- Not idiomatic in Echo apps
+- Bypasses Echo’s parameter system
+
+Use case:
+Only relevant if you’re mixing Echo with Go’s new net/http router (rare).
+
+2. e.Param("id") ✅ Most common in Echo
+Echo’s path parameter accessor.
+
+id := e.Param("id")
+
+A path segment defined in your Echo route:
+GET /admin/users/:id
+
+Example:
+e.GET("/admin/users/:id", HandleGetAdminUsers)
+
+func HandleGetAdminUsers(e echo.Context) error {
+    id := e.Param("id") // "42"
+    ...
+}
+
+Key characteristics:
+- Framework-native (Echo router)
+- Fast and reliable
+- Works with Echo middleware, grouping, versioning, etc.
+
+The idiomatic choice in Echo apps
+Use this for anything in the URL path like /users/42.
+
+3. e.QueryParam("id")
+Echo’s query string accessor.
+id := e.QueryParam("id")
+
+Where the value comes from:
+  The query part of the URL:
+  GET /admin/users?id=42
+
+Example:
+func HandleGetAdminUsers(e echo.Context) error {
+    id := e.QueryParam("id") // "42"
+    ...
+}
+
+Key characteristics:
+- Reads from ?key=value in the URL
+- Multiple values supported via e.QueryParams()
+- Optional parameters (can be absent)
+- Common for filters, pagination, sorting
+
+Use case:
+Use this for things like:
+- ?page=2
+- ?limit=50
+- ?role=admin
+
+How to Solve the Problem of Showing the Redirected Page
+-------------------------------------------------------
+When the backend wants to redirect to a page, it should not send a response (JSON).
+Instead, it should instruct the frontend to redirect.
+Below is an example:
+
+func HandleEmailVerify(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "SHD_EML_272")
+	logger := rc.GetLogger()
+	logger.Info("Handle Email Verify")
+
+	is_post := false
+	status_code, msg, resp := HandleEmailVerifyBase(rc, is_post)
+	if msg == "" {
+		// Success case: redirect to the dashboard
+		// Cookie was already set in HandleEmailVerifyBase
+		redirectURL := resp["redirect_url"]
+		logger.Info("email verify success, redirecting", "redirect_url", redirectURL)
+
+    // IMPORTANT: normally, it sends a response with contents (JSON) (i.e., do
+    // not do: return c.JSON(status_code, resp))
+    // But since we want to show pages (redirect), use c.Redirect(...)
+		return c.Redirect(http.StatusSeeOther, redirectURL)
+	} else {
+		// Error case: return error message
+		logger.Error("failed verify", "error", msg)
+		return c.String(status_code, msg)
+	}
+}
+
+How to Adjust Sidebar Selected Color 
+------------------------------------
+Sidebar is from ShadCN. It is controlled by tax/web/src/app.css:
+The entry name is --sidebar-accent.
+
+How to Create Background Context
+--------------------------------
+ctx := context.Background()
+
+Note that it does not 'create' a new context. It just returns a background 
+context, which is a singleton immutable context from 'context'. 
+In Go, context is immutable. If you want to add new values to it, you 
+call ctx.WithValue(...), which returns back a new context with the 
+new value. It is for this reason that 'context.Background()' does not
+create but return a background context.
+
+Relations of ctx (context.Context), rc and logger
+-------------------------------------------------
+Go recommends to use ctx in (every) function call. I prefer rc 
+(ApiTypes.RequestContext). rc is mutable. It is designed to 
+carry information among function calls, such as trace,
+parameters (or values), etc. 'rc' is created per session.
+It is not thread-safe. When a request is processed in multi-thread
+fashion, one should be careful about the 'rc'. In general, every
+thread should create its own 'rc' unless it is a read-only thread.
+
+As an alternative, we can use ctx:
+  Add a tracer to ctx. The tracer has:
+    - A logger
+    - A tracer
+    - A mutable 'store'
+
+Update Users record in Production
+---------------------------------
+Step 1:
+cd /root/Workspace
+
+Step 2: Login to PostgreSQL. You need to provide PostgreSQL password (you can find it in the .env file)
+./pg_connect.sh
+
+Step 3: Show all tables, optional
+\d
+
+Step 4: List all users (optional)
+select * from users;
+
+Step 5: List id, password (Password is saved in hash), optional
+select id, password from users;
+
+Step 6: List id, user_id_type, first_name, last_name, email, verified, admin, is_owner, email_visibility, auth_type, optional
+select id, user_id_type, first_name, last_name, email, verified, admin, is_owner, email_visibility, auth_type from users;
+
+Step 7: Update a user to admin:
+update users set admin = true, is_owner = true where id = 'xxx'
+
+Changes on Production Data
+--------------------------
+Set bookings::consultant_id to linda's user_id
+
+### Reserved Words in slog 
+  - time 
+  - msg 
+  - level 
+  - source 
+
+Stop OpenClaw
+-------------
+launchctl stop ai.openclaw.gateway && launchctl unload ~/Library/LaunchAgents/ai.openclaw.gateway.plist 2>/dev/null || launchctl bootout gui/$(id -u) ai.openclaw.gateway 2>/dev/null; echo "Service stopped"
+
+Launch
+clawdbot gateway --port 18789 --verbose
+
+## TypeBox
+### Primitives
+
+```text
+Type.String({ minLength: 1, maxLength: 100, pattern: "^\\d+$" })
+Type.Number({ minimum: 0, maximum: 100 })
+Type.Integer()
+Type.Boolean()
+Type.Null()
+```
+
+### Objects & Arrays
+```text
+Type.Object({ field: Type.String() }, { additionalProperties: false })
+Type.Array(Type.String(), { minItems: 1, maxItems: 10 })
+Type.Tuple([Type.String(), Type.Number()])
+```
+
+### Unions & Conditionals
+```text
+Type.Union([Type.String(), Type.Number()])
+Type.Intersect(Type.Object({...}), Type.Object({...}))
+Type.Enum(["option1", "option2"])  // Enum-like
+```
+
+### Optional & Nullable
+```text
+Type.Optional(Type.String())       // Field may be omitted
+Type.Nullable(Type.String())       // Field can be null
+Type.Undefined()                   // Explicit undefined
+```
+
+### Advanced
+```text
+Type.Record(Type.String(), Type.Any())  // Dictionary
+Type.Partial(ObjectSchema)              // Make all fields optional
+Type.Required(ObjectSchema)             // Make all fields required
+Type.Pick(ObjectSchema, ["field"])      // Select specific fields
+Type.Omit(ObjectSchema, ["field"])      // Exclude specific fields
+```
+
+### Custom constraints
+```text
+Type.RegEx(/pattern/)
+Type.Constraints({ minimum: 1, exclusiveMinimum: true })  // Advanced numeric
+```
+
+### How to Set Env Vars
+- cd ~/Workspace/nix/modules/shared/home.nix
+- Add the env var in 'environment.variables', such as:
+    environment.variables = {
+      ...
+      POCKETBASE_ADMIN_EMAIL = "
+      ...
+    }
+- Rebuild the environment:
+  - cd ~/Workspace/nix
+  - darwin-rebuild switch --flake .#Chens-Mac-mini
+  - You need to exit ghostty and then restart it to see the new env vars.
+
+# How to Access Environment Variables in TypeScript
+
+Vite handles environment variables automatically. By default, SvelteKit (it uses Vite) looks environment files in your project root directory with the following files (in the listed order):
+- .env.production
+- .env.development
+- .env.local
+- .env
+
+### 1. Public and Server Side Environment Variables
+
+Environment variables that start with PUBLIC_ can be accessed in frontend. Otherwise, they can only be accessed on the server side.
+
+To access environment variables in frontend, do the following:
+```typescript
+// This will be available on the client
+const apiUrl = import.meta.env.PUBLIC_API_BASE_URL;
+```
+
+# Mise 
+```bash
+mise use <module-name>
+mise use aqua:charmbracelet/crush
+```
+
+# Nix Shell
+This command launches a temporary interactive shell, install the package temporarily. Once exit, the installation is gone:
+```bash
+nix shell nixpkgs#<name>
+```
+
+'nix shell' is ephemeral. If you want to install a package permanently, add it to nix's packages.nix file.

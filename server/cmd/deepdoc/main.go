@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -15,7 +14,10 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/databaseutil"
+	sharedgoose "github.com/chendingplano/shared/go/api/goose"
 	"github.com/chendingplano/shared/go/api/libmanager"
+	"github.com/chendingplano/shared/go/api/loggerutil"
+	"github.com/chendingplano/shared/go/api/security"
 	"github.com/chendingplano/shared/go/api/sysdatastores"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -34,50 +36,67 @@ func main() {
 
 	new_ctx := context.WithValue(ctx, ApiTypes.CallFlowKey, "CWB_DDM_035")
 
-	log.Printf("load .env (CWB_DDM_198)")
 	// Load .env from project root (../../.env relative to cmd/mirai)
 	// err := godotenv.Load("../../../.env")
 	env_path := "./.env"
 	err := godotenv.Load(env_path)
+
+	ApiUtils.LoadLibConfig("CWB_0207150500")
+	var logger = loggerutil.CreateDefaultLogger("CWB_MAN_032")
+	logger.Info("load .env", "loc", "(CWB_DDM_198)")
+
 	if err != nil {
-		error_msg := fmt.Sprintf("Warning: Could not load .env file from:%s, err: %v (CWB_DDM_200)", env_path, err)
-		log.Printf("***** Alarm:%s", error_msg)
+		logger.Error("***** Alarm",
+			"message", "Cound not load .env file",
+			"error", err,
+			"path", env_path,
+			"loc", "CWB_DDM_200")
 
 		// Try loading from current directory as fallback
 		err = godotenv.Load()
 		if err != nil {
-			error_msg = fmt.Sprintf("Warning: Could not load .env file from current directory (CWB_DDM_210): %v", err)
-			log.Printf("***** %s", error_msg)
+			logger.Error("***** Alarm",
+				"message", "Cound not load .env file from current directory",
+				"error", err,
+				"loc", "CWB_DDM_210")
 		} else {
-			log.Printf("load .env file from current directory (CWB_DDM_212)")
+			logger.Info("load .env file from current directory",
+				"loc", "CWB_DDM_212")
 		}
 	}
 
-	// Verify Google OAuth environment variables are loaded
-	log.Printf("Verifying Google OAuth env vars (CWB_DMN_052):")
-	log.Printf("  GOOGLE_OAUTH_CLIENT_ID:%s", os.Getenv("GOOGLE_OAUTH_CLIENT_ID"))
-	log.Printf("  GOOGLE_OAUTH_REDIRECT_URL:%s", os.Getenv("GOOGLE_OAUTH_REDIRECT_URL"))
-	log.Printf("  APP_DOMAIN_NAME:%s", os.Getenv("APP_DOMAIN_NAME"))
+	// Register custom email sender for Shared project
+	// This makes password reset emails use our branded template and Resend service
+	// ApiUtils.SetEmailSender(createMiraiEmailSender())
 
-	err = config.LoadConfig(new_ctx, "./config.toml")
+	// Verify Google OAuth environment variables are loaded
+	logger.Info("Verifying Google OAuth env vars (CWB_DMN_052):")
+	logger.Info("  GOOGLE_OAUTH_CLIENT_ID", "value", os.Getenv("GOOGLE_OAUTH_CLIENT_ID"))
+	logger.Info("  GOOGLE_OAUTH_REDIRECT_URL", "value", os.Getenv("GOOGLE_OAUTH_REDIRECT_URL"))
+	logger.Info("  VITE_DEV_ONLY_URL", "value", os.Getenv("VITE_DEV_ONLY_URL"))
+
+	err = config.LoadConfig(new_ctx, logger, "./config.toml")
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("***** Alarm", "error", err, "loc", "CWB_DDM_075")
 	}
 
+	security.InitAccCtrlMgr()
+
 	// load libconfig.toml
-	libmanager.LoadLibConfig(new_ctx, "../Shared/libconfig.toml")
+	// libmanager.LoadLibConfig(new_ctx, "../Shared/libconfig.toml")
 
 	defer ExitApp()
 
-	fmt.Printf("Starting %s on %s:%d (CWB_DDM_020)\n",
-		config.GlobalConfig.AppName,
-		config.GlobalConfig.Server.Host,
-		config.GlobalConfig.Server.Port)
+	logger.Info("Starting server",
+		"loc", "CWB_DDM_020)",
+		"app_name", config.GlobalConfig.AppName,
+		"host", config.GlobalConfig.Server.Host,
+		"port", config.GlobalConfig.Server.Port)
 
 	e := echo.New()
 
 	// ✅ Enable CORS
-	log.Printf("Configure CORS (CWB_DDM_045)")
+	logger.Info("Configure CORS", "loc", "CWB_DDM_045")
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins:     []string{"http://localhost:5173"}, // frontend
 		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
@@ -85,65 +104,120 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	log.Printf("Register api Routes (CWB_DDM_052)")
+	logger.Info("Register api Routes", "loc", "CWB_DDM_052")
 	err = api.RegisterRoutes(e)
 	if err != nil {
 		panic(err)
 	}
 
-	log.Printf("To Init DB (CWB_DDM_095)")
+	logger.Info("To Init DB", "loc", "CWB_DDM_095")
 	db_type := ApiTypes.DatabaseInfo.DBType
-	databaseutil.InitDB(new_ctx, config.MySQLConfig, config.PGConfig)
-	log.Printf("To Init DB (CWB_DDM_098)... Finished, db_type:%s", db_type)
+	if err := databaseutil.InitDB(new_ctx, config.MySQLConfig, config.PGConfig); err != nil {
+		logger.Error("Failed to initialize database", "error", err)
+		os.Exit(2)
+	}
+
+	logger.Info("To Init DB ... Finished",
+		"db_type", db_type,
+		"loc", "CWB_DDM_111")
 
 	// Make sure the db is created and valid.
 	var db *sql.DB
 	switch db_type {
 	case ApiTypes.MysqlName:
-		log.Println("Set Mysql db (CWB_MAN_104)")
+		logger.Info("Set Mysql db (CWB_MAN_104)")
 		db = ApiTypes.DatabaseInfo.MySQLDBHandle
 
 	case ApiTypes.PgName:
-		log.Println("Set PG db (CWB_MAN_105)")
+		logger.Info("Set PG db (CWB_MAN_105)")
 		db = ApiTypes.DatabaseInfo.PGDBHandle
 
 	default:
-		error_msg := fmt.Sprintf("unrecognized db_type (CWB_MAN_112):%s", db_type)
-		log.Printf("***** %s", error_msg)
+		logger.Error("***** Alarm",
+			"message", "unrecognized db_type",
+			"db_type", db_type,
+			"loc", "CWB_MAN_112")
 		os.Exit(1)
 	}
 
 	if db == nil {
-		error_msg := fmt.Sprintf("db is nil (CWB_MAN_077), db_type:%s. Check the config!", db_type)
-		log.Printf("***** %s", error_msg)
+		logger.Error("***** Alarm",
+			"message", "db is nil",
+			"db_type", db_type,
+			"loc", "CWB_MAN_077")
 		os.Exit(1)
 	}
 
-	// Init the library
-	new_ctx1 := ApiUtils.AddCallFlow(new_ctx, "CWB_MAN_115")
-	libmanager.InitLib(new_ctx1, "../Shared/libconfig.toml")
-
 	// Create tables
 	if config.NeedCreateTables() {
-		log.Printf("To Create Tables (CWB_DDM_036)")
-		sysdatastores.CreateTables()
-		err = database.CreateTables()
+		logger.Info("To Create Tables (CWB_DDM_036)")
+		sysdatastores.CreateSysTables(logger)
+		err = database.CreateTables(logger)
 		if err != nil {
-			log.Fatal("***** Alarm: Failed creating tables (CWB_DDM_030)", err)
+			logger.Error("***** Alarm",
+				"message", "Failed creating tables",
+				"error", err,
+				"loc", "CWB_DDM_030")
 		}
 	} else {
-		log.Printf("Not creating tables (CWB_DDM_041)")
+		logger.Info("Not creating tables (CWB_DDM_041)")
 	}
 
-	log.Printf("Register Shared Routes (CWB_DDM_055)")
+	migrate_cfg := config.GlobalConfig.Migration
+
+	var project_db *sql.DB
+	var shared_db *sql.DB
+	dbType := ApiTypes.DatabaseInfo.DBType
+	switch dbType {
+	case ApiTypes.PgName:
+		project_db = ApiTypes.PG_DB_Project
+		shared_db = ApiTypes.PG_DB_Shared
+	case ApiTypes.MysqlName:
+		project_db = ApiTypes.MySql_DB_Project
+		shared_db = ApiTypes.MySql_DB_Shared
+	default:
+		logger.Error("unsupported db type. System exit!!!!", "db_type", dbType)
+		os.Exit(1)
+	}
+
+	if project_db == nil {
+		logger.Error("project db is not set. System exit!!!!", "db_type", dbType)
+		os.Exit(1)
+	}
+
+	if shared_db == nil {
+		logger.Error("shared database connection is not set. System exit!!!!", "db_type", dbType)
+		os.Exit(1)
+	}
+
+	err = sharedgoose.RunProjectMigrations(ctx, logger, migrate_cfg, project_db)
+	if err != nil {
+		logger.Error("failed to run project migrator. System exit!!!!", "error", err)
+		os.Exit(1)
+	}
+
+	err = sharedgoose.RunSharedMigrations(ctx, logger, migrate_cfg, shared_db)
+	if err != nil {
+		logger.Error("failed to run shared migrator. System exit!!!!", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("Auto-test migrations completed successfully")
+
+	// Init the library
+	libmanager.InitLib(new_ctx, "../Shared/libconfig.toml", "CWB_MAN_157")
+
+	logger.Info("Register Shared Routes (CWB_DDM_055)")
 	shared_api.RegisterRoutes(e)
 
 	var server_port = os.Getenv("SERVER_PORT")
 	if server_port == "" {
-		log.Fatal("***** Alarm: missing SERVER_PORT env var (CWB_MAN_145)")
+		logger.Error("***** Alarm",
+			"message", "missing SERVER_PORT env var",
+			"loc", "CWB_MAN_145")
 		os.Exit(1)
 	}
 	var pp = fmt.Sprintf(":%s", server_port)
-	log.Printf("[API] ⇨ http server started on (CWB_DDM_143): %s", pp)
+	logger.Info("[API] ⇨ http server started on", "server_port", pp)
 	e.Logger.Fatal(e.Start(pp))
 }

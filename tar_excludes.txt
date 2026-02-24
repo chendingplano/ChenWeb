@@ -20,3 +20,8 @@ node_modules
 *.gz
 *.pt
 tax/pb_data
+tax/migrations
+tax/web/build
+tax/server/api/webbuild
+shared/svelte/dist
+ChenWeb/web/build

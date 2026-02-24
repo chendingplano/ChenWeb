@@ -126,7 +126,7 @@ import { checkConfigFileExists } from '$lib/utils.server';
 
 2. Access the config API:
    ```bash
-   curl http://localhost:5173/api/config
+   curl http://localhost:8080/api/config
    ```
 
 3. You should see your config.toml contents as JSON

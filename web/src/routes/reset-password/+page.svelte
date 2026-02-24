@@ -30,7 +30,7 @@
 
 		isLoading = true;
 		try {
-			const res = await fetch('/auth/email/reset/confirm1', {
+			const res = await fetch('/auth/email/reset/confirm', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ token, password })
@@ -91,7 +91,7 @@
 						/>
 						<button
 							type="button"
-							class="absolute right-3 top-3.5 text-gray-500 hover:text-gray-700"
+							class="absolute top-3.5 right-3 text-gray-500 hover:text-gray-700"
 							on:click={() => (showPassword = !showPassword)}
 						>
 							{#if showPassword}
@@ -157,7 +157,7 @@
 				>
 					{#if isLoading}
 						<svg
-							class="-ml-1 mr-2 h-4 w-4 animate-spin text-white"
+							class="mr-2 -ml-1 h-4 w-4 animate-spin text-white"
 							xmlns="http://www.w3.org/2000/svg"
 							fill="none"
 							viewBox="0 0 24 24"

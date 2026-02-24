@@ -49,7 +49,7 @@ Note: the function
 ### Using the API Endpoint Directly
 
 ```bash
-curl http://localhost:5173/api/config
+curl http://localhost:8080/api/config
 ```
 
 ## Why This Structure?

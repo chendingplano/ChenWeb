@@ -3,7 +3,7 @@ app_name = "DeepDoc"
 debug = true
 
 [server]
-port = 8088
+port = 8080
 host = "localhost"
 
 [database]
@@ -25,3 +25,28 @@ table_name_schedules        = "schedules"
 [auth]
 jwt_secret = "super-secret-key"
 session_duration_hours = 24
+
+[migration]
+# MigrationsFS is the filesystem that contains the .sql migration files.
+# Defaults to os.DirFS("migrations") when nil.
+# Can also be fs.Sub(embedFS, "migrations") for an embedded filesystem.
+# Path is relative to where the command is run (project root).
+migrations_fs = "server/migrations"
+
+# TableName overrides the version-tracking table name.
+# Default: "goose_db_version"
+tablename = "db_migrations"
+
+# Verbose enables verbose output from the goose library.
+# Default: true
+verbose = "true"
+
+# AllowOutOfOrder permits applying migrations whose version is lower
+# than the current database version. Useful with feature branches.
+# Default: true
+allow_outof_order = "true"
+
+# MigrationsDir is the directory on disk where migration files are stored.
+# This is used for creating new migration files and ensuring the directory exists.
+# Path is relative to where the command is run (project root).
+migrations_dir = "server/migrations"

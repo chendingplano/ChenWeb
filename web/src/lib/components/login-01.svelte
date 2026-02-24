@@ -24,10 +24,18 @@
 
 			if (res.ok) {
 				const data = await res.json();
+
+				// Check if 2FA is required
+				if (data.status === '2fa_required') {
+					// Redirect to 2FA verification page
+					window.location.href = data.redirect_url || '/verify-2fa';
+					return;
+				}
+
 				let redirect_url = data.redirect_url || '/sidebar-01';
-				redirect_url += `?name=${encodeURIComponent(data.name)}`;
-				// alert("Login successful!");
-				// window.location.href = `/sidebar-01?name=${encodeURIComponent(data.name)}`;
+				if (data.name) {
+					redirect_url += `?name=${encodeURIComponent(data.name)}`;
+				}
 				window.location.href = redirect_url;
 			} else {
 				const msg = await res.text();
@@ -63,7 +71,6 @@
   }
     */
 
-		// await authStore.register(name, email, password);
 		if (user_name) {
 			console.log('User Name:', user_name);
 			alert(`Sign up with user name: ${user_name} is currently disabled for demo purposes.`);
@@ -88,7 +95,7 @@
 		const res = await fetch('/auth/email/forgot', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ email })
+			body: JSON.stringify({ email, loc: 'ARX_LGN_090' })
 		});
 		if (res.ok) {
 			alert('A password reset link has been sent to your email.');
@@ -113,14 +120,28 @@
 
 <div class="form-container">
 	<p class="title">
-		{mode === 'login' ? 'Welcome to DeepDocs' : 'Create an Account'}
+		{mode === 'login' ? 'Welcome to DeepDocs' : 'Reset your password'}
 	</p>
 
 	{#if mode === 'login'}
 		<!-- Login Form -->
 		<form class="form" onsubmit={handleEmailLogin}>
-			<input bind:value={email} type="email" class="input" placeholder="Email" required />
-			<input bind:value={password} type="password" class="input" placeholder="Password" required />
+			<input
+				bind:value={email}
+				type="email"
+				class="input"
+				placeholder="Email"
+				autocomplete="email"
+				required
+			/>
+			<input
+				bind:value={password}
+				type="password"
+				class="input"
+				placeholder="Password"
+				autocomplete="current-password"
+				required
+			/>
 			<p class="page-link">
 				<button type="button" class="page-link-label" onclick={switchToForgot}
 					>Forgot Password?</button
@@ -136,11 +157,42 @@
 	{:else if mode === 'signup'}
 		<!-- Sign Up Form -->
 		<form class="form" onsubmit={handleEmailSignup}>
-			<input bind:value={user_name} type="text" class="input" placeholder="user name" />
-			<input bind:value={first_name} type="text" class="input" placeholder="First name" />
-			<input bind:value={last_name} type="text" class="input" placeholder="Last name" />
-			<input bind:value={email} type="email" class="input" placeholder="Email" />
-			<input bind:value={password} type="password" class="input" placeholder="Password" required />
+			<input
+				bind:value={user_name}
+				type="text"
+				class="input"
+				placeholder="user name"
+				autocomplete="username"
+			/>
+			<input
+				bind:value={first_name}
+				type="text"
+				class="input"
+				placeholder="First name"
+				autocomplete="given-name"
+			/>
+			<input
+				bind:value={last_name}
+				type="text"
+				class="input"
+				placeholder="Last name"
+				autocomplete="family-name"
+			/>
+			<input
+				bind:value={email}
+				type="email"
+				class="input"
+				placeholder="Email"
+				autocomplete="email"
+			/>
+			<input
+				bind:value={password}
+				type="password"
+				class="input"
+				placeholder="Password"
+				autocomplete="new-password"
+				required
+			/>
 			<button class="form-btn">Sign up</button>
 		</form>
 
@@ -157,6 +209,7 @@
 				type="email"
 				class="input"
 				placeholder="Enter your email"
+				autocomplete="email"
 				required
 			/>
 			<button class="form-btn">Send Reset Link</button>

@@ -1,0 +1,51 @@
+[tools]
+bun = "latest"
+caddy = "latest"
+go = "latest"
+node = "latest"
+
+
+[tasks.update]
+run = "cd web && bun install"
+
+[tasks.build-server]
+run = "go build -buildvcs=false -o ./.cache/server.exe ./server/cmd/deepdoc/."
+
+[tasks.build-web]
+run = '''
+cd web && bun run build && cd ..
+rsync -av --delete ./web/build/ ./server/api/webbuild/
+'''
+
+[tasks.dev]
+run = '''
+./web/node_modules/.bin/concurrently \
+  --names "API,WEB" \
+  --prefix-colors "bgBlue.bold,bgMagenta.bold" \
+  'mise dev-server' \
+  'mise dev-web'
+'''
+
+[tasks.dev-server]
+run = 'go tool air'
+
+[tasks.dev-web]
+run = "cd web && bun run dev"
+
+[tasks.publish]
+run = '''
+mise build-web
+KO_DOCKER_REPO=dinglind/mirai go tool ko build ./server/cmd/mirai --platform=linux/amd64 --bare --sbom=none
+'''
+
+[tasks.typegen]
+run = "bunx pocketbase-typegen --db ./pb_data/data.db -o web/src/lib/pocketbase-types.ts"
+
+[tasks.build-both]
+run = "mise build-web && mise build-server"
+
+[tasks.serve]
+run = '''USE_EMBED_FRONTEND=true ./.cache/server.exe serve --dir '''
+
+[tasks.run-all-tests]
+run = "go run ./server/cmd/autotester/"

@@ -5,9 +5,10 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 // Read from .env (or process.env)
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8088';
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8080';
 
 export default defineConfig({
+	envDir: '..',
 	plugins: [
 		tailwindcss(),
 		sveltekit(),
@@ -42,6 +43,12 @@ export default defineConfig({
 			'/shared_api': {
         		target: API_BASE_URL,
         		changeOrigin: true,
+			},
+			'/kratos': {
+				target: 'http://127.0.0.1:4433',
+				changeOrigin: true,
+				secure: false,
+				rewrite: (path) => path.replace(/^\/kratos/, ''),
 			}
     	}
   	},
