@@ -45,8 +45,9 @@
       <div style="font-size:9px; color:#6366f1; letter-spacing:1px; margin-bottom:8px;">PROPERTIES</div>
       <!-- Node name -->
       <div style="margin-bottom:10px;">
-        <label style="font-size:9px; color:#6b7280; display:block; margin-bottom:3px;">Name</label>
+        <label for="prop-node-label" style="font-size:9px; color:#6b7280; display:block; margin-bottom:3px;">Name</label>
         <input
+          id="prop-node-label"
           type="text"
           maxlength="100"
           value={String(node.data.label ?? nodeType.label)}
@@ -60,11 +61,12 @@
       <!-- Attributes -->
       {#each Object.entries(nodeType.defaultData) as [key]}
         <div style="margin-bottom:10px;">
-          <label style="font-size:9px; color:#6b7280; display:block; margin-bottom:3px; text-transform:capitalize;">
+          <label for={`prop-attr-${key}`} style="font-size:9px; color:#6b7280; display:block; margin-bottom:3px; text-transform:capitalize;">
             {key.replace(/_/g, ' ')}
           </label>
           {#if SELECT_ATTRS[key]}
             <select
+              id={`prop-attr-${key}`}
               value={String(node.data[key] ?? nodeType.defaultData[key])}
               onchange={(e) => update(key, (e.target as HTMLSelectElement).value)}
               style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0;"
@@ -75,7 +77,7 @@
             </select>
           {:else if key === 'temperature'}
             <div class="flex items-center gap-2">
-              <input type="range" min="0" max="2" step="0.1"
+              <input id={`prop-attr-${key}`} type="range" min="0" max="2" step="0.1"
                 value={Number(node.data[key] ?? nodeType.defaultData[key])}
                 oninput={(e) => update(key, parseFloat((e.target as HTMLInputElement).value))}
                 style="flex:1;"
@@ -84,19 +86,20 @@
             </div>
           {:else if TEXTAREA_ATTRS.has(key)}
             <textarea
+              id={`prop-attr-${key}`}
               rows="4"
               value={String(node.data[key] ?? nodeType.defaultData[key] ?? '')}
               oninput={(e) => update(key, (e.target as HTMLTextAreaElement).value)}
               style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0; resize:vertical; box-sizing:border-box;"
             ></textarea>
           {:else if MASKED_ATTRS.has(key)}
-            <input type="password"
+            <input id={`prop-attr-${key}`} type="password"
               value={String(node.data[key] ?? '')}
               oninput={(e) => update(key, (e.target as HTMLInputElement).value)}
               style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0; box-sizing:border-box;"
             />
           {:else}
-            <input type="text"
+            <input id={`prop-attr-${key}`} type="text"
               value={String(node.data[key] ?? '')}
               oninput={(e) => update(key, (e.target as HTMLInputElement).value)}
               style="width:100%; background:#1e2535; border:1px solid #374151; border-radius:4px; padding:4px 8px; font-size:10px; color:#e2e8f0; box-sizing:border-box;"
