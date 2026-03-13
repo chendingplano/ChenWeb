@@ -21,6 +21,7 @@ need_create_tables = true
 table_name_documents        = "documents"
 table_name_process_status   = "process_status"
 table_name_schedules        = "schedules"
+table_name_flows            = "flows"
 
 [auth]
 jwt_secret = "super-secret-key"

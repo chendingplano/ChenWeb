@@ -8,5 +8,8 @@ import (
 func CreateTables(logger ApiTypes.JimoLogger) error {
 	appdatastores.CreateProcessStatusTable(logger)
 	appdatastores.CreateDocumentsTable(logger)
+	if err := appdatastores.CreateFlowsTable(logger); err != nil {
+		return err
+	}
 	return nil
 }

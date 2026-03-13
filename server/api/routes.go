@@ -15,6 +15,7 @@ import (
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
+	"github.com/chendingplano/deepdoc/server/api/flowhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -193,6 +194,18 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Add the endpoint '/api/vi/retrieve-process-data'
 	apiGroup.GET("/retrieve-process-data", Dashboard01.RetrieveDataForDashboard01)
+
+	// Flow Canvas
+	apiGroup.GET("/flow-node-types", flowhandler.GetNodeTypes)
+	apiGroup.GET("/flows/default", flowhandler.GetDefaultFlow)
+	apiGroup.GET("/flows", flowhandler.ListFlows)
+	apiGroup.POST("/flows", flowhandler.CreateFlow)
+	apiGroup.GET("/flows/:id", flowhandler.GetFlow)
+	apiGroup.PUT("/flows/:id", flowhandler.UpdateFlow)
+	apiGroup.DELETE("/flows/:id", flowhandler.DeleteFlow)
+	apiGroup.PUT("/flows/:id/default", flowhandler.SetDefaultFlow)
+	apiGroup.POST("/flows/:id/fork", flowhandler.ForkFlow)
+	apiGroup.POST("/flows/:id/template", flowhandler.SaveAsTemplate)
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {
