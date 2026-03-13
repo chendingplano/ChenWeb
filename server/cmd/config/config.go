@@ -40,6 +40,7 @@ type Config struct {
 		TableName_ProcessStatus string `mapstructure:"table_name_process_status"`
 		TableName_Schedules     string `mapstructure:"table_name_schedules"`
 		TableName_Documents     string `mapstructure:"table_name_documents"`
+		TableName_Flows         string `mapstructure:"table_name_flows"`
 	} `mapstructure:"app_table_names"`
 
 	Auth struct {
