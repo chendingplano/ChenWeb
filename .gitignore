@@ -1,5 +1,6 @@
 /.direnv/
 node_modules
+mise.local.toml
 /web/node_modules
 
 # Output
