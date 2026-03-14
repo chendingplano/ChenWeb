@@ -4659,3 +4659,16 @@ nix shell nixpkgs#<name>
 ```
 
 'nix shell' is ephemeral. If you want to install a package permanently, add it to nix's packages.nix file.
+
+# How to Handle Claude Code History Empty Bug
+
+If you pick a session from the history and it shows nothing, this is a known bug. Do the following
+and then restart Claude Code:
+
+```bash
+mv ~/.claude/file-history ~/.claude/file-history.bak
+```
+
+# Jimmy Hot Keys
+
+# Environment Variable Name Changes

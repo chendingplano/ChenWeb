@@ -18,9 +18,9 @@ type ProcessStatus struct {
 }
 
 func CreateProcessStatusTable(logger ApiTypes.JimoLogger) error {
-	db_type := ApiTypes.DatabaseInfo.DBType
-	table_name := config.GlobalConfig.AppTableNames.TableName_ProcessStatus
-	var db *sql.DB
+	db_type := ApiTypes.DBType
+	table_name := config.AppConfig.AppTableNames.TableName_ProcessStatus
+	var db *sql.DB = ApiTypes.ProjectDBHandle
 	var stmt string
 	switch db_type {
 	case ApiTypes.MysqlName:
@@ -31,7 +31,6 @@ func CreateProcessStatusTable(logger ApiTypes.JimoLogger) error {
 			"rcd_count 		INTEGER 		DEFAULT 0, " +
 			"tags 			VARCHAR(255) 	NOT NULL, " +
 			"created_at 	DATETIME 		DEFAULT CURRENT_TIMESTAMP)"
-		db = ApiTypes.DatabaseInfo.MySQLDBHandle
 
 	case ApiTypes.PgName:
 		stmt = "CREATE TABLE IF NOT EXISTS " + table_name + " (" +
@@ -41,7 +40,6 @@ func CreateProcessStatusTable(logger ApiTypes.JimoLogger) error {
 			"rcd_count 		INTEGER 		DEFAULT 0, " +
 			"tags 			VARCHAR(255) 	NOT NULL, " +
 			"created_at 	TIMESTAMP 		WITHOUT TIME ZONE DEFAULT NOW())"
-		db = ApiTypes.DatabaseInfo.PGDBHandle
 
 	default:
 		err := fmt.Errorf("database type not supported:%s (CWB_PST_061)", db_type)
@@ -65,21 +63,9 @@ func RetrieveProcessStatus(rc ApiTypes.RequestContext) ([]ProcessStatus, error) 
 
 	// Query the database for dashboard data
 	const select_fields = "status_name, status_value, rcd_count, created_at"
-	db_type := ApiTypes.DatabaseInfo.DBType
-	table_name := config.GlobalConfig.AppTableNames.TableName_ProcessStatus
+	table_name := config.AppConfig.AppTableNames.TableName_ProcessStatus
 	stmt := fmt.Sprintf("SELECT %s FROM %s ORDER BY created_at desc LIMIT 3000", select_fields, table_name)
-	var db *sql.DB
-	switch db_type {
-	case ApiTypes.MysqlName:
-		db = ApiTypes.MySql_DB_Project
-
-	case ApiTypes.PgName:
-		db = ApiTypes.PG_DB_Project
-
-	default:
-		err := fmt.Errorf("database type not supported:%s (CWB_PST_082)", db_type)
-		return nil, err
-	}
+	var db *sql.DB = ApiTypes.ProjectDBHandle
 
 	rows, err := db.Query(stmt)
 	if err != nil {

@@ -4,17 +4,18 @@ import (
 	"net/http"
 
 	"github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
 )
 
 // ConfigResponse represents the configuration data sent to the frontend
 type ConfigResponse struct {
-	AppName       string              `json:"app_name"`
-	Debug         bool                `json:"debug"`
-	Server        ServerConfig        `json:"server"`
-	Database      DatabaseConfig      `json:"database"`
-	AppTableNames AppTableNamesConfig `json:"app_table_names"`
-	Auth          AuthConfig          `json:"auth"`
+	AppName       string                  `json:"app_name"`
+	Debug         bool                    `json:"debug"`
+	Server        ServerConfig            `json:"server"`
+	Database      ApiTypes.DatabaseConfig `mapstructure:"database"`
+	AppTableNames AppTableNamesConfig     `json:"app_table_names"`
+	Auth          AuthConfig              `json:"auth"`
 }
 
 type ServerConfig struct {
@@ -22,7 +23,8 @@ type ServerConfig struct {
 	Host string `json:"host"`
 }
 
-type DatabaseConfig struct {
+/*
+type DatabaseConf struct {
 	CreateMySQL string `json:"create_mysql"`
 	CreatePG    string `json:"create_pg"`
 	PGHost      string `json:"pg_host"`
@@ -39,6 +41,7 @@ type DatabaseConfig struct {
 	DatabaseType     string `json:"database_type"`
 	NeedCreateTables string `json:"need_create_tables"`
 }
+*/
 
 type AppTableNamesConfig struct {
 	TableNameDocuments     string `json:"table_name_documents"`
@@ -54,40 +57,20 @@ type AuthConfig struct {
 // GetConfig returns the application configuration
 // Endpoint: GET /api/config
 func GetConfig(c echo.Context) error {
-	cfg := config.GlobalConfig
-
 	response := ConfigResponse{
-		AppName: cfg.AppName,
-		Debug:   cfg.Debug,
+		AppName: ApiTypes.CommonConfig.AppInfo.AppName,
 		Server: ServerConfig{
-			Port: cfg.Server.Port,
-			Host: cfg.Server.Host,
-		},
-		Database: DatabaseConfig{
-			CreateMySQL: boolToString(cfg.Database.CreateMySQL),
-			CreatePG:    boolToString(cfg.Database.CreatePG),
-			PGHost:      cfg.Database.PGHost,
-			PGPort:      cfg.Database.PGPort,
-			PGUserName:  cfg.Database.PGUserName,
-			// PGPassword excluded for security
-			PGDBName:      cfg.Database.PGDBName,
-			MySQLHost:     cfg.Database.MySQLHost,
-			MySQLPort:     cfg.Database.MySQLPort,
-			MySQLUserName: cfg.Database.MySQLUserName,
-			// MySQLPassword excluded for security
-			MySQLDBName:      cfg.Database.MySQLDBName,
-			MaxConnections:   cfg.Database.MaxConnections,
-			DatabaseType:     cfg.Database.DatabaseType,
-			NeedCreateTables: boolToString(cfg.Database.NeedCreateTables),
+			Port: ApiTypes.CommonConfig.AppInfo.Port,
+			Host: ApiTypes.CommonConfig.AppInfo.Host,
 		},
 		AppTableNames: AppTableNamesConfig{
-			TableNameDocuments:     cfg.AppTableNames.TableName_Documents,
-			TableNameProcessStatus: cfg.AppTableNames.TableName_ProcessStatus,
-			TableNameSchedules:     cfg.AppTableNames.TableName_Schedules,
+			TableNameDocuments:     config.AppConfig.AppTableNames.TableName_Documents,
+			TableNameProcessStatus: config.AppConfig.AppTableNames.TableName_ProcessStatus,
+			TableNameSchedules:     config.AppConfig.AppTableNames.TableName_Schedules,
 		},
 		Auth: AuthConfig{
 			// JWTSecret excluded for security
-			SessionDurationHours: cfg.Auth.SessionDurationHours,
+			SessionDurationHours: ApiTypes.CommonConfig.Auth.SessionDurationHours,
 		},
 	}
 
@@ -95,7 +78,7 @@ func GetConfig(c echo.Context) error {
 }
 
 // Helper function to convert bool to string
-func boolToString(b bool) string {
+func BoolToString(b bool) string {
 	if b {
 		return "true"
 	}

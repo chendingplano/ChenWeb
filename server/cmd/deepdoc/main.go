@@ -25,7 +25,7 @@ import (
 )
 
 func ExitApp() {
-	databaseutil.CloseDatabase()
+	databaseutil.CloseDatabase(ApiTypes.CommonConfig)
 	libmanager.ExitLib()
 }
 
@@ -46,22 +46,14 @@ func main() {
 	logger.Info("load .env", "loc", "(CWB_DDM_198)")
 
 	if err != nil {
-		logger.Error("***** Alarm",
-			"message", "Cound not load .env file",
-			"error", err,
-			"path", env_path,
-			"loc", "CWB_DDM_200")
+		logger.Error("Cound not load .env file", "error", err, "path", env_path)
 
 		// Try loading from current directory as fallback
 		err = godotenv.Load()
 		if err != nil {
-			logger.Error("***** Alarm",
-				"message", "Cound not load .env file from current directory",
-				"error", err,
-				"loc", "CWB_DDM_210")
+			logger.Error("Cound not load .env file from current directory", "error", err)
 		} else {
-			logger.Info("load .env file from current directory",
-				"loc", "CWB_DDM_212")
+			logger.Info("load .env file from current directory")
 		}
 	}
 
@@ -77,7 +69,7 @@ func main() {
 
 	err = config.LoadConfig(new_ctx, logger, "./config.toml")
 	if err != nil {
-		logger.Error("***** Alarm", "error", err, "loc", "CWB_DDM_075")
+		logger.Error("failed loading config 'config.toml'", "error", err)
 	}
 
 	security.InitAccCtrlMgr()
@@ -89,9 +81,9 @@ func main() {
 
 	logger.Info("Starting server",
 		"loc", "CWB_DDM_020)",
-		"app_name", config.GlobalConfig.AppName,
-		"host", config.GlobalConfig.Server.Host,
-		"port", config.GlobalConfig.Server.Port)
+		"app_name", ApiTypes.CommonConfig.AppInfo.AppName,
+		"host", ApiTypes.CommonConfig.AppInfo.Host,
+		"port", ApiTypes.CommonConfig.AppInfo.Port)
 
 	e := echo.New()
 
@@ -111,8 +103,8 @@ func main() {
 	}
 
 	logger.Info("To Init DB", "loc", "CWB_DDM_095")
-	db_type := ApiTypes.DatabaseInfo.DBType
-	if err := databaseutil.InitDB(new_ctx, config.MySQLConfig, config.PGConfig); err != nil {
+	db_type := ApiTypes.CommonConfig.AppInfo.DatabaseType
+	if err := databaseutil.InitDB(new_ctx, ApiTypes.CommonConfig); err != nil {
 		logger.Error("Failed to initialize database", "error", err)
 		os.Exit(2)
 	}
@@ -122,59 +114,42 @@ func main() {
 		"loc", "CWB_DDM_111")
 
 	// Make sure the db is created and valid.
-	var db *sql.DB
-	switch db_type {
-	case ApiTypes.MysqlName:
-		logger.Info("Set Mysql db (CWB_MAN_104)")
-		db = ApiTypes.DatabaseInfo.MySQLDBHandle
-
-	case ApiTypes.PgName:
-		logger.Info("Set PG db (CWB_MAN_105)")
-		db = ApiTypes.DatabaseInfo.PGDBHandle
-
-	default:
-		logger.Error("***** Alarm",
-			"message", "unrecognized db_type",
-			"db_type", db_type,
-			"loc", "CWB_MAN_112")
-		os.Exit(1)
-	}
-
+	var db = ApiTypes.ProjectDBHandle
 	if db == nil {
-		logger.Error("***** Alarm",
-			"message", "db is nil",
-			"db_type", db_type,
-			"loc", "CWB_MAN_077")
+		logger.Error("ProjectDBHandle is nil", "db_type", db_type)
 		os.Exit(1)
 	}
 
 	// Create tables
 	if config.NeedCreateTables() {
 		logger.Info("To Create Tables (CWB_DDM_036)")
-		sysdatastores.CreateSysTables(logger)
+		err = sysdatastores.CreateSysTables(logger)
+		if err != nil {
+			logger.Error("failed creating system tables", "error", err)
+			os.Exit(1)
+		}
+
 		err = database.CreateTables(logger)
 		if err != nil {
-			logger.Error("***** Alarm",
-				"message", "Failed creating tables",
-				"error", err,
-				"loc", "CWB_DDM_030")
+			logger.Error("failed creating tables", "error", err)
+			os.Exit(1)
 		}
 	} else {
-		logger.Info("Not creating tables (CWB_DDM_041)")
+		logger.Warn("Not creating tables")
 	}
 
-	migrate_cfg := config.GlobalConfig.Migration
+	migrate_cfg := ApiTypes.CommonConfig.MigrationConfig
 
 	var project_db *sql.DB
-	var shared_db *sql.DB
-	dbType := ApiTypes.DatabaseInfo.DBType
+	var migrate_db *sql.DB
+	dbType := ApiTypes.CommonConfig.AppInfo.DatabaseType
 	switch dbType {
 	case ApiTypes.PgName:
-		project_db = ApiTypes.PG_DB_Project
-		shared_db = ApiTypes.PG_DB_Shared
+		project_db = ApiTypes.CommonConfig.PGConf.ProjectDBHandle
+		migrate_db = ApiTypes.CommonConfig.PGConf.MigrationDBHandle
 	case ApiTypes.MysqlName:
-		project_db = ApiTypes.MySql_DB_Project
-		shared_db = ApiTypes.MySql_DB_Shared
+		project_db = ApiTypes.CommonConfig.MySQLConf.ProjectDBHandle
+		migrate_db = ApiTypes.CommonConfig.MySQLConf.MigrationDBHandle
 	default:
 		logger.Error("unsupported db type. System exit!!!!", "db_type", dbType)
 		os.Exit(1)
@@ -185,8 +160,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if shared_db == nil {
-		logger.Error("shared database connection is not set. System exit!!!!", "db_type", dbType)
+	if migrate_db == nil {
+		logger.Error("migrate database connection is not set. System exit!!!!", "db_type", dbType)
 		os.Exit(1)
 	}
 
@@ -196,7 +171,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = sharedgoose.RunSharedMigrations(ctx, logger, migrate_cfg, shared_db)
+	err = sharedgoose.RunSharedMigrations(ctx, logger, migrate_cfg, migrate_db)
 	if err != nil {
 		logger.Error("failed to run shared migrator. System exit!!!!", "error", err)
 		os.Exit(1)
@@ -210,14 +185,14 @@ func main() {
 	logger.Info("Register Shared Routes (CWB_DDM_055)")
 	shared_api.RegisterRoutes(e)
 
-	var server_port = os.Getenv("SERVER_PORT")
-	if server_port == "" {
-		logger.Error("***** Alarm",
+	var server_port = ApiTypes.CommonConfig.AppInfo.Port
+	if server_port <= 0 {
+		logger.Error("",
 			"message", "missing SERVER_PORT env var",
 			"loc", "CWB_MAN_145")
 		os.Exit(1)
 	}
-	var pp = fmt.Sprintf(":%s", server_port)
+	var pp = fmt.Sprintf(":%d", server_port)
 	logger.Info("[API] ⇨ http server started on", "server_port", pp)
 	e.Logger.Fatal(e.Start(pp))
 }

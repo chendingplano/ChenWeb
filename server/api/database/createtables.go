@@ -11,5 +11,6 @@ func CreateTables(logger ApiTypes.JimoLogger) error {
 	if err := appdatastores.CreateFlowsTable(logger); err != nil {
 		return err
 	}
+	appdatastores.CreateDspyPromptsTable(logger)
 	return nil
 }

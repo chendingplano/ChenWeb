@@ -1,27 +1,30 @@
 # config.toml
+[app_info]
 app_name = "DeepDoc"
 debug = true
-
-[server]
 port = 8080
 host = "localhost"
-
-[database]
-create_mysql = false
-create_pg = true
-pg_host = "127.0.0.1"
-pg_port = 5432
-mysql_host = "192.168.0.20"
-mysql_port = 3306
-max_connections = 10
 database_type = "pg"
 need_create_tables = true
+
+[mysql]
+create = false
+host = "127.0.0.1"
+port = 3306
+max_connections = 10
+
+[postgres]
+create = true
+host = "127.0.0.1"
+port = 5432
+max_connections = 10
 
 [app_table_names]
 table_name_documents        = "documents"
 table_name_process_status   = "process_status"
 table_name_schedules        = "schedules"
 table_name_flows            = "flows"
+table_name_dspy_prompts     = "dspy_prompts"
 
 [auth]
 jwt_secret = "super-secret-key"

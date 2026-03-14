@@ -1,6 +1,6 @@
 <!-- web/src/lib/components/shared-ui/canvas/nodes/BaseNode.svelte -->
 <script lang="ts">
-  import { Handle, Position } from '@xyflow/svelte';
+  import { Handle, Position, NodeResizer } from '@xyflow/svelte';
   import CopyIcon   from '@lucide/svelte/icons/copy';
   import Trash2Icon from '@lucide/svelte/icons/trash-2';
   import SlidersIcon from '@lucide/svelte/icons/sliders-horizontal';
@@ -34,8 +34,15 @@
   class="relative rounded-lg overflow-visible"
   style="background:#161b27; border:2px solid {selected ? '#6366f1' : '#374151'};
     box-shadow:{selected ? '0 0 0 3px rgba(99,102,241,0.2)' : 'none'};
-    min-width:160px;"
+    min-width:160px; min-height:60px; width:100%; height:100%;"
 >
+  <NodeResizer
+    isVisible={selected}
+    minWidth={160}
+    minHeight={60}
+    handleStyle="background:#6366f1; border:1px solid #161b27; border-radius:2px; width:8px; height:8px;"
+    lineStyle="border-color:#6366f140;"
+  />
   <!-- Mini toolbar (only when selected) -->
   {#if selected}
     <div

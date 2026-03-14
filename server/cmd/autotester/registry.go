@@ -1,23 +1,13 @@
 package main
 
 import (
-	autotester "github.com/chendingplano/shared/go/api/autotesters"
 	sharedtesters "github.com/chendingplano/shared/go/api/testers"
-	"github.com/dinglind/mirai/server/cmd/config"
 )
 
 // registerAll registers all shared and application-specific testers.
-func registerAll(_ *config.Config) {
+func registerAll() {
 	// Shared library testers
-	autotester.GlobalRegistry.Register("tester_database", func() autotester.Tester {
-		return sharedtesters.NewDatabaseTester(&config.PGConfig)
-	})
-	autotester.GlobalRegistry.Register("tester_databaseutil", func() autotester.Tester {
-		return sharedtesters.NewDatabaseUtilTester()
-	})
-	autotester.GlobalRegistry.Register("tester_logger", func() autotester.Tester {
-		return sharedtesters.NewLoggerTester()
-	})
+	sharedtesters.RegisterTesters()
 
 	/*
 		// Application-specific testers

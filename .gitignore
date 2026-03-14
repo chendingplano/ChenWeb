@@ -32,3 +32,5 @@ vite.config.ts.timestamp-*
 /server/api/webbuild/*
 !/server/api/webbuild/.gitkeep
 /.cache/
+.worktrees/
+.worktrees/

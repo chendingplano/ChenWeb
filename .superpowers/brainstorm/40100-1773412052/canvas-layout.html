@@ -1,0 +1,115 @@
+<h2>Canvas/Flow Editor — Layout Approach</h2>
+<p class="subtitle">How should the Flow editor fit into the home3 shell?</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0f1117;padding:12px;font-size:11px;font-family:monospace;color:#94a3b8;min-height:200px;display:flex;flex-direction:column;gap:4px;">
+      <div style="display:flex;gap:4px;height:100%">
+        <div style="width:52px;background:#1e2535;border-radius:4px;display:flex;flex-direction:column;align-items:center;padding:8px 4px;gap:6px;font-size:9px;color:#6b7280">
+          <div style="width:24px;height:24px;background:#6366f1;border-radius:4px"></div>
+          <div style="width:24px;height:3px;background:#374151;border-radius:2px"></div>
+          <div style="width:24px;height:3px;background:#374151;border-radius:2px"></div>
+          <div style="width:24px;height:3px;background:#374151;border-radius:2px"></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+          <div style="background:#1e2535;border-radius:4px;padding:6px;font-size:9px;color:#e2e8f0">Flow Canvas — Tools → Flow</div>
+          <div style="flex:1;display:flex;gap:4px">
+            <div style="width:140px;background:#1e2535;border-radius:4px;padding:6px">
+              <div style="font-size:8px;color:#6366f1;margin-bottom:4px">NODE PALETTE</div>
+              <div style="background:#2d3748;padding:4px;border-radius:3px;margin-bottom:3px;font-size:8px;color:#e2e8f0">Text Node</div>
+              <div style="background:#2d3748;padding:4px;border-radius:3px;margin-bottom:3px;font-size:8px;color:#e2e8f0">AI Assistant</div>
+              <div style="background:#2d3748;padding:4px;border-radius:3px;margin-bottom:3px;font-size:8px;color:#e2e8f0">Image</div>
+            </div>
+            <div style="flex:1;background:#0f1117;border-radius:4px;border:1px dashed #374151;position:relative;overflow:hidden">
+              <div style="font-size:8px;color:#4b5563;text-align:center;margin-top:30px">Canvas Area</div>
+              <div style="position:absolute;top:20px;left:20px;background:#1e2535;border-radius:4px;padding:8px;font-size:8px;color:#e2e8f0;border:1px solid #374151">Node A<br><span style="color:#6b7280">out →</span></div>
+              <div style="position:absolute;top:20px;right:20px;background:#1e2535;border-radius:4px;padding:8px;font-size:8px;color:#e2e8f0;border:1px solid #374151"><span style="color:#6b7280">← in</span><br>Node B</div>
+            </div>
+            <div style="width:100px;background:#1e2535;border-radius:4px;padding:6px">
+              <div style="font-size:8px;color:#6366f1;margin-bottom:4px">PROPERTIES</div>
+              <div style="font-size:8px;color:#94a3b8">Name:</div>
+              <div style="background:#0f1117;border-radius:2px;padding:2px 4px;font-size:7px;color:#e2e8f0;margin-bottom:3px">Node A</div>
+              <div style="font-size:8px;color:#94a3b8">Type:</div>
+              <div style="background:#0f1117;border-radius:2px;padding:2px 4px;font-size:7px;color:#e2e8f0">Text</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Integrated in home3 shell</h3>
+      <p>Reuses home3's nav-rail (adds Tools → Flow item). Left panel = Node Palette, canvas = main content area, right shelf = Properties. Fits natively into the existing 3-panel layout.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Consistent UI</li><li>Less code to write</li><li>Rail nav stays usable</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Canvas space is limited</li><li>Shelf may feel cramped for complex properties</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0f1117;padding:12px;font-size:11px;font-family:monospace;color:#94a3b8;min-height:200px;display:flex;flex-direction:column;gap:4px;">
+      <div style="display:flex;gap:4px;height:100%">
+        <div style="width:52px;background:#1e2535;border-radius:4px;display:flex;flex-direction:column;align-items:center;padding:8px 4px;gap:6px;font-size:9px;color:#6b7280">
+          <div style="width:24px;height:24px;background:#6366f1;border-radius:4px"></div>
+          <div style="width:24px;height:3px;background:#374151;border-radius:2px"></div>
+          <div style="width:24px;height:3px;background:#374151;border-radius:2px"></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+          <div style="background:#1e2535;border-radius:4px;padding:6px;font-size:9px;color:#e2e8f0;display:flex;justify-content:space-between">
+            <span>Flow Canvas</span>
+            <span style="color:#6366f1;font-size:8px">◂ Expand ▸</span>
+          </div>
+          <div style="flex:1;display:flex;gap:4px">
+            <div style="width:130px;background:#1e2535;border-radius:4px;padding:6px">
+              <div style="font-size:8px;color:#6366f1;margin-bottom:4px">NODE PALETTE</div>
+              <div style="background:#2d3748;padding:4px;border-radius:3px;margin-bottom:3px;font-size:8px;color:#e2e8f0">Text Node</div>
+              <div style="background:#2d3748;padding:4px;border-radius:3px;margin-bottom:3px;font-size:8px;color:#e2e8f0">AI Assistant</div>
+            </div>
+            <div style="flex:1;background:#0f1117;border-radius:4px;border:1px dashed #374151;position:relative;overflow:hidden">
+              <div style="font-size:8px;color:#4b5563;text-align:center;margin-top:30px">Expanded Canvas (full width)</div>
+              <div style="position:absolute;top:20px;left:20px;background:#1e2535;border-radius:4px;padding:8px;font-size:8px;color:#e2e8f0;border:1px solid #374151">Node A</div>
+              <div style="position:absolute;bottom:10px;right:10px;background:#6366f1;border-radius:3px;padding:4px 8px;font-size:7px;color:white">Properties Panel →</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Full-screen canvas mode</h3>
+      <p>When Tools → Flow is selected, the canvas takes over the entire content area. The nav-rail collapses to icon-only. Node Palette floats or docks left. Properties panel slides in from right on node selection.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Maximum canvas space</li><li>Immersive editing experience</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>More state to manage</li><li>Lose context of nav</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0f1117;padding:12px;font-size:11px;font-family:monospace;color:#94a3b8;min-height:200px;display:flex;flex-direction:column;gap:4px;">
+      <div style="display:flex;gap:4px;height:100%">
+        <div style="width:52px;background:#1e2535;border-radius:4px;display:flex;flex-direction:column;align-items:center;padding:8px 4px;gap:6px;font-size:9px;color:#6b7280">
+          <div style="width:24px;height:24px;background:#6366f1;border-radius:4px"></div>
+          <div style="width:24px;height:3px;background:#374151;border-radius:2px"></div>
+          <div style="width:24px;height:3px;background:#374151;border-radius:2px"></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+          <div style="background:#1e2535;border-radius:4px;padding:6px;font-size:9px;color:#e2e8f0">Flows List</div>
+          <div style="flex:1;background:#0f1117;border-radius:4px;border:1px solid #374151;padding:8px">
+            <div style="font-size:8px;color:#6366f1;margin-bottom:6px">MY FLOWS</div>
+            <div style="background:#1e2535;border-radius:4px;padding:6px;margin-bottom:4px;cursor:pointer;font-size:8px;color:#e2e8f0">📊 Data Pipeline v1 →</div>
+            <div style="background:#1e2535;border-radius:4px;padding:6px;margin-bottom:4px;cursor:pointer;font-size:8px;color:#e2e8f0">🤖 AI Workflow →</div>
+            <div style="background:#6366f1;border-radius:4px;padding:6px;margin-bottom:4px;cursor:pointer;font-size:8px;color:white">+ New Flow</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Flow manager + dedicated editor</h3>
+      <p>Tools → Flow shows a "My Flows" list in home3. Clicking a flow opens a dedicated full-screen canvas editor page (new route like <code>/flow-editor/[id]</code>). Supports multiple flows.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Supports multiple flows</li><li>Maximum canvas real estate</li><li>Clean separation</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>More routes/pages</li><li>Loses home3 nav context</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>

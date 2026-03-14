@@ -43,7 +43,7 @@ func main() {
 		logger.Error("loading config failed", "path", "./config.toml")
 	}
 
-	if err := databaseutil.InitDB(new_ctx, config.MySQLConfig, config.PGConfig); err != nil {
+	if err := databaseutil.InitDB(new_ctx, ApiTypes.CommonConfig); err != nil {
 		logger.Error("Failed to initialize database", "error", err)
 		os.Exit(2)
 	}

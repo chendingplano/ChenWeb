@@ -49,3 +49,6 @@ run = '''USE_EMBED_FRONTEND=true ./.cache/server.exe serve --dir '''
 
 [tasks.run-all-tests]
 run = "go run ./server/cmd/autotester/"
+
+[tasks.apply-nix]
+run = "cd ~/Workspace/nix && sudo darwin-rebuild switch --flake ."

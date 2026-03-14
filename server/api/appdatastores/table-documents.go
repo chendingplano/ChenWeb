@@ -13,10 +13,10 @@ import (
 )
 
 func CreateDocumentsTable(logger ApiTypes.JimoLogger) error {
-	db_type := ApiTypes.DatabaseInfo.DBType
-	table_name := config.GlobalConfig.AppTableNames.TableName_Documents
+	db_type := ApiTypes.DBType
+	table_name := config.AppConfig.AppTableNames.TableName_Documents
 	var stmt string
-	var db *sql.DB
+	var db *sql.DB = ApiTypes.ProjectDBHandle
 	const common_fields = "user_id 		VARCHAR(128) 	DEFAULT NULL, " +
 		"doc_name		VARCHAR(256) 	DEFAULT NULL, " +
 		"doc_no 		VARCHAR(256) 	DEFAULT NULL, " +
@@ -39,12 +39,10 @@ func CreateDocumentsTable(logger ApiTypes.JimoLogger) error {
 		stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" +
 			"doc_id BIGINT AUTO_INCREMENT PRIMARY KEY, " + common_fields +
 			") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
-		db = ApiTypes.DatabaseInfo.MySQLDBHandle
 
 	case ApiTypes.PgName:
 		stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" +
 			"doc_id BIGSERIAL PRIMARY KEY, " + common_fields + ")"
-		db = ApiTypes.DatabaseInfo.PGDBHandle
 
 	default:
 		err := fmt.Errorf("database type not supported:%s (CWB_DOC_044)", db_type)

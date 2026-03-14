@@ -13,8 +13,10 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api/Dashboard01"
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
+	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
+	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -206,6 +208,31 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PUT("/flows/:id/default", flowhandler.SetDefaultFlow)
 	apiGroup.POST("/flows/:id/fork", flowhandler.ForkFlow)
 	apiGroup.POST("/flows/:id/template", flowhandler.SaveAsTemplate)
+
+	// AI Assistant (home2) endpoints
+	apiGroup.GET("/ai-assistant/dashboard", aiassistanthandler.GetDashboard)
+	apiGroup.GET("/ai-assistant/agents", aiassistanthandler.GetAgents)
+	apiGroup.POST("/ai-assistant/agents", aiassistanthandler.CreateAgent)
+	apiGroup.GET("/ai-assistant/skills", aiassistanthandler.GetSkills)
+	apiGroup.GET("/ai-assistant/applications", aiassistanthandler.GetApplications)
+	apiGroup.GET("/ai-assistant/knowledge-base", aiassistanthandler.GetKnowledgeBase)
+	apiGroup.GET("/ai-assistant/user-info", aiassistanthandler.GetUserInfo)
+	apiGroup.GET("/ai-assistant/settings", aiassistanthandler.GetSettings)
+	apiGroup.PUT("/ai-assistant/settings", aiassistanthandler.UpdateSettings)
+	apiGroup.PUT("/ai-assistant/agents/:id", aiassistanthandler.UpdateAgent)
+	apiGroup.DELETE("/ai-assistant/agents/:id", aiassistanthandler.DeleteAgent)
+	apiGroup.POST("/ai-assistant/skills", aiassistanthandler.CreateSkill)
+	apiGroup.DELETE("/ai-assistant/skills/:id", aiassistanthandler.DeleteSkill)
+	apiGroup.POST("/ai-assistant/knowledge-base/documents", aiassistanthandler.ImportDocument)
+	apiGroup.DELETE("/ai-assistant/knowledge-base/documents/:id", aiassistanthandler.DeleteDocument)
+
+	// DSPy Prompt Studio endpoints
+	apiGroup.POST("/dspy/prompts", dspyhandler.CreatePrompt)
+	apiGroup.GET("/dspy/prompts", dspyhandler.ListPrompts)
+	apiGroup.GET("/dspy/prompts/:id", dspyhandler.GetPrompt)
+	apiGroup.PUT("/dspy/prompts/:id", dspyhandler.UpdatePrompt)
+	apiGroup.DELETE("/dspy/prompts/:id", dspyhandler.DeletePrompt)
+	apiGroup.POST("/dspy/optimize", dspyhandler.OptimizePrompt)
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {

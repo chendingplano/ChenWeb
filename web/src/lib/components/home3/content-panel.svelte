@@ -51,9 +51,6 @@
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted     = $derived(darkMode ? '#64748B' : '#9CA3AF');
 
-	// Suppress unused
-	void surface2; void radiusButton; // declared as design tokens; not directly used in this component's markup
-
 	// Section icon map
 	const sectionIcons: Record<string, any> = {
 		agents:       BotIcon,
@@ -150,6 +147,7 @@
 							{#if sectionIcons[sectionId]}
 								{@const IconComponent = sectionIcons[sectionId]}
 								<div
+									role="presentation"
 									class="flex items-center justify-center rounded-xl flex-shrink-0"
 									style="width:48px; height:48px; background:{accentTint}; border:1px solid {accent}30;"
 								>
@@ -167,7 +165,7 @@
 						</div>
 						<button
 							class="flex items-center gap-2 rounded-lg px-4 py-2 cursor-pointer transition-opacity duration-150"
-							style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; border-radius:8px;"
+							style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; border-radius:{radiusButton};"
 							onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
 							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
 						>
@@ -178,8 +176,11 @@
 
 				<!-- Placeholder content card -->
 				<div
+					role="presentation"
 					class="rounded-xl p-8 flex items-center justify-center"
 					style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; min-height:300px;"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = cardBg; }}
 				>
 					<div class="text-center">
 						{#if sectionIcons[sectionId]}
