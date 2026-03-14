@@ -2,6 +2,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 
 	import LayoutDashboardIcon from '@lucide/svelte/icons/layout-dashboard';
+	import MessageSquareIcon   from '@lucide/svelte/icons/message-square';
 	import BotIcon             from '@lucide/svelte/icons/bot';
 	import ZapIcon             from '@lucide/svelte/icons/zap';
 	import LayoutGridIcon      from '@lucide/svelte/icons/layout-grid';
@@ -37,21 +38,21 @@
 	let {
 		darkMode       = true,
 		activeMenu     = null,
-		pinned         = false,
+		autoShrinkExpand = false,
 		expanded       = false,
 		width          = 240,
 		onSelect,
-		onTogglePin,
+		onToggleRail,
 		onWidthDragStart,
 		onHoverChange
 	}: {
 		darkMode:          boolean;
 		activeMenu:        ActiveSelection | null;
-		pinned:            boolean;
+		autoShrinkExpand:  boolean;
 		expanded:          boolean;
 		width:             number;
 		onSelect:          (sel: ActiveSelection) => void;
-		onTogglePin:       () => void;
+		onToggleRail:      () => void;
 		onWidthDragStart:  (e: MouseEvent) => void;
 		onHoverChange:     (hovered: boolean) => void;
 	} = $props();
@@ -76,8 +77,8 @@
 	void fontMono;
 
 	// Effective rail width
-	let effectiveWidth = $derived((expanded || pinned) ? width : RAIL_WIDTH_COLLAPSED);
-	let showLabels     = $derived(expanded || pinned);
+	let effectiveWidth = $derived(expanded ? width : RAIL_WIDTH_COLLAPSED);
+	let showLabels = $derived(expanded);
 
 	// Accordion expand state per item
 	let accordionOpen = $state<Record<string, boolean>>({});
@@ -85,6 +86,7 @@
 	// Nav item definitions
 	const mainNav: NavItem[] = [
 		{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon },
+		{ id: 'chat', label: 'Chat', icon: MessageSquareIcon },
 		{
 			id: 'agents', label: 'Agents', icon: BotIcon,
 			children: [
@@ -184,7 +186,7 @@
 	onmouseenter={() => onHoverChange(true)}
 	onmouseleave={() => onHoverChange(false)}
 >
-	<!-- Pin / expand button at top -->
+	<!-- Rail mode button at top -->
 	<div
 		class="flex items-center flex-shrink-0 px-2"
 		style="height:48px; border-bottom:1px solid {borderColor};"
@@ -193,30 +195,30 @@
 			<div class="flex items-center justify-between w-full px-1">
 				<span style="font-size:13px; font-weight:600; color:{accent};">Navigation</span>
 				<button
-					onclick={onTogglePin}
+					onclick={onToggleRail}
 					class="flex items-center justify-center w-7 h-7 rounded-lg cursor-pointer transition-colors duration-150"
 					style="color:{textMuted};"
 					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = accent; }}
 					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
-					aria-label={pinned ? 'Unpin rail' : 'Pin rail'}
-					title={pinned ? 'Unpin rail' : 'Pin rail'}
+					aria-label={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Shrink navigation'}
+					title={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Shrink navigation'}
 				>
-					{#if pinned}
-						<PanelLeftCloseIcon class="w-4 h-4" />
-					{:else}
+					{#if autoShrinkExpand}
 						<PanelLeftIcon class="w-4 h-4" />
+					{:else}
+						<PanelLeftCloseIcon class="w-4 h-4" />
 					{/if}
 				</button>
 			</div>
 		{:else}
 			<button
-				onclick={onTogglePin}
+				onclick={onToggleRail}
 				class="flex items-center justify-center w-full h-8 rounded-lg cursor-pointer transition-colors duration-150"
 				style="color:{textMuted};"
 				onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = accent; }}
 				onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
-				aria-label="Expand rail"
-				title="Expand navigation"
+				aria-label={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Expand navigation'}
+				title={autoShrinkExpand ? 'Disable auto shrink/expand' : 'Expand navigation'}
 			>
 				<PanelLeftIcon class="w-5 h-5" />
 			</button>

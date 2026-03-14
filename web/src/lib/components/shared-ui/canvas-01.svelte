@@ -52,14 +52,12 @@
 
 	let {
 		darkMode = true,
+		railOffset = 56,
 		onClose,
-		onCollapseRail,
-		onRestoreRail
 	}: {
 		darkMode?: boolean;
+		railOffset?: number;
 		onClose: () => void;
-		onCollapseRail: () => void;
-		onRestoreRail: () => void;
 	} = $props();
 
 	// ── Canvas config ─────────────────────────────────────────────────────
@@ -287,7 +285,6 @@
 		if (isDirty) {
 			if (!confirm('You have unsaved changes. Discard and continue?')) return;
 		}
-		onRestoreRail();
 		onClose();
 	}
 
@@ -375,7 +372,6 @@
 
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 	onMount(async () => {
-		onCollapseRail();
 		const res = await flowService.getNodeTypes();
 		nodeTypes = res.nodeTypes ?? [];
 		await loadDefaultOrPicker();
@@ -388,7 +384,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="fixed inset-0 flex flex-col" style="background:#0d1117; z-index:40; left:56px;">
+<div class="fixed inset-y-0 right-0 flex flex-col" style="background:#0d1117; z-index:40; left:{railOffset}px;">
 	<!-- Toolbar -->
 	<FlowToolbar
 		{activeFlow}

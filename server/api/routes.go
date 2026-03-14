@@ -15,6 +15,7 @@ import (
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
+	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
@@ -225,6 +226,16 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.DELETE("/ai-assistant/skills/:id", aiassistanthandler.DeleteSkill)
 	apiGroup.POST("/ai-assistant/knowledge-base/documents", aiassistanthandler.ImportDocument)
 	apiGroup.DELETE("/ai-assistant/knowledge-base/documents/:id", aiassistanthandler.DeleteDocument)
+
+	// Chatter (home3 chat page) endpoints
+	apiGroup.GET("/chatter/settings", chatterhandler.GetSettings)
+	apiGroup.PUT("/chatter/settings", chatterhandler.UpdateSettings)
+	apiGroup.GET("/chatter/prompts", chatterhandler.GetPrompts)
+	apiGroup.GET("/chatter/slash-commands", chatterhandler.GetSlashCommands)
+	apiGroup.GET("/chatter/sessions", chatterhandler.ListSessions)
+	apiGroup.POST("/chatter/sessions", chatterhandler.CreateSession)
+	apiGroup.GET("/chatter/sessions/:id/dialogs", chatterhandler.GetDialogs)
+	apiGroup.POST("/chatter/sessions/:id/messages", chatterhandler.SendMessage)
 
 	// DSPy Prompt Studio endpoints
 	apiGroup.POST("/dspy/prompts", dspyhandler.CreatePrompt)

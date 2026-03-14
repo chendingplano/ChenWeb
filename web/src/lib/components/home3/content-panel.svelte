@@ -2,6 +2,7 @@
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
 	import AppFooter     from '$lib/components/home3/app-footer.svelte';
 	import Canvas01      from '$lib/components/shared-ui/canvas-01.svelte';
+	import Chatter01     from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import PanelRightIcon   from '@lucide/svelte/icons/panel-right';
 	import BotIcon          from '@lucide/svelte/icons/bot';
@@ -24,16 +25,18 @@
 		darkMode       = true,
 		activeMenu     = null,
 		shelfOpen      = true,
+		autoShrinkExpand = false,
+		railOffset     = 56,
 		onToggleShelf,
-		onCollapseRail = () => {},
-		onRestoreRail  = () => {},
+		onAutoShrinkExpandChange = (_enabled: boolean) => {},
 	}: {
 		darkMode:        boolean;
 		activeMenu:      ActiveSelection | null;
 		shelfOpen:       boolean;
+		autoShrinkExpand?: boolean;
+		railOffset?:     number;
 		onToggleShelf:   () => void;
-		onCollapseRail?: () => void;
-		onRestoreRail?:  () => void;
+		onAutoShrinkExpandChange?: (enabled: boolean) => void;
 	} = $props();
 
 	// --- Layout constants ---
@@ -54,6 +57,7 @@
 	// Section icon map
 	const sectionIcons: Record<string, any> = {
 		agents:       BotIcon,
+		chat:         BotIcon,
 		skills:       ZapIcon,
 		applications: LayoutGridIcon,
 		coding:       CodeIcon,
@@ -66,6 +70,7 @@
 	// Section descriptions
 	const sectionDesc: Record<string, string> = {
 		agents:       'Manage, browse, and create AI agents for your workflows.',
+		chat:         'Chat with multiple agents and models in session tabs.',
 		skills:       'Discover and manage modular skills that extend your agents.',
 		applications: 'Connect and manage third-party app integrations.',
 		coding:       'AI-powered coding assistance: review, generate, and debug.',
@@ -117,10 +122,11 @@
 		{#if activeMenu?.childId === 'flow'}
 			<Canvas01
 				{darkMode}
+				{railOffset}
 				onClose={() => { /* no-op — handled by parent navigation */ }}
-				{onCollapseRail}
-				{onRestoreRail}
 			/>
+		{:else if sectionId === 'chat'}
+			<Chatter01 {darkMode} />
 		{:else if isDashboard}
 			<!-- Dashboard shelf toggle in top-right -->
 			<div class="flex justify-end px-6 pt-4">
@@ -174,33 +180,99 @@
 					</div>
 				</div>
 
-				<!-- Placeholder content card -->
-				<div
-					role="presentation"
-					class="rounded-xl p-8 flex items-center justify-center"
-					style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; min-height:300px;"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = cardBg; }}
-				>
-					<div class="text-center">
-						{#if sectionIcons[sectionId]}
-							{@const IconComponent = sectionIcons[sectionId]}
-							<IconComponent class="w-12 h-12 mx-auto mb-4" style="color:{accent}; opacity:0.4;" />
-						{/if}
-						<p style="font-size:16px; font-weight:500; color:{textSecondary}; margin-bottom:8px;">
-							{activeMenu?.childTitle ?? activeMenu?.itemTitle}
-						</p>
-						<p style="font-size:13px; color:{textMuted};">
-							Content for this section will appear here.
-						</p>
+				{#if sectionId === 'settings'}
+					<div
+						class="rounded-xl p-6 space-y-6"
+						style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; min-height:300px;"
+					>
+						<div>
+							<h2 style="font-size:16px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">
+								Navigation Settings
+							</h2>
+							<p style="font-size:13px; color:{textSecondary};">
+								Control how the left navigation panel expands and collapses.
+							</p>
+						</div>
+
+						<div
+							class="rounded-xl p-5"
+							style="background:{surface2}; border:1px solid {borderColor};"
+						>
+							<div class="flex items-start justify-between gap-6">
+								<div>
+									<div style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">
+										Auto Shrink/Expand
+									</div>
+									<p style="font-size:13px; color:{textSecondary}; line-height:1.5;">
+										When enabled, the left panel stays collapsed until you move over it.
+										When disabled, the panel only expands or shrinks when you use the rail button.
+									</p>
+								</div>
+								<button
+									type="button"
+									role="switch"
+									aria-checked={autoShrinkExpand}
+									aria-label="Toggle auto shrink expand"
+									onclick={() => onAutoShrinkExpandChange(!autoShrinkExpand)}
+									class="relative flex-shrink-0 rounded-full cursor-pointer transition-colors duration-200"
+									style="
+										width:52px;
+										height:30px;
+										padding:3px;
+										border:none;
+										background:{autoShrinkExpand ? accent : borderColor};
+									"
+								>
+									<span
+										class="block rounded-full transition-transform duration-200"
+										style="
+											width:24px;
+											height:24px;
+											background:white;
+											transform:translateX({autoShrinkExpand ? '22px' : '0'});
+										"
+									></span>
+								</button>
+							</div>
+							<div
+								class="mt-4 inline-flex items-center rounded-full px-3 py-1"
+								style="background:{autoShrinkExpand ? accentTint : borderColor}; color:{autoShrinkExpand ? accent : textMuted}; font-size:12px; font-weight:600;"
+							>
+								Default: Disabled
+							</div>
+						</div>
 					</div>
-				</div>
+				{:else}
+					<!-- Placeholder content card -->
+					<div
+						role="presentation"
+						class="rounded-xl p-8 flex items-center justify-center"
+						style="background:{cardBg}; border:1px solid {borderColor}; border-radius:{radiusCard}; min-height:300px;"
+						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = cardBg; }}
+					>
+						<div class="text-center">
+							{#if sectionIcons[sectionId]}
+								{@const IconComponent = sectionIcons[sectionId]}
+								<IconComponent class="w-12 h-12 mx-auto mb-4" style="color:{accent}; opacity:0.4;" />
+							{/if}
+							<p style="font-size:16px; font-weight:500; color:{textSecondary}; margin-bottom:8px;">
+								{activeMenu?.childTitle ?? activeMenu?.itemTitle}
+							</p>
+							<p style="font-size:13px; color:{textMuted};">
+								Content for this section will appear here.
+							</p>
+						</div>
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</div>
 
-	<!-- AppFooter at the bottom of the scroll area -->
-	<div style="margin-top:48px;">
-		<AppFooter {darkMode} />
-	</div>
+	{#if sectionId !== 'chat'}
+		<!-- AppFooter at the bottom of the scroll area -->
+		<div style="margin-top:48px;">
+			<AppFooter {darkMode} />
+		</div>
+	{/if}
 </main>

@@ -1,9 +1,16 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import HeroHeader from '$lib/components/home3/hero-header.svelte';
 	import NavRail from '$lib/components/home3/nav-rail.svelte';
 	import ContentPanel from '$lib/components/home3/content-panel.svelte';
 	import ContextShelf from '$lib/components/home3/context-shelf.svelte';
+	import {
+		createRailState,
+		handleRailButtonAction,
+		handleRailHoverChange as getNextRailHoverState
+	} from '$lib/components/home3/rail-state.js';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -21,6 +28,7 @@
 	const SHELF_WIDTH_DEFAULT = 280; // default context shelf width in px
 	const SHELF_WIDTH_MIN = 220; // minimum draggable shelf width in px
 	const SHELF_WIDTH_MAX = 480; // maximum draggable shelf width in px
+	const AUTO_SHRINK_EXPAND_STORAGE_KEY = 'chenweb:home3:auto-shrink-expand';
 
 	// --- Shadows (adjust here to change depth/elevation) ---
 	const shadowCard = '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)'; // resting card
@@ -55,30 +63,47 @@
 
 	// --- App state ---
 	let darkMode = $state(true);
-	let railWidth = $state(RAIL_WIDTH_DEFAULT); // expanded width, preserved across pin/unpin
-	let railPinned = $state(false); // when unpinned, rail collapses on mouseleave
-	let railExpanded = $state(false); // tracks hover state when unpinned
+	let railWidth = $state(RAIL_WIDTH_DEFAULT); // expanded width, preserved across mode changes
+	let autoShrinkExpand = $state(false);
+	let railExpanded = $state(false);
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: 'Dashboard' });
+	let settingsHydrated = $state(false);
 
-	// --- Rail collapse/restore for full-screen panels (e.g. canvas-01) ---
-	let prevRailWidth = $state(RAIL_WIDTH_DEFAULT);
-	let prevRailPinned = $state(false);
+	onMount(() => {
+		const persistedValue = browser ? localStorage.getItem(AUTO_SHRINK_EXPAND_STORAGE_KEY) : null;
+		let initialRailState = createRailState();
 
-	function handleCollapseRail() {
-		prevRailWidth = railWidth;
-		prevRailPinned = railPinned;
-		railWidth = RAIL_WIDTH_COLLAPSED;
-		railPinned = false;
-		railExpanded = false;
-	}
+		if (persistedValue === 'true' || persistedValue === 'false') {
+			initialRailState = createRailState({ autoShrinkExpand: persistedValue === 'true' });
+		} else if (persistedValue) {
+			try {
+				const parsedValue = JSON.parse(persistedValue);
+				initialRailState = createRailState({
+					autoShrinkExpand: parsedValue.autoShrinkExpand,
+					railExpanded: parsedValue.railExpanded
+				});
+			} catch {
+				initialRailState = createRailState();
+			}
+		}
 
-	function handleRestoreRail() {
-		railWidth = prevRailWidth;
-		railPinned = prevRailPinned;
-		railExpanded = prevRailPinned;
-	}
+		autoShrinkExpand = initialRailState.autoShrinkExpand;
+		railExpanded = initialRailState.railExpanded;
+		settingsHydrated = true;
+	});
+
+	$effect(() => {
+		if (!browser || !settingsHydrated) return;
+		localStorage.setItem(
+			AUTO_SHRINK_EXPAND_STORAGE_KEY,
+			JSON.stringify({
+				autoShrinkExpand,
+				railExpanded
+			})
+		);
+	});
 
 	// --- Drag resize state ---
 	let isDraggingRail = false;
@@ -144,18 +169,41 @@
 		}
 	}
 
-	function handleTogglePin() {
-		railPinned = !railPinned;
-		if (!railPinned) railExpanded = false;
+	function handleRailButton() {
+		const nextState = handleRailButtonAction({
+			autoShrinkExpand,
+			railExpanded
+		});
+
+		autoShrinkExpand = nextState.autoShrinkExpand;
+		railExpanded = nextState.railExpanded;
 	}
 
 	function handleRailHoverChange(hovered: boolean) {
-		if (!railPinned) railExpanded = hovered;
+		const nextState = getNextRailHoverState(
+			{
+				autoShrinkExpand,
+				railExpanded
+			},
+			hovered
+		);
+
+		railExpanded = nextState.railExpanded;
+	}
+
+	function handleAutoShrinkExpandChange(enabled: boolean) {
+		autoShrinkExpand = enabled;
+		if (enabled) {
+			railExpanded = false;
+		} else {
+			railExpanded = true;
+		}
 	}
 
 	// Derived colours for the root layout dividers
 	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB'); // border / divider lines
 	let accent = $derived(darkMode ? '#818CF8' : '#6366F1'); // primary accent (indigo)
+	let currentRailOffset = $derived(railExpanded ? railWidth : RAIL_WIDTH_COLLAPSED);
 
 	// Effective rail width for layout (kept for reference; actual width computed inside NavRail)
 	const _railCollapsed = RAIL_WIDTH_COLLAPSED;
@@ -180,17 +228,17 @@
 		<NavRail
 			{darkMode}
 			{activeMenu}
-			pinned={railPinned}
+			{autoShrinkExpand}
 			expanded={railExpanded}
 			width={railWidth}
 			onSelect={handleMenuSelect}
-			onTogglePin={handleTogglePin}
+			onToggleRail={handleRailButton}
 			onWidthDragStart={startRailDrag}
 			onHoverChange={handleRailHoverChange}
 		/>
 
-		<!-- Rail resize divider (only when pinned) -->
-		{#if railPinned}
+		<!-- Rail resize divider (only in manual expanded mode) -->
+		{#if railExpanded && !autoShrinkExpand}
 			<div
 				class="group flex flex-shrink-0 cursor-col-resize items-center justify-center"
 				style="width:4px; background:{borderColor}; transition:background {durationPanel};"
@@ -218,11 +266,12 @@
 			{darkMode}
 			{activeMenu}
 			{shelfOpen}
+			{autoShrinkExpand}
+			railOffset={currentRailOffset}
 			onToggleShelf={() => {
 				shelfOpen = !shelfOpen;
 			}}
-			onCollapseRail={handleCollapseRail}
-			onRestoreRail={handleRestoreRail}
+			onAutoShrinkExpandChange={handleAutoShrinkExpandChange}
 		/>
 
 		<!-- Shelf resize divider (only when open) -->
