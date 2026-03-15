@@ -5,46 +5,65 @@ Purpose: Machine-readable map of documentation for AI agents.
 
 ---
 
-# 1. Metadata
+## 1.1 Metadata
 Metadata includes the following data items:
-- doc-name: <doc name>
-- doc-no: <doc no>
-- publish date: <publish date>
-- release date: <release date>
-- abolish date: <abolish date>
-- current state: <state>
+- doc-name: "doc name"
+- doc-no: "doc no"
+- publish date: "publish date"
+- release date: "release date"
+- abolish date: "abolish date"
+- current state: "state"
 - replace: [doc-no, ...]
-- created: <YYYY-MM-DD>
-- last_updated: <YYYY-MM-DD>
-- parser: <parser-version>
+- created: "YYYY-MM-DD"
+- last_updated: "YYYY-MM-DD"
+- parser: "parser-version"
 
-# 2. Contributors
+## 1.2 Contributors
 Contributors include organizations and individuals.
-  - main organizations: [<org-name>, <org-name>,...]
-  - participating organizations: [<org-name>, <org-name>,...]
-  - main authors: [<person-name>, <person-name>,...]
-  - participating authors: [<person-name>, ...]
+  - main organizations: ["org-name", "org-name",...]
+  - participating organizations: ["org-name", "org-name",...]
+  - main authors: ["person-name", "person-name",...]
+  - participating authors: ["person-name", ...]
 
 ---
 
-# 3. Catagory and Classification
+## 1.3 Catagory and Classification
 Catagories:
-    - Catagory I
-    - Catagory II
-    - Catagory III
-    - Catagory IV
-    - Catagory V
+- Catagory I
+- Catagory II
+- Catagory III
+- Catagory IV
+- Catagory V
 
-CCS: <ccs-code>
+CCS: "ccs-code"
+ICS: "ics-code"
 
-# 4. Agent Info
+## 1.4 Agent Info
 This section contains information specific for agents:
-    - chunking strategy
-    - chunk size
-    - human reviewed: {yes|no}
-    - accuracy level: [0, 1]
+- chunking strategy
+- chunk size
+- human reviewed: {yes|no}
+- accuracy level: [0.0, 1.0], the bigger, the more accurate
 
-# 5. Documentation Scope
+## 1.5 Executive Summary
+
+<3–6 sentences describing the doc>
+
+Example:
+
+This documentation describes a platform that validates technical documents
+against industry standards. The system extracts standards, identifies
+requirements, and verifies compliance within technical documentation.
+The repository contains architecture descriptions, API references,
+developer guides, and operational procedures.
+
+---
+
+## 1.6 Short Summary
+
+1-3 paragraphs describing the doc.
+
+## 1.7 Documentation Scope
 
 included_topics:
   - Doc Structure
@@ -64,32 +83,13 @@ excluded_topics:
 
 ---
 
-# 6. Executive Summary
+## 1.7 Keywords
 
-<3–6 sentences describing the system and documentation>
-
-Example:
-
-This documentation describes a platform that validates technical documents
-against industry standards. The system extracts standards, identifies
-requirements, and verifies compliance within technical documentation.
-The repository contains architecture descriptions, API references,
-developer guides, and operational procedures.
+List the keywords for the doc. Examples: [AI, RAG, document analysis, compliance, standards validation] 
 
 ---
 
-# 7. Keywords
-
-keywords:
-  - AI
-  - RAG
-  - document analysis
-  - compliance
-  - standards validation
-
----
-
-# 8. Documentation Structure
+## 1.8 Documentation Structure
 
 root: docs/
 
@@ -125,7 +125,7 @@ tree:
 
 ---
 
-# 9. Document Index
+## 1.9 Document Index
 
 documents:
 
@@ -147,7 +147,7 @@ documents:
 
 ---
 
-# 10. Key Concepts
+## 1.10 Key Concepts
 
 concepts:
 
@@ -168,15 +168,15 @@ concepts:
 
 ---
 
-# 11. Topics
+## 1.11 Topics
 Concepts are fundamental ideas or entities. Topics are the areas of discussion about ideas, concepts, entities., etc.
     - Topic Reference
     - Topic and Content Relation
 
-# 12. Logical Relationships
+# 1.12 Logical Relationships
 Logical relationships are mainly used for agent to reason.
 
-# 11. Concept Relationships
+# 1.13 Concept Relationships
 
 relationships:
 
@@ -186,7 +186,7 @@ relationships:
 
 ---
 
-# 12. Task-Oriented Navigation
+## 1.14 Task-Oriented Navigation
 
 tasks:
 
@@ -209,7 +209,7 @@ tasks:
 
 ---
 
-# 13. External References
+## 1.15 External References
 
 external_standards:
 
@@ -221,7 +221,7 @@ external_standards:
 
 ---
 
-# 14. Retrieval Hints (For RAG Systems)
+## 1.16 Retrieval Hints (For RAG Systems)
 
 query_examples:
 
@@ -244,7 +244,7 @@ recommended_docs:
 
 ---
 
-# 15. Update Policy
+## 1.17 Update Policy
 
 DOCMAP.md must be updated when:
 
@@ -254,42 +254,22 @@ DOCMAP.md must be updated when:
 
 ---
 
-# 16. Short Summary
+## 1.19 Entity Relations and Logical Relations
+The terms **“Entity Relations”** and **“Logical Relationships”** overlap but are used with **different emphasis and abstraction levels**, especially in **knowledge graphs, ontologies, and reasoning systems for agents**.
 
-DOCMAP provides a machine-readable map of the documentation,
-including structure, document index, key concepts, and task-based
-navigation to help AI agents efficiently locate relevant information.
+### 1.19.1 Entity Relations
 
-## Logical Relationship and Relation
-The terms **“relations”** and **“logical relationships”** overlap but are used with **different emphasis and abstraction levels**, especially in **knowledge graphs, ontologies, and reasoning systems for agents**.
+An **entity relation** is a **formal connection between entities (nodes)**. It explicitly exhibits a factual connection between entities.
 
-**Relations**
+#### Knowledge retrieval
 
-> explicit factual connections between entities.
-
-**Logical relationships**
-
-> reasoning-based connections derived from rules, constraints, or interpretations.
-
-For AI agents, the distinction between relations and logical relationship is important.
-
-Agents operate in two phases:
-
-### Knowledge retrieval
-
-Uses **relations**.
+Uses **entity relations**.
 
 Example:
 
 ```
 Find all Requirements contained in ISO9001
 ```
-
----
-
-### 1. Relations (Graph / Knowledge Representation)
-
-A **relation** is a **formal connection between entities (nodes)**.
 
 Typical form:
 
@@ -313,20 +293,15 @@ Characteristics:
 * **explicitly defined**
 * used in **graphs, databases, and ontologies**
 
-Relations are usually **facts or assertions** about the world.
+Entity relatoins are **data**, not reasoning.
 
-Example knowledge graph triple:
+### 1.19.2 Logical Relationships
 
-```
-(Document123, references, ISO9001)
-```
+Reasoning-based connections derived from rules, constraints, or interpretations.
 
-This is **data**, not reasoning.
+For AI agents, the distinction between entity relations and logical relationship is important.
 
----
-
-### 2. Logical Relationships
-
+Agents operate in two phases:
 A **logical relationship** is a **relationship defined by reasoning or logic**, rather than just a stored edge.
 
 Logical relationships often represent:
@@ -343,9 +318,9 @@ Examples:
 If Document references Standard
 AND Standard contains Requirement
 THEN Document must satisfy Requirement
-```
 
-This relationship is **not explicitly stored** but **derived logically**.
+Section A --contradicts--> Section B
+```
 
 Logical relationships are often expressed as:
 
@@ -357,118 +332,20 @@ Example rule:
 
 ```
 references(Document, Standard)
-contains(Standard, Requirement)
-→ must_satisfy(Document, Requirement)
+contains(Standard, Requirement) → must_satisfy(Document, Requirement)
 ```
 
-This is **reasoning**, not just data.
-
 ---
 
-### 3. Key Difference
+#### Logical Relation Interpretations
 
-|                | Relations          | Logical Relationships              |
-| -------------- | ------------------ | ---------------------------------- |
-| Nature         | Structural link    | Reasoning link                     |
-| Role           | Data               | Logic                              |
-| Representation | Graph edge         | Rule / inference                   |
-| Objectivity    | Mostly objective   | Can include interpretation         |
-| Use            | Knowledge graphs   | Reasoning engines                  |
-| Example        | A → references → B | If A references B → A depends on B |
-
----
-
-### 4. Another Way to View It
-
-### Relations = **What is true**
+Logical relations should include interpretations because they are often derived or even subjective.
 
 Example:
 
 ```
-Standard --contains--> Requirement
+Document --implies--> compliance, explain how it comes to this conclusion.
 ```
-
-This is a **fact**.
-
----
-
-### Logical relationships = **What follows logically**
-
-Example:
-
-```
-If Standard contains Requirement
-AND Document claims compliance with Standard
-THEN Document must satisfy Requirement
-```
-
-This is **reasoning**.
-
----
-
-### 5. In Graph Systems
-
-In graph databases (Neo4j, RDF, etc.), **relations are edges**.
-
-Example:
-
-```
-(Document) --references--> (Standard)
-```
-
-But logical relationships may be:
-
-* inferred edges
-* rule-based relationships
-* temporary reasoning outputs
-
-Example inferred relation:
-
-```
-(Document) --must_satisfy--> (Requirement)
-```
-
-derived from:
-
-```
-references + contains
-```
-
----
-
-### 6. Subjectivity Aspect
-
-Your observation about **subjectivity** is insightful.
-
-### Relations
-
-Usually objective:
-
-```
-Document --references--> ISO9001
-```
-
-This is a factual statement.
-
----
-
-### Logical relationships
-
-Can include interpretation.
-
-Example:
-
-```
-Document --implies--> compliance
-```
-
-or
-
-```
-Section A --contradicts--> Section B
-```
-
-These may involve **interpretation**.
 
 Especially when generated by:
 
@@ -478,7 +355,7 @@ Especially when generated by:
 
 ---
 
-### 7. Another Example
+#### Example: Subjectiveness
 
 Consider this statement:
 
@@ -494,7 +371,7 @@ So it is better classified as a **logical relationship** rather than a simple re
 
 ---
 
-### 8. Layered View (Very Useful)
+### 1.19.3 Layered View (Very Useful)
 
 You can think of three layers.
 
@@ -507,9 +384,7 @@ Document
 Section
 ```
 
----
-
-#### Layer 2 — Relations (Facts)
+#### Layer 2 — Entity Relations (Facts)
 
 ```
 Standard --contains--> Requirement
@@ -531,27 +406,11 @@ These are **rules**.
 
 ---
 
-### 9. In Agent Systems
-
----
-
-### Reasoning
-
-Uses **logical relationships**.
-
-Example:
-
-```
-If requirement is violated → compliance failure
-```
-
----
-
-### 10. Practical Example
+## 1.20 Practical Example
 
 In the **document compliance checker**:
 
-#### Relations
+#### Entity Relations
 
 ```
 Document --references--> Standard
@@ -569,38 +428,4 @@ references + contains → must_satisfy
 must_satisfy + missing_requirement → violation
 
 violation → non_compliance
-```
-
----
-
-### 11. Why This Distinction Matters
-
-Especially for **LLM-based reasoning systems**.
-
-Relations help with:
-
-* retrieval
-* indexing
-* graph navigation
-
-Logical relationships help with:
-
-* inference
-* validation
-* explanation
-
----
-
-### 12. Simple Mental Model
-
-```
-Relations = edges
-Logical relationships = rules
-```
-
-or
-
-```
-Relations = data
-Logical relationships = logic
 ```

@@ -13,4 +13,6 @@
 |jj bookmark create <bookmark> | Create a bookmark. <bookmark> cannot contain spaces |
 |jj log -r 'main@origin..@ & files("<filename>")' | Find all changes that contain <filename> |
 |jj restore --changes-in <change_id> <filename> | Remove <filename> from <change_id> |
+|jj bookmark set main -r @ | Move local main bookmark to point to the current change (@) |
+|jj git push --remote origin -b main | push local main to GitHub |
 --------
