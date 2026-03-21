@@ -25,7 +25,6 @@ func CreateFlowsTable(logger ApiTypes.JimoLogger) error {
 		"is_shared         BOOLEAN          NOT NULL DEFAULT FALSE, " +
 		"is_template       BOOLEAN          NOT NULL DEFAULT FALSE, " +
 		"template_category VARCHAR(100)     DEFAULT NULL, " +
-		"flow_data         LONGTEXT         NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}', " +
 		"thumbnail_svg     TEXT             DEFAULT NULL, " +
 		"created_at        TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
 		"updated_at        TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP"
@@ -33,12 +32,16 @@ func CreateFlowsTable(logger ApiTypes.JimoLogger) error {
 	switch db_type {
 	case ApiTypes.MysqlName:
 		stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" +
-			"flow_id BIGINT AUTO_INCREMENT PRIMARY KEY, " + common_fields +
+			"flow_id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+			"flow_data         LONGTEXT         NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}', " +
+			common_fields +
 			") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
 
 	case ApiTypes.PgName:
 		stmt = "CREATE TABLE IF NOT EXISTS " + table_name + "(" +
-			"flow_id BIGSERIAL PRIMARY KEY, " + common_fields + ")"
+			"flow_id BIGSERIAL PRIMARY KEY, " +
+			"flow_data         TEXT             NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}', " +
+			common_fields + ")"
 
 	default:
 		err := fmt.Errorf("database type not supported:%s (CWB_FLOW_001)", db_type)
@@ -47,7 +50,7 @@ func CreateFlowsTable(logger ApiTypes.JimoLogger) error {
 
 	err := databaseutil.ExecuteStatement(db, stmt)
 	if err != nil {
-		error_msg := fmt.Errorf("failed creating table (CWB_FLOW_002), err: %w, stmt:%s", err, stmt)
+		error_msg := fmt.Errorf("(MID_26032101) failed creating table, error: %w, stmt:%s", err, stmt)
 		return error_msg
 	}
 
