@@ -11,6 +11,8 @@
   import ChevronDownIcon  from '@lucide/svelte/icons/chevron-down';
   import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 
+  function focus(node: HTMLElement) { node.focus(); }
+
   let {
     activeFlow,
     isDirty,
@@ -68,7 +70,7 @@
         onkeydown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') editingName=false; }}
         class="rounded px-2 py-1"
         style="background:#0d1117; border:1px solid #6366f1; color:#e2e8f0; font-size:12px; max-width:200px;"
-        autofocus
+        use:focus
         maxlength="255"
       />
     {:else}

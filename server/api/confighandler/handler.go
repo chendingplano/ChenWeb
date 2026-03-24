@@ -60,8 +60,8 @@ func GetConfig(c echo.Context) error {
 	response := ConfigResponse{
 		AppName: ApiTypes.CommonConfig.AppInfo.AppName,
 		Server: ServerConfig{
-			Port: ApiTypes.CommonConfig.AppInfo.Port,
-			Host: ApiTypes.CommonConfig.AppInfo.Host,
+			Port: ApiTypes.CommonConfig.AppInfo.AppPort,
+			Host: ApiTypes.CommonConfig.AppInfo.AppHost,
 		},
 		AppTableNames: AppTableNamesConfig{
 			TableNameDocuments:     config.AppConfig.AppTableNames.TableName_Documents,

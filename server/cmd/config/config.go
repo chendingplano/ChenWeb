@@ -11,6 +11,7 @@ import (
 )
 
 type AppConfigDef struct {
+	PDFParser     PDFParserConfig `mapstructure:"pdf_parser"`
 	AppTableNames struct {
 		TableName_ProcessStatus string `mapstructure:"table_name_process_status"`
 		TableName_Schedules     string `mapstructure:"table_name_schedules"`
@@ -18,6 +19,20 @@ type AppConfigDef struct {
 		TableName_Flows         string `mapstructure:"table_name_flows"`
 		TableName_DspyPrompts   string `mapstructure:"table_name_dspy_prompts"`
 	} `mapstructure:"app_table_names"`
+}
+
+type PDFParserConfig struct {
+	Enabled             bool     `mapstructure:"enabled"`
+	StagingDir          string   `mapstructure:"staging_dir"`
+	RepoDirs            []string `mapstructure:"repo_dirs"`
+	BackupDir           string   `mapstructure:"backup_dir"`
+	PollIntervalSeconds int      `mapstructure:"poll_interval_seconds"`
+	BatchSize           int      `mapstructure:"batch_size"`
+	PythonBin           string   `mapstructure:"python_bin"`
+	PaddleOCRScript     string   `mapstructure:"paddleocr_script"`
+	UsePaddleOCRVL      bool     `mapstructure:"use_paddleocr_vl"`
+	DeleteFromStaging   bool     `mapstructure:"delete_from_staging"`
+	WorkDir             string   `mapstructure:"work_dir"`
 }
 
 var AppConfig AppConfigDef
@@ -56,7 +71,7 @@ func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath stri
 	logger.Info("PG env vars",
 		"user", ApiTypes.CommonConfig.PGConf.UserName,
 		"project_db", ApiTypes.CommonConfig.PGConf.ProjectDBName,
-		"migration_db", ApiTypes.CommonConfig.PGConf.MigrationDBName,
+		"shared_db", ApiTypes.CommonConfig.PGConf.SharedDBName,
 		"autotester_db", ApiTypes.CommonConfig.PGConf.AutotesterDBName,
 		"pwd_set", ApiTypes.CommonConfig.PGConf.Password != "")
 
@@ -91,4 +106,8 @@ func NeedCreateTables() bool {
 
 func GetProcessStatusTableName() string {
 	return AppConfig.AppTableNames.TableName_ProcessStatus
+}
+
+func GetPDFParserConfig() PDFParserConfig {
+	return AppConfig.PDFParser
 }

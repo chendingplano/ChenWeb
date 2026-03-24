@@ -1,6 +1,7 @@
 <script lang="ts">
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
 	import AppFooter     from '$lib/components/home3/app-footer.svelte';
+	import KbImportView  from '$lib/components/home3/kb-import-view.svelte';
 	import Canvas01      from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01     from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -125,6 +126,8 @@
 				{railOffset}
 				onClose={() => { /* no-op — handled by parent navigation */ }}
 			/>
+		{:else if activeMenu?.childId === 'kb-import'}
+			<KbImportView {darkMode} />
 		{:else if sectionId === 'chat'}
 			<Chatter01 {darkMode} />
 		{:else if isDashboard}

@@ -88,11 +88,6 @@ func main() {
 		os.Exit(2)
 	}
 
-	if ApiTypes.CommonConfig.PGConf.MigrationDBHandle == nil {
-		logger.Error("Migration DB connection not initialized")
-		os.Exit(2)
-	}
-
 	if ApiTypes.CommonConfig.PGConf.AutotesterDBHandle == nil {
 		logger.Error("Autotester DB connection not initialized")
 		os.Exit(2)
@@ -211,7 +206,7 @@ func runAutoTestMigrations(ctx context.Context, logger ApiTypes.JimoLogger) erro
 		"allow_outof_order", migrate_cfg.AllowOutOfOrder)
 
 	var project_db *sql.DB = ApiTypes.ProjectDBHandle
-	var migrate_db *sql.DB = ApiTypes.MigrationDBHandle
+	var migrate_db *sql.DB = ApiTypes.SharedMigrationDBHandle
 	var autotester_db *sql.DB = ApiTypes.AutotesterDBHandle
 	var dbType = ApiTypes.DBType
 

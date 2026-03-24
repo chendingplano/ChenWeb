@@ -1,0 +1,76 @@
+[tools]
+bun = "latest"
+caddy = "latest"
+go = "1.23.12"
+node = "latest"
+
+
+[tasks.build-pdf-parser]
+run = "go build -buildvcs=false -o ../../.cache/pdf-parser.exe ."
+
+[tasks.pdf-parser-run]
+run = "go run ."
+
+[tasks.pdf-parser-once]
+run = "go run . --once"
+
+[tasks.pdf-parser-migrate]
+run = "go run . --migrate-only"
+
+[tasks.pdf-parser-verify-schema]
+run = "go run . --verify-schema-only"
+
+[tasks.pdf-parser-start]
+run = '''
+mkdir -p ../../.cache
+if [ -f ../../.cache/pdf-parser.pid ] && kill -0 "$(cat ../../.cache/pdf-parser.pid)" 2>/dev/null; then
+  echo "pdf-parser already running (pid $(cat ../../.cache/pdf-parser.pid))"
+  exit 0
+fi
+go run .
+echo $! > ../../.cache/pdf-parser.pid
+echo "pdf-parser started (pid $(cat ../../.cache/pdf-parser.pid))"
+'''
+
+[tasks.pdf-parser-stop]
+run = '''
+if [ ! -f ../../.cache/pdf-parser.pid ]; then
+  echo "pdf-parser is not running (no pid file)"
+  exit 0
+fi
+PID="$(cat ../../.cache/pdf-parser.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  kill "$PID"
+  echo "stopped pdf-parser (pid $PID)"
+else
+  echo "stale pid file found for pid $PID"
+fi
+rm -f ../../.cache/pdf-parser.pid
+'''
+
+[tasks.pdf-parser-status]
+run = '''
+if [ ! -f ../../.cache/pdf-parser.pid ]; then
+  if command -v pgrep >/dev/null 2>&1 && pgrep -f "server/cmd/pdfparser|pdf-parser(\\.exe)?" >/dev/null 2>&1; then
+    echo "pdf-parser running (detected by process scan)"
+    exit 0
+  fi
+  echo "pdf-parser not running"
+  exit 1
+fi
+PID="$(cat ../../.cache/pdf-parser.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  echo "pdf-parser running (pid $PID)"
+  exit 0
+fi
+if ps -p "$PID" >/dev/null 2>&1; then
+  echo "pdf-parser running (pid $PID)"
+  exit 0
+fi
+if command -v pgrep >/dev/null 2>&1 && pgrep -f "server/cmd/pdfparser|pdf-parser(\\.exe)?" >/dev/null 2>&1; then
+  echo "pdf-parser running (detected by process scan; stale pid $PID)"
+  exit 0
+fi
+echo "pdf-parser not running (stale pid $PID)"
+exit 1
+'''

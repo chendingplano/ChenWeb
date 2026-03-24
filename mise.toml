@@ -11,6 +11,9 @@ run = "cd web && bun install"
 [tasks.build-server]
 run = "go build -buildvcs=false -o ./.cache/server.exe ./server/cmd/deepdoc/."
 
+[tasks.build-pdf-parser]
+run = "go build -buildvcs=false -o ./.cache/pdf-parser.exe ./server/cmd/pdfparser/."
+
 [tasks.build-web]
 run = '''
 cd web && bun run build && cd ..
@@ -49,6 +52,61 @@ run = '''USE_EMBED_FRONTEND=true ./.cache/server.exe serve --dir '''
 
 [tasks.run-all-tests]
 run = "go run ./server/cmd/autotester/"
+
+[tasks.pdf-parser-run]
+run = "go run ./server/cmd/pdfparser/"
+
+[tasks.pdf-parser-once]
+run = "go run ./server/cmd/pdfparser/ --once"
+
+[tasks.pdf-parser-migrate]
+run = "go run ./server/cmd/pdfparser/ --migrate-only"
+
+[tasks.pdf-parser-verify-schema]
+run = "go run ./server/cmd/pdfparser/ --verify-schema-only"
+
+[tasks.pdf-parser-start]
+run = '''
+mkdir -p ./.cache
+if [ -f ./.cache/pdf-parser.pid ] && kill -0 "$(cat ./.cache/pdf-parser.pid)" 2>/dev/null; then
+  echo "pdf-parser already running (pid $(cat ./.cache/pdf-parser.pid))"
+  exit 0
+fi
+nohup go run ./server/cmd/pdfparser/ > ./.cache/pdf-parser.log 2>&1 &
+echo $! > ./.cache/pdf-parser.pid
+echo "pdf-parser started (pid $(cat ./.cache/pdf-parser.pid))"
+'''
+
+[tasks.pdf-parser-stop]
+run = '''
+if [ ! -f ./.cache/pdf-parser.pid ]; then
+  echo "pdf-parser is not running (no pid file)"
+  exit 0
+fi
+PID="$(cat ./.cache/pdf-parser.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  kill "$PID"
+  echo "stopped pdf-parser (pid $PID)"
+else
+  echo "stale pid file found for pid $PID"
+fi
+rm -f ./.cache/pdf-parser.pid
+'''
+
+[tasks.pdf-parser-status]
+run = '''
+if [ ! -f ./.cache/pdf-parser.pid ]; then
+  echo "pdf-parser not running"
+  exit 1
+fi
+PID="$(cat ./.cache/pdf-parser.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  echo "pdf-parser running (pid $PID)"
+  exit 0
+fi
+echo "pdf-parser not running (stale pid $PID)"
+exit 1
+'''
 
 [tasks.apply-nix]
 run = "cd ~/Workspace/nix && sudo darwin-rebuild switch --flake ."
