@@ -26,7 +26,7 @@ func ValidateSQLStatement(stmt string) error {
 func ValidateConverter(converterJSON string) (map[string]string, error) {
 	var m map[string]string
 	if err := json.Unmarshal([]byte(converterJSON), &m); err != nil {
-		return nil, fmt.Errorf("converter must be valid JSON object: %w (CWB_DGW_060)", err)
+		return nil, fmt.Errorf("converter must be valid JSON object (CWB_DGW_060): %w", err)
 	}
 	valueSet := make(map[string]bool)
 	for _, v := range m {

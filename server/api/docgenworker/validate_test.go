@@ -35,7 +35,7 @@ func TestValidateConverter_AcceptsValidJSON(t *testing.T) {
 	}
 }
 
-func TestValidateConverter_RejectsMissingRequiredKey(t *testing.T) {
+func TestValidateConverter_RejectsMissingRequiredValue(t *testing.T) {
 	conv := `{"cust_id":"customer_id","cust_name":"customer_name"}`
 	if _, err := docgenworker.ValidateConverter(conv); err == nil {
 		t.Fatal("expected error for missing email mapping, got nil")
