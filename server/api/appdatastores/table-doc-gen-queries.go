@@ -88,10 +88,12 @@ func ListDocGenQueries(db *sql.DB, search string) ([]DocGenQuery, error) {
 	var results []DocGenQuery
 	for rows.Next() {
 		var q DocGenQuery
-		if err := rows.Scan(&q.ID, &q.Name, &q.Description, &q.SQLStatement,
+		var description sql.NullString
+		if err := rows.Scan(&q.ID, &q.Name, &description, &q.SQLStatement,
 			&q.CreatedBy, &q.CreatedAt, &q.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan failed: %w (CWB_DGS_065)", err)
 		}
+		q.Description = description.String
 		results = append(results, q)
 	}
 	if results == nil {
@@ -102,10 +104,11 @@ func ListDocGenQueries(db *sql.DB, search string) ([]DocGenQuery, error) {
 
 func GetDocGenQuery(db *sql.DB, id int64) (*DocGenQuery, error) {
 	var q DocGenQuery
+	var description sql.NullString
 	err := db.QueryRow(
 		`SELECT id, name, description, sql_statement, created_by, created_at, updated_at
 		 FROM doc_gen_queries WHERE id=$1`, id,
-	).Scan(&q.ID, &q.Name, &q.Description, &q.SQLStatement,
+	).Scan(&q.ID, &q.Name, &description, &q.SQLStatement,
 		&q.CreatedBy, &q.CreatedAt, &q.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -113,5 +116,6 @@ func GetDocGenQuery(db *sql.DB, id int64) (*DocGenQuery, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetDocGenQuery failed: %w (CWB_DGS_070)", err)
 	}
+	q.Description = description.String
 	return &q, nil
 }

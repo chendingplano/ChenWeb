@@ -165,6 +165,9 @@ func ListDocGenJobs(db *sql.DB, status, requestName string, page, pageSize int) 
 		return nil, 0, fmt.Errorf("ListDocGenJobs count failed: %w (CWB_DGS_150)", err)
 	}
 
+	if page < 1 {
+		page = 1
+	}
 	offset := (page - 1) * pageSize
 	args = append(args, pageSize, offset)
 	rows, err := db.Query(
@@ -217,7 +220,7 @@ func ListStalledDocGenJobs(db *sql.DB) ([]int64, error) {
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ListStalledDocGenJobs scan failed: %w (CWB_DGS_175)", err)
 		}
 		ids = append(ids, id)
 	}
