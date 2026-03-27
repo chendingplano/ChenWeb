@@ -33,6 +33,11 @@ func SubmitJob(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "request_name, purpose, template_type, template_name, output_dir, output_format are required (CWB_DGH_152)"})
 	}
 
+	// Require at least one SQL source
+	if req.SQLQueryID == nil && strings.TrimSpace(req.SQLStatement) == "" {
+		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "sql_query_id or sql_statement is required (CWB_DGH_153a)"})
+	}
+
 	// Resolve SQL: prefer sql_query_id over sql_statement
 	sqlStmt := req.SQLStatement
 	if req.SQLQueryID != nil {
