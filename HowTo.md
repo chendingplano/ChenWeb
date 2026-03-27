@@ -4309,7 +4309,7 @@ In this page, when a user selects one or more records (there is a checkbox in th
       "github.com/chendingplano/shared/go/api/ApiTypes"
   )
 
-  db := ApiTypes.PG_DB_Project (db is *sql.DB, the handle for PostgreSQL ) 
+  db := ApiTypes.ProjectDBHandle (db is *sql.DB, the handle for PostgreSQL ) 
 
 4. For each record, retrieve its email (there is a field named 'email'). If it is not a valid email, report errors
 

@@ -1,0 +1,50 @@
+2026/03/26 09:45:34 INFO InitFileLogging (SHD_JLG_078) loc=SHD_JLG_118
+2026/03/26 09:45:34 INFO Loading config (SHD_LMG_542) config_path=/Users/cding/Workspace/shared/libconfig.toml
+2026/03/26 09:45:34 INFO Loading config success (SHD_LMG_564)
+2026/03/26 09:45:34 INFO file_logger (SHD_LWG_059) type=lumberjack
+2026/03/26 09:45:34 INFO Create lumberjack (SHD_JLG_138) file_dir=/Users/cding/Apps/ChenWebLog/app.log max_size=100 num_files=10 max_age=30
+2026/03/26 09:45:34 INFO newDevLogger with file writer (SHD_JLG_129)
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Loading config [main.go:44->config.go:42][0m [0mfilePath[0m=[0m"../../../config.toml"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Loading config [config.go:57->ApiUtils.go:912][0m [0mconfig_path[0m=[0m"../../../config.toml"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] createPGDB [ApiUtils.go:954->ApiUtils.go:815][0m [0mdbname[0m=[0m"miner"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Connect to project PG [ApiUtils.go:954->ApiUtils.go:821][0m [0mhost[0m=[0m"127.0.0.1"[0m [0mport[0m=[0m"5432"[0m [0musername[0m=[0m"admin"[0m [0mdbname[0m=[0m"miner"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] PostgreSQL created [ApiUtils.go:954->ApiUtils.go:839][0m [0mdbname[0m=[0m"miner"[0m [0muser[0m=[0m"admin"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] PostgreSQL shared-migration connection created [ApiUtils.go:954->ApiUtils.go:865][0m [0mdbname[0m=[0m"miner"[0m [0msearch_path[0m=[0m"shared"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Connect to autotester PG [ApiUtils.go:954->ApiUtils.go:886][0m [0mdbname[0m=[0m"miner_autotester"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] CommonConfig [config.go:57->ApiUtils.go:968][0m [0mdatabase_type[0m=[0m"pg"[0m [0mneed_create_tables[0m=[0m"true"[0m [0mpg[0m=[0m"true"[0m [0mmysql[0m=[0m"false"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] PG env vars [main.go:44->config.go:71][0m [0muser[0m=[0m"admin"[0m [0mproject_db[0m=[0m"miner"[0m [0mshared_db[0m=[0m"miner"[0m [0mautotester_db[0m=[0m"miner_autotester"[0m [0mpwd_set[0m=[0m"true"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Config load success [main.go:44->config.go:91][0m [0mdatabase_type[0m=[0m"pg"[0m [0mneed_create_tables[0m=[0m"true"[0m [0mpg[0m=[0m"true"[0m [0mmysql[0m=[0m"false"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-0d5f9d84] InitDB called (SHD_DBS_0 45) [main.go:49->databaseutil.go:33][0m [0mcaller[0m=[0m"CWB_PDF_001"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-0d5f9d84] To create PGDBMiner (SHD_DBS_024) [main.go:49->databaseutil.go:43][0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-0d5f9d84] createPGDB [databaseutil.go:44->ApiUtils.go:815][0m [0mdbname[0m=[0m"miner"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-0d5f9d84] Connect to project PG [databaseutil.go:44->ApiUtils.go:821][0m [0mhost[0m=[0m"127.0.0.1"[0m [0mport[0m=[0m"5432"[0m [0musername[0m=[0m"admin"[0m [0mdbname[0m=[0m"miner"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-0d5f9d84] PostgreSQL created [databaseutil.go:44->ApiUtils.go:839][0m [0mdbname[0m=[0m"miner"[0m [0muser[0m=[0m"admin"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-0d5f9d84] PostgreSQL shared-migration connection created [databaseutil.go:44->ApiUtils.go:865][0m [0mdbname[0m=[0m"miner"[0m [0msearch_path[0m=[0m"shared"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-0d5f9d84] Connect to autotester PG [databaseutil.go:44->ApiUtils.go:886][0m [0mdbname[0m=[0m"miner_autotester"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-0d5f9d84] PostgreSQL configured (SHD_DBS_033) [main.go:49->databaseutil.go:49][0m [0mcall_flow[0m=[0m"CWB_PDF_001"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Initializing goose migrator [goose.go:223->goose.go:260][0m [0mdb_type[0m=[0m"pg"[0m [0mtable_name[0m=[0m"project.project_db_migration"[0m [0mverbose[0m=[0m"true"[0m [0mallow_out_of_order[0m=[0m"true"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] No migration files found - skipping migration initialization [goose.go:223->goose.go:275][0m [0mdb_type[0m=[0m"pg"[0m [0mtable_name[0m=[0m"project.project_db_migration"[0m [0mmigrations_dir[0m=[0m"project_migrations"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] No migrations to apply - provider not initialized [goose.go:227->goose.go:472][0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Migrations applied successfully [goose.go:151->goose.go:230][0m [0mmigrator[0m=[0m"project migrator"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Initializing goose migrator [goose.go:223->goose.go:260][0m [0mdb_type[0m=[0m"pg"[0m [0mtable_name[0m=[0m"shared.shared_db_migration"[0m [0mverbose[0m=[0m"true"[0m [0mallow_out_of_order[0m=[0m"true"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] No migration files found - skipping migration initialization [goose.go:223->goose.go:275][0m [0mdb_type[0m=[0m"pg"[0m [0mtable_name[0m=[0m"shared.shared_db_migration"[0m [0mmigrations_dir[0m=[0m"shared_migrations"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] No migrations to apply - provider not initialized [goose.go:227->goose.go:472][0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] Migrations applied successfully [goose.go:176->goose.go:230][0m [0mmigrator[0m=[0m"shared migrator"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] schema verification passed [proc.go:285->main.go:78][0m [0mtable[0m=[0m"kb.inputs"[0m [0mcolumn[0m=[0m"result_filename"[0m
+2026-03-26 09:45:34 [96mINFO[0m [97m[req=e-e56c816c] PDF parser service started [main.go:118->service.go:102][0m [0mpoll_interval[0m=[0m"10s"[0m [0mbatch_size[0m=[0m"25"[0m [0mrepo_dirs[0m=[0m"Data/kb/repo-1,Data/kb/repo-2"[0m [0mbackup_dir[0m=[0m"Data/kb/backup"[0m
+2026-03-26 13:06:37 [31mERROR[0m [97m[req=e-e56c816c] failed to process PDF input
+call_flow=[
+    asm_arm64.s:1268
+    proc.go:285
+    main.go:118
+    service.go:119
+    service.go:147
+][0m [0minput_id[0m=[0m"1"[0m [0mfile_name[0m=[0m"/Users/cding/Apps/ChenWebData/std_513428.pdf"[0m [0merror[0m=[0m"create OCR temp dir failed: stat .cache: no such file or directory"[0m
+2026-03-26 13:54:17 [31mERROR[0m [97m[req=e-e56c816c] failed to process PDF input
+call_flow=[
+    asm_arm64.s:1268
+    proc.go:285
+    main.go:118
+    service.go:119
+    service.go:147
+][0m [0minput_id[0m=[0m"2"[0m [0mfile_name[0m=[0m"/Users/cding/Apps/ChenWebData/std_513428_1.pdf"[0m [0merror[0m=[0m"create OCR temp dir failed: stat .cache: no such file or directory"[0m

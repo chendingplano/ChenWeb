@@ -4,7 +4,10 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 
 // Go backend URL (server-side)
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8080';
+const APP_BASE_URL = process.env.APP_BASE_URL
+if (typeof APP_BASE_URL !== "string" || APP_BASE_URL.length <= 0) {
+	console.error("missing APP_BASE_URL")
+}
 
 // Routes that require authentication
 const PROTECTED_ROUTES = ['/dashboard'];
@@ -25,7 +28,7 @@ async function validateSession(cookies: string | null): Promise<SessionValidatio
 	if (!cookies) return { authenticated: false, requires2FA: false };
 
 	try {
-		const response = await fetch(`${API_BASE_URL}/auth/me`, {
+		const response = await fetch(`${APP_BASE_URL}/auth/me`, {
 			method: 'GET',
 			headers: {
 				'Accept': 'application/json',

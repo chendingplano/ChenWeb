@@ -35,3 +35,7 @@ vite.config.ts.timestamp-*
 /.cache/
 .worktrees/
 .worktrees/
+Data
+server/.cache
+autotester
+pdfparser

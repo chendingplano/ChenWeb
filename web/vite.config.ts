@@ -5,7 +5,10 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 // Read from .env (or process.env)
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8080';
+const APP_BASE_URL = process.env.APP_BASE_URL;
+if (typeof APP_BASE_URL !== "string" || APP_BASE_URL.length <= 0) {
+	console.error("missing APP_BASE_URL")
+}
 
 export default defineConfig({
 	envDir: '..',
@@ -23,6 +26,7 @@ export default defineConfig({
 	},
 	server: {
 		port: 5173,
+		allowedHosts: ['macmini.deepdocs.me'],
     	hmr: {
       		// Connect HMR WebSocket to :5173 directly
       		host: 'localhost',
@@ -31,17 +35,17 @@ export default defineConfig({
     	},
     	proxy: {
       		'/api': {
-        		target: API_BASE_URL,
+        		target: APP_BASE_URL,
         		changeOrigin: true,
         		secure: false,
       		},
 			'/auth': {
-				target: API_BASE_URL,
+				target: APP_BASE_URL,
 				changeOrigin: true,
 				secure: false,
 	  		},
 			'/shared_api': {
-        		target: API_BASE_URL,
+        		target: APP_BASE_URL,
         		changeOrigin: true,
 			},
 			'/kratos': {

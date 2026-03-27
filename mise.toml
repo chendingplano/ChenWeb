@@ -11,6 +11,9 @@ run = "cd web && bun install"
 [tasks.build-server]
 run = "go build -buildvcs=false -o ./.cache/server.exe ./server/cmd/deepdoc/."
 
+[tasks.build-pdf-parser]
+run = "go build -buildvcs=false -o ./.cache/pdf-parser.exe ./server/cmd/pdfparser/."
+
 [tasks.build-web]
 run = '''
 cd web && bun run build && cd ..
@@ -49,6 +52,149 @@ run = '''USE_EMBED_FRONTEND=true ./.cache/server.exe serve --dir '''
 
 [tasks.run-all-tests]
 run = "go run ./server/cmd/autotester/"
+
+[tasks.pdf-parser-run]
+run = "go run ./server/cmd/pdfparser/"
+
+[tasks.pdf-parser-once]
+run = "go run ./server/cmd/pdfparser/ --once"
+
+[tasks.pdf-parser-migrate]
+run = "go run ./server/cmd/pdfparser/ --migrate-only"
+
+[tasks.pdf-parser-verify-schema]
+run = "go run ./server/cmd/pdfparser/ --verify-schema-only"
+
+[tasks.pdf-parser-start]
+run = '''
+mkdir -p ./.cache
+if [ -f ./.cache/pdf-parser.pid ] && kill -0 "$(cat ./.cache/pdf-parser.pid)" 2>/dev/null; then
+  echo "pdf-parser already running (pid $(cat ./.cache/pdf-parser.pid))"
+  exit 0
+fi
+nohup go run ./server/cmd/pdfparser/ > ./.cache/pdf-parser.log 2>&1 &
+echo $! > ./.cache/pdf-parser.pid
+echo "pdf-parser (staging) started (pid $(cat ./.cache/pdf-parser.pid))"
+'''
+
+[tasks.pdf-parser-start-sync]
+run = '''
+mkdir -p ./.cache
+if [ -f ./.cache/pdf-parser.pid ] && kill -0 "$(cat ./.cache/pdf-parser.pid)" 2>/dev/null; then
+  echo "pdf-parser already running (pid $(cat ./.cache/pdf-parser.pid))"
+  exit 0
+fi
+go run ./server/cmd/pdfparser/
+echo $! > ./.cache/pdf-parser.pid
+echo "pdf-parser (staging) started (pid $(cat ./.cache/pdf-parser.pid))"
+'''
+
+[tasks.pdf-parser-stop]
+run = '''
+if [ -f ./.cache/pdf-parser.pid ]; then
+  PID="$(cat ./.cache/pdf-parser.pid)"
+  if kill -0 "$PID" 2>/dev/null; then
+    kill "$PID" && echo "stopped pdf-parser (pid $PID)"
+  else
+    echo "stale pid file for pid $PID"
+  fi
+  rm -f ./.cache/pdf-parser.pid
+fi
+if [ -f ./.cache/ocr-service.pid ]; then
+  PID="$(cat ./.cache/ocr-service.pid)"
+  if kill -0 "$PID" 2>/dev/null; then
+    kill "$PID" && echo "stopped ocr-service (pid $PID)"
+  else
+    echo "stale pid file for ocr-service pid $PID"
+  fi
+  rm -f ./.cache/ocr-service.pid
+fi
+'''
+
+[tasks.pdf-parser-status]
+run = '''
+if [ ! -f ./.cache/pdf-parser.pid ]; then
+  echo "pdf-parser not running"
+  exit 1
+fi
+PID="$(cat ./.cache/pdf-parser.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  echo "pdf-parser running (pid $PID)"
+  exit 0
+fi
+echo "pdf-parser not running (stale pid $PID)"
+exit 1
+'''
+
+[tasks.ocr-service-start]
+run = '''
+mkdir -p ./.cache
+if [ -f ./.cache/ocr-service.pid ] && kill -0 "$(cat ./.cache/ocr-service.pid)" 2>/dev/null; then
+  echo "ocr-service already running (pid $(cat ./.cache/ocr-service.pid))"
+  exit 0
+fi
+VENV=/Users/cding/Workspace/ThirdParty/paddleocr/.venv
+export VIRTUAL_ENV="$VENV"
+export PYTHONPATH=""
+unset PYTHONHOME
+nohup "$VENV/bin/python" /Users/cding/Workspace/ThirdParty/paddleocr/pdf_parser_service.py \
+  > ./.cache/ocr-service.log 2>&1 &
+echo $! > ./.cache/ocr-service.pid
+echo "ocr-service started (pid $(cat ./.cache/ocr-service.pid))"
+'''
+[tasks.ocr-service-start-sync]
+run = '''
+mkdir -p ./.cache
+if [ -f ./.cache/ocr-service.pid ] && kill -0 "$(cat ./.cache/ocr-service.pid)" 2>/dev/null; then
+  echo "ocr-service already running (pid $(cat ./.cache/ocr-service.pid))"
+  exit 0
+fi
+VENV=/Users/cding/Workspace/ThirdParty/paddleocr/.venv
+export VIRTUAL_ENV="$VENV"
+export PYTHONPATH=""
+unset PYTHONHOME
+"$VENV/bin/python" /Users/cding/Workspace/ThirdParty/paddleocr/pdf_parser_service.py
+'''
+
+[tasks.ocr-service-kill]
+description = "Stop ocr-service started in sync (foreground) mode by script name"
+run = '''
+if pkill -SIGTERM -f "pdf_parser_service.py"; then
+  echo "ocr-service terminated"
+else
+  echo "ocr-service was not running"
+fi
+'''
+
+[tasks.ocr-service-stop]
+run = '''
+if [ ! -f ./.cache/ocr-service.pid ]; then
+  echo "ocr-service is not running"
+  exit 0
+fi
+PID="$(cat ./.cache/ocr-service.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  kill "$PID" && echo "stopped ocr-service (pid $PID)"
+else
+  echo "stale pid file for pid $PID"
+fi
+rm -f ./.cache/ocr-service.pid
+'''
+
+[tasks.ocr-service-status]
+run = '''
+if [ ! -f ./.cache/ocr-service.pid ]; then
+  echo "ocr-service not running"
+  exit 1
+fi
+PID="$(cat ./.cache/ocr-service.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  echo "ocr-service running (pid $PID)"
+  exit 0
+fi
+echo "ocr-service not running (stale pid $PID)"
+exit 1
+'''
 
 [tasks.apply-nix]
 run = "cd ~/Workspace/nix && sudo darwin-rebuild switch --flake ."

@@ -75,7 +75,9 @@
 <div class="fixed inset-0 z-50 flex items-center justify-center"
   style="background: rgba(0,0,0,0.7);"
   onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+  onkeydown={(e) => { if ((e.key === 'Escape' || e.key === 'Enter') && e.target === e.currentTarget) onClose(); }}
   role="dialog" aria-modal="true" aria-label="Open a Flow"
+  tabindex="0"
 >
   <div class="rounded-xl overflow-hidden shadow-2xl"
     style="background:#111827; border:1px solid #1e2a3a; width:680px; max-width:95vw; max-height:80vh; display:flex; flex-direction:column;">
