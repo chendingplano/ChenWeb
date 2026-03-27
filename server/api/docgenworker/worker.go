@@ -27,9 +27,11 @@ func Start(db *sql.DB, jobCh chan int64, workerCount int) {
 					defer func() {
 						if r := recover(); r != nil {
 							logger.Error("worker panic", "worker_id", workerID, "job_id", jobID, "panic", r)
-							appdatastores.UpdateDocGenJobStatus(db, jobID,
+							if err := appdatastores.UpdateDocGenJobStatus(db, jobID,
 								appdatastores.DocGenJobStatusFailed,
-								fmt.Sprintf("worker panic: %v", r))
+								fmt.Sprintf("worker panic: %v", r)); err != nil {
+								logger.Error("update job status after panic failed", "job_id", jobID, "err", err)
+							}
 						}
 					}()
 					if err := processJob(db, jobID); err != nil {
@@ -58,8 +60,11 @@ func processJob(db *sql.DB, jobID int64) error {
 	logger := loggerutil.CreateDefaultLogger("CWB_DGW_120")
 
 	job, err := appdatastores.GetDocGenJob(db, jobID)
-	if err != nil || job == nil {
-		return fmt.Errorf("job %d not found: %w (CWB_DGW_125)", jobID, err)
+	if err != nil {
+		return fmt.Errorf("job %d fetch failed (CWB_DGW_125): %w", jobID, err)
+	}
+	if job == nil {
+		return fmt.Errorf("job %d not found (CWB_DGW_126)", jobID)
 	}
 
 	if err := appdatastores.UpdateDocGenJobStatus(db, jobID, appdatastores.DocGenJobStatusProcessing, ""); err != nil {
@@ -80,7 +85,12 @@ func processJob(db *sql.DB, jobID int64) error {
 	}
 	defer rows.Close()
 
-	cols, _ := rows.Columns()
+	cols, err := rows.Columns()
+	if err != nil {
+		msg := fmt.Sprintf("columns error: %v", err)
+		appdatastores.UpdateDocGenJobStatus(db, jobID, appdatastores.DocGenJobStatusFailed, msg)
+		return fmt.Errorf("%s (CWB_DGW_142)", msg)
+	}
 
 	outDir := filepath.Join(job.OutputDir, job.RequestName)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
@@ -99,11 +109,13 @@ func processJob(db *sql.DB, jobID int64) error {
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			fail++
-			appdatastores.InsertDocGenLogEntry(db, appdatastores.DocGenLogEntry{
+			if logErr := appdatastores.InsertDocGenLogEntry(db, appdatastores.DocGenLogEntry{
 				JobID: jobID, RequestName: job.RequestName, Purpose: job.Purpose,
 				Filename: "", Status: "failed", ErrorMsg: err.Error(),
 				Remarks: job.Remarks, CreatedBy: job.CreatedBy,
-			})
+			}); logErr != nil {
+				logger.Error("insert log entry failed", "job_id", jobID, "err", logErr)
+			}
 			continue
 		}
 
@@ -151,15 +163,21 @@ func processJob(db *sql.DB, jobID int64) error {
 			success++
 			entry.Status = "generated"
 		}
-		appdatastores.InsertDocGenLogEntry(db, entry)
+		if logErr := appdatastores.InsertDocGenLogEntry(db, entry); logErr != nil {
+			logger.Error("insert log entry failed", "job_id", jobID, "err", logErr)
+		}
 	}
 
 	finalStatus := appdatastores.DocGenJobStatusCompleted
 	if success == 0 && (fail > 0 || total == 0) {
 		finalStatus = appdatastores.DocGenJobStatusFailed
 	}
-	appdatastores.UpdateDocGenJobCounts(db, jobID, total, success, fail)
-	appdatastores.UpdateDocGenJobStatus(db, jobID, finalStatus, "")
+	if err := appdatastores.UpdateDocGenJobCounts(db, jobID, total, success, fail); err != nil {
+		logger.Error("update job counts failed", "job_id", jobID, "err", err)
+	}
+	if err := appdatastores.UpdateDocGenJobStatus(db, jobID, finalStatus, ""); err != nil {
+		logger.Error("update job status failed", "job_id", jobID, "err", err)
+	}
 	logger.Info("job done", "job_id", jobID, "total", total, "success", success, "fail", fail)
 	return nil
 }
