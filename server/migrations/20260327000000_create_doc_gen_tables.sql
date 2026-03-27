@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS doc_gen_jobs (
     output_dir     TEXT NOT NULL,
     output_format  VARCHAR(16) NOT NULL,
     status         VARCHAR(32) NOT NULL DEFAULT 'pending',
+    CONSTRAINT chk_doc_gen_jobs_status CHECK (status IN ('pending','processing','completed','failed')),
     total_count    INT NOT NULL DEFAULT 0,
     success_count  INT NOT NULL DEFAULT 0,
     fail_count     INT NOT NULL DEFAULT 0,
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS doc_gen_log (
     purpose       VARCHAR(255) NOT NULL,
     filename      VARCHAR(512) NOT NULL,
     status        VARCHAR(32) NOT NULL,
+    CONSTRAINT chk_doc_gen_log_status CHECK (status IN ('generated','failed')),
     error_msg     TEXT,
     remarks       TEXT,
     created_by    VARCHAR(255) NOT NULL,
@@ -50,7 +52,23 @@ CREATE TABLE IF NOT EXISTS doc_gen_log (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Indexes for doc_gen_jobs
+CREATE INDEX IF NOT EXISTS idx_doc_gen_jobs_status     ON doc_gen_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_doc_gen_jobs_created_by ON doc_gen_jobs(created_by);
+CREATE INDEX IF NOT EXISTS idx_doc_gen_jobs_created_at ON doc_gen_jobs(created_at DESC);
+
+-- Indexes for doc_gen_log
+CREATE INDEX IF NOT EXISTS idx_doc_gen_log_job_id      ON doc_gen_log(job_id);
+CREATE INDEX IF NOT EXISTS idx_doc_gen_log_customer_id ON doc_gen_log(customer_id);
+CREATE INDEX IF NOT EXISTS idx_doc_gen_log_created_at  ON doc_gen_log(created_at DESC);
+
 -- +goose Down
+DROP INDEX IF EXISTS idx_doc_gen_log_created_at;
+DROP INDEX IF EXISTS idx_doc_gen_log_customer_id;
+DROP INDEX IF EXISTS idx_doc_gen_log_job_id;
+DROP INDEX IF EXISTS idx_doc_gen_jobs_created_at;
+DROP INDEX IF EXISTS idx_doc_gen_jobs_created_by;
+DROP INDEX IF EXISTS idx_doc_gen_jobs_status;
 DROP TABLE IF EXISTS doc_gen_log;
 DROP TABLE IF EXISTS doc_gen_jobs;
 DROP TABLE IF EXISTS doc_gen_queries;
