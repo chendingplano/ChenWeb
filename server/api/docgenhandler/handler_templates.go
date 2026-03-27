@@ -55,7 +55,8 @@ func UploadTemplate(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "file field required (CWB_DGH_022)"})
 	}
-	if !strings.HasSuffix(strings.ToLower(file.Filename), ".docx") {
+	baseName := filepath.Base(file.Filename)
+	if !strings.HasSuffix(strings.ToLower(baseName), ".docx") {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "only .docx files are accepted (CWB_DGH_023)"})
 	}
 
@@ -71,7 +72,7 @@ func UploadTemplate(c echo.Context) error {
 	}
 	defer src.Close()
 
-	dst, err := os.Create(filepath.Join(templateDir, filepath.Base(file.Filename)))
+	dst, err := os.Create(filepath.Join(templateDir, baseName))
 	if err != nil {
 		logger.Error("create template file failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Status: false, ErrorMsg: "failed to save template (CWB_DGH_026)"})
@@ -83,5 +84,5 @@ func UploadTemplate(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Status: false, ErrorMsg: "failed to write template (CWB_DGH_027)"})
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "filename": file.Filename})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "filename": baseName})
 }

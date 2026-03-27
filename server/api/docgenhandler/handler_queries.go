@@ -77,6 +77,9 @@ func UpdateQuery(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "invalid request body (CWB_DGH_123)"})
 	}
+	if req.Name == "" || req.SQLStatement == "" {
+		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "name and sql_statement are required (CWB_DGH_123a)"})
+	}
 
 	if err := appdatastores.UpdateDocGenQuery(ApiTypes.ProjectDBHandle, id, req.Name, req.Description, req.SQLStatement); err != nil {
 		logger.Error("update query failed", "id", id, "err", err)
