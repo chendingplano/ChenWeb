@@ -31,26 +31,25 @@ jwt_secret = "super-secret-key"
 session_duration_hours = 24
 
 [migration]
-# MigrationsFS is the filesystem that contains the .sql migration files.
-# Defaults to os.DirFS("migrations") when nil.
-# Can also be fs.Sub(embedFS, "migrations") for an embedded filesystem.
-# Path is relative to where the command is run (project root).
-migrations_fs = "server/migrations"
+migrations_fs 				= "server/migrations"
+migrations_dir 				= "server/migrations"
+tablename 					= "db_migrations"
+verbose 					= "true"
+allow_outof_order 			= "true"
 
-# TableName overrides the version-tracking table name.
-# Default: "goose_db_version"
-tablename = "db_migrations"
+[pdf_parser]
+enabled = true
+staging_dir = "Data/kb/staging"
+repo_dirs = ["Data/kb/repo-1", "Data/kb/repo-2"]
+backup_dir = "Data/kb/backup"
+poll_interval_seconds = 10
+batch_size = 25
+python_bin = "/Users/cding/Workspace/ThirdParty/paddleocr/.venv/bin/python"
+paddleocr_script = "/Users/cding/Workspace/ThirdParty/paddleocr/parse_pdf.py"
+use_paddleocr_vl = false
+delete_from_staging = true
+work_dir = "/Users/cding/Workspace/ChenWeb/Data/kb/.cache"
 
-# Verbose enables verbose output from the goose library.
-# Default: true
-verbose = "true"
-
-# AllowOutOfOrder permits applying migrations whose version is lower
-# than the current database version. Useful with feature branches.
-# Default: true
-allow_outof_order = "true"
-
-# MigrationsDir is the directory on disk where migration files are stored.
-# This is used for creating new migration files and ensuring the directory exists.
-# Path is relative to where the command is run (project root).
-migrations_dir = "server/migrations"
+[doc_gen]
+template_dir  = "Data/docgen/templates"
+worker_count  = 3
