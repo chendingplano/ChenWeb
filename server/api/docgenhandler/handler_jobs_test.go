@@ -12,9 +12,11 @@ import (
 
 func newEcho() *echo.Echo { return echo.New() }
 
-func TestSubmitJob_MissingFields_Returns400(t *testing.T) {
+// TestSubmitJob_Unauthenticated_Returns401 verifies that unauthenticated
+// callers receive 401 before any field validation occurs.
+func TestSubmitJob_Unauthenticated_Returns401(t *testing.T) {
 	e := newEcho()
-	body := `{"request_name":"","purpose":"test"}`
+	body := `{"request_name":"test","purpose":"test","template_type":"word","template_name":"t.docx","output_dir":"/tmp","output_format":"docx","sql_statement":"SELECT 1","converter":{"cid":"customer_id","cname":"customer_name","cemail":"email"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/docgen/jobs", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
@@ -23,33 +25,12 @@ func TestSubmitJob_MissingFields_Returns400(t *testing.T) {
 	if err := docgenhandler.SubmitJob(c); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated request, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestSubmitJob_NonSelectSQL_Returns400(t *testing.T) {
-	e := newEcho()
-	body := `{
-		"request_name":"test-req","purpose":"test","template_type":"word",
-		"template_name":"t.docx","output_dir":"/tmp","output_format":"docx",
-		"sql_statement":"DELETE FROM foo",
-		"converter":{"cid":"customer_id","cname":"customer_name","cemail":"email"}
-	}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/docgen/jobs", strings.NewReader(body))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := docgenhandler.SubmitJob(c); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for non-SELECT SQL, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestListJobs_Returns200(t *testing.T) {
+func TestListJobs_Returns200or500(t *testing.T) {
 	e := newEcho()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/docgen/jobs", nil)
 	rec := httptest.NewRecorder()

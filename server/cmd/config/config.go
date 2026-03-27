@@ -11,8 +11,9 @@ import (
 )
 
 type DocGenConfig struct {
-	TemplateDir string `mapstructure:"template_dir"`
-	WorkerCount int    `mapstructure:"worker_count"`
+	TemplateDir   string `mapstructure:"template_dir"`
+	WorkerCount   int    `mapstructure:"worker_count"`
+	OutputBaseDir string `mapstructure:"output_base_dir"`
 }
 
 type AppConfigDef struct {

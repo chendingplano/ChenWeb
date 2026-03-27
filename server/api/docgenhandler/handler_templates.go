@@ -66,13 +66,20 @@ func UploadTemplate(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Status: false, ErrorMsg: "failed to create template directory (CWB_DGH_024)"})
 	}
 
+	// Verify the resolved write path stays within templateDir
+	cleanDir := filepath.Clean(templateDir)
+	destPath := filepath.Join(cleanDir, baseName)
+	if !strings.HasPrefix(destPath, cleanDir+string(filepath.Separator)) {
+		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "invalid filename (CWB_DGH_024a)"})
+	}
+
 	src, err := file.Open()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Status: false, ErrorMsg: "failed to open upload (CWB_DGH_025)"})
 	}
 	defer src.Close()
 
-	dst, err := os.Create(filepath.Join(templateDir, baseName))
+	dst, err := os.Create(destPath)
 	if err != nil {
 		logger.Error("create template file failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Status: false, ErrorMsg: "failed to save template (CWB_DGH_026)"})

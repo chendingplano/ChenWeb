@@ -234,9 +234,11 @@ func main() {
 	}
 	docgenJobCh := make(chan int64, 100)
 	docgenworker.Start(project_db, docgenJobCh, workerCount)
-	if err := docgenworker.RequeueStalledJobs(project_db, docgenJobCh); err != nil {
-		logger.Warn("failed to requeue stalled doc gen jobs", "err", err)
-	}
+	go func() {
+		if err := docgenworker.RequeueStalledJobs(project_db, docgenJobCh); err != nil {
+			logger.Warn("failed to requeue stalled doc gen jobs", "err", err)
+		}
+	}()
 	logger.Info("doc gen worker pool started", "workers", workerCount)
 
 	logger.Info("[API] ⇨ http server started on", "server_port", pp)

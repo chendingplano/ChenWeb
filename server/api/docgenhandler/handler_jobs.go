@@ -22,6 +22,12 @@ func SubmitJob(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
+	// Require authentication
+	userInfo := rc.IsAuthenticated()
+	if userInfo == nil {
+		return c.JSON(http.StatusUnauthorized, ErrorResponse{Status: false, ErrorMsg: "authentication required (CWB_DGH_150a)"})
+	}
+
 	var req SubmitJobRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "invalid request body (CWB_DGH_151)"})
@@ -31,6 +37,16 @@ func SubmitJob(c echo.Context) error {
 	if req.RequestName == "" || req.Purpose == "" || req.TemplateType == "" ||
 		req.TemplateName == "" || req.OutputDir == "" || req.OutputFormat == "" {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "request_name, purpose, template_type, template_name, output_dir, output_format are required (CWB_DGH_152)"})
+	}
+
+	// Validate output_dir is within the configured base directory
+	docGenCfg := config.GetDocGenConfig()
+	if docGenCfg.OutputBaseDir != "" {
+		resolvedOut := filepath.Clean(filepath.Join(docGenCfg.OutputBaseDir, filepath.Base(req.OutputDir)))
+		if !strings.HasPrefix(resolvedOut, filepath.Clean(docGenCfg.OutputBaseDir)+string(filepath.Separator)) {
+			return c.JSON(http.StatusBadRequest, ErrorResponse{Status: false, ErrorMsg: "output_dir is outside the allowed base directory (CWB_DGH_152a)"})
+		}
+		req.OutputDir = resolvedOut
 	}
 
 	// Require at least one SQL source
@@ -80,12 +96,8 @@ func SubmitJob(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Status: false, ErrorMsg: "failed to check template (CWB_DGH_160)"})
 	}
 
-	// Determine createdBy from auth context
-	createdBy := "unknown"
-	userInfo := rc.IsAuthenticated()
-	if userInfo != nil {
-		createdBy = userInfo.UserName
-	}
+	// Determine createdBy from auth context (userInfo already verified non-nil above)
+	createdBy := userInfo.UserName
 
 	// Insert job into DB
 	jobID, err := appdatastores.InsertDocGenJob(ApiTypes.ProjectDBHandle, appdatastores.DocGenJob{

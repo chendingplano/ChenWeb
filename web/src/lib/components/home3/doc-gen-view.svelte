@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -71,12 +71,20 @@
 	let newQueryDesc = $state('');
 	let newQuerySQL  = $state('');
 	let addQueryError = $state('');
+	let deleteQueryError = $state('');
 
 	onMount(async () => {
 		await checkAdmin();
 		await loadTemplates();
 		await loadHistory();
 		startAutoRefresh();
+	});
+
+	onDestroy(() => {
+		if (historyRefreshInterval !== null) {
+			clearInterval(historyRefreshInterval);
+			historyRefreshInterval = null;
+		}
 	});
 
 	async function checkAdmin() {
@@ -206,7 +214,13 @@
 
 	async function deleteQuery(id: number) {
 		if (!confirm('Delete this query?')) return;
-		await fetch(`/api/v1/docgen/queries/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+		deleteQueryError = '';
+		const res = await fetch(`/api/v1/docgen/queries/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+		if (!res.ok) {
+			const d = await res.json().catch(() => ({}));
+			deleteQueryError = d.error_msg ?? 'Failed to delete query.';
+			return;
+		}
 		await loadQueryList();
 	}
 
@@ -313,7 +327,7 @@
 				<!-- Converter -->
 				<div>
 					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Converter JSON * <span class="font-normal text-xs" style="color:{textMuted};">(sql_column → template_token; must include customer_id, customer_name, email as values)</span></label>
-					<textarea bind:value={converterStr} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder='{"customer_id_col":"customer_id","name_col":"customer_name","email_col":"email"}' />
+					<textarea bind:value={converterStr} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={'{"customer_id_col":"customer_id","name_col":"customer_name","email_col":"email"}'} />
 				</div>
 
 				<!-- Output Dir -->
@@ -443,6 +457,8 @@
 					</div>
 				</div>
 			{/if}
+
+			{#if deleteQueryError}<div class="text-xs p-2 rounded mb-2" style="background:#EF4444; color:white;">{deleteQueryError}</div>{/if}
 
 			{#if queryListLoading}
 				<div class="text-sm" style="color:{textMuted};">Loading…</div>

@@ -12,5 +12,14 @@ func CreateTables(logger ApiTypes.JimoLogger) error {
 		return err
 	}
 	appdatastores.CreateDspyPromptsTable(logger)
+	if err := appdatastores.CreateDocGenQueriesTable(logger); err != nil {
+		return err
+	}
+	if err := appdatastores.CreateDocGenJobsTable(logger); err != nil {
+		return err
+	}
+	if err := appdatastores.CreateDocGenLogTable(logger); err != nil {
+		return err
+	}
 	return nil
 }

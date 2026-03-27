@@ -73,14 +73,18 @@ func processJob(db *sql.DB, jobID int64) error {
 
 	converter, err := ValidateConverter(job.Converter)
 	if err != nil {
-		appdatastores.UpdateDocGenJobStatus(db, jobID, appdatastores.DocGenJobStatusFailed, err.Error())
+		if statusErr := appdatastores.UpdateDocGenJobStatus(db, jobID, appdatastores.DocGenJobStatusFailed, err.Error()); statusErr != nil {
+			logger.Error("update job status failed after converter error", "job_id", jobID, "err", statusErr)
+		}
 		return err
 	}
 
 	rows, err := db.Query(job.SQLStatement)
 	if err != nil {
 		msg := fmt.Sprintf("SQL error: %v", err)
-		appdatastores.UpdateDocGenJobStatus(db, jobID, appdatastores.DocGenJobStatusFailed, msg)
+		if statusErr := appdatastores.UpdateDocGenJobStatus(db, jobID, appdatastores.DocGenJobStatusFailed, msg); statusErr != nil {
+			logger.Error("update job status failed after SQL error", "job_id", jobID, "err", statusErr)
+		}
 		return fmt.Errorf("%s (CWB_DGW_135)", msg)
 	}
 	defer rows.Close()
@@ -88,7 +92,9 @@ func processJob(db *sql.DB, jobID int64) error {
 	cols, err := rows.Columns()
 	if err != nil {
 		msg := fmt.Sprintf("columns error: %v", err)
-		appdatastores.UpdateDocGenJobStatus(db, jobID, appdatastores.DocGenJobStatusFailed, msg)
+		if statusErr := appdatastores.UpdateDocGenJobStatus(db, jobID, appdatastores.DocGenJobStatusFailed, msg); statusErr != nil {
+			logger.Error("update job status failed after columns error", "job_id", jobID, "err", statusErr)
+		}
 		return fmt.Errorf("%s (CWB_DGW_142)", msg)
 	}
 

@@ -8,7 +8,7 @@ import (
 
 var requiredConverterValues = []string{"customer_id", "customer_name", "email"}
 
-// ValidateSQLStatement returns an error if stmt is not a SELECT query.
+// ValidateSQLStatement returns an error if stmt is not a safe SELECT query.
 func ValidateSQLStatement(stmt string) error {
 	trimmed := strings.TrimSpace(strings.ToUpper(stmt))
 	if trimmed == "" {
@@ -16,6 +16,9 @@ func ValidateSQLStatement(stmt string) error {
 	}
 	if !strings.HasPrefix(trimmed, "SELECT") {
 		return fmt.Errorf("sql_statement must be a SELECT query (CWB_DGW_055)")
+	}
+	if strings.Contains(stmt, ";") {
+		return fmt.Errorf("sql_statement must not contain semicolons (CWB_DGW_056)")
 	}
 	return nil
 }
