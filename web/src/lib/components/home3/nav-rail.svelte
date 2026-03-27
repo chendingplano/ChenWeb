@@ -108,7 +108,8 @@
 			children: [
 				{ id: 'apps-installed',  label: 'Installed' },
 				{ id: 'apps-browse',     label: 'Browse' },
-				{ id: 'apps-configure',  label: 'Configure' }
+				{ id: 'apps-configure',  label: 'Configure' },
+				{ id: 'apps-generate-doc', label: 'Generate Doc' }
 			]
 		},
 		{
