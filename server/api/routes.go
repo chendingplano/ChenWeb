@@ -17,8 +17,10 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
+	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
+	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -237,6 +239,9 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/chatter/sessions/:id/dialogs", chatterhandler.GetDialogs)
 	apiGroup.POST("/chatter/sessions/:id/messages", chatterhandler.SendMessage)
 
+	// Knowledge Base (home3) endpoints
+	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)
+
 	// DSPy Prompt Studio endpoints
 	apiGroup.POST("/dspy/prompts", dspyhandler.CreatePrompt)
 	apiGroup.GET("/dspy/prompts", dspyhandler.ListPrompts)
@@ -244,6 +249,17 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PUT("/dspy/prompts/:id", dspyhandler.UpdatePrompt)
 	apiGroup.DELETE("/dspy/prompts/:id", dspyhandler.DeletePrompt)
 	apiGroup.POST("/dspy/optimize", dspyhandler.OptimizePrompt)
+
+	// Doc Generation endpoints
+	apiGroup.POST("/docgen/jobs", docgenhandler.SubmitJob)
+	apiGroup.GET("/docgen/jobs", docgenhandler.ListJobs)
+	apiGroup.GET("/docgen/jobs/:id", docgenhandler.GetJob)
+	apiGroup.GET("/docgen/queries", docgenhandler.ListQueries)
+	apiGroup.POST("/docgen/queries", docgenhandler.CreateQuery)
+	apiGroup.PUT("/docgen/queries/:id", docgenhandler.UpdateQuery)
+	apiGroup.DELETE("/docgen/queries/:id", docgenhandler.DeleteQuery)
+	apiGroup.GET("/docgen/templates", docgenhandler.ListTemplates)
+	apiGroup.POST("/docgen/templates", docgenhandler.UploadTemplate)
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {

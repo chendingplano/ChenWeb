@@ -9,6 +9,7 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api"
 	"github.com/chendingplano/deepdoc/server/api/database"
+	"github.com/chendingplano/deepdoc/server/api/docgenworker"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -17,6 +18,7 @@ import (
 	sharedgoose "github.com/chendingplano/shared/go/api/goose"
 	"github.com/chendingplano/shared/go/api/libmanager"
 	"github.com/chendingplano/shared/go/api/loggerutil"
+	pdfparser "github.com/chendingplano/shared/go/api/parsers/pdf-parser"
 	"github.com/chendingplano/shared/go/api/security"
 	"github.com/chendingplano/shared/go/api/sysdatastores"
 	"github.com/joho/godotenv"
@@ -82,8 +84,8 @@ func main() {
 	logger.Info("Starting server",
 		"loc", "CWB_DDM_020)",
 		"app_name", ApiTypes.CommonConfig.AppInfo.AppName,
-		"host", ApiTypes.CommonConfig.AppInfo.Host,
-		"port", ApiTypes.CommonConfig.AppInfo.Port)
+		"host", ApiTypes.CommonConfig.AppInfo.AppHost,
+		"port", ApiTypes.CommonConfig.AppInfo.AppPort)
 
 	e := echo.New()
 
@@ -145,11 +147,11 @@ func main() {
 	dbType := ApiTypes.CommonConfig.AppInfo.DatabaseType
 	switch dbType {
 	case ApiTypes.PgName:
-		project_db = ApiTypes.CommonConfig.PGConf.ProjectDBHandle
-		migrate_db = ApiTypes.CommonConfig.PGConf.MigrationDBHandle
+		project_db = ApiTypes.ProjectDBHandle
+		migrate_db = ApiTypes.SharedDBHandle
 	case ApiTypes.MysqlName:
-		project_db = ApiTypes.CommonConfig.MySQLConf.ProjectDBHandle
-		migrate_db = ApiTypes.CommonConfig.MySQLConf.MigrationDBHandle
+		project_db = ApiTypes.ProjectDBHandle
+		migrate_db = ApiTypes.SharedDBHandle
 	default:
 		logger.Error("unsupported db type. System exit!!!!", "db_type", dbType)
 		os.Exit(1)
@@ -179,13 +181,43 @@ func main() {
 
 	logger.Info("Auto-test migrations completed successfully")
 
+	parserCfg := config.GetPDFParserConfig()
+	if parserCfg.Enabled {
+		parserServiceCfg := pdfparser.Config{
+			PollInterval:      time.Duration(parserCfg.PollIntervalSeconds) * time.Second,
+			BatchSize:         parserCfg.BatchSize,
+			StagingDir:        parserCfg.StagingDir,
+			RepoDirs:          parserCfg.RepoDirs,
+			BackupDir:         parserCfg.BackupDir,
+			PythonBin:         parserCfg.PythonBin,
+			PaddleOCRScript:   parserCfg.PaddleOCRScript,
+			UsePaddleOCRVL:    parserCfg.UsePaddleOCRVL,
+			DeleteFromStaging: parserCfg.DeleteFromStaging,
+			WorkDir:           parserCfg.WorkDir,
+		}
+
+		pdfService, err := pdfparser.NewService(parserServiceCfg)
+		if err != nil {
+			logger.Error("failed to initialize PDF parser service", "error", err)
+			os.Exit(1)
+		}
+		go func() {
+			if runErr := pdfService.Run(context.Background(), logger); runErr != nil {
+				logger.Error("PDF parser service exited", "error", runErr)
+			}
+		}()
+		logger.Info("PDF parser service started", "staging_dir", parserCfg.StagingDir)
+	} else {
+		logger.Info("PDF parser service disabled by config")
+	}
+
 	// Init the library
 	libmanager.InitLib(new_ctx, "../Shared/libconfig.toml", "CWB_MAN_157")
 
 	logger.Info("Register Shared Routes (CWB_DDM_055)")
 	shared_api.RegisterRoutes(e)
 
-	var server_port = ApiTypes.CommonConfig.AppInfo.Port
+	var server_port = ApiTypes.CommonConfig.AppInfo.AppPort
 	if server_port <= 0 {
 		logger.Error("",
 			"message", "missing SERVER_PORT env var",
@@ -193,6 +225,20 @@ func main() {
 		os.Exit(1)
 	}
 	var pp = fmt.Sprintf(":%d", server_port)
+
+	// Start doc generation worker pool
+	docGenCfg := config.GetDocGenConfig()
+	workerCount := docGenCfg.WorkerCount
+	if workerCount <= 0 {
+		workerCount = 3
+	}
+	docgenJobCh := make(chan int64, 100)
+	docgenworker.Start(project_db, docgenJobCh, workerCount)
+	if err := docgenworker.RequeueStalledJobs(project_db, docgenJobCh); err != nil {
+		logger.Warn("failed to requeue stalled doc gen jobs", "err", err)
+	}
+	logger.Info("doc gen worker pool started", "workers", workerCount)
+
 	logger.Info("[API] ⇨ http server started on", "server_port", pp)
 	e.Logger.Fatal(e.Start(pp))
 }
