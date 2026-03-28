@@ -263,21 +263,22 @@
 			<div class="space-y-4">
 				<!-- Request Name -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Request Name *</label>
-					<input bind:value={requestName} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Unique identifier" />
+					<label for="docgen-request-name" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Request Name *</label>
+					<input id="docgen-request-name" bind:value={requestName} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Unique identifier" />
 				</div>
 
 				<!-- Purpose -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Purpose *</label>
-					<input bind:value={purpose} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Brief description of this doc run" />
+					<label for="docgen-purpose" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Purpose *</label>
+					<input id="docgen-purpose" bind:value={purpose} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Brief description of this doc run" />
 				</div>
 
 				<!-- SQL Query search-and-pick -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">SQL Query *</label>
+					<label for="docgen-sql-query" class="block text-sm font-medium mb-1" style="color:{textSecondary};">SQL Query *</label>
 					<div class="relative">
 						<input
+							id="docgen-sql-query"
 							bind:value={sqlSearch}
 							oninput={searchQueries}
 							class="w-full px-3 py-2 rounded-lg text-sm"
@@ -302,8 +303,8 @@
 
 				<!-- Template Type -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Template Type *</label>
-					<select bind:value={templateType} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
+					<label for="docgen-template-type" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Template Type *</label>
+					<select id="docgen-template-type" bind:value={templateType} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
 						<option value="word">Word (.docx)</option>
 						<option value="typst">Typst (not yet supported)</option>
 					</select>
@@ -311,9 +312,9 @@
 
 				<!-- Template Name -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Template *</label>
+					<label for="docgen-template-name" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Template *</label>
 					<div class="flex gap-2">
-						<select bind:value={templateName} class="flex-1 px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
+						<select id="docgen-template-name" bind:value={templateName} class="flex-1 px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
 							<option value="">Select a template…</option>
 							{#each templates as t}<option value={t}>{t}</option>{/each}
 						</select>
@@ -326,20 +327,20 @@
 
 				<!-- Converter -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Converter JSON * <span class="font-normal text-xs" style="color:{textMuted};">(sql_column → template_token; must include customer_id, customer_name, email as values)</span></label>
-					<textarea bind:value={converterStr} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={'{"customer_id_col":"customer_id","name_col":"customer_name","email_col":"email"}'} />
+					<label for="docgen-converter-json" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Converter JSON * <span class="font-normal text-xs" style="color:{textMuted};">(sql_column → template_token; must include customer_id, customer_name, email as values)</span></label>
+					<textarea id="docgen-converter-json" bind:value={converterStr} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder={'{"customer_id_col":"customer_id","name_col":"customer_name","email_col":"email"}'}></textarea>
 				</div>
 
 				<!-- Output Dir -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Output Directory *</label>
-					<input bind:value={outputDir} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Data/docgen/output" />
+					<label for="docgen-output-dir" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Output Directory *</label>
+					<input id="docgen-output-dir" bind:value={outputDir} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Data/docgen/output" />
 				</div>
 
 				<!-- Output Format -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Output Format *</label>
-					<select bind:value={outputFormat} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
+					<label for="docgen-output-format" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Output Format *</label>
+					<select id="docgen-output-format" bind:value={outputFormat} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};">
 						<option value="docx">DOCX</option>
 						<option value="pdf">PDF (not yet supported)</option>
 					</select>
@@ -347,8 +348,8 @@
 
 				<!-- Remarks -->
 				<div>
-					<label class="block text-sm font-medium mb-1" style="color:{textSecondary};">Remarks</label>
-					<textarea bind:value={remarks} rows={2} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" />
+					<label for="docgen-remarks" class="block text-sm font-medium mb-1" style="color:{textSecondary};">Remarks</label>
+					<textarea id="docgen-remarks" bind:value={remarks} rows={2} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};"></textarea>
 				</div>
 
 				<button
@@ -450,7 +451,7 @@
 					{#if addQueryError}<div class="text-xs p-2 rounded" style="background:#EF4444; color:white;">{addQueryError}</div>{/if}
 					<input bind:value={newQueryName} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Name *" />
 					<input bind:value={newQueryDesc} class="w-full px-3 py-2 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="Description" />
-					<textarea bind:value={newQuerySQL} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="SELECT ... *" />
+						<textarea bind:value={newQuerySQL} rows={4} class="w-full px-3 py-2 rounded-lg text-sm font-mono" style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};" placeholder="SELECT ... *"></textarea>
 					<div class="flex gap-2">
 						<button onclick={addQuery} class="px-4 py-1.5 rounded-lg text-sm font-semibold" style="background:{accent}; color:white; border:none;">Save</button>
 						<button onclick={() => showAddQuery = false} class="px-4 py-1.5 rounded-lg text-sm" style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary};">Cancel</button>
