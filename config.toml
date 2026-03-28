@@ -49,7 +49,3 @@ paddleocr_script = "/Users/cding/Workspace/ThirdParty/paddleocr/parse_pdf.py"
 use_paddleocr_vl = false
 delete_from_staging = true
 work_dir = "/Users/cding/Workspace/ChenWeb/Data/kb/.cache"
-
-[doc_gen]
-template_dir  = "Data/docgen/templates"
-worker_count  = 3

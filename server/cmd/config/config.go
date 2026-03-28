@@ -17,8 +17,6 @@ type DocGenConfig struct {
 }
 
 type AppConfigDef struct {
-	PDFParser     PDFParserConfig `mapstructure:"pdf_parser"`
-	DocGen        DocGenConfig    `mapstructure:"doc_gen"`
 	AppTableNames struct {
 		TableName_ProcessStatus string `mapstructure:"table_name_process_status"`
 		TableName_Schedules     string `mapstructure:"table_name_schedules"`
@@ -26,6 +24,8 @@ type AppConfigDef struct {
 		TableName_Flows         string `mapstructure:"table_name_flows"`
 		TableName_DspyPrompts   string `mapstructure:"table_name_dspy_prompts"`
 	} `mapstructure:"app_table_names"`
+	PDFParser PDFParserConfig `mapstructure:"pdf_parser"`
+	DocGen    DocGenConfig    `mapstructure:"doc_gen"`
 }
 
 type PDFParserConfig struct {

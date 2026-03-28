@@ -127,10 +127,10 @@
 				{railOffset}
 				onClose={() => { /* no-op — handled by parent navigation */ }}
 			/>
-		{:else if activeMenu?.childId === 'apps-generate-doc'}
-			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
+		{:else if activeMenu?.childId === 'apps-generate-doc'}
+			<DocGenView {darkMode} />
 		{:else if sectionId === 'chat'}
 			<Chatter01 {darkMode} />
 		{:else if isDashboard}
