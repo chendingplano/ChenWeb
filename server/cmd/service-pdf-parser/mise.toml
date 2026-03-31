@@ -51,7 +51,7 @@ rm -f ../../.cache/pdf-parser.pid
 [tasks.pdf-parser-status]
 run = '''
 if [ ! -f ../../.cache/pdf-parser.pid ]; then
-  if command -v pgrep >/dev/null 2>&1 && pgrep -f "server/cmd/pdfparser|pdf-parser(\\.exe)?" >/dev/null 2>&1; then
+  if command -v pgrep >/dev/null 2>&1 && pgrep -f "server/cmd/service-pdf-parser|pdf-parser(\\.exe)?" >/dev/null 2>&1; then
     echo "pdf-parser running (detected by process scan)"
     exit 0
   fi
@@ -67,7 +67,7 @@ if ps -p "$PID" >/dev/null 2>&1; then
   echo "pdf-parser running (pid $PID)"
   exit 0
 fi
-if command -v pgrep >/dev/null 2>&1 && pgrep -f "server/cmd/pdfparser|pdf-parser(\\.exe)?" >/dev/null 2>&1; then
+if command -v pgrep >/dev/null 2>&1 && pgrep -f "server/cmd/service-pdf-parser|pdf-parser(\\.exe)?" >/dev/null 2>&1; then
   echo "pdf-parser running (detected by process scan; stale pid $PID)"
   exit 0
 fi

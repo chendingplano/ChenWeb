@@ -22,7 +22,8 @@ type AppConfigDef struct {
 		TableName_Schedules     string `mapstructure:"table_name_schedules"`
 		TableName_Documents     string `mapstructure:"table_name_documents"`
 		TableName_Flows         string `mapstructure:"table_name_flows"`
-		TableName_DspyPrompts   string `mapstructure:"table_name_dspy_prompts"`
+		TableName_DspyPrompts       string `mapstructure:"table_name_dspy_prompts"`
+		TableName_CustRequestLogs   string `mapstructure:"table_name_cust_request_logs"`
 	} `mapstructure:"app_table_names"`
 	PDFParser PDFParserConfig `mapstructure:"pdf_parser"`
 	DocGen    DocGenConfig    `mapstructure:"doc_gen"`

@@ -20,6 +20,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
+	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -238,6 +239,9 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/chatter/sessions", chatterhandler.CreateSession)
 	apiGroup.GET("/chatter/sessions/:id/dialogs", chatterhandler.GetDialogs)
 	apiGroup.POST("/chatter/sessions/:id/messages", chatterhandler.SendMessage)
+
+	// Customer request log endpoint
+	apiGroup.POST("/cust_request_logs", custreqloghandler.CreateCustRequestLog)
 
 	// Knowledge Base (home3) endpoints
 	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)

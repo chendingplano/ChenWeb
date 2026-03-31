@@ -18,7 +18,6 @@ import (
 	sharedgoose "github.com/chendingplano/shared/go/api/goose"
 	"github.com/chendingplano/shared/go/api/libmanager"
 	"github.com/chendingplano/shared/go/api/loggerutil"
-	pdfparser "github.com/chendingplano/shared/go/api/parsers/pdf-parser"
 	"github.com/chendingplano/shared/go/api/security"
 	"github.com/chendingplano/shared/go/api/sysdatastores"
 	"github.com/joho/godotenv"
@@ -140,78 +139,71 @@ func main() {
 		logger.Warn("Not creating tables")
 	}
 
-	migrate_cfg := ApiTypes.CommonConfig.MigrationConfig
-
 	var project_db *sql.DB
-	var migrate_db *sql.DB
 	dbType := ApiTypes.CommonConfig.AppInfo.DatabaseType
-	switch dbType {
-	case ApiTypes.PgName:
-		project_db = ApiTypes.ProjectDBHandle
-		migrate_db = ApiTypes.SharedDBHandle
-	case ApiTypes.MysqlName:
-		project_db = ApiTypes.ProjectDBHandle
-		migrate_db = ApiTypes.SharedDBHandle
-	default:
+
+	// Currently, only PG is supported
+	if dbType != ApiTypes.PgName {
 		logger.Error("unsupported db type. System exit!!!!", "db_type", dbType)
 		os.Exit(1)
 	}
 
+	project_db = ApiTypes.ProjectDBHandle
 	if project_db == nil {
 		logger.Error("project db is not set. System exit!!!!", "db_type", dbType)
 		os.Exit(1)
 	}
 
-	if migrate_db == nil {
-		logger.Error("migrate database connection is not set. System exit!!!!", "db_type", dbType)
-		os.Exit(1)
-	}
-
-	err = sharedgoose.RunProjectMigrations(ctx, logger, migrate_cfg, project_db)
+	logger.Info("Start Project Migrations")
+	err = sharedgoose.RunProjectMigrations(ctx, logger, project_db)
 	if err != nil {
 		logger.Error("failed to run project migrator. System exit!!!!", "error", err)
 		os.Exit(1)
 	}
 
-	err = sharedgoose.RunSharedMigrations(ctx, logger, migrate_cfg, migrate_db)
+	logger.Info("Start Shared Migrations")
+	err = sharedgoose.RunSharedMigrations(ctx, logger, ApiTypes.SharedMigrationDBHandle)
 	if err != nil {
 		logger.Error("failed to run shared migrator. System exit!!!!", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("Auto-test migrations completed successfully")
+	logger.Info("migrations completed successfully")
 
-	parserCfg := config.GetPDFParserConfig()
-	if parserCfg.Enabled {
-		parserServiceCfg := pdfparser.Config{
-			PollInterval:      time.Duration(parserCfg.PollIntervalSeconds) * time.Second,
-			BatchSize:         parserCfg.BatchSize,
-			StagingDir:        parserCfg.StagingDir,
-			RepoDirs:          parserCfg.RepoDirs,
-			BackupDir:         parserCfg.BackupDir,
-			PythonBin:         parserCfg.PythonBin,
-			PaddleOCRScript:   parserCfg.PaddleOCRScript,
-			UsePaddleOCRVL:    parserCfg.UsePaddleOCRVL,
-			DeleteFromStaging: parserCfg.DeleteFromStaging,
-			WorkDir:           parserCfg.WorkDir,
-		}
-
-		pdfService, err := pdfparser.NewService(parserServiceCfg)
-		if err != nil {
-			logger.Error("failed to initialize PDF parser service", "error", err)
-			os.Exit(1)
-		}
-		go func() {
-			if runErr := pdfService.Run(context.Background(), logger); runErr != nil {
-				logger.Error("PDF parser service exited", "error", runErr)
+	/*
+		parserCfg := config.GetPDFParserConfig()
+		if parserCfg.Enabled {
+			parserServiceCfg := pdfparser.Config{
+				PollInterval:      time.Duration(parserCfg.PollIntervalSeconds) * time.Second,
+				BatchSize:         parserCfg.BatchSize,
+				StagingDir:        parserCfg.StagingDir,
+				RepoDirs:          parserCfg.RepoDirs,
+				BackupDir:         parserCfg.BackupDir,
+				PythonBin:         parserCfg.PythonBin,
+				PaddleOCRScript:   parserCfg.PaddleOCRScript,
+				UsePaddleOCRVL:    parserCfg.UsePaddleOCRVL,
+				DeleteFromStaging: parserCfg.DeleteFromStaging,
+				WorkDir:           parserCfg.WorkDir,
 			}
-		}()
-		logger.Info("PDF parser service started", "staging_dir", parserCfg.StagingDir)
-	} else {
-		logger.Info("PDF parser service disabled by config")
-	}
+
+			pdfService, err := pdfparser.NewService(parserServiceCfg)
+			if err != nil {
+				logger.Error("failed to initialize PDF parser service", "error", err)
+				os.Exit(1)
+			}
+			go func() {
+				if runErr := pdfService.Run(context.Background(), logger); runErr != nil {
+					logger.Error("PDF parser service exited", "error", runErr)
+				}
+			}()
+			logger.Info("PDF parser service started", "staging_dir", parserCfg.StagingDir)
+		} else {
+			logger.Info("PDF parser service disabled by config")
+		}
+	*/
 
 	// Init the library
+	logger.Info("InitLib")
 	libmanager.InitLib(new_ctx, "../Shared/libconfig.toml", "CWB_MAN_157")
 
 	logger.Info("Register Shared Routes (CWB_DDM_055)")

@@ -70,12 +70,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	migrateCfg := ApiTypes.CommonConfig.MigrationConfig
-	if err := sharedgoose.RunProjectMigrations(ctx, logger, migrateCfg, ApiTypes.ProjectDBHandle); err != nil {
+	if err := sharedgoose.RunProjectMigrations(ctx, logger, ApiTypes.ProjectDBHandle); err != nil {
 		logger.Error("project migrations failed", "error", err)
 		os.Exit(1)
 	}
-	if err := sharedgoose.RunSharedMigrations(ctx, logger, migrateCfg, ApiTypes.SharedDBHandle); err != nil {
+	if err := sharedgoose.RunSharedMigrations(ctx, logger, ApiTypes.SharedDBHandle); err != nil {
 		logger.Error("shared migrations failed", "error", err)
 		os.Exit(1)
 	}
@@ -127,9 +126,8 @@ func normalizeMigrationPaths(logger ApiTypes.JimoLogger, configPath string) {
 	if strings.TrimSpace(cfg.MigrationsDir) != "" && !filepath.IsAbs(cfg.MigrationsDir) {
 		cfg.MigrationsDir = filepath.Clean(filepath.Join(configDir, cfg.MigrationsDir))
 	}
-	if strings.TrimSpace(cfg.MigrationsFS) != "" && !filepath.IsAbs(cfg.MigrationsFS) {
-		cfg.MigrationsFS = filepath.Clean(filepath.Join(configDir, cfg.MigrationsFS))
-	}
+
+	cfg.MigrationsFS = os.DirFS(cfg.MigrationsDir)
 
 	ApiTypes.CommonConfig.MigrationConfig = cfg
 	logger.Info("normalized migration paths",
@@ -202,9 +200,9 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 			logger.Error("failed to allocate backup path", "source", srcPath, "error", err)
 			continue
 		}
-		homePath, err := uniquePath(homeDir, entry.Name())
+		homePath, shouldCopyHome, err := resolveRepoPathForStagedFile(srcPath, homeDir, entry.Name())
 		if err != nil {
-			logger.Error("failed to allocate home path", "source", srcPath, "error", err)
+			logger.Error("failed to resolve home path", "source", srcPath, "error", err)
 			continue
 		}
 
@@ -212,12 +210,25 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 			logger.Error("failed to backup staged file", "source", srcPath, "backup", backupPath, "error", err)
 			continue
 		}
-		if err := os.Rename(srcPath, homePath); err != nil {
-			logger.Error("failed to move staged file to home", "source", srcPath, "home", homePath, "error", err)
+		if shouldCopyHome {
+			if err := copyFile(srcPath, homePath); err != nil {
+				logger.Error("failed to copy staged file to home", "source", srcPath, "home", homePath, "error", err)
+				continue
+			}
+		} else {
+			logger.Info("skipped copy to home; same-name file with identical md5 already exists",
+				"source", srcPath,
+				"home", homePath,
+			)
+		}
+
+		if err := os.Remove(srcPath); err != nil {
+			logger.Error("failed to remove staged source file", "source", srcPath, "error", err)
 			continue
 		}
 
-		if err := insertStagedInputRecord(ctx, db, filepath.Base(homePath), homePath, backupPath); err != nil {
+		updated, err := upsertStagedInputRecord(ctx, db, filepath.Base(homePath), srcPath, homePath, backupPath)
+		if err != nil {
 			logger.Error("failed to insert kb.inputs row for staged file",
 				"source", srcPath,
 				"home", homePath,
@@ -231,23 +242,74 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 			"source", srcPath,
 			"home", homePath,
 			"backup", backupPath,
+			"updated_existing_row", updated,
 		)
 	}
 
 	return nil
 }
 
-func insertStagedInputRecord(ctx context.Context, db *sql.DB, name, homePath, backupPath string) error {
-	status, err := json.Marshal([]any{})
-	if err != nil {
-		return fmt.Errorf("marshal default status failed: %w", err)
-	}
-	md5Hex, err := fileMD5Hex(homePath)
-	if err != nil {
-		return fmt.Errorf("calculate file md5 failed: %w", err)
+func resolveRepoPathForStagedFile(srcPath, homeDir, fileName string) (homePath string, shouldCopy bool, err error) {
+	candidate := filepath.Join(homeDir, filepath.Base(fileName))
+	if _, statErr := os.Stat(candidate); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return candidate, true, nil
+		}
+		return "", false, statErr
 	}
 
-	const stmt = `
+	srcMD5, err := fileMD5Hex(srcPath)
+	if err != nil {
+		return "", false, fmt.Errorf("calculate source md5 failed: %w", err)
+	}
+	dstMD5, err := fileMD5Hex(candidate)
+	if err != nil {
+		return "", false, fmt.Errorf("calculate existing home md5 failed: %w", err)
+	}
+
+	if srcMD5 == dstMD5 {
+		return candidate, false, nil
+	}
+
+	uniqueHomePath, err := uniquePath(homeDir, fileName)
+	if err != nil {
+		return "", false, fmt.Errorf("allocate unique home path failed: %w", err)
+	}
+	return uniqueHomePath, true, nil
+}
+
+func upsertStagedInputRecord(ctx context.Context, db *sql.DB, name, srcPath, homePath, backupPath string) (bool, error) {
+	md5Hex, err := fileMD5Hex(homePath)
+	if err != nil {
+		return false, fmt.Errorf("calculate file md5 failed: %w", err)
+	}
+
+	// If upload already created a staging-path row, reuse it instead of creating a duplicate.
+	const updateStmt = `
+UPDATE kb.inputs
+SET name = $1,
+    file_name = $2,
+    backup_filename = $3,
+    md5 = $4,
+    modify_time = NOW()
+WHERE type = 'pdf'
+  AND file_name = $5
+  AND COALESCE(backup_filename, '') = ''
+RETURNING id`
+
+	var existingID int64
+	if err := db.QueryRowContext(ctx, updateStmt, name, homePath, backupPath, md5Hex, srcPath).Scan(&existingID); err == nil {
+		return true, nil
+	} else if err != sql.ErrNoRows {
+		return false, fmt.Errorf("update existing staged kb.inputs failed: %w", err)
+	}
+
+	status, err := json.Marshal([]any{})
+	if err != nil {
+		return false, fmt.Errorf("marshal default status failed: %w", err)
+	}
+
+	const insertStmt = `
 INSERT INTO kb.inputs (
     name,
     type,
@@ -263,11 +325,11 @@ INSERT INTO kb.inputs (
     $4::jsonb,
     $5
 )`
-	_, err = db.ExecContext(ctx, stmt, name, homePath, backupPath, string(status), md5Hex)
+	_, err = db.ExecContext(ctx, insertStmt, name, homePath, backupPath, string(status), md5Hex)
 	if err != nil {
-		return fmt.Errorf("insert kb.inputs failed: %w", err)
+		return false, fmt.Errorf("insert kb.inputs failed: %w", err)
 	}
-	return nil
+	return false, nil
 }
 
 func fileMD5Hex(path string) (string, error) {
@@ -344,6 +406,7 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
+/*
 func firstRepoDir(repoDirs []string) string {
 	for _, dir := range repoDirs {
 		if strings.TrimSpace(dir) != "" {
@@ -361,6 +424,7 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+*/
 
 func verifyResultFilenameColumn(ctx context.Context) error {
 	const stmt = `

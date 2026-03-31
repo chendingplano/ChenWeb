@@ -24,16 +24,14 @@ table_name_documents        = "documents"
 table_name_process_status   = "process_status"
 table_name_schedules        = "schedules"
 table_name_flows            = "flows"
-table_name_dspy_prompts     = "dspy_prompts"
+table_name_dspy_prompts         = "dspy_prompts"
+table_name_cust_request_logs    = "cust_request_logs"
 
 [auth]
 jwt_secret = "super-secret-key"
 session_duration_hours = 24
 
 [migration]
-migrations_fs 				= "server/migrations"
-migrations_dir 				= "server/migrations"
-tablename 					= "db_migrations"
 verbose 					= "true"
 allow_outof_order 			= "true"
 

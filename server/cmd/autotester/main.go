@@ -197,16 +197,7 @@ func isProductionDB() bool {
 // runAutoTestMigrations runs goose migrations for auto-test tables.
 func runAutoTestMigrations(ctx context.Context, logger ApiTypes.JimoLogger) error {
 	// Read the config
-	migrate_cfg := ApiTypes.CommonConfig.MigrationConfig
-	logger.Info("Running auto-test migrations",
-		"migration_fs", migrate_cfg.MigrationsFS,
-		"migration_dir", migrate_cfg.MigrationsDir,
-		"tablename", migrate_cfg.TableName,
-		"verbose", migrate_cfg.Verbose,
-		"allow_outof_order", migrate_cfg.AllowOutOfOrder)
-
 	var project_db *sql.DB = ApiTypes.ProjectDBHandle
-	var migrate_db *sql.DB = ApiTypes.SharedMigrationDBHandle
 	var autotester_db *sql.DB = ApiTypes.AutotesterDBHandle
 	var dbType = ApiTypes.DBType
 
@@ -214,18 +205,14 @@ func runAutoTestMigrations(ctx context.Context, logger ApiTypes.JimoLogger) erro
 		return fmt.Errorf("project db is not set (MID_060221143038) for db type: %s", dbType)
 	}
 
-	if migrate_db == nil {
-		return fmt.Errorf("migrate database connection is not set (MID_060221143039) for db type: %s", dbType)
-	}
-
 	logger.Info("Running project migrations")
-	err := goose.RunProjectMigrations(ctx, logger, migrate_cfg, project_db)
+	err := goose.RunProjectMigrations(ctx, logger, autotester_db)
 	if err != nil {
 		return fmt.Errorf("failed to run project migrator (MID_060221143036): %w", err)
 	}
 
 	logger.Info("Running shared migrations")
-	err = goose.RunSharedMigrations(ctx, logger, migrate_cfg, migrate_db)
+	err = goose.RunSharedMigrations(ctx, logger, autotester_db)
 	if err != nil {
 		return fmt.Errorf("failed to run shared migrator (MID_060221143037): %w", err)
 	}
@@ -236,12 +223,6 @@ func runAutoTestMigrations(ctx context.Context, logger ApiTypes.JimoLogger) erro
 		return fmt.Errorf("autotester database connection is not set (MID_060221143041)")
 	}
 
-	err = goose.RunAutoTesterMigrations(ctx, logger, migrate_cfg, autotester_db)
-	if err != nil {
-		return fmt.Errorf("failed to run autotester migrator (MID_060221143038): %w", err)
-	}
-
-	logger.Info("Auto-test migrations completed successfully")
 	return nil
 }
 
