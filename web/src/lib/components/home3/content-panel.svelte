@@ -2,7 +2,11 @@
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
 	import AppFooter     from '$lib/components/home3/app-footer.svelte';
 	import KbImportView  from '$lib/components/home3/kb-import-view.svelte';
+	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 	import DocGenView    from '$lib/components/home3/doc-gen-view.svelte';
+	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
+	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
+	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
 	import Canvas01      from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01     from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -15,6 +19,7 @@
 	import BookOpenIcon     from '@lucide/svelte/icons/book-open';
 	import SettingsIcon     from '@lucide/svelte/icons/settings';
 	import InfoIcon         from '@lucide/svelte/icons/info';
+	import ShieldIcon       from '@lucide/svelte/icons/shield';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -66,7 +71,9 @@
 		personal:     UserIcon,
 		knowledge:    BookOpenIcon,
 		settings:     SettingsIcon,
-		about:        InfoIcon
+		about:        InfoIcon,
+		'system-admin': ShieldIcon,
+		jetstream: ShieldIcon
 	};
 
 	// Section descriptions
@@ -79,7 +86,8 @@
 		personal:     'Your personal AI assistant for tasks, calendar, and email.',
 		knowledge:    'Your document library and semantic search knowledge base.',
 		settings:     'Configure your workspace, models, and integrations.',
-		about:        'Version info, credits, and system information.'
+		about:        'Version info, credits, and system information.',
+		jetstream: 'Operational monitoring and diagnostics for JetStream services.'
 	};
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
@@ -129,8 +137,16 @@
 			/>
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
+		{:else if activeMenu?.childId === 'kb-metrics'}
+			<MetricMgmtView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-jetstream-logs'}
+			<JetStreamLogsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-jetstream-events'}
+			<JetStreamEventsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-jetstream-subjects'}
+			<JetStreamSubjectsView {darkMode} />
 		{:else if sectionId === 'chat'}
 			<Chatter01 {darkMode} />
 		{:else if isDashboard}

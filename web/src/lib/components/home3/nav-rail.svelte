@@ -19,6 +19,7 @@
 	import CreditCardIcon      from '@lucide/svelte/icons/credit-card';
 	import LogOutIcon          from '@lucide/svelte/icons/log-out';
 	import WorkflowIcon        from '@lucide/svelte/icons/workflow';
+	import ShieldIcon          from '@lucide/svelte/icons/shield';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -32,6 +33,7 @@
 		id: string;
 		label: string;
 		icon: any; // lucide component
+		group?: string;
 		children?: NavChild[];
 	};
 
@@ -85,10 +87,10 @@
 
 	// Nav item definitions
 	const mainNav: NavItem[] = [
-		{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon },
-		{ id: 'chat', label: 'Chat', icon: MessageSquareIcon },
+		{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, group: 'Workspace' },
+		{ id: 'chat', label: 'Chat', icon: MessageSquareIcon, group: 'Workspace' },
 		{
-			id: 'agents', label: 'Agents', icon: BotIcon,
+			id: 'agents', label: 'Agents', icon: BotIcon, group: 'Workspace',
 			children: [
 				{ id: 'agents-my',     label: 'My Agents' },
 				{ id: 'agents-browse', label: 'Browse Library' },
@@ -96,7 +98,7 @@
 			]
 		},
 		{
-			id: 'skills', label: 'Skills', icon: ZapIcon,
+			id: 'skills', label: 'Skills', icon: ZapIcon, group: 'Workspace',
 			children: [
 				{ id: 'skills-all',    label: 'All Skills' },
 				{ id: 'skills-active', label: 'Active' },
@@ -104,7 +106,7 @@
 			]
 		},
 		{
-			id: 'applications', label: 'Applications', icon: LayoutGridIcon,
+			id: 'applications', label: 'Applications', icon: LayoutGridIcon, group: 'Workspace',
 			children: [
 				{ id: 'apps-installed',  label: 'Installed' },
 				{ id: 'apps-browse',     label: 'Browse' },
@@ -113,7 +115,7 @@
 			]
 		},
 		{
-			id: 'coding', label: 'Coding Assistant', icon: CodeIcon,
+			id: 'coding', label: 'Coding Assistant', icon: CodeIcon, group: 'Workspace',
 			children: [
 				{ id: 'coding-review', label: 'Code Review' },
 				{ id: 'coding-gen',    label: 'Code Generation' },
@@ -121,7 +123,7 @@
 			]
 		},
 		{
-			id: 'personal', label: 'Personal Assistant', icon: UserIcon,
+			id: 'personal', label: 'Personal Assistant', icon: UserIcon, group: 'Workspace',
 			children: [
 				{ id: 'personal-tasks',    label: 'Tasks' },
 				{ id: 'personal-calendar', label: 'Calendar' },
@@ -129,17 +131,26 @@
 			]
 		},
 		{
-			id: 'knowledge', label: 'Knowledge Base', icon: BookOpenIcon,
+			id: 'knowledge', label: 'Knowledge Base', icon: BookOpenIcon, group: 'Workspace',
 			children: [
-				{ id: 'kb-docs',   label: 'Documents' },
-				{ id: 'kb-search', label: 'Search' },
-				{ id: 'kb-import', label: 'Import' }
+				{ id: 'kb-docs',    label: 'Documents' },
+				{ id: 'kb-search',  label: 'Search' },
+				{ id: 'kb-import',  label: 'Import' },
+				{ id: 'kb-metrics', label: 'Metrics' }
 			]
 		},
 		{
-			id: 'tools', label: 'Tools', icon: WorkflowIcon,
+			id: 'tools', label: 'Tools', icon: WorkflowIcon, group: 'Workspace',
 			children: [
 				{ id: 'flow', label: 'Flow' }
+			]
+		},
+		{
+			id: 'jetstream', label: 'JetStream', icon: ShieldIcon, group: 'System Admin',
+			children: [
+				{ id: 'sysadmin-jetstream-logs', label: 'JetStream Logs' },
+				{ id: 'sysadmin-jetstream-events', label: 'Events' },
+				{ id: 'sysadmin-jetstream-subjects', label: 'Subjects' }
 			]
 		}
 	];
@@ -228,8 +239,16 @@
 
 	<!-- Main nav items (scrollable) -->
 	<nav class="flex-1 overflow-y-auto py-2" style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;">
-		{#each mainNav as item (item.id)}
+		{#each mainNav as item, index (item.id)}
 			<div class="px-2 mb-0.5">
+				{#if showLabels && item.group && (index === 0 || mainNav[index - 1].group !== item.group)}
+					<div
+						class="px-2 py-2 text-xs uppercase tracking-wide"
+						style="color:{textMuted}; font-weight:600;"
+					>
+						{item.group}
+					</div>
+				{/if}
 				<!-- Parent item button -->
 				<button
 					onclick={() => item.children ? toggleAccordion(item.id) : selectItem(item)}

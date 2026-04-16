@@ -2,6 +2,7 @@
 
 Created by: Codex \
 Date: 2026/04/08 \
+GitHub: https://infographic.antv.vision/ \
 Version: 1.0
 
 ## Scope

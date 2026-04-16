@@ -3,13 +3,16 @@ package api
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/Dashboard01"
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
@@ -17,10 +20,11 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
+	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
-	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
+	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -154,9 +158,14 @@ func RegisterRoutes(e *echo.Echo) error {
 		}
 	})
 
-	e.DELETE("/auth/logout", func(c echo.Context) error {
-		// Clear the session cookie
+	handleLogout := func(c echo.Context) error {
 		logger.Info("Handle logout")
+
+		// Best effort: terminate Kratos session if present.
+		// We forward the incoming browser cookies to Kratos and execute the logout URL.
+		logoutFromKratos(c.Request(), logger)
+
+		// Always clear app session cookie.
 		c.SetCookie(&http.Cookie{
 			Name:     "session_id",
 			Value:    "",
@@ -165,8 +174,14 @@ func RegisterRoutes(e *echo.Echo) error {
 			HttpOnly: true,
 			Secure:   os.Getenv("ENV") == "production", // false in dev, true in prod
 		})
-		return c.NoContent(http.StatusNoContent)
-	})
+
+		// Keep response format compatible with shared auth store.
+		return c.JSON(http.StatusOK, map[string]string{"redirect_url": "/login"})
+	}
+
+	// Support both methods because different frontend paths currently use different verbs.
+	e.DELETE("/auth/logout", handleLogout)
+	e.POST("/auth/logout", handleLogout)
 
 	// Add the endpoint '/api/config' (public endpoint for frontend to fetch config)
 	e.GET("/api/config", confighandler.GetConfig)
@@ -245,6 +260,17 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Knowledge Base (home3) endpoints
 	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)
+	apiGroup.GET("/kb/inputs/:id", kbhandler.GetInput)
+	apiGroup.GET("/kb/inputs/:id/file", kbhandler.GetInputFile)
+	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
+	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)
+	apiGroup.GET("/jetstream/monitor", jetstreamhandler.GetMonitor)
+	apiGroup.GET("/jetstream/subjects", jetstreamhandler.GetSubjects)
+	apiGroup.GET("/jetstream/nats-subjects", jetstreamhandler.ListStoredSubjects)
+	apiGroup.POST("/jetstream/nats-subjects", jetstreamhandler.CreateStoredSubject)
+	apiGroup.PUT("/jetstream/nats-subjects/:id", jetstreamhandler.UpdateStoredSubject)
+	apiGroup.DELETE("/jetstream/nats-subjects/:id", jetstreamhandler.DeleteStoredSubject)
+	apiGroup.POST("/jetstream/events", jetstreamhandler.PublishEvent)
 
 	// DSPy Prompt Studio endpoints
 	apiGroup.POST("/dspy/prompts", dspyhandler.CreatePrompt)
@@ -270,4 +296,71 @@ func RegisterRoutes(e *echo.Echo) error {
 		return c.Redirect(http.StatusFound, "/login")
 	})
 	return nil
+}
+
+func logoutFromKratos(req *http.Request, logger ApiTypes.JimoLogger) {
+	cookieHeader := req.Header.Get("Cookie")
+	if cookieHeader == "" {
+		return
+	}
+
+	kratosPublicURL := os.Getenv("KRATOS_PUBLIC_URL")
+	if kratosPublicURL == "" {
+		kratosPublicURL = "http://127.0.0.1:4433"
+	}
+
+	client := &http.Client{
+		Timeout: 8 * time.Second,
+		// We don't need to follow redirects for logout finalization.
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	flowReq, err := http.NewRequest(http.MethodGet, strings.TrimRight(kratosPublicURL, "/")+"/self-service/logout/browser", nil)
+	if err != nil {
+		logger.Warn("failed to build kratos logout flow request", "error", err)
+		return
+	}
+	flowReq.Header.Set("Accept", "application/json")
+	flowReq.Header.Set("Cookie", cookieHeader)
+
+	flowResp, err := client.Do(flowReq)
+	if err != nil {
+		logger.Warn("failed to create kratos logout flow", "error", err)
+		return
+	}
+	defer flowResp.Body.Close()
+
+	if flowResp.StatusCode < 200 || flowResp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(flowResp.Body, 1024))
+		logger.Warn("kratos logout flow request not successful", "status", flowResp.StatusCode, "body", string(body))
+		return
+	}
+
+	var payload struct {
+		LogoutURL string `json:"logout_url"`
+	}
+	if err := json.NewDecoder(flowResp.Body).Decode(&payload); err != nil {
+		logger.Warn("failed to parse kratos logout flow response", "error", err)
+		return
+	}
+	if payload.LogoutURL == "" {
+		logger.Warn("kratos logout flow missing logout_url")
+		return
+	}
+
+	logoutReq, err := http.NewRequest(http.MethodGet, payload.LogoutURL, nil)
+	if err != nil {
+		logger.Warn("failed to build kratos logout request", "error", err)
+		return
+	}
+	logoutReq.Header.Set("Cookie", cookieHeader)
+
+	logoutResp, err := client.Do(logoutReq)
+	if err != nil {
+		logger.Warn("failed to execute kratos logout request", "error", err)
+		return
+	}
+	defer logoutResp.Body.Close()
 }

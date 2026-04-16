@@ -15,6 +15,21 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+func expectResolveInputTablePlural(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(`SELECT\s+to_regclass\(\$1\)::text AS singular,\s+to_regclass\(\$2\)::text AS plural`).
+		WithArgs("kb.input", "kb.inputs").
+		WillReturnRows(sqlmock.NewRows([]string{"singular", "plural"}).AddRow(nil, "kb.inputs"))
+}
+
+func expectResolveNameColumnStaging(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "name").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "staging_filename").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+}
+
 func TestBuildWhereClauseDocTypeAndFileName(t *testing.T) {
 	whereSQL, args, err := buildWhereClause("pdf", "all", "report", nil, nil)
 	if err != nil {
@@ -148,6 +163,8 @@ func TestListInputsSuccess(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	expectResolveInputTablePlural(mock)
+
 	countQuery := regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i WHERE LOWER(i.type) = LOWER($1) AND EXISTS (
 			SELECT 1
 			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
@@ -157,11 +174,12 @@ func TestListInputsSuccess(t *testing.T) {
 	mock.ExpectQuery(countQuery).
 		WithArgs("pdf", "%report%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	expectResolveNameColumnStaging(mock)
 
 	dataQuery := regexp.QuoteMeta(`
 SELECT
     i.id,
-    i.name,
+    i.staging_filename AS name,
     i.type,
     i.title,
     i.doc_no,
@@ -277,6 +295,7 @@ func TestListInputsCountQueryFailure(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	expectResolveInputTablePlural(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i`)).
 		WillReturnError(errors.New("count failed"))
 
@@ -304,12 +323,14 @@ func TestListInputsDataQueryFailure(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	expectResolveInputTablePlural(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i`)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	expectResolveNameColumnStaging(mock)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT
     i.id,
-    i.name,
+    i.staging_filename AS name,
     i.type,
     i.title,
     i.doc_no,
@@ -356,8 +377,10 @@ func TestListInputsPageSizeCap(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	expectResolveInputTablePlural(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i`)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	expectResolveNameColumnStaging(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC LIMIT $1 OFFSET $2`)).
 		WithArgs(500, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -391,9 +414,11 @@ func TestListInputsWithDateQueryParams(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	expectResolveInputTablePlural(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i WHERE i.create_time >= $1 AND i.create_time <= $2`)).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	expectResolveNameColumnStaging(mock)
 	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC LIMIT $3 OFFSET $4`)).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 20, 20).
 		WillReturnRows(sqlmock.NewRows([]string{

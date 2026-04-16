@@ -27,5 +27,33 @@
   "editor.quickSuggestions": {
     "strings": true
   },
+  "tailwindCSS.experimental.configFile": "./tailwind.config.js",
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/Data/**": true,
+    "**/backup*/**": true,
+    "**/backup_knowledge/**": true,
+    "**/Import/**": true,
+    "**/sandbox/**": true,
+    "**/KnowledgeStore/**": true,
+    "**/ThirdParty/**": true,
+    "**/.svelte-kit/**": true,
+    "**/build/**": true,
+    "**/dist/**": true,
+    "**/.git/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/Data": true,
+    "**/backup*": true,
+    "**/backup_knowledge": true,
+    "**/Import": true,
+    "**/sandbox": true,
+    "**/KnowledgeStore": true,
+    "**/ThirdParty": true,
+    "**/.svelte-kit": true,
+    "**/build": true,
+    "**/dist": true
+  },
   "css.lint.unknownAtRules": "ignore"
 }

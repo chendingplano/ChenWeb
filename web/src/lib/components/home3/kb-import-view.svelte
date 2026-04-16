@@ -35,6 +35,10 @@
 	let records = $state<KbInputRecord[]>([]);
 	let loading = $state(false);
 	let error = $state('');
+	let statusDialogOpen = $state(false);
+	let statusDialogTitle = $state('');
+	let statusDialogItems = $state<KbInputRecord['status']>([]);
+	let statusDialogRawJson = $state('[]');
 
 	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 
@@ -47,14 +51,13 @@
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
 
-	function getParsingOutcome(record: KbInputRecord): 'pending' | 'success' | 'failed' {
-		const parsingItems = (record.status ?? []).filter((item) => {
-			const op = (item?.operation ?? '').toLowerCase();
-			return op === 'parsing' || op === 'parse';
-		});
-		if (parsingItems.length === 0) return 'pending';
-		const hasSuccess = parsingItems.some((item) => (item.status ?? '').toLowerCase() === 'success');
-		return hasSuccess ? 'success' : 'failed';
+	type StatusItem = KbInputRecord['status'][number];
+
+	function findStatusItem(record: KbInputRecord, operation: string): StatusItem | null {
+		return (
+			(record.status ?? []).find((item) => (item?.operation ?? '').toLowerCase() === operation.toLowerCase()) ??
+			null
+		);
 	}
 
 	function formatTime(value?: string): string {
@@ -64,25 +67,53 @@
 		return d.toLocaleString();
 	}
 
+	function formatOptionalTime(value?: string): string {
+		if (!value) return '';
+		const d = new Date(value);
+		if (Number.isNaN(d.getTime())) return value;
+		return d.toLocaleString();
+	}
+
+	function parsingItem(record: KbInputRecord): StatusItem | null {
+		return findStatusItem(record, 'parsing') ?? findStatusItem(record, 'parsed');
+	}
+
 	function parsingLabel(record: KbInputRecord): string {
-		const parsing = getParsingOutcome(record);
-		if (parsing === 'success') return 'Parsed Success';
-		if (parsing === 'failed') return 'Parsed Failed';
-		return 'Pending';
+		const item = parsingItem(record);
+		if (!item) return '';
+		const operation = (item.operation ?? '').toLowerCase();
+		if (operation === 'parsing') return 'parsing';
+		if (operation === 'parsed') return item.proc_status ?? item['proc-status'] ?? '';
+		return '';
 	}
 
-	function parsingBg(record: KbInputRecord): string {
-		const parsing = getParsingOutcome(record);
-		if (parsing === 'success') return 'rgba(16,185,129,0.14)';
-		if (parsing === 'failed') return 'rgba(239,68,68,0.14)';
-		return 'rgba(245,158,11,0.14)';
+	function parsingTime(record: KbInputRecord): string {
+		return formatOptionalTime(parsingItem(record)?.start_time);
 	}
 
-	function parsingColor(record: KbInputRecord): string {
-		const parsing = getParsingOutcome(record);
-		if (parsing === 'success') return '#10b981';
-		if (parsing === 'failed') return '#ef4444';
-		return '#f59e0b';
+	function convertedItem(record: KbInputRecord): StatusItem | null {
+		return findStatusItem(record, 'converted');
+	}
+
+	function convertLabel(record: KbInputRecord): string {
+		const item = convertedItem(record);
+		return item?.proc_status ?? item?.['proc-status'] ?? '';
+	}
+
+	function convertTime(record: KbInputRecord): string {
+		return formatOptionalTime(convertedItem(record)?.start_time);
+	}
+
+	function openStatusDialog(record: KbInputRecord) {
+		const items = record.status ?? [];
+		statusDialogItems = items;
+		statusDialogTitle = `Record ID: ${record.id}, Field 'Status'`;
+		statusDialogRawJson = JSON.stringify(items, null, 2);
+		statusDialogOpen = true;
+	}
+
+	function closeStatusDialog() {
+		statusDialogOpen = false;
 	}
 
 	async function loadRecords() {
@@ -147,7 +178,7 @@
 	>
 		<h2 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">Import Inputs</h2>
 		<p style="font-size:14px; color:{textSecondary};">
-			Browse and filter `kb.inputs` records.
+			Browse and filter Knowledge Base import records.
 		</p>
 	</div>
 
@@ -263,15 +294,18 @@
 						<th class="cell head">Type</th>
 						<th class="cell head">File Name</th>
 						<th class="cell head">Parsing</th>
+						<th class="cell head">Time</th>
+						<th class="cell head">Convert</th>
+						<th class="cell head">Time</th>
 						<th class="cell head">Create Time</th>
 						<th class="cell head">Modify Time</th>
-						<th class="cell head">Error</th>
+						<th class="cell head">Status</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if !loading && records.length === 0}
 						<tr>
-							<td class="cell" colspan={7} style="text-align:center; color:{textMuted};">No records</td>
+							<td class="cell" colspan={10} style="text-align:center; color:{textMuted};">No records</td>
 						</tr>
 					{:else}
 						{#each records as record (record.id)}
@@ -279,26 +313,20 @@
 								<td class="cell" style="color:{textSecondary};">{record.id}</td>
 								<td class="cell" style="color:{textPrimary};">{record.type}</td>
 								<td class="cell" style="color:{textPrimary};">{record.file_name ?? '-'}</td>
-								<td class="cell">
-									<span
-										style="
-											display:inline-flex;
-											align-items:center;
-											height:22px;
-											padding:0 8px;
-											border-radius:999px;
-											font-size:12px;
-											font-weight:600;
-											background:{parsingBg(record)};
-											color:{parsingColor(record)};
-										"
-									>
-										{parsingLabel(record)}
-									</span>
-								</td>
+								<td class="cell" style="color:{textPrimary};">{parsingLabel(record)}</td>
+								<td class="cell" style="color:{textSecondary};">{parsingTime(record)}</td>
+								<td class="cell" style="color:{textPrimary};">{convertLabel(record)}</td>
+								<td class="cell" style="color:{textSecondary};">{convertTime(record)}</td>
 								<td class="cell" style="color:{textSecondary};">{formatTime(record.create_time)}</td>
 								<td class="cell" style="color:{textSecondary};">{formatTime(record.modify_time)}</td>
-								<td class="cell" style="color:#ef4444;">{record.error_msg ?? '-'}</td>
+								<td class="cell">
+									<button
+										onclick={() => openStatusDialog(record)}
+										style="height:28px; padding:0 10px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+									>
+										View
+									</button>
+								</td>
 							</tr>
 						{/each}
 					{/if}
@@ -332,6 +360,86 @@
 		</div>
 	</div>
 </div>
+
+{#if statusDialogOpen}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(15,23,42,0.62);"
+		onclick={closeStatusDialog}
+		onkeydown={(e) => {
+			if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') closeStatusDialog();
+		}}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="w-full max-w-4xl rounded-xl overflow-hidden"
+			style="background:{cardBg}; border:1px solid {borderColor};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Status details dialog"
+			tabindex="0"
+		>
+			<div
+				class="flex items-center justify-between px-4 py-3"
+				style="border-bottom:1px solid {borderColor};"
+			>
+				<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">{statusDialogTitle}</h3>
+				<button
+					onclick={closeStatusDialog}
+					style="height:30px; padding:0 12px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+				>
+					Close
+				</button>
+			</div>
+
+			<div class="grid gap-4 p-4" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);">
+				<div class="rounded-lg p-3" style="border:1px solid {borderColor}; background:{surface2};">
+					<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:8px;">Readable</div>
+					{#if statusDialogItems.length === 0}
+						<div style="font-size:12px; color:{textMuted};">No status entries.</div>
+					{:else}
+						<div class="space-y-2">
+							{#each statusDialogItems as item, idx}
+								<div
+									class="rounded-lg p-2"
+									style="border:1px solid {borderColor}; background:{cardBg};"
+								>
+									<div style="font-size:12px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">
+										Entry #{idx + 1}
+									</div>
+									<div class="grid gap-1" style="grid-template-columns: 120px 1fr;">
+										<span style="font-size:12px; color:{textMuted};">operation</span>
+										<span style="font-size:12px; color:{textPrimary};">{item.operation ?? ''}</span>
+										<span style="font-size:12px; color:{textMuted};">proc_status</span>
+										<span style="font-size:12px; color:{textPrimary};">{item.proc_status ?? item['proc-status'] ?? ''}</span>
+										<span style="font-size:12px; color:{textMuted};">start_time</span>
+										<span style="font-size:12px; color:{textPrimary};">{item.start_time ?? ''}</span>
+										<span style="font-size:12px; color:{textMuted};">time</span>
+										<span style="font-size:12px; color:{textPrimary};">{item.time ?? ''}</span>
+										<span style="font-size:12px; color:{textMuted};">status</span>
+										<span style="font-size:12px; color:{textPrimary};">{item.status ?? ''}</span>
+										<span style="font-size:12px; color:{textMuted};">error</span>
+										<span style="font-size:12px; color:{textPrimary};">{item.error ?? ''}</span>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
+				<div class="rounded-lg p-3" style="border:1px solid {borderColor}; background:{surface2};">
+					<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:8px;">Raw JSON</div>
+					<pre
+						style="margin:0; max-height:440px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:12px; color:{textPrimary};"
+					>{statusDialogRawJson}</pre>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.cell {

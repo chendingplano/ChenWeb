@@ -18,7 +18,10 @@ export type KbInputRecord = {
 	status: Array<{
 		operation?: string;
 		time?: string;
+		start_time?: string;
 		status?: string;
+		proc_status?: string;
+		'proc-status'?: string;
 		error?: string;
 	}>;
 	create_time: string;
@@ -73,4 +76,91 @@ export async function listKbInputs(params: ListKbInputsParams): Promise<ListKbIn
 		throw new Error(msg);
 	}
 	return response.json();
+}
+
+// ---------- kb.metrics / raw-lines / single input ----------
+
+export type SourceLineSpan = { page_number: number; line_number: number };
+
+export type KbMetricRecord = {
+	id: number;
+	input_record_id: number;
+	extract_id: string;
+	input_filename: string;
+	metric_name?: string;
+	source_line_spans?: SourceLineSpan[];
+	metric_subject?: string;
+	metric_desc?: string;
+	metric_context?: string;
+	metric_keywords?: string[];
+	location_type?: string;
+	metric_unit?: string;
+	formula_or_definition?: string;
+	threshold_or_target?: string;
+	measurement_frequency?: string;
+	confidence?: number;
+	is_explicit_metric?: boolean;
+	reasoning_tags?: string[];
+	created_at?: string;
+};
+
+export type ListKbMetricsResponse = {
+	status: boolean;
+	results: KbMetricRecord[];
+	total: number;
+};
+
+async function fetchOrThrow<T>(url: string, fallback: string): Promise<T> {
+	const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
+	if (!response.ok) {
+		const payload = await response.json().catch(() => null);
+		const msg =
+			payload && typeof payload.error_msg === 'string'
+				? payload.error_msg
+				: `${fallback} (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<T>;
+}
+
+export async function listKbMetrics(inputRecordId: number): Promise<ListKbMetricsResponse> {
+	return fetchOrThrow<ListKbMetricsResponse>(
+		`${BASE}/metrics?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to list kb metrics'
+	);
+}
+
+export type GetKbInputResponse = {
+	status: boolean;
+	record: KbInputRecord;
+};
+
+export async function getKbInput(id: number): Promise<GetKbInputResponse> {
+	return fetchOrThrow<GetKbInputResponse>(
+		`${BASE}/inputs/${encodeURIComponent(String(id))}`,
+		'Failed to retrieve kb input'
+	);
+}
+
+export type RawLine = {
+	line_number: number;
+	page_number: number;
+	line_type: string;
+	content: string;
+	coords: number[];
+};
+
+export type GetRawLinesResponse = {
+	status: boolean;
+	input_id: number;
+	file_name?: string;
+	lines: RawLine[];
+	pages: number;
+};
+
+export async function getRawLines(inputRecordId: number): Promise<GetRawLinesResponse> {
+	return fetchOrThrow<GetRawLinesResponse>(
+		`${BASE}/raw-lines?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to retrieve raw lines'
+	);
 }

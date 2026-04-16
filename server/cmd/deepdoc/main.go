@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api"
@@ -68,10 +70,12 @@ func main() {
 	logger.Info("  GOOGLE_OAUTH_REDIRECT_URL", "value", os.Getenv("GOOGLE_OAUTH_REDIRECT_URL"))
 	logger.Info("  VITE_DEV_ONLY_URL", "value", os.Getenv("VITE_DEV_ONLY_URL"))
 
-	err = config.LoadConfig(new_ctx, logger, "./config.toml")
+	configPath := "./config.toml"
+	err = config.LoadConfig(new_ctx, logger, configPath)
 	if err != nil {
 		logger.Error("failed loading config 'config.toml'", "error", err)
 	}
+	normalizeMigrationPaths(logger, configPath)
 
 	security.InitAccCtrlMgr()
 
@@ -235,4 +239,37 @@ func main() {
 
 	logger.Info("[API] ⇨ http server started on", "server_port", pp)
 	e.Logger.Fatal(e.Start(pp))
+}
+
+func normalizeMigrationPaths(logger ApiTypes.JimoLogger, configPath string) {
+	absConfigPath, err := filepath.Abs(configPath)
+	if err != nil {
+		logger.Warn("failed to resolve absolute config path; migration paths left as-is",
+			"config_path", configPath, "error", err)
+		return
+	}
+	configDir := filepath.Dir(absConfigPath)
+
+	cfg := ApiTypes.CommonConfig.MigrationConfig
+
+	if strings.TrimSpace(cfg.MigrationsDir) == "" {
+		cfg.MigrationsDir = "project_migrations"
+	}
+	if strings.TrimSpace(cfg.SharedMigrationsDir) == "" {
+		cfg.SharedMigrationsDir = "shared_migrations"
+	}
+
+	if !filepath.IsAbs(cfg.MigrationsDir) {
+		cfg.MigrationsDir = filepath.Clean(filepath.Join(configDir, cfg.MigrationsDir))
+	}
+	if !filepath.IsAbs(cfg.SharedMigrationsDir) {
+		cfg.SharedMigrationsDir = filepath.Clean(filepath.Join(configDir, cfg.SharedMigrationsDir))
+	}
+
+	cfg.MigrationsFS = os.DirFS(cfg.MigrationsDir)
+	ApiTypes.CommonConfig.MigrationConfig = cfg
+
+	logger.Info("normalized migration paths",
+		"project_migrations_dir", cfg.MigrationsDir,
+		"shared_migrations_dir", cfg.SharedMigrationsDir)
 }

@@ -19,6 +19,11 @@ const (
 	maxPageSize     = 500
 )
 
+const (
+	kbInputTableSingular = "kb.input"
+	kbInputTablePlural   = "kb.inputs"
+)
+
 type inputRecord struct {
 	ID             int64           `json:"id"`
 	Name           *string         `json:"name,omitempty"`
@@ -96,9 +101,18 @@ func ListInputs(c echo.Context) error {
 	}
 
 	db := ApiTypes.ProjectDBHandle
-	total, err := queryTotalCount(db, whereSQL, args)
+	inputTable, err := resolveInputTable(db)
 	if err != nil {
-		logger.Error("count kb.inputs failed", "err", err)
+		logger.Error("resolve kb input table failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to resolve kb input table (CWB_KB_020)",
+		})
+	}
+
+	total, err := queryTotalCount(db, inputTable, whereSQL, args)
+	if err != nil {
+		logger.Error("count kb input failed", "table", inputTable, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
 			ErrorMsg: "failed to count kb inputs (CWB_KB_021)",
@@ -106,9 +120,18 @@ func ListInputs(c echo.Context) error {
 	}
 
 	offset := (page - 1) * pageSize
-	results, err := queryInputs(db, whereSQL, args, pageSize, offset)
+	nameColumnExpr, err := resolveNameColumnExpr(db, inputTable)
 	if err != nil {
-		logger.Error("query kb.inputs failed", "err", err)
+		logger.Error("resolve kb input name column failed", "table", inputTable, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to resolve kb input schema (CWB_KB_023)",
+		})
+	}
+
+	results, err := queryInputs(db, inputTable, nameColumnExpr, whereSQL, args, pageSize, offset)
+	if err != nil {
+		logger.Error("query kb input failed", "table", inputTable, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
 			ErrorMsg: "failed to retrieve kb inputs (CWB_KB_022)",
@@ -128,8 +151,8 @@ func ListInputs(c echo.Context) error {
 	})
 }
 
-func queryTotalCount(db *sql.DB, whereSQL string, args []any) (int64, error) {
-	const base = `SELECT COUNT(1) FROM kb.inputs i`
+func queryTotalCount(db *sql.DB, inputTable, whereSQL string, args []any) (int64, error) {
+	base := fmt.Sprintf("SELECT COUNT(1) FROM %s i", inputTable)
 	query := base
 	if whereSQL != "" {
 		query += " WHERE " + whereSQL
@@ -142,11 +165,11 @@ func queryTotalCount(db *sql.DB, whereSQL string, args []any) (int64, error) {
 	return total, nil
 }
 
-func queryInputs(db *sql.DB, whereSQL string, args []any, limit, offset int) ([]inputRecord, error) {
-	query := `
+func queryInputs(db *sql.DB, inputTable, nameColumnExpr, whereSQL string, args []any, limit, offset int) ([]inputRecord, error) {
+	query := fmt.Sprintf(`
 SELECT
     i.id,
-    i.name,
+    %s AS name,
     i.type,
     i.title,
     i.doc_no,
@@ -164,8 +187,8 @@ SELECT
     i.private_info,
     i.notes,
     i.error_msg
-FROM kb.inputs i
-`
+FROM %s i
+`, nameColumnExpr, inputTable)
 	if whereSQL != "" {
 		query += " WHERE " + whereSQL
 	}
@@ -234,6 +257,83 @@ FROM kb.inputs i
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func resolveInputTable(db *sql.DB) (string, error) {
+	const query = `
+SELECT
+	to_regclass($1)::text AS singular,
+	to_regclass($2)::text AS plural
+`
+
+	var singular sql.NullString
+	var plural sql.NullString
+	if err := db.QueryRow(query, kbInputTableSingular, kbInputTablePlural).Scan(&singular, &plural); err != nil {
+		return "", err
+	}
+
+	if singular.Valid && strings.TrimSpace(singular.String) != "" {
+		return singular.String, nil
+	}
+	if plural.Valid && strings.TrimSpace(plural.String) != "" {
+		return plural.String, nil
+	}
+	return "", fmt.Errorf("neither %s nor %s exists", kbInputTableSingular, kbInputTablePlural)
+}
+
+func resolveNameColumnExpr(db *sql.DB, inputTable string) (string, error) {
+	schema, table, err := splitQualifiedTable(inputTable)
+	if err != nil {
+		return "", err
+	}
+
+	hasName, err := columnExists(db, schema, table, "name")
+	if err != nil {
+		return "", err
+	}
+	if hasName {
+		return "i.name", nil
+	}
+
+	hasStagingFilename, err := columnExists(db, schema, table, "staging_filename")
+	if err != nil {
+		return "", err
+	}
+	if hasStagingFilename {
+		return "i.staging_filename", nil
+	}
+
+	return "", fmt.Errorf("neither name nor staging_filename exists on %s", inputTable)
+}
+
+func splitQualifiedTable(inputTable string) (string, string, error) {
+	parts := strings.SplitN(strings.TrimSpace(inputTable), ".", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid table reference: %s", inputTable)
+	}
+	schema := strings.Trim(parts[0], `"`)
+	table := strings.Trim(parts[1], `"`)
+	if schema == "" || table == "" {
+		return "", "", fmt.Errorf("invalid table reference: %s", inputTable)
+	}
+	return schema, table, nil
+}
+
+func columnExists(db *sql.DB, schema, table, column string) (bool, error) {
+	const query = `
+SELECT EXISTS (
+	SELECT 1
+	FROM information_schema.columns
+	WHERE table_schema = $1
+	  AND table_name = $2
+	  AND column_name = $3
+)
+`
+	var exists bool
+	if err := db.QueryRow(query, schema, table, column).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func buildWhereClause(docType, parseState, fileName string, startTime, endTime *time.Time) (string, []any, error) {
