@@ -171,6 +171,10 @@
 	}
 
 	function selectItem(item: NavItem, child?: NavChild) {
+		if (child?.id === 'kb-metrics') {
+			window.open(`/home3/metrics?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
+			return;
+		}
 		onSelect({
 			itemId:     item.id,
 			childId:    child?.id,
