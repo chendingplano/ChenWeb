@@ -187,7 +187,7 @@ SELECT
     i.id, %s AS name, i.type, i.title, i.doc_no, i.source,
     i.file_name, i.backup_filename, i.result_filename, i.publish_date,
     i.authors, i.owner, COALESCE(i.status, '[]'::jsonb) AS status,
-    i.create_time, i.modify_time, i.public_info, i.private_info,
+    i.create_time, i.modify_time, i.public_info, i.private_info, i.doc_metadata::text,
     i.notes, i.error_msg
 FROM %s i
 WHERE i.id = $1
@@ -200,12 +200,13 @@ WHERE i.id = $1
 		publishDate         sql.NullTime
 		publicInfoNullable  sql.NullString
 		privateInfoNullable sql.NullString
+		docMetadataNullable sql.NullString
 	)
 	if err := row.Scan(
 		&record.ID, &record.Name, &record.Type, &record.Title, &record.DocNo, &record.Source,
 		&record.FileName, &record.BackupFileName, &record.ResultFileName, &publishDate,
 		&record.Authors, &record.Owner, &statusBytes,
-		&record.CreateTime, &record.ModifyTime, &publicInfoNullable, &privateInfoNullable,
+		&record.CreateTime, &record.ModifyTime, &publicInfoNullable, &privateInfoNullable, &docMetadataNullable,
 		&record.Notes, &record.ErrorMsg,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -230,6 +231,12 @@ WHERE i.id = $1
 	}
 	if privateInfoNullable.Valid && strings.TrimSpace(privateInfoNullable.String) != "" {
 		record.PrivateInfo = json.RawMessage([]byte(privateInfoNullable.String))
+	}
+	if docMetadataNullable.Valid {
+		docMetadataText := strings.TrimSpace(docMetadataNullable.String)
+		if docMetadataText != "" && docMetadataText != "null" {
+			record.DocMetadata = json.RawMessage([]byte(docMetadataText))
+		}
 	}
 
 	return c.JSON(http.StatusOK, inputDetailResponse{Status: true, Record: record})

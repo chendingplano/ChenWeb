@@ -195,6 +195,7 @@ SELECT
     i.modify_time,
     i.public_info,
     i.private_info,
+    i.doc_metadata::text,
     i.notes,
     i.error_msg
 FROM kb.inputs i
@@ -207,13 +208,13 @@ FROM kb.inputs i
 	rows := sqlmock.NewRows([]string{
 		"id", "name", "type", "title", "doc_no", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
-		"status", "create_time", "modify_time", "public_info", "private_info",
+		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",
 	}).AddRow(
 		int64(101), "Report A", "pdf", "Annual Report", nil, "upload", "/tmp/report-a.pdf",
 		"/backup/report-a.pdf", "/result/report-a.json", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
 		`[{"operation":"parsing","status":"success"}]`, time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 12, 10, 0, 0, time.UTC),
-		`{"visibility":"public"}`, `{"internal":"yes"}`, "note", "",
+		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",
 	)
 	mock.ExpectQuery(dataQuery).
 		WithArgs("pdf", "%report%", 50, 0).
@@ -346,6 +347,7 @@ func TestListInputsDataQueryFailure(t *testing.T) {
     i.modify_time,
     i.public_info,
     i.private_info,
+    i.doc_metadata::text,
     i.notes,
     i.error_msg
 FROM kb.inputs i
@@ -386,7 +388,7 @@ func TestListInputsPageSizeCap(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "type", "title", "doc_no", "source", "file_name",
 			"backup_filename", "result_filename", "publish_date", "authors", "owner",
-			"status", "create_time", "modify_time", "public_info", "private_info",
+			"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 			"notes", "error_msg",
 		}))
 
@@ -424,7 +426,7 @@ func TestListInputsWithDateQueryParams(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "type", "title", "doc_no", "source", "file_name",
 			"backup_filename", "result_filename", "publish_date", "authors", "owner",
-			"status", "create_time", "modify_time", "public_info", "private_info",
+			"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 			"notes", "error_msg",
 		}))
 

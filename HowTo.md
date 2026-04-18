@@ -4672,3 +4672,6 @@ mv ~/.claude/file-history ~/.claude/file-history.bak
 # Jimmy Hot Keys
 
 # Environment Variable Name Changes
+
+# How to Restore Chrome
+Type: Shift + Cmd + T

@@ -42,6 +42,7 @@ type inputRecord struct {
 	ModifyTime     time.Time       `json:"modify_time"`
 	PublicInfo     json.RawMessage `json:"public_info,omitempty"`
 	PrivateInfo    json.RawMessage `json:"private_info,omitempty"`
+	DocMetadata    json.RawMessage `json:"doc_metadata,omitempty"`
 	Notes          *string         `json:"notes,omitempty"`
 	ErrorMsg       *string         `json:"error_msg,omitempty"`
 }
@@ -185,6 +186,7 @@ SELECT
     i.modify_time,
     i.public_info,
     i.private_info,
+    i.doc_metadata::text,
     i.notes,
     i.error_msg
 FROM %s i
@@ -213,6 +215,7 @@ FROM %s i
 			publishDate         sql.NullTime
 			publicInfoNullable  sql.NullString
 			privateInfoNullable sql.NullString
+			docMetadataNullable sql.NullString
 		)
 
 		if err := rows.Scan(
@@ -233,6 +236,7 @@ FROM %s i
 			&record.ModifyTime,
 			&publicInfoNullable,
 			&privateInfoNullable,
+			&docMetadataNullable,
 			&record.Notes,
 			&record.ErrorMsg,
 		); err != nil {
@@ -252,6 +256,12 @@ FROM %s i
 		if privateInfoNullable.Valid && strings.TrimSpace(privateInfoNullable.String) != "" {
 			privateInfoBytes = []byte(privateInfoNullable.String)
 			record.PrivateInfo = json.RawMessage(privateInfoBytes)
+		}
+		if docMetadataNullable.Valid {
+			docMetadataText := strings.TrimSpace(docMetadataNullable.String)
+			if docMetadataText != "" && docMetadataText != "null" {
+				record.DocMetadata = json.RawMessage([]byte(docMetadataText))
+			}
 		}
 
 		out = append(out, record)

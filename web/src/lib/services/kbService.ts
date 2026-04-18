@@ -28,6 +28,7 @@ export type KbInputRecord = {
 	modify_time: string;
 	public_info?: unknown;
 	private_info?: unknown;
+	doc_metadata?: unknown;
 	notes?: string;
 	error_msg?: string;
 };
