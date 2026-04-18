@@ -261,6 +261,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Knowledge Base (home3) endpoints
 	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)
 	apiGroup.GET("/kb/inputs/:id", kbhandler.GetInput)
+	apiGroup.PUT("/kb/inputs/:id", kbhandler.UpdateInput)
 	apiGroup.GET("/kb/inputs/:id/file", kbhandler.GetInputFile)
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
 	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)

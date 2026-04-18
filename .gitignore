@@ -14,6 +14,7 @@ mise.local.toml
 # OS
 .DS_Store
 Thumbs.db
+.gocache
 
 # Env
 .env

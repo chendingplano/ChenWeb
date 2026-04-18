@@ -3,6 +3,7 @@
 	import {
 		listKbInputs,
 		getKbInput,
+		updateKbInput,
 		getRawLines,
 		type KbInputRecord,
 		type RawLine
@@ -122,6 +123,28 @@
 	let searchError = $state('');
 	let searchSelected = $state<number | null>(null);
 
+	type EditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json';
+	type RecordMetaRow = {
+		label: string;
+		key: string;
+		value: string;
+		rawValue: unknown;
+		editable: boolean;
+		editor?: EditorKind;
+	};
+	type DocMetaRow = {
+		key: string;
+		value: string;
+		rawValue: unknown;
+		editor: EditorKind;
+	};
+
+	let editingFieldKey = $state<string | null>(null);
+	let editingFieldEditor = $state<EditorKind>('text');
+	let editingDraft = $state('');
+	let editingError = $state('');
+	let editingSaving = $state(false);
+
 	const docTypeOptions = [
 		'all',
 		'pdf',
@@ -231,20 +254,20 @@
 	function flattenDocMetadata(
 		value: unknown,
 		path = 'root',
-		out: Array<{ key: string; value: string }> = [],
+		out: Array<{ key: string; value: string; rawValue: unknown }> = [],
 		seen = new WeakSet<object>()
-	): Array<{ key: string; value: string }> {
+	): Array<{ key: string; value: string; rawValue: unknown }> {
 		if (value === null || value === undefined) {
-			out.push({ key: path, value: 'null' });
+			out.push({ key: path, value: 'null', rawValue: null });
 			return out;
 		}
 		if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-			out.push({ key: path, value: String(value) });
+			out.push({ key: path, value: String(value), rawValue: value });
 			return out;
 		}
 		if (Array.isArray(value)) {
 			if (value.length === 0) {
-				out.push({ key: path, value: '[]' });
+				out.push({ key: path, value: '[]', rawValue: [] });
 				return out;
 			}
 			for (let i = 0; i < value.length; i += 1) {
@@ -255,13 +278,13 @@
 		if (typeof value === 'object') {
 			const obj = value as Record<string, unknown>;
 			if (seen.has(obj)) {
-				out.push({ key: path, value: '[Circular]' });
+				out.push({ key: path, value: '[Circular]', rawValue: '[Circular]' });
 				return out;
 			}
 			seen.add(obj);
 			const entries = Object.entries(obj).sort(([a], [b]) => a.localeCompare(b));
 			if (entries.length === 0) {
-				out.push({ key: path, value: '{}' });
+				out.push({ key: path, value: '{}', rawValue: {} });
 				return out;
 			}
 			for (const [k, v] of entries) {
@@ -270,44 +293,205 @@
 			}
 			return out;
 		}
-		out.push({ key: path, value: safeJsonStringify(value) });
+		out.push({ key: path, value: safeJsonStringify(value), rawValue: value });
 		return out;
 	}
 
+	function asDisplayText(value: unknown): string {
+		if (value === null || value === undefined) return '—';
+		if (typeof value === 'string') return value || '—';
+		if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+		return safeJsonStringify(value);
+	}
+
+	function safePrettyJson(value: unknown): string {
+		try {
+			return JSON.stringify(value ?? null, null, 2);
+		} catch {
+			return safeJsonStringify(value);
+		}
+	}
+
+	function parseAuthors(value: string | undefined): string[] {
+		if (!value) return [];
+		const trimmed = value.trim();
+		if (!trimmed) return [];
+		try {
+			const parsed = JSON.parse(trimmed) as unknown;
+			if (Array.isArray(parsed)) {
+				return parsed
+					.map((item) => (typeof item === 'string' ? item.trim() : String(item)))
+					.filter((item) => item.length > 0);
+			}
+		} catch {
+			// fallback to plain text
+		}
+		return trimmed
+			.split(/[,\n]/)
+			.map((item) => item.trim())
+			.filter((item) => item.length > 0);
+	}
+
+	function toDateTimeLocalInput(value?: string): string {
+		if (!value) return '';
+		const d = new Date(value);
+		if (Number.isNaN(d.getTime())) return '';
+		const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+		return local.toISOString().slice(0, 16);
+	}
+
+	function fromDateTimeLocalInput(value: string): string | null {
+		const trimmed = value.trim();
+		if (!trimmed) return null;
+		const d = new Date(trimmed);
+		if (Number.isNaN(d.getTime())) return null;
+		return d.toISOString();
+	}
+
 	let recordMetaRows = $derived.by(() => {
-		if (!currentInput) return [] as Array<{ label: string; value: string }>;
+		if (!currentInput) return [] as RecordMetaRow[];
+		const authorsArray = parseAuthors(currentInput.authors);
 		return [
-			{ label: 'ID', value: String(currentInput.id) },
-			{ label: 'Type', value: currentInput.type || '—' },
-			{ label: 'Name', value: currentInput.name || '—' },
-			{ label: 'Title', value: currentInput.title || '—' },
-			{ label: 'Doc No', value: currentInput.doc_no || '—' },
-			{ label: 'Source', value: currentInput.source || '—' },
-			{ label: 'File', value: currentInput.file_name || '—' },
-			{ label: 'Result File', value: currentInput.result_filename || '—' },
-			{ label: 'Authors', value: currentInput.authors || '—' },
-			{ label: 'Published', value: formatMaybeDate(currentInput.publish_date) },
-			{ label: 'Created', value: formatMaybeDate(currentInput.create_time) },
-			{ label: 'Updated', value: formatMaybeDate(currentInput.modify_time) }
+			{ label: 'ID', key: 'id', value: String(currentInput.id), rawValue: currentInput.id, editable: false },
+			{ label: 'Type', key: 'type', value: currentInput.type || '—', rawValue: currentInput.type, editable: false },
+			{ label: 'Name', key: 'name', value: currentInput.name || '—', rawValue: currentInput.name, editable: false },
+			{
+				label: 'Title',
+				key: 'title',
+				value: currentInput.title || '—',
+				rawValue: currentInput.title ?? '',
+				editable: true,
+				editor: 'text'
+			},
+			{
+				label: 'Doc No',
+				key: 'doc_no',
+				value: currentInput.doc_no || '—',
+				rawValue: currentInput.doc_no ?? '',
+				editable: true,
+				editor: 'text'
+			},
+			{
+				label: 'Source',
+				key: 'source',
+				value: currentInput.source || '—',
+				rawValue: currentInput.source ?? '',
+				editable: true,
+				editor: 'text'
+			},
+			{
+				label: 'Published',
+				key: 'publish_date',
+				value: formatMaybeDate(currentInput.publish_date),
+				rawValue: toDateTimeLocalInput(currentInput.publish_date),
+				editable: true,
+				editor: 'datetime'
+			},
+			{
+				label: 'Authors',
+				key: 'authors',
+				value: authorsArray.length > 0 ? authorsArray.join(', ') : '—',
+				rawValue: authorsArray,
+				editable: true,
+				editor: 'array'
+			},
+			{
+				label: 'Owner',
+				key: 'owner',
+				value: currentInput.owner == null ? '—' : String(currentInput.owner),
+				rawValue: currentInput.owner == null ? '' : String(currentInput.owner),
+				editable: true,
+				editor: 'text'
+			},
+			{
+				label: 'Public Info',
+				key: 'public_info',
+				value: asDisplayText(currentInput.public_info),
+				rawValue: currentInput.public_info ?? null,
+				editable: true,
+				editor: 'json'
+			},
+			{
+				label: 'Private Info',
+				key: 'private_info',
+				value: asDisplayText(currentInput.private_info),
+				rawValue: currentInput.private_info ?? null,
+				editable: true,
+				editor: 'json'
+			},
+			{
+				label: 'File',
+				key: 'file_name',
+				value: currentInput.file_name || '—',
+				rawValue: currentInput.file_name,
+				editable: false
+			},
+			{
+				label: 'Result File',
+				key: 'result_filename',
+				value: currentInput.result_filename || '—',
+				rawValue: currentInput.result_filename,
+				editable: false
+			},
+			{
+				label: 'Notes',
+				key: 'notes',
+				value: currentInput.notes || '—',
+				rawValue: currentInput.notes ?? '',
+				editable: true,
+				editor: 'textarea'
+			},
+			{
+				label: 'Error',
+				key: 'error_msg',
+				value: currentInput.error_msg || '—',
+				rawValue: currentInput.error_msg ?? '',
+				editable: true,
+				editor: 'textarea'
+			},
+			{
+				label: 'Created',
+				key: 'create_time',
+				value: formatMaybeDate(currentInput.create_time),
+				rawValue: currentInput.create_time,
+				editable: false
+			},
+			{
+				label: 'Updated',
+				key: 'modify_time',
+				value: formatMaybeDate(currentInput.modify_time),
+				rawValue: currentInput.modify_time,
+				editable: false
+			}
 		];
 	});
 
 	let docMetadataRows = $derived.by(() => {
 		const raw = getDocMetadataValue(currentInput);
-		if (raw == null) return [] as Array<{ key: string; value: string }>;
+		if (raw == null) return [] as DocMetaRow[];
 
 		if (typeof raw === 'string') {
 			const trimmed = raw.trim();
 			if (!trimmed) return [];
 			try {
 				const parsed = JSON.parse(trimmed) as unknown;
-				return flattenDocMetadata(parsed);
+				return flattenDocMetadata(parsed).map((row) => ({
+					key: row.key,
+					value: row.value,
+					rawValue: row.rawValue,
+					editor: typeof row.rawValue === 'object' && row.rawValue !== null ? 'json' : 'text'
+				}));
 			} catch {
-				return [{ key: 'doc_metadata', value: raw }];
+				return [{ key: 'doc_metadata', value: raw, rawValue: raw, editor: 'text' }];
 			}
 		}
 
-		return flattenDocMetadata(raw);
+		return flattenDocMetadata(raw).map((row) => ({
+			key: row.key,
+			value: row.value,
+			rawValue: row.rawValue,
+			editor: typeof row.rawValue === 'object' && row.rawValue !== null ? 'json' : 'text'
+		}));
 	});
 
 	let pagesGrouped = $derived.by(() => {
@@ -413,6 +597,7 @@
 	async function loadInputRecord(id: number) {
 		errorMsg = '';
 		loading = true;
+		cancelFieldEdit();
 		await resetDocumentState();
 		try {
 			rawLoading = true;
@@ -592,6 +777,221 @@
 		if (name && !looksLikeFileName(name)) return name;
 
 		return `Input #${r.id}`;
+	}
+
+	function isEditingField(key: string): boolean {
+		return editingFieldKey === key;
+	}
+
+	function editorDraftFromValue(editor: EditorKind, rawValue: unknown): string {
+		switch (editor) {
+			case 'json':
+				return safePrettyJson(rawValue);
+			case 'array':
+				return Array.isArray(rawValue) ? rawValue.map((v) => String(v)).join('\n') : '';
+			case 'datetime':
+				return typeof rawValue === 'string' ? rawValue : '';
+			case 'textarea':
+			case 'text':
+			default:
+				return rawValue == null ? '' : String(rawValue);
+		}
+	}
+
+	function startFieldEdit(fieldKey: string, editor: EditorKind | string, rawValue: unknown) {
+		const normalizedEditor: EditorKind =
+			editor === 'text' || editor === 'textarea' || editor === 'datetime' || editor === 'array' || editor === 'json'
+				? editor
+				: 'text';
+		editingFieldKey = fieldKey;
+		editingFieldEditor = normalizedEditor;
+		editingDraft = editorDraftFromValue(normalizedEditor, rawValue);
+		editingError = '';
+	}
+
+	function cancelFieldEdit() {
+		if (editingSaving) return;
+		editingFieldKey = null;
+		editingDraft = '';
+		editingError = '';
+	}
+
+	function parsePathSegments(path: string): Array<string | number> {
+		if (!path || path === 'root') return [];
+		const segments: Array<string | number> = [];
+		const re = /([^[.\]]+)|\[(\d+)\]/g;
+		let match: RegExpExecArray | null = null;
+		while (true) {
+			match = re.exec(path);
+			if (!match) break;
+			if (match[1]) {
+				segments.push(match[1]);
+			} else if (match[2]) {
+				segments.push(Number(match[2]));
+			}
+		}
+		return segments;
+	}
+
+	function deepCloneValue<T>(value: T): T {
+		try {
+			return structuredClone(value);
+		} catch {
+			try {
+				return JSON.parse(JSON.stringify(value)) as T;
+			} catch {
+				return value;
+			}
+		}
+	}
+
+	function getValueByPath(root: unknown, path: string): unknown {
+		if (!path || path === 'root') return root;
+		const segments = parsePathSegments(path);
+		let cur: unknown = root;
+		for (const seg of segments) {
+			if (cur == null || typeof cur !== 'object') return undefined;
+			if (typeof seg === 'number') {
+				if (!Array.isArray(cur)) return undefined;
+				cur = cur[seg];
+			} else {
+				cur = (cur as Record<string, unknown>)[seg];
+			}
+		}
+		return cur;
+	}
+
+	function setValueByPath(root: unknown, path: string, value: unknown): unknown {
+		if (path === 'root') return value;
+		const base = root && typeof root === 'object' ? deepCloneValue(root) : {};
+		const segments = parsePathSegments(path);
+		if (segments.length === 0) return value;
+
+		let cursor: unknown = base;
+		for (let i = 0; i < segments.length; i += 1) {
+			const segment = segments[i];
+			const isLast = i === segments.length - 1;
+			const next = segments[i + 1];
+
+			if (typeof segment === 'number') {
+				if (!Array.isArray(cursor)) return base;
+				if (isLast) {
+					cursor[segment] = value;
+					break;
+				}
+				if (cursor[segment] == null || typeof cursor[segment] !== 'object') {
+					cursor[segment] = typeof next === 'number' ? [] : {};
+				}
+				cursor = cursor[segment];
+				continue;
+			}
+
+			if (cursor == null || typeof cursor !== 'object' || Array.isArray(cursor)) return base;
+			const obj = cursor as Record<string, unknown>;
+			if (isLast) {
+				obj[segment] = value;
+				break;
+			}
+			if (obj[segment] == null || typeof obj[segment] !== 'object') {
+				obj[segment] = typeof next === 'number' ? [] : {};
+			}
+			cursor = obj[segment];
+		}
+		return base;
+	}
+
+	function parseScalarWithHint(raw: string, original: unknown): unknown {
+		const trimmed = raw.trim();
+		if (original === null) {
+			if (trimmed === '') return null;
+			if (trimmed === 'null') return null;
+		}
+		if (typeof original === 'number') {
+			const n = Number(trimmed);
+			return Number.isNaN(n) ? raw : n;
+		}
+		if (typeof original === 'boolean') {
+			if (trimmed.toLowerCase() === 'true') return true;
+			if (trimmed.toLowerCase() === 'false') return false;
+			return original;
+		}
+		return raw;
+	}
+
+	function parseAuthorsDraft(draft: string): string[] {
+		return draft
+			.split(/\r?\n|,/)
+			.map((item) => item.trim())
+			.filter((item) => item.length > 0);
+	}
+
+	async function saveFieldEdit() {
+		if (!currentInput || !editingFieldKey || editingSaving) return;
+		editingError = '';
+		editingSaving = true;
+		try {
+			const payload: Record<string, unknown> = {};
+			if (editingFieldKey.startsWith('field:')) {
+				const field = editingFieldKey.replace(/^field:/, '');
+				switch (field) {
+					case 'title':
+					case 'doc_no':
+					case 'source':
+						payload[field] = editingDraft.trim();
+						break;
+					case 'publish_date': {
+						const iso = fromDateTimeLocalInput(editingDraft);
+						if (editingDraft.trim() && !iso) {
+							throw new Error('Publish date is invalid.');
+						}
+						payload.publish_date = iso;
+						break;
+					}
+					case 'authors':
+						payload.authors = parseAuthorsDraft(editingDraft);
+						break;
+					case 'owner': {
+						const trimmed = editingDraft.trim();
+						payload.owner = trimmed === '' ? null : trimmed;
+						break;
+					}
+					case 'public_info':
+					case 'private_info': {
+						const text = editingDraft.trim();
+						payload[field] = text ? (JSON.parse(text) as unknown) : null;
+						break;
+					}
+					case 'notes':
+					case 'error_msg':
+						payload[field] = editingDraft;
+						break;
+					default:
+						throw new Error('Unsupported editable field.');
+				}
+			} else if (editingFieldKey.startsWith('docmeta:')) {
+				const path = editingFieldKey.replace(/^docmeta:/, '');
+				const currentDocMeta = getDocMetadataValue(currentInput);
+				const previousValue = getValueByPath(currentDocMeta, path);
+				let nextValue: unknown = editingDraft;
+				if (editingFieldEditor === 'json') {
+					const text = editingDraft.trim();
+					nextValue = text ? (JSON.parse(text) as unknown) : null;
+				} else {
+					nextValue = parseScalarWithHint(editingDraft, previousValue);
+				}
+				payload.doc_metadata = setValueByPath(currentDocMeta ?? {}, path, nextValue);
+			}
+
+			const updated = await updateKbInput(currentInput.id, payload);
+			currentInput = updated.record;
+			selectedInputId = updated.record.id;
+			upsertInputRecord(updated.record);
+			cancelFieldEdit();
+		} catch (err) {
+			editingError = err instanceof Error ? err.message : 'Failed to save changes.';
+		} finally {
+			editingSaving = false;
+		}
 	}
 
 	function clampDocPage(page: number): number {
@@ -1161,10 +1561,75 @@
 													<div class="metadata-empty">No record loaded.</div>
 												{:else}
 													<div class="metadata-fields">
-														{#each recordMetaRows as row (row.label)}
+														{#each recordMetaRows as row (row.key)}
 															<div class="metadata-row">
 																<span class="metadata-key">{row.label}</span>
-																<span class="metadata-val" title={row.value}>{row.value}</span>
+																<div class="metadata-val-wrap">
+																	{#if isEditingField(`field:${row.key}`)}
+																		<div class="metadata-editor">
+																			{#if row.editor === 'textarea' || row.editor === 'json' || row.editor === 'array'}
+																				<textarea
+																					class="metadata-input metadata-input-textarea"
+																					rows={row.editor === 'json' ? 8 : row.editor === 'array' ? 5 : 4}
+																					bind:value={editingDraft}
+																				></textarea>
+																			{:else if row.editor === 'datetime'}
+																				<input
+																					class="metadata-input"
+																					type="datetime-local"
+																					bind:value={editingDraft}
+																				/>
+																			{:else}
+																				<input class="metadata-input" type="text" bind:value={editingDraft} />
+																			{/if}
+																			{#if editingError}
+																				<div class="metadata-edit-error">{editingError}</div>
+																			{/if}
+																			<div class="metadata-editor-actions">
+																				<button
+																					class="btn btn-primary metadata-editor-btn"
+																					onclick={saveFieldEdit}
+																					disabled={editingSaving}
+																				>
+																					{editingSaving ? 'Saving…' : 'Save'}
+																				</button>
+																				<button
+																					class="btn btn-ghost metadata-editor-btn"
+																					onclick={cancelFieldEdit}
+																					disabled={editingSaving}
+																				>
+																					Cancel
+																				</button>
+																			</div>
+																		</div>
+																	{:else}
+																		{#if row.editable && row.editor}
+																			<div class="metadata-display">
+																				<button
+																					type="button"
+																					class="metadata-edit-trigger"
+																					title={`${row.value}\n(Double click to edit)`}
+																					ondblclick={() =>
+																						startFieldEdit(`field:${row.key}`, row.editor ?? 'text', row.rawValue)}
+																				>
+																					<span class="metadata-edit-text">{row.value}</span>
+																				</button>
+																				<button
+																					type="button"
+																					class="metadata-edit-icon-btn"
+																					title="Edit field"
+																					aria-label={`Edit ${row.label}`}
+																					onclick={() =>
+																						startFieldEdit(`field:${row.key}`, row.editor ?? 'text', row.rawValue)}
+																				>
+																					✎
+																				</button>
+																			</div>
+																		{:else}
+																			<span class="metadata-val" title={row.value}>{row.value}</span>
+																		{/if}
+																	{/if}
+																</div>
 															</div>
 														{/each}
 													</div>
@@ -1182,7 +1647,62 @@
 																<span class="metadata-key metadata-key-path" title={row.key}
 																	>{row.key}</span
 																>
-																<span class="metadata-val" title={row.value}>{row.value}</span>
+																<div class="metadata-val-wrap">
+																	{#if isEditingField(`docmeta:${row.key}`)}
+																		<div class="metadata-editor">
+																			{#if row.editor === 'json'}
+																				<textarea
+																					class="metadata-input metadata-input-textarea"
+																					rows={8}
+																					bind:value={editingDraft}
+																				></textarea>
+																			{:else}
+																				<input class="metadata-input" type="text" bind:value={editingDraft} />
+																			{/if}
+																			{#if editingError}
+																				<div class="metadata-edit-error">{editingError}</div>
+																			{/if}
+																			<div class="metadata-editor-actions">
+																				<button
+																					class="btn btn-primary metadata-editor-btn"
+																					onclick={saveFieldEdit}
+																					disabled={editingSaving}
+																				>
+																					{editingSaving ? 'Saving…' : 'Save'}
+																				</button>
+																				<button
+																					class="btn btn-ghost metadata-editor-btn"
+																					onclick={cancelFieldEdit}
+																					disabled={editingSaving}
+																				>
+																					Cancel
+																				</button>
+																			</div>
+																		</div>
+																	{:else}
+																		<div class="metadata-display">
+																			<button
+																				type="button"
+																				class="metadata-edit-trigger"
+																				title={`${row.value}\n(Double click to edit)`}
+																				ondblclick={() =>
+																					startFieldEdit(`docmeta:${row.key}`, row.editor, row.rawValue)}
+																			>
+																				<span class="metadata-edit-text">{row.value}</span>
+																			</button>
+																			<button
+																				type="button"
+																				class="metadata-edit-icon-btn"
+																				title="Edit metadata field"
+																				aria-label={`Edit doc metadata ${row.key}`}
+																				onclick={() =>
+																					startFieldEdit(`docmeta:${row.key}`, row.editor, row.rawValue)}
+																			>
+																				✎
+																			</button>
+																		</div>
+																	{/if}
+																</div>
 															</div>
 														{/each}
 													</div>
@@ -2254,6 +2774,80 @@
 		font-size: 12px;
 		color: var(--text-primary);
 		word-break: break-word;
+	}
+	.metadata-val-wrap {
+		min-width: 0;
+	}
+	.metadata-display {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 6px;
+		align-items: start;
+	}
+	.metadata-edit-trigger {
+		all: unset;
+		cursor: text;
+		min-width: 0;
+		font-size: 12px;
+		color: var(--text-primary);
+		word-break: break-word;
+		border-bottom: 1px dashed color-mix(in srgb, var(--brass) 55%, transparent);
+	}
+	.metadata-edit-trigger:hover {
+		color: color-mix(in srgb, var(--brass) 70%, var(--text-primary));
+	}
+	.metadata-edit-text {
+		display: inline;
+	}
+	.metadata-edit-icon-btn {
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg);
+		color: var(--brass);
+		font-size: 12px;
+		line-height: 1;
+		cursor: pointer;
+	}
+	.metadata-edit-icon-btn:hover {
+		border-color: var(--brass);
+	}
+	.metadata-editor {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.metadata-input {
+		width: 100%;
+		min-height: 30px;
+		background: var(--panel-bg);
+		color: var(--text-primary);
+		border: 1px solid var(--ink-line);
+		padding: 6px 8px;
+		font-size: 12px;
+		font-family: var(--font-sans);
+	}
+	.metadata-input:focus {
+		outline: none;
+		border-color: var(--brass);
+	}
+	.metadata-input-textarea {
+		resize: vertical;
+		font-family: var(--font-mono);
+		line-height: 1.45;
+	}
+	.metadata-edit-error {
+		font-size: 11px;
+		color: var(--crimson);
+	}
+	.metadata-editor-actions {
+		display: flex;
+		gap: 8px;
+	}
+	.metadata-editor-btn {
+		height: 30px;
+		padding: 0 12px;
 	}
 	.pdf-canvas-host {
 		min-width: 0;

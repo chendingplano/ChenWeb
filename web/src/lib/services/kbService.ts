@@ -143,6 +143,40 @@ export async function getKbInput(id: number): Promise<GetKbInputResponse> {
 	);
 }
 
+export type UpdateKbInputPayload = {
+	title?: string | null;
+	doc_no?: string | null;
+	source?: string | null;
+	publish_date?: string | null;
+	authors?: string[] | string | null;
+	owner?: string | number | null;
+	public_info?: unknown;
+	private_info?: unknown;
+	doc_metadata?: unknown;
+	notes?: string | null;
+	error_msg?: string | null;
+};
+
+export async function updateKbInput(id: number, payload: UpdateKbInputPayload): Promise<GetKbInputResponse> {
+	const response = await fetch(`${BASE}/inputs/${encodeURIComponent(String(id))}`, {
+		method: 'PUT',
+		credentials: 'same-origin',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to update kb input (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<GetKbInputResponse>;
+}
+
 export type RawLine = {
 	line_number: number;
 	page_number: number;

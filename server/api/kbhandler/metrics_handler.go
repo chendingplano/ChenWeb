@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -150,36 +151,10 @@ type inputDetailResponse struct {
 	Record inputRecord `json:"record"`
 }
 
-// GetInput handles GET /api/v1/kb/inputs/:id
-func GetInput(c echo.Context) error {
-	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_100")
-	defer rc.Close()
-	logger := rc.GetLogger()
-
-	idStr := strings.TrimSpace(c.Param("id"))
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil || id <= 0 {
-		return c.JSON(http.StatusBadRequest, errorResponse{
-			Status:   false,
-			ErrorMsg: "invalid id (CWB_KB_M_110)",
-		})
-	}
-
-	db := ApiTypes.ProjectDBHandle
-	inputTable, err := resolveInputTable(db)
-	if err != nil {
-		logger.Error("resolve kb input table failed", "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{
-			Status:   false,
-			ErrorMsg: "failed to resolve kb input table (CWB_KB_M_120)",
-		})
-	}
+func fetchInputRecordByID(db *sql.DB, inputTable string, id int64) (inputRecord, error) {
 	nameColumnExpr, err := resolveNameColumnExpr(db, inputTable)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, errorResponse{
-			Status:   false,
-			ErrorMsg: "failed to resolve kb input schema (CWB_KB_M_121)",
-		})
+		return inputRecord{}, err
 	}
 
 	query := fmt.Sprintf(`
@@ -209,17 +184,7 @@ WHERE i.id = $1
 		&record.CreateTime, &record.ModifyTime, &publicInfoNullable, &privateInfoNullable, &docMetadataNullable,
 		&record.Notes, &record.ErrorMsg,
 	); err != nil {
-		if err == sql.ErrNoRows {
-			return c.JSON(http.StatusNotFound, errorResponse{
-				Status:   false,
-				ErrorMsg: "record not found (CWB_KB_M_130)",
-			})
-		}
-		logger.Error("query kb input failed", "err", err)
-		return c.JSON(http.StatusInternalServerError, errorResponse{
-			Status:   false,
-			ErrorMsg: "failed to retrieve kb input (CWB_KB_M_131)",
-		})
+		return inputRecord{}, err
 	}
 	if publishDate.Valid {
 		ts := publishDate.Time
@@ -237,6 +202,329 @@ WHERE i.id = $1
 		if docMetadataText != "" && docMetadataText != "null" {
 			record.DocMetadata = json.RawMessage([]byte(docMetadataText))
 		}
+	}
+	return record, nil
+}
+
+// GetInput handles GET /api/v1/kb/inputs/:id
+func GetInput(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_100")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	idStr := strings.TrimSpace(c.Param("id"))
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid id (CWB_KB_M_110)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	inputTable, err := resolveInputTable(db)
+	if err != nil {
+		logger.Error("resolve kb input table failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to resolve kb input table (CWB_KB_M_120)",
+		})
+	}
+	record, err := fetchInputRecordByID(db, inputTable, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, errorResponse{
+				Status:   false,
+				ErrorMsg: "record not found (CWB_KB_M_130)",
+			})
+		}
+		logger.Error("query kb input failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to retrieve kb input (CWB_KB_M_131)",
+		})
+	}
+
+	return c.JSON(http.StatusOK, inputDetailResponse{Status: true, Record: record})
+}
+
+func decodeStringValue(raw json.RawMessage, trim bool) (*string, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("missing value")
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, fmt.Errorf("must be a string or null")
+	}
+	if trim {
+		s = strings.TrimSpace(s)
+	}
+	return &s, nil
+}
+
+func compactJSONRaw(raw json.RawMessage) (string, error) {
+	if !json.Valid(raw) {
+		return "", fmt.Errorf("must be valid json")
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return "", fmt.Errorf("must be valid json")
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode json")
+	}
+	return string(encoded), nil
+}
+
+func decodeOwnerValue(raw json.RawMessage) (*int64, error) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, nil
+	}
+	var numeric int64
+	if err := json.Unmarshal(raw, &numeric); err == nil {
+		return &numeric, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil, nil
+		}
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("owner must be integer text")
+		}
+		return &v, nil
+	}
+	return nil, fmt.Errorf("owner must be integer or string")
+}
+
+func decodeAuthorsValue(raw json.RawMessage) (*string, error) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, nil
+	}
+
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		clean := make([]string, 0, len(arr))
+		for _, entry := range arr {
+			v := strings.TrimSpace(entry)
+			if v == "" {
+				continue
+			}
+			clean = append(clean, v)
+		}
+		encoded, err := json.Marshal(clean)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode authors")
+		}
+		s := string(encoded)
+		return &s, nil
+	}
+
+	var asText string
+	if err := json.Unmarshal(raw, &asText); err == nil {
+		asText = strings.TrimSpace(asText)
+		if asText == "" {
+			return nil, nil
+		}
+		return &asText, nil
+	}
+
+	return nil, fmt.Errorf("authors must be string[] or string")
+}
+
+// UpdateInput handles PUT /api/v1/kb/inputs/:id
+func UpdateInput(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_140")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	idStr := strings.TrimSpace(c.Param("id"))
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid id (CWB_KB_M_141)",
+		})
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid request body (CWB_KB_M_142)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	inputTable, err := resolveInputTable(db)
+	if err != nil {
+		logger.Error("resolve kb input table failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to resolve kb input table (CWB_KB_M_143)",
+		})
+	}
+
+	sets := make([]string, 0, len(payload)+1)
+	args := make([]any, 0, len(payload)+1)
+	addSet := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+
+	sets = append(sets, "modify_time = NOW()")
+
+	fields := make([]string, 0, len(payload))
+	for field := range payload {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	for _, field := range fields {
+		raw := payload[field]
+		switch field {
+		case "title", "doc_no", "source":
+			value, err := decodeStringValue(raw, true)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_M_144)", field, err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "notes", "error_msg":
+			value, err := decodeStringValue(raw, false)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_M_145)", field, err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "publish_date":
+			value, err := decodeStringValue(raw, true)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid publish_date: %v (CWB_KB_M_146)", err),
+				})
+			}
+			if value == nil || *value == "" {
+				addSet(field, nil)
+				break
+			}
+			ts, err := parseTimeQuery(*value)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid publish_date format: %v (CWB_KB_M_147)", err),
+				})
+			}
+			if ts == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *ts)
+			}
+
+		case "authors":
+			value, err := decodeAuthorsValue(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid authors: %v (CWB_KB_M_148)", err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "owner":
+			value, err := decodeOwnerValue(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid owner: %v (CWB_KB_M_149)", err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "public_info", "private_info", "doc_metadata":
+			if strings.TrimSpace(string(raw)) == "null" {
+				addSet(field, nil)
+				break
+			}
+			compact, err := compactJSONRaw(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_M_150)", field, err),
+				})
+			}
+			addSet(field, compact)
+		}
+	}
+
+	if len(sets) <= 1 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "no editable fields in request (CWB_KB_M_151)",
+		})
+	}
+
+	query := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d", inputTable, strings.Join(sets, ", "), len(args)+1)
+	args = append(args, id)
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		logger.Error("update kb input failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to update kb input (CWB_KB_M_152)",
+		})
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		logger.Error("rows affected kb input failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to verify kb input update (CWB_KB_M_153)",
+		})
+	}
+	if affected == 0 {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status:   false,
+			ErrorMsg: "record not found (CWB_KB_M_154)",
+		})
+	}
+
+	record, err := fetchInputRecordByID(db, inputTable, id)
+	if err != nil {
+		logger.Error("reload kb input after update failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to reload kb input (CWB_KB_M_155)",
+		})
 	}
 
 	return c.JSON(http.StatusOK, inputDetailResponse{Status: true, Record: record})
