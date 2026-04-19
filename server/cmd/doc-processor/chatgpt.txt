@@ -1,0 +1,86 @@
+Version ChatGPT
+{
+  "title": "绿色建筑评价标准",
+  "doc_no": "XJJ 126-2020",
+  "authors": [],
+  "metadata": {
+    "notes": [
+      "Cover and approval pages clearly identify the standard as XJJ 126-2020.",
+      "The OCR text for one drafting organization appears corrupted as '乌鲁木齐市建工(集团)第→建筑工程有限责任公司'; normalized conservatively without guessing beyond visible text.",
+      "The main drafting persons list is split across two pages and extracted as a continuous list.",
+      "Page count inferred from provided page markers, not from the original document pagination."
+    ],
+    "source": {
+      "url": null,
+      "journal": null,
+      "publisher": "新疆维吾尔自治区住房和城乡建设厅",
+      "conference": null
+    },
+    "version": null,
+    "abstract": null,
+    "keywords": [],
+    "language": "zh",
+    "subtitle": "Assessment standard for green building",
+    "candidates": {
+      "title": [
+        "绿色建筑评价标准"
+      ],
+      "authors": []
+    },
+    "confidence": 0.98,
+    "page_count": 5,
+    "identifiers": {
+      "doi": null,
+      "isbn": null,
+      "issn": null,
+      "arxiv_id": null
+    },
+    "document_type": "地方工程建设标准",
+    "organizations": [
+      "新疆维吾尔自治区住房和城乡建设厅",
+      "新疆建筑设计研究院有限公司"
+    ]
+  },
+  "publish_date": "2020-11-10",
+  "drafting_persons": [
+    "范欣",
+    "刘卫新",
+    "蔡卫",
+    "张洪洲",
+    "王绍瑞",
+    "李疆",
+    "马丽娜",
+    "李长江",
+    "彭仲毅",
+    "胡志炳",
+    "卢豫玲",
+    "张涛",
+    "董燕萍"
+  ],
+  "implementation_date": "2021-01-01",
+  "main_drafting_persons": [
+    "范欣",
+    "刘卫新",
+    "蔡卫",
+    "张洪洲",
+    "王绍瑞",
+    "李疆",
+    "马丽娜",
+    "李长江",
+    "彭仲毅",
+    "胡志炳",
+    "卢豫玲",
+    "张涛",
+    "董燕萍"
+  ],
+  "drafting_organizations": [
+    "新疆昌合大业建筑科技有限公司",
+    "新疆城建(集团)股份有限公司",
+    "乌鲁木齐市建工(集团)第→建筑工程有限责任公司",
+    "新疆盛欣隆建设工程有限公司",
+    "新疆域建洪源市政园林有限公司"
+  ],
+  "main_drafting_organizations": [
+    "新疆建筑设计研究院有限公司"
+  ]
+}

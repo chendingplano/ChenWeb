@@ -142,7 +142,8 @@
 		{
 			id: 'tools', label: 'Tools', icon: WorkflowIcon, group: 'Workspace',
 			children: [
-				{ id: 'flow', label: 'Flow' }
+				{ id: 'flow', label: 'Flow' },
+				{ id: 'prompt-optimizer', label: 'Prompt Optimizer' }
 			]
 		},
 		{

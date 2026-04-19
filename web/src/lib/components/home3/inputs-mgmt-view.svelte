@@ -270,6 +270,15 @@
 				out.push({ key: path, value: '[]', rawValue: [] });
 				return out;
 			}
+			const isStringArray = value.every((item) => typeof item === 'string');
+			if (isStringArray) {
+				out.push({
+					key: path,
+					value: JSON.stringify(value),
+					rawValue: value
+				});
+				return out;
+			}
 			for (let i = 0; i < value.length; i += 1) {
 				flattenDocMetadata(value[i], `${path}[${i}]`, out, seen);
 			}

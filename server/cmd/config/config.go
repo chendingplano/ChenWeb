@@ -4,9 +4,13 @@ package config
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
+	sharedgoose "github.com/chendingplano/shared/go/api/goose"
 	"github.com/spf13/viper"
 )
 
@@ -18,12 +22,12 @@ type DocGenConfig struct {
 
 type AppConfigDef struct {
 	AppTableNames struct {
-		TableName_ProcessStatus string `mapstructure:"table_name_process_status"`
-		TableName_Schedules     string `mapstructure:"table_name_schedules"`
-		TableName_Documents     string `mapstructure:"table_name_documents"`
-		TableName_Flows         string `mapstructure:"table_name_flows"`
-		TableName_DspyPrompts       string `mapstructure:"table_name_dspy_prompts"`
-		TableName_CustRequestLogs   string `mapstructure:"table_name_cust_request_logs"`
+		TableName_ProcessStatus   string `mapstructure:"table_name_process_status"`
+		TableName_Schedules       string `mapstructure:"table_name_schedules"`
+		TableName_Documents       string `mapstructure:"table_name_documents"`
+		TableName_Flows           string `mapstructure:"table_name_flows"`
+		TableName_DspyPrompts     string `mapstructure:"table_name_dspy_prompts"`
+		TableName_CustRequestLogs string `mapstructure:"table_name_cust_request_logs"`
 	} `mapstructure:"app_table_names"`
 	PDFParser PDFParserConfig `mapstructure:"pdf_parser"`
 	DocGen    DocGenConfig    `mapstructure:"doc_gen"`
@@ -122,4 +126,92 @@ func GetPDFParserConfig() PDFParserConfig {
 
 func GetDocGenConfig() DocGenConfig {
 	return AppConfig.DocGen
+}
+
+func NormalizeMigrationPaths(logger ApiTypes.JimoLogger, configPath string) {
+	absConfigPath, err := filepath.Abs(configPath)
+	if err != nil {
+		logger.Warn("failed to resolve absolute config path; migration paths left as-is",
+			"config_path", configPath, "error", err)
+		return
+	}
+	configDir := filepath.Dir(absConfigPath)
+	cfg := ApiTypes.CommonConfig.MigrationConfig
+
+	projectRel := strings.TrimSpace(cfg.MigrationsDir)
+	if projectRel == "" {
+		projectRel = "project_migrations"
+	}
+	sharedRel := strings.TrimSpace(cfg.SharedMigrationsDir)
+	if sharedRel == "" {
+		sharedRel = "shared_migrations"
+	}
+
+	cfg.MigrationsDir = resolveMigrationDir(configDir, projectRel)
+	cfg.SharedMigrationsDir = resolveMigrationDir(configDir, sharedRel)
+
+	cfg.MigrationsFS = os.DirFS(cfg.MigrationsDir)
+	ApiTypes.CommonConfig.MigrationConfig = cfg
+
+	logger.Info("normalized migration paths",
+		"project_migrations_dir", cfg.MigrationsDir,
+		"shared_migrations_dir", cfg.SharedMigrationsDir)
+}
+
+func resolveMigrationDir(configDir string, relOrAbs string) string {
+	path := strings.TrimSpace(relOrAbs)
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+
+	candidate := filepath.Clean(filepath.Join(configDir, path))
+	if isDir(candidate) {
+		return candidate
+	}
+
+	// If the config lives under server/cmd/*, search ancestors for the first
+	// existing migration directory so all services share ChenWeb/{project,shared}_migrations.
+	base := configDir
+	for {
+		probe := filepath.Clean(filepath.Join(base, path))
+		if isDir(probe) {
+			return probe
+		}
+		parent := filepath.Dir(base)
+		if parent == base {
+			break
+		}
+		base = parent
+	}
+
+	// If not found, keep the config-relative target (goose will create dir if needed).
+	return candidate
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+func RunMigrations(ctx context.Context, logger ApiTypes.JimoLogger) error {
+	if ApiTypes.ProjectDBHandle == nil {
+		return fmt.Errorf("project db handle is nil")
+	}
+	if ApiTypes.SharedDBHandle == nil {
+		return fmt.Errorf("shared db handle is nil")
+	}
+
+	if err := sharedgoose.RunProjectMigrations(ctx, logger, ApiTypes.ProjectDBHandle); err != nil {
+		return fmt.Errorf("project migrations failed: %w", err)
+	}
+	if err := sharedgoose.RunSharedMigrations(ctx, logger, ApiTypes.SharedDBHandle); err != nil {
+		return fmt.Errorf("shared migrations failed: %w", err)
+	}
+	return nil
 }

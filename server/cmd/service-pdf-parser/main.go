@@ -21,7 +21,6 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/databaseutil"
-	sharedgoose "github.com/chendingplano/shared/go/api/goose"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/joho/godotenv"
 )
@@ -53,7 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	normalizeMigrationPaths(logger, configPath)
+	config.NormalizeMigrationPaths(logger, configPath)
 
 	if err := databaseutil.InitDB(newCtx, ApiTypes.CommonConfig); err != nil {
 		logger.Error("failed to initialize database", "error", err)
@@ -61,21 +60,8 @@ func main() {
 	}
 	defer databaseutil.CloseDatabase(ApiTypes.CommonConfig)
 
-	if ApiTypes.ProjectDBHandle == nil {
-		logger.Error("project DB handle is nil")
-		os.Exit(1)
-	}
-	if ApiTypes.SharedDBHandle == nil {
-		logger.Error("shared DB handle is nil")
-		os.Exit(1)
-	}
-
-	if err := sharedgoose.RunProjectMigrations(ctx, logger, ApiTypes.ProjectDBHandle); err != nil {
-		logger.Error("project migrations failed", "error", err)
-		os.Exit(1)
-	}
-	if err := sharedgoose.RunSharedMigrations(ctx, logger, ApiTypes.SharedDBHandle); err != nil {
-		logger.Error("shared migrations failed", "error", err)
+	if err := config.RunMigrations(ctx, logger); err != nil {
+		logger.Error("migrations failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -111,28 +97,6 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	logger.Info("shutdown signal received; stopping")
-}
-
-func normalizeMigrationPaths(logger ApiTypes.JimoLogger, configPath string) {
-	absConfigPath, err := filepath.Abs(configPath)
-	if err != nil {
-		logger.Warn("failed to resolve absolute config path; migration paths left as-is",
-			"config_path", configPath, "error", err)
-		return
-	}
-	configDir := filepath.Dir(absConfigPath)
-	cfg := ApiTypes.CommonConfig.MigrationConfig
-
-	if strings.TrimSpace(cfg.MigrationsDir) != "" && !filepath.IsAbs(cfg.MigrationsDir) {
-		cfg.MigrationsDir = filepath.Clean(filepath.Join(configDir, cfg.MigrationsDir))
-	}
-
-	cfg.MigrationsFS = os.DirFS(cfg.MigrationsDir)
-
-	ApiTypes.CommonConfig.MigrationConfig = cfg
-	logger.Info("normalized migration paths",
-		"migrations_dir", cfg.MigrationsDir,
-		"migrations_fs", cfg.MigrationsFS)
 }
 
 func runStagingThread(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, stagingDir, backupDir, homeDir string) {

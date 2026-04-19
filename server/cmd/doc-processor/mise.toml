@@ -1,0 +1,51 @@
+[tools]
+go = "1.25.7"
+
+[tasks.build-doc-processor]
+run = "go build -buildvcs=false -o ../../../.cache/doc-processor.exe ."
+
+[tasks.doc-processor-run]
+run = "go run ."
+
+[tasks.doc-processor-start]
+run = '''
+mkdir -p ../../../.cache
+if [ -f ../../../.cache/doc-processor.pid ] && kill -0 "$(cat ../../../.cache/doc-processor.pid)" 2>/dev/null; then
+  echo "doc-processor already running (pid $(cat ../../../.cache/doc-processor.pid))"
+  exit 0
+fi
+nohup go run . > ../../../.cache/doc-processor.log 2>&1 &
+echo $! > ../../../.cache/doc-processor.pid
+echo "doc-processor started (pid $(cat ../../../.cache/doc-processor.pid))"
+'''
+
+[tasks.doc-processor-stop]
+run = '''
+if [ ! -f ../../../.cache/doc-processor.pid ]; then
+  echo "doc-processor is not running (no pid file)"
+  exit 0
+fi
+PID="$(cat ../../../.cache/doc-processor.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  kill "$PID"
+  echo "stopped doc-processor (pid $PID)"
+else
+  echo "stale pid file found for pid $PID"
+fi
+rm -f ../../../.cache/doc-processor.pid
+'''
+
+[tasks.doc-processor-status]
+run = '''
+if [ ! -f ../../../.cache/doc-processor.pid ]; then
+  echo "doc-processor not running"
+  exit 1
+fi
+PID="$(cat ../../../.cache/doc-processor.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  echo "doc-processor running (pid $PID)"
+  exit 0
+fi
+echo "doc-processor not running (stale pid $PID)"
+exit 1
+'''

@@ -1,0 +1,577 @@
+package fileconverters
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+const statusTimeLayout = "20060102 15:04:05"
+const DefaultLineFileGeneratedSubject = "kb.line-file-generated"
+
+var ErrNotFound = errors.New("kb.inputs record not found")
+var ErrMissingParsedSuccess = errors.New("kb.inputs record missing parsed success status")
+var ErrResultFileNotFound = errors.New("kb.inputs result file not found")
+var ErrUnsupportedParserName = errors.New("unsupported parser_name")
+var ErrParserNotImplemented = errors.New("parser converter is not implemented")
+
+type ConvertRequest struct {
+	RecordID       int64  `json:"record_id"`
+	ResultFilename string `json:"result_filename"`
+	FileFormat     string `json:"file_format"`
+	Type           string `json:"type"`
+	Status         string `json:"status"`
+	Force          *bool  `json:"force,omitempty"`
+}
+
+type InputRecord struct {
+	ID             int64
+	Type           string
+	ParserName     string
+	StatusRaw      string
+	FileName       string
+	ResultFilename string
+}
+
+type Store interface {
+	GetInputRecord(ctx context.Context, id int64) (InputRecord, error)
+	UpdateInputStatus(ctx context.Context, id int64, statusJSON string, errorMsg *string) error
+}
+
+type Publisher interface {
+	Publish(ctx context.Context, subject string, payload []byte) error
+}
+
+type LineFileGeneratedEvent struct {
+	RecordID         int64  `json:"record_id"`
+	Type             string `json:"type"`
+	Status           string `json:"status"`
+	FileFormat       string `json:"file_format"`
+	ResultFilename   string `json:"result_filename"`
+	LineFileFilename string `json:"line_file_filename"`
+	Error            string `json:"error,omitempty"`
+}
+
+type Service struct {
+	Store          Store
+	Logger         *slog.Logger
+	Now            func() time.Time
+	Publisher      Publisher
+	PublishSubject string
+}
+
+// Subscriber defines the minimal JetStream-facing contract this service needs.
+// The concrete NATS/JetStream adapter can live outside this package.
+type Subscriber interface {
+	Subscribe(ctx context.Context, subject string, durable string, handler func(context.Context, []byte) error) error
+}
+
+func NewService(store Store, logger *slog.Logger) *Service {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Service{
+		Store:          store,
+		Logger:         logger,
+		Now:            time.Now,
+		PublishSubject: DefaultLineFileGeneratedSubject,
+	}
+}
+
+func ParseRequest(payload []byte) (ConvertRequest, error) {
+	var req ConvertRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		return ConvertRequest{}, fmt.Errorf("(MID_26041101) decode request: %w", err)
+	}
+	if req.RecordID <= 0 {
+		return ConvertRequest{}, fmt.Errorf("(MID_26041102) invalid record_id: %d", req.RecordID)
+	}
+	return req, nil
+}
+
+func shouldForceReprocess(req ConvertRequest) bool {
+	if req.Force == nil {
+		return true
+	}
+	return *req.Force
+}
+
+func (s *Service) HandleMessage(ctx context.Context, payload []byte) error {
+	req, err := ParseRequest(payload)
+	if err != nil {
+		return err
+	}
+
+	if req.Type != "" && !strings.EqualFold(strings.TrimSpace(req.Type), "pdf") {
+		s.Logger.Info("ignored message by type", "type", req.Type, "record_id", req.RecordID)
+		return nil
+	}
+	if req.Status != "" && !strings.EqualFold(strings.TrimSpace(req.Status), "success") {
+		s.Logger.Info("ignored message by status", "status", req.Status, "record_id", req.RecordID)
+		return nil
+	}
+
+	return s.HandleRequest(ctx, req)
+}
+
+// Run starts message consumption from a JetStream subject.
+// Message filtering is handled in HandleMessage:
+// type must be "pdf" and status must be "success" when provided.
+func (s *Service) Run(ctx context.Context, sub Subscriber, subject string, durable string) error {
+	if sub == nil {
+		return errors.New("subscriber is nil")
+	}
+	if strings.TrimSpace(subject) == "" {
+		return errors.New("subject is empty")
+	}
+	return sub.Subscribe(ctx, subject, durable, s.HandleMessage)
+}
+
+func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
+	start := s.Now()
+	var lineFilePath string
+	var procErr error
+	defer func() {
+		status := "success"
+		if procErr != nil {
+			status = "failed"
+		}
+		s.Logger.Info("finished processing converter record",
+			"record_id", req.RecordID,
+			"status", status,
+			"line_file", lineFilePath,
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+	}()
+
+	rec, err := s.Store.GetInputRecord(ctx, req.RecordID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			procErr = fmt.Errorf("(MID_26041103) record_id=%d: %w", req.RecordID, ErrNotFound)
+			return procErr
+		}
+		procErr = fmt.Errorf("(MID_26041104) load record %d: %w", req.RecordID, err)
+		return procErr
+	}
+	if !shouldForceReprocess(req) && HasOperationSuccess(rec.StatusRaw, "converted") {
+		s.Logger.Info("skip reprocess because converted already succeeded and force=false", "record_id", req.RecordID)
+		return nil
+	}
+
+	lineFilePath, procErr = s.convert(ctx, req, rec)
+
+	durationMs := time.Since(start).Milliseconds()
+	updatedStatus, statusErr := appendConvertedStatus(rec.StatusRaw, start, durationMs, procErr)
+	if statusErr != nil {
+		procErr = errors.Join(procErr, fmt.Errorf("(MID_26041105) build converted status: %w", statusErr))
+		return procErr
+	}
+
+	var errorMsg *string
+	if procErr != nil {
+		errStr := procErr.Error()
+		errorMsg = &errStr
+	}
+	if err := s.Store.UpdateInputStatus(ctx, rec.ID, updatedStatus, errorMsg); err != nil {
+		procErr = errors.Join(procErr, fmt.Errorf("(MID_26041106) update record status: %w", err))
+		return procErr
+	}
+	if emitErr := s.emitLineFileGeneratedEvent(ctx, req, lineFilePath, procErr); emitErr != nil {
+		procErr = errors.Join(procErr, emitErr)
+		return procErr
+	}
+
+	return procErr
+}
+
+func (s *Service) convert(_ context.Context, req ConvertRequest, rec InputRecord) (string, error) {
+	if !strings.EqualFold(strings.TrimSpace(rec.Type), "pdf") {
+		return "", fmt.Errorf("(MID_26041107) record_id=%d type=%q is not pdf", rec.ID, rec.Type)
+	}
+	if !HasParsedSuccess(rec.StatusRaw) {
+		return "", fmt.Errorf("(MID_26041108) record_id=%d: %w", rec.ID, ErrMissingParsedSuccess)
+	}
+
+	inputFile, err := resolveInputFile(req, rec)
+	if err != nil {
+		return "", err
+	}
+
+	parser := strings.ToLower(strings.TrimSpace(rec.ParserName))
+	switch parser {
+	case "", "opendata":
+		openDataInput, err := resolveOpenDataInputFile(inputFile)
+		if err != nil {
+			return "", err
+		}
+		out, err := ConvertOpenDataFile(openDataInput)
+		if err != nil {
+			return "", fmt.Errorf("(MID_26041109) opendata convert failed: %w", err)
+		}
+		return out, nil
+	case "paddleocr":
+		return "", fmt.Errorf("parser_name=%q: %w", rec.ParserName, ErrParserNotImplemented)
+	default:
+		return "", fmt.Errorf("(MID_26041110) unsupported parser_name=%q: %w", rec.ParserName, ErrUnsupportedParserName)
+	}
+}
+
+func resolveOpenDataInputFile(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("(MID_26041114) opendata input path is empty")
+	}
+	if hasTopLevelKids(path) {
+		return path, nil
+	}
+
+	dir := filepath.Dir(path)
+	if dir == "" || dir == "." {
+		return path, nil
+	}
+
+	preferred := preferredOpenDataJSONName(path)
+	type candidate struct {
+		path     string
+		score    int
+		basename string
+	}
+	candidates := make([]candidate, 0, 8)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return path, nil
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.EqualFold(filepath.Ext(name), ".json") {
+			continue
+		}
+		cPath := filepath.Join(dir, name)
+		if cPath == path {
+			continue
+		}
+		if !hasTopLevelKids(cPath) {
+			continue
+		}
+
+		score := 0
+		lowerName := strings.ToLower(name)
+		if preferred != "" && strings.EqualFold(name, preferred) {
+			score += 100
+		}
+		if strings.HasPrefix(lowerName, "parse_result_") {
+			score -= 20
+		}
+		if strings.HasPrefix(lowerName, "ocr_rslt_") {
+			score -= 10
+		}
+		candidates = append(candidates, candidate{
+			path:     cPath,
+			score:    score,
+			basename: lowerName,
+		})
+	}
+	if len(candidates) == 0 {
+		return path, nil
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return candidates[i].basename < candidates[j].basename
+	})
+	return candidates[0].path, nil
+}
+
+func hasTopLevelKids(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(f, 8*1024*1024))
+	if err != nil {
+		return false
+	}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return false
+	}
+	kids, ok := top["kids"]
+	if !ok {
+		return false
+	}
+	var arr []any
+	return json.Unmarshal(kids, &arr) == nil
+}
+
+func preferredOpenDataJSONName(path string) string {
+	base := strings.ToLower(filepath.Base(path))
+	if !strings.HasPrefix(base, "parse_result_") {
+		return ""
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	type parseResultMeta struct {
+		SourcePDF string `json:"source_pdf"`
+	}
+	var meta parseResultMeta
+	if err := json.NewDecoder(io.LimitReader(f, 4*1024*1024)).Decode(&meta); err != nil {
+		return ""
+	}
+	sourcePDF := strings.TrimSpace(meta.SourcePDF)
+	if sourcePDF == "" {
+		return ""
+	}
+	return strings.TrimSuffix(filepath.Base(sourcePDF), filepath.Ext(sourcePDF)) + ".json"
+}
+
+func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, req ConvertRequest, lineFilePath string, procErr error) error {
+	if s.Publisher == nil {
+		return nil
+	}
+	subject := strings.TrimSpace(s.PublishSubject)
+	if subject == "" {
+		subject = DefaultLineFileGeneratedSubject
+	}
+
+	ev := LineFileGeneratedEvent{
+		RecordID:         req.RecordID,
+		Type:             "pdf",
+		FileFormat:       "txt",
+		ResultFilename:   strings.TrimSpace(req.ResultFilename),
+		LineFileFilename: strings.TrimSpace(lineFilePath),
+	}
+	if procErr == nil {
+		ev.Status = "success"
+	} else {
+		ev.Status = "failed"
+		ev.Error = procErr.Error()
+	}
+
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		return fmt.Errorf("(MID_26041112) encode line-file-generated event: %w", err)
+	}
+	if err := s.Publisher.Publish(ctx, subject, payload); err != nil {
+		return fmt.Errorf("(MID_26041113) publish event subject=%s: %w", subject, err)
+	}
+	return nil
+}
+
+func resolveInputFile(req ConvertRequest, rec InputRecord) (string, error) {
+	candidates := make([]string, 0, 16)
+	if strings.TrimSpace(req.ResultFilename) != "" {
+		candidates = append(candidates, strings.TrimSpace(req.ResultFilename))
+	}
+	if strings.TrimSpace(rec.ResultFilename) != "" {
+		candidates = append(candidates, strings.TrimSpace(rec.ResultFilename))
+	}
+
+	baseDir := filepath.Dir(strings.TrimSpace(rec.FileName))
+	for _, name := range []string{strings.TrimSpace(req.ResultFilename), strings.TrimSpace(rec.ResultFilename)} {
+		if name == "" || filepath.IsAbs(name) || baseDir == "." || baseDir == "" {
+			continue
+		}
+		candidates = append(candidates, filepath.Join(baseDir, name))
+	}
+	if baseDir != "." && baseDir != "" {
+		// Fallback candidates when result_filename is empty/missing.
+		candidates = append(candidates, filepath.Join(baseDir, fmt.Sprintf("parse_result_%d.json", rec.ID)))
+		if base := strings.TrimSpace(filepath.Base(rec.FileName)); base != "" {
+			candidates = append(candidates, filepath.Join(baseDir, strings.TrimSuffix(base, filepath.Ext(base))+".json"))
+		}
+	}
+	if baseDir != "." && baseDir != "" {
+		if entries, err := os.ReadDir(baseDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				if strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+					candidates = append(candidates, filepath.Join(baseDir, entry.Name()))
+				}
+			}
+		}
+	}
+
+	seen := map[string]struct{}{}
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+
+	return "", fmt.Errorf("(MID_26041111) record_id=%d requested_result=%q: %w", rec.ID, req.ResultFilename, ErrResultFileNotFound)
+}
+
+type statusEntry map[string]any
+
+func decodeStatus(raw string) []statusEntry {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return []statusEntry{}
+	}
+
+	var arr []statusEntry
+	if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+		return arr
+	}
+
+	var one statusEntry
+	if err := json.Unmarshal([]byte(raw), &one); err == nil {
+		return []statusEntry{one}
+	}
+
+	return []statusEntry{}
+}
+
+func HasParsedSuccess(rawStatus string) bool {
+	return HasOperationSuccess(rawStatus, "parsed")
+}
+
+func HasOperationSuccess(rawStatus string, operation string) bool {
+	wantOp := strings.ToLower(strings.TrimSpace(operation))
+	if wantOp == "" {
+		return false
+	}
+	entries := decodeStatus(rawStatus)
+	for _, e := range entries {
+		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
+		if op != wantOp {
+			continue
+		}
+		proc := strings.ToLower(strings.TrimSpace(asString(e["proc-status"])))
+		if proc == "success" {
+			return true
+		}
+		if proc == "" {
+			legacy := strings.ToLower(strings.TrimSpace(asString(e["status"])))
+			if legacy == "success" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func appendConvertedStatus(raw string, start time.Time, durationMs int64, procErr error) (string, error) {
+	entries := decodeStatus(raw)
+	entry := statusEntry{
+		"operation":  "converted",
+		"start_time": start.Format(statusTimeLayout),
+		"ms-used":    durationMs,
+	}
+	if procErr == nil {
+		entry["proc-status"] = "success"
+	} else {
+		entry["proc-status"] = "failed"
+		entry["error"] = procErr.Error()
+	}
+
+	replaced := false
+	dedup := make([]statusEntry, 0, len(entries)+1)
+	for _, e := range entries {
+		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
+		if op != "converted" {
+			dedup = append(dedup, e)
+			continue
+		}
+		if !replaced {
+			dedup = append(dedup, entry)
+			replaced = true
+		}
+	}
+	if !replaced {
+		dedup = append(dedup, entry)
+	}
+
+	entries = dedup
+	out, err := json.Marshal(entries)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func asString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", x)
+	}
+}
+
+type SQLStore struct {
+	DB *sql.DB
+}
+
+func (s SQLStore) GetInputRecord(ctx context.Context, id int64) (InputRecord, error) {
+	const stmt = `
+SELECT id,
+       COALESCE(type, ''),
+       COALESCE(parser_name, ''),
+       COALESCE(status::text, '[]'),
+       COALESCE(file_name, ''),
+       COALESCE(result_filename, '')
+FROM kb.inputs
+WHERE id = $1`
+
+	var rec InputRecord
+	err := s.DB.QueryRowContext(ctx, stmt, id).Scan(
+		&rec.ID,
+		&rec.Type,
+		&rec.ParserName,
+		&rec.StatusRaw,
+		&rec.FileName,
+		&rec.ResultFilename,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return InputRecord{}, ErrNotFound
+		}
+		return InputRecord{}, err
+	}
+	return rec, nil
+}
+
+func (s SQLStore) UpdateInputStatus(ctx context.Context, id int64, statusJSON string, errorMsg *string) error {
+	const stmt = `
+UPDATE kb.inputs
+SET status = $1::jsonb,
+    error_msg = $2,
+    modify_time = NOW()
+WHERE id = $3`
+	_, err := s.DB.ExecContext(ctx, stmt, statusJSON, errorMsg, id)
+	return err
+}

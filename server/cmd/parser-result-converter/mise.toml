@@ -1,0 +1,66 @@
+[tools]
+go = "1.25.7"
+
+[tasks.build-parser-result-converter]
+run = "go build -buildvcs=false -o ../../../.cache/parser-result-converter.exe ."
+
+[tasks.parser-result-converter-run]
+run = "go run ."
+
+[tasks.parser-result-converter-start]
+run = '''
+mkdir -p ../../../.cache
+if [ -f ../../../.cache/parser-result-converter.pid ] && kill -0 "$(cat ../../../.cache/parser-result-converter.pid)" 2>/dev/null; then
+  echo "parser-result-converter already running (pid $(cat ../../../.cache/parser-result-converter.pid))"
+  exit 0
+fi
+nohup go run . > ../../../.cache/parser-result-converter.log 2>&1 &
+echo $! > ../../../.cache/parser-result-converter.pid
+echo "parser-result-converter started (pid $(cat ../../../.cache/parser-result-converter.pid))"
+'''
+
+[tasks.parser-result-converter-stop]
+run = '''
+if [ ! -f ../../../.cache/parser-result-converter.pid ]; then
+  echo "parser-result-converter is not running (no pid file)"
+  exit 0
+fi
+PID="$(cat ../../../.cache/parser-result-converter.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  kill "$PID"
+  echo "stopped parser-result-converter (pid $PID)"
+else
+  echo "stale pid file found for pid $PID"
+fi
+rm -f ../../../.cache/parser-result-converter.pid
+'''
+
+[tasks.parser-result-converter-status]
+run = '''
+if [ ! -f ../../../.cache/parser-result-converter.pid ]; then
+  echo "parser-result-converter not running"
+  exit 1
+fi
+PID="$(cat ../../../.cache/parser-result-converter.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  echo "parser-result-converter running (pid $PID)"
+  exit 0
+fi
+echo "parser-result-converter not running (stale pid $PID)"
+exit 1
+'''
+
+[tasks.build-pdf-result-converter]
+run = "mise run build-parser-result-converter"
+
+[tasks.pdf-result-converter-run]
+run = "mise run parser-result-converter-run"
+
+[tasks.pdf-result-converter-start]
+run = "mise run parser-result-converter-start"
+
+[tasks.pdf-result-converter-stop]
+run = "mise run parser-result-converter-stop"
+
+[tasks.pdf-result-converter-status]
+run = "mise run parser-result-converter-status"

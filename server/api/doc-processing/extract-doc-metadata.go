@@ -1,0 +1,488 @@
+package docprocessing
+
+import (
+	"bufio"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/chendingplano/shared/go/api/ApiTypes"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/chendingplano/shared/go/api/loggerutil"
+)
+
+const defaultDocMetaStatusTime = "20060102 15:04:05"
+
+type ExtractDocMetadataProcessor struct {
+	Store        DocMetadataStore
+	Client       LLMJSONExtractor
+	Logger       ApiTypes.JimoLogger
+	Now          func() time.Time
+	InitialPages int
+	PromptText   string
+	PromptRef    string
+	PromptPath   string
+	PromptErr    error
+	ModelName    string
+}
+
+type LLMJSONExtractor interface {
+	ExtractJSON(ctx context.Context, in llmclients.JSONExtractionInput) (map[string]any, error)
+}
+
+func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtractor, logger ApiTypes.JimoLogger) *ExtractDocMetadataProcessor {
+	if logger == nil {
+		logger = loggerutil.CreateDefaultLogger("MID_26041830")
+	}
+	promptText, promptRef, promptPath, promptErr := loadDocMetaPromptFromEnv()
+	return &ExtractDocMetadataProcessor{
+		Store:        store,
+		Client:       client,
+		Logger:       logger,
+		Now:          time.Now,
+		InitialPages: envInt("EXTRACT_DOCMETA_NUM_PAGES", 2, 1),
+		PromptText:   promptText,
+		PromptRef:    promptRef,
+		PromptPath:   promptPath,
+		PromptErr:    promptErr,
+		ModelName:    strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_LLM_NAME")),
+	}
+}
+
+func (p *ExtractDocMetadataProcessor) Name() string { return "extract_doc_metadata" }
+
+func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload []byte) error {
+	evt, err := ParseLineFileGeneratedEvent(payload)
+	if err != nil {
+		return fmt.Errorf("failed parsing event payload: %w", err)
+	}
+	if ShouldSkipLineFileGeneratedEvent(evt) {
+		p.Logger.Info("doc metadata event skipped", "record_id", evt.RecordID, "type", evt.Type, "status", evt.Status)
+		return nil
+	}
+
+	rec, err := p.Store.GetInputRecord(ctx, evt.RecordID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			p.Logger.Error("kb.inputs record not found", "record_id", evt.RecordID)
+			return nil
+		}
+		p.Logger.Error("failed loading kb.inputs record", "record_id", evt.RecordID, "error", err)
+		return nil
+	}
+
+	if strings.TrimSpace(rec.ParserName) == "" {
+		return p.failAndPersist(ctx, rec, errors.New("missing parser name"))
+	}
+	if strings.TrimSpace(rec.ResultFilename) == "" {
+		return p.failAndPersist(ctx, rec, errors.New("missing result filename"))
+	}
+
+	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
+	if err != nil {
+		return p.failAndPersist(ctx, rec, err)
+	}
+
+	fi, err := os.Stat(inputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return p.failAndPersist(ctx, rec, fmt.Errorf("input file not exist: %s", inputPath))
+		}
+		return p.failAndPersist(ctx, rec, fmt.Errorf("stat input file: %w", err))
+	}
+	if fi.Size() == 0 {
+		return p.failAndPersist(ctx, rec, errors.New("input file empty"))
+	}
+
+	linesByPage, maxPage, err := readLineFile(inputPath)
+	if err != nil {
+		return p.failAndPersist(ctx, rec, err)
+	}
+
+	start := p.Now()
+	lastPage := p.InitialPages
+	if lastPage < 1 {
+		lastPage = 1
+	}
+	if maxPage > 0 && lastPage > maxPage {
+		lastPage = maxPage
+	}
+
+	var out docMetadataExtractionOutput
+	for i := 0; i < 10; i++ {
+		if p.PromptErr != nil {
+			return p.failAndPersist(ctx, rec, fmt.Errorf("load prompt file %q failed: %w", p.PromptRef, p.PromptErr))
+		}
+
+		inputText := buildInputText(linesByPage, lastPage)
+		parsed, extractErr := p.Client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+			PromptText: p.PromptText,
+			ModelName:  p.ModelName,
+			InputText:  inputText,
+		})
+		if extractErr != nil {
+			return p.failAndPersist(ctx, rec, fmt.Errorf("extract metadata via llm: %w, model name:%s, prompt file:%s", extractErr, p.ModelName, p.PromptRef))
+		}
+		out = parseDocMetadataOutput(parsed)
+		if !out.NeedMorePages || maxPage == 0 || lastPage >= maxPage {
+			break
+		}
+		lastPage += p.InitialPages
+		if lastPage > maxPage {
+			lastPage = maxPage
+		}
+	}
+
+	statusRaw, statusErr := appendDocMetaStatus(rec.StatusRaw, start, time.Since(start).Milliseconds(), nil)
+	if statusErr != nil {
+		return fmt.Errorf("append status: %w", statusErr)
+	}
+
+	upd := DocMetadataUpdate{
+		Title:       strings.TrimSpace(out.Title),
+		DocNo:       strings.TrimSpace(out.DocNo),
+		PublishDate: strings.TrimSpace(out.PublishDate),
+		Authors:     pickPreferredAuthors(out),
+		DocMetadata: copyMetadata(out.Metadata),
+		StatusRaw:   statusRaw,
+		ErrorMsg:    nil,
+	}
+	if err := p.Store.UpdateInputMetadata(ctx, rec.ID, upd); err != nil {
+		return fmt.Errorf("update kb.inputs metadata: %w", err)
+	}
+
+	p.Logger.Info("doc metadata extracted",
+		"record_id", rec.ID,
+		"input_file", inputPath,
+		"title", upd.Title,
+		"doc_no", upd.DocNo,
+		"authors", len(upd.Authors),
+	)
+	return nil
+}
+
+type docMetadataExtractionOutput struct {
+	Title               string
+	DocNo               string
+	PublishDate         string
+	Authors             []string
+	MainDraftingPersons []string
+	DraftingPersons     []string
+	Metadata            map[string]any
+	NeedMorePages       bool
+}
+
+func parseDocMetadataOutput(parsed map[string]any) docMetadataExtractionOutput {
+	out := docMetadataExtractionOutput{
+		Title:               strings.TrimSpace(asString(parsed["title"])),
+		DocNo:               strings.TrimSpace(asString(parsed["doc_no"])),
+		PublishDate:         strings.TrimSpace(asString(parsed["publish_date"])),
+		Authors:             asStringSlice(parsed["authors"]),
+		MainDraftingPersons: asStringSlice(parsed["main_drafting_persons"]),
+		DraftingPersons:     asStringSlice(parsed["drafting_persons"]),
+		Metadata:            copyExtractedDocMetadata(parsed),
+	}
+	if out.Metadata == nil {
+		out.Metadata = map[string]any{}
+	}
+	if v, ok := parsed["need_more_pages"]; ok {
+		b, err := asBool(v, false)
+		if err == nil {
+			out.NeedMorePages = b
+		}
+	}
+	return out
+}
+
+func (p *ExtractDocMetadataProcessor) failAndPersist(ctx context.Context, rec DocMetadataInputRecord, procErr error) error {
+	errMsg := strings.TrimSpace(procErr.Error())
+	statusRaw, err := appendDocMetaStatus(rec.StatusRaw, p.Now(), 0, procErr)
+	if err != nil {
+		p.Logger.Error("failed building status json", "record_id", rec.ID, "error", err)
+		return nil
+	}
+
+	updateErr := p.Store.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+		ErrorMsg:  &errMsg,
+	})
+	if updateErr != nil {
+		p.Logger.Error("failed persisting error status", "record_id", rec.ID, "error", updateErr)
+		return nil
+	}
+
+	p.Logger.Error("doc metadata extraction failed",
+		"record_id", rec.ID,
+		"error", procErr,
+		"prompt_ref", p.PromptRef,
+		"prompt_path", p.PromptPath,
+	)
+	return nil
+}
+
+func loadDocMetaPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
+	promptRef = strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_PROMPT"))
+	if promptRef == "" {
+		return defaultDocMetaPrompt, "", "", nil
+	}
+
+	paths := make([]string, 0, 8)
+	addCandidate := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		for _, existing := range paths {
+			if existing == p {
+				return
+			}
+		}
+		paths = append(paths, p)
+	}
+
+	if filepath.IsAbs(promptRef) {
+		addCandidate(promptRef)
+	} else {
+		addCandidate(promptRef)
+		if promptDir := strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_PROMPT_DIR")); promptDir != "" {
+			addCandidate(filepath.Join(promptDir, promptRef))
+		}
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", promptRef))
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", "prompts", promptRef))
+		addCandidate(filepath.Join("prompts", promptRef))
+	}
+
+	var lastErr error
+	for _, candidate := range paths {
+		bs, err := os.ReadFile(candidate)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		text := strings.TrimSpace(string(bs))
+		if text == "" {
+			return "", promptRef, candidate, fmt.Errorf("prompt file is empty")
+		}
+		return text, promptRef, candidate, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no candidate path available")
+	}
+	return "", promptRef, "", fmt.Errorf("prompt file not found: %w", lastErr)
+}
+
+func readLineFile(path string) (map[int][]string, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+
+	linesByPage := map[int][]string{}
+	maxPage := 0
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		page := parsePageNumber(line)
+		if page <= 0 {
+			page = 1
+		}
+		linesByPage[page] = append(linesByPage[page], line)
+		if page > maxPage {
+			maxPage = page
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, 0, err
+	}
+	if maxPage == 0 {
+		maxPage = 1
+	}
+	return linesByPage, maxPage, nil
+}
+
+func parsePageNumber(line string) int {
+	parts := strings.Fields(line)
+	if len(parts) < 2 {
+		return 0
+	}
+	page, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0
+	}
+	if page < 1 {
+		return 0
+	}
+	return page
+}
+
+func buildInputText(linesByPage map[int][]string, lastPage int) string {
+	if lastPage < 1 {
+		lastPage = 1
+	}
+	var b strings.Builder
+	for p := 1; p <= lastPage; p++ {
+		for _, line := range linesByPage[p] {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func appendDocMetaStatus(raw string, start time.Time, durationMs int64, procErr error) (string, error) {
+	entries := decodeDocMetaStatus(raw)
+	entry := map[string]any{
+		"operation":  "extract_metadata",
+		"start_time": start.Format(defaultDocMetaStatusTime),
+		"ms-used":    durationMs,
+	}
+	if procErr == nil {
+		entry["proc-status"] = "success"
+		entry["proc_status"] = "success"
+	} else {
+		entry["proc-status"] = "failed"
+		entry["proc_status"] = "failed"
+		entry["error"] = procErr.Error()
+	}
+
+	replaced := false
+	out := make([]map[string]any, 0, len(entries)+1)
+	for _, e := range entries {
+		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
+		if op != "extract_metadata" && op != "extract_doc_metadata" {
+			out = append(out, e)
+			continue
+		}
+		if !replaced {
+			out = append(out, entry)
+			replaced = true
+		}
+	}
+	if !replaced {
+		out = append(out, entry)
+	}
+
+	bs, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(bs), nil
+}
+
+func decodeDocMetaStatus(raw string) []map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return []map[string]any{}
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+		return arr
+	}
+	var one map[string]any
+	if err := json.Unmarshal([]byte(raw), &one); err == nil {
+		return []map[string]any{one}
+	}
+	return []map[string]any{}
+}
+
+func dedupeNonEmpty(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		v := strings.TrimSpace(item)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func pickPreferredAuthors(out docMetadataExtractionOutput) []string {
+	if authors := dedupeNonEmpty(out.Authors); len(authors) > 0 {
+		return authors
+	}
+	if authors := dedupeNonEmpty(out.MainDraftingPersons); len(authors) > 0 {
+		return authors
+	}
+	return dedupeNonEmpty(out.DraftingPersons)
+}
+
+func copyMetadata(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func hasPathSeparator(name string) bool {
+	return strings.ContainsRune(name, filepath.Separator) || strings.Contains(name, "/") || strings.Contains(name, `\\`)
+}
+
+func asStringSlice(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		if s := strings.TrimSpace(asString(v)); s != "" {
+			return []string{s}
+		}
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		s := strings.TrimSpace(asString(item))
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func copyExtractedDocMetadata(parsed map[string]any) map[string]any {
+	if len(parsed) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(parsed))
+	for k, v := range parsed {
+		key := strings.TrimSpace(k)
+		if key == "" || key == "need_more_pages" {
+			continue
+		}
+		out[key] = v
+	}
+	return out
+}
+
+const defaultDocMetaPrompt = `You extract document metadata from line-based document text.
+Return strict JSON with fields:
+- title: string
+- doc_no: string
+- publish_date: string
+- authors: string[]
+- main_drafting_persons: string[]
+- drafting_persons: string[]
+- metadata: object (other metadata only)
+- need_more_pages: boolean
+
+Rules:
+- If current pages are insufficient, set need_more_pages=true.
+- Never output markdown.
+- Prefer empty strings/arrays instead of null.`

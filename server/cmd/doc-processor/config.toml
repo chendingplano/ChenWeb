@@ -1,0 +1,9 @@
+[app_info]
+database_type = "pg"
+need_create_tables = false
+
+[postgres]
+create = true
+
+[mysql]
+create = false

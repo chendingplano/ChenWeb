@@ -5,19 +5,17 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api"
 	"github.com/chendingplano/deepdoc/server/api/database"
 	"github.com/chendingplano/deepdoc/server/api/docgenworker"
+	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/databaseutil"
-	sharedgoose "github.com/chendingplano/shared/go/api/goose"
 	"github.com/chendingplano/shared/go/api/libmanager"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/chendingplano/shared/go/api/security"
@@ -75,7 +73,7 @@ func main() {
 	if err != nil {
 		logger.Error("failed loading config 'config.toml'", "error", err)
 	}
-	normalizeMigrationPaths(logger, configPath)
+	config.NormalizeMigrationPaths(logger, configPath)
 
 	security.InitAccCtrlMgr()
 
@@ -159,20 +157,35 @@ func main() {
 	}
 
 	logger.Info("Start Project Migrations")
-	err = sharedgoose.RunProjectMigrations(ctx, logger, project_db)
+	err = config.RunMigrations(ctx, logger)
 	if err != nil {
-		logger.Error("failed to run project migrator. System exit!!!!", "error", err)
-		os.Exit(1)
-	}
-
-	logger.Info("Start Shared Migrations")
-	err = sharedgoose.RunSharedMigrations(ctx, logger, ApiTypes.SharedMigrationDBHandle)
-	if err != nil {
-		logger.Error("failed to run shared migrator. System exit!!!!", "error", err)
+		logger.Error("failed to run migrations. System exit!!!!", "error", err)
 		os.Exit(1)
 	}
 
 	logger.Info("migrations completed successfully")
+
+	// Prompt Optimizer initialization: load the AES-GCM key used to encrypt
+	// per-user API keys at rest, then seed the built-in templates so every
+	// user has a usable starter set on first visit.
+	poEncKey, err := security.LoadKeyFromEnv("PROMPT_OPTIMIZER_ENCRYPTION_KEY")
+	if err != nil {
+		logger.Error("failed to load PROMPT_OPTIMIZER_ENCRYPTION_KEY",
+			"error", err, "loc", "CWB_DDM_165")
+		os.Exit(1)
+	}
+	if err := promptoptimizerhandler.Init(poEncKey); err != nil {
+		logger.Error("failed to init promptoptimizerhandler",
+			"error", err, "loc", "CWB_DDM_166")
+		os.Exit(1)
+	}
+	if err := promptoptimizerhandler.SeedBuiltinTemplates(project_db); err != nil {
+		logger.Error("failed to seed prompt optimizer built-in templates",
+			"error", err, "loc", "CWB_DDM_167")
+		// non-fatal: users can still create their own templates
+	} else {
+		logger.Info("prompt optimizer built-in templates seeded", "loc", "CWB_DDM_168")
+	}
 
 	/*
 		parserCfg := config.GetPDFParserConfig()
@@ -239,37 +252,4 @@ func main() {
 
 	logger.Info("[API] ⇨ http server started on", "server_port", pp)
 	e.Logger.Fatal(e.Start(pp))
-}
-
-func normalizeMigrationPaths(logger ApiTypes.JimoLogger, configPath string) {
-	absConfigPath, err := filepath.Abs(configPath)
-	if err != nil {
-		logger.Warn("failed to resolve absolute config path; migration paths left as-is",
-			"config_path", configPath, "error", err)
-		return
-	}
-	configDir := filepath.Dir(absConfigPath)
-
-	cfg := ApiTypes.CommonConfig.MigrationConfig
-
-	if strings.TrimSpace(cfg.MigrationsDir) == "" {
-		cfg.MigrationsDir = "project_migrations"
-	}
-	if strings.TrimSpace(cfg.SharedMigrationsDir) == "" {
-		cfg.SharedMigrationsDir = "shared_migrations"
-	}
-
-	if !filepath.IsAbs(cfg.MigrationsDir) {
-		cfg.MigrationsDir = filepath.Clean(filepath.Join(configDir, cfg.MigrationsDir))
-	}
-	if !filepath.IsAbs(cfg.SharedMigrationsDir) {
-		cfg.SharedMigrationsDir = filepath.Clean(filepath.Join(configDir, cfg.SharedMigrationsDir))
-	}
-
-	cfg.MigrationsFS = os.DirFS(cfg.MigrationsDir)
-	ApiTypes.CommonConfig.MigrationConfig = cfg
-
-	logger.Info("normalized migration paths",
-		"project_migrations_dir", cfg.MigrationsDir,
-		"shared_migrations_dir", cfg.SharedMigrationsDir)
 }

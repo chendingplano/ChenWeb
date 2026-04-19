@@ -26,6 +26,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
+	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -291,6 +292,33 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.DELETE("/docgen/queries/:id", docgenhandler.DeleteQuery)
 	apiGroup.GET("/docgen/templates", docgenhandler.ListTemplates)
 	apiGroup.POST("/docgen/templates", docgenhandler.UploadTemplate)
+
+	// Prompt Optimizer endpoints — model registry (with encrypted API keys),
+	// templates, run history, favorites, variables, and the proxied optimize/
+	// iterate/test/analyze operations. All endpoints scope by user_id.
+	apiGroup.GET("/prompt-optimizer/models", promptoptimizerhandler.ListModels)
+	apiGroup.POST("/prompt-optimizer/models", promptoptimizerhandler.CreateModel)
+	apiGroup.PUT("/prompt-optimizer/models/:id", promptoptimizerhandler.UpdateModel)
+	apiGroup.DELETE("/prompt-optimizer/models/:id", promptoptimizerhandler.DeleteModel)
+
+	apiGroup.GET("/prompt-optimizer/templates", promptoptimizerhandler.ListTemplates)
+	apiGroup.GET("/prompt-optimizer/templates/:id", promptoptimizerhandler.GetTemplate)
+	apiGroup.POST("/prompt-optimizer/templates", promptoptimizerhandler.CreateTemplate)
+	apiGroup.PUT("/prompt-optimizer/templates/:id", promptoptimizerhandler.UpdateTemplate)
+	apiGroup.DELETE("/prompt-optimizer/templates/:id", promptoptimizerhandler.DeleteTemplate)
+
+	apiGroup.GET("/prompt-optimizer/history", promptoptimizerhandler.ListHistory)
+	apiGroup.DELETE("/prompt-optimizer/history/:id", promptoptimizerhandler.DeleteHistory)
+
+	apiGroup.GET("/prompt-optimizer/favorites", promptoptimizerhandler.ListFavorites)
+	apiGroup.POST("/prompt-optimizer/favorites", promptoptimizerhandler.CreateFavorite)
+	apiGroup.DELETE("/prompt-optimizer/favorites/:id", promptoptimizerhandler.DeleteFavorite)
+
+	apiGroup.GET("/prompt-optimizer/variables", promptoptimizerhandler.ListVariables)
+	apiGroup.POST("/prompt-optimizer/variables", promptoptimizerhandler.UpsertVariable)
+	apiGroup.DELETE("/prompt-optimizer/variables/:id", promptoptimizerhandler.DeleteVariable)
+
+	apiGroup.POST("/prompt-optimizer/optimize", promptoptimizerhandler.OptimizePrompt)
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {

@@ -40,3 +40,6 @@ Data
 server/.cache
 autotester
 pdfparser
+.models.toml
+
+doc-processor

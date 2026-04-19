@@ -14,6 +14,12 @@ run = "go build -buildvcs=false -o ./.cache/server.exe ./server/cmd/deepdoc/."
 [tasks.build-pdf-parser]
 run = "go build -buildvcs=false -o ./.cache/pdf-parser.exe ./server/cmd/pdfparser/."
 
+[tasks.build-autotester]
+run = "go build -buildvcs=false -o ./.cache/autotester.exe ./server/cmd/autotester/."
+
+[tasks.build-doc-processor]
+run = "go build -buildvcs=false -o ./.cache/doc-processor.exe ./server/cmd/doc-processor/."
+
 [tasks.build-web]
 run = '''
 cd web && bun run build && cd ..

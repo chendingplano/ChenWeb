@@ -38,14 +38,21 @@ func main() {
 
 	// Load config
 	logger.Info("Loading config from config.toml (main)")
-	err := config.LoadConfig(new_ctx, logger, "./config.toml")
+	configPath := "./config.toml"
+	err := config.LoadConfig(new_ctx, logger, configPath)
 	if err != nil {
-		logger.Error("loading config failed", "path", "./config.toml")
+		logger.Error("loading config failed", "path", configPath)
 	}
+	config.NormalizeMigrationPaths(logger, configPath)
 
 	if err := databaseutil.InitDB(new_ctx, ApiTypes.CommonConfig); err != nil {
 		logger.Error("Failed to initialize database", "error", err)
 		os.Exit(2)
+	}
+
+	if err := config.RunMigrations(ctx, logger); err != nil {
+		logger.Error("migrations failed", "error", err)
+		os.Exit(1)
 	}
 
 	logger.Info("To create process status table (main)")
