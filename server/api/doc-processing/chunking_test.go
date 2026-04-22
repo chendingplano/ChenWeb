@@ -48,10 +48,10 @@ func (f *fakeStore) UpdateInputStatus(_ context.Context, id int64, statusJSON st
 
 func TestBuildChunks_RespectsTableBlock(t *testing.T) {
 	input := strings.Join([]string{
-		"1 1 paragraph Intro [0,0,1,1]",
-		"2 1 table |A|B| [0,0,1,1]",
-		"3 1 table |1|2| [0,0,1,1]",
-		"4 1 paragraph Tail [0,0,1,1]",
+		"1	1	paragraph	TestFont	12	[0,0,1,1]	Intro",
+		"2	1	table	TestFont	12	[0,0,1,1]	|A|B|",
+		"3	1	table	TestFont	12	[0,0,1,1]	|1|2|",
+		"4	1	paragraph	TestFont	12	[0,0,1,1]	Tail",
 	}, "\n")
 	lines, err := ParseInputLines([]byte(input))
 	if err != nil {
@@ -75,10 +75,10 @@ func TestBuildChunks_RespectsTableBlock(t *testing.T) {
 
 func TestBuildChunks_NonNumericListNotSplit(t *testing.T) {
 	input := strings.Join([]string{
-		"1 1 paragraph Intro [0,0,1,1]",
-		"2 1 list-item - item A [0,0,1,1]",
-		"3 1 list-item - item B [0,0,1,1]",
-		"4 1 paragraph Tail [0,0,1,1]",
+		"1	1	paragraph	TestFont	12	[0,0,1,1]	Intro",
+		"2	1	list-item	TestFont	12	[0,0,1,1]	- item A",
+		"3	1	list-item	TestFont	12	[0,0,1,1]	- item B",
+		"4	1	paragraph	TestFont	12	[0,0,1,1]	Tail",
 	}, "\n")
 	lines, err := ParseInputLines([]byte(input))
 	if err != nil {
@@ -101,9 +101,9 @@ func TestBuildChunks_NonNumericListNotSplit(t *testing.T) {
 }
 
 func TestBuildChunks_LargeNumericListCanSplit(t *testing.T) {
-	raw := []string{"1 1 paragraph Intro [0,0,1,1]"}
+	raw := []string{"1	1	paragraph	TestFont	12	[0,0,1,1]	Intro"}
 	for i := 1; i <= 8; i++ {
-		raw = append(raw, "2 1 list-item "+string(rune('0'+i))+". item [0,0,1,1]")
+		raw = append(raw, "2	1	list-item	TestFont	12	[0,0,1,1]	"+string(rune('0'+i))+". item")
 	}
 	input := strings.Join(raw, "\n")
 	lines, err := ParseInputLines([]byte(input))
@@ -123,15 +123,15 @@ func TestBuildChunks_LargeNumericListCanSplit(t *testing.T) {
 func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	tmp := t.TempDir()
 	input := strings.Join([]string{
-		"1 1 paragraph Intro [0,0,1,1]",
-		"2 1 paragraph More [0,0,1,1]",
-		"3 2 paragraph End [0,0,1,1]",
+		"1	1	paragraph	TestFont	12	[0,0,1,1]	Intro",
+		"2	1	paragraph	TestFont	12	[0,0,1,1]	More",
+		"3	2	paragraph	TestFont	12	[0,0,1,1]	End",
 	}, "\n")
 
 	st := &fakeStore{rec: InputRecord{ID: 7523, StatusRaw: "[]"}}
-	svc := NewService(st, nil)
+	svc := NewFixedSizeChunkingService(st, nil)
 	svc.ChunkDir = tmp
-	svc.ChunkSize = 40
+	svc.ChunkSize = 80
 	svc.OverlapPercent = 50
 
 	if err := svc.HandleInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
@@ -158,9 +158,20 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read chunk2: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(b2)), "\n")
-	if len(lines) == 0 || !strings.HasPrefix(lines[0], "o ") {
-		t.Fatalf("expected overlap mark 'o' as prefix in chunk2 first line, got: %s", string(b2))
+	contents := []string{string(b2)}
+	chunk3 := filepath.Join(tmp, "7", "7523", "chunk_0003")
+	if b3, err := os.ReadFile(chunk3); err == nil {
+		contents = append(contents, string(b3))
+	}
+	for _, content := range contents {
+		for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
+			if line == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, "r ") && !strings.HasPrefix(line, "o ") {
+				t.Fatalf("expected chunk line to start with mark prefix, got %q", line)
+			}
+		}
 	}
 
 	var status []map[string]any
@@ -181,12 +192,12 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 
 func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 	st := &fakeStore{rec: InputRecord{ID: 1001, StatusRaw: "[]"}}
-	svc := NewService(st, nil)
+	svc := NewFixedSizeChunkingService(st, nil)
 	svc.ChunkDir = t.TempDir()
 	svc.ChunkSize = 2
 	svc.OverlapPercent = 0
 
-	err := svc.HandleInput(context.Background(), 1001, "", []byte("1 1 paragraph x [0,0,1,1]"))
+	err := svc.HandleInput(context.Background(), 1001, "", []byte("1	1	paragraph	TestFont	12	[0,0,1,1]	x"))
 	if err == nil {
 		t.Fatalf("expected error when input_filename is empty")
 	}
@@ -209,7 +220,7 @@ func TestNewService_UsesRequiredAndDefaultChunkEnv(t *testing.T) {
 	t.Setenv("CHUNK_OVERLAP_PERCENT", "")
 	t.Setenv("CHUNK_DIR", "")
 
-	svc := NewService(&fakeStore{}, nil)
+	svc := NewFixedSizeChunkingService(&fakeStore{}, nil)
 	if svc.ChunkSize != 300 {
 		t.Fatalf("ChunkSize=%d, want 300", svc.ChunkSize)
 	}
@@ -223,12 +234,12 @@ func TestNewService_UsesRequiredAndDefaultChunkEnv(t *testing.T) {
 
 func TestService_HandleInput_MissingChunkDir(t *testing.T) {
 	st := &fakeStore{rec: InputRecord{ID: 2002, StatusRaw: "[]"}}
-	svc := NewService(st, nil)
+	svc := NewFixedSizeChunkingService(st, nil)
 	svc.ChunkDir = ""
 	svc.ChunkSize = 2
 	svc.OverlapPercent = 0
 
-	err := svc.HandleInput(context.Background(), 2002, "sample.txt", []byte("1 1 paragraph x [0,0,1,1]"))
+	err := svc.HandleInput(context.Background(), 2002, "sample.txt", []byte("1	1	paragraph	TestFont	12	[0,0,1,1]	x"))
 	if err == nil {
 		t.Fatalf("expected error when CHUNK_DIR is empty")
 	}

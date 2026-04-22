@@ -96,8 +96,8 @@ func TestConvertOpenDataFile(t *testing.T) {
 	in := filepath.Join(tmp, "result.json")
 	content := `{
   "kids": [
-    {"type":"paragraph","page number":1,"content":"hello","bounding box":[1,2,3,4]},
-    {"type":"heading","page number":2,"heading level":"Doctitle","content":"Title","bounding box":[5,6,7,8]},
+    {"type":"paragraph","page number":1,"font":"HiddenHorzOCR","font size":11.04,"content":"hello","bounding box":[1,2,3,4]},
+    {"type":"heading","page number":2,"heading level":"Doctitle","font":"SimHei","font size":15.96,"content":"Title","bounding box":[5,6,7,8]},
     {"type":"image","page number":2,"source":"img/a.png","bounding box":[9,10,11,12]}
   ]
 }`
@@ -118,13 +118,13 @@ func TestConvertOpenDataFile(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines, got %d", len(lines))
 	}
-	if !strings.Contains(lines[0], "1 1 paragraph hello [1,2,3,4]") {
+	if !strings.Contains(lines[0], "1\t1\tparagraph\tHiddenHorzOCR\t11\t[1,2,3,4]\thello") {
 		t.Fatalf("unexpected line1: %s", lines[0])
 	}
-	if !strings.Contains(lines[1], "2 2 heading(Doctitle) Title [5,6,7,8]") {
+	if !strings.Contains(lines[1], "2\t2\theading(Doctitle)\tSimHei\t16\t[5,6,7,8]\tTitle") {
 		t.Fatalf("unexpected line2: %s", lines[1])
 	}
-	if !strings.Contains(lines[2], "3 2 image img/a.png [9,10,11,12]") {
+	if !strings.Contains(lines[2], "3\t2\timage\tunknown-font\t12\t[9,10,11,12]\timg/a.png") {
 		t.Fatalf("unexpected line3: %s", lines[2])
 	}
 }
@@ -243,13 +243,13 @@ func TestConvertOpenDataFile_ConvertsTableToTableRows(t *testing.T) {
 		t.Fatalf("read output: %v", err)
 	}
 	text := strings.TrimSpace(string(got))
-	if !strings.Contains(text, "1 6 table-row |元数据子集|元数据项|元数据值| []") {
+	if !strings.Contains(text, "1\t6\ttable-row\tunknown-font\t12\t[]\t|元数据子集|元数据项|元数据值|") {
 		t.Fatalf("missing table-row header line: %s", text)
 	}
-	if !strings.Contains(text, "2 6 table-row |标识信息子集<br><br>|数据命名表名称|医疗健康物联网 感知设备通信数据命名表 第 7 部分：能量检测仪| []") {
+	if !strings.Contains(text, "2\t6\ttable-row\tunknown-font\t12\t[]\t|标识信息子集<br><br>|数据命名表名称|医疗健康物联网 感知设备通信数据命名表 第 7 部分：能量检测仪|") {
 		t.Fatalf("missing expected first data row: %s", text)
 	}
-	if !strings.Contains(text, "3 6 table-row ||通信数据命名表特征数 据元允许值值域代码表|CV MHIOT.03.007.002 能量检测仪设备故障代码值域代码表<br>CV MHIOT.04.007.007 能量检测仪测量人体部位值域代码表| []") {
+	if !strings.Contains(text, "3\t6\ttable-row\tunknown-font\t12\t[]\t||通信数据命名表特征数 据元允许值值域代码表|CV MHIOT.03.007.002 能量检测仪设备故障代码值域代码表<br>CV MHIOT.04.007.007 能量检测仪测量人体部位值域代码表|") {
 		t.Fatalf("missing expected list-item joined markdown: %s", text)
 	}
 	if strings.Contains(text, "|---|---|---|") {
@@ -301,11 +301,11 @@ func TestConvertOpenDataFile_MergesSplitTablesAcrossPages(t *testing.T) {
 	if strings.Contains(text, "|---|---|---|") {
 		t.Fatalf("did not expect markdown separator rows after merge: %s", text)
 	}
-	if !strings.Contains(text, "1 7 table-row |A|B|C| [63.12,73.8,548.86,105.96]") {
+	if !strings.Contains(text, "1\t7\ttable-row\tunknown-font\t12\t[63.12,73.8,548.86,105.96]\t|A|B|C|") {
 		t.Fatalf("missing merged header row: %s", text)
 	}
-	if !strings.Contains(text, "2 8 table-row |r1c1|r1c2|r1c3| [63.12,585.19,548.86,743.74]") ||
-		!strings.Contains(text, "3 8 table-row |r2c1|r2c2|r2c3| [63.12,585.19,548.86,743.74]") {
+	if !strings.Contains(text, "2\t8\ttable-row\tunknown-font\t12\t[63.12,585.19,548.86,743.74]\t|r1c1|r1c2|r1c3|") ||
+		!strings.Contains(text, "3\t8\ttable-row\tunknown-font\t12\t[63.12,585.19,548.86,743.74]\t|r2c1|r2c2|r2c3|") {
 		t.Fatalf("missing merged data rows: %s", text)
 	}
 }
@@ -336,7 +336,7 @@ func TestConvertOpenDataFile_TableRowEscapesPipeAndUsesRowBBox(t *testing.T) {
 		t.Fatalf("read output: %v", err)
 	}
 	text := strings.TrimSpace(string(got))
-	if !strings.Contains(text, `1 5 table-row |A\|B|C| [10,18,55,45]`) {
+	if !strings.Contains(text, `1	5	table-row	unknown-font	12	[10,18,55,45]	|A\|B|C|`) {
 		t.Fatalf("expected escaped pipe and row bbox union, got: %s", text)
 	}
 }
@@ -451,7 +451,7 @@ func TestHandleRequestOpenDataPrefersDocumentJSONOverParseResultWrapper(t *testi
 	if err != nil {
 		t.Fatalf("read source txt: %v", err)
 	}
-	if !strings.Contains(string(out), "paragraph hello") {
+	if !strings.Contains(string(out), "1\t1\tparagraph\tunknown-font\t12\t[1,2,3,4]\thello") {
 		t.Fatalf("unexpected source txt content: %s", string(out))
 	}
 }

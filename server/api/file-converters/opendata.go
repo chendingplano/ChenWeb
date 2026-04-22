@@ -3,6 +3,7 @@ package fileconverters
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,8 @@ type extractedOpenDataLine struct {
 	Page         string
 	Type         string
 	HeadingLevel string
+	Font         string
+	FontSize     string
 	Content      string
 	BBox         string
 	Raw          string
@@ -40,6 +43,11 @@ type renderedTable struct {
 
 var romanNumeralRE = regexp.MustCompile(`^[ivxlcdm]+$`)
 var whitespaceRE = regexp.MustCompile(`\s+`)
+
+const (
+	defaultLineFont     = "unknown-font"
+	defaultLineFontSize = "12"
+)
 
 func ConvertOpenDataFile(inputPath string) (string, error) {
 	inputPath = strings.TrimSpace(inputPath)
@@ -170,6 +178,12 @@ func makeOpenDataLineItem(node map[string]any) (extractedOpenDataLine, bool) {
 	typ := normalizeTypeToken(asString(node["type"]))
 	headingLevel := strings.TrimSpace(asString(node["heading level"]))
 	page := formatPage(node["page number"])
+	font := strings.TrimSpace(asString(node["font"]))
+	fontSize := normalizeFontSize(firstNonEmptyAny(
+		node["font size"],
+		node["font_size"],
+		node["fontsize"],
+	))
 	content := strings.TrimSpace(asString(node["content"]))
 	if content == "" {
 		content = strings.TrimSpace(asString(node["source"]))
@@ -180,6 +194,8 @@ func makeOpenDataLineItem(node map[string]any) (extractedOpenDataLine, bool) {
 		Page:         page,
 		Type:         strings.TrimSpace(typ),
 		HeadingLevel: headingLevel,
+		Font:         font,
+		FontSize:     fontSize,
 		Content:      content,
 		BBox:         bbox,
 	}, true
@@ -251,12 +267,46 @@ func formatOpenDataLines(items []extractedOpenDataLine) []string {
 		if item.HeadingLevel != "" {
 			typ = fmt.Sprintf("%s(%s)", typ, item.HeadingLevel)
 		}
-		lines = append(lines, strings.TrimSpace(
-			fmt.Sprintf("%d %s %s %s %s", lineNum, item.Page, typ, item.Content, item.BBox),
-		))
+		page := strings.TrimSpace(item.Page)
+		if page == "" {
+			page = "1"
+		}
+		lineType := strings.TrimSpace(typ)
+		if lineType == "" {
+			lineType = "paragraph"
+		}
+		font := strings.TrimSpace(item.Font)
+		if font == "" {
+			font = defaultLineFont
+		}
+		fontSize := strings.TrimSpace(item.FontSize)
+		if fontSize == "" {
+			fontSize = defaultLineFontSize
+		}
+		coordinate := strings.TrimSpace(item.BBox)
+		if coordinate == "" {
+			coordinate = "[]"
+		}
+		lines = append(lines, strings.Join([]string{
+			strconv.Itoa(lineNum),
+			page,
+			lineType,
+			font,
+			fontSize,
+			coordinate,
+			escapeLineContent(item.Content),
+		}, "\t"))
 		lineNum++
 	}
 	return lines
+}
+
+func escapeLineContent(content string) string {
+	c := strings.ReplaceAll(content, "\r\n", "\\n")
+	c = strings.ReplaceAll(c, "\n", "\\n")
+	c = strings.ReplaceAll(c, "\r", "\\n")
+	c = strings.ReplaceAll(c, "\t", "\\t")
+	return c
 }
 
 func renderTableFromNode(node map[string]any) (renderedTable, bool) {
@@ -573,4 +623,25 @@ func formatPage(v any) string {
 		return strconv.FormatFloat(f, 'f', -1, 64)
 	}
 	return s
+}
+
+func firstNonEmptyAny(values ...any) any {
+	for _, v := range values {
+		if strings.TrimSpace(asString(v)) != "" {
+			return v
+		}
+	}
+	return nil
+}
+
+func normalizeFontSize(v any) string {
+	s := strings.TrimSpace(asString(v))
+	if s == "" {
+		return ""
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || f <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(int64(math.Round(f)), 10)
 }

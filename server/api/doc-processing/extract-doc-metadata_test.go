@@ -118,6 +118,7 @@ func TestExtractDocMetadata_MissingParserNameUpdatesFailure(t *testing.T) {
 	st := &fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 9, ParserName: "", ResultFilename: "/tmp/x.json", StagingFilename: "/tmp/in/source.pdf", StatusRaw: "[]"}}
 	ex := &fakeJSONExtractor{}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
+	svc.ModelErr = nil
 
 	err := svc.HandleEvent(context.Background(), []byte(`{"record_id":9}`))
 	if err != nil {
@@ -135,9 +136,9 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 	tmp := t.TempDir()
 	lineFile := filepath.Join(tmp, "ocr_rslt_8_opendata.txt")
 	content := strings.Join([]string{
-		"1 1 heading Document Title [0,0,1,1]",
-		"2 1 paragraph Some line [0,0,1,1]",
-		"3 2 paragraph Another page [0,0,1,1]",
+		"1	1	heading	TestFont	12	[0,0,1,1]	Document Title",
+		"2	1	paragraph	TestFont	12	[0,0,1,1]	Some line",
+		"3	2	paragraph	TestFont	12	[0,0,1,1]	Another page",
 	}, "\n")
 	if err := os.WriteFile(lineFile, []byte(content), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -152,6 +153,7 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 		"language":     "zh-CN",
 	}}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
+	svc.ModelErr = nil
 	svc.InitialPages = 1
 	svc.PromptText = "extract metadata"
 	svc.ModelName = "gpt-test"
@@ -175,10 +177,10 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 	if ex.calledCount != 1 {
 		t.Fatalf("extract called=%d, want 1", ex.calledCount)
 	}
-	if !strings.Contains(ex.inputText, "1 1 heading Document Title") {
+	if !strings.Contains(ex.inputText, "1	1	heading	TestFont	12	[0,0,1,1]	Document Title") {
 		t.Fatalf("extract input should include first page line")
 	}
-	if strings.Contains(ex.inputText, "3 2 paragraph Another page") {
+	if strings.Contains(ex.inputText, "3	2	paragraph	TestFont	12	[0,0,1,1]	Another page") {
 		t.Fatalf("extract input should not include page 2 when InitialPages=1")
 	}
 
@@ -197,7 +199,7 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 func TestExtractDocMetadata_FallbackAuthorsFromMainDraftingPersons(t *testing.T) {
 	tmp := t.TempDir()
 	lineFile := filepath.Join(tmp, "ocr_rslt_9_opendata.txt")
-	content := "1 1 heading Doc [0,0,1,1]\n"
+	content := "1	1	heading	TestFont	12	[0,0,1,1]	Doc\n"
 	if err := os.WriteFile(lineFile, []byte(content), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -218,6 +220,7 @@ func TestExtractDocMetadata_FallbackAuthorsFromMainDraftingPersons(t *testing.T)
 		"drafting_persons":      []any{"Carol"},
 	}}
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
+	svc.ModelErr = nil
 	svc.PromptText = "extract metadata"
 
 	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":9}`)); err != nil {

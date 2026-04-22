@@ -19,17 +19,20 @@ import (
 )
 
 type MetricsProcessor struct {
-	InputStore DocMetadataStore
-	Store      MetricsStore
-	Extractor  LLMJSONExtractor
-	Logger     *slog.Logger
-	Now        func() time.Time
-	PromptText string
-	PromptRef  string
-	PromptPath string
-	PromptErr  error
-	ModelName  string
-	ChunkDir   string
+	InputStore   DocMetadataStore
+	Store        MetricsStore
+	Extractor    LLMJSONExtractor
+	Logger       *slog.Logger
+	Now          func() time.Time
+	PromptText   string
+	PromptRef    string
+	PromptPath   string
+	PromptErr    error
+	ModelRef     string
+	ModelCfgPath string
+	ModelErr     error
+	ModelName    string
+	ChunkDir     string
 }
 
 type MetricsStore interface {
@@ -55,18 +58,23 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		logger = slog.Default()
 	}
 	promptText, promptRef, promptPath, promptErr := loadMetricsPromptFromEnv()
+	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODELS_FILE")
+	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	return &MetricsProcessor{
-		InputStore: inputStore,
-		Store:      store,
-		Extractor:  extractor,
-		Logger:     logger,
-		Now:        time.Now,
-		PromptText: promptText,
-		PromptRef:  promptRef,
-		PromptPath: promptPath,
-		PromptErr:  promptErr,
-		ModelName:  strings.TrimSpace(os.Getenv("EXTRACT_METRICS_LLM_NAME")),
-		ChunkDir:   strings.TrimSpace(os.Getenv("CHUNK_DIR")),
+		InputStore:   inputStore,
+		Store:        store,
+		Extractor:    extractor,
+		Logger:       logger,
+		Now:          time.Now,
+		PromptText:   promptText,
+		PromptRef:    promptRef,
+		PromptPath:   promptPath,
+		PromptErr:    promptErr,
+		ModelRef:     modelRef,
+		ModelCfgPath: modelCfgPath,
+		ModelErr:     modelErr,
+		ModelName:    modelCfg.ModelName,
+		ChunkDir:     strings.TrimSpace(os.Getenv("CHUNK_DIR")),
 	}
 }
 
@@ -92,6 +100,10 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 			return nil
 		}
 		return fmt.Errorf("load kb.inputs record %d: %w", evt.RecordID, err)
+	}
+	if p.ModelErr != nil {
+		p.persistMetricsStatus(ctx, rec, start, p.ModelErr)
+		return nil
 	}
 
 	chunkFiles, err := p.listChunkFiles(evt.RecordID)
@@ -356,41 +368,44 @@ type metricParsedLine struct {
 	LineNumber int    `json:"line_number"`
 	PageNumber int    `json:"page_number"`
 	LineType   string `json:"line_type"`
+	Font       string `json:"font"`
+	FontSize   string `json:"font_size"`
 	Content    string `json:"content"`
 	Coordinate string `json:"coordinate"`
 }
 
 func parseMetricInputLine(line string) (metricParsedLine, bool) {
-	rest := strings.TrimSpace(line)
-	if rest == "" {
+	raw := strings.TrimSpace(line)
+	if raw == "" {
 		return metricParsedLine{}, false
 	}
-	lineNo, rest, ok := consumeLeadingInt(rest)
-	if !ok {
+	fields := strings.Split(raw, "\t")
+	if len(fields) != 7 {
 		return metricParsedLine{}, false
 	}
-	pageNo, rest, ok := consumeLeadingInt(rest)
-	if !ok {
+	lineNo, err := strconv.Atoi(strings.TrimSpace(fields[0]))
+	if err != nil || lineNo < 1 {
 		return metricParsedLine{}, false
 	}
-	lineType, rest, ok := consumeLeadingToken(rest)
-	if !ok {
+	pageNo, err := strconv.Atoi(strings.TrimSpace(fields[1]))
+	if err != nil || pageNo < 1 {
 		return metricParsedLine{}, false
 	}
-
-	content := strings.TrimSpace(rest)
-	coordinate := ""
-	if start := strings.LastIndex(content, "["); start >= 0 {
-		if end := strings.LastIndex(content, "]"); end > start {
-			coordinate = strings.TrimSpace(content[start : end+1])
-			content = strings.TrimSpace(content[:start])
-		}
+	lineType := strings.TrimSpace(fields[2])
+	font := strings.TrimSpace(fields[3])
+	fontSize := strings.TrimSpace(fields[4])
+	coordinate := strings.TrimSpace(fields[5])
+	content := strings.TrimSpace(fields[6])
+	if lineType == "" || font == "" || fontSize == "" || coordinate == "" {
+		return metricParsedLine{}, false
 	}
 
 	return metricParsedLine{
 		LineNumber: lineNo,
 		PageNumber: pageNo,
-		LineType:   strings.TrimSpace(lineType),
+		LineType:   lineType,
+		Font:       font,
+		FontSize:   fontSize,
 		Content:    content,
 		Coordinate: coordinate,
 	}, true
@@ -404,38 +419,6 @@ func parseMetricInputLines(lines []string) []metricParsedLine {
 		}
 	}
 	return parsedLines
-}
-
-func consumeLeadingInt(s string) (int, string, bool) {
-	s = strings.TrimLeft(s, " \t")
-	if s == "" {
-		return 0, "", false
-	}
-	i := 0
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		i++
-	}
-	if i == 0 {
-		return 0, "", false
-	}
-	n, err := strconv.Atoi(s[:i])
-	if err != nil {
-		return 0, "", false
-	}
-	return n, strings.TrimLeft(s[i:], " \t"), true
-}
-
-func consumeLeadingToken(s string) (string, string, bool) {
-	s = strings.TrimLeft(s, " \t")
-	if s == "" {
-		return "", "", false
-	}
-	i := 0
-	for i < len(s) && s[i] != ' ' && s[i] != '\t' {
-		i++
-	}
-	token := s[:i]
-	return token, strings.TrimLeft(s[i:], " \t"), true
 }
 
 func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) string {

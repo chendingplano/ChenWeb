@@ -1,1 +1,1 @@
-/Users/cding/Workspace/KnowledgeStore/DevDocuments/DesignDocs/spec-chunking.md
+/Users/cding/Workspace/KnowledgeStore/DevDocuments/Specs/spec-chunking.md

@@ -30,6 +30,9 @@ type ExtractDocMetadataProcessor struct {
 	PromptRef    string
 	PromptPath   string
 	PromptErr    error
+	ModelRef     string
+	ModelCfgPath string
+	ModelErr     error
 	ModelName    string
 }
 
@@ -42,6 +45,8 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 		logger = loggerutil.CreateDefaultLogger("MID_26041830")
 	}
 	promptText, promptRef, promptPath, promptErr := loadDocMetaPromptFromEnv()
+	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
+	applyStructureModelConfigToExtractor(client, modelCfg)
 	return &ExtractDocMetadataProcessor{
 		Store:        store,
 		Client:       client,
@@ -52,7 +57,10 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 		PromptRef:    promptRef,
 		PromptPath:   promptPath,
 		PromptErr:    promptErr,
-		ModelName:    strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_LLM_NAME")),
+		ModelRef:     modelRef,
+		ModelCfgPath: modelCfgPath,
+		ModelErr:     modelErr,
+		ModelName:    modelCfg.ModelName,
 	}
 }
 
@@ -83,6 +91,9 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 	}
 	if strings.TrimSpace(rec.ResultFilename) == "" {
 		return p.failAndPersist(ctx, rec, errors.New("missing result filename"))
+	}
+	if p.ModelErr != nil {
+		return p.failAndPersist(ctx, rec, p.ModelErr)
 	}
 
 	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
@@ -251,7 +262,7 @@ func loadDocMetaPromptFromEnv() (promptText string, promptRef string, promptPath
 		addCandidate(promptRef)
 	} else {
 		addCandidate(promptRef)
-		if promptDir := strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_PROMPT_DIR")); promptDir != "" {
+		if promptDir := strings.TrimSpace(os.Getenv("PROMPT_DIR")); promptDir != "" {
 			addCandidate(filepath.Join(promptDir, promptRef))
 		}
 		addCandidate(filepath.Join("server", "cmd", "doc-processor", promptRef))
@@ -309,18 +320,30 @@ func readLineFile(path string) (map[int][]string, int, error) {
 }
 
 func parsePageNumber(line string) int {
-	parts := strings.Fields(line)
-	if len(parts) < 2 {
+	parts := strings.Split(line, "\t")
+	if len(parts) != 7 {
 		return 0
 	}
-	page, err := strconv.Atoi(parts[1])
+	page, err := parsePositiveIntField(parts[1])
 	if err != nil {
 		return 0
 	}
-	if page < 1 {
-		return 0
-	}
 	return page
+}
+
+func parsePositiveIntField(raw string) (int, error) {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return 0, fmt.Errorf("empty integer field")
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, err
+	}
+	if n < 1 {
+		return 0, fmt.Errorf("value must be >= 1")
+	}
+	return n, nil
 }
 
 func buildInputText(linesByPage map[int][]string, lastPage int) string {

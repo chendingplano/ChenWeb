@@ -4,9 +4,10 @@ The `doc-processor` control service consumes JetStream messages from `kb.line-fi
 
 ## Processors
 
-1. `chunking` (`server/api/doc-processing/chunking.go`)
-2. `extract-doc-metadata` (`server/api/doc-processing/extract-doc-metadata.go`)
-3. `extract-metrics` (`server/api/doc-processing/extract-metrics.go`)
+1. `structure_analyzer` (`server/api/doc-processing/doc-structure-analyzer.go`)
+2. `chunking` (`server/api/doc-processing/chunking.go`)
+3. `extract_doc_metadata` (`server/api/doc-processing/extract-doc-metadata.go`)
+4. `extract_metrics` (`server/api/doc-processing/extract-metrics.go`)
 
 ## Run
 
@@ -67,7 +68,7 @@ Binary output:
 - `EXTRACT_DOCMETA_LLM_BASE_URL`
 - `EXTRACT_DOCMETA_LLM_TIMEOUT_SEC`
 - `EXTRACT_DOCMETA_PROMPT`
-- `EXTRACT_DOCMETA_PROMPT_DIR`
+- `PROMPT_DIR`
 
 Rules:
 - If `EXTRACT_DOCMETA_LLM_NAME` is set, then `EXTRACT_DOCMETA_LLM_API_KEY`, `EXTRACT_DOCMETA_LLM_BASE_URL`, and `EXTRACT_DOCMETA_LLM_TIMEOUT_SEC` are all required.

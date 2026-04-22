@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,21 @@ func envEnabledDefaultTrue(keys ...string) bool {
 		}
 	}
 	return true
+}
+
+func envDurationSeconds(defaultValue time.Duration, keys ...string) time.Duration {
+	for _, key := range keys {
+		raw := strings.TrimSpace(os.Getenv(key))
+		if raw == "" {
+			continue
+		}
+		sec, err := strconv.Atoi(raw)
+		if err != nil || sec <= 0 {
+			continue
+		}
+		return time.Duration(sec) * time.Second
+	}
+	return defaultValue
 }
 
 func normalizeStreamName(raw string, fallback string) string {
@@ -164,11 +180,13 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 			"subject", subject,
 		)
 	}
+	ackWait := envDurationSeconds(5*time.Minute, "DOC_PROCESSOR_ACK_WAIT_SEC", "FILE_CONVERTER_ACK_WAIT_SEC", "JETSTREAM_ACK_WAIT_SEC")
 
 	opts := []nats.SubOpt{
 		nats.ManualAck(),
 		nats.AckExplicit(),
 		nats.DeliverNew(),
+		nats.AckWait(ackWait),
 	}
 	if normalizedDurable != "" {
 		opts = append(opts, nats.Durable(normalizedDurable))
@@ -202,6 +220,7 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 					nats.ManualAck(),
 					nats.AckExplicit(),
 					nats.DeliverNew(),
+					nats.AckWait(ackWait),
 					nats.Durable(altDurable),
 				}
 				sub, err = js.Subscribe(subject, cb, altOpts...)

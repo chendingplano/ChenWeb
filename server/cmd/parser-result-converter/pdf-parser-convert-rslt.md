@@ -1,1 +1,0 @@
-/Users/cding/Workspace/KnowledgeStore/DevDocuments/DesignDocs/pdf-parser-convert-rslt.md

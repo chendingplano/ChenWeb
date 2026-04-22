@@ -14,11 +14,19 @@ import (
 
 type ChunkingProcessor struct {
 	InputStore DocMetadataStore
-	Service    *Service
-	Logger     ApiTypes.JimoLogger
+	Service    interface {
+		HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error
+	}
+	Logger ApiTypes.JimoLogger
 }
 
-func NewChunkingProcessor(inputStore DocMetadataStore, service *Service, logger ApiTypes.JimoLogger) *ChunkingProcessor {
+func NewChunkingProcessor(
+	inputStore DocMetadataStore,
+	service interface {
+		HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error
+	},
+	logger ApiTypes.JimoLogger,
+) *ChunkingProcessor {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26041902")
 	}

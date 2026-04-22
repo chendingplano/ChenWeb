@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -88,25 +89,38 @@ func main() {
 		os.Exit(1)
 	}
 
-	llmClient, err := llmclients.NewOpenAIJSONClientFromProcessorEnv("EXTRACT_DOCMETA")
-	if err != nil {
-		logger.Error("failed creating llm client", "error", err)
-		os.Exit(1)
+	newLLMClient := func() *llmclients.OpenAIJSONClient {
+		return &llmclients.OpenAIJSONClient{
+			HTTPClient: &http.Client{Timeout: 100 * time.Second},
+		}
 	}
-	metricsLLMClient, err := llmclients.NewOpenAIJSONClientFromProcessorEnv("EXTRACT_METRICS")
-	if err != nil {
-		logger.Error("failed creating metrics llm client", "error", err)
-		os.Exit(1)
-	}
+	llmClient := newLLMClient()
+	metricsLLMClient := newLLMClient()
+	structureLLMClient := newLLMClient()
+	topicChunkLLMClient := newLLMClient()
 
 	inputStore := docprocessing.DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
-	chunkSvc := docprocessing.NewService(docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle}, logger)
+	fixedChunkSvc := docprocessing.NewFixedSizeChunkingService(
+		docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+		logger,
+	)
+	topicChunkSvc := docprocessing.NewSemanticChunkingService(
+		docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+		topicChunkLLMClient,
+		logger,
+	)
+	chunkSvc, err := docprocessing.NewChunkingControllerFromEnv(fixedChunkSvc, topicChunkSvc)
+	if err != nil {
+		logger.Error("failed creating chunking controller", "error", err)
+		os.Exit(1)
+	}
 
 	control := &docprocessing.ControlService{
 		Logger:     logger,
 		InputStore: inputStore,
 		Now:        time.Now,
 		Processors: []docprocessing.Processor{
+			docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
 			docprocessing.NewChunkingProcessor(inputStore, chunkSvc, logger),
 			docprocessing.NewExtractDocMetadataProcessor(inputStore, llmClient, logger),
 			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, slog.Default()),
@@ -126,7 +140,8 @@ func main() {
 		"subject", subject,
 		"durable", durable,
 		"stream", streamName,
-		"processors", []string{"chunking", "extract_doc_metadata", "extract_metrics"},
+		"chunking_method", chunkSvc.Method,
+		"processors", []string{"structure_analyzer", "chunking", "extract_doc_metadata", "extract_metrics"},
 		"started_at", time.Now().Format(time.RFC3339),
 	)
 

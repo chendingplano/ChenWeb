@@ -49,9 +49,9 @@ func TestReadRegularLinesFromChunk_SkipsOverlap(t *testing.T) {
 	tmp := t.TempDir()
 	chunk := filepath.Join(tmp, "chunk_0001")
 	body := strings.Join([]string{
-		"r 1 1 heading Intro [0,0,1,1]",
-		"o 2 1 paragraph Overlap [0,0,1,1]",
-		"r 3 1 paragraph Normal [0,0,1,1]",
+		"r 1	1	heading	TestFont	12	[0,0,1,1]	Intro",
+		"o 2	1	paragraph	TestFont	12	[0,0,1,1]	Overlap",
+		"r 3	1	paragraph	TestFont	12	[0,0,1,1]	Normal",
 	}, "\n")
 	if err := osWriteFile(chunk, []byte(body)); err != nil {
 		t.Fatalf("write chunk: %v", err)
@@ -78,9 +78,9 @@ func TestMetricsProcessor_ExtractsFromChunkFilesAndWritesStatus(t *testing.T) {
 	}
 	chunkFile := filepath.Join(chunkDir, "chunk_0001")
 	body := strings.Join([]string{
-		"r 1 1 heading Intro [0,0,1,1]",
-		"o 2 1 paragraph Ignore overlap [0,0,1,1]",
-		"r 3 1 paragraph Latency must be <= 200ms [0,0,1,1]",
+		"r 1	1	heading	TestFont	12	[0,0,1,1]	Intro",
+		"o 2	1	paragraph	TestFont	12	[0,0,1,1]	Ignore overlap",
+		"r 3	1	paragraph	TestFont	12	[0,0,1,1]	Latency must be <= 200ms",
 	}, "\n")
 	if err := osWriteFile(chunkFile, []byte(body)); err != nil {
 		t.Fatalf("write chunk: %v", err)
@@ -116,6 +116,8 @@ func TestMetricsProcessor_ExtractsFromChunkFilesAndWritesStatus(t *testing.T) {
 	p.ChunkDir = tmp
 	p.PromptText = "extract metrics"
 	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "gpt-test"
 
 	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"2005","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)

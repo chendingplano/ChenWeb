@@ -740,31 +740,32 @@ func rawLinePathFor(resultFilename string) string {
 	return filepath.Join(dir, root+".txt")
 }
 
-// parseRawLine parses: "<line> <page> <type> <content...> [x1,y1,x2,y2]"
+// parseRawLine parses canonical line file records:
+// "<line>\t<page>\t<type>\t<font>\t<font_size>\t[x1,y1,x2,y2]\t<content...>"
 func parseRawLine(s string) (rawLine, bool) {
 	s = strings.TrimRight(s, "\r\n")
 	if strings.TrimSpace(s) == "" {
 		return rawLine{}, false
 	}
-	open := strings.LastIndex(s, "[")
-	closeIdx := strings.LastIndex(s, "]")
-	if open < 0 || closeIdx < 0 || closeIdx < open {
+	fields := strings.Split(s, "\t")
+	if len(fields) != 7 {
 		return rawLine{}, false
 	}
-	coordRaw := s[open+1 : closeIdx]
-	leading := strings.TrimSpace(s[:open])
-
-	parts := strings.SplitN(leading, " ", 4)
-	if len(parts) < 4 {
-		return rawLine{}, false
-	}
-	lineNum, err1 := strconv.Atoi(parts[0])
-	pageNum, err2 := strconv.Atoi(parts[1])
+	lineNum, err1 := strconv.Atoi(strings.TrimSpace(fields[0]))
+	pageNum, err2 := strconv.Atoi(strings.TrimSpace(fields[1]))
 	if err1 != nil || err2 != nil {
 		return rawLine{}, false
 	}
-	lineType := parts[2]
-	content := parts[3]
+	lineType := strings.TrimSpace(fields[2])
+	coordRaw := strings.TrimSpace(fields[5])
+	content := strings.TrimSpace(fields[6])
+	if lineNum < 1 || pageNum < 1 || lineType == "" || coordRaw == "" {
+		return rawLine{}, false
+	}
+	if !strings.HasPrefix(coordRaw, "[") || !strings.HasSuffix(coordRaw, "]") {
+		return rawLine{}, false
+	}
+	coordRaw = strings.TrimSpace(coordRaw[1 : len(coordRaw)-1])
 
 	coords := make([]float64, 0, 4)
 	for _, tok := range strings.Split(coordRaw, ",") {
