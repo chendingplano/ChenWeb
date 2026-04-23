@@ -74,7 +74,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		ModelCfgPath: modelCfgPath,
 		ModelErr:     modelErr,
 		ModelName:    modelCfg.ModelName,
-		ChunkDir:     strings.TrimSpace(os.Getenv("CHUNK_DIR")),
+		ChunkDir:     strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 	}
 }
 
@@ -182,7 +182,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 
 func (p *MetricsProcessor) listChunkFiles(recordID int64) ([]string, error) {
 	if strings.TrimSpace(p.ChunkDir) == "" {
-		return nil, errors.New("missing CHUNK_DIR")
+		return nil, errors.New("missing ARTIFACT_DIR")
 	}
 	if recordID <= 0 {
 		return nil, fmt.Errorf("invalid record_id: %d", recordID)

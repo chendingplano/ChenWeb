@@ -199,3 +199,42 @@ export async function getRawLines(inputRecordId: number): Promise<GetRawLinesRes
 		'Failed to retrieve raw lines'
 	);
 }
+
+// ---------- kb.topic-chunks ----------
+
+export type KbChunkSpan = {
+	page_number: number;
+	line_number: number;
+};
+
+export type KbChunkBBox = {
+	page_number: number;
+	coords: number[];
+};
+
+export type KbTopicChunkRecord = {
+	seqno: number;
+	topic_type: string;
+	topic: string;
+	keywords: string[];
+	line_tokens: string[];
+	source_line_numbers: number[];
+	source_line_spans: KbChunkSpan[];
+	content_lines: RawLine[];
+	bounding_boxes: KbChunkBBox[];
+};
+
+export type ListKbTopicChunksResponse = {
+	status: boolean;
+	input_id: number;
+	file_name?: string;
+	results: KbTopicChunkRecord[];
+	total: number;
+};
+
+export async function listKbTopicChunks(inputRecordId: number): Promise<ListKbTopicChunksResponse> {
+	return fetchOrThrow<ListKbTopicChunksResponse>(
+		`${BASE}/topic-chunks?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to retrieve topic chunks'
+	);
+}

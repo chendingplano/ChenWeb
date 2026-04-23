@@ -2,7 +2,9 @@ package docprocessing
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 )
 
 type fakeProcessor struct {
@@ -64,5 +66,27 @@ func TestControlService_DefaultsToConfiguredOrder(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("calls[%d]=%q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+type fakeEventStore struct {
+	insertErr error
+}
+
+func (f fakeEventStore) InsertEvent(_ context.Context, _ EventRecord) error {
+	return f.insertErr
+}
+
+func (f fakeEventStore) UpsertConsumedStatus(_ context.Context, _ string, _ time.Time, _ int64, _ error) error {
+	return nil
+}
+
+func TestControlService_HandleJetStreamEvent_DoesNotFailWhenEventInsertFails(t *testing.T) {
+	svc := &ControlService{
+		EventStore: fakeEventStore{insertErr: errors.New(`pq: relation "kb.events" does not exist (42P01)`)},
+	}
+	err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"record_id":"1"}`))
+	if err != nil {
+		t.Fatalf("HandleJetStreamEvent() error = %v, want nil", err)
 	}
 }

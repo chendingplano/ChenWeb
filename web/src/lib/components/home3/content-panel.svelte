@@ -8,6 +8,8 @@
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
+	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
+	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import Canvas01      from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01     from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -150,6 +152,10 @@
 			<JetStreamEventsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-subjects'}
 			<JetStreamSubjectsView {darkMode} />
+		{:else if activeMenu?.childId === 'ap-board'}
+			<KanbanBoardView {darkMode} />
+		{:else if activeMenu?.childId === 'ap-agents'}
+			<AgentsView {darkMode} />
 		{:else if sectionId === 'chat'}
 			<Chatter01 {darkMode} />
 		{:else if isDashboard}

@@ -136,7 +136,8 @@
 				{ id: 'kb-search',  label: 'Search' },
 				{ id: 'kb-import',  label: 'Documents' },
 				{ id: 'kb-input-details', label: 'Document Details' },
-				{ id: 'kb-metrics', label: 'Metrics' }
+				{ id: 'kb-metrics', label: 'Metrics' },
+				{ id: 'kb-chunks', label: 'Chunks' }
 			]
 		},
 		{
@@ -144,6 +145,13 @@
 			children: [
 				{ id: 'flow', label: 'Flow' },
 				{ id: 'prompt-optimizer', label: 'Prompt Optimizer' }
+			]
+		},
+		{
+			id: 'agent-platform', label: 'Agent Platform', icon: BotIcon, group: 'Workspace',
+			children: [
+				{ id: 'ap-board',  label: 'Board' },
+				{ id: 'ap-agents', label: 'Agents' }
 			]
 		},
 		{
@@ -178,6 +186,10 @@
 		}
 		if (child?.id === 'kb-input-details') {
 			window.open(`/home3/inputs?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
+			return;
+		}
+		if (child?.id === 'kb-chunks') {
+			window.open(`/home3/chunks?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
 			return;
 		}
 		onSelect({

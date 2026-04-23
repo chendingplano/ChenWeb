@@ -69,7 +69,7 @@ timeout_sec = 120
 		t.Fatalf("write .models.toml: %v", err)
 	}
 
-	t.Setenv("STRUCTURE_DIR", tmp)
+	t.Setenv("ARTIFACT_DIR", tmp)
 	t.Setenv("STRUCTURE_MODEL_NAME", "structure-test")
 	t.Setenv("STRUCTURE_MODELS_FILE", modelsPath)
 	t.Setenv("STRUCTURE_PROMPT", promptPath)
@@ -174,7 +174,7 @@ timeout_sec = 120
 		t.Fatalf("write .models.toml: %v", err)
 	}
 
-	t.Setenv("STRUCTURE_DIR", tmp)
+	t.Setenv("ARTIFACT_DIR", tmp)
 	t.Setenv("STRUCTURE_MODEL_NAME", "structure-test")
 	t.Setenv("STRUCTURE_MODELS_FILE", modelsPath)
 	t.Setenv("STRUCTURE_PROMPT", promptPath)
@@ -233,7 +233,7 @@ timeout_sec = 120
 		t.Fatalf("write .models.toml: %v", err)
 	}
 
-	t.Setenv("STRUCTURE_DIR", tmp)
+	t.Setenv("ARTIFACT_DIR", tmp)
 	t.Setenv("STRUCTURE_MODEL_NAME", "structure-test")
 	t.Setenv("STRUCTURE_MODELS_FILE", modelsPath)
 	t.Setenv("STRUCTURE_PROMPT", promptPath)
@@ -319,7 +319,7 @@ timeout_sec = 120
 		t.Fatalf("write .models.toml: %v", err)
 	}
 
-	t.Setenv("STRUCTURE_DIR", tmp)
+	t.Setenv("ARTIFACT_DIR", tmp)
 	t.Setenv("STRUCTURE_MODEL_NAME", "structure-test")
 	t.Setenv("STRUCTURE_MODELS_FILE", modelsPath)
 	t.Setenv("STRUCTURE_PROMPT", promptPath)
@@ -396,7 +396,7 @@ timeout_sec = 120
 		t.Fatalf("write .models.toml: %v", err)
 	}
 
-	t.Setenv("STRUCTURE_DIR", tmp)
+	t.Setenv("ARTIFACT_DIR", tmp)
 	t.Setenv("STRUCTURE_MODEL_NAME", "missing-model")
 	t.Setenv("STRUCTURE_MODELS_FILE", modelsPath)
 	t.Setenv("STRUCTURE_PROMPT", promptPath)

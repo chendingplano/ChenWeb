@@ -118,6 +118,7 @@ func main() {
 	control := &docprocessing.ControlService{
 		Logger:     logger,
 		InputStore: inputStore,
+		EventStore: docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
 		Now:        time.Now,
 		Processors: []docprocessing.Processor{
 			docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
@@ -146,8 +147,7 @@ func main() {
 	)
 
 	err = ns.Subscribe(ctx, subject, durable, func(msgCtx context.Context, payload []byte) error {
-		control.HandleEvent(msgCtx, payload)
-		return nil
+		return control.HandleJetStreamEvent(msgCtx, subject, payload)
 	})
 	if err != nil && ctx.Err() == nil {
 		logger.Error("doc processor exited with error", "error", err)

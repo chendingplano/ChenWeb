@@ -89,7 +89,7 @@ func NewStructureAnalyzerProcessor(store DocMetadataStore, extractor LLMJSONExtr
 		ModelName:      modelCfg.ModelName,
 		APIKey:         modelCfg.APIKey,
 		BaseURL:        modelCfg.BaseURL,
-		StructureDir:   strings.TrimSpace(os.Getenv("STRUCTURE_DIR")),
+		StructureDir:   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		MaxRetries:     envInt("STRUCTURE_LLM_MAX_RETRIES", 2, 0),
 		InputBlockSize: envInt("INPUT_BLOCK_SIZE", 8, 1),
 	}

@@ -2,7 +2,9 @@ package docprocessing
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,10 +24,41 @@ type ControlService struct {
 	Processors []Processor
 	Logger     ApiTypes.JimoLogger
 	InputStore DocMetadataStore
+	EventStore EventStore
 	Now        func() time.Time
 }
 
 func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
+	s.handleEvent(ctx, payload)
+}
+
+func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject string, payload []byte) error {
+	eventID := ""
+	if s.EventStore != nil {
+		id, err := s.insertReceivedEvent(ctx, subject, payload)
+		if err != nil {
+			if s.Logger != nil {
+				s.Logger.Error("failed inserting kb.events received record", "subject", subject, "error", err)
+			}
+		} else {
+			eventID = id
+		}
+	}
+
+	go func() {
+		procStart := s.now()
+		procErr := s.handleEvent(ctx, payload)
+		if s.EventStore == nil || strings.TrimSpace(eventID) == "" {
+			return
+		}
+		if err := s.EventStore.UpsertConsumedStatus(context.Background(), eventID, procStart, time.Since(procStart).Milliseconds(), procErr); err != nil && s.Logger != nil {
+			s.Logger.Error("failed upserting kb.events consumed status", "event_id", eventID, "error", err)
+		}
+	}()
+	return nil
+}
+
+func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error {
 	requestStart := s.now()
 	processors := s.Processors
 	evt, err := ParseLineFileGeneratedEvent(payload)
@@ -38,7 +71,7 @@ func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
 				"ms_used", time.Since(requestStart).Milliseconds(),
 			)
 		}
-		return
+		return err
 	}
 	if s.Logger != nil {
 		s.Logger.Info("start processing request",
@@ -55,7 +88,7 @@ func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
 				"ms_used", time.Since(requestStart).Milliseconds(),
 			)
 		}
-		return
+		return nil
 	}
 	if !s.preflightInput(ctx, evt) {
 		if s.Logger != nil {
@@ -65,7 +98,7 @@ func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
 				"ms_used", time.Since(requestStart).Milliseconds(),
 			)
 		}
-		return
+		return errors.New("preflight input failed")
 	}
 	if len(evt.Operations) > 0 {
 		processors = s.selectProcessors(evt.Operations)
@@ -78,11 +111,12 @@ func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
 					"ms_used", time.Since(requestStart).Milliseconds(),
 				)
 			}
-			return
+			return nil
 		}
 	}
 
 	requestFailed := false
+	var firstErr error
 	for _, p := range processors {
 		if p == nil {
 			continue
@@ -96,6 +130,9 @@ func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
 		}
 		if err := p.HandleEvent(ctx, payload); err != nil {
 			requestFailed = true
+			if firstErr == nil {
+				firstErr = err
+			}
 			if s.Logger != nil {
 				s.Logger.Error("doc processor failed", "processor", p.Name(), "error", err)
 				s.Logger.Info("finish running processor",
@@ -127,6 +164,7 @@ func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
 			"ms_used", time.Since(requestStart).Milliseconds(),
 		)
 	}
+	return firstErr
 }
 
 func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGeneratedEvent) bool {
@@ -205,6 +243,51 @@ func (s *ControlService) now() time.Time {
 		return s.Now()
 	}
 	return time.Now()
+}
+
+func (s *ControlService) insertReceivedEvent(ctx context.Context, subject string, payload []byte) (string, error) {
+	eventID := newEventID()
+	if s.EventStore == nil {
+		return eventID, nil
+	}
+	start := s.now()
+	status := []map[string]any{
+		{
+			"operation":   "received",
+			"proc_status": "success",
+			"start_time":  start.Format(defaultDocMetaStatusTime),
+			"ms_used":     int64(0),
+		},
+	}
+	statusJSON, err := json.Marshal(status)
+	if err != nil {
+		return "", err
+	}
+	eventPayload := strings.TrimSpace(string(payload))
+	if eventPayload == "" {
+		eventPayload = "{}"
+	}
+	req := EventRecord{
+		EventName:    DefaultEventSubject,
+		EventID:      eventID,
+		EventSubject: strings.TrimSpace(subject),
+		EventPayload: eventPayload,
+		EventStatus:  string(statusJSON),
+		EventSource:  "JetStream",
+		EventNotes:   "",
+	}
+	if err := s.EventStore.InsertEvent(ctx, req); err != nil {
+		return "", err
+	}
+	return eventID, nil
+}
+
+func newEventID() string {
+	var bs [12]byte
+	if _, err := rand.Read(bs[:]); err != nil {
+		return fmt.Sprintf("evt-%d", time.Now().UnixNano())
+	}
+	return "evt-" + hex.EncodeToString(bs[:])
 }
 
 func appendControlStatus(raw string, now time.Time, procErr error) (string, error) {

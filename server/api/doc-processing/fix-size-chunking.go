@@ -107,7 +107,7 @@ func NewFixedSizeChunkingService(store Store, logger ApiTypes.JimoLogger) *Fixed
 		Store:          store,
 		Logger:         logger,
 		Now:            time.Now,
-		ChunkDir:       strings.TrimSpace(os.Getenv("CHUNK_DIR")),
+		ChunkDir:       strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		ChunkSize:      envInt("CHUNK_SIZE", DefaultChunkSize, 1),
 		OverlapPercent: envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
 	}
@@ -127,7 +127,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		return err
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
-		procErr := errors.New("(MID_26042003) missing CHUNK_DIR")
+		procErr := errors.New("(MID_26042003) missing ARTIFACT_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}

@@ -218,7 +218,7 @@ func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 func TestNewService_UsesRequiredAndDefaultChunkEnv(t *testing.T) {
 	t.Setenv("CHUNK_SIZE", "")
 	t.Setenv("CHUNK_OVERLAP_PERCENT", "")
-	t.Setenv("CHUNK_DIR", "")
+	t.Setenv("ARTIFACT_DIR", "")
 
 	svc := NewFixedSizeChunkingService(&fakeStore{}, nil)
 	if svc.ChunkSize != 300 {
@@ -228,7 +228,7 @@ func TestNewService_UsesRequiredAndDefaultChunkEnv(t *testing.T) {
 		t.Fatalf("OverlapPercent=%d, want 20", svc.OverlapPercent)
 	}
 	if svc.ChunkDir != "" {
-		t.Fatalf("ChunkDir=%q, want empty when CHUNK_DIR is unset", svc.ChunkDir)
+		t.Fatalf("ChunkDir=%q, want empty when ARTIFACT_DIR is unset", svc.ChunkDir)
 	}
 }
 
@@ -241,9 +241,9 @@ func TestService_HandleInput_MissingChunkDir(t *testing.T) {
 
 	err := svc.HandleInput(context.Background(), 2002, "sample.txt", []byte("1	1	paragraph	TestFont	12	[0,0,1,1]	x"))
 	if err == nil {
-		t.Fatalf("expected error when CHUNK_DIR is empty")
+		t.Fatalf("expected error when ARTIFACT_DIR is empty")
 	}
-	if !strings.Contains(err.Error(), "missing CHUNK_DIR") {
+	if !strings.Contains(err.Error(), "missing ARTIFACT_DIR") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if st.insertCalls != 0 {
@@ -252,7 +252,7 @@ func TestService_HandleInput_MissingChunkDir(t *testing.T) {
 	if st.updateCalls != 1 {
 		t.Fatalf("UpdateInputStatus calls=%d, want 1", st.updateCalls)
 	}
-	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing CHUNK_DIR") {
-		t.Fatalf("expected persisted error for missing CHUNK_DIR, got %v", st.updatedError)
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing ARTIFACT_DIR") {
+		t.Fatalf("expected persisted error for missing ARTIFACT_DIR, got %v", st.updatedError)
 	}
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api/Dashboard01"
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
+	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
@@ -265,6 +266,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.PUT("/kb/inputs/:id", kbhandler.UpdateInput)
 	apiGroup.GET("/kb/inputs/:id/file", kbhandler.GetInputFile)
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
+	apiGroup.GET("/kb/topic-chunks", kbhandler.ListTopicChunks)
 	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)
 	apiGroup.GET("/jetstream/monitor", jetstreamhandler.GetMonitor)
 	apiGroup.GET("/jetstream/subjects", jetstreamhandler.GetSubjects)
@@ -319,6 +321,39 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.DELETE("/prompt-optimizer/variables/:id", promptoptimizerhandler.DeleteVariable)
 
 	apiGroup.POST("/prompt-optimizer/optimize", promptoptimizerhandler.OptimizePrompt)
+
+	// Agent Platform (home3) endpoints. See design doc:
+	// KnowledgeStore/DevDocuments/DesignDocs/design-agent-platform-home3.md
+	// Tables owned by this feature are defined in
+	// project_migrations/20260422000001_create_agent_platform_tables.sql.
+	//
+	// Workspaces (caller-scoped; no :slug).
+	apiGroup.GET("/ap/workspaces", agentplatformhandler.ListWorkspaces)
+	apiGroup.POST("/ap/workspaces", agentplatformhandler.CreateWorkspace)
+
+	// Agents (workspace-scoped).
+	apiGroup.GET("/ap/w/:slug/agents", agentplatformhandler.ListAgents)
+	apiGroup.POST("/ap/w/:slug/agents", agentplatformhandler.CreateAgent)
+	apiGroup.PATCH("/ap/w/:slug/agents/:id", agentplatformhandler.UpdateAgent)
+	apiGroup.DELETE("/ap/w/:slug/agents/:id", agentplatformhandler.DeleteAgent)
+
+	// Projects (workspace-scoped).
+	apiGroup.GET("/ap/w/:slug/projects", agentplatformhandler.ListProjects)
+	apiGroup.POST("/ap/w/:slug/projects", agentplatformhandler.CreateProject)
+	apiGroup.PATCH("/ap/w/:slug/projects/:id", agentplatformhandler.UpdateProject)
+	apiGroup.DELETE("/ap/w/:slug/projects/:id", agentplatformhandler.DeleteProject)
+
+	// Issues (workspace-scoped). bulk-move must register BEFORE /:num so Echo
+	// does not match "bulk-move" as an issue_number param.
+	apiGroup.GET("/ap/w/:slug/issues", agentplatformhandler.ListIssues)
+	apiGroup.POST("/ap/w/:slug/issues", agentplatformhandler.CreateIssue)
+	apiGroup.POST("/ap/w/:slug/issues/bulk-move", agentplatformhandler.BulkMoveIssues)
+	apiGroup.GET("/ap/w/:slug/issues/:num", agentplatformhandler.GetIssue)
+	apiGroup.PATCH("/ap/w/:slug/issues/:num", agentplatformhandler.UpdateIssue)
+
+	// Comments on an issue.
+	apiGroup.GET("/ap/w/:slug/issues/:num/comments", agentplatformhandler.ListComments)
+	apiGroup.POST("/ap/w/:slug/issues/:num/comments", agentplatformhandler.CreateComment)
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {

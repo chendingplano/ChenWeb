@@ -75,7 +75,7 @@ func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger 
 		Extractor:     extractor,
 		Logger:        logger,
 		Now:           time.Now,
-		ChunkDir:      strings.TrimSpace(os.Getenv("CHUNK_DIR")),
+		ChunkDir:      strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		FileBlockSize: envInt("FILE_BLOCK_SIZE", DefaultFileBlockSize, 1),
 		ModelRef:      modelRef,
 		ModelCfgPath:  modelCfgPath,
@@ -106,7 +106,7 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 		return s.ModelErr
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
-		procErr := errors.New("(MID_26042105) missing CHUNK_DIR")
+		procErr := errors.New("(MID_26042105) missing ARTIFACT_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
