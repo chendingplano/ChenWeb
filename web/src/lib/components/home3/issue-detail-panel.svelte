@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { apClient, type Comment, type IssueStatus } from './agentplatform-client';
+	import {
+		apClient,
+		isTerminalRun,
+		type Comment,
+		type IssueStatus,
+		type TaskEvent,
+		type TaskRun
+	} from './agentplatform-client';
 	import { apStore, STATUS_LABELS } from './agentplatform-store.svelte';
 
 	let {
@@ -15,17 +22,152 @@
 	let posting = $state(false);
 	let lastLoadedNum = $state<number | null>(null);
 
+	// --- Task runs state ---
+	let runs = $state<TaskRun[]>([]);
+	let runsError = $state<string | null>(null);
+	let launchingRun = $state(false);
+	let expandedRunId = $state<string | null>(null);
+	// Map run id → events observed so far (for the expanded row).
+	let runEvents = $state<Record<string, TaskEvent[]>>({});
+	// Active polling identifier — used to cancel stale loops on re-entry.
+	let pollToken = 0;
+
+	async function loadRuns(slug: string, num: number) {
+		try {
+			const res = await apClient.listIssueRuns(slug, num);
+			runs = res.runs;
+			// Auto-expand the latest run if it's still live and nothing else is open.
+			if (!expandedRunId && runs[0] && !isTerminalRun(runs[0].status)) {
+				setExpandedRun(runs[0].id);
+			}
+		} catch (e) {
+			runsError = String((e as Error).message ?? e);
+		}
+	}
+
+	async function launchRun() {
+		const slug = apStore.activeSlug;
+		const issue = apStore.selectedIssue;
+		if (!slug || !issue) return;
+		if (!issue.assignee_agent_id) {
+			runsError = 'assign an agent to this issue before running';
+			return;
+		}
+		runsError = null;
+		launchingRun = true;
+		try {
+			const run = await apClient.runIssue(slug, issue.issue_number);
+			runs = [run, ...runs];
+			setExpandedRun(run.id);
+		} catch (e) {
+			runsError = String((e as Error).message ?? e);
+		} finally {
+			launchingRun = false;
+		}
+	}
+
+	async function cancelRun(runId: string) {
+		const slug = apStore.activeSlug;
+		if (!slug) return;
+		try {
+			await apClient.cancelRun(slug, runId);
+			// Refresh the run row; polling (if any) will also catch it up.
+			const fresh = await apClient.getRun(slug, runId);
+			runs = runs.map((r) => (r.id === runId ? fresh : r));
+		} catch (e) {
+			runsError = String((e as Error).message ?? e);
+		}
+	}
+
+	function setExpandedRun(runId: string | null) {
+		expandedRunId = runId;
+		// Invalidate the previous polling loop; a new one starts if needed.
+		pollToken++;
+		if (!runId) return;
+		runEvents[runId] ??= [];
+		startPolling(runId, pollToken);
+	}
+
+	async function startPolling(runId: string, token: number) {
+		const slug = apStore.activeSlug;
+		if (!slug) return;
+		// Initial fetch, then 2s interval until terminal or cancelled.
+		let since = 0;
+		const existing = runEvents[runId] ?? [];
+		if (existing.length) since = existing[existing.length - 1].id;
+
+		while (pollToken === token && apStore.activeSlug === slug) {
+			try {
+				const [{ events }, run] = await Promise.all([
+					apClient.listRunEvents(slug, runId, since),
+					apClient.getRun(slug, runId)
+				]);
+				if (events.length) {
+					runEvents[runId] = [...(runEvents[runId] ?? []), ...events];
+					since = events[events.length - 1].id;
+				}
+				runs = runs.map((r) => (r.id === runId ? run : r));
+				if (isTerminalRun(run.status)) return;
+			} catch {
+				/* swallow transient errors; keep polling */
+			}
+			await new Promise((r) => setTimeout(r, 2000));
+		}
+	}
+
+	function runStatusColor(s: TaskRun['status']): string {
+		switch (s) {
+			case 'succeeded':
+				return '#34D399';
+			case 'failed':
+				return '#F87171';
+			case 'canceled':
+				return '#94A3B8';
+			case 'running':
+				return '#818CF8';
+			case 'claimed':
+				return '#FBBF24';
+			default:
+				return '#64748B';
+		}
+	}
+
+	function eventColor(k: TaskEvent['kind']): string {
+		switch (k) {
+			case 'stderr':
+			case 'error':
+				return '#F87171';
+			case 'status':
+				return '#818CF8';
+			case 'artifact':
+				return '#34D399';
+			default:
+				return '';
+		}
+	}
+
 	// React to selection changes: when a different issue is selected, reload.
 	$effect(() => {
 		const num = apStore.selectedIssueNum;
 		const slug = apStore.activeSlug;
 		if (num === null || slug === null) {
 			comments = [];
+			runs = [];
+			runEvents = {};
+			expandedRunId = null;
+			pollToken++;
 			lastLoadedNum = null;
 			return;
 		}
 		if (num === lastLoadedNum) return;
 		lastLoadedNum = num;
+		// Reset run UI for the newly-selected issue.
+		runs = [];
+		runEvents = {};
+		expandedRunId = null;
+		pollToken++;
+		runsError = null;
+		loadRuns(slug, num);
 		loadingComments = true;
 		commentsError = null;
 		apClient
@@ -136,6 +278,67 @@
 				<p class="desc">{iss.description}</p>
 			</section>
 		{/if}
+
+		<section class="runs">
+			<div class="runs-head">
+				<label>Agent Runs</label>
+				<button
+					class="run-btn"
+					onclick={launchRun}
+					disabled={launchingRun || !iss.assignee_agent_id}
+					title={iss.assignee_agent_id ? 'Enqueue a new run' : 'Assign an agent first'}
+				>
+					{launchingRun ? 'Queuing…' : '▶ Run'}
+				</button>
+			</div>
+			{#if runsError}
+				<p class="error-text">{runsError}</p>
+			{/if}
+			{#if runs.length === 0}
+				<p class="muted">No runs yet.</p>
+			{:else}
+				<ul class="runs-list">
+					{#each runs as run (run.id)}
+						<li class="run-row" class:expanded={expandedRunId === run.id}>
+							<button
+								class="run-head"
+								onclick={() =>
+									setExpandedRun(expandedRunId === run.id ? null : run.id)}
+							>
+								<span class="run-dot" style:background={runStatusColor(run.status)}></span>
+								<span class="run-status">{run.status}</span>
+								<time>{new Date(run.queued_at).toLocaleTimeString()}</time>
+								{#if run.exit_code !== null && run.exit_code !== undefined}
+									<span class="muted small">exit {run.exit_code}</span>
+								{/if}
+							</button>
+							{#if expandedRunId === run.id}
+								<div class="run-body">
+									{#if run.error_message}
+										<p class="error-text small">{run.error_message}</p>
+									{/if}
+									<pre class="log">{#each runEvents[run.id] ?? [] as ev (ev.id)}<span
+												style:color={eventColor(ev.kind)}
+												>{ev.kind === 'stderr' || ev.kind === 'error'
+													? 'err'
+													: ev.kind === 'status'
+														? 'sta'
+														: ev.kind === 'artifact'
+															? 'art'
+															: 'out'} · {ev.payload}</span
+											>{'\n'}{/each}</pre>
+									{#if !isTerminalRun(run.status)}
+										<button class="cancel-link" onclick={() => cancelRun(run.id)}>
+											Cancel run
+										</button>
+									{/if}
+								</div>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
 
 		<section class="comments">
 			<label>Comments</label>
@@ -283,5 +486,107 @@
 	.reply button:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+	.runs {
+		gap: 6px;
+	}
+	.runs-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+	.run-btn {
+		background: #818cf8;
+		color: white;
+		border: none;
+		padding: 4px 10px;
+		border-radius: 6px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.run-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.runs-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.run-row {
+		background: var(--card);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		overflow: hidden;
+	}
+	.run-row.expanded {
+		background: rgba(129, 140, 248, 0.06);
+	}
+	.run-head {
+		width: 100%;
+		background: none;
+		border: none;
+		padding: 6px 10px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		cursor: pointer;
+		color: var(--heading);
+		font-size: 12px;
+		text-align: left;
+	}
+	.run-head:hover {
+		background: rgba(255, 255, 255, 0.02);
+	}
+	.run-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+	.run-status {
+		flex: 1;
+		font-variant-numeric: tabular-nums;
+	}
+	.run-head time,
+	.run-head .small {
+		color: var(--sub);
+		font-size: 11px;
+	}
+	.run-body {
+		padding: 8px 10px 10px;
+		border-top: 1px solid var(--border);
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.log {
+		margin: 0;
+		font-family: 'Fira Code', 'Cascadia Code', monospace;
+		font-size: 11px;
+		background: rgba(0, 0, 0, 0.25);
+		color: var(--heading);
+		padding: 8px;
+		border-radius: 6px;
+		max-height: 220px;
+		overflow-y: auto;
+		white-space: pre-wrap;
+		word-break: break-all;
+	}
+	.cancel-link {
+		align-self: flex-start;
+		background: none;
+		border: 1px solid var(--border);
+		color: #f87171;
+		padding: 3px 8px;
+		border-radius: 6px;
+		font-size: 11px;
+		cursor: pointer;
+	}
+	.cancel-link:hover {
+		background: rgba(248, 113, 113, 0.08);
 	}
 </style>

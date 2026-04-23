@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ type listTopicChunksResponse struct {
 }
 
 type topicChunkEntry struct {
+	RecordID   int64
 	SeqNo      int
 	TopicType  string
 	LineTokens []string
@@ -115,13 +117,13 @@ func ListTopicChunks(c echo.Context) error {
 		})
 	}
 
-	topicsPath := topicFilePathFor(chunkDir, inputID)
-	topicEntries, err := readTopicChunkEntries(topicsPath)
+	topicsRootPath := topicRootPathFor(chunkDir, inputID)
+	topicEntries, err := readTopicChunkEntries(topicsRootPath, inputID)
 	if err != nil {
-		logger.Error("read topics file failed", "path", topicsPath, "err", err)
+		logger.Error("read topics file failed", "path", topicsRootPath, "err", err)
 		return c.JSON(http.StatusNotFound, errorResponse{
 			Status:   false,
-			ErrorMsg: fmt.Sprintf("topics file not found: %s (CWB_KB_C_024)", filepath.Base(topicsPath)),
+			ErrorMsg: fmt.Sprintf("topics file not found for input %d (CWB_KB_C_024)", inputID),
 		})
 	}
 
@@ -138,9 +140,9 @@ func ListTopicChunks(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func topicFilePathFor(artifactDir string, recordID int64) string {
+func topicRootPathFor(artifactDir string, recordID int64) string {
 	groupID := recordID / 1000
-	return filepath.Join(artifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10), "topics.txt")
+	return filepath.Join(artifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
 }
 
 func readRawLinesFile(path string) ([]rawLine, error) {
@@ -166,18 +168,64 @@ func readRawLinesFile(path string) ([]rawLine, error) {
 	return out, nil
 }
 
-func readTopicChunkEntries(path string) ([]topicChunkEntry, error) {
+func readTopicChunkEntries(root string, inputRecordID int64) ([]topicChunkEntry, error) {
+	out := make([]topicChunkEntry, 0, 256)
+	leafFiles, err := listTopicLeafFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range leafFiles {
+		entries, err := readTopicChunkEntriesFromFile(path, inputRecordID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, entries...)
+	}
+	for i := range out {
+		out[i].SeqNo = i + 1
+	}
+	if len(out) == 0 {
+		return nil, os.ErrNotExist
+	}
+	return out, nil
+}
+
+func listTopicLeafFiles(root string) ([]string, error) {
+	files := []string{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.EqualFold(filepath.Base(path), "topics.txt") {
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(path), ".txt") {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func readTopicChunkEntriesFromFile(path string, inputRecordID int64) ([]topicChunkEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-
-	out := make([]topicChunkEntry, 0, 256)
+	out := make([]topicChunkEntry, 0, 64)
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
 	for scanner.Scan() {
-		entry, ok := parseTopicChunkLine(scanner.Text())
+		entry, ok := parseTopicChunkLine(scanner.Text(), inputRecordID)
 		if !ok {
 			continue
 		}
@@ -189,7 +237,7 @@ func readTopicChunkEntries(path string) ([]topicChunkEntry, error) {
 	return out, nil
 }
 
-func parseTopicChunkLine(line string) (topicChunkEntry, bool) {
+func parseTopicChunkLine(line string, inputRecordID int64) (topicChunkEntry, bool) {
 	s := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
 	if s == "" {
 		return topicChunkEntry{}, false
@@ -198,8 +246,8 @@ func parseTopicChunkLine(line string) (topicChunkEntry, bool) {
 	if len(parts) != 5 {
 		return topicChunkEntry{}, false
 	}
-	seqNo, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil || seqNo <= 0 {
+	idCol, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	if err != nil || idCol <= 0 {
 		return topicChunkEntry{}, false
 	}
 	topicType := strings.TrimSpace(parts[1])
@@ -212,12 +260,13 @@ func parseTopicChunkLine(line string) (topicChunkEntry, bool) {
 		return topicChunkEntry{}, false
 	}
 	return topicChunkEntry{
-		SeqNo:      seqNo,
+		RecordID:   idCol,
+		SeqNo:      0,
 		TopicType:  topicType,
 		LineTokens: lineTokens,
 		Keywords:   parseTopicArrayItems(parts[3]),
 		Topic:      topic,
-	}, true
+	}, idCol == inputRecordID
 }
 
 func parseTopicArrayItems(raw string) []string {

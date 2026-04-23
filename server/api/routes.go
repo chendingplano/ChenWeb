@@ -355,6 +355,15 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/ap/w/:slug/issues/:num/comments", agentplatformhandler.ListComments)
 	apiGroup.POST("/ap/w/:slug/issues/:num/comments", agentplatformhandler.CreateComment)
 
+	// Task runs (M1b). `POST /issues/:num/run` enqueues; the worker pool in
+	// the same package drives execution. `GET /runs/:id/events?since=<id>`
+	// is poll-friendly until the M2 WebSocket lands.
+	apiGroup.POST("/ap/w/:slug/issues/:num/run", agentplatformhandler.RunIssue)
+	apiGroup.GET("/ap/w/:slug/issues/:num/runs", agentplatformhandler.ListIssueRuns)
+	apiGroup.GET("/ap/w/:slug/runs/:id", agentplatformhandler.GetTaskRun)
+	apiGroup.GET("/ap/w/:slug/runs/:id/events", agentplatformhandler.ListRunEvents)
+	apiGroup.POST("/ap/w/:slug/runs/:id/cancel", agentplatformhandler.CancelTaskRun)
+
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {
 		return c.Redirect(http.StatusFound, "/login")

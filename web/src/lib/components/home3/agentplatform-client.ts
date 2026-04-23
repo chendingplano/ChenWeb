@@ -108,6 +108,46 @@ export type UpdateIssueBody = Partial<{
 }>;
 
 // -----------------------------------------------------------------------------
+// Task runs (M1b)
+// -----------------------------------------------------------------------------
+
+export type TaskRunStatus = 'queued' | 'claimed' | 'running' | 'succeeded' | 'failed' | 'canceled';
+
+export type TaskRun = {
+	id: string;
+	workspace_id: string;
+	issue_id: string;
+	issue_number: number;
+	agent_id: string;
+	status: TaskRunStatus;
+	queued_at: string;
+	claimed_at?: string | null;
+	started_at?: string | null;
+	finished_at?: string | null;
+	exit_code?: number | null;
+	error_message?: string | null;
+	runner_version?: string | null;
+	workdir_path?: string | null;
+	lease_expires_at?: string | null;
+};
+
+export type TaskEventKind = 'stdout' | 'stderr' | 'status' | 'heartbeat' | 'artifact' | 'error';
+
+export type TaskEvent = {
+	id: number;
+	task_run_id: string;
+	kind: TaskEventKind;
+	payload: string;
+	at: string;
+};
+
+// Runs are terminal (no more events arriving) in these states.
+export const TERMINAL_RUN_STATUSES: TaskRunStatus[] = ['succeeded', 'failed', 'canceled'];
+export function isTerminalRun(status: TaskRunStatus): boolean {
+	return TERMINAL_RUN_STATUSES.includes(status);
+}
+
+// -----------------------------------------------------------------------------
 // Transport
 // -----------------------------------------------------------------------------
 
@@ -185,5 +225,20 @@ export const apClient = {
 			`/api/v1/ap/w/${encodeURIComponent(slug)}/issues/${num}/comments`
 		),
 	createComment: (slug: string, num: number, body: { body: string }) =>
-		req<Comment>('POST', `/api/v1/ap/w/${encodeURIComponent(slug)}/issues/${num}/comments`, body)
+		req<Comment>('POST', `/api/v1/ap/w/${encodeURIComponent(slug)}/issues/${num}/comments`, body),
+
+	// Task runs (M1b)
+	runIssue: (slug: string, num: number) =>
+		req<TaskRun>('POST', `/api/v1/ap/w/${encodeURIComponent(slug)}/issues/${num}/run`),
+	listIssueRuns: (slug: string, num: number) =>
+		req<{ runs: TaskRun[] }>('GET', `/api/v1/ap/w/${encodeURIComponent(slug)}/issues/${num}/runs`),
+	getRun: (slug: string, id: string) =>
+		req<TaskRun>('GET', `/api/v1/ap/w/${encodeURIComponent(slug)}/runs/${id}`),
+	listRunEvents: (slug: string, id: string, since = 0) =>
+		req<{ events: TaskEvent[] }>(
+			'GET',
+			`/api/v1/ap/w/${encodeURIComponent(slug)}/runs/${id}/events${since > 0 ? `?since=${since}` : ''}`
+		),
+	cancelRun: (slug: string, id: string) =>
+		req<void>('POST', `/api/v1/ap/w/${encodeURIComponent(slug)}/runs/${id}/cancel`)
 };

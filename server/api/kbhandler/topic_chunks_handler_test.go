@@ -1,7 +1,10 @@
 package kbhandler
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -22,12 +25,12 @@ func TestExpandTopicLineTokens(t *testing.T) {
 }
 
 func TestParseTopicChunkLine(t *testing.T) {
-	entry, ok := parseTopicChunkLine("3\ttable\t[38-45, 47]\t[k1, k2]\tTable about emissions")
+	entry, ok := parseTopicChunkLine("53\ttable\t[38-45, 47]\t[k1, k2]\tTable about emissions", 53)
 	if !ok {
 		t.Fatalf("expected parse success")
 	}
-	if entry.SeqNo != 3 {
-		t.Fatalf("unexpected seqno: %d", entry.SeqNo)
+	if entry.RecordID != 53 {
+		t.Fatalf("unexpected record_id: %d", entry.RecordID)
 	}
 	if entry.TopicType != "table" {
 		t.Fatalf("unexpected topic_type: %q", entry.TopicType)
@@ -40,6 +43,56 @@ func TestParseTopicChunkLine(t *testing.T) {
 	}
 	if !reflect.DeepEqual(entry.Keywords, []string{"k1", "k2"}) {
 		t.Fatalf("unexpected keywords: %v", entry.Keywords)
+	}
+}
+
+func TestReadTopicChunkEntries_FromCategoryTree(t *testing.T) {
+	root := t.TempDir()
+	runRoot := filepath.Join(root, "0", "53")
+	if err := os.MkdirAll(filepath.Join(runRoot, "safety_evaluation"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runRoot, "project_overview.txt"), []byte("53\tpolicy\t[1]\t[intro]\tOverview"), 0o644); err != nil {
+		t.Fatalf("write project_overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runRoot, "safety_evaluation", "seismic_design.txt"), []byte("53\tlist\t[11-12]\t[risk]\tSeismic scoring"), 0o644); err != nil {
+		t.Fatalf("write seismic_design: %v", err)
+	}
+
+	entries, err := readTopicChunkEntries(runRoot, 53)
+	if err != nil {
+		t.Fatalf("readTopicChunkEntries: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries)=%d, want 2", len(entries))
+	}
+	if entries[0].SeqNo != 1 || entries[1].SeqNo != 2 {
+		t.Fatalf("seq numbers not assigned incrementally: %+v", entries)
+	}
+}
+
+func TestListTopicLeafFiles_SkipsTopicsTxt(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "a"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "topics.txt"), []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("write legacy: %v", err)
+	}
+	leaf := filepath.Join(root, "a", "b.txt")
+	if err := os.WriteFile(leaf, []byte("53\tlist\t[1]\t[k]\ttopic"), 0o644); err != nil {
+		t.Fatalf("write leaf: %v", err)
+	}
+
+	files, err := listTopicLeafFiles(root)
+	if err != nil {
+		t.Fatalf("listTopicLeafFiles: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("len(files)=%d, want 1 (%v)", len(files), files)
+	}
+	if !strings.HasSuffix(files[0], string(filepath.Separator)+"a"+string(filepath.Separator)+"b.txt") {
+		t.Fatalf("unexpected file listed: %v", files)
 	}
 }
 

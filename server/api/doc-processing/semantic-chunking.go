@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ const (
 	DefaultFileBlockSize         = 3
 	ChunkingMethodTopic          = "topic-chunking"
 	defaultSemanticChunkStatusTS = "20060102 15:04:05"
+	maxCategoryDepth             = 6
+	maxCategoryNameLen           = 64
 )
 
 var coordinatePattern = regexp.MustCompile(`^\[\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*\]$`)
@@ -38,6 +41,9 @@ type SemanticChunkingService struct {
 	ModelErr      error
 	ModelName     string
 	PromptText    string
+	PromptRef     string
+	PromptPath    string
+	PromptErr     error
 }
 
 type SemanticPageBlock struct {
@@ -47,11 +53,12 @@ type SemanticPageBlock struct {
 }
 
 type TopicItem struct {
-	SeqNo     int
-	TopicType string
-	Lines     []string
-	Keywords  []string
-	Topic     string
+	SeqNo        int
+	TopicType    string
+	Lines        []string
+	Keywords     []string
+	Topic        string
+	CategoryPath []string
 }
 
 type topicChunkStatusParams struct {
@@ -69,6 +76,7 @@ func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger 
 		logger = loggerutil.CreateDefaultLogger("MID_26042101")
 	}
 	modelRef, modelCfgPath, modelCfg, modelErr := loadTopicChunkModelFromEnv()
+	promptText, promptRef, promptPath, promptErr := loadTopicChunkPromptFromEnv()
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	return &SemanticChunkingService{
 		Store:         store,
@@ -81,7 +89,10 @@ func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger 
 		ModelCfgPath:  modelCfgPath,
 		ModelErr:      modelErr,
 		ModelName:     modelCfg.ModelName,
-		PromptText:    defaultTopicChunkPrompt,
+		PromptText:    promptText,
+		PromptRef:     promptRef,
+		PromptPath:    promptPath,
+		PromptErr:     promptErr,
 	}
 }
 
@@ -104,6 +115,10 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 	if s.ModelErr != nil {
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, s.ModelErr)
 		return s.ModelErr
+	}
+	if s.PromptErr != nil {
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, fmt.Errorf("load topic chunk prompt %q failed: %w", s.PromptRef, s.PromptErr))
+		return s.PromptErr
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
 		procErr := errors.New("(MID_26042105) missing ARTIFACT_DIR")
@@ -138,7 +153,12 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 	}
 	topics = dedupeTopicItems(topics)
 
-	if err := writeTopicsFile(s.ChunkDir, rec.ID, topics); err != nil {
+	topicsPath, err := writeTopicsFile(s.ChunkDir, rec.ID, topics)
+	if err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(topics), start, err)
+		return err
+	}
+	if err := writeTopicsCategoryTree(s.Logger, s.ChunkDir, rec.ID, topicsPath, topics); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(topics), start, err)
 		return err
 	}
@@ -316,12 +336,22 @@ func (s *SemanticChunkingService) extractTopicsForBlock(ctx context.Context, blo
 			topicType = "general"
 		}
 		keywords := compactTopicArray(m["keywords"])
+		categoryPath, categoryFallbackReason := normalizeAndValidateTopicCategoryPath(extractCategoryPathFromLLM(m), topicType)
+		if categoryFallbackReason != "" && s.Logger != nil {
+			s.Logger.Warn("topic category fallback applied",
+				"block_no", block.BlockNo,
+				"topic_seq", nextSeq,
+				"reason", categoryFallbackReason,
+				"topic", topic,
+			)
+		}
 		out = append(out, TopicItem{
-			SeqNo:     nextSeq,
-			TopicType: topicType,
-			Lines:     lines,
-			Keywords:  keywords,
-			Topic:     topic,
+			SeqNo:        nextSeq,
+			TopicType:    topicType,
+			Lines:        lines,
+			Keywords:     keywords,
+			Topic:        topic,
+			CategoryPath: categoryPath,
 		})
 		nextSeq++
 	}
@@ -329,18 +359,26 @@ func (s *SemanticChunkingService) extractTopicsForBlock(ctx context.Context, blo
 	return out, nil
 }
 
-func writeTopicsFile(chunkDir string, recordID int64, topics []TopicItem) error {
+type legacyTopicRow struct {
+	SeqNo     int
+	TopicType string
+	Lines     string
+	Keywords  string
+	Topic     string
+}
+
+func writeTopicsFile(chunkDir string, recordID int64, topics []TopicItem) (string, error) {
 	if strings.TrimSpace(chunkDir) == "" {
-		return errors.New("(MID_26042110) chunk dir is empty")
+		return "", errors.New("(MID_26042110) chunk dir is empty")
 	}
 	if recordID <= 0 {
-		return fmt.Errorf("(MID_26042111) invalid record id: %d", recordID)
+		return "", fmt.Errorf("(MID_26042111) invalid record id: %d", recordID)
 	}
 
 	groupID := recordID / 1000
 	targetDir := filepath.Join(chunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return err
+		return "", err
 	}
 
 	path := filepath.Join(targetDir, "topics.txt")
@@ -355,7 +393,206 @@ func writeTopicsFile(chunkDir string, recordID int64, topics []TopicItem) error 
 			sanitizeTopicText(topic.Topic),
 		))
 	}
-	return os.WriteFile(path, []byte(strings.TrimRight(b.String(), "\n")), 0o644)
+	if err := os.WriteFile(path, []byte(strings.TrimRight(b.String(), "\n")), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func writeTopicsCategoryTree(logger ApiTypes.JimoLogger, chunkDir string, recordID int64, topicsPath string, topics []TopicItem) error {
+	if strings.TrimSpace(chunkDir) == "" {
+		return errors.New("(MID_26042110) chunk dir is empty")
+	}
+	if recordID <= 0 {
+		return fmt.Errorf("(MID_26042111) invalid record id: %d", recordID)
+	}
+
+	groupID := recordID / 1000
+	targetDir := filepath.Join(chunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return err
+	}
+
+	rows, err := readLegacyTopicRows(topicsPath)
+	if err != nil {
+		return err
+	}
+
+	categoryBySeq := make(map[int][]string, len(topics))
+	for _, topic := range topics {
+		categoryBySeq[topic.SeqNo] = topic.CategoryPath
+	}
+
+	existingByLeaf, err := loadLeafRowsExcludingRecord(targetDir, recordID)
+	if err != nil {
+		return err
+	}
+
+	leafRows := make(map[string][]string, len(rows))
+	normalizedSourceByPath := make(map[string]string, len(topics))
+	for _, row := range rows {
+		categoryPath := categoryBySeq[row.SeqNo]
+		if len(categoryPath) == 0 {
+			categoryPath = fallbackCategoryPath(row.TopicType)
+		}
+		path := filepath.Join(categoryPath...)
+		rawCategorySource := strings.Join(categoryPath, "/")
+		if prev, ok := normalizedSourceByPath[path]; ok && prev != rawCategorySource && logger != nil {
+			logger.Warn("normalized topic category collision",
+				"record_id", recordID,
+				"path", path,
+				"source_a", prev,
+				"source_b", rawCategorySource,
+			)
+		} else {
+			normalizedSourceByPath[path] = rawCategorySource
+		}
+		outRow := fmt.Sprintf(
+			"%d\t%s\t%s\t%s\t%s",
+			recordID,
+			strings.TrimSpace(row.TopicType),
+			strings.TrimSpace(row.Lines),
+			strings.TrimSpace(row.Keywords),
+			sanitizeTopicText(row.Topic),
+		)
+		leafRel := path + ".txt"
+		leafRows[leafRel] = append(leafRows[leafRel], outRow)
+	}
+
+	allLeafPaths := make(map[string]struct{}, len(existingByLeaf)+len(leafRows))
+	for p := range existingByLeaf {
+		allLeafPaths[p] = struct{}{}
+	}
+	for p := range leafRows {
+		allLeafPaths[p] = struct{}{}
+	}
+	leafPaths := make([]string, 0, len(allLeafPaths))
+	for p := range allLeafPaths {
+		leafPaths = append(leafPaths, p)
+	}
+	sort.Strings(leafPaths)
+
+	for _, leafRel := range leafPaths {
+		rows := append([]string{}, existingByLeaf[leafRel]...)
+		rows = append(rows, leafRows[leafRel]...)
+		sort.Strings(rows)
+		filePath := filepath.Join(targetDir, leafRel)
+		if len(rows) == 0 {
+			if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			continue
+		}
+		parentDir := filepath.Dir(filePath)
+		if err := os.MkdirAll(parentDir, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filePath, []byte(strings.Join(rows, "\n")), 0o644); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func readLegacyTopicRows(path string) ([]legacyTopicRow, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	out := make([]legacyTopicRow, 0, 128)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(strings.TrimRight(scanner.Text(), "\r\n"))
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) != 5 {
+			continue
+		}
+		seq, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if err != nil || seq <= 0 {
+			continue
+		}
+		out = append(out, legacyTopicRow{
+			SeqNo:     seq,
+			TopicType: strings.TrimSpace(parts[1]),
+			Lines:     strings.TrimSpace(parts[2]),
+			Keywords:  strings.TrimSpace(parts[3]),
+			Topic:     strings.TrimSpace(parts[4]),
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func loadLeafRowsExcludingRecord(targetDir string, recordID int64) (map[string][]string, error) {
+	out := map[string][]string{}
+	err := filepath.WalkDir(targetDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.EqualFold(filepath.Base(path), "topics.txt") || !strings.EqualFold(filepath.Ext(path), ".txt") {
+			return nil
+		}
+		rel, err := filepath.Rel(targetDir, path)
+		if err != nil {
+			return err
+		}
+		rows, err := readLeafRowsExcludingRecord(path, recordID)
+		if err != nil {
+			return err
+		}
+		out[rel] = rows
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func readLeafRowsExcludingRecord(path string, recordID int64) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	rows := []string{}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(strings.TrimRight(scanner.Text(), "\r\n"))
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) != 5 {
+			continue
+		}
+		id, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+		if err != nil {
+			continue
+		}
+		if id == recordID {
+			continue
+		}
+		rows = append(rows, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func appendTopicChunkStatus(raw string, p topicChunkStatusParams) (string, error) {
@@ -494,6 +731,7 @@ func dedupeTopicItems(in []TopicItem) []TopicItem {
 	seen := make(map[string]struct{}, len(in))
 	for _, item := range in {
 		key := strings.ToLower(strings.TrimSpace(item.TopicType)) + "|" +
+			strings.Join(item.CategoryPath, "/") + "|" +
 			formatTopicArray(item.Lines) + "|" +
 			sanitizeTopicText(item.Topic)
 		if _, ok := seen[key]; ok {
@@ -506,6 +744,105 @@ func dedupeTopicItems(in []TopicItem) []TopicItem {
 		out[i].SeqNo = i + 1
 	}
 	return out
+}
+
+func extractCategoryPathFromLLM(m map[string]any) []string {
+	candidates := []string{}
+	if arr, ok := m["category_path"].([]any); ok {
+		for _, it := range arr {
+			candidates = append(candidates, asString(it))
+		}
+	}
+	if len(candidates) == 0 {
+		if arr, ok := m["categories"].([]any); ok {
+			for _, it := range arr {
+				candidates = append(candidates, asString(it))
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		for _, key := range []string{"category", "topic_category"} {
+			if s := strings.TrimSpace(asString(m[key])); s != "" {
+				candidates = append(candidates, strings.Split(s, "/")...)
+				break
+			}
+		}
+	}
+	return candidates
+}
+
+func normalizeAndValidateTopicCategoryPath(raw []string, topicType string) ([]string, string) {
+	normalized := make([]string, 0, len(raw))
+	for _, part := range raw {
+		s := normalizeCategorySegment(part)
+		if s == "" {
+			continue
+		}
+		normalized = append(normalized, s)
+	}
+	if len(normalized) == 0 {
+		return fallbackCategoryPath(topicType), "missing-category"
+	}
+	if len(normalized) > maxCategoryDepth {
+		return fallbackCategoryPath(topicType), "depth-exceeds-limit"
+	}
+	for _, seg := range normalized {
+		if len(seg) > maxCategoryNameLen {
+			return fallbackCategoryPath(topicType), "segment-too-long"
+		}
+		if !isDescriptiveCategorySegment(seg) {
+			return fallbackCategoryPath(topicType), "non-descriptive-segment"
+		}
+	}
+	return normalized, ""
+}
+
+func fallbackCategoryPath(topicType string) []string {
+	leaf := normalizeCategorySegment(topicType)
+	if leaf == "" {
+		leaf = "general"
+	}
+	return []string{"uncategorized", leaf}
+}
+
+func normalizeCategorySegment(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range s {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAlphaNum {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteRune('_')
+			lastUnderscore = true
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	for strings.Contains(out, "__") {
+		out = strings.ReplaceAll(out, "__", "_")
+	}
+	return out
+}
+
+func isDescriptiveCategorySegment(seg string) bool {
+	if seg == "" {
+		return false
+	}
+	if _, err := strconv.Atoi(seg); err == nil {
+		return false
+	}
+	switch seg {
+	case "general", "misc", "other", "category", "topic", "unknown":
+		return false
+	}
+	return true
 }
 
 func loadTopicChunkModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
@@ -550,12 +887,73 @@ func loadTopicChunkModelFromEnv() (modelRef string, modelPath string, cfg struct
 	}, nil
 }
 
+func loadTopicChunkPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
+	for _, key := range []string{"TOPIC_CHUNK_PROMPT", "SEMANTIC_CHUNKING_PROMPT"} {
+		promptRef = strings.TrimSpace(os.Getenv(key))
+		if promptRef != "" {
+			break
+		}
+	}
+	if promptRef == "" {
+		return defaultTopicChunkPrompt, "", "", nil
+	}
+
+	paths := make([]string, 0, 8)
+	addCandidate := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		for _, existing := range paths {
+			if existing == p {
+				return
+			}
+		}
+		paths = append(paths, p)
+	}
+
+	if filepath.IsAbs(promptRef) {
+		addCandidate(promptRef)
+	} else {
+		addCandidate(promptRef)
+		if promptDir := strings.TrimSpace(os.Getenv("PROMPT_DIR")); promptDir != "" {
+			addCandidate(filepath.Join(promptDir, promptRef))
+		}
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", promptRef))
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", "prompts", promptRef))
+		addCandidate(filepath.Join("prompts", promptRef))
+	}
+
+	var lastErr error
+	for _, candidate := range paths {
+		bs, err := os.ReadFile(candidate)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		text := strings.TrimSpace(string(bs))
+		if text == "" {
+			return "", promptRef, candidate, errors.New("prompt file is empty")
+		}
+		return text, promptRef, candidate, nil
+	}
+
+	if strings.Contains(promptRef, "\n") || strings.Contains(promptRef, " ") {
+		return strings.TrimSpace(promptRef), "inline", "", nil
+	}
+	if lastErr == nil {
+		lastErr = os.ErrNotExist
+	}
+	return "", promptRef, "", fmt.Errorf("prompt file not found: %w", lastErr)
+}
+
 const defaultTopicChunkPrompt = `You extract semantic topics from line-file blocks.
 Return strict JSON only:
 {
   "topics": [
     {
       "topic_type": "string",
+      "category_path": ["snake_case", "snake_case"],
       "lines": ["38-45", "47"],
       "keywords": ["k1", "k2"],
       "topic": "one-sentence topic description"
@@ -570,6 +968,9 @@ Rules:
 - For formula content, create a topic with topic_type "formula".
 - For list content, create a topic with topic_type "list".
 - Include all other meaningful topic types (workflows, policies, rules, etc.) when present.
+- category_path must be descriptive snake_case segments.
+- category_path depth must be <= 6.
+- each category_path segment length must be <= 64.
 - "lines" must reference line numbers/ranges found in the input.
 - Always include concise keywords.
 - Do not output markdown.`

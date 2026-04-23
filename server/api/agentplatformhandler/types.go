@@ -156,3 +156,42 @@ type Comment struct {
 type CreateCommentRequest struct {
 	Body string `json:"body"`
 }
+
+// -----------------------------------------------------------------------------
+// Task run / events / artifacts (M1b)
+// -----------------------------------------------------------------------------
+
+type TaskRun struct {
+	ID             string     `json:"id"`
+	WorkspaceID    string     `json:"workspace_id"`
+	IssueID        string     `json:"issue_id"`
+	IssueNumber    int        `json:"issue_number"`
+	AgentID        string     `json:"agent_id"`
+	Status         string     `json:"status"` // queued|claimed|running|succeeded|failed|canceled
+	QueuedAt       time.Time  `json:"queued_at"`
+	ClaimedAt      *time.Time `json:"claimed_at,omitempty"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	ExitCode       *int       `json:"exit_code,omitempty"`
+	ErrorMessage   *string    `json:"error_message,omitempty"`
+	RunnerVersion  *string    `json:"runner_version,omitempty"`
+	WorkdirPath    *string    `json:"workdir_path,omitempty"`
+	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
+}
+
+type TaskEvent struct {
+	ID        int64     `json:"id"`
+	TaskRunID string    `json:"task_run_id"`
+	Kind      string    `json:"kind"`
+	Payload   string    `json:"payload"`
+	At        time.Time `json:"at"`
+}
+
+type Artifact struct {
+	ID        string    `json:"id"`
+	TaskRunID string    `json:"task_run_id"`
+	Path      string    `json:"path"`
+	Kind      string    `json:"kind"`
+	SizeBytes int64     `json:"size_bytes"`
+	CreatedAt time.Time `json:"created_at"`
+}

@@ -10,6 +10,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api"
 	"github.com/chendingplano/deepdoc/server/api/database"
 	"github.com/chendingplano/deepdoc/server/api/docgenworker"
+	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
@@ -177,6 +178,15 @@ func main() {
 	if err := promptoptimizerhandler.Init(poEncKey); err != nil {
 		logger.Error("failed to init promptoptimizerhandler",
 			"error", err, "loc", "CWB_DDM_166")
+		os.Exit(1)
+	}
+
+	// Agent-platform background workers (M1b). No-op unless
+	// AGENT_PLATFORM_ENABLE_WORKERS=true; fails fast if Docker is unreachable
+	// (unless AGENT_PLATFORM_FORCE_DRYRUN=true, which keeps execution in-process).
+	if err := agentplatformhandler.StartWorkers(ctx, logger, 2); err != nil {
+		logger.Error("failed to start agent-platform workers",
+			"error", err, "loc", "CWB_DDM_169")
 		os.Exit(1)
 	}
 	if err := promptoptimizerhandler.SeedBuiltinTemplates(project_db); err != nil {

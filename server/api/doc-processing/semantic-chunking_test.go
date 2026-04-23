@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -103,17 +105,23 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 		t.Fatalf("chunking_method=%q, want topic-chunking", st.insertedRun.ChunkingMethod)
 	}
 
-	topicsPath := filepath.Join(tmp, "7", "7523", "topics.txt")
-	bs, err := os.ReadFile(topicsPath)
+	coverPath := filepath.Join(tmp, "7", "7523", "uncategorized", "cover.txt")
+	bs, err := os.ReadFile(coverPath)
 	if err != nil {
-		t.Fatalf("read topics file: %v", err)
+		t.Fatalf("read cover topic file: %v", err)
 	}
 	content := string(bs)
-	if !strings.Contains(content, "1\tcover\t[1]\t[cover]\tCover page") {
+	if !strings.Contains(content, "7523\tcover\t[1]\t[cover]\tCover page") {
 		t.Fatalf("topics content missing expected line: %q", content)
 	}
-	if !strings.Contains(content, "4\tformula\t[4]\t[formula]\tEquation") {
-		t.Fatalf("topics content missing expected formula line: %q", content)
+
+	formulaPath := filepath.Join(tmp, "7", "7523", "uncategorized", "formula.txt")
+	formulaBS, err := os.ReadFile(formulaPath)
+	if err != nil {
+		t.Fatalf("read formula topic file: %v", err)
+	}
+	if !strings.Contains(string(formulaBS), "7523\tformula\t[4]\t[formula]\tEquation") {
+		t.Fatalf("topics content missing expected formula line: %q", string(formulaBS))
 	}
 
 	var status []map[string]any
@@ -129,6 +137,169 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 	}
 	if strings.TrimSpace(asString(last["proc_status"])) != "success" {
 		t.Fatalf("proc_status=%v, want success", last["proc_status"])
+	}
+}
+
+func TestNormalizeAndValidateTopicCategoryPath(t *testing.T) {
+	path, reason := normalizeAndValidateTopicCategoryPath([]string{"Safety Rules", "Seismic Design"}, "policy")
+	if reason != "" {
+		t.Fatalf("unexpected reason: %q", reason)
+	}
+	want := []string{"safety_rules", "seismic_design"}
+	if !reflect.DeepEqual(path, want) {
+		t.Fatalf("path=%v, want=%v", path, want)
+	}
+
+	path, reason = normalizeAndValidateTopicCategoryPath([]string{"general"}, "policy")
+	if reason == "" {
+		t.Fatalf("expected non-descriptive category reason")
+	}
+	if !reflect.DeepEqual(path, []string{"uncategorized", "policy"}) {
+		t.Fatalf("fallback path=%v", path)
+	}
+
+	path, reason = normalizeAndValidateTopicCategoryPath([]string{"a", "b", "c", "d", "e", "f", "g"}, "table")
+	if reason != "depth-exceeds-limit" {
+		t.Fatalf("reason=%q, want depth-exceeds-limit", reason)
+	}
+	if !reflect.DeepEqual(path, []string{"uncategorized", "table"}) {
+		t.Fatalf("fallback path=%v", path)
+	}
+}
+
+func TestWriteTopicsCategoryTree_Deterministic(t *testing.T) {
+	tmp := t.TempDir()
+	topics := []TopicItem{
+		{
+			SeqNo:        1,
+			TopicType:    "list",
+			Lines:        []string{"11-12"},
+			Keywords:     []string{"risk", "scoring"},
+			Topic:        "Scoring table for seismic safety",
+			CategoryPath: []string{"safety_evaluation", "seismic_design"},
+		},
+		{
+			SeqNo:        2,
+			TopicType:    "list",
+			Lines:        []string{"9"},
+			Keywords:     []string{"checklist"},
+			Topic:        "Inspection checklist",
+			CategoryPath: []string{"safety_evaluation", "seismic_design"},
+		},
+		{
+			SeqNo:        3,
+			TopicType:    "policy",
+			Lines:        []string{"3"},
+			Keywords:     []string{"scope"},
+			Topic:        "Project scope",
+			CategoryPath: []string{"project_overview"},
+		},
+	}
+
+	topicsPath, err := writeTopicsFile(tmp, 53, topics)
+	if err != nil {
+		t.Fatalf("writeTopicsFile: %v", err)
+	}
+	if err := writeTopicsCategoryTree(nil, tmp, 53, topicsPath, topics); err != nil {
+		t.Fatalf("writeTopicsCategoryTree: %v", err)
+	}
+	if err := writeTopicsCategoryTree(nil, tmp, 53, topicsPath, topics); err != nil {
+		t.Fatalf("writeTopicsCategoryTree second run: %v", err)
+	}
+
+	root := filepath.Join(tmp, "0", "53")
+	var files []string
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		files = append(files, strings.TrimPrefix(path, root+string(filepath.Separator)))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk root: %v", err)
+	}
+	sort.Strings(files)
+	wantFiles := []string{
+		"project_overview.txt",
+		"safety_evaluation/seismic_design.txt",
+		"topics.txt",
+	}
+	if !reflect.DeepEqual(files, wantFiles) {
+		t.Fatalf("files=%v, want=%v", files, wantFiles)
+	}
+
+	seismicPath := filepath.Join(root, "safety_evaluation", "seismic_design.txt")
+	seismicContent, err := os.ReadFile(seismicPath)
+	if err != nil {
+		t.Fatalf("read seismic leaf: %v", err)
+	}
+	wantSeismic := strings.Join([]string{
+		"53\tlist\t[11-12]\t[risk, scoring]\tScoring table for seismic safety",
+		"53\tlist\t[9]\t[checklist]\tInspection checklist",
+	}, "\n")
+	if string(seismicContent) != wantSeismic {
+		t.Fatalf("seismic content=%q, want=%q", string(seismicContent), wantSeismic)
+	}
+
+	legacyPath := filepath.Join(root, "topics.txt")
+	legacyContent, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("read legacy topics.txt: %v", err)
+	}
+	if !strings.Contains(string(legacyContent), "1\tlist\t[11-12]\t[risk, scoring]\tScoring table for seismic safety") {
+		t.Fatalf("legacy topics.txt not preserved as expected: %q", string(legacyContent))
+	}
+}
+
+func TestWriteTopicsCategoryTree_ReprocessReplacesRowsForRecord(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "0", "53")
+	if err := os.MkdirAll(filepath.Join(root, "safety_evaluation"), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	seed := strings.Join([]string{
+		"53\tlist\t[1]\t[a]\tOld entry for same record",
+		"99\tlist\t[2]\t[b]\tOther record entry",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(root, "safety_evaluation", "seismic_design.txt"), []byte(seed), 0o644); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+
+	topics := []TopicItem{
+		{
+			SeqNo:        1,
+			TopicType:    "list",
+			Lines:        []string{"10"},
+			Keywords:     []string{"new"},
+			Topic:        "New entry for same record",
+			CategoryPath: []string{"safety_evaluation", "seismic_design"},
+		},
+	}
+	topicsPath, err := writeTopicsFile(tmp, 53, topics)
+	if err != nil {
+		t.Fatalf("writeTopicsFile: %v", err)
+	}
+	if err := writeTopicsCategoryTree(nil, tmp, 53, topicsPath, topics); err != nil {
+		t.Fatalf("writeTopicsCategoryTree: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "safety_evaluation", "seismic_design.txt"))
+	if err != nil {
+		t.Fatalf("read leaf: %v", err)
+	}
+	content := string(got)
+	if strings.Contains(content, "Old entry for same record") {
+		t.Fatalf("expected old row for record 53 to be replaced, got: %q", content)
+	}
+	if !strings.Contains(content, "99\tlist\t[2]\t[b]\tOther record entry") {
+		t.Fatalf("expected other record row to remain, got: %q", content)
+	}
+	if !strings.Contains(content, "53\tlist\t[10]\t[new]\tNew entry for same record") {
+		t.Fatalf("expected new record row to be present, got: %q", content)
 	}
 }
 
@@ -165,6 +336,26 @@ func TestSemanticChunkingService_HandleInput_LLMErrorPersistsFailure(t *testing.
 	}
 	if strings.TrimSpace(asString(last["error"])) == "" {
 		t.Fatalf("error should be present on failure")
+	}
+}
+
+func TestNewSemanticChunkingService_LoadsPromptFromEnv(t *testing.T) {
+	tmp := t.TempDir()
+	promptPath := filepath.Join(tmp, "topic_prompt.txt")
+	if err := os.WriteFile(promptPath, []byte("custom topic prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	t.Setenv("TOPIC_CHUNK_PROMPT", promptPath)
+
+	svc := NewSemanticChunkingService(&fakeStore{}, &fakeSemanticExtractor{}, nil)
+	if got := strings.TrimSpace(svc.PromptText); got != "custom topic prompt" {
+		t.Fatalf("PromptText=%q, want custom topic prompt", got)
+	}
+	if svc.PromptErr != nil {
+		t.Fatalf("PromptErr=%v, want nil", svc.PromptErr)
+	}
+	if svc.PromptPath != promptPath {
+		t.Fatalf("PromptPath=%q, want %q", svc.PromptPath, promptPath)
 	}
 }
 
