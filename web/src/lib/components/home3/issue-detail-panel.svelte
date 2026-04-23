@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import {
 		apClient,
 		isTerminalRun,
@@ -8,6 +9,7 @@
 		type TaskRun
 	} from './agentplatform-client';
 	import { apStore, STATUS_LABELS } from './agentplatform-store.svelte';
+	import type { WSFrame } from './ws-client';
 
 	let {
 		darkMode = true
@@ -97,19 +99,24 @@
 		if (existing.length) since = existing[existing.length - 1].id;
 
 		while (pollToken === token && apStore.activeSlug === slug) {
-			try {
-				const [{ events }, run] = await Promise.all([
-					apClient.listRunEvents(slug, runId, since),
-					apClient.getRun(slug, runId)
-				]);
-				if (events.length) {
-					runEvents[runId] = [...(runEvents[runId] ?? []), ...events];
-					since = events[events.length - 1].id;
+			// When realtime is healthy the WS delivers events/status; skip
+			// the REST round-trip to stay quiet. The loop keeps running so
+			// we reclaim the responsibility if the WS drops.
+			if (apStore.realtimeStatus !== 'open') {
+				try {
+					const [{ events }, run] = await Promise.all([
+						apClient.listRunEvents(slug, runId, since),
+						apClient.getRun(slug, runId)
+					]);
+					if (events.length) {
+						runEvents[runId] = [...(runEvents[runId] ?? []), ...events];
+						since = events[events.length - 1].id;
+					}
+					runs = runs.map((r) => (r.id === runId ? run : r));
+					if (isTerminalRun(run.status)) return;
+				} catch {
+					/* swallow transient errors; keep polling */
 				}
-				runs = runs.map((r) => (r.id === runId ? run : r));
-				if (isTerminalRun(run.status)) return;
-			} catch {
-				/* swallow transient errors; keep polling */
 			}
 			await new Promise((r) => setTimeout(r, 2000));
 		}
@@ -129,6 +136,57 @@
 				return '#FBBF24';
 			default:
 				return '#64748B';
+		}
+	}
+
+	// Subscribe to realtime frames for the currently-selected issue / run.
+	// The store's dispatch applies issue.updated to issues[] itself; we
+	// consume the comment / run / task event frames here.
+	onMount(() => {
+		return apStore.subscribeFrames(handleFrame);
+	});
+
+	function handleFrame(f: WSFrame) {
+		const iss = apStore.selectedIssue;
+		switch (f.type) {
+			case 'comment.created': {
+				const c = f.payload as Comment;
+				if (iss && c.issue_id === iss.id) {
+					// Append if not already present (REST race).
+					if (!comments.some((x) => x.id === c.id)) {
+						comments = [...comments, c];
+					}
+				}
+				return;
+			}
+			case 'run.created': {
+				const r = f.payload as TaskRun;
+				if (iss && r.issue_id === iss.id) {
+					if (!runs.some((x) => x.id === r.id)) {
+						runs = [r, ...runs];
+					}
+					if (!expandedRunId) setExpandedRun(r.id);
+				}
+				return;
+			}
+			case 'task.status': {
+				const r = f.payload as TaskRun;
+				if (runs.some((x) => x.id === r.id)) {
+					runs = runs.map((x) => (x.id === r.id ? r : x));
+				}
+				return;
+			}
+			case 'task.event': {
+				const ev = f.payload as TaskEvent;
+				const existing = runEvents[ev.task_run_id] ?? [];
+				// Skip dupes if polling and WS briefly overlap.
+				if (existing.some((e) => e.id === ev.id)) return;
+				runEvents = {
+					...runEvents,
+					[ev.task_run_id]: [...existing, ev]
+				};
+				return;
+			}
 		}
 	}
 

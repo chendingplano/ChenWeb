@@ -9,11 +9,13 @@ tool github.com/air-verse/air
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/chendingplano/shared/go v0.0.0-00010101000000-000000000000
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/lib/pq v1.11.2
 	github.com/nats-io/nats.go v1.49.0
 	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/viper v1.21.0
 )
 
@@ -51,7 +53,6 @@ require (
 	github.com/ory/client-go v1.22.23 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.1 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pressly/goose/v3 v3.26.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect

@@ -137,6 +137,7 @@
 				{ id: 'kb-import',  label: 'Documents' },
 				{ id: 'kb-input-details', label: 'Document Details' },
 				{ id: 'kb-metrics', label: 'Metrics' },
+				{ id: 'kb-doc-structure', label: 'Document Structure' },
 				{ id: 'kb-chunks', label: 'Chunks' }
 			]
 		},
@@ -190,6 +191,10 @@
 		}
 		if (child?.id === 'kb-chunks') {
 			window.open(`/home3/chunks?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
+			return;
+		}
+		if (child?.id === 'kb-doc-structure') {
+			window.open(`/home3/doc-structure?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
 			return;
 		}
 		onSelect({

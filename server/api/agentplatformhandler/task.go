@@ -46,6 +46,7 @@ func RunIssue(c echo.Context) error {
 		return jsonError(c, http.StatusInternalServerError, "enqueue run: "+err.Error())
 	}
 	run.IssueNumber = iss.IssueNumber
+	publishTo(wid, "run.created", run)
 	return c.JSON(http.StatusCreated, run)
 }
 
@@ -180,6 +181,11 @@ func CancelTaskRun(c echo.Context) error {
 		return jsonError(c, http.StatusInternalServerError, "cancel run: "+err.Error())
 	}
 	signalCancel(id)
+	// Publish the post-cancel row shape so the UI updates without polling
+	// (and even for queued runs where no worker is in-flight).
+	if fresh, err := getTaskRun(db, wid, id); err == nil {
+		publishTo(wid, "task.status", fresh)
+	}
 	return c.NoContent(http.StatusNoContent)
 }
 

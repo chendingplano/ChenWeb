@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"database/sql"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -169,63 +168,22 @@ func readRawLinesFile(path string) ([]rawLine, error) {
 }
 
 func readTopicChunkEntries(root string, inputRecordID int64) ([]topicChunkEntry, error) {
-	out := make([]topicChunkEntry, 0, 256)
-	leafFiles, err := listTopicLeafFiles(root)
-	if err != nil {
-		return nil, err
-	}
-	for _, path := range leafFiles {
-		entries, err := readTopicChunkEntriesFromFile(path, inputRecordID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, entries...)
-	}
-	for i := range out {
-		out[i].SeqNo = i + 1
-	}
-	if len(out) == 0 {
-		return nil, os.ErrNotExist
-	}
-	return out, nil
+	return readLegacyTopicChunkEntries(root, inputRecordID)
 }
 
-func listTopicLeafFiles(root string) ([]string, error) {
-	files := []string{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if strings.EqualFold(filepath.Base(path), "topics.txt") {
-			return nil
-		}
-		if !strings.EqualFold(filepath.Ext(path), ".txt") {
-			return nil
-		}
-		files = append(files, path)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-func readTopicChunkEntriesFromFile(path string, inputRecordID int64) ([]topicChunkEntry, error) {
+func readLegacyTopicChunkEntries(root string, inputRecordID int64) ([]topicChunkEntry, error) {
+	path := filepath.Join(root, "topics.txt")
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	out := make([]topicChunkEntry, 0, 64)
+
+	out := make([]topicChunkEntry, 0, 128)
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
 	for scanner.Scan() {
-		entry, ok := parseTopicChunkLine(scanner.Text(), inputRecordID)
+		entry, ok := parseLegacyTopicChunkLine(scanner.Text(), inputRecordID)
 		if !ok {
 			continue
 		}
@@ -234,10 +192,14 @@ func readTopicChunkEntriesFromFile(path string, inputRecordID int64) ([]topicChu
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+	if len(out) == 0 {
+		return nil, os.ErrNotExist
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].SeqNo < out[j].SeqNo })
 	return out, nil
 }
 
-func parseTopicChunkLine(line string, inputRecordID int64) (topicChunkEntry, bool) {
+func parseLegacyTopicChunkLine(line string, inputRecordID int64) (topicChunkEntry, bool) {
 	s := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
 	if s == "" {
 		return topicChunkEntry{}, false
@@ -246,27 +208,26 @@ func parseTopicChunkLine(line string, inputRecordID int64) (topicChunkEntry, boo
 	if len(parts) != 5 {
 		return topicChunkEntry{}, false
 	}
-	idCol, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
-	if err != nil || idCol <= 0 {
+	seqNo, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || seqNo <= 0 {
 		return topicChunkEntry{}, false
 	}
 	topicType := strings.TrimSpace(parts[1])
 	if topicType == "" {
 		topicType = "general"
 	}
-	lineTokens := parseTopicArrayItems(parts[2])
 	topic := strings.TrimSpace(parts[4])
 	if topic == "" {
 		return topicChunkEntry{}, false
 	}
 	return topicChunkEntry{
-		RecordID:   idCol,
-		SeqNo:      0,
+		RecordID:   inputRecordID,
+		SeqNo:      seqNo,
 		TopicType:  topicType,
-		LineTokens: lineTokens,
+		LineTokens: parseTopicArrayItems(parts[2]),
 		Keywords:   parseTopicArrayItems(parts[3]),
 		Topic:      topic,
-	}, idCol == inputRecordID
+	}, true
 }
 
 func parseTopicArrayItems(raw string) []string {

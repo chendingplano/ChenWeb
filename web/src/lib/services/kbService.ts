@@ -200,6 +200,36 @@ export async function getRawLines(inputRecordId: number): Promise<GetRawLinesRes
 	);
 }
 
+// ---------- kb.doc-structure ----------
+
+export type DocStructureLine = {
+	line_number: number;
+	page_number: number;
+	line_type: string;
+	corrected_line_type: string;
+	font: string;
+	font_size: string;
+	coords: number[];
+	content: string;
+};
+
+export type GetDocStructureResponse = {
+	status: boolean;
+	input_id: number;
+	file_name?: string;
+	corrected_file?: string;
+	lines: DocStructureLine[];
+	pages: number;
+	total: number;
+};
+
+export async function getKbDocStructure(inputRecordId: number): Promise<GetDocStructureResponse> {
+	return fetchOrThrow<GetDocStructureResponse>(
+		`${BASE}/doc-structure?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to retrieve document structure'
+	);
+}
+
 // ---------- kb.topic-chunks ----------
 
 export type KbChunkSpan = {

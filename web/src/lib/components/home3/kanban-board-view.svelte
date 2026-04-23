@@ -26,6 +26,14 @@
 		if (apStore.workspaces.length === 0) {
 			apStore.loadWorkspaces();
 		}
+		return () => apStore.stopRealtime();
+	});
+
+	// Open (or re-target) the realtime WebSocket whenever the active
+	// workspace is known. startRealtime is idempotent per-slug.
+	$effect(() => {
+		const slug = apStore.activeSlug;
+		if (slug) apStore.startRealtime(slug);
 	});
 
 	// Issues grouped by status, sorted by board_order ASC then issue_number ASC.

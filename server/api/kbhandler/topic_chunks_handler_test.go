@@ -24,8 +24,8 @@ func TestExpandTopicLineTokens(t *testing.T) {
 	}
 }
 
-func TestParseTopicChunkLine(t *testing.T) {
-	entry, ok := parseTopicChunkLine("53\ttable\t[38-45, 47]\t[k1, k2]\tTable about emissions", 53)
+func TestParseLegacyTopicChunkLine(t *testing.T) {
+	entry, ok := parseLegacyTopicChunkLine("1\ttable\t[38-45, 47]\t[k1, k2]\tTable about emissions", 53)
 	if !ok {
 		t.Fatalf("expected parse success")
 	}
@@ -46,7 +46,7 @@ func TestParseTopicChunkLine(t *testing.T) {
 	}
 }
 
-func TestReadTopicChunkEntries_FromCategoryTree(t *testing.T) {
+func TestReadTopicChunkEntries_IgnoresCategoryTreeWithoutTopicsTxt(t *testing.T) {
 	root := t.TempDir()
 	runRoot := filepath.Join(root, "0", "53")
 	if err := os.MkdirAll(filepath.Join(runRoot, "safety_evaluation"), 0o755); err != nil {
@@ -59,6 +59,26 @@ func TestReadTopicChunkEntries_FromCategoryTree(t *testing.T) {
 		t.Fatalf("write seismic_design: %v", err)
 	}
 
+	_, err := readTopicChunkEntries(runRoot, 53)
+	if err == nil {
+		t.Fatalf("expected error when topics.txt is missing")
+	}
+}
+
+func TestReadTopicChunkEntries_FallbackToTopicsFile(t *testing.T) {
+	root := t.TempDir()
+	runRoot := filepath.Join(root, "0", "53")
+	if err := os.MkdirAll(runRoot, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := strings.Join([]string{
+		"1\ttable\t[38-45, 47]\t[risk, scoring]\tScoring table",
+		"2\tlist\t[9]\t[checklist]\tInspection checklist",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(runRoot, "topics.txt"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write topics.txt: %v", err)
+	}
+
 	entries, err := readTopicChunkEntries(runRoot, 53)
 	if err != nil {
 		t.Fatalf("readTopicChunkEntries: %v", err)
@@ -66,33 +86,14 @@ func TestReadTopicChunkEntries_FromCategoryTree(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("len(entries)=%d, want 2", len(entries))
 	}
+	if entries[0].RecordID != 53 || entries[1].RecordID != 53 {
+		t.Fatalf("unexpected record ids: %+v", entries)
+	}
 	if entries[0].SeqNo != 1 || entries[1].SeqNo != 2 {
-		t.Fatalf("seq numbers not assigned incrementally: %+v", entries)
+		t.Fatalf("unexpected seq numbers: %+v", entries)
 	}
-}
-
-func TestListTopicLeafFiles_SkipsTopicsTxt(t *testing.T) {
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "a"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "topics.txt"), []byte("legacy"), 0o644); err != nil {
-		t.Fatalf("write legacy: %v", err)
-	}
-	leaf := filepath.Join(root, "a", "b.txt")
-	if err := os.WriteFile(leaf, []byte("53\tlist\t[1]\t[k]\ttopic"), 0o644); err != nil {
-		t.Fatalf("write leaf: %v", err)
-	}
-
-	files, err := listTopicLeafFiles(root)
-	if err != nil {
-		t.Fatalf("listTopicLeafFiles: %v", err)
-	}
-	if len(files) != 1 {
-		t.Fatalf("len(files)=%d, want 1 (%v)", len(files), files)
-	}
-	if !strings.HasSuffix(files[0], string(filepath.Separator)+"a"+string(filepath.Separator)+"b.txt") {
-		t.Fatalf("unexpected file listed: %v", files)
+	if !reflect.DeepEqual(entries[0].LineTokens, []string{"38-45", "47"}) {
+		t.Fatalf("unexpected line tokens: %v", entries[0].LineTokens)
 	}
 }
 

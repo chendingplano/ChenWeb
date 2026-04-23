@@ -117,10 +117,12 @@ func RegisterRoutes(e *echo.Echo) error {
 				return nil
 			}
 
-			// Paths not starting with "/api", "/auth", "/shared_api", or "/_" are treated as frontend routes
+			// Paths not starting with "/api", "/auth", "/shared_api", "/ws",
+			// or "/_" are treated as frontend routes.
 			if !strings.HasPrefix(path, "/api") &&
 				!strings.HasPrefix(path, "/auth") &&
 				!strings.HasPrefix(path, "/shared_api") &&
+				!strings.HasPrefix(path, "/ws") &&
 				path != "/_" &&
 				!strings.HasPrefix(path, "/_/") {
 
@@ -268,6 +270,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
 	apiGroup.GET("/kb/topic-chunks", kbhandler.ListTopicChunks)
 	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)
+	apiGroup.GET("/kb/doc-structure", kbhandler.GetDocStructure)
 	apiGroup.GET("/jetstream/monitor", jetstreamhandler.GetMonitor)
 	apiGroup.GET("/jetstream/subjects", jetstreamhandler.GetSubjects)
 	apiGroup.GET("/jetstream/nats-subjects", jetstreamhandler.ListStoredSubjects)
@@ -363,6 +366,13 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/ap/w/:slug/runs/:id", agentplatformhandler.GetTaskRun)
 	apiGroup.GET("/ap/w/:slug/runs/:id/events", agentplatformhandler.ListRunEvents)
 	apiGroup.POST("/ap/w/:slug/runs/:id/cancel", agentplatformhandler.CancelTaskRun)
+
+	// WebSocket endpoint for the agent platform (M2). Upgrades via Gorilla
+	// WebSocket inside the handler; auth is enforced by the /ws group
+	// middleware, membership re-checked in the handler itself.
+	wsGroup := e.Group("/ws")
+	wsGroup.Use(authmiddleware.AuthMiddleware)
+	wsGroup.GET("/agent-platform", agentplatformhandler.HandleAgentPlatformWS)
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {

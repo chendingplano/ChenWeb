@@ -12,6 +12,7 @@ import {
 	type UpdateIssueBody,
 	type Workspace
 } from './agentplatform-client';
+import { connectAgentPlatformWS, type WSFrame, type WSStatus } from './ws-client';
 
 // STATUS_ORDER is the left-to-right column order on the kanban board.
 // "canceled" is intentionally excluded from the default board; it shows
@@ -44,6 +45,14 @@ function createStore() {
 	let selectedIssueNum = $state<number | null>(null);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+
+	// Realtime (M2). dispose is captured from connectAgentPlatformWS; the
+	// subscribers set fans out raw frames so components can react without
+	// going through the store for every event shape.
+	let realtimeStatus = $state<WSStatus>('closed');
+	let realtimeDispose: (() => void) | null = null;
+	let realtimeSlug: string | null = null;
+	const frameSubs = new Set<(f: WSFrame) => void>();
 
 	const active = $derived(workspaces.find((w) => w.slug === activeSlug) ?? null);
 
@@ -141,6 +150,61 @@ function createStore() {
 		selectedIssueNum = num;
 	}
 
+	// -------------------------------------------------------------------------
+	// Realtime (WebSocket)
+	// -------------------------------------------------------------------------
+
+	function dispatchFrame(f: WSFrame) {
+		// Apply known frames to store state before fan-out so panels that
+		// read store state see the update synchronously.
+		if (f.type === 'issue.updated' && f.payload && typeof f.payload === 'object') {
+			const iss = f.payload as Issue;
+			if (iss.id) {
+				const idx = issues.findIndex((i) => i.id === iss.id);
+				if (idx >= 0) {
+					issues = issues.map((i, k) => (k === idx ? iss : i));
+				} else {
+					issues = [...issues, iss];
+				}
+			}
+		}
+		// Fan out raw frame to component subscribers (comments, runs, events).
+		for (const h of frameSubs) {
+			try {
+				h(f);
+			} catch {
+				/* isolate handler errors */
+			}
+		}
+	}
+
+	function startRealtime(slug: string) {
+		// Idempotent per slug — calling twice with the same slug is a no-op.
+		if (realtimeSlug === slug && realtimeDispose) return;
+		stopRealtime();
+		realtimeSlug = slug;
+		realtimeDispose = connectAgentPlatformWS(slug, {
+			onFrame: dispatchFrame,
+			onStatus: (s) => {
+				realtimeStatus = s;
+			}
+		});
+	}
+
+	function stopRealtime() {
+		if (realtimeDispose) {
+			realtimeDispose();
+			realtimeDispose = null;
+		}
+		realtimeSlug = null;
+		realtimeStatus = 'closed';
+	}
+
+	function subscribeFrames(handler: (f: WSFrame) => void): () => void {
+		frameSubs.add(handler);
+		return () => frameSubs.delete(handler);
+	}
+
 	return {
 		get workspaces() {
 			return workspaces;
@@ -169,6 +233,9 @@ function createStore() {
 		get error() {
 			return error;
 		},
+		get realtimeStatus() {
+			return realtimeStatus;
+		},
 		loadWorkspaces,
 		switchWorkspace,
 		loadAgents,
@@ -178,7 +245,10 @@ function createStore() {
 		createIssue,
 		updateIssue,
 		moveIssue,
-		selectIssue
+		selectIssue,
+		startRealtime,
+		stopRealtime,
+		subscribeFrames
 	};
 }
 

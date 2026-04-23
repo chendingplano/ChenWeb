@@ -115,6 +115,7 @@ func CreateIssue(c echo.Context) error {
 	if err != nil {
 		return jsonError(c, http.StatusInternalServerError, "create issue: "+err.Error())
 	}
+	publishTo(wid, "issue.updated", issue)
 	return c.JSON(http.StatusCreated, issue)
 }
 
@@ -162,6 +163,7 @@ func UpdateIssue(c echo.Context) error {
 	if err != nil {
 		return jsonError(c, http.StatusInternalServerError, "update issue: "+err.Error())
 	}
+	publishTo(wid, "issue.updated", issue)
 	return c.JSON(http.StatusOK, issue)
 }
 
@@ -214,6 +216,13 @@ func BulkMoveIssues(c echo.Context) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return jsonError(c, http.StatusInternalServerError, "commit: "+err.Error())
+	}
+	// Post-commit fan-out: one issue.updated per moved row. Uses the
+	// outer db (not tx) so readers see committed state.
+	for _, m := range req.Moves {
+		if iss, err := getIssueByNumber(db, wid, m.IssueNumber); err == nil {
+			publishTo(wid, "issue.updated", iss)
+		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"updated": updated})
 }
@@ -281,6 +290,7 @@ func CreateComment(c echo.Context) error {
 	if err != nil {
 		return jsonError(c, http.StatusInternalServerError, "create comment: "+err.Error())
 	}
+	publishTo(wid, "comment.created", cm)
 	return c.JSON(http.StatusCreated, cm)
 }
 

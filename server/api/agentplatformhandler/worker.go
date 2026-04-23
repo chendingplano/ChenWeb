@@ -122,13 +122,13 @@ func (w *worker) executeRun(parent context.Context, run TaskRun) {
 
 	spec, err := w.buildTaskSpec(run)
 	if err != nil {
-		w.finishRun(run.ID, "failed", nil, fmt.Sprintf("build task spec: %v", err), "")
+		w.finishRun(run.WorkspaceID, run.ID, "failed", nil, fmt.Sprintf("build task spec: %v", err), "")
 		return
 	}
 
 	runner, err := agentrun.NewRunnerByKind(spec.RuntimeKind)
 	if err != nil {
-		w.finishRun(run.ID, "failed", nil, fmt.Sprintf("resolve runner: %v", err), "")
+		w.finishRun(run.WorkspaceID, run.ID, "failed", nil, fmt.Sprintf("resolve runner: %v", err), "")
 		return
 	}
 
@@ -141,13 +141,14 @@ func (w *worker) executeRun(parent context.Context, run TaskRun) {
 	); err != nil {
 		w.logger.Error("mark running failed", "run", run.ID, "err", err.Error())
 	}
-	w.insertEvent(run.ID, agentrun.Event{
+	w.insertEvent(run.WorkspaceID, run.ID, agentrun.Event{
 		Kind: agentrun.EventStatus, Payload: "running", At: time.Now(),
 	})
+	w.publishRunStatus(run.WorkspaceID, run.ID)
 
 	wd, err := runner.Prepare(runCtx, spec)
 	if err != nil {
-		w.finishRun(run.ID, "failed", nil, fmt.Sprintf("prepare: %v", err), runnerVersion(runner))
+		w.finishRun(run.WorkspaceID, run.ID, "failed", nil, fmt.Sprintf("prepare: %v", err), runnerVersion(runner))
 		return
 	}
 
@@ -162,7 +163,7 @@ func (w *worker) executeRun(parent context.Context, run TaskRun) {
 	go func() {
 		defer close(pumpDone)
 		for ev := range events {
-			w.insertEvent(run.ID, ev)
+			w.insertEvent(run.WorkspaceID, run.ID, ev)
 		}
 	}()
 
@@ -189,16 +190,20 @@ func (w *worker) executeRun(parent context.Context, run TaskRun) {
 	version := runnerVersion(runner)
 	switch {
 	case runErr == nil:
-		w.finishRun(run.ID, "succeeded", intPtr(0), "", version)
+		w.finishRun(run.WorkspaceID, run.ID, "succeeded", intPtr(0), "", version)
 		_ = os.RemoveAll(workdir) // success → drop workdir
 	case runCtx.Err() != nil:
 		// Either explicit cancel or parent shutdown. If the DB status is
-		// already 'canceled' (the HTTP handler set it), leave it alone.
+		// already 'canceled' (the HTTP handler set it), the HTTP handler
+		// already emitted the status event — still publish the row shape
+		// so the UI can update without polling.
 		if statusOf(w.db, run.ID) != "canceled" {
-			w.finishRun(run.ID, "canceled", nil, "canceled", version)
+			w.finishRun(run.WorkspaceID, run.ID, "canceled", nil, "canceled", version)
+		} else {
+			w.publishRunStatus(run.WorkspaceID, run.ID)
 		}
 	default:
-		w.finishRun(run.ID, "failed", nil, runErr.Error(), version)
+		w.finishRun(run.WorkspaceID, run.ID, "failed", nil, runErr.Error(), version)
 	}
 }
 
@@ -253,14 +258,36 @@ func envSecretsForKind(kind string) map[string]string {
 	return out
 }
 
-func (w *worker) insertEvent(runID string, ev agentrun.Event) {
-	if _, err := w.db.Exec(
+func (w *worker) insertEvent(workspaceID, runID string, ev agentrun.Event) {
+	var eventID int64
+	if err := w.db.QueryRow(
 		`INSERT INTO ap_task_event (task_run_id, kind, payload, at)
-		 VALUES ($1, $2, $3, $4)`,
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id`,
 		runID, string(ev.Kind), ev.Payload, ev.At,
-	); err != nil {
+	).Scan(&eventID); err != nil {
 		w.logger.Error("insert event failed", "run", runID, "err", err.Error())
+		return
 	}
+	// Realtime fan-out — inert if no hub / no subscribers.
+	publishTo(workspaceID, "task.event", TaskEvent{
+		ID:        eventID,
+		TaskRunID: runID,
+		Kind:      string(ev.Kind),
+		Payload:   ev.Payload,
+		At:        ev.At,
+	})
+}
+
+// publishRunStatus reads the current run row and emits a task.status event
+// carrying the full TaskRun shape. Used by lifecycle transitions so the UI
+// can reliably refresh a row without replaying every event.
+func (w *worker) publishRunStatus(workspaceID, runID string) {
+	run, err := getTaskRun(w.db, workspaceID, runID)
+	if err != nil {
+		return
+	}
+	publishTo(workspaceID, "task.status", run)
 }
 
 func (w *worker) renewLease(ctx context.Context, runID string) {
@@ -286,7 +313,7 @@ func (w *worker) renewLease(ctx context.Context, runID string) {
 // finishRun writes the terminal status row update and an accompanying
 // status event. Safe to call with status='canceled' — the SQL is a no-op
 // if the HTTP cancel handler already set it.
-func (w *worker) finishRun(runID, status string, exitCode *int, errMsg, runnerVersion string) {
+func (w *worker) finishRun(workspaceID, runID, status string, exitCode *int, errMsg, runnerVersion string) {
 	_, err := w.db.Exec(
 		`UPDATE ap_task_run
 		 SET status=$2,
@@ -300,14 +327,17 @@ func (w *worker) finishRun(runID, status string, exitCode *int, errMsg, runnerVe
 	if err != nil {
 		w.logger.Error("finalize run failed", "run", runID, "err", err.Error())
 	}
-	w.insertEvent(runID, agentrun.Event{
+	w.insertEvent(workspaceID, runID, agentrun.Event{
 		Kind: agentrun.EventStatus, Payload: status, At: time.Now(),
 	})
 	if errMsg != "" && status == "failed" {
-		w.insertEvent(runID, agentrun.Event{
+		w.insertEvent(workspaceID, runID, agentrun.Event{
 			Kind: agentrun.EventError, Payload: errMsg, At: time.Now(),
 		})
 	}
+	// Publish the final row state so the UI flips its status row
+	// immediately (not only upon replaying the events).
+	w.publishRunStatus(workspaceID, runID)
 }
 
 // statusOf is a small helper to read the current status of a run.
@@ -354,21 +384,38 @@ func leaseSweeper(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			res, err := db.Exec(
+			rows, err := db.Query(
 				`UPDATE ap_task_run
 				 SET status='failed',
 				     finished_at=NOW(),
 				     error_message='lease expired'
 				 WHERE status IN ('claimed','running')
 				   AND lease_expires_at IS NOT NULL
-				   AND lease_expires_at < NOW()`,
+				   AND lease_expires_at < NOW()
+				 RETURNING workspace_id, id`,
 			)
 			if err != nil {
 				logger.Error("lease sweeper failed", "err", err.Error())
 				continue
 			}
-			if n, _ := res.RowsAffected(); n > 0 {
-				logger.Warn("lease sweeper reclaimed stale runs", "count", n)
+			type reclaimed struct{ wid, rid string }
+			var hits []reclaimed
+			for rows.Next() {
+				var r reclaimed
+				if err := rows.Scan(&r.wid, &r.rid); err != nil {
+					logger.Error("lease sweeper scan", "err", err.Error())
+					continue
+				}
+				hits = append(hits, r)
+			}
+			_ = rows.Close()
+			if len(hits) > 0 {
+				logger.Warn("lease sweeper reclaimed stale runs", "count", len(hits))
+				for _, r := range hits {
+					if run, err := getTaskRun(db, r.wid, r.rid); err == nil {
+						publishTo(r.wid, "task.status", run)
+					}
+				}
 			}
 		}
 	}

@@ -26,6 +26,10 @@ import (
 // Workers run until ctx is canceled. Callers should pass a ctx that ties
 // to shutdown (e.g. canceled on SIGINT/SIGTERM).
 func StartWorkers(ctx context.Context, logger ApiTypes.JimoLogger, workerCount int) error {
+	// Always init the hub, even when workers are disabled — HTTP handlers
+	// publish too (issue.updated, comment.created, run.created).
+	InitHub()
+
 	if os.Getenv("AGENT_PLATFORM_ENABLE_WORKERS") != "true" {
 		logger.Info("agent-platform workers disabled (set AGENT_PLATFORM_ENABLE_WORKERS=true to enable)")
 		return nil
