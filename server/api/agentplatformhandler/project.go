@@ -52,6 +52,7 @@ func CreateProject(c echo.Context) error {
 	if err != nil {
 		return jsonError(c, http.StatusInternalServerError, "create project: "+err.Error())
 	}
+	publishTo(wid, "project.updated", p)
 	return c.JSON(http.StatusCreated, p)
 }
 
@@ -80,6 +81,7 @@ func UpdateProject(c echo.Context) error {
 	if err != nil {
 		return jsonError(c, http.StatusInternalServerError, "update project: "+err.Error())
 	}
+	publishTo(wid, "project.updated", p)
 	return c.JSON(http.StatusOK, p)
 }
 
@@ -108,6 +110,7 @@ func DeleteProject(c echo.Context) error {
 	if n == 0 {
 		return jsonError(c, http.StatusNotFound, "project not found")
 	}
+	publishTo(wid, "project.deleted", map[string]string{"id": id})
 	return c.NoContent(http.StatusNoContent)
 }
 

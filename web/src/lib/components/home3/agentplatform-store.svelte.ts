@@ -9,7 +9,10 @@ import {
 	type CreateIssueBody,
 	type Issue,
 	type IssueStatus,
+	type Project,
+	type UpdateAgentBody,
 	type UpdateIssueBody,
+	type UpdateProjectBody,
 	type Workspace
 } from './agentplatform-client';
 import { connectAgentPlatformWS, type WSFrame, type WSStatus } from './ws-client';
@@ -46,6 +49,11 @@ function createStore() {
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
+	// Projects (M4). activeProjectFilterID narrows the kanban board; null
+	// means "all projects + none".
+	let projects = $state<Project[]>([]);
+	let activeProjectFilterID = $state<string | null>(null);
+
 	// Realtime (M2). dispose is captured from connectAgentPlatformWS; the
 	// subscribers set fans out raw frames so components can react without
 	// going through the store for every event shape.
@@ -66,7 +74,7 @@ function createStore() {
 			workspaces = res.workspaces;
 			if (!activeSlug && workspaces.length > 0) {
 				activeSlug = workspaces[0].slug;
-				await Promise.all([loadAgents(), loadIssues()]);
+				await Promise.all([loadAgents(), loadIssues(), loadProjects()]);
 			}
 		} catch (e) {
 			error = String((e as Error).message ?? e);
@@ -79,7 +87,9 @@ function createStore() {
 		if (slug === activeSlug) return;
 		activeSlug = slug;
 		selectedIssueNum = null;
-		await Promise.all([loadAgents(), loadIssues()]);
+		activeProjectFilterID = null;
+		projects = [];
+		await Promise.all([loadAgents(), loadIssues(), loadProjects()]);
 	}
 
 	async function loadAgents() {
@@ -151,6 +161,55 @@ function createStore() {
 	}
 
 	// -------------------------------------------------------------------------
+	// Projects (M4)
+	// -------------------------------------------------------------------------
+
+	async function loadProjects() {
+		if (!activeSlug) return;
+		try {
+			const res = await apClient.listProjects(activeSlug);
+			projects = res.projects;
+		} catch (e) {
+			error = String((e as Error).message ?? e);
+		}
+	}
+
+	async function createProject(body: { name: string; description?: string }) {
+		if (!activeSlug) return;
+		const created = await apClient.createProject(activeSlug, body);
+		if (!projects.some((p) => p.id === created.id)) {
+			projects = [created, ...projects];
+		}
+	}
+
+	async function updateProjectByID(id: string, body: UpdateProjectBody) {
+		if (!activeSlug) return;
+		const updated = await apClient.updateProject(activeSlug, id, body);
+		projects = projects.map((p) => (p.id === id ? updated : p));
+	}
+
+	async function deleteProjectByID(id: string) {
+		if (!activeSlug) return;
+		await apClient.deleteProject(activeSlug, id);
+		projects = projects.filter((p) => p.id !== id);
+		if (activeProjectFilterID === id) activeProjectFilterID = null;
+	}
+
+	function setProjectFilter(id: string | null) {
+		activeProjectFilterID = id;
+	}
+
+	// -------------------------------------------------------------------------
+	// Agent edit (M4)
+	// -------------------------------------------------------------------------
+
+	async function updateAgent(id: string, body: UpdateAgentBody) {
+		if (!activeSlug) return;
+		const updated = await apClient.updateAgent(activeSlug, id, body);
+		agents = agents.map((a) => (a.id === id ? updated : a));
+	}
+
+	// -------------------------------------------------------------------------
 	// Realtime (WebSocket)
 	// -------------------------------------------------------------------------
 
@@ -166,6 +225,33 @@ function createStore() {
 				} else {
 					issues = [...issues, iss];
 				}
+			}
+		} else if (f.type === 'agent.updated' && f.payload && typeof f.payload === 'object') {
+			const a = f.payload as Agent;
+			if (a.id) {
+				// Drop archived rows from the visible list; upsert live ones.
+				if (a.archived_at) {
+					agents = agents.filter((x) => x.id !== a.id);
+				} else {
+					const idx = agents.findIndex((x) => x.id === a.id);
+					agents = idx >= 0
+						? agents.map((x, k) => (k === idx ? a : x))
+						: [a, ...agents];
+				}
+			}
+		} else if (f.type === 'project.updated' && f.payload && typeof f.payload === 'object') {
+			const p = f.payload as Project;
+			if (p.id) {
+				const idx = projects.findIndex((x) => x.id === p.id);
+				projects = idx >= 0
+					? projects.map((x, k) => (k === idx ? p : x))
+					: [p, ...projects];
+			}
+		} else if (f.type === 'project.deleted' && f.payload && typeof f.payload === 'object') {
+			const pid = (f.payload as { id?: string }).id;
+			if (pid) {
+				projects = projects.filter((p) => p.id !== pid);
+				if (activeProjectFilterID === pid) activeProjectFilterID = null;
 			}
 		}
 		// Fan out raw frame to component subscribers (comments, runs, events).
@@ -236,16 +322,28 @@ function createStore() {
 		get realtimeStatus() {
 			return realtimeStatus;
 		},
+		get projects() {
+			return projects;
+		},
+		get activeProjectFilterID() {
+			return activeProjectFilterID;
+		},
 		loadWorkspaces,
 		switchWorkspace,
 		loadAgents,
 		createAgent,
 		deleteAgent,
+		updateAgent,
 		loadIssues,
 		createIssue,
 		updateIssue,
 		moveIssue,
 		selectIssue,
+		loadProjects,
+		createProject,
+		updateProject: updateProjectByID,
+		deleteProject: deleteProjectByID,
+		setProjectFilter,
 		startRealtime,
 		stopRealtime,
 		subscribeFrames

@@ -77,6 +77,7 @@ func CreateAgent(c echo.Context) error {
 		}
 		return jsonError(c, http.StatusInternalServerError, "create agent: "+err.Error())
 	}
+	publishTo(wid, "agent.updated", a)
 	return c.JSON(http.StatusCreated, a)
 }
 
@@ -109,6 +110,7 @@ func UpdateAgent(c echo.Context) error {
 		}
 		return jsonError(c, http.StatusInternalServerError, "update agent: "+err.Error())
 	}
+	publishTo(wid, "agent.updated", a)
 	return c.JSON(http.StatusOK, a)
 }
 
@@ -139,6 +141,10 @@ func DeleteAgent(c echo.Context) error {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return jsonError(c, http.StatusNotFound, "agent not found")
+	}
+	// Publish the archived row so subscribers can drop it from their list.
+	if fresh, err := getAgentByID(db, wid, agentID); err == nil {
+		publishTo(wid, "agent.updated", fresh)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -178,6 +184,31 @@ func listAgents(db *sql.DB, workspaceID string) ([]Agent, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// getAgentByID returns a single agent by id — used to re-read the
+// archived row after DeleteAgent for realtime fan-out. Does not filter
+// on archived_at (callers want to see the archived flag flip).
+func getAgentByID(db *sql.DB, workspaceID, agentID string) (Agent, error) {
+	const stmt = `
+		SELECT id, workspace_id, name, avatar_emoji, runtime_kind,
+		       model, instructions, enabled, archived_at, created_at, updated_at
+		FROM ap_agent
+		WHERE id = $1 AND workspace_id = $2
+	`
+	var a Agent
+	var archived sql.NullTime
+	if err := db.QueryRow(stmt, agentID, workspaceID).Scan(
+		&a.ID, &a.WorkspaceID, &a.Name, &a.AvatarEmoji, &a.RuntimeKind,
+		&a.Model, &a.Instructions, &a.Enabled, &archived, &a.CreatedAt, &a.UpdatedAt,
+	); err != nil {
+		return Agent{}, err
+	}
+	if archived.Valid {
+		t := archived.Time
+		a.ArchivedAt = &t
+	}
+	return a, nil
 }
 
 func insertAgent(db *sql.DB, workspaceID, name, avatar, runtimeKind, model, instructions string, enabled bool) (Agent, error) {

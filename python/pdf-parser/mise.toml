@@ -1,0 +1,68 @@
+[tools]
+python = "3.12"
+
+[tasks.ocr-service-start]
+run = '''
+mkdir -p ../../.cache
+if [ -f ../../.cache/ocr-service.pid ] && kill -0 "$(cat ../../.cache/ocr-service.pid)" 2>/dev/null; then
+  echo "ocr-service already running (pid $(cat ../../.cache/ocr-service.pid))"
+  exit 0
+fi
+VENV=./.venv
+export VIRTUAL_ENV="$VENV"
+export PYTHONPATH="."
+unset PYTHONHOME
+nohup "$VENV/bin/python" ./pdf_parser.py \
+  > ../../.cache/ocr-service.log 2>&1 &
+echo $! > ../../.cache/ocr-service.pid
+echo "ocr-service started (pid $(cat ../../.cache/ocr-service.pid))"
+'''
+
+[tasks.ocr-service-start-sync]
+run = '''
+VENV=./.venv
+export VIRTUAL_ENV="$VENV"
+export PYTHONPATH="."
+unset PYTHONHOME
+"$VENV/bin/python" ./pdf_parser.py
+'''
+
+[tasks.ocr-service-kill]
+description = "Stop ocr-service started in sync (foreground) mode by script name"
+run = '''
+if pkill -SIGTERM -f "pdf_parser.py"; then
+  echo "ocr-service terminated"
+else
+  echo "ocr-service was not running"
+fi
+'''
+
+[tasks.ocr-service-stop]
+run = '''
+if [ ! -f ../../.cache/ocr-service.pid ]; then
+  echo "ocr-service is not running"
+  exit 0
+fi
+PID="$(cat ../../.cache/ocr-service.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  kill "$PID" && echo "stopped ocr-service (pid $PID)"
+else
+  echo "stale pid file for pid $PID"
+fi
+rm -f ../../.cache/ocr-service.pid
+'''
+
+[tasks.ocr-service-status]
+run = '''
+if [ ! -f ../../.cache/ocr-service.pid ]; then
+  echo "ocr-service not running"
+  exit 1
+fi
+PID="$(cat ../../.cache/ocr-service.pid)"
+if kill -0 "$PID" 2>/dev/null; then
+  echo "ocr-service running (pid $PID)"
+  exit 0
+fi
+echo "ocr-service not running (stale pid $PID)"
+exit 1
+'''

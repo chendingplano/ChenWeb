@@ -86,6 +86,11 @@ export type UpdateAgentBody = Partial<{
 	enabled: boolean;
 }>;
 
+export type UpdateProjectBody = Partial<{
+	name: string;
+	description: string;
+}>;
+
 export type CreateIssueBody = {
 	title: string;
 	description?: string;
@@ -203,6 +208,10 @@ export const apClient = {
 		req<{ projects: Project[] }>('GET', `/api/v1/ap/w/${encodeURIComponent(slug)}/projects`),
 	createProject: (slug: string, body: { name: string; description?: string }) =>
 		req<Project>('POST', `/api/v1/ap/w/${encodeURIComponent(slug)}/projects`, body),
+	updateProject: (slug: string, id: string, body: UpdateProjectBody) =>
+		req<Project>('PATCH', `/api/v1/ap/w/${encodeURIComponent(slug)}/projects/${id}`, body),
+	deleteProject: (slug: string, id: string) =>
+		req<void>('DELETE', `/api/v1/ap/w/${encodeURIComponent(slug)}/projects/${id}`),
 
 	// Issues
 	listIssues: (slug: string) =>

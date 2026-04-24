@@ -1,0 +1,680 @@
+#!/usr/bin/env python3
+"""Unified PDF Parser Service
+
+Polls kb.inputs for unprocessed PDF records and dispatches parsing to the
+appropriate backend based on the record's parser_name field.
+
+Required env vars:
+  PG_HOST, PG_PORT, PG_DB_NAME, PG_USER_NAME, PG_PASSWORD
+
+Optional env vars:
+  STAGING_DIR / PDF_STAGING_DIR   Staging directory for new PDFs
+  PDF_REPO_DIR                    Base result directory
+  PDF_BACKUP_DIR                  Backup directory for originals
+  PDF_POLL_INTERVAL               Seconds between DB polls (default: 10)
+  PDF_BATCH_SIZE                  Records per poll (default: 25)
+  PDF_DEFAULT_PARSER              Default parser name (default: opendata)
+"""
+
+import json
+import logging
+import os
+import signal
+import sys
+import time
+import asyncio
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable
+
+from shared import (
+    TIME_FORMAT,
+    pg_connect,
+    fetch_candidates,
+    fetch_record_by_id,
+    has_operation,
+    scan_staging_once,
+    find_duplicate_processed_record,
+    record_parsing,
+    record_parsed_success,
+    record_parsed_failure,
+    record_duplicated,
+    file_md5,
+    copy_file,
+    unique_path,
+    choose_repo_dir,
+)
+from parser_base import ParserBackend
+from parser_docling import DoclingParser
+from parser_opendata import OpenDataParser
+from parser_paddle import PaddleParser
+from parser_mineru import MineruParser
+
+import psycopg2
+
+try:
+    from nats.aio.client import Client as NATS
+except Exception:  # pragma: no cover - optional runtime dependency
+    NATS = None
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y%m%d %H:%M:%S",
+)
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default).strip()
+
+
+def _pg_dsn() -> dict:
+    return {
+        "host": _env("PG_HOST", "127.0.0.1"),
+        "port": int(_env("PG_PORT", "5432")),
+        "dbname": _env("PG_DB_NAME", "miner"),
+        "user": _env("PG_USER_NAME", "admin"),
+        "password": _env("PG_PASSWORD"),
+    }
+
+
+def _repo_dirs() -> list[str]:
+    raw = _env("PDF_REPO_DIR") or _env("PDF_REPO_DIRS") or _env("DATA_HOME_DIR")
+    if raw:
+        return [p.strip() for p in raw.split(",") if p.strip()]
+    return ["/tmp/pdf-repo"]
+
+
+def _backup_dir() -> str:
+    custom = _env("PDF_BACKUP_DIR")
+    if custom:
+        return custom
+    base = _env("DATA_BACKUP_DIR") or "/tmp/pdf-backup"
+    return os.path.join(base, "pdf_files")
+
+
+def _staging_dir() -> str:
+    return _env("STAGING_DIR") or _env("PDF_STAGING_DIR") or _env("DATA_STAGING_DIR")
+
+
+def _poll_interval() -> float:
+    try:
+        return float(_env("PDF_POLL_INTERVAL", "10"))
+    except ValueError:
+        return 10.0
+
+
+def _batch_size() -> int:
+    try:
+        return int(_env("PDF_BATCH_SIZE", "25"))
+    except ValueError:
+        return 25
+
+
+def _default_parser() -> str:
+    return _env("PDF_DEFAULT_PARSER", "opendata")
+
+
+def _pipeline_mode() -> str:
+    mode = _env("PDF_PIPELINE_MODE", "poll").lower()
+    if mode not in {"poll", "jetstream"}:
+        return "poll"
+    return mode
+
+
+def _nats_url() -> str:
+    return _env("NATS_URL", "nats://127.0.0.1:4222")
+
+
+def _nats_user() -> str:
+    return _env("NATS_USER")
+
+
+def _nats_pass() -> str:
+    return _env("NATS_PASS")
+
+
+def _nats_token() -> str:
+    return _env("NATS_TOKEN")
+
+
+def _stage_subject() -> str:
+    return _env("PDF_STAGE_EVENT_SUBJECT", "kb.pdf.staged")
+
+
+def _parsed_subject() -> str:
+    return _env("PDF_PARSED_EVENT_SUBJECT", "kb.pdf.parsed")
+
+
+def _stage_durable() -> str:
+    return _env("PDF_STAGE_EVENT_DURABLE", "pdf-parser")
+
+
+def _stage_stream() -> str:
+    return _env("PDF_STAGE_EVENT_STREAM")
+
+
+def _parsed_stream() -> str:
+    return _env("PDF_PARSED_EVENT_STREAM")
+
+
+# ---------------------------------------------------------------------------
+# Parser registry and dispatch
+# ---------------------------------------------------------------------------
+
+PARSER_REGISTRY: dict[str, type[ParserBackend]] = {
+    "opendata": OpenDataParser,
+    "paddleocr": PaddleParser,
+    "mineru": MineruParser,
+    "docling": DoclingParser,
+}
+
+
+def get_backend(name: str, cache: dict[str, ParserBackend]) -> ParserBackend:
+    """Get or create a parser backend by name. Backends are cached after init."""
+    if name in cache:
+        return cache[name]
+    cls = PARSER_REGISTRY.get(name)
+    if cls is None:
+        raise ValueError(
+            f"Unknown parser '{name}'. Available: {list(PARSER_REGISTRY.keys())}"
+        )
+    backend = cls()
+    backend.init()
+    cache[name] = backend
+    return backend
+
+
+def should_drop_stage_event(exc: Exception) -> bool:
+    """Return True when a stage event should be acked instead of retried.
+
+    These are permanent payload/data issues rather than transient runtime
+    failures, so JetStream redelivery only creates log spam.
+    """
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "missing/invalid record_id",
+            "kb.inputs record not found",
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Progress throttle
+# ---------------------------------------------------------------------------
+
+def make_throttled_progress(
+    db_update: Callable[[int, int], None],
+    min_interval: float = 3.0,
+) -> Callable[[int, int], None]:
+    """Wrap a DB progress-update callback with a time-based throttle.
+
+    The callback fires on the first call, then only when >= min_interval
+    seconds have elapsed since the last DB write.
+
+    Args:
+        db_update: Callable(ms_used, progress_pct) that writes to DB.
+        min_interval: Minimum seconds between DB writes.
+
+    Returns:
+        Throttled callback with signature (page_finished, total_pages).
+    """
+    state = {"last_write": 0.0, "start": time.time()}
+
+    def throttled(page_finished: int, total_pages: int) -> None:
+        now = time.time()
+        if state["last_write"] == 0.0 or (now - state["last_write"]) >= min_interval:
+            ms_used = int((now - state["start"]) * 1000)
+            pct = int(page_finished * 100 / total_pages) if total_pages > 0 else 0
+            db_update(ms_used, pct)
+            state["last_write"] = now
+
+    return throttled
+
+
+# ---------------------------------------------------------------------------
+# Per-record processing
+# ---------------------------------------------------------------------------
+
+def _resolve_input_file(
+    rec: dict, staging_dir: str, repo_dirs: list[str],
+) -> tuple[str, bool]:
+    """Locate the PDF to parse, following the Handle Input File workflow.
+
+    Returns (source_path, from_staging).
+      - from_staging=True  → file was found in the staging directory and should
+        be copied to result/backup dirs then removed from staging after parsing.
+      - from_staging=False → file already lives in the result directory (re-process).
+
+    Raises ValueError when the file cannot be located.
+    """
+    rec_id = rec["id"]
+    staging_filename = (rec.get("name") or "").strip()
+    result_filename = (rec.get("result_filename") or "").strip()
+
+    # 1. Check staging directory for staging_filename
+    if staging_filename and staging_dir:
+        staging_path = os.path.join(staging_dir, staging_filename)
+        if os.path.isfile(staging_path):
+            return staging_path, True
+
+    # 2. Also check file_name (the Go staging service may have already moved
+    #    the file to the home/repo directory and recorded it in file_name).
+    file_name = (rec.get("file_name") or "").strip()
+    if file_name and os.path.isfile(file_name):
+        return file_name, True
+
+    # 3. File not in staging or file_name path.  Check the record's result
+    #    directory — look for result_filename first, then fall back to the
+    #    original filename (staging_filename or basename of file_name).
+    names_to_try: list[str] = []
+    if result_filename:
+        names_to_try.append(result_filename)
+    if staging_filename:
+        names_to_try.append(staging_filename)
+    if file_name:
+        names_to_try.append(os.path.basename(file_name))
+
+    for repo_dir in repo_dirs:
+        record_dir = os.path.join(repo_dir, "pdf_parser", str(rec_id))
+        for name in names_to_try:
+            candidate = os.path.join(record_dir, name)
+            if os.path.isfile(candidate):
+                return candidate, False
+
+    tried = ", ".join(names_to_try) if names_to_try else "(none)"
+    raise ValueError(
+        f"record id={rec_id}: file not in staging dir and not found in result dirs "
+        f"(tried: {tried})"
+    )
+
+
+def _process_record(
+    conn, rec: dict, backend_cache: dict[str, ParserBackend],
+    repo_dirs: list[str], backup_dir: str, staging_dir: str,
+    default_parser: str,
+) -> dict:
+    rec_id = rec["id"]
+    raw_status = rec["status"]
+    md5_hex = (rec.get("md5") or "").strip()
+    parser_name = (rec.get("parser_name") or "").strip() or default_parser
+
+    log.info(
+        "(MID_2026041301) received request record id=%s parser=%s name=%s",
+        rec_id, parser_name, (rec.get("name") or "").strip(),
+    )
+
+    # --- Resolve input file ---------------------------------------------------
+    try:
+        source_file, from_staging = _resolve_input_file(rec, staging_dir, repo_dirs)
+    except ValueError as exc:
+        parse_start = datetime.now().strftime(TIME_FORMAT)
+        record_parsed_failure(conn, rec_id, raw_status, parse_start, 0, str(exc))
+        log.error("(MID_2026040703) %s", exc)
+        return {
+            "record_id": rec_id,
+            "type": "pdf",
+            "status": "failed",
+            "file_format": "json",
+            "result_filename": "",
+            "error": str(exc),
+        }
+
+    # Compute MD5 if missing
+    if not md5_hex and os.path.exists(source_file):
+        md5_hex = file_md5(source_file)
+
+    # Duplicate check
+    duplicate_check_time = datetime.now().strftime(TIME_FORMAT)
+    dup_rcd_id = find_duplicate_processed_record(conn, rec_id, md5_hex)
+    if dup_rcd_id is not None:
+        record_duplicated(conn, rec_id, raw_status, dup_rcd_id, duplicate_check_time)
+        log.info("(MID_2026040709) record id=%s marked duplicated (dup_rcd_id=%s)", rec_id, dup_rcd_id)
+        return {
+            "record_id": rec_id,
+            "type": "pdf",
+            "status": "failed",
+            "file_format": "json",
+            "result_filename": "",
+            "error": f"duplicated record (dup_rcd_id={dup_rcd_id})",
+        }
+
+    parse_start_dt = datetime.now()
+    parse_start = parse_start_dt.strftime(TIME_FORMAT)
+    total_pages = 0
+    result_path = ""
+
+    try:
+        backend = get_backend(parser_name, backend_cache)
+
+        repo_dir = choose_repo_dir(repo_dirs)
+        record_dir = os.path.join(repo_dir, "pdf_parser", str(rec_id))
+        Path(record_dir).mkdir(parents=True, exist_ok=True)
+
+        # If the file came from staging, copy it to the result dir and backup
+        if from_staging:
+            repo_pdf_path = os.path.join(record_dir, os.path.basename(source_file))
+            if source_file != repo_pdf_path:
+                copy_file(source_file, repo_pdf_path)
+
+            Path(backup_dir).mkdir(parents=True, exist_ok=True)
+            backup_path = unique_path(backup_dir, os.path.basename(source_file))
+            copy_file(source_file, backup_path)
+        else:
+            # Re-processing: file is already in the result dir
+            repo_pdf_path = source_file
+            backup_path = (rec.get("backup_filename") or "").strip()
+
+        # Initial "parsing" status
+        raw_status = record_parsing(conn, rec_id, raw_status, parse_start, 0, 0)
+
+        # Throttled progress callback
+        def _db_progress(ms_used: int, pct: int) -> None:
+            nonlocal raw_status
+            raw_status = record_parsing(conn, rec_id, raw_status, parse_start, ms_used, pct)
+
+        throttled = make_throttled_progress(_db_progress, min_interval=3.0)
+
+        log.info("(MID_2026040710) parsing record id=%s parser=%s file=%s", rec_id, parser_name, repo_pdf_path)
+        result = backend.parse(repo_pdf_path, record_dir, throttled)
+        total_pages = result.get("total_pages", 0)
+
+        # Write aggregated result JSON
+        result_output = {
+            "input_id": rec_id,
+            "source_pdf": repo_pdf_path,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "engine": result.get("engine", parser_name),
+            "pages": result.get("pages", []),
+        }
+        pdf_stem = Path(repo_pdf_path).stem
+        result_path = os.path.join(record_dir, f"{pdf_stem}_{parser_name}.json")
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(result_output, f, indent=2, ensure_ascii=False)
+
+        ms_used = int((datetime.now() - parse_start_dt).total_seconds() * 1000)
+        raw_status = record_parsed_success(
+            conn, rec_id, raw_status, parse_start, ms_used,
+            result_path, repo_pdf_path, backup_path, parser_name, total_pages,
+        )
+
+        # Remove source from staging after successful processing
+        if from_staging and os.path.exists(source_file):
+            os.remove(source_file)
+
+        log.info(
+            "(MID_2026040701) processed record id=%s parser=%s pages=%d result=%s",
+            rec_id, parser_name, total_pages, result_path,
+        )
+        return {
+            "record_id": rec_id,
+            "type": "pdf",
+            "status": "success",
+            "file_format": "json",
+            "result_filename": result_path,
+            "error": "",
+        }
+
+    except Exception as exc:
+        ms_used = int((datetime.now() - parse_start_dt).total_seconds() * 1000)
+        record_parsed_failure(conn, rec_id, raw_status, parse_start, ms_used, str(exc))
+        log.error("(MID_2026040702) failed to process record id=%s: %s", rec_id, exc)
+        return {
+            "record_id": rec_id,
+            "type": "pdf",
+            "status": "failed",
+            "file_format": "json",
+            "result_filename": "",
+            "error": str(exc),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Service loop
+# ---------------------------------------------------------------------------
+
+class JetStreamBus:
+    def __init__(self) -> None:
+        self._nc = None
+        self._js = None
+
+    async def connect(self) -> None:
+        if NATS is None:
+            raise RuntimeError("nats-py is not installed. Run: uv pip install nats-py")
+
+        opts = {"servers": [_nats_url()]}
+        token = _nats_token()
+        if token:
+            opts["token"] = token
+        else:
+            user = _nats_user()
+            password = _nats_pass()
+            if user or password:
+                opts["user"] = user
+                opts["password"] = password
+
+        self._nc = NATS()
+        await self._nc.connect(**opts)
+        self._js = self._nc.jetstream()
+
+        stage_stream = _stage_stream()
+        parsed_stream = _parsed_stream()
+        if stage_stream:
+            await self._ensure_stream(stage_stream, _stage_subject())
+        if parsed_stream:
+            await self._ensure_stream(parsed_stream, _parsed_subject())
+
+    async def _ensure_stream(self, stream_name: str, subject: str) -> None:
+        stream_name = stream_name.strip()
+        if not stream_name:
+            return
+        info = None
+        try:
+            info = await self._js.stream_info(stream_name)
+        except Exception:
+            info = None
+        if info is None:
+            await self._js.add_stream(name=stream_name, subjects=[subject])
+            log.info("created jetstream stream name=%s subject=%s", stream_name, subject)
+
+    async def close(self) -> None:
+        if self._nc is not None:
+            await self._nc.drain()
+            await self._nc.close()
+
+    async def publish_parsed(self, result: dict) -> None:
+        payload = {
+            "record_id": result.get("record_id"),
+            "type": "pdf",
+            "status": result.get("status", "failed"),
+            "file_format": result.get("file_format", "json"),
+            "result_filename": result.get("result_filename", ""),
+        }
+        await self._js.publish(_parsed_subject(), json.dumps(payload).encode("utf-8"))
+
+
+async def publish_parsed_event_once(result: dict) -> None:
+    if NATS is None:
+        raise RuntimeError("nats-py is not installed. Run: uv pip install nats-py")
+
+    opts = {"servers": [_nats_url()]}
+    token = _nats_token()
+    if token:
+        opts["token"] = token
+    else:
+        user = _nats_user()
+        password = _nats_pass()
+        if user or password:
+            opts["user"] = user
+            opts["password"] = password
+
+    nc = NATS()
+    await nc.connect(**opts)
+    js = nc.jetstream()
+    payload = {
+        "record_id": result.get("record_id"),
+        "type": "pdf",
+        "status": result.get("status", "failed"),
+        "file_format": result.get("file_format", "json"),
+        "result_filename": result.get("result_filename", ""),
+    }
+    await js.publish(_parsed_subject(), json.dumps(payload).encode("utf-8"))
+    await nc.drain()
+    await nc.close()
+
+
+async def run_jetstream() -> None:
+    dsn = _pg_dsn()
+    repo_dirs = _repo_dirs()
+    backup_dir = _backup_dir()
+    staging_dir = _staging_dir()
+    default_parser = _default_parser()
+
+    log.info("(MID_2026040711) starting pdf_parser service in jetstream mode")
+    log.info("  stage_subject=%s parsed_subject=%s durable=%s", _stage_subject(), _parsed_subject(), _stage_durable())
+
+    for d in repo_dirs:
+        Path(d).mkdir(parents=True, exist_ok=True)
+    Path(backup_dir).mkdir(parents=True, exist_ok=True)
+
+    backend_cache: dict[str, ParserBackend] = {}
+    conn = pg_connect(dsn)
+    bus = JetStreamBus()
+    await bus.connect()
+
+    stop = asyncio.Event()
+
+    def _stop(_sig, _frame):
+        log.info("(MID_2026040712) shutdown signal received")
+        stop.set()
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+
+    sub = await bus._js.pull_subscribe(_stage_subject(), durable=_stage_durable())
+
+    try:
+        while not stop.is_set():
+            try:
+                msgs = await sub.fetch(1, timeout=1)
+            except Exception:
+                msgs = []
+            if not msgs:
+                continue
+            for msg in msgs:
+                payload = {}
+                try:
+                    payload = json.loads(msg.data.decode("utf-8"))
+                    rec_id = int(payload.get("record_id") or 0)
+                    msg_type = str(payload.get("type", "")).strip().lower()
+                    msg_status = str(payload.get("status", "")).strip().lower()
+                    if rec_id <= 0:
+                        raise ValueError("missing/invalid record_id")
+                    if msg_type and msg_type != "pdf":
+                        await msg.ack()
+                        continue
+                    if msg_status and msg_status != "success":
+                        await msg.ack()
+                        continue
+
+                    rec = fetch_record_by_id(conn, rec_id)
+                    if not rec:
+                        raise ValueError(f"kb.inputs record not found id={rec_id}")
+
+                    result = _process_record(
+                        conn, rec, backend_cache,
+                        repo_dirs, backup_dir, staging_dir, default_parser,
+                    )
+                    await bus.publish_parsed(result)
+                    await msg.ack()
+                except Exception as exc:
+                    log.error("(MID_2026040713) jetstream stage event handling failed payload=%s error=%s", payload, exc)
+                    if should_drop_stage_event(exc):
+                        await msg.ack()
+                    else:
+                        await msg.nak()
+    finally:
+        await bus.close()
+        conn.close()
+
+def run() -> None:
+    dsn = _pg_dsn()
+    repo_dirs = _repo_dirs()
+    backup_dir = _backup_dir()
+    staging_dir = _staging_dir()
+    poll_interval = _poll_interval()
+    batch_size = _batch_size()
+    default_parser = _default_parser()
+
+    log.info("(MID_2026040703) starting unified pdf_parser service")
+    log.info("  pg_host=%s db=%s", dsn["host"], dsn["dbname"])
+    log.info("  repo_dirs=%s", repo_dirs)
+    log.info("  backup_dir=%s", backup_dir)
+    log.info("  staging_dir=%s", staging_dir if staging_dir else "(not set)")
+    log.info("  poll_interval=%ss batch_size=%s default_parser=%s",
+             poll_interval, batch_size, default_parser)
+
+    for d in repo_dirs:
+        Path(d).mkdir(parents=True, exist_ok=True)
+    Path(backup_dir).mkdir(parents=True, exist_ok=True)
+
+    backend_cache: dict[str, ParserBackend] = {}
+
+    def _stop(_sig, _frame):
+        log.info("(MID_2026040704) shutdown signal received")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+
+    conn = None
+    while True:
+        try:
+            if conn is None or conn.closed:
+                conn = pg_connect(dsn)
+                log.info("(MID_2026040705) connected to postgres")
+
+            scan_staging_once(conn, staging_dir, backup_dir)
+            records = fetch_candidates(conn, batch_size)
+            if not records:
+                log.debug("(MID_2026040706) nothing to process")
+            else:
+                for rec in records:
+                    if has_operation(rec["status"], "parsing", "parsed"):
+                        continue
+                    result = _process_record(
+                        conn, rec, backend_cache,
+                        repo_dirs, backup_dir, staging_dir, default_parser,
+                    )
+                    try:
+                        asyncio.run(publish_parsed_event_once(result))
+                    except Exception as exc:
+                        log.error("(MID_2026040714) failed to publish parsed event id=%s error=%s", rec["id"], exc)
+
+        except psycopg2.Error as exc:
+            log.error("(MID_2026040707) postgres error: %s — reconnecting", exc)
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+            conn = None
+            time.sleep(poll_interval)
+            continue
+        except Exception as exc:
+            log.error("(MID_2026040708) unexpected error: %s", exc, exc_info=True)
+
+        time.sleep(poll_interval)
+
+
+if __name__ == "__main__":
+    if _pipeline_mode() == "jetstream":
+        asyncio.run(run_jetstream())
+    else:
+        run()

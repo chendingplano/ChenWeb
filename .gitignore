@@ -41,5 +41,6 @@ server/.cache
 autotester
 pdfparser
 .models.toml
+__pycache__
 
 doc-processor
