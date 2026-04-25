@@ -39,6 +39,15 @@ func NewChunkingProcessor(
 
 func (p *ChunkingProcessor) Name() string { return "chunking" }
 
+func (p *ChunkingProcessor) LogName() string {
+	if named, ok := p.Service.(interface{ LogName() string }); ok {
+		if logName := strings.TrimSpace(named.LogName()); logName != "" {
+			return logName
+		}
+	}
+	return p.Name()
+}
+
 func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
@@ -77,6 +86,7 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	}
 	if err := p.Service.HandleInput(ctx, evt.RecordID, inputFilename, fileBody); err != nil {
 		p.Logger.Error("chunking processor failed", "record_id", rec.ID, "error", err)
+		return err
 	}
 	return nil
 }

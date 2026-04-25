@@ -117,7 +117,7 @@ func (p *StructureAnalyzerProcessor) HandleEvent(ctx context.Context, payload []
 		return fmt.Errorf("(MID_26042148) load prompt file %q failed: %w", p.PromptRef, p.PromptErr)
 	}
 	if p.Extractor == nil {
-		return errors.New("llm extractor is nil")
+		return errors.New("(MID_26042438) llm extractor is nil")
 	}
 
 	rec, err := p.Store.GetInputRecord(ctx, evt.RecordID)
@@ -128,10 +128,10 @@ func (p *StructureAnalyzerProcessor) HandleEvent(ctx context.Context, payload []
 		return fmt.Errorf("(MID_26042150) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
 	if strings.TrimSpace(rec.ParserName) == "" {
-		return p.failAndPersist(ctx, rec, start, "", 0, 0, 0, 0, errors.New("missing parser name"))
+		return p.failAndPersist(ctx, rec, start, "", 0, 0, 0, 0, errors.New("(MID_26042421) missing parser name"))
 	}
 	if strings.TrimSpace(rec.ResultFilename) == "" {
-		return p.failAndPersist(ctx, rec, start, "", 0, 0, 0, 0, errors.New("missing result filename"))
+		return p.failAndPersist(ctx, rec, start, "", 0, 0, 0, 0, errors.New("(MID_26042422) missing result filename"))
 	}
 
 	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
@@ -152,12 +152,12 @@ func (p *StructureAnalyzerProcessor) HandleEvent(ctx context.Context, payload []
 		return p.failAndPersist(ctx, rec, start, inputFilename, 0, 0, 0, 0, err)
 	}
 	if len(lines) == 0 {
-		return p.failAndPersist(ctx, rec, start, inputFilename, numPages, 0, 0, 0, errors.New("input file has no valid lines"))
+		return p.failAndPersist(ctx, rec, start, inputFilename, numPages, 0, 0, 0, errors.New("(MID_26042423) input file has no valid lines"))
 	}
 
 	blocks := buildStructureBlocks(lines, p.InputBlockSize)
 	if len(blocks) == 0 {
-		return p.failAndPersist(ctx, rec, start, inputFilename, numPages, len(lines), 0, 0, errors.New("input file has no block to analyze"))
+		return p.failAndPersist(ctx, rec, start, inputFilename, numPages, len(lines), 0, 0, errors.New("(MID_26042424) input file has no block to analyze"))
 	}
 
 	aggregatedCoverPages := make(map[int]struct{}, numPages)
@@ -359,13 +359,13 @@ func (p *StructureAnalyzerProcessor) extractAndValidateStructureOutput(ctx conte
 
 func (p *StructureAnalyzerProcessor) validateRequiredEnv() error {
 	if strings.TrimSpace(p.StructureDir) == "" {
-		return errors.New("missing PROMPT_DIR")
+		return errors.New("(MID_26042425) missing PROMPT_DIR")
 	}
 	if strings.TrimSpace(p.ModelRef) == "" {
-		return errors.New("missing STRUCTURE_MODEL_NAME")
+		return errors.New("(MID_26042426) missing STRUCTURE_MODEL_NAME")
 	}
 	if strings.TrimSpace(p.PromptRef) == "" {
-		return errors.New("missing STRUCTURE_PROMPT")
+		return errors.New("(MID_26042427) missing STRUCTURE_PROMPT")
 	}
 	return nil
 }
@@ -548,7 +548,7 @@ func buildStructureUserInput(lines []structureLine, retryFeedback string) string
 func validateStructureTextOutput(raw string, lines []structureLine) (structureOutput, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return structureOutput{}, errors.New("empty llm output")
+		return structureOutput{}, errors.New("(MID_26042428) empty llm output")
 	}
 
 	all := strings.Split(trimmed, "\n")
@@ -560,10 +560,10 @@ func validateStructureTextOutput(raw string, lines []structureLine) (structureOu
 		}
 	}
 	if len(nonEmpty) == 0 {
-		return structureOutput{}, errors.New("empty llm output")
+		return structureOutput{}, errors.New("(MID_26042429) empty llm output")
 	}
 	if !strings.HasPrefix(strings.ToLower(nonEmpty[0]), "cover_pages:") {
-		return structureOutput{}, errors.New("first output line must start with cover_pages:")
+		return structureOutput{}, errors.New("(MID_26042430) first output line must start with cover_pages:")
 	}
 
 	coverPages, err := parseCoverPagesLine(nonEmpty[0])
@@ -652,14 +652,14 @@ func validateStructureTextOutput(raw string, lines []structureLine) (structureOu
 func parseCoverPagesLine(line string) ([]int, error) {
 	const prefix = "cover_pages:"
 	if !strings.HasPrefix(strings.ToLower(line), prefix) {
-		return nil, errors.New("cover_pages line missing prefix")
+		return nil, errors.New("(MID_26042431) cover_pages line missing prefix")
 	}
 	rest := strings.TrimSpace(line[len(prefix):])
 	if rest == "" {
 		return []int{}, nil
 	}
 	if !strings.HasPrefix(rest, "[") || !strings.HasSuffix(rest, "]") {
-		return nil, errors.New("cover_pages must be bracketed list, e.g. [1,2]")
+		return nil, errors.New("(MID_26042432) cover_pages must be bracketed list, e.g. [1,2]")
 	}
 	var pages []int
 	if err := json.Unmarshal([]byte(rest), &pages); err != nil {
@@ -684,7 +684,7 @@ func parseCoverPagesLine(line string) ([]int, error) {
 func validateStructureOutput(parsed map[string]any, lines []structureLine) (structureOutput, error) {
 	rawLabels, ok := parsed["labels"].([]any)
 	if !ok {
-		return structureOutput{}, errors.New("labels must be an array")
+		return structureOutput{}, errors.New("(MID_26042433) labels must be an array")
 	}
 
 	labels := make([]structureLabel, 0, len(rawLabels))
@@ -749,7 +749,7 @@ func normalizeCoverPages(v any) ([]int, error) {
 	}
 	items, ok := v.([]any)
 	if !ok {
-		return nil, errors.New("cover_pages must be an array")
+		return nil, errors.New("(MID_26042434) cover_pages must be an array")
 	}
 	seen := map[int]struct{}{}
 	out := make([]int, 0, len(items))
@@ -971,7 +971,7 @@ func (p *StructureAnalyzerProcessor) failAndPersist(
 func loadStructurePromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
 	promptRef = strings.TrimSpace(os.Getenv("STRUCTURE_PROMPT"))
 	if promptRef == "" {
-		return "", "", "", errors.New("missing STRUCTURE_PROMPT")
+		return "", "", "", errors.New("(MID_26042435) missing STRUCTURE_PROMPT")
 	}
 
 	paths := make([]string, 0, 8)
@@ -1009,7 +1009,7 @@ func loadStructurePromptFromEnv() (promptText string, promptRef string, promptPa
 		}
 		text := strings.TrimSpace(string(bs))
 		if text == "" {
-			return "", promptRef, candidate, errors.New("prompt file is empty")
+			return "", promptRef, candidate, errors.New("(MID_26042436) prompt file is empty")
 		}
 		return text, promptRef, candidate, nil
 	}
@@ -1018,7 +1018,7 @@ func loadStructurePromptFromEnv() (promptText string, promptRef string, promptPa
 		return strings.TrimSpace(promptRef), "inline", "", nil
 	}
 	if lastErr == nil {
-		lastErr = errors.New("no candidate path available")
+		lastErr = errors.New("(MID_26042437) no candidate path available")
 	}
 	return "", promptRef, "", fmt.Errorf("(MID_26042145) prompt file not found: %w", lastErr)
 }

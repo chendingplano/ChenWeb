@@ -278,7 +278,7 @@ func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, log
 	startPage := 0
 	for i, line := range lines {
 		n := normalizeStaticTitle(line.Content)
-		if n == "table of content" || n == "table of contents" || n == "目录" || n == "目次" {
+		if n == "table of content" || n == "table of contents" || n == "目录" || n == "目次" || n == "目 次" {
 			start = i
 			startPage = line.PageNo
 			break

@@ -144,6 +144,32 @@ func TestMetricsProcessor_ExtractsFromChunkFilesAndWritesStatus(t *testing.T) {
 	}
 }
 
+func TestLoadMetricsPromptFromEnv_UsesPromptDir(t *testing.T) {
+	tmp := t.TempDir()
+	promptPath := filepath.Join(tmp, "prompt_extract_metrics_v1.txt")
+	want := "extract metrics from lines"
+	if err := os.WriteFile(promptPath, []byte(want), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	t.Setenv("PROMPT_DIR", tmp)
+	t.Setenv("EXTRACT_METRICS_PROMPT", "prompt_extract_metrics_v1.txt")
+
+	got, ref, gotPath, err := loadMetricsPromptFromEnv()
+	if err != nil {
+		t.Fatalf("loadMetricsPromptFromEnv: %v", err)
+	}
+	if got != want {
+		t.Fatalf("promptText=%q, want %q", got, want)
+	}
+	if ref != "prompt_extract_metrics_v1.txt" {
+		t.Fatalf("promptRef=%q", ref)
+	}
+	if gotPath != promptPath {
+		t.Fatalf("promptPath=%q, want %q", gotPath, promptPath)
+	}
+}
+
 func osWriteFile(path string, body []byte) error {
 	return os.WriteFile(path, body, 0o644)
 }

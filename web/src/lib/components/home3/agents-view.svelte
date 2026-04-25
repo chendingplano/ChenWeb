@@ -31,6 +31,11 @@
 		instructions: ''
 	});
 
+	// Inline-edit state
+	let editingId = $state<string | null>(null);
+	let editDraft = $state({ name: '', avatar_emoji: '', model: '', instructions: '', enabled: true });
+	let editSaving = $state(false);
+
 	onMount(() => {
 		if (apStore.workspaces.length === 0) {
 			apStore.loadWorkspaces();
@@ -70,6 +75,42 @@
 			await apStore.deleteAgent(a.id);
 		} catch (e) {
 			localError = String((e as Error).message ?? e);
+		}
+	}
+
+	function startEdit(a: Agent) {
+		editingId = a.id;
+		editDraft = {
+			name: a.name,
+			avatar_emoji: a.avatar_emoji,
+			model: a.model,
+			instructions: a.instructions,
+			enabled: a.enabled
+		};
+	}
+
+	function cancelEdit() {
+		editingId = null;
+	}
+
+	async function saveEdit(id: string) {
+		localError = null;
+		const name = editDraft.name.trim();
+		if (!name) { localError = 'Name is required'; return; }
+		editSaving = true;
+		try {
+			await apStore.updateAgent(id, {
+				name,
+				avatar_emoji: editDraft.avatar_emoji,
+				model: editDraft.model,
+				instructions: editDraft.instructions,
+				enabled: editDraft.enabled
+			});
+			editingId = null;
+		} catch (e) {
+			localError = String((e as Error).message ?? e);
+		} finally {
+			editSaving = false;
 		}
 	}
 
@@ -156,19 +197,61 @@
 	<div class="grid">
 		{#each apStore.agents as a (a.id)}
 			<article class="agent-card">
-				<header>
-					<span class="emoji">{a.avatar_emoji}</span>
-					<div class="meta">
-						<span class="name">{a.name}</span>
-						<span class="runtime">{runtimeLabel(a.runtime_kind)}</span>
-					</div>
-					<button class="danger-link" onclick={() => remove(a)}>Archive</button>
-				</header>
-				{#if a.model}
-					<p class="muted small">Model: {a.model}</p>
-				{/if}
-				{#if a.instructions}
-					<p class="instructions">{a.instructions}</p>
+				{#if editingId === a.id}
+					<!-- Inline edit form -->
+					<form
+						class="edit-form"
+						onsubmit={(e) => { e.preventDefault(); saveEdit(a.id); }}
+					>
+						<div class="edit-row">
+							<label class="label-emoji">
+								<span>Emoji</span>
+								<input class="emoji" bind:value={editDraft.avatar_emoji} maxlength="4" />
+							</label>
+							<label class="grow">
+								<span>Name</span>
+								<input bind:value={editDraft.name} required placeholder="Agent name" />
+							</label>
+						</div>
+						<label>
+							<span>Model</span>
+							<input bind:value={editDraft.model} placeholder="e.g. claude-opus-4-7" />
+						</label>
+						<label>
+							<span>Instructions</span>
+							<textarea rows="3" bind:value={editDraft.instructions}></textarea>
+						</label>
+						<label class="toggle-row">
+							<span>Enabled</span>
+							<input type="checkbox" bind:checked={editDraft.enabled} />
+						</label>
+						<div class="edit-foot">
+							<button class="primary small" type="submit" disabled={editSaving || !editDraft.name.trim()}>
+								{editSaving ? 'Saving…' : 'Save'}
+							</button>
+							<button class="ghost small" type="button" onclick={cancelEdit}>Cancel</button>
+						</div>
+					</form>
+				{:else}
+					<!-- Read view -->
+					<header>
+						<span class="emoji">{a.avatar_emoji}</span>
+						<div class="meta">
+							<span class="name">{a.name}</span>
+							<span class="runtime">{runtimeLabel(a.runtime_kind)}</span>
+						</div>
+						<button class="action-link" onclick={() => startEdit(a)}>Edit</button>
+						<button class="danger-link" onclick={() => remove(a)}>Archive</button>
+					</header>
+					{#if a.model}
+						<p class="muted small">Model: {a.model}</p>
+					{/if}
+					{#if a.instructions}
+						<p class="instructions">{a.instructions}</p>
+					{/if}
+					{#if !a.enabled}
+						<p class="muted small disabled-badge">Disabled</p>
+					{/if}
 				{/if}
 			</article>
 		{/each}
@@ -314,6 +397,49 @@
 		padding: 24px;
 		grid-column: 1 / -1;
 	}
+	.action-link {
+		background: none;
+		border: none;
+		color: var(--btn);
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.disabled-badge {
+		color: #f87171;
+	}
+	.edit-form {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.edit-row {
+		display: flex;
+		gap: 8px;
+	}
+	.label-emoji { flex: 0 0 auto; }
+	.grow { flex: 1; }
+	.toggle-row {
+		flex-direction: row;
+		align-items: center;
+		gap: 8px;
+	}
+	.toggle-row span { font-size: 12px; color: var(--sub); }
+	.edit-foot {
+		display: flex;
+		gap: 6px;
+		justify-content: flex-end;
+	}
+	.primary.small { padding: 5px 10px; font-size: 12px; }
+	.ghost {
+		background: transparent;
+		color: var(--sub);
+		border: 1px solid var(--border);
+		padding: 8px 14px;
+		border-radius: 8px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+	.ghost.small { padding: 5px 10px; font-size: 12px; }
 	.error {
 		background: rgba(248, 113, 113, 0.12);
 		color: #f87171;

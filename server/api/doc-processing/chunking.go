@@ -62,3 +62,14 @@ func (c *ChunkingController) HandleInput(ctx context.Context, recordID int64, in
 		return fmt.Errorf("(MID_26042116) unsupported chunking method: %s", c.Method)
 	}
 }
+
+func (c *ChunkingController) LogName() string {
+	switch strings.ToLower(strings.TrimSpace(c.Method)) {
+	case ChunkingMethodFixed:
+		return "fix_size_chunking"
+	case ChunkingMethodTopic:
+		return "topic_chunking"
+	default:
+		return "chunking"
+	}
+}

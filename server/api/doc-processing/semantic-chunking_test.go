@@ -303,6 +303,46 @@ func TestWriteTopicsCategoryTree_ReprocessReplacesRowsForRecord(t *testing.T) {
 	}
 }
 
+func TestWriteTopicsCategoryTree_PreservesCanonicalLineFile(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "0", "84")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	lineFile := filepath.Join(root, "stdGk_3029352_opendata.txt")
+	lineBody := "1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tOriginal line\n"
+	if err := os.WriteFile(lineFile, []byte(lineBody), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+
+	topics := []TopicItem{
+		{
+			SeqNo:        1,
+			TopicType:    "policy",
+			Lines:        []string{"1"},
+			Keywords:     []string{"scope"},
+			Topic:        "Project scope",
+			CategoryPath: []string{"project_overview"},
+		},
+	}
+	topicsPath, err := writeTopicsFile(tmp, 84, topics)
+	if err != nil {
+		t.Fatalf("writeTopicsFile: %v", err)
+	}
+	if err := writeTopicsCategoryTree(nil, tmp, 84, topicsPath, topics); err != nil {
+		t.Fatalf("writeTopicsCategoryTree: %v", err)
+	}
+
+	bs, err := os.ReadFile(lineFile)
+	if err != nil {
+		t.Fatalf("read preserved line file: %v", err)
+	}
+	if string(bs) != lineBody {
+		t.Fatalf("line file changed=%q, want %q", string(bs), lineBody)
+	}
+}
+
 func TestSemanticChunkingService_HandleInput_LLMErrorPersistsFailure(t *testing.T) {
 	input := "1\t1\theading\tTestFont\t12\t[0,0,1,1]\tCover"
 	st := &fakeStore{rec: InputRecord{ID: 9001, StatusRaw: "[]"}}

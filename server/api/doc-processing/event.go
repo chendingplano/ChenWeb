@@ -42,7 +42,7 @@ func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error)
 
 	return LineFileGeneratedEvent{
 		RecordID:   rid,
-		Filename:   strings.TrimSpace(asString(raw["filename"])),
+		Filename:   firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
 		Force:      force,
 		Type:       strings.ToLower(strings.TrimSpace(asString(raw["type"]))),
 		Status:     strings.ToLower(strings.TrimSpace(asString(raw["status"]))),
@@ -156,4 +156,13 @@ func asBool(v any, defaultValue bool) (bool, error) {
 	default:
 		return false, fmt.Errorf("invalid bool value: %v", v)
 	}
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, v := range values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

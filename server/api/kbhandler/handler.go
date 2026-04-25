@@ -27,6 +27,7 @@ const (
 type inputRecord struct {
 	ID             int64           `json:"id"`
 	Name           *string         `json:"name,omitempty"`
+	ParserName     *string         `json:"parser_name,omitempty"`
 	Type           string          `json:"type"`
 	Title          *string         `json:"title,omitempty"`
 	DocNo          *string         `json:"doc_no,omitempty"`
@@ -60,6 +61,23 @@ type errorResponse struct {
 	ErrorMsg string `json:"error_msg"`
 }
 
+type listInputsFilters struct {
+	RecordID        *int64
+	DocType         string
+	ParseState      string
+	Name            string
+	Title           string
+	DocNo           string
+	FileName        string
+	ParserName      string
+	Operation       string
+	ProcStatus      string
+	CreateTimeStart *time.Time
+	CreateTimeEnd   *time.Time
+	ModifyTimeStart *time.Time
+	ModifyTimeEnd   *time.Time
+}
+
 // ListInputs handles GET /api/v1/kb/inputs.
 func ListInputs(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_001")
@@ -72,32 +90,64 @@ func ListInputs(c echo.Context) error {
 		pageSize = maxPageSize
 	}
 
-	startTime, err := parseTimeQuery(c.QueryParam("start_time"))
+	recordID, err := parseOptionalPositiveInt64(c.QueryParam("record_id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: err.Error(),
+		})
+	}
+
+	createStartTime, err := parseTimeQuery(firstNonEmpty(c.QueryParam("create_start_time"), c.QueryParam("start_time")))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
 			ErrorMsg: fmt.Sprintf("invalid start_time: %v (CWB_KB_011)", err),
 		})
 	}
-	endTime, err := parseTimeQuery(c.QueryParam("end_time"))
+	createEndTime, err := parseTimeQuery(firstNonEmpty(c.QueryParam("create_end_time"), c.QueryParam("end_time")))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
 			ErrorMsg: fmt.Sprintf("invalid end_time: %v (CWB_KB_012)", err),
 		})
 	}
-
-	whereSQL, args, err := buildWhereClause(
-		c.QueryParam("doc_type"),
-		c.QueryParam("parse_state"),
-		c.QueryParam("file_name"),
-		startTime,
-		endTime,
-	)
+	modifyStartTime, err := parseTimeQuery(c.QueryParam("modify_start_time"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
-			ErrorMsg: err.Error(),
+			ErrorMsg: fmt.Sprintf("invalid modify_start_time: %v (CWB_KB_013)", err),
+		})
+	}
+	modifyEndTime, err := parseTimeQuery(c.QueryParam("modify_end_time"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("invalid modify_end_time: %v (CWB_KB_014)", err),
+		})
+	}
+
+	filters := listInputsFilters{
+		RecordID:        recordID,
+		DocType:         c.QueryParam("doc_type"),
+		ParseState:      c.QueryParam("parse_state"),
+		Name:            c.QueryParam("name"),
+		Title:           c.QueryParam("title"),
+		DocNo:           c.QueryParam("doc_no"),
+		FileName:        c.QueryParam("file_name"),
+		ParserName:      c.QueryParam("parser_name"),
+		Operation:       c.QueryParam("operation"),
+		ProcStatus:      c.QueryParam("proc_status"),
+		CreateTimeStart: createStartTime,
+		CreateTimeEnd:   createEndTime,
+		ModifyTimeStart: modifyStartTime,
+		ModifyTimeEnd:   modifyEndTime,
+	}
+
+	if !isValidParseState(filters.ParseState) {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("invalid parse_state: %q (CWB_KB_031)", strings.TrimSpace(strings.ToLower(filters.ParseState))),
 		})
 	}
 
@@ -108,6 +158,38 @@ func ListInputs(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
 			ErrorMsg: "failed to resolve kb input table (CWB_KB_020)",
+		})
+	}
+
+	var nameWhereExpr string
+	if strings.TrimSpace(filters.Name) != "" {
+		nameWhereExpr, err = resolveNameColumnExpr(db, inputTable)
+		if err != nil {
+			logger.Error("resolve kb input name column failed", "table", inputTable, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status:   false,
+				ErrorMsg: "failed to resolve kb input schema (CWB_KB_023)",
+			})
+		}
+	}
+
+	var parserWhereExpr string
+	if strings.TrimSpace(filters.ParserName) != "" {
+		parserWhereExpr, err = resolveParserNameColumnExpr(db, inputTable)
+		if err != nil {
+			logger.Error("resolve kb input parser_name column failed", "table", inputTable, "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status:   false,
+				ErrorMsg: "failed to resolve kb input schema (CWB_KB_024)",
+			})
+		}
+	}
+
+	whereSQL, args, err := buildWhereClause(filters, nameWhereExpr, parserWhereExpr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: err.Error(),
 		})
 	}
 
@@ -129,8 +211,16 @@ func ListInputs(c echo.Context) error {
 			ErrorMsg: "failed to resolve kb input schema (CWB_KB_023)",
 		})
 	}
+	parserNameColumnExpr, err := resolveParserNameColumnExpr(db, inputTable)
+	if err != nil {
+		logger.Error("resolve kb input parser_name column failed", "table", inputTable, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to resolve kb input schema (CWB_KB_024)",
+		})
+	}
 
-	results, err := queryInputs(db, inputTable, nameColumnExpr, whereSQL, args, pageSize, offset)
+	results, err := queryInputs(db, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL, args, pageSize, offset)
 	if err != nil {
 		logger.Error("query kb input failed", "table", inputTable, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -166,11 +256,12 @@ func queryTotalCount(db *sql.DB, inputTable, whereSQL string, args []any) (int64
 	return total, nil
 }
 
-func queryInputs(db *sql.DB, inputTable, nameColumnExpr, whereSQL string, args []any, limit, offset int) ([]inputRecord, error) {
+func queryInputs(db *sql.DB, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL string, args []any, limit, offset int) ([]inputRecord, error) {
 	query := fmt.Sprintf(`
 SELECT
     i.id,
     %s AS name,
+    %s AS parser_name,
     i.type,
     i.title,
     i.doc_no,
@@ -190,7 +281,7 @@ SELECT
     i.notes,
     i.error_msg
 FROM %s i
-`, nameColumnExpr, inputTable)
+`, nameColumnExpr, parserNameColumnExpr, inputTable)
 	if whereSQL != "" {
 		query += " WHERE " + whereSQL
 	}
@@ -221,6 +312,7 @@ FROM %s i
 		if err := rows.Scan(
 			&record.ID,
 			&record.Name,
+			&record.ParserName,
 			&record.Type,
 			&record.Title,
 			&record.DocNo,
@@ -267,6 +359,22 @@ FROM %s i
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func resolveParserNameColumnExpr(db *sql.DB, inputTable string) (string, error) {
+	schema, table, err := splitQualifiedTable(inputTable)
+	if err != nil {
+		return "", err
+	}
+
+	hasParserName, err := columnExists(db, schema, table, "parser_name")
+	if err != nil {
+		return "", err
+	}
+	if hasParserName {
+		return "COALESCE(i.parser_name, '')", nil
+	}
+	return "''", nil
 }
 
 func resolveInputTable(db *sql.DB) (string, error) {
@@ -346,7 +454,7 @@ SELECT EXISTS (
 	return exists, nil
 }
 
-func buildWhereClause(docType, parseState, fileName string, startTime, endTime *time.Time) (string, []any, error) {
+func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (string, []any, error) {
 	whereParts := make([]string, 0)
 	args := make([]any, 0)
 	nextArg := func(v any) string {
@@ -354,12 +462,25 @@ func buildWhereClause(docType, parseState, fileName string, startTime, endTime *
 		return fmt.Sprintf("$%d", len(args))
 	}
 
-	docType = strings.TrimSpace(strings.ToLower(docType))
+	nameColumnExpr := "COALESCE(i.name, i.staging_filename, '')"
+	if len(nameColumnExprs) > 0 && strings.TrimSpace(nameColumnExprs[0]) != "" {
+		nameColumnExpr = fmt.Sprintf("COALESCE(%s, '')", strings.TrimSpace(nameColumnExprs[0]))
+	}
+	parserNameExpr := "COALESCE(i.parser_name, '')"
+	if len(nameColumnExprs) > 1 && strings.TrimSpace(nameColumnExprs[1]) != "" {
+		parserNameExpr = strings.TrimSpace(nameColumnExprs[1])
+	}
+
+	if filters.RecordID != nil {
+		whereParts = append(whereParts, fmt.Sprintf("i.id = %s", nextArg(*filters.RecordID)))
+	}
+
+	docType := strings.TrimSpace(strings.ToLower(filters.DocType))
 	if docType != "" && docType != "all" {
 		whereParts = append(whereParts, fmt.Sprintf("LOWER(i.type) = LOWER(%s)", nextArg(docType)))
 	}
 
-	parseState = normalizeParseState(parseState)
+	parseState := normalizeParseState(filters.ParseState)
 	switch parseState {
 	case "all":
 	case "pending":
@@ -386,16 +507,50 @@ func buildWhereClause(docType, parseState, fileName string, startTime, endTime *
 		return "", nil, fmt.Errorf("invalid parse_state: %q (CWB_KB_031)", parseState)
 	}
 
-	fileName = strings.TrimSpace(fileName)
+	if title := strings.TrimSpace(filters.Title); title != "" {
+		whereParts = append(whereParts, fmt.Sprintf("COALESCE(i.title, '') ILIKE %s", nextArg("%"+title+"%")))
+	}
+	if docNo := strings.TrimSpace(filters.DocNo); docNo != "" {
+		whereParts = append(whereParts, fmt.Sprintf("COALESCE(i.doc_no, '') ILIKE %s", nextArg("%"+docNo+"%")))
+	}
+	if name := strings.TrimSpace(filters.Name); name != "" {
+		whereParts = append(whereParts, fmt.Sprintf("%s ILIKE %s", nameColumnExpr, nextArg("%"+name+"%")))
+	}
+	fileName := strings.TrimSpace(filters.FileName)
 	if fileName != "" {
 		whereParts = append(whereParts, fmt.Sprintf("COALESCE(i.file_name, '') ILIKE %s", nextArg("%"+fileName+"%")))
 	}
-
-	if startTime != nil {
-		whereParts = append(whereParts, fmt.Sprintf("i.create_time >= %s", nextArg(*startTime)))
+	if parserName := strings.TrimSpace(filters.ParserName); parserName != "" {
+		whereParts = append(whereParts, fmt.Sprintf("%s ILIKE %s", parserNameExpr, nextArg("%"+parserName+"%")))
 	}
-	if endTime != nil {
-		whereParts = append(whereParts, fmt.Sprintf("i.create_time <= %s", nextArg(*endTime)))
+	operation := strings.TrimSpace(filters.Operation)
+	procStatus := strings.TrimSpace(filters.ProcStatus)
+	if operation != "" || procStatus != "" {
+		statusParts := make([]string, 0, 2)
+		if operation != "" {
+			statusParts = append(statusParts, fmt.Sprintf("LOWER(COALESCE(st->>'operation', '')) = LOWER(%s)", nextArg(operation)))
+		}
+		if procStatus != "" {
+			statusParts = append(statusParts, fmt.Sprintf("LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER(%s)", nextArg(procStatus)))
+		}
+		whereParts = append(whereParts, fmt.Sprintf(`EXISTS (
+			SELECT 1
+			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			WHERE %s
+		)`, strings.Join(statusParts, " AND ")))
+	}
+
+	if filters.CreateTimeStart != nil {
+		whereParts = append(whereParts, fmt.Sprintf("i.create_time >= %s", nextArg(*filters.CreateTimeStart)))
+	}
+	if filters.CreateTimeEnd != nil {
+		whereParts = append(whereParts, fmt.Sprintf("i.create_time <= %s", nextArg(*filters.CreateTimeEnd)))
+	}
+	if filters.ModifyTimeStart != nil {
+		whereParts = append(whereParts, fmt.Sprintf("i.modify_time >= %s", nextArg(*filters.ModifyTimeStart)))
+	}
+	if filters.ModifyTimeEnd != nil {
+		whereParts = append(whereParts, fmt.Sprintf("i.modify_time <= %s", nextArg(*filters.ModifyTimeEnd)))
 	}
 
 	return strings.Join(whereParts, " AND "), args, nil
@@ -416,6 +571,15 @@ func normalizeParseState(raw string) string {
 	}
 }
 
+func isValidParseState(raw string) bool {
+	switch normalizeParseState(raw) {
+	case "all", "pending", "parsed_success", "parsed_failed":
+		return true
+	default:
+		return false
+	}
+}
+
 func parsePositiveInt(raw string, defaultValue int) int {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -426,6 +590,27 @@ func parsePositiveInt(raw string, defaultValue int) int {
 		return defaultValue
 	}
 	return n
+}
+
+func parseOptionalPositiveInt64(raw string) (*int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return nil, fmt.Errorf("invalid record_id: %q (CWB_KB_015)", raw)
+	}
+	return &n, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func parseTimeQuery(raw string) (*time.Time, error) {

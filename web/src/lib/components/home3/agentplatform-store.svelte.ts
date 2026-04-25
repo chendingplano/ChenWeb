@@ -234,18 +234,14 @@ function createStore() {
 					agents = agents.filter((x) => x.id !== a.id);
 				} else {
 					const idx = agents.findIndex((x) => x.id === a.id);
-					agents = idx >= 0
-						? agents.map((x, k) => (k === idx ? a : x))
-						: [a, ...agents];
+					agents = idx >= 0 ? agents.map((x, k) => (k === idx ? a : x)) : [a, ...agents];
 				}
 			}
 		} else if (f.type === 'project.updated' && f.payload && typeof f.payload === 'object') {
 			const p = f.payload as Project;
 			if (p.id) {
 				const idx = projects.findIndex((x) => x.id === p.id);
-				projects = idx >= 0
-					? projects.map((x, k) => (k === idx ? p : x))
-					: [p, ...projects];
+				projects = idx >= 0 ? projects.map((x, k) => (k === idx ? p : x)) : [p, ...projects];
 			}
 		} else if (f.type === 'project.deleted' && f.payload && typeof f.payload === 'object') {
 			const pid = (f.payload as { id?: string }).id;

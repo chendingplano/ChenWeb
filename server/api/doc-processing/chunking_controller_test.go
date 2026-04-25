@@ -61,3 +61,24 @@ func TestChunkingController_DispatchesTopicMethod(t *testing.T) {
 		t.Fatalf("topic calls=%d, want 1", topic.calls)
 	}
 }
+
+func TestChunkingController_LogNameReflectsMethod(t *testing.T) {
+	fixed := &fakeChunkingHandler{}
+	topic := &fakeChunkingHandler{}
+
+	c1, err := NewChunkingController(ChunkingMethodTopic, fixed, topic)
+	if err != nil {
+		t.Fatalf("NewChunkingController topic: %v", err)
+	}
+	if got := c1.LogName(); got != "topic_chunking" {
+		t.Fatalf("topic LogName=%q, want topic_chunking", got)
+	}
+
+	c2, err := NewChunkingController(ChunkingMethodFixed, fixed, topic)
+	if err != nil {
+		t.Fatalf("NewChunkingController fixed: %v", err)
+	}
+	if got := c2.LogName(); got != "fix_size_chunking" {
+		t.Fatalf("fixed LogName=%q, want fix_size_chunking", got)
+	}
+}

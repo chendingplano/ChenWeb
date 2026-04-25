@@ -33,7 +33,7 @@
 	let errorMsg = $state('');
 
 	let docPage = $state(1);
-	let pdfZoom = $state(1);
+	let pdfZoom = $state(0.5);
 	let pdfLoading = $state(false);
 	let pdfError = $state('');
 	let pdfNumPages = $state(0);
@@ -222,27 +222,71 @@
 	}
 
 	function drawPdfHighlights() {
+		const HIGHLIGHT_EXPAND_TOP_PX = 10;
+		const HIGHLIGHT_EXPAND_LEFT_PX = 5;
+		const HIGHLIGHT_EXPAND_RIGHT_PX = 5;
 		for (const pageNo of pdfRenderedPages) {
 			const overlay = document.getElementById(`pdf-overlay-${pageNo}`) as HTMLDivElement | null;
 			const viewport = pdfViewportByPage.get(pageNo);
 			if (!overlay || !viewport) continue;
 			overlay.innerHTML = '';
 			const lines = selectedLinesByPage.get(pageNo) ?? [];
-			for (const ln of lines) {
-				if (!Array.isArray(ln.coords) || ln.coords.length < 4) continue;
+			const rects = lines.flatMap((ln) => {
+				if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
 				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
-				const left = Math.min(vx1, vx2);
-				const top = Math.max(0, Math.min(vy1, vy2) - 10);
-				const width = Math.abs(vx2 - vx1) + 20;
-				const height = Math.abs(vy2 - vy1) + 10;
+				return [
+					{
+						lineNumber: ln.line_number,
+						left: Math.max(0, Math.min(vx1, vx2) - HIGHLIGHT_EXPAND_LEFT_PX),
+						right: Math.max(vx1, vx2) + HIGHLIGHT_EXPAND_RIGHT_PX,
+						top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
+						bottom: Math.max(vy1, vy2)
+					}
+				];
+			});
+
+			const mergedRects: Array<{
+				firstLineNumber: number;
+				lastLineNumber: number;
+				left: number;
+				right: number;
+				top: number;
+				bottom: number;
+			}> = [];
+			for (const rect of rects) {
+				const prev = mergedRects[mergedRects.length - 1];
+				const isAdjacent = !!prev && rect.lineNumber === prev.lastLineNumber + 1;
+				if (isAdjacent && prev) {
+					prev.lastLineNumber = rect.lineNumber;
+					prev.left = Math.min(prev.left, rect.left);
+					prev.right = Math.max(prev.right, rect.right);
+					prev.bottom = Math.max(prev.bottom, rect.bottom);
+					continue;
+				}
+				mergedRects.push({
+					firstLineNumber: rect.lineNumber,
+					lastLineNumber: rect.lineNumber,
+					left: rect.left,
+					right: rect.right,
+					top: rect.top,
+					bottom: rect.bottom
+				});
+			}
+
+			for (const rect of mergedRects) {
+				const width = Math.max(0, rect.right - rect.left);
+				const height = Math.max(0, rect.bottom - rect.top);
 				if (width < 1 || height < 1) continue;
 				const mark = document.createElement('div');
 				mark.className = 'pdf-highlight';
-				mark.style.left = `${left}px`;
-				mark.style.top = `${top}px`;
+				mark.style.left = `${rect.left}px`;
+				mark.style.top = `${rect.top}px`;
 				mark.style.width = `${width}px`;
 				mark.style.height = `${height}px`;
-				mark.title = `line ${ln.line_number}`;
+				mark.title =
+					rect.firstLineNumber === rect.lastLineNumber
+						? `line ${rect.firstLineNumber}`
+						: `lines ${rect.firstLineNumber}-${rect.lastLineNumber}`;
 				overlay.appendChild(mark);
 			}
 		}

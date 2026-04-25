@@ -20,6 +20,10 @@ type Processor interface {
 	HandleEvent(ctx context.Context, payload []byte) error
 }
 
+type logNamedProcessor interface {
+	LogName() string
+}
+
 type ControlService struct {
 	Processors []Processor
 	Logger     ApiTypes.JimoLogger
@@ -98,7 +102,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 				"ms_used", time.Since(requestStart).Milliseconds(),
 			)
 		}
-		return errors.New("preflight input failed")
+		return errors.New("(MID_26042404) preflight input failed")
 	}
 	if len(evt.Operations) > 0 {
 		processors = s.selectProcessors(evt.Operations)
@@ -122,10 +126,11 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			continue
 		}
 		procStart := s.now()
+		processorName := processorLogName(p)
 		if s.Logger != nil {
 			s.Logger.Info("start running processor",
 				"record_id", evt.RecordID,
-				"processor", p.Name(),
+				"processor", processorName,
 			)
 		}
 		if err := p.HandleEvent(ctx, payload); err != nil {
@@ -134,10 +139,10 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 				firstErr = err
 			}
 			if s.Logger != nil {
-				s.Logger.Error("doc processor failed", "processor", p.Name(), "error", err)
+				s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
 				s.Logger.Info("finish running processor",
 					"record_id", evt.RecordID,
-					"processor", p.Name(),
+					"processor", processorName,
 					"proc_status", "failed",
 					"ms_used", time.Since(procStart).Milliseconds(),
 				)
@@ -147,7 +152,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		if s.Logger != nil {
 			s.Logger.Info("finish running processor",
 				"record_id", evt.RecordID,
-				"processor", p.Name(),
+				"processor", processorName,
 				"proc_status", "success",
 				"ms_used", time.Since(procStart).Milliseconds(),
 			)
@@ -165,6 +170,18 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		)
 	}
 	return firstErr
+}
+
+func processorLogName(p Processor) string {
+	if p == nil {
+		return ""
+	}
+	if named, ok := p.(logNamedProcessor); ok {
+		if logName := canonicalOperationName(named.LogName()); logName != "" {
+			return logName
+		}
+	}
+	return p.Name()
 }
 
 func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGeneratedEvent) bool {
@@ -186,11 +203,11 @@ func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGenerat
 	}
 
 	if strings.TrimSpace(rec.ParserName) == "" {
-		s.persistControlFailure(ctx, rec, errors.New("missing parser name"))
+		s.persistControlFailure(ctx, rec, errors.New("(MID_26042401) missing parser name"))
 		return false
 	}
 	if strings.TrimSpace(rec.ResultFilename) == "" {
-		s.persistControlFailure(ctx, rec, errors.New("missing result filename"))
+		s.persistControlFailure(ctx, rec, errors.New("(MID_26042402) missing result filename"))
 		return false
 	}
 
@@ -202,14 +219,14 @@ func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGenerat
 	fi, err := os.Stat(inputPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			s.persistControlFailure(ctx, rec, fmt.Errorf("input file not exist: %s", inputPath))
+			s.persistControlFailure(ctx, rec, fmt.Errorf("(MID_26042405) input file not exist: %s", inputPath))
 			return false
 		}
-		s.persistControlFailure(ctx, rec, fmt.Errorf("stat input file: %w", err))
+		s.persistControlFailure(ctx, rec, fmt.Errorf("(MID_26042406) stat input file: %w", err))
 		return false
 	}
 	if fi.Size() == 0 {
-		s.persistControlFailure(ctx, rec, errors.New("input file empty"))
+		s.persistControlFailure(ctx, rec, errors.New("(MID_26042403) input file empty"))
 		return false
 	}
 	return true

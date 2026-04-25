@@ -117,7 +117,7 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 		return s.ModelErr
 	}
 	if s.PromptErr != nil {
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, fmt.Errorf("load topic chunk prompt %q failed: %w", s.PromptRef, s.PromptErr))
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, fmt.Errorf("(MID_26042440) load topic chunk prompt %q failed: %w", s.PromptRef, s.PromptErr))
 		return s.PromptErr
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
@@ -548,9 +548,12 @@ func loadLeafRowsExcludingRecord(targetDir string, recordID int64) (map[string][
 		if err != nil {
 			return err
 		}
-		rows, err := readLeafRowsExcludingRecord(path, recordID)
+		rows, managed, err := readLeafRowsExcludingRecord(path, recordID)
 		if err != nil {
 			return err
+		}
+		if !managed {
+			return nil
 		}
 		out[rel] = rows
 		return nil
@@ -561,14 +564,15 @@ func loadLeafRowsExcludingRecord(targetDir string, recordID int64) (map[string][
 	return out, nil
 }
 
-func readLeafRowsExcludingRecord(path string, recordID int64) ([]string, error) {
+func readLeafRowsExcludingRecord(path string, recordID int64) ([]string, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 
 	rows := []string{}
+	managed := true
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
 	for scanner.Scan() {
@@ -578,11 +582,13 @@ func readLeafRowsExcludingRecord(path string, recordID int64) ([]string, error) 
 		}
 		parts := strings.Split(line, "\t")
 		if len(parts) != 5 {
-			continue
+			managed = false
+			break
 		}
 		id, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
 		if err != nil {
-			continue
+			managed = false
+			break
 		}
 		if id == recordID {
 			continue
@@ -590,9 +596,12 @@ func readLeafRowsExcludingRecord(path string, recordID int64) ([]string, error) 
 		rows = append(rows, line)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return rows, nil
+	if !managed {
+		return nil, false, nil
+	}
+	return rows, true, nil
 }
 
 func appendTopicChunkStatus(raw string, p topicChunkStatusParams) (string, error) {
@@ -672,14 +681,14 @@ func (s *SemanticChunkingService) failAndPersist(
 func validateCanonicalLine(line Line) error {
 	fs := strings.TrimSpace(line.FontSize)
 	if fs == "" {
-		return errors.New("font_size is empty")
+		return errors.New("(MID_26042446) font_size is empty")
 	}
 	n, err := strconv.ParseFloat(fs, 64)
 	if err != nil || n <= 0 {
-		return fmt.Errorf("invalid font_size: %q", line.FontSize)
+		return fmt.Errorf("(MID_26042441) invalid font_size: %q", line.FontSize)
 	}
 	if !coordinatePattern.MatchString(strings.TrimSpace(line.Coordinate)) {
-		return fmt.Errorf("invalid coordinate: %q", line.Coordinate)
+		return fmt.Errorf("(MID_26042442) invalid coordinate: %q", line.Coordinate)
 	}
 	return nil
 }
@@ -851,7 +860,7 @@ func loadTopicChunkModelFromEnv() (modelRef string, modelPath string, cfg struct
 		modelRef = strings.TrimSpace(os.Getenv("SEMANTIC_CHUNKING_MODEL_NAME"))
 	}
 	if modelRef == "" {
-		return "", "", structureModelConfig{}, errors.New("missing TOPIC_CHUNK_MODEL_NAME")
+		return "", "", structureModelConfig{}, errors.New("(MID_26042447) missing TOPIC_CHUNK_MODEL_NAME")
 	}
 
 	modelPath, err = resolveModelsFilePath("TOPIC_CHUNK_MODELS_FILE")
@@ -933,7 +942,7 @@ func loadTopicChunkPromptFromEnv() (promptText string, promptRef string, promptP
 		}
 		text := strings.TrimSpace(string(bs))
 		if text == "" {
-			return "", promptRef, candidate, errors.New("prompt file is empty")
+			return "", promptRef, candidate, errors.New("(MID_26042445) prompt file is empty")
 		}
 		return text, promptRef, candidate, nil
 	}
@@ -944,7 +953,7 @@ func loadTopicChunkPromptFromEnv() (promptText string, promptRef string, promptP
 	if lastErr == nil {
 		lastErr = os.ErrNotExist
 	}
-	return "", promptRef, "", fmt.Errorf("prompt file not found: %w", lastErr)
+	return "", promptRef, "", fmt.Errorf("(MID_26042443) prompt file not found: %w", lastErr)
 }
 
 const defaultTopicChunkPrompt = `You extract semantic topics from line-file blocks.

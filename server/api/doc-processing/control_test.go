@@ -8,12 +8,20 @@ import (
 )
 
 type fakeProcessor struct {
-	name   string
-	calls  *[]string
-	retErr error
+	name    string
+	logName string
+	calls   *[]string
+	retErr  error
 }
 
 func (f fakeProcessor) Name() string { return f.name }
+
+func (f fakeProcessor) LogName() string {
+	if f.logName != "" {
+		return f.logName
+	}
+	return f.name
+}
 
 func (f fakeProcessor) HandleEvent(_ context.Context, _ []byte) error {
 	if f.calls != nil {
@@ -88,5 +96,12 @@ func TestControlService_HandleJetStreamEvent_DoesNotFailWhenEventInsertFails(t *
 	err := svc.HandleJetStreamEvent(context.Background(), DefaultEventSubject, []byte(`{"record_id":"1"}`))
 	if err != nil {
 		t.Fatalf("HandleJetStreamEvent() error = %v, want nil", err)
+	}
+}
+
+func TestProcessorLogName_PrefersMethodSpecificLogName(t *testing.T) {
+	p := fakeProcessor{name: "chunking", logName: "topic_chunking"}
+	if got := processorLogName(p); got != "topic_chunking" {
+		t.Fatalf("processorLogName=%q, want topic_chunking", got)
 	}
 }

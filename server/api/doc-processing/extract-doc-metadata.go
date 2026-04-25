@@ -45,7 +45,7 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 		logger = loggerutil.CreateDefaultLogger("MID_26041830")
 	}
 	promptText, promptRef, promptPath, promptErr := loadDocMetaPromptFromEnv()
-	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
+	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_LLM_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
 	applyStructureModelConfigToExtractor(client, modelCfg)
 	return &ExtractDocMetadataProcessor{
 		Store:        store,
@@ -69,7 +69,7 @@ func (p *ExtractDocMetadataProcessor) Name() string { return "extract_doc_metada
 func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
-		return fmt.Errorf("failed parsing event payload: %w", err)
+		return fmt.Errorf("(MID_26042410) failed parsing event payload: %w", err)
 	}
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		p.Logger.Info("doc metadata event skipped", "record_id", evt.RecordID, "type", evt.Type, "status", evt.Status)
@@ -104,9 +104,9 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 	fi, err := os.Stat(inputPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return p.failAndPersist(ctx, rec, fmt.Errorf("input file not exist: %s", inputPath))
+			return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042411) input file not exist: %s", inputPath))
 		}
-		return p.failAndPersist(ctx, rec, fmt.Errorf("stat input file: %w", err))
+		return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042412) stat input file: %w", err))
 	}
 	if fi.Size() == 0 {
 		return p.failAndPersist(ctx, rec, errors.New("input file empty"))
@@ -129,7 +129,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 	var out docMetadataExtractionOutput
 	for i := 0; i < 10; i++ {
 		if p.PromptErr != nil {
-			return p.failAndPersist(ctx, rec, fmt.Errorf("load prompt file %q failed: %w", p.PromptRef, p.PromptErr))
+			return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042413) load prompt file %q failed: %w", p.PromptRef, p.PromptErr))
 		}
 
 		inputText := buildInputText(linesByPage, lastPage)
@@ -139,7 +139,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 			InputText:  inputText,
 		})
 		if extractErr != nil {
-			return p.failAndPersist(ctx, rec, fmt.Errorf("extract metadata via llm: %w, model name:%s, prompt file:%s", extractErr, p.ModelName, p.PromptRef))
+			return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042414) extract metadata via llm: %w, model name:%s, prompt file:%s", extractErr, p.ModelName, p.PromptRef))
 		}
 		out = parseDocMetadataOutput(parsed)
 		if !out.NeedMorePages || maxPage == 0 || lastPage >= maxPage {
@@ -153,7 +153,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 
 	statusRaw, statusErr := appendDocMetaStatus(rec.StatusRaw, start, time.Since(start).Milliseconds(), nil)
 	if statusErr != nil {
-		return fmt.Errorf("append status: %w", statusErr)
+		return fmt.Errorf("(MID_26042415) append status: %w", statusErr)
 	}
 
 	upd := DocMetadataUpdate{
@@ -166,7 +166,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		ErrorMsg:    nil,
 	}
 	if err := p.Store.UpdateInputMetadata(ctx, rec.ID, upd); err != nil {
-		return fmt.Errorf("update kb.inputs metadata: %w", err)
+		return fmt.Errorf("(MID_26042416) update kb.inputs metadata: %w", err)
 	}
 
 	p.Logger.Info("doc metadata extracted",
@@ -279,14 +279,14 @@ func loadDocMetaPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 		text := strings.TrimSpace(string(bs))
 		if text == "" {
-			return "", promptRef, candidate, fmt.Errorf("prompt file is empty")
+			return "", promptRef, candidate, fmt.Errorf("(MID_26042417) prompt file is empty")
 		}
 		return text, promptRef, candidate, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no candidate path available")
 	}
-	return "", promptRef, "", fmt.Errorf("prompt file not found: %w", lastErr)
+	return "", promptRef, "", fmt.Errorf("(MID_26042418) prompt file not found: %w", lastErr)
 }
 
 func readLineFile(path string) (map[int][]string, int, error) {
@@ -334,14 +334,14 @@ func parsePageNumber(line string) int {
 func parsePositiveIntField(raw string) (int, error) {
 	v := strings.TrimSpace(raw)
 	if v == "" {
-		return 0, fmt.Errorf("empty integer field")
+		return 0, fmt.Errorf("(MID_26042408) empty integer field")
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
 		return 0, err
 	}
 	if n < 1 {
-		return 0, fmt.Errorf("value must be >= 1")
+		return 0, fmt.Errorf("(MID_26042409) value must be >= 1")
 	}
 	return n, nil
 }

@@ -5,6 +5,7 @@ export type ParseState = 'all' | 'pending' | 'parsed_success' | 'parsed_failed';
 export type KbInputRecord = {
 	id: number;
 	name?: string;
+	parser_name?: string;
 	type: string;
 	title?: string;
 	doc_no?: string;
@@ -41,6 +42,15 @@ export type ListKbInputsParams = {
 	endTime: string;
 	page: number;
 	pageSize: number;
+	recordId?: string;
+	name?: string;
+	title?: string;
+	docNo?: string;
+	parserName?: string;
+	operation?: string;
+	procStatus?: string;
+	modifyStartTime?: string;
+	modifyEndTime?: string;
 };
 
 export type ListKbInputsResponse = {
@@ -55,9 +65,18 @@ function buildQuery(params: ListKbInputsParams): string {
 	const query = new URLSearchParams();
 	query.set('doc_type', params.docType);
 	query.set('parse_state', params.parseState);
+	if (params.recordId?.trim()) query.set('record_id', params.recordId.trim());
+	if (params.name?.trim()) query.set('name', params.name.trim());
+	if (params.title?.trim()) query.set('title', params.title.trim());
+	if (params.docNo?.trim()) query.set('doc_no', params.docNo.trim());
 	if (params.fileName.trim()) query.set('file_name', params.fileName.trim());
+	if (params.parserName?.trim()) query.set('parser_name', params.parserName.trim());
+	if (params.operation?.trim()) query.set('operation', params.operation.trim());
+	if (params.procStatus?.trim()) query.set('proc_status', params.procStatus.trim());
 	if (params.startTime.trim()) query.set('start_time', params.startTime.trim());
 	if (params.endTime.trim()) query.set('end_time', params.endTime.trim());
+	if (params.modifyStartTime?.trim()) query.set('modify_start_time', params.modifyStartTime.trim());
+	if (params.modifyEndTime?.trim()) query.set('modify_end_time', params.modifyEndTime.trim());
 	query.set('page', String(params.page));
 	query.set('page_size', String(params.pageSize));
 	return query.toString();

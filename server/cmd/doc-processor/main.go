@@ -96,7 +96,7 @@ func main() {
 	}
 	llmClient := newLLMClient()
 	metricsLLMClient := newLLMClient()
-	structureLLMClient := newLLMClient()
+	// structureLLMClient := newLLMClient()
 	topicChunkLLMClient := newLLMClient()
 
 	inputStore := docprocessing.DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
@@ -121,7 +121,7 @@ func main() {
 		EventStore: docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
 		Now:        time.Now,
 		Processors: []docprocessing.Processor{
-			docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
+			// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
 			docprocessing.NewStaticAnalyzerProcessor(inputStore, logger),
 			docprocessing.NewChunkingProcessor(inputStore, chunkSvc, logger),
 			docprocessing.NewExtractDocMetadataProcessor(inputStore, llmClient, logger),

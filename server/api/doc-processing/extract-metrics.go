@@ -84,13 +84,13 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
-		return fmt.Errorf("parse event payload: %w", err)
+		return fmt.Errorf("(MID_26042457) parse event payload: %w", err)
 	}
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
 	if p.PromptErr != nil {
-		return fmt.Errorf("load metrics prompt %q: %w", p.PromptRef, p.PromptErr)
+		return fmt.Errorf("(MID_26042458) load metrics prompt %q: %w", p.PromptRef, p.PromptErr)
 	}
 
 	rec, err := p.InputStore.GetInputRecord(ctx, evt.RecordID)
@@ -99,7 +99,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 			p.Logger.Error("kb.inputs record not found", "record_id", evt.RecordID)
 			return nil
 		}
-		return fmt.Errorf("load kb.inputs record %d: %w", evt.RecordID, err)
+		return fmt.Errorf("(MID_26042459) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
 	if p.ModelErr != nil {
 		p.persistMetricsStatus(ctx, rec, start, p.ModelErr)
@@ -112,7 +112,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return nil
 	}
 	if len(chunkFiles) == 0 {
-		err := fmt.Errorf("no chunk files found for record_id=%d", evt.RecordID)
+		err := fmt.Errorf("(MID_26042460) no chunk files found for record_id=%d", evt.RecordID)
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -136,13 +136,13 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	for _, chunkPath := range chunkFiles {
 		lines, err := readRegularLinesFromChunk(chunkPath)
 		if err != nil {
-			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("read chunk file %s: %w", chunkPath, err))
+			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) read chunk file %s: %w", chunkPath, err))
 			return nil
 		}
 		allLines = append(allLines, lines...)
 	}
 	if len(allLines) == 0 {
-		err := fmt.Errorf("no regular lines found in chunk files for record_id=%d", evt.RecordID)
+		err := fmt.Errorf("(MID_26042462) no regular lines found in chunk files for record_id=%d", evt.RecordID)
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -182,10 +182,10 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 
 func (p *MetricsProcessor) listChunkFiles(recordID int64) ([]string, error) {
 	if strings.TrimSpace(p.ChunkDir) == "" {
-		return nil, errors.New("missing ARTIFACT_DIR")
+		return nil, errors.New("(MID_26042463) missing ARTIFACT_DIR")
 	}
 	if recordID <= 0 {
-		return nil, fmt.Errorf("invalid record_id: %d", recordID)
+		return nil, fmt.Errorf("(MID_26042464) invalid record_id: %d", recordID)
 	}
 	groupID := recordID / 1000
 	dir := filepath.Join(p.ChunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
@@ -335,7 +335,7 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 		InputText:  userPrompt,
 	})
 	if err != nil {
-		return metricExtractionResult{}, fmt.Errorf("extract metrics via llm: %w", err)
+		return metricExtractionResult{}, fmt.Errorf("(MID_26042451) extract metrics via llm: %w", err)
 	}
 
 	language := strings.TrimSpace(asString(payload["language"]))
@@ -345,7 +345,7 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 
 	metricsRaw, ok := payload["metrics"].([]any)
 	if !ok {
-		return metricExtractionResult{}, fmt.Errorf("llm output field 'metrics' must be an array")
+		return metricExtractionResult{}, fmt.Errorf("(MID_26042452) llm output field 'metrics' must be an array")
 	}
 	uncertainRaw, _ := payload["uncertain_metrics"].([]any)
 
@@ -567,39 +567,55 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		promptRef = "default_metric_prompt.txt"
 	}
 
-	paths := []string{promptRef}
-	paths = append(paths,
-		filepath.Join("server", "cmd", "doc-processor", promptRef),
-		filepath.Join("server", "cmd", "doc-processor", "prompts", promptRef),
-		filepath.Join("python", "extract_metrics", "prompts", promptRef),
-		filepath.Join("prompts", promptRef),
-	)
+	paths := make([]string, 0, 8)
+	addCandidate := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		for _, existing := range paths {
+			if existing == p {
+				return
+			}
+		}
+		paths = append(paths, p)
+	}
+
 	if filepath.IsAbs(promptRef) {
-		paths = []string{promptRef}
+		addCandidate(promptRef)
+	} else {
+		addCandidate(promptRef)
+		if promptDir := strings.TrimSpace(os.Getenv("PROMPT_DIR")); promptDir != "" {
+			addCandidate(filepath.Join(promptDir, promptRef))
+		}
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", promptRef))
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", "prompts", promptRef))
+		addCandidate(filepath.Join("python", "extract_metrics", "prompts", promptRef))
+		addCandidate(filepath.Join("prompts", promptRef))
 	}
 
 	var lastErr error
 	for _, candidate := range paths {
 		bs, err := os.ReadFile(candidate)
 		if err != nil {
-			lastErr = err
+			lastErr = fmt.Errorf("(MID_26042465) failed reading file. Path:%s, error:%w", candidate, err)
 			continue
 		}
 		text := strings.TrimSpace(string(bs))
 		if text == "" {
-			return "", promptRef, candidate, fmt.Errorf("prompt file is empty")
+			return "", promptRef, candidate, fmt.Errorf("(MID_26042453) prompt file is empty")
 		}
 		return text, promptRef, candidate, nil
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no candidate path available")
+		lastErr = fmt.Errorf("(MID_26042454) no candidate path available")
 	}
-	return "", promptRef, "", fmt.Errorf("prompt file not found: %w", lastErr)
+	return "", promptRef, "", fmt.Errorf("(MID_26042455) prompt file not found: %w", lastErr)
 }
 
 func (s MetricsSQLStore) ensureMetricsTable(ctx context.Context) error {
 	if s.DB == nil {
-		return fmt.Errorf("db is nil")
+		return fmt.Errorf("(MID_26042456) db is nil")
 	}
 	const ddl = `
 CREATE SCHEMA IF NOT EXISTS kb;

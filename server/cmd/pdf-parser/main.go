@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,7 +23,13 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/databaseutil"
 	"github.com/chendingplano/shared/go/api/loggerutil"
+	"github.com/fsnotify/fsnotify"
 	"github.com/joho/godotenv"
+)
+
+const (
+	stagingWatchDebounce    = 500 * time.Millisecond
+	stagingFallbackInterval = 10 * time.Second
 )
 
 func main() {
@@ -109,19 +116,51 @@ func main() {
 }
 
 func runStagingThread(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, stagingDir, backupDir, homeDir string, publisher *stageEventPublisher) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
 	logger.Info("staging thread started",
-		"poll_interval", "10s",
+		"fallback_interval", stagingFallbackInterval.String(),
+		"watch_debounce", stagingWatchDebounce.String(),
 		"staging_dir", stagingDir,
 		"backup_dir", backupDir,
 		"home_dir", homeDir,
 	)
 
-	if err := processStagingOnce(ctx, logger, db, stagingDir, backupDir, homeDir, publisher); err != nil {
+	process := func() error {
+		return processStagingOnce(ctx, logger, db, stagingDir, backupDir, homeDir, publisher)
+	}
+
+	if err := process(); err != nil {
 		logger.Error("initial staging cycle failed", "error", err)
 	}
+
+	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+		logger.Error("ensure staging watch dir failed; falling back to polling", "staging_dir", stagingDir, "error", err)
+		runStagingFallbackLoop(ctx, logger, stagingFallbackInterval, process)
+		return
+	}
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		logger.Error("create staging watcher failed; falling back to polling", "staging_dir", stagingDir, "error", err)
+		runStagingFallbackLoop(ctx, logger, stagingFallbackInterval, process)
+		return
+	}
+	defer watcher.Close()
+
+	if err := watcher.Add(stagingDir); err != nil {
+		logger.Error("watch staging dir failed; falling back to polling", "staging_dir", stagingDir, "error", err)
+		runStagingFallbackLoop(ctx, logger, stagingFallbackInterval, process)
+		return
+	}
+
+	ticker := time.NewTicker(stagingFallbackInterval)
+	defer ticker.Stop()
+
+	runStagingEventLoop(ctx, logger, watcher.Events, watcher.Errors, ticker.C, stagingWatchDebounce, process)
+}
+
+func runStagingFallbackLoop(ctx context.Context, logger ApiTypes.JimoLogger, interval time.Duration, process func() error) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -129,11 +168,85 @@ func runStagingThread(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.D
 			logger.Info("staging thread stopping", "reason", ctx.Err())
 			return
 		case <-ticker.C:
-			if err := processStagingOnce(ctx, logger, db, stagingDir, backupDir, homeDir, publisher); err != nil {
-				logger.Error("staging cycle failed", "error", err)
+			if err := process(); err != nil {
+				logger.Error("staging fallback cycle failed", "error", err)
 			}
 		}
 	}
+}
+
+func runStagingEventLoop(
+	ctx context.Context,
+	logger ApiTypes.JimoLogger,
+	events <-chan fsnotify.Event,
+	watchErrors <-chan error,
+	fallback <-chan time.Time,
+	debounce time.Duration,
+	process func() error,
+) {
+	var debounceTimer *time.Timer
+	var debounceC <-chan time.Time
+	defer func() {
+		if debounceTimer != nil {
+			debounceTimer.Stop()
+		}
+	}()
+
+	runCycle := func(reason string) {
+		if err := process(); err != nil {
+			logger.Error("staging cycle failed", "reason", reason, "error", err)
+		}
+	}
+
+	scheduleCycle := func() {
+		if debounce <= 0 {
+			runCycle("watch_event")
+			return
+		}
+		if debounceTimer != nil {
+			if !debounceTimer.Stop() {
+				select {
+				case <-debounceTimer.C:
+				default:
+				}
+			}
+		}
+		debounceTimer = time.NewTimer(debounce)
+		debounceC = debounceTimer.C
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("staging thread stopping", "reason", ctx.Err())
+			return
+		case event, ok := <-events:
+			if !ok {
+				logger.Warn("staging watcher event channel closed")
+				return
+			}
+			if shouldProcessStagingEvent(event) {
+				logger.Info("staging directory changed", "event", event.String(), "path", event.Name)
+				scheduleCycle()
+			}
+		case err, ok := <-watchErrors:
+			if !ok {
+				logger.Warn("staging watcher error channel closed")
+				return
+			}
+			logger.Error("staging watcher error", "error", err)
+		case <-fallback:
+			runCycle("fallback_rescan")
+		case <-debounceC:
+			debounceTimer = nil
+			debounceC = nil
+			runCycle("watch_event")
+		}
+	}
+}
+
+func shouldProcessStagingEvent(event fsnotify.Event) bool {
+	return event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) != 0
 }
 
 func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, stagingDir, backupDir, homeDir string, publisher *stageEventPublisher) error {
@@ -173,41 +286,45 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 			logger.Error("failed to allocate backup path", "source", srcPath, "error", err)
 			continue
 		}
-		homePath, shouldCopyHome, err := resolveRepoPathForStagedFile(srcPath, homeDir, entry.Name())
-		if err != nil {
-			logger.Error("failed to resolve home path", "source", srcPath, "error", err)
-			continue
-		}
 
 		if err := copyFile(srcPath, backupPath); err != nil {
 			logger.Error("failed to backup staged file", "source", srcPath, "backup", backupPath, "error", err)
 			continue
 		}
-		if shouldCopyHome {
-			if err := copyFile(srcPath, homePath); err != nil {
-				logger.Error("failed to copy staged file to home", "source", srcPath, "home", homePath, "error", err)
-				continue
-			}
-		} else {
-			logger.Info("skipped copy to home; same-name file with identical md5 already exists",
+
+		recordID, updated, err := upsertStagedInputRecord(ctx, db, entry.Name(), srcPath)
+		if err != nil {
+			logger.Error("failed to insert kb.inputs row for staged file",
+				"source", srcPath,
+				"backup", backupPath,
+				"error", err,
+			)
+			continue
+		}
+
+		repoDir, err := repoDirForRecord(homeDir, recordID)
+		if err != nil {
+			logger.Error("failed to resolve record repo dir", "source", srcPath, "record_id", recordID, "error", err)
+			continue
+		}
+		homePath := filepath.Join(repoDir, entry.Name())
+		if err := copyFile(srcPath, homePath); err != nil {
+			logger.Error("failed to copy staged file to home", "source", srcPath, "home", homePath, "error", err)
+			continue
+		}
+		if err := finalizeStagedInputRecord(ctx, db, recordID, homePath, backupPath); err != nil {
+			logger.Error("failed to finalize kb.inputs row for staged file",
 				"source", srcPath,
 				"home", homePath,
+				"backup", backupPath,
+				"record_id", recordID,
+				"error", err,
 			)
+			continue
 		}
 
 		if err := os.Remove(srcPath); err != nil {
 			logger.Error("failed to remove staged source file", "source", srcPath, "error", err)
-			continue
-		}
-
-		recordID, updated, err := upsertStagedInputRecord(ctx, db, filepath.Base(homePath), srcPath, homePath, backupPath)
-		if err != nil {
-			logger.Error("failed to insert kb.inputs row for staged file",
-				"source", srcPath,
-				"home", homePath,
-				"backup", backupPath,
-				"error", err,
-			)
 			continue
 		}
 
@@ -264,8 +381,16 @@ func resolveRepoPathForStagedFile(srcPath, homeDir, fileName string) (homePath s
 	return uniqueHomePath, true, nil
 }
 
-func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, srcPath, homePath, backupPath string) (int64, bool, error) {
-	md5Hex, err := fileMD5Hex(homePath)
+func repoDirForRecord(homeDir string, recordID int64) (string, error) {
+	if recordID <= 0 {
+		return "", fmt.Errorf("invalid record id: %d", recordID)
+	}
+	groupID := recordID / 1000
+	return filepath.Join(homeDir, "Artifacts", strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10)), nil
+}
+
+func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, srcPath string) (int64, bool, error) {
+	md5Hex, err := fileMD5Hex(srcPath)
 	if err != nil {
 		return 0, false, fmt.Errorf("calculate file md5 failed: %w", err)
 	}
@@ -274,17 +399,15 @@ func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, 
 	const updateStmt = `
 UPDATE kb.inputs
 SET staging_filename = $1,
-    file_name = $2,
-    backup_filename = $3,
-    md5 = $4,
+    md5 = $2,
     modify_time = NOW()
 WHERE type = 'pdf'
-  AND file_name = $5
+  AND file_name = $3
   AND COALESCE(backup_filename, '') = ''
 RETURNING id`
 
 	var existingID int64
-	if err := db.QueryRowContext(ctx, updateStmt, staging_filename, homePath, backupPath, md5Hex, srcPath).Scan(&existingID); err == nil {
+	if err := db.QueryRowContext(ctx, updateStmt, staging_filename, md5Hex, srcPath).Scan(&existingID); err == nil {
 		return existingID, true, nil
 	} else if err != sql.ErrNoRows {
 		return 0, false, fmt.Errorf("update existing staged kb.inputs failed: %w", err)
@@ -307,16 +430,29 @@ INSERT INTO kb.inputs (
     $1,
     'pdf',
     $2,
-    $3,
-    $4::jsonb,
-    $5
+    '',
+    $3::jsonb,
+    $4
 )
 RETURNING id`
 	var insertedID int64
-	if err := db.QueryRowContext(ctx, insertStmt, staging_filename, homePath, backupPath, string(status), md5Hex).Scan(&insertedID); err != nil {
+	if err := db.QueryRowContext(ctx, insertStmt, staging_filename, srcPath, string(status), md5Hex).Scan(&insertedID); err != nil {
 		return 0, false, fmt.Errorf("insert kb.inputs failed: %w", err)
 	}
 	return insertedID, false, nil
+}
+
+func finalizeStagedInputRecord(ctx context.Context, db *sql.DB, recordID int64, homePath, backupPath string) error {
+	const stmt = `
+UPDATE kb.inputs
+SET file_name = $1,
+    backup_filename = $2,
+    modify_time = NOW()
+WHERE id = $3`
+	if _, err := db.ExecContext(ctx, stmt, homePath, backupPath, recordID); err != nil {
+		return fmt.Errorf("update finalized kb.inputs path failed: %w", err)
+	}
+	return nil
 }
 
 func fileMD5Hex(path string) (string, error) {

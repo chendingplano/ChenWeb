@@ -35,6 +35,7 @@
 		icon: any; // lucide component
 		group?: string;
 		children?: NavChild[];
+		href?: string;
 	};
 
 	let {
@@ -130,17 +131,7 @@
 				{ id: 'personal-email',    label: 'Email' }
 			]
 		},
-		{
-			id: 'knowledge', label: 'Knowledge Base', icon: BookOpenIcon, group: 'Workspace',
-			children: [
-				{ id: 'kb-search',  label: 'Search' },
-				{ id: 'kb-import',  label: 'Documents' },
-				{ id: 'kb-input-details', label: 'Document Details' },
-				{ id: 'kb-metrics', label: 'Metrics' },
-				{ id: 'kb-doc-structure', label: 'Document Structure' },
-				{ id: 'kb-chunks', label: 'Chunks' }
-			]
-		},
+		{ id: 'knowledge', label: 'Knowledge Base', icon: BookOpenIcon, group: 'Workspace', href: '/home3/knowledge' },
 		{
 			id: 'tools', label: 'Tools', icon: WorkflowIcon, group: 'Workspace',
 			children: [
@@ -151,8 +142,9 @@
 		{
 			id: 'agent-platform', label: 'Agent Platform', icon: BotIcon, group: 'Workspace',
 			children: [
-				{ id: 'ap-board',  label: 'Board' },
-				{ id: 'ap-agents', label: 'Agents' }
+				{ id: 'ap-board',    label: 'Board' },
+				{ id: 'ap-agents',   label: 'Agents' },
+				{ id: 'ap-projects', label: 'Projects' }
 			]
 		},
 		{
@@ -181,6 +173,10 @@
 	}
 
 	function selectItem(item: NavItem, child?: NavChild) {
+		if (!child && item.href) {
+			window.open(`${item.href}?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
+			return;
+		}
 		if (child?.id === 'kb-metrics') {
 			window.open(`/home3/metrics?dark=${darkMode ? '1' : '0'}`, '_blank', 'noopener');
 			return;

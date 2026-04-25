@@ -82,6 +82,16 @@ func TestParseLineFileGeneratedEvent(t *testing.T) {
 		}
 	})
 
+	t.Run("uses line_file_filename when present", func(t *testing.T) {
+		evt, err := ParseLineFileGeneratedEvent([]byte(`{"record_id":"42","line_file_filename":"/tmp/out/actual_opendata.txt"}`))
+		if err != nil {
+			t.Fatalf("ParseLineFileGeneratedEvent: %v", err)
+		}
+		if evt.Filename != "/tmp/out/actual_opendata.txt" {
+			t.Fatalf("Filename=%q, want /tmp/out/actual_opendata.txt", evt.Filename)
+		}
+	})
+
 	t.Run("invalid record id returns error", func(t *testing.T) {
 		_, err := ParseLineFileGeneratedEvent([]byte(`{"record_id":"abc"}`))
 		if err == nil {
@@ -228,5 +238,35 @@ func TestExtractDocMetadata_FallbackAuthorsFromMainDraftingPersons(t *testing.T)
 	}
 	if len(st.updateReq.Authors) != 2 || st.updateReq.Authors[0] != "Alice" || st.updateReq.Authors[1] != "Bob" {
 		t.Fatalf("fallback authors=%v", st.updateReq.Authors)
+	}
+}
+
+func TestNewExtractDocMetadataProcessor_UsesConfiguredLLMName(t *testing.T) {
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[docmeta-test]
+model_name = "gpt-5.4-mini"
+base_url = "https://api.openai.com"
+api_key = "test-key"
+timeout_sec = 30
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
+	t.Setenv("EXTRACT_DOCMETA_LLM_NAME", "docmeta-test")
+	t.Setenv("EXTRACT_DOCMETA_MODELS_FILE", modelsPath)
+	t.Setenv("EXTRACT_DOCMETA_PROMPT", "")
+
+	svc := NewExtractDocMetadataProcessor(&fakeDocMetadataStore{}, &fakeJSONExtractor{}, nil)
+	if svc.ModelErr != nil {
+		t.Fatalf("ModelErr=%v", svc.ModelErr)
+	}
+	if svc.ModelRef != "docmeta-test" {
+		t.Fatalf("ModelRef=%q, want docmeta-test", svc.ModelRef)
+	}
+	if svc.ModelName != "gpt-5.4-mini" {
+		t.Fatalf("ModelName=%q, want gpt-5.4-mini", svc.ModelName)
 	}
 }

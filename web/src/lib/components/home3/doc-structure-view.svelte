@@ -34,7 +34,7 @@
 	let errorMsg = $state('');
 
 	let docPage = $state(1);
-	let pdfZoom = $state(1);
+	let pdfZoom = $state(0.5);
 	let pdfLoading = $state(false);
 	let pdfError = $state('');
 	let pdfNumPages = $state(0);
@@ -133,6 +133,7 @@
 		currentInput = null;
 		selectedLineKey = null;
 		docPage = 1;
+		pdfZoom = 0.5;
 		pdfError = '';
 		correctedFile = '';
 		if (pdfDoc?.destroy) {
@@ -247,9 +248,9 @@
 			for (const ln of pageLines) {
 				if (!Array.isArray(ln.coords) || ln.coords.length < 4) continue;
 				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
-				const left = Math.min(vx1, vx2);
-				const top = Math.max(0, Math.min(vy1, vy2) - 4);
-				const width = Math.abs(vx2 - vx1);
+					const left = Math.max(0, Math.min(vx1, vx2) - 5);
+					const top = Math.max(0, Math.min(vy1, vy2) - 4);
+					const width = Math.abs(vx2 - vx1) + 10;
 				const height = Math.abs(vy2 - vy1) + 8;
 				if (width < 1 || height < 1) continue;
 				const mark = document.createElement('div');

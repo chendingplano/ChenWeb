@@ -268,7 +268,7 @@ def _resolve_input_file(
     #    the file to the home/repo directory and recorded it in file_name).
     file_name = (rec.get("file_name") or "").strip()
     if file_name and os.path.isfile(file_name):
-        return file_name, True
+        return file_name, False
 
     # 3. File not in staging or file_name path.  Check the record's result
     #    directory — look for result_filename first, then fall back to the
@@ -282,9 +282,15 @@ def _resolve_input_file(
         names_to_try.append(os.path.basename(file_name))
 
     for repo_dir in repo_dirs:
-        record_dir = os.path.join(repo_dir, "pdf_parser", str(rec_id))
+        group_id = rec_id // 1000
+        record_dir = os.path.join(repo_dir, "Artifacts", str(group_id), str(rec_id))
         for name in names_to_try:
             candidate = os.path.join(record_dir, name)
+            if os.path.isfile(candidate):
+                return candidate, False
+        legacy_record_dir = os.path.join(repo_dir, "pdf_parser", str(rec_id))
+        for name in names_to_try:
+            candidate = os.path.join(legacy_record_dir, name)
             if os.path.isfile(candidate):
                 return candidate, False
 
@@ -353,12 +359,12 @@ def _process_record(
     try:
         backend = get_backend(parser_name, backend_cache)
 
-        repo_dir = choose_repo_dir(repo_dirs)
-        record_dir = os.path.join(repo_dir, "pdf_parser", str(rec_id))
-        Path(record_dir).mkdir(parents=True, exist_ok=True)
-
         # If the file came from staging, copy it to the result dir and backup
         if from_staging:
+            repo_dir = choose_repo_dir(repo_dirs)
+            group_id = rec_id // 1000
+            record_dir = os.path.join(repo_dir, "Artifacts", str(group_id), str(rec_id))
+            Path(record_dir).mkdir(parents=True, exist_ok=True)
             repo_pdf_path = os.path.join(record_dir, os.path.basename(source_file))
             if source_file != repo_pdf_path:
                 copy_file(source_file, repo_pdf_path)
@@ -367,8 +373,9 @@ def _process_record(
             backup_path = unique_path(backup_dir, os.path.basename(source_file))
             copy_file(source_file, backup_path)
         else:
-            # Re-processing: file is already in the result dir
+            # Re-processing or Go-staged input: file is already in its repo dir.
             repo_pdf_path = source_file
+            record_dir = str(Path(repo_pdf_path).parent)
             backup_path = (rec.get("backup_filename") or "").strip()
 
         # Initial "parsing" status

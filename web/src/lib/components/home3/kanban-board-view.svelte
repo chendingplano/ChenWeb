@@ -36,8 +36,7 @@
 		if (slug) apStore.startRealtime(slug);
 	});
 
-	// Issues grouped by status, sorted by board_order ASC then issue_number ASC.
-	// STATUS_ORDER provides the five visible columns in left-to-right order.
+	// Issues grouped by status, filtered by active project, sorted by board_order ASC then issue_number ASC.
 	const grouped = $derived(() => {
 		const out: Record<IssueStatus, Issue[]> = {
 			backlog: [],
@@ -47,7 +46,9 @@
 			done: [],
 			canceled: []
 		};
+		const filterID = apStore.activeProjectFilterID;
 		for (const i of apStore.issues) {
+			if (filterID !== null && i.project_id !== filterID) continue;
 			if (out[i.status]) out[i.status].push(i);
 		}
 		for (const s of STATUS_ORDER) {
@@ -140,6 +141,23 @@
 			</button>
 		</div>
 	</header>
+
+	{#if apStore.projects.length > 0}
+		<div class="filter-pills">
+			<button
+				class="pill"
+				class:pill-active={apStore.activeProjectFilterID === null}
+				onclick={() => apStore.setProjectFilter(null)}
+			>All</button>
+			{#each apStore.projects as proj (proj.id)}
+				<button
+					class="pill"
+					class:pill-active={apStore.activeProjectFilterID === proj.id}
+					onclick={() => apStore.setProjectFilter(proj.id)}
+				>{proj.name}</button>
+			{/each}
+		</div>
+	{/if}
 
 	{#if showCreate}
 		<form
@@ -314,6 +332,30 @@
 	}
 	.close:hover {
 		background: rgba(0, 0, 0, 0.1);
+	}
+	.filter-pills {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+	.pill {
+		background: transparent;
+		border: 1px solid var(--input-border);
+		color: var(--subtle);
+		padding: 4px 12px;
+		border-radius: 20px;
+		font-size: 12px;
+		cursor: pointer;
+		transition: background 120ms, color 120ms;
+	}
+	.pill:hover {
+		background: var(--input-bg);
+		color: var(--heading);
+	}
+	.pill-active {
+		background: var(--btn);
+		border-color: var(--btn);
+		color: white;
 	}
 	.error {
 		background: rgba(248, 113, 113, 0.12);

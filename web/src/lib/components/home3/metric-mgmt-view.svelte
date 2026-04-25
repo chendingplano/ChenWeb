@@ -94,7 +94,7 @@
 	let pdfLoading = $state(false);
 	let pdfError = $state('');
 	let pdfNumPages = $state(0);
-	let pdfZoom = $state(1);
+	let pdfZoom = $state(0.5);
 	let pdfRenderedPages = $state<number[]>([]);
 	let pdfLastRenderWidth = 0;
 	let pdfResizeRaf = 0;
@@ -105,8 +105,18 @@
 
 	// Search dialog
 	let searchOpen = $state(false);
+	let searchRecordId = $state('');
+	let searchTitle = $state('');
+	let searchDocNo = $state('');
 	let searchFileName = $state('');
 	let searchDocType = $state('all');
+	let searchParserName = $state('');
+	let searchOperation = $state('');
+	let searchProcStatus = $state('all');
+	let searchCreateStart = $state('');
+	let searchCreateEnd = $state('');
+	let searchModifyStart = $state('');
+	let searchModifyEnd = $state('');
 	let searchResults = $state<KbInputRecord[]>([]);
 	let searchLoading = $state(false);
 	let searchError = $state('');
@@ -124,6 +134,7 @@
 		'markdown',
 		'typst'
 	];
+	const procStatusOptions = ['all', 'success', 'fail'];
 
 	type NormalizedSpan = { page_number: number; line_number: number };
 
@@ -390,7 +401,18 @@
 		searchSelected = null;
 		searchResults = [];
 		searchError = '';
+		searchRecordId = '';
+		searchTitle = '';
+		searchDocNo = '';
 		searchFileName = '';
+		searchDocType = 'all';
+		searchParserName = '';
+		searchOperation = '';
+		searchProcStatus = 'all';
+		searchCreateStart = '';
+		searchCreateEnd = '';
+		searchModifyStart = '';
+		searchModifyEnd = '';
 	}
 	function closeSearch() {
 		searchOpen = false;
@@ -401,11 +423,19 @@
 		searchError = '';
 		try {
 			const res = await listKbInputs({
+				recordId: searchRecordId,
 				docType: searchDocType,
 				parseState: 'all',
+				title: searchTitle,
+				docNo: searchDocNo,
 				fileName: searchFileName,
-				startTime: '',
-				endTime: '',
+				parserName: searchParserName,
+				operation: searchOperation,
+				procStatus: searchProcStatus === 'all' ? '' : searchProcStatus,
+				startTime: searchCreateStart,
+				endTime: searchCreateEnd,
+				modifyStartTime: searchModifyStart,
+				modifyEndTime: searchModifyEnd,
 				page: 1,
 				pageSize: 50
 			});
@@ -423,6 +453,38 @@
 	function confirmSearchSelection() {
 		const r = searchResults.find((x) => x.id === searchSelected);
 		if (r) pickSearchResult(r);
+	}
+
+	function recordDisplayName(r: KbInputRecord): string {
+		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
+	}
+
+	function recordDisplayDocNo(r: KbInputRecord): string {
+		return r.doc_no?.trim() || '—';
+	}
+
+	function searchStatusText(record: KbInputRecord): { operation: string; procStatus: string } {
+		const items = record.status ?? [];
+		const desiredOperation = searchOperation.trim().toLowerCase();
+		const matched =
+			desiredOperation !== ''
+				? [...items]
+						.reverse()
+						.find((item) => (item?.operation ?? '').trim().toLowerCase() === desiredOperation)
+				: [...items].reverse().find((item) => item != null);
+
+		if (!matched) {
+			return { operation: '—', procStatus: 'pending' };
+		}
+
+		return {
+			operation: matched.operation?.trim() || '—',
+			procStatus:
+				matched.proc_status?.trim() ||
+				matched['proc-status']?.trim() ||
+				matched.status?.trim() ||
+				'pending'
+		};
 	}
 
 	function metricNameOf(m: KbMetricRecord): string {
@@ -512,22 +574,32 @@
 			if (!overlay || !viewport) continue;
 			overlay.innerHTML = '';
 			const lines = selectedLinesByPage.get(pageNo) ?? [];
-			for (const ln of lines) {
-				if (!Array.isArray(ln.coords) || ln.coords.length < 4) continue;
+			const rects = lines.flatMap((ln) => {
+				if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
 				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
-				const left = Math.min(vx1, vx2);
-				const rawTop = Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX;
-				const top = Math.max(0, rawTop);
-				const width = Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX;
-				const height = Math.abs(vy2 - vy1) + (Math.min(vy1, vy2) - top);
-				if (width < 1 || height < 1) continue;
+				return [
+					{
+						lineNumber: ln.line_number,
+						left: Math.min(vx1, vx2),
+						top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
+						rawBottom: Math.max(vy1, vy2),
+						width: Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX
+					}
+				];
+			});
+			for (let i = 0; i < rects.length; i += 1) {
+				const rect = rects[i];
+				const nextRect = rects[i + 1];
+				const bottom = nextRect ? nextRect.top : rect.rawBottom;
+				const height = Math.max(0, bottom - rect.top);
+				if (rect.width < 1 || height < 1) continue;
 				const mark = document.createElement('div');
 				mark.className = 'pdf-highlight';
-				mark.style.left = `${left}px`;
-				mark.style.top = `${top}px`;
-				mark.style.width = `${width}px`;
+				mark.style.left = `${rect.left}px`;
+				mark.style.top = `${rect.top}px`;
+				mark.style.width = `${rect.width}px`;
 				mark.style.height = `${height}px`;
-				mark.title = `line ${ln.line_number}`;
+				mark.title = `line ${rect.lineNumber}`;
 				overlay.appendChild(mark);
 			}
 		}
@@ -1134,13 +1206,7 @@
 {#if searchOpen}
 	<div
 		class="dialog-overlay"
-		onclick={closeSearch}
-		onkeydown={(e) => {
-			if (e.key === 'Escape') closeSearch();
-		}}
-		role="button"
-		tabindex="0"
-		aria-label="Close search"
+		aria-hidden="true"
 	>
 		<div
 			class="dialog"
@@ -1155,44 +1221,184 @@
 				<div>
 					<div class="dialog-eyebrow">kb.inputs</div>
 					<h2 class="dialog-title">Find a record</h2>
+					<p class="dialog-subtitle">
+						Search by record metadata, parser pipeline state, and create or modify windows.
+					</p>
 				</div>
-				<button class="dialog-close" onclick={closeSearch} aria-label="Close">×</button>
 			</div>
 
+			<div class="dialog-scroll">
 			<div class="dialog-controls">
-				<label class="field flex-2">
-					<span class="field-label">File name contains</span>
-					<input
-						type="text"
-						bind:value={searchFileName}
-						placeholder="report, spec, drawing…"
-						onkeydown={(e) => {
-							if (e.key === 'Enter') runSearch();
-						}}
-					/>
-				</label>
-				<label class="field flex-1">
-					<span class="field-label">Type</span>
-					<select bind:value={searchDocType}>
-						{#each docTypeOptions as o}
-							<option value={o}>{o}</option>
-						{/each}
-					</select>
-				</label>
-				<button class="btn btn-primary" onclick={runSearch} disabled={searchLoading}>
-					{searchLoading ? 'Searching…' : 'Search'}
-				</button>
+				<div class="dialog-section">
+					<div class="dialog-section-head">
+						<div class="dialog-section-title">Identity</div>
+						<div class="dialog-section-copy">Match the record itself and its document metadata.</div>
+					</div>
+					<div class="dialog-grid dialog-grid-primary">
+						<label class="field dialog-field">
+							<span class="field-label">Record ID</span>
+							<input type="text" bind:value={searchRecordId} placeholder="84" onkeydown={(e) => {
+								if (e.key === 'Enter') runSearch();
+							}} />
+						</label>
+						<label class="field dialog-field">
+							<span class="field-label">Type</span>
+							<select bind:value={searchDocType}>
+								{#each docTypeOptions as o}
+									<option value={o}>{o}</option>
+								{/each}
+							</select>
+						</label>
+						<label class="field dialog-field dialog-field-wide">
+							<span class="field-label">Title contains</span>
+							<input
+								type="text"
+								bind:value={searchTitle}
+								placeholder="Input title, standard title…"
+								onkeydown={(e) => {
+									if (e.key === 'Enter') runSearch();
+								}}
+							/>
+						</label>
+						<label class="field dialog-field">
+							<span class="field-label">Doc No contains</span>
+							<input
+								type="text"
+								bind:value={searchDocNo}
+								placeholder="GB/T 123…"
+								onkeydown={(e) => {
+									if (e.key === 'Enter') runSearch();
+								}}
+							/>
+						</label>
+						<label class="field dialog-field dialog-field-wide">
+							<span class="field-label">File name contains</span>
+							<input
+								type="text"
+								bind:value={searchFileName}
+								placeholder="report, spec, drawing…"
+								onkeydown={(e) => {
+									if (e.key === 'Enter') runSearch();
+								}}
+							/>
+						</label>
+					</div>
+				</div>
+
+				<div class="dialog-section">
+					<div class="dialog-section-head">
+						<div class="dialog-section-title">Processing Status</div>
+						<div class="dialog-section-copy">
+							Filter the pipeline entry by parser, operation, and final `proc_status`.
+						</div>
+					</div>
+					<div class="dialog-grid">
+						<label class="field dialog-field">
+							<span class="field-label">Parser name</span>
+							<input
+								type="text"
+								bind:value={searchParserName}
+								placeholder="mineru, pdf-parser…"
+								onkeydown={(e) => {
+									if (e.key === 'Enter') runSearch();
+								}}
+							/>
+						</label>
+						<label class="field dialog-field">
+							<span class="field-label">Operation</span>
+							<input
+								type="text"
+								bind:value={searchOperation}
+								placeholder="extract_metadata"
+								onkeydown={(e) => {
+									if (e.key === 'Enter') runSearch();
+								}}
+							/>
+						</label>
+						<label class="field dialog-field">
+							<span class="field-label">Proc status</span>
+							<select bind:value={searchProcStatus}>
+								{#each procStatusOptions as option}
+									<option value={option}>{option}</option>
+								{/each}
+							</select>
+						</label>
+					</div>
+				</div>
+
+				<div class="dialog-section">
+					<div class="dialog-section-head">
+						<div class="dialog-section-title">Time Windows</div>
+						<div class="dialog-section-copy">
+							Search by create and modify timestamps using local date-time ranges.
+						</div>
+					</div>
+					<div class="dialog-grid dialog-grid-time">
+						<label class="field dialog-field">
+							<span class="field-label">Create time from</span>
+							<input type="datetime-local" bind:value={searchCreateStart} />
+						</label>
+						<label class="field dialog-field">
+							<span class="field-label">Create time to</span>
+							<input type="datetime-local" bind:value={searchCreateEnd} />
+						</label>
+						<label class="field dialog-field">
+							<span class="field-label">Modify time from</span>
+							<input type="datetime-local" bind:value={searchModifyStart} />
+						</label>
+						<label class="field dialog-field">
+							<span class="field-label">Modify time to</span>
+							<input type="datetime-local" bind:value={searchModifyEnd} />
+						</label>
+					</div>
+				</div>
+
+				<div class="dialog-toolbar">
+					<div class="dialog-toolbar-copy">
+						<div class="dialog-toolbar-title">Search Scope</div>
+						<div class="dialog-toolbar-text">
+							Leave fields empty to broaden the search. Results are capped to the newest 50 records.
+						</div>
+					</div>
+					<div class="dialog-toolbar-actions">
+						<button
+							class="btn btn-ghost"
+							onclick={() => {
+								searchRecordId = '';
+								searchTitle = '';
+								searchDocNo = '';
+								searchFileName = '';
+								searchDocType = 'all';
+								searchParserName = '';
+								searchOperation = '';
+								searchProcStatus = 'all';
+								searchCreateStart = '';
+								searchCreateEnd = '';
+								searchModifyStart = '';
+								searchModifyEnd = '';
+								searchResults = [];
+								searchSelected = null;
+								searchError = '';
+							}}>Reset</button>
+						<button class="btn btn-primary dialog-search-btn" onclick={runSearch} disabled={searchLoading}>
+							{searchLoading ? 'Searching…' : 'Search'}
+						</button>
+					</div>
+				</div>
 			</div>
 
 			{#if searchError}
-				<div class="error" style="margin:0 28px;">{searchError}</div>
+				<div class="error dialog-error">{searchError}</div>
 			{/if}
 
 			<div class="dialog-results">
 				{#if searchResults.length === 0 && !searchLoading}
 					<div class="dialog-empty">
 						<div class="empty-glyph">⌕</div>
-						<div>Run a search to see records.</div>
+						<div class="dialog-empty-title">Run a search to see records.</div>
+						<div class="dialog-empty-copy">
+							Use any combination of metadata, parser, and time filters to narrow the archive.
+						</div>
 					</div>
 				{:else}
 					<table class="result-table">
@@ -1200,12 +1406,17 @@
 							<tr>
 								<th>ID</th>
 								<th>Type</th>
+								<th>Title / Doc No</th>
 								<th>File name</th>
+								<th>Parser</th>
+								<th>Status</th>
 								<th>Created</th>
+								<th>Updated</th>
 							</tr>
 						</thead>
 						<tbody>
 							{#each searchResults as r (r.id)}
+								{@const statusSummary = searchStatusText(r)}
 								<tr
 									class:selected={searchSelected === r.id}
 									onclick={() => (searchSelected = r.id)}
@@ -1213,13 +1424,33 @@
 								>
 									<td class="mono">{r.id}</td>
 									<td>{r.type}</td>
+									<td>
+										<div class="result-primary">{recordDisplayName(r)}</div>
+										<div class="result-secondary mono">{recordDisplayDocNo(r)}</div>
+									</td>
 									<td class="ellipsis">{r.file_name ?? '—'}</td>
+									<td class="mono muted">{r.parser_name || '—'}</td>
+									<td>
+										<div class="status-stack">
+											<span class="status-chip mono">{statusSummary.operation}</span>
+											<span
+												class="status-pill"
+												class:status-pill-success={statusSummary.procStatus.toLowerCase() === 'success'}
+												class:status-pill-fail={statusSummary.procStatus.toLowerCase() === 'fail' ||
+													statusSummary.procStatus.toLowerCase() === 'failed'}
+											>
+												{statusSummary.procStatus}
+											</span>
+										</div>
+									</td>
 									<td class="mono muted">{(r.create_time ?? '').slice(0, 19).replace('T', ' ')}</td>
+									<td class="mono muted">{(r.modify_time ?? '').slice(0, 19).replace('T', ' ')}</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				{/if}
+			</div>
 			</div>
 
 			<div class="dialog-foot">
@@ -1227,7 +1458,7 @@
 				<div class="dialog-foot-buttons">
 					<button class="btn btn-ghost" onclick={closeSearch}>Cancel</button>
 					<button
-						class="btn btn-primary"
+						class="btn btn-primary dialog-select-btn"
 						onclick={confirmSearchSelection}
 						disabled={searchSelected == null}>Select</button
 					>
@@ -2270,12 +2501,29 @@
 	}
 	.dialog {
 		width: 100%;
-		max-width: 880px;
-		max-height: 86vh;
+		max-width: 1210px;
+		max-height: min(90vh, 980px);
 		display: flex;
 		flex-direction: column;
 		border: 1px solid;
-		box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+		border-radius: 24px;
+		overflow: auto;
+		background:
+			linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 22%),
+			var(--panel-bg);
+		box-shadow:
+			0 30px 80px rgba(0, 0, 0, 0.55),
+			0 0 0 1px rgba(212, 162, 76, 0.08);
+		resize: both;
+		min-width: 920px;
+		min-height: 720px;
+	}
+	.dialog-scroll {
+		flex: 1 1 auto;
+		min-height: 0;
+		overflow: auto;
+		display: flex;
+		flex-direction: column;
 	}
 	.dialog-head {
 		padding: 24px 28px 16px;
@@ -2283,6 +2531,7 @@
 		justify-content: space-between;
 		align-items: flex-start;
 		border-bottom: 1px solid var(--ink-line-soft);
+		background: linear-gradient(180deg, rgba(212, 162, 76, 0.09), rgba(212, 162, 76, 0));
 	}
 	.dialog-eyebrow {
 		font-family: var(--font-mono);
@@ -2299,46 +2548,172 @@
 		margin: 0;
 		color: var(--text-primary);
 	}
-	.dialog-close {
-		all: unset;
-		font-size: 28px;
-		line-height: 1;
-		color: var(--text-muted);
-		cursor: pointer;
-		padding: 4px 10px;
-		transition: color 150ms;
-	}
-	.dialog-close:hover {
-		color: var(--crimson);
+	.dialog-subtitle {
+		margin: 8px 0 0;
+		max-width: 640px;
+		font-size: 13px;
+		line-height: 1.45;
+		color: var(--text-secondary);
 	}
 
 	.dialog-controls {
 		display: flex;
+		flex-direction: column;
 		gap: 12px;
-		align-items: flex-end;
-		padding: 18px 28px;
+		padding: 16px 28px 12px;
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0.03));
+		flex: 0 0 auto;
 	}
-	.flex-1 {
-		flex: 1;
+	.dialog-section {
+		border: 1px solid rgba(212, 162, 76, 0.16);
+		border-radius: 20px;
+		padding: 14px;
+		background:
+			linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+			#171c26;
 	}
-	.flex-2 {
-		flex: 2;
+	.dialog-section-head {
+		display: flex;
+		justify-content: space-between;
+		gap: 16px;
+		margin-bottom: 10px;
+		align-items: baseline;
+	}
+	.dialog-section-title {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: var(--brass);
+	}
+	.dialog-section-copy {
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+	.dialog-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 10px;
+	}
+	.dialog-grid-time {
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+	}
+	.dialog-grid-primary {
+		grid-template-columns: 0.8fr 0.8fr 1.2fr 1fr 1.4fr;
+	}
+	.dialog-field {
+		margin: 0;
+		padding: 10px 10px 8px;
+		border-radius: 16px;
+		border: 1px solid rgba(255, 255, 255, 0.06);
+		background: #1a202b;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+	}
+	.dialog-field-wide {
+		grid-column: span 2;
+	}
+	.dialog-field :global(input),
+	.dialog-field :global(select) {
+		background: #2a3140;
+		border-color: rgba(255, 255, 255, 0.08);
+		color: #f3eedf;
+	}
+	.dialog-field :global(input:focus),
+	.dialog-field :global(select:focus) {
+		border-color: #d4a24c;
+		box-shadow:
+			0 0 0 1px rgba(212, 162, 76, 0.28),
+			0 0 0 4px rgba(212, 162, 76, 0.08);
+	}
+	.dialog-toolbar {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
+		padding: 0 2px;
+	}
+	.dialog-toolbar-title {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		margin-bottom: 4px;
+	}
+	.dialog-toolbar-text {
+		font-size: 13px;
+		color: var(--text-secondary);
+	}
+	.dialog-toolbar-actions {
+		display: flex;
+		gap: 10px;
+		align-items: center;
+	}
+	.dialog-search-btn {
+		min-width: 140px;
+		background: #d4a24c !important;
+		color: #15110a !important;
+		border: 1px solid #e0b768 !important;
+		box-shadow: 0 8px 20px rgba(212, 162, 76, 0.22);
+		opacity: 1 !important;
+	}
+	.dialog-search-btn:hover:not(:disabled) {
+		background: #e0b768 !important;
+		color: #15110a !important;
+	}
+	.dialog-search-btn:disabled {
+		background: rgba(212, 162, 76, 0.35) !important;
+		color: rgba(21, 17, 10, 0.7) !important;
+	}
+	.dialog-select-btn {
+		min-width: 132px;
+		background: #d4a24c !important;
+		color: #15110a !important;
+		border: 1px solid #e0b768 !important;
+		opacity: 1 !important;
+	}
+	.dialog-select-btn:hover:not(:disabled) {
+		background: #e0b768 !important;
+		color: #15110a !important;
+	}
+	.dialog-select-btn:disabled {
+		background: #4a4f5c !important;
+		color: #aeb4c0 !important;
+		border: 1px solid #636b79 !important;
+		box-shadow: none !important;
+		cursor: not-allowed !important;
+		opacity: 1 !important;
+	}
+	.dialog-error {
+		margin: 0 32px 16px;
 	}
 
 	.dialog-results {
-		flex: 1;
-		overflow-y: auto;
+		flex: 1 1 320px;
 		border-top: 1px solid var(--ink-line-soft);
 		border-bottom: 1px solid var(--ink-line-soft);
-		min-height: 200px;
+		min-height: 360px;
+		background: #121720;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 	}
 	.dialog-empty {
-		padding: 60px 20px;
+		padding: 72px 20px;
 		text-align: center;
 		color: var(--text-muted);
 	}
 	.dialog-empty .empty-glyph {
 		font-size: 48px;
+		color: var(--brass);
+	}
+	.dialog-empty-title {
+		font-size: 18px;
+		color: var(--text-primary);
+		margin-top: 10px;
+	}
+	.dialog-empty-copy {
+		max-width: 420px;
+		margin: 10px auto 0;
+		line-height: 1.6;
 	}
 	.result-table {
 		width: 100%;
@@ -2354,9 +2729,10 @@
 		text-align: left;
 		padding: 12px 16px;
 		border-bottom: 1px solid var(--ink-line);
-		background: var(--panel-bg-alt);
+		background: #181d27;
 		position: sticky;
 		top: 0;
+		z-index: 1;
 	}
 	.result-table tbody tr {
 		border-bottom: 1px solid var(--ink-line-soft);
@@ -2364,17 +2740,18 @@
 		transition: background 120ms;
 	}
 	.result-table tbody tr:hover {
-		background: var(--panel-bg-alt);
+		background: #1d2330;
 	}
 	.result-table tbody tr.selected {
-		background: var(--brass-faint);
+		background: rgba(212, 162, 76, 0.16);
 	}
 	.result-table tbody tr.selected td {
-		color: var(--brass);
+		color: #f4ddb0;
 	}
 	.result-table td {
 		padding: 11px 16px;
 		color: var(--text-primary);
+		vertical-align: top;
 	}
 	.result-table .mono {
 		font-family: var(--font-mono);
@@ -2389,12 +2766,53 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
+	.result-primary {
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+	.result-secondary {
+		margin-top: 4px;
+		color: var(--text-muted);
+	}
+	.status-stack {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 6px;
+	}
+	.status-chip {
+		padding: 2px 8px;
+		border-radius: 999px;
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		background: rgba(255, 255, 255, 0.04);
+		color: #d7cfbb;
+	}
+	.status-pill {
+		padding: 4px 10px;
+		border-radius: 999px;
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		background: rgba(124, 117, 96, 0.16);
+		color: var(--text-secondary);
+	}
+	.status-pill-success {
+		background: rgba(93, 175, 168, 0.16);
+		color: var(--teal);
+	}
+	.status-pill-fail {
+		background: rgba(200, 85, 61, 0.18);
+		color: var(--crimson);
+	}
 
 	.dialog-foot {
-		padding: 16px 28px;
+		padding: 14px 28px 18px;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		flex: 0 0 auto;
+		background: #171c26;
 	}
 	.dialog-foot-hint {
 		font-family: var(--font-mono);
@@ -2405,6 +2823,35 @@
 		display: flex;
 		gap: 10px;
 	}
+	.dialog-scroll::-webkit-scrollbar,
+	.dialog::-webkit-scrollbar {
+		width: 12px;
+		height: 12px;
+	}
+	.dialog-scroll::-webkit-scrollbar-thumb,
+	.dialog::-webkit-scrollbar-thumb {
+		background: rgba(212, 162, 76, 0.34);
+		border-radius: 999px;
+		border: 2px solid transparent;
+		background-clip: padding-box;
+	}
+	.dialog-scroll::-webkit-scrollbar-track,
+	.dialog::-webkit-scrollbar-track {
+		background: rgba(255, 255, 255, 0.03);
+	}
+
+	@media (max-width: 1100px) {
+		.dialog-grid,
+		.dialog-grid-primary {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.dialog-grid-time {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.dialog-field-wide {
+			grid-column: span 2;
+		}
+	}
 
 	@media (max-width: 1440px) {
 		.pdf-layout {
@@ -2413,6 +2860,46 @@
 		.metadata-panel {
 			position: static;
 			max-height: none;
+		}
+	}
+	@media (max-width: 820px) {
+		.dialog-overlay {
+			padding: 12px;
+		}
+		.dialog {
+			max-height: 94vh;
+			border-radius: 18px;
+			min-width: 0;
+			min-height: 0;
+			resize: none;
+		}
+		.dialog-head,
+		.dialog-controls,
+		.dialog-foot {
+			padding-left: 18px;
+			padding-right: 18px;
+		}
+		.dialog-grid,
+		.dialog-grid-primary {
+			grid-template-columns: 1fr;
+		}
+		.dialog-grid-time {
+			grid-template-columns: 1fr;
+		}
+		.dialog-field-wide {
+			grid-column: auto;
+		}
+		.dialog-section-head,
+		.dialog-toolbar,
+		.dialog-foot {
+			flex-direction: column;
+			align-items: stretch;
+		}
+		.dialog-foot-buttons {
+			justify-content: stretch;
+		}
+		.dialog-foot-buttons :global(button) {
+			flex: 1;
 		}
 	}
 </style>
