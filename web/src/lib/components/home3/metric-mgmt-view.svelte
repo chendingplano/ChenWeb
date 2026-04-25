@@ -9,6 +9,7 @@
 		type KbMetricRecord,
 		type RawLine
 	} from '$lib/services/kbService';
+	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -36,6 +37,7 @@
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbMetricRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
+	let highlightSelectionVersion = $state(0);
 	let loading = $state(false);
 	let errorMsg = $state('');
 	let lastSelectedMetricDebug = $state('none');
@@ -269,6 +271,44 @@
 			}));
 	});
 
+	function renderMetricHighlights(
+		pageNo: number,
+		viewport: PdfPageViewport,
+		overlay: HTMLDivElement
+	) {
+		const HIGHLIGHT_EXPAND_TOP_PX = 10;
+		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
+		const lines = selectedLinesByPage.get(pageNo) ?? [];
+		const rects = lines.flatMap((ln) => {
+			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
+			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
+			return [
+				{
+					lineNumber: ln.line_number,
+					left: Math.min(vx1, vx2),
+					top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
+					rawBottom: Math.max(vy1, vy2),
+					width: Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX
+				}
+			];
+		});
+		for (let i = 0; i < rects.length; i += 1) {
+			const rect = rects[i];
+			const nextRect = rects[i + 1];
+			const bottom = nextRect ? nextRect.top : rect.rawBottom;
+			const height = Math.max(0, bottom - rect.top);
+			if (rect.width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${rect.left}px`;
+			mark.style.top = `${rect.top}px`;
+			mark.style.width = `${rect.width}px`;
+			mark.style.height = `${height}px`;
+			mark.title = `line ${rect.lineNumber}`;
+			overlay.appendChild(mark);
+		}
+	}
+
 	function formatMaybeDate(value?: string): string {
 		if (!value) return '—';
 		return value.replace('T', ' ').slice(0, 19);
@@ -322,6 +362,7 @@
 		loading = true;
 		metrics = [];
 		selectedMetricId = null;
+		highlightSelectionVersion = 0;
 		rawLines = [];
 		rawError = '';
 		rawLoading = false;
@@ -359,6 +400,7 @@
 		console.log('metric selected, id:' + m.id);
 		lastSelectedMetricDebug = `${m.id} @ ${new Date().toLocaleTimeString()}`;
 		selectedMetricId = m.id;
+		highlightSelectionVersion += 1;
 		const first = normalizeMetricSpans(m)[0];
 		if (!first) return;
 
@@ -965,54 +1007,17 @@
 							</div>
 						</div>
 					{:else}
-						<div class="doc-page-bar">
-							<button
-								class="page-btn"
-								onclick={() => goToPage(docPage - 1)}
-								disabled={docPage <= 1}
-								aria-label="Previous page">‹</button
-							>
-							<div class="page-bar-label">
-								<span class="page-bar-folio">page</span>
-								<input
-									type="number"
-									min="1"
-									max={Math.max(1, pdfNumPages)}
-									class="page-input"
-									bind:value={docPage}
-									onchange={() => goToPage(docPage)}
-								/>
-								<span class="page-total">/ {Math.max(1, pdfNumPages)}</span>
-							</div>
-							<button
-								class="page-btn"
-								onclick={() => goToPage(docPage + 1)}
-								disabled={docPage >= Math.max(1, pdfNumPages)}
-								aria-label="Next page">›</button
-							>
-							<button
-								class="page-btn small"
-								onclick={zoomOut}
-								title="Zoom out"
-								aria-label="Zoom out">−</button
-							>
-							<span class="zoom-label">{zoomLabel()}</span>
-							<button class="page-btn small" onclick={zoomIn} title="Zoom in" aria-label="Zoom in"
-								>+</button
-							>
-							<div class="page-bar-spacer"></div>
-							<a
-								class="page-btn small"
-								href={fileUrl}
-								target="_blank"
-								rel="noopener"
-								title="Open in new tab">↗</a
-							>
-						</div>
-
 						{#if isPdf}
-							<div class="pdf-stage" bind:this={pdfStageEl}>
-								<div class="pdf-layout">
+							<SharedPdfViewer
+								inputId={currentInput.id}
+								{fileUrl}
+								bind:page={docPage}
+								bind:zoom={pdfZoom}
+								bind:numPages={pdfNumPages}
+								highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
+								renderHighlights={renderMetricHighlights}
+							>
+								<div slot="sidebar">
 									<aside class="metadata-panel">
 										<div class="metadata-title">Metadata</div>
 										<div class="metadata-section">
@@ -1084,43 +1089,8 @@
 											{/if}
 										</div>
 									</aside>
-
-									<div class="pdf-canvas-host" bind:this={pdfCanvasHostEl}>
-										<div class="pdf-pages">
-											{#each pdfRenderedPages as pageNo (pageNo)}
-												<div class="pdf-page" id={`pdf-page-${pageNo}`} data-page={pageNo}>
-													<div class="pdf-page-head">
-														<span class="pdf-page-label">page</span>
-														<span class="pdf-page-num">{String(pageNo).padStart(3, '0')}</span>
-													</div>
-													<div class="pdf-canvas-shell">
-														<canvas class="pdf-canvas" id={`pdf-canvas-${pageNo}`}></canvas>
-														<div class="pdf-overlay" id={`pdf-overlay-${pageNo}`}></div>
-													</div>
-												</div>
-											{/each}
-										</div>
-									</div>
 								</div>
-								{#if pdfLoading}
-									<div class="pdf-status"><span class="dot-loop"></span>Rendering page…</div>
-								{/if}
-								{#if pdfError}
-									<div class="doc-error" style="padding-top:20px;">
-										<div class="doc-error-title">⚠ Cannot render this PDF</div>
-										<div class="doc-error-msg">
-											{pdfError}<br />
-											<a class="doc-error-link" href={fileUrl} target="_blank" rel="noopener"
-												>Open in a new tab</a
-											>
-											&nbsp;or switch to
-											<button class="inline-tab-btn" onclick={() => setMode('source')}
-												>Source&nbsp;Lines</button
-											>.
-										</div>
-									</div>
-								{/if}
-							</div>
+							</SharedPdfViewer>
 						{:else}
 							<iframe
 								class="doc-frame"

@@ -7,6 +7,7 @@
 		type KbTopicChunkRecord,
 		type RawLine
 	} from '$lib/services/kbService';
+	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -29,6 +30,7 @@
 	let currentInput = $state<KbInputRecord | null>(null);
 	let chunks = $state<KbTopicChunkRecord[]>([]);
 	let selectedSeqNo = $state<number | null>(null);
+	let highlightSelectionVersion = $state(0);
 	let loading = $state(false);
 	let errorMsg = $state('');
 
@@ -108,6 +110,75 @@
 
 	let selectedBBoxes = $derived.by(() => selectedChunk?.bounding_boxes ?? []);
 
+	function renderChunkHighlights(
+		pageNo: number,
+		viewport: PdfPageViewport,
+		overlay: HTMLDivElement
+	) {
+		const HIGHLIGHT_EXPAND_TOP_PX = 10;
+		const HIGHLIGHT_EXPAND_LEFT_PX = 5;
+		const HIGHLIGHT_EXPAND_RIGHT_PX = 5;
+		const lines = selectedLinesByPage.get(pageNo) ?? [];
+		const rects = lines.flatMap((ln) => {
+			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
+			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
+			return [
+				{
+					lineNumber: ln.line_number,
+					left: Math.max(0, Math.min(vx1, vx2) - HIGHLIGHT_EXPAND_LEFT_PX),
+					right: Math.max(vx1, vx2) + HIGHLIGHT_EXPAND_RIGHT_PX,
+					top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
+					bottom: Math.max(vy1, vy2)
+				}
+			];
+		});
+
+		const mergedRects: Array<{
+			firstLineNumber: number;
+			lastLineNumber: number;
+			left: number;
+			right: number;
+			top: number;
+			bottom: number;
+		}> = [];
+		for (const rect of rects) {
+			const prev = mergedRects[mergedRects.length - 1];
+			const isAdjacent = !!prev && rect.lineNumber === prev.lastLineNumber + 1;
+			if (isAdjacent && prev) {
+				prev.lastLineNumber = rect.lineNumber;
+				prev.left = Math.min(prev.left, rect.left);
+				prev.right = Math.max(prev.right, rect.right);
+				prev.bottom = Math.max(prev.bottom, rect.bottom);
+				continue;
+			}
+			mergedRects.push({
+				firstLineNumber: rect.lineNumber,
+				lastLineNumber: rect.lineNumber,
+				left: rect.left,
+				right: rect.right,
+				top: rect.top,
+				bottom: rect.bottom
+			});
+		}
+
+		for (const rect of mergedRects) {
+			const width = Math.max(0, rect.right - rect.left);
+			const height = Math.max(0, rect.bottom - rect.top);
+			if (width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${rect.left}px`;
+			mark.style.top = `${rect.top}px`;
+			mark.style.width = `${width}px`;
+			mark.style.height = `${height}px`;
+			mark.title =
+				rect.firstLineNumber === rect.lastLineNumber
+					? `line ${rect.firstLineNumber}`
+					: `lines ${rect.firstLineNumber}-${rect.lastLineNumber}`;
+			overlay.appendChild(mark);
+		}
+	}
+
 	async function doRetrieve() {
 		errorMsg = '';
 		const id = Number(recordIdInput.trim());
@@ -118,6 +189,7 @@
 		loading = true;
 		chunks = [];
 		selectedSeqNo = null;
+		highlightSelectionVersion = 0;
 		currentInput = null;
 		docPage = 1;
 		pdfError = '';
@@ -148,6 +220,7 @@
 
 	async function selectChunk(chunk: KbTopicChunkRecord) {
 		selectedSeqNo = chunk.seqno;
+		highlightSelectionVersion += 1;
 		const first = (chunk.source_line_spans ?? [])[0];
 		if (first && first.page_number > 0) {
 			docPage = first.page_number;
@@ -545,30 +618,16 @@
 				<div class="doc-empty">Retrieve a record to display document and chunk highlights.</div>
 			{:else}
 				{#if isPdf}
-					<div class="doc-page-bar">
-						<button class="page-btn" onclick={() => goToPage(docPage - 1)} disabled={docPage <= 1}>‹</button>
-						<input
-							type="number"
-							min="1"
-							max={Math.max(1, pdfNumPages)}
-							class="page-input"
-							bind:value={docPage}
-							onchange={() => goToPage(docPage)}
-						/>
-						<span>/ {Math.max(1, pdfNumPages)}</span>
-						<button
-							class="page-btn"
-							onclick={() => goToPage(docPage + 1)}
-							disabled={docPage >= Math.max(1, pdfNumPages)}>›</button
-						>
-						<button class="page-btn" onclick={zoomOut}>−</button>
-						<span>{zoomLabel()}</span>
-						<button class="page-btn" onclick={zoomIn}>+</button>
-						<a class="page-btn" href={fileUrl} target="_blank" rel="noopener">↗</a>
-					</div>
-
-					<div class="pdf-stage" bind:this={pdfStageEl}>
-						<div class="pdf-layout">
+					<SharedPdfViewer
+						inputId={currentInput.id}
+						{fileUrl}
+						bind:page={docPage}
+						bind:zoom={pdfZoom}
+						bind:numPages={pdfNumPages}
+						highlightVersion={`${selectedSeqNo ?? 0}:${highlightSelectionVersion}`}
+						renderHighlights={renderChunkHighlights}
+					>
+						<div slot="sidebar">
 							<aside class="meta-panel">
 								<div class="meta-title">Chunk Bounding Boxes</div>
 								{#if selectedBBoxes.length === 0}
@@ -582,19 +641,8 @@
 									{/each}
 								{/if}
 							</aside>
-
-							<div class="pdf-canvas-col" bind:this={pdfCanvasHostEl}>
-								{#if pdfLoading}<div class="pdf-status">Rendering PDF…</div>{/if}
-								{#if pdfError}<div class="error">{pdfError}</div>{/if}
-								{#each pdfRenderedPages as pageNo (pageNo)}
-									<div class="pdf-page" id={`pdf-page-${pageNo}`}>
-										<canvas id={`pdf-canvas-${pageNo}`}></canvas>
-										<div class="pdf-overlay" id={`pdf-overlay-${pageNo}`}></div>
-									</div>
-								{/each}
-							</div>
 						</div>
-					</div>
+					</SharedPdfViewer>
 				{:else}
 					<iframe class="doc-iframe" src={fileUrl} title="Document viewer"></iframe>
 				{/if}

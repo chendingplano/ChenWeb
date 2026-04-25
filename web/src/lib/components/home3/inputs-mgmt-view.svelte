@@ -8,6 +8,7 @@
 		type KbInputRecord,
 		type RawLine
 	} from '$lib/services/kbService';
+	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -1565,54 +1566,17 @@
 							</div>
 						</div>
 					{:else}
-						<div class="doc-page-bar">
-							<button
-								class="page-btn"
-								onclick={() => goToPage(docPage - 1)}
-								disabled={docPage <= 1}
-								aria-label="Previous page">‹</button
-							>
-							<div class="page-bar-label">
-								<span class="page-bar-folio">page</span>
-								<input
-									type="number"
-									min="1"
-									max={Math.max(1, pdfNumPages)}
-									class="page-input"
-									bind:value={docPage}
-									onchange={() => goToPage(docPage)}
-								/>
-								<span class="page-total">/ {Math.max(1, pdfNumPages)}</span>
-							</div>
-							<button
-								class="page-btn"
-								onclick={() => goToPage(docPage + 1)}
-								disabled={docPage >= Math.max(1, pdfNumPages)}
-								aria-label="Next page">›</button
-							>
-							<button
-								class="page-btn small"
-								onclick={zoomOut}
-								title="Zoom out"
-								aria-label="Zoom out">−</button
-							>
-							<span class="zoom-label">{zoomLabel()}</span>
-							<button class="page-btn small" onclick={zoomIn} title="Zoom in" aria-label="Zoom in"
-								>+</button
-							>
-							<div class="page-bar-spacer"></div>
-							<a
-								class="page-btn small"
-								href={fileUrl}
-								target="_blank"
-								rel="noopener"
-								title="Open in new tab">↗</a
-							>
-						</div>
-
 						{#if isPdf}
-							<div class="pdf-stage" bind:this={pdfStageEl}>
-								<div class="pdf-layout">
+							<SharedPdfViewer
+								inputId={currentInput.id}
+								{fileUrl}
+								bind:page={docPage}
+								bind:zoom={pdfZoom}
+								bind:numPages={pdfNumPages}
+								highlightVersion={`${currentInput.id}:${metadataPanelWidth}`}
+								respectPageRotation={false}
+							>
+								<div slot="sidebar">
 									<aside class="metadata-panel" style={`width:${metadataPanelWidth}px;`}>
 										<div class="metadata-head">
 											<div class="metadata-title">Document</div>
@@ -1773,49 +1737,15 @@
 											</div>
 										</div>
 									</aside>
-									<button
-										type="button"
-										class="metadata-resizer"
-										onmousedown={startMetadataResize}
-										aria-label="Resize document metadata panel"
-									></button>
-
-									<div class="pdf-canvas-host" bind:this={pdfCanvasHostEl}>
-										<div class="pdf-pages">
-											{#each pdfRenderedPages as pageNo (pageNo)}
-												<div class="pdf-page" id={`pdf-page-${pageNo}`} data-page={pageNo}>
-													<div class="pdf-page-head">
-														<span class="pdf-page-label">page</span>
-														<span class="pdf-page-num">{String(pageNo).padStart(3, '0')}</span>
-													</div>
-													<div class="pdf-canvas-shell">
-														<canvas class="pdf-canvas" id={`pdf-canvas-${pageNo}`}></canvas>
-														<div class="pdf-overlay" id={`pdf-overlay-${pageNo}`}></div>
-													</div>
-												</div>
-											{/each}
-										</div>
-									</div>
 								</div>
-								{#if pdfLoading}
-									<div class="pdf-status"><span class="dot-loop"></span>Rendering page…</div>
-								{/if}
-								{#if pdfError}
-									<div class="doc-error" style="padding-top:20px;">
-										<div class="doc-error-title">⚠ Cannot render this PDF</div>
-										<div class="doc-error-msg">
-											{pdfError}<br />
-											<a class="doc-error-link" href={fileUrl} target="_blank" rel="noopener"
-												>Open in a new tab</a
-											>
-											&nbsp;or switch to
-											<button class="inline-tab-btn" onclick={() => setMode('source')}
-												>Source&nbsp;Lines</button
-											>.
-										</div>
-									</div>
-								{/if}
-							</div>
+								<button
+									slot="sidebar-resizer"
+									type="button"
+									class="metadata-resizer"
+									onmousedown={startMetadataResize}
+									aria-label="Resize document metadata panel"
+								></button>
+							</SharedPdfViewer>
 						{:else}
 							<iframe
 								class="doc-frame"
