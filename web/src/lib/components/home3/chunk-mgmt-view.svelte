@@ -524,7 +524,7 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge Base · Vol. IV</div>
+			<div class="eyebrow">Knowledge System· Vol. IV</div>
 			<h1 class="display">Topic Chunks</h1>
 			<div class="subtitle">Review semantic chunk topics and map each chunk back to source PDF regions.</div>
 		</div>

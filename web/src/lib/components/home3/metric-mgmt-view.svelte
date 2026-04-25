@@ -825,7 +825,7 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge Base · Vol. III</div>
+			<div class="eyebrow">Knowledge System · Vol. III</div>
 			<h1 class="display">Metrics&nbsp;<span class="amp">&amp;</span>&nbsp;Provenance</h1>
 			<div class="subtitle">
 				A reading room for extracted metrics — locate, verify, return to source.

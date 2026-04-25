@@ -193,7 +193,7 @@
 >
 	<header class="header">
 		<div class="header-left">
-			<div class="eyebrow">Knowledge Base · Vol. IV</div>
+			<div class="eyebrow">Knowledge System · Vol. IV</div>
 			<h1 class="display">Document Structure</h1>
 			<div class="subtitle">Inspect corrected structure labels and highlight their source region in the PDF.</div>
 		</div>

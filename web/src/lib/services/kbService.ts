@@ -287,3 +287,116 @@ export async function listKbTopicChunks(inputRecordId: number): Promise<ListKbTo
 		'Failed to retrieve topic chunks'
 	);
 }
+
+// ---------- kb.stores ----------
+
+export type KnowledgeStoreStatus = 'active' | 'suspended' | 'inactive' | string;
+export type KnowledgeStoreSyncMode = 'auto' | 'manual' | string;
+
+export type KnowledgeStoreRecord = {
+	id: number;
+	tenant_id?: string;
+	ks_type?: string;
+	ks_name: string;
+	ks_desc?: string;
+	ks_sync_mode?: KnowledgeStoreSyncMode;
+	ks_sources?: string[];
+	status?: KnowledgeStoreStatus;
+	notes?: string;
+	error_msg?: string;
+	public_info?: unknown;
+	private_info?: unknown;
+	create_time?: string;
+	modify_time?: string;
+};
+
+export type ListKnowledgeStoresResponse = {
+	status: boolean;
+	results: KnowledgeStoreRecord[];
+	total?: number;
+};
+
+export type KnowledgeStoreResponse = {
+	status: boolean;
+	record: KnowledgeStoreRecord;
+};
+
+export type CreateKnowledgeStorePayload = {
+	tenant_id?: string | null;
+	ks_type?: string | null;
+	ks_name: string;
+	ks_desc?: string | null;
+	ks_sync_mode?: KnowledgeStoreSyncMode | null;
+	ks_sources?: string[] | null;
+	status?: KnowledgeStoreStatus | null;
+	notes?: string | null;
+	public_info?: unknown;
+	private_info?: unknown;
+};
+
+export type UpdateKnowledgeStorePayload = Partial<CreateKnowledgeStorePayload>;
+
+export async function listKnowledgeStores(): Promise<ListKnowledgeStoresResponse> {
+	return fetchOrThrow<ListKnowledgeStoresResponse>(`${BASE}/stores`, 'Failed to list knowledge stores');
+}
+
+export async function createKnowledgeStore(
+	payload: CreateKnowledgeStorePayload
+): Promise<KnowledgeStoreResponse> {
+	const response = await fetch(`${BASE}/stores`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to create knowledge store (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<KnowledgeStoreResponse>;
+}
+
+export async function updateKnowledgeStore(
+	id: number,
+	payload: UpdateKnowledgeStorePayload
+): Promise<KnowledgeStoreResponse> {
+	const response = await fetch(`${BASE}/stores/${encodeURIComponent(String(id))}`, {
+		method: 'PUT',
+		credentials: 'same-origin',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to update knowledge store (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<KnowledgeStoreResponse>;
+}
+
+export async function deleteKnowledgeStore(id: number): Promise<{ status: boolean }> {
+	const response = await fetch(`${BASE}/stores/${encodeURIComponent(String(id))}`, {
+		method: 'DELETE',
+		credentials: 'same-origin'
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to delete knowledge store (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<{ status: boolean }>;
+}

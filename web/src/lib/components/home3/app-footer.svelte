@@ -29,7 +29,7 @@
 				{ label: 'Agents',         href: '/agents' },
 				{ label: 'Skills',         href: '/skills' },
 				{ label: 'Applications',   href: '/applications' },
-				{ label: 'Knowledge Base', href: '/knowledge' }
+				{ label: 'Knowledge System', href: '/knowledge' }
 			]
 		},
 		{

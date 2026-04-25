@@ -12,6 +12,7 @@
 	import InputsMgmtView from '$lib/components/home3/inputs-mgmt-view.svelte';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import ChunkMgmtView from '$lib/components/home3/chunk-mgmt-view.svelte';
+	import KnowledgeStoreView from '$lib/components/home3/knowledge-store-view.svelte';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -29,7 +30,7 @@
 	};
 
 	const menuItems: KbMenuItem[] = [
-		{ id: 'kb-search', label: 'Search', description: 'Explore indexed knowledge', icon: SearchIcon },
+		{ id: 'kb-search', label: 'Knowledge Stores', description: 'Explore indexed knowledge', icon: SearchIcon },
 		{ id: 'kb-import', label: 'Documents', description: 'Review imported records', icon: FileTextIcon },
 		{ id: 'kb-input-details', label: 'Document Details', description: 'Inspect source inputs', icon: DatabaseIcon },
 		{ id: 'kb-metrics', label: 'Metrics', description: 'Manage extracted metrics', icon: BarChart3Icon },
@@ -43,8 +44,8 @@
 	];
 
 	let darkMode = $derived(page.url.searchParams.get('dark') !== '0');
-	let initialSection = $derived((page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-metrics');
-	let activeSection = $state<KbSectionId>('kb-metrics');
+	let initialSection = $derived((page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search');
+	let activeSection = $state<KbSectionId>('kb-search');
 
 	$effect(() => {
 		if (menuItems.some((item) => item.id === initialSection)) {
@@ -83,7 +84,7 @@
 			</div>
 			<div class="min-w-0">
 				<div class="truncate" style="font-size:14px; font-weight:700; color:{textPrimary};">
-					Knowledge Base
+					Knowledge System
 				</div>
 				<div class="truncate" style="font-size:12px; color:{textMuted};">
 					Documents, metrics, structure
@@ -130,7 +131,7 @@
 			style="background:{contentBg}; border-bottom:1px solid {borderColor};"
 		>
 			<div class="min-w-0">
-				<div class="truncate" style="font-size:13px; color:{textMuted};">Knowledge Base</div>
+				<div class="truncate" style="font-size:13px; color:{textMuted};">Knowledge System</div>
 				<h1 class="truncate" style="font-size:18px; font-weight:700; color:{textPrimary};">
 					{activeItem.label}
 				</h1>
@@ -138,7 +139,9 @@
 		</header>
 
 		<div class="min-h-0 flex-1 overflow-hidden">
-			{#if activeSection === 'kb-import'}
+			{#if activeSection === 'kb-search'}
+				<KnowledgeStoreView {darkMode} />
+			{:else if activeSection === 'kb-import'}
 				<KbImportView {darkMode} />
 			{:else if activeSection === 'kb-input-details'}
 				<InputsMgmtView {darkMode} />
@@ -148,21 +151,6 @@
 				<DocStructureView {darkMode} />
 			{:else if activeSection === 'kb-chunks'}
 				<ChunkMgmtView {darkMode} />
-			{:else}
-				<div class="flex h-full items-center justify-center p-8">
-					<div
-						class="max-w-xl rounded-xl p-8 text-center"
-						style="background:{darkMode ? '#1F2333' : '#FFFFFF'}; border:1px solid {borderColor};"
-					>
-						<SearchIcon class="mx-auto mb-4 h-12 w-12" style="color:{accent}; opacity:0.55;" />
-						<h2 style="font-size:18px; font-weight:700; color:{textPrimary}; margin-bottom:8px;">
-							Search
-						</h2>
-						<p style="font-size:14px; color:{textSecondary}; line-height:1.6;">
-							Content for this section will appear here.
-						</p>
-					</div>
-				</div>
 			{/if}
 		</div>
 	</main>

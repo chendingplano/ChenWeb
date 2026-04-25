@@ -263,6 +263,10 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/cust_request_logs", custreqloghandler.CreateCustRequestLog)
 
 	// Knowledge Base (home3) endpoints
+	apiGroup.GET("/kb/stores", kbhandler.ListKnowledgeStores)
+	apiGroup.POST("/kb/stores", kbhandler.CreateKnowledgeStore)
+	apiGroup.PUT("/kb/stores/:id", kbhandler.UpdateKnowledgeStore)
+	apiGroup.DELETE("/kb/stores/:id", kbhandler.DeleteKnowledgeStore)
 	apiGroup.GET("/kb/inputs", kbhandler.ListInputs)
 	apiGroup.GET("/kb/inputs/:id", kbhandler.GetInput)
 	apiGroup.PUT("/kb/inputs/:id", kbhandler.UpdateInput)

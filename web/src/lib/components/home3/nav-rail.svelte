@@ -131,7 +131,7 @@
 				{ id: 'personal-email',    label: 'Email' }
 			]
 		},
-		{ id: 'knowledge', label: 'Knowledge Base', icon: BookOpenIcon, group: 'Workspace', href: '/home3/knowledge' },
+		{ id: 'knowledge', label: 'Knowledge System', icon: BookOpenIcon, group: 'Workspace', href: '/home3/knowledge' },
 		{
 			id: 'tools', label: 'Tools', icon: WorkflowIcon, group: 'Workspace',
 			children: [

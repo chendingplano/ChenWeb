@@ -178,7 +178,7 @@
 	>
 		<h2 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">Import Inputs</h2>
 		<p style="font-size:14px; color:{textSecondary};">
-			Browse and filter Knowledge Base import records.
+			Browse and filter Knowledge System import records.
 		</p>
 	</div>
 
