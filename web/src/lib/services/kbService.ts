@@ -7,8 +7,11 @@ export type KbInputRecord = {
 	name?: string;
 	parser_name?: string;
 	type: string;
+	tenant_id?: string;
+	ks_store_id?: number;
 	title?: string;
 	doc_no?: string;
+	ks_desc?: string;
 	source?: string;
 	file_name?: string;
 	backup_filename?: string;
@@ -163,8 +166,11 @@ export async function getKbInput(id: number): Promise<GetKbInputResponse> {
 }
 
 export type UpdateKbInputPayload = {
+	tenant_id?: string | null;
+	ks_store_id?: string | number | null;
 	title?: string | null;
 	doc_no?: string | null;
+	ks_desc?: string | null;
 	source?: string | null;
 	publish_date?: string | null;
 	authors?: string[] | string | null;
@@ -194,6 +200,60 @@ export async function updateKbInput(id: number, payload: UpdateKbInputPayload): 
 		throw new Error(msg);
 	}
 	return response.json() as Promise<GetKbInputResponse>;
+}
+
+export type UploadKbInputsPayload = {
+	type: string;
+	title?: string;
+	doc_no?: string;
+	authors?: string;
+	public_info?: string;
+	private_info?: string;
+	notes?: string;
+	ks_desc?: string;
+	parser_name: 'paddleocr' | 'opendata' | 'mineru' | 'docling';
+	ks_store_id: number;
+	tenant_id: string;
+	files: File[];
+};
+
+export type UploadKbInputsResponse = {
+	status: boolean;
+	count: number;
+	ids: number[];
+};
+
+export async function uploadKbInputs(payload: UploadKbInputsPayload): Promise<UploadKbInputsResponse> {
+	const form = new FormData();
+	form.set('type', payload.type);
+	form.set('parser_name', payload.parser_name);
+	form.set('ks_store_id', String(payload.ks_store_id));
+	form.set('tenant_id', payload.tenant_id);
+	if (payload.title?.trim()) form.set('title', payload.title.trim());
+	if (payload.doc_no?.trim()) form.set('doc_no', payload.doc_no.trim());
+	if (payload.authors?.trim()) form.set('authors', payload.authors.trim());
+	if (payload.public_info?.trim()) form.set('public_info', payload.public_info.trim());
+	if (payload.private_info?.trim()) form.set('private_info', payload.private_info.trim());
+	if (payload.notes?.trim()) form.set('notes', payload.notes);
+	if (payload.ks_desc?.trim()) form.set('ks_desc', payload.ks_desc);
+	for (const file of payload.files) {
+		form.append('files', file);
+	}
+
+	const response = await fetch(`${BASE}/inputs/upload`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		body: form
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to upload kb inputs (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<UploadKbInputsResponse>;
 }
 
 export type RawLine = {

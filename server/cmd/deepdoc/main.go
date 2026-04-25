@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api"
+	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/database"
 	"github.com/chendingplano/deepdoc/server/api/docgenworker"
-	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
@@ -158,7 +158,9 @@ func main() {
 	}
 
 	logger.Info("Start Project Migrations")
-	err = config.RunMigrations(ctx, logger)
+	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer migrationCancel()
+	err = config.RunMigrations(migrationCtx, logger)
 	if err != nil {
 		logger.Error("failed to run migrations. System exit!!!!", "error", err)
 		os.Exit(1)

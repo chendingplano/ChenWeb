@@ -3,7 +3,7 @@ import os
 import tempfile
 from shared import decode_status, has_operation, upsert_status, replace_status_entry
 from shared import file_md5, copy_file, unique_path, resolve_source_path, choose_repo_dir
-from shared import record_duplicated
+from shared import fetch_candidates, fetch_record_by_id, find_duplicate_processed_record, has_md5_record, record_duplicated
 
 
 class TestDecodeStatus:
@@ -177,12 +177,20 @@ class _FakeCursor:
         self.owner.executed_sql = sql
         self.owner.executed_params = params
 
+    def fetchall(self):
+        return list(self.owner.rows)
+
+    def fetchone(self):
+        return self.owner.row
+
 
 class _FakeConn:
     def __init__(self):
         self.executed_sql = ""
         self.executed_params = ()
         self.commit_called = False
+        self.rows = []
+        self.row = None
 
     def cursor(self):
         return _FakeCursor(self)
@@ -204,3 +212,39 @@ class TestRecordDuplicated:
         assert entries[0]["proc-status"] == "duplicated"
         assert entries[0]["dup_rcd_id"] == 20
         assert entries[0]["start_time"] == "20260410 16:24:29"
+
+
+class TestReadQueriesCloseTransactions:
+    def test_fetch_candidates_commits_after_select(self):
+        conn = _FakeConn()
+        conn.rows = [
+            (11, "doc.pdf", "/tmp/doc.pdf", "docling", "[]", "md5", "", ""),
+        ]
+
+        records = fetch_candidates(conn, 25)
+
+        assert conn.commit_called is True
+        assert records[0]["id"] == 11
+
+    def test_fetch_record_by_id_commits_after_select(self):
+        conn = _FakeConn()
+        conn.row = (12, "doc.pdf", "/tmp/doc.pdf", "docling", "[]", "md5", "", "")
+
+        record = fetch_record_by_id(conn, 12)
+
+        assert conn.commit_called is True
+        assert record["id"] == 12
+
+    def test_has_md5_record_commits_after_select(self):
+        conn = _FakeConn()
+        conn.row = (1,)
+
+        assert has_md5_record(conn, "abc") is True
+        assert conn.commit_called is True
+
+    def test_find_duplicate_processed_record_commits_after_select(self):
+        conn = _FakeConn()
+        conn.row = (99,)
+
+        assert find_duplicate_processed_record(conn, 12, "abc") == 99
+        assert conn.commit_called is True

@@ -38,9 +38,9 @@ func expectResolveParserNameColumn(mock sqlmock.Sqlmock, exists bool) {
 
 func TestBuildWhereClauseDocTypeAndFileName(t *testing.T) {
 	whereSQL, args, err := buildWhereClause(listInputsFilters{
-		DocType:   "pdf",
-		ParseState:"all",
-		FileName:  "report",
+		DocType:    "pdf",
+		ParseState: "all",
+		FileName:   "report",
 	})
 	if err != nil {
 		t.Fatalf("buildWhereClause returned error: %v", err)
@@ -256,8 +256,11 @@ SELECT
     i.staging_filename AS name,
     COALESCE(i.parser_name, '') AS parser_name,
     i.type,
+    i.tenant_id,
+    i.ks_store_id,
     i.title,
     i.doc_no,
+    i.ks_desc,
     i.source,
     i.file_name,
     i.backup_filename,
@@ -281,12 +284,12 @@ FROM kb.inputs i
 			  AND LOWER(COALESCE(st->>'status', '')) = 'success'
 		) AND COALESCE(i.file_name, '') ILIKE $2 ORDER BY i.create_time DESC LIMIT $3 OFFSET $4`)
 	rows := sqlmock.NewRows([]string{
-		"id", "name", "parser_name", "type", "title", "doc_no", "source", "file_name",
+		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",
 	}).AddRow(
-		int64(101), "Report A", "mineru", "pdf", "Annual Report", nil, "upload", "/tmp/report-a.pdf",
+		int64(101), "Report A", "mineru", "pdf", "tenant-alpha", int64(7), "Annual Report", nil, "Store desc", "upload", "/tmp/report-a.pdf",
 		"/backup/report-a.pdf", "/result/report-a.json", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
 		`[{"operation":"parsing","status":"success"}]`, time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC), time.Date(2026, 3, 2, 12, 10, 0, 0, time.UTC),
 		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",
@@ -410,8 +413,11 @@ func TestListInputsDataQueryFailure(t *testing.T) {
     i.staging_filename AS name,
     COALESCE(i.parser_name, '') AS parser_name,
     i.type,
+    i.tenant_id,
+    i.ks_store_id,
     i.title,
     i.doc_no,
+    i.ks_desc,
     i.source,
     i.file_name,
     i.backup_filename,
@@ -464,7 +470,7 @@ func TestListInputsPageSizeCap(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC LIMIT $1 OFFSET $2`)).
 		WithArgs(500, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "parser_name", "type", "title", "doc_no", "source", "file_name",
+			"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
 			"backup_filename", "result_filename", "publish_date", "authors", "owner",
 			"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 			"notes", "error_msg",
@@ -554,8 +560,11 @@ func TestListInputsExtendedQueryParams(t *testing.T) {
     i.staging_filename AS name,
     COALESCE(i.parser_name, '') AS parser_name,
     i.type,
+    i.tenant_id,
+    i.ks_store_id,
     i.title,
     i.doc_no,
+    i.ks_desc,
     i.source,
     i.file_name,
     i.backup_filename,
@@ -579,12 +588,12 @@ FROM kb.inputs i
 			  AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER($9)
 		) AND i.create_time >= $10 AND i.create_time <= $11 AND i.modify_time >= $12 AND i.modify_time <= $13 ORDER BY i.create_time DESC LIMIT $14 OFFSET $15`)
 	rows := sqlmock.NewRows([]string{
-		"id", "name", "parser_name", "type", "title", "doc_no", "source", "file_name",
+		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
 		"status", "create_time", "modify_time", "public_info", "private_info", "doc_metadata",
 		"notes", "error_msg",
 	}).AddRow(
-		int64(84), "Input #84", "mineru", "pdf", "Title", "GB/T 123", "upload", "/tmp/std.pdf",
+		int64(84), "Input #84", "mineru", "pdf", "tenant-alpha", int64(7), "Title", "GB/T 123", "Store desc", "upload", "/tmp/std.pdf",
 		"/backup/std.pdf", "/result/std.json", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), "Alice", int64(7),
 		`[{"operation":"extract_metadata","proc_status":"success"}]`, time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC), time.Date(2026, 4, 11, 12, 0, 0, 0, time.UTC),
 		`{"visibility":"public"}`, `{"internal":"yes"}`, `{"foo":"bar"}`, "note", "",

@@ -157,16 +157,21 @@ func fetchInputRecordByID(db *sql.DB, inputTable string, id int64) (inputRecord,
 		return inputRecord{}, err
 	}
 
+	parserNameColumnExpr, err := resolveParserNameColumnExpr(db, inputTable)
+	if err != nil {
+		return inputRecord{}, err
+	}
+
 	query := fmt.Sprintf(`
 SELECT
-    i.id, %s AS name, i.type, i.title, i.doc_no, i.source,
+    i.id, %s AS name, %s AS parser_name, i.type, i.tenant_id, i.ks_store_id, i.title, i.doc_no, i.ks_desc, i.source,
     i.file_name, i.backup_filename, i.result_filename, i.publish_date,
     i.authors, i.owner, COALESCE(i.status, '[]'::jsonb) AS status,
     i.create_time, i.modify_time, i.public_info, i.private_info, i.doc_metadata::text,
     i.notes, i.error_msg
 FROM %s i
 WHERE i.id = $1
-`, nameColumnExpr, inputTable)
+`, nameColumnExpr, parserNameColumnExpr, inputTable)
 
 	row := db.QueryRow(query, id)
 	var (
@@ -178,7 +183,7 @@ WHERE i.id = $1
 		docMetadataNullable sql.NullString
 	)
 	if err := row.Scan(
-		&record.ID, &record.Name, &record.Type, &record.Title, &record.DocNo, &record.Source,
+		&record.ID, &record.Name, &record.ParserName, &record.Type, &record.TenantID, &record.KSStoreID, &record.Title, &record.DocNo, &record.KSDesc, &record.Source,
 		&record.FileName, &record.BackupFileName, &record.ResultFileName, &publishDate,
 		&record.Authors, &record.Owner, &statusBytes,
 		&record.CreateTime, &record.ModifyTime, &publicInfoNullable, &privateInfoNullable, &docMetadataNullable,
@@ -303,6 +308,29 @@ func decodeOwnerValue(raw json.RawMessage) (*int64, error) {
 	return nil, fmt.Errorf("owner must be integer or string")
 }
 
+func decodeInt64Value(raw json.RawMessage) (*int64, error) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, nil
+	}
+	var numeric int64
+	if err := json.Unmarshal(raw, &numeric); err == nil {
+		return &numeric, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil, nil
+		}
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("must be integer text")
+		}
+		return &v, nil
+	}
+	return nil, fmt.Errorf("must be integer or string")
+}
+
 func decodeAuthorsValue(raw json.RawMessage) (*string, error) {
 	if strings.TrimSpace(string(raw)) == "null" {
 		return nil, nil
@@ -389,12 +417,26 @@ func UpdateInput(c echo.Context) error {
 	for _, field := range fields {
 		raw := payload[field]
 		switch field {
-		case "title", "doc_no", "source":
+		case "title", "doc_no", "source", "tenant_id":
 			value, err := decodeStringValue(raw, true)
 			if err != nil {
 				return c.JSON(http.StatusBadRequest, errorResponse{
 					Status:   false,
 					ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_M_144)", field, err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "ks_desc":
+			value, err := decodeStringValue(raw, false)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_M_145A)", field, err),
 				})
 			}
 			if value == nil {
@@ -462,6 +504,20 @@ func UpdateInput(c echo.Context) error {
 				return c.JSON(http.StatusBadRequest, errorResponse{
 					Status:   false,
 					ErrorMsg: fmt.Sprintf("invalid owner: %v (CWB_KB_M_149)", err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "ks_store_id":
+			value, err := decodeInt64Value(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid ks_store_id: %v (CWB_KB_M_149A)", err),
 				})
 			}
 			if value == nil {

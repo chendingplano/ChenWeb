@@ -199,6 +199,7 @@ def fetch_candidates(conn, batch_size: int) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(sql, (batch_size,))
         rows = cur.fetchall()
+    conn.commit()
     return [
         {
             "id": r[0],
@@ -232,6 +233,7 @@ def fetch_record_by_id(conn, rec_id: int) -> dict | None:
     with conn.cursor() as cur:
         cur.execute(sql, (rec_id,))
         row = cur.fetchone()
+    conn.commit()
     if not row:
         return None
     return {
@@ -251,7 +253,9 @@ def has_md5_record(conn, md5_hex: str) -> bool:
     sql = "SELECT 1 FROM kb.inputs WHERE md5 = %s LIMIT 1"
     with conn.cursor() as cur:
         cur.execute(sql, (md5_hex,))
-        return cur.fetchone() is not None
+        found = cur.fetchone() is not None
+    conn.commit()
+    return found
 
 
 def find_duplicate_processed_record(conn, rec_id: int, md5_hex: str) -> int | None:
@@ -280,6 +284,7 @@ def find_duplicate_processed_record(conn, rec_id: int, md5_hex: str) -> int | No
     with conn.cursor() as cur:
         cur.execute(sql, (rec_id, md5_hex))
         row = cur.fetchone()
+    conn.commit()
     return row[0] if row else None
 
 

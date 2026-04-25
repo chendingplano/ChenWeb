@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
-	import { listKbInputs } from '$lib/services/kbService';
+	import { listKbInputs, uploadKbInputs } from '$lib/services/kbService';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -23,6 +24,7 @@
 		{ value: 'parsed_success', label: 'Parsed Success' },
 		{ value: 'parsed_failed', label: 'Parsed Failed' }
 	];
+	const uploadParserOptions = ['paddleocr', 'opendata', 'mineru', 'docling'] as const;
 
 	let docType = $state('all');
 	let parseState = $state<ParseState>('all');
@@ -39,6 +41,21 @@
 	let statusDialogTitle = $state('');
 	let statusDialogItems = $state<KbInputRecord['status']>([]);
 	let statusDialogRawJson = $state('[]');
+	let uploadDialogOpen = $state(false);
+	let uploadSubmitting = $state(false);
+	let uploadError = $state('');
+	let uploadLaunchError = $state('');
+	let uploadType = $state('pdf');
+	let uploadTitle = $state('');
+	let uploadDocNo = $state('');
+	let uploadAuthors = $state('');
+	let uploadPublicInfo = $state('');
+	let uploadPrivateInfo = $state('');
+	let uploadNotes = $state('');
+	let uploadKsDesc = $state('');
+	let uploadParserName = $state<(typeof uploadParserOptions)[number]>('docling');
+	let selectedFiles = $state<File[]>([]);
+	let filePicker = $state<HTMLInputElement | null>(null);
 
 	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 
@@ -116,6 +133,89 @@
 		statusDialogOpen = false;
 	}
 
+	function resetUploadDialog() {
+		uploadError = '';
+		uploadType = 'pdf';
+		uploadTitle = '';
+		uploadDocNo = '';
+		uploadAuthors = '';
+		uploadPublicInfo = '';
+		uploadPrivateInfo = '';
+		uploadNotes = '';
+		uploadKsDesc = '';
+		uploadParserName = 'docling';
+		selectedFiles = [];
+		if (filePicker) filePicker.value = '';
+	}
+
+	function openUploadDialog() {
+		uploadLaunchError = '';
+		if (!knowledgeStoreState.activeStore) {
+			uploadLaunchError = 'Select an active knowledge store before uploading files.';
+			return;
+		}
+		resetUploadDialog();
+		uploadDialogOpen = true;
+	}
+
+	function closeUploadDialog() {
+		uploadDialogOpen = false;
+		uploadSubmitting = false;
+		uploadError = '';
+	}
+
+	function triggerFilePicker() {
+		filePicker?.click();
+	}
+
+	function onFileSelection(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		selectedFiles = Array.from(input.files ?? []);
+	}
+
+	async function submitUpload() {
+		uploadError = '';
+		const activeStore = knowledgeStoreState.activeStore;
+		if (!activeStore) {
+			uploadError = 'No active knowledge store is selected.';
+			return;
+		}
+		if (!activeStore.tenant_id?.trim()) {
+			uploadError = 'The active knowledge store is missing tenant_id.';
+			return;
+		}
+		if (selectedFiles.length === 0) {
+			uploadError = 'Pick at least one file to upload.';
+			return;
+		}
+
+		uploadSubmitting = true;
+		try {
+			await uploadKbInputs({
+				type: uploadType,
+				title: uploadTitle,
+				doc_no: uploadDocNo,
+				authors: uploadAuthors,
+				public_info: uploadPublicInfo,
+				private_info: uploadPrivateInfo,
+				notes: uploadNotes,
+				ks_desc: uploadKsDesc,
+				parser_name: uploadParserName,
+				ks_store_id: activeStore.id,
+				tenant_id: activeStore.tenant_id,
+				files: selectedFiles
+			});
+			closeUploadDialog();
+			resetUploadDialog();
+			page = 1;
+			await loadRecords();
+		} catch (err) {
+			uploadError = err instanceof Error ? err.message : 'Failed to upload files';
+		} finally {
+			uploadSubmitting = false;
+		}
+	}
+
 	async function loadRecords() {
 		loading = true;
 		error = '';
@@ -176,10 +276,23 @@
 		class="rounded-xl p-6 mb-6"
 		style="background:{cardBg}; border:1px solid {borderColor};"
 	>
-		<h2 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">Import Inputs</h2>
-		<p style="font-size:14px; color:{textSecondary};">
-			Browse and filter Knowledge System import records.
-		</p>
+		<div class="flex items-start justify-between gap-4">
+			<div>
+				<h2 style="font-size:20px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">Import Inputs</h2>
+				<p style="font-size:14px; color:{textSecondary};">
+					Browse and filter Knowledge System import records.
+				</p>
+			</div>
+			<button
+				onclick={openUploadDialog}
+				style="height:38px; padding:0 14px; border:none; border-radius:10px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"
+			>
+				Upload Files
+			</button>
+		</div>
+		{#if uploadLaunchError}
+			<div style="margin-top:10px; font-size:12px; color:#ef4444;">{uploadLaunchError}</div>
+		{/if}
 	</div>
 
 	<div
@@ -360,6 +473,150 @@
 		</div>
 	</div>
 </div>
+
+{#if uploadDialogOpen}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(15,23,42,0.62);"
+		onclick={closeUploadDialog}
+		onkeydown={(e) => {
+			if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') closeUploadDialog();
+		}}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="w-full max-w-4xl rounded-xl overflow-hidden"
+			style="background:{cardBg}; border:1px solid {borderColor};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Upload files dialog"
+			tabindex="0"
+		>
+			<div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {borderColor};">
+				<div>
+					<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Upload File Dialog</h3>
+					<div style="margin-top:4px; font-size:12px; color:{textMuted};">
+						Active Knowledge Store:
+						{#if knowledgeStoreState.activeStore}
+							<span style="color:{textPrimary};">{knowledgeStoreState.activeStore.ks_name}</span>
+							<span class="mono" style="margin-left:8px;">ID {knowledgeStoreState.activeStore.id}</span>
+						{:else}
+							<span style="color:#ef4444;">None selected</span>
+						{/if}
+					</div>
+				</div>
+				<button
+					onclick={closeUploadDialog}
+					style="height:30px; padding:0 12px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+				>
+					Close
+				</button>
+			</div>
+
+			<div class="p-4">
+				<div class="grid gap-3" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">Type</span>
+						<select
+							bind:value={uploadType}
+							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
+						>
+							{#each docTypeOptions.filter((option) => option !== 'all') as option}
+								<option value={option}>{option}</option>
+							{/each}
+						</select>
+					</label>
+
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">Parser Name</span>
+						<select
+							bind:value={uploadParserName}
+							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
+						>
+							{#each uploadParserOptions as option}
+								<option value={option}>{option}</option>
+							{/each}
+						</select>
+					</label>
+
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">Title</span>
+						<input bind:value={uploadTitle} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
+					</label>
+
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">Doc No</span>
+						<input bind:value={uploadDocNo} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
+					</label>
+
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">Authors</span>
+						<input bind:value={uploadAuthors} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
+					</label>
+
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">Public Info</span>
+						<input bind:value={uploadPublicInfo} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
+					</label>
+
+					<label class="flex flex-col gap-1.5">
+						<span style="font-size:12px; color:{textMuted};">Private Info</span>
+						<input bind:value={uploadPrivateInfo} type="text" style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;" />
+					</label>
+
+					<div class="rounded-lg p-3" style="border:1px solid {borderColor}; background:{surface2};">
+						<div style="font-size:12px; color:{textMuted}; margin-bottom:6px;">Selected Files</div>
+						{#if selectedFiles.length === 0}
+							<div style="font-size:12px; color:{textSecondary};">No files selected yet.</div>
+						{:else}
+							<div class="space-y-1" style="max-height:90px; overflow:auto;">
+								{#each selectedFiles as file}
+									<div style="font-size:12px; color:{textPrimary};">{file.name}</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<label class="flex flex-col gap-1.5" style="grid-column: 1 / -1;">
+						<span style="font-size:12px; color:{textMuted};">Notes</span>
+						<textarea bind:value={uploadNotes} rows="3" style="border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:10px;"></textarea>
+					</label>
+
+					<label class="flex flex-col gap-1.5" style="grid-column: 1 / -1;">
+						<span style="font-size:12px; color:{textMuted};">ks_desc</span>
+						<textarea bind:value={uploadKsDesc} rows="3" style="border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:10px;"></textarea>
+					</label>
+				</div>
+
+				<input bind:this={filePicker} type="file" multiple class="hidden" onchange={onFileSelection} />
+
+				<div class="mt-4 flex items-center gap-2">
+					<button
+						onclick={triggerFilePicker}
+						type="button"
+						style="height:36px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textPrimary}; font-size:13px; cursor:pointer;"
+					>
+						Browse and Pick Files
+					</button>
+					<button
+						onclick={submitUpload}
+						disabled={uploadSubmitting}
+						type="button"
+						style="height:36px; padding:0 14px; border:none; border-radius:8px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{uploadSubmitting ? 0.65 : 1};"
+					>
+						{uploadSubmitting ? 'Uploading…' : 'Upload Files'}
+					</button>
+					{#if uploadError}
+						<span style="font-size:12px; color:#ef4444;">{uploadError}</span>
+					{/if}
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if statusDialogOpen}
 	<div

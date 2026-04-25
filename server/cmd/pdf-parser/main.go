@@ -401,8 +401,7 @@ UPDATE kb.inputs
 SET staging_filename = $1,
     md5 = $2,
     modify_time = NOW()
-WHERE type = 'pdf'
-  AND file_name = $3
+WHERE file_name = $3
   AND COALESCE(backup_filename, '') = ''
 RETURNING id`
 

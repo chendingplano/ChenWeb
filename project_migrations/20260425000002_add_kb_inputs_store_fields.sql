@@ -1,0 +1,11 @@
+-- +goose Up
+ALTER TABLE IF EXISTS kb.inputs
+    ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(128) NOT NULL DEFAULT '-',
+    ADD COLUMN IF NOT EXISTS ks_store_id BIGINT,
+    ADD COLUMN IF NOT EXISTS ks_desc TEXT;
+
+-- +goose Down
+ALTER TABLE IF EXISTS kb.inputs
+    DROP COLUMN IF EXISTS ks_desc,
+    DROP COLUMN IF EXISTS ks_store_id,
+    DROP COLUMN IF EXISTS tenant_id;

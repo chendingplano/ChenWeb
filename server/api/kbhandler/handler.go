@@ -29,8 +29,11 @@ type inputRecord struct {
 	Name           *string         `json:"name,omitempty"`
 	ParserName     *string         `json:"parser_name,omitempty"`
 	Type           string          `json:"type"`
+	TenantID       *string         `json:"tenant_id,omitempty"`
+	KSStoreID      *int64          `json:"ks_store_id,omitempty"`
 	Title          *string         `json:"title,omitempty"`
 	DocNo          *string         `json:"doc_no,omitempty"`
+	KSDesc         *string         `json:"ks_desc,omitempty"`
 	Source         *string         `json:"source,omitempty"`
 	FileName       *string         `json:"file_name,omitempty"`
 	BackupFileName *string         `json:"backup_filename,omitempty"`
@@ -263,8 +266,11 @@ SELECT
     %s AS name,
     %s AS parser_name,
     i.type,
+    i.tenant_id,
+    i.ks_store_id,
     i.title,
     i.doc_no,
+    i.ks_desc,
     i.source,
     i.file_name,
     i.backup_filename,
@@ -314,8 +320,11 @@ FROM %s i
 			&record.Name,
 			&record.ParserName,
 			&record.Type,
+			&record.TenantID,
+			&record.KSStoreID,
 			&record.Title,
 			&record.DocNo,
+			&record.KSDesc,
 			&record.Source,
 			&record.FileName,
 			&record.BackupFileName,

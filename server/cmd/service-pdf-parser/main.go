@@ -256,8 +256,7 @@ SET name = $1,
     backup_filename = $3,
     md5 = $4,
     modify_time = NOW()
-WHERE type = 'pdf'
-  AND file_name = $5
+WHERE file_name = $5
   AND COALESCE(backup_filename, '') = ''
 RETURNING id`
 
