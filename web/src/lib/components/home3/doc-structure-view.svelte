@@ -1,12 +1,30 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import {
 		listKbInputs,
 		getKbDocStructure,
 		getKbInput,
+		updateKbDocStructureLine,
+		deleteKbDocStructureLine,
 		type DocStructureLine,
 		type KbInputRecord
 	} from '$lib/services/kbService';
+	import {
+		DOC_STRUCTURE_DEFAULT_SETTINGS,
+		DOC_STRUCTURE_RECORD_DEFAULT_BACKGROUND,
+		DOC_STRUCTURE_RECORD_GAP_MAX,
+		DOC_STRUCTURE_RECORD_GAP_MIN,
+		DOC_STRUCTURE_RECORD_MAX_HEIGHT,
+		DOC_STRUCTURE_RECORD_MIN_HEIGHT,
+		DOC_STRUCTURE_LINE_LIST_MAX_WIDTH,
+		DOC_STRUCTURE_LINE_LIST_MIN_WIDTH,
+		clampDocStructureLineListWidth,
+		readDocStructureSettings,
+		writeDocStructureSettings,
+		clampDocStructureRecordGap,
+		clampDocStructureRecordHeight
+	} from './doc-structure-settings.js';
 	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -29,6 +47,13 @@
 	const INFO_PANEL_MIN_WIDTH = 140;
 	const INFO_PANEL_MAX_WIDTH = 420;
 
+	type DocStructureSettings = {
+		lineListWidth: number;
+		recordBackground: string;
+		recordHeight: number;
+		recordGap: number;
+	};
+
 	let recordIdInput = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let correctedFile = $state('');
@@ -44,6 +69,14 @@
 	let headingsOnly = $state(false);
 	let loading = $state(false);
 	let errorMsg = $state('');
+	let docStructureSettings = $state<DocStructureSettings>({ ...DOC_STRUCTURE_DEFAULT_SETTINGS });
+	let lineListWidth = $derived(docStructureSettings.lineListWidth);
+	let recordBackground = $derived(docStructureSettings.recordBackground);
+	let recordHeight = $derived(docStructureSettings.recordHeight);
+	let recordGap = $derived(docStructureSettings.recordGap);
+	let lineListResizing = $state(false);
+	let lineListSettingsOpen = $state(false);
+	let settingsHydrated = $state(false);
 	let infoPanelWidth = $state(INFO_PANEL_DEFAULT_WIDTH);
 	let infoPanelResizing = $state(false);
 	let searchOpen = $state(false);
@@ -63,6 +96,17 @@
 	let searchLoading = $state(false);
 	let searchError = $state('');
 	let searchSelected = $state<number | null>(null);
+
+	let editingLineKey = $state<string | null>(null);
+	let editingCorrectedType = $state('');
+	let editingContent = $state('');
+	let editingOriginalType = $state('');
+	let editingOriginalContent = $state('');
+	let editingSaving = $state(false);
+	let editingError = $state('');
+	let editingHasChanges = $derived(
+		editingCorrectedType !== editingOriginalType || editingContent !== editingOriginalContent
+	);
 
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
@@ -107,6 +151,41 @@
 	function isHeadingLine(line: DocStructureLine): boolean {
 		const t = effectiveLineType(line);
 		return /^heading(?:-\d+)?$/i.test(t) || t.includes('heading');
+	}
+
+	function displayLineType(line: DocStructureLine): string {
+		const t = effectiveLineType(line);
+		return t === '' ? 'unknown' : t;
+	}
+
+	function getDocStructureSettingsUserId(): string | null {
+		return null;
+	}
+
+	function applyDocStructureSettings(next: Partial<DocStructureSettings>) {
+		docStructureSettings = {
+			...docStructureSettings,
+			...next,
+			lineListWidth: clampDocStructureLineListWidth(
+				next.lineListWidth ?? docStructureSettings.lineListWidth
+			),
+			recordHeight: clampDocStructureRecordHeight(
+				next.recordHeight ?? docStructureSettings.recordHeight
+			),
+			recordGap: clampDocStructureRecordGap(next.recordGap ?? docStructureSettings.recordGap)
+		};
+	}
+
+	function openLineListSettings() {
+		lineListSettingsOpen = true;
+	}
+
+	function closeLineListSettings() {
+		lineListSettingsOpen = false;
+	}
+
+	function resetLineListSettings() {
+		docStructureSettings = { ...DOC_STRUCTURE_DEFAULT_SETTINGS };
 	}
 
 	let filteredLines = $derived.by(() =>
@@ -207,6 +286,58 @@
 				: null;
 		if (line.page_number > 0) {
 			docPage = line.page_number;
+		}
+	}
+
+	function adjustLineListWidth(delta: number) {
+		applyDocStructureSettings({
+			lineListWidth: clampDocStructureLineListWidth(lineListWidth + delta)
+		});
+	}
+
+	function startLineListResize(event: PointerEvent) {
+		event.preventDefault();
+		const handle = event.currentTarget as HTMLElement | null;
+		const startX = event.clientX;
+		const startWidth = lineListWidth;
+		lineListResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		handle?.setPointerCapture?.(event.pointerId);
+
+		const handleMove = (moveEvent: PointerEvent) => {
+			applyDocStructureSettings({
+				lineListWidth: clampDocStructureLineListWidth(startWidth + (moveEvent.clientX - startX))
+			});
+		};
+		const handleUp = (upEvent: PointerEvent) => {
+			lineListResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			handle?.releasePointerCapture?.(upEvent.pointerId);
+			window.removeEventListener('pointermove', handleMove);
+			window.removeEventListener('pointerup', handleUp);
+			window.removeEventListener('pointercancel', handleUp);
+		};
+
+		window.addEventListener('pointermove', handleMove);
+		window.addEventListener('pointerup', handleUp, { once: true });
+		window.addEventListener('pointercancel', handleUp, { once: true });
+	}
+
+	function onLineListResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			adjustLineListWidth(-16);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			adjustLineListWidth(16);
+		} else if (event.key === 'Home') {
+			event.preventDefault();
+			applyDocStructureSettings({ lineListWidth: DOC_STRUCTURE_LINE_LIST_MIN_WIDTH });
+		} else if (event.key === 'End') {
+			event.preventDefault();
+			applyDocStructureSettings({ lineListWidth: DOC_STRUCTURE_LINE_LIST_MAX_WIDTH });
 		}
 	}
 
@@ -324,6 +455,103 @@
 		if (r) pickSearchResult(r);
 	}
 
+	const LINE_TYPE_OPTIONS = [
+		'paragraph', 'heading', 'heading-1', 'heading-2', 'heading-3', 'heading-4', 'heading-5',
+		'toc', 'image', 'table', 'table-caption', 'figure', 'figure-caption',
+		'header', 'footer', 'list', 'list-item', 'code', 'doc-title', 'unknown'
+	];
+
+	function startLineEdit(line: DocStructureLine) {
+		editingLineKey = lineKey(line);
+		editingCorrectedType = line.line_type || '';
+		editingContent = line.content || '';
+		editingOriginalType = line.line_type || '';
+		editingOriginalContent = line.content || '';
+		editingError = '';
+	}
+
+	function cancelLineEdit() {
+		if (editingSaving) return;
+		editingLineKey = null;
+		editingCorrectedType = '';
+		editingContent = '';
+		editingOriginalType = '';
+		editingOriginalContent = '';
+		editingError = '';
+	}
+
+	async function saveLineEdit() {
+		if (!editingLineKey || editingSaving) return;
+		const recordId = Number(recordIdInput.trim());
+		if (!recordId || recordId <= 0) {
+			editingError = 'No record loaded.';
+			return;
+		}
+		const line = lines.find((ln) => lineKey(ln) === editingLineKey);
+		if (!line) {
+			editingError = 'Line not found.';
+			return;
+		}
+		const correctedType = editingCorrectedType.trim();
+		if (!correctedType) {
+			editingError = 'Line type cannot be empty.';
+			return;
+		}
+		editingSaving = true;
+		editingError = '';
+		try {
+			const res = await updateKbDocStructureLine({
+				input_record_id: recordId,
+				page_number: line.page_number,
+				line_number: line.line_number,
+				corrected_line_type: correctedType,
+				content: editingContent
+			});
+			lines = res.lines ?? [];
+			editingLineKey = null;
+		} catch (err) {
+			editingError = err instanceof Error ? err.message : 'Failed to save.';
+		} finally {
+			editingSaving = false;
+		}
+	}
+
+	let deletingLineKey = $state<string | null>(null);
+	let deleteConfirmLine = $state<DocStructureLine | null>(null);
+
+	function requestDeleteConfirm(line: DocStructureLine, e: MouseEvent) {
+		e.stopPropagation();
+		deleteConfirmLine = line;
+	}
+
+	function cancelDeleteConfirm() {
+		deleteConfirmLine = null;
+	}
+
+	async function confirmDeleteLine() {
+		const line = deleteConfirmLine;
+		if (!line) return;
+		const key = lineKey(line);
+		deleteConfirmLine = null;
+		if (deletingLineKey === key) return;
+		const recordId = Number(recordIdInput.trim());
+		if (!recordId || recordId <= 0) return;
+		deletingLineKey = key;
+		try {
+			const res = await deleteKbDocStructureLine({
+				input_record_id: recordId,
+				page_number: line.page_number,
+				line_number: line.line_number
+			});
+			lines = res.lines ?? [];
+			if (selectedLineKey === key) selectedLineKey = null;
+		} catch (err) {
+			console.error('Failed to delete line', err);
+		} finally {
+			deletingLineKey = null;
+		}
+	}
+
 	function recordDisplayName(r: KbInputRecord): string {
 		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
 	}
@@ -357,11 +585,23 @@
 	}
 
 	onMount(() => {
+		docStructureSettings = readDocStructureSettings(
+			localStorage,
+			getDocStructureSettingsUserId()
+		) as DocStructureSettings;
+		settingsHydrated = true;
+
 		return () => {
+			lineListResizing = false;
 			infoPanelResizing = false;
 			document.body.style.cursor = '';
 			document.body.style.userSelect = '';
 		};
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined' || !settingsHydrated) return;
+		writeDocStructureSettings(localStorage, getDocStructureSettingsUserId(), docStructureSettings);
 	});
 </script>
 
@@ -381,6 +621,9 @@
 		--font-serif:{fontSerif};
 		--font-mono:{fontMono};
 		--font-sans:{fontSans};
+		--line-record-bg:{recordBackground || DOC_STRUCTURE_RECORD_DEFAULT_BACKGROUND};
+		--line-record-h:{recordHeight}px;
+		--line-record-gap:{recordGap}px;
 	"
 >
 	<header class="header">
@@ -392,7 +635,7 @@
 	</header>
 
 	<div class="body">
-		<aside class="left">
+		<aside class="left" style={`width:${lineListWidth}px;`}>
 			<div class="left-controls">
 				<label class="field">
 					<span class="field-label">Record ID</span>
@@ -441,8 +684,14 @@
 			</div>
 
 			<div class="left-meta">
-				<div class="left-meta-title">Lines</div>
-				<div class="left-meta-count">{filteredLines.length} shown / {lines.length} total</div>
+				<div class="left-meta-copy">
+					<div class="left-meta-title">Lines</div>
+					<div class="left-meta-count">{filteredLines.length} shown / {lines.length} total</div>
+				</div>
+				<button class="btn btn-ghost settings-btn" type="button" onclick={openLineListSettings}>
+					<SettingsIcon style="width:14px; height:14px;" />
+					Settings
+				</button>
 			</div>
 
 			<div class="line-list">
@@ -450,33 +699,134 @@
 					<div class="empty">
 						<div class="empty-title">No lines loaded</div>
 						<div class="empty-sub">
-							Enter a Record ID to load a `.corrected` file.
+							Enter a Record ID to load a `.txt` file.
 							{#if headingsOnly}No heading lines found in current result.{/if}
 						</div>
 					</div>
 				{:else}
+					<div class="line-list-head" aria-hidden="true">
+						<span>Line Type</span>
+						<span>Content</span>
+					</div>
 					{#each filteredLines as line (`${line.page_number}-${line.line_number}`)}
-						<button
-							type="button"
-							class="line-card"
-							class:selected={selectedLineKey === lineKey(line)}
-							onclick={() => selectLine(line)}
-						>
-							<div class="line-ref-row">
-								<span class="line-ref">P{line.page_number}:L{line.line_number}</span>
-								<span class="line-type-chip">{line.corrected_line_type}</span>
+						{#if editingLineKey === lineKey(line)}
+							<div
+								class="line-card line-card-editing"
+								class:selected={selectedLineKey === lineKey(line)}
+							>
+								<form
+									class="line-edit-form"
+									onsubmit={(e) => {
+										e.preventDefault();
+										saveLineEdit();
+									}}
+								>
+									<div class="line-edit-field">
+										<span class="line-edit-label">Line Type</span>
+										<div class="line-type-edit-row">
+											<input
+												class="line-edit-input"
+												type="text"
+												bind:value={editingCorrectedType}
+												onkeydown={(e) => {
+													if (e.key === 'Escape') cancelLineEdit();
+												}}
+											/>
+											<select
+												class="line-edit-select"
+												value={editingCorrectedType}
+												onchange={(e) => {
+													editingCorrectedType = (e.currentTarget as HTMLSelectElement).value;
+												}}
+											>
+												<option value="" disabled>pick type</option>
+												{#each LINE_TYPE_OPTIONS as opt}
+													<option value={opt}>{opt}</option>
+												{/each}
+											</select>
+										</div>
+									</div>
+									<div class="line-edit-field">
+										<span class="line-edit-label">Content</span>
+										<input
+											class="line-edit-input"
+											type="text"
+											bind:value={editingContent}
+											onkeydown={(e) => {
+												if (e.key === 'Escape') cancelLineEdit();
+											}}
+										/>
+									</div>
+									{#if editingError}<div class="line-edit-error">{editingError}</div>{/if}
+									<div class="line-edit-actions">
+										<button
+											class="btn btn-primary line-edit-action-btn"
+											type="submit"
+											disabled={editingSaving || !editingHasChanges}
+										>
+											{editingSaving ? 'Saving…' : 'Save'}
+										</button>
+										<button
+											class="btn btn-ghost line-edit-action-btn"
+											type="button"
+											onclick={cancelLineEdit}
+											disabled={editingSaving}
+										>Cancel</button>
+									</div>
+								</form>
 							</div>
-							<div class="line-content">{line.content || '—'}</div>
-							<div class="line-sub">
-								orig: {line.line_type}
-								{#if line.font}
-									· {line.font} {line.font_size}
-								{/if}
+						{:else}
+							<div
+								class="line-card"
+								class:selected={selectedLineKey === lineKey(line)}
+								role="button"
+								tabindex="0"
+								onclick={() => selectLine(line)}
+								onkeydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										selectLine(line);
+									}
+								}}
+								title={`Page ${line.page_number}, line ${line.line_number}`}
+							>
+								<span class="line-type-cell">{displayLineType(line)}</span>
+								<span class="line-content-cell">{line.content || '—'}</span>
+								<div class="line-actions">
+									<button
+										type="button"
+										class="line-edit-btn"
+										title="Edit line"
+										aria-label={`Edit line ${line.line_number}`}
+										onclick={(e) => {
+											e.stopPropagation();
+											startLineEdit(line);
+										}}
+									>✎</button>
+									<button
+										type="button"
+										class="line-delete-btn"
+										title="Delete line"
+										aria-label={`Delete line ${line.line_number}`}
+										disabled={deletingLineKey === lineKey(line)}
+										onclick={(e) => requestDeleteConfirm(line, e)}
+									>✕</button>
+								</div>
 							</div>
-						</button>
+						{/if}
 					{/each}
 				{/if}
 			</div>
+			<button
+				type="button"
+				class="line-list-resizer"
+				class:active={lineListResizing}
+				aria-label="Resize lines list"
+				onpointerdown={startLineListResize}
+				onkeydown={onLineListResizerKeydown}
+			>
+				<span class="line-list-resizer-grip" aria-hidden="true"></span>
+			</button>
 		</aside>
 
 		<section class="right">
@@ -548,6 +898,139 @@
 		</section>
 	</div>
 </div>
+
+{#if lineListSettingsOpen}
+	<div
+		class="dialog-overlay"
+		aria-hidden="true"
+		onclick={closeLineListSettings}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') closeLineListSettings();
+		}}
+	>
+		<div
+			class="dialog settings-dialog"
+			style="background:{panelBg}; border-color:{inkLine};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') closeLineListSettings();
+				e.stopPropagation();
+			}}
+			role="dialog"
+			aria-modal="true"
+			tabindex="0"
+		>
+			<div class="dialog-head">
+				<div>
+					<div class="dialog-eyebrow">Preferences</div>
+					<h2 class="dialog-title">Lines View Settings</h2>
+					<p class="dialog-subtitle">
+						Adjust the list card color and spacing. These preferences are saved automatically.
+					</p>
+				</div>
+			</div>
+
+			<div class="dialog-scroll">
+				<div class="dialog-controls">
+					<div class="dialog-section">
+						<div class="dialog-section-head">
+							<div class="dialog-section-title">Appearance</div>
+							<div class="dialog-section-copy">Tune the record rows in the lines list.</div>
+						</div>
+						<div class="settings-grid">
+							<label class="field dialog-field settings-field">
+								<span class="field-label">Record background color</span>
+								<div class="settings-color-row">
+									<input
+										class="settings-color-input"
+										type="color"
+										value={recordBackground}
+										oninput={(e) =>
+											applyDocStructureSettings({
+												recordBackground: (e.currentTarget as HTMLInputElement).value
+											})}
+									/>
+								</div>
+							</label>
+							<label class="field dialog-field settings-field settings-field-wide">
+								<span class="field-label">Record height ({recordHeight}px)</span>
+								<div class="settings-width-row">
+									<span class="settings-width-bound">{DOC_STRUCTURE_RECORD_MIN_HEIGHT}</span>
+									<input
+										type="range"
+										min={DOC_STRUCTURE_RECORD_MIN_HEIGHT}
+										max={DOC_STRUCTURE_RECORD_MAX_HEIGHT}
+										step="2"
+										value={recordHeight}
+										oninput={(e) =>
+											applyDocStructureSettings({
+												recordHeight: Number((e.currentTarget as HTMLInputElement).value)
+											})}
+										class="settings-width-slider"
+									/>
+									<span class="settings-width-bound">{DOC_STRUCTURE_RECORD_MAX_HEIGHT}</span>
+								</div>
+							</label>
+							<label class="field dialog-field settings-field settings-field-wide">
+								<span class="field-label">Gap between records ({recordGap}px)</span>
+								<div class="settings-width-row">
+									<span class="settings-width-bound">{DOC_STRUCTURE_RECORD_GAP_MIN}</span>
+									<input
+										type="range"
+										min={DOC_STRUCTURE_RECORD_GAP_MIN}
+										max={DOC_STRUCTURE_RECORD_GAP_MAX}
+										step="1"
+										value={recordGap}
+										oninput={(e) =>
+											applyDocStructureSettings({
+												recordGap: Number((e.currentTarget as HTMLInputElement).value)
+											})}
+										class="settings-width-slider"
+									/>
+									<span class="settings-width-bound">{DOC_STRUCTURE_RECORD_GAP_MAX}</span>
+								</div>
+							</label>
+							<label class="field dialog-field settings-field settings-field-wide">
+								<span class="field-label">List width ({lineListWidth}px)</span>
+								<div class="settings-width-row">
+									<span class="settings-width-bound">{DOC_STRUCTURE_LINE_LIST_MIN_WIDTH}</span>
+									<input
+										type="range"
+										min={DOC_STRUCTURE_LINE_LIST_MIN_WIDTH}
+										max={DOC_STRUCTURE_LINE_LIST_MAX_WIDTH}
+										step="4"
+										value={lineListWidth}
+										oninput={(e) =>
+											applyDocStructureSettings({
+												lineListWidth: Number((e.currentTarget as HTMLInputElement).value)
+											})}
+										class="settings-width-slider"
+									/>
+									<span class="settings-width-bound">{DOC_STRUCTURE_LINE_LIST_MAX_WIDTH}</span>
+								</div>
+								<div class="dialog-section-copy" style="margin-top:6px;">
+									You can also drag the divider beside the list to resize it.
+								</div>
+							</label>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="dialog-foot">
+				<div class="dialog-foot-hint">Updates are saved automatically.</div>
+				<div class="dialog-foot-buttons">
+					<button class="btn btn-primary dialog-select-btn" type="button" onclick={resetLineListSettings}>
+						Reset
+					</button>
+					<button class="btn btn-primary dialog-select-btn" type="button" onclick={closeLineListSettings}>
+						Close
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if searchOpen}
 	<div class="dialog-overlay" aria-hidden="true">
@@ -817,6 +1300,40 @@
 	</div>
 {/if}
 
+{#if deleteConfirmLine}
+	<div
+		class="dialog-overlay"
+		aria-hidden="true"
+		onclick={cancelDeleteConfirm}
+		onkeydown={(e) => { if (e.key === 'Escape') cancelDeleteConfirm(); }}
+	>
+		<div
+			class="delete-dialog"
+			style="background:{panelBg}; border-color:{inkLine};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => { if (e.key === 'Escape') cancelDeleteConfirm(); e.stopPropagation(); }}
+			role="dialog"
+			aria-modal="true"
+			tabindex="0"
+		>
+			<div class="delete-dialog-icon">⚠</div>
+			<div class="delete-dialog-title">Delete Line?</div>
+			<div class="delete-dialog-body">
+				<span class="delete-dialog-type">{deleteConfirmLine.line_type}</span>
+				<span class="delete-dialog-content">{deleteConfirmLine.content || '(no content)'}</span>
+			</div>
+			<p class="delete-dialog-sub">
+				Page {deleteConfirmLine.page_number}, line {deleteConfirmLine.line_number}.
+				This will remove it from the <code>.txt</code> file and record it in <code>.manual</code>.
+			</p>
+			<div class="delete-dialog-actions">
+				<button class="btn btn-ghost" type="button" onclick={cancelDeleteConfirm}>Cancel</button>
+				<button class="btn delete-confirm-btn" type="button" onclick={confirmDeleteLine}>Delete</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
 
@@ -853,15 +1370,18 @@
 	}
 	.body {
 		display: grid;
-		grid-template-columns: 420px 1fr;
+		grid-template-columns: auto 1fr;
 		min-height: 0;
 	}
 	.left {
+		position: relative;
 		border-right: 1px solid var(--ink-line);
 		background: var(--panel-bg);
 		display: grid;
 		grid-template-rows: auto auto 1fr;
 		min-height: 0;
+		min-width: 280px;
+		max-width: 760px;
 	}
 	.left-controls {
 		padding: 14px;
@@ -934,6 +1454,8 @@
 	.left-meta {
 		display: flex;
 		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
 		padding: 10px 14px;
 		border-bottom: 1px solid var(--ink-line-soft);
 		color: var(--text-secondary);
@@ -941,54 +1463,344 @@
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 	}
+	.left-meta-copy {
+		min-width: 0;
+	}
+	.settings-btn {
+		flex: 0 0 auto;
+		height: 34px;
+		padding: 0 10px;
+		font-size: 12px;
+	}
 	.line-list {
 		overflow: auto;
 		padding: 10px;
+		display: flex;
+		flex-direction: column;
+		gap: var(--line-record-gap);
+	}
+	.line-list-head {
 		display: grid;
-		gap: 10px;
+		grid-template-columns: minmax(110px, 132px) minmax(0, 1fr);
+		gap: 12px;
+		padding: 0 10px 6px;
+		font-size: 10px;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--text-muted);
 	}
 	.line-card {
+		display: grid;
+		grid-template-columns: minmax(110px, 132px) minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 8px;
 		border: 1px solid var(--ink-line-soft);
-		background: var(--panel-bg-alt);
+		background: var(--line-record-bg);
 		border-radius: 12px;
-		padding: 10px;
+		min-height: var(--line-record-h);
+		padding: 0 6px 0 10px;
 		text-align: left;
 		cursor: pointer;
 		color: inherit;
+	}
+	.line-actions {
+		display: flex;
+		gap: 2px;
+		align-items: center;
+		flex-shrink: 0;
 	}
 	.line-card.selected {
 		border-color: var(--brass);
 		box-shadow: 0 0 0 1px var(--brass-faint) inset;
 	}
-	.line-ref-row {
+	.line-card-editing {
+		display: block;
+		min-height: auto;
+		padding: 10px;
+		cursor: default;
+	}
+	.line-edit-btn,
+	.line-delete-btn {
+		width: 22px;
+		height: 22px;
+		padding: 0;
+		border: 1px solid transparent;
+		background: transparent;
+		color: var(--text-muted);
+		border-radius: 6px;
+		font-size: 13px;
+		cursor: pointer;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-		margin-bottom: 6px;
+		justify-content: center;
+		opacity: 0;
+		transition: opacity 0.12s, color 0.12s;
+		flex-shrink: 0;
 	}
-	.line-ref {
+	.line-card:hover .line-edit-btn,
+	.line-card:hover .line-delete-btn {
+		opacity: 1;
+	}
+	.line-edit-btn:hover {
+		color: var(--brass);
+		border-color: var(--ink-line);
+		background: var(--panel-bg-alt);
+	}
+	.line-delete-btn:hover {
+		color: #c8553d;
+		border-color: rgba(200, 85, 61, 0.4);
+		background: rgba(200, 85, 61, 0.1);
+	}
+	.line-delete-btn:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	.delete-dialog {
+		width: 100%;
+		max-width: 420px;
+		border: 1px solid;
+		border-radius: 20px;
+		padding: 28px 28px 22px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+	}
+	.delete-dialog-icon {
+		font-size: 28px;
+		color: #c8553d;
+		line-height: 1;
+	}
+	.delete-dialog-title {
+		font-family: var(--font-serif);
+		font-size: 22px;
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+	.delete-dialog-body {
+		display: flex;
+		align-items: baseline;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.delete-dialog-type {
 		font-family: var(--font-mono);
 		font-size: 11px;
-		padding: 2px 7px;
-		border-radius: 999px;
-		background: var(--brass-faint);
-		color: var(--brass);
-	}
-	.line-type-chip {
-		font-size: 11px;
 		text-transform: uppercase;
-		color: var(--text-muted);
-		letter-spacing: 0.06em;
+		letter-spacing: 0.08em;
+		color: var(--brass);
+		flex-shrink: 0;
 	}
-	.line-content {
+	.delete-dialog-content {
 		font-size: 13px;
-		line-height: 1.4;
-		margin-bottom: 6px;
+		color: var(--text-secondary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 280px;
 	}
-	.line-sub {
+	.delete-dialog-sub {
 		font-size: 12px;
 		color: var(--text-muted);
+		line-height: 1.5;
+		margin: 0;
+	}
+	.delete-dialog-sub code {
+		font-family: var(--font-mono);
+		color: var(--text-secondary);
+	}
+	.delete-dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 10px;
+		margin-top: 6px;
+	}
+	.delete-confirm-btn {
+		background: #c8553d !important;
+		color: #fff !important;
+		border: 1px solid rgba(200,85,61,0.6) !important;
+		padding: 0 20px;
+	}
+	.delete-confirm-btn:hover {
+		background: #d9654b !important;
+	}
+	.line-edit-form {
+		display: flex;
+		flex-direction: column;
+		gap: 7px;
+	}
+	.line-edit-field {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+	.line-edit-label {
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--text-muted);
+	}
+	.line-type-edit-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 6px;
+	}
+	.line-edit-input {
+		height: 30px;
+		padding: 0 8px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		border-radius: 8px;
+		font-size: 12px;
+		width: 100%;
+		box-sizing: border-box;
+	}
+	.line-edit-input:focus {
+		outline: none;
+		border-color: var(--brass);
+	}
+	.line-edit-select {
+		height: 30px;
+		padding: 0 6px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		border-radius: 8px;
+		font-size: 12px;
+		width: 100%;
+		box-sizing: border-box;
+		cursor: pointer;
+	}
+	.line-edit-select:focus {
+		outline: none;
+		border-color: var(--brass);
+	}
+	.line-edit-error {
+		font-size: 11px;
+		color: #c8553d;
+	}
+	.line-edit-actions {
+		display: flex;
+		gap: 6px;
+		margin-top: 2px;
+	}
+	.line-edit-action-btn {
+		height: 28px;
+		padding: 0 10px;
+		font-size: 12px;
+		flex: 1;
+	}
+	.line-type-cell {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--brass);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.line-content-cell {
+		font-size: 13px;
+		line-height: 1.3;
+		color: var(--text-primary);
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.settings-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+	}
+	.settings-field {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.settings-field-wide {
+		grid-column: span 2;
+	}
+	.settings-color-row {
+		display: flex;
+		align-items: center;
+	}
+	.settings-color-input {
+		width: 100%;
+		height: 42px;
+		padding: 4px;
+		cursor: pointer;
+	}
+	.settings-width-row {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+	}
+	.settings-width-bound {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+	.settings-width-slider {
+		width: 100%;
+		height: 20px;
+		padding: 0;
+	}
+	.line-list-resizer {
+		position: absolute;
+		top: 0;
+		right: -8px;
+		bottom: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		user-select: none;
+		touch-action: none;
+		outline: none;
+		z-index: 3;
+	}
+	.line-list-resizer::before {
+		content: '';
+		width: 1px;
+		height: 100%;
+		background: var(--ink-line);
+		opacity: 0.9;
+		transition: background 150ms ease;
+	}
+	.line-list-resizer:hover::before,
+	.line-list-resizer.active::before,
+	.line-list-resizer:focus-visible::before {
+		background: var(--brass);
+	}
+	.line-list-resizer-grip {
+		position: absolute;
+		width: 8px;
+		height: 52px;
+		border-radius: 999px;
+		background:
+			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
+			var(--panel-bg);
+		border: 1px solid var(--ink-line-soft);
+		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
+		transition:
+			border-color 150ms ease,
+			background-color 150ms ease;
+	}
+	.line-list-resizer:hover .line-list-resizer-grip,
+	.line-list-resizer.active .line-list-resizer-grip,
+	.line-list-resizer:focus-visible .line-list-resizer-grip {
+		border-color: var(--brass);
+		background:
+			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
+			var(--panel-bg);
 	}
 	.right {
 		min-width: 0;
@@ -1586,6 +2398,12 @@
 	.dialog::-webkit-scrollbar-track {
 		background: rgba(255, 255, 255, 0.03);
 	}
+	.settings-dialog {
+		max-width: 760px;
+		min-width: 640px;
+		min-height: 0;
+		resize: none;
+	}
 	@media (max-width: 1200px) {
 		.body {
 			grid-template-columns: 1fr;
@@ -1602,6 +2420,7 @@
 		.meta-panel {
 			position: static;
 		}
+		.line-list-resizer,
 		.info-panel-resizer {
 			display: none;
 		}
@@ -1616,6 +2435,12 @@
 		}
 		.dialog-field-wide {
 			grid-column: span 2;
+		}
+		.settings-grid {
+			grid-template-columns: 1fr;
+		}
+		.settings-field-wide {
+			grid-column: auto;
 		}
 	}
 	@media (max-width: 820px) {

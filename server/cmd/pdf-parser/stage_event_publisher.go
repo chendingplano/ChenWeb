@@ -67,13 +67,13 @@ func newStageEventPublisher(logger ApiTypes.JimoLogger) (*stageEventPublisher, e
 
 	nc, err := nats.Connect(natsURL, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("connect nats: %w", err)
+		return nil, fmt.Errorf("(MID_26042701) connect nats: %w", err)
 	}
 
 	js, err := nc.JetStream()
 	if err != nil {
 		nc.Close()
-		return nil, fmt.Errorf("jetstream context: %w", err)
+		return nil, fmt.Errorf("(MID_26042702) jetstream context: %w", err)
 	}
 
 	subject := strings.TrimSpace(os.Getenv("PDF_STAGE_EVENT_SUBJECT"))
@@ -89,7 +89,7 @@ func newStageEventPublisher(logger ApiTypes.JimoLogger) (*stageEventPublisher, e
 				cfg.Subjects = append(cfg.Subjects, subject)
 				if _, err := js.UpdateStream(&cfg); err != nil {
 					nc.Close()
-					return nil, fmt.Errorf("update stream %s subjects: %w", streamName, err)
+					return nil, fmt.Errorf("(MID_26042703) update stream %s subjects: %w", streamName, err)
 				}
 				logger.Info("updated stream to include stage subject", "stream", streamName, "subject", subject)
 			}
@@ -101,7 +101,7 @@ func newStageEventPublisher(logger ApiTypes.JimoLogger) (*stageEventPublisher, e
 				Storage:   nats.FileStorage,
 			}); err != nil {
 				nc.Close()
-				return nil, fmt.Errorf("add stream %s: %w", streamName, err)
+				return nil, fmt.Errorf("(MID_26042704) add stream %s: %w", streamName, err)
 			}
 			logger.Info("created jetstream stream for stage events", "stream", streamName, "subject", subject)
 		}
@@ -112,14 +112,14 @@ func newStageEventPublisher(logger ApiTypes.JimoLogger) (*stageEventPublisher, e
 
 func (p *stageEventPublisher) Publish(evt stageEvent) error {
 	if p == nil || p.js == nil {
-		return fmt.Errorf("publisher is not initialized")
+		return fmt.Errorf("(MID_26042705) publisher is not initialized")
 	}
 	payload, err := json.Marshal(evt)
 	if err != nil {
-		return fmt.Errorf("marshal stage event: %w", err)
+		return fmt.Errorf("(MID_26042706) marshal stage event: %w", err)
 	}
 	if _, err := p.js.Publish(p.subject, payload); err != nil {
-		return fmt.Errorf("publish stage event: %w", err)
+		return fmt.Errorf("(MID_26042707) publish stage event: %w", err)
 	}
 	return nil
 }

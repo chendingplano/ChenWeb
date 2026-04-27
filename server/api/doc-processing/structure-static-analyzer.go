@@ -152,6 +152,27 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 }
 
 func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFilename string, inputPath string, out staticAnalyzeResult) error {
+	if p.OverrideOrigin {
+		hasCorrection := false
+		for _, line := range out.Lines {
+			if c := strings.TrimSpace(out.CorrectedType[line.LineNo]); c != "" && c != "unchanged" {
+				hasCorrection = true
+				break
+			}
+		}
+		if !hasCorrection {
+			return nil
+		}
+		original, err := os.ReadFile(inputPath)
+		if err != nil {
+			return fmt.Errorf("(MID_26042313) read original for backup: %w", err)
+		}
+		originPath := strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + ".origin"
+		if err := os.WriteFile(originPath, original, 0o644); err != nil {
+			return fmt.Errorf("(MID_26042314) write origin backup: %w", err)
+		}
+	}
+
 	var filePath string
 	if p.OverrideOrigin {
 		filePath = inputPath
@@ -299,12 +320,12 @@ func parseStaticInputLine(raw string) (staticInputLine, error) {
 // or -1 if no TOC is detected.
 func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, _ ApiTypes.JimoLogger) int {
 	start := -1
-	startPage := 0
+	// startPage := 0
 	for i, line := range lines {
 		n := normalizeStaticTitle(line.Content)
 		if n == "table of content" || n == "table of contents" || n == "目录" || n == "目次" || n == "目 次" {
 			start = i
-			startPage = line.PageNo
+			// startPage = line.PageNo
 			break
 		}
 	}
@@ -315,9 +336,10 @@ func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, _ A
 	firstTOC := -1
 	gapBefore := 0
 	for i := start + 1; i < len(lines); i++ {
-		if lines[i].PageNo != startPage {
-			return -1
-		}
+		// if lines[i].PageNo != startPage {
+		// 	return -1
+		// }
+
 		if isStaticTOCLine(lines[i]) {
 			firstTOC = i
 			break
@@ -360,14 +382,16 @@ func normalizeStaticTitle(s string) string {
 }
 
 func isStaticTOCLine(line staticInputLine) bool {
-	if line.OriginalLineLower != "paragraph" && line.OriginalLineLower != "list-item" {
-		return false
-	}
+	// if line.OriginalLineLower != "paragraph" && line.OriginalLineLower != "list-item" {
+	// 	return false
+	// }
+
 	s := strings.TrimSpace(line.Content)
 	if s == "" {
 		return false
 	}
-	if strings.Contains(s, "…") {
+	stripped := strings.ReplaceAll(s, " ", "")
+	if strings.Contains(stripped, "…") || strings.Contains(stripped, "...") || strings.Contains(stripped, "．．") {
 		return true
 	}
 	return staticTOCDotLeaderRE.MatchString(s)

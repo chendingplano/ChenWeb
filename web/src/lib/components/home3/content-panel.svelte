@@ -11,6 +11,7 @@
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
+	import SkillMgmtView from '$lib/components/home3/skill-mgmt-view.svelte';
 	import Canvas01      from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01     from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -153,7 +154,13 @@
 			<JetStreamEventsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-subjects'}
 			<JetStreamSubjectsView {darkMode} />
-		{:else if activeMenu?.childId === 'ap-board'}
+		{:else if activeMenu?.itemId === 'skills' && activeMenu?.childId === 'skills-active'}
+			<SkillMgmtView {darkMode} initialFilter="activated" />
+		{:else if activeMenu?.itemId === 'skills' && activeMenu?.childId === 'skills-create'}
+			<SkillMgmtView {darkMode} openAdd={true} />
+		{:else if activeMenu?.itemId === 'skills'}
+			<SkillMgmtView {darkMode} />
+	{:else if activeMenu?.childId === 'ap-board'}
 			<KanbanBoardView {darkMode} />
 		{:else if activeMenu?.childId === 'ap-agents'}
 			<AgentsView {darkMode} />

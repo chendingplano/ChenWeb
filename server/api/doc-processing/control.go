@@ -108,7 +108,11 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		processors = s.selectProcessors(evt.Operations)
 		if len(processors) == 0 {
 			if s.Logger != nil {
-				s.Logger.Info("doc processor skipped, no matching operation", "operations", evt.Operations)
+				allowed := make([]string, 0, len(s.Processors))
+				for _, p := range s.Processors {
+					allowed = append(allowed, p.Name())
+				}
+				s.Logger.Info("doc processor skipped, no matching operation", "requested", evt.Operations, "allowed", allowed)
 				s.Logger.Info("finish processing request",
 					"record_id", evt.RecordID,
 					"proc_status", "skipped",
