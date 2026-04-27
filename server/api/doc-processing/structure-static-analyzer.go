@@ -28,10 +28,11 @@ var (
 )
 
 type StaticAnalyzerProcessor struct {
-	Store       DocMetadataStore
-	Logger      ApiTypes.JimoLogger
-	Now         func() time.Time
-	ArtifactDir string
+	Store          DocMetadataStore
+	Logger         ApiTypes.JimoLogger
+	Now            func() time.Time
+	ArtifactDir    string
+	OverrideOrigin bool
 }
 
 type staticInputLine struct {
@@ -66,11 +67,13 @@ func NewStaticAnalyzerProcessor(store DocMetadataStore, logger ApiTypes.JimoLogg
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26042301")
 	}
+	extractPrompt := strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_PROMPT"))
 	return &StaticAnalyzerProcessor{
-		Store:       store,
-		Logger:      logger,
-		Now:         time.Now,
-		ArtifactDir: strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		Store:          store,
+		Logger:         logger,
+		Now:            time.Now,
+		ArtifactDir:    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		OverrideOrigin: strings.ToLower(extractPrompt) != "false",
 	}
 }
 
@@ -85,7 +88,7 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
-	if strings.TrimSpace(p.ArtifactDir) == "" {
+	if !p.OverrideOrigin && strings.TrimSpace(p.ArtifactDir) == "" {
 		return errors.New("missing ARTIFACT_DIR")
 	}
 	if p.Store == nil {
@@ -123,7 +126,7 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 	if err != nil {
 		return p.failAndPersist(ctx, rec, start, inputFilename, 0, 0, 0, err)
 	}
-	if err := p.writeCorrectedArtifact(rec.ID, inputFilename, out); err != nil {
+	if err := p.writeCorrectedArtifact(rec.ID, inputFilename, inputPath, out); err != nil {
 		return p.failAndPersist(ctx, rec, start, inputFilename, out.NumPages, out.NumLines, len(out.Lines), err)
 	}
 
@@ -148,18 +151,22 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 	return nil
 }
 
-func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFilename string, out staticAnalyzeResult) error {
-	groupID := recordID / 1000
-	runDir := filepath.Join(p.ArtifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		return fmt.Errorf("(MID_26042308) create run dir: %w", err)
+func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFilename string, inputPath string, out staticAnalyzeResult) error {
+	var filePath string
+	if p.OverrideOrigin {
+		filePath = inputPath
+	} else {
+		groupID := recordID / 1000
+		runDir := filepath.Join(p.ArtifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
+		if err := os.MkdirAll(runDir, 0o755); err != nil {
+			return fmt.Errorf("(MID_26042308) create run dir: %w", err)
+		}
+		root := strings.TrimSuffix(filepath.Base(strings.TrimSpace(inputFilename)), filepath.Ext(strings.TrimSpace(inputFilename)))
+		if root == "" {
+			root = "result"
+		}
+		filePath = filepath.Join(runDir, root+".corrected")
 	}
-
-	root := strings.TrimSuffix(filepath.Base(strings.TrimSpace(inputFilename)), filepath.Ext(strings.TrimSpace(inputFilename)))
-	if root == "" {
-		root = "result"
-	}
-	filePath := filepath.Join(runDir, root+".corrected")
 
 	var b strings.Builder
 	for i, line := range out.Lines {
@@ -167,15 +174,32 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 		if corrected == "" {
 			corrected = "unchanged"
 		}
-		row := []string{
-			strconv.Itoa(line.LineNo),
-			strconv.Itoa(line.PageNo),
-			line.OriginalLineType,
-			corrected,
-			line.Font,
-			line.FontSize,
-			line.Coordinate,
-			line.Content,
+		var row []string
+		if p.OverrideOrigin {
+			lineType := line.OriginalLineType
+			if corrected != "unchanged" {
+				lineType = corrected
+			}
+			row = []string{
+				strconv.Itoa(line.LineNo),
+				strconv.Itoa(line.PageNo),
+				lineType,
+				line.Font,
+				line.FontSize,
+				line.Coordinate,
+				line.Content,
+			}
+		} else {
+			row = []string{
+				strconv.Itoa(line.LineNo),
+				strconv.Itoa(line.PageNo),
+				line.OriginalLineType,
+				corrected,
+				line.Font,
+				line.FontSize,
+				line.Coordinate,
+				line.Content,
+			}
 		}
 		b.WriteString(strings.Join(row, "\t"))
 		if i < len(out.Lines)-1 {
