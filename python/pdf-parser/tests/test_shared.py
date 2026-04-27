@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 from shared import decode_status, has_operation, upsert_status, replace_status_entry
-from shared import file_md5, copy_file, unique_path, resolve_source_path, choose_repo_dir
+from shared import file_md5, copy_file, unique_path, resolve_source_path, choose_repo_dir, relativize_to_data_home, relativize_to_backup_root, resolve_repo_path, resolve_backup_path
 from shared import fetch_candidates, fetch_record_by_id, find_duplicate_processed_record, has_md5_record, record_duplicated
 
 
@@ -147,6 +147,30 @@ class TestResolveSourcePath:
 
     def test_no_staging_returns_filename(self):
         assert resolve_source_path("file.pdf", "") == "file.pdf"
+
+
+class TestRepoPathHelpers:
+    def test_relativize_to_data_home_strips_prefix(self):
+        assert relativize_to_data_home(
+            "/Users/cding/Apps/SemOS/Artifacts/0/86/std_33830.pdf",
+            "/Users/cding/Apps/SemOS",
+        ) == "Artifacts/0/86/std_33830.pdf"
+
+    def test_resolve_repo_path_joins_relative_path_to_repo_root(self):
+        assert resolve_repo_path("Artifacts/0/86/std_33830.pdf", ["/Users/cding/Apps/SemOS"]) == \
+            "/Users/cding/Apps/SemOS/Artifacts/0/86/std_33830.pdf"
+
+    def test_relativize_to_backup_root_strips_parent_prefix(self):
+        assert relativize_to_backup_root(
+            "/Users/cding/Apps/Backup/std_20039_1.pdf",
+            "/Users/cding/Apps/Backup",
+        ) == "Backup/std_20039_1.pdf"
+
+    def test_resolve_backup_path_joins_relative_backup_path(self):
+        assert resolve_backup_path(
+            "Backup/std_20039_1.pdf",
+            "/Users/cding/Apps/Backup",
+        ) == "/Users/cding/Apps/Backup/std_20039_1.pdf"
 
 
 class TestChooseRepoDir:

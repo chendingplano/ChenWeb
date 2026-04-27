@@ -13,6 +13,7 @@
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import ChunkMgmtView from '$lib/components/home3/chunk-mgmt-view.svelte';
 	import KnowledgeStoreView from '$lib/components/home3/knowledge-store-view.svelte';
+	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -64,6 +65,8 @@
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
 	let hoverBg = $derived(darkMode ? 'rgba(45,51,72,0.6)' : 'rgba(228,230,235,0.7)');
+
+	let needsActiveStore = $derived(activeSection !== 'kb-search');
 
 	function selectSection(id: KbSectionId) {
 		activeSection = id;
@@ -136,10 +139,54 @@
 					{activeItem.label}
 				</h1>
 			</div>
+			{#if needsActiveStore}
+				{#if knowledgeStoreState.activeStore}
+					<div
+						class="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full"
+						style="background:{accentTint}; border:1px solid {accent}30;"
+					>
+						<span style="font-size:11px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">Active Store</span>
+						<span style="font-size:13px; font-weight:600; color:{accent}; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{knowledgeStoreState.activeStore.ks_name}</span>
+						<span style="font-size:11px; color:{textMuted}; font-family:monospace;">#{knowledgeStoreState.activeStore.id}</span>
+					</div>
+				{:else}
+					<div
+						class="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full"
+						style="background:rgba(239,68,68,0.10); border:1px solid rgba(239,68,68,0.25);"
+					>
+						<span style="font-size:13px; color:#ef4444;">No active store</span>
+					</div>
+				{/if}
+			{/if}
 		</header>
 
 		<div class="min-h-0 flex-1 overflow-hidden">
-			{#if activeSection === 'kb-search'}
+			{#if needsActiveStore && !knowledgeStoreState.activeStore}
+				<div
+					class="h-full flex flex-col items-center justify-center p-8"
+					style="background:{contentBg};"
+				>
+					<div
+						class="rounded-2xl p-8 text-center"
+						style="background:{panelBg}; border:1px solid {borderColor}; max-width:420px; width:100%;"
+					>
+						<div style="font-size:2.5rem; margin-bottom:1rem; opacity:0.35; color:{textSecondary};">◎</div>
+						<div style="font-size:17px; font-weight:700; color:{textPrimary}; margin-bottom:0.5rem;">
+							No Knowledge Store Selected
+						</div>
+						<p style="font-size:13px; color:{textSecondary}; line-height:1.6; margin-bottom:1.5rem;">
+							This section operates on the active knowledge store. Go to <strong style="color:{textPrimary};">Knowledge Stores</strong> and click a card to select one before continuing.
+						</p>
+						<button
+							type="button"
+							onclick={() => selectSection('kb-search')}
+							style="padding:10px 20px; border-radius:8px; background:{accent}; color:white; font-size:14px; font-weight:600; border:none; cursor:pointer;"
+						>
+							Go to Knowledge Stores
+						</button>
+					</div>
+				</div>
+			{:else if activeSection === 'kb-search'}
 				<KnowledgeStoreView {darkMode} />
 			{:else if activeSection === 'kb-import'}
 				<KbImportView {darkMode} />

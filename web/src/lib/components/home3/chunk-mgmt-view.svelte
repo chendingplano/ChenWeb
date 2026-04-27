@@ -1,5 +1,8 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { onMount, tick } from 'svelte';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import { appAuthStore } from '@chendingplano/shared';
 	import {
 		getKbInput,
 		listKbInputs,
@@ -9,6 +12,17 @@
 		type RawLine
 	} from '$lib/services/kbService';
 	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
+	import {
+		CHUNK_LIST_MAX_WIDTH,
+		CHUNK_LIST_MIN_WIDTH,
+		ZOOM_MIN,
+		ZOOM_MAX,
+		ZOOM_STEP,
+		CHUNK_PANEL_DEFAULT_SETTINGS,
+		clampChunkListWidth,
+		readChunkPanelSettings,
+		writeChunkPanelSettings
+	} from './chunk-mgmt-settings.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -26,9 +40,7 @@
 	const fontSerif = "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
 	const fontMono = "'JetBrains Mono', 'IBM Plex Mono', monospace";
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
-	const INFO_PANEL_DEFAULT_WIDTH = 270;
-	const INFO_PANEL_MIN_WIDTH = 140;
-	const INFO_PANEL_MAX_WIDTH = 420;
+	type ChunkPanelSettings = typeof CHUNK_PANEL_DEFAULT_SETTINGS;
 
 	let recordIdInput = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
@@ -37,8 +49,12 @@
 	let highlightSelectionVersion = $state(0);
 	let loading = $state(false);
 	let errorMsg = $state('');
-	let infoPanelWidth = $state(INFO_PANEL_DEFAULT_WIDTH);
 	let infoPanelResizing = $state(false);
+	let chunkListResizing = $state(false);
+	let infoPanelWidth = $state(270);
+	let chunkListSettingsOpen = $state(false);
+	let chunkListSettingsHydrated = $state(false);
+	let chunkPanelSettings = $state<ChunkPanelSettings>({ ...CHUNK_PANEL_DEFAULT_SETTINGS });
 	let searchOpen = $state(false);
 	let searchRecordId = $state('');
 	let searchTitle = $state('');
@@ -58,9 +74,10 @@
 	let searchSelected = $state<number | null>(null);
 
 	let docPage = $state(1);
-	let pdfZoom = $state(0.5);
+	let pdfZoom = $state(CHUNK_PANEL_DEFAULT_SETTINGS.pdfZoom);
 	let pdfLoading = $state(false);
 	let pdfError = $state('');
+	let iframeRevision = $state(0);
 	let pdfNumPages = $state(0);
 	let pdfRenderedPages = $state<number[]>([]);
 	let pdfStageEl = $state<HTMLDivElement | null>(null);
@@ -116,7 +133,8 @@
 	let isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
 	let fileUrl = $derived.by(() => {
 		if (!currentInput) return '';
-		return `/api/v1/kb/inputs/${currentInput.id}/file#page=${docPage}&zoom=page-width`;
+		const rev = isPdf ? '' : `&_r=${iframeRevision}`;
+		return `/api/v1/kb/inputs/${currentInput.id}/file#page=${docPage}&zoom=page-width${rev}`;
 	});
 
 	let selectedChunk = $derived.by(() => {
@@ -146,6 +164,40 @@
 	});
 
 	let selectedBBoxes = $derived.by(() => selectedChunk?.bounding_boxes ?? []);
+	let chunkListWidth = $derived(chunkPanelSettings.chunkListWidth);
+	let chunkCardBackground = $derived(chunkPanelSettings.chunkCardBackground);
+	let summaryBackground = $derived(chunkPanelSettings.summaryBackground);
+	let contentBackground = $derived(chunkPanelSettings.contentBackground);
+
+	function getChunkSettingsUserId(): string | null {
+		return appAuthStore.getUser()?.id ?? null;
+	}
+
+	function applyChunkPanelSettings(next: Partial<ChunkPanelSettings>) {
+		const updated = {
+			...chunkPanelSettings,
+			...next,
+			chunkListWidth: clampChunkListWidth(next.chunkListWidth ?? chunkPanelSettings.chunkListWidth)
+		};
+		chunkPanelSettings = updated;
+		if (typeof next.pdfZoom === 'number') pdfZoom = next.pdfZoom;
+	}
+
+	function openChunkSettings() {
+		chunkListSettingsOpen = true;
+	}
+
+	function closeChunkSettings() {
+		chunkListSettingsOpen = false;
+	}
+
+	function resetChunkSettings() {
+		chunkPanelSettings = { ...CHUNK_PANEL_DEFAULT_SETTINGS };
+	}
+
+	function clampInfoPanelWidth(width: number): number {
+		return Math.min(420, Math.max(140, Math.round(width)));
+	}
 
 	function renderChunkHighlights(
 		pageNo: number,
@@ -262,20 +314,59 @@
 		if (first && first.page_number > 0) {
 			docPage = first.page_number;
 		}
-		if (isPdf) {
-			await tick();
-			await renderSinglePdfPage(docPage);
-			drawPdfHighlights();
-			scrollPdfToPage(docPage, 'auto');
+		if (!isPdf) {
+			iframeRevision += 1;
 		}
-	}
-
-	function clampInfoPanelWidth(width: number): number {
-		return Math.min(INFO_PANEL_MAX_WIDTH, Math.max(INFO_PANEL_MIN_WIDTH, Math.round(width)));
 	}
 
 	function adjustInfoPanelWidth(delta: number) {
 		infoPanelWidth = clampInfoPanelWidth(infoPanelWidth + delta);
+	}
+
+	function startChunkListResize(event: PointerEvent) {
+		event.preventDefault();
+		const handle = event.currentTarget as HTMLElement | null;
+		const startX = event.clientX;
+		const startWidth = chunkListWidth;
+		chunkListResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		handle?.setPointerCapture?.(event.pointerId);
+
+		const handleMove = (moveEvent: PointerEvent) => {
+			applyChunkPanelSettings({
+				chunkListWidth: clampChunkListWidth(startWidth + (moveEvent.clientX - startX))
+			});
+		};
+		const handleUp = (upEvent: PointerEvent) => {
+			chunkListResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			handle?.releasePointerCapture?.(upEvent.pointerId);
+			window.removeEventListener('pointermove', handleMove);
+			window.removeEventListener('pointerup', handleUp);
+			window.removeEventListener('pointercancel', handleUp);
+		};
+
+		window.addEventListener('pointermove', handleMove);
+		window.addEventListener('pointerup', handleUp, { once: true });
+		window.addEventListener('pointercancel', handleUp, { once: true });
+	}
+
+	function onChunkListResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			applyChunkPanelSettings({ chunkListWidth: clampChunkListWidth(chunkListWidth - 16) });
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			applyChunkPanelSettings({ chunkListWidth: clampChunkListWidth(chunkListWidth + 16) });
+		} else if (event.key === 'Home') {
+			event.preventDefault();
+			applyChunkPanelSettings({ chunkListWidth: CHUNK_LIST_MIN_WIDTH });
+		} else if (event.key === 'End') {
+			event.preventDefault();
+			applyChunkPanelSettings({ chunkListWidth: CHUNK_LIST_MAX_WIDTH });
+		}
 	}
 
 	function startInfoPanelResize(event: PointerEvent) {
@@ -315,10 +406,10 @@
 			adjustInfoPanelWidth(16);
 		} else if (event.key === 'Home') {
 			event.preventDefault();
-			infoPanelWidth = INFO_PANEL_MIN_WIDTH;
+			infoPanelWidth = 140;
 		} else if (event.key === 'End') {
 			event.preventDefault();
-			infoPanelWidth = INFO_PANEL_MAX_WIDTH;
+			infoPanelWidth = 420;
 		}
 	}
 
@@ -681,12 +772,23 @@
 	});
 
 	onMount(() => {
+		if (browser) {
+			chunkPanelSettings = readChunkPanelSettings(localStorage, getChunkSettingsUserId());
+			pdfZoom = chunkPanelSettings.pdfZoom;
+			chunkListSettingsHydrated = true;
+		}
 		return () => {
 			infoPanelResizing = false;
+			chunkListResizing = false;
 			document.body.style.cursor = '';
 			document.body.style.userSelect = '';
 			if (pdfDoc?.destroy) void pdfDoc.destroy();
 		};
+	});
+
+	$effect(() => {
+		if (!browser || !chunkListSettingsHydrated) return;
+		writeChunkPanelSettings(localStorage, getChunkSettingsUserId(), { ...chunkPanelSettings, pdfZoom });
 	});
 </script>
 
@@ -706,6 +808,9 @@
 		--font-serif:{fontSerif};
 		--font-mono:{fontMono};
 		--font-sans:{fontSans};
+		--chunk-card-bg:{chunkCardBackground};
+		--chunk-summary-bg:{summaryBackground};
+		--chunk-content-bg:{contentBackground};
 	"
 >
 	<header class="header">
@@ -714,9 +819,15 @@
 			<h1 class="display">Topic Chunks</h1>
 			<div class="subtitle">Review semantic chunk topics and map each chunk back to source PDF regions.</div>
 		</div>
+		<div class="header-actions">
+			<button class="btn btn-ghost header-settings-btn" type="button" onclick={openChunkSettings}>
+				<SettingsIcon size={15} />
+				Settings
+			</button>
+		</div>
 	</header>
 
-	<div class="body">
+	<div class="body" style={`grid-template-columns:${chunkListWidth}px 14px 1fr;`}>
 		<aside class="left">
 			<div class="left-controls">
 				<label class="field">
@@ -754,8 +865,10 @@
 			</div>
 
 			<div class="left-meta">
-				<div class="left-meta-title">Chunks</div>
-				<div class="left-meta-count">{chunks.length} found</div>
+				<div class="left-meta-copy">
+					<div class="left-meta-title">Chunks</div>
+					<div class="left-meta-count">{chunks.length} found</div>
+				</div>
 			</div>
 
 			<div class="chunk-list">
@@ -772,19 +885,22 @@
 							class:selected={selectedSeqNo === chunk.seqno}
 							onclick={() => selectChunk(chunk)}
 						>
-							<div class="chunk-line1">
-								<span class="seq">#{chunk.seqno}</span>
-								<span class="type">{chunk.topic_type}</span>
+							<div class="chunk-summary">
+								<div class="chunk-section-label">Summary</div>
+								<div class="chunk-line1">
+									<span class="seq">#{chunk.seqno}</span>
+									<span class="type">{chunk.topic_type}</span>
+								</div>
+								<div class="chunk-topic">{chunk.topic}</div>
+								<div class="chunk-keywords">{(chunk.keywords ?? []).join(', ') || '—'}</div>
 							</div>
-							<div class="chunk-topic">{chunk.topic}</div>
-							<div class="chunk-keywords">{(chunk.keywords ?? []).join(', ') || '—'}</div>
 							<div class="chunk-content">
+								<div class="chunk-section-label">Content</div>
 								{#if (chunk.content_lines ?? []).length === 0}
 									<div class="chunk-content-line muted">No source lines found.</div>
 								{:else}
 									{#each chunk.content_lines as ln (`${chunk.seqno}-${ln.page_number}-${ln.line_number}`)}
 										<div class="chunk-content-line">
-											<span class="ln-ref">P{ln.page_number}:L{ln.line_number}</span>
 											<span>{ln.content}</span>
 										</div>
 									{/each}
@@ -795,6 +911,16 @@
 				{/if}
 			</div>
 		</aside>
+		<button
+			type="button"
+			class="chunk-list-resizer"
+			class:active={chunkListResizing}
+			aria-label="Resize chunks list"
+			onpointerdown={startChunkListResize}
+			onkeydown={onChunkListResizerKeydown}
+		>
+			<span class="chunk-list-resizer-grip" aria-hidden="true"></span>
+		</button>
 
 		<section class="right">
 			<div class="right-toolbar">
@@ -1125,6 +1251,144 @@
 	</div>
 {/if}
 
+{#if chunkListSettingsOpen}
+	<div
+		class="dialog-overlay"
+		aria-hidden="true"
+		onclick={closeChunkSettings}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') closeChunkSettings();
+		}}
+	>
+		<div
+			class="dialog settings-dialog"
+			style="background:{panelBg}; border-color:{inkLine};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			tabindex="0"
+		>
+			<div class="dialog-head">
+				<div>
+					<div class="dialog-eyebrow">Preferences</div>
+					<h2 class="dialog-title">Chunk View Settings</h2>
+					<p class="dialog-subtitle">
+						Adjust the chunk list layout and colors. These preferences are saved for the current user.
+					</p>
+				</div>
+			</div>
+
+			<div class="dialog-scroll">
+				<div class="dialog-controls">
+					<div class="dialog-section">
+						<div class="dialog-section-head">
+							<div class="dialog-section-title">Appearance</div>
+							<div class="dialog-section-copy">Set the saved defaults used by this chunk viewer.</div>
+						</div>
+						<div class="settings-grid">
+							<label class="field dialog-field settings-field">
+								<span class="field-label">Chunk background color</span>
+								<div class="settings-color-row">
+									<input
+										class="settings-color-input"
+										type="color"
+										value={chunkPanelSettings.chunkCardBackground}
+										oninput={(e) =>
+											applyChunkPanelSettings({
+												chunkCardBackground: (e.currentTarget as HTMLInputElement).value
+											})}
+									/>
+								</div>
+							</label>
+							<label class="field dialog-field settings-field">
+								<span class="field-label">Summary block background color</span>
+								<div class="settings-color-row">
+									<input
+										class="settings-color-input"
+										type="color"
+										value={chunkPanelSettings.summaryBackground}
+										oninput={(e) =>
+											applyChunkPanelSettings({
+												summaryBackground: (e.currentTarget as HTMLInputElement).value
+											})}
+									/>
+								</div>
+							</label>
+							<label class="field dialog-field settings-field">
+								<span class="field-label">Content block background color</span>
+								<div class="settings-color-row">
+									<input
+										class="settings-color-input"
+										type="color"
+										value={chunkPanelSettings.contentBackground}
+										oninput={(e) =>
+											applyChunkPanelSettings({
+												contentBackground: (e.currentTarget as HTMLInputElement).value
+											})}
+									/>
+								</div>
+							</label>
+							<div class="field dialog-field settings-field settings-field-wide">
+								<span class="field-label">CHUNKS list width ({chunkPanelSettings.chunkListWidth}px)</span>
+								<div class="settings-width-row">
+									<span class="settings-width-bound">{CHUNK_LIST_MIN_WIDTH}</span>
+									<input
+										type="range"
+										min={CHUNK_LIST_MIN_WIDTH}
+										max={CHUNK_LIST_MAX_WIDTH}
+										step="4"
+										value={chunkPanelSettings.chunkListWidth}
+										oninput={(e) =>
+											applyChunkPanelSettings({
+												chunkListWidth: Number((e.currentTarget as HTMLInputElement).value)
+											})}
+										class="settings-width-slider"
+									/>
+									<span class="settings-width-bound">{CHUNK_LIST_MAX_WIDTH}</span>
+								</div>
+								<div class="dialog-section-copy" style="margin-top:6px;">
+									You can also drag the divider beside the list to resize.
+								</div>
+							</div>
+							<label class="field dialog-field settings-field settings-field-wide">
+								<span class="field-label">Zoom percent ({Math.round(pdfZoom * 100)}%)</span>
+								<div class="settings-width-row">
+									<span class="settings-width-bound">{Math.round(ZOOM_MIN * 100)}%</span>
+									<input
+										type="range"
+										min={ZOOM_MIN}
+										max={ZOOM_MAX}
+										step={ZOOM_STEP}
+										value={pdfZoom}
+										oninput={(e) => {
+											const v = Number((e.currentTarget as HTMLInputElement).value);
+											pdfZoom = v;
+											applyChunkPanelSettings({ pdfZoom: v });
+										}}
+										class="settings-width-slider"
+									/>
+									<span class="settings-width-bound">{Math.round(ZOOM_MAX * 100)}%</span>
+								</div>
+							</label>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="dialog-foot">
+				<div class="dialog-foot-hint">Updates are saved automatically.</div>
+				<div class="dialog-foot-buttons">
+					<button class="btn btn-primary dialog-select-btn" type="button" onclick={resetChunkSettings}>Reset</button>
+					<button class="btn btn-primary dialog-select-btn" type="button" onclick={closeChunkSettings}>
+						Close
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
 
@@ -1139,16 +1403,18 @@
 	.header {
 		display: flex;
 		justify-content: space-between;
+		align-items: flex-start;
 		padding: 18px 22px;
 		border-bottom: 1px solid var(--ink-line);
 		background: linear-gradient(180deg, var(--panel-bg), var(--panel-bg-alt));
 	}
+	.header-actions { display: flex; align-items: center; gap: 10px; }
+	.header-settings-btn { white-space: nowrap; }
 	.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 	.display { font-family: var(--font-serif); font-size: 32px; line-height: 1.1; margin: 6px 0 2px; }
 	.subtitle { color: var(--text-secondary); font-size: 14px; }
 	.body {
 		display: grid;
-		grid-template-columns: 420px 1fr;
 		min-height: 0;
 	}
 	.left {
@@ -1192,24 +1458,85 @@
 	.left-meta {
 		display: flex;
 		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
 		padding: 10px 14px;
 		border-bottom: 1px solid var(--ink-line-soft);
-		color: var(--text-secondary);
-		font-size: 12px;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
+	}
+	.left-meta-copy { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+	.mono { font-family: var(--font-mono); }
+	.chunk-list-resizer {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 14px;
+		padding: 0;
+		border: 0;
+		background: var(--page-bg);
+		cursor: col-resize;
+		user-select: none;
+		touch-action: none;
+		outline: none;
+	}
+	.chunk-list-resizer::before {
+		content: '';
+		width: 1px;
+		height: 100%;
+		background: var(--ink-line);
+		opacity: 0.9;
+		transition: background 150ms ease;
+	}
+	.chunk-list-resizer:hover::before,
+	.chunk-list-resizer.active::before,
+	.chunk-list-resizer:focus-visible::before {
+		background: var(--brass);
+	}
+	.chunk-list-resizer-grip {
+		position: absolute;
+		width: 8px;
+		height: 42px;
+		border-radius: 999px;
+		background:
+			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
+			var(--panel-bg);
+		border: 1px solid var(--ink-line-soft);
+		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
+	}
+	.chunk-list-resizer:hover .chunk-list-resizer-grip,
+	.chunk-list-resizer.active .chunk-list-resizer-grip,
+	.chunk-list-resizer:focus-visible .chunk-list-resizer-grip {
+		border-color: var(--brass);
+		background:
+			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
+			var(--panel-bg);
 	}
 	.chunk-list { overflow: auto; padding: 10px; display: grid; gap: 10px; }
 	.chunk-card {
 		border: 1px solid var(--ink-line-soft);
-		background: var(--panel-bg-alt);
+		background: var(--chunk-card-bg);
 		border-radius: 12px;
 		padding: 10px;
 		text-align: left;
 		cursor: pointer;
 		color: inherit;
+		display: grid;
+		gap: 8px;
 	}
 	.chunk-card.selected { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass-faint) inset; }
+	.chunk-summary,
+	.chunk-content {
+		border-radius: 10px;
+		padding: 10px;
+	}
+	.chunk-summary { background: var(--chunk-summary-bg); }
+	.chunk-content { background: var(--chunk-content-bg); display: grid; gap: 6px; }
+	.chunk-section-label {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
 	.chunk-line1 { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
 	.seq {
 		font-family: var(--font-mono);
@@ -1222,9 +1549,7 @@
 	.type { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.06em; }
 	.chunk-topic { font-weight: 700; margin-bottom: 4px; }
 	.chunk-keywords { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-	.chunk-content { display: grid; gap: 3px; }
-	.chunk-content-line { font-size: 12px; color: var(--text-secondary); display: grid; grid-template-columns: auto 1fr; gap: 6px; }
-	.ln-ref { color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; }
+	.chunk-content-line { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
 	.muted { color: var(--text-muted); }
 	.right { min-width: 0; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 	.right-toolbar {
@@ -1239,29 +1564,6 @@
 	.name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.stats { display: flex; gap: 14px; color: var(--text-secondary); font-size: 12px; }
 	.doc-empty { padding: 20px; color: var(--text-secondary); }
-	.doc-page-bar {
-		display: flex;
-		gap: 8px;
-		align-items: center;
-		padding: 10px 14px;
-		border-bottom: 1px solid var(--ink-line-soft);
-		background: var(--panel-bg-alt);
-	}
-	.page-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 30px;
-		height: 30px;
-		border: 1px solid var(--ink-line);
-		border-radius: 8px;
-		background: var(--panel-bg);
-		text-decoration: none;
-		color: var(--text-primary);
-	}
-	.page-input { width: 72px; height: 30px; }
-	.pdf-stage { min-height: 0; overflow: auto; padding: 14px; }
-	.pdf-layout { display: grid; grid-template-columns: 240px 1fr; gap: 14px; }
 	.info-panel-shell {
 		position: sticky;
 		top: 6px;
@@ -1340,19 +1642,6 @@
 	.bbox-row { margin-bottom: 8px; border-bottom: 1px dashed var(--ink-line-soft); padding-bottom: 8px; }
 	.bbox-page { font-size: 12px; color: var(--text-secondary); }
 	.bbox-coord { font-family: var(--font-mono); font-size: 12px; }
-	.pdf-canvas-col { display: grid; gap: 14px; }
-	.pdf-page {
-		position: relative;
-		background: #fff;
-		width: fit-content;
-		margin: 0 auto;
-		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-	}
-	.pdf-overlay {
-		position: absolute;
-		inset: 0;
-		pointer-events: none;
-	}
 	:global(.pdf-highlight) {
 		position: absolute;
 		background: rgba(212, 162, 76, 0.28);
@@ -1630,10 +1919,69 @@
 	}
 	.dialog-scroll::-webkit-scrollbar-track,
 	.dialog::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.03); }
+	.settings-dialog {
+		max-width: 760px;
+		min-width: 640px;
+		min-height: 0;
+		resize: none;
+	}
+	.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+	.settings-field { background: #1a202b; }
+	.settings-field-wide { grid-column: 1 / -1; }
+	.settings-color-row { display: flex; align-items: center; gap: 12px; }
+	.settings-color-input {
+		width: 52px;
+		min-width: 52px;
+		padding: 0;
+		border-radius: 10px;
+		overflow: hidden;
+		cursor: pointer;
+	}
+	.settings-width-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.settings-width-slider {
+		flex: 1;
+		min-width: 0;
+		height: 6px;
+		appearance: none;
+		background: rgba(212, 162, 76, 0.18);
+		border-radius: 999px;
+		outline: none;
+		cursor: pointer;
+	}
+	.settings-width-slider::-webkit-slider-thumb {
+		appearance: none;
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		background: #e8ce8a;
+		border: 2px solid rgba(0, 0, 0, 0.3);
+		box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+		cursor: pointer;
+	}
+	.settings-width-slider::-moz-range-thumb {
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		background: #e8ce8a;
+		border: 2px solid rgba(0, 0, 0, 0.3);
+		box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+		cursor: pointer;
+	}
+	.settings-width-bound {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-muted);
+		min-width: 28px;
+		text-align: center;
+	}
 	@media (max-width: 1200px) {
 		.body { grid-template-columns: 1fr; }
 		.left { max-height: 44vh; border-right: none; border-bottom: 1px solid var(--ink-line); }
-		.pdf-layout { grid-template-columns: 1fr; }
+		.chunk-list-resizer { display: none; }
 		.info-panel-shell,
 		.meta-panel { position: static; }
 		.info-panel-resizer { display: none; }
@@ -1653,18 +2001,22 @@
 			min-height: 0;
 			resize: none;
 		}
+		.settings-dialog { min-width: 0; }
 		.dialog-head,
 		.dialog-controls,
 		.dialog-foot { padding-left: 18px; padding-right: 18px; }
 		.dialog-grid,
 		.dialog-grid-primary,
-		.dialog-grid-time { grid-template-columns: 1fr; }
+		.dialog-grid-time,
+		.settings-grid { grid-template-columns: 1fr; }
 		.dialog-field-wide { grid-column: auto; }
 		.dialog-section-head,
 		.dialog-toolbar,
 		.dialog-foot { flex-direction: column; align-items: flex-start; }
 		.dialog-toolbar-actions,
 		.dialog-foot-buttons { width: 100%; }
+		.left-meta { align-items: flex-start; flex-direction: column; }
+		.settings-color-row { flex-direction: column; align-items: stretch; }
 		.dialog-search-btn,
 		.dialog-select-btn,
 		.dialog-foot-buttons .btn { width: 100%; }

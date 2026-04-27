@@ -45,6 +45,7 @@ export type ListKbInputsParams = {
 	endTime: string;
 	page: number;
 	pageSize: number;
+	ksStoreId?: number | null;
 	recordId?: string;
 	name?: string;
 	title?: string;
@@ -68,6 +69,7 @@ function buildQuery(params: ListKbInputsParams): string {
 	const query = new URLSearchParams();
 	query.set('doc_type', params.docType);
 	query.set('parse_state', params.parseState);
+	if (params.ksStoreId != null) query.set('ks_store_id', String(params.ksStoreId));
 	if (params.recordId?.trim()) query.set('record_id', params.recordId.trim());
 	if (params.name?.trim()) query.set('name', params.name.trim());
 	if (params.title?.trim()) query.set('title', params.title.trim());
@@ -182,7 +184,10 @@ export type UpdateKbInputPayload = {
 	error_msg?: string | null;
 };
 
-export async function updateKbInput(id: number, payload: UpdateKbInputPayload): Promise<GetKbInputResponse> {
+export async function updateKbInput(
+	id: number,
+	payload: UpdateKbInputPayload
+): Promise<GetKbInputResponse> {
 	const response = await fetch(`${BASE}/inputs/${encodeURIComponent(String(id))}`, {
 		method: 'PUT',
 		credentials: 'same-origin',
@@ -223,7 +228,9 @@ export type UploadKbInputsResponse = {
 	ids: number[];
 };
 
-export async function uploadKbInputs(payload: UploadKbInputsPayload): Promise<UploadKbInputsResponse> {
+export async function uploadKbInputs(
+	payload: UploadKbInputsPayload
+): Promise<UploadKbInputsResponse> {
 	const form = new FormData();
 	form.set('type', payload.type);
 	form.set('parser_name', payload.parser_name);
@@ -397,7 +404,10 @@ export type CreateKnowledgeStorePayload = {
 export type UpdateKnowledgeStorePayload = Partial<CreateKnowledgeStorePayload>;
 
 export async function listKnowledgeStores(): Promise<ListKnowledgeStoresResponse> {
-	return fetchOrThrow<ListKnowledgeStoresResponse>(`${BASE}/stores`, 'Failed to list knowledge stores');
+	return fetchOrThrow<ListKnowledgeStoresResponse>(
+		`${BASE}/stores`,
+		'Failed to list knowledge stores'
+	);
 }
 
 export async function createKnowledgeStore(

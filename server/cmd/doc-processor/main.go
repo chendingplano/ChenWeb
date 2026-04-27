@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -125,7 +124,7 @@ func main() {
 			docprocessing.NewStaticAnalyzerProcessor(inputStore, logger),
 			docprocessing.NewChunkingProcessor(inputStore, chunkSvc, logger),
 			docprocessing.NewExtractDocMetadataProcessor(inputStore, llmClient, logger),
-			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, slog.Default()),
+			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
 		},
 	}
 

@@ -43,6 +43,9 @@ from shared import (
     copy_file,
     unique_path,
     choose_repo_dir,
+    relativize_to_data_home,
+    relativize_to_backup_root,
+    resolve_repo_path,
 )
 from parser_base import ParserBackend
 from parser_docling import DoclingParser
@@ -83,19 +86,20 @@ def _pg_dsn() -> dict:
 
 
 def _repo_dirs() -> list[str]:
-    raw = _env("PDF_REPO_DIR") or _env("PDF_REPO_DIRS") or _env("DATA_HOME_DIR")
+    raw = _env("DATA_HOME_DIR")
     if raw:
         return [p.strip() for p in raw.split(",") if p.strip()]
-    return ["/tmp/pdf-repo"]
 
+    log.error("(MID_2026042601) env var DATA_HOME_DIR not defined!")
+    return ["/tmp/pdf-repo"]
 
 def _backup_dir() -> str:
     custom = _env("PDF_BACKUP_DIR")
     if custom:
         return custom
-    base = _env("DATA_BACKUP_DIR") or "/tmp/pdf-backup"
-    return os.path.join(base, "pdf_files")
 
+    log.error("(MID_2026042601) PDF_BACKUP_DIR not defined")
+    return "/tmp/pdf-backup"
 
 def _staging_dir() -> str:
     return _env("STAGING_DIR") or _env("PDF_STAGING_DIR") or _env("DATA_STAGING_DIR")
@@ -267,15 +271,20 @@ def _resolve_input_file(
     # 2. Also check file_name (the Go staging service may have already moved
     #    the file to the home/repo directory and recorded it in file_name).
     file_name = (rec.get("file_name") or "").strip()
-    if file_name and os.path.isfile(file_name):
-        return file_name, False
+    resolved_file_name = resolve_repo_path(file_name, repo_dirs)
+    if resolved_file_name and os.path.isfile(resolved_file_name):
+        return resolved_file_name, False
+
+    resolved_result_name = resolve_repo_path(result_filename, repo_dirs)
+    if resolved_result_name and os.path.isfile(resolved_result_name):
+        return resolved_result_name, False
 
     # 3. File not in staging or file_name path.  Check the record's result
     #    directory — look for result_filename first, then fall back to the
     #    original filename (staging_filename or basename of file_name).
     names_to_try: list[str] = []
     if result_filename:
-        names_to_try.append(result_filename)
+        names_to_try.append(os.path.basename(result_filename))
     if staging_filename:
         names_to_try.append(staging_filename)
     if file_name:
@@ -408,7 +417,11 @@ def _process_record(
         ms_used = int((datetime.now() - parse_start_dt).total_seconds() * 1000)
         raw_status = record_parsed_success(
             conn, rec_id, raw_status, parse_start, ms_used,
-            result_path, repo_pdf_path, backup_path, parser_name, total_pages,
+            relativize_to_data_home(result_path),
+            relativize_to_data_home(repo_pdf_path),
+            relativize_to_backup_root(backup_path),
+            parser_name,
+            total_pages,
         )
 
         # Remove source from staging after successful processing
@@ -424,7 +437,7 @@ def _process_record(
             "type": "pdf",
             "status": "success",
             "file_format": "json",
-            "result_filename": result_path,
+            "result_filename": relativize_to_data_home(result_path),
             "error": "",
         }
 

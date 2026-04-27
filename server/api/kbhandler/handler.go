@@ -66,6 +66,7 @@ type errorResponse struct {
 
 type listInputsFilters struct {
 	RecordID        *int64
+	KsStoreID       *int64
 	DocType         string
 	ParseState      string
 	Name            string
@@ -101,6 +102,14 @@ func ListInputs(c echo.Context) error {
 		})
 	}
 
+	ksStoreID, err := parseOptionalPositiveInt64(c.QueryParam("ks_store_id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("invalid ks_store_id: %v (CWB_KB_015)", err),
+		})
+	}
+
 	createStartTime, err := parseTimeQuery(firstNonEmpty(c.QueryParam("create_start_time"), c.QueryParam("start_time")))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{
@@ -132,6 +141,7 @@ func ListInputs(c echo.Context) error {
 
 	filters := listInputsFilters{
 		RecordID:        recordID,
+		KsStoreID:       ksStoreID,
 		DocType:         c.QueryParam("doc_type"),
 		ParseState:      c.QueryParam("parse_state"),
 		Name:            c.QueryParam("name"),
@@ -482,6 +492,9 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 
 	if filters.RecordID != nil {
 		whereParts = append(whereParts, fmt.Sprintf("i.id = %s", nextArg(*filters.RecordID)))
+	}
+	if filters.KsStoreID != nil {
+		whereParts = append(whereParts, fmt.Sprintf("i.ks_store_id = %s", nextArg(*filters.KsStoreID)))
 	}
 
 	docType := strings.TrimSpace(strings.ToLower(filters.DocType))

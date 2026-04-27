@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/pathutil"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -725,10 +726,14 @@ func GetInputFile(c echo.Context) error {
 	}
 
 	pickFirstNonEmpty := func(vals ...sql.NullString) string {
-		for _, v := range vals {
-			if v.Valid && strings.TrimSpace(v.String) != "" {
-				return v.String
-			}
+		if len(vals) > 0 && vals[0].Valid && strings.TrimSpace(vals[0].String) != "" {
+			return pathutil.ResolveDataHomePath(vals[0].String)
+		}
+		if len(vals) > 1 && vals[1].Valid && strings.TrimSpace(vals[1].String) != "" {
+			return pathutil.ResolveBackupPath(vals[1].String)
+		}
+		if len(vals) > 2 && vals[2].Valid && strings.TrimSpace(vals[2].String) != "" {
+			return pathutil.ResolveDataHomePath(vals[2].String)
 		}
 		return ""
 	}
@@ -789,8 +794,9 @@ func contentTypeFor(docType, path string) string {
 }
 
 func rawLinePathFor(resultFilename string) string {
-	dir := filepath.Dir(resultFilename)
-	base := filepath.Base(resultFilename)
+	resolved := pathutil.ResolveDataHomePath(resultFilename)
+	dir := filepath.Dir(resolved)
+	base := filepath.Base(resolved)
 	ext := filepath.Ext(base)
 	root := strings.TrimSuffix(base, ext)
 	return filepath.Join(dir, root+".txt")

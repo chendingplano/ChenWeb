@@ -85,7 +85,7 @@ PYTHONPATH=. .venv/bin/python pdf_parser.py
 |---|---|---|
 | `STAGING_DIR` | | Directory to scan for new PDF files |
 | `PDF_REPO_DIR` | `/tmp/pdf-repo` | Base directory for parse results |
-| `PDF_BACKUP_DIR` | `/tmp/pdf-backup/pdf_files` | Backup directory for originals |
+| `PDF_BACKUP_DIR` | `/tmp/pdf-backup` | Backup directory for originals |
 | `PDF_POLL_INTERVAL` | `10` | Seconds between DB polls |
 | `PDF_BATCH_SIZE` | `25` | Records fetched per poll cycle |
 | `PDF_DEFAULT_PARSER` | `opendata` | Parser when `parser_name` is not set |

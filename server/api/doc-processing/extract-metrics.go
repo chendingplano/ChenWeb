@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,14 +14,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 type MetricsProcessor struct {
 	InputStore   DocMetadataStore
 	Store        MetricsStore
 	Extractor    LLMJSONExtractor
-	Logger       *slog.Logger
+	Logger       ApiTypes.JimoLogger
 	Now          func() time.Time
 	PromptText   string
 	PromptRef    string
@@ -53,9 +54,9 @@ type SaveMetricsRequest struct {
 	Metrics       []map[string]any
 }
 
-func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extractor LLMJSONExtractor, logger *slog.Logger) *MetricsProcessor {
+func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *MetricsProcessor {
 	if logger == nil {
-		logger = slog.Default()
+		logger = loggerutil.CreateDefaultLogger("MID_26042470")
 	}
 	promptText, promptRef, promptPath, promptErr := loadMetricsPromptFromEnv()
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODELS_FILE")
@@ -102,17 +103,24 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return fmt.Errorf("(MID_26042459) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
 	if p.ModelErr != nil {
+		p.Logger.Warn("metrics extraction skipped: model config error",
+			"record_id", evt.RecordID, "model_ref", p.ModelRef, "error", p.ModelErr)
 		p.persistMetricsStatus(ctx, rec, start, p.ModelErr)
 		return nil
 	}
 
-	chunkFiles, err := p.listChunkFiles(evt.RecordID)
-	if err != nil {
-		p.persistMetricsStatus(ctx, rec, start, err)
+	topicsPath, chunkFiles, detectErr := p.detectChunkingInputs(evt.RecordID)
+	if detectErr != nil {
+		p.Logger.Error("metrics extraction skipped: chunk detection failed",
+			"record_id", evt.RecordID, "chunk_dir", p.ChunkDir, "error", detectErr)
+		p.persistMetricsStatus(ctx, rec, start, detectErr)
 		return nil
 	}
-	if len(chunkFiles) == 0 {
+	if topicsPath == "" && len(chunkFiles) == 0 {
 		err := fmt.Errorf("(MID_26042460) no chunk files found for record_id=%d", evt.RecordID)
+		p.Logger.Error("no chunk files",
+			"record_id", evt.RecordID,
+			"chunk_dir", p.ChunkDir)
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -132,17 +140,37 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		}
 	}
 
-	allLines := make([]string, 0, 1024)
-	for _, chunkPath := range chunkFiles {
-		lines, err := readRegularLinesFromChunk(chunkPath)
-		if err != nil {
-			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) read chunk file %s: %w", chunkPath, err))
+	var allLines []string
+	var inputCount int
+	if topicsPath != "" {
+		lineFilePath, lineFileErr := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
+		if lineFileErr != nil {
+			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042466) resolve line file for record_id=%d: %w", evt.RecordID, lineFileErr))
 			return nil
 		}
-		allLines = append(allLines, lines...)
+		lines, readErr := readLinesFromTopicsFile(topicsPath, lineFilePath)
+		if readErr != nil {
+			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042467) read topics file %s: %w", topicsPath, readErr))
+			return nil
+		}
+		allLines = lines
+		inputCount = 1
+	} else {
+		allLines = make([]string, 0, 1024)
+		for _, chunkPath := range chunkFiles {
+			lines, err := readRegularLinesFromChunk(chunkPath)
+			if err != nil {
+				p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) read chunk file %s: %w", chunkPath, err))
+				return nil
+			}
+			allLines = append(allLines, lines...)
+		}
+		inputCount = len(chunkFiles)
 	}
 	if len(allLines) == 0 {
 		err := fmt.Errorf("(MID_26042462) no regular lines found in chunk files for record_id=%d", evt.RecordID)
+		p.Logger.Warn("metrics extraction skipped: no regular lines in chunk files",
+			"record_id", evt.RecordID, "chunk_files", inputCount)
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -174,27 +202,36 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		"inserted_rows", inserted,
 		"metrics_count", len(result.Metrics),
 		"uncertain_metrics_count", len(result.UncertainMetrics),
-		"chunk_files", len(chunkFiles),
+		"chunk_files", inputCount,
 	)
 	p.persistMetricsStatus(ctx, rec, start, nil)
 	return nil
 }
 
-func (p *MetricsProcessor) listChunkFiles(recordID int64) ([]string, error) {
+// detectChunkingInputs checks the artifact directory for the record and returns
+// either the topics.txt path (topic-driven chunking) or the list of chunk_* file
+// paths (fix-length chunking), with topics.txt taking priority.
+func (p *MetricsProcessor) detectChunkingInputs(recordID int64) (topicsPath string, chunkFiles []string, err error) {
 	if strings.TrimSpace(p.ChunkDir) == "" {
-		return nil, errors.New("(MID_26042463) missing ARTIFACT_DIR")
+		return "", nil, errors.New("(MID_26042463) missing ARTIFACT_DIR")
 	}
 	if recordID <= 0 {
-		return nil, fmt.Errorf("(MID_26042464) invalid record_id: %d", recordID)
+		return "", nil, fmt.Errorf("(MID_26042464) invalid record_id: %d", recordID)
 	}
 	groupID := recordID / 1000
 	dir := filepath.Join(p.ChunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
+
+	tp := filepath.Join(dir, "topics.txt")
+	if info, statErr := os.Stat(tp); statErr == nil && !info.IsDir() {
+		return tp, nil, nil
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return "", nil, nil
 		}
-		return nil, err
+		return "", nil, err
 	}
 	paths := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -208,7 +245,7 @@ func (p *MetricsProcessor) listChunkFiles(recordID int64) ([]string, error) {
 		paths = append(paths, filepath.Join(dir, name))
 	}
 	sort.Strings(paths)
-	return paths, nil
+	return "", paths, nil
 }
 
 func readRegularLinesFromChunk(path string) ([]string, error) {
@@ -259,6 +296,116 @@ func splitChunkMark(line string) (base string, mark string) {
 		return strings.TrimSpace(raw[:idx]), last
 	}
 	return raw, "r"
+}
+
+// readLinesFromTopicsFile reads topics.txt and the original line file,
+// returning the ordered, deduplicated set of lines referenced by the topics.
+func readLinesFromTopicsFile(topicsPath, lineFilePath string) ([]string, error) {
+	topics, err := readLegacyTopicRows(topicsPath)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26042468) read topics file %s: %w", topicsPath, err)
+	}
+	wantLines := make(map[int]struct{})
+	for _, t := range topics {
+		nums, parseErr := parseTopicLineRanges(t.Lines)
+		if parseErr != nil {
+			return nil, fmt.Errorf("(MID_26042469) parse line ranges for topic seq=%d: %w", t.SeqNo, parseErr)
+		}
+		for _, n := range nums {
+			wantLines[n] = struct{}{}
+		}
+	}
+	if len(wantLines) == 0 {
+		return nil, nil
+	}
+	return readLinesFromFileByNumbers(lineFilePath, wantLines)
+}
+
+// parseTopicLineRanges parses a lines field like "[38-45, 47, 49]" into a slice of line numbers.
+func parseTopicLineRanges(raw string) ([]int, error) {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimPrefix(s, "[")
+	s = strings.TrimSuffix(s, "]")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	out := make([]int, 0, 16)
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if idx := strings.Index(part, "-"); idx > 0 {
+			start, err1 := strconv.Atoi(strings.TrimSpace(part[:idx]))
+			end, err2 := strconv.Atoi(strings.TrimSpace(part[idx+1:]))
+			if err1 != nil || err2 != nil || start < 1 || end < start {
+				return nil, fmt.Errorf("invalid range: %q", part)
+			}
+			for n := start; n <= end; n++ {
+				out = append(out, n)
+			}
+		} else {
+			n, err := strconv.Atoi(part)
+			if err != nil || n < 1 {
+				return nil, fmt.Errorf("invalid line number: %q", part)
+			}
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// readLinesFromFileByNumbers reads a canonical line file and returns lines whose
+// line number (first tab-separated field) is in wantLines, sorted and deduplicated.
+func readLinesFromFileByNumbers(path string, wantLines map[int]struct{}) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	type numberedLine struct {
+		no   int
+		text string
+	}
+	collected := make([]numberedLine, 0, len(wantLines))
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1024), 16*1024*1024)
+	for sc.Scan() {
+		raw := strings.TrimSpace(sc.Text())
+		if raw == "" {
+			continue
+		}
+		idx := strings.Index(raw, "\t")
+		if idx < 0 {
+			continue
+		}
+		lineNo, err := strconv.Atoi(strings.TrimSpace(raw[:idx]))
+		if err != nil || lineNo < 1 {
+			continue
+		}
+		if _, ok := wantLines[lineNo]; ok {
+			collected = append(collected, numberedLine{no: lineNo, text: raw})
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(collected, func(i, j int) bool { return collected[i].no < collected[j].no })
+
+	out := make([]string, 0, len(collected))
+	lastNo := -1
+	for _, nl := range collected {
+		if nl.no == lastNo {
+			continue
+		}
+		lastNo = nl.no
+		out = append(out, nl.text)
+	}
+	return out, nil
 }
 
 func (p *MetricsProcessor) persistMetricsStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, procErr error) {

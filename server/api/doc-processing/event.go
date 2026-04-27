@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/chendingplano/deepdoc/server/api/pathutil"
 )
 
 const DefaultEventSubject = "kb.line-file-generated"
@@ -61,7 +63,7 @@ func ShouldSkipLineFileGeneratedEvent(evt LineFileGeneratedEvent) bool {
 }
 
 func ResolveInputFilePath(evt LineFileGeneratedEvent, resultFilename string, parserName string, stagingFilename string) (string, error) {
-	resultPath := strings.TrimSpace(resultFilename)
+	resultPath := pathutil.ResolveDataHomePath(resultFilename)
 	if strings.TrimSpace(evt.Filename) != "" {
 		f := strings.TrimSpace(evt.Filename)
 		if hasPathSeparator(f) {
@@ -83,7 +85,7 @@ func ResolveInputFilePath(evt LineFileGeneratedEvent, resultFilename string, par
 		return "", errors.New("missing parser name")
 	}
 
-	root := strings.TrimSuffix(filepath.Base(strings.TrimSpace(stagingFilename)), filepath.Ext(strings.TrimSpace(stagingFilename)))
+	root := strings.TrimSuffix(filepath.Base(pathutil.ResolveDataHomePath(stagingFilename)), filepath.Ext(strings.TrimSpace(stagingFilename)))
 	if root == "" {
 		root = strings.TrimSuffix(filepath.Base(resultPath), filepath.Ext(resultPath))
 	}

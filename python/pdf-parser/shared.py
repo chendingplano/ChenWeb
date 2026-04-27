@@ -133,6 +133,89 @@ def resolve_source_path(file_name: str, staging_dir: str) -> str:
     return file_name
 
 
+def relativize_to_data_home(path: str, data_home_dir: str | None = None) -> str:
+    """Store repo paths relative to DATA_HOME_DIR when possible."""
+    path = (path or "").strip()
+    if not path:
+        return ""
+    if not os.path.isabs(path):
+        return path
+    home = (data_home_dir or os.environ.get("DATA_HOME_DIR", "")).strip()
+    if not home:
+        return path
+    try:
+        rel = os.path.relpath(path, home)
+    except ValueError:
+        return path
+    if rel == "." or rel.startswith(".."+os.sep) or rel == "..":
+        return path
+    return rel
+
+
+def relativize_to_backup_root(path: str, backup_dir: str | None = None) -> str:
+    """Store backup paths relative to the parent of DATA_BACKUP_DIR when possible.
+
+    Example:
+      DATA_BACKUP_DIR=/Users/cding/Apps/Backup
+      /Users/cding/Apps/Backup/file.pdf -> Backup/file.pdf
+    """
+    path = (path or "").strip()
+    if not path:
+        return ""
+    if not os.path.isabs(path):
+        return path
+
+    configured_backup = (backup_dir or os.environ.get("DATA_BACKUP_DIR", "")).strip()
+    if not configured_backup:
+        return path
+
+    base = os.path.dirname(configured_backup)
+    if not base:
+        return path
+
+    try:
+        rel = os.path.relpath(path, base)
+    except ValueError:
+        return path
+    if rel == "." or rel.startswith(".."+os.sep) or rel == "..":
+        return path
+    return rel
+
+
+def resolve_repo_path(path: str, repo_dirs: list[str]) -> str:
+    """Resolve a stored file path against repo dirs when it is relative."""
+    path = (path or "").strip()
+    if not path:
+        return ""
+    if os.path.isabs(path):
+        return path
+    for repo_dir in repo_dirs:
+        candidate = os.path.join(repo_dir, path)
+        if os.path.exists(candidate):
+            return candidate
+    if repo_dirs:
+        return os.path.join(repo_dirs[0], path)
+    return path
+
+
+def resolve_backup_path(path: str, backup_dir: str | None = None) -> str:
+    """Resolve a stored backup path against the parent of DATA_BACKUP_DIR."""
+    path = (path or "").strip()
+    if not path:
+        return ""
+    if os.path.isabs(path):
+        return path
+
+    configured_backup = (backup_dir or os.environ.get("DATA_BACKUP_DIR", "")).strip()
+    if not configured_backup:
+        return path
+
+    base = os.path.dirname(configured_backup)
+    if not base:
+        return path
+    return os.path.join(base, path)
+
+
 _repo_dir_cache: str | None = None
 
 

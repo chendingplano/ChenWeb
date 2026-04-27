@@ -122,6 +122,15 @@ func TestResolveInputFilePath(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected relative path with separator to fail")
 	}
+
+	t.Setenv("DATA_HOME_DIR", "/tmp/repo")
+	got3, err := ResolveInputFilePath(LineFileGeneratedEvent{RecordID: 1}, "Artifacts/0/101/source_opendata.json", "opendata", "source.pdf")
+	if err != nil {
+		t.Fatalf("ResolveInputFilePath relative result: %v", err)
+	}
+	if got3 != "/tmp/repo/Artifacts/0/101/source_opendata.txt" {
+		t.Fatalf("path=%q, want %q", got3, "/tmp/repo/Artifacts/0/101/source_opendata.txt")
+	}
 }
 
 func TestExtractDocMetadata_MissingParserNameUpdatesFailure(t *testing.T) {

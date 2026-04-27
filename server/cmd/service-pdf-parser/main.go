@@ -295,6 +295,24 @@ INSERT INTO kb.inputs (
 	return false, nil
 }
 
+/*
+func relativePathFromHomeDir(homeDir, fullPath string) (string, error) {
+	cleanHome := filepath.Clean(strings.TrimSpace(homeDir))
+	cleanPath := filepath.Clean(strings.TrimSpace(fullPath))
+	if cleanHome == "" || cleanPath == "" {
+		return "", fmt.Errorf("homeDir=%q fullPath=%q", homeDir, fullPath)
+	}
+	rel, err := filepath.Rel(cleanHome, cleanPath)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+		return "", fmt.Errorf("path %q is outside home dir %q", cleanPath, cleanHome)
+	}
+	return rel, nil
+}
+*/
+
 func fileMD5Hex(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {

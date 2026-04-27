@@ -98,7 +98,7 @@ These override config file values when set:
 | `PG_USER_NAME` | `admin` | Database user |
 | `PG_PASSWORD` | _(none)_ | Database password (**required**) |
 | `PDF_REPO_DIR` | `/tmp/pdf-repo` | Output directory |
-| `PDF_BACKUP_DIR` | `/tmp/pdf-backup/pdf_files` | Backup directory |
+| `PDF_BACKUP_DIR` | `/tmp/pdf-backup` | Backup directory |
 | `PDF_POLL_INTERVAL` | `10` | Poll interval in seconds |
 | `PDF_BATCH_SIZE` | `25` | Records per poll cycle |
 | `PDF_DEFAULT_PARSER` | `opendata` | Parser backend (`opendata` or `paddle`) |

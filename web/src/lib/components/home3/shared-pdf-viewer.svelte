@@ -82,13 +82,14 @@
 	}
 
 	function scrollToPage(pageNo: number, behavior: ScrollBehavior = 'smooth') {
-		if (!pdfStageEl) return;
+		const host = pdfCanvasHostEl;
+		if (!host) return;
 		const pageEl = document.getElementById(`${viewerId}-page-${pageNo}`);
 		if (!pageEl) return;
 		const pageRect = pageEl.getBoundingClientRect();
-		const stageRect = pdfStageEl.getBoundingClientRect();
-		const targetTop = pdfStageEl.scrollTop + (pageRect.top - stageRect.top);
-		pdfStageEl.scrollTo({ top: Math.max(0, targetTop), behavior });
+		const hostRect = host.getBoundingClientRect();
+		const targetTop = host.scrollTop + (pageRect.top - hostRect.top);
+		host.scrollTo({ top: Math.max(0, targetTop), behavior });
 	}
 
 	function zoomIn() {
@@ -153,15 +154,16 @@
 	}
 
 	function scrollToFirstHighlight(pageNo: number, behavior: ScrollBehavior = 'auto') {
-		if (!pdfStageEl) return false;
+		const host = pdfCanvasHostEl;
+		if (!host) return false;
 		const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
 		const firstHighlight = overlay?.querySelector('.pdf-highlight') as HTMLElement | null;
 		if (!firstHighlight) return false;
 		const highlightRect = firstHighlight.getBoundingClientRect();
-		const stageRect = pdfStageEl.getBoundingClientRect();
+		const hostRect = host.getBoundingClientRect();
 		const padding = 24;
-		const targetTop = pdfStageEl.scrollTop + (highlightRect.top - stageRect.top) - padding;
-		pdfStageEl.scrollTo({ top: Math.max(0, targetTop), behavior });
+		const targetTop = host.scrollTop + (highlightRect.top - hostRect.top) - padding;
+		host.scrollTo({ top: Math.max(0, targetTop), behavior });
 		return true;
 	}
 

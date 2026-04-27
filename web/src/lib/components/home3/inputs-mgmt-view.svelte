@@ -9,6 +9,7 @@
 		type RawLine
 	} from '$lib/services/kbService';
 	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
+	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -703,7 +704,8 @@
 				modifyStartTime: searchModifyStart,
 				modifyEndTime: searchModifyEnd,
 				page: 1,
-				pageSize: 50
+				pageSize: 50,
+				ksStoreId: knowledgeStoreState.activeStoreId ?? undefined
 			});
 			searchResults = res.results ?? [];
 		} catch (err) {
@@ -1849,6 +1851,15 @@
 					<p class="dialog-subtitle">
 						Search by record metadata, parser pipeline state, and create or modify windows.
 					</p>
+					<div style="margin-top:8px; font-size:11px; font-family:var(--font-mono); letter-spacing:0.12em; text-transform:uppercase; color:var(--text-muted);">
+						Store scope:&nbsp;
+						{#if knowledgeStoreState.activeStore}
+							<span style="color:var(--brass); font-weight:600;">{knowledgeStoreState.activeStore.ks_name}</span>
+							<span style="opacity:0.55;"> #{knowledgeStoreState.activeStore.id}</span>
+						{:else}
+							<span style="color:#ff7d6b; text-transform:none; letter-spacing:0;">No active store — results will not be scoped</span>
+						{/if}
+					</div>
 				</div>
 			</div>
 

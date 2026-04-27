@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/md5"
 	"database/sql"
@@ -186,6 +187,9 @@ func runStagingEventLoop(
 ) {
 	var debounceTimer *time.Timer
 	var debounceC <-chan time.Time
+	var pendingEventCount int
+	var pendingLastEvent string
+	var pendingLastPath string
 	defer func() {
 		if debounceTimer != nil {
 			debounceTimer.Stop()
@@ -193,12 +197,26 @@ func runStagingEventLoop(
 	}()
 
 	runCycle := func(reason string) {
+		if pendingEventCount > 0 {
+			logger.Info("staging directory changed",
+				"reason", reason,
+				"event_count", pendingEventCount,
+				"last_event", pendingLastEvent,
+				"last_path", pendingLastPath,
+			)
+			pendingEventCount = 0
+			pendingLastEvent = ""
+			pendingLastPath = ""
+		}
 		if err := process(); err != nil {
 			logger.Error("staging cycle failed", "reason", reason, "error", err)
 		}
 	}
 
-	scheduleCycle := func() {
+	scheduleCycle := func(event fsnotify.Event) {
+		pendingEventCount++
+		pendingLastEvent = event.String()
+		pendingLastPath = event.Name
 		if debounce <= 0 {
 			runCycle("watch_event")
 			return
@@ -226,8 +244,8 @@ func runStagingEventLoop(
 				return
 			}
 			if shouldProcessStagingEvent(event) {
-				logger.Info("staging directory changed", "event", event.String(), "path", event.Name)
-				scheduleCycle()
+				logger.Debug("staging watcher event", "event", event.String(), "path", event.Name)
+				scheduleCycle(event)
 			}
 		case err, ok := <-watchErrors:
 			if !ok {
@@ -281,46 +299,17 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 		}
 
 		srcPath := filepath.Join(stagingDir, entry.Name())
-		backupPath, err := uniquePath(backupDir, entry.Name())
+		recordID, updated, homePath, backupPath, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, entry.Name(), srcPath)
 		if err != nil {
-			logger.Error("failed to allocate backup path", "source", srcPath, "error", err)
+			logger.Error("failed to insert kb.inputs row for staged file", "source", srcPath, "error", err)
 			continue
 		}
 
-		if err := copyFile(srcPath, backupPath); err != nil {
-			logger.Error("failed to backup staged file", "source", srcPath, "backup", backupPath, "error", err)
-			continue
-		}
-
-		recordID, updated, err := upsertStagedInputRecord(ctx, db, entry.Name(), srcPath)
-		if err != nil {
-			logger.Error("failed to insert kb.inputs row for staged file",
-				"source", srcPath,
-				"backup", backupPath,
-				"error", err,
-			)
-			continue
-		}
-
-		repoDir, err := repoDirForRecord(homeDir, recordID)
-		if err != nil {
-			logger.Error("failed to resolve record repo dir", "source", srcPath, "record_id", recordID, "error", err)
-			continue
-		}
-		homePath := filepath.Join(repoDir, entry.Name())
-		if err := copyFile(srcPath, homePath); err != nil {
-			logger.Error("failed to copy staged file to home", "source", srcPath, "home", homePath, "error", err)
-			continue
-		}
-		if err := finalizeStagedInputRecord(ctx, db, recordID, homePath, backupPath); err != nil {
-			logger.Error("failed to finalize kb.inputs row for staged file",
-				"source", srcPath,
-				"home", homePath,
-				"backup", backupPath,
-				"record_id", recordID,
-				"error", err,
-			)
-			continue
+		if strings.EqualFold(filepath.Ext(entry.Name()), ".zip") {
+			if err := ingestZipChildren(ctx, logger, db, homeDir, backupDir, homePath, publisher); err != nil {
+				logger.Error("failed to ingest zip entries", "source", srcPath, "record_id", recordID, "home", homePath, "error", err)
+				continue
+			}
 		}
 
 		if err := os.Remove(srcPath); err != nil {
@@ -332,19 +321,127 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 			"source", srcPath,
 			"home", homePath,
 			"backup", backupPath,
+			"type", fileType,
 			"record_id", recordID,
 			"updated_existing_row", updated,
 		)
-		if publisher != nil {
+		if publisher != nil && strings.EqualFold(fileType, "pdf") {
 			if err := publisher.Publish(stageEvent{
 				RecordID:   recordID,
-				Type:       "pdf",
+				Type:       fileType,
 				Status:     "success",
 				Force:      true,
-				FileFormat: "pdf",
+				FileFormat: fileType,
 				FileName:   homePath,
 			}); err != nil {
 				logger.Error("failed to publish stage event", "record_id", recordID, "error", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func ingestInputFile(
+	ctx context.Context,
+	db *sql.DB,
+	homeDir, backupDir, stagingName, srcPath string,
+) (recordID int64, updated bool, homePath string, backupPath string, fileType string, err error) {
+	fileType = detectInputType(stagingName)
+
+	backupPath, err = uniquePath(backupDir, filepath.Base(stagingName))
+	if err != nil {
+		return 0, false, "", "", fileType, fmt.Errorf("allocate backup path: %w", err)
+	}
+	if err := copyFile(srcPath, backupPath); err != nil {
+		return 0, false, "", "", fileType, fmt.Errorf("backup staged file: %w", err)
+	}
+
+	recordID, updated, err = upsertStagedInputRecord(ctx, db, filepath.Base(stagingName), srcPath, fileType)
+	if err != nil {
+		return 0, false, "", backupPath, fileType, err
+	}
+
+	repoDir, err := repoDirForRecord(homeDir, recordID)
+	if err != nil {
+		return 0, false, "", backupPath, fileType, fmt.Errorf("resolve record repo dir: %w", err)
+	}
+	homePath = filepath.Join(repoDir, filepath.Base(stagingName))
+	if err := copyFile(srcPath, homePath); err != nil {
+		return 0, false, "", backupPath, fileType, fmt.Errorf("copy staged file to home: %w", err)
+	}
+	if err := finalizeStagedInputRecord(ctx, db, recordID, homeDir, homePath, backupPath); err != nil {
+		return 0, false, homePath, backupPath, fileType, err
+	}
+	return recordID, updated, homePath, backupPath, fileType, nil
+}
+
+func ingestZipChildren(
+	ctx context.Context,
+	logger ApiTypes.JimoLogger,
+	db *sql.DB,
+	homeDir, backupDir, zipHomePath string,
+	publisher *stageEventPublisher,
+) error {
+	reader, err := zip.OpenReader(zipHomePath)
+	if err != nil {
+		return fmt.Errorf("open zip file: %w", err)
+	}
+	defer reader.Close()
+
+	for _, entry := range reader.File {
+		if entry.FileInfo().IsDir() {
+			continue
+		}
+
+		rc, err := entry.Open()
+		if err != nil {
+			logger.Warn("open zip entry failed", "zip", zipHomePath, "entry", entry.Name, "error", err)
+			continue
+		}
+
+		tmpFile, err := os.CreateTemp("", "pdf-parser-zip-*"+filepath.Ext(entry.Name))
+		if err != nil {
+			_ = rc.Close()
+			logger.Warn("create temp file for zip entry failed", "zip", zipHomePath, "entry", entry.Name, "error", err)
+			continue
+		}
+
+		_, copyErr := io.Copy(tmpFile, rc)
+		closeErr := rc.Close()
+		syncErr := tmpFile.Sync()
+		tmpCloseErr := tmpFile.Close()
+		if copyErr != nil || closeErr != nil || syncErr != nil || tmpCloseErr != nil {
+			_ = os.Remove(tmpFile.Name())
+			logger.Warn("materialize zip entry failed", "zip", zipHomePath, "entry", entry.Name, "copy_error", copyErr, "close_error", closeErr, "sync_error", syncErr, "tmp_close_error", tmpCloseErr)
+			continue
+		}
+
+		recordID, updated, homePath, _, fileType, err := ingestInputFile(ctx, db, homeDir, backupDir, filepath.Base(entry.Name), tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
+		if err != nil {
+			logger.Error("failed to ingest zip child", "zip", zipHomePath, "entry", entry.Name, "error", err)
+			continue
+		}
+
+		logger.Info("zip child ingested",
+			"zip", zipHomePath,
+			"entry", entry.Name,
+			"home", homePath,
+			"type", fileType,
+			"record_id", recordID,
+			"updated_existing_row", updated,
+		)
+		if publisher != nil && strings.EqualFold(fileType, "pdf") {
+			if err := publisher.Publish(stageEvent{
+				RecordID:   recordID,
+				Type:       fileType,
+				Status:     "success",
+				Force:      true,
+				FileFormat: fileType,
+				FileName:   homePath,
+			}); err != nil {
+				logger.Error("failed to publish zip child stage event", "zip", zipHomePath, "entry", entry.Name, "record_id", recordID, "error", err)
 			}
 		}
 	}
@@ -389,7 +486,7 @@ func repoDirForRecord(homeDir string, recordID int64) (string, error) {
 	return filepath.Join(homeDir, "Artifacts", strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10)), nil
 }
 
-func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, srcPath string) (int64, bool, error) {
+func upsertStagedInputRecord(ctx context.Context, db *sql.DB, staging_filename, srcPath, fileType string) (int64, bool, error) {
 	md5Hex, err := fileMD5Hex(srcPath)
 	if err != nil {
 		return 0, false, fmt.Errorf("calculate file md5 failed: %w", err)
@@ -427,31 +524,84 @@ INSERT INTO kb.inputs (
     md5
 ) VALUES (
     $1,
-    'pdf',
     $2,
+    $3,
     '',
-    $3::jsonb,
-    $4
+    $4::jsonb,
+    $5
 )
 RETURNING id`
 	var insertedID int64
-	if err := db.QueryRowContext(ctx, insertStmt, staging_filename, srcPath, string(status), md5Hex).Scan(&insertedID); err != nil {
+	if err := db.QueryRowContext(ctx, insertStmt, staging_filename, fileType, srcPath, string(status), md5Hex).Scan(&insertedID); err != nil {
 		return 0, false, fmt.Errorf("insert kb.inputs failed: %w", err)
 	}
 	return insertedID, false, nil
 }
 
-func finalizeStagedInputRecord(ctx context.Context, db *sql.DB, recordID int64, homePath, backupPath string) error {
+func finalizeStagedInputRecord(ctx context.Context, db *sql.DB, recordID int64, homeDir, homePath, backupPath string) error {
+	relativeHomePath, err := relativePathFromHomeDir(homeDir, homePath)
+	if err != nil {
+		return fmt.Errorf("normalize file_name for record %d: %w", recordID, err)
+	}
+	relativeBackupPath, err := relativePathFromParentDir(os.Getenv("DATA_BACKUP_DIR"), backupPath)
+	if err != nil {
+		return fmt.Errorf("normalize backup_filename for record %d: %w", recordID, err)
+	}
+
 	const stmt = `
 UPDATE kb.inputs
 SET file_name = $1,
     backup_filename = $2,
     modify_time = NOW()
 WHERE id = $3`
-	if _, err := db.ExecContext(ctx, stmt, homePath, backupPath, recordID); err != nil {
+	if _, err := db.ExecContext(ctx, stmt, relativeHomePath, relativeBackupPath, recordID); err != nil {
 		return fmt.Errorf("update finalized kb.inputs path failed: %w", err)
 	}
 	return nil
+}
+
+func detectInputType(name string) string {
+	ext := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(filepath.Ext(name))), ".")
+	if ext == "" {
+		return "file"
+	}
+	return ext
+}
+
+func relativePathFromHomeDir(homeDir, fullPath string) (string, error) {
+	cleanHome := filepath.Clean(strings.TrimSpace(homeDir))
+	cleanPath := filepath.Clean(strings.TrimSpace(fullPath))
+	if cleanHome == "" || cleanPath == "" {
+		return "", fmt.Errorf("homeDir=%q fullPath=%q", homeDir, fullPath)
+	}
+	rel, err := filepath.Rel(cleanHome, cleanPath)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+		return "", fmt.Errorf("path %q is outside home dir %q", cleanPath, cleanHome)
+	}
+	return rel, nil
+}
+
+func relativePathFromParentDir(baseDir, fullPath string) (string, error) {
+	cleanBaseDir := filepath.Clean(strings.TrimSpace(baseDir))
+	if cleanBaseDir == "" {
+		return "", fmt.Errorf("baseDir=%q", baseDir)
+	}
+	parentDir := filepath.Dir(cleanBaseDir)
+	cleanPath := filepath.Clean(strings.TrimSpace(fullPath))
+	if cleanPath == "" {
+		return "", fmt.Errorf("fullPath=%q", fullPath)
+	}
+	rel, err := filepath.Rel(parentDir, cleanPath)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+		return "", fmt.Errorf("path %q is outside parent dir %q", cleanPath, parentDir)
+	}
+	return rel, nil
 }
 
 func fileMD5Hex(path string) (string, error) {

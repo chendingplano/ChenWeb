@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/pathutil"
 )
 
 const statusTimeLayout = "20060102 15:04:05"
@@ -218,8 +220,16 @@ func (s *Service) convert(_ context.Context, req ConvertRequest, rec InputRecord
 			return "", fmt.Errorf("(MID_26041109) opendata convert failed: %w", err)
 		}
 		return out, nil
+
 	case "paddleocr":
-		return "", fmt.Errorf("parser_name=%q: %w", rec.ParserName, ErrParserNotImplemented)
+		return "", fmt.Errorf("(MID_26042601) parser_name=%q: %w", rec.ParserName, ErrParserNotImplemented)
+
+	case "mineru":
+		return "", fmt.Errorf("(MID_26042602) converter for parser_name=%q not supported yet: %w", rec.ParserName, ErrParserNotImplemented)
+
+	case "docline":
+		return "", fmt.Errorf("(MID_26042603) converter for parser_name=%q not supported yet: %w", rec.ParserName, ErrParserNotImplemented)
+
 	default:
 		return "", fmt.Errorf("(MID_26041110) unsupported parser_name=%q: %w", rec.ParserName, ErrUnsupportedParserName)
 	}
@@ -382,13 +392,13 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, req ConvertReq
 func resolveInputFile(req ConvertRequest, rec InputRecord) (string, error) {
 	candidates := make([]string, 0, 16)
 	if strings.TrimSpace(req.ResultFilename) != "" {
-		candidates = append(candidates, strings.TrimSpace(req.ResultFilename))
+		candidates = append(candidates, pathutil.ResolveDataHomePath(req.ResultFilename))
 	}
 	if strings.TrimSpace(rec.ResultFilename) != "" {
-		candidates = append(candidates, strings.TrimSpace(rec.ResultFilename))
+		candidates = append(candidates, pathutil.ResolveDataHomePath(rec.ResultFilename))
 	}
 
-	baseDir := filepath.Dir(strings.TrimSpace(rec.FileName))
+	baseDir := filepath.Dir(pathutil.ResolveDataHomePath(rec.FileName))
 	for _, name := range []string{strings.TrimSpace(req.ResultFilename), strings.TrimSpace(rec.ResultFilename)} {
 		if name == "" || filepath.IsAbs(name) || baseDir == "." || baseDir == "" {
 			continue

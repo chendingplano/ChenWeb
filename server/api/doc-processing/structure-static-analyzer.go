@@ -273,7 +273,7 @@ func parseStaticInputLine(raw string) (staticInputLine, error) {
 // applyStaticTOCLabels identifies lines that are likely part of a table of contents based on their content and proximity to
 // a TOC title, and updates the corrected map with "toc" for those lines. It returns the last pos in 'lines' of the TOC title if found,
 // or -1 if no TOC is detected.
-func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) int {
+func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, _ ApiTypes.JimoLogger) int {
 	start := -1
 	startPage := 0
 	for i, line := range lines {
