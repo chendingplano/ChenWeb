@@ -12,6 +12,11 @@ const (
 	ChunkingMethodEnv = "CHUNKING_METHOD"
 )
 
+var allowedChunkingMethods = []string{
+	ChunkingMethodFixed,
+	ChunkingMethodTopic,
+}
+
 type chunkingHandler interface {
 	HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error
 }
@@ -42,7 +47,12 @@ func NewChunkingController(method string, fixed chunkingHandler, topic chunkingH
 			return nil, errors.New("(MID_26042114) topic chunking service is nil")
 		}
 	default:
-		return nil, fmt.Errorf("(MID_26042115) unsupported %s: %s", ChunkingMethodEnv, method)
+		return nil, fmt.Errorf(
+			"(MID_26042115) unsupported %s: %s (allowed: %s)",
+			ChunkingMethodEnv,
+			method,
+			strings.Join(allowedChunkingMethods, ", "),
+		)
 	}
 
 	return &ChunkingController{

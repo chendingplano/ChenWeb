@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -29,6 +30,7 @@ type docStructureLine struct {
 
 type manualEntry struct {
 	Operation  string
+	Timestamp  string
 	Line       docStructureLine
 	OldContent string
 }
@@ -47,6 +49,7 @@ func formatManualLine(e manualEntry) string {
 		e.Line.Font,
 		e.Line.FontSize,
 		coordsStr,
+		e.Timestamp,
 		"|$|" + e.OldContent + "|$|",
 		"|$|" + e.Line.Content + "|$|",
 	}, "\t")
@@ -57,12 +60,12 @@ func parseManualLine(s string) (manualEntry, bool) {
 	if strings.TrimSpace(s) == "" {
 		return manualEntry{}, false
 	}
-	fields := strings.SplitN(s, "\t", 9)
-	if len(fields) != 9 {
+	fields := strings.SplitN(s, "\t", 10)
+	if len(fields) != 10 {
 		return manualEntry{}, false
 	}
 	operation := strings.TrimSpace(fields[0])
-	if operation != "add" && operation != "modify" && operation != "delete" {
+	if operation != "modify" && operation != "delete" {
 		return manualEntry{}, false
 	}
 	lineNum, err1 := strconv.Atoi(strings.TrimSpace(fields[1]))
@@ -74,6 +77,7 @@ func parseManualLine(s string) (manualEntry, bool) {
 	font := strings.TrimSpace(fields[4])
 	fontSize := strings.TrimSpace(fields[5])
 	coordsRaw := strings.TrimSpace(fields[6])
+	timestamp := strings.TrimSpace(fields[7])
 	if lineType == "" || coordsRaw == "" {
 		return manualEntry{}, false
 	}
@@ -93,10 +97,11 @@ func parseManualLine(s string) (manualEntry, bool) {
 		}
 		coords = append(coords, v)
 	}
-	oldContent := unwrapManualContent(strings.TrimSpace(fields[7]))
-	newContent := unwrapManualContent(strings.TrimSpace(fields[8]))
+	oldContent := unwrapManualContent(strings.TrimSpace(fields[8]))
+	newContent := unwrapManualContent(strings.TrimSpace(fields[9]))
 	return manualEntry{
 		Operation: operation,
+		Timestamp: timestamp,
 		Line: docStructureLine{
 			LineNumber: lineNum,
 			PageNumber: pageNum,
@@ -461,7 +466,7 @@ func UpdateDocStructureLine(c echo.Context) error {
 		})
 	}
 
-	if err := upsertManualFile(manualPath, manualEntry{Operation: "modify", Line: updatedLine, OldContent: oldContent}); err != nil {
+	if err := upsertManualFile(manualPath, manualEntry{Operation: "modify", Timestamp: time.Now().Format("20060102-150405"), Line: updatedLine, OldContent: oldContent}); err != nil {
 		logger.Error("upsert manual file failed", "path", manualPath, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status: false, ErrorMsg: "failed to write manual file (CWB_KB_DSU_043)",
@@ -621,7 +626,7 @@ func DeleteDocStructureLine(c echo.Context) error {
 
 	deleteEntryLine := deletedLine
 	deleteEntryLine.Content = ""
-	if err := upsertManualFile(manualPath, manualEntry{Operation: "delete", Line: deleteEntryLine, OldContent: deletedLine.Content}); err != nil {
+	if err := upsertManualFile(manualPath, manualEntry{Operation: "delete", Timestamp: time.Now().Format("20060102-150405"), Line: deleteEntryLine, OldContent: deletedLine.Content}); err != nil {
 		logger.Error("upsert manual file failed", "path", manualPath, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status: false, ErrorMsg: "failed to write manual file (CWB_KB_DSD_043)",
@@ -700,6 +705,8 @@ func upsertManualFile(path string, entry manualEntry) error {
 			if e, ok := parseManualLine(raw); ok {
 				if e.Line.PageNumber != entry.Line.PageNumber || e.Line.LineNumber != entry.Line.LineNumber {
 					entries = append(entries, e)
+				} else {
+					entry.OldContent = e.OldContent
 				}
 			} else if ln, ok := parseCorrectedLine(raw); ok {
 				// migrate old 7-field format entries
@@ -715,6 +722,8 @@ func upsertManualFile(path string, entry manualEntry) error {
 					}
 					migrated.Line.Content = newContent
 					entries = append(entries, migrated)
+				} else if ln.LineType == "deleted" {
+					entry.OldContent = ln.Content
 				}
 			}
 		}

@@ -96,11 +96,13 @@ func main() {
 	llmClient := newLLMClient()
 	metricsLLMClient := newLLMClient()
 	// structureLLMClient := newLLMClient()
+	fixedChunkLLMClient := newLLMClient()
 	topicChunkLLMClient := newLLMClient()
 
 	inputStore := docprocessing.DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
 	fixedChunkSvc := docprocessing.NewFixedSizeChunkingService(
 		docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+		fixedChunkLLMClient,
 		logger,
 	)
 	topicChunkSvc := docprocessing.NewSemanticChunkingService(

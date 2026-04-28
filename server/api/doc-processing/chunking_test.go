@@ -122,20 +122,60 @@ func TestBuildChunks_LargeNumericListCanSplit(t *testing.T) {
 
 func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	tmp := t.TempDir()
+	treeRoot := t.TempDir()
 	input := strings.Join([]string{
 		"1	1	paragraph	TestFont	12	[0,0,1,1]	Intro",
 		"2	1	paragraph	TestFont	12	[0,0,1,1]	More",
 		"3	2	paragraph	TestFont	12	[0,0,1,1]	End",
 	}, "\n")
 
-	st := &fakeStore{rec: InputRecord{ID: 7523, StatusRaw: "[]"}}
-	svc := NewFixedSizeChunkingService(st, nil)
+	st := &fakeStore{rec: InputRecord{
+		ID:              7523,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "std_20039.pdf",
+	}}
+	ex := &fakeSemanticExtractor{
+		outs: []map[string]any{
+			{
+				"topics": []any{
+					map[string]any{
+						"topic_type":    "policy",
+						"lines":         []any{"1-2"},
+						"keywords":      []any{"intro", "scope"},
+						"topic":         "Intro scope",
+						"category_path": []any{"document_overview"},
+					},
+				},
+			},
+			{
+				"topics": []any{
+					map[string]any{
+						"topic_type":    "policy",
+						"lines":         []any{"3"},
+						"keywords":      []any{"end"},
+						"topic":         "Ending section",
+						"category_path": []any{"document_overview", "closing_notes"},
+					},
+				},
+			},
+		},
+	}
+	svc := NewFixedSizeChunkingService(st, ex, nil)
 	svc.ChunkDir = tmp
-	svc.ChunkSize = 80
+	svc.TreeRootDir = treeRoot
+	svc.ChunkSize = 25
 	svc.OverlapPercent = 50
+	svc.ModelErr = nil
+	svc.PromptErr = nil
+	svc.ModelName = "topic-model"
+	svc.PromptText = "extract chunk topics"
 
 	if err := svc.HandleInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
 		t.Fatalf("HandleInput: %v", err)
+	}
+	if ex.calls != 2 {
+		t.Fatalf("extractor calls=%d, want 2", ex.calls)
 	}
 
 	if st.insertCalls != 1 {
@@ -144,34 +184,53 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	if st.updateCalls != 1 {
 		t.Fatalf("UpdateInputStatus calls=%d, want 1", st.updateCalls)
 	}
-
-	chunk1 := filepath.Join(tmp, "7", "7523", "chunk_0001")
-	chunk2 := filepath.Join(tmp, "7", "7523", "chunk_0002")
-	if _, err := os.Stat(chunk1); err != nil {
-		t.Fatalf("missing chunk1: %v", err)
-	}
-	if _, err := os.Stat(chunk2); err != nil {
-		t.Fatalf("missing chunk2: %v", err)
+	if st.insertedRun.ChunkingMethod != "fix-size" {
+		t.Fatalf("chunking_method=%q, want fix-size", st.insertedRun.ChunkingMethod)
 	}
 
-	b2, err := os.ReadFile(chunk2)
+	chunkPath := filepath.Join(tmp, "7", "7523", "std_20039_opendata.chunks")
+	topicPath := filepath.Join(tmp, "7", "7523", "std_20039_opendata.topics")
+	legacyTopicsPath := filepath.Join(tmp, "7", "7523", "topics.txt")
+	if _, err := os.Stat(chunkPath); err != nil {
+		t.Fatalf("missing chunk artifact: %v", err)
+	}
+	if _, err := os.Stat(topicPath); err != nil {
+		t.Fatalf("missing topic artifact: %v", err)
+	}
+	if _, err := os.Stat(legacyTopicsPath); err != nil {
+		t.Fatalf("missing legacy topics.txt: %v", err)
+	}
+
+	b2, err := os.ReadFile(chunkPath)
 	if err != nil {
-		t.Fatalf("read chunk2: %v", err)
+		t.Fatalf("read chunk artifact: %v", err)
 	}
-	contents := []string{string(b2)}
-	chunk3 := filepath.Join(tmp, "7", "7523", "chunk_0003")
-	if b3, err := os.ReadFile(chunk3); err == nil {
-		contents = append(contents, string(b3))
+	content := strings.TrimSpace(string(b2))
+	wantSnippets := []string{
+		"overlap: []",
+		"lines: [1-2]",
+		"overlap: [2]",
+		"lines: [3]",
 	}
-	for _, content := range contents {
-		for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
-			if line == "" {
-				continue
-			}
-			if !strings.HasPrefix(line, "r ") && !strings.HasPrefix(line, "o ") {
-				t.Fatalf("expected chunk line to start with mark prefix, got %q", line)
-			}
+	for _, want := range wantSnippets {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected chunk artifact to contain %q, got %q", want, content)
 		}
+	}
+	topicContent, err := os.ReadFile(topicPath)
+	if err != nil {
+		t.Fatalf("read topic artifact: %v", err)
+	}
+	if !strings.Contains(string(topicContent), "1\tpolicy\t[1-2]\t[intro, scope]\tIntro scope") {
+		t.Fatalf("unexpected topic artifact content: %q", string(topicContent))
+	}
+	treeLeaf := filepath.Join(treeRoot, "document_overview", "closing_notes.txt")
+	treeContent, err := os.ReadFile(treeLeaf)
+	if err != nil {
+		t.Fatalf("read topic tree leaf: %v", err)
+	}
+	if !strings.Contains(string(treeContent), "7523\tpolicy\t[3]\t[end]\tEnding section") {
+		t.Fatalf("unexpected tree leaf content: %q", string(treeContent))
 	}
 
 	var status []map[string]any
@@ -185,15 +244,16 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	if last["operation"] != "chunked" {
 		t.Fatalf("operation=%v, want chunked", last["operation"])
 	}
-	if last["proc-status"] != "success" {
-		t.Fatalf("proc-status=%v, want success", last["proc-status"])
+	if last["proc_status"] != "success" {
+		t.Fatalf("proc_status=%v, want success", last["proc_status"])
 	}
 }
 
 func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 	st := &fakeStore{rec: InputRecord{ID: 1001, StatusRaw: "[]"}}
-	svc := NewFixedSizeChunkingService(st, nil)
+	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = t.TempDir()
+	svc.TreeRootDir = t.TempDir()
 	svc.ChunkSize = 2
 	svc.OverlapPercent = 0
 
@@ -220,7 +280,7 @@ func TestNewService_UsesRequiredAndDefaultChunkEnv(t *testing.T) {
 	t.Setenv("CHUNK_OVERLAP_PERCENT", "")
 	t.Setenv("ARTIFACT_DIR", "")
 
-	svc := NewFixedSizeChunkingService(&fakeStore{}, nil)
+	svc := NewFixedSizeChunkingService(&fakeStore{}, &fakeSemanticExtractor{}, nil)
 	if svc.ChunkSize != 300 {
 		t.Fatalf("ChunkSize=%d, want 300", svc.ChunkSize)
 	}
@@ -234,7 +294,7 @@ func TestNewService_UsesRequiredAndDefaultChunkEnv(t *testing.T) {
 
 func TestService_HandleInput_MissingChunkDir(t *testing.T) {
 	st := &fakeStore{rec: InputRecord{ID: 2002, StatusRaw: "[]"}}
-	svc := NewFixedSizeChunkingService(st, nil)
+	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = ""
 	svc.ChunkSize = 2
 	svc.OverlapPercent = 0
@@ -254,5 +314,40 @@ func TestService_HandleInput_MissingChunkDir(t *testing.T) {
 	}
 	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing ARTIFACT_DIR") {
 		t.Fatalf("expected persisted error for missing ARTIFACT_DIR, got %v", st.updatedError)
+	}
+}
+
+func TestService_HandleInput_MissingTreeRootDir(t *testing.T) {
+	st := &fakeStore{rec: InputRecord{
+		ID:              2003,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "sample.pdf",
+	}}
+	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
+	svc.ChunkDir = t.TempDir()
+	svc.TreeRootDir = ""
+	svc.ChunkSize = 2
+	svc.OverlapPercent = 0
+	svc.ModelErr = nil
+	svc.PromptErr = nil
+	svc.ModelName = "topic-model"
+	svc.PromptText = "prompt"
+
+	err := svc.HandleInput(context.Background(), 2003, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
+	if err == nil {
+		t.Fatalf("expected error when CHUNK_TREE_ROOT_DIR is empty")
+	}
+	if !strings.Contains(err.Error(), "missing CHUNK_TREE_ROOT_DIR") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.insertCalls != 0 {
+		t.Fatalf("InsertChunkRun calls=%d, want 0", st.insertCalls)
+	}
+	if st.updateCalls != 1 {
+		t.Fatalf("UpdateInputStatus calls=%d, want 1", st.updateCalls)
+	}
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing CHUNK_TREE_ROOT_DIR") {
+		t.Fatalf("expected persisted error for missing CHUNK_TREE_ROOT_DIR, got %v", st.updatedError)
 	}
 }

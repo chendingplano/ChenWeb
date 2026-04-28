@@ -125,6 +125,12 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return nil
 	}
 
+	lineFilePath, lineFileErr := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
+	if lineFileErr != nil {
+		p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042466) resolve line file for record_id=%d: %w", evt.RecordID, lineFileErr))
+		return nil
+	}
+
 	if evt.Force {
 		_, _ = p.Store.DeleteMetricsByInputRecordID(ctx, evt.RecordID)
 	} else {
@@ -143,11 +149,6 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	var allLines []string
 	var inputCount int
 	if topicsPath != "" {
-		lineFilePath, lineFileErr := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
-		if lineFileErr != nil {
-			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042466) resolve line file for record_id=%d: %w", evt.RecordID, lineFileErr))
-			return nil
-		}
 		lines, readErr := readLinesFromTopicsFile(topicsPath, lineFilePath)
 		if readErr != nil {
 			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042467) read topics file %s: %w", topicsPath, readErr))
@@ -158,7 +159,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	} else {
 		allLines = make([]string, 0, 1024)
 		for _, chunkPath := range chunkFiles {
-			lines, err := readRegularLinesFromChunk(chunkPath)
+			lines, err := readRegularLinesFromChunk(chunkPath, lineFilePath)
 			if err != nil {
 				p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) read chunk file %s: %w", chunkPath, err))
 				return nil
@@ -209,8 +210,8 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 }
 
 // detectChunkingInputs checks the artifact directory for the record and returns
-// either the topics.txt path (topic-driven chunking) or the list of chunk_* file
-// paths (fix-length chunking), with topics.txt taking priority.
+// the preferred topic artifact path or chunk artifact paths, prioritizing the
+// spec-compliant .topics/.chunks layout before falling back to legacy files.
 func (p *MetricsProcessor) detectChunkingInputs(recordID int64) (topicsPath string, chunkFiles []string, err error) {
 	if strings.TrimSpace(p.ChunkDir) == "" {
 		return "", nil, errors.New("(MID_26042463) missing ARTIFACT_DIR")
@@ -220,12 +221,6 @@ func (p *MetricsProcessor) detectChunkingInputs(recordID int64) (topicsPath stri
 	}
 	groupID := recordID / 1000
 	dir := filepath.Join(p.ChunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
-
-	tp := filepath.Join(dir, "topics.txt")
-	if info, statErr := os.Stat(tp); statErr == nil && !info.IsDir() {
-		return tp, nil, nil
-	}
-
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -233,22 +228,47 @@ func (p *MetricsProcessor) detectChunkingInputs(recordID int64) (topicsPath stri
 		}
 		return "", nil, err
 	}
-	paths := make([]string, 0, len(entries))
+
+	topicPaths := make([]string, 0, 2)
+	legacyTopicPaths := make([]string, 0, 1)
+	chunkPaths := make([]string, 0, len(entries))
+	legacyChunkPaths := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := strings.TrimSpace(entry.Name())
-		if !strings.HasPrefix(name, "chunk_") {
+		fullPath := filepath.Join(dir, name)
+		switch {
+		case strings.HasSuffix(name, ".topics"):
+			topicPaths = append(topicPaths, fullPath)
+		case name == "topics.txt":
+			legacyTopicPaths = append(legacyTopicPaths, fullPath)
+		case strings.HasSuffix(name, ".chunks"):
+			chunkPaths = append(chunkPaths, fullPath)
+		case strings.HasPrefix(name, "chunk_"):
+			legacyChunkPaths = append(legacyChunkPaths, fullPath)
+		default:
 			continue
 		}
-		paths = append(paths, filepath.Join(dir, name))
 	}
-	sort.Strings(paths)
-	return "", paths, nil
+	sort.Strings(topicPaths)
+	if len(topicPaths) > 0 {
+		return topicPaths[0], nil, nil
+	}
+	sort.Strings(legacyTopicPaths)
+	if len(legacyTopicPaths) > 0 {
+		return legacyTopicPaths[0], nil, nil
+	}
+	sort.Strings(chunkPaths)
+	if len(chunkPaths) > 0 {
+		return "", chunkPaths, nil
+	}
+	sort.Strings(legacyChunkPaths)
+	return "", legacyChunkPaths, nil
 }
 
-func readRegularLinesFromChunk(path string) ([]string, error) {
+func readRegularLinesFromChunk(path string, lineFilePath string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -256,11 +276,26 @@ func readRegularLinesFromChunk(path string) ([]string, error) {
 	defer f.Close()
 
 	lines := make([]string, 0, 256)
+	regularLineNos := make([]int, 0, 256)
+	hasSummaryFormat := false
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1024), 16*1024*1024)
 	for sc.Scan() {
 		raw := strings.TrimSpace(sc.Text())
 		if raw == "" {
+			continue
+		}
+		if strings.HasPrefix(raw, "overlap:") {
+			hasSummaryFormat = true
+			continue
+		}
+		if strings.HasPrefix(raw, "lines:") {
+			hasSummaryFormat = true
+			nums, err := parseTopicLineRanges(strings.TrimSpace(strings.TrimPrefix(raw, "lines:")))
+			if err != nil {
+				return nil, err
+			}
+			regularLineNos = append(regularLineNos, nums...)
 			continue
 		}
 		base, mark := splitChunkMark(raw)
@@ -271,6 +306,18 @@ func readRegularLinesFromChunk(path string) ([]string, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+	if hasSummaryFormat {
+		if strings.TrimSpace(lineFilePath) == "" {
+			return nil, fmt.Errorf("summary chunk file requires source line file")
+		}
+		wantLines := make(map[int]struct{}, len(regularLineNos))
+		for _, n := range regularLineNos {
+			if n > 0 {
+				wantLines[n] = struct{}{}
+			}
+		}
+		return readLinesFromFileByNumbers(lineFilePath, wantLines)
 	}
 	return lines, nil
 }

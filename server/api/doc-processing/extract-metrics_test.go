@@ -57,7 +57,7 @@ func TestReadRegularLinesFromChunk_SkipsOverlap(t *testing.T) {
 		t.Fatalf("write chunk: %v", err)
 	}
 
-	lines, err := readRegularLinesFromChunk(chunk)
+	lines, err := readRegularLinesFromChunk(chunk, "")
 	if err != nil {
 		t.Fatalf("readRegularLinesFromChunk: %v", err)
 	}
@@ -69,6 +69,45 @@ func TestReadRegularLinesFromChunk_SkipsOverlap(t *testing.T) {
 	}
 }
 
+func TestReadRegularLinesFromChunk_SummaryFormatUsesSourceLineFile(t *testing.T) {
+	tmp := t.TempDir()
+	chunk := filepath.Join(tmp, "std_20039_opendata.chunks")
+	lineFile := filepath.Join(tmp, "std_20039_opendata.txt")
+	chunkBody := strings.Join([]string{
+		"overlap: [2]",
+		"lines: [1, 3-4]",
+	}, "\n")
+	lineBody := strings.Join([]string{
+		"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tIntro",
+		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tOverlap",
+		"3\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tBody",
+		"4\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tTail",
+	}, "\n")
+	if err := osWriteFile(chunk, []byte(chunkBody)); err != nil {
+		t.Fatalf("write chunk: %v", err)
+	}
+	if err := osWriteFile(lineFile, []byte(lineBody)); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+
+	lines, err := readRegularLinesFromChunk(chunk, lineFile)
+	if err != nil {
+		t.Fatalf("readRegularLinesFromChunk: %v", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("lines=%v", lines)
+	}
+	got := strings.Join(lines, "\n")
+	if strings.Contains(got, "Overlap") {
+		t.Fatalf("overlap lines should be excluded: %v", lines)
+	}
+	for _, want := range []string{"Intro", "Body", "Tail"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in %q", want, got)
+		}
+	}
+}
+
 func TestMetricsProcessor_ExtractsFromChunkFilesAndWritesStatus(t *testing.T) {
 	tmp := t.TempDir()
 	recordID := int64(2005)
@@ -77,13 +116,21 @@ func TestMetricsProcessor_ExtractsFromChunkFilesAndWritesStatus(t *testing.T) {
 		t.Fatalf("mkdir chunk dir: %v", err)
 	}
 	chunkFile := filepath.Join(chunkDir, "chunk_0001")
+	lineFile := filepath.Join(tmp, "ocr_rslt_2005_opendata.txt")
 	body := strings.Join([]string{
-		"r 1	1	heading	TestFont	12	[0,0,1,1]	Intro",
-		"o 2	1	paragraph	TestFont	12	[0,0,1,1]	Ignore overlap",
-		"r 3	1	paragraph	TestFont	12	[0,0,1,1]	Latency must be <= 200ms",
+		"overlap: [2]",
+		"lines: [1, 3]",
 	}, "\n")
 	if err := osWriteFile(chunkFile, []byte(body)); err != nil {
 		t.Fatalf("write chunk: %v", err)
+	}
+	lineBody := strings.Join([]string{
+		"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tIntro",
+		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tIgnore overlap",
+		"3\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLatency must be <= 200ms",
+	}, "\n")
+	if err := osWriteFile(lineFile, []byte(lineBody)); err != nil {
+		t.Fatalf("write line file: %v", err)
 	}
 
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
@@ -141,6 +188,41 @@ func TestMetricsProcessor_ExtractsFromChunkFilesAndWritesStatus(t *testing.T) {
 	}
 	if strings.TrimSpace(asString(last["proc_status"])) != "success" {
 		t.Fatalf("proc_status=%v", last["proc_status"])
+	}
+}
+
+func TestMetricsProcessor_DetectChunkingInputs_PrefersSpecArtifacts(t *testing.T) {
+	tmp := t.TempDir()
+	recordID := int64(2005)
+	chunkDir := filepath.Join(tmp, "2", "2005")
+	if err := osMkdirAll(chunkDir); err != nil {
+		t.Fatalf("mkdir chunk dir: %v", err)
+	}
+	if err := osWriteFile(filepath.Join(chunkDir, "std_20039_opendata.topics"), []byte("1\tgeneral\t[1]\t[x]\tTopic\n")); err != nil {
+		t.Fatalf("write .topics file: %v", err)
+	}
+	if err := osWriteFile(filepath.Join(chunkDir, "std_20039_opendata.chunks"), []byte("overlap: []\nlines: [1]\n")); err != nil {
+		t.Fatalf("write .chunks file: %v", err)
+	}
+	if err := osWriteFile(filepath.Join(chunkDir, "topics.txt"), []byte("1\tgeneral\t[9]\t[legacy]\tLegacy Topic\n")); err != nil {
+		t.Fatalf("write legacy topics.txt: %v", err)
+	}
+	if err := osWriteFile(filepath.Join(chunkDir, "chunk_0001"), []byte("r 9\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLegacy line\n")); err != nil {
+		t.Fatalf("write legacy chunk file: %v", err)
+	}
+
+	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{}, &fakeJSONExtractor{}, nil)
+	p.ChunkDir = tmp
+
+	topicsPath, chunkFiles, err := p.detectChunkingInputs(recordID)
+	if err != nil {
+		t.Fatalf("detectChunkingInputs: %v", err)
+	}
+	if topicsPath != filepath.Join(chunkDir, "std_20039_opendata.topics") {
+		t.Fatalf("topicsPath=%q", topicsPath)
+	}
+	if len(chunkFiles) != 0 {
+		t.Fatalf("chunkFiles=%v, want none when .topics is present", chunkFiles)
 	}
 }
 

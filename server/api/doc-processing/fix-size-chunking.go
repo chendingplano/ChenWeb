@@ -32,8 +32,12 @@ var (
 )
 
 type InputRecord struct {
-	ID        int64
-	StatusRaw string
+	ID              int64
+	ParserName      string
+	ResultFilename  string
+	StagingFilename string
+	FileName        string
+	StatusRaw       string
 }
 
 type ChunkRunRecord struct {
@@ -52,11 +56,21 @@ type Store interface {
 
 type FixedSizeChunkingService struct {
 	Store          Store
+	Extractor      LLMJSONExtractor
 	Logger         ApiTypes.JimoLogger
 	Now            func() time.Time
 	ChunkDir       string
+	TreeRootDir    string
 	ChunkSize      int
 	OverlapPercent int
+	ModelRef       string
+	ModelCfgPath   string
+	ModelErr       error
+	ModelName      string
+	PromptText     string
+	PromptRef      string
+	PromptPath     string
+	PromptErr      error
 }
 
 type ChunkOptions struct {
@@ -99,23 +113,39 @@ type protectedBlock struct {
 	splittable bool
 }
 
-func NewFixedSizeChunkingService(store Store, logger ApiTypes.JimoLogger) *FixedSizeChunkingService {
+func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *FixedSizeChunkingService {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26041901")
 	}
+	modelRef, modelCfgPath, modelCfg, modelErr := loadFixedSizeTopicModelFromEnv()
+	promptText, promptRef, promptPath, promptErr := loadFixedSizeTopicPromptFromEnv()
+	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	return &FixedSizeChunkingService{
 		Store:          store,
+		Extractor:      extractor,
 		Logger:         logger,
 		Now:            time.Now,
 		ChunkDir:       strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		TreeRootDir:    strings.TrimSpace(os.Getenv("CHUNK_TREE_ROOT_DIR")),
 		ChunkSize:      envInt("CHUNK_SIZE", DefaultChunkSize, 1),
 		OverlapPercent: envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
+		ModelRef:       modelRef,
+		ModelCfgPath:   modelCfgPath,
+		ModelErr:       modelErr,
+		ModelName:      modelCfg.ModelName,
+		PromptText:     promptText,
+		PromptRef:      promptRef,
+		PromptPath:     promptPath,
+		PromptErr:      promptErr,
 	}
 }
 
 func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
 	if s.Store == nil {
 		return errors.New("(MID_26042012) store is nil")
+	}
+	if s.Extractor == nil {
+		return errors.New("(MID_26042013) fixed-size chunking extractor is nil")
 	}
 	if recordID <= 0 {
 		return fmt.Errorf("(MID_26042002) invalid record_id: %d", recordID)
@@ -131,8 +161,22 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
+	if strings.TrimSpace(s.TreeRootDir) == "" {
+		procErr := errors.New("(MID_26042014) missing CHUNK_TREE_ROOT_DIR")
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
 	if strings.TrimSpace(inputFilename) == "" {
 		procErr := errors.New("(MID_26042004) missing input filename")
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+	if s.ModelErr != nil {
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, s.ModelErr)
+		return s.ModelErr
+	}
+	if s.PromptErr != nil {
+		procErr := fmt.Errorf("(MID_26042015) load fixed-size chunk prompt %q failed: %w", s.PromptRef, s.PromptErr)
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
@@ -142,31 +186,79 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, err)
 		return err
 	}
+	numPages := uniquePages(lines)
+	numLines := len(lines)
 	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: s.ChunkSize, OverlapPercent: s.OverlapPercent})
 	if err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, uniquePages(lines), len(lines), 0, start, err)
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, 0, start, err)
 		return err
 	}
 
-	if err := writeChunkFiles(s.ChunkDir, rec.ID, chunks); err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, uniquePages(lines), len(lines), 0, start, err)
+	stagingName := strings.TrimSpace(rec.StagingFilename)
+	if stagingName == "" {
+		stagingName = inputFilename
+	}
+	artifactBase := buildChunkArtifactBaseName(stagingName, rec.ParserName)
+	if _, err := writeCombinedChunkFile(s.ChunkDir, rec.ID, artifactBase+".chunks", chunks); err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, 0, start, err)
+		return err
+	}
+
+	topics := make([]TopicItem, 0, len(chunks))
+	seqStart := 1
+	for _, chunk := range chunks {
+		chunkLines := make([]Line, 0, len(chunk.Lines))
+		for _, marked := range chunk.Lines {
+			chunkLines = append(chunkLines, marked.Line)
+		}
+		chunkTopics, chunkErr := extractTopicsFromLinesWithLLM(
+			ctx,
+			s.Extractor,
+			s.Logger,
+			s.ModelName,
+			s.PromptText,
+			chunkLines,
+			seqStart,
+			"chunk_seqno",
+			chunk.SeqNo,
+		)
+		if chunkErr != nil {
+			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, fmt.Errorf("(MID_26042016) %w", chunkErr))
+			return chunkErr
+		}
+		topics = append(topics, chunkTopics...)
+		seqStart += len(chunkTopics)
+	}
+	topics = dedupeTopicItems(topics)
+
+	topicsPath, err := writeNamedTopicsFile(s.ChunkDir, rec.ID, artifactBase+".topics", topics)
+	if err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+		return err
+	}
+	if _, err := writeNamedTopicsFile(s.ChunkDir, rec.ID, "topics.txt", topics); err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+		return err
+	}
+	if err := writeTopicsCategoryTreeToDir(s.Logger, s.TreeRootDir, rec.ID, topicsPath, topics); err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
 
 	if err := s.Store.InsertChunkRun(ctx, ChunkRunRecord{
 		SourceRecordID: rec.ID,
-		ChunkingMethod: ChunkingMethodFixed,
+		ChunkingMethod: "fix-size",
 		ChunkingSize:   s.ChunkSize,
 		OverlapPercent: s.OverlapPercent,
 	}); err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, uniquePages(lines), len(lines), len(chunks), start, err)
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
 
 	statusRaw, err := appendChunkedStatus(rec.StatusRaw, chunkStatusParams{
 		InputFilename: inputFilename,
-		NumPages:      uniquePages(lines),
-		NumLines:      len(lines),
+		NumPages:      numPages,
+		NumLines:      numLines,
 		NumChunks:     len(chunks),
 		Start:         start,
 		DurationMs:    time.Since(start).Milliseconds(),
@@ -183,9 +275,12 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 	s.Logger.Info("chunking completed",
 		"record_id", rec.ID,
 		"chunk_dir", s.ChunkDir,
-		"num_pages", uniquePages(lines),
-		"num_lines", len(lines),
+		"tree_root_dir", s.TreeRootDir,
+		"num_pages", numPages,
+		"num_lines", numLines,
 		"num_chunks", len(chunks),
+		"num_topics", len(topics),
+		"model_name", s.ModelName,
 	)
 	return nil
 }
@@ -231,6 +326,9 @@ func ParseInputLines(input []byte) ([]Line, error) {
 		lineNo++
 		raw := strings.TrimSpace(sc.Text())
 		if raw == "" {
+			continue
+		}
+		if fields := strings.Split(raw, "\t"); len(fields) >= 3 && strings.EqualFold(strings.TrimSpace(fields[2]), "TOC") {
 			continue
 		}
 		parsed, err := parseLine(raw)
@@ -358,6 +456,7 @@ func findTargetByBytes(lines []Line, start int, targetBytes int) int {
 	return len(lines)
 }
 
+/*
 func writeChunkFiles(chunkDir string, recordID int64, chunks []Chunk) error {
 	if strings.TrimSpace(chunkDir) == "" {
 		return errors.New("(MID_26042010) chunk dir is empty")
@@ -384,6 +483,7 @@ func writeChunkFiles(chunkDir string, recordID int64, chunks []Chunk) error {
 	}
 	return nil
 }
+*/
 
 func formatMarkedLine(ml MarkedLine) string {
 	base := lineRawForChunking(ml.Line)
@@ -395,11 +495,15 @@ func formatMarkedLine(ml MarkedLine) string {
 }
 
 func lineRawForChunking(line Line) string {
-	base := strings.TrimSpace(line.Raw)
-	if base != "" {
-		return base
+	// base := strings.TrimSpace(line.Raw)
+	// if base != "" {
+	// 	return base
+	// }
+	if line.LineType == "image" {
+		return ""
 	}
-	return fmt.Sprintf("%d %d %s %s %s", line.LineNo, line.PageNo, line.LineType, line.Content, line.Coordinate)
+
+	return fmt.Sprintf("%d %d %s %s", line.LineNo, line.PageNo, line.LineType, line.Content)
 }
 
 func lineRawByteSize(line Line) int {
@@ -570,12 +674,12 @@ func appendChunkedStatus(raw string, p chunkStatusParams) (string, error) {
 		"num_lines":      p.NumLines,
 		"num_chunks":     p.NumChunks,
 		"start_time":     p.Start.Format(defaultStatusTime),
-		"ms-used":        p.DurationMs,
+		"ms_used":        p.DurationMs,
 	}
 	if p.ProcErr == nil {
-		entry["proc-status"] = "success"
+		entry["proc_status"] = "success"
 	} else {
-		entry["proc-status"] = "failed"
+		entry["proc_status"] = "failed"
 		entry["error"] = p.ProcErr.Error()
 	}
 
@@ -668,6 +772,95 @@ func envInt(key string, fallback int, min int) int {
 		return min
 	}
 	return n
+}
+
+func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
+	modelRef = strings.TrimSpace(os.Getenv("CHUNK_EXTRACT_TOPIC_MODEL_NAME"))
+	if modelRef == "" {
+		return "", "", structureModelConfig{ModelName: DefaultChunkTopicModelName}, nil
+	}
+
+	modelPath, err = resolveModelsFilePath("CHUNK_EXTRACT_TOPIC_MODELS_FILE")
+	if err != nil {
+		return modelRef, "", structureModelConfig{ModelName: modelRef}, nil
+	}
+	raw, err := os.ReadFile(modelPath)
+	if err != nil {
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042017) read %s failed: %w", modelPath, err)
+	}
+	parsed := ApiTypes.LLMModelsFile{}
+	if err := parseTOMLMap(raw, &parsed); err != nil {
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042018) parse %s failed: %w", modelPath, err)
+	}
+	modelDef, ok := parsed[modelRef]
+	if !ok {
+		return modelRef, modelPath, structureModelConfig{ModelName: modelRef}, nil
+	}
+	if strings.TrimSpace(modelDef.ModelName) == "" {
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042019) model %q in %s missing model_name", modelRef, modelPath)
+	}
+	return modelRef, modelPath, structureModelConfig{
+		ModelName:    strings.TrimSpace(modelDef.ModelName),
+		APIKey:       strings.TrimSpace(modelDef.APIKey),
+		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
+		TimeoutSec:   modelDef.TimeoutSec,
+		ThinkingType: normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
+	}, nil
+}
+
+func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
+	promptRef = strings.TrimSpace(os.Getenv("CHUNK_EXTRACT_TOPIC_PROMPT"))
+	if promptRef == "" {
+		return "", "", "", errors.New("(MID_26042020) missing CHUNK_EXTRACT_TOPIC_PROMPT")
+	}
+
+	paths := make([]string, 0, 8)
+	addCandidate := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		for _, existing := range paths {
+			if existing == p {
+				return
+			}
+		}
+		paths = append(paths, p)
+	}
+
+	if filepath.IsAbs(promptRef) {
+		addCandidate(promptRef)
+	} else {
+		addCandidate(promptRef)
+		if promptDir := strings.TrimSpace(os.Getenv("PROMPT_DIR")); promptDir != "" {
+			addCandidate(filepath.Join(promptDir, promptRef))
+		}
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", promptRef))
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", "prompts", promptRef))
+		addCandidate(filepath.Join("prompts", promptRef))
+	}
+
+	var lastErr error
+	for _, candidate := range paths {
+		bs, err := os.ReadFile(candidate)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		text := strings.TrimSpace(string(bs))
+		if text == "" {
+			return "", promptRef, candidate, errors.New("(MID_26042021) prompt file is empty")
+		}
+		return text, promptRef, candidate, nil
+	}
+
+	if strings.Contains(promptRef, "\n") || strings.Contains(promptRef, " ") {
+		return strings.TrimSpace(promptRef), "inline", "", nil
+	}
+	if lastErr == nil {
+		lastErr = os.ErrNotExist
+	}
+	return "", promptRef, "", fmt.Errorf("(MID_26042022) prompt file not found: %w", lastErr)
 }
 
 func min(a int, b int) int {

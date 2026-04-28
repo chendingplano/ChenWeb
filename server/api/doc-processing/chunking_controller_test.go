@@ -26,6 +26,16 @@ func TestNewChunkingControllerFromEnv_RequiresMethod(t *testing.T) {
 	}
 }
 
+func TestNewChunkingController_UnsupportedMethodListsAllowedValues(t *testing.T) {
+	_, err := NewChunkingController("fix-size", &fakeChunkingHandler{}, &fakeChunkingHandler{})
+	if err == nil {
+		t.Fatalf("expected unsupported method error")
+	}
+	if !strings.Contains(err.Error(), "allowed: "+ChunkingMethodFixed+", "+ChunkingMethodTopic) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestChunkingController_DispatchesFixedMethod(t *testing.T) {
 	fixed := &fakeChunkingHandler{}
 	topic := &fakeChunkingHandler{}

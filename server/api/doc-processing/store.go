@@ -35,12 +35,23 @@ func (s SQLStore) GetInputRecord(ctx context.Context, id int64) (InputRecord, er
 	}
 	const stmt = `
 SELECT id,
+       COALESCE(parser_name, ''),
+       COALESCE(result_filename, ''),
+       COALESCE(staging_filename, ''),
+       COALESCE(file_name, ''),
        COALESCE(status::text, '[]')
 FROM kb.inputs
 WHERE id = $1`
 
 	var rec InputRecord
-	err := s.DB.QueryRowContext(ctx, stmt, id).Scan(&rec.ID, &rec.StatusRaw)
+	err := s.DB.QueryRowContext(ctx, stmt, id).Scan(
+		&rec.ID,
+		&rec.ParserName,
+		&rec.ResultFilename,
+		&rec.StagingFilename,
+		&rec.FileName,
+		&rec.StatusRaw,
+	)
 	if err != nil {
 		return InputRecord{}, err
 	}

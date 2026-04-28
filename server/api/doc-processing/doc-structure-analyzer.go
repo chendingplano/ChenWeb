@@ -371,10 +371,11 @@ func (p *StructureAnalyzerProcessor) validateRequiredEnv() error {
 }
 
 type structureModelConfig struct {
-	ModelName  string
-	APIKey     string
-	BaseURL    string
-	TimeoutSec int
+	ModelName    string
+	APIKey       string
+	BaseURL      string
+	TimeoutSec   int
+	ThinkingType string
 }
 
 func loadStructureModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
@@ -410,10 +411,11 @@ func loadModelConfigFromEnv(modelRefEnv string, modelsFileEnv string) (modelRef 
 		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042106) model %q in %s missing model_name", modelRef, modelPath)
 	}
 	cfg = structureModelConfig{
-		ModelName:  strings.TrimSpace(modelDef.ModelName),
-		APIKey:     strings.TrimSpace(modelDef.APIKey),
-		BaseURL:    strings.TrimSpace(modelDef.BaseURL),
-		TimeoutSec: modelDef.TimeoutSec,
+		ModelName:    strings.TrimSpace(modelDef.ModelName),
+		APIKey:       strings.TrimSpace(modelDef.APIKey),
+		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
+		TimeoutSec:   modelDef.TimeoutSec,
+		ThinkingType: normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
 	}
 	return modelRef, modelPath, cfg, nil
 }
@@ -469,6 +471,9 @@ func applyStructureModelConfigToExtractor(extractor LLMJSONExtractor, cfg struct
 	if v := strings.TrimSpace(cfg.BaseURL); v != "" {
 		client.BaseURL = v
 	}
+	if v := normalizeThinkingType(cfg.ThinkingType); v != "" {
+		client.ThinkingType = v
+	}
 	if cfg.TimeoutSec <= 0 {
 		return
 	}
@@ -477,6 +482,15 @@ func applyStructureModelConfigToExtractor(extractor LLMJSONExtractor, cfg struct
 		return
 	}
 	client.HTTPClient.Timeout = time.Duration(cfg.TimeoutSec) * time.Second
+}
+
+func normalizeThinkingType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "enabled", "disabled":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
 }
 
 func parseStructureLines(body []byte) ([]structureLine, int, error) {
