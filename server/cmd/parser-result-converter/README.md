@@ -1,6 +1,6 @@
 # Parser Result Converter Service
 
-The `parser-result-converter` service consumes JetStream messages for parsed PDFs and converts parser JSON output into `.txt` line output.
+The `parser-result-converter` service consumes JetStream messages for parsed PDFs and converts parser JSON output into canonical `.txt` Line Files used by the downstream document-processing pipeline.
 
 ## What It Does
 
@@ -17,8 +17,11 @@ The `parser-result-converter` service consumes JetStream messages for parsed PDF
 - Uses converter by `parser_name`:
   - empty / `opendata`: converts JSON to `.txt`
   - `paddleocr`: currently returns not-implemented
+  - `mineru`: currently returns not-implemented
+  - `docline`: currently returns not-implemented
 - Appends a `converted` status entry to `kb.inputs.status` with success/failed
 - Publishes completion event to subject `kb.line-file-generated`
+- Removes repeated non-empty lines that appear on every page by default
 
 ## Run
 
@@ -79,6 +82,11 @@ Binary output:
   - set to `false` / `0` / `no` / `off` to disable
   - safety guard: auto-recreate only runs when the stream has exactly one subject and it is `kb.pdf.parsed`
 - `PARSER_RESULT_CONVERTER_CONFIG` (fallback: `FILE_CONVERTER_CONFIG`, default: `../../../config.toml`)
+- `LINE_FILE_REMOVE_REPEAT_LINES` (default: enabled)
+  - repeated non-empty content that appears on every page is removed from generated Line Files
+  - set `LINE_FILE_REMOVE_REPEAT_LINES=false` to keep those repeated lines
+- `LINE_FILE_REMOVE_REPEAT_PERCENT` (default: `85`)
+  - when repeat-line removal is enabled, a line is removed if the same non-empty content appears on at least this percent of pages
 
 Legacy fallback variables (for backward compatibility):
 

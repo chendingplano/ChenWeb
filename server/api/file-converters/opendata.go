@@ -12,7 +12,8 @@ import (
 )
 
 type openDataDocument struct {
-	Kids []map[string]any `json:"kids"`
+	NumberOfPages int              `json:"number of pages"`
+	Kids          []map[string]any `json:"kids"`
 }
 
 type extractedOpenDataLine struct {
@@ -67,6 +68,7 @@ func ConvertOpenDataFile(inputPath string) (string, error) {
 
 	items := extractOpenDataLineItems(doc.Kids)
 	items = filterPageNumberLines(items)
+	items = filterRepeatedContentLines(items, doc.NumberOfPages)
 	lines := formatOpenDataLines(items)
 
 	outputPath := openDataOutputPath(inputPath)
@@ -257,6 +259,95 @@ func isPageNumberToken(content string) bool {
 		return true
 	}
 	return romanNumeralRE.MatchString(strings.ToLower(token))
+}
+
+func filterRepeatedContentLines(lines []extractedOpenDataLine, declaredPages int) []extractedOpenDataLine {
+	if !lineFileRemoveRepeatLinesEnabled() || len(lines) == 0 {
+		return lines
+	}
+
+	totalPages := declaredPages
+	if totalPages <= 0 {
+		totalPages = countDistinctPages(lines)
+	}
+	if totalPages <= 1 {
+		return lines
+	}
+	minPercent := lineFileRemoveRepeatPercent()
+
+	pagesByContent := make(map[string]map[string]struct{})
+	for _, line := range lines {
+		content := strings.TrimSpace(line.Content)
+		page := strings.TrimSpace(line.Page)
+		if line.Raw != "" || content == "" || page == "" {
+			continue
+		}
+		if _, ok := pagesByContent[content]; !ok {
+			pagesByContent[content] = make(map[string]struct{})
+		}
+		pagesByContent[content][page] = struct{}{}
+	}
+
+	repeated := make(map[string]struct{})
+	for content, pages := range pagesByContent {
+		if percentOfPages(len(pages), totalPages) >= minPercent {
+			repeated[content] = struct{}{}
+		}
+	}
+	if len(repeated) == 0 {
+		return lines
+	}
+
+	out := make([]extractedOpenDataLine, 0, len(lines))
+	for _, line := range lines {
+		content := strings.TrimSpace(line.Content)
+		if _, ok := repeated[content]; ok && content != "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func countDistinctPages(lines []extractedOpenDataLine) int {
+	pages := make(map[string]struct{})
+	for _, line := range lines {
+		page := strings.TrimSpace(line.Page)
+		if page == "" {
+			continue
+		}
+		pages[page] = struct{}{}
+	}
+	return len(pages)
+}
+
+func lineFileRemoveRepeatLinesEnabled() bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("LINE_FILE_REMOVE_REPEAT_LINES")), "false")
+}
+
+func lineFileRemoveRepeatPercent() float64 {
+	raw := strings.TrimSpace(os.Getenv("LINE_FILE_REMOVE_REPEAT_PERCENT"))
+	if raw == "" {
+		return 85
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 85
+	}
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
+func percentOfPages(coveredPages int, totalPages int) float64 {
+	if totalPages <= 0 {
+		return 0
+	}
+	return float64(coveredPages) * 100 / float64(totalPages)
 }
 
 func formatOpenDataLines(items []extractedOpenDataLine) []string {

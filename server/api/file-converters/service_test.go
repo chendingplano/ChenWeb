@@ -341,6 +341,150 @@ func TestConvertOpenDataFile_TableRowEscapesPipeAndUsesRowBBox(t *testing.T) {
 	}
 }
 
+func TestConvertOpenDataFile_RemovesRepeatedContentAcrossAllPagesByDefault(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "result.json")
+	content := `{
+  "number of pages": 3,
+  "kids": [
+    {"type":"paragraph","page number":1,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":1,"content":"page-1-body","bounding box":[30,30,40,40]},
+    {"type":"paragraph","page number":2,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":2,"content":"page-2-body","bounding box":[30,30,40,40]},
+    {"type":"paragraph","page number":3,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":3,"content":"page-3-body","bounding box":[30,30,40,40]}
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertOpenDataFile(in)
+	if err != nil {
+		t.Fatalf("ConvertOpenDataFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	text := string(got)
+	if strings.Contains(text, "www.weboos.com") {
+		t.Fatalf("expected repeated line to be removed, got: %s", text)
+	}
+	if !strings.Contains(text, "page-1-body") || !strings.Contains(text, "page-2-body") || !strings.Contains(text, "page-3-body") {
+		t.Fatalf("expected page body lines to remain, got: %s", text)
+	}
+}
+
+func TestConvertOpenDataFile_KeepsRepeatedContentWhenEnvDisabled(t *testing.T) {
+	t.Setenv("LINE_FILE_REMOVE_REPEAT_LINES", "false")
+
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "result.json")
+	content := `{
+  "number of pages": 2,
+  "kids": [
+    {"type":"paragraph","page number":1,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":1,"content":"page-1-body","bounding box":[30,30,40,40]},
+    {"type":"paragraph","page number":2,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":2,"content":"page-2-body","bounding box":[30,30,40,40]}
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertOpenDataFile(in)
+	if err != nil {
+		t.Fatalf("ConvertOpenDataFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	text := string(got)
+	if strings.Count(text, "www.weboos.com") != 2 {
+		t.Fatalf("expected repeated line to remain when disabled, got: %s", text)
+	}
+}
+
+func TestConvertOpenDataFile_RemovesRepeatedContentWhenAbovePercentThreshold(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "result.json")
+	content := `{
+  "number of pages": 10,
+  "kids": [
+    {"type":"paragraph","page number":1,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":2,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":3,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":4,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":5,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":6,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":7,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":8,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":9,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":10,"content":"page-10-only","bounding box":[10,10,20,20]}
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertOpenDataFile(in)
+	if err != nil {
+		t.Fatalf("ConvertOpenDataFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	text := string(got)
+	if strings.Contains(text, "www.weboos.com") {
+		t.Fatalf("expected repeated line above threshold to be removed, got: %s", text)
+	}
+	if !strings.Contains(text, "page-10-only") {
+		t.Fatalf("expected non-matching lines to remain, got: %s", text)
+	}
+}
+
+func TestConvertOpenDataFile_KeepsRepeatedContentWhenBelowPercentThreshold(t *testing.T) {
+	t.Setenv("LINE_FILE_REMOVE_REPEAT_PERCENT", "95")
+
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "result.json")
+	content := `{
+  "number of pages": 10,
+  "kids": [
+    {"type":"paragraph","page number":1,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":2,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":3,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":4,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":5,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":6,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":7,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":8,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":9,"content":"www.weboos.com","bounding box":[10,10,20,20]},
+    {"type":"paragraph","page number":10,"content":"page-10-only","bounding box":[10,10,20,20]}
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertOpenDataFile(in)
+	if err != nil {
+		t.Fatalf("ConvertOpenDataFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	text := string(got)
+	if strings.Count(text, "www.weboos.com") != 9 {
+		t.Fatalf("expected repeated line below threshold to remain, got: %s", text)
+	}
+}
+
 func TestHandleRequestSuccessAppendsConvertedStatus(t *testing.T) {
 	tmp := t.TempDir()
 	jsonPath := filepath.Join(tmp, "ocr_result.json")

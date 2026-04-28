@@ -27,6 +27,96 @@ type docStructureLine struct {
 	Content           string    `json:"content"`
 }
 
+type manualEntry struct {
+	Operation  string
+	Line       docStructureLine
+	OldContent string
+}
+
+func formatManualLine(e manualEntry) string {
+	parts := make([]string, len(e.Line.Coords))
+	for i, c := range e.Line.Coords {
+		parts[i] = strconv.FormatFloat(c, 'f', -1, 64)
+	}
+	coordsStr := "[" + strings.Join(parts, ",") + "]"
+	return strings.Join([]string{
+		e.Operation,
+		strconv.Itoa(e.Line.LineNumber),
+		strconv.Itoa(e.Line.PageNumber),
+		e.Line.LineType,
+		e.Line.Font,
+		e.Line.FontSize,
+		coordsStr,
+		"|$|" + e.OldContent + "|$|",
+		"|$|" + e.Line.Content + "|$|",
+	}, "\t")
+}
+
+func parseManualLine(s string) (manualEntry, bool) {
+	s = strings.TrimRight(s, "\r\n")
+	if strings.TrimSpace(s) == "" {
+		return manualEntry{}, false
+	}
+	fields := strings.SplitN(s, "\t", 9)
+	if len(fields) != 9 {
+		return manualEntry{}, false
+	}
+	operation := strings.TrimSpace(fields[0])
+	if operation != "add" && operation != "modify" && operation != "delete" {
+		return manualEntry{}, false
+	}
+	lineNum, err1 := strconv.Atoi(strings.TrimSpace(fields[1]))
+	pageNum, err2 := strconv.Atoi(strings.TrimSpace(fields[2]))
+	if err1 != nil || err2 != nil || lineNum <= 0 || pageNum <= 0 {
+		return manualEntry{}, false
+	}
+	lineType := strings.TrimSpace(fields[3])
+	font := strings.TrimSpace(fields[4])
+	fontSize := strings.TrimSpace(fields[5])
+	coordsRaw := strings.TrimSpace(fields[6])
+	if lineType == "" || coordsRaw == "" {
+		return manualEntry{}, false
+	}
+	if !strings.HasPrefix(coordsRaw, "[") || !strings.HasSuffix(coordsRaw, "]") {
+		return manualEntry{}, false
+	}
+	coordsInner := strings.TrimSpace(coordsRaw[1 : len(coordsRaw)-1])
+	coords := make([]float64, 0, 4)
+	for _, tok := range strings.Split(coordsInner, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(tok, 64)
+		if err != nil {
+			continue
+		}
+		coords = append(coords, v)
+	}
+	oldContent := unwrapManualContent(strings.TrimSpace(fields[7]))
+	newContent := unwrapManualContent(strings.TrimSpace(fields[8]))
+	return manualEntry{
+		Operation: operation,
+		Line: docStructureLine{
+			LineNumber: lineNum,
+			PageNumber: pageNum,
+			LineType:   lineType,
+			Font:       font,
+			FontSize:   fontSize,
+			Coords:     coords,
+			Content:    newContent,
+		},
+		OldContent: oldContent,
+	}, true
+}
+
+func unwrapManualContent(s string) string {
+	if len(s) >= 6 && strings.HasPrefix(s, "|$|") && strings.HasSuffix(s, "|$|") {
+		return s[3 : len(s)-3]
+	}
+	return s
+}
+
 type docStructureResponse struct {
 	Status        bool               `json:"status"`
 	InputID       int64              `json:"input_id"`
@@ -343,8 +433,10 @@ func UpdateDocStructureLine(c echo.Context) error {
 
 	found := false
 	var updatedLine docStructureLine
+	var oldContent string
 	for i := range lines {
 		if lines[i].PageNumber == req.PageNumber && lines[i].LineNumber == req.LineNumber {
+			oldContent = lines[i].Content
 			if req.CorrectedLineType != nil {
 				lines[i].LineType = strings.TrimSpace(*req.CorrectedLineType)
 			}
@@ -369,7 +461,7 @@ func UpdateDocStructureLine(c echo.Context) error {
 		})
 	}
 
-	if err := upsertManualFile(manualPath, updatedLine); err != nil {
+	if err := upsertManualFile(manualPath, manualEntry{Operation: "modify", Line: updatedLine, OldContent: oldContent}); err != nil {
 		logger.Error("upsert manual file failed", "path", manualPath, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status: false, ErrorMsg: "failed to write manual file (CWB_KB_DSU_043)",
@@ -527,8 +619,9 @@ func DeleteDocStructureLine(c echo.Context) error {
 		})
 	}
 
-	deletedLine.LineType = "deleted"
-	if err := upsertManualFile(manualPath, deletedLine); err != nil {
+	deleteEntryLine := deletedLine
+	deleteEntryLine.Content = ""
+	if err := upsertManualFile(manualPath, manualEntry{Operation: "delete", Line: deleteEntryLine, OldContent: deletedLine.Content}); err != nil {
 		logger.Error("upsert manual file failed", "path", manualPath, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status: false, ErrorMsg: "failed to write manual file (CWB_KB_DSD_043)",
@@ -582,30 +675,59 @@ func formatTxtLine(ln docStructureLine) string {
 	}, "\t")
 }
 
-func upsertManualFile(path string, line docStructureLine) error {
-	lines := make([]docStructureLine, 0)
+func writeManualFile(path string, entries []manualEntry) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for _, e := range entries {
+		if _, err := fmt.Fprintln(w, formatManualLine(e)); err != nil {
+			return err
+		}
+	}
+	return w.Flush()
+}
+
+func upsertManualFile(path string, entry manualEntry) error {
+	entries := make([]manualEntry, 0)
 	if f, err := os.Open(path); err == nil {
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024)
 		for scanner.Scan() {
-			ln, ok := parseCorrectedLine(scanner.Text())
-			if !ok {
-				continue
-			}
-			if ln.PageNumber != line.PageNumber || ln.LineNumber != line.LineNumber {
-				lines = append(lines, ln)
+			raw := scanner.Text()
+			if e, ok := parseManualLine(raw); ok {
+				if e.Line.PageNumber != entry.Line.PageNumber || e.Line.LineNumber != entry.Line.LineNumber {
+					entries = append(entries, e)
+				}
+			} else if ln, ok := parseCorrectedLine(raw); ok {
+				// migrate old 7-field format entries
+				if ln.PageNumber != entry.Line.PageNumber || ln.LineNumber != entry.Line.LineNumber {
+					op, oldContent, newContent := "modify", "", ln.Content
+					if ln.LineType == "deleted" {
+						op, oldContent, newContent = "delete", ln.Content, ""
+					}
+					migrated := manualEntry{
+						Operation:  op,
+						Line:       ln,
+						OldContent: oldContent,
+					}
+					migrated.Line.Content = newContent
+					entries = append(entries, migrated)
+				}
 			}
 		}
 		f.Close()
 	}
-	lines = append(lines, line)
-	sort.Slice(lines, func(i, j int) bool {
-		if lines[i].LineNumber != lines[j].LineNumber {
-			return lines[i].LineNumber < lines[j].LineNumber
+	entries = append(entries, entry)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Line.LineNumber != entries[j].Line.LineNumber {
+			return entries[i].Line.LineNumber < entries[j].Line.LineNumber
 		}
-		return lines[i].PageNumber < lines[j].PageNumber
+		return entries[i].Line.PageNumber < entries[j].Line.PageNumber
 	})
-	return writeTxtLinesFile(path, lines)
+	return writeManualFile(path, entries)
 }
 
 func writeCorrectedLinesFile(path string, lines []docStructureLine) error {
