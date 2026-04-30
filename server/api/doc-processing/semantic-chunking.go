@@ -50,13 +50,30 @@ type SemanticPageBlock struct {
 	Lines   []Line
 }
 
+// CategoryPathNode represents one node (segment) in a category path
+// as defined by spec-category-extraction.md.
+type CategoryPathNode struct {
+	Name       string   `json:"name"`
+	Keywords   []string `json:"keywords"`
+	Confidence float64  `json:"confidence"`
+}
+
+// CategoryPathEntry represents one full category path with detail
+// as defined by spec-category-extraction.md.
+type CategoryPathEntry struct {
+	PathKeywords   []string           `json:"path_keywords"`
+	PathConfidence float64            `json:"path_confidence"`
+	Nodes          []CategoryPathNode `json:"category_path"`
+}
+
 type TopicItem struct {
-	SeqNo        int
-	TopicType    string
-	Lines        []string
-	Keywords     []string
-	Topic        string
-	CategoryPath []string
+	SeqNo              int
+	TopicType          string
+	Lines              []string
+	Keywords           []string
+	Topic              string
+	CategoryPath       []string            // flat list of category names (for tree files)
+	CategoryPathDetail []CategoryPathEntry // detailed structure from LLM (for .topics file)
 }
 
 type topicChunkStatusParams struct {
@@ -151,12 +168,7 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 	}
 	topics = dedupeTopicItems(topics)
 
-	topicsPath, err := writeTopicsFile(s.ChunkDir, rec.ID, topics)
-	if err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(topics), start, err)
-		return err
-	}
-	if err := writeTopicsCategoryTree(s.Logger, s.ChunkDir, rec.ID, topicsPath, topics); err != nil {
+	if err := writeTopicsCategoryTree(s.Logger, s.ChunkDir, rec.ID, topics); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(topics), start, err)
 		return err
 	}
@@ -313,18 +325,16 @@ type legacyTopicRow struct {
 	Topic     string
 }
 
-func writeTopicsFile(chunkDir string, recordID int64, topics []TopicItem) (string, error) {
-	return writeNamedTopicsFile(chunkDir, recordID, "topics.txt", topics)
-}
 
-func writeTopicsCategoryTree(logger ApiTypes.JimoLogger, chunkDir string, recordID int64, topicsPath string, topics []TopicItem) error {
+func writeTopicsCategoryTree(logger ApiTypes.JimoLogger, chunkDir string, recordID int64, topics []TopicItem) error {
 	targetDir, err := buildRecordArtifactDir(chunkDir, recordID)
 	if err != nil {
 		return err
 	}
-	return writeTopicsCategoryTreeToDir(logger, targetDir, recordID, topicsPath, topics)
+	return writeTopicsCategoryTreeToDir(logger, targetDir, recordID, topics)
 }
 
+/*
 func readLegacyTopicRows(path string) ([]legacyTopicRow, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -360,6 +370,143 @@ func readLegacyTopicRows(path string) ([]legacyTopicRow, error) {
 		return nil, err
 	}
 	return out, nil
+}
+*/
+
+// readTopicsFile reads a .topics file in the spec-compliant text format and
+// returns parsed topic rows. It auto-detects the format: if the first non-empty
+// line starts with "topic_id:" it parses the new spec format; otherwise it
+// falls back to the legacy tab-delimited format.
+func readTopicsFile(path string) ([]legacyTopicRow, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
+
+	// Peek at the first non-empty line to detect format.
+	var firstLine string
+	for scanner.Scan() {
+		firstLine = strings.TrimSpace(scanner.Text())
+		if firstLine != "" {
+			break
+		}
+	}
+	if firstLine == "" {
+		return nil, nil
+	}
+
+	if strings.HasPrefix(firstLine, "topic_id:") {
+		return parseSpecTopicsFile(scanner, firstLine)
+	}
+	return parseLegacyTopicsFile(scanner, firstLine)
+}
+
+func parseSpecTopicsFile(scanner *bufio.Scanner, firstLine string) ([]legacyTopicRow, error) {
+	out := make([]legacyTopicRow, 0, 128)
+	var cur *legacyTopicRow
+
+	finishRow := func() {
+		if cur != nil {
+			out = append(out, *cur)
+			cur = nil
+		}
+	}
+
+	processLine := func(line string) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			finishRow()
+			return
+		}
+		key, val := splitSpecLine(line)
+		if key == "" {
+			return
+		}
+		if cur == nil {
+			cur = &legacyTopicRow{}
+		}
+		switch key {
+		case "topic_id":
+			cur.SeqNo, _ = strconv.Atoi(val)
+		case "topic_type":
+			cur.TopicType = unquoteSpec(val)
+		case "lines":
+			cur.Lines = val
+		case "topic_keywords":
+			cur.Keywords = val
+		case "topic":
+			cur.Topic = unquoteSpec(val)
+		}
+	}
+
+	processLine(firstLine)
+	for scanner.Scan() {
+		processLine(scanner.Text())
+	}
+	finishRow()
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func parseLegacyTopicsFile(scanner *bufio.Scanner, firstLine string) ([]legacyTopicRow, error) {
+	out := make([]legacyTopicRow, 0, 128)
+
+	processLine := func(line string) {
+		parts := strings.Split(line, "\t")
+		if len(parts) != 5 {
+			return
+		}
+		seq, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if err != nil || seq <= 0 {
+			return
+		}
+		out = append(out, legacyTopicRow{
+			SeqNo:     seq,
+			TopicType: strings.TrimSpace(parts[1]),
+			Lines:     strings.TrimSpace(parts[2]),
+			Keywords:  strings.TrimSpace(parts[3]),
+			Topic:     strings.TrimSpace(parts[4]),
+		})
+	}
+
+	processLine(firstLine)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		processLine(line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func splitSpecLine(line string) (key, value string) {
+	idx := strings.Index(line, ":")
+	if idx < 0 {
+		return "", ""
+	}
+	return strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])
+}
+
+func unquoteSpec(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		unquoted, err := strconv.Unquote(s)
+		if err == nil {
+			return unquoted
+		}
+	}
+	return s
 }
 
 func loadLeafRowsExcludingRecord(targetDir string, recordID int64) (map[string][]string, error) {
@@ -586,28 +733,167 @@ func dedupeTopicItems(in []TopicItem) []TopicItem {
 }
 
 func extractCategoryPathFromLLM(m map[string]any) []string {
-	candidates := []string{}
+	// 1) Direct category_path — flat strings or nested [{name, keywords, confidence}, ...]
 	if arr, ok := m["category_path"].([]any); ok {
+		if names := extractNamesFromCategoryPathArray(arr); len(names) > 0 {
+			return names
+		}
+	}
+
+	// 2) Nested categories payload: [{category_path: [...], path_keywords, path_confidence}, ...]
+	if arr, ok := m["categories"].([]any); ok {
 		for _, it := range arr {
-			candidates = append(candidates, asString(it))
-		}
-	}
-	if len(candidates) == 0 {
-		if arr, ok := m["categories"].([]any); ok {
-			for _, it := range arr {
-				candidates = append(candidates, asString(it))
+			catObj, ok := it.(map[string]any)
+			if !ok {
+				if s := asString(it); s != "" {
+					return []string{s}
+				}
+				continue
+			}
+			if cp, ok := catObj["category_path"].([]any); ok {
+				if names := extractNamesFromCategoryPathArray(cp); len(names) > 0 {
+					return names
+				}
 			}
 		}
 	}
-	if len(candidates) == 0 {
-		for _, key := range []string{"category", "topic_category"} {
-			if s := strings.TrimSpace(asString(m[key])); s != "" {
-				candidates = append(candidates, strings.Split(s, "/")...)
-				break
-			}
+
+	// 3) Flat string fallbacks: "category", "topic_category" (slash-delimited)
+	for _, key := range []string{"category", "topic_category"} {
+		if s := strings.TrimSpace(asString(m[key])); s != "" {
+			return strings.Split(s, "/")
 		}
 	}
-	return candidates
+
+	return nil
+}
+
+// extractNamesFromCategoryPathArray extracts category names from a []any that
+// contains either plain strings or objects with a "name" field (the nested
+// {name, keywords, confidence} shape defined by spec-category-extraction.md).
+func extractNamesFromCategoryPathArray(arr []any) []string {
+	names := make([]string, 0, len(arr))
+	for _, it := range arr {
+		if obj, ok := it.(map[string]any); ok {
+			if name := asString(obj["name"]); name != "" {
+				names = append(names, name)
+			}
+		} else if s := asString(it); s != "" {
+			names = append(names, s)
+		}
+	}
+	return names
+}
+
+// extractCategoryPathDetailFromLLM extracts full category path detail from an
+// LLM response map, returning the structured entries as defined by
+// spec-category-extraction.md. Returns nil if no structured data is found.
+func extractCategoryPathDetailFromLLM(m map[string]any) []CategoryPathEntry {
+	// 1) Direct category_path array of nodes: [{name, keywords, confidence}, ...]
+	if arr, ok := m["category_path"].([]any); ok {
+		nodes := extractCategoryPathNodes(arr)
+		if len(nodes) > 0 {
+			return []CategoryPathEntry{{
+				Nodes:          nodes,
+				PathKeywords:   collectNodeKeywords(nodes),
+				PathConfidence: avgNodeConfidence(nodes),
+			}}
+		}
+	}
+
+	// 2) Nested categories payload: [{category_path: [...], path_keywords, path_confidence}, ...]
+	if arr, ok := m["categories"].([]any); ok {
+		entries := make([]CategoryPathEntry, 0, len(arr))
+		for _, it := range arr {
+			catObj, ok := it.(map[string]any)
+			if !ok {
+				continue
+			}
+			nodes := extractCategoryPathNodes(catObj["category_path"])
+			if len(nodes) == 0 {
+				continue
+			}
+			entry := CategoryPathEntry{
+				Nodes: nodes,
+			}
+			if pks, ok := catObj["path_keywords"].([]any); ok {
+				entry.PathKeywords = compactTopicArray(pks)
+			}
+			if entry.PathKeywords == nil {
+				entry.PathKeywords = collectNodeKeywords(nodes)
+			}
+			if pc, ok := catObj["path_confidence"].(float64); ok {
+				entry.PathConfidence = pc
+			} else {
+				entry.PathConfidence = avgNodeConfidence(nodes)
+			}
+			entries = append(entries, entry)
+		}
+		if len(entries) > 0 {
+			return entries
+		}
+	}
+
+	return nil
+}
+
+func extractCategoryPathNodes(raw any) []CategoryPathNode {
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	nodes := make([]CategoryPathNode, 0, len(arr))
+	for _, it := range arr {
+		obj, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := asString(obj["name"])
+		if name == "" {
+			continue
+		}
+		node := CategoryPathNode{Name: name}
+		if ks, ok := obj["keywords"].([]any); ok {
+			node.Keywords = compactTopicArray(ks)
+		}
+		if node.Keywords == nil {
+			node.Keywords = []string{}
+		}
+		if cf, ok := obj["confidence"].(float64); ok {
+			node.Confidence = cf
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
+func collectNodeKeywords(nodes []CategoryPathNode) []string {
+	seen := make(map[string]struct{}, len(nodes)*3)
+	out := make([]string, 0, len(nodes)*3)
+	for _, n := range nodes {
+		for _, kw := range n.Keywords {
+			if _, ok := seen[kw]; ok {
+				continue
+			}
+			seen[kw] = struct{}{}
+			out = append(out, kw)
+		}
+	}
+	if out == nil {
+		return []string{}
+	}
+	return out
+}
+
+func avgNodeConfidence(nodes []CategoryPathNode) float64 {
+	if len(nodes) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, n := range nodes {
+		sum += n.Confidence
+	}
+	return sum / float64(len(nodes))
 }
 
 func normalizeAndValidateTopicCategoryPath(raw []string, topicType string) ([]string, string) {
@@ -627,7 +913,8 @@ func normalizeAndValidateTopicCategoryPath(raw []string, topicType string) ([]st
 	}
 	for _, seg := range normalized {
 		if len(seg) > maxCategoryNameLen {
-			return fallbackCategoryPath(topicType), "segment-too-long"
+			err_msg := fmt.Sprintf("(MID_26042931) segment-too-long, segment:%s, max_len:%d", seg, maxCategoryNameLen)
+			return fallbackCategoryPath(topicType), err_msg
 		}
 		if !isDescriptiveCategorySegment(seg) {
 			return fallbackCategoryPath(topicType), "non-descriptive-segment"
@@ -644,6 +931,25 @@ func fallbackCategoryPath(topicType string) []string {
 	return []string{"uncategorized", leaf}
 }
 
+// keywordCategoryPath builds a category path from keywords when LLM-generated
+// categories are non-descriptive. Returns nil if no usable keywords are found.
+func keywordCategoryPath(keywords []string) []string {
+	result := make([]string, 0, 5)
+	for _, kw := range keywords {
+		seg := normalizeCategorySegment(kw)
+		if seg != "" && isDescriptiveCategorySegment(seg) {
+			result = append(result, seg)
+		}
+		if len(result) == 5 {
+			break
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func normalizeCategorySegment(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	if s == "" {
@@ -653,7 +959,10 @@ func normalizeCategorySegment(raw string) string {
 	lastUnderscore := false
 	for _, r := range s {
 		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
-		if isAlphaNum {
+		isCJK := (r >= 0x4E00 && r <= 0x9FFF) || // CJK Unified Ideographs
+			(r >= 0x3400 && r <= 0x4DBF) || // CJK Extension A
+			(r >= 0xF900 && r <= 0xFAFF) // CJK Compatibility Ideographs
+		if isAlphaNum || isCJK {
 			b.WriteRune(r)
 			lastUnderscore = false
 			continue

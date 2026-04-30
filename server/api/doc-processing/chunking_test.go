@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeStore struct {
@@ -164,12 +165,26 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	svc := NewFixedSizeChunkingService(st, ex, nil)
 	svc.ChunkDir = tmp
 	svc.TreeRootDir = treeRoot
+	svc.SummaryTreeDir = t.TempDir()
 	svc.ChunkSize = 25
 	svc.OverlapPercent = 50
 	svc.ModelErr = nil
 	svc.PromptErr = nil
 	svc.ModelName = "topic-model"
 	svc.PromptText = "extract chunk topics"
+	svc.SummaryModelErr = nil
+	svc.SummaryPromptErr = nil
+	svc.SummaryModelName = "summary-model"
+	svc.SummaryPromptText = "summary prompt"
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, children []SummaryItem) (string, error) {
+		if level == 0 {
+			return "chunk summary " + asString(seqNo), nil
+		}
+		return "parent summary " + strings.Join(collectSummaryIDs(children), ","), nil
+	}
+	svc.GenerateSummaryTreeCategories = func(_ context.Context, _ SummaryItem) ([]string, error) {
+		return []string{"legacy_summary_tree"}, nil
+	}
 
 	if err := svc.HandleInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
 		t.Fatalf("HandleInput: %v", err)
@@ -190,15 +205,11 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 
 	chunkPath := filepath.Join(tmp, "7", "7523", "std_20039_opendata.chunks")
 	topicPath := filepath.Join(tmp, "7", "7523", "std_20039_opendata.topics")
-	legacyTopicsPath := filepath.Join(tmp, "7", "7523", "topics.txt")
 	if _, err := os.Stat(chunkPath); err != nil {
 		t.Fatalf("missing chunk artifact: %v", err)
 	}
 	if _, err := os.Stat(topicPath); err != nil {
 		t.Fatalf("missing topic artifact: %v", err)
-	}
-	if _, err := os.Stat(legacyTopicsPath); err != nil {
-		t.Fatalf("missing legacy topics.txt: %v", err)
 	}
 
 	b2, err := os.ReadFile(chunkPath)
@@ -217,12 +228,19 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 			t.Fatalf("expected chunk artifact to contain %q, got %q", want, content)
 		}
 	}
-	topicContent, err := os.ReadFile(topicPath)
+	topicRows, err := readTopicsFile(topicPath)
 	if err != nil {
 		t.Fatalf("read topic artifact: %v", err)
 	}
-	if !strings.Contains(string(topicContent), "1\tpolicy\t[1-2]\t[intro, scope]\tIntro scope") {
-		t.Fatalf("unexpected topic artifact content: %q", string(topicContent))
+	if len(topicRows) == 0 {
+		t.Fatalf("expected at least one topic record in topic artifact")
+	}
+	first := topicRows[0]
+	if first.TopicType != "policy" {
+		t.Fatalf("first topic_type=%q, want policy", first.TopicType)
+	}
+	if first.Topic != "Intro scope" {
+		t.Fatalf("first topic=%q, want Intro scope", first.Topic)
 	}
 	treeLeaf := filepath.Join(treeRoot, "document_overview", "closing_notes.txt")
 	treeContent, err := os.ReadFile(treeLeaf)
@@ -254,6 +272,7 @@ func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = t.TempDir()
 	svc.TreeRootDir = t.TempDir()
+	svc.SummaryTreeDir = t.TempDir()
 	svc.ChunkSize = 2
 	svc.OverlapPercent = 0
 
@@ -333,12 +352,17 @@ func TestService_HandleInput_MissingTreeRootDir(t *testing.T) {
 	svc.PromptErr = nil
 	svc.ModelName = "topic-model"
 	svc.PromptText = "prompt"
+	svc.SummaryTreeDir = t.TempDir()
+	svc.SummaryModelErr = nil
+	svc.SummaryPromptErr = nil
+	svc.SummaryModelName = "summary-model"
+	svc.SummaryPromptText = "summary prompt"
 
 	err := svc.HandleInput(context.Background(), 2003, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
 	if err == nil {
-		t.Fatalf("expected error when CHUNK_TREE_ROOT_DIR is empty")
+		t.Fatalf("expected error when TOPIC_TREE_ROOT_DIR is empty")
 	}
-	if !strings.Contains(err.Error(), "missing CHUNK_TREE_ROOT_DIR") {
+	if !strings.Contains(err.Error(), "missing TOPIC_TREE_ROOT_DIR") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if st.insertCalls != 0 {
@@ -347,7 +371,169 @@ func TestService_HandleInput_MissingTreeRootDir(t *testing.T) {
 	if st.updateCalls != 1 {
 		t.Fatalf("UpdateInputStatus calls=%d, want 1", st.updateCalls)
 	}
-	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing CHUNK_TREE_ROOT_DIR") {
-		t.Fatalf("expected persisted error for missing CHUNK_TREE_ROOT_DIR, got %v", st.updatedError)
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing TOPIC_TREE_ROOT_DIR") {
+		t.Fatalf("expected persisted error for missing TOPIC_TREE_ROOT_DIR, got %v", st.updatedError)
 	}
+}
+
+func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
+	tmp := t.TempDir()
+	topicTreeRoot := t.TempDir()
+	summaryTreeRoot := t.TempDir()
+	input := strings.Join([]string{
+		"1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tAlpha",
+		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tBeta",
+		"3\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tGamma",
+		"4\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tDelta",
+	}, "\n")
+
+	st := &fakeStore{rec: InputRecord{
+		ID:              8123,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "sample.pdf",
+	}}
+	ex := &fakeSemanticExtractor{
+		outs: []map[string]any{
+			{"topics": []any{map[string]any{
+				"topic_type":    "policy",
+				"lines":         []any{"1-2"},
+				"keywords":      []any{"alpha"},
+				"topic":         "Alpha topic",
+				"category_path": []any{"document_overview"},
+			}}},
+			{"topics": []any{map[string]any{
+				"topic_type":    "policy",
+				"lines":         []any{"3-4"},
+				"keywords":      []any{"gamma"},
+				"topic":         "Gamma topic",
+				"category_path": []any{"document_overview", "details"},
+			}}},
+		},
+	}
+	svc := NewFixedSizeChunkingService(st, ex, nil)
+	svc.ChunkDir = tmp
+	svc.TreeRootDir = topicTreeRoot
+	svc.SummaryTreeDir = summaryTreeRoot
+	svc.ChunkSize = 22
+	svc.OverlapPercent = 0
+	svc.ModelErr = nil
+	svc.PromptErr = nil
+	svc.ModelName = "topic-model"
+	svc.PromptText = "extract chunk topics"
+	svc.SummaryModelErr = nil
+	svc.SummaryPromptErr = nil
+	svc.SummaryModelName = "summary-model"
+	svc.SummaryPromptText = "summarize chunk"
+	svc.SummaryGroupSize = 2
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, error) {
+		if level == 0 {
+			return "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromLines(lines)), nil
+		}
+		ids := make([]string, 0, len(children))
+		for _, child := range children {
+			ids = append(ids, child.SummaryID)
+		}
+		return "parent summary " + asString(seqNo) + " children=" + strings.Join(ids, ","), nil
+	}
+	svc.GenerateSummaryTreeCategories = func(_ context.Context, root SummaryItem) ([]string, error) {
+		if root.Level == 0 {
+			t.Fatalf("expected a parent/root summary, got level 0")
+		}
+		return []string{"Safety Overview", "Closing Notes"}, nil
+	}
+
+	if err := svc.HandleInput(context.Background(), 8123, "sample.txt", []byte(input)); err != nil {
+		t.Fatalf("HandleInput: %v", err)
+	}
+
+	recordDir := filepath.Join(tmp, "8", "8123")
+	for _, rel := range []string{
+		"summary_0_0001.txt",
+		"summary_0_0002.txt",
+		"summary_1_0001.txt",
+	} {
+		if _, err := os.Stat(filepath.Join(recordDir, rel)); err != nil {
+			t.Fatalf("missing summary artifact %s: %v", rel, err)
+		}
+	}
+
+	treeLeaf := filepath.Join(summaryTreeRoot, "safety_overview", "closing_notes", "summaries.txt")
+	treeBody, err := os.ReadFile(treeLeaf)
+	if err != nil {
+		t.Fatalf("read summary tree leaf: %v", err)
+	}
+	if strings.TrimSpace(string(treeBody)) != "8123_1_0001" {
+		t.Fatalf("unexpected summary tree content: %q", string(treeBody))
+	}
+}
+
+func TestService_HandleInput_SummaryGenerationFailure(t *testing.T) {
+	st := &fakeStore{rec: InputRecord{
+		ID:              9001,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "sample.pdf",
+	}}
+	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
+	svc.ChunkDir = t.TempDir()
+	svc.TreeRootDir = t.TempDir()
+	svc.SummaryTreeDir = t.TempDir()
+	svc.ChunkSize = 10
+	svc.OverlapPercent = 0
+	svc.ModelErr = nil
+	svc.PromptErr = nil
+	svc.ModelName = "topic-model"
+	svc.PromptText = "prompt"
+	svc.SummaryModelErr = nil
+	svc.SummaryPromptErr = nil
+	svc.SummaryModelName = "summary-model"
+	svc.SummaryPromptText = "summary prompt"
+	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, _ int, _ []Line, _ []SummaryItem) (string, error) {
+		return "", errors.New("summary generator boom")
+	}
+
+	err := svc.HandleInput(context.Background(), 9001, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
+	if err == nil {
+		t.Fatalf("expected summary generation error")
+	}
+	if !strings.Contains(err.Error(), "summary generator boom") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, "summary generator boom") {
+		t.Fatalf("expected persisted summary generation error, got %v", st.updatedError)
+	}
+}
+
+func TestAppendChunkedStatus_SanitizesInvalidUTF8Error(t *testing.T) {
+	rawErr := errors.New(string([]byte{'b', 'a', 'd', ':', ' ', 0xe4, 0x2e, 0x6d}))
+	statusRaw, err := appendChunkedStatus("[]", chunkStatusParams{
+		InputFilename: "sample.txt",
+		NumPages:      1,
+		NumLines:      2,
+		NumChunks:     1,
+		Start:         time.Unix(0, 0),
+		DurationMs:    12,
+		ProcErr:       rawErr,
+	})
+	if err != nil {
+		t.Fatalf("appendChunkedStatus: %v", err)
+	}
+	if !json.Valid([]byte(statusRaw)) {
+		t.Fatalf("status JSON is invalid: %q", statusRaw)
+	}
+	if strings.Contains(statusRaw, string([]byte{0xe4, 0x2e, 0x6d})) {
+		t.Fatalf("status JSON still contains invalid utf8 sequence: %q", statusRaw)
+	}
+	if !strings.Contains(statusRaw, "bad: ") {
+		t.Fatalf("expected sanitized error message in status JSON: %q", statusRaw)
+	}
+}
+
+func chunkLineNosFromLines(lines []Line) []int {
+	out := make([]int, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, line.LineNo)
+	}
+	return out
 }

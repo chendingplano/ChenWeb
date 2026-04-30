@@ -44,31 +44,92 @@ func buildChunkArtifactBaseName(stagingFilename string, parserName string) strin
 	return root + "_" + parser
 }
 
-func writeNamedTopicsFile(chunkDir string, recordID int64, fileName string, topics []TopicItem) (string, error) {
+
+func writeTopicsFile(chunkDir string, recordID int64, fileName string, topics []TopicItem) (string, error) {
 	if strings.TrimSpace(fileName) == "" {
-		fileName = "topics.txt"
+		return "", errors.New("(MID_26043001) topic file name is empty")
 	}
 	targetDir, err := buildRecordArtifactDir(chunkDir, recordID)
 	if err != nil {
 		return "", err
 	}
 
-	path := filepath.Join(targetDir, fileName)
 	var b strings.Builder
-	for _, topic := range topics {
-		b.WriteString(fmt.Sprintf(
-			"%d\t%s\t%s\t%s\t%s\n",
-			topic.SeqNo,
-			strings.TrimSpace(topic.TopicType),
-			formatTopicArray(topic.Lines),
-			formatTopicArray(topic.Keywords),
-			sanitizeTopicText(topic.Topic),
-		))
+	for i, topic := range topics {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(fmt.Sprintf("topic_id: %d\n", topic.SeqNo))
+		b.WriteString(fmt.Sprintf("topic_type: %q\n", strings.TrimSpace(topic.TopicType)))
+		b.WriteString("lines: ")
+		b.WriteString(formatTopicArray(topic.Lines))
+		b.WriteByte('\n')
+		b.WriteString("topic_keywords: ")
+		b.WriteString(formatTopicArray(topic.Keywords))
+		b.WriteByte('\n')
+		b.WriteString("topic: ")
+		b.WriteString(strconv.Quote(sanitizeTopicText(topic.Topic)))
+		b.WriteByte('\n')
+		b.WriteString("category_paths: ")
+		b.WriteString(formatCategoryPathEntries(topic.CategoryPathDetail))
+		b.WriteByte('\n')
 	}
-	if err := os.WriteFile(path, []byte(strings.TrimRight(b.String(), "\n")), 0o644); err != nil {
+
+	path := filepath.Join(targetDir, fileName)
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+func formatCategoryPathEntries(entries []CategoryPathEntry) string {
+	if len(entries) == 0 {
+		return "[]"
+	}
+	parts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		parts = append(parts, formatCategoryPathEntry(entry))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatCategoryPathEntry(entry CategoryPathEntry) string {
+	var b strings.Builder
+	b.WriteByte('(')
+	b.WriteString(formatStringSlice(entry.PathKeywords))
+	b.WriteString(", ")
+	b.WriteString(strconv.FormatFloat(entry.PathConfidence, 'f', -1, 64))
+	b.WriteString(", [")
+	nodeParts := make([]string, 0, len(entry.Nodes))
+	for _, node := range entry.Nodes {
+		nodeParts = append(nodeParts, formatCategoryPathNode(node))
+	}
+	b.WriteString(strings.Join(nodeParts, ", "))
+	b.WriteString("])")
+	return b.String()
+}
+
+func formatCategoryPathNode(node CategoryPathNode) string {
+	var b strings.Builder
+	b.WriteByte('(')
+	b.WriteString(strconv.Quote(node.Name))
+	b.WriteString(", ")
+	b.WriteString(formatStringSlice(node.Keywords))
+	b.WriteString(", ")
+	b.WriteString(strconv.FormatFloat(node.Confidence, 'f', -1, 64))
+	b.WriteByte(')')
+	return b.String()
+}
+
+func formatStringSlice(items []string) string {
+	if items == nil {
+		return "[]"
+	}
+	quoted := make([]string, 0, len(items))
+	for _, item := range items {
+		quoted = append(quoted, strconv.Quote(item))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
 func writeCombinedChunkFile(chunkDir string, recordID int64, fileName string, chunks []Chunk) (string, error) {
@@ -160,7 +221,7 @@ func formatLineNumberRange(start, end int) string {
 	return fmt.Sprintf("%d-%d", start, end)
 }
 
-func writeTopicsCategoryTreeToDir(logger ApiTypes.JimoLogger, targetDir string, recordID int64, topicsPath string, topics []TopicItem) error {
+func writeTopicsCategoryTreeToDir(logger ApiTypes.JimoLogger, targetDir string, recordID int64, topics []TopicItem) error {
 	if strings.TrimSpace(targetDir) == "" {
 		return errors.New("(MID_26042110) topic tree dir is empty")
 	}
@@ -171,27 +232,17 @@ func writeTopicsCategoryTreeToDir(logger ApiTypes.JimoLogger, targetDir string, 
 		return err
 	}
 
-	rows, err := readLegacyTopicRows(topicsPath)
-	if err != nil {
-		return err
-	}
-
-	categoryBySeq := make(map[int][]string, len(topics))
-	for _, topic := range topics {
-		categoryBySeq[topic.SeqNo] = topic.CategoryPath
-	}
-
 	existingByLeaf, err := loadLeafRowsExcludingRecord(targetDir, recordID)
 	if err != nil {
 		return err
 	}
 
-	leafRows := make(map[string][]string, len(rows))
+	leafRows := make(map[string][]string, len(topics))
 	normalizedSourceByPath := make(map[string]string, len(topics))
-	for _, row := range rows {
-		categoryPath := categoryBySeq[row.SeqNo]
+	for _, topic := range topics {
+		categoryPath := topic.CategoryPath
 		if len(categoryPath) == 0 {
-			categoryPath = fallbackCategoryPath(row.TopicType)
+			categoryPath = fallbackCategoryPath(topic.TopicType)
 		}
 		path := filepath.Join(categoryPath...)
 		rawCategorySource := strings.Join(categoryPath, "/")
@@ -208,10 +259,10 @@ func writeTopicsCategoryTreeToDir(logger ApiTypes.JimoLogger, targetDir string, 
 		outRow := fmt.Sprintf(
 			"%d\t%s\t%s\t%s\t%s",
 			recordID,
-			strings.TrimSpace(row.TopicType),
-			strings.TrimSpace(row.Lines),
-			strings.TrimSpace(row.Keywords),
-			sanitizeTopicText(row.Topic),
+			strings.TrimSpace(topic.TopicType),
+			formatTopicArray(topic.Lines),
+			formatTopicArray(topic.Keywords),
+			sanitizeTopicText(topic.Topic),
 		)
 		leafRel := path + ".txt"
 		leafRows[leafRel] = append(leafRows[leafRel], outRow)
@@ -281,6 +332,7 @@ func extractTopicsFromLinesWithLLM(
 		"num_lines", len(linesText),
 		"model_name", modelName,
 	)
+
 	llmStart := time.Now()
 	parsed, err := extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		PromptText: promptText,
@@ -320,6 +372,7 @@ func extractTopicsFromLinesWithLLM(
 		if !ok {
 			continue
 		}
+
 		lineRanges := compactTopicArray(m["lines"])
 		if len(lineRanges) == 0 {
 			lineRanges = compactTopicArray(m["line_ranges"])
@@ -332,23 +385,44 @@ func extractTopicsFromLinesWithLLM(
 		if topicType == "" {
 			topicType = "general"
 		}
-		keywords := compactTopicArray(m["keywords"])
+		topic_keywords := compactTopicArray(m["keywords"])
+
 		categoryPath, categoryFallbackReason := normalizeAndValidateTopicCategoryPath(extractCategoryPathFromLLM(m), topicType)
-		if categoryFallbackReason != "" && logger != nil {
-			logger.Warn("topic category fallback applied",
-				logScopeName, logScopeValue,
-				"topic_seq", nextSeq,
-				"reason", categoryFallbackReason,
-				"topic", topic,
-			)
+
+		logger.Info("raw topic item from LLM",
+			logScopeName, logScopeValue,
+			"item", item,
+			"m", m,
+			"topic", topic,
+			"topic_type", topicType,
+			"line_ranges", lineRanges,
+			"keywords", topic_keywords,
+			"category_path", categoryPath,
+			"category_fallback_reason", categoryFallbackReason,
+		)
+
+		if categoryFallbackReason != "" {
+			if kp := keywordCategoryPath(topic_keywords); kp != nil {
+				categoryPath = kp
+			}
+			if logger != nil {
+				logger.Warn("topic category fallback applied",
+					logScopeName, logScopeValue,
+					"topic_seq", nextSeq,
+					"reason", categoryFallbackReason,
+					"fallback_category", strings.Join(categoryPath, "/"),
+					"topic", topic,
+				)
+			}
 		}
 		out = append(out, TopicItem{
-			SeqNo:        nextSeq,
-			TopicType:    topicType,
-			Lines:        lineRanges,
-			Keywords:     keywords,
-			Topic:        topic,
-			CategoryPath: categoryPath,
+			SeqNo:              nextSeq,
+			TopicType:          topicType,
+			Lines:              lineRanges,
+			Keywords:           topic_keywords,
+			Topic:              topic,
+			CategoryPath:       categoryPath,
+			CategoryPathDetail: extractCategoryPathDetailFromLLM(m),
 		})
 		nextSeq++
 	}

@@ -105,7 +105,7 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 		t.Fatalf("chunking_method=%q, want topic-chunking", st.insertedRun.ChunkingMethod)
 	}
 
-	coverPath := filepath.Join(tmp, "7", "7523", "uncategorized", "cover.txt")
+	coverPath := filepath.Join(tmp, "7", "7523", "cover.txt")
 	bs, err := os.ReadFile(coverPath)
 	if err != nil {
 		t.Fatalf("read cover topic file: %v", err)
@@ -115,7 +115,7 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 		t.Fatalf("topics content missing expected line: %q", content)
 	}
 
-	formulaPath := filepath.Join(tmp, "7", "7523", "uncategorized", "formula.txt")
+	formulaPath := filepath.Join(tmp, "7", "7523", "formula.txt")
 	formulaBS, err := os.ReadFile(formulaPath)
 	if err != nil {
 		t.Fatalf("read formula topic file: %v", err)
@@ -196,20 +196,16 @@ func TestWriteTopicsCategoryTree_Deterministic(t *testing.T) {
 		},
 	}
 
-	topicsPath, err := writeTopicsFile(tmp, 53, topics)
-	if err != nil {
-		t.Fatalf("writeTopicsFile: %v", err)
-	}
-	if err := writeTopicsCategoryTree(nil, tmp, 53, topicsPath, topics); err != nil {
+	if err := writeTopicsCategoryTree(nil, tmp, 53, topics); err != nil {
 		t.Fatalf("writeTopicsCategoryTree: %v", err)
 	}
-	if err := writeTopicsCategoryTree(nil, tmp, 53, topicsPath, topics); err != nil {
+	if err := writeTopicsCategoryTree(nil, tmp, 53, topics); err != nil {
 		t.Fatalf("writeTopicsCategoryTree second run: %v", err)
 	}
 
 	root := filepath.Join(tmp, "0", "53")
 	var files []string
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -226,7 +222,6 @@ func TestWriteTopicsCategoryTree_Deterministic(t *testing.T) {
 	wantFiles := []string{
 		"project_overview.txt",
 		"safety_evaluation/seismic_design.txt",
-		"topics.txt",
 	}
 	if !reflect.DeepEqual(files, wantFiles) {
 		t.Fatalf("files=%v, want=%v", files, wantFiles)
@@ -245,14 +240,6 @@ func TestWriteTopicsCategoryTree_Deterministic(t *testing.T) {
 		t.Fatalf("seismic content=%q, want=%q", string(seismicContent), wantSeismic)
 	}
 
-	legacyPath := filepath.Join(root, "topics.txt")
-	legacyContent, err := os.ReadFile(legacyPath)
-	if err != nil {
-		t.Fatalf("read legacy topics.txt: %v", err)
-	}
-	if !strings.Contains(string(legacyContent), "1\tlist\t[11-12]\t[risk, scoring]\tScoring table for seismic safety") {
-		t.Fatalf("legacy topics.txt not preserved as expected: %q", string(legacyContent))
-	}
 }
 
 func TestWriteTopicsCategoryTree_ReprocessReplacesRowsForRecord(t *testing.T) {
@@ -279,11 +266,7 @@ func TestWriteTopicsCategoryTree_ReprocessReplacesRowsForRecord(t *testing.T) {
 			CategoryPath: []string{"safety_evaluation", "seismic_design"},
 		},
 	}
-	topicsPath, err := writeTopicsFile(tmp, 53, topics)
-	if err != nil {
-		t.Fatalf("writeTopicsFile: %v", err)
-	}
-	if err := writeTopicsCategoryTree(nil, tmp, 53, topicsPath, topics); err != nil {
+	if err := writeTopicsCategoryTree(nil, tmp, 53, topics); err != nil {
 		t.Fatalf("writeTopicsCategoryTree: %v", err)
 	}
 
@@ -326,11 +309,7 @@ func TestWriteTopicsCategoryTree_PreservesCanonicalLineFile(t *testing.T) {
 			CategoryPath: []string{"project_overview"},
 		},
 	}
-	topicsPath, err := writeTopicsFile(tmp, 84, topics)
-	if err != nil {
-		t.Fatalf("writeTopicsFile: %v", err)
-	}
-	if err := writeTopicsCategoryTree(nil, tmp, 84, topicsPath, topics); err != nil {
+	if err := writeTopicsCategoryTree(nil, tmp, 84, topics); err != nil {
 		t.Fatalf("writeTopicsCategoryTree: %v", err)
 	}
 
@@ -396,6 +375,26 @@ func TestNewSemanticChunkingService_LoadsPromptFromEnv(t *testing.T) {
 	}
 	if svc.PromptPath != promptPath {
 		t.Fatalf("PromptPath=%q, want %q", svc.PromptPath, promptPath)
+	}
+}
+
+func TestNormalizeCategorySegment_CJK(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"消防员职业健康", "消防员职业健康"},
+		{"Safety Overview", "safety_overview"},
+		{"本标准规定了消防员", "本标准规定了消防员"},
+		{"mixed 消防 content", "mixed_消防_content"},
+		{"", ""},
+		{"123", "123"},
+	}
+	for _, tc := range cases {
+		got := normalizeCategorySegment(tc.input)
+		if got != tc.want {
+			t.Errorf("normalizeCategorySegment(%q) = %q, want %q", tc.input, got, tc.want)
+		}
 	}
 }
 

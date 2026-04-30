@@ -348,7 +348,7 @@ func splitChunkMark(line string) (base string, mark string) {
 // readLinesFromTopicsFile reads topics.txt and the original line file,
 // returning the ordered, deduplicated set of lines referenced by the topics.
 func readLinesFromTopicsFile(topicsPath, lineFilePath string) ([]string, error) {
-	topics, err := readLegacyTopicRows(topicsPath)
+	topics, err := readTopicsFile(topicsPath)
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26042468) read topics file %s: %w", topicsPath, err)
 	}
