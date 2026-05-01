@@ -4670,6 +4670,36 @@ mv ~/.claude/file-history ~/.claude/file-history.bak
 ```
 
 # Jimmy Hot Keys
+| Hot Key | What It Does |
+|---|---|
+|`<space>n` | open NeoTree (the file explorer for neovim). The NeoTree buffer is a normal vim buffer, so you can use the normal keybinds (like `hjkl` and `/`) to navigate and search. |
+| `<space>f` | Format the document |
+| `<backspace>` | Neovim has a concept of a "Working Directory", which is the directory that you instruct neovim to view. For example, if you called `vi ./src/` in a project, its working directory would be `./src/`. And if you called `vi ./src/main.rs`, its working directory will still be `./src/`. You can go back a directory within NeoTree by pressing `<backspace>`.
+| `a` | Within NeoTree, use `a` to create a file/directory (depending on whether the name ends with `/`), you can also add multiple directories by specifying a path (`src/package/main.rs`). |
+  `r` | Rename a file/directory |, 
+| `x` | Cut |,
+| `y` | Copy |,
+| `p` | Paste |,
+| `<space>sg` | Grep all file contents |,
+| `<space>sf` | Grep all file names. This will only search within the working directory that vi is in. |,
+| `gd` | Go to definition |,
+| `gri` | Go to implementation |,
+| `grD` | Go to declaration |, 
+| `gra` | Call LSP code action, like rename or add linting comments) |,
+| `grr` | Go to references |,
+| `K` | Press `K` over anything to get LSP definitions of the item you're hovering. |,
+| `<ctrl>o` | Every time neovim navigates, it adds an entry onto the navigation stack. This command pops out of the stack |,
+| `<ctrl>i` | Navigate into the stack. For example, if I went to a definition, I would use `<ctrl>o` to go back to where I was. If I want to recall what I was reading, I would use `<ctrl>i` to redo the navigation.
+| `<backspace>` | Neovim keeps history of which file you last visited. `<backspace>` in normal mode allows you to switch between the last two buffers. |,
+| `<space>b` | Open a tree of all buffers you have visited. |,
+| `<space>n` | Go down in the list of selections |,
+| `<ctrl><space>` | (it might not work right now because of language switching using the same keybind) to manually request a completion from the LSP server. |,
+| `<ctrl>p` | Go up |, 
+| `<ctrl>y` | Accept |, 
+| `<ctrl>e` | Remove the completion box, I normally press `<ctrl>e` and then `<ctrl>y` to accept a Github Copilot suggestion. |,
+| `[d` and `]d` | Navigate to the next and previous diagnostic. |,
+| `<space>e` | View the diagnostic message.
+--------
 
 # Environment Variable Name Changes
 

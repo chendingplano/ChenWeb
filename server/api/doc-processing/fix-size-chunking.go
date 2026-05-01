@@ -98,7 +98,7 @@ type FixedSizeChunkingService struct {
 	CategoryPromptErr             error
 	TopicEmbeddingModelName       string
 	SummaryEmbeddingModelName     string
-	GenerateSummary               func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, error)
+	GenerateSummary               func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, error)
 	GenerateSummaryTreeCategories func(ctx context.Context, root SummaryItem) ([]string, error)
 }
 
@@ -142,6 +142,21 @@ type protectedBlock struct {
 	splittable bool
 }
 
+// FixedSizeChunkingService is the core document processing pipeline for the doc-processor service.
+// It processes uploaded documents end-to-end through three stages:
+//  1. Chunking — splits document text into fixed-size byte chunks with configurable overlap.
+//  2. Topic extraction — calls an LLM via Extractor with a configurable prompt to identify topics per chunk.
+//  3. Summary tree generation — groups chunks hierarchically, calls an LLM to produce summaries and
+//     category labels at each level, then persists the tree to disk and the database via Store.
+//
+// The main entry point is HandleInput. In production it is instantiated once at startup in
+// cmd/doc-processor/main.go with a SQL store, an OpenAI-compatible JSON client, and a logger.
+//
+// NewFixedSizeChunkingService constructs the service by loading all model configs, prompts, and
+// embedding settings from environment variables. The topic embedder is resolved in priority order:
+// a dedicated OpenAI-compatible client if TOPIC_EMBEDDING_MODEL_NAME is set with a valid config,
+// then the extractor itself if it implements Embedder, otherwise nil. Summary embedding follows the
+// same fallback pattern via SUMMARY_EMBEDDING_MODEL_NAME. A default logger is created when none is provided.
 func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *FixedSizeChunkingService {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26041901")
@@ -358,7 +373,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		for _, marked := range chunk.Lines {
 			chunkLines = append(chunkLines, marked.Line)
 		}
-		summaryText, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunkLines, nil)
+		summaryText, summaryKeywords, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunkLines, nil)
 		if summaryErr != nil {
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, summaryErr)
 			return summaryErr
@@ -370,6 +385,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 			Level:     0,
 			SeqNo:     chunk.SeqNo,
 			Lines:     lineRangesFromNumbers(regularLines),
+			Keywords:  summaryKeywords,
 			Summary:   sanitizeTopicText(summaryText),
 		}
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
@@ -379,7 +395,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		leafSummaries = append(leafSummaries, item)
 	}
 
-	allSummaries, rootSummary, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, func(level int, seqNo int, children []SummaryItem) (string, error) {
+	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, func(level int, seqNo int, children []SummaryItem) (string, []string, error) {
 		return s.generateSummary(ctx, rec.ID, level, seqNo, nil, children)
 	})
 	if err != nil {
@@ -395,23 +411,26 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 			return err
 		}
 	}
-	categories, err := s.generateSummaryTreeCategories(ctx, rootSummary)
-	if err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
-		s.Logger.Error("failed generate categories",
-			"categories", categories,
-			"rootSummary", rootSummary,
-			"error", err)
-		return err
-	}
-	if err := writeSummaryTreeRootReference(s.Logger, s.SummaryTreeDir, rec.ID, rootSummary, categories); err != nil {
+	if err := os.MkdirAll(s.SummaryTreeDir, 0o755); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
-
+	if err := removeSummaryTreeRecord(s.SummaryTreeDir, rec.ID); err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+		return err
+	}
 	for i := range allSummaries {
-		allSummaries[i].CategoryPaths = categories
+		cats, catErr := s.generateSummaryTreeCategories(ctx, allSummaries[i])
+		if catErr != nil {
+			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, catErr)
+			return catErr
+		}
+		allSummaries[i].CategoryPaths = cats
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, allSummaries[i]); err != nil {
+			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+			return err
+		}
+		if err := writeSummaryTreeEntry(s.Logger, s.SummaryTreeDir, allSummaries[i], cats); err != nil {
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
@@ -462,30 +481,46 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 	return nil
 }
 
-func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, error) {
+func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, error) {
 	if s.GenerateSummary != nil {
 		return s.GenerateSummary(ctx, recordID, level, seqNo, lines, children)
 	}
 	if s.Extractor == nil {
-		return "", errors.New("(MID_26042904) summary extractor is nil")
+		return "", nil, errors.New("(MID_26042904) summary extractor is nil")
 	}
 	inputText := buildSummaryInputText(lines, children)
+
+	// Query LLM, respond format:
+	//	{
+	//		"summary":"xxx",
+	//		"keywords":"xxx"
+	//	}
 	parsed, err := s.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		PromptText: appendLanguageInstruction(s.SummaryPromptText, inputText),
 		ModelName:  s.SummaryModelName,
 		InputText:  inputText,
 	})
 	if err != nil {
-		return "", fmt.Errorf("(MID_26042905) generate summary for level %d seq %d failed: %w", level, seqNo, err)
+		return "", nil, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d failed: %w", level, seqNo, err)
 	}
 	summary := sanitizeTopicText(asString(parsed["summary"]))
 	if summary == "" {
 		summary = sanitizeTopicText(asString(parsed["text"]))
+		s.Logger.Error("failed retrieving summary", "prompt", s.SummaryPromptText,
+			"model_name", s.SummaryModelName,
+			"input text", inputText,
+			"fallback", summary)
 	}
 	if summary == "" {
 		summary = fallbackSummaryText(inputText)
 	}
-	return summary, nil
+
+	keywords := compactTopicArray(parsed["keywords"])
+	s.Logger.Info("Generated summary",
+		"model_name", s.ModelName,
+		"summary", summary,
+		"keywords", keywords)
+	return summary, keywords, nil
 }
 
 func (s *FixedSizeChunkingService) generateSummaryTreeCategories(ctx context.Context, root SummaryItem) ([]string, error) {
@@ -505,10 +540,19 @@ func (s *FixedSizeChunkingService) generateSummaryTreeCategories(ctx context.Con
 		return nil, fmt.Errorf("(MID_26042923) category path LLM extraction failed: %w", err)
 	}
 	rawPath := extractCategoryPathFromLLM(parsed)
+	s.Logger.Info("LLM category path raw response",
+		"summary_id", root.SummaryID,
+		"raw_path", rawPath,
+		"parsed_json", parsed,
+	)
 	path, reason := normalizeAndValidateTopicCategoryPath(rawPath, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
 		return nil, fmt.Errorf("(MID_26042924) invalid summary tree category path from LLM (%s): %v", reason, rawPath)
 	}
+	s.Logger.Info("LLM category path normalized",
+		"summary_id", root.SummaryID,
+		"path", path,
+	)
 	return path, nil
 }
 

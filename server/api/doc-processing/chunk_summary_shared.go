@@ -29,6 +29,7 @@ type SummaryItem struct {
 	SeqNo         int
 	Lines         []string
 	Children      []string
+	Keywords      []string
 	CategoryPaths []string
 	Summary       string
 	Embedding     []float64
@@ -75,6 +76,9 @@ func writeSummaryFile(baseDir string, recordID int64, item SummaryItem) (string,
 	b.WriteByte('\n')
 	b.WriteString("children: ")
 	b.WriteString(formatQuotedArray(item.Children))
+	b.WriteByte('\n')
+	b.WriteString("keywords: ")
+	b.WriteString(formatQuotedArray(item.Keywords))
 	b.WriteByte('\n')
 	b.WriteString("category_paths: ")
 	b.WriteString(formatQuotedArray(item.CategoryPaths))
@@ -124,7 +128,7 @@ func buildSummaryTree(
 	recordID int64,
 	leafs []SummaryItem,
 	groupSize int,
-	summarize func(level int, seqNo int, children []SummaryItem) (string, error),
+	summarize func(level int, seqNo int, children []SummaryItem) (string, []string, error),
 ) ([]SummaryItem, SummaryItem, error) {
 	if len(leafs) == 0 {
 		return nil, SummaryItem{}, errors.New("no leaf summaries")
@@ -141,7 +145,7 @@ func buildSummaryTree(
 			end := min(i+groupSize, len(current))
 			children := append([]SummaryItem(nil), current[i:end]...)
 			seqNo := len(next) + 1
-			summaryText, err := summarize(level, seqNo, children)
+			summaryText, keywords, err := summarize(level, seqNo, children)
 			if err != nil {
 				return nil, SummaryItem{}, err
 			}
@@ -152,6 +156,7 @@ func buildSummaryTree(
 				SeqNo:     seqNo,
 				Lines:     mergeSummaryLineRanges(children),
 				Children:  collectSummaryIDs(children),
+				Keywords:  keywords,
 				Summary:   sanitizeTopicText(summaryText),
 			}
 			next = append(next, parent)
@@ -242,6 +247,43 @@ func collectSummaryIDs(items []SummaryItem) []string {
 		out = append(out, strings.TrimSpace(item.SummaryID))
 	}
 	return out
+}
+
+// writeSummaryTreeEntry appends summary.SummaryID to
+// baseDir/<category_path>/summaries.txt. The caller must create baseDir and
+// remove stale entries for the record before the first call.
+func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary SummaryItem, rawCategories []string) error {
+	categoryPath, reason := normalizeAndValidateTopicCategoryPath(rawCategories, defaultSummaryTreeFallbackTopicType)
+	if reason != "" {
+		return fmt.Errorf("(MID_26042930) summary tree category path invalid (%s): %v", reason, rawCategories)
+	}
+	for _, seg := range categoryPath {
+		if seg == "uncategorized" {
+			return fmt.Errorf("(MID_26042931) summary tree category path must not contain 'uncategorized': %v", categoryPath)
+		}
+	}
+	leaf := filepath.Join(append([]string{baseDir}, append(categoryPath, "summaries.txt")...)...)
+	leafDir := filepath.Dir(leaf)
+	if _, err := os.Stat(leafDir); os.IsNotExist(err) {
+		if logger != nil {
+			logger.Info("creating new summary tree directory", "path", leafDir)
+		}
+	}
+	if err := os.MkdirAll(leafDir, 0o755); err != nil {
+		return err
+	}
+	existing := make([]string, 0)
+	if bs, err := os.ReadFile(leaf); err == nil {
+		for _, row := range strings.Split(string(bs), "\n") {
+			row = strings.TrimSpace(row)
+			if row != "" {
+				existing = append(existing, row)
+			}
+		}
+	}
+	existing = appendUniqueString(existing, strings.TrimSpace(summary.SummaryID))
+	sort.Strings(existing)
+	return os.WriteFile(leaf, []byte(strings.Join(existing, "\n")), 0o644)
 }
 
 func writeSummaryTreeRootReference(logger ApiTypes.JimoLogger, baseDir string, recordID int64, root SummaryItem, rawCategories []string) error {

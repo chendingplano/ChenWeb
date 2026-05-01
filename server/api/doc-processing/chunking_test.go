@@ -176,11 +176,11 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	svc.SummaryPromptErr = nil
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summary prompt"
-	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, children []SummaryItem) (string, error) {
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, children []SummaryItem) (string, []string, error) {
 		if level == 0 {
-			return "chunk summary " + asString(seqNo), nil
+			return "chunk summary " + asString(seqNo), nil, nil
 		}
-		return "parent summary " + strings.Join(collectSummaryIDs(children), ","), nil
+		return "parent summary " + strings.Join(collectSummaryIDs(children), ","), nil, nil
 	}
 	svc.GenerateSummaryTreeCategories = func(_ context.Context, _ SummaryItem) ([]string, error) {
 		return []string{"legacy_summary_tree"}, nil
@@ -426,20 +426,17 @@ func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summarize chunk"
 	svc.SummaryGroupSize = 2
-	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, error) {
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, error) {
 		if level == 0 {
-			return "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromLines(lines)), nil
+			return "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromLines(lines)), nil, nil
 		}
 		ids := make([]string, 0, len(children))
 		for _, child := range children {
 			ids = append(ids, child.SummaryID)
 		}
-		return "parent summary " + asString(seqNo) + " children=" + strings.Join(ids, ","), nil
+		return "parent summary " + asString(seqNo) + " children=" + strings.Join(ids, ","), nil, nil
 	}
-	svc.GenerateSummaryTreeCategories = func(_ context.Context, root SummaryItem) ([]string, error) {
-		if root.Level == 0 {
-			t.Fatalf("expected a parent/root summary, got level 0")
-		}
+	svc.GenerateSummaryTreeCategories = func(_ context.Context, _ SummaryItem) ([]string, error) {
 		return []string{"Safety Overview", "Closing Notes"}, nil
 	}
 
@@ -463,8 +460,9 @@ func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read summary tree leaf: %v", err)
 	}
-	if strings.TrimSpace(string(treeBody)) != "8123_1_0001" {
-		t.Fatalf("unexpected summary tree content: %q", string(treeBody))
+	wantTreeContent := "8123_0_0001\n8123_0_0002\n8123_1_0001"
+	if strings.TrimSpace(string(treeBody)) != wantTreeContent {
+		t.Fatalf("unexpected summary tree content: %q, want %q", strings.TrimSpace(string(treeBody)), wantTreeContent)
 	}
 }
 
@@ -489,8 +487,8 @@ func TestService_HandleInput_SummaryGenerationFailure(t *testing.T) {
 	svc.SummaryPromptErr = nil
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summary prompt"
-	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, _ int, _ []Line, _ []SummaryItem) (string, error) {
-		return "", errors.New("summary generator boom")
+	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, _ int, _ []Line, _ []SummaryItem) (string, []string, error) {
+		return "", nil, errors.New("summary generator boom")
 	}
 
 	err := svc.HandleInput(context.Background(), 9001, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
