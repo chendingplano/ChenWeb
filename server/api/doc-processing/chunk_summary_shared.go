@@ -61,6 +61,10 @@ func summaryFileName(level int, seqNo int) string {
 	return fmt.Sprintf("summary_%d_%04d.txt", level, seqNo)
 }
 
+func summaryEmbedFileName(level int, seqNo int) string {
+	return fmt.Sprintf("summary_%d_%04d.embed", level, seqNo)
+}
+
 func writeSummaryFile(baseDir string, recordID int64, item SummaryItem) (string, error) {
 	targetDir, err := buildRecordArtifactDir(baseDir, recordID)
 	if err != nil {
@@ -115,7 +119,8 @@ func deleteSummaryFiles(baseDir string, recordID int64) error {
 			continue
 		}
 		name := entry.Name()
-		if strings.HasPrefix(name, "summary_") && strings.HasSuffix(name, ".txt") {
+		isSummaryFile := strings.HasPrefix(name, "summary_") && (strings.HasSuffix(name, ".txt") || strings.HasSuffix(name, ".embed"))
+		if isSummaryFile {
 			if err := os.Remove(filepath.Join(targetDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}

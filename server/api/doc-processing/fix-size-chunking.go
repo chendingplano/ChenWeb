@@ -200,35 +200,35 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 		}
 	}
 	return &FixedSizeChunkingService{
-		Store:               store,
-		Extractor:           extractor,
-		Logger:              logger,
-		Now:                 time.Now,
-		ChunkDir:            strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		TreeRootDir:         strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR")),
-		SummaryTreeDir:      strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR")),
-		ChunkSize:           envInt("CHUNK_SIZE", DefaultChunkSize, 1),
-		OverlapPercent:      envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
-		ModelRef:            modelRef,
-		ModelCfgPath:        modelCfgPath,
-		ModelErr:            modelErr,
-		ModelName:           modelCfg.ModelName,
-		PromptText:          promptText,
-		PromptRef:           promptRef,
-		PromptPath:          promptPath,
-		PromptErr:           promptErr,
-		SummaryGroupSize:    envInt("SUMMARY_GROUP_SIZE", DefaultSummaryGroupSize, 1),
-		SummaryModelRef:     summaryModelRef,
-		SummaryModelCfgPath: summaryModelCfgPath,
-		SummaryModelErr:     summaryModelErr,
-		SummaryModelName:    summaryModelCfg.ModelName,
-		SummaryPromptText:   summaryPromptText,
-		SummaryPromptRef:    summaryPromptRef,
-		SummaryPromptPath:   summaryPromptPath,
-		SummaryPromptErr:    summaryPromptErr,
-		CategoryPromptText:  categoryPromptText,
-		CategoryPromptRef:   categoryPromptRef,
-		CategoryPromptPath:  categoryPromptPath,
+		Store:                     store,
+		Extractor:                 extractor,
+		Logger:                    logger,
+		Now:                       time.Now,
+		ChunkDir:                  strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		TreeRootDir:               strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR")),
+		SummaryTreeDir:            strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR")),
+		ChunkSize:                 envInt("CHUNK_SIZE", DefaultChunkSize, 1),
+		OverlapPercent:            envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
+		ModelRef:                  modelRef,
+		ModelCfgPath:              modelCfgPath,
+		ModelErr:                  modelErr,
+		ModelName:                 modelCfg.ModelName,
+		PromptText:                promptText,
+		PromptRef:                 promptRef,
+		PromptPath:                promptPath,
+		PromptErr:                 promptErr,
+		SummaryGroupSize:          envInt("SUMMARY_GROUP_SIZE", DefaultSummaryGroupSize, 1),
+		SummaryModelRef:           summaryModelRef,
+		SummaryModelCfgPath:       summaryModelCfgPath,
+		SummaryModelErr:           summaryModelErr,
+		SummaryModelName:          summaryModelCfg.ModelName,
+		SummaryPromptText:         summaryPromptText,
+		SummaryPromptRef:          summaryPromptRef,
+		SummaryPromptPath:         summaryPromptPath,
+		SummaryPromptErr:          summaryPromptErr,
+		CategoryPromptText:        categoryPromptText,
+		CategoryPromptRef:         categoryPromptRef,
+		CategoryPromptPath:        categoryPromptPath,
 		CategoryPromptErr:         categoryPromptErr,
 		Embedder:                  embedder,
 		TopicEmbeddingModelName:   topicEmbeddingModelName,
@@ -435,7 +435,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 			return err
 		}
 	}
-	if err := s.embedAndWriteSummaries(ctx, rec.ID, artifactBase, allSummaries); err != nil {
+	if err := s.embedAndWriteSummaries(ctx, rec.ID, allSummaries); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
@@ -618,6 +618,30 @@ func (s *FixedSizeChunkingService) failAndPersist(
 	s.Logger.Error("chunking failed", "record_id", rec.ID, "error", procErr)
 }
 
+const (
+	embedMaxRetries = 3
+	embedRetryDelay = 3 * time.Second
+)
+
+func (s *FixedSizeChunkingService) embedWithRetry(ctx context.Context, input llmclients.EmbedInput) ([]float64, error) {
+	var lastErr error
+	for attempt := 1; attempt <= embedMaxRetries; attempt++ {
+		vec, err := s.Embedder.Embed(ctx, input)
+		if err == nil {
+			return vec, nil
+		}
+		lastErr = err
+		if attempt < embedMaxRetries {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(embedRetryDelay):
+			}
+		}
+	}
+	return nil, lastErr
+}
+
 func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, recordID int64, artifactBase string, topics []TopicItem) error {
 	if s.Embedder == nil || strings.TrimSpace(s.TopicEmbeddingModelName) == "" {
 		return nil
@@ -632,7 +656,7 @@ func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, reco
 	}
 	embeddings := make([]topicEmbed, 0, len(topics))
 	for _, topic := range topics {
-		vec, err := s.Embedder.Embed(ctx, llmclients.EmbedInput{
+		vec, err := s.embedWithRetry(ctx, llmclients.EmbedInput{
 			ModelName: s.TopicEmbeddingModelName,
 			InputText: topic.Topic,
 		})
@@ -663,7 +687,10 @@ func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, reco
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-func (s *FixedSizeChunkingService) embedAndWriteSummaries(ctx context.Context, recordID int64, artifactBase string, summaries []SummaryItem) error {
+func (s *FixedSizeChunkingService) embedAndWriteSummaries(
+	ctx context.Context,
+	recordID int64,
+	summaries []SummaryItem) error {
 	if s.Embedder == nil || strings.TrimSpace(s.SummaryEmbeddingModelName) == "" {
 		return nil
 	}
@@ -674,31 +701,24 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(ctx context.Context, r
 	if err != nil {
 		return err
 	}
-	var b strings.Builder
-	first := true
 	for _, item := range summaries {
 		summaryText := strings.TrimSpace(item.Summary)
 		if summaryText == "" {
 			continue
 		}
-		vec, err := s.Embedder.Embed(ctx, llmclients.EmbedInput{
+		vec, err := s.embedWithRetry(ctx, llmclients.EmbedInput{
 			ModelName: s.SummaryEmbeddingModelName,
 			InputText: summaryText,
 		})
 		if err != nil {
 			return fmt.Errorf("(MID_26043101) embed summary %q failed: %w", item.SummaryID, err)
 		}
-		if !first {
-			b.WriteByte('\n')
+		embedPath := filepath.Join(targetDir, summaryEmbedFileName(item.Level, item.SeqNo))
+		if err := os.WriteFile(embedPath, []byte(formatFloatArray(vec)+"\n"), 0o644); err != nil {
+			return fmt.Errorf("(MID_26043102) write embed file for summary %q failed: %w", item.SummaryID, err)
 		}
-		first = false
-		b.WriteString(fmt.Sprintf("summary_id: %q\n", strings.TrimSpace(item.SummaryID)))
-		b.WriteString("embedding: ")
-		b.WriteString(formatFloatArray(vec))
-		b.WriteByte('\n')
 	}
-	path := filepath.Join(targetDir, artifactBase+".summary_embed")
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	return nil
 }
 
 func ParseInputLines(input []byte) ([]Line, error) {
