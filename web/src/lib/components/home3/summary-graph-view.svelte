@@ -21,7 +21,7 @@
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
 	import {
 		getSummaryCategoryMock,
-		listSummaryGraphMock
+		listSummaryGraph
 	} from '$lib/services/kbService';
 	import type {
 		SummaryCategoryNode,
@@ -55,12 +55,11 @@
 	let selectedSummaryIdByPath = $state<Record<string, string | null>>({});
 	let selectedTargetByPath = $state<Record<string, SummaryPdfTarget | null>>({});
 	let loading = $state(true);
+	let loadError = $state('');
+	let errorDialogOpen = $state(false);
 
 	onMount(async () => {
-		const response = await listSummaryGraphMock();
-		nodes = response.results;
-		selectedNodeId = response.results[0]?.id ?? null;
-		loading = false;
+		await loadGraph();
 	});
 
 	let selectedNode = $derived(nodes.find((node) => node.id === selectedNodeId) ?? null);
@@ -70,6 +69,24 @@
 		selectedNodeId = nodeId;
 		dialogMode = mode;
 		dialogOpen = true;
+	}
+
+	async function loadGraph() {
+		loading = true;
+		loadError = '';
+		try {
+			const response = await listSummaryGraph();
+			nodes = response.results;
+			selectedNodeId = response.results[0]?.id ?? null;
+		} catch (error) {
+			nodes = [];
+			selectedNodeId = null;
+			loadError =
+				error instanceof Error ? error.message : 'Failed to load summary graph';
+			errorDialogOpen = true;
+		} finally {
+			loading = false;
+		}
 	}
 
 	async function showSummaries(node: SummaryCategoryNode) {
@@ -168,6 +185,11 @@
 				summaryId: summary.id
 			}
 		};
+	}
+
+	function keywordText(keywords: string[] | null | undefined) {
+		if (!Array.isArray(keywords) || keywords.length === 0) return '—';
+		return keywords.join(', ');
 	}
 
 	function visibleRoots() {
@@ -307,6 +329,47 @@
 		onConfirm={applyDialog}
 	/>
 
+	{#if errorDialogOpen && loadError}
+		<div
+			class="error-overlay"
+			role="presentation"
+			tabindex="-1"
+			onclick={() => (errorDialogOpen = false)}
+			onkeydown={(event) => {
+				if (event.key === 'Escape') errorDialogOpen = false;
+			}}
+		>
+			<div
+				class="error-dialog"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Summary Graph Load Error"
+				tabindex="0"
+				onclick={(event) => event.stopPropagation()}
+				onkeydown={(event) => event.stopPropagation()}
+			>
+				<div class="eyebrow">Load Error</div>
+				<h3>Could not load Summary Graph</h3>
+				<p class="dialog-copy">{loadError}</p>
+				<div class="dialog-actions">
+					<button type="button" class="secondary-btn" onclick={() => (errorDialogOpen = false)}>
+						Close
+					</button>
+					<button
+						type="button"
+						class="primary-btn"
+						onclick={async () => {
+							errorDialogOpen = false;
+							await loadGraph();
+						}}
+					>
+						Try Again
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<div class="hero">
 		<div>
 			<div class="eyebrow">Document Summaries</div>
@@ -338,7 +401,11 @@
 				<div class="graph-workspace">
 					<div class="graph-stage">
 						{#if loading}
-							<div class="empty-state">Loading mocked summary categories…</div>
+							<div class="empty-state">Loading summary categories…</div>
+						{:else if loadError}
+							<div class="empty-state">
+								Summary Graph could not be loaded. Open the error dialog for details or try again.
+							</div>
 						{:else}
 							<Chart
 								{init}
@@ -364,7 +431,7 @@
 								<div><span>Confidence</span><strong>{selectedNode.metadata.confidence}</strong></div>
 								<div><span>Children</span><strong>{selectedNode.childIds.length}</strong></div>
 								<div><span>Summaries</span><strong>{selectedNode.summaryIds.length}</strong></div>
-								<div><span>Keywords</span><strong>{selectedNode.metadata.keywords.join(', ') || '—'}</strong></div>
+								<div><span>Keywords</span><strong>{keywordText(selectedNode.metadata.keywords)}</strong></div>
 							</div>
 							<div class="action-grid action-grid-top">
 								<button type="button" onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}>
@@ -398,6 +465,57 @@
 		display: flex;
 		height: 100%;
 		flex-direction: column;
+		color: var(--text);
+	}
+
+	.error-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 24;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1.5rem;
+		background: rgba(2, 6, 23, 0.62);
+		backdrop-filter: blur(10px);
+	}
+
+	.error-dialog {
+		width: min(540px, 100%);
+		border-radius: 22px;
+		border: 1px solid rgba(248, 113, 113, 0.28);
+		background: #111827;
+		padding: 1.25rem;
+		box-shadow: 0 30px 80px rgba(15, 23, 42, 0.5);
+	}
+
+	.dialog-copy {
+		margin-top: 0.55rem;
+		color: var(--muted);
+	}
+
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.75rem;
+		margin-top: 1rem;
+	}
+
+	.primary-btn,
+	.secondary-btn {
+		border-radius: 12px;
+		padding: 0.72rem 1rem;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		cursor: pointer;
+	}
+
+	.primary-btn {
+		background: var(--accent);
+		color: #fff;
+	}
+
+	.secondary-btn {
+		background: rgba(15, 23, 42, 0.55);
 		color: var(--text);
 	}
 

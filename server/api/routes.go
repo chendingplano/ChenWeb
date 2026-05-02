@@ -275,6 +275,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
 	apiGroup.GET("/kb/topic-chunks", kbhandler.ListTopicChunks)
 	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)
+	apiGroup.GET("/kb/summary-graph", kbhandler.ListSummaryGraph)
 	apiGroup.GET("/kb/doc-structure", kbhandler.GetDocStructure)
 	apiGroup.PATCH("/kb/doc-structure", kbhandler.UpdateDocStructureLine)
 	apiGroup.DELETE("/kb/doc-structure", kbhandler.DeleteDocStructureLine)

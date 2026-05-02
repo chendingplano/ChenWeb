@@ -574,6 +574,13 @@ export type SearchSummaryTreeResponse = {
 	total: number;
 };
 
+export async function listSummaryGraph(): Promise<ListSummaryGraphResponse> {
+	return fetchOrThrow<ListSummaryGraphResponse>(
+		`${BASE}/summary-graph`,
+		'Failed to list summary graph'
+	);
+}
+
 export async function listSummaryGraphMock(): Promise<ListSummaryGraphResponse> {
 	return Promise.resolve({
 		status: true,
