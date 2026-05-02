@@ -1,5 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Chart } from 'svelte-echarts';
+	import type { EChartsOption } from 'echarts';
+	import { init, use } from 'echarts/core';
+	import { TreeChart } from 'echarts/charts';
+	import { CanvasRenderer } from 'echarts/renderers';
+	import { TooltipComponent } from 'echarts/components';
 	import {
 		addChildNode,
 		createSummaryGraphTabs,
@@ -24,6 +30,8 @@
 		SummaryRecordCard
 	} from './summary-types';
 
+	use([TreeChart, TooltipComponent, CanvasRenderer]);
+
 	type DialogMode = 'rename' | 'metadata' | 'add' | 'delete' | 'merge' | 'split' | null;
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
@@ -35,6 +43,7 @@
 	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
 	let accent = $derived(darkMode ? '#818cf8' : '#4f46e5');
 	let warm = $derived(darkMode ? '#fbbf24' : '#b45309');
+	let chartTheme = $derived(darkMode ? ('dark' as const) : ('light' as const));
 
 	let nodes = $state<SummaryCategoryNode[]>([]);
 	let tabs = $state<SummaryCategoryTabType[]>(createSummaryGraphTabs());
@@ -170,6 +179,123 @@
 			.map((childId) => nodes.find((candidate) => candidate.id === childId))
 			.filter(Boolean) as SummaryCategoryNode[];
 	}
+
+	function buildTreeNode(node: SummaryCategoryNode): Record<string, unknown> {
+		const isSelected = node.id === selectedNodeId;
+		return {
+			id: node.id,
+			name: node.label,
+			value: node.summaryIds.length,
+			categoryPath: node.categoryPath,
+			desc: node.metadata.desc,
+			categoryType: node.metadata.category_type,
+			confidence: node.metadata.confidence,
+			keywords: node.metadata.keywords,
+			summaryCount: node.summaryIds.length,
+			collapsed: !node.expanded,
+			symbolSize: isSelected ? 14 : 11,
+			itemStyle: {
+				color: isSelected ? accent : darkMode ? '#cbd5e1' : '#94a3b8',
+				borderColor: isSelected ? warm : accent,
+				borderWidth: isSelected ? 3 : 2
+			},
+			label: {
+				color: isSelected ? textMain : textMuted,
+				fontWeight: isSelected ? 700 : 500
+			},
+			children: childrenOf(node).map(buildTreeNode)
+		};
+	}
+
+	function treeTooltipFormatter(params: any) {
+		const data = (params?.data ?? {}) as Record<string, unknown>;
+		if (!data.categoryPath) return '';
+		const keywords = Array.isArray(data.keywords) ? data.keywords.join(', ') : '';
+		return `
+			<div style="min-width:220px">
+				<div style="font-weight:700; margin-bottom:4px;">${String(data.name ?? '')}</div>
+				<div style="font-size:12px; opacity:0.75; margin-bottom:6px;">${String(data.categoryPath ?? '')}</div>
+				<div style="font-size:12px; margin-bottom:6px;">${String(data.desc ?? '')}</div>
+				<div style="font-size:12px;">Summaries: ${String(data.summaryCount ?? 0)}</div>
+				<div style="font-size:12px;">Keywords: ${keywords || '—'}</div>
+			</div>
+		`;
+	}
+
+	let treeOption = $derived.by((): EChartsOption => {
+		const root = {
+			id: 'summary-root',
+			name: '',
+			symbolSize: 1,
+			itemStyle: {
+				color: 'transparent',
+				borderColor: 'transparent'
+			},
+			label: {
+				show: false
+			},
+			lineStyle: {
+				color: darkMode ? 'rgba(148, 163, 184, 0.28)' : 'rgba(100, 116, 139, 0.24)',
+				width: 2,
+				curveness: 0.55
+			},
+			children: visibleRoots().map(buildTreeNode)
+		};
+
+		return {
+			backgroundColor: 'transparent',
+			animationDuration: 300,
+			animationDurationUpdate: 350,
+			tooltip: {
+				trigger: 'item',
+				triggerOn: 'mousemove',
+				backgroundColor: darkMode ? '#0f172a' : '#ffffff',
+				borderColor: darkMode ? '#334155' : '#cbd5e1',
+				textStyle: {
+					color: darkMode ? '#e2e8f0' : '#0f172a'
+				},
+				formatter: treeTooltipFormatter
+			},
+			series: [
+				{
+					type: 'tree',
+					data: [root],
+					top: '2%',
+					left: '2%',
+					bottom: '2%',
+					right: '16%',
+					layout: 'orthogonal',
+					orient: 'LR',
+					symbol: 'emptyCircle',
+					edgeShape: 'curve',
+					expandAndCollapse: false,
+					initialTreeDepth: -1,
+					lineStyle: {
+						color: darkMode ? 'rgba(148, 163, 184, 0.28)' : 'rgba(100, 116, 139, 0.24)',
+						width: 2,
+						curveness: 0.55
+					},
+					label: {
+						position: 'left',
+						verticalAlign: 'middle',
+						align: 'right',
+						fontSize: 13
+					},
+					leaves: {
+						label: {
+							position: 'right',
+							align: 'left',
+							color: textMain
+						}
+					},
+					emphasis: {
+						focus: 'descendant'
+					},
+					roam: true
+				} as any
+			]
+		};
+	});
 </script>
 
 <div class="graph-shell" style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --warm:${warm};`}>
@@ -210,65 +336,18 @@
 				{#if loading}
 					<div class="empty-state">Loading mocked summary categories…</div>
 				{:else}
-					{#each visibleRoots() as root}
-						<div class="root-column">
-							<div
-								class:selected={selectedNodeId === root.id}
-								class="node-card"
-								role="button"
-								tabindex="0"
-								onclick={() => (selectedNodeId = root.id)}
-								onkeydown={(event) => {
-									if (event.key === 'Enter' || event.key === ' ') selectedNodeId = root.id;
-								}}
-							>
-								<div class="node-head">
-									<h3>{root.label}</h3>
-									<span>{root.metadata.category_type}</span>
-								</div>
-								<p>{root.metadata.desc}</p>
-								<div class="node-foot">
-									<button type="button" class="tiny" onclick={(event) => { event.stopPropagation(); nodes = toggleNodeExpanded(nodes, root.id); }}>
-										{root.expanded ? 'Collapse' : 'Expand'}
-									</button>
-									<button type="button" class="tiny accent" onclick={(event) => { event.stopPropagation(); showSummaries(root); }}>
-										Show Summaries
-									</button>
-								</div>
-							</div>
-
-							{#if root.expanded}
-								<div class="children-row">
-									{#each childrenOf(root) as child}
-										<div
-											class:selected={selectedNodeId === child.id}
-											class="node-card child"
-											role="button"
-											tabindex="0"
-											onclick={() => (selectedNodeId = child.id)}
-											onkeydown={(event) => {
-												if (event.key === 'Enter' || event.key === ' ') selectedNodeId = child.id;
-											}}
-										>
-											<div class="node-head">
-												<h3>{child.label}</h3>
-												<span>{child.summaryIds.length} summaries</span>
-											</div>
-											<p>{child.metadata.desc}</p>
-											<div class="node-foot">
-												<button type="button" class="tiny" onclick={(event) => { event.stopPropagation(); nodes = toggleNodeExpanded(nodes, child.id); }}>
-													{child.expanded ? 'Collapse' : 'Expand'}
-												</button>
-												<button type="button" class="tiny accent" onclick={(event) => { event.stopPropagation(); showSummaries(child); }}>
-													Show Summaries
-												</button>
-											</div>
-										</div>
-									{/each}
-								</div>
-							{/if}
-						</div>
-					{/each}
+					<Chart
+						{init}
+						theme={chartTheme}
+						options={treeOption}
+						style="width:100%; height:100%;"
+						onclick={(event: any) => {
+							const nodeId = String(event?.data?.id ?? '');
+							if (nodeId && nodeId !== 'summary-root') {
+								selectedNodeId = nodeId;
+							}
+						}}
+					/>
 				{/if}
 			</div>
 
@@ -282,6 +361,14 @@
 						<div><span>Children</span><strong>{selectedNode.childIds.length}</strong></div>
 						<div><span>Summaries</span><strong>{selectedNode.summaryIds.length}</strong></div>
 						<div><span>Keywords</span><strong>{selectedNode.metadata.keywords.join(', ') || '—'}</strong></div>
+					</div>
+					<div class="action-grid action-grid-top">
+						<button type="button" onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}>
+							{selectedNode.expanded ? 'Collapse' : 'Expand'}
+						</button>
+						<button type="button" class="accent-action" onclick={() => showSummaries(selectedNode)}>
+							Show Summaries
+						</button>
 					</div>
 					<div class="action-grid">
 						<button type="button" onclick={() => openDialog('rename', selectedNode.id)}>Rename</button>
@@ -392,72 +479,16 @@
 	}
 
 	.graph-stage {
-		display: flex;
-		gap: 1rem;
-		overflow: auto;
-		padding: 1rem;
+		overflow: hidden;
+		padding: 0.5rem;
 	}
 
-	.root-column {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		min-width: 320px;
-	}
-
-	.children-row {
-		display: flex;
-		flex-direction: column;
-		gap: 0.85rem;
-		padding-left: 1.25rem;
-		border-left: 2px dashed rgba(129, 140, 248, 0.25);
-	}
-
-	.node-card {
-		display: flex;
-		flex-direction: column;
-		gap: 0.8rem;
-		border-radius: 20px;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.48);
-		padding: 1rem;
-		text-align: left;
-		color: inherit;
-	}
-
-	.node-card.selected,
-	.node-card:hover {
-		border-color: rgba(129, 140, 248, 0.4);
-	}
-
-	.node-card.child {
-		background: rgba(15, 23, 42, 0.3);
-	}
-
-	.node-head {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
-
-	.node-head h3 {
-		font-size: 1rem;
-	}
-
-	.node-head span,
 	.path,
 	.empty-state {
 		color: var(--muted);
 		font-size: 0.84rem;
 	}
 
-	.node-foot {
-		display: flex;
-		gap: 0.6rem;
-	}
-
-	.tiny,
 	.action-grid button {
 		border-radius: 12px;
 		border: 1px solid rgba(148, 163, 184, 0.14);
@@ -465,11 +496,6 @@
 		padding: 0.55rem 0.8rem;
 		color: inherit;
 		cursor: pointer;
-	}
-
-	.tiny.accent {
-		background: rgba(99, 102, 241, 0.14);
-		color: #c7d2fe;
 	}
 
 	.inspector {
@@ -507,6 +533,16 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 0.75rem;
+	}
+
+	.action-grid-top {
+		margin-bottom: 0.75rem;
+	}
+
+	.accent-action {
+		background: rgba(99, 102, 241, 0.14);
+		color: #c7d2fe;
+		border-color: rgba(129, 140, 248, 0.3);
 	}
 
 	.action-grid .danger {
