@@ -320,70 +320,76 @@
 		</div>
 	</div>
 
-	<SummaryGraphTabs {tabs} {activeTabId} onSelect={(tabId) => (activeTabId = tabId)} onClose={closeTab} />
-
-	{#if activeTab.categoryPath}
-		<SummaryCategoryTab
-			categoryPath={activeTab.categoryPath}
-			summaries={categorySummaries[activeTab.categoryPath] ?? []}
-			selectedSummaryId={selectedSummaryIdByPath[activeTab.categoryPath] ?? null}
-			selectedTarget={selectedTargetByPath[activeTab.categoryPath] ?? null}
-			onSelectSummary={(summary) => selectSummary(activeTab.categoryPath!, summary)}
-		/>
-	{:else}
-		<div class="graph-workspace">
-			<div class="graph-stage">
-				{#if loading}
-					<div class="empty-state">Loading mocked summary categories…</div>
-				{:else}
-					<Chart
-						{init}
-						theme={chartTheme}
-						options={treeOption}
-						style="width:100%; height:100%;"
-						onclick={(event: any) => {
-							const nodeId = String(event?.data?.id ?? '');
-							if (nodeId && nodeId !== 'summary-root') {
-								selectedNodeId = nodeId;
-							}
-						}}
-					/>
-				{/if}
-			</div>
-
-			<div class="inspector">
-				<div class="eyebrow">Node Inspector</div>
-				{#if selectedNode}
-					<h3>{selectedNode.label}</h3>
-					<p class="path">{selectedNode.categoryPath}</p>
-					<div class="meta-grid">
-						<div><span>Confidence</span><strong>{selectedNode.metadata.confidence}</strong></div>
-						<div><span>Children</span><strong>{selectedNode.childIds.length}</strong></div>
-						<div><span>Summaries</span><strong>{selectedNode.summaryIds.length}</strong></div>
-						<div><span>Keywords</span><strong>{selectedNode.metadata.keywords.join(', ') || '—'}</strong></div>
-					</div>
-					<div class="action-grid action-grid-top">
-						<button type="button" onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}>
-							{selectedNode.expanded ? 'Collapse' : 'Expand'}
-						</button>
-						<button type="button" class="accent-action" onclick={() => showSummaries(selectedNode)}>
-							Show Summaries
-						</button>
-					</div>
-					<div class="action-grid">
-						<button type="button" onclick={() => openDialog('rename', selectedNode.id)}>Rename</button>
-						<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}>Edit Metadata</button>
-						<button type="button" onclick={() => openDialog('add', selectedNode.id)}>Add Node</button>
-						<button type="button" onclick={() => openDialog('merge', selectedNode.id)}>Merge</button>
-						<button type="button" onclick={() => openDialog('split', selectedNode.id)}>Split</button>
-						<button type="button" class="danger" onclick={() => openDialog('delete', selectedNode.id)}>Delete</button>
-					</div>
-				{:else}
-					<div class="empty-state">Select a category node to inspect and edit it.</div>
-				{/if}
-			</div>
+	<div class="tabbed-window">
+		<div class="tabbed-window-head">
+			<SummaryGraphTabs {tabs} {activeTabId} onSelect={(tabId) => (activeTabId = tabId)} onClose={closeTab} />
 		</div>
-	{/if}
+
+		<div class="tabbed-window-body">
+			{#if activeTab.categoryPath}
+				<SummaryCategoryTab
+					categoryPath={activeTab.categoryPath}
+					summaries={categorySummaries[activeTab.categoryPath] ?? []}
+					selectedSummaryId={selectedSummaryIdByPath[activeTab.categoryPath] ?? null}
+					selectedTarget={selectedTargetByPath[activeTab.categoryPath] ?? null}
+					onSelectSummary={(summary) => selectSummary(activeTab.categoryPath!, summary)}
+				/>
+			{:else}
+				<div class="graph-workspace">
+					<div class="graph-stage">
+						{#if loading}
+							<div class="empty-state">Loading mocked summary categories…</div>
+						{:else}
+							<Chart
+								{init}
+								theme={chartTheme}
+								options={treeOption}
+								style="width:100%; height:100%;"
+								onclick={(event: any) => {
+									const nodeId = String(event?.data?.id ?? '');
+									if (nodeId && nodeId !== 'summary-root') {
+										selectedNodeId = nodeId;
+									}
+								}}
+							/>
+						{/if}
+					</div>
+
+					<div class="inspector">
+						<div class="eyebrow">Node Inspector</div>
+						{#if selectedNode}
+							<h3>{selectedNode.label}</h3>
+							<p class="path">{selectedNode.categoryPath}</p>
+							<div class="meta-grid">
+								<div><span>Confidence</span><strong>{selectedNode.metadata.confidence}</strong></div>
+								<div><span>Children</span><strong>{selectedNode.childIds.length}</strong></div>
+								<div><span>Summaries</span><strong>{selectedNode.summaryIds.length}</strong></div>
+								<div><span>Keywords</span><strong>{selectedNode.metadata.keywords.join(', ') || '—'}</strong></div>
+							</div>
+							<div class="action-grid action-grid-top">
+								<button type="button" onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}>
+									{selectedNode.expanded ? 'Collapse' : 'Expand'}
+								</button>
+								<button type="button" class="accent-action" onclick={() => showSummaries(selectedNode)}>
+									Show Summaries
+								</button>
+							</div>
+							<div class="action-grid">
+								<button type="button" onclick={() => openDialog('rename', selectedNode.id)}>Rename</button>
+								<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}>Edit Metadata</button>
+								<button type="button" onclick={() => openDialog('add', selectedNode.id)}>Add Node</button>
+								<button type="button" onclick={() => openDialog('merge', selectedNode.id)}>Merge</button>
+								<button type="button" onclick={() => openDialog('split', selectedNode.id)}>Split</button>
+								<button type="button" class="danger" onclick={() => openDialog('delete', selectedNode.id)}>Delete</button>
+							</div>
+						{:else}
+							<div class="empty-state">Select a category node to inspect and edit it.</div>
+						{/if}
+					</div>
+				</div>
+			{/if}
+		</div>
+	</div>
 </div>
 
 <style>
@@ -462,25 +468,51 @@
 		font-size: 1rem;
 	}
 
+	.tabbed-window {
+		display: flex;
+		min-height: 0;
+		flex: 1;
+		flex-direction: column;
+	}
+
+	.tabbed-window-head {
+		position: relative;
+		z-index: 4;
+		margin-bottom: -1px;
+		padding-inline: 0.55rem;
+	}
+
+	.tabbed-window-body {
+		display: flex;
+		min-height: 0;
+		flex: 1;
+		flex-direction: column;
+		border: 1px solid var(--border);
+		border-radius: 0 24px 24px 24px;
+		background: linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(15, 23, 42, 0.58));
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.04),
+			0 18px 44px rgba(2, 6, 23, 0.18);
+		overflow: hidden;
+	}
+
 	.graph-workspace {
 		display: grid;
 		min-height: 0;
 		flex: 1;
 		grid-template-columns: minmax(0, 1.45fr) 360px;
-		gap: 1rem;
+		gap: 0;
 	}
 
 	.graph-stage,
 	.inspector {
 		min-height: 0;
-		border-radius: 24px;
-		border: 1px solid var(--border);
-		background: var(--panel);
+		background: transparent;
 	}
 
 	.graph-stage {
 		overflow: hidden;
-		padding: 0.5rem;
+		padding: 0.85rem 0.75rem 0.75rem;
 	}
 
 	.path,
@@ -499,7 +531,9 @@
 	}
 
 	.inspector {
+		border-left: 1px solid rgba(148, 163, 184, 0.12);
 		padding: 1rem;
+		background: rgba(2, 6, 23, 0.16);
 	}
 
 	.meta-grid {

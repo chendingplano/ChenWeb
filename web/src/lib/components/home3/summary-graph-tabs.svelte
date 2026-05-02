@@ -35,23 +35,46 @@
 <style>
 	.tab-strip {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.55rem;
-		margin-bottom: 1rem;
+		flex-wrap: nowrap;
+		gap: 0;
+		align-items: flex-end;
+		overflow-x: auto;
+		overflow-y: hidden;
+		padding: 0 0.5rem;
+		scrollbar-width: thin;
 	}
 
 	.tab {
 		display: inline-flex;
 		align-items: center;
-		border-radius: 14px;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.34);
+		position: relative;
+		margin-right: -1px;
+		border: 2px solid rgba(15, 23, 42, 0.9);
+		border-bottom: none;
+		border-radius: 14px 14px 0 0;
+		background: #fbbf24;
+		box-shadow: none;
 		overflow: hidden;
+		transform: translateY(10px);
+		z-index: 1;
 	}
 
 	.tab.active {
-		border-color: rgba(99, 102, 241, 0.38);
-		background: rgba(99, 102, 241, 0.14);
+		border-color: rgba(15, 23, 42, 0.96);
+		background: #2f75c8;
+		transform: translateY(0);
+		z-index: 3;
+		box-shadow: none;
+	}
+
+	.tab.active::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: -2px;
+		height: 4px;
+		background: rgba(15, 23, 42, 0.96);
 	}
 
 	.tab-button,
@@ -63,12 +86,27 @@
 	}
 
 	.tab-button {
-		padding: 0.72rem 0.95rem;
+		padding: 0.88rem 1.25rem 0.8rem;
 		font-weight: 700;
+		white-space: nowrap;
+		color: #111827;
 	}
 
 	.close-button {
-		padding: 0.72rem 0.75rem;
-		color: #94a3b8;
+		padding: 0.88rem 0.85rem 0.8rem 0.2rem;
+		color: rgba(17, 24, 39, 0.76);
+		font-size: 1rem;
+	}
+
+	.tab.active .tab-button,
+	.tab.active .close-button {
+		color: #ffffff;
+	}
+
+	@media (max-width: 760px) {
+		.tab-button {
+			padding: 0.82rem 1rem 0.74rem;
+			font-size: 0.9rem;
+		}
 	}
 </style>
