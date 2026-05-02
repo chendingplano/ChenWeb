@@ -13,6 +13,8 @@
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import ChunkMgmtView from '$lib/components/home3/chunk-mgmt-view.svelte';
 	import KnowledgeStoreView from '$lib/components/home3/knowledge-store-view.svelte';
+	import SummaryGraphView from '$lib/components/home3/summary-graph-view.svelte';
+	import SummaryTreeView from '$lib/components/home3/summary-tree-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 
 	type KbSectionId =
@@ -21,13 +23,16 @@
 		| 'kb-input-details'
 		| 'kb-metrics'
 		| 'kb-doc-structure'
-		| 'kb-chunks';
+		| 'kb-chunks'
+		| 'kb-summary-graph'
+		| 'kb-summary-tree';
 
 	type KbMenuItem = {
 		id: KbSectionId;
 		label: string;
 		description: string;
 		icon: any;
+		children?: Array<{ id: KbSectionId; label: string; description: string }>;
 	};
 
 	const menuItems: KbMenuItem[] = [
@@ -41,7 +46,25 @@
 			description: 'Inspect parsed hierarchy',
 			icon: ListTreeIcon
 		},
-		{ id: 'kb-chunks', label: 'Chunks', description: 'Browse chunk output', icon: BoxesIcon }
+		{ id: 'kb-chunks', label: 'Chunks', description: 'Browse chunk output', icon: BoxesIcon },
+		{
+			id: 'kb-summary-graph',
+			label: 'Document Summaries',
+			description: 'Graph and tree summary workspaces',
+			icon: BookOpenIcon,
+			children: [
+				{
+					id: 'kb-summary-graph',
+					label: 'Summary Graph',
+					description: 'Category-first summary graph'
+				},
+				{
+					id: 'kb-summary-tree',
+					label: 'Summary Tree',
+					description: 'Document-centric summary browser'
+				}
+			]
+		}
 	];
 
 	let darkMode = $derived(page.url.searchParams.get('dark') !== '0');
@@ -54,7 +77,13 @@
 		}
 	});
 
-	let activeItem = $derived(menuItems.find((item) => item.id === activeSection) ?? menuItems[3]);
+	let documentSummariesOpen = $state(true);
+	let activeItem = $derived(
+		menuItems.find(
+			(item) =>
+				item.id === activeSection || item.children?.some((child) => child.id === activeSection)
+		) ?? menuItems[3]
+	);
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
 	let panelBg = $derived(darkMode ? '#252A3A' : '#ECEEF2');
 	let contentBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
@@ -70,6 +99,17 @@
 
 	function selectSection(id: KbSectionId) {
 		activeSection = id;
+		if (id === 'kb-summary-graph' || id === 'kb-summary-tree') {
+			documentSummariesOpen = true;
+		}
+	}
+
+	function isDocumentSummariesParent(item: KbMenuItem) {
+		return item.children && item.children.length > 0;
+	}
+
+	function isChildActive(childId: KbSectionId) {
+		return activeSection === childId;
 	}
 </script>
 
@@ -97,33 +137,81 @@
 
 		<nav class="flex-1 overflow-y-auto px-2 py-3" style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;">
 			{#each menuItems as item (item.id)}
-				<button
-					type="button"
-					onclick={() => selectSection(item.id)}
-					class="mb-1 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
-					style="
-						background:{activeSection === item.id ? accentTint : 'transparent'};
-						color:{activeSection === item.id ? accent : textSecondary};
-						border:none;
-						border-left:2px solid {activeSection === item.id ? accent : 'transparent'};
-					"
-					onmouseenter={(e) => {
-						const el = e.currentTarget as HTMLElement;
-						if (activeSection !== item.id) el.style.background = hoverBg;
-						el.style.color = textPrimary;
-					}}
-					onmouseleave={(e) => {
-						const el = e.currentTarget as HTMLElement;
-						if (activeSection !== item.id) el.style.background = 'transparent';
-						el.style.color = activeSection === item.id ? accent : textSecondary;
-					}}
-				>
-					<item.icon class="h-5 w-5 flex-shrink-0" />
-					<span class="min-w-0">
-						<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
-						<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
-					</span>
-				</button>
+				{#if isDocumentSummariesParent(item)}
+					<div
+						class="mb-1 rounded-lg"
+						style="background:{item.children?.some((child) => isChildActive(child.id)) ? accentTint : 'transparent'};"
+					>
+						<button
+							type="button"
+							onclick={() => (documentSummariesOpen = !documentSummariesOpen)}
+							class="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
+							style="
+								color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
+								border:none;
+								border-left:2px solid {item.children?.some((child) => isChildActive(child.id)) ? accent : 'transparent'};
+							"
+						>
+							<item.icon class="h-5 w-5 flex-shrink-0" />
+							<span class="min-w-0 flex-1">
+								<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
+								<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
+							</span>
+							<span style="font-size:12px; color:{textMuted};">{documentSummariesOpen ? '−' : '+'}</span>
+						</button>
+
+						{#if documentSummariesOpen}
+							<div class="pb-2 pl-6 pr-2">
+								{#each item.children ?? [] as child (child.id)}
+									<button
+										type="button"
+										onclick={() => selectSection(child.id)}
+										class="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-150"
+										style="
+											background:{isChildActive(child.id) ? 'rgba(255,255,255,0.08)' : 'transparent'};
+											color:{isChildActive(child.id) ? textPrimary : textSecondary};
+											border:none;
+										"
+									>
+										<span style="font-size:12px; color:{isChildActive(child.id) ? accent : textMuted};">•</span>
+										<span class="min-w-0">
+											<span class="block truncate" style="font-size:13px; font-weight:600;">{child.label}</span>
+											<span class="block truncate" style="font-size:11px; color:{textMuted};">{child.description}</span>
+										</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{:else}
+					<button
+						type="button"
+						onclick={() => selectSection(item.id)}
+						class="mb-1 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
+						style="
+							background:{activeSection === item.id ? accentTint : 'transparent'};
+							color:{activeSection === item.id ? accent : textSecondary};
+							border:none;
+							border-left:2px solid {activeSection === item.id ? accent : 'transparent'};
+						"
+						onmouseenter={(e) => {
+							const el = e.currentTarget as HTMLElement;
+							if (activeSection !== item.id) el.style.background = hoverBg;
+							el.style.color = textPrimary;
+						}}
+						onmouseleave={(e) => {
+							const el = e.currentTarget as HTMLElement;
+							if (activeSection !== item.id) el.style.background = 'transparent';
+							el.style.color = activeSection === item.id ? accent : textSecondary;
+						}}
+					>
+						<item.icon class="h-5 w-5 flex-shrink-0" />
+						<span class="min-w-0">
+							<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
+							<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
+						</span>
+					</button>
+				{/if}
 			{/each}
 		</nav>
 	</aside>
@@ -198,6 +286,10 @@
 				<DocStructureView {darkMode} />
 			{:else if activeSection === 'kb-chunks'}
 				<ChunkMgmtView {darkMode} />
+			{:else if activeSection === 'kb-summary-graph'}
+				<SummaryGraphView {darkMode} />
+			{:else if activeSection === 'kb-summary-tree'}
+				<SummaryTreeView {darkMode} />
 			{/if}
 		</div>
 	</main>

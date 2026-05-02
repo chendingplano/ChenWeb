@@ -1,3 +1,14 @@
+import {
+	MOCK_CATEGORY_SUMMARIES,
+	MOCK_SUMMARY_GRAPH_NODES,
+	MOCK_SUMMARY_TREE_RECORDS
+} from '$lib/components/home3/summary-mock-data';
+import type {
+	SummaryCategoryNode,
+	SummaryRecordCard,
+	SummaryTreeRecord
+} from '$lib/components/home3/summary-types';
+
 const BASE = '/api/v1/kb';
 
 export type ParseState = 'all' | 'pending' | 'parsed_success' | 'parsed_failed';
@@ -526,4 +537,87 @@ export async function deleteKnowledgeStore(id: number): Promise<{ status: boolea
 		throw new Error(msg);
 	}
 	return response.json() as Promise<{ status: boolean }>;
+}
+
+// ---------- kb.document-summaries (phase 1 mock adapters) ----------
+
+export type ListSummaryGraphResponse = {
+	status: boolean;
+	results: SummaryCategoryNode[];
+};
+
+export type GetSummaryCategoryResponse = {
+	status: boolean;
+	categoryPath: string;
+	summaries: SummaryRecordCard[];
+};
+
+export type SearchSummaryTreeParams = {
+	recordId?: string;
+	title?: string;
+	docNo?: string;
+	fileName?: string;
+	docType?: string;
+	parserName?: string;
+	operation?: string;
+	procStatus?: string;
+	createStart?: string;
+	createEnd?: string;
+	modifyStart?: string;
+	modifyEnd?: string;
+	ksStoreId?: number | null;
+};
+
+export type SearchSummaryTreeResponse = {
+	status: boolean;
+	results: SummaryTreeRecord[];
+	total: number;
+};
+
+export async function listSummaryGraphMock(): Promise<ListSummaryGraphResponse> {
+	return Promise.resolve({
+		status: true,
+		results: structuredClone(MOCK_SUMMARY_GRAPH_NODES)
+	});
+}
+
+export async function getSummaryCategoryMock(
+	categoryPath: string
+): Promise<GetSummaryCategoryResponse> {
+	return Promise.resolve({
+		status: true,
+		categoryPath,
+		summaries: structuredClone(MOCK_CATEGORY_SUMMARIES[categoryPath] ?? [])
+	});
+}
+
+export async function searchSummaryTreeMock(
+	params: SearchSummaryTreeParams
+): Promise<SearchSummaryTreeResponse> {
+	const q = {
+		recordId: params.recordId?.trim().toLowerCase() ?? '',
+		title: params.title?.trim().toLowerCase() ?? '',
+		docNo: params.docNo?.trim().toLowerCase() ?? '',
+		fileName: params.fileName?.trim().toLowerCase() ?? '',
+		docType: params.docType?.trim().toLowerCase() ?? '',
+		parserName: params.parserName?.trim().toLowerCase() ?? '',
+		procStatus: params.procStatus?.trim().toLowerCase() ?? ''
+	};
+
+	const results = MOCK_SUMMARY_TREE_RECORDS.filter((record) => {
+		if (q.recordId && !String(record.id).includes(q.recordId)) return false;
+		if (q.title && !record.title.toLowerCase().includes(q.title)) return false;
+		if (q.docNo && !record.docNo.toLowerCase().includes(q.docNo)) return false;
+		if (q.fileName && !record.fileName.toLowerCase().includes(q.fileName)) return false;
+		if (q.docType && q.docType !== 'all' && record.docType.toLowerCase() !== q.docType) return false;
+		if (q.parserName && !record.parserName.toLowerCase().includes(q.parserName)) return false;
+		if (q.procStatus && q.procStatus !== 'all' && record.procStatus.toLowerCase() !== q.procStatus) return false;
+		return true;
+	});
+
+	return Promise.resolve({
+		status: true,
+		results: structuredClone(results),
+		total: results.length
+	});
 }
