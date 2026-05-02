@@ -60,7 +60,7 @@ Primary summary text
 summary_end`)
 	mustWriteFile(t, filepath.Join(artifactDir, "1", "1042", "sample_pdfplumber.corrected"), "7\t3\tparagraph\tunchanged\tTimes\t10\t[0,0,1,1]\tB\n12\t5\tparagraph\tunchanged\tTimes\t10\t[0,0,1,1]\tC\n")
 
-	results, err := readRecordSummaryCards(recordID)
+	results, err := readRecordSummaryCards(nil, recordID)
 	if err != nil {
 		t.Fatalf("readRecordSummaryCards: %v", err)
 	}
@@ -82,12 +82,66 @@ func TestReadRecordSummaryCardsMissingDir(t *testing.T) {
 	artifactDir := t.TempDir()
 	t.Setenv("ARTIFACT_DIR", artifactDir)
 
-	results, err := readRecordSummaryCards(1042)
+	results, err := readRecordSummaryCards(nil, 1042)
 	if err != nil {
 		t.Fatalf("readRecordSummaryCards should allow missing record dir: %v", err)
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected no summaries, got %+v", results)
+	}
+}
+
+func TestReadRecordSummaryCardsFindsRecordInNonDefaultGroupDir(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+
+	expectResolveInputTablePlural(mock)
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "staging_filename").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "parser_name").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	recordID := int64(93)
+	query := regexp.QuoteMeta(`SELECT COALESCE(i.staging_filename, '') AS staging_filename, COALESCE(i.parser_name, '') AS parser_name, i.file_name FROM kb.inputs i WHERE i.id = $1`)
+	mock.ExpectQuery(query).
+		WithArgs(recordID).
+		WillReturnRows(sqlmock.NewRows([]string{"staging_filename", "parser_name", "file_name"}).
+			AddRow("sample.pdf", "pdfplumber", "/tmp/standards/sample.pdf"))
+
+	mustWriteFile(t, filepath.Join(artifactDir, "7", "93", "summary_0_0001.txt"), `summary_id: "93_0_0001"
+record_id: 93
+level: 0
+lines: ["1-2"]
+keywords: ["health"]
+summary_begin:
+Leaf summary text
+summary_end`)
+	mustWriteFile(t, filepath.Join(artifactDir, "7", "93", "sample_pdfplumber.corrected"), "1\t9\tparagraph\tunchanged\tTimes\t10\t[0,0,1,1]\tA\n")
+
+	results, err := readRecordSummaryCards(nil, recordID)
+	if err != nil {
+		t.Fatalf("readRecordSummaryCards: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(results))
+	}
+	if results[0].ID != "93_0_0001" || results[0].Page != 9 {
+		t.Fatalf("unexpected record: %+v", results[0])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
 	}
 }
 

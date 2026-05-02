@@ -157,6 +157,26 @@ func ListInputs(c echo.Context) error {
 		ModifyTimeEnd:   modifyEndTime,
 	}
 
+	logger.Info("list kb inputs request",
+		"page", page,
+		"page_size", pageSize,
+		"record_id", optionalInt64Value(recordID),
+		"ks_store_id", optionalInt64Value(ksStoreID),
+		"doc_type", strings.TrimSpace(filters.DocType),
+		"parse_state", strings.TrimSpace(filters.ParseState),
+		"name", strings.TrimSpace(filters.Name),
+		"title", strings.TrimSpace(filters.Title),
+		"doc_no", strings.TrimSpace(filters.DocNo),
+		"file_name", strings.TrimSpace(filters.FileName),
+		"parser_name", strings.TrimSpace(filters.ParserName),
+		"operation", strings.TrimSpace(filters.Operation),
+		"proc_status", strings.TrimSpace(filters.ProcStatus),
+		"create_start_time", formatOptionalTime(filters.CreateTimeStart),
+		"create_end_time", formatOptionalTime(filters.CreateTimeEnd),
+		"modify_start_time", formatOptionalTime(filters.ModifyTimeStart),
+		"modify_end_time", formatOptionalTime(filters.ModifyTimeEnd),
+	)
+
 	if !isValidParseState(filters.ParseState) {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
@@ -246,6 +266,14 @@ func ListInputs(c echo.Context) error {
 		results = []inputRecord{}
 	}
 
+	logger.Info("list kb inputs result",
+		"record_id", optionalInt64Value(recordID),
+		"ks_store_id", optionalInt64Value(ksStoreID),
+		"total", total,
+		"returned", len(results),
+		"sample_ids", sampleInputIDs(results, 8),
+	)
+
 	return c.JSON(http.StatusOK, listInputsResponse{
 		Status:   true,
 		Results:  results,
@@ -253,6 +281,34 @@ func ListInputs(c echo.Context) error {
 		PageSize: pageSize,
 		Total:    total,
 	})
+}
+
+func optionalInt64Value(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func formatOptionalTime(v *time.Time) string {
+	if v == nil {
+		return ""
+	}
+	return v.Format(time.RFC3339)
+}
+
+func sampleInputIDs(records []inputRecord, limit int) []int64 {
+	if limit <= 0 || len(records) == 0 {
+		return []int64{}
+	}
+	if len(records) < limit {
+		limit = len(records)
+	}
+	out := make([]int64, 0, limit)
+	for i := 0; i < limit; i++ {
+		out = append(out, records[i].ID)
+	}
+	return out
 }
 
 func queryTotalCount(db *sql.DB, inputTable, whereSQL string, args []any) (int64, error) {

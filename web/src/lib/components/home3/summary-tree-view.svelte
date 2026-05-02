@@ -3,7 +3,12 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import PanelsTopLeftIcon from '@lucide/svelte/icons/panels-top-left';
 	import Rows3Icon from '@lucide/svelte/icons/rows-3';
-	import { getRecordSummaries, searchSummaryTree } from '$lib/services/kbService';
+	import {
+		getKbInput,
+		getRecordSummaries,
+		searchSummaryTree,
+		type KbInputRecord
+	} from '$lib/services/kbService';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 	import {
 		createSummaryTreeState,
@@ -50,6 +55,37 @@
 		return value?.trim() || '—';
 	}
 
+	function summaryTreeStatusText(record: KbInputRecord): string {
+		const items = record.status ?? [];
+		const matched = [...items].reverse().find((item) => item != null);
+		if (!matched) return 'pending';
+		return (
+			matched.proc_status?.trim() ||
+			matched['proc-status']?.trim() ||
+			matched.status?.trim() ||
+			'pending'
+		);
+	}
+
+	function mapKbInputToSummaryTreeRecord(record: KbInputRecord): SummaryTreeRecord {
+		return {
+			id: record.id,
+			title:
+				record.title?.trim() ||
+				record.name?.trim() ||
+				record.file_name?.trim() ||
+				`Record #${record.id}`,
+			fileName: record.file_name?.trim() || record.name?.trim() || '—',
+			docType: record.type?.trim() || '—',
+			docNo: record.doc_no?.trim() || '—',
+			parserName: record.parser_name?.trim() || '—',
+			procStatus: summaryTreeStatusText(record),
+			createTime: record.create_time ? new Date(record.create_time).toLocaleString() : '—',
+			modifyTime: record.modify_time ? new Date(record.modify_time).toLocaleString() : '—',
+			summaries: []
+		};
+	}
+
 	$effect(() => {
 		if (!activeRecord && results[0]) {
 			treeState = selectSummaryTreeRecord(treeState, results[0].id);
@@ -66,8 +102,20 @@
 		loading = true;
 		loadError = '';
 		try {
+			const directRecordId = Number(recordIdInput.trim());
+			if (recordIdInput.trim() !== '') {
+				if (!Number.isFinite(directRecordId) || directRecordId <= 0) {
+					throw new Error('Enter a valid Record ID');
+				}
+				const response = await getKbInput(directRecordId);
+				results = [mapKbInputToSummaryTreeRecord(response.record)];
+				treeState = createSummaryTreeState();
+				treeState = selectSummaryTreeRecord(treeState, response.record.id);
+				return;
+			}
+
 			const response = await searchSummaryTree({
-				recordId: recordIdInput.trim(),
+				recordId: '',
 				title: '',
 				docNo: '',
 				fileName: '',

@@ -122,7 +122,11 @@ func readSummaryCategoryRecords(summaryTreeDir string, categoryPath string) ([]s
 			continue
 		}
 
-		summaryPath := filepath.Join(artifactDir, strconv.FormatInt(recordID/1000, 10), strconv.FormatInt(recordID, 10), fmt.Sprintf("summary_%d_%04d.txt", level, seqNo))
+		recordDir, err := resolveRecordArtifactDir(artifactDir, recordID)
+		if err != nil {
+			return nil, err
+		}
+		summaryPath := filepath.Join(recordDir, fmt.Sprintf("summary_%d_%04d.txt", level, seqNo))
 		parsed, err := readSummaryArtifactFile(summaryPath)
 		if err != nil {
 			return nil, err
@@ -290,12 +294,11 @@ func readLinePageMapForRecord(artifactDir string, meta summaryArtifactMeta) (map
 	if stagingRoot == "" || meta.parser == "" {
 		return map[int]int{}, nil
 	}
-	path := filepath.Join(
-		artifactDir,
-		strconv.FormatInt(meta.recordID/1000, 10),
-		strconv.FormatInt(meta.recordID, 10),
-		stagingRoot+"_"+meta.parser+".corrected",
-	)
+	recordDir, err := resolveRecordArtifactDir(artifactDir, meta.recordID)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(recordDir, stagingRoot+"_"+meta.parser+".corrected")
 	lines, _, err := readCorrectedLinesFile(path)
 	if err != nil {
 		return nil, err
