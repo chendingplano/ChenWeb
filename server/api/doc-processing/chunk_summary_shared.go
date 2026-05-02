@@ -20,6 +20,7 @@ const (
 	DefaultSummaryReclusteringDays      = 7
 	defaultSummaryClusterStateFileName  = "_cluster_state.json"
 	defaultSummaryTreeFallbackTopicType = "summary"
+	categoryMetadataFileName            = "metadata.txt"
 )
 
 type SummaryItem struct {
@@ -254,10 +255,94 @@ func collectSummaryIDs(items []SummaryItem) []string {
 	return out
 }
 
+// upsertCategoryDirMetadata creates metadata.txt in dir if it does not exist,
+// or merges new keywords not already present if the file exists.
+// This covers both new directories and existing directories that are missing
+// the file (edge case: directory pre-existed without a metadata.txt).
+func upsertCategoryDirMetadata(dir, name, categoryType string, confidence float64, keywords []string, now time.Time) error {
+	metaPath := filepath.Join(dir, categoryMetadataFileName)
+	_, statErr := os.Stat(metaPath)
+	if statErr == nil {
+		return mergeCategoryDirKeywords(metaPath, keywords)
+	}
+	if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	return createCategoryDirMetadata(metaPath, name, categoryType, confidence, keywords, now)
+}
+
+func createCategoryDirMetadata(path, name, categoryType string, confidence float64, keywords []string, now time.Time) error {
+	if keywords == nil {
+		keywords = []string{}
+	}
+	descJSON, _ := json.Marshal(name)
+	typeJSON, _ := json.Marshal(categoryType)
+	kwJSON, err := json.Marshal(keywords)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`"desc":%s`, string(descJSON)) + "\n")
+	b.WriteString(fmt.Sprintf(`"category_type":%s`, string(typeJSON)) + "\n")
+	b.WriteString(fmt.Sprintf(`"confidence":%s`, strconv.FormatFloat(confidence, 'f', -1, 64)) + "\n")
+	b.WriteString(fmt.Sprintf(`"keywords":%s`, string(kwJSON)) + "\n")
+	b.WriteString(fmt.Sprintf(`"create_time":"%s"`, now.Format("20060102-150405")))
+	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+// mergeCategoryDirKeywords adds any keywords not already in metadata.txt.
+func mergeCategoryDirKeywords(metaPath string, newKeywords []string) error {
+	if len(newKeywords) == 0 {
+		return nil
+	}
+	body, err := os.ReadFile(metaPath)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(body), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSuffix(strings.TrimSpace(line), ",")
+		if !strings.HasPrefix(trimmed, `"keywords":`) {
+			continue
+		}
+		valJSON := strings.TrimSpace(strings.TrimPrefix(trimmed, `"keywords":`))
+		var existing []string
+		if err := json.Unmarshal([]byte(valJSON), &existing); err != nil {
+			return err
+		}
+		added := false
+		for _, kw := range newKeywords {
+			found := false
+			for _, e := range existing {
+				if e == kw {
+					found = true
+					break
+				}
+			}
+			if !found {
+				existing = append(existing, kw)
+				added = true
+			}
+		}
+		if !added {
+			return nil
+		}
+		kwJSON, err := json.Marshal(existing)
+		if err != nil {
+			return err
+		}
+		lines[i] = fmt.Sprintf(`"keywords":%s`, string(kwJSON))
+		return os.WriteFile(metaPath, []byte(strings.Join(lines, "\n")), 0o644)
+	}
+	return nil
+}
+
 // writeSummaryTreeEntry appends summary.SummaryID to
 // baseDir/<category_path>/summaries.txt. The caller must create baseDir and
 // remove stale entries for the record before the first call.
-func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary SummaryItem, rawCategories []string) error {
+// pathNodes optionally provides per-node metadata (keywords, confidence) for
+// each segment of the category path; nil is safe and falls back to defaults.
+func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary SummaryItem, rawCategories []string, pathNodes []CategoryPathNode) error {
 	categoryPath, reason := normalizeAndValidateTopicCategoryPath(rawCategories, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
 		return fmt.Errorf("(MID_26042930) summary tree category path invalid (%s): %v", reason, rawCategories)
@@ -277,6 +362,21 @@ func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary S
 	if err := os.MkdirAll(leafDir, 0o755); err != nil {
 		return err
 	}
+	currentDir := baseDir
+	for i, seg := range categoryPath {
+		currentDir = filepath.Join(currentDir, seg)
+		name, confidence, keywords := seg, 0.0, []string(nil)
+		if i < len(pathNodes) {
+			if pathNodes[i].Name != "" {
+				name = pathNodes[i].Name
+			}
+			confidence = pathNodes[i].Confidence
+			keywords = pathNodes[i].Keywords
+		}
+		if err := upsertCategoryDirMetadata(currentDir, name, defaultSummaryTreeFallbackTopicType, confidence, keywords, time.Now()); err != nil {
+			return err
+		}
+	}
 	existing := make([]string, 0)
 	if bs, err := os.ReadFile(leaf); err == nil {
 		for _, row := range strings.Split(string(bs), "\n") {
@@ -291,7 +391,7 @@ func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary S
 	return os.WriteFile(leaf, []byte(strings.Join(existing, "\n")), 0o644)
 }
 
-func writeSummaryTreeRootReference(logger ApiTypes.JimoLogger, baseDir string, recordID int64, root SummaryItem, rawCategories []string) error {
+func writeSummaryTreeRootReference(logger ApiTypes.JimoLogger, baseDir string, recordID int64, root SummaryItem, rawCategories []string, pathNodes []CategoryPathNode) error {
 	if strings.TrimSpace(baseDir) == "" {
 		return errors.New("summary tree dir is empty")
 	}
@@ -322,6 +422,21 @@ func writeSummaryTreeRootReference(logger ApiTypes.JimoLogger, baseDir string, r
 	}
 	if err := os.MkdirAll(leafDir, 0o755); err != nil {
 		return err
+	}
+	currentDir := baseDir
+	for i, seg := range categoryPath {
+		currentDir = filepath.Join(currentDir, seg)
+		name, confidence, keywords := seg, 0.0, []string(nil)
+		if i < len(pathNodes) {
+			if pathNodes[i].Name != "" {
+				name = pathNodes[i].Name
+			}
+			confidence = pathNodes[i].Confidence
+			keywords = pathNodes[i].Keywords
+		}
+		if err := upsertCategoryDirMetadata(currentDir, name, defaultSummaryTreeFallbackTopicType, confidence, keywords, time.Now()); err != nil {
+			return err
+		}
 	}
 	existing := make([]string, 0)
 	if bs, err := os.ReadFile(leaf); err == nil {

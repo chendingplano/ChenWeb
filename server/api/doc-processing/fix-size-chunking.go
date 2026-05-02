@@ -99,7 +99,7 @@ type FixedSizeChunkingService struct {
 	TopicEmbeddingModelName       string
 	SummaryEmbeddingModelName     string
 	GenerateSummary               func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, error)
-	GenerateSummaryTreeCategories func(ctx context.Context, root SummaryItem) ([]string, error)
+	GenerateSummaryTreeCategories func(ctx context.Context, root SummaryItem) ([]string, []CategoryPathNode, error)
 }
 
 type ChunkOptions struct {
@@ -420,7 +420,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		return err
 	}
 	for i := range allSummaries {
-		cats, catErr := s.generateSummaryTreeCategories(ctx, allSummaries[i])
+		cats, nodes, catErr := s.generateSummaryTreeCategories(ctx, allSummaries[i])
 		if catErr != nil {
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, catErr)
 			return catErr
@@ -430,7 +430,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
-		if err := writeSummaryTreeEntry(s.Logger, s.SummaryTreeDir, allSummaries[i], cats); err != nil {
+		if err := writeSummaryTreeEntry(s.Logger, s.SummaryTreeDir, allSummaries[i], cats, nodes); err != nil {
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
@@ -523,13 +523,13 @@ func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID
 	return summary, keywords, nil
 }
 
-func (s *FixedSizeChunkingService) generateSummaryTreeCategories(ctx context.Context, root SummaryItem) ([]string, error) {
+func (s *FixedSizeChunkingService) generateSummaryTreeCategories(ctx context.Context, root SummaryItem) ([]string, []CategoryPathNode, error) {
 	if s.GenerateSummaryTreeCategories != nil {
 		return s.GenerateSummaryTreeCategories(ctx, root)
 	}
 	summary := sanitizeTopicText(root.Summary)
 	if summary == "" {
-		return nil, errors.New("(MID_26042912) root summary text is empty; cannot generate category path")
+		return nil, nil, errors.New("(MID_26042912) root summary text is empty; cannot generate category path")
 	}
 	parsed, err := s.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		PromptText: s.CategoryPromptText,
@@ -537,7 +537,7 @@ func (s *FixedSizeChunkingService) generateSummaryTreeCategories(ctx context.Con
 		InputText:  summary,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26042923) category path LLM extraction failed: %w", err)
+		return nil, nil, fmt.Errorf("(MID_26042923) category path LLM extraction failed: %w", err)
 	}
 	rawPath := extractCategoryPathFromLLM(parsed)
 	s.Logger.Info("LLM category path raw response",
@@ -547,13 +547,17 @@ func (s *FixedSizeChunkingService) generateSummaryTreeCategories(ctx context.Con
 	)
 	path, reason := normalizeAndValidateTopicCategoryPath(rawPath, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
-		return nil, fmt.Errorf("(MID_26042924) invalid summary tree category path from LLM (%s): %v", reason, rawPath)
+		return nil, nil, fmt.Errorf("(MID_26042924) invalid summary tree category path from LLM (%s): %v", reason, rawPath)
+	}
+	var nodes []CategoryPathNode
+	if entries := extractCategoryPathDetailFromLLM(parsed); len(entries) > 0 {
+		nodes = entries[0].Nodes
 	}
 	s.Logger.Info("LLM category path normalized",
 		"summary_id", root.SummaryID,
 		"path", path,
 	)
-	return path, nil
+	return path, nodes, nil
 }
 
 func buildSummaryInputText(lines []Line, children []SummaryItem) string {

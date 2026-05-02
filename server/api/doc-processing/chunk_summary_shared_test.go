@@ -91,7 +91,7 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 	tmp := t.TempDir()
 	root := SummaryItem{SummaryID: "53_1_0001", RecordID: 53, Level: 1, SeqNo: 1}
 
-	if err := writeSummaryTreeRootReference(nil, tmp, 53, root, []string{"Safety Overview", "Closing Notes"}); err != nil {
+	if err := writeSummaryTreeRootReference(nil, tmp, 53, root, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("writeSummaryTreeRootReference: %v", err)
 	}
 	leaf := filepath.Join(tmp, "safety_overview", "closing_notes", "summaries.txt")
@@ -105,7 +105,7 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 
 	// Reprocessing the same record replaces its prior entry and does not duplicate it.
 	root2 := SummaryItem{SummaryID: "53_2_0001", RecordID: 53, Level: 2, SeqNo: 1}
-	if err := writeSummaryTreeRootReference(nil, tmp, 53, root2, []string{"Safety Overview", "Closing Notes"}); err != nil {
+	if err := writeSummaryTreeRootReference(nil, tmp, 53, root2, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("rewrite summary tree root reference: %v", err)
 	}
 	body, err = os.ReadFile(leaf)
@@ -118,7 +118,7 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 
 	// A second record writing to the same leaf must not overwrite the first record's entry.
 	root3 := SummaryItem{SummaryID: "77_1_0001", RecordID: 77, Level: 1, SeqNo: 1}
-	if err := writeSummaryTreeRootReference(nil, tmp, 77, root3, []string{"Safety Overview", "Closing Notes"}); err != nil {
+	if err := writeSummaryTreeRootReference(nil, tmp, 77, root3, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("write second record summary tree root reference: %v", err)
 	}
 	body, err = os.ReadFile(leaf)
@@ -135,7 +135,7 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 
 	// Reprocessing record 77 replaces its entry and preserves record 53's entry.
 	root4 := SummaryItem{SummaryID: "77_2_0001", RecordID: 77, Level: 2, SeqNo: 1}
-	if err := writeSummaryTreeRootReference(nil, tmp, 77, root4, []string{"Safety Overview", "Closing Notes"}); err != nil {
+	if err := writeSummaryTreeRootReference(nil, tmp, 77, root4, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("reprocess record 77: %v", err)
 	}
 	body, err = os.ReadFile(leaf)
@@ -233,6 +233,115 @@ func TestAppendLanguageInstruction(t *testing.T) {
 	zhPrompt := appendLanguageInstruction("Summarize this.", "这是一段中文内容。")
 	if !strings.Contains(zhPrompt, "Chinese") {
 		t.Fatalf("expected Chinese instruction, got: %q", zhPrompt)
+	}
+}
+
+func TestCategoryDirMetadata_CreateAndMerge(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "public_health")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+
+	// Create a new metadata.txt.
+	if err := upsertCategoryDirMetadata(dir, "public_health", "summary", 0.95, []string{"health management", "disease prevention"}, now); err != nil {
+		t.Fatalf("upsertCategoryDirMetadata create: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, categoryMetadataFileName))
+	if err != nil {
+		t.Fatalf("read metadata.txt: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{`"desc":"public_health"`, `"category_type":"summary"`, `"confidence":0.95`, `"health management"`, `"disease prevention"`, `"create_time":"20260502-120000"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("metadata.txt missing %q, got:\n%s", want, text)
+		}
+	}
+
+	// Merge new keywords — new keyword added, duplicate skipped.
+	if err := upsertCategoryDirMetadata(dir, "public_health", "summary", 0.9, []string{"disease prevention", "immunization"}, now); err != nil {
+		t.Fatalf("upsertCategoryDirMetadata merge: %v", err)
+	}
+	body2, err := os.ReadFile(filepath.Join(dir, categoryMetadataFileName))
+	if err != nil {
+		t.Fatalf("read metadata.txt after merge: %v", err)
+	}
+	text2 := string(body2)
+	for _, want := range []string{`"health management"`, `"disease prevention"`, `"immunization"`} {
+		if !strings.Contains(text2, want) {
+			t.Fatalf("merged metadata.txt missing %q, got:\n%s", want, text2)
+		}
+	}
+	// create_time must not change on update.
+	if !strings.Contains(text2, `"create_time":"20260502-120000"`) {
+		t.Fatalf("create_time changed on merge, got:\n%s", text2)
+	}
+}
+
+func TestCategoryDirMetadata_ExistingDirWithoutFile(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "preexisting")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Directory exists but has no metadata.txt yet.
+	metaPath := filepath.Join(dir, categoryMetadataFileName)
+	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no metadata.txt before test")
+	}
+
+	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+	if err := upsertCategoryDirMetadata(dir, "preexisting", "summary", 0.8, []string{"kw1"}, now); err != nil {
+		t.Fatalf("upsertCategoryDirMetadata on existing dir without file: %v", err)
+	}
+
+	body, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("metadata.txt not created for existing dir: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"desc":"preexisting"`) {
+		t.Fatalf("missing desc in metadata.txt, got:\n%s", text)
+	}
+	if !strings.Contains(text, `"kw1"`) {
+		t.Fatalf("missing keyword in metadata.txt, got:\n%s", text)
+	}
+}
+
+func TestWriteSummaryTreeEntry_WritesMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	summary := SummaryItem{SummaryID: "10_1_0001", RecordID: 10, Level: 1, SeqNo: 1}
+	nodes := []CategoryPathNode{
+		{Name: "Safety Overview", Keywords: []string{"safety", "overview"}, Confidence: 0.9},
+		{Name: "Closing Notes", Keywords: []string{"closing"}, Confidence: 0.8},
+	}
+	if err := writeSummaryTreeEntry(nil, tmp, summary, []string{"Safety Overview", "Closing Notes"}, nodes); err != nil {
+		t.Fatalf("writeSummaryTreeEntry: %v", err)
+	}
+	for _, tc := range []struct {
+		dir  string
+		want []string
+	}{
+		{
+			filepath.Join(tmp, "safety_overview"),
+			[]string{`"desc":"Safety Overview"`, `"safety"`, `"overview"`, `"confidence":0.9`},
+		},
+		{
+			filepath.Join(tmp, "safety_overview", "closing_notes"),
+			[]string{`"desc":"Closing Notes"`, `"closing"`, `"confidence":0.8`},
+		},
+	} {
+		body, err := os.ReadFile(filepath.Join(tc.dir, categoryMetadataFileName))
+		if err != nil {
+			t.Fatalf("read metadata.txt in %s: %v", tc.dir, err)
+		}
+		text := string(body)
+		for _, w := range tc.want {
+			if !strings.Contains(text, w) {
+				t.Fatalf("metadata.txt in %s missing %q, got:\n%s", tc.dir, w, text)
+			}
+		}
 	}
 }
 

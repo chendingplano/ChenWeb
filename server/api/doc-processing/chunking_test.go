@@ -182,8 +182,8 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 		}
 		return "parent summary " + strings.Join(collectSummaryIDs(children), ","), nil, nil
 	}
-	svc.GenerateSummaryTreeCategories = func(_ context.Context, _ SummaryItem) ([]string, error) {
-		return []string{"legacy_summary_tree"}, nil
+	svc.GenerateSummaryTreeCategories = func(_ context.Context, _ SummaryItem) ([]string, []CategoryPathNode, error) {
+		return []string{"legacy_summary_tree"}, nil, nil
 	}
 
 	if err := svc.HandleInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
@@ -436,8 +436,8 @@ func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 		}
 		return "parent summary " + asString(seqNo) + " children=" + strings.Join(ids, ","), nil, nil
 	}
-	svc.GenerateSummaryTreeCategories = func(_ context.Context, _ SummaryItem) ([]string, error) {
-		return []string{"Safety Overview", "Closing Notes"}, nil
+	svc.GenerateSummaryTreeCategories = func(_ context.Context, _ SummaryItem) ([]string, []CategoryPathNode, error) {
+		return []string{"Safety Overview", "Closing Notes"}, nil, nil
 	}
 
 	if err := svc.HandleInput(context.Background(), 8123, "sample.txt", []byte(input)); err != nil {
