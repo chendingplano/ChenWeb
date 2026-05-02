@@ -574,6 +574,12 @@ export type SearchSummaryTreeResponse = {
 	total: number;
 };
 
+export type GetRecordSummariesResponse = {
+	status: boolean;
+	recordId: number;
+	summaries: SummaryRecordCard[];
+};
+
 export async function listSummaryGraph(): Promise<ListSummaryGraphResponse> {
 	return fetchOrThrow<ListSummaryGraphResponse>(
 		`${BASE}/summary-graph`,
@@ -588,6 +594,15 @@ export async function listSummaryGraphMock(): Promise<ListSummaryGraphResponse> 
 	});
 }
 
+export async function getSummaryCategory(
+	categoryPath: string
+): Promise<GetSummaryCategoryResponse> {
+	return fetchOrThrow<GetSummaryCategoryResponse>(
+		`${BASE}/summary-category?category_path=${encodeURIComponent(categoryPath)}`,
+		'Failed to load summary category'
+	);
+}
+
 export async function getSummaryCategoryMock(
 	categoryPath: string
 ): Promise<GetSummaryCategoryResponse> {
@@ -596,6 +611,90 @@ export async function getSummaryCategoryMock(
 		categoryPath,
 		summaries: structuredClone(MOCK_CATEGORY_SUMMARIES[categoryPath] ?? [])
 	});
+}
+
+function summaryTreeStatusText(
+	record: KbInputRecord,
+	operation: string
+): { operation: string; procStatus: string } {
+	const items = record.status ?? [];
+	const desiredOperation = operation.trim().toLowerCase();
+	const matched =
+		desiredOperation !== ''
+			? [...items]
+					.reverse()
+					.find((item) => (item?.operation ?? '').trim().toLowerCase() === desiredOperation)
+			: [...items].reverse().find((item) => item != null);
+
+	if (!matched) {
+		return { operation: '—', procStatus: 'pending' };
+	}
+
+	return {
+		operation: matched.operation?.trim() || '—',
+		procStatus:
+			matched.proc_status?.trim() ||
+			matched['proc-status']?.trim() ||
+			matched.status?.trim() ||
+			'pending'
+	};
+}
+
+function mapKbInputToSummaryTreeRecord(
+	record: KbInputRecord,
+	operation: string
+): SummaryTreeRecord {
+	const statusSummary = summaryTreeStatusText(record, operation);
+	return {
+		id: record.id,
+		title: record.title?.trim() || record.name?.trim() || record.file_name?.trim() || `Record #${record.id}`,
+		fileName: record.file_name?.trim() || record.name?.trim() || '—',
+		docType: record.type?.trim() || '—',
+		docNo: record.doc_no?.trim() || '—',
+		parserName: record.parser_name?.trim() || '—',
+		procStatus: statusSummary.procStatus,
+		createTime: record.create_time ? new Date(record.create_time).toLocaleString() : '—',
+		modifyTime: record.modify_time ? new Date(record.modify_time).toLocaleString() : '—',
+		summaries: []
+	};
+}
+
+export async function searchSummaryTree(
+	params: SearchSummaryTreeParams
+): Promise<SearchSummaryTreeResponse> {
+	const response = await listKbInputs({
+		docType: params.docType?.trim() || 'all',
+		parseState: 'all',
+		fileName: params.fileName?.trim() || '',
+		startTime: params.createStart?.trim() || '',
+		endTime: params.createEnd?.trim() || '',
+		page: 1,
+		pageSize: 100,
+		ksStoreId: params.ksStoreId ?? null,
+		recordId: params.recordId?.trim() || '',
+		title: params.title?.trim() || '',
+		docNo: params.docNo?.trim() || '',
+		parserName: params.parserName?.trim() || '',
+		operation: params.operation?.trim() || '',
+		procStatus: params.procStatus?.trim() || '',
+		modifyStartTime: params.modifyStart?.trim() || '',
+		modifyEndTime: params.modifyEnd?.trim() || ''
+	});
+
+	return {
+		status: response.status,
+		results: response.results.map((record) =>
+			mapKbInputToSummaryTreeRecord(record, params.operation?.trim() || '')
+		),
+		total: response.total
+	};
+}
+
+export async function getRecordSummaries(recordId: number): Promise<GetRecordSummariesResponse> {
+	return fetchOrThrow<GetRecordSummariesResponse>(
+		`${BASE}/record-summaries?record_id=${encodeURIComponent(String(recordId))}`,
+		'Failed to load record summaries'
+	);
 }
 
 export async function searchSummaryTreeMock(

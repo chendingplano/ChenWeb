@@ -19,7 +19,7 @@
 	import SummaryCategoryTab from './summary-category-tab.svelte';
 	import SummaryGraphTabs from './summary-graph-tabs.svelte';
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
-	import { getSummaryCategoryMock, listSummaryGraph } from '$lib/services/kbService';
+	import { getSummaryCategory, listSummaryGraph } from '$lib/services/kbService';
 	import type {
 		SummaryCategoryNode,
 		SummaryCategoryTab as SummaryCategoryTabType,
@@ -58,6 +58,7 @@
 	let loading = $state(true);
 	let loadError = $state('');
 	let errorDialogOpen = $state(false);
+	let categoryLoadingByPath = $state<Record<string, boolean>>({});
 	let chartApi = $state<any>(null);
 	let graphStageEl = $state<HTMLDivElement | null>(null);
 	let hoveredNodeId = $state<string | null>(null);
@@ -116,8 +117,13 @@
 		const result = openCategorySummaryTab(tabs, node.categoryPath);
 		tabs = result.tabs;
 		activeTabId = result.activeTabId;
-		if (!categorySummaries[node.categoryPath]) {
-			const response = await getSummaryCategoryMock(node.categoryPath);
+		if (categorySummaries[node.categoryPath] || categoryLoadingByPath[node.categoryPath]) {
+			return;
+		}
+
+		categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: true };
+		try {
+			const response = await getSummaryCategory(node.categoryPath);
 			categorySummaries = { ...categorySummaries, [node.categoryPath]: response.summaries };
 			if (response.summaries[0]) {
 				selectedSummaryIdByPath = {
@@ -132,7 +138,24 @@
 						summaryId: response.summaries[0].id
 					}
 				};
+			} else {
+				selectedSummaryIdByPath = {
+					...selectedSummaryIdByPath,
+					[node.categoryPath]: null
+				};
+				selectedTargetByPath = {
+					...selectedTargetByPath,
+					[node.categoryPath]: null
+				};
 			}
+		} catch (error) {
+			loadError =
+				error instanceof Error
+					? error.message
+					: `Failed to load summaries for ${node.categoryPath}`;
+			errorDialogOpen = true;
+		} finally {
+			categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: false };
 		}
 	}
 
@@ -219,14 +242,49 @@
 		return keywords.join(', ');
 	}
 
-	function placeHoverCard(offsetX: number, offsetY: number) {
+	function placeHoverCardNearNode(nodeX: number, nodeY: number, nodeRadius = 8) {
 		const stageWidth = graphStageEl?.clientWidth ?? 1200;
 		const stageHeight = graphStageEl?.clientHeight ?? 720;
-		const cardWidth = 320;
-		const cardHeight = 210;
+		const cardWidth = 428;
+		const cardHeight = 320;
+		const gap = 50;
+		const anchoredX = nodeX - nodeRadius;
+		const anchoredY = nodeY + nodeRadius + gap;
 		hoverCardPos = {
-			x: Math.max(16, Math.min(offsetX + 18, stageWidth - cardWidth - 16)),
-			y: Math.max(16, Math.min(offsetY + 18, stageHeight - cardHeight - 16))
+			x: Math.max(16, Math.min(anchoredX, stageWidth - cardWidth - 16)),
+			y: Math.max(16, Math.min(anchoredY, stageHeight - cardHeight - 16))
+		};
+	}
+
+	function getHoveredNodePixel(event: any): { x: number; y: number } | null {
+		const dataIndex = Number(event?.dataIndex);
+		if (!chartApi || !Number.isFinite(dataIndex) || dataIndex < 0) return null;
+
+		const seriesModel = chartApi.getModel?.().getSeriesByIndex?.(0);
+		const seriesData = seriesModel?.getData?.();
+		const layout = seriesData?.getItemLayout?.(dataIndex);
+		const group = chartApi?._chartsViews?.[0]?.group;
+		if (!layout || !group) return null;
+
+		const localX = Number(layout?.x ?? layout?.[0]);
+		const localY = Number(layout?.y ?? layout?.[1]);
+		if (!Number.isFinite(localX) || !Number.isFinite(localY)) return null;
+
+		if (typeof group.transformCoordToGlobal === 'function') {
+			const global = group.transformCoordToGlobal(localX, localY);
+			const point = Array.isArray(global) ? global : [global?.x, global?.y];
+			const x = Number(point?.[0]);
+			const y = Number(point?.[1]);
+			if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+		}
+
+		const scaleX = Number(group?.scaleX ?? 1) || 1;
+		const scaleY = Number(group?.scaleY ?? 1) || 1;
+		const offsetX = Number(group?.x ?? 0);
+		const offsetY = Number(group?.y ?? 0);
+		return {
+			x: localX * scaleX + offsetX,
+			y: localY * scaleY + offsetY
 		};
 	}
 
@@ -235,10 +293,17 @@
 		if (!nodeId || nodeId === 'summary-root') return;
 		clearHoverHideTimer();
 		hoveredNodeId = nodeId;
+		const rawSize = Number(event?.data?.symbolSize ?? 11);
+		const nodeRadius = Number.isFinite(rawSize) ? rawSize / 2 : 6;
+		const nodePixel = getHoveredNodePixel(event);
+		if (nodePixel) {
+			placeHoverCardNearNode(nodePixel.x, nodePixel.y, nodeRadius);
+			return;
+		}
 		const nativeEvent = event?.event?.event ?? event?.event ?? null;
-		const offsetX = Number(nativeEvent?.offsetX ?? 48);
-		const offsetY = Number(nativeEvent?.offsetY ?? 48);
-		placeHoverCard(offsetX, offsetY);
+		const fallbackX = Number(nativeEvent?.offsetX ?? 48);
+		const fallbackY = Number(nativeEvent?.offsetY ?? 48);
+		placeHoverCardNearNode(fallbackX, fallbackY, nodeRadius);
 	}
 
 	function buildMiniMapLayout(): MiniMapLayout {
@@ -617,21 +682,28 @@
 										<span>Description</span>
 										<strong>{hoveredNode.metadata.desc || '—'}</strong>
 									</div>
+									<div class="hover-card-row">
+										<span>Keywords</span>
+										<strong>{keywordText(hoveredNode.metadata.keywords)}</strong>
+									</div>
 									<div class="hover-card-row compact">
 										<div>
 											<span>Summaries</span>
 											<strong>{hoveredNode.summaryIds.length}</strong>
 										</div>
 										<div>
-											<span>Keywords</span>
-											<strong>{keywordText(hoveredNode.metadata.keywords)}</strong>
+											<span>Children</span>
+											<strong>{hoveredNode.childIds.length}</strong>
 										</div>
 									</div>
 									<div class="hover-toolbar">
 										<button
 											type="button"
 											class="toolbar-btn primary"
-											onclick={() => runHoverAction('show-summaries', hoveredNode)}>Show</button
+											onclick={() => runHoverAction('show-summaries', hoveredNode)}
+										>
+											Show Summaries
+										</button
 										>
 										<button
 											type="button"
@@ -713,55 +785,89 @@
 					<div class="inspector">
 						<div class="eyebrow">Node Inspector</div>
 						{#if selectedNode}
-							<h3>{selectedNode.label}</h3>
-							<p class="path">{selectedNode.categoryPath}</p>
-							<div class="meta-grid">
-								<div>
-									<span>Confidence</span><strong>{selectedNode.metadata.confidence}</strong>
+							<div class="inspector-card">
+								<div class="hover-card-head inspector-card-head">
+									<div>
+										<div class="hover-card-title">Name</div>
+										<div class="hover-card-value strong">{selectedNode.label}</div>
+									</div>
+									<div class="hover-selected-pill active">Selected</div>
 								</div>
-								<div><span>Children</span><strong>{selectedNode.childIds.length}</strong></div>
-								<div><span>Summaries</span><strong>{selectedNode.summaryIds.length}</strong></div>
-								<div>
-									<span>Keywords</span><strong>{keywordText(selectedNode.metadata.keywords)}</strong
+								<div class="hover-card-row">
+									<span>Path</span>
+									<strong>{selectedNode.categoryPath}</strong>
+								</div>
+								<div class="hover-card-row">
+									<span>Description</span>
+									<strong>{selectedNode.metadata.desc || '—'}</strong>
+								</div>
+								<div class="hover-card-row">
+									<span>Keywords</span>
+									<strong>{keywordText(selectedNode.metadata.keywords)}</strong>
+								</div>
+								<div class="inspector-grid">
+									<div class="inspector-stat">
+										<span>Confidence</span>
+										<strong>{selectedNode.metadata.confidence}</strong>
+									</div>
+									<div class="inspector-stat">
+										<span>Children</span>
+										<strong>{selectedNode.childIds.length}</strong>
+									</div>
+									<div class="inspector-stat">
+										<span>Summaries</span>
+										<strong>{selectedNode.summaryIds.length}</strong>
+									</div>
+									<div class="inspector-stat">
+										<span>Category Type</span>
+										<strong>{selectedNode.metadata.category_type || '—'}</strong>
+									</div>
+									<div class="inspector-stat inspector-stat-wide">
+										<span>Category Path</span>
+										<strong>{selectedNode.categoryPath}</strong>
+									</div>
+									<div class="inspector-stat inspector-stat-wide">
+										<span>Create Time</span>
+										<strong>{selectedNode.metadata.create_time || '—'}</strong>
+									</div>
+								</div>
+								<div class="action-grid action-grid-top">
+									<button
+										type="button"
+										onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}
+									>
+										{selectedNode.expanded ? 'Collapse' : 'Expand'}
+									</button>
+									<button
+										type="button"
+										class="accent-action"
+										onclick={() => showSummaries(selectedNode)}
+									>
+										Show Summaries
+									</button>
+								</div>
+								<div class="action-grid">
+									<button type="button" onclick={() => openDialog('rename', selectedNode.id)}
+										>Rename</button
+									>
+									<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}
+										>Edit Metadata</button
+									>
+									<button type="button" onclick={() => openDialog('add', selectedNode.id)}
+										>Add Node</button
+									>
+									<button type="button" onclick={() => openDialog('merge', selectedNode.id)}
+										>Merge</button
+									>
+									<button type="button" onclick={() => openDialog('split', selectedNode.id)}
+										>Split</button
+									>
+									<button
+										type="button"
+										class="danger"
+										onclick={() => openDialog('delete', selectedNode.id)}>Delete</button
 									>
 								</div>
-							</div>
-							<div class="action-grid action-grid-top">
-								<button
-									type="button"
-									onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}
-								>
-									{selectedNode.expanded ? 'Collapse' : 'Expand'}
-								</button>
-								<button
-									type="button"
-									class="accent-action"
-									onclick={() => showSummaries(selectedNode)}
-								>
-									Show Summaries
-								</button>
-							</div>
-							<div class="action-grid">
-								<button type="button" onclick={() => openDialog('rename', selectedNode.id)}
-									>Rename</button
-								>
-								<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}
-									>Edit Metadata</button
-								>
-								<button type="button" onclick={() => openDialog('add', selectedNode.id)}
-									>Add Node</button
-								>
-								<button type="button" onclick={() => openDialog('merge', selectedNode.id)}
-									>Merge</button
-								>
-								<button type="button" onclick={() => openDialog('split', selectedNode.id)}
-									>Split</button
-								>
-								<button
-									type="button"
-									class="danger"
-									onclick={() => openDialog('delete', selectedNode.id)}>Delete</button
-								>
 							</div>
 						{:else}
 							<div class="empty-state">Select a category node to inspect and edit it.</div>
@@ -951,7 +1057,8 @@
 	.hover-card {
 		position: absolute;
 		z-index: 12;
-		width: min(320px, calc(100% - 2rem));
+		width: min(428px, calc(100% - 2rem));
+		max-width: calc(100% - 2rem);
 		border-radius: 18px;
 		border: 1px solid rgba(129, 140, 248, 0.2);
 		background: rgba(15, 23, 42, 0.94);
@@ -966,6 +1073,12 @@
 		justify-content: space-between;
 		gap: 0.75rem;
 		margin-bottom: 0.7rem;
+	}
+
+	.hover-card-head > div:first-child,
+	.hover-card-row > strong,
+	.hover-card-row.compact > div {
+		min-width: 0;
 	}
 
 	.hover-card-title,
@@ -984,6 +1097,10 @@
 		margin-top: 0.2rem;
 		font-size: 0.84rem;
 		line-height: 1.4;
+		max-width: 100%;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+		white-space: normal;
 	}
 
 	.hover-card-value.strong {
@@ -1100,7 +1217,6 @@
 		rx: 4;
 	}
 
-	.path,
 	.empty-state {
 		color: var(--muted);
 		font-size: 0.84rem;
@@ -1119,22 +1235,40 @@
 		border-left: 1px solid rgba(148, 163, 184, 0.12);
 		padding: 1rem;
 		background: rgba(2, 6, 23, 0.16);
+		overflow: auto;
 	}
 
-	.meta-grid {
+	.inspector-card {
+		border-radius: 22px;
+		border: 1px solid rgba(129, 140, 248, 0.16);
+		background: rgba(15, 23, 42, 0.7);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+		padding: 1rem;
+	}
+
+	.inspector-card-head {
+		margin-bottom: 0.95rem;
+	}
+
+	.inspector-grid {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 0.75rem;
 		margin: 1rem 0;
 	}
 
-	.meta-grid div {
+	.inspector-stat {
 		border-radius: 16px;
 		background: var(--panel-alt);
 		padding: 0.8rem;
+		min-width: 0;
 	}
 
-	.meta-grid span {
+	.inspector-stat-wide {
+		grid-column: 1 / -1;
+	}
+
+	.inspector-stat span {
 		display: block;
 		margin-bottom: 0.2rem;
 		font-size: 0.72rem;
@@ -1144,8 +1278,13 @@
 		color: var(--muted);
 	}
 
-	.meta-grid strong {
+	.inspector-stat strong {
 		font-size: 0.92rem;
+		display: block;
+		max-width: 100%;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+		white-space: normal;
 	}
 
 	.action-grid {
@@ -1192,6 +1331,10 @@
 
 		.hover-toolbar {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.inspector-grid {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

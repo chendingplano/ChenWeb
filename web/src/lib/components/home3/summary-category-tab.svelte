@@ -51,7 +51,10 @@
 	<div class="category-body">
 		<div class="summary-list" style={`width:${leftWidth}px;`}>
 			{#if summaries.length === 0}
-				<div class="empty-state">No summaries in this category yet.</div>
+				<div class="empty-state">
+					No summaries are available for this category yet. This category may not have a
+					`summaries.txt` file yet.
+				</div>
 			{:else}
 				{#each summaries as summary}
 					<SummaryCard
