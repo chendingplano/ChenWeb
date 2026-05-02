@@ -55,26 +55,16 @@
 		background: #fbbf24;
 		box-shadow: none;
 		overflow: hidden;
-		transform: translateY(10px);
+		min-height: 52px;
 		z-index: 1;
 	}
 
 	.tab.active {
 		border-color: rgba(15, 23, 42, 0.96);
 		background: #2f75c8;
-		transform: translateY(0);
+		min-height: 58px;
 		z-index: 3;
-		box-shadow: none;
-	}
-
-	.tab.active::after {
-		content: '';
-		position: absolute;
-		left: 0;
-		right: 0;
-		bottom: -2px;
-		height: 4px;
-		background: rgba(15, 23, 42, 0.96);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 	}
 
 	.tab-button,

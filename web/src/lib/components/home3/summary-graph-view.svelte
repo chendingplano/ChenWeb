@@ -19,10 +19,7 @@
 	import SummaryCategoryTab from './summary-category-tab.svelte';
 	import SummaryGraphTabs from './summary-graph-tabs.svelte';
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
-	import {
-		getSummaryCategoryMock,
-		listSummaryGraph
-	} from '$lib/services/kbService';
+	import { getSummaryCategoryMock, listSummaryGraph } from '$lib/services/kbService';
 	import type {
 		SummaryCategoryNode,
 		SummaryCategoryTab as SummaryCategoryTabType,
@@ -33,6 +30,10 @@
 	use([TreeChart, TooltipComponent, CanvasRenderer]);
 
 	type DialogMode = 'rename' | 'metadata' | 'add' | 'delete' | 'merge' | 'split' | null;
+	type HoverCardPos = { x: number; y: number };
+	type MiniMapNode = { id: string; x: number; y: number; selected: boolean };
+	type MiniMapEdge = { fromX: number; fromY: number; toX: number; toY: number };
+	type MiniMapLayout = { nodes: MiniMapNode[]; edges: MiniMapEdge[] };
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -57,18 +58,41 @@
 	let loading = $state(true);
 	let loadError = $state('');
 	let errorDialogOpen = $state(false);
+	let chartApi = $state<any>(null);
+	let graphStageEl = $state<HTMLDivElement | null>(null);
+	let hoveredNodeId = $state<string | null>(null);
+	let hoverCardPos = $state<HoverCardPos>({ x: 28, y: 28 });
+	let hoverCardHovering = $state(false);
+	let miniViewport = $state({ left: 0.08, top: 0.12, width: 0.36, height: 0.42, scale: 1 });
+	let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
 
 	onMount(async () => {
 		await loadGraph();
 	});
 
 	let selectedNode = $derived(nodes.find((node) => node.id === selectedNodeId) ?? null);
+	let hoveredNode = $derived(nodes.find((node) => node.id === hoveredNodeId) ?? null);
 	let activeTab = $derived(tabs.find((tab) => tab.id === activeTabId) ?? tabs[0]);
+	let miniMapLayout = $derived.by((): MiniMapLayout => buildMiniMapLayout());
 
 	function openDialog(mode: DialogMode, nodeId: string) {
 		selectedNodeId = nodeId;
 		dialogMode = mode;
 		dialogOpen = true;
+	}
+
+	function clearHoverHideTimer() {
+		if (hoverHideTimer) {
+			clearTimeout(hoverHideTimer);
+			hoverHideTimer = null;
+		}
+	}
+
+	function scheduleHoverHide() {
+		clearHoverHideTimer();
+		hoverHideTimer = setTimeout(() => {
+			if (!hoverCardHovering) hoveredNodeId = null;
+		}, 120);
 	}
 
 	async function loadGraph() {
@@ -81,8 +105,7 @@
 		} catch (error) {
 			nodes = [];
 			selectedNodeId = null;
-			loadError =
-				error instanceof Error ? error.message : 'Failed to load summary graph';
+			loadError = error instanceof Error ? error.message : 'Failed to load summary graph';
 			errorDialogOpen = true;
 		} finally {
 			loading = false;
@@ -171,7 +194,11 @@
 			selectedNodeId = targetId || selectedNodeId;
 		}
 		if (dialogMode === 'split') {
-			nodes = splitNode(nodes, selectedNode.id, Array.isArray(payload.splitLabels) ? (payload.splitLabels as string[]) : []);
+			nodes = splitNode(
+				nodes,
+				selectedNode.id,
+				Array.isArray(payload.splitLabels) ? (payload.splitLabels as string[]) : []
+			);
 		}
 	}
 
@@ -191,6 +218,129 @@
 		if (!Array.isArray(keywords) || keywords.length === 0) return '—';
 		return keywords.join(', ');
 	}
+
+	function placeHoverCard(offsetX: number, offsetY: number) {
+		const stageWidth = graphStageEl?.clientWidth ?? 1200;
+		const stageHeight = graphStageEl?.clientHeight ?? 720;
+		const cardWidth = 320;
+		const cardHeight = 210;
+		hoverCardPos = {
+			x: Math.max(16, Math.min(offsetX + 18, stageWidth - cardWidth - 16)),
+			y: Math.max(16, Math.min(offsetY + 18, stageHeight - cardHeight - 16))
+		};
+	}
+
+	function updateHoverNode(event: any) {
+		const nodeId = String(event?.data?.id ?? '');
+		if (!nodeId || nodeId === 'summary-root') return;
+		clearHoverHideTimer();
+		hoveredNodeId = nodeId;
+		const nativeEvent = event?.event?.event ?? event?.event ?? null;
+		const offsetX = Number(nativeEvent?.offsetX ?? 48);
+		const offsetY = Number(nativeEvent?.offsetY ?? 48);
+		placeHoverCard(offsetX, offsetY);
+	}
+
+	function buildMiniMapLayout(): MiniMapLayout {
+		const mappedNodes: Array<{ id: string; depth: number; row: number; selected: boolean }> = [];
+		const edges: Array<{ fromDepth: number; fromRow: number; toDepth: number; toRow: number }> = [];
+		let row = 0;
+
+		function visit(node: SummaryCategoryNode, depth: number) {
+			const nodeRow = row++;
+			mappedNodes.push({
+				id: node.id,
+				depth,
+				row: nodeRow,
+				selected: node.id === selectedNodeId
+			});
+			if (!node.expanded) return nodeRow;
+			for (const child of childrenOf(node)) {
+				const childRow = visit(child, depth + 1);
+				edges.push({ fromDepth: depth, fromRow: nodeRow, toDepth: depth + 1, toRow: childRow });
+			}
+			return nodeRow;
+		}
+
+		for (const root of visibleRoots()) visit(root, 0);
+
+		const maxDepth = Math.max(1, ...mappedNodes.map((node) => node.depth));
+		const maxRow = Math.max(1, row - 1);
+
+		return {
+			nodes: mappedNodes.map((node) => ({
+				id: node.id,
+				x: mappedNodes.length === 1 ? 0.08 : 0.08 + (node.depth / maxDepth) * 0.84,
+				y: row <= 1 ? 0.5 : 0.08 + (node.row / maxRow) * 0.84,
+				selected: node.selected
+			})),
+			edges: edges.map((edge) => ({
+				fromX: 0.08 + (edge.fromDepth / maxDepth) * 0.84,
+				fromY: row <= 1 ? 0.5 : 0.08 + (edge.fromRow / maxRow) * 0.84,
+				toX: 0.08 + (edge.toDepth / maxDepth) * 0.84,
+				toY: row <= 1 ? 0.5 : 0.08 + (edge.toRow / maxRow) * 0.84
+			}))
+		};
+	}
+
+	function syncMiniViewport() {
+		const view = chartApi?._chartsViews?.[0];
+		const group = view?.group;
+		const bounds = group?.getBoundingRect?.();
+		const stageWidth = graphStageEl?.clientWidth ?? 0;
+		const stageHeight = graphStageEl?.clientHeight ?? 0;
+		const scaleX = Math.abs(Number(group?.scaleX ?? 1)) || 1;
+		const scaleY = Math.abs(Number(group?.scaleY ?? 1)) || 1;
+		const offsetX = Number(group?.x ?? 0);
+		const offsetY = Number(group?.y ?? 0);
+
+		if (
+			!bounds ||
+			!stageWidth ||
+			!stageHeight ||
+			!Number.isFinite(bounds.width) ||
+			bounds.width <= 0 ||
+			!Number.isFinite(bounds.height) ||
+			bounds.height <= 0
+		) {
+			miniViewport = { left: 0.08, top: 0.12, width: 0.36, height: 0.42, scale: 1 };
+			return;
+		}
+
+		const viewLeft = -offsetX / scaleX;
+		const viewTop = -offsetY / scaleY;
+		const viewWidth = stageWidth / scaleX;
+		const viewHeight = stageHeight / scaleY;
+		const left = Math.max(0, Math.min(1, (viewLeft - bounds.x) / bounds.width));
+		const top = Math.max(0, Math.min(1, (viewTop - bounds.y) / bounds.height));
+		const width = Math.max(0.1, Math.min(1 - left, viewWidth / bounds.width));
+		const height = Math.max(0.12, Math.min(1 - top, viewHeight / bounds.height));
+
+		miniViewport = { left, top, width, height, scale: Math.max(scaleX, scaleY) };
+	}
+
+	function runHoverAction(
+		action: Exclude<DialogMode, null> | 'show-summaries' | 'toggle-expand',
+		node: SummaryCategoryNode
+	) {
+		selectedNodeId = node.id;
+		if (action === 'show-summaries') {
+			showSummaries(node);
+			return;
+		}
+		if (action === 'toggle-expand') {
+			nodes = toggleNodeExpanded(nodes, node.id);
+			setTimeout(syncMiniViewport, 0);
+			return;
+		}
+		openDialog(action, node.id);
+	}
+
+	$effect(() => {
+		if (chartApi && graphStageEl && !loadError) {
+			setTimeout(syncMiniViewport, 0);
+		}
+	});
 
 	function visibleRoots() {
 		return nodes.filter((node) => !node.id.includes('/'));
@@ -215,33 +365,27 @@
 			keywords: node.metadata.keywords,
 			summaryCount: node.summaryIds.length,
 			collapsed: !node.expanded,
-			symbolSize: isSelected ? 14 : 11,
+			symbolSize: isSelected ? 16 : 11,
 			itemStyle: {
 				color: isSelected ? accent : darkMode ? '#cbd5e1' : '#94a3b8',
 				borderColor: isSelected ? warm : accent,
-				borderWidth: isSelected ? 3 : 2
+				borderWidth: isSelected ? 4 : 2,
+				shadowBlur: isSelected ? 18 : 0,
+				shadowColor: isSelected ? 'rgba(129, 140, 248, 0.72)' : 'transparent'
 			},
 			label: {
 				color: isSelected ? textMain : textMuted,
-				fontWeight: isSelected ? 700 : 500
+				fontWeight: isSelected ? 700 : 500,
+				backgroundColor: isSelected
+					? darkMode
+						? 'rgba(99, 102, 241, 0.16)'
+						: 'rgba(79, 70, 229, 0.12)'
+					: 'transparent',
+				padding: isSelected ? [4, 8] : 0,
+				borderRadius: isSelected ? 999 : 0
 			},
 			children: childrenOf(node).map(buildTreeNode)
 		};
-	}
-
-	function treeTooltipFormatter(params: any) {
-		const data = (params?.data ?? {}) as Record<string, unknown>;
-		if (!data.categoryPath) return '';
-		const keywords = Array.isArray(data.keywords) ? data.keywords.join(', ') : '';
-		return `
-			<div style="min-width:220px">
-				<div style="font-weight:700; margin-bottom:4px;">${String(data.name ?? '')}</div>
-				<div style="font-size:12px; opacity:0.75; margin-bottom:6px;">${String(data.categoryPath ?? '')}</div>
-				<div style="font-size:12px; margin-bottom:6px;">${String(data.desc ?? '')}</div>
-				<div style="font-size:12px;">Summaries: ${String(data.summaryCount ?? 0)}</div>
-				<div style="font-size:12px;">Keywords: ${keywords || '—'}</div>
-			</div>
-		`;
 	}
 
 	let treeOption = $derived.by((): EChartsOption => {
@@ -269,14 +413,7 @@
 			animationDuration: 300,
 			animationDurationUpdate: 350,
 			tooltip: {
-				trigger: 'item',
-				triggerOn: 'mousemove',
-				backgroundColor: darkMode ? '#0f172a' : '#ffffff',
-				borderColor: darkMode ? '#334155' : '#cbd5e1',
-				textStyle: {
-					color: darkMode ? '#e2e8f0' : '#0f172a'
-				},
-				formatter: treeTooltipFormatter
+				show: false
 			},
 			series: [
 				{
@@ -288,6 +425,8 @@
 					right: '16%',
 					layout: 'orthogonal',
 					orient: 'LR',
+					layerPadding: 72,
+					nodePadding: 26,
 					symbol: 'emptyCircle',
 					edgeShape: 'curve',
 					expandAndCollapse: false,
@@ -320,7 +459,10 @@
 	});
 </script>
 
-<div class="graph-shell" style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --warm:${warm};`}>
+<div
+	class="graph-shell"
+	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --warm:${warm};`}
+>
 	<SummaryNodeDialog
 		bind:open={dialogOpen}
 		mode={dialogMode}
@@ -385,7 +527,12 @@
 
 	<div class="tabbed-window">
 		<div class="tabbed-window-head">
-			<SummaryGraphTabs {tabs} {activeTabId} onSelect={(tabId) => (activeTabId = tabId)} onClose={closeTab} />
+			<SummaryGraphTabs
+				{tabs}
+				{activeTabId}
+				onSelect={(tabId) => (activeTabId = tabId)}
+				onClose={closeTab}
+			/>
 		</div>
 
 		<div class="tabbed-window-body">
@@ -399,7 +546,7 @@
 				/>
 			{:else}
 				<div class="graph-workspace">
-					<div class="graph-stage">
+					<div class="graph-stage" bind:this={graphStageEl}>
 						{#if loading}
 							<div class="empty-state">Loading summary categories…</div>
 						{:else if loadError}
@@ -408,17 +555,158 @@
 							</div>
 						{:else}
 							<Chart
+								bind:chart={chartApi}
 								{init}
 								theme={chartTheme}
 								options={treeOption}
 								style="width:100%; height:100%;"
+								onrendered={syncMiniViewport}
+								onfinished={syncMiniViewport}
+								onmouseover={(event: any) => updateHoverNode(event)}
+								onmousemove={(event: any) => {
+									if (event?.data?.id) updateHoverNode(event);
+								}}
+								onmouseout={() => scheduleHoverHide()}
+								onglobalout={() => scheduleHoverHide()}
 								onclick={(event: any) => {
 									const nodeId = String(event?.data?.id ?? '');
 									if (nodeId && nodeId !== 'summary-root') {
 										selectedNodeId = nodeId;
+										hoveredNodeId = nodeId;
+										const clickedNode = nodes.find((node) => node.id === nodeId);
+										if (clickedNode && clickedNode.childIds.length > 0 && !clickedNode.expanded) {
+											nodes = toggleNodeExpanded(nodes, nodeId);
+											setTimeout(syncMiniViewport, 0);
+										}
+										updateHoverNode(event);
 									}
 								}}
 							/>
+
+							{#if hoveredNode}
+								<div
+									class="hover-card"
+									role="presentation"
+									style={`left:${hoverCardPos.x}px; top:${hoverCardPos.y}px;`}
+									onmouseenter={() => {
+										hoverCardHovering = true;
+										clearHoverHideTimer();
+									}}
+									onmouseleave={() => {
+										hoverCardHovering = false;
+										scheduleHoverHide();
+									}}
+								>
+									<div class="hover-card-head">
+										<div>
+											<div class="hover-card-title">Name</div>
+											<div class="hover-card-value strong">{hoveredNode.label}</div>
+										</div>
+										<div
+											class:active={hoveredNode.id === selectedNodeId}
+											class="hover-selected-pill"
+										>
+											{hoveredNode.id === selectedNodeId ? 'Selected' : 'Hover'}
+										</div>
+									</div>
+									<div class="hover-card-row">
+										<span>Path</span>
+										<strong>{hoveredNode.categoryPath}</strong>
+									</div>
+									<div class="hover-card-row">
+										<span>Description</span>
+										<strong>{hoveredNode.metadata.desc || '—'}</strong>
+									</div>
+									<div class="hover-card-row compact">
+										<div>
+											<span>Summaries</span>
+											<strong>{hoveredNode.summaryIds.length}</strong>
+										</div>
+										<div>
+											<span>Keywords</span>
+											<strong>{keywordText(hoveredNode.metadata.keywords)}</strong>
+										</div>
+									</div>
+									<div class="hover-toolbar">
+										<button
+											type="button"
+											class="toolbar-btn primary"
+											onclick={() => runHoverAction('show-summaries', hoveredNode)}>Show</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('toggle-expand', hoveredNode)}
+										>
+											{hoveredNode.expanded ? 'Collapse' : 'Expand'}
+										</button>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('rename', hoveredNode)}>Rename</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('metadata', hoveredNode)}>Metadata</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('add', hoveredNode)}>Add</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('merge', hoveredNode)}>Merge</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('split', hoveredNode)}>Split</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn danger"
+											onclick={() => runHoverAction('delete', hoveredNode)}>Delete</button
+										>
+									</div>
+								</div>
+							{/if}
+
+							<div class="mini-map">
+								<div class="mini-map-head">
+									<span>Zoom Window</span>
+									<strong>{miniViewport.scale.toFixed(2)}x</strong>
+								</div>
+								<svg viewBox="0 0 100 100" class="mini-map-svg" aria-hidden="true">
+									{#each miniMapLayout.edges as edge}
+										<line
+											x1={edge.fromX * 100}
+											y1={edge.fromY * 100}
+											x2={edge.toX * 100}
+											y2={edge.toY * 100}
+											class="mini-map-edge"
+										/>
+									{/each}
+									{#each miniMapLayout.nodes as node}
+										<circle
+											cx={node.x * 100}
+											cy={node.y * 100}
+											r={node.selected ? 2.6 : 1.8}
+											class:selected={node.selected}
+											class="mini-map-node"
+										/>
+									{/each}
+									<rect
+										x={miniViewport.left * 100}
+										y={miniViewport.top * 100}
+										width={miniViewport.width * 100}
+										height={miniViewport.height * 100}
+										class="mini-map-viewport"
+									/>
+								</svg>
+							</div>
 						{/if}
 					</div>
 
@@ -428,26 +716,52 @@
 							<h3>{selectedNode.label}</h3>
 							<p class="path">{selectedNode.categoryPath}</p>
 							<div class="meta-grid">
-								<div><span>Confidence</span><strong>{selectedNode.metadata.confidence}</strong></div>
+								<div>
+									<span>Confidence</span><strong>{selectedNode.metadata.confidence}</strong>
+								</div>
 								<div><span>Children</span><strong>{selectedNode.childIds.length}</strong></div>
 								<div><span>Summaries</span><strong>{selectedNode.summaryIds.length}</strong></div>
-								<div><span>Keywords</span><strong>{keywordText(selectedNode.metadata.keywords)}</strong></div>
+								<div>
+									<span>Keywords</span><strong>{keywordText(selectedNode.metadata.keywords)}</strong
+									>
+								</div>
 							</div>
 							<div class="action-grid action-grid-top">
-								<button type="button" onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}>
+								<button
+									type="button"
+									onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}
+								>
 									{selectedNode.expanded ? 'Collapse' : 'Expand'}
 								</button>
-								<button type="button" class="accent-action" onclick={() => showSummaries(selectedNode)}>
+								<button
+									type="button"
+									class="accent-action"
+									onclick={() => showSummaries(selectedNode)}
+								>
 									Show Summaries
 								</button>
 							</div>
 							<div class="action-grid">
-								<button type="button" onclick={() => openDialog('rename', selectedNode.id)}>Rename</button>
-								<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}>Edit Metadata</button>
-								<button type="button" onclick={() => openDialog('add', selectedNode.id)}>Add Node</button>
-								<button type="button" onclick={() => openDialog('merge', selectedNode.id)}>Merge</button>
-								<button type="button" onclick={() => openDialog('split', selectedNode.id)}>Split</button>
-								<button type="button" class="danger" onclick={() => openDialog('delete', selectedNode.id)}>Delete</button>
+								<button type="button" onclick={() => openDialog('rename', selectedNode.id)}
+									>Rename</button
+								>
+								<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}
+									>Edit Metadata</button
+								>
+								<button type="button" onclick={() => openDialog('add', selectedNode.id)}
+									>Add Node</button
+								>
+								<button type="button" onclick={() => openDialog('merge', selectedNode.id)}
+									>Merge</button
+								>
+								<button type="button" onclick={() => openDialog('split', selectedNode.id)}
+									>Split</button
+								>
+								<button
+									type="button"
+									class="danger"
+									onclick={() => openDialog('delete', selectedNode.id)}>Delete</button
+								>
 							</div>
 						{:else}
 							<div class="empty-state">Select a category node to inspect and edit it.</div>
@@ -629,8 +943,161 @@
 	}
 
 	.graph-stage {
+		position: relative;
 		overflow: hidden;
 		padding: 0.85rem 0.75rem 0.75rem;
+	}
+
+	.hover-card {
+		position: absolute;
+		z-index: 12;
+		width: min(320px, calc(100% - 2rem));
+		border-radius: 18px;
+		border: 1px solid rgba(129, 140, 248, 0.2);
+		background: rgba(15, 23, 42, 0.94);
+		box-shadow: 0 20px 48px rgba(2, 6, 23, 0.38);
+		backdrop-filter: blur(12px);
+		padding: 0.9rem;
+	}
+
+	.hover-card-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin-bottom: 0.7rem;
+	}
+
+	.hover-card-title,
+	.hover-card-row span,
+	.mini-map-head span {
+		font-size: 0.68rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+
+	.hover-card-value,
+	.hover-card-row strong {
+		display: block;
+		margin-top: 0.2rem;
+		font-size: 0.84rem;
+		line-height: 1.4;
+	}
+
+	.hover-card-value.strong {
+		font-size: 0.98rem;
+		font-weight: 700;
+		color: var(--text);
+	}
+
+	.hover-selected-pill {
+		border-radius: 999px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		padding: 0.3rem 0.6rem;
+		font-size: 0.7rem;
+		color: var(--muted);
+	}
+
+	.hover-selected-pill.active {
+		border-color: rgba(129, 140, 248, 0.36);
+		background: rgba(99, 102, 241, 0.18);
+		color: #e0e7ff;
+	}
+
+	.hover-card-row {
+		margin-bottom: 0.65rem;
+	}
+
+	.hover-card-row.compact {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem;
+	}
+
+	.hover-toolbar {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.5rem;
+		margin-top: 0.35rem;
+	}
+
+	.toolbar-btn {
+		border-radius: 10px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		background: rgba(15, 23, 42, 0.7);
+		padding: 0.48rem 0.5rem;
+		font-size: 0.73rem;
+		color: var(--text);
+		cursor: pointer;
+	}
+
+	.toolbar-btn.primary {
+		border-color: rgba(129, 140, 248, 0.32);
+		background: rgba(99, 102, 241, 0.18);
+		color: #e0e7ff;
+	}
+
+	.toolbar-btn.danger {
+		border-color: rgba(248, 113, 113, 0.28);
+		color: #fca5a5;
+	}
+
+	.mini-map {
+		position: absolute;
+		right: 1rem;
+		bottom: 1rem;
+		z-index: 10;
+		width: 220px;
+		border-radius: 18px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		background: rgba(15, 23, 42, 0.92);
+		box-shadow: 0 18px 42px rgba(2, 6, 23, 0.28);
+		padding: 0.75rem;
+		backdrop-filter: blur(10px);
+	}
+
+	.mini-map-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.5rem;
+	}
+
+	.mini-map-head strong {
+		font-size: 0.78rem;
+		color: var(--text);
+	}
+
+	.mini-map-svg {
+		display: block;
+		width: 100%;
+		height: 120px;
+		border-radius: 12px;
+		background:
+			radial-gradient(circle at top left, rgba(129, 140, 248, 0.12), transparent 48%),
+			rgba(2, 6, 23, 0.34);
+	}
+
+	.mini-map-edge {
+		stroke: rgba(148, 163, 184, 0.32);
+		stroke-width: 1.2;
+	}
+
+	.mini-map-node {
+		fill: rgba(226, 232, 240, 0.86);
+	}
+
+	.mini-map-node.selected {
+		fill: #818cf8;
+	}
+
+	.mini-map-viewport {
+		fill: rgba(129, 140, 248, 0.08);
+		stroke: rgba(129, 140, 248, 0.92);
+		stroke-width: 1.2;
+		rx: 4;
 	}
 
 	.path,
@@ -717,6 +1184,14 @@
 	@media (max-width: 980px) {
 		.graph-workspace {
 			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.mini-map {
+			width: 180px;
+		}
+
+		.hover-toolbar {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 	}
 </style>
