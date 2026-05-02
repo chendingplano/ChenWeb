@@ -1,9 +1,0 @@
-{"type":"server-started","port":53769,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:53769","screen_dir":"/Users/cding/Workspace/ChenWeb/.superpowers/brainstorm/40100-1773412052"}
-{"type":"screen-added","file":"/Users/cding/Workspace/ChenWeb/.superpowers/brainstorm/40100-1773412052/canvas-layout.html"}
-{"type":"screen-added","file":"/Users/cding/Workspace/ChenWeb/.superpowers/brainstorm/40100-1773412052/edge-style.html"}
-{"type":"screen-added","file":"/Users/cding/Workspace/ChenWeb/.superpowers/brainstorm/40100-1773412052/waiting-1.html"}
-{"type":"screen-added","file":"/Users/cding/Workspace/ChenWeb/.superpowers/brainstorm/40100-1773412052/approaches.html"}
-{"type":"screen-added","file":"/Users/cding/Workspace/ChenWeb/.superpowers/brainstorm/40100-1773412052/design-layout.html"}
-{"type":"screen-added","file":"/Users/cding/Workspace/ChenWeb/.superpowers/brainstorm/40100-1773412052/design-flow-picker.html"}
-{"type":"screen-added","file":"/Users/cding/Workspace/ChenWeb/.superpowers/brainstorm/40100-1773412052/design-components.html"}
-{"type":"server-stopped","reason":"idle timeout"}

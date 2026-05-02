@@ -1,0 +1,156 @@
+1. :root
+--------
+This is the topmost scope. <html> will select :root.
+It is used to define global CSS attributes. Use it with care.
+  - Globally shared attributes only
+  - Loaded once in app or in a +layout.svelte
+
+2. How Theme Works
+------------------
+Below is an example:
+    :root {
+      --color-bg: #fff;
+      --color-text: #000;
+    }
+
+    :root[data-theme="dark"] {
+      --color-bg: #111;
+      --color-text: #eee;
+    }
+
+'data-theme' is an attribute selector. It matches an HTML with a CSS 'data-theme' 
+attribute:
+    <html data-theme="dark">
+
+3. What is []
+-------------
+[] denotes Attribute Selector. In the above example:
+    - :root selects <html> dom
+    - [data-theme="dark"] selects <html> dom with the attribute data-theme="dark".
+
+You may also use class (CSS class), such as:
+
+4. What Is Design Tokens
+------------------------
+First, what is not a design token? Styles are not design tokens because it is 
+an entire style. Design tokens are specific attributes.
+  .cancel-btn,
+  .submit-btn {
+    padding: 12px 30px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: all 0.3s;
+  }
+
+Design tokens represent single design decisions:
+    :root {
+      --space-md: 12px;
+      --space-lg: 30px;
+      --border-radius-sm: 4px;
+      --transition-default: all 0.3s;
+      --font-size-sm: 0.9em;
+      --color-button-bg: #e0e0e0;
+      --color-button-text: #333;
+    }
+
+Styles then use these tokens:
+    .form-button {
+      padding: var(--space-md) var(--space-lg);
+      border: none;
+      border-radius: var(--border-radius-sm);
+      cursor: pointer;
+      font-size: var(--font-size-sm);
+      transition: var(--transition-default);
+    }
+
+5. Shared Styles
+----------------
+  - Use design tokens to share common attributes
+  - Use shared styles, which uses design tokens
+
+6. # Sign
+---------
+# sign selects any element with the specified id.
+    #month-year {
+      font-weight: bold;
+      font-size: 20px;
+    }
+
+In the above example, it selects any element whose id = 'month-year', regardless
+of where it appears.
+
+7. :has()
+---------
+    div:has(> #month-year) {
+      font-weight: bold;
+      font-size: 20px;
+    }
+
+The above means: it selects a div that directly contains an element whose ID is '#month-year'.
+'directly' means the element is the div's direct child, not a nested child.
+
+The symbol '>' means 'direct'
+
+8. :has() + #
+-------------
+    div:has(> #month-year) #month-year {
+      font-weight: bold;
+      font-size: 20px;
+    }
+
+The selector 'div:has(> #month-year)' selects the div (i.e., the parent).
+'#month-year' selects the child. Together, it selects an element that is
+a direct child of a div and its ID="#month-year".
+
+9. Custom Property
+------------------
+Any property whose name starts with '--' is a custom property. You can define
+and reference through var().
+  .calendar {
+    --calendar-width: 300px;
+    --calendar-height: 360px;
+
+    width: var(--calendar-width);
+    height: var(--calendar-height);
+    background-color: #111111;
+    border-radius: 10px;
+    box-shadow: 0 0 30px #222222;
+    overflow: hidden;
+    color: white;
+    display: flex;
+    flex-direction: column;
+  }
+
+In the above example, '--calendar-width' and '--calendar-height' are two custom
+properties. They can be set through code:
+    $effect(() => {
+      if (monthYearEl?.parentElement?.parentElement) {
+        const root = monthYearEl.parentElement.parentElement; // .calendar
+        root.style.setProperty('--calendar-width', `${width}px`);
+        root.style.setProperty('--calendar-height', `${height}px`);
+      }
+    });
+
+The above sets the properties '--calendar-width' and '--calendar-height' through
+variables 'width' and 'height' (props)
+
+10. flex: 1
+-----------
+flex: 1 is used to let the elements with flex: 1 share the remaining vertical space.
+
+Example:
+  <div>
+    <div class"A">Hello World 01</div>
+    <div class"B">Hello World 02</div>
+    <div class"C">Hello World 03</div>
+  </div>
+
+  <style>
+    .A {background:red}
+    .B {background:blue flex:1}
+    .C {background:yellow flex:1}
+  </style>
+
+  A will take just enough space. B and C will share the remaining vertical spaces evenly.
