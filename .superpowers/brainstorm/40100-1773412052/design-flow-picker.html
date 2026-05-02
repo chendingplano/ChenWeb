@@ -1,0 +1,122 @@
+<h2>Design: Flow Picker Modal</h2>
+<p class="subtitle">Section 2 of 4 — Appears on canvas load when no default flow is set; also reachable from the toolbar flow name dropdown</p>
+
+<div class="mockup" style="max-width:780px;margin:0 auto;">
+  <div class="mockup-header">Flow Picker — shown on top of the canvas</div>
+  <div class="mockup-body" style="background:#0d1117;padding:24px;display:flex;align-items:center;justify-content:center;min-height:480px;">
+
+    <!-- Modal -->
+    <div style="background:#111827;border:1px solid #1e2a3a;border-radius:12px;width:680px;box-shadow:0 24px 64px rgba(0,0,0,0.7);overflow:hidden;">
+
+      <!-- Modal header -->
+      <div style="padding:16px 20px;border-bottom:1px solid #1e2a3a;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-size:14px;color:#e2e8f0;font-weight:500;">Open a Flow</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:2px;">Select an existing flow, start from a template, or open a blank canvas</div>
+        </div>
+        <div style="font-size:12px;color:#4b5563;cursor:pointer;">✕</div>
+      </div>
+
+      <!-- Tabs -->
+      <div style="display:flex;border-bottom:1px solid #1e2a3a;padding:0 20px;">
+        <div style="padding:10px 16px;font-size:11px;color:#6366f1;border-bottom:2px solid #6366f1;cursor:pointer;">My Flows</div>
+        <div style="padding:10px 16px;font-size:11px;color:#6b7280;cursor:pointer;">Shared Flows</div>
+        <div style="padding:10px 16px;font-size:11px;color:#6b7280;cursor:pointer;">Templates</div>
+      </div>
+
+      <!-- Search + actions bar -->
+      <div style="padding:12px 20px;display:flex;gap:8px;align-items:center;">
+        <input style="flex:1;background:#1e2535;border:1px solid #374151;border-radius:6px;padding:6px 12px;font-size:11px;color:#94a3b8;" placeholder="Search flows...">
+        <div style="background:#6366f1;border-radius:6px;padding:6px 12px;font-size:11px;color:white;cursor:pointer;white-space:nowrap;">+ New Empty Flow</div>
+      </div>
+
+      <!-- Flow grid -->
+      <div style="padding:0 20px 20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+
+        <!-- Default flow card (star) -->
+        <div style="background:#1a1f2e;border:2px solid #6366f1;border-radius:8px;padding:12px;cursor:pointer;position:relative;">
+          <div style="position:absolute;top:8px;right:8px;font-size:10px;color:#fbbf24;">★ default</div>
+          <div style="width:100%;height:60px;background:#0d1117;border-radius:4px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+            <!-- mini canvas preview -->
+            <svg width="120" height="50" viewBox="0 0 120 50">
+              <rect x="5" y="15" width="40" height="20" rx="3" fill="#1e2535" stroke="#374151" stroke-width="0.5"/>
+              <text x="25" y="28" text-anchor="middle" fill="#94a3b8" font-size="6">Text</text>
+              <circle cx="45" cy="25" r="3" fill="#6366f1"/>
+              <path d="M48 25 C 65 25, 65 25, 72 25" stroke="#6366f1" stroke-width="1.5" fill="none"/>
+              <rect x="72" y="15" width="44" height="20" rx="3" fill="#1e2535" stroke="#6366f1" stroke-width="0.5"/>
+              <text x="94" y="28" text-anchor="middle" fill="#e2e8f0" font-size="6">AI Asst.</text>
+              <circle cx="72" cy="25" r="3" fill="#818cf8"/>
+            </svg>
+          </div>
+          <div style="font-size:11px;color:#e2e8f0;margin-bottom:3px;">Data Pipeline v1</div>
+          <div style="font-size:9px;color:#6b7280;">3 nodes · edited 2h ago</div>
+          <div style="font-size:9px;color:#6b7280;margin-top:2px;">🔒 Private</div>
+        </div>
+
+        <!-- Regular flow card -->
+        <div style="background:#161b27;border:1px solid #1e2a3a;border-radius:8px;padding:12px;cursor:pointer;">
+          <div style="width:100%;height:60px;background:#0d1117;border-radius:4px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;">
+            <svg width="120" height="50" viewBox="0 0 120 50">
+              <rect x="5" y="5" width="35" height="18" rx="3" fill="#1e2535" stroke="#374151" stroke-width="0.5"/>
+              <text x="22" y="17" text-anchor="middle" fill="#94a3b8" font-size="6">File</text>
+              <rect x="5" y="28" width="35" height="18" rx="3" fill="#1e2535" stroke="#374151" stroke-width="0.5"/>
+              <text x="22" y="40" text-anchor="middle" fill="#94a3b8" font-size="6">HTTP</text>
+              <circle cx="40" cy="14" r="3" fill="#6366f1"/>
+              <circle cx="40" cy="37" r="3" fill="#6366f1"/>
+              <path d="M43 14 C 60 14, 60 25, 77 25" stroke="#6366f1" stroke-width="1.5" fill="none"/>
+              <path d="M43 37 C 60 37, 60 25, 77 25" stroke="#6366f1" stroke-width="1.5" fill="none"/>
+              <rect x="77" y="15" width="40" height="20" rx="3" fill="#1e2535" stroke="#374151" stroke-width="0.5"/>
+              <text x="97" y="28" text-anchor="middle" fill="#94a3b8" font-size="6">AI Asst.</text>
+            </svg>
+          </div>
+          <div style="font-size:11px;color:#e2e8f0;margin-bottom:3px;">Doc Summarizer</div>
+          <div style="font-size:9px;color:#6b7280;">5 nodes · edited yesterday</div>
+          <div style="font-size:9px;color:#22c55e;margin-top:2px;">🌐 Shared</div>
+        </div>
+
+        <!-- Another flow card -->
+        <div style="background:#161b27;border:1px solid #1e2a3a;border-radius:8px;padding:12px;cursor:pointer;">
+          <div style="width:100%;height:60px;background:#0d1117;border-radius:4px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;">
+            <svg width="120" height="50" viewBox="0 0 120 50">
+              <rect x="10" y="15" width="35" height="20" rx="3" fill="#1e2535" stroke="#374151" stroke-width="0.5"/>
+              <text x="27" y="28" text-anchor="middle" fill="#94a3b8" font-size="6">Rule</text>
+              <circle cx="45" cy="25" r="3" fill="#6366f1"/>
+              <path d="M48 25 C 62 10, 62 10, 75 10" stroke="#6366f1" stroke-width="1.5" fill="none"/>
+              <path d="M48 25 C 62 40, 62 40, 75 40" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="3,2"/>
+              <rect x="75" y="5" width="38" height="14" rx="3" fill="#1e2535" stroke="#374151" stroke-width="0.5"/>
+              <rect x="75" y="33" width="38" height="14" rx="3" fill="#1e2535" stroke="#374151" stroke-width="0.5"/>
+              <text x="94" y="14" text-anchor="middle" fill="#94a3b8" font-size="6">Tool A</text>
+              <text x="94" y="42" text-anchor="middle" fill="#94a3b8" font-size="6">Tool B</text>
+            </svg>
+          </div>
+          <div style="font-size:11px;color:#e2e8f0;margin-bottom:3px;">Routing Logic</div>
+          <div style="font-size:9px;color:#6b7280;">4 nodes · 3 days ago</div>
+          <div style="font-size:9px;color:#6b7280;margin-top:2px;">🔒 Private</div>
+        </div>
+
+      </div>
+
+      <!-- Footer -->
+      <div style="padding:12px 20px;border-top:1px solid #1e2a3a;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:10px;color:#4b5563;">Tip: click a flow to open it · right-click for options (set default, save as template, delete)</div>
+        <div style="display:flex;gap:8px;">
+          <div style="background:#1e2535;border-radius:6px;padding:5px 12px;font-size:11px;color:#94a3b8;cursor:pointer;">Cancel</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px;">
+  <h3>Flow Picker behaviour</h3>
+  <ul>
+    <li><strong>On canvas open:</strong> if user has a default flow → load it immediately, skip picker. Otherwise → show picker.</li>
+    <li><strong>Tabs:</strong> My Flows (owned), Shared Flows (shared by others), Templates.</li>
+    <li><strong>Card thumbnail:</strong> mini SVG preview of the flow graph stored in the flow record.</li>
+    <li><strong>Right-click / context menu on card:</strong> Open · Set as default · Save as template · Duplicate · Delete.</li>
+    <li><strong>Toolbar flow-name dropdown:</strong> re-opens picker to switch flows without leaving the canvas.</li>
+    <li><strong>Templates tab:</strong> same card layout, but cards show a "Use template" button — creates a new flow forked from the template.</li>
+  </ul>
+</div>
+<p class="subtitle" style="text-align:center;">Does this look right?</p>

@@ -1,0 +1,79 @@
+
+## Summary
+This processor analyzes document structure line by line and outputs corrected structure labels.
+
+## Input File
+The input file is a sequence of lines with the following format:
+
+<line_number>\t<page_number>\t<line_type>\t<font>\t<font_size>\t<coordinate>\t<content>
+
+- Delimiter is TAB (`\t`) only.
+- Each line contains exactly 6 TAB delimiters (7 fields).
+- Space-separated variants are invalid.
+- Additional fields are invalid.
+- Missing fields are invalid.
+
+The processor preserves the original input line type and adds:
+- `corrected_line_type`
+- `confidence`
+- `reason`
+
+## Classification Taxonomy
+Allowed `corrected_line_type` values:
+- `heading-1`, `heading-2`, `heading-3`, ... (no fixed upper bound)
+- `paragraph`
+- `list-item`
+- `table`
+- `formula`
+- `toc`
+- `footer`
+- `cover`
+- `other`
+
+Notes:
+- Heading labels are encoded as `heading-N` (not `heading` + separate level).
+- List subtype detection may be used internally for decision quality, but output label remains `list-item`.
+
+## Processing Rules
+2. Fail fast on malformed lines.
+3. Build structural context using neighboring lines/pages and numbering continuity.
+4. Disambiguate headings vs list items using hybrid signals:
+   - deterministic pre-signals (numbering pattern, punctuation, coordinate, font/font_size, original line_type)
+   - local and cross-page context
+   - LLM semantic decision
+5. Detect cover pages at page level and output `cover_pages`.
+6. Apply line-level labels for all lines, including `cover` where appropriate.
+7. Best-effort uncertainty handling:
+   - uncertain lines still receive valid labels
+   - uncertainty lowers `confidence`
+   - uncertainty alone MUST NOT fail a run
+
+### Heading vs List Disambiguation
+Heading candidate indicators:
+- hierarchical numbering (`N`, `N.M`, `N.M.K`)
+- numbering continuity with nearby section lines
+- short/title-like content
+- followed by body text or deeper subsection
+
+List-item candidate indicators:
+- enumerators (`1`, `1)`, `a`, `b`, symbols)
+- sibling sequence nearby
+- parent intro text such as "按下列", "如下:", "following:"
+- sentence-like requirement content
+
+Mandatory tie-break:
+- if single-number prefix is ambiguous, prefer `list-item` when sibling sequence exists
+- otherwise prefer `heading-1` only when section-boundary behavior is clear
+
+Heading level assignment:
+- `3 xxx` -> `heading-1`
+- `3.1 xxx` -> `heading-2`
+- `3.1.1 xxx` -> `heading-3`
+- spaced numbering like `3. 1. 2` must be normalized before level inference
+
+## Output
+LLM output must be strict in the following format:
+cover_pages: [page-number...]
+<line_number>\t<original_line_type>\t<corrected_line_type>\t<confidence>\t<reason>
+
+IMPORTANT: only output the lines whose line_type needs to be corrected.
