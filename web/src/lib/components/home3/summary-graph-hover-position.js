@@ -11,6 +11,10 @@
  *   nodeHeight?: number;
  *   margin?: number;
  *   gap?: number;
+ *   gapLeftX?: number;
+ *   gapRightX?: number;
+ *   gapTopY?: number;
+ *   gapBelowY?: number;
  *   debug?: boolean;
  * }} HoverCardPlacementInput
  */
@@ -46,14 +50,18 @@ export function computeHoverCardPosition(input) {
 		nodeHeight,
 		margin = 16,
 		gap = 10,
+		gapLeftX = -30,
+		gapRightX = 95,
+		gapTopY = 0,
+		gapBelowY = 70,
 		debug = false
 	} = input;
 
 	const safeGap = Math.max(0, gap);
-	const safeGapLeftX = -30;
-	const safeGapRightX = 95;
-	const safeGapTopY = 0;
-	const safeGapBelowY = 70;
+	const safeGapLeftX = gapLeftX;
+	const safeGapRightX = gapRightX;
+	const safeGapTopY = gapTopY;
+	const safeGapBelowY = gapBelowY;
 	const clampedCardWidth = Math.max(220, Math.min(cardWidth, stageWidth - margin * 2));
 	const clampedCardHeight = Math.max(160, Math.min(cardHeight, stageHeight - margin * 2));
 	const nodeHalfWidth = Math.max(0, Number(nodeWidth ?? nodeRadius * 2)) / 2;
@@ -82,7 +90,23 @@ export function computeHoverCardPosition(input) {
 		if (debug) {
 			console.debug('[summary-hover-placement]', {
 				decision,
-				input: { nodeX, nodeY, nodeRadius, nodeWidth, nodeHeight, stageWidth, stageHeight, cardWidth, cardHeight, margin, gap },
+				input: {
+					nodeX,
+					nodeY,
+					nodeRadius,
+					nodeWidth,
+					nodeHeight,
+					stageWidth,
+					stageHeight,
+					cardWidth,
+					cardHeight,
+					margin,
+					gap,
+					gapLeftX,
+					gapRightX,
+					gapTopY,
+					gapBelowY
+				},
 				derived: {
 					safeGap,
 					clampedCardWidth,

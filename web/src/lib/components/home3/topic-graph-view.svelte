@@ -24,6 +24,7 @@
 	import TopicGraphTabs from './topic-graph-tabs.svelte';
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
 	import { getTopicCategory, listTopicGraph } from '$lib/services/kbService';
+	import type { SummaryCategoryNode } from './summary-types';
 	import type {
 		TopicCategoryNode,
 		TopicCategoryTab as TopicCategoryTabType,
@@ -39,6 +40,10 @@
 	type MiniMapNode = { id: string; x: number; y: number; selected: boolean };
 	type MiniMapEdge = { fromX: number; fromY: number; toX: number; toY: number };
 	type MiniMapLayout = { nodes: MiniMapNode[]; edges: MiniMapEdge[] };
+	const TOPIC_HOVER_GAP_LEFT_X = -30;
+	const TOPIC_HOVER_GAP_RIGHT_X = 95;
+	const TOPIC_HOVER_GAP_TOP_Y = 0;
+	const TOPIC_HOVER_GAP_BELOW_Y = 70;
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -81,6 +86,24 @@
 	let hoveredNode = $derived(nodes.find((node) => node.id === hoveredNodeId) ?? null);
 	let activeTab = $derived(tabs.find((tab) => tab.id === activeTabId) ?? tabs[0]);
 	let miniMapLayout = $derived.by((): MiniMapLayout => buildMiniMapLayout());
+	let dialogNode = $derived(selectedNode ? toSummaryDialogNode(selectedNode) : null);
+	let dialogAvailableNodes = $derived(nodes.map(toSummaryDialogNode));
+
+	function toSummaryDialogNode(node: TopicCategoryNode): SummaryCategoryNode {
+		return {
+			id: node.id,
+			categoryPath: node.categoryPath,
+			label: node.label,
+			metadata: {
+				...node.metadata,
+				category_type: ''
+			},
+			childIds: node.childIds,
+			summaryIds: node.topicIds,
+			hasSummariesFile: node.hasTopicsFile,
+			expanded: node.expanded
+		};
+	}
 
 	function openDialog(mode: DialogMode, nodeId: string) {
 		selectedNodeId = nodeId;
@@ -150,9 +173,7 @@
 			}
 		} catch (error) {
 			loadError =
-				error instanceof Error
-					? error.message
-					: `Failed to load topics for ${node.categoryPath}`;
+				error instanceof Error ? error.message : `Failed to load topics for ${node.categoryPath}`;
 			errorDialogOpen = true;
 		} finally {
 			categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: false };
@@ -274,8 +295,13 @@
 			cardWidth,
 			cardHeight,
 			gap: 5,
+			gapLeftX: TOPIC_HOVER_GAP_LEFT_X,
+			gapRightX: TOPIC_HOVER_GAP_RIGHT_X,
+			gapTopY: TOPIC_HOVER_GAP_TOP_Y,
+			gapBelowY: TOPIC_HOVER_GAP_BELOW_Y,
 			debug: true
 		});
+		/*
 		console.debug('[topic-hover-placeHoverCardNearNode]', {
 			nodeX,
 			nodeY,
@@ -287,6 +313,7 @@
 			cardHeight,
 			hoverCardPos
 		});
+		*/
 	}
 
 	function normalizeChartPointToStage(
@@ -313,6 +340,7 @@
 				? globalAdjustedPoint
 				: directPoint
 			: globalAdjustedPoint;
+		/*
 		console.debug('[topic-hover-coordinate]', {
 			globalX,
 			globalY,
@@ -330,10 +358,15 @@
 			chosenSource: localPoint === globalAdjustedPoint ? 'global-adjusted' : 'direct-local',
 			localPoint
 		});
+		*/
 		return localPoint;
 	}
 
-	function getHoveredNodePixel(event: any, referenceX?: number, referenceY?: number): { x: number; y: number } | null {
+	function getHoveredNodePixel(
+		event: any,
+		referenceX?: number,
+		referenceY?: number
+	): { x: number; y: number } | null {
 		const dataIndex = Number(event?.dataIndex);
 		if (!chartApi || !Number.isFinite(dataIndex) || dataIndex < 0) return null;
 
@@ -382,16 +415,11 @@
 			const reconciledNodePixel =
 				Number.isFinite(nativeX) && Number.isFinite(nativeY)
 					? {
-							x:
-								Math.abs(nodePixel.x - nativeX) > nodeDimensions.width
-									? nativeX
-									: nodePixel.x,
-							y:
-								Math.abs(nodePixel.y - nativeY) > nodeDimensions.height
-									? nativeY
-									: nodePixel.y
+							x: Math.abs(nodePixel.x - nativeX) > nodeDimensions.width ? nativeX : nodePixel.x,
+							y: Math.abs(nodePixel.y - nativeY) > nodeDimensions.height ? nativeY : nodePixel.y
 						}
 					: nodePixel;
+			/*
 			console.debug('[topic-hover-anchor]', {
 				source: 'chart-layout',
 				nodeId,
@@ -403,6 +431,7 @@
 					Number.isFinite(nativeX) && Number.isFinite(nativeY) ? { x: nativeX, y: nativeY } : null,
 				rawSymbolSize: event?.data?.symbolSize
 			});
+			*/
 			placeHoverCardNearNode(
 				reconciledNodePixel.x,
 				reconciledNodePixel.y,
@@ -413,6 +442,7 @@
 		}
 		const fallbackX = Number(nativeEvent?.offsetX ?? 48);
 		const fallbackY = Number(nativeEvent?.offsetY ?? 48);
+		/*
 		console.debug('[topic-hover-anchor]', {
 			source: 'fallback-native-offset',
 			nodeId,
@@ -422,6 +452,7 @@
 			nodeDimensions,
 			rawSymbolSize: event?.data?.symbolSize
 		});
+		*/
 		placeHoverCardNearNode(fallbackX, fallbackY, nodeRadius, nodeDimensions);
 	}
 
@@ -549,8 +580,12 @@
 			symbolSize: [160, 64],
 			itemStyle: {
 				color: isSelected
-					? darkMode ? 'rgba(13,148,136,0.7)' : 'rgba(22,163,74,0.15)'
-					: darkMode ? 'rgba(15,23,42,0.85)' : 'rgba(241,245,249,0.9)',
+					? darkMode
+						? 'rgba(13,148,136,0.7)'
+						: 'rgba(22,163,74,0.15)'
+					: darkMode
+						? 'rgba(15,23,42,0.85)'
+						: 'rgba(241,245,249,0.9)',
 				borderColor: isSelected ? warm : accent,
 				borderWidth: isSelected ? 2 : 1,
 				borderRadius: 10,
@@ -654,8 +689,8 @@
 	<SummaryNodeDialog
 		bind:open={dialogOpen}
 		mode={dialogMode}
-		node={selectedNode ? { ...selectedNode, summaryIds: (selectedNode as any).topicIds ?? [], metadata: { ...selectedNode.metadata, category_type: '' } } : null}
-		availableNodes={nodes.map((n) => ({ ...n, summaryIds: (n as any).topicIds ?? [], metadata: { ...n.metadata, category_type: '' } }))}
+		node={dialogNode}
+		availableNodes={dialogAvailableNodes}
 		onConfirm={applyDialog}
 	/>
 
@@ -665,7 +700,9 @@
 			role="presentation"
 			tabindex="-1"
 			onclick={() => (errorDialogOpen = false)}
-			onkeydown={(event) => { if (event.key === 'Escape') errorDialogOpen = false; }}
+			onkeydown={(event) => {
+				if (event.key === 'Escape') errorDialogOpen = false;
+			}}
 		>
 			<div
 				class="error-dialog"
@@ -680,8 +717,17 @@
 				<h3>Could not load Semantic Web</h3>
 				<p class="dialog-copy">{loadError}</p>
 				<div class="dialog-actions">
-					<button type="button" class="secondary-btn" onclick={() => (errorDialogOpen = false)}>Close</button>
-					<button type="button" class="primary-btn" onclick={async () => { errorDialogOpen = false; await loadGraph(); }}>Try Again</button>
+					<button type="button" class="secondary-btn" onclick={() => (errorDialogOpen = false)}
+						>Close</button
+					>
+					<button
+						type="button"
+						class="primary-btn"
+						onclick={async () => {
+							errorDialogOpen = false;
+							await loadGraph();
+						}}>Try Again</button
+					>
 				</div>
 			</div>
 		</div>
@@ -696,7 +742,9 @@
 		<div class="hero-stats">
 			<div><span>Nodes</span><strong>{nodes.length}</strong></div>
 			<div><span>Tabs</span><strong>{tabs.length}</strong></div>
-			<div><span>Topics</span><strong>{nodes.reduce((s, n) => s + n.topicIds.length, 0)}</strong></div>
+			<div>
+				<span>Topics</span><strong>{nodes.reduce((s, n) => s + n.topicIds.length, 0)}</strong>
+			</div>
 		</div>
 	</div>
 
@@ -738,7 +786,9 @@
 								onrendered={syncMiniViewport}
 								onfinished={syncMiniViewport}
 								onmouseover={(event: any) => updateHoverNode(event)}
-								onmousemove={(event: any) => { if (event?.data?.id) updateHoverNode(event); }}
+								onmousemove={(event: any) => {
+									if (event?.data?.id) updateHoverNode(event);
+								}}
 								onmouseout={() => scheduleHoverHide()}
 								onglobalout={() => scheduleHoverHide()}
 								onclick={(event: any) => {
@@ -756,21 +806,30 @@
 								}}
 							/>
 
-								{#if hoveredNode}
-									<div
-										bind:this={hoverCardEl}
-										class="hover-card"
+							{#if hoveredNode}
+								<div
+									bind:this={hoverCardEl}
+									class="hover-card"
 									role="presentation"
 									style={`left:${hoverCardPos.x}px; top:${hoverCardPos.y}px;`}
-									onmouseenter={() => { hoverCardHovering = true; clearHoverHideTimer(); }}
-									onmouseleave={() => { hoverCardHovering = false; scheduleHoverHide(); }}
+									onmouseenter={() => {
+										hoverCardHovering = true;
+										clearHoverHideTimer();
+									}}
+									onmouseleave={() => {
+										hoverCardHovering = false;
+										scheduleHoverHide();
+									}}
 								>
 									<div class="hover-card-head">
 										<div>
 											<div class="hover-card-title">Name</div>
 											<div class="hover-card-value strong">{hoveredNode.label}</div>
 										</div>
-										<div class:active={hoveredNode.id === selectedNodeId} class="hover-selected-pill">
+										<div
+											class:active={hoveredNode.id === selectedNodeId}
+											class="hover-selected-pill"
+										>
 											{hoveredNode.id === selectedNodeId ? 'Selected' : 'Hover'}
 										</div>
 									</div>
@@ -797,14 +856,51 @@
 										</div>
 									</div>
 									<div class="hover-toolbar">
-										<button type="button" class="toolbar-btn primary" disabled={!hoveredNode.hasTopicsFile} title={hoveredNode.hasTopicsFile ? undefined : 'No topics.txt file for this category'} onclick={() => runHoverAction('show-topics', hoveredNode)}>Show Topics</button>
-										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('toggle-expand', hoveredNode)}>{hoveredNode.expanded ? 'Collapse' : 'Expand'}</button>
-										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('rename', hoveredNode)}>Rename</button>
-										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('metadata', hoveredNode)}>Metadata</button>
-										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('add', hoveredNode)}>Add</button>
-										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('merge', hoveredNode)}>Merge</button>
-										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('split', hoveredNode)}>Split</button>
-										<button type="button" class="toolbar-btn danger" onclick={() => runHoverAction('delete', hoveredNode)}>Delete</button>
+										<button
+											type="button"
+											class="toolbar-btn primary"
+											disabled={!hoveredNode.hasTopicsFile}
+											title={hoveredNode.hasTopicsFile
+												? undefined
+												: 'No topics.txt file for this category'}
+											onclick={() => runHoverAction('show-topics', hoveredNode)}>Show Topics</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('toggle-expand', hoveredNode)}
+											>{hoveredNode.expanded ? 'Collapse' : 'Expand'}</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('rename', hoveredNode)}>Rename</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('metadata', hoveredNode)}>Metadata</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('add', hoveredNode)}>Add</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('merge', hoveredNode)}>Merge</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn"
+											onclick={() => runHoverAction('split', hoveredNode)}>Split</button
+										>
+										<button
+											type="button"
+											class="toolbar-btn danger"
+											onclick={() => runHoverAction('delete', hoveredNode)}>Delete</button
+										>
 									</div>
 								</div>
 							{/if}
@@ -816,7 +912,13 @@
 								</div>
 								<svg viewBox="0 0 100 100" class="mini-map-svg" aria-hidden="true">
 									{#each miniMapLayout.edges as edge}
-										<line x1={edge.fromX * 100} y1={edge.fromY * 100} x2={edge.toX * 100} y2={edge.toY * 100} class="mini-map-edge" />
+										<line
+											x1={edge.fromX * 100}
+											y1={edge.fromY * 100}
+											x2={edge.toX * 100}
+											y2={edge.toY * 100}
+											class="mini-map-edge"
+										/>
 									{/each}
 									{#each miniMapLayout.nodes as node}
 										<rect
@@ -829,7 +931,13 @@
 											class="mini-map-node"
 										/>
 									{/each}
-									<rect x={miniViewport.left * 100} y={miniViewport.top * 100} width={miniViewport.width * 100} height={miniViewport.height * 100} class="mini-map-viewport" />
+									<rect
+										x={miniViewport.left * 100}
+										y={miniViewport.top * 100}
+										width={miniViewport.width * 100}
+										height={miniViewport.height * 100}
+										class="mini-map-viewport"
+									/>
 								</svg>
 							</div>
 						{/if}
@@ -881,20 +989,45 @@
 									</div>
 								</div>
 								<div class="action-grid action-grid-top">
-									<button type="button" onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}>
+									<button
+										type="button"
+										onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}
+									>
 										{selectedNode.expanded ? 'Collapse' : 'Expand'}
 									</button>
-									<button type="button" class="accent-action" disabled={!selectedNode.hasTopicsFile} title={selectedNode.hasTopicsFile ? undefined : 'No topics.txt file for this category'} onclick={() => showTopics(selectedNode)}>
+									<button
+										type="button"
+										class="accent-action"
+										disabled={!selectedNode.hasTopicsFile}
+										title={selectedNode.hasTopicsFile
+											? undefined
+											: 'No topics.txt file for this category'}
+										onclick={() => showTopics(selectedNode)}
+									>
 										Show Topics
 									</button>
 								</div>
 								<div class="action-grid">
-									<button type="button" onclick={() => openDialog('rename', selectedNode.id)}>Rename</button>
-									<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}>Edit Metadata</button>
-									<button type="button" onclick={() => openDialog('add', selectedNode.id)}>Add Node</button>
-									<button type="button" onclick={() => openDialog('merge', selectedNode.id)}>Merge</button>
-									<button type="button" onclick={() => openDialog('split', selectedNode.id)}>Split</button>
-									<button type="button" class="danger" onclick={() => openDialog('delete', selectedNode.id)}>Delete</button>
+									<button type="button" onclick={() => openDialog('rename', selectedNode.id)}
+										>Rename</button
+									>
+									<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}
+										>Edit Metadata</button
+									>
+									<button type="button" onclick={() => openDialog('add', selectedNode.id)}
+										>Add Node</button
+									>
+									<button type="button" onclick={() => openDialog('merge', selectedNode.id)}
+										>Merge</button
+									>
+									<button type="button" onclick={() => openDialog('split', selectedNode.id)}
+										>Split</button
+									>
+									<button
+										type="button"
+										class="danger"
+										onclick={() => openDialog('delete', selectedNode.id)}>Delete</button
+									>
 								</div>
 							</div>
 						{:else}
@@ -937,7 +1070,10 @@
 		box-shadow: 0 30px 80px rgba(15, 23, 42, 0.5);
 	}
 
-	.dialog-copy { margin-top: 0.55rem; color: var(--muted); }
+	.dialog-copy {
+		margin-top: 0.55rem;
+		color: var(--muted);
+	}
 
 	.dialog-actions {
 		display: flex;
@@ -946,15 +1082,22 @@
 		margin-top: 1rem;
 	}
 
-	.primary-btn, .secondary-btn {
+	.primary-btn,
+	.secondary-btn {
 		border-radius: 12px;
 		padding: 0.72rem 1rem;
 		border: 1px solid rgba(148, 163, 184, 0.18);
 		cursor: pointer;
 	}
 
-	.primary-btn { background: var(--accent); color: #fff; }
-	.secondary-btn { background: rgba(15, 23, 42, 0.55); color: var(--text); }
+	.primary-btn {
+		background: var(--accent);
+		color: #fff;
+	}
+	.secondary-btn {
+		background: rgba(15, 23, 42, 0.55);
+		color: var(--text);
+	}
 
 	.hero {
 		display: flex;
@@ -978,9 +1121,20 @@
 		color: var(--muted);
 	}
 
-	h2, h3, p { margin: 0; }
-	h2 { margin-top: 0.3rem; font-size: 1.5rem; }
-	.hero p { margin-top: 0.45rem; max-width: 52rem; color: var(--muted); }
+	h2,
+	h3,
+	p {
+		margin: 0;
+	}
+	h2 {
+		margin-top: 0.3rem;
+		font-size: 1.5rem;
+	}
+	.hero p {
+		margin-top: 0.45rem;
+		max-width: 52rem;
+		color: var(--muted);
+	}
 
 	.hero-stats {
 		display: grid;
@@ -996,11 +1150,31 @@
 		padding: 0.75rem 0.9rem;
 	}
 
-	.hero-stats span { display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
-	.hero-stats strong { display: block; margin-top: 0.2rem; font-size: 1rem; }
+	.hero-stats span {
+		display: block;
+		font-size: 0.72rem;
+		color: var(--muted);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+	.hero-stats strong {
+		display: block;
+		margin-top: 0.2rem;
+		font-size: 1rem;
+	}
 
-	.tabbed-window { display: flex; min-height: 0; flex: 1; flex-direction: column; }
-	.tabbed-window-head { position: relative; z-index: 4; margin-bottom: -1px; padding-inline: 0.55rem; }
+	.tabbed-window {
+		display: flex;
+		min-height: 0;
+		flex: 1;
+		flex-direction: column;
+	}
+	.tabbed-window-head {
+		position: relative;
+		z-index: 4;
+		margin-bottom: -1px;
+		padding-inline: 0.55rem;
+	}
 	.tabbed-window-body {
 		display: flex;
 		min-height: 0;
@@ -1009,7 +1183,9 @@
 		border: 1px solid var(--border);
 		border-radius: 0 24px 24px 24px;
 		background: linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(15, 23, 42, 0.58));
-		box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 44px rgba(2,6,23,0.18);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.04),
+			0 18px 44px rgba(2, 6, 23, 0.18);
 		overflow: hidden;
 	}
 
@@ -1021,8 +1197,16 @@
 		gap: 0;
 	}
 
-	.graph-stage, .inspector { min-height: 0; background: transparent; }
-	.graph-stage { position: relative; overflow: hidden; padding: 0.85rem 0.75rem 0.75rem; }
+	.graph-stage,
+	.inspector {
+		min-height: 0;
+		background: transparent;
+	}
+	.graph-stage {
+		position: relative;
+		overflow: hidden;
+		padding: 0.85rem 0.75rem 0.75rem;
+	}
 
 	.hover-card {
 		position: absolute;
@@ -1047,9 +1231,13 @@
 
 	.hover-card-head > div:first-child,
 	.hover-card-row > strong,
-	.hover-card-row.compact > div { min-width: 0; }
+	.hover-card-row.compact > div {
+		min-width: 0;
+	}
 
-	.hover-card-title, .hover-card-row span, .mini-map-head span {
+	.hover-card-title,
+	.hover-card-row span,
+	.mini-map-head span {
 		font-size: 0.68rem;
 		font-weight: 700;
 		letter-spacing: 0.08em;
@@ -1057,7 +1245,8 @@
 		color: var(--muted);
 	}
 
-	.hover-card-value, .hover-card-row strong {
+	.hover-card-value,
+	.hover-card-row strong {
 		display: block;
 		margin-top: 0.2rem;
 		font-size: 0.84rem;
@@ -1068,7 +1257,11 @@
 		white-space: normal;
 	}
 
-	.hover-card-value.strong { font-size: 0.98rem; font-weight: 700; color: var(--text); }
+	.hover-card-value.strong {
+		font-size: 0.98rem;
+		font-weight: 700;
+		color: var(--text);
+	}
 
 	.hover-selected-pill {
 		border-radius: 999px;
@@ -1084,8 +1277,14 @@
 		color: #a7f3d0;
 	}
 
-	.hover-card-row { margin-bottom: 0.65rem; }
-	.hover-card-row.compact { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+	.hover-card-row {
+		margin-bottom: 0.65rem;
+	}
+	.hover-card-row.compact {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem;
+	}
 
 	.hover-toolbar {
 		display: grid;
@@ -1104,8 +1303,15 @@
 		cursor: pointer;
 	}
 
-	.toolbar-btn.primary { border-color: rgba(34, 197, 94, 0.32); background: rgba(13, 148, 136, 0.18); color: #a7f3d0; }
-	.toolbar-btn.danger { border-color: rgba(248, 113, 113, 0.28); color: #fca5a5; }
+	.toolbar-btn.primary {
+		border-color: rgba(34, 197, 94, 0.32);
+		background: rgba(13, 148, 136, 0.18);
+		color: #a7f3d0;
+	}
+	.toolbar-btn.danger {
+		border-color: rgba(248, 113, 113, 0.28);
+		color: #fca5a5;
+	}
 
 	.toolbar-btn:disabled,
 	.accent-action:disabled {
@@ -1127,21 +1333,43 @@
 		backdrop-filter: blur(10px);
 	}
 
-	.mini-map-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
-	.mini-map-head strong { font-size: 0.78rem; color: var(--text); }
+	.mini-map-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.5rem;
+	}
+	.mini-map-head strong {
+		font-size: 0.78rem;
+		color: var(--text);
+	}
 
 	.mini-map-svg {
 		display: block;
 		width: 100%;
 		height: 120px;
 		border-radius: 12px;
-		background: radial-gradient(circle at top left, rgba(34, 197, 94, 0.12), transparent 48%), rgba(2, 6, 23, 0.34);
+		background:
+			radial-gradient(circle at top left, rgba(34, 197, 94, 0.12), transparent 48%),
+			rgba(2, 6, 23, 0.34);
 	}
 
-	.mini-map-edge { stroke: rgba(34, 197, 94, 0.32); stroke-width: 1.2; }
-	.mini-map-node { fill: rgba(226, 232, 240, 0.86); }
-	.mini-map-node.selected { fill: #22c55e; }
-	.mini-map-viewport { fill: rgba(34, 197, 94, 0.08); stroke: rgba(34, 197, 94, 0.92); stroke-width: 1.2; rx: 4; }
+	.mini-map-edge {
+		stroke: rgba(34, 197, 94, 0.32);
+		stroke-width: 1.2;
+	}
+	.mini-map-node {
+		fill: rgba(226, 232, 240, 0.86);
+	}
+	.mini-map-node.selected {
+		fill: #22c55e;
+	}
+	.mini-map-viewport {
+		fill: rgba(34, 197, 94, 0.08);
+		stroke: rgba(34, 197, 94, 0.92);
+		stroke-width: 1.2;
+		rx: 4;
+	}
 
 	.empty-state {
 		color: var(--muted);
@@ -1181,25 +1409,75 @@
 		padding: 1rem;
 	}
 
-	.inspector-card-head { margin-bottom: 0.95rem; }
+	.inspector-card-head {
+		margin-bottom: 0.95rem;
+	}
 
-	.inspector-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin: 1rem 0; }
+	.inspector-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem;
+		margin: 1rem 0;
+	}
 
-	.inspector-stat { border-radius: 16px; background: var(--panel-alt); padding: 0.8rem; min-width: 0; }
-	.inspector-stat-wide { grid-column: 1 / -1; }
-	.inspector-stat span { display: block; margin-bottom: 0.2rem; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-	.inspector-stat strong { font-size: 0.92rem; display: block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+	.inspector-stat {
+		border-radius: 16px;
+		background: var(--panel-alt);
+		padding: 0.8rem;
+		min-width: 0;
+	}
+	.inspector-stat-wide {
+		grid-column: 1 / -1;
+	}
+	.inspector-stat span {
+		display: block;
+		margin-bottom: 0.2rem;
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--muted);
+	}
+	.inspector-stat strong {
+		font-size: 0.92rem;
+		display: block;
+		max-width: 100%;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+		white-space: normal;
+	}
 
-	.action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
-	.action-grid-top { margin-bottom: 0.75rem; }
+	.action-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem;
+	}
+	.action-grid-top {
+		margin-bottom: 0.75rem;
+	}
 
-	.accent-action { background: rgba(13, 148, 136, 0.14); color: #6ee7b7; border-color: rgba(34, 197, 94, 0.3); }
-	.action-grid .danger { border-color: rgba(248, 113, 113, 0.28); color: #fca5a5; }
+	.accent-action {
+		background: rgba(13, 148, 136, 0.14);
+		color: #6ee7b7;
+		border-color: rgba(34, 197, 94, 0.3);
+	}
+	.action-grid .danger {
+		border-color: rgba(248, 113, 113, 0.28);
+		color: #fca5a5;
+	}
 
 	@media (max-width: 980px) {
-		.graph-workspace { grid-template-columns: minmax(0, 1fr); }
-		.mini-map { width: 180px; }
-		.hover-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-		.inspector-grid { grid-template-columns: 1fr; }
+		.graph-workspace {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.mini-map {
+			width: 180px;
+		}
+		.hover-toolbar {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.inspector-grid {
+			grid-template-columns: 1fr;
+		}
 	}
 </style>

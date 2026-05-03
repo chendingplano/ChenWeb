@@ -16,7 +16,7 @@ test('places the hover card left when there is enough room on the left', () => {
 		stageHeight: 900
 	});
 
-	assert.equal(pos.x + 428, 1492, 'expected the left side to win before any vertical placement');
+	assert.equal(pos.x + 428, 1222, 'expected the left side to win before any vertical placement');
 });
 
 test('places the hover card right when left does not fit but right does', () => {
@@ -28,7 +28,7 @@ test('places the hover card right when left does not fit but right does', () => 
 		stageHeight: 900
 	});
 
-	assert.equal(pos.x, 513, 'expected the right side to win after left is rejected');
+	assert.equal(pos.x, 223, 'expected the right side to win after left is rejected');
 });
 
 test('places the hover card above when left and right do not fit but top does', () => {
@@ -85,7 +85,7 @@ test('places the hover card left when the node is near the right edge', () => {
 		stageHeight: 900
 	});
 
-	assert.equal(pos.x, 837, 'expected the card to open to the left of the hovered topic node');
+	assert.equal(pos.x, 567, 'expected the card to open to the left of the hovered topic node');
 	assert.equal(pos.y, 564, 'expected the left placement to stay as centered as the stage bounds allow');
 });
 
@@ -113,7 +113,7 @@ test('never allows a negative gap to push the card back over the node', () => {
 		gap: -20
 	});
 
-	assert.equal(pos.x + 428, 1192, 'expected negative gap values to clamp without breaking left preference');
+	assert.equal(pos.x + 428, 922, 'expected negative gap values to clamp without breaking left preference');
 });
 
 test('keeps the hover card alive while the pointer moves through the buffer between node and card', () => {

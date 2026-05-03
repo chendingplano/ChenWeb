@@ -44,6 +44,10 @@
 	const HOVER_CARD_WIDTH = 428;
 	const HOVER_CARD_HEIGHT = 320;
 	const HOVER_KEEP_ALIVE_BUFFER = 20;
+	const SUMMARY_HOVER_GAP_LEFT_X = -30;
+	const SUMMARY_HOVER_GAP_RIGHT_X = 150;
+	const SUMMARY_HOVER_GAP_TOP_Y = 0;
+	const SUMMARY_HOVER_GAP_BELOW_Y = 70;
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -289,6 +293,10 @@
 			stageHeight,
 			cardWidth,
 			cardHeight,
+			gapLeftX: SUMMARY_HOVER_GAP_LEFT_X,
+			gapRightX: SUMMARY_HOVER_GAP_RIGHT_X,
+			gapTopY: SUMMARY_HOVER_GAP_TOP_Y,
+			gapBelowY: SUMMARY_HOVER_GAP_BELOW_Y,
 			debug: true
 		});
 		console.debug('[summary-hover-placeHoverCardNearNode]', {
@@ -348,7 +356,11 @@
 		return localPoint;
 	}
 
-	function getHoveredNodePixel(event: any, referenceX?: number, referenceY?: number): { x: number; y: number } | null {
+	function getHoveredNodePixel(
+		event: any,
+		referenceX?: number,
+		referenceY?: number
+	): { x: number; y: number } | null {
 		const dataIndex = Number(event?.dataIndex);
 		if (!chartApi || !Number.isFinite(dataIndex) || dataIndex < 0) return null;
 
@@ -392,19 +404,6 @@
 		const nativeEvent = event?.event?.event ?? event?.event ?? null;
 		const nativeX = Number(nativeEvent?.offsetX);
 		const nativeY = Number(nativeEvent?.offsetY);
-		if (Number.isFinite(nativeX) && Number.isFinite(nativeY)) {
-			const pointerAnchorRadius = Number.isFinite(rawSize) ? rawSize : nodeRadius;
-			console.debug('[summary-hover-anchor]', {
-				source: 'native-event-offset',
-				nodeId,
-				nativeX,
-				nativeY,
-				nodeRadius,
-				pointerAnchorRadius
-			});
-			placeHoverCardNearNode(nativeX, nativeY, pointerAnchorRadius);
-			return;
-		}
 		const nodePixel = getHoveredNodePixel(event, nativeX, nativeY);
 		if (nodePixel) {
 			console.debug('[summary-hover-anchor]', {
@@ -420,14 +419,16 @@
 		}
 		const fallbackX = Number(nativeEvent?.offsetX ?? 48);
 		const fallbackY = Number(nativeEvent?.offsetY ?? 48);
+		const pointerAnchorRadius = Number.isFinite(rawSize) ? rawSize : nodeRadius;
 		console.debug('[summary-hover-anchor]', {
-			source: 'fallback',
+			source: 'fallback-native-offset',
 			nodeId,
 			fallbackX,
 			fallbackY,
-			nodeRadius
+			nodeRadius,
+			pointerAnchorRadius
 		});
-		placeHoverCardNearNode(fallbackX, fallbackY, nodeRadius);
+		placeHoverCardNearNode(fallbackX, fallbackY, pointerAnchorRadius);
 	}
 
 	function buildMiniMapLayout(): MiniMapLayout {
@@ -835,12 +836,13 @@
 											type="button"
 											class="toolbar-btn primary"
 											disabled={!hoveredNode.hasSummariesFile}
-											title={hoveredNode.hasSummariesFile ? undefined : 'No summaries.txt file for this category'}
+											title={hoveredNode.hasSummariesFile
+												? undefined
+												: 'No summaries.txt file for this category'}
 											onclick={() => runHoverAction('show-summaries', hoveredNode)}
 										>
 											Show Summaries
-										</button
-										>
+										</button>
 										<button
 											type="button"
 											class="toolbar-btn"
@@ -978,7 +980,9 @@
 										type="button"
 										class="accent-action"
 										disabled={!selectedNode.hasSummariesFile}
-										title={selectedNode.hasSummariesFile ? undefined : 'No summaries.txt file for this category'}
+										title={selectedNode.hasSummariesFile
+											? undefined
+											: 'No summaries.txt file for this category'}
 										onclick={() => showSummaries(selectedNode)}
 									>
 										Show Summaries
