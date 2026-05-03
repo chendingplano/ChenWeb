@@ -433,7 +433,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
-		if err := writeSummaryTreeEntry(s.Logger, s.SummaryTreeDir, allSummaries[i], cats, nodes); err != nil {
+		if err := writeSummaryTreeEntry(ctx, s.Embedder, s.SummaryEmbeddingModelName, s.Logger, s.SummaryTreeDir, allSummaries[i], cats, nodes); err != nil {
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
