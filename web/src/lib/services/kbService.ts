@@ -697,6 +697,74 @@ export async function getRecordSummaries(recordId: number): Promise<GetRecordSum
 	);
 }
 
+// ---------- kb.topic-graph / topic-category / record-topics ----------
+
+export type TopicCategoryNodeApi = {
+	id: string;
+	categoryPath: string;
+	label: string;
+	metadata: {
+		desc: string;
+		confidence: number;
+		keywords: string[];
+		create_time: string;
+	};
+	childIds: string[];
+	topicIds: string[];
+	hasTopicsFile: boolean;
+	expanded: boolean;
+};
+
+export type TopicCardApi = {
+	id: string;
+	pdfFileName: string;
+	topicKeywords: string[];
+	topicText: string;
+	topicType: string;
+	inputId: number;
+	page: number;
+	coords: number[];
+	targets: Array<{ page: number; coords: number[] }>;
+};
+
+export type ListTopicGraphResponse = {
+	status: boolean;
+	results: TopicCategoryNodeApi[];
+};
+
+export type GetTopicCategoryResponse = {
+	status: boolean;
+	categoryPath: string;
+	topics: TopicCardApi[];
+};
+
+export type GetRecordTopicsResponse = {
+	status: boolean;
+	recordId: number;
+	topics: TopicCardApi[];
+};
+
+export async function listTopicGraph(): Promise<ListTopicGraphResponse> {
+	return fetchOrThrow<ListTopicGraphResponse>(
+		`${BASE}/topic-graph`,
+		'Failed to list topic graph'
+	);
+}
+
+export async function getTopicCategory(categoryPath: string): Promise<GetTopicCategoryResponse> {
+	return fetchOrThrow<GetTopicCategoryResponse>(
+		`${BASE}/topic-category?category_path=${encodeURIComponent(categoryPath)}`,
+		'Failed to load topic category'
+	);
+}
+
+export async function getRecordTopics(recordId: number): Promise<GetRecordTopicsResponse> {
+	return fetchOrThrow<GetRecordTopicsResponse>(
+		`${BASE}/record-topics?record_id=${encodeURIComponent(String(recordId))}`,
+		'Failed to load record topics'
+	);
+}
+
 export async function searchSummaryTreeMock(
 	params: SearchSummaryTreeParams
 ): Promise<SearchSummaryTreeResponse> {

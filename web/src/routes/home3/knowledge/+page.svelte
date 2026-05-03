@@ -15,7 +15,10 @@
 	import KnowledgeStoreView from '$lib/components/home3/knowledge-store-view.svelte';
 	import SummaryGraphView from '$lib/components/home3/summary-graph-view.svelte';
 	import SummaryTreeView from '$lib/components/home3/summary-tree-view.svelte';
+	import TopicGraphView from '$lib/components/home3/topic-graph-view.svelte';
+	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
+	import NetworkIcon from '@lucide/svelte/icons/network';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -25,7 +28,9 @@
 		| 'kb-doc-structure'
 		| 'kb-chunks'
 		| 'kb-summary-graph'
-		| 'kb-summary-tree';
+		| 'kb-summary-tree'
+		| 'kb-topic-graph'
+		| 'kb-topic-tree';
 
 	type KbMenuItem = {
 		id: KbSectionId;
@@ -64,6 +69,24 @@
 					description: 'Document-centric summary browser'
 				}
 			]
+		},
+		{
+			id: 'kb-topic-graph',
+			label: 'Semantic Web',
+			description: 'Topic graph and semantic tree',
+			icon: NetworkIcon,
+			children: [
+				{
+					id: 'kb-topic-graph',
+					label: 'Semantic Web',
+					description: 'Category-first topic graph'
+				},
+				{
+					id: 'kb-topic-tree',
+					label: 'Document Semantic Tree',
+					description: 'Document-centric topic browser'
+				}
+			]
 		}
 	];
 
@@ -78,6 +101,7 @@
 	});
 
 	let documentSummariesOpen = $state(true);
+	let semanticWebOpen = $state(true);
 	let activeItem = $derived(
 		menuItems.find(
 			(item) =>
@@ -102,10 +126,24 @@
 		if (id === 'kb-summary-graph' || id === 'kb-summary-tree') {
 			documentSummariesOpen = true;
 		}
+		if (id === 'kb-topic-graph' || id === 'kb-topic-tree') {
+			semanticWebOpen = true;
+		}
 	}
 
-	function isDocumentSummariesParent(item: KbMenuItem) {
+	function isCollapsibleParent(item: KbMenuItem) {
 		return item.children && item.children.length > 0;
+	}
+
+	function isParentOpen(item: KbMenuItem) {
+		if (item.id === 'kb-summary-graph') return documentSummariesOpen;
+		if (item.id === 'kb-topic-graph') return semanticWebOpen;
+		return false;
+	}
+
+	function toggleParentOpen(item: KbMenuItem) {
+		if (item.id === 'kb-summary-graph') documentSummariesOpen = !documentSummariesOpen;
+		else if (item.id === 'kb-topic-graph') semanticWebOpen = !semanticWebOpen;
 	}
 
 	function isChildActive(childId: KbSectionId) {
@@ -137,14 +175,14 @@
 
 		<nav class="flex-1 overflow-y-auto px-2 py-3" style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;">
 			{#each menuItems as item (item.id)}
-				{#if isDocumentSummariesParent(item)}
+				{#if isCollapsibleParent(item)}
 					<div
 						class="mb-1 rounded-lg"
 						style="background:{item.children?.some((child) => isChildActive(child.id)) ? accentTint : 'transparent'};"
 					>
 						<button
 							type="button"
-							onclick={() => (documentSummariesOpen = !documentSummariesOpen)}
+							onclick={() => toggleParentOpen(item)}
 							class="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
 							style="
 								color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
@@ -157,10 +195,10 @@
 								<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
 								<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
 							</span>
-							<span style="font-size:12px; color:{textMuted};">{documentSummariesOpen ? '−' : '+'}</span>
+							<span style="font-size:12px; color:{textMuted};">{isParentOpen(item) ? '−' : '+'}</span>
 						</button>
 
-						{#if documentSummariesOpen}
+						{#if isParentOpen(item)}
 							<div class="pb-2 pl-6 pr-2">
 								{#each item.children ?? [] as child (child.id)}
 									<button
@@ -290,6 +328,10 @@
 				<SummaryGraphView {darkMode} />
 			{:else if activeSection === 'kb-summary-tree'}
 				<SummaryTreeView {darkMode} />
+			{:else if activeSection === 'kb-topic-graph'}
+				<TopicGraphView {darkMode} />
+			{:else if activeSection === 'kb-topic-tree'}
+				<TopicTreeView {darkMode} />
 			{/if}
 		</div>
 	</main>

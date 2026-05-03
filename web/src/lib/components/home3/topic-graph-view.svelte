@@ -8,42 +8,37 @@
 	import { TooltipComponent } from 'echarts/components';
 	import {
 		addChildNode,
-		createSummaryGraphTabs,
+		createTopicGraphTabs,
 		deleteNode,
 		mergeNodes,
-		openCategorySummaryTab,
+		openCategoryTopicTab,
 		renameNode,
 		splitNode,
 		toggleNodeExpanded
-	} from './summary-graph-state.js';
+	} from './topic-graph-state.js';
 	import {
 		computeHoverCardPosition,
-		isPointInHoverKeepAliveZone,
 		toContainerLocalPoint
 	} from './summary-graph-hover-position.js';
-	import SummaryCategoryTab from './summary-category-tab.svelte';
-	import SummaryGraphTabs from './summary-graph-tabs.svelte';
+	import TopicCategoryTab from './topic-category-tab.svelte';
+	import TopicGraphTabs from './topic-graph-tabs.svelte';
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
-	import { getSummaryCategory, listSummaryGraph } from '$lib/services/kbService';
+	import { getTopicCategory, listTopicGraph } from '$lib/services/kbService';
 	import type {
-		SummaryCategoryNode,
-		SummaryCategoryTab as SummaryCategoryTabType,
-		SummaryPdfTarget,
-		SummaryRecordCard
-	} from './summary-types';
+		TopicCategoryNode,
+		TopicCategoryTab as TopicCategoryTabType,
+		TopicPdfTarget,
+		TopicCard
+	} from './topic-types';
 
 	use([TreeChart, TooltipComponent, CanvasRenderer]);
 
 	type DialogMode = 'rename' | 'metadata' | 'add' | 'delete' | 'merge' | 'split' | null;
 	type HoverCardPos = { x: number; y: number };
-	type HoverAnchor = { x: number; y: number; nodeRadius: number } | null;
+	type NodeDimensions = { width: number; height: number };
 	type MiniMapNode = { id: string; x: number; y: number; selected: boolean };
 	type MiniMapEdge = { fromX: number; fromY: number; toX: number; toY: number };
 	type MiniMapLayout = { nodes: MiniMapNode[]; edges: MiniMapEdge[] };
-
-	const HOVER_CARD_WIDTH = 428;
-	const HOVER_CARD_HEIGHT = 320;
-	const HOVER_KEEP_ALIVE_BUFFER = 20;
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -52,19 +47,19 @@
 	let border = $derived(darkMode ? '#2b3548' : '#dbe3f0');
 	let textMain = $derived(darkMode ? '#e2e8f0' : '#0f172a');
 	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
-	let accent = $derived(darkMode ? '#818cf8' : '#4f46e5');
-	let warm = $derived(darkMode ? '#fbbf24' : '#b45309');
+	let accent = $derived(darkMode ? '#22c55e' : '#16a34a');
+	let warm = $derived(darkMode ? '#4ade80' : '#15803d');
 	let chartTheme = $derived(darkMode ? ('dark' as const) : ('light' as const));
 
-	let nodes = $state<SummaryCategoryNode[]>([]);
-	let tabs = $state<SummaryCategoryTabType[]>(createSummaryGraphTabs());
-	let activeTabId = $state('summary-graph');
+	let nodes = $state<TopicCategoryNode[]>([]);
+	let tabs = $state<TopicCategoryTabType[]>(createTopicGraphTabs());
+	let activeTabId = $state('topic-graph');
 	let selectedNodeId = $state<string | null>(null);
 	let dialogOpen = $state(false);
 	let dialogMode = $state<DialogMode>(null);
-	let categorySummaries = $state<Record<string, SummaryRecordCard[]>>({});
-	let selectedSummaryIdByPath = $state<Record<string, string | null>>({});
-	let selectedTargetByPath = $state<Record<string, SummaryPdfTarget | null>>({});
+	let categoryTopics = $state<Record<string, TopicCard[]>>({});
+	let selectedTopicIdByPath = $state<Record<string, string | null>>({});
+	let selectedTargetByPath = $state<Record<string, TopicPdfTarget | null>>({});
 	let loading = $state(true);
 	let loadError = $state('');
 	let errorDialogOpen = $state(false);
@@ -74,7 +69,6 @@
 	let hoverCardEl = $state<HTMLDivElement | null>(null);
 	let hoveredNodeId = $state<string | null>(null);
 	let hoverCardPos = $state<HoverCardPos>({ x: 28, y: 28 });
-	let hoverAnchor = $state<HoverAnchor>(null);
 	let hoverCardHovering = $state(false);
 	let miniViewport = $state({ left: 0.08, top: 0.12, width: 0.36, height: 0.42, scale: 1 });
 	let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -104,86 +98,61 @@
 	function scheduleHoverHide() {
 		clearHoverHideTimer();
 		hoverHideTimer = setTimeout(() => {
-			if (!hoverCardHovering) {
-				hoveredNodeId = null;
-				hoverAnchor = null;
-			}
+			if (!hoverCardHovering) hoveredNodeId = null;
 		}, 120);
-	}
-
-	function shouldKeepHoverAlive(pointerX: number, pointerY: number) {
-		if (!hoverAnchor || !hoveredNodeId) return false;
-		return isPointInHoverKeepAliveZone({
-			pointX: pointerX,
-			pointY: pointerY,
-			nodeX: hoverAnchor.x,
-			nodeY: hoverAnchor.y,
-			nodeRadius: hoverAnchor.nodeRadius,
-			cardX: hoverCardPos.x,
-			cardY: hoverCardPos.y,
-			cardWidth: HOVER_CARD_WIDTH,
-			cardHeight: HOVER_CARD_HEIGHT,
-			buffer: HOVER_KEEP_ALIVE_BUFFER
-		});
 	}
 
 	async function loadGraph() {
 		loading = true;
 		loadError = '';
 		try {
-			const response = await listSummaryGraph();
+			const response = await listTopicGraph();
 			nodes = response.results;
 			selectedNodeId = response.results[0]?.id ?? null;
 		} catch (error) {
 			nodes = [];
 			selectedNodeId = null;
-			loadError = error instanceof Error ? error.message : 'Failed to load summary graph';
+			loadError = error instanceof Error ? error.message : 'Failed to load topic graph';
 			errorDialogOpen = true;
 		} finally {
 			loading = false;
 		}
 	}
 
-	async function showSummaries(node: SummaryCategoryNode) {
-		const result = openCategorySummaryTab(tabs, node.categoryPath);
+	async function showTopics(node: TopicCategoryNode) {
+		const result = openCategoryTopicTab(tabs, node.categoryPath);
 		tabs = result.tabs;
 		activeTabId = result.activeTabId;
-		if (categorySummaries[node.categoryPath] || categoryLoadingByPath[node.categoryPath]) {
+		if (categoryTopics[node.categoryPath] || categoryLoadingByPath[node.categoryPath]) {
 			return;
 		}
 
 		categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: true };
 		try {
-			const response = await getSummaryCategory(node.categoryPath);
-			categorySummaries = { ...categorySummaries, [node.categoryPath]: response.summaries };
-			if (response.summaries[0]) {
-				selectedSummaryIdByPath = {
-					...selectedSummaryIdByPath,
-					[node.categoryPath]: response.summaries[0].id
+			const response = await getTopicCategory(node.categoryPath);
+			categoryTopics = { ...categoryTopics, [node.categoryPath]: response.topics };
+			if (response.topics[0]) {
+				selectedTopicIdByPath = {
+					...selectedTopicIdByPath,
+					[node.categoryPath]: response.topics[0].id
 				};
 				selectedTargetByPath = {
 					...selectedTargetByPath,
 					[node.categoryPath]: {
-						inputId: response.summaries[0].inputId,
-						page: response.summaries[0].page,
-						summaryId: response.summaries[0].id
+						inputId: response.topics[0].inputId,
+						page: response.topics[0].page,
+						topicId: response.topics[0].id
 					}
 				};
 			} else {
-				selectedSummaryIdByPath = {
-					...selectedSummaryIdByPath,
-					[node.categoryPath]: null
-				};
-				selectedTargetByPath = {
-					...selectedTargetByPath,
-					[node.categoryPath]: null
-				};
+				selectedTopicIdByPath = { ...selectedTopicIdByPath, [node.categoryPath]: null };
+				selectedTargetByPath = { ...selectedTargetByPath, [node.categoryPath]: null };
 			}
 		} catch (error) {
 			loadError =
 				error instanceof Error
 					? error.message
-					: `Failed to load summaries for ${node.categoryPath}`;
+					: `Failed to load topics for ${node.categoryPath}`;
 			errorDialogOpen = true;
 		} finally {
 			categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: false };
@@ -192,7 +161,7 @@
 
 	function closeTab(tabId: string) {
 		tabs = tabs.filter((tab) => tab.id !== tabId);
-		if (activeTabId === tabId) activeTabId = 'summary-graph';
+		if (activeTabId === tabId) activeTabId = 'topic-graph';
 	}
 
 	function applyDialog(payload: Record<string, unknown>) {
@@ -208,15 +177,14 @@
 					categoryPath: `${selectedNode.categoryPath}/${label.toLowerCase().replace(/\s+/g, '-')}`,
 					label,
 					metadata: {
-						desc: String(payload.desc ?? 'Mock category created in phase 1.'),
-						category_type: String(payload.categoryType ?? 'topic'),
+						desc: String(payload.desc ?? ''),
 						confidence: Number(payload.confidence ?? 0.75),
 						keywords: Array.isArray(payload.keywords) ? (payload.keywords as string[]) : [],
 						create_time: '20260501-120000'
 					},
 					childIds: [],
-					summaryIds: [],
-					hasSummariesFile: false,
+					topicIds: [],
+					hasTopicsFile: false,
 					expanded: false
 				});
 			}
@@ -229,7 +197,6 @@
 							metadata: {
 								...node.metadata,
 								desc: String(payload.desc ?? node.metadata.desc),
-								category_type: String(payload.categoryType ?? node.metadata.category_type),
 								confidence: Number(payload.confidence ?? node.metadata.confidence),
 								keywords: Array.isArray(payload.keywords)
 									? (payload.keywords as string[])
@@ -257,14 +224,14 @@
 		}
 	}
 
-	function selectSummary(categoryPath: string, summary: SummaryRecordCard) {
-		selectedSummaryIdByPath = { ...selectedSummaryIdByPath, [categoryPath]: summary.id };
+	function selectTopic(categoryPath: string, topic: TopicCard) {
+		selectedTopicIdByPath = { ...selectedTopicIdByPath, [categoryPath]: topic.id };
 		selectedTargetByPath = {
 			...selectedTargetByPath,
 			[categoryPath]: {
-				inputId: summary.inputId,
-				page: summary.page,
-				summaryId: summary.id
+				inputId: topic.inputId,
+				page: topic.page,
+				topicId: topic.id
 			}
 		};
 	}
@@ -274,27 +241,46 @@
 		return keywords.join(', ');
 	}
 
-	function placeHoverCardNearNode(nodeX: number, nodeY: number, nodeRadius = 8) {
+	function getNodeDimensions(symbolSize: unknown): NodeDimensions {
+		if (Array.isArray(symbolSize)) {
+			const width = Number(symbolSize[0]);
+			const height = Number(symbolSize[1]);
+			if (Number.isFinite(width) && Number.isFinite(height)) return { width, height };
+		}
+		const size = Number(symbolSize);
+		const fallback = Number.isFinite(size) ? size : 11;
+		return { width: fallback, height: fallback };
+	}
+
+	function placeHoverCardNearNode(
+		nodeX: number,
+		nodeY: number,
+		nodeRadius = 8,
+		nodeDimensions: NodeDimensions = { width: nodeRadius * 2, height: nodeRadius * 2 }
+	) {
 		const stageWidth = graphStageEl?.clientWidth ?? 1200;
 		const stageHeight = graphStageEl?.clientHeight ?? 720;
 		const cardRect = hoverCardEl?.getBoundingClientRect?.();
-		const cardWidth = cardRect?.width || HOVER_CARD_WIDTH;
-		const cardHeight = cardRect?.height || HOVER_CARD_HEIGHT;
-		hoverAnchor = { x: nodeX, y: nodeY, nodeRadius };
+		const cardWidth = cardRect?.width || 428;
+		const cardHeight = cardRect?.height || 320;
 		hoverCardPos = computeHoverCardPosition({
 			nodeX,
 			nodeY,
 			nodeRadius,
+			nodeWidth: nodeDimensions.width,
+			nodeHeight: nodeDimensions.height,
 			stageWidth,
 			stageHeight,
 			cardWidth,
 			cardHeight,
+			gap: 5,
 			debug: true
 		});
-		console.debug('[summary-hover-placeHoverCardNearNode]', {
+		console.debug('[topic-hover-placeHoverCardNearNode]', {
 			nodeX,
 			nodeY,
 			nodeRadius,
+			nodeDimensions,
 			stageWidth,
 			stageHeight,
 			cardWidth,
@@ -327,8 +313,7 @@
 				? globalAdjustedPoint
 				: directPoint
 			: globalAdjustedPoint;
-
-		console.debug('[summary-hover-coordinate]', {
+		console.debug('[topic-hover-coordinate]', {
 			globalX,
 			globalY,
 			stageRect: {
@@ -384,50 +369,60 @@
 
 	function updateHoverNode(event: any) {
 		const nodeId = String(event?.data?.id ?? '');
-		if (!nodeId || nodeId === 'summary-root') return;
+		if (!nodeId || nodeId === 'topic-root') return;
 		clearHoverHideTimer();
 		hoveredNodeId = nodeId;
-		const rawSize = Number(event?.data?.symbolSize ?? 11);
-		const nodeRadius = Number.isFinite(rawSize) ? rawSize / 2 : 6;
+		const nodeDimensions = getNodeDimensions(event?.data?.symbolSize);
+		const nodeRadius = nodeDimensions.height / 2;
 		const nativeEvent = event?.event?.event ?? event?.event ?? null;
 		const nativeX = Number(nativeEvent?.offsetX);
 		const nativeY = Number(nativeEvent?.offsetY);
-		if (Number.isFinite(nativeX) && Number.isFinite(nativeY)) {
-			const pointerAnchorRadius = Number.isFinite(rawSize) ? rawSize : nodeRadius;
-			console.debug('[summary-hover-anchor]', {
-				source: 'native-event-offset',
-				nodeId,
-				nativeX,
-				nativeY,
-				nodeRadius,
-				pointerAnchorRadius
-			});
-			placeHoverCardNearNode(nativeX, nativeY, pointerAnchorRadius);
-			return;
-		}
 		const nodePixel = getHoveredNodePixel(event, nativeX, nativeY);
 		if (nodePixel) {
-			console.debug('[summary-hover-anchor]', {
+			const reconciledNodePixel =
+				Number.isFinite(nativeX) && Number.isFinite(nativeY)
+					? {
+							x:
+								Math.abs(nodePixel.x - nativeX) > nodeDimensions.width
+									? nativeX
+									: nodePixel.x,
+							y:
+								Math.abs(nodePixel.y - nativeY) > nodeDimensions.height
+									? nativeY
+									: nodePixel.y
+						}
+					: nodePixel;
+			console.debug('[topic-hover-anchor]', {
 				source: 'chart-layout',
 				nodeId,
 				nodePixel,
+				reconciledNodePixel,
 				nodeRadius,
+				nodeDimensions,
 				referencePointer:
-					Number.isFinite(nativeX) && Number.isFinite(nativeY) ? { x: nativeX, y: nativeY } : null
+					Number.isFinite(nativeX) && Number.isFinite(nativeY) ? { x: nativeX, y: nativeY } : null,
+				rawSymbolSize: event?.data?.symbolSize
 			});
-			placeHoverCardNearNode(nodePixel.x, nodePixel.y, nodeRadius);
+			placeHoverCardNearNode(
+				reconciledNodePixel.x,
+				reconciledNodePixel.y,
+				nodeRadius,
+				nodeDimensions
+			);
 			return;
 		}
 		const fallbackX = Number(nativeEvent?.offsetX ?? 48);
 		const fallbackY = Number(nativeEvent?.offsetY ?? 48);
-		console.debug('[summary-hover-anchor]', {
-			source: 'fallback',
+		console.debug('[topic-hover-anchor]', {
+			source: 'fallback-native-offset',
 			nodeId,
 			fallbackX,
 			fallbackY,
-			nodeRadius
+			nodeRadius,
+			nodeDimensions,
+			rawSymbolSize: event?.data?.symbolSize
 		});
-		placeHoverCardNearNode(fallbackX, fallbackY, nodeRadius);
+		placeHoverCardNearNode(fallbackX, fallbackY, nodeRadius, nodeDimensions);
 	}
 
 	function buildMiniMapLayout(): MiniMapLayout {
@@ -435,14 +430,9 @@
 		const edges: Array<{ fromDepth: number; fromRow: number; toDepth: number; toRow: number }> = [];
 		let row = 0;
 
-		function visit(node: SummaryCategoryNode, depth: number) {
+		function visit(node: TopicCategoryNode, depth: number) {
 			const nodeRow = row++;
-			mappedNodes.push({
-				id: node.id,
-				depth,
-				row: nodeRow,
-				selected: node.id === selectedNodeId
-			});
+			mappedNodes.push({ id: node.id, depth, row: nodeRow, selected: node.id === selectedNodeId });
 			if (!node.expanded) return nodeRow;
 			for (const child of childrenOf(node)) {
 				const childRow = visit(child, depth + 1);
@@ -509,12 +499,12 @@
 	}
 
 	function runHoverAction(
-		action: Exclude<DialogMode, null> | 'show-summaries' | 'toggle-expand',
-		node: SummaryCategoryNode
+		action: Exclude<DialogMode, null> | 'show-topics' | 'toggle-expand',
+		node: TopicCategoryNode
 	) {
 		selectedNodeId = node.id;
-		if (action === 'show-summaries') {
-			showSummaries(node);
+		if (action === 'show-topics') {
+			showTopics(node);
 			return;
 		}
 		if (action === 'toggle-expand') {
@@ -535,43 +525,59 @@
 		return nodes.filter((node) => !node.id.includes('/'));
 	}
 
-	function childrenOf(node: SummaryCategoryNode) {
+	function childrenOf(node: TopicCategoryNode) {
 		return node.childIds
 			.map((childId) => nodes.find((candidate) => candidate.id === childId))
-			.filter(Boolean) as SummaryCategoryNode[];
+			.filter(Boolean) as TopicCategoryNode[];
 	}
 
-	function buildTreeNode(node: SummaryCategoryNode): Record<string, unknown> {
+	function buildTreeNode(node: TopicCategoryNode): Record<string, unknown> {
 		const isSelected = node.id === selectedNodeId;
+		const kws = node.metadata.keywords.slice(0, 3).join(', ') || '—';
+		const conf = node.metadata.confidence ? node.metadata.confidence.toFixed(2) : '—';
 		return {
 			id: node.id,
 			name: node.label,
-			value: node.summaryIds.length,
+			value: node.topicIds.length,
 			categoryPath: node.categoryPath,
 			desc: node.metadata.desc,
-			categoryType: node.metadata.category_type,
 			confidence: node.metadata.confidence,
 			keywords: node.metadata.keywords,
-			summaryCount: node.summaryIds.length,
+			topicCount: node.topicIds.length,
 			collapsed: !node.expanded,
-			symbolSize: isSelected ? 16 : 11,
+			symbol: 'rect',
+			symbolSize: [160, 64],
 			itemStyle: {
-				color: isSelected ? accent : darkMode ? '#cbd5e1' : '#94a3b8',
+				color: isSelected
+					? darkMode ? 'rgba(13,148,136,0.7)' : 'rgba(22,163,74,0.15)'
+					: darkMode ? 'rgba(15,23,42,0.85)' : 'rgba(241,245,249,0.9)',
 				borderColor: isSelected ? warm : accent,
-				borderWidth: isSelected ? 4 : 2,
+				borderWidth: isSelected ? 2 : 1,
+				borderRadius: 10,
 				shadowBlur: isSelected ? 18 : 0,
-				shadowColor: isSelected ? 'rgba(129, 140, 248, 0.72)' : 'transparent'
+				shadowColor: isSelected ? 'rgba(34,197,94,0.5)' : 'transparent'
 			},
 			label: {
-				color: isSelected ? textMain : textMuted,
-				fontWeight: isSelected ? 700 : 500,
-				backgroundColor: isSelected
-					? darkMode
-						? 'rgba(99, 102, 241, 0.16)'
-						: 'rgba(79, 70, 229, 0.12)'
-					: 'transparent',
-				padding: isSelected ? [4, 8] : 0,
-				borderRadius: isSelected ? 999 : 0
+				show: true,
+				position: 'inside',
+				color: isSelected ? '#ffffff' : textMain,
+				formatter: (params: any) => {
+					const name = String(params.data?.name ?? '');
+					return `{label|${name}}\n{meta|${conf}  ${kws}}`;
+				},
+				rich: {
+					label: {
+						fontSize: 12,
+						fontWeight: '700',
+						lineHeight: 18,
+						color: isSelected ? '#ffffff' : textMain
+					},
+					meta: {
+						fontSize: 10,
+						lineHeight: 14,
+						color: isSelected ? 'rgba(255,255,255,0.7)' : textMuted
+					}
+				}
 			},
 			children: childrenOf(node).map(buildTreeNode)
 		};
@@ -579,18 +585,14 @@
 
 	let treeOption = $derived.by((): EChartsOption => {
 		const root = {
-			id: 'summary-root',
+			id: 'topic-root',
 			name: '',
-			symbolSize: 1,
-			itemStyle: {
-				color: 'transparent',
-				borderColor: 'transparent'
-			},
-			label: {
-				show: false
-			},
+			symbol: 'rect',
+			symbolSize: [1, 1],
+			itemStyle: { color: 'transparent', borderColor: 'transparent' },
+			label: { show: false },
 			lineStyle: {
-				color: darkMode ? 'rgba(148, 163, 184, 0.28)' : 'rgba(100, 116, 139, 0.24)',
+				color: darkMode ? 'rgba(34,197,94,0.28)' : 'rgba(22,163,74,0.24)',
 				width: 2,
 				curveness: 0.55
 			},
@@ -601,46 +603,43 @@
 			backgroundColor: 'transparent',
 			animationDuration: 300,
 			animationDurationUpdate: 350,
-			tooltip: {
-				show: false
-			},
+			tooltip: { show: false },
 			series: [
 				{
 					type: 'tree',
 					data: [root],
-					top: '2%',
-					left: '2%',
-					bottom: '2%',
-					right: '16%',
+					top: '4%',
+					left: '4%',
+					bottom: '4%',
+					right: '20%',
 					layout: 'orthogonal',
 					orient: 'LR',
-					layerPadding: 72,
-					nodePadding: 26,
-					symbol: 'emptyCircle',
+					layerPadding: 100,
+					nodePadding: 32,
+					symbol: 'rect',
+					symbolSize: [160, 64],
 					edgeShape: 'curve',
 					expandAndCollapse: false,
 					initialTreeDepth: -1,
 					lineStyle: {
-						color: darkMode ? 'rgba(148, 163, 184, 0.28)' : 'rgba(100, 116, 139, 0.24)',
+						color: darkMode ? 'rgba(34,197,94,0.28)' : 'rgba(22,163,74,0.24)',
 						width: 2,
 						curveness: 0.55
 					},
 					label: {
-						position: 'left',
+						position: 'inside',
 						verticalAlign: 'middle',
-						align: 'right',
-						fontSize: 13
+						align: 'center',
+						fontSize: 12
 					},
 					leaves: {
 						label: {
-							position: 'right',
-							align: 'left',
+							position: 'inside',
+							align: 'center',
 							color: textMain
 						}
 					},
-					emphasis: {
-						focus: 'descendant'
-					},
+					emphasis: { focus: 'descendant' },
 					roam: true
 				} as any
 			]
@@ -655,8 +654,8 @@
 	<SummaryNodeDialog
 		bind:open={dialogOpen}
 		mode={dialogMode}
-		node={selectedNode}
-		availableNodes={nodes}
+		node={selectedNode ? { ...selectedNode, summaryIds: (selectedNode as any).topicIds ?? [], metadata: { ...selectedNode.metadata, category_type: '' } } : null}
+		availableNodes={nodes.map((n) => ({ ...n, summaryIds: (n as any).topicIds ?? [], metadata: { ...n.metadata, category_type: '' } }))}
 		onConfirm={applyDialog}
 	/>
 
@@ -666,36 +665,23 @@
 			role="presentation"
 			tabindex="-1"
 			onclick={() => (errorDialogOpen = false)}
-			onkeydown={(event) => {
-				if (event.key === 'Escape') errorDialogOpen = false;
-			}}
+			onkeydown={(event) => { if (event.key === 'Escape') errorDialogOpen = false; }}
 		>
 			<div
 				class="error-dialog"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Summary Graph Load Error"
+				aria-label="Semantic Web Load Error"
 				tabindex="0"
 				onclick={(event) => event.stopPropagation()}
 				onkeydown={(event) => event.stopPropagation()}
 			>
 				<div class="eyebrow">Load Error</div>
-				<h3>Could not load Summary Graph</h3>
+				<h3>Could not load Semantic Web</h3>
 				<p class="dialog-copy">{loadError}</p>
 				<div class="dialog-actions">
-					<button type="button" class="secondary-btn" onclick={() => (errorDialogOpen = false)}>
-						Close
-					</button>
-					<button
-						type="button"
-						class="primary-btn"
-						onclick={async () => {
-							errorDialogOpen = false;
-							await loadGraph();
-						}}
-					>
-						Try Again
-					</button>
+					<button type="button" class="secondary-btn" onclick={() => (errorDialogOpen = false)}>Close</button>
+					<button type="button" class="primary-btn" onclick={async () => { errorDialogOpen = false; await loadGraph(); }}>Try Again</button>
 				</div>
 			</div>
 		</div>
@@ -703,20 +689,20 @@
 
 	<div class="hero">
 		<div>
-			<div class="eyebrow">Document Summaries</div>
-			<h2>Summary Graph</h2>
-			<p>Category-first workspace for browsing, editing, and opening category-path summary tabs.</p>
+			<div class="eyebrow">Semantic Web</div>
+			<h2>Topic Graph</h2>
+			<p>Category-first workspace for browsing topics indexed in the Semantic Web.</p>
 		</div>
 		<div class="hero-stats">
 			<div><span>Nodes</span><strong>{nodes.length}</strong></div>
 			<div><span>Tabs</span><strong>{tabs.length}</strong></div>
-			<div><span>Mode</span><strong>Phase 1 Mock</strong></div>
+			<div><span>Topics</span><strong>{nodes.reduce((s, n) => s + n.topicIds.length, 0)}</strong></div>
 		</div>
 	</div>
 
 	<div class="tabbed-window">
 		<div class="tabbed-window-head">
-			<SummaryGraphTabs
+			<TopicGraphTabs
 				{tabs}
 				{activeTabId}
 				onSelect={(tabId) => (activeTabId = tabId)}
@@ -726,30 +712,21 @@
 
 		<div class="tabbed-window-body">
 			{#if activeTab.categoryPath}
-				<SummaryCategoryTab
+				<TopicCategoryTab
 					categoryPath={activeTab.categoryPath}
-					summaries={categorySummaries[activeTab.categoryPath] ?? []}
-					selectedSummaryId={selectedSummaryIdByPath[activeTab.categoryPath] ?? null}
+					topics={categoryTopics[activeTab.categoryPath] ?? []}
+					selectedTopicId={selectedTopicIdByPath[activeTab.categoryPath] ?? null}
 					selectedTarget={selectedTargetByPath[activeTab.categoryPath] ?? null}
-					onSelectSummary={(summary) => selectSummary(activeTab.categoryPath!, summary)}
+					onSelectTopic={(topic) => selectTopic(activeTab.categoryPath!, topic)}
 				/>
 			{:else}
 				<div class="graph-workspace">
-					<div
-						class="graph-stage"
-						role="presentation"
-						bind:this={graphStageEl}
-						onmousemove={(event: MouseEvent) => {
-							if (shouldKeepHoverAlive(event.offsetX, event.offsetY)) {
-								clearHoverHideTimer();
-							}
-						}}
-					>
+					<div class="graph-stage" bind:this={graphStageEl}>
 						{#if loading}
-							<div class="empty-state">Loading summary categories…</div>
+							<div class="empty-state">Loading topic categories…</div>
 						{:else if loadError}
 							<div class="empty-state">
-								Summary Graph could not be loaded. Open the error dialog for details or try again.
+								Semantic Web could not be loaded. Open the error dialog for details or try again.
 							</div>
 						{:else}
 							<Chart
@@ -761,14 +738,12 @@
 								onrendered={syncMiniViewport}
 								onfinished={syncMiniViewport}
 								onmouseover={(event: any) => updateHoverNode(event)}
-								onmousemove={(event: any) => {
-									if (event?.data?.id) updateHoverNode(event);
-								}}
+								onmousemove={(event: any) => { if (event?.data?.id) updateHoverNode(event); }}
 								onmouseout={() => scheduleHoverHide()}
 								onglobalout={() => scheduleHoverHide()}
 								onclick={(event: any) => {
 									const nodeId = String(event?.data?.id ?? '');
-									if (nodeId && nodeId !== 'summary-root') {
+									if (nodeId && nodeId !== 'topic-root') {
 										selectedNodeId = nodeId;
 										hoveredNodeId = nodeId;
 										const clickedNode = nodes.find((node) => node.id === nodeId);
@@ -781,30 +756,21 @@
 								}}
 							/>
 
-							{#if hoveredNode}
-								<div
-									bind:this={hoverCardEl}
-									class="hover-card"
+								{#if hoveredNode}
+									<div
+										bind:this={hoverCardEl}
+										class="hover-card"
 									role="presentation"
 									style={`left:${hoverCardPos.x}px; top:${hoverCardPos.y}px;`}
-									onmouseenter={() => {
-										hoverCardHovering = true;
-										clearHoverHideTimer();
-									}}
-									onmouseleave={() => {
-										hoverCardHovering = false;
-										scheduleHoverHide();
-									}}
+									onmouseenter={() => { hoverCardHovering = true; clearHoverHideTimer(); }}
+									onmouseleave={() => { hoverCardHovering = false; scheduleHoverHide(); }}
 								>
 									<div class="hover-card-head">
 										<div>
 											<div class="hover-card-title">Name</div>
 											<div class="hover-card-value strong">{hoveredNode.label}</div>
 										</div>
-										<div
-											class:active={hoveredNode.id === selectedNodeId}
-											class="hover-selected-pill"
-										>
+										<div class:active={hoveredNode.id === selectedNodeId} class="hover-selected-pill">
 											{hoveredNode.id === selectedNodeId ? 'Selected' : 'Hover'}
 										</div>
 									</div>
@@ -822,8 +788,8 @@
 									</div>
 									<div class="hover-card-row compact">
 										<div>
-											<span>Summaries</span>
-											<strong>{hoveredNode.summaryIds.length}</strong>
+											<span>Topics</span>
+											<strong>{hoveredNode.topicIds.length}</strong>
 										</div>
 										<div>
 											<span>Children</span>
@@ -831,53 +797,14 @@
 										</div>
 									</div>
 									<div class="hover-toolbar">
-										<button
-											type="button"
-											class="toolbar-btn primary"
-											disabled={!hoveredNode.hasSummariesFile}
-											title={hoveredNode.hasSummariesFile ? undefined : 'No summaries.txt file for this category'}
-											onclick={() => runHoverAction('show-summaries', hoveredNode)}
-										>
-											Show Summaries
-										</button
-										>
-										<button
-											type="button"
-											class="toolbar-btn"
-											onclick={() => runHoverAction('toggle-expand', hoveredNode)}
-										>
-											{hoveredNode.expanded ? 'Collapse' : 'Expand'}
-										</button>
-										<button
-											type="button"
-											class="toolbar-btn"
-											onclick={() => runHoverAction('rename', hoveredNode)}>Rename</button
-										>
-										<button
-											type="button"
-											class="toolbar-btn"
-											onclick={() => runHoverAction('metadata', hoveredNode)}>Metadata</button
-										>
-										<button
-											type="button"
-											class="toolbar-btn"
-											onclick={() => runHoverAction('add', hoveredNode)}>Add</button
-										>
-										<button
-											type="button"
-											class="toolbar-btn"
-											onclick={() => runHoverAction('merge', hoveredNode)}>Merge</button
-										>
-										<button
-											type="button"
-											class="toolbar-btn"
-											onclick={() => runHoverAction('split', hoveredNode)}>Split</button
-										>
-										<button
-											type="button"
-											class="toolbar-btn danger"
-											onclick={() => runHoverAction('delete', hoveredNode)}>Delete</button
-										>
+										<button type="button" class="toolbar-btn primary" disabled={!hoveredNode.hasTopicsFile} title={hoveredNode.hasTopicsFile ? undefined : 'No topics.txt file for this category'} onclick={() => runHoverAction('show-topics', hoveredNode)}>Show Topics</button>
+										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('toggle-expand', hoveredNode)}>{hoveredNode.expanded ? 'Collapse' : 'Expand'}</button>
+										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('rename', hoveredNode)}>Rename</button>
+										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('metadata', hoveredNode)}>Metadata</button>
+										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('add', hoveredNode)}>Add</button>
+										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('merge', hoveredNode)}>Merge</button>
+										<button type="button" class="toolbar-btn" onclick={() => runHoverAction('split', hoveredNode)}>Split</button>
+										<button type="button" class="toolbar-btn danger" onclick={() => runHoverAction('delete', hoveredNode)}>Delete</button>
 									</div>
 								</div>
 							{/if}
@@ -889,30 +816,20 @@
 								</div>
 								<svg viewBox="0 0 100 100" class="mini-map-svg" aria-hidden="true">
 									{#each miniMapLayout.edges as edge}
-										<line
-											x1={edge.fromX * 100}
-											y1={edge.fromY * 100}
-											x2={edge.toX * 100}
-											y2={edge.toY * 100}
-											class="mini-map-edge"
-										/>
+										<line x1={edge.fromX * 100} y1={edge.fromY * 100} x2={edge.toX * 100} y2={edge.toY * 100} class="mini-map-edge" />
 									{/each}
 									{#each miniMapLayout.nodes as node}
-										<circle
-											cx={node.x * 100}
-											cy={node.y * 100}
-											r={node.selected ? 2.6 : 1.8}
+										<rect
+											x={node.x * 100 - 3}
+											y={node.y * 100 - 1.5}
+											width="6"
+											height="3"
+											rx="1"
 											class:selected={node.selected}
 											class="mini-map-node"
 										/>
 									{/each}
-									<rect
-										x={miniViewport.left * 100}
-										y={miniViewport.top * 100}
-										width={miniViewport.width * 100}
-										height={miniViewport.height * 100}
-										class="mini-map-viewport"
-									/>
+									<rect x={miniViewport.left * 100} y={miniViewport.top * 100} width={miniViewport.width * 100} height={miniViewport.height * 100} class="mini-map-viewport" />
 								</svg>
 							</div>
 						{/if}
@@ -951,12 +868,8 @@
 										<strong>{selectedNode.childIds.length}</strong>
 									</div>
 									<div class="inspector-stat">
-										<span>Summaries</span>
-										<strong>{selectedNode.summaryIds.length}</strong>
-									</div>
-									<div class="inspector-stat">
-										<span>Category Type</span>
-										<strong>{selectedNode.metadata.category_type || '—'}</strong>
+										<span>Topics</span>
+										<strong>{selectedNode.topicIds.length}</strong>
 									</div>
 									<div class="inspector-stat inspector-stat-wide">
 										<span>Category Path</span>
@@ -968,43 +881,20 @@
 									</div>
 								</div>
 								<div class="action-grid action-grid-top">
-									<button
-										type="button"
-										onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}
-									>
+									<button type="button" onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}>
 										{selectedNode.expanded ? 'Collapse' : 'Expand'}
 									</button>
-									<button
-										type="button"
-										class="accent-action"
-										disabled={!selectedNode.hasSummariesFile}
-										title={selectedNode.hasSummariesFile ? undefined : 'No summaries.txt file for this category'}
-										onclick={() => showSummaries(selectedNode)}
-									>
-										Show Summaries
+									<button type="button" class="accent-action" disabled={!selectedNode.hasTopicsFile} title={selectedNode.hasTopicsFile ? undefined : 'No topics.txt file for this category'} onclick={() => showTopics(selectedNode)}>
+										Show Topics
 									</button>
 								</div>
 								<div class="action-grid">
-									<button type="button" onclick={() => openDialog('rename', selectedNode.id)}
-										>Rename</button
-									>
-									<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}
-										>Edit Metadata</button
-									>
-									<button type="button" onclick={() => openDialog('add', selectedNode.id)}
-										>Add Node</button
-									>
-									<button type="button" onclick={() => openDialog('merge', selectedNode.id)}
-										>Merge</button
-									>
-									<button type="button" onclick={() => openDialog('split', selectedNode.id)}
-										>Split</button
-									>
-									<button
-										type="button"
-										class="danger"
-										onclick={() => openDialog('delete', selectedNode.id)}>Delete</button
-									>
+									<button type="button" onclick={() => openDialog('rename', selectedNode.id)}>Rename</button>
+									<button type="button" onclick={() => openDialog('metadata', selectedNode.id)}>Edit Metadata</button>
+									<button type="button" onclick={() => openDialog('add', selectedNode.id)}>Add Node</button>
+									<button type="button" onclick={() => openDialog('merge', selectedNode.id)}>Merge</button>
+									<button type="button" onclick={() => openDialog('split', selectedNode.id)}>Split</button>
+									<button type="button" class="danger" onclick={() => openDialog('delete', selectedNode.id)}>Delete</button>
 								</div>
 							</div>
 						{:else}
@@ -1047,10 +937,7 @@
 		box-shadow: 0 30px 80px rgba(15, 23, 42, 0.5);
 	}
 
-	.dialog-copy {
-		margin-top: 0.55rem;
-		color: var(--muted);
-	}
+	.dialog-copy { margin-top: 0.55rem; color: var(--muted); }
 
 	.dialog-actions {
 		display: flex;
@@ -1059,23 +946,15 @@
 		margin-top: 1rem;
 	}
 
-	.primary-btn,
-	.secondary-btn {
+	.primary-btn, .secondary-btn {
 		border-radius: 12px;
 		padding: 0.72rem 1rem;
 		border: 1px solid rgba(148, 163, 184, 0.18);
 		cursor: pointer;
 	}
 
-	.primary-btn {
-		background: var(--accent);
-		color: #fff;
-	}
-
-	.secondary-btn {
-		background: rgba(15, 23, 42, 0.55);
-		color: var(--text);
-	}
+	.primary-btn { background: var(--accent); color: #fff; }
+	.secondary-btn { background: rgba(15, 23, 42, 0.55); color: var(--text); }
 
 	.hero {
 		display: flex;
@@ -1086,7 +965,7 @@
 		padding: 1.1rem 1.2rem;
 		border-radius: 24px;
 		background:
-			radial-gradient(circle at top left, rgba(129, 140, 248, 0.18), transparent 42%),
+			radial-gradient(circle at top left, rgba(34, 197, 94, 0.18), transparent 42%),
 			linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66));
 		border: 1px solid var(--border);
 	}
@@ -1099,22 +978,9 @@
 		color: var(--muted);
 	}
 
-	h2,
-	h3,
-	p {
-		margin: 0;
-	}
-
-	h2 {
-		margin-top: 0.3rem;
-		font-size: 1.5rem;
-	}
-
-	.hero p {
-		margin-top: 0.45rem;
-		max-width: 52rem;
-		color: var(--muted);
-	}
+	h2, h3, p { margin: 0; }
+	h2 { margin-top: 0.3rem; font-size: 1.5rem; }
+	.hero p { margin-top: 0.45rem; max-width: 52rem; color: var(--muted); }
 
 	.hero-stats {
 		display: grid;
@@ -1125,39 +991,16 @@
 	.hero-stats div {
 		min-width: 110px;
 		border-radius: 16px;
-		border: 1px solid rgba(148, 163, 184, 0.12);
+		border: 1px solid rgba(34, 197, 94, 0.15);
 		background: rgba(30, 41, 59, 0.36);
 		padding: 0.75rem 0.9rem;
 	}
 
-	.hero-stats span {
-		display: block;
-		font-size: 0.72rem;
-		color: var(--muted);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-	}
+	.hero-stats span { display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+	.hero-stats strong { display: block; margin-top: 0.2rem; font-size: 1rem; }
 
-	.hero-stats strong {
-		display: block;
-		margin-top: 0.2rem;
-		font-size: 1rem;
-	}
-
-	.tabbed-window {
-		display: flex;
-		min-height: 0;
-		flex: 1;
-		flex-direction: column;
-	}
-
-	.tabbed-window-head {
-		position: relative;
-		z-index: 4;
-		margin-bottom: -1px;
-		padding-inline: 0.55rem;
-	}
-
+	.tabbed-window { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+	.tabbed-window-head { position: relative; z-index: 4; margin-bottom: -1px; padding-inline: 0.55rem; }
 	.tabbed-window-body {
 		display: flex;
 		min-height: 0;
@@ -1166,9 +1009,7 @@
 		border: 1px solid var(--border);
 		border-radius: 0 24px 24px 24px;
 		background: linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(15, 23, 42, 0.58));
-		box-shadow:
-			inset 0 1px 0 rgba(255, 255, 255, 0.04),
-			0 18px 44px rgba(2, 6, 23, 0.18);
+		box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 44px rgba(2,6,23,0.18);
 		overflow: hidden;
 	}
 
@@ -1180,17 +1021,8 @@
 		gap: 0;
 	}
 
-	.graph-stage,
-	.inspector {
-		min-height: 0;
-		background: transparent;
-	}
-
-	.graph-stage {
-		position: relative;
-		overflow: hidden;
-		padding: 0.85rem 0.75rem 0.75rem;
-	}
+	.graph-stage, .inspector { min-height: 0; background: transparent; }
+	.graph-stage { position: relative; overflow: hidden; padding: 0.85rem 0.75rem 0.75rem; }
 
 	.hover-card {
 		position: absolute;
@@ -1198,7 +1030,7 @@
 		width: min(428px, calc(100% - 2rem));
 		max-width: calc(100% - 2rem);
 		border-radius: 18px;
-		border: 1px solid rgba(129, 140, 248, 0.2);
+		border: 1px solid rgba(34, 197, 94, 0.2);
 		background: rgba(15, 23, 42, 0.94);
 		box-shadow: 0 20px 48px rgba(2, 6, 23, 0.38);
 		backdrop-filter: blur(12px);
@@ -1215,13 +1047,9 @@
 
 	.hover-card-head > div:first-child,
 	.hover-card-row > strong,
-	.hover-card-row.compact > div {
-		min-width: 0;
-	}
+	.hover-card-row.compact > div { min-width: 0; }
 
-	.hover-card-title,
-	.hover-card-row span,
-	.mini-map-head span {
+	.hover-card-title, .hover-card-row span, .mini-map-head span {
 		font-size: 0.68rem;
 		font-weight: 700;
 		letter-spacing: 0.08em;
@@ -1229,8 +1057,7 @@
 		color: var(--muted);
 	}
 
-	.hover-card-value,
-	.hover-card-row strong {
+	.hover-card-value, .hover-card-row strong {
 		display: block;
 		margin-top: 0.2rem;
 		font-size: 0.84rem;
@@ -1241,11 +1068,7 @@
 		white-space: normal;
 	}
 
-	.hover-card-value.strong {
-		font-size: 0.98rem;
-		font-weight: 700;
-		color: var(--text);
-	}
+	.hover-card-value.strong { font-size: 0.98rem; font-weight: 700; color: var(--text); }
 
 	.hover-selected-pill {
 		border-radius: 999px;
@@ -1256,20 +1079,13 @@
 	}
 
 	.hover-selected-pill.active {
-		border-color: rgba(129, 140, 248, 0.36);
-		background: rgba(99, 102, 241, 0.18);
-		color: #e0e7ff;
+		border-color: rgba(34, 197, 94, 0.36);
+		background: rgba(13, 148, 136, 0.18);
+		color: #a7f3d0;
 	}
 
-	.hover-card-row {
-		margin-bottom: 0.65rem;
-	}
-
-	.hover-card-row.compact {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.75rem;
-	}
+	.hover-card-row { margin-bottom: 0.65rem; }
+	.hover-card-row.compact { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
 
 	.hover-toolbar {
 		display: grid;
@@ -1288,21 +1104,13 @@
 		cursor: pointer;
 	}
 
-	.toolbar-btn.primary {
-		border-color: rgba(129, 140, 248, 0.32);
-		background: rgba(99, 102, 241, 0.18);
-		color: #e0e7ff;
-	}
+	.toolbar-btn.primary { border-color: rgba(34, 197, 94, 0.32); background: rgba(13, 148, 136, 0.18); color: #a7f3d0; }
+	.toolbar-btn.danger { border-color: rgba(248, 113, 113, 0.28); color: #fca5a5; }
 
 	.toolbar-btn:disabled,
 	.accent-action:disabled {
 		opacity: 0.38;
 		cursor: not-allowed;
-	}
-
-	.toolbar-btn.danger {
-		border-color: rgba(248, 113, 113, 0.28);
-		color: #fca5a5;
 	}
 
 	.mini-map {
@@ -1312,58 +1120,41 @@
 		z-index: 10;
 		width: 220px;
 		border-radius: 18px;
-		border: 1px solid rgba(148, 163, 184, 0.18);
+		border: 1px solid rgba(34, 197, 94, 0.18);
 		background: rgba(15, 23, 42, 0.92);
 		box-shadow: 0 18px 42px rgba(2, 6, 23, 0.28);
 		padding: 0.75rem;
 		backdrop-filter: blur(10px);
 	}
 
-	.mini-map-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 0.5rem;
-	}
-
-	.mini-map-head strong {
-		font-size: 0.78rem;
-		color: var(--text);
-	}
+	.mini-map-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+	.mini-map-head strong { font-size: 0.78rem; color: var(--text); }
 
 	.mini-map-svg {
 		display: block;
 		width: 100%;
 		height: 120px;
 		border-radius: 12px;
-		background:
-			radial-gradient(circle at top left, rgba(129, 140, 248, 0.12), transparent 48%),
-			rgba(2, 6, 23, 0.34);
+		background: radial-gradient(circle at top left, rgba(34, 197, 94, 0.12), transparent 48%), rgba(2, 6, 23, 0.34);
 	}
 
-	.mini-map-edge {
-		stroke: rgba(148, 163, 184, 0.32);
-		stroke-width: 1.2;
-	}
-
-	.mini-map-node {
-		fill: rgba(226, 232, 240, 0.86);
-	}
-
-	.mini-map-node.selected {
-		fill: #818cf8;
-	}
-
-	.mini-map-viewport {
-		fill: rgba(129, 140, 248, 0.08);
-		stroke: rgba(129, 140, 248, 0.92);
-		stroke-width: 1.2;
-		rx: 4;
-	}
+	.mini-map-edge { stroke: rgba(34, 197, 94, 0.32); stroke-width: 1.2; }
+	.mini-map-node { fill: rgba(226, 232, 240, 0.86); }
+	.mini-map-node.selected { fill: #22c55e; }
+	.mini-map-viewport { fill: rgba(34, 197, 94, 0.08); stroke: rgba(34, 197, 94, 0.92); stroke-width: 1.2; rx: 4; }
 
 	.empty-state {
 		color: var(--muted);
 		font-size: 0.84rem;
+		display: flex;
+		min-height: 220px;
+		align-items: center;
+		justify-content: center;
+		border-radius: 18px;
+		border: 1px dashed rgba(148, 163, 184, 0.2);
+		background: rgba(15, 23, 42, 0.2);
+		text-align: center;
+		padding: 1rem;
 	}
 
 	.action-grid button {
@@ -1376,7 +1167,7 @@
 	}
 
 	.inspector {
-		border-left: 1px solid rgba(148, 163, 184, 0.12);
+		border-left: 1px solid rgba(34, 197, 94, 0.12);
 		padding: 1rem;
 		background: rgba(2, 6, 23, 0.16);
 		overflow: auto;
@@ -1384,101 +1175,31 @@
 
 	.inspector-card {
 		border-radius: 22px;
-		border: 1px solid rgba(129, 140, 248, 0.16);
+		border: 1px solid rgba(34, 197, 94, 0.16);
 		background: rgba(15, 23, 42, 0.7);
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 		padding: 1rem;
 	}
 
-	.inspector-card-head {
-		margin-bottom: 0.95rem;
-	}
+	.inspector-card-head { margin-bottom: 0.95rem; }
 
-	.inspector-grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.75rem;
-		margin: 1rem 0;
-	}
+	.inspector-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin: 1rem 0; }
 
-	.inspector-stat {
-		border-radius: 16px;
-		background: var(--panel-alt);
-		padding: 0.8rem;
-		min-width: 0;
-	}
+	.inspector-stat { border-radius: 16px; background: var(--panel-alt); padding: 0.8rem; min-width: 0; }
+	.inspector-stat-wide { grid-column: 1 / -1; }
+	.inspector-stat span { display: block; margin-bottom: 0.2rem; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+	.inspector-stat strong { font-size: 0.92rem; display: block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
 
-	.inspector-stat-wide {
-		grid-column: 1 / -1;
-	}
+	.action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+	.action-grid-top { margin-bottom: 0.75rem; }
 
-	.inspector-stat span {
-		display: block;
-		margin-bottom: 0.2rem;
-		font-size: 0.72rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--muted);
-	}
-
-	.inspector-stat strong {
-		font-size: 0.92rem;
-		display: block;
-		max-width: 100%;
-		overflow-wrap: anywhere;
-		word-break: break-word;
-		white-space: normal;
-	}
-
-	.action-grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.75rem;
-	}
-
-	.action-grid-top {
-		margin-bottom: 0.75rem;
-	}
-
-	.accent-action {
-		background: rgba(99, 102, 241, 0.14);
-		color: #c7d2fe;
-		border-color: rgba(129, 140, 248, 0.3);
-	}
-
-	.action-grid .danger {
-		border-color: rgba(248, 113, 113, 0.28);
-		color: #fca5a5;
-	}
-
-	.empty-state {
-		display: flex;
-		min-height: 220px;
-		align-items: center;
-		justify-content: center;
-		border-radius: 18px;
-		border: 1px dashed rgba(148, 163, 184, 0.2);
-		background: rgba(15, 23, 42, 0.2);
-		text-align: center;
-		padding: 1rem;
-	}
+	.accent-action { background: rgba(13, 148, 136, 0.14); color: #6ee7b7; border-color: rgba(34, 197, 94, 0.3); }
+	.action-grid .danger { border-color: rgba(248, 113, 113, 0.28); color: #fca5a5; }
 
 	@media (max-width: 980px) {
-		.graph-workspace {
-			grid-template-columns: minmax(0, 1fr);
-		}
-
-		.mini-map {
-			width: 180px;
-		}
-
-		.hover-toolbar {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-
-		.inspector-grid {
-			grid-template-columns: 1fr;
-		}
+		.graph-workspace { grid-template-columns: minmax(0, 1fr); }
+		.mini-map { width: 180px; }
+		.hover-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.inspector-grid { grid-template-columns: 1fr; }
 	}
 </style>

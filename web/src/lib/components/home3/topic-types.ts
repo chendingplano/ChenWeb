@@ -1,56 +1,56 @@
-export type SummaryCategoryMetadata = {
+export type TopicCategoryMetadata = {
 	desc: string;
-	category_type: string;
 	confidence: number;
 	keywords: string[];
 	create_time: string;
 };
 
-export type SummaryPdfTarget = {
+export type TopicPdfTarget = {
 	inputId: number;
 	page: number;
-	summaryId: string;
+	topicId: string;
 };
 
-export type SummaryRecordTarget = {
+export type TopicRecordTarget = {
 	page: number;
 	coords: number[];
 };
 
-export type SummaryRecordCard = {
+export type TopicCard = {
 	id: string;
 	pdfFileName: string;
-	keywords: string[];
-	summaryText: string;
+	topicKeywords: string[];
+	topicText: string;
+	topicType: string;
 	inputId: number;
 	page: number;
 	coords: number[];
-	targets: SummaryRecordTarget[];
+	targets: TopicRecordTarget[];
 };
 
-export type SummaryCategoryNode = {
+export type TopicCategoryNode = {
 	id: string;
 	categoryPath: string;
 	label: string;
-	metadata: SummaryCategoryMetadata;
+	metadata: TopicCategoryMetadata;
 	childIds: string[];
-	summaryIds: string[];
-	hasSummariesFile: boolean;
+	topicIds: string[];
+	hasTopicsFile: boolean;
 	expanded?: boolean;
 };
 
-export type SummaryCategoryTab = {
+export type TopicCategoryTab = {
 	id: string;
 	label: string;
 	categoryPath: string | null;
 	closable: boolean;
 };
 
-export type SummaryTreeSummary = SummaryRecordCard & {
+export type TopicTreeTopic = TopicCard & {
 	recordId: number;
 };
 
-export type SummaryTreeRecord = {
+export type TopicTreeRecord = {
 	id: number;
 	title: string;
 	fileName: string;
@@ -60,5 +60,5 @@ export type SummaryTreeRecord = {
 	procStatus: string;
 	createTime: string;
 	modifyTime: string;
-	summaries: SummaryTreeSummary[];
+	topics: TopicTreeTopic[];
 };

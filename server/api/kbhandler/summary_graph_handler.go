@@ -22,13 +22,14 @@ type summaryGraphMetadata struct {
 }
 
 type summaryGraphNode struct {
-	ID           string               `json:"id"`
-	CategoryPath string               `json:"categoryPath"`
-	Label        string               `json:"label"`
-	Metadata     summaryGraphMetadata `json:"metadata"`
-	ChildIDs     []string             `json:"childIds"`
-	SummaryIDs   []string             `json:"summaryIds"`
-	Expanded     bool                 `json:"expanded"`
+	ID               string               `json:"id"`
+	CategoryPath     string               `json:"categoryPath"`
+	Label            string               `json:"label"`
+	Metadata         summaryGraphMetadata `json:"metadata"`
+	ChildIDs         []string             `json:"childIds"`
+	SummaryIDs       []string             `json:"summaryIds"`
+	HasSummariesFile bool                 `json:"hasSummariesFile"`
+	Expanded         bool                 `json:"expanded"`
 }
 
 type listSummaryGraphResponse struct {
@@ -85,14 +86,16 @@ func readSummaryGraphNodes(summaryTreeDir string) ([]summaryGraphNode, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		summaryIDs, hasSummariesFile := readSummaryGraphSummaryIDs(path)
 		node := summaryGraphNode{
-			ID:           rel,
-			CategoryPath: rel,
-			Label:        filepath.Base(path),
-			Metadata:     readSummaryGraphMetadata(path),
-			ChildIDs:     readSummaryGraphChildIDs(summaryTreeDir, path),
-			SummaryIDs:   readSummaryGraphSummaryIDs(path),
-			Expanded:     false,
+			ID:               rel,
+			CategoryPath:     rel,
+			Label:            filepath.Base(path),
+			Metadata:         readSummaryGraphMetadata(path),
+			ChildIDs:         readSummaryGraphChildIDs(summaryTreeDir, path),
+			SummaryIDs:       summaryIDs,
+			HasSummariesFile: hasSummariesFile,
+			Expanded:         false,
 		}
 		nodes = append(nodes, node)
 		return nil
@@ -128,11 +131,11 @@ func readSummaryGraphChildIDs(summaryTreeDir string, dir string) []string {
 	return childIDs
 }
 
-func readSummaryGraphSummaryIDs(dir string) []string {
+func readSummaryGraphSummaryIDs(dir string) ([]string, bool) {
 	path := filepath.Join(dir, "summaries.txt")
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return []string{}
+		return []string{}, false
 	}
 	rows := make([]string, 0)
 	for _, row := range strings.Split(string(body), "\n") {
@@ -143,7 +146,7 @@ func readSummaryGraphSummaryIDs(dir string) []string {
 		rows = append(rows, row)
 	}
 	sort.Strings(rows)
-	return rows
+	return rows, true
 }
 
 func readSummaryGraphMetadata(dir string) summaryGraphMetadata {

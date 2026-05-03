@@ -1,44 +1,43 @@
 /**
- * @typedef {{ id: string, label: string, categoryPath: string | null, closable: boolean }} SummaryCategoryTab
+ * @typedef {{ id: string, label: string, categoryPath: string | null, closable: boolean }} TopicCategoryTab
  * @typedef {{
  *   id: string,
  *   label: string,
  *   categoryPath: string,
  *   metadata: {
  *     desc: string,
- *     category_type: string,
  *     confidence: number,
  *     keywords: string[],
  *     create_time: string
  *   },
  *   childIds: string[],
- *   summaryIds: string[],
- *   hasSummariesFile: boolean,
+ *   topicIds: string[],
+ *   hasTopicsFile: boolean,
  *   expanded?: boolean
- * }} SummaryGraphNode
+ * }} TopicGraphNode
  */
 
 const FIXED_GRAPH_TAB = {
-	id: 'summary-graph',
-	label: 'Summary Graph',
+	id: 'topic-graph',
+	label: 'Semantic Web',
 	categoryPath: null,
 	closable: false
 };
 
 /**
- * @returns {SummaryCategoryTab[]}
+ * @returns {TopicCategoryTab[]}
  */
-export function createSummaryGraphTabs() {
+export function createTopicGraphTabs() {
 	return [{ ...FIXED_GRAPH_TAB }];
 }
 
 /**
- * @param {SummaryCategoryTab[]} tabs
+ * @param {TopicCategoryTab[]} tabs
  * @param {string} categoryPath
- * @returns {{ tabs: SummaryCategoryTab[], activeTabId: string }}
+ * @returns {{ tabs: TopicCategoryTab[], activeTabId: string }}
  */
-export function openCategorySummaryTab(tabs, categoryPath) {
-	const nextId = `category:${categoryPath}`;
+export function openCategoryTopicTab(tabs, categoryPath) {
+	const nextId = `topic-category:${categoryPath}`;
 	const existing = tabs.find((tab) => tab.id === nextId);
 	if (existing) {
 		return { tabs, activeTabId: existing.id };
@@ -59,9 +58,9 @@ export function openCategorySummaryTab(tabs, categoryPath) {
 }
 
 /**
- * @param {SummaryGraphNode[]} nodes
+ * @param {TopicGraphNode[]} nodes
  * @param {string} nodeId
- * @returns {SummaryGraphNode[]}
+ * @returns {TopicGraphNode[]}
  */
 export function toggleNodeExpanded(nodes, nodeId) {
 	return nodes.map((node) =>
@@ -70,20 +69,20 @@ export function toggleNodeExpanded(nodes, nodeId) {
 }
 
 /**
- * @param {SummaryGraphNode[]} nodes
+ * @param {TopicGraphNode[]} nodes
  * @param {string} nodeId
  * @param {string} label
- * @returns {SummaryGraphNode[]}
+ * @returns {TopicGraphNode[]}
  */
 export function renameNode(nodes, nodeId, label) {
 	return nodes.map((node) => (node.id === nodeId ? { ...node, label } : node));
 }
 
 /**
- * @param {SummaryGraphNode[]} nodes
+ * @param {TopicGraphNode[]} nodes
  * @param {string} parentId
- * @param {SummaryGraphNode} childNode
- * @returns {SummaryGraphNode[]}
+ * @param {TopicGraphNode} childNode
+ * @returns {TopicGraphNode[]}
  */
 export function addChildNode(nodes, parentId, childNode) {
 	return [
@@ -95,9 +94,9 @@ export function addChildNode(nodes, parentId, childNode) {
 }
 
 /**
- * @param {SummaryGraphNode[]} nodes
+ * @param {TopicGraphNode[]} nodes
  * @param {string} nodeId
- * @returns {SummaryGraphNode[]}
+ * @returns {TopicGraphNode[]}
  */
 export function deleteNode(nodes, nodeId) {
 	return nodes
@@ -109,10 +108,10 @@ export function deleteNode(nodes, nodeId) {
 }
 
 /**
- * @param {SummaryGraphNode[]} nodes
+ * @param {TopicGraphNode[]} nodes
  * @param {string} sourceId
  * @param {string} targetId
- * @returns {SummaryGraphNode[]}
+ * @returns {TopicGraphNode[]}
  */
 export function mergeNodes(nodes, sourceId, targetId) {
 	const source = nodes.find((node) => node.id === sourceId);
@@ -125,10 +124,9 @@ export function mergeNodes(nodes, sourceId, targetId) {
 				return {
 					...node,
 					childIds: [...new Set([...node.childIds, ...source.childIds])],
-					summaryIds: [...new Set([...(node.summaryIds ?? []), ...(source.summaryIds ?? [])])]
+					topicIds: [...new Set([...(node.topicIds ?? []), ...(source.topicIds ?? [])])]
 				};
 			}
-
 			return {
 				...node,
 				childIds: node.childIds.filter((childId) => childId !== sourceId)
@@ -137,10 +135,10 @@ export function mergeNodes(nodes, sourceId, targetId) {
 }
 
 /**
- * @param {SummaryGraphNode[]} nodes
+ * @param {TopicGraphNode[]} nodes
  * @param {string} nodeId
  * @param {string[]} labels
- * @returns {SummaryGraphNode[]}
+ * @returns {TopicGraphNode[]}
  */
 export function splitNode(nodes, nodeId, labels) {
 	const target = nodes.find((node) => node.id === nodeId);
@@ -155,14 +153,13 @@ export function splitNode(nodes, nodeId, labels) {
 		label,
 		metadata: {
 			desc: `Split from ${target.label}`,
-			category_type: target.metadata.category_type,
 			confidence: target.metadata.confidence,
 			keywords: [...target.metadata.keywords],
 			create_time: target.metadata.create_time
 		},
 		childIds: [],
-		summaryIds: [],
-		hasSummariesFile: false,
+		topicIds: [],
+		hasTopicsFile: false,
 		expanded: false
 	}));
 

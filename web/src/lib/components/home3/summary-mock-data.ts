@@ -18,6 +18,7 @@ export const MOCK_SUMMARY_GRAPH_NODES: SummaryCategoryNode[] = [
 		},
 		childIds: ['finance/tax', 'finance/payroll'],
 		summaryIds: [],
+		hasSummariesFile: false,
 		expanded: true
 	},
 	{
@@ -33,6 +34,7 @@ export const MOCK_SUMMARY_GRAPH_NODES: SummaryCategoryNode[] = [
 		},
 		childIds: ['finance/tax/federal-corporate'],
 		summaryIds: ['sum-tax-1', 'sum-tax-2'],
+		hasSummariesFile: true,
 		expanded: true
 	},
 	{
@@ -48,6 +50,7 @@ export const MOCK_SUMMARY_GRAPH_NODES: SummaryCategoryNode[] = [
 		},
 		childIds: [],
 		summaryIds: ['sum-fed-1'],
+		hasSummariesFile: true,
 		expanded: false
 	},
 	{
@@ -63,6 +66,7 @@ export const MOCK_SUMMARY_GRAPH_NODES: SummaryCategoryNode[] = [
 		},
 		childIds: [],
 		summaryIds: ['sum-pay-1'],
+		hasSummariesFile: true,
 		expanded: false
 	},
 	{
@@ -78,6 +82,7 @@ export const MOCK_SUMMARY_GRAPH_NODES: SummaryCategoryNode[] = [
 		},
 		childIds: ['research/standards/engineering/high-voltage/legacy-archive'],
 		summaryIds: [],
+		hasSummariesFile: false,
 		expanded: true
 	},
 	{
@@ -93,6 +98,7 @@ export const MOCK_SUMMARY_GRAPH_NODES: SummaryCategoryNode[] = [
 		},
 		childIds: [],
 		summaryIds: ['sum-legacy-1'],
+		hasSummariesFile: true,
 		expanded: false
 	}
 ];
