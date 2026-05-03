@@ -98,6 +98,7 @@ type FixedSizeChunkingService struct {
 	CategoryPromptErr             error
 	TopicEmbeddingModelName       string
 	SummaryEmbeddingModelName     string
+	CategorySimilarityMinScore    float64
 	GenerateSummary               func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, error)
 	GenerateSummaryTreeCategories func(ctx context.Context, root SummaryItem) ([]string, []CategoryPathNode, error)
 }
@@ -199,6 +200,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 			summaryEmbeddingModelName = summaryEmbeddingModelRef
 		}
 	}
+	categorySimilarityMinScore := envFloat("CATEGORY_SIMILARITY_MIN_SCORE", DefaultCategorySimilarityMinScore, 0)
 	return &FixedSizeChunkingService{
 		Store:                     store,
 		Extractor:                 extractor,
@@ -230,9 +232,10 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 		CategoryPromptRef:         categoryPromptRef,
 		CategoryPromptPath:        categoryPromptPath,
 		CategoryPromptErr:         categoryPromptErr,
-		Embedder:                  embedder,
-		TopicEmbeddingModelName:   topicEmbeddingModelName,
-		SummaryEmbeddingModelName: summaryEmbeddingModelName,
+		Embedder:                   embedder,
+		TopicEmbeddingModelName:    topicEmbeddingModelName,
+		SummaryEmbeddingModelName:  summaryEmbeddingModelName,
+		CategorySimilarityMinScore: categorySimilarityMinScore,
 	}
 }
 
@@ -354,7 +357,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
-	if err := writeTopicsCategoryTreeToDir(s.Logger, s.TreeRootDir, rec.ID, topics); err != nil {
+	if err := indexTopicsInTreeDir(ctx, s.Embedder, s.TopicEmbeddingModelName, s.CategorySimilarityMinScore, s.Logger, s.TreeRootDir, rec.ID, topics); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
@@ -646,7 +649,7 @@ func (s *FixedSizeChunkingService) embedWithRetry(ctx context.Context, input llm
 	return nil, lastErr
 }
 
-func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, recordID int64, artifactBase string, topics []TopicItem) error {
+func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, recordID int64, _ string, topics []TopicItem) error {
 	if s.Embedder == nil || strings.TrimSpace(s.TopicEmbeddingModelName) == "" {
 		return nil
 	}
@@ -654,41 +657,29 @@ func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, reco
 		return nil
 	}
 
-	type topicEmbed struct {
-		TopicID   int
-		Embedding []float64
+	targetDir, err := buildRecordArtifactDir(s.ChunkDir, recordID)
+	if err != nil {
+		return err
 	}
-	embeddings := make([]topicEmbed, 0, len(topics))
+	embedDir := filepath.Join(targetDir, "embeddings")
+	if err := os.MkdirAll(embedDir, 0o755); err != nil {
+		return fmt.Errorf("(MID_26050201) create embeddings dir failed: %w", err)
+	}
+
 	for _, topic := range topics {
 		vec, err := s.embedWithRetry(ctx, llmclients.EmbedInput{
 			ModelName: s.TopicEmbeddingModelName,
 			InputText: topic.Topic,
 		})
 		if err != nil {
-			return fmt.Errorf("(MID_26043003) embed topic seq=%d failed: %w", topic.SeqNo, err)
+			return fmt.Errorf("(MID_26050202) embed topic seq=%d failed: %w", topic.SeqNo, err)
 		}
-		embeddings = append(embeddings, topicEmbed{
-			TopicID:   topic.SeqNo,
-			Embedding: vec,
-		})
-	}
-
-	targetDir, err := buildRecordArtifactDir(s.ChunkDir, recordID)
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(targetDir, artifactBase+".embed")
-	var b strings.Builder
-	for i, e := range embeddings {
-		if i > 0 {
-			b.WriteByte('\n')
+		embedPath := filepath.Join(embedDir, fmt.Sprintf("topic_%d.embed", topic.SeqNo))
+		if err := os.WriteFile(embedPath, []byte(formatFloatArray(vec)+"\n"), 0o644); err != nil {
+			return fmt.Errorf("(MID_26050203) write embed file for topic %d failed: %w", topic.SeqNo, err)
 		}
-		b.WriteString(fmt.Sprintf("topic_id: %d\n", e.TopicID))
-		b.WriteString("embedding: ")
-		b.WriteString(formatFloatArray(e.Embedding))
-		b.WriteByte('\n')
 	}
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	return nil
 }
 
 func (s *FixedSizeChunkingService) embedAndWriteSummaries(
@@ -705,6 +696,10 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(
 	if err != nil {
 		return err
 	}
+	embedDir := filepath.Join(targetDir, "embeddings")
+	if err := os.MkdirAll(embedDir, 0o755); err != nil {
+		return fmt.Errorf("(MID_26043100) create embeddings dir failed: %w", err)
+	}
 	for _, item := range summaries {
 		summaryText := strings.TrimSpace(item.Summary)
 		if summaryText == "" {
@@ -717,7 +712,7 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(
 		if err != nil {
 			return fmt.Errorf("(MID_26043101) embed summary %q failed: %w", item.SummaryID, err)
 		}
-		embedPath := filepath.Join(targetDir, summaryEmbedFileName(item.Level, item.SeqNo))
+		embedPath := filepath.Join(embedDir, summaryEmbedFileName(item.Level, item.SeqNo))
 		if err := os.WriteFile(embedPath, []byte(formatFloatArray(vec)+"\n"), 0o644); err != nil {
 			return fmt.Errorf("(MID_26043102) write embed file for summary %q failed: %w", item.SummaryID, err)
 		}
@@ -1183,8 +1178,7 @@ func envInt(key string, fallback int, min int) int {
 	return n
 }
 
-/*
-func envFloat(key string, fallback float64, min float64) float64 {
+func envFloat(key string, fallback float64, minVal float64) float64 {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
 		return fallback
@@ -1193,12 +1187,11 @@ func envFloat(key string, fallback float64, min float64) float64 {
 	if err != nil {
 		return fallback
 	}
-	if n < min {
-		return min
+	if n < minVal {
+		return minVal
 	}
 	return n
 }
-*/
 
 func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
 	modelRef = strings.TrimSpace(os.Getenv("CHUNK_EXTRACT_TOPIC_MODEL_NAME"))

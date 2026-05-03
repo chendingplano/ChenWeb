@@ -2,8 +2,10 @@ package docprocessing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -385,7 +387,10 @@ func extractTopicsFromLinesWithLLM(
 		if topicType == "" {
 			topicType = "general"
 		}
-		topic_keywords := compactTopicArray(m["keywords"])
+		topic_keywords := compactTopicArray(m["topic_keywords"])
+		if len(topic_keywords) == 0 {
+			topic_keywords = compactTopicArray(m["keywords"])
+		}
 
 		categoryPath, categoryFallbackReason := normalizeAndValidateTopicCategoryPath(extractCategoryPathFromLLM(m), topicType)
 
@@ -427,5 +432,449 @@ func extractTopicsFromLinesWithLLM(
 		nextSeq++
 	}
 
+	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// New topic tree indexing (spec Section 6.5)
+// ---------------------------------------------------------------------------
+
+const (
+	topicCategoryEmbedFileName = "category.embed"
+	topicCategoryMetaFileName  = "metadata.txt"
+	topicsFileName             = "topics.txt"
+	DefaultCategorySimilarityMinScore = 0.85
+)
+
+// indexTopicsInTreeDir indexes all topics from a single record into the topic
+// tree at treeRootDir using cosine-similarity-based directory matching.
+// If embedder is nil similarity matching is skipped and the normalised category
+// name is used as directory name directly.
+func indexTopicsInTreeDir(
+	ctx context.Context,
+	embedder Embedder,
+	embeddingModelName string,
+	similarityThreshold float64,
+	logger ApiTypes.JimoLogger,
+	treeRootDir string,
+	recordID int64,
+	topics []TopicItem,
+) error {
+	if strings.TrimSpace(treeRootDir) == "" {
+		return errors.New("(MID_26050210) topic tree root dir is empty")
+	}
+	if recordID <= 0 {
+		return fmt.Errorf("(MID_26050211) invalid record id: %d", recordID)
+	}
+	if err := os.MkdirAll(treeRootDir, 0o755); err != nil {
+		return err
+	}
+	if err := removeTopicTreeRecord(treeRootDir, recordID); err != nil {
+		return fmt.Errorf("(MID_26050212) remove old topic tree entries for record %d: %w", recordID, err)
+	}
+	now := time.Now()
+	for _, topic := range topics {
+		paths := topic.CategoryPathDetail
+		if len(paths) == 0 && len(topic.CategoryPath) > 0 {
+			// synthesise a path entry from the flat CategoryPath
+			nodes := make([]CategoryPathNode, 0, len(topic.CategoryPath))
+			for _, seg := range topic.CategoryPath {
+				nodes = append(nodes, CategoryPathNode{Name: seg})
+			}
+			paths = []CategoryPathEntry{{Nodes: nodes}}
+		}
+		for _, pathEntry := range paths {
+			if len(pathEntry.Nodes) == 0 {
+				continue
+			}
+			if err := indexTopicPathInTree(ctx, embedder, embeddingModelName, similarityThreshold, logger, treeRootDir, recordID, topic, pathEntry, now); err != nil {
+				return fmt.Errorf("(MID_26050213) index topic %d path: %w", topic.SeqNo, err)
+			}
+		}
+	}
+	return nil
+}
+
+// indexTopicPathInTree navigates/creates the category directory hierarchy for
+// one category-path entry of a topic and upserts the topic to topics.txt at
+// the leaf directory.
+func indexTopicPathInTree(
+	ctx context.Context,
+	embedder Embedder,
+	embeddingModelName string,
+	similarityThreshold float64,
+	logger ApiTypes.JimoLogger,
+	treeRootDir string,
+	recordID int64,
+	topic TopicItem,
+	pathEntry CategoryPathEntry,
+	now time.Time,
+) error {
+	currentDir := treeRootDir
+	for _, node := range pathEntry.Nodes {
+		subdir, err := findOrCreateCategorySubdir(ctx, embedder, embeddingModelName, similarityThreshold, logger, currentDir, node, now)
+		if err != nil {
+			return err
+		}
+		currentDir = subdir
+	}
+	return upsertTopicToLeafDir(currentDir, recordID, topic)
+}
+
+// findOrCreateCategorySubdir returns the best-matching sub-directory for node
+// under parentDir following the spec 6.5.4 lookup order:
+//  1. Exact normalized-name match — reuse if the directory already exists.
+//  2. Cosine-similarity match — reuse the closest existing directory when its
+//     similarity score is >= similarityThreshold (requires embedder).
+//  3. Create a new directory with the normalized name (never appends numeric
+//     suffixes like _2, _3).
+func findOrCreateCategorySubdir(
+	ctx context.Context,
+	embedder Embedder,
+	embeddingModelName string,
+	similarityThreshold float64,
+	logger ApiTypes.JimoLogger,
+	parentDir string,
+	node CategoryPathNode,
+	now time.Time,
+) (string, error) {
+	normalizedName := normalizeCategorySegment(node.Name)
+	if normalizedName == "" {
+		normalizedName = "uncategorized"
+	}
+
+	// Step 1: exact name match.
+	exactDir := filepath.Join(parentDir, normalizedName)
+	if _, err := os.Stat(exactDir); err == nil {
+		mergeTopicCategoryKeywords(filepath.Join(exactDir, topicCategoryMetaFileName), node.Keywords) //nolint:errcheck
+		return exactDir, nil
+	}
+
+	// Step 2: cosine-similarity match (only when embedder is configured).
+	var nodeVec []float64
+	if embedder != nil && strings.TrimSpace(embeddingModelName) != "" {
+		embedText := node.Name
+		if len(node.Keywords) > 0 {
+			embedText += " " + strings.Join(node.Keywords, " ")
+		}
+		vec, err := embedder.Embed(ctx, llmclients.EmbedInput{
+			ModelName: embeddingModelName,
+			InputText: embedText,
+		})
+		if err == nil {
+			nodeVec = vec
+		} else if logger != nil {
+			logger.Warn("(MID_26050220) embed category node failed; skipping similarity search",
+				"node_name", node.Name, "error", err)
+		}
+		if len(nodeVec) > 0 {
+			entries, readErr := os.ReadDir(parentDir)
+			if readErr == nil {
+				bestScore := -1.0
+				bestDir := ""
+				for _, entry := range entries {
+					if !entry.IsDir() {
+						continue
+					}
+					embedPath := filepath.Join(parentDir, entry.Name(), topicCategoryEmbedFileName)
+					existingVec, loadErr := loadFloatEmbedding(embedPath)
+					if loadErr != nil || len(existingVec) == 0 {
+						continue
+					}
+					score := cosineSimilarity(nodeVec, existingVec)
+					if score > bestScore {
+						bestScore = score
+						bestDir = filepath.Join(parentDir, entry.Name())
+					}
+				}
+				if bestDir != "" && bestScore >= similarityThreshold {
+					mergeTopicCategoryKeywords(filepath.Join(bestDir, topicCategoryMetaFileName), node.Keywords) //nolint:errcheck
+					return bestDir, nil
+				}
+			}
+		}
+	}
+
+	// Step 3: create a new directory using the normalized name (no suffix).
+	if err := os.MkdirAll(exactDir, 0o755); err != nil {
+		return "", fmt.Errorf("(MID_26050221) create category dir %q: %w", exactDir, err)
+	}
+	if err := writeTopicCategoryMetadata(exactDir, node, now); err != nil {
+		return "", fmt.Errorf("(MID_26050222) write metadata for %q: %w", exactDir, err)
+	}
+	if len(nodeVec) > 0 {
+		embedPath := filepath.Join(exactDir, topicCategoryEmbedFileName)
+		if err := os.WriteFile(embedPath, []byte(formatFloatArray(nodeVec)+"\n"), 0o644); err != nil {
+			return "", fmt.Errorf("(MID_26050223) write category embed for %q: %w", exactDir, err)
+		}
+	}
+	return exactDir, nil
+}
+
+// upsertTopicToLeafDir upserts a topic entry to topics.txt in leafDir.
+// Existing entries for recordID are removed before writing new ones.
+func upsertTopicToLeafDir(leafDir string, recordID int64, topic TopicItem) error {
+	filePath := filepath.Join(leafDir, topicsFileName)
+	existing, err := readTopicsFileEntries(filePath)
+	if err != nil {
+		return fmt.Errorf("(MID_26050230) read %s: %w", filePath, err)
+	}
+	// Remove old entries for this record (already purged by removeTopicTreeRecord,
+	// but guard against duplicates within a single run).
+	filtered := existing[:0]
+	for _, e := range existing {
+		if e.RecordID != recordID {
+			filtered = append(filtered, e)
+		}
+	}
+	filtered = append(filtered, topicsFileEntry{
+		RecordID:  recordID,
+		TopicType: topic.TopicType,
+		Lines:     formatTopicArray(topic.Lines),
+		Keywords:  formatTopicArray(topic.Keywords),
+		Topic:     sanitizeTopicText(topic.Topic),
+	})
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].RecordID < filtered[j].RecordID
+	})
+	if err := writeTopicsFileEntries(filePath, filtered); err != nil {
+		return fmt.Errorf("(MID_26050231) write %s: %w", filePath, err)
+	}
+	return nil
+}
+
+// removeTopicTreeRecord walks treeRootDir and removes all topics.txt entries
+// whose record_id matches recordID.
+func removeTopicTreeRecord(treeRootDir string, recordID int64) error {
+	return filepath.WalkDir(treeRootDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != topicsFileName {
+			return nil
+		}
+		entries, readErr := readTopicsFileEntries(path)
+		if readErr != nil {
+			return readErr
+		}
+		filtered := entries[:0]
+		for _, e := range entries {
+			if e.RecordID != recordID {
+				filtered = append(filtered, e)
+			}
+		}
+		if len(filtered) == len(entries) {
+			return nil // nothing changed
+		}
+		if len(filtered) == 0 {
+			return os.Remove(path)
+		}
+		return writeTopicsFileEntries(path, filtered)
+	})
+}
+
+// topicsFileEntry is one topic block in a topics.txt file (spec 6.5.3).
+type topicsFileEntry struct {
+	RecordID  int64
+	TopicType string
+	Lines     string
+	Keywords  string
+	Topic     string
+}
+
+// readTopicsFileEntries parses the multi-line topics.txt format (spec 6.5.3).
+// Returns an empty slice if the file does not exist.
+func readTopicsFileEntries(path string) ([]topicsFileEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []topicsFileEntry{}, nil
+		}
+		return nil, err
+	}
+	return parseTopicsFileEntries(data), nil
+}
+
+func parseTopicsFileEntries(data []byte) []topicsFileEntry {
+	out := make([]topicsFileEntry, 0, 8)
+	var cur *topicsFileEntry
+	for _, rawLine := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			if cur != nil {
+				out = append(out, *cur)
+				cur = nil
+			}
+			continue
+		}
+		key, val := splitSpecLine(line)
+		if key == "" {
+			continue
+		}
+		if cur == nil {
+			cur = &topicsFileEntry{}
+		}
+		switch key {
+		case "record_id":
+			// value may have a trailing comma: "123," or "123"
+			v := strings.TrimSuffix(strings.TrimSpace(val), ",")
+			cur.RecordID, _ = strconv.ParseInt(v, 10, 64)
+		case "topic_type":
+			cur.TopicType = unquoteSpec(val)
+		case "lines":
+			cur.Lines = val
+		case "topic_keywords":
+			cur.Keywords = val
+		case "topic":
+			cur.Topic = unquoteSpec(val)
+		}
+	}
+	if cur != nil {
+		out = append(out, *cur)
+	}
+	return out
+}
+
+func writeTopicsFileEntries(path string, entries []topicsFileEntry) error {
+	var b strings.Builder
+	for i, e := range entries {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(fmt.Sprintf("record_id: %d,\n", e.RecordID))
+		b.WriteString(fmt.Sprintf("topic_type: %q\n", e.TopicType))
+		b.WriteString("lines: ")
+		b.WriteString(e.Lines)
+		b.WriteByte('\n')
+		b.WriteString("topic_keywords: ")
+		b.WriteString(e.Keywords)
+		b.WriteByte('\n')
+		b.WriteString("topic: ")
+		b.WriteString(strconv.Quote(e.Topic))
+		b.WriteByte('\n')
+	}
+	return os.WriteFile(path, []byte(strings.TrimRight(b.String(), "\n")), 0o644)
+}
+
+// writeTopicCategoryMetadata writes metadata.txt for a topic category directory
+// (spec 6.5.1). Does not include category_type (unlike the summary tree metadata).
+func writeTopicCategoryMetadata(dir string, node CategoryPathNode, now time.Time) error {
+	metaPath := filepath.Join(dir, topicCategoryMetaFileName)
+	if _, err := os.Stat(metaPath); err == nil {
+		// Merge keywords into existing metadata without overwriting confidence/desc.
+		return mergeTopicCategoryKeywords(metaPath, node.Keywords)
+	}
+	keywords := node.Keywords
+	if keywords == nil {
+		keywords = []string{}
+	}
+	descJSON, _ := json.Marshal(node.Name)
+	kwJSON, err := json.Marshal(keywords)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`"desc":%s`, string(descJSON)) + "\n")
+	b.WriteString(fmt.Sprintf(`"confidence":%s`, strconv.FormatFloat(node.Confidence, 'f', -1, 64)) + "\n")
+	b.WriteString(fmt.Sprintf(`"keywords":%s`, string(kwJSON)) + "\n")
+	b.WriteString(fmt.Sprintf(`"create_time":"%s"`, now.Format("20060102-150405")))
+	return os.WriteFile(metaPath, []byte(b.String()), 0o644)
+}
+
+// mergeTopicCategoryKeywords adds any new keywords to the existing metadata.txt.
+func mergeTopicCategoryKeywords(metaPath string, newKeywords []string) error {
+	if len(newKeywords) == 0 {
+		return nil
+	}
+	body, err := os.ReadFile(metaPath)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(body), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, `"keywords":`) {
+			continue
+		}
+		valJSON := strings.TrimSpace(strings.TrimPrefix(trimmed, `"keywords":`))
+		var existing []string
+		if err := json.Unmarshal([]byte(valJSON), &existing); err != nil {
+			return err
+		}
+		added := false
+		for _, kw := range newKeywords {
+			found := false
+			for _, e := range existing {
+				if e == kw {
+					found = true
+					break
+				}
+			}
+			if !found {
+				existing = append(existing, kw)
+				added = true
+			}
+		}
+		if !added {
+			return nil
+		}
+		kwJSON, err := json.Marshal(existing)
+		if err != nil {
+			return err
+		}
+		lines[i] = fmt.Sprintf(`"keywords":%s`, string(kwJSON))
+		return os.WriteFile(metaPath, []byte(strings.Join(lines, "\n")), 0o644)
+	}
+	return nil
+}
+
+// cosineSimilarity returns the cosine similarity between two vectors.
+// Returns 0 if either vector has zero magnitude.
+func cosineSimilarity(a, b []float64) float64 {
+	if len(a) == 0 || len(b) == 0 || len(a) != len(b) {
+		return 0
+	}
+	var dot, magA, magB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		magA += a[i] * a[i]
+		magB += b[i] * b[i]
+	}
+	if magA == 0 || magB == 0 {
+		return 0
+	}
+	denom := math.Sqrt(magA) * math.Sqrt(magB)
+	if denom == 0 {
+		return 0
+	}
+	return dot / denom
+}
+
+// loadFloatEmbedding loads a float64 vector from a file written by formatFloatArray.
+func loadFloatEmbedding(path string) ([]float64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	raw := strings.TrimSpace(string(data))
+	raw = strings.TrimPrefix(raw, "[")
+	raw = strings.TrimSuffix(raw, "]")
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []float64{}, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]float64, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		f, err := strconv.ParseFloat(p, 64)
+		if err != nil {
+			return nil, fmt.Errorf("(MID_26050240) parse float %q: %w", p, err)
+		}
+		out = append(out, f)
+	}
 	return out, nil
 }

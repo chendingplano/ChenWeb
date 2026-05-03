@@ -12,6 +12,11 @@ export type SummaryPdfTarget = {
 	summaryId: string;
 };
 
+export type SummaryRecordTarget = {
+	page: number;
+	coords: number[];
+};
+
 export type SummaryRecordCard = {
 	id: string;
 	pdfFileName: string;
@@ -19,6 +24,8 @@ export type SummaryRecordCard = {
 	summaryText: string;
 	inputId: number;
 	page: number;
+	coords: number[];
+	targets: SummaryRecordTarget[];
 };
 
 export type SummaryCategoryNode = {

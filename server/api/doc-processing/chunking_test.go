@@ -242,13 +242,17 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	if first.Topic != "Intro scope" {
 		t.Fatalf("first topic=%q, want Intro scope", first.Topic)
 	}
-	treeLeaf := filepath.Join(treeRoot, "document_overview", "closing_notes.txt")
+	// New tree format: topics.txt inside a sub-directory for each category level.
+	treeLeaf := filepath.Join(treeRoot, "document_overview", "closing_notes", "topics.txt")
 	treeContent, err := os.ReadFile(treeLeaf)
 	if err != nil {
 		t.Fatalf("read topic tree leaf: %v", err)
 	}
-	if !strings.Contains(string(treeContent), "7523\tpolicy\t[3]\t[end]\tEnding section") {
-		t.Fatalf("unexpected tree leaf content: %q", string(treeContent))
+	wantTopicLines := []string{"record_id: 7523,", `topic_type: "policy"`, "Ending section"}
+	for _, want := range wantTopicLines {
+		if !strings.Contains(string(treeContent), want) {
+			t.Fatalf("expected tree leaf to contain %q, got: %q", want, string(treeContent))
+		}
 	}
 
 	var status []map[string]any

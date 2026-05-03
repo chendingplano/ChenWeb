@@ -70,6 +70,12 @@ summary_end`)
 	if results[0].ID != "1042_1_0001" || results[0].Page != 3 {
 		t.Fatalf("unexpected first record: %+v", results[0])
 	}
+	if len(results[0].Coords) != 4 || results[0].Coords[2] != 1 {
+		t.Fatalf("unexpected first coords: %+v", results[0])
+	}
+	if len(results[0].Targets) != 1 || results[0].Targets[0].Page != 3 {
+		t.Fatalf("unexpected first targets: %+v", results[0].Targets)
+	}
 	if results[1].ID != "1042_1_0002" || results[1].Page != 5 {
 		t.Fatalf("unexpected second record: %+v", results[1])
 	}
@@ -140,6 +146,12 @@ summary_end`)
 	if results[0].ID != "93_0_0001" || results[0].Page != 9 {
 		t.Fatalf("unexpected record: %+v", results[0])
 	}
+	if len(results[0].Coords) != 4 {
+		t.Fatalf("unexpected coords: %+v", results[0])
+	}
+	if len(results[0].Targets) != 2 || results[0].Targets[0].Page != 9 {
+		t.Fatalf("unexpected targets: %+v", results[0].Targets)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
 	}
@@ -205,5 +217,42 @@ summary_end`)
 	}
 	if !payload.Status || payload.RecordID != 1042 || len(payload.Summaries) != 1 {
 		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if len(payload.Summaries[0].Coords) != 4 {
+		t.Fatalf("unexpected coords in payload: %+v", payload.Summaries[0])
+	}
+	if len(payload.Summaries[0].Targets) != 1 {
+		t.Fatalf("unexpected targets in payload: %+v", payload.Summaries[0])
+	}
+}
+
+func TestExpandSummaryTargetsMergesContinuousLinesAndSkipsErrorImage(t *testing.T) {
+	targets := expandSummaryTargets([]string{"76-88"}, map[int]summaryLineTarget{
+		76: {page: 5, lineType: "paragraph", coords: []float64{0, 389.462, 623.999, 478.248}},
+		77: {page: 5, lineType: "paragraph", coords: []float64{83.76, 436.27, 140.4, 447.37}},
+		78: {page: 5, lineType: "paragraph", coords: []float64{83.86, 421.006, 99.898, 433.058}},
+		79: {page: 5, lineType: "paragraph", coords: []float64{105.6, 405.503, 427.022, 417.109}},
+		80: {page: 5, lineType: "paragraph", coords: []float64{105.36, 390.37, 546.721, 401.77}},
+		81: {page: 5, lineType: "paragraph", coords: []float64{84, 375.3, 297.121, 386.4}},
+		82: {page: 5, lineType: "heading-2", coords: []float64{85.08, 192.43, 298.081, 235.039}},
+		83: {page: 5, lineType: "heading-2", coords: []float64{85.56, 146.35, 548.164, 188.869}},
+		84: {page: 5, lineType: "paragraph", coords: []float64{86.4, 131.17, 546.961, 142.57}},
+		85: {page: 5, lineType: "paragraph", coords: []float64{85.68, 116.1, 199.44, 127.2}},
+		86: {page: 5, lineType: "heading-2", coords: []float64{85.81, 85.573, 227.043, 112.098}},
+		87: {page: 6, lineType: "image", coords: []float64{0, 0, 624, 879.12}},
+		88: {page: 6, lineType: "paragraph", coords: []float64{89.76, 747.55, 553.2, 773.53}},
+	})
+
+	if len(targets) != 2 {
+		t.Fatalf("expected 2 merged targets, got %+v", targets)
+	}
+	if targets[0].Page != 5 || len(targets[0].Coords) != 4 {
+		t.Fatalf("unexpected first merged target: %+v", targets[0])
+	}
+	if targets[0].Coords[0] == 0 || targets[0].Coords[2] >= 600 {
+		t.Fatalf("expected watermark/error boxes to be ignored, got %+v", targets[0])
+	}
+	if targets[1].Page != 6 || len(targets[1].Coords) != 4 {
+		t.Fatalf("unexpected second merged target: %+v", targets[1])
 	}
 }

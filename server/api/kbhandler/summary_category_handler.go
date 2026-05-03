@@ -23,6 +23,8 @@ type summaryCategoryRecord struct {
 	SummaryText string   `json:"summaryText"`
 	InputID     int64    `json:"inputId"`
 	Page        int      `json:"page"`
+	Coords      []float64 `json:"coords"`
+	Targets     []summaryRecordTarget `json:"targets"`
 }
 
 type getSummaryCategoryResponse struct {
@@ -36,6 +38,17 @@ type summaryArtifactMeta struct {
 	staging  string
 	parser   string
 	fileName string
+}
+
+type summaryLineTarget struct {
+	page   int
+	coords []float64
+	lineType string
+}
+
+type summaryRecordTarget struct {
+	Page   int       `json:"page"`
+	Coords []float64 `json:"coords"`
 }
 
 type parsedSummaryFile struct {
@@ -114,7 +127,7 @@ func readSummaryCategoryRecords(summaryTreeDir string, categoryPath string) ([]s
 	}
 
 	metaCache := map[int64]summaryArtifactMeta{}
-	pageCache := map[int64]map[int]int{}
+	pageCache := map[int64]map[int]summaryLineTarget{}
 	results := make([]summaryCategoryRecord, 0, len(summaryIDs))
 	for _, summaryID := range summaryIDs {
 		recordID, level, seqNo, ok := parseSummaryIDParts(summaryID)
@@ -141,14 +154,17 @@ func readSummaryCategoryRecords(summaryTreeDir string, categoryPath string) ([]s
 			metaCache[recordID] = meta
 		}
 
-		linePages, ok := pageCache[recordID]
+		lineTargets, ok := pageCache[recordID]
 		if !ok {
-			linePages, err = readLinePageMapForRecord(artifactDir, meta)
+			lineTargets, err = readLineTargetMapForRecord(artifactDir, meta)
 			if err != nil {
 				return nil, err
 			}
-			pageCache[recordID] = linePages
+			pageCache[recordID] = lineTargets
 		}
+
+		targets := expandSummaryTargets(parsed.lines, lineTargets)
+		page, coords := firstSummaryTarget(targets)
 
 		results = append(results, summaryCategoryRecord{
 			ID:          parsed.summaryID,
@@ -156,7 +172,9 @@ func readSummaryCategoryRecords(summaryTreeDir string, categoryPath string) ([]s
 			Keywords:    append([]string(nil), parsed.keywords...),
 			SummaryText: parsed.summaryText,
 			InputID:     recordID,
-			Page:        firstSummaryPage(parsed.lines, linePages),
+			Page:        page,
+			Coords:      coords,
+			Targets:     targets,
 		})
 	}
 
@@ -285,14 +303,14 @@ func fetchSummaryArtifactMeta(db *sql.DB, inputTable string, stagingExpr string,
 	}, nil
 }
 
-func readLinePageMapForRecord(artifactDir string, meta summaryArtifactMeta) (map[int]int, error) {
+func readLineTargetMapForRecord(artifactDir string, meta summaryArtifactMeta) (map[int]summaryLineTarget, error) {
 	if meta.recordID <= 0 {
-		return map[int]int{}, nil
+		return map[int]summaryLineTarget{}, nil
 	}
 	stagingBase := filepath.Base(meta.staging)
 	stagingRoot := strings.TrimSuffix(stagingBase, filepath.Ext(stagingBase))
 	if stagingRoot == "" || meta.parser == "" {
-		return map[int]int{}, nil
+		return map[int]summaryLineTarget{}, nil
 	}
 	recordDir, err := resolveRecordArtifactDir(artifactDir, meta.recordID)
 	if err != nil {
@@ -303,29 +321,122 @@ func readLinePageMapForRecord(artifactDir string, meta summaryArtifactMeta) (map
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[int]int, len(lines))
+	out := make(map[int]summaryLineTarget, len(lines))
 	for _, line := range lines {
-		out[line.LineNumber] = line.PageNumber
+		out[line.LineNumber] = summaryLineTarget{
+			page: line.PageNumber,
+			coords: append([]float64(nil), line.Coords...),
+			lineType: strings.TrimSpace(line.LineType),
+		}
 	}
 	return out, nil
 }
 
-func firstSummaryPage(lineRanges []string, linePages map[int]int) int {
-	bestLine := 0
-	bestPage := 1
+func expandSummaryTargets(lineRanges []string, lineTargets map[int]summaryLineTarget) []summaryRecordTarget {
+	lineNos := make([]int, 0)
+	seen := map[int]struct{}{}
 	for _, lineRange := range lineRanges {
 		for _, lineNo := range expandSummaryLineRange(lineRange) {
-			page, ok := linePages[lineNo]
-			if !ok {
+			if _, ok := lineTargets[lineNo]; !ok {
 				continue
 			}
-			if bestLine == 0 || lineNo < bestLine {
-				bestLine = lineNo
-				bestPage = page
+			if _, dup := seen[lineNo]; dup {
+				continue
 			}
+			seen[lineNo] = struct{}{}
+			lineNos = append(lineNos, lineNo)
 		}
 	}
-	return bestPage
+	sort.Ints(lineNos)
+	out := make([]summaryRecordTarget, 0, len(lineNos))
+	var current *summaryRecordTarget
+	lastLineNo := 0
+	for _, lineNo := range lineNos {
+		target := lineTargets[lineNo]
+		if isSummaryErrorLine(target) {
+			lastLineNo = lineNo
+			continue
+		}
+		if len(target.coords) < 4 {
+			current = nil
+			lastLineNo = 0
+			continue
+		}
+		box := normalizeBBox(target.coords)
+		if current != nil && target.page == current.Page && lastLineNo > 0 && lineNo == lastLineNo+1 {
+			current.Coords = mergeBBox(current.Coords, box)
+		} else {
+			next := summaryRecordTarget{
+				Page:   target.page,
+				Coords: box,
+			}
+			out = append(out, next)
+			current = &out[len(out)-1]
+		}
+		lastLineNo = lineNo
+	}
+	return out
+}
+
+func isSummaryErrorLine(target summaryLineTarget) bool {
+	if len(target.coords) < 4 {
+		return false
+	}
+	if target.coords[0] != 0 || target.coords[1] != 0 {
+		return target.coords[0] == 0 && target.coords[2] >= 600
+	}
+	if strings.EqualFold(strings.TrimSpace(target.lineType), "image") {
+		return true
+	}
+	return target.coords[2] >= 600 && target.coords[3] >= 800
+}
+
+func normalizeBBox(coords []float64) []float64 {
+	if len(coords) < 4 {
+		return []float64{}
+	}
+	x1, y1, x2, y2 := coords[0], coords[1], coords[2], coords[3]
+	left := summaryMinFloat(x1, x2)
+	top := summaryMinFloat(y1, y2)
+	right := summaryMaxFloat(x1, x2)
+	bottom := summaryMaxFloat(y1, y2)
+	return []float64{left, top, right, bottom}
+}
+
+func mergeBBox(a []float64, b []float64) []float64 {
+	if len(a) < 4 {
+		return append([]float64(nil), b...)
+	}
+	if len(b) < 4 {
+		return append([]float64(nil), a...)
+	}
+	return []float64{
+		summaryMinFloat(a[0], b[0]),
+		summaryMinFloat(a[1], b[1]),
+		summaryMaxFloat(a[2], b[2]),
+		summaryMaxFloat(a[3], b[3]),
+	}
+}
+
+func summaryMinFloat(a float64, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func summaryMaxFloat(a float64, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func firstSummaryTarget(targets []summaryRecordTarget) (int, []float64) {
+	if len(targets) == 0 {
+		return 1, []float64{}
+	}
+	return targets[0].Page, append([]float64(nil), targets[0].Coords...)
 }
 
 func expandSummaryLineRange(span string) []int {

@@ -98,7 +98,7 @@ func readRecordSummaryCards(logger ApiTypes.JimoLogger, recordID int64) ([]summa
 	if err != nil {
 		return nil, err
 	}
-	linePages, err := readLinePageMapForRecord(artifactDir, meta)
+	lineTargets, err := readLineTargetMapForRecord(artifactDir, meta)
 	if err != nil {
 		return nil, err
 	}
@@ -117,13 +117,17 @@ func readRecordSummaryCards(logger ApiTypes.JimoLogger, recordID int64) ([]summa
 			base := filepath.Base(path)
 			summaryID = strings.TrimSuffix(base, filepath.Ext(base))
 		}
+		targets := expandSummaryTargets(parsed.lines, lineTargets)
+		page, coords := firstSummaryTarget(targets)
 		results = append(results, summaryCategoryRecord{
 			ID:          summaryID,
 			PdfFileName: filepath.Base(strings.TrimSpace(meta.fileName)),
 			Keywords:    append([]string(nil), parsed.keywords...),
 			SummaryText: parsed.summaryText,
 			InputID:     recordID,
-			Page:        firstSummaryPage(parsed.lines, linePages),
+			Page:        page,
+			Coords:      coords,
+			Targets:     targets,
 		})
 	}
 

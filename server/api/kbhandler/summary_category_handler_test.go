@@ -73,6 +73,12 @@ summary_end`)
 	if results[0].Page != 3 {
 		t.Fatalf("unexpected page: %+v", results[0])
 	}
+	if len(results[0].Coords) != 4 {
+		t.Fatalf("unexpected coords: %+v", results[0])
+	}
+	if len(results[0].Targets) != 2 || results[0].Targets[0].Page != 3 {
+		t.Fatalf("unexpected targets: %+v", results[0].Targets)
+	}
 	if results[0].SummaryText != "Tax filing summary text" {
 		t.Fatalf("unexpected summary text: %+v", results[0])
 	}
@@ -164,6 +170,12 @@ summary_end`)
 	}
 	if len(payload.Summaries) != 1 || payload.Summaries[0].Page != 3 {
 		t.Fatalf("unexpected summaries: %+v", payload.Summaries)
+	}
+	if len(payload.Summaries[0].Coords) != 4 {
+		t.Fatalf("unexpected coords in payload: %+v", payload.Summaries[0])
+	}
+	if len(payload.Summaries[0].Targets) != 1 || payload.Summaries[0].Targets[0].Page != 3 {
+		t.Fatalf("unexpected targets in payload: %+v", payload.Summaries[0])
 	}
 }
 

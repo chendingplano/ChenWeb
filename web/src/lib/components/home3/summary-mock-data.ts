@@ -106,7 +106,9 @@ export const MOCK_CATEGORY_SUMMARIES: Record<string, SummaryRecordCard[]> = {
 			summaryText:
 				'Captures the filing timeline, document dependencies, and missing support for the current federal return package.',
 			inputId: 101,
-			page: 4
+			page: 4,
+			coords: [],
+			targets: []
 		},
 		{
 			id: 'sum-tax-2',
@@ -115,7 +117,9 @@ export const MOCK_CATEGORY_SUMMARIES: Record<string, SummaryRecordCard[]> = {
 			summaryText:
 				'Summarizes allocation assumptions, inconsistent state language, and unresolved follow-up items.',
 			inputId: 102,
-			page: 11
+			page: 11,
+			coords: [],
+			targets: []
 		}
 	],
 	'finance/tax/federal-corporate': [
@@ -126,7 +130,9 @@ export const MOCK_CATEGORY_SUMMARIES: Record<string, SummaryRecordCard[]> = {
 			summaryText:
 				'Lists the control checkpoints that need review before final corporate filing sign-off.',
 			inputId: 103,
-			page: 7
+			page: 7,
+			coords: [],
+			targets: []
 		}
 	],
 	'finance/payroll': [
@@ -137,7 +143,9 @@ export const MOCK_CATEGORY_SUMMARIES: Record<string, SummaryRecordCard[]> = {
 			summaryText:
 				'Highlights payroll variance drivers and delayed withholding reconciliations from the quarterly review.',
 			inputId: 104,
-			page: 3
+			page: 3,
+			coords: [],
+			targets: []
 		}
 	],
 	'research/standards/engineering/high-voltage/legacy-archive': [
@@ -148,7 +156,9 @@ export const MOCK_CATEGORY_SUMMARIES: Record<string, SummaryRecordCard[]> = {
 			summaryText:
 				'Collects archived appendix notes and exceptions that still affect downstream engineering interpretation.',
 			inputId: 105,
-			page: 19
+			page: 19,
+			coords: [],
+			targets: []
 		}
 	]
 };
@@ -173,7 +183,9 @@ export const MOCK_SUMMARY_TREE_RECORDS: SummaryTreeRecord[] = [
 				summaryText:
 					'Federal filing package summary with evidence gaps and dependency notes.',
 				inputId: 101,
-				page: 4
+				page: 4,
+				coords: [],
+				targets: []
 			}
 		]
 	},
@@ -196,7 +208,9 @@ export const MOCK_SUMMARY_TREE_RECORDS: SummaryTreeRecord[] = [
 				summaryText:
 					'Archived appendix guidance affecting long-tail engineering interpretations.',
 				inputId: 105,
-				page: 19
+				page: 19,
+				coords: [],
+				targets: []
 			}
 		]
 	}

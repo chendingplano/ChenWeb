@@ -10,13 +10,14 @@
 		type KbInputRecord
 	} from '$lib/services/kbService';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
+	import SharedPdfViewer from './shared-pdf-viewer.svelte';
 	import {
 		createSummaryTreeState,
 		selectRecordSummaryTarget,
 		selectSummaryTreeRecord,
 		toggleSummaryTreeListMode
 	} from './summary-tree-state.js';
-	import type { SummaryTreeRecord } from './summary-types';
+	import type { SummaryRecordTarget, SummaryTreeRecord } from './summary-types';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
@@ -36,12 +37,33 @@
 	let errorDialogOpen = $state(false);
 	let summaryLoadingByRecordId = $state<Record<number, boolean>>({});
 	let treeState = $state(createSummaryTreeState());
+	let docPage = $state(1);
+	let pdfZoom = $state(0.5);
+	let pdfNumPages = $state(0);
+	const SUMMARY_SIDEBAR_MIN_WIDTH = 240;
+	const SUMMARY_SIDEBAR_MAX_WIDTH = 520;
+	let summarySidebarWidth = $state(320);
+	let summarySidebarResizing = $state(false);
 
 	onMount(async () => {
 		await runSearch();
 	});
 
 	let activeRecord = $derived(results.find((record) => record.id === treeState.selectedRecordId) ?? results[0] ?? null);
+	let selectedSummary = $derived(
+		activeRecord?.summaries.find((summary) => summary.id === treeState.selectedSummaryId) ?? null
+	);
+	let viewerInputId = $derived(treeState.selectedPdfTarget?.inputId ?? activeRecord?.id ?? null);
+	let viewerFileUrl = $derived(
+		viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : ''
+	);
+	let viewerIsPdf = $derived(
+		(activeRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf')
+	);
+
+	type SummaryPdfViewport = {
+		convertToViewportRectangle: (rect: number[]) => number[];
+	};
 
 	function recordDisplayName(record: SummaryTreeRecord) {
 		return record.title?.trim() || `Record #${record.id}`;
@@ -53,6 +75,94 @@
 
 	function formatRecordTime(value: string) {
 		return value?.trim() || '—';
+	}
+
+	function formatCoords(coords: number[]) {
+		if (!Array.isArray(coords) || coords.length < 4) return '—';
+		return `[${coords.map((n) => Math.trunc(n)).join(', ')}]`;
+	}
+
+	function formatTargets(targets: SummaryRecordTarget[]) {
+		if (!Array.isArray(targets) || targets.length === 0) return '—';
+		return targets
+			.filter((target) => Array.isArray(target.coords) && target.coords.length >= 4)
+			.map((target) => `p.${target.page} ${formatCoords(target.coords)}`)
+			.join('\n');
+	}
+
+	function renderSummaryHighlight(pageNo: number, viewport: SummaryPdfViewport, overlay: HTMLDivElement) {
+		if (!selectedSummary) return;
+		const targets = selectedSummary.targets?.filter(
+			(target) => target.page === pageNo && Array.isArray(target.coords) && target.coords.length >= 4
+		);
+		if (!targets || targets.length === 0) return;
+		for (const target of targets) {
+			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
+			const left = Math.max(0, Math.min(vx1, vx2) - 5);
+			const top = Math.max(0, Math.min(vy1, vy2) - 4);
+			const width = Math.abs(vx2 - vx1) + 10;
+			const height = Math.abs(vy2 - vy1) + 8;
+			if (width < 1 || height < 1) continue;
+			const box = document.createElement('div');
+			box.className = 'pdf-highlight';
+			box.style.left = `${left}px`;
+			box.style.top = `${top}px`;
+			box.style.width = `${width}px`;
+			box.style.height = `${height}px`;
+			overlay.appendChild(box);
+		}
+	}
+
+	function clampSummarySidebarWidth(width: number) {
+		return Math.min(SUMMARY_SIDEBAR_MAX_WIDTH, Math.max(SUMMARY_SIDEBAR_MIN_WIDTH, Math.round(width)));
+	}
+
+	function adjustSummarySidebarWidth(delta: number) {
+		summarySidebarWidth = clampSummarySidebarWidth(summarySidebarWidth + delta);
+	}
+
+	function startSummarySidebarResize(event: PointerEvent) {
+		event.preventDefault();
+		const handle = event.currentTarget as HTMLElement | null;
+		const startX = event.clientX;
+		const startWidth = summarySidebarWidth;
+		summarySidebarResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		handle?.setPointerCapture?.(event.pointerId);
+
+		const handleMove = (moveEvent: PointerEvent) => {
+			summarySidebarWidth = clampSummarySidebarWidth(startWidth + (moveEvent.clientX - startX));
+		};
+		const handleUp = (upEvent: PointerEvent) => {
+			summarySidebarResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			handle?.releasePointerCapture?.(upEvent.pointerId);
+			window.removeEventListener('pointermove', handleMove);
+			window.removeEventListener('pointerup', handleUp);
+			window.removeEventListener('pointercancel', handleUp);
+		};
+
+		window.addEventListener('pointermove', handleMove);
+		window.addEventListener('pointerup', handleUp, { once: true });
+		window.addEventListener('pointercancel', handleUp, { once: true });
+	}
+
+	function onSummarySidebarResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			adjustSummarySidebarWidth(-16);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			adjustSummarySidebarWidth(16);
+		} else if (event.key === 'Home') {
+			event.preventDefault();
+			summarySidebarWidth = SUMMARY_SIDEBAR_MIN_WIDTH;
+		} else if (event.key === 'End') {
+			event.preventDefault();
+			summarySidebarWidth = SUMMARY_SIDEBAR_MAX_WIDTH;
+		}
 	}
 
 	function summaryTreeStatusText(record: KbInputRecord): string {
@@ -89,6 +199,13 @@
 	$effect(() => {
 		if (!activeRecord && results[0]) {
 			treeState = selectSummaryTreeRecord(treeState, results[0].id);
+		}
+	});
+
+	$effect(() => {
+		const selectedPage = treeState.selectedPdfTarget?.page;
+		if (selectedPage) {
+			docPage = selectedPage;
 		}
 	});
 
@@ -178,7 +295,10 @@
 	}
 </script>
 
-<div class="tree-shell" style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent};`}>
+<div
+	class="tree-shell"
+	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148, 163, 184, 0.16); --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted}; --brass:#d8a74b; --crimson:#fca5a5; --font-mono:ui-monospace, SFMono-Regular, Menlo, monospace; --font-serif:\"Iowan Old Style\", \"Palatino Linotype\", \"Book Antiqua\", Georgia, serif;`}
+>
 	<KbInputSearchDialog
 		bind:open={searchOpen}
 		onSelect={async (record) => {
@@ -368,7 +488,7 @@
 							<span>{activeRecord.parserName}</span>
 						</div>
 						<div class="summary-snippets">
-							{#each activeRecord.summaries as summary}
+								{#each activeRecord.summaries as summary}
 								<button
 									type="button"
 									class:selected={treeState.selectedSummaryId === summary.id}
@@ -381,7 +501,7 @@
 									}))}
 								>
 									<div class="snippet-head">
-										<strong>{summary.pdfFileName}</strong>
+										<strong>{summary.id}</strong>
 										<span>p.{summary.page}</span>
 									</div>
 									<p>{summary.summaryText}</p>
@@ -392,19 +512,86 @@
 
 					<div class="pdf-card">
 						<div class="eyebrow">PDF Display</div>
-						{#if treeState.selectedPdfTarget}
-							<div class="mock-sheet">
-								<div class="sheet-title">PDF Jump Target</div>
-								<div class="sheet-grid">
-									<div><span>Input ID</span><strong>{treeState.selectedPdfTarget.inputId}</strong></div>
-									<div><span>Page</span><strong>{treeState.selectedPdfTarget.page}</strong></div>
-									<div><span>Summary</span><strong>{treeState.selectedPdfTarget.summaryId}</strong></div>
-									<div>
-										<span>File URL</span>
-										<strong>{`/api/v1/kb/inputs/${treeState.selectedPdfTarget.inputId}/file`}</strong>
+						{#if viewerInputId && treeState.selectedPdfTarget && viewerIsPdf}
+							<SharedPdfViewer
+								inputId={viewerInputId}
+								fileUrl={viewerFileUrl}
+								bind:page={docPage}
+								bind:zoom={pdfZoom}
+								bind:numPages={pdfNumPages}
+								highlightVersion={selectedSummary
+									? `${selectedSummary.id}:${selectedSummary.targets.map((target) => `${target.page}:${target.coords.join(',')}`).join('|')}`
+									: 'summary-tree'}
+								renderHighlights={renderSummaryHighlight}
+							>
+								<div slot="sidebar">
+									<div class="summary-sidebar-shell" style={`width:${summarySidebarWidth}px;`}>
+										<aside class="summary-sidebar">
+											<div class="summary-sidebar-title">Selected Summary</div>
+											{#if selectedSummary}
+												<div class="summary-sidebar-block">
+													<div class="summary-sidebar-row">
+														<span>Summary ID</span>
+														<strong>{selectedSummary.id}</strong>
+													</div>
+													<div class="summary-sidebar-row">
+														<span>Record ID</span>
+														<strong>{selectedSummary.recordId}</strong>
+													</div>
+													<div class="summary-sidebar-row">
+														<span>Page</span>
+														<strong>{selectedSummary.page}</strong>
+													</div>
+													<div class="summary-sidebar-row">
+														<span>PDF</span>
+														<strong title={selectedSummary.pdfFileName}>{selectedSummary.pdfFileName}</strong>
+													</div>
+													<div class="summary-sidebar-row">
+														<span>Coords</span>
+														<strong class="coords-block">{formatTargets(selectedSummary.targets)}</strong>
+													</div>
+												</div>
+
+												<div class="summary-sidebar-block">
+													<div class="summary-sidebar-label">Summary</div>
+													<p class="summary-sidebar-copy">{selectedSummary.summaryText}</p>
+												</div>
+
+												<div class="summary-sidebar-block">
+													<div class="summary-sidebar-label">Keywords</div>
+													{#if selectedSummary.keywords.length > 0}
+														<div class="keyword-list">
+															{#each selectedSummary.keywords as keyword (keyword)}
+																<span class="keyword-chip">{keyword}</span>
+															{/each}
+														</div>
+													{:else}
+														<p class="summary-sidebar-copy muted">No keywords were extracted for this summary.</p>
+													{/if}
+												</div>
+											{:else}
+												<div class="summary-sidebar-empty">Select a summary card to inspect it alongside the source PDF.</div>
+											{/if}
+										</aside>
+										<button
+											type="button"
+											class="summary-sidebar-resizer"
+											class:active={summarySidebarResizing}
+											aria-label="Resize summary sidebar"
+											onpointerdown={startSummarySidebarResize}
+											onkeydown={onSummarySidebarResizerKeydown}
+										>
+											<span class="summary-sidebar-resizer-grip" aria-hidden="true"></span>
+										</button>
 									</div>
 								</div>
-							</div>
+							</SharedPdfViewer>
+						{:else if viewerInputId && treeState.selectedPdfTarget}
+							<iframe
+								class="pdf-fallback-frame"
+								title={activeRecord.fileName}
+								src={viewerFileUrl}
+							></iframe>
 						{:else if summaryLoadingByRecordId[activeRecord.id]}
 							<div class="empty-state pdf-empty">Loading summaries for the selected record…</div>
 						{:else if activeRecord.summaries.length === 0}
@@ -845,6 +1032,8 @@
 
 	.detail-card,
 	.pdf-card {
+		display: flex;
+		flex-direction: column;
 		min-height: 0;
 		border-radius: 20px;
 		border: 1px solid rgba(148, 163, 184, 0.14);
@@ -854,23 +1043,59 @@
 
 	.summary-snippets {
 		display: flex;
+		min-height: 0;
+		flex: 1;
 		flex-direction: column;
 		gap: 0.75rem;
 		margin-top: 1rem;
+		overflow: auto;
+		padding-right: 0.25rem;
 	}
 
 	.snippet {
+		position: relative;
 		border-radius: 16px;
 		border: 1px solid rgba(148, 163, 184, 0.14);
 		background: rgba(15, 23, 42, 0.34);
 		padding: 0.85rem;
 		text-align: left;
 		color: inherit;
+		transition:
+			border-color 150ms ease,
+			background 150ms ease,
+			box-shadow 150ms ease,
+			transform 150ms ease;
 	}
 
-	.snippet.selected,
+	.snippet::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: 4px;
+		border-radius: 16px 0 0 16px;
+		background: transparent;
+		transition: background 150ms ease;
+	}
+
 	.snippet:hover {
 		border-color: rgba(59, 130, 246, 0.34);
+	}
+
+	.snippet.selected {
+		border-color: rgba(96, 165, 250, 0.58);
+		background:
+			linear-gradient(180deg, rgba(37, 99, 235, 0.14), rgba(37, 99, 235, 0.06)),
+			rgba(15, 23, 42, 0.9);
+		box-shadow:
+			0 0 0 1px rgba(96, 165, 250, 0.18) inset,
+			0 16px 36px rgba(15, 23, 42, 0.24);
+		transform: translateY(-1px);
+	}
+
+	.snippet.selected::before {
+		background: linear-gradient(180deg, #60a5fa, #818cf8);
 	}
 
 	.snippet p {
@@ -880,7 +1105,10 @@
 		line-height: 1.5;
 	}
 
-	.mock-sheet,
+	.snippet.selected p {
+		color: #dbeafe;
+	}
+
 	.empty-state {
 		display: flex;
 		flex: 1;
@@ -894,42 +1122,202 @@
 		color: var(--muted);
 	}
 
-	.mock-sheet {
-		max-width: 420px;
-		margin: 1rem auto 0;
-		border-style: solid;
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.92));
-		color: #0f172a;
-		box-shadow: 0 22px 50px rgba(15, 23, 42, 0.22);
+	.pdf-card :global(.doc-page-bar) {
+		margin-top: 0.85rem;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 16px 16px 0 0;
 	}
 
-	.sheet-title {
-		margin-bottom: 1rem;
-		font-size: 1rem;
-		font-weight: 800;
+	.pdf-card :global(.pdf-stage) {
+		margin-top: -1px;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 0 0 16px 16px;
+		background: rgba(2, 6, 23, 0.28);
 	}
 
-	.sheet-grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 1rem;
-		text-align: left;
+	.summary-sidebar-shell {
+		position: relative;
+		flex: 0 0 auto;
+		height: 100%;
 	}
 
-	.sheet-grid span {
-		display: block;
-		margin-bottom: 0.2rem;
+	.summary-sidebar {
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		padding: 1rem 1.25rem 1rem 1rem;
+		border-right: 1px solid rgba(148, 163, 184, 0.14);
+		background: rgba(15, 23, 42, 0.82);
+		overflow: auto;
+	}
+
+	.summary-sidebar-title,
+	.summary-sidebar-label {
 		font-size: 0.72rem;
 		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+
+	.summary-sidebar-title {
+		margin-bottom: 0.85rem;
+	}
+
+	.summary-sidebar-block + .summary-sidebar-block {
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid rgba(148, 163, 184, 0.1);
+	}
+
+	.summary-sidebar-row {
+		display: grid;
+		grid-template-columns: 76px minmax(0, 1fr);
+		gap: 0.6rem;
+		margin-bottom: 0.6rem;
+		align-items: start;
+	}
+
+	.summary-sidebar-row span {
+		font-size: 0.76rem;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
-		color: #64748b;
+		color: var(--muted);
+	}
+
+	.summary-sidebar-row strong,
+	.summary-sidebar-copy {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+
+	.coords-block {
+		white-space: pre-wrap;
+		font-family: var(--font-mono);
+		font-size: 0.8rem;
+		line-height: 1.45;
+	}
+
+	.summary-sidebar-resizer {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		min-height: 120px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		user-select: none;
+		touch-action: none;
+		outline: none;
+		z-index: 4;
+	}
+
+	.summary-sidebar-resizer::before {
+		content: '';
+		width: 1px;
+		height: 100%;
+		background: var(--ink-line);
+		opacity: 0.8;
+		transition: background 150ms ease;
+	}
+
+	.summary-sidebar-resizer:hover::before,
+	.summary-sidebar-resizer.active::before,
+	.summary-sidebar-resizer:focus-visible::before {
+		background: var(--brass);
+	}
+
+	.summary-sidebar-resizer-grip {
+		position: absolute;
+		width: 8px;
+		height: 52px;
+		border-radius: 999px;
+		background:
+			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
+			var(--panel-bg);
+		border: 1px solid var(--ink-line-soft);
+		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
+		transition:
+			border-color 150ms ease,
+			background-color 150ms ease;
+	}
+
+	.summary-sidebar-resizer:hover .summary-sidebar-resizer-grip,
+	.summary-sidebar-resizer.active .summary-sidebar-resizer-grip,
+	.summary-sidebar-resizer:focus-visible .summary-sidebar-resizer-grip {
+		border-color: var(--brass);
+		background:
+			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
+			var(--panel-bg);
+	}
+
+	.summary-sidebar-copy {
+		margin-top: 0.55rem;
+		font-size: 0.88rem;
+		line-height: 1.6;
+		color: var(--text);
+	}
+
+	.summary-sidebar-copy.muted,
+	.summary-sidebar-empty {
+		color: var(--muted);
+	}
+
+	.summary-sidebar-empty {
+		font-size: 0.9rem;
+		line-height: 1.6;
+	}
+
+	.keyword-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+		margin-top: 0.6rem;
+	}
+
+	.keyword-chip {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.32rem 0.58rem;
+		border-radius: 999px;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		background: rgba(37, 99, 235, 0.12);
+		font-size: 0.78rem;
+		color: #c7d2fe;
+	}
+
+	.pdf-fallback-frame {
+		margin-top: 0.85rem;
+		width: 100%;
+		min-height: 540px;
+		flex: 1;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 16px;
+		background: white;
+	}
+
+	:global(.pdf-highlight) {
+		position: absolute;
+		background: rgba(212, 162, 76, 0.3);
+		outline: 1px solid rgba(212, 162, 76, 0.85);
+		border-radius: 2px;
 	}
 
 	@media (max-width: 980px) {
 		.workspace,
 		.detail-grid {
 			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.summary-sidebar-resizer {
+			display: none;
 		}
 	}
 </style>
