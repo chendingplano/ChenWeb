@@ -338,6 +338,7 @@
 			gapBelowY: SUMMARY_HOVER_GAP_BELOW_Y,
 			debug: true
 		});
+		/*
 		console.debug('[summary-hover-placeHoverCardNearNode]', {
 			nodeX,
 			nodeY,
@@ -348,6 +349,7 @@
 			cardHeight,
 			hoverCardPos
 		});
+		*/
 	}
 
 	function normalizeChartPointToStage(
@@ -375,6 +377,7 @@
 				: directPoint
 			: globalAdjustedPoint;
 
+		/*
 		console.debug('[summary-hover-coordinate]', {
 			globalX,
 			globalY,
@@ -392,6 +395,7 @@
 			chosenSource: localPoint === globalAdjustedPoint ? 'global-adjusted' : 'direct-local',
 			localPoint
 		});
+		*/
 		return localPoint;
 	}
 
@@ -445,6 +449,7 @@
 		const nativeY = Number(nativeEvent?.offsetY);
 		const nodePixel = getHoveredNodePixel(event, nativeX, nativeY);
 		if (nodePixel) {
+			/*
 			console.debug('[summary-hover-anchor]', {
 				source: 'chart-layout',
 				nodeId,
@@ -453,12 +458,14 @@
 				referencePointer:
 					Number.isFinite(nativeX) && Number.isFinite(nativeY) ? { x: nativeX, y: nativeY } : null
 			});
+			*/
 			placeHoverCardNearNode(nodePixel.x, nodePixel.y, nodeRadius);
 			return;
 		}
 		const fallbackX = Number(nativeEvent?.offsetX ?? 48);
 		const fallbackY = Number(nativeEvent?.offsetY ?? 48);
 		const pointerAnchorRadius = Number.isFinite(rawSize) ? rawSize : nodeRadius;
+		/*
 		console.debug('[summary-hover-anchor]', {
 			source: 'fallback-native-offset',
 			nodeId,
@@ -467,6 +474,7 @@
 			nodeRadius,
 			pointerAnchorRadius
 		});
+		*/
 		placeHoverCardNearNode(fallbackX, fallbackY, pointerAnchorRadius);
 	}
 

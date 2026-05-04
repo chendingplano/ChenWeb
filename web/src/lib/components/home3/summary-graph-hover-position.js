@@ -88,6 +88,7 @@ export function computeHoverCardPosition(input) {
 	 */
 	const finish = (decision, pos) => {
 		if (debug) {
+			/*
 			console.debug('[summary-hover-placement]', {
 				decision,
 				input: {
@@ -123,6 +124,7 @@ export function computeHoverCardPosition(input) {
 				},
 				pos
 			});
+			*/
 		}
 		return pos;
 	};
