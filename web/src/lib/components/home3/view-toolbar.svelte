@@ -4,23 +4,31 @@
 	import NetworkIcon from '@lucide/svelte/icons/network';
 	import ImageDownIcon from '@lucide/svelte/icons/image-down';
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
+	import CircleIcon from '@lucide/svelte/icons/circle';
+	import SquareIcon from '@lucide/svelte/icons/square';
+
+	type NodeStyle = 'circle' | 'rect';
 
 	type Props = {
 		darkMode?: boolean;
+		nodeStyle?: NodeStyle;
 		onExpandCollapseAll?: () => void;
 		onFilter?: () => void;
 		onExpandToLevel?: (level: number) => void;
 		onExportPng?: () => void;
 		onSettings?: () => void;
+		onToggleNodeStyle?: () => void;
 	};
 
 	let {
 		darkMode = true,
+		nodeStyle,
 		onExpandCollapseAll,
 		onFilter,
 		onExpandToLevel,
 		onExportPng,
-		onSettings
+		onSettings,
+		onToggleNodeStyle
 	}: Props = $props();
 
 	let expandLevelOpen = $state(false);
@@ -130,6 +138,24 @@
 		>
 			<Settings2Icon class="tb-icon" />
 		</button>
+
+		{#if onToggleNodeStyle !== undefined}
+			<div class="toolbar-sep" aria-hidden="true"></div>
+
+			<button
+				type="button"
+				class="toolbar-btn"
+				class:active={nodeStyle === 'circle'}
+				title={nodeStyle === 'circle' ? 'Switch to rectangle nodes' : 'Switch to circle nodes'}
+				onclick={() => onToggleNodeStyle?.()}
+			>
+				{#if nodeStyle === 'circle'}
+					<CircleIcon class="tb-icon" />
+				{:else}
+					<SquareIcon class="tb-icon" />
+				{/if}
+			</button>
+		{/if}
 	</div>
 </div>
 
