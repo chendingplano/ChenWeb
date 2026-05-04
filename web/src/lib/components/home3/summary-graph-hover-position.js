@@ -165,12 +165,10 @@ export function isPointInHoverKeepAliveZone(input) {
 		buffer = 20
 	} = input;
 
-	const minX = Math.min(nodeX - nodeRadius, cardX) - buffer;
-	const maxX = Math.max(nodeX + nodeRadius, cardX + cardWidth) + buffer;
-	const minY = Math.min(nodeY - nodeRadius, cardY) - buffer;
-	const maxY = Math.max(nodeY + nodeRadius, cardY + cardHeight) + buffer;
+	const distanceFromNode = Math.hypot(pointX - nodeX, pointY - nodeY);
+	if (distanceFromNode <= nodeRadius + buffer) return true;
 
-	return pointX >= minX && pointX <= maxX && pointY >= minY && pointY <= maxY;
+	return pointX >= cardX && pointX <= cardX + cardWidth && pointY >= cardY && pointY <= cardY + cardHeight;
 }
 
 /**

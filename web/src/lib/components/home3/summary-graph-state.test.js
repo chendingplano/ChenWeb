@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+	canToggleNodeExpanded,
 	createSummaryGraphTabs,
 	openCategorySummaryTab,
 	toggleNodeExpanded,
@@ -66,6 +67,16 @@ test('toggleNodeExpanded flips the expansion state for one node only', () => {
 
 	assert.equal(next[0].expanded, true);
 	assert.equal(next[1].expanded, false);
+});
+
+test('canToggleNodeExpanded stays true for nodes with children even after they are expanded', () => {
+	const collapsedNode = makeNode('root', 'Root', ['child']);
+	const expandedNode = makeNode('root', 'Root', ['child'], { expanded: true });
+	const leafNode = makeNode('leaf', 'Leaf');
+
+	assert.equal(canToggleNodeExpanded(collapsedNode), true);
+	assert.equal(canToggleNodeExpanded(expandedNode), true);
+	assert.equal(canToggleNodeExpanded(leafNode), false);
 });
 
 test('renameNode updates only the targeted node label', () => {

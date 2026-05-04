@@ -116,10 +116,10 @@ test('never allows a negative gap to push the card back over the node', () => {
 	assert.equal(pos.x + 428, 922, 'expected negative gap values to clamp without breaking left preference');
 });
 
-test('keeps the hover card alive while the pointer moves through the buffer between node and card', () => {
+test('keeps the hover card alive while the pointer stays within the node buffer', () => {
 	assert.equal(
 		isPointInHoverKeepAliveZone({
-			pointX: 1490,
+			pointX: 1504,
 			pointY: 360,
 			nodeX: 1520,
 			nodeY: 360,
@@ -131,11 +131,41 @@ test('keeps the hover card alive while the pointer moves through the buffer betw
 	);
 });
 
-test('allows the hover card to hide once the pointer leaves the buffered bridge area', () => {
+test('allows the hover card to hide once the pointer moves beyond the node buffer without entering the card', () => {
 	assert.equal(
 		isPointInHoverKeepAliveZone({
-			pointX: 980,
-			pointY: 560,
+			pointX: 1560,
+			pointY: 360,
+			nodeX: 1520,
+			nodeY: 360,
+			nodeRadius: 8,
+			cardX: 1082,
+			cardY: 200
+		}),
+		false
+	);
+});
+
+test('keeps the hover card alive while the pointer is over the card itself', () => {
+	assert.equal(
+		isPointInHoverKeepAliveZone({
+			pointX: 1120,
+			pointY: 260,
+			nodeX: 1520,
+			nodeY: 360,
+			nodeRadius: 8,
+			cardX: 1082,
+			cardY: 200
+		}),
+		true
+	);
+});
+
+test('allows the hover card to hide as soon as the pointer leaves the card bounds', () => {
+	assert.equal(
+		isPointInHoverKeepAliveZone({
+			pointX: 1120,
+			pointY: 521,
 			nodeX: 1520,
 			nodeY: 360,
 			nodeRadius: 8,

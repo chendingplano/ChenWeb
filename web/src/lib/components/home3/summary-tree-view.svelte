@@ -11,6 +11,7 @@
 	} from '$lib/services/kbService';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 	import SharedPdfViewer from './shared-pdf-viewer.svelte';
+	import ViewToolbar from './view-toolbar.svelte';
 	import {
 		createSummaryTreeState,
 		selectRecordSummaryTarget,
@@ -368,6 +369,8 @@
 			</button>
 		</div>
 	</div>
+
+	<ViewToolbar {darkMode} />
 
 	<div class="workspace">
 		<div class="left-panel">

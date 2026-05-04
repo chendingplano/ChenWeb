@@ -7,6 +7,13 @@
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
 	import BoxesIcon from '@lucide/svelte/icons/boxes';
 	import DatabaseIcon from '@lucide/svelte/icons/database';
+	import BriefcaseBusinessIcon from '@lucide/svelte/icons/briefcase-business';
+	import FunctionSquareIcon from '@lucide/svelte/icons/function-square';
+	import PackageIcon from '@lucide/svelte/icons/package';
+	import QuoteIcon from '@lucide/svelte/icons/quote';
+	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
+	import Table2Icon from '@lucide/svelte/icons/table-2';
+	import WorkflowIcon from '@lucide/svelte/icons/workflow';
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 	import InputsMgmtView from '$lib/components/home3/inputs-mgmt-view.svelte';
@@ -18,6 +25,10 @@
 	import TopicGraphView from '$lib/components/home3/topic-graph-view.svelte';
 	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
+	import {
+		KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS,
+		isUnderConstructionKnowledgeSection
+	} from '$lib/components/home3/knowledge-sections.js';
 	import NetworkIcon from '@lucide/svelte/icons/network';
 
 	type KbSectionId =
@@ -30,7 +41,15 @@
 		| 'kb-summary-graph'
 		| 'kb-summary-tree'
 		| 'kb-topic-graph'
-		| 'kb-topic-tree';
+		| 'kb-topic-tree'
+		| 'kb-references'
+		| 'kb-formulas'
+		| 'kb-tables'
+		| 'kb-compliance-provisions-terms'
+		| 'kb-quotations'
+		| 'kb-case-studies'
+		| 'kb-workflow'
+		| 'kb-product-parts';
 
 	type KbMenuItem = {
 		id: KbSectionId;
@@ -40,11 +59,42 @@
 		children?: Array<{ id: KbSectionId; label: string; description: string }>;
 	};
 
+	const underConstructionIcons: Record<string, any> = {
+		'kb-references': BookOpenIcon,
+		'kb-formulas': FunctionSquareIcon,
+		'kb-tables': Table2Icon,
+		'kb-compliance-provisions-terms': ShieldCheckIcon,
+		'kb-quotations': QuoteIcon,
+		'kb-case-studies': BriefcaseBusinessIcon,
+		'kb-workflow': WorkflowIcon,
+		'kb-product-parts': PackageIcon
+	};
+
 	const menuItems: KbMenuItem[] = [
-		{ id: 'kb-search', label: 'Knowledge Stores', description: 'Explore indexed knowledge', icon: SearchIcon },
-		{ id: 'kb-import', label: 'Documents', description: 'Review imported records', icon: FileTextIcon },
-		{ id: 'kb-input-details', label: 'Document Details', description: 'Inspect source inputs', icon: DatabaseIcon },
-		{ id: 'kb-metrics', label: 'Metrics', description: 'Manage extracted metrics', icon: BarChart3Icon },
+		{
+			id: 'kb-search',
+			label: 'Knowledge Stores',
+			description: 'Explore indexed knowledge',
+			icon: SearchIcon
+		},
+		{
+			id: 'kb-import',
+			label: 'Documents',
+			description: 'Review imported records',
+			icon: FileTextIcon
+		},
+		{
+			id: 'kb-input-details',
+			label: 'Document Details',
+			description: 'Inspect source inputs',
+			icon: DatabaseIcon
+		},
+		{
+			id: 'kb-metrics',
+			label: 'Metrics',
+			description: 'Manage extracted metrics',
+			icon: BarChart3Icon
+		},
 		{
 			id: 'kb-doc-structure',
 			label: 'Document Structure',
@@ -87,11 +137,19 @@
 					description: 'Document-centric topic browser'
 				}
 			]
-		}
+		},
+		...KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.map((section) => ({
+			id: section.id as KbSectionId,
+			label: section.label,
+			description: section.description,
+			icon: underConstructionIcons[section.id] ?? BookOpenIcon
+		}))
 	];
 
 	let darkMode = $derived(page.url.searchParams.get('dark') !== '0');
-	let initialSection = $derived((page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search');
+	let initialSection = $derived(
+		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
+	);
 	let activeSection = $state<KbSectionId>('kb-search');
 
 	$effect(() => {
@@ -119,7 +177,9 @@
 	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
 	let hoverBg = $derived(darkMode ? 'rgba(45,51,72,0.6)' : 'rgba(228,230,235,0.7)');
 
-	let needsActiveStore = $derived(activeSection !== 'kb-search');
+	let needsActiveStore = $derived(
+		activeSection !== 'kb-search' && !isUnderConstructionKnowledgeSection(activeSection)
+	);
 
 	function selectSection(id: KbSectionId) {
 		activeSection = id;
@@ -149,6 +209,13 @@
 	function isChildActive(childId: KbSectionId) {
 		return activeSection === childId;
 	}
+
+	function getUnderConstructionLabel(sectionId: KbSectionId) {
+		return (
+			KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.find((section) => section.id === sectionId)?.label ??
+			activeItem.label
+		);
+	}
 </script>
 
 <div class="kb-page flex overflow-hidden" style="background:{pageBg}; color:{textPrimary};">
@@ -173,12 +240,17 @@
 			</div>
 		</div>
 
-		<nav class="flex-1 overflow-y-auto px-2 py-3" style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;">
+		<nav
+			class="flex-1 overflow-y-auto px-2 py-3"
+			style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
+		>
 			{#each menuItems as item (item.id)}
 				{#if isCollapsibleParent(item)}
 					<div
 						class="mb-1 rounded-lg"
-						style="background:{item.children?.some((child) => isChildActive(child.id)) ? accentTint : 'transparent'};"
+						style="background:{item.children?.some((child) => isChildActive(child.id))
+							? accentTint
+							: 'transparent'};"
 					>
 						<button
 							type="button"
@@ -187,19 +259,27 @@
 							style="
 								color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
 								border:none;
-								border-left:2px solid {item.children?.some((child) => isChildActive(child.id)) ? accent : 'transparent'};
+								border-left:2px solid {item.children?.some((child) => isChildActive(child.id))
+								? accent
+								: 'transparent'};
 							"
 						>
 							<item.icon class="h-5 w-5 flex-shrink-0" />
 							<span class="min-w-0 flex-1">
-								<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
-								<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
+								<span class="block truncate" style="font-size:14px; font-weight:600;"
+									>{item.label}</span
+								>
+								<span class="block truncate" style="font-size:12px; color:{textMuted};"
+									>{item.description}</span
+								>
 							</span>
-							<span style="font-size:12px; color:{textMuted};">{isParentOpen(item) ? '−' : '+'}</span>
+							<span style="font-size:12px; color:{textMuted};"
+								>{isParentOpen(item) ? '−' : '+'}</span
+							>
 						</button>
 
 						{#if isParentOpen(item)}
-							<div class="pb-2 pl-6 pr-2">
+							<div class="pr-2 pb-2 pl-6">
 								{#each item.children ?? [] as child (child.id)}
 									<button
 										type="button"
@@ -211,10 +291,17 @@
 											border:none;
 										"
 									>
-										<span style="font-size:12px; color:{isChildActive(child.id) ? accent : textMuted};">•</span>
+										<span
+											style="font-size:12px; color:{isChildActive(child.id) ? accent : textMuted};"
+											>•</span
+										>
 										<span class="min-w-0">
-											<span class="block truncate" style="font-size:13px; font-weight:600;">{child.label}</span>
-											<span class="block truncate" style="font-size:11px; color:{textMuted};">{child.description}</span>
+											<span class="block truncate" style="font-size:13px; font-weight:600;"
+												>{child.label}</span
+											>
+											<span class="block truncate" style="font-size:11px; color:{textMuted};"
+												>{child.description}</span
+											>
 										</span>
 									</button>
 								{/each}
@@ -245,8 +332,12 @@
 					>
 						<item.icon class="h-5 w-5 flex-shrink-0" />
 						<span class="min-w-0">
-							<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
-							<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
+							<span class="block truncate" style="font-size:14px; font-weight:600;"
+								>{item.label}</span
+							>
+							<span class="block truncate" style="font-size:12px; color:{textMuted};"
+								>{item.description}</span
+							>
 						</span>
 					</button>
 				{/if}
@@ -268,16 +359,24 @@
 			{#if needsActiveStore}
 				{#if knowledgeStoreState.activeStore}
 					<div
-						class="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full"
+						class="flex flex-shrink-0 items-center gap-2 rounded-full px-3 py-1.5"
 						style="background:{accentTint}; border:1px solid {accent}30;"
 					>
-						<span style="font-size:11px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">Active Store</span>
-						<span style="font-size:13px; font-weight:600; color:{accent}; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{knowledgeStoreState.activeStore.ks_name}</span>
-						<span style="font-size:11px; color:{textMuted}; font-family:monospace;">#{knowledgeStoreState.activeStore.id}</span>
+						<span
+							style="font-size:11px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;"
+							>Active Store</span
+						>
+						<span
+							style="font-size:13px; font-weight:600; color:{accent}; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+							>{knowledgeStoreState.activeStore.ks_name}</span
+						>
+						<span style="font-size:11px; color:{textMuted}; font-family:monospace;"
+							>#{knowledgeStoreState.activeStore.id}</span
+						>
 					</div>
 				{:else}
 					<div
-						class="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full"
+						class="flex flex-shrink-0 items-center gap-2 rounded-full px-3 py-1.5"
 						style="background:rgba(239,68,68,0.10); border:1px solid rgba(239,68,68,0.25);"
 					>
 						<span style="font-size:13px; color:#ef4444;">No active store</span>
@@ -289,19 +388,27 @@
 		<div class="min-h-0 flex-1 overflow-hidden">
 			{#if needsActiveStore && !knowledgeStoreState.activeStore}
 				<div
-					class="h-full flex flex-col items-center justify-center p-8"
+					class="flex h-full flex-col items-center justify-center p-8"
 					style="background:{contentBg};"
 				>
 					<div
 						class="rounded-2xl p-8 text-center"
 						style="background:{panelBg}; border:1px solid {borderColor}; max-width:420px; width:100%;"
 					>
-						<div style="font-size:2.5rem; margin-bottom:1rem; opacity:0.35; color:{textSecondary};">◎</div>
-						<div style="font-size:17px; font-weight:700; color:{textPrimary}; margin-bottom:0.5rem;">
+						<div style="font-size:2.5rem; margin-bottom:1rem; opacity:0.35; color:{textSecondary};">
+							◎
+						</div>
+						<div
+							style="font-size:17px; font-weight:700; color:{textPrimary}; margin-bottom:0.5rem;"
+						>
 							No Knowledge Store Selected
 						</div>
-						<p style="font-size:13px; color:{textSecondary}; line-height:1.6; margin-bottom:1.5rem;">
-							This section operates on the active knowledge store. Go to <strong style="color:{textPrimary};">Knowledge Stores</strong> and click a card to select one before continuing.
+						<p
+							style="font-size:13px; color:{textSecondary}; line-height:1.6; margin-bottom:1.5rem;"
+						>
+							This section operates on the active knowledge store. Go to <strong
+								style="color:{textPrimary};">Knowledge Stores</strong
+							> and click a card to select one before continuing.
 						</p>
 						<button
 							type="button"
@@ -332,6 +439,31 @@
 				<TopicGraphView {darkMode} />
 			{:else if activeSection === 'kb-topic-tree'}
 				<TopicTreeView {darkMode} />
+			{:else if isUnderConstructionKnowledgeSection(activeSection)}
+				<div
+					class="flex h-full flex-col items-center justify-center p-8"
+					style="background:{contentBg};"
+				>
+					<div
+						class="w-full rounded-2xl p-8 text-center"
+						style="background:{panelBg}; border:1px solid {borderColor}; max-width:440px;"
+					>
+						<div
+							class="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl"
+							style="background:{accentTint}; color:{accent}; border:1px solid {accent}30;"
+						>
+							<BoxesIcon class="h-6 w-6" />
+						</div>
+						<div
+							style="font-size:17px; font-weight:700; color:{textPrimary}; margin-bottom:0.5rem;"
+						>
+							{getUnderConstructionLabel(activeSection)}
+						</div>
+						<p style="font-size:13px; color:{textSecondary}; line-height:1.6; margin:0;">
+							Under construction
+						</p>
+					</div>
+				</div>
 			{/if}
 		</div>
 	</main>

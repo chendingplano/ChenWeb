@@ -28,6 +28,7 @@
 	import TopicCategoryTab from './topic-category-tab.svelte';
 	import TopicGraphTabs from './topic-graph-tabs.svelte';
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
+	import ViewToolbar from './view-toolbar.svelte';
 	import { getTopicCategory, listTopicGraph } from '$lib/services/kbService';
 	import type { SummaryCategoryNode } from './summary-types';
 	import type {
@@ -1018,6 +1019,8 @@
 			</div>
 		</div>
 	</div>
+
+	<ViewToolbar {darkMode} />
 
 	<div class="tabbed-window">
 		<div class="tabbed-window-head">

@@ -8,6 +8,7 @@
 	import { TooltipComponent } from 'echarts/components';
 	import {
 		addChildNode,
+		canToggleNodeExpanded,
 		createSummaryGraphTabs,
 		deleteNode,
 		mergeNodes,
@@ -29,6 +30,7 @@
 	import SummaryCategoryTab from './summary-category-tab.svelte';
 	import SummaryGraphTabs from './summary-graph-tabs.svelte';
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
+	import ViewToolbar from './view-toolbar.svelte';
 	import { getSummaryCategory, listSummaryGraph } from '$lib/services/kbService';
 	import type {
 		SummaryCategoryNode,
@@ -42,6 +44,14 @@
 	type DialogMode = 'rename' | 'metadata' | 'add' | 'delete' | 'merge' | 'split' | null;
 	type HoverCardPos = { x: number; y: number };
 	type HoverAnchor = { x: number; y: number; nodeRadius: number } | null;
+	type RenderedNodeHit = {
+		node: SummaryCategoryNode;
+		point: { x: number; y: number };
+		distance: number;
+		dx: number;
+		dy: number;
+		source: 'hovered' | 'label' | 'nearest';
+	};
 	type MiniMapNode = { id: string; x: number; y: number; selected: boolean };
 	type MiniMapEdge = { fromX: number; fromY: number; toX: number; toY: number };
 	type MiniMapLayout = { nodes: MiniMapNode[]; edges: MiniMapEdge[] };
@@ -75,6 +85,9 @@
 	const SUMMARY_HOVER_GAP_BELOW_Y = 70;
 	const SUMMARY_PARENT_CHILD_DISTANCE = 300;
 	const SUMMARY_REVEAL_MARGIN = 96;
+	const SUMMARY_NODE_CLICK_FALLBACK_MAX_DX = 280;
+	const SUMMARY_NODE_CLICK_FALLBACK_MAX_DY = 26;
+	const SUMMARY_NODE_CLICK_FALLBACK_ROW_DY = 36;
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -108,6 +121,8 @@
 	let hoverCardPos = $state<HoverCardPos>({ x: 28, y: 28 });
 	let hoverAnchor = $state<HoverAnchor>(null);
 	let hoverCardHovering = $state(false);
+	let dismissedHoverNodeId = $state<string | null>(null);
+	let hoverDismissPending = $state(false);
 	let miniViewport = $state({ left: 0.08, top: 0.12, width: 0.36, height: 0.42, scale: 1 });
 	let stagePointerDown = $state(false);
 	let miniMapDragging = $state(false);
@@ -116,6 +131,8 @@
 	let graphCanPan = $state(false);
 	let pendingRevealNodeId = $state<string | null>(null);
 	let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
+	let pendingZrClickFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+	let lastEChartsClickStamp = 0;
 
 	onMount(() => {
 		const handlePointerUp = () => {
@@ -147,6 +164,7 @@
 	);
 
 	function openDialog(mode: DialogMode, nodeId: string) {
+		console.log('[summary-graph-click] openDialog (MID_26050410)', { mode, nodeId });
 		selectedNodeId = nodeId;
 		dialogMode = mode;
 		dialogOpen = true;
@@ -159,17 +177,83 @@
 		}
 	}
 
+	function clearPendingZrClickFallback() {
+		if (pendingZrClickFallbackTimer) {
+			clearTimeout(pendingZrClickFallbackTimer);
+			pendingZrClickFallbackTimer = null;
+		}
+	}
+
 	function scheduleHoverHide() {
 		clearHoverHideTimer();
 		hoverHideTimer = setTimeout(() => {
 			if (!hoverCardHovering) {
 				hoveredNodeId = null;
 				hoverAnchor = null;
+				hoverDismissPending = false;
 			}
 		}, 120);
 	}
 
+	function dismissHoverCard() {
+		dismissedHoverNodeId = hoveredNodeId;
+		hoverDismissPending = true;
+		hoverCardHovering = false;
+		scheduleHoverHide();
+	}
+
+	function describeDomTarget(target: EventTarget | null) {
+		if (!(target instanceof Element)) return String(target);
+		const classes = Array.from(target.classList ?? [])
+			.slice(0, 6)
+			.join('.');
+		return `${target.tagName.toLowerCase()}${target.id ? `#${target.id}` : ''}${classes ? `.${classes}` : ''}`;
+	}
+
+	function describeChartTarget(target: any) {
+		if (!target) return null;
+		return {
+			type: target.type,
+			name: target.name,
+			silent: target.silent,
+			ignore: target.ignore,
+			shape: target.shape ? Object.keys(target.shape) : null,
+			styleText: target.style?.text
+		};
+	}
+
+	function logGraphPointer(
+		source: string,
+		event: MouseEvent | PointerEvent | any,
+		extra: Record<string, unknown> = {}
+	) {
+		const nativeEvent = event?.event?.event ?? event?.event ?? event;
+		const target = nativeEvent?.target ?? event?.target ?? null;
+		console.log(`[summary-graph-click] ${source} (MID_26050409)`, {
+			type: nativeEvent?.type ?? event?.type,
+			button: nativeEvent?.button,
+			buttons: nativeEvent?.buttons,
+			client: {
+				x: nativeEvent?.clientX,
+				y: nativeEvent?.clientY
+			},
+			offset: {
+				x: nativeEvent?.offsetX,
+				y: nativeEvent?.offsetY
+			},
+			target: describeDomTarget(target),
+			overlay:
+				target instanceof Element ? target.closest('.hover-card, .mini-map')?.className : null,
+			stagePointerDown,
+			miniMapDragging,
+			hoveredNodeId,
+			selectedNodeId,
+			...extra
+		});
+	}
+
 	function shouldKeepHoverAlive(pointerX: number, pointerY: number) {
+		if (dismissedHoverNodeId) return false;
 		if (!hoverAnchor || !hoveredNodeId) return false;
 		return isPointInHoverKeepAliveZone({
 			pointX: pointerX,
@@ -203,6 +287,7 @@
 	}
 
 	async function showSummaries(node: SummaryCategoryNode) {
+		console.log('showSummaries (MID_26050408)');
 		const result = openCategorySummaryTab(tabs, node.categoryPath);
 		tabs = result.tabs;
 		activeTabId = result.activeTabId;
@@ -249,6 +334,7 @@
 	}
 
 	function closeTab(tabId: string) {
+		console.log('[summary-graph-click] closeTab (MID_26050411)', { tabId });
 		tabs = tabs.filter((tab) => tab.id !== tabId);
 		if (activeTabId === tabId) activeTabId = 'summary-graph';
 	}
@@ -452,17 +538,42 @@
 		};
 	}
 
-	function updateHoverNode(event: any) {
+	function updateHoverNode(event: any, source: 'mouseover' | 'mousemove' | 'click' = 'mousemove') {
 		const nodeId = String(event?.data?.id ?? '');
 		if (!nodeId || nodeId === 'summary-root') return;
-		clearHoverHideTimer();
-		hoveredNodeId = nodeId;
 		const rawSize = Number(event?.data?.symbolSize ?? 11);
 		const nodeRadius = Number.isFinite(rawSize) ? rawSize / 2 : 6;
 		const nativeEvent = event?.event?.event ?? event?.event ?? null;
 		const nativeX = Number(nativeEvent?.offsetX);
 		const nativeY = Number(nativeEvent?.offsetY);
 		const nodePixel = getHoveredNodePixel(event, nativeX, nativeY);
+
+		if (nodeId === dismissedHoverNodeId && source !== 'click') {
+			if (hoverDismissPending) return;
+			if (source === 'mouseover') {
+				dismissedHoverNodeId = null;
+			} else {
+				const fallbackX = Number(nativeEvent?.offsetX);
+				const fallbackY = Number(nativeEvent?.offsetY);
+				const anchor =
+					nodePixel ??
+					(Number.isFinite(fallbackX) && Number.isFinite(fallbackY)
+						? { x: fallbackX, y: fallbackY }
+						: null);
+				const pointerIsBackOnNode =
+					anchor &&
+					Number.isFinite(nativeX) &&
+					Number.isFinite(nativeY) &&
+					Math.hypot(nativeX - anchor.x, nativeY - anchor.y) <=
+						nodeRadius + HOVER_KEEP_ALIVE_BUFFER;
+				if (!pointerIsBackOnNode) return;
+			}
+		}
+
+		dismissedHoverNodeId = null;
+		hoverDismissPending = false;
+		clearHoverHideTimer();
+		hoveredNodeId = nodeId;
 		if (nodePixel) {
 			/*
 			console.debug('[summary-hover-anchor]', {
@@ -491,6 +602,37 @@
 		});
 		*/
 		placeHoverCardNearNode(fallbackX, fallbackY, pointerAnchorRadius);
+	}
+
+	function handleChartPointerOut() {
+		scheduleHoverHide();
+	}
+
+	function handleChartNodeClick(event: any) {
+		lastEChartsClickStamp = Date.now();
+		clearPendingZrClickFallback();
+		logGraphPointer('echarts-node-click', event, {
+			componentType: event?.componentType,
+			seriesType: event?.seriesType,
+			dataIndex: event?.dataIndex,
+			nodeId: event?.data?.id,
+			nodeName: event?.data?.name,
+			zrTarget: describeChartTarget(event?.event?.target)
+		});
+		const nodeId = String(event?.data?.id ?? '');
+		if (!nodeId || nodeId === 'summary-root') return;
+
+		dismissedHoverNodeId = null;
+		hoverDismissPending = false;
+		selectedNodeId = nodeId;
+		hoveredNodeId = nodeId;
+		clearHoverHideTimer();
+
+		const clickedNode = nodes.find((node) => node.id === nodeId);
+		if (canToggleNodeExpanded(clickedNode)) {
+			toggleNodeAndMaybeReveal(nodeId);
+		}
+		updateHoverNode(event, 'click');
 	}
 
 	function buildMiniMapLayout(): MiniMapLayout {
@@ -652,6 +794,166 @@
 		return point;
 	}
 
+	function getNativeEventPoint(event: any): { x: number; y: number } | null {
+		const nativeEvent = event?.event?.event ?? event?.event ?? event;
+		const offsetX = Number(nativeEvent?.offsetX);
+		const offsetY = Number(nativeEvent?.offsetY);
+		if (Number.isFinite(offsetX) && Number.isFinite(offsetY)) return { x: offsetX, y: offsetY };
+
+		const clientX = Number(nativeEvent?.clientX);
+		const clientY = Number(nativeEvent?.clientY);
+		const stageRect = graphStageEl?.getBoundingClientRect?.();
+		if (stageRect && Number.isFinite(clientX) && Number.isFinite(clientY)) {
+			return { x: clientX - stageRect.left, y: clientY - stageRect.top };
+		}
+		return null;
+	}
+
+	function getZrTargetText(target: any): string {
+		return String(
+			target?.style?.text ??
+				target?.style?.textContent ??
+				target?.style?.richText ??
+				target?.name ??
+				target?.__title ??
+				''
+		).trim();
+	}
+
+	function getVisibleNodeIds() {
+		const visibleIds = new Set<string>();
+		const visit = (node: SummaryCategoryNode) => {
+			visibleIds.add(node.id);
+			if (!node.expanded) return;
+			for (const child of childrenOf(node)) visit(child);
+		};
+		for (const root of visibleRoots()) visit(root);
+		return visibleIds;
+	}
+
+	function getRenderedHitForNode(
+		node: SummaryCategoryNode,
+		point: { x: number; y: number },
+		source: RenderedNodeHit['source']
+	): RenderedNodeHit | null {
+		const renderedPoint = getRenderedNodePoint(node.id);
+		if (!renderedPoint) return null;
+		const dx = Math.abs(point.x - renderedPoint.x);
+		const dy = Math.abs(point.y - renderedPoint.y);
+		return {
+			node,
+			point: renderedPoint,
+			distance: Math.hypot(dx, dy),
+			dx,
+			dy,
+			source
+		};
+	}
+
+	function isAcceptableRenderedNodeHit(hit: RenderedNodeHit) {
+		if (hit.source === 'label' || hit.source === 'hovered') return true;
+		return (
+			hit.distance <= 44 ||
+			hit.dy <= SUMMARY_NODE_CLICK_FALLBACK_ROW_DY ||
+			(hit.dy <= SUMMARY_NODE_CLICK_FALLBACK_MAX_DY && hit.dx <= SUMMARY_NODE_CLICK_FALLBACK_MAX_DX)
+		);
+	}
+
+	function findRenderedNodeHit(event: any): RenderedNodeHit | null {
+		const point = getNativeEventPoint(event);
+		if (!point) return null;
+
+		const targetText = getZrTargetText(event?.target ?? event?.topTarget);
+		const visibleNodeIds = getVisibleNodeIds();
+		const hoveredNode = hoveredNodeId
+			? nodes.find((node) => node.id === hoveredNodeId && visibleNodeIds.has(node.id))
+			: null;
+		if (hoveredNode) {
+			const hoveredHit = getRenderedHitForNode(hoveredNode, point, 'hovered');
+			if (hoveredHit && isAcceptableRenderedNodeHit(hoveredHit)) return hoveredHit;
+		}
+
+		const labelMatches = targetText
+			? nodes.filter(
+					(node) =>
+						visibleNodeIds.has(node.id) &&
+						(node.label === targetText || node.categoryPath === targetText)
+				)
+			: [];
+		const candidates =
+			labelMatches.length > 0 ? labelMatches : nodes.filter((node) => visibleNodeIds.has(node.id));
+		let best: RenderedNodeHit | null = null;
+
+		for (const node of candidates) {
+			const hit = getRenderedHitForNode(node, point, labelMatches.length > 0 ? 'label' : 'nearest');
+			if (!hit) continue;
+			if (!best || hit.distance < best.distance) best = hit;
+		}
+
+		if (!best) return null;
+		return isAcceptableRenderedNodeHit(best) ? best : null;
+	}
+
+	function handleZrClickFallback(event: any, clickStamp: number, capturedPoint?: { x: number; y: number } | null) {
+		if (lastEChartsClickStamp && Math.abs(lastEChartsClickStamp - clickStamp) < 50) return;
+
+		const hit = findRenderedNodeHit(event);
+		const fallbackHitSummary = hit
+			? `${hit.node.id} label="${hit.node.label}" canToggle=${canToggleNodeExpanded(hit.node)} source=${hit.source} distance=${Math.round(hit.distance * 10) / 10} dx=${Math.round(hit.dx * 10) / 10} dy=${Math.round(hit.dy * 10) / 10}`
+			: 'none';
+		console.log(
+			'[summary-graph-click] zrender-click-fallback-hit (MID_26050413)',
+			fallbackHitSummary
+		);
+		logGraphPointer('zrender-click-fallback', event, {
+			fallbackHitSummary,
+			fallbackHit: hit
+				? {
+						nodeId: hit.node.id,
+						label: hit.node.label,
+						distance: Math.round(hit.distance * 10) / 10,
+						dx: Math.round(hit.dx * 10) / 10,
+						dy: Math.round(hit.dy * 10) / 10,
+						source: hit.source,
+						canToggle: canToggleNodeExpanded(hit.node)
+					}
+				: null
+		});
+		if (hit && canToggleNodeExpanded(hit.node)) {
+			selectedNodeId = hit.node.id;
+			hoveredNodeId = hit.node.id;
+			dismissedHoverNodeId = null;
+			hoverDismissPending = false;
+			clearHoverHideTimer();
+			toggleNodeAndMaybeReveal(hit.node.id);
+			return;
+		}
+
+		// Hover-based fallback: when the hit-test can't find the node (e.g. child nodes in a tree
+		// chart that ECharts internal flat data doesn't index), use the hover anchor as heuristic.
+		if (!hit && hoveredNodeId && hoverAnchor && capturedPoint && canToggleNodeExpanded(hoveredNode)) {
+			const dist = Math.hypot(capturedPoint.x - hoverAnchor.x, capturedPoint.y - hoverAnchor.y);
+			const clickRadius = (hoverAnchor.nodeRadius || 8) + 30;
+			if (dist <= clickRadius) {
+				selectedNodeId = hoveredNodeId;
+				dismissedHoverNodeId = null;
+				hoverDismissPending = false;
+				clearHoverHideTimer();
+				toggleNodeAndMaybeReveal(hoveredNodeId);
+			}
+		}
+	}
+
+	function scheduleZrClickFallback(event: any) {
+		clearPendingZrClickFallback();
+		const clickStamp = Date.now();
+		const capturedPoint = getNativeEventPoint(event);
+		pendingZrClickFallbackTimer = setTimeout(() => {
+			pendingZrClickFallbackTimer = null;
+			handleZrClickFallback(event, clickStamp, capturedPoint);
+		}, 0);
+	}
+
 	function revealExpandedChildren(nodeId: string) {
 		const context = getRoamContext();
 		const node = nodes.find((candidate) => candidate.id === nodeId);
@@ -697,6 +999,7 @@
 	}
 
 	function toggleNodeAndMaybeReveal(nodeId: string) {
+		console.log('toggleNodeAndMaybeReview (MID_26050406)');
 		const node = nodes.find((candidate) => candidate.id === nodeId);
 		const shouldReveal = Boolean(node && node.childIds.length > 0 && !node.expanded);
 		nodes = toggleNodeExpanded(nodes, nodeId);
@@ -776,6 +1079,7 @@
 		action: Exclude<DialogMode, null> | 'show-summaries' | 'toggle-expand',
 		node: SummaryCategoryNode
 	) {
+		console.log('runHoverAction (MID_26050405)');
 		selectedNodeId = node.id;
 		if (action === 'show-summaries') {
 			showSummaries(node);
@@ -804,12 +1108,37 @@
 				);
 				syncMiniViewport();
 			};
+			const handleZrClick = (event?: any) => {
+				logGraphPointer('zrender-click', event, {
+					zrTarget: describeChartTarget(event?.target),
+					zrTopTarget: describeChartTarget(event?.topTarget)
+				});
+				scheduleZrClickFallback(event);
+			};
+			const handleStageClickCapture = (event: MouseEvent) => {
+				logGraphPointer('stage-dom-click-capture', event);
+			};
+			const handleStageClickBubble = (event: MouseEvent) => {
+				logGraphPointer('stage-dom-click-bubble', event);
+			};
+			const handleStagePointerUpCapture = (event: PointerEvent) => {
+				logGraphPointer('stage-dom-pointerup-capture', event);
+			};
 			zr.on('mousewheel', handleRoam);
 			zr.on('mousemove', handleRoam);
+			zr.on('click', handleZrClick);
+			graphStageEl.addEventListener('click', handleStageClickCapture, true);
+			graphStageEl.addEventListener('click', handleStageClickBubble);
+			graphStageEl.addEventListener('pointerup', handleStagePointerUpCapture, true);
 
 			return () => {
 				zr.off('mousewheel', handleRoam);
 				zr.off('mousemove', handleRoam);
+				zr.off('click', handleZrClick);
+				clearPendingZrClickFallback();
+				graphStageEl?.removeEventListener('click', handleStageClickCapture, true);
+				graphStageEl?.removeEventListener('click', handleStageClickBubble);
+				graphStageEl?.removeEventListener('pointerup', handleStagePointerUpCapture, true);
 				setChartCursor('default');
 			};
 		}
@@ -996,12 +1325,17 @@
 		</div>
 	</div>
 
+	<ViewToolbar {darkMode} />
+
 	<div class="tabbed-window">
 		<div class="tabbed-window-head">
 			<SummaryGraphTabs
 				{tabs}
 				{activeTabId}
-				onSelect={(tabId) => (activeTabId = tabId)}
+				onSelect={(tabId) => {
+					console.log('[summary-graph-click] tab-select (MID_26050412)', { tabId });
+					activeTabId = tabId;
+				}}
 				onClose={closeTab}
 			/>
 		</div>
@@ -1033,6 +1367,7 @@
 							chartApi?.getZr?.()?.setCursorStyle?.('default');
 						}}
 						onpointerdown={(event: PointerEvent) => {
+							logGraphPointer('stage-dom-pointerdown', event);
 							const target = event.target as HTMLElement | null;
 							if (target?.closest('.hover-card, .mini-map')) return;
 							stagePointerDown = true;
@@ -1071,24 +1406,13 @@
 										syncMiniViewport();
 										revealPendingExpandedChildren();
 									}}
-									onmouseover={(event: any) => updateHoverNode(event)}
+									onmouseover={(event: any) => updateHoverNode(event, 'mouseover')}
 									onmousemove={(event: any) => {
-										if (event?.data?.id) updateHoverNode(event);
+										if (event?.data?.id) updateHoverNode(event, 'mousemove');
 									}}
-									onmouseout={() => scheduleHoverHide()}
-									onglobalout={() => scheduleHoverHide()}
-									onclick={(event: any) => {
-										const nodeId = String(event?.data?.id ?? '');
-										if (nodeId && nodeId !== 'summary-root') {
-											selectedNodeId = nodeId;
-											hoveredNodeId = nodeId;
-											const clickedNode = nodes.find((node) => node.id === nodeId);
-											if (clickedNode && clickedNode.childIds.length > 0 && !clickedNode.expanded) {
-												toggleNodeAndMaybeReveal(nodeId);
-											}
-											updateHoverNode(event);
-										}
-									}}
+									onmouseout={handleChartPointerOut}
+									onglobalout={handleChartPointerOut}
+									onclick={handleChartNodeClick}
 								/>
 							</div>
 
@@ -1100,11 +1424,26 @@
 									style={`left:${hoverCardPos.x}px; top:${hoverCardPos.y}px;`}
 									onmouseenter={() => {
 										hoverCardHovering = true;
+										dismissedHoverNodeId = null;
+										hoverDismissPending = false;
 										clearHoverHideTimer();
 									}}
-									onmouseleave={() => {
-										hoverCardHovering = false;
-										scheduleHoverHide();
+									onmouseleave={dismissHoverCard}
+									onclick={(event: MouseEvent) => {
+										logGraphPointer('hover-card-click', event);
+										if ((event.target as Element).closest('button')) {
+											console.log(
+												'[summary-graph-click] hover-card-button-click-ignored (MID_26050402)'
+											);
+											return;
+										}
+										if (hoveredNode && canToggleNodeExpanded(hoveredNode)) {
+											console.log('[summary-graph-click] hover-card-toggle (MID_26050403)', {
+												nodeId: hoveredNode.id
+											});
+											toggleNodeAndMaybeReveal(hoveredNode.id);
+										}
+										console.log('[summary-graph-click] hover-card-click-complete (MID_26050404)');
 									}}
 								>
 									<div class="hover-card-head">
@@ -1226,6 +1565,7 @@
 										(event.currentTarget as SVGSVGElement).releasePointerCapture?.(event.pointerId);
 									}}
 									onclick={(event: MouseEvent) => {
+										logGraphPointer('mini-map-click', event);
 										if (miniMapDragMoved) {
 											miniMapDragMoved = false;
 											return;
@@ -1313,10 +1653,7 @@
 									</div>
 								</div>
 								<div class="action-grid action-grid-top">
-									<button
-										type="button"
-										onclick={() => toggleNodeAndMaybeReveal(selectedNode.id)}
-									>
+									<button type="button" onclick={() => toggleNodeAndMaybeReveal(selectedNode.id)}>
 										{selectedNode.expanded ? 'Collapse' : 'Expand'}
 									</button>
 									<button

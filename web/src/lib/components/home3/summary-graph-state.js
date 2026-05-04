@@ -59,6 +59,14 @@ export function openCategorySummaryTab(tabs, categoryPath) {
 }
 
 /**
+ * @param {SummaryGraphNode | null | undefined} node
+ * @returns {boolean}
+ */
+export function canToggleNodeExpanded(node) {
+	return Boolean(node && Array.isArray(node.childIds) && node.childIds.length > 0);
+}
+
+/**
  * @param {SummaryGraphNode[]} nodes
  * @param {string} nodeId
  * @returns {SummaryGraphNode[]}
