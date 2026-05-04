@@ -20,6 +20,11 @@
 		computeHoverCardPosition,
 		toContainerLocalPoint
 	} from './summary-graph-hover-position.js';
+	import {
+		getFixedTreeLayoutWidth,
+		getPanOffsetToRevealRect,
+		getVisibleTreeDepth
+	} from './graph-layout-utils.js';
 	import TopicCategoryTab from './topic-category-tab.svelte';
 	import TopicGraphTabs from './topic-graph-tabs.svelte';
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
@@ -64,6 +69,8 @@
 	const TOPIC_HOVER_GAP_RIGHT_X = 95;
 	const TOPIC_HOVER_GAP_TOP_Y = 0;
 	const TOPIC_HOVER_GAP_BELOW_Y = 70;
+	const TOPIC_PARENT_CHILD_DISTANCE = 300;
+	const TOPIC_REVEAL_MARGIN = 112;
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
 
@@ -102,6 +109,7 @@
 	let miniMapDragStart = $state<MiniMapDragStart>(null);
 	let miniMapDragMoved = $state(false);
 	let graphCanPan = $state(false);
+	let pendingRevealNodeId = $state<string | null>(null);
 	let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
 
 	onMount(() => {
@@ -127,6 +135,13 @@
 	let miniMapLayout = $derived.by((): MiniMapLayout => buildMiniMapLayout());
 	let dialogNode = $derived(selectedNode ? toSummaryDialogNode(selectedNode) : null);
 	let dialogAvailableNodes = $derived(nodes.map(toSummaryDialogNode));
+	let visibleTreeDepth = $derived(getVisibleTreeDepth(nodes));
+	let fixedTreeLayoutWidth = $derived(
+		getFixedTreeLayoutWidth({
+			visibleDepth: visibleTreeDepth,
+			parentChildDistance: TOPIC_PARENT_CHILD_DISTANCE
+		})
+	);
 
 	function toSummaryDialogNode(node: TopicCategoryNode): SummaryCategoryNode {
 		return {
@@ -608,6 +623,99 @@
 		syncMiniViewport();
 	}
 
+	function getRenderedNodePoint(nodeId: string): { x: number; y: number } | null {
+		const seriesModel = chartApi?.getModel?.().getSeriesByIndex?.(0);
+		const seriesData = seriesModel?.getData?.();
+		const group = chartApi?._chartsViews?.[0]?.group;
+		if (!seriesData || !group) return null;
+
+		let point: { x: number; y: number } | null = null;
+		seriesData.each?.((dataIndex: number) => {
+			if (point) return;
+			const option = seriesData.getItemModel?.(dataIndex)?.option;
+			if (String(option?.id ?? '') !== nodeId) return;
+
+			const layout = seriesData.getItemLayout?.(dataIndex);
+			const localX = Number(layout?.x ?? layout?.[0]);
+			const localY = Number(layout?.y ?? layout?.[1]);
+			if (!Number.isFinite(localX) || !Number.isFinite(localY)) return;
+
+			if (typeof group.transformCoordToGlobal === 'function') {
+				const global = group.transformCoordToGlobal(localX, localY);
+				const chartPoint = Array.isArray(global) ? global : [global?.x, global?.y];
+				const x = Number(chartPoint?.[0]);
+				const y = Number(chartPoint?.[1]);
+				if (Number.isFinite(x) && Number.isFinite(y)) {
+					point = normalizeChartPointToStage(x, y);
+				}
+				return;
+			}
+
+			const scaleX = Number(group?.scaleX ?? 1) || 1;
+			const scaleY = Number(group?.scaleY ?? 1) || 1;
+			const offsetX = Number(group?.x ?? 0);
+			const offsetY = Number(group?.y ?? 0);
+			point = {
+				x: localX * scaleX + offsetX,
+				y: localY * scaleY + offsetY
+			};
+		});
+
+		return point;
+	}
+
+	function revealExpandedChildren(nodeId: string) {
+		const context = getRoamContext();
+		const node = nodes.find((candidate) => candidate.id === nodeId);
+		if (!context || !node || !node.expanded || node.childIds.length === 0) return false;
+
+		const childPoints = node.childIds
+			.map((childId) => getRenderedNodePoint(childId))
+			.filter(Boolean) as Array<{ x: number; y: number }>;
+		if (childPoints.length === 0) return false;
+
+		const xs = childPoints.map((point) => point.x);
+		const ys = childPoints.map((point) => point.y);
+		const pan = getPanOffsetToRevealRect({
+			rect: {
+				left: Math.min(...xs) - 90,
+				right: Math.max(...xs) + 190,
+				top: Math.min(...ys) - 64,
+				bottom: Math.max(...ys) + 64
+			},
+			offsetX: context.offsetX,
+			offsetY: context.offsetY,
+			stageWidth: context.stageWidth,
+			stageHeight: context.stageHeight,
+			margin: TOPIC_REVEAL_MARGIN
+		});
+
+		if (pan.changed) moveChartToOffset(pan.x, pan.y);
+		return true;
+	}
+
+	function revealPendingExpandedChildren() {
+		const nodeId = pendingRevealNodeId;
+		if (!nodeId) return;
+		pendingRevealNodeId = null;
+		revealExpandedChildren(nodeId);
+		syncMiniViewport();
+	}
+
+	function scheduleExpandedNodeReveal(nodeId: string) {
+		pendingRevealNodeId = nodeId;
+		requestAnimationFrame(() => requestAnimationFrame(revealPendingExpandedChildren));
+		setTimeout(revealPendingExpandedChildren, 380);
+	}
+
+	function toggleNodeAndMaybeReveal(nodeId: string) {
+		const node = nodes.find((candidate) => candidate.id === nodeId);
+		const shouldReveal = Boolean(node && node.childIds.length > 0 && !node.expanded);
+		nodes = toggleNodeExpanded(nodes, nodeId);
+		if (shouldReveal) scheduleExpandedNodeReveal(nodeId);
+		else setTimeout(syncMiniViewport, 0);
+	}
+
 	function applyMiniMapViewport(normalizedCenterX: number, normalizedCenterY: number) {
 		const context = getRoamContext();
 		if (!context) return;
@@ -686,8 +794,7 @@
 			return;
 		}
 		if (action === 'toggle-expand') {
-			nodes = toggleNodeExpanded(nodes, node.id);
-			setTimeout(syncMiniViewport, 0);
+			toggleNodeAndMaybeReveal(node.id);
 			return;
 		}
 		openDialog(action, node.id);
@@ -812,11 +919,9 @@
 					top: '4%',
 					left: '4%',
 					bottom: '4%',
-					right: '20%',
+					width: fixedTreeLayoutWidth,
 					layout: 'orthogonal',
 					orient: 'LR',
-					layerPadding: 100,
-					nodePadding: 32,
 					symbol: 'rect',
 					symbolSize: [160, 64],
 					edgeShape: 'curve',
@@ -975,8 +1080,14 @@
 									theme={chartTheme}
 									options={treeOption}
 									style="width:100%; height:100%;"
-									onrendered={syncMiniViewport}
-									onfinished={syncMiniViewport}
+									onrendered={() => {
+										syncMiniViewport();
+										revealPendingExpandedChildren();
+									}}
+									onfinished={() => {
+										syncMiniViewport();
+										revealPendingExpandedChildren();
+									}}
 									onmouseover={(event: any) => updateHoverNode(event)}
 									onmousemove={(event: any) => {
 										if (event?.data?.id) updateHoverNode(event);
@@ -990,8 +1101,7 @@
 											hoveredNodeId = nodeId;
 											const clickedNode = nodes.find((node) => node.id === nodeId);
 											if (clickedNode && clickedNode.childIds.length > 0 && !clickedNode.expanded) {
-												nodes = toggleNodeExpanded(nodes, nodeId);
-												setTimeout(syncMiniViewport, 0);
+												toggleNodeAndMaybeReveal(nodeId);
 											}
 											updateHoverNode(event);
 										}
@@ -1217,7 +1327,7 @@
 								<div class="action-grid action-grid-top">
 									<button
 										type="button"
-										onclick={() => (nodes = toggleNodeExpanded(nodes, selectedNode.id))}
+										onclick={() => toggleNodeAndMaybeReveal(selectedNode.id)}
 									>
 										{selectedNode.expanded ? 'Collapse' : 'Expand'}
 									</button>
