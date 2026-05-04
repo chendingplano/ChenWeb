@@ -40,6 +40,26 @@
 	type MiniMapNode = { id: string; x: number; y: number; selected: boolean };
 	type MiniMapEdge = { fromX: number; fromY: number; toX: number; toY: number };
 	type MiniMapLayout = { nodes: MiniMapNode[]; edges: MiniMapEdge[] };
+	type MiniMapDragStart = {
+		x: number;
+		y: number;
+		offsetX: number;
+		offsetY: number;
+		boundsWidth: number;
+		boundsHeight: number;
+		scaleX: number;
+		scaleY: number;
+	} | null;
+	type RoamContext = {
+		group: any;
+		bounds: { x: number; y: number; width: number; height: number };
+		stageWidth: number;
+		stageHeight: number;
+		scaleX: number;
+		scaleY: number;
+		offsetX: number;
+		offsetY: number;
+	};
 
 	const HOVER_CARD_WIDTH = 428;
 	const HOVER_CARD_HEIGHT = 320;
@@ -76,15 +96,34 @@
 	let chartApi = $state<any>(null);
 	let graphStageEl = $state<HTMLDivElement | null>(null);
 	let hoverCardEl = $state<HTMLDivElement | null>(null);
+	let miniMapSvgEl = $state<SVGSVGElement | null>(null);
 	let hoveredNodeId = $state<string | null>(null);
 	let hoverCardPos = $state<HoverCardPos>({ x: 28, y: 28 });
 	let hoverAnchor = $state<HoverAnchor>(null);
 	let hoverCardHovering = $state(false);
 	let miniViewport = $state({ left: 0.08, top: 0.12, width: 0.36, height: 0.42, scale: 1 });
+	let stagePointerDown = $state(false);
+	let miniMapDragging = $state(false);
+	let miniMapDragStart = $state<MiniMapDragStart>(null);
+	let miniMapDragMoved = $state(false);
+	let graphCanPan = $state(false);
 	let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
 
-	onMount(async () => {
-		await loadGraph();
+	onMount(() => {
+		const handlePointerUp = () => {
+			stagePointerDown = false;
+			miniMapDragging = false;
+			miniMapDragStart = null;
+		};
+
+		window.addEventListener('pointerup', handlePointerUp);
+		window.addEventListener('pointercancel', handlePointerUp);
+		void loadGraph();
+
+		return () => {
+			window.removeEventListener('pointerup', handlePointerUp);
+			window.removeEventListener('pointercancel', handlePointerUp);
+		};
 	});
 
 	let selectedNode = $derived(nodes.find((node) => node.id === selectedNodeId) ?? null);
@@ -473,7 +512,7 @@
 		};
 	}
 
-	function syncMiniViewport() {
+	function getRoamContext(): RoamContext | null {
 		const view = chartApi?._chartsViews?.[0];
 		const group = view?.group;
 		const bounds = group?.getBoundingRect?.();
@@ -493,20 +532,128 @@
 			!Number.isFinite(bounds.height) ||
 			bounds.height <= 0
 		) {
+			return null;
+		}
+
+		return {
+			group,
+			bounds,
+			stageWidth,
+			stageHeight,
+			scaleX,
+			scaleY,
+			offsetX,
+			offsetY
+		};
+	}
+
+	function syncMiniViewport() {
+		const context = getRoamContext();
+		if (!context) {
 			miniViewport = { left: 0.08, top: 0.12, width: 0.36, height: 0.42, scale: 1 };
 			return;
 		}
+
+		const { bounds, stageWidth, stageHeight, scaleX, scaleY, offsetX, offsetY } = context;
 
 		const viewLeft = -offsetX / scaleX;
 		const viewTop = -offsetY / scaleY;
 		const viewWidth = stageWidth / scaleX;
 		const viewHeight = stageHeight / scaleY;
-		const left = Math.max(0, Math.min(1, (viewLeft - bounds.x) / bounds.width));
-		const top = Math.max(0, Math.min(1, (viewTop - bounds.y) / bounds.height));
-		const width = Math.max(0.1, Math.min(1 - left, viewWidth / bounds.width));
-		const height = Math.max(0.12, Math.min(1 - top, viewHeight / bounds.height));
+		const left = Math.max(-1, Math.min(2, (viewLeft - bounds.x) / bounds.width));
+		const top = Math.max(-1, Math.min(2, (viewTop - bounds.y) / bounds.height));
+		const width = Math.max(0.1, Math.min(2.5, viewWidth / bounds.width));
+		const height = Math.max(0.12, Math.min(2.5, viewHeight / bounds.height));
 
 		miniViewport = { left, top, width, height, scale: Math.max(scaleX, scaleY) };
+	}
+
+	function moveChartToOffset(nextX: number, nextY: number) {
+		const context = getRoamContext();
+		if (!context) return;
+
+		const { group, offsetX, offsetY } = context;
+		const dx = nextX - offsetX;
+		const dy = nextY - offsetY;
+
+		group.attr({ x: nextX, y: nextY });
+		group.dirty?.();
+		chartApi?.dispatchAction?.({
+			type: 'treeRoam',
+			seriesIndex: 0,
+			dx,
+			dy
+		});
+		chartApi?.getZr?.()?.refreshImmediately?.();
+		syncMiniViewport();
+	}
+
+	function applyMiniMapViewport(normalizedCenterX: number, normalizedCenterY: number) {
+		const context = getRoamContext();
+		if (!context) return;
+
+		const { bounds, scaleX, scaleY } = context;
+		const clampedWidth = Math.min(0.92, Math.max(0.1, miniViewport.width));
+		const clampedHeight = Math.min(0.92, Math.max(0.12, miniViewport.height));
+		const nextLeft = Math.max(0, Math.min(1 - clampedWidth, normalizedCenterX - clampedWidth / 2));
+		const nextTop = Math.max(0, Math.min(1 - clampedHeight, normalizedCenterY - clampedHeight / 2));
+		const nextViewLeft = bounds.x + nextLeft * bounds.width;
+		const nextViewTop = bounds.y + nextTop * bounds.height;
+		const nextX = -nextViewLeft * scaleX;
+		const nextY = -nextViewTop * scaleY;
+
+		moveChartToOffset(nextX, nextY);
+	}
+
+	function updateMiniMapFromPointer(event: PointerEvent) {
+		if (!miniMapSvgEl) return;
+		const rect = miniMapSvgEl.getBoundingClientRect();
+		if (!rect.width || !rect.height) return;
+
+		const normalizedX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+		const normalizedY = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+		applyMiniMapViewport(normalizedX, normalizedY);
+	}
+
+	function getMiniMapPointer(event: PointerEvent) {
+		if (!miniMapSvgEl) return null;
+		const rect = miniMapSvgEl.getBoundingClientRect();
+		if (!rect.width || !rect.height) return null;
+
+		return {
+			x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+			y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+		};
+	}
+
+	function startMiniMapDrag(event: PointerEvent) {
+		const point = getMiniMapPointer(event);
+		const context = getRoamContext();
+		if (!point || !context) return;
+
+		miniMapDragStart = {
+			x: point.x,
+			y: point.y,
+			offsetX: context.offsetX,
+			offsetY: context.offsetY,
+			boundsWidth: context.bounds.width,
+			boundsHeight: context.bounds.height,
+			scaleX: context.scaleX,
+			scaleY: context.scaleY
+		};
+	}
+
+	function dragMiniMapViewport(event: PointerEvent) {
+		const point = getMiniMapPointer(event);
+		if (!point || !miniMapDragStart) return;
+
+		const deltaX = point.x - miniMapDragStart.x;
+		const deltaY = point.y - miniMapDragStart.y;
+		miniMapDragMoved = miniMapDragMoved || Math.hypot(deltaX, deltaY) > 0.002;
+		moveChartToOffset(
+			miniMapDragStart.offsetX - deltaX * miniMapDragStart.boundsWidth * miniMapDragStart.scaleX,
+			miniMapDragStart.offsetY - deltaY * miniMapDragStart.boundsHeight * miniMapDragStart.scaleY
+		);
 	}
 
 	function runHoverAction(
@@ -529,6 +676,25 @@
 	$effect(() => {
 		if (chartApi && graphStageEl && !loadError) {
 			setTimeout(syncMiniViewport, 0);
+			const zr = chartApi?.getZr?.();
+			if (!zr) return;
+
+			const setChartCursor = (cursor: 'grab' | 'grabbing' | 'default') => {
+				zr.setCursorStyle?.(cursor);
+			};
+			const handleRoam = (event?: any) => {
+				graphCanPan = !event?.target;
+				setChartCursor(stagePointerDown || miniMapDragging ? 'grabbing' : graphCanPan ? 'grab' : 'default');
+				syncMiniViewport();
+			};
+			zr.on('mousewheel', handleRoam);
+			zr.on('mousemove', handleRoam);
+
+			return () => {
+				zr.off('mousewheel', handleRoam);
+				zr.off('mousemove', handleRoam);
+				setChartCursor('default');
+			};
 		}
 	});
 
@@ -738,8 +904,30 @@
 				<div class="graph-workspace">
 					<div
 						class="graph-stage"
+						class:can-pan={graphCanPan}
+						class:is-panning={stagePointerDown && !miniMapDragging}
 						role="presentation"
 						bind:this={graphStageEl}
+						onpointerenter={() => {
+							graphCanPan = true;
+							chartApi?.getZr?.()?.setCursorStyle?.('grab');
+						}}
+						onpointerleave={() => {
+							graphCanPan = false;
+							stagePointerDown = false;
+							chartApi?.getZr?.()?.setCursorStyle?.('default');
+						}}
+						onpointerdown={(event: PointerEvent) => {
+							const target = event.target as HTMLElement | null;
+							if (target?.closest('.hover-card, .mini-map')) return;
+							stagePointerDown = true;
+							chartApi?.getZr?.()?.setCursorStyle?.('grabbing');
+						}}
+						onpointermove={(event: PointerEvent) => {
+							const target = event.target as HTMLElement | null;
+							if (target?.closest('.hover-card, .mini-map')) return;
+							if (stagePointerDown) chartApi?.getZr?.()?.setCursorStyle?.('grabbing');
+						}}
 						onmousemove={(event: MouseEvent) => {
 							if (shouldKeepHoverAlive(event.offsetX, event.offsetY)) {
 								clearHoverHideTimer();
@@ -753,34 +941,36 @@
 								Summary Graph could not be loaded. Open the error dialog for details or try again.
 							</div>
 						{:else}
-							<Chart
-								bind:chart={chartApi}
-								{init}
-								theme={chartTheme}
-								options={treeOption}
-								style="width:100%; height:100%;"
-								onrendered={syncMiniViewport}
-								onfinished={syncMiniViewport}
-								onmouseover={(event: any) => updateHoverNode(event)}
-								onmousemove={(event: any) => {
-									if (event?.data?.id) updateHoverNode(event);
-								}}
-								onmouseout={() => scheduleHoverHide()}
-								onglobalout={() => scheduleHoverHide()}
-								onclick={(event: any) => {
-									const nodeId = String(event?.data?.id ?? '');
-									if (nodeId && nodeId !== 'summary-root') {
-										selectedNodeId = nodeId;
-										hoveredNodeId = nodeId;
-										const clickedNode = nodes.find((node) => node.id === nodeId);
-										if (clickedNode && clickedNode.childIds.length > 0 && !clickedNode.expanded) {
-											nodes = toggleNodeExpanded(nodes, nodeId);
-											setTimeout(syncMiniViewport, 0);
+							<div class="chart-cursor-host">
+								<Chart
+									bind:chart={chartApi}
+									{init}
+									theme={chartTheme}
+									options={treeOption}
+									style="width:100%; height:100%;"
+									onrendered={syncMiniViewport}
+									onfinished={syncMiniViewport}
+									onmouseover={(event: any) => updateHoverNode(event)}
+									onmousemove={(event: any) => {
+										if (event?.data?.id) updateHoverNode(event);
+									}}
+									onmouseout={() => scheduleHoverHide()}
+									onglobalout={() => scheduleHoverHide()}
+									onclick={(event: any) => {
+										const nodeId = String(event?.data?.id ?? '');
+										if (nodeId && nodeId !== 'summary-root') {
+											selectedNodeId = nodeId;
+											hoveredNodeId = nodeId;
+											const clickedNode = nodes.find((node) => node.id === nodeId);
+											if (clickedNode && clickedNode.childIds.length > 0 && !clickedNode.expanded) {
+												nodes = toggleNodeExpanded(nodes, nodeId);
+												setTimeout(syncMiniViewport, 0);
+											}
+											updateHoverNode(event);
 										}
-										updateHoverNode(event);
-									}
-								}}
-							/>
+									}}
+								/>
+							</div>
 
 							{#if hoveredNode}
 								<div
@@ -889,7 +1079,40 @@
 									<span>Zoom Window</span>
 									<strong>{miniViewport.scale.toFixed(2)}x</strong>
 								</div>
-								<svg viewBox="0 0 100 100" class="mini-map-svg" aria-hidden="true">
+								<svg
+									bind:this={miniMapSvgEl}
+									viewBox="0 0 100 100"
+									class="mini-map-svg"
+									class:is-dragging={miniMapDragging}
+									aria-hidden="true"
+									onpointerdown={(event: PointerEvent) => {
+										miniMapDragging = true;
+										stagePointerDown = false;
+										(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId);
+										event.preventDefault();
+										event.stopPropagation();
+										miniMapDragMoved = false;
+										startMiniMapDrag(event);
+									}}
+									onpointermove={(event: PointerEvent) => {
+										if (!miniMapDragging) return;
+										event.preventDefault();
+										event.stopPropagation();
+										dragMiniMapViewport(event);
+									}}
+									onpointerup={(event: PointerEvent) => {
+										miniMapDragging = false;
+										miniMapDragStart = null;
+										(event.currentTarget as SVGSVGElement).releasePointerCapture?.(event.pointerId);
+									}}
+									onclick={(event: MouseEvent) => {
+										if (miniMapDragMoved) {
+											miniMapDragMoved = false;
+											return;
+										}
+										updateMiniMapFromPointer(event as PointerEvent);
+									}}
+								>
 									{#each miniMapLayout.edges as edge}
 										<line
 											x1={edge.fromX * 100}
@@ -1194,6 +1417,28 @@
 		position: relative;
 		overflow: hidden;
 		padding: 0.85rem 0.75rem 0.75rem;
+		cursor: default;
+	}
+
+	.graph-stage.can-pan {
+		cursor: grab;
+	}
+
+	.graph-stage.is-panning {
+		cursor: grabbing;
+	}
+
+	.chart-cursor-host {
+		width: 100%;
+		height: 100%;
+	}
+
+	.graph-stage.can-pan .chart-cursor-host :global(*) {
+		cursor: grab !important;
+	}
+
+	.graph-stage.is-panning .chart-cursor-host :global(*) {
+		cursor: grabbing !important;
 	}
 
 	.hover-card {
@@ -1340,9 +1585,15 @@
 		width: 100%;
 		height: 120px;
 		border-radius: 12px;
+		cursor: grab;
+		touch-action: none;
 		background:
 			radial-gradient(circle at top left, rgba(129, 140, 248, 0.12), transparent 48%),
 			rgba(2, 6, 23, 0.34);
+	}
+
+	.mini-map-svg.is-dragging {
+		cursor: grabbing;
 	}
 
 	.mini-map-edge {
