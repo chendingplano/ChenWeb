@@ -25,11 +25,12 @@ type logNamedProcessor interface {
 }
 
 type ControlService struct {
-	Processors []Processor
-	Logger     ApiTypes.JimoLogger
-	InputStore DocMetadataStore
-	EventStore EventStore
-	Now        func() time.Time
+	Processors        []Processor
+	BlockingProcessor Processor // always runs before Processors, regardless of requested operations
+	Logger            ApiTypes.JimoLogger
+	InputStore        DocMetadataStore
+	EventStore        EventStore
+	Now               func() time.Time
 }
 
 func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
@@ -123,44 +124,23 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 	}
 
+	// Inject a block buffer holder into context so the blocking processor
+	// can share its output with downstream processors.
+	ctx, _ = withBlockBufferHolder(ctx)
+
 	requestFailed := false
 	var firstErr error
+
+	// Always run the blocking processor first, regardless of requested operations.
+	if s.BlockingProcessor != nil {
+		s.runSingleProcessor(ctx, payload, s.BlockingProcessor, evt.RecordID, &requestFailed, &firstErr)
+	}
+
 	for _, p := range processors {
 		if p == nil {
 			continue
 		}
-		procStart := s.now()
-		processorName := processorLogName(p)
-		if s.Logger != nil {
-			s.Logger.Info("start running processor",
-				"record_id", evt.RecordID,
-				"processor", processorName,
-			)
-		}
-		if err := p.HandleEvent(ctx, payload); err != nil {
-			requestFailed = true
-			if firstErr == nil {
-				firstErr = err
-			}
-			if s.Logger != nil {
-				s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
-				s.Logger.Info("finish running processor",
-					"record_id", evt.RecordID,
-					"processor", processorName,
-					"proc_status", "failed",
-					"ms_used", time.Since(procStart).Milliseconds(),
-				)
-			}
-			continue
-		}
-		if s.Logger != nil {
-			s.Logger.Info("finish running processor",
-				"record_id", evt.RecordID,
-				"processor", processorName,
-				"proc_status", "success",
-				"ms_used", time.Since(procStart).Milliseconds(),
-			)
-		}
+		s.runSingleProcessor(ctx, payload, p, evt.RecordID, &requestFailed, &firstErr)
 	}
 	if s.Logger != nil {
 		status := "success"
@@ -174,6 +154,41 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		)
 	}
 	return firstErr
+}
+
+func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte, p Processor, recordID int64, requestFailed *bool, firstErr *error) {
+	procStart := s.now()
+	processorName := processorLogName(p)
+	if s.Logger != nil {
+		s.Logger.Info("start running processor",
+			"record_id", recordID,
+			"processor", processorName,
+		)
+	}
+	if err := p.HandleEvent(ctx, payload); err != nil {
+		*requestFailed = true
+		if *firstErr == nil {
+			*firstErr = err
+		}
+		if s.Logger != nil {
+			s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
+			s.Logger.Info("finish running processor",
+				"record_id", recordID,
+				"processor", processorName,
+				"proc_status", "failed",
+				"ms_used", time.Since(procStart).Milliseconds(),
+			)
+		}
+		return
+	}
+	if s.Logger != nil {
+		s.Logger.Info("finish running processor",
+			"record_id", recordID,
+			"processor", processorName,
+			"proc_status", "success",
+			"ms_used", time.Since(procStart).Milliseconds(),
+		)
+	}
 }
 
 func processorLogName(p Processor) string {

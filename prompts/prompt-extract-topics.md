@@ -5,15 +5,24 @@ Identify coherent topics in the text. A topic is a logically grouped unit of con
 
 ## 2. Input Format
 
-The input is a line-based file, where each line has exactly 7 fields separated by TAB:
+The format of lines in the input is:
 
 ```text
-<line-number>\t<page-number>\t<line-type>\t<content>
+<flag>\t<line-number>\t<page-number>\t<line-type>\t<content>
 ```
+
+where:
+- `<tag>` specifies the type of the line: 'o' for overlap lines and 'n' for noaml lines.
+- `<line-number>` is the line number
+- `<page-number>` is the page number
+- `<line-type>` is the line type, such as 'paragraph', 'image', 'heading', 'table', etc.
+- `<content>` is the actual content
 
 Example:
 ```text
-244 16	list-item	建筑结构与建筑设备管线分离
+o 244 16  paragraph Below lists all the values
+n 245 16	list-item	a) provisions
+n 246 16	list-item	b) metrics
 ```
 
 ## 3. Topic Types
@@ -76,40 +85,28 @@ Use one of the following values:
 
 ## 5. Generate Category Paths
 
-You are a taxonomy extraction engine. Your task is to extract hierarchical categories, along with keywords and confidence scores,
-for each topic.
+### 5.1. Category structure
 
-The goal is to identify one or more category paths representing distinct topics in a given topic, where:
-
-* Each path is ordered from general → specific
-* Each deeper level refines the previous level
-* Each path captures one coherent topic
-
-### 5.1 Category structure
-
-* Each category path MUST contain 2–5 levels
-* Level 1 = most general domain
-* Last level = most specific topic
+* A category path is made of one or more categories, forming a path: level_1_category/level_2/category/..., similar to file path.
+* Level 1 category is an `Industry Classification`. MUST be generic enough, normally one 
+  Level 1 category maps to a specific industry, such as 'Health', 'Medical', 'Software', 'Manufacturing', etc.
+* Level 2 MUST also be generic within its industry.
+* Last level = most specific
 * Each level MUST be semantically narrower than its parent
+* Limit the max depth of category paths to 10
 
-### 5.2 Multiple topics
+### 5.2. Category Paths Extraction Rules
 
-* Extract ALL major topics in the input
-* 1–3 category paths per line, up to 5 only if clearly multi-topic
-* Output multiple category paths if needed
-* Do NOT merge unrelated topics into a single path
-
-### 5.3 Keywords
-
+* Extract one or more (up to 5) category paths per provision
 * Provide both category-level keywords and path-level keywords
-* Provide keywords (at least 1, up to 6) per category of per category path
+* Provide keywords per category of per category path
 * Keywords MUST:
 
   * Be directly grounded in the input
   * Be specific and meaningful (not generic words)
   * Help distinguish this topic from others
 
-### 5.4 Confidence
+### 5.3. Confidence
 
 * Provide a confidence score between 0 and 1 for each category path
 * Confidence reflects:
@@ -123,7 +120,7 @@ The goal is to identify one or more category paths representing distinct topics 
   * 0.6–0.85 → reasonably clear topic
   * <0.6 → weak or inferred topic (avoid if possible)
 
-### 5.5 Category quality
+### 5.4. Category Quality
 
 * Use canonical noun phrases
 * Avoid verbs, sentences, or vague terms
@@ -131,74 +128,17 @@ The goal is to identify one or more category paths representing distinct topics 
 
   * "general", "other", "miscellaneous"
 
-### 5.6 Consistency
+### 5.5. Consistency
 
 * Reuse common top-level categories when appropriate
 * Keep naming style consistent across all paths
 
-### 5.7 Language
+### 5.6. Language
 
 * Match the language of the input.
 * For English / Latin-script content: use English category names.
 * For Chinese / CJK content: use Chinese category names directly.
-
-### 5.8 Normalization rules
-
-Apply these rules according to the language of each category segment:
-
-* For English / Latin-script segments:
-  * Use lowercase
-  * Use snake_case (underscores between words)
-  * Remove punctuation
-* For Chinese / CJK segments:
-  * Keep the original Chinese characters — do NOT snake_case or romanize them
-  * Remove punctuation (Chinese punctuation such as ，、。：；“” are removed)
-  * Do NOT insert spaces or underscores between characters
-* Keep each level concise (1–4 words preferred)
-
-### 5.9 Category Path Output format (STRICT JSON)
-
-```json
-{
-  "categories": [
-    {
-      "category_path": [
-        {
-          "name": "public_health",
-          "keywords": ["health management", "disease prevention", "public health"],
-          "confidence": 0.95
-        },
-        {
-          "name": "vaccination",
-          "keywords": ["vaccination", "immunization", "vaccine administration"],
-          "confidence": 0.94
-        },
-        {
-          "name": "record_management",
-          "keywords": ["vaccination records", "recipient data", "immunization information system"],
-          "confidence": 0.92
-        }
-      ],
-      "path_keywords": ["vaccination records", "recipient data", "information system"],
-      "path_confidence": 0.92
-    }
-  ]
-}
-```
-
-For each topic, generate a multi-level `category_path`:
-
-  * Use snake_case for each segment.
-  * Be descriptive and semantic, not generic.
-  * Maximum depth: 6
-  * Each segment max length: 64 characters
-  * Order from general → specific
-
-Example (English input):
-["building_design", "structural_systems", "pipeline_separation"]
-
-Example (Chinese input):
-["建筑设计", "结构系统", "管线分离"]
+* ALSO provide an accurate English translation if the original language is not English.
 
 ## 6. Output Requirements
 
@@ -213,10 +153,20 @@ Return **strict JSON only** in the following format:
       "lines": ["38-45", "47"],
       "topic_keywords": ["k1", "k2"],
       "topic": "topic description",
-      "categories": <refer to 'Category Path Output format' section>
-    },
-    {
-      next-topic
+      "categories": [
+        {
+          "category_path": [
+            {
+              "name": "public_health",
+              "keywords": ["health management", "disease prevention", "public health"],
+              "confidence": 0.95
+            },
+            ...
+          ],
+          "path_keywords": ["vaccination records", "recipient data", "information system"],
+          "path_confidence": 0.92
+        }
+      ]
     },
     ...
   ]

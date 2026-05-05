@@ -151,6 +151,59 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, err)
 		return err
 	}
+	return s.handleSemanticLines(ctx, rec, inputFilename, start, lines)
+}
+
+// HandleBlockInput is the block-buffer variant of HandleInput. It uses
+// ParseBlockBufferLines to obtain document lines from the BlockingProcessor's
+// in-memory output, skipping file I/O and canonical-line validation
+// (FontSize/Coordinate are not carried by the block format).
+func (s *SemanticChunkingService) HandleBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error {
+	if buf == nil {
+		return errors.New("(MID_26050620) block buffer is nil")
+	}
+	if s.Store == nil {
+		return errors.New("(MID_26050621) store is nil")
+	}
+	if s.Extractor == nil {
+		return errors.New("(MID_26050622) semantic chunking extractor is nil")
+	}
+	if recordID <= 0 {
+		return fmt.Errorf("(MID_26050623) invalid record_id: %d", recordID)
+	}
+	start := s.Now()
+
+	rec, err := s.Store.GetInputRecord(ctx, recordID)
+	if err != nil {
+		return err
+	}
+	if s.ModelErr != nil {
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, s.ModelErr)
+		return s.ModelErr
+	}
+	if s.PromptErr != nil {
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, fmt.Errorf("(MID_26050624) load topic chunk prompt %q failed: %w", s.PromptRef, s.PromptErr))
+		return s.PromptErr
+	}
+	if strings.TrimSpace(s.ChunkDir) == "" {
+		procErr := errors.New("(MID_26050625) missing ARTIFACT_DIR")
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+	if strings.TrimSpace(inputFilename) == "" {
+		procErr := errors.New("(MID_26050626) missing input filename")
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+
+	lines := ParseBlockBufferLines(buf)
+	return s.handleSemanticLines(ctx, rec, inputFilename, start, lines)
+}
+
+// handleSemanticLines runs topic extraction, tree indexing, and status
+// persistence for a pre-parsed set of lines. Called by both HandleInput
+// (after ParseSemanticInputLines) and HandleBlockInput (after ParseBlockBufferLines).
+func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
 	numPages := uniquePages(lines)
 	numLines := len(lines)
 
@@ -306,6 +359,7 @@ func (s *SemanticChunkingService) extractTopicsForBlock(ctx context.Context, blo
 		s.Logger,
 		s.ModelName,
 		s.PromptText,
+		s.PromptRef,
 		block.Lines,
 		seqStart,
 		"block_no",
@@ -324,7 +378,6 @@ type legacyTopicRow struct {
 	Keywords  string
 	Topic     string
 }
-
 
 func writeTopicsCategoryTree(logger ApiTypes.JimoLogger, chunkDir string, recordID int64, topics []TopicItem) error {
 	targetDir, err := buildRecordArtifactDir(chunkDir, recordID)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,8 +26,6 @@ const (
 	defaultStatusTime      = "20060102 15:04:05"
 	ChunkingMethodFixed    = "fix-size-chunking"
 	numericSplitMultiplier = 3
-
-	defaultGenerateCategoryPrompt = `Given the following document summary, return a JSON object with a single field "category_path" containing an array of 1 to 2 short, descriptive category labels in snake_case (2 to 5 words each). Return only the JSON object with no explanation. Example: {"category_path": ["fire_safety_standards", "health_requirements"]}`
 )
 
 var (
@@ -88,19 +87,14 @@ type FixedSizeChunkingService struct {
 	SummaryModelCfgPath           string
 	SummaryModelErr               error
 	SummaryModelName              string
-	SummaryPromptText             string
-	SummaryPromptRef              string
-	SummaryPromptPath             string
-	SummaryPromptErr              error
-	CategoryPromptText            string
-	CategoryPromptRef             string
-	CategoryPromptPath            string
-	CategoryPromptErr             error
-	TopicEmbeddingModelName       string
-	SummaryEmbeddingModelName     string
-	CategorySimilarityMinScore    float64
-	GenerateSummary               func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, error)
-	GenerateSummaryTreeCategories func(ctx context.Context, root SummaryItem) ([]string, []CategoryPathNode, error)
+	SummaryPromptText          string
+	SummaryPromptRef           string
+	SummaryPromptPath          string
+	SummaryPromptErr           error
+	TopicEmbeddingModelName    string
+	SummaryEmbeddingModelName  string
+	CategorySimilarityMinScore float64
+	GenerateSummary            func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error)
 }
 
 type ChunkOptions struct {
@@ -166,7 +160,6 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 	promptText, promptRef, promptPath, promptErr := loadFixedSizeTopicPromptFromEnv()
 	summaryModelRef, summaryModelCfgPath, summaryModelCfg, summaryModelErr := loadFixedSizeSummaryModelFromEnv()
 	summaryPromptText, summaryPromptRef, summaryPromptPath, summaryPromptErr := loadFixedSizeSummaryPromptFromEnv()
-	categoryPromptText, categoryPromptRef, categoryPromptPath, categoryPromptErr := loadCategoryPromptFromEnv()
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	topicEmbeddingModelRef := strings.TrimSpace(os.Getenv("TOPIC_EMBEDDING_MODEL_NAME"))
 	var embedder Embedder
@@ -202,36 +195,32 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 	}
 	categorySimilarityMinScore := envFloat("CATEGORY_SIMILARITY_MIN_SCORE", DefaultCategorySimilarityMinScore, 0)
 	return &FixedSizeChunkingService{
-		Store:                     store,
-		Extractor:                 extractor,
-		Logger:                    logger,
-		Now:                       time.Now,
-		ChunkDir:                  strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		TreeRootDir:               strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR")),
-		SummaryTreeDir:            strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR")),
-		ChunkSize:                 envInt("CHUNK_SIZE", DefaultChunkSize, 1),
-		OverlapPercent:            envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
-		ModelRef:                  modelRef,
-		ModelCfgPath:              modelCfgPath,
-		ModelErr:                  modelErr,
-		ModelName:                 modelCfg.ModelName,
-		PromptText:                promptText,
-		PromptRef:                 promptRef,
-		PromptPath:                promptPath,
-		PromptErr:                 promptErr,
-		SummaryGroupSize:          envInt("SUMMARY_GROUP_SIZE", DefaultSummaryGroupSize, 1),
-		SummaryModelRef:           summaryModelRef,
-		SummaryModelCfgPath:       summaryModelCfgPath,
-		SummaryModelErr:           summaryModelErr,
-		SummaryModelName:          summaryModelCfg.ModelName,
-		SummaryPromptText:         summaryPromptText,
-		SummaryPromptRef:          summaryPromptRef,
-		SummaryPromptPath:         summaryPromptPath,
-		SummaryPromptErr:          summaryPromptErr,
-		CategoryPromptText:        categoryPromptText,
-		CategoryPromptRef:         categoryPromptRef,
-		CategoryPromptPath:        categoryPromptPath,
-		CategoryPromptErr:         categoryPromptErr,
+		Store:                      store,
+		Extractor:                  extractor,
+		Logger:                     logger,
+		Now:                        time.Now,
+		ChunkDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		TreeRootDir:                strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR")),
+		SummaryTreeDir:             strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR")),
+		ChunkSize:                  envInt("CHUNK_SIZE", DefaultChunkSize, 1),
+		OverlapPercent:             envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
+		ModelRef:                   modelRef,
+		ModelCfgPath:               modelCfgPath,
+		ModelErr:                   modelErr,
+		ModelName:                  modelCfg.ModelName,
+		PromptText:                 promptText,
+		PromptRef:                  promptRef,
+		PromptPath:                 promptPath,
+		PromptErr:                  promptErr,
+		SummaryGroupSize:           envInt("SUMMARY_GROUP_SIZE", DefaultSummaryGroupSize, 1),
+		SummaryModelRef:            summaryModelRef,
+		SummaryModelCfgPath:        summaryModelCfgPath,
+		SummaryModelErr:            summaryModelErr,
+		SummaryModelName:           summaryModelCfg.ModelName,
+		SummaryPromptText:          summaryPromptText,
+		SummaryPromptRef:           summaryPromptRef,
+		SummaryPromptPath:          summaryPromptPath,
+		SummaryPromptErr:           summaryPromptErr,
 		Embedder:                   embedder,
 		TopicEmbeddingModelName:    topicEmbeddingModelName,
 		SummaryEmbeddingModelName:  summaryEmbeddingModelName,
@@ -293,21 +282,84 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
-	if s.GenerateSummaryTreeCategories == nil && s.CategoryPromptErr != nil && strings.TrimSpace(s.CategoryPromptText) == "" {
-		procErr := fmt.Errorf("(MID_26042921) load category prompt %q failed: %w", s.CategoryPromptRef, s.CategoryPromptErr)
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
-		return procErr
-	}
-	if s.GenerateSummaryTreeCategories == nil && s.CategoryPromptErr != nil {
-		s.Logger.Warn("(MID_26042920) GENERATE_CATEGORY_PROMPT not defined; using default category prompt",
-			"error", s.CategoryPromptErr)
-	}
 
 	lines, err := ParseInputLines(inputFile)
 	if err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, err)
 		return err
 	}
+	return s.handleChunkLines(ctx, rec, inputFilename, start, lines)
+}
+
+// HandleBlockInput is the block-buffer variant of HandleInput. It uses
+// ParseBlockBufferLines to obtain the document lines from an in-memory
+// BlockBuffer produced by the BlockingProcessor, skipping the file-read step.
+func (s *FixedSizeChunkingService) HandleBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error {
+	if buf == nil {
+		return errors.New("(MID_26050601) block buffer is nil")
+	}
+	if s.Store == nil {
+		return errors.New("(MID_26050602) store is nil")
+	}
+	if s.Extractor == nil {
+		return errors.New("(MID_26050603) fixed-size chunking extractor is nil")
+	}
+	if recordID <= 0 {
+		return fmt.Errorf("(MID_26050604) invalid record_id: %d", recordID)
+	}
+
+	start := s.Now()
+	rec, err := s.Store.GetInputRecord(ctx, recordID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(s.ChunkDir) == "" {
+		procErr := errors.New("(MID_26050605) missing ARTIFACT_DIR")
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+	if strings.TrimSpace(s.TreeRootDir) == "" {
+		procErr := errors.New("(MID_26050606) missing TOPIC_TREE_ROOT_DIR")
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+	if strings.TrimSpace(s.SummaryTreeDir) == "" {
+		procErr := errors.New("(MID_26050607) missing SUMMARY_TREE_DIR")
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+	if strings.TrimSpace(inputFilename) == "" {
+		procErr := errors.New("(MID_26050608) missing input filename")
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+	if s.ModelErr != nil {
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, s.ModelErr)
+		return s.ModelErr
+	}
+	if s.PromptErr != nil {
+		procErr := fmt.Errorf("(MID_26050609) load fixed-size chunk prompt %q failed: %w", s.PromptRef, s.PromptErr)
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+	if s.GenerateSummary == nil && s.SummaryModelErr != nil {
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, s.SummaryModelErr)
+		return s.SummaryModelErr
+	}
+	if s.GenerateSummary == nil && s.SummaryPromptErr != nil {
+		procErr := fmt.Errorf("(MID_26050610) load fixed-size summary prompt %q failed: %w", s.SummaryPromptRef, s.SummaryPromptErr)
+		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		return procErr
+	}
+
+	lines := ParseBlockBufferLines(buf)
+	return s.handleChunkLines(ctx, rec, inputFilename, start, lines)
+}
+
+// handleChunkLines runs chunking, topic extraction, summary generation, and
+// status persistence for a pre-parsed set of lines. Called by both HandleInput
+// and HandleBlockInput after their respective parse/validate steps.
+func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
 	numPages := uniquePages(lines)
 	numLines := len(lines)
 	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: s.ChunkSize, OverlapPercent: s.OverlapPercent})
@@ -339,6 +391,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 			s.Logger,
 			s.ModelName,
 			s.PromptText,
+			s.PromptRef,
 			chunkLines,
 			seqStart,
 			"chunk_seqno",
@@ -376,20 +429,22 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		for _, marked := range chunk.Lines {
 			chunkLines = append(chunkLines, marked.Line)
 		}
-		summaryText, summaryKeywords, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunkLines, nil)
+		summaryText, summaryKeywords, catPath, catNodes, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunkLines, nil)
 		if summaryErr != nil {
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, summaryErr)
 			return summaryErr
 		}
 		_, regularLines := chunkLineNumbers(chunk)
 		item := SummaryItem{
-			SummaryID: buildSummaryID(rec.ID, 0, chunk.SeqNo),
-			RecordID:  rec.ID,
-			Level:     0,
-			SeqNo:     chunk.SeqNo,
-			Lines:     lineRangesFromNumbers(regularLines),
-			Keywords:  summaryKeywords,
-			Summary:   sanitizeTopicText(summaryText),
+			SummaryID:     buildSummaryID(rec.ID, 0, chunk.SeqNo),
+			RecordID:      rec.ID,
+			Level:         0,
+			SeqNo:         chunk.SeqNo,
+			Lines:         lineRangesFromNumbers(regularLines),
+			Keywords:      summaryKeywords,
+			CategoryPaths: catPath,
+			CategoryNodes: catNodes,
+			Summary:       sanitizeTopicText(summaryText),
 		}
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
@@ -398,7 +453,7 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		leafSummaries = append(leafSummaries, item)
 	}
 
-	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, func(level int, seqNo int, children []SummaryItem) (string, []string, error) {
+	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, func(level int, seqNo int, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
 		return s.generateSummary(ctx, rec.ID, level, seqNo, nil, children)
 	})
 	if err != nil {
@@ -422,18 +477,8 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
-	for i := range allSummaries {
-		cats, nodes, catErr := s.generateSummaryTreeCategories(ctx, allSummaries[i])
-		if catErr != nil {
-			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, catErr)
-			return catErr
-		}
-		allSummaries[i].CategoryPaths = cats
-		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, allSummaries[i]); err != nil {
-			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
-			return err
-		}
-		if err := writeSummaryTreeEntry(ctx, s.Embedder, s.SummaryEmbeddingModelName, s.Logger, s.SummaryTreeDir, allSummaries[i], cats, nodes); err != nil {
+	for _, item := range allSummaries {
+		if err := writeSummaryTreeEntry(ctx, s.Embedder, s.SummaryEmbeddingModelName, s.Logger, s.SummaryTreeDir, item, item.CategoryPaths, item.CategoryNodes); err != nil {
 			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
@@ -484,27 +529,54 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 	return nil
 }
 
-func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, error) {
+// ParseBlockBufferLines converts a BlockBuffer to a sorted, deduplicated slice
+// of Line values using only the normal ('n') lines. Overlap ('o') lines are
+// skipped because each page already appears as a normal line in its own block.
+// Font, FontSize, and Coordinate are left empty since the blocking processor
+// drops them; fixed-size chunking does not use these fields.
+func ParseBlockBufferLines(buf *BlockBuffer) []Line {
+	if buf == nil {
+		return nil
+	}
+	seen := make(map[int]struct{})
+	out := make([]Line, 0, 128)
+	for _, block := range buf.Blocks {
+		for _, bl := range block.Lines {
+			if bl.Flag != "n" {
+				continue
+			}
+			if _, ok := seen[bl.LineNumber]; ok {
+				continue
+			}
+			seen[bl.LineNumber] = struct{}{}
+			out = append(out, Line{
+				LineNo:   bl.LineNumber,
+				PageNo:   bl.PageNumber,
+				LineType: strings.ToLower(bl.LineType),
+				Content:  bl.Content,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LineNo < out[j].LineNo })
+	return out
+}
+
+func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
 	if s.GenerateSummary != nil {
 		return s.GenerateSummary(ctx, recordID, level, seqNo, lines, children)
 	}
 	if s.Extractor == nil {
-		return "", nil, errors.New("(MID_26042904) summary extractor is nil")
+		return "", nil, nil, nil, errors.New("(MID_26042904) summary extractor is nil")
 	}
 	inputText := buildSummaryInputText(lines, children)
 
-	// Query LLM, respond format:
-	//	{
-	//		"summary":"xxx",
-	//		"keywords":"xxx"
-	//	}
 	parsed, err := s.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		PromptText: appendLanguageInstruction(s.SummaryPromptText, inputText),
 		ModelName:  s.SummaryModelName,
 		InputText:  inputText,
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d failed: %w", level, seqNo, err)
+		return "", nil, nil, nil, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d failed: %w", level, seqNo, err)
 	}
 	summary := sanitizeTopicText(asString(parsed["summary"]))
 	if summary == "" {
@@ -519,48 +591,27 @@ func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID
 	}
 
 	keywords := compactTopicArray(parsed["keywords"])
-	s.Logger.Info("Generated summary",
-		"model_name", s.ModelName,
-		"summary", summary,
-		"keywords", keywords)
-	return summary, keywords, nil
-}
 
-func (s *FixedSizeChunkingService) generateSummaryTreeCategories(ctx context.Context, root SummaryItem) ([]string, []CategoryPathNode, error) {
-	if s.GenerateSummaryTreeCategories != nil {
-		return s.GenerateSummaryTreeCategories(ctx, root)
-	}
-	summary := sanitizeTopicText(root.Summary)
-	if summary == "" {
-		return nil, nil, errors.New("(MID_26042912) root summary text is empty; cannot generate category path")
-	}
-	parsed, err := s.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptText: s.CategoryPromptText,
-		ModelName:  s.ModelName,
-		InputText:  summary,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("(MID_26042923) category path LLM extraction failed: %w", err)
-	}
 	rawPath := extractCategoryPathFromLLM(parsed)
-	s.Logger.Info("LLM category path raw response",
-		"summary_id", root.SummaryID,
-		"raw_path", rawPath,
-		"parsed_json", parsed,
-	)
 	path, reason := normalizeAndValidateTopicCategoryPath(rawPath, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
-		return nil, nil, fmt.Errorf("(MID_26042924) invalid summary tree category path from LLM (%s): %v", reason, rawPath)
+		s.Logger.Warn("(MID_26042906) invalid category path in summary response; using empty path",
+			"level", level, "seq", seqNo, "reason", reason, "raw_path", rawPath)
+		path = nil
 	}
 	var nodes []CategoryPathNode
 	if entries := extractCategoryPathDetailFromLLM(parsed); len(entries) > 0 {
 		nodes = entries[0].Nodes
 	}
-	s.Logger.Info("LLM category path normalized",
-		"summary_id", root.SummaryID,
-		"path", path,
-	)
-	return path, nodes, nil
+
+	s.Logger.Info("Generated summary",
+		"model_name", s.SummaryModelName,
+		"level", level,
+		"seq", seqNo,
+		"summary", summary,
+		"keywords", keywords,
+		"category_path", path)
+	return summary, keywords, path, nodes, nil
 }
 
 func buildSummaryInputText(lines []Line, children []SummaryItem) string {
@@ -1380,60 +1431,6 @@ func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, p
 	return "", promptRef, "", fmt.Errorf("(MID_26042911) summary prompt file not found: %w", lastErr)
 }
 
-func loadCategoryPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("GENERATE_CATEGORY_PROMPT"))
-	if promptRef == "" {
-		return defaultGenerateCategoryPrompt, "default", "", fmt.Errorf("(MID_26042920) GENERATE_CATEGORY_PROMPT is not defined; using default category prompt")
-	}
-
-	paths := make([]string, 0, 8)
-	addCandidate := func(p string) {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			return
-		}
-		for _, existing := range paths {
-			if existing == p {
-				return
-			}
-		}
-		paths = append(paths, p)
-	}
-
-	if filepath.IsAbs(promptRef) {
-		addCandidate(promptRef)
-	} else {
-		addCandidate(promptRef)
-		if promptDir := strings.TrimSpace(os.Getenv("PROMPT_DIR")); promptDir != "" {
-			addCandidate(filepath.Join(promptDir, promptRef))
-		}
-		addCandidate(filepath.Join("server", "cmd", "doc-processor", promptRef))
-		addCandidate(filepath.Join("server", "cmd", "doc-processor", "prompts", promptRef))
-		addCandidate(filepath.Join("prompts", promptRef))
-	}
-
-	var lastErr error
-	for _, candidate := range paths {
-		bs, err := os.ReadFile(candidate)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		text := strings.TrimSpace(string(bs))
-		if text == "" {
-			return "", promptRef, candidate, errors.New("(MID_26042922) category prompt file is empty")
-		}
-		return text, promptRef, candidate, nil
-	}
-
-	if strings.Contains(promptRef, "\n") || strings.Contains(promptRef, " ") {
-		return strings.TrimSpace(promptRef), "inline", "", nil
-	}
-	if lastErr == nil {
-		lastErr = os.ErrNotExist
-	}
-	return "", promptRef, "", fmt.Errorf("(MID_26042921) category prompt file not found: %w", lastErr)
-}
 
 func min(a int, b int) int {
 	if a < b {

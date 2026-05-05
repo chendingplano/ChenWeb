@@ -4,7 +4,7 @@
 	import FilterXIcon from '@lucide/svelte/icons/filter-x';
 	import NetworkIcon from '@lucide/svelte/icons/network';
 	import ImageDownIcon from '@lucide/svelte/icons/image-down';
-	import Settings2Icon from '@lucide/svelte/icons/settings-2';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import CircleIcon from '@lucide/svelte/icons/circle';
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import Minimize2Icon from '@lucide/svelte/icons/minimize-2';
@@ -170,17 +170,6 @@
 			<ImageDownIcon class="tb-icon" />
 		</button>
 
-		<div class="toolbar-sep" aria-hidden="true"></div>
-
-		<button
-			type="button"
-			class="toolbar-btn"
-			title="Settings"
-			onclick={() => onSettings?.()}
-		>
-			<Settings2Icon class="tb-icon" />
-		</button>
-
 		{#if onToggleNodeStyle !== undefined}
 			<div class="toolbar-sep" aria-hidden="true"></div>
 
@@ -198,6 +187,17 @@
 				{/if}
 			</button>
 		{/if}
+
+		<div class="toolbar-sep" aria-hidden="true"></div>
+
+		<button
+			type="button"
+			class="toolbar-btn"
+			title="Settings"
+			onclick={() => onSettings?.()}
+		>
+			<SettingsIcon class="tb-icon" />
+		</button>
 	</div>
 </div>
 

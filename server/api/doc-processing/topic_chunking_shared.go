@@ -312,6 +312,7 @@ func extractTopicsFromLinesWithLLM(
 	logger ApiTypes.JimoLogger,
 	modelName string,
 	promptText string,
+	promptRef string,
 	lines []Line,
 	seqStart int,
 	logScopeName string,
@@ -344,6 +345,7 @@ func extractTopicsFromLinesWithLLM(
 	logger.Info("llm call end",
 		logScopeName, logScopeValue,
 		"model_name", modelName,
+		"prompt_name", promptRef,
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 		"error", err,
 	)

@@ -34,6 +34,7 @@ type SummaryItem struct {
 	Children      []string
 	Keywords      []string
 	CategoryPaths []string
+	CategoryNodes []CategoryPathNode
 	Summary       string
 	Embedding     []float64
 }
@@ -140,7 +141,7 @@ func buildSummaryTree(
 	recordID int64,
 	leafs []SummaryItem,
 	groupSize int,
-	summarize func(level int, seqNo int, children []SummaryItem) (string, []string, error),
+	summarize func(level int, seqNo int, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error),
 ) ([]SummaryItem, SummaryItem, error) {
 	if len(leafs) == 0 {
 		return nil, SummaryItem{}, errors.New("no leaf summaries")
@@ -157,19 +158,21 @@ func buildSummaryTree(
 			end := min(i+groupSize, len(current))
 			children := append([]SummaryItem(nil), current[i:end]...)
 			seqNo := len(next) + 1
-			summaryText, keywords, err := summarize(level, seqNo, children)
+			summaryText, keywords, catPath, catNodes, err := summarize(level, seqNo, children)
 			if err != nil {
 				return nil, SummaryItem{}, err
 			}
 			parent := SummaryItem{
-				SummaryID: buildSummaryID(recordID, level, seqNo),
-				RecordID:  recordID,
-				Level:     level,
-				SeqNo:     seqNo,
-				Lines:     mergeSummaryLineRanges(children),
-				Children:  collectSummaryIDs(children),
-				Keywords:  keywords,
-				Summary:   sanitizeTopicText(summaryText),
+				SummaryID:     buildSummaryID(recordID, level, seqNo),
+				RecordID:      recordID,
+				Level:         level,
+				SeqNo:         seqNo,
+				Lines:         mergeSummaryLineRanges(children),
+				Children:      collectSummaryIDs(children),
+				Keywords:      keywords,
+				CategoryPaths: catPath,
+				CategoryNodes: catNodes,
+				Summary:       sanitizeTopicText(summaryText),
 			}
 			next = append(next, parent)
 			all = append(all, parent)

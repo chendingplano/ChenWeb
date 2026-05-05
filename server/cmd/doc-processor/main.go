@@ -117,10 +117,11 @@ func main() {
 	}
 
 	control := &docprocessing.ControlService{
-		Logger:     logger,
-		InputStore: inputStore,
-		EventStore: docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
-		Now:        time.Now,
+		Logger:            logger,
+		InputStore:        inputStore,
+		EventStore:        docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+		Now:               time.Now,
+		BlockingProcessor: docprocessing.NewBlockingProcessor(inputStore, logger),
 		Processors: []docprocessing.Processor{
 			// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
 			docprocessing.NewStaticAnalyzerProcessor(inputStore, logger),
@@ -144,7 +145,7 @@ func main() {
 		"durable", durable,
 		"stream", streamName,
 		"chunking_method", chunkSvc.Method,
-		"processors", []string{"structure_analyzer", "static_analyzer", "chunking", "extract_doc_metadata", "extract_metrics"},
+		"processors", []string{"blocking", "structure_analyzer", "static_analyzer", "chunking", "extract_doc_metadata", "extract_metrics"},
 		"started_at", time.Now().Format(time.RFC3339),
 	)
 

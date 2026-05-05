@@ -64,12 +64,12 @@ func TestBuildSummaryTree(t *testing.T) {
 		{SummaryID: "93_0_0004", RecordID: 93, Level: 0, SeqNo: 4, Lines: []string{"7-8"}, Summary: "D"},
 	}
 
-	all, root, err := buildSummaryTree(93, leafs, 2, func(level int, seqNo int, children []SummaryItem) (string, []string, error) {
+	all, root, err := buildSummaryTree(93, leafs, 2, func(level int, seqNo int, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
 		ids := make([]string, 0, len(children))
 		for _, child := range children {
 			ids = append(ids, child.SummaryID)
 		}
-		return "L" + asString(level) + ":" + strings.Join(ids, ","), nil, nil
+		return "L" + asString(level) + ":" + strings.Join(ids, ","), nil, nil, nil, nil
 	})
 	if err != nil {
 		t.Fatalf("buildSummaryTree: %v", err)

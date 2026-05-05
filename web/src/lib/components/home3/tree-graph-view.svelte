@@ -120,7 +120,7 @@
 
 	let { mode, darkMode = true }: { mode: Mode; darkMode?: boolean } = $props();
 
-	let nodeStyle = $state<NodeStyle>(mode === 'summary' ? 'circle' : 'rect');
+	let nodeStyle = $state<NodeStyle>('rect');
 
 	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
 	let panelAlt = $derived(darkMode ? '#0f172a' : '#eef2ff');
@@ -1284,12 +1284,52 @@
 
 	// ---- Chart data ----
 
+	// Rect symbol: 210×84 visual rect centered within 210×108 layout area (24px gap between siblings).
+	// Ghost lines at (0,0) and (210,108) anchor the bounding box so ECharts allocates the full 108px.
+	const RECT_NODE_SYMBOL =
+		'path://M0,0 L0.001,0 M209.999,108 L210,108 M10,12 H200 Q210,12 210,22 V86 Q210,96 200,96 H10 Q0,96 0,86 V22 Q0,12 10,12 Z';
+	const RECT_NODE_SIZE = [210, 108] as const;
+
 	function buildTreeNode(node: GraphCategoryNode): Record<string, unknown> {
 		const isSelected = node.id === selectedNodeId;
 		const isFilterMatch = hasActiveFilter && filterMatchNodeIdSet.has(node.id);
 		if (nodeStyle === 'rect') {
-			const kws = node.metadata.keywords.slice(0, 3).join(', ') || '—';
-			const conf = node.metadata.confidence ? node.metadata.confidence.toFixed(2) : '—';
+			const conf = node.metadata.confidence ? `Conf: ${node.metadata.confidence.toFixed(2)}` : '—';
+
+			// Split keywords across up to 2 lines. L2_MAX: chars for the keywords portion on the conf line.
+			// L3_MAX: chars for the second keywords-only line before truncation.
+			const allKws = node.metadata.keywords.map((k) => k.charAt(0).toUpperCase() + k.slice(1));
+			const L2_MAX = 10;
+			const L3_MAX = 15;
+			let kws1: string;
+			let kws2: string | null = null;
+			if (allKws.length === 0) {
+				kws1 = '—';
+			} else {
+				const all = allKws.join(', ');
+				if (all.length <= L2_MAX) {
+					kws1 = all;
+				} else {
+					const fit: string[] = [];
+					const rest: string[] = [];
+					let done = false;
+					for (const kw of allKws) {
+						if (!done) {
+							const candidate = fit.length ? fit.join(', ') + ', ' + kw : kw;
+							if (candidate.length <= L2_MAX) fit.push(kw);
+							else { done = true; rest.push(kw); }
+						} else {
+							rest.push(kw);
+						}
+					}
+					kws1 = fit.length ? fit.join(', ') : allKws[0].slice(0, L2_MAX - 3) + '...';
+					if (rest.length > 0) {
+						const raw3 = rest.join(', ');
+						kws2 = raw3.length > L3_MAX ? raw3.slice(0, L3_MAX - 3) + '...' : raw3;
+					}
+				}
+			}
+
 			return {
 				id: node.id,
 				name: node.label,
@@ -1300,8 +1340,8 @@
 				keywords: node.metadata.keywords,
 				topicCount: node.itemIds.length,
 				collapsed: !node.expanded,
-				symbol: 'rect',
-				symbolSize: [160, 64],
+				symbol: RECT_NODE_SYMBOL,
+				symbolSize: RECT_NODE_SIZE,
 				itemStyle: {
 					color: isSelected
 						? darkMode
@@ -1312,7 +1352,6 @@
 							: 'rgba(241,245,249,0.9)',
 					borderColor: isSelected || isFilterMatch ? warm : accent,
 					borderWidth: isSelected || isFilterMatch ? 2 : 1,
-					borderRadius: 10,
 					shadowBlur: isSelected || isFilterMatch ? 18 : 0,
 					shadowColor: isSelected || isFilterMatch
 						? mode === 'summary'
@@ -1325,8 +1364,13 @@
 					position: 'inside',
 					color: isSelected ? '#ffffff' : textMain,
 					formatter: (params: any) => {
-						const name = String(params.data?.name ?? '');
-						return `{label|${name}}\n{meta|${conf}  ${kws}}`;
+						const raw = String(params.data?.name ?? '');
+						const displayName = raw.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+						const name = displayName.length > 20 ? displayName.slice(0, 17) + '...' : displayName;
+						const kwsLine = kws2
+							? `{meta|${conf}  ${kws1}}\n{meta|${kws2}}`
+							: `{meta|${conf}  ${kws1}}`;
+						return `{label|${name}}\n${kwsLine}`;
 					},
 					rich: {
 						label: {
@@ -1415,8 +1459,8 @@
 					width: fixedTreeLayoutWidth,
 					layout: 'orthogonal',
 					orient: 'LR',
-					symbol: isRect ? 'rect' : 'emptyCircle',
-					symbolSize: isRect ? [160, 64] : 11,
+					symbol: isRect ? RECT_NODE_SYMBOL : 'emptyCircle',
+					symbolSize: isRect ? RECT_NODE_SIZE : 11,
 					edgeShape: 'curve',
 					expandAndCollapse: false,
 					initialTreeDepth: -1,

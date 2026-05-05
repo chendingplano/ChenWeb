@@ -66,6 +66,23 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		return fmt.Errorf("load kb.inputs record %d: %w", evt.RecordID, err)
 	}
 
+	inputFilename := strings.TrimSpace(evt.Filename)
+
+	// Prefer the block buffer produced by the BlockingProcessor when available.
+	if buf := BlockBufferFromContext(ctx); buf != nil {
+		if bh, ok := p.Service.(chunkingBlockHandler); ok {
+			if inputFilename == "" {
+				inputFilename = rec.FileName
+			}
+			if err := bh.HandleBlockInput(ctx, evt.RecordID, inputFilename, buf); err != nil {
+				p.Logger.Error("chunking processor failed (block input)", "record_id", rec.ID, "error", err)
+				return err
+			}
+			return nil
+		}
+	}
+
+	// Fall back to reading the input file directly.
 	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
 	if err != nil {
 		p.Logger.Error("resolve chunking input path failed", "record_id", rec.ID, "error", err)
@@ -80,7 +97,6 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		return fmt.Errorf("read chunking input file %s: %w", inputPath, err)
 	}
 
-	inputFilename := strings.TrimSpace(evt.Filename)
 	if inputFilename == "" {
 		inputFilename = filepath.Base(inputPath)
 	}
