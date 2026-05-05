@@ -7,6 +7,7 @@
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
 	import CircleIcon from '@lucide/svelte/icons/circle';
 	import SquareIcon from '@lucide/svelte/icons/square';
+	import Minimize2Icon from '@lucide/svelte/icons/minimize-2';
 
 	type NodeStyle = 'circle' | 'rect';
 
@@ -19,6 +20,8 @@
 		onResetFilter?: () => void;
 		resetFilterDisabled?: boolean;
 		onExpandToLevel?: (level: number) => void;
+		onCollapseSelected?: () => void;
+		collapseSelectedDisabled?: boolean;
 		onExportPng?: () => void;
 		onSettings?: () => void;
 		onToggleNodeStyle?: () => void;
@@ -33,6 +36,8 @@
 		onResetFilter,
 		resetFilterDisabled = true,
 		onExpandToLevel,
+		onCollapseSelected,
+		collapseSelectedDisabled = true,
 		onExportPng,
 		onSettings,
 		onToggleNodeStyle
@@ -116,7 +121,7 @@
 				type="button"
 				class="toolbar-btn"
 				class:active={expandLevelOpen}
-				title="Expand Selected Node to Level"
+				title="Expand Selected Node"
 				onclick={handleExpandToLevel}
 			>
 				<NetworkIcon class="tb-icon" />
@@ -140,6 +145,19 @@
 				</div>
 			{/if}
 		</div>
+
+		<button
+			type="button"
+			class="toolbar-btn"
+			disabled={collapseSelectedDisabled}
+			aria-disabled={collapseSelectedDisabled}
+			title="Collapse Selected Node"
+			onclick={() => {
+				if (!collapseSelectedDisabled) onCollapseSelected?.();
+			}}
+		>
+			<Minimize2Icon class="tb-icon" />
+		</button>
 
 		<div class="toolbar-sep" aria-hidden="true"></div>
 
@@ -199,6 +217,8 @@
 		background: var(--surface);
 		backdrop-filter: blur(8px);
 		padding: 3px;
+		position: relative;
+		z-index: 10;
 	}
 
 	.toolbar-btn {

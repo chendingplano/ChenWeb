@@ -1168,6 +1168,25 @@
 		else setTimeout(syncMiniViewport, 0);
 	}
 
+	function collapseSelectedNode() {
+		if (!selectedNode?.expanded) return;
+		nodes = nodes.map((n) => (n.id === selectedNode!.id ? { ...n, expanded: false } : n));
+		setTimeout(syncMiniViewport, 0);
+	}
+
+	function expandSelectedToLevel(depth: number) {
+		if (!selectedNode) return;
+		const basePath = selectedNode.categoryPath;
+		const baseDepth = getNodeLevel(selectedNode);
+		nodes = nodes.map((n) => {
+			if (!n.categoryPath.startsWith(basePath)) return n;
+			const relativeDepth = getNodeLevel(n) - baseDepth;
+			if (relativeDepth < depth) return { ...n, expanded: true };
+			return n;
+		});
+		scheduleExpandedNodeReveal(selectedNode.id);
+	}
+
 	function applyMiniMapViewport(normalizedCenterX: number, normalizedCenterY: number) {
 		const context = getRoamContext();
 		if (!context) return;
@@ -1607,6 +1626,9 @@
 		onFilter={openFilterDialog}
 		resetFilterDisabled={!hasActiveFilter}
 		onResetFilter={clearLevelFilter}
+		collapseSelectedDisabled={!selectedNode?.expanded}
+		onCollapseSelected={collapseSelectedNode}
+		onExpandToLevel={expandSelectedToLevel}
 		onToggleNodeStyle={() => {
 			nodeStyle = nodeStyle === 'circle' ? 'rect' : 'circle';
 		}}
