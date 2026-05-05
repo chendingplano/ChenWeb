@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
 	import ListFilterIcon from '@lucide/svelte/icons/list-filter';
+	import FilterXIcon from '@lucide/svelte/icons/filter-x';
 	import NetworkIcon from '@lucide/svelte/icons/network';
 	import ImageDownIcon from '@lucide/svelte/icons/image-down';
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
@@ -14,6 +15,9 @@
 		nodeStyle?: NodeStyle;
 		onExpandCollapseAll?: () => void;
 		onFilter?: () => void;
+		filterDisabled?: boolean;
+		onResetFilter?: () => void;
+		resetFilterDisabled?: boolean;
 		onExpandToLevel?: (level: number) => void;
 		onExportPng?: () => void;
 		onSettings?: () => void;
@@ -25,6 +29,9 @@
 		nodeStyle,
 		onExpandCollapseAll,
 		onFilter,
+		filterDisabled = false,
+		onResetFilter,
+		resetFilterDisabled = true,
 		onExpandToLevel,
 		onExportPng,
 		onSettings,
@@ -79,10 +86,27 @@
 		<button
 			type="button"
 			class="toolbar-btn"
+			disabled={filterDisabled}
+			aria-disabled={filterDisabled}
 			title="Filter Nodes in Current Level"
-			onclick={() => onFilter?.()}
+			onclick={() => {
+				if (!filterDisabled) onFilter?.();
+			}}
 		>
 			<ListFilterIcon class="tb-icon" />
+		</button>
+
+		<button
+			type="button"
+			class="toolbar-btn"
+			disabled={resetFilterDisabled}
+			aria-disabled={resetFilterDisabled}
+			title="Reset Current Level Filter"
+			onclick={() => {
+				if (!resetFilterDisabled) onResetFilter?.();
+			}}
+		>
+			<FilterXIcon class="tb-icon" />
 		</button>
 
 		<div class="toolbar-sep" aria-hidden="true"></div>
@@ -191,6 +215,11 @@
 		transition:
 			background 120ms ease,
 			color 120ms ease;
+	}
+
+	.toolbar-btn:disabled {
+		opacity: 0.38;
+		cursor: not-allowed;
 	}
 
 	.toolbar-btn:hover,

@@ -24,10 +24,15 @@
 	import ViewToolbar from './view-toolbar.svelte';
 	import {
 		getSummaryCategory,
+		filterGraphNodes,
 		listSummaryGraph,
 		getTopicCategory,
 		listTopicGraph
 	} from '$lib/services/kbService';
+	import {
+		filterNodesInSelectedLevel,
+		getNodesInSelectedLevel
+	} from './tree-graph-filter-state.js';
 	import type {
 		SummaryCategoryNode,
 		SummaryCategoryTab,
@@ -41,6 +46,13 @@
 	type Mode = 'summary' | 'topic';
 	type NodeStyle = 'circle' | 'rect';
 	type DialogMode = 'rename' | 'metadata' | 'add' | 'delete' | 'merge' | 'split' | null;
+	type LevelFilterDraft = {
+		keywords: string;
+		startTime: string;
+		endTime: string;
+		semanticText: string;
+		threshold: number;
+	};
 	type HoverCardPos = { x: number; y: number };
 	type HoverAnchor = { x: number; y: number; nodeRadius: number } | null;
 	type MiniMapNode = { id: string; x: number; y: number; selected: boolean };
@@ -142,6 +154,20 @@
 	let selectedNodeId = $state<string | null>(null);
 	let dialogOpen = $state(false);
 	let dialogMode = $state<DialogMode>(null);
+	let filterDialogOpen = $state(false);
+	let filterDraft = $state<LevelFilterDraft>({
+		keywords: '',
+		startTime: '',
+		endTime: '',
+		semanticText: '',
+		threshold: 0.6
+	});
+	let filterApplying = $state(false);
+	let filterError = $state('');
+	let filterMatchNodeIds = $state<string[]>([]);
+	let filterSemanticScores = $state<Record<string, number>>({});
+	let activeFilterLevel = $state<number | null>(null);
+	let activeFilterSelectedPath = $state<string | null>(null);
 	let loading = $state(true);
 	let loadError = $state('');
 	let errorDialogOpen = $state(false);
@@ -204,6 +230,13 @@
 	);
 	let dialogNode = $derived(selectedNode ? toDialogNode(selectedNode) : null);
 	let dialogAvailableNodes = $derived(nodes.map(toDialogNode));
+	let selectedLevelNodes = $derived(getNodesInSelectedLevel(nodes, selectedNodeId));
+	let filterMatchNodeIdSet = $derived(new Set(filterMatchNodeIds));
+	let hasActiveFilter = $derived(activeFilterLevel !== null);
+	let bestFilterSemanticScore = $derived.by(() => {
+		const scores = Object.values(filterSemanticScores);
+		return scores.length > 0 ? Math.max(...scores) : null;
+	});
 
 	// ---- Helpers ----
 
@@ -249,6 +282,79 @@
 	function keywordText(keywords: string[] | null | undefined) {
 		if (!Array.isArray(keywords) || keywords.length === 0) return '—';
 		return keywords.join(', ');
+	}
+
+	function getNodeLevel(node: GraphCategoryNode) {
+		return node.categoryPath.split('/').filter(Boolean).length - 1;
+	}
+
+	function clearLevelFilter() {
+		filterMatchNodeIds = [];
+		filterSemanticScores = {};
+		activeFilterLevel = null;
+		activeFilterSelectedPath = null;
+	}
+
+	function openFilterDialog() {
+		if (!selectedNode) return;
+		filterError = '';
+		filterDialogOpen = true;
+	}
+
+	async function applyLevelFilter() {
+		if (!selectedNode) return;
+		filterApplying = true;
+		loadError = '';
+		filterError = '';
+		try {
+			const levelNodes = getNodesInSelectedLevel(nodes, selectedNode.id) as GraphCategoryNode[];
+			let matches = new Set(
+				filterNodesInSelectedLevel(nodes, selectedNode.id, {
+					keywords: filterDraft.keywords,
+					startTime: filterDraft.startTime,
+					endTime: filterDraft.endTime
+				})
+			);
+			const semanticText = filterDraft.semanticText.trim();
+			const nextScores: Record<string, number> = {};
+			if (semanticText) {
+				const response = await filterGraphNodes({
+					mode,
+					candidatePaths: levelNodes.map((node) => node.categoryPath),
+					semanticText,
+					threshold: filterDraft.threshold
+				});
+				const semanticIds = new Set<string>();
+				for (const match of response.matches) {
+					const node = levelNodes.find((n) => n.categoryPath === match.categoryPath);
+					if (!node) continue;
+					semanticIds.add(node.id);
+					nextScores[node.id] = match.score;
+				}
+				matches = new Set([...matches].filter((id) => semanticIds.has(id)));
+			}
+			filterMatchNodeIds = [...matches];
+			filterSemanticScores = nextScores;
+			activeFilterLevel = getNodeLevel(selectedNode);
+			activeFilterSelectedPath = selectedNode.categoryPath;
+			filterDialogOpen = false;
+			if (filterMatchNodeIds[0]) selectedNodeId = filterMatchNodeIds[0];
+		} catch (error) {
+			filterError = error instanceof Error ? error.message : 'Failed to filter graph nodes';
+		} finally {
+			filterApplying = false;
+		}
+	}
+
+	function shouldRenderNode(node: GraphCategoryNode) {
+		if (!hasActiveFilter || activeFilterLevel === null) return true;
+		const nodeLevel = getNodeLevel(node);
+		if (nodeLevel !== activeFilterLevel) return true;
+		return filterMatchNodeIdSet.has(node.id);
+	}
+
+	function filteredChildrenOf(node: GraphCategoryNode): GraphCategoryNode[] {
+		return childrenOf(node).filter(shouldRenderNode);
 	}
 
 	// ---- Node state operations ----
@@ -358,6 +464,7 @@
 				}));
 			}
 			selectedNodeId = nodes[0]?.id ?? null;
+			clearLevelFilter();
 		} catch (error) {
 			nodes = [];
 			selectedNodeId = null;
@@ -761,9 +868,9 @@
 		const visit = (node: GraphCategoryNode) => {
 			visibleIds.add(node.id);
 			if (!node.expanded) return;
-			for (const child of childrenOf(node)) visit(child);
+			for (const child of filteredChildrenOf(node)) visit(child);
 		};
-		for (const root of visibleRoots()) visit(root);
+		for (const root of visibleRoots().filter(shouldRenderNode)) visit(root);
 		return visibleIds;
 	}
 
@@ -921,7 +1028,7 @@
 			const nodeRow = row++;
 			mapped.push({ id: node.id, depth, row: nodeRow, selected: node.id === selectedNodeId });
 			if (!node.expanded) return nodeRow;
-			for (const child of childrenOf(node)) {
+			for (const child of filteredChildrenOf(node)) {
 				const childRow = visit(child, depth + 1);
 				edges.push({
 					fromDepth: depth,
@@ -932,7 +1039,7 @@
 			}
 			return nodeRow;
 		}
-		for (const root of visibleRoots()) visit(root, 0);
+		for (const root of visibleRoots().filter(shouldRenderNode)) visit(root, 0);
 		const maxDepth = Math.max(1, ...mapped.map((n) => n.depth));
 		const maxRow = Math.max(1, row - 1);
 		return {
@@ -1160,6 +1267,7 @@
 
 	function buildTreeNode(node: GraphCategoryNode): Record<string, unknown> {
 		const isSelected = node.id === selectedNodeId;
+		const isFilterMatch = hasActiveFilter && filterMatchNodeIdSet.has(node.id);
 		if (nodeStyle === 'rect') {
 			const kws = node.metadata.keywords.slice(0, 3).join(', ') || '—';
 			const conf = node.metadata.confidence ? node.metadata.confidence.toFixed(2) : '—';
@@ -1183,11 +1291,11 @@
 						: darkMode
 							? 'rgba(15,23,42,0.85)'
 							: 'rgba(241,245,249,0.9)',
-					borderColor: isSelected ? warm : accent,
-					borderWidth: isSelected ? 2 : 1,
+					borderColor: isSelected || isFilterMatch ? warm : accent,
+					borderWidth: isSelected || isFilterMatch ? 2 : 1,
 					borderRadius: 10,
-					shadowBlur: isSelected ? 18 : 0,
-					shadowColor: isSelected
+					shadowBlur: isSelected || isFilterMatch ? 18 : 0,
+					shadowColor: isSelected || isFilterMatch
 						? mode === 'summary'
 							? 'rgba(129,140,248,0.5)'
 							: 'rgba(34,197,94,0.5)'
@@ -1215,7 +1323,7 @@
 						}
 					}
 				},
-				children: childrenOf(node).map(buildTreeNode)
+				children: filteredChildrenOf(node).map(buildTreeNode)
 			};
 		}
 
@@ -1230,22 +1338,22 @@
 			keywords: node.metadata.keywords,
 			summaryCount: node.itemIds.length,
 			collapsed: !node.expanded,
-			symbolSize: isSelected ? 16 : 11,
+			symbolSize: isSelected || isFilterMatch ? 16 : 11,
 			itemStyle: {
-				color: isSelected ? accent : darkMode ? '#cbd5e1' : '#94a3b8',
-				borderColor: isSelected ? warm : accent,
-				borderWidth: isSelected ? 4 : 2,
-				shadowBlur: isSelected ? 18 : 0,
-				shadowColor: isSelected
+				color: isSelected || isFilterMatch ? accent : darkMode ? '#cbd5e1' : '#94a3b8',
+				borderColor: isSelected || isFilterMatch ? warm : accent,
+				borderWidth: isSelected || isFilterMatch ? 4 : 2,
+				shadowBlur: isSelected || isFilterMatch ? 18 : 0,
+				shadowColor: isSelected || isFilterMatch
 					? mode === 'summary'
 						? 'rgba(129, 140, 248, 0.72)'
 						: 'rgba(34, 197, 94, 0.72)'
 					: 'transparent'
 			},
 			label: {
-				color: isSelected ? textMain : textMuted,
-				fontWeight: isSelected ? 700 : 500,
-				backgroundColor: isSelected
+				color: isSelected || isFilterMatch ? textMain : textMuted,
+				fontWeight: isSelected || isFilterMatch ? 700 : 500,
+				backgroundColor: isSelected || isFilterMatch
 					? darkMode
 						? mode === 'summary'
 							? 'rgba(99, 102, 241, 0.16)'
@@ -1254,10 +1362,10 @@
 							? 'rgba(79, 70, 229, 0.12)'
 							: 'rgba(22, 163, 74, 0.12)'
 					: 'transparent',
-				padding: isSelected ? [4, 8] : 0,
-				borderRadius: isSelected ? 999 : 0
+				padding: isSelected || isFilterMatch ? [4, 8] : 0,
+				borderRadius: isSelected || isFilterMatch ? 999 : 0
 			},
-			children: childrenOf(node).map(buildTreeNode)
+			children: filteredChildrenOf(node).map(buildTreeNode)
 		};
 	}
 
@@ -1271,7 +1379,7 @@
 			itemStyle: { color: 'transparent', borderColor: 'transparent' },
 			label: { show: false },
 			lineStyle: { color: lineColor, width: 2, curveness: 0.55 },
-			children: visibleRoots().map(buildTreeNode)
+			children: visibleRoots().filter(shouldRenderNode).map(buildTreeNode)
 		};
 		return {
 			backgroundColor: 'transparent',
@@ -1370,6 +1478,104 @@
 		</div>
 	{/if}
 
+	{#if filterDialogOpen && selectedNode}
+		<div
+			class="modal-overlay"
+			role="presentation"
+			tabindex="-1"
+			onclick={() => {
+				if (!filterApplying) filterDialogOpen = false;
+			}}
+			onkeydown={(event) => {
+				if (event.key === 'Escape' && !filterApplying) filterDialogOpen = false;
+			}}
+		>
+			<div
+				class="filter-dialog"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Filter Nodes in Current Level"
+				tabindex="0"
+				onclick={(event) => event.stopPropagation()}
+				onkeydown={(event) => event.stopPropagation()}
+			>
+				<form
+					onsubmit={(event) => {
+						event.preventDefault();
+						void applyLevelFilter();
+					}}
+				>
+					<div class="eyebrow">Current Level</div>
+					<h3>Filter Nodes</h3>
+					<p class="dialog-copy">
+						Level {getNodeLevel(selectedNode) + 1} from <strong>{selectedNode.categoryPath}</strong>
+						contains {selectedLevelNodes.length} nodes.
+					</p>
+					{#if filterError}
+						<div class="filter-error" role="alert">{filterError}</div>
+					{/if}
+					<label class="field">
+						<span>Keywords</span>
+						<input
+							type="text"
+							bind:value={filterDraft.keywords}
+							placeholder="keyword, phrase, another"
+						/>
+					</label>
+					<div class="filter-grid">
+						<label class="field">
+							<span>Created After</span>
+							<input
+								type="text"
+								bind:value={filterDraft.startTime}
+								placeholder="YYYYMMDD-HHMMSS"
+							/>
+						</label>
+						<label class="field">
+							<span>Created Before</span>
+							<input
+								type="text"
+								bind:value={filterDraft.endTime}
+								placeholder="YYYYMMDD-HHMMSS"
+							/>
+						</label>
+					</div>
+					<label class="field">
+						<span>Semantic Text</span>
+						<textarea
+							rows="3"
+							bind:value={filterDraft.semanticText}
+							placeholder="Text to embed and compare against current-level node vectors"
+						></textarea>
+					</label>
+					<label class="field">
+						<span>Semantic Threshold {filterDraft.threshold.toFixed(2)}</span>
+						<input
+							type="range"
+							min="0"
+							max="1"
+							step="0.01"
+							bind:value={filterDraft.threshold}
+						/>
+					</label>
+					<div class="dialog-actions">
+						<button
+							type="button"
+							class="secondary-btn"
+							disabled={filterApplying}
+							onclick={() => (filterDialogOpen = false)}
+						>
+							Cancel
+						</button>
+						<button type="submit" class="primary-btn" disabled={filterApplying}>
+							{filterApplying ? 'Filtering…' : 'Apply Filter'}
+						</button>
+					</div>
+				</form>
+			</div>
+		</div>
+	{/if}
+
 	<div class="hero">
 		<div>
 			<div class="eyebrow">{mode === 'summary' ? 'Document Summaries' : 'Semantic Web'}</div>
@@ -1397,10 +1603,27 @@
 	<ViewToolbar
 		{darkMode}
 		{nodeStyle}
+		filterDisabled={!selectedNode}
+		onFilter={openFilterDialog}
+		resetFilterDisabled={!hasActiveFilter}
+		onResetFilter={clearLevelFilter}
 		onToggleNodeStyle={() => {
 			nodeStyle = nodeStyle === 'circle' ? 'rect' : 'circle';
 		}}
 	/>
+
+	{#if hasActiveFilter}
+		<div class="filter-status" role="status">
+			<span>
+				Filtered level {activeFilterLevel !== null ? activeFilterLevel + 1 : '—'} from
+				<strong>{activeFilterSelectedPath}</strong>: {filterMatchNodeIds.length} match{filterMatchNodeIds.length === 1 ? '' : 'es'}
+				{#if bestFilterSemanticScore !== null}
+					, best semantic score {bestFilterSemanticScore.toFixed(2)}
+				{/if}
+			</span>
+			<button type="button" class="text-btn" onclick={clearLevelFilter}>Clear</button>
+		</div>
+	{/if}
 
 	<div class="tabbed-window">
 		<div class="tabbed-window-head">
@@ -1825,7 +2048,8 @@
 		color: var(--text);
 	}
 
-	.error-overlay {
+	.error-overlay,
+	.modal-overlay {
 		position: absolute;
 		inset: 0;
 		z-index: 24;
@@ -1844,6 +2068,69 @@
 		background: #111827;
 		padding: 1.25rem;
 		box-shadow: 0 30px 80px rgba(15, 23, 42, 0.5);
+	}
+
+	.filter-dialog {
+		width: min(620px, 100%);
+		border-radius: 22px;
+		border: 1px solid rgba(var(--accent-rgb, 129, 140, 248), 0.24);
+		background: #111827;
+		padding: 1.25rem;
+		box-shadow: 0 30px 80px rgba(15, 23, 42, 0.5);
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.38rem;
+		margin-top: 0.8rem;
+	}
+
+	.field span {
+		font-size: 0.72rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+
+	.field input,
+	.field textarea {
+		width: 100%;
+		border-radius: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		background: rgba(15, 23, 42, 0.68);
+		color: var(--text);
+		padding: 0.68rem 0.75rem;
+		font: inherit;
+	}
+
+	.field textarea {
+		resize: vertical;
+		min-height: 88px;
+	}
+
+	.field input[type='range'] {
+		padding: 0;
+		accent-color: var(--accent);
+	}
+
+	.filter-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem;
+	}
+
+	.filter-error {
+		margin-top: 0.8rem;
+		border: 1px solid rgba(248, 113, 113, 0.34);
+		border-radius: 12px;
+		background: rgba(127, 29, 29, 0.28);
+		color: #fecaca;
+		padding: 0.68rem 0.75rem;
+		font-size: 0.82rem;
+		line-height: 1.45;
+		overflow-wrap: anywhere;
 	}
 
 	.dialog-copy {
@@ -1874,6 +2161,43 @@
 	.secondary-btn {
 		background: rgba(15, 23, 42, 0.55);
 		color: var(--text);
+	}
+
+	.primary-btn:disabled,
+	.secondary-btn:disabled {
+		opacity: 0.48;
+		cursor: not-allowed;
+	}
+
+	.filter-status {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin: -0.25rem 0 0.75rem;
+		border: 1px solid rgba(var(--accent-rgb, 129, 140, 248), 0.2);
+		border-radius: 14px;
+		background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+		padding: 0.62rem 0.75rem;
+		font-size: 0.82rem;
+		color: var(--text);
+	}
+
+	.filter-status span {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.filter-status strong {
+		margin-inline: 0.25rem;
+	}
+
+	.text-btn {
+		border: none;
+		background: transparent;
+		color: var(--accent);
+		font-weight: 700;
+		cursor: pointer;
 	}
 
 	.hero {
@@ -2303,6 +2627,15 @@
 
 		.inspector-grid {
 			grid-template-columns: 1fr;
+		}
+
+		.filter-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.filter-status {
+			align-items: flex-start;
+			flex-direction: column;
 		}
 	}
 </style>

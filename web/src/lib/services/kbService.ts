@@ -744,6 +744,18 @@ export type GetRecordTopicsResponse = {
 	topics: TopicCardApi[];
 };
 
+export type FilterGraphNodesRequest = {
+	mode: 'summary' | 'topic';
+	candidatePaths: string[];
+	semanticText: string;
+	threshold: number;
+};
+
+export type FilterGraphNodesResponse = {
+	status: boolean;
+	matches: Array<{ categoryPath: string; score: number }>;
+};
+
 export async function listTopicGraph(): Promise<ListTopicGraphResponse> {
 	return fetchOrThrow<ListTopicGraphResponse>(
 		`${BASE}/topic-graph`,
@@ -763,6 +775,26 @@ export async function getRecordTopics(recordId: number): Promise<GetRecordTopics
 		`${BASE}/record-topics?record_id=${encodeURIComponent(String(recordId))}`,
 		'Failed to load record topics'
 	);
+}
+
+export async function filterGraphNodes(
+	params: FilterGraphNodesRequest
+): Promise<FilterGraphNodesResponse> {
+	const response = await fetch(`${BASE}/graph-node-filter`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(params)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to filter graph nodes (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<FilterGraphNodesResponse>;
 }
 
 export async function searchSummaryTreeMock(

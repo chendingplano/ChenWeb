@@ -281,6 +281,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/topic-graph", kbhandler.ListTopicGraph)
 	apiGroup.GET("/kb/topic-category", kbhandler.GetTopicCategory)
 	apiGroup.GET("/kb/record-topics", kbhandler.GetRecordTopics)
+	apiGroup.POST("/kb/graph-node-filter", kbhandler.FilterGraphNodes)
 	apiGroup.GET("/kb/doc-structure", kbhandler.GetDocStructure)
 	apiGroup.PATCH("/kb/doc-structure", kbhandler.UpdateDocStructureLine)
 	apiGroup.DELETE("/kb/doc-structure", kbhandler.DeleteDocStructureLine)
