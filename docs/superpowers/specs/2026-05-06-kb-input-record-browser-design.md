@@ -57,13 +57,18 @@ This is preferable to a presentational-only component because the data-loading a
 
 - `Record ID` input
 - `Retrieve` action
+- explicit `Search` button in the browser controls
 - opening and handling `KbInputSearchDialog`
-- `listKbInputs` pagination
+- explicit `Reset` button for clearing active search filters
+- `listKbInputs` pagination with visible pager whenever multiple pages exist
 - optional active-store scoping
 - browser-local loading, empty, and error states
 - record selection state
 - first-record auto-selection on initial load and page changes
 - record-list rendering
+- adjustable left-panel width with a drag handle / slider-style resize affordance
+- `Settings` button and settings dialog / popover
+- persisted per-instance browser settings
 - compact pager UI
 
 ### Owned by Parent Screens
@@ -86,13 +91,17 @@ The reusable browser should expose a small, neutral API centered on records rath
 - `subtitle?: string`
   - Optional helper copy shown near the header or empty state
 - `pageSize?: number`
-  - Default should match current knowledge patterns
+  - Default: `50`
 - `scopeToActiveStore?: boolean`
   - Enables `knowledgeStoreState.activeStore?.id` scoping when desired
 - `selectedRecordId?: number | null`
   - Allows parent-driven selection when needed
 - `autoSelectFirstRecord?: boolean`
   - Default: `true`
+- `instanceKey: string`
+  - Required stable identifier used for per-instance settings persistence
+- `defaultListWidth?: number`
+  - Starting width before persisted settings are loaded
 
 ### Rendering Props
 
@@ -116,12 +125,30 @@ Suggested `BrowserRecordCard` shape:
 - `onSelect(record: KbInputRecord): void`
 - `onResultsChange(payload: { results: KbInputRecord[]; total: number; page: number }): void`
 - `onError?(error: Error): void`
+- `onFiltersChange?(filters: BrowserFilterState): void`
+
+Suggested `BrowserFilterState` shape:
+
+- `recordId: string`
+- `searchRecordId: string`
+- `searchTitle: string`
+- `searchDocNo: string`
+- `searchFileName: string`
+- `searchDocType: string`
+- `searchParserName: string`
+- `searchOperation: string`
+- `searchProcStatus: string`
+- `searchCreateStart: string`
+- `searchCreateEnd: string`
+- `searchModifyStart: string`
+- `searchModifyEnd: string`
 
 If Svelte event dispatch is preferred over callback props, keep the event names equally neutral:
 
 - `select`
 - `resultschange`
 - `error`
+- `filterschanged`
 
 ## Internal Behavior
 
@@ -130,6 +157,7 @@ If Svelte event dispatch is preferred over callback props, keep the event names 
 When no explicit `Record ID` is entered:
 
 - call `listKbInputs`
+- apply any active search filters captured through `KbInputSearchDialog`
 - apply pagination
 - apply active-store scoping only when `scopeToActiveStore` is true
 - populate the visible record list
@@ -139,6 +167,16 @@ When a `Record ID` is entered:
 - call `getKbInput`
 - render a one-record result set
 - reset browser pagination to page 1 for display consistency
+
+### Search and Reset Rules
+
+- the browser must keep an explicit `Search` button in the top controls
+- `Search` opens the existing `KbInputSearchDialog`
+- choosing filters in the dialog updates the browser query state
+- the top controls must include an explicit `Reset` button
+- `Reset` clears all active search filters and returns the browser to its default list query
+- `Reset` is disabled when no filters are active
+- a direct `Record ID` entry in the top control bar is not treated as a dialog filter; it remains an immediate retrieve path
 
 ### Selection Rules
 
@@ -154,6 +192,25 @@ When a `Record ID` is entered:
 - list/retrieve failures should render a browser-local error state
 - the parent should not need to handle browser fetch failures unless it opts into `onError`
 
+### Pagination Rules
+
+- pagination controls must remain visible when the total record count exceeds the active page size
+- changing pages must preserve the currently active filter set
+- when the page size changes from settings, the browser should reload from page 1
+- page size is browser-local state and should not leak across knowledge sections
+
+### Width and Settings Rules
+
+- the browser must expose a resize handle so users can widen or narrow the left panel interactively
+- the width control should behave like existing ChenWeb resizable side panels
+- a `Settings` button must open a browser-specific settings surface
+- configurable settings for this phase:
+  - page size, default `50`
+  - list width
+- settings changes should apply immediately and persist locally
+- settings must persist per instance, not globally
+- `Chunks` browser settings must not affect `Metrics`, `Document Structure`, `Semantic Web`, or other browser instances
+
 ## Shared Helper Extraction
 
 Move the existing generic query-building helpers into a neutral companion module:
@@ -166,8 +223,35 @@ This helper module can hold:
 - shared `listKbInputs` parameter construction
 - first-record selection helpers
 - optional display-field mapping helpers
+- per-instance settings key construction
+- page-size and list-width clamping helpers
 
 The current `topic-tree-record-browser.js` should be folded into this neutral helper or replaced by it.
+
+## Settings Persistence Model
+
+Reuse the same local-storage style already present in modules like:
+
+- `chunk-mgmt-settings.js`
+- `doc-structure-settings.js`
+
+The record browser should have its own settings helper module, for example:
+
+- `kb-input-record-browser-settings.js`
+
+That module should own:
+
+- min/max/default list width
+- min/max/default page size
+- `instanceKey`-based storage key generation
+- merge / clamp helpers
+- read / write helpers
+
+Suggested storage-key shape:
+
+- `chenweb:kb-input-record-browser:<instanceKey>:settings`
+
+This keeps persistence isolated per consumer instance while still allowing each section to use the same browser component.
 
 ## Adoption Plan
 
@@ -183,6 +267,8 @@ This validates:
 - selection event flow
 - pagination behavior
 - first-record auto-selection
+- search and reset behavior
+- settings persistence behavior
 
 ### Phase 2: Migrate Other Record-Browser Consumers
 
@@ -198,7 +284,10 @@ Each migration should remove local copies of:
 
 - record list paging state
 - search dialog state
+- reset-filter state
 - record browser rendering
+- width-resize state
+- browser settings persistence state
 - `listKbInputs` fetch boilerplate
 
 ### Phase 3: Rename and Cleanup
@@ -238,6 +327,12 @@ Minimum regression coverage should include:
 - direct `Record ID` retrieval replaces the list with one record
 - active-store scoping is applied only when enabled
 - search dialog selection updates the active record
+- `Search` button remains visible and opens the dialog
+- `Reset` clears active filters and is disabled when no filters are active
+- pager remains visible when result count spans multiple pages
+- width changes persist per browser instance
+- page-size changes persist per browser instance
+- `Chunks` and `Metrics` settings do not overwrite each other
 - invalid `Record ID` shows validation feedback
 
 Consumer-level tests should verify only the handoff boundary:
