@@ -168,8 +168,23 @@
 		if (!firstHighlight) return false;
 		const highlightRect = firstHighlight.getBoundingClientRect();
 		const hostRect = host.getBoundingClientRect();
-		const padding = 24;
-		const targetTop = host.scrollTop + (highlightRect.top - hostRect.top) - padding;
+		const hostHeight = host.clientHeight;
+		const highlightTop = highlightRect.top - hostRect.top;
+		const highlightBottom = highlightRect.bottom - hostRect.top;
+
+		// Rule 1: highlight is entirely visible — no scroll needed
+		if (highlightTop >= 0 && highlightBottom <= hostHeight) return true;
+
+		const highlightHeight = highlightRect.height;
+		let targetTop: number;
+		if (highlightHeight >= hostHeight) {
+			// Rule 2: highlight taller than viewport — pin to top
+			targetTop = host.scrollTop + highlightTop;
+		} else {
+			// Rule 3: leave ~20% of viewport above the highlight
+			const topPadding = hostHeight * 0.2;
+			targetTop = host.scrollTop + highlightTop - topPadding;
+		}
 		host.scrollTo({ top: Math.max(0, targetTop), behavior });
 		return true;
 	}
