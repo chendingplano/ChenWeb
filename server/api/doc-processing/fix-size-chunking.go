@@ -169,7 +169,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 		if embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
 			timeoutSec := embCfg.TimeoutSec
 			if timeoutSec <= 0 {
-				timeoutSec = 30
+				timeoutSec = 60
 			}
 			embedder = &llmclients.OpenAIJSONClient{
 				HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},

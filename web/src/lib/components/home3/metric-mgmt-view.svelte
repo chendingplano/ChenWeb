@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import {
-		listKbInputs,
 		listKbMetrics,
 		getKbInput,
 		getRawLines,
@@ -9,9 +8,8 @@
 		type KbMetricRecord,
 		type RawLine
 	} from '$lib/services/kbService';
+	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
-	import { knowledgeStoreState } from './knowledge-store-state.svelte';
-	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -34,7 +32,6 @@
 	const fontMono = "'JetBrains Mono', 'IBM Plex Mono', monospace";
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
 	// ---------- State ----------
-	let recordIdInput = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbMetricRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
@@ -104,39 +101,6 @@
 	let pdfStageEl = $state<HTMLDivElement | null>(null);
 	let pdfCanvasHostEl = $state<HTMLDivElement | null>(null);
 	let pdfViewportByPage = new Map<number, PdfPageViewport>();
-
-	// Search dialog
-	let searchOpen = $state(false);
-	let searchRecordId = $state('');
-	let searchTitle = $state('');
-	let searchDocNo = $state('');
-	let searchFileName = $state('');
-	let searchDocType = $state('all');
-	let searchParserName = $state('');
-	let searchOperation = $state('');
-	let searchProcStatus = $state('all');
-	let searchCreateStart = $state('');
-	let searchCreateEnd = $state('');
-	let searchModifyStart = $state('');
-	let searchModifyEnd = $state('');
-	let searchResults = $state<KbInputRecord[]>([]);
-	let searchLoading = $state(false);
-	let searchError = $state('');
-	let searchSelected = $state<number | null>(null);
-
-	const docTypeOptions = [
-		'all',
-		'pdf',
-		'doc',
-		'excel',
-		'ppt',
-		'text',
-		'json',
-		'xml',
-		'markdown',
-		'typst'
-	];
-	const procStatusOptions = ['all', 'success', 'fail'];
 
 	type NormalizedSpan = { page_number: number; line_number: number };
 
@@ -352,13 +316,8 @@
 			}));
 	});
 
-	async function doRetrieve() {
+	async function loadMetricsForRecord(id: number) {
 		errorMsg = '';
-		const id = Number(recordIdInput.trim());
-		if (!Number.isFinite(id) || id <= 0) {
-			errorMsg = 'Enter a valid Record ID';
-			return;
-		}
 		loading = true;
 		metrics = [];
 		selectedMetricId = null;
@@ -438,66 +397,6 @@
 		viewMode = mode;
 	}
 
-	function openSearch() {
-		searchOpen = true;
-		searchSelected = null;
-		searchResults = [];
-		searchError = '';
-		searchRecordId = '';
-		searchTitle = '';
-		searchDocNo = '';
-		searchFileName = '';
-		searchDocType = 'all';
-		searchParserName = '';
-		searchOperation = '';
-		searchProcStatus = 'all';
-		searchCreateStart = '';
-		searchCreateEnd = '';
-		searchModifyStart = '';
-		searchModifyEnd = '';
-	}
-	function closeSearch() {
-		searchOpen = false;
-	}
-
-	async function runSearch() {
-		searchLoading = true;
-		searchError = '';
-		try {
-			const res = await listKbInputs({
-				recordId: searchRecordId,
-				docType: searchDocType,
-				parseState: 'all',
-				title: searchTitle,
-				docNo: searchDocNo,
-				fileName: searchFileName,
-				parserName: searchParserName,
-				operation: searchOperation,
-				procStatus: searchProcStatus === 'all' ? '' : searchProcStatus,
-				startTime: searchCreateStart,
-				endTime: searchCreateEnd,
-				modifyStartTime: searchModifyStart,
-				modifyEndTime: searchModifyEnd,
-				page: 1,
-				pageSize: 50,
-				ksStoreId: knowledgeStoreState.activeStoreId ?? undefined
-			});
-			searchResults = res.results ?? [];
-		} catch (err) {
-			searchError = err instanceof Error ? err.message : 'Search failed';
-		} finally {
-			searchLoading = false;
-		}
-	}
-	function pickSearchResult(r: KbInputRecord) {
-		recordIdInput = String(r.id);
-		searchOpen = false;
-	}
-	function confirmSearchSelection() {
-		const r = searchResults.find((x) => x.id === searchSelected);
-		if (r) pickSearchResult(r);
-	}
-
 	function recordDisplayName(r: KbInputRecord): string {
 		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
 	}
@@ -506,27 +405,15 @@
 		return r.doc_no?.trim() || '—';
 	}
 
-	function searchStatusText(record: KbInputRecord): { operation: string; procStatus: string } {
-		const items = record.status ?? [];
-		const desiredOperation = searchOperation.trim().toLowerCase();
-		const matched =
-			desiredOperation !== ''
-				? [...items]
-						.reverse()
-						.find((item) => (item?.operation ?? '').trim().toLowerCase() === desiredOperation)
-				: [...items].reverse().find((item) => item != null);
-
-		if (!matched) {
-			return { operation: '—', procStatus: 'pending' };
-		}
-
+	function mapBrowserRecord(record: KbInputRecord) {
 		return {
-			operation: matched.operation?.trim() || '—',
-			procStatus:
-				matched.proc_status?.trim() ||
-				matched['proc-status']?.trim() ||
-				matched.status?.trim() ||
-				'pending'
+			id: record.id,
+			title: recordDisplayName(record),
+			subtitle: record.file_name?.trim() || record.name?.trim() || '—',
+			meta: [recordDisplayDocNo(record), record.parser_name?.trim() || '—'],
+			status: record.type?.trim() || '—',
+			description: formatMaybeDate(record.create_time),
+			badges: [record.type?.trim() || '—']
 		};
 	}
 
@@ -842,44 +729,22 @@
 	</header>
 
 	<div class="body">
-		<!-- ============ LEFT PANEL ============ -->
-		<aside class="left">
-			<div class="left-controls">
-				<label class="field">
-					<span class="field-label">Record&nbsp;ID</span>
-					<div class="field-row">
-						<input
-							type="text"
-							inputmode="numeric"
-							bind:value={recordIdInput}
-							placeholder="e.g. 1042"
-							onkeydown={(e) => {
-								if (e.key === 'Enter') doRetrieve();
-							}}
-						/>
-						<button
-							class="btn btn-ghost"
-							onclick={openSearch}
-							title="Search records from kb.inputs"
-						>
-							<span class="btn-icon">⌕</span>Search
-						</button>
-					</div>
-				</label>
+		<KbInputRecordBrowser
+			{darkMode}
+			instanceKey="metrics-record-browser"
+			title="kb.inputs"
+			subtitle="Search, filter, and select input records before inspecting extracted metrics."
+			emptyTitle="No records yet"
+			emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+			selectedRecordId={currentInput?.id ?? null}
+			mapRecord={mapBrowserRecord}
+			onSelect={(record) => void loadMetricsForRecord(record.id)}
+			onError={(error) => {
+				errorMsg = error.message;
+			}}
+		/>
 
-				<button class="btn btn-primary retrieve" onclick={doRetrieve} disabled={loading}>
-					{#if loading}
-						<span class="spinner"></span>Retrieving…
-					{:else}
-						<span class="btn-icon">→</span>Retrieve
-					{/if}
-				</button>
-
-				{#if errorMsg}
-					<div class="error">{errorMsg}</div>
-				{/if}
-			</div>
-
+		<aside class="metric-sidebar">
 			<div class="left-meta">
 				<div class="left-meta-title">Metrics</div>
 				<div class="left-meta-count">{metrics.length} found</div>
@@ -889,11 +754,13 @@
 			</div>
 
 			<div class="metrics-list">
-				{#if !loading && metrics.length === 0}
+				{#if errorMsg}
+					<div class="error">{errorMsg}</div>
+				{:else if !loading && metrics.length === 0}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
 						<div class="empty-title">No metrics yet</div>
-						<div class="empty-sub">Enter a Record ID and press Retrieve to populate the index.</div>
+						<div class="empty-sub">Select a record from kb.inputs to populate the metrics index.</div>
 					</div>
 				{:else}
 					{#each metrics as m, idx (m.id)}
@@ -1176,14 +1043,6 @@
 	</div>
 </div>
 
-<!-- ============ SEARCH DIALOG ============ -->
-<KbInputSearchDialog
-	bind:open={searchOpen}
-	onSelect={(record) => {
-		recordIdInput = String(record.id);
-	}}
-/>
-
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
 
@@ -1281,14 +1140,20 @@
 		flex: 1;
 		height: 100%;
 		display: grid;
-		grid-template-columns: 380px 1fr;
+		grid-template-columns: auto 360px minmax(0, 1fr);
 		min-height: 0;
 		min-width: 0;
 		overflow: hidden;
 	}
 
-	/* ---------- LEFT ---------- */
-	.left {
+	@media (max-width: 1480px) {
+		.body {
+			grid-template-columns: auto 320px minmax(0, 1fr);
+		}
+	}
+
+	/* ---------- METRIC SIDEBAR ---------- */
+	.metric-sidebar {
 		display: flex;
 		flex-direction: column;
 		border-right: 1px solid var(--ink-line);
@@ -1296,109 +1161,6 @@
 		min-width: 0;
 		min-height: 0;
 		overflow: hidden;
-	}
-	.left-controls {
-		padding: 24px 24px 18px;
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
-		border-bottom: 1px solid var(--ink-line-soft);
-	}
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-	.field-label {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: var(--text-muted);
-	}
-	.field-row {
-		display: flex;
-		gap: 8px;
-	}
-	.field-row input {
-		flex: 1;
-		min-width: 0;
-	}
-	.field input,
-	.field select {
-		font-family: var(--font-mono);
-		font-size: 14px;
-		padding: 10px 12px;
-		background: var(--panel-bg-alt);
-		color: var(--text-primary);
-		border: 1px solid var(--ink-line);
-		border-radius: 0;
-		outline: none;
-		transition:
-			border-color 150ms,
-			background 150ms;
-	}
-	.field input:focus,
-	.field select:focus {
-		border-color: var(--brass);
-		background: var(--panel-bg);
-	}
-
-	.btn {
-		font-family: var(--font-sans);
-		font-size: 13px;
-		font-weight: 600;
-		letter-spacing: 0.02em;
-		padding: 10px 14px;
-		border: 1px solid var(--ink-line);
-		border-radius: 0;
-		background: transparent;
-		color: var(--text-primary);
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 8px;
-		transition:
-			background 150ms,
-			color 150ms,
-			border-color 150ms,
-			transform 100ms;
-	}
-	.btn:hover {
-		background: var(--brass-faint);
-		border-color: var(--brass);
-		color: var(--brass);
-	}
-	.btn:active {
-		transform: translateY(1px);
-	}
-	.btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-		transform: none;
-	}
-	.btn-icon {
-		font-family: var(--font-mono);
-		font-size: 14px;
-		line-height: 1;
-	}
-	.btn-primary {
-		background: var(--brass);
-		border-color: var(--brass);
-		color: #1a1410;
-	}
-	.btn-primary:hover {
-		background: var(--text-primary);
-		color: var(--brass);
-		border-color: var(--text-primary);
-	}
-	.btn-ghost {
-		background: var(--panel-bg-alt);
-	}
-	.retrieve {
-		padding: 12px;
-		font-size: 14px;
 	}
 
 	.error {

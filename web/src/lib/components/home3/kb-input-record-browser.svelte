@@ -97,6 +97,7 @@
 	let listWidth = $state(clampKbInputRecordBrowserListWidth(defaultListWidth));
 	let selectedRecordIdInternal = $state<number | null>(selectedRecordId);
 	let lastEmittedRecordId = $state<number | null>(null);
+	let justEmitted = $state(false);
 	let resizing = $state(false);
 	let settingsHydrated = $state(false);
 
@@ -114,8 +115,27 @@
 	});
 
 	$effect(() => {
-		if (selectedRecordId != null && selectedRecordId !== selectedRecordIdInternal) {
+		if (
+			selectedRecordId != null &&
+			selectedRecordId !== selectedRecordIdInternal
+		) {
+			if (justEmitted) {
+				// We just called onSelect() for a different record.
+				// The parent's selectedRecordId prop still holds the old
+				// value (the async handler hasn't finished yet).  Do NOT
+				// sync the stale value back — that causes an oscillation
+				// where the browser keeps toggling between two records.
+				return;
+			}
 			selectedRecordIdInternal = selectedRecordId;
+		}
+	});
+
+	// Clear justEmitted once the parent acknowledges our emit by
+	// updating selectedRecordId to match.
+	$effect(() => {
+		if (justEmitted && selectedRecordId === lastEmittedRecordId) {
+			justEmitted = false;
 		}
 	});
 
@@ -179,10 +199,12 @@
 		selectedRecordIdInternal = record?.id ?? null;
 		if (!record) {
 			lastEmittedRecordId = null;
+			justEmitted = false;
 			return;
 		}
 		if (!force && lastEmittedRecordId === record.id) return;
 		lastEmittedRecordId = record.id;
+		justEmitted = true;
 		onSelect(record);
 	}
 

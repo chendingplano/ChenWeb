@@ -5,14 +5,13 @@
 	import { appAuthStore } from '@chendingplano/shared';
 	import {
 		getKbInput,
-		listKbInputs,
 		listKbTopicChunks,
 		type KbInputRecord,
 		type KbTopicChunkRecord,
 		type RawLine
 	} from '$lib/services/kbService';
+	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
-	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 	import {
 		CHUNK_LIST_MAX_WIDTH,
 		CHUNK_LIST_MIN_WIDTH,
@@ -43,7 +42,6 @@
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
 	type ChunkPanelSettings = typeof CHUNK_PANEL_DEFAULT_SETTINGS;
 
-	let recordIdInput = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let chunks = $state<KbTopicChunkRecord[]>([]);
 	let selectedSeqNo = $state<number | null>(null);
@@ -54,23 +52,6 @@
 	let chunkListSettingsOpen = $state(false);
 	let chunkListSettingsHydrated = $state(false);
 	let chunkPanelSettings = $state<ChunkPanelSettings>({ ...CHUNK_PANEL_DEFAULT_SETTINGS });
-	let searchOpen = $state(false);
-	let searchRecordId = $state('');
-	let searchTitle = $state('');
-	let searchDocNo = $state('');
-	let searchFileName = $state('');
-	let searchDocType = $state('all');
-	let searchParserName = $state('');
-	let searchOperation = $state('');
-	let searchProcStatus = $state('all');
-	let searchCreateStart = $state('');
-	let searchCreateEnd = $state('');
-	let searchModifyStart = $state('');
-	let searchModifyEnd = $state('');
-	let searchResults = $state<KbInputRecord[]>([]);
-	let searchLoading = $state(false);
-	let searchError = $state('');
-	let searchSelected = $state<number | null>(null);
 
 	let docPage = $state(1);
 	let pdfZoom = $state(CHUNK_PANEL_DEFAULT_SETTINGS.pdfZoom);
@@ -114,20 +95,6 @@
 	let pdfLastRenderWidth = 0;
 	let pdfResizeRaf = 0;
 	let pdfViewportByPage = new Map<number, PdfPageViewport>();
-
-	const docTypeOptions = [
-		'all',
-		'pdf',
-		'doc',
-		'excel',
-		'ppt',
-		'text',
-		'json',
-		'xml',
-		'markdown',
-		'typst'
-	];
-	const procStatusOptions = ['all', 'success', 'fail'];
 
 	let isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
 	let fileUrl = $derived.by(() => {
@@ -263,13 +230,8 @@
 		}
 	}
 
-	async function doRetrieve() {
+	async function loadChunksForRecord(id: number) {
 		errorMsg = '';
-		const id = Number(recordIdInput.trim());
-		if (!Number.isFinite(id) || id <= 0) {
-			errorMsg = 'Enter a valid Record ID';
-			return;
-		}
 		loading = true;
 		chunks = [];
 		selectedSeqNo = null;
@@ -360,68 +322,6 @@
 		}
 	}
 
-	function openSearch() {
-		searchOpen = true;
-		searchSelected = null;
-		searchResults = [];
-		searchError = '';
-		searchRecordId = '';
-		searchTitle = '';
-		searchDocNo = '';
-		searchFileName = '';
-		searchDocType = 'all';
-		searchParserName = '';
-		searchOperation = '';
-		searchProcStatus = 'all';
-		searchCreateStart = '';
-		searchCreateEnd = '';
-		searchModifyStart = '';
-		searchModifyEnd = '';
-	}
-
-	function closeSearch() {
-		searchOpen = false;
-	}
-
-	async function runSearch() {
-		searchLoading = true;
-		searchError = '';
-		try {
-			const res = await listKbInputs({
-				recordId: searchRecordId,
-				docType: searchDocType,
-				parseState: 'all',
-				title: searchTitle,
-				docNo: searchDocNo,
-				fileName: searchFileName,
-				parserName: searchParserName,
-				operation: searchOperation,
-				procStatus: searchProcStatus === 'all' ? '' : searchProcStatus,
-				startTime: searchCreateStart,
-				endTime: searchCreateEnd,
-				modifyStartTime: searchModifyStart,
-				modifyEndTime: searchModifyEnd,
-				page: 1,
-				pageSize: 50
-			});
-			searchResults = res.results ?? [];
-		} catch (err) {
-			searchError = err instanceof Error ? err.message : 'Search failed';
-		} finally {
-			searchLoading = false;
-		}
-	}
-
-	function pickSearchResult(r: KbInputRecord) {
-		recordIdInput = String(r.id);
-		searchOpen = false;
-	}
-
-	function confirmSearchSelection() {
-		const r = searchResults.find((x) => x.id === searchSelected);
-		if (r) pickSearchResult(r);
-	}
-
 	function recordDisplayName(r: KbInputRecord): string {
 		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
 	}
@@ -430,27 +330,15 @@
 		return r.doc_no?.trim() || '—';
 	}
 
-	function searchStatusText(record: KbInputRecord): { operation: string; procStatus: string } {
-		const items = record.status ?? [];
-		const desiredOperation = searchOperation.trim().toLowerCase();
-		const matched =
-			desiredOperation !== ''
-				? [...items]
-						.reverse()
-						.find((item) => (item?.operation ?? '').trim().toLowerCase() === desiredOperation)
-				: [...items].reverse().find((item) => item != null);
-
-		if (!matched) {
-			return { operation: '—', procStatus: 'pending' };
-		}
-
+	function mapBrowserRecord(record: KbInputRecord) {
 		return {
-			operation: matched.operation?.trim() || '—',
-			procStatus:
-				matched.proc_status?.trim() ||
-				matched['proc-status']?.trim() ||
-				matched.status?.trim() ||
-				'pending'
+			id: record.id,
+			title: recordDisplayName(record),
+			subtitle: record.file_name?.trim() || record.name?.trim() || '—',
+			meta: [recordDisplayDocNo(record), record.parser_name?.trim() || '—'],
+			status: record.type?.trim() || '—',
+			description: 'Select a record to inspect semantic chunks.',
+			badges: [record.type?.trim() || '—']
 		};
 	}
 
@@ -773,43 +661,23 @@
 		</div>
 	</header>
 
-	<div class="body" style={`grid-template-columns:${chunkListWidth}px 14px 1fr;`}>
-		<aside class="left">
-			<div class="left-controls">
-				<label class="field">
-					<span class="field-label">Record ID</span>
-					<div class="field-row">
-						<input
-							type="text"
-							inputmode="numeric"
-							bind:value={recordIdInput}
-							placeholder="e.g. 1042"
-							onkeydown={(e) => {
-								if (e.key === 'Enter') doRetrieve();
-							}}
-						/>
-						<button
-							class="btn btn-ghost"
-							type="button"
-							onclick={openSearch}
-							title="Search records from kb.inputs"
-						>
-							<span class="btn-icon">⌕</span>Search
-						</button>
-					</div>
-				</label>
+	<div class="body" style={`grid-template-columns:auto ${chunkListWidth}px 14px 1fr;`}>
+		<KbInputRecordBrowser
+			{darkMode}
+			instanceKey="chunks-record-browser"
+			title="kb.inputs"
+			subtitle="Search, filter, and select input records before inspecting semantic chunks."
+			emptyTitle="No records yet"
+			emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+			selectedRecordId={currentInput?.id ?? null}
+			mapRecord={mapBrowserRecord}
+			onSelect={(record) => void loadChunksForRecord(record.id)}
+			onError={(error) => {
+				errorMsg = error.message;
+			}}
+		/>
 
-				<button class="btn btn-primary retrieve" onclick={doRetrieve} disabled={loading}>
-					{#if loading}
-						<span class="spinner"></span>Retrieving…
-					{:else}
-						Retrieve
-					{/if}
-				</button>
-
-				{#if errorMsg}<div class="error">{errorMsg}</div>{/if}
-			</div>
-
+		<aside class="chunk-sidebar">
 			<div class="left-meta">
 				<div class="left-meta-copy">
 					<div class="left-meta-title">Chunks</div>
@@ -818,10 +686,12 @@
 			</div>
 
 			<div class="chunk-list">
-				{#if !loading && chunks.length === 0}
+				{#if errorMsg}
+					<div class="error">{errorMsg}</div>
+				{:else if !loading && chunks.length === 0}
 					<div class="empty">
 						<div class="empty-title">No chunks loaded</div>
-						<div class="empty-sub">Enter a Record ID and retrieve `topics.txt` chunks.</div>
+						<div class="empty-sub">Select a record to retrieve `topics.txt` chunks.</div>
 					</div>
 				{:else}
 					{#each chunks as chunk (chunk.seqno)}
@@ -919,13 +789,6 @@
 		</section>
 	</div>
 </div>
-
-<KbInputSearchDialog
-	bind:open={searchOpen}
-	onSelect={(record) => {
-		recordIdInput = String(record.id);
-	}}
-/>
 
 {#if chunkListSettingsOpen}
 	<div
@@ -1093,16 +956,13 @@
 		display: grid;
 		min-height: 0;
 	}
-	.left {
+	.chunk-sidebar {
 		border-right: 1px solid var(--ink-line);
 		background: var(--panel-bg);
 		display: grid;
 		grid-template-rows: auto auto 1fr;
 		min-height: 0;
 	}
-	.left-controls { padding: 14px; border-bottom: 1px solid var(--ink-line-soft); }
-	.field-label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
-	.field-row { display: flex; gap: 8px; }
 	input {
 		width: 100%;
 		height: 38px;
@@ -1119,7 +979,6 @@
 		font-weight: 600;
 		cursor: pointer;
 	}
-	.btn-primary { width: 100%; margin-top: 10px; background: var(--brass); color: #1d1508; }
 	.btn-ghost {
 		padding: 0 12px;
 		background: var(--panel-bg-alt);
@@ -1129,7 +988,6 @@
 		align-items: center;
 		gap: 6px;
 	}
-	.btn-icon { font-size: 13px; line-height: 1; }
 	.btn:disabled { opacity: 0.6; cursor: default; }
 	.left-meta {
 		display: flex;
@@ -1592,7 +1450,7 @@
 	}
 	@media (max-width: 1200px) {
 		.body { grid-template-columns: 1fr; }
-		.left { max-height: 44vh; border-right: none; border-bottom: 1px solid var(--ink-line); }
+		.chunk-sidebar { max-height: 44vh; border-right: none; border-bottom: 1px solid var(--ink-line); }
 		.chunk-list-resizer { display: none; }
 		.meta-panel { position: static; }
 	}

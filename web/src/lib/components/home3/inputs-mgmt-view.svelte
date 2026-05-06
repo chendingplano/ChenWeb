@@ -1,16 +1,15 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import {
-		listKbInputs,
 		getKbInput,
 		updateKbInput,
 		getRawLines,
 		type KbInputRecord,
 		type RawLine
 	} from '$lib/services/kbService';
+	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
-	import { knowledgeStoreState } from './knowledge-store-state.svelte';
-	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
+	import { KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE } from './kb-input-record-browser-settings.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -34,18 +33,11 @@
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
 
 	// ---------- State ----------
-	let recordIdInput = $state('');
-	let inputRecords = $state<KbInputRecord[]>([]);
-	let listPage = $state(1);
-	let listPageSize = $state(20);
 	let listTotal = $state(0);
-	let listLoading = $state(false);
-	let listJumpInput = $state('1');
 	let selectedInputId = $state<number | null>(null);
 	let currentInput = $state<KbInputRecord | null>(null);
 	let loading = $state(false);
 	let errorMsg = $state('');
-	let lastSelectedInputDebug = $state('none');
 
 	let rawLines = $state<RawLine[]>([]);
 	let rawLoading = $state(false);
@@ -68,11 +60,13 @@
 	);
 
 	// PDF.js rendering state
+	type PdfWorker = { destroy: () => void };
 	type PdfJsLib = {
 		getDocument: (
-			src: string | { url: string; withCredentials?: boolean }
+			src: string | { url: string; withCredentials?: boolean; cMapUrl?: string; cMapPacked?: boolean; worker?: PdfWorker }
 		) => { promise: Promise<unknown> };
 		GlobalWorkerOptions?: { workerSrc: string };
+		PDFWorker: new (params?: { name?: string }) => PdfWorker;
 	};
 	type PdfPageViewport = {
 		width: number;
@@ -94,6 +88,7 @@
 	};
 
 	let pdfLib: PdfJsLib | null = null;
+	let pdfWorker: PdfWorker | null = null;
 	let pdfDoc: PdfDocumentProxy | null = null;
 	let pdfLoadedInputId = 0;
 	let pdfRenderSeq = 0;
@@ -110,8 +105,6 @@
 	let pdfCanvasHostEl = $state<HTMLDivElement | null>(null);
 	let pdfViewportByPage = new Map<number, PdfPageViewport>();
 	let pdfActiveRenders = new Map<number, { cancel: () => void }>(); // Upsidedown prevention
-
-	let searchOpen = $state(false);
 
 	type EditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json';
 	type RecordMetaRow = {
@@ -509,96 +502,31 @@
 			}));
 	});
 
-	let listTotalPages = $derived.by(() =>
-		Math.max(1, Math.ceil(listTotal / Math.max(1, listPageSize)))
-	);
-
-	function upsertInputRecord(record: KbInputRecord) {
-		const idx = inputRecords.findIndex((x) => x.id === record.id);
-		if (idx === -1) {
-			inputRecords = [record, ...inputRecords].slice(0, listPageSize);
-			return;
-		}
-		const next = [...inputRecords];
-		next[idx] = record;
-		inputRecords = next;
-	}
-
-	async function resetDocumentState() {
+	function resetDocumentState() {
 		rawLines = [];
 		rawError = '';
 		rawLoading = false;
 		docPage = 1;
 		pdfError = '';
-		for (const task of pdfActiveRenders.values()) task.cancel(); // Upsidedown prevention
-		pdfActiveRenders.clear(); // Upsidedown prevention
-		if (pdfDoc?.destroy) {
-			await pdfDoc.destroy();
-		}
+		for (const task of pdfActiveRenders.values()) task.cancel();
+		pdfActiveRenders.clear();
+		// Do NOT call pdfDoc.destroy() here. Destroying the document terminates the
+		// shared PDFWorker, which kills any in-flight load for the document we're
+		// switching TO — producing the infinite "Worker was destroyed" loop. The
+		// shared worker is destroyed only on component unmount (onMount cleanup).
 		pdfDoc = null;
 		pdfNumPages = 0;
 		pdfRenderedPages = [];
 		pdfLoadedInputId = 0;
-		pdfSettledRenderInputId = 0; // Upsidedown prevention
+		pdfSettledRenderInputId = 0;
 		pdfViewportByPage.clear();
-	}
-
-	async function loadInputList(page: number) {
-		const nextPage = Math.max(1, page);
-		listLoading = true;
-		try {
-			const res = await listKbInputs({
-				docType: 'all',
-				parseState: 'all',
-				fileName: '',
-				startTime: '',
-				endTime: '',
-				page: nextPage,
-				pageSize: listPageSize
-			});
-			inputRecords = res.results ?? [];
-			listTotal = Math.max(0, res.total ?? 0);
-			listPage = Math.max(1, res.page ?? nextPage);
-		} finally {
-			listLoading = false;
-		}
-	}
-
-	async function loadInitialInputList() {
-		try {
-			await loadInputList(1);
-		} catch {
-			// keep initial experience non-blocking
-		}
-	}
-
-	async function prevInputPage() {
-		if (listPage <= 1 || listLoading) return;
-		await loadInputList(listPage - 1);
-	}
-
-	async function nextInputPage() {
-		if (listPage >= listTotalPages || listLoading) return;
-		await loadInputList(listPage + 1);
-	}
-
-	async function jumpToInputPage() {
-		const parsed = Number(listJumpInput.trim());
-		if (!Number.isFinite(parsed)) {
-			listJumpInput = String(listPage);
-			return;
-		}
-		const target = Math.max(1, Math.min(listTotalPages, Math.trunc(parsed)));
-		listJumpInput = String(target);
-		if (target === listPage || listLoading) return;
-		await loadInputList(target);
 	}
 
 	async function loadInputRecord(id: number) {
 		errorMsg = '';
 		loading = true;
 		cancelFieldEdit();
-		await resetDocumentState();
+		resetDocumentState();
 		try {
 			rawLoading = true;
 			const [inputRes, rawRes] = await Promise.all([
@@ -607,11 +535,8 @@
 			]);
 			currentInput = inputRes.record;
 			selectedInputId = inputRes.record.id;
-			upsertInputRecord(inputRes.record);
 			rawLines = rawRes?.lines ?? [];
 			rawError = rawRes ? '' : 'Failed to load raw lines';
-			lastSelectedInputDebug = `${inputRes.record.id} @ ${new Date().toLocaleTimeString()}`;
-			recordIdInput = String(inputRes.record.id);
 		} catch (err) {
 			currentInput = null;
 			selectedInputId = null;
@@ -622,27 +547,8 @@
 		}
 	}
 
-	async function doRetrieve() {
-		const id = Number(recordIdInput.trim());
-		if (!Number.isFinite(id) || id <= 0) {
-			errorMsg = 'Enter a valid Record ID';
-			return;
-		}
-		await loadInputRecord(id);
-	}
-
-	function onInputCardClick(event: MouseEvent, record: KbInputRecord) {
-		event.preventDefault();
-		event.stopPropagation();
-		void loadInputRecord(record.id);
-	}
-
 	function setMode(mode: 'document' | 'source') {
 		viewMode = mode;
-	}
-
-	function openSearch() {
-		searchOpen = true;
 	}
 
 	function asTrimmedString(value: unknown): string {
@@ -741,6 +647,18 @@
 		if (name && !looksLikeFileName(name)) return name;
 
 		return `Input #${r.id}`;
+	}
+
+	function mapBrowserRecord(record: KbInputRecord) {
+		return {
+			id: record.id,
+			title: inputDisplayName(record),
+			subtitle: record.file_name?.trim() || record.name?.trim() || '—',
+			meta: [inputDisplayDocNo(record) || '—', record.parser_name?.trim() || '—'],
+			status: record.type?.trim() || '—',
+			description: formatMaybeDate(record.create_time),
+			badges: [record.type?.trim() || '—']
+		};
 	}
 
 	function isEditingField(key: string): boolean {
@@ -949,7 +867,6 @@
 			const updated = await updateKbInput(currentInput.id, payload);
 			currentInput = updated.record;
 			selectedInputId = updated.record.id;
-			upsertInputRecord(updated.record);
 			cancelFieldEdit();
 		} catch (err) {
 			editingError = err instanceof Error ? err.message : 'Failed to save changes.';
@@ -1000,24 +917,29 @@
 				import.meta.url
 			).toString();
 		}
+		// Create a persistent shared worker so that pdfDoc.destroy() on record
+		// switch only tears down the document, not the underlying worker thread.
+		pdfWorker = new pdfLib.PDFWorker({ name: 'inputs-mgmt-pdf-worker' });
 	}
 
 	async function ensurePdfDoc() {
 		if (!currentInput || !isPdf) return;
 		if (pdfDoc && pdfLoadedInputId === currentInput.id) return;
 
-		if (pdfDoc?.destroy) {
-			await pdfDoc.destroy();
-		}
+		// Drop the old document reference without calling destroy() — same reason
+		// as resetDocumentState: destroy() would kill the shared PDFWorker.
 		pdfDoc = null;
 		pdfLoadedInputId = 0;
 		pdfError = '';
 
 		await ensurePdfLib();
-		if (!pdfLib) return;
+		if (!pdfLib || !pdfWorker) return;
 		const task = pdfLib.getDocument({
 			url: `/api/v1/kb/inputs/${currentInput.id}/file`,
-			withCredentials: true
+			withCredentials: true,
+			cMapUrl: '/pdfjs-cmaps/',
+			cMapPacked: true,
+			worker: pdfWorker
 		});
 		pdfDoc = (await task.promise) as PdfDocumentProxy;
 		pdfLoadedInputId = currentInput.id;
@@ -1139,23 +1061,33 @@
 		const canRenderPdf = viewMode === 'document' && isPdf && !!currentInput && !!pdfStageEl;
 		if (!canRenderPdf) return;
 		pdfZoom;
-		pdfRenderedPages.length;
+		// NOTE: do NOT read pdfRenderedPages.length here. That would re-trigger this
+		// effect when resetDocumentState() clears the array — but currentInput still
+		// points to the OLD record at that moment, so ensurePdfDoc() would start
+		// loading the wrong PDF. renderPdfPages() is called sequentially inside the
+		// same IIFE after ensurePdfDoc(), so the extra dependency is both unneeded
+		// and harmful.
 		let cancelled = false;
 		(async () => {
-			await ensurePdfDoc();
-			if (cancelled) return;
-			await tick();
-			if (cancelled) return;
-			await renderPdfPages();
-			if (cancelled || !currentInput) return;
-
-			// Initial PDF layout can settle one frame later; do a second pass
-			// (equivalent to what users were doing via zoom +/- to correct page orientation).
-			if (pdfSettledRenderInputId !== currentInput.id) {
-				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			try {
+				await ensurePdfDoc();
+				if (cancelled) return;
+				await tick();
 				if (cancelled) return;
 				await renderPdfPages();
-				pdfSettledRenderInputId = currentInput.id;
+				if (cancelled || !currentInput) return;
+
+				// Initial PDF layout can settle one frame later; do a second pass.
+				if (pdfSettledRenderInputId !== currentInput.id) {
+					await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+					if (cancelled) return;
+					await renderPdfPages();
+					pdfSettledRenderInputId = currentInput.id;
+				}
+			} catch (err) {
+				if ((err as { name?: string })?.name !== 'RenderingCancelledException') {
+					pdfError = err instanceof Error ? err.message : 'PDF rendering failed';
+				}
 			}
 		})();
 		return () => {
@@ -1189,12 +1121,11 @@
 	});
 
 	onMount(() => {
-		void loadInitialInputList();
 		return () => {
-			stopMetadataResize();
-			if (pdfDoc?.destroy) {
-				void pdfDoc.destroy();
-			}
+			for (const task of pdfActiveRenders.values()) task.cancel();
+			pdfActiveRenders.clear();
+			if (pdfDoc?.destroy) void pdfDoc.destroy();
+			pdfWorker?.destroy();
 		};
 	});
 </script>
@@ -1240,125 +1171,33 @@
 	<div class="body">
 		<!-- ============ LEFT PANEL ============ -->
 		<aside class="left">
-			<div class="left-controls">
-				<label class="field">
-					<span class="field-label">Record&nbsp;ID</span>
-					<div class="field-row">
-						<input
-							type="text"
-							inputmode="numeric"
-							bind:value={recordIdInput}
-							placeholder="e.g. 1042"
-							onkeydown={(e) => {
-								if (e.key === 'Enter') doRetrieve();
-							}}
-						/>
-						<button
-							class="btn btn-ghost"
-							onclick={openSearch}
-							title="Search records from kb.inputs"
-						>
-							<span class="btn-icon">⌕</span>Search
-						</button>
-					</div>
-				</label>
-
-				<button class="btn btn-primary retrieve" onclick={doRetrieve} disabled={loading}>
-					{#if loading}
-						<span class="spinner"></span>Retrieving…
-					{:else}
-						<span class="btn-icon">→</span>Retrieve
-					{/if}
-				</button>
-
-				{#if errorMsg}
-					<div class="error">{errorMsg}</div>
-				{/if}
-			</div>
-
-			<div class="left-meta">
-				<div class="left-meta-title">kb.inputs</div>
-				<div class="left-meta-count">{listTotal} found</div>
-			</div>
-			<div class="debug-badge" aria-live="polite">
-				Debug: last selected input = {lastSelectedInputDebug}
-			</div>
-
-			<div class="metrics-list">
-				{#if !loading && inputRecords.length === 0}
-					<div class="empty">
-						<div class="empty-glyph">§</div>
-						<div class="empty-title">No records yet</div>
-						<div class="empty-sub">
-							Enter a Record ID and press Retrieve, or use Search to browse kb.inputs.
-						</div>
-					</div>
-				{:else}
-					{#each inputRecords as r, idx (r.id)}
-						<button
-							type="button"
-							class="metric-card"
-							class:selected={selectedInputId === r.id}
-							onclick={(event) => onInputCardClick(event, r)}
-						>
-							<div class="card-rule" aria-hidden="true"></div>
-							<div class="card-body">
-								<div class="card-row-top">
-									<div class="card-index">
-										№ {String((listPage - 1) * listPageSize + idx + 1).padStart(3, '0')}
-										<span class="card-id">id {r.id}</span>
-									</div>
-									<div class="card-conf mono" title="Type">{r.type || '—'}</div>
-								</div>
-								<div class="card-name">{inputDisplayName(r)}</div>
-								{#if inputDisplayDocNo(r) || r.source}
-									<div class="card-desc">
-										{inputDisplayDocNo(r)
-											? `Doc No: ${inputDisplayDocNo(r)}`
-											: `Source: ${r.source}`}
-									</div>
-								{/if}
-								<div class="card-foot">
-									<span class="chip chip-quiet">{formatMaybeDate(r.create_time)}</span>
-								</div>
-							</div>
-						</button>
-					{/each}
-				{/if}
-			</div>
-
-			<div class="list-pager">
-				<button class="pager-btn" onclick={prevInputPage} disabled={listPage <= 1 || listLoading}
-					>‹ Prev</button
-				>
-				<div class="pager-meta">
-					<span>Page {listPage} / {listTotalPages}</span>
-					<span>{inputRecords.length} on page</span>
-					<div class="pager-jump">
-						<label for="kb-inputs-jump">Go</label>
-						<input
-							id="kb-inputs-jump"
-							type="number"
-							min="1"
-							max={listTotalPages}
-							bind:value={listJumpInput}
-							onkeydown={(e) => {
-								if (e.key === 'Enter') {
-									void jumpToInputPage();
-								}
-							}}
-						/>
-						<button class="pager-btn pager-go" onclick={jumpToInputPage} disabled={listLoading}>
-							Jump
-						</button>
-					</div>
-				</div>
-				<button
-					class="pager-btn"
-					onclick={nextInputPage}
-					disabled={listPage >= listTotalPages || listLoading}>Next ›</button
-				>
-			</div>
+			<KbInputRecordBrowser
+				{darkMode}
+				instanceKey="inputs-mgmt"
+				title="kb.inputs"
+				subtitle="Search, filter, and select input records before inspecting document details."
+				emptyTitle="No records yet"
+				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				pageSize={KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE}
+				selectedRecordId={selectedInputId}
+				mapRecord={mapBrowserRecord}
+				onSelect={(record) => {
+					// Set selectedInputId synchronously so the browser's
+					// selectedRecordId prop updates immediately.
+					// If we wait until the async loadInputRecord completes,
+					// the browser's sync effect will see the stale prop value
+					// and overwrite its internal selection, creating an
+					// infinite oscillation between records.
+					selectedInputId = record.id;
+					void loadInputRecord(record.id);
+				}}
+				onResultsChange={({ total }) => {
+					listTotal = total;
+				}}
+				onError={(error) => {
+					errorMsg = error.message;
+				}}
+			/>
 		</aside>
 
 		<!-- ============ RIGHT PANEL ============ -->
@@ -1697,14 +1536,6 @@
 		</section>
 	</div>
 </div>
-
-<!-- ============ SEARCH DIALOG ============ -->
-<KbInputSearchDialog
-	bind:open={searchOpen}
-	onSelect={(record) => {
-		void loadInputRecord(record.id);
-	}}
-/>
 
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');

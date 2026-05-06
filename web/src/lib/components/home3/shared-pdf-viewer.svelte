@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 
+	type PdfWorker = { destroy: () => void };
 	type PdfJsLib = {
 		getDocument: (
-			src: string | { url: string; withCredentials?: boolean }
+			src: string | { url: string; withCredentials?: boolean; cMapUrl?: string; cMapPacked?: boolean; worker?: PdfWorker }
 		) => { promise: Promise<unknown> };
 		GlobalWorkerOptions?: { workerSrc: string };
+		PDFWorker: new (params?: { name?: string }) => PdfWorker;
 	};
 
 	export type PdfPageViewport = {
@@ -54,6 +56,7 @@
 	const viewerId = `pdfv-${Math.random().toString(36).slice(2)}`;
 
 	let pdfLib: PdfJsLib | null = null;
+	let pdfWorker: PdfWorker | null = null;
 	let pdfDoc: PdfDocumentProxy | null = null;
 	let pdfLoadedInputId = 0;
 	let pdfRenderSeq = 0;
@@ -114,6 +117,7 @@
 				import.meta.url
 			).toString();
 		}
+		pdfWorker = new pdfLib.PDFWorker({ name: 'shared-pdf-viewer-worker' });
 	}
 
 	async function ensurePdfDoc() {
@@ -122,19 +126,22 @@
 
 		for (const task of pdfActiveRenders.values()) task.cancel?.();
 		pdfActiveRenders.clear();
-		if (pdfDoc?.destroy) await pdfDoc.destroy();
-
+		// Drop the old document without destroy() — calling destroy() terminates the
+		// shared PDFWorker and kills any in-flight load for the incoming document.
 		pdfDoc = null;
 		pdfLoadedInputId = 0;
 		pdfError = '';
 		pdfViewportByPage.clear();
 
 		await ensurePdfLib();
-		if (!pdfLib) return;
+		if (!pdfLib || !pdfWorker) return;
 
 		const task = pdfLib.getDocument({
 			url: fileUrl,
-			withCredentials: true
+			withCredentials: true,
+			cMapUrl: '/pdfjs-cmaps/',
+			cMapPacked: true,
+			worker: pdfWorker
 		});
 		pdfDoc = (await task.promise) as PdfDocumentProxy;
 		pdfLoadedInputId = inputId;
@@ -237,14 +244,23 @@
 	$effect(() => {
 		if (!inputId || !fileUrl || !pdfStageEl) return;
 		zoom;
-		pdfRenderedPages.length;
+		// NOTE: do NOT read pdfRenderedPages.length here — it would re-fire this
+		// effect when the array is updated inside ensurePdfDoc() while inputId
+		// is still the previous record, causing the "Worker was destroyed" loop.
+		// renderPdfPages() is already called sequentially below, so no dependency needed.
 		let cancelled = false;
 		(async () => {
-			await ensurePdfDoc();
-			if (cancelled) return;
-			await tick();
-			if (cancelled) return;
-			await renderPdfPages();
+			try {
+				await ensurePdfDoc();
+				if (cancelled) return;
+				await tick();
+				if (cancelled) return;
+				await renderPdfPages();
+			} catch (err) {
+				if ((err as { name?: string })?.name !== 'RenderingCancelledException') {
+					pdfError = err instanceof Error ? err.message : 'Failed to render PDF';
+				}
+			}
 		})();
 		return () => {
 			cancelled = true;
@@ -325,6 +341,7 @@
 			for (const task of pdfActiveRenders.values()) task.cancel?.();
 			pdfActiveRenders.clear();
 			if (pdfDoc?.destroy) void pdfDoc.destroy();
+			pdfWorker?.destroy();
 		};
 	});
 </script>

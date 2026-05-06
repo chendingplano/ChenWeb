@@ -88,6 +88,7 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 func (p *ProvisionsProcessor) Name() string { return "extract_provisions" }
 
 func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) error {
+	p.Logger.Info("Extract Provisions handle event")
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
@@ -154,6 +155,11 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		p.persistProvisionsStatus(ctx, rec, start, err)
 		return nil
 	}
+
+	p.Logger.Info("Before calling LLM", 
+		"num_blocks", len(blocks),
+		"record_id", evt.RecordID,
+		"filename", inputFilename)
 
 	result, err := p.extractProvisionsFromBlocksWithLLM(ctx, blocks)
 	if err != nil {
@@ -239,6 +245,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(ctx context.Con
 			InputText:  buildProvisionUserPrompt(block),
 		})
 		if err != nil {
+			p.Logger.Error("failed extracting", "error", err)
 			return provisionExtractionResult{}, fmt.Errorf("(MID_26050531) extract provisions via llm: %w", err)
 		}
 		if language == "" {
@@ -246,6 +253,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(ctx context.Con
 		}
 		raw, ok := payload["provisions"].([]any)
 		if !ok {
+			p.Logger.Error("missing 'provisions'")
 			return provisionExtractionResult{}, fmt.Errorf("(MID_26050532) llm output field 'provisions' must be an array")
 		}
 		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(block), blockLineText(block))...)

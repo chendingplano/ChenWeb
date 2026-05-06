@@ -295,12 +295,26 @@ func embedSummaryCategoryDir(ctx context.Context, embedder Embedder, embeddingMo
 	if strings.TrimSpace(embedText) == "" {
 		return nil
 	}
-	vec, err := embedder.Embed(ctx, llmclients.EmbedInput{
-		ModelName: embeddingModelName,
-		InputText: embedText,
-	})
-	if err != nil {
-		return fmt.Errorf("(MID_26050310) embed summary category dir %q: %w", dir, err)
+	var vec []float64
+	var embedErr error
+	for attempt := 1; attempt <= embedMaxRetries; attempt++ {
+		vec, embedErr = embedder.Embed(ctx, llmclients.EmbedInput{
+			ModelName: embeddingModelName,
+			InputText: embedText,
+		})
+		if embedErr == nil {
+			break
+		}
+		if attempt < embedMaxRetries {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("(MID_26050310) embed summary category dir %q: %w", dir, ctx.Err())
+			case <-time.After(embedRetryDelay):
+			}
+		}
+	}
+	if embedErr != nil {
+		return fmt.Errorf("(MID_26050310) embed summary category dir %q: %w", dir, embedErr)
 	}
 	return os.WriteFile(filepath.Join(dir, topicCategoryEmbedFileName), []byte(formatFloatArray(vec)+"\n"), 0o644)
 }

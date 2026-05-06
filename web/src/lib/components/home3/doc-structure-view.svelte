@@ -2,7 +2,6 @@
 	import { onMount } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import {
-		listKbInputs,
 		getKbDocStructure,
 		getKbInput,
 		updateKbDocStructureLine,
@@ -10,6 +9,7 @@
 		type DocStructureLine,
 		type KbInputRecord
 	} from '$lib/services/kbService';
+	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import {
 		DOC_STRUCTURE_DEFAULT_SETTINGS,
 		DOC_STRUCTURE_RECORD_DEFAULT_BACKGROUND,
@@ -26,7 +26,6 @@
 		clampDocStructureRecordHeight
 	} from './doc-structure-settings.js';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
-	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -51,7 +50,6 @@
 		recordGap: number;
 	};
 
-	let recordIdInput = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let correctedFile = $state('');
 	let lines = $state<DocStructureLine[]>([]);
@@ -74,23 +72,6 @@
 	let lineListResizing = $state(false);
 	let lineListSettingsOpen = $state(false);
 	let settingsHydrated = $state(false);
-	let searchOpen = $state(false);
-	let searchRecordId = $state('');
-	let searchTitle = $state('');
-	let searchDocNo = $state('');
-	let searchFileName = $state('');
-	let searchDocType = $state('all');
-	let searchParserName = $state('');
-	let searchOperation = $state('');
-	let searchProcStatus = $state('all');
-	let searchCreateStart = $state('');
-	let searchCreateEnd = $state('');
-	let searchModifyStart = $state('');
-	let searchModifyEnd = $state('');
-	let searchResults = $state<KbInputRecord[]>([]);
-	let searchLoading = $state(false);
-	let searchError = $state('');
-	let searchSelected = $state<number | null>(null);
 
 	let editingLineKey = $state<string | null>(null);
 	let editingCorrectedType = $state('');
@@ -106,20 +87,6 @@
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
-
-	const docTypeOptions = [
-		'all',
-		'pdf',
-		'doc',
-		'excel',
-		'ppt',
-		'text',
-		'json',
-		'xml',
-		'markdown',
-		'typst'
-	];
-	const procStatusOptions = ['all', 'success', 'fail'];
 
 	type PdfPageViewport = {
 		width: number;
@@ -231,13 +198,8 @@
 		overlay.appendChild(mark);
 	}
 
-	async function doRetrieve() {
+	async function loadStructureForRecord(id: number) {
 		errorMsg = '';
-		const id = Number(recordIdInput.trim());
-		if (!Number.isFinite(id) || id <= 0) {
-			errorMsg = 'Enter a valid Record ID';
-			return;
-		}
 		loading = true;
 		lines = [];
 		currentInput = null;
@@ -336,68 +298,6 @@
 		}
 	}
 
-	function openSearch() {
-		searchOpen = true;
-		searchSelected = null;
-		searchResults = [];
-		searchError = '';
-		searchRecordId = '';
-		searchTitle = '';
-		searchDocNo = '';
-		searchFileName = '';
-		searchDocType = 'all';
-		searchParserName = '';
-		searchOperation = '';
-		searchProcStatus = 'all';
-		searchCreateStart = '';
-		searchCreateEnd = '';
-		searchModifyStart = '';
-		searchModifyEnd = '';
-	}
-
-	function closeSearch() {
-		searchOpen = false;
-	}
-
-	async function runSearch() {
-		searchLoading = true;
-		searchError = '';
-		try {
-			const res = await listKbInputs({
-				recordId: searchRecordId,
-				docType: searchDocType,
-				parseState: 'all',
-				title: searchTitle,
-				docNo: searchDocNo,
-				fileName: searchFileName,
-				parserName: searchParserName,
-				operation: searchOperation,
-				procStatus: searchProcStatus === 'all' ? '' : searchProcStatus,
-				startTime: searchCreateStart,
-				endTime: searchCreateEnd,
-				modifyStartTime: searchModifyStart,
-				modifyEndTime: searchModifyEnd,
-				page: 1,
-				pageSize: 50
-			});
-			searchResults = res.results ?? [];
-		} catch (err) {
-			searchError = err instanceof Error ? err.message : 'Search failed';
-		} finally {
-			searchLoading = false;
-		}
-	}
-
-	function pickSearchResult(r: KbInputRecord) {
-		recordIdInput = String(r.id);
-		searchOpen = false;
-	}
-
-	function confirmSearchSelection() {
-		const r = searchResults.find((x) => x.id === searchSelected);
-		if (r) pickSearchResult(r);
-	}
-
 	const LINE_TYPE_OPTIONS = [
 		'paragraph', 'heading', 'heading-1', 'heading-2', 'heading-3', 'heading-4', 'heading-5',
 		'toc', 'image', 'table', 'table-caption', 'figure', 'figure-caption',
@@ -425,7 +325,7 @@
 
 	async function saveLineEdit() {
 		if (!editingLineKey || editingSaving) return;
-		const recordId = Number(recordIdInput.trim());
+		const recordId = Number(currentInput?.id ?? 0);
 		if (!recordId || recordId <= 0) {
 			editingError = 'No record loaded.';
 			return;
@@ -477,7 +377,7 @@
 		const key = lineKey(line);
 		deleteConfirmLine = null;
 		if (deletingLineKey === key) return;
-		const recordId = Number(recordIdInput.trim());
+		const recordId = Number(currentInput?.id ?? 0);
 		if (!recordId || recordId <= 0) return;
 		deletingLineKey = key;
 		try {
@@ -503,27 +403,15 @@
 		return r.doc_no?.trim() || '—';
 	}
 
-	function searchStatusText(record: KbInputRecord): { operation: string; procStatus: string } {
-		const items = record.status ?? [];
-		const desiredOperation = searchOperation.trim().toLowerCase();
-		const matched =
-			desiredOperation !== ''
-				? [...items]
-						.reverse()
-						.find((item) => (item?.operation ?? '').trim().toLowerCase() === desiredOperation)
-				: [...items].reverse().find((item) => item != null);
-
-		if (!matched) {
-			return { operation: '—', procStatus: 'pending' };
-		}
-
+	function mapBrowserRecord(record: KbInputRecord) {
 		return {
-			operation: matched.operation?.trim() || '—',
-			procStatus:
-				matched.proc_status?.trim() ||
-				matched['proc-status']?.trim() ||
-				matched.status?.trim() ||
-				'pending'
+			id: record.id,
+			title: recordDisplayName(record),
+			subtitle: record.file_name?.trim() || record.name?.trim() || '—',
+			meta: [recordDisplayDocNo(record), record.parser_name?.trim() || '—'],
+			status: record.type?.trim() || '—',
+			description: currentInput?.id === record.id && correctedFile ? correctedFile : 'Select a record to inspect structure lines.',
+			badges: [record.type?.trim() || '—']
 		};
 	}
 
@@ -577,54 +465,22 @@
 	</header>
 
 	<div class="body">
-		<aside class="left" style={`width:${lineListWidth}px;`}>
-			<div class="left-controls">
-				<label class="field">
-					<span class="field-label">Record ID</span>
-					<div class="field-row">
-						<input
-							type="text"
-							inputmode="numeric"
-							bind:value={recordIdInput}
-							placeholder="e.g. 1042"
-							onkeydown={(e) => {
-								if (e.key === 'Enter') doRetrieve();
-							}}
-						/>
-						<button
-							class="btn btn-ghost"
-							type="button"
-							onclick={openSearch}
-							title="Search records from kb.inputs"
-						>
-							<span class="btn-icon">⌕</span>Search
-						</button>
-					</div>
-				</label>
+		<KbInputRecordBrowser
+			{darkMode}
+			instanceKey="doc-structure-record-browser"
+			title="kb.inputs"
+			subtitle="Search, filter, and select input records before inspecting corrected structure lines."
+			emptyTitle="No records yet"
+			emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+			selectedRecordId={currentInput?.id ?? null}
+			mapRecord={mapBrowserRecord}
+			onSelect={(record) => void loadStructureForRecord(record.id)}
+			onError={(error) => {
+				errorMsg = error.message;
+			}}
+		/>
 
-				<div class="btn-row">
-					<button class="btn btn-primary retrieve" onclick={doRetrieve} disabled={loading}>
-						{#if loading}
-							<span class="spinner"></span>Retrieving…
-						{:else}
-							Retrieve
-						{/if}
-					</button>
-					<button
-						class="btn btn-secondary"
-						type="button"
-						class:active={headingsOnly}
-						onclick={() => {
-							headingsOnly = !headingsOnly;
-						}}
-					>
-						Headings Only
-					</button>
-				</div>
-
-				{#if errorMsg}<div class="error">{errorMsg}</div>{/if}
-			</div>
-
+		<aside class="structure-sidebar" style={`width:${lineListWidth}px;`}>
 			<div class="left-meta">
 				<div class="left-meta-copy">
 					<div class="left-meta-title">Lines</div>
@@ -637,11 +493,13 @@
 			</div>
 
 			<div class="line-list">
-				{#if !loading && filteredLines.length === 0}
+				{#if errorMsg}
+					<div class="error">{errorMsg}</div>
+				{:else if !loading && filteredLines.length === 0}
 					<div class="empty">
 						<div class="empty-title">No lines loaded</div>
 						<div class="empty-sub">
-							Enter a Record ID to load a `.txt` file.
+							Select a record to load a `.txt` file.
 							{#if headingsOnly}No heading lines found in current result.{/if}
 						</div>
 					</div>
@@ -965,13 +823,6 @@
 	</div>
 {/if}
 
-<KbInputSearchDialog
-	bind:open={searchOpen}
-	onSelect={(record) => {
-		recordIdInput = String(record.id);
-	}}
-/>
-
 {#if deleteConfirmLine}
 	<div
 		class="dialog-overlay"
@@ -1042,10 +893,10 @@
 	}
 	.body {
 		display: grid;
-		grid-template-columns: auto 1fr;
+		grid-template-columns: auto auto 1fr;
 		min-height: 0;
 	}
-	.left {
+	.structure-sidebar {
 		position: relative;
 		border-right: 1px solid var(--ink-line);
 		background: var(--panel-bg);
@@ -2016,7 +1867,7 @@
 		.body {
 			grid-template-columns: 1fr;
 		}
-		.left {
+		.structure-sidebar {
 			max-height: 44vh;
 			border-right: none;
 			border-bottom: 1px solid var(--ink-line);
