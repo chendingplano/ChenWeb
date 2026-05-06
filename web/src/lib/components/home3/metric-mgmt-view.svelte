@@ -111,33 +111,45 @@
 		return i > 0 ? i : null;
 	}
 
+	// Maps line_number → page_number, built from the loaded raw lines.
+	let lineNumToPage = $derived.by(() => {
+		const map = new Map<number, number>();
+		for (const ln of rawLines) {
+			if (!map.has(ln.line_number)) map.set(ln.line_number, ln.page_number);
+		}
+		return map;
+	});
+
+	// source_line_spans uses line-number spans only ("90", "98:99").
+	// Page numbers are resolved via lineNumToPage.
 	function normalizeMetricSpans(m: KbMetricRecord | undefined): NormalizedSpan[] {
 		const raw = (m as { source_line_spans?: unknown })?.source_line_spans;
 		if (!Array.isArray(raw)) return [];
-		const out: NormalizedSpan[] = [];
+		const lineNums: number[] = [];
 		for (const item of raw) {
 			if (typeof item === 'string') {
-				const mm = item.trim().match(/^(\d+)\s*[:,-]\s*(\d+)$/);
-				if (!mm) continue;
-				const p = toPositiveInt(mm[1]);
-				const l = toPositiveInt(mm[2]);
-				if (p && l) out.push({ page_number: p, line_number: l });
-				continue;
-			}
-			if (item && typeof item === 'object') {
+				const s = item.trim();
+				const mm = s.match(/^(\d+)\s*[:,-]\s*(\d+)$/);
+				if (mm) {
+					const start = parseInt(mm[1], 10);
+					const end = parseInt(mm[2], 10);
+					for (let n = start; n <= end && n <= start + 200; n++) lineNums.push(n);
+				} else {
+					const n = parseInt(s, 10);
+					if (n > 0) lineNums.push(n);
+				}
+			} else if (typeof item === 'number' && item > 0) {
+				lineNums.push(Math.trunc(item));
+			} else if (item && typeof item === 'object') {
 				const obj = item as Record<string, unknown>;
-				const p =
-					toPositiveInt(obj.page_number) ??
-					toPositiveInt(obj.page) ??
-					toPositiveInt(obj.page_no) ??
-					toPositiveInt(obj.pageNo);
-				const l =
-					toPositiveInt(obj.line_number) ??
-					toPositiveInt(obj.line) ??
-					toPositiveInt(obj.line_no) ??
-					toPositiveInt(obj.lineNo);
-				if (p && l) out.push({ page_number: p, line_number: l });
+				const l = toPositiveInt(obj.line_number ?? obj.line ?? obj.line_no ?? obj.lineNo);
+				if (l) lineNums.push(l);
 			}
+		}
+		const out: NormalizedSpan[] = [];
+		for (const lineNo of lineNums) {
+			const pageNo = lineNumToPage.get(lineNo);
+			if (pageNo) out.push({ page_number: pageNo, line_number: lineNo });
 		}
 		return out;
 	}
@@ -356,7 +368,6 @@
 	}
 
 	async function selectMetric(m: KbMetricRecord) {
-		console.log('metric selected, id:' + m.id);
 		lastSelectedMetricDebug = `${m.id} @ ${new Date().toLocaleTimeString()}`;
 		selectedMetricId = m.id;
 		highlightSelectionVersion += 1;
@@ -364,6 +375,7 @@
 		if (!first) return;
 
 		// Move display to the selected page without forcing iframe remount/reload.
+		console.log('metric selected, id:' + m.id + ", page_num:" + first.page_number);
 		docPage = first.page_number > 0 ? first.page_number : 1;
 		if (viewMode === 'document' && isPdf) {
 			await tick();
@@ -425,7 +437,18 @@
 		return `${Math.round(c * 100)}%`;
 	}
 	function spanCount(m: KbMetricRecord): number {
-		return normalizeMetricSpans(m).length;
+		const raw = (m as { source_line_spans?: unknown })?.source_line_spans;
+		if (!Array.isArray(raw)) return 0;
+		let count = 0;
+		for (const item of raw) {
+			if (typeof item === 'string') {
+				const mm = item.trim().match(/^(\d+)\s*[:,-]\s*(\d+)$/);
+				count += mm ? Math.max(0, parseInt(mm[2], 10) - parseInt(mm[1], 10) + 1) : 1;
+			} else {
+				count += 1;
+			}
+		}
+		return count;
 	}
 
 	function clampDocPage(page: number): number {

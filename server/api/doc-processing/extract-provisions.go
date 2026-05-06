@@ -344,7 +344,7 @@ func normalizeProvisionList(items []any, lineToPage map[int]int, lineText map[st
 			"need_verify":        toBool(raw["need_verify"]),
 			"categories":         raw["categories"],
 		}
-		sourceSpans := normalizeSourceLineSpans(raw["source_line_spans"], lineToPage)
+		sourceSpans := normalizeSourceLineSpans(raw["source_line_spans"])
 		normalized["source_line_spans"] = sourceSpans
 		if strings.TrimSpace(asString(normalized["source_text"])) == "" {
 			normalized["source_text"] = sourceTextFromSpans(sourceSpans, lineText)

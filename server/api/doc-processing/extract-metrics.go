@@ -543,13 +543,8 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 	}
 	uncertainRaw, _ := payload["uncertain_metrics"].([]any)
 
-	lineToPage := make(map[int]int, len(parsedLines))
-	for _, line := range parsedLines {
-		lineToPage[line.LineNumber] = line.PageNumber
-	}
-
-	metrics := normalizeMetricList(metricsRaw, lineToPage)
-	uncertain := normalizeMetricList(uncertainRaw, lineToPage)
+	metrics := normalizeMetricList(metricsRaw)
+	uncertain := normalizeMetricList(uncertainRaw)
 	return metricExtractionResult{
 		ExtractID:        p.Now().Format("20060102-150405"),
 		Language:         language,
@@ -620,7 +615,7 @@ func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) strin
 		"language": "string",
 		"metrics": []map[string]any{{
 			"metric_name":           "string",
-			"source_line_spans":     []string{"5:12", "5:13"},
+			"source_line_spans":     []string{"5", "12:14"},
 			"subject":               "string",
 			"desc":                  "string",
 			"context":               "string",
@@ -646,7 +641,7 @@ func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) strin
 		"\n\nParsed line hints (best effort; do not treat as complete):\n" + string(parsedLinesJSON)
 }
 
-func normalizeMetricList(items []any, lineToPage map[int]int) []map[string]any {
+func normalizeMetricList(items []any) []map[string]any {
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		raw, ok := item.(map[string]any)
@@ -669,40 +664,79 @@ func normalizeMetricList(items []any, lineToPage map[int]int) []map[string]any {
 			"table_name_or_section": strings.TrimSpace(asString(raw["table_name_or_section"])),
 			"reasoning_tags":        toStringSlice(raw["reasoning_tags"]),
 		}
-		normalized["source_line_spans"] = normalizeSourceLineSpans(raw["source_line_spans"], lineToPage)
+		normalized["source_line_spans"] = normalizeSourceLineSpans(raw["source_line_spans"])
 		out = append(out, normalized)
 	}
 	return out
 }
 
-func normalizeSourceLineSpans(value any, lineToPage map[int]int) []string {
+func normalizeSourceLineSpans(value any) []string {
 	items, ok := value.([]any)
 	if !ok {
 		return nil
 	}
-	out := make([]string, 0, len(items))
+
+	type lineSpan struct{ start, end int }
+	spans := make([]lineSpan, 0, len(items))
+
 	for _, item := range items {
 		switch v := item.(type) {
 		case map[string]any:
 			lineNo := int(toFloat(v["line_number"]))
-			pageNo := int(toFloat(v["page_number"]))
-			if lineNo > 0 && pageNo > 0 {
-				out = append(out, fmt.Sprintf("%d:%d", pageNo, lineNo))
+			if lineNo > 0 {
+				spans = append(spans, lineSpan{lineNo, lineNo})
 			}
 		case float64:
 			lineNo := int(v)
-			if pageNo, ok := lineToPage[lineNo]; ok {
-				out = append(out, fmt.Sprintf("%d:%d", pageNo, lineNo))
+			if lineNo > 0 {
+				spans = append(spans, lineSpan{lineNo, lineNo})
 			}
 		case string:
-			parts := strings.SplitN(v, ":", 2)
-			if len(parts) == 2 {
-				p, pErr := strconv.Atoi(strings.TrimSpace(parts[0]))
-				l, lErr := strconv.Atoi(strings.TrimSpace(parts[1]))
-				if pErr == nil && lErr == nil {
-					out = append(out, fmt.Sprintf("%d:%d", p, l))
+			s := strings.TrimSpace(v)
+			if idx := strings.Index(s, ":"); idx > 0 {
+				start, err1 := strconv.Atoi(strings.TrimSpace(s[:idx]))
+				end, err2 := strconv.Atoi(strings.TrimSpace(s[idx+1:]))
+				if err1 == nil && err2 == nil && start > 0 && end >= start {
+					spans = append(spans, lineSpan{start, end})
+				}
+			} else {
+				n, err := strconv.Atoi(s)
+				if err == nil && n > 0 {
+					spans = append(spans, lineSpan{n, n})
 				}
 			}
+		}
+	}
+
+	if len(spans) == 0 {
+		return nil
+	}
+
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start != spans[j].start {
+			return spans[i].start < spans[j].start
+		}
+		return spans[i].end < spans[j].end
+	})
+
+	merged := []lineSpan{spans[0]}
+	for _, s := range spans[1:] {
+		last := &merged[len(merged)-1]
+		if s.start <= last.end+1 {
+			if s.end > last.end {
+				last.end = s.end
+			}
+		} else {
+			merged = append(merged, s)
+		}
+	}
+
+	out := make([]string, 0, len(merged))
+	for _, s := range merged {
+		if s.start == s.end {
+			out = append(out, strconv.Itoa(s.start))
+		} else {
+			out = append(out, fmt.Sprintf("%d:%d", s.start, s.end))
 		}
 	}
 	return out
