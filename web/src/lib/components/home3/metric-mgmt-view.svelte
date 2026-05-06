@@ -9,7 +9,7 @@
 		type KbMetricRecord,
 		type RawLine
 	} from '$lib/services/kbService';
-	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
+	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 
@@ -33,10 +33,6 @@
 	const fontSerif = "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
 	const fontMono = "'JetBrains Mono', 'IBM Plex Mono', monospace";
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
-	const METADATA_DEFAULT_WIDTH = 270;
-	const METADATA_MIN_WIDTH = 140;
-	const METADATA_MAX_WIDTH = 420;
-
 	// ---------- State ----------
 	let recordIdInput = $state('');
 	let currentInput = $state<KbInputRecord | null>(null);
@@ -50,9 +46,6 @@
 	let rawLines = $state<RawLine[]>([]);
 	let rawLoading = $state(false);
 	let rawError = $state('');
-	let metadataWidth = $state(METADATA_DEFAULT_WIDTH);
-	let metadataResizing = $state(false);
-
 	// Document viewer state
 	let viewMode = $state<'document' | 'source'>('document');
 	let docPage = $state<number>(1);
@@ -540,54 +533,6 @@
 	function metricNameOf(m: KbMetricRecord): string {
 		return m.metric_name?.trim() || m.metric_subject?.trim() || `Metric #${m.id}`;
 	}
-	function clampMetadataWidth(width: number): number {
-		return Math.min(METADATA_MAX_WIDTH, Math.max(METADATA_MIN_WIDTH, Math.round(width)));
-	}
-	function adjustMetadataWidth(delta: number) {
-		metadataWidth = clampMetadataWidth(metadataWidth + delta);
-	}
-	function startMetadataResize(event: PointerEvent) {
-		event.preventDefault();
-		const handle = event.currentTarget as HTMLElement | null;
-		const startX = event.clientX;
-		const startWidth = metadataWidth;
-		metadataResizing = true;
-		document.body.style.cursor = 'col-resize';
-		document.body.style.userSelect = 'none';
-		handle?.setPointerCapture?.(event.pointerId);
-
-		const handleMove = (moveEvent: PointerEvent) => {
-			metadataWidth = clampMetadataWidth(startWidth + (moveEvent.clientX - startX));
-		};
-		const handleUp = (upEvent: PointerEvent) => {
-			metadataResizing = false;
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			handle?.releasePointerCapture?.(upEvent.pointerId);
-			window.removeEventListener('pointermove', handleMove);
-			window.removeEventListener('pointerup', handleUp);
-			window.removeEventListener('pointercancel', handleUp);
-		};
-
-		window.addEventListener('pointermove', handleMove);
-		window.addEventListener('pointerup', handleUp, { once: true });
-		window.addEventListener('pointercancel', handleUp, { once: true });
-	}
-	function onMetadataResizerKeydown(event: KeyboardEvent) {
-		if (event.key === 'ArrowLeft') {
-			event.preventDefault();
-			adjustMetadataWidth(-16);
-		} else if (event.key === 'ArrowRight') {
-			event.preventDefault();
-			adjustMetadataWidth(16);
-		} else if (event.key === 'Home') {
-			event.preventDefault();
-			metadataWidth = METADATA_MIN_WIDTH;
-		} else if (event.key === 'End') {
-			event.preventDefault();
-			metadataWidth = METADATA_MAX_WIDTH;
-		}
-	}
 	function confidencePct(c?: number): string {
 		if (c == null) return '—';
 		return `${Math.round(c * 100)}%`;
@@ -851,9 +796,6 @@
 
 	onMount(() => {
 		return () => {
-			metadataResizing = false;
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
 			if (pdfDoc?.destroy) {
 				void pdfDoc.destroy();
 			}
@@ -1067,7 +1009,7 @@
 						</div>
 					{:else}
 						{#if isPdf}
-							<SharedPdfViewer
+							<PdfViewWindow
 								inputId={currentInput.id}
 								{fileUrl}
 								bind:page={docPage}
@@ -1075,93 +1017,84 @@
 								bind:numPages={pdfNumPages}
 								highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
 								renderHighlights={renderMetricHighlights}
+								sidebarMinWidth={140}
+								sidebarMaxWidth={420}
+								sidebarDefaultWidth={270}
 							>
-								<div slot="sidebar">
-									<div class="metadata-shell" style={`width:${metadataWidth}px;`}>
-										<aside class="metadata-panel">
-											<div class="metadata-title">Metadata</div>
-											<div class="metadata-section">
-												<div class="metadata-section-title">Selected Metric</div>
-												{#if selectedMetric}
-													<div class="metadata-row">
-														<span class="metadata-key">Name</span>
-														<span class="metadata-val">{metricNameOf(selectedMetric)}</span>
-													</div>
-													<div class="metadata-row">
-														<span class="metadata-key">Confidence</span>
-														<span class="metadata-val"
-															>{confidencePct(selectedMetric.confidence)}</span
-														>
-													</div>
-													<div class="metadata-row">
-														<span class="metadata-key">Spans</span>
-														<span class="metadata-val">{spanCount(selectedMetric)}</span>
-													</div>
-												{:else}
-													<div class="metadata-empty">Select a metric to inspect source lines.</div>
-												{/if}
-											</div>
+								{#snippet sidebar()}
+									<aside class="metadata-panel">
+										<div class="metadata-title">Metadata</div>
+										<div class="metadata-section">
+											<div class="metadata-section-title">Selected Metric</div>
+											{#if selectedMetric}
+												<div class="metadata-row">
+													<span class="metadata-key">Name</span>
+													<span class="metadata-val">{metricNameOf(selectedMetric)}</span>
+												</div>
+												<div class="metadata-row">
+													<span class="metadata-key">Confidence</span>
+													<span class="metadata-val"
+														>{confidencePct(selectedMetric.confidence)}</span
+													>
+												</div>
+												<div class="metadata-row">
+													<span class="metadata-key">Spans</span>
+													<span class="metadata-val">{spanCount(selectedMetric)}</span>
+												</div>
+											{:else}
+												<div class="metadata-empty">Select a metric to inspect source lines.</div>
+											{/if}
+										</div>
 
-											<div class="metadata-section">
-												<div class="metadata-section-title">Selected Lines (By Page)</div>
-												{#if selectedLineGroups.length === 0}
-													<div class="metadata-empty">No selected lines.</div>
-												{:else}
-													{#each selectedLineGroups as group (group.page)}
-														<div class="metadata-page-group">
-															<div class="metadata-page-title">Page {group.page}</div>
-															<div class="metadata-lines">
-																{#each group.lines as line (`${group.page}-${line.line_number}`)}
-																	<div class="metadata-line-row">
-																		<div class="metadata-line-head">
-																			<span class="metadata-line-no">{line.span_key}</span>
-																			{#if line.line_type}
-																				<span class="metadata-line-type">{line.line_type}</span>
-																			{/if}
-																		</div>
-																		<div class="metadata-line-content">
-																			{line.content || (line.found ? '—' : '(line text unavailable)')}
-																			{#if line.coords_text}
-																				&nbsp;{line.coords_text}
-																			{/if}
-																		</div>
+										<div class="metadata-section">
+											<div class="metadata-section-title">Selected Lines (By Page)</div>
+											{#if selectedLineGroups.length === 0}
+												<div class="metadata-empty">No selected lines.</div>
+											{:else}
+												{#each selectedLineGroups as group (group.page)}
+													<div class="metadata-page-group">
+														<div class="metadata-page-title">Page {group.page}</div>
+														<div class="metadata-lines">
+															{#each group.lines as line (`${group.page}-${line.line_number}`)}
+																<div class="metadata-line-row">
+																	<div class="metadata-line-head">
+																		<span class="metadata-line-no">{line.span_key}</span>
+																		{#if line.line_type}
+																			<span class="metadata-line-type">{line.line_type}</span>
+																		{/if}
 																	</div>
-																{/each}
-															</div>
+																	<div class="metadata-line-content">
+																		{line.content || (line.found ? '—' : '(line text unavailable)')}
+																		{#if line.coords_text}
+																			&nbsp;{line.coords_text}
+																		{/if}
+																	</div>
+																</div>
+															{/each}
+														</div>
+													</div>
+												{/each}
+											{/if}
+										</div>
+
+										<div class="metadata-section">
+											<div class="metadata-section-title">Record Fields</div>
+											{#if !currentInput}
+												<div class="metadata-empty">No record loaded.</div>
+											{:else}
+												<div class="metadata-fields">
+													{#each recordMetaRows as row (row.label)}
+														<div class="metadata-row">
+															<span class="metadata-key">{row.label}</span>
+															<span class="metadata-val" title={row.value}>{row.value}</span>
 														</div>
 													{/each}
-												{/if}
-											</div>
-
-											<div class="metadata-section">
-												<div class="metadata-section-title">Record Fields</div>
-												{#if !currentInput}
-													<div class="metadata-empty">No record loaded.</div>
-												{:else}
-													<div class="metadata-fields">
-														{#each recordMetaRows as row (row.label)}
-															<div class="metadata-row">
-																<span class="metadata-key">{row.label}</span>
-																<span class="metadata-val" title={row.value}>{row.value}</span>
-															</div>
-														{/each}
-													</div>
-												{/if}
-											</div>
-										</aside>
-										<button
-											type="button"
-											class="metadata-resizer"
-											class:active={metadataResizing}
-											aria-label="Resize metadata panel"
-											onpointerdown={startMetadataResize}
-											onkeydown={onMetadataResizerKeydown}
-										>
-											<span class="metadata-resizer-grip" aria-hidden="true"></span>
-										</button>
-									</div>
-								</div>
-							</SharedPdfViewer>
+												</div>
+											{/if}
+										</div>
+									</aside>
+								{/snippet}
+							</PdfViewWindow>
 						{:else}
 							<iframe
 								class="doc-frame"
@@ -1873,16 +1806,6 @@
 		align-items: start;
 		padding: 4px 0 8px;
 	}
-	.metadata-shell {
-		position: sticky;
-		top: 6px;
-		align-self: start;
-		width: 270px;
-		min-width: 140px;
-		max-width: 420px;
-		flex: 0 0 auto;
-		padding-right: 16px;
-	}
 	.metadata-panel {
 		position: sticky;
 		top: 0;
@@ -1898,60 +1821,6 @@
 		overflow: auto;
 		scrollbar-width: thin;
 		scrollbar-color: var(--ink-line) transparent;
-	}
-	.metadata-resizer {
-		position: absolute;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 16px;
-		min-height: 120px;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		cursor: col-resize;
-		user-select: none;
-		touch-action: none;
-		outline: none;
-		z-index: 4;
-	}
-	.metadata-resizer::before {
-		content: '';
-		width: 1px;
-		height: 100%;
-		background: var(--ink-line);
-		opacity: 0.8;
-		transition: background 150ms ease;
-	}
-	.metadata-resizer:hover::before,
-	.metadata-resizer.active::before,
-	.metadata-resizer:focus-visible::before {
-		background: var(--brass);
-	}
-	.metadata-resizer-grip {
-		position: absolute;
-		width: 8px;
-		height: 52px;
-		border-radius: 999px;
-		background:
-			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
-			var(--panel-bg);
-		border: 1px solid var(--ink-line-soft);
-		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
-		transition:
-			border-color 150ms ease,
-			background-color 150ms ease;
-	}
-	.metadata-resizer:hover .metadata-resizer-grip,
-	.metadata-resizer.active .metadata-resizer-grip,
-	.metadata-resizer:focus-visible .metadata-resizer-grip {
-		border-color: var(--brass);
-		background:
-			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
-			var(--panel-bg);
 	}
 	.metadata-title {
 		font-family: var(--font-serif);
@@ -2705,13 +2574,9 @@
 		.pdf-layout {
 			grid-template-columns: 1fr;
 		}
-		.metadata-shell,
 		.metadata-panel {
 			position: static;
 			max-height: none;
-		}
-		.metadata-resizer {
-			display: none;
 		}
 	}
 	@media (max-width: 820px) {

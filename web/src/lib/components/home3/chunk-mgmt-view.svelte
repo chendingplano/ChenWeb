@@ -11,7 +11,7 @@
 		type KbTopicChunkRecord,
 		type RawLine
 	} from '$lib/services/kbService';
-	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
+	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 	import {
 		CHUNK_LIST_MAX_WIDTH,
@@ -50,9 +50,7 @@
 	let highlightSelectionVersion = $state(0);
 	let loading = $state(false);
 	let errorMsg = $state('');
-	let infoPanelResizing = $state(false);
 	let chunkListResizing = $state(false);
-	let infoPanelWidth = $state(270);
 	let chunkListSettingsOpen = $state(false);
 	let chunkListSettingsHydrated = $state(false);
 	let chunkPanelSettings = $state<ChunkPanelSettings>({ ...CHUNK_PANEL_DEFAULT_SETTINGS });
@@ -196,10 +194,6 @@
 		chunkPanelSettings = { ...CHUNK_PANEL_DEFAULT_SETTINGS };
 	}
 
-	function clampInfoPanelWidth(width: number): number {
-		return Math.min(420, Math.max(140, Math.round(width)));
-	}
-
 	function renderChunkHighlights(
 		pageNo: number,
 		viewport: PdfPageViewport,
@@ -320,10 +314,6 @@
 		}
 	}
 
-	function adjustInfoPanelWidth(delta: number) {
-		infoPanelWidth = clampInfoPanelWidth(infoPanelWidth + delta);
-	}
-
 	function startChunkListResize(event: PointerEvent) {
 		event.preventDefault();
 		const handle = event.currentTarget as HTMLElement | null;
@@ -367,50 +357,6 @@
 		} else if (event.key === 'End') {
 			event.preventDefault();
 			applyChunkPanelSettings({ chunkListWidth: CHUNK_LIST_MAX_WIDTH });
-		}
-	}
-
-	function startInfoPanelResize(event: PointerEvent) {
-		event.preventDefault();
-		const handle = event.currentTarget as HTMLElement | null;
-		const startX = event.clientX;
-		const startWidth = infoPanelWidth;
-		infoPanelResizing = true;
-		document.body.style.cursor = 'col-resize';
-		document.body.style.userSelect = 'none';
-		handle?.setPointerCapture?.(event.pointerId);
-
-		const handleMove = (moveEvent: PointerEvent) => {
-			infoPanelWidth = clampInfoPanelWidth(startWidth + (moveEvent.clientX - startX));
-		};
-		const handleUp = (upEvent: PointerEvent) => {
-			infoPanelResizing = false;
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			handle?.releasePointerCapture?.(upEvent.pointerId);
-			window.removeEventListener('pointermove', handleMove);
-			window.removeEventListener('pointerup', handleUp);
-			window.removeEventListener('pointercancel', handleUp);
-		};
-
-		window.addEventListener('pointermove', handleMove);
-		window.addEventListener('pointerup', handleUp, { once: true });
-		window.addEventListener('pointercancel', handleUp, { once: true });
-	}
-
-	function onInfoPanelResizerKeydown(event: KeyboardEvent) {
-		if (event.key === 'ArrowLeft') {
-			event.preventDefault();
-			adjustInfoPanelWidth(-16);
-		} else if (event.key === 'ArrowRight') {
-			event.preventDefault();
-			adjustInfoPanelWidth(16);
-		} else if (event.key === 'Home') {
-			event.preventDefault();
-			infoPanelWidth = 140;
-		} else if (event.key === 'End') {
-			event.preventDefault();
-			infoPanelWidth = 420;
 		}
 	}
 
@@ -779,7 +725,6 @@
 			chunkListSettingsHydrated = true;
 		}
 		return () => {
-			infoPanelResizing = false;
 			chunkListResizing = false;
 			document.body.style.cursor = '';
 			document.body.style.userSelect = '';
@@ -939,7 +884,7 @@
 				<div class="doc-empty">Retrieve a record to display document and chunk highlights.</div>
 			{:else}
 				{#if isPdf}
-					<SharedPdfViewer
+					<PdfViewWindow
 						inputId={currentInput.id}
 						{fileUrl}
 						bind:page={docPage}
@@ -947,35 +892,26 @@
 						bind:numPages={pdfNumPages}
 						highlightVersion={`${selectedSeqNo ?? 0}:${highlightSelectionVersion}`}
 						renderHighlights={renderChunkHighlights}
+						sidebarMinWidth={140}
+						sidebarMaxWidth={420}
+						sidebarDefaultWidth={270}
 					>
-						<div slot="sidebar">
-							<div class="info-panel-shell" style={`width:${infoPanelWidth}px;`}>
-								<aside class="meta-panel">
-									<div class="meta-title">Chunk Bounding Boxes</div>
-									{#if selectedBBoxes.length === 0}
-										<div class="meta-empty">No coordinates available.</div>
-									{:else}
-										{#each selectedBBoxes as box (`${box.page_number}-${box.coords.join(',')}`)}
-											<div class="bbox-row">
-												<div class="bbox-page">Page {box.page_number}</div>
-												<div class="bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</div>
-											</div>
-										{/each}
-									{/if}
-								</aside>
-								<button
-									type="button"
-									class="info-panel-resizer"
-									class:active={infoPanelResizing}
-									aria-label="Resize information panel"
-									onpointerdown={startInfoPanelResize}
-									onkeydown={onInfoPanelResizerKeydown}
-								>
-									<span class="info-panel-resizer-grip" aria-hidden="true"></span>
-								</button>
-							</div>
-						</div>
-					</SharedPdfViewer>
+						{#snippet sidebar()}
+							<aside class="meta-panel">
+								<div class="meta-title">Chunk Bounding Boxes</div>
+								{#if selectedBBoxes.length === 0}
+									<div class="meta-empty">No coordinates available.</div>
+								{:else}
+									{#each selectedBBoxes as box (`${box.page_number}-${box.coords.join(',')}`)}
+										<div class="bbox-row">
+											<div class="bbox-page">Page {box.page_number}</div>
+											<div class="bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</div>
+										</div>
+									{/each}
+								{/if}
+							</aside>
+						{/snippet}
+					</PdfViewWindow>
 				{:else}
 					<iframe class="doc-iframe" src={fileUrl} title="Document viewer"></iframe>
 				{/if}
@@ -1304,16 +1240,6 @@
 	.name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.stats { display: flex; gap: 14px; color: var(--text-secondary); font-size: 12px; }
 	.doc-empty { padding: 20px; color: var(--text-secondary); }
-	.info-panel-shell {
-		position: sticky;
-		top: 6px;
-		align-self: start;
-		width: 270px;
-		min-width: 140px;
-		max-width: 420px;
-		flex: 0 0 auto;
-		padding-right: 16px;
-	}
 	.meta-panel {
 		position: sticky;
 		top: 0;
@@ -1323,60 +1249,6 @@
 		border-radius: 12px;
 		padding: 10px;
 		height: fit-content;
-	}
-	.info-panel-resizer {
-		position: absolute;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 16px;
-		min-height: 120px;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		cursor: col-resize;
-		user-select: none;
-		touch-action: none;
-		outline: none;
-		z-index: 4;
-	}
-	.info-panel-resizer::before {
-		content: '';
-		width: 1px;
-		height: 100%;
-		background: var(--ink-line);
-		opacity: 0.8;
-		transition: background 150ms ease;
-	}
-	.info-panel-resizer:hover::before,
-	.info-panel-resizer.active::before,
-	.info-panel-resizer:focus-visible::before {
-		background: var(--brass);
-	}
-	.info-panel-resizer-grip {
-		position: absolute;
-		width: 8px;
-		height: 52px;
-		border-radius: 999px;
-		background:
-			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
-			var(--panel-bg);
-		border: 1px solid var(--ink-line-soft);
-		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
-		transition:
-			border-color 150ms ease,
-			background-color 150ms ease;
-	}
-	.info-panel-resizer:hover .info-panel-resizer-grip,
-	.info-panel-resizer.active .info-panel-resizer-grip,
-	.info-panel-resizer:focus-visible .info-panel-resizer-grip {
-		border-color: var(--brass);
-		background:
-			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
-			var(--panel-bg);
 	}
 	.meta-title { font-weight: 700; margin-bottom: 8px; }
 	.bbox-row { margin-bottom: 8px; border-bottom: 1px dashed var(--ink-line-soft); padding-bottom: 8px; }
@@ -1722,9 +1594,7 @@
 		.body { grid-template-columns: 1fr; }
 		.left { max-height: 44vh; border-right: none; border-bottom: 1px solid var(--ink-line); }
 		.chunk-list-resizer { display: none; }
-		.info-panel-shell,
 		.meta-panel { position: static; }
-		.info-panel-resizer { display: none; }
 	}
 	@media (max-width: 1100px) {
 		.dialog-grid,

@@ -6,11 +6,12 @@
 	import {
 		getKbInput,
 		getRecordTopics,
-		searchSummaryTree,
-		type KbInputRecord
+		listKbInputs,
+		type KbInputRecord,
+		type TopicCardApi
 	} from '$lib/services/kbService';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
-	import SharedPdfViewer from './shared-pdf-viewer.svelte';
+	import PdfViewWindow from './pdf-view-window.svelte';
 	import {
 		createTopicTreeState,
 		selectRecordTopicTarget,
@@ -19,8 +20,35 @@
 	} from './topic-tree-state.js';
 	import type { TopicRecordTarget, TopicTreeRecord } from './topic-types';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
+	import {
+		TOPIC_TREE_PAGE_SIZE,
+		buildTopicTreeListParams,
+		selectFirstRecordId
+	} from './topic-tree-record-browser.js';
 
-	let { darkMode = true }: { darkMode?: boolean } = $props();
+	let {
+		darkMode = true,
+		heroEyebrow = 'Semantic Web',
+		heroTitle = 'Document Semantic Tree',
+		heroDescription = 'Document-centric browser over topics extracted from chunks.',
+		sidebarTitle = 'Selected Topic',
+		loadErrorTitle = 'Topic Tree',
+		itemSingular = 'topic',
+		itemPlural = 'topics',
+		getRecordItems = getRecordTopics,
+		scopeToActiveStore = false
+	}: {
+		darkMode?: boolean;
+		heroEyebrow?: string;
+		heroTitle?: string;
+		heroDescription?: string;
+		sidebarTitle?: string;
+		loadErrorTitle?: string;
+		itemSingular?: string;
+		itemPlural?: string;
+		getRecordItems?: (recordId: number) => Promise<{ topics: TopicCardApi[] }>;
+		scopeToActiveStore?: boolean;
+	} = $props();
 
 	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
 	let panelAlt = $derived(darkMode ? '#0f172a' : '#eef2ff');
@@ -40,14 +68,15 @@
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
-	const TOPIC_SIDEBAR_MIN_WIDTH = 240;
-	const TOPIC_SIDEBAR_MAX_WIDTH = 520;
-	let topicSidebarWidth = $state(320);
-	let topicSidebarResizing = $state(false);
-
+	let listPage = $state(1);
+	let listPageSize = TOPIC_TREE_PAGE_SIZE;
+	let listTotal = $state(0);
+	let listJumpInput = $state('1');
 	onMount(async () => {
-		await runSearch();
+		await runSearch(1);
 	});
+
+	let listTotalPages = $derived(Math.max(1, Math.ceil(listTotal / listPageSize)));
 
 	let activeRecord = $derived(results.find((r) => r.id === treeState.selectedRecordId) ?? results[0] ?? null);
 	let selectedTopic = $derived(
@@ -98,49 +127,6 @@
 		}
 	}
 
-	function clampTopicSidebarWidth(width: number) {
-		return Math.min(TOPIC_SIDEBAR_MAX_WIDTH, Math.max(TOPIC_SIDEBAR_MIN_WIDTH, Math.round(width)));
-	}
-
-	function adjustTopicSidebarWidth(delta: number) {
-		topicSidebarWidth = clampTopicSidebarWidth(topicSidebarWidth + delta);
-	}
-
-	function startTopicSidebarResize(event: PointerEvent) {
-		event.preventDefault();
-		const handle = event.currentTarget as HTMLElement | null;
-		const startX = event.clientX;
-		const startWidth = topicSidebarWidth;
-		topicSidebarResizing = true;
-		document.body.style.cursor = 'col-resize';
-		document.body.style.userSelect = 'none';
-		handle?.setPointerCapture?.(event.pointerId);
-
-		const handleMove = (moveEvent: PointerEvent) => {
-			topicSidebarWidth = clampTopicSidebarWidth(startWidth + (moveEvent.clientX - startX));
-		};
-		const handleUp = (upEvent: PointerEvent) => {
-			topicSidebarResizing = false;
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			handle?.releasePointerCapture?.(upEvent.pointerId);
-			window.removeEventListener('pointermove', handleMove);
-			window.removeEventListener('pointerup', handleUp);
-			window.removeEventListener('pointercancel', handleUp);
-		};
-
-		window.addEventListener('pointermove', handleMove);
-		window.addEventListener('pointerup', handleUp, { once: true });
-		window.addEventListener('pointercancel', handleUp, { once: true });
-	}
-
-	function onTopicSidebarResizerKeydown(event: KeyboardEvent) {
-		if (event.key === 'ArrowLeft') { event.preventDefault(); adjustTopicSidebarWidth(-16); }
-		else if (event.key === 'ArrowRight') { event.preventDefault(); adjustTopicSidebarWidth(16); }
-		else if (event.key === 'Home') { event.preventDefault(); topicSidebarWidth = TOPIC_SIDEBAR_MIN_WIDTH; }
-		else if (event.key === 'End') { event.preventDefault(); topicSidebarWidth = TOPIC_SIDEBAR_MAX_WIDTH; }
-	}
-
 	function topicTreeStatusText(record: KbInputRecord): string {
 		const items = record.status ?? [];
 		const matched = [...items].reverse().find((item) => item != null);
@@ -182,7 +168,7 @@
 		}
 	});
 
-	async function runSearch() {
+	async function runSearch(page = listPage) {
 		loading = true;
 		loadError = '';
 		try {
@@ -193,42 +179,68 @@
 				}
 				const response = await getKbInput(directRecordId);
 				results = [mapKbInputToTopicTreeRecord(response.record)];
+				listTotal = results.length;
+				listPage = 1;
+				listJumpInput = '1';
 				treeState = createTopicTreeState();
 				treeState = selectTopicTreeRecord(treeState, response.record.id);
 				return;
 			}
 
-			const response = await searchSummaryTree({
-				recordId: '',
-				title: '',
-				docNo: '',
-				fileName: '',
-				docType: 'all',
-				parserName: '',
-				operation: '',
-				procStatus: 'all',
-				createStart: '',
-				createEnd: '',
-				modifyStart: '',
-				modifyEnd: '',
-				ksStoreId: knowledgeStoreState.activeStore?.id ?? null
-			});
+			const response = await listKbInputs(
+				buildTopicTreeListParams({
+					page,
+					pageSize: listPageSize,
+					activeStoreId: knowledgeStoreState.activeStore?.id ?? null,
+					scopeToActiveStore
+				})
+			);
 			results = response.results.map((r) => ({
-				...r,
+				...mapKbInputToTopicTreeRecord(r),
 				topics: []
 			}));
+			listTotal = Math.max(0, response.total ?? 0);
+			listPage = Math.max(1, response.page ?? page);
+			listJumpInput = String(listPage);
 			treeState = createTopicTreeState();
-			if (results[0]) {
-				treeState = selectTopicTreeRecord(treeState, results[0].id);
+			const firstRecordId = selectFirstRecordId(results);
+			if (firstRecordId != null) {
+				treeState = selectTopicTreeRecord(treeState, firstRecordId);
 			}
 		} catch (error) {
 			results = [];
+			listTotal = 0;
+			listPage = 1;
+			listJumpInput = '1';
 			treeState = createTopicTreeState();
-			loadError = error instanceof Error ? error.message : 'Failed to load topic tree records';
+			loadError = error instanceof Error ? error.message : `Failed to load ${itemSingular} tree records`;
 			errorDialogOpen = true;
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function prevPage() {
+		if (listPage <= 1 || loading || recordIdInput.trim() !== '') return;
+		await runSearch(listPage - 1);
+	}
+
+	async function nextPage() {
+		if (listPage >= listTotalPages || loading || recordIdInput.trim() !== '') return;
+		await runSearch(listPage + 1);
+	}
+
+	async function jumpToPage() {
+		if (loading || recordIdInput.trim() !== '') return;
+		const parsed = Number(listJumpInput.trim());
+		if (!Number.isFinite(parsed)) {
+			listJumpInput = String(listPage);
+			return;
+		}
+		const target = Math.max(1, Math.min(listTotalPages, Math.trunc(parsed)));
+		listJumpInput = String(target);
+		if (target === listPage) return;
+		await runSearch(target);
 	}
 
 	async function ensureRecordTopics(recordId: number) {
@@ -237,7 +249,7 @@
 
 		topicLoadingByRecordId = { ...topicLoadingByRecordId, [recordId]: true };
 		try {
-			const response = await getRecordTopics(recordId);
+			const response = await getRecordItems(recordId);
 			results = results.map((r) =>
 				r.id === recordId
 					? { ...r, topics: response.topics.map((t) => ({ ...t, recordId })) }
@@ -252,7 +264,7 @@
 				});
 			}
 		} catch (error) {
-			loadError = error instanceof Error ? error.message : `Failed to load topics for record ${recordId}`;
+			loadError = error instanceof Error ? error.message : `Failed to load ${itemPlural} for record ${recordId}`;
 			errorDialogOpen = true;
 		} finally {
 			topicLoadingByRecordId = { ...topicLoadingByRecordId, [recordId]: false };
@@ -290,7 +302,7 @@
 				onkeydown={(event) => event.stopPropagation()}
 			>
 				<div class="eyebrow">Load Error</div>
-				<h3>Could not load Topic Tree data</h3>
+				<h3>Could not load {loadErrorTitle} data</h3>
 				<p class="dialog-copy">{loadError}</p>
 				<div class="dialog-actions">
 					<button type="button" class="ghost" onclick={() => (errorDialogOpen = false)}>Close</button>
@@ -302,9 +314,9 @@
 
 	<div class="hero">
 		<div>
-			<div class="eyebrow">Semantic Web</div>
-			<h2>Document Semantic Tree</h2>
-			<p>Document-centric browser over topics extracted from chunks.</p>
+			<div class="eyebrow">{heroEyebrow}</div>
+			<h2>{heroTitle}</h2>
+			<p>{heroDescription}</p>
 		</div>
 		<div class="hero-actions">
 			<button type="button" class="ghost" onclick={() => (treeState = toggleTopicTreeListMode(treeState))}>
@@ -349,14 +361,14 @@
 
 			<div class="left-meta">
 				<div class="left-meta-title">kb.inputs</div>
-				<div class="left-meta-count">{results.length} found</div>
+				<div class="left-meta-count">{listTotal} found</div>
 			</div>
 
 			<div class="result-list topic-tree-results">
 				{#if loading}
 					<div class="empty-state">Loading records…</div>
 				{:else if loadError}
-					<div class="empty-state">Topic Tree could not be loaded. Open the error dialog for details or try again.</div>
+					<div class="empty-state">{loadErrorTitle} could not be loaded. Open the error dialog for details or try again.</div>
 				{:else if results.length === 0}
 					<div class="empty-state">No records found.</div>
 				{:else if treeState.listMode === 'compact'}
@@ -406,12 +418,51 @@
 							<p>
 								{record.topics[0]?.topicText ??
 									(treeState.selectedRecordId === record.id && topicLoadingByRecordId[record.id]
-										? 'Loading topic preview…'
-										: 'Select this record to load its topics.')}
+										? `Loading ${itemSingular} preview…`
+										: `Select this record to load its ${itemPlural}.`)}
 							</p>
 						</button>
 					{/each}
 				{/if}
+			</div>
+
+			<div class="list-pager">
+				<button
+					class="pager-btn"
+					onclick={prevPage}
+					disabled={listPage <= 1 || loading || recordIdInput.trim() !== ''}>‹ Prev</button
+				>
+				<div class="pager-meta">
+					<span>Page {listPage} / {listTotalPages}</span>
+					<span>{results.length} on page</span>
+					<div class="pager-jump">
+						<label for="topic-tree-jump">Go</label>
+						<input
+							id="topic-tree-jump"
+							type="number"
+							min="1"
+							max={listTotalPages}
+							bind:value={listJumpInput}
+							disabled={recordIdInput.trim() !== ''}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') {
+									void jumpToPage();
+								}
+							}}
+						/>
+						<button
+							class="pager-btn pager-go"
+							onclick={jumpToPage}
+							disabled={loading || recordIdInput.trim() !== ''}>
+							Jump
+						</button>
+					</div>
+				</div>
+				<button
+					class="pager-btn"
+					onclick={nextPage}
+					disabled={listPage >= listTotalPages || loading || recordIdInput.trim() !== ''}>Next ›</button
+				>
 			</div>
 		</div>
 
@@ -463,7 +514,7 @@
 					<div class="pdf-card">
 						<div class="eyebrow">PDF Display</div>
 						{#if viewerInputId && treeState.selectedPdfTarget && viewerIsPdf}
-							<SharedPdfViewer
+							<PdfViewWindow
 								inputId={viewerInputId}
 								fileUrl={viewerFileUrl}
 								bind:page={docPage}
@@ -473,76 +524,67 @@
 									? `${selectedTopic.id}:${selectedTopic.targets.map((t) => `${t.page}:${t.coords.join(',')}`).join('|')}`
 									: 'topic-tree'}
 								renderHighlights={renderTopicHighlight}
+								sidebarMinWidth={240}
+								sidebarMaxWidth={520}
+								sidebarDefaultWidth={320}
 							>
-								<div slot="sidebar">
-									<div class="topic-sidebar-shell" style={`width:${topicSidebarWidth}px;`}>
-										<aside class="topic-sidebar">
-											<div class="topic-sidebar-title">Selected Topic</div>
-											{#if selectedTopic}
-												<div class="topic-sidebar-block">
-													<div class="topic-sidebar-row">
-														<span>Topic ID</span>
-														<strong>{selectedTopic.id}</strong>
-													</div>
-													<div class="topic-sidebar-row">
-														<span>Record ID</span>
-														<strong>{selectedTopic.recordId}</strong>
-													</div>
-													<div class="topic-sidebar-row">
-														<span>Page</span>
-														<strong>{selectedTopic.page}</strong>
-													</div>
-													<div class="topic-sidebar-row">
-														<span>Type</span>
-														<strong>{selectedTopic.topicType || '—'}</strong>
-													</div>
+								{#snippet sidebar()}
+									<aside class="topic-sidebar">
+										<div class="topic-sidebar-title">{sidebarTitle}</div>
+										{#if selectedTopic}
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-row">
+													<span>{itemSingular} ID</span>
+													<strong>{selectedTopic.id}</strong>
 												</div>
-												<div class="topic-sidebar-block">
-													<div class="topic-sidebar-label">Topic</div>
-													<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
+												<div class="topic-sidebar-row">
+													<span>Record ID</span>
+													<strong>{selectedTopic.recordId}</strong>
 												</div>
-												<div class="topic-sidebar-block">
-													<div class="topic-sidebar-label">Keywords</div>
-													{#if selectedTopic.topicKeywords.length > 0}
-														<div class="keyword-list">
-															{#each selectedTopic.topicKeywords as kw (kw)}
-																<span class="keyword-chip">{kw}</span>
-															{/each}
-														</div>
-													{:else}
-														<p class="topic-sidebar-copy muted">No keywords extracted.</p>
-													{/if}
+												<div class="topic-sidebar-row">
+													<span>Page</span>
+													<strong>{selectedTopic.page}</strong>
 												</div>
-											{:else}
-												<div class="topic-sidebar-empty">Select a topic to inspect it alongside the source PDF.</div>
-											{/if}
-										</aside>
-										<button
-											type="button"
-											class="topic-sidebar-resizer"
-											class:active={topicSidebarResizing}
-											aria-label="Resize topic sidebar"
-											onpointerdown={startTopicSidebarResize}
-											onkeydown={onTopicSidebarResizerKeydown}
-										>
-											<span class="topic-sidebar-resizer-grip" aria-hidden="true"></span>
-										</button>
-									</div>
-								</div>
-							</SharedPdfViewer>
+												<div class="topic-sidebar-row">
+													<span>Type</span>
+													<strong>{selectedTopic.topicType || '—'}</strong>
+												</div>
+											</div>
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-label">{itemSingular}</div>
+												<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
+											</div>
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-label">Keywords</div>
+												{#if selectedTopic.topicKeywords.length > 0}
+													<div class="keyword-list">
+														{#each selectedTopic.topicKeywords as kw (kw)}
+															<span class="keyword-chip">{kw}</span>
+														{/each}
+													</div>
+												{:else}
+													<p class="topic-sidebar-copy muted">No keywords extracted.</p>
+												{/if}
+											</div>
+										{:else}
+											<div class="topic-sidebar-empty">Select a {itemSingular} to inspect it alongside the source PDF.</div>
+										{/if}
+									</aside>
+								{/snippet}
+							</PdfViewWindow>
 						{:else if viewerInputId && treeState.selectedPdfTarget}
 							<iframe class="pdf-fallback-frame" title={activeRecord.fileName} src={viewerFileUrl}></iframe>
 						{:else if topicLoadingByRecordId[activeRecord.id]}
-							<div class="empty-state pdf-empty">Loading topics for the selected record…</div>
+							<div class="empty-state pdf-empty">Loading {itemPlural} for the selected record…</div>
 						{:else if activeRecord.topics.length === 0}
-							<div class="empty-state pdf-empty">No topics are available for this record yet.</div>
+							<div class="empty-state pdf-empty">No {itemPlural} are available for this record yet.</div>
 						{:else}
-							<div class="empty-state pdf-empty">Select a topic to move the PDF display to the relevant page.</div>
+							<div class="empty-state pdf-empty">Select a {itemSingular} to move the PDF display to the relevant page.</div>
 						{/if}
 					</div>
 				</div>
 			{:else}
-				<div class="empty-state">Select a record from the left panel to inspect its topics.</div>
+				<div class="empty-state">Select a record from the left panel to inspect its {itemPlural}.</div>
 			{/if}
 		</div>
 	</div>
@@ -662,6 +704,64 @@
 
 	.result-list { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: auto; padding: 0 1rem 1rem; }
 	.topic-tree-results { gap: 0.8rem; }
+	.list-pager {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 10px 16px 14px;
+		border-top: 1px solid var(--ink-line-soft);
+		background: linear-gradient(180deg, rgba(0, 0, 0, 0), var(--panel-bg));
+	}
+	.pager-btn {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 11px;
+		padding: 6px 10px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+	.pager-btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+	.pager-meta {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 10px;
+		letter-spacing: 0.05em;
+		color: var(--text-muted);
+	}
+	.pager-jump {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		margin-top: 4px;
+	}
+	.pager-jump label {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 10px;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+	.pager-jump input {
+		width: 58px;
+		padding: 4px 6px;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 11px;
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		border: 1px solid var(--ink-line);
+	}
+	.pager-go {
+		padding: 4px 8px;
+		font-size: 10px;
+	}
 
 	.left-meta { display: flex; align-items: baseline; justify-content: space-between; padding: 1rem; border-bottom: 1px solid rgba(148, 163, 184, 0.08); }
 	.left-meta-title { font-size: 0.95rem; font-weight: 700; color: #bbf7d0; }
@@ -723,20 +823,13 @@
 	.pdf-card :global(.doc-page-bar) { margin-top: 0.85rem; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px 16px 0 0; }
 	.pdf-card :global(.pdf-stage) { margin-top: -1px; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 0 0 16px 16px; background: rgba(2, 6, 23, 0.28); }
 
-	.topic-sidebar-shell { position: relative; flex: 0 0 auto; height: 100%; }
-	.topic-sidebar { width: 100%; height: 100%; min-width: 0; padding: 1rem 1.25rem 1rem 1rem; border-right: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.82); overflow: auto; }
+	.topic-sidebar { width: 100%; height: 100%; min-width: 0; padding: 1rem 1rem 1rem 0; background: rgba(15, 23, 42, 0.82); overflow: auto; }
 	.topic-sidebar-title, .topic-sidebar-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 	.topic-sidebar-title { margin-bottom: 0.85rem; }
 	.topic-sidebar-block + .topic-sidebar-block { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(148, 163, 184, 0.1); }
 	.topic-sidebar-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 0.6rem; margin-bottom: 0.6rem; align-items: start; }
 	.topic-sidebar-row span { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
 	.topic-sidebar-row strong, .topic-sidebar-copy { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
-
-	.topic-sidebar-resizer { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; width: 16px; min-height: 120px; padding: 0; border: 0; background: transparent; cursor: col-resize; user-select: none; touch-action: none; outline: none; z-index: 4; }
-	.topic-sidebar-resizer::before { content: ''; width: 1px; height: 100%; background: var(--ink-line); opacity: 0.8; transition: background 150ms ease; }
-	.topic-sidebar-resizer:hover::before, .topic-sidebar-resizer.active::before, .topic-sidebar-resizer:focus-visible::before { background: #22c55e; }
-	.topic-sidebar-resizer-grip { position: absolute; width: 8px; height: 52px; border-radius: 999px; background: radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y, var(--panel-bg); border: 1px solid var(--ink-line-soft); box-shadow: 0 0 0 2px rgba(0,0,0,0.14); transition: border-color 150ms ease, background-color 150ms ease; }
-	.topic-sidebar-resizer:hover .topic-sidebar-resizer-grip, .topic-sidebar-resizer.active .topic-sidebar-resizer-grip, .topic-sidebar-resizer:focus-visible .topic-sidebar-resizer-grip { border-color: #22c55e; background: radial-gradient(circle, #22c55e 22%, transparent 24%) center 6px / 6px 12px repeat-y, var(--panel-bg); }
 
 	.topic-sidebar-copy { margin-top: 0.55rem; font-size: 0.88rem; line-height: 1.6; color: var(--text); }
 	.topic-sidebar-copy.muted, .topic-sidebar-empty { color: var(--muted); }
@@ -751,6 +844,5 @@
 
 	@media (max-width: 980px) {
 		.workspace, .detail-grid { grid-template-columns: minmax(0, 1fr); }
-		.topic-sidebar-resizer { display: none; }
 	}
 </style>

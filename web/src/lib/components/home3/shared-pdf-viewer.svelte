@@ -294,6 +294,20 @@
 	});
 
 	$effect(() => {
+		if (!pdfCanvasHostEl) return;
+		const ro = new ResizeObserver(() => {
+			const w = Math.floor(pdfCanvasHostEl?.clientWidth ?? 0);
+			if (w <= 0 || w === pdfLastRenderWidth) return;
+			if (pdfResizeRaf) cancelAnimationFrame(pdfResizeRaf);
+			pdfResizeRaf = requestAnimationFrame(() => {
+				void renderPdfPages();
+			});
+		});
+		ro.observe(pdfCanvasHostEl);
+		return () => ro.disconnect();
+	});
+
+	$effect(() => {
 		if (!pdfSidebarClusterEl) return;
 		const updateSidebarWidth = () => {
 			pdfSidebarWidth = Math.ceil(pdfSidebarClusterEl?.getBoundingClientRect().width ?? 0);

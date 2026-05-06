@@ -14,14 +14,15 @@ import (
 )
 
 type topicCategoryRecord struct {
-	ID          string               `json:"id"`
-	PdfFileName string               `json:"pdfFileName"`
-	TopicType   string               `json:"topicType"`
-	TopicText   string               `json:"topicText"`
-	Keywords    []string             `json:"topicKeywords"`
-	InputID     int64                `json:"inputId"`
-	Page        int                  `json:"page"`
-	Coords      []float64            `json:"coords"`
+	ID          string                `json:"id"`
+	TopicName   string                `json:"topicName,omitempty"`
+	PdfFileName string                `json:"pdfFileName"`
+	TopicType   string                `json:"topicType"`
+	TopicText   string                `json:"topicText"`
+	Keywords    []string              `json:"topicKeywords"`
+	InputID     int64                 `json:"inputId"`
+	Page        int                   `json:"page"`
+	Coords      []float64             `json:"coords"`
 	Targets     []summaryRecordTarget `json:"targets"`
 }
 

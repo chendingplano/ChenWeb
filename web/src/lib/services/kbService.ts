@@ -777,6 +777,72 @@ export async function getRecordTopics(recordId: number): Promise<GetRecordTopics
 	);
 }
 
+export type ListProvisionGraphResponse = ListTopicGraphResponse;
+export type GetProvisionCategoryResponse = GetTopicCategoryResponse;
+export type GetRecordProvisionsResponse = GetRecordTopicsResponse;
+
+export async function listProvisionGraph(ksStoreId?: number | null): Promise<ListProvisionGraphResponse> {
+	const query = new URLSearchParams();
+	if (ksStoreId != null) query.set('ks_store_id', String(ksStoreId));
+	const suffix = query.toString();
+	const result = await fetchOrThrow<ListProvisionGraphResponse>(
+		`${BASE}/provision-graph${suffix ? `?${suffix}` : ''}`,
+		'Failed to list provision graph'
+	);
+	const provisionIds = new Set(
+		(result.results ?? []).flatMap((node) => node.topicIds ?? [])
+	);
+	/*
+	console.log('[Compliance Provisions] provision graph received', {
+		ksStoreId,
+		nodes: result.results?.length ?? 0,
+		uniqueProvisions: provisionIds.size,
+		provisionRefs: (result.results ?? []).reduce(
+			(count, node) => count + (node.topicIds?.length ?? 0),
+			0
+		)
+	});
+	*/
+	return result;
+}
+
+export async function getProvisionCategory(
+	categoryPath: string,
+	ksStoreId?: number | null
+): Promise<GetProvisionCategoryResponse> {
+	const query = new URLSearchParams();
+	query.set('category_path', categoryPath);
+	if (ksStoreId != null) query.set('ks_store_id', String(ksStoreId));
+	const result = await fetchOrThrow<GetProvisionCategoryResponse>(
+		`${BASE}/provision-category?${query.toString()}`,
+		'Failed to load provision category'
+	);
+	/*
+	console.log('[Compliance Provisions] provision category received', {
+		categoryPath,
+		ksStoreId,
+		provisions: result.topics?.length ?? 0,
+		provisionIds: (result.topics ?? []).map((topic) => topic.id)
+	});
+	*/
+	return result;
+}
+
+export async function getRecordProvisions(recordId: number): Promise<GetRecordProvisionsResponse> {
+	const result = await fetchOrThrow<GetRecordProvisionsResponse>(
+		`${BASE}/record-provisions?record_id=${encodeURIComponent(String(recordId))}`,
+		'Failed to load record provisions'
+	);
+	/*
+	console.log('[Compliance Provisions] record provisions received', {
+		recordId,
+		provisions: result.topics?.length ?? 0,
+		provisionIds: (result.topics ?? []).map((topic) => topic.id)
+	});
+	*/
+	return result;
+}
+
 export async function filterGraphNodes(
 	params: FilterGraphNodesRequest
 ): Promise<FilterGraphNodesResponse> {

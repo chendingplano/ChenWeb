@@ -10,7 +10,7 @@
 		type KbInputRecord
 	} from '$lib/services/kbService';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
-	import SharedPdfViewer from './shared-pdf-viewer.svelte';
+	import PdfViewWindow from './pdf-view-window.svelte';
 	import ViewToolbar from './view-toolbar.svelte';
 	import {
 		createSummaryTreeState,
@@ -41,10 +41,6 @@
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
-	const SUMMARY_SIDEBAR_MIN_WIDTH = 240;
-	const SUMMARY_SIDEBAR_MAX_WIDTH = 520;
-	let summarySidebarWidth = $state(320);
-	let summarySidebarResizing = $state(false);
 
 	onMount(async () => {
 		await runSearch();
@@ -111,58 +107,6 @@
 			box.style.width = `${width}px`;
 			box.style.height = `${height}px`;
 			overlay.appendChild(box);
-		}
-	}
-
-	function clampSummarySidebarWidth(width: number) {
-		return Math.min(SUMMARY_SIDEBAR_MAX_WIDTH, Math.max(SUMMARY_SIDEBAR_MIN_WIDTH, Math.round(width)));
-	}
-
-	function adjustSummarySidebarWidth(delta: number) {
-		summarySidebarWidth = clampSummarySidebarWidth(summarySidebarWidth + delta);
-	}
-
-	function startSummarySidebarResize(event: PointerEvent) {
-		event.preventDefault();
-		const handle = event.currentTarget as HTMLElement | null;
-		const startX = event.clientX;
-		const startWidth = summarySidebarWidth;
-		summarySidebarResizing = true;
-		document.body.style.cursor = 'col-resize';
-		document.body.style.userSelect = 'none';
-		handle?.setPointerCapture?.(event.pointerId);
-
-		const handleMove = (moveEvent: PointerEvent) => {
-			summarySidebarWidth = clampSummarySidebarWidth(startWidth + (moveEvent.clientX - startX));
-		};
-		const handleUp = (upEvent: PointerEvent) => {
-			summarySidebarResizing = false;
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			handle?.releasePointerCapture?.(upEvent.pointerId);
-			window.removeEventListener('pointermove', handleMove);
-			window.removeEventListener('pointerup', handleUp);
-			window.removeEventListener('pointercancel', handleUp);
-		};
-
-		window.addEventListener('pointermove', handleMove);
-		window.addEventListener('pointerup', handleUp, { once: true });
-		window.addEventListener('pointercancel', handleUp, { once: true });
-	}
-
-	function onSummarySidebarResizerKeydown(event: KeyboardEvent) {
-		if (event.key === 'ArrowLeft') {
-			event.preventDefault();
-			adjustSummarySidebarWidth(-16);
-		} else if (event.key === 'ArrowRight') {
-			event.preventDefault();
-			adjustSummarySidebarWidth(16);
-		} else if (event.key === 'Home') {
-			event.preventDefault();
-			summarySidebarWidth = SUMMARY_SIDEBAR_MIN_WIDTH;
-		} else if (event.key === 'End') {
-			event.preventDefault();
-			summarySidebarWidth = SUMMARY_SIDEBAR_MAX_WIDTH;
 		}
 	}
 
@@ -516,7 +460,7 @@
 					<div class="pdf-card">
 						<div class="eyebrow">PDF Display</div>
 						{#if viewerInputId && treeState.selectedPdfTarget && viewerIsPdf}
-							<SharedPdfViewer
+							<PdfViewWindow
 								inputId={viewerInputId}
 								fileUrl={viewerFileUrl}
 								bind:page={docPage}
@@ -526,69 +470,60 @@
 									? `${selectedSummary.id}:${selectedSummary.targets.map((target) => `${target.page}:${target.coords.join(',')}`).join('|')}`
 									: 'summary-tree'}
 								renderHighlights={renderSummaryHighlight}
+								sidebarMinWidth={240}
+								sidebarMaxWidth={520}
+								sidebarDefaultWidth={320}
 							>
-								<div slot="sidebar">
-									<div class="summary-sidebar-shell" style={`width:${summarySidebarWidth}px;`}>
-										<aside class="summary-sidebar">
-											<div class="summary-sidebar-title">Selected Summary</div>
-											{#if selectedSummary}
-												<div class="summary-sidebar-block">
-													<div class="summary-sidebar-row">
-														<span>Summary ID</span>
-														<strong>{selectedSummary.id}</strong>
-													</div>
-													<div class="summary-sidebar-row">
-														<span>Record ID</span>
-														<strong>{selectedSummary.recordId}</strong>
-													</div>
-													<div class="summary-sidebar-row">
-														<span>Page</span>
-														<strong>{selectedSummary.page}</strong>
-													</div>
-													<div class="summary-sidebar-row">
-														<span>PDF</span>
-														<strong title={selectedSummary.pdfFileName}>{selectedSummary.pdfFileName}</strong>
-													</div>
-													<div class="summary-sidebar-row">
-														<span>Coords</span>
-														<strong class="coords-block">{formatTargets(selectedSummary.targets)}</strong>
-													</div>
+								{#snippet sidebar()}
+									<aside class="summary-sidebar">
+										<div class="summary-sidebar-title">Selected Summary</div>
+										{#if selectedSummary}
+											<div class="summary-sidebar-block">
+												<div class="summary-sidebar-row">
+													<span>Summary ID</span>
+													<strong>{selectedSummary.id}</strong>
 												</div>
+												<div class="summary-sidebar-row">
+													<span>Record ID</span>
+													<strong>{selectedSummary.recordId}</strong>
+												</div>
+												<div class="summary-sidebar-row">
+													<span>Page</span>
+													<strong>{selectedSummary.page}</strong>
+												</div>
+												<div class="summary-sidebar-row">
+													<span>PDF</span>
+													<strong title={selectedSummary.pdfFileName}>{selectedSummary.pdfFileName}</strong>
+												</div>
+												<div class="summary-sidebar-row">
+													<span>Coords</span>
+													<strong class="coords-block">{formatTargets(selectedSummary.targets)}</strong>
+												</div>
+											</div>
 
-												<div class="summary-sidebar-block">
-													<div class="summary-sidebar-label">Summary</div>
-													<p class="summary-sidebar-copy">{selectedSummary.summaryText}</p>
-												</div>
+											<div class="summary-sidebar-block">
+												<div class="summary-sidebar-label">Summary</div>
+												<p class="summary-sidebar-copy">{selectedSummary.summaryText}</p>
+											</div>
 
-												<div class="summary-sidebar-block">
-													<div class="summary-sidebar-label">Keywords</div>
-													{#if selectedSummary.keywords.length > 0}
-														<div class="keyword-list">
-															{#each selectedSummary.keywords as keyword (keyword)}
-																<span class="keyword-chip">{keyword}</span>
-															{/each}
-														</div>
-													{:else}
-														<p class="summary-sidebar-copy muted">No keywords were extracted for this summary.</p>
-													{/if}
-												</div>
-											{:else}
-												<div class="summary-sidebar-empty">Select a summary card to inspect it alongside the source PDF.</div>
-											{/if}
-										</aside>
-										<button
-											type="button"
-											class="summary-sidebar-resizer"
-											class:active={summarySidebarResizing}
-											aria-label="Resize summary sidebar"
-											onpointerdown={startSummarySidebarResize}
-											onkeydown={onSummarySidebarResizerKeydown}
-										>
-											<span class="summary-sidebar-resizer-grip" aria-hidden="true"></span>
-										</button>
-									</div>
-								</div>
-							</SharedPdfViewer>
+											<div class="summary-sidebar-block">
+												<div class="summary-sidebar-label">Keywords</div>
+												{#if selectedSummary.keywords.length > 0}
+													<div class="keyword-list">
+														{#each selectedSummary.keywords as keyword (keyword)}
+															<span class="keyword-chip">{keyword}</span>
+														{/each}
+													</div>
+												{:else}
+													<p class="summary-sidebar-copy muted">No keywords were extracted for this summary.</p>
+												{/if}
+											</div>
+										{:else}
+											<div class="summary-sidebar-empty">Select a summary card to inspect it alongside the source PDF.</div>
+										{/if}
+									</aside>
+								{/snippet}
+							</PdfViewWindow>
 						{:else if viewerInputId && treeState.selectedPdfTarget}
 							<iframe
 								class="pdf-fallback-frame"
@@ -1138,12 +1073,6 @@
 		background: rgba(2, 6, 23, 0.28);
 	}
 
-	.summary-sidebar-shell {
-		position: relative;
-		flex: 0 0 auto;
-		height: 100%;
-	}
-
 	.summary-sidebar {
 		width: 100%;
 		height: 100%;
@@ -1200,65 +1129,6 @@
 		font-family: var(--font-mono);
 		font-size: 0.8rem;
 		line-height: 1.45;
-	}
-
-	.summary-sidebar-resizer {
-		position: absolute;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 16px;
-		min-height: 120px;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		cursor: col-resize;
-		user-select: none;
-		touch-action: none;
-		outline: none;
-		z-index: 4;
-	}
-
-	.summary-sidebar-resizer::before {
-		content: '';
-		width: 1px;
-		height: 100%;
-		background: var(--ink-line);
-		opacity: 0.8;
-		transition: background 150ms ease;
-	}
-
-	.summary-sidebar-resizer:hover::before,
-	.summary-sidebar-resizer.active::before,
-	.summary-sidebar-resizer:focus-visible::before {
-		background: var(--brass);
-	}
-
-	.summary-sidebar-resizer-grip {
-		position: absolute;
-		width: 8px;
-		height: 52px;
-		border-radius: 999px;
-		background:
-			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
-			var(--panel-bg);
-		border: 1px solid var(--ink-line-soft);
-		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
-		transition:
-			border-color 150ms ease,
-			background-color 150ms ease;
-	}
-
-	.summary-sidebar-resizer:hover .summary-sidebar-resizer-grip,
-	.summary-sidebar-resizer.active .summary-sidebar-resizer-grip,
-	.summary-sidebar-resizer:focus-visible .summary-sidebar-resizer-grip {
-		border-color: var(--brass);
-		background:
-			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
-			var(--panel-bg);
 	}
 
 	.summary-sidebar-copy {
@@ -1319,8 +1189,5 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 
-		.summary-sidebar-resizer {
-			display: none;
-		}
 	}
 </style>

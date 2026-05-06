@@ -97,6 +97,7 @@
 		itemIds: string[];
 		hasItemsFile: boolean;
 		expanded: boolean;
+		isItemNode?: boolean;
 	};
 	type RenderedNodeHit = {
 		node: GraphCategoryNode;
@@ -118,7 +119,33 @@
 	const NODE_CLICK_FALLBACK_MAX_DY = 26;
 	const NODE_CLICK_FALLBACK_ROW_DY = 36;
 
-	let { mode, darkMode = true }: { mode: Mode; darkMode?: boolean } = $props();
+	let {
+		mode,
+		darkMode = true,
+		heroEyebrow,
+		heroTitle,
+		heroDescription,
+		rootTabLabel,
+		loadErrorLabel,
+		itemLabelPlural,
+		showItemsLabel,
+		showItemNodes = false,
+		listGraph,
+		getCategoryItems
+	}: {
+		mode: Mode;
+		darkMode?: boolean;
+		heroEyebrow?: string;
+		heroTitle?: string;
+		heroDescription?: string;
+		rootTabLabel?: string;
+		loadErrorLabel?: string;
+		itemLabelPlural?: string;
+		showItemsLabel?: string;
+		showItemNodes?: boolean;
+		listGraph?: () => Promise<{ results: any[] }>;
+		getCategoryItems?: (categoryPath: string) => Promise<{ topics: TopicCard[] }>;
+	} = $props();
 
 	let nodeStyle = $state<NodeStyle>('rect');
 
@@ -250,6 +277,13 @@
 	let selectedLevelNodes = $derived(getNodesInSelectedLevel(nodes, selectedNodeId));
 	let filterMatchNodeIdSet = $derived(new Set(filterMatchNodeIds));
 	let hasActiveFilter = $derived(activeFilterLevel !== null);
+	let totalItemCount = $derived.by(() => {
+		const ids = new Set<string>();
+		for (const node of nodes) {
+			for (const id of node.itemIds ?? []) ids.add(id);
+		}
+		return ids.size;
+	});
 	let bestFilterSemanticScore = $derived.by(() => {
 		const scores = Object.values(filterSemanticScores);
 		return scores.length > 0 ? Math.max(...scores) : null;
@@ -260,7 +294,14 @@
 	function makeInitialTabs(): GraphTab[] {
 		return mode === 'summary'
 			? [{ id: 'summary-graph', label: 'Summary Graph', categoryPath: null, closable: false }]
-			: [{ id: 'topic-graph', label: 'Semantic Web', categoryPath: null, closable: false }];
+			: [
+					{
+						id: 'topic-graph',
+						label: rootTabLabel ?? 'Semantic Web',
+						categoryPath: null,
+						closable: false
+					}
+				];
 	}
 
 	function toDialogNode(node: GraphCategoryNode): SummaryCategoryNode {
@@ -451,6 +492,90 @@
 
 	// ---- Data loading ----
 
+	function createItemNode(parent: GraphCategoryNode, topic: TopicCard): GraphCategoryNode {
+		const label = String(topic.topicName || topic.id || 'Provision').trim();
+		return {
+			id: `${parent.id}::item::${topic.id}`,
+			label,
+			categoryPath: `${parent.categoryPath}/${label}`,
+			metadata: {
+				desc: topic.topicText,
+				confidence: parent.metadata.confidence,
+				keywords: topic.topicKeywords ?? [],
+				create_time: parent.metadata.create_time
+			},
+			childIds: [],
+			itemIds: [topic.id],
+			hasItemsFile: false,
+			expanded: false,
+			isItemNode: true
+		};
+	}
+
+	async function expandTopicItemsAsNodes(baseNodes: GraphCategoryNode[]): Promise<GraphCategoryNode[]> {
+		if (!showItemNodes || mode !== 'topic' || !getCategoryItems) return baseNodes;
+
+		const leafCategories = baseNodes.filter((node) => node.childIds.length === 0 && node.itemIds.length > 0);
+		if (leafCategories.length === 0) return baseNodes;
+
+		const fetched = await Promise.all(
+			leafCategories.map(async (node) => ({
+				node,
+				response: await getCategoryItems(node.categoryPath)
+			}))
+		);
+		const nextCategoryTopics: Record<string, TopicCard[]> = {};
+		const itemNodes: GraphCategoryNode[] = [];
+		const itemChildIdsByParent = new Map<string, string[]>();
+
+		for (const { node, response } of fetched) {
+			const topics = response.topics ?? [];
+			nextCategoryTopics[node.categoryPath] = topics;
+			if (topics[0]) {
+				selectedTopicIdByPath = {
+					...selectedTopicIdByPath,
+					[node.categoryPath]: topics[0].id
+				};
+				selectedTopicTargetByPath = {
+					...selectedTopicTargetByPath,
+					[node.categoryPath]: {
+						inputId: topics[0].inputId,
+						page: topics[0].page,
+						topicId: topics[0].id
+					}
+				};
+			}
+
+			const childNodes = topics.map((topic) => createItemNode(node, topic));
+			itemNodes.push(...childNodes);
+			itemChildIdsByParent.set(
+				node.id,
+				childNodes.map((child) => child.id)
+			);
+		}
+
+		categoryTopics = { ...categoryTopics, ...nextCategoryTopics };
+		const categoryNodeIds = new Set(baseNodes.map((node) => node.id));
+		return [
+			...baseNodes.map((node) => {
+				const itemChildIds = itemChildIdsByParent.get(node.id);
+				const hasCategoryChildren = node.childIds.some((childId) => categoryNodeIds.has(childId));
+				const shouldExpandTopLevelCategory =
+					node.categoryPath.split('/').filter(Boolean).length === 1 && hasCategoryChildren;
+				if (itemChildIds) {
+					return {
+						...node,
+						childIds: [...new Set([...node.childIds, ...itemChildIds])],
+						expanded: shouldExpandTopLevelCategory
+					};
+				}
+				if (shouldExpandTopLevelCategory) return { ...node, expanded: true };
+				return node;
+			}),
+			...itemNodes
+		];
+	}
+
 	async function loadGraph() {
 		loading = true;
 		loadError = '';
@@ -468,8 +593,8 @@
 					expanded: n.expanded ?? false
 				}));
 			} else {
-				const response = await listTopicGraph();
-				nodes = response.results.map((n: any) => ({
+				const response = listGraph ? await listGraph() : await listTopicGraph();
+				const graphNodes = response.results.map((n: any) => ({
 					id: n.id,
 					label: n.label,
 					categoryPath: n.categoryPath,
@@ -479,6 +604,7 @@
 					hasItemsFile: n.hasTopicsFile,
 					expanded: n.expanded ?? false
 				}));
+				nodes = await expandTopicItemsAsNodes(graphNodes);
 			}
 			selectedNodeId = nodes[0]?.id ?? null;
 			clearLevelFilter();
@@ -548,7 +674,9 @@
 			if (categoryTopics[node.categoryPath] || categoryLoadingByPath[node.categoryPath]) return;
 			categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: true };
 			try {
-				const response = await getTopicCategory(node.categoryPath);
+				const response = getCategoryItems
+					? await getCategoryItems(node.categoryPath)
+					: await getTopicCategory(node.categoryPath);
 				categoryTopics = { ...categoryTopics, [node.categoryPath]: response.topics };
 				if (response.topics[0]) {
 					selectedTopicIdByPath = {
@@ -1536,7 +1664,7 @@
 			>
 				<div class="eyebrow">Load Error</div>
 				<h3>
-					Could not load {mode === 'summary' ? 'Summary Graph' : 'Semantic Web'}
+					Could not load {mode === 'summary' ? 'Summary Graph' : (loadErrorLabel ?? 'Semantic Web')}
 				</h3>
 				<p class="dialog-copy">{loadError}</p>
 				<div class="dialog-actions">
@@ -1658,12 +1786,12 @@
 
 	<div class="hero">
 		<div>
-			<div class="eyebrow">{mode === 'summary' ? 'Document Summaries' : 'Semantic Web'}</div>
-			<h2>{mode === 'summary' ? 'Summary Graph' : 'Topic Graph'}</h2>
+			<div class="eyebrow">{mode === 'summary' ? 'Document Summaries' : (heroEyebrow ?? 'Semantic Web')}</div>
+			<h2>{mode === 'summary' ? 'Summary Graph' : (heroTitle ?? 'Topic Graph')}</h2>
 			<p>
 				{mode === 'summary'
 					? 'Category-first workspace for browsing, editing, and opening category-path summary tabs.'
-					: 'Category-first workspace for browsing topics indexed in the Semantic Web.'}
+					: (heroDescription ?? 'Category-first workspace for browsing topics indexed in the Semantic Web.')}
 			</p>
 		</div>
 		<div class="hero-stats">
@@ -1674,7 +1802,7 @@
 				<strong>
 					{mode === 'summary'
 						? 'Phase 1 Mock'
-						: nodes.reduce((s, n) => s + n.itemIds.length, 0)}
+						: totalItemCount}
 				</strong>
 			</div>
 		</div>
@@ -1804,7 +1932,7 @@
 							</div>
 						{:else if loadError}
 							<div class="empty-state">
-								{mode === 'summary' ? 'Summary Graph' : 'Semantic Web'} could not be loaded. Open
+								{mode === 'summary' ? 'Summary Graph' : (loadErrorLabel ?? 'Semantic Web')} could not be loaded. Open
 								the error dialog for details or try again.
 							</div>
 						{:else}
@@ -1897,7 +2025,7 @@
 												: `No ${mode === 'summary' ? 'summaries' : 'topics'}.txt file for this category`}
 											onclick={() => runHoverAction('show-items', hoveredNode)}
 										>
-											{mode === 'summary' ? 'Show Summaries' : 'Show Topics'}
+											{mode === 'summary' ? 'Show Summaries' : (showItemsLabel ?? 'Show Topics')}
 										</button>
 										<button
 											type="button"
@@ -2056,7 +2184,7 @@
 										<strong>{selectedNode.childIds.length}</strong>
 									</div>
 									<div class="inspector-stat">
-										<span>{mode === 'summary' ? 'Summaries' : 'Topics'}</span>
+										<span>{mode === 'summary' ? 'Summaries' : (itemLabelPlural ?? 'Topics')}</span>
 										<strong>{selectedNode.itemIds.length}</strong>
 									</div>
 									{#if mode === 'summary' && selectedNode.metadata.category_type}
@@ -2090,7 +2218,7 @@
 											: `No ${mode === 'summary' ? 'summaries' : 'topics'}.txt file for this category`}
 										onclick={() => showItems(selectedNode)}
 									>
-										{mode === 'summary' ? 'Show Summaries' : 'Show Topics'}
+										{mode === 'summary' ? 'Show Summaries' : (showItemsLabel ?? 'Show Topics')}
 									</button>
 								</div>
 								<div class="action-grid">

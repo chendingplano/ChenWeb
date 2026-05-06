@@ -25,7 +25,7 @@
 		clampDocStructureRecordGap,
 		clampDocStructureRecordHeight
 	} from './doc-structure-settings.js';
-	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
+	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -44,10 +44,6 @@
 	const fontSerif = "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
 	const fontMono = "'JetBrains Mono', 'IBM Plex Mono', monospace";
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
-	const INFO_PANEL_DEFAULT_WIDTH = 270;
-	const INFO_PANEL_MIN_WIDTH = 140;
-	const INFO_PANEL_MAX_WIDTH = 420;
-
 	type DocStructureSettings = {
 		lineListWidth: number;
 		recordBackground: string;
@@ -78,8 +74,6 @@
 	let lineListResizing = $state(false);
 	let lineListSettingsOpen = $state(false);
 	let settingsHydrated = $state(false);
-	let infoPanelWidth = $state(INFO_PANEL_DEFAULT_WIDTH);
-	let infoPanelResizing = $state(false);
 	let searchOpen = $state(false);
 	let searchRecordId = $state('');
 	let searchTitle = $state('');
@@ -342,58 +336,6 @@
 		}
 	}
 
-	function clampInfoPanelWidth(width: number): number {
-		return Math.min(INFO_PANEL_MAX_WIDTH, Math.max(INFO_PANEL_MIN_WIDTH, Math.round(width)));
-	}
-
-	function adjustInfoPanelWidth(delta: number) {
-		infoPanelWidth = clampInfoPanelWidth(infoPanelWidth + delta);
-	}
-
-	function startInfoPanelResize(event: PointerEvent) {
-		event.preventDefault();
-		const handle = event.currentTarget as HTMLElement | null;
-		const startX = event.clientX;
-		const startWidth = infoPanelWidth;
-		infoPanelResizing = true;
-		document.body.style.cursor = 'col-resize';
-		document.body.style.userSelect = 'none';
-		handle?.setPointerCapture?.(event.pointerId);
-
-		const handleMove = (moveEvent: PointerEvent) => {
-			infoPanelWidth = clampInfoPanelWidth(startWidth + (moveEvent.clientX - startX));
-		};
-		const handleUp = (upEvent: PointerEvent) => {
-			infoPanelResizing = false;
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			handle?.releasePointerCapture?.(upEvent.pointerId);
-			window.removeEventListener('pointermove', handleMove);
-			window.removeEventListener('pointerup', handleUp);
-			window.removeEventListener('pointercancel', handleUp);
-		};
-
-		window.addEventListener('pointermove', handleMove);
-		window.addEventListener('pointerup', handleUp, { once: true });
-		window.addEventListener('pointercancel', handleUp, { once: true });
-	}
-
-	function onInfoPanelResizerKeydown(event: KeyboardEvent) {
-		if (event.key === 'ArrowLeft') {
-			event.preventDefault();
-			adjustInfoPanelWidth(-16);
-		} else if (event.key === 'ArrowRight') {
-			event.preventDefault();
-			adjustInfoPanelWidth(16);
-		} else if (event.key === 'Home') {
-			event.preventDefault();
-			infoPanelWidth = INFO_PANEL_MIN_WIDTH;
-		} else if (event.key === 'End') {
-			event.preventDefault();
-			infoPanelWidth = INFO_PANEL_MAX_WIDTH;
-		}
-	}
-
 	function openSearch() {
 		searchOpen = true;
 		searchSelected = null;
@@ -594,7 +536,6 @@
 
 		return () => {
 			lineListResizing = false;
-			infoPanelResizing = false;
 			document.body.style.cursor = '';
 			document.body.style.userSelect = '';
 		};
@@ -846,7 +787,7 @@
 				<div class="doc-empty">Retrieve a record to display document and structure highlights.</div>
 			{:else}
 				{#if isPdf}
-					<SharedPdfViewer
+					<PdfViewWindow
 						inputId={currentInput.id}
 						{fileUrl}
 						bind:page={docPage}
@@ -856,42 +797,33 @@
 							? `${selectedHighlightTarget.page}:${selectedHighlightTarget.coords.join(',')}:${selectedHighlightTarget.version}`
 							: `${selectedLineKey ?? ''}:${highlightSelectionVersion}`}
 						renderHighlights={renderStructureHighlights}
+						sidebarMinWidth={140}
+						sidebarMaxWidth={420}
+						sidebarDefaultWidth={270}
 					>
-						<div slot="sidebar">
-							<div class="info-panel-shell" style={`width:${infoPanelWidth}px;`}>
-								<aside class="meta-panel">
-									<div class="meta-title">Selected Line</div>
-									{#if !selectedLine}
-										<div class="meta-empty">Select a line from the left panel.</div>
-									{:else}
-										<div class="meta-row"><span>Page</span><strong>{selectedLine.page_number}</strong></div>
-										<div class="meta-row"><span>Line</span><strong>{selectedLine.line_number}</strong></div>
-										<div class="meta-row">
-											<span>Corrected</span><strong>{selectedLine.corrected_line_type}</strong>
-										</div>
-										<div class="meta-row"><span>Original</span><strong>{selectedLine.line_type}</strong></div>
-										<div class="meta-row mono">
-											[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
-										</div>
-									{/if}
-									{#if correctedFile}
-										<div class="meta-title corrected-title">Corrected File</div>
-										<div class="meta-file">{correctedFile}</div>
-									{/if}
-								</aside>
-								<button
-									type="button"
-									class="info-panel-resizer"
-									class:active={infoPanelResizing}
-									aria-label="Resize information panel"
-									onpointerdown={startInfoPanelResize}
-									onkeydown={onInfoPanelResizerKeydown}
-								>
-									<span class="info-panel-resizer-grip" aria-hidden="true"></span>
-								</button>
-							</div>
-						</div>
-					</SharedPdfViewer>
+						{#snippet sidebar()}
+							<aside class="meta-panel">
+								<div class="meta-title">Selected Line</div>
+								{#if !selectedLine}
+									<div class="meta-empty">Select a line from the left panel.</div>
+								{:else}
+									<div class="meta-row"><span>Page</span><strong>{selectedLine.page_number}</strong></div>
+									<div class="meta-row"><span>Line</span><strong>{selectedLine.line_number}</strong></div>
+									<div class="meta-row">
+										<span>Corrected</span><strong>{selectedLine.corrected_line_type}</strong>
+									</div>
+									<div class="meta-row"><span>Original</span><strong>{selectedLine.line_type}</strong></div>
+									<div class="meta-row mono">
+										[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
+									</div>
+								{/if}
+								{#if correctedFile}
+									<div class="meta-title corrected-title">Corrected File</div>
+									<div class="meta-file">{correctedFile}</div>
+								{/if}
+							</aside>
+						{/snippet}
+					</PdfViewWindow>
 				{:else}
 					<iframe class="doc-iframe" src={fileUrl} title="Document viewer"></iframe>
 				{/if}
@@ -1628,70 +1560,6 @@
 		padding: 10px;
 		height: fit-content;
 	}
-	.info-panel-shell {
-		position: sticky;
-		top: 6px;
-		align-self: start;
-		width: 270px;
-		min-width: 140px;
-		max-width: 420px;
-		flex: 0 0 auto;
-		padding-right: 16px;
-	}
-	.info-panel-resizer {
-		position: absolute;
-		top: 0;
-		right: 0;
-		bottom: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 16px;
-		min-height: 120px;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		cursor: col-resize;
-		user-select: none;
-		touch-action: none;
-		outline: none;
-		z-index: 4;
-	}
-	.info-panel-resizer::before {
-		content: '';
-		width: 1px;
-		height: 100%;
-		background: var(--ink-line);
-		opacity: 0.8;
-		transition: background 150ms ease;
-	}
-	.info-panel-resizer:hover::before,
-	.info-panel-resizer.active::before,
-	.info-panel-resizer:focus-visible::before {
-		background: var(--brass);
-	}
-	.info-panel-resizer-grip {
-		position: absolute;
-		width: 8px;
-		height: 52px;
-		border-radius: 999px;
-		background:
-			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
-			var(--panel-bg);
-		border: 1px solid var(--ink-line-soft);
-		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
-		transition:
-			border-color 150ms ease,
-			background-color 150ms ease;
-	}
-	.info-panel-resizer:hover .info-panel-resizer-grip,
-	.info-panel-resizer.active .info-panel-resizer-grip,
-	.info-panel-resizer:focus-visible .info-panel-resizer-grip {
-		border-color: var(--brass);
-		background:
-			radial-gradient(circle, var(--brass) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
-			var(--panel-bg);
-	}
 	.meta-title {
 		font-weight: 700;
 		margin-bottom: 8px;
@@ -2156,12 +2024,10 @@
 		.pdf-layout {
 			grid-template-columns: 1fr;
 		}
-		.info-panel-shell,
 		.meta-panel {
 			position: static;
 		}
-		.line-list-resizer,
-		.info-panel-resizer {
+		.line-list-resizer {
 			display: none;
 		}
 	}

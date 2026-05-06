@@ -15,11 +15,6 @@ export const KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS = [
 		description: 'Table extraction workspace'
 	},
 	{
-		id: 'kb-compliance-provisions-terms',
-		label: 'Compliance Provisions and Terms',
-		description: 'Compliance provision library'
-	},
-	{
 		id: 'kb-quotations',
 		label: 'Quotations',
 		description: 'Quotation extraction workspace'

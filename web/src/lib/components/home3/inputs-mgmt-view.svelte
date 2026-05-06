@@ -8,7 +8,7 @@
 		type KbInputRecord,
 		type RawLine
 	} from '$lib/services/kbService';
-	import SharedPdfViewer from '$lib/components/home3/shared-pdf-viewer.svelte';
+	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 
@@ -110,12 +110,6 @@
 	let pdfCanvasHostEl = $state<HTMLDivElement | null>(null);
 	let pdfViewportByPage = new Map<number, PdfPageViewport>();
 	let pdfActiveRenders = new Map<number, { cancel: () => void }>(); // Upsidedown prevention
-	let metadataPanelWidth = $state(340);
-	let metadataResizing = false;
-	let metadataResizeStartX = 0;
-	let metadataResizeStartWidth = 340;
-	const METADATA_PANEL_MIN_WIDTH = 260;
-	const METADATA_PANEL_MAX_WIDTH = 620;
 
 	let searchOpen = $state(false);
 
@@ -996,31 +990,6 @@
 		return `${Math.round(pdfZoom * 100)}%`;
 	}
 
-	function onMetadataResizeMove(e: MouseEvent) {
-		if (!metadataResizing) return;
-		const delta = e.clientX - metadataResizeStartX;
-		metadataPanelWidth = Math.max(
-			METADATA_PANEL_MIN_WIDTH,
-			Math.min(METADATA_PANEL_MAX_WIDTH, metadataResizeStartWidth + delta)
-		);
-	}
-
-	function stopMetadataResize() {
-		if (!metadataResizing) return;
-		metadataResizing = false;
-		document.removeEventListener('mousemove', onMetadataResizeMove);
-		document.removeEventListener('mouseup', stopMetadataResize);
-	}
-
-	function startMetadataResize(e: MouseEvent) {
-		metadataResizing = true;
-		metadataResizeStartX = e.clientX;
-		metadataResizeStartWidth = metadataPanelWidth;
-		document.addEventListener('mousemove', onMetadataResizeMove);
-		document.addEventListener('mouseup', stopMetadataResize);
-		e.preventDefault();
-	}
-
 	async function ensurePdfLib() {
 		if (pdfLib) return;
 		const mod = (await import('pdfjs-dist')) as unknown as PdfJsLib;
@@ -1473,17 +1442,20 @@
 						</div>
 					{:else}
 						{#if isPdf}
-							<SharedPdfViewer
+							<PdfViewWindow
 								inputId={currentInput.id}
 								{fileUrl}
 								bind:page={docPage}
 								bind:zoom={pdfZoom}
 								bind:numPages={pdfNumPages}
-								highlightVersion={`${currentInput.id}:${metadataPanelWidth}`}
+								highlightVersion={currentInput.id}
 								respectPageRotation={false}
+								sidebarMinWidth={260}
+								sidebarMaxWidth={620}
+								sidebarDefaultWidth={340}
 							>
-								<div slot="sidebar">
-									<aside class="metadata-panel" style={`width:${metadataPanelWidth}px;`}>
+								{#snippet sidebar()}
+								<aside class="metadata-panel">
 										<div class="metadata-head">
 											<div class="metadata-title">Document</div>
 										</div>
@@ -1643,15 +1615,8 @@
 											</div>
 										</div>
 									</aside>
-								</div>
-								<button
-									slot="sidebar-resizer"
-									type="button"
-									class="metadata-resizer"
-									onmousedown={startMetadataResize}
-									aria-label="Resize document metadata panel"
-								></button>
-							</SharedPdfViewer>
+								{/snippet}
+							</PdfViewWindow>
 						{:else}
 							<iframe
 								class="doc-frame"
@@ -2431,18 +2396,15 @@
 		min-height: 0;
 	}
 	.metadata-panel {
-		position: sticky;
-		top: 6px;
-		align-self: start;
+		width: 100%;
+		height: 100%;
 		background: var(--panel-bg);
 		border: 1px solid var(--ink-line);
 		display: flex;
 		flex-direction: column;
-		max-height: calc(100vh - 320px);
 		overflow: hidden;
 		scrollbar-width: thin;
 		scrollbar-color: var(--ink-line) transparent;
-		flex: 0 0 auto;
 		min-width: 0;
 	}
 	.metadata-head {
@@ -2458,27 +2420,6 @@
 		padding: 12px;
 		overflow-y: auto;
 		min-height: 0;
-	}
-	.metadata-resizer {
-		all: unset;
-		flex: 0 0 8px;
-		cursor: col-resize;
-		position: relative;
-		align-self: stretch;
-	}
-	.metadata-resizer::before {
-		content: '';
-		position: absolute;
-		left: 50%;
-		top: 0;
-		bottom: 0;
-		width: 1px;
-		transform: translateX(-50%);
-		background: var(--ink-line);
-		opacity: 0.7;
-	}
-	.metadata-resizer:hover::before {
-		background: var(--brass);
 	}
 	.metadata-title {
 		font-family: var(--font-serif);
@@ -3318,10 +3259,6 @@
 		.metadata-panel {
 			position: static;
 			max-height: none;
-			width: auto !important;
-		}
-		.metadata-resizer {
-			display: none;
 		}
 	}
 	@media (max-width: 820px) {

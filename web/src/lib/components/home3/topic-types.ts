@@ -18,6 +18,7 @@ export type TopicRecordTarget = {
 
 export type TopicCard = {
 	id: string;
+	topicName?: string;
 	pdfFileName: string;
 	topicKeywords: string[];
 	topicText: string;

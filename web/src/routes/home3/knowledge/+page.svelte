@@ -26,6 +26,11 @@
 	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import {
+		getProvisionCategory,
+		getRecordProvisions,
+		listProvisionGraph
+	} from '$lib/services/kbService';
+	import {
 		KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS,
 		isUnderConstructionKnowledgeSection
 	} from '$lib/components/home3/knowledge-sections.js';
@@ -42,10 +47,11 @@
 		| 'kb-summary-tree'
 		| 'kb-topic-graph'
 		| 'kb-topic-tree'
+		| 'kb-provision-graph'
+		| 'kb-provision-tree'
 		| 'kb-references'
 		| 'kb-formulas'
 		| 'kb-tables'
-		| 'kb-compliance-provisions-terms'
 		| 'kb-quotations'
 		| 'kb-case-studies'
 		| 'kb-workflow'
@@ -63,7 +69,6 @@
 		'kb-references': BookOpenIcon,
 		'kb-formulas': FunctionSquareIcon,
 		'kb-tables': Table2Icon,
-		'kb-compliance-provisions-terms': ShieldCheckIcon,
 		'kb-quotations': QuoteIcon,
 		'kb-case-studies': BriefcaseBusinessIcon,
 		'kb-workflow': WorkflowIcon,
@@ -138,6 +143,24 @@
 				}
 			]
 		},
+		{
+			id: 'kb-provision-graph',
+			label: 'Compliance Provisions',
+			description: 'Provision graph and document tree',
+			icon: ShieldCheckIcon,
+			children: [
+				{
+					id: 'kb-provision-graph',
+					label: 'Provision Web',
+					description: 'Category-first provision graph'
+				},
+				{
+					id: 'kb-provision-tree',
+					label: 'Provision Tree',
+					description: 'Document-centric provision browser'
+				}
+			]
+		},
 		...KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.map((section) => ({
 			id: section.id as KbSectionId,
 			label: section.label,
@@ -160,6 +183,7 @@
 
 	let documentSummariesOpen = $state(true);
 	let semanticWebOpen = $state(true);
+	let complianceProvisionsOpen = $state(true);
 	let activeItem = $derived(
 		menuItems.find(
 			(item) =>
@@ -189,6 +213,9 @@
 		if (id === 'kb-topic-graph' || id === 'kb-topic-tree') {
 			semanticWebOpen = true;
 		}
+		if (id === 'kb-provision-graph' || id === 'kb-provision-tree') {
+			complianceProvisionsOpen = true;
+		}
 	}
 
 	function isCollapsibleParent(item: KbMenuItem) {
@@ -198,12 +225,14 @@
 	function isParentOpen(item: KbMenuItem) {
 		if (item.id === 'kb-summary-graph') return documentSummariesOpen;
 		if (item.id === 'kb-topic-graph') return semanticWebOpen;
+		if (item.id === 'kb-provision-graph') return complianceProvisionsOpen;
 		return false;
 	}
 
 	function toggleParentOpen(item: KbMenuItem) {
 		if (item.id === 'kb-summary-graph') documentSummariesOpen = !documentSummariesOpen;
 		else if (item.id === 'kb-topic-graph') semanticWebOpen = !semanticWebOpen;
+		else if (item.id === 'kb-provision-graph') complianceProvisionsOpen = !complianceProvisionsOpen;
 	}
 
 	function isChildActive(childId: KbSectionId) {
@@ -439,6 +468,34 @@
 				<TopicGraphView {darkMode} />
 			{:else if activeSection === 'kb-topic-tree'}
 				<TopicTreeView {darkMode} />
+			{:else if activeSection === 'kb-provision-graph'}
+				<TopicGraphView
+					{darkMode}
+					heroEyebrow="Compliance Provisions"
+					heroTitle="Provision Web"
+					heroDescription="Category-first workspace for browsing compliance provisions indexed from the active knowledge store."
+					rootTabLabel="Provision Web"
+					loadErrorLabel="Provision Web"
+					itemLabelPlural="Provisions"
+					showItemsLabel="Show Provisions"
+					showItemNodes={true}
+					listGraph={() => listProvisionGraph(knowledgeStoreState.activeStore?.id ?? null)}
+					getCategoryItems={(categoryPath) =>
+						getProvisionCategory(categoryPath, knowledgeStoreState.activeStore?.id ?? null)
+					}
+				/>
+			{:else if activeSection === 'kb-provision-tree'}
+				<TopicTreeView
+					{darkMode}
+					heroEyebrow="Compliance Provisions"
+					heroTitle="Provision Tree"
+					heroDescription="Document-centric browser over compliance provisions extracted from chunks."
+					sidebarTitle="Selected Provision"
+					loadErrorTitle="Provision Tree"
+					itemSingular="provision"
+					itemPlural="provisions"
+					getRecordItems={getRecordProvisions}
+				/>
 			{:else if isUnderConstructionKnowledgeSection(activeSection)}
 				<div
 					class="flex h-full flex-col items-center justify-center p-8"
