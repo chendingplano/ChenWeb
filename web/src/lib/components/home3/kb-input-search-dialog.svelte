@@ -1,13 +1,18 @@
 <script lang="ts">
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 	import { listKbInputs, type KbInputRecord } from '$lib/services/kbService';
+	import { createDefaultRecordBrowserFilters } from './topic-tree-record-browser.js';
+
+	type RecordBrowserFilters = ReturnType<typeof createDefaultRecordBrowserFilters>;
 
 	let {
 		open = $bindable(false),
-		onSelect = () => {}
+		onSelect = () => {},
+		initialFilters = createDefaultRecordBrowserFilters()
 	}: {
 		open?: boolean;
-		onSelect?: (record: KbInputRecord) => void;
+		onSelect?: (record: KbInputRecord, filters: RecordBrowserFilters) => void;
+		initialFilters?: RecordBrowserFilters;
 	} = $props();
 
 	const docTypeOptions = ['all', 'pdf', 'doc', 'excel', 'ppt', 'text', 'markdown'];
@@ -32,26 +37,47 @@
 	let lastOpenState = $state(false);
 
 	$effect(() => {
-		if (open && !lastOpenState) resetSearch();
+		if (open && !lastOpenState) applyFilters(initialFilters);
 		lastOpenState = open;
 	});
 
 	function resetSearch() {
+		applyFilters(createDefaultRecordBrowserFilters());
+	}
+
+	function applyFilters(filters: RecordBrowserFilters) {
 		searchSelected = null;
 		searchResults = [];
 		searchError = '';
-		searchRecordId = '';
-		searchTitle = '';
-		searchDocNo = '';
-		searchFileName = '';
-		searchDocType = 'all';
-		searchParserName = '';
-		searchOperation = '';
-		searchProcStatus = 'all';
-		searchCreateStart = '';
-		searchCreateEnd = '';
-		searchModifyStart = '';
-		searchModifyEnd = '';
+		searchRecordId = filters.searchRecordId ?? '';
+		searchTitle = filters.searchTitle ?? '';
+		searchDocNo = filters.searchDocNo ?? '';
+		searchFileName = filters.searchFileName ?? '';
+		searchDocType = filters.searchDocType ?? 'all';
+		searchParserName = filters.searchParserName ?? '';
+		searchOperation = filters.searchOperation ?? '';
+		searchProcStatus = filters.searchProcStatus ?? 'all';
+		searchCreateStart = filters.searchCreateStart ?? '';
+		searchCreateEnd = filters.searchCreateEnd ?? '';
+		searchModifyStart = filters.searchModifyStart ?? '';
+		searchModifyEnd = filters.searchModifyEnd ?? '';
+	}
+
+	function currentFilters(): RecordBrowserFilters {
+		return {
+			searchRecordId,
+			searchTitle,
+			searchDocNo,
+			searchFileName,
+			searchDocType,
+			searchParserName,
+			searchOperation,
+			searchProcStatus,
+			searchCreateStart,
+			searchCreateEnd,
+			searchModifyStart,
+			searchModifyEnd
+		};
 	}
 
 	async function runSearch() {
@@ -90,7 +116,7 @@
 
 	function pickSearchResult(record: KbInputRecord) {
 		open = false;
-		onSelect(record);
+		onSelect(record, currentFilters());
 	}
 
 	function confirmSearchSelection() {
@@ -345,7 +371,7 @@
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
 	.dialog-overlay {
-		position: absolute;
+		position: fixed;
 		inset: 0;
 		z-index: 25;
 		display: flex;

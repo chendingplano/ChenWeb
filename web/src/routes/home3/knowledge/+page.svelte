@@ -467,7 +467,7 @@
 			{:else if activeSection === 'kb-topic-graph'}
 				<TopicGraphView {darkMode} />
 			{:else if activeSection === 'kb-topic-tree'}
-				<TopicTreeView {darkMode} />
+				<TopicTreeView {darkMode} browserInstanceKey="topic-tree" />
 			{:else if activeSection === 'kb-provision-graph'}
 				<TopicGraphView
 					{darkMode}
@@ -487,6 +487,7 @@
 			{:else if activeSection === 'kb-provision-tree'}
 				<TopicTreeView
 					{darkMode}
+					browserInstanceKey="provision-tree"
 					heroEyebrow="Compliance Provisions"
 					heroTitle="Provision Tree"
 					heroDescription="Document-centric browser over compliance provisions extracted from chunks."

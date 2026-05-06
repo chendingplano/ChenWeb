@@ -1,17 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import SearchIcon from '@lucide/svelte/icons/search';
 	import PanelsTopLeftIcon from '@lucide/svelte/icons/panels-top-left';
 	import Rows3Icon from '@lucide/svelte/icons/rows-3';
 	import {
-		getKbInput,
 		getRecordSummaries,
-		searchSummaryTree,
 		type KbInputRecord
 	} from '$lib/services/kbService';
-	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
+	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
-	import ViewToolbar from './view-toolbar.svelte';
 	import {
 		createSummaryTreeState,
 		selectRecordSummaryTarget,
@@ -19,9 +14,11 @@
 		toggleSummaryTreeListMode
 	} from './summary-tree-state.js';
 	import type { SummaryRecordTarget, SummaryTreeRecord } from './summary-types';
-	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 
-	let { darkMode = true }: { darkMode?: boolean } = $props();
+	let {
+		darkMode = true,
+		browserInstanceKey = 'summary-tree'
+	}: { darkMode?: boolean; browserInstanceKey?: string } = $props();
 
 	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
 	let panelAlt = $derived(darkMode ? '#0f172a' : '#eef2ff');
@@ -30,49 +27,28 @@
 	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
 	let accent = $derived(darkMode ? '#818cf8' : '#4f46e5');
 
-	let searchOpen = $state(false);
-	let recordIdInput = $state('');
-	let results = $state<SummaryTreeRecord[]>([]);
-	let loading = $state(true);
 	let loadError = $state('');
 	let errorDialogOpen = $state(false);
 	let summaryLoadingByRecordId = $state<Record<number, boolean>>({});
+	let recordCache = $state<Record<number, SummaryTreeRecord>>({});
 	let treeState = $state(createSummaryTreeState());
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
 
-	onMount(async () => {
-		await runSearch();
-	});
-
-	let activeRecord = $derived(results.find((record) => record.id === treeState.selectedRecordId) ?? results[0] ?? null);
+	let activeRecord = $derived(
+		treeState.selectedRecordId != null ? (recordCache[treeState.selectedRecordId] ?? null) : null
+	);
 	let selectedSummary = $derived(
 		activeRecord?.summaries.find((summary) => summary.id === treeState.selectedSummaryId) ?? null
 	);
 	let viewerInputId = $derived(treeState.selectedPdfTarget?.inputId ?? activeRecord?.id ?? null);
-	let viewerFileUrl = $derived(
-		viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : ''
-	);
-	let viewerIsPdf = $derived(
-		(activeRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf')
-	);
+	let viewerFileUrl = $derived(viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : '');
+	let viewerIsPdf = $derived((activeRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf'));
 
 	type SummaryPdfViewport = {
 		convertToViewportRectangle: (rect: number[]) => number[];
 	};
-
-	function recordDisplayName(record: SummaryTreeRecord) {
-		return record.title?.trim() || `Record #${record.id}`;
-	}
-
-	function recordDisplayDocNo(record: SummaryTreeRecord) {
-		return record.docNo?.trim() || '—';
-	}
-
-	function formatRecordTime(value: string) {
-		return value?.trim() || '—';
-	}
 
 	function formatCoords(coords: number[]) {
 		if (!Array.isArray(coords) || coords.length < 4) return '—';
@@ -142,12 +118,6 @@
 	}
 
 	$effect(() => {
-		if (!activeRecord && results[0]) {
-			treeState = selectSummaryTreeRecord(treeState, results[0].id);
-		}
-	});
-
-	$effect(() => {
 		const selectedPage = treeState.selectedPdfTarget?.page;
 		if (selectedPage) {
 			docPage = selectedPage;
@@ -160,69 +130,25 @@
 		}
 	});
 
-	async function runSearch() {
-		loading = true;
-		loadError = '';
-		try {
-			const directRecordId = Number(recordIdInput.trim());
-			if (recordIdInput.trim() !== '') {
-				if (!Number.isFinite(directRecordId) || directRecordId <= 0) {
-					throw new Error('Enter a valid Record ID');
-				}
-				const response = await getKbInput(directRecordId);
-				results = [mapKbInputToSummaryTreeRecord(response.record)];
-				treeState = createSummaryTreeState();
-				treeState = selectSummaryTreeRecord(treeState, response.record.id);
-				return;
-			}
-
-			const response = await searchSummaryTree({
-				recordId: '',
-				title: '',
-				docNo: '',
-				fileName: '',
-				docType: 'all',
-				parserName: '',
-				operation: '',
-				procStatus: 'all',
-				createStart: '',
-				createEnd: '',
-				modifyStart: '',
-				modifyEnd: '',
-				ksStoreId: knowledgeStoreState.activeStore?.id ?? null
-			});
-			results = response.results;
-			treeState = createSummaryTreeState();
-			if (response.results[0]) {
-				treeState = selectSummaryTreeRecord(treeState, response.results[0].id);
-			}
-		} catch (error) {
-			results = [];
-			treeState = createSummaryTreeState();
-			loadError =
-				error instanceof Error ? error.message : 'Failed to load summary tree records';
-			errorDialogOpen = true;
-		} finally {
-			loading = false;
-		}
-	}
-
 	async function ensureRecordSummaries(recordId: number) {
-		const current = results.find((record) => record.id === recordId);
+		const current = recordCache[recordId];
 		if (!current || current.summaries.length > 0 || summaryLoadingByRecordId[recordId]) return;
 
 		summaryLoadingByRecordId = { ...summaryLoadingByRecordId, [recordId]: true };
 		try {
 			const response = await getRecordSummaries(recordId);
-			results = results.map((record) =>
-				record.id === recordId
-					? {
-							...record,
-							summaries: response.summaries.map((summary) => ({ ...summary, recordId }))
-						}
-					: record
-			);
-			if (treeState.selectedRecordId === recordId && response.summaries[0] && !treeState.selectedPdfTarget) {
+			recordCache = {
+				...recordCache,
+				[recordId]: {
+					...current,
+					summaries: response.summaries.map((summary) => ({ ...summary, recordId }))
+				}
+			};
+			if (
+				treeState.selectedRecordId === recordId &&
+				response.summaries[0] &&
+				!treeState.selectedPdfTarget
+			) {
 				treeState = selectRecordSummaryTarget(treeState, {
 					recordId,
 					summaryId: response.summaries[0].id,
@@ -238,20 +164,38 @@
 			summaryLoadingByRecordId = { ...summaryLoadingByRecordId, [recordId]: false };
 		}
 	}
+
+	function handleRecordSelect(record: KbInputRecord) {
+		const mapped = mapKbInputToSummaryTreeRecord(record);
+		recordCache = {
+			...recordCache,
+			[record.id]: {
+				...(recordCache[record.id] ?? mapped),
+				...mapped,
+				summaries: recordCache[record.id]?.summaries ?? []
+			}
+		};
+		treeState = selectSummaryTreeRecord(treeState, record.id);
+	}
+
+	function mapBrowserRecord(record: KbInputRecord) {
+		const mapped = mapKbInputToSummaryTreeRecord(record);
+		return {
+			id: record.id,
+			title: mapped.title,
+			subtitle: mapped.fileName,
+			meta: [mapped.docNo, mapped.parserName],
+			status: mapped.procStatus,
+			description: mapped.createTime,
+			badges: [mapped.docType]
+		};
+	}
 </script>
 
 <div
 	class="tree-shell"
 	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148, 163, 184, 0.16); --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted}; --brass:#d8a74b; --crimson:#fca5a5; --font-mono:ui-monospace, SFMono-Regular, Menlo, monospace; --font-serif:\"Iowan Old Style\", \"Palatino Linotype\", \"Book Antiqua\", Georgia, serif;`}
 >
-	<KbInputSearchDialog
-		bind:open={searchOpen}
-		onSelect={async (record) => {
-			recordIdInput = String(record.id);
-			await runSearch();
-		}}
-	/>
-
 	{#if errorDialogOpen && loadError}
 		<div
 			class="error-overlay"
@@ -272,20 +216,10 @@
 				onkeydown={(event) => event.stopPropagation()}
 			>
 				<div class="eyebrow">Load Error</div>
-				<h3>Could not load Summary Tree data</h3>
+				<h3>Could not load summary tree data</h3>
 				<p class="dialog-copy">{loadError}</p>
 				<div class="dialog-actions">
 					<button type="button" class="ghost" onclick={() => (errorDialogOpen = false)}>Close</button>
-					<button
-						type="button"
-						class="primary"
-						onclick={async () => {
-							errorDialogOpen = false;
-							await runSearch();
-						}}
-					>
-						Try Again
-					</button>
 				</div>
 			</div>
 		</div>
@@ -295,7 +229,7 @@
 		<div>
 			<div class="eyebrow">Document Summaries</div>
 			<h2>Summary Tree</h2>
-			<p>Document-centric browser over <code>kb.inputs</code> with a search area modeled after Document Details.</p>
+			<p>Document-centric browser over <code>kb.inputs</code> with a shared record browser on the left.</p>
 		</div>
 		<div class="hero-actions">
 			<button type="button" class="ghost" onclick={() => (treeState = toggleSummaryTreeListMode(treeState))}>
@@ -304,117 +238,26 @@
 					Expanded View
 				{:else}
 					<Rows3Icon class="h-4 w-4" />
-					Document Details View
+					Compact View
 				{/if}
-			</button>
-			<button type="button" class="primary" onclick={() => (searchOpen = true)}>
-				<SearchIcon class="h-4 w-4" />
-				Search
 			</button>
 		</div>
 	</div>
 
-	<ViewToolbar {darkMode} />
-
 	<div class="workspace">
-		<div class="left-panel">
-			<div class="left-controls">
-				<label class="field">
-					<span class="field-label">Record ID</span>
-					<div class="field-row">
-						<input
-							type="text"
-							inputmode="numeric"
-							bind:value={recordIdInput}
-							placeholder="e.g. 1042"
-							onkeydown={(e) => {
-								if (e.key === 'Enter') void runSearch();
-							}}
-						/>
-						<button type="button" class="ghost search-btn" onclick={() => (searchOpen = true)} title="Search records from kb.inputs">
-							<SearchIcon class="h-4 w-4" />
-							Search
-						</button>
-					</div>
-				</label>
-
-				<button type="button" class="retrieve-btn" onclick={runSearch} disabled={loading}>
-					{#if loading}
-						Loading…
-					{:else}
-						<span class="retrieve-arrow">→</span>
-						Retrieve
-					{/if}
-				</button>
-			</div>
-
-			<div class="left-meta">
-				<div class="left-meta-title">kb.inputs</div>
-				<div class="left-meta-count">{results.length} found</div>
-			</div>
-
-			<div class="result-list summary-tree-results">
-				{#if loading}
-					<div class="empty-state">Loading records…</div>
-				{:else if loadError}
-					<div class="empty-state">Summary Tree could not be loaded. Open the error dialog for details or try again.</div>
-				{:else if results.length === 0}
-					<div class="empty-state">No summary records found.</div>
-				{:else if treeState.listMode === 'compact'}
-					{#each results as record, idx (record.id)}
-						<button
-							type="button"
-							class="record-browser-card"
-							class:selected={treeState.selectedRecordId === record.id}
-							onclick={() => (treeState = selectSummaryTreeRecord(treeState, record.id))}
-						>
-							<div class="card-rule" aria-hidden="true"></div>
-							<div class="card-body">
-								<div class="card-row-top">
-									<div class="card-index">
-										№ {String(idx + 1).padStart(3, '0')}
-										<span class="card-id">id {record.id}</span>
-									</div>
-									<div class="card-conf mono" title="Type">{record.docType || '—'}</div>
-								</div>
-								<div class="card-name">{recordDisplayName(record)}</div>
-								<div class="card-desc">Doc No: {recordDisplayDocNo(record)}</div>
-								<div class="card-foot">
-									<span class="chip chip-quiet">{formatRecordTime(record.createTime)}</span>
-								</div>
-							</div>
-						</button>
-					{/each}
-				{:else}
-					{#each results as record}
-						<button
-							type="button"
-							class:selected={treeState.selectedRecordId === record.id}
-							class="record-card"
-							onclick={() => (treeState = selectSummaryTreeRecord(treeState, record.id))}
-						>
-							<div class="record-head">
-								<div>
-									<div class="record-title">{record.title}</div>
-									<div class="record-subtitle">{record.fileName}</div>
-								</div>
-								<div class="record-status">{record.procStatus}</div>
-							</div>
-							<div class="record-meta">
-								<span>{record.docNo}</span>
-								<span>{record.parserName}</span>
-							</div>
-							<p>
-								{record.summaries[0]?.summaryText ??
-									(treeState.selectedRecordId === record.id && summaryLoadingByRecordId[record.id]
-										? 'Loading summary preview…'
-										: 'Select this record to load its summaries.')}
-							</p>
-						</button>
-					{/each}
-				{/if}
-			</div>
-		</div>
+		<KbInputRecordBrowser
+			{darkMode}
+			instanceKey={browserInstanceKey}
+			title="kb.inputs"
+			subtitle="Search, filter, and select records before inspecting their summaries."
+			emptyTitle="No records found."
+			emptySubtitle="Use Search or Retrieve to browse kb.inputs for summaries."
+			scopeToActiveStore={true}
+			selectedRecordId={treeState.selectedRecordId}
+			renderMode={treeState.listMode === 'cards' ? 'cards' : 'compact'}
+			mapRecord={mapBrowserRecord}
+			onSelect={handleRecordSelect}
+		/>
 
 		<div class="right-panel">
 			<div class="right-tabs">
@@ -434,21 +277,26 @@
 							<span>{activeRecord.docType}</span>
 							<span>{activeRecord.parserName}</span>
 						</div>
-						<div class="summary-snippets">
-								{#each activeRecord.summaries as summary}
+						<div class="topic-snippets">
+							{#each activeRecord.summaries as summary}
 								<button
 									type="button"
 									class:selected={treeState.selectedSummaryId === summary.id}
 									class="snippet"
-									onclick={() => (treeState = selectRecordSummaryTarget(treeState, {
-										recordId: activeRecord.id,
-										summaryId: summary.id,
-										inputId: summary.inputId,
-										page: summary.page
-									}))}
+									onclick={() =>
+										(treeState = selectRecordSummaryTarget(treeState, {
+											recordId: activeRecord.id,
+											summaryId: summary.id,
+											inputId: summary.inputId,
+											page: summary.page
+										}))}
 								>
 									<div class="snippet-head">
-										<strong>{summary.id}</strong>
+										<div class="keyword-row">
+											{#each summary.keywords.slice(0, 4) as kw}
+												<span class="keyword">{kw}</span>
+											{/each}
+										</div>
 										<span>p.{summary.page}</span>
 									</div>
 									<p>{summary.summaryText}</p>
@@ -475,69 +323,45 @@
 								sidebarDefaultWidth={320}
 							>
 								{#snippet sidebar()}
-									<aside class="summary-sidebar">
-										<div class="summary-sidebar-title">Selected Summary</div>
+									<aside class="topic-sidebar">
+										<div class="topic-sidebar-title">Selected Summary</div>
 										{#if selectedSummary}
-											<div class="summary-sidebar-block">
-												<div class="summary-sidebar-row">
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-row">
 													<span>Summary ID</span>
 													<strong>{selectedSummary.id}</strong>
 												</div>
-												<div class="summary-sidebar-row">
+												<div class="topic-sidebar-row">
 													<span>Record ID</span>
 													<strong>{selectedSummary.recordId}</strong>
 												</div>
-												<div class="summary-sidebar-row">
+												<div class="topic-sidebar-row">
 													<span>Page</span>
 													<strong>{selectedSummary.page}</strong>
 												</div>
-												<div class="summary-sidebar-row">
-													<span>PDF</span>
-													<strong title={selectedSummary.pdfFileName}>{selectedSummary.pdfFileName}</strong>
-												</div>
-												<div class="summary-sidebar-row">
-													<span>Coords</span>
-													<strong class="coords-block">{formatTargets(selectedSummary.targets)}</strong>
+												<div class="topic-sidebar-row">
+													<span>Targets</span>
+													<strong>{formatTargets(selectedSummary.targets)}</strong>
 												</div>
 											</div>
-
-											<div class="summary-sidebar-block">
-												<div class="summary-sidebar-label">Summary</div>
-												<p class="summary-sidebar-copy">{selectedSummary.summaryText}</p>
-											</div>
-
-											<div class="summary-sidebar-block">
-												<div class="summary-sidebar-label">Keywords</div>
-												{#if selectedSummary.keywords.length > 0}
-													<div class="keyword-list">
-														{#each selectedSummary.keywords as keyword (keyword)}
-															<span class="keyword-chip">{keyword}</span>
-														{/each}
-													</div>
-												{:else}
-													<p class="summary-sidebar-copy muted">No keywords were extracted for this summary.</p>
-												{/if}
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-label">Summary</div>
+												<p class="topic-sidebar-copy">{selectedSummary.summaryText}</p>
 											</div>
 										{:else}
-											<div class="summary-sidebar-empty">Select a summary card to inspect it alongside the source PDF.</div>
+											<div class="topic-sidebar-empty">Select a summary to inspect it alongside the source PDF.</div>
 										{/if}
 									</aside>
 								{/snippet}
 							</PdfViewWindow>
 						{:else if viewerInputId && treeState.selectedPdfTarget}
-							<iframe
-								class="pdf-fallback-frame"
-								title={activeRecord.fileName}
-								src={viewerFileUrl}
-							></iframe>
+							<iframe class="pdf-fallback-frame" title={activeRecord.fileName} src={viewerFileUrl}></iframe>
 						{:else if summaryLoadingByRecordId[activeRecord.id]}
 							<div class="empty-state pdf-empty">Loading summaries for the selected record…</div>
 						{:else if activeRecord.summaries.length === 0}
 							<div class="empty-state pdf-empty">No summaries are available for this record yet.</div>
 						{:else}
-							<div class="empty-state pdf-empty">
-								Select a summary to move the PDF display to the relevant page.
-							</div>
+							<div class="empty-state pdf-empty">Select a summary to move the PDF display to the relevant page.</div>
 						{/if}
 					</div>
 				</div>
@@ -578,10 +402,7 @@
 		box-shadow: 0 30px 80px rgba(15, 23, 42, 0.5);
 	}
 
-	.dialog-copy {
-		margin-top: 0.55rem;
-		color: var(--muted);
-	}
+	.dialog-copy { margin-top: 0.55rem; color: var(--muted); }
 
 	.dialog-actions {
 		display: flex;
@@ -599,43 +420,19 @@
 		padding: 1.1rem 1.2rem;
 		border-radius: 24px;
 		background:
-			radial-gradient(circle at top right, rgba(59, 130, 246, 0.14), transparent 42%),
+			radial-gradient(circle at top right, rgba(129, 140, 248, 0.15), transparent 42%),
 			linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66));
 		border: 1px solid var(--border);
 	}
 
-	.eyebrow {
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--muted);
-	}
+	.eyebrow { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+	h2, h3, p { margin: 0; }
+	h2 { margin-top: 0.3rem; font-size: 1.5rem; }
+	.hero p { margin-top: 0.45rem; max-width: 52rem; color: var(--muted); }
 
-	h2,
-	h3,
-	p {
-		margin: 0;
-	}
+	.hero-actions { display: flex; gap: 0.75rem; }
 
-	h2 {
-		margin-top: 0.3rem;
-		font-size: 1.5rem;
-	}
-
-	.hero p {
-		margin-top: 0.45rem;
-		max-width: 52rem;
-		color: var(--muted);
-	}
-
-	.hero-actions {
-		display: flex;
-		gap: 0.75rem;
-	}
-
-	.ghost,
-	.primary {
+	.ghost {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -643,551 +440,72 @@
 		padding: 0.8rem 1rem;
 		border: 1px solid rgba(148, 163, 184, 0.16);
 		cursor: pointer;
-	}
-
-	.ghost {
 		background: rgba(15, 23, 42, 0.36);
 		color: var(--text);
-	}
-
-	.primary {
-		background: linear-gradient(135deg, #2563eb, #4f46e5);
-		border-color: transparent;
-		color: white;
-		font-weight: 700;
 	}
 
 	.workspace {
 		display: grid;
 		min-height: 0;
 		flex: 1;
-		grid-template-columns: 360px minmax(0, 1fr);
+		grid-template-columns: auto minmax(0, 1fr);
 		gap: 1rem;
 	}
 
-	.left-panel,
 	.right-panel {
 		min-height: 0;
 		border-radius: 24px;
 		border: 1px solid var(--border);
 		background: var(--panel);
-	}
-
-	.left-panel {
 		display: flex;
-		flex-direction: column;
-		padding: 0;
-		overflow: hidden;
-	}
-
-	.left-controls {
-		padding: 1rem;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.08);
-	}
-
-	.field {
-		display: block;
-	}
-
-	.field-label {
-		display: block;
-		margin-bottom: 0.6rem;
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--muted);
-	}
-
-	.field-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 0.75rem;
-	}
-
-	.field-row input {
-		width: 100%;
-		min-width: 0;
-		border-radius: 0;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(31, 41, 55, 0.9);
-		padding: 0.95rem 1rem;
-		font-size: 0.95rem;
-		color: #f3f4f6;
-	}
-
-	.search-btn {
-		padding-inline: 1rem;
-	}
-
-	.retrieve-btn {
-		margin-top: 1rem;
-		width: 100%;
-		border: none;
-		background: #d8a74b;
-		color: #111827;
-		padding: 0.95rem 1rem;
-		font-size: 1rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.retrieve-btn:disabled {
-		opacity: 0.7;
-		cursor: default;
-	}
-
-	.retrieve-arrow {
-		margin-right: 0.45rem;
-	}
-
-	.result-list {
-		display: flex;
-		min-height: 0;
-		flex: 1;
-		flex-direction: column;
-		overflow: auto;
-		padding: 0 1rem 1rem;
-	}
-
-	.summary-tree-results {
-		gap: 0.8rem;
-	}
-
-	.left-meta {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		padding: 1rem;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.08);
-	}
-
-	.left-meta-title {
-		font-size: 0.95rem;
-		font-weight: 700;
-		color: #f5e8c8;
-	}
-
-	.left-meta-count {
-		font-size: 0.78rem;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: #b8a57a;
-	}
-
-	.record-card {
-		margin-bottom: 0.75rem;
-		border-radius: 16px;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.28);
-		padding: 0.9rem;
-		text-align: left;
-		color: inherit;
-	}
-
-	.record-card.selected,
-	.record-card:hover {
-		border-color: rgba(129, 140, 248, 0.34);
-		background: rgba(99, 102, 241, 0.1);
-	}
-
-	.record-head,
-	.snippet-head {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
-
-	.record-title {
-		font-size: 0.94rem;
-		font-weight: 700;
-	}
-
-	.record-subtitle {
-		margin-top: 0.15rem;
-		font-size: 0.8rem;
-		color: var(--muted);
-	}
-
-	.record-meta,
-	.detail-meta {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.45rem;
-		margin: 0.75rem 0;
-	}
-
-	.record-meta span,
-	.record-status,
-	.detail-meta span {
-		border-radius: 999px;
-		padding: 0.25rem 0.55rem;
-		background: rgba(148, 163, 184, 0.12);
-		font-size: 0.72rem;
-		color: var(--muted);
-	}
-
-	.record-browser-card {
-		position: relative;
-		width: 100%;
-		border: 1px solid rgba(148, 163, 184, 0.12);
-		background: rgba(31, 41, 55, 0.72);
-		color: inherit;
-		text-align: left;
-		cursor: pointer;
-		overflow: hidden;
-	}
-
-	.record-browser-card:hover {
-		background: rgba(39, 51, 67, 0.84);
-	}
-
-	.record-browser-card.selected {
-		border-color: rgba(129, 140, 248, 0.38);
-		background: rgba(49, 58, 82, 0.9);
-	}
-
-	.card-rule {
-		position: absolute;
-		left: 0;
-		top: 0;
-		bottom: 0;
-		width: 6px;
-		background: rgba(129, 140, 248, 0.18);
-	}
-
-	.record-browser-card.selected .card-rule {
-		background: #818cf8;
-	}
-
-	.card-body {
-		padding: 1rem 1rem 1rem 1.25rem;
-	}
-
-	.card-row-top {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
-
-	.card-index {
-		font-size: 0.74rem;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: #b8a57a;
-	}
-
-	.card-id {
-		margin-left: 0.35rem;
-		color: #e6c06d;
-	}
-
-	.card-conf {
-		font-size: 0.82rem;
-		font-weight: 700;
-		color: #72d5d0;
-		text-transform: lowercase;
-	}
-
-	.card-name {
-		margin-top: 0.65rem;
-		font-size: 1rem;
-		font-weight: 700;
-		line-height: 1.35;
-		color: #f8fafc;
-	}
-
-	.record-browser-card.selected .card-name {
-		color: #ffffff;
-	}
-
-	.card-desc {
-		margin-top: 0.45rem;
-		font-size: 0.9rem;
-		color: #e5dec9;
-	}
-
-	.card-foot {
-		margin-top: 0.85rem;
-	}
-
-	.chip {
-		display: inline-flex;
-		align-items: center;
-		padding: 0.38rem 0.68rem;
-		border: 1px solid rgba(184, 165, 122, 0.22);
-		background: rgba(21, 28, 40, 0.9);
-		font-size: 0.78rem;
-		letter-spacing: 0.06em;
-		color: #b8a57a;
-	}
-
-	.chip-quiet {
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-	}
-
-	.right-panel {
-		display: flex;
-		min-height: 0;
 		flex-direction: column;
 		padding: 1rem;
 	}
 
-	.right-tabs {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.55rem;
-		margin-bottom: 1rem;
-	}
+	.right-tabs { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-bottom: 1rem; }
+	.tab { border-radius: 14px; padding: 0.72rem 0.9rem; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.3); font-weight: 700; }
+	.tab.active { border-color: rgba(129, 140, 248, 0.36); background: rgba(99, 102, 241, 0.16); color: #c7d2fe; }
+	.tab.passive { color: var(--muted); }
 
-	.tab {
-		border-radius: 14px;
-		padding: 0.72rem 0.9rem;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.3);
-		font-weight: 700;
-	}
+	.detail-grid { display: grid; min-height: 0; flex: 1; grid-template-columns: 340px minmax(0, 1fr); gap: 1rem; }
+	.detail-card, .pdf-card { display: flex; flex-direction: column; min-height: 0; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.26); padding: 1rem; }
+	.detail-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.75rem 0; }
+	.detail-meta span { border-radius: 999px; padding: 0.25rem 0.55rem; background: rgba(148, 163, 184, 0.12); font-size: 0.72rem; color: var(--muted); }
 
-	.tab.active {
-		border-color: rgba(59, 130, 246, 0.36);
-		background: rgba(37, 99, 235, 0.16);
-		color: #bfdbfe;
-	}
+	.topic-snippets { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 0.75rem; margin-top: 1rem; overflow: auto; padding-right: 0.25rem; }
 
-	.tab.passive {
-		color: var(--muted);
-	}
+	.snippet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+	.snippet { position: relative; border-radius: 16px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.34); padding: 0.85rem; text-align: left; color: inherit; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+	.snippet:hover { border-color: rgba(129, 140, 248, 0.34); }
+	.snippet.selected { border-color: rgba(165, 180, 252, 0.58); background: linear-gradient(180deg, rgba(99, 102, 241, 0.14), rgba(99, 102, 241, 0.06)), rgba(15, 23, 42, 0.9); box-shadow: 0 0 0 1px rgba(165, 180, 252, 0.18) inset, 0 16px 36px rgba(15, 23, 42, 0.24); transform: translateY(-1px); }
+	.snippet p { margin-top: 0.5rem; font-size: 0.84rem; color: var(--muted); line-height: 1.5; }
+	.snippet.selected p { color: #e0e7ff; }
 
-	.detail-grid {
-		display: grid;
-		min-height: 0;
-		flex: 1;
-		grid-template-columns: 340px minmax(0, 1fr);
-		gap: 1rem;
-	}
+	.keyword-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+	.keyword { border-radius: 999px; padding: 0.18rem 0.48rem; background: rgba(129, 140, 248, 0.14); font-size: 0.7rem; font-weight: 600; color: #c7d2fe; }
 
-	.detail-card,
-	.pdf-card {
-		display: flex;
-		flex-direction: column;
-		min-height: 0;
-		border-radius: 20px;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.26);
-		padding: 1rem;
-	}
+	.empty-state { display: flex; flex: 1; align-items: center; justify-content: center; border-radius: 18px; border: 1px dashed rgba(148, 163, 184, 0.2); background: rgba(2, 6, 23, 0.28); padding: 1rem; text-align: center; color: var(--muted); }
 
-	.summary-snippets {
-		display: flex;
-		min-height: 0;
-		flex: 1;
-		flex-direction: column;
-		gap: 0.75rem;
-		margin-top: 1rem;
-		overflow: auto;
-		padding-right: 0.25rem;
-	}
+	.pdf-card :global(.doc-page-bar) { margin-top: 0.85rem; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px 16px 0 0; }
+	.pdf-card :global(.pdf-stage) { margin-top: -1px; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 0 0 16px 16px; background: rgba(2, 6, 23, 0.28); }
 
-	.snippet {
-		position: relative;
-		border-radius: 16px;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.34);
-		padding: 0.85rem;
-		text-align: left;
-		color: inherit;
-		transition:
-			border-color 150ms ease,
-			background 150ms ease,
-			box-shadow 150ms ease,
-			transform 150ms ease;
-	}
+	.topic-sidebar { width: 100%; height: 100%; min-width: 0; padding: 1rem 1rem 1rem 0; background: rgba(15, 23, 42, 0.82); overflow: auto; }
+	.topic-sidebar-title, .topic-sidebar-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+	.topic-sidebar-title { margin-bottom: 0.85rem; }
+	.topic-sidebar-block + .topic-sidebar-block { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(148, 163, 184, 0.1); }
+	.topic-sidebar-row { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 0.6rem; margin-bottom: 0.6rem; align-items: start; }
+	.topic-sidebar-row span { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+	.topic-sidebar-row strong, .topic-sidebar-copy { min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
 
-	.snippet::before {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 0;
-		bottom: 0;
-		width: 4px;
-		border-radius: 16px 0 0 16px;
-		background: transparent;
-		transition: background 150ms ease;
-	}
+	.topic-sidebar-copy { margin-top: 0.55rem; font-size: 0.88rem; line-height: 1.6; color: var(--text); }
+	.topic-sidebar-empty { color: var(--muted); }
+	.topic-sidebar-empty { font-size: 0.9rem; line-height: 1.6; }
 
-	.snippet:hover {
-		border-color: rgba(59, 130, 246, 0.34);
-	}
+	.pdf-fallback-frame { margin-top: 0.85rem; width: 100%; min-height: 540px; flex: 1; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px; background: white; }
 
-	.snippet.selected {
-		border-color: rgba(96, 165, 250, 0.58);
-		background:
-			linear-gradient(180deg, rgba(37, 99, 235, 0.14), rgba(37, 99, 235, 0.06)),
-			rgba(15, 23, 42, 0.9);
-		box-shadow:
-			0 0 0 1px rgba(96, 165, 250, 0.18) inset,
-			0 16px 36px rgba(15, 23, 42, 0.24);
-		transform: translateY(-1px);
-	}
-
-	.snippet.selected::before {
-		background: linear-gradient(180deg, #60a5fa, #818cf8);
-	}
-
-	.snippet p {
-		margin-top: 0.5rem;
-		font-size: 0.84rem;
-		color: var(--muted);
-		line-height: 1.5;
-	}
-
-	.snippet.selected p {
-		color: #dbeafe;
-	}
-
-	.empty-state {
-		display: flex;
-		flex: 1;
-		align-items: center;
-		justify-content: center;
-		border-radius: 18px;
-		border: 1px dashed rgba(148, 163, 184, 0.2);
-		background: rgba(2, 6, 23, 0.28);
-		padding: 1rem;
-		text-align: center;
-		color: var(--muted);
-	}
-
-	.pdf-card :global(.doc-page-bar) {
-		margin-top: 0.85rem;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		border-radius: 16px 16px 0 0;
-	}
-
-	.pdf-card :global(.pdf-stage) {
-		margin-top: -1px;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		border-radius: 0 0 16px 16px;
-		background: rgba(2, 6, 23, 0.28);
-	}
-
-	.summary-sidebar {
-		width: 100%;
-		height: 100%;
-		min-width: 0;
-		padding: 1rem 1.25rem 1rem 1rem;
-		border-right: 1px solid rgba(148, 163, 184, 0.14);
-		background: rgba(15, 23, 42, 0.82);
-		overflow: auto;
-	}
-
-	.summary-sidebar-title,
-	.summary-sidebar-label {
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--muted);
-	}
-
-	.summary-sidebar-title {
-		margin-bottom: 0.85rem;
-	}
-
-	.summary-sidebar-block + .summary-sidebar-block {
-		margin-top: 1rem;
-		padding-top: 1rem;
-		border-top: 1px solid rgba(148, 163, 184, 0.1);
-	}
-
-	.summary-sidebar-row {
-		display: grid;
-		grid-template-columns: 76px minmax(0, 1fr);
-		gap: 0.6rem;
-		margin-bottom: 0.6rem;
-		align-items: start;
-	}
-
-	.summary-sidebar-row span {
-		font-size: 0.76rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--muted);
-	}
-
-	.summary-sidebar-row strong,
-	.summary-sidebar-copy {
-		min-width: 0;
-		overflow-wrap: anywhere;
-		word-break: break-word;
-	}
-
-	.coords-block {
-		white-space: pre-wrap;
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-		line-height: 1.45;
-	}
-
-	.summary-sidebar-copy {
-		margin-top: 0.55rem;
-		font-size: 0.88rem;
-		line-height: 1.6;
-		color: var(--text);
-	}
-
-	.summary-sidebar-copy.muted,
-	.summary-sidebar-empty {
-		color: var(--muted);
-	}
-
-	.summary-sidebar-empty {
-		font-size: 0.9rem;
-		line-height: 1.6;
-	}
-
-	.keyword-list {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.45rem;
-		margin-top: 0.6rem;
-	}
-
-	.keyword-chip {
-		display: inline-flex;
-		align-items: center;
-		padding: 0.32rem 0.58rem;
-		border-radius: 999px;
-		border: 1px solid rgba(96, 165, 250, 0.22);
-		background: rgba(37, 99, 235, 0.12);
-		font-size: 0.78rem;
-		color: #c7d2fe;
-	}
-
-	.pdf-fallback-frame {
-		margin-top: 0.85rem;
-		width: 100%;
-		min-height: 540px;
-		flex: 1;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		border-radius: 16px;
-		background: white;
-	}
-
-	:global(.pdf-highlight) {
-		position: absolute;
-		background: rgba(212, 162, 76, 0.3);
-		outline: 1px solid rgba(212, 162, 76, 0.85);
-		border-radius: 2px;
-	}
+	:global(.pdf-highlight) { position: absolute; background: rgba(129, 140, 248, 0.25); outline: 1px solid rgba(129, 140, 248, 0.8); border-radius: 2px; }
 
 	@media (max-width: 980px) {
-		.workspace,
-		.detail-grid {
-			grid-template-columns: minmax(0, 1fr);
-		}
-
+		.workspace, .detail-grid { grid-template-columns: minmax(0, 1fr); }
 	}
 </style>

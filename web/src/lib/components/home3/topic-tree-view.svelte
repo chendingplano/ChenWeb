@@ -1,16 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import SearchIcon from '@lucide/svelte/icons/search';
 	import PanelsTopLeftIcon from '@lucide/svelte/icons/panels-top-left';
 	import Rows3Icon from '@lucide/svelte/icons/rows-3';
 	import {
-		getKbInput,
 		getRecordTopics,
-		listKbInputs,
 		type KbInputRecord,
 		type TopicCardApi
 	} from '$lib/services/kbService';
-	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
+	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import {
 		createTopicTreeState,
@@ -19,12 +15,6 @@
 		toggleTopicTreeListMode
 	} from './topic-tree-state.js';
 	import type { TopicRecordTarget, TopicTreeRecord } from './topic-types';
-	import { knowledgeStoreState } from './knowledge-store-state.svelte';
-	import {
-		TOPIC_TREE_PAGE_SIZE,
-		buildTopicTreeListParams,
-		selectFirstRecordId
-	} from './topic-tree-record-browser.js';
 
 	let {
 		darkMode = true,
@@ -36,7 +26,8 @@
 		itemSingular = 'topic',
 		itemPlural = 'topics',
 		getRecordItems = getRecordTopics,
-		scopeToActiveStore = false
+		scopeToActiveStore = false,
+		browserInstanceKey = 'topic-tree'
 	}: {
 		darkMode?: boolean;
 		heroEyebrow?: string;
@@ -48,6 +39,7 @@
 		itemPlural?: string;
 		getRecordItems?: (recordId: number) => Promise<{ topics: TopicCardApi[] }>;
 		scopeToActiveStore?: boolean;
+		browserInstanceKey?: string;
 	} = $props();
 
 	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
@@ -57,57 +49,34 @@
 	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
 	let accent = $derived(darkMode ? '#22c55e' : '#16a34a');
 
-	let searchOpen = $state(false);
-	let recordIdInput = $state('');
-	let results = $state<TopicTreeRecord[]>([]);
-	let loading = $state(true);
 	let loadError = $state('');
 	let errorDialogOpen = $state(false);
 	let topicLoadingByRecordId = $state<Record<number, boolean>>({});
+	let recordCache = $state<Record<number, TopicTreeRecord>>({});
 	let treeState = $state(createTopicTreeState());
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
-	let listPage = $state(1);
-	let listPageSize = TOPIC_TREE_PAGE_SIZE;
-	let listTotal = $state(0);
-	let listJumpInput = $state('1');
-	onMount(async () => {
-		await runSearch(1);
-	});
 
-	let listTotalPages = $derived(Math.max(1, Math.ceil(listTotal / listPageSize)));
-
-	let activeRecord = $derived(results.find((r) => r.id === treeState.selectedRecordId) ?? results[0] ?? null);
+	let activeRecord = $derived(
+		treeState.selectedRecordId != null ? (recordCache[treeState.selectedRecordId] ?? null) : null
+	);
 	let selectedTopic = $derived(
-		activeRecord?.topics.find((t) => t.id === treeState.selectedTopicId) ?? null
+		activeRecord?.topics.find((topic) => topic.id === treeState.selectedTopicId) ?? null
 	);
 	let viewerInputId = $derived(treeState.selectedPdfTarget?.inputId ?? activeRecord?.id ?? null);
 	let viewerFileUrl = $derived(viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : '');
-	let viewerIsPdf = $derived(
-		(activeRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf')
-	);
+	let viewerIsPdf = $derived((activeRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf'));
 
 	type TopicPdfViewport = {
 		convertToViewportRectangle: (rect: number[]) => number[];
 	};
 
-	function recordDisplayName(record: TopicTreeRecord) {
-		return record.title?.trim() || `Record #${record.id}`;
-	}
-
-	function recordDisplayDocNo(record: TopicTreeRecord) {
-		return record.docNo?.trim() || '—';
-	}
-
-	function formatRecordTime(value: string) {
-		return value?.trim() || '—';
-	}
-
 	function renderTopicHighlight(pageNo: number, viewport: TopicPdfViewport, overlay: HTMLDivElement) {
 		if (!selectedTopic) return;
 		const targets = selectedTopic.targets?.filter(
-			(t: TopicRecordTarget) => t.page === pageNo && Array.isArray(t.coords) && t.coords.length >= 4
+			(target: TopicRecordTarget) =>
+				target.page === pageNo && Array.isArray(target.coords) && target.coords.length >= 4
 		);
 		if (!targets || targets.length === 0) return;
 		for (const target of targets) {
@@ -131,13 +100,22 @@
 		const items = record.status ?? [];
 		const matched = [...items].reverse().find((item) => item != null);
 		if (!matched) return 'pending';
-		return matched.proc_status?.trim() || matched['proc-status']?.trim() || matched.status?.trim() || 'pending';
+		return (
+			matched.proc_status?.trim() ||
+			matched['proc-status']?.trim() ||
+			matched.status?.trim() ||
+			'pending'
+		);
 	}
 
 	function mapKbInputToTopicTreeRecord(record: KbInputRecord): TopicTreeRecord {
 		return {
 			id: record.id,
-			title: record.title?.trim() || record.name?.trim() || record.file_name?.trim() || `Record #${record.id}`,
+			title:
+				record.title?.trim() ||
+				record.name?.trim() ||
+				record.file_name?.trim() ||
+				`Record #${record.id}`,
 			fileName: record.file_name?.trim() || record.name?.trim() || '—',
 			docType: record.type?.trim() || '—',
 			docNo: record.doc_no?.trim() || '—',
@@ -148,12 +126,6 @@
 			topics: []
 		};
 	}
-
-	$effect(() => {
-		if (!activeRecord && results[0]) {
-			treeState = selectTopicTreeRecord(treeState, results[0].id);
-		}
-	});
 
 	$effect(() => {
 		const selectedPage = treeState.selectedPdfTarget?.page;
@@ -168,94 +140,25 @@
 		}
 	});
 
-	async function runSearch(page = listPage) {
-		loading = true;
-		loadError = '';
-		try {
-			const directRecordId = Number(recordIdInput.trim());
-			if (recordIdInput.trim() !== '') {
-				if (!Number.isFinite(directRecordId) || directRecordId <= 0) {
-					throw new Error('Enter a valid Record ID');
-				}
-				const response = await getKbInput(directRecordId);
-				results = [mapKbInputToTopicTreeRecord(response.record)];
-				listTotal = results.length;
-				listPage = 1;
-				listJumpInput = '1';
-				treeState = createTopicTreeState();
-				treeState = selectTopicTreeRecord(treeState, response.record.id);
-				return;
-			}
-
-			const response = await listKbInputs(
-				buildTopicTreeListParams({
-					page,
-					pageSize: listPageSize,
-					activeStoreId: knowledgeStoreState.activeStore?.id ?? null,
-					scopeToActiveStore
-				})
-			);
-			results = response.results.map((r) => ({
-				...mapKbInputToTopicTreeRecord(r),
-				topics: []
-			}));
-			listTotal = Math.max(0, response.total ?? 0);
-			listPage = Math.max(1, response.page ?? page);
-			listJumpInput = String(listPage);
-			treeState = createTopicTreeState();
-			const firstRecordId = selectFirstRecordId(results);
-			if (firstRecordId != null) {
-				treeState = selectTopicTreeRecord(treeState, firstRecordId);
-			}
-		} catch (error) {
-			results = [];
-			listTotal = 0;
-			listPage = 1;
-			listJumpInput = '1';
-			treeState = createTopicTreeState();
-			loadError = error instanceof Error ? error.message : `Failed to load ${itemSingular} tree records`;
-			errorDialogOpen = true;
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function prevPage() {
-		if (listPage <= 1 || loading || recordIdInput.trim() !== '') return;
-		await runSearch(listPage - 1);
-	}
-
-	async function nextPage() {
-		if (listPage >= listTotalPages || loading || recordIdInput.trim() !== '') return;
-		await runSearch(listPage + 1);
-	}
-
-	async function jumpToPage() {
-		if (loading || recordIdInput.trim() !== '') return;
-		const parsed = Number(listJumpInput.trim());
-		if (!Number.isFinite(parsed)) {
-			listJumpInput = String(listPage);
-			return;
-		}
-		const target = Math.max(1, Math.min(listTotalPages, Math.trunc(parsed)));
-		listJumpInput = String(target);
-		if (target === listPage) return;
-		await runSearch(target);
-	}
-
 	async function ensureRecordTopics(recordId: number) {
-		const current = results.find((r) => r.id === recordId);
+		const current = recordCache[recordId];
 		if (!current || current.topics.length > 0 || topicLoadingByRecordId[recordId]) return;
 
 		topicLoadingByRecordId = { ...topicLoadingByRecordId, [recordId]: true };
 		try {
 			const response = await getRecordItems(recordId);
-			results = results.map((r) =>
-				r.id === recordId
-					? { ...r, topics: response.topics.map((t) => ({ ...t, recordId })) }
-					: r
-			);
-			if (treeState.selectedRecordId === recordId && response.topics[0] && !treeState.selectedPdfTarget) {
+			recordCache = {
+				...recordCache,
+				[recordId]: {
+					...current,
+					topics: response.topics.map((topic) => ({ ...topic, recordId }))
+				}
+			};
+			if (
+				treeState.selectedRecordId === recordId &&
+				response.topics[0] &&
+				!treeState.selectedPdfTarget
+			) {
 				treeState = selectRecordTopicTarget(treeState, {
 					recordId,
 					topicId: response.topics[0].id,
@@ -264,11 +167,38 @@
 				});
 			}
 		} catch (error) {
-			loadError = error instanceof Error ? error.message : `Failed to load ${itemPlural} for record ${recordId}`;
+			loadError =
+				error instanceof Error ? error.message : `Failed to load ${itemPlural} for record ${recordId}`;
 			errorDialogOpen = true;
 		} finally {
 			topicLoadingByRecordId = { ...topicLoadingByRecordId, [recordId]: false };
 		}
+	}
+
+	function handleRecordSelect(record: KbInputRecord) {
+		const mapped = mapKbInputToTopicTreeRecord(record);
+		recordCache = {
+			...recordCache,
+			[record.id]: {
+				...(recordCache[record.id] ?? mapped),
+				...mapped,
+				topics: recordCache[record.id]?.topics ?? []
+			}
+		};
+		treeState = selectTopicTreeRecord(treeState, record.id);
+	}
+
+	function mapBrowserRecord(record: KbInputRecord) {
+		const mapped = mapKbInputToTopicTreeRecord(record);
+		return {
+			id: record.id,
+			title: mapped.title,
+			subtitle: mapped.fileName,
+			meta: [mapped.docNo, mapped.parserName],
+			status: mapped.procStatus,
+			description: mapped.createTime,
+			badges: [mapped.docType]
+		};
 	}
 </script>
 
@@ -276,21 +206,15 @@
 	class="tree-shell"
 	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16); --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted};`}
 >
-	<KbInputSearchDialog
-		bind:open={searchOpen}
-		onSelect={async (record) => {
-			recordIdInput = String(record.id);
-			await runSearch();
-		}}
-	/>
-
 	{#if errorDialogOpen && loadError}
 		<div
 			class="error-overlay"
 			role="presentation"
 			tabindex="-1"
 			onclick={() => (errorDialogOpen = false)}
-			onkeydown={(event) => { if (event.key === 'Escape') errorDialogOpen = false; }}
+			onkeydown={(event) => {
+				if (event.key === 'Escape') errorDialogOpen = false;
+			}}
 		>
 			<div
 				class="error-dialog"
@@ -306,7 +230,6 @@
 				<p class="dialog-copy">{loadError}</p>
 				<div class="dialog-actions">
 					<button type="button" class="ghost" onclick={() => (errorDialogOpen = false)}>Close</button>
-					<button type="button" class="primary" onclick={async () => { errorDialogOpen = false; await runSearch(); }}>Try Again</button>
 				</div>
 			</div>
 		</div>
@@ -328,143 +251,23 @@
 					Compact View
 				{/if}
 			</button>
-			<button type="button" class="primary" onclick={() => (searchOpen = true)}>
-				<SearchIcon class="h-4 w-4" />
-				Search
-			</button>
 		</div>
 	</div>
 
 	<div class="workspace">
-		<div class="left-panel">
-			<div class="left-controls">
-				<label class="field">
-					<span class="field-label">Record ID</span>
-					<div class="field-row">
-						<input
-							type="text"
-							inputmode="numeric"
-							bind:value={recordIdInput}
-							placeholder="e.g. 1042"
-							onkeydown={(e) => { if (e.key === 'Enter') void runSearch(); }}
-						/>
-						<button type="button" class="ghost search-btn" onclick={() => (searchOpen = true)} title="Search records">
-							<SearchIcon class="h-4 w-4" />
-							Search
-						</button>
-					</div>
-				</label>
-				<button type="button" class="retrieve-btn" onclick={runSearch} disabled={loading}>
-					{#if loading}Loading…{:else}<span class="retrieve-arrow">→</span>Retrieve{/if}
-				</button>
-			</div>
-
-			<div class="left-meta">
-				<div class="left-meta-title">kb.inputs</div>
-				<div class="left-meta-count">{listTotal} found</div>
-			</div>
-
-			<div class="result-list topic-tree-results">
-				{#if loading}
-					<div class="empty-state">Loading records…</div>
-				{:else if loadError}
-					<div class="empty-state">{loadErrorTitle} could not be loaded. Open the error dialog for details or try again.</div>
-				{:else if results.length === 0}
-					<div class="empty-state">No records found.</div>
-				{:else if treeState.listMode === 'compact'}
-					{#each results as record, idx (record.id)}
-						<button
-							type="button"
-							class="record-browser-card"
-							class:selected={treeState.selectedRecordId === record.id}
-							onclick={() => (treeState = selectTopicTreeRecord(treeState, record.id))}
-						>
-							<div class="card-rule" aria-hidden="true"></div>
-							<div class="card-body">
-								<div class="card-row-top">
-									<div class="card-index">
-										№ {String(idx + 1).padStart(3, '0')}
-										<span class="card-id">id {record.id}</span>
-									</div>
-									<div class="card-conf mono" title="Type">{record.docType || '—'}</div>
-								</div>
-								<div class="card-name">{recordDisplayName(record)}</div>
-								<div class="card-desc">Doc No: {recordDisplayDocNo(record)}</div>
-								<div class="card-foot">
-									<span class="chip chip-quiet">{formatRecordTime(record.createTime)}</span>
-								</div>
-							</div>
-						</button>
-					{/each}
-				{:else}
-					{#each results as record}
-						<button
-							type="button"
-							class:selected={treeState.selectedRecordId === record.id}
-							class="record-card"
-							onclick={() => (treeState = selectTopicTreeRecord(treeState, record.id))}
-						>
-							<div class="record-head">
-								<div>
-									<div class="record-title">{record.title}</div>
-									<div class="record-subtitle">{record.fileName}</div>
-								</div>
-								<div class="record-status">{record.procStatus}</div>
-							</div>
-							<div class="record-meta">
-								<span>{record.docNo}</span>
-								<span>{record.parserName}</span>
-							</div>
-							<p>
-								{record.topics[0]?.topicText ??
-									(treeState.selectedRecordId === record.id && topicLoadingByRecordId[record.id]
-										? `Loading ${itemSingular} preview…`
-										: `Select this record to load its ${itemPlural}.`)}
-							</p>
-						</button>
-					{/each}
-				{/if}
-			</div>
-
-			<div class="list-pager">
-				<button
-					class="pager-btn"
-					onclick={prevPage}
-					disabled={listPage <= 1 || loading || recordIdInput.trim() !== ''}>‹ Prev</button
-				>
-				<div class="pager-meta">
-					<span>Page {listPage} / {listTotalPages}</span>
-					<span>{results.length} on page</span>
-					<div class="pager-jump">
-						<label for="topic-tree-jump">Go</label>
-						<input
-							id="topic-tree-jump"
-							type="number"
-							min="1"
-							max={listTotalPages}
-							bind:value={listJumpInput}
-							disabled={recordIdInput.trim() !== ''}
-							onkeydown={(e) => {
-								if (e.key === 'Enter') {
-									void jumpToPage();
-								}
-							}}
-						/>
-						<button
-							class="pager-btn pager-go"
-							onclick={jumpToPage}
-							disabled={loading || recordIdInput.trim() !== ''}>
-							Jump
-						</button>
-					</div>
-				</div>
-				<button
-					class="pager-btn"
-					onclick={nextPage}
-					disabled={listPage >= listTotalPages || loading || recordIdInput.trim() !== ''}>Next ›</button
-				>
-			</div>
-		</div>
+		<KbInputRecordBrowser
+			{darkMode}
+			instanceKey={browserInstanceKey}
+			title="kb.inputs"
+			subtitle={`Search, filter, and select records before inspecting their ${itemPlural}.`}
+			emptyTitle="No records found."
+			emptySubtitle={`Use Search or Retrieve to browse kb.inputs for ${itemPlural}.`}
+			{scopeToActiveStore}
+			selectedRecordId={treeState.selectedRecordId}
+			renderMode={treeState.listMode === 'cards' ? 'cards' : 'compact'}
+			mapRecord={mapBrowserRecord}
+			onSelect={handleRecordSelect}
+		/>
 
 		<div class="right-panel">
 			<div class="right-tabs">
@@ -490,12 +293,13 @@
 									type="button"
 									class:selected={treeState.selectedTopicId === topic.id}
 									class="snippet"
-									onclick={() => (treeState = selectRecordTopicTarget(treeState, {
-										recordId: activeRecord.id,
-										topicId: topic.id,
-										inputId: topic.inputId,
-										page: topic.page
-									}))}
+									onclick={() =>
+										(treeState = selectRecordTopicTarget(treeState, {
+											recordId: activeRecord.id,
+											topicId: topic.id,
+											inputId: topic.inputId,
+											page: topic.page
+										}))}
 								>
 									<div class="snippet-head">
 										<div class="keyword-row">
@@ -521,7 +325,7 @@
 								bind:zoom={pdfZoom}
 								bind:numPages={pdfNumPages}
 								highlightVersion={selectedTopic
-									? `${selectedTopic.id}:${selectedTopic.targets.map((t) => `${t.page}:${t.coords.join(',')}`).join('|')}`
+									? `${selectedTopic.id}:${selectedTopic.targets.map((target) => `${target.page}:${target.coords.join(',')}`).join('|')}`
 									: 'topic-tree'}
 								renderHighlights={renderTopicHighlight}
 								sidebarMinWidth={240}
@@ -650,7 +454,7 @@
 
 	.hero-actions { display: flex; gap: 0.75rem; }
 
-	.ghost, .primary {
+	.ghost {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -661,143 +465,30 @@
 	}
 
 	.ghost { background: rgba(15, 23, 42, 0.36); color: var(--text); }
-	.primary { background: linear-gradient(135deg, #16a34a, #0d9488); border-color: transparent; color: white; font-weight: 700; }
 
 	.workspace {
 		display: grid;
 		min-height: 0;
 		flex: 1;
-		grid-template-columns: 360px minmax(0, 1fr);
+		grid-template-columns: auto minmax(0, 1fr);
 		gap: 1rem;
 	}
 
-	.left-panel, .right-panel {
+	.right-panel {
 		min-height: 0;
 		border-radius: 24px;
 		border: 1px solid var(--border);
 		background: var(--panel);
-	}
-
-	.left-panel { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-	.left-controls { padding: 1rem; border-bottom: 1px solid rgba(148, 163, 184, 0.08); }
-
-	.field { display: block; }
-	.field-label { display: block; margin-bottom: 0.6rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
-	.field-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem; }
-	.field-row input { width: 100%; min-width: 0; border-radius: 0; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(31, 41, 55, 0.9); padding: 0.95rem 1rem; font-size: 0.95rem; color: #f3f4f6; }
-	.search-btn { padding-inline: 1rem; }
-
-	.retrieve-btn {
-		margin-top: 1rem;
-		width: 100%;
-		border: none;
-		background: #22c55e;
-		color: #111827;
-		padding: 0.95rem 1rem;
-		font-size: 1rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.retrieve-btn:disabled { opacity: 0.7; cursor: default; }
-	.retrieve-arrow { margin-right: 0.45rem; }
-
-	.result-list { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: auto; padding: 0 1rem 1rem; }
-	.topic-tree-results { gap: 0.8rem; }
-	.list-pager {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 10px;
-		padding: 10px 16px 14px;
-		border-top: 1px solid var(--ink-line-soft);
-		background: linear-gradient(180deg, rgba(0, 0, 0, 0), var(--panel-bg));
-	}
-	.pager-btn {
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: 11px;
-		padding: 6px 10px;
-		border: 1px solid var(--ink-line);
-		background: var(--panel-bg-alt);
-		color: var(--text-primary);
-		cursor: pointer;
-	}
-	.pager-btn:disabled {
-		opacity: 0.45;
-		cursor: not-allowed;
-	}
-	.pager-meta {
 		display: flex;
 		flex-direction: column;
-		align-items: center;
-		gap: 2px;
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: 10px;
-		letter-spacing: 0.05em;
-		color: var(--text-muted);
-	}
-	.pager-jump {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		margin-top: 4px;
-	}
-	.pager-jump label {
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: 10px;
-		color: var(--text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-	.pager-jump input {
-		width: 58px;
-		padding: 4px 6px;
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: 11px;
-		background: var(--panel-bg-alt);
-		color: var(--text-primary);
-		border: 1px solid var(--ink-line);
-	}
-	.pager-go {
-		padding: 4px 8px;
-		font-size: 10px;
+		padding: 1rem;
 	}
 
-	.left-meta { display: flex; align-items: baseline; justify-content: space-between; padding: 1rem; border-bottom: 1px solid rgba(148, 163, 184, 0.08); }
-	.left-meta-title { font-size: 0.95rem; font-weight: 700; color: #bbf7d0; }
-	.left-meta-count { font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; color: #4ade80; }
+	.snippet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
 
-	.record-card { margin-bottom: 0.75rem; border-radius: 16px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.28); padding: 0.9rem; text-align: left; color: inherit; }
-	.record-card.selected, .record-card:hover { border-color: rgba(34, 197, 94, 0.34); background: rgba(13, 148, 136, 0.1); }
+	.detail-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.75rem 0; }
+	.detail-meta span { border-radius: 999px; padding: 0.25rem 0.55rem; background: rgba(148, 163, 184, 0.12); font-size: 0.72rem; color: var(--muted); }
 
-	.record-head, .snippet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
-	.record-title { font-size: 0.94rem; font-weight: 700; }
-	.record-subtitle { margin-top: 0.15rem; font-size: 0.8rem; color: var(--muted); }
-
-	.record-meta, .detail-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.75rem 0; }
-	.record-meta span, .record-status, .detail-meta span { border-radius: 999px; padding: 0.25rem 0.55rem; background: rgba(148, 163, 184, 0.12); font-size: 0.72rem; color: var(--muted); }
-
-	.record-browser-card { position: relative; width: 100%; border: 1px solid rgba(148, 163, 184, 0.12); background: rgba(31, 41, 55, 0.72); color: inherit; text-align: left; cursor: pointer; overflow: hidden; }
-	.record-browser-card:hover { background: rgba(39, 51, 67, 0.84); }
-	.record-browser-card.selected { border-color: rgba(34, 197, 94, 0.38); background: rgba(30, 60, 40, 0.9); }
-
-	.card-rule { position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: rgba(34, 197, 94, 0.18); }
-	.record-browser-card.selected .card-rule { background: #22c55e; }
-
-	.card-body { padding: 1rem 1rem 1rem 1.25rem; }
-	.card-row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
-	.card-index { font-size: 0.74rem; letter-spacing: 0.12em; text-transform: uppercase; color: #4ade80; }
-	.card-id { margin-left: 0.35rem; color: #86efac; }
-	.card-conf { font-size: 0.82rem; font-weight: 700; color: #34d399; text-transform: lowercase; }
-	.card-name { margin-top: 0.65rem; font-size: 1rem; font-weight: 700; line-height: 1.35; color: #f8fafc; }
-	.record-browser-card.selected .card-name { color: #ffffff; }
-	.card-desc { margin-top: 0.45rem; font-size: 0.9rem; color: #d1fae5; }
-	.card-foot { margin-top: 0.85rem; }
-
-	.chip { display: inline-flex; align-items: center; padding: 0.38rem 0.68rem; border: 1px solid rgba(74, 222, 128, 0.22); background: rgba(21, 28, 40, 0.9); font-size: 0.78rem; letter-spacing: 0.06em; color: #4ade80; }
-	.chip-quiet { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-	.right-panel { display: flex; min-height: 0; flex-direction: column; padding: 1rem; }
 	.right-tabs { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-bottom: 1rem; }
 
 	.tab { border-radius: 14px; padding: 0.72rem 0.9rem; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.3); font-weight: 700; }
