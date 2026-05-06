@@ -21,7 +21,7 @@
 	import TopicCategoryTabPanel from './topic-category-tab.svelte';
 	import TopicGraphTabs from './topic-graph-tabs.svelte';
 	import SummaryNodeDialog from './summary-node-dialog.svelte';
-	import ViewToolbar from './view-toolbar.svelte';
+	import ViewToolbar, { type GraphSettings } from './view-toolbar.svelte';
 	import {
 		getSummaryCategory,
 		filterGraphNodes,
@@ -121,6 +121,23 @@
 	let { mode, darkMode = true }: { mode: Mode; darkMode?: boolean } = $props();
 
 	let nodeStyle = $state<NodeStyle>('rect');
+
+	const GRAPH_SETTINGS_KEY = 'tree-graph-view-settings';
+	const defaultGraphSettings: GraphSettings = { defaultExpandDepth: 6, showInfoBlock: false };
+
+	function loadGraphSettings(): GraphSettings {
+		try {
+			const raw = localStorage.getItem(GRAPH_SETTINGS_KEY);
+			if (raw) return { ...defaultGraphSettings, ...JSON.parse(raw) };
+		} catch {}
+		return { ...defaultGraphSettings };
+	}
+
+	let graphSettings = $state<GraphSettings>(loadGraphSettings());
+
+	$effect(() => {
+		localStorage.setItem(GRAPH_SETTINGS_KEY, JSON.stringify(graphSettings));
+	});
 
 	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
 	let panelAlt = $derived(darkMode ? '#0f172a' : '#eef2ff');
@@ -1676,6 +1693,10 @@
 		onToggleNodeStyle={() => {
 			nodeStyle = nodeStyle === 'circle' ? 'rect' : 'circle';
 		}}
+		settings={graphSettings}
+		onSettingsChange={(patch) => {
+			graphSettings = { ...graphSettings, ...patch };
+		}}
 	/>
 
 	{#if hasActiveFilter}
@@ -1812,7 +1833,7 @@
 								/>
 							</div>
 
-							{#if hoveredNode}
+							{#if hoveredNode && graphSettings.showInfoBlock}
 								<div
 									bind:this={hoverCardEl}
 									class="hover-card"

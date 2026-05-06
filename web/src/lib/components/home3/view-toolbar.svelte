@@ -11,6 +11,11 @@
 
 	type NodeStyle = 'circle' | 'rect';
 
+	export type GraphSettings = {
+		defaultExpandDepth: number;
+		showInfoBlock: boolean;
+	};
+
 	type Props = {
 		darkMode?: boolean;
 		nodeStyle?: NodeStyle;
@@ -23,7 +28,8 @@
 		onCollapseSelected?: () => void;
 		collapseSelectedDisabled?: boolean;
 		onExportPng?: () => void;
-		onSettings?: () => void;
+		settings?: GraphSettings;
+		onSettingsChange?: (patch: Partial<GraphSettings>) => void;
 		onToggleNodeStyle?: () => void;
 	};
 
@@ -39,12 +45,19 @@
 		onCollapseSelected,
 		collapseSelectedDisabled = true,
 		onExportPng,
-		onSettings,
+		settings,
+		onSettingsChange,
 		onToggleNodeStyle
 	}: Props = $props();
 
 	let expandLevelOpen = $state(false);
 	let expandLevel = $state(2);
+	let settingsOpen = $state(false);
+
+	$effect(() => {
+		const max = settings?.defaultExpandDepth ?? 6;
+		if (expandLevel > max) expandLevel = max;
+	});
 
 	let surface = $derived(darkMode ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.72)');
 	let borderColor = $derived(darkMode ? 'rgba(148,163,184,0.14)' : 'rgba(100,116,139,0.18)');
@@ -62,10 +75,18 @@
 		onExpandToLevel?.(expandLevel);
 	}
 
+	function handleSettings(event: MouseEvent) {
+		event.stopPropagation();
+		settingsOpen = !settingsOpen;
+	}
+
 	function closePopoverOnOutside(event: MouseEvent) {
 		const target = event.target as HTMLElement;
 		if (!target.closest('.toolbar-expand-level-wrap')) {
 			expandLevelOpen = false;
+		}
+		if (!target.closest('.toolbar-settings-wrap')) {
+			settingsOpen = false;
 		}
 	}
 </script>
@@ -134,7 +155,7 @@
 						<input
 							type="range"
 							min="1"
-							max="6"
+							max={settings?.defaultExpandDepth ?? 6}
 							step="1"
 							bind:value={expandLevel}
 							class="level-slider"
@@ -190,14 +211,62 @@
 
 		<div class="toolbar-sep" aria-hidden="true"></div>
 
-		<button
-			type="button"
-			class="toolbar-btn"
-			title="Settings"
-			onclick={() => onSettings?.()}
-		>
-			<SettingsIcon class="tb-icon" />
-		</button>
+		<div class="toolbar-settings-wrap">
+			<button
+				type="button"
+				class="toolbar-btn"
+				class:active={settingsOpen}
+				title="Settings"
+				onclick={handleSettings}
+			>
+				<SettingsIcon class="tb-icon" />
+			</button>
+
+			{#if settingsOpen}
+				<div class="settings-popover" role="dialog" aria-label="Settings">
+					<div class="level-label">Settings</div>
+
+					<div class="settings-field">
+						<label class="settings-field-label" for="setting-expand-depth"
+							>Default Expand Selected Node Depth</label
+						>
+						<input
+							id="setting-expand-depth"
+							type="number"
+							min="1"
+							max="20"
+							value={settings?.defaultExpandDepth ?? 6}
+							oninput={(e) => {
+								const v = parseInt((e.target as HTMLInputElement).value);
+								if (!isNaN(v) && v >= 1) onSettingsChange?.({ defaultExpandDepth: v });
+							}}
+							class="settings-number-input"
+						/>
+						<div class="settings-help">The maximum depth of expanding the selected node.</div>
+					</div>
+
+					<div class="settings-field">
+						<div class="settings-checkbox-row">
+							<input
+								id="setting-show-info"
+								type="checkbox"
+								checked={settings?.showInfoBlock ?? false}
+								onchange={(e) => {
+									onSettingsChange?.({ showInfoBlock: (e.target as HTMLInputElement).checked });
+								}}
+								class="settings-checkbox"
+							/>
+							<label class="settings-field-label" for="setting-show-info"
+								>Show Information Block</label
+							>
+						</div>
+						<div class="settings-help">
+							Control whether to show the information when the mouse hovers over a node.
+						</div>
+					</div>
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>
 
@@ -327,5 +396,70 @@
 
 	.level-apply:hover {
 		opacity: 0.88;
+	}
+
+	.toolbar-settings-wrap {
+		position: relative;
+	}
+
+	.settings-popover {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: 0;
+		z-index: 40;
+		min-width: 220px;
+		border-radius: 12px;
+		border: 1px solid var(--border-c);
+		background: var(--pop);
+		padding: 0.75rem;
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.settings-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.settings-field-label {
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--text-c);
+	}
+
+	.settings-help {
+		font-size: 0.68rem;
+		color: var(--text-c);
+		opacity: 0.7;
+		line-height: 1.4;
+	}
+
+	.settings-number-input {
+		width: 72px;
+		padding: 0.25rem 0.4rem;
+		border-radius: 6px;
+		border: 1px solid var(--border-c);
+		background: transparent;
+		color: #818cf8;
+		font-size: 0.9rem;
+		font-weight: 700;
+		text-align: center;
+	}
+
+	.settings-checkbox-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.settings-checkbox {
+		accent-color: #818cf8;
+		width: 15px;
+		height: 15px;
+		cursor: pointer;
+		flex-shrink: 0;
 	}
 </style>

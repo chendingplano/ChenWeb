@@ -55,10 +55,12 @@ and normal lines.
 For every extracted provisions, produce a structured record with the following fields:
 
 * `provision_name`: normalized short name of the provision
-* `source_text`: exact text span in form of line numbers or close excerpt that supports extraction
+* `source_line_spans`: source page/line references that support extraction, formatted as `["<page>:<line>", ...]`
+* `provision_original`: exact provision text in the source language
+* `provision_en`: English translation, or the same as `provision_original` if the source is English
 * `location_type`: one of `sentence`, `paragraph`, `bullet`, `table_row`, `table_cell`, `heading_context`, `mixed`
 * `context`: the contextual information about the provision
-* `subject`: what is being measured
+* `subject`: must be descriptive and complete, include the context information, used to semantically identify the provision.
 * `confidence`: number from 0 to 1
 * `is_explicit`: true if the document clearly defines it as a provision; false if inferred but still strongly supported
 
@@ -140,21 +142,23 @@ Apply these rules according to the language of each category segment:
   * Do NOT insert spaces or underscores between characters
 
 ## Output Format (STRICT JSON ONLY)
+```json
 {
   "language": "<detected_language>",
   "provisions": [
     {
-      "name": <provision name>,
-      "type": "mandatory | recommended | optional",
-      "provision_original": "[ddd, ddd-ddd, ...]",
+      "name": "<provision name>",
+      "type": "mandatory",
+      "provision_original": "<original provision text>",
       "provision_en": "<English translation or same as original if English>",
+      "source_line_spans": ["<page>:<line>", "<page>:<line>"],
       "context":"<the context>",
       "subject":"<the provision's subject>",
       "location_type":"<the location type>",
       "keywords": ["k1", "k2", "k3"],
       "confidence": 0.0,
-      "is_explicit":true|false,
-      "need_verify":true|false,
+      "is_explicit": true,
+      "need_verify": false,
       "categories": [
         {
           "category_path": [
@@ -163,14 +167,12 @@ Apply these rules according to the language of each category segment:
               "keywords": ["health management", "disease prevention", "public health"],
               "confidence": 0.95
             },
-            ...
           ],
           "path_keywords": ["vaccination records", "recipient data", "information system"],
           "path_confidence": 0.92
         }
       ]
-    },
-    ...
+    }
   ]
 }
 ```

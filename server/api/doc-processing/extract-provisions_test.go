@@ -1,0 +1,322 @@
+package docprocessing
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+type fakeProvisionsStore struct {
+	exists       bool
+	existsErr    error
+	saveErr      error
+	deleteErr    error
+	deleteCalled int
+	saveCalled   int
+	existCalled  int
+	lastSave     SaveProvisionsRequest
+}
+
+func (f *fakeProvisionsStore) ProvisionsExist(_ context.Context, _ int64, _ string) (bool, error) {
+	f.existCalled++
+	if f.existsErr != nil {
+		return false, f.existsErr
+	}
+	return f.exists, nil
+}
+
+func (f *fakeProvisionsStore) DeleteProvisionsByInputRecordID(_ context.Context, _ int64) (int64, error) {
+	f.deleteCalled++
+	if f.deleteErr != nil {
+		return 0, f.deleteErr
+	}
+	return 0, nil
+}
+
+func (f *fakeProvisionsStore) SaveProvisions(_ context.Context, req SaveProvisionsRequest) (int64, error) {
+	f.saveCalled++
+	f.lastSave = req
+	if f.saveErr != nil {
+		return 0, f.saveErr
+	}
+	return int64(len(req.Provisions)), nil
+}
+
+func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              4001,
+		ParserName:      "opendata",
+		ResultFilename:  "/tmp/std-4001.json",
+		StagingFilename: "/tmp/std-4001.pdf",
+		StatusRaw:       "[]",
+	}}
+	provisionsStore := &fakeProvisionsStore{}
+	extractor := &fakeJSONExtractor{out: map[string]any{
+		"language": "en",
+		"provisions": []any{
+			map[string]any{
+				"name":               "inspection_requirement",
+				"type":               "mandatory",
+				"provision_original": "The operator shall inspect pressure relief valves monthly.",
+				"provision_en":       "The operator shall inspect pressure relief valves monthly.",
+				"source_line_spans":  []any{float64(10)},
+				"context":            "maintenance section",
+				"subject":            "pressure relief valve inspection",
+				"location_type":      "sentence",
+				"keywords":           []any{"inspection", "pressure relief valve"},
+				"confidence":         0.91,
+				"is_explicit":        true,
+				"need_verify":        false,
+				"categories": []any{
+					map[string]any{
+						"path_keywords":   []any{"valve inspection"},
+						"path_confidence": float64(0.88),
+					},
+				},
+			},
+		},
+	}}
+
+	ctx, h := withBlockBufferHolder(context.Background())
+	h.mu.Lock()
+	h.buffer = &BlockBuffer{Blocks: []Block{{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 10, PageNumber: 2, LineType: "paragraph", Content: "The operator shall inspect pressure relief valves monthly."},
+			{Flag: "o", LineNumber: 11, PageNumber: 3, LineType: "paragraph", Content: "Overlap context."},
+		},
+	}}}
+	h.mu.Unlock()
+
+	p := NewProvisionsProcessor(inputStore, provisionsStore, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "gpt-test"
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"4001","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if extractor.calledCount != 1 {
+		t.Fatalf("calledCount=%d, want 1", extractor.calledCount)
+	}
+	if !strings.Contains(extractor.inputText, "n\t10\t2\tparagraph\tThe operator shall inspect") {
+		t.Fatalf("block line not sent to LLM input: %q", extractor.inputText)
+	}
+	if provisionsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", provisionsStore.saveCalled)
+	}
+	if provisionsStore.lastSave.ExtractID == "" {
+		t.Fatalf("ExtractID should be set")
+	}
+	if got := int(toFloat(provisionsStore.lastSave.Provisions[0]["prov_id"])); got != 1 {
+		t.Fatalf("prov_id=%v, want 1", got)
+	}
+	if got := provisionsStore.lastSave.Provisions[0]["prov_name"]; got != "inspection_requirement" {
+		t.Fatalf("prov_name=%v", got)
+	}
+	if got := provisionsStore.lastSave.Provisions[0]["prov_subject"]; got != "pressure relief valve inspection" {
+		t.Fatalf("prov_subject=%v", got)
+	}
+	if got := provisionsStore.lastSave.Provisions[0]["source_line_spans"]; len(got.([]string)) != 1 || got.([]string)[0] != "2:10" {
+		t.Fatalf("source_line_spans=%v", got)
+	}
+	if got := strings.TrimSpace(asString(provisionsStore.lastSave.Provisions[0]["source_text"])); got != "The operator shall inspect pressure relief valves monthly." {
+		t.Fatalf("source_text=%q", got)
+	}
+	dbRow := buildProvisionDBRecord(provisionsStore.lastSave.Provisions[0], provisionsStore.lastSave.Language)
+	if got := dbRow["provision_type"]; got != "mandatory" {
+		t.Fatalf("db provision_type=%v", got)
+	}
+	if got := dbRow["source_text"]; got != "The operator shall inspect pressure relief valves monthly." {
+		t.Fatalf("db source_text=%v", got)
+	}
+	if got := dbRow["provision_original"]; got != nil {
+		t.Fatalf("db provision_original=%v, want nil for English", got)
+	}
+	if got := dbRow["provision_en"]; got != "The operator shall inspect pressure relief valves monthly." {
+		t.Fatalf("db provision_en=%v", got)
+	}
+	if got := dbRow["provision_subject"]; got != "pressure relief valve inspection" {
+		t.Fatalf("db provision_subject=%v", got)
+	}
+	if got := dbRow["provision_keywords"]; len(got.([]string)) != 2 {
+		t.Fatalf("db provision_keywords=%v", got)
+	}
+	if got := toFloat(dbRow["confidence"]); got != 0.91 {
+		t.Fatalf("db confidence=%v", got)
+	}
+	if got := toBool(dbRow["need_verify"]); got {
+		t.Fatalf("db need_verify=%v, want false", got)
+	}
+	if _, ok := dbRow["prov_subject"]; ok {
+		t.Fatalf("db row should not include duplicate prov_subject")
+	}
+	if _, ok := dbRow["prov_keywords"]; ok {
+		t.Fatalf("db row should not include duplicate prov_keywords")
+	}
+	if got := int(toFloat(dbRow["num_blocks"])); got != 1 {
+		t.Fatalf("db num_blocks=%v, want 1", got)
+	}
+	if got := int(toFloat(dbRow["num_provisions"])); got != 1 {
+		t.Fatalf("db num_provisions=%v, want 1", got)
+	}
+	if _, ok := dbRow["time_per_provision"]; !ok {
+		t.Fatalf("db row missing time_per_provision")
+	}
+	if got := strings.TrimSpace(asString(dbRow["model_name"])); got != "gpt-test" {
+		t.Fatalf("db model_name=%q, want gpt-test", got)
+	}
+	if got := strings.TrimSpace(asString(dbRow["prompt_name"])); got != "prompt-test" {
+		t.Fatalf("db prompt_name=%q, want prompt-test", got)
+	}
+	artifactPath := filepath.Join(tmp, "4", "4001", "std-4001_opendata.provisions")
+	body, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatalf("read provisions artifact: %v", err)
+	}
+	var artifactRows []map[string]any
+	if err := json.Unmarshal(body, &artifactRows); err != nil {
+		t.Fatalf("artifact json: %v", err)
+	}
+	if len(artifactRows) != 1 {
+		t.Fatalf("artifact rows=%d, want 1", len(artifactRows))
+	}
+	if got := int(toFloat(artifactRows[0]["prov_id"])); got != 1 {
+		t.Fatalf("artifact prov_id=%v, want 1", got)
+	}
+	if got := strings.TrimSpace(asString(artifactRows[0]["status"])); got != "active" {
+		t.Fatalf("artifact status=%q, want active", got)
+	}
+
+	var statusArr []map[string]any
+	if err := json.Unmarshal([]byte(inputStore.updateReq.StatusRaw), &statusArr); err != nil {
+		t.Fatalf("status json: %v", err)
+	}
+	last := statusArr[len(statusArr)-1]
+	if strings.TrimSpace(asString(last["operation"])) != "extract_provisions" {
+		t.Fatalf("operation=%v", last["operation"])
+	}
+	if strings.TrimSpace(asString(last["proc_status"])) != "success" {
+		t.Fatalf("proc_status=%v", last["proc_status"])
+	}
+}
+
+func TestBuildProvisionDBRecord_NonEnglishPreservesOriginal(t *testing.T) {
+	row := map[string]any{
+		"prov_subject":       "fire fighter physical examination",
+		"prov_context":       "Section 4.1.1",
+		"prov_keywords":      []string{"消防员", "体格检查"},
+		"prov_conf":          0.95,
+		"source_text":        "100 消防员体格检查应符合下列标准:",
+		"source_line_spans":  []string{"6:100"},
+		"num_blocks":         2,
+		"num_provisions":     3,
+		"time_per_provision": int64(12),
+		"model_name":         "gpt-test",
+		"prompt_name":        "prompt-test",
+		"public_info": map[string]any{
+			"provision_type":     "mandatory",
+			"provision_original": "消防员体格检查应符合下列标准:",
+			"provision_en":       "Fire fighter physical examination shall meet the following standards:",
+			"need_verify":        false,
+		},
+	}
+
+	dbRow := buildProvisionDBRecord(row, "zh")
+	if got := dbRow["provision_original"]; got != "消防员体格检查应符合下列标准:" {
+		t.Fatalf("provision_original=%v", got)
+	}
+	if got := dbRow["provision_en"]; got != "Fire fighter physical examination shall meet the following standards:" {
+		t.Fatalf("provision_en=%v", got)
+	}
+}
+
+func TestProvisionsProcessor_FallsBackToInputFileWhenBlockBufferMissing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	lineFile := filepath.Join(tmp, "std_5001_opendata.txt")
+	if err := os.WriteFile(lineFile, []byte("1\t1\tparagraph\tArial\t11\t[0,0,1,1]\tThe device must log alarms.\n"), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              5001,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "std_5001.json"),
+		StagingFilename: filepath.Join(tmp, "std_5001.pdf"),
+		StatusRaw:       "[]",
+	}}
+	provisionsStore := &fakeProvisionsStore{}
+	extractor := &fakeJSONExtractor{out: map[string]any{
+		"language":   "en",
+		"provisions": []any{},
+	}}
+
+	p := NewProvisionsProcessor(inputStore, provisionsStore, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "gpt-test"
+
+	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"5001","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if !strings.Contains(extractor.inputText, "n\t1\t1\tparagraph\tThe device must log alarms.") {
+		t.Fatalf("fallback block input not built from line file: %q", extractor.inputText)
+	}
+}
+
+func TestControlService_ChunkingOperationDoesNotSelectProvisions(t *testing.T) {
+	got := make([]string, 0, 3)
+	svc := &ControlService{
+		Processors: []Processor{
+			fakeProcessor{name: "chunking", calls: &got},
+			fakeProcessor{name: "extract_provisions", calls: &got},
+		},
+	}
+
+	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1","operation":"chunking"}`))
+
+	want := []string{"chunking"}
+	if len(got) != len(want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("calls[%d]=%q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestLoadProvisionsPromptFromEnv_UsesPromptDir(t *testing.T) {
+	tmp := t.TempDir()
+	promptPath := filepath.Join(tmp, "prompt-extract-provisions.md")
+	want := "extract normative provisions"
+	if err := os.WriteFile(promptPath, []byte(want), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	t.Setenv("PROMPT_DIR", tmp)
+	t.Setenv("EXTRACT_PROVISIONS_PROMPT", "prompt-extract-provisions.md")
+
+	got, ref, gotPath, err := loadProvisionsPromptFromEnv()
+	if err != nil {
+		t.Fatalf("loadProvisionsPromptFromEnv: %v", err)
+	}
+	if got != want {
+		t.Fatalf("promptText=%q, want %q", got, want)
+	}
+	if ref != "prompt-extract-provisions.md" {
+		t.Fatalf("promptRef=%q", ref)
+	}
+	if gotPath != promptPath {
+		t.Fatalf("promptPath=%q, want %q", gotPath, promptPath)
+	}
+}
