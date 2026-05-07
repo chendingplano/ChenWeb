@@ -739,6 +739,7 @@ func upsertManualFile(path string, entry manualEntry) error {
 	return writeManualFile(path, entries)
 }
 
+/*
 func writeCorrectedLinesFile(path string, lines []docStructureLine) error {
 	f, err := os.Create(path)
 	if err != nil {
@@ -771,6 +772,7 @@ func formatCorrectedLine(ln docStructureLine) string {
 		ln.Content,
 	}, "\t")
 }
+*/
 
 func parseCorrectedLine(s string) (docStructureLine, bool) {
 	s = strings.TrimRight(s, "\r\n")

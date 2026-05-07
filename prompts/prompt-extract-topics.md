@@ -54,6 +54,13 @@ Use one of the following values:
 * Topic description must be in the same language in which the input is and reflect the core meaning.
 * Output must be STRICT JSON (no explanation, no markdown).
 
+### 4.1 Extracted Attributes
+* "topic_type": the topic type,
+* "lines": the line numbers of the lines from which the metric is extracted, such as ["38-45", "47"],
+* "topic_keywords": ["k1", "k2"],
+* "topic_desc": the topic description,
+* "categories": the topic's categories (refer to 'KnowledgeStore/DevDocuments/Specs/spec-category-extraction')
+
 ### 4.1 Special Content Handling
 
 * Cover page:

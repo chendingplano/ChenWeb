@@ -52,7 +52,7 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 
 	go func() {
 		procStart := s.now()
-		procErr := s.handleEvent(ctx, payload)
+		procErr := s.handleEvent(withEventID(ctx, eventID), payload)
 		if s.EventStore == nil || strings.TrimSpace(eventID) == "" {
 			return
 		}
@@ -170,7 +170,7 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 		if *firstErr == nil {
 			*firstErr = err
 		}
-		if s.Logger != nil {
+		//if s.Logger != nil {
 			s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
 			s.Logger.Info("finish running processor",
 				"record_id", recordID,
@@ -178,7 +178,7 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 				"proc_status", "failed",
 				"ms_used", time.Since(procStart).Milliseconds(),
 			)
-		}
+		//}
 		return
 	}
 	if s.Logger != nil {
@@ -316,6 +316,17 @@ func (s *ControlService) insertReceivedEvent(ctx context.Context, subject string
 		return "", err
 	}
 	return eventID, nil
+}
+
+type eventIDCtxKey struct{}
+
+func withEventID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, eventIDCtxKey{}, id)
+}
+
+func eventIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(eventIDCtxKey{}).(string)
+	return id
 }
 
 func newEventID() string {

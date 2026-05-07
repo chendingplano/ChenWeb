@@ -21,7 +21,7 @@ import (
 type metricRecord struct {
 	ID                  int64           `json:"id"`
 	InputRecordID       int64           `json:"input_record_id"`
-	ExtractID           string          `json:"extract_id"`
+	EventID             *string         `json:"event_id,omitempty"`
 	InputFilename       string          `json:"input_filename"`
 	MetricName          *string         `json:"metric_name,omitempty"`
 	SourceLineSpans     json.RawMessage `json:"source_line_spans,omitempty"`
@@ -31,6 +31,11 @@ type metricRecord struct {
 	MetricKeywords      json.RawMessage `json:"metric_keywords,omitempty"`
 	LocationType        *string         `json:"location_type,omitempty"`
 	MetricUnit          *string         `json:"metric_unit,omitempty"`
+	MetricValue         *string         `json:"metric_value,omitempty"`
+	ValueDataType       *string         `json:"value_data_type,omitempty"`
+	ValueRangeType      *string         `json:"value_range_type,omitempty"`
+	ValueClass          *string         `json:"value_class,omitempty"`
+	ValueClassEn        *string         `json:"value_class_en,omitempty"`
 	FormulaOrDefinition *string         `json:"formula_or_definition,omitempty"`
 	ThresholdOrTarget   *string         `json:"threshold_or_target,omitempty"`
 	MeasurementFreq     *string         `json:"measurement_frequency,omitempty"`
@@ -70,15 +75,17 @@ func ListMetrics(c echo.Context) error {
 	db := ApiTypes.ProjectDBHandle
 	const query = `
 SELECT
-    id, input_record_id, extract_id, input_filename,
-    metric_name, source_line_spans, metric_subject, metric_desc,
-    metric_context, metric_keywords, location_type, metric_unit,
-    formula_or_definition, threshold_or_target, measurement_frequency,
-    confidence, is_explicit_metric, reasoning_tags,
-    COALESCE(to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
-FROM kb.metrics
-WHERE input_record_id = $1
-ORDER BY id ASC
+    m.id, m.input_record_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
+    m.metric_name, m.source_line_spans, m.metric_subject, m.metric_desc,
+    m.metric_context, m.metric_keywords, m.location_type, m.metric_unit,
+    m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
+    m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
+    m.confidence, m.is_explicit_metric, m.reasoning_tags,
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+FROM kb.metrics m
+LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+WHERE m.input_record_id = $1
+ORDER BY m.id ASC
 `
 	rows, err := db.Query(query, inputID)
 	if err != nil {
@@ -101,9 +108,10 @@ ORDER BY id ASC
 			isExplicit     sql.NullBool
 		)
 		if err := rows.Scan(
-			&r.ID, &r.InputRecordID, &r.ExtractID, &r.InputFilename,
+			&r.ID, &r.InputRecordID, &r.EventID, &r.InputFilename,
 			&r.MetricName, &spansBytes, &r.MetricSubject, &r.MetricDesc,
 			&r.MetricContext, &keywordsBytes, &r.LocationType, &r.MetricUnit,
+			&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
 			&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 			&confidence, &isExplicit, &reasoningBytes, &r.CreatedAt,
 		); err != nil {

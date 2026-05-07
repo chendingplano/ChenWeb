@@ -156,7 +156,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		return nil
 	}
 
-	p.Logger.Info("Before calling LLM", 
+	p.Logger.Info("Before calling LLM",
 		"num_blocks", len(blocks),
 		"record_id", evt.RecordID,
 		"filename", inputFilename)
@@ -321,7 +321,7 @@ func blockLineText(block Block) map[string]string {
 	return out
 }
 
-func normalizeProvisionList(items []any, lineToPage map[int]int, lineText map[string]string) []map[string]any {
+func normalizeProvisionList(items []any, _ map[int]int, lineText map[string]string) []map[string]any {
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		raw, ok := item.(map[string]any)

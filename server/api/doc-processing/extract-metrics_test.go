@@ -20,7 +20,7 @@ type fakeMetricsStore struct {
 	metricsExistCalls int
 }
 
-func (f *fakeMetricsStore) MetricsExist(_ context.Context, _ int64, _ string) (bool, error) {
+func (f *fakeMetricsStore) MetricsExist(_ context.Context, _ int64) (bool, error) {
 	f.metricsExistCalls++
 	if f.existsErr != nil {
 		return false, f.existsErr

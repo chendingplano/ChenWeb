@@ -48,6 +48,7 @@ Examples of likely metrics:
 Do NOT extract:
 
 * general concepts, goals, principles, or qualities with no measurable form
+* table of content, cover page, abstract section, conclusion section, summary section
 * non-quantitative requirements unless they clearly define a measurable evaluation criterion
 * ordinary tables that list entities, names, examples, roles, references, sections, or descriptions but not measurements
 * raw facts that are not framed as measurable indicators
@@ -63,6 +64,10 @@ Examples of non-metrics:
 * a table of abbreviations
 * a list of components
 * section numbers or identifiers without measurement meaning
+
+## Special Handling for Terms and Definitions Section
+Some documents, especiall formal documents such as standards, laws, regulations, etc., have a dedicated section for terms and definitions.
+Do not extract metrics from this type of section.
 
 ## Special handling for tables
 
@@ -97,7 +102,7 @@ When analyzing tables:
 4. If only some rows in a table define metrics, extract only those rows.
 5. Use surrounding text, captions, headers, and section titles to interpret the table.
 
-## Extraction requirements
+## Extraction Requirements
 
 For every extracted metric, produce a structured record with the following fields:
 
@@ -105,17 +110,25 @@ For every extracted metric, produce a structured record with the following field
 * `source_text`: exact text span or close excerpt that supports extraction
 * `location_type`: one of `sentence`, `bullet`, `table_row`, `table_cell`, `heading_context`, `mixed`
 * `context`: short explanation of why this item is a metric
-* `unit`: unit if present, otherwise null
+* `metric_unit`: the metrics's unit
+* `metric_value`: the metric's value. IMPORTANT: this attribute holds JUST the value. NO explanations! NO extra words or phrases, such "temperature should not be over 50 degree"
+* `value_data_type`: the metric value data type, such as numerical', 'string', 'non-measurable', etc.
+* `value_range_type`: the value range type, such as '>', '>=', '<', '<=', '(ddd, ddd)', '[ddd, ddd]', '[ddd, ddd)', '(ddd, ddd]', etc.
+* `value_class`: the classification of the metric: 'measurable/可测量', 'quality/质量指标', 'reliability/可靠性指标', 'performance/性能指标', etc.
 * `formula_or_definition`: formula or explicit definition if present, otherwise null
 * `threshold_or_target`: target / threshold / acceptable limit if present, otherwise null
 * `measurement_frequency`: if stated, otherwise null
-* `subject`: what is being measured
+* `metric_subject`: what is being measured
+* `metric_context`: the metric's context
+* `metric_desc`: the metric's description
+* `metric_keywords`: the keywords for the metrics
 * `confidence`: number from 0 to 1
+* `need_verify`: be conservative. If not sure, set this to true to let human users review and verify
 * `is_explicit_metric`: true if the document clearly defines it as a metric; false if inferred but still strongly supported
 * `table_name_or_section`: table caption, section title, or nearest heading if available
 * `reasoning_tags`: short tags such as `named_metric`, `has_unit`, `has_threshold`, `formula_present`, `performance_measure`, `quality_measure`, `compliance_measure`, `inferred_from_table`
 
-## Decision rules
+## Decision Rules
 
 Apply these rules strictly:
 
@@ -128,34 +141,61 @@ Apply these rules strictly:
 * Preserve exact wording in `source_text`.
 * Normalize `metric_name` only enough to make it concise and readable.
 
+## Languages
+* For attributes "metric_name", "source_text", "metric_subject", "metric_keywords", and "metric_unit":
+  * Extract them in the original language
+  * If the original language is not English, translate them to English and save them in the 
+    attribute '<original_attribute_name>_en'. For instance, for 'metric_name', its English 
+    translation is saved in 'metric_name_en'
+* Generate "metric_desc" and "metric_context" in the original language. If the original language
+  is not English, generate their English version and save them to "metric_desc" and "metric_context",
+  respectively.
+* For "value_class", if the original language is not English, generate the value in the original language
+  and then its English version.
+  
 ## Output format
 
 Return valid JSON with this schema:
 
+```json
 {
-"metrics": [
-{
-"metric_name": "...",
-"source_text": "...",
-"location_type": "sentence|bullet|table_row|table_cell|heading_context|mixed",
-"context": "...",
-"unit": "... or null",
-"formula_or_definition": "... or null",
-"threshold_or_target": "... or null",
-"measurement_frequency": "... or null",
-"subject": "...",
-"confidence": 0.0,
-"is_explicit_metric": true,
-"table_name_or_section": "... or null",
-"reasoning_tags": ["..."]
+   "metrics": [
+   {
+      "metric_name": "...",
+      "metric_name_en": "...",
+      "metric_desc": "...",
+      "metric_desc_en": "...",
+      "source_text": "...",
+      "source_text_en": "...",
+      "location_type": "sentence|bullet|table_row|table_cell|heading_context|mixed",
+      "metric_context": "...",
+      "metric_context_en": "...",
+      "metric_keywords": "...",
+      "metric_keywords_en": "...",
+      "metric_unit": "...",
+      "metric_unit_en": "...",
+      "metric_value": "...",
+      "value_data_type": "...",
+      "value_range_type": "...",
+      "value_class": "...",
+      "value_class_en": "...",
+      "formula_or_definition": "...",
+      "threshold_or_target": "...",
+      "measurement_frequency": "...",
+      "metric_subject": "...",
+      "metric_subject_en": "...",
+      "confidence": 0.0,
+      "need_verify": true or false, 
+      "is_explicit_metric": true,
+      "table_name_or_section": "...",
+      "reasoning_tags": ["..."]
+   },
+   {
+      <next metric>
+   },
+   ...
 }
-],
-"summary": {
-"document_contains_metrics": true,
-"metric_count": 0,
-"notes": "Brief note about where the metrics were found and whether tables were relevant."
-}
-}
+```
 
 ## Final instruction
 

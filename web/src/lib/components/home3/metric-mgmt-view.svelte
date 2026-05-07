@@ -221,6 +221,8 @@
 		return toPositiveInt(metric.input_record_id);
 	}
 
+	let currentPageLines = $derived(rawLines.filter((ln) => ln.page_number === docPage));
+
 	let selectedLineGroups = $derived.by(() => {
 		const grouped = new Map<number, MetadataLine[]>();
 		const metric = selectedMetric;
@@ -968,6 +970,34 @@
 										</div>
 
 										<div class="metadata-section">
+											<div class="metadata-section-title">Lines — Page {docPage}</div>
+											{#if rawLoading}
+												<div class="metadata-empty">Loading…</div>
+											{:else if currentPageLines.length === 0}
+												<div class="metadata-empty">No lines for this page.</div>
+											{:else}
+												<div class="metadata-lines">
+													{#each currentPageLines as line (line.line_number)}
+														<div
+															class="metadata-line-row"
+															class:hl={highlightKeys.has(`${docPage}:${line.line_number}`)}
+														>
+															<div class="metadata-line-head">
+																<span class="metadata-line-no"
+																	>{String(line.line_number).padStart(4, '0')}</span
+																>
+																{#if line.line_type}
+																	<span class="metadata-line-type">{line.line_type}</span>
+																{/if}
+															</div>
+															<div class="metadata-line-content">{line.content}</div>
+														</div>
+													{/each}
+												</div>
+											{/if}
+										</div>
+
+										<div class="metadata-section">
 											<div class="metadata-section-title">Record Fields</div>
 											{#if !currentInput}
 												<div class="metadata-empty">No record loaded.</div>
@@ -1653,6 +1683,10 @@
 		padding: 6px;
 		background: var(--panel-bg);
 		border: 1px solid var(--ink-line-soft);
+	}
+	.metadata-line-row.hl {
+		background: color-mix(in srgb, var(--brass) 12%, var(--panel-bg));
+		border-color: var(--brass);
 	}
 	.metadata-line-head {
 		display: flex;

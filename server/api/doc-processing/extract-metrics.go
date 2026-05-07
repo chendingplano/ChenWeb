@@ -37,7 +37,7 @@ type MetricsProcessor struct {
 }
 
 type MetricsStore interface {
-	MetricsExist(ctx context.Context, inputRecordID int64, inputFilename string) (bool, error)
+	MetricsExist(ctx context.Context, inputRecordID int64) (bool, error)
 	DeleteMetricsByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error)
 	SaveMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error)
 }
@@ -48,9 +48,10 @@ type MetricsSQLStore struct {
 
 type SaveMetricsRequest struct {
 	InputRecordID int64
-	InputFilename string
-	ExtractID     string
+	EventID       string
 	Language      string
+	ModelName     string
+	PromptName    string
 	Metrics       []map[string]any
 }
 
@@ -85,12 +86,15 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
+		p.Logger.Error("parse input file failed", "error", err)
 		return fmt.Errorf("(MID_26042457) parse event payload: %w", err)
 	}
 	if ShouldSkipLineFileGeneratedEvent(evt) {
+		p.Logger.Warn("processor skipped")
 		return nil
 	}
 	if p.PromptErr != nil {
+		p.Logger.Error("prompt error", "error", p.PromptErr)
 		return fmt.Errorf("(MID_26042458) load metrics prompt %q: %w", p.PromptRef, p.PromptErr)
 	}
 
@@ -100,6 +104,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 			p.Logger.Error("kb.inputs record not found", "record_id", evt.RecordID)
 			return nil
 		}
+		p.Logger.Error("retrieve record failed", "record_id", evt.RecordID, "error", err)
 		return fmt.Errorf("(MID_26042459) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
 	if p.ModelErr != nil {
@@ -127,6 +132,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 
 	lineFilePath, lineFileErr := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
 	if lineFileErr != nil {
+		p.Logger.Error("resolve input file path failed", "record_id", evt.RecordID, "error", lineFileErr)
 		p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042466) resolve line file for record_id=%d: %w", evt.RecordID, lineFileErr))
 		return nil
 	}
@@ -134,10 +140,11 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	if evt.Force {
 		_, _ = p.Store.DeleteMetricsByInputRecordID(ctx, evt.RecordID)
 	} else {
-		exists, err := p.Store.MetricsExist(ctx, evt.RecordID, "")
+		exists, err := p.Store.MetricsExist(ctx, evt.RecordID)
 		if err != nil {
+			p.Logger.Error("check metrics exist failed", "record_id", evt.RecordID, "error", err)
 			p.persistMetricsStatus(ctx, rec, start, err)
-			return nil
+			return fmt.Errorf("(MID_26050707) failed checking metrics, error:%w, record_id:%d", err, evt.RecordID)
 		}
 		if exists {
 			p.Logger.Info("metrics extraction skipped", "record_id", evt.RecordID, "reason", "metrics already exist and force=false")
@@ -152,7 +159,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		lines, readErr := readLinesFromTopicsFile(topicsPath, lineFilePath)
 		if readErr != nil {
 			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042467) read topics file %s: %w", topicsPath, readErr))
-			return nil
+			return fmt.Errorf("(MID_26050708) failed reading input file, error:%w, path:%s", readErr, topicsPath)
 		}
 		allLines = lines
 		inputCount = 1
@@ -162,7 +169,8 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 			lines, err := readRegularLinesFromChunk(chunkPath, lineFilePath)
 			if err != nil {
 				p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) read chunk file %s: %w", chunkPath, err))
-				return nil
+				return fmt.Errorf("(MID_26050702) failed reading input file, error:%w, chunkPath:%s, lineFilePath:%s",
+					err, chunkPath, lineFilePath)
 			}
 			allLines = append(allLines, lines...)
 		}
@@ -170,32 +178,27 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	}
 	if len(allLines) == 0 {
 		err := fmt.Errorf("(MID_26042462) no regular lines found in chunk files for record_id=%d", evt.RecordID)
-		p.Logger.Warn("metrics extraction skipped: no regular lines in chunk files",
-			"record_id", evt.RecordID, "chunk_files", inputCount)
 		p.persistMetricsStatus(ctx, rec, start, err)
-		return nil
+		return err
 	}
 
 	result, err := p.extractMetricsFromLinesWithLLM(ctx, allLines)
 	if err != nil {
 		p.persistMetricsStatus(ctx, rec, start, err)
-		return nil
+		return fmt.Errorf("(MID_26050701) extractMetrics failed, error:%w", err)
 	}
 
-	inputFilename := filepath.Base(strings.TrimSpace(rec.ResultFilename))
-	if inputFilename == "" {
-		inputFilename = fmt.Sprintf("record_%d", evt.RecordID)
-	}
 	inserted, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
 		InputRecordID: evt.RecordID,
-		InputFilename: inputFilename,
-		ExtractID:     result.ExtractID,
+		EventID:       eventIDFromContext(ctx),
 		Language:      result.Language,
+		ModelName:     p.ModelName,
+		PromptName:    p.PromptRef,
 		Metrics:       result.Metrics,
 	})
 	if err != nil {
 		p.persistMetricsStatus(ctx, rec, start, err)
-		return nil
+		return fmt.Errorf("(MID_26050703) insert records failed, error:%w", err)
 	}
 
 	p.Logger.Info("metrics extracted",
@@ -309,7 +312,7 @@ func readRegularLinesFromChunk(path string, lineFilePath string) ([]string, erro
 	}
 	if hasSummaryFormat {
 		if strings.TrimSpace(lineFilePath) == "" {
-			return nil, fmt.Errorf("summary chunk file requires source line file")
+			return nil, fmt.Errorf("(MID_26050704) summary chunk file requires source line file")
 		}
 		wantLines := make(map[int]struct{}, len(regularLineNos))
 		for _, n := range regularLineNos {
@@ -387,7 +390,7 @@ func parseTopicLineRanges(raw string) ([]int, error) {
 			start, err1 := strconv.Atoi(strings.TrimSpace(part[:idx]))
 			end, err2 := strconv.Atoi(strings.TrimSpace(part[idx+1:]))
 			if err1 != nil || err2 != nil || start < 1 || end < start {
-				return nil, fmt.Errorf("invalid range: %q", part)
+				return nil, fmt.Errorf("(MID_26050705) invalid range: %q", part)
 			}
 			for n := start; n <= end; n++ {
 				out = append(out, n)
@@ -395,7 +398,7 @@ func parseTopicLineRanges(raw string) ([]int, error) {
 		} else {
 			n, err := strconv.Atoi(part)
 			if err != nil || n < 1 {
-				return nil, fmt.Errorf("invalid line number: %q", part)
+				return nil, fmt.Errorf("(MID_26050706) invalid line number: %q", part)
 			}
 			out = append(out, n)
 		}
@@ -514,7 +517,6 @@ func appendMetricsStatus(raw string, start time.Time, durationMs int64, procErr 
 }
 
 type metricExtractionResult struct {
-	ExtractID        string
 	Language         string
 	Metrics          []map[string]any
 	UncertainMetrics []map[string]any
@@ -546,7 +548,6 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 	metrics := normalizeMetricList(metricsRaw)
 	uncertain := normalizeMetricList(uncertainRaw)
 	return metricExtractionResult{
-		ExtractID:        p.Now().Format("20060102-150405"),
 		Language:         language,
 		Metrics:          metrics,
 		UncertainMetrics: uncertain,
@@ -615,13 +616,24 @@ func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) strin
 		"language": "string",
 		"metrics": []map[string]any{{
 			"metric_name":           "string",
+			"metric_name_en":        "string",
 			"source_line_spans":     []string{"5", "12:14"},
 			"subject":               "string",
+			"subject_en":            "string",
 			"desc":                  "string",
+			"desc_en":               "string",
 			"context":               "string",
+			"context_en":            "string",
 			"keywords":              []string{"string"},
+			"keywords_en":           []string{"string"},
 			"location_type":         "string",
 			"unit":                  "string",
+			"unit_en":               "string",
+			"metric_value":          "string",
+			"value_data_type":       "string",
+			"value_range_type":      "string",
+			"value_class":           "string",
+			"value_class_en":        "string",
 			"formula_or_definition": "string",
 			"threshold_or_target":   "string",
 			"measurement_frequency": "string",
@@ -650,12 +662,23 @@ func normalizeMetricList(items []any) []map[string]any {
 		}
 		normalized := map[string]any{
 			"metric_name":           strings.TrimSpace(asString(raw["metric_name"])),
+			"metric_name_en":        strings.TrimSpace(asString(raw["metric_name_en"])),
 			"subject":               strings.TrimSpace(asString(raw["subject"])),
+			"subject_en":            strings.TrimSpace(asString(raw["subject_en"])),
 			"desc":                  strings.TrimSpace(asString(raw["desc"])),
+			"desc_en":               strings.TrimSpace(asString(raw["desc_en"])),
 			"context":               strings.TrimSpace(asString(raw["context"])),
+			"context_en":            strings.TrimSpace(asString(raw["context_en"])),
 			"keywords":              toStringSlice(raw["keywords"]),
+			"keywords_en":           toStringSlice(raw["keywords_en"]),
 			"location_type":         strings.TrimSpace(asString(raw["location_type"])),
 			"unit":                  strings.TrimSpace(asString(raw["unit"])),
+			"unit_en":               strings.TrimSpace(asString(raw["unit_en"])),
+			"metric_value":          strings.TrimSpace(asString(raw["metric_value"])),
+			"value_data_type":       strings.TrimSpace(asString(raw["value_data_type"])),
+			"value_range_type":      strings.TrimSpace(asString(raw["value_range_type"])),
+			"value_class":           strings.TrimSpace(asString(raw["value_class"])),
+			"value_class_en":        strings.TrimSpace(asString(raw["value_class_en"])),
 			"formula_or_definition": strings.TrimSpace(asString(raw["formula_or_definition"])),
 			"threshold_or_target":   strings.TrimSpace(asString(raw["threshold_or_target"])),
 			"measurement_frequency": strings.TrimSpace(asString(raw["measurement_frequency"])),
@@ -850,22 +873,35 @@ CREATE SCHEMA IF NOT EXISTS kb;
 
 CREATE TABLE IF NOT EXISTS kb.metrics (
     id BIGSERIAL PRIMARY KEY,
+    event_id TEXT,
     input_record_id BIGINT NOT NULL,
-    extract_id TEXT NOT NULL,
-    input_filename TEXT NOT NULL,
     metric_name TEXT,
+    metric_name_en TEXT,
     source_line_spans JSONB,
     metric_subject TEXT,
+    metric_subject_en TEXT,
     metric_desc TEXT,
+    metric_desc_en TEXT,
     metric_context TEXT,
+    metric_context_en TEXT,
     metric_keywords JSONB,
+    metric_keywords_en JSONB,
+    model_name TEXT,
+    prompt_name TEXT,
     location_type TEXT,
     metric_unit TEXT,
+    metric_unit_en TEXT,
+    metric_value TEXT,
+    value_data_type TEXT,
+    value_range_type TEXT,
+    value_class TEXT,
+    value_class_en TEXT,
     formula_or_definition TEXT,
     threshold_or_target TEXT,
     measurement_frequency TEXT,
     confidence DOUBLE PRECISION,
     is_explicit_metric BOOLEAN,
+    table_name_or_section TEXT,
     reasoning_tags JSONB,
     ext_info JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -875,18 +911,13 @@ CREATE TABLE IF NOT EXISTS kb.metrics (
 	return err
 }
 
-func (s MetricsSQLStore) MetricsExist(ctx context.Context, inputRecordID int64, inputFilename string) (bool, error) {
+func (s MetricsSQLStore) MetricsExist(ctx context.Context, inputRecordID int64) (bool, error) {
 	if err := s.ensureMetricsTable(ctx); err != nil {
 		return false, err
 	}
-	const q = `
-SELECT 1
-FROM kb.metrics
-WHERE input_record_id = $1
-  AND ($2 = '' OR input_filename = $2)
-LIMIT 1`
+	const q = `SELECT 1 FROM kb.metrics WHERE input_record_id = $1 LIMIT 1`
 	var one int
-	err := s.DB.QueryRowContext(ctx, q, inputRecordID, strings.TrimSpace(inputFilename)).Scan(&one)
+	err := s.DB.QueryRowContext(ctx, q, inputRecordID).Scan(&one)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -917,28 +948,49 @@ func (s MetricsSQLStore) SaveMetrics(ctx context.Context, req SaveMetricsRequest
 
 	const stmt = `
 INSERT INTO kb.metrics (
+	event_id,
 	input_record_id,
-	extract_id,
-	input_filename,
 	metric_name,
+	metric_name_en,
 	source_line_spans,
 	metric_subject,
+	metric_subject_en,
 	metric_desc,
+	metric_desc_en,
 	metric_context,
+	metric_context_en,
 	metric_keywords,
+	metric_keywords_en,
+	model_name,
+	prompt_name,
 	location_type,
 	metric_unit,
+	metric_unit_en,
+	metric_value,
+	value_data_type,
+	value_range_type,
+	value_class,
+	value_class_en,
 	formula_or_definition,
 	threshold_or_target,
 	measurement_frequency,
 	confidence,
 	is_explicit_metric,
+	table_name_or_section,
 	reasoning_tags,
 	ext_info
 )
 VALUES (
-	$1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb
+	$1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30::jsonb,$31::jsonb
 )`
+
+	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
+		strings.EqualFold(strings.TrimSpace(req.Language), "english")
+
+	var eventIDVal interface{}
+	if id := strings.TrimSpace(req.EventID); id != "" {
+		eventIDVal = id
+	}
 
 	var inserted int64
 	for _, metric := range req.Metrics {
@@ -946,28 +998,60 @@ VALUES (
 		keywordsJSON, _ := json.Marshal(metric["keywords"])
 		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
 		extInfo, _ := json.Marshal(map[string]any{
-			"table_name_or_section": metric["table_name_or_section"],
-			"language":              req.Language,
-			"schema_version":        "1",
+			"language":       req.Language,
+			"schema_version": "2",
 		})
 
+		var (
+			metricNameEn  interface{}
+			subjectEn     interface{}
+			descEn        interface{}
+			contextEn     interface{}
+			keywordsEnVal interface{}
+			unitEn        interface{}
+			valueClassEn  interface{}
+		)
+		if !isEnglish {
+			metricNameEn = strings.TrimSpace(asString(metric["metric_name_en"]))
+			subjectEn = strings.TrimSpace(asString(metric["subject_en"]))
+			descEn = strings.TrimSpace(asString(metric["desc_en"]))
+			contextEn = strings.TrimSpace(asString(metric["context_en"]))
+			kw, _ := json.Marshal(metric["keywords_en"])
+			keywordsEnVal = string(kw)
+			unitEn = strings.TrimSpace(asString(metric["unit_en"]))
+			valueClassEn = strings.TrimSpace(asString(metric["value_class_en"]))
+		}
+
 		_, err := s.DB.ExecContext(ctx, stmt,
+			eventIDVal,
 			req.InputRecordID,
-			req.ExtractID,
-			req.InputFilename,
 			strings.TrimSpace(asString(metric["metric_name"])),
+			metricNameEn,
 			string(sourceSpansJSON),
 			strings.TrimSpace(asString(metric["subject"])),
+			subjectEn,
 			strings.TrimSpace(asString(metric["desc"])),
+			descEn,
 			strings.TrimSpace(asString(metric["context"])),
+			contextEn,
 			string(keywordsJSON),
+			keywordsEnVal,
+			strings.TrimSpace(req.ModelName),
+			strings.TrimSpace(req.PromptName),
 			strings.TrimSpace(asString(metric["location_type"])),
 			strings.TrimSpace(asString(metric["unit"])),
+			unitEn,
+			strings.TrimSpace(asString(metric["metric_value"])),
+			strings.TrimSpace(asString(metric["value_data_type"])),
+			strings.TrimSpace(asString(metric["value_range_type"])),
+			strings.TrimSpace(asString(metric["value_class"])),
+			valueClassEn,
 			strings.TrimSpace(asString(metric["formula_or_definition"])),
 			strings.TrimSpace(asString(metric["threshold_or_target"])),
 			strings.TrimSpace(asString(metric["measurement_frequency"])),
 			toFloat(metric["confidence"]),
 			toBool(metric["is_explicit_metric"]),
+			strings.TrimSpace(asString(metric["table_name_or_section"])),
 			string(reasoningTagsJSON),
 			string(extInfo),
 		)
