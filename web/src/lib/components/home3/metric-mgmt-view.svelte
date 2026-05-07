@@ -7,6 +7,7 @@
 		updateKbInput,
 		getRawLines,
 		createKbMetric,
+		createKbProvision,
 		updateRawLine,
 		type KbInputRecord,
 		type KbMetricRecord,
@@ -16,7 +17,6 @@
 	import EditableMetadataSection from '$lib/components/home3/editable-metadata-section.svelte';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
-	import CirclePlusIcon from '@lucide/svelte/icons/circle-plus';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
@@ -368,6 +368,9 @@
 			.map((l) => l.line_number);
 		pdfSelectedLines = selected;
 		addMetricBufferLines = selected;
+		if (selected.length > 0) {
+			addMetricOpen = true;
+		}
 	}
 
 	function handleDragMove(detail: {
@@ -916,6 +919,39 @@
 			addMetricBufferLines = addMetricBufferLines.filter((ln) => !removedLines.includes(ln));
 		}
 
+		let canAddPrevious = $derived.by(() => {
+			if (addMetricBufferLines.length === 0 || rawLines.length === 0) return false;
+			const minLine = Math.min(...addMetricBufferLines);
+			return rawLines.some((ln) => ln.line_number < minLine);
+		});
+		let canAddNext = $derived.by(() => {
+			if (addMetricBufferLines.length === 0 || rawLines.length === 0) return false;
+			const maxLine = Math.max(...addMetricBufferLines);
+			return rawLines.some((ln) => ln.line_number > maxLine);
+		});
+
+		function addPreviousLine() {
+			if (addMetricBufferLines.length === 0) return;
+			const minLine = Math.min(...addMetricBufferLines);
+			const prev = rawLines
+				.filter((ln) => ln.line_number < minLine && !addMetricBufferLines.includes(ln.line_number))
+				.sort((a, b) => b.line_number - a.line_number)[0];
+			if (prev) {
+				addMetricBufferLines = [prev.line_number, ...addMetricBufferLines];
+			}
+		}
+
+		function addNextLine() {
+			if (addMetricBufferLines.length === 0) return;
+			const maxLine = Math.max(...addMetricBufferLines);
+			const next = rawLines
+				.filter((ln) => ln.line_number > maxLine && !addMetricBufferLines.includes(ln.line_number))
+				.sort((a, b) => a.line_number - b.line_number)[0];
+			if (next) {
+				addMetricBufferLines = [...addMetricBufferLines, next.line_number];
+			}
+		}
+
 		async function extractMetric() {
 			if (!currentInput || addMetricDialogLines.length === 0) return;
 			addMetricSaving = true;
@@ -936,6 +972,30 @@
 				addMetricBufferLines = [];
 			} catch (err) {
 				alert(err instanceof Error ? err.message : 'Failed to create metric');
+			} finally {
+				addMetricSaving = false;
+			}
+		}
+
+		async function extractProvision() {
+			if (!currentInput || addMetricDialogLines.length === 0) return;
+			addMetricSaving = true;
+			try {
+				const spans: SourceLineSpan[] = addMetricDialogLines.map((l) => ({
+					page_number: l.page_number,
+					line_number: l.line_number
+				}));
+				const created = await createKbProvision({
+					input_record_id: currentInput.id,
+					provision_name: `Provision from ${currentInput.id}`,
+					source_line_spans: spans
+				});
+				addMetricOpen = false;
+				addMetricEditKey = null;
+				addMetricEditContent = '';
+				addMetricBufferLines = [];
+			} catch (err) {
+				alert(err instanceof Error ? err.message : 'Failed to create provision');
 			} finally {
 				addMetricSaving = false;
 			}
@@ -1085,13 +1145,6 @@
 							bind:selectedLines={pdfSelectedLines}
 						>
 							{#snippet toolbar()}
-								<button
-									type="button"
-									class="pvw-tool-btn"
-									onclick={() => (addMetricOpen = true)}
-									title="Add Metric"><CirclePlusIcon class="pvw-tb-icon" /></button
-								>
-								<div class="pvw-tool-sep"></div>
 								<button
 									type="button"
 									class="pvw-tool-btn"
@@ -1414,7 +1467,6 @@
 {#if addMetricOpen}
 		<div
 			class="dialog-overlay"
-			style="background:{panelBg};"
 			aria-hidden="true"
 			onclick={() => { addMetricOpen = false; addMetricBufferLines = []; }}
 			onkeydown={(e) => {
@@ -1422,8 +1474,7 @@
 			}}
 		>
 			<div
-				class="dialog"
-				style="background:{panelBg};border-color:{inkLine};"
+				class="dialog am-dialog"
 				role="dialog"
 				aria-modal="true"
 				aria-label="Add metric"
@@ -1432,136 +1483,129 @@
 				onkeydown={(e) => e.stopPropagation()}
 			>
 				<div class="dialog-head">
-					<div class="dialog-eyebrow">Knowledge System</div>
-					<div class="dialog-title">Add Metric</div>
-					<div class="dialog-subtitle">
-						Review selected lines, edit content, or delete unwanted entries before extracting a metric.
+					<div>
+						<div class="dialog-eyebrow">KB.Metrics</div>
+						<h2 class="dialog-title">Add Metric</h2>
+						<p class="dialog-subtitle">Review selected lines, edit content, or delete unwanted entries before extracting a metric.</p>
 					</div>
-					<button type="button" class="dialog-close-btn" onclick={() => { addMetricOpen = false; addMetricBufferLines = []; }}
-						>Close</button
-					>
 				</div>
-				<div class="dialog-body">
+
+				<div class="dialog-controls am-body">
 					{#if addMetricDialogLines.length === 0}
-						<div class="add-metric-empty">
+						<div class="dialog-section am-empty-section">
 							<div class="empty-glyph">§</div>
 							<div class="empty-title">No lines selected</div>
-							<div class="empty-sub">
-								Drag to select lines on the PDF, then open this dialog again.
-							</div>
+							<div class="empty-sub">Drag to select lines on the PDF, then open this dialog again.</div>
 						</div>
 					{:else}
-						<div class="add-metric-count">{addMetricDialogLines.length} line{addMetricDialogLines.length === 1 ? '' : 's'} selected</div>
-						<div class="add-metric-table-wrap">
-							<table class="add-metric-table">
-								<thead>
-									<tr>
-										<th class="col-line">Line #</th>
-										<th class="col-page">Page</th>
-										<th class="col-type">Type</th>
-										<th class="col-content">Content</th>
-										<th class="col-action"></th>
-										<th class="col-action"></th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each addMetricDialogLines as line (line.key)}
-										<tr class="add-metric-row">
-											<td class="mono">{line.line_number}</td>
-											<td class="mono">{line.page_number}</td>
-											<td><span class="type-badge">{line.line_type}</span></td>
-											<td class="content-cell">
-												{#if addMetricEditKey === line.key}
-													<input
-														class="add-metric-edit-input"
-														type="text"
-														bind:value={addMetricEditContent}
-																onkeydown={(e) => {
-															if (e.key === 'Escape') cancelEditDialogLine();
-															if (e.key === 'Enter') saveEditDialogLine(line.page_number, line.line_number);
-														}}
-													/>
-												{:else}
-													<span class="content-text">{line.content}</span>
-												{/if}
-											</td>
-											<td class="action-cell">
-												{#if addMetricEditKey === line.key}
-													<button
-														type="button"
-														class="add-metric-action-btn save"
-														disabled={addMetricSaving}
-														onclick={() => saveEditDialogLine(line.page_number, line.line_number)}
-													>Save</button
-													>
-													<button
-														type="button"
-														class="add-metric-action-btn cancel"
-														onclick={cancelEditDialogLine}
-													>Cancel</button
-													>
-												{:else}
-													<button
-														type="button"
-														class="add-metric-action-btn edit"
-														onclick={() => startEditDialogLine(line.key, line.content)}
-													>Edit</button
-													>
-												{/if}
-											</td>
-											<td class="action-cell">
-												{#if addMetricEditKey !== line.key}
-													<button
-														type="button"
-														class="add-metric-action-btn delete"
-														onclick={() => deleteDialogLine(line.key)}
-													>Delete</button
-													>
-												{/if}
-											</td>
+						<div class="dialog-section">
+							<div class="dialog-section-head">
+								<span class="dialog-section-title">Selected Lines</span>
+								<span class="dialog-section-copy">{addMetricDialogLines.length} line{addMetricDialogLines.length === 1 ? '' : 's'} selected</span>
+								<button type="button" class="am-btn am-btn-head-add" disabled={!canAddPrevious} onclick={addPreviousLine}>+ Add</button>
+							</div>
+							<div class="am-table-wrap">
+								<table class="am-table">
+									<thead>
+										<tr>
+											<th class="am-col-line">Line #</th>
+											<th class="am-col-page">Page</th>
+											<th class="am-col-type">Type</th>
+											<th class="am-col-content">Content</th>
+											<th class="am-col-actions"></th>
 										</tr>
-									{/each}
-								</tbody>
-							</table>
+									</thead>
+									<tbody>
+										{#each addMetricDialogLines as line (line.key)}
+											<tr class="am-row">
+												<td class="am-mono">{line.line_number}</td>
+												<td class="am-mono">{line.page_number}</td>
+												<td><span class="am-type-badge">{line.line_type}</span></td>
+												<td class="am-content-cell">
+													{#if addMetricEditKey === line.key}
+														<input
+															class="am-edit-input"
+															type="text"
+															bind:value={addMetricEditContent}
+															onkeydown={(e) => {
+																if (e.key === 'Escape') cancelEditDialogLine();
+																if (e.key === 'Enter') saveEditDialogLine(line.page_number, line.line_number);
+															}}
+														/>
+													{:else}
+														<span class="am-content-text">{line.content}</span>
+													{/if}
+												</td>
+												<td class="am-action-cell">
+													{#if addMetricEditKey === line.key}
+														<button type="button" class="am-btn am-btn-save"
+															disabled={addMetricSaving}
+															onclick={() => saveEditDialogLine(line.page_number, line.line_number)}
+														>Save</button>
+														<button type="button" class="am-btn am-btn-cancel-row"
+															onclick={cancelEditDialogLine}
+														>Cancel</button>
+													{:else}
+														<button type="button" class="am-btn am-btn-edit"
+															onclick={() => startEditDialogLine(line.key, line.content)}
+														>Edit</button>
+														<button type="button" class="am-btn am-btn-delete"
+															onclick={() => deleteDialogLine(line.key)}
+														>Remove</button>
+													{/if}
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+								<div class="am-table-foot">
+									<button type="button" class="am-btn am-btn-foot-add" disabled={!canAddNext} onclick={addNextLine}>+ Add</button>
+								</div>
+							</div>
 						</div>
 					{/if}
 				</div>
-				<div class="add-metric-foot">
-					<div class="add-metric-foot-left">
+
+				<div class="dialog-foot">
+					<div class="dialog-foot-hint">
 						<button
 							type="button"
-							class="add-metric-foot-btn help"
+							class="am-btn-foot am-btn-help"
 							onclick={() => {
 								alert(
-									'Select PDF lines to add as a metric.\n\n' +
+									'Select PDF lines to extract a metric or provision.\n\n' +
 									'• Drag on the PDF to select lines\n' +
 									'• Edit: modify line content (saves to the original file)\n' +
-									'• Delete: remove a line from this selection\n' +
+									'• Remove: remove a line from this selection\n' +
+									'• Extract Provision: create a new provision from the remaining lines\n' +
 									'• Extract Metric: create a new metric from the remaining lines'
 								);
 							}}
-						>Help</button
-						>
+						>Help</button>
 					</div>
-					<div class="add-metric-foot-right">
+					<div class="dialog-foot-buttons">
 						<button
 							type="button"
-							class="add-metric-foot-btn cancel"
+							class="am-btn-foot am-btn-foot-cancel"
 							onclick={() => {
 								addMetricOpen = false;
 								addMetricEditKey = null;
 								addMetricEditContent = '';
 								addMetricBufferLines = [];
 							}}
-						>Cancel</button
-						>
+						>Close</button>
 						<button
 							type="button"
-							class="add-metric-foot-btn extract"
+							class="am-btn-foot am-btn-foot-extract dialog-search-btn"
+							disabled={addMetricDialogLines.length === 0 || addMetricSaving}
+							onclick={extractProvision}
+						>{addMetricSaving ? 'Saving…' : 'Extract Provision'}</button>
+						<button
+							type="button"
+							class="am-btn-foot am-btn-foot-extract dialog-search-btn"
 							disabled={addMetricDialogLines.length === 0 || addMetricSaving}
 							onclick={extractMetric}
-						>{addMetricSaving ? 'Saving…' : 'Extract Metric'}</button
-						>
+						>{addMetricSaving ? 'Saving…' : 'Extract Metric'}</button>
 					</div>
 				</div>
 			</div>
@@ -2067,30 +2111,262 @@
 	.dialog-placeholder code {
 		color: var(--brass);
 	}
-	.dialog-body {
-		padding: 18px 16px;
+	.am-dialog {
+		min-width: 860px;
+		min-height: 540px;
+		max-width: 1100px;
+		max-height: min(88vh, 900px);
 	}
-	.dialog-title {
-		font-family: var(--font-serif, serif);
-		font-size: 22px;
-		color: var(--brass);
-		line-height: 1;
+	.am-body {
+		flex: 1 1 auto;
+		overflow-y: auto;
+		min-height: 0;
 	}
-	.dialog-close-btn {
-		height: 30px;
+	.am-empty-section {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		padding: 48px 24px;
+		gap: 8px;
+		text-align: center;
+	}
+	.am-table-wrap {
+		overflow-x: auto;
+		border-radius: 12px;
+		background: #13192280;
+		border: 1px solid rgba(255, 255, 255, 0.05);
+	}
+	.am-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 13px;
+	}
+	.am-table thead th {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.12em;
+		color: var(--text-muted);
+		text-align: left;
+		padding: 10px 14px;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+		background: #181d27;
+		white-space: nowrap;
+	}
+	.am-table tbody tr {
+		border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+		transition: background 100ms;
+	}
+	.am-table tbody tr:last-child {
+		border-bottom: none;
+	}
+	.am-table tbody tr:hover {
+		background: rgba(255, 255, 255, 0.03);
+	}
+	.am-table td {
+		padding: 10px 14px;
+		vertical-align: middle;
+		color: var(--text-primary);
+	}
+	.am-col-line,
+	.am-col-page {
+		width: 64px;
+	}
+	.am-col-type {
+		width: 130px;
+	}
+	.am-col-actions {
+		width: 180px;
+	}
+	.am-mono {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--text-muted);
+	}
+	.am-type-badge {
+		display: inline-block;
+		padding: 2px 8px;
+		border-radius: 4px;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.06em;
+		text-transform: lowercase;
+		background: rgba(93, 175, 168, 0.12);
+		color: var(--teal);
+		border: 1px solid rgba(93, 175, 168, 0.2);
+		white-space: nowrap;
+	}
+	.am-content-cell {
+		max-width: 480px;
+	}
+	.am-content-text {
+		display: block;
+		line-height: 1.45;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	.am-action-cell {
+		display: flex;
+		gap: 6px;
+		align-items: center;
+		white-space: nowrap;
+	}
+	.am-edit-input {
+		width: 100%;
+		min-width: 200px;
+		padding: 6px 10px;
+		background: #1a202b;
+		border: 1px solid rgba(212, 162, 76, 0.35);
+		border-radius: 8px;
+		color: var(--text-primary);
+		font-family: inherit;
+		font-size: 13px;
+		outline: none;
+	}
+	.am-edit-input:focus {
+		border-color: var(--brass);
+		box-shadow: 0 0 0 2px rgba(212, 162, 76, 0.15);
+	}
+	.am-btn {
+		height: 28px;
 		padding: 0 10px;
-		border: 1px solid var(--ink-line);
-		background: var(--panel-bg-alt);
+		border-radius: 6px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.06em;
+		cursor: pointer;
+		transition:
+			background 120ms,
+			border-color 120ms,
+			color 120ms;
+		white-space: nowrap;
+	}
+	.am-btn-edit {
+		background: rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(255, 255, 255, 0.14);
 		color: var(--text-secondary);
-		font-family: var(--font-mono, monospace);
+	}
+	.am-btn-edit:hover {
+		background: rgba(255, 255, 255, 0.11);
+		border-color: rgba(255, 255, 255, 0.24);
+		color: var(--text-primary);
+	}
+	.am-btn-delete {
+		background: rgba(200, 85, 61, 0.12);
+		border: 1px solid rgba(200, 85, 61, 0.3);
+		color: var(--crimson);
+	}
+	.am-btn-delete:hover {
+		background: rgba(200, 85, 61, 0.22);
+		border-color: rgba(200, 85, 61, 0.52);
+	}
+	.am-btn-save {
+		background: rgba(212, 162, 76, 0.15);
+		border: 1px solid rgba(212, 162, 76, 0.38);
+		color: var(--brass);
+	}
+	.am-btn-save:hover:not(:disabled) {
+		background: rgba(212, 162, 76, 0.26);
+		border-color: var(--brass);
+	}
+	.am-btn-save:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.am-btn-cancel-row {
+		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		color: var(--text-muted);
+	}
+	.am-btn-cancel-row:hover {
+		background: rgba(255, 255, 255, 0.08);
+		color: var(--text-secondary);
+	}
+	.am-btn-foot {
+		height: 40px;
+		padding: 0 18px;
+		border-radius: 10px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		letter-spacing: 0.08em;
+		cursor: pointer;
+		transition:
+			background 120ms,
+			border-color 120ms,
+			color 120ms;
+	}
+	.am-btn-help {
+		background: transparent;
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		color: var(--text-muted);
+	}
+	.am-btn-help:hover {
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--text-secondary);
+	}
+	.am-btn-foot-cancel {
+		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		color: var(--text-secondary);
+	}
+	.am-btn-foot-cancel:hover {
+		background: rgba(255, 255, 255, 0.09);
+		border-color: rgba(255, 255, 255, 0.22);
+		color: var(--text-primary);
+	}
+	.am-btn-head-add {
+		flex-shrink: 0;
+		height: 24px;
+		padding: 0 10px;
+		border-radius: 6px;
+		font-family: var(--font-mono);
 		font-size: 10px;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		cursor: pointer;
+		background: rgba(93, 175, 168, 0.1);
+		border: 1px solid rgba(93, 175, 168, 0.28);
+		color: var(--teal);
+		transition: background 120ms, border-color 120ms;
+		margin-left: auto;
 	}
-	.dialog-close-btn:hover {
-		border-color: var(--brass);
-		color: var(--brass);
+	.am-btn-head-add:hover:not(:disabled) {
+		background: rgba(93, 175, 168, 0.2);
+		border-color: rgba(93, 175, 168, 0.5);
+	}
+	.am-btn-head-add:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.am-table-foot {
+		display: flex;
+		justify-content: flex-end;
+		padding: 8px 10px 6px;
+		border-top: 1px solid rgba(255, 255, 255, 0.04);
+		background: rgba(0, 0, 0, 0.08);
+		border-radius: 0 0 12px 12px;
+	}
+	.am-btn-foot-add {
+		height: 26px;
+		padding: 0 12px;
+		border-radius: 6px;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		cursor: pointer;
+		background: rgba(93, 175, 168, 0.1);
+		border: 1px solid rgba(93, 175, 168, 0.28);
+		color: var(--teal);
+		transition: background 120ms, border-color 120ms;
+	}
+	.am-btn-foot-add:hover:not(:disabled) {
+		background: rgba(93, 175, 168, 0.2);
+		border-color: rgba(93, 175, 168, 0.5);
+	}
+	.am-btn-foot-add:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
 	}
 
 	.document {
@@ -2641,6 +2917,8 @@
 		justify-content: center;
 		z-index: 50;
 		padding: 24px;
+		background: rgba(2, 6, 23, 0.68);
+		backdrop-filter: blur(10px);
 	}
 	.dialog {
 		width: 100%;
@@ -2648,9 +2926,11 @@
 		max-height: min(90vh, 980px);
 		display: flex;
 		flex-direction: column;
-		border: 1px solid;
 		border-radius: 24px;
 		overflow: auto;
+		background: #111827;
+		color: #f3eedf;
+		border: 1px solid rgba(148, 163, 184, 0.16);
 		box-shadow:
 			0 30px 80px rgba(0, 0, 0, 0.55),
 			0 0 0 1px rgba(212, 162, 76, 0.08);

@@ -996,6 +996,39 @@ export async function filterGraphNodes(
 	return response.json() as Promise<FilterGraphNodesResponse>;
 }
 
+// ---------- kb.provisions ----------
+
+export type CreateKbProvisionPayload = {
+	input_record_id: number;
+	provision_name?: string;
+	source_line_spans?: SourceLineSpan[];
+};
+
+export type CreateKbProvisionResponse = {
+	status: boolean;
+	record: KbMetricRecord;
+};
+
+export async function createKbProvision(
+	payload: CreateKbProvisionPayload
+): Promise<CreateKbProvisionResponse> {
+	const response = await fetch(`${BASE}/provisions`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to create kb provision (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<CreateKbProvisionResponse>;
+}
+
 export async function searchSummaryTreeMock(
 	params: SearchSummaryTreeParams
 ): Promise<SearchSummaryTreeResponse> {
