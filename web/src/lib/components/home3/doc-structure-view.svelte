@@ -658,28 +658,28 @@
 						sidebarMinWidth={140}
 						sidebarMaxWidth={420}
 						sidebarDefaultWidth={270}
+						sidebarTitle="Selected Line"
+						sidebarSettingsKey="doc-structure-pdf-sidebar"
+						sidebarWidthSettingLabel="Panel Width"
 					>
 						{#snippet sidebar()}
-							<aside class="meta-panel">
-								<div class="meta-title">Selected Line</div>
-								{#if !selectedLine}
-									<div class="meta-empty">Select a line from the left panel.</div>
-								{:else}
-									<div class="meta-row"><span>Page</span><strong>{selectedLine.page_number}</strong></div>
-									<div class="meta-row"><span>Line</span><strong>{selectedLine.line_number}</strong></div>
-									<div class="meta-row">
-										<span>Corrected</span><strong>{selectedLine.corrected_line_type}</strong>
-									</div>
-									<div class="meta-row"><span>Original</span><strong>{selectedLine.line_type}</strong></div>
-									<div class="meta-row mono">
-										[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
-									</div>
-								{/if}
-								{#if correctedFile}
-									<div class="meta-title corrected-title">Corrected File</div>
-									<div class="meta-file">{correctedFile}</div>
-								{/if}
-							</aside>
+							{#if !selectedLine}
+								<div class="meta-empty">Select a line from the left panel.</div>
+							{:else}
+								<div class="meta-row"><span>Page</span><strong>{selectedLine.page_number}</strong></div>
+								<div class="meta-row"><span>Line</span><strong>{selectedLine.line_number}</strong></div>
+								<div class="meta-row">
+									<span>Corrected</span><strong>{selectedLine.corrected_line_type}</strong>
+								</div>
+								<div class="meta-row"><span>Original</span><strong>{selectedLine.line_type}</strong></div>
+								<div class="meta-row mono">
+									[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
+								</div>
+							{/if}
+							{#if correctedFile}
+								<div class="meta-title corrected-title">Corrected File</div>
+								<div class="meta-file">{correctedFile}</div>
+							{/if}
 						{/snippet}
 					</PdfViewWindow>
 				{:else}

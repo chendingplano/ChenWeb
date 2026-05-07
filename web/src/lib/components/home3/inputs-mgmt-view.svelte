@@ -1292,168 +1292,164 @@
 								sidebarMinWidth={260}
 								sidebarMaxWidth={620}
 								sidebarDefaultWidth={340}
+								sidebarTitle="Document"
+								sidebarSettingsKey="inputs-mgmt-pdf-sidebar"
+								sidebarWidthSettingLabel="Document Panel Width"
 							>
 								{#snippet sidebar()}
-								<aside class="metadata-panel">
-										<div class="metadata-head">
-											<div class="metadata-title">Document</div>
-										</div>
-										<div class="metadata-body">
-											<div class="metadata-section">
-												<div class="metadata-section-title">Record Fields</div>
-												{#if !currentInput}
-													<div class="metadata-empty">No record loaded.</div>
-												{:else}
-													<div class="metadata-fields">
-														{#each recordMetaRows as row (row.key)}
-															<div class="metadata-row">
-																<span class="metadata-key">{row.label}</span>
-																<div class="metadata-val-wrap">
-																	{#if isEditingField(`field:${row.key}`)}
-																		<div class="metadata-editor">
-																			{#if row.editor === 'textarea' || row.editor === 'json' || row.editor === 'array'}
-																				<textarea
-																					class="metadata-input metadata-input-textarea"
-																					rows={row.editor === 'json' ? 8 : row.editor === 'array' ? 5 : 4}
-																					bind:value={editingDraft}
-																				></textarea>
-																			{:else if row.editor === 'datetime'}
-																				<input
-																					class="metadata-input"
-																					type="datetime-local"
-																					bind:value={editingDraft}
-																				/>
-																			{:else}
-																				<input class="metadata-input" type="text" bind:value={editingDraft} />
-																			{/if}
-																			{#if editingError}
-																				<div class="metadata-edit-error">{editingError}</div>
-																			{/if}
-																			<div class="metadata-editor-actions">
-																				<button
-																					class="btn btn-primary metadata-editor-btn"
-																					onclick={saveFieldEdit}
-																					disabled={editingSaving}
-																				>
-																					{editingSaving ? 'Saving…' : 'Save'}
-																				</button>
-																				<button
-																					class="btn btn-ghost metadata-editor-btn"
-																					onclick={cancelFieldEdit}
-																					disabled={editingSaving}
-																				>
-																					Cancel
-																				</button>
-																			</div>
-																		</div>
+									<div class="metadata-section">
+										<div class="metadata-section-title">Record Fields</div>
+										{#if !currentInput}
+											<div class="metadata-empty">No record loaded.</div>
+										{:else}
+											<div class="metadata-fields">
+												{#each recordMetaRows as row (row.key)}
+													<div class="metadata-row">
+														<span class="metadata-key">{row.label}</span>
+														<div class="metadata-val-wrap">
+															{#if isEditingField(`field:${row.key}`)}
+																<div class="metadata-editor">
+																	{#if row.editor === 'textarea' || row.editor === 'json' || row.editor === 'array'}
+																		<textarea
+																			class="metadata-input metadata-input-textarea"
+																			rows={row.editor === 'json' ? 8 : row.editor === 'array' ? 5 : 4}
+																			bind:value={editingDraft}
+																		></textarea>
+																	{:else if row.editor === 'datetime'}
+																		<input
+																			class="metadata-input"
+																			type="datetime-local"
+																			bind:value={editingDraft}
+																		/>
 																	{:else}
-																		{#if row.editable && row.editor}
-																			<div class="metadata-display">
-																				<button
-																					type="button"
-																					class="metadata-edit-trigger"
-																					title={`${row.value}\n(Double click to edit)`}
-																					ondblclick={() =>
-																						startFieldEdit(`field:${row.key}`, row.editor ?? 'text', row.rawValue)}
-																				>
-																					<span class="metadata-edit-text">{row.value}</span>
-																				</button>
-																				<button
-																					type="button"
-																					class="metadata-edit-icon-btn"
-																					title="Edit field"
-																					aria-label={`Edit ${row.label}`}
-																					onclick={() =>
-																						startFieldEdit(`field:${row.key}`, row.editor ?? 'text', row.rawValue)}
-																				>
-																					✎
-																				</button>
-																			</div>
-																		{:else}
-																			<span class="metadata-val" title={row.value}>{row.value}</span>
-																		{/if}
+																		<input class="metadata-input" type="text" bind:value={editingDraft} />
 																	{/if}
+																	{#if editingError}
+																		<div class="metadata-edit-error">{editingError}</div>
+																	{/if}
+																	<div class="metadata-editor-actions">
+																		<button
+																			class="btn btn-primary metadata-editor-btn"
+																			onclick={saveFieldEdit}
+																			disabled={editingSaving}
+																		>
+																			{editingSaving ? 'Saving…' : 'Save'}
+																		</button>
+																		<button
+																			class="btn btn-ghost metadata-editor-btn"
+																			onclick={cancelFieldEdit}
+																			disabled={editingSaving}
+																		>
+																			Cancel
+																		</button>
+																	</div>
 																</div>
-															</div>
-														{/each}
+															{:else}
+																{#if row.editable && row.editor}
+																	<div class="metadata-display">
+																		<button
+																			type="button"
+																			class="metadata-edit-trigger"
+																			title={`${row.value}\n(Double click to edit)`}
+																			ondblclick={() =>
+																				startFieldEdit(`field:${row.key}`, row.editor ?? 'text', row.rawValue)}
+																		>
+																			<span class="metadata-edit-text">{row.value}</span>
+																		</button>
+																		<button
+																			type="button"
+																			class="metadata-edit-icon-btn"
+																			title="Edit field"
+																			aria-label={`Edit ${row.label}`}
+																			onclick={() =>
+																				startFieldEdit(`field:${row.key}`, row.editor ?? 'text', row.rawValue)}
+																		>
+																			✎
+																		</button>
+																	</div>
+																{:else}
+																	<span class="metadata-val" title={row.value}>{row.value}</span>
+																{/if}
+															{/if}
+														</div>
 													</div>
-												{/if}
+												{/each}
 											</div>
+										{/if}
+									</div>
 
-											<div class="metadata-section">
-												<div class="metadata-section-title">Doc Metadata</div>
-												{#if docMetadataRows.length === 0}
-													<div class="metadata-empty">No doc_metadata available.</div>
-												{:else}
-													<div class="metadata-fields">
-														{#each docMetadataRows as row (`${row.key}-${row.value}`)}
-															<div class="metadata-row metadata-row-wide">
-																<span class="metadata-key metadata-key-path" title={row.key}
-																	>{row.key}</span
-																>
-																<div class="metadata-val-wrap">
-																	{#if isEditingField(`docmeta:${row.key}`)}
-																		<div class="metadata-editor">
-																			{#if row.editor === 'json'}
-																				<textarea
-																					class="metadata-input metadata-input-textarea"
-																					rows={8}
-																					bind:value={editingDraft}
-																				></textarea>
-																			{:else}
-																				<input class="metadata-input" type="text" bind:value={editingDraft} />
-																			{/if}
-																			{#if editingError}
-																				<div class="metadata-edit-error">{editingError}</div>
-																			{/if}
-																			<div class="metadata-editor-actions">
-																				<button
-																					class="btn btn-primary metadata-editor-btn"
-																					onclick={saveFieldEdit}
-																					disabled={editingSaving}
-																				>
-																					{editingSaving ? 'Saving…' : 'Save'}
-																				</button>
-																				<button
-																					class="btn btn-ghost metadata-editor-btn"
-																					onclick={cancelFieldEdit}
-																					disabled={editingSaving}
-																				>
-																					Cancel
-																				</button>
-																			</div>
-																		</div>
+									<div class="metadata-section">
+										<div class="metadata-section-title">Doc Metadata</div>
+										{#if docMetadataRows.length === 0}
+											<div class="metadata-empty">No doc_metadata available.</div>
+										{:else}
+											<div class="metadata-fields">
+												{#each docMetadataRows as row (`${row.key}-${row.value}`)}
+													<div class="metadata-row metadata-row-wide">
+														<span class="metadata-key metadata-key-path" title={row.key}
+															>{row.key}</span
+														>
+														<div class="metadata-val-wrap">
+															{#if isEditingField(`docmeta:${row.key}`)}
+																<div class="metadata-editor">
+																	{#if row.editor === 'json'}
+																		<textarea
+																			class="metadata-input metadata-input-textarea"
+																			rows={8}
+																			bind:value={editingDraft}
+																		></textarea>
 																	{:else}
-																		<div class="metadata-display">
-																			<button
-																				type="button"
-																				class="metadata-edit-trigger"
-																				title={`${row.value}\n(Double click to edit)`}
-																				ondblclick={() =>
-																					startFieldEdit(`docmeta:${row.key}`, row.editor, row.rawValue)}
-																			>
-																				<span class="metadata-edit-text">{row.value}</span>
-																			</button>
-																			<button
-																				type="button"
-																				class="metadata-edit-icon-btn"
-																				title="Edit metadata field"
-																				aria-label={`Edit doc metadata ${row.key}`}
-																				onclick={() =>
-																					startFieldEdit(`docmeta:${row.key}`, row.editor, row.rawValue)}
-																			>
-																				✎
-																			</button>
-																		</div>
+																		<input class="metadata-input" type="text" bind:value={editingDraft} />
 																	{/if}
+																	{#if editingError}
+																		<div class="metadata-edit-error">{editingError}</div>
+																	{/if}
+																	<div class="metadata-editor-actions">
+																		<button
+																			class="btn btn-primary metadata-editor-btn"
+																			onclick={saveFieldEdit}
+																			disabled={editingSaving}
+																		>
+																			{editingSaving ? 'Saving…' : 'Save'}
+																		</button>
+																		<button
+																			class="btn btn-ghost metadata-editor-btn"
+																			onclick={cancelFieldEdit}
+																			disabled={editingSaving}
+																		>
+																			Cancel
+																		</button>
+																	</div>
 																</div>
-															</div>
-														{/each}
+															{:else}
+																<div class="metadata-display">
+																	<button
+																		type="button"
+																		class="metadata-edit-trigger"
+																		title={`${row.value}\n(Double click to edit)`}
+																		ondblclick={() =>
+																			startFieldEdit(`docmeta:${row.key}`, row.editor, row.rawValue)}
+																	>
+																		<span class="metadata-edit-text">{row.value}</span>
+																	</button>
+																	<button
+																		type="button"
+																		class="metadata-edit-icon-btn"
+																		title="Edit metadata field"
+																		aria-label={`Edit doc metadata ${row.key}`}
+																		onclick={() =>
+																			startFieldEdit(`docmeta:${row.key}`, row.editor, row.rawValue)}
+																	>
+																		✎
+																	</button>
+																</div>
+															{/if}
+														</div>
 													</div>
-												{/if}
+												{/each}
 											</div>
-										</div>
-									</aside>
+										{/if}
+									</div>
 								{/snippet}
 							</PdfViewWindow>
 						{:else}

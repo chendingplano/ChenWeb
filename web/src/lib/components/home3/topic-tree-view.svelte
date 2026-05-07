@@ -331,49 +331,49 @@
 								sidebarMinWidth={240}
 								sidebarMaxWidth={520}
 								sidebarDefaultWidth={320}
+								sidebarTitle={sidebarTitle}
+								sidebarSettingsKey="topic-tree-pdf-sidebar"
+								sidebarWidthSettingLabel="Panel Width"
 							>
 								{#snippet sidebar()}
-									<aside class="topic-sidebar">
-										<div class="topic-sidebar-title">{sidebarTitle}</div>
-										{#if selectedTopic}
-											<div class="topic-sidebar-block">
-												<div class="topic-sidebar-row">
-													<span>{itemSingular} ID</span>
-													<strong>{selectedTopic.id}</strong>
-												</div>
-												<div class="topic-sidebar-row">
-													<span>Record ID</span>
-													<strong>{selectedTopic.recordId}</strong>
-												</div>
-												<div class="topic-sidebar-row">
-													<span>Page</span>
-													<strong>{selectedTopic.page}</strong>
-												</div>
-												<div class="topic-sidebar-row">
-													<span>Type</span>
-													<strong>{selectedTopic.topicType || '—'}</strong>
-												</div>
+									{#if selectedTopic}
+										<div class="topic-sidebar-block">
+											<div class="topic-sidebar-row">
+												<span>{itemSingular} ID</span>
+												<strong>{selectedTopic.id}</strong>
 											</div>
-											<div class="topic-sidebar-block">
-												<div class="topic-sidebar-label">{itemSingular}</div>
-												<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
+											<div class="topic-sidebar-row">
+												<span>Record ID</span>
+												<strong>{selectedTopic.recordId}</strong>
 											</div>
-											<div class="topic-sidebar-block">
-												<div class="topic-sidebar-label">Keywords</div>
-												{#if selectedTopic.topicKeywords.length > 0}
-													<div class="keyword-list">
-														{#each selectedTopic.topicKeywords as kw (kw)}
-															<span class="keyword-chip">{kw}</span>
-														{/each}
-													</div>
-												{:else}
-													<p class="topic-sidebar-copy muted">No keywords extracted.</p>
-												{/if}
+											<div class="topic-sidebar-row">
+												<span>Page</span>
+												<strong>{selectedTopic.page}</strong>
 											</div>
-										{:else}
-											<div class="topic-sidebar-empty">Select a {itemSingular} to inspect it alongside the source PDF.</div>
-										{/if}
-									</aside>
+											<div class="topic-sidebar-row">
+												<span>Type</span>
+												<strong>{selectedTopic.topicType || '—'}</strong>
+											</div>
+										</div>
+										<div class="topic-sidebar-block">
+											<div class="topic-sidebar-label">{itemSingular}</div>
+											<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
+										</div>
+										<div class="topic-sidebar-block">
+											<div class="topic-sidebar-label">Keywords</div>
+											{#if selectedTopic.topicKeywords.length > 0}
+												<div class="keyword-list">
+													{#each selectedTopic.topicKeywords as kw (kw)}
+														<span class="keyword-chip">{kw}</span>
+													{/each}
+												</div>
+											{:else}
+												<p class="topic-sidebar-copy muted">No keywords extracted.</p>
+											{/if}
+										</div>
+									{:else}
+										<div class="topic-sidebar-empty">Select a {itemSingular} to inspect it alongside the source PDF.</div>
+									{/if}
 								{/snippet}
 							</PdfViewWindow>
 						{:else if viewerInputId && treeState.selectedPdfTarget}

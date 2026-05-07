@@ -508,12 +508,16 @@
 		display: flex;
 		height: 100%;
 		min-height: 100%;
-		align-items: flex-start;
+		align-items: stretch;
 	}
 	.pdf-sidebar-cluster {
 		display: flex;
-		align-items: flex-start;
+		align-items: stretch;
+		align-self: stretch;
 		flex: 0 0 auto;
+		height: 100%;
+		min-height: 0;
+		max-height: 100%;
 	}
 	.pdf-canvas-host {
 		flex: 1;

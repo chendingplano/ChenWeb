@@ -1,7 +1,14 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import SharedPdfViewer from './shared-pdf-viewer.svelte';
 	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
+	import {
+		clampPdfSidebarWidth,
+		clampPdfViewWindowZoom,
+		readPdfViewWindowSettings,
+		writePdfViewWindowSettings
+	} from './pdf-view-window-settings.js';
 
 	let {
 		inputId,
@@ -16,6 +23,10 @@
 		sidebarMinWidth = 140,
 		sidebarMaxWidth = 420,
 		sidebarDefaultWidth = 270,
+		sidebarTitle = 'Metadata',
+		sidebarSettingsKey = null,
+		sidebarWidthSettingLabel = 'Metadata Panel Width',
+		zoomSettingLabel = 'Zoom',
 		sidebar
 	}: {
 		inputId: number | null;
@@ -30,14 +41,58 @@
 		sidebarMinWidth?: number;
 		sidebarMaxWidth?: number;
 		sidebarDefaultWidth?: number;
+		sidebarTitle?: string;
+		sidebarSettingsKey?: string | null;
+		sidebarWidthSettingLabel?: string;
+		zoomSettingLabel?: string;
 		sidebar?: Snippet;
 	} = $props();
 
 	let panelWidth = $state(sidebarDefaultWidth);
 	let resizing = $state(false);
+	let settingsOpen = $state(false);
+	let storage: Storage | null = null;
+
+	function sidebarWidthOptions() {
+		return {
+			minWidth: sidebarMinWidth,
+			maxWidth: sidebarMaxWidth,
+			defaultWidth: sidebarDefaultWidth
+		};
+	}
 
 	function clamp(w: number): number {
-		return Math.min(sidebarMaxWidth, Math.max(sidebarMinWidth, Math.round(w)));
+		return clampPdfSidebarWidth(w, sidebarWidthOptions());
+	}
+
+	function savePanelWidth(nextWidth: number) {
+		panelWidth = clamp(nextWidth);
+		if (!sidebarSettingsKey || !storage) return;
+		writePdfViewWindowSettings(
+			storage,
+			sidebarSettingsKey,
+			{ sidebarWidth: panelWidth, zoom },
+			sidebarWidthOptions()
+		);
+	}
+
+	function zoomPercentLabel(value: number): string {
+		return `${Math.round(value * 100)}%`;
+	}
+
+	function saveZoom(nextZoom: number) {
+		zoom = clampPdfViewWindowZoom(nextZoom);
+		if (!sidebarSettingsKey || !storage) return;
+		writePdfViewWindowSettings(
+			storage,
+			sidebarSettingsKey,
+			{ sidebarWidth: panelWidth, zoom },
+			sidebarWidthOptions()
+		);
+	}
+
+	function closeSettings() {
+		settingsOpen = false;
 	}
 
 	function startResize(event: PointerEvent) {
@@ -51,7 +106,7 @@
 		handle?.setPointerCapture?.(event.pointerId);
 
 		const handleMove = (e: PointerEvent) => {
-			panelWidth = clamp(startWidth + (e.clientX - startX));
+			savePanelWidth(startWidth + (e.clientX - startX));
 		};
 		const handleUp = (e: PointerEvent) => {
 			resizing = false;
@@ -71,18 +126,37 @@
 	function onResizerKeydown(event: KeyboardEvent) {
 		if (event.key === 'ArrowLeft') {
 			event.preventDefault();
-			panelWidth = clamp(panelWidth - 16);
+			savePanelWidth(panelWidth - 16);
 		} else if (event.key === 'ArrowRight') {
 			event.preventDefault();
-			panelWidth = clamp(panelWidth + 16);
+			savePanelWidth(panelWidth + 16);
 		} else if (event.key === 'Home') {
 			event.preventDefault();
-			panelWidth = sidebarMinWidth;
+			savePanelWidth(sidebarMinWidth);
 		} else if (event.key === 'End') {
 			event.preventDefault();
-			panelWidth = sidebarMaxWidth;
+			savePanelWidth(sidebarMaxWidth);
 		}
 	}
+
+	onMount(() => {
+		storage = window.localStorage;
+		const settings = readPdfViewWindowSettings(
+			storage,
+			sidebarSettingsKey,
+			sidebarWidthOptions()
+		);
+		panelWidth = settings.sidebarWidth;
+		zoom = settings.zoom;
+	});
+
+	$effect(() => {
+		panelWidth = clamp(panelWidth);
+	});
+
+	$effect(() => {
+		zoom = clampPdfViewWindowZoom(zoom);
+	});
 </script>
 
 <SharedPdfViewer
@@ -99,7 +173,26 @@
 	<div slot="sidebar">
 		{#if sidebar}
 			<div class="pvw-shell" style={`width:${panelWidth}px;`}>
-				{@render sidebar()}
+				<aside class="pvw-sidebar-panel">
+					<div class="pvw-sidebar-head">
+						<div class="pvw-sidebar-title">{sidebarTitle}</div>
+						<button
+							type="button"
+							class="pvw-settings-btn"
+							class:active={settingsOpen}
+							aria-expanded={settingsOpen}
+							aria-label="Sidebar settings"
+							onclick={() => {
+								settingsOpen = !settingsOpen;
+							}}
+						>
+							Settings
+						</button>
+					</div>
+					<div class="pvw-sidebar-body">
+						{@render sidebar()}
+					</div>
+				</aside>
 				<button
 					type="button"
 					class="pvw-resizer"
@@ -115,12 +208,230 @@
 	</div>
 </SharedPdfViewer>
 
+{#if settingsOpen}
+	<div
+		class="pvw-settings-dialog-overlay"
+		aria-hidden="true"
+		onclick={closeSettings}
+		onkeydown={(event) => {
+			if (event.key === 'Escape') closeSettings();
+		}}
+	>
+		<div
+			class="pvw-settings-dialog"
+			role="dialog"
+			aria-modal="true"
+			aria-label="PDF viewer settings"
+			tabindex="0"
+			onclick={(event) => event.stopPropagation()}
+			onkeydown={(event) => event.stopPropagation()}
+		>
+			<div class="pvw-settings-dialog-head">
+				<div class="pvw-settings-dialog-title">Settings</div>
+				<button type="button" class="pvw-settings-close-btn" onclick={closeSettings}>Close</button>
+			</div>
+			<div class="pvw-settings-dialog-body">
+				<label class="pvw-settings-field">
+					<span class="pvw-settings-label">{sidebarWidthSettingLabel} ({panelWidth}px)</span>
+					<input
+						class="pvw-settings-range"
+						type="range"
+						min={sidebarMinWidth}
+						max={sidebarMaxWidth}
+						step="1"
+						value={panelWidth}
+						oninput={(event) => {
+							savePanelWidth(Number((event.currentTarget as HTMLInputElement).value));
+						}}
+					/>
+				</label>
+				<label class="pvw-settings-field">
+					<span class="pvw-settings-label">{zoomSettingLabel} ({zoomPercentLabel(zoom)})</span>
+					<input
+						class="pvw-settings-range"
+						type="range"
+						min="0.1"
+						max="3"
+						step="0.05"
+						value={zoom}
+						oninput={(event) => {
+							saveZoom(Number((event.currentTarget as HTMLInputElement).value));
+						}}
+					/>
+				</label>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.pvw-shell {
 		position: relative;
 		flex: 0 0 auto;
 		height: 100%;
+		min-height: 0;
+		max-height: 100%;
+		align-self: stretch;
 		padding-right: 16px;
+	}
+
+	.pvw-sidebar-panel {
+		height: 100%;
+		min-height: 0;
+		max-height: 100%;
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		background: var(--panel-bg);
+		border: 1px solid var(--ink-line);
+		overflow: hidden;
+	}
+
+	.pvw-sidebar-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 12px;
+		border-bottom: 1px solid var(--ink-line-soft);
+		background: var(--panel-bg);
+		flex-shrink: 0;
+	}
+
+	.pvw-sidebar-title {
+		font-family: var(--font-serif, serif);
+		font-size: 24px;
+		line-height: 1;
+		color: var(--brass);
+	}
+
+	.pvw-settings-btn {
+		height: 28px;
+		padding: 0 10px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-secondary);
+		font-family: var(--font-mono, monospace);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		cursor: pointer;
+	}
+
+	.pvw-settings-btn:hover,
+	.pvw-settings-btn.active,
+	.pvw-settings-btn:focus-visible {
+		border-color: var(--brass);
+		color: var(--brass);
+		outline: none;
+	}
+
+	.pvw-settings-field {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.pvw-settings-label {
+		font-family: var(--font-mono, monospace);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.pvw-settings-range {
+		width: 100%;
+		accent-color: var(--brass);
+	}
+
+	.pvw-settings-dialog-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 24px;
+		background: rgba(9, 12, 17, 0.62);
+		backdrop-filter: blur(4px);
+	}
+
+	.pvw-settings-dialog {
+		width: min(420px, 100%);
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg);
+		box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+	}
+
+	.pvw-settings-dialog-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 14px 16px;
+		border-bottom: 1px solid var(--ink-line-soft);
+	}
+
+	.pvw-settings-dialog-title {
+		font-family: var(--font-serif, serif);
+		font-size: 22px;
+		color: var(--brass);
+		line-height: 1;
+	}
+
+	.pvw-settings-close-btn {
+		height: 30px;
+		padding: 0 10px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-secondary);
+		font-family: var(--font-mono, monospace);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		cursor: pointer;
+	}
+
+	.pvw-settings-close-btn:hover,
+	.pvw-settings-close-btn:focus-visible {
+		border-color: var(--brass);
+		color: var(--brass);
+		outline: none;
+	}
+
+	.pvw-settings-dialog-body {
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
+		padding: 16px;
+	}
+
+	.pvw-sidebar-body {
+		flex: 1;
+		min-height: 0;
+		max-height: 100%;
+		overflow-y: auto;
+		overflow-x: hidden;
+		padding: 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-line) transparent;
+	}
+
+	.pvw-sidebar-body::-webkit-scrollbar {
+		width: 10px;
+	}
+
+	.pvw-sidebar-body::-webkit-scrollbar-thumb {
+		background: var(--ink-line);
+		border-radius: 999px;
+	}
+
+	.pvw-sidebar-body::-webkit-scrollbar-track {
+		background: transparent;
 	}
 
 	.pvw-resizer {
@@ -188,6 +499,9 @@
 			height: auto;
 			width: auto !important;
 			padding-right: 0;
+		}
+		.pvw-sidebar-panel {
+			height: auto;
 		}
 		.pvw-resizer {
 			display: none;

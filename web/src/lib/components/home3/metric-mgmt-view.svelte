@@ -292,6 +292,101 @@
 		return value.replace('T', ' ').slice(0, 19);
 	}
 
+	function combineField(base?: string | null, en?: string | null): string {
+		const b = base?.trim() || '';
+		const e = en?.trim() || '';
+		if (!b && !e) return '—';
+		if (!b) return e;
+		if (!e || b === e) return b;
+		return `${b} / ${e}`;
+	}
+
+	function combineArrField(base?: string[] | null, en?: string[] | null): string {
+		const b = (base ?? []).join(', ');
+		const e = (en ?? []).join(', ');
+		if (!b && !e) return '—';
+		if (!b) return e;
+		if (!e || b === e) return b;
+		return `${b} / ${e}`;
+	}
+
+	function formatSpans(spans: unknown): string {
+		if (!Array.isArray(spans) || spans.length === 0) return '—';
+		return spans
+			.map((s) => {
+				if (typeof s === 'string') return s;
+				if (s && typeof s === 'object') {
+					const o = s as Record<string, unknown>;
+					return String(o.line_number ?? o.line ?? s);
+				}
+				return String(s);
+			})
+			.join(', ');
+	}
+
+	function buildMetricFieldRows(m: KbMetricRecord): Array<{ label: string; value: string }> {
+		const opt = (v: unknown): string => {
+			if (v == null || v === '') return '—';
+			if (typeof v === 'boolean') return v ? 'true' : 'false';
+			return String(v).trim() || '—';
+		};
+		return [
+			{ label: 'id', value: opt(m.id) },
+			{ label: 'event id', value: opt(m.event_id) },
+			{ label: 'input record id', value: opt(m.input_record_id) },
+			{ label: 'metric name', value: combineField(m.metric_name, m.metric_name_en) },
+			{ label: 'source line spans', value: formatSpans(m.source_line_spans) },
+			{ label: 'metric subject', value: combineField(m.metric_subject, m.metric_subject_en) },
+			{ label: 'metric desc', value: combineField(m.metric_desc, m.metric_desc_en) },
+			{ label: 'metric context', value: combineField(m.metric_context, m.metric_context_en) },
+			{ label: 'metric keywords', value: combineArrField(m.metric_keywords, m.metric_keywords_en) },
+			{ label: 'model name', value: opt(m.model_name) },
+			{ label: 'metric unit', value: combineField(m.metric_unit, m.metric_unit_en) },
+			{ label: 'metric value', value: opt(m.metric_value) },
+			{ label: 'value data type', value: opt(m.value_data_type) },
+			{ label: 'value range type', value: opt(m.value_range_type) },
+			{ label: 'value class', value: combineField(m.value_class, m.value_class_en) },
+			{ label: 'definition', value: opt(m.formula_or_definition) },
+			{ label: 'threshold', value: opt(m.threshold_or_target) },
+			{ label: 'frequency', value: opt(m.measurement_frequency) },
+			{ label: 'confidence', value: m.confidence != null ? confidencePct(m.confidence) : '—' },
+			{ label: 'is explicit', value: opt(m.is_explicit_metric) },
+			{ label: 'table/section', value: opt(m.table_name_or_section) },
+			{ label: 'reasoning tags', value: (m.reasoning_tags ?? []).join(', ') || '—' },
+			{ label: 'created at', value: formatMaybeDate(m.created_at) }
+		];
+	}
+
+	let metricFieldRows = $derived.by(() => {
+		if (!selectedMetric) return [] as Array<{ label: string; value: string }>;
+		return buildMetricFieldRows(selectedMetric);
+	});
+
+	let filteredPageLines = $derived.by(() => {
+		const CONTEXT = 3;
+		if (selectedMetricId == null) return currentPageLines;
+		const highlightedOnPage: number[] = [];
+		for (const k of highlightKeys) {
+			const [pgStr, lnStr] = k.split(':');
+			if (Number(pgStr) === docPage) highlightedOnPage.push(Number(lnStr));
+		}
+		if (highlightedOnPage.length === 0) return [] as typeof currentPageLines;
+		const allLineNums = currentPageLines.map((l) => l.line_number);
+		const include = new Set<number>();
+		for (const hl of highlightedOnPage) {
+			const idx = allLineNums.indexOf(hl);
+			if (idx < 0) continue;
+			for (
+				let i = Math.max(0, idx - CONTEXT);
+				i <= Math.min(allLineNums.length - 1, idx + CONTEXT);
+				i++
+			) {
+				include.add(allLineNums[i]);
+			}
+		}
+		return currentPageLines.filter((l) => include.has(l.line_number));
+	});
+
 	let recordMetaRows = $derived.by(() => {
 		if (!currentInput && !selectedMetric) return [] as Array<{ label: string; value: string }>;
 		const sourceRecordId = metricSourceRecordId(selectedMetric);
@@ -910,109 +1005,105 @@
 								highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
 								renderHighlights={renderMetricHighlights}
 								sidebarMinWidth={140}
-								sidebarMaxWidth={420}
+								sidebarMaxWidth={620}
 								sidebarDefaultWidth={270}
+								sidebarTitle="Metadata"
+								sidebarSettingsKey="metrics-pdf-sidebar"
+								sidebarWidthSettingLabel="Metadata Panel Width"
 							>
 								{#snippet sidebar()}
-									<aside class="metadata-panel">
-										<div class="metadata-title">Metadata</div>
-										<div class="metadata-section">
-											<div class="metadata-section-title">Selected Metric</div>
-											{#if selectedMetric}
-												<div class="metadata-row">
-													<span class="metadata-key">Name</span>
-													<span class="metadata-val">{metricNameOf(selectedMetric)}</span>
-												</div>
-												<div class="metadata-row">
-													<span class="metadata-key">Confidence</span>
-													<span class="metadata-val"
-														>{confidencePct(selectedMetric.confidence)}</span
-													>
-												</div>
-												<div class="metadata-row">
-													<span class="metadata-key">Spans</span>
-													<span class="metadata-val">{spanCount(selectedMetric)}</span>
-												</div>
-											{:else}
-												<div class="metadata-empty">Select a metric to inspect source lines.</div>
-											{/if}
-										</div>
-
-										<div class="metadata-section">
-											<div class="metadata-section-title">Selected Lines (By Page)</div>
-											{#if selectedLineGroups.length === 0}
-												<div class="metadata-empty">No selected lines.</div>
-											{:else}
-												{#each selectedLineGroups as group (group.page)}
-													<div class="metadata-page-group">
-														<div class="metadata-page-title">Page {group.page}</div>
-														<div class="metadata-lines">
-															{#each group.lines as line (`${group.page}-${line.line_number}`)}
-																<div class="metadata-line-row">
-																	<div class="metadata-line-head">
-																		<span class="metadata-line-no">{line.span_key}</span>
-																		{#if line.line_type}
-																			<span class="metadata-line-type">{line.line_type}</span>
-																		{/if}
-																	</div>
-																	<div class="metadata-line-content">
-																		{line.content || (line.found ? '—' : '(line text unavailable)')}
-																		{#if line.coords_text}
-																			&nbsp;{line.coords_text}
-																		{/if}
-																	</div>
-																</div>
-															{/each}
-														</div>
+									<div class="metadata-section">
+										<div class="metadata-section-title">Metric Fields</div>
+										{#if selectedMetric}
+											<div class="metadata-fields">
+												{#each metricFieldRows as row (row.label)}
+													<div class="metadata-row">
+														<span class="metadata-key">{row.label}</span>
+														<span class="metadata-val" title={row.value}>{row.value}</span>
 													</div>
 												{/each}
-											{/if}
-										</div>
+											</div>
+										{:else}
+											<div class="metadata-empty">Select a metric to inspect its fields.</div>
+										{/if}
+									</div>
 
-										<div class="metadata-section">
-											<div class="metadata-section-title">Lines — Page {docPage}</div>
-											{#if rawLoading}
-												<div class="metadata-empty">Loading…</div>
-											{:else if currentPageLines.length === 0}
-												<div class="metadata-empty">No lines for this page.</div>
-											{:else}
-												<div class="metadata-lines">
-													{#each currentPageLines as line (line.line_number)}
-														<div
-															class="metadata-line-row"
-															class:hl={highlightKeys.has(`${docPage}:${line.line_number}`)}
-														>
-															<div class="metadata-line-head">
-																<span class="metadata-line-no"
-																	>{String(line.line_number).padStart(4, '0')}</span
-																>
-																{#if line.line_type}
-																	<span class="metadata-line-type">{line.line_type}</span>
-																{/if}
+									<div class="metadata-section">
+										<div class="metadata-section-title">Record Fields</div>
+										{#if !currentInput}
+											<div class="metadata-empty">No record loaded.</div>
+										{:else}
+											<div class="metadata-fields">
+												{#each recordMetaRows as row (row.label)}
+													<div class="metadata-row">
+														<span class="metadata-key">{row.label}</span>
+														<span class="metadata-val" title={row.value}>{row.value}</span>
+													</div>
+												{/each}
+											</div>
+										{/if}
+									</div>
+
+									<div class="metadata-section">
+										<div class="metadata-section-title">Selected Lines (By Page)</div>
+										{#if selectedLineGroups.length === 0}
+											<div class="metadata-empty">No selected lines.</div>
+										{:else}
+											{#each selectedLineGroups as group (group.page)}
+												<div class="metadata-page-group">
+													<div class="metadata-page-title">Page {group.page}</div>
+													<div class="metadata-lines">
+														{#each group.lines as line (`${group.page}-${line.line_number}`)}
+															<div class="metadata-line-row">
+																<div class="metadata-line-head">
+																	<span class="metadata-line-no">{line.span_key}</span>
+																	{#if line.line_type}
+																		<span class="metadata-line-type">{line.line_type}</span>
+																	{/if}
+																</div>
+																<div class="metadata-line-content">
+																	{line.content || (line.found ? '—' : '(line text unavailable)')}
+																	{#if line.coords_text}
+																		&nbsp;{line.coords_text}
+																	{/if}
+																</div>
 															</div>
-															<div class="metadata-line-content">{line.content}</div>
-														</div>
-													{/each}
+														{/each}
+													</div>
 												</div>
-											{/if}
-										</div>
+											{/each}
+										{/if}
+									</div>
 
-										<div class="metadata-section">
-											<div class="metadata-section-title">Record Fields</div>
-											{#if !currentInput}
-												<div class="metadata-empty">No record loaded.</div>
-											{:else}
-												<div class="metadata-fields">
-													{#each recordMetaRows as row (row.label)}
-														<div class="metadata-row">
-															<span class="metadata-key">{row.label}</span>
-															<span class="metadata-val" title={row.value}>{row.value}</span>
+									<div class="metadata-section">
+										<div class="metadata-section-title">Lines — Page {docPage}</div>
+										{#if rawLoading}
+											<div class="metadata-empty">Loading…</div>
+										{:else if filteredPageLines.length === 0 && selectedMetricId != null}
+											<div class="metadata-empty">No selected lines on page {docPage}.</div>
+										{:else if filteredPageLines.length === 0}
+											<div class="metadata-empty">No lines for this page.</div>
+										{:else}
+											<div class="metadata-lines">
+												{#each filteredPageLines as line (line.line_number)}
+													<div
+														class="metadata-line-row"
+														class:hl={highlightKeys.has(`${docPage}:${line.line_number}`)}
+													>
+														<div class="metadata-line-head">
+															<span class="metadata-line-no"
+																>{String(line.line_number).padStart(4, '0')}</span
+															>
+															{#if line.line_type}
+																<span class="metadata-line-type">{line.line_type}</span>
+															{/if}
 														</div>
-													{/each}
-												</div>
-											{/if}
-										</div>
-									</aside>
+														<div class="metadata-line-content">{line.content}</div>
+													</div>
+												{/each}
+											</div>
+										{/if}
+									</div>
 								{/snippet}
 							</PdfViewWindow>
 						{:else}
@@ -1712,7 +1803,7 @@
 	}
 	.metadata-row {
 		display: grid;
-		grid-template-columns: 96px 1fr;
+		grid-template-columns: 130px 1fr;
 		gap: 8px;
 		align-items: start;
 	}

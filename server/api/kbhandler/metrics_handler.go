@@ -24,13 +24,20 @@ type metricRecord struct {
 	EventID             *string         `json:"event_id,omitempty"`
 	InputFilename       string          `json:"input_filename"`
 	MetricName          *string         `json:"metric_name,omitempty"`
+	MetricNameEn        *string         `json:"metric_name_en,omitempty"`
 	SourceLineSpans     json.RawMessage `json:"source_line_spans,omitempty"`
 	MetricSubject       *string         `json:"metric_subject,omitempty"`
+	MetricSubjectEn     *string         `json:"metric_subject_en,omitempty"`
 	MetricDesc          *string         `json:"metric_desc,omitempty"`
+	MetricDescEn        *string         `json:"metric_desc_en,omitempty"`
 	MetricContext       *string         `json:"metric_context,omitempty"`
+	MetricContextEn     *string         `json:"metric_context_en,omitempty"`
 	MetricKeywords      json.RawMessage `json:"metric_keywords,omitempty"`
+	MetricKeywordsEn    json.RawMessage `json:"metric_keywords_en,omitempty"`
+	ModelName           *string         `json:"model_name,omitempty"`
 	LocationType        *string         `json:"location_type,omitempty"`
 	MetricUnit          *string         `json:"metric_unit,omitempty"`
+	MetricUnitEn        *string         `json:"metric_unit_en,omitempty"`
 	MetricValue         *string         `json:"metric_value,omitempty"`
 	ValueDataType       *string         `json:"value_data_type,omitempty"`
 	ValueRangeType      *string         `json:"value_range_type,omitempty"`
@@ -41,6 +48,7 @@ type metricRecord struct {
 	MeasurementFreq     *string         `json:"measurement_frequency,omitempty"`
 	Confidence          *float64        `json:"confidence,omitempty"`
 	IsExplicitMetric    *bool           `json:"is_explicit_metric,omitempty"`
+	TableNameOrSection  *string         `json:"table_name_or_section,omitempty"`
 	ReasoningTags       json.RawMessage `json:"reasoning_tags,omitempty"`
 	CreatedAt           string          `json:"created_at,omitempty"`
 }
@@ -76,11 +84,12 @@ func ListMetrics(c echo.Context) error {
 	const query = `
 SELECT
     m.id, m.input_record_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
-    m.metric_name, m.source_line_spans, m.metric_subject, m.metric_desc,
-    m.metric_context, m.metric_keywords, m.location_type, m.metric_unit,
+    m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
+    m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
+    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
     m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
     m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
-    m.confidence, m.is_explicit_metric, m.reasoning_tags,
+    m.confidence, m.is_explicit_metric, m.table_name_or_section, m.reasoning_tags,
     COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
@@ -100,20 +109,22 @@ ORDER BY m.id ASC
 	out := make([]metricRecord, 0)
 	for rows.Next() {
 		var (
-			r              metricRecord
-			spansBytes     []byte
-			keywordsBytes  []byte
-			reasoningBytes []byte
-			confidence     sql.NullFloat64
-			isExplicit     sql.NullBool
+			r                 metricRecord
+			spansBytes        []byte
+			keywordsBytes     []byte
+			keywordsEnBytes   []byte
+			reasoningBytes    []byte
+			confidence        sql.NullFloat64
+			isExplicit        sql.NullBool
 		)
 		if err := rows.Scan(
 			&r.ID, &r.InputRecordID, &r.EventID, &r.InputFilename,
-			&r.MetricName, &spansBytes, &r.MetricSubject, &r.MetricDesc,
-			&r.MetricContext, &keywordsBytes, &r.LocationType, &r.MetricUnit,
+			&r.MetricName, &r.MetricNameEn, &spansBytes, &r.MetricSubject, &r.MetricSubjectEn,
+			&r.MetricDesc, &r.MetricDescEn, &r.MetricContext, &r.MetricContextEn,
+			&keywordsBytes, &keywordsEnBytes, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
 			&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
 			&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
-			&confidence, &isExplicit, &reasoningBytes, &r.CreatedAt,
+			&confidence, &isExplicit, &r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 		); err != nil {
 			logger.Error("scan kb.metrics row failed", "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -126,6 +137,9 @@ ORDER BY m.id ASC
 		}
 		if len(keywordsBytes) > 0 {
 			r.MetricKeywords = json.RawMessage(keywordsBytes)
+		}
+		if len(keywordsEnBytes) > 0 {
+			r.MetricKeywordsEn = json.RawMessage(keywordsEnBytes)
 		}
 		if len(reasoningBytes) > 0 {
 			r.ReasoningTags = json.RawMessage(reasoningBytes)

@@ -321,37 +321,37 @@
 								sidebarMinWidth={240}
 								sidebarMaxWidth={520}
 								sidebarDefaultWidth={320}
+								sidebarTitle="Selected Summary"
+								sidebarSettingsKey="summary-tree-pdf-sidebar"
+								sidebarWidthSettingLabel="Panel Width"
 							>
 								{#snippet sidebar()}
-									<aside class="topic-sidebar">
-										<div class="topic-sidebar-title">Selected Summary</div>
-										{#if selectedSummary}
-											<div class="topic-sidebar-block">
-												<div class="topic-sidebar-row">
-													<span>Summary ID</span>
-													<strong>{selectedSummary.id}</strong>
-												</div>
-												<div class="topic-sidebar-row">
-													<span>Record ID</span>
-													<strong>{selectedSummary.recordId}</strong>
-												</div>
-												<div class="topic-sidebar-row">
-													<span>Page</span>
-													<strong>{selectedSummary.page}</strong>
-												</div>
-												<div class="topic-sidebar-row">
-													<span>Targets</span>
-													<strong>{formatTargets(selectedSummary.targets)}</strong>
-												</div>
+									{#if selectedSummary}
+										<div class="topic-sidebar-block">
+											<div class="topic-sidebar-row">
+												<span>Summary ID</span>
+												<strong>{selectedSummary.id}</strong>
 											</div>
-											<div class="topic-sidebar-block">
-												<div class="topic-sidebar-label">Summary</div>
-												<p class="topic-sidebar-copy">{selectedSummary.summaryText}</p>
+											<div class="topic-sidebar-row">
+												<span>Record ID</span>
+												<strong>{selectedSummary.recordId}</strong>
 											</div>
-										{:else}
-											<div class="topic-sidebar-empty">Select a summary to inspect it alongside the source PDF.</div>
-										{/if}
-									</aside>
+											<div class="topic-sidebar-row">
+												<span>Page</span>
+												<strong>{selectedSummary.page}</strong>
+											</div>
+											<div class="topic-sidebar-row">
+												<span>Targets</span>
+												<strong>{formatTargets(selectedSummary.targets)}</strong>
+											</div>
+										</div>
+										<div class="topic-sidebar-block">
+											<div class="topic-sidebar-label">Summary</div>
+											<p class="topic-sidebar-copy">{selectedSummary.summaryText}</p>
+										</div>
+									{:else}
+										<div class="topic-sidebar-empty">Select a summary to inspect it alongside the source PDF.</div>
+									{/if}
 								{/snippet}
 							</PdfViewWindow>
 						{:else if viewerInputId && treeState.selectedPdfTarget}

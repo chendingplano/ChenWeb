@@ -765,21 +765,21 @@
 						sidebarMinWidth={140}
 						sidebarMaxWidth={420}
 						sidebarDefaultWidth={270}
+						sidebarTitle="Chunk Bounding Boxes"
+						sidebarSettingsKey="chunk-mgmt-pdf-sidebar"
+						sidebarWidthSettingLabel="Panel Width"
 					>
 						{#snippet sidebar()}
-							<aside class="meta-panel">
-								<div class="meta-title">Chunk Bounding Boxes</div>
-								{#if selectedBBoxes.length === 0}
-									<div class="meta-empty">No coordinates available.</div>
-								{:else}
-									{#each selectedBBoxes as box (`${box.page_number}-${box.coords.join(',')}`)}
-										<div class="bbox-row">
-											<div class="bbox-page">Page {box.page_number}</div>
-											<div class="bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</div>
-										</div>
-									{/each}
-								{/if}
-							</aside>
+							{#if selectedBBoxes.length === 0}
+								<div class="meta-empty">No coordinates available.</div>
+							{:else}
+								{#each selectedBBoxes as box (`${box.page_number}-${box.coords.join(',')}`)}
+									<div class="bbox-row">
+										<div class="bbox-page">Page {box.page_number}</div>
+										<div class="bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</div>
+									</div>
+								{/each}
+							{/if}
 						{/snippet}
 					</PdfViewWindow>
 				{:else}
