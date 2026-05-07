@@ -6,9 +6,12 @@
 		updateKbMetric,
 		updateKbInput,
 		getRawLines,
+		createKbMetric,
+		updateRawLine,
 		type KbInputRecord,
 		type KbMetricRecord,
-		type RawLine
+		type RawLine,
+		type SourceLineSpan
 	} from '$lib/services/kbService';
 	import EditableMetadataSection from '$lib/components/home3/editable-metadata-section.svelte';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
@@ -67,8 +70,15 @@
 	let deleteLineMode = $state(false);
 	let addLineOpen = $state(false);
 	let addMetricOpen = $state(false);
+	let addMetricEditKey = $state<string | null>(null);
+	let addMetricEditContent = $state("");
+	let addMetricSaving = $state(false);
 	let pdfSelectedLines = $state<number[]>([]);
 	let pdfDragPreviewLines = $state<number[]>([]);
+	// Dedicated buffer for the Add Metric dialog, set during drag-select and
+	// cleared only when the dialog closes. Not affected by the click-away handler
+	// that clears pdfSelectedLines on outside clicks.
+	let addMetricBufferLines = $state<number[]>([]);
 	let editingLineKey = $state<string | null>(null);
 	let editingLineContent = $state('');
 	let newLineContent = $state('');
@@ -357,6 +367,7 @@
 			})
 			.map((l) => l.line_number);
 		pdfSelectedLines = selected;
+		addMetricBufferLines = selected;
 	}
 
 	function handleDragMove(detail: {
@@ -841,6 +852,95 @@
 			}
 		};
 	});
+		// ---------- Add Metric dialog ----------
+		// Reads from addMetricBufferLines (set during drag-select) instead of
+		// pdfSelectedLines so the buffer survives click-away clearing.
+		let addMetricDialogLines = $derived.by(() => {
+			const seen = new Set<string>();
+			const result: Array<RawLine & { key: string }> = [];
+			for (const lineNo of addMetricBufferLines) {
+				for (const ln of rawLines) {
+					if (ln.line_number !== lineNo) continue;
+					const key = `${ln.page_number}:${ln.line_number}`;
+					if (seen.has(key)) continue;
+					seen.add(key);
+					result.push({ ...ln, key });
+				}
+			}
+			return result.sort((a, b) => a.line_number - b.line_number);
+		});
+
+		function startEditDialogLine(key: string, content: string) {
+			addMetricEditKey = key;
+			addMetricEditContent = content;
+		}
+
+		function cancelEditDialogLine() {
+			addMetricEditKey = null;
+			addMetricEditContent = '';
+		}
+
+		async function saveEditDialogLine(pageNo: number, lineNo: number) {
+			if (!currentInput || !addMetricEditKey) return;
+			const confirmed = window.confirm('Save changes to the original file?');
+			if (!confirmed) return;
+			addMetricSaving = true;
+			try {
+				await updateRawLine({
+					input_record_id: currentInput.id,
+					page_number: pageNo,
+					line_number: lineNo,
+					content: addMetricEditContent
+				});
+				rawLines = rawLines.map((l) =>
+					l.page_number === pageNo && l.line_number === lineNo
+						? { ...l, content: addMetricEditContent }
+						: l
+				);
+				addMetricEditKey = null;
+				addMetricEditContent = '';
+				addMetricBufferLines = [];
+			} catch (err) {
+				alert(err instanceof Error ? err.message : 'Failed to save line');
+			} finally {
+				addMetricSaving = false;
+			}
+		}
+
+		function deleteDialogLine(key: string) {
+			const removedLines: number[] = [];
+			for (const ln of addMetricDialogLines) {
+				if (ln.key === key) removedLines.push(ln.line_number);
+			}
+			if (removedLines.length === 0) return;
+			addMetricBufferLines = addMetricBufferLines.filter((ln) => !removedLines.includes(ln));
+		}
+
+		async function extractMetric() {
+			if (!currentInput || addMetricDialogLines.length === 0) return;
+			addMetricSaving = true;
+			try {
+				const spans: SourceLineSpan[] = addMetricDialogLines.map((l) => ({
+					page_number: l.page_number,
+					line_number: l.line_number
+				}));
+				const created = await createKbMetric({
+					input_record_id: currentInput.id,
+					metric_name: `Metric from ${currentInput.id}`,
+					source_line_spans: spans
+				});
+				metrics = [...metrics, created.record];
+				addMetricOpen = false;
+				addMetricEditKey = null;
+				addMetricEditContent = '';
+				addMetricBufferLines = [];
+			} catch (err) {
+				alert(err instanceof Error ? err.message : 'Failed to create metric');
+			} finally {
+				addMetricSaving = false;
+			}
+		}
+
 </script>
 
 <div
@@ -1312,39 +1412,161 @@
 </div>
 
 {#if addMetricOpen}
-	<div
-		class="dialog-overlay"
-		aria-hidden="true"
-		onclick={() => (addMetricOpen = false)}
-		onkeydown={(e) => {
-			if (e.key === 'Escape') addMetricOpen = false;
-		}}
-	>
 		<div
-			class="dialog"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Add metric"
-			tabindex="0"
-			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => e.stopPropagation()}
+			class="dialog-overlay"
+			style="background:{panelBg};"
+			aria-hidden="true"
+			onclick={() => { addMetricOpen = false; addMetricBufferLines = []; }}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') { addMetricOpen = false; addMetricBufferLines = []; }
+			}}
 		>
-			<div class="dialog-head">
-				<div class="dialog-title">Add Metric</div>
-				<button type="button" class="dialog-close-btn" onclick={() => (addMetricOpen = false)}
-					>Close</button
-				>
-			</div>
-			<div class="dialog-body">
-				<div class="dialog-placeholder">
-					Add Metric functionality will be available once the <code>POST /kb/metrics</code> API endpoint
-					is implemented.
+			<div
+				class="dialog"
+				style="background:{panelBg};border-color:{inkLine};"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Add metric"
+				tabindex="0"
+				onclick={(e) => e.stopPropagation()}
+				onkeydown={(e) => e.stopPropagation()}
+			>
+				<div class="dialog-head">
+					<div class="dialog-eyebrow">Knowledge System</div>
+					<div class="dialog-title">Add Metric</div>
+					<div class="dialog-subtitle">
+						Review selected lines, edit content, or delete unwanted entries before extracting a metric.
+					</div>
+					<button type="button" class="dialog-close-btn" onclick={() => { addMetricOpen = false; addMetricBufferLines = []; }}
+						>Close</button
+					>
+				</div>
+				<div class="dialog-body">
+					{#if addMetricDialogLines.length === 0}
+						<div class="add-metric-empty">
+							<div class="empty-glyph">§</div>
+							<div class="empty-title">No lines selected</div>
+							<div class="empty-sub">
+								Drag to select lines on the PDF, then open this dialog again.
+							</div>
+						</div>
+					{:else}
+						<div class="add-metric-count">{addMetricDialogLines.length} line{addMetricDialogLines.length === 1 ? '' : 's'} selected</div>
+						<div class="add-metric-table-wrap">
+							<table class="add-metric-table">
+								<thead>
+									<tr>
+										<th class="col-line">Line #</th>
+										<th class="col-page">Page</th>
+										<th class="col-type">Type</th>
+										<th class="col-content">Content</th>
+										<th class="col-action"></th>
+										<th class="col-action"></th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each addMetricDialogLines as line (line.key)}
+										<tr class="add-metric-row">
+											<td class="mono">{line.line_number}</td>
+											<td class="mono">{line.page_number}</td>
+											<td><span class="type-badge">{line.line_type}</span></td>
+											<td class="content-cell">
+												{#if addMetricEditKey === line.key}
+													<input
+														class="add-metric-edit-input"
+														type="text"
+														bind:value={addMetricEditContent}
+																onkeydown={(e) => {
+															if (e.key === 'Escape') cancelEditDialogLine();
+															if (e.key === 'Enter') saveEditDialogLine(line.page_number, line.line_number);
+														}}
+													/>
+												{:else}
+													<span class="content-text">{line.content}</span>
+												{/if}
+											</td>
+											<td class="action-cell">
+												{#if addMetricEditKey === line.key}
+													<button
+														type="button"
+														class="add-metric-action-btn save"
+														disabled={addMetricSaving}
+														onclick={() => saveEditDialogLine(line.page_number, line.line_number)}
+													>Save</button
+													>
+													<button
+														type="button"
+														class="add-metric-action-btn cancel"
+														onclick={cancelEditDialogLine}
+													>Cancel</button
+													>
+												{:else}
+													<button
+														type="button"
+														class="add-metric-action-btn edit"
+														onclick={() => startEditDialogLine(line.key, line.content)}
+													>Edit</button
+													>
+												{/if}
+											</td>
+											<td class="action-cell">
+												{#if addMetricEditKey !== line.key}
+													<button
+														type="button"
+														class="add-metric-action-btn delete"
+														onclick={() => deleteDialogLine(line.key)}
+													>Delete</button
+													>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+				</div>
+				<div class="add-metric-foot">
+					<div class="add-metric-foot-left">
+						<button
+							type="button"
+							class="add-metric-foot-btn help"
+							onclick={() => {
+								alert(
+									'Select PDF lines to add as a metric.\n\n' +
+									'• Drag on the PDF to select lines\n' +
+									'• Edit: modify line content (saves to the original file)\n' +
+									'• Delete: remove a line from this selection\n' +
+									'• Extract Metric: create a new metric from the remaining lines'
+								);
+							}}
+						>Help</button
+						>
+					</div>
+					<div class="add-metric-foot-right">
+						<button
+							type="button"
+							class="add-metric-foot-btn cancel"
+							onclick={() => {
+								addMetricOpen = false;
+								addMetricEditKey = null;
+								addMetricEditContent = '';
+								addMetricBufferLines = [];
+							}}
+						>Cancel</button
+						>
+						<button
+							type="button"
+							class="add-metric-foot-btn extract"
+							disabled={addMetricDialogLines.length === 0 || addMetricSaving}
+							onclick={extractMetric}
+						>{addMetricSaving ? 'Saving…' : 'Extract Metric'}</button
+						>
+					</div>
 				</div>
 			</div>
 		</div>
-	</div>
-{/if}
-
+	{/if}
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
 
@@ -2169,8 +2391,8 @@
 	}
 	:global(.pdf-highlight-preview) {
 		position: absolute;
-		background: transparent;
-		border-left: 6px solid rgba(22, 163, 74, 0.85);
+		background: rgba(22, 163, 74, 0.16);
+		border-left: 4px solid rgba(22, 163, 74, 0.85);
 	}
 	.pdf-status {
 		font-family: var(--font-mono);
@@ -2414,8 +2636,6 @@
 	.dialog-overlay {
 		position: fixed;
 		inset: 0;
-		background: rgba(8, 10, 14, 0.72);
-		backdrop-filter: blur(3px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -2431,8 +2651,6 @@
 		border: 1px solid;
 		border-radius: 24px;
 		overflow: auto;
-		background:
-			linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 22%), var(--panel-bg);
 		box-shadow:
 			0 30px 80px rgba(0, 0, 0, 0.55),
 			0 0 0 1px rgba(212, 162, 76, 0.08);

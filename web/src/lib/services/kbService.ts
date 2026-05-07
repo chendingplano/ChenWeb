@@ -368,6 +368,67 @@ export async function getRawLines(inputRecordId: number): Promise<GetRawLinesRes
 	);
 }
 
+export type UpdateRawLinePayload = {
+	input_record_id: number;
+	page_number: number;
+	line_number: number;
+	content: string;
+};
+
+export type UpdateRawLineResponse = {
+	status: boolean;
+	line: RawLine;
+};
+
+export async function updateRawLine(payload: UpdateRawLinePayload): Promise<UpdateRawLineResponse> {
+	const response = await fetch(`${BASE}/raw-lines`, {
+		method: 'PATCH',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to update raw line (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<UpdateRawLineResponse>;
+}
+
+export type CreateKbMetricPayload = {
+	input_record_id: number;
+	metric_name?: string;
+	source_line_spans?: SourceLineSpan[];
+};
+
+export type CreateKbMetricResponse = {
+	status: boolean;
+	record: KbMetricRecord;
+};
+
+export async function createKbMetric(
+	payload: CreateKbMetricPayload
+): Promise<CreateKbMetricResponse> {
+	const response = await fetch(`${BASE}/metrics`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to create kb metric (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<CreateKbMetricResponse>;
+}
+
 // ---------- kb.doc-structure ----------
 
 export type DocStructureLine = {
@@ -718,7 +779,11 @@ function mapKbInputToSummaryTreeRecord(
 	const statusSummary = summaryTreeStatusText(record, operation);
 	return {
 		id: record.id,
-		title: record.title?.trim() || record.name?.trim() || record.file_name?.trim() || `Record #${record.id}`,
+		title:
+			record.title?.trim() ||
+			record.name?.trim() ||
+			record.file_name?.trim() ||
+			`Record #${record.id}`,
 		fileName: record.file_name?.trim() || record.name?.trim() || '—',
 		docType: record.type?.trim() || '—',
 		docNo: record.doc_no?.trim() || '—',
@@ -828,10 +893,7 @@ export type FilterGraphNodesResponse = {
 };
 
 export async function listTopicGraph(): Promise<ListTopicGraphResponse> {
-	return fetchOrThrow<ListTopicGraphResponse>(
-		`${BASE}/topic-graph`,
-		'Failed to list topic graph'
-	);
+	return fetchOrThrow<ListTopicGraphResponse>(`${BASE}/topic-graph`, 'Failed to list topic graph');
 }
 
 export async function getTopicCategory(categoryPath: string): Promise<GetTopicCategoryResponse> {
@@ -852,7 +914,9 @@ export type ListProvisionGraphResponse = ListTopicGraphResponse;
 export type GetProvisionCategoryResponse = GetTopicCategoryResponse;
 export type GetRecordProvisionsResponse = GetRecordTopicsResponse;
 
-export async function listProvisionGraph(ksStoreId?: number | null): Promise<ListProvisionGraphResponse> {
+export async function listProvisionGraph(
+	ksStoreId?: number | null
+): Promise<ListProvisionGraphResponse> {
 	const query = new URLSearchParams();
 	if (ksStoreId != null) query.set('ks_store_id', String(ksStoreId));
 	const suffix = query.toString();
@@ -860,9 +924,7 @@ export async function listProvisionGraph(ksStoreId?: number | null): Promise<Lis
 		`${BASE}/provision-graph${suffix ? `?${suffix}` : ''}`,
 		'Failed to list provision graph'
 	);
-	const provisionIds = new Set(
-		(result.results ?? []).flatMap((node) => node.topicIds ?? [])
-	);
+	const provisionIds = new Set((result.results ?? []).flatMap((node) => node.topicIds ?? []));
 	/*
 	console.log('[Compliance Provisions] provision graph received', {
 		ksStoreId,
@@ -952,9 +1014,11 @@ export async function searchSummaryTreeMock(
 		if (q.title && !record.title.toLowerCase().includes(q.title)) return false;
 		if (q.docNo && !record.docNo.toLowerCase().includes(q.docNo)) return false;
 		if (q.fileName && !record.fileName.toLowerCase().includes(q.fileName)) return false;
-		if (q.docType && q.docType !== 'all' && record.docType.toLowerCase() !== q.docType) return false;
+		if (q.docType && q.docType !== 'all' && record.docType.toLowerCase() !== q.docType)
+			return false;
 		if (q.parserName && !record.parserName.toLowerCase().includes(q.parserName)) return false;
-		if (q.procStatus && q.procStatus !== 'all' && record.procStatus.toLowerCase() !== q.procStatus) return false;
+		if (q.procStatus && q.procStatus !== 'all' && record.procStatus.toLowerCase() !== q.procStatus)
+			return false;
 		return true;
 	});
 
