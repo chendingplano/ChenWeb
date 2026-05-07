@@ -2170,8 +2170,7 @@
 	:global(.pdf-highlight-preview) {
 		position: absolute;
 		background: transparent;
-		border-left: 3px solid rgba(22, 163, 74, 0.9);
-		border-right: 3px solid rgba(22, 163, 74, 0.9);
+		border-left: 6px solid rgba(22, 163, 74, 0.85);
 	}
 	.pdf-status {
 		font-family: var(--font-mono);
