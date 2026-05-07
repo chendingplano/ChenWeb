@@ -11,8 +11,10 @@
 	import KbInputSearchDialog from './kb-input-search-dialog.svelte';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 	import {
+		KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR,
 		KB_INPUT_RECORD_BROWSER_DEFAULT_LIST_WIDTH,
 		KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE,
+		KB_INPUT_RECORD_BROWSER_HIGHLIGHT_PRESETS,
 		KB_INPUT_RECORD_BROWSER_MAX_LIST_WIDTH,
 		KB_INPUT_RECORD_BROWSER_MIN_LIST_WIDTH,
 		clampKbInputRecordBrowserListWidth,
@@ -101,6 +103,7 @@
 	let resizing = $state(false);
 	let settingsHydrated = $state(false);
 
+	let highlightColor = $state(KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR);
 	let effectivePageSize = $state(clampKbInputRecordBrowserPageSize(pageSize));
 	let listTotalPages = $derived(Math.max(1, Math.ceil(listTotal / effectivePageSize)));
 	let resetDisabled = $derived(!hasActiveRecordBrowserFilters(filters));
@@ -110,6 +113,7 @@
 			const saved = readKbInputRecordBrowserSettings(localStorage, instanceKey);
 			listWidth = clampKbInputRecordBrowserListWidth(saved.listWidth ?? defaultListWidth);
 			effectivePageSize = clampKbInputRecordBrowserPageSize(saved.pageSize ?? pageSize);
+			if (saved.highlightColor) highlightColor = saved.highlightColor;
 			settingsHydrated = true;
 		}
 	});
@@ -145,15 +149,21 @@
 		}
 	});
 
-	function saveSettings(next: Partial<{ listWidth: number; pageSize: number }>) {
+	function saveSettings(next: Partial<{ listWidth: number; pageSize: number; highlightColor: string }>) {
 		const mergedWidth = clampKbInputRecordBrowserListWidth(next.listWidth ?? listWidth);
 		const mergedPageSize = clampKbInputRecordBrowserPageSize(next.pageSize ?? effectivePageSize);
+		const mergedHighlight =
+			typeof next.highlightColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(next.highlightColor)
+				? next.highlightColor
+				: highlightColor;
 		listWidth = mergedWidth;
 		effectivePageSize = mergedPageSize;
+		highlightColor = mergedHighlight;
 		if (browser) {
 			writeKbInputRecordBrowserSettings(localStorage, instanceKey, {
 				listWidth: mergedWidth,
-				pageSize: mergedPageSize
+				pageSize: mergedPageSize,
+				highlightColor: mergedHighlight
 			});
 		}
 	}
@@ -356,7 +366,7 @@
 
 <div
 	class="browser-shell"
-	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148, 163, 184, 0.16); --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted}; width:${listWidth}px;`}
+	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148, 163, 184, 0.16); --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted}; --highlight:${highlightColor}; width:${listWidth}px;`}
 >
 	<KbInputSearchDialog
 		bind:open={searchOpen}
@@ -556,6 +566,30 @@
 					}}
 				/>
 			</label>
+			<div class="field settings-field">
+				<span class="field-label">Highlight color</span>
+				<div class="color-presets">
+					{#each KB_INPUT_RECORD_BROWSER_HIGHLIGHT_PRESETS as preset}
+						<button
+							type="button"
+							class="color-swatch"
+							class:active={highlightColor === preset}
+							style={`background: ${preset}`}
+							title={preset}
+							onclick={() => saveSettings({ highlightColor: preset })}
+						></button>
+					{/each}
+				</div>
+				<label class="color-custom-row">
+					<input
+						type="color"
+						value={highlightColor}
+						oninput={(e) => saveSettings({ highlightColor: (e.currentTarget as HTMLInputElement).value })}
+					/>
+					<span class="color-custom-label">Custom</span>
+					<span class="color-custom-hex mono">{highlightColor}</span>
+				</label>
+			</div>
 			<div class="settings-actions">
 				<button type="button" class="ghost settings-close" onclick={() => (settingsOpen = false)}>Close</button>
 			</div>
@@ -688,10 +722,12 @@
 	}
 	.record-browser-card.selected,
 	.record-card.selected {
-		border-color: rgba(34, 197, 94, 0.42);
-		box-shadow: 0 12px 30px rgba(2, 6, 23, 0.28);
+		border-color: color-mix(in srgb, var(--highlight) 65%, transparent);
+		background: color-mix(in srgb, var(--highlight) 9%, transparent);
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--highlight) 20%, transparent), 0 12px 30px rgba(2, 6, 23, 0.28);
 	}
-	.card-rule { background: linear-gradient(180deg, rgba(34, 197, 94, 0.8), rgba(13, 148, 136, 0.35)); }
+	.card-rule { background: linear-gradient(180deg, color-mix(in srgb, var(--highlight) 40%, transparent), color-mix(in srgb, var(--highlight) 15%, transparent)); }
+	.record-browser-card.selected .card-rule { background: linear-gradient(180deg, var(--highlight), color-mix(in srgb, var(--highlight) 55%, transparent)); }
 	.card-body { padding: 0.95rem 1rem 1rem; }
 	.card-row-top, .record-head {
 		display: flex;
@@ -836,6 +872,50 @@
 	.settings-field input[type='range'] { width: 100%; }
 	.settings-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
 	.settings-close { padding: 0.65rem 0.9rem; }
+	.color-presets {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+		margin-top: 0.5rem;
+	}
+	.color-swatch {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		border: 2px solid transparent;
+		cursor: pointer;
+		padding: 0;
+		transition: transform 0.1s, border-color 0.1s;
+	}
+	.color-swatch:hover { transform: scale(1.15); }
+	.color-swatch.active {
+		border-color: #f3f4f6;
+		box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+		transform: scale(1.15);
+	}
+	.color-custom-row {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		margin-top: 0.65rem;
+		cursor: pointer;
+	}
+	.color-custom-row input[type='color'] {
+		width: 28px;
+		height: 28px;
+		border: none;
+		border-radius: 50%;
+		padding: 0;
+		cursor: pointer;
+		background: none;
+	}
+	.color-custom-label { font-size: 0.8rem; color: var(--muted); }
+	.color-custom-hex {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.75rem;
+		color: var(--muted);
+		opacity: 0.7;
+	}
 	@media (max-width: 980px) {
 		.browser-shell { width: 100% !important; }
 		.browser-resizer { display: none; }

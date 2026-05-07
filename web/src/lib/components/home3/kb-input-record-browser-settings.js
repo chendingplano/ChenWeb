@@ -11,9 +11,24 @@ export const KB_INPUT_RECORD_BROWSER_MIN_PAGE_SIZE = 10;
 export const KB_INPUT_RECORD_BROWSER_MAX_PAGE_SIZE = 200;
 export const KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE = 50;
 
+export const KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR = '#3b82f6';
+
+/** Six-digit hex colors (#rrggbb) only — what <input type="color"> always produces. */
+export const KB_INPUT_RECORD_BROWSER_HIGHLIGHT_PRESETS = [
+	'#3b82f6', // blue
+	'#6366f1', // indigo
+	'#8b5cf6', // violet
+	'#06b6d4', // cyan
+	'#22c55e', // green
+	'#f59e0b', // amber
+	'#ef4444', // red
+	'#94a3b8'  // slate
+];
+
 export const KB_INPUT_RECORD_BROWSER_DEFAULT_SETTINGS = {
 	pageSize: KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE,
-	listWidth: KB_INPUT_RECORD_BROWSER_DEFAULT_LIST_WIDTH
+	listWidth: KB_INPUT_RECORD_BROWSER_DEFAULT_LIST_WIDTH,
+	highlightColor: KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR
 };
 
 /**
@@ -61,6 +76,9 @@ export function mergeKbInputRecordBrowserSettings(partial) {
 	}
 	if (typeof partial.listWidth === 'number') {
 		merged.listWidth = clampKbInputRecordBrowserListWidth(partial.listWidth);
+	}
+	if (typeof partial.highlightColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(partial.highlightColor)) {
+		merged.highlightColor = partial.highlightColor;
 	}
 
 	return merged;
