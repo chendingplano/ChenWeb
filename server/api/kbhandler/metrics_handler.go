@@ -59,6 +59,11 @@ type listMetricsResponse struct {
 	Total   int            `json:"total"`
 }
 
+type metricDetailResponse struct {
+	Status bool         `json:"status"`
+	Record metricRecord `json:"record"`
+}
+
 // ListMetrics handles GET /api/v1/kb/metrics?input_record_id=N
 func ListMetrics(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_001")
@@ -109,13 +114,13 @@ ORDER BY m.id ASC
 	out := make([]metricRecord, 0)
 	for rows.Next() {
 		var (
-			r                 metricRecord
-			spansBytes        []byte
-			keywordsBytes     []byte
-			keywordsEnBytes   []byte
-			reasoningBytes    []byte
-			confidence        sql.NullFloat64
-			isExplicit        sql.NullBool
+			r               metricRecord
+			spansBytes      []byte
+			keywordsBytes   []byte
+			keywordsEnBytes []byte
+			reasoningBytes  []byte
+			confidence      sql.NullFloat64
+			isExplicit      sql.NullBool
 		)
 		if err := rows.Scan(
 			&r.ID, &r.InputRecordID, &r.EventID, &r.InputFilename,
@@ -167,6 +172,65 @@ ORDER BY m.id ASC
 		Results: out,
 		Total:   len(out),
 	})
+}
+
+func fetchMetricByID(db *sql.DB, id int64) (metricRecord, error) {
+	const query = `
+SELECT
+    m.id, m.input_record_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
+    m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
+    m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
+    m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
+    m.metric_value, m.value_data_type, m.value_range_type, m.value_class, m.value_class_en,
+    m.formula_or_definition, m.threshold_or_target, m.measurement_frequency,
+    m.confidence, m.is_explicit_metric, m.table_name_or_section, m.reasoning_tags,
+    COALESCE(to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+FROM kb.metrics m
+LEFT JOIN kb.inputs i ON i.id = m.input_record_id
+WHERE m.id = $1
+`
+	var (
+		r               metricRecord
+		spansBytes      []byte
+		keywordsBytes   []byte
+		keywordsEnBytes []byte
+		reasoningBytes  []byte
+		confidence      sql.NullFloat64
+		isExplicit      sql.NullBool
+	)
+	err := db.QueryRow(query, id).Scan(
+		&r.ID, &r.InputRecordID, &r.EventID, &r.InputFilename,
+		&r.MetricName, &r.MetricNameEn, &spansBytes, &r.MetricSubject, &r.MetricSubjectEn,
+		&r.MetricDesc, &r.MetricDescEn, &r.MetricContext, &r.MetricContextEn,
+		&keywordsBytes, &keywordsEnBytes, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
+		&r.MetricValue, &r.ValueDataType, &r.ValueRangeType, &r.ValueClass, &r.ValueClassEn,
+		&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
+		&confidence, &isExplicit, &r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
+	)
+	if err != nil {
+		return metricRecord{}, err
+	}
+	if len(spansBytes) > 0 {
+		r.SourceLineSpans = json.RawMessage(spansBytes)
+	}
+	if len(keywordsBytes) > 0 {
+		r.MetricKeywords = json.RawMessage(keywordsBytes)
+	}
+	if len(keywordsEnBytes) > 0 {
+		r.MetricKeywordsEn = json.RawMessage(keywordsEnBytes)
+	}
+	if len(reasoningBytes) > 0 {
+		r.ReasoningTags = json.RawMessage(reasoningBytes)
+	}
+	if confidence.Valid {
+		v := confidence.Float64
+		r.Confidence = &v
+	}
+	if isExplicit.Valid {
+		v := isExplicit.Bool
+		r.IsExplicitMetric = &v
+	}
+	return r, nil
 }
 
 type inputDetailResponse struct {
@@ -352,6 +416,55 @@ func decodeInt64Value(raw json.RawMessage) (*int64, error) {
 		return &v, nil
 	}
 	return nil, fmt.Errorf("must be integer or string")
+}
+
+func decodeFloat64Value(raw json.RawMessage) (*float64, error) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, nil
+	}
+	var numeric float64
+	if err := json.Unmarshal(raw, &numeric); err == nil {
+		return &numeric, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		s = strings.TrimSpace(strings.TrimSuffix(s, "%"))
+		if s == "" {
+			return nil, nil
+		}
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return nil, fmt.Errorf("must be numeric text")
+		}
+		return &v, nil
+	}
+	return nil, fmt.Errorf("must be number or string")
+}
+
+func decodeBoolValue(raw json.RawMessage) (*bool, error) {
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, nil
+	}
+	var boolean bool
+	if err := json.Unmarshal(raw, &boolean); err == nil {
+		return &boolean, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "":
+			return nil, nil
+		case "true", "1", "yes", "y":
+			v := true
+			return &v, nil
+		case "false", "0", "no", "n":
+			v := false
+			return &v, nil
+		default:
+			return nil, fmt.Errorf("must be boolean text")
+		}
+	}
+	return nil, fmt.Errorf("must be boolean or string")
 }
 
 func decodeAuthorsValue(raw json.RawMessage) (*string, error) {
@@ -607,6 +720,158 @@ func UpdateInput(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, inputDetailResponse{Status: true, Record: record})
+}
+
+// UpdateMetric handles PUT /api/v1/kb/metrics/:id
+func UpdateMetric(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_160")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	idStr := strings.TrimSpace(c.Param("id"))
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid id (CWB_KB_M_161)",
+		})
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid request body (CWB_KB_M_162)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	sets := make([]string, 0, len(payload))
+	args := make([]any, 0, len(payload)+1)
+	addSet := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+
+	fields := make([]string, 0, len(payload))
+	for field := range payload {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	for _, field := range fields {
+		raw := payload[field]
+		switch field {
+		case "metric_name", "metric_name_en", "metric_subject", "metric_subject_en",
+			"metric_desc", "metric_desc_en", "metric_context", "metric_context_en",
+			"model_name", "location_type", "metric_unit", "metric_unit_en",
+			"metric_value", "value_data_type", "value_range_type", "value_class", "value_class_en",
+			"formula_or_definition", "threshold_or_target", "measurement_frequency", "table_name_or_section":
+			value, err := decodeStringValue(raw, false)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_M_163)", field, err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "source_line_spans", "metric_keywords", "metric_keywords_en", "reasoning_tags":
+			if strings.TrimSpace(string(raw)) == "null" {
+				addSet(field, nil)
+				break
+			}
+			compact, err := compactJSONRaw(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_M_164)", field, err),
+				})
+			}
+			addSet(field, compact)
+
+		case "confidence":
+			value, err := decodeFloat64Value(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid confidence: %v (CWB_KB_M_165)", err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "is_explicit_metric":
+			value, err := decodeBoolValue(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status:   false,
+					ErrorMsg: fmt.Sprintf("invalid is_explicit_metric: %v (CWB_KB_M_166)", err),
+				})
+			}
+			if value == nil {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+		}
+	}
+
+	if len(sets) == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "no editable fields in request (CWB_KB_M_167)",
+		})
+	}
+
+	query := fmt.Sprintf("UPDATE kb.metrics SET %s WHERE id = $%d", strings.Join(sets, ", "), len(args)+1)
+	args = append(args, id)
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		logger.Error("update kb metric failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to update kb metric (CWB_KB_M_168)",
+		})
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		logger.Error("rows affected kb metric failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to verify kb metric update (CWB_KB_M_169)",
+		})
+	}
+	if affected == 0 {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status:   false,
+			ErrorMsg: "record not found (CWB_KB_M_170)",
+		})
+	}
+
+	record, err := fetchMetricByID(db, id)
+	if err != nil {
+		logger.Error("reload kb metric after update failed", "id", id, "err", err)
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, errorResponse{
+				Status:   false,
+				ErrorMsg: "record not found (CWB_KB_M_171)",
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to reload kb metric (CWB_KB_M_172)",
+		})
+	}
+
+	return c.JSON(http.StatusOK, metricDetailResponse{Status: true, Record: record})
 }
 
 type rawLine struct {

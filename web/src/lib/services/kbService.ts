@@ -116,7 +116,7 @@ export async function listKbInputs(params: ListKbInputsParams): Promise<ListKbIn
 
 // ---------- kb.metrics / raw-lines / single input ----------
 
-export type SourceLineSpan = { page_number: number; line_number: number };
+export type SourceLineSpan = { page_number: number; line_number: number } | string | number;
 
 export type KbMetricRecord = {
 	id: number;
@@ -159,6 +159,11 @@ export type ListKbMetricsResponse = {
 	total: number;
 };
 
+export type GetKbMetricResponse = {
+	status: boolean;
+	record: KbMetricRecord;
+};
+
 async function fetchOrThrow<T>(url: string, fallback: string): Promise<T> {
 	const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
 	if (!response.ok) {
@@ -177,6 +182,59 @@ export async function listKbMetrics(inputRecordId: number): Promise<ListKbMetric
 		`${BASE}/metrics?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
 		'Failed to list kb metrics'
 	);
+}
+
+export type UpdateKbMetricPayload = {
+	metric_name?: string | null;
+	metric_name_en?: string | null;
+	source_line_spans?: unknown;
+	metric_subject?: string | null;
+	metric_subject_en?: string | null;
+	metric_desc?: string | null;
+	metric_desc_en?: string | null;
+	metric_context?: string | null;
+	metric_context_en?: string | null;
+	metric_keywords?: unknown;
+	metric_keywords_en?: unknown;
+	model_name?: string | null;
+	location_type?: string | null;
+	metric_unit?: string | null;
+	metric_unit_en?: string | null;
+	metric_value?: string | null;
+	value_data_type?: string | null;
+	value_range_type?: string | null;
+	value_class?: string | null;
+	value_class_en?: string | null;
+	formula_or_definition?: string | null;
+	threshold_or_target?: string | null;
+	measurement_frequency?: string | null;
+	confidence?: number | null;
+	is_explicit_metric?: boolean | null;
+	table_name_or_section?: string | null;
+	reasoning_tags?: unknown;
+};
+
+export async function updateKbMetric(
+	id: number,
+	payload: UpdateKbMetricPayload
+): Promise<GetKbMetricResponse> {
+	const response = await fetch(`${BASE}/metrics/${encodeURIComponent(String(id))}`, {
+		method: 'PUT',
+		credentials: 'same-origin',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to update kb metric (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<GetKbMetricResponse>;
 }
 
 export type GetKbInputResponse = {

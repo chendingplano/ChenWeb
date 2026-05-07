@@ -3,13 +3,25 @@
 	import {
 		listKbMetrics,
 		getKbInput,
+		updateKbMetric,
+		updateKbInput,
 		getRawLines,
 		type KbInputRecord,
 		type KbMetricRecord,
 		type RawLine
 	} from '$lib/services/kbService';
+	import EditableMetadataSection from '$lib/components/home3/editable-metadata-section.svelte';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
+	import {
+		buildKbMetricMetadataRows,
+		buildKbMetricUpdatePayloadForMetadataEdit
+	} from './kb-metric-metadata.js';
+	import {
+		buildKbInputDocMetadataRows,
+		buildKbInputRecordMetadataRows,
+		buildKbInputUpdatePayloadForMetadataEdit
+	} from './kb-input-metadata.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -292,74 +304,21 @@
 		return value.replace('T', ' ').slice(0, 19);
 	}
 
-	function combineField(base?: string | null, en?: string | null): string {
-		const b = base?.trim() || '';
-		const e = en?.trim() || '';
-		if (!b && !e) return '—';
-		if (!b) return e;
-		if (!e || b === e) return b;
-		return `${b} / ${e}`;
-	}
-
-	function combineArrField(base?: string[] | null, en?: string[] | null): string {
-		const b = (base ?? []).join(', ');
-		const e = (en ?? []).join(', ');
-		if (!b && !e) return '—';
-		if (!b) return e;
-		if (!e || b === e) return b;
-		return `${b} / ${e}`;
-	}
-
-	function formatSpans(spans: unknown): string {
-		if (!Array.isArray(spans) || spans.length === 0) return '—';
-		return spans
-			.map((s) => {
-				if (typeof s === 'string') return s;
-				if (s && typeof s === 'object') {
-					const o = s as Record<string, unknown>;
-					return String(o.line_number ?? o.line ?? s);
-				}
-				return String(s);
-			})
-			.join(', ');
-	}
-
-	function buildMetricFieldRows(m: KbMetricRecord): Array<{ label: string; value: string }> {
-		const opt = (v: unknown): string => {
-			if (v == null || v === '') return '—';
-			if (typeof v === 'boolean') return v ? 'true' : 'false';
-			return String(v).trim() || '—';
-		};
-		return [
-			{ label: 'id', value: opt(m.id) },
-			{ label: 'event id', value: opt(m.event_id) },
-			{ label: 'input record id', value: opt(m.input_record_id) },
-			{ label: 'metric name', value: combineField(m.metric_name, m.metric_name_en) },
-			{ label: 'source line spans', value: formatSpans(m.source_line_spans) },
-			{ label: 'metric subject', value: combineField(m.metric_subject, m.metric_subject_en) },
-			{ label: 'metric desc', value: combineField(m.metric_desc, m.metric_desc_en) },
-			{ label: 'metric context', value: combineField(m.metric_context, m.metric_context_en) },
-			{ label: 'metric keywords', value: combineArrField(m.metric_keywords, m.metric_keywords_en) },
-			{ label: 'model name', value: opt(m.model_name) },
-			{ label: 'metric unit', value: combineField(m.metric_unit, m.metric_unit_en) },
-			{ label: 'metric value', value: opt(m.metric_value) },
-			{ label: 'value data type', value: opt(m.value_data_type) },
-			{ label: 'value range type', value: opt(m.value_range_type) },
-			{ label: 'value class', value: combineField(m.value_class, m.value_class_en) },
-			{ label: 'definition', value: opt(m.formula_or_definition) },
-			{ label: 'threshold', value: opt(m.threshold_or_target) },
-			{ label: 'frequency', value: opt(m.measurement_frequency) },
-			{ label: 'confidence', value: m.confidence != null ? confidencePct(m.confidence) : '—' },
-			{ label: 'is explicit', value: opt(m.is_explicit_metric) },
-			{ label: 'table/section', value: opt(m.table_name_or_section) },
-			{ label: 'reasoning tags', value: (m.reasoning_tags ?? []).join(', ') || '—' },
-			{ label: 'created at', value: formatMaybeDate(m.created_at) }
-		];
-	}
+	type MetadataEditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json';
+	type MetadataRow = {
+		label: string;
+		key: string;
+		value: string;
+		rawValue: unknown;
+		editable: boolean;
+		editor?: MetadataEditorKind;
+		editKey?: string;
+		wide?: boolean;
+		pathLike?: boolean;
+	};
 
 	let metricFieldRows = $derived.by(() => {
-		if (!selectedMetric) return [] as Array<{ label: string; value: string }>;
-		return buildMetricFieldRows(selectedMetric);
+		return buildKbMetricMetadataRows(selectedMetric);
 	});
 
 	let filteredPageLines = $derived.by(() => {
@@ -387,28 +346,22 @@
 		return currentPageLines.filter((l) => include.has(l.line_number));
 	});
 
-	let recordMetaRows = $derived.by(() => {
-		if (!currentInput && !selectedMetric) return [] as Array<{ label: string; value: string }>;
-		const sourceRecordId = metricSourceRecordId(selectedMetric);
-		return [
-			{ label: 'ID', value: selectedMetric ? String(selectedMetric.id) : '—' },
-			{
-				label: 'Source Record',
-				value: sourceRecordId ? String(sourceRecordId) : '—'
-			},
-			{ label: 'Type', value: currentInput?.type || '—' },
-			{ label: 'Name', value: currentInput?.name || '—' },
-			{ label: 'Title', value: currentInput?.title || '—' },
-			{ label: 'Doc No', value: currentInput?.doc_no || '—' },
-			{ label: 'Source', value: currentInput?.source || '—' },
-			{ label: 'File', value: currentInput?.file_name || '—' },
-			{ label: 'Result File', value: currentInput?.result_filename || '—' },
-			{ label: 'Authors', value: currentInput?.authors || '—' },
-			{ label: 'Published', value: formatMaybeDate(currentInput?.publish_date) },
-			{ label: 'Created', value: formatMaybeDate(currentInput?.create_time) },
-			{ label: 'Updated', value: formatMaybeDate(currentInput?.modify_time) }
-		];
-	});
+	let inputRecordMetaRows = $derived.by(() => buildKbInputRecordMetadataRows(currentInput));
+	let inputDocMetadataRows = $derived.by(() => buildKbInputDocMetadataRows(currentInput));
+
+	async function saveInputMetadataRow(row: MetadataRow, draft: string, editor: MetadataEditorKind) {
+		if (!currentInput) return;
+		const payload = buildKbInputUpdatePayloadForMetadataEdit(currentInput, row, draft, editor);
+		const updated = await updateKbInput(currentInput.id, payload);
+		currentInput = updated.record;
+	}
+
+	async function saveMetricMetadataRow(row: MetadataRow, draft: string, editor: MetadataEditorKind) {
+		if (!selectedMetric) return;
+		const payload = buildKbMetricUpdatePayloadForMetadataEdit(selectedMetric, row, draft, editor);
+		const updated = await updateKbMetric(selectedMetric.id, payload);
+		metrics = metrics.map((metric) => (metric.id === updated.record.id ? updated.record : metric));
+	}
 
 	let pagesGrouped = $derived.by(() => {
 		const map = new Map<number, RawLine[]>();
@@ -1012,37 +965,29 @@
 								sidebarWidthSettingLabel="Metadata Panel Width"
 							>
 								{#snippet sidebar()}
-									<div class="metadata-section">
-										<div class="metadata-section-title">Metric Fields</div>
-										{#if selectedMetric}
-											<div class="metadata-fields">
-												{#each metricFieldRows as row (row.label)}
-													<div class="metadata-row">
-														<span class="metadata-key">{row.label}</span>
-														<span class="metadata-val" title={row.value}>{row.value}</span>
-													</div>
-												{/each}
-											</div>
-										{:else}
-											<div class="metadata-empty">Select a metric to inspect its fields.</div>
-										{/if}
-									</div>
+									<EditableMetadataSection
+										title="kb.metrics Record"
+										rows={metricFieldRows}
+										emptyText="Select a metric to inspect its fields."
+										canEdit={true}
+										onSave={saveMetricMetadataRow}
+									/>
 
-									<div class="metadata-section">
-										<div class="metadata-section-title">Record Fields</div>
-										{#if !currentInput}
-											<div class="metadata-empty">No record loaded.</div>
-										{:else}
-											<div class="metadata-fields">
-												{#each recordMetaRows as row (row.label)}
-													<div class="metadata-row">
-														<span class="metadata-key">{row.label}</span>
-														<span class="metadata-val" title={row.value}>{row.value}</span>
-													</div>
-												{/each}
-											</div>
-										{/if}
-									</div>
+									<EditableMetadataSection
+										title="kb.inputs Record"
+										rows={inputRecordMetaRows}
+										emptyText="No record loaded."
+										canEdit={true}
+										onSave={saveInputMetadataRow}
+									/>
+
+									<EditableMetadataSection
+										title="kb.inputs Doc Metadata"
+										rows={inputDocMetadataRows}
+										emptyText="No doc_metadata available."
+										canEdit={true}
+										onSave={saveInputMetadataRow}
+									/>
 
 									<div class="metadata-section">
 										<div class="metadata-section-title">Selected Lines (By Page)</div>

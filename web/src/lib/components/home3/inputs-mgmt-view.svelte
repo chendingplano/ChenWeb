@@ -7,9 +7,16 @@
 		type KbInputRecord,
 		type RawLine
 	} from '$lib/services/kbService';
+	import EditableMetadataSection from '$lib/components/home3/editable-metadata-section.svelte';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import { KB_INPUT_RECORD_BROWSER_DEFAULT_PAGE_SIZE } from './kb-input-record-browser-settings.js';
+	import {
+		buildKbInputDocMetadataRows,
+		buildKbInputRecordMetadataRows,
+		buildKbInputUpdatePayloadForMetadataEdit,
+		getKbInputDocMetadataValue
+	} from './kb-input-metadata.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -114,12 +121,20 @@
 		rawValue: unknown;
 		editable: boolean;
 		editor?: EditorKind;
+		editKey?: string;
+		wide?: boolean;
+		pathLike?: boolean;
 	};
 	type DocMetaRow = {
+		label: string;
 		key: string;
 		value: string;
 		rawValue: unknown;
+		editable: boolean;
 		editor: EditorKind;
+		editKey?: string;
+		wide?: boolean;
+		pathLike?: boolean;
 	};
 
 	let editingFieldKey = $state<string | null>(null);
@@ -341,151 +356,9 @@
 		return d.toISOString();
 	}
 
-	let recordMetaRows = $derived.by(() => {
-		if (!currentInput) return [] as RecordMetaRow[];
-		const authorsArray = parseAuthors(currentInput.authors);
-		return [
-			{ label: 'ID', key: 'id', value: String(currentInput.id), rawValue: currentInput.id, editable: false },
-			{ label: 'Type', key: 'type', value: currentInput.type || '—', rawValue: currentInput.type, editable: false },
-			{ label: 'Name', key: 'name', value: currentInput.name || '—', rawValue: currentInput.name, editable: false },
-			{
-				label: 'Title',
-				key: 'title',
-				value: currentInput.title || '—',
-				rawValue: currentInput.title ?? '',
-				editable: true,
-				editor: 'text'
-			},
-			{
-				label: 'Doc No',
-				key: 'doc_no',
-				value: currentInput.doc_no || '—',
-				rawValue: currentInput.doc_no ?? '',
-				editable: true,
-				editor: 'text'
-			},
-			{
-				label: 'Source',
-				key: 'source',
-				value: currentInput.source || '—',
-				rawValue: currentInput.source ?? '',
-				editable: true,
-				editor: 'text'
-			},
-			{
-				label: 'Published',
-				key: 'publish_date',
-				value: formatMaybeDate(currentInput.publish_date),
-				rawValue: toDateTimeLocalInput(currentInput.publish_date),
-				editable: true,
-				editor: 'datetime'
-			},
-			{
-				label: 'Authors',
-				key: 'authors',
-				value: authorsArray.length > 0 ? authorsArray.join(', ') : '—',
-				rawValue: authorsArray,
-				editable: true,
-				editor: 'array'
-			},
-			{
-				label: 'Owner',
-				key: 'owner',
-				value: currentInput.owner == null ? '—' : String(currentInput.owner),
-				rawValue: currentInput.owner == null ? '' : String(currentInput.owner),
-				editable: true,
-				editor: 'text'
-			},
-			{
-				label: 'Public Info',
-				key: 'public_info',
-				value: asDisplayText(currentInput.public_info),
-				rawValue: currentInput.public_info ?? null,
-				editable: true,
-				editor: 'json'
-			},
-			{
-				label: 'Private Info',
-				key: 'private_info',
-				value: asDisplayText(currentInput.private_info),
-				rawValue: currentInput.private_info ?? null,
-				editable: true,
-				editor: 'json'
-			},
-			{
-				label: 'File',
-				key: 'file_name',
-				value: currentInput.file_name || '—',
-				rawValue: currentInput.file_name,
-				editable: false
-			},
-			{
-				label: 'Result File',
-				key: 'result_filename',
-				value: currentInput.result_filename || '—',
-				rawValue: currentInput.result_filename,
-				editable: false
-			},
-			{
-				label: 'Notes',
-				key: 'notes',
-				value: currentInput.notes || '—',
-				rawValue: currentInput.notes ?? '',
-				editable: true,
-				editor: 'textarea'
-			},
-			{
-				label: 'Error',
-				key: 'error_msg',
-				value: currentInput.error_msg || '—',
-				rawValue: currentInput.error_msg ?? '',
-				editable: true,
-				editor: 'textarea'
-			},
-			{
-				label: 'Created',
-				key: 'create_time',
-				value: formatMaybeDate(currentInput.create_time),
-				rawValue: currentInput.create_time,
-				editable: false
-			},
-			{
-				label: 'Updated',
-				key: 'modify_time',
-				value: formatMaybeDate(currentInput.modify_time),
-				rawValue: currentInput.modify_time,
-				editable: false
-			}
-		];
-	});
+	let recordMetaRows = $derived.by(() => buildKbInputRecordMetadataRows(currentInput));
 
-	let docMetadataRows = $derived.by(() => {
-		const raw = getDocMetadataValue(currentInput);
-		if (raw == null) return [] as DocMetaRow[];
-
-		if (typeof raw === 'string') {
-			const trimmed = raw.trim();
-			if (!trimmed) return [];
-			try {
-				const parsed = JSON.parse(trimmed) as unknown;
-				return flattenDocMetadata(parsed).map((row) => ({
-					key: row.key,
-					value: row.value,
-					rawValue: row.rawValue,
-					editor: typeof row.rawValue === 'object' && row.rawValue !== null ? 'json' : 'text'
-				}));
-			} catch {
-				return [{ key: 'doc_metadata', value: raw, rawValue: raw, editor: 'text' }];
-			}
-		}
-
-		return flattenDocMetadata(raw).map((row) => ({
-			key: row.key,
-			value: row.value,
-			rawValue: row.rawValue,
-			editor: typeof row.rawValue === 'object' && row.rawValue !== null ? 'json' : 'text'
-		}));
-	});
+	let docMetadataRows = $derived.by(() => buildKbInputDocMetadataRows(currentInput));
 
 	let pagesGrouped = $derived.by(() => {
 		const map = new Map<number, RawLine[]>();
@@ -633,14 +506,14 @@
 	function inputDisplayDocNo(r: KbInputRecord): string {
 		const direct = asTrimmedString(r.doc_no);
 		if (direct) return direct;
-		return findMetadataTextByKeys(getDocMetadataValue(r), docNoMetadataKeys);
+		return findMetadataTextByKeys(getKbInputDocMetadataValue(r), docNoMetadataKeys);
 	}
 
 	function inputDisplayName(r: KbInputRecord): string {
 		const directTitle = asTrimmedString(r.title);
 		if (directTitle) return directTitle;
 
-		const metaTitle = findMetadataTextByKeys(getDocMetadataValue(r), titleMetadataKeys);
+		const metaTitle = findMetadataTextByKeys(getKbInputDocMetadataValue(r), titleMetadataKeys);
 		if (metaTitle) return metaTitle;
 
 		const name = asTrimmedString(r.name);
@@ -659,6 +532,14 @@
 			description: formatMaybeDate(record.create_time),
 			badges: [record.type?.trim() || '—']
 		};
+	}
+
+	async function saveInputMetadataRow(row: RecordMetaRow | DocMetaRow, draft: string, editor: EditorKind) {
+		if (!currentInput) return;
+		const payload = buildKbInputUpdatePayloadForMetadataEdit(currentInput, row, draft, editor);
+		const updated = await updateKbInput(currentInput.id, payload);
+		currentInput = updated.record;
+		selectedInputId = updated.record.id;
 	}
 
 	function isEditingField(key: string): boolean {
@@ -1297,159 +1178,21 @@
 								sidebarWidthSettingLabel="Document Panel Width"
 							>
 								{#snippet sidebar()}
-									<div class="metadata-section">
-										<div class="metadata-section-title">Record Fields</div>
-										{#if !currentInput}
-											<div class="metadata-empty">No record loaded.</div>
-										{:else}
-											<div class="metadata-fields">
-												{#each recordMetaRows as row (row.key)}
-													<div class="metadata-row">
-														<span class="metadata-key">{row.label}</span>
-														<div class="metadata-val-wrap">
-															{#if isEditingField(`field:${row.key}`)}
-																<div class="metadata-editor">
-																	{#if row.editor === 'textarea' || row.editor === 'json' || row.editor === 'array'}
-																		<textarea
-																			class="metadata-input metadata-input-textarea"
-																			rows={row.editor === 'json' ? 8 : row.editor === 'array' ? 5 : 4}
-																			bind:value={editingDraft}
-																		></textarea>
-																	{:else if row.editor === 'datetime'}
-																		<input
-																			class="metadata-input"
-																			type="datetime-local"
-																			bind:value={editingDraft}
-																		/>
-																	{:else}
-																		<input class="metadata-input" type="text" bind:value={editingDraft} />
-																	{/if}
-																	{#if editingError}
-																		<div class="metadata-edit-error">{editingError}</div>
-																	{/if}
-																	<div class="metadata-editor-actions">
-																		<button
-																			class="btn btn-primary metadata-editor-btn"
-																			onclick={saveFieldEdit}
-																			disabled={editingSaving}
-																		>
-																			{editingSaving ? 'Saving…' : 'Save'}
-																		</button>
-																		<button
-																			class="btn btn-ghost metadata-editor-btn"
-																			onclick={cancelFieldEdit}
-																			disabled={editingSaving}
-																		>
-																			Cancel
-																		</button>
-																	</div>
-																</div>
-															{:else}
-																{#if row.editable && row.editor}
-																	<div class="metadata-display">
-																		<button
-																			type="button"
-																			class="metadata-edit-trigger"
-																			title={`${row.value}\n(Double click to edit)`}
-																			ondblclick={() =>
-																				startFieldEdit(`field:${row.key}`, row.editor ?? 'text', row.rawValue)}
-																		>
-																			<span class="metadata-edit-text">{row.value}</span>
-																		</button>
-																		<button
-																			type="button"
-																			class="metadata-edit-icon-btn"
-																			title="Edit field"
-																			aria-label={`Edit ${row.label}`}
-																			onclick={() =>
-																				startFieldEdit(`field:${row.key}`, row.editor ?? 'text', row.rawValue)}
-																		>
-																			✎
-																		</button>
-																	</div>
-																{:else}
-																	<span class="metadata-val" title={row.value}>{row.value}</span>
-																{/if}
-															{/if}
-														</div>
-													</div>
-												{/each}
-											</div>
-										{/if}
-									</div>
+									<EditableMetadataSection
+										title="Record Fields"
+										rows={recordMetaRows}
+										emptyText="No record loaded."
+										canEdit={true}
+										onSave={saveInputMetadataRow}
+									/>
 
-									<div class="metadata-section">
-										<div class="metadata-section-title">Doc Metadata</div>
-										{#if docMetadataRows.length === 0}
-											<div class="metadata-empty">No doc_metadata available.</div>
-										{:else}
-											<div class="metadata-fields">
-												{#each docMetadataRows as row (`${row.key}-${row.value}`)}
-													<div class="metadata-row metadata-row-wide">
-														<span class="metadata-key metadata-key-path" title={row.key}
-															>{row.key}</span
-														>
-														<div class="metadata-val-wrap">
-															{#if isEditingField(`docmeta:${row.key}`)}
-																<div class="metadata-editor">
-																	{#if row.editor === 'json'}
-																		<textarea
-																			class="metadata-input metadata-input-textarea"
-																			rows={8}
-																			bind:value={editingDraft}
-																		></textarea>
-																	{:else}
-																		<input class="metadata-input" type="text" bind:value={editingDraft} />
-																	{/if}
-																	{#if editingError}
-																		<div class="metadata-edit-error">{editingError}</div>
-																	{/if}
-																	<div class="metadata-editor-actions">
-																		<button
-																			class="btn btn-primary metadata-editor-btn"
-																			onclick={saveFieldEdit}
-																			disabled={editingSaving}
-																		>
-																			{editingSaving ? 'Saving…' : 'Save'}
-																		</button>
-																		<button
-																			class="btn btn-ghost metadata-editor-btn"
-																			onclick={cancelFieldEdit}
-																			disabled={editingSaving}
-																		>
-																			Cancel
-																		</button>
-																	</div>
-																</div>
-															{:else}
-																<div class="metadata-display">
-																	<button
-																		type="button"
-																		class="metadata-edit-trigger"
-																		title={`${row.value}\n(Double click to edit)`}
-																		ondblclick={() =>
-																			startFieldEdit(`docmeta:${row.key}`, row.editor, row.rawValue)}
-																	>
-																		<span class="metadata-edit-text">{row.value}</span>
-																	</button>
-																	<button
-																		type="button"
-																		class="metadata-edit-icon-btn"
-																		title="Edit metadata field"
-																		aria-label={`Edit doc metadata ${row.key}`}
-																		onclick={() =>
-																			startFieldEdit(`docmeta:${row.key}`, row.editor, row.rawValue)}
-																	>
-																		✎
-																	</button>
-																</div>
-															{/if}
-														</div>
-													</div>
-												{/each}
-											</div>
-										{/if}
-									</div>
+									<EditableMetadataSection
+										title="Doc Metadata"
+										rows={docMetadataRows}
+										emptyText="No doc_metadata available."
+										canEdit={true}
+										onSave={saveInputMetadataRow}
+									/>
 								{/snippet}
 							</PdfViewWindow>
 						{:else}

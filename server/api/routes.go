@@ -273,6 +273,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/inputs/upload", kbhandler.UploadInputs)
 	apiGroup.GET("/kb/inputs/:id/file", kbhandler.GetInputFile)
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
+	apiGroup.PUT("/kb/metrics/:id", kbhandler.UpdateMetric)
 	apiGroup.GET("/kb/topic-chunks", kbhandler.ListTopicChunks)
 	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)
 	apiGroup.GET("/kb/summary-graph", kbhandler.ListSummaryGraph)
