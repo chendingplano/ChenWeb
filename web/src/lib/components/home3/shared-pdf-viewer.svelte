@@ -40,7 +40,9 @@
 		highlightVersion = 0,
 		renderHighlights,
 		loadingLabel = 'Rendering page…',
-		respectPageRotation = true
+		respectPageRotation = true,
+		onselect,
+		ondragmove
 	}: {
 		inputId: number | null;
 		fileUrl: string;
@@ -51,6 +53,18 @@
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
+		onselect?: (detail: {
+			pageNumber: number;
+			viewportY1: number;
+			viewportY2: number;
+			viewport: PdfPageViewport;
+		}) => void;
+		ondragmove?: (detail: {
+			pageNumber: number;
+			viewportY1: number;
+			viewportY2: number;
+			viewport: PdfPageViewport;
+		}) => void;
 	} = $props();
 
 	const viewerId = `pdfv-${Math.random().toString(36).slice(2)}`;
@@ -72,6 +86,91 @@
 	let pdfSidebarWidth = $state(0);
 	let pdfViewportByPage = new Map<number, PdfPageViewport>();
 	let pdfActiveRenders = new Map<number, { cancel?: () => void }>();
+
+	// ---------- Drag-select state ----------
+	let dragSelecting = $state(false);
+	let dragSelStartClientY = 0;
+	let dragSelCurrentClientY = 0;
+	let dragSelPage = 0;
+	let indViewportTop = $state(0);
+	let indHeight = $state(0);
+	let indViewportLeft = $state(0);
+	let indWidth = $state(0);
+
+	// ---------- Drag-select handlers ----------
+	function onDragPointerDown(e: PointerEvent) {
+		if (!onselect || e.button !== 0) return;
+		const host = pdfCanvasHostEl;
+		if (!host) return;
+
+		const pageEl = (e.target as HTMLElement).closest('[data-page]');
+		if (!pageEl) return;
+		const pageNo = parseInt(pageEl.getAttribute('data-page') ?? '0', 10);
+		if (!pageNo) return;
+
+		e.preventDefault();
+		host.setPointerCapture(e.pointerId);
+
+		const hostRect = host.getBoundingClientRect();
+		dragSelStartClientY = e.clientY;
+		dragSelCurrentClientY = e.clientY;
+		dragSelPage = pageNo;
+		indViewportTop = e.clientY;
+		indHeight = 0;
+		indViewportLeft = hostRect.left + 18;
+		indWidth = hostRect.width - 36;
+		dragSelecting = true;
+	}
+
+	function onDragPointerMove(e: PointerEvent) {
+		if (!dragSelecting) return;
+		dragSelCurrentClientY = e.clientY;
+		indViewportTop = Math.min(dragSelStartClientY, e.clientY);
+		indHeight = Math.abs(e.clientY - dragSelStartClientY);
+
+		if (ondragmove) {
+			const pageNo = dragSelPage;
+			const canvasEl = document.getElementById(`${viewerId}-canvas-${pageNo}`) as HTMLCanvasElement | null;
+			const viewport = pdfViewportByPage.get(pageNo);
+			if (canvasEl && viewport) {
+				const canvasRect = canvasEl.getBoundingClientRect();
+				const rawY1 = Math.min(dragSelStartClientY, e.clientY) - canvasRect.top;
+				const rawY2 = Math.max(dragSelStartClientY, e.clientY) - canvasRect.top;
+				const viewportY1 = Math.max(0, Math.min(rawY1, viewport.height));
+				const viewportY2 = Math.max(0, Math.min(rawY2, viewport.height));
+				ondragmove({ pageNumber: pageNo, viewportY1, viewportY2, viewport });
+				paintOverlayForPage(pageNo);
+			}
+		}
+	}
+
+	function onDragPointerUp(e: PointerEvent) {
+		if (!dragSelecting) return;
+		dragSelecting = false;
+		if (!onselect) return;
+
+		const pageNo = dragSelPage;
+		const canvasEl = document.getElementById(`${viewerId}-canvas-${pageNo}`) as HTMLCanvasElement | null;
+		const viewport = pdfViewportByPage.get(pageNo);
+		if (!canvasEl || !viewport) return;
+
+		const canvasRect = canvasEl.getBoundingClientRect();
+		const rawY1 = Math.min(dragSelStartClientY, e.clientY) - canvasRect.top;
+		const rawY2 = Math.max(dragSelStartClientY, e.clientY) - canvasRect.top;
+
+		const viewportY1 = Math.max(0, Math.min(rawY1, viewport.height));
+		const viewportY2 = Math.max(0, Math.min(rawY2, viewport.height));
+
+		if (viewportY2 - viewportY1 < 5) return;
+
+		onselect({
+			pageNumber: pageNo,
+			viewportY1,
+			viewportY2,
+			viewport
+		});
+		paintHighlights();
+	}
 
 	function clampPage(nextPage: number): number {
 		const max = Math.max(1, numPages || 1);
@@ -152,12 +251,16 @@
 
 	function paintHighlights() {
 		for (const pageNo of pdfRenderedPages) {
-			const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
-			const viewport = pdfViewportByPage.get(pageNo);
-			if (!overlay || !viewport) continue;
-			overlay.innerHTML = '';
-			renderHighlights?.(pageNo, viewport, overlay);
+			paintOverlayForPage(pageNo);
 		}
+	}
+
+	function paintOverlayForPage(pageNo: number) {
+		const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
+		const viewport = pdfViewportByPage.get(pageNo);
+		if (!overlay || !viewport) return;
+		overlay.innerHTML = '';
+		renderHighlights?.(pageNo, viewport, overlay);
 	}
 
 	function scrollToFirstHighlight(pageNo: number, behavior: ScrollBehavior = 'auto') {
@@ -395,6 +498,7 @@
 		<a class="page-btn small" href={fileUrl} target="_blank" rel="noopener" title="Open in new tab">↗</a>
 		</div>
 	</div>
+	<slot name="page-bar-tool" />
 </div>
 
 <div class="pdf-stage" bind:this={pdfStageEl}>
@@ -403,7 +507,12 @@
 			<slot name="sidebar" />
 			<slot name="sidebar-resizer" />
 		</div>
-		<div class="pdf-canvas-host" bind:this={pdfCanvasHostEl}>
+		<div class="pdf-canvas-host" bind:this={pdfCanvasHostEl}
+			onpointerdown={onDragPointerDown}
+			onpointermove={onDragPointerMove}
+			onpointerup={onDragPointerUp}
+			onselectstart={(e) => e.preventDefault()}
+		>
 			<div class="pdf-pages">
 				{#each pdfRenderedPages as pageNo (pageNo)}
 					<div class="pdf-page" id={`${viewerId}-page-${pageNo}`} data-page={pageNo}>
@@ -420,6 +529,12 @@
 			</div>
 		</div>
 	</div>
+	{#if dragSelecting}
+		<div
+			class="pdf-drag-indicator"
+			style="top:{indViewportTop}px;left:{indViewportLeft}px;width:{indWidth}px;height:{indHeight}px;"
+		></div>
+	{/if}
 	{#if pdfLoading}
 		<div class="pdf-status"><span class="dot-loop"></span>{loadingLabel}</div>
 	{/if}
@@ -525,6 +640,10 @@
 		padding: 18px;
 		height: 100%;
 		overflow: auto;
+		touch-action: none;
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-tap-highlight-color: transparent;
 	}
 	.pdf-pages {
 		display: flex;
@@ -562,6 +681,14 @@
 		left: 0;
 		top: 0;
 		pointer-events: none;
+	}
+	.pdf-drag-indicator {
+		position: fixed;
+		z-index: 10;
+		pointer-events: none;
+		background: transparent;
+		border-left: 3px solid rgba(99, 102, 241, 0.5);
+		border-right: 3px solid rgba(99, 102, 241, 0.5);
 	}
 	.pdf-status {
 		position: sticky;

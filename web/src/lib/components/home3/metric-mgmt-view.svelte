@@ -13,6 +13,12 @@
 	import EditableMetadataSection from '$lib/components/home3/editable-metadata-section.svelte';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
+	import CirclePlusIcon from '@lucide/svelte/icons/circle-plus';
+	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
+	import ListIcon from '@lucide/svelte/icons/list';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import {
 		buildKbMetricMetadataRows,
 		buildKbMetricUpdatePayloadForMetadataEdit
@@ -56,7 +62,17 @@
 	let rawLoading = $state(false);
 	let rawError = $state('');
 	// Document viewer state
-	let viewMode = $state<'document' | 'source'>('document');
+	let showLines = $state(false);
+	let editLineMode = $state(false);
+	let deleteLineMode = $state(false);
+	let addLineOpen = $state(false);
+	let addMetricOpen = $state(false);
+	let pdfSelectedLines = $state<number[]>([]);
+	let pdfDragPreviewLines = $state<number[]>([]);
+	let editingLineKey = $state<string | null>(null);
+	let editingLineContent = $state('');
+	let newLineContent = $state('');
+	let newLineType = $state('text');
 	let docPage = $state<number>(1);
 
 	let fileUrl = $derived.by(() => {
@@ -297,6 +313,70 @@
 			mark.title = `line ${rect.lineNumber}`;
 			overlay.appendChild(mark);
 		}
+		// Draw drag preview lines during active drag
+		if (pdfDragPreviewLines.length > 0) {
+			for (const ln of rawLines) {
+				if (ln.page_number !== pageNo) continue;
+				if (!pdfDragPreviewLines.includes(ln.line_number)) continue;
+				if (!Array.isArray(ln.coords) || ln.coords.length < 4) continue;
+				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
+				const left = Math.min(vx1, vx2);
+				const top = Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX);
+				const bottom = Math.max(vy1, vy2);
+				const width = Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX;
+				const height = Math.max(0, bottom - top);
+				if (width < 1 || height < 1) continue;
+				const mark = document.createElement('div');
+				mark.className = 'pdf-highlight-preview';
+				mark.style.left = `${left}px`;
+				mark.style.top = `${top}px`;
+				mark.style.width = `${width}px`;
+				mark.style.height = `${height}px`;
+				mark.title = `line ${ln.line_number}`;
+				overlay.appendChild(mark);
+			}
+		}
+	}
+
+	function handleDragSelect(detail: {
+		pageNumber: number;
+		viewportY1: number;
+		viewportY2: number;
+		viewport: PdfPageViewport;
+	}) {
+		pdfDragPreviewLines = [];
+		const { pageNumber, viewportY1, viewportY2, viewport } = detail;
+		const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
+		const selected = pageLines
+			.filter((line) => {
+				if (!Array.isArray(line.coords) || line.coords.length < 4) return false;
+				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+				const lineTop = Math.min(vy1, vy2);
+				const lineBottom = Math.max(vy1, vy2);
+				return Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2);
+			})
+			.map((l) => l.line_number);
+		pdfSelectedLines = selected;
+	}
+
+	function handleDragMove(detail: {
+		pageNumber: number;
+		viewportY1: number;
+		viewportY2: number;
+		viewport: PdfPageViewport;
+	}) {
+		const { pageNumber, viewportY1, viewportY2, viewport } = detail;
+		const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
+		const selected = pageLines
+			.filter((line) => {
+				if (!Array.isArray(line.coords) || line.coords.length < 4) return false;
+				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+				const lineTop = Math.min(vy1, vy2);
+				const lineBottom = Math.max(vy1, vy2);
+				return Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2);
+			})
+			.map((l) => l.line_number);
+		pdfDragPreviewLines = selected;
 	}
 
 	function formatMaybeDate(value?: string): string {
@@ -356,7 +436,11 @@
 		currentInput = updated.record;
 	}
 
-	async function saveMetricMetadataRow(row: MetadataRow, draft: string, editor: MetadataEditorKind) {
+	async function saveMetricMetadataRow(
+		row: MetadataRow,
+		draft: string,
+		editor: MetadataEditorKind
+	) {
 		if (!selectedMetric) return;
 		const payload = buildKbMetricUpdatePayloadForMetadataEdit(selectedMetric, row, draft, editor);
 		const updated = await updateKbMetric(selectedMetric.id, payload);
@@ -425,17 +509,17 @@
 		if (!first) return;
 
 		// Move display to the selected page without forcing iframe remount/reload.
-		console.log('metric selected, id:' + m.id + ", page_num:" + first.page_number);
+		console.log('metric selected, id:' + m.id + ', page_num:' + first.page_number);
 		docPage = first.page_number > 0 ? first.page_number : 1;
-		if (viewMode === 'document' && isPdf) {
+		if (!showLines && isPdf) {
 			await tick();
 			await renderSinglePdfPage(docPage);
 			drawPdfHighlights();
 			scrollPdfToPage(docPage, 'auto');
 		}
 
-		// If user is on the source-lines tab, scroll the highlighted line into view.
-		if (viewMode === 'source') {
+		// If user is on the lines panel, scroll the highlighted line into view.
+		if (showLines) {
 			await tick();
 			const target = document.getElementById(`raw-${first.page_number}-${first.line_number}`);
 			if (target) {
@@ -453,10 +537,6 @@
 		event.preventDefault();
 		event.stopPropagation();
 		void selectMetric(m);
-	}
-
-	function setMode(mode: 'document' | 'source') {
-		viewMode = mode;
 	}
 
 	function recordDisplayName(r: KbInputRecord): string {
@@ -696,7 +776,7 @@
 	}
 
 	$effect(() => {
-		const canRenderPdf = viewMode === 'document' && isPdf && !!currentInput && !!pdfStageEl;
+		const canRenderPdf = !showLines && isPdf && !!currentInput && !!pdfStageEl;
 		if (!canRenderPdf) return;
 		pdfZoom;
 		pdfRenderedPages.length;
@@ -725,19 +805,19 @@
 
 	$effect(() => {
 		// Jump when target page changes (e.g. clicking a metric card, prev/next, page input).
-		if (viewMode !== 'document' || !isPdf || !pdfDoc) return;
+		if (showLines || !isPdf || !pdfDoc) return;
 		docPage;
 		void tick().then(() => scrollPdfToPage(clampDocPage(docPage), 'auto'));
 	});
 
 	$effect(() => {
-		if (viewMode !== 'document' || !isPdf || pdfViewportByPage.size === 0) return;
+		if (showLines || !isPdf || pdfViewportByPage.size === 0) return;
 		selectedLinesByPage;
 		drawPdfHighlights();
 	});
 
 	$effect(() => {
-		if (viewMode !== 'document' || !isPdf || !pdfStageEl) return;
+		if (showLines || !isPdf || !pdfStageEl) return;
 		const ro = new ResizeObserver(() => {
 			const w = Math.floor(pdfStageEl?.clientWidth ?? 0);
 			if (w <= 0 || w === pdfLastRenderWidth) return;
@@ -833,7 +913,9 @@
 					<div class="empty">
 						<div class="empty-glyph">§</div>
 						<div class="empty-title">No metrics yet</div>
-						<div class="empty-sub">Select a record from kb.inputs to populate the metrics index.</div>
+						<div class="empty-sub">
+							Select a record from kb.inputs to populate the metrics index.
+						</div>
 					</div>
 				{:else}
 					{#each metrics as m, idx (m.id)}
@@ -870,267 +952,398 @@
 
 		<!-- ============ RIGHT PANEL ============ -->
 		<section class="right">
-			<div class="right-toolbar">
-				<div class="right-title">
-					{#if currentInput}
-						<span class="title-glyph">¶</span>
-						<span class="title-name" title={currentInput.file_name ?? ''}
-							>{currentInput.file_name ?? '(unnamed file)'}</span
-						>
-						<span class="title-type">{currentInput.type}</span>
-					{:else}
-						<span class="title-glyph">¶</span>
-						<span class="title-name muted">No document loaded</span>
-					{/if}
-				</div>
-
-				<div class="tabs" role="tablist" aria-label="Right panel mode">
-					<button
-						class="tab"
-						class:active={viewMode === 'document'}
-						onclick={() => setMode('document')}
-						role="tab"
-						aria-selected={viewMode === 'document'}
-					>
-						Document
-					</button>
-					<button
-						class="tab"
-						class:active={viewMode === 'source'}
-						onclick={() => setMode('source')}
-						role="tab"
-						aria-selected={viewMode === 'source'}
-					>
-						Source&nbsp;Lines
-					</button>
-				</div>
-
-				<div class="right-stats">
-					{#if currentInput && viewMode === 'document'}
-						<span class="stat"
-							><span class="stat-num">{String(docPage).padStart(3, '0')}</span><span
-								class="stat-label">page</span
-							></span
-						>
-						<span class="stat"
-							><span class="stat-num">{highlightKeys.size}</span><span class="stat-label"
-								>marks</span
-							></span
-						>
-					{:else if pagesGrouped.length > 0}
-						<span class="stat"
-							><span class="stat-num">{pagesGrouped.length}</span><span class="stat-label"
-								>pages</span
-							></span
-						>
-						<span class="stat"
-							><span class="stat-num">{rawLines.length}</span><span class="stat-label">lines</span
-							></span
-						>
-						<span class="stat"
-							><span class="stat-num">{highlightKeys.size}</span><span class="stat-label"
-								>marks</span
-							></span
-						>
-					{/if}
-				</div>
-			</div>
-
-			{#if viewMode === 'document'}
-				<div class="doc-frame-wrap">
-					{#if !currentInput}
-						<div class="doc-empty">
-							<div class="doc-empty-mark">⌬</div>
-							<div class="doc-empty-title">Awaiting selection</div>
-							<div class="doc-empty-sub">
-								Once you retrieve a record, the original document appears here.<br />
-								Click any metric on the left to jump to its source page.
-							</div>
+			<div class="doc-frame-wrap">
+				{#if !currentInput}
+					<div class="doc-empty">
+						<div class="doc-empty-mark">⌬</div>
+						<div class="doc-empty-title">Awaiting selection</div>
+						<div class="doc-empty-sub">
+							Once you retrieve a record, the original document appears here.<br />
+							Click any metric on the left to jump to its source page.
 						</div>
-					{:else}
-						{#if isPdf}
-							<PdfViewWindow
-								inputId={currentInput.id}
-								{fileUrl}
-								bind:page={docPage}
-								bind:zoom={pdfZoom}
-								bind:numPages={pdfNumPages}
-								highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
-								renderHighlights={renderMetricHighlights}
-								sidebarMinWidth={140}
-								sidebarMaxWidth={620}
-								sidebarDefaultWidth={270}
-								sidebarTitle="Metadata"
-								sidebarSettingsKey="metrics-pdf-sidebar"
-								sidebarWidthSettingLabel="Metadata Panel Width"
-							>
-								{#snippet sidebar()}
-									<EditableMetadataSection
-										title="kb.metrics Record"
-										rows={metricFieldRows}
-										emptyText="Select a metric to inspect its fields."
-										canEdit={true}
-										onSave={saveMetricMetadataRow}
-									/>
+					</div>
+				{:else}
+					{#if isPdf}
+						<PdfViewWindow
+							inputId={currentInput.id}
+							{fileUrl}
+							bind:page={docPage}
+							bind:zoom={pdfZoom}
+							bind:numPages={pdfNumPages}
+							highlightVersion={`${selectedMetricId ?? 0}:${highlightSelectionVersion}`}
+							renderHighlights={renderMetricHighlights}
+							bind:showingLines={showLines}
+							{darkMode}
+							sidebarMinWidth={140}
+							sidebarMaxWidth={620}
+							sidebarDefaultWidth={270}
+							sidebarTitle="Metadata"
+							sidebarSettingsKey="metrics-pdf-sidebar"
+							sidebarWidthSettingLabel="Metadata Panel Width"
+							onselect={handleDragSelect}
+							ondragmove={handleDragMove}
+							bind:selectedLines={pdfSelectedLines}
+						>
+							{#snippet toolbar()}
+								<button
+									type="button"
+									class="pvw-tool-btn"
+									onclick={() => (addMetricOpen = true)}
+									title="Add Metric"><CirclePlusIcon class="pvw-tb-icon" /></button
+								>
+								<div class="pvw-tool-sep"></div>
+								<button
+									type="button"
+									class="pvw-tool-btn"
+									class:active={editLineMode}
+									disabled={pdfSelectedLines.length === 0}
+									onclick={() => {
+										editLineMode = !editLineMode;
+										if (editLineMode) deleteLineMode = false;
+										editingLineKey = null;
+									}}
+									title="Edit Lines"><SquarePenIcon class="pvw-tb-icon" /></button
+								>
+								<button
+									type="button"
+									class="pvw-tool-btn"
+									class:active={deleteLineMode}
+									disabled={pdfSelectedLines.length === 0}
+									onclick={() => {
+										deleteLineMode = !deleteLineMode;
+										if (deleteLineMode) editLineMode = false;
+										editingLineKey = null;
+									}}
+									title="Delete Lines"><Trash2Icon class="pvw-tb-icon" /></button
+								>
+								<button
+									type="button"
+									class="pvw-tool-btn"
+									class:active={addLineOpen}
+									onclick={() => (addLineOpen = !addLineOpen)}
+									title="Add Line"><ListPlusIcon class="pvw-tb-icon" /></button
+								>
+								<div class="pvw-tool-sep"></div>
+								<button
+									type="button"
+									class="pvw-tool-btn"
+									class:active={showLines}
+									onclick={() => (showLines = !showLines)}
+									title={showLines ? 'Show PDF Document' : 'Show Lines'}
+								>
+									{#if showLines}
+										<FileTextIcon class="pvw-tb-icon" />
+									{:else}
+										<ListIcon class="pvw-tb-icon" />
+									{/if}
+								</button>
+							{/snippet}
+							{#snippet sidebar()}
+								<EditableMetadataSection
+									title="kb.metrics Record"
+									rows={metricFieldRows}
+									emptyText="Select a metric to inspect its fields."
+									canEdit={true}
+									onSave={saveMetricMetadataRow}
+								/>
 
-									<EditableMetadataSection
-										title="kb.inputs Record"
-										rows={inputRecordMetaRows}
-										emptyText="No record loaded."
-										canEdit={true}
-										onSave={saveInputMetadataRow}
-									/>
+								<EditableMetadataSection
+									title="kb.inputs Record"
+									rows={inputRecordMetaRows}
+									emptyText="No record loaded."
+									canEdit={true}
+									onSave={saveInputMetadataRow}
+								/>
 
-									<EditableMetadataSection
-										title="kb.inputs Doc Metadata"
-										rows={inputDocMetadataRows}
-										emptyText="No doc_metadata available."
-										canEdit={true}
-										onSave={saveInputMetadataRow}
-									/>
+								<EditableMetadataSection
+									title="kb.inputs Doc Metadata"
+									rows={inputDocMetadataRows}
+									emptyText="No doc_metadata available."
+									canEdit={true}
+									onSave={saveInputMetadataRow}
+								/>
 
-									<div class="metadata-section">
-										<div class="metadata-section-title">Selected Lines (By Page)</div>
-										{#if selectedLineGroups.length === 0}
-											<div class="metadata-empty">No selected lines.</div>
-										{:else}
-											{#each selectedLineGroups as group (group.page)}
-												<div class="metadata-page-group">
-													<div class="metadata-page-title">Page {group.page}</div>
-													<div class="metadata-lines">
-														{#each group.lines as line (`${group.page}-${line.line_number}`)}
-															<div class="metadata-line-row">
-																<div class="metadata-line-head">
-																	<span class="metadata-line-no">{line.span_key}</span>
-																	{#if line.line_type}
-																		<span class="metadata-line-type">{line.line_type}</span>
-																	{/if}
-																</div>
-																<div class="metadata-line-content">
-																	{line.content || (line.found ? '—' : '(line text unavailable)')}
-																	{#if line.coords_text}
-																		&nbsp;{line.coords_text}
-																	{/if}
-																</div>
+								<div class="metadata-section">
+									<div class="metadata-section-title">Selected Lines (By Page)</div>
+									{#if selectedLineGroups.length === 0}
+										<div class="metadata-empty">No selected lines.</div>
+									{:else}
+										{#each selectedLineGroups as group (group.page)}
+											<div class="metadata-page-group">
+												<div class="metadata-page-title">Page {group.page}</div>
+												<div class="metadata-lines">
+													{#each group.lines as line (`${group.page}-${line.line_number}`)}
+														<div class="metadata-line-row">
+															<div class="metadata-line-head">
+																<span class="metadata-line-no">{line.span_key}</span>
+																{#if line.line_type}
+																	<span class="metadata-line-type">{line.line_type}</span>
+																{/if}
 															</div>
-														{/each}
+															<div class="metadata-line-content">
+																{line.content || (line.found ? '—' : '(line text unavailable)')}
+																{#if line.coords_text}
+																	&nbsp;{line.coords_text}
+																{/if}
+															</div>
+														</div>
+													{/each}
+												</div>
+											</div>
+										{/each}
+									{/if}
+								</div>
+
+								<div class="metadata-section">
+									<div class="metadata-section-title">Lines — Page {docPage}</div>
+									{#if rawLoading}
+										<div class="metadata-empty">Loading…</div>
+									{:else if filteredPageLines.length === 0 && selectedMetricId != null}
+										<div class="metadata-empty">No selected lines on page {docPage}.</div>
+									{:else if filteredPageLines.length === 0}
+										<div class="metadata-empty">No lines for this page.</div>
+									{:else}
+										<div class="metadata-lines">
+											{#each filteredPageLines as line (line.line_number)}
+												<div
+													class="metadata-line-row"
+													class:hl={highlightKeys.has(`${docPage}:${line.line_number}`)}
+												>
+													<div class="metadata-line-head">
+														<span class="metadata-line-no"
+															>{String(line.line_number).padStart(4, '0')}</span
+														>
+														{#if line.line_type}
+															<span class="metadata-line-type">{line.line_type}</span>
+														{/if}
 													</div>
+													<div class="metadata-line-content">{line.content}</div>
 												</div>
 											{/each}
-										{/if}
-									</div>
-
-									<div class="metadata-section">
-										<div class="metadata-section-title">Lines — Page {docPage}</div>
-										{#if rawLoading}
-											<div class="metadata-empty">Loading…</div>
-										{:else if filteredPageLines.length === 0 && selectedMetricId != null}
-											<div class="metadata-empty">No selected lines on page {docPage}.</div>
-										{:else if filteredPageLines.length === 0}
-											<div class="metadata-empty">No lines for this page.</div>
-										{:else}
-											<div class="metadata-lines">
-												{#each filteredPageLines as line (line.line_number)}
-													<div
-														class="metadata-line-row"
-														class:hl={highlightKeys.has(`${docPage}:${line.line_number}`)}
-													>
-														<div class="metadata-line-head">
-															<span class="metadata-line-no"
-																>{String(line.line_number).padStart(4, '0')}</span
-															>
-															{#if line.line_type}
-																<span class="metadata-line-type">{line.line_type}</span>
-															{/if}
-														</div>
-														<div class="metadata-line-content">{line.content}</div>
-													</div>
-												{/each}
+										</div>
+									{/if}
+								</div>
+							{/snippet}
+							{#snippet linesView()}
+								<div class="lines-panel">
+									{#if rawLoading}
+										<div class="doc-status">
+											<span class="dot-loop"></span>Reading raw_line file…
+										</div>
+									{:else if rawError}
+										<div class="doc-error">
+											<div class="doc-error-title">⚠ Cannot render document</div>
+											<div class="doc-error-msg">{rawError}</div>
+										</div>
+									{:else if pagesGrouped.length === 0}
+										<div class="doc-empty">
+											<div class="doc-empty-mark">⌬</div>
+											<div class="doc-empty-title">Awaiting selection</div>
+											<div class="doc-empty-sub">
+												Once you retrieve a record, the parsed lines appear here.<br />
+												Click any metric on the left to jump to its source line.
+											</div>
+										</div>
+									{:else}
+										{#if addLineOpen}
+											<div class="add-line-form">
+												<span class="add-line-title">Insert Line</span>
+												<select class="add-line-type-select" bind:value={newLineType}>
+													<option value="text">text</option>
+													<option value="title">title</option>
+													<option value="header">header</option>
+													<option value="list-item">list-item</option>
+													<option value="footer">footer</option>
+												</select>
+												<input
+													class="add-line-input"
+													type="text"
+													placeholder="Line content…"
+													bind:value={newLineContent}
+												/>
+												<button
+													type="button"
+													class="add-line-save"
+													onclick={() => {
+														/* TODO: POST /kb/raw-lines when API is available */
+														newLineContent = '';
+														addLineOpen = false;
+													}}>Add</button
+												>
+												<button
+													type="button"
+													class="add-line-cancel"
+													onclick={() => {
+														addLineOpen = false;
+														newLineContent = '';
+													}}>Cancel</button
+												>
 											</div>
 										{/if}
-									</div>
-								{/snippet}
-							</PdfViewWindow>
-						{:else}
-							<iframe
-								class="doc-frame"
-								title={currentInput.file_name ?? `Record ${currentInput.id}`}
-								src={fileUrl}
-							></iframe>
-						{/if}
-
-						{#if isText}
-							<div class="doc-foot-hint">
-								This file is rendered as text by your browser. For exact line highlighting, switch
-								to the <button class="inline-tab-btn" onclick={() => setMode('source')}
-									>Source&nbsp;Lines</button
-								> tab.
-							</div>
-						{:else if !isPdf}
-							<div class="doc-foot-hint">
-								Inline preview support varies by file type. For line-level highlights, use the <button
-									class="inline-tab-btn"
-									onclick={() => setMode('source')}>Source&nbsp;Lines</button
-								> tab.
-							</div>
-						{/if}
-					{/if}
-				</div>
-			{:else}
-				<div class="document">
-					{#if rawLoading}
-						<div class="doc-status"><span class="dot-loop"></span>Reading raw_line file…</div>
-					{:else if rawError}
-						<div class="doc-error">
-							<div class="doc-error-title">⚠ Cannot render document</div>
-							<div class="doc-error-msg">{rawError}</div>
-						</div>
-					{:else if pagesGrouped.length === 0}
-						<div class="doc-empty">
-							<div class="doc-empty-mark">⌬</div>
-							<div class="doc-empty-title">Awaiting selection</div>
-							<div class="doc-empty-sub">
-								Once you retrieve a record, the parsed document appears here.<br />
-								Click any metric on the left to jump to its source line.
-							</div>
-						</div>
-					{:else}
-						{#each pagesGrouped as pg (pg.page)}
-							<article id={`page-${pg.page}`} class="page">
-								<div class="page-edge" aria-hidden="true"></div>
-								<header class="page-head">
-									<span class="page-folio">page</span>
-									<span class="page-num">{String(pg.page).padStart(3, '0')}</span>
-									<span class="page-rule"></span>
-									<span class="page-count">{pg.lines.length} lines</span>
-								</header>
-								<div class="page-body">
-									{#each pg.lines as ln (ln.line_number)}
-										{@const k = `${ln.page_number}:${ln.line_number}`}
-										{@const hl = highlightKeys.has(k)}
-										<div
-											id={`raw-${ln.page_number}-${ln.line_number}`}
-											class="line"
-											class:highlight={hl}
-											class:line-heading={ln.line_type?.includes('header') ||
-												ln.line_type === 'title'}
-											class:line-list={ln.line_type === 'list-item'}
-											class:line-footer={ln.line_type === 'footer'}
-										>
-											<span class="line-no">{String(ln.line_number).padStart(4, '0')}</span>
-											<span class="line-type">{ln.line_type}</span>
-											<span class="line-content">{ln.content}</span>
-										</div>
-									{/each}
+										{#each pagesGrouped as pg (pg.page)}
+											<article id={`page-${pg.page}`} class="page">
+												<div class="page-edge" aria-hidden="true"></div>
+												<header class="page-head">
+													<span class="page-folio">page</span>
+													<span class="page-num">{String(pg.page).padStart(3, '0')}</span>
+													<span class="page-rule"></span>
+													<span class="page-count">{pg.lines.length} lines</span>
+												</header>
+												<div class="page-body">
+													{#each pg.lines as ln (ln.line_number)}
+														{@const k = `${ln.page_number}:${ln.line_number}`}
+														{@const hl = highlightKeys.has(k)}
+														<div
+															id={`raw-${ln.page_number}-${ln.line_number}`}
+															class="line"
+															class:highlight={hl}
+															class:line-heading={ln.line_type?.includes('header') ||
+																ln.line_type === 'title'}
+															class:line-list={ln.line_type === 'list-item'}
+															class:line-footer={ln.line_type === 'footer'}
+															class:line-edit-active={editingLineKey === k}
+														>
+															<span class="line-no">{String(ln.line_number).padStart(4, '0')}</span>
+															<span class="line-type">{ln.line_type}</span>
+															{#if editLineMode && editingLineKey === k}
+																<input
+																	class="line-edit-input"
+																	type="text"
+																	bind:value={editingLineContent}
+																	onkeydown={(e) => {
+																		if (e.key === 'Enter') {
+																			/* TODO: PATCH /kb/raw-lines when API is available */
+																			rawLines = rawLines.map((l) =>
+																				l.line_number === ln.line_number &&
+																				l.page_number === ln.page_number
+																					? { ...l, content: editingLineContent }
+																					: l
+																			);
+																			editingLineKey = null;
+																		} else if (e.key === 'Escape') {
+																			editingLineKey = null;
+																		}
+																	}}
+																/>
+																<button
+																	type="button"
+																	class="line-edit-save"
+																	onclick={() => {
+																		/* TODO: PATCH /kb/raw-lines when API is available */
+																		rawLines = rawLines.map((l) =>
+																			l.line_number === ln.line_number &&
+																			l.page_number === ln.page_number
+																				? { ...l, content: editingLineContent }
+																				: l
+																		);
+																		editingLineKey = null;
+																	}}>✓</button
+																>
+																<button
+																	type="button"
+																	class="line-edit-cancel"
+																	onclick={() => (editingLineKey = null)}>✕</button
+																>
+															{:else if editLineMode}
+																<button
+																	type="button"
+																	class="line-content line-content-editable"
+																	onclick={() => {
+																		editingLineKey = k;
+																		editingLineContent = ln.content;
+																	}}>{ln.content}</button
+																>
+															{:else}
+																<span class="line-content">{ln.content}</span>
+															{/if}
+															{#if deleteLineMode}
+																<button
+																	type="button"
+																	class="line-delete-btn"
+																	title="Delete line {ln.line_number}"
+																	onclick={() => {
+																		/* TODO: DELETE /kb/raw-lines when API is available */
+																		rawLines = rawLines.filter(
+																			(l) =>
+																				!(
+																					l.line_number === ln.line_number &&
+																					l.page_number === ln.page_number
+																				)
+																		);
+																	}}>×</button
+																>
+															{/if}
+														</div>
+													{/each}
+												</div>
+											</article>
+										{/each}
+									{/if}
 								</div>
-							</article>
-						{/each}
+							{/snippet}
+						</PdfViewWindow>
+					{:else}
+						<iframe
+							class="doc-frame"
+							title={currentInput.file_name ?? `Record ${currentInput.id}`}
+							src={fileUrl}
+						></iframe>
 					{/if}
-				</div>
-			{/if}
+
+					{#if isText}
+						<div class="doc-foot-hint">
+							This file is rendered as text by your browser. For exact line highlighting, switch to
+							the <button class="inline-tab-btn" onclick={() => (showLines = true)}
+								>Source&nbsp;Lines</button
+							> view.
+						</div>
+					{:else if !isPdf}
+						<div class="doc-foot-hint">
+							Inline preview support varies by file type. For line-level highlights, use the <button
+								class="inline-tab-btn"
+								onclick={() => (showLines = true)}>Source&nbsp;Lines</button
+							> view.
+						</div>
+					{/if}
+				{/if}
+			</div>
 		</section>
 	</div>
 </div>
+
+{#if addMetricOpen}
+	<div
+		class="dialog-overlay"
+		aria-hidden="true"
+		onclick={() => (addMetricOpen = false)}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') addMetricOpen = false;
+		}}
+	>
+		<div
+			class="dialog"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Add metric"
+			tabindex="0"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+		>
+			<div class="dialog-head">
+				<div class="dialog-title">Add Metric</div>
+				<button type="button" class="dialog-close-btn" onclick={() => (addMetricOpen = false)}
+					>Close</button
+				>
+			</div>
+			<div class="dialog-body">
+				<div class="dialog-placeholder">
+					Add Metric functionality will be available once the <code>POST /kb/metrics</code> API endpoint
+					is implemented.
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
@@ -1454,75 +1667,208 @@
 		background: var(--page-bg);
 		overflow: hidden;
 	}
-	.right-toolbar {
-		display: flex;
-		justify-content: space-between;
+	/* ---- PDF toolbar buttons (rendered via snippet in PdfViewWindow's pvw-toolbar-pill) ---- */
+	.pvw-tool-btn {
+		display: inline-flex;
 		align-items: center;
-		padding: 16px 28px;
-		border-bottom: 1px solid var(--ink-line);
-		background: var(--panel-bg);
-		gap: 16px;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		border-radius: 8px;
+		border: none;
+		background: transparent;
+		color: var(--pvw-tc, #94a3b8);
+		cursor: pointer;
+		transition:
+			background 120ms ease,
+			color 120ms ease;
 	}
-	.right-title {
-		display: flex;
-		align-items: baseline;
-		gap: 10px;
-		min-width: 0;
+	.pvw-tool-btn:disabled {
+		opacity: 0.38;
+		cursor: not-allowed;
+	}
+	.pvw-tool-btn:hover,
+	.pvw-tool-btn:focus-visible,
+	.pvw-tool-btn.active {
+		background: var(--pvw-hvr, rgba(99, 102, 241, 0.14));
+		color: #818cf8;
+		outline: none;
+	}
+	.pvw-tool-sep {
+		width: 1px;
+		height: 18px;
+		background: var(--pvw-bdc, rgba(148, 163, 184, 0.18));
+		flex-shrink: 0;
+		margin: 0 2px;
+	}
+	:global(.pvw-tb-icon) {
+		width: 15px;
+		height: 15px;
+		flex-shrink: 0;
+		pointer-events: none;
+	}
+
+	/* ---- Lines panel (shown via linesView snippet) ---- */
+	.lines-panel {
+		padding: 32px 36px 80px;
+	}
+
+	.line-edit-active .line-content {
+		display: none;
+	}
+	.line-edit-input {
 		flex: 1;
+		min-width: 0;
+		height: 22px;
+		padding: 0 6px;
+		border: 1px solid var(--brass);
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		font-family: var(--font-mono, monospace);
+		font-size: 11px;
+		outline: none;
 	}
-	.title-glyph {
-		font-family: var(--font-serif);
-		font-size: 22px;
+	.line-edit-save,
+	.line-edit-cancel {
+		all: unset;
+		cursor: pointer;
+		padding: 0 6px;
+		font-family: var(--font-mono, monospace);
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+	.line-edit-save:hover {
 		color: var(--brass);
+	}
+	.line-edit-cancel:hover {
+		color: var(--crimson, #c8553d);
+	}
+
+	.line-content-editable {
+		all: unset;
+		cursor: text;
+		border-bottom: 1px dashed var(--ink-line);
+		font-family: inherit;
+		font-size: inherit;
+		color: inherit;
+	}
+	.line-content-editable:hover {
+		border-bottom-color: var(--brass);
+		color: var(--brass);
+	}
+
+	.line-delete-btn {
+		all: unset;
+		cursor: pointer;
+		margin-left: auto;
+		padding: 0 6px;
+		font-size: 14px;
+		color: var(--text-muted);
 		line-height: 1;
 	}
-	.title-name {
-		font-family: var(--font-serif);
-		font-size: 19px;
-		color: var(--text-primary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		flex: 1;
-		min-width: 0;
+	.line-delete-btn:hover {
+		color: var(--crimson, #c8553d);
 	}
-	.title-name.muted {
-		color: var(--text-muted);
-		font-style: italic;
+
+	.add-line-form {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 14px;
+		background: var(--panel-bg-alt);
+		border: 1px solid var(--ink-line);
+		margin-bottom: 16px;
 	}
-	.title-type {
-		font-family: var(--font-mono);
+	.add-line-title {
+		font-family: var(--font-mono, monospace);
 		font-size: 10px;
 		text-transform: uppercase;
-		letter-spacing: 0.1em;
+		letter-spacing: 0.08em;
 		color: var(--text-muted);
-		padding: 2px 6px;
-		border: 1px solid var(--ink-line);
-	}
-	.right-stats {
-		display: flex;
-		gap: 18px;
 		flex-shrink: 0;
 	}
-	.stat {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		line-height: 1;
+	.add-line-type-select {
+		height: 26px;
+		padding: 0 6px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg);
+		color: var(--text-primary);
+		font-family: var(--font-mono, monospace);
+		font-size: 10px;
+		text-transform: uppercase;
+		cursor: pointer;
 	}
-	.stat-num {
-		font-family: var(--font-serif);
+	.add-line-input {
+		flex: 1;
+		min-width: 0;
+		height: 26px;
+		padding: 0 8px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg);
+		color: var(--text-primary);
+		font-family: var(--font-mono, monospace);
+		font-size: 11px;
+	}
+	.add-line-input:focus {
+		outline: none;
+		border-color: var(--brass);
+	}
+	.add-line-save,
+	.add-line-cancel {
+		height: 26px;
+		padding: 0 10px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-secondary);
+		font-family: var(--font-mono, monospace);
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.07em;
+		cursor: pointer;
+	}
+	.add-line-save:hover {
+		border-color: var(--brass);
+		color: var(--brass);
+	}
+	.add-line-cancel:hover {
+		border-color: var(--ink-line);
+		color: var(--text-primary);
+	}
+
+	/* ---- Add Metric dialog ---- */
+	.dialog-placeholder {
+		font-family: var(--font-mono, monospace);
+		font-size: 12px;
+		color: var(--text-muted);
+		line-height: 1.6;
+	}
+	.dialog-placeholder code {
+		color: var(--brass);
+	}
+	.dialog-body {
+		padding: 18px 16px;
+	}
+	.dialog-title {
+		font-family: var(--font-serif, serif);
 		font-size: 22px;
 		color: var(--brass);
-		font-weight: 500;
+		line-height: 1;
 	}
-	.stat-label {
-		font-family: var(--font-mono);
-		font-size: 9px;
+	.dialog-close-btn {
+		height: 30px;
+		padding: 0 10px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-secondary);
+		font-family: var(--font-mono, monospace);
+		font-size: 10px;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		letter-spacing: 0.12em;
-		color: var(--text-muted);
-		margin-top: 4px;
+		cursor: pointer;
+	}
+	.dialog-close-btn:hover {
+		border-color: var(--brass);
+		color: var(--brass);
 	}
 
 	.document {
@@ -1821,6 +2167,12 @@
 		border: 1px solid rgba(200, 85, 61, 0.9);
 		box-shadow: inset 0 0 0 1px rgba(255, 210, 179, 0.22);
 	}
+	:global(.pdf-highlight-preview) {
+		position: absolute;
+		background: transparent;
+		border-left: 3px solid rgba(22, 163, 74, 0.9);
+		border-right: 3px solid rgba(22, 163, 74, 0.9);
+	}
 	.pdf-status {
 		font-family: var(--font-mono);
 		font-size: 12px;
@@ -2081,8 +2433,7 @@
 		border-radius: 24px;
 		overflow: auto;
 		background:
-			linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 22%),
-			var(--panel-bg);
+			linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 22%), var(--panel-bg);
 		box-shadow:
 			0 30px 80px rgba(0, 0, 0, 0.55),
 			0 0 0 1px rgba(212, 162, 76, 0.08);
@@ -2141,8 +2492,7 @@
 		border-radius: 20px;
 		padding: 14px;
 		background:
-			linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
-			#171c26;
+			linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)), #171c26;
 	}
 	.dialog-section-head {
 		display: flex;

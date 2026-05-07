@@ -27,6 +27,13 @@
 		sidebarSettingsKey = null,
 		sidebarWidthSettingLabel = 'Metadata Panel Width',
 		zoomSettingLabel = 'Zoom',
+		darkMode = true,
+		showingLines = $bindable(false),
+		selectedLines = $bindable([] as number[]),
+		onselect,
+		ondragmove,
+		toolbar,
+		linesView,
 		sidebar
 	}: {
 		inputId: number | null;
@@ -45,8 +52,30 @@
 		sidebarSettingsKey?: string | null;
 		sidebarWidthSettingLabel?: string;
 		zoomSettingLabel?: string;
+		darkMode?: boolean;
+		showingLines?: boolean;
+		selectedLines?: number[];
+		onselect?: (detail: {
+			pageNumber: number;
+			viewportY1: number;
+			viewportY2: number;
+			viewport: PdfPageViewport;
+		}) => void;
+		ondragmove?: (detail: {
+			pageNumber: number;
+			viewportY1: number;
+			viewportY2: number;
+			viewport: PdfPageViewport;
+		}) => void;
+		toolbar?: Snippet;
+		linesView?: Snippet;
 		sidebar?: Snippet;
 	} = $props();
+
+	let pillSurface = $derived(darkMode ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.72)');
+	let pillBorder = $derived(darkMode ? 'rgba(148,163,184,0.18)' : 'rgba(100,116,139,0.18)');
+	let pillText = $derived(darkMode ? '#94a3b8' : '#64748b');
+	let pillHover = $derived(darkMode ? 'rgba(99,102,241,0.14)' : 'rgba(99,102,241,0.10)');
 
 	let panelWidth = $state(sidebarDefaultWidth);
 	let resizing = $state(false);
@@ -139,6 +168,13 @@
 		}
 	}
 
+	function onClickAway(e: MouseEvent) {
+		if (selectedLines.length === 0) return;
+		const target = e.target as HTMLElement;
+		if (target.closest('.pvw-tool-btn')) return;
+		selectedLines = [];
+	}
+
 	onMount(() => {
 		storage = window.localStorage;
 		const settings = readPdfViewWindowSettings(
@@ -148,6 +184,8 @@
 		);
 		panelWidth = settings.sidebarWidth;
 		zoom = settings.zoom;
+		window.addEventListener('click', onClickAway, { capture: true });
+		return () => window.removeEventListener('click', onClickAway, { capture: true });
 	});
 
 	$effect(() => {
@@ -159,54 +197,74 @@
 	});
 </script>
 
-<SharedPdfViewer
-	{inputId}
-	{fileUrl}
-	bind:page
-	bind:zoom
-	bind:numPages
-	{highlightVersion}
-	{renderHighlights}
-	{loadingLabel}
-	{respectPageRotation}
->
-	<div slot="sidebar">
-		{#if sidebar}
-			<div class="pvw-shell" style={`width:${panelWidth}px;`}>
-				<aside class="pvw-sidebar-panel">
-					<div class="pvw-sidebar-head">
-						<div class="pvw-sidebar-title">{sidebarTitle}</div>
+<div class="pvw-container">
+	{#if showingLines && linesView}
+		<div class="pvw-lines-host">
+			{@render linesView()}
+		</div>
+	{:else}
+		<SharedPdfViewer
+			{inputId}
+			{fileUrl}
+			bind:page
+			bind:zoom
+			bind:numPages
+			{highlightVersion}
+			{renderHighlights}
+			{loadingLabel}
+			{respectPageRotation}
+			{onselect}
+			{ondragmove}
+		>
+			<div slot="page-bar-tool">
+				{#if toolbar}
+					<div
+						class="pvw-toolbar-pill"
+						style={`--pvw-surf:${pillSurface}; --pvw-bdc:${pillBorder}; --pvw-tc:${pillText}; --pvw-hvr:${pillHover};`}
+					>
+						{@render toolbar()}
+					</div>
+				{/if}
+			</div>
+			<div slot="sidebar">
+				{#if sidebar}
+					<div class="pvw-shell" style={`width:${panelWidth}px;`}>
+						<aside class="pvw-sidebar-panel">
+							<div class="pvw-sidebar-head">
+								<div class="pvw-sidebar-title">{sidebarTitle}</div>
+								<button
+									type="button"
+									class="pvw-settings-btn"
+									class:active={settingsOpen}
+									aria-expanded={settingsOpen}
+									aria-label="Sidebar settings"
+									onclick={() => {
+										settingsOpen = !settingsOpen;
+									}}
+								>
+									Settings
+								</button>
+							</div>
+							<div class="pvw-sidebar-body">
+								{@render sidebar()}
+							</div>
+						</aside>
 						<button
 							type="button"
-							class="pvw-settings-btn"
-							class:active={settingsOpen}
-							aria-expanded={settingsOpen}
-							aria-label="Sidebar settings"
-							onclick={() => {
-								settingsOpen = !settingsOpen;
-							}}
+							class="pvw-resizer"
+							class:active={resizing}
+							aria-label="Resize panel"
+							onpointerdown={startResize}
+							onkeydown={onResizerKeydown}
 						>
-							Settings
+							<span class="pvw-resizer-grip" aria-hidden="true"></span>
 						</button>
 					</div>
-					<div class="pvw-sidebar-body">
-						{@render sidebar()}
-					</div>
-				</aside>
-				<button
-					type="button"
-					class="pvw-resizer"
-					class:active={resizing}
-					aria-label="Resize panel"
-					onpointerdown={startResize}
-					onkeydown={onResizerKeydown}
-				>
-					<span class="pvw-resizer-grip" aria-hidden="true"></span>
-				</button>
+				{/if}
 			</div>
-		{/if}
-	</div>
-</SharedPdfViewer>
+		</SharedPdfViewer>
+	{/if}
+</div>
 
 {#if settingsOpen}
 	<div
@@ -265,6 +323,47 @@
 {/if}
 
 <style>
+	.pvw-container {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+	}
+
+	.pvw-toolbar-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 0;
+		border-radius: 12px;
+		border: 1px solid var(--pvw-bdc);
+		background: var(--pvw-surf);
+		backdrop-filter: blur(8px);
+		padding: 3px;
+		position: relative;
+		z-index: 10;
+	}
+
+	.pvw-lines-host {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
+		background: var(--panel-bg);
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-line) transparent;
+	}
+
+	.pvw-lines-host::-webkit-scrollbar {
+		width: 10px;
+	}
+	.pvw-lines-host::-webkit-scrollbar-thumb {
+		background: var(--ink-line);
+		border-radius: 999px;
+	}
+	.pvw-lines-host::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
 	.pvw-shell {
 		position: relative;
 		flex: 0 0 auto;

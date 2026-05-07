@@ -375,45 +375,6 @@
 	</aside>
 
 	<main class="flex min-w-0 flex-1 flex-col overflow-hidden" style="background:{contentBg};">
-		<header
-			class="flex flex-shrink-0 items-center justify-between px-6 py-3"
-			style="background:{contentBg}; border-bottom:1px solid {borderColor};"
-		>
-			<div class="min-w-0">
-				<div class="truncate" style="font-size:13px; color:{textMuted};">Knowledge System</div>
-				<h1 class="truncate" style="font-size:18px; font-weight:700; color:{textPrimary};">
-					{activeItem.label}
-				</h1>
-			</div>
-			{#if needsActiveStore}
-				{#if knowledgeStoreState.activeStore}
-					<div
-						class="flex flex-shrink-0 items-center gap-2 rounded-full px-3 py-1.5"
-						style="background:{accentTint}; border:1px solid {accent}30;"
-					>
-						<span
-							style="font-size:11px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;"
-							>Active Store</span
-						>
-						<span
-							style="font-size:13px; font-weight:600; color:{accent}; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
-							>{knowledgeStoreState.activeStore.ks_name}</span
-						>
-						<span style="font-size:11px; color:{textMuted}; font-family:monospace;"
-							>#{knowledgeStoreState.activeStore.id}</span
-						>
-					</div>
-				{:else}
-					<div
-						class="flex flex-shrink-0 items-center gap-2 rounded-full px-3 py-1.5"
-						style="background:rgba(239,68,68,0.10); border:1px solid rgba(239,68,68,0.25);"
-					>
-						<span style="font-size:13px; color:#ef4444;">No active store</span>
-					</div>
-				{/if}
-			{/if}
-		</header>
-
 		<div class="min-h-0 flex-1 overflow-hidden">
 			{#if needsActiveStore && !knowledgeStoreState.activeStore}
 				<div
