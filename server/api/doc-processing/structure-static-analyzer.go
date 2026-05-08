@@ -25,6 +25,8 @@ var (
 	staticSingleSymListRE   = regexp.MustCompile(`^[*\-•·—]\s+\S+`)
 	staticMultiSymListRE    = regexp.MustCompile(`^([A-Za-z]+|[ivxlcdmIVXLCDM]+)\)\s+\S+`)
 	staticTOCDotLeaderRE    = regexp.MustCompile(`\.{3,}`)
+	staticPageImagePathRE   = regexp.MustCompile(`^(.+)/imageFile(\d+)\.png$`)
+	staticZeroOriginCoordRE = regexp.MustCompile(`^\[\s*0(?:\.0+)?,\s*0(?:\.0+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?\s*\]$`)
 )
 
 type StaticAnalyzerProcessor struct {
@@ -89,10 +91,10 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 		return nil
 	}
 	if !p.OverrideOrigin && strings.TrimSpace(p.ArtifactDir) == "" {
-		return errors.New("missing ARTIFACT_DIR")
+		return errors.New("(MID_26050814) missing ARTIFACT_DIR")
 	}
 	if p.Store == nil {
-		return errors.New("doc metadata store is nil")
+		return errors.New("(MID_26050815) doc metadata store is nil")
 	}
 
 	rec, err := p.Store.GetInputRecord(ctx, evt.RecordID)
@@ -103,10 +105,10 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 		return fmt.Errorf("(MID_26042304) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
 	if strings.TrimSpace(rec.ParserName) == "" {
-		return p.failAndPersist(ctx, rec, start, "", 0, 0, 0, errors.New("missing parser name"))
+		return p.failAndPersist(ctx, rec, start, "", 0, 0, 0, errors.New("(MID_26050816) missing parser name"))
 	}
 	if strings.TrimSpace(rec.ResultFilename) == "" {
-		return p.failAndPersist(ctx, rec, start, "", 0, 0, 0, errors.New("missing result filename"))
+		return p.failAndPersist(ctx, rec, start, "", 0, 0, 0, errors.New("(MID_26050817) missing result filename"))
 	}
 
 	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
@@ -233,6 +235,8 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 	return nil
 }
 
+// analyzeStaticStructure
+// This is the main function for static analysis.
 func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnalyzeResult, error) {
 	sc := bufio.NewScanner(strings.NewReader(string(body)))
 	sc.Buffer(make([]byte, 1024), 16*1024*1024)
@@ -264,6 +268,7 @@ func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnal
 	if err := sc.Err(); err != nil {
 		return staticAnalyzeResult{}, fmt.Errorf("(MID_26042310) read input lines: %w", err)
 	}
+	lines = removeStaticPageImageArtifacts(lines)
 
 	corrected := make(map[int]string, len(lines))
 	for _, line := range lines {
@@ -282,18 +287,80 @@ func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnal
 	}, nil
 }
 
+func removeStaticPageImageArtifacts(lines []staticInputLine) []staticInputLine {
+	type artifactMatch struct {
+		lineIndex  int
+		pageInFile int
+	}
+
+	matchesByPrefix := make(map[string][]artifactMatch, 4)
+	for i, line := range lines {
+		if line.OriginalLineLower != "image" {
+			continue
+		}
+		if !staticZeroOriginCoordRE.MatchString(strings.TrimSpace(line.Coordinate)) {
+			continue
+		}
+		m := staticPageImagePathRE.FindStringSubmatch(strings.TrimSpace(line.Content))
+		if len(m) != 3 {
+			continue
+		}
+		pageInFile, err := strconv.Atoi(strings.TrimSpace(m[2]))
+		if err != nil || pageInFile <= 0 || pageInFile != line.PageNo {
+			continue
+		}
+		prefix := strings.TrimSpace(m[1])
+		if prefix == "" {
+			continue
+		}
+		matchesByPrefix[prefix] = append(matchesByPrefix[prefix], artifactMatch{
+			lineIndex:  i,
+			pageInFile: pageInFile,
+		})
+	}
+
+	removed := make(map[int]struct{}, len(lines))
+	for _, matches := range matchesByPrefix {
+		if len(matches) < 2 {
+			continue
+		}
+		seenPages := make(map[int]struct{}, len(matches))
+		for _, match := range matches {
+			seenPages[match.pageInFile] = struct{}{}
+		}
+		if len(seenPages) < 2 {
+			continue
+		}
+		for _, match := range matches {
+			removed[match.lineIndex] = struct{}{}
+		}
+	}
+	if len(removed) == 0 {
+		return lines
+	}
+
+	filtered := make([]staticInputLine, 0, len(lines)-len(removed))
+	for i, line := range lines {
+		if _, ok := removed[i]; ok {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
+}
+
 func parseStaticInputLine(raw string) (staticInputLine, error) {
 	fields := strings.Split(raw, "\t")
 	if len(fields) != 7 {
-		return staticInputLine{}, errors.New("invalid field count")
+		return staticInputLine{}, errors.New("(MID_26050810) invalid field count")
 	}
 	lineNo, err := strconv.Atoi(strings.TrimSpace(fields[0]))
 	if err != nil || lineNo <= 0 {
-		return staticInputLine{}, errors.New("invalid line number")
+		return staticInputLine{}, errors.New("(MID_26050811) invalid line number")
 	}
 	pageNo, err := strconv.Atoi(strings.TrimSpace(fields[1]))
 	if err != nil || pageNo <= 0 {
-		return staticInputLine{}, errors.New("invalid page number")
+		return staticInputLine{}, errors.New("(MID_26050812) invalid page number")
 	}
 	originalLineType := strings.TrimSpace(fields[2])
 	font := strings.TrimSpace(fields[3])
@@ -301,7 +368,7 @@ func parseStaticInputLine(raw string) (staticInputLine, error) {
 	coordinate := strings.TrimSpace(fields[5])
 	content := strings.TrimSpace(fields[6])
 	if originalLineType == "" || font == "" || fontSize == "" || coordinate == "" {
-		return staticInputLine{}, errors.New("empty required field")
+		return staticInputLine{}, errors.New("(MID_26050813) empty required field")
 	}
 	return staticInputLine{
 		LineNo:            lineNo,
@@ -575,6 +642,9 @@ func isStaticNextHeading(prev []int, cur []int) bool {
 	return false
 }
 
+// applyStticListLabels
+// For each line with type 'list-teim', it uses regexp to determine
+// the list type and change the list type if matches
 func applyStaticListLabels(lines []staticInputLine, corrected map[int]string) {
 	for _, line := range lines {
 		if line.OriginalLineLower != "list-item" {
@@ -587,8 +657,10 @@ func applyStaticListLabels(lines []staticInputLine, corrected map[int]string) {
 		switch {
 		case staticNumListRE.MatchString(content):
 			corrected[line.LineNo] = "num-list-item"
+
 		case staticSingleSymListRE.MatchString(content):
 			corrected[line.LineNo] = "s-sym-list-item"
+
 		case staticMultiSymListRE.MatchString(content):
 			corrected[line.LineNo] = "m-sym-list-item"
 		}

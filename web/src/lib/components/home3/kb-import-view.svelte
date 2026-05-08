@@ -181,7 +181,7 @@
 		uploadPrivateInfo = '';
 		uploadNotes = '';
 		uploadKsDesc = '';
-		uploadParserName = 'docling';
+		uploadParserName = 'opendata';		// The default PDF parser
 		selectedFiles = [];
 		if (filePicker) filePicker.value = '';
 	}

@@ -41,14 +41,31 @@ func (f *fakeDocMetadataStore) UpdateInputMetadata(_ context.Context, id int64, 
 
 type fakeJSONExtractor struct {
 	out         map[string]any
+	outs        []map[string]any
 	err         error
+	errs        []error
 	inputText   string
+	modelNames  []string
 	calledCount int
 }
 
 func (f *fakeJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
 	f.calledCount++
 	f.inputText = in.InputText
+	f.modelNames = append(f.modelNames, in.ModelName)
+	if len(f.outs) > 0 || len(f.errs) > 0 {
+		var out map[string]any
+		var err error
+		if len(f.outs) > 0 {
+			out = f.outs[0]
+			f.outs = f.outs[1:]
+		}
+		if len(f.errs) > 0 {
+			err = f.errs[0]
+			f.errs = f.errs[1:]
+		}
+		return out, err
+	}
 	return f.out, f.err
 }
 

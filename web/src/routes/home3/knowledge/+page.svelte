@@ -95,16 +95,16 @@
 			icon: DatabaseIcon
 		},
 		{
-			id: 'kb-metrics',
-			label: 'Metrics',
-			description: 'Manage extracted metrics',
-			icon: BarChart3Icon
-		},
-		{
 			id: 'kb-doc-structure',
 			label: 'Document Structure',
 			description: 'Inspect parsed hierarchy',
 			icon: ListTreeIcon
+		},
+		{
+			id: 'kb-metrics',
+			label: 'Metrics',
+			description: 'Manage extracted metrics',
+			icon: BarChart3Icon
 		},
 		{ id: 'kb-chunks', label: 'Chunks', description: 'Browse chunk output', icon: BoxesIcon },
 		{

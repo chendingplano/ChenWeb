@@ -18,21 +18,25 @@ import (
 )
 
 type ProvisionsProcessor struct {
-	InputStore   DocMetadataStore
-	Store        ProvisionsStore
-	Extractor    LLMJSONExtractor
-	Logger       ApiTypes.JimoLogger
-	Now          func() time.Time
-	PromptText   string
-	PromptRef    string
-	PromptPath   string
-	PromptErr    error
-	ModelRef     string
-	ModelCfgPath string
-	ModelErr     error
-	ModelName    string
-	BlockSize    int
-	ArtifactDir  string
+	InputStore           DocMetadataStore
+	Store                ProvisionsStore
+	Extractor            LLMJSONExtractor
+	Logger               ApiTypes.JimoLogger
+	Now                  func() time.Time
+	PromptText           string
+	PromptRef            string
+	PromptPath           string
+	PromptErr            error
+	ModelRef             string
+	ModelCfgPath         string
+	ModelErr             error
+	ModelName            string
+	FallbackModelRef     string
+	FallbackModelCfgPath string
+	FallbackModelErr     error
+	FallbackModelName    string
+	BlockSize            int
+	ArtifactDir          string
 }
 
 type ProvisionsStore interface {
@@ -57,6 +61,7 @@ type provisionExtractionResult struct {
 	ExtractID  string
 	Language   string
 	Provisions []map[string]any
+	ModelName  string
 }
 
 func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *ProvisionsProcessor {
@@ -65,23 +70,28 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	}
 	promptText, promptRef, promptPath, promptErr := loadProvisionsPromptFromEnv()
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_NAME", "EXTRACT_PROVISIONS_MODELS_FILE")
+	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_FALLBACK", "EXTRACT_PROVISIONS_MODELS_FILE")
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	return &ProvisionsProcessor{
-		InputStore:   inputStore,
-		Store:        store,
-		Extractor:    extractor,
-		Logger:       logger,
-		Now:          time.Now,
-		PromptText:   promptText,
-		PromptRef:    promptRef,
-		PromptPath:   promptPath,
-		PromptErr:    promptErr,
-		ModelRef:     modelRef,
-		ModelCfgPath: modelCfgPath,
-		ModelErr:     modelErr,
-		ModelName:    modelCfg.ModelName,
-		BlockSize:    envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
-		ArtifactDir:  strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		InputStore:           inputStore,
+		Store:                store,
+		Extractor:            extractor,
+		Logger:               logger,
+		Now:                  time.Now,
+		PromptText:           promptText,
+		PromptRef:            promptRef,
+		PromptPath:           promptPath,
+		PromptErr:            promptErr,
+		ModelRef:             modelRef,
+		ModelCfgPath:         modelCfgPath,
+		ModelErr:             modelErr,
+		ModelName:            modelCfg.ModelName,
+		FallbackModelRef:     fallbackModelRef,
+		FallbackModelCfgPath: fallbackModelCfgPath,
+		FallbackModelErr:     fallbackModelErr,
+		FallbackModelName:    fallbackModelCfg.ModelName,
+		BlockSize:            envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
+		ArtifactDir:          strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 	}
 }
 
@@ -166,7 +176,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		p.persistProvisionsStatus(ctx, rec, start, err)
 		return nil
 	}
-	outputRows := p.buildProvisionOutputRows(result.Provisions, start, len(blocks), time.Since(start).Milliseconds())
+	outputRows := p.buildProvisionOutputRows(result.Provisions, start, len(blocks), time.Since(start).Milliseconds(), result.ModelName)
 
 	inserted, err := p.Store.SaveProvisions(ctx, SaveProvisionsRequest{
 		InputRecordID: evt.RecordID,
@@ -231,6 +241,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(ctx context.Con
 	extractID := p.Now().Format("20060102-150405")
 	language := ""
 	provisions := make([]map[string]any, 0, len(blocks))
+	usedModelName := strings.TrimSpace(p.ModelName)
 
 	for idx, block := range blocks {
 		p.Logger.Info("Start extracting provisions",
@@ -239,23 +250,16 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(ctx context.Con
 			"model name", p.ModelName,
 			"prompt name", p.PromptRef,
 		)
-		payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-			PromptText: p.PromptText,
-			ModelName:  p.ModelName,
-			InputText:  buildProvisionUserPrompt(block),
-		})
+		payload, modelName, err := p.extractProvisionPayloadWithFallback(ctx, block)
 		if err != nil {
 			p.Logger.Error("failed extracting", "error", err)
 			return provisionExtractionResult{}, fmt.Errorf("(MID_26050531) extract provisions via llm: %w", err)
 		}
+		usedModelName = strings.TrimSpace(modelName)
 		if language == "" {
 			language = strings.TrimSpace(asString(payload["language"]))
 		}
-		raw, ok := payload["provisions"].([]any)
-		if !ok {
-			p.Logger.Error("missing 'provisions'")
-			return provisionExtractionResult{}, fmt.Errorf("(MID_26050532) llm output field 'provisions' must be an array")
-		}
+		raw := payload["provisions"].([]any)
 		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(block), blockLineText(block))...)
 		p.Logger.Info("LLM responded", "# provisions", len(provisions))
 	}
@@ -266,7 +270,122 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(ctx context.Con
 		ExtractID:  extractID,
 		Language:   language,
 		Provisions: provisions,
+		ModelName:  firstNonEmptyTrimmed(usedModelName, p.ModelName),
 	}, nil
+}
+
+func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Context, block Block) (map[string]any, string, error) {
+	payload, err := p.extractProvisionPayload(ctx, block, p.ModelName)
+	if err == nil {
+		return payload, strings.TrimSpace(p.ModelName), nil
+	}
+
+	var payloadVal any = "nil"
+	if payload != nil {
+		payloadVal = payload
+	}
+
+	p.Logger.Warn("primary LLM failed extracting provisions", 
+		"error", err,
+		"model_name", p.ModelName,
+		"fallback_model", p.FallbackModelName,
+		"payload", payloadVal)
+
+	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
+	if fallbackModelName == "" {
+		return nil, strings.TrimSpace(p.ModelName),
+			fmt.Errorf("(MID_26050820) extract provisions failed and fallback model not available, err:%w, model_name:%s", err, p.ModelName)
+	}
+
+	if p.FallbackModelErr != nil {
+		return nil, fallbackModelName, fmt.Errorf("(MID_26050544) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
+	}
+
+	p.Logger.Warn("primary provisions extraction failed; retrying fallback model",
+		"primary_model", p.ModelName,
+		"fallback_model", fallbackModelName,
+		"error", err,
+		"prompt_name", p.PromptRef,
+	)
+
+	payload, fallbackErr := p.extractProvisionPayload(ctx, block, fallbackModelName)
+	if fallbackErr != nil {
+		return nil, fallbackModelName, fmt.Errorf("(MID_26050545) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
+	}
+	return payload, fallbackModelName, nil
+}
+
+func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block Block, modelName string) (map[string]any, error) {
+	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptText: p.PromptText,
+		ModelName:  modelName,
+		InputText:  buildProvisionUserPrompt(block),
+	})
+	if err != nil {
+		if payload == nil {
+			return nil, fmt.Errorf("(MID_26050841) failed extracting provisions, error:%w")
+		}
+		return nil, fmt.Errorf("(MID_26050842) failed extracting provisions, error:%w, payload:%v", payload)
+	}
+
+	payload = normalizeProvisionPayload(payload)
+	if len(payload) == 0 {
+		return nil, errors.New("(MID_26050546) empty llm json object")
+	}
+	raw, ok := payload["provisions"]
+	if !ok {
+		return nil, fmt.Errorf("(MID_26050532) llm output field 'provisions' must be an array, JSON:%v", payload)
+	}
+	items, ok := normalizeProvisionItems(raw)
+	if !ok {
+		return nil, fmt.Errorf("(MID_26050547) llm output field 'provisions' must be an array, JSON:%v", payload)
+	}
+	payload["provisions"] = items
+	return payload, nil
+}
+
+func normalizeProvisionPayload(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return payload
+	}
+	if _, ok := payload["provisions"]; ok {
+		return payload
+	}
+	if looksLikeProvisionRecord(payload) {
+		return map[string]any{
+			"language":   firstNonEmptyTrimmed(asString(payload["language"]), "unknown"),
+			"provisions": []any{payload},
+		}
+	}
+	return payload
+}
+
+func normalizeProvisionItems(value any) ([]any, bool) {
+	switch v := value.(type) {
+	case []any:
+		return v, true
+	case map[string]any:
+		return []any{v}, true
+	default:
+		return nil, false
+	}
+}
+
+func looksLikeProvisionRecord(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	for _, key := range []string{"name", "provision_original", "provision_en", "type", "subject", "source_line_spans"} {
+		if strings.TrimSpace(asString(payload[key])) != "" {
+			return true
+		}
+		if key == "source_line_spans" {
+			if _, ok := payload[key].([]any); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func buildProvisionUserPrompt(block Block) string {
@@ -321,7 +440,7 @@ func blockLineText(block Block) map[string]string {
 	return out
 }
 
-func normalizeProvisionList(items []any, _ map[int]int, lineText map[string]string) []map[string]any {
+func normalizeProvisionList(items []any, lineToPage map[int]int, lineText map[string]string) []map[string]any {
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		raw, ok := item.(map[string]any)
@@ -344,7 +463,7 @@ func normalizeProvisionList(items []any, _ map[int]int, lineText map[string]stri
 			"need_verify":        toBool(raw["need_verify"]),
 			"categories":         raw["categories"],
 		}
-		sourceSpans := normalizeSourceLineSpans(raw["source_line_spans"])
+		sourceSpans := normalizeProvisionSourceLineSpans(raw["source_line_spans"], lineToPage)
 		normalized["source_line_spans"] = sourceSpans
 		if strings.TrimSpace(asString(normalized["source_text"])) == "" {
 			normalized["source_text"] = sourceTextFromSpans(sourceSpans, lineText)
@@ -368,7 +487,60 @@ func sourceTextFromSpans(spans []string, lineText map[string]string) string {
 	return strings.Join(parts, "\n")
 }
 
-func (p *ProvisionsProcessor) buildProvisionOutputRows(provisions []map[string]any, now time.Time, numBlocks int, durationMs int64) []map[string]any {
+func normalizeProvisionSourceLineSpans(value any, lineToPage map[int]int) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+
+	out := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	appendSpan := func(span string) {
+		span = strings.TrimSpace(span)
+		if span == "" {
+			return
+		}
+		if _, ok := seen[span]; ok {
+			return
+		}
+		seen[span] = struct{}{}
+		out = append(out, span)
+	}
+
+	formatLineSpan := func(pageNo int, lineNo int) string {
+		if lineNo <= 0 {
+			return ""
+		}
+		if pageNo > 0 {
+			return fmt.Sprintf("%d:%d", pageNo, lineNo)
+		}
+		return strconv.Itoa(lineNo)
+	}
+
+	for _, item := range items {
+		switch v := item.(type) {
+		case map[string]any:
+			lineNo := int(toFloat(v["line_number"]))
+			pageNo := int(toFloat(v["page_number"]))
+			if pageNo <= 0 && lineNo > 0 {
+				pageNo = lineToPage[lineNo]
+			}
+			appendSpan(formatLineSpan(pageNo, lineNo))
+		case float64:
+			lineNo := int(v)
+			appendSpan(formatLineSpan(lineToPage[lineNo], lineNo))
+		case string:
+			appendSpan(v)
+		}
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (p *ProvisionsProcessor) buildProvisionOutputRows(provisions []map[string]any, now time.Time, numBlocks int, durationMs int64, modelName string) []map[string]any {
 	out := make([]map[string]any, 0, len(provisions))
 	timeText := now.Format(defaultDocMetaStatusTime)
 	timePerProvision := float64(0)
@@ -397,7 +569,7 @@ func (p *ProvisionsProcessor) buildProvisionOutputRows(provisions []map[string]a
 			"num_blocks":         numBlocks,
 			"num_provisions":     len(provisions),
 			"time_per_provision": timePerProvision,
-			"model_name":         strings.TrimSpace(p.ModelName),
+			"model_name":         strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.ModelName)),
 			"prompt_name":        strings.TrimSpace(p.PromptRef),
 			"is_explicit":        toBool(provision["is_explicit"]),
 			"status":             "active",
@@ -414,6 +586,14 @@ func (p *ProvisionsProcessor) buildProvisionOutputRows(provisions []map[string]a
 		})
 	}
 	return out
+}
+
+func loadOptionalModelConfigFromEnv(modelRefEnv string, modelsFileEnv string) (modelRef string, modelPath string, cfg structureModelConfig, err error) {
+	modelRef = strings.TrimSpace(os.Getenv(modelRefEnv))
+	if modelRef == "" {
+		return "", "", structureModelConfig{}, nil
+	}
+	return loadModelConfigFromEnv(modelRefEnv, modelsFileEnv)
 }
 
 func buildProvisionDBRecord(provision map[string]any, language string) map[string]any {

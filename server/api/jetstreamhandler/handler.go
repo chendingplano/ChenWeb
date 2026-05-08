@@ -169,7 +169,13 @@ type PublishEventRequest struct {
 }
 
 func validateSubjectPayload(subject string, payload string) error {
-	if subject != "kb.pdf.parsed" && subject != "kb.pdf.staged" {
+	requiredFields := map[string][]string{
+		"kb.pdf.parsed":          {"record_id", "type", "status"},
+		"kb.pdf.staged":          {"record_id", "type", "status"},
+		"kb.line-file-generated": {"record_id", "type", "status"},
+	}
+	fields, ok := requiredFields[subject]
+	if !ok {
 		return nil
 	}
 
@@ -183,8 +189,7 @@ func validateSubjectPayload(subject string, payload string) error {
 		return fmt.Errorf("payload must be valid JSON object for subject %s", subject)
 	}
 
-	requiredFields := []string{"record_id", "type", "status"}
-	for _, key := range requiredFields {
+	for _, key := range fields {
 		value, ok := decoded[key]
 		if !ok || value == nil {
 			return fmt.Errorf("payload field '%s' is required for subject %s", key, subject)

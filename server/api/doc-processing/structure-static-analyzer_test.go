@@ -258,3 +258,38 @@ func TestStaticAnalyzer_DoesNotLeakTOCToNextPage(t *testing.T) {
 		t.Fatalf("line89=%q, want non-toc", got)
 	}
 }
+
+func TestStaticAnalyzer_RemovesRepeatedPageImageArtifacts(t *testing.T) {
+	body := strings.Join([]string{
+		"1\t1\timage\tunknown-font\t12\t[0,0,624,879.12]\tstd_20039_images/imageFile1.png",
+		"2\t1\tparagraph\tF\t12\t[0,0,1,1]\t1 Scope",
+		"3\t1\tparagraph\tF\t12\t[0,0,1,1]\t1.1 Purpose",
+		"10\t2\timage\tunknown-font\t12\t[0,0,624,879.12]\tstd_20039_images/imageFile2.png",
+		"11\t2\tparagraph\tF\t12\t[0,0,1,1]\t2 Terms",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := out.NumLines; got != 5 {
+		t.Fatalf("NumLines=%d, want 5", got)
+	}
+	if got := len(out.Lines); got != 3 {
+		t.Fatalf("len(Lines)=%d, want 3 after removing page image artifacts", got)
+	}
+	for _, removed := range []int{1, 10} {
+		if _, ok := out.CorrectedType[removed]; ok {
+			t.Fatalf("line %d still present in corrected map", removed)
+		}
+	}
+	if got := out.CorrectedType[2]; got != "heading-1" {
+		t.Fatalf("line2=%q, want heading-1", got)
+	}
+	if got := out.CorrectedType[3]; got != "heading-2" {
+		t.Fatalf("line3=%q, want heading-2", got)
+	}
+	if got := out.CorrectedType[11]; got != "heading-1" {
+		t.Fatalf("line11=%q, want heading-1", got)
+	}
+}

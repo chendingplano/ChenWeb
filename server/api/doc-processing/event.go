@@ -1,6 +1,7 @@
 package docprocessing
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,8 +24,8 @@ type LineFileGeneratedEvent struct {
 }
 
 func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error) {
-	var raw map[string]any
-	if err := json.Unmarshal(payload, &raw); err != nil {
+	raw, err := decodeEventPayload(payload)
+	if err != nil {
 		return LineFileGeneratedEvent{}, fmt.Errorf("decode event: %w", err)
 	}
 
@@ -50,6 +51,42 @@ func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error)
 		Status:     strings.ToLower(strings.TrimSpace(asString(raw["status"]))),
 		Operations: parseOperations(raw["operation"]),
 	}, nil
+}
+
+func decodeEventPayload(payload []byte) (map[string]any, error) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 {
+		return nil, errors.New("empty payload")
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(trimmed, &raw); err == nil {
+		return raw, nil
+	}
+
+	var encoded string
+	if err := json.Unmarshal(trimmed, &encoded); err == nil {
+		inner := bytes.TrimSpace([]byte(encoded))
+		if len(inner) == 0 {
+			return nil, errors.New("empty string payload")
+		}
+		if err := json.Unmarshal(inner, &raw); err == nil {
+			return raw, nil
+		}
+	}
+
+	return nil, errors.New(previewInvalidEventPayload(trimmed))
+}
+
+func previewInvalidEventPayload(payload []byte) string {
+	const maxLen = 160
+	if len(payload) > maxLen {
+		payload = payload[:maxLen]
+	}
+	preview := strings.ReplaceAll(string(payload), "\n", "\\n")
+	preview = strings.ReplaceAll(preview, "\r", "\\r")
+	preview = strings.ReplaceAll(preview, "\t", "\\t")
+	return fmt.Sprintf("invalid JSON payload preview=%q", preview)
 }
 
 func ShouldSkipLineFileGeneratedEvent(evt LineFileGeneratedEvent) bool {

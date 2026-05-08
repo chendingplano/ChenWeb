@@ -105,3 +105,11 @@ func TestProcessorLogName_PrefersMethodSpecificLogName(t *testing.T) {
 		t.Fatalf("processorLogName=%q, want topic_chunking", got)
 	}
 }
+
+func TestNormalizeStoredEventPayload_WrapsInvalidJSON(t *testing.T) {
+	got := normalizeStoredEventPayload([]byte(`{"record_id":"1""type":"pdf"}`))
+	want := `{"_payload_error":"invalid_json","_raw_payload":"{\"record_id\":\"1\"\"type\":\"pdf\"}"}`
+	if got != want {
+		t.Fatalf("normalizeStoredEventPayload()=%s, want %s", got, want)
+	}
+}

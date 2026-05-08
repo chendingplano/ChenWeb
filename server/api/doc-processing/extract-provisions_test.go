@@ -3,6 +3,7 @@ package docprocessing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -270,6 +271,290 @@ func TestProvisionsProcessor_FallsBackToInputFileWhenBlockBufferMissing(t *testi
 	}
 	if !strings.Contains(extractor.inputText, "n\t1\t1\tparagraph\tThe device must log alarms.") {
 		t.Fatalf("fallback block input not built from line file: %q", extractor.inputText)
+	}
+}
+
+func TestProvisionsProcessor_AcceptsSingleProvisionObject(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              6000,
+		ParserName:      "opendata",
+		ResultFilename:  "/tmp/std-6000.json",
+		StagingFilename: "/tmp/std-6000.pdf",
+		StatusRaw:       "[]",
+	}}
+	provisionsStore := &fakeProvisionsStore{}
+	extractor := &fakeJSONExtractor{out: map[string]any{
+		"language": "zh",
+		"provisions": map[string]any{
+			"name":               "terminal_radiation_requirement",
+			"type":               "mandatory",
+			"provision_original": "终端设备中密封源的质量应符合GB4075。",
+			"provision_en":       "The quality of sealed sources in terminal equipment shall comply with GB4075.",
+			"source_line_spans":  []any{"8:181"},
+			"subject":            "医疗健康监测终端设备辐射安全要求",
+			"keywords":           []any{"终端辐射", "密封源", "GB4075"},
+			"confidence":         0.95,
+			"is_explicit":        true,
+			"need_verify":        false,
+			"categories":         []any{},
+		},
+	}}
+
+	ctx, h := withBlockBufferHolder(context.Background())
+	h.mu.Lock()
+	h.buffer = &BlockBuffer{Blocks: []Block{{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 181, PageNumber: 8, LineType: "paragraph", Content: "终端设备中密封源的质量应符合GB4075。"},
+		},
+	}}}
+	h.mu.Unlock()
+
+	p := NewProvisionsProcessor(inputStore, provisionsStore, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "primary-model"
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6000","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if provisionsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", provisionsStore.saveCalled)
+	}
+	if len(provisionsStore.lastSave.Provisions) != 1 {
+		t.Fatalf("saved provisions=%d, want 1", len(provisionsStore.lastSave.Provisions))
+	}
+	if got := provisionsStore.lastSave.Provisions[0]["prov_name"]; got != "terminal_radiation_requirement" {
+		t.Fatalf("prov_name=%v", got)
+	}
+}
+
+func TestProvisionsProcessor_AcceptsBareProvisionObject(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              6004,
+		ParserName:      "opendata",
+		ResultFilename:  "/tmp/std-6004.json",
+		StagingFilename: "/tmp/std-6004.pdf",
+		StatusRaw:       "[]",
+	}}
+	provisionsStore := &fakeProvisionsStore{}
+	extractor := &fakeJSONExtractor{out: map[string]any{
+		"name":               "terminal_radiation_requirement",
+		"type":               "mandatory",
+		"provision_original": "终端设备中密封源的质量应符合GB4075。",
+		"provision_en":       "The quality of sealed sources in terminal equipment shall comply with GB4075.",
+		"source_line_spans":  []any{"8:181"},
+		"subject":            "医疗健康监测终端设备辐射安全要求",
+		"keywords":           []any{"终端辐射", "密封源", "GB4075"},
+		"confidence":         0.95,
+		"is_explicit":        true,
+		"need_verify":        false,
+		"categories":         []any{},
+	}}
+
+	ctx, h := withBlockBufferHolder(context.Background())
+	h.mu.Lock()
+	h.buffer = &BlockBuffer{Blocks: []Block{{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 181, PageNumber: 8, LineType: "paragraph", Content: "终端设备中密封源的质量应符合GB4075。"},
+		},
+	}}}
+	h.mu.Unlock()
+
+	p := NewProvisionsProcessor(inputStore, provisionsStore, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "primary-model"
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6004","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if provisionsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", provisionsStore.saveCalled)
+	}
+	if len(provisionsStore.lastSave.Provisions) != 1 {
+		t.Fatalf("saved provisions=%d, want 1", len(provisionsStore.lastSave.Provisions))
+	}
+	if got := provisionsStore.lastSave.Provisions[0]["prov_name"]; got != "terminal_radiation_requirement" {
+		t.Fatalf("prov_name=%v", got)
+	}
+}
+
+func TestProvisionsProcessor_RetriesWithCallbackModelOnEmptyJSON(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              6001,
+		ParserName:      "opendata",
+		ResultFilename:  "/tmp/std-6001.json",
+		StagingFilename: "/tmp/std-6001.pdf",
+		StatusRaw:       "[]",
+	}}
+	provisionsStore := &fakeProvisionsStore{}
+	extractor := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{},
+			{
+				"language": "en",
+				"provisions": []any{
+					map[string]any{
+						"name":               "logging_requirement",
+						"type":               "mandatory",
+						"provision_original": "The device shall log all alarms.",
+						"provision_en":       "The device shall log all alarms.",
+						"source_line_spans":  []any{"2:10"},
+						"confidence":         0.87,
+					},
+				},
+			},
+		},
+	}
+
+	ctx, h := withBlockBufferHolder(context.Background())
+	h.mu.Lock()
+	h.buffer = &BlockBuffer{Blocks: []Block{{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 10, PageNumber: 2, LineType: "paragraph", Content: "The device shall log all alarms."},
+		},
+	}}}
+	h.mu.Unlock()
+
+	p := NewProvisionsProcessor(inputStore, provisionsStore, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "primary-model"
+	p.FallbackModelName = "fallback-model"
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6001","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if extractor.calledCount != 2 {
+		t.Fatalf("calledCount=%d, want 2", extractor.calledCount)
+	}
+	if len(extractor.modelNames) != 2 {
+		t.Fatalf("modelNames=%v", extractor.modelNames)
+	}
+	if extractor.modelNames[0] != "primary-model" {
+		t.Fatalf("first model=%q, want primary-model", extractor.modelNames[0])
+	}
+	if extractor.modelNames[1] != "fallback-model" {
+		t.Fatalf("second model=%q, want fallback-model", extractor.modelNames[1])
+	}
+	if provisionsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", provisionsStore.saveCalled)
+	}
+	if got := provisionsStore.lastSave.Provisions[0]["prov_name"]; got != "logging_requirement" {
+		t.Fatalf("prov_name=%v", got)
+	}
+}
+
+func TestProvisionsProcessor_FailsOnEmptyJSONWithoutCallbackModel(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              6002,
+		ParserName:      "opendata",
+		ResultFilename:  "/tmp/std-6002.json",
+		StagingFilename: "/tmp/std-6002.pdf",
+		StatusRaw:       "[]",
+	}}
+	provisionsStore := &fakeProvisionsStore{}
+	extractor := &fakeJSONExtractor{out: map[string]any{}}
+
+	ctx, h := withBlockBufferHolder(context.Background())
+	h.mu.Lock()
+	h.buffer = &BlockBuffer{Blocks: []Block{{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 10, PageNumber: 2, LineType: "paragraph", Content: "The device shall log all alarms."},
+		},
+	}}}
+	h.mu.Unlock()
+
+	p := NewProvisionsProcessor(inputStore, provisionsStore, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "primary-model"
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6002","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if provisionsStore.saveCalled != 0 {
+		t.Fatalf("saveCalled=%d, want 0", provisionsStore.saveCalled)
+	}
+	if inputStore.updateReq.ErrorMsg == nil || !strings.Contains(*inputStore.updateReq.ErrorMsg, "empty llm json object") {
+		t.Fatalf("ErrorMsg=%v, want empty-json message", inputStore.updateReq.ErrorMsg)
+	}
+}
+
+func TestProvisionsProcessor_RetriesWithCallbackModelOnExtractorError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              6003,
+		ParserName:      "opendata",
+		ResultFilename:  "/tmp/std-6003.json",
+		StagingFilename: "/tmp/std-6003.pdf",
+		StatusRaw:       "[]",
+	}}
+	provisionsStore := &fakeProvisionsStore{}
+	extractor := &fakeJSONExtractor{
+		errs: []error{
+			errors.New("primary model failed"),
+			nil,
+		},
+		outs: []map[string]any{
+			nil,
+			{
+				"language":   "en",
+				"provisions": []any{},
+			},
+		},
+	}
+
+	ctx, h := withBlockBufferHolder(context.Background())
+	h.mu.Lock()
+	h.buffer = &BlockBuffer{Blocks: []Block{{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 10, PageNumber: 2, LineType: "paragraph", Content: "The device shall log all alarms."},
+		},
+	}}}
+	h.mu.Unlock()
+
+	p := NewProvisionsProcessor(inputStore, provisionsStore, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "primary-model"
+	p.FallbackModelName = "fallback-model"
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6003","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if extractor.calledCount != 2 {
+		t.Fatalf("calledCount=%d, want 2", extractor.calledCount)
+	}
+	if extractor.modelNames[1] != "fallback-model" {
+		t.Fatalf("second model=%q, want fallback-model", extractor.modelNames[1])
+	}
+	if provisionsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", provisionsStore.saveCalled)
 	}
 }
 

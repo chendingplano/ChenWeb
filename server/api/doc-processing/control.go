@@ -299,10 +299,7 @@ func (s *ControlService) insertReceivedEvent(ctx context.Context, subject string
 	if err != nil {
 		return "", err
 	}
-	eventPayload := strings.TrimSpace(string(payload))
-	if eventPayload == "" {
-		eventPayload = "{}"
-	}
+	eventPayload := normalizeStoredEventPayload(payload)
 	req := EventRecord{
 		EventName:    DefaultEventSubject,
 		EventID:      eventID,
@@ -316,6 +313,24 @@ func (s *ControlService) insertReceivedEvent(ctx context.Context, subject string
 		return "", err
 	}
 	return eventID, nil
+}
+
+func normalizeStoredEventPayload(payload []byte) string {
+	trimmed := strings.TrimSpace(string(payload))
+	if trimmed == "" {
+		return "{}"
+	}
+	if json.Valid([]byte(trimmed)) {
+		return trimmed
+	}
+	out, err := json.Marshal(map[string]any{
+		"_raw_payload":   trimmed,
+		"_payload_error": "invalid_json",
+	})
+	if err != nil {
+		return `{"_payload_error":"invalid_json"}`
+	}
+	return string(out)
 }
 
 type eventIDCtxKey struct{}
