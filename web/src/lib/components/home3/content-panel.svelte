@@ -8,6 +8,7 @@
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
+	import DiaryView from '$lib/components/home3/diary-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
@@ -25,6 +26,7 @@
 	import SettingsIcon     from '@lucide/svelte/icons/settings';
 	import InfoIcon         from '@lucide/svelte/icons/info';
 	import ShieldIcon       from '@lucide/svelte/icons/shield';
+	import BookMarkedIcon   from '@lucide/svelte/icons/book-marked';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -78,7 +80,8 @@
 		settings:     SettingsIcon,
 		about:        InfoIcon,
 		'system-admin': ShieldIcon,
-		jetstream: ShieldIcon
+		jetstream: ShieldIcon,
+		'my-workspace': BookMarkedIcon
 	};
 
 	// Section descriptions
@@ -92,7 +95,8 @@
 		knowledge:    'Your document library and semantic search knowledge base.',
 		settings:     'Configure your workspace, models, and integrations.',
 		about:        'Version info, credits, and system information.',
-		jetstream: 'Operational monitoring and diagnostics for JetStream services.'
+		jetstream: 'Operational monitoring and diagnostics for JetStream services.',
+		'my-workspace': 'Your personal workspace: diary, notes, and resources.'
 	};
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
@@ -154,6 +158,8 @@
 			<JetStreamEventsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-subjects'}
 			<JetStreamSubjectsView {darkMode} />
+		{:else if activeMenu?.childId === 'diary'}
+			<DiaryView {darkMode} />
 		{:else if activeMenu?.itemId === 'skills' && activeMenu?.childId === 'skills-active'}
 			<SkillMgmtView {darkMode} initialFilter="activated" />
 		{:else if activeMenu?.itemId === 'skills' && activeMenu?.childId === 'skills-create'}

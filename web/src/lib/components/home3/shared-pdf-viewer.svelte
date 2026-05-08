@@ -1,5 +1,7 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { onMount, tick } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 
 	type PdfWorker = { destroy: () => void };
 	type PdfJsLib = {
@@ -42,7 +44,10 @@
 		loadingLabel = 'Rendering page…',
 		respectPageRotation = true,
 		onselect,
-		ondragmove
+		ondragmove,
+		pageBarTool,
+		sidebarContent,
+		sidebarResizer
 	}: {
 		inputId: number | null;
 		fileUrl: string;
@@ -65,6 +70,9 @@
 			viewportY2: number;
 			viewport: PdfPageViewport;
 		}) => void;
+		pageBarTool?: Snippet;
+		sidebarContent?: Snippet;
+		sidebarResizer?: Snippet;
 	} = $props();
 
 	const viewerId = `pdfv-${Math.random().toString(36).slice(2)}`;
@@ -84,13 +92,12 @@
 	let pdfCanvasHostEl = $state<HTMLDivElement | null>(null);
 	let pdfSidebarClusterEl = $state<HTMLDivElement | null>(null);
 	let pdfSidebarWidth = $state(0);
-	let pdfViewportByPage = new Map<number, PdfPageViewport>();
-	let pdfActiveRenders = new Map<number, { cancel?: () => void }>();
+	let pdfViewportByPage = new SvelteMap<number, PdfPageViewport>();
+	let pdfActiveRenders = new SvelteMap<number, { cancel?: () => void }>();
 
 	// ---------- Drag-select state ----------
 	let dragSelecting = $state(false);
 	let dragSelStartClientY = 0;
-	let dragSelCurrentClientY = 0;
 	let dragSelPage = 0;
 	let indViewportTop = $state(0);
 	let indHeight = $state(0);
@@ -113,7 +120,6 @@
 
 		const hostRect = host.getBoundingClientRect();
 		dragSelStartClientY = e.clientY;
-		dragSelCurrentClientY = e.clientY;
 		dragSelPage = pageNo;
 		indViewportTop = e.clientY;
 		indHeight = 0;
@@ -124,7 +130,6 @@
 
 	function onDragPointerMove(e: PointerEvent) {
 		if (!dragSelecting) return;
-		dragSelCurrentClientY = e.clientY;
 		indViewportTop = Math.min(dragSelStartClientY, e.clientY);
 		indHeight = Math.abs(e.clientY - dragSelStartClientY);
 
@@ -204,6 +209,10 @@
 
 	function zoomLabel(): string {
 		return `${Math.round(zoom * 100)}%`;
+	}
+
+	function openPdfInNewTab() {
+		window.open(fileUrl, '_blank', 'noopener');
 	}
 
 	async function ensurePdfLib() {
@@ -361,7 +370,7 @@
 
 	$effect(() => {
 		if (!inputId || !fileUrl || !pdfStageEl) return;
-		zoom;
+		const currentZoom = zoom;
 		// NOTE: do NOT read pdfRenderedPages.length here — it would re-fire this
 		// effect when the array is updated inside ensurePdfDoc() while inputId
 		// is still the previous record, causing the "Worker was destroyed" loop.
@@ -370,9 +379,9 @@
 		(async () => {
 			try {
 				await ensurePdfDoc();
-				if (cancelled) return;
+				if (cancelled || currentZoom !== zoom) return;
 				await tick();
-				if (cancelled) return;
+				if (cancelled || currentZoom !== zoom) return;
 				await renderPdfPages();
 			} catch (err) {
 				if ((err as { name?: string })?.name !== 'RenderingCancelledException') {
@@ -387,11 +396,11 @@
 
 	$effect(() => {
 		if (!pdfDoc || !pdfStageEl) return;
-		page;
+		const currentPage = page;
 		void tick().then(() => {
 			paintHighlights();
-			if (!scrollToFirstHighlight(clampPage(page), 'auto')) {
-				scrollToPage(clampPage(page), 'auto');
+			if (!scrollToFirstHighlight(clampPage(currentPage), 'auto')) {
+				scrollToPage(clampPage(currentPage), 'auto');
 			}
 		});
 	});
@@ -400,8 +409,7 @@
 		const version = highlightVersion;
 		const seq = ++pdfHighlightPaintSeq;
 		void tick().then(() => {
-			if (seq !== pdfHighlightPaintSeq || pdfViewportByPage.size === 0) return;
-			version;
+			if (seq !== pdfHighlightPaintSeq || highlightVersion !== version || pdfViewportByPage.size === 0) return;
 			paintHighlights();
 			if (!scrollToFirstHighlight(clampPage(page), 'auto')) {
 				scrollToPage(clampPage(page), 'auto');
@@ -495,17 +503,17 @@
 		<button class="page-btn small" onclick={zoomOut} title="Zoom out" aria-label="Zoom out">−</button>
 		<span class="zoom-label">{zoomLabel()}</span>
 		<button class="page-btn small" onclick={zoomIn} title="Zoom in" aria-label="Zoom in">+</button>
-		<a class="page-btn small" href={fileUrl} target="_blank" rel="noopener" title="Open in new tab">↗</a>
+		<button class="page-btn small" type="button" onclick={openPdfInNewTab} title="Open in new tab" aria-label="Open in new tab">↗</button>
 		</div>
 	</div>
-	<slot name="page-bar-tool" />
+	{@render pageBarTool?.()}
 </div>
 
 <div class="pdf-stage" bind:this={pdfStageEl}>
 	<div class="pdf-layout">
 		<div class="pdf-sidebar-cluster" bind:this={pdfSidebarClusterEl}>
-			<slot name="sidebar" />
-			<slot name="sidebar-resizer" />
+			{@render sidebarContent?.()}
+			{@render sidebarResizer?.()}
 		</div>
 		<div class="pdf-canvas-host" bind:this={pdfCanvasHostEl}
 			onpointerdown={onDragPointerDown}
@@ -543,7 +551,7 @@
 			<div class="doc-error-title">⚠ Cannot render this PDF</div>
 			<div class="doc-error-msg">
 				{pdfError}<br />
-				<a class="doc-error-link" href={fileUrl} target="_blank" rel="noopener">Open in a new tab</a>
+				<button class="doc-error-link" type="button" onclick={openPdfInNewTab}>Open in a new tab</button>
 			</div>
 		</div>
 	{/if}

@@ -63,32 +63,32 @@ Binary output:
 ### Metadata Processor
 
 - `EXTRACT_DOCMETA_NUM_PAGES` (default: `2`)
-- `EXTRACT_DOCMETA_LLM_NAME` (defaults to `SHARED_LLM_NAME`)
-- `EXTRACT_DOCMETA_LLM_API_KEY`
-- `EXTRACT_DOCMETA_LLM_BASE_URL`
-- `EXTRACT_DOCMETA_LLM_TIMEOUT_SEC`
+- `EXTRACT_DOCMETA_MODEL_NAME` (defaults to `SHARED_MODEL_NAME`)
+- `EXTRACT_DOCMETA_MODELLLM_API_KEY`
+- `EXTRACT_DOCMETA_MODELLLM_BASE_URL`
+- `EXTRACT_DOCMETA_MODELLLM_TIMEOUT_SEC`
 - `EXTRACT_DOCMETA_PROMPT`
 - `PROMPT_DIR`
 
 Rules:
-- If `EXTRACT_DOCMETA_LLM_NAME` is set, then `EXTRACT_DOCMETA_LLM_API_KEY`, `EXTRACT_DOCMETA_LLM_BASE_URL`, and `EXTRACT_DOCMETA_LLM_TIMEOUT_SEC` are all required.
-- If `EXTRACT_DOCMETA_LLM_NAME` is not set, the processor falls back to `SHARED_LLM_*`.
+- If `EXTRACT_DOCMETA_NAME` is set, then `EXTRACT_DOCMETA_LLM_API_KEY`, `EXTRACT_DOCMETA_LLM_BASE_URL`, and `EXTRACT_DOCMETA_LLM_TIMEOUT_SEC` are all required.
+- If `EXTRACT_DOCMETA_NAME` is not set, the processor falls back to `SHARED_LLM_*`.
 
 ### Metrics Processor
 
-- `EXTRACT_METRICS_LLM_NAME` (defaults to `SHARED_LLM_NAME`)
+- `EXTRACT_METRICS_MODEL_NAME` (defaults to `SHARED_MODEL_NAME`)
 - `EXTRACT_METRICS_LLM_API_KEY`
 - `EXTRACT_METRICS_LLM_BASE_URL`
 - `EXTRACT_METRICS_LLM_TIMEOUT_SEC`
 - `EXTRACT_METRICS_PROMPT` (or `PROMPT_FILE_NAME`)
 
 Rules:
-- If `EXTRACT_METRICS_LLM_NAME` is set, then `EXTRACT_METRICS_LLM_API_KEY`, `EXTRACT_METRICS_LLM_BASE_URL`, and `EXTRACT_METRICS_LLM_TIMEOUT_SEC` are all required.
-- If `EXTRACT_METRICS_LLM_NAME` is not set, the processor falls back to `SHARED_LLM_*`.
+- If `EXTRACT_METRICS_MODEL_NAME` is set, then `EXTRACT_METRICS_LLM_API_KEY`, `EXTRACT_METRICS_LLM_BASE_URL`, and `EXTRACT_METRICS_LLM_TIMEOUT_SEC` are all required.
+- If `EXTRACT_METRICS_MODEL_NAME` is not set, the processor falls back to `SHARED_LLM_*`.
 
 ### Shared LLM
 
-- `SHARED_LLM_NAME` (required when any processor falls back to shared)
+- `SHARED_MODEL_NAME` (required when any processor falls back to shared)
 - `SHARED_LLM_API_KEY` (required when any processor falls back to shared)
 - `SHARED_LLM_BASE_URL` (required when any processor falls back to shared)
 - `SHARED_LLM_TIMEOUT_SEC` (default: `100`)

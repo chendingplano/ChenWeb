@@ -20,6 +20,7 @@
 	import LogOutIcon          from '@lucide/svelte/icons/log-out';
 	import WorkflowIcon        from '@lucide/svelte/icons/workflow';
 	import ShieldIcon          from '@lucide/svelte/icons/shield';
+	import BookMarkedIcon      from '@lucide/svelte/icons/book-marked';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -153,6 +154,12 @@
 				{ id: 'sysadmin-jetstream-logs', label: 'JetStream Logs' },
 				{ id: 'sysadmin-jetstream-events', label: 'Events' },
 				{ id: 'sysadmin-jetstream-subjects', label: 'Subjects' }
+			]
+		},
+		{
+			id: 'my-workspace', label: 'My Workspace', icon: BookMarkedIcon, group: 'Personal',
+			children: [
+				{ id: 'diary', label: 'Diary' }
 			]
 		}
 	];

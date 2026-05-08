@@ -264,7 +264,7 @@ timeout_sec = 30
 		t.Fatalf("write models file: %v", err)
 	}
 
-	t.Setenv("EXTRACT_DOCMETA_LLM_NAME", "docmeta-test")
+	t.Setenv("EXTRACT_DOCMETA_MODEL_NAME", "docmeta-test")
 	t.Setenv("EXTRACT_DOCMETA_MODELS_FILE", modelsPath)
 	t.Setenv("EXTRACT_DOCMETA_PROMPT", "")
 

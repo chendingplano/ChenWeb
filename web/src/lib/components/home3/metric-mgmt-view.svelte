@@ -6,11 +6,13 @@
 		updateKbMetric,
 		updateKbInput,
 		getRawLines,
-		createKbMetric,
+		extractKbMetrics,
+		saveExtractedKbMetrics,
 		createKbProvision,
 		updateRawLine,
 		type KbInputRecord,
 		type KbMetricRecord,
+		type ExtractedKbMetric,
 		type RawLine,
 		type SourceLineSpan
 	} from '$lib/services/kbService';
@@ -71,8 +73,9 @@
 	let addLineOpen = $state(false);
 	let addMetricOpen = $state(false);
 	let addMetricEditKey = $state<string | null>(null);
-	let addMetricEditContent = $state("");
-	let addMetricSaving = $state(false);
+	let addMetricEditContent = $state('');
+	let addMetricBusyAction = $state<'line' | 'extract' | 'save' | 'provision' | null>(null);
+	let extractedMetricsPreview = $state<ExtractedKbMetric[]>([]);
 	let pdfSelectedLines = $state<number[]>([]);
 	let pdfDragPreviewLines = $state<number[]>([]);
 	// Dedicated buffer for the Add Metric dialog, set during drag-select and
@@ -84,6 +87,7 @@
 	let newLineContent = $state('');
 	let newLineType = $state('text');
 	let docPage = $state<number>(1);
+	let addMetricBusy = $derived(addMetricBusyAction !== null);
 
 	let fileUrl = $derived.by(() => {
 		if (!currentInput) return '';
@@ -369,6 +373,7 @@
 		pdfSelectedLines = selected;
 		addMetricBufferLines = selected;
 		if (selected.length > 0) {
+			resetAddMetricPreview();
 			addMetricOpen = true;
 		}
 	}
@@ -486,6 +491,9 @@
 		rawError = '';
 		rawLoading = false;
 		currentInput = null;
+		addMetricOpen = false;
+		addMetricBusyAction = null;
+		resetAddMetricPreview();
 		docPage = 1;
 		pdfError = '';
 		if (pdfDoc?.destroy) {
@@ -576,10 +584,30 @@
 	function metricNameOf(m: KbMetricRecord): string {
 		return m.metric_name?.trim() || m.metric_subject?.trim() || `Metric #${m.id}`;
 	}
+	function previewMetricNameOf(m: ExtractedKbMetric, index: number): string {
+		return m.metric_name?.trim() || m.metric_subject?.trim() || `Metric ${index + 1}`;
+	}
 	function confidencePct(c?: number): string {
 		if (c == null) return '—';
 		return `${Math.round(c * 100)}%`;
 	}
+	function resetAddMetricPreview() {
+		extractedMetricsPreview = [];
+	}
+
+	function closeAddMetricDialog() {
+		addMetricOpen = false;
+		addMetricEditKey = null;
+		addMetricEditContent = '';
+		addMetricBufferLines = [];
+		addMetricBusyAction = null;
+		resetAddMetricPreview();
+	}
+
+	function removeExtractedMetricPreview(index: number) {
+		extractedMetricsPreview = extractedMetricsPreview.filter((_, idx) => idx !== index);
+	}
+
 	function spanCount(m: KbMetricRecord): number {
 		const raw = (m as { source_line_spans?: unknown })?.source_line_spans;
 		if (!Array.isArray(raw)) return 0;
@@ -887,7 +915,7 @@
 			if (!currentInput || !addMetricEditKey) return;
 			const confirmed = window.confirm('Save changes to the original file?');
 			if (!confirmed) return;
-			addMetricSaving = true;
+			addMetricBusyAction = 'line';
 			try {
 				await updateRawLine({
 					input_record_id: currentInput.id,
@@ -903,10 +931,11 @@
 				addMetricEditKey = null;
 				addMetricEditContent = '';
 				addMetricBufferLines = [];
+				resetAddMetricPreview();
 			} catch (err) {
 				alert(err instanceof Error ? err.message : 'Failed to save line');
 			} finally {
-				addMetricSaving = false;
+				addMetricBusyAction = null;
 			}
 		}
 
@@ -917,6 +946,7 @@
 			}
 			if (removedLines.length === 0) return;
 			addMetricBufferLines = addMetricBufferLines.filter((ln) => !removedLines.includes(ln));
+			resetAddMetricPreview();
 		}
 
 		let canAddPrevious = $derived.by(() => {
@@ -938,6 +968,7 @@
 				.sort((a, b) => b.line_number - a.line_number)[0];
 			if (prev) {
 				addMetricBufferLines = [prev.line_number, ...addMetricBufferLines];
+				resetAddMetricPreview();
 			}
 		}
 
@@ -949,55 +980,73 @@
 				.sort((a, b) => a.line_number - b.line_number)[0];
 			if (next) {
 				addMetricBufferLines = [...addMetricBufferLines, next.line_number];
+				resetAddMetricPreview();
 			}
 		}
 
 		async function extractMetric() {
 			if (!currentInput || addMetricDialogLines.length === 0) return;
-			addMetricSaving = true;
+			addMetricBusyAction = 'extract';
 			try {
-				const spans: SourceLineSpan[] = addMetricDialogLines.map((l) => ({
-					page_number: l.page_number,
-					line_number: l.line_number
-				}));
-				const created = await createKbMetric({
-					input_record_id: currentInput.id,
-					metric_name: `Metric from ${currentInput.id}`,
-					source_line_spans: spans
+				const nums = [...new Set(addMetricDialogLines.map((l) => l.line_number))].sort(
+					(a, b) => a - b
+				);
+				const lineSpecs: string[] = [];
+				let i = 0;
+				while (i < nums.length) {
+					let j = i;
+					while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+					lineSpecs.push(i === j ? `${nums[i]}` : `${nums[i]}-${nums[j]}`);
+					i = j + 1;
+				}
+				const result = await extractKbMetrics({
+					record_id: currentInput.id,
+					lines: lineSpecs
 				});
-				metrics = [...metrics, created.record];
-				addMetricOpen = false;
-				addMetricEditKey = null;
-				addMetricEditContent = '';
-				addMetricBufferLines = [];
+				extractedMetricsPreview = result.metrics ?? [];
 			} catch (err) {
-				alert(err instanceof Error ? err.message : 'Failed to create metric');
+				alert(err instanceof Error ? err.message : 'Failed to extract metrics');
 			} finally {
-				addMetricSaving = false;
+				addMetricBusyAction = null;
+			}
+		}
+
+		async function saveExtractedMetricsPreview() {
+			if (!currentInput || extractedMetricsPreview.length === 0) return;
+			addMetricBusyAction = 'save';
+			try {
+				await saveExtractedKbMetrics({
+					record_id: currentInput.id,
+					metrics: extractedMetricsPreview
+				});
+				const refreshed = await listKbMetrics(currentInput.id);
+				metrics = refreshed.results ?? [];
+				closeAddMetricDialog();
+			} catch (err) {
+				alert(err instanceof Error ? err.message : 'Failed to save metrics');
+			} finally {
+				addMetricBusyAction = null;
 			}
 		}
 
 		async function extractProvision() {
 			if (!currentInput || addMetricDialogLines.length === 0) return;
-			addMetricSaving = true;
+			addMetricBusyAction = 'provision';
 			try {
 				const spans: SourceLineSpan[] = addMetricDialogLines.map((l) => ({
 					page_number: l.page_number,
 					line_number: l.line_number
 				}));
-				const created = await createKbProvision({
+				await createKbProvision({
 					input_record_id: currentInput.id,
 					provision_name: `Provision from ${currentInput.id}`,
 					source_line_spans: spans
 				});
-				addMetricOpen = false;
-				addMetricEditKey = null;
-				addMetricEditContent = '';
-				addMetricBufferLines = [];
+				closeAddMetricDialog();
 			} catch (err) {
 				alert(err instanceof Error ? err.message : 'Failed to create provision');
 			} finally {
-				addMetricSaving = false;
+				addMetricBusyAction = null;
 			}
 		}
 
@@ -1468,9 +1517,9 @@
 		<div
 			class="dialog-overlay"
 			aria-hidden="true"
-			onclick={() => { addMetricOpen = false; addMetricBufferLines = []; }}
+			onclick={closeAddMetricDialog}
 			onkeydown={(e) => {
-				if (e.key === 'Escape') { addMetricOpen = false; addMetricBufferLines = []; }
+				if (e.key === 'Escape') closeAddMetricDialog();
 			}}
 		>
 			<div
@@ -1486,7 +1535,7 @@
 					<div>
 						<div class="dialog-eyebrow">KB.Metrics</div>
 						<h2 class="dialog-title">Add Metric</h2>
-						<p class="dialog-subtitle">Review selected lines, edit content, or delete unwanted entries before extracting a metric.</p>
+						<p class="dialog-subtitle">Review selected lines, extract candidate metrics, remove any you do not want, then save the remaining metrics to the database.</p>
 					</div>
 				</div>
 
@@ -1539,7 +1588,7 @@
 												<td class="am-action-cell">
 													{#if addMetricEditKey === line.key}
 														<button type="button" class="am-btn am-btn-save"
-															disabled={addMetricSaving}
+															disabled={addMetricBusy}
 															onclick={() => saveEditDialogLine(line.page_number, line.line_number)}
 														>Save</button>
 														<button type="button" class="am-btn am-btn-cancel-row"
@@ -1563,6 +1612,54 @@
 								</div>
 							</div>
 						</div>
+
+						<div class="dialog-section">
+							<div class="dialog-section-head">
+								<span class="dialog-section-title">Extracted Metrics</span>
+								<span class="dialog-section-copy">{extractedMetricsPreview.length} metric{extractedMetricsPreview.length === 1 ? '' : 's'} ready</span>
+							</div>
+							{#if addMetricBusyAction === 'extract'}
+								<div class="am-status-row" aria-live="polite">
+									<span class="am-spinner" aria-hidden="true"></span>
+									<span>Extracting metrics from the selected lines…</span>
+								</div>
+							{:else if extractedMetricsPreview.length === 0}
+								<div class="metadata-empty">
+									Press <strong>Extract Metric</strong> to preview the metrics returned by the backend.
+								</div>
+							{:else}
+								<div class="am-preview-list">
+									{#each extractedMetricsPreview as metric, idx (`${previewMetricNameOf(metric, idx)}-${idx}`)}
+										<div class="am-preview-card">
+											<div class="am-preview-head">
+												<div>
+													<div class="am-preview-name">{previewMetricNameOf(metric, idx)}</div>
+													<div class="am-preview-meta">
+														<span>{confidencePct(metric.confidence)}</span>
+														{#if metric.location_type}<span>{metric.location_type}</span>{/if}
+														{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
+													</div>
+												</div>
+												<button
+													type="button"
+													class="am-btn am-btn-delete"
+													disabled={addMetricBusy}
+													onclick={() => removeExtractedMetricPreview(idx)}
+												>Remove</button>
+											</div>
+											{#if metric.metric_desc}
+												<div class="am-preview-desc">{metric.metric_desc}</div>
+											{/if}
+											<div class="am-preview-fields">
+												{#if metric.metric_value}<span class="chip chip-mono">{metric.metric_value}</span>{/if}
+												{#if metric.value_data_type}<span class="chip chip-quiet">{metric.value_data_type}</span>{/if}
+												{#if metric.table_name_or_section}<span class="chip">{metric.table_name_or_section}</span>{/if}
+											</div>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
 					{/if}
 				</div>
 
@@ -1578,7 +1675,8 @@
 									'• Edit: modify line content (saves to the original file)\n' +
 									'• Remove: remove a line from this selection\n' +
 									'• Extract Provision: create a new provision from the remaining lines\n' +
-									'• Extract Metric: create a new metric from the remaining lines'
+									'• Extract Metric: preview metrics returned from the backend\n' +
+									'• Save: persist the remaining preview metrics to kb.metrics'
 								);
 							}}
 						>Help</button>
@@ -1587,25 +1685,38 @@
 						<button
 							type="button"
 							class="am-btn-foot am-btn-foot-cancel"
-							onclick={() => {
-								addMetricOpen = false;
-								addMetricEditKey = null;
-								addMetricEditContent = '';
-								addMetricBufferLines = [];
-							}}
+							onclick={closeAddMetricDialog}
 						>Close</button>
 						<button
 							type="button"
 							class="am-btn-foot am-btn-foot-extract dialog-search-btn"
-							disabled={addMetricDialogLines.length === 0 || addMetricSaving}
+							disabled={addMetricDialogLines.length === 0 || addMetricBusy}
 							onclick={extractProvision}
-						>{addMetricSaving ? 'Saving…' : 'Extract Provision'}</button>
+						>{addMetricBusyAction === 'provision' ? 'Saving…' : 'Extract Provision'}</button>
 						<button
 							type="button"
 							class="am-btn-foot am-btn-foot-extract dialog-search-btn"
-							disabled={addMetricDialogLines.length === 0 || addMetricSaving}
+							disabled={addMetricDialogLines.length === 0 || addMetricBusy}
 							onclick={extractMetric}
-						>{addMetricSaving ? 'Saving…' : 'Extract Metric'}</button>
+						>
+							{#if addMetricBusyAction === 'extract'}
+								<span class="am-btn-inline"><span class="am-spinner" aria-hidden="true"></span>Extracting…</span>
+							{:else}
+								Extract Metric
+							{/if}
+						</button>
+						<button
+							type="button"
+							class="am-btn-foot am-btn-foot-save dialog-search-btn"
+							disabled={extractedMetricsPreview.length === 0 || addMetricBusy}
+							onclick={saveExtractedMetricsPreview}
+						>
+							{#if addMetricBusyAction === 'save'}
+								<span class="am-btn-inline"><span class="am-spinner" aria-hidden="true"></span>Saving…</span>
+							{:else}
+								Save
+							{/if}
+						</button>
 					</div>
 				</div>
 			</div>
@@ -1886,6 +1997,7 @@
 		line-height: 1.45;
 		color: var(--text-secondary);
 		display: -webkit-box;
+		line-clamp: 2;
 		-webkit-line-clamp: 2;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
@@ -2102,15 +2214,6 @@
 	}
 
 	/* ---- Add Metric dialog ---- */
-	.dialog-placeholder {
-		font-family: var(--font-mono, monospace);
-		font-size: 12px;
-		color: var(--text-muted);
-		line-height: 1.6;
-	}
-	.dialog-placeholder code {
-		color: var(--brass);
-	}
 	.am-dialog {
 		min-width: 860px;
 		min-height: 540px;
@@ -2368,19 +2471,82 @@
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
-
-	.document {
-		flex: 1;
-		overflow-y: auto;
-		padding: 32px 36px 80px;
-		scrollbar-width: thin;
-		scrollbar-color: var(--ink-line) transparent;
+	.am-status-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 14px 16px;
+		border-radius: 12px;
+		background: rgba(212, 162, 76, 0.08);
+		border: 1px solid rgba(212, 162, 76, 0.18);
+		color: var(--text-secondary);
+		font-size: 13px;
 	}
-	.document::-webkit-scrollbar {
-		width: 10px;
+	.am-spinner {
+		width: 14px;
+		height: 14px;
+		border-radius: 999px;
+		border: 2px solid rgba(212, 162, 76, 0.28);
+		border-top-color: var(--brass);
+		animation: am-spin 0.8s linear infinite;
+		flex: 0 0 auto;
 	}
-	.document::-webkit-scrollbar-thumb {
-		background: var(--ink-line);
+	@keyframes am-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	.am-preview-list {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.am-preview-card {
+		padding: 14px;
+		border-radius: 14px;
+		border: 1px solid rgba(212, 162, 76, 0.14);
+		background: rgba(11, 16, 24, 0.46);
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.am-preview-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 12px;
+	}
+	.am-preview-name {
+		font-family: var(--font-serif);
+		font-size: 21px;
+		line-height: 1.1;
+		color: var(--text-primary);
+	}
+	.am-preview-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+		margin-top: 6px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+	.am-preview-desc {
+		font-size: 13px;
+		line-height: 1.5;
+		color: var(--text-secondary);
+	}
+	.am-preview-fields {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.am-btn-inline {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
 	}
 
 	/* Inline document viewer */
@@ -2394,82 +2560,6 @@
 		gap: 12px;
 		overflow: hidden;
 	}
-	.doc-page-bar {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 8px 10px;
-		background: var(--panel-bg);
-		border: 1px solid var(--ink-line);
-	}
-	.page-btn {
-		all: unset;
-		cursor: pointer;
-		font-family: var(--font-mono);
-		font-size: 16px;
-		line-height: 1;
-		color: var(--text-primary);
-		padding: 6px 10px;
-		border: 1px solid var(--ink-line);
-		background: var(--panel-bg-alt);
-		transition:
-			border-color 150ms,
-			color 150ms,
-			background 150ms;
-	}
-	.page-btn:hover {
-		border-color: var(--brass);
-		color: var(--brass);
-		background: var(--panel-bg);
-	}
-	.page-btn:disabled {
-		opacity: 0.45;
-		cursor: not-allowed;
-	}
-	.page-btn.small {
-		font-size: 14px;
-		padding: 6px 8px;
-	}
-	.page-bar-label {
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-	}
-	.page-total {
-		font-family: var(--font-mono);
-		font-size: 11px;
-		color: var(--text-muted);
-	}
-	.zoom-label {
-		min-width: 52px;
-		text-align: center;
-		font-family: var(--font-mono);
-		font-size: 12px;
-		color: var(--text-primary);
-	}
-	.page-bar-folio {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: var(--text-muted);
-	}
-	.page-input {
-		width: 74px;
-		font-family: var(--font-mono);
-		font-size: 13px;
-		padding: 6px 8px;
-		background: var(--panel-bg-alt);
-		color: var(--text-primary);
-		border: 1px solid var(--ink-line);
-		outline: none;
-	}
-	.page-input:focus {
-		border-color: var(--brass);
-	}
-	.page-bar-spacer {
-		flex: 1;
-	}
 	.doc-frame {
 		flex: 1;
 		width: 100%;
@@ -2477,51 +2567,6 @@
 		min-height: 0;
 		border: 1px solid var(--ink-line);
 		background: #0a0d14;
-	}
-	.pdf-stage {
-		flex: 1 1 0;
-		height: 0;
-		min-height: 0;
-		overflow: auto;
-		padding: 2px 0 12px;
-		scrollbar-width: thin;
-		scrollbar-color: var(--ink-line) transparent;
-	}
-	.pdf-stage::-webkit-scrollbar {
-		width: 10px;
-		height: 10px;
-	}
-	.pdf-stage::-webkit-scrollbar-thumb {
-		background: var(--ink-line);
-	}
-	.pdf-layout {
-		display: grid;
-		grid-template-columns: minmax(280px, 340px) 1fr;
-		gap: 18px;
-		align-items: start;
-		padding: 4px 0 8px;
-	}
-	.metadata-panel {
-		position: sticky;
-		top: 0;
-		align-self: start;
-		width: 100%;
-		background: var(--panel-bg);
-		border: 1px solid var(--ink-line);
-		padding: 12px;
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		max-height: calc(100vh - 320px);
-		overflow: auto;
-		scrollbar-width: thin;
-		scrollbar-color: var(--ink-line) transparent;
-	}
-	.metadata-title {
-		font-family: var(--font-serif);
-		font-size: 24px;
-		color: var(--brass);
-		line-height: 1;
 	}
 	.metadata-section {
 		border: 1px solid var(--ink-line-soft);
@@ -2585,80 +2630,6 @@
 		color: var(--text-secondary);
 		line-height: 1.4;
 	}
-	.metadata-fields {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	.metadata-row {
-		display: grid;
-		grid-template-columns: 130px 1fr;
-		gap: 8px;
-		align-items: start;
-	}
-	.metadata-key {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--text-muted);
-	}
-	.metadata-val {
-		font-size: 12px;
-		color: var(--text-primary);
-		word-break: break-word;
-	}
-	.pdf-canvas-host {
-		min-width: 0;
-	}
-	.pdf-pages {
-		display: flex;
-		flex-direction: column;
-		gap: 18px;
-		padding: 0 0 8px;
-	}
-	.pdf-page {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-	.pdf-page-head {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		width: fit-content;
-		margin: 0 auto;
-		padding: 4px 10px;
-		border: 1px solid var(--ink-line);
-		background: var(--panel-bg);
-	}
-	.pdf-page-label {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: var(--text-muted);
-	}
-	.pdf-page-num {
-		font-family: var(--font-mono);
-		font-size: 11px;
-		color: var(--brass);
-	}
-	.pdf-canvas-shell {
-		position: relative;
-		width: fit-content;
-		margin: 0 auto;
-		border: 1px solid var(--ink-line);
-		background: #0f1218;
-	}
-	.pdf-canvas {
-		display: block;
-	}
-	.pdf-overlay {
-		position: absolute;
-		inset: 0;
-		pointer-events: none;
-	}
 	:global(.pdf-highlight) {
 		position: absolute;
 		background: rgba(200, 85, 61, 0.18);
@@ -2669,13 +2640,6 @@
 		position: absolute;
 		background: rgba(22, 163, 74, 0.16);
 		border-left: 4px solid rgba(22, 163, 74, 0.85);
-	}
-	.pdf-status {
-		font-family: var(--font-mono);
-		font-size: 12px;
-		color: var(--text-secondary);
-		text-align: center;
-		padding: 12px 0 6px;
 	}
 	.doc-foot-hint {
 		font-size: 12px;
@@ -2697,11 +2661,6 @@
 		color: var(--text-primary);
 		border-bottom-color: var(--text-primary);
 	}
-	.doc-error-link {
-		color: var(--brass);
-		text-decoration: underline;
-	}
-
 	.doc-status,
 	.doc-error,
 	.doc-empty {
@@ -2894,20 +2853,6 @@
 		}
 	}
 
-	.spinner {
-		width: 12px;
-		height: 12px;
-		border: 2px solid currentColor;
-		border-right-color: transparent;
-		border-radius: 50%;
-		animation: spin 700ms linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-
 	/* ---------- Dialog ---------- */
 	.dialog-overlay {
 		position: fixed;
@@ -2937,13 +2882,6 @@
 		resize: both;
 		min-width: 920px;
 		min-height: 720px;
-	}
-	.dialog-scroll {
-		flex: 1 1 auto;
-		min-height: 0;
-		overflow: auto;
-		display: flex;
-		flex-direction: column;
 	}
 	.dialog-head {
 		padding: 24px 28px 16px;
@@ -3009,65 +2947,6 @@
 		font-size: 12px;
 		color: var(--text-secondary);
 	}
-	.dialog-grid {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 10px;
-	}
-	.dialog-grid-time {
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-	}
-	.dialog-grid-primary {
-		grid-template-columns: 0.8fr 0.8fr 1.2fr 1fr 1.4fr;
-	}
-	.dialog-field {
-		margin: 0;
-		padding: 10px 10px 8px;
-		border-radius: 16px;
-		border: 1px solid rgba(255, 255, 255, 0.06);
-		background: #1a202b;
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-	}
-	.dialog-field-wide {
-		grid-column: span 2;
-	}
-	.dialog-field :global(input),
-	.dialog-field :global(select) {
-		background: #2a3140;
-		border-color: rgba(255, 255, 255, 0.08);
-		color: #f3eedf;
-	}
-	.dialog-field :global(input:focus),
-	.dialog-field :global(select:focus) {
-		border-color: #d4a24c;
-		box-shadow:
-			0 0 0 1px rgba(212, 162, 76, 0.28),
-			0 0 0 4px rgba(212, 162, 76, 0.08);
-	}
-	.dialog-toolbar {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 12px;
-		padding: 0 2px;
-	}
-	.dialog-toolbar-title {
-		font-family: var(--font-mono);
-		font-size: 11px;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: var(--text-secondary);
-		margin-bottom: 4px;
-	}
-	.dialog-toolbar-text {
-		font-size: 13px;
-		color: var(--text-secondary);
-	}
-	.dialog-toolbar-actions {
-		display: flex;
-		gap: 10px;
-		align-items: center;
-	}
 	.dialog-search-btn {
 		min-width: 140px;
 		background: #d4a24c !important;
@@ -3084,147 +2963,20 @@
 		background: rgba(212, 162, 76, 0.35) !important;
 		color: rgba(21, 17, 10, 0.7) !important;
 	}
-	.dialog-select-btn {
-		min-width: 132px;
-		background: #d4a24c !important;
-		color: #15110a !important;
-		border: 1px solid #e0b768 !important;
-		opacity: 1 !important;
+	.am-btn-foot-save {
+		background: rgba(93, 175, 168, 0.9) !important;
+		border: 1px solid rgba(93, 175, 168, 0.95) !important;
+		color: #081311 !important;
+		box-shadow: 0 8px 20px rgba(93, 175, 168, 0.18);
 	}
-	.dialog-select-btn:hover:not(:disabled) {
-		background: #e0b768 !important;
-		color: #15110a !important;
+	.am-btn-foot-save:hover:not(:disabled) {
+		background: #74c4bd !important;
+		color: #081311 !important;
 	}
-	.dialog-select-btn:disabled {
-		background: #4a4f5c !important;
-		color: #aeb4c0 !important;
-		border: 1px solid #636b79 !important;
-		box-shadow: none !important;
-		cursor: not-allowed !important;
-		opacity: 1 !important;
+	.am-btn-foot-save:disabled {
+		background: rgba(93, 175, 168, 0.28) !important;
+		color: rgba(8, 19, 17, 0.65) !important;
 	}
-	.dialog-error {
-		margin: 0 32px 16px;
-	}
-
-	.dialog-results {
-		flex: 1 1 320px;
-		border-top: 1px solid var(--ink-line-soft);
-		border-bottom: 1px solid var(--ink-line-soft);
-		min-height: 360px;
-		background: #121720;
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-	}
-	.dialog-empty {
-		padding: 72px 20px;
-		text-align: center;
-		color: var(--text-muted);
-	}
-	.dialog-empty .empty-glyph {
-		font-size: 48px;
-		color: var(--brass);
-	}
-	.dialog-empty-title {
-		font-size: 18px;
-		color: var(--text-primary);
-		margin-top: 10px;
-	}
-	.dialog-empty-copy {
-		max-width: 420px;
-		margin: 10px auto 0;
-		line-height: 1.6;
-	}
-	.result-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 13px;
-	}
-	.result-table thead th {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--text-muted);
-		text-align: left;
-		padding: 12px 16px;
-		border-bottom: 1px solid var(--ink-line);
-		background: #181d27;
-		position: sticky;
-		top: 0;
-		z-index: 1;
-	}
-	.result-table tbody tr {
-		border-bottom: 1px solid var(--ink-line-soft);
-		cursor: pointer;
-		transition: background 120ms;
-	}
-	.result-table tbody tr:hover {
-		background: #1d2330;
-	}
-	.result-table tbody tr.selected {
-		background: rgba(212, 162, 76, 0.16);
-	}
-	.result-table tbody tr.selected td {
-		color: #f4ddb0;
-	}
-	.result-table td {
-		padding: 11px 16px;
-		color: var(--text-primary);
-		vertical-align: top;
-	}
-	.result-table .mono {
-		font-family: var(--font-mono);
-		font-size: 12px;
-	}
-	.result-table .muted {
-		color: var(--text-muted);
-	}
-	.result-table .ellipsis {
-		max-width: 360px;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.result-primary {
-		font-weight: 600;
-		color: var(--text-primary);
-	}
-	.result-secondary {
-		margin-top: 4px;
-		color: var(--text-muted);
-	}
-	.status-stack {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 6px;
-	}
-	.status-chip {
-		padding: 2px 8px;
-		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		background: rgba(255, 255, 255, 0.04);
-		color: #d7cfbb;
-	}
-	.status-pill {
-		padding: 4px 10px;
-		border-radius: 999px;
-		font-size: 11px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		background: rgba(124, 117, 96, 0.16);
-		color: var(--text-secondary);
-	}
-	.status-pill-success {
-		background: rgba(93, 175, 168, 0.16);
-		color: var(--teal);
-	}
-	.status-pill-fail {
-		background: rgba(200, 85, 61, 0.18);
-		color: var(--crimson);
-	}
-
 	.dialog-foot {
 		padding: 14px 28px 18px;
 		display: flex;
@@ -3242,45 +2994,20 @@
 		display: flex;
 		gap: 10px;
 	}
-	.dialog-scroll::-webkit-scrollbar,
 	.dialog::-webkit-scrollbar {
 		width: 12px;
 		height: 12px;
 	}
-	.dialog-scroll::-webkit-scrollbar-thumb,
 	.dialog::-webkit-scrollbar-thumb {
 		background: rgba(212, 162, 76, 0.34);
 		border-radius: 999px;
 		border: 2px solid transparent;
 		background-clip: padding-box;
 	}
-	.dialog-scroll::-webkit-scrollbar-track,
 	.dialog::-webkit-scrollbar-track {
 		background: rgba(255, 255, 255, 0.03);
 	}
 
-	@media (max-width: 1100px) {
-		.dialog-grid,
-		.dialog-grid-primary {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-		.dialog-grid-time {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-		.dialog-field-wide {
-			grid-column: span 2;
-		}
-	}
-
-	@media (max-width: 1440px) {
-		.pdf-layout {
-			grid-template-columns: 1fr;
-		}
-		.metadata-panel {
-			position: static;
-			max-height: none;
-		}
-	}
 	@media (max-width: 820px) {
 		.dialog-overlay {
 			padding: 12px;
@@ -3298,18 +3025,7 @@
 			padding-left: 18px;
 			padding-right: 18px;
 		}
-		.dialog-grid,
-		.dialog-grid-primary {
-			grid-template-columns: 1fr;
-		}
-		.dialog-grid-time {
-			grid-template-columns: 1fr;
-		}
-		.dialog-field-wide {
-			grid-column: auto;
-		}
 		.dialog-section-head,
-		.dialog-toolbar,
 		.dialog-foot {
 			flex-direction: column;
 			align-items: stretch;

@@ -429,6 +429,97 @@ export async function createKbMetric(
 	return response.json() as Promise<CreateKbMetricResponse>;
 }
 
+export type ExtractKbMetricsPayload = {
+	record_id: number;
+	lines: string[];
+};
+
+export type ExtractedKbMetric = {
+	metric_name?: string;
+	metric_name_en?: string;
+	source_line_spans?: SourceLineSpan[];
+	metric_subject?: string;
+	metric_subject_en?: string;
+	metric_desc?: string;
+	metric_desc_en?: string;
+	metric_context?: string;
+	metric_context_en?: string;
+	metric_keywords?: unknown;
+	metric_keywords_en?: unknown;
+	location_type?: string;
+	metric_unit?: string;
+	metric_unit_en?: string;
+	metric_value?: string;
+	value_data_type?: string;
+	value_range_type?: string;
+	value_class?: string;
+	value_class_en?: string;
+	formula_or_definition?: string;
+	threshold_or_target?: string;
+	measurement_frequency?: string;
+	confidence?: number;
+	is_explicit_metric?: boolean;
+	table_name_or_section?: string;
+	reasoning_tags?: unknown;
+};
+
+export type ExtractKbMetricsResponse = {
+	status: boolean;
+	metrics?: ExtractedKbMetric[];
+	error?: string;
+};
+
+export async function extractKbMetrics(
+	payload: ExtractKbMetricsPayload
+): Promise<ExtractKbMetricsResponse> {
+	const response = await fetch(`${BASE}/metrics/extract`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error === 'string'
+				? parsed.error
+				: `Failed to extract metrics (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<ExtractKbMetricsResponse>;
+}
+
+export type SaveExtractedKbMetricsPayload = {
+	record_id: number;
+	metrics: ExtractedKbMetric[];
+};
+
+export type SaveExtractedKbMetricsResponse = {
+	status: boolean;
+	inserted?: number;
+	error?: string;
+};
+
+export async function saveExtractedKbMetrics(
+	payload: SaveExtractedKbMetricsPayload
+): Promise<SaveExtractedKbMetricsResponse> {
+	const response = await fetch(`${BASE}/metrics/save`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error === 'string'
+				? parsed.error
+				: `Failed to save extracted metrics (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<SaveExtractedKbMetricsResponse>;
+}
+
 // ---------- kb.doc-structure ----------
 
 export type DocStructureLine = {

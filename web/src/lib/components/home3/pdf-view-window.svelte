@@ -189,10 +189,6 @@
 	});
 
 	$effect(() => {
-		panelWidth = clamp(panelWidth);
-	});
-
-	$effect(() => {
 		zoom = clampPdfViewWindowZoom(zoom);
 	});
 </script>
@@ -216,7 +212,7 @@
 			{onselect}
 			{ondragmove}
 		>
-			<div slot="page-bar-tool">
+			{#snippet pageBarTool()}
 				{#if toolbar}
 					<div
 						class="pvw-toolbar-pill"
@@ -225,8 +221,8 @@
 						{@render toolbar()}
 					</div>
 				{/if}
-			</div>
-			<div slot="sidebar">
+			{/snippet}
+			{#snippet sidebarContent()}
 				{#if sidebar}
 					<div class="pvw-shell" style={`width:${panelWidth}px;`}>
 						<aside class="pvw-sidebar-panel">
@@ -261,7 +257,7 @@
 						</button>
 					</div>
 				{/if}
-			</div>
+			{/snippet}
 		</SharedPdfViewer>
 	{/if}
 </div>

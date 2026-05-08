@@ -45,7 +45,7 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 		logger = loggerutil.CreateDefaultLogger("MID_26041830")
 	}
 	promptText, promptRef, promptPath, promptErr := loadDocMetaPromptFromEnv()
-	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_LLM_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
+	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
 	applyStructureModelConfigToExtractor(client, modelCfg)
 	return &ExtractDocMetadataProcessor{
 		Store:        store,

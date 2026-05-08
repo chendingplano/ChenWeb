@@ -22,6 +22,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
+	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
@@ -274,6 +275,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/inputs/:id/file", kbhandler.GetInputFile)
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
 	apiGroup.PUT("/kb/metrics/:id", kbhandler.UpdateMetric)
+	apiGroup.POST("/kb/metrics/extract", kbhandler.ExtractMetric)
+	apiGroup.POST("/kb/metrics/save", kbhandler.SaveExtractedMetrics)
 	apiGroup.GET("/kb/topic-chunks", kbhandler.ListTopicChunks)
 	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)
 	apiGroup.GET("/kb/summary-graph", kbhandler.ListSummaryGraph)
@@ -389,6 +392,13 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/ap/w/:slug/runs/:id", agentplatformhandler.GetTaskRun)
 	apiGroup.GET("/ap/w/:slug/runs/:id/events", agentplatformhandler.ListRunEvents)
 	apiGroup.POST("/ap/w/:slug/runs/:id/cancel", agentplatformhandler.CancelTaskRun)
+
+	// Diary (My Workspace) endpoints — reads/writes JSON files under DIARY_HOME_DIR.
+	apiGroup.GET("/diary", diaryhandler.List)
+	apiGroup.POST("/diary", diaryhandler.Create)
+	apiGroup.GET("/diary/:id", diaryhandler.Get)
+	apiGroup.PUT("/diary/:id", diaryhandler.Update)
+	apiGroup.DELETE("/diary/:id", diaryhandler.Delete)
 
 	// WebSocket endpoint for the agent platform (M2). Upgrades via Gorilla
 	// WebSocket inside the handler; auth is enforced by the /ws group
