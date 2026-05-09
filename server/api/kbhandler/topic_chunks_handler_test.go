@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -24,29 +23,7 @@ func TestExpandTopicLineTokens(t *testing.T) {
 	}
 }
 
-func TestParseLegacyTopicChunkLine(t *testing.T) {
-	entry, ok := parseLegacyTopicChunkLine("1\ttable\t[38-45, 47]\t[k1, k2]\tTable about emissions", 53)
-	if !ok {
-		t.Fatalf("expected parse success")
-	}
-	if entry.RecordID != 53 {
-		t.Fatalf("unexpected record_id: %d", entry.RecordID)
-	}
-	if entry.TopicType != "table" {
-		t.Fatalf("unexpected topic_type: %q", entry.TopicType)
-	}
-	if entry.Topic != "Table about emissions" {
-		t.Fatalf("unexpected topic: %q", entry.Topic)
-	}
-	if !reflect.DeepEqual(entry.LineTokens, []string{"38-45", "47"}) {
-		t.Fatalf("unexpected line tokens: %v", entry.LineTokens)
-	}
-	if !reflect.DeepEqual(entry.Keywords, []string{"k1", "k2"}) {
-		t.Fatalf("unexpected keywords: %v", entry.Keywords)
-	}
-}
-
-func TestReadTopicChunkEntries_IgnoresCategoryTreeWithoutTopicsTxt(t *testing.T) {
+func TestReadChunkEntries_IgnoresCategoryTreeWithoutChunksFile(t *testing.T) {
 	root := t.TempDir()
 	runRoot := filepath.Join(root, "0", "53")
 	if err := os.MkdirAll(filepath.Join(runRoot, "safety_evaluation"), 0o755); err != nil {
@@ -59,41 +36,26 @@ func TestReadTopicChunkEntries_IgnoresCategoryTreeWithoutTopicsTxt(t *testing.T)
 		t.Fatalf("write seismic_design: %v", err)
 	}
 
-	_, err := readTopicChunkEntries(runRoot, 53)
+	_, err := readChunkEntries(runRoot, 53)
 	if err == nil {
-		t.Fatalf("expected error when topics.txt is missing")
+		t.Fatalf("expected error when .chunks file is missing")
 	}
 }
 
-func TestReadTopicChunkEntries_FallbackToTopicsFile(t *testing.T) {
+func TestReadChunkEntries_DoesNotFallbackToTopicsFile(t *testing.T) {
 	root := t.TempDir()
 	runRoot := filepath.Join(root, "0", "53")
 	if err := os.MkdirAll(runRoot, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	content := strings.Join([]string{
-		"1\ttable\t[38-45, 47]\t[risk, scoring]\tScoring table",
-		"2\tlist\t[9]\t[checklist]\tInspection checklist",
-	}, "\n")
+	content := "1\ttable\t[38-45, 47]\t[risk, scoring]\tScoring table\n2\tlist\t[9]\t[checklist]\tInspection checklist\n"
 	if err := os.WriteFile(filepath.Join(runRoot, "topics.txt"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write topics.txt: %v", err)
 	}
 
-	entries, err := readTopicChunkEntries(runRoot, 53)
-	if err != nil {
-		t.Fatalf("readTopicChunkEntries: %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("len(entries)=%d, want 2", len(entries))
-	}
-	if entries[0].RecordID != 53 || entries[1].RecordID != 53 {
-		t.Fatalf("unexpected record ids: %+v", entries)
-	}
-	if entries[0].SeqNo != 1 || entries[1].SeqNo != 2 {
-		t.Fatalf("unexpected seq numbers: %+v", entries)
-	}
-	if !reflect.DeepEqual(entries[0].LineTokens, []string{"38-45", "47"}) {
-		t.Fatalf("unexpected line tokens: %v", entries[0].LineTokens)
+	_, err := readChunkEntries(runRoot, 53)
+	if err == nil {
+		t.Fatalf("expected error when only topics.txt exists")
 	}
 }
 
@@ -120,6 +82,32 @@ func TestParseChunksFile(t *testing.T) {
 	}
 	if !reflect.DeepEqual(entries[1].LineTokens, []string{"6-10"}) {
 		t.Fatalf("chunk 2 line_tokens: %v", entries[1].LineTokens)
+	}
+}
+
+func TestParseChunksFile_IgnoresBlankLinesBetweenEntries(t *testing.T) {
+	chunksContent := "overlap: []\nlines: [1-5]\n\noverlap: [5]\nlines: [6-10]\n\noverlap: [10]\nlines: [11-12]\n"
+	root := t.TempDir()
+	chunkPath := filepath.Join(root, "test.chunks")
+	if err := os.WriteFile(chunkPath, []byte(chunksContent), 0o644); err != nil {
+		t.Fatalf("write chunks: %v", err)
+	}
+
+	entries, err := parseChunksFile(chunkPath, 42)
+	if err != nil {
+		t.Fatalf("parseChunksFile: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("len(entries)=%d, want 3", len(entries))
+	}
+	if !reflect.DeepEqual(entries[0].LineTokens, []string{"1-5"}) {
+		t.Fatalf("chunk 1 line_tokens: %v", entries[0].LineTokens)
+	}
+	if !reflect.DeepEqual(entries[1].LineTokens, []string{"6-10"}) {
+		t.Fatalf("chunk 2 line_tokens: %v", entries[1].LineTokens)
+	}
+	if !reflect.DeepEqual(entries[2].LineTokens, []string{"11-12"}) {
+		t.Fatalf("chunk 3 line_tokens: %v", entries[2].LineTokens)
 	}
 }
 
@@ -160,7 +148,7 @@ func TestParseTopicsEnrichmentFile(t *testing.T) {
 	}
 }
 
-func TestReadTopicChunkEntries_ReadsChunksFile(t *testing.T) {
+func TestReadChunkEntries_ReadsChunksFile(t *testing.T) {
 	root := t.TempDir()
 	runRoot := filepath.Join(root, "0", "42")
 	if err := os.MkdirAll(runRoot, 0o755); err != nil {
@@ -172,9 +160,9 @@ func TestReadTopicChunkEntries_ReadsChunksFile(t *testing.T) {
 		t.Fatalf("write chunks: %v", err)
 	}
 
-	entries, err := readTopicChunkEntries(runRoot, 42)
+	entries, err := readChunkEntries(runRoot, 42)
 	if err != nil {
-		t.Fatalf("readTopicChunkEntries: %v", err)
+		t.Fatalf("readChunkEntries: %v", err)
 	}
 	if len(entries) != 2 {
 		t.Fatalf("len(entries)=%d, want 2", len(entries))
@@ -182,46 +170,8 @@ func TestReadTopicChunkEntries_ReadsChunksFile(t *testing.T) {
 	if entries[0].SeqNo != 1 || entries[1].SeqNo != 2 {
 		t.Fatalf("unexpected seqno: %+v", entries)
 	}
-	// Default topic values when no .topics file
 	if entries[0].TopicType != "general" {
 		t.Fatalf("default topic_type: %q", entries[0].TopicType)
-	}
-}
-
-func TestReadTopicChunkEntries_ChunksWithTopicsEnrichment(t *testing.T) {
-	root := t.TempDir()
-	runRoot := filepath.Join(root, "0", "7")
-	if err := os.MkdirAll(runRoot, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	chunksContent := "overlap: []\nlines: [1-5]\noverlap: [5]\nlines: [6-10]\n"
-	if err := os.WriteFile(filepath.Join(runRoot, "doc_parser.chunks"), []byte(chunksContent), 0o644); err != nil {
-		t.Fatalf("write chunks: %v", err)
-	}
-	topicsContent := "topic_id: 1\ntopic_type: \"policy\"\nlines: [1-5]\ntopic_keywords: [\"intro\"]\ntopic: \"Overview\"\ncategory_paths: []\n\ntopic_id: 2\ntopic_type: \"list\"\nlines: [6-10]\ntopic_keywords: [\"checklist\"]\ntopic: \"Inspection checklist\"\ncategory_paths: []\n"
-	if err := os.WriteFile(filepath.Join(runRoot, "doc_parser.topics"), []byte(topicsContent), 0o644); err != nil {
-		t.Fatalf("write topics: %v", err)
-	}
-
-	entries, err := readTopicChunkEntries(runRoot, 7)
-	if err != nil {
-		t.Fatalf("readTopicChunkEntries: %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("len(entries)=%d, want 2", len(entries))
-	}
-	if entries[0].TopicType != "policy" {
-		t.Fatalf("enriched topic_type: %q", entries[0].TopicType)
-	}
-	if entries[0].Topic != "Overview" {
-		t.Fatalf("enriched topic: %q", entries[0].Topic)
-	}
-	if !reflect.DeepEqual(entries[0].Keywords, []string{"intro"}) {
-		t.Fatalf("enriched keywords: %v", entries[0].Keywords)
-	}
-	if entries[1].TopicType != "list" {
-		t.Fatalf("enriched topic_type: %q", entries[1].TopicType)
 	}
 }
 

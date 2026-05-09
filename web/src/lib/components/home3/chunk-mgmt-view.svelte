@@ -5,7 +5,7 @@
 	import { appAuthStore } from '@chendingplano/shared';
 	import {
 		getKbInput,
-		listKbTopicChunks,
+		listKbChunks,
 		type KbInputRecord,
 		type KbTopicChunkRecord,
 		type RawLine
@@ -249,16 +249,26 @@
 		pdfViewportByPage.clear();
 		try {
 			const [chunkRes, inputRes] = await Promise.all([
-				listKbTopicChunks(id),
+				listKbChunks(id),
 				getKbInput(id).catch(() => null)
 			]);
+			console.log('[chunk-mgmt] listKbChunks response', {
+				recordId: id,
+				total: chunkRes.total,
+				chunks: (chunkRes.results ?? []).map((chunk) => ({
+					seqno: chunk.seqno,
+					line_tokens: chunk.line_tokens,
+					source_line_spans: chunk.source_line_spans,
+					content_line_count: chunk.content_lines?.length ?? 0
+				}))
+			});
 			chunks = chunkRes.results ?? [];
 			currentInput = inputRes?.record ?? null;
 			if (chunks.length > 0) {
 				await selectChunk(chunks[0]);
 			}
 		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve topic chunks';
+			errorMsg = err instanceof Error ? err.message : 'Failed to retrieve chunks';
 		} finally {
 			loading = false;
 		}
@@ -340,6 +350,58 @@
 			description: 'Select a record to inspect semantic chunks.',
 			badges: [record.type?.trim() || '—']
 		};
+	}
+
+	function formatSourceLineRanges(
+		spans: Array<{ page_number: number; line_number: number }> | null | undefined
+	): string[] {
+		if (!spans || spans.length === 0) return [];
+
+		const normalized = [...spans]
+			.filter(
+				(span) =>
+					Number.isFinite(span?.page_number) &&
+					Number.isFinite(span?.line_number) &&
+					span.page_number > 0 &&
+					span.line_number > 0
+			)
+			.sort((a, b) => {
+				if (a.page_number !== b.page_number) return a.page_number - b.page_number;
+				return a.line_number - b.line_number;
+			});
+
+		if (normalized.length === 0) return [];
+
+		const out: string[] = [];
+		let start = normalized[0];
+		let end = normalized[0];
+
+		for (let i = 1; i < normalized.length; i += 1) {
+			const current = normalized[i];
+			const isAdjacent =
+				current.page_number === end.page_number && current.line_number === end.line_number + 1;
+			const isDuplicate =
+				current.page_number === end.page_number && current.line_number === end.line_number;
+			if (isDuplicate) continue;
+			if (isAdjacent) {
+				end = current;
+				continue;
+			}
+			out.push(
+				start.line_number === end.line_number
+					? `P${start.page_number}:${start.line_number}`
+					: `P${start.page_number}:${start.line_number}-${end.line_number}`
+			);
+			start = current;
+			end = current;
+		}
+
+		out.push(
+			start.line_number === end.line_number
+				? `P${start.page_number}:${start.line_number}`
+				: `P${start.page_number}:${start.line_number}-${end.line_number}`
+		);
+		return out;
 	}
 
 	function clampDocPage(page: number): number {
@@ -648,11 +710,11 @@
 	"
 >
 	<header class="header">
-		<div class="header-left">
-			<div class="eyebrow">Knowledge System· Vol. IV</div>
-			<h1 class="display">Topic Chunks</h1>
-			<div class="subtitle">Review semantic chunk topics and map each chunk back to source PDF regions.</div>
-		</div>
+			<div class="header-left">
+				<div class="eyebrow">Knowledge System· Vol. IV</div>
+				<h1 class="display">Chunks</h1>
+				<div class="subtitle">Review fixed-size chunks and map each chunk back to source PDF regions.</div>
+			</div>
 		<div class="header-actions">
 			<button class="btn btn-ghost header-settings-btn" type="button" onclick={openChunkSettings}>
 				<SettingsIcon size={15} />
@@ -666,7 +728,7 @@
 			{darkMode}
 			instanceKey="chunks-record-browser"
 			title="kb.inputs"
-			subtitle="Search, filter, and select input records before inspecting semantic chunks."
+			subtitle="Search, filter, and select input records before inspecting chunks."
 			emptyTitle="No records yet"
 			emptySubtitle="Use Search or Retrieve to browse kb.inputs."
 			selectedRecordId={currentInput?.id ?? null}
@@ -691,7 +753,7 @@
 				{:else if !loading && chunks.length === 0}
 					<div class="empty">
 						<div class="empty-title">No chunks loaded</div>
-						<div class="empty-sub">Select a record to retrieve `topics.txt` chunks.</div>
+						<div class="empty-sub">Select a record to retrieve `.chunks` entries.</div>
 					</div>
 				{:else}
 					{#each chunks as chunk (chunk.seqno)}
@@ -794,25 +856,8 @@
 										<div class="info-section">
 											<div class="info-section-title">Source Lines</div>
 											<div class="info-spans">
-												{#each selectedChunk.source_line_spans as span (`${span.page_number}-${span.line_number}`)}
-													<span class="info-span-chip">P{span.page_number}:L{span.line_number}</span>
-												{/each}
-											</div>
-										</div>
-									{/if}
-
-									{#if (selectedChunk.content_lines ?? []).length > 0}
-										<div class="info-section">
-											<div class="info-section-title">Content Lines ({selectedChunk.content_lines.length})</div>
-											<div class="info-content-list">
-												{#each selectedChunk.content_lines as ln (`${ln.page_number}-${ln.line_number}`)}
-													<div class="info-content-item">
-														<div class="info-content-meta">
-															<span class="info-content-line">L{ln.line_number}</span>
-															<span class="info-content-type">{ln.line_type}</span>
-														</div>
-														<div class="info-content-preview">{ln.content}</div>
-													</div>
+												{#each formatSourceLineRanges(selectedChunk.source_line_spans) as spanLabel (spanLabel)}
+													<span class="info-span-chip">{spanLabel}</span>
 												{/each}
 											</div>
 										</div>
@@ -826,6 +871,23 @@
 													<div class="info-bbox-row">
 														<span class="info-bbox-page">Page {box.page_number}</span>
 														<span class="info-bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</span>
+													</div>
+												{/each}
+											</div>
+										</div>
+									{/if}
+
+									{#if (selectedChunk.content_lines ?? []).length > 0}
+										<div class="info-section info-section-content">
+											<div class="info-section-title">Content Lines ({selectedChunk.content_lines.length})</div>
+											<div class="info-content-list">
+												{#each selectedChunk.content_lines as ln (`${ln.page_number}-${ln.line_number}`)}
+													<div class="info-content-item">
+														<div class="info-content-meta">
+															<span class="info-content-line">L{ln.line_number}</span>
+															<span class="info-content-type">{ln.line_type}</span>
+														</div>
+														<div class="info-content-preview">{ln.content}</div>
 													</div>
 												{/each}
 											</div>
@@ -1164,10 +1226,16 @@
 		height: fit-content;
 	}
 	.meta-title { font-weight: 700; margin-bottom: 8px; }
-	.info-block { display: flex; flex-direction: column; gap: 2px; }
+	.info-block { display: flex; flex-direction: column; gap: 2px; min-height: 100%; flex: 1 1 auto; }
 	.info-section {
 		padding: 8px 0;
 		border-bottom: 1px solid var(--ink-line-soft);
+	}
+	.info-section-content {
+		display: flex;
+		flex: 1 1 auto;
+		flex-direction: column;
+		min-height: 0;
 	}
 	.info-section:last-child { border-bottom: none; }
 	.info-section-title {
@@ -1199,7 +1267,16 @@
 		background: rgba(255, 255, 255, 0.05);
 		color: var(--text-secondary);
 	}
-	.info-content-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+	.info-content-list {
+		display: flex;
+		flex: 1 1 auto;
+		flex-direction: column;
+		gap: 4px;
+		min-height: 0;
+		max-height: none;
+		padding-bottom: 24px;
+		overflow-y: auto;
+	}
 	.info-content-item {
 		padding: 4px 6px;
 		border-radius: 4px;

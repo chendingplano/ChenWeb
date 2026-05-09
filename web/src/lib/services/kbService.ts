@@ -607,7 +607,7 @@ export async function deleteKbDocStructureLine(
 	return response.json() as Promise<GetDocStructureResponse>;
 }
 
-// ---------- kb.topic-chunks ----------
+// ---------- kb.chunks ----------
 
 export type KbChunkSpan = {
 	page_number: number;
@@ -639,11 +639,22 @@ export type ListKbTopicChunksResponse = {
 	total: number;
 };
 
-export async function listKbTopicChunks(inputRecordId: number): Promise<ListKbTopicChunksResponse> {
-	return fetchOrThrow<ListKbTopicChunksResponse>(
-		`${BASE}/topic-chunks?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
-		'Failed to retrieve topic chunks'
+export async function listKbChunks(inputRecordId: number): Promise<ListKbTopicChunksResponse> {
+	const result = await fetchOrThrow<ListKbTopicChunksResponse>(
+		`${BASE}/chunks?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to retrieve chunks'
 	);
+	console.log('[kbService] listKbChunks fetched', {
+		inputRecordId,
+		total: result.total,
+		chunks: (result.results ?? []).map((chunk) => ({
+			seqno: chunk.seqno,
+			line_tokens: chunk.line_tokens,
+			source_line_spans: chunk.source_line_spans,
+			content_line_count: chunk.content_lines?.length ?? 0
+		}))
+	});
+	return result;
 }
 
 // ---------- kb.stores ----------
