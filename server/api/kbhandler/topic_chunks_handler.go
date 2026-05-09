@@ -188,7 +188,36 @@ func readChunkEntries(root string, inputRecordID int64) ([]topicChunkEntry, erro
 		return nil, os.ErrNotExist
 	}
 
-	return parseChunksFile(chunksPath, inputRecordID)
+	entries, err := parseChunksFile(chunksPath, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+
+	summaries, err := readChunkSummaryEnrichment(root)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if len(summaries) == 0 {
+		return entries, nil
+	}
+
+	for i := range entries {
+		summary, ok := summaries[entries[i].SeqNo]
+		if !ok {
+			continue
+		}
+		if text := strings.TrimSpace(summary.summaryText); text != "" {
+			entries[i].Topic = text
+		}
+		if len(summary.keywords) > 0 {
+			entries[i].Keywords = append([]string(nil), summary.keywords...)
+		}
+		if strings.TrimSpace(entries[i].TopicType) == "" || strings.EqualFold(strings.TrimSpace(entries[i].TopicType), "general") {
+			entries[i].TopicType = "summary"
+		}
+	}
+
+	return entries, nil
 }
 
 func findChunksFilePath(root string) string {
@@ -202,6 +231,41 @@ func findChunksFilePath(root string) string {
 		}
 	}
 	return ""
+}
+
+func readChunkSummaryEnrichment(root string) (map[int]parsedSummaryFile, error) {
+	paths, err := filepath.Glob(filepath.Join(root, "summary_0_*.txt"))
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, os.ErrNotExist
+	}
+
+	sort.Strings(paths)
+	out := make(map[int]parsedSummaryFile, len(paths))
+	for _, path := range paths {
+		parsed, err := readSummaryArtifactFile(path)
+		if err != nil {
+			return nil, err
+		}
+		seqNo := parsed.seqNo
+		if seqNo <= 0 {
+			base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+			parts := strings.Split(base, "_")
+			if len(parts) >= 3 {
+				seqNo, _ = strconv.Atoi(parts[len(parts)-1])
+			}
+		}
+		if seqNo <= 0 {
+			continue
+		}
+		out[seqNo] = parsed
+	}
+	if len(out) == 0 {
+		return nil, os.ErrNotExist
+	}
+	return out, nil
 }
 
 // parseChunksFile reads a .chunks file where each chunk occupies two lines:

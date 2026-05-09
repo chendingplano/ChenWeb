@@ -139,12 +139,13 @@ func TestBuildChunks_NonNumericListNotSplit(t *testing.T) {
 	}
 }
 
-func TestBuildChunks_LargeNumericListCanSplit(t *testing.T) {
-	raw := []string{"1	1	paragraph	TestFont	12	[0,0,1,1]	Intro"}
-	for i := 1; i <= 8; i++ {
-		raw = append(raw, "2	1	list-item	TestFont	12	[0,0,1,1]	"+string(rune('0'+i))+". item")
-	}
-	input := strings.Join(raw, "\n")
+func TestBuildChunks_NumericListNotSplit(t *testing.T) {
+	input := strings.Join([]string{
+		"1	1	paragraph	TestFont	12	[0,0,1,1]	Intro",
+		"2	1	list-item	TestFont	12	[0,0,1,1]	1. item A",
+		"3	1	list-item	TestFont	12	[0,0,1,1]	2. item B",
+		"4	1	paragraph	TestFont	12	[0,0,1,1]	Tail",
+	}, "\n")
 	lines, err := ParseInputLines([]byte(input))
 	if err != nil {
 		t.Fatalf("ParseInputLines: %v", err)
@@ -154,8 +155,43 @@ func TestBuildChunks_LargeNumericListCanSplit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildChunks: %v", err)
 	}
-	if len(chunks) < 4 {
-		t.Fatalf("expected large numeric list to be splittable, chunks=%d", len(chunks))
+	chunkByLine := map[int]int{}
+	for _, c := range chunks {
+		for _, ml := range c.Lines {
+			chunkByLine[ml.Line.LineNo] = c.SeqNo
+		}
+	}
+	if chunkByLine[2] == 0 || chunkByLine[3] == 0 || chunkByLine[2] != chunkByLine[3] {
+		t.Fatalf("expected numeric list lines 2 and 3 to stay in same chunk, got line2=%d line3=%d", chunkByLine[2], chunkByLine[3])
+	}
+}
+
+func TestBuildChunks_MixedListVariantsNotSplit(t *testing.T) {
+	input := strings.Join([]string{
+		"111	6	list-item	HiddenHorzOCR	9	[112.81,351.18,453.85,362.88]	c)呼吸...:",
+		"112	6	m-sym-list-item	HiddenHorzOCR	10	[112.81,336,287.77,348]	d) 中枢神...",
+		"114	6	heading-4	Times-Roman	11	[92.36,306.242,211.93,318.612]	4. 1. 1. 3 耳、鼻、咽眼科",
+		"115	6	list-item	HiddenHorzOCR	10	[113.28,289.93,553.44,301.93]	a)昕觉:纯音...;",
+		"116	6	m-sym-list-item	HiddenHorzOCR	9	[114,275.46,330.97,286.56]	b) 嗅觉:嗅觉正常，能觉察燃烧物和异常气味。",
+		"117	6	heading-4	Times-Roman	11	[92.6,260.393,159.61,272.762]	4. 1. 1. 4 眼科",
+	}, "\n")
+	lines, err := ParseInputLines([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseInputLines: %v", err)
+	}
+
+	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: 120, OverlapPercent: 0})
+	if err != nil {
+		t.Fatalf("BuildChunks: %v", err)
+	}
+	chunkByLine := map[int]int{}
+	for _, c := range chunks {
+		for _, ml := range c.Lines {
+			chunkByLine[ml.Line.LineNo] = c.SeqNo
+		}
+	}
+	if chunkByLine[115] == 0 || chunkByLine[116] == 0 || chunkByLine[115] != chunkByLine[116] {
+		t.Fatalf("expected mixed list-variant lines 115 and 116 to stay in same chunk, got line115=%d line116=%d", chunkByLine[115], chunkByLine[116])
 	}
 }
 

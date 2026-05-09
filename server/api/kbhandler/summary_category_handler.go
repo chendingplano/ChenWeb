@@ -3,6 +3,7 @@ package kbhandler
 import (
 	"bufio"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,13 +18,13 @@ import (
 )
 
 type summaryCategoryRecord struct {
-	ID          string   `json:"id"`
-	PdfFileName string   `json:"pdfFileName"`
-	Keywords    []string `json:"keywords"`
-	SummaryText string   `json:"summaryText"`
-	InputID     int64    `json:"inputId"`
-	Page        int      `json:"page"`
-	Coords      []float64 `json:"coords"`
+	ID          string                `json:"id"`
+	PdfFileName string                `json:"pdfFileName"`
+	Keywords    []string              `json:"keywords"`
+	SummaryText string                `json:"summaryText"`
+	InputID     int64                 `json:"inputId"`
+	Page        int                   `json:"page"`
+	Coords      []float64             `json:"coords"`
 	Targets     []summaryRecordTarget `json:"targets"`
 }
 
@@ -41,8 +42,8 @@ type summaryArtifactMeta struct {
 }
 
 type summaryLineTarget struct {
-	page   int
-	coords []float64
+	page     int
+	coords   []float64
 	lineType string
 }
 
@@ -270,6 +271,20 @@ func parseQuotedStringArray(raw string) []string {
 	if raw == "" || raw == "[]" {
 		return []string{}
 	}
+	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		var parsed []string
+		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+			out := make([]string, 0, len(parsed))
+			for _, part := range parsed {
+				part = strings.TrimSpace(part)
+				if part == "" {
+					continue
+				}
+				out = append(out, part)
+			}
+			return out
+		}
+	}
 	raw = strings.TrimPrefix(raw, "[")
 	raw = strings.TrimSuffix(raw, "]")
 	if strings.TrimSpace(raw) == "" {
@@ -324,8 +339,8 @@ func readLineTargetMapForRecord(artifactDir string, meta summaryArtifactMeta) (m
 	out := make(map[int]summaryLineTarget, len(lines))
 	for _, line := range lines {
 		out[line.LineNumber] = summaryLineTarget{
-			page: line.PageNumber,
-			coords: append([]float64(nil), line.Coords...),
+			page:     line.PageNumber,
+			coords:   append([]float64(nil), line.Coords...),
 			lineType: strings.TrimSpace(line.LineType),
 		}
 	}

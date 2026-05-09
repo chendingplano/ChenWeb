@@ -21,17 +21,14 @@ import (
 )
 
 const (
-	DefaultChunkSize       = 300
-	DefaultOverlapPercent  = 20
-	defaultStatusTime      = "20060102 15:04:05"
-	ChunkingMethodFixed    = "fix-size-chunking"
-	numericSplitMultiplier = 3
+	DefaultChunkSize      = 300
+	DefaultOverlapPercent = 20
+	defaultStatusTime     = "20060102 15:04:05"
+	ChunkingMethodFixed   = "fix-size-chunking"
 )
 
 var (
-	numericSectionPattern  = regexp.MustCompile(`^\d+\.\d+\b`)
-	numericListItemPattern = regexp.MustCompile(`^\d+[\.)]?\s+`)
-	nonNumericListPattern  = regexp.MustCompile(`^([*\-•·—]+|[A-Za-z]\)|[（(][一二三四五六七八九十]+[）)])\s+`)
+	numericSectionPattern = regexp.MustCompile(`^\d+\.\d+\b`)
 )
 
 type InputRecord struct {
@@ -122,14 +119,6 @@ type Chunk struct {
 	SeqNo int
 	Lines []MarkedLine
 }
-
-type listKind int
-
-const (
-	listNone listKind = iota
-	listNumeric
-	listNonNumeric
-)
 
 type protectedBlock struct {
 	start      int
@@ -974,7 +963,7 @@ func lineRawByteSize(line Line) int {
 	return len([]byte(lineRawForChunking(line)))
 }
 
-func buildProtectedBlocks(lines []Line, chunkSizeBytes int) []*protectedBlock {
+func buildProtectedBlocks(lines []Line, _ int) []*protectedBlock {
 	out := make([]*protectedBlock, len(lines))
 
 	for i := 0; i < len(lines); i++ {
@@ -997,37 +986,23 @@ func buildProtectedBlocks(lines []Line, chunkSizeBytes int) []*protectedBlock {
 			continue
 		}
 
-		if lt != "list-item" {
+		if !isListType(lt) {
 			continue
 		}
 
-		kind := listKindForLine(lines[i])
-		if kind == listNone {
+		if !isChunkListCandidate(lines[i]) {
 			continue
 		}
 
 		j := i + 1
-		for j < len(lines) && strings.ToLower(strings.TrimSpace(lines[j].LineType)) == "list-item" && listKindForLine(lines[j]) == kind {
+		for j < len(lines) && isListType(strings.ToLower(strings.TrimSpace(lines[j].LineType))) && isChunkListCandidate(lines[j]) {
 			j++
 		}
 
-		if kind == listNonNumeric {
+		if j-i >= 2 {
 			markBlock(out, &protectedBlock{start: i, end: j, splittable: false})
-			i = j - 1
-			continue
 		}
-
-		if kind == listNumeric {
-			if j-i >= 2 {
-				blockBytes := 0
-				for k := i; k < j; k++ {
-					blockBytes += lineRawByteSize(lines[k])
-				}
-				splittable := chunkSizeBytes > 0 && blockBytes >= numericSplitMultiplier*chunkSizeBytes
-				markBlock(out, &protectedBlock{start: i, end: j, splittable: splittable})
-			}
-			i = j - 1
-		}
+		i = j - 1
 	}
 
 	return out
@@ -1091,24 +1066,22 @@ func splitUnsplittableBlock(cut int, blockIndex []*protectedBlock) *protectedBlo
 	return left
 }
 
-func listKindForLine(line Line) listKind {
-	if strings.ToLower(strings.TrimSpace(line.LineType)) != "list-item" {
-		return listNone
+func isChunkListCandidate(line Line) bool {
+	if !isListType(line.LineType) {
+		return false
 	}
 	content := strings.TrimSpace(line.Content)
 	if content == "" {
-		return listNone
+		return false
 	}
 	if numericSectionPattern.MatchString(content) {
-		return listNone
+		return false
 	}
-	if numericListItemPattern.MatchString(content) {
-		return listNumeric
-	}
-	if nonNumericListPattern.MatchString(content) {
-		return listNonNumeric
-	}
-	return listNonNumeric
+	return true
+}
+
+func isListType(lineType string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(lineType)), "list-item")
 }
 
 func isTableType(lineType string) bool {

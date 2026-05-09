@@ -175,6 +175,94 @@ func TestReadChunkEntries_ReadsChunksFile(t *testing.T) {
 	}
 }
 
+func TestReadChunkSummaryEnrichment_ReadsLeafSummaries(t *testing.T) {
+	root := t.TempDir()
+	mustSummary := `summary_id: "93_0_0001"
+record_id: 93
+level: 0
+lines: ["1-3"]
+keywords: ["screening", "hearing"]
+category_paths: []
+summary_begin:
+Leaf summary text
+summary_end`
+	if err := os.WriteFile(filepath.Join(root, "summary_0_0001.txt"), []byte(mustSummary), 0o644); err != nil {
+		t.Fatalf("write summary: %v", err)
+	}
+
+	got, err := readChunkSummaryEnrichment(root)
+	if err != nil {
+		t.Fatalf("readChunkSummaryEnrichment: %v", err)
+	}
+	entry, ok := got[1]
+	if !ok {
+		t.Fatalf("missing seqno 1: %+v", got)
+	}
+	if entry.summaryText != "Leaf summary text" {
+		t.Fatalf("summaryText=%q", entry.summaryText)
+	}
+	if !reflect.DeepEqual(entry.keywords, []string{"screening", "hearing"}) {
+		t.Fatalf("keywords=%v", entry.keywords)
+	}
+}
+
+func TestReadChunkEntries_EnrichesChunksFromLeafSummaries(t *testing.T) {
+	root := t.TempDir()
+	runRoot := filepath.Join(root, "0", "93")
+	if err := os.MkdirAll(runRoot, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	chunksContent := "overlap: []\nlines: [1-3]\noverlap: [3]\nlines: [4-6]\n"
+	if err := os.WriteFile(filepath.Join(runRoot, "doc_parser.chunks"), []byte(chunksContent), 0o644); err != nil {
+		t.Fatalf("write chunks: %v", err)
+	}
+	summary1 := `summary_id: "93_0_0001"
+record_id: 93
+level: 0
+lines: ["1-3"]
+keywords: ["screening", "hearing"]
+category_paths: []
+summary_begin:
+First chunk summary
+summary_end`
+	summary2 := `summary_id: "93_0_0002"
+record_id: 93
+level: 0
+lines: ["4-6"]
+keywords: ["vision"]
+category_paths: []
+summary_begin:
+Second chunk summary
+summary_end`
+	if err := os.WriteFile(filepath.Join(runRoot, "summary_0_0001.txt"), []byte(summary1), 0o644); err != nil {
+		t.Fatalf("write summary1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runRoot, "summary_0_0002.txt"), []byte(summary2), 0o644); err != nil {
+		t.Fatalf("write summary2: %v", err)
+	}
+
+	entries, err := readChunkEntries(runRoot, 93)
+	if err != nil {
+		t.Fatalf("readChunkEntries: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries)=%d, want 2", len(entries))
+	}
+	if entries[0].Topic != "First chunk summary" || entries[1].Topic != "Second chunk summary" {
+		t.Fatalf("topics=%q / %q", entries[0].Topic, entries[1].Topic)
+	}
+	if entries[0].TopicType != "summary" || entries[1].TopicType != "summary" {
+		t.Fatalf("topic types=%q / %q", entries[0].TopicType, entries[1].TopicType)
+	}
+	if !reflect.DeepEqual(entries[0].Keywords, []string{"screening", "hearing"}) {
+		t.Fatalf("keywords[0]=%v", entries[0].Keywords)
+	}
+	if !reflect.DeepEqual(entries[1].Keywords, []string{"vision"}) {
+		t.Fatalf("keywords[1]=%v", entries[1].Keywords)
+	}
+}
+
 func TestBuildChunkBoundingBoxes(t *testing.T) {
 	lines := []rawLine{
 		{PageNumber: 1, LineNumber: 1, Coords: []float64{10, 20, 30, 40}},
