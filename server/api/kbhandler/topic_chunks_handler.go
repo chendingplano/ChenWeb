@@ -168,7 +168,182 @@ func readRawLinesFile(path string) ([]rawLine, error) {
 }
 
 func readTopicChunkEntries(root string, inputRecordID int64) ([]topicChunkEntry, error) {
+	// Try reading .chunks + .topics files first (new fixed-size chunking format).
+	entries, err := readChunksEntries(root, inputRecordID)
+	if err == nil {
+		return entries, nil
+	}
+	// Fall back to legacy topics.txt
 	return readLegacyTopicChunkEntries(root, inputRecordID)
+}
+
+// readChunksEntries reads the .chunks file from root, then enriches each entry
+// with topic metadata from the sibling .topics file (if it exists).
+func readChunksEntries(root string, inputRecordID int64) ([]topicChunkEntry, error) {
+	chunksPath := findChunksFilePath(root)
+	if chunksPath == "" {
+		return nil, os.ErrNotExist
+	}
+
+	entries, err := parseChunksFile(chunksPath, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Enrich with .topics file if available (same base name, different extension).
+	topicsPath := strings.TrimSuffix(chunksPath, ".chunks") + ".topics"
+	topicMap, tErr := readTopicEnrichment(topicsPath)
+	if tErr == nil {
+		for i, e := range entries {
+			if t, ok := topicMap[e.SeqNo]; ok {
+				if t.TopicType != "" {
+					entries[i].TopicType = t.TopicType
+				}
+				if t.Topic != "" {
+					entries[i].Topic = t.Topic
+				}
+				if len(t.Keywords) > 0 {
+					entries[i].Keywords = t.Keywords
+				}
+			}
+		}
+	}
+
+	return entries, nil
+}
+
+func findChunksFilePath(root string) string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".chunks") {
+			return filepath.Join(root, e.Name())
+		}
+	}
+	return ""
+}
+
+// parseChunksFile reads a .chunks file where each chunk occupies two lines:
+//
+//	overlap: [ddd, ddd-ddd, ...]
+//	lines: [ddd, ddd-ddd, ...]
+func parseChunksFile(path string, inputRecordID int64) ([]topicChunkEntry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
+
+	var out []topicChunkEntry
+	seqNo := 1
+	for scanner.Scan() {
+		// Consume the overlap line (not needed for the chunk display).
+		_ = scanner.Text()
+		if !scanner.Scan() {
+			break
+		}
+		linesPart := scanner.Text()
+
+		val := strings.TrimSpace(linesPart)
+		if strings.HasPrefix(val, "lines:") {
+			val = strings.TrimSpace(val[len("lines:"):])
+		}
+		lineTokens := parseTopicArrayItems(val)
+
+		out = append(out, topicChunkEntry{
+			RecordID:   inputRecordID,
+			SeqNo:      seqNo,
+			TopicType:  "general",
+			LineTokens: lineTokens,
+			Keywords:   []string{},
+			Topic:      "",
+		})
+		seqNo++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, os.ErrNotExist
+	}
+	return out, nil
+}
+
+// readTopicEnrichment reads a .topics file and returns a map from seq_no to entry.
+// The .topics format is multi-line records separated by topic_id boundaries:
+//
+//	topic_id: 1
+//	topic_type: "table"
+//	lines: [38-45, 47]
+//	topic_keywords: ["risk", "scoring"]
+//	topic: "Scoring table"
+//	category_paths: [...]
+func readTopicEnrichment(path string) (map[int]topicChunkEntry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	out := make(map[int]topicChunkEntry)
+	var current topicChunkEntry
+	hasRecord := false
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "topic_id:") {
+			if hasRecord && current.SeqNo > 0 {
+				out[current.SeqNo] = current
+			}
+			current = topicChunkEntry{Keywords: []string{}}
+			hasRecord = true
+			n, err := strconv.Atoi(strings.TrimSpace(line[len("topic_id:"):]))
+			if err == nil && n > 0 {
+				current.SeqNo = n
+			}
+			continue
+		}
+
+		if !hasRecord {
+			continue
+		}
+
+		if strings.HasPrefix(line, "topic_type:") {
+			val := strings.TrimSpace(line[len("topic_type:"):])
+			current.TopicType = strings.Trim(val, "\"")
+		} else if strings.HasPrefix(line, "topic_keywords:") {
+			kw := parseTopicArrayItems(line[len("topic_keywords:"):])
+			for i := range kw {
+				kw[i] = strings.Trim(kw[i], `"`)
+			}
+			current.Keywords = kw
+		} else if strings.HasPrefix(line, "topic:") {
+			val := strings.TrimSpace(line[len("topic:"):])
+			current.Topic = strings.Trim(val, "\"")
+		}
+	}
+
+	if hasRecord && current.SeqNo > 0 {
+		out[current.SeqNo] = current
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, os.ErrNotExist
+	}
+	return out, nil
 }
 
 func readLegacyTopicChunkEntries(root string, inputRecordID int64) ([]topicChunkEntry, error) {

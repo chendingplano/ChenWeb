@@ -27,6 +27,7 @@ var (
 	staticTOCDotLeaderRE    = regexp.MustCompile(`\.{3,}`)
 	staticPageImagePathRE   = regexp.MustCompile(`^(.+)/imageFile(\d+)\.png$`)
 	staticZeroOriginCoordRE = regexp.MustCompile(`^\[\s*0(?:\.0+)?,\s*0(?:\.0+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?\s*\]$`)
+	staticLegacyHeadingRE   = regexp.MustCompile(`^heading\((\d+)\)$`)
 )
 
 type StaticAnalyzerProcessor struct {
@@ -362,7 +363,7 @@ func parseStaticInputLine(raw string) (staticInputLine, error) {
 	if err != nil || pageNo <= 0 {
 		return staticInputLine{}, errors.New("(MID_26050812) invalid page number")
 	}
-	originalLineType := strings.TrimSpace(fields[2])
+	originalLineType := normalizeStaticLineType(strings.TrimSpace(fields[2]))
 	font := strings.TrimSpace(fields[3])
 	fontSize := strings.TrimSpace(fields[4])
 	coordinate := strings.TrimSpace(fields[5])
@@ -380,6 +381,18 @@ func parseStaticInputLine(raw string) (staticInputLine, error) {
 		Coordinate:        coordinate,
 		Content:           content,
 	}, nil
+}
+
+func normalizeStaticLineType(lineType string) string {
+	lineType = strings.TrimSpace(lineType)
+	if strings.EqualFold(lineType, "heading") {
+		return "heading-1"
+	}
+	m := staticLegacyHeadingRE.FindStringSubmatch(strings.ToLower(lineType))
+	if len(m) == 2 {
+		return "heading-" + m[1]
+	}
+	return lineType
 }
 
 // applyStaticTOCLabels identifies lines that are likely part of a table of contents based on their content and proximity to
@@ -461,10 +474,6 @@ func normalizeStaticTitle(s string) string {
 }
 
 func isStaticTOCLine(line staticInputLine) bool {
-	// if line.OriginalLineLower != "paragraph" && line.OriginalLineLower != "list-item" {
-	// 	return false
-	// }
-
 	s := strings.TrimSpace(line.Content)
 	if s == "" {
 		return false
@@ -489,9 +498,6 @@ func applyStaticHeadingLabels(lastTOC int, lines []staticInputLine, corrected ma
 		if corrected[line.LineNo] == "toc" {
 			continue
 		}
-		// if line.OriginalLineLower == "list-item" {
-		// 	continue
-		// }
 
 		if symbol, parts, title, ok := parseStaticAppendixHeading(line.Content); ok {
 			if title == "" && i+1 < len(lines) && lines[i+1].OriginalLineLower == "paragraph" {
@@ -656,13 +662,13 @@ func applyStaticListLabels(lines []staticInputLine, corrected map[int]string) {
 		content := strings.TrimSpace(line.Content)
 		switch {
 		case staticNumListRE.MatchString(content):
-			corrected[line.LineNo] = "num-list-item"
+			corrected[line.LineNo] = "list-item-num"
 
 		case staticSingleSymListRE.MatchString(content):
-			corrected[line.LineNo] = "s-sym-list-item"
+			corrected[line.LineNo] = "list-item-s-sym"
 
 		case staticMultiSymListRE.MatchString(content):
-			corrected[line.LineNo] = "m-sym-list-item"
+			corrected[line.LineNo] = "list-item_m-sym"
 		}
 	}
 }

@@ -64,29 +64,29 @@ type Embedder interface {
 }
 
 type FixedSizeChunkingService struct {
-	Store                         Store
-	Extractor                     LLMJSONExtractor
-	Embedder                      Embedder
-	Logger                        ApiTypes.JimoLogger
-	Now                           func() time.Time
-	ChunkDir                      string
-	TreeRootDir                   string
-	SummaryTreeDir                string
-	ChunkSize                     int
-	OverlapPercent                int
-	ModelRef                      string
-	ModelCfgPath                  string
-	ModelErr                      error
-	ModelName                     string
-	PromptText                    string
-	PromptRef                     string
-	PromptPath                    string
-	PromptErr                     error
-	SummaryGroupSize              int
-	SummaryModelRef               string
-	SummaryModelCfgPath           string
-	SummaryModelErr               error
-	SummaryModelName              string
+	Store                      Store
+	Extractor                  LLMJSONExtractor
+	Embedder                   Embedder
+	Logger                     ApiTypes.JimoLogger
+	Now                        func() time.Time
+	ChunkDir                   string
+	TreeRootDir                string
+	SummaryTreeDir             string
+	ChunkSize                  int
+	OverlapPercent             int
+	ModelRef                   string
+	ModelCfgPath               string
+	ModelErr                   error
+	ModelName                  string
+	PromptText                 string
+	PromptRef                  string
+	PromptPath                 string
+	PromptErr                  error
+	SummaryGroupSize           int
+	SummaryModelRef            string
+	SummaryModelCfgPath        string
+	SummaryModelErr            error
+	SummaryModelName           string
 	SummaryPromptText          string
 	SummaryPromptRef           string
 	SummaryPromptPath          string
@@ -373,10 +373,16 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		stagingName = inputFilename
 	}
 	artifactBase := buildChunkArtifactBaseName(stagingName, rec.ParserName)
-	if _, err := writeCombinedChunkFile(s.ChunkDir, rec.ID, artifactBase+".chunks", chunks); err != nil {
+	chunkFilePath, err := writeCombinedChunkFile(s.ChunkDir, rec.ID, artifactBase+".chunks", chunks)
+	if err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, 0, start, err)
 		return err
 	}
+	s.Logger.Info("chunk file generated",
+		"record_id", rec.ID,
+		"chunk_file", chunkFilePath,
+		"num_chunks", len(chunks),
+	)
 
 	topics := make([]TopicItem, 0, len(chunks))
 	seqStart := 1
@@ -543,6 +549,9 @@ func ParseBlockBufferLines(buf *BlockBuffer) []Line {
 	for _, block := range buf.Blocks {
 		for _, bl := range block.Lines {
 			if bl.Flag != "n" {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(bl.LineType), "TOC") {
 				continue
 			}
 			if _, ok := seen[bl.LineNumber]; ok {
@@ -1430,7 +1439,6 @@ func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, p
 	}
 	return "", promptRef, "", fmt.Errorf("(MID_26042911) summary prompt file not found: %w", lastErr)
 }
-
 
 func min(a int, b int) int {
 	if a < b {

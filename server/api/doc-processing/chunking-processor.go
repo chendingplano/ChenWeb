@@ -72,7 +72,7 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	if buf := BlockBufferFromContext(ctx); buf != nil {
 		if bh, ok := p.Service.(chunkingBlockHandler); ok {
 			if inputFilename == "" {
-				inputFilename = rec.FileName
+				inputFilename = resolveChunkingInputFilename(rec, "")
 			}
 			if err := bh.HandleBlockInput(ctx, evt.RecordID, inputFilename, buf); err != nil {
 				p.Logger.Error("chunking processor failed (block input)", "record_id", rec.ID, "error", err)
@@ -98,11 +98,27 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	}
 
 	if inputFilename == "" {
-		inputFilename = filepath.Base(inputPath)
+		inputFilename = resolveChunkingInputFilename(rec, inputPath)
 	}
 	if err := p.Service.HandleInput(ctx, evt.RecordID, inputFilename, fileBody); err != nil {
 		p.Logger.Error("chunking processor failed", "record_id", rec.ID, "error", err)
 		return err
 	}
 	return nil
+}
+
+func resolveChunkingInputFilename(rec DocMetadataInputRecord, inputPath string) string {
+	candidates := []string{
+		inputPath,
+		rec.StagingFilename,
+		rec.FileName,
+		rec.ResultFilename,
+	}
+	for _, candidate := range candidates {
+		name := filepath.Base(strings.TrimSpace(candidate))
+		if name != "" && name != "." && name != string(filepath.Separator) {
+			return name
+		}
+	}
+	return ""
 }

@@ -11,6 +11,44 @@ import (
 	"time"
 )
 
+type fakeLogger struct {
+	infos []fakeLogEntry
+}
+
+type fakeLogEntry struct {
+	message string
+	args    []any
+}
+
+func (f *fakeLogger) Debug(string, ...any) {}
+func (f *fakeLogger) Line(string, ...any)  {}
+func (f *fakeLogger) Warn(string, ...any)  {}
+func (f *fakeLogger) Error(string, ...any) {}
+func (f *fakeLogger) Trace(string)         {}
+func (f *fakeLogger) Close()               {}
+
+func (f *fakeLogger) Info(message string, args ...any) {
+	f.infos = append(f.infos, fakeLogEntry{message: message, args: append([]any(nil), args...)})
+}
+
+func findInfoLog(entries []fakeLogEntry, message string) (fakeLogEntry, bool) {
+	for _, entry := range entries {
+		if entry.message == message {
+			return entry, true
+		}
+	}
+	return fakeLogEntry{}, false
+}
+
+func logValue(args []any, key string) (any, bool) {
+	for i := 0; i+1 < len(args); i += 2 {
+		if k, ok := args[i].(string); ok && k == key {
+			return args[i+1], true
+		}
+	}
+	return nil, false
+}
+
 type fakeStore struct {
 	rec           InputRecord
 	getErr        error
@@ -121,6 +159,36 @@ func TestBuildChunks_LargeNumericListCanSplit(t *testing.T) {
 	}
 }
 
+func TestParseBlockBufferLines_SkipsTOCLines(t *testing.T) {
+	buf := &BlockBuffer{
+		Blocks: []Block{
+			{
+				Index: 1,
+				Lines: []BlockLine{
+					{Flag: "n", LineNumber: 8, PageNumber: 1, LineType: "paragraph", Content: "title"},
+					{Flag: "n", LineNumber: 12, PageNumber: 2, LineType: "toc", Content: "目次"},
+					{Flag: "n", LineNumber: 13, PageNumber: 2, LineType: "TOC", Content: "前言"},
+					{Flag: "o", LineNumber: 14, PageNumber: 2, LineType: "toc", Content: "ignored overlap"},
+					{Flag: "n", LineNumber: 23, PageNumber: 3, LineType: "paragraph", Content: "body"},
+				},
+			},
+		},
+	}
+
+	lines := ParseBlockBufferLines(buf)
+	if len(lines) != 2 {
+		t.Fatalf("lines=%d, want 2", len(lines))
+	}
+	if lines[0].LineNo != 8 || lines[1].LineNo != 23 {
+		t.Fatalf("line numbers=%v, want [8 23]", []int{lines[0].LineNo, lines[1].LineNo})
+	}
+	for _, line := range lines {
+		if strings.EqualFold(strings.TrimSpace(line.LineType), "toc") {
+			t.Fatalf("unexpected TOC line in output: %+v", line)
+		}
+	}
+}
+
 func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	tmp := t.TempDir()
 	treeRoot := t.TempDir()
@@ -162,7 +230,9 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 			},
 		},
 	}
+	logger := &fakeLogger{}
 	svc := NewFixedSizeChunkingService(st, ex, nil)
+	svc.Logger = logger
 	svc.ChunkDir = tmp
 	svc.TreeRootDir = treeRoot
 	svc.SummaryTreeDir = t.TempDir()
@@ -207,6 +277,16 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	}
 	if _, err := os.Stat(topicPath); err != nil {
 		t.Fatalf("missing topic artifact: %v", err)
+	}
+	logEntry, ok := findInfoLog(logger.infos, "chunk file generated")
+	if !ok {
+		t.Fatalf("expected \"chunk file generated\" log entry, got %#v", logger.infos)
+	}
+	if got, ok := logValue(logEntry.args, "chunk_file"); !ok || got != chunkPath {
+		t.Fatalf("chunk_file=%v, ok=%v, want %q", got, ok, chunkPath)
+	}
+	if got, ok := logValue(logEntry.args, "num_chunks"); !ok || got != len(ex.outs) {
+		t.Fatalf("num_chunks=%v, ok=%v, want %d", got, ok, len(ex.outs))
 	}
 
 	b2, err := os.ReadFile(chunkPath)

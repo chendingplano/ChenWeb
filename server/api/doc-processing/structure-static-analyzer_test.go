@@ -223,6 +223,32 @@ func TestParseStaticNumericHeading_NormalizesOCRZero(t *testing.T) {
 	}
 }
 
+func TestParseStaticInputLine_NormalizesLegacyHeadingType(t *testing.T) {
+	line, err := parseStaticInputLine("1\t1\theading(2)\tF\t12\t[0,0,1,1]\tScope")
+	if err != nil {
+		t.Fatalf("parseStaticInputLine: %v", err)
+	}
+	if got := line.OriginalLineType; got != "heading-2" {
+		t.Fatalf("OriginalLineType=%q, want heading-2", got)
+	}
+	if got := line.OriginalLineLower; got != "heading-2" {
+		t.Fatalf("OriginalLineLower=%q, want heading-2", got)
+	}
+}
+
+func TestParseStaticInputLine_NormalizesBareHeadingType(t *testing.T) {
+	line, err := parseStaticInputLine("1\t1\theading \tF\t12\t[0,0,1,1]\tScope")
+	if err != nil {
+		t.Fatalf("parseStaticInputLine: %v", err)
+	}
+	if got := line.OriginalLineType; got != "heading-1" {
+		t.Fatalf("OriginalLineType=%q, want heading-1", got)
+	}
+	if got := line.OriginalLineLower; got != "heading-1" {
+		t.Fatalf("OriginalLineLower=%q, want heading-1", got)
+	}
+}
+
 func TestStaticAnalyzer_DoesNotLeakTOCToNextPage(t *testing.T) {
 	body := strings.Join([]string{
 		"80\t7\tparagraph\tHiddenHorzOCR\t9\t[0,0,1,1]\t目录",

@@ -765,20 +765,75 @@
 						sidebarMinWidth={140}
 						sidebarMaxWidth={420}
 						sidebarDefaultWidth={270}
-						sidebarTitle="Chunk Bounding Boxes"
+						sidebarTitle="Chunk Details"
 						sidebarSettingsKey="chunk-mgmt-pdf-sidebar"
 						sidebarWidthSettingLabel="Panel Width"
 					>
 						{#snippet sidebar()}
-							{#if selectedBBoxes.length === 0}
-								<div class="meta-empty">No coordinates available.</div>
-							{:else}
-								{#each selectedBBoxes as box (`${box.page_number}-${box.coords.join(',')}`)}
-									<div class="bbox-row">
-										<div class="bbox-page">Page {box.page_number}</div>
-										<div class="bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</div>
+							{#if selectedChunk}
+								<div class="info-block">
+									<div class="info-section">
+										<div class="info-section-title">Chunk</div>
+										<div class="info-row">
+											<span class="info-label">#{selectedChunk.seqno}</span>
+											<span class="info-type">{selectedChunk.topic_type}</span>
+										</div>
+										<div class="info-topic">{selectedChunk.topic}</div>
 									</div>
-								{/each}
+
+									{#if (selectedChunk.keywords ?? []).length > 0}
+										<div class="info-section">
+											<div class="info-section-title">Keywords</div>
+											<div class="info-keywords">
+												{selectedChunk.keywords.join(', ')}
+											</div>
+										</div>
+									{/if}
+
+									{#if (selectedChunk.source_line_spans ?? []).length > 0}
+										<div class="info-section">
+											<div class="info-section-title">Source Lines</div>
+											<div class="info-spans">
+												{#each selectedChunk.source_line_spans as span (`${span.page_number}-${span.line_number}`)}
+													<span class="info-span-chip">P{span.page_number}:L{span.line_number}</span>
+												{/each}
+											</div>
+										</div>
+									{/if}
+
+									{#if (selectedChunk.content_lines ?? []).length > 0}
+										<div class="info-section">
+											<div class="info-section-title">Content Lines ({selectedChunk.content_lines.length})</div>
+											<div class="info-content-list">
+												{#each selectedChunk.content_lines as ln (`${ln.page_number}-${ln.line_number}`)}
+													<div class="info-content-item">
+														<div class="info-content-meta">
+															<span class="info-content-line">L{ln.line_number}</span>
+															<span class="info-content-type">{ln.line_type}</span>
+														</div>
+														<div class="info-content-preview">{ln.content}</div>
+													</div>
+												{/each}
+											</div>
+										</div>
+									{/if}
+
+									{#if selectedBBoxes.length > 0}
+										<div class="info-section">
+											<div class="info-section-title">Bounding Boxes ({selectedBBoxes.length})</div>
+											<div class="info-bbox-list">
+												{#each selectedBBoxes as box (`${box.page_number}-${box.coords.join(',')}`)}
+													<div class="info-bbox-row">
+														<span class="info-bbox-page">Page {box.page_number}</span>
+														<span class="info-bbox-coord">[{box.coords.map((n) => Math.trunc(n)).join(', ')}]</span>
+													</div>
+												{/each}
+											</div>
+										</div>
+									{/if}
+								</div>
+							{:else}
+								<div class="meta-empty">Select a chunk to view details.</div>
 							{/if}
 						{/snippet}
 					</PdfViewWindow>
@@ -1109,9 +1164,62 @@
 		height: fit-content;
 	}
 	.meta-title { font-weight: 700; margin-bottom: 8px; }
-	.bbox-row { margin-bottom: 8px; border-bottom: 1px dashed var(--ink-line-soft); padding-bottom: 8px; }
-	.bbox-page { font-size: 12px; color: var(--text-secondary); }
-	.bbox-coord { font-family: var(--font-mono); font-size: 12px; }
+	.info-block { display: flex; flex-direction: column; gap: 2px; }
+	.info-section {
+		padding: 8px 0;
+		border-bottom: 1px solid var(--ink-line-soft);
+	}
+	.info-section:last-child { border-bottom: none; }
+	.info-section-title {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--text-muted);
+		margin-bottom: 5px;
+	}
+	.info-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+	.info-label { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--brass); }
+	.info-type {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		padding: 1px 6px;
+		border-radius: 999px;
+		background: rgba(212, 162, 76, 0.14);
+		color: #e8ce8a;
+	}
+	.info-topic { font-size: 12px; line-height: 1.5; color: var(--text-primary); }
+	.info-keywords { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+	.info-spans { display: flex; flex-wrap: wrap; gap: 4px; }
+	.info-span-chip {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		padding: 2px 6px;
+		border-radius: 4px;
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--text-secondary);
+	}
+	.info-content-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+	.info-content-item {
+		padding: 4px 6px;
+		border-radius: 4px;
+		background: rgba(255, 255, 255, 0.03);
+	}
+	.info-content-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+	.info-content-line { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--brass); }
+	.info-content-type {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		padding: 0 4px;
+		border-radius: 3px;
+		background: rgba(255, 255, 255, 0.06);
+		color: var(--text-muted);
+	}
+	.info-content-preview { font-size: 11px; line-height: 1.4; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+	.info-bbox-list { display: flex; flex-direction: column; gap: 4px; }
+	.info-bbox-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
+	.info-bbox-page { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+	.info-bbox-coord { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
 	:global(.pdf-highlight) {
 		position: absolute;
 		background: rgba(212, 162, 76, 0.28);

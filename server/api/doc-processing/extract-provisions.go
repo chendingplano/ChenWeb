@@ -285,7 +285,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 		payloadVal = payload
 	}
 
-	p.Logger.Warn("primary LLM failed extracting provisions", 
+	p.Logger.Warn("primary LLM failed extracting provisions",
 		"error", err,
 		"model_name", p.ModelName,
 		"fallback_model", p.FallbackModelName,
@@ -323,9 +323,9 @@ func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block
 	})
 	if err != nil {
 		if payload == nil {
-			return nil, fmt.Errorf("(MID_26050841) failed extracting provisions, error:%w")
+			return nil, fmt.Errorf("(MID_26050841) failed extracting provisions, error:%w", err)
 		}
-		return nil, fmt.Errorf("(MID_26050842) failed extracting provisions, error:%w, payload:%v", payload)
+		return nil, fmt.Errorf("(MID_26050842) failed extracting provisions, error:%w, payload:%v", err, payload)
 	}
 
 	payload = normalizeProvisionPayload(payload)
