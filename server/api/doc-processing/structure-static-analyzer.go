@@ -27,6 +27,7 @@ var (
 	staticTOCDotLeaderRE    = regexp.MustCompile(`\.{3,}`)
 	staticPageImagePathRE   = regexp.MustCompile(`^(.+)/imageFile(\d+)\.png$`)
 	staticZeroOriginCoordRE = regexp.MustCompile(`^\[\s*0(?:\.0+)?,\s*0(?:\.0+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?\s*\]$`)
+	staticX1ZeroCoordRE     = regexp.MustCompile(`^\[\s*0(?:\.0+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?\s*\]$`)
 	staticLegacyHeadingRE   = regexp.MustCompile(`^heading\((\d+)\)$`)
 )
 
@@ -270,6 +271,7 @@ func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnal
 		return staticAnalyzeResult{}, fmt.Errorf("(MID_26042310) read input lines: %w", err)
 	}
 	lines = removeStaticPageImageArtifacts(lines)
+	lines = removeStaticWeBoosWatermarkLines(lines)
 
 	corrected := make(map[int]string, len(lines))
 	for _, line := range lines {
@@ -348,6 +350,57 @@ func removeStaticPageImageArtifacts(lines []staticInputLine) []staticInputLine {
 		filtered = append(filtered, line)
 	}
 	return filtered
+}
+
+func removeStaticWeBoosWatermarkLines(lines []staticInputLine) []staticInputLine {
+	matchesByPage := make(map[int][]int, 4)
+	for i, line := range lines {
+		if !isStaticWeBoosWatermarkParagraph(line) {
+			continue
+		}
+		matchesByPage[line.PageNo] = append(matchesByPage[line.PageNo], i)
+	}
+
+	totalMatches := 0
+	for _, indexes := range matchesByPage {
+		if len(indexes) != 1 {
+			return lines
+		}
+		totalMatches += len(indexes)
+	}
+	if totalMatches == 0 {
+		return lines
+	}
+
+	removed := make(map[int]struct{}, totalMatches)
+	for _, indexes := range matchesByPage {
+		for _, idx := range indexes {
+			removed[idx] = struct{}{}
+		}
+	}
+
+	filtered := make([]staticInputLine, 0, len(lines)-len(removed))
+	for i, line := range lines {
+		if _, ok := removed[i]; ok {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
+}
+
+func isStaticWeBoosWatermarkParagraph(line staticInputLine) bool {
+	if line.OriginalLineLower != "paragraph" {
+		return false
+	}
+	content := strings.TrimSpace(line.Content)
+	if !strings.HasPrefix(content, "www") {
+		return false
+	}
+	if len(content) > len("www.weboos.com") {
+		return false
+	}
+	return staticX1ZeroCoordRE.MatchString(strings.TrimSpace(line.Coordinate))
 }
 
 func parseStaticInputLine(raw string) (staticInputLine, error) {

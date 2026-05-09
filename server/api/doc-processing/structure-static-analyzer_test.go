@@ -319,3 +319,105 @@ func TestStaticAnalyzer_RemovesRepeatedPageImageArtifacts(t *testing.T) {
 		t.Fatalf("line11=%q, want heading-1", got)
 	}
 }
+
+func TestStaticAnalyzer_RemovesWeBoosWatermarkLines(t *testing.T) {
+	body := strings.Join([]string{
+		"7\t1\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"8\t1\tparagraph\tF\t12\t[0,0,1,1]\t1 Scope",
+		"26\t2\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"27\t2\tparagraph\tF\t12\t[0,0,1,1]\t1.1 Purpose",
+		"35\t3\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"36\t3\tparagraph\tF\t12\t[0,0,1,1]\t2 Terms",
+		"45\t4\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"272\t10\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww om",
+		"683\t24\ttable-row\tunknown-font\t12\t[99.42,376.32,541.08,422.82]\t|注2 1高毒可燃气体按有毒气体检测<br>2 特定有毒气体指有相应传感器或气体检测管的有毒气体<br>3 符合本规范技术要求的其他类型直读式仪器也可以用于检测<br>www.weboos.com|||",
+		"684\t24\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww m",
+		"46\t4\tparagraph\tF\t12\t[0,0,1,1]\t2.1 Definitions",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := len(out.Lines); got != 5 {
+		t.Fatalf("len(Lines)=%d, want 5 after removing watermark lines", got)
+	}
+	for _, removed := range []int{7, 26, 35, 45, 272, 684} {
+		if _, ok := out.CorrectedType[removed]; ok {
+			t.Fatalf("line %d still present in corrected map", removed)
+		}
+	}
+	if got := out.CorrectedType[8]; got != "heading-1" {
+		t.Fatalf("line8=%q, want heading-1", got)
+	}
+	if got := out.CorrectedType[27]; got != "heading-2" {
+		t.Fatalf("line27=%q, want heading-2", got)
+	}
+	if got := out.CorrectedType[36]; got != "heading-1" {
+		t.Fatalf("line36=%q, want heading-1", got)
+	}
+	if got := out.CorrectedType[46]; got != "heading-2" {
+		t.Fatalf("line46=%q, want heading-2", got)
+	}
+	var line683 staticInputLine
+	found683 := false
+	for _, line := range out.Lines {
+		if line.LineNo != 683 {
+			continue
+		}
+		line683 = line
+		found683 = true
+		break
+	}
+	if !found683 {
+		t.Fatalf("line 683 missing from output")
+	}
+	if got := line683.Content; got != "|注2 1高毒可燃气体按有毒气体检测<br>2 特定有毒气体指有相应传感器或气体检测管的有毒气体<br>3 符合本规范技术要求的其他类型直读式仪器也可以用于检测<br>www.weboos.com|||" {
+		t.Fatalf("line683 content=%q, want embedded watermark preserved per spec result", got)
+	}
+}
+
+func TestStaticAnalyzer_KeepsEmbeddedWeBoosWatermarkWhenRuleTriggers(t *testing.T) {
+	body := strings.Join([]string{
+		"7\t1\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"26\t2\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"35\t3\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"77\t4\ttable-row\tF\t12\t[0,0,1,1]\talpha www.weboos.com omega",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := len(out.Lines); got != 1 {
+		t.Fatalf("len(Lines)=%d, want 1 after removing watermark paragraphs", got)
+	}
+	if got := out.Lines[0].Content; got != "alpha www.weboos.com omega" {
+		t.Fatalf("line77 content=%q, want embedded watermark preserved", got)
+	}
+}
+
+func TestStaticAnalyzer_KeepsWeBoosWatermarkLinesWhenPageHasMultipleMatches(t *testing.T) {
+	body := strings.Join([]string{
+		"7\t1\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"8\t1\tparagraph\tF\t12\t[0,0,1,1]\t1 Scope",
+		"26\t2\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"27\t2\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww m",
+		"35\t3\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+		"36\t3\tparagraph\tF\t12\t[0,0,1,1]\t2 Terms",
+		"45\t4\tparagraph\tSimSun\t89\t[0,389.462,623.999,478.248]\twww.weboos.com",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := len(out.Lines); got != 7 {
+		t.Fatalf("len(Lines)=%d, want 7 when a page has multiple watermark matches", got)
+	}
+	for _, kept := range []int{7, 26, 27, 35, 45} {
+		if _, ok := out.CorrectedType[kept]; !ok {
+			t.Fatalf("line %d unexpectedly removed", kept)
+		}
+	}
+}
