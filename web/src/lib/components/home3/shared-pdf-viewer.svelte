@@ -196,6 +196,14 @@
 		const pageRect = pageEl.getBoundingClientRect();
 		const hostRect = host.getBoundingClientRect();
 		const targetTop = host.scrollTop + (pageRect.top - hostRect.top);
+		/*
+		console.log('[shared-pdf-viewer] scrollToPage', {
+			pageNo,
+			behavior,
+			targetTop,
+			currentScrollTop: host.scrollTop
+		});
+		*/
 		host.scrollTo({ top: Math.max(0, targetTop), behavior });
 	}
 
@@ -277,12 +285,30 @@
 		if (!host) return false;
 		const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
 		const firstHighlight = overlay?.querySelector('.pdf-highlight') as HTMLElement | null;
-		if (!firstHighlight) return false;
+		if (!firstHighlight) {
+			/*
+			console.log('[shared-pdf-viewer] scrollToFirstHighlight: no highlight found', {
+				pageNo,
+				behavior
+			});
+			*/
+			return false;
+		}
 		const highlightRect = firstHighlight.getBoundingClientRect();
 		const hostRect = host.getBoundingClientRect();
 		const hostHeight = host.clientHeight;
 		const highlightTop = highlightRect.top - hostRect.top;
 		const highlightBottom = highlightRect.bottom - hostRect.top;
+		/*
+		console.log('[shared-pdf-viewer] scrollToFirstHighlight: found highlight', {
+			pageNo,
+			behavior,
+			highlightTop,
+			highlightBottom,
+			hostHeight,
+			currentScrollTop: host.scrollTop
+		});
+		*/
 
 		// Rule 1: highlight is entirely visible — no scroll needed
 		if (highlightTop >= 0 && highlightBottom <= hostHeight) return true;
@@ -297,6 +323,13 @@
 			const topPadding = hostHeight * 0.2;
 			targetTop = host.scrollTop + highlightTop - topPadding;
 		}
+		/*
+		console.log('[shared-pdf-viewer] scrollToFirstHighlight: scrolling to highlight', {
+			pageNo,
+			behavior,
+			targetTop
+		});
+		*/
 		host.scrollTo({ top: Math.max(0, targetTop), behavior });
 		return true;
 	}

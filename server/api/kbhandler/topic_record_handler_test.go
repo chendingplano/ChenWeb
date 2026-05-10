@@ -147,3 +147,59 @@ category_paths: []
 		t.Fatalf("unmet db expectations: %v", err)
 	}
 }
+
+func TestReadRecordTopicCards_UsesTxtLineArtifactForPageTargets(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+
+	expectResolveInputTablePlural(mock)
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "staging_filename").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "parser_name").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	recordID := int64(99)
+	query := regexp.QuoteMeta(`SELECT COALESCE(i.staging_filename, '') AS staging_filename, COALESCE(i.parser_name, '') AS parser_name, i.file_name FROM kb.inputs i WHERE i.id = $1`)
+	mock.ExpectQuery(query).
+		WithArgs(recordID).
+		WillReturnRows(sqlmock.NewRows([]string{"staging_filename", "parser_name", "file_name"}).
+			AddRow("std_20039.pdf", "opendata", "/tmp/standards/std_20039.pdf"))
+
+	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "std_20039_opendata.topics"), `topic_id: 101
+topic_type: "requirement"
+lines: ["338-342"]
+topic_keywords: ["clinic", "health"]
+topic: "Requirements text"
+category_paths: []
+`)
+	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "std_20039_opendata.txt"), "338\t17\tparagraph\tSong\t12\t[10,20,30,40]\tA\n339\t17\tparagraph\tSong\t12\t[11,21,31,41]\tB\n342\t17\tparagraph\tSong\t12\t[12,22,32,42]\tC\n")
+
+	results, err := readRecordTopicCards(nil, recordID)
+	if err != nil {
+		t.Fatalf("readRecordTopicCards: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 topic, got %d", len(results))
+	}
+	if results[0].Page != 17 {
+		t.Fatalf("expected topic page from txt line artifact, got %+v", results[0])
+	}
+	if len(results[0].Targets) == 0 || results[0].Targets[0].Page != 17 {
+		t.Fatalf("expected topic targets from txt line artifact, got %+v", results[0].Targets)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}

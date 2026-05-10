@@ -10,10 +10,10 @@
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import {
 		createTopicTreeState,
-		selectRecordTopicTarget,
 		selectTopicTreeRecord,
 		toggleTopicTreeListMode
 	} from './topic-tree-state.js';
+	import { selectTopicTreeViewerTarget } from './topic-tree-selection.js';
 	import { formatTopicLineSpecs } from './topic-line-specs';
 	import type { TopicRecordTarget, TopicTreeRecord } from './topic-types';
 
@@ -79,6 +79,17 @@
 			(target: TopicRecordTarget) =>
 				target.page === pageNo && Array.isArray(target.coords) && target.coords.length >= 4
 		);
+		/*
+		console.log('[topic-tree] renderTopicHighlight', {
+			selectedTopicId: selectedTopic.id,
+			selectedTopicText: selectedTopic.topicText,
+			requestedPage: pageNo,
+			selectedTopicPage: selectedTopic.page,
+			lineNumbers: selectedTopic.sourceLineSpecs ?? [],
+			allTargets: selectedTopic.targets ?? [],
+			matchedTargets: targets ?? []
+		});
+		*/
 		if (!targets || targets.length === 0) return;
 		for (const target of targets) {
 			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
@@ -86,6 +97,16 @@
 			const top = Math.max(0, Math.min(vy1, vy2) - 4);
 			const width = Math.abs(vx2 - vx1) + 10;
 			const height = Math.abs(vy2 - vy1) + 8;
+			/*
+			console.log('[topic-tree] highlight target converted', {
+				selectedTopicId: selectedTopic.id,
+				page: pageNo,
+				lineNumbers: selectedTopic.sourceLineSpecs ?? [],
+				pdfCoords: target.coords,
+				viewportCoords: [vx1, vy1, vx2, vy2],
+				box: { left, top, width, height }
+			});
+			*/
 			if (width < 1 || height < 1) continue;
 			const box = document.createElement('div');
 			box.className = 'pdf-highlight';
@@ -141,6 +162,28 @@
 		}
 	});
 
+	function selectTopic(topic: TopicTreeRecord['topics'][number], recordId: number) {
+		const next = selectTopicTreeViewerTarget(treeState, {
+			recordId,
+			topicId: topic.id,
+			inputId: topic.inputId,
+			page: topic.page
+		});
+		/*
+		console.log('[topic-tree] selectTopic jump request', {
+			recordId,
+			topicId: topic.id,
+			inputId: topic.inputId,
+			jumpPage: next.page,
+			selectedTopicPage: topic.page,
+			lineNumbers: topic.sourceLineSpecs ?? [],
+			targets: topic.targets ?? []
+		});
+		*/
+		treeState = next.treeState;
+		docPage = next.page;
+	}
+
 	async function ensureRecordTopics(recordId: number) {
 		const current = recordCache[recordId];
 		if (!current || current.topics.length > 0 || topicLoadingByRecordId[recordId]) return;
@@ -160,12 +203,7 @@
 				response.topics[0] &&
 				!treeState.selectedPdfTarget
 			) {
-				treeState = selectRecordTopicTarget(treeState, {
-					recordId,
-					topicId: response.topics[0].id,
-					inputId: response.topics[0].inputId,
-					page: response.topics[0].page
-				});
+				selectTopic({ ...response.topics[0], recordId }, recordId);
 			}
 		} catch (error) {
 			loadError =
@@ -294,13 +332,7 @@
 									type="button"
 									class:selected={treeState.selectedTopicId === topic.id}
 									class="snippet"
-									onclick={() =>
-										(treeState = selectRecordTopicTarget(treeState, {
-											recordId: activeRecord.id,
-											topicId: topic.id,
-											inputId: topic.inputId,
-											page: topic.page
-										}))}
+									onclick={() => selectTopic(topic, activeRecord.id)}
 								>
 									<div class="snippet-head">
 										<div class="keyword-row">
