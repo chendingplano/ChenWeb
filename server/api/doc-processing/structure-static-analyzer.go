@@ -240,6 +240,9 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 // analyzeStaticStructure
 // This is the main function for static analysis.
 func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnalyzeResult, error) {
+	if logger == nil {
+		logger = loggerutil.CreateDefaultLogger("MID_26051001")
+	}
 	sc := bufio.NewScanner(strings.NewReader(string(body)))
 	sc.Buffer(make([]byte, 1024), 16*1024*1024)
 
@@ -559,6 +562,7 @@ func applyStaticHeadingLabels(lastTOC int, lines []staticInputLine, corrected ma
 			if title != "" && len(parts) > 0 && symbol != "" {
 				if prev, exists := appendixSeq[symbol]; !exists || isStaticNextHeading(prev, parts) || len(parts) == 1 {
 					corrected[line.LineNo] = fmt.Sprintf("heading-%d", len(parts))
+					lines[i].Content, _ = normalizeStaticHeadingContent(lines[i].Content)
 					appendixSeq[symbol] = parts
 				}
 				continue
@@ -588,12 +592,14 @@ func applyStaticHeadingLabels(lastTOC int, lines []staticInputLine, corrected ma
 
 		if !hasNumericSeq {
 			corrected[line.LineNo] = fmt.Sprintf("heading-%d", len(parts))
+			lines[i].Content, _ = normalizeStaticHeadingContent(lines[i].Content)
 			prevNumeric = parts
 			hasNumericSeq = true
 			continue
 		}
 		if isStaticNextHeading(prevNumeric, parts) {
 			corrected[line.LineNo] = fmt.Sprintf("heading-%d", len(parts))
+			lines[i].Content, _ = normalizeStaticHeadingContent(lines[i].Content)
 			prevNumeric = parts
 			hasNumericSeq = true
 		}
@@ -632,6 +638,38 @@ func normalizeStaticHeadingNumber(raw string) string {
 	s = strings.TrimSuffix(s, ".")
 	s = strings.NewReplacer("O", "0", "o", "0").Replace(s)
 	return s
+}
+
+func normalizeStaticHeadingContent(content string) (string, bool) {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return content, false
+	}
+
+	if m := staticNumericHeadingRE.FindStringSubmatch(trimmed); len(m) == 3 {
+		normalizedNumber := normalizeStaticHeadingNumber(m[1])
+		if _, ok := parseStaticHeadingParts(normalizedNumber); ok {
+			normalized := normalizedNumber
+			if title := strings.TrimSpace(m[2]); title != "" {
+				normalized += " " + title
+			}
+			return normalized, normalized != trimmed
+		}
+	}
+
+	if m := staticAppendixHeadingRE.FindStringSubmatch(trimmed); len(m) == 4 {
+		symbol := strings.ToUpper(strings.TrimSpace(m[1]))
+		normalizedNumber := normalizeStaticHeadingNumber(m[2])
+		if _, ok := parseStaticHeadingParts(normalizedNumber); ok {
+			normalized := symbol + "." + normalizedNumber
+			if title := strings.TrimSpace(m[3]); title != "" {
+				normalized += " " + title
+			}
+			return normalized, normalized != trimmed
+		}
+	}
+
+	return content, false
 }
 
 func parseStaticHeadingParts(raw string) ([]int, bool) {

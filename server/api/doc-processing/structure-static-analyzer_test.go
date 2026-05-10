@@ -223,6 +223,165 @@ func TestParseStaticNumericHeading_NormalizesOCRZero(t *testing.T) {
 	}
 }
 
+func TestNormalizeStaticHeadingContent_OCRZeroSpacingVariants(t *testing.T) {
+	testCases := []struct {
+		name    string
+		input   string
+		want    string
+		changed bool
+	}{
+		{
+			name:    "already compact zero form",
+			input:   "2.0.1 工作环境 working environment",
+			want:    "2.0.1 工作环境 working environment",
+			changed: false,
+		},
+		{
+			name:    "space around zero",
+			input:   "2. 0.1 工作环境 working environment",
+			want:    "2.0.1 工作环境 working environment",
+			changed: true,
+		},
+		{
+			name:    "ocr o with both spaces",
+			input:   "2. o. 2 工作地点 working site 时停留",
+			want:    "2.0.2 工作地点 working site 时停留",
+			changed: true,
+		},
+		{
+			name:    "ocr o without spaces",
+			input:   "2.o.3 有害气体 harmful g康造成危害的气",
+			want:    "2.0.3 有害气体 harmful g康造成危害的气",
+			changed: true,
+		},
+		{
+			name:    "ocr o with left space only",
+			input:   "2. o.4 有毒气体 toxic gas 通动物并能引起人体",
+			want:    "2.0.4 有毒气体 toxic gas 通动物并能引起人体",
+			changed: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, changed := normalizeStaticHeadingContent(tc.input)
+			if got != tc.want {
+				t.Fatalf("normalizeStaticHeadingContent(%q)=%q, want %q", tc.input, got, tc.want)
+			}
+			if changed != tc.changed {
+				t.Fatalf("changed=%v, want %v", changed, tc.changed)
+			}
+		})
+	}
+}
+
+func TestStaticAnalyzer_NormalizesOCRZeroSpacingInDetectedHeadings(t *testing.T) {
+	body := strings.Join([]string{
+		"76\t7\theading-1\tHiddenHorzOCR\t7\t[121.2,326.71,172.33,336.01]\t2 术语",
+		"77\t7\theading-2\tTimes-Roman\t7\t[49.16,296.826,170.259,304.526]\t2. 0.1 工作环境 working environment",
+		"78\t7\tparagraph\tHiddenHorzOCR\t6\t[62.89,285.73,198.97,293.53]\t工作场所及周围空间的安全卫生状态和条件。",
+		"79\t7\theading-2\tTimes-Roman\t10\t[49.16,264.61,244.571,286.01]\t2. o. 2 工作地点 working site 时停留",
+		"80\t7\tparagraph\tHiddenHorzOCR\t6\t[49.44,254.05,72.72,261.85]\t的地点。",
+		"81\t7\theading-2\tTimes-Roman\t10\t[49.16,233.23,245.053,254.56]\t2. o. 3 有害气体 harmful g康造成危害的气",
+		"82\t7\tparagraph\tHiddenHorzOCR\t6\t[48.97,222.67,198.97,230.17]\t体、蒸汽、雾或含有有毒粉尘的混合气体的总称。",
+		"83\t7\theading-2\tTimes-Roman\t10\t[49.16,201.73,245.291,223.13]\t2. o. 4 有毒气体 toxic gas 通动物并能引起人体",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+
+	wantContent := map[int]string{
+		77: "2.0.1 工作环境 working environment",
+		79: "2.0.2 工作地点 working site 时停留",
+		81: "2.0.3 有害气体 harmful g康造成危害的气",
+		83: "2.0.4 有毒气体 toxic gas 通动物并能引起人体",
+	}
+	wantTypes := map[int]string{
+		76: "heading-1",
+		77: "heading-2",
+		79: "heading-2",
+		81: "heading-2",
+		83: "heading-2",
+	}
+
+	gotByLine := make(map[int]staticInputLine, len(out.Lines))
+	for _, line := range out.Lines {
+		gotByLine[line.LineNo] = line
+	}
+
+	for lineNo, want := range wantContent {
+		line, ok := gotByLine[lineNo]
+		if !ok {
+			t.Fatalf("line %d missing from output", lineNo)
+		}
+		if line.Content != want {
+			t.Fatalf("line %d content=%q, want %q", lineNo, line.Content, want)
+		}
+	}
+	for lineNo, want := range wantTypes {
+		if got := out.CorrectedType[lineNo]; got != want {
+			t.Fatalf("line %d corrected=%q, want %q", lineNo, got, want)
+		}
+	}
+}
+
+func TestStaticAnalyzer_WriteCorrectedArtifact_PreservesNormalizedHeadingContent(t *testing.T) {
+	tmp := t.TempDir()
+	p := &StaticAnalyzerProcessor{
+		ArtifactDir:    tmp,
+		OverrideOrigin: false,
+	}
+
+	out := staticAnalyzeResult{
+		Lines: []staticInputLine{
+			{
+				LineNo:            77,
+				PageNo:            7,
+				OriginalLineType:  "heading-2",
+				OriginalLineLower: "heading-2",
+				Font:              "Times-Roman",
+				FontSize:          "7",
+				Coordinate:        "[49.16,296.826,170.259,304.526]",
+				Content:           "2.0.1 工作环境 working environment",
+			},
+			{
+				LineNo:            79,
+				PageNo:            7,
+				OriginalLineType:  "heading-2",
+				OriginalLineLower: "heading-2",
+				Font:              "Times-Roman",
+				FontSize:          "10",
+				Coordinate:        "[49.16,264.61,244.571,286.01]",
+				Content:           "2.0.2 工作地点 working site 时停留",
+			},
+		},
+		CorrectedType: map[int]string{
+			77: "heading-2",
+			79: "heading-2",
+		},
+	}
+
+	if err := p.writeCorrectedArtifact(97, "ocr_rslt_97_opendata.txt", filepath.Join(tmp, "ignored.txt"), out); err != nil {
+		t.Fatalf("writeCorrectedArtifact: %v", err)
+	}
+
+	outPath := filepath.Join(tmp, "0", "97", "ocr_rslt_97_opendata.corrected")
+	bs, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read corrected file: %v", err)
+	}
+	got := strings.TrimSpace(string(bs))
+	want := strings.Join([]string{
+		"77\t7\theading-2\theading-2\tTimes-Roman\t7\t[49.16,296.826,170.259,304.526]\t2.0.1 工作环境 working environment",
+		"79\t7\theading-2\theading-2\tTimes-Roman\t10\t[49.16,264.61,244.571,286.01]\t2.0.2 工作地点 working site 时停留",
+	}, "\n")
+	if got != want {
+		t.Fatalf("corrected artifact=\n%s\nwant=\n%s", got, want)
+	}
+}
+
 func TestParseStaticInputLine_NormalizesLegacyHeadingType(t *testing.T) {
 	line, err := parseStaticInputLine("1\t1\theading(2)\tF\t12\t[0,0,1,1]\tScope")
 	if err != nil {

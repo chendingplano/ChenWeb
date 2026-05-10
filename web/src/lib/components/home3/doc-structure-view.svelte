@@ -25,6 +25,12 @@
 		clampDocStructureRecordGap,
 		clampDocStructureRecordHeight
 	} from './doc-structure-settings.js';
+	import {
+		DOC_STRUCTURE_FILTER_OPTIONS,
+		effectiveDocStructureLineType,
+		filterDocStructureLines,
+		getDocStructureFilterLabel
+	} from './doc-structure-filters.js';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -61,7 +67,15 @@
 		label: string;
 		version: number;
 	} | null>(null);
-	let headingsOnly = $state(false);
+	type DocStructureFilterValue =
+		| 'all'
+		| 'headings'
+		| 'paragraphs'
+		| 'lists'
+		| 'tables'
+		| 'formulas';
+
+	let lineFilter = $state<DocStructureFilterValue>('all');
 	let loading = $state(false);
 	let errorMsg = $state('');
 	let docStructureSettings = $state<DocStructureSettings>({ ...DOC_STRUCTURE_DEFAULT_SETTINGS });
@@ -104,19 +118,13 @@
 		return `${line.page_number}:${line.line_number}`;
 	}
 
-	function effectiveLineType(line: DocStructureLine): string {
-		const corrected = line.corrected_line_type?.trim().toLowerCase() ?? '';
-		if (corrected !== '' && corrected !== 'unchanged') return corrected;
-		return line.line_type?.trim().toLowerCase() ?? '';
-	}
-
 	function isHeadingLine(line: DocStructureLine): boolean {
-		const t = effectiveLineType(line);
+		const t = effectiveDocStructureLineType(line);
 		return /^heading(?:-\d+)?$/i.test(t) || t.includes('heading');
 	}
 
 	function displayLineType(line: DocStructureLine): string {
-		const t = effectiveLineType(line);
+		const t = effectiveDocStructureLineType(line);
 		return t === '' ? 'unknown' : t;
 	}
 
@@ -150,9 +158,7 @@
 		docStructureSettings = { ...DOC_STRUCTURE_DEFAULT_SETTINGS };
 	}
 
-	let filteredLines = $derived.by(() =>
-		headingsOnly ? lines.filter((ln) => isHeadingLine(ln)) : lines
-	);
+	let filteredLines = $derived.by(() => filterDocStructureLines(lines, lineFilter));
 
 	let headingCount = $derived.by(() => lines.filter((ln) => isHeadingLine(ln)).length);
 
@@ -218,7 +224,7 @@
 			lines = structureRes.lines ?? [];
 			correctedFile = structureRes.corrected_file ?? '';
 			currentInput = inputRes?.record ?? null;
-			const first = (headingsOnly ? lines.filter((ln) => isHeadingLine(ln)) : lines)[0];
+			const first = filterDocStructureLines(lines, lineFilter)[0];
 			if (first) {
 				await selectLine(first);
 			}
@@ -403,6 +409,10 @@
 		return r.doc_no?.trim() || '—';
 	}
 
+	function handleLineFilterChange(event: Event) {
+		lineFilter = (event.currentTarget as HTMLSelectElement).value as DocStructureFilterValue;
+	}
+
 	function mapBrowserRecord(record: KbInputRecord) {
 		return {
 			id: record.id,
@@ -432,6 +442,20 @@
 	$effect(() => {
 		if (typeof window === 'undefined' || !settingsHydrated) return;
 		writeDocStructureSettings(localStorage, getDocStructureSettingsUserId(), docStructureSettings);
+	});
+
+	$effect(() => {
+		const visibleSelected =
+			selectedLineKey != null &&
+			filteredLines.some((line) => lineKey(line) === selectedLineKey);
+		if (visibleSelected) return;
+		const nextLine = filteredLines[0] ?? null;
+		if (!nextLine) {
+			selectedLineKey = null;
+			selectedHighlightTarget = null;
+			return;
+		}
+		void selectLine(nextLine);
 	});
 </script>
 
@@ -484,12 +508,24 @@
 			<div class="left-meta">
 				<div class="left-meta-copy">
 					<div class="left-meta-title">Lines</div>
-					<div class="left-meta-count">{filteredLines.length} shown / {lines.length} total</div>
+					<div class="left-meta-count">
+						{filteredLines.length} shown / {lines.length} total · {getDocStructureFilterLabel(lineFilter)}
+					</div>
 				</div>
-				<button class="btn btn-ghost settings-btn" type="button" onclick={openLineListSettings}>
-					<SettingsIcon style="width:14px; height:14px;" />
-					Settings
-				</button>
+				<div class="left-meta-actions">
+					<label class="filter-field">
+						<span class="sr-only">Filter lines by type</span>
+						<select class="filter-select" value={lineFilter} onchange={handleLineFilterChange}>
+							{#each DOC_STRUCTURE_FILTER_OPTIONS as option (option.value)}
+								<option value={option.value}>{option.label}</option>
+							{/each}
+						</select>
+					</label>
+					<button class="btn btn-ghost settings-btn" type="button" onclick={openLineListSettings}>
+						<SettingsIcon style="width:14px; height:14px;" />
+						Settings
+					</button>
+				</div>
 			</div>
 
 			<div class="line-list">
@@ -500,7 +536,9 @@
 						<div class="empty-title">No lines loaded</div>
 						<div class="empty-sub">
 							Select a record to load a `.txt` file.
-							{#if headingsOnly}No heading lines found in current result.{/if}
+							{#if lineFilter !== 'all'}
+								No {getDocStructureFilterLabel(lineFilter).toLowerCase()} found in current result.
+							{/if}
 						</div>
 					</div>
 				{:else}
@@ -989,11 +1027,62 @@
 	.left-meta-copy {
 		min-width: 0;
 	}
+	.left-meta-actions {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex: 0 0 auto;
+	}
+	.filter-field {
+		display: flex;
+		align-items: center;
+	}
+	.filter-select {
+		height: 34px;
+		padding: 0 34px 0 10px;
+		border: 1px solid var(--ink-line);
+		border-radius: 10px;
+		background:
+			linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)),
+			var(--panel-bg-alt);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		cursor: pointer;
+		appearance: none;
+		background-image:
+			linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
+			linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+		background-position:
+			calc(100% - 16px) 14px,
+			calc(100% - 11px) 14px;
+		background-size: 5px 5px, 5px 5px;
+		background-repeat: no-repeat;
+	}
+	.filter-select:focus {
+		outline: none;
+		border-color: var(--brass);
+		box-shadow:
+			0 0 0 1px var(--brass-faint),
+			0 0 0 4px rgba(212, 162, 76, 0.08);
+	}
 	.settings-btn {
 		flex: 0 0 auto;
 		height: 34px;
 		padding: 0 10px;
 		font-size: 12px;
+	}
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 	.line-list {
 		overflow: auto;
