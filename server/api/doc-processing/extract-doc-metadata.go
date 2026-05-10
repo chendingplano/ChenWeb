@@ -34,6 +34,13 @@ type ExtractDocMetadataProcessor struct {
 	ModelCfgPath string
 	ModelErr     error
 	ModelName    string
+	ModelCfg     structureModelConfig
+
+	FallbackModelRef     string
+	FallbackModelCfgPath string
+	FallbackModelErr     error
+	FallbackModelName    string
+	FallbackModelCfg     structureModelConfig
 }
 
 type LLMJSONExtractor interface {
@@ -46,6 +53,7 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 	}
 	promptText, promptRef, promptPath, promptErr := loadDocMetaPromptFromEnv()
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
+	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_FALLBACK", "EXTRACT_DOCMETA_MODELS_FILE")
 	applyStructureModelConfigToExtractor(client, modelCfg)
 	return &ExtractDocMetadataProcessor{
 		Store:        store,
@@ -61,6 +69,13 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 		ModelCfgPath: modelCfgPath,
 		ModelErr:     modelErr,
 		ModelName:    modelCfg.ModelName,
+		ModelCfg:     modelCfg,
+
+		FallbackModelRef:     fallbackModelRef,
+		FallbackModelCfgPath: fallbackModelCfgPath,
+		FallbackModelErr:     fallbackModelErr,
+		FallbackModelName:    fallbackModelCfg.ModelName,
+		FallbackModelCfg:     fallbackModelCfg,
 	}
 }
 
@@ -133,13 +148,9 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		}
 
 		inputText := buildInputText(linesByPage, lastPage)
-		parsed, extractErr := p.Client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-			PromptText: p.PromptText,
-			ModelName:  p.ModelName,
-			InputText:  inputText,
-		})
+		parsed, usedModelName, extractErr := p.extractMetadataWithFallback(ctx, inputText)
 		if extractErr != nil {
-			return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042414) extract metadata via llm: %w, model name:%s, prompt file:%s", extractErr, p.ModelName, p.PromptRef))
+			return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042414) extract metadata via llm: %w, model name:%s, prompt file:%s", extractErr, usedModelName, p.PromptRef))
 		}
 		out = parseDocMetadataOutput(parsed)
 		if !out.NeedMorePages || maxPage == 0 || lastPage >= maxPage {
@@ -177,6 +188,44 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		"authors", len(upd.Authors),
 	)
 	return nil
+}
+
+func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
+	parsed, err := p.extractMetadataWithModel(ctx, inputText, p.ModelName, p.ModelCfg)
+	if err == nil {
+		return parsed, strings.TrimSpace(p.ModelName), nil
+	}
+
+	primaryModelName := strings.TrimSpace(p.ModelName)
+	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
+	if fallbackModelName == "" {
+		return nil, primaryModelName, fmt.Errorf("(MID_26051001) primary extraction failed and fallback model not configured: %w", err)
+	}
+	if p.FallbackModelErr != nil {
+		return nil, fallbackModelName, fmt.Errorf("(MID_26051002) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
+	}
+
+	p.Logger.Warn("primary doc metadata extraction failed; retrying fallback model",
+		"primary_model", primaryModelName,
+		"fallback_model", fallbackModelName,
+		"error", err,
+		"prompt_name", p.PromptRef,
+	)
+
+	parsed, fallbackErr := p.extractMetadataWithModel(ctx, inputText, fallbackModelName, p.FallbackModelCfg)
+	if fallbackErr != nil {
+		return nil, fallbackModelName, fmt.Errorf("(MID_26051003) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
+	}
+	return parsed, fallbackModelName, nil
+}
+
+func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
+	applyStructureModelConfigToExtractor(p.Client, cfg)
+	return p.Client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptText: p.PromptText,
+		ModelName:  modelName,
+		InputText:  inputText,
+	})
 }
 
 type docMetadataExtractionOutput struct {

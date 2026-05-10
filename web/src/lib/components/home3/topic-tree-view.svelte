@@ -14,6 +14,7 @@
 		selectTopicTreeRecord,
 		toggleTopicTreeListMode
 	} from './topic-tree-state.js';
+	import { formatTopicLineSpecs } from './topic-line-specs';
 	import type { TopicRecordTarget, TopicTreeRecord } from './topic-types';
 
 	let {
@@ -353,6 +354,10 @@
 											<div class="topic-sidebar-row">
 												<span>Type</span>
 												<strong>{selectedTopic.topicType || '—'}</strong>
+											</div>
+											<div class="topic-sidebar-row">
+												<span>Line Numbers</span>
+												<strong>{formatTopicLineSpecs(selectedTopic.sourceLineSpecs)}</strong>
 											</div>
 										</div>
 										<div class="topic-sidebar-block">

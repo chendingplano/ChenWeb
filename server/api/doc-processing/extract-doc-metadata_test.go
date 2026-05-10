@@ -296,3 +296,102 @@ timeout_sec = 30
 		t.Fatalf("ModelName=%q, want gpt-5.4-mini", svc.ModelName)
 	}
 }
+
+func TestNewExtractDocMetadataProcessor_LoadsFallbackModel(t *testing.T) {
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[docmeta-primary]
+model_name = "gemma4:26b"
+base_url = "http://127.0.0.1:11434"
+api_key = "ollama"
+timeout_sec = 30
+
+[docmeta-fallback]
+model_name = "gpt-5.4-mini"
+base_url = "https://api.openai.com"
+api_key = "test-key"
+timeout_sec = 60
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
+	t.Setenv("EXTRACT_DOCMETA_MODEL_NAME", "docmeta-primary")
+	t.Setenv("EXTRACT_DOCMETA_MODEL_FALLBACK", "docmeta-fallback")
+	t.Setenv("EXTRACT_DOCMETA_MODELS_FILE", modelsPath)
+	t.Setenv("EXTRACT_DOCMETA_PROMPT", "")
+
+	svc := NewExtractDocMetadataProcessor(&fakeDocMetadataStore{}, &fakeJSONExtractor{}, nil)
+	if svc.ModelErr != nil {
+		t.Fatalf("ModelErr=%v", svc.ModelErr)
+	}
+	if svc.FallbackModelErr != nil {
+		t.Fatalf("FallbackModelErr=%v", svc.FallbackModelErr)
+	}
+	if svc.FallbackModelRef != "docmeta-fallback" {
+		t.Fatalf("FallbackModelRef=%q, want docmeta-fallback", svc.FallbackModelRef)
+	}
+	if svc.FallbackModelName != "gpt-5.4-mini" {
+		t.Fatalf("FallbackModelName=%q, want gpt-5.4-mini", svc.FallbackModelName)
+	}
+}
+
+func TestExtractDocMetadata_PrimaryFailureRetriesFallbackModel(t *testing.T) {
+	tmp := t.TempDir()
+	lineFile := filepath.Join(tmp, "ocr_rslt_10_opendata.txt")
+	content := "1\t1\theading\tTestFont\t12\t[0,0,1,1]\tDocument Title\n"
+	if err := os.WriteFile(lineFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	st := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              10,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_10.json"),
+		StagingFilename: filepath.Join(tmp, "ocr_rslt_10.pdf"),
+		StatusRaw:       "[]",
+	}}
+	ex := &fakeJSONExtractor{
+		errs: []error{
+			errors.New("primary timeout"),
+			nil,
+		},
+		outs: []map[string]any{
+			nil,
+			{
+				"title":        "Fallback Title",
+				"doc_no":       "GB/T 789",
+				"publish_date": "2024-03-01",
+				"authors":      []any{"Fallback Org"},
+			},
+		},
+	}
+	svc := NewExtractDocMetadataProcessor(st, ex, nil)
+	svc.ModelErr = nil
+	svc.ModelName = "gemma4:26b"
+	svc.FallbackModelName = "gpt-5.4-mini"
+	svc.PromptText = "extract metadata"
+
+	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":10}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if ex.calledCount != 2 {
+		t.Fatalf("extract called=%d, want 2", ex.calledCount)
+	}
+	if len(ex.modelNames) != 2 {
+		t.Fatalf("modelNames=%v", ex.modelNames)
+	}
+	if ex.modelNames[0] != "gemma4:26b" {
+		t.Fatalf("primary model=%q", ex.modelNames[0])
+	}
+	if ex.modelNames[1] != "gpt-5.4-mini" {
+		t.Fatalf("fallback model=%q", ex.modelNames[1])
+	}
+	if st.updateReq.Title != "Fallback Title" {
+		t.Fatalf("title=%q", st.updateReq.Title)
+	}
+	if st.updateReq.ErrorMsg != nil {
+		t.Fatalf("unexpected error msg: %v", *st.updateReq.ErrorMsg)
+	}
+}

@@ -310,9 +310,32 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 
 	payload, fallbackErr := p.extractProvisionPayload(ctx, block, fallbackModelName)
 	if fallbackErr != nil {
+		if isEmptyFallbackProvisionExtractionError(fallbackErr) {
+			p.Logger.Warn("fallback provisions extraction returned empty JSON; treating as empty result",
+				"fallback_model", fallbackModelName,
+				"error", fallbackErr,
+				"prompt_name", p.PromptRef,
+			)
+			return map[string]any{
+				"language":   "unknown",
+				"provisions": []any{},
+			}, fallbackModelName, nil
+		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26050545) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
 	return payload, fallbackModelName, nil
+}
+
+func isEmptyFallbackProvisionExtractionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "unexpected end of JSON input") &&
+		strings.Contains(msg, "json:{[]}")
 }
 
 func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block Block, modelName string) (map[string]any, error) {

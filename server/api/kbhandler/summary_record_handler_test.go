@@ -226,6 +226,65 @@ summary_end`)
 	}
 }
 
+func TestReadRecordSummaryCards_AllowsMissingCorrectedArtifact(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+
+	expectResolveInputTablePlural(mock)
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "staging_filename").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "parser_name").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	recordID := int64(99)
+	query := regexp.QuoteMeta(`SELECT COALESCE(i.staging_filename, '') AS staging_filename, COALESCE(i.parser_name, '') AS parser_name, i.file_name FROM kb.inputs i WHERE i.id = $1`)
+	mock.ExpectQuery(query).
+		WithArgs(recordID).
+		WillReturnRows(sqlmock.NewRows([]string{"staging_filename", "parser_name", "file_name"}).
+			AddRow("std_20039.pdf", "opendata", "/tmp/standards/std_20039.pdf"))
+
+	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "summary_0_0001.txt"), `summary_id: "99_0_0001"
+record_id: 99
+level: 0
+lines: ["1-3"]
+keywords: ["scope", "definitions"]
+summary_begin:
+Scope summary
+summary_end`)
+
+	results, err := readRecordSummaryCards(nil, recordID)
+	if err != nil {
+		t.Fatalf("readRecordSummaryCards: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(results))
+	}
+	if results[0].Page != 1 {
+		t.Fatalf("expected default page 1 without corrected artifact, got %+v", results[0])
+	}
+	if len(results[0].Coords) != 0 {
+		t.Fatalf("expected empty coords without corrected artifact, got %+v", results[0])
+	}
+	if len(results[0].Targets) != 0 {
+		t.Fatalf("expected empty targets without corrected artifact, got %+v", results[0])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func TestExpandSummaryTargetsMergesContinuousLinesAndSkipsErrorImage(t *testing.T) {
 	targets := expandSummaryTargets([]string{"76-88"}, map[int]summaryLineTarget{
 		76: {page: 5, lineType: "paragraph", coords: []float64{0, 389.462, 623.999, 478.248}},

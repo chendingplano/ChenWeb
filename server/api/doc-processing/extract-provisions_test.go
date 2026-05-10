@@ -558,6 +558,68 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnExtractorError(t *testing
 	}
 }
 
+func TestProvisionsProcessor_TreatsEmptyFallbackJSONAsSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", tmp)
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              6004,
+		ParserName:      "opendata",
+		ResultFilename:  "/tmp/std-6004.json",
+		StagingFilename: "/tmp/std-6004.pdf",
+		StatusRaw:       "[]",
+	}}
+	provisionsStore := &fakeProvisionsStore{}
+	extractor := &fakeJSONExtractor{
+		errs: []error{
+			errors.New("primary model failed"),
+			errors.New("(MID_26050841) failed extracting provisions, error:(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+		},
+	}
+
+	ctx, h := withBlockBufferHolder(context.Background())
+	h.mu.Lock()
+	h.buffer = &BlockBuffer{Blocks: []Block{{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 10, PageNumber: 2, LineType: "paragraph", Content: "The device shall log all alarms."},
+		},
+	}}}
+	h.mu.Unlock()
+
+	p := NewProvisionsProcessor(inputStore, provisionsStore, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "primary-model"
+	p.FallbackModelName = "fallback-model"
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6004","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if extractor.calledCount != 2 {
+		t.Fatalf("calledCount=%d, want 2", extractor.calledCount)
+	}
+	if provisionsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", provisionsStore.saveCalled)
+	}
+	if len(provisionsStore.lastSave.Provisions) != 0 {
+		t.Fatalf("saved provisions=%d, want 0", len(provisionsStore.lastSave.Provisions))
+	}
+	if got := strings.TrimSpace(provisionsStore.lastSave.Language); got != "unknown" {
+		t.Fatalf("language=%q, want unknown", got)
+	}
+
+	var statusArr []map[string]any
+	if err := json.Unmarshal([]byte(inputStore.updateReq.StatusRaw), &statusArr); err != nil {
+		t.Fatalf("status json: %v", err)
+	}
+	last := statusArr[len(statusArr)-1]
+	if strings.TrimSpace(asString(last["proc_status"])) != "success" {
+		t.Fatalf("proc_status=%v, want success", last["proc_status"])
+	}
+}
+
 func TestControlService_ChunkingOperationDoesNotSelectProvisions(t *testing.T) {
 	got := make([]string, 0, 3)
 	svc := &ControlService{

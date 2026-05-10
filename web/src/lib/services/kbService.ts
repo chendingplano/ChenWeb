@@ -959,6 +959,7 @@ export type TopicCardApi = {
 	topicKeywords: string[];
 	topicText: string;
 	topicType: string;
+	sourceLineSpecs?: string[];
 	inputId: number;
 	page: number;
 	coords: number[];

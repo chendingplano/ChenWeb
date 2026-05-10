@@ -121,15 +121,16 @@ func readRecordTopicCards(logger ApiTypes.JimoLogger, recordID int64) ([]topicCa
 				topicID = fmt.Sprintf("%d_%s", recordID, filepath.Base(path))
 			}
 			results = append(results, topicCategoryRecord{
-				ID:          topicID,
-				PdfFileName: filepath.Base(strings.TrimSpace(meta.fileName)),
-				TopicType:   topic.topicType,
-				TopicText:   topic.topicText,
-				Keywords:    append([]string(nil), topic.keywords...),
-				InputID:     recordID,
-				Page:        page,
-				Coords:      coords,
-				Targets:     targets,
+				ID:              topicID,
+				PdfFileName:     filepath.Base(strings.TrimSpace(meta.fileName)),
+				TopicType:       topic.topicType,
+				TopicText:       topic.topicText,
+				Keywords:        append([]string(nil), topic.keywords...),
+				SourceLineSpecs: append([]string(nil), topic.lines...),
+				InputID:         recordID,
+				Page:            page,
+				Coords:          coords,
+				Targets:         targets,
 			})
 		}
 	}

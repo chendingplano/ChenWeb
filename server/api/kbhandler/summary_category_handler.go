@@ -334,6 +334,9 @@ func readLineTargetMapForRecord(artifactDir string, meta summaryArtifactMeta) (m
 	path := filepath.Join(recordDir, stagingRoot+"_"+meta.parser+".corrected")
 	lines, _, err := readCorrectedLinesFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return map[int]summaryLineTarget{}, nil
+		}
 		return nil, err
 	}
 	out := make(map[int]summaryLineTarget, len(lines))
