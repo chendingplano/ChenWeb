@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,8 @@ import (
 )
 
 var (
-	staticNumericHeadingRE  = regexp.MustCompile(`^([0-9Oo]+(?:\s*\.\s*[0-9Oo]+)*)\s*\.?\s*(.*)$`)
-	staticAppendixHeadingRE = regexp.MustCompile(`^([A-Za-z])\s*\.\s*([0-9Oo]+(?:\s*\.\s*[0-9Oo]+)*)\s*\.?\s*(.*)$`)
+	staticNumericHeadingRE  = regexp.MustCompile(`^([0-9OoSsLl]+(?:\s*\.\s*[0-9OoSsLl]+)*)\s*\.?\s*(.*)$`)
+	staticAppendixHeadingRE = regexp.MustCompile(`^([A-Za-z])\s*\.\s*([0-9OoSsLl]+(?:\s*\.\s*[0-9OoSsLl]+)*)\s*\.?\s*(.*)$`)
 	staticNumListRE         = regexp.MustCompile(`^\d+[\.)]?\s+\S+`)
 	staticSingleSymListRE   = regexp.MustCompile(`^[*\-•·—]\s+\S+`)
 	staticMultiSymListRE    = regexp.MustCompile(`^([A-Za-z]+|[ivxlcdmIVXLCDM]+)\)\s+\S+`)
@@ -55,6 +56,7 @@ type staticAnalyzeResult struct {
 	CorrectedType map[int]string
 	NumPages      int
 	NumLines      int
+	OutputChanged bool
 }
 
 type staticStatusParams struct {
@@ -85,6 +87,9 @@ func (p *StaticAnalyzerProcessor) Name() string { return "static_analyzer" }
 
 func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	start := p.now()
+	if p.Logger != nil {
+		p.Logger.Info("static analyzer invoked", "payload_bytes", len(payload))
+	}
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
 		return fmt.Errorf("(MID_26042302) parse event payload: %w", err)
@@ -157,14 +162,7 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 
 func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFilename string, inputPath string, out staticAnalyzeResult) error {
 	if p.OverrideOrigin {
-		hasCorrection := false
-		for _, line := range out.Lines {
-			if c := strings.TrimSpace(out.CorrectedType[line.LineNo]); c != "" && c != "unchanged" {
-				hasCorrection = true
-				break
-			}
-		}
-		if !hasCorrection {
+		if !out.OutputChanged {
 			return nil
 		}
 		original, err := os.ReadFile(inputPath)
@@ -173,7 +171,10 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 		}
 		originPath := strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + ".origin"
 		if err := os.WriteFile(originPath, original, 0o644); err != nil {
-			return fmt.Errorf("(MID_26042314) write origin backup: %w", err)
+			return fmt.Errorf("(MID_26042315) write origin backup: %w", err)
+		}
+		if p.Logger != nil {
+			p.Logger.Info("origin backup written", "origin_path", originPath, "input_path", inputPath)
 		}
 	}
 
@@ -234,6 +235,9 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 	if err := os.WriteFile(filePath, []byte(b.String()), 0o644); err != nil {
 		return fmt.Errorf("(MID_26042309) write corrected file: %w", err)
 	}
+	if p.Logger != nil {
+		p.Logger.Info("static analyzer output written", "output_path", filePath, "line_count", len(out.Lines), "override_origin", p.OverrideOrigin)
+	}
 	return nil
 }
 
@@ -273,24 +277,94 @@ func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnal
 	if err := sc.Err(); err != nil {
 		return staticAnalyzeResult{}, fmt.Errorf("(MID_26042310) read input lines: %w", err)
 	}
-	lines = removeStaticPageImageArtifacts(lines)
-	lines = removeStaticWeBoosWatermarkLines(lines)
+	lines = applyStaticRemoveFullPageImageArtifactLines(lines, logger)
+	lines = applyStaticRemoveWeBoosWatermarkLines(lines, logger)
+	lines = applyStaticCorrectHeadings(lines, logger)
 
 	corrected := make(map[int]string, len(lines))
 	for _, line := range lines {
 		corrected[line.LineNo] = "unchanged"
 	}
 
-	lastTOC := applyStaticTOCLabels(lines, corrected, logger)
-	applyStaticHeadingLabels(lastTOC, lines, corrected, logger)
-	applyStaticListLabels(lines, corrected)
+	lastTOC := applyStaticDetectTableOfContent(lines, corrected, logger)
+	applyStaticDetectHeadings(lastTOC, lines, corrected, logger)
+	lines = applyStaticMergeLines(lines, corrected, logger)
+	applyStaticDetectItemLists(lines, corrected, logger)
+
+	outputChanged := len(lines) != len(seenLineNo)
+	if !outputChanged {
+		for _, line := range lines {
+			if strings.TrimSpace(corrected[line.LineNo]) != "unchanged" {
+				outputChanged = true
+				break
+			}
+		}
+	}
 
 	return staticAnalyzeResult{
 		Lines:         lines,
 		CorrectedType: corrected,
 		NumPages:      len(pageSet),
 		NumLines:      numLines,
+		OutputChanged: outputChanged,
 	}, nil
+}
+
+func applyStaticRemoveFullPageImageArtifactLines(lines []staticInputLine, logger ApiTypes.JimoLogger) []staticInputLine {
+	if logger != nil {
+		logger.Info("remove full-page image artifact lines invoked", "line_count", len(lines))
+	}
+	return removeStaticPageImageArtifacts(lines)
+}
+
+func applyStaticRemoveWeBoosWatermarkLines(lines []staticInputLine, logger ApiTypes.JimoLogger) []staticInputLine {
+	if logger != nil {
+		logger.Info("remove weboos watermark lines invoked", "line_count", len(lines))
+	}
+	return removeStaticWeBoosWatermarkLines(lines)
+}
+
+func applyStaticCorrectHeadings(lines []staticInputLine, logger ApiTypes.JimoLogger) []staticInputLine {
+	if logger != nil {
+		logger.Info("correct headings invoked", "line_count", len(lines))
+	}
+	for i := range lines {
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(lines[i].OriginalLineLower)), "heading-") {
+			continue
+		}
+		if normalized, changed := normalizeStaticHeadingContent(lines[i].Content); changed {
+			lines[i].Content = normalized
+		}
+	}
+	return lines
+}
+
+func applyStaticDetectTableOfContent(lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) int {
+	if logger != nil {
+		logger.Info("detect table of content invoked", "line_count", len(lines))
+	}
+	return applyStaticTOCLabels(lines, corrected, logger)
+}
+
+func applyStaticDetectHeadings(lastTOC int, lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) {
+	if logger != nil {
+		logger.Info("detect headings invoked", "line_count", len(lines))
+	}
+	applyStaticHeadingLabels(lastTOC, lines, corrected, logger)
+}
+
+func applyStaticMergeLines(lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) []staticInputLine {
+	if logger != nil {
+		logger.Info("merge lines invoked", "line_count", len(lines))
+	}
+	return mergeStaticParagraphLines(lines, corrected)
+}
+
+func applyStaticDetectItemLists(lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) {
+	if logger != nil {
+		logger.Info("detect item lists invoked", "line_count", len(lines))
+	}
+	applyStaticListLabels(lines, corrected)
 }
 
 func removeStaticPageImageArtifacts(lines []staticInputLine) []staticInputLine {
@@ -439,6 +513,232 @@ func parseStaticInputLine(raw string) (staticInputLine, error) {
 	}, nil
 }
 
+type staticLineGeometry struct {
+	X1 float64
+	Y1 float64
+	X2 float64
+	Y2 float64
+}
+
+type staticPageLayout struct {
+	LineStart float64
+	LineEnd   float64
+	StartTol  float64
+	EndTol    float64
+}
+
+func mergeStaticParagraphLines(lines []staticInputLine, corrected map[int]string) []staticInputLine {
+	if len(lines) < 2 {
+		return lines
+	}
+
+	layoutByPage := buildStaticPageLayouts(lines, corrected)
+	if len(layoutByPage) == 0 {
+		return lines
+	}
+
+	merged := make([]staticInputLine, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		cur := lines[i]
+		layout, ok := layoutByPage[cur.PageNo]
+		if !ok || !isStaticMergeableParagraph(cur, corrected) {
+			merged = append(merged, cur)
+			continue
+		}
+
+		curGeom, ok := parseStaticLineGeometry(cur.Coordinate)
+		if !ok || !isStaticParagraphStart(curGeom, layout) {
+			merged = append(merged, cur)
+			continue
+		}
+
+		parts := []string{strings.TrimSpace(cur.Content)}
+		bbox := curGeom
+		tailGeom := curGeom
+		lastIdx := i
+		for j := i + 1; j < len(lines); j++ {
+			next := lines[j]
+			if next.PageNo != cur.PageNo || !isStaticMergeableParagraph(next, corrected) {
+				break
+			}
+			if !isStaticNearLineEnd(tailGeom, layout) {
+				break
+			}
+			nextGeom, ok := parseStaticLineGeometry(next.Coordinate)
+			if !ok || !isStaticNearLineStart(nextGeom, layout) {
+				break
+			}
+			parts = append(parts, strings.TrimSpace(next.Content))
+			bbox = unionStaticLineGeometry(bbox, nextGeom)
+			tailGeom = nextGeom
+			lastIdx = j
+		}
+
+		if lastIdx == i {
+			merged = append(merged, cur)
+			continue
+		}
+
+		cur.Content = strings.Join(parts, "")
+		cur.Coordinate = formatStaticLineGeometry(bbox)
+		merged = append(merged, cur)
+		i = lastIdx
+	}
+	return merged
+}
+
+func buildStaticPageLayouts(lines []staticInputLine, corrected map[int]string) map[int]staticPageLayout {
+	x1ByPage := make(map[int][]float64, 8)
+	x2ByPage := make(map[int][]float64, 8)
+	for _, line := range lines {
+		if !isStaticMergeableParagraph(line, corrected) {
+			continue
+		}
+		geom, ok := parseStaticLineGeometry(line.Coordinate)
+		if !ok {
+			continue
+		}
+		x1ByPage[line.PageNo] = append(x1ByPage[line.PageNo], geom.X1)
+		x2ByPage[line.PageNo] = append(x2ByPage[line.PageNo], geom.X2)
+	}
+
+	layouts := make(map[int]staticPageLayout, len(x1ByPage))
+	for pageNo, x1s := range x1ByPage {
+		x2s := x2ByPage[pageNo]
+		if len(x1s) < 2 || len(x2s) < 2 {
+			continue
+		}
+		lineStart := staticPercentile(x1s, 0.1)
+		lineEnd := staticPercentile(x2s, 0.9)
+		width := lineEnd - lineStart
+		if width <= 0 {
+			continue
+		}
+		startTol := maxFloat(3, width*0.03)
+		endTol := maxFloat(5, width*0.04)
+		layouts[pageNo] = staticPageLayout{
+			LineStart: lineStart,
+			LineEnd:   lineEnd,
+			StartTol:  startTol,
+			EndTol:    endTol,
+		}
+	}
+	return layouts
+}
+
+func isStaticMergeableParagraph(line staticInputLine, corrected map[int]string) bool {
+	if strings.ToLower(strings.TrimSpace(line.OriginalLineLower)) != "paragraph" {
+		return false
+	}
+	if isStaticWeBoosWatermarkParagraph(line) {
+		return false
+	}
+	if isStaticTOCLine(line) {
+		return false
+	}
+	switch normalizeStaticTitle(line.Content) {
+	case "table of content", "table of contents", "目录", "目次", "目 次":
+		return false
+	}
+	return strings.TrimSpace(corrected[line.LineNo]) == "unchanged"
+}
+
+func parseStaticLineGeometry(raw string) (staticLineGeometry, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "[") || !strings.HasSuffix(trimmed, "]") {
+		return staticLineGeometry{}, false
+	}
+	fields := strings.Split(trimmed[1:len(trimmed)-1], ",")
+	if len(fields) != 4 {
+		return staticLineGeometry{}, false
+	}
+	vals := [4]float64{}
+	for i, field := range fields {
+		v, err := strconv.ParseFloat(strings.TrimSpace(field), 64)
+		if err != nil {
+			return staticLineGeometry{}, false
+		}
+		vals[i] = v
+	}
+	return staticLineGeometry{
+		X1: vals[0],
+		Y1: vals[1],
+		X2: vals[2],
+		Y2: vals[3],
+	}, true
+}
+
+func isStaticParagraphStart(geom staticLineGeometry, layout staticPageLayout) bool {
+	return isStaticNearLineStart(geom, layout) || geom.X1 > layout.LineStart+layout.StartTol
+}
+
+func isStaticNearLineStart(geom staticLineGeometry, layout staticPageLayout) bool {
+	return absFloat(geom.X1-layout.LineStart) <= layout.StartTol
+}
+
+func isStaticNearLineEnd(geom staticLineGeometry, layout staticPageLayout) bool {
+	return geom.X2 >= layout.LineEnd-layout.EndTol
+}
+
+func unionStaticLineGeometry(a staticLineGeometry, b staticLineGeometry) staticLineGeometry {
+	return staticLineGeometry{
+		X1: minFloat(a.X1, b.X1),
+		Y1: minFloat(a.Y1, b.Y1),
+		X2: maxFloat(a.X2, b.X2),
+		Y2: maxFloat(a.Y2, b.Y2),
+	}
+}
+
+func formatStaticLineGeometry(geom staticLineGeometry) string {
+	return fmt.Sprintf("[%g,%g,%g,%g]", geom.X1, geom.Y1, geom.X2, geom.Y2)
+}
+
+func staticPercentile(values []float64, p float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	cp := append([]float64(nil), values...)
+	sort.Float64s(cp)
+	if len(cp) == 1 {
+		return cp[0]
+	}
+	if p <= 0 {
+		return cp[0]
+	}
+	if p >= 1 {
+		return cp[len(cp)-1]
+	}
+	idx := int(float64(len(cp)-1) * p)
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(cp) {
+		idx = len(cp) - 1
+	}
+	return cp[idx]
+}
+
+func minFloat(a float64, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxFloat(a float64, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func absFloat(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 func normalizeStaticLineType(lineType string) string {
 	lineType = strings.TrimSpace(lineType)
 	if strings.EqualFold(lineType, "heading") {
@@ -554,6 +854,9 @@ func applyStaticHeadingLabels(lastTOC int, lines []staticInputLine, corrected ma
 		if corrected[line.LineNo] == "toc" {
 			continue
 		}
+		if isStaticTOCLine(line) {
+			continue
+		}
 
 		if symbol, parts, title, ok := parseStaticAppendixHeading(line.Content); ok {
 			if title == "" && i+1 < len(lines) && lines[i+1].OriginalLineLower == "paragraph" {
@@ -636,7 +939,14 @@ func normalizeStaticHeadingNumber(raw string) string {
 	s := strings.TrimSpace(raw)
 	s = strings.ReplaceAll(s, " ", "")
 	s = strings.TrimSuffix(s, ".")
-	s = strings.NewReplacer("O", "0", "o", "0").Replace(s)
+	s = strings.NewReplacer(
+		"O", "0",
+		"o", "0",
+		"S", "5",
+		"s", "5",
+		"l", "1",
+		"L", "1",
+	).Replace(s)
 	return s
 }
 

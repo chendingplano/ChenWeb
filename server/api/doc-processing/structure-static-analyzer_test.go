@@ -144,6 +144,34 @@ func TestStaticAnalyzer_StatusReplacesExistingEntry(t *testing.T) {
 	}
 }
 
+func TestAnalyzeStaticStructure_LogsProcessingSteps(t *testing.T) {
+	logger := &fakeLogger{}
+	body := strings.Join([]string{
+		"1\t1\tparagraph\tF\t12\t[0,0,1,1]\t1 Scope",
+		"2\t1\tparagraph\tF\t12\t[0,0,1,1]\t1.1 Purpose",
+		"3\t1\tlist-item\tF\t12\t[0,0,1,1]\t1) first item",
+	}, "\n")
+
+	if _, err := analyzeStaticStructure([]byte(body), logger); err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+
+	wantMessages := []string{
+		"remove full-page image artifact lines invoked",
+		"remove weboos watermark lines invoked",
+		"detect table of content invoked",
+		"correct headings invoked",
+		"detect headings invoked",
+		"merge lines invoked",
+		"detect item lists invoked",
+	}
+	for _, want := range wantMessages {
+		if _, ok := findInfoLog(logger.infos, want); !ok {
+			t.Fatalf("missing log %q in %#v", want, logger.infos)
+		}
+	}
+}
+
 func TestStaticAnalyzer_NumericalHeadingPrediction(t *testing.T) {
 	body := strings.Join([]string{
 		"1\t1\tparagraph\tF\t12\t[0,0,1,1]\t3 Main",
@@ -258,6 +286,30 @@ func TestNormalizeStaticHeadingContent_OCRZeroSpacingVariants(t *testing.T) {
 			name:    "ocr o with left space only",
 			input:   "2. o.4 有毒气体 toxic gas 通动物并能引起人体",
 			want:    "2.0.4 有毒气体 toxic gas 通动物并能引起人体",
+			changed: true,
+		},
+		{
+			name:    "ocr uppercase o",
+			input:   "3. O. 2 Heading",
+			want:    "3.0.2 Heading",
+			changed: true,
+		},
+		{
+			name:    "ocr s becomes five",
+			input:   "s.2 Heading",
+			want:    "5.2 Heading",
+			changed: true,
+		},
+		{
+			name:    "ocr uppercase s becomes five",
+			input:   "S.3 Heading",
+			want:    "5.3 Heading",
+			changed: true,
+		},
+		{
+			name:    "ocr lowercase l becomes one",
+			input:   "2.l.3 Heading",
+			want:    "2.1.3 Heading",
 			changed: true,
 		},
 	}
@@ -379,6 +431,19 @@ func TestStaticAnalyzer_WriteCorrectedArtifact_PreservesNormalizedHeadingContent
 	}, "\n")
 	if got != want {
 		t.Fatalf("corrected artifact=\n%s\nwant=\n%s", got, want)
+	}
+}
+
+func TestParseStaticNumericHeading_NormalizesAdditionalOCRDigits(t *testing.T) {
+	parts, title, ok := parseStaticNumericHeading("S.l.3 Heading body")
+	if !ok {
+		t.Fatalf("parseStaticNumericHeading returned ok=false")
+	}
+	if len(parts) != 3 || parts[0] != 5 || parts[1] != 1 || parts[2] != 3 {
+		t.Fatalf("parts=%v, want [5 1 3]", parts)
+	}
+	if title != "Heading body" {
+		t.Fatalf("title=%q, want %q", title, "Heading body")
 	}
 }
 
@@ -578,5 +643,212 @@ func TestStaticAnalyzer_KeepsWeBoosWatermarkLinesWhenPageHasMultipleMatches(t *t
 		if _, ok := out.CorrectedType[kept]; !ok {
 			t.Fatalf("line %d unexpectedly removed", kept)
 		}
+	}
+}
+
+func TestStaticAnalyzer_MergesChineseStyleParagraphLines(t *testing.T) {
+	body := strings.Join([]string{
+		"74\t5\tparagraph\tHiddenHorzOCR\t9\t[104.88,496.943,339.001,508.549]\t职业健康监护 occupational health surveillance",
+		"75\t5\tparagraph\tHiddenHorzOCR\t9\t[83.28,451.33,546.241,493.45]\t以预防为目的，根据职业危害因素对消防员健康的损害或影响，采取综合措施，保护",
+		"77\t5\tparagraph\tHiddenHorzOCR\t9\t[83.76,436.27,297.121,447.37]\t消防员健康。",
+		"78\t5\tparagraph\tHiddenHorzOCR\t9\t[105.36,390.37,546.721,401.77]\t用于消除或者减少职业危害因素对消防员健康的损害或影响，达到保护消防员健康目的的装备，主",
+		"79\t5\tparagraph\tHiddenHorzOCR\t9\t[84,375.3,297.121,386.4]\t要包括侦检装备、个人防护装备、洗消装备等。",
+		"80\t5\theading-2\tTimes-Roman\t11\t[83.86,360.006,99.898,372.058]\t3.9",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := len(out.Lines); got != 4 {
+		t.Fatalf("len(Lines)=%d, want 4 after Chinese merge", got)
+	}
+	wantByLine := map[int]string{
+		75: "以预防为目的，根据职业危害因素对消防员健康的损害或影响，采取综合措施，保护消防员健康。",
+		78: "用于消除或者减少职业危害因素对消防员健康的损害或影响，达到保护消防员健康目的的装备，主要包括侦检装备、个人防护装备、洗消装备等。",
+	}
+	gotByLine := make(map[int]string, len(out.Lines))
+	for _, line := range out.Lines {
+		gotByLine[line.LineNo] = line.Content
+	}
+	for lineNo, want := range wantByLine {
+		if got := gotByLine[lineNo]; got != want {
+			t.Fatalf("line %d content=%q, want %q", lineNo, got, want)
+		}
+	}
+	var merged staticInputLine
+	found := false
+	for _, line := range out.Lines {
+		if line.LineNo != 78 {
+			continue
+		}
+		merged = line
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("merged line 78 missing")
+	}
+	want := "用于消除或者减少职业危害因素对消防员健康的损害或影响，达到保护消防员健康目的的装备，主要包括侦检装备、个人防护装备、洗消装备等。"
+	if merged.Content != want {
+		t.Fatalf("merged content=%q, want %q", merged.Content, want)
+	}
+	for _, removed := range []int{77, 79} {
+		for _, line := range out.Lines {
+			if line.LineNo == removed {
+				t.Fatalf("line %d should have been merged away", removed)
+			}
+		}
+	}
+}
+
+func TestStaticAnalyzer_MergesEnglishStyleParagraphLines(t *testing.T) {
+	body := strings.Join([]string{
+		"1\t1\tparagraph\tTimes-Roman\t10\t[72,500,520,512]\tThis standard applies to buildings designed for rapid response and",
+		"2\t1\tparagraph\tTimes-Roman\t10\t[72,486,519,498]\tcontinuous operational readiness under adverse field conditions,",
+		"3\t1\tparagraph\tTimes-Roman\t10\t[72,472,250,484]\twith short final wrapping.",
+		"4\t1\tparagraph\tTimes-Roman\t10\t[72,458,521,470]\tA separate paragraph begins here and should stay independent because",
+		"5\t1\tparagraph\tTimes-Roman\t10\t[72,444,260,456]\tit ends on the next short line.",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := len(out.Lines); got != 2 {
+		t.Fatalf("len(Lines)=%d, want 2 after English merge", got)
+	}
+	gotContent := map[int]string{}
+	for _, line := range out.Lines {
+		gotContent[line.LineNo] = line.Content
+	}
+	if got := gotContent[1]; got != "This standard applies to buildings designed for rapid response andcontinuous operational readiness under adverse field conditions,with short final wrapping." {
+		t.Fatalf("line1 content=%q", got)
+	}
+	if got := gotContent[4]; got != "A separate paragraph begins here and should stay independent becauseit ends on the next short line." {
+		t.Fatalf("line4 content=%q", got)
+	}
+}
+
+func TestStaticAnalyzer_HandleEvent_WritesMergeOnlyOverrideOutput(t *testing.T) {
+	tmp := t.TempDir()
+	recordID := int64(9012)
+	lineFile := filepath.Join(tmp, "ocr_rslt_9012_opendata.txt")
+	body := strings.Join([]string{
+		"1\t1\tparagraph\tTimes-Roman\t10\t[72,500,520,512]\tThis standard applies to buildings designed for rapid response and",
+		"2\t1\tparagraph\tTimes-Roman\t10\t[72,486,519,498]\tcontinuous operational readiness under adverse field conditions,",
+		"3\t1\tparagraph\tTimes-Roman\t10\t[72,472,250,484]\twith short final wrapping.",
+	}, "\n")
+	if err := os.WriteFile(lineFile, []byte(body), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+
+	t.Setenv("ARTIFACT_DIR", tmp)
+	store := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              recordID,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_9012.json"),
+		StagingFilename: filepath.Join(tmp, "ocr_rslt_9012.pdf"),
+		StatusRaw:       "[]",
+	}}
+	logger := &fakeLogger{}
+	p := NewStaticAnalyzerProcessor(store, logger)
+
+	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"9012"}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+
+	if _, ok := findInfoLog(logger.infos, "static analyzer invoked"); !ok {
+		t.Fatalf("expected invocation log, got %#v", logger.infos)
+	}
+	originLog, ok := findInfoLog(logger.infos, "origin backup written")
+	if !ok {
+		t.Fatalf("expected origin backup log, got %#v", logger.infos)
+	}
+	if got, ok := logValue(originLog.args, "origin_path"); !ok || got != filepath.Join(tmp, "ocr_rslt_9012_opendata.origin") {
+		t.Fatalf("origin_path=%v, ok=%v", got, ok)
+	}
+	txtLog, ok := findInfoLog(logger.infos, "static analyzer output written")
+	if !ok {
+		t.Fatalf("expected output write log, got %#v", logger.infos)
+	}
+	if got, ok := logValue(txtLog.args, "output_path"); !ok || got != lineFile {
+		t.Fatalf("output_path=%v, ok=%v", got, ok)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmp, "ocr_rslt_9012_opendata.origin")); err != nil {
+		t.Fatalf("expected .origin backup: %v", err)
+	}
+	bs, err := os.ReadFile(lineFile)
+	if err != nil {
+		t.Fatalf("read rewritten file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(bs)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("rewritten lines=%d, want 1 merged line", len(lines))
+	}
+	if !strings.Contains(lines[0], "This standard applies to buildings designed for rapid response andcontinuous operational readiness under adverse field conditions,with short final wrapping.") {
+		t.Fatalf("rewritten content=%q", lines[0])
+	}
+}
+
+func TestStaticAnalyzer_WriteCorrectedArtifact_RefreshesOriginBackupFromCurrentInput(t *testing.T) {
+	tmp := t.TempDir()
+	inputPath := filepath.Join(tmp, "ocr_rslt_93_opendata.txt")
+	originPath := filepath.Join(tmp, "ocr_rslt_93_opendata.origin")
+
+	currentInputBody := strings.Join([]string{
+		"1\t1\tparagraph\tF\t12\t[0,0,1,1]\tCurrent OCR line 1",
+		"7\t1\tparagraph\tF\t12\t[0,0,1,1]\tCurrent OCR line 7",
+		"2\t1\tparagraph\tF\t12\t[0,0,1,1]\tCurrent OCR line 2",
+	}, "\n")
+	staleOriginBody := strings.Join([]string{
+		"1\t1\tparagraph\tF\t12\t[0,0,1,1]\tStale origin line 1",
+		"2\t1\tparagraph\tF\t12\t[0,0,1,1]\tStale origin line 2",
+	}, "\n")
+	if err := os.WriteFile(inputPath, []byte(currentInputBody), 0o644); err != nil {
+		t.Fatalf("write input file: %v", err)
+	}
+	if err := os.WriteFile(originPath, []byte(staleOriginBody), 0o644); err != nil {
+		t.Fatalf("write origin file: %v", err)
+	}
+
+	logger := &fakeLogger{}
+	p := &StaticAnalyzerProcessor{OverrideOrigin: true, Logger: logger}
+	out := staticAnalyzeResult{
+		Lines: []staticInputLine{
+			{
+				LineNo:            2,
+				PageNo:            1,
+				OriginalLineType:  "paragraph",
+				OriginalLineLower: "paragraph",
+				Font:              "F",
+				FontSize:          "12",
+				Coordinate:        "[0,0,1,1]",
+				Content:           "Changed line 2",
+			},
+		},
+		CorrectedType: map[int]string{2: "heading-1"},
+		OutputChanged: true,
+	}
+
+	if err := p.writeCorrectedArtifact(93, filepath.Base(inputPath), inputPath, out); err != nil {
+		t.Fatalf("writeCorrectedArtifact: %v", err)
+	}
+
+	gotOrigin, err := os.ReadFile(originPath)
+	if err != nil {
+		t.Fatalf("read origin file: %v", err)
+	}
+	if string(gotOrigin) != currentInputBody {
+		t.Fatalf("origin content=\n%s\nwant current input=\n%s", string(gotOrigin), currentInputBody)
+	}
+	if logEntry, ok := findInfoLog(logger.infos, "origin backup written"); !ok {
+		t.Fatalf("expected origin backup written log, got %#v", logger.infos)
+	} else if got, ok := logValue(logEntry.args, "origin_path"); !ok || got != originPath {
+		t.Fatalf("origin_path=%v, ok=%v", got, ok)
+	}
+	if _, ok := findInfoLog(logger.infos, "static analyzer output written"); !ok {
+		t.Fatalf("expected output write log, got %#v", logger.infos)
 	}
 }

@@ -1,6 +1,7 @@
-<script lang="ts">
+	<script lang="ts">
 	import { onMount } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import {
 		getKbDocStructure,
 		getKbInput,
@@ -305,7 +306,7 @@
 	}
 
 	const LINE_TYPE_OPTIONS = [
-		'paragraph', 'heading', 'heading-1', 'heading-2', 'heading-3', 'heading-4', 'heading-5',
+		'paragraph', 'heading-1', 'heading-2', 'heading-3', 'heading-4', 'heading-5',
 		'toc', 'image', 'table', 'table-caption', 'figure', 'figure-caption',
 		'header', 'footer', 'list', 'list-item', 'code', 'doc-title', 'unknown'
 	];
@@ -543,6 +544,7 @@
 					</div>
 				{:else}
 					<div class="line-list-head" aria-hidden="true">
+						<span>Line</span>
 						<span>Line Type</span>
 						<span>Content</span>
 					</div>
@@ -628,6 +630,7 @@
 								}}
 								title={`Page ${line.page_number}, line ${line.line_number}`}
 							>
+								<span class="line-number-cell">L{line.line_number}</span>
 								<span class="line-type-cell">{displayLineType(line)}</span>
 								<span class="line-content-cell">{line.content || '—'}</span>
 								<div class="line-actions">
@@ -648,7 +651,7 @@
 										aria-label={`Delete line ${line.line_number}`}
 										disabled={deletingLineKey === lineKey(line)}
 										onclick={(e) => requestDeleteConfirm(line, e)}
-									>✕</button>
+									><Trash2Icon class="line-action-icon" /></button>
 								</div>
 							</div>
 						{/if}
@@ -1093,7 +1096,7 @@
 	}
 	.line-list-head {
 		display: grid;
-		grid-template-columns: minmax(110px, 132px) minmax(0, 1fr);
+		grid-template-columns: 56px minmax(110px, 132px) minmax(0, 1fr);
 		gap: 12px;
 		padding: 0 10px 6px;
 		font-size: 10px;
@@ -1103,7 +1106,7 @@
 	}
 	.line-card {
 		display: grid;
-		grid-template-columns: minmax(110px, 132px) minmax(0, 1fr) auto;
+		grid-template-columns: 56px minmax(110px, 132px) minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 8px;
 		border: 1px solid var(--ink-line-soft);
@@ -1152,6 +1155,10 @@
 	.line-card:hover .line-edit-btn,
 	.line-card:hover .line-delete-btn {
 		opacity: 1;
+	}
+	.line-action-icon {
+		width: 13px;
+		height: 13px;
 	}
 	.line-edit-btn:hover {
 		color: var(--brass);
@@ -1302,6 +1309,12 @@
 		padding: 0 10px;
 		font-size: 12px;
 		flex: 1;
+	}
+	.line-number-cell {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-secondary);
+		white-space: nowrap;
 	}
 	.line-type-cell {
 		font-family: var(--font-mono);
