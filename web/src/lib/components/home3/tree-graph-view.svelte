@@ -1008,6 +1008,25 @@
 		updateHoverNode(event, 'click');
 	}
 
+	function showNodeItemsOnDoubleClick(nodeId: string) {
+		const node = nodes.find((n) => n.id === nodeId);
+		if (!node || !node.hasItemsFile) return;
+		selectedNodeId = nodeId;
+		hoveredNodeId = nodeId;
+		dismissedHoverNodeId = null;
+		hoverDismissPending = false;
+		clearHoverHideTimer();
+		void showItems(node);
+	}
+
+	function handleChartNodeDoubleClick(event: any) {
+		clearPendingZrClickFallback();
+		const nodeId = String(event?.data?.id ?? '');
+		if (!nodeId || nodeId === rootId) return;
+		showNodeItemsOnDoubleClick(nodeId);
+		updateHoverNode(event, 'click');
+	}
+
 	function getVisibleNodeIds() {
 		const visibleIds = new Set<string>();
 		const visit = (node: GraphCategoryNode) => {
@@ -1148,6 +1167,18 @@
 		}
 	}
 
+	function handleZrDoubleClickFallback(event: any, capturedPoint?: { x: number; y: number } | null) {
+		const hit = findRenderedNodeHit(event);
+		if (hit) {
+			showNodeItemsOnDoubleClick(hit.node.id);
+			return;
+		}
+		if (!hoveredNodeId || !hoverAnchor || !capturedPoint || !hoveredNode?.hasItemsFile) return;
+		const dist = Math.hypot(capturedPoint.x - hoverAnchor.x, capturedPoint.y - hoverAnchor.y);
+		const clickRadius = (hoverAnchor.nodeRadius || 8) + 30;
+		if (dist <= clickRadius) showNodeItemsOnDoubleClick(hoveredNodeId);
+	}
+
 	function scheduleZrClickFallback(event: any) {
 		clearPendingZrClickFallback();
 		const clickStamp = Date.now();
@@ -1155,6 +1186,14 @@
 		pendingZrClickFallbackTimer = setTimeout(() => {
 			pendingZrClickFallbackTimer = null;
 			handleZrClickFallback(event, clickStamp, capturedPoint);
+		}, 0);
+	}
+
+	function scheduleZrDoubleClickFallback(event: any) {
+		clearPendingZrClickFallback();
+		const capturedPoint = getNativeEventPoint(event);
+		setTimeout(() => {
+			handleZrDoubleClickFallback(event, capturedPoint);
 		}, 0);
 	}
 
@@ -1414,13 +1453,16 @@
 				syncMiniViewport();
 			};
 			const handleZrClick = (event?: any) => scheduleZrClickFallback(event);
+			const handleZrDoubleClick = (event?: any) => scheduleZrDoubleClickFallback(event);
 			zr.on('mousewheel', handleRoam);
 			zr.on('mousemove', handleRoam);
 			zr.on('click', handleZrClick);
+			zr.on('dblclick', handleZrDoubleClick);
 			return () => {
 				zr.off('mousewheel', handleRoam);
 				zr.off('mousemove', handleRoam);
 				zr.off('click', handleZrClick);
+				zr.off('dblclick', handleZrDoubleClick);
 				clearPendingZrClickFallback();
 				setChartCursor('default');
 			};
@@ -1958,6 +2000,7 @@
 									onmouseout={handleChartPointerOut}
 									onglobalout={handleChartPointerOut}
 									onclick={handleChartNodeClick}
+									ondblclick={handleChartNodeDoubleClick}
 								/>
 							</div>
 

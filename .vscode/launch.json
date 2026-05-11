@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Doc Processor",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/server/cmd/doc-processor",
+      "cwd": "${workspaceFolder}/server/cmd/doc-processor",
+      "envFile": "${workspaceFolder}/server/cmd/doc-processor/.env",
+      "env": {
+        "DOC_PROCESSOR_CONFIG": "${workspaceFolder}/config.toml",
+        "MODELS_FILE": "${workspaceFolder}/.models.toml",
+        "SHARED_LIB_CONFIG_DIR": "${workspaceFolder}/../shared/libconfig.toml",
+        "GOCACHE": "${workspaceFolder}/.cache/go-build"
+      },
+      "console": "integratedTerminal"
+    }
+  ]
+}

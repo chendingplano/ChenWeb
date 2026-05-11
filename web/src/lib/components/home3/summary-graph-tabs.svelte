@@ -52,7 +52,7 @@
 		border: 2px solid rgba(15, 23, 42, 0.9);
 		border-bottom: none;
 		border-radius: 14px 14px 0 0;
-		background: #fbbf24;
+		background: #2f75c8;
 		box-shadow: none;
 		overflow: hidden;
 		min-height: 52px;
@@ -61,7 +61,7 @@
 
 	.tab.active {
 		border-color: rgba(15, 23, 42, 0.96);
-		background: #2f75c8;
+		background: #fbbf24;
 		min-height: 58px;
 		z-index: 3;
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
@@ -79,18 +79,18 @@
 		padding: 0.88rem 1.25rem 0.8rem;
 		font-weight: 700;
 		white-space: nowrap;
-		color: #111827;
+		color: #ffffff;
 	}
 
 	.close-button {
 		padding: 0.88rem 0.85rem 0.8rem 0.2rem;
-		color: rgba(17, 24, 39, 0.76);
+		color: rgba(255, 255, 255, 0.82);
 		font-size: 1rem;
 	}
 
 	.tab.active .tab-button,
 	.tab.active .close-button {
-		color: #ffffff;
+		color: #111827;
 	}
 
 	@media (max-width: 760px) {

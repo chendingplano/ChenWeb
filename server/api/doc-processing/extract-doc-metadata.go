@@ -186,6 +186,8 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		"title", upd.Title,
 		"doc_no", upd.DocNo,
 		"authors", len(upd.Authors),
+		"model", p.ModelName,
+		"prompt", p.PromptRef,
 	)
 	return nil
 }
@@ -210,13 +212,34 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Co
 		"fallback_model", fallbackModelName,
 		"error", err,
 		"prompt_name", p.PromptRef,
+		"inputText", inputText,
 	)
 
 	parsed, fallbackErr := p.extractMetadataWithModel(ctx, inputText, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
+		if isEmptyDocMetadataExtractionError(fallbackErr) {
+			p.Logger.Warn("fallback doc metadata extraction returned empty JSON; treating as empty result",
+				"fallback_model", fallbackModelName,
+				"error", fallbackErr,
+				"prompt_name", p.PromptRef,
+			)
+			return map[string]any{}, fallbackModelName, nil
+		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26051003) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
 	return parsed, fallbackModelName, nil
+}
+
+func isEmptyDocMetadataExtractionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "unexpected end of JSON input") &&
+		strings.Contains(msg, "json:{[]}")
 }
 
 func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {

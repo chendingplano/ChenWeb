@@ -395,3 +395,56 @@ func TestExtractDocMetadata_PrimaryFailureRetriesFallbackModel(t *testing.T) {
 		t.Fatalf("unexpected error msg: %v", *st.updateReq.ErrorMsg)
 	}
 }
+
+func TestExtractDocMetadata_FallbackEmptyJSONIsWarning(t *testing.T) {
+	tmp := t.TempDir()
+	lineFile := filepath.Join(tmp, "ocr_rslt_11_opendata.txt")
+	content := "1\t1\theading\tTestFont\t12\t[0,0,1,1]\tDocument Title\n"
+	if err := os.WriteFile(lineFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	st := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              11,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_11.json"),
+		StagingFilename: filepath.Join(tmp, "ocr_rslt_11.pdf"),
+		StatusRaw:       "[]",
+	}}
+	ex := &fakeJSONExtractor{
+		errs: []error{
+			errors.New("primary timeout"),
+			errors.New("(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}, model name:deepseek-v4-pro, prompt file:prompt_extract_doc_metadata_v1.txt"),
+		},
+	}
+	svc := NewExtractDocMetadataProcessor(st, ex, nil)
+	svc.ModelErr = nil
+	svc.ModelName = "gemma4:26b"
+	svc.FallbackModelName = "deepseek-v4-pro"
+	svc.PromptText = "extract metadata"
+
+	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":11}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if ex.calledCount != 2 {
+		t.Fatalf("extract called=%d, want 2", ex.calledCount)
+	}
+	if st.updateCalled != 1 {
+		t.Fatalf("updateCalled=%d, want 1", st.updateCalled)
+	}
+	if st.updateReq.ErrorMsg != nil {
+		t.Fatalf("unexpected error msg: %v", *st.updateReq.ErrorMsg)
+	}
+	if st.updateReq.Title != "" {
+		t.Fatalf("title=%q, want empty", st.updateReq.Title)
+	}
+	if st.updateReq.DocNo != "" {
+		t.Fatalf("docNo=%q, want empty", st.updateReq.DocNo)
+	}
+	if len(st.updateReq.Authors) != 0 {
+		t.Fatalf("authors=%v, want empty", st.updateReq.Authors)
+	}
+	if len(st.updateReq.DocMetadata) != 0 {
+		t.Fatalf("docMetadata=%v, want empty", st.updateReq.DocMetadata)
+	}
+}
