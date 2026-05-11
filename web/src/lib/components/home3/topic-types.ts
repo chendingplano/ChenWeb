@@ -23,6 +23,7 @@ export type TopicCard = {
 	topicKeywords: string[];
 	topicText: string;
 	topicType: string;
+	categoryPaths?: string[];
 	sourceLineSpecs?: string[];
 	inputId: number;
 	page: number;

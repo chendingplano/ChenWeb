@@ -397,10 +397,22 @@
 											<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
 										</div>
 										<div class="topic-sidebar-block">
+											<div class="topic-sidebar-label">Category Paths</div>
+											{#if selectedTopic.categoryPaths && selectedTopic.categoryPaths.length > 0}
+												<div class="keyword-list">
+													{#each selectedTopic.categoryPaths as path, idx (`${path}-${idx}`)}
+														<span class="keyword-chip">{path}</span>
+													{/each}
+												</div>
+											{:else}
+												<p class="topic-sidebar-copy muted">No category paths assigned.</p>
+											{/if}
+										</div>
+										<div class="topic-sidebar-block">
 											<div class="topic-sidebar-label">Keywords</div>
 											{#if selectedTopic.topicKeywords.length > 0}
 												<div class="keyword-list">
-													{#each selectedTopic.topicKeywords as kw (kw)}
+													{#each selectedTopic.topicKeywords as kw, idx (`${kw}-${idx}`)}
 														<span class="keyword-chip">{kw}</span>
 													{/each}
 												</div>

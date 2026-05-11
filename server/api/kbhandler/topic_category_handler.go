@@ -20,6 +20,7 @@ type topicCategoryRecord struct {
 	TopicType       string                `json:"topicType"`
 	TopicText       string                `json:"topicText"`
 	Keywords        []string              `json:"topicKeywords"`
+	CategoryPaths   []string              `json:"categoryPaths,omitempty"`
 	SourceLineSpecs []string              `json:"sourceLineSpecs,omitempty"`
 	InputID         int64                 `json:"inputId"`
 	Page            int                   `json:"page"`
@@ -137,15 +138,16 @@ func readTopicCategoryRecords(topicTreeDir string, categoryPath string) ([]topic
 		page, coords := firstSummaryTarget(targets)
 
 		results = append(results, topicCategoryRecord{
-			ID:          topicID,
-			PdfFileName: filepath.Base(strings.TrimSpace(meta.fileName)),
-			TopicType:   parsed.topicType,
-			TopicText:   parsed.topicText,
-			Keywords:    append([]string(nil), parsed.keywords...),
-			InputID:     recordID,
-			Page:        page,
-			Coords:      coords,
-			Targets:     targets,
+			ID:            topicID,
+			PdfFileName:   filepath.Base(strings.TrimSpace(meta.fileName)),
+			TopicType:     parsed.topicType,
+			TopicText:     parsed.topicText,
+			Keywords:      append([]string(nil), parsed.keywords...),
+			CategoryPaths: append([]string(nil), parsed.categoryPaths...),
+			InputID:       recordID,
+			Page:          page,
+			Coords:        coords,
+			Targets:       targets,
 		})
 	}
 
@@ -171,16 +173,7 @@ func readTopicIDsForCategory(topicTreeDir string, categoryPath string) ([]string
 		}
 		return nil, err
 	}
-	rows := make([]string, 0)
-	for _, row := range strings.Split(string(body), "\n") {
-		row = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(row), ","))
-		if row == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	sort.Strings(rows)
-	return rows, nil
+	return parseTopicCategoryIDs(body), nil
 }
 
 // parseTopicIDParts parses "<record_id>_<topic_seq_no>" from a topic ID string.
@@ -199,4 +192,71 @@ func parseTopicIDParts(topicID string) (recordID int64, topicSeqNo int, ok bool)
 		return 0, 0, false
 	}
 	return recordID, topicSeqNo, true
+}
+
+func parseTopicCategoryIDs(body []byte) []string {
+	type topicBlock struct {
+		recordID int64
+		topicID  int
+	}
+
+	flush := func(
+		block *topicBlock,
+		out *[]string,
+		seqByRecord map[int64]int,
+	) {
+		if block == nil || block.recordID <= 0 {
+			return
+		}
+		seqNo := block.topicID
+		if seqNo <= 0 {
+			seqByRecord[block.recordID]++
+			seqNo = seqByRecord[block.recordID]
+		} else if seqNo > seqByRecord[block.recordID] {
+			seqByRecord[block.recordID] = seqNo
+		}
+		*out = append(*out, fmt.Sprintf("%d_%d", block.recordID, seqNo))
+	}
+
+	rows := make([]string, 0)
+	seqByRecord := map[int64]int{}
+	var current *topicBlock
+
+	for _, rawLine := range strings.Split(string(body), "\n") {
+		line := strings.TrimSpace(strings.TrimRight(rawLine, "\r"))
+		if line == "" {
+			flush(current, &rows, seqByRecord)
+			current = nil
+			continue
+		}
+
+		if !strings.Contains(line, ":") {
+			flush(current, &rows, seqByRecord)
+			current = nil
+			rows = append(rows, strings.TrimSuffix(strings.TrimSpace(line), ","))
+			continue
+		}
+
+		if current == nil {
+			current = &topicBlock{}
+		}
+
+		switch {
+		case strings.HasPrefix(line, "record_id:"):
+			raw := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "record_id:"), ","))
+			if recordID, err := parseInt64(raw); err == nil {
+				current.recordID = recordID
+			}
+		case strings.HasPrefix(line, "topic_id:"):
+			raw := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "topic_id:"), ","))
+			raw = strings.Trim(raw, `"`)
+			if topicID, err := parseInt(raw); err == nil {
+				current.topicID = topicID
+			}
+		}
+	}
+
+	flush(current, &rows, seqByRecord)
+	sort.Strings(rows)
+	return rows
 }

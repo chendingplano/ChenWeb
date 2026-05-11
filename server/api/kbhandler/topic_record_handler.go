@@ -22,11 +22,12 @@ type getRecordTopicsResponse struct {
 }
 
 type parsedTopicEntry struct {
-	topicID   string
-	topicType string
-	topicText string
-	keywords  []string
-	lines     []string
+	topicID       string
+	topicType     string
+	topicText     string
+	keywords      []string
+	lines         []string
+	categoryPaths []string
 }
 
 func GetRecordTopics(c echo.Context) error {
@@ -126,6 +127,7 @@ func readRecordTopicCards(logger ApiTypes.JimoLogger, recordID int64) ([]topicCa
 				TopicType:       topic.topicType,
 				TopicText:       topic.topicText,
 				Keywords:        append([]string(nil), topic.keywords...),
+				CategoryPaths:   append([]string(nil), topic.categoryPaths...),
 				SourceLineSpecs: append([]string(nil), topic.lines...),
 				InputID:         recordID,
 				Page:            page,
@@ -193,6 +195,9 @@ func parseTopicsFile(path string) ([]parsedTopicEntry, error) {
 		case strings.HasPrefix(trimmed, "topic_keywords:"):
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "topic_keywords:"))
 			current.keywords = parseQuotedStringArray(raw)
+		case strings.HasPrefix(trimmed, "category_paths:"):
+			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "category_paths:"))
+			current.categoryPaths = parseQuotedStringArray(raw)
 		case strings.HasPrefix(trimmed, "topic:"):
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "topic:"))
 			current.topicText = strings.Trim(raw, `"`)

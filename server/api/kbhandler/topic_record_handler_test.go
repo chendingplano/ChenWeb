@@ -47,7 +47,7 @@ topic_type: "general"
 lines: ["1-3"]
 topic_keywords: ["scope", "definitions"]
 topic: "Scope and definitions"
-category_paths: []
+category_paths: ["safety/scope"]
 `)
 
 	results, err := readRecordTopicCards(nil, recordID)
@@ -62,6 +62,9 @@ category_paths: []
 	}
 	if len(results[0].SourceLineSpecs) != 1 || results[0].SourceLineSpecs[0] != "1-3" {
 		t.Fatalf("expected line specs to round-trip, got %+v", results[0].SourceLineSpecs)
+	}
+	if len(results[0].CategoryPaths) != 1 || results[0].CategoryPaths[0] != "safety/scope" {
+		t.Fatalf("expected category paths to round-trip, got %+v", results[0].CategoryPaths)
 	}
 	if results[0].Page != 1 {
 		t.Fatalf("expected default page 1 without corrected artifact, got %+v", results[0])
@@ -111,7 +114,7 @@ topic_type: "general"
 lines: ["1-3"]
 topic_keywords: ["scope", "definitions"]
 topic: "Scope and definitions"
-category_paths: []
+category_paths: ["safety/scope"]
 `)
 
 	e := echo.New()
@@ -139,6 +142,9 @@ category_paths: []
 	}
 	if len(payload.Topics[0].SourceLineSpecs) != 1 || payload.Topics[0].SourceLineSpecs[0] != "1-3" {
 		t.Fatalf("expected line specs in payload, got %+v", payload.Topics[0].SourceLineSpecs)
+	}
+	if len(payload.Topics[0].CategoryPaths) != 1 || payload.Topics[0].CategoryPaths[0] != "safety/scope" {
+		t.Fatalf("expected category paths in payload, got %+v", payload.Topics[0].CategoryPaths)
 	}
 	if payload.Topics[0].Page != 1 || len(payload.Topics[0].Targets) != 0 {
 		t.Fatalf("expected empty highlight data, got %+v", payload.Topics[0])

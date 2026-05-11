@@ -135,16 +135,7 @@ func readTopicGraphTopicIDs(dir string) ([]string, bool) {
 	if err != nil {
 		return []string{}, false
 	}
-	rows := make([]string, 0)
-	for _, row := range strings.Split(string(body), "\n") {
-		row = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(row), ","))
-		if row == "" {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	sort.Strings(rows)
-	return rows, true
+	return parseTopicCategoryIDs(body), true
 }
 
 func readTopicGraphMetadata(dir string) topicGraphMetadata {
