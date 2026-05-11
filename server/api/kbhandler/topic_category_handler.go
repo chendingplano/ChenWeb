@@ -34,6 +34,14 @@ type getTopicCategoryResponse struct {
 	Topics       []topicCategoryRecord `json:"topics"`
 }
 
+type topicCategoryReference struct {
+	RecordID  int64
+	TopicID   string
+	TopicText string
+	Lines     []string
+	Ordinal   int
+}
+
 func GetTopicCategory(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_TCAT_001")
 	defer rc.Close()
@@ -77,11 +85,11 @@ func readTopicCategoryRecords(topicTreeDir string, categoryPath string) ([]topic
 		return nil, fmt.Errorf("missing ARTIFACT_DIR")
 	}
 
-	topicIDs, err := readTopicIDsForCategory(topicTreeDir, categoryPath)
+	topicRefs, err := readTopicRefsForCategory(topicTreeDir, categoryPath)
 	if err != nil {
 		return nil, err
 	}
-	if len(topicIDs) == 0 {
+	if len(topicRefs) == 0 {
 		return []topicCategoryRecord{}, nil
 	}
 
@@ -101,14 +109,14 @@ func readTopicCategoryRecords(topicTreeDir string, categoryPath string) ([]topic
 
 	metaCache := map[int64]summaryArtifactMeta{}
 	lineTargetCache := map[int64]map[int]summaryLineTarget{}
-	results := make([]topicCategoryRecord, 0, len(topicIDs))
+	results := make([]topicCategoryRecord, 0, len(topicRefs))
 
-	for _, topicID := range topicIDs {
-		recordID, topicSeqNo, ok := parseTopicIDParts(topicID)
-		if !ok {
+	for _, topicRef := range topicRefs {
+		if topicRef.RecordID <= 0 {
 			continue
 		}
 
+		recordID := topicRef.RecordID
 		meta, ok := metaCache[recordID]
 		if !ok {
 			var err error
@@ -129,25 +137,27 @@ func readTopicCategoryRecords(topicTreeDir string, categoryPath string) ([]topic
 			lineTargetCache[recordID] = lineTargets
 		}
 
-		parsed, err := readTopicFromArtifact(artifactDir, recordID, meta, topicSeqNo)
+		parsed, err := resolveTopicCategoryReference(artifactDir, recordID, meta, topicRef)
 		if err != nil {
 			continue
 		}
 
 		targets := expandSummaryTargets(parsed.lines, lineTargets)
 		page, coords := firstSummaryTarget(targets)
+		resultTopicID := buildTopicCategoryRecordID(recordID, parsed.topicID, topicRef.Ordinal)
 
 		results = append(results, topicCategoryRecord{
-			ID:            topicID,
-			PdfFileName:   filepath.Base(strings.TrimSpace(meta.fileName)),
-			TopicType:     parsed.topicType,
-			TopicText:     parsed.topicText,
-			Keywords:      append([]string(nil), parsed.keywords...),
-			CategoryPaths: append([]string(nil), parsed.categoryPaths...),
-			InputID:       recordID,
-			Page:          page,
-			Coords:        coords,
-			Targets:       targets,
+			ID:              resultTopicID,
+			PdfFileName:     filepath.Base(strings.TrimSpace(meta.fileName)),
+			TopicType:       parsed.topicType,
+			TopicText:       parsed.topicText,
+			Keywords:        append([]string(nil), parsed.keywords...),
+			CategoryPaths:   append([]string(nil), parsed.categoryPaths...),
+			SourceLineSpecs: append([]string(nil), parsed.lines...),
+			InputID:         recordID,
+			Page:            page,
+			Coords:          coords,
+			Targets:         targets,
 		})
 	}
 
@@ -157,7 +167,103 @@ func readTopicCategoryRecords(topicTreeDir string, categoryPath string) ([]topic
 	return results, nil
 }
 
+func resolveTopicCategoryReference(
+	artifactDir string,
+	recordID int64,
+	meta summaryArtifactMeta,
+	topicRef topicCategoryReference,
+) (parsedTopicEntry, error) {
+	if topicRef.TopicID != "" {
+		if topicSeqNo, err := parseInt(topicRef.TopicID); err == nil && topicSeqNo > 0 {
+			return readTopicFromArtifact(artifactDir, recordID, meta, topicSeqNo)
+		}
+	}
+
+	recordDir, err := resolveRecordArtifactDir(artifactDir, recordID)
+	if err != nil {
+		return parsedTopicEntry{}, err
+	}
+
+	candidates := listTopicArtifactCandidates(recordDir, meta)
+	normalizedText := strings.TrimSpace(topicRef.TopicText)
+	for _, path := range candidates {
+		topics, err := parseTopicsFile(path)
+		if err != nil {
+			continue
+		}
+
+		if match, ok := findBestMatchingTopic(topics, normalizedText, topicRef.Lines); ok {
+			return match, nil
+		}
+
+		if topicRef.Ordinal >= 1 && topicRef.Ordinal <= len(topics) {
+			return topics[topicRef.Ordinal-1], nil
+		}
+	}
+
+	return parsedTopicEntry{}, fmt.Errorf("topic reference not found for record %d", recordID)
+}
+
+func findBestMatchingTopic(topics []parsedTopicEntry, topicText string, lines []string) (parsedTopicEntry, bool) {
+	bestScore := 0
+	var best parsedTopicEntry
+	for _, topic := range topics {
+		score := 0
+		if topicText != "" && strings.TrimSpace(topic.topicText) == topicText {
+			score += 3
+		}
+		if sameTopicLines(topic.lines, lines) {
+			score += 2
+		}
+		if score > bestScore {
+			bestScore = score
+			best = topic
+		}
+	}
+	return best, bestScore > 0
+}
+
+func sameTopicLines(left []string, right []string) bool {
+	if len(left) == 0 || len(right) == 0 || len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if strings.TrimSpace(left[index]) != strings.TrimSpace(right[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func buildTopicCategoryRecordID(recordID int64, topicID string, ordinal int) string {
+	topicID = strings.TrimSpace(topicID)
+	if topicID != "" {
+		return fmt.Sprintf("%d_%s", recordID, topicID)
+	}
+	return fmt.Sprintf("%d_%d", recordID, ordinal)
+}
+
 func readTopicIDsForCategory(topicTreeDir string, categoryPath string) ([]string, error) {
+	refs, err := readTopicRefsForCategory(topicTreeDir, categoryPath)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.RecordID <= 0 {
+			continue
+		}
+		topicID := strings.TrimSpace(ref.TopicID)
+		if topicID == "" {
+			topicID = fmt.Sprintf("%d", ref.Ordinal)
+		}
+		rows = append(rows, fmt.Sprintf("%d_%s", ref.RecordID, topicID))
+	}
+	sort.Strings(rows)
+	return rows, nil
+}
+
+func readTopicRefsForCategory(topicTreeDir string, categoryPath string) ([]topicCategoryReference, error) {
 	cleanPath := filepath.Clean(strings.TrimSpace(categoryPath))
 	if cleanPath == "." || cleanPath == "" {
 		return nil, fmt.Errorf("invalid category path")
@@ -169,11 +275,11 @@ func readTopicIDsForCategory(topicTreeDir string, categoryPath string) ([]string
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []string{}, nil
+			return []topicCategoryReference{}, nil
 		}
 		return nil, err
 	}
-	return parseTopicCategoryIDs(body), nil
+	return parseTopicCategoryRefs(body), nil
 }
 
 // parseTopicIDParts parses "<record_id>_<topic_seq_no>" from a topic ID string.
@@ -195,30 +301,59 @@ func parseTopicIDParts(topicID string) (recordID int64, topicSeqNo int, ok bool)
 }
 
 func parseTopicCategoryIDs(body []byte) []string {
+	refs := parseTopicCategoryRefs(body)
+	rows := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.RecordID <= 0 {
+			continue
+		}
+		topicID := strings.TrimSpace(ref.TopicID)
+		if topicID == "" {
+			topicID = fmt.Sprintf("%d", ref.Ordinal)
+		}
+		rows = append(rows, fmt.Sprintf("%d_%s", ref.RecordID, topicID))
+	}
+	sort.Strings(rows)
+	return rows
+}
+
+func parseTopicCategoryRefs(body []byte) []topicCategoryReference {
 	type topicBlock struct {
-		recordID int64
-		topicID  int
+		recordID  int64
+		topicID   string
+		topicText string
+		lines     []string
 	}
 
 	flush := func(
 		block *topicBlock,
-		out *[]string,
+		out *[]topicCategoryReference,
 		seqByRecord map[int64]int,
 	) {
 		if block == nil || block.recordID <= 0 {
 			return
 		}
-		seqNo := block.topicID
-		if seqNo <= 0 {
+		seqNo := seqByRecord[block.recordID]
+		if strings.TrimSpace(block.topicID) == "" {
 			seqByRecord[block.recordID]++
 			seqNo = seqByRecord[block.recordID]
-		} else if seqNo > seqByRecord[block.recordID] {
-			seqByRecord[block.recordID] = seqNo
+		} else if parsedTopicID, err := parseInt(block.topicID); err == nil && parsedTopicID > seqByRecord[block.recordID] {
+			seqByRecord[block.recordID] = parsedTopicID
+			seqNo = seqByRecord[block.recordID]
+		} else if seqNo == 0 {
+			seqByRecord[block.recordID]++
+			seqNo = seqByRecord[block.recordID]
 		}
-		*out = append(*out, fmt.Sprintf("%d_%d", block.recordID, seqNo))
+		*out = append(*out, topicCategoryReference{
+			RecordID:  block.recordID,
+			TopicID:   strings.TrimSpace(block.topicID),
+			TopicText: strings.TrimSpace(block.topicText),
+			Lines:     append([]string(nil), block.lines...),
+			Ordinal:   seqNo,
+		})
 	}
 
-	rows := make([]string, 0)
+	rows := make([]topicCategoryReference, 0)
 	seqByRecord := map[int64]int{}
 	var current *topicBlock
 
@@ -233,7 +368,16 @@ func parseTopicCategoryIDs(body []byte) []string {
 		if !strings.Contains(line, ":") {
 			flush(current, &rows, seqByRecord)
 			current = nil
-			rows = append(rows, strings.TrimSuffix(strings.TrimSpace(line), ","))
+			legacyID := strings.TrimSuffix(strings.TrimSpace(line), ",")
+			recordID, topicSeqNo, ok := parseTopicIDParts(legacyID)
+			if !ok {
+				continue
+			}
+			rows = append(rows, topicCategoryReference{
+				RecordID: recordID,
+				TopicID:  fmt.Sprintf("%d", topicSeqNo),
+				Ordinal:  topicSeqNo,
+			})
 			continue
 		}
 
@@ -249,14 +393,16 @@ func parseTopicCategoryIDs(body []byte) []string {
 			}
 		case strings.HasPrefix(line, "topic_id:"):
 			raw := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "topic_id:"), ","))
-			raw = strings.Trim(raw, `"`)
-			if topicID, err := parseInt(raw); err == nil {
-				current.topicID = topicID
-			}
+			current.topicID = strings.Trim(raw, `"`)
+		case strings.HasPrefix(line, "lines:"):
+			raw := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "lines:"), ","))
+			current.lines = parseQuotedStringArray(raw)
+		case strings.HasPrefix(line, "topic:"):
+			raw := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "topic:"), ","))
+			current.topicText = strings.Trim(raw, `"`)
 		}
 	}
 
 	flush(current, &rows, seqByRecord)
-	sort.Strings(rows)
 	return rows
 }

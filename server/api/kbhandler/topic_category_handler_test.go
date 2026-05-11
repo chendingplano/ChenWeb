@@ -124,11 +124,91 @@ category_paths: []
 	if results[0].TopicText != "Requirements text" {
 		t.Fatalf("unexpected topic text: %+v", results[0])
 	}
+	if len(results[0].SourceLineSpecs) != 1 || results[0].SourceLineSpecs[0] != "338-342" {
+		t.Fatalf("unexpected source line specs: %+v", results[0].SourceLineSpecs)
+	}
 	if results[0].Page != 17 {
 		t.Fatalf("expected page 17, got %+v", results[0])
 	}
 	if len(results[0].Targets) == 0 || results[0].Targets[0].Page != 17 {
 		t.Fatalf("expected highlight targets from line artifact, got %+v", results[0].Targets)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestReadTopicCategoryRecords_ResolvesStructuredTopicWithoutTopicIDByTopicText(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	artifactDir := t.TempDir()
+	topicTreeDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+
+	expectResolveInputTablePlural(mock)
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "staging_filename").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "parser_name").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	recordID := int64(99)
+	query := regexp.QuoteMeta(`SELECT COALESCE(i.staging_filename, '') AS staging_filename, COALESCE(i.parser_name, '') AS parser_name, i.file_name FROM kb.inputs i WHERE i.id = $1`)
+	mock.ExpectQuery(query).
+		WithArgs(recordID).
+		WillReturnRows(sqlmock.NewRows([]string{"staging_filename", "parser_name", "file_name"}).
+			AddRow("std_20039.pdf", "opendata", "/tmp/standards/std_20039.pdf"))
+
+	mustWriteFile(t, filepath.Join(topicTreeDir, "safety", "inspection", "topics.txt"), `record_id: 99,
+topic_type: "list"
+lines: [493-501]
+topic_keywords: [传染病筛查, 免疫]
+topic: "应定期对消防员进行传染病筛查和免疫。"
+`)
+	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "std_20039_opendata.topics"), `topic_id: 1
+topic_type: "general"
+lines: ["1-3"]
+topic_keywords: ["overview"]
+topic: "消防员职业健康标准 (Standard on occupational health for fire fighter) - 发布信息"
+category_paths: []
+
+topic_id: 149
+topic_type: "list"
+lines: ["493-501"]
+topic_keywords: ["传染病筛查", "免疫"]
+topic: "应定期对消防员进行传染病筛查和免疫。"
+category_paths: []
+`)
+	mustWriteFile(t, filepath.Join(artifactDir, "0", "99", "std_20039_opendata.txt"), "493\t17\tparagraph\tSong\t12\t[10,20,30,40]\tA\n501\t17\tparagraph\tSong\t12\t[11,21,31,41]\tB\n")
+
+	results, err := readTopicCategoryRecords(topicTreeDir, "safety/inspection")
+	if err != nil {
+		t.Fatalf("readTopicCategoryRecords: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 topic, got %d", len(results))
+	}
+	if results[0].ID != "99_149" {
+		t.Fatalf("expected resolved artifact topic id, got %+v", results[0])
+	}
+	if results[0].TopicText != "应定期对消防员进行传染病筛查和免疫。" {
+		t.Fatalf("unexpected topic text: %+v", results[0])
+	}
+	if len(results[0].SourceLineSpecs) != 1 || results[0].SourceLineSpecs[0] != "493-501" {
+		t.Fatalf("unexpected source line specs: %+v", results[0].SourceLineSpecs)
+	}
+	if results[0].Page != 17 {
+		t.Fatalf("expected page 17, got %+v", results[0])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

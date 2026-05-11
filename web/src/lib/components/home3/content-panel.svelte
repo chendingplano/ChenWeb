@@ -1,5 +1,6 @@
 <script lang="ts">
 	import DashboardView from '$lib/components/home3/dashboard-view.svelte';
+	import DocProcessorDashboardView from '$lib/components/home3/doc-processor-dashboard-view.svelte';
 	import AppFooter     from '$lib/components/home3/app-footer.svelte';
 	import KbImportView  from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
@@ -138,7 +139,9 @@
 
 	<!-- Main content area -->
 	<div class="flex-1">
-		{#if activeMenu?.childId === 'flow'}
+		{#if activeMenu?.childId === 'doc-processor-dashboard'}
+			<DocProcessorDashboardView {darkMode} />
+		{:else if activeMenu?.childId === 'flow'}
 			<Canvas01
 				{darkMode}
 				{railOffset}

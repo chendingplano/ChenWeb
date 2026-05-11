@@ -1,6 +1,7 @@
 <script lang="ts">
 	import TopicCard from './topic-card.svelte';
-	import SharedPdfViewer from './shared-pdf-viewer.svelte';
+	import PdfViewWindow from './pdf-view-window.svelte';
+	import { formatTopicLineSpecs } from './topic-line-specs';
 	import type { TopicCard as TopicCardType, TopicPdfTarget, TopicRecordTarget } from './topic-types';
 
 	let {
@@ -25,6 +26,9 @@
 	let selectedTopic = $derived(topics.find((t) => t.id === selectedTopicId) ?? null);
 	let viewerInputId = $derived(selectedTarget?.inputId ?? null);
 	let viewerFileUrl = $derived(viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : '');
+	let viewerIsPdf = $derived(
+		(selectedTopic?.pdfFileName ?? '').trim().toLowerCase().endsWith('.pdf')
+	);
 	let viewerPage = $state(1);
 	let viewerZoom = $state(0.5);
 	let viewerNumPages = $state(0);
@@ -115,8 +119,8 @@
 		></button>
 
 		<div class="pdf-panel">
-			{#if viewerInputId && selectedTarget}
-				<SharedPdfViewer
+			{#if viewerInputId && selectedTarget && viewerIsPdf}
+				<PdfViewWindow
 					inputId={viewerInputId}
 					fileUrl={viewerFileUrl}
 					bind:page={viewerPage}
@@ -126,7 +130,72 @@
 						? `${selectedTopic.id}:${selectedTopic.targets.map((t) => `${t.page}:${t.coords.join(',')}`).join('|')}`
 						: 'topic-category'}
 					renderHighlights={renderTopicHighlight}
-				/>
+					sidebarMinWidth={240}
+					sidebarMaxWidth={520}
+					sidebarDefaultWidth={320}
+					sidebarTitle="Topic Details"
+					sidebarSettingsKey="topic-category-pdf-sidebar"
+					sidebarWidthSettingLabel="Panel Width"
+				>
+					{#snippet sidebar()}
+						{#if selectedTopic}
+							<div class="topic-sidebar-block">
+								<div class="topic-sidebar-row">
+									<span>Topic ID</span>
+									<strong>{selectedTopic.id}</strong>
+								</div>
+								<div class="topic-sidebar-row">
+									<span>Record ID</span>
+									<strong>{selectedTopic.inputId}</strong>
+								</div>
+								<div class="topic-sidebar-row">
+									<span>Page</span>
+									<strong>{selectedTopic.page}</strong>
+								</div>
+								<div class="topic-sidebar-row">
+									<span>Type</span>
+									<strong>{selectedTopic.topicType || '—'}</strong>
+								</div>
+								<div class="topic-sidebar-row">
+									<span>Line Numbers</span>
+									<strong>{formatTopicLineSpecs(selectedTopic.sourceLineSpecs)}</strong>
+								</div>
+							</div>
+							<div class="topic-sidebar-block">
+								<div class="topic-sidebar-label">Topic</div>
+								<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
+							</div>
+							<div class="topic-sidebar-block">
+								<div class="topic-sidebar-label">Category Paths</div>
+								{#if selectedTopic.categoryPaths && selectedTopic.categoryPaths.length > 0}
+									<div class="keyword-list">
+										{#each selectedTopic.categoryPaths as path, idx (`${path}-${idx}`)}
+											<span class="keyword-chip">{path}</span>
+										{/each}
+									</div>
+								{:else}
+									<p class="topic-sidebar-copy muted">No category paths assigned.</p>
+								{/if}
+							</div>
+							<div class="topic-sidebar-block">
+								<div class="topic-sidebar-label">Keywords</div>
+								{#if selectedTopic.topicKeywords.length > 0}
+									<div class="keyword-list">
+										{#each selectedTopic.topicKeywords as kw, idx (`${kw}-${idx}`)}
+											<span class="keyword-chip">{kw}</span>
+										{/each}
+									</div>
+								{:else}
+									<p class="topic-sidebar-copy muted">No keywords extracted.</p>
+								{/if}
+							</div>
+						{:else}
+							<div class="topic-sidebar-empty">Select a topic to inspect it alongside the source PDF.</div>
+						{/if}
+					{/snippet}
+				</PdfViewWindow>
+			{:else if viewerInputId && selectedTarget}
+				<iframe class="pdf-fallback-frame" title={selectedTopic?.pdfFileName ?? categoryPath} src={viewerFileUrl}></iframe>
 			{:else}
 				<div class="pdf-empty">
 					Select a topic card on the left to display its source PDF.
@@ -212,6 +281,18 @@
 		flex-direction: column;
 	}
 
+	.pdf-panel :global(.doc-page-bar) {
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 16px 16px 0 0;
+	}
+
+	.pdf-panel :global(.pdf-stage) {
+		margin-top: -1px;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 0 0 16px 16px;
+		background: rgba(2, 6, 23, 0.28);
+	}
+
 	.pdf-empty,
 	.empty-state {
 		display: flex;
@@ -224,6 +305,80 @@
 		padding: 1.2rem;
 		color: #94a3b8;
 		text-align: center;
+	}
+
+	.topic-sidebar-block + .topic-sidebar-block {
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid rgba(148, 163, 184, 0.1);
+	}
+
+	.topic-sidebar-row {
+		display: grid;
+		grid-template-columns: 96px minmax(0, 1fr);
+		gap: 0.6rem;
+		margin-bottom: 0.6rem;
+		align-items: start;
+	}
+
+	.topic-sidebar-row span,
+	.topic-sidebar-label {
+		font-size: 0.72rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #94a3b8;
+	}
+
+	.topic-sidebar-row strong,
+	.topic-sidebar-copy {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+
+	.topic-sidebar-copy {
+		margin-top: 0.55rem;
+		font-size: 0.88rem;
+		line-height: 1.6;
+		color: #e2e8f0;
+	}
+
+	.topic-sidebar-copy.muted,
+	.topic-sidebar-empty {
+		color: #94a3b8;
+	}
+
+	.topic-sidebar-empty {
+		font-size: 0.9rem;
+		line-height: 1.6;
+	}
+
+	.keyword-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+		margin-top: 0.6rem;
+	}
+
+	.keyword-chip {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.32rem 0.58rem;
+		border-radius: 999px;
+		border: 1px solid rgba(74, 222, 128, 0.22);
+		background: rgba(13, 148, 136, 0.12);
+		font-size: 0.78rem;
+		color: #6ee7b7;
+	}
+
+	.pdf-fallback-frame {
+		width: 100%;
+		min-height: 540px;
+		flex: 1;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 16px;
+		background: white;
 	}
 
 	:global(.pdf-highlight) {

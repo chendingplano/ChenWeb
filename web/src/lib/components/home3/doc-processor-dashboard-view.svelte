@@ -1,0 +1,997 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import ActivityIcon from '@lucide/svelte/icons/activity';
+	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import XCircleIcon from '@lucide/svelte/icons/x-circle';
+	import ClockIcon from '@lucide/svelte/icons/clock';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import PlayIcon from '@lucide/svelte/icons/play';
+	import SquareIcon from '@lucide/svelte/icons/square';
+	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
+	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
+	import { listKbInputs, type KbInputRecord } from '$lib/services/kbService';
+
+	let { darkMode = true }: { darkMode: boolean } = $props();
+
+	// Design tokens
+	let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
+	let surface2 = $derived(darkMode ? '#252A3A' : '#ECEEF2');
+	let surface3 = $derived(darkMode ? '#1A1E2C' : '#F8F9FB');
+	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB');
+	let accent = $derived(darkMode ? '#818CF8' : '#6366F1');
+	let accentTint = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)');
+	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
+	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
+	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
+	let colorSuccess = $derived(darkMode ? '#34D399' : '#10B981');
+	let colorSuccessTint = $derived(darkMode ? 'rgba(52,211,153,0.12)' : 'rgba(16,185,129,0.10)');
+	let colorError = $derived(darkMode ? '#F87171' : '#EF4444');
+	let colorErrorTint = $derived(darkMode ? 'rgba(248,113,113,0.12)' : 'rgba(239,68,68,0.10)');
+
+	// ── Types ──────────────────────────────────────────────────────────────
+
+	type StageStatus = 'pending' | 'in-progress' | 'success' | 'failed';
+
+	type StatusEntry = {
+		operation?: string;
+		time?: string;
+		start_time?: string;
+		status?: string;
+		proc_status?: string;
+		'proc-status'?: string;
+		error?: string;
+		progress?: string;
+	};
+
+	type StageInfo = {
+		id: string;
+		label: string;
+		status: StageStatus;
+		entry?: StatusEntry;
+		isLeaf?: boolean;
+	};
+
+	// ── Pipeline definition ────────────────────────────────────────────────
+
+	const MAIN_STAGES = [
+		{ id: 'staged', label: 'Staged', operations: [] as string[] },
+		{ id: 'parsing', label: 'PDF Parser', operations: ['parsing', 'parsed'] },
+		{ id: 'converting', label: 'Result Converter', operations: ['converting', 'line-file-generated'] },
+		{ id: 'blocking', label: 'Blocking', operations: ['blocking'] }
+	];
+
+	const LEAF_PROCESSORS = [
+		{ id: 'structure_analyzer', label: 'Structure Analyzer' },
+		{ id: 'chunking', label: 'Chunking' },
+		{ id: 'extract_doc_metadata', label: 'Extract Metadata' },
+		{ id: 'extract_metrics', label: 'Extract Metrics' },
+		{ id: 'extract_provisions', label: 'Extract Provisions' }
+	];
+
+	const ALL_PROCESSOR_IDS = LEAF_PROCESSORS.map((p) => p.id);
+
+	// ── Active pipelines state ─────────────────────────────────────────────
+
+	let activePipelines = $state<KbInputRecord[]>([]);
+	let pipelinesLoading = $state(true);
+	let pipelinesError = $state('');
+	let lastPoll = $state('');
+	let tooltipState = $state<{
+		recordId: number;
+		stageId: string;
+		label: string;
+		status: StageStatus;
+		entry?: StatusEntry;
+		x: number;
+		y: number;
+	} | null>(null);
+
+	// ── Manual launch state ────────────────────────────────────────────────
+
+	let searchQuery = $state('');
+	let searchLoading = $state(false);
+	let searchResults = $state<KbInputRecord[]>([]);
+	let searchError = $state('');
+	let selectedRecord = $state<KbInputRecord | null>(null);
+	let processors = $state<Record<string, boolean>>(
+		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
+	);
+	let showConfirm = $state(false);
+	let launching = $state(false);
+	let launchError = $state('');
+	let launchToast = $state<{ kind: 'success' | 'error'; msg: string } | null>(null);
+
+	// ── Restart dialog state ───────────────────────────────────────────────
+
+	let restartTarget = $state<KbInputRecord | null>(null);
+	let restartProcessors = $state<Record<string, boolean>>(
+		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
+	);
+	let showRestartDialog = $state(false);
+	let restarting = $state(false);
+	let restartError = $state('');
+
+	// ── Helpers ────────────────────────────────────────────────────────────
+
+	function resolveEntryStatus(entry: StatusEntry): StageStatus {
+		const ps = (entry.proc_status ?? entry['proc-status'] ?? entry.status ?? '').toLowerCase();
+		if (ps === 'success') return 'success';
+		if (ps === 'fail' || ps === 'failed' || ps === 'error') return 'failed';
+		if (entry.progress !== undefined) return 'in-progress';
+		if (!ps) return 'in-progress';
+		return 'in-progress';
+	}
+
+	function computeStages(record: KbInputRecord): { main: StageInfo[]; leaves: StageInfo[] } {
+		const statusMap = new Map<string, StatusEntry>();
+		for (const e of record.status ?? []) {
+			if (e.operation) statusMap.set(e.operation, e as StatusEntry);
+		}
+
+		function stageFor(operations: string[]): { status: StageStatus; entry?: StatusEntry } {
+			for (const op of operations) {
+				const e = statusMap.get(op);
+				if (e) return { status: resolveEntryStatus(e), entry: e };
+			}
+			return { status: 'pending' };
+		}
+
+		const main: StageInfo[] = MAIN_STAGES.map((s) => {
+			if (s.id === 'staged') return { id: 'staged', label: 'Staged', status: 'success' };
+			const { status, entry } = stageFor(s.operations);
+			return { id: s.id, label: s.label, status, entry };
+		});
+
+		const leaves: StageInfo[] = LEAF_PROCESSORS.map((p) => {
+			const { status, entry } = stageFor([p.id]);
+			return { id: p.id, label: p.label, status, entry, isLeaf: true };
+		});
+
+		return { main, leaves };
+	}
+
+	function isActiveRecord(record: KbInputRecord): boolean {
+		const s = record.status ?? [];
+		if (!s.length) return true;
+		for (const e of s as StatusEntry[]) {
+			const ps = (e.proc_status ?? e['proc-status'] ?? e.status ?? '').toLowerCase();
+			if (e.progress !== undefined && !['success', 'fail', 'failed'].includes(ps)) return true;
+		}
+		const last = s[s.length - 1] as StatusEntry;
+		const lps = (last.proc_status ?? last['proc-status'] ?? last.status ?? '').toLowerCase();
+		return !['success', 'fail', 'failed'].includes(lps);
+	}
+
+	function stageStatusColor(status: StageStatus): string {
+		if (status === 'success') return colorSuccess;
+		if (status === 'failed') return colorError;
+		if (status === 'in-progress') return accent;
+		return textMuted;
+	}
+
+	function stageStatusBg(status: StageStatus): string {
+		if (status === 'success') return colorSuccessTint;
+		if (status === 'failed') return colorErrorTint;
+		if (status === 'in-progress') return accentTint;
+		return 'transparent';
+	}
+
+	function recordTitle(record: KbInputRecord): string {
+		return record.title?.trim() || record.name?.trim() || record.file_name?.trim() || `Record #${record.id}`;
+	}
+
+	function formatTime(s?: string): string {
+		if (!s) return '—';
+		return s.slice(0, 19).replace('T', ' ');
+	}
+
+	function lastStatusText(record: KbInputRecord): string {
+		const items = record.status ?? [];
+		if (!items.length) return 'staged';
+		const last = items[items.length - 1];
+		const ps = last.proc_status ?? last['proc-status'] ?? last.status ?? '';
+		return `${last.operation ?? '?'} · ${ps || 'running'}`;
+	}
+
+	// ── API calls ──────────────────────────────────────────────────────────
+
+	async function pollPipelines() {
+		try {
+			const res = await listKbInputs({
+				docType: 'all',
+				parseState: 'all',
+				fileName: '',
+				startTime: '',
+				endTime: '',
+				page: 1,
+				pageSize: 20
+			});
+			activePipelines = (res.results ?? []).filter(isActiveRecord).slice(0, 10);
+			lastPoll = new Date().toLocaleTimeString();
+			pipelinesError = '';
+		} catch (err) {
+			pipelinesError = err instanceof Error ? err.message : 'Failed to load pipelines';
+		} finally {
+			pipelinesLoading = false;
+		}
+	}
+
+	async function runSearch() {
+		if (!searchQuery.trim()) return;
+		searchLoading = true;
+		searchError = '';
+		selectedRecord = null;
+		try {
+			const isNumeric = /^\d+$/.test(searchQuery.trim());
+			const res = await listKbInputs({
+				docType: 'all',
+				parseState: 'all',
+				fileName: '',
+				startTime: '',
+				endTime: '',
+				page: 1,
+				pageSize: 30,
+				recordId: isNumeric ? searchQuery.trim() : undefined,
+				title: isNumeric ? undefined : searchQuery.trim()
+			});
+			searchResults = res.results ?? [];
+			if (!searchResults.length) searchError = 'No records found.';
+		} catch (err) {
+			searchError = err instanceof Error ? err.message : 'Search failed';
+		} finally {
+			searchLoading = false;
+		}
+	}
+
+	async function doLaunch(record: KbInputRecord, procs: Record<string, boolean>) {
+		const chosen = ALL_PROCESSOR_IDS.filter((p) => procs[p]);
+		const allChosen = chosen.length === ALL_PROCESSOR_IDS.length;
+		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
+		if (!allChosen) payload.operation = chosen;
+
+		const res = await fetch('/api/v1/jetstream/events', {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ subject: 'kb.line-file-generated', data: payload })
+		});
+		if (!res.ok) {
+			const body = await res.json().catch(() => null);
+			throw new Error(body?.error_msg ?? body?.message ?? `Request failed (${res.status})`);
+		}
+	}
+
+	async function confirmLaunch() {
+		if (!selectedRecord) return;
+		launching = true;
+		launchError = '';
+		try {
+			await doLaunch(selectedRecord, processors);
+			showConfirm = false;
+			launchToast = { kind: 'success', msg: `Launched processing for record #${selectedRecord.id}` };
+			setTimeout(() => {
+				launchToast = null;
+			}, 4000);
+		} catch (err) {
+			launchError = err instanceof Error ? err.message : 'Launch failed';
+		} finally {
+			launching = false;
+		}
+	}
+
+	async function confirmRestart() {
+		if (!restartTarget) return;
+		restarting = true;
+		restartError = '';
+		try {
+			await doLaunch(restartTarget, restartProcessors);
+			showRestartDialog = false;
+			restartTarget = null;
+			launchToast = { kind: 'success', msg: `Restart triggered` };
+			setTimeout(() => {
+				launchToast = null;
+			}, 4000);
+		} catch (err) {
+			restartError = err instanceof Error ? err.message : 'Restart failed';
+		} finally {
+			restarting = false;
+		}
+	}
+
+	function openRestart(record: KbInputRecord) {
+		restartTarget = record;
+		restartProcessors = Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]));
+		restartError = '';
+		showRestartDialog = true;
+	}
+
+	function allProcessorsSelected(): boolean {
+		return ALL_PROCESSOR_IDS.every((p) => processors[p]);
+	}
+
+	function someProcessorsSelected(): boolean {
+		return ALL_PROCESSOR_IDS.some((p) => processors[p]);
+	}
+
+	function toggleAll() {
+		const next = !allProcessorsSelected();
+		processors = Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, next]));
+	}
+
+	function allRestartSelected(): boolean {
+		return ALL_PROCESSOR_IDS.every((p) => restartProcessors[p]);
+	}
+
+	function toggleAllRestart() {
+		const next = !allRestartSelected();
+		restartProcessors = Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, next]));
+	}
+
+	function showTooltip(
+		e: MouseEvent,
+		recordId: number,
+		stage: StageInfo
+	) {
+		const el = e.currentTarget as HTMLElement;
+		const rect = el.getBoundingClientRect();
+		tooltipState = {
+			recordId,
+			stageId: stage.id,
+			label: stage.label,
+			status: stage.status,
+			entry: stage.entry,
+			x: rect.left + rect.width / 2,
+			y: rect.top
+		};
+	}
+
+	function hideTooltip() {
+		tooltipState = null;
+	}
+
+	onMount(() => {
+		pollPipelines();
+		const interval = setInterval(pollPipelines, 5000);
+		return () => clearInterval(interval);
+	});
+</script>
+
+<!-- ══════════════════════════════════════════════════════════════
+     Root
+══════════════════════════════════════════════════════════════ -->
+<div class="flex flex-col" style="min-height:100%;">
+
+	<!-- ── Toast ─────────────────────────────────────────────── -->
+	{#if launchToast}
+		<div
+			class="fixed right-6 top-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3"
+			style="background:{launchToast.kind === 'success' ? colorSuccessTint : colorErrorTint};
+			       border:1px solid {launchToast.kind === 'success' ? colorSuccess : colorError}40;
+			       color:{launchToast.kind === 'success' ? colorSuccess : colorError};
+			       font-size:13px; font-weight:500; box-shadow:0 4px 16px rgba(0,0,0,0.25);"
+		>
+			{#if launchToast.kind === 'success'}
+				<CircleCheckIcon class="h-4 w-4 flex-shrink-0" />
+			{:else}
+				<XCircleIcon class="h-4 w-4 flex-shrink-0" />
+			{/if}
+			{launchToast.msg}
+		</div>
+	{/if}
+
+	<!-- ── Floating tooltip ───────────────────────────────────── -->
+	{#if tooltipState}
+		<div
+			class="pointer-events-none fixed z-50 rounded-lg px-3 py-2"
+			style="
+				left:{tooltipState.x}px; top:{tooltipState.y - 8}px;
+				transform:translate(-50%, -100%);
+				background:{cardBg}; border:1px solid {borderColor};
+				box-shadow:0 8px 24px rgba(0,0,0,0.30);
+				min-width:160px; max-width:280px;
+			"
+		>
+			<div style="font-size:11px; font-weight:600; color:{stageStatusColor(tooltipState.status)}; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.08em;">
+				{tooltipState.label} · {tooltipState.status}
+			</div>
+			{#if tooltipState.entry}
+				{#if tooltipState.entry.progress}
+					<div style="font-size:12px; color:{textSecondary};">Progress: {tooltipState.entry.progress}</div>
+				{/if}
+				{#if tooltipState.entry.time || tooltipState.entry.start_time}
+					<div style="font-size:11px; color:{textMuted}; font-family:monospace; margin-top:2px;">
+						{formatTime(tooltipState.entry.time ?? tooltipState.entry.start_time)}
+					</div>
+				{/if}
+				{#if tooltipState.entry.error}
+					<div style="font-size:11px; color:{colorError}; margin-top:4px; word-break:break-word;">
+						{tooltipState.entry.error}
+					</div>
+				{/if}
+			{:else}
+				<div style="font-size:12px; color:{textMuted};">Not yet started</div>
+			{/if}
+		</div>
+	{/if}
+
+	<!-- ════════════════════════════════════════════════════════
+	     Section 1 — Active Pipelines
+	══════════════════════════════════════════════════════════ -->
+	<section class="p-6">
+
+		<!-- Section header -->
+		<div class="mb-4 flex items-start justify-between">
+			<div>
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">Active Pipelines</h2>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">Live processing threads — refreshes every 5 s</p>
+			</div>
+			<div class="flex items-center gap-3">
+				{#if lastPoll}
+					<span style="font-size:11px; color:{textMuted}; font-family:monospace;">Updated {lastPoll}</span>
+				{/if}
+				<button
+					onclick={pollPipelines}
+					class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-none"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-weight:500; cursor:pointer;"
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textPrimary;
+						(e.currentTarget as HTMLElement).style.borderColor = accent + '60';
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textSecondary;
+						(e.currentTarget as HTMLElement).style.borderColor = borderColor;
+					}}
+				>
+					<RefreshCwIcon class="h-3 w-3" />
+					Refresh
+				</button>
+			</div>
+		</div>
+
+		<!-- Loading skeleton -->
+		{#if pipelinesLoading}
+			<div class="space-y-3">
+				{#each Array(3) as _, i}
+					<div
+						class="rounded-xl"
+						style="height:90px; background:{surface2}; border:1px solid {borderColor}; opacity:{1 - i * 0.25};"
+					></div>
+				{/each}
+			</div>
+
+		<!-- Error -->
+		{:else if pipelinesError}
+			<div
+				class="flex items-center gap-3 rounded-xl p-4"
+				style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:13px;"
+			>
+				<AlertCircleIcon class="h-4 w-4 flex-shrink-0" />
+				{pipelinesError}
+			</div>
+
+		<!-- Empty state -->
+		{:else if activePipelines.length === 0}
+			<div
+				class="flex flex-col items-center rounded-xl py-14"
+				style="background:{surface2}; border:1px solid {borderColor};"
+			>
+				<ActivityIcon class="mb-3 h-10 w-10" style="color:{textMuted}; opacity:0.4;" />
+				<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 6px;">No active pipelines</p>
+				<p style="font-size:12px; color:{textMuted}; margin:0; max-width:320px; text-align:center; line-height:1.5;">
+					Processing threads appear here while documents are being processed. Use Manual Launch below to start one.
+				</p>
+			</div>
+
+		<!-- Pipeline cards -->
+		{:else}
+			<div class="space-y-3">
+				{#each activePipelines as record (record.id)}
+					{@const { main, leaves } = computeStages(record)}
+					<div
+						class="rounded-xl p-4"
+						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
+					>
+						<!-- Card header -->
+						<div class="mb-4 flex items-center justify-between">
+							<div class="flex items-center gap-2 min-w-0">
+								<span
+									style="font-family:monospace; font-size:10px; font-weight:600; color:{accent};
+									       background:{accentTint}; border:1px solid {accent}30; border-radius:6px; padding:1px 6px; flex-shrink:0;"
+								>#{record.id}</span>
+								<span
+									class="truncate"
+									style="font-size:13px; font-weight:600; color:{textPrimary}; max-width:340px;"
+									title={recordTitle(record)}
+								>{recordTitle(record)}</span>
+								<span
+									style="font-size:10px; padding:1px 7px; border-radius:999px;
+									       background:{accentTint}; color:{accent}; font-family:monospace; flex-shrink:0;"
+								>{record.type}</span>
+							</div>
+							<div class="flex flex-shrink-0 items-center gap-2">
+								<span style="font-size:11px; color:{textMuted}; font-family:monospace;">{formatTime(record.modify_time)}</span>
+								<!-- Stop button (disabled, no API) -->
+								<button
+									disabled
+									title="Stop — not yet implemented"
+									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:not-allowed; opacity:0.5;"
+								>
+									<SquareIcon class="h-3 w-3" />
+									Stop
+								</button>
+								<!-- Restart button -->
+								<button
+									onclick={() => openRestart(record)}
+									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+									style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; font-weight:500; cursor:pointer;"
+									onmouseenter={(e) => {
+										(e.currentTarget as HTMLElement).style.background = accent + '25';
+									}}
+									onmouseleave={(e) => {
+										(e.currentTarget as HTMLElement).style.background = accentTint;
+									}}
+								>
+									<PlayIcon class="h-3 w-3" />
+									Restart
+								</button>
+							</div>
+						</div>
+
+						<!-- Pipeline visualization -->
+						<div class="flex items-center gap-0 overflow-x-auto" style="padding-bottom:4px;">
+							<!-- Main stages -->
+							{#each main as stage, i}
+								<!-- Node -->
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div
+									class="relative flex flex-shrink-0 flex-col items-center"
+									style="min-width:72px;"
+									onmouseenter={(e) => showTooltip(e, record.id, stage)}
+									onmouseleave={hideTooltip}
+								>
+									<!-- Circle -->
+									<div
+										class="flex items-center justify-center rounded-full"
+										style="
+											width:32px; height:32px;
+											background:{stageStatusBg(stage.status)};
+											border:2px solid {stageStatusColor(stage.status)}{stage.status === 'pending' ? '40' : ''};
+											{stage.status === 'in-progress' ? 'animation:pulse-ring 1.5s ease-in-out infinite;' : ''}
+										"
+									>
+										{#if stage.status === 'success'}
+											<CircleCheckIcon class="h-4 w-4" style="color:{colorSuccess};" />
+										{:else if stage.status === 'failed'}
+											<XCircleIcon class="h-4 w-4" style="color:{colorError};" />
+										{:else if stage.status === 'in-progress'}
+											<div
+												class="rounded-full"
+												style="width:10px; height:10px; background:{accent}; animation:pulse 1s ease-in-out infinite;"
+											></div>
+										{:else}
+											<ClockIcon class="h-3.5 w-3.5" style="color:{textMuted}; opacity:0.5;" />
+										{/if}
+									</div>
+									<!-- Label -->
+									<div
+										style="font-size:10px; color:{stageStatusColor(stage.status)}{stage.status === 'pending' ? '80' : ''}; margin-top:5px; text-align:center; white-space:nowrap; max-width:72px; overflow:hidden; text-overflow:ellipsis;"
+									>{stage.label}</div>
+								</div>
+
+								<!-- Connector line (between main stages, before leaf column) -->
+								{#if i < main.length - 1}
+									<div style="flex:0 0 24px; height:2px; background:{borderColor}; margin-bottom:16px; flex-shrink:0;"></div>
+								{/if}
+							{/each}
+
+							<!-- Arrow to leaf column -->
+							<div style="flex:0 0 24px; height:2px; background:{borderColor}; margin-bottom:16px; flex-shrink:0;"></div>
+
+							<!-- Leaf processors column -->
+							<div class="flex flex-shrink-0 flex-col gap-1.5">
+								{#each leaves as stage}
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div
+										class="relative flex items-center gap-2"
+										onmouseenter={(e) => showTooltip(e, record.id, stage)}
+										onmouseleave={hideTooltip}
+									>
+										<!-- Small node circle -->
+										<div
+											class="flex flex-shrink-0 items-center justify-center rounded-full"
+											style="
+												width:22px; height:22px;
+												background:{stageStatusBg(stage.status)};
+												border:1.5px solid {stageStatusColor(stage.status)}{stage.status === 'pending' ? '40' : ''};
+											"
+										>
+											{#if stage.status === 'success'}
+												<CircleCheckIcon class="h-3 w-3" style="color:{colorSuccess};" />
+											{:else if stage.status === 'failed'}
+												<XCircleIcon class="h-3 w-3" style="color:{colorError};" />
+											{:else if stage.status === 'in-progress'}
+												<div
+													class="rounded-full"
+													style="width:6px; height:6px; background:{accent}; animation:pulse 1s ease-in-out infinite;"
+												></div>
+											{:else}
+												<div style="width:5px; height:5px; border-radius:50%; background:{textMuted}; opacity:0.3;"></div>
+											{/if}
+										</div>
+										<span
+											style="font-size:11px; color:{stageStatusColor(stage.status)}{stage.status === 'pending' ? '70' : ''}; white-space:nowrap;"
+										>{stage.label}</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+
+						<!-- Status line -->
+						<div class="mt-3" style="font-size:11px; color:{textMuted}; font-family:monospace; border-top:1px solid {borderColor}; padding-top:8px;">
+							Last: {lastStatusText(record)}
+						</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</section>
+
+	<!-- ── Section divider ────────────────────────────────────── -->
+	<div style="height:1px; background:{borderColor}; margin:0 24px;"></div>
+
+	<!-- ════════════════════════════════════════════════════════
+	     Section 2 — Manual Launch
+	══════════════════════════════════════════════════════════ -->
+	<section class="p-6">
+
+		<div class="mb-4">
+			<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">Manual Launch</h2>
+			<p style="font-size:12px; color:{textMuted}; margin:0;">Search a kb.inputs record and launch selected processors</p>
+		</div>
+
+		<!-- Search bar -->
+		<div class="mb-4 flex gap-2">
+			<div
+				class="flex flex-1 items-center gap-2 rounded-lg px-3"
+				style="background:{surface2}; border:1px solid {borderColor}; height:38px;"
+			>
+				<SearchIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+				<input
+					type="text"
+					bind:value={searchQuery}
+					placeholder="Record ID or title…"
+					onkeydown={(e) => { if (e.key === 'Enter') void runSearch(); }}
+					class="flex-1 bg-transparent outline-none"
+					style="font-size:13px; color:{textPrimary}; border:none;"
+				/>
+			</div>
+			<button
+				onclick={runSearch}
+				disabled={searchLoading || !searchQuery.trim()}
+				class="flex items-center gap-1.5 rounded-lg px-4 py-2"
+				style="background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; border:none; opacity:{searchLoading || !searchQuery.trim() ? '0.55' : '1'};"
+				onmouseenter={(e) => {
+					if (!searchLoading && searchQuery.trim()) (e.currentTarget as HTMLElement).style.opacity = '0.88';
+				}}
+				onmouseleave={(e) => {
+					(e.currentTarget as HTMLElement).style.opacity = searchLoading || !searchQuery.trim() ? '0.55' : '1';
+				}}
+			>
+				{searchLoading ? 'Searching…' : 'Search'}
+			</button>
+		</div>
+
+		<!-- Search error -->
+		{#if searchError && !searchResults.length}
+			<div style="font-size:13px; color:{colorError}; margin-bottom:12px;">{searchError}</div>
+		{/if}
+
+		<!-- Results table -->
+		{#if searchResults.length > 0}
+			<div
+				class="mb-4 overflow-hidden rounded-xl"
+				style="border:1px solid {borderColor};"
+			>
+				<table style="width:100%; border-collapse:collapse; font-size:13px;">
+					<thead>
+						<tr style="background:{surface2}; border-bottom:1px solid {borderColor};">
+							{#each ['ID', 'Type', 'Title', 'Parser', 'Last Status', 'Updated'] as col}
+								<th
+									class="px-3 py-2 text-left"
+									style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; white-space:nowrap;"
+								>{col}</th>
+							{/each}
+						</tr>
+					</thead>
+					<tbody>
+						{#each searchResults as rec (rec.id)}
+							<tr
+								onclick={() => (selectedRecord = selectedRecord?.id === rec.id ? null : rec)}
+								style="
+									border-bottom:1px solid {borderColor};
+									background:{selectedRecord?.id === rec.id ? accentTint : 'transparent'};
+									cursor:pointer;
+								"
+								onmouseenter={(e) => {
+									if (selectedRecord?.id !== rec.id)
+										(e.currentTarget as HTMLElement).style.background = surface2;
+								}}
+								onmouseleave={(e) => {
+									if (selectedRecord?.id !== rec.id)
+										(e.currentTarget as HTMLElement).style.background = 'transparent';
+								}}
+							>
+								<td class="px-3 py-2.5" style="font-family:monospace; color:{accent}; font-size:12px;">{rec.id}</td>
+								<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px;">{rec.type}</td>
+								<td class="px-3 py-2.5 max-w-xs truncate" style="color:{textPrimary};" title={recordTitle(rec)}>{recordTitle(rec)}</td>
+								<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px;">{rec.parser_name || '—'}</td>
+								<td class="px-3 py-2.5" style="color:{textSecondary}; font-family:monospace; font-size:11px;">{lastStatusText(rec)}</td>
+								<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px; white-space:nowrap;">{formatTime(rec.modify_time)}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+
+		<!-- Processor selection + launch (shown once a record is selected) -->
+		{#if selectedRecord}
+			<div
+				class="rounded-xl p-4"
+				style="background:{cardBg}; border:1px solid {borderColor};"
+			>
+				<div class="mb-3 flex items-center justify-between">
+					<div>
+						<div style="font-size:12px; color:{textMuted}; margin-bottom:2px; font-family:monospace; text-transform:uppercase; letter-spacing:0.08em;">Selected record</div>
+						<div style="font-size:13px; font-weight:600; color:{textPrimary};">
+							#{selectedRecord.id} — {recordTitle(selectedRecord)}
+						</div>
+					</div>
+				</div>
+
+				<div style="font-size:12px; color:{textMuted}; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">Processors to run</div>
+
+				<div class="mb-4 space-y-1.5">
+					<!-- Always-on: blocking -->
+					<label
+						class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2"
+						style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;"
+					>
+						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
+						<span style="font-size:13px; color:{textSecondary};">blocking</span>
+						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">always on</span>
+					</label>
+
+					<!-- Selectable processors -->
+					{#each LEAF_PROCESSORS as proc}
+						<label
+							class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+							style="background:{processors[proc.id] ? accentTint : surface2}; border:1px solid {processors[proc.id] ? accent + '40' : borderColor};"
+							onmouseenter={(e) => {
+								if (!processors[proc.id]) (e.currentTarget as HTMLElement).style.background = surface3;
+							}}
+							onmouseleave={(e) => {
+								(e.currentTarget as HTMLElement).style.background = processors[proc.id] ? accentTint : surface2;
+							}}
+						>
+							<input
+								type="checkbox"
+								bind:checked={processors[proc.id]}
+								class="sr-only"
+							/>
+							{#if processors[proc.id]}
+								<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+							{:else}
+								<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+							{/if}
+							<span style="font-size:13px; color:{processors[proc.id] ? textPrimary : textSecondary}; font-family:monospace;">{proc.id}</span>
+							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
+						</label>
+					{/each}
+				</div>
+
+				<!-- Toggle all + launch -->
+				<div class="flex items-center justify-between">
+					<button
+						onclick={toggleAll}
+						class="rounded-lg px-3 py-1.5"
+						style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+					>
+						{allProcessorsSelected() ? 'Deselect all' : 'Select all'}
+					</button>
+
+					<button
+						onclick={() => { launchError = ''; showConfirm = true; }}
+						disabled={!someProcessorsSelected()}
+						class="flex items-center gap-2 rounded-lg px-4 py-2"
+						style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:{someProcessorsSelected() ? 'pointer' : 'not-allowed'}; opacity:{someProcessorsSelected() ? '1' : '0.5'};"
+						onmouseenter={(e) => {
+							if (someProcessorsSelected()) (e.currentTarget as HTMLElement).style.opacity = '0.88';
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.opacity = someProcessorsSelected() ? '1' : '0.5';
+						}}
+					>
+						<PlayIcon class="h-4 w-4" />
+						Launch
+					</button>
+				</div>
+			</div>
+		{/if}
+	</section>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     Confirm Launch Dialog
+══════════════════════════════════════════════════════════════ -->
+{#if showConfirm && selectedRecord}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-40 flex items-center justify-center"
+		style="background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);"
+		onmousedown={(e) => { if (e.target === e.currentTarget) { showConfirm = false; launchError = ''; } }}
+	>
+		<div
+			class="mx-4 w-full max-w-md rounded-2xl p-6"
+			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
+		>
+			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 8px;">Confirm launch</h3>
+			<p style="font-size:13px; color:{textSecondary}; margin:0 0 16px; line-height:1.5;">
+				Launch processing for record
+				<span style="color:{accent}; font-family:monospace; font-weight:600;">#{selectedRecord.id}</span>
+				({recordTitle(selectedRecord)})?
+			</p>
+
+			<!-- Processors summary -->
+			<div
+				class="mb-4 rounded-lg px-3 py-2.5"
+				style="background:{surface2}; border:1px solid {borderColor}; font-size:12px; color:{textSecondary};"
+			>
+				<div style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-bottom:6px;">Processors</div>
+				<div class="flex flex-wrap gap-1.5">
+					<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">blocking</span>
+					{#each ALL_PROCESSOR_IDS.filter(p => processors[p]) as p}
+						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{p}</span>
+					{/each}
+				</div>
+				{#if ALL_PROCESSOR_IDS.every(p => processors[p])}
+					<div style="margin-top:6px; font-size:11px; color:{textMuted};">All processors selected — omitting operation filter.</div>
+				{/if}
+			</div>
+
+			{#if launchError}
+				<div style="font-size:12px; color:{colorError}; margin-bottom:12px;">{launchError}</div>
+			{/if}
+
+			<div class="flex justify-end gap-2">
+				<button
+					onclick={() => { showConfirm = false; launchError = ''; }}
+					class="rounded-lg px-4 py-2"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; cursor:pointer;"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+				>Cancel</button>
+				<button
+					onclick={confirmLaunch}
+					disabled={launching}
+					class="flex items-center gap-2 rounded-lg px-4 py-2"
+					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:{launching ? 'not-allowed' : 'pointer'}; opacity:{launching ? '0.7' : '1'};"
+					onmouseenter={(e) => { if (!launching) (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = launching ? '0.7' : '1'; }}
+				>
+					<PlayIcon class="h-4 w-4" />
+					{launching ? 'Launching…' : 'Confirm Launch'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- ════════════════════════════════════════════════════════════
+     Restart Dialog
+══════════════════════════════════════════════════════════════ -->
+{#if showRestartDialog && restartTarget}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-40 flex items-center justify-center"
+		style="background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);"
+		onmousedown={(e) => { if (e.target === e.currentTarget) { showRestartDialog = false; restartError = ''; } }}
+	>
+		<div
+			class="mx-4 w-full max-w-md rounded-2xl p-6"
+			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
+		>
+			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">Restart pipeline</h3>
+			<p style="font-size:13px; color:{textSecondary}; margin:0 0 16px;">
+				Record <span style="color:{accent}; font-family:monospace; font-weight:600;">#{restartTarget.id}</span>
+				— select processors to re-run:
+			</p>
+
+			<div class="mb-4 space-y-1.5">
+				<label class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2" style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;">
+					<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
+					<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">blocking</span>
+					<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">always on</span>
+				</label>
+				{#each LEAF_PROCESSORS as proc}
+					<label
+						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+						style="background:{restartProcessors[proc.id] ? accentTint : surface2}; border:1px solid {restartProcessors[proc.id] ? accent + '40' : borderColor};"
+					>
+						<input type="checkbox" bind:checked={restartProcessors[proc.id]} class="sr-only" />
+						{#if restartProcessors[proc.id]}
+							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+						{:else}
+							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+						{/if}
+						<span style="font-size:13px; color:{restartProcessors[proc.id] ? textPrimary : textSecondary}; font-family:monospace;">{proc.id}</span>
+					</label>
+				{/each}
+			</div>
+
+			<div class="mb-4 flex">
+				<button
+					onclick={toggleAllRestart}
+					class="rounded-lg px-3 py-1.5"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+				>{allRestartSelected() ? 'Deselect all' : 'Select all'}</button>
+			</div>
+
+			{#if restartError}
+				<div style="font-size:12px; color:{colorError}; margin-bottom:12px;">{restartError}</div>
+			{/if}
+
+			<div class="flex justify-end gap-2">
+				<button
+					onclick={() => { showRestartDialog = false; restartError = ''; }}
+					class="rounded-lg px-4 py-2"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; cursor:pointer;"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+				>Cancel</button>
+				<button
+					onclick={confirmRestart}
+					disabled={restarting || !ALL_PROCESSOR_IDS.some(p => restartProcessors[p])}
+					class="flex items-center gap-2 rounded-lg px-4 py-2"
+					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none;
+					       cursor:{restarting ? 'not-allowed' : 'pointer'};
+					       opacity:{restarting || !ALL_PROCESSOR_IDS.some(p => restartProcessors[p]) ? '0.6' : '1'};"
+					onmouseenter={(e) => {
+						if (!restarting) (e.currentTarget as HTMLElement).style.opacity = '0.88';
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.opacity = restarting ? '0.6' : '1';
+					}}
+				>
+					<RefreshCwIcon class="h-4 w-4" />
+					{restarting ? 'Restarting…' : 'Restart'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<style>
+	@keyframes pulse {
+		0%, 100% { opacity: 1; transform: scale(1); }
+		50%       { opacity: 0.5; transform: scale(0.85); }
+	}
+	@keyframes pulse-ring {
+		0%, 100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.4); }
+		50%       { box-shadow: 0 0 0 4px rgba(129, 140, 248, 0); }
+	}
+	input[type='text'] {
+		background: transparent;
+		border: none;
+		outline: none;
+	}
+	input[type='text']::placeholder {
+		color: #64748b;
+	}
+</style>

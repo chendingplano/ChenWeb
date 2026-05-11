@@ -220,32 +220,7 @@ func readTopicFromArtifact(artifactDir string, recordID int64, meta summaryArtif
 		return parsedTopicEntry{}, err
 	}
 
-	// Try to find a matching topics file; prefer the one with a staging+parser name
-	stagingBase := filepath.Base(meta.staging)
-	stagingRoot := strings.TrimSuffix(stagingBase, filepath.Ext(stagingBase))
-	var candidates []string
-	if stagingRoot != "" && meta.parser != "" {
-		named := filepath.Join(recordDir, stagingRoot+"_"+meta.parser+".topics")
-		if _, err := os.Stat(named); err == nil {
-			candidates = append(candidates, named)
-		}
-	}
-	// Fall back to any .topics file
-	glob, err := filepath.Glob(filepath.Join(recordDir, "*.topics"))
-	if err == nil {
-		for _, g := range glob {
-			alreadyAdded := false
-			for _, c := range candidates {
-				if c == g {
-					alreadyAdded = true
-					break
-				}
-			}
-			if !alreadyAdded {
-				candidates = append(candidates, g)
-			}
-		}
-	}
+	candidates := listTopicArtifactCandidates(recordDir, meta)
 
 	for _, path := range candidates {
 		topics, err := parseTopicsFile(path)
@@ -267,6 +242,34 @@ func readTopicFromArtifact(artifactDir string, recordID int64, meta summaryArtif
 		}
 	}
 	return parsedTopicEntry{}, fmt.Errorf("topic %d not found for record %d", topicSeqNo, recordID)
+}
+
+func listTopicArtifactCandidates(recordDir string, meta summaryArtifactMeta) []string {
+	stagingBase := filepath.Base(meta.staging)
+	stagingRoot := strings.TrimSuffix(stagingBase, filepath.Ext(stagingBase))
+	candidates := make([]string, 0)
+	if stagingRoot != "" && meta.parser != "" {
+		named := filepath.Join(recordDir, stagingRoot+"_"+meta.parser+".topics")
+		if _, err := os.Stat(named); err == nil {
+			candidates = append(candidates, named)
+		}
+	}
+	glob, err := filepath.Glob(filepath.Join(recordDir, "*.topics"))
+	if err == nil {
+		for _, g := range glob {
+			alreadyAdded := false
+			for _, c := range candidates {
+				if c == g {
+					alreadyAdded = true
+					break
+				}
+			}
+			if !alreadyAdded {
+				candidates = append(candidates, g)
+			}
+		}
+	}
+	return candidates
 }
 
 func parseInt64(s string) (int64, error) {

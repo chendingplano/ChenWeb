@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { TopicCard } from './topic-types';
+	import { formatTopicLineSpecs } from './topic-line-specs';
 
 	let {
 		topic,
@@ -17,6 +18,20 @@
 		{#each topic.topicKeywords as keyword}
 			<span class="keyword">{keyword}</span>
 		{/each}
+	</div>
+	<div class="meta-grid">
+		<div class="meta-item">
+			<span>Record ID</span>
+			<strong>{topic.inputId}</strong>
+		</div>
+		<div class="meta-item">
+			<span>Type</span>
+			<strong>{topic.topicType || '—'}</strong>
+		</div>
+		<div class="meta-item meta-item-wide">
+			<span>Line Numbers</span>
+			<strong>{formatTopicLineSpecs(topic.sourceLineSpecs)}</strong>
+		</div>
 	</div>
 	<p>{topic.topicText}</p>
 </button>
@@ -57,6 +72,42 @@
 		font-size: 0.72rem;
 		font-weight: 600;
 		color: #4ade80;
+	}
+
+	.meta-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.55rem;
+		margin-bottom: 10px;
+	}
+
+	.meta-item {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.22rem;
+	}
+
+	.meta-item span {
+		font-size: 0.65rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #94a3b8;
+	}
+
+	.meta-item strong {
+		min-width: 0;
+		font-size: 0.78rem;
+		font-weight: 600;
+		line-height: 1.4;
+		color: #e2e8f0;
+		overflow-wrap: anywhere;
+		word-break: break-word;
+	}
+
+	.meta-item-wide {
+		grid-column: 1 / -1;
 	}
 
 	p {

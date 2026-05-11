@@ -89,7 +89,12 @@
 
 	// Nav item definitions
 	const mainNav: NavItem[] = [
-		{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, group: 'Workspace' },
+		{
+			id: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, group: 'Workspace',
+			children: [
+				{ id: 'doc-processor-dashboard', label: 'Doc Processor' }
+			]
+		},
 		{ id: 'chat', label: 'Chat', icon: MessageSquareIcon, group: 'Workspace' },
 		{
 			id: 'agents', label: 'Agents', icon: BotIcon, group: 'Workspace',
