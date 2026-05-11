@@ -12,8 +12,7 @@
       "env": {
         "DOC_PROCESSOR_CONFIG": "${workspaceFolder}/config.toml",
         "MODELS_FILE": "${workspaceFolder}/.models.toml",
-        "SHARED_LIB_CONFIG_DIR": "${workspaceFolder}/../shared/libconfig.toml",
-        "GOCACHE": "${workspaceFolder}/.cache/go-build"
+        "SHARED_LIB_CONFIG_DIR": "${workspaceFolder}/../shared/libconfig.toml"
       },
       "console": "integratedTerminal"
     }

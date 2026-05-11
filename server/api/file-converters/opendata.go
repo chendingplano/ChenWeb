@@ -79,8 +79,43 @@ func ConvertOpenDataFile(inputPath string) (string, error) {
 	if err := os.WriteFile(outputPath, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("write output file: %w", err)
 	}
+	originPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".origin"
+	if err := writeReadOnlyFile(originPath, []byte(content), 0o444); err != nil {
+		return "", fmt.Errorf("write origin file: %w", err)
+	}
 
 	return outputPath, nil
+}
+
+func writeReadOnlyFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		_ = tmp.Close()
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 func openDataOutputPath(inputPath string) string {

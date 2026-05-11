@@ -181,6 +181,7 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 		)
 	}
 	ackWait := envDurationSeconds(5*time.Minute, "DOC_PROCESSOR_ACK_WAIT_SEC", "FILE_CONVERTER_ACK_WAIT_SEC", "JETSTREAM_ACK_WAIT_SEC")
+	allowFallbackDurable := envEnabled("NATS_ALLOW_FALLBACK_DURABLE", "JETSTREAM_ALLOW_FALLBACK_DURABLE")
 
 	opts := []nats.SubOpt{
 		nats.ManualAck(),
@@ -206,7 +207,7 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 	}
 
 	sub, err := js.Subscribe(subject, cb, opts...)
-	if err != nil && normalizedDurable != "" {
+	if err != nil && normalizedDurable != "" && allowFallbackDurable {
 		msg := strings.ToLower(err.Error())
 		if strings.Contains(msg, "already bound to a subscription") || strings.Contains(msg, "without a deliver group") {
 			altDurable := normalizeConsumerName(fmt.Sprintf("%s-%d", normalizedDurable, time.Now().UnixNano()%1_000_000))
@@ -228,7 +229,24 @@ func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, durable 
 		}
 	}
 	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if normalizedDurable != "" && (strings.Contains(msg, "already bound to a subscription") || strings.Contains(msg, "without a deliver group")) {
+			return fmt.Errorf(
+				"subscribe subject=%s durable=%s: %w (another live consumer likely already owns this durable; stop the old process or enable NATS_ALLOW_FALLBACK_DURABLE=true if you intentionally want a second consumer)",
+				subject,
+				normalizedDurable,
+				err,
+			)
+		}
 		return fmt.Errorf("subscribe subject=%s: %w", subject, err)
+	}
+	if s.logger != nil {
+		s.logger.Info("jetstream subscription active",
+			"subject", subject,
+			"durable", normalizedDurable,
+			"ack_wait", ackWait.String(),
+			"fallback_durable_enabled", allowFallbackDurable,
+		)
 	}
 	defer sub.Unsubscribe()
 

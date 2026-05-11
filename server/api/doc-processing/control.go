@@ -85,8 +85,16 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		)
 	}
 
-	if ShouldSkipLineFileGeneratedEvent(evt) {
+	if skipReason := skipReasonLineFileGeneratedEvent(evt); skipReason != "" {
 		if s.Logger != nil {
+			s.Logger.Info("doc processor skipped event",
+				"record_id", evt.RecordID,
+				"reason", skipReason,
+				"type", evt.Type,
+				"status", evt.Status,
+				"filename", evt.Filename,
+				"operations", evt.Operations,
+			)
 			s.Logger.Info("finish processing request",
 				"record_id", evt.RecordID,
 				"proc_status", "skipped",

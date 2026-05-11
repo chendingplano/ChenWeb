@@ -90,13 +90,17 @@ func previewInvalidEventPayload(payload []byte) string {
 }
 
 func ShouldSkipLineFileGeneratedEvent(evt LineFileGeneratedEvent) bool {
+	return skipReasonLineFileGeneratedEvent(evt) != ""
+}
+
+func skipReasonLineFileGeneratedEvent(evt LineFileGeneratedEvent) string {
 	if evt.Type != "" && evt.Type != "pdf" {
-		return true
+		return fmt.Sprintf("type=%q", evt.Type)
 	}
 	if evt.Status != "" && evt.Status != "success" {
-		return true
+		return fmt.Sprintf("status=%q", evt.Status)
 	}
-	return false
+	return ""
 }
 
 func ResolveInputFilePath(evt LineFileGeneratedEvent, resultFilename string, parserName string, stagingFilename string) (string, error) {

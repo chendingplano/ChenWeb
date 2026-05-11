@@ -118,6 +118,21 @@ func TestConvertOpenDataFile(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines, got %d", len(lines))
 	}
+	originPath := strings.TrimSuffix(out, filepath.Ext(out)) + ".origin"
+	origin, err := os.ReadFile(originPath)
+	if err != nil {
+		t.Fatalf("read origin output: %v", err)
+	}
+	if string(origin) != string(got) {
+		t.Fatalf("origin output mismatch:\norigin=%q\ntext=%q", string(origin), string(got))
+	}
+	info, err := os.Stat(originPath)
+	if err != nil {
+		t.Fatalf("stat origin output: %v", err)
+	}
+	if info.Mode().Perm() != 0o444 {
+		t.Fatalf("origin mode=%#o, want 0444", info.Mode().Perm())
+	}
 	if !strings.Contains(lines[0], "1\t1\tparagraph\tHiddenHorzOCR\t11\t[1,2,3,4]\thello") {
 		t.Fatalf("unexpected line1: %s", lines[0])
 	}
@@ -126,6 +141,58 @@ func TestConvertOpenDataFile(t *testing.T) {
 	}
 	if !strings.Contains(lines[2], "3\t2\timage\tunknown-font\t12\t[9,10,11,12]\timg/a.png") {
 		t.Fatalf("unexpected line3: %s", lines[2])
+	}
+}
+
+func TestConvertOpenDataFile_RewritesExistingReadOnlyOriginFile(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "sample.json")
+	input := `{
+  "number of pages": 1,
+  "kids": [
+    {"page number": 1, "type": "paragraph", "content": "hello", "bounding box": [1,2,3,4]}
+  ]
+}`
+	if err := os.WriteFile(in, []byte(input), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertOpenDataFile(in)
+	if err != nil {
+		t.Fatalf("first ConvertOpenDataFile: %v", err)
+	}
+	originPath := strings.TrimSuffix(out, filepath.Ext(out)) + ".origin"
+	if err := os.Chmod(originPath, 0o644); err != nil {
+		t.Fatalf("make origin writable for seed: %v", err)
+	}
+	if err := os.WriteFile(originPath, []byte("stale\n"), 0o644); err != nil {
+		t.Fatalf("seed read-only origin: %v", err)
+	}
+	if err := os.Chmod(originPath, 0o444); err != nil {
+		t.Fatalf("make seeded origin read-only: %v", err)
+	}
+
+	out, err = ConvertOpenDataFile(in)
+	if err != nil {
+		t.Fatalf("second ConvertOpenDataFile: %v", err)
+	}
+	got, err := os.ReadFile(originPath)
+	if err != nil {
+		t.Fatalf("read rewritten origin: %v", err)
+	}
+	txt, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output txt: %v", err)
+	}
+	if string(got) != string(txt) {
+		t.Fatalf("rewritten origin mismatch:\norigin=%q\ntext=%q", string(got), string(txt))
+	}
+	info, err := os.Stat(originPath)
+	if err != nil {
+		t.Fatalf("stat rewritten origin: %v", err)
+	}
+	if info.Mode().Perm() != 0o444 {
+		t.Fatalf("rewritten origin mode=%#o, want 0444", info.Mode().Perm())
 	}
 }
 
@@ -541,6 +608,10 @@ func TestHandleRequestSuccessAppendsConvertedStatus(t *testing.T) {
 	if _, err := os.Stat(outPath); err != nil {
 		t.Fatalf("expected output txt: %v", err)
 	}
+	originPath := strings.TrimSuffix(outPath, filepath.Ext(outPath)) + ".origin"
+	if _, err := os.Stat(originPath); err != nil {
+		t.Fatalf("expected output origin: %v", err)
+	}
 	var ev LineFileGeneratedEvent
 	if err := json.Unmarshal(pub.payload, &ev); err != nil {
 		t.Fatalf("unmarshal publish payload: %v", err)
@@ -625,6 +696,28 @@ func TestHandleRequestFailureAppendsFailedStatus(t *testing.T) {
 	}
 	if !strings.Contains(st.updatedStatus, `"operation":"converted"`) || !strings.Contains(st.updatedStatus, `"proc-status":"failed"`) {
 		t.Fatalf("missing converted failed status: %s", st.updatedStatus)
+	}
+}
+
+func TestHandleRequestFailureDoesNotPublishLineFileGeneratedEvent(t *testing.T) {
+	st := &fakeStore{rec: InputRecord{
+		ID:         12,
+		Type:       "pdf",
+		ParserName: "opendata",
+		StatusRaw:  `[]`,
+		FileName:   "/tmp/source.pdf",
+	}}
+	pub := &fakePublisher{}
+
+	svc := NewService(st, slog.Default())
+	svc.Publisher = pub
+
+	err := svc.HandleRequest(context.Background(), ConvertRequest{RecordID: 12})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if pub.calls != 0 {
+		t.Fatalf("expected no publish on failed conversion, got %d", pub.calls)
 	}
 }
 

@@ -121,14 +121,15 @@ func deleteSummaryFiles(baseDir string, recordID int64) error {
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() {
-			if name == "embeddings" {
-				if err := os.RemoveAll(filepath.Join(targetDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-					return err
-				}
-			}
 			continue
 		}
 		if strings.HasPrefix(name, "summary_") && strings.HasSuffix(name, ".txt") {
+			if err := os.Remove(filepath.Join(targetDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			continue
+		}
+		if strings.HasPrefix(name, "summary_") && strings.HasSuffix(name, ".embed") {
 			if err := os.Remove(filepath.Join(targetDir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}

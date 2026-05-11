@@ -165,17 +165,6 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 		if !out.OutputChanged {
 			return nil
 		}
-		original, err := os.ReadFile(inputPath)
-		if err != nil {
-			return fmt.Errorf("(MID_26042313) read original for backup: %w", err)
-		}
-		originPath := strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + ".origin"
-		if err := os.WriteFile(originPath, original, 0o644); err != nil {
-			return fmt.Errorf("(MID_26042315) write origin backup: %w", err)
-		}
-		if p.Logger != nil {
-			p.Logger.Info("origin backup written", "origin_path", originPath, "input_path", inputPath)
-		}
 	}
 
 	var filePath string

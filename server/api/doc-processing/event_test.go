@@ -32,3 +32,47 @@ func TestParseLineFileGeneratedEvent_InvalidPayloadIncludesPreview(t *testing.T)
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestShouldSkipLineFileGeneratedEvent(t *testing.T) {
+	tests := []struct {
+		name string
+		evt  LineFileGeneratedEvent
+		want bool
+	}{
+		{
+			name: "success pdf is processed",
+			evt:  LineFileGeneratedEvent{RecordID: 1, Type: "pdf", Status: "success"},
+			want: false,
+		},
+		{
+			name: "non pdf is skipped",
+			evt:  LineFileGeneratedEvent{RecordID: 1, Type: "txt", Status: "success"},
+			want: true,
+		},
+		{
+			name: "failed status is skipped",
+			evt:  LineFileGeneratedEvent{RecordID: 1, Type: "pdf", Status: "failed"},
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ShouldSkipLineFileGeneratedEvent(tc.evt); got != tc.want {
+				t.Fatalf("ShouldSkipLineFileGeneratedEvent()=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSkipReasonLineFileGeneratedEvent(t *testing.T) {
+	if got := skipReasonLineFileGeneratedEvent(LineFileGeneratedEvent{Type: "txt", Status: "success"}); got != `type="txt"` {
+		t.Fatalf("type skip reason=%q, want %q", got, `type="txt"`)
+	}
+	if got := skipReasonLineFileGeneratedEvent(LineFileGeneratedEvent{Type: "pdf", Status: "failed"}); got != `status="failed"` {
+		t.Fatalf("status skip reason=%q, want %q", got, `status="failed"`)
+	}
+	if got := skipReasonLineFileGeneratedEvent(LineFileGeneratedEvent{Type: "pdf", Status: "success"}); got != "" {
+		t.Fatalf("success skip reason=%q, want empty", got)
+	}
+}

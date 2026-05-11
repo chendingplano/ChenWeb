@@ -360,6 +360,9 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, req ConvertReq
 	if s.Publisher == nil {
 		return nil
 	}
+	if procErr != nil {
+		return nil
+	}
 	subject := strings.TrimSpace(s.PublishSubject)
 	if subject == "" {
 		subject = DefaultLineFileGeneratedSubject
@@ -372,12 +375,7 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, req ConvertReq
 		ResultFilename:   strings.TrimSpace(req.ResultFilename),
 		LineFileFilename: strings.TrimSpace(lineFilePath),
 	}
-	if procErr == nil {
-		ev.Status = "success"
-	} else {
-		ev.Status = "failed"
-		ev.Error = procErr.Error()
-	}
+	ev.Status = "success"
 
 	payload, err := json.Marshal(ev)
 	if err != nil {

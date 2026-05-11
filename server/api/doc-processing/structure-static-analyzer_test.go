@@ -29,6 +29,7 @@ func TestStaticAnalyzer_SuccessWritesCorrectedAndStatus(t *testing.T) {
 	}
 
 	t.Setenv("ARTIFACT_DIR", tmp)
+	t.Setenv("EXTRACT_DOCMETA_PROMPT", "false")
 	store := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              recordID,
 		ParserName:      "opendata",
@@ -90,22 +91,23 @@ func TestStaticAnalyzer_SuccessWritesCorrectedAndStatus(t *testing.T) {
 	if gotByLine["1"] != "heading-1" {
 		t.Fatalf("line1 corrected=%q, want heading-1", gotByLine["1"])
 	}
-	if gotByLine["2"] != "num-list-item" {
-		t.Fatalf("line2 corrected=%q, want num-list-item", gotByLine["2"])
+	if gotByLine["2"] != "list-item-num" {
+		t.Fatalf("line2 corrected=%q, want list-item-num", gotByLine["2"])
 	}
 	if gotByLine["3"] != "toc" || gotByLine["4"] != "toc" || gotByLine["5"] != "toc" {
 		t.Fatalf("toc lines got: 3=%q 4=%q 5=%q, want all toc", gotByLine["3"], gotByLine["4"], gotByLine["5"])
 	}
-	if gotByLine["6"] != "s-sym-list-item" {
-		t.Fatalf("line6 corrected=%q, want s-sym-list-item", gotByLine["6"])
+	if gotByLine["6"] != "list-item-s-sym" {
+		t.Fatalf("line6 corrected=%q, want list-item-s-sym", gotByLine["6"])
 	}
-	if gotByLine["7"] != "m-sym-list-item" {
-		t.Fatalf("line7 corrected=%q, want m-sym-list-item", gotByLine["7"])
+	if gotByLine["7"] != "list-item_m-sym" {
+		t.Fatalf("line7 corrected=%q, want list-item_m-sym", gotByLine["7"])
 	}
 }
 
 func TestStaticAnalyzer_MissingArtifactDirFailsFast(t *testing.T) {
 	t.Setenv("ARTIFACT_DIR", "")
+	t.Setenv("EXTRACT_DOCMETA_PROMPT", "false")
 	store := &fakeDocMetadataStore{}
 	p := NewStaticAnalyzerProcessor(store, nil)
 	err := p.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
@@ -734,6 +736,7 @@ func TestStaticAnalyzer_HandleEvent_WritesMergeOnlyOverrideOutput(t *testing.T) 
 	tmp := t.TempDir()
 	recordID := int64(9012)
 	lineFile := filepath.Join(tmp, "ocr_rslt_9012_opendata.txt")
+	originPath := filepath.Join(tmp, "ocr_rslt_9012_opendata.origin")
 	body := strings.Join([]string{
 		"1\t1\tparagraph\tTimes-Roman\t10\t[72,500,520,512]\tThis standard applies to buildings designed for rapid response and",
 		"2\t1\tparagraph\tTimes-Roman\t10\t[72,486,519,498]\tcontinuous operational readiness under adverse field conditions,",
@@ -741,6 +744,10 @@ func TestStaticAnalyzer_HandleEvent_WritesMergeOnlyOverrideOutput(t *testing.T) 
 	}, "\n")
 	if err := os.WriteFile(lineFile, []byte(body), 0o644); err != nil {
 		t.Fatalf("write line file: %v", err)
+	}
+	seedOrigin := "seed origin should remain untouched"
+	if err := os.WriteFile(originPath, []byte(seedOrigin), 0o444); err != nil {
+		t.Fatalf("write origin file: %v", err)
 	}
 
 	t.Setenv("ARTIFACT_DIR", tmp)
@@ -761,12 +768,8 @@ func TestStaticAnalyzer_HandleEvent_WritesMergeOnlyOverrideOutput(t *testing.T) 
 	if _, ok := findInfoLog(logger.infos, "static analyzer invoked"); !ok {
 		t.Fatalf("expected invocation log, got %#v", logger.infos)
 	}
-	originLog, ok := findInfoLog(logger.infos, "origin backup written")
-	if !ok {
-		t.Fatalf("expected origin backup log, got %#v", logger.infos)
-	}
-	if got, ok := logValue(originLog.args, "origin_path"); !ok || got != filepath.Join(tmp, "ocr_rslt_9012_opendata.origin") {
-		t.Fatalf("origin_path=%v, ok=%v", got, ok)
+	if originLog, ok := findInfoLog(logger.infos, "origin backup written"); ok {
+		t.Fatalf("did not expect origin backup log, got %#v", originLog)
 	}
 	txtLog, ok := findInfoLog(logger.infos, "static analyzer output written")
 	if !ok {
@@ -776,8 +779,12 @@ func TestStaticAnalyzer_HandleEvent_WritesMergeOnlyOverrideOutput(t *testing.T) 
 		t.Fatalf("output_path=%v, ok=%v", got, ok)
 	}
 
-	if _, err := os.Stat(filepath.Join(tmp, "ocr_rslt_9012_opendata.origin")); err != nil {
-		t.Fatalf("expected .origin backup: %v", err)
+	gotOrigin, err := os.ReadFile(originPath)
+	if err != nil {
+		t.Fatalf("read origin file: %v", err)
+	}
+	if string(gotOrigin) != seedOrigin {
+		t.Fatalf("origin content changed: got %q want %q", string(gotOrigin), seedOrigin)
 	}
 	bs, err := os.ReadFile(lineFile)
 	if err != nil {
@@ -792,7 +799,7 @@ func TestStaticAnalyzer_HandleEvent_WritesMergeOnlyOverrideOutput(t *testing.T) 
 	}
 }
 
-func TestStaticAnalyzer_WriteCorrectedArtifact_RefreshesOriginBackupFromCurrentInput(t *testing.T) {
+func TestStaticAnalyzer_WriteCorrectedArtifact_LeavesExistingOriginUntouched(t *testing.T) {
 	tmp := t.TempDir()
 	inputPath := filepath.Join(tmp, "ocr_rslt_93_opendata.txt")
 	originPath := filepath.Join(tmp, "ocr_rslt_93_opendata.origin")
@@ -840,13 +847,11 @@ func TestStaticAnalyzer_WriteCorrectedArtifact_RefreshesOriginBackupFromCurrentI
 	if err != nil {
 		t.Fatalf("read origin file: %v", err)
 	}
-	if string(gotOrigin) != currentInputBody {
-		t.Fatalf("origin content=\n%s\nwant current input=\n%s", string(gotOrigin), currentInputBody)
+	if string(gotOrigin) != staleOriginBody {
+		t.Fatalf("origin content=\n%s\nwant unchanged stale origin=\n%s", string(gotOrigin), staleOriginBody)
 	}
-	if logEntry, ok := findInfoLog(logger.infos, "origin backup written"); !ok {
-		t.Fatalf("expected origin backup written log, got %#v", logger.infos)
-	} else if got, ok := logValue(logEntry.args, "origin_path"); !ok || got != originPath {
-		t.Fatalf("origin_path=%v, ok=%v", got, ok)
+	if logEntry, ok := findInfoLog(logger.infos, "origin backup written"); ok {
+		t.Fatalf("did not expect origin backup written log, got %#v", logEntry)
 	}
 	if _, ok := findInfoLog(logger.infos, "static analyzer output written"); !ok {
 		t.Fatalf("expected output write log, got %#v", logger.infos)

@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,45 @@ func TestWriteSummaryFile(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected summary file to contain %q, got %q", want, text)
 		}
+	}
+}
+
+func TestDeleteSummaryFiles_PreservesTopicEmbeddings(t *testing.T) {
+	tmp := t.TempDir()
+	recordID := int64(101)
+
+	targetDir, err := buildRecordArtifactDir(tmp, recordID)
+	if err != nil {
+		t.Fatalf("buildRecordArtifactDir: %v", err)
+	}
+	embedDir := filepath.Join(targetDir, "embeddings")
+	if err := os.MkdirAll(embedDir, 0o755); err != nil {
+		t.Fatalf("mkdir embeddings: %v", err)
+	}
+	topicEmbedPath := filepath.Join(embedDir, "topic_137.embed")
+	if err := os.WriteFile(topicEmbedPath, []byte("[0.1,0.2]\n"), 0o644); err != nil {
+		t.Fatalf("write topic embed: %v", err)
+	}
+	summaryFilePath := filepath.Join(targetDir, "summary_0_0001.txt")
+	if err := os.WriteFile(summaryFilePath, []byte("summary"), 0o644); err != nil {
+		t.Fatalf("write summary file: %v", err)
+	}
+	summaryEmbedPath := filepath.Join(targetDir, "summary_0_0001.embed")
+	if err := os.WriteFile(summaryEmbedPath, []byte("[0.3,0.4]\n"), 0o644); err != nil {
+		t.Fatalf("write summary embed: %v", err)
+	}
+
+	if err := deleteSummaryFiles(tmp, recordID); err != nil {
+		t.Fatalf("deleteSummaryFiles: %v", err)
+	}
+	if _, err := os.Stat(topicEmbedPath); err != nil {
+		t.Fatalf("topic embed missing after cleanup: %v", err)
+	}
+	if _, err := os.Stat(summaryFilePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("summary txt exists after cleanup or wrong error: %v", err)
+	}
+	if _, err := os.Stat(summaryEmbedPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("summary embed exists after cleanup or wrong error: %v", err)
 	}
 }
 
