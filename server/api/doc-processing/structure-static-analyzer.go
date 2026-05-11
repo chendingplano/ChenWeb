@@ -27,7 +27,6 @@ var (
 	staticMultiSymListRE    = regexp.MustCompile(`^([A-Za-z]+|[ivxlcdmIVXLCDM]+)\)\s+\S+`)
 	staticTOCDotLeaderRE    = regexp.MustCompile(`\.{3,}`)
 	staticPageImagePathRE   = regexp.MustCompile(`^(.+)/imageFile(\d+)\.png$`)
-	staticZeroOriginCoordRE = regexp.MustCompile(`^\[\s*0(?:\.0+)?,\s*0(?:\.0+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?\s*\]$`)
 	staticX1ZeroCoordRE     = regexp.MustCompile(`^\[\s*0(?:\.0+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?\s*\]$`)
 	staticLegacyHeadingRE   = regexp.MustCompile(`^heading\((\d+)\)$`)
 )
@@ -367,7 +366,7 @@ func removeStaticPageImageArtifacts(lines []staticInputLine) []staticInputLine {
 		if line.OriginalLineLower != "image" {
 			continue
 		}
-		if !staticZeroOriginCoordRE.MatchString(strings.TrimSpace(line.Coordinate)) {
+		if !isStaticPageImageArtifactCoordinate(line.Coordinate) {
 			continue
 		}
 		m := staticPageImagePathRE.FindStringSubmatch(strings.TrimSpace(line.Content))
@@ -416,6 +415,14 @@ func removeStaticPageImageArtifacts(lines []staticInputLine) []staticInputLine {
 		filtered = append(filtered, line)
 	}
 	return filtered
+}
+
+func isStaticPageImageArtifactCoordinate(raw string) bool {
+	geom, ok := parseStaticLineGeometry(raw)
+	if !ok {
+		return false
+	}
+	return geom.X1 <= 5 && geom.Y1 <= 5
 }
 
 func removeStaticWeBoosWatermarkLines(lines []staticInputLine) []staticInputLine {

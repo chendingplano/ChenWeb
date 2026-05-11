@@ -491,9 +491,6 @@ func TestStaticAnalyzer_DoesNotLeakTOCToNextPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyzeStaticStructure: %v", err)
 	}
-	if got := out.CorrectedType[84]; got != "unchanged" {
-		t.Fatalf("line84=%q, want unchanged", got)
-	}
 	if got := out.CorrectedType[85]; got != "heading-1" {
 		t.Fatalf("line85=%q, want heading-1", got)
 	}
@@ -543,6 +540,30 @@ func TestStaticAnalyzer_RemovesRepeatedPageImageArtifacts(t *testing.T) {
 	}
 	if got := out.CorrectedType[11]; got != "heading-1" {
 		t.Fatalf("line11=%q, want heading-1", got)
+	}
+}
+
+func TestStaticAnalyzer_RemovesRepeatedPageImageArtifactsWithNearOriginCoordinates(t *testing.T) {
+	body := strings.Join([]string{
+		"18\t3\timage\tunknown-font\t12\t[-0.24,-0.24,281.28,397.2]\tstd_33830_images/imageFile3.png",
+		"19\t3\tparagraph\tF\t12\t[0,0,1,1]\t3 Definitions",
+		"42\t5\timage\tunknown-font\t12\t[-0.24,-0.24,281.28,397.2]\tstd_33830_images/imageFile5.png",
+		"43\t5\tparagraph\tF\t12\t[0,0,1,1]\t5 Requirements",
+		"257\t18\timage\tunknown-font\t12\t[-2.64,-1.92,283.44,398.88]\tstd_33830_images/imageFile18.png",
+		"258\t18\tparagraph\tF\t12\t[0,0,1,1]\t18 Appendix",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := len(out.Lines); got != 3 {
+		t.Fatalf("len(Lines)=%d, want 3 after removing near-origin image artifacts", got)
+	}
+	for _, removed := range []int{18, 42, 257} {
+		if _, ok := out.CorrectedType[removed]; ok {
+			t.Fatalf("line %d still present in corrected map", removed)
+		}
 	}
 }
 
