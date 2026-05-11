@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"testing"
 
@@ -74,6 +75,58 @@ category_paths: ["safety/scope"]
 	}
 	if len(results[0].Targets) != 0 {
 		t.Fatalf("expected empty targets without corrected artifact, got %+v", results[0])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestReadRecordTopicCards_ParsesStructuredCategoryPaths(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+
+	expectResolveInputTablePlural(mock)
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "staging_filename").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs("kb", "inputs", "parser_name").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	recordID := int64(101)
+	query := regexp.QuoteMeta(`SELECT COALESCE(i.staging_filename, '') AS staging_filename, COALESCE(i.parser_name, '') AS parser_name, i.file_name FROM kb.inputs i WHERE i.id = $1`)
+	mock.ExpectQuery(query).
+		WithArgs(recordID).
+		WillReturnRows(sqlmock.NewRows([]string{"staging_filename", "parser_name", "file_name"}).
+			AddRow("sample.pdf", "opendata", "/tmp/standards/sample.pdf"))
+
+	mustWriteFile(t, filepath.Join(artifactDir, "0", "101", "sample_opendata.topics"), `topic_id: 1
+topic_type: "cover"
+lines: [1-8]
+topic_keywords: [石油天然气行业标准, 气体防护站设计规范, SY/T 6772-2009]
+topic: "中华人民共和国石油天然气行业标准 气体防护站设计规范 SY/T 6772-2009"
+category_paths: [(["石油天然气行业标准", "气体防护站设计规范", "SY/T 6772-2009"], 0.95, [("石油天然气", ["石油天然气", "行业标准"], 0.95), ("标准规范", ["设计规范", "气体防护站"], 0.95)])]
+`)
+
+	results, err := readRecordTopicCards(nil, recordID)
+	if err != nil {
+		t.Fatalf("readRecordTopicCards: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 topic, got %d", len(results))
+	}
+	if !reflect.DeepEqual(results[0].CategoryPaths, []string{"石油天然气/标准规范"}) {
+		t.Fatalf("expected normalized structured category path, got %+v", results[0].CategoryPaths)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
@@ -207,5 +260,17 @@ category_paths: []
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestParseTopicCategoryPaths_StructuredTuplePayload(t *testing.T) {
+	raw := `[([` +
+		`"石油天然气行业标准", "气体防护站设计规范", "SY/T 6772-2009"` +
+		`], 0.95, [("石油天然气", ["石油天然气", "行业标准"], 0.95), ("标准规范", ["设计规范", "气体防护站"], 0.95)])]`
+
+	got := parseTopicCategoryPaths(raw)
+	want := []string{"石油天然气/标准规范"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected parsed category paths: got=%v want=%v", got, want)
 	}
 }

@@ -3,11 +3,18 @@
 	import Rows3Icon from '@lucide/svelte/icons/rows-3';
 	import {
 		getRecordTopics,
+		listTopicGraph,
 		type KbInputRecord,
+		type TopicCategoryNodeApi,
 		type TopicCardApi
 	} from '$lib/services/kbService';
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
+	import {
+		buildTopicCategoryMetadataByPath,
+		buildTopicCategoryPathDisplay,
+		type TopicCategoryPathMetadata
+	} from './topic-category-paths';
 	import {
 		createTopicTreeState,
 		selectTopicTreeRecord,
@@ -55,6 +62,9 @@
 	let topicLoadingByRecordId = $state<Record<number, boolean>>({});
 	let recordCache = $state<Record<number, TopicTreeRecord>>({});
 	let treeState = $state(createTopicTreeState());
+	let categoryMetadataByPath = $state<Record<string, TopicCategoryPathMetadata>>({});
+	let categoryMetadataLoaded = $state(false);
+	let truncatedCategoryPaths = $state<Record<string, boolean>>({});
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
@@ -68,6 +78,11 @@
 	let viewerInputId = $derived(treeState.selectedPdfTarget?.inputId ?? activeRecord?.id ?? null);
 	let viewerFileUrl = $derived(viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : '');
 	let viewerIsPdf = $derived((activeRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf'));
+	let selectedTopicCategoryPaths = $derived(
+		selectedTopic?.categoryPaths?.map((path) =>
+			buildTopicCategoryPathDisplay(path, categoryMetadataByPath)
+		) ?? []
+	);
 
 	type TopicPdfViewport = {
 		convertToViewportRectangle: (rect: number[]) => number[];
@@ -162,6 +177,12 @@
 		}
 	});
 
+	$effect(() => {
+		if (!categoryMetadataLoaded) {
+			void ensureCategoryMetadata();
+		}
+	});
+
 	function selectTopic(topic: TopicTreeRecord['topics'][number], recordId: number) {
 		const next = selectTopicTreeViewerTarget(treeState, {
 			recordId,
@@ -212,6 +233,41 @@
 		} finally {
 			topicLoadingByRecordId = { ...topicLoadingByRecordId, [recordId]: false };
 		}
+	}
+
+	async function ensureCategoryMetadata() {
+		if (categoryMetadataLoaded) return;
+		categoryMetadataLoaded = true;
+		try {
+			const response = await listTopicGraph();
+			categoryMetadataByPath = buildTopicCategoryMetadataByPath(
+				(response.results ?? []) as TopicCategoryNodeApi[]
+			);
+		} catch (error) {
+			console.warn('failed to load topic category metadata', error);
+		}
+	}
+
+	function trackPathOverflow(node: HTMLElement, pathKey: string) {
+		let currentPathKey = pathKey;
+		const update = () => {
+			const next = node.scrollWidth > node.clientWidth + 1;
+			if (truncatedCategoryPaths[currentPathKey] !== next) {
+				truncatedCategoryPaths = { ...truncatedCategoryPaths, [currentPathKey]: next };
+			}
+		};
+		const resizeObserver = new ResizeObserver(update);
+		resizeObserver.observe(node);
+		queueMicrotask(update);
+		return {
+			update(nextPathKey: string) {
+				currentPathKey = nextPathKey;
+				queueMicrotask(update);
+			},
+			destroy() {
+				resizeObserver.disconnect();
+			}
+		};
 	}
 
 	function handleRecordSelect(record: KbInputRecord) {
@@ -398,10 +454,34 @@
 										</div>
 										<div class="topic-sidebar-block">
 											<div class="topic-sidebar-label">Category Paths</div>
-											{#if selectedTopic.categoryPaths && selectedTopic.categoryPaths.length > 0}
-												<div class="keyword-list">
-													{#each selectedTopic.categoryPaths as path, idx (`${path}-${idx}`)}
-														<span class="keyword-chip">{path}</span>
+											{#if selectedTopicCategoryPaths.length > 0}
+												<div class="category-path-list">
+													{#each selectedTopicCategoryPaths as categoryPath, idx (`${categoryPath.path}-${idx}`)}
+														<div class="category-path-row">
+															<div class="category-path-line">
+																<div
+																	class="category-path-segments"
+																	use:trackPathOverflow={categoryPath.path}
+																	title={truncatedCategoryPaths[categoryPath.path]
+																		? categoryPath.path
+																		: undefined}
+																>
+																	{#each categoryPath.segments as segment, segmentIdx (`${segment.path}-${segmentIdx}`)}
+																		<span class="keyword-chip category-path-chip" title={segment.tooltip}
+																			>{segment.label}</span
+																		>
+																		{#if segmentIdx < categoryPath.segments.length - 1}
+																			<span class="category-path-separator">/</span>
+																		{/if}
+																	{/each}
+																</div>
+																{#if categoryPath.confidenceLabel}
+																	<span class="category-path-confidence"
+																		>{categoryPath.confidenceLabel}</span
+																	>
+																{/if}
+															</div>
+														</div>
 													{/each}
 												</div>
 											{:else}
@@ -577,6 +657,13 @@
 
 	.keyword-list { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.6rem; }
 	.keyword-chip { display: inline-flex; align-items: center; padding: 0.32rem 0.58rem; border-radius: 999px; border: 1px solid rgba(74, 222, 128, 0.22); background: rgba(13, 148, 136, 0.12); font-size: 0.78rem; color: #6ee7b7; }
+	.category-path-list { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
+	.category-path-row { min-width: 0; }
+	.category-path-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.6rem; min-width: 0; }
+	.category-path-segments { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+	.category-path-chip { max-width: 100%; vertical-align: middle; }
+	.category-path-separator { display: inline-block; margin: 0 0.32rem; color: var(--muted); vertical-align: middle; }
+	.category-path-confidence { flex: none; font-size: 0.76rem; font-weight: 700; color: var(--muted); }
 
 	.pdf-fallback-frame { margin-top: 0.85rem; width: 100%; min-height: 540px; flex: 1; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px; background: white; }
 
