@@ -5,6 +5,7 @@
 		getRecordTopics,
 		listTopicGraph,
 		type KbInputRecord,
+		type ListTopicGraphResponse,
 		type TopicCategoryNodeApi,
 		type TopicCardApi
 	} from '$lib/services/kbService';
@@ -34,6 +35,7 @@
 		itemSingular = 'topic',
 		itemPlural = 'topics',
 		getRecordItems = getRecordTopics,
+		listCategoryGraph = listTopicGraph,
 		scopeToActiveStore = false,
 		browserInstanceKey = 'topic-tree'
 	}: {
@@ -46,6 +48,7 @@
 		itemSingular?: string;
 		itemPlural?: string;
 		getRecordItems?: (recordId: number) => Promise<{ topics: TopicCardApi[] }>;
+		listCategoryGraph?: () => Promise<ListTopicGraphResponse>;
 		scopeToActiveStore?: boolean;
 		browserInstanceKey?: string;
 	} = $props();
@@ -239,7 +242,7 @@
 		if (categoryMetadataLoaded) return;
 		categoryMetadataLoaded = true;
 		try {
-			const response = await listTopicGraph();
+			const response = await listCategoryGraph();
 			categoryMetadataByPath = buildTopicCategoryMetadataByPath(
 				(response.results ?? []) as TopicCategoryNodeApi[]
 			);

@@ -398,7 +398,7 @@ func looksLikeProvisionRecord(payload map[string]any) bool {
 	if len(payload) == 0 {
 		return false
 	}
-	for _, key := range []string{"name", "provision_original", "provision_en", "type", "subject", "source_line_spans"} {
+	for _, key := range []string{"name", "provision", "provision_original", "provision_en", "type", "subject", "source_line_spans"} {
 		if strings.TrimSpace(asString(payload[key])) != "" {
 			return true
 		}
@@ -415,19 +415,26 @@ func buildProvisionUserPrompt(block Block) string {
 	schema := map[string]any{
 		"language": "string",
 		"provisions": []map[string]any{{
-			"name":               "string",
-			"type":               "mandatory|recommended|optional",
-			"provision_original": "string",
-			"provision_en":       "string",
-			"source_line_spans":  []string{"2:10"},
-			"context":            "string",
-			"subject":            "string",
-			"location_type":      "string",
-			"keywords":           []string{"string"},
-			"confidence":         0.0,
-			"is_explicit":        true,
-			"need_verify":        false,
-			"categories":         []any{},
+			"name":              "string",
+			"name_en":           "string",
+			"type":              "mandatory|recommended|optional",
+			"provision":         "string",
+			"provision_en":      "string",
+			"provision_desc":    "string",
+			"provision_desc_en": "string",
+			"source_line_spans": []string{"2:10"},
+			"context":           "string",
+			"context_en":        "string",
+			"subject":           "string",
+			"subject_en":        "string",
+			"location_type":     "string",
+			"keywords":          []string{"string"},
+			"keywords_en":       []string{"string"},
+			"confidence":        0.0,
+			"is_explicit":       true,
+			"need_verify":       false,
+			"category_paths":    []any{},
+			"category_path_en":  []any{},
 		}},
 	}
 	lines := make([]string, 0, len(block.Lines))
@@ -471,20 +478,32 @@ func normalizeProvisionList(items []any, lineToPage map[int]int, lineText map[st
 			continue
 		}
 		provisionName := strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["provision_name"]), asString(raw["name"])))
+		provisionText := strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["provision"]), asString(raw["provision_original"])))
+		categoryPaths := raw["category_paths"]
+		if categoryPaths == nil {
+			categoryPaths = raw["categories"]
+		}
 		normalized := map[string]any{
 			"provision_name":     provisionName,
+			"provision_name_en":  strings.TrimSpace(asString(raw["name_en"])),
 			"provision_type":     strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["provision_type"]), asString(raw["type"]))),
-			"source_text":        strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["source_text"]), asString(raw["provision_original"]))),
-			"provision_original": strings.TrimSpace(asString(raw["provision_original"])),
+			"source_text":        strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["source_text"]), provisionText)),
+			"provision":          provisionText,
 			"provision_en":       strings.TrimSpace(asString(raw["provision_en"])),
+			"provision_desc":     strings.TrimSpace(asString(raw["provision_desc"])),
+			"provision_desc_en":  strings.TrimSpace(asString(raw["provision_desc_en"])),
 			"context":            strings.TrimSpace(asString(raw["context"])),
+			"context_en":         strings.TrimSpace(asString(raw["context_en"])),
 			"subject":            strings.TrimSpace(asString(raw["subject"])),
+			"subject_en":         strings.TrimSpace(asString(raw["subject_en"])),
 			"location_type":      strings.TrimSpace(asString(raw["location_type"])),
 			"keywords":           toStringSlice(raw["keywords"]),
+			"keywords_en":        toStringSlice(raw["keywords_en"]),
 			"confidence":         toFloat(raw["confidence"]),
 			"is_explicit":        toBool(raw["is_explicit"]),
 			"need_verify":        toBool(raw["need_verify"]),
-			"categories":         raw["categories"],
+			"category_paths":     categoryPaths,
+			"category_paths_en":  raw["category_path_en"],
 		}
 		sourceSpans := normalizeProvisionSourceLineSpans(raw["source_line_spans"], lineToPage)
 		normalized["source_line_spans"] = sourceSpans
@@ -572,40 +591,43 @@ func (p *ProvisionsProcessor) buildProvisionOutputRows(provisions []map[string]a
 	}
 	for i, provision := range provisions {
 		publicInfo := map[string]any{
-			"provision_type":     strings.TrimSpace(asString(provision["provision_type"])),
-			"source_line_spans":  provision["source_line_spans"],
-			"provision_original": strings.TrimSpace(asString(provision["provision_original"])),
-			"provision_en":       strings.TrimSpace(asString(provision["provision_en"])),
-			"need_verify":        toBool(provision["need_verify"]),
+			"provision_type":    strings.TrimSpace(asString(provision["provision_type"])),
+			"source_line_spans": provision["source_line_spans"],
 		}
 		out = append(out, map[string]any{
-			"prov_id":            i + 1,
-			"prov_name":          strings.TrimSpace(asString(provision["provision_name"])),
-			"prov_subject":       strings.TrimSpace(asString(provision["subject"])),
-			"prov_desc":          strings.TrimSpace(firstNonEmptyTrimmed(asString(provision["provision_en"]), asString(provision["provision_original"]), asString(provision["source_text"]))),
-			"prov_context":       strings.TrimSpace(asString(provision["context"])),
-			"prov_keywords":      provision["keywords"],
-			"category_paths":     provision["categories"],
-			"location_type":      strings.TrimSpace(asString(provision["location_type"])),
-			"prov_conf":          toFloat(provision["confidence"]),
-			"source_text":        strings.TrimSpace(asString(provision["source_text"])),
-			"num_blocks":         numBlocks,
-			"num_provisions":     len(provisions),
-			"time_per_provision": timePerProvision,
-			"model_name":         strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.ModelName)),
-			"prompt_name":        strings.TrimSpace(p.PromptRef),
-			"is_explicit":        toBool(provision["is_explicit"]),
-			"status":             "active",
-			"create_time":        timeText,
-			"modify_time":        timeText,
-			"public_info":        publicInfo,
-			"private_info":       map[string]any{},
-			"notes":              "",
-			"error_msg":          "",
-
-			// Keep source spans available for tests and callers that inspect
-			// the in-memory request before it is folded into public_info.
-			"source_line_spans": provision["source_line_spans"],
+			"prov_id":               i + 1,
+			"prov_name":             strings.TrimSpace(asString(provision["provision_name"])),
+			"prov_name_en":          strings.TrimSpace(asString(provision["provision_name_en"])),
+			"provision":             strings.TrimSpace(asString(provision["provision"])),
+			"provision_en":          strings.TrimSpace(asString(provision["provision_en"])),
+			"provision_subject":     strings.TrimSpace(asString(provision["subject"])),
+			"provision_subject_en":  strings.TrimSpace(asString(provision["subject_en"])),
+			"prov_desc":             strings.TrimSpace(firstNonEmptyTrimmed(asString(provision["provision_desc"]), asString(provision["provision_en"]), asString(provision["provision"]), asString(provision["source_text"]))),
+			"prov_desc_en":          strings.TrimSpace(asString(provision["provision_desc_en"])),
+			"prov_context":          strings.TrimSpace(asString(provision["context"])),
+			"prov_context_en":       strings.TrimSpace(asString(provision["context_en"])),
+			"provision_keywords":    provision["keywords"],
+			"provision_keywords_en": provision["keywords_en"],
+			"category_paths":        provision["category_paths"],
+			"category_paths_en":     provision["category_paths_en"],
+			"location_type":         strings.TrimSpace(asString(provision["location_type"])),
+			"confidence":            toFloat(provision["confidence"]),
+			"source_text":           strings.TrimSpace(asString(provision["source_text"])),
+			"num_blocks":            numBlocks,
+			"num_provisions":        len(provisions),
+			"time_per_provision":    timePerProvision,
+			"model_name":            strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.ModelName)),
+			"prompt_name":           strings.TrimSpace(p.PromptRef),
+			"is_explicit":           toBool(provision["is_explicit"]),
+			"need_verify":           toBool(provision["need_verify"]),
+			"status":                "active",
+			"create_time":           timeText,
+			"modify_time":           timeText,
+			"public_info":           publicInfo,
+			"private_info":          map[string]any{},
+			"notes":                 "",
+			"error_msg":             "",
+			"source_line_spans":     provision["source_line_spans"],
 		})
 	}
 	return out
@@ -621,45 +643,51 @@ func loadOptionalModelConfigFromEnv(modelRefEnv string, modelsFileEnv string) (m
 
 func buildProvisionDBRecord(provision map[string]any, language string) map[string]any {
 	publicInfo, _ := provision["public_info"].(map[string]any)
-	provisionOriginal := strings.TrimSpace(asString(publicInfo["provision_original"]))
-	provisionEn := strings.TrimSpace(asString(publicInfo["provision_en"]))
+	provisionText := strings.TrimSpace(asString(provision["provision"]))
+	provisionEn := strings.TrimSpace(asString(provision["provision_en"]))
 	lang := strings.ToLower(strings.TrimSpace(language))
-	if lang == "en" || lang == "eng" || lang == "english" || strings.EqualFold(provisionOriginal, provisionEn) {
-		provisionOriginal = ""
+	if lang == "en" || lang == "eng" || lang == "english" || strings.EqualFold(provisionText, provisionEn) {
+		provisionText = ""
 	}
 
-	var originalValue any
-	if provisionOriginal != "" {
-		originalValue = provisionOriginal
+	var provisionValue any
+	if provisionText != "" {
+		provisionValue = provisionText
 	}
 
 	return map[string]any{
-		"prov_id":            int(toFloat(provision["prov_id"])),
-		"prov_name":          strings.TrimSpace(asString(provision["prov_name"])),
-		"provision_type":     strings.TrimSpace(asString(publicInfo["provision_type"])),
-		"source_text":        strings.TrimSpace(asString(provision["source_text"])),
-		"source_line_spans":  provision["source_line_spans"],
-		"provision_original": originalValue,
-		"provision_en":       provisionEn,
-		"prov_context":       strings.TrimSpace(asString(provision["prov_context"])),
-		"provision_subject":  strings.TrimSpace(asString(provision["prov_subject"])),
-		"prov_desc":          strings.TrimSpace(asString(provision["prov_desc"])),
-		"provision_keywords": provision["prov_keywords"],
-		"category_paths":     provision["category_paths"],
-		"location_type":      strings.TrimSpace(asString(provision["location_type"])),
-		"confidence":         toFloat(provision["prov_conf"]),
-		"is_explicit":        toBool(provision["is_explicit"]),
-		"need_verify":        toBool(publicInfo["need_verify"]),
-		"num_blocks":         int(toFloat(provision["num_blocks"])),
-		"num_provisions":     int(toFloat(provision["num_provisions"])),
-		"time_per_provision": toFloat(provision["time_per_provision"]),
-		"model_name":         strings.TrimSpace(asString(provision["model_name"])),
-		"prompt_name":        strings.TrimSpace(asString(provision["prompt_name"])),
-		"status":             strings.TrimSpace(firstNonEmptyTrimmed(asString(provision["status"]), "active")),
-		"public_info":        publicInfo,
-		"private_info":       provision["private_info"],
-		"notes":              strings.TrimSpace(asString(provision["notes"])),
-		"error_msg":          strings.TrimSpace(asString(provision["error_msg"])),
+		"prov_id":               int(toFloat(provision["prov_id"])),
+		"prov_name":             strings.TrimSpace(asString(provision["prov_name"])),
+		"prov_name_en":          strings.TrimSpace(asString(provision["prov_name_en"])),
+		"provision_type":        strings.TrimSpace(asString(publicInfo["provision_type"])),
+		"source_text":           strings.TrimSpace(asString(provision["source_text"])),
+		"source_line_spans":     provision["source_line_spans"],
+		"provision":             provisionValue,
+		"provision_en":          provisionEn,
+		"prov_context":          strings.TrimSpace(asString(provision["prov_context"])),
+		"prov_context_en":       strings.TrimSpace(asString(provision["prov_context_en"])),
+		"provision_subject":     strings.TrimSpace(asString(provision["provision_subject"])),
+		"provision_subject_en":  strings.TrimSpace(asString(provision["provision_subject_en"])),
+		"prov_desc":             strings.TrimSpace(asString(provision["prov_desc"])),
+		"prov_desc_en":          strings.TrimSpace(asString(provision["prov_desc_en"])),
+		"provision_keywords":    provision["provision_keywords"],
+		"provision_keywords_en": provision["provision_keywords_en"],
+		"category_paths":        provision["category_paths"],
+		"category_paths_en":     provision["category_paths_en"],
+		"location_type":         strings.TrimSpace(asString(provision["location_type"])),
+		"confidence":            toFloat(provision["confidence"]),
+		"is_explicit":           toBool(provision["is_explicit"]),
+		"need_verify":           toBool(provision["need_verify"]),
+		"num_blocks":            int(toFloat(provision["num_blocks"])),
+		"num_provisions":        int(toFloat(provision["num_provisions"])),
+		"time_per_provision":    toFloat(provision["time_per_provision"]),
+		"model_name":            strings.TrimSpace(asString(provision["model_name"])),
+		"prompt_name":           strings.TrimSpace(asString(provision["prompt_name"])),
+		"status":                strings.TrimSpace(firstNonEmptyTrimmed(asString(provision["status"]), "active")),
+		"public_info":           publicInfo,
+		"private_info":          provision["private_info"],
+		"notes":                 strings.TrimSpace(asString(provision["notes"])),
+		"error_msg":             strings.TrimSpace(asString(provision["error_msg"])),
 	}
 }
 
@@ -897,16 +925,22 @@ INSERT INTO kb.provisions (
 	input_filename,
 	prov_id,
 	prov_name,
+	prov_name_en,
 	provision_type,
 	source_text,
 	source_line_spans,
-	provision_original,
+	provision,
 	provision_en,
 	provision_subject,
+	provision_subject_en,
 	prov_desc,
+	prov_desc_en,
 	prov_context,
+	prov_context_en,
 	provision_keywords,
+	provision_keywords_en,
 	category_paths,
+	category_paths_en,
 	location_type,
 	confidence,
 	is_explicit,
@@ -923,22 +957,28 @@ INSERT INTO kb.provisions (
 	error_msg
 )
 VALUES (
-		$1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26::jsonb,$27::jsonb,$28,$29
+	$1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32::jsonb,$33::jsonb,$34,$35
 )
 ON CONFLICT (input_record_id, prov_id) DO UPDATE SET
 	extract_id = EXCLUDED.extract_id,
 	input_filename = EXCLUDED.input_filename,
 	prov_name = EXCLUDED.prov_name,
+	prov_name_en = EXCLUDED.prov_name_en,
 	provision_type = EXCLUDED.provision_type,
 	source_text = EXCLUDED.source_text,
 	source_line_spans = EXCLUDED.source_line_spans,
-	provision_original = EXCLUDED.provision_original,
+	provision = EXCLUDED.provision,
 	provision_en = EXCLUDED.provision_en,
 	provision_subject = EXCLUDED.provision_subject,
+	provision_subject_en = EXCLUDED.provision_subject_en,
 	prov_desc = EXCLUDED.prov_desc,
+	prov_desc_en = EXCLUDED.prov_desc_en,
 	prov_context = EXCLUDED.prov_context,
+	prov_context_en = EXCLUDED.prov_context_en,
 	provision_keywords = EXCLUDED.provision_keywords,
+	provision_keywords_en = EXCLUDED.provision_keywords_en,
 	category_paths = EXCLUDED.category_paths,
+	category_paths_en = EXCLUDED.category_paths_en,
 	location_type = EXCLUDED.location_type,
 	confidence = EXCLUDED.confidence,
 	is_explicit = EXCLUDED.is_explicit,
@@ -960,7 +1000,9 @@ ON CONFLICT (input_record_id, prov_id) DO UPDATE SET
 		dbRecord := buildProvisionDBRecord(provision, req.Language)
 		sourceSpansJSON, _ := json.Marshal(dbRecord["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(dbRecord["provision_keywords"])
+		keywordsEnJSON, _ := json.Marshal(dbRecord["provision_keywords_en"])
 		categoryPathsJSON, _ := json.Marshal(dbRecord["category_paths"])
+		categoryPathsEnJSON, _ := json.Marshal(dbRecord["category_paths_en"])
 		publicInfo := map[string]any{
 			"language":       req.Language,
 			"schema_version": "1",
@@ -974,35 +1016,41 @@ ON CONFLICT (input_record_id, prov_id) DO UPDATE SET
 		privateInfoJSON, _ := json.Marshal(dbRecord["private_info"])
 
 		_, err := s.DB.ExecContext(ctx, stmt,
-			req.InputRecordID,
-			req.ExtractID,
-			req.InputFilename,
-			int(toFloat(dbRecord["prov_id"])),
-			strings.TrimSpace(asString(dbRecord["prov_name"])),
-			strings.TrimSpace(asString(dbRecord["provision_type"])),
-			strings.TrimSpace(asString(dbRecord["source_text"])),
-			string(sourceSpansJSON),
-			dbRecord["provision_original"],
-			strings.TrimSpace(asString(dbRecord["provision_en"])),
-			strings.TrimSpace(asString(dbRecord["provision_subject"])),
-			strings.TrimSpace(asString(dbRecord["prov_desc"])),
-			strings.TrimSpace(asString(dbRecord["prov_context"])),
-			string(keywordsJSON),
-			string(categoryPathsJSON),
-			strings.TrimSpace(asString(dbRecord["location_type"])),
-			toFloat(dbRecord["confidence"]),
-			toBool(dbRecord["is_explicit"]),
-			toBool(dbRecord["need_verify"]),
-			int(toFloat(dbRecord["num_blocks"])),
-			int(toFloat(dbRecord["num_provisions"])),
-			toFloat(dbRecord["time_per_provision"]),
-			strings.TrimSpace(asString(dbRecord["model_name"])),
-			strings.TrimSpace(asString(dbRecord["prompt_name"])),
-			strings.TrimSpace(firstNonEmptyTrimmed(asString(dbRecord["status"]), "active")),
-			string(publicInfoJSON),
-			string(privateInfoJSON),
-			strings.TrimSpace(asString(dbRecord["notes"])),
-			strings.TrimSpace(asString(dbRecord["error_msg"])),
+			req.InputRecordID,                                                             // $1
+			req.ExtractID,                                                                 // $2
+			req.InputFilename,                                                             // $3
+			int(toFloat(dbRecord["prov_id"])),                                             // $4
+			strings.TrimSpace(asString(dbRecord["prov_name"])),                            // $5
+			strings.TrimSpace(asString(dbRecord["prov_name_en"])),                         // $6
+			strings.TrimSpace(asString(dbRecord["provision_type"])),                       // $7
+			strings.TrimSpace(asString(dbRecord["source_text"])),                          // $8
+			string(sourceSpansJSON),                                                       // $9
+			dbRecord["provision"],                                                         // $10
+			strings.TrimSpace(asString(dbRecord["provision_en"])),                         // $11
+			strings.TrimSpace(asString(dbRecord["provision_subject"])),                    // $12
+			strings.TrimSpace(asString(dbRecord["provision_subject_en"])),                 // $13
+			strings.TrimSpace(asString(dbRecord["prov_desc"])),                            // $14
+			strings.TrimSpace(asString(dbRecord["prov_desc_en"])),                         // $15
+			strings.TrimSpace(asString(dbRecord["prov_context"])),                         // $16
+			strings.TrimSpace(asString(dbRecord["prov_context_en"])),                      // $17
+			string(keywordsJSON),                                                          // $18
+			string(keywordsEnJSON),                                                        // $19
+			string(categoryPathsJSON),                                                     // $20
+			string(categoryPathsEnJSON),                                                   // $21
+			strings.TrimSpace(asString(dbRecord["location_type"])),                        // $22
+			toFloat(dbRecord["confidence"]),                                               // $23
+			toBool(dbRecord["is_explicit"]),                                               // $24
+			toBool(dbRecord["need_verify"]),                                               // $25
+			int(toFloat(dbRecord["num_blocks"])),                                          // $26
+			int(toFloat(dbRecord["num_provisions"])),                                      // $27
+			toFloat(dbRecord["time_per_provision"]),                                       // $28
+			strings.TrimSpace(asString(dbRecord["model_name"])),                           // $29
+			strings.TrimSpace(asString(dbRecord["prompt_name"])),                          // $30
+			strings.TrimSpace(firstNonEmptyTrimmed(asString(dbRecord["status"]), "active")), // $31
+			string(publicInfoJSON),                                                        // $32
+			string(privateInfoJSON),                                                       // $33
+			strings.TrimSpace(asString(dbRecord["notes"])),                                // $34
+			strings.TrimSpace(asString(dbRecord["error_msg"])),                            // $35
 		)
 		if err != nil {
 			return inserted, err

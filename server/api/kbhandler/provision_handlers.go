@@ -426,16 +426,17 @@ func buildProvisionTopicCards(rows []provisionRow) ([]topicCategoryRecord, error
 		targets := expandSummaryTargets(convertProvisionSourceSpans(row.SourceLineSpans), lineTargets)
 		page, coords := firstSummaryTarget(targets)
 		results = append(results, topicCategoryRecord{
-			ID:          row.ItemID,
-			TopicName:   row.ProvName,
-			PdfFileName: filepath.Base(strings.TrimSpace(meta.fileName)),
-			TopicType:   row.ProvisionType,
-			TopicText:   row.ProvisionText,
-			Keywords:    append([]string(nil), row.Keywords...),
-			InputID:     row.InputRecordID,
-			Page:        page,
-			Coords:      coords,
-			Targets:     targets,
+			ID:            row.ItemID,
+			TopicName:     row.ProvName,
+			PdfFileName:   filepath.Base(strings.TrimSpace(meta.fileName)),
+			TopicType:     row.ProvisionType,
+			TopicText:     row.ProvisionText,
+			Keywords:      append([]string(nil), row.Keywords...),
+			CategoryPaths: append([]string(nil), row.CategoryPaths...),
+			InputID:       row.InputRecordID,
+			Page:          page,
+			Coords:        coords,
+			Targets:       targets,
 		})
 	}
 

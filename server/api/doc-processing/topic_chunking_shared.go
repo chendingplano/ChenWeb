@@ -46,7 +46,6 @@ func buildChunkArtifactBaseName(stagingFilename string, parserName string) strin
 	return root + "_" + parser
 }
 
-
 func writeTopicsFile(chunkDir string, recordID int64, fileName string, topics []TopicItem) (string, error) {
 	if strings.TrimSpace(fileName) == "" {
 		return "", errors.New("(MID_26043001) topic file name is empty")
@@ -308,6 +307,7 @@ func writeTopicsCategoryTreeToDir(logger ApiTypes.JimoLogger, targetDir string, 
 
 func extractTopicsFromLinesWithLLM(
 	ctx context.Context,
+	record_id int64,
 	extractor LLMJSONExtractor,
 	logger ApiTypes.JimoLogger,
 	modelName string,
@@ -346,6 +346,7 @@ func extractTopicsFromLinesWithLLM(
 		logScopeName, logScopeValue,
 		"model_name", modelName,
 		"prompt_name", promptRef,
+		"record_id", record_id,
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 		"error", err,
 	)
@@ -355,12 +356,13 @@ func extractTopicsFromLinesWithLLM(
 			baseURL = strings.TrimSpace(client.BaseURL)
 		}
 		return nil, fmt.Errorf(
-			"(MID_26042804) extract topics for %s %d failed (model=%q, base_url=%q): %w",
+			"(MID_26042804) extract topics for %s %d failed (model=%q, base_url=%q): %w, record_id=%d",
 			logScopeName,
 			logScopeValue,
 			modelName,
 			baseURL,
 			err,
+			record_id,
 		)
 	}
 
@@ -398,8 +400,8 @@ func extractTopicsFromLinesWithLLM(
 
 		logger.Info("raw topic item from LLM",
 			logScopeName, logScopeValue,
+			"record_id", record_id,
 			"item", item,
-			"m", m,
 			"topic", topic,
 			"topic_type", topicType,
 			"line_ranges", lineRanges,
@@ -415,6 +417,7 @@ func extractTopicsFromLinesWithLLM(
 			if logger != nil {
 				logger.Warn("topic category fallback applied",
 					logScopeName, logScopeValue,
+					"record_id", record_id,
 					"topic_seq", nextSeq,
 					"reason", categoryFallbackReason,
 					"fallback_category", strings.Join(categoryPath, "/"),
@@ -442,9 +445,9 @@ func extractTopicsFromLinesWithLLM(
 // ---------------------------------------------------------------------------
 
 const (
-	topicCategoryEmbedFileName = "category.embed"
-	topicCategoryMetaFileName  = "metadata.txt"
-	topicsFileName             = "topics.txt"
+	topicCategoryEmbedFileName        = "category.embed"
+	topicCategoryMetaFileName         = "metadata.txt"
+	topicsFileName                    = "topics.txt"
 	DefaultCategorySimilarityMinScore = 0.85
 )
 

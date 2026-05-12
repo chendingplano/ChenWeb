@@ -54,38 +54,52 @@ and normal lines.
 
 For every extracted provisions, produce a structured record with the following fields:
 
-* `provision_name`: normalized short name of the provision
+* `name`: normalized short name of the provision in its input language.
+* `name_en`: English translation of `name`.
 * `source_line_spans`: source page/line references that support extraction, formatted as `["<page>:<line>", ...]`
-* `provision_original`: exact provision text in the source language
-* `provision_en`: English translation, or the same as `provision_original` if the source is English
+* `provision`: exact provision text in the input language
+* `provision_en`: English translation of `provision` 
 * `location_type`: one of `sentence`, `paragraph`, `bullet`, `table_row`, `table_cell`, `heading_context`, `mixed`
-* `context`: the contextual information about the provision
-* `subject`: must be descriptive and complete, include the context information, used to semantically identify the provision.
+* `provision_desc`: the description about the provision.
+* `provision_desc_en`: English translation of `provision_desc`.
+* `context`: the contextual information about the provision in its input language.
+* `context_en`: English translation of `context`.
+* `subject`: must be descriptive and complete, include the context information, used to semantically identify the provision in its input language. 
+* `keywords`: The keywords about the provision.
+* `keywords_en`: English translation of `keywords`.
+* `subject_en`: English transation of `subject`.
 * `confidence`: number from 0 to 1
 * `is_explicit`: true if the document clearly defines it as a provision; false if inferred but still strongly supported
+
+IMPORTANT: for `name`, `provision`, `provision_desc`, `keywords`, `context` and `subject`, generate them in the input language.
+ALSO provide accurate English translation if the input language is not English in `name_en`, `provision_en`, `provision_desc_en`, `keywords_en`, `context_en` and `subject_en`, respectively.
 
 ## 7. Extract Category Paths
 
 ### 7.1. Category structure
 
-* A category path is made of one or more categories, forming a path: level_1_category/level_2/category/..., similar to file path.
-* Level 1 category is an `Industry Classification`. MUST be generic enough, normally one 
-  Level 1 category maps to a specific industry, such as 'Health', 'Medical', 'Software', 'Manufacturing', etc.
-* Level 2 MUST also be generic within its industry.
+A category path is made of one or more categories, forming a category path:
+```text
+  <industry-class>/<level_2_category>/..., similar to file path.
+```
+
+* `<industry-class>` is an `Industry Classification`. MUST be generic, such as 'Health', 'Medical', 'Software', 'Manufacturing', etc.
+* `<level_2_category>` MUST also be generic within its industry.
 * Last level = most specific
 * Each level MUST be semantically narrower than its parent
+* `<industry-class>`, `<level_2_category>` and subsequent categories MUST be in the input language.
 * Limit the max depth of category paths to 10
 
 ### 7.2. Category Paths Extraction Rules
 
-* Extract one or more (up to 5) category paths per provision
+* Extract multiple category paths per provision
 * Provide both category-level keywords and path-level keywords
-* Provide keywords, per category of per category path
 * Keywords MUST:
 
   * Be directly grounded in the input
   * Be specific and meaningful (not generic words)
   * Help distinguish this topic from others
+  * Keywords are in its input language
 
 ### 7.3. Confidence
 
@@ -141,38 +155,66 @@ Apply these rules according to the language of each category segment:
   * Remove punctuation (Chinese punctuation such as ，、。：；“” are removed)
   * Do NOT insert spaces or underscores between characters
 
-## Output Format (STRICT JSON ONLY)
+## 10. Output Format (STRICT JSON ONLY)
 ```json
 {
   "language": "<detected_language>",
   "provisions": [
     {
       "name": "<provision name>",
+      "name_en": "<provision name>",
       "type": "mandatory",
-      "provision_original": "<original provision text>",
+      "provision": "<original provision text>",
       "provision_en": "<English translation or same as original if English>",
+      "provision_desc": <the description about the provision>,
+      "provision_desc_en": <the English translation of provision_desc>,
       "source_line_spans": ["<page>:<line>", "<page>:<line>"],
       "context":"<the context>",
+      "context_en":"<the English translation of the context if its input lanuage is not English>",
       "subject":"<the provision's subject>",
+      "subject_en":"<the provision's subject>",
       "location_type":"<the location type>",
-      "keywords": ["k1", "k2", "k3"],
+      "keywords": ["keyword", "keyword"...],
+      "keywords_en": ["keyword", "keyword"...],
       "confidence": 0.0,
-      "is_explicit": true,
-      "need_verify": false,
-      "categories": [
+      "is_explicit": true or false,
+      "need_verify": true or false,
+      "category_paths": [
         {
           "category_path": [
             {
-              "name": "public_health",
-              "keywords": ["health management", "disease prevention", "public health"],
-              "confidence": 0.95
+              "name": "category-name",
+              "keywords": ["keyword", "keyword"...],
+              "confidence": ddd
             },
+            {
+              <the next category>
+            },
+            ...
           ],
-          "path_keywords": ["vaccination records", "recipient data", "information system"],
-          "path_confidence": 0.92
+          "path_keywords": ["keyword", "keyword"...],
+          "path_confidence": ddd
+        }
+      ]
+      "category_path_en": [    // This is the English translation of 'category_path', present only when the input language is not English!
+        {
+          "category_path": [
+            {
+              "name": "category-name",
+              "keywords": ["keyword", "keyword"...],
+              "confidence": ddd
+            },
+            {
+              <the next category>
+            },
+            ...
+          ],
+          "path_keywords": ["keyword", "keyword"...],
+          "path_confidence": ddd
         }
       ]
     }
   ]
 }
 ```
+

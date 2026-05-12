@@ -209,7 +209,7 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 	topics := make([]TopicItem, 0, 128)
 	seqNo := 1
 	for _, block := range blocks {
-		blockTopics, blockErr := s.extractTopicsForBlock(ctx, block, seqNo)
+		blockTopics, blockErr := s.extractTopicsForBlock(ctx, rec.ID, block, seqNo)
 		if blockErr != nil {
 			s.failAndPersist(ctx, rec, inputFilename, start, blockErr)
 			return blockErr
@@ -351,9 +351,14 @@ func BuildSemanticPageBlocks(lines []Line, fileBlockSize int) []SemanticPageBloc
 	return blocks
 }
 
-func (s *SemanticChunkingService) extractTopicsForBlock(ctx context.Context, block SemanticPageBlock, seqStart int) ([]TopicItem, error) {
+func (s *SemanticChunkingService) extractTopicsForBlock(
+	ctx context.Context,
+	record_id int64,
+	block SemanticPageBlock,
+	seqStart int) ([]TopicItem, error) {
 	topics, err := extractTopicsFromLinesWithLLM(
 		ctx,
+		record_id,
 		s.Extractor,
 		s.Logger,
 		s.ModelName,

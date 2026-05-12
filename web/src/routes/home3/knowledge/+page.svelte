@@ -457,6 +457,7 @@
 					itemSingular="provision"
 					itemPlural="provisions"
 					getRecordItems={getRecordProvisions}
+					listCategoryGraph={() => listProvisionGraph(knowledgeStoreState.activeStore?.id ?? null)}
 				/>
 			{:else if isUnderConstructionKnowledgeSection(activeSection)}
 				<div

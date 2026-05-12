@@ -61,19 +61,19 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 		"language": "en",
 		"provisions": []any{
 			map[string]any{
-				"name":               "inspection_requirement",
-				"type":               "mandatory",
-				"provision_original": "The operator shall inspect pressure relief valves monthly.",
-				"provision_en":       "The operator shall inspect pressure relief valves monthly.",
-				"source_line_spans":  []any{float64(10)},
-				"context":            "maintenance section",
-				"subject":            "pressure relief valve inspection",
-				"location_type":      "sentence",
-				"keywords":           []any{"inspection", "pressure relief valve"},
-				"confidence":         0.91,
-				"is_explicit":        true,
-				"need_verify":        false,
-				"categories": []any{
+				"name":          "inspection_requirement",
+				"type":          "mandatory",
+				"provision":     "The operator shall inspect pressure relief valves monthly.",
+				"provision_en":  "The operator shall inspect pressure relief valves monthly.",
+				"source_line_spans": []any{float64(10)},
+				"context":       "maintenance section",
+				"subject":       "pressure relief valve inspection",
+				"location_type": "sentence",
+				"keywords":      []any{"inspection", "pressure relief valve"},
+				"confidence":    0.91,
+				"is_explicit":   true,
+				"need_verify":   false,
+				"category_paths": []any{
 					map[string]any{
 						"path_keywords":   []any{"valve inspection"},
 						"path_confidence": float64(0.88),
@@ -122,8 +122,8 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if got := provisionsStore.lastSave.Provisions[0]["prov_name"]; got != "inspection_requirement" {
 		t.Fatalf("prov_name=%v", got)
 	}
-	if got := provisionsStore.lastSave.Provisions[0]["prov_subject"]; got != "pressure relief valve inspection" {
-		t.Fatalf("prov_subject=%v", got)
+	if got := provisionsStore.lastSave.Provisions[0]["provision_subject"]; got != "pressure relief valve inspection" {
+		t.Fatalf("provision_subject=%v", got)
 	}
 	if got := provisionsStore.lastSave.Provisions[0]["source_line_spans"]; len(got.([]string)) != 1 || got.([]string)[0] != "2:10" {
 		t.Fatalf("source_line_spans=%v", got)
@@ -138,8 +138,8 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if got := dbRow["source_text"]; got != "The operator shall inspect pressure relief valves monthly." {
 		t.Fatalf("db source_text=%v", got)
 	}
-	if got := dbRow["provision_original"]; got != nil {
-		t.Fatalf("db provision_original=%v, want nil for English", got)
+	if got := dbRow["provision"]; got != nil {
+		t.Fatalf("db provision=%v, want nil for English", got)
 	}
 	if got := dbRow["provision_en"]; got != "The operator shall inspect pressure relief valves monthly." {
 		t.Fatalf("db provision_en=%v", got)
@@ -229,10 +229,10 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 
 func TestBuildProvisionDBRecord_NonEnglishPreservesOriginal(t *testing.T) {
 	row := map[string]any{
-		"prov_subject":       "fire fighter physical examination",
+		"provision_subject":  "fire fighter physical examination",
 		"prov_context":       "Section 4.1.1",
-		"prov_keywords":      []string{"消防员", "体格检查"},
-		"prov_conf":          0.95,
+		"provision_keywords": []string{"消防员", "体格检查"},
+		"confidence":         0.95,
 		"source_text":        "100 消防员体格检查应符合下列标准:",
 		"source_line_spans":  []string{"6:100"},
 		"num_blocks":         2,
@@ -240,17 +240,17 @@ func TestBuildProvisionDBRecord_NonEnglishPreservesOriginal(t *testing.T) {
 		"time_per_provision": int64(12),
 		"model_name":         "gpt-test",
 		"prompt_name":        "prompt-test",
+		"provision":          "消防员体格检查应符合下列标准:",
+		"provision_en":       "Fire fighter physical examination shall meet the following standards:",
+		"need_verify":        false,
 		"public_info": map[string]any{
-			"provision_type":     "mandatory",
-			"provision_original": "消防员体格检查应符合下列标准:",
-			"provision_en":       "Fire fighter physical examination shall meet the following standards:",
-			"need_verify":        false,
+			"provision_type": "mandatory",
 		},
 	}
 
 	dbRow := buildProvisionDBRecord(row, "zh")
-	if got := dbRow["provision_original"]; got != "消防员体格检查应符合下列标准:" {
-		t.Fatalf("provision_original=%v", got)
+	if got := dbRow["provision"]; got != "消防员体格检查应符合下列标准:" {
+		t.Fatalf("provision=%v", got)
 	}
 	if got := dbRow["provision_en"]; got != "Fire fighter physical examination shall meet the following standards:" {
 		t.Fatalf("provision_en=%v", got)
@@ -306,17 +306,17 @@ func TestProvisionsProcessor_AcceptsSingleProvisionObject(t *testing.T) {
 	extractor := &fakeJSONExtractor{out: map[string]any{
 		"language": "zh",
 		"provisions": map[string]any{
-			"name":               "terminal_radiation_requirement",
-			"type":               "mandatory",
-			"provision_original": "终端设备中密封源的质量应符合GB4075。",
-			"provision_en":       "The quality of sealed sources in terminal equipment shall comply with GB4075.",
-			"source_line_spans":  []any{"8:181"},
-			"subject":            "医疗健康监测终端设备辐射安全要求",
-			"keywords":           []any{"终端辐射", "密封源", "GB4075"},
-			"confidence":         0.95,
-			"is_explicit":        true,
-			"need_verify":        false,
-			"categories":         []any{},
+			"name":           "terminal_radiation_requirement",
+			"type":           "mandatory",
+			"provision":      "终端设备中密封源的质量应符合GB4075。",
+			"provision_en":   "The quality of sealed sources in terminal equipment shall comply with GB4075.",
+			"source_line_spans": []any{"8:181"},
+			"subject":        "医疗健康监测终端设备辐射安全要求",
+			"keywords":       []any{"终端辐射", "密封源", "GB4075"},
+			"confidence":     0.95,
+			"is_explicit":    true,
+			"need_verify":    false,
+			"category_paths": []any{},
 		},
 	}}
 
@@ -363,17 +363,17 @@ func TestProvisionsProcessor_AcceptsBareProvisionObject(t *testing.T) {
 	}}
 	provisionsStore := &fakeProvisionsStore{}
 	extractor := &fakeJSONExtractor{out: map[string]any{
-		"name":               "terminal_radiation_requirement",
-		"type":               "mandatory",
-		"provision_original": "终端设备中密封源的质量应符合GB4075。",
-		"provision_en":       "The quality of sealed sources in terminal equipment shall comply with GB4075.",
-		"source_line_spans":  []any{"8:181"},
-		"subject":            "医疗健康监测终端设备辐射安全要求",
-		"keywords":           []any{"终端辐射", "密封源", "GB4075"},
-		"confidence":         0.95,
-		"is_explicit":        true,
-		"need_verify":        false,
-		"categories":         []any{},
+		"name":           "terminal_radiation_requirement",
+		"type":           "mandatory",
+		"provision":      "终端设备中密封源的质量应符合GB4075。",
+		"provision_en":   "The quality of sealed sources in terminal equipment shall comply with GB4075.",
+		"source_line_spans": []any{"8:181"},
+		"subject":        "医疗健康监测终端设备辐射安全要求",
+		"keywords":       []any{"终端辐射", "密封源", "GB4075"},
+		"confidence":     0.95,
+		"is_explicit":    true,
+		"need_verify":    false,
+		"category_paths": []any{},
 	}}
 
 	ctx, h := withBlockBufferHolder(context.Background())
@@ -425,12 +425,12 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnEmptyJSON(t *testing.T) {
 				"language": "en",
 				"provisions": []any{
 					map[string]any{
-						"name":               "logging_requirement",
-						"type":               "mandatory",
-						"provision_original": "The device shall log all alarms.",
-						"provision_en":       "The device shall log all alarms.",
-						"source_line_spans":  []any{"2:10"},
-						"confidence":         0.87,
+						"name":             "logging_requirement",
+						"type":             "mandatory",
+						"provision":        "The device shall log all alarms.",
+						"provision_en":     "The device shall log all alarms.",
+						"source_line_spans": []any{"2:10"},
+						"confidence":       0.87,
 					},
 				},
 			},

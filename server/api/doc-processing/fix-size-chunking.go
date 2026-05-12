@@ -383,6 +383,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		}
 		chunkTopics, chunkErr := extractTopicsFromLinesWithLLM(
 			ctx,
+			rec.ID,
 			s.Extractor,
 			s.Logger,
 			s.ModelName,

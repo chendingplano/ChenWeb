@@ -27,7 +27,6 @@ var (
 	staticMultiSymListRE    = regexp.MustCompile(`^([A-Za-z]+|[ivxlcdmIVXLCDM]+)\)\s+\S+`)
 	staticTOCDotLeaderRE    = regexp.MustCompile(`\.{3,}`)
 	staticPageImagePathRE   = regexp.MustCompile(`^(.+)/imageFile(\d+)\.png$`)
-	staticX1ZeroCoordRE     = regexp.MustCompile(`^\[\s*0(?:\.0+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?,\s*[-+]?\d+(?:\.\d+)?\s*\]$`)
 	staticLegacyHeadingRE   = regexp.MustCompile(`^heading\((\d+)\)$`)
 )
 
@@ -316,6 +315,66 @@ func applyStaticRemoveWeBoosWatermarkLines(lines []staticInputLine, logger ApiTy
 	return removeStaticWeBoosWatermarkLines(lines)
 }
 
+func removeStaticWeBoosWatermarkLines(lines []staticInputLine) []staticInputLine {
+	const watermark = "www.weboos.com"
+
+	// Collect pages that have exactly one line with content == watermark.
+	matchesByPage := make(map[int]int) // page → index in lines
+	for i, line := range lines {
+		if strings.TrimSpace(line.Content) != watermark {
+			continue
+		}
+		if _, seen := matchesByPage[line.PageNo]; seen {
+			// More than one exact match on this page — condition cannot be met.
+			return lines
+		}
+		matchesByPage[line.PageNo] = i
+	}
+	if len(matchesByPage) < 3 {
+		return lines
+	}
+
+	// Build removal set from exact-match lines and the "starts with www" fallback
+	// for pages that have no exact match.
+	removed := make(map[int]struct{}, len(matchesByPage))
+	for _, idx := range matchesByPage {
+		removed[idx] = struct{}{}
+	}
+
+	// For pages without an exact match: remove the sole www-prefixed short line, if any.
+	wwwCandidates := make(map[int][]int) // page → indexes of www-prefix lines
+	for i, line := range lines {
+		if _, ok := removed[i]; ok {
+			continue
+		}
+		if _, hasExact := matchesByPage[line.PageNo]; hasExact {
+			continue
+		}
+		content := strings.TrimSpace(line.Content)
+		if strings.HasPrefix(content, "www") && len(content) <= len(watermark) {
+			wwwCandidates[line.PageNo] = append(wwwCandidates[line.PageNo], i)
+		}
+	}
+	for _, idxs := range wwwCandidates {
+		if len(idxs) == 1 {
+			removed[idxs[0]] = struct{}{}
+		}
+	}
+
+	// Build output: skip removed lines; strip embedded watermark from remaining content.
+	filtered := make([]staticInputLine, 0, len(lines)-len(removed))
+	for i, line := range lines {
+		if _, ok := removed[i]; ok {
+			continue
+		}
+		if strings.Contains(line.Content, watermark) {
+			line.Content = strings.ReplaceAll(line.Content, watermark, "")
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
+}
+
 func applyStaticCorrectHeadings(lines []staticInputLine, logger ApiTypes.JimoLogger) []staticInputLine {
 	if logger != nil {
 		logger.Info("correct headings invoked", "line_count", len(lines))
@@ -427,57 +486,6 @@ func isStaticPageImageArtifactCoordinate(raw string) bool {
 		return false
 	}
 	return geom.X1 <= 5 && geom.Y1 <= 5
-}
-
-func removeStaticWeBoosWatermarkLines(lines []staticInputLine) []staticInputLine {
-	matchesByPage := make(map[int][]int, 4)
-	for i, line := range lines {
-		if !isStaticWeBoosWatermarkParagraph(line) {
-			continue
-		}
-		matchesByPage[line.PageNo] = append(matchesByPage[line.PageNo], i)
-	}
-
-	totalMatches := 0
-	for _, indexes := range matchesByPage {
-		if len(indexes) != 1 {
-			return lines
-		}
-		totalMatches += len(indexes)
-	}
-	if totalMatches == 0 {
-		return lines
-	}
-
-	removed := make(map[int]struct{}, totalMatches)
-	for _, indexes := range matchesByPage {
-		for _, idx := range indexes {
-			removed[idx] = struct{}{}
-		}
-	}
-
-	filtered := make([]staticInputLine, 0, len(lines)-len(removed))
-	for i, line := range lines {
-		if _, ok := removed[i]; ok {
-			continue
-		}
-		filtered = append(filtered, line)
-	}
-	return filtered
-}
-
-func isStaticWeBoosWatermarkParagraph(line staticInputLine) bool {
-	if line.OriginalLineLower != "paragraph" {
-		return false
-	}
-	content := strings.TrimSpace(line.Content)
-	if !strings.HasPrefix(content, "www") {
-		return false
-	}
-	if len(content) > len("www.weboos.com") {
-		return false
-	}
-	return staticX1ZeroCoordRE.MatchString(strings.TrimSpace(line.Coordinate))
 }
 
 func parseStaticInputLine(raw string) (staticInputLine, error) {
@@ -628,9 +636,6 @@ func buildStaticPageLayouts(lines []staticInputLine, corrected map[int]string) m
 
 func isStaticMergeableParagraph(line staticInputLine, corrected map[int]string) bool {
 	if strings.ToLower(strings.TrimSpace(line.OriginalLineLower)) != "paragraph" {
-		return false
-	}
-	if isStaticWeBoosWatermarkParagraph(line) {
 		return false
 	}
 	if isStaticTOCLine(line) {
