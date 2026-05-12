@@ -207,6 +207,24 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if strings.TrimSpace(asString(last["proc_status"])) != "success" {
 		t.Fatalf("proc_status=%v", last["proc_status"])
 	}
+	if last["record_id"] != "4001" {
+		t.Fatalf("record_id=%v, want 4001", last["record_id"])
+	}
+	if last["file_type"] != "pdf" {
+		t.Fatalf("file_type=%v, want pdf", last["file_type"])
+	}
+	if strings.TrimSpace(asString(last["input_filename"])) == "" {
+		t.Fatalf("input_filename should be set")
+	}
+	if _, ok := last["ms_used"]; !ok {
+		t.Fatalf("ms_used should be present")
+	}
+	if _, ok := last["ms-used"]; ok {
+		t.Fatalf("ms-used should not be present (renamed to ms_used)")
+	}
+	if _, ok := last["proc-status"]; ok {
+		t.Fatalf("proc-status should not be present (use proc_status only)")
+	}
 }
 
 func TestBuildProvisionDBRecord_NonEnglishPreservesOriginal(t *testing.T) {

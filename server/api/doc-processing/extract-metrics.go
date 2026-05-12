@@ -458,13 +458,39 @@ func readLinesFromFileByNumbers(path string, wantLines map[int]struct{}) ([]stri
 	return out, nil
 }
 
+type metricsStatusParams struct {
+	RecordID      int64
+	FileType      string
+	InputFilename string
+	Start         time.Time
+	DurationMs    int64
+	ProcErr       error
+}
+
+func detectMetricsFileType(rec DocMetadataInputRecord) string {
+	for _, candidate := range []string{rec.FileName, rec.StagingFilename, rec.ResultFilename} {
+		ext := strings.ToLower(strings.TrimSpace(filepath.Ext(strings.TrimSpace(candidate))))
+		if ext != "" {
+			return strings.TrimPrefix(ext, ".")
+		}
+	}
+	return ""
+}
+
 func (p *MetricsProcessor) persistMetricsStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, procErr error) {
 	errMsg := (*string)(nil)
 	if procErr != nil {
 		msg := strings.TrimSpace(procErr.Error())
 		errMsg = &msg
 	}
-	statusRaw, err := appendMetricsStatus(rec.StatusRaw, start, time.Since(start).Milliseconds(), procErr)
+	statusRaw, err := appendMetricsStatus(rec.StatusRaw, metricsStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectMetricsFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcErr:       procErr,
+	})
 	if err != nil {
 		p.Logger.Error("failed building metrics status", "record_id", rec.ID, "error", err)
 		return
@@ -477,20 +503,21 @@ func (p *MetricsProcessor) persistMetricsStatus(ctx context.Context, rec DocMeta
 	}
 }
 
-func appendMetricsStatus(raw string, start time.Time, durationMs int64, procErr error) (string, error) {
+func appendMetricsStatus(raw string, p metricsStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
 	entry := map[string]any{
-		"operation":  "extract_metrics",
-		"start_time": start.Format(defaultDocMetaStatusTime),
-		"ms-used":    durationMs,
+		"record_id":      strconv.FormatInt(p.RecordID, 10),
+		"file_type":      strings.ToLower(strings.TrimSpace(p.FileType)),
+		"operation":      "extract_metrics",
+		"input_filename": strings.TrimSpace(p.InputFilename),
+		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
+		"ms_used":        p.DurationMs,
 	}
-	if procErr == nil {
-		entry["proc-status"] = "success"
+	if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
-		entry["proc-status"] = "failed"
 		entry["proc_status"] = "failed"
-		entry["error"] = strings.TrimSpace(procErr.Error())
+		entry["error"] = strings.TrimSpace(p.ProcErr.Error())
 	}
 
 	replaced := false

@@ -702,13 +702,29 @@ func (p *ProvisionsProcessor) writeProvisionsArtifact(recordID int64, rec DocMet
 	return path, nil
 }
 
+type provisionsStatusParams struct {
+	RecordID      int64
+	FileType      string
+	InputFilename string
+	Start         time.Time
+	DurationMs    int64
+	ProcErr       error
+}
+
 func (p *ProvisionsProcessor) persistProvisionsStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, procErr error) {
 	errMsg := (*string)(nil)
 	if procErr != nil {
 		msg := strings.TrimSpace(procErr.Error())
 		errMsg = &msg
 	}
-	statusRaw, err := appendProvisionsStatus(rec.StatusRaw, start, time.Since(start).Milliseconds(), procErr)
+	statusRaw, err := appendProvisionsStatus(rec.StatusRaw, provisionsStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectProvisionsFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcErr:       procErr,
+	})
 	if err != nil {
 		p.Logger.Error("failed building provisions status", "record_id", rec.ID, "error", err)
 		return
@@ -721,20 +737,31 @@ func (p *ProvisionsProcessor) persistProvisionsStatus(ctx context.Context, rec D
 	}
 }
 
-func appendProvisionsStatus(raw string, start time.Time, durationMs int64, procErr error) (string, error) {
+func detectProvisionsFileType(rec DocMetadataInputRecord) string {
+	for _, candidate := range []string{rec.FileName, rec.StagingFilename, rec.ResultFilename} {
+		ext := strings.ToLower(strings.TrimSpace(filepath.Ext(strings.TrimSpace(candidate))))
+		if ext != "" {
+			return strings.TrimPrefix(ext, ".")
+		}
+	}
+	return ""
+}
+
+func appendProvisionsStatus(raw string, p provisionsStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
 	entry := map[string]any{
-		"operation":  "extract_provisions",
-		"start_time": start.Format(defaultDocMetaStatusTime),
-		"ms-used":    durationMs,
+		"record_id":      strconv.FormatInt(p.RecordID, 10),
+		"file_type":      strings.ToLower(strings.TrimSpace(p.FileType)),
+		"operation":      "extract_provisions",
+		"input_filename": strings.TrimSpace(p.InputFilename),
+		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
+		"ms_used":        p.DurationMs,
 	}
-	if procErr == nil {
-		entry["proc-status"] = "success"
+	if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
-		entry["proc-status"] = "failed"
 		entry["proc_status"] = "failed"
-		entry["error"] = strings.TrimSpace(procErr.Error())
+		entry["error"] = strings.TrimSpace(p.ProcErr.Error())
 	}
 
 	replaced := false

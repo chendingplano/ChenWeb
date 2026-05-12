@@ -351,6 +351,7 @@ func (s *FixedSizeChunkingService) HandleBlockInput(ctx context.Context, recordI
 func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
 	numPages := uniquePages(lines)
 	numLines := len(lines)
+	fileType := detectChunkStatusFileType(rec, inputFilename)
 	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: s.ChunkSize, OverlapPercent: s.OverlapPercent})
 	if err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, 0, start, err)
@@ -414,7 +415,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		return err
 	}
 	if err := deleteSummaryFiles(s.ChunkDir, rec.ID); err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
 
@@ -426,7 +427,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		}
 		summaryText, summaryKeywords, catPath, catNodes, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunkLines, nil)
 		if summaryErr != nil {
-			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, summaryErr)
+			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, summaryErr)
 			return summaryErr
 		}
 		_, regularLines := chunkLineNumbers(chunk)
@@ -442,7 +443,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 			Summary:       sanitizeTopicText(summaryText),
 		}
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
-			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
 		leafSummaries = append(leafSummaries, item)
@@ -452,7 +453,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		return s.generateSummary(ctx, rec.ID, level, seqNo, nil, children)
 	})
 	if err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
 	for _, item := range allSummaries {
@@ -460,26 +461,26 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 			continue
 		}
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
-			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
 	}
 	if err := os.MkdirAll(s.SummaryTreeDir, 0o755); err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
 	if err := removeSummaryTreeRecord(s.SummaryTreeDir, rec.ID); err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
 	for _, item := range allSummaries {
 		if err := writeSummaryTreeEntry(ctx, s.Embedder, s.SummaryEmbeddingModelName, s.Logger, s.SummaryTreeDir, item, item.CategoryPaths, item.CategoryNodes); err != nil {
-			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
 	}
 	if err := s.embedAndWriteSummaries(ctx, rec.ID, allSummaries); err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
+		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
 
@@ -493,14 +494,28 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		return err
 	}
 
-	statusRaw, err := appendChunkedStatus(rec.StatusRaw, chunkStatusParams{
+	statusRaw, err := appendSummariesStatus(rec.StatusRaw, summaryStatusParams{
+		RecordID:      rec.ID,
+		FileType:      fileType,
 		InputFilename: inputFilename,
-		NumPages:      numPages,
-		NumLines:      numLines,
-		NumChunks:     len(chunks),
 		Start:         start,
 		DurationMs:    time.Since(start).Milliseconds(),
 		ProcErr:       nil,
+	})
+	if err != nil {
+		return err
+	}
+	statusRaw, err = appendChunkedStatus(statusRaw, chunkStatusParams{
+		RecordID:        rec.ID,
+		FileType:        fileType,
+		InputFilename:   inputFilename,
+		NumPages:        numPages,
+		NumLines:        numLines,
+		NumLabeledLines: numLines,
+		NumChunks:       len(chunks),
+		Start:           start,
+		DurationMs:      time.Since(start).Milliseconds(),
+		ProcErr:         nil,
 	})
 	if err != nil {
 		return err
@@ -654,13 +669,16 @@ func (s *FixedSizeChunkingService) failAndPersist(
 	procErr error,
 ) {
 	statusRaw, err := appendChunkedStatus(rec.StatusRaw, chunkStatusParams{
-		InputFilename: inputFilename,
-		NumPages:      numPages,
-		NumLines:      numLines,
-		NumChunks:     numChunks,
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       procErr,
+		RecordID:        rec.ID,
+		FileType:        detectChunkStatusFileType(rec, inputFilename),
+		InputFilename:   inputFilename,
+		NumPages:        numPages,
+		NumLines:        numLines,
+		NumLabeledLines: numLines,
+		NumChunks:       numChunks,
+		Start:           start,
+		DurationMs:      time.Since(start).Milliseconds(),
+		ProcErr:         procErr,
 	})
 	if err != nil {
 		s.Logger.Error("failed building chunk status", "record_id", rec.ID, "error", err)
@@ -672,6 +690,53 @@ func (s *FixedSizeChunkingService) failAndPersist(
 		return
 	}
 	s.Logger.Error("chunking failed", "record_id", rec.ID, "error", procErr)
+}
+
+func (s *FixedSizeChunkingService) failAndPersistSummaries(
+	ctx context.Context,
+	rec InputRecord,
+	inputFilename string,
+	numPages int,
+	numLines int,
+	numChunks int,
+	start time.Time,
+	procErr error,
+) {
+	statusRaw, err := appendSummariesStatus(rec.StatusRaw, summaryStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectChunkStatusFileType(rec, inputFilename),
+		InputFilename: inputFilename,
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcErr:       procErr,
+	})
+	if err != nil {
+		s.Logger.Error("failed building summary status", "record_id", rec.ID, "error", err)
+		return
+	}
+	statusRaw, err = appendChunkedStatus(statusRaw, chunkStatusParams{
+		RecordID:        rec.ID,
+		FileType:        detectChunkStatusFileType(rec, inputFilename),
+		InputFilename:   inputFilename,
+		NumPages:        numPages,
+		NumLines:        numLines,
+		NumLabeledLines: numLines,
+		NumChunks:       numChunks,
+		Start:           start,
+		DurationMs:      time.Since(start).Milliseconds(),
+		ProcErr:         procErr,
+	})
+	if err != nil {
+		s.Logger.Error("failed building chunk status", "record_id", rec.ID, "error", err)
+		return
+	}
+
+	errMsg := sanitizeUTF8Text(procErr.Error())
+	if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, &errMsg); updateErr != nil {
+		s.Logger.Error("failed persisting summary failure status", "record_id", rec.ID, "error", updateErr)
+		return
+	}
+	s.Logger.Error("summary generation failed", "record_id", rec.ID, "error", procErr)
 }
 
 const (
@@ -1093,10 +1158,22 @@ func isFormulaType(lineType string) bool {
 }
 
 type chunkStatusParams struct {
+	RecordID        int64
+	FileType        string
+	InputFilename   string
+	NumPages        int
+	NumLines        int
+	NumLabeledLines int
+	NumChunks       int
+	Start           time.Time
+	DurationMs      int64
+	ProcErr         error
+}
+
+type summaryStatusParams struct {
+	RecordID      int64
+	FileType      string
 	InputFilename string
-	NumPages      int
-	NumLines      int
-	NumChunks     int
 	Start         time.Time
 	DurationMs    int64
 	ProcErr       error
@@ -1105,13 +1182,16 @@ type chunkStatusParams struct {
 func appendChunkedStatus(raw string, p chunkStatusParams) (string, error) {
 	entries := decodeStatus(raw)
 	entry := map[string]any{
-		"operation":      "chunked",
-		"input_filename": sanitizeUTF8Text(p.InputFilename),
-		"num_pages":      p.NumPages,
-		"num_lines":      p.NumLines,
-		"num_chunks":     p.NumChunks,
-		"start_time":     p.Start.Format(defaultStatusTime),
-		"ms_used":        p.DurationMs,
+		"record_id":         strconv.FormatInt(p.RecordID, 10),
+		"file_type":         sanitizeUTF8Text(strings.ToLower(strings.TrimSpace(p.FileType))),
+		"operation":         "chunked",
+		"input_filename":    sanitizeUTF8Text(p.InputFilename),
+		"num_pages":         p.NumPages,
+		"num_lines":         p.NumLines,
+		"num_labeled_lines": p.NumLabeledLines,
+		"num_chunks":        p.NumChunks,
+		"start_time":        p.Start.Format(defaultStatusTime),
+		"ms_used":           p.DurationMs,
 	}
 	if p.ProcErr == nil {
 		entry["proc_status"] = "success"
@@ -1142,6 +1222,63 @@ func appendChunkedStatus(raw string, p chunkStatusParams) (string, error) {
 		return "", err
 	}
 	return string(bs), nil
+}
+
+func appendSummariesStatus(raw string, p summaryStatusParams) (string, error) {
+	entries := decodeStatus(raw)
+	entry := map[string]any{
+		"record_id":      strconv.FormatInt(p.RecordID, 10),
+		"file_type":      sanitizeUTF8Text(strings.ToLower(strings.TrimSpace(p.FileType))),
+		"operation":      "generate_summaries",
+		"input_filename": sanitizeUTF8Text(p.InputFilename),
+		"start_time":     p.Start.Format(defaultStatusTime),
+		"ms_used":        p.DurationMs,
+	}
+	if p.ProcErr == nil {
+		entry["proc_status"] = "success"
+	} else {
+		entry["proc_status"] = "failed"
+		entry["error"] = sanitizeUTF8Text(p.ProcErr.Error())
+	}
+
+	replaced := false
+	out := make([]map[string]any, 0, len(entries)+1)
+	for _, e := range entries {
+		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
+		if op != "generate_summaries" {
+			out = append(out, e)
+			continue
+		}
+		if !replaced {
+			out = append(out, entry)
+			replaced = true
+		}
+	}
+	if !replaced {
+		out = append(out, entry)
+	}
+
+	bs, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(bs), nil
+}
+
+func detectChunkStatusFileType(rec InputRecord, inputFilename string) string {
+	candidates := []string{
+		rec.FileName,
+		rec.StagingFilename,
+		rec.ResultFilename,
+		inputFilename,
+	}
+	for _, candidate := range candidates {
+		ext := strings.ToLower(strings.TrimSpace(filepath.Ext(strings.TrimSpace(candidate))))
+		if ext != "" {
+			return strings.TrimPrefix(ext, ".")
+		}
+	}
+	return ""
 }
 
 func decodeStatus(raw string) []map[string]any {

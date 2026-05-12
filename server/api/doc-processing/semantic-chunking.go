@@ -77,13 +77,14 @@ type TopicItem struct {
 }
 
 type topicChunkStatusParams struct {
-	InputFilename string
-	NumPages      int
-	NumLines      int
-	NumChunks     int
-	Start         time.Time
-	DurationMs    int64
-	ProcErr       error
+	RecordID       int64
+	FileType       string
+	InputFilename  string
+	OutputFilename string
+	NumTopics      int
+	Start          time.Time
+	DurationMs     int64
+	ProcErr        error
 }
 
 func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *SemanticChunkingService {
@@ -128,27 +129,27 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 		return err
 	}
 	if s.ModelErr != nil {
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, s.ModelErr)
+		s.failAndPersist(ctx, rec, inputFilename, start, s.ModelErr)
 		return s.ModelErr
 	}
 	if s.PromptErr != nil {
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, fmt.Errorf("(MID_26042440) load topic chunk prompt %q failed: %w", s.PromptRef, s.PromptErr))
+		s.failAndPersist(ctx, rec, inputFilename, start, fmt.Errorf("(MID_26042440) load topic chunk prompt %q failed: %w", s.PromptRef, s.PromptErr))
 		return s.PromptErr
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
 		procErr := errors.New("(MID_26042105) missing ARTIFACT_DIR")
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(inputFilename) == "" {
 		procErr := errors.New("(MID_26042106) missing input filename")
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
 
 	lines, err := ParseSemanticInputLines(inputFile)
 	if err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, err)
+		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}
 	return s.handleSemanticLines(ctx, rec, inputFilename, start, lines)
@@ -178,21 +179,21 @@ func (s *SemanticChunkingService) HandleBlockInput(ctx context.Context, recordID
 		return err
 	}
 	if s.ModelErr != nil {
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, s.ModelErr)
+		s.failAndPersist(ctx, rec, inputFilename, start, s.ModelErr)
 		return s.ModelErr
 	}
 	if s.PromptErr != nil {
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, fmt.Errorf("(MID_26050624) load topic chunk prompt %q failed: %w", s.PromptRef, s.PromptErr))
+		s.failAndPersist(ctx, rec, inputFilename, start, fmt.Errorf("(MID_26050624) load topic chunk prompt %q failed: %w", s.PromptRef, s.PromptErr))
 		return s.PromptErr
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
 		procErr := errors.New("(MID_26050625) missing ARTIFACT_DIR")
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
 	if strings.TrimSpace(inputFilename) == "" {
 		procErr := errors.New("(MID_26050626) missing input filename")
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
+		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
 
@@ -204,16 +205,13 @@ func (s *SemanticChunkingService) HandleBlockInput(ctx context.Context, recordID
 // persistence for a pre-parsed set of lines. Called by both HandleInput
 // (after ParseSemanticInputLines) and HandleBlockInput (after ParseBlockBufferLines).
 func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
-	numPages := uniquePages(lines)
-	numLines := len(lines)
-
 	blocks := BuildSemanticPageBlocks(lines, s.FileBlockSize)
 	topics := make([]TopicItem, 0, 128)
 	seqNo := 1
 	for _, block := range blocks {
 		blockTopics, blockErr := s.extractTopicsForBlock(ctx, block, seqNo)
 		if blockErr != nil {
-			s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(topics), start, blockErr)
+			s.failAndPersist(ctx, rec, inputFilename, start, blockErr)
 			return blockErr
 		}
 		topics = append(topics, blockTopics...)
@@ -222,7 +220,7 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 	topics = dedupeTopicItems(topics)
 
 	if err := writeTopicsCategoryTree(s.Logger, s.ChunkDir, rec.ID, topics); err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(topics), start, err)
+		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}
 
@@ -237,18 +235,21 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		OverlapPercent: overlapPercent,
 		Notes:          "semantic topic chunking with 1-page overlap",
 	}); err != nil {
-		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(topics), start, err)
+		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}
 
+	groupID := rec.ID / 1000
+	outputFilename := filepath.Join(s.ChunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(rec.ID, 10), "topics.txt")
 	statusRaw, err := appendTopicChunkStatus(rec.StatusRaw, topicChunkStatusParams{
-		InputFilename: inputFilename,
-		NumPages:      numPages,
-		NumLines:      numLines,
-		NumChunks:     len(topics),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       nil,
+		RecordID:       rec.ID,
+		FileType:       strings.TrimPrefix(strings.ToLower(filepath.Ext(inputFilename)), "."),
+		InputFilename:  inputFilename,
+		OutputFilename: outputFilename,
+		NumTopics:      len(topics),
+		Start:          start,
+		DurationMs:     time.Since(start).Milliseconds(),
+		ProcErr:        nil,
 	})
 	if err != nil {
 		return err
@@ -259,8 +260,6 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 
 	s.Logger.Info("semantic chunking completed",
 		"record_id", rec.ID,
-		"num_pages", numPages,
-		"num_lines", numLines,
 		"num_topics", len(topics),
 		"chunk_dir", s.ChunkDir,
 		"model_name", s.ModelName,
@@ -637,13 +636,14 @@ func readLeafRowsExcludingRecord(path string, recordID int64) ([]string, bool, e
 func appendTopicChunkStatus(raw string, p topicChunkStatusParams) (string, error) {
 	entries := decodeStatus(raw)
 	entry := map[string]any{
-		"operation":      "topic_chunk",
-		"input_filename": strings.TrimSpace(p.InputFilename),
-		"num_pages":      p.NumPages,
-		"num_lines":      p.NumLines,
-		"num_chunks":     p.NumChunks,
-		"ms_used":        p.DurationMs,
-		"start_time":     p.Start.Format(defaultSemanticChunkStatusTS),
+		"record_id":       p.RecordID,
+		"file_type":       p.FileType,
+		"operation":       "generate_topics",
+		"input_filename":  strings.TrimSpace(p.InputFilename),
+		"output_filename": strings.TrimSpace(p.OutputFilename),
+		"num_topics":      p.NumTopics,
+		"ms_used":         p.DurationMs,
+		"start_time":      p.Start.Format(defaultSemanticChunkStatusTS),
 	}
 	if p.ProcErr == nil {
 		entry["proc_status"] = "success"
@@ -656,7 +656,7 @@ func appendTopicChunkStatus(raw string, p topicChunkStatusParams) (string, error
 	out := make([]map[string]any, 0, len(entries)+1)
 	for _, e := range entries {
 		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
-		if op != "topic_chunk" {
+		if op != "generate_topics" {
 			out = append(out, e)
 			continue
 		}
@@ -680,17 +680,13 @@ func (s *SemanticChunkingService) failAndPersist(
 	ctx context.Context,
 	rec InputRecord,
 	inputFilename string,
-	numPages int,
-	numLines int,
-	numChunks int,
 	start time.Time,
 	procErr error,
 ) {
 	statusRaw, err := appendTopicChunkStatus(rec.StatusRaw, topicChunkStatusParams{
+		RecordID:      rec.ID,
+		FileType:      strings.TrimPrefix(strings.ToLower(filepath.Ext(inputFilename)), "."),
 		InputFilename: inputFilename,
-		NumPages:      numPages,
-		NumLines:      numLines,
-		NumChunks:     numChunks,
 		Start:         start,
 		DurationMs:    time.Since(start).Milliseconds(),
 		ProcErr:       procErr,

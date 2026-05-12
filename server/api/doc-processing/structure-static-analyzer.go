@@ -59,6 +59,8 @@ type staticAnalyzeResult struct {
 }
 
 type staticStatusParams struct {
+	RecordID        int64
+	FileType        string
 	InputFilename   string
 	NumPages        int
 	NumLines        int
@@ -139,6 +141,8 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 	}
 
 	statusRaw, err := appendStaticAnalyzerStatus(rec.StatusRaw, staticStatusParams{
+		RecordID:        rec.ID,
+		FileType:        detectStaticStatusFileType(rec, inputFilename),
 		InputFilename:   inputFilename,
 		NumPages:        out.NumPages,
 		NumLines:        out.NumLines,
@@ -1073,26 +1077,28 @@ func applyStaticListLabels(lines []staticInputLine, corrected map[int]string) {
 func appendStaticAnalyzerStatus(raw string, p staticStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
 	entry := map[string]any{
-		"operation":         "static_analyzer",
-		"input_filename":    strings.TrimSpace(p.InputFilename),
-		"num_pages":         p.NumPages,
-		"num_lines":         p.NumLines,
-		"num_labeled_lines": p.NumLabeledLines,
-		"start_time":        p.Start.Format(defaultDocMetaStatusTime),
-		"ms_used":           p.DurationMs,
+		"record_id":      strconv.FormatInt(p.RecordID, 10),
+		"file_type":      sanitizeUTF8Text(strings.ToLower(strings.TrimSpace(p.FileType))),
+		"operation":      "static_analzyer",
+		"input_filename": sanitizeUTF8Text(p.InputFilename),
+		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
+		"ms_used":        p.DurationMs,
 	}
 	if p.ProcErr == nil {
 		entry["proc_status"] = "success"
+		entry["num_pages"] = p.NumPages
+		entry["num_lines"] = p.NumLines
+		entry["num_labeled_lines"] = p.NumLabeledLines
 	} else {
 		entry["proc_status"] = "failed"
-		entry["error"] = strings.TrimSpace(p.ProcErr.Error())
+		entry["error"] = sanitizeUTF8Text(p.ProcErr.Error())
 	}
 
 	replaced := false
 	out := make([]map[string]any, 0, len(entries)+1)
 	for _, e := range entries {
 		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
-		if op != "static_analyzer" && op != "static-analyzer" {
+		if op != "static_analyzer" && op != "static-analyzer" && op != "static_analzyer" {
 			out = append(out, e)
 			continue
 		}
@@ -1111,6 +1117,22 @@ func appendStaticAnalyzerStatus(raw string, p staticStatusParams) (string, error
 	return string(bs), nil
 }
 
+func detectStaticStatusFileType(rec DocMetadataInputRecord, inputFilename string) string {
+	candidates := []string{
+		rec.FileName,
+		rec.StagingFilename,
+		rec.ResultFilename,
+		inputFilename,
+	}
+	for _, candidate := range candidates {
+		ext := strings.ToLower(strings.TrimSpace(filepath.Ext(strings.TrimSpace(candidate))))
+		if ext != "" {
+			return strings.TrimPrefix(ext, ".")
+		}
+	}
+	return ""
+}
+
 func (p *StaticAnalyzerProcessor) failAndPersist(
 	ctx context.Context,
 	rec DocMetadataInputRecord,
@@ -1122,6 +1144,8 @@ func (p *StaticAnalyzerProcessor) failAndPersist(
 	procErr error,
 ) error {
 	statusRaw, err := appendStaticAnalyzerStatus(rec.StatusRaw, staticStatusParams{
+		RecordID:        rec.ID,
+		FileType:        detectStaticStatusFileType(rec, inputFilename),
 		InputFilename:   inputFilename,
 		NumPages:        numPages,
 		NumLines:        numLines,

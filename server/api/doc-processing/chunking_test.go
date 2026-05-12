@@ -372,15 +372,48 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	if err := json.Unmarshal([]byte(st.updatedStatus), &status); err != nil {
 		t.Fatalf("status json: %v", err)
 	}
-	if len(status) == 0 {
-		t.Fatalf("expected status entry")
+	if len(status) < 2 {
+		t.Fatalf("expected summary and chunk status entries, got %d", len(status))
 	}
-	last := status[len(status)-1]
-	if last["operation"] != "chunked" {
-		t.Fatalf("operation=%v, want chunked", last["operation"])
+	var summaryStatus map[string]any
+	var chunkStatus map[string]any
+	for _, entry := range status {
+		switch entry["operation"] {
+		case "generate_summaries":
+			summaryStatus = entry
+		case "chunked":
+			chunkStatus = entry
+		}
 	}
-	if last["proc_status"] != "success" {
-		t.Fatalf("proc_status=%v, want success", last["proc_status"])
+	if summaryStatus == nil {
+		t.Fatalf("missing generate_summaries status entry: %#v", status)
+	}
+	if summaryStatus["record_id"] != "7523" {
+		t.Fatalf("summary record_id=%v, want 7523", summaryStatus["record_id"])
+	}
+	if summaryStatus["file_type"] != "pdf" {
+		t.Fatalf("summary file_type=%v, want pdf", summaryStatus["file_type"])
+	}
+	if summaryStatus["proc_status"] != "success" {
+		t.Fatalf("summary proc_status=%v, want success", summaryStatus["proc_status"])
+	}
+	if summaryStatus["input_filename"] != "sample.txt" {
+		t.Fatalf("summary input_filename=%v, want sample.txt", summaryStatus["input_filename"])
+	}
+	if chunkStatus == nil {
+		t.Fatalf("missing chunked status entry: %#v", status)
+	}
+	if chunkStatus["record_id"] != "7523" {
+		t.Fatalf("chunk record_id=%v, want 7523", chunkStatus["record_id"])
+	}
+	if chunkStatus["file_type"] != "pdf" {
+		t.Fatalf("chunk file_type=%v, want pdf", chunkStatus["file_type"])
+	}
+	if chunkStatus["proc_status"] != "success" {
+		t.Fatalf("chunk proc_status=%v, want success", chunkStatus["proc_status"])
+	}
+	if got := int(toFloat(chunkStatus["num_labeled_lines"])); got != 3 {
+		t.Fatalf("num_labeled_lines=%d, want 3", got)
 	}
 }
 
@@ -615,18 +648,41 @@ func TestService_HandleInput_SummaryGenerationFailure(t *testing.T) {
 	if st.updatedError == nil || !strings.Contains(*st.updatedError, "summary generator boom") {
 		t.Fatalf("expected persisted summary generation error, got %v", st.updatedError)
 	}
+	var status []map[string]any
+	if err := json.Unmarshal([]byte(st.updatedStatus), &status); err != nil {
+		t.Fatalf("status json: %v", err)
+	}
+	var summaryStatus map[string]any
+	for _, entry := range status {
+		if entry["operation"] == "generate_summaries" {
+			summaryStatus = entry
+			break
+		}
+	}
+	if summaryStatus == nil {
+		t.Fatalf("missing generate_summaries failure status: %#v", status)
+	}
+	if summaryStatus["proc_status"] != "failed" {
+		t.Fatalf("summary proc_status=%v, want failed", summaryStatus["proc_status"])
+	}
+	if !strings.Contains(asString(summaryStatus["error"]), "summary generator boom") {
+		t.Fatalf("summary error=%v, want summary generator boom", summaryStatus["error"])
+	}
 }
 
 func TestAppendChunkedStatus_SanitizesInvalidUTF8Error(t *testing.T) {
 	rawErr := errors.New(string([]byte{'b', 'a', 'd', ':', ' ', 0xe4, 0x2e, 0x6d}))
 	statusRaw, err := appendChunkedStatus("[]", chunkStatusParams{
-		InputFilename: "sample.txt",
-		NumPages:      1,
-		NumLines:      2,
-		NumChunks:     1,
-		Start:         time.Unix(0, 0),
-		DurationMs:    12,
-		ProcErr:       rawErr,
+		RecordID:        42,
+		FileType:        "pdf",
+		InputFilename:   "sample.txt",
+		NumPages:        1,
+		NumLines:        2,
+		NumLabeledLines: 2,
+		NumChunks:       1,
+		Start:           time.Unix(0, 0),
+		DurationMs:      12,
+		ProcErr:         rawErr,
 	})
 	if err != nil {
 		t.Fatalf("appendChunkedStatus: %v", err)
@@ -639,6 +695,20 @@ func TestAppendChunkedStatus_SanitizesInvalidUTF8Error(t *testing.T) {
 	}
 	if !strings.Contains(statusRaw, "bad: ") {
 		t.Fatalf("expected sanitized error message in status JSON: %q", statusRaw)
+	}
+	var status []map[string]any
+	if err := json.Unmarshal([]byte(statusRaw), &status); err != nil {
+		t.Fatalf("unmarshal status JSON: %v", err)
+	}
+	last := status[len(status)-1]
+	if last["record_id"] != "42" {
+		t.Fatalf("record_id=%v, want 42", last["record_id"])
+	}
+	if last["file_type"] != "pdf" {
+		t.Fatalf("file_type=%v, want pdf", last["file_type"])
+	}
+	if got := int(toFloat(last["num_labeled_lines"])); got != 2 {
+		t.Fatalf("num_labeled_lines=%d, want 2", got)
 	}
 }
 

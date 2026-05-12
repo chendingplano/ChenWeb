@@ -3,6 +3,7 @@ package docprocessing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,7 @@ func TestStaticAnalyzer_SuccessWritesCorrectedAndStatus(t *testing.T) {
 		ParserName:      "opendata",
 		ResultFilename:  filepath.Join(tmp, "ocr_rslt_9001.json"),
 		StagingFilename: filepath.Join(tmp, "ocr_rslt_9001.pdf"),
+		FileName:        "source.pdf",
 		StatusRaw:       "[]",
 	}}
 	p := NewStaticAnalyzerProcessor(store, nil)
@@ -57,8 +59,14 @@ func TestStaticAnalyzer_SuccessWritesCorrectedAndStatus(t *testing.T) {
 		t.Fatalf("status len=%d, want 1", len(status))
 	}
 	row := status[0]
-	if got := strings.TrimSpace(asString(row["operation"])); got != "static_analyzer" {
-		t.Fatalf("operation=%q, want static_analyzer", got)
+	if got := strings.TrimSpace(asString(row["record_id"])); got != "9001" {
+		t.Fatalf("record_id=%q, want 9001", got)
+	}
+	if got := strings.TrimSpace(asString(row["file_type"])); got != "pdf" {
+		t.Fatalf("file_type=%q, want pdf", got)
+	}
+	if got := strings.TrimSpace(asString(row["operation"])); got != "static_analzyer" {
+		t.Fatalf("operation=%q, want static_analzyer", got)
 	}
 	if got := strings.TrimSpace(asString(row["proc_status"])); got != "success" {
 		t.Fatalf("proc_status=%q, want success", got)
@@ -118,8 +126,10 @@ func TestStaticAnalyzer_MissingArtifactDirFailsFast(t *testing.T) {
 
 func TestStaticAnalyzer_StatusReplacesExistingEntry(t *testing.T) {
 	start := time.Date(2026, 4, 23, 10, 0, 0, 0, time.UTC)
-	raw := `[{"operation":"static-analyzer","proc_status":"failed"},{"operation":"chunking","proc_status":"success"}]`
+	raw := `[{"operation":"static_analyzer","proc_status":"failed"},{"operation":"chunking","proc_status":"success"}]`
 	got, err := appendStaticAnalyzerStatus(raw, staticStatusParams{
+		RecordID:        42,
+		FileType:        "pdf",
 		InputFilename:   "x.txt",
 		NumPages:        2,
 		NumLines:        5,
@@ -138,11 +148,58 @@ func TestStaticAnalyzer_StatusReplacesExistingEntry(t *testing.T) {
 	if len(arr) != 2 {
 		t.Fatalf("status len=%d, want 2", len(arr))
 	}
-	if strings.TrimSpace(asString(arr[0]["operation"])) != "static_analyzer" {
-		t.Fatalf("first operation=%q, want static_analyzer", asString(arr[0]["operation"]))
+	if strings.TrimSpace(asString(arr[0]["record_id"])) != "42" {
+		t.Fatalf("first record_id=%q, want 42", asString(arr[0]["record_id"]))
+	}
+	if strings.TrimSpace(asString(arr[0]["file_type"])) != "pdf" {
+		t.Fatalf("first file_type=%q, want pdf", asString(arr[0]["file_type"]))
+	}
+	if strings.TrimSpace(asString(arr[0]["operation"])) != "static_analzyer" {
+		t.Fatalf("first operation=%q, want static_analzyer", asString(arr[0]["operation"]))
 	}
 	if strings.TrimSpace(asString(arr[0]["proc_status"])) != "success" {
 		t.Fatalf("first proc_status=%q, want success", asString(arr[0]["proc_status"]))
+	}
+}
+
+func TestStaticAnalyzer_FailureStatusOmitsSuccessOnlyCounts(t *testing.T) {
+	start := time.Date(2026, 4, 23, 10, 0, 0, 0, time.UTC)
+	got, err := appendStaticAnalyzerStatus("[]", staticStatusParams{
+		RecordID:        7,
+		FileType:        "docx",
+		InputFilename:   "broken.txt",
+		NumPages:        2,
+		NumLines:        5,
+		NumLabeledLines: 4,
+		Start:           start,
+		DurationMs:      12,
+		ProcErr:         errors.New("boom"),
+	})
+	if err != nil {
+		t.Fatalf("appendStaticAnalyzerStatus: %v", err)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(got), &arr); err != nil {
+		t.Fatalf("status json: %v", err)
+	}
+	if len(arr) != 1 {
+		t.Fatalf("status len=%d, want 1", len(arr))
+	}
+	row := arr[0]
+	if strings.TrimSpace(asString(row["operation"])) != "static_analzyer" {
+		t.Fatalf("operation=%q, want static_analzyer", asString(row["operation"]))
+	}
+	if strings.TrimSpace(asString(row["proc_status"])) != "failed" {
+		t.Fatalf("proc_status=%q, want failed", asString(row["proc_status"]))
+	}
+	if _, ok := row["num_pages"]; ok {
+		t.Fatalf("num_pages should be omitted on failure, got %v", row["num_pages"])
+	}
+	if _, ok := row["num_lines"]; ok {
+		t.Fatalf("num_lines should be omitted on failure, got %v", row["num_lines"])
+	}
+	if _, ok := row["num_labeled_lines"]; ok {
+		t.Fatalf("num_labeled_lines should be omitted on failure, got %v", row["num_labeled_lines"])
 	}
 }
 

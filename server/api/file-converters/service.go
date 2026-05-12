@@ -312,22 +312,79 @@ func hasTopLevelKids(path string) bool {
 		return false
 	}
 	defer f.Close()
+	return streamingHasTopLevelArrayKey(f, "kids")
+}
 
-	raw, err := io.ReadAll(io.LimitReader(f, 8*1024*1024))
+// streamingHasTopLevelArrayKey scans a JSON object stream to check whether the
+// named key exists at the top level and its value is a JSON array. It reads
+// only as far as the target key, so large files (>8 MB) are handled correctly.
+func streamingHasTopLevelArrayKey(r io.Reader, targetKey string) bool {
+	dec := json.NewDecoder(r)
+
+	tok, err := dec.Token()
 	if err != nil {
 		return false
 	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return false
+	}
 
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &top); err != nil {
-		return false
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return false
+		}
+		if key == targetKey {
+			valTok, err := dec.Token()
+			if err != nil {
+				return false
+			}
+			delim, ok := valTok.(json.Delim)
+			return ok && delim == '['
+		}
+		if err := skipJSONValue(dec); err != nil {
+			return false
+		}
 	}
-	kids, ok := top["kids"]
-	if !ok {
-		return false
+	return false
+}
+
+// skipJSONValue advances dec past the next complete JSON value. dec must have
+// already consumed the opening delimiter for container types before calling.
+func skipJSONValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
 	}
-	var arr []any
-	return json.Unmarshal(kids, &arr) == nil
+	switch v := tok.(type) {
+	case json.Delim:
+		switch v {
+		case '{':
+			for dec.More() {
+				if err := skipJSONValue(dec); err != nil { // key
+					return err
+				}
+				if err := skipJSONValue(dec); err != nil { // value
+					return err
+				}
+			}
+			_, err = dec.Token() // '}'
+			return err
+		case '[':
+			for dec.More() {
+				if err := skipJSONValue(dec); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token() // ']'
+			return err
+		}
+	}
+	return nil
 }
 
 func preferredOpenDataJSONName(path string) string {

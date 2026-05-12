@@ -133,11 +133,13 @@ func TestMetricsProcessor_ExtractsFromChunkFilesAndWritesStatus(t *testing.T) {
 		t.Fatalf("write line file: %v", err)
 	}
 
+	resultFilename := filepath.Join(tmp, "ocr_rslt_2005.json")
+	stagingFilename := filepath.Join(tmp, "ocr_rslt_2005.pdf")
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              recordID,
 		ParserName:      "opendata",
-		ResultFilename:  filepath.Join(tmp, "ocr_rslt_2005.json"),
-		StagingFilename: filepath.Join(tmp, "ocr_rslt_2005.pdf"),
+		ResultFilename:  resultFilename,
+		StagingFilename: stagingFilename,
 		StatusRaw:       "[]",
 	}}
 	metricsStore := &fakeMetricsStore{}
@@ -188,6 +190,24 @@ func TestMetricsProcessor_ExtractsFromChunkFilesAndWritesStatus(t *testing.T) {
 	}
 	if strings.TrimSpace(asString(last["proc_status"])) != "success" {
 		t.Fatalf("proc_status=%v", last["proc_status"])
+	}
+	if strings.TrimSpace(asString(last["record_id"])) != "2005" {
+		t.Fatalf("record_id=%v", last["record_id"])
+	}
+	if strings.TrimSpace(asString(last["file_type"])) != "pdf" {
+		t.Fatalf("file_type=%v", last["file_type"])
+	}
+	if strings.TrimSpace(asString(last["input_filename"])) != resultFilename {
+		t.Fatalf("input_filename=%v, want %v", last["input_filename"], resultFilename)
+	}
+	if _, ok := last["ms_used"]; !ok {
+		t.Fatalf("ms_used missing from status entry")
+	}
+	if _, present := last["ms-used"]; present {
+		t.Fatalf("legacy ms-used key must not be present")
+	}
+	if _, present := last["proc-status"]; present {
+		t.Fatalf("legacy proc-status key must not be present")
 	}
 }
 
