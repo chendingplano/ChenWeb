@@ -22,6 +22,7 @@ export type SummaryRecordCard = {
 	pdfFileName: string;
 	keywords: string[];
 	summaryText: string;
+	categoryPaths?: string[];
 	inputId: number;
 	page: number;
 	coords: number[];

@@ -18,14 +18,15 @@ import (
 )
 
 type summaryCategoryRecord struct {
-	ID          string                `json:"id"`
-	PdfFileName string                `json:"pdfFileName"`
-	Keywords    []string              `json:"keywords"`
-	SummaryText string                `json:"summaryText"`
-	InputID     int64                 `json:"inputId"`
-	Page        int                   `json:"page"`
-	Coords      []float64             `json:"coords"`
-	Targets     []summaryRecordTarget `json:"targets"`
+	ID            string                `json:"id"`
+	PdfFileName   string                `json:"pdfFileName"`
+	Keywords      []string              `json:"keywords"`
+	SummaryText   string                `json:"summaryText"`
+	CategoryPaths []string              `json:"categoryPaths,omitempty"`
+	InputID       int64                 `json:"inputId"`
+	Page          int                   `json:"page"`
+	Coords        []float64             `json:"coords"`
+	Targets       []summaryRecordTarget `json:"targets"`
 }
 
 type getSummaryCategoryResponse struct {
@@ -53,13 +54,14 @@ type summaryRecordTarget struct {
 }
 
 type parsedSummaryFile struct {
-	summaryID   string
-	recordID    int64
-	level       int
-	seqNo       int
-	keywords    []string
-	summaryText string
-	lines       []string
+	summaryID     string
+	recordID      int64
+	level         int
+	seqNo         int
+	keywords      []string
+	categoryPaths []string
+	summaryText   string
+	lines         []string
 }
 
 func GetSummaryCategory(c echo.Context) error {
@@ -168,14 +170,15 @@ func readSummaryCategoryRecords(summaryTreeDir string, categoryPath string) ([]s
 		page, coords := firstSummaryTarget(targets)
 
 		results = append(results, summaryCategoryRecord{
-			ID:          parsed.summaryID,
-			PdfFileName: filepath.Base(strings.TrimSpace(meta.fileName)),
-			Keywords:    append([]string(nil), parsed.keywords...),
-			SummaryText: parsed.summaryText,
-			InputID:     recordID,
-			Page:        page,
-			Coords:      coords,
-			Targets:     targets,
+			ID:            parsed.summaryID,
+			PdfFileName:   filepath.Base(strings.TrimSpace(meta.fileName)),
+			Keywords:      append([]string(nil), parsed.keywords...),
+			SummaryText:   parsed.summaryText,
+			CategoryPaths: append([]string(nil), parsed.categoryPaths...),
+			InputID:       recordID,
+			Page:          page,
+			Coords:        coords,
+			Targets:       targets,
 		})
 	}
 
@@ -219,7 +222,7 @@ func readSummaryArtifactFile(path string) (parsedSummaryFile, error) {
 		return parsedSummaryFile{}, err
 	}
 
-	out := parsedSummaryFile{keywords: []string{}, lines: []string{}}
+	out := parsedSummaryFile{keywords: []string{}, categoryPaths: []string{}, lines: []string{}}
 	scanner := bufio.NewScanner(strings.NewReader(string(body)))
 	scanner.Buffer(make([]byte, 1024), 8*1024*1024)
 
@@ -251,6 +254,8 @@ func readSummaryArtifactFile(path string) (parsedSummaryFile, error) {
 			out.lines = parseQuotedStringArray(strings.TrimSpace(strings.TrimPrefix(trimmed, "lines:")))
 		case strings.HasPrefix(trimmed, "keywords:"):
 			out.keywords = parseQuotedStringArray(strings.TrimSpace(strings.TrimPrefix(trimmed, "keywords:")))
+		case strings.HasPrefix(trimmed, "category_paths:"):
+			out.categoryPaths = parseQuotedStringArray(strings.TrimSpace(strings.TrimPrefix(trimmed, "category_paths:")))
 		}
 	}
 	if err := scanner.Err(); err != nil {

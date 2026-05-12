@@ -462,9 +462,6 @@
 																<div
 																	class="category-path-segments"
 																	use:trackPathOverflow={categoryPath.path}
-																	title={truncatedCategoryPaths[categoryPath.path]
-																		? categoryPath.path
-																		: undefined}
 																>
 																	{#each categoryPath.segments as segment, segmentIdx (`${segment.path}-${segmentIdx}`)}
 																		<span class="keyword-chip category-path-chip" title={segment.tooltip}
@@ -475,6 +472,9 @@
 																		{/if}
 																	{/each}
 																</div>
+																{#if truncatedCategoryPaths[categoryPath.path]}
+																	<span class="category-path-ellipsis" title={categoryPath.path}>…</span>
+																{/if}
 																{#if categoryPath.confidenceLabel}
 																	<span class="category-path-confidence"
 																		>{categoryPath.confidenceLabel}</span
@@ -659,10 +659,11 @@
 	.keyword-chip { display: inline-flex; align-items: center; padding: 0.32rem 0.58rem; border-radius: 999px; border: 1px solid rgba(74, 222, 128, 0.22); background: rgba(13, 148, 136, 0.12); font-size: 0.78rem; color: #6ee7b7; }
 	.category-path-list { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
 	.category-path-row { min-width: 0; }
-	.category-path-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.6rem; min-width: 0; }
-	.category-path-segments { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-	.category-path-chip { max-width: 100%; vertical-align: middle; }
-	.category-path-separator { display: inline-block; margin: 0 0.32rem; color: var(--muted); vertical-align: middle; }
+	.category-path-line { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+	.category-path-segments { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; }
+	.category-path-chip { vertical-align: middle; }
+	.category-path-separator { display: inline-block; margin: 0 0.28rem; color: var(--muted); vertical-align: middle; }
+	.category-path-ellipsis { flex: none; cursor: help; font-size: 0.82rem; font-weight: 700; color: var(--muted); user-select: none; letter-spacing: 0.04em; }
 	.category-path-confidence { flex: none; font-size: 0.76rem; font-weight: 700; color: var(--muted); }
 
 	.pdf-fallback-frame { margin-top: 0.85rem; width: 100%; min-height: 540px; flex: 1; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px; background: white; }

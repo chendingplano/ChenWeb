@@ -3,10 +3,17 @@
 	import Rows3Icon from '@lucide/svelte/icons/rows-3';
 	import {
 		getRecordSummaries,
-		type KbInputRecord
+		listSummaryGraph,
+		type KbInputRecord,
+		type TopicCategoryNodeApi
 	} from '$lib/services/kbService';
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
+	import {
+		buildTopicCategoryMetadataByPath,
+		buildTopicCategoryPathDisplay,
+		type TopicCategoryPathMetadata
+	} from './topic-category-paths';
 	import {
 		createSummaryTreeState,
 		selectRecordSummaryTarget,
@@ -32,6 +39,9 @@
 	let summaryLoadingByRecordId = $state<Record<number, boolean>>({});
 	let recordCache = $state<Record<number, SummaryTreeRecord>>({});
 	let treeState = $state(createSummaryTreeState());
+	let categoryMetadataByPath = $state<Record<string, TopicCategoryPathMetadata>>({});
+	let categoryMetadataLoaded = $state(false);
+	let truncatedCategoryPaths = $state<Record<string, boolean>>({});
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
@@ -45,6 +55,11 @@
 	let viewerInputId = $derived(treeState.selectedPdfTarget?.inputId ?? activeRecord?.id ?? null);
 	let viewerFileUrl = $derived(viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : '');
 	let viewerIsPdf = $derived((activeRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf'));
+	let selectedSummaryCategoryPaths = $derived(
+		selectedSummary?.categoryPaths?.map((path) =>
+			buildTopicCategoryPathDisplay(path, categoryMetadataByPath)
+		) ?? []
+	);
 
 	type SummaryPdfViewport = {
 		convertToViewportRectangle: (rect: number[]) => number[];
@@ -130,6 +145,12 @@
 		}
 	});
 
+	$effect(() => {
+		if (!categoryMetadataLoaded) {
+			void ensureCategoryMetadata();
+		}
+	});
+
 	async function ensureRecordSummaries(recordId: number) {
 		const current = recordCache[recordId];
 		if (!current || current.summaries.length > 0 || summaryLoadingByRecordId[recordId]) return;
@@ -163,6 +184,41 @@
 		} finally {
 			summaryLoadingByRecordId = { ...summaryLoadingByRecordId, [recordId]: false };
 		}
+	}
+
+	async function ensureCategoryMetadata() {
+		if (categoryMetadataLoaded) return;
+		categoryMetadataLoaded = true;
+		try {
+			const response = await listSummaryGraph();
+			categoryMetadataByPath = buildTopicCategoryMetadataByPath(
+				(response.results ?? []) as unknown as TopicCategoryNodeApi[]
+			);
+		} catch (error) {
+			console.warn('failed to load summary category metadata', error);
+		}
+	}
+
+	function trackPathOverflow(node: HTMLElement, pathKey: string) {
+		let currentPathKey = pathKey;
+		const update = () => {
+			const next = node.scrollWidth > node.clientWidth + 1;
+			if (truncatedCategoryPaths[currentPathKey] !== next) {
+				truncatedCategoryPaths = { ...truncatedCategoryPaths, [currentPathKey]: next };
+			}
+		};
+		const resizeObserver = new ResizeObserver(update);
+		resizeObserver.observe(node);
+		queueMicrotask(update);
+		return {
+			update(nextPathKey: string) {
+				currentPathKey = nextPathKey;
+				queueMicrotask(update);
+			},
+			destroy() {
+				resizeObserver.disconnect();
+			}
+		};
 	}
 
 	function handleRecordSelect(record: KbInputRecord) {
@@ -346,6 +402,42 @@
 											</div>
 										</div>
 										<div class="topic-sidebar-block">
+											<div class="topic-sidebar-label">Category Paths</div>
+											{#if selectedSummaryCategoryPaths.length > 0}
+												<div class="category-path-list">
+													{#each selectedSummaryCategoryPaths as categoryPath, idx (`${categoryPath.path}-${idx}`)}
+														<div class="category-path-row">
+															<div class="category-path-line">
+																<div
+																	class="category-path-segments"
+																	use:trackPathOverflow={categoryPath.path}
+																>
+																	{#each categoryPath.segments as segment, segmentIdx (`${segment.path}-${segmentIdx}`)}
+																		<span class="keyword-chip category-path-chip" title={segment.tooltip}
+																			>{segment.label}</span
+																		>
+																		{#if segmentIdx < categoryPath.segments.length - 1}
+																			<span class="category-path-separator">/</span>
+																		{/if}
+																	{/each}
+																</div>
+																{#if truncatedCategoryPaths[categoryPath.path]}
+																	<span class="category-path-ellipsis" title={categoryPath.path}>…</span>
+																{/if}
+																{#if categoryPath.confidenceLabel}
+																	<span class="category-path-confidence"
+																		>{categoryPath.confidenceLabel}</span
+																	>
+																{/if}
+															</div>
+														</div>
+													{/each}
+												</div>
+											{:else}
+												<p class="topic-sidebar-copy muted">No category paths assigned.</p>
+											{/if}
+										</div>
+										<div class="topic-sidebar-block">
 											<div class="topic-sidebar-label">Summary</div>
 											<p class="topic-sidebar-copy">{selectedSummary.summaryText}</p>
 										</div>
@@ -504,6 +596,17 @@
 	.pdf-fallback-frame { margin-top: 0.85rem; width: 100%; min-height: 540px; flex: 1; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px; background: white; }
 
 	:global(.pdf-highlight) { position: absolute; background: rgba(129, 140, 248, 0.25); outline: 1px solid rgba(129, 140, 248, 0.8); border-radius: 2px; }
+
+	.keyword-chip { display: inline-flex; align-items: center; padding: 0.32rem 0.58rem; border-radius: 999px; border: 1px solid rgba(165, 180, 252, 0.22); background: rgba(99, 102, 241, 0.12); font-size: 0.78rem; color: #c7d2fe; }
+	.category-path-list { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
+	.category-path-row { min-width: 0; }
+	.category-path-line { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+	.category-path-segments { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; }
+	.category-path-chip { vertical-align: middle; }
+	.category-path-separator { display: inline-block; margin: 0 0.28rem; color: var(--muted); vertical-align: middle; }
+	.category-path-ellipsis { flex: none; cursor: help; font-size: 0.82rem; font-weight: 700; color: var(--muted); user-select: none; letter-spacing: 0.04em; }
+	.category-path-confidence { flex: none; font-size: 0.76rem; font-weight: 700; color: var(--muted); }
+	.topic-sidebar-copy.muted { color: var(--muted); }
 
 	@media (max-width: 980px) {
 		.workspace, .detail-grid { grid-template-columns: minmax(0, 1fr); }
