@@ -172,7 +172,7 @@ func validateSubjectPayload(subject string, payload string) error {
 	requiredFields := map[string][]string{
 		"kb.pdf.parsed":          {"record_id", "type", "status"},
 		"kb.pdf.staged":          {"record_id", "type", "status"},
-		"kb.line-file-generated": {"record_id", "type", "status"},
+		"kb.line-file-generated": {"record_id"},
 	}
 	fields, ok := requiredFields[subject]
 	if !ok {

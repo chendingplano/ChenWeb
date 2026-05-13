@@ -49,27 +49,36 @@
 		label: string;
 		status: StageStatus;
 		entry?: StatusEntry;
-		isLeaf?: boolean;
 	};
 
 	// ── Pipeline definition ────────────────────────────────────────────────
 
-	const MAIN_STAGES = [
-		{ id: 'staged', label: 'Staged', operations: [] as string[] },
-		{ id: 'parsing', label: 'PDF Parser', operations: ['parsing', 'parsed'] },
-		{ id: 'converting', label: 'Result Converter', operations: ['converting', 'line-file-generated'] },
-		{ id: 'blocking', label: 'Blocking', operations: ['blocking'] }
+	// Single ordered pipeline definition. 'operations' lists all operation names
+	// this stage may write into kb.inputs.status ('static_analzyer' is the actual
+	// name used by the structure analyzer service despite the typo in the spec).
+	const PIPELINE_STAGES = [
+		{ id: 'staged',               label: 'Staged',             operations: [] as string[] },
+		{ id: 'parsing',              label: 'PDF Parser',          operations: ['parsing', 'parsed'] },
+		{ id: 'converting',           label: 'Result Convert',      operations: ['converting', 'converted', 'line-file-generated'] },
+		{ id: 'structure_analyzer',   label: 'Structure Analyzer',  operations: ['structure_analyzer', 'static_analzyer'] },
+		{ id: 'chunking',             label: 'Chunking',            operations: ['chunking', 'chunked'] },
+		{ id: 'extract_doc_metadata', label: 'Extract Metadata',    operations: ['extract_doc_metadata', 'extract_metadata'] },
+		{ id: 'extract_metrics',      label: 'Extract Metrics',     operations: ['extract_metrics'] },
+		{ id: 'extract_provisions',   label: 'Extract Provisions',  operations: ['extract_provisions'] },
+		{ id: 'generate_summaries',   label: 'Generate Summary',    operations: ['generate_summaries'] }
 	];
 
-	const LEAF_PROCESSORS = [
-		{ id: 'structure_analyzer', label: 'Structure Analyzer' },
-		{ id: 'chunking', label: 'Chunking' },
-		{ id: 'extract_doc_metadata', label: 'Extract Metadata' },
-		{ id: 'extract_metrics', label: 'Extract Metrics' },
-		{ id: 'extract_provisions', label: 'Extract Provisions' }
+	// Stages managed by the doc-processor service — all must finish for the pipeline to be done.
+	const DOC_PROCESSOR_STAGES = PIPELINE_STAGES.slice(3);
+
+	// Processors that can be explicitly requested in launch/restart payloads.
+	// generate_summaries is triggered internally by chunking, not directly requestable.
+	const ALL_PROCESSOR_IDS = [
+		'structure_analyzer', 'chunking', 'extract_doc_metadata', 'extract_metrics', 'extract_provisions'
 	];
 
-	const ALL_PROCESSOR_IDS = LEAF_PROCESSORS.map((p) => p.id);
+	// Ordered subset of PIPELINE_STAGES shown in the launch/restart UI.
+	const MANUAL_PROCESSORS = PIPELINE_STAGES.filter(s => ALL_PROCESSOR_IDS.includes(s.id));
 
 	// ── Active pipelines state ─────────────────────────────────────────────
 
@@ -123,7 +132,7 @@
 		return 'in-progress';
 	}
 
-	function computeStages(record: KbInputRecord): { main: StageInfo[]; leaves: StageInfo[] } {
+	function computeStages(record: KbInputRecord): StageInfo[] {
 		const statusMap = new Map<string, StatusEntry>();
 		for (const e of record.status ?? []) {
 			if (e.operation) statusMap.set(e.operation, e as StatusEntry);
@@ -137,30 +146,42 @@
 			return { status: 'pending' };
 		}
 
-		const main: StageInfo[] = MAIN_STAGES.map((s) => {
-			if (s.id === 'staged') return { id: 'staged', label: 'Staged', status: 'success' };
+		return PIPELINE_STAGES.map((s) => {
+			if (s.id === 'staged') return { id: 'staged', label: s.label, status: 'success' as StageStatus };
 			const { status, entry } = stageFor(s.operations);
 			return { id: s.id, label: s.label, status, entry };
 		});
-
-		const leaves: StageInfo[] = LEAF_PROCESSORS.map((p) => {
-			const { status, entry } = stageFor([p.id]);
-			return { id: p.id, label: p.label, status, entry, isLeaf: true };
-		});
-
-		return { main, leaves };
 	}
+
+	const FINAL_STATUSES = new Set(['success', 'fail', 'failed']);
 
 	function isActiveRecord(record: KbInputRecord): boolean {
 		const s = record.status ?? [];
 		if (!s.length) return true;
+
+		// Build a map of the latest proc_status for each operation.
+		const statusMap = new Map<string, string>();
 		for (const e of s as StatusEntry[]) {
+			const op = e.operation ?? '';
 			const ps = (e.proc_status ?? e['proc-status'] ?? e.status ?? '').toLowerCase();
-			if (e.progress !== undefined && !['success', 'fail', 'failed'].includes(ps)) return true;
+			if (op) statusMap.set(op, ps);
 		}
-		const last = s[s.length - 1] as StatusEntry;
-		const lps = (last.proc_status ?? last['proc-status'] ?? last.status ?? '').toLowerCase();
-		return !['success', 'fail', 'failed'].includes(lps);
+
+		// Any entry with a non-final status means something is still running.
+		for (const ps of statusMap.values()) {
+			if (!FINAL_STATUSES.has(ps)) return true;
+		}
+
+		// All present entries are final. The pipeline is done only when every
+		// doc-processor stage has reported a final status. Until then (e.g. after
+		// 'converted' is done but before any leaf processor has reported) the record
+		// is active. Blocking is internal and writes no status entry.
+		for (const stage of DOC_PROCESSOR_STAGES) {
+			const hasFinal = stage.operations.some((op) => FINAL_STATUSES.has(statusMap.get(op) ?? ''));
+			if (!hasFinal) return true;
+		}
+
+		return false;
 	}
 
 	function stageStatusColor(status: StageStatus): string {
@@ -254,7 +275,7 @@
 			method: 'POST',
 			credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ subject: 'kb.line-file-generated', data: payload })
+			body: JSON.stringify({ subject: 'kb.line-file-generated', payload: JSON.stringify(payload) })
 		});
 		if (!res.ok) {
 			const body = await res.json().catch(() => null);
@@ -487,7 +508,7 @@
 		{:else}
 			<div class="space-y-3">
 				{#each activePipelines as record (record.id)}
-					{@const { main, leaves } = computeStages(record)}
+					{@const stages = computeStages(record)}
 					<div
 						class="rounded-xl p-4"
 						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
@@ -539,93 +560,46 @@
 							</div>
 						</div>
 
-						<!-- Pipeline visualization -->
+						<!-- Pipeline visualization — single horizontal chain -->
 						<div class="flex items-center gap-0 overflow-x-auto" style="padding-bottom:4px;">
-							<!-- Main stages -->
-							{#each main as stage, i}
-								<!-- Node -->
+							{#each stages as stage, i}
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
 								<div
 									class="relative flex flex-shrink-0 flex-col items-center"
-									style="min-width:72px;"
+									style="min-width:68px;"
 									onmouseenter={(e) => showTooltip(e, record.id, stage)}
 									onmouseleave={hideTooltip}
 								>
-									<!-- Circle -->
 									<div
 										class="flex items-center justify-center rounded-full"
 										style="
-											width:32px; height:32px;
+											width:28px; height:28px;
 											background:{stageStatusBg(stage.status)};
 											border:2px solid {stageStatusColor(stage.status)}{stage.status === 'pending' ? '40' : ''};
 											{stage.status === 'in-progress' ? 'animation:pulse-ring 1.5s ease-in-out infinite;' : ''}
 										"
 									>
 										{#if stage.status === 'success'}
-											<CircleCheckIcon class="h-4 w-4" style="color:{colorSuccess};" />
+											<CircleCheckIcon class="h-3.5 w-3.5" style="color:{colorSuccess};" />
 										{:else if stage.status === 'failed'}
-											<XCircleIcon class="h-4 w-4" style="color:{colorError};" />
+											<XCircleIcon class="h-3.5 w-3.5" style="color:{colorError};" />
 										{:else if stage.status === 'in-progress'}
 											<div
 												class="rounded-full"
-												style="width:10px; height:10px; background:{accent}; animation:pulse 1s ease-in-out infinite;"
+												style="width:8px; height:8px; background:{accent}; animation:pulse 1s ease-in-out infinite;"
 											></div>
 										{:else}
-											<ClockIcon class="h-3.5 w-3.5" style="color:{textMuted}; opacity:0.5;" />
+											<ClockIcon class="h-3 w-3" style="color:{textMuted}; opacity:0.5;" />
 										{/if}
 									</div>
-									<!-- Label -->
 									<div
-										style="font-size:10px; color:{stageStatusColor(stage.status)}{stage.status === 'pending' ? '80' : ''}; margin-top:5px; text-align:center; white-space:nowrap; max-width:72px; overflow:hidden; text-overflow:ellipsis;"
+										style="font-size:9px; color:{stageStatusColor(stage.status)}{stage.status === 'pending' ? '80' : ''}; margin-top:4px; text-align:center; white-space:nowrap; max-width:68px; overflow:hidden; text-overflow:ellipsis;"
 									>{stage.label}</div>
 								</div>
-
-								<!-- Connector line (between main stages, before leaf column) -->
-								{#if i < main.length - 1}
-									<div style="flex:0 0 24px; height:2px; background:{borderColor}; margin-bottom:16px; flex-shrink:0;"></div>
+								{#if i < stages.length - 1}
+									<div style="flex:0 0 16px; height:2px; background:{borderColor}; margin-bottom:13px; flex-shrink:0;"></div>
 								{/if}
 							{/each}
-
-							<!-- Arrow to leaf column -->
-							<div style="flex:0 0 24px; height:2px; background:{borderColor}; margin-bottom:16px; flex-shrink:0;"></div>
-
-							<!-- Leaf processors column -->
-							<div class="flex flex-shrink-0 flex-col gap-1.5">
-								{#each leaves as stage}
-									<!-- svelte-ignore a11y_no_static_element_interactions -->
-									<div
-										class="relative flex items-center gap-2"
-										onmouseenter={(e) => showTooltip(e, record.id, stage)}
-										onmouseleave={hideTooltip}
-									>
-										<!-- Small node circle -->
-										<div
-											class="flex flex-shrink-0 items-center justify-center rounded-full"
-											style="
-												width:22px; height:22px;
-												background:{stageStatusBg(stage.status)};
-												border:1.5px solid {stageStatusColor(stage.status)}{stage.status === 'pending' ? '40' : ''};
-											"
-										>
-											{#if stage.status === 'success'}
-												<CircleCheckIcon class="h-3 w-3" style="color:{colorSuccess};" />
-											{:else if stage.status === 'failed'}
-												<XCircleIcon class="h-3 w-3" style="color:{colorError};" />
-											{:else if stage.status === 'in-progress'}
-												<div
-													class="rounded-full"
-													style="width:6px; height:6px; background:{accent}; animation:pulse 1s ease-in-out infinite;"
-												></div>
-											{:else}
-												<div style="width:5px; height:5px; border-radius:50%; background:{textMuted}; opacity:0.3;"></div>
-											{/if}
-										</div>
-										<span
-											style="font-size:11px; color:{stageStatusColor(stage.status)}{stage.status === 'pending' ? '70' : ''}; white-space:nowrap;"
-										>{stage.label}</span>
-									</div>
-								{/each}
-							</div>
 						</div>
 
 						<!-- Status line -->
@@ -765,7 +739,7 @@
 					</label>
 
 					<!-- Selectable processors -->
-					{#each LEAF_PROCESSORS as proc}
+					{#each MANUAL_PROCESSORS as proc}
 						<label
 							class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
 							style="background:{processors[proc.id] ? accentTint : surface2}; border:1px solid {processors[proc.id] ? accent + '40' : borderColor};"
@@ -917,7 +891,7 @@
 					<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">blocking</span>
 					<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">always on</span>
 				</label>
-				{#each LEAF_PROCESSORS as proc}
+				{#each MANUAL_PROCESSORS as proc}
 					<label
 						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
 						style="background:{restartProcessors[proc.id] ? accentTint : surface2}; border:1px solid {restartProcessors[proc.id] ? accent + '40' : borderColor};"
