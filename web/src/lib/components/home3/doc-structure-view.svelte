@@ -7,6 +7,7 @@
 		getKbInput,
 		updateKbDocStructureLine,
 		deleteKbDocStructureLine,
+		splitKbDocStructureLines,
 		type DocStructureLine,
 		type KbInputRecord
 	} from '$lib/services/kbService';
@@ -97,6 +98,21 @@
 	let editingError = $state('');
 	let editingHasChanges = $derived(
 		editingCorrectedType !== editingOriginalType || editingContent !== editingOriginalContent
+	);
+
+	// Sidebar: inline Line Type edit
+	let sidebarTypeEditing = $state(false);
+	let sidebarTypeSaving = $state(false);
+	let sidebarTypeError = $state('');
+
+	// Sidebar: Content edit dialog
+	let sidebarContentDialogOpen = $state(false);
+	let sidebarContentDraftText = $state('');
+	let sidebarContentSaving = $state(false);
+	let sidebarContentError = $state('');
+
+	let sidebarContentParagraphCount = $derived(
+		sidebarContentDraftText.split('\n').filter((s) => s.trim().length > 0).length
 	);
 
 	let docPage = $state(1);
@@ -402,6 +418,87 @@
 		}
 	}
 
+	function openSidebarTypeEdit() {
+		sidebarTypeEditing = true;
+		sidebarTypeError = '';
+	}
+
+	function closeSidebarTypeEdit() {
+		sidebarTypeEditing = false;
+		sidebarTypeError = '';
+	}
+
+	async function saveSidebarLineType(newType: string) {
+		if (!selectedLine || !currentInput) return;
+		sidebarTypeSaving = true;
+		sidebarTypeError = '';
+		try {
+			const res = await updateKbDocStructureLine({
+				input_record_id: currentInput.id,
+				page_number: selectedLine.page_number,
+				line_number: selectedLine.line_number,
+				corrected_line_type: newType
+			});
+			lines = res.lines ?? [];
+			sidebarTypeEditing = false;
+		} catch (err) {
+			sidebarTypeError = err instanceof Error ? err.message : 'Failed to save.';
+		} finally {
+			sidebarTypeSaving = false;
+		}
+	}
+
+	function openSidebarContentEdit() {
+		if (!selectedLine) return;
+		sidebarContentDraftText = selectedLine.content || '';
+		sidebarContentDialogOpen = true;
+		sidebarContentError = '';
+	}
+
+	function closeSidebarContentEdit() {
+		if (sidebarContentSaving) return;
+		sidebarContentDialogOpen = false;
+		sidebarContentDraftText = '';
+		sidebarContentError = '';
+	}
+
+	async function saveSidebarContent() {
+		if (!selectedLine || !currentInput || sidebarContentSaving) return;
+		const paragraphs = sidebarContentDraftText
+			.split('\n')
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
+		if (paragraphs.length === 0) {
+			sidebarContentError = 'Content cannot be empty.';
+			return;
+		}
+		sidebarContentSaving = true;
+		sidebarContentError = '';
+		try {
+			const res =
+				paragraphs.length === 1
+					? await updateKbDocStructureLine({
+							input_record_id: currentInput.id,
+							page_number: selectedLine.page_number,
+							line_number: selectedLine.line_number,
+							content: paragraphs[0]
+						})
+					: await splitKbDocStructureLines({
+							input_record_id: currentInput.id,
+							page_number: selectedLine.page_number,
+							line_number: selectedLine.line_number,
+							contents: paragraphs,
+							line_type: selectedLine.line_type
+						});
+			lines = res.lines ?? [];
+			sidebarContentDialogOpen = false;
+		} catch (err) {
+			sidebarContentError = err instanceof Error ? err.message : 'Failed to save.';
+		} finally {
+			sidebarContentSaving = false;
+		}
+	}
+
 	function recordDisplayName(r: KbInputRecord): string {
 		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
 	}
@@ -443,6 +540,13 @@
 	$effect(() => {
 		if (typeof window === 'undefined' || !settingsHydrated) return;
 		writeDocStructureSettings(localStorage, getDocStructureSettingsUserId(), docStructureSettings);
+	});
+
+	$effect(() => {
+		// Cancel sidebar editing when the selected line changes
+		void selectedLineKey;
+		sidebarTypeEditing = false;
+		sidebarTypeError = '';
 	});
 
 	$effect(() => {
@@ -709,8 +813,74 @@
 							{:else}
 								<div class="meta-row"><span>Page</span><strong>{selectedLine.page_number}</strong></div>
 								<div class="meta-row"><span>Line</span><strong>{selectedLine.line_number}</strong></div>
-								<div class="meta-row"><span>Line Type</span><strong>{selectedLine.line_type}</strong></div>
-								<div class="meta-row"><span>Content</span><strong>{selectedLine.content || '—'}</strong></div>
+
+								<!-- Line Type: hover shows edit icon, click opens inline dropdown -->
+								<div class="meta-row sidebar-editable-row">
+									<span>Line Type</span>
+									{#if sidebarTypeEditing}
+										<div
+											class="sidebar-type-edit-wrap"
+											onfocusout={(e) => {
+												if (
+													!sidebarTypeSaving &&
+													!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)
+												) {
+													closeSidebarTypeEdit();
+												}
+											}}
+										>
+											<select
+												class="sidebar-type-select"
+												value={selectedLine.line_type}
+												disabled={sidebarTypeSaving}
+												onchange={(e) => {
+													const val = (e.currentTarget as HTMLSelectElement).value;
+													if (val) void saveSidebarLineType(val);
+												}}
+											>
+												{#each LINE_TYPE_OPTIONS as opt (opt)}
+													<option value={opt}>{opt}</option>
+												{/each}
+											</select>
+											{#if !sidebarTypeSaving}
+												<button
+													class="sidebar-type-cancel-btn"
+													type="button"
+													tabindex="0"
+													onclick={closeSidebarTypeEdit}
+												>✕</button>
+											{/if}
+											{#if sidebarTypeError}
+												<div class="sidebar-edit-error">{sidebarTypeError}</div>
+											{/if}
+										</div>
+									{:else}
+										<div class="sidebar-val-group">
+											<strong>{selectedLine.line_type || '—'}</strong>
+											<button
+												class="sidebar-edit-icon-btn"
+												type="button"
+												title="Edit line type"
+												onclick={openSidebarTypeEdit}
+											>✎</button>
+										</div>
+									{/if}
+								</div>
+
+								<!-- Content: hover shows edit icon, click opens dialog -->
+								<div class="meta-row sidebar-editable-row sidebar-content-row">
+									<div class="sidebar-content-label-row">
+										<span>Content</span>
+										<button
+											class="sidebar-edit-icon-btn"
+											type="button"
+											title="Edit content"
+											onclick={openSidebarContentEdit}
+										>✎</button>
+									</div>
+									<strong class="sidebar-content-full">{selectedLine.content || '—'}</strong>
+								</div>
+
 								<div class="meta-row mono">
 									<span>Coordinate</span>[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
 								</div>
@@ -728,6 +898,72 @@
 		</section>
 	</div>
 </div>
+
+{#if sidebarContentDialogOpen}
+	<div
+		class="dialog-overlay"
+		aria-hidden="true"
+		onclick={(e) => { if (e.target === e.currentTarget) closeSidebarContentEdit(); }}
+		onkeydown={(e) => { if (e.key === 'Escape') closeSidebarContentEdit(); }}
+	>
+		<div
+			class="dialog content-edit-dialog"
+			style="background:{panelBg}; border-color:{inkLine};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => { if (e.key === 'Escape') closeSidebarContentEdit(); e.stopPropagation(); }}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Edit content"
+			tabindex="0"
+		>
+			<div class="dialog-head">
+				<div>
+					<div class="dialog-eyebrow">Edit</div>
+					<h2 class="dialog-title">Edit Content</h2>
+					<p class="dialog-subtitle">
+						Each non-empty line becomes a separate document line. Use newlines to split into multiple paragraphs — all will share the same coordinates and line type.
+					</p>
+				</div>
+			</div>
+
+			<div class="dialog-scroll">
+				<div class="content-edit-body">
+					<textarea
+						class="content-edit-textarea"
+						bind:value={sidebarContentDraftText}
+						disabled={sidebarContentSaving}
+						rows="10"
+						placeholder="Enter content…"
+						spellcheck="false"
+					></textarea>
+					{#if sidebarContentError}
+						<div class="line-edit-error content-edit-error">{sidebarContentError}</div>
+					{/if}
+				</div>
+			</div>
+
+			<div class="dialog-foot">
+				<div class="dialog-foot-hint">
+					{sidebarContentParagraphCount} line{sidebarContentParagraphCount === 1 ? '' : 's'} after save
+				</div>
+				<div class="dialog-foot-buttons">
+					<button
+						class="btn btn-ghost"
+						type="button"
+						disabled={sidebarContentSaving}
+						onclick={closeSidebarContentEdit}
+					>Cancel</button>
+					<button
+						class="btn btn-primary dialog-select-btn"
+						type="button"
+						disabled={sidebarContentSaving || sidebarContentParagraphCount === 0}
+						onclick={() => void saveSidebarContent()}
+					>{sidebarContentSaving ? 'Saving…' : 'Save'}</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if lineListSettingsOpen}
 	<div
@@ -2040,5 +2276,151 @@
 		.dialog-foot-buttons .btn {
 			width: 100%;
 		}
+	}
+
+	/* ── Sidebar editable rows ─────────────────────────────────────── */
+	.sidebar-editable-row {
+		position: relative;
+	}
+	.sidebar-val-group {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+		flex: 1 1 0;
+		justify-content: flex-end;
+	}
+	.sidebar-content-row {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 4px;
+	}
+	.sidebar-content-label-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+	.sidebar-content-full {
+		font-size: 13px;
+		color: var(--text-primary);
+		word-break: break-word;
+		white-space: pre-wrap;
+		line-height: 1.45;
+	}
+	.sidebar-edit-icon-btn {
+		flex-shrink: 0;
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border: 1px solid transparent;
+		background: transparent;
+		color: var(--text-muted);
+		border-radius: 5px;
+		font-size: 12px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		opacity: 0;
+		transition: opacity 0.12s, color 0.12s;
+	}
+	.sidebar-editable-row:hover .sidebar-edit-icon-btn {
+		opacity: 1;
+	}
+	.sidebar-edit-icon-btn:hover {
+		color: var(--brass);
+		border-color: var(--ink-line);
+		background: var(--panel-bg-alt);
+	}
+
+	/* ── Sidebar inline type editor ───────────────────────────────── */
+	.sidebar-type-edit-wrap {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		flex: 1 1 0;
+		min-width: 0;
+		justify-content: flex-end;
+		flex-wrap: wrap;
+	}
+	.sidebar-type-select {
+		height: 26px;
+		padding: 0 6px;
+		border: 1px solid var(--brass);
+		border-radius: 7px;
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		font-size: 11px;
+		font-family: var(--font-mono);
+		cursor: pointer;
+		max-width: 130px;
+	}
+	.sidebar-type-select:focus {
+		outline: none;
+		box-shadow: 0 0 0 2px rgba(212, 162, 76, 0.22);
+	}
+	.sidebar-type-cancel-btn {
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-muted);
+		border-radius: 5px;
+		font-size: 10px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+	}
+	.sidebar-type-cancel-btn:hover {
+		color: #c8553d;
+		border-color: rgba(200, 85, 61, 0.4);
+	}
+	.sidebar-edit-error {
+		font-size: 10px;
+		color: #c8553d;
+		width: 100%;
+	}
+
+	/* ── Content edit dialog ──────────────────────────────────────── */
+	.content-edit-dialog {
+		max-width: 640px;
+		min-width: 380px;
+		min-height: 0;
+		resize: none;
+	}
+	.content-edit-body {
+		padding: 16px 24px 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.content-edit-textarea {
+		width: 100%;
+		box-sizing: border-box;
+		padding: 10px 12px;
+		border: 1px solid var(--ink-line);
+		border-radius: 10px;
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		font-size: 13px;
+		font-family: var(--font-sans);
+		line-height: 1.55;
+		resize: vertical;
+		min-height: 160px;
+	}
+	.content-edit-textarea:focus {
+		outline: none;
+		border-color: var(--brass);
+		box-shadow: 0 0 0 2px rgba(212, 162, 76, 0.14);
+	}
+	.content-edit-textarea:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.content-edit-error {
+		margin-top: 2px;
 	}
 </style>

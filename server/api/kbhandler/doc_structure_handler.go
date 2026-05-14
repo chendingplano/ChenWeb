@@ -488,6 +488,207 @@ func UpdateDocStructureLine(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+type splitDocStructureLineRequest struct {
+	InputRecordID int64    `json:"input_record_id"`
+	PageNumber    int      `json:"page_number"`
+	LineNumber    int      `json:"line_number"`
+	Contents      []string `json:"contents"`
+	LineType      string   `json:"line_type"`
+}
+
+// SplitDocStructureLine handles POST /api/v1/kb/doc-structure/split.
+// It replaces one line with multiple lines (one per content entry), renumbering
+// all lines sequentially afterwards.
+func SplitDocStructureLine(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_DSS_001")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	var req splitDocStructureLineRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid request body (CWB_KB_DSS_010)",
+		})
+	}
+	if req.InputRecordID <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid input_record_id (CWB_KB_DSS_011)",
+		})
+	}
+	if req.PageNumber <= 0 || req.LineNumber <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid page_number or line_number (CWB_KB_DSS_012)",
+		})
+	}
+	if strings.TrimSpace(req.LineType) == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "line_type cannot be empty (CWB_KB_DSS_013)",
+		})
+	}
+	nonEmpty := make([]string, 0, len(req.Contents))
+	for _, c := range req.Contents {
+		if t := strings.TrimSpace(strings.ReplaceAll(c, "\t", " ")); t != "" {
+			nonEmpty = append(nonEmpty, t)
+		}
+	}
+	if len(nonEmpty) == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "contents cannot be empty (CWB_KB_DSS_014)",
+		})
+	}
+
+	artifactDir := strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
+	if artifactDir == "" {
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "missing ARTIFACT_DIR (CWB_KB_DSS_020)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	inputTable, err := resolveInputTable(db)
+	if err != nil {
+		logger.Error("resolve kb input table failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to resolve table (CWB_KB_DSS_021)",
+		})
+	}
+
+	stagingExpr, err := resolveStagingOrNameExpr(db, inputTable)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to resolve filename column (CWB_KB_DSS_022)",
+		})
+	}
+	parserExpr, err := resolveParserNameExpr(db, inputTable)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to resolve parser column (CWB_KB_DSS_023)",
+		})
+	}
+
+	query := fmt.Sprintf(`SELECT %s AS staging_filename, %s AS parser_name, i.file_name FROM %s i WHERE i.id = $1`, stagingExpr, parserExpr, inputTable)
+	var stagingFilename, parserName, fileName sql.NullString
+	if err := db.QueryRow(query, req.InputRecordID).Scan(&stagingFilename, &parserName, &fileName); err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, errorResponse{
+				Status: false, ErrorMsg: "record not found (CWB_KB_DSS_030)",
+			})
+		}
+		logger.Error("query kb input failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to retrieve record (CWB_KB_DSS_031)",
+		})
+	}
+
+	staging := strings.TrimSpace(stagingFilename.String)
+	parser := strings.TrimSpace(parserName.String)
+	if staging == "" || parser == "" {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status: false, ErrorMsg: "staging filename or parser name is empty (CWB_KB_DSS_032)",
+		})
+	}
+
+	stagingBase := filepath.Base(staging)
+	stagingRoot := strings.TrimSuffix(stagingBase, filepath.Ext(stagingBase))
+	if strings.TrimSpace(stagingRoot) == "" {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status: false, ErrorMsg: "invalid staging filename (CWB_KB_DSS_033)",
+		})
+	}
+
+	artifactBase := filepath.Join(
+		artifactDir,
+		strconv.FormatInt(req.InputRecordID/1000, 10),
+		strconv.FormatInt(req.InputRecordID, 10),
+	)
+	txtPath := filepath.Join(artifactBase, stagingRoot+"_"+parser+".txt")
+	manualPath := filepath.Join(artifactBase, stagingRoot+"_"+parser+".manual")
+
+	lines, _, err := readCorrectedLinesFile(txtPath)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("structure file not found: %s (CWB_KB_DSS_040)", filepath.Base(txtPath)),
+		})
+	}
+
+	// Find target line index
+	targetIdx := -1
+	for i := range lines {
+		if lines[i].PageNumber == req.PageNumber && lines[i].LineNumber == req.LineNumber {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status: false, ErrorMsg: "line not found (CWB_KB_DSS_041)",
+		})
+	}
+
+	original := lines[targetIdx]
+	lineType := strings.TrimSpace(req.LineType)
+
+	// Rebuild slice: lines before + split lines + lines after
+	rebuilt := make([]docStructureLine, 0, len(lines)+len(nonEmpty)-1)
+	rebuilt = append(rebuilt, lines[:targetIdx]...)
+	for _, content := range nonEmpty {
+		rebuilt = append(rebuilt, docStructureLine{
+			PageNumber: original.PageNumber,
+			LineType:   lineType,
+			Font:       original.Font,
+			FontSize:   original.FontSize,
+			Coords:     original.Coords,
+			Content:    content,
+		})
+	}
+	rebuilt = append(rebuilt, lines[targetIdx+1:]...)
+
+	// Renumber sequentially
+	for i := range rebuilt {
+		rebuilt[i].LineNumber = i + 1
+	}
+
+	if err := writeTxtLinesFile(txtPath, rebuilt); err != nil {
+		logger.Error("write txt file failed", "path", txtPath, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to write txt file (CWB_KB_DSS_042)",
+		})
+	}
+
+	// Log the modification of the original line in the manual file
+	updatedFirst := rebuilt[targetIdx]
+	if err := upsertManualFile(manualPath, manualEntry{
+		Operation: "modify",
+		Timestamp: time.Now().Format("20060102-150405"),
+		Line:      updatedFirst,
+		OldContent: original.Content,
+	}); err != nil {
+		logger.Error("upsert manual file failed", "path", manualPath, "err", err)
+	}
+
+	maxPage := 0
+	for _, ln := range rebuilt {
+		if ln.PageNumber > maxPage {
+			maxPage = ln.PageNumber
+		}
+	}
+
+	logger.Info("split doc structure line", "input_id", req.InputRecordID, "page", req.PageNumber, "line", req.LineNumber, "into", len(nonEmpty))
+	resp := docStructureResponse{
+		Status:        true,
+		InputID:       req.InputRecordID,
+		CorrectedFile: txtPath,
+		Lines:         rebuilt,
+		Pages:         maxPage,
+		Total:         len(rebuilt),
+	}
+	if fileName.Valid {
+		resp.FileName = fileName.String
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
 type deleteDocStructureLineRequest struct {
 	InputRecordID int64 `json:"input_record_id" query:"input_record_id"`
 	PageNumber    int   `json:"page_number"    query:"page_number"`

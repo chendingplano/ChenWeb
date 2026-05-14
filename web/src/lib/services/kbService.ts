@@ -580,6 +580,34 @@ export async function updateKbDocStructureLine(
 	return response.json() as Promise<GetDocStructureResponse>;
 }
 
+export type SplitDocStructureLinePayload = {
+	input_record_id: number;
+	page_number: number;
+	line_number: number;
+	contents: string[];
+	line_type: string;
+};
+
+export async function splitKbDocStructureLines(
+	payload: SplitDocStructureLinePayload
+): Promise<GetDocStructureResponse> {
+	const response = await fetch(`${BASE}/doc-structure/split`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to split doc structure line (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<GetDocStructureResponse>;
+}
+
 export type DeleteDocStructureLinePayload = {
 	input_record_id: number;
 	page_number: number;

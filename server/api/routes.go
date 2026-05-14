@@ -299,6 +299,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/doc-structure", kbhandler.GetDocStructure)
 	apiGroup.PATCH("/kb/doc-structure", kbhandler.UpdateDocStructureLine)
 	apiGroup.DELETE("/kb/doc-structure", kbhandler.DeleteDocStructureLine)
+	apiGroup.POST("/kb/doc-structure/split", kbhandler.SplitDocStructureLine)
 	apiGroup.GET("/kb/skill-categories", kbhandler.ListSkillCategories)
 	apiGroup.GET("/kb/skills", kbhandler.ListSkills)
 	apiGroup.POST("/kb/skills", kbhandler.CreateSkill)
