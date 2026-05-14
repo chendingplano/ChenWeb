@@ -1,0 +1,84 @@
+package kbhandler
+
+import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	toml "github.com/pelletier/go-toml/v2"
+
+	"github.com/chendingplano/shared/go/api/EchoFactory"
+	"github.com/labstack/echo/v4"
+)
+
+type kbFrontendConfig struct {
+	TopicTypes []string `json:"topic_types"`
+}
+
+type kbFrontendConfigResponse struct {
+	Status bool             `json:"status"`
+	Config kbFrontendConfig `json:"config"`
+}
+
+// GetKbFrontendConfig reads the [frontend] section from config.toml and returns frontend
+// configuration such as the topic type list. The config file path is resolved via the
+// KB_CONFIG_FILE env var, falling back to ./config.toml.
+func GetKbFrontendConfig(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_CFG_001")
+	defer rc.Close()
+
+	cfg, err := loadKbFrontendConfig()
+	if err != nil {
+		rc.GetLogger().Warn("load kb frontend config failed", "err", err)
+		return c.JSON(http.StatusOK, kbFrontendConfigResponse{
+			Status: true,
+			Config: kbFrontendConfig{TopicTypes: []string{}},
+		})
+	}
+
+	return c.JSON(http.StatusOK, kbFrontendConfigResponse{Status: true, Config: cfg})
+}
+
+type rawKbFrontendSection struct {
+	Frontend struct {
+		TopicTypes []string `toml:"topic_types"`
+	} `toml:"frontend"`
+}
+
+func loadKbFrontendConfig() (kbFrontendConfig, error) {
+	path := resolveKbConfigFilePath()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return kbFrontendConfig{}, err
+	}
+	var raw rawKbFrontendSection
+	if err := toml.Unmarshal(body, &raw); err != nil {
+		return kbFrontendConfig{}, err
+	}
+	types := raw.Frontend.TopicTypes
+	if types == nil {
+		types = []string{}
+	}
+	return kbFrontendConfig{TopicTypes: types}, nil
+}
+
+func resolveKbConfigFilePath() string {
+	if v := strings.TrimSpace(os.Getenv("KB_CONFIG_FILE")); v != "" {
+		return v
+	}
+	// Walk up from the current working directory looking for config.toml
+	cur, _ := os.Getwd()
+	for i := 0; i < 6; i++ {
+		candidate := filepath.Join(cur, "config.toml")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	return "./config.toml"
+}

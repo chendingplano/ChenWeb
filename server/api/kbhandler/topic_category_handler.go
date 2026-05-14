@@ -14,20 +14,21 @@ import (
 )
 
 type topicCategoryRecord struct {
-	ID              string                `json:"id"`
-	TopicName       string                `json:"topicName,omitempty"`
-	PdfFileName     string                `json:"pdfFileName"`
-	TopicType       string                `json:"topicType"`
-	TopicText       string                `json:"topicText"`
-	TopicDescEn     string                `json:"topicDescEn,omitempty"`
-	Keywords        []string              `json:"topicKeywords"`
-	KeywordsEn      []string              `json:"topicKeywordsEn,omitempty"`
-	CategoryPaths   []string              `json:"categoryPaths,omitempty"`
-	SourceLineSpecs []string              `json:"sourceLineSpecs,omitempty"`
-	InputID         int64                 `json:"inputId"`
-	Page            int                   `json:"page"`
-	Coords          []float64             `json:"coords"`
-	Targets         []summaryRecordTarget `json:"targets"`
+	ID                string                `json:"id"`
+	TopicName         string                `json:"topicName,omitempty"`
+	PdfFileName       string                `json:"pdfFileName"`
+	TopicType         string                `json:"topicType"`
+	TopicText         string                `json:"topicText"`
+	TopicDescEn       string                `json:"topicDescEn,omitempty"`
+	Keywords          []string              `json:"topicKeywords"`
+	KeywordsEn        []string              `json:"topicKeywordsEn,omitempty"`
+	CategoryPaths     []string              `json:"categoryPaths,omitempty"`
+	CategoryPathsEn   []string              `json:"categoryPathsEn,omitempty"`
+	SourceLineSpecs   []string              `json:"sourceLineSpecs,omitempty"`
+	InputID           int64                 `json:"inputId"`
+	Page              int                   `json:"page"`
+	Coords            []float64             `json:"coords"`
+	Targets           []summaryRecordTarget `json:"targets"`
 }
 
 type getTopicCategoryResponse struct {
@@ -154,7 +155,9 @@ func readTopicCategoryRecords(topicTreeDir string, categoryPath string) ([]topic
 			TopicType:       parsed.topicType,
 			TopicText:       parsed.topicText,
 			Keywords:        append([]string(nil), parsed.keywords...),
+			KeywordsEn:      append([]string(nil), parsed.keywordsEn...),
 			CategoryPaths:   append([]string(nil), parsed.categoryPaths...),
+			CategoryPathsEn: append([]string(nil), parsed.categoryPathsEn...),
 			SourceLineSpecs: append([]string(nil), parsed.lines...),
 			InputID:         recordID,
 			Page:            page,

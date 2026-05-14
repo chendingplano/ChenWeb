@@ -26,6 +26,7 @@ export type TopicCard = {
 	topicDescEn?: string;
 	topicType: string;
 	categoryPaths?: string[];
+	categoryPathsEn?: string[];
 	sourceLineSpecs?: string[];
 	inputId: number;
 	page: number;

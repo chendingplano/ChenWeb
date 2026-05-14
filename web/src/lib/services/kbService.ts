@@ -964,6 +964,7 @@ export type TopicCardApi = {
 	topicDescEn?: string;
 	topicType: string;
 	categoryPaths?: string[];
+	categoryPathsEn?: string[];
 	sourceLineSpecs?: string[];
 	inputId: number;
 	page: number;
@@ -1016,6 +1017,43 @@ export async function getRecordTopics(recordId: number): Promise<GetRecordTopics
 		`${BASE}/record-topics?record_id=${encodeURIComponent(String(recordId))}`,
 		'Failed to load record topics'
 	);
+}
+
+export type UpdateRecordTopicPayload = {
+	record_id: number;
+	topic_id: string;
+	topic_type: string;
+	topic_text: string;
+	topic_desc_en: string;
+	topic_keywords: string[];
+	topic_keywords_en: string[];
+	category_paths: string[];
+	category_paths_en: string[];
+};
+
+export type KbFrontendConfig = {
+	topic_types: string[];
+};
+
+export async function getKbFrontendConfig(): Promise<KbFrontendConfig> {
+	const response = await fetchOrThrow<{ status: boolean; config: KbFrontendConfig }>(
+		`${BASE}/config`,
+		'Failed to load kb frontend config'
+	);
+	return response.config;
+}
+
+export async function updateRecordTopic(payload: UpdateRecordTopicPayload): Promise<{ status: boolean }> {
+	const response = await fetch(`${BASE}/record-topic`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const text = await response.text().catch(() => '');
+		throw new Error(text || `Failed to update record topic (${response.status})`);
+	}
+	return response.json() as Promise<{ status: boolean }>;
 }
 
 export type ListProvisionGraphResponse = ListTopicGraphResponse;

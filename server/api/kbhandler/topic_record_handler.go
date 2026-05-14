@@ -22,14 +22,15 @@ type getRecordTopicsResponse struct {
 }
 
 type parsedTopicEntry struct {
-	topicID       string
-	topicType     string
-	topicText     string
-	topicDescEn   string
-	keywords      []string
-	keywordsEn    []string
-	lines         []string
-	categoryPaths []string
+	topicID           string
+	topicType         string
+	topicText         string
+	topicDescEn       string
+	keywords          []string
+	keywordsEn        []string
+	lines             []string
+	categoryPaths     []string
+	categoryPathsEn   []string
 }
 
 func GetRecordTopics(c echo.Context) error {
@@ -132,6 +133,7 @@ func readRecordTopicCards(logger ApiTypes.JimoLogger, recordID int64) ([]topicCa
 				Keywords:        append([]string(nil), topic.keywords...),
 				KeywordsEn:      append([]string(nil), topic.keywordsEn...),
 				CategoryPaths:   append([]string(nil), topic.categoryPaths...),
+				CategoryPathsEn: append([]string(nil), topic.categoryPathsEn...),
 				SourceLineSpecs: append([]string(nil), topic.lines...),
 				InputID:         recordID,
 				Page:            page,
@@ -203,7 +205,8 @@ func parseTopicsFile(path string) ([]parsedTopicEntry, error) {
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "topic_keywords:"))
 			current.keywords = parseQuotedStringArray(raw)
 		case strings.HasPrefix(trimmed, "category_paths_en:"):
-			// skip English category paths for now
+			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "category_paths_en:"))
+			current.categoryPathsEn = parseTopicCategoryPaths(raw)
 		case strings.HasPrefix(trimmed, "category_paths:"):
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "category_paths:"))
 			current.categoryPaths = parseTopicCategoryPaths(raw)

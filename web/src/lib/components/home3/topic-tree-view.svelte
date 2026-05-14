@@ -4,6 +4,8 @@
 	import {
 		getRecordTopics,
 		listTopicGraph,
+		updateRecordTopic,
+		getKbFrontendConfig,
 		type KbInputRecord,
 		type ListTopicGraphResponse,
 		type TopicCategoryNodeApi,
@@ -75,6 +77,20 @@
 	let resizing = $state(false);
 	let resizeStartX = 0;
 	let resizeStartWidth = 0;
+
+	let editingTopic = $state(false);
+	let editTopicType = $state('');
+	let editTopicText = $state('');
+	let editTopicDescEn = $state('');
+	let editKeywordsRaw = $state('');
+	let editKeywordsEnRaw = $state('');
+	let editCategoryPathsRaw = $state('');
+	let editCategoryPathsEnRaw = $state('');
+	let editSaving = $state(false);
+	let editError = $state('');
+
+	let topicTypeOptions = $state<string[]>([]);
+	let configLoaded = $state(false);
 
 	let activeRecord = $derived(
 		treeState.selectedRecordId != null ? (recordCache[treeState.selectedRecordId] ?? null) : null
@@ -187,6 +203,17 @@
 	$effect(() => {
 		if (!categoryMetadataLoaded) {
 			void ensureCategoryMetadata();
+		}
+	});
+
+	$effect(() => {
+		if (!configLoaded) {
+			configLoaded = true;
+			getKbFrontendConfig()
+				.then((cfg) => {
+					topicTypeOptions = cfg.topic_types ?? [];
+				})
+				.catch(() => {});
 		}
 	});
 
@@ -303,6 +330,101 @@
 			description: mapped.createTime,
 			badges: [mapped.docType]
 		};
+	}
+
+	function hasNonAscii(s: string): boolean {
+		return /[^ -]/.test(s);
+	}
+
+	function arraysEqual(a: string[], b: string[]): boolean {
+		return a.length === b.length && a.every((v, i) => v === b[i]);
+	}
+
+	function lookupTopicTypeEn(typeValue: string): string {
+		if (!typeValue || !hasNonAscii(typeValue)) return '';
+		for (const entry of topicTypeOptions) {
+			const parts = entry.split('/');
+			if (parts.length >= 2 && parts[0].trim() === typeValue.trim()) {
+				return parts.slice(1).join('/').trim();
+			}
+			if (entry.trim() === typeValue.trim()) {
+				return '';
+			}
+		}
+		return '';
+	}
+
+	function startTopicEdit() {
+		if (!selectedTopic) return;
+		editTopicType = selectedTopic.topicType ?? '';
+		editTopicText = selectedTopic.topicText ?? '';
+		editTopicDescEn = selectedTopic.topicDescEn ?? '';
+		editKeywordsRaw = (selectedTopic.topicKeywords ?? []).join('\n');
+		editKeywordsEnRaw = (selectedTopic.topicKeywordsEn ?? []).join('\n');
+		editCategoryPathsRaw = (selectedTopic.categoryPaths ?? []).join('\n');
+		editCategoryPathsEnRaw = (selectedTopic.categoryPathsEn ?? []).join('\n');
+		editError = '';
+		editingTopic = true;
+	}
+
+	function cancelTopicEdit() {
+		editingTopic = false;
+		editError = '';
+	}
+
+	async function saveTopicEdit() {
+		if (!selectedTopic || editSaving) return;
+		editError = '';
+		editSaving = true;
+		const newKeywords = editKeywordsRaw.split('\n').map((k) => k.trim()).filter(Boolean);
+		const newKeywordsEn = editKeywordsEnRaw.split('\n').map((k) => k.trim()).filter(Boolean);
+		const newPaths = editCategoryPathsRaw.split('\n').map((p) => p.trim()).filter(Boolean);
+		const newPathsEn = editCategoryPathsEnRaw.split('\n').map((p) => p.trim()).filter(Boolean);
+		try {
+			await updateRecordTopic({
+				record_id: selectedTopic.recordId,
+				topic_id: selectedTopic.id,
+				topic_type: editTopicType.trim(),
+				topic_text: editTopicText.trim(),
+				topic_desc_en: editTopicDescEn.trim(),
+				topic_keywords: newKeywords,
+				topic_keywords_en: newKeywordsEn,
+				category_paths: newPaths,
+				category_paths_en: newPathsEn
+			});
+			const recordId = selectedTopic.recordId;
+			const cached = recordCache[recordId];
+			if (cached) {
+				recordCache = {
+					...recordCache,
+					[recordId]: {
+						...cached,
+						topics: cached.topics.map((t) =>
+							t.id === selectedTopic!.id
+								? {
+										...t,
+										topicType: editTopicType.trim(),
+										topicText: editTopicText.trim(),
+										topicDescEn: editTopicDescEn.trim() || undefined,
+										topicKeywords: newKeywords,
+										topicKeywordsEn: newKeywordsEn.length > 0 ? newKeywordsEn : undefined,
+										categoryPaths: newPaths,
+										categoryPathsEn: newPathsEn.length > 0 ? newPathsEn : undefined
+									}
+								: t
+						)
+					}
+				};
+			}
+			if (newPaths.join('\n') !== (selectedTopic.categoryPaths ?? []).join('\n')) {
+				categoryMetadataLoaded = false;
+			}
+			editingTopic = false;
+		} catch (err) {
+			editError = err instanceof Error ? err.message : 'Failed to save topic';
+		} finally {
+			editSaving = false;
+		}
 	}
 
 	function startResize(event: PointerEvent) {
@@ -486,83 +608,231 @@
 							>
 								{#snippet sidebar()}
 									{#if selectedTopic}
-										<div class="topic-sidebar-block">
-											<div class="topic-sidebar-row">
-												<span>{itemSingular} ID</span>
-												<strong>{selectedTopic.id}</strong>
+										{#if editingTopic}
+											<div class="topic-sidebar-edit">
+												<div class="topic-edit-field">
+													<label class="topic-sidebar-label" for="edit-topic-type">TYPE</label>
+													<input
+														id="edit-topic-type"
+														class="topic-edit-input"
+														type="text"
+														list="topic-type-options"
+														bind:value={editTopicType}
+														placeholder="select or type…"
+														autocomplete="off"
+													/>
+													<datalist id="topic-type-options">
+														{#each topicTypeOptions as opt (opt)}
+															<option value={opt}></option>
+														{/each}
+													</datalist>
+												</div>
+												<div class="topic-edit-field">
+													<label class="topic-sidebar-label" for="edit-topic-desc">TOPIC DESCRIPTION</label>
+													<textarea
+														id="edit-topic-desc"
+														class="topic-edit-textarea"
+														bind:value={editTopicText}
+														rows={4}
+														placeholder="topic description (CN)"
+													></textarea>
+												</div>
+												<div class="topic-edit-field">
+													<label class="topic-sidebar-label" for="edit-topic-desc-en">TOPIC DESCRIPTION (EN)</label>
+													<textarea
+														id="edit-topic-desc-en"
+														class="topic-edit-textarea"
+														bind:value={editTopicDescEn}
+														rows={4}
+														placeholder="topic description (EN)"
+													></textarea>
+												</div>
+												<div class="topic-edit-field">
+													<label class="topic-sidebar-label" for="edit-category-paths">CATEGORY PATHS</label>
+													<p class="topic-edit-hint">One path per line (e.g. Root/Sub/Child)</p>
+													<textarea
+														id="edit-category-paths"
+														class="topic-edit-textarea"
+														bind:value={editCategoryPathsRaw}
+														rows={3}
+														placeholder="Root/Category/Subcategory"
+													></textarea>
+												</div>
+												<div class="topic-edit-field">
+													<label class="topic-sidebar-label" for="edit-category-paths-en">CATEGORY PATHS (EN)</label>
+													<p class="topic-edit-hint">One path per line</p>
+													<textarea
+														id="edit-category-paths-en"
+														class="topic-edit-textarea"
+														bind:value={editCategoryPathsEnRaw}
+														rows={3}
+														placeholder="Root/Category/Subcategory (EN)"
+													></textarea>
+												</div>
+												<div class="topic-edit-field">
+													<label class="topic-sidebar-label" for="edit-keywords">KEYWORDS</label>
+													<p class="topic-edit-hint">One keyword per line</p>
+													<textarea
+														id="edit-keywords"
+														class="topic-edit-textarea"
+														bind:value={editKeywordsRaw}
+														rows={3}
+														placeholder="keyword (CN)"
+													></textarea>
+												</div>
+												<div class="topic-edit-field">
+													<label class="topic-sidebar-label" for="edit-keywords-en">KEYWORDS (EN)</label>
+													<p class="topic-edit-hint">One keyword per line</p>
+													<textarea
+														id="edit-keywords-en"
+														class="topic-edit-textarea"
+														bind:value={editKeywordsEnRaw}
+														rows={3}
+														placeholder="keyword (EN)"
+													></textarea>
+												</div>
+												{#if editError}
+													<p class="topic-edit-error">{editError}</p>
+												{/if}
+												<div class="topic-edit-actions">
+													<button
+														type="button"
+														class="topic-edit-btn topic-edit-btn-save"
+														disabled={editSaving}
+														onclick={saveTopicEdit}
+													>
+														{editSaving ? 'Saving…' : 'Save'}
+													</button>
+													<button
+														type="button"
+														class="topic-edit-btn topic-edit-btn-cancel"
+														disabled={editSaving}
+														onclick={cancelTopicEdit}
+													>Cancel</button>
+												</div>
 											</div>
-											<div class="topic-sidebar-row">
-												<span>Record ID</span>
-												<strong>{selectedTopic.recordId}</strong>
+										{:else}
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-row">
+													<span>{itemSingular} ID</span>
+													<strong>{selectedTopic.id}</strong>
+												</div>
+												<div class="topic-sidebar-row">
+													<span>Record ID</span>
+													<strong>{selectedTopic.recordId}</strong>
+												</div>
+												<div class="topic-sidebar-row">
+													<span>Page</span>
+													<strong>{selectedTopic.page}</strong>
+												</div>
+												<div class="topic-sidebar-row">
+													<span>Type</span>
+													<span class="topic-type-display">
+														<strong>{selectedTopic.topicType || '—'}</strong>
+														{#if hasNonAscii(selectedTopic.topicType)}
+															{@const typeEn = lookupTopicTypeEn(selectedTopic.topicType)}
+															{#if typeEn}
+																<span class="topic-type-en">({typeEn})</span>
+															{/if}
+														{/if}
+													</span>
+												</div>
+												<div class="topic-sidebar-row">
+													<span>Line Numbers</span>
+													<strong>{formatTopicLineSpecs(selectedTopic.sourceLineSpecs)}</strong>
+												</div>
 											</div>
-											<div class="topic-sidebar-row">
-												<span>Page</span>
-												<strong>{selectedTopic.page}</strong>
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-label-row">
+													<div class="topic-sidebar-label">Topic Description</div>
+													<button type="button" class="topic-edit-trigger" onclick={startTopicEdit}>Edit</button>
+												</div>
+												<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
+												{#if selectedTopic.topicDescEn}
+													<p class="topic-sidebar-copy topic-desc-en">{selectedTopic.topicDescEn}</p>
+												{/if}
 											</div>
-											<div class="topic-sidebar-row">
-												<span>Type</span>
-												<strong>{selectedTopic.topicType || '—'}</strong>
-											</div>
-											<div class="topic-sidebar-row">
-												<span>Line Numbers</span>
-												<strong>{formatTopicLineSpecs(selectedTopic.sourceLineSpecs)}</strong>
-											</div>
-										</div>
-										<div class="topic-sidebar-block">
-											<div class="topic-sidebar-label">Topic Description</div>
-											<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
-											{#if selectedTopic.topicDescEn}
-												<p class="topic-sidebar-copy topic-desc-en">{selectedTopic.topicDescEn}</p>
-											{/if}
-										</div>
-										<div class="topic-sidebar-block">
-											<div class="topic-sidebar-label">Category Paths</div>
-											{#if selectedTopicCategoryPaths.length > 0}
-												<div class="category-path-list">
-													{#each selectedTopicCategoryPaths as categoryPath, idx (`${categoryPath.path}-${idx}`)}
-														<div class="category-path-row">
-															<div class="category-path-line">
-																<div
-																	class="category-path-segments"
-																	use:trackPathOverflow={categoryPath.path}
-																>
-																	{#each categoryPath.segments as segment, segmentIdx (`${segment.path}-${segmentIdx}`)}
-																		<span class="keyword-chip category-path-chip" title={segment.tooltip}
-																			>{segment.label}</span
-																		>
-																		{#if segmentIdx < categoryPath.segments.length - 1}
-																			<span class="category-path-separator">/</span>
-																		{/if}
-																	{/each}
-																</div>
-																{#if truncatedCategoryPaths[categoryPath.path]}
-																	<span class="category-path-ellipsis" title={categoryPath.path}>…</span>
-																{/if}
-																{#if categoryPath.confidenceLabel}
-																	<span class="category-path-confidence"
-																		>{categoryPath.confidenceLabel}</span
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-label">Category Paths</div>
+												{#if selectedTopicCategoryPaths.length > 0}
+													<div class="category-path-list">
+														{#each selectedTopicCategoryPaths as categoryPath, idx (`${categoryPath.path}-${idx}`)}
+															<div class="category-path-row">
+																<div class="category-path-line">
+																	<div
+																		class="category-path-segments"
+																		use:trackPathOverflow={categoryPath.path}
 																	>
-																{/if}
+																		{#each categoryPath.segments as segment, segmentIdx (`${segment.path}-${segmentIdx}`)}
+																			<span class="keyword-chip category-path-chip" title={segment.tooltip}
+																				>{segment.label}</span
+																			>
+																			{#if segmentIdx < categoryPath.segments.length - 1}
+																				<span class="category-path-separator">/</span>
+																			{/if}
+																		{/each}
+																	</div>
+																	{#if truncatedCategoryPaths[categoryPath.path]}
+																		<span class="category-path-ellipsis" title={categoryPath.path}>…</span>
+																	{/if}
+																	{#if categoryPath.confidenceLabel}
+																		<span class="category-path-confidence">{categoryPath.confidenceLabel}</span>
+																	{/if}
+																</div>
 															</div>
-														</div>
-													{/each}
+														{/each}
+													</div>
+												{:else}
+													<p class="topic-sidebar-copy muted">No category paths assigned.</p>
+												{/if}
+											</div>
+											{@const catPathsEn = selectedTopic.categoryPathsEn ?? []}
+											{#if catPathsEn.length > 0 && !arraysEqual(selectedTopic.categoryPaths ?? [], catPathsEn)}
+												<div class="topic-sidebar-block">
+													<div class="topic-sidebar-label">Category Paths (English)</div>
+													<div class="category-path-list">
+														{#each catPathsEn as enPath, idx (`en-cat-${enPath}-${idx}`)}
+															{@const enSegments = enPath.split('/').filter(Boolean)}
+															<div class="category-path-row">
+																<div class="category-path-line">
+																	<div class="category-path-segments">
+																		{#each enSegments as seg, segIdx (`en-seg-${seg}-${segIdx}`)}
+																			<span class="keyword-chip category-path-chip">{seg}</span>
+																			{#if segIdx < enSegments.length - 1}
+																				<span class="category-path-separator">/</span>
+																			{/if}
+																		{/each}
+																	</div>
+																</div>
+															</div>
+														{/each}
+													</div>
 												</div>
-											{:else}
-												<p class="topic-sidebar-copy muted">No category paths assigned.</p>
 											{/if}
-										</div>
-										<div class="topic-sidebar-block">
-											<div class="topic-sidebar-label">Keywords</div>
-											{#if selectedTopic.topicKeywords.length > 0}
-												<div class="keyword-list">
-													{#each selectedTopic.topicKeywords as kw, idx (`${kw}-${idx}`)}
-														<span class="keyword-chip">{kw}</span>
-													{/each}
+											<div class="topic-sidebar-block">
+												<div class="topic-sidebar-label">Keywords</div>
+												{#if selectedTopic.topicKeywords.length > 0}
+													<div class="keyword-list">
+														{#each selectedTopic.topicKeywords as kw, idx (`${kw}-${idx}`)}
+															<span class="keyword-chip">{kw}</span>
+														{/each}
+													</div>
+												{:else}
+													<p class="topic-sidebar-copy muted">No keywords extracted.</p>
+												{/if}
+											</div>
+											{@const kwEn = selectedTopic.topicKeywordsEn ?? []}
+											{#if kwEn.length > 0 && !arraysEqual(selectedTopic.topicKeywords, kwEn)}
+												<div class="topic-sidebar-block">
+													<div class="topic-sidebar-label">Keywords (English)</div>
+													<div class="keyword-list">
+														{#each kwEn as kw, idx (`en-kw-${kw}-${idx}`)}
+															<span class="keyword-chip keyword-chip-en">{kw}</span>
+														{/each}
+													</div>
 												</div>
-											{:else}
-												<p class="topic-sidebar-copy muted">No keywords extracted.</p>
 											{/if}
-										</div>
+										{/if}
 									{:else}
 										<div class="topic-sidebar-empty">Select a {itemSingular} to inspect it alongside the source PDF.</div>
 									{/if}
@@ -746,6 +1016,29 @@
 	.category-path-separator { display: inline-block; margin: 0 0.28rem; color: var(--muted); vertical-align: middle; }
 	.category-path-ellipsis { flex: none; cursor: help; font-size: 0.82rem; font-weight: 700; color: var(--muted); user-select: none; letter-spacing: 0.04em; }
 	.category-path-confidence { flex: none; font-size: 0.76rem; font-weight: 700; color: var(--muted); }
+
+	.topic-type-display { display: flex; align-items: baseline; gap: 0.35rem; flex-wrap: wrap; }
+	.topic-type-en { font-size: 0.74rem; color: var(--muted); font-style: italic; font-weight: 400; }
+	.keyword-chip-en { border-color: rgba(148, 163, 184, 0.2); background: rgba(148, 163, 184, 0.08); color: var(--muted); font-style: italic; }
+
+	.topic-sidebar-label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+	.topic-edit-trigger { flex: none; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 8px; padding: 0.2rem 0.5rem; background: rgba(34, 197, 94, 0.08); cursor: pointer; transition: background 150ms ease, border-color 150ms ease; }
+	.topic-edit-trigger:hover { background: rgba(34, 197, 94, 0.16); border-color: rgba(34, 197, 94, 0.5); }
+
+	.topic-sidebar-edit { display: flex; flex-direction: column; gap: 0.85rem; padding-bottom: 0.5rem; }
+	.topic-edit-field { display: flex; flex-direction: column; gap: 0.35rem; }
+	.topic-edit-hint { margin: 0; font-size: 0.68rem; color: var(--muted); opacity: 0.7; }
+	.topic-edit-input, .topic-edit-textarea { width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 10px; padding: 0.5rem 0.65rem; color: var(--text); font-size: 0.84rem; line-height: 1.5; font-family: inherit; resize: vertical; transition: border-color 150ms ease; }
+	.topic-edit-input:focus, .topic-edit-textarea:focus { outline: none; border-color: rgba(34, 197, 94, 0.5); }
+	.topic-edit-textarea { min-height: 72px; }
+	.topic-edit-error { margin: 0; font-size: 0.8rem; color: #f87171; line-height: 1.4; }
+	.topic-edit-actions { display: flex; gap: 0.5rem; margin-top: 0.25rem; }
+	.topic-edit-btn { flex: 1; border-radius: 10px; padding: 0.55rem 0.75rem; font-size: 0.82rem; font-weight: 700; cursor: pointer; border: 1px solid; transition: opacity 150ms ease, background 150ms ease; }
+	.topic-edit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.topic-edit-btn-save { background: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.45); color: #4ade80; }
+	.topic-edit-btn-save:not(:disabled):hover { background: rgba(34, 197, 94, 0.3); }
+	.topic-edit-btn-cancel { background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.2); color: var(--muted); }
+	.topic-edit-btn-cancel:not(:disabled):hover { background: rgba(148, 163, 184, 0.14); }
 
 	.pdf-fallback-frame { margin-top: 0.85rem; width: 100%; min-height: 540px; flex: 1; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px; background: white; }
 
