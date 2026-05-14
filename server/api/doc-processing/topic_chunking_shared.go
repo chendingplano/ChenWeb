@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -477,22 +476,14 @@ func extractTopicsFromLinesWithLLM(
 // ---------------------------------------------------------------------------
 
 const (
-	topicCategoryEmbedFileName        = "category.embed"
 	topicCategoryMetaFileName         = "metadata.txt"
 	topicsFileName                    = "topics.txt"
 	DefaultCategorySimilarityMinScore = 0.85
 )
 
 // indexTopicsInTreeDir indexes all topics from a single record into the topic
-// tree at treeRootDir using cosine-similarity-based directory matching.
-// If embedder is nil similarity matching is skipped and the normalised category
-// name is used as directory name directly.
+// tree at treeRootDir using category name-based directory matching.
 func indexTopicsInTreeDir(
-	ctx context.Context,
-	embedder Embedder,
-	embeddingModelName string,
-	similarityThreshold float64,
-	logger ApiTypes.JimoLogger,
 	treeRootDir string,
 	recordID int64,
 	topics []TopicItem,
@@ -524,7 +515,7 @@ func indexTopicsInTreeDir(
 			if len(pathEntry.Nodes) == 0 {
 				continue
 			}
-			if err := indexTopicPathInTree(ctx, embedder, embeddingModelName, similarityThreshold, logger, treeRootDir, recordID, topic, pathEntry, now); err != nil {
+			if err := indexTopicPathInTree(treeRootDir, recordID, topic, pathEntry, now); err != nil {
 				return fmt.Errorf("(MID_26050213) index topic %d path: %w", topic.SeqNo, err)
 			}
 		}
@@ -536,11 +527,6 @@ func indexTopicsInTreeDir(
 // one category-path entry of a topic and upserts the topic to topics.txt at
 // the leaf directory.
 func indexTopicPathInTree(
-	ctx context.Context,
-	embedder Embedder,
-	embeddingModelName string,
-	similarityThreshold float64,
-	logger ApiTypes.JimoLogger,
 	treeRootDir string,
 	recordID int64,
 	topic TopicItem,
@@ -549,7 +535,7 @@ func indexTopicPathInTree(
 ) error {
 	currentDir := treeRootDir
 	for _, node := range pathEntry.Nodes {
-		subdir, err := findOrCreateCategorySubdir(ctx, embedder, embeddingModelName, similarityThreshold, logger, currentDir, node, now)
+		subdir, err := findOrCreateCategorySubdir(currentDir, node, now)
 		if err != nil {
 			return err
 		}
@@ -563,11 +549,6 @@ func indexTopicPathInTree(
 // directory name. Otherwise, it creates the directory, its 'metadata.txt' and returns the
 // directory name.
 func findOrCreateCategorySubdir(
-	ctx context.Context,
-	embedder Embedder,
-	embeddingModelName string,
-	similarityThreshold float64,
-	logger ApiTypes.JimoLogger,
 	parentDir string,
 	node CategoryPathNode,
 	now time.Time,
@@ -638,12 +619,6 @@ func findOrCreateCategorySubdir(
 
 	if err := writeTopicCategoryMetadata(exactDir, node, now); err != nil {
 		return "", fmt.Errorf("(MID_26050222) write metadata for %q: %w", exactDir, err)
-	}
-	if len(nodeVec) > 0 {
-		embedPath := filepath.Join(exactDir, topicCategoryEmbedFileName)
-		if err := os.WriteFile(embedPath, []byte(formatFloatArray(nodeVec)+"\n"), 0o644); err != nil {
-			return "", fmt.Errorf("(MID_26050223) write category embed for %q: %w", exactDir, err)
-		}
 	}
 	return exactDir, nil
 }
@@ -865,53 +840,3 @@ func mergeTopicCategoryKeywords(metaPath string, newKeywords []string) error {
 	return nil
 }
 
-// cosineSimilarity returns the cosine similarity between two vectors.
-// Returns 0 if either vector has zero magnitude.
-func cosineSimilarity(a, b []float64) float64 {
-	if len(a) == 0 || len(b) == 0 || len(a) != len(b) {
-		return 0
-	}
-	var dot, magA, magB float64
-	for i := range a {
-		dot += a[i] * b[i]
-		magA += a[i] * a[i]
-		magB += b[i] * b[i]
-	}
-	if magA == 0 || magB == 0 {
-		return 0
-	}
-	denom := math.Sqrt(magA) * math.Sqrt(magB)
-	if denom == 0 {
-		return 0
-	}
-	return dot / denom
-}
-
-// loadFloatEmbedding loads a float64 vector from a file written by formatFloatArray.
-func loadFloatEmbedding(path string) ([]float64, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	raw := strings.TrimSpace(string(data))
-	raw = strings.TrimPrefix(raw, "[")
-	raw = strings.TrimSuffix(raw, "]")
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return []float64{}, nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]float64, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		f, err := strconv.ParseFloat(p, 64)
-		if err != nil {
-			return nil, fmt.Errorf("(MID_26050240) parse float %q: %w", p, err)
-		}
-		out = append(out, f)
-	}
-	return out, nil
-}

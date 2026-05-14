@@ -153,7 +153,7 @@
 		'json',
 		'xml',
 		'markdown',
-		'typst'
+		'typst',
 	];
 	const procStatusOptions = ['all', 'success', 'fail'];
 

@@ -253,7 +253,7 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}
-	if err := indexTopicsInTreeDir(ctx, s.Embedder, s.TopicEmbeddingModelName, s.CategorySimilarityMinScore, s.Logger, s.TreeRootDir, rec.ID, topics); err != nil {
+	if err := indexTopicsInTreeDir(s.TreeRootDir, rec.ID, topics); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}

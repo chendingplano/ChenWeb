@@ -64,6 +64,7 @@ export type ListKbInputsParams = {
 	parserName?: string;
 	operation?: string;
 	procStatus?: string;
+	excludeDocType?: string;
 	modifyStartTime?: string;
 	modifyEndTime?: string;
 };
@@ -89,6 +90,7 @@ function buildQuery(params: ListKbInputsParams): string {
 	if (params.parserName?.trim()) query.set('parser_name', params.parserName.trim());
 	if (params.operation?.trim()) query.set('operation', params.operation.trim());
 	if (params.procStatus?.trim()) query.set('proc_status', params.procStatus.trim());
+	if (params.excludeDocType?.trim()) query.set('exclude_doc_type', params.excludeDocType.trim());
 	if (params.startTime.trim()) query.set('start_time', params.startTime.trim());
 	if (params.endTime.trim()) query.set('end_time', params.endTime.trim());
 	if (params.modifyStartTime?.trim()) query.set('modify_start_time', params.modifyStartTime.trim());

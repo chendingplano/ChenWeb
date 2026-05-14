@@ -26,6 +26,7 @@ var allowedUploadParsers = map[string]struct{}{
 
 var allowedUploadTypes = map[string]struct{}{
 	"pdf":      {},
+	"zip":      {},
 	"doc":      {},
 	"excel":    {},
 	"ppt":      {},

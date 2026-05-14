@@ -28,6 +28,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
+	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -122,6 +123,7 @@ func RegisterRoutes(e *echo.Echo) error {
 			// or "/_" are treated as frontend routes.
 			if !strings.HasPrefix(path, "/api") &&
 				!strings.HasPrefix(path, "/auth") &&
+				!strings.HasPrefix(path, "/integrations/openmetadata") &&
 				!strings.HasPrefix(path, "/shared_api") &&
 				!strings.HasPrefix(path, "/ws") &&
 				path != "/_" &&
@@ -199,6 +201,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/health", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]any{"status": "ok"})
 	})
+
+	apiGroup.GET("/integrations/openmetadata/session", openmetadatahandler.GetSession)
 
 	// Add the endpoint 'api/v1/button-click' (testing only)
 	apiGroup.POST("/button-click", buttonhandler.HandleButtonClick)
@@ -407,6 +411,12 @@ func RegisterRoutes(e *echo.Echo) error {
 	wsGroup := e.Group("/ws")
 	wsGroup.Use(authmiddleware.AuthMiddleware)
 	wsGroup.GET("/agent-platform", agentplatformhandler.HandleAgentPlatformWS)
+
+	openMetadataGroup := e.Group("/integrations/openmetadata")
+	openMetadataGroup.Use(authmiddleware.AuthMiddleware)
+	openMetadataGroup.Any("", openmetadatahandler.Proxy)
+	openMetadataGroup.Any("/", openmetadatahandler.Proxy)
+	openMetadataGroup.Any("/*", openmetadatahandler.Proxy)
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {

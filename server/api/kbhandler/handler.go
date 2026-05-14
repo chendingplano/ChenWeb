@@ -76,6 +76,7 @@ type listInputsFilters struct {
 	ParserName      string
 	Operation       string
 	ProcStatus      string
+	ExcludeDocType  string
 	CreateTimeStart *time.Time
 	CreateTimeEnd   *time.Time
 	ModifyTimeStart *time.Time
@@ -151,6 +152,7 @@ func ListInputs(c echo.Context) error {
 		ParserName:      c.QueryParam("parser_name"),
 		Operation:       c.QueryParam("operation"),
 		ProcStatus:      c.QueryParam("proc_status"),
+		ExcludeDocType:  c.QueryParam("exclude_doc_type"),
 		CreateTimeStart: createStartTime,
 		CreateTimeEnd:   createEndTime,
 		ModifyTimeStart: modifyStartTime,
@@ -171,6 +173,7 @@ func ListInputs(c echo.Context) error {
 		"parser_name", strings.TrimSpace(filters.ParserName),
 		"operation", strings.TrimSpace(filters.Operation),
 		"proc_status", strings.TrimSpace(filters.ProcStatus),
+		"exclude_doc_type", strings.TrimSpace(filters.ExcludeDocType),
 		"create_start_time", formatOptionalTime(filters.CreateTimeStart),
 		"create_end_time", formatOptionalTime(filters.CreateTimeEnd),
 		"modify_start_time", formatOptionalTime(filters.ModifyTimeStart),
@@ -556,6 +559,9 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	docType := strings.TrimSpace(strings.ToLower(filters.DocType))
 	if docType != "" && docType != "all" {
 		whereParts = append(whereParts, fmt.Sprintf("LOWER(i.type) = LOWER(%s)", nextArg(docType)))
+	}
+	if excludeDocType := strings.TrimSpace(strings.ToLower(filters.ExcludeDocType)); excludeDocType != "" {
+		whereParts = append(whereParts, fmt.Sprintf("LOWER(i.type) <> LOWER(%s)", nextArg(excludeDocType)))
 	}
 
 	parseState := normalizeParseState(filters.ParseState)

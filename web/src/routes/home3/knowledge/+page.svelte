@@ -428,7 +428,7 @@
 			{:else if activeSection === 'kb-topic-graph'}
 				<TopicGraphView {darkMode} />
 			{:else if activeSection === 'kb-topic-tree'}
-				<TopicTreeView {darkMode} browserInstanceKey="topic-tree" scopeToActiveStore={true} />
+				<TopicTreeView {darkMode} browserInstanceKey="topic-tree" />
 			{:else if activeSection === 'kb-provision-graph'}
 				<TopicGraphView
 					{darkMode}

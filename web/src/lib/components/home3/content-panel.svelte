@@ -6,6 +6,7 @@
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 	import DocGenView    from '$lib/components/home3/doc-gen-view.svelte';
 	import PromptOptimizerView from '$lib/components/home3/prompt-optimizer-view.svelte';
+	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
@@ -155,6 +156,8 @@
 			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'prompt-optimizer'}
 			<PromptOptimizerView {darkMode} />
+		{:else if activeMenu?.childId === 'openmetadata'}
+			<OpenMetadataWorkspace {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-logs'}
 			<JetStreamLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-events'}

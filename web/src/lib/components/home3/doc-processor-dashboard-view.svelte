@@ -243,7 +243,10 @@
 				page: 1,
 				pageSize: 20
 			});
-			activePipelines = (res.results ?? []).filter(isActiveRecord).slice(0, 10);
+			activePipelines = (res.results ?? [])
+				.filter(r => !r.file_name?.toLowerCase().endsWith('.zip'))
+				.filter(isActiveRecord)
+				.slice(0, 10);
 			lastPoll = new Date().toLocaleTimeString();
 			pipelinesError = '';
 		} catch (err) {

@@ -71,6 +71,7 @@ export function buildTopicTreeListParams({
 	/** @type {import('$lib/services/kbService').ListKbInputsParams} */
 	const params = {
 		docType: normalizedFilters.searchDocType?.trim() || 'all',
+		excludeDocType: 'zip',
 		parseState: 'all',
 		fileName: normalizedFilters.searchFileName?.trim() || '',
 		startTime: normalizedFilters.searchCreateStart?.trim() || '',

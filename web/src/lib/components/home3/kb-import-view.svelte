@@ -10,6 +10,7 @@
 	const docTypeOptions = [
 		'all',
 		'pdf',
+		'zip',
 		'doc',
 		'excel',
 		'ppt',
