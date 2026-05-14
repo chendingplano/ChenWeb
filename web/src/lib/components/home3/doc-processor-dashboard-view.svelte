@@ -12,6 +12,7 @@
 	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import PauseIcon from '@lucide/svelte/icons/pause';
 	import { listKbInputs, type KbInputRecord } from '$lib/services/kbService';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -97,6 +98,12 @@
 		x: number;
 		y: number;
 	} | null>(null);
+
+	// ── Sync control state ────────────────────────────────────────────────
+	let autoSync = $state(true);
+	let syncInterval: ReturnType<typeof setInterval> | null = null;
+	let emptyPollCount = 0;
+	let prevActivePipelinesCount = 0;
 
 	// ── Manual launch state ────────────────────────────────────────────────
 
@@ -230,9 +237,31 @@
 		return `${last.operation ?? '?'} · ${ps || 'running'}`;
 	}
 
+	// ── Sync helpers ─────────────────────────────────────────────────────
+
+	function startAutoSync() {
+		if (syncInterval !== null) return;
+		autoSync = true;
+		emptyPollCount = 0;
+		syncInterval = setInterval(pollPipelines, 5000);
+	}
+
+	function stopAutoSync() {
+		if (syncInterval !== null) {
+			clearInterval(syncInterval);
+			syncInterval = null;
+		}
+		autoSync = false;
+	}
+
+	function toggleSync() {
+		if (autoSync) stopAutoSync(); else startAutoSync();
+	}
+
 	// ── API calls ──────────────────────────────────────────────────────────
 
 	async function pollPipelines() {
+		const prevCount = prevActivePipelinesCount;
 		try {
 			const res = await listKbInputs({
 				docType: 'all',
@@ -243,12 +272,31 @@
 				page: 1,
 				pageSize: 20
 			});
-			activePipelines = (res.results ?? [])
+			const newPipelines = (res.results ?? [])
 				.filter(r => !r.file_name?.toLowerCase().endsWith('.zip'))
 				.filter(isActiveRecord)
 				.slice(0, 10);
+			const newCount = newPipelines.length;
+			activePipelines = newPipelines;
+			prevActivePipelinesCount = newCount;
 			lastPoll = new Date().toLocaleTimeString();
 			pipelinesError = '';
+
+			// Turn sync back on when pipelines appear while sync was off
+			if (prevCount === 0 && newCount > 0 && !autoSync) {
+				startAutoSync();
+			}
+			// Track consecutive empty polls; disable sync after 5 following a non-empty state
+			if (newCount === 0) {
+				if (prevCount > 0) {
+					emptyPollCount = 1;
+				} else if (emptyPollCount > 0) {
+					emptyPollCount++;
+					if (emptyPollCount >= 5 && autoSync) stopAutoSync();
+				}
+			} else {
+				emptyPollCount = 0;
+			}
 		} catch (err) {
 			pipelinesError = err instanceof Error ? err.message : 'Failed to load pipelines';
 		} finally {
@@ -456,8 +504,8 @@
 
 	onMount(() => {
 		pollPipelines();
-		const interval = setInterval(pollPipelines, 5000);
-		return () => clearInterval(interval);
+		syncInterval = setInterval(pollPipelines, 5000);
+		return () => { if (syncInterval !== null) clearInterval(syncInterval); };
 	});
 </script>
 
@@ -528,12 +576,36 @@
 		<div class="mb-4 flex items-start justify-between">
 			<div>
 				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">Active Pipelines</h2>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">Live processing threads — refreshes every 5 s</p>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">
+				{autoSync ? 'Live processing threads — refreshes every 5 s' : 'Live processing threads — auto-sync paused'}
+			</p>
 			</div>
 			<div class="flex items-center gap-3">
 				{#if lastPoll}
 					<span style="font-size:11px; color:{textMuted}; font-family:monospace;">Updated {lastPoll}</span>
 				{/if}
+				<!-- Stop Sync / Start Sync toggle -->
+				<button
+					onclick={toggleSync}
+					class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-none"
+					style="background:{autoSync ? surface2 : colorSuccessTint}; border:1px solid {autoSync ? borderColor : colorSuccess + '50'}; color:{autoSync ? textSecondary : colorSuccess}; font-size:12px; font-weight:500; cursor:pointer;"
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = autoSync ? textPrimary : colorSuccess;
+						(e.currentTarget as HTMLElement).style.borderColor = autoSync ? accent + '60' : colorSuccess;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = autoSync ? textSecondary : colorSuccess;
+						(e.currentTarget as HTMLElement).style.borderColor = autoSync ? borderColor : colorSuccess + '50';
+					}}
+				>
+					{#if autoSync}
+						<PauseIcon class="h-3 w-3" />
+						Stop Sync
+					{:else}
+						<PlayIcon class="h-3 w-3" />
+						Start Sync
+					{/if}
+				</button>
 				<button
 					onclick={pollPipelines}
 					class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-none"

@@ -71,6 +71,10 @@
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
+	let detailCardWidth = $state(340);
+	let resizing = $state(false);
+	let resizeStartX = 0;
+	let resizeStartWidth = 0;
 
 	let activeRecord = $derived(
 		treeState.selectedRecordId != null ? (recordCache[treeState.selectedRecordId] ?? null) : null
@@ -219,7 +223,9 @@
 				...recordCache,
 				[recordId]: {
 					...current,
-					topics: response.topics.map((topic) => ({ ...topic, recordId }))
+					topics: [...response.topics]
+						.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+						.map((topic) => ({ ...topic, recordId }))
 				}
 			};
 			if (
@@ -298,10 +304,35 @@
 			badges: [mapped.docType]
 		};
 	}
+
+	function startResize(event: MouseEvent) {
+		resizing = true;
+		resizeStartX = event.clientX;
+		resizeStartWidth = detailCardWidth;
+		event.preventDefault();
+	}
+
+	$effect(() => {
+		if (!resizing) return;
+		function onMove(e: MouseEvent) {
+			const delta = e.clientX - resizeStartX;
+			detailCardWidth = Math.max(180, Math.min(640, resizeStartWidth + delta));
+		}
+		function onUp() {
+			resizing = false;
+		}
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+		return () => {
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+	});
 </script>
 
 <div
 	class="tree-shell"
+	class:resizing={resizing}
 	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16); --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted};`}
 >
 	{#if errorDialogOpen && loadError}
@@ -377,7 +408,7 @@
 
 			{#if activeRecord}
 				<div class="detail-grid">
-					<div class="detail-card">
+					<div class="detail-card" style="width:{detailCardWidth}px; flex: 0 0 {detailCardWidth}px;">
 						<div class="eyebrow">Selected Record</div>
 						<h3>{activeRecord.title}</h3>
 						<div class="detail-meta">
@@ -395,6 +426,7 @@
 								>
 									<div class="snippet-head">
 										<div class="keyword-row">
+											<span class="snippet-id">#{topic.id}</span>
 											{#each topic.topicKeywords.slice(0, 4) as kw}
 												<span class="keyword">{kw}</span>
 											{/each}
@@ -406,6 +438,13 @@
 							{/each}
 						</div>
 					</div>
+
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div
+						class="resize-handle"
+						class:active={resizing}
+						onmousedown={startResize}
+					></div>
 
 					<div class="pdf-card">
 						<div class="eyebrow">PDF Display</div>
@@ -535,6 +574,8 @@
 		color: var(--text);
 	}
 
+	.tree-shell.resizing { cursor: col-resize; user-select: none; }
+
 	.error-overlay {
 		position: absolute;
 		inset: 0;
@@ -627,7 +668,12 @@
 	.tab.active { border-color: rgba(34, 197, 94, 0.36); background: rgba(13, 148, 136, 0.16); color: #a7f3d0; }
 	.tab.passive { color: var(--muted); }
 
-	.detail-grid { display: grid; min-height: 0; flex: 1; grid-template-columns: 340px minmax(0, 1fr); gap: 1rem; }
+	.detail-grid { display: flex; min-height: 0; flex: 1; align-items: stretch; gap: 0; }
+	.detail-card { flex: 0 0 auto; overflow: hidden; }
+	.pdf-card { flex: 1 1 0; min-width: 0; }
+	.resize-handle { flex: 0 0 8px; cursor: col-resize; align-self: stretch; position: relative; margin: 0 0.25rem; border-radius: 4px; transition: background 150ms; }
+	.resize-handle::after { content: ''; position: absolute; top: 15%; bottom: 15%; left: 50%; transform: translateX(-50%); width: 2px; border-radius: 2px; background: rgba(148, 163, 184, 0.2); transition: background 150ms; }
+	.resize-handle:hover::after, .resize-handle.active::after { background: rgba(34, 197, 94, 0.55); }
 	.detail-card, .pdf-card { display: flex; flex-direction: column; min-height: 0; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.26); padding: 1rem; }
 
 	.topic-snippets { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 0.75rem; margin-top: 1rem; overflow: auto; padding-right: 0.25rem; }
@@ -640,6 +686,7 @@
 
 	.keyword-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 	.keyword { border-radius: 999px; padding: 0.18rem 0.48rem; background: rgba(34, 197, 94, 0.14); font-size: 0.7rem; font-weight: 600; color: #4ade80; }
+	.snippet-id { border-radius: 999px; padding: 0.18rem 0.48rem; background: rgba(148, 163, 184, 0.1); font-size: 0.7rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 
 	.empty-state { display: flex; flex: 1; align-items: center; justify-content: center; border-radius: 18px; border: 1px dashed rgba(148, 163, 184, 0.2); background: rgba(2, 6, 23, 0.28); padding: 1rem; text-align: center; color: var(--muted); }
 
@@ -674,6 +721,9 @@
 	:global(.pdf-highlight) { position: absolute; background: rgba(34, 197, 94, 0.25); outline: 1px solid rgba(34, 197, 94, 0.8); border-radius: 2px; }
 
 	@media (max-width: 980px) {
-		.workspace, .detail-grid { grid-template-columns: minmax(0, 1fr); }
+		.workspace { grid-template-columns: minmax(0, 1fr); }
+		.detail-grid { flex-direction: column; }
+		.detail-card { width: 100% !important; flex: none !important; }
+		.resize-handle { display: none; }
 	}
 </style>

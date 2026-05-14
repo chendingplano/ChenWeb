@@ -8,11 +8,13 @@
 	let {
 		open = $bindable(false),
 		onSelect = () => {},
-		initialFilters = createDefaultRecordBrowserFilters()
+		initialFilters = createDefaultRecordBrowserFilters(),
+		scopeToActiveStore = false
 	}: {
 		open?: boolean;
 		onSelect?: (record: KbInputRecord, filters: RecordBrowserFilters) => void;
 		initialFilters?: RecordBrowserFilters;
+		scopeToActiveStore?: boolean;
 	} = $props();
 
 	const docTypeOptions = ['all', 'pdf', 'doc', 'excel', 'ppt', 'text', 'markdown'];
@@ -100,7 +102,7 @@
 				modifyEndTime: searchModifyEnd,
 				page: 1,
 				pageSize: 50,
-				ksStoreId: knowledgeStoreState.activeStoreId ?? undefined
+				ksStoreId: scopeToActiveStore ? (knowledgeStoreState.activeStoreId ?? undefined) : undefined
 			});
 			searchResults = res.results ?? [];
 		} catch (err) {
@@ -174,11 +176,11 @@
 					</p>
 					<div class="scope-copy">
 						Store scope:
-						{#if knowledgeStoreState.activeStore}
+						{#if scopeToActiveStore && knowledgeStoreState.activeStore}
 							<span class="scope-store">{knowledgeStoreState.activeStore.ks_name}</span>
 							<span class="scope-id">#{knowledgeStoreState.activeStore.id}</span>
 						{:else}
-							<span class="scope-empty">No active store — results will not be scoped</span>
+							<span class="scope-empty">All stores</span>
 						{/if}
 					</div>
 				</div>

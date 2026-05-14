@@ -410,7 +410,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
-	if err := indexTopicsInTreeDir(s.TreeRootDir, rec.ID, topics); err != nil {
+	if err := indexTopicsInTreeDir(s.Logger, s.TreeRootDir, rec.ID, topics); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}

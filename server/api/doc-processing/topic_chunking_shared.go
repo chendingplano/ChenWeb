@@ -484,6 +484,7 @@ const (
 // indexTopicsInTreeDir indexes all topics from a single record into the topic
 // tree at treeRootDir using category name-based directory matching.
 func indexTopicsInTreeDir(
+	logger ApiTypes.JimoLogger,
 	treeRootDir string,
 	recordID int64,
 	topics []TopicItem,
@@ -515,7 +516,7 @@ func indexTopicsInTreeDir(
 			if len(pathEntry.Nodes) == 0 {
 				continue
 			}
-			if err := indexTopicPathInTree(treeRootDir, recordID, topic, pathEntry, now); err != nil {
+			if err := indexTopicPathInTree(logger, treeRootDir, recordID, topic, pathEntry, now); err != nil {
 				return fmt.Errorf("(MID_26050213) index topic %d path: %w", topic.SeqNo, err)
 			}
 		}
@@ -527,6 +528,7 @@ func indexTopicsInTreeDir(
 // one category-path entry of a topic and upserts the topic to topics.txt at
 // the leaf directory.
 func indexTopicPathInTree(
+	logger ApiTypes.JimoLogger,
 	treeRootDir string,
 	recordID int64,
 	topic TopicItem,
@@ -535,7 +537,7 @@ func indexTopicPathInTree(
 ) error {
 	currentDir := treeRootDir
 	for _, node := range pathEntry.Nodes {
-		subdir, err := findOrCreateCategorySubdir(currentDir, node, now)
+		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
 		if err != nil {
 			return err
 		}
@@ -549,6 +551,7 @@ func indexTopicPathInTree(
 // directory name. Otherwise, it creates the directory, its 'metadata.txt' and returns the
 // directory name.
 func findOrCreateCategorySubdir(
+	logger ApiTypes.JimoLogger,
 	parentDir string,
 	node CategoryPathNode,
 	now time.Time,
@@ -613,6 +616,14 @@ func findOrCreateCategorySubdir(
 	*/
 
 	// Step 3: create a new directory using the normalized name (no suffix).
+	if logger != nil {
+		logger.Info("(MID_26050223) creating new category dir",
+			"node_name", node.Name,
+			"normalized_name", normalizedName,
+			"parent_dir", parentDir,
+			"exact_dir", exactDir,
+		)
+	}
 	if err := os.MkdirAll(exactDir, 0o755); err != nil {
 		return "", fmt.Errorf("(MID_26050221) create category dir %q: %w", exactDir, err)
 	}

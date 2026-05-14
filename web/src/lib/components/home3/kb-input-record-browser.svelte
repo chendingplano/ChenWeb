@@ -371,6 +371,7 @@
 	<KbInputSearchDialog
 		bind:open={searchOpen}
 		initialFilters={filters}
+		{scopeToActiveStore}
 		onSelect={async (record, nextFilters) => {
 			recordIdInput = '';
 			applyFilters(nextFilters);
