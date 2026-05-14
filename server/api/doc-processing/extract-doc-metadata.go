@@ -170,7 +170,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 	upd := DocMetadataUpdate{
 		Title:       strings.TrimSpace(out.Title),
 		DocNo:       strings.TrimSpace(out.DocNo),
-		PublishDate: strings.TrimSpace(out.PublishDate),
+		PublishDate: normalizePublishDateForColumn(out.PublishDate),
 		Authors:     pickPreferredAuthors(out),
 		DocMetadata: copyMetadata(out.Metadata),
 		StatusRaw:   statusRaw,
@@ -430,6 +430,29 @@ func buildInputText(linesByPage map[int][]string, lastPage int) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func normalizePublishDateForColumn(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.Format("2006-01-02")
+	}
+
+	for _, layout := range []string{
+		"2006-01-02",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04",
+	} {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+
+	return ""
 }
 
 func appendDocMetaStatus(raw string, start time.Time, durationMs int64, procErr error) (string, error) {

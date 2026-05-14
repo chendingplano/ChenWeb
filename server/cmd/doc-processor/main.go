@@ -127,6 +127,8 @@ func main() {
 			// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
 			docprocessing.NewStaticAnalyzerProcessor(inputStore, logger),
 			docprocessing.NewChunkingProcessor(inputStore, chunkSvc, logger),
+			docprocessing.NewGenerateSummariesProcessor(inputStore, fixedChunkSvc, logger),
+			docprocessing.NewGenerateTopicsProcessor(inputStore, topicChunkSvc, logger),
 			docprocessing.NewExtractDocMetadataProcessor(inputStore, llmClient, logger),
 			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
 			docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
@@ -147,7 +149,7 @@ func main() {
 		"durable", durable,
 		"stream", streamName,
 		"chunking_method", chunkSvc.Method,
-		"processors", []string{"blocking", "structure_analyzer", "static_analyzer", "chunking", "extract_doc_metadata", "extract_metrics", "extract_provisions"},
+		"processors", []string{"blocking", "structure_analyzer", "static_analyzer", "chunking", "generate_summaries", "generate_topics", "extract_doc_metadata", "extract_metrics", "extract_provisions"},
 		"started_at", time.Now().Format(time.RFC3339),
 	)
 

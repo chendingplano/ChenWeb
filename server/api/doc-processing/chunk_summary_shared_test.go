@@ -1,7 +1,6 @@
 package docprocessing
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -132,7 +131,7 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 	tmp := t.TempDir()
 	root := SummaryItem{SummaryID: "53_1_0001", RecordID: 53, Level: 1, SeqNo: 1}
 
-	if err := writeSummaryTreeRootReference(context.Background(), nil, "", nil, tmp, 53, root, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
+	if err := writeSummaryTreeRootReference(nil, tmp, 53, root, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("writeSummaryTreeRootReference: %v", err)
 	}
 	leaf := filepath.Join(tmp, "safety_overview", "closing_notes", "summaries.txt")
@@ -146,7 +145,7 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 
 	// Reprocessing the same record replaces its prior entry and does not duplicate it.
 	root2 := SummaryItem{SummaryID: "53_2_0001", RecordID: 53, Level: 2, SeqNo: 1}
-	if err := writeSummaryTreeRootReference(context.Background(), nil, "", nil, tmp, 53, root2, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
+	if err := writeSummaryTreeRootReference(nil, tmp, 53, root2, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("rewrite summary tree root reference: %v", err)
 	}
 	body, err = os.ReadFile(leaf)
@@ -159,7 +158,7 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 
 	// A second record writing to the same leaf must not overwrite the first record's entry.
 	root3 := SummaryItem{SummaryID: "77_1_0001", RecordID: 77, Level: 1, SeqNo: 1}
-	if err := writeSummaryTreeRootReference(context.Background(), nil, "", nil, tmp, 77, root3, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
+	if err := writeSummaryTreeRootReference(nil, tmp, 77, root3, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("write second record summary tree root reference: %v", err)
 	}
 	body, err = os.ReadFile(leaf)
@@ -176,7 +175,7 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 
 	// Reprocessing record 77 replaces its entry and preserves record 53's entry.
 	root4 := SummaryItem{SummaryID: "77_2_0001", RecordID: 77, Level: 2, SeqNo: 1}
-	if err := writeSummaryTreeRootReference(context.Background(), nil, "", nil, tmp, 77, root4, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
+	if err := writeSummaryTreeRootReference(nil, tmp, 77, root4, []string{"Safety Overview", "Closing Notes"}, nil); err != nil {
 		t.Fatalf("reprocess record 77: %v", err)
 	}
 	body, err = os.ReadFile(leaf)
@@ -357,7 +356,7 @@ func TestWriteSummaryTreeEntry_WritesMetadata(t *testing.T) {
 		{Name: "Safety Overview", Keywords: []string{"safety", "overview"}, Confidence: 0.9},
 		{Name: "Closing Notes", Keywords: []string{"closing"}, Confidence: 0.8},
 	}
-	if err := writeSummaryTreeEntry(context.Background(), nil, "", nil, tmp, summary, []string{"Safety Overview", "Closing Notes"}, nodes); err != nil {
+	if err := writeSummaryTreeEntry(nil, tmp, summary, []string{"Safety Overview", "Closing Notes"}, nodes); err != nil {
 		t.Fatalf("writeSummaryTreeEntry: %v", err)
 	}
 	for _, tc := range []struct {

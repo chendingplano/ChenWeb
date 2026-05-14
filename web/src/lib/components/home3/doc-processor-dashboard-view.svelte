@@ -10,6 +10,8 @@
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { listKbInputs, type KbInputRecord } from '$lib/services/kbService';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
@@ -54,27 +56,27 @@
 	// ── Pipeline definition ────────────────────────────────────────────────
 
 	// Single ordered pipeline definition. 'operations' lists all operation names
-	// this stage may write into kb.inputs.status ('static_analzyer' is the actual
-	// name used by the structure analyzer service despite the typo in the spec).
+	// this stage may write into kb.inputs.status, including legacy aliases.
 	const PIPELINE_STAGES = [
 		{ id: 'staged',               label: 'Staged',             operations: [] as string[] },
 		{ id: 'parsing',              label: 'PDF Parser',          operations: ['parsing', 'parsed'] },
 		{ id: 'converting',           label: 'Result Convert',      operations: ['converting', 'converted', 'line-file-generated'] },
-		{ id: 'structure_analyzer',   label: 'Structure Analyzer',  operations: ['structure_analyzer', 'static_analzyer'] },
+		{ id: 'structure_analyzer',   label: 'Structure Analyzer',  operations: ['structure_analyzer', 'static_analyzer', 'static_analzyer'] },
 		{ id: 'chunking',             label: 'Chunking',            operations: ['chunking', 'chunked'] },
 		{ id: 'extract_doc_metadata', label: 'Extract Metadata',    operations: ['extract_doc_metadata', 'extract_metadata'] },
 		{ id: 'extract_metrics',      label: 'Extract Metrics',     operations: ['extract_metrics'] },
 		{ id: 'extract_provisions',   label: 'Extract Provisions',  operations: ['extract_provisions'] },
-		{ id: 'generate_summaries',   label: 'Generate Summary',    operations: ['generate_summaries'] }
+		{ id: 'generate_summaries',   label: 'Generate Summaries',  operations: ['generate_summaries'] },
+		{ id: 'generate_topics',      label: 'Generate Topics',     operations: ['generate_topics'] }
 	];
 
 	// Stages managed by the doc-processor service — all must finish for the pipeline to be done.
 	const DOC_PROCESSOR_STAGES = PIPELINE_STAGES.slice(3);
 
 	// Processors that can be explicitly requested in launch/restart payloads.
-	// generate_summaries is triggered internally by chunking, not directly requestable.
 	const ALL_PROCESSOR_IDS = [
-		'structure_analyzer', 'chunking', 'extract_doc_metadata', 'extract_metrics', 'extract_provisions'
+		'structure_analyzer', 'chunking', 'extract_doc_metadata', 'extract_metrics', 'extract_provisions',
+		'generate_summaries', 'generate_topics'
 	];
 
 	// Ordered subset of PIPELINE_STAGES shown in the launch/restart UI.
@@ -120,6 +122,19 @@
 	let showRestartDialog = $state(false);
 	let restarting = $state(false);
 	let restartError = $state('');
+
+	// ── Failed Pipelines state ─────────────────────────────────────────────
+
+	const FAILED_PAGE_SIZE = 30;
+	let failedExpanded = $state(false);
+	let failedRecords = $state<KbInputRecord[]>([]);
+	let failedLoading = $state(false);
+	let failedError = $state('');
+	let failedPage = $state(1);
+	let failedTotal = $state(0);
+	let failedLoaded = $state(false);
+
+	let failedTotalPages = $derived(Math.max(1, Math.ceil(failedTotal / FAILED_PAGE_SIZE)));
 
 	// ── Helpers ────────────────────────────────────────────────────────────
 
@@ -322,9 +337,74 @@
 
 	function openRestart(record: KbInputRecord) {
 		restartTarget = record;
-		restartProcessors = Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]));
+		restartProcessors = getDefaultRestartProcessors(record);
 		restartError = '';
 		showRestartDialog = true;
+	}
+
+	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
+		const unfinishedStageIds = new Set(
+			computeStages(record)
+				.filter((stage) => stage.status !== 'success' && ALL_PROCESSOR_IDS.includes(stage.id))
+				.map((stage) => stage.id)
+		);
+
+		if (!unfinishedStageIds.size) {
+			return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]));
+		}
+
+		return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, unfinishedStageIds.has(p)]));
+	}
+
+	function getFailedSteps(record: KbInputRecord): string[] {
+		return (record.status ?? [])
+			.filter((e) => {
+				const ps = (
+					(e as StatusEntry).proc_status ??
+					(e as StatusEntry)['proc-status'] ??
+					e.status ??
+					''
+				).toLowerCase();
+				return ps === 'failed' || ps === 'fail';
+			})
+			.map((e) => e.operation ?? '?');
+	}
+
+	async function loadFailedPipelines() {
+		failedLoading = true;
+		failedError = '';
+		try {
+			const res = await listKbInputs({
+				docType: 'all',
+				parseState: 'all',
+				fileName: '',
+				startTime: '',
+				endTime: '',
+				page: failedPage,
+				pageSize: FAILED_PAGE_SIZE,
+				procStatus: 'failed'
+			});
+			failedRecords = res.results ?? [];
+			failedTotal = res.total ?? 0;
+			failedLoaded = true;
+		} catch (err) {
+			failedError = err instanceof Error ? err.message : 'Failed to load failed pipelines';
+		} finally {
+			failedLoading = false;
+		}
+	}
+
+	function toggleFailedExpanded() {
+		failedExpanded = !failedExpanded;
+		if (failedExpanded && !failedLoaded && !failedLoading) {
+			void loadFailedPipelines();
+		}
+	}
+
+	function failedGoToPage(page: number) {
+		if (page < 1 || page > failedTotalPages) return;
+		failedPage = page;
+		void loadFailedPipelines();
 	}
 
 	function allProcessorsSelected(): boolean {
@@ -794,6 +874,181 @@
 						Launch
 					</button>
 				</div>
+			</div>
+		{/if}
+	</section>
+
+	<!-- ── Section divider ────────────────────────────────────── -->
+	<div style="height:1px; background:{borderColor}; margin:0 24px;"></div>
+
+	<!-- ════════════════════════════════════════════════════════
+	     Section 3 — Failed Pipelines
+	══════════════════════════════════════════════════════════ -->
+	<section class="p-6">
+
+		<!-- Collapsible header -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="flex cursor-pointer items-center justify-between"
+			onclick={toggleFailedExpanded}
+			onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFailedExpanded(); } }}
+			role="button"
+			tabindex="0"
+			style="user-select:none;"
+		>
+			<div class="flex items-center gap-2">
+				{#if failedExpanded}
+					<ChevronDownIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+				{:else}
+					<ChevronRightIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+				{/if}
+				<div>
+					<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 2px;">
+						Failed Pipelines
+						{#if failedLoaded}
+							<span style="font-size:12px; font-weight:400; color:{colorError}; margin-left:6px;">({failedTotal})</span>
+						{/if}
+					</h2>
+					<p style="font-size:12px; color:{textMuted}; margin:0;">Records with at least one failed processing step</p>
+				</div>
+			</div>
+			{#if failedExpanded}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<button
+					onclick={(e) => { e.stopPropagation(); failedPage = 1; void loadFailedPipelines(); }}
+					class="flex items-center gap-1.5 rounded-lg px-3 py-1.5"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-weight:500; cursor:pointer;"
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textPrimary;
+						(e.currentTarget as HTMLElement).style.borderColor = accent + '60';
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textSecondary;
+						(e.currentTarget as HTMLElement).style.borderColor = borderColor;
+					}}
+				>
+					<RefreshCwIcon class="h-3 w-3" />
+					Refresh
+				</button>
+			{/if}
+		</div>
+
+		{#if failedExpanded}
+			<div class="mt-4">
+
+				<!-- Loading -->
+				{#if failedLoading}
+					<div class="space-y-2">
+						{#each Array(4) as _, i}
+							<div
+								class="rounded-lg"
+								style="height:44px; background:{surface2}; border:1px solid {borderColor}; opacity:{1 - i * 0.2};"
+							></div>
+						{/each}
+					</div>
+
+				<!-- Error -->
+				{:else if failedError}
+					<div
+						class="flex items-center gap-3 rounded-xl p-4"
+						style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:13px;"
+					>
+						<AlertCircleIcon class="h-4 w-4 flex-shrink-0" />
+						{failedError}
+					</div>
+
+				<!-- Empty -->
+				{:else if failedRecords.length === 0}
+					<div
+						class="flex flex-col items-center rounded-xl py-10"
+						style="background:{surface2}; border:1px solid {borderColor};"
+					>
+						<CircleCheckIcon class="mb-3 h-8 w-8" style="color:{colorSuccess}; opacity:0.5;" />
+						<p style="font-size:14px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">No failed pipelines</p>
+						<p style="font-size:12px; color:{textMuted}; margin:0;">All processed records completed without failures.</p>
+					</div>
+
+				<!-- Table -->
+				{:else}
+					<div class="overflow-hidden rounded-xl" style="border:1px solid {borderColor};">
+						<table style="width:100%; border-collapse:collapse; font-size:13px;">
+							<thead>
+								<tr style="background:{surface2}; border-bottom:1px solid {borderColor};">
+									{#each ['ID', 'Title', 'Failed Steps', 'Created', ''] as col}
+										<th
+											class="px-3 py-2 text-left"
+											style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; white-space:nowrap;"
+										>{col}</th>
+									{/each}
+								</tr>
+							</thead>
+							<tbody>
+								{#each failedRecords as rec (rec.id)}
+									{@const failedSteps = getFailedSteps(rec)}
+									<tr style="border-bottom:1px solid {borderColor}; background:transparent;">
+										<td class="px-3 py-2.5" style="font-family:monospace; color:{accent}; font-size:12px; white-space:nowrap;">{rec.id}</td>
+										<td class="px-3 py-2.5 max-w-xs" style="color:{textPrimary};">
+											<span class="block truncate" title={recordTitle(rec)}>{recordTitle(rec)}</span>
+										</td>
+										<td class="px-3 py-2.5">
+											<div class="flex flex-wrap gap-1">
+												{#each failedSteps as step}
+													<span
+														style="font-family:monospace; font-size:10px; padding:1px 6px; border-radius:999px;
+														       background:{colorErrorTint}; color:{colorError}; border:1px solid {colorError}30; white-space:nowrap;"
+													>{step}</span>
+												{/each}
+											</div>
+										</td>
+										<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px; white-space:nowrap;">{formatTime(rec.create_time)}</td>
+										<td class="px-3 py-2.5 text-right">
+											<button
+												onclick={() => openRestart(rec)}
+												class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+												style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:11px; font-weight:500; cursor:pointer; white-space:nowrap;"
+												onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '25'; }}
+												onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
+											>
+												<PlayIcon class="h-3 w-3" />
+												Restart
+											</button>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+
+					<!-- Pagination -->
+					{#if failedTotalPages > 1}
+						<div class="mt-3 flex items-center justify-between">
+							<span style="font-size:12px; color:{textMuted};">
+								{(failedPage - 1) * FAILED_PAGE_SIZE + 1}–{Math.min(failedPage * FAILED_PAGE_SIZE, failedTotal)} of {failedTotal}
+							</span>
+							<div class="flex items-center gap-1.5">
+								<button
+									onclick={() => failedGoToPage(failedPage - 1)}
+									disabled={failedPage <= 1}
+									class="rounded-lg px-3 py-1.5"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{failedPage <= 1 ? textMuted : textSecondary}; font-size:12px; cursor:{failedPage <= 1 ? 'not-allowed' : 'pointer'}; opacity:{failedPage <= 1 ? '0.45' : '1'};"
+									onmouseenter={(e) => { if (failedPage > 1) (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = failedPage <= 1 ? textMuted : textSecondary; }}
+								>← Prev</button>
+								<span style="font-size:12px; color:{textSecondary}; font-family:monospace; padding:0 6px;">
+									{failedPage} / {failedTotalPages}
+								</span>
+								<button
+									onclick={() => failedGoToPage(failedPage + 1)}
+									disabled={failedPage >= failedTotalPages}
+									class="rounded-lg px-3 py-1.5"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{failedPage >= failedTotalPages ? textMuted : textSecondary}; font-size:12px; cursor:{failedPage >= failedTotalPages ? 'not-allowed' : 'pointer'}; opacity:{failedPage >= failedTotalPages ? '0.45' : '1'};"
+									onmouseenter={(e) => { if (failedPage < failedTotalPages) (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = failedPage >= failedTotalPages ? textMuted : textSecondary; }}
+								>Next →</button>
+							</div>
+						</div>
+					{/if}
+				{/if}
 			</div>
 		{/if}
 	</section>

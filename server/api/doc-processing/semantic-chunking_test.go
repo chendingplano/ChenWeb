@@ -13,6 +13,26 @@ import (
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
+func TestNewSemanticChunkingService_UsesExtractTopicModelEnv(t *testing.T) {
+	t.Setenv("SEMANTIC_CHUNKING_MODEL_NAME", "")
+	t.Setenv("EXTRACT_TOPIC_MODEL_NAME", "topic-extractor")
+
+	logger := &fakeLogger{}
+	svc := NewSemanticChunkingService(&fakeStore{}, &fakeSemanticExtractor{}, logger)
+	if svc == nil {
+		t.Fatalf("service is nil")
+	}
+	if svc.ModelErr != nil {
+		t.Fatalf("ModelErr=%v, want nil", svc.ModelErr)
+	}
+	if svc.ModelRef != "topic-extractor" {
+		t.Fatalf("ModelRef=%q, want topic-extractor", svc.ModelRef)
+	}
+	if len(logger.errors) != 0 {
+		t.Fatalf("startup logged unexpected errors: %#v", logger.errors)
+	}
+}
+
 func TestBuildSemanticPageBlocks_WithOnePageOverlap(t *testing.T) {
 	lines, err := ParseInputLines([]byte(strings.Join([]string{
 		"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tP1",
@@ -42,6 +62,7 @@ func TestBuildSemanticPageBlocks_WithOnePageOverlap(t *testing.T) {
 
 func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T) {
 	tmp := t.TempDir()
+	treeRoot := t.TempDir()
 	input := strings.Join([]string{
 		"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tCover",
 		"2\t2\tparagraph\tTestFont\t12\t[0,0,1,1]\tSection A",
@@ -58,12 +79,19 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 						"lines":      []any{"1"},
 						"keywords":   []any{"cover"},
 						"topic":      "Cover page",
+						"category_path": []any{
+							"document_overview",
+						},
 					},
 					map[string]any{
 						"topic_type": "policy",
 						"lines":      []any{"2"},
 						"keywords":   []any{"section", "policy"},
 						"topic":      "Section A",
+						"category_path": []any{
+							"document_overview",
+							"section_a",
+						},
 					},
 				},
 			},
@@ -74,20 +102,33 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 						"lines":      []any{"3"},
 						"keywords":   []any{"table"},
 						"topic":      "Data table",
+						"category_path": []any{
+							"data_tables",
+						},
 					},
 					map[string]any{
 						"topic_type": "formula",
 						"lines":      []any{"4"},
 						"keywords":   []any{"formula"},
 						"topic":      "Equation",
+						"category_path": []any{
+							"document_overview",
+							"equations",
+						},
 					},
 				},
 			},
 		},
 	}
-	st := &fakeStore{rec: InputRecord{ID: 7523, StatusRaw: "[]"}}
+	st := &fakeStore{rec: InputRecord{
+		ID:              7523,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "std_20039.pdf",
+	}}
 	svc := NewSemanticChunkingService(st, ex, nil)
 	svc.ChunkDir = tmp
+	svc.TreeRootDir = treeRoot
 	svc.FileBlockSize = 2
 	svc.ModelErr = nil
 	svc.ModelName = "topic-model"
@@ -105,23 +146,25 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 		t.Fatalf("chunking_method=%q, want topic-chunking", st.insertedRun.ChunkingMethod)
 	}
 
-	coverPath := filepath.Join(tmp, "7", "7523", "cover.txt")
-	bs, err := os.ReadFile(coverPath)
+	topicPath := filepath.Join(tmp, "7", "7523", "std_20039_opendata.topics")
+	bs, err := os.ReadFile(topicPath)
 	if err != nil {
-		t.Fatalf("read cover topic file: %v", err)
+		t.Fatalf("read .topics artifact: %v", err)
 	}
 	content := string(bs)
-	if !strings.Contains(content, "7523\tcover\t[1]\t[cover]\tCover page") {
-		t.Fatalf("topics content missing expected line: %q", content)
+	if !strings.Contains(content, `topic_desc: "Cover page"`) {
+		t.Fatalf(".topics content missing expected topic: %q", content)
 	}
-
-	formulaPath := filepath.Join(tmp, "7", "7523", "formula.txt")
-	formulaBS, err := os.ReadFile(formulaPath)
+	treeLeaf := filepath.Join(treeRoot, "document_overview", "equations", "topics.txt")
+	treeBS, err := os.ReadFile(treeLeaf)
 	if err != nil {
-		t.Fatalf("read formula topic file: %v", err)
+		t.Fatalf("read tree leaf: %v", err)
 	}
-	if !strings.Contains(string(formulaBS), "7523\tformula\t[4]\t[formula]\tEquation") {
-		t.Fatalf("topics content missing expected formula line: %q", string(formulaBS))
+	if !strings.Contains(string(treeBS), `topic: "Equation"`) {
+		t.Fatalf("tree content missing expected topic: %q", string(treeBS))
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "7", "7523", "document_overview")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected category directory under artifact dir, err=%v", err)
 	}
 
 	var status []map[string]any
@@ -132,11 +175,14 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 		t.Fatalf("expected status entry")
 	}
 	last := status[len(status)-1]
-	if strings.TrimSpace(asString(last["operation"])) != "topic_chunk" {
-		t.Fatalf("operation=%v, want topic_chunk", last["operation"])
+	if strings.TrimSpace(asString(last["operation"])) != "generate_topics" {
+		t.Fatalf("operation=%v, want generate_topics", last["operation"])
 	}
 	if strings.TrimSpace(asString(last["proc_status"])) != "success" {
 		t.Fatalf("proc_status=%v, want success", last["proc_status"])
+	}
+	if got := strings.TrimSpace(asString(last["output_filename"])); got != topicPath {
+		t.Fatalf("output_filename=%q, want %q", got, topicPath)
 	}
 }
 
@@ -328,6 +374,7 @@ func TestSemanticChunkingService_HandleInput_LLMErrorPersistsFailure(t *testing.
 	ex := &fakeSemanticExtractor{err: context.DeadlineExceeded}
 	svc := NewSemanticChunkingService(st, ex, nil)
 	svc.ChunkDir = t.TempDir()
+	svc.TreeRootDir = t.TempDir()
 	svc.FileBlockSize = 2
 	svc.ModelErr = nil
 
@@ -355,6 +402,40 @@ func TestSemanticChunkingService_HandleInput_LLMErrorPersistsFailure(t *testing.
 	}
 	if strings.TrimSpace(asString(last["error"])) == "" {
 		t.Fatalf("error should be present on failure")
+	}
+}
+
+func TestSemanticChunkingService_HandleInput_MissingTreeRootDir(t *testing.T) {
+	st := &fakeStore{rec: InputRecord{
+		ID:              9002,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "sample.pdf",
+	}}
+	svc := NewSemanticChunkingService(st, &fakeSemanticExtractor{}, nil)
+	svc.ChunkDir = t.TempDir()
+	svc.TreeRootDir = ""
+	svc.FileBlockSize = 2
+	svc.ModelErr = nil
+	svc.PromptErr = nil
+	svc.ModelName = "topic-model"
+	svc.PromptText = "prompt"
+
+	err := svc.HandleInput(context.Background(), 9002, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
+	if err == nil {
+		t.Fatalf("expected error when TOPIC_TREE_ROOT_DIR is empty")
+	}
+	if !strings.Contains(err.Error(), "missing TOPIC_TREE_ROOT_DIR") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.insertCalls != 0 {
+		t.Fatalf("InsertChunkRun calls=%d, want 0", st.insertCalls)
+	}
+	if st.updateCalls != 1 {
+		t.Fatalf("UpdateInputStatus calls=%d, want 1", st.updateCalls)
+	}
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing TOPIC_TREE_ROOT_DIR") {
+		t.Fatalf("expected persisted missing tree root error, got %v", st.updatedError)
 	}
 }
 

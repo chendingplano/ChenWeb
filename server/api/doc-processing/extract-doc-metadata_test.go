@@ -267,6 +267,43 @@ func TestExtractDocMetadata_FallbackAuthorsFromMainDraftingPersons(t *testing.T)
 	}
 }
 
+func TestExtractDocMetadata_PartialPublishDateFallsBackToMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	lineFile := filepath.Join(tmp, "ocr_rslt_12_opendata.txt")
+	content := "1\t1\theading\tTestFont\t12\t[0,0,1,1]\tDocument Title\n"
+	if err := os.WriteFile(lineFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	st := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              12,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_12.json"),
+		StagingFilename: filepath.Join(tmp, "ocr_rslt_12.pdf"),
+		StatusRaw:       "[]",
+	}}
+	ex := &fakeJSONExtractor{out: map[string]any{
+		"title":        "Year Only Document",
+		"publish_date": "2009",
+		"metadata": map[string]any{
+			"language": "en",
+		},
+	}}
+	svc := NewExtractDocMetadataProcessor(st, ex, nil)
+	svc.ModelErr = nil
+	svc.PromptText = "extract metadata"
+
+	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":12}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if st.updateReq.PublishDate != "" {
+		t.Fatalf("publishDate=%q, want empty for partial date", st.updateReq.PublishDate)
+	}
+	if got := asString(st.updateReq.DocMetadata["publish_date"]); got != "2009" {
+		t.Fatalf("doc metadata publish_date=%q, want 2009", got)
+	}
+}
+
 func TestNewExtractDocMetadataProcessor_UsesConfiguredLLMName(t *testing.T) {
 	tmp := t.TempDir()
 	modelsPath := filepath.Join(tmp, ".models.toml")

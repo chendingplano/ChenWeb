@@ -49,6 +49,10 @@ func (p *ChunkingProcessor) LogName() string {
 }
 
 func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) error {
+	return runChunkingServiceEvent(ctx, payload, p.InputStore, p.Service, p.Logger)
+}
+
+func runChunkingServiceEvent(ctx context.Context, payload []byte, inputStore DocMetadataStore, service chunkingHandler, logger ApiTypes.JimoLogger) error {
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
 		return fmt.Errorf("parse event payload: %w", err)
@@ -57,10 +61,10 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		return nil
 	}
 
-	rec, err := p.InputStore.GetInputRecord(ctx, evt.RecordID)
+	rec, err := inputStore.GetInputRecord(ctx, evt.RecordID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			p.Logger.Error("kb.inputs record not found", "record_id", evt.RecordID)
+			logger.Error("kb.inputs record not found", "record_id", evt.RecordID)
 			return nil
 		}
 		return fmt.Errorf("load kb.inputs record %d: %w", evt.RecordID, err)
@@ -70,12 +74,12 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 
 	// Prefer the block buffer produced by the BlockingProcessor when available.
 	if buf := BlockBufferFromContext(ctx); buf != nil {
-		if bh, ok := p.Service.(chunkingBlockHandler); ok {
+		if bh, ok := service.(chunkingBlockHandler); ok {
 			if inputFilename == "" {
 				inputFilename = resolveChunkingInputFilename(rec, "")
 			}
 			if err := bh.HandleBlockInput(ctx, evt.RecordID, inputFilename, buf); err != nil {
-				p.Logger.Error("chunking processor failed (block input)", "record_id", rec.ID, "error", err)
+				logger.Error("chunking processor failed (block input)", "record_id", rec.ID, "error", err)
 				return err
 			}
 			return nil
@@ -85,13 +89,13 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	// Fall back to reading the input file directly.
 	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
 	if err != nil {
-		p.Logger.Error("resolve chunking input path failed", "record_id", rec.ID, "error", err)
+		logger.Error("resolve chunking input path failed", "record_id", rec.ID, "error", err)
 		return nil
 	}
 	fileBody, err := os.ReadFile(inputPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			p.Logger.Error("chunking input file not found", "record_id", rec.ID, "path", inputPath)
+			logger.Error("chunking input file not found", "record_id", rec.ID, "path", inputPath)
 			return nil
 		}
 		return fmt.Errorf("read chunking input file %s: %w", inputPath, err)
@@ -100,8 +104,8 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	if inputFilename == "" {
 		inputFilename = resolveChunkingInputFilename(rec, inputPath)
 	}
-	if err := p.Service.HandleInput(ctx, evt.RecordID, inputFilename, fileBody); err != nil {
-		p.Logger.Error("chunking processor failed", "record_id", rec.ID, "error", err)
+	if err := service.HandleInput(ctx, evt.RecordID, inputFilename, fileBody); err != nil {
+		logger.Error("chunking processor failed", "record_id", rec.ID, "error", err)
 		return err
 	}
 	return nil

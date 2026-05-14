@@ -174,13 +174,16 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 	} else if e, ok := extractor.(Embedder); ok {
 		embedder = e
 	}
-	summaryEmbeddingModelName := topicEmbeddingModelName
-	if summaryEmbeddingModelRef := strings.TrimSpace(os.Getenv("SUMMARY_EMBEDDING_MODEL_NAME")); summaryEmbeddingModelRef != "" {
-		if _, _, embCfg, embErr := loadModelConfigFromEnv("SUMMARY_EMBEDDING_MODEL_NAME", ""); embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
-			summaryEmbeddingModelName = embCfg.ModelName
-		} else {
-			summaryEmbeddingModelName = summaryEmbeddingModelRef
-		}
+	summaryEmbeddingModelRef := strings.TrimSpace(os.Getenv("SUMMARY_EMBEDDING_MODEL_NAME"))
+	if summaryEmbeddingModelRef == "" {
+		logger.Error("SUMMARY_EMBEDDING_MODEL_NAME is not defined")
+		panic("SUMMARY_EMBEDDING_MODEL_NAME is not defined")
+	}
+	var summaryEmbeddingModelName string
+	if _, _, embCfg, embErr := loadModelConfigFromEnv("SUMMARY_EMBEDDING_MODEL_NAME", ""); embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
+		summaryEmbeddingModelName = embCfg.ModelName
+	} else {
+		summaryEmbeddingModelName = summaryEmbeddingModelRef
 	}
 	categorySimilarityMinScore := envFloat("CATEGORY_SIMILARITY_MIN_SCORE", DefaultCategorySimilarityMinScore, 0)
 	return &FixedSizeChunkingService{
@@ -475,7 +478,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		return err
 	}
 	for _, item := range allSummaries {
-		if err := writeSummaryTreeEntry(ctx, s.Embedder, s.SummaryEmbeddingModelName, s.Logger, s.SummaryTreeDir, item, item.CategoryPaths, item.CategoryNodes); err != nil {
+		if err := writeSummaryTreeEntry(s.Logger, s.SummaryTreeDir, item, item.CategoryPaths, item.CategoryNodes); err != nil {
 			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
@@ -590,7 +593,7 @@ func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID
 		InputText:  inputText,
 	})
 	if err != nil {
-		return "", nil, nil, nil, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d failed: %w", level, seqNo, err)
+		return "", nil, nil, nil, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d: %w", level, seqNo, err)
 	}
 	summary := sanitizeTopicText(asString(parsed["summary"]))
 	if summary == "" {
@@ -1365,7 +1368,7 @@ func envFloat(key string, fallback float64, minVal float64) float64 {
 }
 
 func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
-	modelRef = strings.TrimSpace(os.Getenv("CHUNK_EXTRACT_TOPIC_MODEL_NAME"))
+	modelRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_MODEL_NAME"))
 	if modelRef == "" {
 		return "", "", structureModelConfig{ModelName: DefaultChunkTopicModelName}, nil
 	}
@@ -1401,7 +1404,7 @@ func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg st
 func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
 	modelRef = strings.TrimSpace(os.Getenv("CHUNK_SUMMARY_MODEL_NAME"))
 	if modelRef == "" {
-		modelRef = strings.TrimSpace(os.Getenv("CHUNK_EXTRACT_TOPIC_MODEL_NAME"))
+		modelRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_MODEL_NAME"))
 	}
 	if modelRef == "" {
 		return "", "", structureModelConfig{ModelName: DefaultChunkTopicModelName}, nil
@@ -1441,9 +1444,9 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 }
 
 func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("CHUNK_EXTRACT_TOPIC_PROMPT"))
+	promptRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_PROMPT"))
 	if promptRef == "" {
-		return "", "", "", errors.New("(MID_26042020) missing CHUNK_EXTRACT_TOPIC_PROMPT")
+		return "", "", "", errors.New("(MID_26042020) missing EXTRACT_TOPIC_PROMPT")
 	}
 
 	paths := make([]string, 0, 8)
@@ -1498,7 +1501,7 @@ func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, pro
 func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
 	promptRef = strings.TrimSpace(os.Getenv("CHUNK_SUMMARY_PROMPT"))
 	if promptRef == "" {
-		promptRef = strings.TrimSpace(os.Getenv("CHUNK_EXTRACT_TOPIC_PROMPT"))
+		promptRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_PROMPT"))
 	}
 	if promptRef == "" {
 		return "", "", "", errors.New("(MID_26042909) missing CHUNK_SUMMARY_PROMPT")

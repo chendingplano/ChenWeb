@@ -1,7 +1,6 @@
 package docprocessing
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 const (
@@ -265,60 +263,6 @@ func collectSummaryIDs(items []SummaryItem) []string {
 	return out
 }
 
-// embedSummaryCategoryDir reads desc and keywords from the category directory's
-// metadata.txt, embeds them, and writes the vector to category.embed (spec 4.4).
-// No-op when embedder is nil or embeddingModelName is empty.
-func embedSummaryCategoryDir(ctx context.Context, embedder Embedder, embeddingModelName, dir string) error {
-	if embedder == nil || strings.TrimSpace(embeddingModelName) == "" {
-		return nil
-	}
-	body, err := os.ReadFile(filepath.Join(dir, categoryMetadataFileName))
-	if err != nil {
-		return err
-	}
-	var desc string
-	var keywords []string
-	for _, line := range strings.Split(string(body), "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, `"desc":`):
-			val := strings.TrimSpace(strings.TrimPrefix(trimmed, `"desc":`))
-			json.Unmarshal([]byte(val), &desc) //nolint:errcheck
-		case strings.HasPrefix(trimmed, `"keywords":`):
-			val := strings.TrimSpace(strings.TrimPrefix(trimmed, `"keywords":`))
-			json.Unmarshal([]byte(val), &keywords) //nolint:errcheck
-		}
-	}
-	embedText := desc
-	if len(keywords) > 0 {
-		embedText += " " + strings.Join(keywords, " ")
-	}
-	if strings.TrimSpace(embedText) == "" {
-		return nil
-	}
-	var vec []float64
-	var embedErr error
-	for attempt := 1; attempt <= embedMaxRetries; attempt++ {
-		vec, embedErr = embedder.Embed(ctx, llmclients.EmbedInput{
-			ModelName: embeddingModelName,
-			InputText: embedText,
-		})
-		if embedErr == nil {
-			break
-		}
-		if attempt < embedMaxRetries {
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("(MID_26050310) embed summary category dir %q: %w", dir, ctx.Err())
-			case <-time.After(embedRetryDelay):
-			}
-		}
-	}
-	if embedErr != nil {
-		return fmt.Errorf("(MID_26050310) embed summary category dir %q: %w", dir, embedErr)
-	}
-	return os.WriteFile(filepath.Join(dir, topicCategoryEmbedFileName), []byte(formatFloatArray(vec)+"\n"), 0o644)
-}
 
 // upsertCategoryDirMetadata creates metadata.txt in dir if it does not exist,
 // or merges new keywords not already present if the file exists.
@@ -407,7 +351,7 @@ func mergeCategoryDirKeywords(metaPath string, newKeywords []string) error {
 // remove stale entries for the record before the first call.
 // pathNodes optionally provides per-node metadata (keywords, confidence) for
 // each segment of the category path; nil is safe and falls back to defaults.
-func writeSummaryTreeEntry(ctx context.Context, embedder Embedder, embeddingModelName string, logger ApiTypes.JimoLogger, baseDir string, summary SummaryItem, rawCategories []string, pathNodes []CategoryPathNode) error {
+func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary SummaryItem, rawCategories []string, pathNodes []CategoryPathNode) error {
 	categoryPath, reason := normalizeAndValidateTopicCategoryPath(rawCategories, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
 		return fmt.Errorf("(MID_26042930) summary tree category path invalid (%s): %v", reason, rawCategories)
@@ -441,9 +385,6 @@ func writeSummaryTreeEntry(ctx context.Context, embedder Embedder, embeddingMode
 		if err := upsertCategoryDirMetadata(currentDir, name, defaultSummaryTreeFallbackTopicType, confidence, keywords, time.Now()); err != nil {
 			return err
 		}
-		if err := embedSummaryCategoryDir(ctx, embedder, embeddingModelName, currentDir); err != nil {
-			return err
-		}
 	}
 	existing := make([]string, 0)
 	if bs, err := os.ReadFile(leaf); err == nil {
@@ -459,7 +400,7 @@ func writeSummaryTreeEntry(ctx context.Context, embedder Embedder, embeddingMode
 	return os.WriteFile(leaf, []byte(strings.Join(existing, "\n")), 0o644)
 }
 
-func writeSummaryTreeRootReference(ctx context.Context, embedder Embedder, embeddingModelName string, logger ApiTypes.JimoLogger, baseDir string, recordID int64, root SummaryItem, rawCategories []string, pathNodes []CategoryPathNode) error {
+func writeSummaryTreeRootReference(logger ApiTypes.JimoLogger, baseDir string, recordID int64, root SummaryItem, rawCategories []string, pathNodes []CategoryPathNode) error {
 	if strings.TrimSpace(baseDir) == "" {
 		return errors.New("summary tree dir is empty")
 	}
@@ -503,9 +444,6 @@ func writeSummaryTreeRootReference(ctx context.Context, embedder Embedder, embed
 			keywords = pathNodes[i].Keywords
 		}
 		if err := upsertCategoryDirMetadata(currentDir, name, defaultSummaryTreeFallbackTopicType, confidence, keywords, time.Now()); err != nil {
-			return err
-		}
-		if err := embedSummaryCategoryDir(ctx, embedder, embeddingModelName, currentDir); err != nil {
 			return err
 		}
 	}

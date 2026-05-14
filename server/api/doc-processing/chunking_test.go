@@ -13,6 +13,7 @@ import (
 
 type fakeLogger struct {
 	infos []fakeLogEntry
+	errors []fakeLogEntry
 }
 
 type fakeLogEntry struct {
@@ -23,9 +24,12 @@ type fakeLogEntry struct {
 func (f *fakeLogger) Debug(string, ...any) {}
 func (f *fakeLogger) Line(string, ...any)  {}
 func (f *fakeLogger) Warn(string, ...any)  {}
-func (f *fakeLogger) Error(string, ...any) {}
 func (f *fakeLogger) Trace(string)         {}
 func (f *fakeLogger) Close()               {}
+
+func (f *fakeLogger) Error(message string, args ...any) {
+	f.errors = append(f.errors, fakeLogEntry{message: message, args: append([]any(nil), args...)})
+}
 
 func (f *fakeLogger) Info(message string, args ...any) {
 	f.infos = append(f.infos, fakeLogEntry{message: message, args: append([]any(nil), args...)})

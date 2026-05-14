@@ -28,20 +28,24 @@ const (
 var coordinatePattern = regexp.MustCompile(`^\[\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*\]$`)
 
 type SemanticChunkingService struct {
-	Store         Store
-	Extractor     LLMJSONExtractor
-	Logger        ApiTypes.JimoLogger
-	Now           func() time.Time
-	ChunkDir      string
-	FileBlockSize int
-	ModelRef      string
-	ModelCfgPath  string
-	ModelErr      error
-	ModelName     string
-	PromptText    string
-	PromptRef     string
-	PromptPath    string
-	PromptErr     error
+	Store                      Store
+	Extractor                  LLMJSONExtractor
+	Embedder                   Embedder
+	Logger                     ApiTypes.JimoLogger
+	Now                        func() time.Time
+	ChunkDir                   string
+	TreeRootDir                string
+	FileBlockSize              int
+	ModelRef                   string
+	ModelCfgPath               string
+	ModelErr                   error
+	ModelName                  string
+	PromptText                 string
+	PromptRef                  string
+	PromptPath                 string
+	PromptErr                  error
+	TopicEmbeddingModelName    string
+	CategorySimilarityMinScore float64
 }
 
 type SemanticPageBlock struct {
@@ -67,13 +71,17 @@ type CategoryPathEntry struct {
 }
 
 type TopicItem struct {
-	SeqNo              int
-	TopicType          string
-	Lines              []string
-	Keywords           []string
-	Topic              string
-	CategoryPath       []string            // flat list of category names (for tree files)
-	CategoryPathDetail []CategoryPathEntry // detailed structure from LLM (for .topics file)
+	SeqNo                int
+	TopicType            string
+	TopicTypeEn          string
+	Lines                []string
+	Keywords             []string
+	KeywordsEn           []string
+	Topic                string              // topic_desc in .topics file format
+	TopicEn              string              // topic_desc_en in .topics file format
+	CategoryPath         []string            // flat list of category names (for tree files)
+	CategoryPathDetail   []CategoryPathEntry // detailed structure from LLM (for .topics file)
+	CategoryPathDetailEn []CategoryPathEntry // English translation (only when input is non-English)
 }
 
 type topicChunkStatusParams struct {
@@ -91,24 +99,34 @@ func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger 
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26042101")
 	}
-	modelRef, modelCfgPath, modelCfg, modelErr := loadTopicChunkModelFromEnv()
+	modelRef, modelCfgPath, modelCfg, modelErr := loadFixedSizeTopicModelFromEnv()
 	promptText, promptRef, promptPath, promptErr := loadTopicChunkPromptFromEnv()
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
+	var embedder Embedder
+	topicEmbeddingModelName := strings.TrimSpace(os.Getenv("TOPIC_EMBEDDING_MODEL_NAME"))
+	if e, ok := extractor.(Embedder); ok {
+		embedder = e
+	}
+
 	return &SemanticChunkingService{
-		Store:         store,
-		Extractor:     extractor,
-		Logger:        logger,
-		Now:           time.Now,
-		ChunkDir:      strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		FileBlockSize: envInt("FILE_BLOCK_SIZE", DefaultFileBlockSize, 1),
-		ModelRef:      modelRef,
-		ModelCfgPath:  modelCfgPath,
-		ModelErr:      modelErr,
-		ModelName:     modelCfg.ModelName,
-		PromptText:    promptText,
-		PromptRef:     promptRef,
-		PromptPath:    promptPath,
-		PromptErr:     promptErr,
+		Store:                      store,
+		Extractor:                  extractor,
+		Embedder:                   embedder,
+		Logger:                     logger,
+		Now:                        time.Now,
+		ChunkDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		TreeRootDir:                strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR")),
+		FileBlockSize:              envInt("FILE_BLOCK_SIZE", DefaultFileBlockSize, 1),
+		ModelRef:                   modelRef,
+		ModelCfgPath:               modelCfgPath,
+		ModelErr:                   modelErr,
+		ModelName:                  modelCfg.ModelName,
+		PromptText:                 promptText,
+		PromptRef:                  promptRef,
+		PromptPath:                 promptPath,
+		PromptErr:                  promptErr,
+		TopicEmbeddingModelName:    topicEmbeddingModelName,
+		CategorySimilarityMinScore: envFloat("CATEGORY_SIMILARITY_MIN_SCORE", DefaultCategorySimilarityMinScore, 0),
 	}
 }
 
@@ -138,6 +156,11 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
 		procErr := errors.New("(MID_26042105) missing ARTIFACT_DIR")
+		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
+		return procErr
+	}
+	if strings.TrimSpace(s.TreeRootDir) == "" {
+		procErr := errors.New("(MID_26051310) missing TOPIC_TREE_ROOT_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
@@ -191,6 +214,11 @@ func (s *SemanticChunkingService) HandleBlockInput(ctx context.Context, recordID
 		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
+	if strings.TrimSpace(s.TreeRootDir) == "" {
+		procErr := errors.New("(MID_26051311) missing TOPIC_TREE_ROOT_DIR")
+		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
+		return procErr
+	}
 	if strings.TrimSpace(inputFilename) == "" {
 		procErr := errors.New("(MID_26050626) missing input filename")
 		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
@@ -219,7 +247,13 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 	}
 	topics = dedupeTopicItems(topics)
 
-	if err := writeTopicsCategoryTree(s.Logger, s.ChunkDir, rec.ID, topics); err != nil {
+	artifactBase := buildChunkArtifactBaseName(rec.StagingFilename, rec.ParserName)
+	outputFilename, err := writeTopicsFile(s.ChunkDir, rec.ID, artifactBase+".topics", topics)
+	if err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, start, err)
+		return err
+	}
+	if err := indexTopicsInTreeDir(ctx, s.Embedder, s.TopicEmbeddingModelName, s.CategorySimilarityMinScore, s.Logger, s.TreeRootDir, rec.ID, topics); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}
@@ -239,8 +273,6 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		return err
 	}
 
-	groupID := rec.ID / 1000
-	outputFilename := filepath.Join(s.ChunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(rec.ID, 10), "topics.txt")
 	statusRaw, err := appendTopicChunkStatus(rec.StatusRaw, topicChunkStatusParams{
 		RecordID:       rec.ID,
 		FileType:       strings.TrimPrefix(strings.ToLower(filepath.Ext(inputFilename)), "."),
@@ -261,7 +293,7 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 	s.Logger.Info("semantic chunking completed",
 		"record_id", rec.ID,
 		"num_topics", len(topics),
-		"chunk_dir", s.ChunkDir,
+		"filename", outputFilename,
 		"model_name", s.ModelName,
 	)
 	return nil
@@ -495,7 +527,7 @@ func parseSpecTopicsFile(scanner *bufio.Scanner, firstLine string) ([]legacyTopi
 			cur.Lines = val
 		case "topic_keywords":
 			cur.Keywords = val
-		case "topic":
+		case "topic_desc", "topic":
 			cur.Topic = unquoteSpec(val)
 		}
 	}
@@ -795,7 +827,12 @@ func extractCategoryPathFromLLM(m map[string]any) []string {
 	}
 
 	// 2) Nested categories payload: [{category_path: [...], path_keywords, path_confidence}, ...]
-	if arr, ok := m["categories"].([]any); ok {
+	// Accepts both "category_paths" (new key) and "categories" (legacy key).
+	for _, containerKey := range []string{"category_paths", "categories"} {
+		arr, ok := m[containerKey].([]any)
+		if !ok {
+			continue
+		}
 		for _, it := range arr {
 			catObj, ok := it.(map[string]any)
 			if !ok {
@@ -856,38 +893,60 @@ func extractCategoryPathDetailFromLLM(m map[string]any) []CategoryPathEntry {
 	}
 
 	// 2) Nested categories payload: [{category_path: [...], path_keywords, path_confidence}, ...]
-	if arr, ok := m["categories"].([]any); ok {
-		entries := make([]CategoryPathEntry, 0, len(arr))
-		for _, it := range arr {
-			catObj, ok := it.(map[string]any)
-			if !ok {
-				continue
-			}
-			nodes := extractCategoryPathNodes(catObj["category_path"])
-			if len(nodes) == 0 {
-				continue
-			}
-			entry := CategoryPathEntry{
-				Nodes: nodes,
-			}
-			if pks, ok := catObj["path_keywords"].([]any); ok {
-				entry.PathKeywords = compactTopicArray(pks)
-			}
-			if entry.PathKeywords == nil {
-				entry.PathKeywords = collectNodeKeywords(nodes)
-			}
-			if pc, ok := catObj["path_confidence"].(float64); ok {
-				entry.PathConfidence = pc
-			} else {
-				entry.PathConfidence = avgNodeConfidence(nodes)
-			}
-			entries = append(entries, entry)
+	// Accepts both "category_paths" (new key) and "categories" (legacy key).
+	for _, containerKey := range []string{"category_paths", "categories"} {
+		arr, ok := m[containerKey].([]any)
+		if !ok {
+			continue
 		}
-		if len(entries) > 0 {
+		if entries := parseCategoryPathsArray(arr); len(entries) > 0 {
 			return entries
 		}
 	}
 
+	return nil
+}
+
+// parseCategoryPathsArray converts a raw LLM category-paths array (the value of
+// "category_paths" or "categories") into a slice of CategoryPathEntry.
+func parseCategoryPathsArray(arr []any) []CategoryPathEntry {
+	entries := make([]CategoryPathEntry, 0, len(arr))
+	for _, it := range arr {
+		catObj, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		nodes := extractCategoryPathNodes(catObj["category_path"])
+		if len(nodes) == 0 {
+			continue
+		}
+		entry := CategoryPathEntry{Nodes: nodes}
+		if pks, ok := catObj["path_keywords"].([]any); ok {
+			entry.PathKeywords = compactTopicArray(pks)
+		}
+		if entry.PathKeywords == nil {
+			entry.PathKeywords = collectNodeKeywords(nodes)
+		}
+		if pc, ok := catObj["path_confidence"].(float64); ok {
+			entry.PathConfidence = pc
+		} else {
+			entry.PathConfidence = avgNodeConfidence(nodes)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// extractCategoryPathDetailEnFromLLM extracts the English-translated category
+// path detail from the "category_paths_en" key in an LLM response map.
+func extractCategoryPathDetailEnFromLLM(m map[string]any) []CategoryPathEntry {
+	arr, ok := m["category_paths_en"].([]any)
+	if !ok {
+		return nil
+	}
+	if entries := parseCategoryPathsArray(arr); len(entries) > 0 {
+		return entries
+	}
 	return nil
 }
 
@@ -1047,51 +1106,8 @@ func isDescriptiveCategorySegment(seg string) bool {
 	return true
 }
 
-func loadTopicChunkModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
-	modelRef = strings.TrimSpace(os.Getenv("TOPIC_CHUNK_MODEL_NAME"))
-	if modelRef == "" {
-		modelRef = strings.TrimSpace(os.Getenv("SEMANTIC_CHUNKING_MODEL_NAME"))
-	}
-	if modelRef == "" {
-		return "", "", structureModelConfig{}, errors.New("(MID_26042447) missing TOPIC_CHUNK_MODEL_NAME")
-	}
-
-	modelPath, err = resolveModelsFilePath("TOPIC_CHUNK_MODELS_FILE")
-	if err != nil {
-		if strings.TrimSpace(os.Getenv("SEMANTIC_CHUNKING_MODELS_FILE")) != "" {
-			modelPath, err = resolveModelsFilePath("SEMANTIC_CHUNKING_MODELS_FILE")
-		}
-		if err != nil {
-			return modelRef, "", structureModelConfig{}, err
-		}
-	}
-
-	raw, err := os.ReadFile(modelPath)
-	if err != nil {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042117) read %s failed: %w", modelPath, err)
-	}
-	parsed := ApiTypes.LLMModelsFile{}
-	if err := parseTOMLMap(raw, &parsed); err != nil {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042118) parse %s failed: %w", modelPath, err)
-	}
-	modelDef, ok := parsed[modelRef]
-	if !ok {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042119) model %q not found in %s", modelRef, modelPath)
-	}
-	if strings.TrimSpace(modelDef.ModelName) == "" {
-		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042120) model %q in %s missing model_name", modelRef, modelPath)
-	}
-	return modelRef, modelPath, structureModelConfig{
-		ModelName:    strings.TrimSpace(modelDef.ModelName),
-		APIKey:       strings.TrimSpace(modelDef.APIKey),
-		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
-		TimeoutSec:   modelDef.TimeoutSec,
-		ThinkingType: normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
-	}, nil
-}
-
 func loadTopicChunkPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	for _, key := range []string{"TOPIC_CHUNK_PROMPT", "SEMANTIC_CHUNKING_PROMPT"} {
+	for _, key := range []string{"EXTRACT_TOPIC_PROMPT", "SEMANTIC_CHUNKING_PROMPT"} {
 		promptRef = strings.TrimSpace(os.Getenv(key))
 		if promptRef != "" {
 			break

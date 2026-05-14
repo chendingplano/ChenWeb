@@ -62,18 +62,36 @@ func writeTopicsFile(chunkDir string, recordID int64, fileName string, topics []
 		}
 		b.WriteString(fmt.Sprintf("topic_id: %d\n", topic.SeqNo))
 		b.WriteString(fmt.Sprintf("topic_type: %q\n", strings.TrimSpace(topic.TopicType)))
+		if strings.TrimSpace(topic.TopicTypeEn) != "" {
+			b.WriteString(fmt.Sprintf("topic_type_en: %q\n", strings.TrimSpace(topic.TopicTypeEn)))
+		}
 		b.WriteString("lines: ")
 		b.WriteString(formatTopicArray(topic.Lines))
 		b.WriteByte('\n')
 		b.WriteString("topic_keywords: ")
 		b.WriteString(formatTopicArray(topic.Keywords))
 		b.WriteByte('\n')
-		b.WriteString("topic: ")
+		if len(topic.KeywordsEn) > 0 {
+			b.WriteString("topic_keywords_en: ")
+			b.WriteString(formatTopicArray(topic.KeywordsEn))
+			b.WriteByte('\n')
+		}
+		b.WriteString("topic_desc: ")
 		b.WriteString(strconv.Quote(sanitizeTopicText(topic.Topic)))
 		b.WriteByte('\n')
+		if strings.TrimSpace(topic.TopicEn) != "" {
+			b.WriteString("topic_desc_en: ")
+			b.WriteString(strconv.Quote(sanitizeTopicText(topic.TopicEn)))
+			b.WriteByte('\n')
+		}
 		b.WriteString("category_paths: ")
 		b.WriteString(formatCategoryPathEntries(topic.CategoryPathDetail))
 		b.WriteByte('\n')
+		if len(topic.CategoryPathDetailEn) > 0 {
+			b.WriteString("category_paths_en: ")
+			b.WriteString(formatCategoryPathEntries(topic.CategoryPathDetailEn))
+			b.WriteByte('\n')
+		}
 	}
 
 	path := filepath.Join(targetDir, fileName)
@@ -334,6 +352,7 @@ func extractTopicsFromLinesWithLLM(
 		logScopeName, logScopeValue,
 		"num_lines", len(linesText),
 		"model_name", modelName,
+		"inputText", strings.Join(linesText, "\n"),
 	)
 
 	llmStart := time.Now()
@@ -347,6 +366,7 @@ func extractTopicsFromLinesWithLLM(
 		"model_name", modelName,
 		"prompt_name", promptRef,
 		"record_id", record_id,
+		"parsed", parsed,
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 		"error", err,
 	)
@@ -383,7 +403,10 @@ func extractTopicsFromLinesWithLLM(
 		if len(lineRanges) == 0 {
 			lineRanges = compactTopicArray(m["line_ranges"])
 		}
-		topic := sanitizeTopicText(asString(m["topic"]))
+		topic := sanitizeTopicText(asString(m["topic_desc"]))
+		if topic == "" {
+			topic = sanitizeTopicText(asString(m["topic"]))
+		}
 		if topic == "" {
 			continue
 		}
@@ -391,16 +414,20 @@ func extractTopicsFromLinesWithLLM(
 		if topicType == "" {
 			topicType = "general"
 		}
+		topicTypeEn := strings.ToLower(strings.TrimSpace(asString(m["topic_type_en"])))
 		topic_keywords := compactTopicArray(m["topic_keywords"])
 		if len(topic_keywords) == 0 {
 			topic_keywords = compactTopicArray(m["keywords"])
 		}
+		topic_keywords_en := compactTopicArray(m["topic_keywords_en"])
+		topicEn := sanitizeTopicText(asString(m["topic_desc_en"]))
 
 		categoryPath, categoryFallbackReason := normalizeAndValidateTopicCategoryPath(extractCategoryPathFromLLM(m), topicType)
 
-		logger.Info("raw topic item from LLM",
+		logger.Info("extracted topic from LLM",
 			logScopeName, logScopeValue,
 			"record_id", record_id,
+			"nextSeq", nextSeq,
 			"item", item,
 			"topic", topic,
 			"topic_type", topicType,
@@ -425,14 +452,19 @@ func extractTopicsFromLinesWithLLM(
 				)
 			}
 		}
+
 		out = append(out, TopicItem{
-			SeqNo:              nextSeq,
-			TopicType:          topicType,
-			Lines:              lineRanges,
-			Keywords:           topic_keywords,
-			Topic:              topic,
-			CategoryPath:       categoryPath,
-			CategoryPathDetail: extractCategoryPathDetailFromLLM(m),
+			SeqNo:                nextSeq,
+			TopicType:            topicType,
+			TopicTypeEn:          topicTypeEn,
+			Lines:                lineRanges,
+			Keywords:             topic_keywords,
+			KeywordsEn:           topic_keywords_en,
+			Topic:                topic,
+			TopicEn:              topicEn,
+			CategoryPath:         categoryPath,
+			CategoryPathDetail:   extractCategoryPathDetailFromLLM(m),
+			CategoryPathDetailEn: extractCategoryPathDetailEnFromLLM(m),
 		})
 		nextSeq++
 	}
@@ -526,13 +558,10 @@ func indexTopicPathInTree(
 	return upsertTopicToLeafDir(currentDir, recordID, topic)
 }
 
-// findOrCreateCategorySubdir returns the best-matching sub-directory for node
-// under parentDir following the spec 6.5.4 lookup order:
-//  1. Exact normalized-name match — reuse if the directory already exists.
-//  2. Cosine-similarity match — reuse the closest existing directory when its
-//     similarity score is >= similarityThreshold (requires embedder).
-//  3. Create a new directory with the normalized name (never appends numeric
-//     suffixes like _2, _3).
+// findOrCreateCategorySubdir: Given a node 'CategoryPathNode', it normalize the node name
+// and checks whether the directory exists. If yes, it merges the keywords and returns the
+// directory name. Otherwise, it creates the directory, its 'metadata.txt' and returns the
+// directory name.
 func findOrCreateCategorySubdir(
 	ctx context.Context,
 	embedder Embedder,
@@ -545,7 +574,7 @@ func findOrCreateCategorySubdir(
 ) (string, error) {
 	normalizedName := normalizeCategorySegment(node.Name)
 	if normalizedName == "" {
-		normalizedName = "uncategorized"
+		return "", fmt.Errorf("(MID_26051401) category name is empty")
 	}
 
 	// Step 1: exact name match.
@@ -555,6 +584,7 @@ func findOrCreateCategorySubdir(
 		return exactDir, nil
 	}
 
+	/* Embedding is no longer supported 
 	// Step 2: cosine-similarity match (only when embedder is configured).
 	var nodeVec []float64
 	if embedder != nil && strings.TrimSpace(embeddingModelName) != "" {
@@ -599,11 +629,13 @@ func findOrCreateCategorySubdir(
 			}
 		}
 	}
+	*/
 
 	// Step 3: create a new directory using the normalized name (no suffix).
 	if err := os.MkdirAll(exactDir, 0o755); err != nil {
 		return "", fmt.Errorf("(MID_26050221) create category dir %q: %w", exactDir, err)
 	}
+
 	if err := writeTopicCategoryMetadata(exactDir, node, now); err != nil {
 		return "", fmt.Errorf("(MID_26050222) write metadata for %q: %w", exactDir, err)
 	}
