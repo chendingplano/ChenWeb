@@ -305,29 +305,25 @@
 		};
 	}
 
-	function startResize(event: MouseEvent) {
+	function startResize(event: PointerEvent) {
 		resizing = true;
 		resizeStartX = event.clientX;
 		resizeStartWidth = detailCardWidth;
-		event.preventDefault();
-	}
-
-	$effect(() => {
-		if (!resizing) return;
-		function onMove(e: MouseEvent) {
-			const delta = e.clientX - resizeStartX;
-			detailCardWidth = Math.max(180, Math.min(640, resizeStartWidth + delta));
+		document.body.style.cursor = 'col-resize';
+		function onMove(e: PointerEvent) {
+			detailCardWidth = Math.max(180, Math.min(640, resizeStartWidth + e.clientX - resizeStartX));
 		}
 		function onUp() {
 			resizing = false;
+			document.body.style.cursor = '';
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerup', onUp);
+			window.removeEventListener('pointercancel', onUp);
 		}
-		window.addEventListener('mousemove', onMove);
-		window.addEventListener('mouseup', onUp);
-		return () => {
-			window.removeEventListener('mousemove', onMove);
-			window.removeEventListener('mouseup', onUp);
-		};
-	});
+		window.addEventListener('pointermove', onMove);
+		window.addEventListener('pointerup', onUp, { once: true });
+		window.addEventListener('pointercancel', onUp, { once: true });
+	}
 </script>
 
 <div
@@ -425,26 +421,48 @@
 									onclick={() => selectTopic(topic, activeRecord.id)}
 								>
 									<div class="snippet-head">
-										<div class="keyword-row">
+										<div class="snippet-id-group">
 											<span class="snippet-id">#{topic.id}</span>
-											{#each topic.topicKeywords.slice(0, 4) as kw}
+											{#if topic.topicType}
+												<span class="snippet-type">{topic.topicType}</span>
+											{/if}
+										</div>
+										<span class="snippet-page">p.{topic.page}</span>
+									</div>
+									{#if topic.topicKeywords.length > 0}
+										<div class="keyword-row snippet-kw-row">
+											{#each topic.topicKeywords as kw}
 												<span class="keyword">{kw}</span>
 											{/each}
 										</div>
-										<span>p.{topic.page}</span>
-									</div>
+									{/if}
+									{#if topic.sourceLineSpecs && topic.sourceLineSpecs.length > 0}
+										<div class="snippet-info-row">
+											<span class="snippet-info-label">Lines</span>
+											<span class="snippet-info-val">{formatTopicLineSpecs(topic.sourceLineSpecs)}</span>
+										</div>
+									{/if}
+									{#if topic.categoryPaths && topic.categoryPaths.length > 0}
+										<div class="snippet-info-row">
+											<span class="snippet-info-label">Category</span>
+											<span class="snippet-info-val snippet-cat-val">{topic.categoryPaths.join(' · ')}</span>
+										</div>
+									{/if}
 									<p>{topic.topicText}</p>
 								</button>
 							{/each}
 						</div>
 					</div>
 
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div
+					<button
+						type="button"
 						class="resize-handle"
 						class:active={resizing}
-						onmousedown={startResize}
-					></div>
+						aria-label="Resize selected record panel"
+						onpointerdown={startResize}
+					>
+						<span class="resize-grip" aria-hidden="true"></span>
+					</button>
 
 					<div class="pdf-card">
 						<div class="eyebrow">PDF Display</div>
@@ -491,8 +509,11 @@
 											</div>
 										</div>
 										<div class="topic-sidebar-block">
-											<div class="topic-sidebar-label">{itemSingular}</div>
+											<div class="topic-sidebar-label">Topic Description</div>
 											<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>
+											{#if selectedTopic.topicDescEn}
+												<p class="topic-sidebar-copy topic-desc-en">{selectedTopic.topicDescEn}</p>
+											{/if}
 										</div>
 										<div class="topic-sidebar-block">
 											<div class="topic-sidebar-label">Category Paths</div>
@@ -671,9 +692,10 @@
 	.detail-grid { display: flex; min-height: 0; flex: 1; align-items: stretch; gap: 0; }
 	.detail-card { flex: 0 0 auto; overflow: hidden; }
 	.pdf-card { flex: 1 1 0; min-width: 0; }
-	.resize-handle { flex: 0 0 8px; cursor: col-resize; align-self: stretch; position: relative; margin: 0 0.25rem; border-radius: 4px; transition: background 150ms; }
-	.resize-handle::after { content: ''; position: absolute; top: 15%; bottom: 15%; left: 50%; transform: translateX(-50%); width: 2px; border-radius: 2px; background: rgba(148, 163, 184, 0.2); transition: background 150ms; }
-	.resize-handle:hover::after, .resize-handle.active::after { background: rgba(34, 197, 94, 0.55); }
+	.resize-handle { flex: 0 0 16px; position: relative; padding: 0; border: 0; background: transparent; cursor: col-resize; outline: none; user-select: none; align-self: stretch; }
+	.resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: 7px; width: 1px; background: var(--ink-line); opacity: 0.8; }
+	.resize-grip { position: absolute; top: 50%; left: 50%; width: 8px; height: 52px; transform: translate(-50%, -50%); border-radius: 999px; background: radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y, var(--panel-bg); border: 1px solid var(--ink-line-soft); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14); }
+	.resize-handle.active .resize-grip, .resize-handle:hover .resize-grip, .resize-handle:focus-visible .resize-grip { border-color: #22c55e; }
 	.detail-card, .pdf-card { display: flex; flex-direction: column; min-height: 0; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.26); padding: 1rem; }
 
 	.topic-snippets { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 0.75rem; margin-top: 1rem; overflow: auto; padding-right: 0.25rem; }
@@ -687,6 +709,14 @@
 	.keyword-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 	.keyword { border-radius: 999px; padding: 0.18rem 0.48rem; background: rgba(34, 197, 94, 0.14); font-size: 0.7rem; font-weight: 600; color: #4ade80; }
 	.snippet-id { border-radius: 999px; padding: 0.18rem 0.48rem; background: rgba(148, 163, 184, 0.1); font-size: 0.7rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+	.snippet-id-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+	.snippet-type { border-radius: 999px; padding: 0.18rem 0.48rem; background: rgba(251, 191, 36, 0.14); font-size: 0.68rem; font-weight: 600; color: #fbbf24; letter-spacing: 0.03em; }
+	.snippet-page { flex: none; font-size: 0.76rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+	.snippet-kw-row { margin-top: 0.4rem; }
+	.snippet-info-row { display: flex; align-items: baseline; gap: 0.4rem; margin-top: 0.35rem; }
+	.snippet-info-label { flex: none; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); opacity: 0.7; }
+	.snippet-info-val { font-size: 0.74rem; color: var(--muted); overflow-wrap: anywhere; line-height: 1.4; }
+	.snippet-cat-val { font-style: italic; }
 
 	.empty-state { display: flex; flex: 1; align-items: center; justify-content: center; border-radius: 18px; border: 1px dashed rgba(148, 163, 184, 0.2); background: rgba(2, 6, 23, 0.28); padding: 1rem; text-align: center; color: var(--muted); }
 
@@ -702,6 +732,7 @@
 	.topic-sidebar-row strong, .topic-sidebar-copy { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 
 	.topic-sidebar-copy { margin-top: 0.55rem; font-size: 0.88rem; line-height: 1.6; color: var(--text); }
+	.topic-sidebar-copy.topic-desc-en { color: var(--muted); font-style: italic; }
 	.topic-sidebar-copy.muted, .topic-sidebar-empty { color: var(--muted); }
 	.topic-sidebar-empty { font-size: 0.9rem; line-height: 1.6; }
 

@@ -25,7 +25,9 @@ type parsedTopicEntry struct {
 	topicID       string
 	topicType     string
 	topicText     string
+	topicDescEn   string
 	keywords      []string
+	keywordsEn    []string
 	lines         []string
 	categoryPaths []string
 }
@@ -126,7 +128,9 @@ func readRecordTopicCards(logger ApiTypes.JimoLogger, recordID int64) ([]topicCa
 				PdfFileName:     filepath.Base(strings.TrimSpace(meta.fileName)),
 				TopicType:       topic.topicType,
 				TopicText:       topic.topicText,
+				TopicDescEn:     topic.topicDescEn,
 				Keywords:        append([]string(nil), topic.keywords...),
+				KeywordsEn:      append([]string(nil), topic.keywordsEn...),
 				CategoryPaths:   append([]string(nil), topic.categoryPaths...),
 				SourceLineSpecs: append([]string(nil), topic.lines...),
 				InputID:         recordID,
@@ -192,15 +196,28 @@ func parseTopicsFile(path string) ([]parsedTopicEntry, error) {
 		case strings.HasPrefix(trimmed, "lines:"):
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "lines:"))
 			current.lines = parseQuotedStringArray(raw)
+		case strings.HasPrefix(trimmed, "topic_keywords_en:"):
+			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "topic_keywords_en:"))
+			current.keywordsEn = parseQuotedStringArray(raw)
 		case strings.HasPrefix(trimmed, "topic_keywords:"):
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "topic_keywords:"))
 			current.keywords = parseQuotedStringArray(raw)
+		case strings.HasPrefix(trimmed, "category_paths_en:"):
+			// skip English category paths for now
 		case strings.HasPrefix(trimmed, "category_paths:"):
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "category_paths:"))
 			current.categoryPaths = parseTopicCategoryPaths(raw)
+		case strings.HasPrefix(trimmed, "topic_desc_en:"):
+			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "topic_desc_en:"))
+			current.topicDescEn = strings.Trim(raw, `"`)
+		case strings.HasPrefix(trimmed, "topic_desc:"):
+			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "topic_desc:"))
+			current.topicText = strings.Trim(raw, `"`)
 		case strings.HasPrefix(trimmed, "topic:"):
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "topic:"))
-			current.topicText = strings.Trim(raw, `"`)
+			if current.topicText == "" {
+				current.topicText = strings.Trim(raw, `"`)
+			}
 		}
 	}
 

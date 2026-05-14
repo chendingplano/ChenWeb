@@ -959,7 +959,9 @@ export type TopicCardApi = {
 	id: string;
 	pdfFileName: string;
 	topicKeywords: string[];
+	topicKeywordsEn?: string[];
 	topicText: string;
+	topicDescEn?: string;
 	topicType: string;
 	categoryPaths?: string[];
 	sourceLineSpecs?: string[];

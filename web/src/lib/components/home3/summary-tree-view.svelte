@@ -45,6 +45,28 @@
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
+	let selectedRecordWidth = $state(340);
+	let isResizingRecord = $state(false);
+
+	function startRecordResize(e: PointerEvent) {
+		isResizingRecord = true;
+		const startX = e.clientX;
+		const startWidth = selectedRecordWidth;
+		document.body.style.cursor = 'col-resize';
+		function onMove(ev: PointerEvent) {
+			selectedRecordWidth = Math.max(200, Math.min(640, startWidth + ev.clientX - startX));
+		}
+		function onUp() {
+			isResizingRecord = false;
+			document.body.style.cursor = '';
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerup', onUp);
+			window.removeEventListener('pointercancel', onUp);
+		}
+		window.addEventListener('pointermove', onMove);
+		window.addEventListener('pointerup', onUp, { once: true });
+		window.addEventListener('pointercancel', onUp, { once: true });
+	}
 
 	let activeRecord = $derived(
 		treeState.selectedRecordId != null ? (recordCache[treeState.selectedRecordId] ?? null) : null
@@ -308,7 +330,6 @@
 			subtitle="Search, filter, and select records before inspecting their summaries."
 			emptyTitle="No records found."
 			emptySubtitle="Use Search or Retrieve to browse kb.inputs for summaries."
-			scopeToActiveStore={true}
 			selectedRecordId={treeState.selectedRecordId}
 			renderMode={treeState.listMode === 'cards' ? 'cards' : 'compact'}
 			mapRecord={mapBrowserRecord}
@@ -325,7 +346,7 @@
 
 			{#if activeRecord}
 				<div class="detail-grid">
-					<div class="detail-card">
+					<div class="detail-card" style="width:{selectedRecordWidth}px;min-width:{selectedRecordWidth}px;max-width:{selectedRecordWidth}px;">
 						<div class="eyebrow">Selected Record</div>
 						<h3>{activeRecord.title}</h3>
 						<div class="detail-meta">
@@ -360,6 +381,16 @@
 							{/each}
 						</div>
 					</div>
+
+					<button
+						type="button"
+						class="record-resize-handle"
+						class:active={isResizingRecord}
+						aria-label="Resize selected record panel"
+						onpointerdown={startRecordResize}
+					>
+						<span class="record-resize-grip" aria-hidden="true"></span>
+					</button>
 
 					<div class="pdf-card">
 						<div class="eyebrow">PDF Display</div>
@@ -559,8 +590,14 @@
 	.tab.active { border-color: rgba(129, 140, 248, 0.36); background: rgba(99, 102, 241, 0.16); color: #c7d2fe; }
 	.tab.passive { color: var(--muted); }
 
-	.detail-grid { display: grid; min-height: 0; flex: 1; grid-template-columns: 340px minmax(0, 1fr); gap: 1rem; }
-	.detail-card, .pdf-card { display: flex; flex-direction: column; min-height: 0; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.26); padding: 1rem; }
+	.detail-grid { display: flex; min-height: 0; flex: 1; gap: 0; }
+	.detail-card { flex: none; display: flex; flex-direction: column; min-height: 0; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.26); padding: 1rem; }
+	.pdf-card { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.26); padding: 1rem; }
+
+	.record-resize-handle { flex: none; position: relative; width: 16px; padding: 0; border: 0; background: transparent; cursor: col-resize; outline: none; user-select: none; }
+	.record-resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: 7px; width: 1px; background: var(--ink-line); opacity: 0.8; }
+	.record-resize-grip { position: absolute; top: 50%; left: 50%; width: 8px; height: 52px; transform: translate(-50%, -50%); border-radius: 999px; background: radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y, var(--panel-bg); border: 1px solid var(--ink-line-soft); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14); }
+	.record-resize-handle.active .record-resize-grip, .record-resize-handle:hover .record-resize-grip, .record-resize-handle:focus-visible .record-resize-grip { border-color: #22c55e; }
 	.detail-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.75rem 0; }
 	.detail-meta span { border-radius: 999px; padding: 0.25rem 0.55rem; background: rgba(148, 163, 184, 0.12); font-size: 0.72rem; color: var(--muted); }
 
@@ -609,6 +646,10 @@
 	.topic-sidebar-copy.muted { color: var(--muted); }
 
 	@media (max-width: 980px) {
-		.workspace, .detail-grid { grid-template-columns: minmax(0, 1fr); }
+		.workspace { grid-template-columns: minmax(0, 1fr); }
+		.detail-grid { flex-direction: column; }
+		.detail-card { flex: none; width: 100% !important; min-width: unset !important; max-width: unset !important; margin-bottom: 0.75rem; }
+		.pdf-card { flex: 1; }
+		.record-resize-handle { display: none; }
 	}
 </style>

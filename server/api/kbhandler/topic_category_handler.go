@@ -19,7 +19,9 @@ type topicCategoryRecord struct {
 	PdfFileName     string                `json:"pdfFileName"`
 	TopicType       string                `json:"topicType"`
 	TopicText       string                `json:"topicText"`
+	TopicDescEn     string                `json:"topicDescEn,omitempty"`
 	Keywords        []string              `json:"topicKeywords"`
+	KeywordsEn      []string              `json:"topicKeywordsEn,omitempty"`
 	CategoryPaths   []string              `json:"categoryPaths,omitempty"`
 	SourceLineSpecs []string              `json:"sourceLineSpecs,omitempty"`
 	InputID         int64                 `json:"inputId"`
