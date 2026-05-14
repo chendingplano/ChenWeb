@@ -709,17 +709,15 @@
 							{:else}
 								<div class="meta-row"><span>Page</span><strong>{selectedLine.page_number}</strong></div>
 								<div class="meta-row"><span>Line</span><strong>{selectedLine.line_number}</strong></div>
-								<div class="meta-row">
-									<span>Corrected</span><strong>{selectedLine.corrected_line_type}</strong>
-								</div>
-								<div class="meta-row"><span>Original</span><strong>{selectedLine.line_type}</strong></div>
+								<div class="meta-row"><span>Line Type</span><strong>{selectedLine.line_type}</strong></div>
+								<div class="meta-row"><span>Content</span><strong>{selectedLine.content || '—'}</strong></div>
 								<div class="meta-row mono">
-									[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
+									<span>Coordinate</span>[{selectedLine.coords.map((n) => Math.trunc(n)).join(', ')}]
 								</div>
 							{/if}
 							{#if correctedFile}
-								<div class="meta-title corrected-title">Corrected File</div>
-								<div class="meta-file">{correctedFile}</div>
+								<div class="meta-title corrected-title">File</div>
+								<div class="meta-file">{correctedFile.replace('/Users/cding/Apps/SemOS/', '')}</div>
 							{/if}
 						{/snippet}
 					</PdfViewWindow>
