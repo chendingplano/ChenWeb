@@ -12,7 +12,7 @@
 		scopeToActiveStore = false
 	}: {
 		open?: boolean;
-		onSelect?: (record: KbInputRecord, filters: RecordBrowserFilters) => void;
+		onSelect?: (records: KbInputRecord[], filters: RecordBrowserFilters) => void;
 		initialFilters?: RecordBrowserFilters;
 		scopeToActiveStore?: boolean;
 	} = $props();
@@ -22,7 +22,7 @@
 
 	let searchLoading = $state(false);
 	let searchResults = $state<KbInputRecord[]>([]);
-	let searchSelected = $state<number | null>(null);
+	let searchSelected = $state<Set<number>>(new Set());
 	let searchError = $state('');
 	let searchRecordId = $state('');
 	let searchTitle = $state('');
@@ -48,7 +48,7 @@
 	}
 
 	function applyFilters(filters: RecordBrowserFilters) {
-		searchSelected = null;
+		searchSelected = new Set();
 		searchResults = [];
 		searchError = '';
 		searchRecordId = filters.searchRecordId ?? '';
@@ -85,6 +85,7 @@
 	async function runSearch() {
 		searchLoading = true;
 		searchError = '';
+		searchSelected = new Set();
 		try {
 			const res = await listKbInputs({
 				recordId: searchRecordId,
@@ -116,14 +117,32 @@
 		open = false;
 	}
 
+	function toggleSearchSelection(id: number) {
+		const next = new Set(searchSelected);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		searchSelected = next;
+	}
+
+	function toggleSelectAll() {
+		if (searchSelected.size === searchResults.length && searchResults.length > 0) {
+			searchSelected = new Set();
+		} else {
+			searchSelected = new Set(searchResults.map((r) => r.id));
+		}
+	}
+
 	function pickSearchResult(record: KbInputRecord) {
 		open = false;
-		onSelect(record, currentFilters());
+		onSelect([record], currentFilters());
 	}
 
 	function confirmSearchSelection() {
-		const record = searchResults.find((x) => x.id === searchSelected);
-		if (record) pickSearchResult(record);
+		const selected = searchResults.filter((r) => searchSelected.has(r.id));
+		if (selected.length > 0) {
+			open = false;
+			onSelect(selected, currentFilters());
+		}
 	}
 
 	function searchStatusText(record: KbInputRecord): { operation: string; procStatus: string } {
@@ -308,6 +327,16 @@
 						<table class="result-table">
 							<thead>
 								<tr>
+									<th class="col-check">
+										<input
+											type="checkbox"
+											class="row-check"
+											checked={searchSelected.size === searchResults.length && searchResults.length > 0}
+											indeterminate={searchSelected.size > 0 && searchSelected.size < searchResults.length}
+											onchange={toggleSelectAll}
+											title="Select all"
+										/>
+									</th>
 									<th>ID</th>
 									<th>Type</th>
 									<th>Title / Doc No</th>
@@ -322,10 +351,19 @@
 								{#each searchResults as record (record.id)}
 									{@const statusSummary = searchStatusText(record)}
 									<tr
-										class:selected={searchSelected === record.id}
-										onclick={() => (searchSelected = record.id)}
+										class:selected={searchSelected.has(record.id)}
+										onclick={() => toggleSearchSelection(record.id)}
 										ondblclick={() => pickSearchResult(record)}
 									>
+										<td class="col-check">
+											<input
+												type="checkbox"
+												class="row-check"
+												checked={searchSelected.has(record.id)}
+												onclick={(e) => e.stopPropagation()}
+												onchange={() => toggleSearchSelection(record.id)}
+											/>
+										</td>
 										<td class="mono">{record.id}</td>
 										<td>{record.type}</td>
 										<td>
@@ -358,11 +396,11 @@
 			</div>
 
 			<div class="dialog-foot">
-				<div class="dialog-foot-hint">Double-click a row, or select and press Select.</div>
+				<div class="dialog-foot-hint">Click to toggle, double-click to pick one. Header checkbox selects all.</div>
 				<div class="dialog-foot-buttons">
 					<button class="btn btn-ghost" type="button" onclick={closeSearch}>Cancel</button>
-					<button class="btn btn-primary dialog-select-btn" type="button" onclick={confirmSearchSelection} disabled={searchSelected == null}>
-						Select
+					<button class="btn btn-primary dialog-select-btn" type="button" onclick={confirmSearchSelection} disabled={searchSelected.size === 0}>
+						{searchSelected.size > 0 ? `Select (${searchSelected.size})` : 'Select'}
 					</button>
 				</div>
 			</div>
@@ -656,6 +694,19 @@
 		position: sticky;
 		top: 0;
 		z-index: 1;
+	}
+
+	.col-check {
+		width: 40px;
+		padding: 0 8px 0 16px !important;
+		text-align: center !important;
+	}
+
+	.row-check {
+		width: 15px;
+		height: 15px;
+		accent-color: #d4a24c;
+		cursor: pointer;
 	}
 
 	.result-table tbody tr {

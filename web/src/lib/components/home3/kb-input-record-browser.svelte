@@ -89,6 +89,7 @@
 	let searchOpen = $state(false);
 	let settingsOpen = $state(false);
 	let recordIdInput = $state('');
+	let pinnedMode = $state(false);
 	let results = $state<KbInputRecord[]>([]);
 	let filters = $state<RecordBrowserFilters>(createDefaultRecordBrowserFilters());
 	let loading = $state(true);
@@ -106,7 +107,7 @@
 	let highlightColor = $state(KB_INPUT_RECORD_BROWSER_DEFAULT_HIGHLIGHT_COLOR);
 	let effectivePageSize = $state(clampKbInputRecordBrowserPageSize(pageSize));
 	let listTotalPages = $derived(Math.max(1, Math.ceil(listTotal / effectivePageSize)));
-	let resetDisabled = $derived(!hasActiveRecordBrowserFilters(filters));
+	let resetDisabled = $derived(!hasActiveRecordBrowserFilters(filters) && !pinnedMode && recordIdInput.trim() === '');
 
 	$effect(() => {
 		if (!settingsHydrated && browser) {
@@ -293,17 +294,17 @@
 	}
 
 	async function prevPage() {
-		if (listPage <= 1 || loading || recordIdInput.trim() !== '') return;
+		if (listPage <= 1 || loading || recordIdInput.trim() !== '' || pinnedMode) return;
 		await loadRecords(listPage - 1, selectedRecordIdInternal);
 	}
 
 	async function nextPage() {
-		if (listPage >= listTotalPages || loading || recordIdInput.trim() !== '') return;
+		if (listPage >= listTotalPages || loading || recordIdInput.trim() !== '' || pinnedMode) return;
 		await loadRecords(listPage + 1, selectedRecordIdInternal);
 	}
 
 	async function jumpToPage() {
-		if (loading || recordIdInput.trim() !== '') return;
+		if (loading || recordIdInput.trim() !== '' || pinnedMode) return;
 		const parsed = Number(listJumpInput.trim());
 		if (!Number.isFinite(parsed)) {
 			listJumpInput = String(listPage);
@@ -318,6 +319,7 @@
 	async function resetFilters() {
 		if (resetDisabled) return;
 		recordIdInput = '';
+		pinnedMode = false;
 		applyFilters(createDefaultRecordBrowserFilters());
 		await loadRecords(1, null);
 	}
@@ -372,10 +374,22 @@
 		bind:open={searchOpen}
 		initialFilters={filters}
 		{scopeToActiveStore}
-		onSelect={async (record, nextFilters) => {
+		onSelect={async (records, nextFilters) => {
 			recordIdInput = '';
 			applyFilters(nextFilters);
-			await loadRecords(1, record.id);
+			if (records.length === 1) {
+				pinnedMode = false;
+				await loadRecords(1, records[0].id);
+			} else {
+				pinnedMode = true;
+				results = records;
+				listTotal = records.length;
+				listPage = 1;
+				listJumpInput = '1';
+				onResultsChange({ results, total: listTotal, page: 1 });
+				const first = records[0] ?? null;
+				emitSelectedRecord(first, true);
+			}
 		}}
 	/>
 
@@ -427,7 +441,13 @@
 
 		<div class="left-meta">
 			<div class="left-meta-title">{title}</div>
-			<div class="left-meta-count">{listTotal} found</div>
+			<div class="left-meta-count">
+				{#if pinnedMode}
+					{results.length} pinned
+				{:else}
+					{listTotal} found
+				{/if}
+			</div>
 		</div>
 
 		<div class="result-list">
@@ -491,7 +511,7 @@
 			{/if}
 		</div>
 
-		{#if listTotal > effectivePageSize}
+		{#if listTotal > effectivePageSize && !pinnedMode}
 			<div class="list-pager">
 				<button class="pager-btn" onclick={prevPage} disabled={listPage <= 1 || loading || recordIdInput.trim() !== ''}
 					>‹ Prev</button
