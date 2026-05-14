@@ -14,6 +14,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PauseIcon from '@lucide/svelte/icons/pause';
 	import { listKbInputs, type KbInputRecord } from '$lib/services/kbService';
+	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -107,11 +108,8 @@
 
 	// ── Manual launch state ────────────────────────────────────────────────
 
-	let searchQuery = $state('');
-	let searchLoading = $state(false);
-	let searchResults = $state<KbInputRecord[]>([]);
-	let searchError = $state('');
-	let selectedRecord = $state<KbInputRecord | null>(null);
+	let searchDialogOpen = $state(false);
+	let selectedRecords = $state<KbInputRecord[]>([]);
 	let processors = $state<Record<string, boolean>>(
 		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
 	);
@@ -304,33 +302,6 @@
 		}
 	}
 
-	async function runSearch() {
-		if (!searchQuery.trim()) return;
-		searchLoading = true;
-		searchError = '';
-		selectedRecord = null;
-		try {
-			const isNumeric = /^\d+$/.test(searchQuery.trim());
-			const res = await listKbInputs({
-				docType: 'all',
-				parseState: 'all',
-				fileName: '',
-				startTime: '',
-				endTime: '',
-				page: 1,
-				pageSize: 30,
-				recordId: isNumeric ? searchQuery.trim() : undefined,
-				title: isNumeric ? undefined : searchQuery.trim()
-			});
-			searchResults = res.results ?? [];
-			if (!searchResults.length) searchError = 'No records found.';
-		} catch (err) {
-			searchError = err instanceof Error ? err.message : 'Search failed';
-		} finally {
-			searchLoading = false;
-		}
-	}
-
 	async function doLaunch(record: KbInputRecord, procs: Record<string, boolean>) {
 		const chosen = ALL_PROCESSOR_IDS.filter((p) => procs[p]);
 		const allChosen = chosen.length === ALL_PROCESSOR_IDS.length;
@@ -350,16 +321,23 @@
 	}
 
 	async function confirmLaunch() {
-		if (!selectedRecord) return;
+		if (!selectedRecords.length) return;
 		launching = true;
 		launchError = '';
 		try {
-			await doLaunch(selectedRecord, processors);
+			const results = await Promise.allSettled(
+				selectedRecords.map((rec) => doLaunch(rec, processors))
+			);
+			const failures = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
 			showConfirm = false;
-			launchToast = { kind: 'success', msg: `Launched processing for record #${selectedRecord.id}` };
-			setTimeout(() => {
-				launchToast = null;
-			}, 4000);
+			if (failures.length === 0) {
+				const n = selectedRecords.length;
+				launchToast = { kind: 'success', msg: `Launched ${n} record${n !== 1 ? 's' : ''}` };
+			} else {
+				const firstMsg = failures[0].reason instanceof Error ? failures[0].reason.message : 'unknown error';
+				launchToast = { kind: 'error', msg: `${failures.length}/${selectedRecords.length} failed: ${firstMsg}` };
+			}
+			setTimeout(() => { launchToast = null; }, 4000);
 		} catch (err) {
 			launchError = err instanceof Error ? err.message : 'Launch failed';
 		} finally {
@@ -770,116 +748,75 @@
 	<!-- ── Section divider ────────────────────────────────────── -->
 	<div style="height:1px; background:{borderColor}; margin:0 24px;"></div>
 
+	<!-- Search dialog -->
+	<KbInputSearchDialog
+		bind:open={searchDialogOpen}
+		onSelect={(records) => { selectedRecords = records; }}
+	/>
+
 	<!-- ════════════════════════════════════════════════════════
 	     Section 2 — Manual Launch
 	══════════════════════════════════════════════════════════ -->
 	<section class="p-6">
 
-		<div class="mb-4">
-			<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">Manual Launch</h2>
-			<p style="font-size:12px; color:{textMuted}; margin:0;">Search a kb.inputs record and launch selected processors</p>
-		</div>
-
-		<!-- Search bar -->
-		<div class="mb-4 flex gap-2">
-			<div
-				class="flex flex-1 items-center gap-2 rounded-lg px-3"
-				style="background:{surface2}; border:1px solid {borderColor}; height:38px;"
-			>
-				<SearchIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
-				<input
-					type="text"
-					bind:value={searchQuery}
-					placeholder="Record ID or title…"
-					onkeydown={(e) => { if (e.key === 'Enter') void runSearch(); }}
-					class="flex-1 bg-transparent outline-none"
-					style="font-size:13px; color:{textPrimary}; border:none;"
-				/>
+		<div class="mb-4 flex items-start justify-between">
+			<div>
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">Manual Launch</h2>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">Search kb.inputs records and launch selected processors</p>
 			</div>
 			<button
-				onclick={runSearch}
-				disabled={searchLoading || !searchQuery.trim()}
+				onclick={() => { searchDialogOpen = true; }}
 				class="flex items-center gap-1.5 rounded-lg px-4 py-2"
-				style="background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; border:none; opacity:{searchLoading || !searchQuery.trim() ? '0.55' : '1'};"
-				onmouseenter={(e) => {
-					if (!searchLoading && searchQuery.trim()) (e.currentTarget as HTMLElement).style.opacity = '0.88';
-				}}
-				onmouseleave={(e) => {
-					(e.currentTarget as HTMLElement).style.opacity = searchLoading || !searchQuery.trim() ? '0.55' : '1';
-				}}
+				style="background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; border:none; flex-shrink:0;"
+				onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
+				onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
 			>
-				{searchLoading ? 'Searching…' : 'Search'}
+				<SearchIcon class="h-4 w-4" />
+				Search
 			</button>
 		</div>
 
-		<!-- Search error -->
-		{#if searchError && !searchResults.length}
-			<div style="font-size:13px; color:{colorError}; margin-bottom:12px;">{searchError}</div>
-		{/if}
-
-		<!-- Results table -->
-		{#if searchResults.length > 0}
-			<div
-				class="mb-4 overflow-hidden rounded-xl"
-				style="border:1px solid {borderColor};"
-			>
-				<table style="width:100%; border-collapse:collapse; font-size:13px;">
-					<thead>
-						<tr style="background:{surface2}; border-bottom:1px solid {borderColor};">
-							{#each ['ID', 'Type', 'Title', 'Parser', 'Last Status', 'Updated'] as col}
-								<th
-									class="px-3 py-2 text-left"
-									style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; white-space:nowrap;"
-								>{col}</th>
-							{/each}
-						</tr>
-					</thead>
-					<tbody>
-						{#each searchResults as rec (rec.id)}
-							<tr
-								onclick={() => (selectedRecord = selectedRecord?.id === rec.id ? null : rec)}
-								style="
-									border-bottom:1px solid {borderColor};
-									background:{selectedRecord?.id === rec.id ? accentTint : 'transparent'};
-									cursor:pointer;
-								"
-								onmouseenter={(e) => {
-									if (selectedRecord?.id !== rec.id)
-										(e.currentTarget as HTMLElement).style.background = surface2;
-								}}
-								onmouseleave={(e) => {
-									if (selectedRecord?.id !== rec.id)
-										(e.currentTarget as HTMLElement).style.background = 'transparent';
-								}}
-							>
-								<td class="px-3 py-2.5" style="font-family:monospace; color:{accent}; font-size:12px;">{rec.id}</td>
-								<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px;">{rec.type}</td>
-								<td class="px-3 py-2.5 max-w-xs truncate" style="color:{textPrimary};" title={recordTitle(rec)}>{recordTitle(rec)}</td>
-								<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px;">{rec.parser_name || '—'}</td>
-								<td class="px-3 py-2.5" style="color:{textSecondary}; font-family:monospace; font-size:11px;">{lastStatusText(rec)}</td>
-								<td class="px-3 py-2.5" style="color:{textMuted}; font-family:monospace; font-size:11px; white-space:nowrap;">{formatTime(rec.modify_time)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+		<!-- Selected records chip list -->
+		{#if selectedRecords.length > 0}
+			<div class="mb-4 rounded-xl p-3" style="background:{surface2}; border:1px solid {borderColor};">
+				<div class="mb-2 flex items-center justify-between">
+					<span style="font-size:10px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">
+						{selectedRecords.length} record{selectedRecords.length !== 1 ? 's' : ''} selected
+					</span>
+					<button
+						onclick={() => { selectedRecords = []; }}
+						style="font-size:11px; color:{textMuted}; background:none; border:none; cursor:pointer; padding:0;"
+						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = colorError; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
+					>Clear all</button>
+				</div>
+				<div class="flex flex-wrap gap-1.5">
+					{#each selectedRecords as rec (rec.id)}
+						<span
+							class="flex items-center gap-1.5 rounded-lg px-2.5 py-1"
+							style="background:{cardBg}; border:1px solid {borderColor}; font-size:12px; color:{textPrimary};"
+						>
+							<span style="font-family:monospace; color:{accent}; font-size:11px;">#{rec.id}</span>
+							<span class="max-w-32 truncate" title={recordTitle(rec)}>{recordTitle(rec)}</span>
+							<button
+								onclick={() => { selectedRecords = selectedRecords.filter(r => r.id !== rec.id); }}
+								style="background:none; border:none; cursor:pointer; color:{textMuted}; padding:0; line-height:1; font-size:14px; margin-left:2px;"
+								onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = colorError; }}
+								onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
+								title="Remove"
+							>×</button>
+						</span>
+					{/each}
+				</div>
 			</div>
 		{/if}
 
-		<!-- Processor selection + launch (shown once a record is selected) -->
-		{#if selectedRecord}
+		<!-- Processor selection + launch (shown once records are selected) -->
+		{#if selectedRecords.length > 0}
 			<div
 				class="rounded-xl p-4"
 				style="background:{cardBg}; border:1px solid {borderColor};"
 			>
-				<div class="mb-3 flex items-center justify-between">
-					<div>
-						<div style="font-size:12px; color:{textMuted}; margin-bottom:2px; font-family:monospace; text-transform:uppercase; letter-spacing:0.08em;">Selected record</div>
-						<div style="font-size:13px; font-weight:600; color:{textPrimary};">
-							#{selectedRecord.id} — {recordTitle(selectedRecord)}
-						</div>
-					</div>
-				</div>
-
 				<div style="font-size:12px; color:{textMuted}; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">Processors to run</div>
 
 				<div class="mb-4 space-y-1.5">
@@ -1132,7 +1069,7 @@
 <!-- ════════════════════════════════════════════════════════════
      Confirm Launch Dialog
 ══════════════════════════════════════════════════════════════ -->
-{#if showConfirm && selectedRecord}
+{#if showConfirm && selectedRecords.length > 0}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-40 flex items-center justify-center"
@@ -1144,11 +1081,18 @@
 			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
 		>
 			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 8px;">Confirm launch</h3>
-			<p style="font-size:13px; color:{textSecondary}; margin:0 0 16px; line-height:1.5;">
-				Launch processing for record
-				<span style="color:{accent}; font-family:monospace; font-weight:600;">#{selectedRecord.id}</span>
-				({recordTitle(selectedRecord)})?
+			<p style="font-size:13px; color:{textSecondary}; margin:0 0 12px; line-height:1.5;">
+				Launch processing for {selectedRecords.length} record{selectedRecords.length !== 1 ? 's' : ''}:
 			</p>
+			<div class="mb-4 flex flex-wrap gap-1.5">
+				{#each selectedRecords as rec (rec.id)}
+					<span
+						style="font-family:monospace; font-size:11px; padding:2px 8px; border-radius:999px;
+						       background:{accentTint}; color:{accent}; border:1px solid {accent}30;"
+						title={recordTitle(rec)}
+					>#{rec.id}</span>
+				{/each}
+			</div>
 
 			<!-- Processors summary -->
 			<div
@@ -1289,13 +1233,5 @@
 	@keyframes pulse-ring {
 		0%, 100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.4); }
 		50%       { box-shadow: 0 0 0 4px rgba(129, 140, 248, 0); }
-	}
-	input[type='text'] {
-		background: transparent;
-		border: none;
-		outline: none;
-	}
-	input[type='text']::placeholder {
-		color: #64748b;
 	}
 </style>
