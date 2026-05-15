@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import { appAuthStore } from '@chendingplano/shared';
 	import {
@@ -12,6 +12,7 @@
 	} from '$lib/services/kbService';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
+	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
 	import {
 		CHUNK_LIST_MAX_WIDTH,
 		CHUNK_LIST_MIN_WIDTH,
@@ -55,46 +56,8 @@
 
 	let docPage = $state(1);
 	let pdfZoom = $state(CHUNK_PANEL_DEFAULT_SETTINGS.pdfZoom);
-	let pdfLoading = $state(false);
-	let pdfError = $state('');
 	let iframeRevision = $state(0);
 	let pdfNumPages = $state(0);
-	let pdfRenderedPages = $state<number[]>([]);
-	let pdfStageEl = $state<HTMLDivElement | null>(null);
-	let pdfCanvasHostEl = $state<HTMLDivElement | null>(null);
-
-	type PdfJsLib = {
-		getDocument: (
-			src: string | { url: string; withCredentials?: boolean }
-		) => { promise: Promise<unknown> };
-		GlobalWorkerOptions?: { workerSrc: string };
-	};
-	type PdfPageViewport = {
-		width: number;
-		height: number;
-		convertToViewportRectangle: (rect: number[]) => number[];
-	};
-	type PdfPageProxy = {
-		rotate?: number;
-		getViewport: (params: { scale: number; rotation?: number }) => PdfPageViewport;
-		render: (params: {
-			canvasContext: CanvasRenderingContext2D;
-			viewport: PdfPageViewport;
-		}) => { promise: Promise<void> };
-	};
-	type PdfDocumentProxy = {
-		numPages: number;
-		getPage: (n: number) => Promise<PdfPageProxy>;
-		destroy?: () => void | Promise<void>;
-	};
-
-	let pdfLib: PdfJsLib | null = null;
-	let pdfDoc: PdfDocumentProxy | null = null;
-	let pdfLoadedInputId = 0;
-	let pdfRenderSeq = 0;
-	let pdfLastRenderWidth = 0;
-	let pdfResizeRaf = 0;
-	let pdfViewportByPage = new Map<number, PdfPageViewport>();
 
 	let isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
 	let fileUrl = $derived.by(() => {
@@ -238,15 +201,7 @@
 		highlightSelectionVersion = 0;
 		currentInput = null;
 		docPage = 1;
-		pdfError = '';
-		if (pdfDoc?.destroy) {
-			await pdfDoc.destroy();
-		}
-		pdfDoc = null;
 		pdfNumPages = 0;
-		pdfRenderedPages = [];
-		pdfLoadedInputId = 0;
-		pdfViewportByPage.clear();
 		try {
 			const [chunkRes, inputRes] = await Promise.all([
 				listKbChunks(id),
@@ -404,270 +359,6 @@
 		return out;
 	}
 
-	function clampDocPage(page: number): number {
-		const n = Number.isFinite(page) ? Math.trunc(page) : 1;
-		const max = Math.max(1, pdfNumPages || 1);
-		return Math.max(1, Math.min(n || 1, max));
-	}
-	function goToPage(page: number, behavior: ScrollBehavior = 'smooth') {
-		docPage = clampDocPage(page);
-		if (isPdf) scrollPdfToPage(docPage, behavior);
-	}
-
-	function scrollPdfToPage(pageNo: number, behavior: ScrollBehavior = 'smooth') {
-		if (!pdfStageEl) return;
-		const pageEl = document.getElementById(`pdf-page-${pageNo}`);
-		if (!pageEl) return;
-		const pageRect = pageEl.getBoundingClientRect();
-		const stageRect = pdfStageEl.getBoundingClientRect();
-		const targetTop = pdfStageEl.scrollTop + (pageRect.top - stageRect.top);
-		pdfStageEl.scrollTo({ top: Math.max(0, targetTop), behavior });
-	}
-
-	function zoomIn() {
-		pdfZoom = Math.min(3, Number((pdfZoom + 0.1).toFixed(2)));
-	}
-	function zoomOut() {
-		pdfZoom = Math.max(0.1, Number((pdfZoom - 0.1).toFixed(2)));
-	}
-	function zoomLabel(): string {
-		return `${Math.round(pdfZoom * 100)}%`;
-	}
-
-	async function ensurePdfLib() {
-		if (pdfLib) return;
-		const mod = (await import('pdfjs-dist')) as unknown as PdfJsLib;
-		pdfLib = mod;
-		if (pdfLib.GlobalWorkerOptions) {
-			pdfLib.GlobalWorkerOptions.workerSrc = new URL(
-				'pdfjs-dist/build/pdf.worker.mjs',
-				import.meta.url
-			).toString();
-		}
-	}
-
-	async function ensurePdfDoc() {
-		if (!currentInput || !isPdf) return;
-		if (pdfDoc && pdfLoadedInputId === currentInput.id) return;
-		if (pdfDoc?.destroy) await pdfDoc.destroy();
-		pdfDoc = null;
-		pdfLoadedInputId = 0;
-		pdfError = '';
-		await ensurePdfLib();
-		if (!pdfLib) return;
-		const task = pdfLib.getDocument({
-			url: `/api/v1/kb/inputs/${currentInput.id}/file`,
-			withCredentials: true
-		});
-		pdfDoc = (await task.promise) as PdfDocumentProxy;
-		pdfLoadedInputId = currentInput.id;
-		pdfNumPages = Math.max(1, pdfDoc.numPages || 1);
-		pdfRenderedPages = Array.from({ length: pdfNumPages }, (_, i) => i + 1);
-	}
-
-	function drawPdfHighlights() {
-		const HIGHLIGHT_EXPAND_TOP_PX = 10;
-		const HIGHLIGHT_EXPAND_LEFT_PX = 5;
-		const HIGHLIGHT_EXPAND_RIGHT_PX = 5;
-		for (const pageNo of pdfRenderedPages) {
-			const overlay = document.getElementById(`pdf-overlay-${pageNo}`) as HTMLDivElement | null;
-			const viewport = pdfViewportByPage.get(pageNo);
-			if (!overlay || !viewport) continue;
-			overlay.innerHTML = '';
-			const lines = selectedLinesByPage.get(pageNo) ?? [];
-			const rects = lines.flatMap((ln) => {
-				if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
-				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
-				return [
-					{
-						lineNumber: ln.line_number,
-						left: Math.max(0, Math.min(vx1, vx2) - HIGHLIGHT_EXPAND_LEFT_PX),
-						right: Math.max(vx1, vx2) + HIGHLIGHT_EXPAND_RIGHT_PX,
-						top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
-						bottom: Math.max(vy1, vy2)
-					}
-				];
-			});
-
-			const mergedRects: Array<{
-				firstLineNumber: number;
-				lastLineNumber: number;
-				left: number;
-				right: number;
-				top: number;
-				bottom: number;
-			}> = [];
-			for (const rect of rects) {
-				const prev = mergedRects[mergedRects.length - 1];
-				const isAdjacent = !!prev && rect.lineNumber === prev.lastLineNumber + 1;
-				if (isAdjacent && prev) {
-					prev.lastLineNumber = rect.lineNumber;
-					prev.left = Math.min(prev.left, rect.left);
-					prev.right = Math.max(prev.right, rect.right);
-					prev.bottom = Math.max(prev.bottom, rect.bottom);
-					continue;
-				}
-				mergedRects.push({
-					firstLineNumber: rect.lineNumber,
-					lastLineNumber: rect.lineNumber,
-					left: rect.left,
-					right: rect.right,
-					top: rect.top,
-					bottom: rect.bottom
-				});
-			}
-
-			for (const rect of mergedRects) {
-				const width = Math.max(0, rect.right - rect.left);
-				const height = Math.max(0, rect.bottom - rect.top);
-				if (width < 1 || height < 1) continue;
-				const mark = document.createElement('div');
-				mark.className = 'pdf-highlight';
-				mark.style.left = `${rect.left}px`;
-				mark.style.top = `${rect.top}px`;
-				mark.style.width = `${width}px`;
-				mark.style.height = `${height}px`;
-				mark.title =
-					rect.firstLineNumber === rect.lastLineNumber
-						? `line ${rect.firstLineNumber}`
-						: `lines ${rect.firstLineNumber}-${rect.lastLineNumber}`;
-				overlay.appendChild(mark);
-			}
-		}
-	}
-
-	async function renderPdfPages() {
-		if (!pdfDoc || !pdfStageEl || pdfRenderedPages.length === 0) return;
-		const stageWidth = Math.floor((pdfCanvasHostEl ?? pdfStageEl).clientWidth);
-		if (stageWidth <= 0) return;
-		const seq = ++pdfRenderSeq;
-		pdfLastRenderWidth = stageWidth;
-		pdfLoading = true;
-		pdfError = '';
-		try {
-			const firstPage = await pdfDoc.getPage(1);
-			const firstPageRotation = firstPage.rotate ?? 0;
-			const baseViewport = firstPage.getViewport({ scale: 1, rotation: firstPageRotation });
-			const availableWidth = Math.max(stageWidth - 40, 320);
-			const baseScale = availableWidth / baseViewport.width;
-			const targetScale = Math.max(0.1, baseScale * pdfZoom);
-
-			for (const pageNo of pdfRenderedPages) {
-				if (seq !== pdfRenderSeq) return;
-				const canvas = document.getElementById(`pdf-canvas-${pageNo}`) as HTMLCanvasElement | null;
-				const overlay = document.getElementById(`pdf-overlay-${pageNo}`) as HTMLDivElement | null;
-				if (!canvas || !overlay) continue;
-				const page = await pdfDoc.getPage(pageNo);
-				const pageRotation = page.rotate ?? 0;
-				const viewport = page.getViewport({ scale: targetScale, rotation: pageRotation });
-				const ctx = canvas.getContext('2d');
-				if (!ctx) continue;
-
-				canvas.width = Math.floor(viewport.width);
-				canvas.height = Math.floor(viewport.height);
-				canvas.style.width = `${viewport.width}px`;
-				canvas.style.height = `${viewport.height}px`;
-				overlay.style.width = `${viewport.width}px`;
-				overlay.style.height = `${viewport.height}px`;
-				pdfViewportByPage.set(pageNo, viewport);
-
-				ctx.setTransform(1, 0, 0, 1, 0, 0);
-				ctx.clearRect(0, 0, viewport.width, viewport.height);
-				await page.render({ canvasContext: ctx, viewport }).promise;
-			}
-
-			if (seq !== pdfRenderSeq) return;
-			drawPdfHighlights();
-		} catch (err) {
-			pdfError = err instanceof Error ? err.message : 'Failed to render PDF';
-		} finally {
-			if (seq === pdfRenderSeq) pdfLoading = false;
-		}
-	}
-
-	async function renderSinglePdfPage(pageNo: number) {
-		if (!pdfDoc || !pdfStageEl || !Number.isFinite(pageNo) || pageNo <= 0) return;
-		const stageWidth = Math.floor((pdfCanvasHostEl ?? pdfStageEl).clientWidth);
-		if (stageWidth <= 0) return;
-
-		const firstPage = await pdfDoc.getPage(1);
-		const firstPageRotation = firstPage.rotate ?? 0;
-		const baseViewport = firstPage.getViewport({ scale: 1, rotation: firstPageRotation });
-		const availableWidth = Math.max(stageWidth - 40, 320);
-		const baseScale = availableWidth / baseViewport.width;
-		const targetScale = Math.max(0.1, baseScale * pdfZoom);
-
-		const canvas = document.getElementById(`pdf-canvas-${pageNo}`) as HTMLCanvasElement | null;
-		const overlay = document.getElementById(`pdf-overlay-${pageNo}`) as HTMLDivElement | null;
-		if (!canvas || !overlay) return;
-
-		const page = await pdfDoc.getPage(pageNo);
-		const pageRotation = page.rotate ?? 0;
-		const viewport = page.getViewport({ scale: targetScale, rotation: pageRotation });
-		const ctx = canvas.getContext('2d');
-		if (!ctx) return;
-
-		canvas.width = Math.floor(viewport.width);
-		canvas.height = Math.floor(viewport.height);
-		canvas.style.width = `${viewport.width}px`;
-		canvas.style.height = `${viewport.height}px`;
-		overlay.style.width = `${viewport.width}px`;
-		overlay.style.height = `${viewport.height}px`;
-		pdfViewportByPage.set(pageNo, viewport);
-
-		ctx.setTransform(1, 0, 0, 1, 0, 0);
-		ctx.clearRect(0, 0, viewport.width, viewport.height);
-		await page.render({ canvasContext: ctx, viewport }).promise;
-	}
-
-	$effect(() => {
-		const canRenderPdf = isPdf && !!currentInput && !!pdfStageEl;
-		if (!canRenderPdf) return;
-		pdfZoom;
-		pdfRenderedPages.length;
-		let cancelled = false;
-		(async () => {
-			await ensurePdfDoc();
-			if (cancelled) return;
-			await tick();
-			if (cancelled) return;
-			await renderPdfPages();
-		})();
-		return () => {
-			cancelled = true;
-		};
-	});
-
-	$effect(() => {
-		if (!isPdf || !pdfDoc) return;
-		docPage;
-		void tick().then(() => scrollPdfToPage(clampDocPage(docPage), 'auto'));
-	});
-
-	$effect(() => {
-		if (!isPdf || pdfViewportByPage.size === 0) return;
-		selectedLinesByPage;
-		drawPdfHighlights();
-	});
-
-	$effect(() => {
-		if (!isPdf || !pdfStageEl) return;
-		const ro = new ResizeObserver(() => {
-			const w = Math.floor(pdfStageEl?.clientWidth ?? 0);
-			if (w <= 0 || w === pdfLastRenderWidth) return;
-			if (pdfResizeRaf) cancelAnimationFrame(pdfResizeRaf);
-			pdfResizeRaf = requestAnimationFrame(() => {
-				void renderPdfPages();
-			});
-		});
-		ro.observe(pdfStageEl);
-		return () => {
-			ro.disconnect();
-			if (pdfResizeRaf) cancelAnimationFrame(pdfResizeRaf);
-			pdfResizeRaf = 0;
-		};
-	});
-
 	onMount(() => {
 		if (browser) {
 			chunkPanelSettings = readChunkPanelSettings(localStorage, getChunkSettingsUserId());
@@ -678,7 +369,6 @@
 			chunkListResizing = false;
 			document.body.style.cursor = '';
 			document.body.style.userSelect = '';
-			if (pdfDoc?.destroy) void pdfDoc.destroy();
 		};
 	});
 

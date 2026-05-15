@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import {
@@ -793,17 +794,6 @@
 		</aside>
 
 		<section class="right">
-			<div class="right-toolbar">
-				<div class="title">
-					<span class="name">{currentInput?.file_name ?? 'No document loaded'}</span>
-					{#if currentInput}<span class="type">{currentInput.type}</span>{/if}
-				</div>
-				<div class="stats">
-					<span>{highlightCount} mark</span>
-					<span>{headingCount} headings</span>
-				</div>
-			</div>
-
 			{#if !currentInput}
 				<div class="doc-empty">Retrieve a record to display document and structure highlights.</div>
 			{:else}
@@ -818,6 +808,7 @@
 							? `${selectedHighlightTarget.page}:${selectedHighlightTarget.coords.join(',')}:${selectedHighlightTarget.version}`
 							: `${selectedLineKey ?? ''}:${highlightSelectionVersion}`}
 						renderHighlights={renderStructureHighlights}
+						{darkMode}
 						sidebarMinWidth={140}
 						sidebarMaxWidth={420}
 						sidebarDefaultWidth={270}
@@ -825,6 +816,23 @@
 						sidebarSettingsKey="doc-structure-pdf-sidebar"
 						sidebarWidthSettingLabel="Panel Width"
 					>
+						{#snippet toolbar()}
+							<button
+								type="button"
+								class="pvw-tool-btn"
+								disabled={!selectedLine}
+								onclick={openSidebarTypeEdit}
+								title="Edit Line Type"
+							><SquarePenIcon class="pvw-tb-icon" /></button>
+							<div class="pvw-tool-sep"></div>
+							<button
+								type="button"
+								class="pvw-tool-btn"
+								disabled={!selectedLine || !!deletingLineKey}
+								onclick={(e) => { if (selectedLine) requestDeleteConfirm(selectedLine, e); }}
+								title="Delete Line"
+							><Trash2Icon class="pvw-tb-icon" /></button>
+						{/snippet}
 						{#snippet sidebar()}
 							{#if !selectedLine}
 								<div class="meta-empty">Select a line from the left panel.</div>
@@ -1701,41 +1709,45 @@
 	}
 	.right {
 		min-width: 0;
-		display: grid;
-		grid-template-rows: auto 1fr;
 		min-height: 0;
-	}
-	.right-toolbar {
 		display: flex;
-		justify-content: space-between;
+		flex-direction: column;
+	}
+	.pvw-tool-btn {
+		display: inline-flex;
 		align-items: center;
-		padding: 12px 14px;
-		border-bottom: 1px solid var(--ink-line);
-		background: var(--panel-bg);
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		border-radius: 8px;
+		border: none;
+		background: transparent;
+		color: var(--pvw-tc, #94a3b8);
+		cursor: pointer;
+		transition: background 120ms ease, color 120ms ease;
 	}
-	.title {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		min-width: 0;
+	.pvw-tool-btn:disabled {
+		opacity: 0.38;
+		cursor: not-allowed;
 	}
-	.name {
-		font-weight: 700;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+	.pvw-tool-btn:hover:not(:disabled),
+	.pvw-tool-btn:focus-visible {
+		background: var(--pvw-hvr, rgba(99, 102, 241, 0.14));
+		color: #818cf8;
+		outline: none;
 	}
-	.type {
-		color: var(--text-muted);
-		text-transform: uppercase;
-		font-size: 11px;
-		letter-spacing: 0.06em;
+	.pvw-tool-sep {
+		width: 1px;
+		height: 18px;
+		background: var(--pvw-bdc, rgba(148, 163, 184, 0.18));
+		flex-shrink: 0;
+		margin: 0 2px;
 	}
-	.stats {
-		display: flex;
-		gap: 14px;
-		color: var(--text-secondary);
-		font-size: 12px;
+	:global(.pvw-tb-icon) {
+		width: 15px;
+		height: 15px;
+		flex-shrink: 0;
+		pointer-events: none;
 	}
 	.doc-empty {
 		padding: 20px;
