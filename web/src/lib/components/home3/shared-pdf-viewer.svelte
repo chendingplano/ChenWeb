@@ -58,18 +58,18 @@
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
-		onselect?: (detail: {
+		onselect?: (ranges: Array<{
 			pageNumber: number;
 			viewportY1: number;
 			viewportY2: number;
 			viewport: PdfPageViewport;
-		}) => void;
-		ondragmove?: (detail: {
+		}>) => void;
+		ondragmove?: (ranges: Array<{
 			pageNumber: number;
 			viewportY1: number;
 			viewportY2: number;
 			viewport: PdfPageViewport;
-		}) => void;
+		}>) => void;
 		pageBarTool?: Snippet;
 		sidebarContent?: Snippet;
 		sidebarResizer?: Snippet;
@@ -128,23 +128,39 @@
 		dragSelecting = true;
 	}
 
+	function getPageRanges(clientY1: number, clientY2: number) {
+		const ranges: Array<{
+			pageNumber: number;
+			viewportY1: number;
+			viewportY2: number;
+			viewport: PdfPageViewport;
+		}> = [];
+		for (const [pageNo, viewport] of pdfViewportByPage.entries()) {
+			const canvasEl = document.getElementById(`${viewerId}-canvas-${pageNo}`) as HTMLCanvasElement | null;
+			if (!canvasEl) continue;
+			const rect = canvasEl.getBoundingClientRect();
+			if (clientY2 < rect.top || clientY1 > rect.bottom) continue;
+			const rawY1 = Math.max(clientY1, rect.top) - rect.top;
+			const rawY2 = Math.min(clientY2, rect.bottom) - rect.top;
+			const viewportY1 = Math.max(0, Math.min(rawY1, viewport.height));
+			const viewportY2 = Math.max(0, Math.min(rawY2, viewport.height));
+			ranges.push({ pageNumber: pageNo, viewportY1, viewportY2, viewport });
+		}
+		return ranges.sort((a, b) => a.pageNumber - b.pageNumber);
+	}
+
 	function onDragPointerMove(e: PointerEvent) {
 		if (!dragSelecting) return;
 		indViewportTop = Math.min(dragSelStartClientY, e.clientY);
 		indHeight = Math.abs(e.clientY - dragSelStartClientY);
 
 		if (ondragmove) {
-			const pageNo = dragSelPage;
-			const canvasEl = document.getElementById(`${viewerId}-canvas-${pageNo}`) as HTMLCanvasElement | null;
-			const viewport = pdfViewportByPage.get(pageNo);
-			if (canvasEl && viewport) {
-				const canvasRect = canvasEl.getBoundingClientRect();
-				const rawY1 = Math.min(dragSelStartClientY, e.clientY) - canvasRect.top;
-				const rawY2 = Math.max(dragSelStartClientY, e.clientY) - canvasRect.top;
-				const viewportY1 = Math.max(0, Math.min(rawY1, viewport.height));
-				const viewportY2 = Math.max(0, Math.min(rawY2, viewport.height));
-				ondragmove({ pageNumber: pageNo, viewportY1, viewportY2, viewport });
-				paintOverlayForPage(pageNo);
+			const clientY1 = Math.min(dragSelStartClientY, e.clientY);
+			const clientY2 = Math.max(dragSelStartClientY, e.clientY);
+			const ranges = getPageRanges(clientY1, clientY2);
+			if (ranges.length > 0) {
+				ondragmove(ranges);
+				for (const r of ranges) paintOverlayForPage(r.pageNumber);
 			}
 		}
 	}
@@ -154,26 +170,12 @@
 		dragSelecting = false;
 		if (!onselect) return;
 
-		const pageNo = dragSelPage;
-		const canvasEl = document.getElementById(`${viewerId}-canvas-${pageNo}`) as HTMLCanvasElement | null;
-		const viewport = pdfViewportByPage.get(pageNo);
-		if (!canvasEl || !viewport) return;
+		const clientY1 = Math.min(dragSelStartClientY, e.clientY);
+		const clientY2 = Math.max(dragSelStartClientY, e.clientY);
+		if (clientY2 - clientY1 < 5) return;
 
-		const canvasRect = canvasEl.getBoundingClientRect();
-		const rawY1 = Math.min(dragSelStartClientY, e.clientY) - canvasRect.top;
-		const rawY2 = Math.max(dragSelStartClientY, e.clientY) - canvasRect.top;
-
-		const viewportY1 = Math.max(0, Math.min(rawY1, viewport.height));
-		const viewportY2 = Math.max(0, Math.min(rawY2, viewport.height));
-
-		if (viewportY2 - viewportY1 < 5) return;
-
-		onselect({
-			pageNumber: pageNo,
-			viewportY1,
-			viewportY2,
-			viewport
-		});
+		const ranges = getPageRanges(clientY1, clientY2);
+		if (ranges.length > 0) onselect(ranges);
 		paintHighlights();
 	}
 

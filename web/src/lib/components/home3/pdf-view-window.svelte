@@ -59,18 +59,18 @@
 		showingLines?: boolean;
 		selectedLines?: number[];
 		enableSelectionDialog?: boolean;
-		onselect?: (detail: {
+		onselect?: (ranges: Array<{
 			pageNumber: number;
 			viewportY1: number;
 			viewportY2: number;
 			viewport: PdfPageViewport;
-		}) => void;
-		ondragmove?: (detail: {
+		}>) => void;
+		ondragmove?: (ranges: Array<{
 			pageNumber: number;
 			viewportY1: number;
 			viewportY2: number;
 			viewport: PdfPageViewport;
-		}) => void;
+		}>) => void;
 		toolbar?: Snippet;
 		linesView?: Snippet;
 		sidebar?: Snippet;
@@ -78,12 +78,12 @@
 
 	// ---- Built-in selection dialog state (used when enableSelectionDialog=true and no external onselect) ----
 	let builtinDialogOpen = $state(false);
-	let builtinSelectionDetail = $state<{
+	let builtinSelectionDetail = $state<Array<{
 		pageNumber: number;
 		viewportY1: number;
 		viewportY2: number;
 		viewport: PdfPageViewport;
-	} | null>(null);
+	}> | null>(null);
 	let builtinRawLines = $state<RawLine[]>([]);
 	let builtinRawLinesInputId = $state<number | null>(null);
 	let builtinDragPreviewLines = $state<number[]>([]);
@@ -102,36 +102,39 @@
 			.catch(() => {});
 	});
 
-	function handleBuiltinSelect(detail: {
+	function handleBuiltinSelect(ranges: Array<{
 		pageNumber: number;
 		viewportY1: number;
 		viewportY2: number;
 		viewport: PdfPageViewport;
-	}) {
+	}>) {
 		builtinDragPreviewLines = [];
 		builtinHighlightVersion++;
-		builtinSelectionDetail = detail;
+		builtinSelectionDetail = ranges;
 		builtinDialogOpen = true;
 	}
 
-	function handleBuiltinDragMove(detail: {
+	function handleBuiltinDragMove(ranges: Array<{
 		pageNumber: number;
 		viewportY1: number;
 		viewportY2: number;
 		viewport: PdfPageViewport;
-	}) {
-		const { pageNumber, viewportY1, viewportY2, viewport } = detail;
-		const pageLines = builtinRawLines.filter((l) => l.page_number === pageNumber);
-		builtinDragPreviewLines = pageLines
-			.filter((line) => {
-				if (!Array.isArray(line.coords) || line.coords.length < 4) return false;
+	}>) {
+		const previewLines: number[] = [];
+		for (const { pageNumber, viewportY1, viewportY2, viewport } of ranges) {
+			const pageLines = builtinRawLines.filter((l) => l.page_number === pageNumber);
+			for (const line of pageLines) {
+				if (!Array.isArray(line.coords) || line.coords.length < 4) continue;
 				const [, vy1, , vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
 				const lineTop = Math.min(vy1, vy2);
 				const lineBottom = Math.max(vy1, vy2);
-				return Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2);
-			})
-			.map((l) => l.line_number);
-		// SharedPdfViewer calls paintOverlayForPage immediately after this callback,
+				if (Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2)) {
+					previewLines.push(line.line_number);
+				}
+			}
+		}
+		builtinDragPreviewLines = previewLines;
+		// SharedPdfViewer calls paintOverlayForPage for each covered page immediately after,
 		// so renderBuiltinHighlights will read the updated builtinDragPreviewLines.
 	}
 

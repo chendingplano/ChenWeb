@@ -313,24 +313,26 @@
 		}
 	}
 
-	function handleDragSelect(detail: {
+	function handleDragSelect(ranges: Array<{
 		pageNumber: number;
 		viewportY1: number;
 		viewportY2: number;
 		viewport: PdfPageViewport;
-	}) {
+	}>) {
 		pdfDragPreviewLines = [];
-		const { pageNumber, viewportY1, viewportY2, viewport } = detail;
-		const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
-		const selected = pageLines
-			.filter((line) => {
-				if (!Array.isArray(line.coords) || line.coords.length < 4) return false;
-				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+		const selected: number[] = [];
+		for (const { pageNumber, viewportY1, viewportY2, viewport } of ranges) {
+			const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
+			for (const line of pageLines) {
+				if (!Array.isArray(line.coords) || line.coords.length < 4) continue;
+				const [, vy1, , vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
 				const lineTop = Math.min(vy1, vy2);
 				const lineBottom = Math.max(vy1, vy2);
-				return Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2);
-			})
-			.map((l) => l.line_number);
+				if (Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2)) {
+					selected.push(line.line_number);
+				}
+			}
+		}
 		pdfSelectedLines = selected;
 		addMetricBufferLines = selected;
 		if (selected.length > 0) {
@@ -339,23 +341,25 @@
 		}
 	}
 
-	function handleDragMove(detail: {
+	function handleDragMove(ranges: Array<{
 		pageNumber: number;
 		viewportY1: number;
 		viewportY2: number;
 		viewport: PdfPageViewport;
-	}) {
-		const { pageNumber, viewportY1, viewportY2, viewport } = detail;
-		const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
-		const selected = pageLines
-			.filter((line) => {
-				if (!Array.isArray(line.coords) || line.coords.length < 4) return false;
-				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+	}>) {
+		const selected: number[] = [];
+		for (const { pageNumber, viewportY1, viewportY2, viewport } of ranges) {
+			const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
+			for (const line of pageLines) {
+				if (!Array.isArray(line.coords) || line.coords.length < 4) continue;
+				const [, vy1, , vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
 				const lineTop = Math.min(vy1, vy2);
 				const lineBottom = Math.max(vy1, vy2);
-				return Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2);
-			})
-			.map((l) => l.line_number);
+				if (Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2)) {
+					selected.push(line.line_number);
+				}
+			}
+		}
 		pdfDragPreviewLines = selected;
 	}
 
