@@ -106,6 +106,33 @@
 	let indViewportLeft = $state(0);
 	let indWidth = $state(0);
 
+	// ---------- Drag-select auto-scroll ----------
+	const DRAG_SCROLL_ZONE = 60;   // px from edge that triggers auto-scroll
+	const DRAG_SCROLL_MAX_SPD = 14; // max px scrolled per animation frame
+	let dragScrollRaf = 0;
+	let dragScrollSpeed = 0;
+
+	function stopDragScroll() {
+		if (dragScrollRaf) {
+			cancelAnimationFrame(dragScrollRaf);
+			dragScrollRaf = 0;
+		}
+		dragScrollSpeed = 0;
+	}
+
+	function startDragScroll() {
+		if (dragScrollRaf) return;
+		function step() {
+			if (!dragSelecting || !pdfCanvasHostEl || dragScrollSpeed === 0) {
+				dragScrollRaf = 0;
+				return;
+			}
+			pdfCanvasHostEl.scrollBy(0, dragScrollSpeed);
+			dragScrollRaf = requestAnimationFrame(step);
+		}
+		dragScrollRaf = requestAnimationFrame(step);
+	}
+
 	// ---------- Drag-select handlers ----------
 	function onDragPointerDown(e: PointerEvent) {
 		if (!onselect || e.button !== 0) return;
@@ -156,6 +183,22 @@
 		indViewportTop = Math.min(dragSelStartClientY, e.clientY);
 		indHeight = Math.abs(e.clientY - dragSelStartClientY);
 
+		// Auto-scroll when pointer is near the top or bottom edge of the scroll container
+		if (pdfCanvasHostEl) {
+			const rect = pdfCanvasHostEl.getBoundingClientRect();
+			const distBottom = rect.bottom - e.clientY;
+			const distTop = e.clientY - rect.top;
+			if (distBottom < DRAG_SCROLL_ZONE && distBottom >= 0) {
+				dragScrollSpeed = Math.round(DRAG_SCROLL_MAX_SPD * (1 - distBottom / DRAG_SCROLL_ZONE));
+				startDragScroll();
+			} else if (distTop < DRAG_SCROLL_ZONE && distTop >= 0) {
+				dragScrollSpeed = -Math.round(DRAG_SCROLL_MAX_SPD * (1 - distTop / DRAG_SCROLL_ZONE));
+				startDragScroll();
+			} else {
+				stopDragScroll();
+			}
+		}
+
 		if (ondragmove) {
 			const clientY1 = Math.min(dragSelStartClientY, e.clientY);
 			const clientY2 = Math.max(dragSelStartClientY, e.clientY);
@@ -170,6 +213,7 @@
 	function onDragPointerUp(e: PointerEvent) {
 		if (!dragSelecting) return;
 		dragSelecting = false;
+		stopDragScroll();
 		if (!onselect) return;
 
 		const clientY1 = Math.min(dragSelStartClientY, e.clientY);
