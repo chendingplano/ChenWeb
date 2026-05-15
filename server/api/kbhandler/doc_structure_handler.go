@@ -311,11 +311,12 @@ func readCorrectedLinesFile(path string) ([]docStructureLine, int, error) {
 // parseCorrectedLine parses corrected line records:
 // "<line>\t<page>\t<line_type>\t<corrected_line_type>\t<font>\t<font_size>\t[x1,y1,x2,y2]\t<content...>"
 type updateDocStructureLineRequest struct {
-	InputRecordID     int64   `json:"input_record_id"`
-	PageNumber        int     `json:"page_number"`
-	LineNumber        int     `json:"line_number"`
-	CorrectedLineType *string `json:"corrected_line_type"`
-	Content           *string `json:"content"`
+	InputRecordID     int64      `json:"input_record_id"`
+	PageNumber        int        `json:"page_number"`
+	LineNumber        int        `json:"line_number"`
+	CorrectedLineType *string    `json:"corrected_line_type"`
+	Content           *string    `json:"content"`
+	Coords            *[]float64 `json:"coords"`
 }
 
 // UpdateDocStructureLine handles PATCH /api/v1/kb/doc-structure
@@ -340,7 +341,7 @@ func UpdateDocStructureLine(c echo.Context) error {
 			Status: false, ErrorMsg: "invalid page_number or line_number (CWB_KB_DSU_012)",
 		})
 	}
-	if req.CorrectedLineType == nil && req.Content == nil {
+	if req.CorrectedLineType == nil && req.Content == nil && req.Coords == nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status: false, ErrorMsg: "nothing to update (CWB_KB_DSU_013)",
 		})
@@ -447,6 +448,9 @@ func UpdateDocStructureLine(c echo.Context) error {
 			}
 			if req.Content != nil {
 				lines[i].Content = strings.ReplaceAll(*req.Content, "\t", " ")
+			}
+			if req.Coords != nil {
+				lines[i].Coords = *req.Coords
 			}
 			updatedLine = lines[i]
 			found = true

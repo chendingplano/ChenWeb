@@ -558,6 +558,7 @@ export type UpdateDocStructureLinePayload = {
 	line_number: number;
 	corrected_line_type?: string;
 	content?: string;
+	coords?: number[];
 };
 
 export async function updateKbDocStructureLine(

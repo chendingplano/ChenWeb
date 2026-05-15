@@ -1,8 +1,9 @@
 	<script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
+	import CrosshairIcon from '@lucide/svelte/icons/crosshair';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import {
@@ -123,10 +124,20 @@
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
 
+	// Edit Coordinates mode
+	let editingCoordsMode = $state(false);
+	let editCoordsDraft = $state<number[]>([]);
+	let editCoordsSaving = $state(false);
+	let editCoordsError = $state('');
+
 	type PdfPageViewport = {
 		width: number;
 		height: number;
 		convertToViewportRectangle: (rect: number[]) => number[];
+	};
+
+	type PdfPageViewportFull = PdfPageViewport & {
+		convertToPdfPoint: (x: number, y: number) => number[];
 	};
 
 	let isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
@@ -209,6 +220,13 @@
 	) {
 		const target = selectedHighlightTarget;
 		if (!target || target.page !== pageNo || target.coords.length < 4) return;
+
+		if (editingCoordsMode && editCoordsDraft.length >= 4) {
+			console.log('[coord-editor] renderStructureHighlights → entering coord-edit mode for page', pageNo);
+			renderCoordEditor(viewport as PdfPageViewportFull, overlay);
+			return;
+		}
+
 		const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
 		const left = Math.max(0, Math.min(vx1, vx2) - 5);
 		const top = Math.max(0, Math.min(vy1, vy2) - 4);
@@ -223,6 +241,236 @@
 		mark.style.height = `${height}px`;
 		mark.title = target.label;
 		overlay.appendChild(mark);
+	}
+
+	function renderCoordEditor(viewport: PdfPageViewportFull, overlay: HTMLDivElement) {
+		console.log('[coord-editor] renderCoordEditor called, draft=', editCoordsDraft);
+
+		const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(editCoordsDraft.slice(0, 4));
+
+		// Raw coordinate boundaries (no visual padding)
+		let vLeft = Math.min(vx1, vx2);
+		let vTop = Math.min(vy1, vy2);
+		let vRight = Math.max(vx1, vx2);
+		let vBottom = Math.max(vy1, vy2);
+
+		// Match the static highlight's visual padding
+		const PAD_H = 5;
+		const PAD_V = 4;
+		const HS = 8; // handle size in px
+
+		const rectEl = document.createElement('div');
+		rectEl.style.cssText =
+			'position:absolute;box-sizing:border-box;' +
+			'background:rgba(212,162,76,0.3);' +
+			'outline:1px solid rgba(212,162,76,0.85);' +
+			'border-radius:2px;cursor:move;pointer-events:auto;';
+
+		// 8 handles: 4 corners + 4 edge midpoints
+		const hTL = makeHandle('nwse-resize');
+		const hTC = makeHandle('n-resize');
+		const hTR = makeHandle('nesw-resize');
+		const hML = makeHandle('w-resize');
+		const hMR = makeHandle('e-resize');
+		const hBL = makeHandle('nesw-resize');
+		const hBC = makeHandle('s-resize');
+		const hBR = makeHandle('nwse-resize');
+
+		const btnPanel = document.createElement('div');
+		btnPanel.style.cssText = 'position:absolute;display:flex;gap:6px;pointer-events:none;z-index:3;';
+
+		const saveBtn = document.createElement('button');
+		saveBtn.type = 'button';
+		saveBtn.textContent = 'Save';
+		saveBtn.style.cssText =
+			'height:26px;padding:0 12px;background:#d4a24c;color:#15110a;border:1px solid #e0b768;' +
+			'border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;pointer-events:auto;';
+
+		const cancelBtn = document.createElement('button');
+		cancelBtn.type = 'button';
+		cancelBtn.textContent = 'Cancel';
+		cancelBtn.style.cssText =
+			'height:26px;padding:0 12px;background:rgba(255,255,255,0.08);color:#94a3b8;' +
+			'border:1px solid rgba(148,163,184,0.2);border-radius:8px;font-size:12px;font-weight:600;' +
+			'cursor:pointer;pointer-events:auto;';
+
+		btnPanel.appendChild(saveBtn);
+		btnPanel.appendChild(cancelBtn);
+
+		function applyLayout() {
+			const l = Math.min(vLeft, vRight) - PAD_H;
+			const t = Math.min(vTop, vBottom) - PAD_V;
+			const w = Math.abs(vRight - vLeft) + PAD_H * 2;
+			const h = Math.abs(vBottom - vTop) + PAD_V * 2;
+			const hs2 = HS / 2;
+
+			rectEl.style.left = `${l}px`;
+			rectEl.style.top = `${t}px`;
+			rectEl.style.width = `${w}px`;
+			rectEl.style.height = `${h}px`;
+
+			hTL.style.left = `${l - hs2}px`; hTL.style.top = `${t - hs2}px`;
+			hTC.style.left = `${l + w / 2 - hs2}px`; hTC.style.top = `${t - hs2}px`;
+			hTR.style.left = `${l + w - hs2}px`; hTR.style.top = `${t - hs2}px`;
+			hML.style.left = `${l - hs2}px`; hML.style.top = `${t + h / 2 - hs2}px`;
+			hMR.style.left = `${l + w - hs2}px`; hMR.style.top = `${t + h / 2 - hs2}px`;
+			hBL.style.left = `${l - hs2}px`; hBL.style.top = `${t + h - hs2}px`;
+			hBC.style.left = `${l + w / 2 - hs2}px`; hBC.style.top = `${t + h - hs2}px`;
+			hBR.style.left = `${l + w - hs2}px`; hBR.style.top = `${t + h - hs2}px`;
+
+			btnPanel.style.left = `${l}px`;
+			btnPanel.style.top = `${t + h + 8}px`;
+		}
+
+		function commitCoords() {
+			const l = Math.min(vLeft, vRight);
+			const t = Math.min(vTop, vBottom);
+			const r = Math.max(vLeft, vRight);
+			const b = Math.max(vTop, vBottom);
+			const [x1, y1] = viewport.convertToPdfPoint(l, b);
+			const [x2, y2] = viewport.convertToPdfPoint(r, t);
+			editCoordsDraft = [x1, y1, x2, y2];
+			highlightSelectionVersion += 1;
+			console.log('[coord-editor] commitCoords, new PDF coords=', [x1, y1, x2, y2]);
+		}
+
+		function attachDrag(
+			el: HTMLDivElement,
+			applyDelta: (
+				sv: { l: number; t: number; r: number; b: number },
+				dx: number,
+				dy: number
+			) => void
+		) {
+			el.addEventListener('pointerdown', (e: PointerEvent) => {
+				e.stopPropagation();
+				e.preventDefault();
+				el.setPointerCapture(e.pointerId);
+				const sx = e.clientX;
+				const sy = e.clientY;
+				const sv = { l: vLeft, t: vTop, r: vRight, b: vBottom };
+				const onMove = (me: PointerEvent) => {
+					applyDelta(sv, me.clientX - sx, me.clientY - sy);
+					applyLayout();
+				};
+				const onUp = () => {
+					el.removeEventListener('pointermove', onMove);
+					commitCoords();
+				};
+				el.addEventListener('pointermove', onMove);
+				el.addEventListener('pointerup', onUp, { once: true });
+			});
+		}
+
+		// Rect body: move all edges together
+		attachDrag(rectEl, (sv, dx, dy) => {
+			vLeft = sv.l + dx; vTop = sv.t + dy;
+			vRight = sv.r + dx; vBottom = sv.b + dy;
+		});
+		// Corner handles
+		attachDrag(hTL, (sv, dx, dy) => { vLeft = sv.l + dx; vTop = sv.t + dy; });
+		attachDrag(hTR, (sv, dx, dy) => { vRight = sv.r + dx; vTop = sv.t + dy; });
+		attachDrag(hBL, (sv, dx, dy) => { vLeft = sv.l + dx; vBottom = sv.b + dy; });
+		attachDrag(hBR, (sv, dx, dy) => { vRight = sv.r + dx; vBottom = sv.b + dy; });
+		// Edge midpoint handles
+		attachDrag(hTC, (sv, _dx, dy) => { vTop = sv.t + dy; });
+		attachDrag(hBC, (sv, _dx, dy) => { vBottom = sv.b + dy; });
+		attachDrag(hML, (sv, dx, _dy) => { vLeft = sv.l + dx; });
+		attachDrag(hMR, (sv, dx, _dy) => { vRight = sv.r + dx; });
+
+		let savingInProgress = false;
+		saveBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			if (savingInProgress || editCoordsSaving) return;
+			savingInProgress = true;
+			saveBtn.disabled = true;
+			saveBtn.textContent = 'Saving…';
+			void saveEditCoords().finally(() => {
+				savingInProgress = false;
+				if (editCoordsError) {
+					saveBtn.disabled = false;
+					saveBtn.textContent = 'Save';
+					window.alert(editCoordsError);
+					editCoordsError = '';
+				}
+			});
+		});
+
+		cancelBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			cancelEditCoords();
+		});
+
+		applyLayout();
+		overlay.appendChild(rectEl);
+		overlay.appendChild(hTL);
+		overlay.appendChild(hTC);
+		overlay.appendChild(hTR);
+		overlay.appendChild(hML);
+		overlay.appendChild(hMR);
+		overlay.appendChild(hBL);
+		overlay.appendChild(hBC);
+		overlay.appendChild(hBR);
+		overlay.appendChild(btnPanel);
+	}
+
+	function makeHandle(cursor: string): HTMLDivElement {
+		const h = document.createElement('div');
+		h.style.cssText =
+			`position:absolute;width:${8}px;height:${8}px;` +
+			`background:#fff;border:2px solid rgba(212,162,76,0.9);border-radius:2px;` +
+			`box-shadow:0 1px 4px rgba(0,0,0,0.3);cursor:${cursor};pointer-events:auto;` +
+			`z-index:2;box-sizing:border-box;`;
+		return h;
+	}
+
+	function startEditCoords() {
+		console.log('[coord-editor] startEditCoords called', {
+			selectedLine: selectedLine ? { page: selectedLine.page_number, line: selectedLine.line_number, coords: selectedLine.coords } : null
+		});
+		if (!selectedLine) {
+			console.warn('[coord-editor] no selectedLine');
+			return;
+		}
+		if (!Array.isArray(selectedLine.coords) || selectedLine.coords.length < 4) {
+			console.warn('[coord-editor] selectedLine.coords invalid:', selectedLine.coords);
+			return;
+		}
+		editCoordsDraft = [...selectedLine.coords.slice(0, 4)];
+		editingCoordsMode = true;
+		editCoordsError = '';
+		highlightSelectionVersion += 1;
+		console.log('[coord-editor] entered coord-edit mode, draft=', editCoordsDraft, 'version=', highlightSelectionVersion);
+	}
+
+	function cancelEditCoords() {
+		editingCoordsMode = false;
+		editCoordsDraft = [];
+		editCoordsError = '';
+		highlightSelectionVersion += 1;
+	}
+
+	async function saveEditCoords() {
+		if (!selectedLine || !currentInput || editCoordsSaving || editCoordsDraft.length < 4) return;
+		editCoordsSaving = true;
+		editCoordsError = '';
+		try {
+			const res = await updateKbDocStructureLine({
+				input_record_id: currentInput.id,
+				page_number: selectedLine.page_number,
+				line_number: selectedLine.line_number,
+				coords: editCoordsDraft
+			});
+			lines = res.lines ?? [];
+			editingCoordsMode = false;
+			editCoordsDraft = [];
+			const updatedLine = lines.find((l) => lineKey(l) === selectedLineKey);
+			if (updatedLine) await selectLine(updatedLine);
+		} catch (err) {
+			editCoordsError = err instanceof Error ? err.message : 'Failed to save coordinates.';
+		} finally {
+			editCoordsSaving = false;
+		}
 	}
 
 	async function loadStructureForRecord(id: number) {
@@ -551,6 +799,13 @@
 		void selectedLineKey;
 		sidebarTypeEditing = false;
 		sidebarTypeError = '';
+		untrack(() => {
+			if (editingCoordsMode) {
+				editingCoordsMode = false;
+				editCoordsDraft = [];
+				editCoordsError = '';
+			}
+		});
 	});
 
 	$effect(() => {
@@ -804,7 +1059,9 @@
 						bind:page={docPage}
 						bind:zoom={pdfZoom}
 						bind:numPages={pdfNumPages}
-						highlightVersion={selectedHighlightTarget
+						highlightVersion={editingCoordsMode && editCoordsDraft.length >= 4
+							? `edit:${editCoordsDraft.join(',')}:${highlightSelectionVersion}`
+							: selectedHighlightTarget
 							? `${selectedHighlightTarget.page}:${selectedHighlightTarget.coords.join(',')}:${selectedHighlightTarget.version}`
 							: `${selectedLineKey ?? ''}:${highlightSelectionVersion}`}
 						renderHighlights={renderStructureHighlights}
@@ -824,6 +1081,15 @@
 								onclick={openSidebarTypeEdit}
 								title="Edit Line Type"
 							><SquarePenIcon class="pvw-tb-icon" /></button>
+							<div class="pvw-tool-sep"></div>
+							<button
+								type="button"
+								class="pvw-tool-btn"
+								class:active={editingCoordsMode}
+								disabled={!selectedLine}
+								onclick={editingCoordsMode ? cancelEditCoords : startEditCoords}
+								title={editingCoordsMode ? 'Cancel coordinate edit' : 'Edit Coordinates'}
+							><CrosshairIcon class="pvw-tb-icon" /></button>
 							<div class="pvw-tool-sep"></div>
 							<button
 								type="button"
@@ -1735,6 +2001,10 @@
 		background: var(--pvw-hvr, rgba(99, 102, 241, 0.14));
 		color: #818cf8;
 		outline: none;
+	}
+	.pvw-tool-btn.active {
+		background: var(--pvw-hvr, rgba(99, 102, 241, 0.14));
+		color: #818cf8;
 	}
 	.pvw-tool-sep {
 		width: 1px;
