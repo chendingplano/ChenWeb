@@ -628,7 +628,7 @@
 													</datalist>
 												</div>
 												<div class="topic-edit-field">
-													<label class="topic-sidebar-label" for="edit-topic-desc">TOPIC DESCRIPTION</label>
+													<label class="topic-sidebar-label" for="edit-topic-desc">{(itemSingular.charAt(0).toUpperCase() + itemSingular.slice(1)).toUpperCase()} DESCRIPTION</label>
 													<textarea
 														id="edit-topic-desc"
 														class="topic-edit-textarea"
@@ -638,7 +638,7 @@
 													></textarea>
 												</div>
 												<div class="topic-edit-field">
-													<label class="topic-sidebar-label" for="edit-topic-desc-en">TOPIC DESCRIPTION (EN)</label>
+													<label class="topic-sidebar-label" for="edit-topic-desc-en">{(itemSingular.charAt(0).toUpperCase() + itemSingular.slice(1)).toUpperCase()} DESCRIPTION (EN)</label>
 													<textarea
 														id="edit-topic-desc-en"
 														class="topic-edit-textarea"
@@ -744,7 +744,7 @@
 											</div>
 											<div class="topic-sidebar-block">
 												<div class="topic-sidebar-label-row">
-													<div class="topic-sidebar-label">Topic Description</div>
+													<div class="topic-sidebar-label">{itemSingular.charAt(0).toUpperCase() + itemSingular.slice(1)} Description</div>
 													<button type="button" class="topic-edit-trigger" onclick={startTopicEdit}>Edit</button>
 												</div>
 												<p class="topic-sidebar-copy">{selectedTopic.topicText}</p>

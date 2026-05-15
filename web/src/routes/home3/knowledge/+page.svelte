@@ -35,6 +35,8 @@
 		isUnderConstructionKnowledgeSection
 	} from '$lib/components/home3/knowledge-sections.js';
 	import NetworkIcon from '@lucide/svelte/icons/network';
+	import PanelLeftIcon from '@lucide/svelte/icons/panel-left';
+	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -169,6 +171,7 @@
 		}))
 	];
 
+	let menuCollapsed = $state(false);
 	let darkMode = $derived(page.url.searchParams.get('dark') !== '0');
 	let initialSection = $derived(
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
@@ -250,126 +253,166 @@
 <div class="kb-page flex overflow-hidden" style="background:{pageBg}; color:{textPrimary};">
 	<aside
 		class="kb-menu flex flex-col overflow-hidden"
+		class:menu-collapsed={menuCollapsed}
 		style="background:{panelBg}; border-right:1px solid {borderColor};"
 	>
-		<div class="flex items-center gap-3 px-4 py-4" style="border-bottom:1px solid {borderColor};">
-			<div
-				class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg"
-				style="background:{accentTint}; color:{accent}; border:1px solid {accent}30;"
-			>
-				<BookOpenIcon class="h-5 w-5" />
-			</div>
-			<div class="min-w-0">
-				<div class="truncate" style="font-size:14px; font-weight:700; color:{textPrimary};">
-					Knowledge System
+		<!-- Header: matches nav-rail style -->
+		<div
+			class="flex flex-shrink-0 items-center px-2"
+			style="height:48px; border-bottom:1px solid {borderColor};"
+		>
+			{#if !menuCollapsed}
+				<div class="flex w-full items-center justify-between px-1">
+					<span style="font-size:13px; font-weight:600; color:{accent};">Knowledge</span>
+					<button
+						type="button"
+						onclick={() => (menuCollapsed = true)}
+						class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+						style="border:none; background:transparent; color:{textMuted};"
+						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = accent; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
+						aria-label="Collapse menu"
+						title="Collapse menu"
+					>
+						<PanelLeftCloseIcon class="h-4 w-4" />
+					</button>
 				</div>
-				<div class="truncate" style="font-size:12px; color:{textMuted};">
-					Documents, metrics, structure
-				</div>
-			</div>
+			{:else}
+				<button
+					type="button"
+					onclick={() => (menuCollapsed = false)}
+					class="flex h-8 w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+					style="border:none; background:transparent; color:{textMuted};"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = accent; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
+					aria-label="Expand menu"
+					title="Expand menu"
+				>
+					<PanelLeftIcon class="h-5 w-5" />
+				</button>
+			{/if}
 		</div>
 
+		<!-- Nav: always rendered; items adapt between icon-only and full -->
 		<nav
-			class="flex-1 overflow-y-auto px-2 py-3"
+			class="flex-1 overflow-y-auto py-2"
 			style="scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 		>
 			{#each menuItems as item (item.id)}
-				{#if isCollapsibleParent(item)}
-					<div
-						class="mb-1 rounded-lg"
-						style="background:{item.children?.some((child) => isChildActive(child.id))
-							? accentTint
-							: 'transparent'};"
-					>
-						<button
-							type="button"
-							onclick={() => toggleParentOpen(item)}
-							class="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
-							style="
-								color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
-								border:none;
-								border-left:2px solid {item.children?.some((child) => isChildActive(child.id))
-								? accent
-								: 'transparent'};
-							"
-						>
-							<item.icon class="h-5 w-5 flex-shrink-0" />
-							<span class="min-w-0 flex-1">
-								<span class="block truncate" style="font-size:14px; font-weight:600;"
-									>{item.label}</span
-								>
-								<span class="block truncate" style="font-size:12px; color:{textMuted};"
-									>{item.description}</span
-								>
-							</span>
-							<span style="font-size:12px; color:{textMuted};"
-								>{isParentOpen(item) ? '−' : '+'}</span
+				<div class="mb-0.5 px-2">
+					{#if isCollapsibleParent(item)}
+						{#if menuCollapsed}
+							<!-- Collapsed: icon only, clicking enters the parent section -->
+							<button
+								type="button"
+								onclick={() => selectSection(item.id)}
+								class="flex w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
+								style="
+									padding:9px 0;
+									border:none;
+									background:{item.children?.some((child) => isChildActive(child.id)) ? accentTint : 'transparent'};
+									color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
+								"
+								title={item.label}
+								aria-label={item.label}
+								onmouseenter={(e) => {
+									const el = e.currentTarget as HTMLElement;
+									if (!item.children?.some((child) => isChildActive(child.id))) el.style.background = hoverBg;
+									el.style.color = textPrimary;
+								}}
+								onmouseleave={(e) => {
+									const el = e.currentTarget as HTMLElement;
+									if (!item.children?.some((child) => isChildActive(child.id))) el.style.background = 'transparent';
+									el.style.color = item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary;
+								}}
 							>
-						</button>
-
-						{#if isParentOpen(item)}
-							<div class="pr-2 pb-2 pl-6">
-								{#each item.children ?? [] as child (child.id)}
-									<button
-										type="button"
-										onclick={() => selectSection(child.id)}
-										class="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-150"
-										style="
-											background:{isChildActive(child.id) ? 'rgba(255,255,255,0.08)' : 'transparent'};
-											color:{isChildActive(child.id) ? textPrimary : textSecondary};
-											border:none;
-										"
-									>
-										<span
-											style="font-size:12px; color:{isChildActive(child.id) ? accent : textMuted};"
-											>•</span
-										>
-										<span class="min-w-0">
-											<span class="block truncate" style="font-size:13px; font-weight:600;"
-												>{child.label}</span
+								<item.icon class="h-5 w-5 flex-shrink-0" />
+							</button>
+						{:else}
+							<!-- Expanded: full collapsible parent -->
+							<div
+								class="rounded-lg"
+								style="background:{item.children?.some((child) => isChildActive(child.id)) ? accentTint : 'transparent'};"
+							>
+								<button
+									type="button"
+									onclick={() => toggleParentOpen(item)}
+									class="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
+									style="
+										color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
+										border:none;
+										border-left:2px solid {item.children?.some((child) => isChildActive(child.id)) ? accent : 'transparent'};
+									"
+								>
+									<item.icon class="h-5 w-5 flex-shrink-0" />
+									<span class="min-w-0 flex-1">
+										<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
+										<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
+									</span>
+									<span style="font-size:12px; color:{textMuted};">{isParentOpen(item) ? '−' : '+'}</span>
+								</button>
+								{#if isParentOpen(item)}
+									<div class="pr-2 pb-2 pl-6">
+										{#each item.children ?? [] as child (child.id)}
+											<button
+												type="button"
+												onclick={() => selectSection(child.id)}
+												class="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-150"
+												style="
+													background:{isChildActive(child.id) ? 'rgba(255,255,255,0.08)' : 'transparent'};
+													color:{isChildActive(child.id) ? textPrimary : textSecondary};
+													border:none;
+												"
 											>
-											<span class="block truncate" style="font-size:11px; color:{textMuted};"
-												>{child.description}</span
-											>
-										</span>
-									</button>
-								{/each}
+												<span style="font-size:12px; color:{isChildActive(child.id) ? accent : textMuted};">•</span>
+												<span class="min-w-0">
+													<span class="block truncate" style="font-size:13px; font-weight:600;">{child.label}</span>
+													<span class="block truncate" style="font-size:11px; color:{textMuted};">{child.description}</span>
+												</span>
+											</button>
+										{/each}
+									</div>
+								{/if}
 							</div>
 						{/if}
-					</div>
-				{:else}
-					<button
-						type="button"
-						onclick={() => selectSection(item.id)}
-						class="mb-1 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150"
-						style="
-							background:{activeSection === item.id ? accentTint : 'transparent'};
-							color:{activeSection === item.id ? accent : textSecondary};
-							border:none;
-							border-left:2px solid {activeSection === item.id ? accent : 'transparent'};
-						"
-						onmouseenter={(e) => {
-							const el = e.currentTarget as HTMLElement;
-							if (activeSection !== item.id) el.style.background = hoverBg;
-							el.style.color = textPrimary;
-						}}
-						onmouseleave={(e) => {
-							const el = e.currentTarget as HTMLElement;
-							if (activeSection !== item.id) el.style.background = 'transparent';
-							el.style.color = activeSection === item.id ? accent : textSecondary;
-						}}
-					>
-						<item.icon class="h-5 w-5 flex-shrink-0" />
-						<span class="min-w-0">
-							<span class="block truncate" style="font-size:14px; font-weight:600;"
-								>{item.label}</span
-							>
-							<span class="block truncate" style="font-size:12px; color:{textMuted};"
-								>{item.description}</span
-							>
-						</span>
-					</button>
-				{/if}
+					{:else}
+						<!-- Leaf item -->
+						<button
+							type="button"
+							onclick={() => selectSection(item.id)}
+							class="flex w-full cursor-pointer items-center rounded-lg text-left transition-colors duration-150"
+							style="
+								gap:{menuCollapsed ? '0' : '12px'};
+								padding:{menuCollapsed ? '9px 0' : '8px 10px'};
+								justify-content:{menuCollapsed ? 'center' : 'flex-start'};
+								background:{activeSection === item.id ? accentTint : 'transparent'};
+								color:{activeSection === item.id ? accent : textSecondary};
+								border:none;
+								border-left:{!menuCollapsed && activeSection === item.id ? '2px solid ' + accent : '2px solid transparent'};
+							"
+							title={menuCollapsed ? item.label : undefined}
+							aria-label={item.label}
+							onmouseenter={(e) => {
+								const el = e.currentTarget as HTMLElement;
+								if (activeSection !== item.id) el.style.background = hoverBg;
+								el.style.color = textPrimary;
+							}}
+							onmouseleave={(e) => {
+								const el = e.currentTarget as HTMLElement;
+								if (activeSection !== item.id) el.style.background = 'transparent';
+								el.style.color = activeSection === item.id ? accent : textSecondary;
+							}}
+						>
+							<item.icon class="h-5 w-5 flex-shrink-0" />
+							{#if !menuCollapsed}
+								<span class="min-w-0 flex-1">
+									<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
+									<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
+								</span>
+							{/if}
+						</button>
+					{/if}
+				</div>
 			{/each}
 		</nav>
 	</aside>
@@ -497,6 +540,12 @@
 	.kb-menu {
 		width: 280px;
 		flex: 0 0 280px;
+		transition: width 200ms ease, flex-basis 200ms ease;
+	}
+
+	.kb-menu.menu-collapsed {
+		width: 56px;
+		flex: 0 0 56px;
 	}
 
 	@media (max-width: 760px) {

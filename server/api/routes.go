@@ -106,6 +106,10 @@ func RegisterRoutes(e *echo.Echo) error {
 				// Add other public pages here
 			}
 
+			if path == "/callback" {
+				return next(c)
+			}
+
 			// Let Echo handle / so we can redirect it
 			if path == "/" {
 				logger.Info("Root path, let Echo handle redirect")
@@ -420,6 +424,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	openMetadataGroup.Any("", openmetadatahandler.Proxy)
 	openMetadataGroup.Any("/", openmetadatahandler.Proxy)
 	openMetadataGroup.Any("/*", openmetadatahandler.Proxy)
+
+	e.Any("/callback", openmetadatahandler.ProxyCallback)
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {

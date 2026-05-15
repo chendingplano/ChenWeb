@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import {
 		getKbDocStructure,
 		getKbInput,
@@ -88,6 +90,7 @@
 	let lineListResizing = $state(false);
 	let lineListSettingsOpen = $state(false);
 	let settingsHydrated = $state(false);
+	let browserCollapsed = $state(false);
 
 	let editingLineKey = $state<string | null>(null);
 	let editingCorrectedType = $state('');
@@ -594,23 +597,38 @@
 	</header>
 
 	<div class="body">
-		<KbInputRecordBrowser
-			{darkMode}
-			instanceKey="doc-structure-record-browser"
-			title="kb.inputs"
-			subtitle="Search, filter, and select input records before inspecting corrected structure lines."
-			emptyTitle="No records yet"
-			emptySubtitle="Use Search or Retrieve to browse kb.inputs."
-			selectedRecordId={currentInput?.id ?? null}
-			mapRecord={mapBrowserRecord}
-			onSelect={(record) => void loadStructureForRecord(record.id)}
-			onError={(error) => {
-				errorMsg = error.message;
-			}}
-		/>
+		{#if !browserCollapsed}
+			<KbInputRecordBrowser
+				{darkMode}
+				instanceKey="doc-structure-record-browser"
+				title="kb.inputs"
+				subtitle="Search, filter, and select input records before inspecting corrected structure lines."
+				emptyTitle="No records yet"
+				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				selectedRecordId={currentInput?.id ?? null}
+				mapRecord={mapBrowserRecord}
+				onSelect={(record) => void loadStructureForRecord(record.id)}
+				onError={(error) => {
+					errorMsg = error.message;
+				}}
+			/>
+		{/if}
 
 		<aside class="structure-sidebar" style={`width:${lineListWidth}px;`}>
 			<div class="left-meta">
+				<button
+					class="browser-collapse-btn"
+					type="button"
+					onclick={() => (browserCollapsed = !browserCollapsed)}
+					title={browserCollapsed ? 'Expand records panel' : 'Collapse records panel'}
+					aria-label={browserCollapsed ? 'Expand records panel' : 'Collapse records panel'}
+				>
+					{#if browserCollapsed}
+						<ChevronRightIcon style="width:13px; height:13px;" />
+					{:else}
+						<ChevronLeftIcon style="width:13px; height:13px;" />
+					{/if}
+				</button>
 				<div class="left-meta-copy">
 					<div class="left-meta-title">Lines</div>
 					<div class="left-meta-count">
@@ -1260,6 +1278,26 @@
 		font-size: 12px;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
+	}
+	.browser-collapse-btn {
+		flex: 0 0 auto;
+		width: 26px;
+		height: 26px;
+		padding: 0;
+		border: 1px solid var(--ink-line);
+		border-radius: 7px;
+		background: var(--panel-bg-alt);
+		color: var(--text-muted);
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: color 0.12s, border-color 0.12s, background 0.12s;
+	}
+	.browser-collapse-btn:hover {
+		color: var(--brass);
+		border-color: var(--brass);
+		background: var(--brass-faint);
 	}
 	.left-meta-copy {
 		min-width: 0;

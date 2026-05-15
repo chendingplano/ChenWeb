@@ -44,17 +44,21 @@ type getRecordProvisionsResponse struct {
 }
 
 type provisionRow struct {
-	ItemID          string
-	InputRecordID   int64
-	ProvID          int
-	ProvName        string
-	ProvisionType   string
-	ProvisionText   string
-	Keywords        []string
-	CategoryChains  []provisionCategoryChain
-	CategoryPaths   []string
-	SourceLineSpans []string
-	Confidence      float64
+	ItemID           string
+	InputRecordID    int64
+	ProvID           int
+	ProvName         string
+	ProvNameEn       string
+	ProvisionType    string
+	ProvisionText    string
+	Keywords         []string
+	ProvKeywordsEn   []string
+	CategoryChains   []provisionCategoryChain
+	CategoryPaths    []string
+	CategoryChainsEn []provisionCategoryChain
+	CategoryPathsEn  []string
+	SourceLineSpans  []string
+	Confidence       float64
 }
 
 type provisionCategorySegment struct {
@@ -423,20 +427,29 @@ func buildProvisionTopicCards(rows []provisionRow) ([]topicCategoryRecord, error
 			lineTargetCache[row.InputRecordID] = lineTargets
 		}
 
-		targets := expandSummaryTargets(convertProvisionSourceSpans(row.SourceLineSpans), lineTargets)
+		convertedSpans := convertProvisionSourceSpans(row.SourceLineSpans)
+		targets := expandSummaryTargets(convertedSpans, lineTargets)
 		page, coords := firstSummaryTarget(targets)
+		topicDescEn := ""
+		if pne := strings.TrimSpace(row.ProvNameEn); pne != "" && pne != strings.TrimSpace(row.ProvName) {
+			topicDescEn = pne
+		}
 		results = append(results, topicCategoryRecord{
-			ID:            row.ItemID,
-			TopicName:     row.ProvName,
-			PdfFileName:   filepath.Base(strings.TrimSpace(meta.fileName)),
-			TopicType:     row.ProvisionType,
-			TopicText:     row.ProvisionText,
-			Keywords:      append([]string(nil), row.Keywords...),
-			CategoryPaths: append([]string(nil), row.CategoryPaths...),
-			InputID:       row.InputRecordID,
-			Page:          page,
-			Coords:        coords,
-			Targets:       targets,
+			ID:              row.ItemID,
+			TopicName:       row.ProvName,
+			PdfFileName:     filepath.Base(strings.TrimSpace(meta.fileName)),
+			TopicType:       row.ProvisionType,
+			TopicText:       strings.TrimSpace(row.ProvName),
+			TopicDescEn:     topicDescEn,
+			Keywords:        append([]string(nil), row.Keywords...),
+			KeywordsEn:      append([]string(nil), row.ProvKeywordsEn...),
+			CategoryPaths:   append([]string(nil), row.CategoryPaths...),
+			CategoryPathsEn: append([]string(nil), row.CategoryPathsEn...),
+			SourceLineSpecs: convertedSpans,
+			InputID:         row.InputRecordID,
+			Page:            page,
+			Coords:          coords,
+			Targets:         targets,
 		})
 	}
 
@@ -469,6 +482,18 @@ func queryProvisionRows(recordID *int64, ksStoreID *int64) ([]provisionRow, erro
 	if err != nil {
 		return nil, err
 	}
+	provNameEnExpr, err := resolveProvisionTextExpr(db, provisionTable, []string{"prov_name_en"})
+	if err != nil {
+		return nil, err
+	}
+	keywordsEnExpr, err := resolveProvisionJSONArrayExpr(db, provisionTable, []string{"provision_keywords_en", "prov_keywords_en"})
+	if err != nil {
+		return nil, err
+	}
+	categoryPathsEnExpr, err := resolveProvisionJSONArrayExpr(db, provisionTable, []string{"category_paths_en"})
+	if err != nil {
+		return nil, err
+	}
 
 	args := make([]any, 0, 2)
 	where := make([]string, 0, 2)
@@ -486,14 +511,17 @@ SELECT
 	p.input_record_id,
 	p.prov_id,
 	COALESCE(NULLIF(TRIM(p.prov_name), ''), 'provision') AS prov_name,
+	COALESCE(TRIM(%s), '') AS prov_name_en,
 	COALESCE(TRIM(p.provision_type), '') AS provision_type,
-	COALESCE(NULLIF(TRIM(p.prov_desc), ''), NULLIF(TRIM(p.provision_en), ''), NULLIF(TRIM(p.provision_original), ''), NULLIF(TRIM(p.source_text), ''), NULLIF(TRIM(%s), ''), '') AS provision_text,
+	COALESCE(NULLIF(TRIM(p.prov_desc), ''), NULLIF(TRIM(p.provision_en), ''), NULLIF(TRIM(p.provision), ''), NULLIF(TRIM(p.source_text), ''), NULLIF(TRIM(%s), ''), '') AS provision_text,
 	%s AS keywords_json,
+	%s AS keywords_en_json,
 	%s AS category_paths_json,
+	%s AS category_paths_en_json,
 	COALESCE(p.source_line_spans, '[]'::jsonb) AS source_line_spans_json,
 	%s AS confidence
 FROM kb.provisions p
-JOIN %s i ON i.id = p.input_record_id`, subjectExpr, keywordsExpr, categoryPathsExpr, confidenceExpr, inputTable)
+JOIN %s i ON i.id = p.input_record_id`, provNameEnExpr, subjectExpr, keywordsExpr, keywordsEnExpr, categoryPathsExpr, categoryPathsEnExpr, confidenceExpr, inputTable)
 	if len(where) > 0 {
 		query += "\nWHERE " + strings.Join(where, " AND ")
 	}
@@ -510,22 +538,28 @@ JOIN %s i ON i.id = p.input_record_id`, subjectExpr, keywordsExpr, categoryPaths
 	for rows.Next() {
 		var rec provisionRow
 		var keywordsRaw []byte
+		var keywordsEnRaw []byte
 		var categoryPathsRaw []byte
+		var categoryPathsEnRaw []byte
 		var sourceLineSpansRaw []byte
 		if err := rows.Scan(
 			&rec.InputRecordID,
 			&rec.ProvID,
 			&rec.ProvName,
+			&rec.ProvNameEn,
 			&rec.ProvisionType,
 			&rec.ProvisionText,
 			&keywordsRaw,
+			&keywordsEnRaw,
 			&categoryPathsRaw,
+			&categoryPathsEnRaw,
 			&sourceLineSpansRaw,
 			&rec.Confidence,
 		); err != nil {
 			return nil, err
 		}
 		rec.Keywords = decodeJSONStringArray(keywordsRaw)
+		rec.ProvKeywordsEn = decodeJSONStringArray(keywordsEnRaw)
 		rec.CategoryChains = decodeProvisionCategoryChains(categoryPathsRaw)
 		rec.CategoryPaths = make([]string, 0, len(rec.CategoryChains))
 		for _, chain := range rec.CategoryChains {
@@ -540,6 +574,13 @@ JOIN %s i ON i.id = p.input_record_id`, subjectExpr, keywordsExpr, categoryPaths
 					Path:     path,
 					Segments: fallbackCategorySegments(path),
 				})
+			}
+		}
+		rec.CategoryChainsEn = decodeProvisionCategoryChains(categoryPathsEnRaw)
+		rec.CategoryPathsEn = make([]string, 0, len(rec.CategoryChainsEn))
+		for _, chain := range rec.CategoryChainsEn {
+			if strings.TrimSpace(chain.Path) != "" {
+				rec.CategoryPathsEn = append(rec.CategoryPathsEn, chain.Path)
 			}
 		}
 		rec.SourceLineSpans = decodeJSONStringArray(sourceLineSpansRaw)
@@ -655,8 +696,10 @@ func filterNonEmptyStrings(values []string) []string {
 
 func decodeProvisionCategoryChains(raw []byte) []provisionCategoryChain {
 	raw = bytesOrEmptyJSONArray(raw)
+
+	// Format 1: [{category_path:[...], path_confidence:..., path_keywords:[...]}]
 	var payloads []provisionCategoryPathPayload
-	if err := json.Unmarshal(raw, &payloads); err == nil {
+	if err := json.Unmarshal(raw, &payloads); err == nil && len(payloads) > 0 && payloads[0].CategoryPath != nil {
 		out := make([]provisionCategoryChain, 0, len(payloads))
 		for _, payload := range payloads {
 			segments := make([]provisionCategorySegment, 0, len(payload.CategoryPath))
@@ -683,8 +726,46 @@ func decodeProvisionCategoryChains(raw []byte) []provisionCategoryChain {
 				PathKeywords:   filterNonEmptyStrings(payload.PathKeywords),
 			})
 		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+
+	// Format 2: [[{name, keywords, confidence}, ...], ...]
+	var rawChains [][]provisionCategorySegment
+	if err := json.Unmarshal(raw, &rawChains); err == nil {
+		out := make([]provisionCategoryChain, 0, len(rawChains))
+		for _, segments := range rawChains {
+			validSegs := make([]provisionCategorySegment, 0, len(segments))
+			names := make([]string, 0, len(segments))
+			pathConf := 0.0
+			for _, seg := range segments {
+				name := strings.TrimSpace(seg.Name)
+				if name == "" {
+					continue
+				}
+				validSegs = append(validSegs, provisionCategorySegment{
+					Name:       name,
+					Keywords:   filterNonEmptyStrings(seg.Keywords),
+					Confidence: seg.Confidence,
+				})
+				names = append(names, name)
+				if seg.Confidence > pathConf {
+					pathConf = seg.Confidence
+				}
+			}
+			if len(validSegs) == 0 {
+				continue
+			}
+			out = append(out, provisionCategoryChain{
+				Path:           strings.Join(names, "/"),
+				Segments:       validSegs,
+				PathConfidence: pathConf,
+			})
+		}
 		return out
 	}
+
 	return []provisionCategoryChain{}
 }
 

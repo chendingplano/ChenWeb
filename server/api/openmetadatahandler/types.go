@@ -4,6 +4,8 @@ type config struct {
 	UpstreamURL    string
 	PublicBasePath string
 	DisplayName    string
+	SSOMode        string
+	BearerToken    string
 }
 
 type CurrentUser struct {
@@ -13,13 +15,16 @@ type CurrentUser struct {
 }
 
 type SessionResponse struct {
-	Status        bool     `json:"status"`
-	LaunchURL     string   `json:"launch_url"`
-	ProxyBasePath string   `json:"proxy_base_path"`
-	DisplayName   string   `json:"display_name"`
-	UserID        string   `json:"user_id"`
-	Capabilities  []string `json:"capabilities"`
-	Message       string   `json:"message,omitempty"`
+	Status           bool     `json:"status"`
+	LaunchURL        string   `json:"launch_url"`
+	ProxyBasePath    string   `json:"proxy_base_path"`
+	CallbackURL      string   `json:"callback_url,omitempty"`
+	DisplayName      string   `json:"display_name"`
+	UserID           string   `json:"user_id"`
+	SSOMode          string   `json:"sso_mode"`
+	Capabilities     []string `json:"capabilities"`
+	AuthBoundaryNote string   `json:"auth_boundary_note,omitempty"`
+	Message          string   `json:"message,omitempty"`
 }
 
 type ErrorResponse struct {

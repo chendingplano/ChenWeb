@@ -10,9 +10,12 @@
 		status: boolean;
 		launch_url: string;
 		proxy_base_path: string;
+		callback_url?: string;
 		display_name: string;
 		user_id: string;
+		sso_mode: string;
 		capabilities: string[];
+		auth_boundary_note?: string;
 		message?: string;
 	};
 
@@ -196,11 +199,29 @@
 						<span style="color:{textSecondary};">Launch path</span>
 						<code style="color:{textPrimary};">{session.proxy_base_path}</code>
 					</div>
+					{#if session.callback_url}
+						<div class="flex min-w-0 items-center gap-2">
+							<span style="color:{textSecondary};">Callback URL</span>
+							<code style="color:{textPrimary};">{session.callback_url}</code>
+						</div>
+					{/if}
+					<div class="flex items-center gap-2">
+						<span style="color:{textSecondary};">SSO mode</span>
+						<code style="color:{textPrimary};">{session.sso_mode}</code>
+					</div>
 					<div class="flex items-center gap-2">
 						<span style="color:{textSecondary};">Capabilities</span>
 						<code style="color:{textPrimary};">{session.capabilities.join(', ')}</code>
 					</div>
 				</div>
+				{#if session.auth_boundary_note}
+					<div
+						class="px-5 py-3"
+						style="border-bottom:1px solid {borderColor}; background:{surface2}; color:{textSecondary}; font-size:12px; line-height:1.55;"
+					>
+						{session.auth_boundary_note}
+					</div>
+				{/if}
 				<iframe
 					title="OpenMetadata workspace"
 					src={iframeSrc}
