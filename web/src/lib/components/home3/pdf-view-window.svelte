@@ -87,7 +87,7 @@
 	let builtinRawLines = $state<RawLine[]>([]);
 	let builtinRawLinesInputId = $state<number | null>(null);
 	let builtinDragPreviewLines = $state<number[]>([]);
-	let builtinHighlightVersion = $state(0);
+	let builtinRepaintVersion = $state(0);
 
 	let useBuiltinDialog = $derived(enableSelectionDialog && !onselect);
 
@@ -108,11 +108,21 @@
 		viewportY2: number;
 		viewport: PdfPageViewport;
 	}>) {
-		builtinDragPreviewLines = [];
-		builtinHighlightVersion++;
+		// Keep builtinDragPreviewLines so the selected lines stay highlighted while dialog is open.
+		// Cleared by the effect below when the dialog closes.
 		builtinSelectionDetail = ranges;
 		builtinDialogOpen = true;
 	}
+
+	let builtinDialogPrevOpen = false;
+	$effect(() => {
+		const isOpen = builtinDialogOpen;
+		if (!isOpen && builtinDialogPrevOpen) {
+			builtinDragPreviewLines = [];
+			builtinRepaintVersion++;
+		}
+		builtinDialogPrevOpen = isOpen;
+	});
 
 	function handleBuiltinDragMove(ranges: Array<{
 		pageNumber: number;
@@ -180,9 +190,7 @@
 	let effectiveOnSelect = $derived(useBuiltinDialog ? handleBuiltinSelect : onselect);
 	let effectiveOnDragMove = $derived(useBuiltinDialog ? handleBuiltinDragMove : ondragmove);
 	let effectiveRenderHighlights = $derived(useBuiltinDialog ? renderBuiltinHighlights : renderHighlights);
-	let effectiveHighlightVersion = $derived(
-		useBuiltinDialog ? `${highlightVersion}:${builtinHighlightVersion}` : highlightVersion
-	);
+	let effectiveHighlightVersion = $derived(highlightVersion);
 
 	let pillSurface = $derived(darkMode ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.72)');
 	let pillBorder = $derived(darkMode ? 'rgba(148,163,184,0.18)' : 'rgba(100,116,139,0.18)');
@@ -318,6 +326,7 @@
 			bind:zoom
 			bind:numPages
 			highlightVersion={effectiveHighlightVersion}
+			repaintVersion={useBuiltinDialog ? builtinRepaintVersion : undefined}
 			renderHighlights={effectiveRenderHighlights}
 			{loadingLabel}
 			{respectPageRotation}

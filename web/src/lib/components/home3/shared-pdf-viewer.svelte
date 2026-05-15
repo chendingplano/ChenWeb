@@ -40,6 +40,7 @@
 		zoom = $bindable(0.5),
 		numPages = $bindable(0),
 		highlightVersion = 0,
+		repaintVersion = 0,
 		renderHighlights,
 		loadingLabel = 'Rendering page…',
 		respectPageRotation = true,
@@ -55,6 +56,7 @@
 		zoom?: number;
 		numPages?: number;
 		highlightVersion?: number | string;
+		repaintVersion?: number | string;
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
@@ -449,6 +451,16 @@
 			if (!scrollToFirstHighlight(clampPage(page), 'auto')) {
 				scrollToPage(clampPage(page), 'auto');
 			}
+		});
+	});
+
+	let pdfRepaintSeq = 0;
+	$effect(() => {
+		const version = repaintVersion;
+		const seq = ++pdfRepaintSeq;
+		void tick().then(() => {
+			if (seq !== pdfRepaintSeq || repaintVersion !== version || pdfViewportByPage.size === 0) return;
+			paintHighlights();
 		});
 	});
 
