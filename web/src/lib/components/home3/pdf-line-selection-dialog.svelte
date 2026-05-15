@@ -30,6 +30,37 @@
 	} = $props();
 
 	let bufferLines = $state<number[]>([]);
+	let translateX = $state(0);
+	let translateY = $state(0);
+	let isDragging = $state(false);
+	let dragStartX = 0;
+	let dragStartY = 0;
+
+	$effect(() => {
+		if (open) {
+			translateX = 0;
+			translateY = 0;
+		}
+	});
+
+	function onHeaderPointerDown(e: PointerEvent) {
+		isDragging = true;
+		dragStartX = e.clientX - translateX;
+		dragStartY = e.clientY - translateY;
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		e.preventDefault();
+	}
+
+	function onHeaderPointerMove(e: PointerEvent) {
+		if (!isDragging) return;
+		translateX = e.clientX - dragStartX;
+		translateY = e.clientY - dragStartY;
+	}
+
+	function onHeaderPointerUp() {
+		isDragging = false;
+	}
+
 	let editKey = $state<string | null>(null);
 	let editContent = $state('');
 	let busyAction = $state<'line' | 'extract' | 'save' | 'provision' | null>(null);
@@ -228,25 +259,26 @@
 </script>
 
 {#if open}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="dialog-overlay"
-		aria-hidden="true"
-		onclick={close}
-		onkeydown={(e) => {
-			if (e.key === 'Escape') close();
-		}}
-	>
+	<div class="dialog-overlay" aria-hidden="true">
 		<div
 			class="dialog am-dialog"
 			role="dialog"
 			aria-modal="true"
 			aria-label="Add metric"
 			tabindex="0"
-			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => e.stopPropagation()}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') close();
+			}}
+			style="transform: translate({translateX}px, {translateY}px)"
 		>
-			<div class="dialog-head">
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="dialog-head"
+				onpointerdown={onHeaderPointerDown}
+				onpointermove={onHeaderPointerMove}
+				onpointerup={onHeaderPointerUp}
+				style="cursor: {isDragging ? 'grabbing' : 'grab'}"
+			>
 				<div>
 					<div class="dialog-eyebrow">KB.Metrics</div>
 					<h2 class="dialog-title">Add Metric</h2>
@@ -505,8 +537,7 @@
 		justify-content: center;
 		z-index: 50;
 		padding: 24px;
-		background: rgba(2, 6, 23, 0.68);
-		backdrop-filter: blur(10px);
+		pointer-events: none;
 	}
 
 	/* ---- Dialog shell ---- */
@@ -527,6 +558,7 @@
 		resize: both;
 		min-width: 920px;
 		min-height: 720px;
+		pointer-events: auto;
 	}
 	.am-dialog {
 		min-width: 860px;
@@ -543,6 +575,7 @@
 		align-items: flex-start;
 		border-bottom: 1px solid var(--ink-line-soft);
 		background: linear-gradient(180deg, rgba(212, 162, 76, 0.09), rgba(212, 162, 76, 0));
+		user-select: none;
 	}
 	.dialog-eyebrow {
 		font-family: var(--font-mono);
