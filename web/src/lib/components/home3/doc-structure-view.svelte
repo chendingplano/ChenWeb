@@ -222,7 +222,7 @@
 		if (!target || target.page !== pageNo || target.coords.length < 4) return;
 
 		if (editingCoordsMode && editCoordsDraft.length >= 4) {
-			console.log('[coord-editor] renderStructureHighlights → entering coord-edit mode for page', pageNo);
+			// console.log('[coord-editor] renderStructureHighlights → entering coord-edit mode for page', pageNo);
 			renderCoordEditor(viewport as PdfPageViewportFull, overlay);
 			return;
 		}
@@ -244,7 +244,7 @@
 	}
 
 	function renderCoordEditor(viewport: PdfPageViewportFull, overlay: HTMLDivElement) {
-		console.log('[coord-editor] renderCoordEditor called, draft=', editCoordsDraft);
+		// console.log('[coord-editor] renderCoordEditor called, draft=', $state.snapshot(editCoordsDraft));
 
 		const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(editCoordsDraft.slice(0, 4));
 
@@ -331,7 +331,7 @@
 			const [x2, y2] = viewport.convertToPdfPoint(r, t);
 			editCoordsDraft = [x1, y1, x2, y2];
 			highlightSelectionVersion += 1;
-			console.log('[coord-editor] commitCoords, new PDF coords=', [x1, y1, x2, y2]);
+			// console.log('[coord-editor] commitCoords, new PDF coords=', [x1, y1, x2, y2]);
 		}
 
 		function attachDrag(
@@ -425,9 +425,11 @@
 	}
 
 	function startEditCoords() {
+		/*
 		console.log('[coord-editor] startEditCoords called', {
 			selectedLine: selectedLine ? { page: selectedLine.page_number, line: selectedLine.line_number, coords: selectedLine.coords } : null
 		});
+		*/
 		if (!selectedLine) {
 			console.warn('[coord-editor] no selectedLine');
 			return;
@@ -440,7 +442,7 @@
 		editingCoordsMode = true;
 		editCoordsError = '';
 		highlightSelectionVersion += 1;
-		console.log('[coord-editor] entered coord-edit mode, draft=', editCoordsDraft, 'version=', highlightSelectionVersion);
+		// console.log('[coord-editor] entered coord-edit mode, draft=', $state.snapshot(editCoordsDraft), 'version=', highlightSelectionVersion);
 	}
 
 	function cancelEditCoords() {

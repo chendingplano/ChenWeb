@@ -9,6 +9,8 @@
 		readPdfViewWindowSettings,
 		writePdfViewWindowSettings
 	} from './pdf-view-window-settings.js';
+	import PdfLineSelectionDialog from './pdf-line-selection-dialog.svelte';
+	import { getRawLines, type RawLine } from '$lib/services/kbService';
 
 	let {
 		inputId,
@@ -30,6 +32,7 @@
 		darkMode = true,
 		showingLines = $bindable(false),
 		selectedLines = $bindable([] as number[]),
+		enableSelectionDialog = true,
 		onselect,
 		ondragmove,
 		toolbar,
@@ -55,6 +58,7 @@
 		darkMode?: boolean;
 		showingLines?: boolean;
 		selectedLines?: number[];
+		enableSelectionDialog?: boolean;
 		onselect?: (detail: {
 			pageNumber: number;
 			viewportY1: number;
@@ -71,6 +75,111 @@
 		linesView?: Snippet;
 		sidebar?: Snippet;
 	} = $props();
+
+	// ---- Built-in selection dialog state (used when enableSelectionDialog=true and no external onselect) ----
+	let builtinDialogOpen = $state(false);
+	let builtinSelectionDetail = $state<{
+		pageNumber: number;
+		viewportY1: number;
+		viewportY2: number;
+		viewport: PdfPageViewport;
+	} | null>(null);
+	let builtinRawLines = $state<RawLine[]>([]);
+	let builtinRawLinesInputId = $state<number | null>(null);
+	let builtinDragPreviewLines = $state<number[]>([]);
+	let builtinHighlightVersion = $state(0);
+
+	let useBuiltinDialog = $derived(enableSelectionDialog && !onselect);
+
+	$effect(() => {
+		if (!useBuiltinDialog || inputId == null || inputId === builtinRawLinesInputId) return;
+		builtinRawLinesInputId = inputId;
+		builtinRawLines = [];
+		getRawLines(inputId)
+			.then((res) => {
+				if (inputId === builtinRawLinesInputId) builtinRawLines = res.lines ?? [];
+			})
+			.catch(() => {});
+	});
+
+	function handleBuiltinSelect(detail: {
+		pageNumber: number;
+		viewportY1: number;
+		viewportY2: number;
+		viewport: PdfPageViewport;
+	}) {
+		builtinDragPreviewLines = [];
+		builtinHighlightVersion++;
+		builtinSelectionDetail = detail;
+		builtinDialogOpen = true;
+	}
+
+	function handleBuiltinDragMove(detail: {
+		pageNumber: number;
+		viewportY1: number;
+		viewportY2: number;
+		viewport: PdfPageViewport;
+	}) {
+		const { pageNumber, viewportY1, viewportY2, viewport } = detail;
+		const pageLines = builtinRawLines.filter((l) => l.page_number === pageNumber);
+		builtinDragPreviewLines = pageLines
+			.filter((line) => {
+				if (!Array.isArray(line.coords) || line.coords.length < 4) return false;
+				const [, vy1, , vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+				const lineTop = Math.min(vy1, vy2);
+				const lineBottom = Math.max(vy1, vy2);
+				return Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2);
+			})
+			.map((l) => l.line_number);
+		// SharedPdfViewer calls paintOverlayForPage immediately after this callback,
+		// so renderBuiltinHighlights will read the updated builtinDragPreviewLines.
+	}
+
+	const HIGHLIGHT_EXPAND_TOP_PX = 10;
+	const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
+
+	function renderBuiltinHighlights(
+		pageNo: number,
+		viewport: PdfPageViewport,
+		overlay: HTMLDivElement
+	) {
+		renderHighlights?.(pageNo, viewport, overlay);
+		if (builtinDragPreviewLines.length === 0) return;
+		for (const ln of builtinRawLines) {
+			if (ln.page_number !== pageNo) continue;
+			if (!builtinDragPreviewLines.includes(ln.line_number)) continue;
+			if (!Array.isArray(ln.coords) || ln.coords.length < 4) continue;
+			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
+			const left = Math.min(vx1, vx2);
+			const top = Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX);
+			const bottom = Math.max(vy1, vy2);
+			const width = Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX;
+			const height = Math.max(0, bottom - top);
+			if (width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight-preview';
+			mark.style.left = `${left}px`;
+			mark.style.top = `${top}px`;
+			mark.style.width = `${width}px`;
+			mark.style.height = `${height}px`;
+			overlay.appendChild(mark);
+		}
+	}
+
+	function handleBuiltinRawLineUpdate(updated: RawLine) {
+		builtinRawLines = builtinRawLines.map((l) =>
+			l.page_number === updated.page_number && l.line_number === updated.line_number
+				? updated
+				: l
+		);
+	}
+
+	let effectiveOnSelect = $derived(useBuiltinDialog ? handleBuiltinSelect : onselect);
+	let effectiveOnDragMove = $derived(useBuiltinDialog ? handleBuiltinDragMove : ondragmove);
+	let effectiveRenderHighlights = $derived(useBuiltinDialog ? renderBuiltinHighlights : renderHighlights);
+	let effectiveHighlightVersion = $derived(
+		useBuiltinDialog ? `${highlightVersion}:${builtinHighlightVersion}` : highlightVersion
+	);
 
 	let pillSurface = $derived(darkMode ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.72)');
 	let pillBorder = $derived(darkMode ? 'rgba(148,163,184,0.18)' : 'rgba(100,116,139,0.18)');
@@ -205,12 +314,12 @@
 			bind:page
 			bind:zoom
 			bind:numPages
-			{highlightVersion}
-			{renderHighlights}
+			highlightVersion={effectiveHighlightVersion}
+			renderHighlights={effectiveRenderHighlights}
 			{loadingLabel}
 			{respectPageRotation}
-			{onselect}
-			{ondragmove}
+			onselect={effectiveOnSelect}
+			ondragmove={effectiveOnDragMove}
 		>
 			{#snippet pageBarTool()}
 				{#if toolbar}
@@ -261,6 +370,16 @@
 		</SharedPdfViewer>
 	{/if}
 </div>
+
+{#if useBuiltinDialog}
+	<PdfLineSelectionDialog
+		{inputId}
+		bind:open={builtinDialogOpen}
+		rawLines={builtinRawLines}
+		selectionDetail={builtinSelectionDetail}
+		onrawlineupdate={handleBuiltinRawLineUpdate}
+	/>
+{/if}
 
 {#if settingsOpen}
 	<div
@@ -319,6 +438,13 @@
 {/if}
 
 <style>
+	:global(.pdf-highlight-preview) {
+		position: absolute;
+		background: rgba(22, 163, 74, 0.16);
+		border: 1px solid rgba(22, 163, 74, 0.55);
+		box-shadow: inset 0 0 0 1px rgba(134, 239, 172, 0.15);
+	}
+
 	.pvw-container {
 		display: flex;
 		flex-direction: column;
