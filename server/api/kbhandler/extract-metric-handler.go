@@ -273,7 +273,6 @@ func ExtractMetric(c echo.Context) error {
 		"model_ref", modelRef,
 		"model_name", modelCfg.ModelName,
 		"prompt_name", promptRef,
-		"prompt", promptText,
 		"input", composedInput)
 
 	payload, err := client.ExtractJSON(c.Request().Context(), llmclients.JSONExtractionInput{

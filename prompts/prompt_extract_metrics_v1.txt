@@ -7,7 +7,7 @@ The input format is:
 ...
 ```
 where:
-- `<flag>` can be 'o' for overlapping lines and 'n' for normal lines. 
+- `<flag>` can be 'o' for overlapped lines and 'n' for normal lines. 
 - `<line_number>` is the line number
 - `<page_number>` is the page number
 - `<line_type>` identifies the type of lines, such as 'heading', 'paragraph', 'table', etc.

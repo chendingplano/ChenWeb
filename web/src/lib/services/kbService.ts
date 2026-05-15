@@ -1181,7 +1181,10 @@ export type CreateKbProvisionPayload = {
 
 export type CreateKbProvisionResponse = {
 	status: boolean;
-	record: KbMetricRecord;
+	prov_id: number;
+	provision_name: string;
+	span_count: number;
+	message?: string;
 };
 
 export async function createKbProvision(
@@ -1202,6 +1205,93 @@ export async function createKbProvision(
 		throw new Error(msg);
 	}
 	return response.json() as Promise<CreateKbProvisionResponse>;
+}
+
+export type ExtractedKbProvision = {
+	prov_name?: string;
+	prov_name_en?: string;
+	provision_type?: string;
+	source_text?: string;
+	source_line_spans?: SourceLineSpan[];
+	provision?: string;
+	provision_en?: string;
+	provision_subject?: string;
+	provision_subject_en?: string;
+	prov_desc?: string;
+	prov_desc_en?: string;
+	prov_context?: string;
+	prov_context_en?: string;
+	provision_keywords?: unknown;
+	provision_keywords_en?: unknown;
+	category_paths?: unknown;
+	category_paths_en?: unknown;
+	location_type?: string;
+	confidence?: number;
+	is_explicit?: boolean;
+	need_verify?: boolean;
+};
+
+export type ExtractKbProvisionsPayload = {
+	record_id: number;
+	source_line_spans: { page_number: number; line_number: number }[];
+};
+
+export type ExtractKbProvisionsResponse = {
+	status: boolean;
+	provisions?: ExtractedKbProvision[];
+	language?: string;
+	error?: string;
+};
+
+export async function extractKbProvisions(
+	payload: ExtractKbProvisionsPayload
+): Promise<ExtractKbProvisionsResponse> {
+	const response = await fetch(`${BASE}/provisions/extract`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error === 'string'
+				? parsed.error
+				: `Failed to extract provisions (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<ExtractKbProvisionsResponse>;
+}
+
+export type SaveExtractedKbProvisionsPayload = {
+	record_id: number;
+	provisions: ExtractedKbProvision[];
+};
+
+export type SaveExtractedKbProvisionsResponse = {
+	status: boolean;
+	inserted?: number;
+	error?: string;
+};
+
+export async function saveExtractedKbProvisions(
+	payload: SaveExtractedKbProvisionsPayload
+): Promise<SaveExtractedKbProvisionsResponse> {
+	const response = await fetch(`${BASE}/provisions/save`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error === 'string'
+				? parsed.error
+				: `Failed to save extracted provisions (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<SaveExtractedKbProvisionsResponse>;
 }
 
 export async function searchSummaryTreeMock(

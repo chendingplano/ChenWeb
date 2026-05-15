@@ -833,3 +833,127 @@ func appendIfMissing(values []string, value string) []string {
 	}
 	return append(values, value)
 }
+
+type createProvisionLineSpan struct {
+	PageNumber int `json:"page_number"`
+	LineNumber int `json:"line_number"`
+}
+
+type createProvisionRequest struct {
+	InputRecordID   int64                     `json:"input_record_id"`
+	ProvisionName   string                    `json:"provision_name"`
+	SourceLineSpans []createProvisionLineSpan `json:"source_line_spans"`
+}
+
+type createProvisionResponse struct {
+	Status        bool   `json:"status"`
+	ProvID        int    `json:"prov_id"`
+	ProvisionName string `json:"provision_name,omitempty"`
+	SpanCount     int    `json:"span_count,omitempty"`
+	Message       string `json:"message,omitempty"`
+}
+
+// CreateProvision handles POST /api/v1/kb/provisions.
+// It inserts a single provision row derived from the selected source lines.
+func CreateProvision(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_CPROV_001")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	var req createProvisionRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, createProvisionResponse{
+			Status:  false,
+			Message: fmt.Sprintf("invalid request body (CWB_KB_CPROV_010): %v", err),
+		})
+	}
+
+	logger.Info("create provision request received",
+		"input_record_id", req.InputRecordID,
+		"provision_name", req.ProvisionName,
+		"span_count", len(req.SourceLineSpans),
+	)
+	for i, s := range req.SourceLineSpans {
+		logger.Info("create provision span", "index", i, "page", s.PageNumber, "line", s.LineNumber)
+	}
+
+	if req.InputRecordID <= 0 {
+		return c.JSON(http.StatusBadRequest, createProvisionResponse{
+			Status:  false,
+			Message: "missing or invalid input_record_id (CWB_KB_CPROV_011)",
+		})
+	}
+	if len(req.SourceLineSpans) == 0 {
+		return c.JSON(http.StatusBadRequest, createProvisionResponse{
+			Status:  false,
+			Message: "source_line_spans must not be empty (CWB_KB_CPROV_012)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+
+	var nextProvID int
+	if err := db.QueryRow(
+		`SELECT COALESCE(MAX(prov_id), 0) + 1 FROM kb.provisions WHERE input_record_id = $1`,
+		req.InputRecordID,
+	).Scan(&nextProvID); err != nil {
+		logger.Error("failed to get next prov_id", "input_record_id", req.InputRecordID, "err", err)
+		return c.JSON(http.StatusInternalServerError, createProvisionResponse{
+			Status:  false,
+			Message: "failed to create provision (CWB_KB_CPROV_020)",
+		})
+	}
+	logger.Info("next prov_id determined", "input_record_id", req.InputRecordID, "prov_id", nextProvID)
+
+	spans := make([]string, 0, len(req.SourceLineSpans))
+	for _, s := range req.SourceLineSpans {
+		spans = append(spans, fmt.Sprintf("%d:%d", s.PageNumber, s.LineNumber))
+	}
+	spansJSON, _ := json.Marshal(spans)
+
+	provisionName := strings.TrimSpace(req.ProvisionName)
+	if provisionName == "" {
+		provisionName = fmt.Sprintf("Provision %d", nextProvID)
+	}
+
+	logger.Info("inserting provision",
+		"input_record_id", req.InputRecordID,
+		"prov_id", nextProvID,
+		"prov_name", provisionName,
+		"spans", spans,
+		"spans_json", string(spansJSON),
+	)
+
+	if _, err := db.Exec(
+		`INSERT INTO kb.provisions (input_record_id, prov_id, prov_name, source_line_spans, extract_id, input_filename)
+		 VALUES ($1, $2, $3, $4::jsonb, '', '')
+		 ON CONFLICT (input_record_id, prov_id) DO NOTHING`,
+		req.InputRecordID, nextProvID, provisionName, string(spansJSON),
+	); err != nil {
+		logger.Error("failed to insert provision",
+			"input_record_id", req.InputRecordID,
+			"prov_id", nextProvID,
+			"prov_name", provisionName,
+			"spans", spans,
+			"err", err,
+		)
+		return c.JSON(http.StatusInternalServerError, createProvisionResponse{
+			Status:  false,
+			Message: "failed to create provision (CWB_KB_CPROV_021)",
+		})
+	}
+
+	logger.Info("provision created successfully",
+		"input_record_id", req.InputRecordID,
+		"prov_id", nextProvID,
+		"prov_name", provisionName,
+		"span_count", len(spans),
+		"spans", spans,
+	)
+	return c.JSON(http.StatusOK, createProvisionResponse{
+		Status:        true,
+		ProvID:        nextProvID,
+		ProvisionName: provisionName,
+		SpanCount:     len(spans),
+	})
+}

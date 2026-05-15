@@ -3,9 +3,12 @@
 	import {
 		extractKbMetrics,
 		saveExtractedKbMetrics,
+		extractKbProvisions,
+		saveExtractedKbProvisions,
 		createKbProvision,
 		updateRawLine,
 		type ExtractedKbMetric,
+		type ExtractedKbProvision,
 		type RawLine,
 		type SourceLineSpan
 	} from '$lib/services/kbService';
@@ -30,6 +33,7 @@
 	} = $props();
 
 	let bufferLines = $state<number[]>([]);
+	let provisionPreview = $state<ExtractedKbProvision[]>([]);
 	let translateX = $state(0);
 	let translateY = $state(0);
 	let isDragging = $state(false);
@@ -66,6 +70,40 @@
 	let busyAction = $state<'line' | 'extract' | 'save' | 'provision' | null>(null);
 	let extractedPreview = $state<ExtractedKbMetric[]>([]);
 	let busy = $derived(busyAction !== null);
+
+	type Operation = 'extract-metrics' | 'extract-provisions' | 'write-comments' | 'ask-ai';
+	let selectedOperation = $state<Operation>('extract-metrics');
+	let commentText = $state('');
+
+	let opMeta = $derived.by(() => {
+		switch (selectedOperation) {
+			case 'extract-metrics':
+				return {
+					eyebrow: 'KB.Metrics',
+					title: 'Add Metric',
+					subtitle:
+						'Review selected lines, extract candidate metrics, remove any you do not want, then save the remaining metrics to the database.'
+				};
+			case 'extract-provisions':
+				return {
+					eyebrow: 'KB.Provisions',
+					title: 'Extract Provision',
+					subtitle: 'Review selected lines and extract a compliance provision.'
+				};
+			case 'write-comments':
+				return {
+					eyebrow: 'KB.Comments',
+					title: 'Write Comment',
+					subtitle: 'Review the selected lines and write a comment about the selected content.'
+				};
+			case 'ask-ai':
+				return {
+					eyebrow: 'KB.AI',
+					title: 'Ask AI',
+					subtitle: 'Ask AI about the selected content. Coming soon.'
+				};
+		}
+	});
 
 	$effect(() => {
 		if (!selectionDetail || selectionDetail.length === 0 || rawLines.length === 0) return;
@@ -122,6 +160,8 @@
 		bufferLines = [];
 		busyAction = null;
 		extractedPreview = [];
+		provisionPreview = [];
+		commentText = '';
 	}
 
 	function startEditLine(key: string, content: string) {
@@ -227,23 +267,50 @@
 
 	async function extractProvision() {
 		if (!inputId || dialogLines.length === 0) return;
-		busyAction = 'provision';
+		busyAction = 'extract';
 		try {
-			const spans: SourceLineSpan[] = dialogLines.map((l) => ({
+			const spans = dialogLines.map((l) => ({
 				page_number: l.page_number,
 				line_number: l.line_number
 			}));
-			await createKbProvision({
-				input_record_id: inputId,
-				provision_name: `Provision from ${inputId}`,
-				source_line_spans: spans
-			});
-			close();
+			const result = await extractKbProvisions({ record_id: inputId, source_line_spans: spans });
+			provisionPreview = result.provisions ?? [];
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Failed to create provision');
+			alert(err instanceof Error ? err.message : 'Failed to extract provisions');
 		} finally {
 			busyAction = null;
 		}
+	}
+
+	async function saveProvisions() {
+		if (!inputId || provisionPreview.length === 0) return;
+		busyAction = 'save';
+		try {
+			await saveExtractedKbProvisions({ record_id: inputId, provisions: provisionPreview });
+			close();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to save provisions');
+		} finally {
+			busyAction = null;
+		}
+	}
+
+	function removeProvisionPreview(index: number) {
+		provisionPreview = provisionPreview.filter((_, idx) => idx !== index);
+	}
+
+	function provisionDisplayName(p: ExtractedKbProvision, index: number): string {
+		return p.prov_name?.trim() || p.provision_subject?.trim() || `Provision ${index + 1}`;
+	}
+
+	function saveComment() {
+		// TODO: connect to backend
+		alert('Write Comments is not yet connected to the backend.');
+	}
+
+	function runOperation() {
+		if (selectedOperation === 'extract-metrics') extractMetric();
+		else if (selectedOperation === 'extract-provisions') extractProvision();
 	}
 
 	function removePreview(index: number) {
@@ -282,12 +349,9 @@
 				style="cursor: {isDragging ? 'grabbing' : 'grab'}"
 			>
 				<div>
-					<div class="dialog-eyebrow">KB.Metrics</div>
-					<h2 class="dialog-title">Add Metric</h2>
-					<p class="dialog-subtitle">
-						Review selected lines, extract candidate metrics, remove any you do not want, then save
-						the remaining metrics to the database.
-					</p>
+					<div class="dialog-eyebrow">{opMeta.eyebrow}</div>
+					<h2 class="dialog-title">{opMeta.title}</h2>
+					<p class="dialog-subtitle">{opMeta.subtitle}</p>
 				</div>
 			</div>
 
@@ -389,6 +453,7 @@
 						</div>
 					</div>
 
+					{#if selectedOperation === 'extract-metrics'}
 					<div class="dialog-section">
 						<div class="dialog-section-head">
 							<span class="dialog-section-title">Extracted Metrics</span>
@@ -447,65 +512,162 @@
 						{/if}
 					</div>
 				{/if}
+					{#if selectedOperation === 'extract-provisions'}
+					<div class="dialog-section">
+						<div class="dialog-section-head">
+							<span class="dialog-section-title">Extracted Provisions</span>
+							<span class="dialog-section-copy"
+								>{provisionPreview.length} provision{provisionPreview.length === 1
+									? ''
+									: 's'} ready</span
+							>
+						</div>
+						{#if busyAction === 'extract'}
+							<div class="am-status-row" aria-live="polite">
+								<span class="am-spinner" aria-hidden="true"></span>
+								<span>Extracting provisions from the selected lines…</span>
+							</div>
+						{:else if provisionPreview.length === 0}
+							<div class="metadata-empty">
+								Press <strong>Run</strong> to preview the provisions returned by the AI.
+							</div>
+						{:else}
+							<div class="am-preview-list">
+								{#each provisionPreview as prov, idx (`${provisionDisplayName(prov, idx)}-${idx}`)}
+									<div class="am-preview-card">
+										<div class="am-preview-head">
+											<div>
+												<div class="am-preview-name">{provisionDisplayName(prov, idx)}</div>
+												<div class="am-preview-meta">
+													<span>{confidencePct(prov.confidence)}</span>
+													{#if prov.provision_type}<span>{prov.provision_type}</span>{/if}
+													{#if prov.location_type}<span>{prov.location_type}</span>{/if}
+												</div>
+											</div>
+											<button
+												type="button"
+												class="am-btn am-btn-delete"
+												disabled={busy}
+												onclick={() => removeProvisionPreview(idx)}>Remove</button
+											>
+										</div>
+										{#if prov.prov_desc || prov.provision_en}
+											<div class="am-preview-desc">{prov.prov_desc || prov.provision_en}</div>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+					{/if}
+					{#if selectedOperation === 'write-comments'}
+					<div class="dialog-section">
+						<div class="dialog-section-head">
+							<span class="dialog-section-title">Comment</span>
+						</div>
+						<textarea
+							class="am-comment-textarea"
+							placeholder="Write your comment about the selected lines…"
+							bind:value={commentText}
+						></textarea>
+					</div>
+					{/if}
+			{/if}
 			</div>
 
 			<div class="dialog-foot">
-				<div class="dialog-foot-hint">
+				<div class="dialog-foot-left">
 					<button
 						type="button"
 						class="am-btn-foot am-btn-help"
 						onclick={() => {
 							alert(
-								'Select PDF lines to extract a metric or provision.\n\n' +
+								'Select PDF lines and choose an operation.\n\n' +
 									'• Drag on the PDF to select lines\n' +
 									'• Edit: modify line content (saves to the original file)\n' +
 									'• Remove: remove a line from this selection\n' +
-									'• Extract Provision: create a new provision from the remaining lines\n' +
-									'• Extract Metric: preview metrics returned from the backend\n' +
-									'• Save: persist the remaining preview metrics to kb.metrics'
+									'• Extract Provisions: create a new provision from the remaining lines\n' +
+									'• Extract Metrics: preview metrics returned from the backend, then Save\n' +
+									'• Write Comments: write a comment about the selected content'
 							);
 						}}>Help</button
 					>
+					<div class="dialog-operation-select">
+						<label class="dialog-operation-label" for="op-select">Operation</label>
+						<select
+							id="op-select"
+							class="dialog-operation-dropdown"
+							bind:value={selectedOperation}
+							onchange={() => {
+								extractedPreview = [];
+								provisionPreview = [];
+								commentText = '';
+							}}
+						>
+							<option value="extract-metrics">Extract Metrics</option>
+							<option value="extract-provisions">Extract Provisions</option>
+							<option value="write-comments">Write Comments</option>
+							<option value="ask-ai" disabled>Ask AI (coming soon)</option>
+						</select>
+					</div>
+					<button
+						type="button"
+						class="am-btn-foot am-btn-run dialog-search-btn"
+						disabled={selectedOperation !== 'extract-metrics' &&
+							selectedOperation !== 'extract-provisions'}
+						onclick={runOperation}
+					>
+						{#if busyAction === 'extract'}
+							<span class="am-btn-inline"
+								><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>Running…</span
+							>
+						{:else}
+							Run
+						{/if}
+					</button>
 				</div>
 				<div class="dialog-foot-buttons">
 					<button type="button" class="am-btn-foot am-btn-foot-cancel" onclick={close}
 						>Close</button
 					>
-					<button
-						type="button"
-						class="am-btn-foot am-btn-foot-extract dialog-search-btn"
-						disabled={dialogLines.length === 0 || busy}
-						onclick={extractProvision}
-						>{busyAction === 'provision' ? 'Saving…' : 'Extract Provision'}</button
-					>
-					<button
-						type="button"
-						class="am-btn-foot am-btn-foot-extract dialog-search-btn"
-						disabled={dialogLines.length === 0 || busy}
-						onclick={extractMetric}
-					>
-						{#if busyAction === 'extract'}
-							<span class="am-btn-inline"
-								><span class="am-spinner" aria-hidden="true"></span>Extracting…</span
-							>
-						{:else}
-							Extract Metric
-						{/if}
-					</button>
-					<button
-						type="button"
-						class="am-btn-foot am-btn-foot-save dialog-search-btn"
-						disabled={extractedPreview.length === 0 || busy}
-						onclick={saveExtracted}
-					>
-						{#if busyAction === 'save'}
-							<span class="am-btn-inline"
-								><span class="am-spinner" aria-hidden="true"></span>Saving…</span
-							>
-						{:else}
-							Save
-						{/if}
-					</button>
+					{#if selectedOperation === 'extract-metrics'}
+						<button
+							type="button"
+							class="am-btn-foot am-btn-foot-save dialog-search-btn"
+							disabled={extractedPreview.length === 0 || busy}
+							onclick={saveExtracted}
+						>
+							{#if busyAction === 'save'}
+								<span class="am-btn-inline"
+									><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>Saving…</span
+								>
+							{:else}
+								Save
+							{/if}
+						</button>
+					{:else if selectedOperation === 'extract-provisions'}
+						<button
+							type="button"
+							class="am-btn-foot am-btn-foot-save dialog-search-btn"
+							disabled={provisionPreview.length === 0 || busy}
+							onclick={saveProvisions}
+						>
+							{#if busyAction === 'save'}
+								<span class="am-btn-inline"
+									><span class="am-spinner am-spinner-dark" aria-hidden="true"></span>Saving…</span
+								>
+							{:else}
+								Save
+							{/if}
+						</button>
+					{:else if selectedOperation === 'write-comments'}
+						<button
+							type="button"
+							class="am-btn-foot am-btn-foot-save dialog-search-btn"
+							disabled={commentText.trim().length === 0 || busy}
+							onclick={saveComment}>Save Comment</button
+						>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -952,6 +1114,30 @@
 		color: var(--text-muted);
 	}
 
+	/* ---- Comment textarea ---- */
+	.am-comment-textarea {
+		width: 100%;
+		min-height: 120px;
+		padding: 12px 14px;
+		background: #13192280;
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 12px;
+		color: var(--text-primary);
+		font-family: inherit;
+		font-size: 13px;
+		line-height: 1.55;
+		resize: vertical;
+		outline: none;
+		box-sizing: border-box;
+	}
+	.am-comment-textarea:focus {
+		border-color: rgba(212, 162, 76, 0.4);
+		box-shadow: 0 0 0 2px rgba(212, 162, 76, 0.1);
+	}
+	.am-comment-textarea::placeholder {
+		color: var(--text-muted);
+	}
+
 	/* ---- Metadata empty ---- */
 	.metadata-empty {
 		font-size: 12px;
@@ -995,6 +1181,13 @@
 		background: rgba(255, 255, 255, 0.09);
 		color: var(--text-primary);
 	}
+	.am-btn-run {
+		min-width: 72px;
+	}
+	.am-spinner-dark {
+		border-color: rgba(21, 17, 10, 0.3);
+		border-top-color: #15110a;
+	}
 	.dialog-search-btn {
 		min-width: 140px;
 		background: #d4a24c !important;
@@ -1033,10 +1226,49 @@
 		flex: 0 0 auto;
 		background: #171c26;
 	}
-	.dialog-foot-hint {
+	.dialog-foot-left {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+	}
+	.dialog-operation-select {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.dialog-operation-label {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		white-space: nowrap;
+	}
+	.dialog-operation-dropdown {
+		height: 36px;
+		padding: 0 28px 0 10px;
+		background: rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		border-radius: 8px;
+		color: var(--text-primary);
 		font-family: var(--font-mono);
 		font-size: 11px;
-		color: var(--text-muted);
+		letter-spacing: 0.04em;
+		cursor: pointer;
+		appearance: none;
+		-webkit-appearance: none;
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237c7560' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+		background-repeat: no-repeat;
+		background-position: right 8px center;
+		outline: none;
+	}
+	.dialog-operation-dropdown:focus {
+		border-color: rgba(212, 162, 76, 0.5);
+		box-shadow: 0 0 0 2px rgba(212, 162, 76, 0.12);
+	}
+	.dialog-operation-dropdown option {
+		background: #1a202b;
+		color: var(--text-primary);
 	}
 	.dialog-foot-buttons {
 		display: flex;
