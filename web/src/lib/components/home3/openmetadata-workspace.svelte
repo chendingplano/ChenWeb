@@ -19,6 +19,8 @@
 		message?: string;
 	};
 
+	const OPENMETADATA_THEME_STORAGE_KEY = 'ui-theme';
+
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
@@ -39,18 +41,37 @@
 	let session = $state<SessionResponse | null>(null);
 	let syncContext = $state(false);
 	let iframeNonce = $state(0);
+	let hasAppliedInitialTheme = $state(false);
+	let lastAppliedTheme = $state<'dark' | 'light' | null>(null);
 
 	let iframeSrc = $derived.by(() => {
 		if (!session?.launch_url) return '';
 		const url = new URL(session.launch_url, window.location.origin);
 		url.searchParams.set('embed', '1');
 		url.searchParams.set('shell', 'chenweb');
+		url.searchParams.set('om_theme', darkMode ? 'dark' : 'light');
 		url.searchParams.set('reload', String(iframeNonce));
 		return url.toString();
 	});
 
 	onMount(async () => {
+		applyOpenMetadataTheme(darkMode ? 'dark' : 'light');
+		hasAppliedInitialTheme = true;
 		await loadSession();
+	});
+
+	$effect(() => {
+		const desiredTheme = darkMode ? 'dark' : 'light';
+		applyOpenMetadataTheme(desiredTheme);
+		if (!hasAppliedInitialTheme) {
+			return;
+		}
+		if (lastAppliedTheme !== desiredTheme) {
+			lastAppliedTheme = desiredTheme;
+			if (session) {
+				iframeNonce += 1;
+			}
+		}
 	});
 
 	async function loadSession() {
@@ -88,7 +109,18 @@
 
 	function openInNewTab() {
 		if (!session?.launch_url) return;
-		window.open(session.launch_url, '_blank', 'noopener');
+		const url = new URL(session.launch_url, window.location.origin);
+		url.searchParams.set('om_theme', darkMode ? 'dark' : 'light');
+		window.open(url.toString(), '_blank', 'noopener');
+	}
+
+	function applyOpenMetadataTheme(theme: 'dark' | 'light') {
+		if (typeof window === 'undefined') return;
+		if (theme === 'dark') {
+			window.localStorage.setItem(OPENMETADATA_THEME_STORAGE_KEY, theme);
+			return;
+		}
+		window.localStorage.removeItem(OPENMETADATA_THEME_STORAGE_KEY);
 	}
 </script>
 

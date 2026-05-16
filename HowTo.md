@@ -4705,3 +4705,27 @@ mv ~/.claude/file-history ~/.claude/file-history.bak
 
 # How to Restore Chrome
 Type: Shift + Cmd + T
+
+# Google Client ID
+URL: https://console.cloud.google.com/apis/credentials
+Use chending1111@gmail.com
+
+There are currently four projects:
+```text
+Generative Language Client
+Project ID: gen-lang-client-0276721966
+Organization: No organization
+
+My First Project
+Project ID: zippy-avatar-430001-f7
+Organization: No organization
+
+ChenProject-01
+Project ID: gen-lang-client-0520328478
+Organization: No organization
+
+My First Project
+Project ID: liquid-force-430923-d2
+Organization: No organization
+```
+Normally you need to choose 'Generative Language Client'.

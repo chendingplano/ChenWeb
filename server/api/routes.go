@@ -23,6 +23,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
+	"github.com/chendingplano/deepdoc/server/api/kehandler"
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
@@ -40,6 +41,8 @@ import (
 
 //go:embed all:webbuild
 var webBuild embed.FS
+
+const rootFaviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#102033"/><path fill="#5eead4" d="M18 17h28v8H27v14h19v8H18z"/><path fill="#f8fafc" d="M30 28h16v8H30z"/></svg>`
 
 func RegisterRoutes(e *echo.Echo) error {
 	// This function registers all API routes and returns the Echo instance.
@@ -106,7 +109,7 @@ func RegisterRoutes(e *echo.Echo) error {
 				// Add other public pages here
 			}
 
-			if path == "/callback" {
+			if path == "/callback" || path == "/auth/callback" || isLocalFaviconPath(path) {
 				return next(c)
 			}
 
@@ -408,6 +411,10 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/ap/w/:slug/runs/:id/events", agentplatformhandler.ListRunEvents)
 	apiGroup.POST("/ap/w/:slug/runs/:id/cancel", agentplatformhandler.CancelTaskRun)
 
+	// Knowledge Engineering endpoints — reads/writes RTB files under ARTIFACT_DIR/Topics/.
+	apiGroup.GET("/ke/research-topics", kehandler.List)
+	apiGroup.POST("/ke/research-topics", kehandler.Create)
+
 	// Diary (My Workspace) endpoints — reads/writes JSON files under DIARY_HOME_DIR.
 	apiGroup.GET("/diary", diaryhandler.List)
 	apiGroup.POST("/diary", diaryhandler.Create)
@@ -422,19 +429,38 @@ func RegisterRoutes(e *echo.Echo) error {
 	wsGroup.Use(authmiddleware.AuthMiddleware)
 	wsGroup.GET("/agent-platform", agentplatformhandler.HandleAgentPlatformWS)
 
+	e.Any("/callback", openmetadatahandler.ProxyCallback)
+	e.Any("/auth/callback", openmetadatahandler.RedirectAuthCallback)
+	e.GET("/favicon.ico", serveRootFavicon)
+	e.GET("/favicon.png", serveRootFavicon)
+	e.GET("/integrations/openmetadata/favicon.ico", serveRootFavicon)
+	e.GET("/integrations/openmetadata/favicon.png", serveRootFavicon)
+	e.GET("/integrations/openmetadata/favicons/*", serveRootFavicon)
+
 	openMetadataGroup := e.Group("/integrations/openmetadata")
 	openMetadataGroup.Use(authmiddleware.AuthMiddleware)
 	openMetadataGroup.Any("", openmetadatahandler.Proxy)
 	openMetadataGroup.Any("/", openmetadatahandler.Proxy)
 	openMetadataGroup.Any("/*", openmetadatahandler.Proxy)
 
-	e.Any("/callback", openmetadatahandler.ProxyCallback)
-
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {
 		return c.Redirect(http.StatusFound, "/login")
 	})
 	return nil
+}
+
+func isLocalFaviconPath(path string) bool {
+	return path == "/favicon.ico" ||
+		path == "/favicon.png" ||
+		path == "/integrations/openmetadata/favicon.ico" ||
+		path == "/integrations/openmetadata/favicon.png" ||
+		strings.HasPrefix(path, "/integrations/openmetadata/favicons/")
+}
+
+func serveRootFavicon(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
+	return c.Blob(http.StatusOK, "image/svg+xml", []byte(rootFaviconSVG))
 }
 
 func logoutFromKratos(req *http.Request, logger ApiTypes.JimoLogger) {

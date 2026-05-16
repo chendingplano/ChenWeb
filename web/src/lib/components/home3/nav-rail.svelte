@@ -21,6 +21,7 @@
 	import WorkflowIcon        from '@lucide/svelte/icons/workflow';
 	import ShieldIcon          from '@lucide/svelte/icons/shield';
 	import BookMarkedIcon      from '@lucide/svelte/icons/book-marked';
+	import BrainIcon           from '@lucide/svelte/icons/brain';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -138,6 +139,12 @@
 			]
 		},
 		{ id: 'knowledge', label: 'Knowledge System', icon: BookOpenIcon, group: 'Workspace', href: '/home3/knowledge' },
+		{
+			id: 'knowledge-engineering', label: 'Knowledge Engineering', icon: BrainIcon, group: 'Workspace',
+			children: [
+				{ id: 'ke-research-topics', label: 'Research Topics' }
+			]
+		},
 		{
 			id: 'tools', label: 'Tools', icon: WorkflowIcon, group: 'Workspace',
 			children: [

@@ -11,6 +11,7 @@
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
 	import DiaryView from '$lib/components/home3/diary-view.svelte';
+	import ResearchTopicsView from '$lib/components/home3/research-topics-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
@@ -29,6 +30,7 @@
 	import InfoIcon         from '@lucide/svelte/icons/info';
 	import ShieldIcon       from '@lucide/svelte/icons/shield';
 	import BookMarkedIcon   from '@lucide/svelte/icons/book-marked';
+	import BrainIcon        from '@lucide/svelte/icons/brain';
 
 	type ActiveSelection = {
 		itemId: string;
@@ -83,7 +85,8 @@
 		about:        InfoIcon,
 		'system-admin': ShieldIcon,
 		jetstream: ShieldIcon,
-		'my-workspace': BookMarkedIcon
+		'my-workspace': BookMarkedIcon,
+		'knowledge-engineering': BrainIcon
 	};
 
 	// Section descriptions
@@ -98,7 +101,8 @@
 		settings:     'Configure your workspace, models, and integrations.',
 		about:        'Version info, credits, and system information.',
 		jetstream: 'Operational monitoring and diagnostics for JetStream services.',
-		'my-workspace': 'Your personal workspace: diary, notes, and resources.'
+		'my-workspace': 'Your personal workspace: diary, notes, and resources.',
+		'knowledge-engineering': 'Manage research topic beans: articles, thoughts, designs, specs, and readings.'
 	};
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
@@ -166,6 +170,8 @@
 			<JetStreamSubjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}
 			<DiaryView {darkMode} />
+		{:else if activeMenu?.childId === 'ke-research-topics'}
+			<ResearchTopicsView {darkMode} />
 		{:else if activeMenu?.itemId === 'skills' && activeMenu?.childId === 'skills-active'}
 			<SkillMgmtView {darkMode} initialFilter="activated" />
 		{:else if activeMenu?.itemId === 'skills' && activeMenu?.childId === 'skills-create'}
