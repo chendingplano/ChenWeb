@@ -37,6 +37,8 @@
 	import NetworkIcon from '@lucide/svelte/icons/network';
 	import PanelLeftIcon from '@lucide/svelte/icons/panel-left';
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
+	import UploadIcon from '@lucide/svelte/icons/upload';
+	import LayersIcon from '@lucide/svelte/icons/layers';
 
 	type KbSectionId =
 		| 'kb-search'
@@ -51,6 +53,7 @@
 		| 'kb-topic-tree'
 		| 'kb-provision-graph'
 		| 'kb-provision-tree'
+		| 'kb-doc-wiki'
 		| 'kb-references'
 		| 'kb-formulas'
 		| 'kb-tables'
@@ -67,16 +70,6 @@
 		children?: Array<{ id: KbSectionId; label: string; description: string }>;
 	};
 
-	const underConstructionIcons: Record<string, any> = {
-		'kb-references': BookOpenIcon,
-		'kb-formulas': FunctionSquareIcon,
-		'kb-tables': Table2Icon,
-		'kb-quotations': QuoteIcon,
-		'kb-case-studies': BriefcaseBusinessIcon,
-		'kb-workflow': WorkflowIcon,
-		'kb-product-parts': PackageIcon
-	};
-
 	const menuItems: KbMenuItem[] = [
 		{
 			id: 'kb-search',
@@ -86,89 +79,88 @@
 		},
 		{
 			id: 'kb-import',
-			label: 'Documents',
-			description: 'Review imported records',
-			icon: FileTextIcon
+			label: 'Injestion',
+			description: 'Ingest documents and data',
+			icon: UploadIcon,
+			children: [
+				{
+					id: 'kb-import',
+					label: 'Upload Files',
+					description: 'Upload and import document files'
+				}
+			]
 		},
 		{
-			id: 'kb-input-details',
-			label: 'Document Details',
-			description: 'Inspect source inputs',
-			icon: DatabaseIcon
-		},
-		{
-			id: 'kb-doc-structure',
-			label: 'Document Structure',
-			description: 'Inspect parsed hierarchy',
-			icon: ListTreeIcon
-		},
-		{
-			id: 'kb-metrics',
-			label: 'Metrics',
-			description: 'Manage extracted metrics',
-			icon: BarChart3Icon
-		},
-		{ id: 'kb-chunks', label: 'Chunks', description: 'Browse chunk output', icon: BoxesIcon },
-		{
-			id: 'kb-summary-graph',
-			label: 'Document Summaries',
-			description: 'Graph and tree summary workspaces',
+			id: 'kb-doc-wiki',
+			label: 'Document Wiki',
+			description: 'Browse document knowledge',
 			icon: BookOpenIcon,
 			children: [
 				{
-					id: 'kb-summary-graph',
-					label: 'Summary Graph',
-					description: 'Category-first summary graph'
+					id: 'kb-input-details',
+					label: 'Document Metadata',
+					description: 'Inspect source inputs'
+				},
+				{
+					id: 'kb-doc-structure',
+					label: 'Document Structure',
+					description: 'Inspect parsed hierarchy'
 				},
 				{
 					id: 'kb-summary-tree',
-					label: 'Summary Tree',
+					label: 'Document Tree',
 					description: 'Document-centric summary browser'
-				}
-			]
-		},
-		{
-			id: 'kb-topic-graph',
-			label: 'Semantic Web',
-			description: 'Topic graph and semantic tree',
-			icon: NetworkIcon,
-			children: [
+				},
 				{
-					id: 'kb-topic-graph',
-					label: 'Semantic Web',
-					description: 'Category-first topic graph'
+					id: 'kb-summary-graph',
+					label: 'Subject Wiki',
+					description: 'Category-first summary graph'
 				},
 				{
 					id: 'kb-topic-tree',
-					label: 'Document Semantic Tree',
+					label: 'Document Topic Tree',
 					description: 'Document-centric topic browser'
-				}
-			]
-		},
-		{
-			id: 'kb-provision-graph',
-			label: 'Compliance Provisions',
-			description: 'Provision graph and document tree',
-			icon: ShieldCheckIcon,
-			children: [
+				},
 				{
-					id: 'kb-provision-graph',
-					label: 'Provision Web',
-					description: 'Category-first provision graph'
+					id: 'kb-topic-graph',
+					label: 'Topic Wiki',
+					description: 'Category-first topic graph'
+				},
+				{
+					id: 'kb-metrics',
+					label: 'Metrics',
+					description: 'Manage extracted metrics'
 				},
 				{
 					id: 'kb-provision-tree',
 					label: 'Provision Tree',
 					description: 'Document-centric provision browser'
-				}
+				},
+				{
+					id: 'kb-provision-graph',
+					label: 'Provision Wiki',
+					description: 'Category-first provision graph'
+				},
+				...KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.map((section) => ({
+					id: section.id as KbSectionId,
+					label: section.label,
+					description: section.description
+				}))
 			]
 		},
-		...KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.map((section) => ({
-			id: section.id as KbSectionId,
-			label: section.label,
-			description: section.description,
-			icon: underConstructionIcons[section.id] ?? BookOpenIcon
-		}))
+		{
+			id: 'kb-chunks',
+			label: 'Document Processing',
+			description: 'Process and analyze documents',
+			icon: LayersIcon,
+			children: [
+				{
+					id: 'kb-chunks',
+					label: 'Document Chunking',
+					description: 'Browse chunk output'
+				}
+			]
+		}
 	];
 
 	let menuCollapsed = $state(false);
@@ -179,19 +171,24 @@
 	let activeSection = $state<KbSectionId>('kb-search');
 
 	$effect(() => {
-		if (menuItems.some((item) => item.id === initialSection)) {
+		const found = menuItems.some(
+			(item) =>
+				item.id === initialSection ||
+				item.children?.some((child) => child.id === initialSection)
+		);
+		if (found) {
 			activeSection = initialSection;
 		}
 	});
 
-	let documentSummariesOpen = $state(true);
-	let semanticWebOpen = $state(true);
-	let complianceProvisionsOpen = $state(true);
+	let injestionOpen = $state(false);
+	let documentWikiOpen = $state(false);
+	let documentProcessingOpen = $state(false);
 	let activeItem = $derived(
 		menuItems.find(
 			(item) =>
 				item.id === activeSection || item.children?.some((child) => child.id === activeSection)
-		) ?? menuItems[3]
+		) ?? menuItems[0]
 	);
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
 	let panelBg = $derived(darkMode ? '#252A3A' : '#ECEEF2');
@@ -209,15 +206,21 @@
 	);
 
 	function selectSection(id: KbSectionId) {
+		if (id === 'kb-doc-wiki') {
+			activeSection = 'kb-input-details';
+			documentWikiOpen = true;
+			return;
+		}
 		activeSection = id;
-		if (id === 'kb-summary-graph' || id === 'kb-summary-tree') {
-			documentSummariesOpen = true;
+		if (id === 'kb-import') {
+			injestionOpen = true;
 		}
-		if (id === 'kb-topic-graph' || id === 'kb-topic-tree') {
-			semanticWebOpen = true;
+		if (id === 'kb-chunks') {
+			documentProcessingOpen = true;
 		}
-		if (id === 'kb-provision-graph' || id === 'kb-provision-tree') {
-			complianceProvisionsOpen = true;
+		const docWikiItem = menuItems.find((item) => item.id === 'kb-doc-wiki');
+		if (docWikiItem?.children?.some((child) => child.id === id)) {
+			documentWikiOpen = true;
 		}
 	}
 
@@ -226,16 +229,16 @@
 	}
 
 	function isParentOpen(item: KbMenuItem) {
-		if (item.id === 'kb-summary-graph') return documentSummariesOpen;
-		if (item.id === 'kb-topic-graph') return semanticWebOpen;
-		if (item.id === 'kb-provision-graph') return complianceProvisionsOpen;
+		if (item.id === 'kb-import') return injestionOpen;
+		if (item.id === 'kb-doc-wiki') return documentWikiOpen;
+		if (item.id === 'kb-chunks') return documentProcessingOpen;
 		return false;
 	}
 
 	function toggleParentOpen(item: KbMenuItem) {
-		if (item.id === 'kb-summary-graph') documentSummariesOpen = !documentSummariesOpen;
-		else if (item.id === 'kb-topic-graph') semanticWebOpen = !semanticWebOpen;
-		else if (item.id === 'kb-provision-graph') complianceProvisionsOpen = !complianceProvisionsOpen;
+		if (item.id === 'kb-import') injestionOpen = !injestionOpen;
+		else if (item.id === 'kb-doc-wiki') documentWikiOpen = !documentWikiOpen;
+		else if (item.id === 'kb-chunks') documentProcessingOpen = !documentProcessingOpen;
 	}
 
 	function isChildActive(childId: KbSectionId) {
@@ -476,10 +479,10 @@
 				<TopicGraphView
 					{darkMode}
 					heroEyebrow="Compliance Provisions"
-					heroTitle="Provision Web"
+					heroTitle="Provision Wiki"
 					heroDescription="Category-first workspace for browsing compliance provisions indexed from the active knowledge store."
-					rootTabLabel="Provision Web"
-					loadErrorLabel="Provision Web"
+					rootTabLabel="Provision Wiki"
+					loadErrorLabel="Provision Wiki"
 					itemLabelPlural="Provisions"
 					showItemsLabel="Show Provisions"
 					showItemNodes={true}
