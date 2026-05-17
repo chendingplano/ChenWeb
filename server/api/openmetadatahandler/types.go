@@ -6,6 +6,7 @@ type config struct {
 	DisplayName    string
 	SSOMode        string
 	BearerToken    string
+	AdminToken     string
 }
 
 type CurrentUser struct {
@@ -23,6 +24,7 @@ type SessionResponse struct {
 	UserID           string   `json:"user_id"`
 	SSOMode          string   `json:"sso_mode"`
 	Capabilities     []string `json:"capabilities"`
+	ProvisionStatus  string   `json:"provision_status,omitempty"`
 	AuthBoundaryNote string   `json:"auth_boundary_note,omitempty"`
 	Message          string   `json:"message,omitempty"`
 }

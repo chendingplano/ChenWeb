@@ -412,6 +412,91 @@ func TestLoadConfigRequiresBearerTokenForSessionBootstrap(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAcceptsTokenBridgeMode(t *testing.T) {
+	t.Setenv("OPENMETADATA_UPSTREAM_URL", "http://localhost:8585")
+	t.Setenv("OPENMETADATA_SSO_MODE", "token-bridge")
+	t.Setenv("OPENMETADATA_ADMIN_TOKEN", "admin-jwt")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("expected token-bridge mode to be accepted, got error: %v", err)
+	}
+	if cfg.SSOMode != "token-bridge" {
+		t.Fatalf("expected sso mode token-bridge, got %q", cfg.SSOMode)
+	}
+	if cfg.AdminToken != "admin-jwt" {
+		t.Fatalf("expected admin token admin-jwt, got %q", cfg.AdminToken)
+	}
+}
+
+func TestLoadConfigRequiresAdminTokenForTokenBridge(t *testing.T) {
+	t.Setenv("OPENMETADATA_UPSTREAM_URL", "http://localhost:8585")
+	t.Setenv("OPENMETADATA_SSO_MODE", "token-bridge")
+	_ = os.Unsetenv("OPENMETADATA_ADMIN_TOKEN")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("expected token-bridge mode without admin token to fail")
+	}
+}
+
+func TestGetSessionReturnsTokenBridgeSSOMode(t *testing.T) {
+	t.Setenv("OPENMETADATA_UPSTREAM_URL", "http://localhost:8585")
+	t.Setenv("OPENMETADATA_SSO_MODE", "token-bridge")
+	t.Setenv("OPENMETADATA_ADMIN_TOKEN", "admin-jwt")
+
+	originalResolver := resolveCurrentUser
+	t.Cleanup(func() { resolveCurrentUser = originalResolver })
+	resolveCurrentUser = func(c echo.Context, loc string) (*CurrentUser, bool) {
+		return &CurrentUser{
+			UserID:      "user-tb-1",
+			Email:       "tom@example.com",
+			DisplayName: "Tom",
+		}, true
+	}
+
+	e := newEcho()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/integrations/openmetadata/session", nil)
+	req.Host = "chenweb.local:8080"
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := GetSession(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp SessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.SSOMode != "token-bridge" {
+		t.Fatalf("expected sso mode token-bridge, got %q", resp.SSOMode)
+	}
+}
+
+func TestProxyInjectsAdminTokenForTokenBridge(t *testing.T) {
+	t.Setenv("OPENMETADATA_PUBLIC_BASE_PATH", "/integrations/openmetadata/")
+	t.Setenv("OPENMETADATA_UPSTREAM_URL", "http://example.invalid")
+	t.Setenv("OPENMETADATA_SSO_MODE", "token-bridge")
+	t.Setenv("OPENMETADATA_ADMIN_TOKEN", "bridge-token")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/integrations/openmetadata/api/v1/tables", nil)
+	req.Header.Set("Authorization", "Bearer should-be-replaced")
+	rewriteRequest(req, cfg)
+
+	if got := req.Header.Get("Authorization"); got != "Bearer bridge-token" {
+		t.Fatalf("expected injected admin token Bearer bridge-token, got %q", got)
+	}
+}
+
 func TestRewriteOpenMetadataHTMLRewritesRootAssetURLs(t *testing.T) {
 	const original = `
 <script>window.BASE_PATH = '/';</script>
@@ -424,7 +509,7 @@ func TestRewriteOpenMetadataHTMLRewritesRootAssetURLs(t *testing.T) {
 <link rel="icon" href="/favicons/favicon-32x32.png">
 `
 
-	got := rewriteOpenMetadataHTML(original, "/integrations/openmetadata/", "")
+	got := rewriteOpenMetadataHTML(original, "/integrations/openmetadata/", "", "")
 
 	expectedSnippets := []string{
 		"window.BASE_PATH = '/integrations/openmetadata/';",
@@ -458,7 +543,7 @@ images.forEach((image) => {
 </script>
 `
 
-	got := rewriteOpenMetadataHTML(original, "/integrations/openmetadata/", "")
+	got := rewriteOpenMetadataHTML(original, "/integrations/openmetadata/", "", "")
 
 	if strings.Contains(got, "governance.png") {
 		t.Fatalf("expected governance preload to be removed, got %s", got)
@@ -534,8 +619,56 @@ func TestRewriteHTMLResponseHandlesGzipEncodedHTML(t *testing.T) {
 	}
 }
 
+func TestInjectSessionBootstrapWritesTokenToOMStorage(t *testing.T) {
+	html := `<html><head></head><body><div id="root"></div></body></html>`
+	got := rewriteOpenMetadataHTML(html, "/integrations/openmetadata/", "", "my-admin-jwt")
+
+	if !strings.Contains(got, `id="chenweb-om-sso"`) {
+		t.Fatalf("expected session bootstrap script, got %s", got)
+	}
+	if !strings.Contains(got, `"my-admin-jwt"`) {
+		t.Fatalf("expected admin token in session bootstrap script, got %s", got)
+	}
+	if !strings.Contains(got, `AppDataStore`) {
+		t.Fatalf("expected OM IndexedDB database name in script, got %s", got)
+	}
+	if !strings.Contains(got, `primary`) {
+		t.Fatalf("expected OM token key 'primary' in script, got %s", got)
+	}
+}
+
+func TestInjectSessionBootstrapSkippedWhenNoToken(t *testing.T) {
+	html := `<html><head></head><body><div id="root"></div></body></html>`
+	got := rewriteOpenMetadataHTML(html, "/integrations/openmetadata/", "", "")
+
+	if strings.Contains(got, `id="chenweb-om-sso"`) {
+		t.Fatalf("expected no session bootstrap script when admin token is empty, got %s", got)
+	}
+}
+
+func TestSessionBootstrapHidesLogoutInTokenBridge(t *testing.T) {
+	html := `<html><head></head><body><div id="root"></div></body></html>`
+	got := rewriteOpenMetadataHTML(html, "/integrations/openmetadata/", "", "admin-jwt")
+
+	if !strings.Contains(got, `id="chenweb-om-hide-logout"`) {
+		t.Fatalf("expected logout-hiding style when admin token is set, got %s", got)
+	}
+	if !strings.Contains(got, `[data-testid="app-bar-item-logout"]{display:none !important;}`) {
+		t.Fatalf("expected logout selector rule, got %s", got)
+	}
+}
+
+func TestNoLogoutStyleWithoutToken(t *testing.T) {
+	html := `<html><head></head><body><div id="root"></div></body></html>`
+	got := rewriteOpenMetadataHTML(html, "/integrations/openmetadata/", "", "")
+
+	if strings.Contains(got, `chenweb-om-hide-logout`) {
+		t.Fatalf("expected no logout-hiding style for non-token-bridge mode, got %s", got)
+	}
+}
+
 func TestRewriteOpenMetadataHTMLInjectsDarkThemeBootstrap(t *testing.T) {
-	got := rewriteOpenMetadataHTML(`<html><head></head><body><div id="root"></div></body></html>`, "/integrations/openmetadata/", "dark")
+	got := rewriteOpenMetadataHTML(`<html><head></head><body><div id="root"></div></body></html>`, "/integrations/openmetadata/", "dark", "")
 
 	expectedSnippets := []string{
 		`id="chenweb-openmetadata-theme"`,

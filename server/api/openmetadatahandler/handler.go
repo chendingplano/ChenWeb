@@ -1,11 +1,14 @@
 package openmetadatahandler
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -18,6 +21,7 @@ var allowedSSOModes = map[string]bool{
 	defaultSSOMode:      true,
 	"shared-idp":        true,
 	"session-bootstrap": true,
+	"token-bridge":      true,
 }
 
 var resolveCurrentUser = func(c echo.Context, loc string) (*CurrentUser, bool) {
@@ -65,24 +69,41 @@ func GetSession(c echo.Context) error {
 		user.DisplayName = cfg.DisplayName
 	}
 
+	provisionStatus := provisionUser(c.Request().Context(), cfg, user)
+
 	return c.JSON(http.StatusOK, SessionResponse{
-		Status:        true,
-		LaunchURL:     cfg.PublicBasePath,
-		ProxyBasePath: cfg.PublicBasePath,
-		CallbackURL:   callbackURLForRequest(c.Request(), cfg),
-		DisplayName:   cfg.DisplayName,
-		UserID:        user.UserID,
-		SSOMode:       cfg.SSOMode,
+		Status:          true,
+		LaunchURL:       cfg.PublicBasePath,
+		ProxyBasePath:   cfg.PublicBasePath,
+		CallbackURL:     callbackURLForRequest(c.Request(), cfg),
+		DisplayName:     cfg.DisplayName,
+		UserID:          user.UserID,
+		SSOMode:         cfg.SSOMode,
+		ProvisionStatus: provisionStatus,
 		Capabilities: []string{
 			"embedded_ui",
 			"open_in_new_tab",
 			"reload",
 		},
-		// ChenWeb is the current access gate. Full production SSO still needs
-		// stronger upstream identity wiring such as shared IdP exchange or a
-		// server-side OpenMetadata session bootstrap flow.
 		AuthBoundaryNote: "ChenWeb gates access to the embedded proxy path; production SSO may still require shared IdP exchange or server-side OpenMetadata session bootstrap.",
 	})
+}
+
+func provisionUser(ctx context.Context, cfg config, user *CurrentUser) string {
+	if cfg.SSOMode != "token-bridge" || cfg.AdminToken == "" {
+		return "skipped"
+	}
+	if userProvisionCache.isProvisioned(user.UserID) {
+		return "provisioned"
+	}
+	provCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := EnsureOpenMetadataUser(provCtx, cfg.AdminToken, cfg.UpstreamURL, user); err != nil {
+		slog.WarnContext(ctx, "openmetadata user provisioning failed", "user_id", user.UserID, "email", user.Email, "error", err)
+		return "error"
+	}
+	userProvisionCache.markProvisioned(user.UserID)
+	return "provisioned"
 }
 
 func loadConfig() (config, error) {
@@ -104,6 +125,10 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	adminToken, err := resolveAdminToken(ssoMode, os.Getenv("OPENMETADATA_ADMIN_TOKEN"))
+	if err != nil {
+		return config{}, err
+	}
 
 	return config{
 		UpstreamURL:    upstreamURL,
@@ -111,6 +136,7 @@ func loadConfig() (config, error) {
 		DisplayName:    displayName,
 		SSOMode:        ssoMode,
 		BearerToken:    bearerToken,
+		AdminToken:     adminToken,
 	}, nil
 }
 
@@ -134,7 +160,7 @@ func normalizeSSOMode(mode string) (string, error) {
 		return defaultSSOMode, nil
 	}
 	if !allowedSSOModes[mode] {
-		return "", fmt.Errorf("OPENMETADATA_SSO_MODE must be one of: proxy-only, shared-idp, session-bootstrap")
+		return "", fmt.Errorf("OPENMETADATA_SSO_MODE must be one of: proxy-only, shared-idp, session-bootstrap, token-bridge")
 	}
 	return mode, nil
 }
@@ -146,6 +172,17 @@ func resolveBearerToken(ssoMode string, token string) (string, error) {
 	}
 	if token == "" {
 		return "", fmt.Errorf("OPENMETADATA_BEARER_TOKEN is required when OPENMETADATA_SSO_MODE=session-bootstrap")
+	}
+	return token, nil
+}
+
+func resolveAdminToken(ssoMode string, token string) (string, error) {
+	token = strings.TrimSpace(token)
+	if ssoMode != "token-bridge" {
+		return token, nil
+	}
+	if token == "" {
+		return "", fmt.Errorf("OPENMETADATA_ADMIN_TOKEN is required when OPENMETADATA_SSO_MODE=token-bridge")
 	}
 	return token, nil
 }

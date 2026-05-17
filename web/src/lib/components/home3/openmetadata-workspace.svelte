@@ -15,6 +15,7 @@
 		user_id: string;
 		sso_mode: string;
 		capabilities: string[];
+		provision_status?: string;
 		auth_boundary_note?: string;
 		message?: string;
 	};
@@ -54,7 +55,13 @@
 		return url.toString();
 	});
 
+	const SSO_LOG = '[ChenWeb-OM-SSO]';
+	function ssoLog(...args: unknown[]) {
+		console.log(SSO_LOG, '[workspace]', ...args);
+	}
+
 	onMount(async () => {
+		ssoLog('OpenMetadata workspace mounted (Tools => OpenMetadata clicked)');
 		applyOpenMetadataTheme(darkMode ? 'dark' : 'light');
 		hasAppliedInitialTheme = true;
 		await loadSession();
@@ -78,14 +85,22 @@
 		loading = true;
 		loadError = '';
 		try {
+			ssoLog('fetching /api/v1/integrations/openmetadata/session');
 			const res = await fetch('/api/v1/integrations/openmetadata/session', {
 				credentials: 'same-origin'
 			});
 			if (!res.ok) {
 				const message = await readErrorMessage(res);
+				ssoLog('session fetch failed', res.status, message);
 				throw new Error(message);
 			}
 			session = (await res.json()) as SessionResponse;
+			ssoLog('session response', {
+				sso_mode: session.sso_mode,
+				provision_status: session.provision_status,
+				launch_url: session.launch_url,
+				user_id: session.user_id
+			});
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : 'Failed to start OpenMetadata';
 			session = null;
@@ -152,6 +167,9 @@
 							{#if loadError}
 								<WifiOffIcon class="h-3 w-3" />
 								Disconnected
+							{:else if session?.sso_mode === 'token-bridge'}
+								<WifiIcon class="h-3 w-3" style="color:{success};" />
+								SSO active
 							{:else}
 								<WifiIcon class="h-3 w-3" style="color:{success};" />
 								Session ready
@@ -196,9 +214,9 @@
 		{#if loading}
 			<div class="px-5 py-12" style="background:{pageBg}; color:{textSecondary};">
 				<div class="mx-auto max-w-xl rounded-xl px-5 py-6" style="background:{surface2}; border:1px solid {borderColor};">
-					<div style="font-size:14px; font-weight:600; color:{textPrimary};">Starting OpenMetadata</div>
+					<div style="font-size:14px; font-weight:600; color:{textPrimary};">Connecting to OpenMetadata</div>
 					<p style="font-size:13px; line-height:1.6; margin-top:6px;">
-						ChenWeb is requesting a session and preparing the embedded workspace.
+						ChenWeb is verifying your identity and preparing a seamless session.
 					</p>
 				</div>
 			</div>
@@ -241,12 +259,20 @@
 						<span style="color:{textSecondary};">SSO mode</span>
 						<code style="color:{textPrimary};">{session.sso_mode}</code>
 					</div>
+					{#if session.sso_mode === 'token-bridge' && session.provision_status}
+						<div class="flex items-center gap-2">
+							<span style="color:{textSecondary};">Identity</span>
+							<code style="color:{session.provision_status === 'provisioned' ? success : textMuted};">
+								{session.provision_status}
+							</code>
+						</div>
+					{/if}
 					<div class="flex items-center gap-2">
 						<span style="color:{textSecondary};">Capabilities</span>
 						<code style="color:{textPrimary};">{session.capabilities.join(', ')}</code>
 					</div>
 				</div>
-				{#if session.auth_boundary_note}
+				{#if session.auth_boundary_note && session.sso_mode !== 'token-bridge'}
 					<div
 						class="px-5 py-3"
 						style="border-bottom:1px solid {borderColor}; background:{surface2}; color:{textSecondary}; font-size:12px; line-height:1.55;"
@@ -259,6 +285,7 @@
 					src={iframeSrc}
 					class="block w-full"
 					style="height:calc(100vh - 370px); min-height:720px; border:0; background:white;"
+					onload={() => ssoLog('iframe loaded', iframeSrc)}
 				></iframe>
 			</div>
 		{/if}
