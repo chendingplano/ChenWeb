@@ -192,6 +192,27 @@
 	let rootId = $derived(`${mode}-root`);
 
 	// --- Graph nodes (unified type) ---
+	let inspectorWidth = $state(360);
+	let inspectorResizing = $state(false);
+	let inspectorResizeStartX = 0;
+	let inspectorResizeStartWidth = 0;
+
+	function startInspectorResize(e: PointerEvent) {
+		e.preventDefault();
+		inspectorResizeStartX = e.clientX;
+		inspectorResizeStartWidth = inspectorWidth;
+		inspectorResizing = true;
+		window.addEventListener('pointermove', onInspectorResizeMove);
+		window.addEventListener('pointerup', onInspectorResizeEnd, { once: true });
+	}
+	function onInspectorResizeMove(e: PointerEvent) {
+		inspectorWidth = Math.max(220, Math.min(600, inspectorResizeStartWidth - (e.clientX - inspectorResizeStartX)));
+	}
+	function onInspectorResizeEnd() {
+		inspectorResizing = false;
+		window.removeEventListener('pointermove', onInspectorResizeMove);
+	}
+
 	let nodes = $state<GraphCategoryNode[]>([]);
 	let tabs = $state<GraphTab[]>(makeInitialTabs());
 	let activeTabId = $state(mode === 'summary' ? 'summary-graph' : 'topic-graph');
@@ -1938,6 +1959,7 @@
 				<div class="graph-workspace">
 					<div
 						class="graph-stage"
+						style="flex:1; min-width:0;"
 						class:can-pan={graphCanPan}
 						class:is-panning={stagePointerDown && !miniMapDragging}
 						role="presentation"
@@ -2194,7 +2216,14 @@
 						{/if}
 					</div>
 
-					<div class="inspector">
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div
+						class="inspector-resize-handle"
+						class:is-resizing={inspectorResizing}
+						onpointerdown={startInspectorResize}
+					></div>
+
+					<div class="inspector" style="width:{inspectorWidth}px; flex-shrink:0;">
 						<div class="eyebrow">Node Inspector</div>
 						{#if selectedNode}
 							<div class="inspector-card">
@@ -2554,11 +2583,9 @@
 	}
 
 	.graph-workspace {
-		display: grid;
+		display: flex;
 		min-height: 0;
 		flex: 1;
-		grid-template-columns: minmax(0, 1.45fr) 360px;
-		gap: 0;
 	}
 
 	.graph-stage,
@@ -2568,10 +2595,29 @@
 	}
 
 	.graph-stage {
+		flex: 1;
+		min-width: 0;
 		position: relative;
 		overflow: hidden;
 		padding: 0.85rem 0.75rem 0.75rem;
 		cursor: default;
+	}
+
+	.inspector-resize-handle {
+		width: 4px;
+		flex-shrink: 0;
+		cursor: col-resize;
+		background: transparent;
+		transition: background 150ms;
+		user-select: none;
+		touch-action: none;
+		border-left: 1px solid var(--border);
+		margin-right: -1px;
+	}
+
+	.inspector-resize-handle:hover,
+	.inspector-resize-handle.is-resizing {
+		background: rgba(129, 140, 248, 0.45);
 	}
 
 	.graph-stage.can-pan {
@@ -2794,6 +2840,7 @@
 	}
 
 	.inspector {
+		flex-shrink: 0;
 		border-left: 1px solid rgba(148, 163, 184, 0.12);
 		padding: 1rem;
 		background: rgba(2, 6, 23, 0.16);
@@ -2872,7 +2919,16 @@
 
 	@media (max-width: 980px) {
 		.graph-workspace {
-			grid-template-columns: minmax(0, 1fr);
+			flex-direction: column;
+		}
+
+		.inspector {
+			width: 100% !important;
+			flex-shrink: 1;
+		}
+
+		.inspector-resize-handle {
+			display: none;
 		}
 
 		.mini-map {

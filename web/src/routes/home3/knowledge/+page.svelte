@@ -92,7 +92,7 @@
 		},
 		{
 			id: 'kb-doc-wiki',
-			label: 'Document Wiki',
+			label: 'Subject Wiki',
 			description: 'Browse document knowledge',
 			icon: BookOpenIcon,
 			children: [
@@ -164,6 +164,28 @@
 	];
 
 	let menuCollapsed = $state(false);
+	let menuWidth = $state(280);
+	let menuResizing = $state(false);
+	let menuResizeStartX = 0;
+	let menuResizeStartWidth = 0;
+
+	function startMenuResize(e: PointerEvent) {
+		if (menuCollapsed) return;
+		e.preventDefault();
+		menuResizeStartX = e.clientX;
+		menuResizeStartWidth = menuWidth;
+		menuResizing = true;
+		window.addEventListener('pointermove', onMenuResizeMove);
+		window.addEventListener('pointerup', onMenuResizeEnd, { once: true });
+	}
+	function onMenuResizeMove(e: PointerEvent) {
+		menuWidth = Math.max(180, Math.min(480, menuResizeStartWidth + (e.clientX - menuResizeStartX)));
+	}
+	function onMenuResizeEnd() {
+		menuResizing = false;
+		window.removeEventListener('pointermove', onMenuResizeMove);
+	}
+
 	let darkMode = $derived(page.url.searchParams.get('dark') !== '0');
 	let initialSection = $derived(
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
@@ -257,7 +279,13 @@
 	<aside
 		class="kb-menu flex flex-col overflow-hidden"
 		class:menu-collapsed={menuCollapsed}
-		style="background:{panelBg}; border-right:1px solid {borderColor};"
+		style="
+			background:{panelBg};
+			border-right:1px solid {borderColor};
+			width:{menuCollapsed ? 56 : menuWidth}px;
+			flex: 0 0 {menuCollapsed ? 56 : menuWidth}px;
+			transition:{menuResizing ? 'none' : 'width 200ms ease, flex-basis 200ms ease'};
+		"
 	>
 		<!-- Header: matches nav-rail style -->
 		<div
@@ -420,6 +448,15 @@
 		</nav>
 	</aside>
 
+	{#if !menuCollapsed}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="menu-resize-handle"
+			class:is-resizing={menuResizing}
+			onpointerdown={startMenuResize}
+		></div>
+	{/if}
+
 	<main class="flex min-w-0 flex-1 flex-col overflow-hidden" style="background:{contentBg};">
 		<div class="min-h-0 flex-1 overflow-hidden">
 			{#if needsActiveStore && !knowledgeStoreState.activeStore}
@@ -541,14 +578,24 @@
 	}
 
 	.kb-menu {
-		width: 280px;
-		flex: 0 0 280px;
-		transition: width 200ms ease, flex-basis 200ms ease;
+		flex-shrink: 0;
 	}
 
-	.kb-menu.menu-collapsed {
-		width: 56px;
-		flex: 0 0 56px;
+	.menu-resize-handle {
+		width: 4px;
+		flex-shrink: 0;
+		cursor: col-resize;
+		margin-left: -1px;
+		background: transparent;
+		transition: background 150ms;
+		user-select: none;
+		touch-action: none;
+		z-index: 10;
+	}
+
+	.menu-resize-handle:hover,
+	.menu-resize-handle.is-resizing {
+		background: rgba(129, 140, 248, 0.45);
 	}
 
 	@media (max-width: 760px) {

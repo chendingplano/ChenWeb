@@ -42,12 +42,12 @@ func ListSummaryGraph(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	summaryTreeDir := strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR"))
+	summaryTreeDir := strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
 	if summaryTreeDir == "" {
-		logger.Error("missing SUMMARY_TREE_DIR")
+		logger.Error("missing ARTIFACT_WEB_DIR")
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
-			ErrorMsg: "missing SUMMARY_TREE_DIR (CWB_KB_SG_010)",
+			ErrorMsg: "missing ARTIFACT_WEB_DIR (CWB_KB_SG_010)",
 		})
 	}
 
