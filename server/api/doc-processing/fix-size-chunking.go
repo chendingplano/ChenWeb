@@ -67,7 +67,6 @@ type FixedSizeChunkingService struct {
 	Logger                     ApiTypes.JimoLogger
 	Now                        func() time.Time
 	ChunkDir                   string
-	TreeRootDir                string
 	ArtifactWebDir             string
 	ChunkSize                  int
 	OverlapPercent             int
@@ -192,7 +191,6 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 		Logger:                     logger,
 		Now:                        time.Now,
 		ChunkDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		TreeRootDir:                strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR")),
 		ArtifactWebDir:             strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 		ChunkSize:                  envInt("CHUNK_SIZE", DefaultChunkSize, 1),
 		OverlapPercent:             envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
@@ -238,11 +236,6 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
 		procErr := errors.New("(MID_26042003) missing ARTIFACT_DIR")
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
-		return procErr
-	}
-	if strings.TrimSpace(s.TreeRootDir) == "" {
-		procErr := errors.New("(MID_26042014) missing TOPIC_TREE_ROOT_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
@@ -307,11 +300,6 @@ func (s *FixedSizeChunkingService) HandleBlockInput(ctx context.Context, recordI
 	}
 	if strings.TrimSpace(s.ChunkDir) == "" {
 		procErr := errors.New("(MID_26050605) missing ARTIFACT_DIR")
-		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
-		return procErr
-	}
-	if strings.TrimSpace(s.TreeRootDir) == "" {
-		procErr := errors.New("(MID_26050606) missing TOPIC_TREE_ROOT_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
@@ -410,7 +398,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
-	if err := indexTopicsInTreeDir(s.Logger, s.TreeRootDir, rec.ID, topics); err != nil {
+	if err := indexTopicsInTreeDir(s.Logger, s.ArtifactWebDir, rec.ID, topics); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
@@ -536,7 +524,6 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 	s.Logger.Info("chunking completed",
 		"record_id", rec.ID,
 		"chunk_dir", s.ChunkDir,
-		"tree_root_dir", s.TreeRootDir,
 		"num_pages", numPages,
 		"num_lines", numLines,
 		"num_chunks", len(chunks),

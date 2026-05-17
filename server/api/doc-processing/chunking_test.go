@@ -274,7 +274,6 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	svc := NewFixedSizeChunkingService(st, ex, nil)
 	svc.Logger = logger
 	svc.ChunkDir = tmp
-	svc.TreeRootDir = treeRoot
 	svc.ArtifactWebDir = t.TempDir()
 	svc.ChunkSize = 25
 	svc.OverlapPercent = 50
@@ -425,7 +424,6 @@ func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 	st := &fakeStore{rec: InputRecord{ID: 1001, StatusRaw: "[]"}}
 	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = t.TempDir()
-	svc.TreeRootDir = t.TempDir()
 	svc.ArtifactWebDir = t.TempDir()
 	svc.ChunkSize = 2
 	svc.OverlapPercent = 0
@@ -490,49 +488,9 @@ func TestService_HandleInput_MissingChunkDir(t *testing.T) {
 	}
 }
 
-func TestService_HandleInput_MissingTreeRootDir(t *testing.T) {
-	st := &fakeStore{rec: InputRecord{
-		ID:              2003,
-		StatusRaw:       "[]",
-		ParserName:      "opendata",
-		StagingFilename: "sample.pdf",
-	}}
-	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
-	svc.ChunkDir = t.TempDir()
-	svc.TreeRootDir = ""
-	svc.ChunkSize = 2
-	svc.OverlapPercent = 0
-	svc.ModelErr = nil
-	svc.PromptErr = nil
-	svc.ModelName = "topic-model"
-	svc.PromptText = "prompt"
-	svc.ArtifactWebDir = t.TempDir()
-	svc.SummaryModelErr = nil
-	svc.SummaryPromptErr = nil
-	svc.SummaryModelName = "summary-model"
-	svc.SummaryPromptText = "summary prompt"
-
-	err := svc.HandleInput(context.Background(), 2003, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
-	if err == nil {
-		t.Fatalf("expected error when TOPIC_TREE_ROOT_DIR is empty")
-	}
-	if !strings.Contains(err.Error(), "missing TOPIC_TREE_ROOT_DIR") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if st.insertCalls != 0 {
-		t.Fatalf("InsertChunkRun calls=%d, want 0", st.insertCalls)
-	}
-	if st.updateCalls != 1 {
-		t.Fatalf("UpdateInputStatus calls=%d, want 1", st.updateCalls)
-	}
-	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing TOPIC_TREE_ROOT_DIR") {
-		t.Fatalf("expected persisted error for missing TOPIC_TREE_ROOT_DIR, got %v", st.updatedError)
-	}
-}
 
 func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 	tmp := t.TempDir()
-	topicTreeRoot := t.TempDir()
 	summaryTreeRoot := t.TempDir()
 	input := strings.Join([]string{
 		"1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tAlpha",
@@ -567,7 +525,6 @@ func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 	}
 	svc := NewFixedSizeChunkingService(st, ex, nil)
 	svc.ChunkDir = tmp
-	svc.TreeRootDir = topicTreeRoot
 	svc.ArtifactWebDir = summaryTreeRoot
 	svc.ChunkSize = 22
 	svc.OverlapPercent = 0
@@ -632,7 +589,6 @@ func TestService_HandleInput_SummaryGenerationFailure(t *testing.T) {
 	}}
 	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = t.TempDir()
-	svc.TreeRootDir = t.TempDir()
 	svc.ArtifactWebDir = t.TempDir()
 	svc.ChunkSize = 10
 	svc.OverlapPercent = 0

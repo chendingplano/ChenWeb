@@ -128,7 +128,7 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 	}}
 	svc := NewSemanticChunkingService(st, ex, nil)
 	svc.ChunkDir = tmp
-	svc.TreeRootDir = treeRoot
+	svc.ArtifactWebDir = treeRoot
 	svc.FileBlockSize = 2
 	svc.ModelErr = nil
 	svc.ModelName = "topic-model"
@@ -160,7 +160,7 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 	if err != nil {
 		t.Fatalf("read tree leaf: %v", err)
 	}
-	if !strings.Contains(string(treeBS), `topic: "Equation"`) {
+	if !strings.Contains(string(treeBS), `topic_desc: "Equation"`) {
 		t.Fatalf("tree content missing expected topic: %q", string(treeBS))
 	}
 	if _, err := os.Stat(filepath.Join(tmp, "7", "7523", "document_overview")); !os.IsNotExist(err) {
@@ -374,7 +374,7 @@ func TestSemanticChunkingService_HandleInput_LLMErrorPersistsFailure(t *testing.
 	ex := &fakeSemanticExtractor{err: context.DeadlineExceeded}
 	svc := NewSemanticChunkingService(st, ex, nil)
 	svc.ChunkDir = t.TempDir()
-	svc.TreeRootDir = t.TempDir()
+	svc.ArtifactWebDir = t.TempDir()
 	svc.FileBlockSize = 2
 	svc.ModelErr = nil
 
@@ -405,7 +405,7 @@ func TestSemanticChunkingService_HandleInput_LLMErrorPersistsFailure(t *testing.
 	}
 }
 
-func TestSemanticChunkingService_HandleInput_MissingTreeRootDir(t *testing.T) {
+func TestSemanticChunkingService_HandleInput_MissingArtifactWebDir(t *testing.T) {
 	st := &fakeStore{rec: InputRecord{
 		ID:              9002,
 		StatusRaw:       "[]",
@@ -414,7 +414,7 @@ func TestSemanticChunkingService_HandleInput_MissingTreeRootDir(t *testing.T) {
 	}}
 	svc := NewSemanticChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = t.TempDir()
-	svc.TreeRootDir = ""
+	svc.ArtifactWebDir = ""
 	svc.FileBlockSize = 2
 	svc.ModelErr = nil
 	svc.PromptErr = nil
@@ -423,9 +423,9 @@ func TestSemanticChunkingService_HandleInput_MissingTreeRootDir(t *testing.T) {
 
 	err := svc.HandleInput(context.Background(), 9002, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
 	if err == nil {
-		t.Fatalf("expected error when TOPIC_TREE_ROOT_DIR is empty")
+		t.Fatalf("expected error when ARTIFACT_WEB_DIR is empty")
 	}
-	if !strings.Contains(err.Error(), "missing TOPIC_TREE_ROOT_DIR") {
+	if !strings.Contains(err.Error(), "missing ARTIFACT_WEB_DIR") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if st.insertCalls != 0 {
@@ -434,8 +434,8 @@ func TestSemanticChunkingService_HandleInput_MissingTreeRootDir(t *testing.T) {
 	if st.updateCalls != 1 {
 		t.Fatalf("UpdateInputStatus calls=%d, want 1", st.updateCalls)
 	}
-	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing TOPIC_TREE_ROOT_DIR") {
-		t.Fatalf("expected persisted missing tree root error, got %v", st.updatedError)
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, "missing ARTIFACT_WEB_DIR") {
+		t.Fatalf("expected persisted missing artifact web dir error, got %v", st.updatedError)
 	}
 }
 

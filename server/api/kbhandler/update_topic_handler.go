@@ -95,7 +95,7 @@ func UpdateRecordTopic(c echo.Context) error {
 		})
 	}
 
-	topicTreeDir := strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR"))
+	topicTreeDir := strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
 	if topicTreeDir != "" {
 		if err := updateTopicCategoryIndex(logger, topicTreeDir, req, oldCategoryPaths, topicLines); err != nil {
 			logger.Warn("update topic category index failed", "err", err)
@@ -294,7 +294,7 @@ func topicJSONStringArray(items []string) string {
 	return string(b)
 }
 
-// updateTopicCategoryIndex adjusts the topics.txt index files in TOPIC_TREE_ROOT_DIR when
+// updateTopicCategoryIndex adjusts the topics.txt index files in ARTIFACT_WEB_DIR when
 // category paths change.
 func updateTopicCategoryIndex(logger ApiTypes.JimoLogger, topicTreeDir string, req updateRecordTopicRequest, oldPaths []string, topicLines []string) error {
 	oldSet := stringSliceToSet(oldPaths)

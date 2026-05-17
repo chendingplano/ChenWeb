@@ -46,7 +46,6 @@ func TestChunkingProcessor_HandleEvent_ReturnsServiceError(t *testing.T) {
 
 func TestChunkingProcessor_HandleEvent_BlockInputFallbackWritesChunks(t *testing.T) {
 	tmp := t.TempDir()
-	treeRoot := t.TempDir()
 	summaryRoot := t.TempDir()
 
 	store := &fakeStore{rec: InputRecord{
@@ -72,7 +71,6 @@ func TestChunkingProcessor_HandleEvent_BlockInputFallbackWritesChunks(t *testing
 	}
 	service := NewFixedSizeChunkingService(store, extractor, nil)
 	service.ChunkDir = tmp
-	service.TreeRootDir = treeRoot
 	service.ArtifactWebDir = summaryRoot
 	service.ChunkSize = 100
 	service.OverlapPercent = 0

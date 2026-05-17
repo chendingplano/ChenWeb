@@ -126,7 +126,7 @@ func graphFilterRootDir(mode string) string {
 	if mode == "summary" {
 		return strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR"))
 	}
-	return strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR"))
+	return strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
 }
 
 func newGraphFilterEmbedder(mode string) graphFilterEmbedderConfig {

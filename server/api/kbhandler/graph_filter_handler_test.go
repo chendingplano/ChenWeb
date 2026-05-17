@@ -94,7 +94,7 @@ api_key = "test-key"
 base_url = %q
 timeout_sec = 5
 `, embeddingServer.URL))
-	t.Setenv("TOPIC_TREE_ROOT_DIR", root)
+	t.Setenv("ARTIFACT_WEB_DIR", root)
 	t.Setenv("TOPIC_EMBEDDING_MODEL_NAME", "topic-embedding")
 	t.Setenv("MODELS_FILE", modelsPath)
 

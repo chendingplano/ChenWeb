@@ -40,12 +40,12 @@ func ListTopicGraph(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	topicTreeDir := strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR"))
+	topicTreeDir := strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
 	if topicTreeDir == "" {
-		logger.Error("missing TOPIC_TREE_ROOT_DIR")
+		logger.Error("missing ARTIFACT_WEB_DIR")
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
-			ErrorMsg: "missing TOPIC_TREE_ROOT_DIR (CWB_KB_TG_010)",
+			ErrorMsg: "missing ARTIFACT_WEB_DIR (CWB_KB_TG_010)",
 		})
 	}
 

@@ -50,11 +50,11 @@ func GetTopicCategory(c echo.Context) error {
 	defer rc.Close()
 	logger := rc.GetLogger()
 
-	topicTreeDir := strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR"))
+	topicTreeDir := strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
 	if topicTreeDir == "" {
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,
-			ErrorMsg: "missing TOPIC_TREE_ROOT_DIR (CWB_KB_TCAT_010)",
+			ErrorMsg: "missing ARTIFACT_WEB_DIR (CWB_KB_TCAT_010)",
 		})
 	}
 
@@ -402,6 +402,9 @@ func parseTopicCategoryRefs(body []byte) []topicCategoryReference {
 		case strings.HasPrefix(line, "lines:"):
 			raw := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "lines:"), ","))
 			current.lines = parseQuotedStringArray(raw)
+		case strings.HasPrefix(line, "topic_desc:"):
+			raw := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "topic_desc:"), ","))
+			current.topicText = strings.Trim(raw, `"`)
 		case strings.HasPrefix(line, "topic:"):
 			raw := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "topic:"), ","))
 			current.topicText = strings.Trim(raw, `"`)

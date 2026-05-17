@@ -34,7 +34,7 @@ type SemanticChunkingService struct {
 	Logger                     ApiTypes.JimoLogger
 	Now                        func() time.Time
 	ChunkDir                   string
-	TreeRootDir                string
+	ArtifactWebDir             string
 	FileBlockSize              int
 	ModelRef                   string
 	ModelCfgPath               string
@@ -115,7 +115,7 @@ func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger 
 		Logger:                     logger,
 		Now:                        time.Now,
 		ChunkDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		TreeRootDir:                strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR")),
+		ArtifactWebDir:             strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 		FileBlockSize:              envInt("FILE_BLOCK_SIZE", DefaultFileBlockSize, 1),
 		ModelRef:                   modelRef,
 		ModelCfgPath:               modelCfgPath,
@@ -159,8 +159,8 @@ func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int6
 		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
-	if strings.TrimSpace(s.TreeRootDir) == "" {
-		procErr := errors.New("(MID_26051310) missing TOPIC_TREE_ROOT_DIR")
+	if strings.TrimSpace(s.ArtifactWebDir) == "" {
+		procErr := errors.New("(MID_26051310) missing ARTIFACT_WEB_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
@@ -214,8 +214,8 @@ func (s *SemanticChunkingService) HandleBlockInput(ctx context.Context, recordID
 		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
-	if strings.TrimSpace(s.TreeRootDir) == "" {
-		procErr := errors.New("(MID_26051311) missing TOPIC_TREE_ROOT_DIR")
+	if strings.TrimSpace(s.ArtifactWebDir) == "" {
+		procErr := errors.New("(MID_26051311) missing ARTIFACT_WEB_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, start, procErr)
 		return procErr
 	}
@@ -253,7 +253,7 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}
-	if err := indexTopicsInTreeDir(s.Logger, s.TreeRootDir, rec.ID, topics); err != nil {
+	if err := indexTopicsInTreeDir(s.Logger, s.ArtifactWebDir, rec.ID, topics); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}

@@ -651,14 +651,22 @@ func upsertTopicToLeafDir(leafDir string, recordID int64, topic TopicItem) error
 		}
 	}
 	filtered = append(filtered, topicsFileEntry{
-		RecordID:  recordID,
-		TopicType: topic.TopicType,
-		Lines:     formatTopicArray(topic.Lines),
-		Keywords:  formatTopicArray(topic.Keywords),
-		Topic:     sanitizeTopicText(topic.Topic),
+		RecordID:        recordID,
+		SeqNo:           topic.SeqNo,
+		TopicType:       topic.TopicType,
+		Lines:           formatTopicArray(topic.Lines),
+		Keywords:        formatTopicArray(topic.Keywords),
+		KeywordsEn:      formatTopicArray(topic.KeywordsEn),
+		TopicDesc:       sanitizeTopicText(topic.Topic),
+		TopicDescEn:     sanitizeTopicText(topic.TopicEn),
+		CategoryPaths:   formatCategoryPathEntries(topic.CategoryPathDetail),
+		CategoryPathsEn: formatCategoryPathEntries(topic.CategoryPathDetailEn),
 	})
 	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].RecordID < filtered[j].RecordID
+		if filtered[i].RecordID != filtered[j].RecordID {
+			return filtered[i].RecordID < filtered[j].RecordID
+		}
+		return filtered[i].SeqNo < filtered[j].SeqNo
 	})
 	if err := writeTopicsFileEntries(filePath, filtered); err != nil {
 		return fmt.Errorf("(MID_26050231) write %s: %w", filePath, err)
@@ -696,13 +704,18 @@ func removeTopicTreeRecord(treeRootDir string, recordID int64) error {
 	})
 }
 
-// topicsFileEntry is one topic block in a topics.txt file (spec 6.5.3).
+// topicsFileEntry is one topic block in a topics.txt file.
 type topicsFileEntry struct {
-	RecordID  int64
-	TopicType string
-	Lines     string
-	Keywords  string
-	Topic     string
+	RecordID        int64
+	SeqNo           int
+	TopicType       string
+	Lines           string
+	Keywords        string
+	KeywordsEn      string
+	TopicDesc       string
+	TopicDescEn     string
+	CategoryPaths   string
+	CategoryPathsEn string
 }
 
 // readTopicsFileEntries parses the multi-line topics.txt format (spec 6.5.3).
@@ -742,14 +755,28 @@ func parseTopicsFileEntries(data []byte) []topicsFileEntry {
 			// value may have a trailing comma: "123," or "123"
 			v := strings.TrimSuffix(strings.TrimSpace(val), ",")
 			cur.RecordID, _ = strconv.ParseInt(v, 10, 64)
+		case "topic_id":
+			v := strings.TrimSuffix(strings.TrimSpace(val), ",")
+			n, _ := strconv.Atoi(strings.Trim(v, `"`))
+			cur.SeqNo = n
 		case "topic_type":
 			cur.TopicType = unquoteSpec(val)
 		case "lines":
 			cur.Lines = val
 		case "topic_keywords":
 			cur.Keywords = val
-		case "topic":
-			cur.Topic = unquoteSpec(val)
+		case "topic_keywords_en":
+			cur.KeywordsEn = val
+		case "topic_desc":
+			cur.TopicDesc = unquoteSpec(val)
+		case "topic": // backward compat with old format
+			cur.TopicDesc = unquoteSpec(val)
+		case "topic_desc_en":
+			cur.TopicDescEn = unquoteSpec(val)
+		case "category_paths":
+			cur.CategoryPaths = val
+		case "category_paths_en":
+			cur.CategoryPathsEn = val
 		}
 	}
 	if cur != nil {
@@ -764,7 +791,8 @@ func writeTopicsFileEntries(path string, entries []topicsFileEntry) error {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString(fmt.Sprintf("record_id: %d,\n", e.RecordID))
+		b.WriteString(fmt.Sprintf("record_id: %d\n", e.RecordID))
+		b.WriteString(fmt.Sprintf("topic_id: %d\n", e.SeqNo))
 		b.WriteString(fmt.Sprintf("topic_type: %q\n", e.TopicType))
 		b.WriteString("lines: ")
 		b.WriteString(e.Lines)
@@ -772,9 +800,27 @@ func writeTopicsFileEntries(path string, entries []topicsFileEntry) error {
 		b.WriteString("topic_keywords: ")
 		b.WriteString(e.Keywords)
 		b.WriteByte('\n')
-		b.WriteString("topic: ")
-		b.WriteString(strconv.Quote(e.Topic))
+		if e.KeywordsEn != "" && e.KeywordsEn != "[]" {
+			b.WriteString("topic_keywords_en: ")
+			b.WriteString(e.KeywordsEn)
+			b.WriteByte('\n')
+		}
+		b.WriteString("topic_desc: ")
+		b.WriteString(strconv.Quote(e.TopicDesc))
 		b.WriteByte('\n')
+		if strings.TrimSpace(e.TopicDescEn) != "" {
+			b.WriteString("topic_desc_en: ")
+			b.WriteString(strconv.Quote(e.TopicDescEn))
+			b.WriteByte('\n')
+		}
+		b.WriteString("category_paths: ")
+		b.WriteString(e.CategoryPaths)
+		b.WriteByte('\n')
+		if e.CategoryPathsEn != "" && e.CategoryPathsEn != "[]" {
+			b.WriteString("category_paths_en: ")
+			b.WriteString(e.CategoryPathsEn)
+			b.WriteByte('\n')
+		}
 	}
 	return os.WriteFile(path, []byte(strings.TrimRight(b.String(), "\n")), 0o644)
 }
