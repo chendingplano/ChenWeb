@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -35,8 +36,12 @@ type ProvisionsProcessor struct {
 	FallbackModelCfgPath string
 	FallbackModelErr     error
 	FallbackModelName    string
-	BlockSize            int
-	ArtifactDir          string
+	BlockSize   int
+	PrevOverlap int
+	NextOverlap int
+	RemoveTOC   bool
+	ArtifactDir    string
+	ArtifactWebDir string
 }
 
 type ProvisionsStore interface {
@@ -72,6 +77,7 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_NAME", "EXTRACT_PROVISIONS_MODELS_FILE")
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_FALLBACK", "EXTRACT_PROVISIONS_MODELS_FILE")
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
+	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &ProvisionsProcessor{
 		InputStore:           inputStore,
 		Store:                store,
@@ -90,8 +96,12 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		FallbackModelCfgPath: fallbackModelCfgPath,
 		FallbackModelErr:     fallbackModelErr,
 		FallbackModelName:    fallbackModelCfg.ModelName,
-		BlockSize:            envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
-		ArtifactDir:          strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		BlockSize:      envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
+		PrevOverlap:    prevOverlap,
+		NextOverlap:    nextOverlap,
+		RemoveTOC:      removeTOC,
+		ArtifactDir:    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		ArtifactWebDir: strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 	}
 }
 
@@ -190,9 +200,13 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		p.Logger.Error("save provision error", "error", err, "record_id", evt.RecordID)
 		return nil
 	}
-	artifactPath, err := p.writeProvisionsArtifact(evt.RecordID, rec, outputRows)
-	if err != nil {
-		p.Logger.Error("write provision error", "error", err, "record_id", evt.RecordID)
+	if err := p.indexProvisionsInTree(evt.RecordID, outputRows); err != nil {
+		p.Logger.Error("index provision tree error", "error", err, "record_id", evt.RecordID)
+		p.persistProvisionsStatus(ctx, rec, start, err)
+		return nil
+	}
+	if err := p.writeProvisionsArtifact(evt.RecordID, rec, outputRows); err != nil {
+		p.Logger.Error("write provisions artifact error", "error", err, "record_id", evt.RecordID)
 		p.persistProvisionsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -201,7 +215,6 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		"inserted_rows", inserted,
 		"provisions_count", len(outputRows),
 		"blocks", len(blocks),
-		"artifact_path", artifactPath,
 	)
 	p.persistProvisionsStatus(ctx, rec, start, nil)
 	return nil
@@ -223,7 +236,7 @@ func (p *ProvisionsProcessor) resolveBlocks(ctx context.Context, evt LineFileGen
 		}
 		return nil, fmt.Errorf("(MID_26050529) read input file: %w", err)
 	}
-	buf, err := buildBlocks(body, p.blockSize())
+	buf, err := buildBlocks(body, p.blockSize(), p.PrevOverlap, p.NextOverlap, p.RemoveTOC)
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26050530) build blocks: %w", err)
 	}
@@ -691,43 +704,237 @@ func buildProvisionDBRecord(provision map[string]any, language string) map[strin
 	}
 }
 
-func (p *ProvisionsProcessor) writeProvisionsArtifact(recordID int64, rec DocMetadataInputRecord, rows []map[string]any) (string, error) {
+func (p *ProvisionsProcessor) indexProvisionsInTree(recordID int64, provisions []map[string]any) error {
+	dir := strings.TrimSpace(p.ArtifactWebDir)
+	if dir == "" {
+		dir = strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
+	}
+	if dir == "" {
+		return errors.New("(MID_26050560) missing ARTIFACT_WEB_DIR")
+	}
+	if recordID <= 0 {
+		return fmt.Errorf("(MID_26050561) invalid record_id: %d", recordID)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("(MID_26050562) create artifact web dir: %w", err)
+	}
+	if err := removeProvisionTreeRecord(dir, recordID); err != nil {
+		return fmt.Errorf("(MID_26050563) remove old provision tree entries for record %d: %w", recordID, err)
+	}
+	now := p.Now()
+	for _, prov := range provisions {
+		provID := int(toFloat(prov["prov_id"]))
+		if provID <= 0 {
+			continue
+		}
+		entry := fmt.Sprintf("%d_%d", recordID, provID)
+		for _, segs := range decodeProvisionCategoryPathSegments(prov["category_paths"]) {
+			if err := upsertProvisionIDToLeafDir(p.Logger, dir, segs, entry, now); err != nil {
+				return fmt.Errorf("(MID_26050564) index provision %s: %w", entry, err)
+			}
+		}
+		for _, segs := range decodeProvisionCategoryPathSegments(prov["category_paths_en"]) {
+			if err := upsertProvisionIDToLeafDir(p.Logger, dir, segs, entry, now); err != nil {
+				return fmt.Errorf("(MID_26050565) index provision %s en: %w", entry, err)
+			}
+		}
+	}
+	return nil
+}
+
+func removeProvisionTreeRecord(baseDir string, recordID int64) error {
+	prefix := strconv.FormatInt(recordID, 10) + "_"
+	return filepath.WalkDir(baseDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != "provisions.txt" {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rows := make([]string, 0)
+		for _, row := range strings.Split(string(body), "\n") {
+			row = strings.TrimSpace(row)
+			if row == "" || strings.HasPrefix(row, prefix) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+		if len(rows) == 0 {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
+		sort.Strings(rows)
+		return os.WriteFile(path, []byte(strings.Join(rows, "\n")), 0o644)
+	})
+}
+
+func upsertProvisionIDToLeafDir(_ ApiTypes.JimoLogger, baseDir string, segments []string, provisionID string, now time.Time) error {
+	if len(segments) == 0 {
+		return nil
+	}
+	currentDir := baseDir
+	for _, seg := range segments {
+		normalizedSeg := normalizeCategorySegment(seg)
+		if normalizedSeg == "" {
+			return fmt.Errorf("(MID_26050566) empty category segment for provision %s", provisionID)
+		}
+		subdir := filepath.Join(currentDir, normalizedSeg)
+		if err := os.MkdirAll(subdir, 0o755); err != nil {
+			return err
+		}
+		if err := upsertCategoryDirMetadata(subdir, seg, "provision", 0, nil, now); err != nil {
+			return err
+		}
+		currentDir = subdir
+	}
+	leaf := filepath.Join(currentDir, "provisions.txt")
+	existing := make([]string, 0)
+	if bs, err := os.ReadFile(leaf); err == nil {
+		for _, row := range strings.Split(string(bs), "\n") {
+			row = strings.TrimSpace(row)
+			if row != "" {
+				existing = append(existing, row)
+			}
+		}
+	}
+	for _, e := range existing {
+		if e == provisionID {
+			return nil
+		}
+	}
+	existing = append(existing, provisionID)
+	sort.Strings(existing)
+	return os.WriteFile(leaf, []byte(strings.Join(existing, "\n")), 0o644)
+}
+
+func decodeProvisionCategoryPathSegments(value any) [][]string {
+	if value == nil {
+		return nil
+	}
+	bs, err := json.Marshal(value)
+	if err != nil || string(bs) == "null" || string(bs) == "[]" {
+		return nil
+	}
+	type segNode struct {
+		Name string `json:"name"`
+	}
+	type pathPayload struct {
+		CategoryPath []segNode `json:"category_path"`
+	}
+	var format1 []pathPayload
+	if err := json.Unmarshal(bs, &format1); err == nil && len(format1) > 0 {
+		out := make([][]string, 0, len(format1))
+		for _, p := range format1 {
+			if len(p.CategoryPath) == 0 {
+				continue
+			}
+			names := make([]string, 0, len(p.CategoryPath))
+			for _, seg := range p.CategoryPath {
+				if name := strings.TrimSpace(seg.Name); name != "" {
+					names = append(names, name)
+				}
+			}
+			if len(names) > 0 {
+				out = append(out, names)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	var format2 [][]segNode
+	if err := json.Unmarshal(bs, &format2); err == nil {
+		out := make([][]string, 0, len(format2))
+		for _, path := range format2 {
+			names := make([]string, 0, len(path))
+			for _, seg := range path {
+				if name := strings.TrimSpace(seg.Name); name != "" {
+					names = append(names, name)
+				}
+			}
+			if len(names) > 0 {
+				out = append(out, names)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func (p *ProvisionsProcessor) writeProvisionsArtifact(recordID int64, rec DocMetadataInputRecord, provisions []map[string]any) error {
 	artifactDir := strings.TrimSpace(p.ArtifactDir)
 	if artifactDir == "" {
 		artifactDir = strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
 	}
 	if artifactDir == "" {
-		return "", errors.New("(MID_26050538) missing ARTIFACT_DIR")
+		return errors.New("(MID_26050570) missing ARTIFACT_DIR")
 	}
 	if recordID <= 0 {
-		return "", fmt.Errorf("(MID_26050539) invalid record_id: %d", recordID)
-	}
-	parserName := strings.TrimSpace(rec.ParserName)
-	if parserName == "" {
-		return "", errors.New("(MID_26050540) missing parser name")
-	}
-	root := strings.TrimSuffix(filepath.Base(strings.TrimSpace(rec.StagingFilename)), filepath.Ext(strings.TrimSpace(rec.StagingFilename)))
-	if root == "" {
-		root = strings.TrimSuffix(filepath.Base(strings.TrimSpace(rec.ResultFilename)), filepath.Ext(strings.TrimSpace(rec.ResultFilename)))
-	}
-	if root == "" {
-		root = fmt.Sprintf("record_%d", recordID)
+		return fmt.Errorf("(MID_26050571) invalid record_id: %d", recordID)
 	}
 
 	groupID := recordID / 1000
-	dir := filepath.Join(artifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("(MID_26050541) create provisions artifact dir: %w", err)
+	stagingBase := filepath.Base(strings.TrimSpace(rec.StagingFilename))
+	filenameRoot := strings.TrimSuffix(stagingBase, filepath.Ext(stagingBase))
+	if filenameRoot == "" {
+		filenameRoot = fmt.Sprintf("record_%d", recordID)
 	}
-	path := filepath.Join(dir, root+"_"+parserName+".provisions")
-	body, err := json.MarshalIndent(rows, "", "  ")
+	parserName := strings.TrimSpace(rec.ParserName)
+	if parserName == "" {
+		parserName = "default"
+	}
+
+	outDir := filepath.Join(artifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("(MID_26050572) create artifact dir: %w", err)
+	}
+
+	outPath := filepath.Join(outDir, filenameRoot+"_"+parserName+".provisions")
+	fileRecords := make([]map[string]any, 0, len(provisions))
+	for _, row := range provisions {
+		fileRecords = append(fileRecords, buildProvisionFileRecord(row))
+	}
+	bs, err := json.MarshalIndent(fileRecords, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("(MID_26050542) marshal provisions artifact: %w", err)
+		return fmt.Errorf("(MID_26050573) marshal provisions: %w", err)
 	}
-	if err := os.WriteFile(path, body, 0o644); err != nil {
-		return "", fmt.Errorf("(MID_26050543) write provisions artifact: %w", err)
+	if err := os.WriteFile(outPath, bs, 0o644); err != nil {
+		return fmt.Errorf("(MID_26050574) write provisions artifact: %w", err)
 	}
-	return path, nil
+	return nil
+}
+
+func buildProvisionFileRecord(row map[string]any) map[string]any {
+	publicInfo, _ := row["public_info"].(map[string]any)
+	return map[string]any{
+		"prov_id":           int(toFloat(row["prov_id"])),
+		"prov_name":         strings.TrimSpace(asString(row["prov_name"])),
+		"prov_name_en":      strings.TrimSpace(asString(row["prov_name_en"])),
+		"prov_type":         strings.TrimSpace(asString(publicInfo["provision_type"])),
+		"provision":         strings.TrimSpace(asString(row["provision"])),
+		"provision_en":      strings.TrimSpace(asString(row["provision_en"])),
+		"provision_desc":    strings.TrimSpace(asString(row["prov_desc"])),
+		"provision_desc_en": strings.TrimSpace(asString(row["prov_desc_en"])),
+		"source_line_spans": row["source_line_spans"],
+		"context":           strings.TrimSpace(asString(row["prov_context"])),
+		"context_en":        strings.TrimSpace(asString(row["prov_context_en"])),
+		"subject":           strings.TrimSpace(asString(row["provision_subject"])),
+		"subject_en":        strings.TrimSpace(asString(row["provision_subject_en"])),
+		"location_type":     strings.TrimSpace(asString(row["location_type"])),
+		"keywords":          row["provision_keywords"],
+		"keywords_en":       row["provision_keywords_en"],
+		"confidence":        toFloat(row["confidence"]),
+		"is_explicit":       toBool(row["is_explicit"]),
+		"need_verify":       toBool(row["need_verify"]),
+		"category_paths":    row["category_paths"],
+		"category_paths_en": row["category_paths_en"],
+	}
 }
 
 type provisionsStatusParams struct {

@@ -48,6 +48,7 @@ func (f *fakeProvisionsStore) SaveProvisions(_ context.Context, req SaveProvisio
 
 func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 	t.Setenv("ARTIFACT_DIR", tmp)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              4001,
@@ -75,6 +76,10 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 				"need_verify":   false,
 				"category_paths": []any{
 					map[string]any{
+						"category_path": []any{
+							map[string]any{"name": "safety", "keywords": []any{"safety"}, "confidence": float64(0.90)},
+							map[string]any{"name": "pressure_relief", "keywords": []any{"pressure", "valve"}, "confidence": float64(0.88)},
+						},
 						"path_keywords":   []any{"valve inspection"},
 						"path_confidence": float64(0.88),
 					},
@@ -177,23 +182,35 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if got := strings.TrimSpace(asString(dbRow["prompt_name"])); got != "prompt-test" {
 		t.Fatalf("db prompt_name=%q, want prompt-test", got)
 	}
-	artifactPath := filepath.Join(tmp, "4", "4001", "std-4001_opendata.provisions")
-	body, err := os.ReadFile(artifactPath)
+	provisionsPath := filepath.Join(tmp, "safety", "pressure_relief", "provisions.txt")
+	body, err := os.ReadFile(provisionsPath)
 	if err != nil {
-		t.Fatalf("read provisions artifact: %v", err)
+		t.Fatalf("read provisions.txt: %v", err)
 	}
-	var artifactRows []map[string]any
-	if err := json.Unmarshal(body, &artifactRows); err != nil {
-		t.Fatalf("artifact json: %v", err)
+	if got := strings.TrimSpace(string(body)); got != "4001_1" {
+		t.Fatalf("provisions.txt=%q, want 4001_1", got)
 	}
-	if len(artifactRows) != 1 {
-		t.Fatalf("artifact rows=%d, want 1", len(artifactRows))
+
+	artifactPath := filepath.Join(tmp, "4", "4001", "std-4001_opendata.provisions")
+	artifactBody, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatalf("read .provisions artifact: %v", err)
 	}
-	if got := int(toFloat(artifactRows[0]["prov_id"])); got != 1 {
-		t.Fatalf("artifact prov_id=%v, want 1", got)
+	var artifactRecords []map[string]any
+	if err := json.Unmarshal(artifactBody, &artifactRecords); err != nil {
+		t.Fatalf("parse .provisions artifact: %v", err)
 	}
-	if got := strings.TrimSpace(asString(artifactRows[0]["status"])); got != "active" {
-		t.Fatalf("artifact status=%q, want active", got)
+	if len(artifactRecords) != 1 {
+		t.Fatalf(".provisions record count=%d, want 1", len(artifactRecords))
+	}
+	if got := int(toFloat(artifactRecords[0]["prov_id"])); got != 1 {
+		t.Fatalf(".provisions prov_id=%v, want 1", got)
+	}
+	if got := strings.TrimSpace(asString(artifactRecords[0]["prov_type"])); got != "mandatory" {
+		t.Fatalf(".provisions prov_type=%v, want mandatory", got)
+	}
+	if got := strings.TrimSpace(asString(artifactRecords[0]["subject"])); got != "pressure relief valve inspection" {
+		t.Fatalf(".provisions subject=%v", got)
 	}
 
 	var statusArr []map[string]any
@@ -259,6 +276,7 @@ func TestBuildProvisionDBRecord_NonEnglishPreservesOriginal(t *testing.T) {
 
 func TestProvisionsProcessor_FallsBackToInputFileWhenBlockBufferMissing(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 	t.Setenv("ARTIFACT_DIR", tmp)
 	lineFile := filepath.Join(tmp, "std_5001_opendata.txt")
 	if err := os.WriteFile(lineFile, []byte("1\t1\tparagraph\tArial\t11\t[0,0,1,1]\tThe device must log alarms.\n"), 0o644); err != nil {
@@ -294,6 +312,7 @@ func TestProvisionsProcessor_FallsBackToInputFileWhenBlockBufferMissing(t *testi
 
 func TestProvisionsProcessor_AcceptsSingleProvisionObject(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 	t.Setenv("ARTIFACT_DIR", tmp)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              6000,
@@ -353,6 +372,7 @@ func TestProvisionsProcessor_AcceptsSingleProvisionObject(t *testing.T) {
 
 func TestProvisionsProcessor_AcceptsBareProvisionObject(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 	t.Setenv("ARTIFACT_DIR", tmp)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              6004,
@@ -409,6 +429,7 @@ func TestProvisionsProcessor_AcceptsBareProvisionObject(t *testing.T) {
 
 func TestProvisionsProcessor_RetriesWithCallbackModelOnEmptyJSON(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 	t.Setenv("ARTIFACT_DIR", tmp)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              6001,
@@ -480,6 +501,7 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnEmptyJSON(t *testing.T) {
 
 func TestProvisionsProcessor_FailsOnEmptyJSONWithoutCallbackModel(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 	t.Setenv("ARTIFACT_DIR", tmp)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              6002,
@@ -521,6 +543,7 @@ func TestProvisionsProcessor_FailsOnEmptyJSONWithoutCallbackModel(t *testing.T) 
 
 func TestProvisionsProcessor_RetriesWithCallbackModelOnExtractorError(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 	t.Setenv("ARTIFACT_DIR", tmp)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              6003,
@@ -578,6 +601,7 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnExtractorError(t *testing
 
 func TestProvisionsProcessor_TreatsEmptyFallbackJSONAsSuccess(t *testing.T) {
 	tmp := t.TempDir()
+	t.Setenv("ARTIFACT_WEB_DIR", tmp)
 	t.Setenv("ARTIFACT_DIR", tmp)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              6004,

@@ -14,6 +14,7 @@ import (
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
+	"github.com/spf13/viper"
 )
 
 const DefaultBlockingBlockSize = 8
@@ -85,20 +86,46 @@ func BlockBufferFromContext(ctx context.Context) *BlockBuffer {
 // --- BlockingProcessor ---
 
 type BlockingProcessor struct {
-	InputStore DocMetadataStore
-	Logger     ApiTypes.JimoLogger
-	BlockSize  int
+	InputStore  DocMetadataStore
+	Logger      ApiTypes.JimoLogger
+	BlockSize   int
+	PrevOverlap int
+	NextOverlap int
+	RemoveTOC   bool
 }
 
 func NewBlockingProcessor(store DocMetadataStore, logger ApiTypes.JimoLogger) *BlockingProcessor {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26050501")
 	}
+	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &BlockingProcessor{
-		InputStore: store,
-		Logger:     logger,
-		BlockSize:  envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
+		InputStore:  store,
+		Logger:      logger,
+		BlockSize:   envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
+		PrevOverlap: prevOverlap,
+		NextOverlap: nextOverlap,
+		RemoveTOC:   removeTOC,
 	}
+}
+
+// blockingConfigFromViper reads the doc-processing overlap and TOC-filter settings
+// from viper, defaulting to 1 overlap page on each side when not configured.
+func blockingConfigFromViper() (prevOverlap, nextOverlap int, removeTOC bool) {
+	prevOverlap = 1
+	if viper.IsSet("doc-processing.prev_overlapped_pages_in_blocks") {
+		if v := viper.GetInt("doc-processing.prev_overlapped_pages_in_blocks"); v >= 0 {
+			prevOverlap = v
+		}
+	}
+	nextOverlap = 1
+	if viper.IsSet("doc-processing.next_overlapped_pages_in_blocks") {
+		if v := viper.GetInt("doc-processing.next_overlapped_pages_in_blocks"); v >= 0 {
+			nextOverlap = v
+		}
+	}
+	removeTOC = viper.GetBool("doc-processing.remove_toc_in_blocks")
+	return
 }
 
 func (p *BlockingProcessor) Name() string { return "blocking" }
@@ -137,7 +164,7 @@ func (p *BlockingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		return fmt.Errorf("(MID_26050508) read input file: %w", err)
 	}
 
-	buf, err := buildBlocks(body, p.blockSize())
+	buf, err := buildBlocks(body, p.blockSize(), p.PrevOverlap, p.NextOverlap, p.RemoveTOC)
 	if err != nil {
 		return fmt.Errorf("(MID_26050509) build blocks: %w", err)
 	}
@@ -165,12 +192,15 @@ func (p *BlockingProcessor) blockSize() int {
 	return DefaultBlockingBlockSize
 }
 
-// buildBlocks parses a line file and groups lines into overlapping page blocks.
-// Each block has: 1 previous-overlap page (flag='o') + blockSize core pages
-// (flag='n') + 1 subsequent-overlap page (flag='o').
-func buildBlocks(body []byte, blockSize int) (*BlockBuffer, error) {
+func buildBlocks(body []byte, blockSize, prevOverlap, nextOverlap int, removeTOC bool) (*BlockBuffer, error) {
 	if blockSize < 1 {
 		blockSize = 1
+	}
+	if prevOverlap < 0 {
+		prevOverlap = 0
+	}
+	if nextOverlap < 0 {
+		nextOverlap = 0
 	}
 
 	linesByPage := make(map[int][]blockInputLine)
@@ -184,6 +214,9 @@ func buildBlocks(body []byte, blockSize int) (*BlockBuffer, error) {
 		line, err := parseBlockInputLine(raw)
 		if err != nil {
 			continue // skip malformed lines
+		}
+		if removeTOC && line.LineType == "toc" {
+			continue
 		}
 		linesByPage[line.PageNumber] = append(linesByPage[line.PageNumber], line)
 	}
@@ -212,9 +245,13 @@ func buildBlocks(body []byte, blockSize int) (*BlockBuffer, error) {
 
 		var lines []BlockLine
 
-		// Previous-overlap page
-		if start > 0 {
-			for _, l := range linesByPage[pages[start-1]] {
+		// Previous-overlap pages
+		prevStart := start - prevOverlap
+		if prevStart < 0 {
+			prevStart = 0
+		}
+		for _, pg := range pages[prevStart:start] {
+			for _, l := range linesByPage[pg] {
 				lines = append(lines, BlockLine{Flag: "o", LineNumber: l.LineNumber, PageNumber: l.PageNumber, LineType: l.LineType, Content: l.Content})
 			}
 		}
@@ -226,9 +263,13 @@ func buildBlocks(body []byte, blockSize int) (*BlockBuffer, error) {
 			}
 		}
 
-		// Subsequent-overlap page
-		if end < n {
-			for _, l := range linesByPage[pages[end]] {
+		// Subsequent-overlap pages
+		nextEnd := end + nextOverlap
+		if nextEnd > n {
+			nextEnd = n
+		}
+		for _, pg := range pages[end:nextEnd] {
+			for _, l := range linesByPage[pg] {
 				lines = append(lines, BlockLine{Flag: "o", LineNumber: l.LineNumber, PageNumber: l.PageNumber, LineType: l.LineType, Content: l.Content})
 			}
 		}
@@ -245,6 +286,17 @@ type blockInputLine struct {
 	PageNumber int
 	LineType   string
 	Content    string
+}
+
+// ParseRawLineToBlockLine parses a 7-field canonical line-file record into a
+// BlockLine, dropping the font, font_size, and coordinate fields. The caller
+// is responsible for setting Flag ("n" or "o").
+func ParseRawLineToBlockLine(raw string) (BlockLine, error) {
+	bl, err := parseBlockInputLine(raw)
+	if err != nil {
+		return BlockLine{}, err
+	}
+	return BlockLine{LineNumber: bl.LineNumber, PageNumber: bl.PageNumber, LineType: bl.LineType, Content: bl.Content}, nil
 }
 
 // parseBlockInputLine parses a 7-field TAB-separated line file record and drops

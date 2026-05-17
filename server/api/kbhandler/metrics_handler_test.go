@@ -189,7 +189,7 @@ func TestUpdateMetricSuccess(t *testing.T) {
 
 	selectQuery := regexp.QuoteMeta(`
 SELECT
-    m.id, m.input_record_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
+    m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
     m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
@@ -202,7 +202,7 @@ LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.id = $1
 `)
 	rows := sqlmock.NewRows([]string{
-		"id", "input_record_id", "event_id", "input_filename", "metric_name", "metric_name_en",
+		"id", "input_record_id", "metric_id", "event_id", "input_filename", "metric_name", "metric_name_en",
 		"source_line_spans", "metric_subject", "metric_subject_en", "metric_desc", "metric_desc_en",
 		"metric_context", "metric_context_en", "metric_keywords", "metric_keywords_en", "model_name",
 		"location_type", "metric_unit", "metric_unit_en", "metric_value", "value_data_type",
@@ -210,7 +210,7 @@ WHERE m.id = $1
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 		"table_name_or_section", "reasoning_tags", "created_at",
 	}).AddRow(
-		int64(11), int64(7), "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
+		int64(11), int64(7), "7_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
 		`["5","12:14"]`, "Energy usage", "Energy usage EN", "Metric description", "Metric description EN",
 		"Metric context", "Metric context EN", `["energy","intensity"]`, `["energy","intensity"]`, "gpt-4.1",
 		"table", "kWh", "kWh", "12.3", "number", "exact", "performance", "performance",

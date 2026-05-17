@@ -21,6 +21,7 @@ import (
 type metricRecord struct {
 	ID                  int64           `json:"id"`
 	InputRecordID       int64           `json:"input_record_id"`
+	MetricID            *string         `json:"metric_id,omitempty"`
 	EventID             *string         `json:"event_id,omitempty"`
 	InputFilename       string          `json:"input_filename"`
 	MetricName          *string         `json:"metric_name,omitempty"`
@@ -88,7 +89,7 @@ func ListMetrics(c echo.Context) error {
 	db := ApiTypes.ProjectDBHandle
 	const query = `
 SELECT
-    m.id, m.input_record_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
+    m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
     m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
@@ -123,7 +124,7 @@ ORDER BY m.id ASC
 			isExplicit      sql.NullBool
 		)
 		if err := rows.Scan(
-			&r.ID, &r.InputRecordID, &r.EventID, &r.InputFilename,
+			&r.ID, &r.InputRecordID, &r.MetricID, &r.EventID, &r.InputFilename,
 			&r.MetricName, &r.MetricNameEn, &spansBytes, &r.MetricSubject, &r.MetricSubjectEn,
 			&r.MetricDesc, &r.MetricDescEn, &r.MetricContext, &r.MetricContextEn,
 			&keywordsBytes, &keywordsEnBytes, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,
@@ -177,7 +178,7 @@ ORDER BY m.id ASC
 func fetchMetricByID(db *sql.DB, id int64) (metricRecord, error) {
 	const query = `
 SELECT
-    m.id, m.input_record_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
+    m.id, m.input_record_id, m.metric_id, m.event_id, COALESCE(i.staging_filename, '') AS input_filename,
     m.metric_name, m.metric_name_en, m.source_line_spans, m.metric_subject, m.metric_subject_en,
     m.metric_desc, m.metric_desc_en, m.metric_context, m.metric_context_en,
     m.metric_keywords, m.metric_keywords_en, m.model_name, m.location_type, m.metric_unit, m.metric_unit_en,
@@ -199,7 +200,7 @@ WHERE m.id = $1
 		isExplicit      sql.NullBool
 	)
 	err := db.QueryRow(query, id).Scan(
-		&r.ID, &r.InputRecordID, &r.EventID, &r.InputFilename,
+		&r.ID, &r.InputRecordID, &r.MetricID, &r.EventID, &r.InputFilename,
 		&r.MetricName, &r.MetricNameEn, &spansBytes, &r.MetricSubject, &r.MetricSubjectEn,
 		&r.MetricDesc, &r.MetricDescEn, &r.MetricContext, &r.MetricContextEn,
 		&keywordsBytes, &keywordsEnBytes, &r.ModelName, &r.LocationType, &r.MetricUnit, &r.MetricUnitEn,

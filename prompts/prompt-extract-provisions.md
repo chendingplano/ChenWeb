@@ -196,7 +196,7 @@ Apply these rules according to the language of each category segment:
           "path_confidence": ddd
         }
       ]
-      "category_path_en": [    // This is the English translation of 'category_path', present only when the input language is not English!
+      "category_paths_en": [    // This is the English translation of 'category_path', present only when the input language is not English!
         {
           "category_path": [
             {
@@ -213,8 +213,11 @@ Apply these rules according to the language of each category segment:
           "path_confidence": ddd
         }
       ]
-    }
+    },
+    {
+      <next provision>
+    },
+    ...
   ]
 }
 ```
-

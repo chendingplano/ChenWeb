@@ -1,7 +1,6 @@
 package kbhandler
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -16,6 +15,7 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/labstack/echo/v4"
 	toml "github.com/pelletier/go-toml/v2"
 )
@@ -126,17 +126,16 @@ func ExtractMetric(c echo.Context) error {
 	}
 
 	rawPath := rawLinePathFor(resultFile.String)
-	f, err := os.Open(rawPath)
+	rawBytes, err := os.ReadFile(rawPath)
 	if err != nil {
-		logger.Error("open raw line file failed", "path", rawPath, "err", err)
+		logger.Error("read raw line file failed", "path", rawPath, "err", err)
 		return c.JSON(http.StatusNotFound, extractMetricResponse{
 			Status: false,
 			Error:  fmt.Sprintf("raw line file not found: %s (CWB_KB_M_408)", filepath.Base(rawPath)),
 		})
 	}
-	defer f.Close()
 
-	// Parse the line specs (e.g. ["90", "95-97"]) into a set of wanted line numbers
+	// Parse the line specs (e.g. ["90", "95-97"]) into a set of wanted line numbers.
 	wanted := parseLineSpecs(req.Lines)
 	if len(wanted) == 0 {
 		return c.JSON(http.StatusBadRequest, extractMetricResponse{
@@ -145,7 +144,7 @@ func ExtractMetric(c echo.Context) error {
 		})
 	}
 
-	// Build overlap set: 5 lines before the first and after the last selected line
+	// Build overlap set: 5 lines before the first and after the last selected line.
 	minLine, maxLine := wanted[0], wanted[len(wanted)-1]
 	overlap := make(map[int]bool)
 	for i := minLine - 5; i < minLine; i++ {
@@ -156,18 +155,8 @@ func ExtractMetric(c echo.Context) error {
 	for i := maxLine + 1; i <= maxLine+5; i++ {
 		overlap[i] = true
 	}
-	// Remove lines already in the selected set
 	for _, n := range wanted {
 		delete(overlap, n)
-	}
-
-	// Read the raw line file and collect wanted + overlap lines in order
-	type composedLine struct {
-		lineNumber int
-		pageNumber int
-		lineType   string
-		content    string
-		isOverlap  bool
 	}
 
 	selectedSet := make(map[int]bool, len(wanted))
@@ -175,60 +164,35 @@ func ExtractMetric(c echo.Context) error {
 		selectedSet[n] = true
 	}
 
-	allLines := make([]composedLine, 0, len(wanted)+len(overlap))
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024)
-	for scanner.Scan() {
-		raw := scanner.Text()
-		// Use existing parseRawLine helper
-		parsed, ok := parseRawLine(raw)
-		if !ok {
+	// Apply the blocking process: parse each raw line (dropping font/size/coord),
+	// set the flag to 'n' for selected lines and 'o' for overlap lines.
+	blockLines := make([]docprocessing.BlockLine, 0, len(wanted)+len(overlap))
+	for _, raw := range strings.Split(string(rawBytes), "\n") {
+		bl, parseErr := docprocessing.ParseRawLineToBlockLine(strings.TrimRight(raw, "\r"))
+		if parseErr != nil {
 			continue
 		}
-		n := parsed.LineNumber
-		if selectedSet[n] {
-			allLines = append(allLines, composedLine{
-				lineNumber: n,
-				pageNumber: parsed.PageNumber,
-				lineType:   parsed.LineType,
-				content:    parsed.Content,
-				isOverlap:  false,
-			})
-		} else if overlap[n] {
-			allLines = append(allLines, composedLine{
-				lineNumber: n,
-				pageNumber: parsed.PageNumber,
-				lineType:   parsed.LineType,
-				content:    parsed.Content,
-				isOverlap:  true,
-			})
+		if selectedSet[bl.LineNumber] {
+			bl.Flag = "n"
+			blockLines = append(blockLines, bl)
+		} else if overlap[bl.LineNumber] {
+			bl.Flag = "o"
+			blockLines = append(blockLines, bl)
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		logger.Error("scan raw line file failed", "err", err)
-		return c.JSON(http.StatusInternalServerError, extractMetricResponse{
-			Status: false,
-			Error:  "failed to read raw line file (CWB_KB_M_410)",
-		})
-	}
 
-	if len(allLines) == 0 {
+	if len(blockLines) == 0 {
 		return c.JSON(http.StatusBadRequest, extractMetricResponse{
 			Status: false,
 			Error:  "specified lines not found in file (CWB_KB_M_411)",
 		})
 	}
 
-	// Compose LLM input in the format:
-	// <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
+	// Compose the block input string: <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
 	var sb strings.Builder
-	for _, cl := range allLines {
-		flag := "n"
-		if cl.isOverlap {
-			flag = "o"
-		}
-		sb.WriteString(fmt.Sprintf("%s\t%d\t%d\t%s\t%s\n",
-			flag, cl.lineNumber, cl.pageNumber, cl.lineType, cl.content))
+	for _, bl := range blockLines {
+		sb.WriteString(bl.String())
+		sb.WriteByte('\n')
 	}
 	composedInput := sb.String()
 
@@ -497,6 +461,7 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		id BIGSERIAL PRIMARY KEY,
 		event_id TEXT,
 		input_record_id BIGINT NOT NULL,
+		metric_id TEXT,
 		metric_name TEXT,
 		metric_name_en TEXT,
 		source_line_spans JSONB,
@@ -532,9 +497,14 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		return 0, err
 	}
 
+	var existingCount int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM kb.metrics WHERE input_record_id = $1`, inputRecordID).Scan(&existingCount); err != nil {
+		existingCount = 0
+	}
+
 	const stmt = `
 	INSERT INTO kb.metrics (
-		event_id, input_record_id, metric_name, metric_name_en, source_line_spans,
+		event_id, input_record_id, metric_id, metric_name, metric_name_en, source_line_spans,
 		metric_subject, metric_subject_en, metric_desc, metric_desc_en,
 		metric_context, metric_context_en, metric_keywords, metric_keywords_en,
 		model_name, prompt_name, location_type, metric_unit, metric_unit_en,
@@ -542,8 +512,8 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		formula_or_definition, threshold_or_target, measurement_frequency,
 		confidence, is_explicit_metric, table_name_or_section, reasoning_tags, ext_info
 	) VALUES (
-		$1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,
-		$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30::jsonb,$31::jsonb
+		$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,
+		$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb
 	)`
 
 	extInfo, _ := json.Marshal(map[string]any{
@@ -552,7 +522,7 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 	})
 
 	var inserted int64
-	for _, m := range metrics {
+	for i, m := range metrics {
 		spansJSON, _ := json.Marshal(m["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(m["metric_keywords"])
 		reasoningJSON, _ := json.Marshal(m["reasoning_tags"])
@@ -562,9 +532,12 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 			metricNameEn = v
 		}
 
+		metricID := fmt.Sprintf("%d_%d", inputRecordID, existingCount+int64(i)+1)
+
 		_, err := db.Exec(stmt,
 			"rest-api",
 			inputRecordID,
+			metricID,
 			strings.TrimSpace(anyAsString(m["metric_name"])),
 			metricNameEn,
 			string(spansJSON),

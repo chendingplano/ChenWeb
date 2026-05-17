@@ -1,11 +1,9 @@
 package docprocessing
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -114,22 +112,6 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return nil
 	}
 
-	topicsPath, chunkFiles, detectErr := p.detectChunkingInputs(evt.RecordID)
-	if detectErr != nil {
-		p.Logger.Error("metrics extraction skipped: chunk detection failed",
-			"record_id", evt.RecordID, "chunk_dir", p.ChunkDir, "error", detectErr)
-		p.persistMetricsStatus(ctx, rec, start, detectErr)
-		return nil
-	}
-	if topicsPath == "" && len(chunkFiles) == 0 {
-		err := fmt.Errorf("(MID_26042460) no chunk files found for record_id=%d", evt.RecordID)
-		p.Logger.Error("no chunk files",
-			"record_id", evt.RecordID,
-			"chunk_dir", p.ChunkDir)
-		p.persistMetricsStatus(ctx, rec, start, err)
-		return nil
-	}
-
 	lineFilePath, lineFileErr := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
 	if lineFileErr != nil {
 		p.Logger.Error("resolve input file path failed", "record_id", evt.RecordID, "error", lineFileErr)
@@ -153,309 +135,120 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		}
 	}
 
-	var allLines []string
-	var inputCount int
-	if topicsPath != "" {
-		lines, readErr := readLinesFromTopicsFile(topicsPath, lineFilePath)
+	// Get blocks from context (set by BlockingProcessor), or build them from the line file.
+	buf := BlockBufferFromContext(ctx)
+	if buf == nil {
+		body, readErr := os.ReadFile(lineFilePath)
 		if readErr != nil {
-			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042467) read topics file %s: %w", topicsPath, readErr))
-			return fmt.Errorf("(MID_26050708) failed reading input file, error:%w, path:%s", readErr, topicsPath)
+			p.Logger.Error("read line file failed", "record_id", evt.RecordID, "path", lineFilePath, "error", readErr)
+			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042466) read line file for record_id=%d: %w", evt.RecordID, readErr))
+			return fmt.Errorf("(MID_26050708) failed reading line file, error:%w, path:%s", readErr, lineFilePath)
 		}
-		allLines = lines
-		inputCount = 1
-	} else {
-		allLines = make([]string, 0, 1024)
-		for _, chunkPath := range chunkFiles {
-			lines, err := readRegularLinesFromChunk(chunkPath, lineFilePath)
-			if err != nil {
-				p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) read chunk file %s: %w", chunkPath, err))
-				return fmt.Errorf("(MID_26050702) failed reading input file, error:%w, chunkPath:%s, lineFilePath:%s",
-					err, chunkPath, lineFilePath)
-			}
-			allLines = append(allLines, lines...)
+		bPrev, bNext, bRemoveTOC := blockingConfigFromViper()
+		buf, err = buildBlocks(body, envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1), bPrev, bNext, bRemoveTOC)
+		if err != nil {
+			p.Logger.Error("build blocks failed", "record_id", evt.RecordID, "error", err)
+			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) build blocks for record_id=%d: %w", evt.RecordID, err))
+			return fmt.Errorf("(MID_26050702) failed building blocks, error:%w", err)
 		}
-		inputCount = len(chunkFiles)
 	}
-	if len(allLines) == 0 {
-		err := fmt.Errorf("(MID_26042462) no regular lines found in chunk files for record_id=%d", evt.RecordID)
+	if len(buf.Blocks) == 0 {
+		err := fmt.Errorf("(MID_26042460) no blocks found for record_id=%d", evt.RecordID)
+		p.Logger.Error("no blocks", "record_id", evt.RecordID, "line_file", lineFilePath)
 		p.persistMetricsStatus(ctx, rec, start, err)
-		return err
+		return nil
 	}
 
-	result, err := p.extractMetricsFromLinesWithLLM(ctx, allLines)
-	if err != nil {
-		p.persistMetricsStatus(ctx, rec, start, err)
-		return fmt.Errorf("(MID_26050701) extractMetrics failed, error:%w", err)
+	var allMetrics []map[string]any
+	var detectedLanguage string
+	var totalUncertain int
+	for _, block := range buf.Blocks {
+		lines := make([]string, len(block.Lines))
+		for i, bl := range block.Lines {
+			lines[i] = bl.String()
+		}
+		result, err := p.extractMetricsFromLinesWithLLM(ctx, lines)
+		if err != nil {
+			p.persistMetricsStatus(ctx, rec, start, err)
+			return fmt.Errorf("(MID_26050701) extractMetrics failed for block %d, error:%w", block.Index, err)
+		}
+		if detectedLanguage == "" || detectedLanguage == "unknown" {
+			detectedLanguage = result.Language
+		}
+		allMetrics = append(allMetrics, result.Metrics...)
+		totalUncertain += len(result.UncertainMetrics)
+	}
+	if detectedLanguage == "" {
+		detectedLanguage = "unknown"
+	}
+
+	for i, m := range allMetrics {
+		m["metric_id"] = fmt.Sprintf("%d_%d", evt.RecordID, i+1)
+		allMetrics[i] = m
 	}
 
 	inserted, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
 		InputRecordID: evt.RecordID,
 		EventID:       eventIDFromContext(ctx),
-		Language:      result.Language,
+		Language:      detectedLanguage,
 		ModelName:     p.ModelName,
 		PromptName:    p.PromptRef,
-		Metrics:       result.Metrics,
+		Metrics:       allMetrics,
 	})
 	if err != nil {
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26050703) insert records failed, error:%w", err)
 	}
 
+	if fileErr := p.saveMetricsToFile(evt.RecordID, rec, allMetrics); fileErr != nil {
+		p.Logger.Warn("save metrics to file failed", "record_id", evt.RecordID, "error", fileErr)
+	}
+
 	p.Logger.Info("metrics extracted",
 		"record_id", evt.RecordID,
 		"inserted_rows", inserted,
-		"metrics_count", len(result.Metrics),
-		"uncertain_metrics_count", len(result.UncertainMetrics),
-		"chunk_files", inputCount,
+		"metrics_count", len(allMetrics),
+		"uncertain_metrics_count", totalUncertain,
+		"num_blocks", len(buf.Blocks),
 	)
 	p.persistMetricsStatus(ctx, rec, start, nil)
 	return nil
 }
 
-// detectChunkingInputs checks the artifact directory for the record and returns
-// the preferred topic artifact path or chunk artifact paths, prioritizing the
-// spec-compliant .topics/.chunks layout before falling back to legacy files.
-func (p *MetricsProcessor) detectChunkingInputs(recordID int64) (topicsPath string, chunkFiles []string, err error) {
+func (p *MetricsProcessor) saveMetricsToFile(recordID int64, rec DocMetadataInputRecord, metrics []map[string]any) error {
+	if len(metrics) == 0 {
+		return nil
+	}
 	if strings.TrimSpace(p.ChunkDir) == "" {
-		return "", nil, errors.New("(MID_26042463) missing ARTIFACT_DIR")
+		return fmt.Errorf("(MID_26042480) missing ARTIFACT_DIR")
 	}
-	if recordID <= 0 {
-		return "", nil, fmt.Errorf("(MID_26042464) invalid record_id: %d", recordID)
+
+	stagingBase := filepath.Base(strings.TrimSpace(rec.StagingFilename))
+	filenameRoot := strings.TrimSuffix(stagingBase, filepath.Ext(stagingBase))
+	if filenameRoot == "" {
+		return fmt.Errorf("(MID_26042481) cannot determine filename root from staging_filename %q", rec.StagingFilename)
 	}
+
+	parserName := strings.TrimSpace(rec.ParserName)
+	if parserName == "" {
+		return fmt.Errorf("(MID_26042482) parser_name is empty for record_id=%d", recordID)
+	}
+
 	groupID := recordID / 1000
 	dir := filepath.Join(p.ChunkDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
-	entries, err := os.ReadDir(dir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("(MID_26042483) create directory %s: %w", dir, err)
+	}
+
+	path := filepath.Join(dir, filenameRoot+"_"+parserName+".metrics")
+	bs, err := json.MarshalIndent(metrics, "", "  ")
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil, nil
-		}
-		return "", nil, err
+		return fmt.Errorf("(MID_26042484) marshal metrics: %w", err)
 	}
-
-	topicPaths := make([]string, 0, 2)
-	legacyTopicPaths := make([]string, 0, 1)
-	chunkPaths := make([]string, 0, len(entries))
-	legacyChunkPaths := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := strings.TrimSpace(entry.Name())
-		fullPath := filepath.Join(dir, name)
-		switch {
-		case strings.HasSuffix(name, ".topics"):
-			topicPaths = append(topicPaths, fullPath)
-		case name == "topics.txt":
-			legacyTopicPaths = append(legacyTopicPaths, fullPath)
-		case strings.HasSuffix(name, ".chunks"):
-			chunkPaths = append(chunkPaths, fullPath)
-		case strings.HasPrefix(name, "chunk_"):
-			legacyChunkPaths = append(legacyChunkPaths, fullPath)
-		default:
-			continue
-		}
+	if err := os.WriteFile(path, bs, 0644); err != nil {
+		return fmt.Errorf("(MID_26042485) write metrics file %s: %w", path, err)
 	}
-	sort.Strings(topicPaths)
-	if len(topicPaths) > 0 {
-		return topicPaths[0], nil, nil
-	}
-	sort.Strings(legacyTopicPaths)
-	if len(legacyTopicPaths) > 0 {
-		return legacyTopicPaths[0], nil, nil
-	}
-	sort.Strings(chunkPaths)
-	if len(chunkPaths) > 0 {
-		return "", chunkPaths, nil
-	}
-	sort.Strings(legacyChunkPaths)
-	return "", legacyChunkPaths, nil
-}
-
-func readRegularLinesFromChunk(path string, lineFilePath string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	lines := make([]string, 0, 256)
-	regularLineNos := make([]int, 0, 256)
-	hasSummaryFormat := false
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024), 16*1024*1024)
-	for sc.Scan() {
-		raw := strings.TrimSpace(sc.Text())
-		if raw == "" {
-			continue
-		}
-		if strings.HasPrefix(raw, "overlap:") {
-			hasSummaryFormat = true
-			continue
-		}
-		if strings.HasPrefix(raw, "lines:") {
-			hasSummaryFormat = true
-			nums, err := parseTopicLineRanges(strings.TrimSpace(strings.TrimPrefix(raw, "lines:")))
-			if err != nil {
-				return nil, err
-			}
-			regularLineNos = append(regularLineNos, nums...)
-			continue
-		}
-		base, mark := splitChunkMark(raw)
-		if mark == "o" {
-			continue
-		}
-		lines = append(lines, base)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	if hasSummaryFormat {
-		if strings.TrimSpace(lineFilePath) == "" {
-			return nil, fmt.Errorf("(MID_26050704) summary chunk file requires source line file")
-		}
-		wantLines := make(map[int]struct{}, len(regularLineNos))
-		for _, n := range regularLineNos {
-			if n > 0 {
-				wantLines[n] = struct{}{}
-			}
-		}
-		return readLinesFromFileByNumbers(lineFilePath, wantLines)
-	}
-	return lines, nil
-}
-
-func splitChunkMark(line string) (base string, mark string) {
-	raw := strings.TrimSpace(line)
-	if raw == "" {
-		return "", ""
-	}
-
-	// Preferred format: "<mark> <line...>"
-	if len(raw) > 2 && (raw[0] == 'r' || raw[0] == 'o') && raw[1] == ' ' {
-		return strings.TrimSpace(raw[2:]), string(raw[0])
-	}
-
-	// Backward compatibility: "<line...> <mark>"
-	idx := strings.LastIndex(raw, " ")
-	if idx < 0 {
-		return raw, "r"
-	}
-	last := strings.TrimSpace(raw[idx+1:])
-	if last == "r" || last == "o" {
-		return strings.TrimSpace(raw[:idx]), last
-	}
-	return raw, "r"
-}
-
-// readLinesFromTopicsFile reads topics.txt and the original line file,
-// returning the ordered, deduplicated set of lines referenced by the topics.
-func readLinesFromTopicsFile(topicsPath, lineFilePath string) ([]string, error) {
-	topics, err := readTopicsFile(topicsPath)
-	if err != nil {
-		return nil, fmt.Errorf("(MID_26042468) read topics file %s: %w", topicsPath, err)
-	}
-	wantLines := make(map[int]struct{})
-	for _, t := range topics {
-		nums, parseErr := parseTopicLineRanges(t.Lines)
-		if parseErr != nil {
-			return nil, fmt.Errorf("(MID_26042469) parse line ranges for topic seq=%d: %w", t.SeqNo, parseErr)
-		}
-		for _, n := range nums {
-			wantLines[n] = struct{}{}
-		}
-	}
-	if len(wantLines) == 0 {
-		return nil, nil
-	}
-	return readLinesFromFileByNumbers(lineFilePath, wantLines)
-}
-
-// parseTopicLineRanges parses a lines field like "[38-45, 47, 49]" into a slice of line numbers.
-func parseTopicLineRanges(raw string) ([]int, error) {
-	s := strings.TrimSpace(raw)
-	s = strings.TrimPrefix(s, "[")
-	s = strings.TrimSuffix(s, "]")
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil
-	}
-	out := make([]int, 0, 16)
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if idx := strings.Index(part, "-"); idx > 0 {
-			start, err1 := strconv.Atoi(strings.TrimSpace(part[:idx]))
-			end, err2 := strconv.Atoi(strings.TrimSpace(part[idx+1:]))
-			if err1 != nil || err2 != nil || start < 1 || end < start {
-				return nil, fmt.Errorf("(MID_26050705) invalid range: %q", part)
-			}
-			for n := start; n <= end; n++ {
-				out = append(out, n)
-			}
-		} else {
-			n, err := strconv.Atoi(part)
-			if err != nil || n < 1 {
-				return nil, fmt.Errorf("(MID_26050706) invalid line number: %q", part)
-			}
-			out = append(out, n)
-		}
-	}
-	return out, nil
-}
-
-// readLinesFromFileByNumbers reads a canonical line file and returns lines whose
-// line number (first tab-separated field) is in wantLines, sorted and deduplicated.
-func readLinesFromFileByNumbers(path string, wantLines map[int]struct{}) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	type numberedLine struct {
-		no   int
-		text string
-	}
-	collected := make([]numberedLine, 0, len(wantLines))
-
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1024), 16*1024*1024)
-	for sc.Scan() {
-		raw := strings.TrimSpace(sc.Text())
-		if raw == "" {
-			continue
-		}
-		idx := strings.Index(raw, "\t")
-		if idx < 0 {
-			continue
-		}
-		lineNo, err := strconv.Atoi(strings.TrimSpace(raw[:idx]))
-		if err != nil || lineNo < 1 {
-			continue
-		}
-		if _, ok := wantLines[lineNo]; ok {
-			collected = append(collected, numberedLine{no: lineNo, text: raw})
-		}
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-
-	sort.Slice(collected, func(i, j int) bool { return collected[i].no < collected[j].no })
-
-	out := make([]string, 0, len(collected))
-	lastNo := -1
-	for _, nl := range collected {
-		if nl.no == lastNo {
-			continue
-		}
-		lastNo = nl.no
-		out = append(out, nl.text)
-	}
-	return out, nil
+	return nil
 }
 
 type metricsStatusParams struct {
@@ -552,6 +345,13 @@ type metricExtractionResult struct {
 func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, lines []string) (metricExtractionResult, error) {
 	parsedLines := parseMetricInputLines(lines)
 	userPrompt := buildMetricUserPrompt(lines, parsedLines)
+
+	p.Logger.Info("Ready to extract metrics",
+		"input", parsedLines,
+		"model name", p.ModelName,
+		"num_lines", len(lines),
+		"prompt", p.PromptRef)
+
 	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		PromptText: p.PromptText,
 		ModelName:  p.ModelName,
@@ -581,14 +381,13 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 	}, nil
 }
 
+// metricParsedLine mirrors the block format: <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
 type metricParsedLine struct {
+	Flag       string `json:"flag"`
 	LineNumber int    `json:"line_number"`
 	PageNumber int    `json:"page_number"`
 	LineType   string `json:"line_type"`
-	Font       string `json:"font"`
-	FontSize   string `json:"font_size"`
 	Content    string `json:"content"`
-	Coordinate string `json:"coordinate"`
 }
 
 func parseMetricInputLine(line string) (metricParsedLine, bool) {
@@ -596,35 +395,33 @@ func parseMetricInputLine(line string) (metricParsedLine, bool) {
 	if raw == "" {
 		return metricParsedLine{}, false
 	}
+	// Block format: <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
 	fields := strings.Split(raw, "\t")
-	if len(fields) != 7 {
+	if len(fields) != 5 {
 		return metricParsedLine{}, false
 	}
-	lineNo, err := strconv.Atoi(strings.TrimSpace(fields[0]))
+	flag := strings.TrimSpace(fields[0])
+	if flag != "o" && flag != "n" {
+		return metricParsedLine{}, false
+	}
+	lineNo, err := strconv.Atoi(strings.TrimSpace(fields[1]))
 	if err != nil || lineNo < 1 {
 		return metricParsedLine{}, false
 	}
-	pageNo, err := strconv.Atoi(strings.TrimSpace(fields[1]))
+	pageNo, err := strconv.Atoi(strings.TrimSpace(fields[2]))
 	if err != nil || pageNo < 1 {
 		return metricParsedLine{}, false
 	}
-	lineType := strings.TrimSpace(fields[2])
-	font := strings.TrimSpace(fields[3])
-	fontSize := strings.TrimSpace(fields[4])
-	coordinate := strings.TrimSpace(fields[5])
-	content := strings.TrimSpace(fields[6])
-	if lineType == "" || font == "" || fontSize == "" || coordinate == "" {
+	lineType := strings.TrimSpace(fields[3])
+	if lineType == "" {
 		return metricParsedLine{}, false
 	}
-
 	return metricParsedLine{
+		Flag:       flag,
 		LineNumber: lineNo,
 		PageNumber: pageNo,
 		LineType:   lineType,
-		Font:       font,
-		FontSize:   fontSize,
-		Content:    content,
-		Coordinate: coordinate,
+		Content:    strings.TrimSpace(fields[4]),
 	}, true
 }
 
@@ -902,6 +699,7 @@ CREATE TABLE IF NOT EXISTS kb.metrics (
     id BIGSERIAL PRIMARY KEY,
     event_id TEXT,
     input_record_id BIGINT NOT NULL,
+    metric_id TEXT,
     metric_name TEXT,
     metric_name_en TEXT,
     source_line_spans JSONB,
@@ -977,6 +775,7 @@ func (s MetricsSQLStore) SaveMetrics(ctx context.Context, req SaveMetricsRequest
 INSERT INTO kb.metrics (
 	event_id,
 	input_record_id,
+	metric_id,
 	metric_name,
 	metric_name_en,
 	source_line_spans,
@@ -1008,7 +807,7 @@ INSERT INTO kb.metrics (
 	ext_info
 )
 VALUES (
-	$1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30::jsonb,$31::jsonb
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -1052,6 +851,7 @@ VALUES (
 		_, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
 			req.InputRecordID,
+			strings.TrimSpace(asString(metric["metric_id"])),
 			strings.TrimSpace(asString(metric["metric_name"])),
 			metricNameEn,
 			string(sourceSpansJSON),

@@ -63,7 +63,7 @@
 		{ id: 'staged',               label: 'Staged',             operations: [] as string[] },
 		{ id: 'parsing',              label: 'PDF Parser',          operations: ['parsing', 'parsed'] },
 		{ id: 'converting',           label: 'Result Convert',      operations: ['converting', 'converted', 'line-file-generated'] },
-		{ id: 'structure_analyzer',   label: 'Structure Analyzer',  operations: ['structure_analyzer', 'static_analyzer', 'static_analzyer'] },
+		{ id: 'static_analyzer',      label: 'Static Analyzer',     operations: ['static_analyzer', 'static_analzyer', 'structure_analyzer'] },
 		{ id: 'chunking',             label: 'Chunking',            operations: ['chunking', 'chunked'] },
 		{ id: 'extract_doc_metadata', label: 'Extract Metadata',    operations: ['extract_doc_metadata', 'extract_metadata'] },
 		{ id: 'extract_metrics',      label: 'Extract Metrics',     operations: ['extract_metrics'] },
@@ -77,7 +77,7 @@
 
 	// Processors that can be explicitly requested in launch/restart payloads.
 	const ALL_PROCESSOR_IDS = [
-		'structure_analyzer', 'chunking', 'extract_doc_metadata', 'extract_metrics', 'extract_provisions',
+		'static_analyzer', 'chunking', 'extract_doc_metadata', 'extract_metrics', 'extract_provisions',
 		'generate_summaries', 'generate_topics'
 	];
 

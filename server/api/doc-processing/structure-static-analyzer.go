@@ -642,7 +642,7 @@ func isStaticMergeableParagraph(line staticInputLine, corrected map[int]string) 
 		return false
 	}
 	switch normalizeStaticTitle(line.Content) {
-	case "table of content", "table of contents", "目录", "目次", "目 次":
+	case "tableofcontent", "tableofcontents", "目录", "目次":
 		return false
 	}
 	return strings.TrimSpace(corrected[line.LineNo]) == "unchanged"
@@ -764,7 +764,7 @@ func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, log
 	// startPage := 0
 	for i, line := range lines {
 		n := normalizeStaticTitle(line.Content)
-		if n == "table of content" || n == "table of contents" || n == "目录" || n == "目次" || n == "目 次" {
+		if n == "tableofcontent" || n == "tableofcontents" || n == "目录" || n == "目次" {
 			start = i
 			// startPage = line.PageNo
 			break
@@ -831,7 +831,8 @@ func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, log
 }
 
 func normalizeStaticTitle(s string) string {
-	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(s))), " ")
+	s = strings.ReplaceAll(s, "　", " ") // Chinese ideographic space → ASCII space
+	return strings.Join(strings.Fields(strings.ToLower(s)), "")
 }
 
 func isStaticTOCLine(line staticInputLine) bool {

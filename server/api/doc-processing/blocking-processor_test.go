@@ -9,7 +9,7 @@ import (
 
 func TestBuildBlocks_SinglePage(t *testing.T) {
 	input := "1\t1\theading\tArial\t12\t[0,0,100,20]\tHello"
-	buf, err := buildBlocks([]byte(input), 3)
+	buf, err := buildBlocks([]byte(input), 3, 1, 1, false)
 	if err != nil {
 		t.Fatalf("buildBlocks error: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestBuildBlocks_NoPreviousOverlapOnFirstBlock(t *testing.T) {
 		"3\t3\tparagraph\tArial\t11\t[0,0,1,1]\tPage3Line1",
 		"4\t4\tparagraph\tArial\t11\t[0,0,1,1]\tPage4Line1",
 	}
-	buf, err := buildBlocks([]byte(strings.Join(lines, "\n")), 3)
+	buf, err := buildBlocks([]byte(strings.Join(lines, "\n")), 3, 1, 1, false)
 	if err != nil {
 		t.Fatalf("buildBlocks error: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestBuildBlocks_ThreeFullBlocks(t *testing.T) {
 	for pg := 1; pg <= 9; pg++ {
 		lines = append(lines, fmt.Sprintf("1\t%d\tparagraph\tArial\t11\t[0,0,1,1]\tcontent", pg))
 	}
-	buf, err := buildBlocks([]byte(strings.Join(lines, "\n")), 3)
+	buf, err := buildBlocks([]byte(strings.Join(lines, "\n")), 3, 1, 1, false)
 	if err != nil {
 		t.Fatalf("buildBlocks error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestBuildBlocks_ThreeFullBlocks(t *testing.T) {
 }
 
 func TestBuildBlocks_EmptyInput(t *testing.T) {
-	buf, err := buildBlocks([]byte(""), 3)
+	buf, err := buildBlocks([]byte(""), 3, 1, 1, false)
 	if err != nil {
 		t.Fatalf("buildBlocks error: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestBuildBlocks_EmptyInput(t *testing.T) {
 
 func TestBuildBlocks_MalformedLinesSkipped(t *testing.T) {
 	input := "not-valid\n1\t1\theading\tArial\t12\t[0,0,1,1]\tGood"
-	buf, err := buildBlocks([]byte(input), 3)
+	buf, err := buildBlocks([]byte(input), 3, 1, 1, false)
 	if err != nil {
 		t.Fatalf("buildBlocks error: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestBuildBlocks_MalformedLinesSkipped(t *testing.T) {
 
 func TestBuildBlocks_FontFieldsDropped(t *testing.T) {
 	input := "1\t1\theading\tTimes\t14\t[1,2,3,4]\tContent Here"
-	buf, err := buildBlocks([]byte(input), 3)
+	buf, err := buildBlocks([]byte(input), 3, 1, 1, false)
 	if err != nil {
 		t.Fatalf("buildBlocks error: %v", err)
 	}
@@ -149,6 +149,74 @@ func TestBuildBlocks_FontFieldsDropped(t *testing.T) {
 	out := line.String()
 	if strings.Contains(out, "Times") || strings.Contains(out, "\t14\t") || strings.Contains(out, "[1,2,3,4]") {
 		t.Errorf("output should not contain font/size/coordinate fields: %s", out)
+	}
+}
+
+func TestBuildBlocks_RemoveTOC(t *testing.T) {
+	lines := []string{
+		"1\t1\ttoc\tArial\t12\t[0,0,1,1]\tTable of Contents",
+		"2\t1\theading\tArial\t12\t[0,0,1,1]\tIntroduction",
+		"3\t2\ttoc\tArial\t12\t[0,0,1,1]\tChapter 1",
+		"4\t2\tparagraph\tArial\t11\t[0,0,1,1]\tBody text",
+	}
+	input := strings.Join(lines, "\n")
+
+	bufWithTOC, err := buildBlocks([]byte(input), 3, 1, 1, false)
+	if err != nil {
+		t.Fatalf("buildBlocks error: %v", err)
+	}
+	totalWithTOC := 0
+	for _, b := range bufWithTOC.Blocks {
+		totalWithTOC += len(b.Lines)
+	}
+	if totalWithTOC != 4 {
+		t.Errorf("without filter: want 4 lines total, got %d", totalWithTOC)
+	}
+
+	bufFiltered, err := buildBlocks([]byte(input), 3, 1, 1, true)
+	if err != nil {
+		t.Fatalf("buildBlocks error: %v", err)
+	}
+	for _, b := range bufFiltered.Blocks {
+		for _, l := range b.Lines {
+			if l.LineType == "toc" {
+				t.Errorf("removeTOC=true: found toc line in output: %s", l.String())
+			}
+		}
+	}
+	totalFiltered := 0
+	for _, b := range bufFiltered.Blocks {
+		totalFiltered += len(b.Lines)
+	}
+	if totalFiltered != 2 {
+		t.Errorf("with filter: want 2 non-toc lines total, got %d", totalFiltered)
+	}
+}
+
+func TestBuildBlocks_CustomOverlap(t *testing.T) {
+	// 6 pages, block size 2, prevOverlap=2, nextOverlap=2
+	var lines []string
+	for pg := 1; pg <= 6; pg++ {
+		lines = append(lines, fmt.Sprintf("1\t%d\tparagraph\tArial\t11\t[0,0,1,1]\tpage%d", pg, pg))
+	}
+	buf, err := buildBlocks([]byte(strings.Join(lines, "\n")), 2, 2, 2, false)
+	if err != nil {
+		t.Fatalf("buildBlocks error: %v", err)
+	}
+	// block 1: core pages 1-2 (n) + next-overlap pages 3-4 (o)         = 4 lines
+	// block 2: prev-overlap pages 1-2 (o) + core 3-4 (n) + next 5-6 (o) = 6 lines
+	// block 3: prev-overlap pages 3-4 (o) + core 5-6 (n)               = 4 lines
+	if len(buf.Blocks) != 3 {
+		t.Fatalf("want 3 blocks, got %d", len(buf.Blocks))
+	}
+	if len(buf.Blocks[0].Lines) != 4 {
+		t.Errorf("block1: want 4 lines, got %d", len(buf.Blocks[0].Lines))
+	}
+	if len(buf.Blocks[1].Lines) != 6 {
+		t.Errorf("block2: want 6 lines, got %d", len(buf.Blocks[1].Lines))
+	}
+	if len(buf.Blocks[2].Lines) != 4 {
+		t.Errorf("block3: want 4 lines, got %d", len(buf.Blocks[2].Lines))
 	}
 }
 

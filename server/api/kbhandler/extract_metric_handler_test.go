@@ -232,10 +232,14 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 
 	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS kb;").
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb.metrics WHERE input_record_id").
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	mock.ExpectExec("INSERT INTO kb.metrics").
 		WithArgs(
 			"rest-api",
 			int64(7),
+			"7_1",
 			"Energy intensity",
 			nil,
 			`["10:11"]`,
