@@ -275,7 +275,7 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	svc.Logger = logger
 	svc.ChunkDir = tmp
 	svc.TreeRootDir = treeRoot
-	svc.SummaryTreeDir = t.TempDir()
+	svc.ArtifactWebDir = t.TempDir()
 	svc.ChunkSize = 25
 	svc.OverlapPercent = 50
 	svc.ModelErr = nil
@@ -286,11 +286,11 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	svc.SummaryPromptErr = nil
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summary prompt"
-	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, children []SummaryItem) (summaryGenerateResult, error) {
 		if level == 0 {
-			return "chunk summary " + asString(seqNo), nil, []string{"legacy_summary_tree"}, nil, nil
+			return summaryGenerateResult{Summary: "chunk summary " + asString(seqNo), CategoryPaths: []string{"legacy_summary_tree"}}, nil
 		}
-		return "parent summary " + strings.Join(collectSummaryIDs(children), ","), nil, []string{"legacy_summary_tree"}, nil, nil
+		return summaryGenerateResult{Summary: "parent summary " + strings.Join(collectSummaryIDs(children), ","), CategoryPaths: []string{"legacy_summary_tree"}}, nil
 	}
 
 	if err := svc.HandleInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
@@ -426,7 +426,7 @@ func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = t.TempDir()
 	svc.TreeRootDir = t.TempDir()
-	svc.SummaryTreeDir = t.TempDir()
+	svc.ArtifactWebDir = t.TempDir()
 	svc.ChunkSize = 2
 	svc.OverlapPercent = 0
 
@@ -506,7 +506,7 @@ func TestService_HandleInput_MissingTreeRootDir(t *testing.T) {
 	svc.PromptErr = nil
 	svc.ModelName = "topic-model"
 	svc.PromptText = "prompt"
-	svc.SummaryTreeDir = t.TempDir()
+	svc.ArtifactWebDir = t.TempDir()
 	svc.SummaryModelErr = nil
 	svc.SummaryPromptErr = nil
 	svc.SummaryModelName = "summary-model"
@@ -568,7 +568,7 @@ func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 	svc := NewFixedSizeChunkingService(st, ex, nil)
 	svc.ChunkDir = tmp
 	svc.TreeRootDir = topicTreeRoot
-	svc.SummaryTreeDir = summaryTreeRoot
+	svc.ArtifactWebDir = summaryTreeRoot
 	svc.ChunkSize = 22
 	svc.OverlapPercent = 0
 	svc.ModelErr = nil
@@ -580,15 +580,21 @@ func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summarize chunk"
 	svc.SummaryGroupSize = 2
-	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []Line, children []SummaryItem) (summaryGenerateResult, error) {
 		if level == 0 {
-			return "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromLines(lines)), nil, []string{"Safety Overview", "Closing Notes"}, nil, nil
+			return summaryGenerateResult{
+				Summary:       "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromLines(lines)),
+				CategoryPaths: []string{"Safety Overview", "Closing Notes"},
+			}, nil
 		}
 		ids := make([]string, 0, len(children))
 		for _, child := range children {
 			ids = append(ids, child.SummaryID)
 		}
-		return "parent summary " + asString(seqNo) + " children=" + strings.Join(ids, ","), nil, []string{"Safety Overview", "Closing Notes"}, nil, nil
+		return summaryGenerateResult{
+			Summary:       "parent summary " + asString(seqNo) + " children=" + strings.Join(ids, ","),
+			CategoryPaths: []string{"Safety Overview", "Closing Notes"},
+		}, nil
 	}
 
 	if err := svc.HandleInput(context.Background(), 8123, "sample.txt", []byte(input)); err != nil {
@@ -627,7 +633,7 @@ func TestService_HandleInput_SummaryGenerationFailure(t *testing.T) {
 	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = t.TempDir()
 	svc.TreeRootDir = t.TempDir()
-	svc.SummaryTreeDir = t.TempDir()
+	svc.ArtifactWebDir = t.TempDir()
 	svc.ChunkSize = 10
 	svc.OverlapPercent = 0
 	svc.ModelErr = nil
@@ -638,8 +644,8 @@ func TestService_HandleInput_SummaryGenerationFailure(t *testing.T) {
 	svc.SummaryPromptErr = nil
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summary prompt"
-	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, _ int, _ []Line, _ []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
-		return "", nil, nil, nil, errors.New("summary generator boom")
+	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, _ int, _ []Line, _ []SummaryItem) (summaryGenerateResult, error) {
+		return summaryGenerateResult{}, errors.New("summary generator boom")
 	}
 
 	err := svc.HandleInput(context.Background(), 9001, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))

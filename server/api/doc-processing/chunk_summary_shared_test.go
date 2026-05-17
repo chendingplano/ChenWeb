@@ -46,7 +46,7 @@ func TestWriteSummaryFile(t *testing.T) {
 		`summary_id: "93_1_0001"`,
 		"record_id: 93",
 		"children: [\"93_0_0001\", \"93_0_0002\"]",
-		"summary_begin:",
+		"summary_begin",
 		"Parent summary text",
 		"summary_end",
 	} {
@@ -103,12 +103,12 @@ func TestBuildSummaryTree(t *testing.T) {
 		{SummaryID: "93_0_0004", RecordID: 93, Level: 0, SeqNo: 4, Lines: []string{"7-8"}, Summary: "D"},
 	}
 
-	all, root, err := buildSummaryTree(93, leafs, 2, func(level int, seqNo int, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
+	all, root, err := buildSummaryTree(93, leafs, 2, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
 		ids := make([]string, 0, len(children))
 		for _, child := range children {
 			ids = append(ids, child.SummaryID)
 		}
-		return "L" + asString(level) + ":" + strings.Join(ids, ","), nil, nil, nil, nil
+		return summaryGenerateResult{Summary: "L" + asString(level) + ":" + strings.Join(ids, ",")}, nil
 	})
 	if err != nil {
 		t.Fatalf("buildSummaryTree: %v", err)

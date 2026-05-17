@@ -938,14 +938,16 @@ func parseCategoryPathsArray(arr []any) []CategoryPathEntry {
 }
 
 // extractCategoryPathDetailEnFromLLM extracts the English-translated category
-// path detail from the "category_paths_en" key in an LLM response map.
+// path detail from "categories_en" or "category_paths_en" in an LLM response map.
 func extractCategoryPathDetailEnFromLLM(m map[string]any) []CategoryPathEntry {
-	arr, ok := m["category_paths_en"].([]any)
-	if !ok {
-		return nil
-	}
-	if entries := parseCategoryPathsArray(arr); len(entries) > 0 {
-		return entries
+	for _, key := range []string{"categories_en", "category_paths_en"} {
+		arr, ok := m[key].([]any)
+		if !ok {
+			continue
+		}
+		if entries := parseCategoryPathsArray(arr); len(entries) > 0 {
+			return entries
+		}
 	}
 	return nil
 }

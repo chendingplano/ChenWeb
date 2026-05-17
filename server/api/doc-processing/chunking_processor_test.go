@@ -73,15 +73,15 @@ func TestChunkingProcessor_HandleEvent_BlockInputFallbackWritesChunks(t *testing
 	service := NewFixedSizeChunkingService(store, extractor, nil)
 	service.ChunkDir = tmp
 	service.TreeRootDir = treeRoot
-	service.SummaryTreeDir = summaryRoot
+	service.ArtifactWebDir = summaryRoot
 	service.ChunkSize = 100
 	service.OverlapPercent = 0
 	service.ModelErr = nil
 	service.PromptErr = nil
 	service.SummaryModelErr = nil
 	service.SummaryPromptErr = nil
-	service.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, _ []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
-		return "summary " + asString(level) + "-" + asString(seqNo), nil, []string{"legacy_summary_tree"}, nil, nil
+	service.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, _ []SummaryItem) (summaryGenerateResult, error) {
+		return summaryGenerateResult{Summary: "summary " + asString(level) + "-" + asString(seqNo), CategoryPaths: []string{"legacy_summary_tree"}}, nil
 	}
 
 	processor := NewChunkingProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{

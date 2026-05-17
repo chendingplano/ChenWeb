@@ -23,18 +23,35 @@ const (
 	categoryMetadataFileName            = "metadata.txt"
 )
 
+// summaryGenerateResult carries all LLM output fields for one summary generation call.
+// It is returned by generateSummary and used to populate a SummaryItem.
+type summaryGenerateResult struct {
+	Summary             string
+	SummaryEn           string
+	Keywords            []string
+	KeywordsEn          []string
+	CategoryPaths       []string            // flat segment names used for tree-dir indexing
+	CategoryNodes       []CategoryPathNode  // per-node metadata for the first category path
+	CategoryPathItems   []CategoryPathEntry // all category paths in rich format (written to file)
+	CategoryPathItemsEn []CategoryPathEntry // English translations of category paths
+}
+
 type SummaryItem struct {
-	SummaryID     string
-	RecordID      int64
-	Level         int
-	SeqNo         int
-	Lines         []string
-	Children      []string
-	Keywords      []string
-	CategoryPaths []string
-	CategoryNodes []CategoryPathNode
-	Summary       string
-	Embedding     []float64
+	SummaryID           string
+	RecordID            int64
+	Level               int
+	SeqNo               int
+	Lines               []string
+	Children            []string
+	Keywords            []string
+	KeywordsEn          []string
+	CategoryPaths       []string            // flat segment names for tree-dir indexing
+	CategoryNodes       []CategoryPathNode  // per-node metadata for first category path
+	CategoryPathItems   []CategoryPathEntry // rich format written to summary file
+	CategoryPathItemsEn []CategoryPathEntry // English translations
+	Summary             string
+	SummaryEn           string
+	Embedding           []float64
 }
 
 type SummaryCluster struct {
@@ -86,17 +103,28 @@ func writeSummaryFile(baseDir string, recordID int64, item SummaryItem) (string,
 	b.WriteString("keywords: ")
 	b.WriteString(formatQuotedArray(item.Keywords))
 	b.WriteByte('\n')
+	if len(item.KeywordsEn) > 0 {
+		b.WriteString("keywords_en: ")
+		b.WriteString(formatQuotedArray(item.KeywordsEn))
+		b.WriteByte('\n')
+	}
 	b.WriteString("category_paths: ")
-	b.WriteString(formatQuotedArray(item.CategoryPaths))
+	b.WriteString(formatCategoryPathEntries(item.CategoryPathItems))
 	b.WriteByte('\n')
-	b.WriteString("summary_begin:\n")
+	if len(item.CategoryPathItemsEn) > 0 {
+		b.WriteString("category_paths_en: ")
+		b.WriteString(formatCategoryPathEntries(item.CategoryPathItemsEn))
+		b.WriteByte('\n')
+	}
+	b.WriteString("summary_begin\n")
 	b.WriteString(strings.TrimSpace(item.Summary))
 	b.WriteByte('\n')
 	b.WriteString("summary_end\n")
-	if len(item.Embedding) > 0 {
-		b.WriteString("embedding: ")
-		b.WriteString(formatFloatArray(item.Embedding))
+	if strings.TrimSpace(item.SummaryEn) != "" {
+		b.WriteString("summary_en_begin\n")
+		b.WriteString(strings.TrimSpace(item.SummaryEn))
 		b.WriteByte('\n')
+		b.WriteString("summary_en_end\n")
 	}
 	if err := os.WriteFile(path, []byte(strings.TrimRight(b.String(), "\n")), 0o644); err != nil {
 		return "", err
@@ -140,7 +168,7 @@ func buildSummaryTree(
 	recordID int64,
 	leafs []SummaryItem,
 	groupSize int,
-	summarize func(level int, seqNo int, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error),
+	summarize func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error),
 ) ([]SummaryItem, SummaryItem, error) {
 	if len(leafs) == 0 {
 		return nil, SummaryItem{}, errors.New("no leaf summaries")
@@ -157,21 +185,25 @@ func buildSummaryTree(
 			end := min(i+groupSize, len(current))
 			children := append([]SummaryItem(nil), current[i:end]...)
 			seqNo := len(next) + 1
-			summaryText, keywords, catPath, catNodes, err := summarize(level, seqNo, children)
+			res, err := summarize(level, seqNo, children)
 			if err != nil {
 				return nil, SummaryItem{}, err
 			}
 			parent := SummaryItem{
-				SummaryID:     buildSummaryID(recordID, level, seqNo),
-				RecordID:      recordID,
-				Level:         level,
-				SeqNo:         seqNo,
-				Lines:         mergeSummaryLineRanges(children),
-				Children:      collectSummaryIDs(children),
-				Keywords:      keywords,
-				CategoryPaths: catPath,
-				CategoryNodes: catNodes,
-				Summary:       sanitizeTopicText(summaryText),
+				SummaryID:           buildSummaryID(recordID, level, seqNo),
+				RecordID:            recordID,
+				Level:               level,
+				SeqNo:               seqNo,
+				Lines:               mergeSummaryLineRanges(children),
+				Children:            collectSummaryIDs(children),
+				Keywords:            res.Keywords,
+				KeywordsEn:          res.KeywordsEn,
+				CategoryPaths:       res.CategoryPaths,
+				CategoryNodes:       res.CategoryNodes,
+				CategoryPathItems:   res.CategoryPathItems,
+				CategoryPathItemsEn: res.CategoryPathItemsEn,
+				Summary:             sanitizeTopicText(res.Summary),
+				SummaryEn:           sanitizeTopicText(res.SummaryEn),
 			}
 			next = append(next, parent)
 			all = append(all, parent)

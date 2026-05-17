@@ -68,7 +68,7 @@ type FixedSizeChunkingService struct {
 	Now                        func() time.Time
 	ChunkDir                   string
 	TreeRootDir                string
-	SummaryTreeDir             string
+	ArtifactWebDir             string
 	ChunkSize                  int
 	OverlapPercent             int
 	ModelRef                   string
@@ -91,7 +91,7 @@ type FixedSizeChunkingService struct {
 	TopicEmbeddingModelName    string
 	SummaryEmbeddingModelName  string
 	CategorySimilarityMinScore float64
-	GenerateSummary            func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error)
+	GenerateSummary            func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (summaryGenerateResult, error)
 }
 
 type ChunkOptions struct {
@@ -193,7 +193,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 		Now:                        time.Now,
 		ChunkDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		TreeRootDir:                strings.TrimSpace(os.Getenv("TOPIC_TREE_ROOT_DIR")),
-		SummaryTreeDir:             strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR")),
+		ArtifactWebDir:             strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 		ChunkSize:                  envInt("CHUNK_SIZE", DefaultChunkSize, 1),
 		OverlapPercent:             envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
 		ModelRef:                   modelRef,
@@ -246,8 +246,8 @@ func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
-	if strings.TrimSpace(s.SummaryTreeDir) == "" {
-		procErr := errors.New("(MID_26042901) missing SUMMARY_TREE_DIR")
+	if strings.TrimSpace(s.ArtifactWebDir) == "" {
+		procErr := errors.New("(MID_26042901) missing ARTIFACT_WEB_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
@@ -315,8 +315,8 @@ func (s *FixedSizeChunkingService) HandleBlockInput(ctx context.Context, recordI
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
-	if strings.TrimSpace(s.SummaryTreeDir) == "" {
-		procErr := errors.New("(MID_26050607) missing SUMMARY_TREE_DIR")
+	if strings.TrimSpace(s.ArtifactWebDir) == "" {
+		procErr := errors.New("(MID_26050607) missing ARTIFACT_WEB_DIR")
 		s.failAndPersist(ctx, rec, inputFilename, 0, 0, 0, start, procErr)
 		return procErr
 	}
@@ -429,22 +429,26 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		for _, marked := range chunk.Lines {
 			chunkLines = append(chunkLines, marked.Line)
 		}
-		summaryText, summaryKeywords, catPath, catNodes, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunkLines, nil)
+		res, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunkLines, nil)
 		if summaryErr != nil {
 			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, summaryErr)
 			return summaryErr
 		}
 		_, regularLines := chunkLineNumbers(chunk)
 		item := SummaryItem{
-			SummaryID:     buildSummaryID(rec.ID, 0, chunk.SeqNo),
-			RecordID:      rec.ID,
-			Level:         0,
-			SeqNo:         chunk.SeqNo,
-			Lines:         lineRangesFromNumbers(regularLines),
-			Keywords:      summaryKeywords,
-			CategoryPaths: catPath,
-			CategoryNodes: catNodes,
-			Summary:       sanitizeTopicText(summaryText),
+			SummaryID:           buildSummaryID(rec.ID, 0, chunk.SeqNo),
+			RecordID:            rec.ID,
+			Level:               0,
+			SeqNo:               chunk.SeqNo,
+			Lines:               lineRangesFromNumbers(regularLines),
+			Keywords:            res.Keywords,
+			KeywordsEn:          res.KeywordsEn,
+			CategoryPaths:       res.CategoryPaths,
+			CategoryNodes:       res.CategoryNodes,
+			CategoryPathItems:   res.CategoryPathItems,
+			CategoryPathItemsEn: res.CategoryPathItemsEn,
+			Summary:             sanitizeTopicText(res.Summary),
+			SummaryEn:           sanitizeTopicText(res.SummaryEn),
 		}
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
 			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
@@ -453,7 +457,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		leafSummaries = append(leafSummaries, item)
 	}
 
-	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, func(level int, seqNo int, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
+	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
 		return s.generateSummary(ctx, rec.ID, level, seqNo, nil, children)
 	})
 	if err != nil {
@@ -469,16 +473,16 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 			return err
 		}
 	}
-	if err := os.MkdirAll(s.SummaryTreeDir, 0o755); err != nil {
+	if err := os.MkdirAll(s.ArtifactWebDir, 0o755); err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
-	if err := removeSummaryTreeRecord(s.SummaryTreeDir, rec.ID); err != nil {
+	if err := removeSummaryTreeRecord(s.ArtifactWebDir, rec.ID); err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
 	for _, item := range allSummaries {
-		if err := writeSummaryTreeEntry(s.Logger, s.SummaryTreeDir, item, item.CategoryPaths, item.CategoryNodes); err != nil {
+		if err := writeSummaryTreeEntry(s.Logger, s.ArtifactWebDir, item, item.CategoryPaths, item.CategoryNodes); err != nil {
 			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 			return err
 		}
@@ -578,12 +582,12 @@ func ParseBlockBufferLines(buf *BlockBuffer) []Line {
 	return out
 }
 
-func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (string, []string, []string, []CategoryPathNode, error) {
+func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (summaryGenerateResult, error) {
 	if s.GenerateSummary != nil {
 		return s.GenerateSummary(ctx, recordID, level, seqNo, lines, children)
 	}
 	if s.Extractor == nil {
-		return "", nil, nil, nil, errors.New("(MID_26042904) summary extractor is nil")
+		return summaryGenerateResult{}, errors.New("(MID_26042904) summary extractor is nil")
 	}
 	inputText := buildSummaryInputText(lines, children)
 
@@ -593,7 +597,7 @@ func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID
 		InputText:  inputText,
 	})
 	if err != nil {
-		return "", nil, nil, nil, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d: %w", level, seqNo, err)
+		return summaryGenerateResult{}, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d: %w", level, seqNo, err)
 	}
 	summary := sanitizeTopicText(asString(parsed["summary"]))
 	if summary == "" {
@@ -606,8 +610,10 @@ func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID
 	if summary == "" {
 		summary = fallbackSummaryText(inputText)
 	}
+	summaryEn := sanitizeTopicText(asString(parsed["summary_en"]))
 
 	keywords := compactTopicArray(parsed["keywords"])
+	keywordsEn := compactTopicArray(parsed["keywords_en"])
 
 	rawPath := extractCategoryPathFromLLM(parsed)
 	path, reason := normalizeAndValidateTopicCategoryPath(rawPath, defaultSummaryTreeFallbackTopicType)
@@ -616,9 +622,11 @@ func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID
 			"level", level, "seq", seqNo, "reason", reason, "raw_path", rawPath)
 		path = nil
 	}
+	categoryPathItems := extractCategoryPathDetailFromLLM(parsed)
+	categoryPathItemsEn := extractCategoryPathDetailEnFromLLM(parsed)
 	var nodes []CategoryPathNode
-	if entries := extractCategoryPathDetailFromLLM(parsed); len(entries) > 0 {
-		nodes = entries[0].Nodes
+	if len(categoryPathItems) > 0 {
+		nodes = categoryPathItems[0].Nodes
 	}
 
 	s.Logger.Info("Generated summary",
@@ -628,7 +636,16 @@ func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID
 		"summary", summary,
 		"keywords", keywords,
 		"category_path", path)
-	return summary, keywords, path, nodes, nil
+	return summaryGenerateResult{
+		Summary:             summary,
+		SummaryEn:           summaryEn,
+		Keywords:            keywords,
+		KeywordsEn:          keywordsEn,
+		CategoryPaths:       path,
+		CategoryNodes:       nodes,
+		CategoryPathItems:   categoryPathItems,
+		CategoryPathItemsEn: categoryPathItemsEn,
+	}, nil
 }
 
 func buildSummaryInputText(lines []Line, children []SummaryItem) string {
@@ -1499,12 +1516,12 @@ func loadFixedSizeTopicPromptFromEnv() (promptText string, promptRef string, pro
 }
 
 func loadFixedSizeSummaryPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("CHUNK_SUMMARY_PROMPT"))
+	promptRef = strings.TrimSpace(os.Getenv("GENERATE_SUMMARY_PROMPT"))
 	if promptRef == "" {
 		promptRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_PROMPT"))
 	}
 	if promptRef == "" {
-		return "", "", "", errors.New("(MID_26042909) missing CHUNK_SUMMARY_PROMPT")
+		return "", "", "", errors.New("(MID_26042909) missing GENERATE_SUMMARY_PROMPT")
 	}
 
 	paths := make([]string, 0, 8)
