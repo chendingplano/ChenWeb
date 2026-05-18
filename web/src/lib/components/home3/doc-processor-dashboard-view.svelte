@@ -69,7 +69,8 @@
 		{ id: 'extract_metrics',      label: 'Extract Metrics',     operations: ['extract_metrics'] },
 		{ id: 'extract_provisions',   label: 'Extract Provisions',  operations: ['extract_provisions'] },
 		{ id: 'generate_summaries',   label: 'Generate Summaries',  operations: ['generate_summaries'] },
-		{ id: 'generate_topics',      label: 'Generate Topics',     operations: ['generate_topics'] }
+		{ id: 'generate_topics',      label: 'Generate Topics',     operations: ['generate_topics'] },
+		{ id: 'generate_scene_blocks', label: 'Generate Scene Blocks', operations: ['generate_scene_blocks'] }
 	];
 
 	// Stages managed by the doc-processor service — all must finish for the pipeline to be done.
@@ -78,7 +79,7 @@
 	// Processors that can be explicitly requested in launch/restart payloads.
 	const ALL_PROCESSOR_IDS = [
 		'static_analyzer', 'chunking', 'extract_doc_metadata', 'extract_metrics', 'extract_provisions',
-		'generate_summaries', 'generate_topics'
+		'generate_summaries', 'generate_topics', 'generate_scene_blocks'
 	];
 
 	// Ordered subset of PIPELINE_STAGES shown in the launch/restart UI.
