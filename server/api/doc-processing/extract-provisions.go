@@ -352,6 +352,11 @@ func isEmptyFallbackProvisionExtractionError(err error) bool {
 }
 
 func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block Block, modelName string) (map[string]any, error) {
+	p.Logger.Info("To extract provisions", 
+		"model", modelName,
+		"prompt_name", p.PromptRef,
+		"input_text", block)
+
 	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		PromptText: p.PromptText,
 		ModelName:  modelName,

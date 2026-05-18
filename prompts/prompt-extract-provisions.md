@@ -15,7 +15,7 @@ Each format of lines in the input is:
 ```text
 <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
 ```
-where `<flag>` indicates whether the line is an overlap line ('o') or normal line ('n').
+where `<flag>` indicates whether the line is an overlapped line ('o') or normal line ('n').
 
 ## 2. Classification
 For each extracted provision, classify it as:
@@ -40,7 +40,7 @@ Provisions may appear:
 * in tables
 
 ## 5. Extraction Rules
-- Do not extract provisions from olverlap lines unless provisions live in both the overlap lines 
+- Do not extract provisions from overlapped lines unless provisions live in both the overlapped lines 
 and normal lines.
 - Extract complete, self-contained statements (not fragments).
 - Preserve technical meaning exactly; do NOT paraphrase unless necessary for clarity.

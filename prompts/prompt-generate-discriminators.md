@@ -4,7 +4,9 @@ Your task is to generate discriminators for a given user request.
 
 ## Definition
 
-A discriminator is a term, concept, phrase, metadata signal, structural clue, alias, or retrieval heuristic that helps distinguish relevant information from irrelevant information within a knowledge corpus.
+A discriminator is a term, concept, phrase, metadata signal, structural clue,
+alias, or retrieval heuristic that helps distinguish relevant information 
+from irrelevant information within a knowledge corpus.
 
 A good discriminator is NOT merely semantically related to the query.
 

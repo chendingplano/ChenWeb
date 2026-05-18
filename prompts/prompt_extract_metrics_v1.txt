@@ -153,18 +153,100 @@ Apply these rules strictly:
 * Preserve exact wording in `source_text`.
 * Normalize `metric_name` only enough to make it concise and readable.
 
+## Extract Category Paths
+
+A category path is made of one or more categories, forming a category path:
+```text
+  <domain>/<subdomain>/<category>/..., similar to file path.
+```
+
+* `<domain>` MUST be generic, such as 'Health', 'Medical', 'Software', 'Manufacturing', etc.
+* `<subdomain>` MUST also be generic within its domain.
+* `<domain>`, `<subdomain>` and `<category>` MUST be in its input language
+* Each deeper level category MUST be semantically narrower than its parent
+* Last level = most specific
+* Limit the max depth of category paths to 10
+
+### Category Paths and File Paths
+
+* A category path maps to a file path.
+
+### Multiple Category Paths
+
+* Extract multiple category paths per metric as needed, up to 5
+* Output multiple category paths
+
+### Keywords
+
+* Provide both category-level keywords and path-level keywords
+* Provide keywords (at least 1) per category of per category path
+* Keywords MUST:
+
+  * Be in its input language
+  * Be directly grounded in the input
+  * Be specific and meaningful (not generic words)
+  * Help distinguish this topic from others
+
+### Confidence
+
+* Provide a confidence score between 0 and 1 for each category path
+* Confidence reflects:
+
+  * Clarity of the topic in the input
+  * Completeness of the category path
+  * Strength of supporting evidence
+* Use:
+
+  * ≥0.85 → strong, explicit topic
+  * 0.6–0.85 → reasonably clear topic
+  * <0.6 → weak or inferred topic (avoid if possible)
+
+### Category Quality
+
+* Use canonical noun phrases
+* Avoid verbs, sentences, or vague terms
+* Avoid generic categories such as:
+
+  * "general", "other", "miscellaneous"
+
+### Consistency
+
+* Reuse common top-level categories when appropriate
+* Keep naming style consistent across all paths
+
+### Language
+
+* Match the language of the input.
+* For English / Latin-script content: use English category names.
+* For Chinese / CJK content: use Chinese category names directly.
+
+### Normalization rules
+
+Apply these rules according to the language of each category segment:
+
+* For English / Latin-script segments:
+  * Use lowercase
+  * Use snake_case (underscores between words)
+  * Remove punctuation
+* For Chinese / CJK segments:
+  * Keep the original Chinese characters — do NOT snake_case or romanize them
+  * Remove punctuation (Chinese punctuation such as ，、。：；“” are removed)
+  * Do NOT insert spaces or underscores between characters
+* Keep each level concise (1–4 words preferred)
+
+### Output format (STRICT JSON)
+
+```json
+```
+
 ## Languages
-* For attributes "metric_name", "source_text", "metric_subject", "metric_keywords", and "metric_unit":
+For attributes "metric_name", "metric_desc", "metric_content", "source_text", "metric_subject", 
+"metric_keywords", "metric_unit", "value_class" and "category_paths":
   * Extract them in the original language
   * If the original language is not English, translate them to English and save them in the 
     attribute '<original_attribute_name>_en'. For instance, for 'metric_name', its English 
     translation is saved in 'metric_name_en'
-* Generate "metric_desc" and "metric_context" in the original language. If the original language
-  is not English, generate their English version and save them to "metric_desc" and "metric_context",
-  respectively.
-* For "value_class", if the original language is not English, generate the value in the original language
-  and then its English version.
-  
+
 ## Output format
 
 Return valid JSON with this schema:
@@ -202,6 +284,34 @@ Return valid JSON with this schema:
       "is_explicit_metric": true,
       "table_name_or_section": "...",
       "reasoning_tags": ["..."]
+      "category_paths": [
+         {
+            "category_path": [
+            {
+               "name": "public_health",
+               "keywords": ["health management", "disease prevention", "public health"],
+               "confidence": 0.95
+            },
+            {
+               "name": "vaccination",
+               "keywords": ["vaccination", "immunization", "vaccine administration"],
+               "confidence": 0.94
+            },
+            {
+               "name": "record_management",
+               "keywords": ["vaccination records", "recipient data", "immunization information system"],
+               "confidence": 0.92
+            }
+            ],
+            "path_keywords": ["vaccination records", "recipient data", "information system"],
+            "path_confidence": 0.92
+         },
+         {
+            <next category path>
+         },
+         ...
+      ],
+      "caetgory_paths_en": [...]
    },
    {
       <next metric>

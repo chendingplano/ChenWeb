@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,20 +19,21 @@ import (
 )
 
 type MetricsProcessor struct {
-	InputStore   DocMetadataStore
-	Store        MetricsStore
-	Extractor    LLMJSONExtractor
-	Logger       ApiTypes.JimoLogger
-	Now          func() time.Time
-	PromptText   string
-	PromptRef    string
-	PromptPath   string
-	PromptErr    error
-	ModelRef     string
-	ModelCfgPath string
-	ModelErr     error
-	ModelName    string
-	ChunkDir     string
+	InputStore      DocMetadataStore
+	Store           MetricsStore
+	Extractor       LLMJSONExtractor
+	Logger          ApiTypes.JimoLogger
+	Now             func() time.Time
+	PromptText      string
+	PromptRef       string
+	PromptPath      string
+	PromptErr       error
+	ModelRef        string
+	ModelCfgPath    string
+	ModelErr        error
+	ModelName       string
+	ChunkDir        string
+	ArtifactWebDir  string
 }
 
 type MetricsStore interface {
@@ -74,7 +76,8 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		ModelCfgPath: modelCfgPath,
 		ModelErr:     modelErr,
 		ModelName:    modelCfg.ModelName,
-		ChunkDir:     strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		ChunkDir:       strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		ArtifactWebDir: strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 	}
 }
 
@@ -202,6 +205,10 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 
 	if fileErr := p.saveMetricsToFile(evt.RecordID, rec, allMetrics); fileErr != nil {
 		p.Logger.Warn("save metrics to file failed", "record_id", evt.RecordID, "error", fileErr)
+	}
+
+	if indexErr := p.indexMetrics(evt.RecordID, allMetrics); indexErr != nil {
+		p.Logger.Warn("index metrics failed", "record_id", evt.RecordID, "error", indexErr)
 	}
 
 	p.Logger.Info("metrics extracted",
@@ -465,6 +472,24 @@ func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) strin
 			"is_explicit_metric":    true,
 			"table_name_or_section": "string",
 			"reasoning_tags":        []string{"string"},
+			"category_paths": []map[string]any{{
+				"category_path": []map[string]any{{
+					"name":       "string",
+					"keywords":   []string{"string"},
+					"confidence": 0.0,
+				}},
+				"path_keywords":   []string{"string"},
+				"path_confidence": 0.0,
+			}},
+			"category_paths_en": []map[string]any{{
+				"category_path": []map[string]any{{
+					"name":       "string",
+					"keywords":   []string{"string"},
+					"confidence": 0.0,
+				}},
+				"path_keywords":   []string{"string"},
+				"path_confidence": 0.0,
+			}},
 		}},
 		"uncertain_metrics": []any{},
 	}
@@ -512,6 +537,13 @@ func normalizeMetricList(items []any) []map[string]any {
 			"reasoning_tags":        toStringSlice(raw["reasoning_tags"]),
 		}
 		normalized["source_line_spans"] = normalizeSourceLineSpans(raw["source_line_spans"])
+		normalized["category_paths"] = raw["category_paths"]
+		// handle spec typo "caetgory_paths_en"
+		catPathsEn := raw["category_paths_en"]
+		if catPathsEn == nil {
+			catPathsEn = raw["caetgory_paths_en"]
+		}
+		normalized["category_paths_en"] = catPathsEn
 		out = append(out, normalized)
 	}
 	return out
@@ -728,6 +760,8 @@ CREATE TABLE IF NOT EXISTS kb.metrics (
     is_explicit_metric BOOLEAN,
     table_name_or_section TEXT,
     reasoning_tags JSONB,
+    category_paths JSONB,
+    category_paths_en JSONB,
     ext_info JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -804,10 +838,12 @@ INSERT INTO kb.metrics (
 	is_explicit_metric,
 	table_name_or_section,
 	reasoning_tags,
+	category_paths,
+	category_paths_en,
 	ext_info
 )
 VALUES (
-	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb,$33::jsonb,$34::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -823,19 +859,21 @@ VALUES (
 		sourceSpansJSON, _ := json.Marshal(metric["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(metric["keywords"])
 		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
+		categoryPathsJSON, _ := json.Marshal(metric["category_paths"])
 		extInfo, _ := json.Marshal(map[string]any{
 			"language":       req.Language,
 			"schema_version": "2",
 		})
 
 		var (
-			metricNameEn  interface{}
-			subjectEn     interface{}
-			descEn        interface{}
-			contextEn     interface{}
-			keywordsEnVal interface{}
-			unitEn        interface{}
-			valueClassEn  interface{}
+			metricNameEn      any
+			subjectEn         any
+			descEn            any
+			contextEn         any
+			keywordsEnVal     any
+			unitEn            any
+			valueClassEn      any
+			categoryPathsEnVal any
 		)
 		if !isEnglish {
 			metricNameEn = strings.TrimSpace(asString(metric["metric_name_en"]))
@@ -846,6 +884,8 @@ VALUES (
 			keywordsEnVal = string(kw)
 			unitEn = strings.TrimSpace(asString(metric["unit_en"]))
 			valueClassEn = strings.TrimSpace(asString(metric["value_class_en"]))
+			cp, _ := json.Marshal(metric["category_paths_en"])
+			categoryPathsEnVal = string(cp)
 		}
 
 		_, err := s.DB.ExecContext(ctx, stmt,
@@ -880,6 +920,8 @@ VALUES (
 			toBool(metric["is_explicit_metric"]),
 			strings.TrimSpace(asString(metric["table_name_or_section"])),
 			string(reasoningTagsJSON),
+			string(categoryPathsJSON),
+			categoryPathsEnVal,
 			string(extInfo),
 		)
 		if err != nil {
@@ -888,4 +930,111 @@ VALUES (
 		inserted++
 	}
 	return inserted, nil
+}
+
+func (p *MetricsProcessor) indexMetrics(recordID int64, metrics []map[string]any) error {
+	if strings.TrimSpace(p.ArtifactWebDir) == "" {
+		return fmt.Errorf("(MID_26051801) missing ARTIFACT_WEB_DIR")
+	}
+	return indexMetricsInTreeDir(p.Logger, p.ArtifactWebDir, recordID, metrics)
+}
+
+func indexMetricsInTreeDir(logger ApiTypes.JimoLogger, treeRootDir string, recordID int64, metrics []map[string]any) error {
+	if strings.TrimSpace(treeRootDir) == "" {
+		return fmt.Errorf("(MID_26051802) metric tree root dir is empty")
+	}
+	if recordID <= 0 {
+		return fmt.Errorf("(MID_26051803) invalid record id: %d", recordID)
+	}
+	if err := os.MkdirAll(treeRootDir, 0o755); err != nil {
+		return err
+	}
+	if err := removeMetricTreeRecord(treeRootDir, recordID); err != nil {
+		return fmt.Errorf("(MID_26051804) remove old metric tree entries for record %d: %w", recordID, err)
+	}
+	now := time.Now()
+	for _, metric := range metrics {
+		metricID := strings.TrimSpace(asString(metric["metric_id"]))
+		if metricID == "" {
+			continue
+		}
+		if pathsRaw, ok := metric["category_paths"].([]any); ok {
+			for _, entry := range parseCategoryPathsArray(pathsRaw) {
+				if err := writeMetricTreeEntry(logger, treeRootDir, metricID, entry, now); err != nil {
+					return fmt.Errorf("(MID_26051805) index metric %s path: %w", metricID, err)
+				}
+			}
+		}
+		if pathsEnRaw, ok := metric["category_paths_en"].([]any); ok {
+			for _, entry := range parseCategoryPathsArray(pathsEnRaw) {
+				if err := writeMetricTreeEntry(logger, treeRootDir, metricID, entry, now); err != nil {
+					return fmt.Errorf("(MID_26051806) index metric %s en path: %w", metricID, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func writeMetricTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, metricID string, pathEntry CategoryPathEntry, now time.Time) error {
+	if len(pathEntry.Nodes) == 0 {
+		return nil
+	}
+	currentDir := treeRootDir
+	for _, node := range pathEntry.Nodes {
+		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
+		if err != nil {
+			return err
+		}
+		currentDir = subdir
+	}
+	return upsertMetricToLeafDir(currentDir, metricID)
+}
+
+func upsertMetricToLeafDir(leafDir string, metricID string) error {
+	filePath := filepath.Join(leafDir, "metrics.txt")
+	existing := make([]string, 0)
+	if bs, err := os.ReadFile(filePath); err == nil {
+		for _, row := range strings.Split(string(bs), "\n") {
+			row = strings.TrimSpace(row)
+			if row != "" {
+				existing = append(existing, row)
+			}
+		}
+	}
+	existing = appendUniqueString(existing, metricID)
+	sort.Strings(existing)
+	return os.WriteFile(filePath, []byte(strings.Join(existing, "\n")), 0o644)
+}
+
+func removeMetricTreeRecord(treeRootDir string, recordID int64) error {
+	prefix := strconv.FormatInt(recordID, 10) + "_"
+	return filepath.WalkDir(treeRootDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != "metrics.txt" {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rows := make([]string, 0)
+		for _, row := range strings.Split(string(body), "\n") {
+			row = strings.TrimSpace(row)
+			if row == "" || strings.HasPrefix(row, prefix) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+		if len(rows) == 0 {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
+		sort.Strings(rows)
+		return os.WriteFile(path, []byte(strings.Join(rows, "\n")), 0o644)
+	})
 }
