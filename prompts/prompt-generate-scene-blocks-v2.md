@@ -289,6 +289,10 @@ Return STRICT JSON only.
 
 # Field Semantics
 
+## Languages
+* All text (i.e., the fields that have the corresponding "_en" name) fields are in its input language
+* Generate the '_en' field of the accurate English translation the corresponding field if its input language is not English.
+
 ## scene_id
 
 Must be:

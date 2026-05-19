@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { onDestroy } from 'svelte';
 	import { fly } from 'svelte/transition';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import InfoIcon from '@lucide/svelte/icons/info';
@@ -65,7 +66,11 @@
 	const LIST_MIN = 360;
 	const LIST_MAX = 860;
 	const LIST_DEFAULT = 560;
+	const FOCUS_PDF_MIN = 320;
+	const FOCUS_PDF_MAX = 1460;
+	const FOCUS_PDF_DEFAULT = 480;
 	const listWidthKey = $derived(`scene-blocks:list-width:${browserInstanceKey}`);
+	const focusPdfWidthKey = $derived(`scene-blocks:focus-pdf-width:${browserInstanceKey}`);
 
 	let selectedRecordId = $state<number | null>(null);
 	let recordCache = $state<Record<number, KbInputRecord>>({});
@@ -75,7 +80,10 @@
 	let focusedBlockId = $state<number | null>(null);
 	let listWidth = $state(LIST_DEFAULT);
 	let resizing = $state(false);
+	let focusPdfWidth = $state(FOCUS_PDF_DEFAULT);
+	let focusResizing = $state(false);
 	let showDiscriminators = $state(false);
+	let sceneTypeFilter = $state('__all__');
 
 	// Scene Map (focus mode) — measured canvas box + currently hovered attribute.
 	let mapW = $state(0);
@@ -94,11 +102,35 @@
 	);
 	let viewerInputId = $derived(activeRecord?.id ?? null);
 	let viewerFileUrl = $derived(viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : '');
-	let viewerIsPdf = $derived(
-		(activeRecord?.file_name ?? '').trim().toLowerCase().endsWith('.pdf')
-	);
+	let viewerIsPdf = $derived((activeRecord?.file_name ?? '').trim().toLowerCase().endsWith('.pdf'));
 	let focusedBlock = $derived(
 		focusedBlockId != null ? (blocks.find((b) => b.id === focusedBlockId) ?? null) : null
+	);
+	let sceneTypeOptions = $derived.by(() => {
+		const seen = new Set<string>();
+		const out: string[] = [];
+		for (const block of blocks) {
+			const val = block.scene_type?.trim();
+			if (!val || seen.has(val)) continue;
+			seen.add(val);
+			out.push(val);
+		}
+		return out.sort((a, b) => a.localeCompare(b));
+	});
+	let filteredFocusBlocks = $derived.by(() => {
+		if (sceneTypeFilter === '__all__') return blocks;
+		return blocks.filter((block) => (block.scene_type?.trim() || '') === sceneTypeFilter);
+	});
+	let focusedBlockIndex = $derived(
+		focusedBlockId != null ? filteredFocusBlocks.findIndex((block) => block.id === focusedBlockId) : -1
+	);
+	let prevFocusedBlockId = $derived(
+		focusedBlockIndex > 0 ? filteredFocusBlocks[focusedBlockIndex - 1]?.id ?? null : null
+	);
+	let nextFocusedBlockId = $derived(
+		focusedBlockIndex >= 0 && focusedBlockIndex < filteredFocusBlocks.length - 1
+			? filteredFocusBlocks[focusedBlockIndex + 1]?.id ?? null
+			: null
 	);
 	let focusedMetaKeywords = $derived(focusedBlock ? strList(focusedBlock, 'keywords') : []);
 	let focusedMetaStates = $derived(focusedBlock ? strList(focusedBlock, 'states') : []);
@@ -115,10 +147,26 @@
 		return Math.max(LIST_MIN, Math.min(LIST_MAX, Math.round(value)));
 	}
 
+	function clampFocusPdfWidth(value: number) {
+		if (!Number.isFinite(value)) return FOCUS_PDF_DEFAULT;
+		return Math.max(FOCUS_PDF_MIN, Math.min(FOCUS_PDF_MAX, Math.round(value)));
+	}
+
 	$effect(() => {
 		if (!browser) return;
 		const saved = Number(localStorage.getItem(listWidthKey));
 		if (Number.isFinite(saved) && saved > 0) listWidth = clampListWidth(saved);
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		const saved = Number(localStorage.getItem(focusPdfWidthKey));
+		if (Number.isFinite(saved) && saved > 0) {
+			focusPdfWidth = clampFocusPdfWidth(saved);
+			return;
+		}
+		// First-load default: keep the canvas at roughly 2/3 and the PDF at 1/3.
+		focusPdfWidth = clampFocusPdfWidth(Math.round(window.innerWidth / 3));
 	});
 
 	function persistListWidth(next: number) {
@@ -126,11 +174,17 @@
 		if (browser) localStorage.setItem(listWidthKey, String(listWidth));
 	}
 
+	function persistFocusPdfWidth(next: number) {
+		focusPdfWidth = clampFocusPdfWidth(next);
+		if (browser) localStorage.setItem(focusPdfWidthKey, String(focusPdfWidth));
+	}
+
 	async function handleRecordSelect(record: KbInputRecord) {
 		recordCache = { ...recordCache, [record.id]: record };
 		if (selectedRecordId === record.id && blocks.length) return;
 		selectedRecordId = record.id;
 		closeFocus();
+		sceneTypeFilter = '__all__';
 		loading = true;
 		loadError = '';
 		blocks = [];
@@ -147,6 +201,11 @@
 	}
 
 	function focusBlock(id: number) {
+		const block = blocks.find((item) => item.id === id) ?? null;
+		const blockType = block?.scene_type?.trim() || '';
+		if (sceneTypeFilter !== '__all__' && blockType !== sceneTypeFilter) {
+			sceneTypeFilter = blockType || '__all__';
+		}
 		focusedBlockId = id;
 		showDiscriminators = false;
 		hoveredAttr = null;
@@ -204,6 +263,58 @@
 		}
 	}
 
+	function startFocusResize(event: PointerEvent) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = focusPdfWidth;
+		focusResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		const move = (e: PointerEvent) => persistFocusPdfWidth(startWidth - (e.clientX - startX));
+		const up = () => {
+			focusResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up, { once: true });
+		window.addEventListener('pointercancel', up, { once: true });
+	}
+
+	function onFocusResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			persistFocusPdfWidth(focusPdfWidth + 24);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			persistFocusPdfWidth(focusPdfWidth - 24);
+		}
+	}
+
+	function goToPrevScene() {
+		if (prevFocusedBlockId == null) return;
+		focusBlock(prevFocusedBlockId);
+	}
+
+	function goToNextScene() {
+		if (nextFocusedBlockId == null) return;
+		focusBlock(nextFocusedBlockId);
+	}
+
+	$effect(() => {
+		if (focusedBlockId == null) return;
+		if (sceneTypeFilter === '__all__') return;
+		if (filteredFocusBlocks.some((block) => block.id === focusedBlockId)) return;
+		if (filteredFocusBlocks.length > 0) {
+			focusBlock(filteredFocusBlocks[0].id);
+			return;
+		}
+		sceneTypeFilter = '__all__';
+	});
+
 	function arr(value: unknown): any[] {
 		return Array.isArray(value) ? value : [];
 	}
@@ -221,7 +332,14 @@
 	// attribute collections present on the block as satellite nodes.
 	type AttrKind = 'str' | 'kw' | 'entity' | 'actions' | 'rels' | 'srcrefs' | 'disc';
 	type AttrDef = { key: string; label: string; icon: any; kind: AttrKind; field: string };
-	type GroupDef = { id: string; label: string; icon: any; ux: number; uy: number; attrs: AttrDef[] };
+	type GroupDef = {
+		id: string;
+		label: string;
+		icon: any;
+		ux: number;
+		uy: number;
+		attrs: AttrDef[];
+	};
 
 	const D = Math.SQRT1_2; // unit diagonal — groups sit at the four corners
 
@@ -346,14 +464,7 @@
 		return arr((block as any)[def.field]);
 	}
 
-	function shortenLine(
-		x1: number,
-		y1: number,
-		x2: number,
-		y2: number,
-		r1: number,
-		r2: number
-	) {
+	function shortenLine(x1: number, y1: number, x2: number, y2: number, r1: number, r2: number) {
 		const dx = x2 - x1;
 		const dy = y2 - y1;
 		const d = Math.hypot(dx, dy) || 1;
@@ -436,7 +547,9 @@
 			const gap = 18;
 			const pad = 14;
 			const preferRight = sat.x <= sceneMap.W / 2;
-			const rawLeft = preferRight ? sat.x + sceneMap.Rsn + gap : sat.x - inspectorW - sceneMap.Rsn - gap;
+			const rawLeft = preferRight
+				? sat.x + sceneMap.Rsn + gap
+				: sat.x - inspectorW - sceneMap.Rsn - gap;
 			const rawTop = sat.y - inspectorH / 2;
 			const left = Math.max(pad, Math.min(rawLeft, sceneMap.W - inspectorW - pad));
 			const top = Math.max(pad, Math.min(rawTop, sceneMap.H - inspectorH - pad));
@@ -446,14 +559,23 @@
 	});
 
 	function satEnter(key: string) {
-		if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+		if (hoverTimer) {
+			clearTimeout(hoverTimer);
+			hoverTimer = null;
+		}
 		hoveredAttr = key;
 	}
 	function satLeave() {
-		hoverTimer = setTimeout(() => { hoveredAttr = null; hoverTimer = null; }, 220);
+		hoverTimer = setTimeout(() => {
+			hoveredAttr = null;
+			hoverTimer = null;
+		}, 220);
 	}
 	function inspEnter() {
-		if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+		if (hoverTimer) {
+			clearTimeout(hoverTimer);
+			hoverTimer = null;
+		}
 	}
 	function inspLeave() {
 		hoveredAttr = null;
@@ -469,10 +591,10 @@
 
 <div
 	class="scene-shell"
-	class:resizing
+	class:resizing={resizing || focusResizing}
 	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16); --center-bg:${centerBg}; --center-ink:${centerInk};`}
+	style:--focus-pdf-width={`${focusPdfWidth}px`}
 >
-
 	{#snippet pdfPanel(ctxBlock: KbSceneBlockRecord | null)}
 		<div class="pdf-card">
 			<div class="pdf-head">
@@ -489,49 +611,13 @@
 					bind:zoom={pdfZoom}
 					bind:numPages={pdfNumPages}
 					{darkMode}
-					sidebarTitle="Scene context"
-					sidebarSettingsKey="scene-blocks-pdf-sidebar"
-					sidebarWidthSettingLabel="Panel width"
-				>
-					{#snippet sidebar()}
-						{#if ctxBlock}
-							<div class="sb">
-								{#if ctxBlock.scene_type?.trim()}
-									<span class="scene-type">{ctxBlock.scene_type}</span>
-								{/if}
-								<div class="sb-title">{ctxBlock.title}</div>
-								{#if ctxBlock.summary?.trim()}
-									<p class="sb-summary">{ctxBlock.summary}</p>
-								{/if}
-								{#if arr(ctxBlock.source_refs).length}
-									<div class="sb-label">Source evidence</div>
-									<ul class="srcrefs">
-										{#each arr(ctxBlock.source_refs) as ref}
-											<li>
-												<span class="src-kind">{ref?.evidence_type ?? 'ref'}</span>
-												<span class="src-loc">{ref?.reference ?? ref?.source_id ?? '—'}</span>
-											</li>
-										{/each}
-									</ul>
-								{/if}
-								<p class="sb-note">
-									Scene blocks don't carry page coordinates, so use the evidence
-									references above to locate the scene in the document.
-								</p>
-							</div>
-						{:else}
-							<p class="sb-note">
-								Open a scene block to see its summary and source evidence here.
-							</p>
-						{/if}
-					{/snippet}
-				</PdfViewWindow>
+				/>
 			{:else if viewerInputId}
 				<div class="empty-state pdf-empty">
 					<div class="empty-title">Source isn't a PDF</div>
 					<div class="empty-copy">
-						This record's source file can't be previewed here. Scene block detail is
-						available on the canvas.
+						This record's source file can't be previewed here. Scene block detail is available on
+						the canvas.
 					</div>
 				</div>
 			{:else}
@@ -548,13 +634,48 @@
 		<div class="focus-grid" transition:fly={{ y: 8, duration: 180 }}>
 			<div class="canvas">
 				<div class="canvas-bar">
-					<button type="button" class="back-btn" onclick={closeFocus}>
-						<ArrowLeftIcon class="h-4 w-4" />
-						<span>Back</span>
-					</button>
-					<div class="canvas-crumb mono">
-						{#if fb.scene_type?.trim()}<span class="crumb-type">{fb.scene_type}</span>{/if}
-						Scene Block{#if fb.object_id}<span class="crumb-sep">·</span>{fb.object_id}{/if}
+					<div class="canvas-bar-left">
+						<button type="button" class="back-btn" onclick={closeFocus}>
+							<ArrowLeftIcon class="h-4 w-4" />
+							<span>Back</span>
+						</button>
+						<div class="canvas-crumb mono">
+							{#if fb.scene_type?.trim()}<span class="crumb-type">{fb.scene_type}</span>{/if}
+							Scene Block{#if fb.object_id}<span class="crumb-sep">·</span>{fb.object_id}{/if}
+						</div>
+					</div>
+					<div class="canvas-controls">
+						<label class="scene-filter">
+							<span class="scene-filter-label">Scene Type</span>
+							<select bind:value={sceneTypeFilter} class="scene-filter-select">
+								<option value="__all__">All scene types</option>
+								{#each sceneTypeOptions as sceneType}
+									<option value={sceneType}>{sceneType}</option>
+								{/each}
+							</select>
+						</label>
+						<div class="scene-nav" aria-label="Scene navigation">
+							<button
+								type="button"
+								class="nav-btn"
+								aria-label="Previous scene"
+								title="Previous scene"
+								disabled={prevFocusedBlockId == null}
+								onclick={goToPrevScene}
+							>
+								<ChevronLeftIcon class="h-4 w-4" />
+							</button>
+							<button
+								type="button"
+								class="nav-btn"
+								aria-label="Next scene"
+								title="Next scene"
+								disabled={nextFocusedBlockId == null}
+								onclick={goToNextScene}
+							>
+								<ChevronRightIcon class="h-4 w-4" />
+							</button>
+						</div>
 					</div>
 				</div>
 
@@ -604,27 +725,13 @@
 							<div
 								class="node center"
 								title={fb.title?.trim() || fb.scene_id || 'Scene'}
-								style="left:{m.cx}px; top:{m.cy}px; width:{m.Rc * 2}px; height:{m.Rc *
-									2}px;"
+								style="left:{m.cx}px; top:{m.cy}px; width:{m.Rc * 2}px; height:{m.Rc * 2}px;"
 							>
 								<span class="center-title">
 									{fb.title?.trim() || fb.scene_id || 'Scene'}
 								</span>
 							</div>
-							<div
-								class="center-cap"
-								style="left:{m.cx}px; top:{m.cy + m.Rc + 12}px;"
-							>
-								{#if fb.scene_type?.trim()}
-									<span class="scene-type">{fb.scene_type}</span>
-								{/if}
-								<span
-									class="cap-conf conf-{confidenceBand(conf)}"
-									title="Extraction confidence"
-								>
-									<span class="cap-conf-dot"></span>
-									<span class="mono">{Math.round(conf * 100)}%</span>
-								</span>
+							<div class="center-cap" style="left:{m.cx}px; top:{m.cy + m.Rc + 12}px;">
 								{#if fb.object_id}
 									<span class="cap-id mono">{fb.object_id}</span>
 								{/if}
@@ -634,8 +741,7 @@
 								<div
 									class="node group"
 									class:is-empty={g.empty}
-									style="left:{g.x}px; top:{g.y}px; width:{m.Rgn * 2}px; height:{m.Rgn *
-										2}px;"
+									style="left:{g.x}px; top:{g.y}px; width:{m.Rgn * 2}px; height:{m.Rgn * 2}px;"
 								>
 									<g.icon class="group-ic" />
 									<span class="group-label">{g.label}</span>
@@ -647,8 +753,7 @@
 										type="button"
 										class="node sat"
 										class:active={hoveredAttr === s.key}
-										style="left:{s.x}px; top:{s.y}px; width:{m.Rsn * 2}px; height:{m.Rsn *
-											2}px;"
+										style="left:{s.x}px; top:{s.y}px; width:{m.Rsn * 2}px; height:{m.Rsn * 2}px;"
 										title="{s.def.label} ({s.count})"
 										onmouseenter={() => satEnter(s.key)}
 										onmouseleave={satLeave}
@@ -691,10 +796,19 @@
 							<div class="meta-card-head">
 								<div class="meta-card-title">{fb.title?.trim() || fb.scene_id || 'Scene'}</div>
 								{#if fb.summary?.trim()}
-									<p class="meta-card-summary">{fb.summary}</p>
+									<p class="meta-card-summary">
+										<span class="meta-summary-label">Summary:</span>
+										{fb.summary}
+									</p>
 								{/if}
 							</div>
 							<div class="meta-card-body">
+								{#if fb.scene_type?.trim()}
+									<div class="meta-row">
+										<span class="meta-label">Scene Type</span>
+										<span class="meta-val">{fb.scene_type}</span>
+									</div>
+								{/if}
 								<div class="meta-row">
 									<span class="meta-label">Confidence</span>
 									<span class="cap-conf conf-{confidenceBand(conf)}" title="Extraction confidence">
@@ -739,7 +853,9 @@
 							<aside
 								class="map-inspector"
 								class:is-floating={!!inspectorPos}
-								style={inspectorPos ? `left:${inspectorPos.left}px; top:${inspectorPos.top}px;` : undefined}
+								style={inspectorPos
+									? `left:${inspectorPos.left}px; top:${inspectorPos.top}px;`
+									: undefined}
 								bind:clientWidth={inspectorW}
 								bind:clientHeight={inspectorH}
 								transition:fly={{ y: 12, duration: 160 }}
@@ -801,9 +917,7 @@
 											{#each si.items as ref}
 												<li>
 													<span class="src-kind">{ref?.evidence_type ?? 'ref'}</span>
-													<span class="src-loc"
-														>{ref?.reference ?? ref?.source_id ?? '—'}</span
-													>
+													<span class="src-loc">{ref?.reference ?? ref?.source_id ?? '—'}</span>
 												</li>
 											{/each}
 										</ul>
@@ -838,6 +952,17 @@
 					</div>
 				</div>
 			</div>
+
+			<button
+				type="button"
+				class="resize-handle focus-resize-handle"
+				class:active={focusResizing}
+				aria-label="Resize the source document panel"
+				onpointerdown={startFocusResize}
+				onkeydown={onFocusResizerKeydown}
+			>
+				<span class="resize-grip" aria-hidden="true"></span>
+			</button>
 
 			{@render pdfPanel(focusedBlock)}
 		</div>
@@ -892,10 +1017,7 @@
 					</div>
 				{:else}
 					<div class="detail-grid">
-						<div
-							class="scene-card"
-							style="width:{listWidth}px; flex:0 0 {listWidth}px;"
-						>
+						<div class="scene-card" style="width:{listWidth}px; flex:0 0 {listWidth}px;">
 							<div class="scene-card-head">
 								<div class="eyebrow">Extracted scenes</div>
 								<div class="scene-card-count">
@@ -921,8 +1043,8 @@
 									<div class="empty-state">
 										<div class="empty-title">No scene blocks yet</div>
 										<div class="empty-copy">
-											This record has no entries in <code>kb.scene_objects</code>. Scene blocks
-											are produced by the generate-scene-blocks processor once the document is
+											This record has no entries in <code>kb.scene_objects</code>. Scene blocks are
+											produced by the generate-scene-blocks processor once the document is
 											processed.
 										</div>
 									</div>
@@ -1182,7 +1304,9 @@
 		border-radius: 16px;
 		background: rgba(2, 6, 23, 0.28);
 		overflow: hidden;
-		transition: border-color 160ms ease, background 160ms ease;
+		transition:
+			border-color 160ms ease,
+			background 160ms ease;
 	}
 	.scene-block:hover {
 		border-color: color-mix(in srgb, var(--accent) 50%, transparent);
@@ -1218,7 +1342,9 @@
 		align-items: center;
 		color: var(--muted);
 		padding-top: 0.3rem;
-		transition: transform 160ms ease, color 160ms ease;
+		transition:
+			transform 160ms ease,
+			color 160ms ease;
 	}
 	.scene-row:hover .row-go {
 		color: var(--accent);
@@ -1616,39 +1742,6 @@
 		}
 	}
 
-	.sb {
-		display: flex;
-		flex-direction: column;
-		gap: 0.6rem;
-	}
-	.sb-title {
-		font-size: 0.95rem;
-		font-weight: 700;
-		color: var(--text);
-		line-height: 1.4;
-	}
-	.sb-summary {
-		margin: 0;
-		font-size: 0.84rem;
-		line-height: 1.55;
-		color: var(--muted);
-	}
-	.sb-label {
-		font-size: 0.66rem;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--muted);
-		margin-top: 0.3rem;
-	}
-	.sb-note {
-		margin: 0.4rem 0 0;
-		font-size: 0.78rem;
-		line-height: 1.5;
-		color: var(--muted);
-		opacity: 0.85;
-	}
-
 	/* ── Focus mode: Canvas | PDF Viewer ─────────────────────────────── */
 	.focus-grid {
 		display: flex;
@@ -1661,19 +1754,22 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
-		flex: 1 1 auto;
+		flex: 1 1 0;
 		border-radius: 24px;
 		border: 1px solid var(--border);
 		background: var(--panel);
 		overflow: hidden;
 	}
 	.focus-grid > .pdf-card {
-		flex: 0 0 clamp(360px, 40%, 580px);
+		flex: 0 0 var(--focus-pdf-width, 480px);
 		min-width: 0;
 		padding: 1rem;
 		border-radius: 24px;
 		border: 1px solid var(--border);
 		background: var(--panel);
+	}
+	.focus-resize-handle {
+		flex-shrink: 0;
 	}
 	.canvas-bar {
 		display: flex;
@@ -1683,6 +1779,19 @@
 		padding: 0.85rem 1.1rem;
 		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 		flex-shrink: 0;
+	}
+	.canvas-bar-left {
+		display: flex;
+		align-items: center;
+		gap: 0.9rem;
+		min-width: 0;
+	}
+	.canvas-controls {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.75rem;
+		flex-wrap: wrap;
 	}
 	.back-btn {
 		display: inline-flex;
@@ -1696,12 +1805,87 @@
 		font-size: 0.85rem;
 		font-weight: 700;
 		cursor: pointer;
-		transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+		transition:
+			border-color 150ms ease,
+			background 150ms ease,
+			color 150ms ease;
 	}
 	.back-btn:hover {
 		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 		background: color-mix(in srgb, var(--accent) 12%, transparent);
 		color: var(--accent);
+	}
+	.scene-filter {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		min-width: 0;
+	}
+	.scene-filter-label {
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted);
+		flex-shrink: 0;
+	}
+	.scene-filter-select {
+		min-width: 180px;
+		max-width: 280px;
+		padding: 0.48rem 2rem 0.48rem 0.78rem;
+		border-radius: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		background: rgba(15, 23, 42, 0.42);
+		color: var(--text);
+		font-size: 0.82rem;
+		line-height: 1.2;
+		appearance: none;
+		cursor: pointer;
+		background-image:
+			linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+			linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+		background-position:
+			calc(100% - 16px) calc(50% - 2px),
+			calc(100% - 11px) calc(50% - 2px);
+		background-size: 5px 5px, 5px 5px;
+		background-repeat: no-repeat;
+	}
+	.scene-filter-select:focus-visible {
+		outline: none;
+		border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+	}
+	.scene-nav {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.nav-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 38px;
+		height: 38px;
+		border-radius: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		background: rgba(148, 163, 184, 0.08);
+		color: var(--text);
+		cursor: pointer;
+		transition: border-color 150ms ease, background 150ms ease, color 150ms ease, opacity 150ms ease;
+	}
+	.nav-btn:hover:not(:disabled) {
+		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+		color: var(--accent);
+	}
+	.nav-btn:disabled {
+		opacity: 0.42;
+		cursor: not-allowed;
+	}
+	.nav-btn:focus-visible {
+		outline: none;
+		border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 	}
 	.canvas-crumb {
 		display: flex;
@@ -1794,7 +1978,9 @@
 		fill: none;
 		stroke: color-mix(in srgb, var(--muted) 34%, transparent);
 		stroke-width: 1.25;
-		transition: stroke 150ms ease, stroke-width 150ms ease;
+		transition:
+			stroke 150ms ease,
+			stroke-width 150ms ease;
 	}
 	.wire.spoke {
 		stroke: color-mix(in srgb, var(--muted) 46%, transparent);
@@ -2089,6 +2275,10 @@
 		-webkit-box-orient: vertical;
 		overflow: hidden;
 	}
+	.meta-summary-label {
+		font-weight: 700;
+		color: var(--text);
+	}
 	.meta-card-body {
 		display: flex;
 		flex-direction: column;
@@ -2184,7 +2374,7 @@
 		padding: 0.1rem 0.42rem;
 		border-radius: 6px;
 	}
-.insp-body {
+	.insp-body {
 		display: flex;
 		flex-direction: column;
 		gap: 0.55rem;
@@ -2237,6 +2427,27 @@
 		}
 		.focus-grid {
 			flex-direction: column;
+		}
+		.canvas-bar {
+			flex-direction: column;
+			align-items: stretch;
+		}
+		.canvas-bar-left,
+		.canvas-controls {
+			width: 100%;
+		}
+		.canvas-controls {
+			justify-content: space-between;
+		}
+		.scene-filter {
+			flex: 1 1 220px;
+		}
+		.scene-filter-select {
+			max-width: none;
+			flex: 1;
+		}
+		.focus-resize-handle {
+			display: none;
 		}
 		.focus-grid > .pdf-card {
 			flex: 1 1 auto;
