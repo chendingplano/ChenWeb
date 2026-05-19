@@ -171,7 +171,18 @@
 	];
 
 	let menuCollapsed = $state(false);
+	let menuCollapsedBeforeFocus = false;
 	let menuWidth = $state(280);
+
+	// Scene Blocks "Show Selected Scene Block" folds the Menu while a block is on the canvas.
+	function handleSceneFocusMode(focused: boolean) {
+		if (focused) {
+			menuCollapsedBeforeFocus = menuCollapsed;
+			menuCollapsed = true;
+		} else {
+			menuCollapsed = menuCollapsedBeforeFocus;
+		}
+	}
 	let menuResizing = $state(false);
 	let menuResizeStartX = 0;
 	let menuResizeStartWidth = 0;
@@ -510,7 +521,11 @@
 			{:else if activeSection === 'kb-doc-structure'}
 				<DocStructureView {darkMode} />
 			{:else if activeSection === 'kb-scene-blocks'}
-				<SceneBlocksView {darkMode} browserInstanceKey="scene-blocks" />
+				<SceneBlocksView
+					{darkMode}
+					browserInstanceKey="scene-blocks"
+					onFocusModeChange={handleSceneFocusMode}
+				/>
 			{:else if activeSection === 'kb-chunks'}
 				<ChunkMgmtView {darkMode} />
 			{:else if activeSection === 'kb-summary-graph'}

@@ -1,12 +1,28 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { onDestroy } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import LogInIcon from '@lucide/svelte/icons/log-in';
+	import ZapIcon from '@lucide/svelte/icons/zap';
+	import BrainIcon from '@lucide/svelte/icons/brain';
+	import TagIcon from '@lucide/svelte/icons/tag';
+	import ActivityIcon from '@lucide/svelte/icons/activity';
+	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import LockIcon from '@lucide/svelte/icons/lock';
+	import DatabaseIcon from '@lucide/svelte/icons/database';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import PlayIcon from '@lucide/svelte/icons/play';
-	import RouteIcon from '@lucide/svelte/icons/route';
+	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import FlagIcon from '@lucide/svelte/icons/flag';
-	import LinkIcon from '@lucide/svelte/icons/link';
+	import TargetIcon from '@lucide/svelte/icons/target';
+	import GitForkIcon from '@lucide/svelte/icons/git-fork';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import Share2Icon from '@lucide/svelte/icons/share-2';
+	import LayersIcon from '@lucide/svelte/icons/layers';
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
@@ -22,7 +38,8 @@
 		scopeToActiveStore = false,
 		heroEyebrow = 'Subject Wiki',
 		heroTitle = 'Scene Blocks',
-		heroDescription = 'Inspect the event-driven scenes an LLM extracted from each document: who acts, what triggers the scene, how it unfolds, and how it resolves.'
+		heroDescription = 'Inspect the event-driven scenes an LLM extracted from each document: who acts, what triggers the scene, how it unfolds, and how it resolves.',
+		onFocusModeChange
 	}: {
 		darkMode?: boolean;
 		browserInstanceKey?: string;
@@ -30,6 +47,8 @@
 		heroEyebrow?: string;
 		heroTitle?: string;
 		heroDescription?: string;
+		/** Notifies the host so it can fold/restore the surrounding Menu while a scene block is shown on the canvas. */
+		onFocusModeChange?: (focused: boolean) => void;
 	} = $props();
 
 	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
@@ -38,6 +57,10 @@
 	let textMain = $derived(darkMode ? '#e2e8f0' : '#0f172a');
 	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
 	let accent = $derived(darkMode ? '#22c55e' : '#16a34a');
+	// The Scene Map center node is a high-contrast disc that reads as the focal
+	// point against the canvas in either theme (dark disc on light, light on dark).
+	let centerBg = $derived(darkMode ? '#e8edf7' : '#0e1729');
+	let centerInk = $derived(darkMode ? '#0b1220' : '#f6f8fc');
 
 	const LIST_MIN = 360;
 	const LIST_MAX = 860;
@@ -49,10 +72,18 @@
 	let blocks = $state<KbSceneBlockRecord[]>([]);
 	let loading = $state(false);
 	let loadError = $state('');
-	let expandedBlockId = $state<number | null>(null);
+	let focusedBlockId = $state<number | null>(null);
 	let listWidth = $state(LIST_DEFAULT);
 	let resizing = $state(false);
 	let showDiscriminators = $state(false);
+
+	// Scene Map (focus mode) — measured canvas box + currently hovered attribute.
+	let mapW = $state(0);
+	let mapH = $state(0);
+	let hoveredAttr = $state<string | null>(null);
+	let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+	let inspectorW = $state(320);
+	let inspectorH = $state(260);
 
 	let docPage = $state(1);
 	let pdfZoom = $state(0.6);
@@ -66,9 +97,11 @@
 	let viewerIsPdf = $derived(
 		(activeRecord?.file_name ?? '').trim().toLowerCase().endsWith('.pdf')
 	);
-	let activeBlock = $derived(
-		expandedBlockId != null ? (blocks.find((b) => b.id === expandedBlockId) ?? null) : null
+	let focusedBlock = $derived(
+		focusedBlockId != null ? (blocks.find((b) => b.id === focusedBlockId) ?? null) : null
 	);
+	let focusedMetaKeywords = $derived(focusedBlock ? strList(focusedBlock, 'keywords') : []);
+	let focusedMetaStates = $derived(focusedBlock ? strList(focusedBlock, 'states') : []);
 	let avgConfidence = $derived(
 		blocks.length
 			? Math.round(
@@ -97,8 +130,7 @@
 		recordCache = { ...recordCache, [record.id]: record };
 		if (selectedRecordId === record.id && blocks.length) return;
 		selectedRecordId = record.id;
-		expandedBlockId = null;
-		showDiscriminators = false;
+		closeFocus();
 		loading = true;
 		loadError = '';
 		blocks = [];
@@ -114,11 +146,26 @@
 		}
 	}
 
-	function toggleBlock(id: number) {
-		expandedBlockId = expandedBlockId === id ? null : id;
+	function focusBlock(id: number) {
+		focusedBlockId = id;
 		showDiscriminators = false;
-		if (expandedBlockId === id) docPage = 1;
+		hoveredAttr = null;
+		docPage = 1;
+		onFocusModeChange?.(true);
 	}
+
+	function closeFocus() {
+		if (focusedBlockId == null) return;
+		focusedBlockId = null;
+		showDiscriminators = false;
+		hoveredAttr = null;
+		onFocusModeChange?.(false);
+	}
+
+	onDestroy(() => {
+		if (focusedBlockId != null) onFocusModeChange?.(false);
+		if (hoverTimer) clearTimeout(hoverTimer);
+	});
 
 	function confidenceBand(value: number) {
 		if (value >= 0.8) return 'high';
@@ -157,409 +204,792 @@
 		}
 	}
 
-	const STRING_GROUPS = [
-		{ key: 'setup', label: 'Setup', icon: PlayIcon, fields: ['preconditions', 'triggers', 'states'] },
-		{ key: 'flow', label: 'Flow', icon: RouteIcon, fields: ['decisions', 'constraints'] },
-		{
-			key: 'resolution',
-			label: 'Resolution',
-			icon: FlagIcon,
-			fields: ['outcomes', 'failure_modes', 'root_causes', 'resolutions']
-		}
-	] as const;
-
-	const FIELD_LABELS: Record<string, string> = {
-		preconditions: 'Preconditions',
-		triggers: 'Triggers',
-		states: 'States',
-		decisions: 'Decisions',
-		constraints: 'Constraints',
-		outcomes: 'Outcomes',
-		failure_modes: 'Failure modes',
-		root_causes: 'Root causes',
-		resolutions: 'Resolutions'
-	};
-
 	function arr(value: unknown): any[] {
 		return Array.isArray(value) ? value : [];
 	}
 	function strList(block: KbSceneBlockRecord, field: string): string[] {
 		return arr((block as any)[field]).filter((v) => typeof v === 'string' && v.trim() !== '');
 	}
-	function groupHasContent(block: KbSceneBlockRecord, fields: readonly string[]) {
-		return fields.some((f) => strList(block, f).length > 0);
-	}
 	function sortedActions(block: KbSceneBlockRecord) {
 		return [...arr(block.actions)].sort(
 			(a, b) => (Number(a?.sequence) || 0) - (Number(b?.sequence) || 0)
 		);
 	}
+
+	// ── Scene Map model ───────────────────────────────────────────────
+	// Four functional groups radiate from the scene; each carries the
+	// attribute collections present on the block as satellite nodes.
+	type AttrKind = 'str' | 'kw' | 'entity' | 'actions' | 'rels' | 'srcrefs' | 'disc';
+	type AttrDef = { key: string; label: string; icon: any; kind: AttrKind; field: string };
+	type GroupDef = { id: string; label: string; icon: any; ux: number; uy: number; attrs: AttrDef[] };
+
+	const D = Math.SQRT1_2; // unit diagonal — groups sit at the four corners
+
+	const SCENE_GROUPS: GroupDef[] = [
+		{
+			id: 'metadata',
+			label: 'Metadata',
+			icon: InfoIcon,
+			ux: -D,
+			uy: -D,
+			attrs: [
+				{ key: 'keywords', label: 'Keywords', icon: TagIcon, kind: 'kw', field: 'keywords' },
+				{ key: 'states', label: 'States', icon: ActivityIcon, kind: 'str', field: 'states' }
+			]
+		},
+		{
+			id: 'inputs',
+			label: 'Inputs & Resources',
+			icon: LogInIcon,
+			ux: D,
+			uy: -D,
+			attrs: [
+				{ key: 'triggers', label: 'Triggers', icon: ZapIcon, kind: 'str', field: 'triggers' },
+				{
+					key: 'preconditions',
+					label: 'Preconditions',
+					icon: CircleCheckIcon,
+					kind: 'str',
+					field: 'preconditions'
+				},
+				{
+					key: 'constraints',
+					label: 'Constraints',
+					icon: LockIcon,
+					kind: 'str',
+					field: 'constraints'
+				},
+				{
+					key: 'resources',
+					label: 'Resources',
+					icon: DatabaseIcon,
+					kind: 'entity',
+					field: 'resources'
+				},
+				{
+					key: 'source_refs',
+					label: 'Source Refs',
+					icon: FileTextIcon,
+					kind: 'srcrefs',
+					field: 'source_refs'
+				}
+			]
+		},
+		{
+			id: 'actions',
+			label: 'System Actions',
+			icon: ZapIcon,
+			ux: D,
+			uy: D,
+			attrs: [
+				{ key: 'actors', label: 'Actors', icon: UsersIcon, kind: 'entity', field: 'actors' },
+				{ key: 'actions', label: 'Actions', icon: PlayIcon, kind: 'actions', field: 'actions' },
+				{
+					key: 'decisions',
+					label: 'Decisions',
+					icon: GitBranchIcon,
+					kind: 'str',
+					field: 'decisions'
+				},
+				{
+					key: 'resolutions',
+					label: 'Resolutions',
+					icon: FlagIcon,
+					kind: 'str',
+					field: 'resolutions'
+				}
+			]
+		},
+		{
+			id: 'reasoning',
+			label: 'Reasoning Logs',
+			icon: BrainIcon,
+			ux: -D,
+			uy: D,
+			attrs: [
+				{ key: 'outcomes', label: 'Outcomes', icon: TargetIcon, kind: 'str', field: 'outcomes' },
+				{
+					key: 'root_causes',
+					label: 'Root Causes',
+					icon: GitForkIcon,
+					kind: 'str',
+					field: 'root_causes'
+				},
+				{
+					key: 'failure_modes',
+					label: 'Failure Modes',
+					icon: TriangleAlertIcon,
+					kind: 'str',
+					field: 'failure_modes'
+				},
+				{
+					key: 'relationships',
+					label: 'Relationships',
+					icon: Share2Icon,
+					kind: 'rels',
+					field: 'relationships'
+				},
+				{
+					key: 'discriminators',
+					label: 'Discriminators',
+					icon: LayersIcon,
+					kind: 'disc',
+					field: 'discriminators'
+				}
+			]
+		}
+	];
+
+	function attrRaw(block: KbSceneBlockRecord, def: AttrDef): any[] {
+		if (def.kind === 'str' || def.kind === 'kw') return strList(block, def.field);
+		if (def.kind === 'actions') return sortedActions(block);
+		return arr((block as any)[def.field]);
+	}
+
+	function shortenLine(
+		x1: number,
+		y1: number,
+		x2: number,
+		y2: number,
+		r1: number,
+		r2: number
+	) {
+		const dx = x2 - x1;
+		const dy = y2 - y1;
+		const d = Math.hypot(dx, dy) || 1;
+		const ux = dx / d;
+		const uy = dy / d;
+		return { x1: x1 + ux * r1, y1: y1 + uy * r1, x2: x2 - ux * r2, y2: y2 - uy * r2 };
+	}
+
+	let sceneMap = $derived.by(() => {
+		const fb = focusedBlock;
+		if (!fb || mapW < 1 || mapH < 1) return null;
+
+		const W = mapW;
+		const H = mapH;
+		const cx = W / 2;
+		const cy = H / 2;
+		const base = Math.min(W, H);
+
+		const Rc = Math.max(54, Math.min(94, base * 0.115)); // center disc radius
+		const Rgn = Math.max(42, Math.min(58, base * 0.072)); // group node radius
+		const Rsn = 21; // satellite node radius
+
+		// A satellite can sit up to ~(Rg + Rs) from the center plus its node
+		// radius and label box. Cap (Rg + Rs) conservatively (no diagonal
+		// discount) so nodes and labels never clip any canvas edge.
+		const reachY = cy - 12 - Rsn - 34; // label box below the lowest node
+		const reachX = cx - 12 - 66; // half the max label width
+		const reach = Math.max(120, Math.min(reachY, reachX));
+		let Rs = Math.max(90, Math.min(200, base * 0.22));
+		let Rg = Math.max(Rc + Rgn + 26, Math.min(330, base * 0.34, reach - Rs));
+		if (reach - Rs < Rc + Rgn + 26) {
+			Rs = Math.max(56, reach - (Rc + Rgn + 28));
+			Rg = Rc + Rgn + 28;
+		}
+
+		const groups = SCENE_GROUPS.map((g) => {
+			const gx = cx + g.ux * Rg;
+			const gy = cy + g.uy * Rg;
+			const present = g.attrs
+				.map((def) => ({ def, count: attrRaw(fb, def).length }))
+				.filter((s) => s.count > 0);
+			const baseAng = Math.atan2(g.uy, g.ux);
+			const k = present.length;
+			const span = k > 1 ? Math.min(Math.PI * 0.62, (k - 1) * 0.44) : 0;
+			const satellites = present.map((s, i) => {
+				const ang = baseAng + (k > 1 ? (i - (k - 1) / 2) * (span / (k - 1)) : 0);
+				const sx = gx + Math.cos(ang) * Rs;
+				const sy = gy + Math.sin(ang) * Rs;
+				const wire = shortenLine(gx, gy, sx, sy, Rgn + 3, Rsn + 3);
+				return { ...s, key: s.def.key, x: sx, y: sy, ang, wire };
+			});
+			return {
+				...g,
+				x: gx,
+				y: gy,
+				empty: k === 0,
+				satellites,
+				spoke: shortenLine(cx, cy, gx, gy, Rc + 5, Rgn + 3)
+			};
+		});
+
+		return { cx, cy, Rc, Rgn, Rsn, W, H, groups };
+	});
+
+	let selectedInfo = $derived.by(() => {
+		if (!hoveredAttr || !focusedBlock) return null;
+		for (const g of SCENE_GROUPS) {
+			const def = g.attrs.find((a) => a.key === hoveredAttr);
+			if (def) return { group: g, def, items: attrRaw(focusedBlock, def) };
+		}
+		return null;
+	});
+
+	let inspectorPos = $derived.by(() => {
+		if (!sceneMap || !hoveredAttr || mapW < 720) return null;
+		for (const group of sceneMap.groups) {
+			const sat = group.satellites.find((s) => s.key === hoveredAttr);
+			if (!sat) continue;
+
+			const gap = 18;
+			const pad = 14;
+			const preferRight = sat.x <= sceneMap.W / 2;
+			const rawLeft = preferRight ? sat.x + sceneMap.Rsn + gap : sat.x - inspectorW - sceneMap.Rsn - gap;
+			const rawTop = sat.y - inspectorH / 2;
+			const left = Math.max(pad, Math.min(rawLeft, sceneMap.W - inspectorW - pad));
+			const top = Math.max(pad, Math.min(rawTop, sceneMap.H - inspectorH - pad));
+			return { left, top };
+		}
+		return null;
+	});
+
+	function satEnter(key: string) {
+		if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+		hoveredAttr = key;
+	}
+	function satLeave() {
+		hoverTimer = setTimeout(() => { hoveredAttr = null; hoverTimer = null; }, 220);
+	}
+	function inspEnter() {
+		if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+	}
+	function inspLeave() {
+		hoveredAttr = null;
+	}
+
+	function onCanvasKeydown(event: KeyboardEvent) {
+		if (event.key !== 'Escape') return;
+		if (focusedBlockId != null) closeFocus();
+	}
 </script>
+
+<svelte:window onkeydown={focusedBlockId != null ? onCanvasKeydown : undefined} />
 
 <div
 	class="scene-shell"
 	class:resizing
-	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16);`}
+	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148,163,184,0.16); --center-bg:${centerBg}; --center-ink:${centerInk};`}
 >
-	<div class="hero">
-		<div class="hero-copy">
-			<div class="eyebrow">{heroEyebrow}</div>
-			<h2>{heroTitle}</h2>
-			<p>{heroDescription}</p>
-		</div>
-		{#if activeRecord && !loading && blocks.length}
-			<div class="hero-stat" aria-label="Scene block summary for the selected record">
-				<span class="hero-stat-count">{blocks.length}</span>
-				<span class="hero-stat-label">scene {blocks.length === 1 ? 'block' : 'blocks'}</span>
-				<span class="hero-stat-sep" aria-hidden="true">·</span>
-				<span class="hero-stat-conf">avg confidence {avgConfidence}%</span>
-			</div>
-		{/if}
-	</div>
 
-	<div class="workspace">
-		<KbInputRecordBrowser
-			{darkMode}
-			instanceKey={browserInstanceKey}
-			title="kb.inputs"
-			subtitle="Search, filter, and select a record to inspect its extracted scene blocks."
-			emptyTitle="No records found."
-			emptySubtitle="Use Search or Retrieve to browse kb.inputs for scene blocks."
-			{scopeToActiveStore}
-			{selectedRecordId}
-			onSelect={handleRecordSelect}
-		/>
-
-		<div class="right-panel">
-			<div class="right-tabs">
-				<div class="tab active">Scene Blocks</div>
-				{#if activeRecord}
-					<div class="tab passive" title={activeRecord.file_name ?? ''}>
-						{activeRecord.title?.trim() ||
-							activeRecord.file_name?.trim() ||
-							`Record #${activeRecord.id}`}
-					</div>
+	{#snippet pdfPanel(ctxBlock: KbSceneBlockRecord | null)}
+		<div class="pdf-card">
+			<div class="pdf-head">
+				<div class="eyebrow">Source document</div>
+				{#if ctxBlock}
+					<div class="pdf-ctx" title={ctxBlock.title}>{ctxBlock.title}</div>
 				{/if}
 			</div>
-
-			{#if !activeRecord}
-				<div class="empty-state">
-					<div class="empty-title">Select a record</div>
+			{#if viewerInputId && viewerIsPdf}
+				<PdfViewWindow
+					inputId={viewerInputId}
+					fileUrl={viewerFileUrl}
+					bind:page={docPage}
+					bind:zoom={pdfZoom}
+					bind:numPages={pdfNumPages}
+					{darkMode}
+					sidebarTitle="Scene context"
+					sidebarSettingsKey="scene-blocks-pdf-sidebar"
+					sidebarWidthSettingLabel="Panel width"
+				>
+					{#snippet sidebar()}
+						{#if ctxBlock}
+							<div class="sb">
+								{#if ctxBlock.scene_type?.trim()}
+									<span class="scene-type">{ctxBlock.scene_type}</span>
+								{/if}
+								<div class="sb-title">{ctxBlock.title}</div>
+								{#if ctxBlock.summary?.trim()}
+									<p class="sb-summary">{ctxBlock.summary}</p>
+								{/if}
+								{#if arr(ctxBlock.source_refs).length}
+									<div class="sb-label">Source evidence</div>
+									<ul class="srcrefs">
+										{#each arr(ctxBlock.source_refs) as ref}
+											<li>
+												<span class="src-kind">{ref?.evidence_type ?? 'ref'}</span>
+												<span class="src-loc">{ref?.reference ?? ref?.source_id ?? '—'}</span>
+											</li>
+										{/each}
+									</ul>
+								{/if}
+								<p class="sb-note">
+									Scene blocks don't carry page coordinates, so use the evidence
+									references above to locate the scene in the document.
+								</p>
+							</div>
+						{:else}
+							<p class="sb-note">
+								Open a scene block to see its summary and source evidence here.
+							</p>
+						{/if}
+					{/snippet}
+				</PdfViewWindow>
+			{:else if viewerInputId}
+				<div class="empty-state pdf-empty">
+					<div class="empty-title">Source isn't a PDF</div>
 					<div class="empty-copy">
-						Choose a document from the left to read the scene blocks extracted from it.
+						This record's source file can't be previewed here. Scene block detail is
+						available on the canvas.
 					</div>
 				</div>
 			{:else}
-				<div class="detail-grid">
-					<div
-						class="scene-card"
-						style="width:{listWidth}px; flex:0 0 {listWidth}px;"
-					>
-						<div class="scene-card-head">
-							<div class="eyebrow">Extracted scenes</div>
-							<div class="scene-card-count">
-								{#if loading}loading…{:else}{blocks.length} total{/if}
-							</div>
-						</div>
-
-						<div class="scene-list">
-							{#if loading}
-								{#each Array(4) as _, i (i)}
-									<div class="skeleton-row" style={`animation-delay:${i * 60}ms`}>
-										<div class="sk sk-pill"></div>
-										<div class="sk sk-title"></div>
-										<div class="sk sk-line"></div>
-									</div>
-								{/each}
-							{:else if loadError}
-								<div class="error-card">
-									<div class="error-title">Couldn't load scene blocks</div>
-									<div class="error-copy">{loadError}</div>
-								</div>
-							{:else if blocks.length === 0}
-								<div class="empty-state">
-									<div class="empty-title">No scene blocks yet</div>
-									<div class="empty-copy">
-										This record has no entries in <code>kb.scene_objects</code>. Scene blocks
-										are produced by the generate-scene-blocks processor once the document is
-										processed.
-									</div>
-								</div>
-							{:else}
-								{#each blocks as block, idx (block.id)}
-									{@const open = expandedBlockId === block.id}
-									{@const conf = Number(block.confidence) || 0}
-									<div class="scene-block" class:open>
-										<button
-											type="button"
-											class="scene-row"
-											aria-expanded={open}
-											onclick={() => toggleBlock(block.id)}
-										>
-											<span class="row-index mono">{String(idx + 1).padStart(2, '0')}</span>
-											<span class="chevron" class:open>
-												<ChevronRightIcon class="h-3.5 w-3.5" />
-											</span>
-											<span class="row-main">
-												<span class="row-top">
-													{#if block.scene_type?.trim()}
-														<span class="scene-type">{block.scene_type}</span>
-													{/if}
-													<span class="row-title">
-														{block.title?.trim() || block.scene_id || `Scene ${idx + 1}`}
-													</span>
-												</span>
-												{#if block.summary?.trim()}
-													<span class="row-summary">{block.summary}</span>
-												{/if}
-												{#if strList(block, 'keywords').length}
-													<span class="row-keywords">
-														{#each strList(block, 'keywords').slice(0, 6) as kw}
-															<span class="kw">{kw}</span>
-														{/each}
-													</span>
-												{/if}
-											</span>
-											<span class="row-conf" title="Extraction confidence">
-												<span class="conf-meter conf-{confidenceBand(conf)}">
-													<span class="conf-fill" style="width:{Math.round(conf * 100)}%"></span>
-												</span>
-												<span class="conf-num mono">{Math.round(conf * 100)}%</span>
-											</span>
-										</button>
-
-										{#if open}
-											<div class="scene-detail" transition:fly={{ y: -6, duration: 160 }}>
-												{#if arr(block.actors).length || arr(block.resources).length}
-													<section class="grp">
-														<header class="grp-head">
-															<UsersIcon class="h-3.5 w-3.5" />
-															<span>Cast</span>
-														</header>
-														{#if arr(block.actors).length}
-															<div class="grp-sub">Actors</div>
-															<div class="chips">
-																{#each arr(block.actors) as actor}
-																	<span class="entity">
-																		{#if actor?.type}<span class="entity-type">{actor.type}</span>{/if}
-																		<span class="entity-name">{actor?.name ?? '—'}</span>
-																	</span>
-																{/each}
-															</div>
-														{/if}
-														{#if arr(block.resources).length}
-															<div class="grp-sub">Resources</div>
-															<div class="chips">
-																{#each arr(block.resources) as res}
-																	<span class="entity">
-																		{#if res?.type}<span class="entity-type">{res.type}</span>{/if}
-																		<span class="entity-name">{res?.name ?? '—'}</span>
-																	</span>
-																{/each}
-															</div>
-														{/if}
-													</section>
-												{/if}
-
-												{#each STRING_GROUPS as g (g.key)}
-													{#if groupHasContent(block, g.fields) || (g.key === 'flow' && sortedActions(block).length)}
-														<section class="grp">
-															<header class="grp-head">
-																<g.icon class="h-3.5 w-3.5" />
-																<span>{g.label}</span>
-															</header>
-															{#if g.key === 'flow' && sortedActions(block).length}
-																<div class="grp-sub">Actions</div>
-																<ol class="actions">
-																	{#each sortedActions(block) as act, ai}
-																		<li>
-																			<span class="act-seq mono">
-																				{String(Number(act?.sequence) || ai + 1).padStart(2, '0')}
-																			</span>
-																			<span class="act-body">
-																				{#if act?.actor}<span class="act-actor">{act.actor}</span>{/if}
-																				<span class="act-text">{act?.action ?? ''}</span>
-																			</span>
-																		</li>
-																	{/each}
-																</ol>
-															{/if}
-															{#each g.fields as field}
-																{#if strList(block, field).length}
-																	<div class="grp-sub">{FIELD_LABELS[field]}</div>
-																	<ul class="lines">
-																		{#each strList(block, field) as item}
-																			<li>{item}</li>
-																		{/each}
-																	</ul>
-																{/if}
-															{/each}
-														</section>
-													{/if}
-												{/each}
-
-												{#if arr(block.relationships).length || arr(block.source_refs).length || arr(block.discriminators).length}
-													<section class="grp">
-														<header class="grp-head">
-															<LinkIcon class="h-3.5 w-3.5" />
-															<span>Links & evidence</span>
-														</header>
-														{#if arr(block.relationships).length}
-															<div class="grp-sub">Relationships</div>
-															<div class="rels">
-																{#each arr(block.relationships) as rel}
-																	<span class="rel">
-																		<span class="rel-type">{rel?.type ?? 'related'}</span>
-																		<span class="rel-arrow" aria-hidden="true">→</span>
-																		<span class="rel-target">{rel?.target ?? '—'}</span>
-																	</span>
-																{/each}
-															</div>
-														{/if}
-														{#if arr(block.source_refs).length}
-															<div class="grp-sub">Source evidence</div>
-															<ul class="srcrefs">
-																{#each arr(block.source_refs) as ref}
-																	<li>
-																		<span class="src-kind">{ref?.evidence_type ?? 'ref'}</span>
-																		<span class="src-loc">{ref?.reference ?? ref?.source_id ?? '—'}</span>
-																	</li>
-																{/each}
-															</ul>
-														{/if}
-														{#if arr(block.discriminators).length}
-															<button
-																type="button"
-																class="disc-toggle"
-																onclick={() => (showDiscriminators = !showDiscriminators)}
-															>
-																{showDiscriminators ? 'Hide' : 'Show'} retrieval discriminators ({arr(
-																	block.discriminators
-																).length})
-															</button>
-															{#if showDiscriminators}
-																<div class="disc-wrap">
-																	{#each arr(block.discriminators) as d}
-																		<div class="disc">
-																			{#if d?.intent}<div class="disc-intent">{d.intent}</div>{/if}
-																			{#if arr(d?.domain).length}
-																				<div class="chips">
-																					{#each arr(d.domain) as dom}<span class="kw">{dom}</span>{/each}
-																				</div>
-																			{/if}
-																			{#each arr(d?.discriminators) as dd}
-																				<div class="disc-item">
-																					<span class="disc-cat">{dd?.category ?? '—'}</span>
-																					<span class="disc-val">{dd?.value ?? ''}</span>
-																					{#if dd?.confidence != null}
-																						<span class="disc-conf mono"
-																							>{Math.round((Number(dd.confidence) || 0) * 100)}%</span
-																						>
-																					{/if}
-																				</div>
-																			{/each}
-																		</div>
-																	{/each}
-																</div>
-															{/if}
-														{/if}
-													</section>
-												{/if}
-
-												<footer class="scene-foot mono">
-													{#if block.scene_id}<span>scene_id: {block.scene_id}</span>{/if}
-													{#if block.event_id}<span>event: {block.event_id}</span>{/if}
-													{#if block.model_name}<span>{block.model_name}</span>{/if}
-												</footer>
-											</div>
-										{/if}
-									</div>
-								{/each}
-							{/if}
-						</div>
-					</div>
-
-					<button
-						type="button"
-						class="resize-handle"
-						class:active={resizing}
-						aria-label="Resize the scene block panel"
-						onpointerdown={startResize}
-						onkeydown={onResizerKeydown}
-					>
-						<span class="resize-grip" aria-hidden="true"></span>
-					</button>
-
-					<div class="pdf-card">
-						<div class="pdf-head">
-							<div class="eyebrow">Source document</div>
-							{#if activeBlock}
-								<div class="pdf-ctx" title={activeBlock.title}>{activeBlock.title}</div>
-							{/if}
-						</div>
-						{#if viewerInputId && viewerIsPdf}
-							<PdfViewWindow
-								inputId={viewerInputId}
-								fileUrl={viewerFileUrl}
-								bind:page={docPage}
-								bind:zoom={pdfZoom}
-								bind:numPages={pdfNumPages}
-								{darkMode}
-								sidebarTitle="Scene context"
-								sidebarSettingsKey="scene-blocks-pdf-sidebar"
-								sidebarWidthSettingLabel="Panel width"
-							>
-								{#snippet sidebar()}
-									{#if activeBlock}
-										<div class="sb">
-											{#if activeBlock.scene_type?.trim()}
-												<span class="scene-type">{activeBlock.scene_type}</span>
-											{/if}
-											<div class="sb-title">{activeBlock.title}</div>
-											{#if activeBlock.summary?.trim()}
-												<p class="sb-summary">{activeBlock.summary}</p>
-											{/if}
-											{#if arr(activeBlock.source_refs).length}
-												<div class="sb-label">Source evidence</div>
-												<ul class="srcrefs">
-													{#each arr(activeBlock.source_refs) as ref}
-														<li>
-															<span class="src-kind">{ref?.evidence_type ?? 'ref'}</span>
-															<span class="src-loc">{ref?.reference ?? ref?.source_id ?? '—'}</span>
-														</li>
-													{/each}
-												</ul>
-											{/if}
-											<p class="sb-note">
-												Scene blocks don't carry page coordinates, so use the evidence
-												references above to locate the scene in the document.
-											</p>
-										</div>
-									{:else}
-										<p class="sb-note">
-											Expand a scene block to see its summary and source evidence here.
-										</p>
-									{/if}
-								{/snippet}
-							</PdfViewWindow>
-						{:else if viewerInputId}
-							<div class="empty-state pdf-empty">
-								<div class="empty-title">Source isn't a PDF</div>
-								<div class="empty-copy">
-									This record's source file can't be previewed here. Scene block detail is
-									available in the panel on the left.
-								</div>
-							</div>
-						{:else}
-							<div class="empty-state pdf-empty">
-								<div class="empty-copy">Select a record to preview its source document.</div>
-							</div>
-						{/if}
-					</div>
+				<div class="empty-state pdf-empty">
+					<div class="empty-copy">Select a record to preview its source document.</div>
 				</div>
 			{/if}
 		</div>
-	</div>
+	{/snippet}
+
+	{#if focusedBlock}
+		{@const fb = focusedBlock}
+		{@const conf = Number(fb.confidence) || 0}
+		<div class="focus-grid" transition:fly={{ y: 8, duration: 180 }}>
+			<div class="canvas">
+				<div class="canvas-bar">
+					<button type="button" class="back-btn" onclick={closeFocus}>
+						<ArrowLeftIcon class="h-4 w-4" />
+						<span>Back</span>
+					</button>
+					<div class="canvas-crumb mono">
+						{#if fb.scene_type?.trim()}<span class="crumb-type">{fb.scene_type}</span>{/if}
+						Scene Block{#if fb.object_id}<span class="crumb-sep">·</span>{fb.object_id}{/if}
+					</div>
+				</div>
+
+				<div class="canvas-body">
+					<header class="map-head">
+						<div class="eyebrow">Scene Map</div>
+						{#if fb.summary?.trim()}
+							<p class="map-sub">{fb.summary}</p>
+						{:else}
+							<p class="map-sub">Functional structure of the extracted scene.</p>
+						{/if}
+					</header>
+
+					<div class="scene-map" bind:clientWidth={mapW} bind:clientHeight={mapH}>
+						{#if sceneMap}
+							{@const m = sceneMap}
+							<svg
+								class="map-wires"
+								width={m.W}
+								height={m.H}
+								viewBox="0 0 {m.W} {m.H}"
+								aria-hidden="true"
+							>
+								{#each m.groups as g (g.id)}
+									{#if !g.empty}
+										<line
+											class="wire spoke"
+											x1={g.spoke.x1}
+											y1={g.spoke.y1}
+											x2={g.spoke.x2}
+											y2={g.spoke.y2}
+										/>
+									{/if}
+									{#each g.satellites as s (s.key)}
+										<line
+											class="wire"
+											class:active={hoveredAttr === s.key}
+											x1={s.wire.x1}
+											y1={s.wire.y1}
+											x2={s.wire.x2}
+											y2={s.wire.y2}
+										/>
+									{/each}
+								{/each}
+							</svg>
+
+							<div
+								class="node center"
+								title={fb.title?.trim() || fb.scene_id || 'Scene'}
+								style="left:{m.cx}px; top:{m.cy}px; width:{m.Rc * 2}px; height:{m.Rc *
+									2}px;"
+							>
+								<span class="center-title">
+									{fb.title?.trim() || fb.scene_id || 'Scene'}
+								</span>
+							</div>
+							<div
+								class="center-cap"
+								style="left:{m.cx}px; top:{m.cy + m.Rc + 12}px;"
+							>
+								{#if fb.scene_type?.trim()}
+									<span class="scene-type">{fb.scene_type}</span>
+								{/if}
+								<span
+									class="cap-conf conf-{confidenceBand(conf)}"
+									title="Extraction confidence"
+								>
+									<span class="cap-conf-dot"></span>
+									<span class="mono">{Math.round(conf * 100)}%</span>
+								</span>
+								{#if fb.object_id}
+									<span class="cap-id mono">{fb.object_id}</span>
+								{/if}
+							</div>
+
+							{#each m.groups as g (g.id)}
+								<div
+									class="node group"
+									class:is-empty={g.empty}
+									style="left:{g.x}px; top:{g.y}px; width:{m.Rgn * 2}px; height:{m.Rgn *
+										2}px;"
+								>
+									<g.icon class="group-ic" />
+									<span class="group-label">{g.label}</span>
+								</div>
+
+								{#each g.satellites as s (s.key)}
+									{@const Def = s.def.icon}
+									<button
+										type="button"
+										class="node sat"
+										class:active={hoveredAttr === s.key}
+										style="left:{s.x}px; top:{s.y}px; width:{m.Rsn * 2}px; height:{m.Rsn *
+											2}px;"
+										title="{s.def.label} ({s.count})"
+										onmouseenter={() => satEnter(s.key)}
+										onmouseleave={satLeave}
+									>
+										<Def class="sat-ic" />
+										<span class="sat-badge mono">{s.count}</span>
+									</button>
+									<button
+										type="button"
+										class="sat-label"
+										class:active={hoveredAttr === s.key}
+										style="left:{s.x}px; top:{s.y + m.Rsn + 7}px;"
+										tabindex="-1"
+										onmouseenter={() => satEnter(s.key)}
+										onmouseleave={satLeave}
+									>
+										{s.def.label}
+									</button>
+								{/each}
+							{/each}
+						{:else}
+							<div class="map-measuring">Laying out scene map…</div>
+						{/if}
+
+						<aside class="map-legend" aria-label="Map legend">
+							<div class="legend-h">Map Legend</div>
+							<div class="legend-row">
+								<span class="lg lg-scene"></span><span>Scene</span>
+							</div>
+							<div class="legend-row">
+								<span class="lg lg-group"></span><span>Functional group</span>
+							</div>
+							<div class="legend-row">
+								<span class="lg lg-attr"></span><span>Attribute</span>
+							</div>
+							<div class="legend-hint">Hover an attribute node to inspect its values</div>
+						</aside>
+
+						<aside class="map-meta-card" aria-label="Scene metadata">
+							<div class="meta-card-head">
+								<div class="meta-card-title">{fb.title?.trim() || fb.scene_id || 'Scene'}</div>
+								{#if fb.summary?.trim()}
+									<p class="meta-card-summary">{fb.summary}</p>
+								{/if}
+							</div>
+							<div class="meta-card-body">
+								<div class="meta-row">
+									<span class="meta-label">Confidence</span>
+									<span class="cap-conf conf-{confidenceBand(conf)}" title="Extraction confidence">
+										<span class="cap-conf-dot"></span>
+										<span class="mono">{Math.round(conf * 100)}%</span>
+									</span>
+								</div>
+								{#if fb.object_id}
+									<div class="meta-row">
+										<span class="meta-label">Object ID</span>
+										<span class="meta-val mono">{fb.object_id}</span>
+									</div>
+								{/if}
+								{#if fb.scene_id}
+									<div class="meta-row">
+										<span class="meta-label">Scene ID</span>
+										<span class="meta-val mono">{fb.scene_id}</span>
+									</div>
+								{/if}
+								{#if focusedMetaKeywords.length}
+									<div class="meta-row meta-row-col">
+										<span class="meta-label">Keywords</span>
+										<div class="chips">
+											{#each focusedMetaKeywords as kw}<span class="kw">{kw}</span>{/each}
+										</div>
+									</div>
+								{/if}
+								{#if focusedMetaStates.length}
+									<div class="meta-row meta-row-col">
+										<span class="meta-label">States</span>
+										<ul class="lines">
+											{#each focusedMetaStates as st}<li>{st}</li>{/each}
+										</ul>
+									</div>
+								{/if}
+							</div>
+						</aside>
+
+						{#if selectedInfo}
+							{@const si = selectedInfo}
+							{@const SiIcon = si.def.icon}
+							<aside
+								class="map-inspector"
+								class:is-floating={!!inspectorPos}
+								style={inspectorPos ? `left:${inspectorPos.left}px; top:${inspectorPos.top}px;` : undefined}
+								bind:clientWidth={inspectorW}
+								bind:clientHeight={inspectorH}
+								transition:fly={{ y: 12, duration: 160 }}
+								onmouseenter={inspEnter}
+								onmouseleave={inspLeave}
+							>
+								<header class="insp-head">
+									<span class="insp-ic"><SiIcon class="h-4 w-4" /></span>
+									<span class="insp-titles">
+										<span class="insp-group">{si.group.label}</span>
+										<span class="insp-name">{si.def.label}</span>
+									</span>
+									<span class="insp-count mono">{si.items.length}</span>
+								</header>
+								<div class="insp-body">
+									{#if si.def.kind === 'kw'}
+										<div class="chips">
+											{#each si.items as kw}<span class="kw">{kw}</span>{/each}
+										</div>
+									{:else if si.def.kind === 'str'}
+										<ul class="lines">
+											{#each si.items as item}<li>{item}</li>{/each}
+										</ul>
+									{:else if si.def.kind === 'entity'}
+										<div class="chips">
+											{#each si.items as e}
+												<span class="entity">
+													{#if e?.type}<span class="entity-type">{e.type}</span>{/if}
+													<span class="entity-name">{e?.name ?? '—'}</span>
+												</span>
+											{/each}
+										</div>
+									{:else if si.def.kind === 'actions'}
+										<ol class="actions">
+											{#each si.items as act, ai}
+												<li>
+													<span class="act-seq mono">
+														{String(Number(act?.sequence) || ai + 1).padStart(2, '0')}
+													</span>
+													<span class="act-body">
+														{#if act?.actor}<span class="act-actor">{act.actor}</span>{/if}
+														<span class="act-text">{act?.action ?? ''}</span>
+													</span>
+												</li>
+											{/each}
+										</ol>
+									{:else if si.def.kind === 'rels'}
+										<div class="rels">
+											{#each si.items as rel}
+												<span class="rel">
+													<span class="rel-type">{rel?.type ?? 'related'}</span>
+													<span class="rel-arrow" aria-hidden="true">→</span>
+													<span class="rel-target">{rel?.target ?? '—'}</span>
+												</span>
+											{/each}
+										</div>
+									{:else if si.def.kind === 'srcrefs'}
+										<ul class="srcrefs">
+											{#each si.items as ref}
+												<li>
+													<span class="src-kind">{ref?.evidence_type ?? 'ref'}</span>
+													<span class="src-loc"
+														>{ref?.reference ?? ref?.source_id ?? '—'}</span
+													>
+												</li>
+											{/each}
+										</ul>
+									{:else if si.def.kind === 'disc'}
+										<div class="disc-wrap">
+											{#each si.items as d}
+												<div class="disc">
+													{#if d?.intent}<div class="disc-intent">{d.intent}</div>{/if}
+													{#if arr(d?.domain).length}
+														<div class="chips">
+															{#each arr(d.domain) as dom}<span class="kw">{dom}</span>{/each}
+														</div>
+													{/if}
+													{#each arr(d?.discriminators) as dd}
+														<div class="disc-item">
+															<span class="disc-cat">{dd?.category ?? '—'}</span>
+															<span class="disc-val">{dd?.value ?? ''}</span>
+															{#if dd?.confidence != null}
+																<span class="disc-conf mono"
+																	>{Math.round((Number(dd.confidence) || 0) * 100)}%</span
+																>
+															{/if}
+														</div>
+													{/each}
+												</div>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							</aside>
+						{/if}
+					</div>
+				</div>
+			</div>
+
+			{@render pdfPanel(focusedBlock)}
+		</div>
+	{:else}
+		<div class="hero">
+			<div class="hero-copy">
+				<div class="eyebrow">{heroEyebrow}</div>
+				<h2>{heroTitle}</h2>
+				<p>{heroDescription}</p>
+			</div>
+			{#if activeRecord && !loading && blocks.length}
+				<div class="hero-stat" aria-label="Scene block summary for the selected record">
+					<span class="hero-stat-count">{blocks.length}</span>
+					<span class="hero-stat-label">scene {blocks.length === 1 ? 'block' : 'blocks'}</span>
+					<span class="hero-stat-sep" aria-hidden="true">·</span>
+					<span class="hero-stat-conf">avg confidence {avgConfidence}%</span>
+				</div>
+			{/if}
+		</div>
+
+		<div class="workspace">
+			<KbInputRecordBrowser
+				{darkMode}
+				instanceKey={browserInstanceKey}
+				title="kb.inputs"
+				subtitle="Search, filter, and select a record to inspect its extracted scene blocks."
+				emptyTitle="No records found."
+				emptySubtitle="Use Search or Retrieve to browse kb.inputs for scene blocks."
+				{scopeToActiveStore}
+				{selectedRecordId}
+				onSelect={handleRecordSelect}
+			/>
+
+			<div class="right-panel">
+				<div class="right-tabs">
+					<div class="tab active">Scene Blocks</div>
+					{#if activeRecord}
+						<div class="tab passive" title={activeRecord.file_name ?? ''}>
+							{activeRecord.title?.trim() ||
+								activeRecord.file_name?.trim() ||
+								`Record #${activeRecord.id}`}
+						</div>
+					{/if}
+				</div>
+
+				{#if !activeRecord}
+					<div class="empty-state">
+						<div class="empty-title">Select a record</div>
+						<div class="empty-copy">
+							Choose a document from the left to read the scene blocks extracted from it.
+						</div>
+					</div>
+				{:else}
+					<div class="detail-grid">
+						<div
+							class="scene-card"
+							style="width:{listWidth}px; flex:0 0 {listWidth}px;"
+						>
+							<div class="scene-card-head">
+								<div class="eyebrow">Extracted scenes</div>
+								<div class="scene-card-count">
+									{#if loading}loading…{:else}{blocks.length} total{/if}
+								</div>
+							</div>
+
+							<div class="scene-list">
+								{#if loading}
+									{#each Array(4) as _, i (i)}
+										<div class="skeleton-row" style={`animation-delay:${i * 60}ms`}>
+											<div class="sk sk-pill"></div>
+											<div class="sk sk-title"></div>
+											<div class="sk sk-line"></div>
+										</div>
+									{/each}
+								{:else if loadError}
+									<div class="error-card">
+										<div class="error-title">Couldn't load scene blocks</div>
+										<div class="error-copy">{loadError}</div>
+									</div>
+								{:else if blocks.length === 0}
+									<div class="empty-state">
+										<div class="empty-title">No scene blocks yet</div>
+										<div class="empty-copy">
+											This record has no entries in <code>kb.scene_objects</code>. Scene blocks
+											are produced by the generate-scene-blocks processor once the document is
+											processed.
+										</div>
+									</div>
+								{:else}
+									{#each blocks as block, idx (block.id)}
+										{@const conf = Number(block.confidence) || 0}
+										<div class="scene-block">
+											<button
+												type="button"
+												class="scene-row"
+												title="Open this scene block"
+												onclick={() => focusBlock(block.id)}
+											>
+												<span class="row-index mono">{String(idx + 1).padStart(2, '0')}</span>
+												<span class="row-main">
+													<span class="row-top">
+														{#if block.scene_type?.trim()}
+															<span class="scene-type">{block.scene_type}</span>
+														{/if}
+														<span class="row-title">
+															{block.title?.trim() || block.scene_id || `Scene ${idx + 1}`}
+														</span>
+													</span>
+													{#if block.summary?.trim()}
+														<span class="row-summary">{block.summary}</span>
+													{/if}
+													{#if strList(block, 'keywords').length}
+														<span class="row-keywords">
+															{#each strList(block, 'keywords').slice(0, 6) as kw}
+																<span class="kw">{kw}</span>
+															{/each}
+														</span>
+													{/if}
+												</span>
+												<span class="row-conf" title="Extraction confidence">
+													<span class="conf-meter conf-{confidenceBand(conf)}">
+														<span class="conf-fill" style="width:{Math.round(conf * 100)}%"></span>
+													</span>
+													<span class="conf-num mono">{Math.round(conf * 100)}%</span>
+												</span>
+												<span class="row-go" aria-hidden="true">
+													<ChevronRightIcon class="h-4 w-4" />
+												</span>
+											</button>
+										</div>
+									{/each}
+								{/if}
+							</div>
+						</div>
+
+						<button
+							type="button"
+							class="resize-handle"
+							class:active={resizing}
+							aria-label="Resize the scene block panel"
+							onpointerdown={startResize}
+							onkeydown={onResizerKeydown}
+						>
+							<span class="resize-grip" aria-hidden="true"></span>
+						</button>
+
+						{@render pdfPanel(null)}
+					</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -754,14 +1184,13 @@
 		overflow: hidden;
 		transition: border-color 160ms ease, background 160ms ease;
 	}
-	.scene-block.open {
-		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-		background: color-mix(in srgb, var(--accent) 7%, rgba(2, 6, 23, 0.3));
-		box-shadow: 0 14px 34px rgba(2, 6, 23, 0.32);
+	.scene-block:hover {
+		border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+		background: color-mix(in srgb, var(--accent) 6%, rgba(2, 6, 23, 0.3));
 	}
 	.scene-row {
 		display: grid;
-		grid-template-columns: auto auto minmax(0, 1fr) auto;
+		grid-template-columns: auto minmax(0, 1fr) auto auto;
 		align-items: start;
 		gap: 0.7rem;
 		width: 100%;
@@ -784,15 +1213,16 @@
 	.mono {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	}
-	.chevron {
+	.row-go {
 		display: inline-flex;
+		align-items: center;
 		color: var(--muted);
-		padding-top: 0.15rem;
+		padding-top: 0.3rem;
 		transition: transform 160ms ease, color 160ms ease;
 	}
-	.chevron.open {
-		transform: rotate(90deg);
+	.scene-row:hover .row-go {
 		color: var(--accent);
+		transform: translateX(2px);
 	}
 	.row-main {
 		display: flex;
@@ -834,10 +1264,6 @@
 		line-clamp: 2;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
-	}
-	.scene-block.open .row-summary {
-		-webkit-line-clamp: unset;
-		line-clamp: unset;
 	}
 	.row-keywords {
 		display: flex;
@@ -886,37 +1312,6 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.scene-detail {
-		padding: 0.2rem 1rem 1.05rem;
-		display: flex;
-		flex-direction: column;
-		gap: 1.05rem;
-	}
-	.grp {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-	.grp-head {
-		display: flex;
-		align-items: center;
-		gap: 0.45rem;
-		font-size: 0.7rem;
-		font-weight: 800;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--accent);
-		padding-bottom: 0.3rem;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-	}
-	.grp-sub {
-		font-size: 0.68rem;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--muted);
-		margin-top: 0.2rem;
-	}
 	.chips {
 		display: flex;
 		flex-wrap: wrap;
@@ -1058,20 +1453,6 @@
 		color: var(--text);
 		word-break: break-word;
 	}
-	.disc-toggle {
-		align-self: flex-start;
-		margin-top: 0.2rem;
-		font-size: 0.78rem;
-		font-weight: 600;
-		color: var(--accent);
-		background: transparent;
-		border: 0;
-		padding: 0.2rem 0;
-		cursor: pointer;
-	}
-	.disc-toggle:hover {
-		text-decoration: underline;
-	}
 	.disc-wrap {
 		display: flex;
 		flex-direction: column;
@@ -1112,16 +1493,6 @@
 		color: var(--muted);
 		font-size: 0.72rem;
 	}
-	.scene-foot {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.4rem 1rem;
-		padding-top: 0.7rem;
-		border-top: 1px solid rgba(148, 163, 184, 0.1);
-		font-size: 0.7rem;
-		color: var(--muted);
-	}
-
 	.resize-handle {
 		flex: 0 0 16px;
 		position: relative;
@@ -1278,6 +1649,572 @@
 		opacity: 0.85;
 	}
 
+	/* ── Focus mode: Canvas | PDF Viewer ─────────────────────────────── */
+	.focus-grid {
+		display: flex;
+		min-height: 0;
+		flex: 1;
+		align-items: stretch;
+		gap: 1rem;
+	}
+	.canvas {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		flex: 1 1 auto;
+		border-radius: 24px;
+		border: 1px solid var(--border);
+		background: var(--panel);
+		overflow: hidden;
+	}
+	.focus-grid > .pdf-card {
+		flex: 0 0 clamp(360px, 40%, 580px);
+		min-width: 0;
+		padding: 1rem;
+		border-radius: 24px;
+		border: 1px solid var(--border);
+		background: var(--panel);
+	}
+	.canvas-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.85rem 1.1rem;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+		flex-shrink: 0;
+	}
+	.back-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0.5rem 0.95rem;
+		border-radius: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		background: rgba(148, 163, 184, 0.08);
+		color: var(--text);
+		font-size: 0.85rem;
+		font-weight: 700;
+		cursor: pointer;
+		transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+	}
+	.back-btn:hover {
+		border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+		color: var(--accent);
+	}
+	.canvas-crumb {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.72rem;
+		letter-spacing: 0.06em;
+		color: var(--muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.crumb-type {
+		padding: 0.16rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
+		border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+	}
+	.crumb-sep {
+		margin: 0 0.1rem;
+		opacity: 0.5;
+	}
+	.canvas-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.85rem;
+		min-height: 0;
+		flex: 1;
+		padding: 1.05rem 1.25rem 1.15rem;
+	}
+	.map-head {
+		flex-shrink: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+	.map-sub {
+		margin: 0.15rem 0 0;
+		font-size: 0.86rem;
+		line-height: 1.55;
+		color: var(--muted);
+		max-width: 78ch;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.scene-map {
+		position: relative;
+		flex: 1 1 auto;
+		min-height: 440px;
+		border-radius: 18px;
+		border: 1px solid var(--border);
+		overflow: hidden;
+		background:
+			radial-gradient(
+				circle at 50% 47%,
+				color-mix(in srgb, var(--accent) 8%, transparent),
+				transparent 58%
+			),
+			var(--panel-alt);
+	}
+	.scene-map::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		background-image: radial-gradient(
+			color-mix(in srgb, var(--muted) 24%, transparent) 1px,
+			transparent 1.5px
+		);
+		background-size: 26px 26px;
+		background-position: -13px -13px;
+		opacity: 0.45;
+		pointer-events: none;
+	}
+	.map-wires {
+		position: absolute;
+		inset: 0;
+		overflow: visible;
+		pointer-events: none;
+	}
+	.wire {
+		fill: none;
+		stroke: color-mix(in srgb, var(--muted) 34%, transparent);
+		stroke-width: 1.25;
+		transition: stroke 150ms ease, stroke-width 150ms ease;
+	}
+	.wire.spoke {
+		stroke: color-mix(in srgb, var(--muted) 46%, transparent);
+		stroke-width: 1.5;
+	}
+	.wire.active {
+		stroke: var(--accent);
+		stroke-width: 2;
+	}
+
+	.node {
+		position: absolute;
+		transform: translate(-50%, -50%);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.center {
+		border-radius: 50%;
+		background: var(--center-bg);
+		color: var(--center-ink);
+		text-align: center;
+		z-index: 3;
+		box-shadow:
+			0 14px 34px -12px rgba(2, 6, 23, 0.55),
+			0 0 0 7px color-mix(in srgb, var(--center-bg) 16%, transparent);
+	}
+	.center-title {
+		padding: 0 0.95rem;
+		font-size: clamp(0.82rem, 1.3vw, 1.02rem);
+		font-weight: 800;
+		line-height: 1.22;
+		letter-spacing: -0.01em;
+		display: -webkit-box;
+		-webkit-line-clamp: 4;
+		line-clamp: 4;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.center-cap {
+		position: absolute;
+		transform: translate(-50%, 0);
+		z-index: 3;
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		white-space: nowrap;
+	}
+	.cap-conf {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.34rem;
+		padding: 0.16rem 0.5rem;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--muted) 16%, transparent);
+		color: var(--text);
+		font-size: 0.72rem;
+	}
+	.cap-conf-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--muted);
+	}
+	.cap-conf.conf-high .cap-conf-dot {
+		background: var(--accent);
+	}
+	.cap-conf.conf-mid .cap-conf-dot {
+		background: #d6a93c;
+	}
+	.cap-conf.conf-low .cap-conf-dot {
+		background: #b9657a;
+	}
+	.cap-id {
+		font-size: 0.7rem;
+		color: var(--muted);
+	}
+
+	.group {
+		flex-direction: column;
+		gap: 0.18rem;
+		border-radius: 50%;
+		background: var(--panel);
+		border: 1.5px solid color-mix(in srgb, var(--text) 26%, transparent);
+		color: var(--text);
+		text-align: center;
+		z-index: 2;
+		box-shadow: 0 8px 20px -12px rgba(2, 6, 23, 0.55);
+	}
+	.group.is-empty {
+		opacity: 0.4;
+		filter: saturate(0.4);
+	}
+	:global(.group .group-ic) {
+		width: 17px;
+		height: 17px;
+		color: var(--muted);
+	}
+	.group-label {
+		padding: 0 0.4rem;
+		font-size: clamp(0.55rem, 0.85vw, 0.66rem);
+		font-weight: 800;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+		line-height: 1.15;
+		color: var(--text);
+	}
+
+	.sat {
+		border-radius: 50%;
+		padding: 0;
+		cursor: pointer;
+		color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+		border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+		z-index: 2;
+		transition:
+			transform 150ms cubic-bezier(0.22, 1, 0.36, 1),
+			box-shadow 150ms ease,
+			background 150ms ease,
+			border-color 150ms ease;
+	}
+	.sat:hover {
+		transform: translate(-50%, -50%) scale(1.09);
+		border-color: var(--accent);
+	}
+	.sat:focus-visible {
+		outline: none;
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+	}
+	:global(.sat .sat-ic) {
+		width: 17px;
+		height: 17px;
+	}
+	.sat-badge {
+		position: absolute;
+		top: -7px;
+		right: -7px;
+		min-width: 17px;
+		height: 17px;
+		padding: 0 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 999px;
+		background: var(--accent);
+		color: #fff;
+		font-size: 0.58rem;
+		font-weight: 700;
+		line-height: 1;
+		box-shadow: 0 0 0 2px var(--panel-alt);
+	}
+	.sat.active {
+		background: var(--accent);
+		color: #fff;
+		border-color: var(--accent);
+		box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 24%, transparent);
+	}
+	.sat.active .sat-badge {
+		background: var(--panel);
+		color: var(--accent);
+	}
+	.sat-label {
+		position: absolute;
+		transform: translate(-50%, 0);
+		z-index: 2;
+		max-width: 124px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		text-align: center;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		line-height: 1.25;
+		color: var(--muted);
+		cursor: pointer;
+		word-break: break-word;
+		transition: color 150ms ease;
+	}
+	.sat-label:hover {
+		color: var(--text);
+	}
+	.sat-label.active {
+		color: var(--accent);
+	}
+	.map-measuring {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		font-size: 0.82rem;
+		color: var(--muted);
+	}
+
+	.map-legend {
+		position: absolute;
+		right: 14px;
+		bottom: 14px;
+		z-index: 4;
+		display: flex;
+		flex-direction: column;
+		gap: 0.38rem;
+		padding: 0.7rem 0.85rem;
+		border-radius: 12px;
+		background: color-mix(in srgb, var(--panel) 94%, transparent);
+		border: 1px solid var(--border);
+		box-shadow: 0 12px 28px -16px rgba(2, 6, 23, 0.5);
+	}
+	.legend-h {
+		font-size: 0.58rem;
+		font-weight: 800;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--muted);
+		margin-bottom: 0.05rem;
+	}
+	.legend-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.72rem;
+		color: var(--text);
+	}
+	.lg {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+	.lg-scene {
+		background: var(--center-bg);
+		border: 1px solid color-mix(in srgb, var(--text) 28%, transparent);
+	}
+	.lg-group {
+		background: transparent;
+		border: 1.5px solid color-mix(in srgb, var(--text) 42%, transparent);
+	}
+	.lg-attr {
+		background: color-mix(in srgb, var(--accent) 24%, var(--panel));
+		border: 1px solid var(--accent);
+	}
+	.legend-hint {
+		margin-top: 0.15rem;
+		max-width: 156px;
+		font-size: 0.66rem;
+		line-height: 1.4;
+		color: var(--muted);
+		opacity: 0.85;
+	}
+
+	.map-meta-card {
+		position: absolute;
+		left: 14px;
+		top: 14px;
+		z-index: 4;
+		width: min(256px, 34%);
+		max-height: calc(50% - 20px);
+		display: flex;
+		flex-direction: column;
+		border-radius: 14px;
+		border: 1px solid var(--border);
+		background: var(--panel);
+		box-shadow: 0 20px 44px -18px rgba(2, 6, 23, 0.6);
+		overflow: hidden;
+	}
+	.meta-card-head {
+		padding: 0.65rem 0.75rem;
+		border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+		flex-shrink: 0;
+	}
+	.meta-card-title {
+		font-size: 0.84rem;
+		font-weight: 700;
+		color: var(--text);
+		line-height: 1.25;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.meta-card-summary {
+		margin: 0.28rem 0 0;
+		font-size: 0.73rem;
+		line-height: 1.45;
+		color: var(--muted);
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.meta-card-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.42rem;
+		padding: 0.65rem 0.75rem;
+		overflow-y: auto;
+	}
+	.meta-row {
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
+		font-size: 0.77rem;
+		flex-wrap: wrap;
+	}
+	.meta-row-col {
+		flex-direction: column;
+		gap: 0.28rem;
+	}
+	.meta-label {
+		font-size: 0.58rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted);
+		flex-shrink: 0;
+	}
+	.meta-val {
+		color: var(--text);
+		font-size: 0.73rem;
+		word-break: break-all;
+		min-width: 0;
+	}
+
+	.map-inspector {
+		position: absolute;
+		left: 14px;
+		bottom: 14px;
+		z-index: 5;
+		width: min(360px, 44%);
+		max-height: calc(100% - 28px);
+		display: flex;
+		flex-direction: column;
+		border-radius: 14px;
+		border: 1px solid var(--border);
+		background: var(--panel);
+		box-shadow: 0 20px 44px -18px rgba(2, 6, 23, 0.6);
+		overflow: hidden;
+	}
+	.map-inspector.is-floating {
+		bottom: auto;
+	}
+	.insp-head {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		padding: 0.7rem 0.8rem;
+		border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+	}
+	.insp-ic {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 30px;
+		border-radius: 9px;
+		flex-shrink: 0;
+		color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 15%, transparent);
+	}
+	.insp-titles {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		flex: 1;
+	}
+	.insp-group {
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+	.insp-name {
+		font-size: 0.92rem;
+		font-weight: 700;
+		color: var(--text);
+		line-height: 1.2;
+	}
+	.insp-count {
+		font-size: 0.74rem;
+		color: var(--muted);
+		background: color-mix(in srgb, var(--muted) 15%, transparent);
+		padding: 0.1rem 0.42rem;
+		border-radius: 6px;
+	}
+.insp-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.55rem;
+		padding: 0.8rem;
+		overflow-y: auto;
+	}
+
+	@media (max-width: 1180px) {
+		.map-inspector {
+			width: min(320px, 58%);
+		}
+	}
+
+	@media (max-width: 720px) {
+		.scene-map {
+			min-height: 380px;
+		}
+		.map-legend,
+		.map-meta-card {
+			display: none;
+		}
+		.map-inspector {
+			left: 10px;
+			top: auto !important;
+			right: 10px;
+			bottom: 10px;
+			width: auto;
+		}
+	}
+
 	@media (max-width: 980px) {
 		.workspace {
 			grid-template-columns: minmax(0, 1fr);
@@ -1297,6 +2234,13 @@
 			flex-direction: column;
 			align-items: flex-start;
 			gap: 1rem;
+		}
+		.focus-grid {
+			flex-direction: column;
+		}
+		.focus-grid > .pdf-card {
+			flex: 1 1 auto;
+			min-height: 420px;
 		}
 	}
 </style>
