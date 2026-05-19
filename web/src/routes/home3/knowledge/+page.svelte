@@ -24,6 +24,7 @@
 	import SummaryTreeView from '$lib/components/home3/summary-tree-view.svelte';
 	import TopicGraphView from '$lib/components/home3/topic-graph-view.svelte';
 	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
+	import SceneBlocksView from '$lib/components/home3/scene-blocks-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import {
 		getProvisionCategory,
@@ -46,6 +47,7 @@
 		| 'kb-input-details'
 		| 'kb-metrics'
 		| 'kb-doc-structure'
+		| 'kb-scene-blocks'
 		| 'kb-chunks'
 		| 'kb-summary-graph'
 		| 'kb-summary-tree'
@@ -130,6 +132,11 @@
 					id: 'kb-metrics',
 					label: 'Metrics',
 					description: 'Manage extracted metrics'
+				},
+				{
+					id: 'kb-scene-blocks',
+					label: 'Scene Blocks',
+					description: 'Event-driven scene extraction'
 				},
 				{
 					id: 'kb-provision-tree',
@@ -502,6 +509,8 @@
 				<MetricMgmtView {darkMode} />
 			{:else if activeSection === 'kb-doc-structure'}
 				<DocStructureView {darkMode} />
+			{:else if activeSection === 'kb-scene-blocks'}
+				<SceneBlocksView {darkMode} browserInstanceKey="scene-blocks" />
 			{:else if activeSection === 'kb-chunks'}
 				<ChunkMgmtView {darkMode} />
 			{:else if activeSection === 'kb-summary-graph'}

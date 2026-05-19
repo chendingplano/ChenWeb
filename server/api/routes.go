@@ -291,6 +291,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/chunks", kbhandler.ListChunks)
 	apiGroup.GET("/kb/topic-chunks", kbhandler.ListTopicChunks)
 	apiGroup.GET("/kb/raw-lines", kbhandler.GetRawLines)
+	apiGroup.GET("/kb/scene-blocks", kbhandler.ListSceneBlocks)
 	apiGroup.GET("/kb/summary-graph", kbhandler.ListSummaryGraph)
 	apiGroup.GET("/kb/summary-category", kbhandler.GetSummaryCategory)
 	apiGroup.GET("/kb/record-summaries", kbhandler.GetRecordSummaries)

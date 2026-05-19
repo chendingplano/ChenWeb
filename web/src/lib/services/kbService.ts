@@ -688,6 +688,89 @@ export async function listKbChunks(inputRecordId: number): Promise<ListKbTopicCh
 	return result;
 }
 
+// ---------- kb.scene_objects ----------
+
+export type KbSceneActor = { type?: string; name?: string };
+export type KbSceneResource = { type?: string; name?: string };
+export type KbSceneAction = { sequence?: number; actor?: string; action?: string };
+export type KbSceneRelationship = { type?: string; target?: string };
+export type KbSceneSourceRef = {
+	source_id?: string;
+	evidence_type?: string;
+	reference?: string;
+};
+export type KbSceneDiscriminator = {
+	intent?: string;
+	domain?: string[];
+	discriminators?: Array<{
+		category?: string;
+		value?: string;
+		confidence?: number;
+		reason?: string;
+	}>;
+	exploration_plan?: string[];
+};
+
+export type KbSceneBlockRecord = {
+	id: number;
+	object_id: string;
+	event_id: string;
+	scene_id: string;
+	scene_type: string;
+	title: string;
+	summary: string;
+	actors: KbSceneActor[];
+	resources: KbSceneResource[];
+	preconditions: string[];
+	triggers: string[];
+	states: string[];
+	actions: KbSceneAction[];
+	constraints: string[];
+	decisions: string[];
+	outcomes: string[];
+	failure_modes: string[];
+	root_causes: string[];
+	resolutions: string[];
+	relationships: KbSceneRelationship[];
+	discriminators: KbSceneDiscriminator[];
+	keywords: string[];
+	confidence: number;
+	source_refs: KbSceneSourceRef[];
+	model_name: string;
+	prompt_name: string;
+	create_time: string;
+	modify_time: string;
+};
+
+export type ListKbSceneBlocksResponse = {
+	status: boolean;
+	input_id: number;
+	file_name?: string;
+	results: KbSceneBlockRecord[];
+	total: number;
+};
+
+export async function listKbSceneBlocks(
+	inputRecordId: number
+): Promise<ListKbSceneBlocksResponse> {
+	const result = await fetchOrThrow<ListKbSceneBlocksResponse>(
+		`${BASE}/scene-blocks?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to retrieve scene blocks'
+	);
+	console.log('[kbService] listKbSceneBlocks fetched', {
+		inputRecordId,
+		total: result.total,
+		scene_blocks: (result.results ?? []).map((block) => ({
+			id: block.id,
+			scene_id: block.scene_id,
+			scene_type: block.scene_type,
+			title: block.title,
+			confidence: block.confidence
+		}))
+	});
+	return result;
+}
+
 // ---------- kb.stores ----------
 
 export type KnowledgeStoreStatus = 'active' | 'suspended' | 'inactive' | string;
