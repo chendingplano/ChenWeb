@@ -28,9 +28,16 @@
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import { knowledgeStoreState } from './knowledge-store-state.svelte';
 	import {
+		formatSceneBlockLineSpans,
+		normalizeSceneBlockLineRefs
+	} from './scene-block-line-spans.js';
+	import { buildSceneBlockMetaSections } from './scene-block-meta.js';
+	import {
+		getRawLines,
 		listKbSceneBlocks,
 		type KbInputRecord,
-		type KbSceneBlockRecord
+		type KbSceneBlockRecord,
+		type RawLine
 	} from '$lib/services/kbService';
 
 	let {
@@ -92,10 +99,18 @@
 	let hoverTimer: ReturnType<typeof setTimeout> | null = null;
 	let inspectorW = $state(320);
 	let inspectorH = $state(260);
+	let sceneMetaCardEl = $state<HTMLElement | null>(null);
+	let sceneMetaCardWidth = $state<number | null>(null);
+	let sceneMetaCardHeight = $state<number | null>(null);
+	let sceneMetaResizing = $state(false);
 
 	let docPage = $state(1);
 	let pdfZoom = $state(0.6);
 	let pdfNumPages = $state(0);
+	let rawLines = $state<RawLine[]>([]);
+	let rawLinesInputId = $state<number | null>(null);
+	let sceneHighlightVersion = $state(0);
+	let sceneHighlightPrimedForBlockId = $state<number | null>(null);
 
 	let activeRecord = $derived(
 		selectedRecordId != null ? (recordCache[selectedRecordId] ?? null) : null
@@ -132,8 +147,32 @@
 			? filteredFocusBlocks[focusedBlockIndex + 1]?.id ?? null
 			: null
 	);
-	let focusedMetaKeywords = $derived(focusedBlock ? strList(focusedBlock, 'keywords') : []);
-	let focusedMetaStates = $derived(focusedBlock ? strList(focusedBlock, 'states') : []);
+	let focusedMetaSections = $derived(focusedBlock ? buildSceneBlockMetaSections(focusedBlock) : []);
+	let focusedTitleEn = $derived.by(() => {
+		const base = focusedBlock?.title?.trim() || '';
+		const english = focusedBlock?.title_en?.trim() || '';
+		return english && english !== base ? english : '';
+	});
+	let focusedLineSpans = $derived(focusedBlock ? formatSceneBlockLineSpans(focusedBlock.evidence_lines) : []);
+	let focusedLineRefs = $derived.by(() =>
+		focusedBlock ? normalizeSceneBlockLineRefs(focusedBlock.evidence_lines ?? [], rawLines) : []
+	);
+	let focusedRawLinesByPage = $derived.by(() => {
+		const map = new Map<number, RawLine[]>();
+		if (!focusedLineRefs.length) return map;
+		const rawLineByKey = new Map<string, RawLine>();
+		for (const line of rawLines) {
+			rawLineByKey.set(`${line.page_number}:${line.line_number}`, line);
+		}
+		for (const ref of focusedLineRefs) {
+			const line = rawLineByKey.get(`${ref.page_number}:${ref.line_number}`);
+			if (!line || !Array.isArray(line.coords) || line.coords.length < 4) continue;
+			const group = map.get(ref.page_number) ?? [];
+			group.push(line);
+			map.set(ref.page_number, group);
+		}
+		return map;
+	});
 	let avgConfidence = $derived(
 		blocks.length
 			? Math.round(
@@ -141,6 +180,18 @@
 				)
 			: 0
 	);
+	let sceneMetaMaxWidth = $derived(Math.max(256, mapW - 28));
+	let sceneMetaMaxHeight = $derived(Math.max(220, mapH - 28));
+	let sceneMetaCardStyle = $derived.by(() => {
+		const width = sceneMetaCardWidth != null ? Math.min(sceneMetaMaxWidth, Math.max(256, sceneMetaCardWidth)) : null;
+		const height = sceneMetaCardHeight != null ? Math.min(sceneMetaMaxHeight, Math.max(220, sceneMetaCardHeight)) : null;
+		const styles = [
+			`max-height:${sceneMetaMaxHeight}px`
+		];
+		if (width != null) styles.push(`width:${width}px`);
+		if (height != null) styles.push(`height:${height}px`);
+		return styles.join(';');
+	});
 
 	function clampListWidth(value: number) {
 		if (!Number.isFinite(value)) return LIST_DEFAULT;
@@ -151,6 +202,28 @@
 		if (!Number.isFinite(value)) return FOCUS_PDF_DEFAULT;
 		return Math.max(FOCUS_PDF_MIN, Math.min(FOCUS_PDF_MAX, Math.round(value)));
 	}
+
+	function clampSceneMetaCardWidth(value: number) {
+		if (!Number.isFinite(value)) return Math.min(sceneMetaMaxWidth, 320);
+		return Math.max(256, Math.min(sceneMetaMaxWidth, Math.round(value)));
+	}
+
+	function clampSceneMetaCardHeight(value: number) {
+		if (!Number.isFinite(value)) return Math.min(sceneMetaMaxHeight, 320);
+		return Math.max(220, Math.min(sceneMetaMaxHeight, Math.round(value)));
+	}
+
+	$effect(() => {
+		if (focusedBlockId == null) {
+			sceneHighlightPrimedForBlockId = null;
+			return;
+		}
+		if (sceneHighlightPrimedForBlockId === focusedBlockId) return;
+		if (focusedLineRefs.length === 0) return;
+		docPage = focusedLineRefs[0].page_number;
+		sceneHighlightPrimedForBlockId = focusedBlockId;
+		sceneHighlightVersion += 1;
+	});
 
 	$effect(() => {
 		if (!browser) return;
@@ -200,6 +273,24 @@
 		}
 	}
 
+	async function ensureRawLinesLoadedForViewer() {
+		const inputId = viewerInputId;
+		if (inputId == null) {
+			rawLinesInputId = null;
+			rawLines = [];
+			return;
+		}
+		if (inputId === rawLinesInputId && rawLines.length > 0) return;
+		rawLinesInputId = inputId;
+		rawLines = [];
+		try {
+			const res = await getRawLines(inputId);
+			if (rawLinesInputId === inputId) rawLines = res.lines ?? [];
+		} catch {
+			if (rawLinesInputId === inputId) rawLines = [];
+		}
+	}
+
 	function focusBlock(id: number) {
 		const block = blocks.find((item) => item.id === id) ?? null;
 		const blockType = block?.scene_type?.trim() || '';
@@ -210,6 +301,9 @@
 		showDiscriminators = false;
 		hoveredAttr = null;
 		docPage = 1;
+		sceneHighlightPrimedForBlockId = null;
+		sceneHighlightVersion += 1;
+		void ensureRawLinesLoadedForViewer();
 		onFocusModeChange?.(true);
 	}
 
@@ -218,6 +312,8 @@
 		focusedBlockId = null;
 		showDiscriminators = false;
 		hoveredAttr = null;
+		rawLinesInputId = null;
+		rawLines = [];
 		onFocusModeChange?.(false);
 	}
 
@@ -294,6 +390,51 @@
 		}
 	}
 
+	function startSceneMetaResize(event: PointerEvent) {
+		if (!sceneMetaCardEl) return;
+		event.preventDefault();
+		event.stopPropagation();
+		const rect = sceneMetaCardEl.getBoundingClientRect();
+		const startX = event.clientX;
+		const startY = event.clientY;
+		const startWidth = rect.width;
+		const startHeight = rect.height;
+		sceneMetaResizing = true;
+		document.body.style.cursor = 'nwse-resize';
+		document.body.style.userSelect = 'none';
+		const move = (e: PointerEvent) => {
+			sceneMetaCardWidth = clampSceneMetaCardWidth(startWidth + (e.clientX - startX));
+			sceneMetaCardHeight = clampSceneMetaCardHeight(startHeight + (e.clientY - startY));
+		};
+		const up = () => {
+			sceneMetaResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up, { once: true });
+		window.addEventListener('pointercancel', up, { once: true });
+	}
+
+	function onSceneMetaResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			sceneMetaCardWidth = clampSceneMetaCardWidth((sceneMetaCardWidth ?? sceneMetaCardEl?.getBoundingClientRect().width ?? 320) - 24);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			sceneMetaCardWidth = clampSceneMetaCardWidth((sceneMetaCardWidth ?? sceneMetaCardEl?.getBoundingClientRect().width ?? 320) + 24);
+		} else if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			sceneMetaCardHeight = clampSceneMetaCardHeight((sceneMetaCardHeight ?? sceneMetaCardEl?.getBoundingClientRect().height ?? 320) - 24);
+		} else if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			sceneMetaCardHeight = clampSceneMetaCardHeight((sceneMetaCardHeight ?? sceneMetaCardEl?.getBoundingClientRect().height ?? 320) + 24);
+		}
+	}
+
 	function goToPrevScene() {
 		if (prevFocusedBlockId == null) return;
 		focusBlock(prevFocusedBlockId);
@@ -325,6 +466,48 @@
 		return [...arr(block.actions)].sort(
 			(a, b) => (Number(a?.sequence) || 0) - (Number(b?.sequence) || 0)
 		);
+	}
+
+	function renderSceneBlockHighlights(pageNo: number, viewport: any, overlay: HTMLDivElement) {
+		const HIGHLIGHT_EXPAND_TOP_PX = 10;
+		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
+		const lines = focusedRawLinesByPage.get(pageNo) ?? [];
+		const rects = lines
+			.map((line) => {
+				if (!Array.isArray(line.coords) || line.coords.length < 4) return null;
+				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+				return {
+					lineNumber: line.line_number,
+					left: Math.min(vx1, vx2),
+					top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
+					rawBottom: Math.max(vy1, vy2),
+					width: Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX
+				};
+			})
+			.filter((rect): rect is { lineNumber: number; left: number; top: number; rawBottom: number; width: number } => !!rect);
+		for (let i = 0; i < rects.length; i += 1) {
+			const rect = rects[i];
+			const nextRect = rects[i + 1];
+			const bottom = nextRect ? nextRect.top : rect.rawBottom;
+			const height = Math.max(0, bottom - rect.top);
+			if (rect.width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${rect.left}px`;
+			mark.style.top = `${rect.top}px`;
+			mark.style.width = `${rect.width}px`;
+			mark.style.height = `${height}px`;
+			mark.title = `line ${rect.lineNumber}`;
+			overlay.appendChild(mark);
+		}
+	}
+
+	function formatCreateTime(value: string | undefined) {
+		const text = value?.trim() || '';
+		if (!text) return '';
+		const date = new Date(text);
+		if (Number.isNaN(date.getTime())) return text;
+		return date.toLocaleString();
 	}
 
 	// ── Scene Map model ───────────────────────────────────────────────
@@ -503,24 +686,22 @@
 		const groups = SCENE_GROUPS.map((g) => {
 			const gx = cx + g.ux * Rg;
 			const gy = cy + g.uy * Rg;
-			const present = g.attrs
-				.map((def) => ({ def, count: attrRaw(fb, def).length }))
-				.filter((s) => s.count > 0);
+			const attrs = g.attrs.map((def) => ({ def, count: attrRaw(fb, def).length }));
 			const baseAng = Math.atan2(g.uy, g.ux);
-			const k = present.length;
+			const k = attrs.length;
 			const span = k > 1 ? Math.min(Math.PI * 0.62, (k - 1) * 0.44) : 0;
-			const satellites = present.map((s, i) => {
+			const satellites = attrs.map((s, i) => {
 				const ang = baseAng + (k > 1 ? (i - (k - 1) / 2) * (span / (k - 1)) : 0);
 				const sx = gx + Math.cos(ang) * Rs;
 				const sy = gy + Math.sin(ang) * Rs;
 				const wire = shortenLine(gx, gy, sx, sy, Rgn + 3, Rsn + 3);
-				return { ...s, key: s.def.key, x: sx, y: sy, ang, wire };
+				return { ...s, key: s.def.key, hasValue: s.count > 0, x: sx, y: sy, ang, wire };
 			});
 			return {
 				...g,
 				x: gx,
 				y: gy,
-				empty: k === 0,
+				empty: attrs.every((s) => s.count === 0),
 				satellites,
 				spoke: shortenLine(cx, cy, gx, gy, Rc + 5, Rgn + 3)
 			};
@@ -610,6 +791,8 @@
 					bind:page={docPage}
 					bind:zoom={pdfZoom}
 					bind:numPages={pdfNumPages}
+					renderHighlights={ctxBlock ? renderSceneBlockHighlights : undefined}
+					highlightVersion={ctxBlock ? `${focusedBlockId ?? 0}:${sceneHighlightVersion}` : 0}
 					{darkMode}
 				/>
 			{:else if viewerInputId}
@@ -700,19 +883,19 @@
 								aria-hidden="true"
 							>
 								{#each m.groups as g (g.id)}
-									{#if !g.empty}
-										<line
-											class="wire spoke"
-											x1={g.spoke.x1}
-											y1={g.spoke.y1}
-											x2={g.spoke.x2}
-											y2={g.spoke.y2}
-										/>
-									{/if}
+									<line
+										class="wire spoke"
+										class:is-empty={g.empty}
+										x1={g.spoke.x1}
+										y1={g.spoke.y1}
+										x2={g.spoke.x2}
+										y2={g.spoke.y2}
+									/>
 									{#each g.satellites as s (s.key)}
 										<line
 											class="wire"
 											class:active={hoveredAttr === s.key}
+											class:is-empty={!s.hasValue}
 											x1={s.wire.x1}
 											y1={s.wire.y1}
 											x2={s.wire.x2}
@@ -753,6 +936,7 @@
 										type="button"
 										class="node sat"
 										class:active={hoveredAttr === s.key}
+										class:is-empty={!s.hasValue}
 										style="left:{s.x}px; top:{s.y}px; width:{m.Rsn * 2}px; height:{m.Rsn * 2}px;"
 										title="{s.def.label} ({s.count})"
 										onmouseenter={() => satEnter(s.key)}
@@ -765,6 +949,7 @@
 										type="button"
 										class="sat-label"
 										class:active={hoveredAttr === s.key}
+										class:is-empty={!s.hasValue}
 										style="left:{s.x}px; top:{s.y + m.Rsn + 7}px;"
 										tabindex="-1"
 										onmouseenter={() => satEnter(s.key)}
@@ -792,14 +977,17 @@
 							<div class="legend-hint">Hover an attribute node to inspect its values</div>
 						</aside>
 
-						<aside class="map-meta-card" aria-label="Scene metadata">
+						<aside
+							bind:this={sceneMetaCardEl}
+							class="map-meta-card"
+							class:is-resizing={sceneMetaResizing}
+							style={sceneMetaCardStyle}
+							aria-label="Scene metadata"
+						>
 							<div class="meta-card-head">
 								<div class="meta-card-title">{fb.title?.trim() || fb.scene_id || 'Scene'}</div>
-								{#if fb.summary?.trim()}
-									<p class="meta-card-summary">
-										<span class="meta-summary-label">Summary:</span>
-										{fb.summary}
-									</p>
+								{#if focusedTitleEn}
+									<p class="meta-card-subtitle">{focusedTitleEn}</p>
 								{/if}
 							</div>
 							<div class="meta-card-body">
@@ -828,23 +1016,50 @@
 										<span class="meta-val mono">{fb.scene_id}</span>
 									</div>
 								{/if}
-								{#if focusedMetaKeywords.length}
-									<div class="meta-row meta-row-col">
-										<span class="meta-label">Keywords</span>
+								<div class="meta-row meta-row-col">
+									<span class="meta-label">LINES</span>
+									{#if focusedLineSpans.length}
 										<div class="chips">
-											{#each focusedMetaKeywords as kw}<span class="kw">{kw}</span>{/each}
+											{#each focusedLineSpans as span}<span class="kw mono">{span}</span>{/each}
 										</div>
+									{:else}
+										<p class="meta-card-summary">
+											Evidence lines are unavailable for this scene block. Regenerate scene blocks
+											to enable line display and PDF highlighting.
+										</p>
+									{/if}
+								</div>
+								{#if formatCreateTime(fb.create_time)}
+									<div class="meta-row">
+										<span class="meta-label">CREATE TIME</span>
+										<span class="meta-val">{formatCreateTime(fb.create_time)}</span>
 									</div>
 								{/if}
-								{#if focusedMetaStates.length}
+								{#each focusedMetaSections as section (section.label)}
 									<div class="meta-row meta-row-col">
-										<span class="meta-label">States</span>
-										<ul class="lines">
-											{#each focusedMetaStates as st}<li>{st}</li>{/each}
-										</ul>
+										<span class="meta-label">{section.label}</span>
+										{#if section.kind === 'text'}
+											<p class="meta-card-summary">{section.value}</p>
+										{:else if section.kind === 'lines'}
+											<ul class="lines">
+												{#each section.items as item}<li>{item}</li>{/each}
+											</ul>
+										{:else}
+											<div class="chips">
+												{#each section.items as item}<span class="kw">{item}</span>{/each}
+											</div>
+										{/if}
 									</div>
-								{/if}
+								{/each}
 							</div>
+							<button
+								type="button"
+								class="meta-card-resizer"
+								aria-label="Resize scene metadata card"
+								title="Drag to resize"
+								onpointerdown={startSceneMetaResize}
+								onkeydown={onSceneMetaResizerKeydown}
+							></button>
 						</aside>
 
 						{#if selectedInfo}
@@ -871,7 +1086,9 @@
 									<span class="insp-count mono">{si.items.length}</span>
 								</header>
 								<div class="insp-body">
-									{#if si.def.kind === 'kw'}
+									{#if si.items.length === 0}
+										<p class="insp-empty">No values were extracted for this attribute.</p>
+									{:else if si.def.kind === 'kw'}
 										<div class="chips">
 											{#each si.items as kw}<span class="kw">{kw}</span>{/each}
 										</div>
@@ -1986,6 +2203,9 @@
 		stroke: color-mix(in srgb, var(--muted) 46%, transparent);
 		stroke-width: 1.5;
 	}
+	.wire.is-empty {
+		stroke: color-mix(in srgb, var(--muted) 18%, transparent);
+	}
 	.wire.active {
 		stroke: var(--accent);
 		stroke-width: 2;
@@ -2103,6 +2323,11 @@
 			background 150ms ease,
 			border-color 150ms ease;
 	}
+	.sat.is-empty {
+		color: var(--muted);
+		background: color-mix(in srgb, var(--muted) 10%, var(--panel));
+		border-color: color-mix(in srgb, var(--muted) 24%, transparent);
+	}
 	.sat:hover {
 		transform: translate(-50%, -50%) scale(1.09);
 		border-color: var(--accent);
@@ -2132,6 +2357,10 @@
 		font-weight: 700;
 		line-height: 1;
 		box-shadow: 0 0 0 2px var(--panel-alt);
+	}
+	.sat.is-empty .sat-badge {
+		background: color-mix(in srgb, var(--muted) 55%, var(--panel));
+		color: var(--text);
 	}
 	.sat.active {
 		background: var(--accent);
@@ -2164,6 +2393,9 @@
 	}
 	.sat-label:hover {
 		color: var(--text);
+	}
+	.sat-label.is-empty {
+		color: color-mix(in srgb, var(--muted) 80%, transparent);
 	}
 	.sat-label.active {
 		color: var(--accent);
@@ -2239,7 +2471,8 @@
 		top: 14px;
 		z-index: 4;
 		width: min(256px, 34%);
-		max-height: calc(50% - 20px);
+		min-width: 256px;
+		min-height: 220px;
 		display: flex;
 		flex-direction: column;
 		border-radius: 14px;
@@ -2247,6 +2480,9 @@
 		background: var(--panel);
 		box-shadow: 0 20px 44px -18px rgba(2, 6, 23, 0.6);
 		overflow: hidden;
+	}
+	.map-meta-card.is-resizing {
+		user-select: none;
 	}
 	.meta-card-head {
 		padding: 0.65rem 0.75rem;
@@ -2269,22 +2505,41 @@
 		font-size: 0.73rem;
 		line-height: 1.45;
 		color: var(--muted);
-		display: -webkit-box;
-		-webkit-line-clamp: 2;
-		line-clamp: 2;
-		-webkit-box-orient: vertical;
-		overflow: hidden;
 	}
-	.meta-summary-label {
-		font-weight: 700;
-		color: var(--text);
+	.meta-card-subtitle {
+		margin: 0.24rem 0 0;
+		font-size: 0.72rem;
+		line-height: 1.4;
+		color: var(--muted);
 	}
 	.meta-card-body {
 		display: flex;
 		flex-direction: column;
 		gap: 0.42rem;
-		padding: 0.65rem 0.75rem;
+		padding: 0.65rem 0.75rem 1rem;
 		overflow-y: auto;
+	}
+	.meta-card-resizer {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		width: 22px;
+		height: 22px;
+		padding: 0;
+		border: 0;
+		border-top-left-radius: 10px;
+		background:
+			linear-gradient(135deg, transparent 0 48%, color-mix(in srgb, var(--muted) 52%, transparent) 48% 56%, transparent 56% 64%, color-mix(in srgb, var(--muted) 76%, transparent) 64% 72%, transparent 72%),
+			color-mix(in srgb, var(--panel) 88%, transparent);
+		cursor: nwse-resize;
+		opacity: 0.9;
+	}
+	.meta-card-resizer:hover,
+	.meta-card-resizer:focus-visible {
+		background:
+			linear-gradient(135deg, transparent 0 48%, color-mix(in srgb, var(--accent) 58%, transparent) 48% 56%, transparent 56% 64%, color-mix(in srgb, var(--accent) 82%, transparent) 64% 72%, transparent 72%),
+			color-mix(in srgb, var(--panel) 92%, transparent);
+		outline: none;
 	}
 	.meta-row {
 		display: flex;
@@ -2380,6 +2635,18 @@
 		gap: 0.55rem;
 		padding: 0.8rem;
 		overflow-y: auto;
+	}
+	.insp-empty {
+		margin: 0;
+		font-size: 0.82rem;
+		line-height: 1.5;
+		color: var(--muted);
+	}
+	:global(.pdf-highlight) {
+		position: absolute;
+		background: rgba(34, 197, 94, 0.18);
+		outline: 1px solid rgba(34, 197, 94, 0.72);
+		border-radius: 2px;
 	}
 
 	@media (max-width: 1180px) {

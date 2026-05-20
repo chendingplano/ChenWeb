@@ -90,7 +90,7 @@ type FixedSizeChunkingService struct {
 	TopicEmbeddingModelName    string
 	SummaryEmbeddingModelName  string
 	CategorySimilarityMinScore float64
-	GenerateSummary            func(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (summaryGenerateResult, error)
+	GenerateSummary            func(ctx context.Context, recordID int64, level int, seqNo int, lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error)
 }
 
 type ChunkOptions struct {
@@ -368,11 +368,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 	topics := make([]TopicItem, 0, len(chunks))
 	seqStart := 1
 	for _, chunk := range chunks {
-		chunkLines := make([]Line, 0, len(chunk.Lines))
-		for _, marked := range chunk.Lines {
-			chunkLines = append(chunkLines, marked.Line)
-		}
-		chunkTopics, chunkErr := extractTopicsFromLinesWithLLM(
+		chunkTopics, chunkErr := extractTopicsFromMarkedLinesWithLLM(
 			ctx,
 			rec.ID,
 			s.Extractor,
@@ -380,7 +376,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 			s.ModelName,
 			s.PromptText,
 			s.PromptRef,
-			chunkLines,
+			chunk.Lines,
 			seqStart,
 			"chunk_seqno",
 			chunk.SeqNo,
@@ -413,11 +409,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 
 	leafSummaries := make([]SummaryItem, 0, len(chunks))
 	for _, chunk := range chunks {
-		chunkLines := make([]Line, 0, len(chunk.Lines))
-		for _, marked := range chunk.Lines {
-			chunkLines = append(chunkLines, marked.Line)
-		}
-		res, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunkLines, nil)
+		res, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunk.Lines, nil)
 		if summaryErr != nil {
 			s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, summaryErr)
 			return summaryErr
@@ -569,7 +561,7 @@ func ParseBlockBufferLines(buf *BlockBuffer) []Line {
 	return out
 }
 
-func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID int64, level int, seqNo int, lines []Line, children []SummaryItem) (summaryGenerateResult, error) {
+func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID int64, level int, seqNo int, lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error) {
 	if s.GenerateSummary != nil {
 		return s.GenerateSummary(ctx, recordID, level, seqNo, lines, children)
 	}
@@ -635,17 +627,9 @@ func (s *FixedSizeChunkingService) generateSummary(ctx context.Context, recordID
 	}, nil
 }
 
-func buildSummaryInputText(lines []Line, children []SummaryItem) string {
+func buildSummaryInputText(lines []MarkedLine, children []SummaryItem) string {
 	if len(lines) > 0 {
-		parts := make([]string, 0, len(lines))
-		for _, line := range lines {
-			raw := lineRawForChunking(line)
-			if strings.TrimSpace(raw) == "" {
-				continue
-			}
-			parts = append(parts, raw)
-		}
-		return strings.Join(parts, "\n")
+		return buildMarkedChunkInputText(lines)
 	}
 	parts := make([]string, 0, len(children))
 	for _, child := range children {
@@ -935,7 +919,7 @@ func BuildChunks(lines []Line, opts ChunkOptions) ([]Chunk, error) {
 
 		c := Chunk{SeqNo: seq, Lines: make([]MarkedLine, 0, end-start)}
 		for i := start; i < end; i++ {
-			mark := "r"
+			mark := "n"
 			if i < prevEnd {
 				mark = "o"
 			}
@@ -1029,7 +1013,34 @@ func lineRawForChunking(line Line) string {
 		return ""
 	}
 
-	return fmt.Sprintf("%d %d %s %s", line.LineNo, line.PageNo, line.LineType, line.Content)
+	return fmt.Sprintf("%d\t%d\t%s\t%s", line.LineNo, line.PageNo, line.LineType, line.Content)
+}
+
+func normalizeChunkFlag(mark string) string {
+	if strings.EqualFold(strings.TrimSpace(mark), "o") {
+		return "o"
+	}
+	return "n"
+}
+
+func formatMarkedChunkLine(line Line, mark string) string {
+	base := strings.TrimSpace(lineRawForChunking(line))
+	if base == "" {
+		return ""
+	}
+	return normalizeChunkFlag(mark) + "\t" + base
+}
+
+func buildMarkedChunkInputText(lines []MarkedLine) string {
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		raw := formatMarkedChunkLine(line.Line, line.Mark)
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		parts = append(parts, raw)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func lineRawByteSize(line Line) int {

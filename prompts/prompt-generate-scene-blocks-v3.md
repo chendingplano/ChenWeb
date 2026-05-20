@@ -135,12 +135,14 @@ Return STRICT JSON only.
     {
       "scene_id": "stable_snake_case_identifier",
       "scene_type": "string",
-      "title": "human readable title",
+      "title": "标题",
       "title_en": "human readable title",
-      "line_spans": array of compact line span strings
 
-      "summary": "standalone description of the semantic situation",
-      "summary_en": "standalone description of the semantic situation",
+      "evidence_lines": "array of compact line span strings"
+      "evidence_type": "raw_text|summary|provision|topic|execution_trace|conversation",
+
+      "summary": "90岁以上老年人健康检查规范的适用范围",
+      "summary_en": "Scope of application for the health examination standard for elderly over 90",
 
       "actors": [
         {
@@ -158,29 +160,14 @@ Return STRICT JSON only.
         }
       ],
 
-      "preconditions": [
-        "conditions that must already be true"
-      ],
+      "preconditions": ["必须满足的先决条件"],
+      "preconditions_en": ["conditions that must already be true"],
 
-      "preconditions_en": [
-        "必须满足的先决条件"
-      ],
+      "triggers": ["触发此场景的事件"],
+      "triggers_en": ["events that activate this scene"],
 
-      "triggers": [
-        "events that activate this scene"
-      ],
-
-      "triggers_en": [
-        "触发此场景的事件"
-      ],
-
-      "states": [
-        "important states during this scene"
-      ],
-
-      "states_en": [
-        "此场景的重要状态"
-      ],
+      "states": ["此场景的重要状态"],
+      "states_en": ["important states during this scene"],
 
       "actions": [
         {
@@ -198,82 +185,51 @@ Return STRICT JSON only.
         }
       ],
 
-      "constraints": [
-        "rules, thresholds, deadlines, obligations"
-      ],
+      "constraints": ["规则,阈值" ],
+      "constraints_en": ["rules, thresholds"],
 
-      "constraints_en": [
-        "rules, thresholds, deadlines, obligations"
-      ],
+      "decisions": ["不符合规定"],
+      "decisions_en": ["not qualified"],
 
-      "decisions": [
-        "branching decision logic if applicable"
-      ],
+      "outcomes": ["所期待的结果"],
+      "outcomes_en": ["expected results" ],
 
-      "decisions_en": [
-        "branching decision logic if applicable"
-      ],
+      "failure_modes": ["可能出现错误"],
+      "failure_modes_en": ["what can go wrong"],
 
-      "outcomes": [
-        "expected results"
-      ],
+      "root_causes": ["问题的根源"],
+      "root_causes_en": ["if causal failure analysis is present"],
 
-      "outcomes_en": [
-        "expected results"
-      ],
-
-      "failure_modes": [
-        "what can go wrong"
-      ],
-
-      "failure_modes_en": [
-        "what can go wrong"
-      ],
-
-      "root_causes": [
-        "if causal failure analysis is present"
-      ],
-
-      "root_causes_en": [
-        "if causal failure analysis is present"
-      ],
-
-      "resolutions": [
-        "corrective actions if applicable"
-      ],
-
-      "resolutions_en": [
-        "应采取的操作"
-      ],
+      "resolutions": ["应采取的操作"],
+      "resolutions_en": ["corrective actions if applicable"],
 
       "relationships": [
-        {
-          "type": "depends_on|causes|triggers|constrains|uses|applies_to|references|produces",
-          "target": "semantic target"
-        }
-      ],
-
-      "relationships_en": [
         {
           "type": "depends_on|causes|triggers|constrains|uses|applies_to|references|produces",
           "target": "语义目标"
         }
       ],
 
+      "relationships_en": [
+        {
+          "type": "depends_on|causes|triggers|constrains|uses|applies_to|references|produces",
+          "target": "semantic target"
+        }
+      ],
+
       "discriminators": [
         {
-          "intent": "short interpretation of user need",
-          "domain": ["domain1", "domain2"],
+          "intent": "用户需求的简短描述",
+          "domain": ["健康", "法律法规"],
           "discriminators": [
             {
               "category": "lexical | synonym | abbreviation | metadata | structural | graph | heuristic",
               "value": "string",
               "confidence": 0.0,
-              "reason": "why this helps discriminate"
+              "reason": "为什么会发生"
           }
           ],
-          "exploration_plan": [
-            "ordered recommended exploration steps"
+          "exploration_plan": ["推荐的信息探索(exploration)步骤"
           ]
         },
       ],
@@ -302,14 +258,7 @@ Return STRICT JSON only.
       "keywords": ["关键词",...],
       "keywords_en": ["keyword",...],
 
-      "confidence": 0.95,
-
-      "source_refs": [
-        {
-          "source_id": "string",
-          "evidence_type": "raw_text|summary|provision|topic|execution_trace|conversation",
-          "reference": "location reference"
-        }
+      "confidence": 0.95
       ]
     }
   ]
@@ -371,8 +320,7 @@ Use precise types such as:
 
 ---
 
-## line_spans
-"line_spans": array of compact line span strings.
+## evidence_lines
 
 Purpose:
 Identify the exact source lines from which the scene block is derived.
@@ -426,7 +374,9 @@ GOOD:
 BAD:
 ["1","2","3","4",...,"103"]
 
-8. line_spans MUST be minimal and compact.
+8. evidence_lines MUST be minimal and compact.
+
+---
 
 ## summary
 

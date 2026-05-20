@@ -718,12 +718,16 @@ export type KbSceneBlockRecord = {
 	scene_id: string;
 	scene_type: string;
 	title: string;
+	title_en?: string;
 	summary: string;
+	summary_en?: string;
+	evidence_lines?: SourceLineSpan[];
 	actors: KbSceneActor[];
 	resources: KbSceneResource[];
 	preconditions: string[];
 	triggers: string[];
 	states: string[];
+	states_en?: string[];
 	actions: KbSceneAction[];
 	constraints: string[];
 	decisions: string[];
@@ -734,6 +738,7 @@ export type KbSceneBlockRecord = {
 	relationships: KbSceneRelationship[];
 	discriminators: KbSceneDiscriminator[];
 	keywords: string[];
+	keywords_en?: string[];
 	confidence: number;
 	source_refs: KbSceneSourceRef[];
 	model_name: string;

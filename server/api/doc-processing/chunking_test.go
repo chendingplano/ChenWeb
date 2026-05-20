@@ -12,7 +12,7 @@ import (
 )
 
 type fakeLogger struct {
-	infos []fakeLogEntry
+	infos  []fakeLogEntry
 	errors []fakeLogEntry
 }
 
@@ -285,8 +285,10 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	svc.SummaryPromptErr = nil
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summary prompt"
-	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, children []SummaryItem) (summaryGenerateResult, error) {
+	var leafSummaryInputs []string
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error) {
 		if level == 0 {
+			leafSummaryInputs = append(leafSummaryInputs, buildMarkedChunkInputText(lines))
 			return summaryGenerateResult{Summary: "chunk summary " + asString(seqNo), CategoryPaths: []string{"legacy_summary_tree"}}, nil
 		}
 		return summaryGenerateResult{Summary: "parent summary " + strings.Join(collectSummaryIDs(children), ","), CategoryPaths: []string{"legacy_summary_tree"}}, nil
@@ -297,6 +299,24 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	}
 	if ex.calls != 2 {
 		t.Fatalf("extractor calls=%d, want 2", ex.calls)
+	}
+	if len(ex.inputs) != 2 {
+		t.Fatalf("extractor inputs=%d, want 2", len(ex.inputs))
+	}
+	if !strings.Contains(ex.inputs[0], "n\t1\t1\tparagraph\tAlpha") {
+		t.Fatalf("first topic chunk missing flagged line format: %q", ex.inputs[0])
+	}
+	if !strings.Contains(ex.inputs[1], "o\t2\t1\tparagraph\tBeta") {
+		t.Fatalf("second topic chunk missing overlap flag format: %q", ex.inputs[1])
+	}
+	if len(leafSummaryInputs) != 2 {
+		t.Fatalf("leafSummaryInputs=%d, want 2", len(leafSummaryInputs))
+	}
+	if !strings.Contains(leafSummaryInputs[0], "n\t1\t1\tparagraph\tAlpha") {
+		t.Fatalf("first summary chunk missing flagged line format: %q", leafSummaryInputs[0])
+	}
+	if !strings.Contains(leafSummaryInputs[1], "o\t2\t1\tparagraph\tBeta") {
+		t.Fatalf("second summary chunk missing overlap flag format: %q", leafSummaryInputs[1])
 	}
 
 	if st.insertCalls != 1 {
@@ -488,7 +508,6 @@ func TestService_HandleInput_MissingChunkDir(t *testing.T) {
 	}
 }
 
-
 func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 	tmp := t.TempDir()
 	summaryTreeRoot := t.TempDir()
@@ -537,10 +556,10 @@ func TestService_HandleInput_WritesSummariesTree(t *testing.T) {
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summarize chunk"
 	svc.SummaryGroupSize = 2
-	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []Line, children []SummaryItem) (summaryGenerateResult, error) {
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error) {
 		if level == 0 {
 			return summaryGenerateResult{
-				Summary:       "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromLines(lines)),
+				Summary:       "leaf summary " + asString(seqNo) + " lines=" + formatLineNumberRanges(chunkLineNosFromMarkedLines(lines)),
 				CategoryPaths: []string{"Safety Overview", "Closing Notes"},
 			}, nil
 		}
@@ -600,7 +619,7 @@ func TestService_HandleInput_SummaryGenerationFailure(t *testing.T) {
 	svc.SummaryPromptErr = nil
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summary prompt"
-	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, _ int, _ []Line, _ []SummaryItem) (summaryGenerateResult, error) {
+	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, _ int, _ []MarkedLine, _ []SummaryItem) (summaryGenerateResult, error) {
 		return summaryGenerateResult{}, errors.New("summary generator boom")
 	}
 
@@ -678,10 +697,10 @@ func TestAppendChunkedStatus_SanitizesInvalidUTF8Error(t *testing.T) {
 	}
 }
 
-func chunkLineNosFromLines(lines []Line) []int {
+func chunkLineNosFromMarkedLines(lines []MarkedLine) []int {
 	out := make([]int, 0, len(lines))
 	for _, line := range lines {
-		out = append(out, line.LineNo)
+		out = append(out, line.Line.LineNo)
 	}
 	return out
 }

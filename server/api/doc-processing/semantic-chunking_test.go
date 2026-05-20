@@ -480,13 +480,15 @@ func TestNormalizeCategorySegment_CJK(t *testing.T) {
 }
 
 type fakeSemanticExtractor struct {
-	outs  []map[string]any
-	err   error
-	calls int
+	outs   []map[string]any
+	err    error
+	calls  int
+	inputs []string
 }
 
-func (f *fakeSemanticExtractor) ExtractJSON(_ context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+func (f *fakeSemanticExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
 	f.calls++
+	f.inputs = append(f.inputs, in.InputText)
 	if f.err != nil {
 		return nil, f.err
 	}

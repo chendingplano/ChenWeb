@@ -78,7 +78,7 @@ func TestChunkingProcessor_HandleEvent_BlockInputFallbackWritesChunks(t *testing
 	service.PromptErr = nil
 	service.SummaryModelErr = nil
 	service.SummaryPromptErr = nil
-	service.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []Line, _ []SummaryItem) (summaryGenerateResult, error) {
+	service.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, _ []MarkedLine, _ []SummaryItem) (summaryGenerateResult, error) {
 		return summaryGenerateResult{Summary: "summary " + asString(level) + "-" + asString(seqNo), CategoryPaths: []string{"legacy_summary_tree"}}, nil
 	}
 

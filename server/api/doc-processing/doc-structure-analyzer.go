@@ -471,9 +471,7 @@ func applyStructureModelConfigToExtractor(extractor LLMJSONExtractor, cfg struct
 	if v := strings.TrimSpace(cfg.BaseURL); v != "" {
 		client.BaseURL = v
 	}
-	if v := normalizeThinkingType(cfg.ThinkingType); v != "" {
-		client.ThinkingType = v
-	}
+	client.ThinkingType = normalizeThinkingType(cfg.ThinkingType)
 	if cfg.TimeoutSec <= 0 {
 		return
 	}

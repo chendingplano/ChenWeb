@@ -50,3 +50,21 @@ func TestApplyStructureModelConfigToExtractor_SetsThinkingType(t *testing.T) {
 		t.Fatalf("ThinkingType=%q, want disabled", client.ThinkingType)
 	}
 }
+
+func TestApplyStructureModelConfigToExtractor_ClearsThinkingTypeWhenUnset(t *testing.T) {
+	client := &llmclients.OpenAIJSONClient{
+		ThinkingType: "disabled",
+	}
+
+	applyStructureModelConfigToExtractor(client, structureModelConfig{
+		ModelName:    "gpt-5.4-mini",
+		APIKey:       "sk-test",
+		BaseURL:      "https://api.openai.com",
+		TimeoutSec:   42,
+		ThinkingType: "",
+	})
+
+	if client.ThinkingType != "" {
+		t.Fatalf("ThinkingType=%q, want empty", client.ThinkingType)
+	}
+}

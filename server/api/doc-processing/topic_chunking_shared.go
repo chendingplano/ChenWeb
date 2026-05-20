@@ -341,7 +341,7 @@ func extractTopicsFromLinesWithLLM(
 
 	linesText := make([]string, 0, len(lines))
 	for _, line := range lines {
-		ll := lineRawForChunking(line)
+		ll := formatMarkedChunkLine(line, "n")
 		if strings.TrimSpace(ll) != "" {
 			linesText = append(linesText, ll)
 		}
@@ -389,7 +389,73 @@ func extractTopicsFromLinesWithLLM(
 	if !ok {
 		return []TopicItem{}, nil
 	}
+	return normalizeExtractedTopics(rawTopics, seqStart, logger, logScopeName, logScopeValue, record_id), nil
+}
 
+func extractTopicsFromMarkedLinesWithLLM(
+	ctx context.Context,
+	record_id int64,
+	extractor LLMJSONExtractor,
+	logger ApiTypes.JimoLogger,
+	modelName string,
+	promptText string,
+	promptRef string,
+	lines []MarkedLine,
+	seqStart int,
+	logScopeName string,
+	logScopeValue int,
+) ([]TopicItem, error) {
+	if extractor == nil {
+		return nil, errors.New("(MID_26042802) topic extractor is nil")
+	}
+
+	inputText := buildMarkedChunkInputText(lines)
+	logger.Info("llm call start",
+		logScopeName, logScopeValue,
+		"num_lines", len(lines),
+		"model_name", modelName,
+		"inputText", inputText,
+	)
+
+	llmStart := time.Now()
+	parsed, err := extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptText: promptText,
+		ModelName:  modelName,
+		InputText:  inputText,
+	})
+	logger.Info("llm call end",
+		logScopeName, logScopeValue,
+		"model_name", modelName,
+		"prompt_name", promptRef,
+		"record_id", record_id,
+		"parsed", parsed,
+		"duration_ms", time.Since(llmStart).Milliseconds(),
+		"error", err,
+	)
+	if err != nil {
+		baseURL := ""
+		if client, ok := extractor.(*llmclients.OpenAIJSONClient); ok && client != nil {
+			baseURL = strings.TrimSpace(client.BaseURL)
+		}
+		return nil, fmt.Errorf(
+			"(MID_26042804) extract topics for %s %d failed (model=%q, base_url=%q): %w, record_id=%d",
+			logScopeName,
+			logScopeValue,
+			modelName,
+			baseURL,
+			err,
+			record_id,
+		)
+	}
+
+	rawTopics, ok := parsed["topics"].([]any)
+	if !ok {
+		return []TopicItem{}, nil
+	}
+	return normalizeExtractedTopics(rawTopics, seqStart, logger, logScopeName, logScopeValue, record_id), nil
+}
+
+func normalizeExtractedTopics(rawTopics []any, seqStart int, logger ApiTypes.JimoLogger, logScopeName string, logScopeValue int, recordID int64) []TopicItem {
 	out := make([]TopicItem, 0, len(rawTopics))
 	nextSeq := seqStart
 	for _, item := range rawTopics {
@@ -414,36 +480,36 @@ func extractTopicsFromLinesWithLLM(
 			topicType = "general"
 		}
 		topicTypeEn := strings.ToLower(strings.TrimSpace(asString(m["topic_type_en"])))
-		topic_keywords := compactTopicArray(m["topic_keywords"])
-		if len(topic_keywords) == 0 {
-			topic_keywords = compactTopicArray(m["keywords"])
+		topicKeywords := compactTopicArray(m["topic_keywords"])
+		if len(topicKeywords) == 0 {
+			topicKeywords = compactTopicArray(m["keywords"])
 		}
-		topic_keywords_en := compactTopicArray(m["topic_keywords_en"])
+		topicKeywordsEn := compactTopicArray(m["topic_keywords_en"])
 		topicEn := sanitizeTopicText(asString(m["topic_desc_en"]))
 
 		categoryPath, categoryFallbackReason := normalizeAndValidateTopicCategoryPath(extractCategoryPathFromLLM(m), topicType)
 
 		logger.Info("extracted topic from LLM",
 			logScopeName, logScopeValue,
-			"record_id", record_id,
+			"record_id", recordID,
 			"nextSeq", nextSeq,
 			"item", item,
 			"topic", topic,
 			"topic_type", topicType,
 			"line_ranges", lineRanges,
-			"keywords", topic_keywords,
+			"keywords", topicKeywords,
 			"category_path", categoryPath,
 			"category_fallback_reason", categoryFallbackReason,
 		)
 
 		if categoryFallbackReason != "" {
-			if kp := keywordCategoryPath(topic_keywords); kp != nil {
+			if kp := keywordCategoryPath(topicKeywords); kp != nil {
 				categoryPath = kp
 			}
 			if logger != nil {
 				logger.Warn("topic category fallback applied",
 					logScopeName, logScopeValue,
-					"record_id", record_id,
+					"record_id", recordID,
 					"topic_seq", nextSeq,
 					"reason", categoryFallbackReason,
 					"fallback_category", strings.Join(categoryPath, "/"),
@@ -457,8 +523,8 @@ func extractTopicsFromLinesWithLLM(
 			TopicType:            topicType,
 			TopicTypeEn:          topicTypeEn,
 			Lines:                lineRanges,
-			Keywords:             topic_keywords,
-			KeywordsEn:           topic_keywords_en,
+			Keywords:             topicKeywords,
+			KeywordsEn:           topicKeywordsEn,
 			Topic:                topic,
 			TopicEn:              topicEn,
 			CategoryPath:         categoryPath,
@@ -467,8 +533,7 @@ func extractTopicsFromLinesWithLLM(
 		})
 		nextSeq++
 	}
-
-	return out, nil
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -568,7 +633,7 @@ func findOrCreateCategorySubdir(
 		return exactDir, nil
 	}
 
-	/* Embedding is no longer supported 
+	/* Embedding is no longer supported
 	// Step 2: cosine-similarity match (only when embedder is configured).
 	var nodeVec []float64
 	if embedder != nil && strings.TrimSpace(embeddingModelName) != "" {
@@ -896,4 +961,3 @@ func mergeTopicCategoryKeywords(metaPath string, newKeywords []string) error {
 	}
 	return nil
 }
-

@@ -24,12 +24,16 @@ type sceneBlockRecord struct {
 	SceneID        string          `json:"scene_id"`
 	SceneType      string          `json:"scene_type"`
 	Title          string          `json:"title"`
+	TitleEn        string          `json:"title_en,omitempty"`
 	Summary        string          `json:"summary"`
+	SummaryEn      string          `json:"summary_en,omitempty"`
+	EvidenceLines  json.RawMessage `json:"evidence_lines,omitempty"`
 	Actors         json.RawMessage `json:"actors"`
 	Resources      json.RawMessage `json:"resources"`
 	Preconditions  json.RawMessage `json:"preconditions"`
 	Triggers       json.RawMessage `json:"triggers"`
 	States         json.RawMessage `json:"states"`
+	StatesEn       json.RawMessage `json:"states_en,omitempty"`
 	Actions        json.RawMessage `json:"actions"`
 	Constraints    json.RawMessage `json:"constraints"`
 	Decisions      json.RawMessage `json:"decisions"`
@@ -40,6 +44,7 @@ type sceneBlockRecord struct {
 	Relationships  json.RawMessage `json:"relationships"`
 	Discriminators json.RawMessage `json:"discriminators"`
 	Keywords       json.RawMessage `json:"keywords"`
+	KeywordsEn     json.RawMessage `json:"keywords_en,omitempty"`
 	Confidence     float64         `json:"confidence"`
 	SourceRefs     json.RawMessage `json:"source_refs"`
 	ModelName      string          `json:"model_name"`
@@ -63,6 +68,58 @@ func jsonArrayOrEmpty(b []byte) json.RawMessage {
 		return json.RawMessage("[]")
 	}
 	return json.RawMessage(b)
+}
+
+func normalizeJSONStringArray(v any) json.RawMessage {
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(b)
+}
+
+func applySceneBlockExtInfo(r *sceneBlockRecord, raw json.RawMessage) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return
+	}
+	var ext map[string]any
+	if err := json.Unmarshal(raw, &ext); err != nil {
+		return
+	}
+	if titleEn := strings.TrimSpace(fmt.Sprint(ext["title_en"])); titleEn != "" && titleEn != "<nil>" {
+		r.TitleEn = titleEn
+	}
+	if summaryEn := strings.TrimSpace(fmt.Sprint(ext["summary_en"])); summaryEn != "" && summaryEn != "<nil>" {
+		r.SummaryEn = summaryEn
+	}
+	if evidenceLines := normalizeJSONStringArray(ext["evidence_lines"]); len(evidenceLines) > 0 {
+		r.EvidenceLines = evidenceLines
+	}
+	if keywordsEn := normalizeJSONStringArray(ext["keywords_en"]); len(keywordsEn) > 0 {
+		r.KeywordsEn = keywordsEn
+	}
+	if statesEn := normalizeJSONStringArray(ext["states_en"]); len(statesEn) > 0 {
+		r.StatesEn = statesEn
+	}
 }
 
 // ListSceneBlocks handles GET /api/v1/kb/scene-blocks?input_record_id=N.
@@ -105,7 +162,7 @@ SELECT
 	id, object_id, event_id, scene_id, scene_type, title, summary,
 	actors, resources, preconditions, triggers, states, actions, constraints,
 	decisions, outcomes, failure_modes, root_causes, resolutions, relationships,
-	discriminators, keywords, confidence, source_refs, model_name, prompt_name,
+	discriminators, keywords, confidence, source_refs, model_name, prompt_name, ext_info,
 	create_time, modify_time
 FROM kb.scene_objects
 WHERE input_record_id = $1
@@ -140,6 +197,7 @@ ORDER BY id`
 			discrim    []byte
 			keywords   []byte
 			srcRefs    []byte
+			extInfo    []byte
 			createTime time.Time
 			modifyTime time.Time
 		)
@@ -147,7 +205,7 @@ ORDER BY id`
 			&r.ID, &r.ObjectID, &r.EventID, &r.SceneID, &r.SceneType, &r.Title, &r.Summary,
 			&actors, &resources, &precond, &triggers, &states, &actions, &constr,
 			&decisions, &outcomes, &failure, &rootCauses, &resolution, &relations,
-			&discrim, &keywords, &r.Confidence, &srcRefs, &r.ModelName, &r.PromptName,
+			&discrim, &keywords, &r.Confidence, &srcRefs, &r.ModelName, &r.PromptName, &extInfo,
 			&createTime, &modifyTime,
 		); err != nil {
 			logger.Error("scan kb.scene_objects row failed", "err", err, "input_id", inputID)
@@ -171,6 +229,7 @@ ORDER BY id`
 		r.Discriminators = jsonArrayOrEmpty(discrim)
 		r.Keywords = jsonArrayOrEmpty(keywords)
 		r.SourceRefs = jsonArrayOrEmpty(srcRefs)
+		applySceneBlockExtInfo(&r, json.RawMessage(extInfo))
 		r.CreateTime = createTime.Format(time.RFC3339)
 		r.ModifyTime = modifyTime.Format(time.RFC3339)
 		results = append(results, r)

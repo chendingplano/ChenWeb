@@ -19,23 +19,28 @@ import (
 )
 
 type SceneBlocksProcessor struct {
-	InputStore     DocMetadataStore
-	Store          SceneObjectsStore
-	Extractor      LLMJSONExtractor
-	Logger         ApiTypes.JimoLogger
-	Now            func() time.Time
-	PromptText     string
-	PromptRef      string
-	PromptErr      error
-	ModelRef       string
-	ModelErr       error
-	ModelName      string
-	ChunkSize      int
-	OverlapPercent int
-	PrevOverlap    int
-	NextOverlap    int
-	RemoveTOC      bool
-	ArtifactDir    string
+	InputStore        DocMetadataStore
+	Store             SceneObjectsStore
+	Extractor         LLMJSONExtractor
+	Logger            ApiTypes.JimoLogger
+	Now               func() time.Time
+	PromptText        string
+	PromptRef         string
+	PromptErr         error
+	ModelRef          string
+	ModelErr          error
+	ModelName         string
+	ModelCfg          structureModelConfig
+	FallbackModelRef  string
+	FallbackModelErr  error
+	FallbackModelName string
+	FallbackModelCfg  structureModelConfig
+	ChunkSize         int
+	OverlapPercent    int
+	PrevOverlap       int
+	NextOverlap       int
+	RemoveTOC         bool
+	ArtifactDir       string
 }
 
 type SceneObjectsStore interface {
@@ -54,6 +59,48 @@ type UpsertSceneObjectRequest struct {
 	ExtInfo       map[string]any
 }
 
+func buildSceneBlockExtInfo(block map[string]any) map[string]any {
+	if len(block) == 0 {
+		return map[string]any{}
+	}
+	jsonStringSlice := func(v any) []string {
+		items, ok := v.([]any)
+		if !ok {
+			return nil
+		}
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok {
+				continue
+			}
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	out := map[string]any{}
+	if titleEn := strings.TrimSpace(asString(block["title_en"])); titleEn != "" {
+		out["title_en"] = titleEn
+	}
+	if summaryEn := strings.TrimSpace(asString(block["summary_en"])); summaryEn != "" {
+		out["summary_en"] = summaryEn
+	}
+	if evidenceLines := jsonStringSlice(block["evidence_lines"]); len(evidenceLines) > 0 {
+		out["evidence_lines"] = evidenceLines
+	}
+	if keywordsEn := jsonStringSlice(block["keywords_en"]); len(keywordsEn) > 0 {
+		out["keywords_en"] = keywordsEn
+	}
+	if statesEn := jsonStringSlice(block["states_en"]); len(statesEn) > 0 {
+		out["states_en"] = statesEn
+	}
+	return out
+}
+
 type SceneObjectsSQLStore struct {
 	DB *sql.DB
 }
@@ -64,26 +111,32 @@ func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStor
 	}
 	promptText, promptRef, promptErr := loadSceneBlocksPromptFromEnv()
 	modelRef, _, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_SCENE_BLOCKS_MODEL_NAME", "EXTRACT_SCENE_BLOCKS_MODELS_FILE")
+	fallbackModelRef, _, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_SCENE_BLOCKS_MODEL_FALLBACK", "EXTRACT_SCENE_BLOCKS_MODELS_FILE")
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &SceneBlocksProcessor{
-		InputStore:     inputStore,
-		Store:          store,
-		Extractor:      extractor,
-		Logger:         logger,
-		Now:            time.Now,
-		PromptText:     promptText,
-		PromptRef:      promptRef,
-		PromptErr:      promptErr,
-		ModelRef:       modelRef,
-		ModelErr:       modelErr,
-		ModelName:      modelCfg.ModelName,
-		ChunkSize:      envInt("CHUNK_SIZE", DefaultChunkSize, 1),
-		OverlapPercent: envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
-		PrevOverlap:    prevOverlap,
-		NextOverlap:    nextOverlap,
-		RemoveTOC:      removeTOC,
-		ArtifactDir:    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		InputStore:        inputStore,
+		Store:             store,
+		Extractor:         extractor,
+		Logger:            logger,
+		Now:               time.Now,
+		PromptText:        promptText,
+		PromptRef:         promptRef,
+		PromptErr:         promptErr,
+		ModelRef:          modelRef,
+		ModelErr:          modelErr,
+		ModelName:         modelCfg.ModelName,
+		ModelCfg:          modelCfg,
+		FallbackModelRef:  fallbackModelRef,
+		FallbackModelErr:  fallbackModelErr,
+		FallbackModelName: fallbackModelCfg.ModelName,
+		FallbackModelCfg:  fallbackModelCfg,
+		ChunkSize:         envInt("CHUNK_SIZE", DefaultChunkSize, 1),
+		OverlapPercent:    envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
+		PrevOverlap:       prevOverlap,
+		NextOverlap:       nextOverlap,
+		RemoveTOC:         removeTOC,
+		ArtifactDir:       strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 	}
 }
 
@@ -96,16 +149,22 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 	if err != nil {
 		return fmt.Errorf("(MID_26051802) parse event payload: %w", err)
 	}
-	if ShouldSkipLineFileGeneratedEvent(evt) {
-		return nil
-	}
+
+	// if ShouldSkipLineFileGeneratedEvent(evt) {
+	// 	p.Logger.Warn("generate scene blocks - skipped")
+	// 	return nil
+	// }
+
 	if p.PromptErr != nil {
+		p.Logger.Error("prompt error", "prompt_name", p.PromptRef, "error", p.PromptErr)
 		return fmt.Errorf("(MID_26051803) load scene blocks prompt %q: %w", p.PromptRef, p.PromptErr)
 	}
 	if p.InputStore == nil {
+		p.Logger.Error("input store is nil")
 		return errors.New("(MID_26051804) input store is nil")
 	}
 	if p.Store == nil {
+		p.Logger.Error("scene objects store is nil")
 		return errors.New("(MID_26051805) scene objects store is nil")
 	}
 
@@ -115,6 +174,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 			p.Logger.Error("kb.inputs record not found", "record_id", evt.RecordID)
 			return nil
 		}
+		p.Logger.Error("failed get record", "error", err)
 		return fmt.Errorf("(MID_26051806) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
 	if p.ModelErr != nil {
@@ -167,20 +227,26 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 	eventID := eventIDFromContext(ctx)
 	var allSceneBlocks []map[string]any
 	seqno := 1
-	for _, chunk := range chunks {
+	for idx, chunk := range chunks {
 		chunkText := buildSceneBlocksChunkText(chunk)
-		payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-			PromptText: p.PromptText,
-			ModelName:  p.ModelName,
-			InputText:  chunkText,
-		})
+		p.Logger.Info("Begin generating scene",
+			"idx", idx,
+			"model name", p.ModelName,
+			"prompt name", p.PromptRef,
+			"chunk", chunkText)
+		payload, usedModelName, err := p.extractSceneBlocksWithFallback(ctx, chunkText)
 		if err != nil {
 			procErr := fmt.Errorf("(MID_26051809) extract scene blocks via llm for chunk %d: %w", chunk.SeqNo, err)
 			p.persistSceneBlocksStatus(ctx, rec, start, procErr)
+			p.Logger.Error("LLM failed",
+				"chunk seqno", chunk.SeqNo,
+				"error", err,
+				"model name", usedModelName,
+				"prompt name", p.PromptRef)
 			return nil
 		}
 		raw, _ := payload["scene_blocks"].([]any)
-		for _, item := range raw {
+		for block_idx, item := range raw {
 			block, ok := item.(map[string]any)
 			if !ok {
 				continue
@@ -191,20 +257,28 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 				ObjectID:      objectID,
 				EventID:       eventID,
 				SceneBlock:    block,
-				ModelName:     strings.TrimSpace(p.ModelName),
+				ModelName:     strings.TrimSpace(usedModelName),
 				PromptName:    strings.TrimSpace(p.PromptRef),
-				ExtInfo:       map[string]any{},
+				ExtInfo:       buildSceneBlockExtInfo(block),
 			}
 			if err := p.Store.UpsertSceneObject(ctx, req); err != nil {
 				procErr := fmt.Errorf("(MID_26051810) upsert scene object %s: %w", objectID, err)
 				p.persistSceneBlocksStatus(ctx, rec, start, procErr)
+				p.Logger.Error("failed updating db",
+					"error", err,
+					"seqno", chunk.SeqNo,
+					"block", block_idx,
+					"model name", usedModelName,
+					"prompt name", p.PromptRef)
 				return nil
 			}
 			block["object_id"] = objectID
 			allSceneBlocks = append(allSceneBlocks, block)
 			seqno++
 		}
-		p.Logger.Info("LLM responded", "# scene_blocks", len(allSceneBlocks))
+		p.Logger.Info("LLM responded",
+			"dx", idx,
+			"num blocks", len(raw))
 	}
 
 	if err := p.writeSceneBlocksArtifact(evt.RecordID, rec, allSceneBlocks); err != nil {
@@ -247,11 +321,74 @@ func (p *SceneBlocksProcessor) resolveInputLines(ctx context.Context, evt LineFi
 }
 
 func buildSceneBlocksChunkText(chunk Chunk) string {
-	lines := make([]string, 0, len(chunk.Lines))
-	for _, ml := range chunk.Lines {
-		lines = append(lines, ml.Line.Content)
+	return buildMarkedChunkInputText(chunk.Lines)
+}
+
+func (p *SceneBlocksProcessor) extractSceneBlocksWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
+	payload, err := p.extractSceneBlocksWithModel(ctx, inputText, p.ModelName, p.ModelCfg)
+	if err == nil {
+		return payload, strings.TrimSpace(p.ModelName), nil
 	}
-	return strings.Join(lines, "\n")
+
+	primaryModelName := strings.TrimSpace(p.ModelName)
+	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
+	if fallbackModelName == "" {
+		return nil, primaryModelName, err
+	}
+	if p.FallbackModelErr != nil {
+		return nil, fallbackModelName, fmt.Errorf("(MID_26051825) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
+	}
+
+	if isEmptySceneBlocksExtractionError(err) {
+		p.Logger.Warn("primary scene blocks extraction returned empty JSON; retrying fallback model",
+			"primary_model", primaryModelName,
+			"fallback_model", fallbackModelName,
+			"error", err,
+			"prompt_name", p.PromptRef,
+		)
+	} else {
+		p.Logger.Warn("primary scene blocks extraction failed; retrying fallback model",
+			"primary_model", primaryModelName,
+			"fallback_model", fallbackModelName,
+			"error", err,
+			"prompt_name", p.PromptRef,
+		)
+	}
+
+	payload, fallbackErr := p.extractSceneBlocksWithModel(ctx, inputText, fallbackModelName, p.FallbackModelCfg)
+	if fallbackErr != nil {
+		if isEmptySceneBlocksExtractionError(fallbackErr) {
+			p.Logger.Warn("fallback scene blocks extraction returned empty JSON; treating as empty result",
+				"fallback_model", fallbackModelName,
+				"error", fallbackErr,
+				"prompt_name", p.PromptRef,
+			)
+			return map[string]any{"scene_blocks": []any{}}, fallbackModelName, nil
+		}
+		return nil, fallbackModelName, fmt.Errorf("(MID_26051826) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
+	}
+	return payload, fallbackModelName, nil
+}
+
+func (p *SceneBlocksProcessor) extractSceneBlocksWithModel(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
+	applyStructureModelConfigToExtractor(p.Extractor, cfg)
+	return p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptText: p.PromptText,
+		ModelName:  modelName,
+		InputText:  inputText,
+	})
+}
+
+func isEmptySceneBlocksExtractionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "unexpected end of JSON input") &&
+		strings.Contains(msg, "json:{[]}")
 }
 
 func (p *SceneBlocksProcessor) writeSceneBlocksArtifact(recordID int64, rec DocMetadataInputRecord, sceneBlocks []map[string]any) error {
@@ -271,7 +408,12 @@ func (p *SceneBlocksProcessor) writeSceneBlocksArtifact(recordID int64, rec DocM
 	}
 	artifactBase := buildChunkArtifactBaseName(rec.StagingFilename, rec.ParserName)
 	outPath := filepath.Join(outDir, artifactBase+".scene_blocks")
-	bs, err := json.MarshalIndent(sceneBlocks, "", "  ")
+	nowFn := p.Now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	stampedSceneBlocks := addSceneBlockCreateTimes(sceneBlocks, nowFn())
+	bs, err := json.MarshalIndent(stampedSceneBlocks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("(MID_26051818) marshal scene blocks: %w", err)
 	}
@@ -279,6 +421,29 @@ func (p *SceneBlocksProcessor) writeSceneBlocksArtifact(recordID int64, rec DocM
 		return fmt.Errorf("(MID_26051819) write scene blocks artifact: %w", err)
 	}
 	return nil
+}
+
+func addSceneBlockCreateTimes(sceneBlocks []map[string]any, now time.Time) []map[string]any {
+	if len(sceneBlocks) == 0 {
+		return sceneBlocks
+	}
+	createTime := now.Format("20060102-150405")
+	out := make([]map[string]any, 0, len(sceneBlocks))
+	for _, block := range sceneBlocks {
+		if block == nil {
+			out = append(out, nil)
+			continue
+		}
+		cloned := make(map[string]any, len(block)+1)
+		for k, v := range block {
+			cloned[k] = v
+		}
+		if strings.TrimSpace(asString(cloned["create_time"])) == "" {
+			cloned["create_time"] = createTime
+		}
+		out = append(out, cloned)
+	}
+	return out
 }
 
 type sceneBlocksStatusParams struct {
@@ -379,7 +544,7 @@ func appendSceneBlocksStatus(raw string, p sceneBlocksStatusParams) (string, err
 func loadSceneBlocksPromptFromEnv() (promptText string, promptRef string, promptErr error) {
 	promptRef = strings.TrimSpace(os.Getenv("EXTRACT_SCENE_BLOCKS_PROMPT"))
 	if promptRef == "" {
-		promptRef = "prompt-generate-scene-blocks.md"
+		promptRef = "prompt-generate-scene-blocks-v2.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -524,33 +689,33 @@ ON CONFLICT (input_record_id, object_id) DO UPDATE SET
 	modify_time = NOW()`
 
 	_, err := s.DB.ExecContext(ctx, stmt,
-		strings.TrimSpace(req.ObjectID),                       // $1
-		req.InputRecordID,                                     // $2
-		strings.TrimSpace(req.EventID),                        // $3
-		strings.TrimSpace(asString(block["scene_id"])),        // $4
-		strings.TrimSpace(asString(block["scene_type"])),      // $5
-		strings.TrimSpace(asString(block["title"])),           // $6
-		strings.TrimSpace(asString(block["summary"])),         // $7
-		toJSON(block["actors"]),                               // $8
-		toJSON(block["resources"]),                            // $9
-		toJSON(block["preconditions"]),                        // $10
-		toJSON(block["triggers"]),                             // $11
-		toJSON(block["states"]),                               // $12
-		toJSON(block["actions"]),                              // $13
-		toJSON(block["constraints"]),                          // $14
-		toJSON(block["decisions"]),                            // $15
-		toJSON(block["outcomes"]),                             // $16
-		toJSON(block["failure_modes"]),                        // $17
-		toJSON(block["root_causes"]),                          // $18
-		toJSON(block["resolutions"]),                          // $19
-		toJSON(block["relationships"]),                        // $20
-		toJSON(block["discriminators"]),                       // $21
-		toJSON(block["keywords"]),                             // $22
-		toFloat(block["confidence"]),                          // $23
-		toJSON(block["source_refs"]),                          // $24
-		strings.TrimSpace(req.ModelName),                      // $25
-		strings.TrimSpace(req.PromptName),                     // $26
-		toJSON(extInfo),                                       // $27
+		strings.TrimSpace(req.ObjectID),                  // $1
+		req.InputRecordID,                                // $2
+		strings.TrimSpace(req.EventID),                   // $3
+		strings.TrimSpace(asString(block["scene_id"])),   // $4
+		strings.TrimSpace(asString(block["scene_type"])), // $5
+		strings.TrimSpace(asString(block["title"])),      // $6
+		strings.TrimSpace(asString(block["summary"])),    // $7
+		toJSON(block["actors"]),                          // $8
+		toJSON(block["resources"]),                       // $9
+		toJSON(block["preconditions"]),                   // $10
+		toJSON(block["triggers"]),                        // $11
+		toJSON(block["states"]),                          // $12
+		toJSON(block["actions"]),                         // $13
+		toJSON(block["constraints"]),                     // $14
+		toJSON(block["decisions"]),                       // $15
+		toJSON(block["outcomes"]),                        // $16
+		toJSON(block["failure_modes"]),                   // $17
+		toJSON(block["root_causes"]),                     // $18
+		toJSON(block["resolutions"]),                     // $19
+		toJSON(block["relationships"]),                   // $20
+		toJSON(block["discriminators"]),                  // $21
+		toJSON(block["keywords"]),                        // $22
+		toFloat(block["confidence"]),                     // $23
+		toJSON(block["source_refs"]),                     // $24
+		strings.TrimSpace(req.ModelName),                 // $25
+		strings.TrimSpace(req.PromptName),                // $26
+		toJSON(extInfo),                                  // $27
 	)
 	return err
 }
