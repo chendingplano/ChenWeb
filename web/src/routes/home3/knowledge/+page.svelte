@@ -25,6 +25,7 @@
 	import TopicGraphView from '$lib/components/home3/topic-graph-view.svelte';
 	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
 	import SceneBlocksView from '$lib/components/home3/scene-blocks-view.svelte';
+	import ProductsView from '$lib/components/home3/products-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import {
 		getProvisionCategory,
@@ -48,6 +49,7 @@
 		| 'kb-metrics'
 		| 'kb-doc-structure'
 		| 'kb-scene-blocks'
+		| 'kb-products'
 		| 'kb-chunks'
 		| 'kb-summary-graph'
 		| 'kb-summary-tree'
@@ -139,6 +141,11 @@
 					description: 'Event-driven scene extraction'
 				},
 				{
+					id: 'kb-products',
+					label: 'Products',
+					description: 'Product and part relation extraction'
+				},
+				{
 					id: 'kb-provision-tree',
 					label: 'Provision Tree',
 					description: 'Document-centric provision browser'
@@ -174,8 +181,8 @@
 	let menuCollapsedBeforeFocus = false;
 	let menuWidth = $state(280);
 
-	// Scene Blocks "Show Selected Scene Block" folds the Menu while a block is on the canvas.
-	function handleSceneFocusMode(focused: boolean) {
+	// Scene Blocks and Products "Show Selected Item" fold the Menu while an item is on the canvas.
+	function handleExtractionFocusMode(focused: boolean) {
 		if (focused) {
 			menuCollapsedBeforeFocus = menuCollapsed;
 			menuCollapsed = true;
@@ -183,6 +190,8 @@
 			menuCollapsed = menuCollapsedBeforeFocus;
 		}
 	}
+	// Keep backward-compat alias used below.
+	const handleSceneFocusMode = handleExtractionFocusMode;
 	let menuResizing = $state(false);
 	let menuResizeStartX = 0;
 	let menuResizeStartWidth = 0;
@@ -524,7 +533,13 @@
 				<SceneBlocksView
 					{darkMode}
 					browserInstanceKey="scene-blocks"
-					onFocusModeChange={handleSceneFocusMode}
+					onFocusModeChange={handleExtractionFocusMode}
+				/>
+			{:else if activeSection === 'kb-products'}
+				<ProductsView
+					{darkMode}
+					browserInstanceKey="products"
+					onFocusModeChange={handleExtractionFocusMode}
 				/>
 			{:else if activeSection === 'kb-chunks'}
 				<ChunkMgmtView {darkMode} />

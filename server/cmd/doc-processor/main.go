@@ -97,6 +97,7 @@ func main() {
 	metricsLLMClient := newLLMClient()
 	provisionsLLMClient := newLLMClient()
 	sceneBlocksLLMClient := newLLMClient()
+	productsLLMClient := newLLMClient()
 	// structureLLMClient := newLLMClient()
 	fixedChunkLLMClient := newLLMClient()
 	topicChunkLLMClient := newLLMClient()
@@ -134,6 +135,7 @@ func main() {
 			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
 			docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
 			docprocessing.NewSceneBlocksProcessor(inputStore, docprocessing.SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, sceneBlocksLLMClient, logger),
+			docprocessing.NewProductsProcessor(inputStore, docprocessing.ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, productsLLMClient, logger),
 		},
 	}
 
@@ -151,7 +153,7 @@ func main() {
 		"durable", durable,
 		"stream", streamName,
 		"chunking_method", chunkSvc.Method,
-		"processors", []string{"blocking", "structure_analyzer", "static_analyzer", "chunking", "generate_summaries", "generate_topics", "extract_doc_metadata", "extract_metrics", "extract_provisions", "generate_scene_blocks"},
+		"processors", []string{"blocking", "structure_analyzer", "static_analyzer", "chunking", "generate_summaries", "generate_topics", "extract_doc_metadata", "extract_metrics", "extract_provisions", "generate_scene_blocks", "extract_products"},
 		"started_at", time.Now().Format(time.RFC3339),
 	)
 

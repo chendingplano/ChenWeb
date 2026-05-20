@@ -15,6 +15,15 @@
 	import PauseIcon from '@lucide/svelte/icons/pause';
 	import { listKbInputs, type KbInputRecord } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
+	import {
+		ALL_PROCESSOR_IDS,
+		PIPELINE_STAGES,
+		computeStages,
+		isActiveRecord,
+		type StageInfo,
+		type StageStatus,
+		type StatusEntry
+	} from './doc-processor-dashboard-state';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -34,53 +43,6 @@
 	let colorErrorTint = $derived(darkMode ? 'rgba(248,113,113,0.12)' : 'rgba(239,68,68,0.10)');
 
 	// ── Types ──────────────────────────────────────────────────────────────
-
-	type StageStatus = 'pending' | 'in-progress' | 'success' | 'failed';
-
-	type StatusEntry = {
-		operation?: string;
-		time?: string;
-		start_time?: string;
-		status?: string;
-		proc_status?: string;
-		'proc-status'?: string;
-		error?: string;
-		progress?: string;
-	};
-
-	type StageInfo = {
-		id: string;
-		label: string;
-		status: StageStatus;
-		entry?: StatusEntry;
-	};
-
-	// ── Pipeline definition ────────────────────────────────────────────────
-
-	// Single ordered pipeline definition. 'operations' lists all operation names
-	// this stage may write into kb.inputs.status, including legacy aliases.
-	const PIPELINE_STAGES = [
-		{ id: 'staged',               label: 'Staged',             operations: [] as string[] },
-		{ id: 'parsing',              label: 'PDF Parser',          operations: ['parsing', 'parsed'] },
-		{ id: 'converting',           label: 'Result Convert',      operations: ['converting', 'converted', 'line-file-generated'] },
-		{ id: 'static_analyzer',      label: 'Static Analyzer',     operations: ['static_analyzer', 'static_analzyer', 'structure_analyzer'] },
-		{ id: 'chunking',             label: 'Chunking',            operations: ['chunking', 'chunked'] },
-		{ id: 'extract_doc_metadata', label: 'Extract Metadata',    operations: ['extract_doc_metadata', 'extract_metadata'] },
-		{ id: 'extract_metrics',      label: 'Extract Metrics',     operations: ['extract_metrics'] },
-		{ id: 'extract_provisions',   label: 'Extract Provisions',  operations: ['extract_provisions'] },
-		{ id: 'generate_summaries',   label: 'Generate Summaries',  operations: ['generate_summaries'] },
-		{ id: 'generate_topics',      label: 'Generate Topics',     operations: ['generate_topics'] },
-		{ id: 'generate_scene_blocks', label: 'Generate Scene Blocks', operations: ['generate_scene_blocks'] }
-	];
-
-	// Stages managed by the doc-processor service — all must finish for the pipeline to be done.
-	const DOC_PROCESSOR_STAGES = PIPELINE_STAGES.slice(3);
-
-	// Processors that can be explicitly requested in launch/restart payloads.
-	const ALL_PROCESSOR_IDS = [
-		'static_analyzer', 'chunking', 'extract_doc_metadata', 'extract_metrics', 'extract_provisions',
-		'generate_summaries', 'generate_topics', 'generate_scene_blocks'
-	];
 
 	// Ordered subset of PIPELINE_STAGES shown in the launch/restart UI.
 	const MANUAL_PROCESSORS = PIPELINE_STAGES.filter(s => ALL_PROCESSOR_IDS.includes(s.id));
@@ -143,67 +105,6 @@
 	let failedTotalPages = $derived(Math.max(1, Math.ceil(failedTotal / FAILED_PAGE_SIZE)));
 
 	// ── Helpers ────────────────────────────────────────────────────────────
-
-	function resolveEntryStatus(entry: StatusEntry): StageStatus {
-		const ps = (entry.proc_status ?? entry['proc-status'] ?? entry.status ?? '').toLowerCase();
-		if (ps === 'success') return 'success';
-		if (ps === 'fail' || ps === 'failed' || ps === 'error') return 'failed';
-		if (entry.progress !== undefined) return 'in-progress';
-		if (!ps) return 'in-progress';
-		return 'in-progress';
-	}
-
-	function computeStages(record: KbInputRecord): StageInfo[] {
-		const statusMap = new Map<string, StatusEntry>();
-		for (const e of record.status ?? []) {
-			if (e.operation) statusMap.set(e.operation, e as StatusEntry);
-		}
-
-		function stageFor(operations: string[]): { status: StageStatus; entry?: StatusEntry } {
-			for (const op of operations) {
-				const e = statusMap.get(op);
-				if (e) return { status: resolveEntryStatus(e), entry: e };
-			}
-			return { status: 'pending' };
-		}
-
-		return PIPELINE_STAGES.map((s) => {
-			if (s.id === 'staged') return { id: 'staged', label: s.label, status: 'success' as StageStatus };
-			const { status, entry } = stageFor(s.operations);
-			return { id: s.id, label: s.label, status, entry };
-		});
-	}
-
-	const FINAL_STATUSES = new Set(['success', 'fail', 'failed']);
-
-	function isActiveRecord(record: KbInputRecord): boolean {
-		const s = record.status ?? [];
-		if (!s.length) return true;
-
-		// Build a map of the latest proc_status for each operation.
-		const statusMap = new Map<string, string>();
-		for (const e of s as StatusEntry[]) {
-			const op = e.operation ?? '';
-			const ps = (e.proc_status ?? e['proc-status'] ?? e.status ?? '').toLowerCase();
-			if (op) statusMap.set(op, ps);
-		}
-
-		// Any entry with a non-final status means something is still running.
-		for (const ps of statusMap.values()) {
-			if (!FINAL_STATUSES.has(ps)) return true;
-		}
-
-		// All present entries are final. The pipeline is done only when every
-		// doc-processor stage has reported a final status. Until then (e.g. after
-		// 'converted' is done but before any leaf processor has reported) the record
-		// is active. Blocking is internal and writes no status entry.
-		for (const stage of DOC_PROCESSOR_STAGES) {
-			const hasFinal = stage.operations.some((op) => FINAL_STATUSES.has(statusMap.get(op) ?? ''));
-			if (!hasFinal) return true;
-		}
-
-		return false;
-	}
 
 	function stageStatusColor(status: StageStatus): string {
 		if (status === 'success') return colorSuccess;

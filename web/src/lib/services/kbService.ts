@@ -776,6 +776,64 @@ export async function listKbSceneBlocks(
 	return result;
 }
 
+// ---------- kb.products ----------
+
+export type KbProductRecord = {
+	id: number;
+	product_rel_id: string;
+	product_name: string;
+	product_name_en?: string;
+	canonical_name: string;
+	canonical_name_en?: string;
+	product_type?: string;
+	relation_type?: string;
+	relation_summary?: string;
+	relation_summary_en?: string;
+	evidence_quote?: string;
+	evidence_lines?: SourceLineSpan[];
+	obligation_level?: string;
+	requirement_text?: string;
+	requirement_text_en?: string;
+	conditions: string[];
+	exceptions: string[];
+	parameters: string[];
+	related_products: string[];
+	responsible_actor?: string;
+	confidence: number;
+	confidence_reason?: string;
+	model_name: string;
+	prompt_name: string;
+	create_time: string;
+	modify_time: string;
+};
+
+export type ListKbProductsResponse = {
+	status: boolean;
+	input_id: number;
+	file_name?: string;
+	results: KbProductRecord[];
+	total: number;
+};
+
+export async function listKbProducts(inputRecordId: number): Promise<ListKbProductsResponse> {
+	const result = await fetchOrThrow<ListKbProductsResponse>(
+		`${BASE}/products?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to retrieve products'
+	);
+	console.log('[kbService] listKbProducts fetched', {
+		inputRecordId,
+		total: result.total,
+		products: (result.results ?? []).map((p) => ({
+			id: p.id,
+			product_rel_id: p.product_rel_id,
+			product_name: p.product_name,
+			product_type: p.product_type,
+			confidence: p.confidence
+		}))
+	});
+	return result;
+}
+
 // ---------- kb.stores ----------
 
 export type KnowledgeStoreStatus = 'active' | 'suspended' | 'inactive' | string;

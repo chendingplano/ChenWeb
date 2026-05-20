@@ -17,13 +17,13 @@ Each format of lines in the input is:
 ```
 where `<flag>` indicates whether the line is an overlapped line ('o') or normal line ('n').
 
-## 2. Classification
+## 3. Classification
 For each extracted provision, classify it as:
 - "mandatory" → strict requirement or prohibition
 - "recommended" → guidance or best practice
 - "optional" → permission or allowed behavior (if applicable)
 
-## 3. Language Handling
+## 4. Language Handling
 - Detect the original language of the input.
 - If the input is NOT English:
   - Keep the extracted provision in the original language.
@@ -31,7 +31,7 @@ For each extracted provision, classify it as:
 - If the input is English:
   - Only provide the English version.
 
-## 4. Provisions
+## 5. Provisions
 Provisions may appear:
 
 * in normal prose or sentences
@@ -39,7 +39,7 @@ Provisions may appear:
 * in definitions sections
 * in tables
 
-## 5. Extraction Rules
+## 6. Extraction Rules
 - Do not extract provisions from overlapped lines unless provisions live in both the overlapped lines 
 and normal lines.
 - Extract complete, self-contained statements (not fragments).
@@ -50,7 +50,7 @@ and normal lines.
 - Provisions may appear in tables
 - Be conservative. If uncertain, set a flag (`need_verify`) to let human users verify.
 
-## 6. Extraction Requirements
+## 7. Extraction Requirements
 
 For every extracted provisions, produce a structured record with the following fields:
 
@@ -74,9 +74,9 @@ For every extracted provisions, produce a structured record with the following f
 IMPORTANT: for `name`, `provision`, `provision_desc`, `keywords`, `context` and `subject`, generate them in the input language.
 ALSO provide accurate English translation if the input language is not English in `name_en`, `provision_en`, `provision_desc_en`, `keywords_en`, `context_en` and `subject_en`, respectively.
 
-## 7. Extract Category Paths
+## 8. Extract Category Paths
 
-### 7.1. Category structure
+### 8.1. Category structure
 
 A category path is made of one or more categories, forming a category path:
 ```text
@@ -90,7 +90,7 @@ A category path is made of one or more categories, forming a category path:
 * `<industry-class>`, `<level_2_category>` and subsequent categories MUST be in the input language.
 * Limit the max depth of category paths to 10
 
-### 7.2. Category Paths Extraction Rules
+### 8.2. Category Paths Extraction Rules
 
 * Extract multiple category paths per provision
 * Provide both category-level keywords and path-level keywords
@@ -101,7 +101,7 @@ A category path is made of one or more categories, forming a category path:
   * Help distinguish this topic from others
   * Keywords are in its input language
 
-### 7.3. Confidence
+### 8.3. Confidence
 
 * Provide a confidence score between 0 and 1 for each category path
 * Confidence reflects:
@@ -115,7 +115,7 @@ A category path is made of one or more categories, forming a category path:
   * 0.6–0.85 → reasonably clear topic
   * <0.6 → weak or inferred topic (avoid if possible)
 
-### 7.4. Category Quality
+### 8.4. Category Quality
 
 * Use canonical noun phrases
 * Avoid verbs, sentences, or vague terms
@@ -123,26 +123,26 @@ A category path is made of one or more categories, forming a category path:
 
   * "general", "other", "miscellaneous"
 
-### 7.5. Consistency
+### 8.5. Consistency
 
 * Reuse common top-level categories when appropriate
 * Keep naming style consistent across all paths
 
-### 7.6. Language
+### 8.6. Language
 
 * Match the language of the input.
 * For English / Latin-script content: use English category names.
 * For Chinese / CJK content: use Chinese category names directly.
 * ALSO provide an accurate English translation if the original language is not English.
 
-## 8. Confidence Scoring
+## 9. Confidence Scoring
 Assign a confidence score (0.0–1.0) for each provision based on:
 - Strength of normative signal (e.g., "shall" > "should")
 - Clarity of obligation or recommendation
 - Completeness of the extracted statement
 - Ambiguity in language or context
 
-## 9. Normalization Rules
+## 10. Normalization Rules
 
 Apply these rules according to the language of each category segment:
 
@@ -155,7 +155,7 @@ Apply these rules according to the language of each category segment:
   * Remove punctuation (Chinese punctuation such as ，、。：；“” are removed)
   * Do NOT insert spaces or underscores between characters
 
-## 10. Output Format (STRICT JSON ONLY)
+## 11. Output Format (STRICT JSON ONLY)
 ```json
 {
   "language": "<detected_language>",
@@ -196,23 +196,7 @@ Apply these rules according to the language of each category segment:
           "path_confidence": ddd
         }
       ]
-      "category_paths_en": [    // This is the English translation of 'category_path', present only when the input language is not English!
-        {
-          "category_path": [
-            {
-              "name": "category-name",
-              "keywords": ["keyword", "keyword"...],
-              "confidence": ddd
-            },
-            {
-              <the next category>
-            },
-            ...
-          ],
-          "path_keywords": ["keyword", "keyword"...],
-          "path_confidence": ddd
-        }
-      ]
+      "category_paths_en": [// the accurate English translation of 'category_path' only when its input language is not English!]
     },
     {
       <next provision>
