@@ -43,8 +43,8 @@
 		id: string;
 		label: string;
 		icon: any;
-		ux: number;
-		uy: number;
+		ux?: number;
+		uy?: number;
 		attrs: AttrDef[];
 	};
 
@@ -603,11 +603,15 @@
 			Rg = Rc + Rgn + 28;
 		}
 
-		const mapGroups = groups.map((g) => {
-			const gx = cx + g.ux * Rg;
-			const gy = cy + g.uy * Rg;
+		const n = groups.length;
+		const mapGroups = groups.map((g, i) => {
+			const angle = -Math.PI / 2 + (2 * Math.PI * i) / n;
+			const ux = g.ux ?? Math.cos(angle);
+			const uy = g.uy ?? Math.sin(angle);
+			const gx = cx + ux * Rg;
+			const gy = cy + uy * Rg;
 			const attrs = g.attrs.map((def) => ({ def, count: attrRaw(fb, def).length }));
-			const baseAng = Math.atan2(g.uy, g.ux);
+			const baseAng = Math.atan2(uy, ux);
 			const k = attrs.length;
 			const span = k > 1 ? Math.min(Math.PI * 0.62, (k - 1) * 0.44) : 0;
 			const satellites = attrs.map((s, i) => {

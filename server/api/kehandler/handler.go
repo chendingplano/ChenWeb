@@ -52,7 +52,7 @@ func topicsBaseDir() (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("ARTIFACT_DIR environment variable is not set")
 	}
-	return filepath.Join(dir, "Topics"), nil
+	return filepath.Join(dir, "ResearchTopics"), nil
 }
 
 func metaFilePath(base string, bean ResearchTopicBean) string {

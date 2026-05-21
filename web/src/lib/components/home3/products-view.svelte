@@ -1,4 +1,5 @@
 <script lang="ts">
+	import TagIcon from '@lucide/svelte/icons/tag';
 	import InfoIcon from '@lucide/svelte/icons/info';
 	import LogInIcon from '@lucide/svelte/icons/log-in';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
@@ -32,15 +33,20 @@
 		onFocusModeChange?: (focused: boolean) => void;
 	} = $props();
 
-	const D = Math.SQRT1_2;
-
 	const PRODUCT_GROUPS: GroupDef[] = [
+		{
+			id: 'metadata',
+			label: 'Metadata',
+			icon: TagIcon,
+			attrs: [
+				{ key: 'product_type', label: 'Product Type', icon: TagIcon, kind: 'text', field: 'product_type' },
+				{ key: 'canonical_name', label: 'Canonical Name', icon: FileTextIcon, kind: 'text', field: 'canonical_name' }
+			]
+		},
 		{
 			id: 'grounding',
 			label: 'Grounding',
 			icon: InfoIcon,
-			ux: -D,
-			uy: -D,
 			attrs: [
 				{ key: 'evidence_quote', label: 'Evidence Quote', icon: FileTextIcon, kind: 'text', field: 'evidence_quote' },
 				{ key: 'confidence_reason', label: 'Confidence Reason', icon: InfoIcon, kind: 'text', field: 'confidence_reason' }
@@ -50,20 +56,25 @@
 			id: 'inputs',
 			label: 'Inputs',
 			icon: LogInIcon,
-			ux: D,
-			uy: -D,
 			attrs: [
 				{ key: 'conditions', label: 'Conditions', icon: CircleCheckIcon, kind: 'str', field: 'conditions' },
 				{ key: 'parameters', label: 'Parameters', icon: SettingsIcon, kind: 'str', field: 'parameters' }
 			]
 		},
 		{
+			id: 'actors',
+			label: 'Actors',
+			icon: UsersIcon,
+			attrs: [
+				{ key: 'responsible_actor', label: 'Responsible Actor', icon: UsersIcon, kind: 'text', field: 'responsible_actor' }
+			]
+		},
+		{
 			id: 'requirements',
 			label: 'Requirements',
 			icon: ClipboardListIcon,
-			ux: D,
-			uy: D,
 			attrs: [
+				{ key: 'obligation_level', label: 'Obligation Level', icon: CircleCheckIcon, kind: 'text', field: 'obligation_level' },
 				{ key: 'exceptions', label: 'Exceptions', icon: TriangleAlertIcon, kind: 'str', field: 'exceptions' },
 				{ key: 'requirement_text', label: 'Requirement Text', icon: FileTextIcon, kind: 'text', field: 'requirement_text' }
 			]
@@ -72,12 +83,9 @@
 			id: 'relations',
 			label: 'Relations',
 			icon: Share2Icon,
-			ux: -D,
-			uy: D,
 			attrs: [
-				{ key: 'responsible_actor', label: 'Responsible Actor', icon: UsersIcon, kind: 'text', field: 'responsible_actor' },
-				{ key: 'related_products', label: 'Related Products', icon: PackageIcon, kind: 'kw', field: 'related_products' },
-				{ key: 'relation_type', label: 'Relation Type', icon: GitBranchIcon, kind: 'text', field: 'relation_type' }
+				{ key: 'relation_type', label: 'Relation Type', icon: GitBranchIcon, kind: 'text', field: 'relation_type' },
+				{ key: 'related_products', label: 'Related Products', icon: PackageIcon, kind: 'kw', field: 'related_products' }
 			]
 		}
 	];

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -33,6 +34,40 @@ type ProductsProcessor struct {
 	ModelErr             error
 	ModelName            string
 	ModelCfg             structureModelConfig
+	MentionPromptText    string
+	MentionPromptRef     string
+	MentionPromptPath    string
+	MentionPromptErr     error
+	MentionModelRef      string
+	MentionModelCfgPath  string
+	MentionModelErr      error
+	MentionModelName     string
+	MentionModelCfg      structureModelConfig
+	RelationPromptText   string
+	RelationPromptRef    string
+	RelationPromptPath   string
+	RelationPromptErr    error
+	RelationModelRef     string
+	RelationModelCfgPath string
+	RelationModelErr     error
+	RelationModelName    string
+	RelationModelCfg     structureModelConfig
+	TranslatePromptText  string
+	TranslatePromptRef   string
+	TranslatePromptPath  string
+	TranslatePromptErr   error
+	TranslateModelRef    string
+	TranslateModelName   string
+	TranslateModelCfg    structureModelConfig
+	TranslateEnabled     bool
+	CategorizePromptText string
+	CategorizePromptRef  string
+	CategorizePromptPath string
+	CategorizePromptErr  error
+	CategorizeModelRef   string
+	CategorizeModelName  string
+	CategorizeModelCfg   structureModelConfig
+	CategorizeEnabled    bool
 	FallbackModelRef     string
 	FallbackModelCfgPath string
 	FallbackModelErr     error
@@ -66,30 +101,119 @@ type productExtractionResult struct {
 	ModelName string
 }
 
+type productMention struct {
+	MentionText       string
+	CanonicalHint     string
+	ProductTypeHint   string
+	EvidenceQuote     string
+	EvidenceLines     []string
+	IsExplicit        bool
+	Confidence        float64
+	ConfidenceReason  string
+	BlockIndex        int
+	BlockLines        []BlockLine
+	HasNormalEvidence bool
+}
+
+type productCandidate struct {
+	CandidateID        string
+	ProductName        string
+	CanonicalName      string
+	ProductTypeHint    string
+	SupportingMentions []map[string]any
+	SupportLines       []BlockLine
+}
+
 func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *ProductsProcessor {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26052001")
 	}
-	promptText, promptRef, promptPath, promptErr := loadProductsPromptFromEnv()
-	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_NAME", "EXTRACT_PRODUCT_MODELS_FILE")
+	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
+		[]string{"EXTRACT_PRODUCT_MENTIONS_PROMPT"},
+		"prompt-extract-product-mentions-v1.md",
+	)
+	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
+		[]string{"ENRICH_PRODUCT_RELATIONS_PROMPT", "EXTRACT_PRODUCTS_PROMPT", "EXTRACT_PRODUCT_PROMPT"},
+		"prompt-enrich-product-relations-v1.md",
+	)
+	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
+		[]string{"EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
+		"EXTRACT_PRODUCT_MODELS_FILE",
+	)
+	relationModelRef, relationModelCfgPath, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
+		[]string{"ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
+		"EXTRACT_PRODUCT_MODELS_FILE",
+	)
+	translatePromptText, translatePromptRef, translatePromptPath, translatePromptErr := loadProductPromptFromEnvKeys(
+		[]string{"TRANSLATE_PRODUCTS_PROMPT"},
+		"prompt-translate-products-v1.md",
+	)
+	categorizePromptText, categorizePromptRef, categorizePromptPath, categorizePromptErr := loadProductPromptFromEnvKeys(
+		[]string{"CATEGORIZE_PRODUCTS_PROMPT"},
+		"prompt-categorize-products-v1.md",
+	)
+	translateModelRef, _, translateModelCfg, translateModelErr := loadOptionalModelConfigFromEnvKeys(
+		[]string{"TRANSLATE_PRODUCTS_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
+		"EXTRACT_PRODUCT_MODELS_FILE",
+	)
+	categorizeModelRef, _, categorizeModelCfg, categorizeModelErr := loadOptionalModelConfigFromEnvKeys(
+		[]string{"CATEGORIZE_PRODUCTS_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
+		"EXTRACT_PRODUCT_MODELS_FILE",
+	)
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "EXTRACT_PRODUCT_MODELS_FILE")
-	applyStructureModelConfigToExtractor(extractor, modelCfg)
+	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
+	translateEnabled := translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
+	categorizeEnabled := categorizePromptErr == nil && strings.TrimSpace(categorizePromptText) != "" && categorizeModelErr == nil && strings.TrimSpace(categorizeModelCfg.ModelName) != ""
 	return &ProductsProcessor{
 		InputStore:           inputStore,
 		Store:                store,
 		Extractor:            extractor,
 		Logger:               logger,
 		Now:                  time.Now,
-		PromptText:           promptText,
-		PromptRef:            promptRef,
-		PromptPath:           promptPath,
-		PromptErr:            promptErr,
-		ModelRef:             modelRef,
-		ModelCfgPath:         modelCfgPath,
-		ModelErr:             modelErr,
-		ModelName:            modelCfg.ModelName,
-		ModelCfg:             modelCfg,
+		PromptText:           relationPromptText,
+		PromptRef:            relationPromptRef,
+		PromptPath:           relationPromptPath,
+		PromptErr:            relationPromptErr,
+		ModelRef:             relationModelRef,
+		ModelCfgPath:         relationModelCfgPath,
+		ModelErr:             relationModelErr,
+		ModelName:            relationModelCfg.ModelName,
+		ModelCfg:             relationModelCfg,
+		MentionPromptText:    mentionPromptText,
+		MentionPromptRef:     mentionPromptRef,
+		MentionPromptPath:    mentionPromptPath,
+		MentionPromptErr:     mentionPromptErr,
+		MentionModelRef:      mentionModelRef,
+		MentionModelCfgPath:  mentionModelCfgPath,
+		MentionModelErr:      mentionModelErr,
+		MentionModelName:     mentionModelCfg.ModelName,
+		MentionModelCfg:      mentionModelCfg,
+		RelationPromptText:   relationPromptText,
+		RelationPromptRef:    relationPromptRef,
+		RelationPromptPath:   relationPromptPath,
+		RelationPromptErr:    relationPromptErr,
+		RelationModelRef:     relationModelRef,
+		RelationModelCfgPath: relationModelCfgPath,
+		RelationModelErr:     relationModelErr,
+		RelationModelName:    relationModelCfg.ModelName,
+		RelationModelCfg:     relationModelCfg,
+		TranslatePromptText:  translatePromptText,
+		TranslatePromptRef:   translatePromptRef,
+		TranslatePromptPath:  translatePromptPath,
+		TranslatePromptErr:   translatePromptErr,
+		TranslateModelRef:    translateModelRef,
+		TranslateModelName:   translateModelCfg.ModelName,
+		TranslateModelCfg:    translateModelCfg,
+		TranslateEnabled:     translateEnabled,
+		CategorizePromptText: categorizePromptText,
+		CategorizePromptRef:  categorizePromptRef,
+		CategorizePromptPath: categorizePromptPath,
+		CategorizePromptErr:  categorizePromptErr,
+		CategorizeModelRef:   categorizeModelRef,
+		CategorizeModelName:  categorizeModelCfg.ModelName,
+		CategorizeModelCfg:   categorizeModelCfg,
+		CategorizeEnabled:    categorizeEnabled,
 		FallbackModelRef:     fallbackModelRef,
 		FallbackModelCfgPath: fallbackModelCfgPath,
 		FallbackModelErr:     fallbackModelErr,
@@ -116,8 +240,11 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
-	if p.PromptErr != nil {
-		return fmt.Errorf("(MID_26052003) load products prompt %q: %w", p.PromptRef, p.PromptErr)
+	if p.MentionPromptErr != nil {
+		return fmt.Errorf("(MID_26052003) load product mentions prompt %q: %w", p.MentionPromptRef, p.MentionPromptErr)
+	}
+	if p.RelationPromptErr != nil {
+		return fmt.Errorf("(MID_26052003) load product relations prompt %q: %w", p.RelationPromptRef, p.RelationPromptErr)
 	}
 	if p.InputStore == nil {
 		return errors.New("(MID_26052004) input store is nil")
@@ -134,10 +261,16 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		}
 		return fmt.Errorf("(MID_26052006) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
-	if p.ModelErr != nil {
-		p.Logger.Warn("products extraction skipped: model config error",
-			"record_id", evt.RecordID, "model_ref", p.ModelRef, "error", p.ModelErr)
-		p.persistProductsStatus(ctx, rec, start, p.ModelErr)
+	if p.MentionModelErr != nil {
+		p.Logger.Warn("products extraction skipped: mention model config error",
+			"record_id", evt.RecordID, "model_ref", p.MentionModelRef, "error", p.MentionModelErr)
+		p.persistProductsStatus(ctx, rec, start, p.MentionModelErr)
+		return nil
+	}
+	if p.RelationModelErr != nil {
+		p.Logger.Warn("products extraction skipped: relation model config error",
+			"record_id", evt.RecordID, "model_ref", p.RelationModelRef, "error", p.RelationModelErr)
+		p.persistProductsStatus(ctx, rec, start, p.RelationModelErr)
 		return nil
 	}
 
@@ -250,80 +383,114 @@ func (p *ProductsProcessor) productBlockSize() int {
 }
 
 func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context, blocks []Block) (productExtractionResult, error) {
-	products := make([]map[string]any, 0, len(blocks))
-	usedModelName := strings.TrimSpace(p.ModelName)
-
+	mentions := make([]productMention, 0, len(blocks))
+	usedMentionModel := strings.TrimSpace(p.MentionModelName)
 	for idx, block := range blocks {
 		startTime := time.Now()
-		p.Logger.Info("Start extracting products",
+		p.Logger.Info("Start extracting product mentions",
 			"idx", idx,
 			"total", len(blocks),
-			"model_name", p.ModelName,
-			"prompt_name", p.PromptRef,
+			"model_name", p.MentionModelName,
+			"prompt_name", p.MentionPromptRef,
 		)
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, block)
+		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, buildProductMentionsUserPrompt(block), p.MentionPromptText, p.MentionPromptRef, p.MentionModelName, p.MentionModelCfg)
 		if err != nil {
-			p.Logger.Error("failed extracting products", "error", err)
-			return productExtractionResult{}, fmt.Errorf("(MID_26052020) extract products via llm: %w", err)
+			p.Logger.Error("failed extracting product mentions", "error", err)
+			return productExtractionResult{}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
 		}
-		usedModelName = strings.TrimSpace(modelName)
+		usedMentionModel = strings.TrimSpace(modelName)
+		raw, _ := payload["mentions"].([]any)
+		mentions = append(mentions, normalizeProductMentions(raw, block)...)
+		p.Logger.Info("LLM responded with product mentions",
+			"mentions_so_far", len(mentions),
+			"model_name", p.MentionModelName,
+			"prompt_name", p.MentionPromptRef,
+			"ms_used", time.Since(startTime).Milliseconds())
+	}
+
+	candidates := mergeProductMentionCandidates(mentions)
+	products := make([]map[string]any, 0, len(candidates))
+	usedRelationModel := strings.TrimSpace(p.RelationModelName)
+	for idx, candidate := range candidates {
+		startTime := time.Now()
+		p.Logger.Info("Start enriching product candidate",
+			"idx", idx,
+			"total", len(candidates),
+			"candidate_id", candidate.CandidateID,
+			"model_name", p.RelationModelName,
+			"prompt_name", p.RelationPromptRef,
+		)
+		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, buildProductRelationUserPrompt(candidate), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
+		if err != nil {
+			p.Logger.Error("failed enriching product relations", "error", err, "candidate_id", candidate.CandidateID)
+			return productExtractionResult{}, fmt.Errorf("(MID_26052020) enrich product relations via llm: %w", err)
+		}
+		usedRelationModel = strings.TrimSpace(modelName)
 		raw, _ := payload["products"].([]any)
 		products = append(products, normalizeProductList(raw)...)
-		p.Logger.Info("LLM responded", 
-			"number of products", len(products), 
-			"model name", p.ModelName,
-			"prompt name", p.PromptRef,
+		p.Logger.Info("LLM responded with product relations",
+			"products_so_far", len(products),
+			"model_name", p.RelationModelName,
+			"prompt_name", p.RelationPromptRef,
 			"ms_used", time.Since(startTime).Milliseconds())
+	}
+
+	products = dedupeFinalProductRows(products)
+	if p.TranslateEnabled {
+		products = p.translateProductRows(ctx, products)
+	}
+	if p.CategorizeEnabled {
+		products = p.categorizeProductRows(ctx, products)
 	}
 	return productExtractionResult{
 		Products:  products,
-		ModelName: firstNonEmptyTrimmed(usedModelName, p.ModelName),
+		ModelName: firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
 	}, nil
 }
 
-func (p *ProductsProcessor) extractProductPayloadWithFallback(ctx context.Context, block Block) (map[string]any, string, error) {
+func (p *ProductsProcessor) extractProductPayloadWithFallback(ctx context.Context, inputText string, promptText string, promptRef string, modelName string, cfg structureModelConfig) (map[string]any, string, error) {
 	primaryStart := time.Now()
-	payload, err := p.extractProductPayload(ctx, block, p.ModelName, p.ModelCfg)
+	payload, err := p.extractProductPayload(ctx, inputText, promptText, promptRef, modelName, cfg)
 	if err == nil {
-		return payload, strings.TrimSpace(p.ModelName), nil
+		return payload, strings.TrimSpace(modelName), nil
 	}
 
 	var payloadVal any = "nil"
 	if payload != nil {
 		payloadVal = payload
 	}
-	p.Logger.Warn("primary LLM failed extracting products",
+	p.Logger.Warn("primary LLM failed extracting products payload",
 		"error", err,
-		"model_name", p.ModelName,
+		"model_name", modelName,
 		"fallback_model", p.FallbackModelName,
 		"payload", payloadVal,
 		"ms_used", time.Since(primaryStart).Milliseconds())
 
 	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
 	if fallbackModelName == "" {
-		return nil, strings.TrimSpace(p.ModelName),
-			fmt.Errorf("(MID_26052021) extract products failed and fallback model not available, err:%w, model_name:%s", err, p.ModelName)
+		return nil, strings.TrimSpace(modelName),
+			fmt.Errorf("(MID_26052021) extract products failed and fallback model not available, err:%w, model_name:%s", err, modelName)
 	}
 	if p.FallbackModelErr != nil {
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052022) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
 	p.Logger.Warn("primary products extraction failed; retrying fallback model",
-		"primary_model", p.ModelName,
+		"primary_model", modelName,
 		"fallback_model", fallbackModelName,
 		"error", err,
-		"prompt_name", p.PromptRef,
+		"prompt_name", promptRef,
 	)
 
-	payload, fallbackErr := p.extractProductPayload(ctx, block, fallbackModelName, p.FallbackModelCfg)
+	payload, fallbackErr := p.extractProductPayload(ctx, inputText, promptText, promptRef, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
 		if isEmptyFallbackProductExtractionError(fallbackErr) {
 			p.Logger.Warn("fallback products extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
-				"prompt_name", p.PromptRef,
+				"prompt_name", promptRef,
 			)
-			return map[string]any{"products": []any{}}, fallbackModelName, nil
+			return map[string]any{"products": []any{}, "mentions": []any{}}, fallbackModelName, nil
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052023) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
@@ -339,17 +506,17 @@ func isEmptyFallbackProductExtractionError(err error) bool {
 		strings.Contains(msg, "json:{[]}")
 }
 
-func (p *ProductsProcessor) extractProductPayload(ctx context.Context, block Block, modelName string, cfg structureModelConfig) (map[string]any, error) {
+func (p *ProductsProcessor) extractProductPayload(ctx context.Context, inputText string, promptText string, promptRef string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	p.Logger.Info("To extract products",
 		"model", modelName,
-		"prompt_name", p.PromptRef,
+		"prompt_name", promptRef,
 	)
 
 	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptText: p.PromptText,
+		PromptText: promptText,
 		ModelName:  modelName,
-		InputText:  buildProductUserPrompt(block),
+		InputText:  inputText,
 	})
 	if err != nil {
 		if payload == nil {
@@ -362,9 +529,17 @@ func (p *ProductsProcessor) extractProductPayload(ctx context.Context, block Blo
 	if len(payload) == 0 {
 		return nil, errors.New("(MID_26052032) empty llm json object")
 	}
+	if raw, ok := payload["mentions"]; ok {
+		items, ok := normalizeProductItems(raw)
+		if !ok {
+			return nil, fmt.Errorf("(MID_26052034) llm output field 'mentions' must be an array, JSON:%v", payload)
+		}
+		payload["mentions"] = items
+		return payload, nil
+	}
 	raw, ok := payload["products"]
 	if !ok {
-		return nil, fmt.Errorf("(MID_26052033) llm output field 'products' must be an array, JSON:%v", payload)
+		return nil, fmt.Errorf("(MID_26052033) llm output must contain 'products' or 'mentions', JSON:%v", payload)
 	}
 	items, ok := normalizeProductItems(raw)
 	if !ok {
@@ -410,54 +585,17 @@ func looksLikeProductRecord(payload map[string]any) bool {
 	return false
 }
 
-func buildProductUserPrompt(block Block) string {
+func buildProductMentionsUserPrompt(block Block) string {
 	schema := map[string]any{
-		"products": []map[string]any{{
-			"product_name":        "string",
-			"product_name_en":     "string or null",
-			"canonical_name":      "string",
-			"canonical_name_en":   "string",
-			"product_type":        "specific_product|product_class|component|material|software|system|equipment|consumable|packaging|other",
-			"relation_type":       "scope|regulated_object|requirement_target|performance_requirement|design_requirement|material_requirement|testing_requirement|certification_requirement|usage_condition|installation_requirement|maintenance_requirement|storage_requirement|prohibited_product|exempted_product|component_of|contains_product|compatible_with|replacement_or_alternative|measurement_object|risk_source|other",
-			"product_summary":    "one concise sentence describing how the input relates to this product",
-			"product_summary_en": "one concise sentence in English",
-			"evidence_quote":      "short supporting quote from the input",
-			"evidence_lines":      []string{"32", "35-45"},
-			"relation_details": map[string]any{
-				"obligation_level":         "mandatory|recommended|permitted|prohibited|conditional|descriptive|unknown",
-				"requirement_text":         "string",
-				"requirement_text_en":      "string or null",
-				"conditions":               []string{"condition 1"},
-				"exceptions":               []string{"exception 1"},
-				"thresholds_or_parameters": []map[string]any{{"name": "string", "value": "string", "unit": "string or null"}},
-				"related_products":         []map[string]any{{"product_name": "string", "relationship": "component_of|contains_product|compatible_with|replacement_or_alternative|compared_with|other"}},
-				"responsible_actor":        "string or null",
-			},
-			"confidence":           0.0,
-			"confidence_reason":    "brief reason",
-			"confidence_reason_en": "brief reason in English",
-			"discriminators": []map[string]any{{
-				"intent":  "short interpretation of user need",
-				"domain":  []string{"domain1", "domain2"},
-				"discriminators": []map[string]any{{
-					"category":   "lexical|synonym|abbreviation|metadata|structural|graph|heuristic",
-					"value":      "string",
-					"confidence": 0.0,
-					"reason":     "why this helps discriminate",
-				}},
-				"exploration_plan": []string{"ordered recommended exploration steps"},
-			}},
-			"discriminators_en": []any{},
-			"category_paths": []map[string]any{{
-				"category_path": []map[string]any{{
-					"name":       "string",
-					"keywords":   []string{"string"},
-					"confidence": 0.0,
-				}},
-				"path_keywords":   []string{"string"},
-				"path_confidence": 0.0,
-			}},
-			"category_paths_en": []any{},
+		"mentions": []map[string]any{{
+			"mention_text":      "string",
+			"canonical_hint":    "string or null",
+			"product_type_hint": "specific_product|product_class|component|material|software|system|equipment|consumable|packaging|other|unknown",
+			"evidence_quote":    "short supporting quote from the input",
+			"evidence_lines":    []string{"32", "35-45"},
+			"is_explicit":       true,
+			"confidence":        0.0,
+			"confidence_reason": "brief reason",
 		}},
 	}
 	lines := make([]string, 0, len(block.Lines))
@@ -470,6 +608,253 @@ func buildProductUserPrompt(block Block) string {
 		"\n\nBlock index: " + strconv.Itoa(block.Index) +
 		"\n\nInput block lines (plain):\n" + strings.Join(lines, "\n") +
 		"\n\nInput block lines (raw, JSON array):\n" + string(linesJSON)
+}
+
+func buildProductRelationUserPrompt(candidate productCandidate) string {
+	lines := make([]string, 0, len(candidate.SupportLines))
+	for _, line := range candidate.SupportLines {
+		lines = append(lines, line.String())
+	}
+	linesJSON, _ := json.Marshal(lines)
+	candidateJSON, _ := json.Marshal(map[string]any{
+		"candidate_id":        candidate.CandidateID,
+		"product_name":        candidate.ProductName,
+		"canonical_name":      candidate.CanonicalName,
+		"product_type_hint":   candidate.ProductTypeHint,
+		"supporting_mentions": candidate.SupportingMentions,
+	})
+	return "Return JSON only.\n\nCandidate:\n" + string(candidateJSON) +
+		"\n\nSource lines (plain):\n" + strings.Join(lines, "\n") +
+		"\n\nSource lines (raw, JSON array):\n" + string(linesJSON)
+}
+
+func normalizeProductMentions(items []any, block Block) []productMention {
+	out := make([]productMention, 0, len(items))
+	for _, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		evidenceLines := normalizeProductEvidenceLines(raw["evidence_lines"])
+		out = append(out, productMention{
+			MentionText:       strings.TrimSpace(asString(raw["mention_text"])),
+			CanonicalHint:     strings.TrimSpace(asString(raw["canonical_hint"])),
+			ProductTypeHint:   strings.TrimSpace(asString(raw["product_type_hint"])),
+			EvidenceQuote:     strings.TrimSpace(asString(raw["evidence_quote"])),
+			EvidenceLines:     evidenceLines,
+			IsExplicit:        toBool(raw["is_explicit"]),
+			Confidence:        toFloat(raw["confidence"]),
+			ConfidenceReason:  strings.TrimSpace(asString(raw["confidence_reason"])),
+			BlockIndex:        block.Index,
+			BlockLines:        append([]BlockLine(nil), block.Lines...),
+			HasNormalEvidence: mentionHasNormalEvidence(block, evidenceLines, strings.TrimSpace(asString(raw["evidence_quote"]))),
+		})
+	}
+	return out
+}
+
+func mentionHasNormalEvidence(block Block, spans []string, quote string) bool {
+	lineNums := make(map[int]struct{})
+	for _, span := range spans {
+		start, end, ok := parseCompactLineSpan(span)
+		if !ok {
+			continue
+		}
+		for i := start; i <= end; i++ {
+			lineNums[i] = struct{}{}
+		}
+	}
+	for _, line := range block.Lines {
+		if line.Flag != "n" {
+			continue
+		}
+		if len(lineNums) == 0 {
+			if quote == "" || strings.Contains(strings.ToLower(line.Content), strings.ToLower(quote)) {
+				return true
+			}
+			continue
+		}
+		if _, ok := lineNums[line.LineNumber]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func parseCompactLineSpan(span string) (int, int, bool) {
+	span = strings.TrimSpace(span)
+	if span == "" {
+		return 0, 0, false
+	}
+	if strings.Contains(span, "-") {
+		parts := strings.SplitN(span, "-", 2)
+		start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+		end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err1 != nil || err2 != nil || end < start {
+			return 0, 0, false
+		}
+		return start, end, true
+	}
+	n, err := strconv.Atoi(span)
+	if err != nil {
+		return 0, 0, false
+	}
+	return n, n, true
+}
+
+func mergeProductMentionCandidates(mentions []productMention) []productCandidate {
+	type bucket struct {
+		mentions []productMention
+	}
+	grouped := map[string]*bucket{}
+	order := make([]string, 0, len(mentions))
+	for _, mention := range mentions {
+		key := normalizedProductCandidateKey(mention.CanonicalHint, mention.MentionText)
+		if key == "" {
+			continue
+		}
+		if grouped[key] == nil {
+			grouped[key] = &bucket{}
+			order = append(order, key)
+		}
+		grouped[key].mentions = append(grouped[key].mentions, mention)
+	}
+
+	out := make([]productCandidate, 0, len(order))
+	for _, key := range order {
+		b := grouped[key]
+		if b == nil || len(b.mentions) == 0 {
+			continue
+		}
+		hasNormal := false
+		for _, mention := range b.mentions {
+			if mention.HasNormalEvidence {
+				hasNormal = true
+				break
+			}
+		}
+		if !hasNormal {
+			continue
+		}
+		supportMentions := make([]map[string]any, 0, len(b.mentions))
+		lineMap := map[string]BlockLine{}
+		productName := ""
+		canonicalName := ""
+		productType := "unknown"
+		typeCounts := map[string]int{}
+		for _, mention := range b.mentions {
+			if productName == "" || (mention.HasNormalEvidence && productName == b.mentions[0].MentionText) {
+				productName = firstNonEmptyTrimmed(mention.MentionText, productName)
+			}
+			canonicalName = firstNonEmptyTrimmed(canonicalName, mention.CanonicalHint)
+			if t := strings.TrimSpace(mention.ProductTypeHint); t != "" {
+				typeCounts[t]++
+			}
+			supportMentions = append(supportMentions, map[string]any{
+				"mention_text":   mention.MentionText,
+				"evidence_quote": mention.EvidenceQuote,
+				"evidence_lines": mention.EvidenceLines,
+				"is_explicit":    mention.IsExplicit,
+				"confidence":     mention.Confidence,
+			})
+			for _, line := range mention.BlockLines {
+				lineKey := fmt.Sprintf("%d:%d:%s", line.PageNumber, line.LineNumber, line.Content)
+				existing, exists := lineMap[lineKey]
+				if !exists || (existing.Flag != "n" && line.Flag == "n") {
+					lineMap[lineKey] = line
+				}
+			}
+		}
+		for candidateType, count := range typeCounts {
+			if count > typeCounts[productType] {
+				productType = candidateType
+			}
+		}
+		if productType == "" {
+			productType = "unknown"
+		}
+		if canonicalName == "" {
+			canonicalName = productName
+		}
+		supportLines := make([]BlockLine, 0, len(lineMap))
+		for _, line := range lineMap {
+			supportLines = append(supportLines, line)
+		}
+		sort.Slice(supportLines, func(i, j int) bool {
+			if supportLines[i].PageNumber != supportLines[j].PageNumber {
+				return supportLines[i].PageNumber < supportLines[j].PageNumber
+			}
+			if supportLines[i].LineNumber != supportLines[j].LineNumber {
+				return supportLines[i].LineNumber < supportLines[j].LineNumber
+			}
+			return supportLines[i].Flag < supportLines[j].Flag
+		})
+		out = append(out, productCandidate{
+			CandidateID:        fmt.Sprintf("cand_%d", len(out)+1),
+			ProductName:        productName,
+			CanonicalName:      canonicalName,
+			ProductTypeHint:    productType,
+			SupportingMentions: supportMentions,
+			SupportLines:       supportLines,
+		})
+	}
+	return out
+}
+
+func normalizedProductCandidateKey(canonicalHint string, mentionText string) string {
+	base := firstNonEmptyTrimmed(canonicalHint, mentionText)
+	base = strings.ToLower(strings.TrimSpace(base))
+	base = strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsLetter(r):
+			return unicode.ToLower(r)
+		case unicode.IsNumber(r):
+			return r
+		case unicode.IsSpace(r):
+			return r
+		default:
+			return ' '
+		}
+	}, base)
+	return strings.Join(strings.Fields(base), " ")
+}
+
+func dedupeFinalProductRows(products []map[string]any) []map[string]any {
+	grouped := map[string]map[string]any{}
+	order := make([]string, 0, len(products))
+	for _, product := range products {
+		key := strings.Join([]string{
+			normalizedProductCandidateKey(asString(product["canonical_name"]), asString(product["product_name"])),
+			strings.ToLower(strings.TrimSpace(asString(product["relation_type"]))),
+			strings.ToLower(strings.TrimSpace(asString(product["requirement_text"]))),
+		}, "|")
+		if existing, ok := grouped[key]; ok {
+			mergedLines := toStringSlice(existing["evidence_lines"])
+			for _, line := range toStringSlice(product["evidence_lines"]) {
+				mergedLines = appendUniqueString(mergedLines, line)
+			}
+			existing["evidence_lines"] = mergedLines
+			if toFloat(product["confidence"]) > toFloat(existing["confidence"]) {
+				existing["confidence"] = product["confidence"]
+				existing["confidence_reason"] = product["confidence_reason"]
+			}
+			if strings.TrimSpace(asString(existing["evidence_quote"])) == "" {
+				existing["evidence_quote"] = product["evidence_quote"]
+			}
+			continue
+		}
+		cloned := map[string]any{}
+		for k, v := range product {
+			cloned[k] = v
+		}
+		grouped[key] = cloned
+		order = append(order, key)
+	}
+	out := make([]map[string]any, 0, len(order))
+	for _, key := range order {
+		out = append(out, grouped[key])
+	}
+	return out
 }
 
 func normalizeProductList(items []any) []map[string]any {
@@ -539,6 +924,20 @@ func normalizeProductList(items []any) []map[string]any {
 }
 
 func normalizeProductEvidenceLines(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
 	items, ok := value.([]any)
 	if !ok {
 		return nil
@@ -556,44 +955,111 @@ func normalizeProductEvidenceLines(value any) []string {
 	return out
 }
 
+func (p *ProductsProcessor) translateProductRows(ctx context.Context, products []map[string]any) []map[string]any {
+	for i := range products {
+		rowInput, _ := json.Marshal(map[string]any{
+			"products": []map[string]any{{
+				"product_name":      products[i]["product_name"],
+				"canonical_name":    products[i]["canonical_name"],
+				"product_summary":   products[i]["relation_summary"],
+				"requirement_text":  products[i]["requirement_text"],
+				"confidence_reason": products[i]["confidence_reason"],
+			}},
+		})
+		payload, _, err := p.extractProductPayloadWithFallback(ctx, string(rowInput), p.TranslatePromptText, p.TranslatePromptRef, p.TranslateModelName, p.TranslateModelCfg)
+		if err != nil {
+			p.Logger.Warn("translate product row failed; keeping untranslated row", "error", err, "product_name", products[i]["product_name"])
+			continue
+		}
+		raw, _ := payload["products"].([]any)
+		if len(raw) == 0 {
+			continue
+		}
+		first, _ := raw[0].(map[string]any)
+		if first == nil {
+			continue
+		}
+		for _, key := range []string{"product_name_en", "canonical_name_en", "product_summary_en", "requirement_text_en", "confidence_reason_en"} {
+			switch key {
+			case "product_summary_en":
+				products[i]["relation_summary_en"] = strings.TrimSpace(asString(first[key]))
+			default:
+				products[i][key] = strings.TrimSpace(asString(first[key]))
+			}
+		}
+	}
+	return products
+}
+
+func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products []map[string]any) []map[string]any {
+	for i := range products {
+		rowInput, _ := json.Marshal(map[string]any{
+			"products": []map[string]any{{
+				"product_name":    products[i]["product_name"],
+				"canonical_name":  products[i]["canonical_name"],
+				"product_type":    products[i]["product_type"],
+				"relation_type":   products[i]["relation_type"],
+				"product_summary": products[i]["relation_summary"],
+				"evidence_quote":  products[i]["evidence_quote"],
+			}},
+		})
+		payload, _, err := p.extractProductPayloadWithFallback(ctx, string(rowInput), p.CategorizePromptText, p.CategorizePromptRef, p.CategorizeModelName, p.CategorizeModelCfg)
+		if err != nil {
+			p.Logger.Warn("categorize product row failed; keeping uncategorized row", "error", err, "product_name", products[i]["product_name"])
+			continue
+		}
+		raw, _ := payload["products"].([]any)
+		if len(raw) == 0 {
+			continue
+		}
+		first, _ := raw[0].(map[string]any)
+		if first == nil {
+			continue
+		}
+		products[i]["category_paths"] = first["category_paths"]
+		products[i]["category_paths_en"] = first["category_paths_en"]
+	}
+	return products
+}
+
 func (p *ProductsProcessor) buildProductOutputRows(products []map[string]any, now time.Time, numBlocks int, modelName string) []map[string]any {
 	out := make([]map[string]any, 0, len(products))
 	timeText := now.Format(defaultDocMetaStatusTime)
 	for _, product := range products {
 		out = append(out, map[string]any{
-			"product_name":        strings.TrimSpace(asString(product["product_name"])),
-			"product_name_en":     strings.TrimSpace(asString(product["product_name_en"])),
-			"canonical_name":      strings.TrimSpace(asString(product["canonical_name"])),
-			"canonical_name_en":   strings.TrimSpace(asString(product["canonical_name_en"])),
-			"product_type":        strings.TrimSpace(asString(product["product_type"])),
-			"relation_type":       strings.TrimSpace(asString(product["relation_type"])),
-			"relation_summary":    strings.TrimSpace(asString(product["relation_summary"])),
-			"relation_summary_en": strings.TrimSpace(asString(product["relation_summary_en"])),
-			"evidence_quote":      strings.TrimSpace(asString(product["evidence_quote"])),
-			"evidence_lines":      product["evidence_lines"],
-			"obligation_level":    strings.TrimSpace(asString(product["obligation_level"])),
-			"requirement_text":    strings.TrimSpace(asString(product["requirement_text"])),
-			"requirement_text_en": strings.TrimSpace(asString(product["requirement_text_en"])),
-			"conditions":          product["conditions"],
-			"exceptions":          product["exceptions"],
-			"parameters":          product["parameters"],
-			"related_products":    product["related_products"],
-			"responsible_actor":   strings.TrimSpace(asString(product["responsible_actor"])),
+			"product_name":         strings.TrimSpace(asString(product["product_name"])),
+			"product_name_en":      strings.TrimSpace(asString(product["product_name_en"])),
+			"canonical_name":       strings.TrimSpace(asString(product["canonical_name"])),
+			"canonical_name_en":    strings.TrimSpace(asString(product["canonical_name_en"])),
+			"product_type":         strings.TrimSpace(asString(product["product_type"])),
+			"relation_type":        strings.TrimSpace(asString(product["relation_type"])),
+			"relation_summary":     strings.TrimSpace(asString(product["relation_summary"])),
+			"relation_summary_en":  strings.TrimSpace(asString(product["relation_summary_en"])),
+			"evidence_quote":       strings.TrimSpace(asString(product["evidence_quote"])),
+			"evidence_lines":       product["evidence_lines"],
+			"obligation_level":     strings.TrimSpace(asString(product["obligation_level"])),
+			"requirement_text":     strings.TrimSpace(asString(product["requirement_text"])),
+			"requirement_text_en":  strings.TrimSpace(asString(product["requirement_text_en"])),
+			"conditions":           product["conditions"],
+			"exceptions":           product["exceptions"],
+			"parameters":           product["parameters"],
+			"related_products":     product["related_products"],
+			"responsible_actor":    strings.TrimSpace(asString(product["responsible_actor"])),
 			"confidence":           toFloat(product["confidence"]),
 			"confidence_reason":    strings.TrimSpace(asString(product["confidence_reason"])),
 			"confidence_reason_en": strings.TrimSpace(asString(product["confidence_reason_en"])),
 			"category_paths":       product["category_paths"],
-			"category_paths_en":   product["category_paths_en"],
-			"status":              "active",
-			"model_name":          strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.ModelName)),
-			"prompt_name":         strings.TrimSpace(p.PromptRef),
-			"num_blocks":          numBlocks,
-			"create_time":         timeText,
-			"modify_time":         timeText,
-			"public_info":         map[string]any{},
-			"private_info":        map[string]any{},
-			"notes":               "",
-			"error_msg":           "",
+			"category_paths_en":    product["category_paths_en"],
+			"status":               "active",
+			"model_name":           strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.ModelName)),
+			"prompt_name":          strings.TrimSpace(p.PromptRef),
+			"num_blocks":           numBlocks,
+			"create_time":          timeText,
+			"modify_time":          timeText,
+			"public_info":          map[string]any{},
+			"private_info":         map[string]any{},
+			"notes":                "",
+			"error_msg":            "",
 		})
 	}
 	return out
@@ -748,30 +1214,30 @@ func (p *ProductsProcessor) writeProductsArtifact(recordID int64, rec DocMetadat
 
 func buildProductFileRecord(row map[string]any) map[string]any {
 	return map[string]any{
-		"product_rel_id":      strings.TrimSpace(asString(row["product_rel_id"])),
-		"product_name":        strings.TrimSpace(asString(row["product_name"])),
-		"product_name_en":     strings.TrimSpace(asString(row["product_name_en"])),
-		"canonical_name":      strings.TrimSpace(asString(row["canonical_name"])),
-		"canonical_name_en":   strings.TrimSpace(asString(row["canonical_name_en"])),
-		"product_type":        strings.TrimSpace(asString(row["product_type"])),
-		"relation_type":       strings.TrimSpace(asString(row["relation_type"])),
-		"relation_summary":    strings.TrimSpace(asString(row["relation_summary"])),
-		"relation_summary_en": strings.TrimSpace(asString(row["relation_summary_en"])),
-		"evidence_quote":      strings.TrimSpace(asString(row["evidence_quote"])),
-		"evidence_lines":      row["evidence_lines"],
-		"obligation_level":    strings.TrimSpace(asString(row["obligation_level"])),
-		"requirement_text":    strings.TrimSpace(asString(row["requirement_text"])),
-		"requirement_text_en": strings.TrimSpace(asString(row["requirement_text_en"])),
-		"conditions":          row["conditions"],
-		"exceptions":          row["exceptions"],
-		"parameters":          row["parameters"],
-		"related_products":    row["related_products"],
-		"responsible_actor":   strings.TrimSpace(asString(row["responsible_actor"])),
+		"product_rel_id":       strings.TrimSpace(asString(row["product_rel_id"])),
+		"product_name":         strings.TrimSpace(asString(row["product_name"])),
+		"product_name_en":      strings.TrimSpace(asString(row["product_name_en"])),
+		"canonical_name":       strings.TrimSpace(asString(row["canonical_name"])),
+		"canonical_name_en":    strings.TrimSpace(asString(row["canonical_name_en"])),
+		"product_type":         strings.TrimSpace(asString(row["product_type"])),
+		"relation_type":        strings.TrimSpace(asString(row["relation_type"])),
+		"relation_summary":     strings.TrimSpace(asString(row["relation_summary"])),
+		"relation_summary_en":  strings.TrimSpace(asString(row["relation_summary_en"])),
+		"evidence_quote":       strings.TrimSpace(asString(row["evidence_quote"])),
+		"evidence_lines":       row["evidence_lines"],
+		"obligation_level":     strings.TrimSpace(asString(row["obligation_level"])),
+		"requirement_text":     strings.TrimSpace(asString(row["requirement_text"])),
+		"requirement_text_en":  strings.TrimSpace(asString(row["requirement_text_en"])),
+		"conditions":           row["conditions"],
+		"exceptions":           row["exceptions"],
+		"parameters":           row["parameters"],
+		"related_products":     row["related_products"],
+		"responsible_actor":    strings.TrimSpace(asString(row["responsible_actor"])),
 		"confidence":           toFloat(row["confidence"]),
 		"confidence_reason":    strings.TrimSpace(asString(row["confidence_reason"])),
 		"confidence_reason_en": strings.TrimSpace(asString(row["confidence_reason_en"])),
 		"category_paths":       row["category_paths"],
-		"category_paths_en":   row["category_paths_en"],
+		"category_paths_en":    row["category_paths_en"],
 		"model_name":           strings.TrimSpace(asString(row["model_name"])),
 		"prompt_name":          strings.TrimSpace(asString(row["prompt_name"])),
 		"create_time":          strings.TrimSpace(asString(row["create_time"])),
@@ -864,14 +1330,18 @@ func appendProductsStatus(raw string, p productsStatusParams) (string, error) {
 }
 
 func loadProductsPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	for _, key := range []string{"EXTRACT_PRODUCTS_PROMPT", "EXTRACT_PRODUCT_PROMPT"} {
+	return loadProductPromptFromEnvKeys([]string{"ENRICH_PRODUCT_RELATIONS_PROMPT", "EXTRACT_PRODUCTS_PROMPT", "EXTRACT_PRODUCT_PROMPT"}, "prompt-enrich-product-relations-v1.md")
+}
+
+func loadProductPromptFromEnvKeys(envKeys []string, defaultRef string) (promptText string, promptRef string, promptPath string, promptErr error) {
+	for _, key := range envKeys {
 		promptRef = strings.TrimSpace(os.Getenv(key))
 		if promptRef != "" {
 			break
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-extract-products.md"
+		promptRef = defaultRef
 	}
 
 	paths := make([]string, 0, 8)
@@ -917,6 +1387,57 @@ func loadProductsPromptFromEnv() (promptText string, promptRef string, promptPat
 		lastErr = fmt.Errorf("(MID_26052062) no candidate path available")
 	}
 	return "", promptRef, "", fmt.Errorf("(MID_26052063) prompt file not found: %w", lastErr)
+}
+
+func loadModelConfigFromEnvKeys(modelRefEnvs []string, modelsFileEnv string) (modelRef string, modelPath string, cfg structureModelConfig, err error) {
+	modelRefValue := ""
+	modelRefKey := ""
+	for _, key := range modelRefEnvs {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			modelRefValue = value
+			modelRefKey = key
+			break
+		}
+	}
+	if modelRefValue == "" {
+		return "", "", structureModelConfig{}, fmt.Errorf("missing one of %s", strings.Join(modelRefEnvs, ", "))
+	}
+	modelPath, err = resolveModelsFilePath(modelsFileEnv)
+	if err != nil {
+		return modelRefValue, "", structureModelConfig{}, err
+	}
+	raw, err := os.ReadFile(modelPath)
+	if err != nil {
+		return modelRefValue, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042103) read %s failed: %w", modelPath, err)
+	}
+	parsed := ApiTypes.LLMModelsFile{}
+	if err := parseTOMLMap(raw, &parsed); err != nil {
+		return modelRefValue, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042104) parse %s failed: %w", modelPath, err)
+	}
+	modelDef, ok := parsed[modelRefValue]
+	if !ok {
+		return modelRefValue, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042105) model %q from %s not found in %s", modelRefValue, modelRefKey, modelPath)
+	}
+	if strings.TrimSpace(modelDef.ModelName) == "" {
+		return modelRefValue, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042106) model %q in %s missing model_name", modelRefValue, modelPath)
+	}
+	cfg = structureModelConfig{
+		ModelName:    strings.TrimSpace(modelDef.ModelName),
+		APIKey:       strings.TrimSpace(modelDef.APIKey),
+		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
+		TimeoutSec:   modelDef.TimeoutSec,
+		ThinkingType: normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
+	}
+	return modelRefValue, modelPath, cfg, nil
+}
+
+func loadOptionalModelConfigFromEnvKeys(modelRefEnvs []string, modelsFileEnv string) (modelRef string, modelPath string, cfg structureModelConfig, err error) {
+	for _, key := range modelRefEnvs {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return loadModelConfigFromEnvKeys(modelRefEnvs, modelsFileEnv)
+		}
+	}
+	return "", "", structureModelConfig{}, nil
 }
 
 func (s ProductsSQLStore) ensureReady() error {
@@ -1044,38 +1565,38 @@ ON CONFLICT (input_record_id, product_rel_id) DO UPDATE SET
 		privateInfoJSON, _ := json.Marshal(product["private_info"])
 
 		_, err := s.DB.ExecContext(ctx, stmt,
-			req.InputRecordID,                                                               // $1
+			req.InputRecordID, // $1
 			strings.TrimSpace(asString(product["product_rel_id"])),                         // $2
-			strings.TrimSpace(asString(product["product_name"])),                            // $3
-			strings.TrimSpace(asString(product["product_name_en"])),                         // $4
-			strings.TrimSpace(asString(product["canonical_name"])),                          // $5
-			strings.TrimSpace(asString(product["canonical_name_en"])),                       // $6
-			strings.TrimSpace(asString(product["product_type"])),                            // $7
-			strings.TrimSpace(asString(product["relation_type"])),                           // $8
-			strings.TrimSpace(asString(product["relation_summary"])),                        // $9
-			strings.TrimSpace(asString(product["relation_summary_en"])),                     // $10
-			strings.TrimSpace(asString(product["evidence_quote"])),                          // $11
-			string(evidenceLinesJSON),                                                       // $12
-			strings.TrimSpace(asString(product["obligation_level"])),                        // $13
-			strings.TrimSpace(asString(product["requirement_text"])),                        // $14
-			strings.TrimSpace(asString(product["requirement_text_en"])),                     // $15
-			string(conditionsJSON),                                                          // $16
-			string(exceptionsJSON),                                                          // $17
-			string(parametersJSON),                                                          // $18
-			string(relatedProductsJSON),                                                     // $19
-			strings.TrimSpace(asString(product["responsible_actor"])),                       // $20
-			toFloat(product["confidence"]),                                                  // $21
-			strings.TrimSpace(asString(product["confidence_reason"])),                       // $22
-			strings.TrimSpace(asString(product["confidence_reason_en"])),                    // $23
-			string(categoryPathsJSON),                                                       // $24
-			string(categoryPathsEnJSON),                                                     // $25
-			strings.TrimSpace(firstNonEmptyTrimmed(asString(product["status"]), "active")),  // $26
-			strings.TrimSpace(asString(product["model_name"])),                              // $27
-			strings.TrimSpace(asString(product["prompt_name"])),                             // $28
-			string(publicInfoJSON),                                                          // $29
-			string(privateInfoJSON),                                                         // $30
-			strings.TrimSpace(asString(product["notes"])),                                   // $31
-			strings.TrimSpace(asString(product["error_msg"])),                               // $32
+			strings.TrimSpace(asString(product["product_name"])),                           // $3
+			strings.TrimSpace(asString(product["product_name_en"])),                        // $4
+			strings.TrimSpace(asString(product["canonical_name"])),                         // $5
+			strings.TrimSpace(asString(product["canonical_name_en"])),                      // $6
+			strings.TrimSpace(asString(product["product_type"])),                           // $7
+			strings.TrimSpace(asString(product["relation_type"])),                          // $8
+			strings.TrimSpace(asString(product["relation_summary"])),                       // $9
+			strings.TrimSpace(asString(product["relation_summary_en"])),                    // $10
+			strings.TrimSpace(asString(product["evidence_quote"])),                         // $11
+			string(evidenceLinesJSON),                                                      // $12
+			strings.TrimSpace(asString(product["obligation_level"])),                       // $13
+			strings.TrimSpace(asString(product["requirement_text"])),                       // $14
+			strings.TrimSpace(asString(product["requirement_text_en"])),                    // $15
+			string(conditionsJSON),                                                         // $16
+			string(exceptionsJSON),                                                         // $17
+			string(parametersJSON),                                                         // $18
+			string(relatedProductsJSON),                                                    // $19
+			strings.TrimSpace(asString(product["responsible_actor"])),                      // $20
+			toFloat(product["confidence"]),                                                 // $21
+			strings.TrimSpace(asString(product["confidence_reason"])),                      // $22
+			strings.TrimSpace(asString(product["confidence_reason_en"])),                   // $23
+			string(categoryPathsJSON),                                                      // $24
+			string(categoryPathsEnJSON),                                                    // $25
+			strings.TrimSpace(firstNonEmptyTrimmed(asString(product["status"]), "active")), // $26
+			strings.TrimSpace(asString(product["model_name"])),                             // $27
+			strings.TrimSpace(asString(product["prompt_name"])),                            // $28
+			string(publicInfoJSON),                                                         // $29
+			string(privateInfoJSON),                                                        // $30
+			strings.TrimSpace(asString(product["notes"])),                                  // $31
+			strings.TrimSpace(asString(product["error_msg"])),                              // $32
 		)
 		if err != nil {
 			return inserted, err
