@@ -158,6 +158,51 @@
 		return raw.split(',').map(s => s.trim()).filter(Boolean);
 	}
 
+	// ── Content editor ────────────────────────────────────────────────────────
+	const TEXT_EXTENSIONS = new Set(['.md', '.typ', '.text', '.html']);
+
+	let editedContent    = $state('');
+	let contentDirty     = $state(false);
+	let savingContent    = $state(false);
+	let saveContentError = $state('');
+
+	$effect(() => {
+		if (selectedBean) {
+			editedContent = selectedBean.content ?? '';
+			contentDirty = false;
+			saveContentError = '';
+		}
+	});
+
+	async function handleSaveContent() {
+		if (!selectedBean) return;
+		savingContent = true;
+		saveContentError = '';
+		try {
+			const res = await fetch(`/api/v1/ke/research-topics/${encodeURIComponent(selectedBean.bean_name)}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ content: editedContent }),
+			});
+			if (!res.ok) {
+				const body = await res.json().catch(() => ({}));
+				throw new Error(body.error ?? `Server error: ${res.status}`);
+			}
+			const snap = selectedBean;
+			beans = beans.map(b =>
+				b.bean_name === snap.bean_name && b.bean_category === snap.bean_category
+					? { ...b, content: editedContent }
+					: b
+			);
+			selectedBean = { ...snap, content: editedContent };
+			contentDirty = false;
+		} catch (e: any) {
+			saveContentError = e.message ?? 'Failed to save';
+		} finally {
+			savingContent = false;
+		}
+	}
+
 	async function handleCreate() {
 		submitError = '';
 		submitting = true;
@@ -292,7 +337,8 @@
 					</p>
 				</div>
 			{:else}
-				<div class="flex flex-col gap-3 mt-2">
+				<div class="grid gap-3 mt-2" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));">
+
 					{#each filteredBeans as bean (bean.bean_name + bean.bean_category)}
 						{@const typeConf = beanTypeColors[bean.bean_type]}
 						{@const TypeIcon = beanTypeIcons[bean.bean_type]}
@@ -363,38 +409,86 @@
 					</div>
 				</div>
 
-				<div class="rounded-xl p-4 mb-4 grid gap-3" style="background:{cardBg}; border:1px solid {borderColor}; grid-template-columns:1fr 1fr;">
-					{#each [
-						{ label: 'Bean Name',  value: bean.bean_name,      mono: true },
-						{ label: 'Bean Type',  value: bean.bean_type,      mono: false },
-						{ label: 'File Type',  value: bean.file_type + ' (' + fileTypeExtension[bean.file_type] + ')', mono: false },
-						{ label: 'Category',   value: bean.bean_category,  mono: true },
-						{ label: 'Authors',    value: (bean.authors ?? []).join(', ') || '—', mono: false },
-					] as row}
-						<div>
-							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">{row.label}</div>
-							<div style="font-size:13px; color:{textPrimary}; {row.mono ? 'font-family:monospace;' : ''}">{row.value}</div>
+				<!-- Metadata block -->
+				<div class="rounded-xl p-4 mb-4" style="background:{cardBg}; border:1px solid {borderColor};">
+					<div class="grid gap-3" style="grid-template-columns:1fr 1fr;">
+						{#each [
+							{ label: 'Bean Name',  value: bean.bean_name,      mono: true },
+							{ label: 'Bean Type',  value: bean.bean_type,      mono: false },
+							{ label: 'File Type',  value: bean.file_type + ' (' + fileTypeExtension[bean.file_type] + ')', mono: false },
+							{ label: 'Category',   value: bean.bean_category,  mono: true },
+							{ label: 'Authors',    value: (bean.authors ?? []).join(', ') || '—', mono: false },
+						] as row}
+							<div>
+								<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">{row.label}</div>
+								<div style="font-size:13px; color:{textPrimary}; {row.mono ? 'font-family:monospace;' : ''}">{row.value}</div>
+							</div>
+						{/each}
+					</div>
+					{#if bean.bean_desc}
+						<div style="border-top:1px solid {borderColor}; margin-top:12px; padding-top:12px;">
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Description</div>
+							<p style="font-size:13px; color:{textSecondary}; line-height:1.6;">{bean.bean_desc}</p>
 						</div>
-					{/each}
+					{/if}
+					{#if bean.bean_keywords?.length}
+						<div style="border-top:1px solid {borderColor}; margin-top:12px; padding-top:12px;">
+							<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">Keywords</div>
+							<div class="flex flex-wrap gap-2">
+								{#each (bean.bean_keywords ?? []) as kw}
+									<span class="rounded-full px-3 py-1 text-xs" style="background:{accentTint}; color:{accent}; border:1px solid {accent}30;">{kw}</span>
+								{/each}
+							</div>
+						</div>
+					{/if}
 				</div>
 
-				{#if bean.bean_desc}
-					<div class="rounded-xl p-4 mb-4" style="background:{cardBg}; border:1px solid {borderColor};">
-						<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Description</div>
-						<p style="font-size:13px; color:{textSecondary}; line-height:1.6;">{bean.bean_desc}</p>
+				<!-- Content block -->
+				{#each [fileTypeExtension[bean.file_type] ?? ''] as ext}
+				<div class="rounded-xl mb-4" style="background:{cardBg}; border:1px solid {borderColor}; overflow:hidden;">
+					<div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid {borderColor};">
+						<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em;">Content</div>
+						{#if TEXT_EXTENSIONS.has(ext) && contentDirty}
+							<div class="flex items-center gap-2">
+								{#if saveContentError}
+									<span style="font-size:11px; color:{danger};">{saveContentError}</span>
+								{/if}
+								<button
+									onclick={handleSaveContent}
+									disabled={savingContent}
+									class="flex items-center gap-1.5 rounded-lg px-3 py-1 cursor-pointer text-xs font-semibold transition-opacity duration-150"
+									style="background:{accent}; color:white; border:none; opacity:{savingContent ? '0.6' : '1'};"
+								>
+									{#if savingContent}
+										<LoaderIcon style="width:11px; height:11px; animation:spin 1s linear infinite;" />
+										Saving…
+									{:else}
+										Save
+									{/if}
+								</button>
+							</div>
+						{/if}
 					</div>
-				{/if}
-
-				{#if bean.bean_keywords?.length}
-					<div class="rounded-xl p-4 mb-4" style="background:{cardBg}; border:1px solid {borderColor};">
-						<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">Keywords</div>
-						<div class="flex flex-wrap gap-2">
-							{#each (bean.bean_keywords ?? []) as kw}
-								<span class="rounded-full px-3 py-1 text-xs" style="background:{accentTint}; color:{accent}; border:1px solid {accent}30;">{kw}</span>
-							{/each}
+					{#if TEXT_EXTENSIONS.has(ext)}
+						<textarea
+							value={editedContent}
+							oninput={(e) => { editedContent = (e.currentTarget as HTMLTextAreaElement).value; contentDirty = true; }}
+							spellcheck={false}
+							style="display:block; width:100%; min-height:280px; background:transparent; border:none; padding:16px; font-family:monospace; font-size:12px; color:{textPrimary}; outline:none; resize:vertical; line-height:1.7; box-sizing:border-box;"
+						></textarea>
+					{:else if ext === '.pdf'}
+						<embed
+							src={editedContent}
+							type="application/pdf"
+							style="width:100%; height:400px; display:block;"
+						/>
+					{:else}
+						<div class="flex items-center justify-center p-8" style="color:{textMuted}; font-size:13px;">
+							File type not supported: {bean.bean_name}{ext}
 						</div>
-					</div>
-				{/if}
+					{/if}
+				</div>
+				{/each}
 
 				{#if bean.related_topics?.length}
 					<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">

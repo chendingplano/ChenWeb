@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -70,9 +71,24 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 		errs: []error{
 			fmt.Errorf("(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
 			nil,
+			nil,
 		},
 		outs: []map[string]any{
 			nil,
+			{
+				"candidates": []any{
+					map[string]any{
+						"scene_key":         "scene_1",
+						"scene_type_hint":   "operation",
+						"title":             "Open access panel",
+						"summary_hint":      "Operator opens the access panel.",
+						"evidence_quote":    "Operator opens the access panel.",
+						"line_spans":        []any{"1-2"},
+						"confidence":        0.8,
+						"confidence_reason": "Direct statement",
+					},
+				},
+			},
 			{
 				"scene_blocks": []any{
 					map[string]any{
@@ -87,8 +103,18 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 	}
 
 	p := NewSceneBlocksProcessor(inputStore, sceneStore, extractor, nil)
+	p.MentionPromptText = "extract scene candidates"
+	p.MentionPromptRef = "prompt-extract-scene-candidates-v1.md"
+	p.MentionPromptErr = nil
+	p.MentionModelErr = nil
+	p.MentionModelName = "primary-model"
+	p.RelationPromptText = "extract scene blocks"
+	p.RelationPromptRef = "prompt-enrich-scene-blocks-v1.md"
+	p.RelationPromptErr = nil
+	p.RelationModelErr = nil
+	p.RelationModelName = "primary-model"
 	p.PromptText = "extract scene blocks"
-	p.PromptRef = "prompt-generate-scene-blocks-v2.md"
+	p.PromptRef = "prompt-enrich-scene-blocks-v1.md"
 	p.PromptErr = nil
 	p.ModelErr = nil
 	p.ModelName = "primary-model"
@@ -102,8 +128,8 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 		t.Fatalf("HandleEvent: %v", err)
 	}
 
-	if extractor.calledCount != 2 {
-		t.Fatalf("calledCount=%d, want 2", extractor.calledCount)
+	if extractor.calledCount != 3 {
+		t.Fatalf("calledCount=%d, want 3", extractor.calledCount)
 	}
 	if !strings.Contains(extractor.inputText, "n\t1\t1\tparagraph\tScene introduction") {
 		t.Fatalf("scene block input missing flagged line format: %q", extractor.inputText)
@@ -111,7 +137,7 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 	if !strings.Contains(extractor.inputText, "n\t2\t1\tparagraph\tOperator opens the access panel.") {
 		t.Fatalf("scene block input missing second flagged line: %q", extractor.inputText)
 	}
-	if len(extractor.modelNames) != 2 {
+	if len(extractor.modelNames) != 3 {
 		t.Fatalf("modelNames=%v", extractor.modelNames)
 	}
 	if extractor.modelNames[0] != "primary-model" {
@@ -120,11 +146,14 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 	if extractor.modelNames[1] != "fallback-model" {
 		t.Fatalf("second model=%q, want fallback-model", extractor.modelNames[1])
 	}
+	if extractor.modelNames[2] != "primary-model" {
+		t.Fatalf("third model=%q, want primary-model", extractor.modelNames[2])
+	}
 	if sceneStore.upsertCalled != 1 {
 		t.Fatalf("upsertCalled=%d, want 1", sceneStore.upsertCalled)
 	}
-	if got := strings.TrimSpace(sceneStore.lastUpsert.ModelName); got != "fallback-model" {
-		t.Fatalf("saved model=%q, want fallback-model", got)
+	if got := strings.TrimSpace(sceneStore.lastUpsert.ModelName); got != "primary-model" {
+		t.Fatalf("saved model=%q, want primary-model", got)
 	}
 	if got := strings.TrimSpace(asString(sceneStore.lastUpsert.SceneBlock["title"])); got != "Open access panel" {
 		t.Fatalf("saved title=%q", got)
@@ -140,6 +169,157 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 	last := statusArr[len(statusArr)-1]
 	if got := strings.TrimSpace(asString(last["proc_status"])); got != "success" {
 		t.Fatalf("proc_status=%q, want success", got)
+	}
+}
+
+func TestSceneBlocksProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T) {
+	tmp := t.TempDir()
+	lineFile := filepath.Join(tmp, "scene-lines.txt")
+	lineBody := strings.Join([]string{
+		"1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tOperator opens the access panel.",
+		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tThe access panel exposes the wiring bay.",
+		"3\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tOperator inspects the wiring bay.",
+	}, "\n")
+	if err := os.WriteFile(lineFile, []byte(lineBody), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              7002,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_7002.json"),
+		StagingFilename: filepath.Join(tmp, "source.pdf"),
+		StatusRaw:       "[]",
+	}}
+	sceneStore := &fakeSceneObjectsStore{}
+	extractor := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{
+				"candidates": []any{
+					map[string]any{
+						"scene_key":         "access_panel_opening",
+						"scene_type_hint":   "operation",
+						"title":             "Open access panel",
+						"summary_hint":      "Operator opens the access panel.",
+						"evidence_quote":    "Operator opens the access panel.",
+						"line_spans":        []any{"1-2"},
+						"confidence":        0.82,
+						"confidence_reason": "Directly stated workflow step",
+					},
+				},
+			},
+			{
+				"candidates": []any{
+					map[string]any{
+						"scene_key":         "access_panel_opening",
+						"scene_type_hint":   "operation",
+						"title":             "Opening the access panel",
+						"summary_hint":      "Access panel is opened for inspection.",
+						"evidence_quote":    "Operator opens the access panel.",
+						"line_spans":        []any{"2-3"},
+						"confidence":        0.71,
+						"confidence_reason": "Repeated in overlap",
+					},
+				},
+			},
+			{
+				"candidates": []any{},
+			},
+			{
+				"scene_blocks": []any{
+					map[string]any{
+						"scene_id":    "access_panel_opening",
+						"scene_type":  "operation",
+						"title":       "Open access panel",
+						"summary":     "Operator opens the access panel to inspect the wiring bay.",
+						"line_spans":  []any{"1-3"},
+						"confidence":  0.93,
+						"source_refs": []any{},
+					},
+				},
+			},
+		},
+	}
+
+	p := NewSceneBlocksProcessor(inputStore, sceneStore, extractor, nil)
+	p.MentionPromptText = "extract scene candidates"
+	p.MentionPromptRef = "prompt-extract-scene-candidates-v1.md"
+	p.MentionPromptErr = nil
+	p.MentionModelErr = nil
+	p.MentionModelName = "mention-model"
+	p.RelationPromptText = "enrich scene blocks"
+	p.RelationPromptRef = "prompt-enrich-scene-blocks-v1.md"
+	p.RelationPromptErr = nil
+	p.RelationModelErr = nil
+	p.RelationModelName = "relation-model"
+	p.PromptText = p.RelationPromptText
+	p.PromptRef = p.RelationPromptRef
+	p.ModelName = p.RelationModelName
+	p.ChunkSize = 2
+	p.OverlapPercent = 50
+	p.ArtifactDir = tmp
+
+	payload := fmt.Sprintf(`{"record_id":"7002","force":true,"line_file_filename":%q}`, lineFile)
+	if err := p.HandleEvent(context.Background(), []byte(payload)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+
+	if extractor.calledCount != 4 {
+		t.Fatalf("calledCount=%d, want 4", extractor.calledCount)
+	}
+	if got, want := extractor.modelNames, []string{"mention-model", "mention-model", "mention-model", "relation-model"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("modelNames=%v, want %v", got, want)
+	}
+	if sceneStore.upsertCalled != 1 {
+		t.Fatalf("upsertCalled=%d, want 1", sceneStore.upsertCalled)
+	}
+	if got := strings.TrimSpace(asString(sceneStore.lastUpsert.ObjectID)); got != "7002_1" {
+		t.Fatalf("objectID=%q, want 7002_1", got)
+	}
+	if got := strings.TrimSpace(asString(sceneStore.lastUpsert.ModelName)); got != "relation-model" {
+		t.Fatalf("saved model=%q, want relation-model", got)
+	}
+	if got := strings.TrimSpace(asString(sceneStore.lastUpsert.SceneBlock["scene_id"])); got != "access_panel_opening" {
+		t.Fatalf("scene_id=%q", got)
+	}
+}
+
+func TestMergeSceneCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
+	overlapOnly := []sceneCandidateMention{
+		{
+			SceneKey:          "access_panel_opening",
+			Title:             "Open access panel",
+			SummaryHint:       "Operator opens the access panel.",
+			EvidenceQuote:     "Operator opens the access panel.",
+			LineSpans:         []string{"10"},
+			Confidence:        0.8,
+			ChunkIndex:        1,
+			ChunkLines:        []MarkedLine{{Line: Line{LineNo: 10, PageNo: 1, LineType: "paragraph", Content: "Operator opens the access panel."}, Mark: "o"}},
+			HasNormalEvidence: false,
+		},
+	}
+	if got := mergeSceneCandidateMentions(overlapOnly); len(got) != 0 {
+		t.Fatalf("overlap-only candidates=%d, want 0", len(got))
+	}
+
+	withNormal := append([]sceneCandidateMention(nil), overlapOnly...)
+	withNormal = append(withNormal, sceneCandidateMention{
+		SceneKey:          "access_panel_opening",
+		Title:             "Opening the access panel",
+		SummaryHint:       "Panel opening step",
+		EvidenceQuote:     "Operator opens the access panel.",
+		LineSpans:         []string{"10"},
+		Confidence:        0.7,
+		ChunkIndex:        2,
+		ChunkLines:        []MarkedLine{{Line: Line{LineNo: 10, PageNo: 1, LineType: "paragraph", Content: "Operator opens the access panel."}, Mark: "r"}},
+		HasNormalEvidence: true,
+	})
+	merged := mergeSceneCandidateMentions(withNormal)
+	if len(merged) != 1 {
+		t.Fatalf("merged candidates=%d, want 1", len(merged))
+	}
+	if got := merged[0].SceneKey; got != "access_panel_opening" {
+		t.Fatalf("scene key=%q", got)
 	}
 }
 

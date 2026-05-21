@@ -138,11 +138,11 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"EXTRACT_PRODUCT_MODELS_FILE",
+		"MODEL_CONFIG_FILE",
 	)
 	relationModelRef, relationModelCfgPath, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
 		[]string{"ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"EXTRACT_PRODUCT_MODELS_FILE",
+		"MODEL_CONFIG_FILE",
 	)
 	translatePromptText, translatePromptRef, translatePromptPath, translatePromptErr := loadProductPromptFromEnvKeys(
 		[]string{"TRANSLATE_PRODUCTS_PROMPT"},
@@ -154,13 +154,13 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	)
 	translateModelRef, _, translateModelCfg, translateModelErr := loadOptionalModelConfigFromEnvKeys(
 		[]string{"TRANSLATE_PRODUCTS_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"EXTRACT_PRODUCT_MODELS_FILE",
+		"MODEL_CONFIG_FILE",
 	)
 	categorizeModelRef, _, categorizeModelCfg, categorizeModelErr := loadOptionalModelConfigFromEnvKeys(
 		[]string{"CATEGORIZE_PRODUCTS_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"EXTRACT_PRODUCT_MODELS_FILE",
+		"MODEL_CONFIG_FILE",
 	)
-	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "EXTRACT_PRODUCT_MODELS_FILE")
+	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_CONFIG_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	translateEnabled := translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""
@@ -409,6 +409,11 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 	}
 
 	candidates := mergeProductMentionCandidates(mentions)
+	p.Logger.Info("Merged product mention candidates",
+		"mentions_count", len(mentions),
+		"candidate_count", len(candidates),
+		"record_stage", "post_merge",
+	)
 	products := make([]map[string]any, 0, len(candidates))
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
@@ -427,19 +432,38 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 		}
 		usedRelationModel = strings.TrimSpace(modelName)
 		raw, _ := payload["products"].([]any)
-		products = append(products, normalizeProductList(raw)...)
+		normalized := normalizeProductList(raw)
+		products = append(products, normalized...)
 		p.Logger.Info("LLM responded with product relations",
+			"candidate_id", candidate.CandidateID,
+			"rows_for_candidate", len(normalized),
 			"products_so_far", len(products),
 			"model_name", p.RelationModelName,
 			"prompt_name", p.RelationPromptRef,
 			"ms_used", time.Since(startTime).Milliseconds())
 	}
 
+	preDedupeCount := len(products)
 	products = dedupeFinalProductRows(products)
+	p.Logger.Info("Deduped final product relation rows",
+		"rows_before_dedup", preDedupeCount,
+		"rows_after_dedup", len(products),
+		"record_stage", "post_relation_dedup",
+	)
 	if p.TranslateEnabled {
+		p.Logger.Info("Starting product translation pass",
+			"row_count", len(products),
+			"model_name", p.TranslateModelName,
+			"prompt_name", p.TranslatePromptRef,
+		)
 		products = p.translateProductRows(ctx, products)
 	}
 	if p.CategorizeEnabled {
+		p.Logger.Info("Starting product categorization pass",
+			"row_count", len(products),
+			"model_name", p.CategorizeModelName,
+			"prompt_name", p.CategorizePromptRef,
+		)
 		products = p.categorizeProductRows(ctx, products)
 	}
 	return productExtractionResult{

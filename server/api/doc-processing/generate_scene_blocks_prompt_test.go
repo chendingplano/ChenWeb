@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLoadSceneBlocksPromptFromEnvDefaultsToV2Prompt(t *testing.T) {
+func TestLoadSceneBlocksPromptFromEnvDefaultsToEnrichmentPrompt(t *testing.T) {
 	prevPrompt := os.Getenv("EXTRACT_SCENE_BLOCKS_PROMPT")
 	prevDir := os.Getenv("PROMPT_DIR")
 	t.Cleanup(func() {
@@ -34,7 +34,7 @@ func TestLoadSceneBlocksPromptFromEnvDefaultsToV2Prompt(t *testing.T) {
 	if promptErr != nil {
 		t.Fatalf("loadSceneBlocksPromptFromEnv: %v", promptErr)
 	}
-	if got, want := strings.TrimSpace(promptRef), "prompt-generate-scene-blocks-v2.md"; got != want {
+	if got, want := strings.TrimSpace(promptRef), "prompt-enrich-scene-blocks-v1.md"; got != want {
 		t.Fatalf("promptRef=%q, want %q", got, want)
 	}
 }

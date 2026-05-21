@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -19,28 +21,71 @@ import (
 )
 
 type SceneBlocksProcessor struct {
-	InputStore        DocMetadataStore
-	Store             SceneObjectsStore
-	Extractor         LLMJSONExtractor
-	Logger            ApiTypes.JimoLogger
-	Now               func() time.Time
-	PromptText        string
-	PromptRef         string
-	PromptErr         error
-	ModelRef          string
-	ModelErr          error
-	ModelName         string
-	ModelCfg          structureModelConfig
-	FallbackModelRef  string
-	FallbackModelErr  error
-	FallbackModelName string
-	FallbackModelCfg  structureModelConfig
-	ChunkSize         int
-	OverlapPercent    int
-	PrevOverlap       int
-	NextOverlap       int
-	RemoveTOC         bool
-	ArtifactDir       string
+	InputStore         DocMetadataStore
+	Store              SceneObjectsStore
+	Extractor          LLMJSONExtractor
+	Logger             ApiTypes.JimoLogger
+	Now                func() time.Time
+	MentionPromptText  string
+	MentionPromptRef   string
+	MentionPromptErr   error
+	MentionModelRef    string
+	MentionModelErr    error
+	MentionModelName   string
+	MentionModelCfg    structureModelConfig
+	RelationPromptText string
+	RelationPromptRef  string
+	RelationPromptErr  error
+	RelationModelRef   string
+	RelationModelErr   error
+	RelationModelName  string
+	RelationModelCfg   structureModelConfig
+	PromptText         string
+	PromptRef          string
+	PromptErr          error
+	ModelRef           string
+	ModelErr           error
+	ModelName          string
+	ModelCfg           structureModelConfig
+	FallbackModelRef   string
+	FallbackModelErr   error
+	FallbackModelName  string
+	FallbackModelCfg   structureModelConfig
+	ChunkSize          int
+	OverlapPercent     int
+	PrevOverlap        int
+	NextOverlap        int
+	RemoveTOC          bool
+	ArtifactDir        string
+}
+
+type sceneExtractionResult struct {
+	SceneBlocks []map[string]any
+	ModelName   string
+}
+
+type sceneCandidateMention struct {
+	SceneKey          string
+	SceneTypeHint     string
+	Title             string
+	SummaryHint       string
+	EvidenceQuote     string
+	LineSpans         []string
+	Confidence        float64
+	ConfidenceReason  string
+	ChunkIndex        int
+	ChunkLines        []MarkedLine
+	HasNormalEvidence bool
+}
+
+type sceneCandidate struct {
+	CandidateID        string
+	SceneKey           string
+	SceneTypeHint      string
+	Title              string
+	SummaryHint        string
+	SupportingMentions []map[string]any
+	SupportLines       []MarkedLine
 }
 
 type SceneObjectsStore interface {
@@ -63,25 +108,6 @@ func buildSceneBlockExtInfo(block map[string]any) map[string]any {
 	if len(block) == 0 {
 		return map[string]any{}
 	}
-	jsonStringSlice := func(v any) []string {
-		items, ok := v.([]any)
-		if !ok {
-			return nil
-		}
-		out := make([]string, 0, len(items))
-		for _, item := range items {
-			s, ok := item.(string)
-			if !ok {
-				continue
-			}
-			s = strings.TrimSpace(s)
-			if s == "" {
-				continue
-			}
-			out = append(out, s)
-		}
-		return out
-	}
 	out := map[string]any{}
 	if titleEn := strings.TrimSpace(asString(block["title_en"])); titleEn != "" {
 		out["title_en"] = titleEn
@@ -89,13 +115,16 @@ func buildSceneBlockExtInfo(block map[string]any) map[string]any {
 	if summaryEn := strings.TrimSpace(asString(block["summary_en"])); summaryEn != "" {
 		out["summary_en"] = summaryEn
 	}
-	if evidenceLines := jsonStringSlice(block["evidence_lines"]); len(evidenceLines) > 0 {
+	if evidenceLines := normalizeProductEvidenceLines(block["evidence_lines"]); len(evidenceLines) > 0 {
 		out["evidence_lines"] = evidenceLines
 	}
-	if keywordsEn := jsonStringSlice(block["keywords_en"]); len(keywordsEn) > 0 {
+	if lineSpans := normalizeProductEvidenceLines(block["line_spans"]); len(lineSpans) > 0 {
+		out["line_spans"] = lineSpans
+	}
+	if keywordsEn := normalizeProductEvidenceLines(block["keywords_en"]); len(keywordsEn) > 0 {
 		out["keywords_en"] = keywordsEn
 	}
-	if statesEn := jsonStringSlice(block["states_en"]); len(statesEn) > 0 {
+	if statesEn := normalizeProductEvidenceLines(block["states_en"]); len(statesEn) > 0 {
 		out["states_en"] = statesEn
 	}
 	return out
@@ -109,34 +138,62 @@ func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStor
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26051801")
 	}
-	promptText, promptRef, promptErr := loadSceneBlocksPromptFromEnv()
-	modelRef, _, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_SCENE_BLOCKS_MODEL_NAME", "EXTRACT_SCENE_BLOCKS_MODELS_FILE")
-	fallbackModelRef, _, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_SCENE_BLOCKS_MODEL_FALLBACK", "EXTRACT_SCENE_BLOCKS_MODELS_FILE")
-	applyStructureModelConfigToExtractor(extractor, modelCfg)
+	mentionPromptText, mentionPromptRef, mentionPromptErr := loadScenePromptFromEnvKeys(
+		[]string{"EXTRACT_SCENE_CANDIDATES_PROMPT"},
+		"prompt-extract-scene-candidates-v1.md",
+	)
+	relationPromptText, relationPromptRef, relationPromptErr := loadScenePromptFromEnvKeys(
+		[]string{"ENRICH_SCENE_BLOCKS_PROMPT", "EXTRACT_SCENE_BLOCKS_PROMPT"},
+		"prompt-enrich-scene-blocks-v1.md",
+	)
+	mentionModelRef, _, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
+		[]string{"EXTRACT_SCENE_CANDIDATES_MODEL_NAME", "EXTRACT_SCENE_BLOCKS_MODEL_NAME"},
+		"MODEL_CONFIG_FILE",
+	)
+	relationModelRef, _, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
+		[]string{"ENRICH_SCENE_BLOCKS_MODEL_NAME", "EXTRACT_SCENE_BLOCKS_MODEL_NAME"},
+		"MODEL_CONFIG_FILE",
+	)
+	fallbackModelRef, _, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_SCENE_BLOCKS_MODEL_FALLBACK", "MODEL_CONFIG_FILE")
+	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &SceneBlocksProcessor{
-		InputStore:        inputStore,
-		Store:             store,
-		Extractor:         extractor,
-		Logger:            logger,
-		Now:               time.Now,
-		PromptText:        promptText,
-		PromptRef:         promptRef,
-		PromptErr:         promptErr,
-		ModelRef:          modelRef,
-		ModelErr:          modelErr,
-		ModelName:         modelCfg.ModelName,
-		ModelCfg:          modelCfg,
-		FallbackModelRef:  fallbackModelRef,
-		FallbackModelErr:  fallbackModelErr,
-		FallbackModelName: fallbackModelCfg.ModelName,
-		FallbackModelCfg:  fallbackModelCfg,
-		ChunkSize:         envInt("CHUNK_SIZE", DefaultChunkSize, 1),
-		OverlapPercent:    envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
-		PrevOverlap:       prevOverlap,
-		NextOverlap:       nextOverlap,
-		RemoveTOC:         removeTOC,
-		ArtifactDir:       strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		InputStore:         inputStore,
+		Store:              store,
+		Extractor:          extractor,
+		Logger:             logger,
+		Now:                time.Now,
+		MentionPromptText:  mentionPromptText,
+		MentionPromptRef:   mentionPromptRef,
+		MentionPromptErr:   mentionPromptErr,
+		MentionModelRef:    mentionModelRef,
+		MentionModelErr:    mentionModelErr,
+		MentionModelName:   mentionModelCfg.ModelName,
+		MentionModelCfg:    mentionModelCfg,
+		RelationPromptText: relationPromptText,
+		RelationPromptRef:  relationPromptRef,
+		RelationPromptErr:  relationPromptErr,
+		RelationModelRef:   relationModelRef,
+		RelationModelErr:   relationModelErr,
+		RelationModelName:  relationModelCfg.ModelName,
+		RelationModelCfg:   relationModelCfg,
+		PromptText:         relationPromptText,
+		PromptRef:          relationPromptRef,
+		PromptErr:          relationPromptErr,
+		ModelRef:           relationModelRef,
+		ModelErr:           relationModelErr,
+		ModelName:          relationModelCfg.ModelName,
+		ModelCfg:           relationModelCfg,
+		FallbackModelRef:   fallbackModelRef,
+		FallbackModelErr:   fallbackModelErr,
+		FallbackModelName:  fallbackModelCfg.ModelName,
+		FallbackModelCfg:   fallbackModelCfg,
+		ChunkSize:          envInt("CHUNK_SIZE", DefaultChunkSize, 1),
+		OverlapPercent:     envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
+		PrevOverlap:        prevOverlap,
+		NextOverlap:        nextOverlap,
+		RemoveTOC:          removeTOC,
+		ArtifactDir:        strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 	}
 }
 
@@ -150,14 +207,13 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		return fmt.Errorf("(MID_26051802) parse event payload: %w", err)
 	}
 
-	// if ShouldSkipLineFileGeneratedEvent(evt) {
-	// 	p.Logger.Warn("generate scene blocks - skipped")
-	// 	return nil
-	// }
-
-	if p.PromptErr != nil {
-		p.Logger.Error("prompt error", "prompt_name", p.PromptRef, "error", p.PromptErr)
-		return fmt.Errorf("(MID_26051803) load scene blocks prompt %q: %w", p.PromptRef, p.PromptErr)
+	if p.MentionPromptErr != nil {
+		p.Logger.Error("prompt error", "prompt_name", p.MentionPromptRef, "error", p.MentionPromptErr)
+		return fmt.Errorf("(MID_26051803) load scene candidates prompt %q: %w", p.MentionPromptRef, p.MentionPromptErr)
+	}
+	if p.RelationPromptErr != nil {
+		p.Logger.Error("prompt error", "prompt_name", p.RelationPromptRef, "error", p.RelationPromptErr)
+		return fmt.Errorf("(MID_26051803) load scene blocks prompt %q: %w", p.RelationPromptRef, p.RelationPromptErr)
 	}
 	if p.InputStore == nil {
 		p.Logger.Error("input store is nil")
@@ -177,10 +233,16 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		p.Logger.Error("failed get record", "error", err)
 		return fmt.Errorf("(MID_26051806) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
-	if p.ModelErr != nil {
-		p.Logger.Warn("scene blocks extraction skipped: model config error",
-			"record_id", evt.RecordID, "model_ref", p.ModelRef, "error", p.ModelErr)
-		p.persistSceneBlocksStatus(ctx, rec, start, p.ModelErr)
+	if p.MentionModelErr != nil {
+		p.Logger.Warn("scene blocks extraction skipped: mention model config error",
+			"record_id", evt.RecordID, "model_ref", p.MentionModelRef, "error", p.MentionModelErr)
+		p.persistSceneBlocksStatus(ctx, rec, start, p.MentionModelErr)
+		return nil
+	}
+	if p.RelationModelErr != nil {
+		p.Logger.Warn("scene blocks extraction skipped: relation model config error",
+			"record_id", evt.RecordID, "model_ref", p.RelationModelRef, "error", p.RelationModelErr)
+		p.persistSceneBlocksStatus(ctx, rec, start, p.RelationModelErr)
 		return nil
 	}
 
@@ -224,64 +286,43 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		"record_id", evt.RecordID,
 	)
 
-	eventID := eventIDFromContext(ctx)
-	var allSceneBlocks []map[string]any
-	seqno := 1
-	for idx, chunk := range chunks {
-		chunkText := buildSceneBlocksChunkText(chunk)
-		p.Logger.Info("Begin generating scene",
-			"idx", idx,
-			"model name", p.ModelName,
-			"prompt name", p.PromptRef,
-			"chunk", chunkText)
-		payload, usedModelName, err := p.extractSceneBlocksWithFallback(ctx, chunkText)
-		if err != nil {
-			procErr := fmt.Errorf("(MID_26051809) extract scene blocks via llm for chunk %d: %w", chunk.SeqNo, err)
-			p.persistSceneBlocksStatus(ctx, rec, start, procErr)
-			p.Logger.Error("LLM failed",
-				"chunk seqno", chunk.SeqNo,
-				"error", err,
-				"model name", usedModelName,
-				"prompt name", p.PromptRef)
-			return nil
-		}
-		raw, _ := payload["scene_blocks"].([]any)
-		for block_idx, item := range raw {
-			block, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			objectID := fmt.Sprintf("%d_%d", evt.RecordID, seqno)
-			req := UpsertSceneObjectRequest{
-				InputRecordID: evt.RecordID,
-				ObjectID:      objectID,
-				EventID:       eventID,
-				SceneBlock:    block,
-				ModelName:     strings.TrimSpace(usedModelName),
-				PromptName:    strings.TrimSpace(p.PromptRef),
-				ExtInfo:       buildSceneBlockExtInfo(block),
-			}
-			if err := p.Store.UpsertSceneObject(ctx, req); err != nil {
-				procErr := fmt.Errorf("(MID_26051810) upsert scene object %s: %w", objectID, err)
-				p.persistSceneBlocksStatus(ctx, rec, start, procErr)
-				p.Logger.Error("failed updating db",
-					"error", err,
-					"seqno", chunk.SeqNo,
-					"block", block_idx,
-					"model name", usedModelName,
-					"prompt name", p.PromptRef)
-				return nil
-			}
-			block["object_id"] = objectID
-			allSceneBlocks = append(allSceneBlocks, block)
-			seqno++
-		}
-		p.Logger.Info("LLM responded",
-			"dx", idx,
-			"num blocks", len(raw))
+	result, err := p.extractSceneBlocksFromChunksWithLLM(ctx, chunks)
+	if err != nil {
+		p.persistSceneBlocksStatus(ctx, rec, start, err)
+		p.Logger.Error("scene blocks extraction failed", "record_id", evt.RecordID, "error", err)
+		return nil
 	}
 
-	if err := p.writeSceneBlocksArtifact(evt.RecordID, rec, allSceneBlocks); err != nil {
+	eventID := eventIDFromContext(ctx)
+	for idx := range result.SceneBlocks {
+		block := result.SceneBlocks[idx]
+		objectID := fmt.Sprintf("%d_%d", evt.RecordID, idx+1)
+		if strings.TrimSpace(asString(block["scene_id"])) == "" {
+			block["scene_id"] = objectID
+		}
+		req := UpsertSceneObjectRequest{
+			InputRecordID: evt.RecordID,
+			ObjectID:      objectID,
+			EventID:       eventID,
+			SceneBlock:    block,
+			ModelName:     strings.TrimSpace(result.ModelName),
+			PromptName:    strings.TrimSpace(p.RelationPromptRef),
+			ExtInfo:       buildSceneBlockExtInfo(block),
+		}
+		if err := p.Store.UpsertSceneObject(ctx, req); err != nil {
+			procErr := fmt.Errorf("(MID_26051810) upsert scene object %s: %w", objectID, err)
+			p.persistSceneBlocksStatus(ctx, rec, start, procErr)
+			p.Logger.Error("failed updating db",
+				"error", err,
+				"object_id", objectID,
+				"model name", result.ModelName,
+				"prompt name", p.RelationPromptRef)
+			return nil
+		}
+		block["object_id"] = objectID
+	}
+
+	if err := p.writeSceneBlocksArtifact(evt.RecordID, rec, result.SceneBlocks); err != nil {
 		p.Logger.Error("write scene blocks artifact error", "error", err, "record_id", evt.RecordID)
 		p.persistSceneBlocksStatus(ctx, rec, start, err)
 		return nil
@@ -289,10 +330,10 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 
 	p.Logger.Info("scene blocks extracted",
 		"record_id", evt.RecordID,
-		"scene_blocks_count", len(allSceneBlocks),
+		"scene_blocks_count", len(result.SceneBlocks),
 		"num_chunks", len(chunks),
-		"model_name", p.ModelName,
-		"prompt_name", p.PromptRef)
+		"model_name", result.ModelName,
+		"prompt_name", p.RelationPromptRef)
 
 	p.persistSceneBlocksStatus(ctx, rec, start, nil)
 	return nil
@@ -324,13 +365,89 @@ func buildSceneBlocksChunkText(chunk Chunk) string {
 	return buildMarkedChunkInputText(chunk.Lines)
 }
 
-func (p *SceneBlocksProcessor) extractSceneBlocksWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
-	payload, err := p.extractSceneBlocksWithModel(ctx, inputText, p.ModelName, p.ModelCfg)
-	if err == nil {
-		return payload, strings.TrimSpace(p.ModelName), nil
+func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(ctx context.Context, chunks []Chunk) (sceneExtractionResult, error) {
+	mentions := make([]sceneCandidateMention, 0, len(chunks))
+	usedMentionModel := strings.TrimSpace(p.MentionModelName)
+	for idx, chunk := range chunks {
+		startTime := time.Now()
+		p.Logger.Info("Start extracting scene candidates",
+			"idx", idx,
+			"total", len(chunks),
+			"model_name", p.MentionModelName,
+			"prompt_name", p.MentionPromptRef,
+		)
+		payload, modelName, err := p.extractScenePayloadWithFallback(ctx, buildSceneCandidateUserPrompt(chunk), p.MentionPromptText, p.MentionPromptRef, p.MentionModelName, p.MentionModelCfg)
+		if err != nil {
+			return sceneExtractionResult{}, fmt.Errorf("(MID_26051809) extract scene candidates via llm for chunk %d: %w", chunk.SeqNo, err)
+		}
+		usedMentionModel = strings.TrimSpace(modelName)
+		raw, _ := payload["candidates"].([]any)
+		mentions = append(mentions, normalizeSceneCandidateMentions(raw, chunk)...)
+		p.Logger.Info("LLM responded with scene candidates",
+			"candidates_so_far", len(mentions),
+			"model_name", modelName,
+			"prompt_name", p.MentionPromptRef,
+			"ms_used", time.Since(startTime).Milliseconds(),
+		)
 	}
 
-	primaryModelName := strings.TrimSpace(p.ModelName)
+	candidates := mergeSceneCandidateMentions(mentions)
+	p.Logger.Info("Merged scene candidates",
+		"mentions_count", len(mentions),
+		"candidate_count", len(candidates),
+		"record_stage", "post_merge",
+	)
+
+	sceneBlocks := make([]map[string]any, 0, len(candidates))
+	usedRelationModel := strings.TrimSpace(p.RelationModelName)
+	for idx, candidate := range candidates {
+		startTime := time.Now()
+		p.Logger.Info("Start enriching scene candidate",
+			"idx", idx,
+			"total", len(candidates),
+			"candidate_id", candidate.CandidateID,
+			"model_name", p.RelationModelName,
+			"prompt_name", p.RelationPromptRef,
+		)
+		payload, modelName, err := p.extractScenePayloadWithFallback(ctx, buildSceneRelationUserPrompt(candidate), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
+		if err != nil {
+			return sceneExtractionResult{}, fmt.Errorf("(MID_26051827) enrich scene blocks via llm for candidate %s: %w", candidate.CandidateID, err)
+		}
+		usedRelationModel = strings.TrimSpace(modelName)
+		raw, _ := payload["scene_blocks"].([]any)
+		normalized := normalizeSceneBlockList(raw, candidate)
+		sceneBlocks = append(sceneBlocks, normalized...)
+		p.Logger.Info("LLM responded with scene blocks",
+			"candidate_id", candidate.CandidateID,
+			"blocks_for_candidate", len(normalized),
+			"scene_blocks_so_far", len(sceneBlocks),
+			"model_name", modelName,
+			"prompt_name", p.RelationPromptRef,
+			"ms_used", time.Since(startTime).Milliseconds(),
+		)
+	}
+
+	preDedupeCount := len(sceneBlocks)
+	sceneBlocks = dedupeFinalSceneBlocks(sceneBlocks)
+	p.Logger.Info("Deduped final scene blocks",
+		"rows_before_dedup", preDedupeCount,
+		"rows_after_dedup", len(sceneBlocks),
+		"record_stage", "post_scene_dedup",
+	)
+
+	return sceneExtractionResult{
+		SceneBlocks: sceneBlocks,
+		ModelName:   firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
+	}, nil
+}
+
+func (p *SceneBlocksProcessor) extractScenePayloadWithFallback(ctx context.Context, inputText string, promptText string, promptRef string, modelName string, cfg structureModelConfig) (map[string]any, string, error) {
+	payload, err := p.extractScenePayload(ctx, inputText, promptText, modelName, cfg)
+	if err == nil {
+		return payload, strings.TrimSpace(modelName), nil
+	}
+
+	primaryModelName := strings.TrimSpace(modelName)
 	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
 	if fallbackModelName == "" {
 		return nil, primaryModelName, err
@@ -340,30 +457,30 @@ func (p *SceneBlocksProcessor) extractSceneBlocksWithFallback(ctx context.Contex
 	}
 
 	if isEmptySceneBlocksExtractionError(err) {
-		p.Logger.Warn("primary scene blocks extraction returned empty JSON; retrying fallback model",
+		p.Logger.Warn("primary scene extraction returned empty JSON; retrying fallback model",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
 			"error", err,
-			"prompt_name", p.PromptRef,
+			"prompt_name", promptRef,
 		)
 	} else {
-		p.Logger.Warn("primary scene blocks extraction failed; retrying fallback model",
+		p.Logger.Warn("primary scene extraction failed; retrying fallback model",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
 			"error", err,
-			"prompt_name", p.PromptRef,
+			"prompt_name", promptRef,
 		)
 	}
 
-	payload, fallbackErr := p.extractSceneBlocksWithModel(ctx, inputText, fallbackModelName, p.FallbackModelCfg)
+	payload, fallbackErr := p.extractScenePayload(ctx, inputText, promptText, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
 		if isEmptySceneBlocksExtractionError(fallbackErr) {
-			p.Logger.Warn("fallback scene blocks extraction returned empty JSON; treating as empty result",
+			p.Logger.Warn("fallback scene extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
-				"prompt_name", p.PromptRef,
+				"prompt_name", promptRef,
 			)
-			return map[string]any{"scene_blocks": []any{}}, fallbackModelName, nil
+			return map[string]any{"scene_blocks": []any{}, "candidates": []any{}}, fallbackModelName, nil
 		}
 		return nil, fallbackModelName, fmt.Errorf("(MID_26051826) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
@@ -371,12 +488,88 @@ func (p *SceneBlocksProcessor) extractSceneBlocksWithFallback(ctx context.Contex
 }
 
 func (p *SceneBlocksProcessor) extractSceneBlocksWithModel(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
+	return p.extractScenePayload(ctx, inputText, p.PromptText, modelName, cfg)
+}
+
+func (p *SceneBlocksProcessor) extractScenePayload(ctx context.Context, inputText string, promptText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	return p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptText: p.PromptText,
+	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
 	})
+	if err != nil {
+		return payload, err
+	}
+	payload = normalizeScenePayload(payload)
+	if len(payload) == 0 {
+		return nil, errors.New("(MID_26051828) empty llm json object")
+	}
+	if raw, ok := payload["candidates"]; ok {
+		items, ok := normalizeSceneItems(raw)
+		if !ok {
+			return nil, fmt.Errorf("(MID_26051829) llm output field 'candidates' must be an array, JSON:%v", payload)
+		}
+		payload["candidates"] = items
+		return payload, nil
+	}
+	if raw, ok := payload["scene_blocks"]; ok {
+		items, ok := normalizeSceneItems(raw)
+		if !ok {
+			return nil, fmt.Errorf("(MID_26051830) llm output field 'scene_blocks' must be an array, JSON:%v", payload)
+		}
+		payload["scene_blocks"] = items
+		return payload, nil
+	}
+	return nil, fmt.Errorf("(MID_26051831) llm output must contain 'scene_blocks' or 'candidates', JSON:%v", payload)
+}
+
+func normalizeScenePayload(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return payload
+	}
+	if _, ok := payload["scene_blocks"]; ok {
+		return payload
+	}
+	if _, ok := payload["candidates"]; ok {
+		return payload
+	}
+	if looksLikeSceneBlockRecord(payload) {
+		return map[string]any{"scene_blocks": []any{payload}}
+	}
+	if looksLikeSceneCandidateRecord(payload) {
+		return map[string]any{"candidates": []any{payload}}
+	}
+	return payload
+}
+
+func normalizeSceneItems(value any) ([]any, bool) {
+	switch v := value.(type) {
+	case []any:
+		return v, true
+	case map[string]any:
+		return []any{v}, true
+	default:
+		return nil, false
+	}
+}
+
+func looksLikeSceneBlockRecord(payload map[string]any) bool {
+	for _, key := range []string{"scene_id", "scene_type", "title", "summary"} {
+		if strings.TrimSpace(asString(payload[key])) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeSceneCandidateRecord(payload map[string]any) bool {
+	for _, key := range []string{"scene_key", "scene_type_hint", "title", "summary_hint"} {
+		if strings.TrimSpace(asString(payload[key])) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func isEmptySceneBlocksExtractionError(err error) bool {
@@ -389,6 +582,304 @@ func isEmptySceneBlocksExtractionError(err error) bool {
 	}
 	return strings.Contains(msg, "unexpected end of JSON input") &&
 		strings.Contains(msg, "json:{[]}")
+}
+
+func buildSceneCandidateUserPrompt(chunk Chunk) string {
+	schema := map[string]any{
+		"candidates": []map[string]any{{
+			"scene_key":         "stable_snake_case_identifier",
+			"scene_type_hint":   "workflow|operation|failure|decision|monitoring|compliance|state_transition|interaction|other",
+			"title":             "human readable title",
+			"summary_hint":      "one sentence description of the scene",
+			"evidence_quote":    "short supporting quote",
+			"line_spans":        []string{"12", "13-15"},
+			"confidence":        0.0,
+			"confidence_reason": "brief reason",
+		}},
+	}
+	lines := make([]string, 0, len(chunk.Lines))
+	for _, line := range chunk.Lines {
+		lines = append(lines, formatMarkedChunkLine(line.Line, line.Mark))
+	}
+	linesJSON, _ := json.Marshal(lines)
+	schemaJSON, _ := json.Marshal(schema)
+	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nChunk index: " + strconv.Itoa(chunk.SeqNo) +
+		"\n\nInput chunk lines (plain):\n" + strings.Join(lines, "\n") +
+		"\n\nInput chunk lines (raw, JSON array):\n" + string(linesJSON)
+}
+
+func buildSceneRelationUserPrompt(candidate sceneCandidate) string {
+	lines := make([]string, 0, len(candidate.SupportLines))
+	for _, line := range candidate.SupportLines {
+		lines = append(lines, formatMarkedChunkLine(line.Line, line.Mark))
+	}
+	linesJSON, _ := json.Marshal(lines)
+	candidateJSON, _ := json.Marshal(map[string]any{
+		"candidate_id":        candidate.CandidateID,
+		"scene_key":           candidate.SceneKey,
+		"scene_type_hint":     candidate.SceneTypeHint,
+		"title":               candidate.Title,
+		"summary_hint":        candidate.SummaryHint,
+		"supporting_mentions": candidate.SupportingMentions,
+	})
+	return "Return JSON only.\n\nCandidate:\n" + string(candidateJSON) +
+		"\n\nSource lines (plain):\n" + strings.Join(lines, "\n") +
+		"\n\nSource lines (raw, JSON array):\n" + string(linesJSON)
+}
+
+func normalizeSceneCandidateMentions(items []any, chunk Chunk) []sceneCandidateMention {
+	out := make([]sceneCandidateMention, 0, len(items))
+	for _, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		lineSpans := normalizeProductEvidenceLines(raw["line_spans"])
+		evidenceQuote := strings.TrimSpace(asString(raw["evidence_quote"]))
+		out = append(out, sceneCandidateMention{
+			SceneKey:          strings.TrimSpace(asString(raw["scene_key"])),
+			SceneTypeHint:     strings.TrimSpace(asString(raw["scene_type_hint"])),
+			Title:             strings.TrimSpace(asString(raw["title"])),
+			SummaryHint:       strings.TrimSpace(asString(raw["summary_hint"])),
+			EvidenceQuote:     evidenceQuote,
+			LineSpans:         lineSpans,
+			Confidence:        toFloat(raw["confidence"]),
+			ConfidenceReason:  strings.TrimSpace(asString(raw["confidence_reason"])),
+			ChunkIndex:        chunk.SeqNo,
+			ChunkLines:        append([]MarkedLine(nil), chunk.Lines...),
+			HasNormalEvidence: sceneCandidateHasNormalEvidence(chunk, lineSpans, evidenceQuote),
+		})
+	}
+	return out
+}
+
+func sceneCandidateHasNormalEvidence(chunk Chunk, spans []string, quote string) bool {
+	lineNums := make(map[int]struct{})
+	for _, span := range spans {
+		start, end, ok := parseCompactLineSpan(span)
+		if !ok {
+			continue
+		}
+		for i := start; i <= end; i++ {
+			lineNums[i] = struct{}{}
+		}
+	}
+	for _, line := range chunk.Lines {
+		if line.Mark == "o" {
+			continue
+		}
+		if len(lineNums) == 0 {
+			if quote == "" || strings.Contains(strings.ToLower(line.Line.Content), strings.ToLower(quote)) {
+				return true
+			}
+			continue
+		}
+		if _, ok := lineNums[line.Line.LineNo]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeSceneCandidateMentions(mentions []sceneCandidateMention) []sceneCandidate {
+	type bucket struct {
+		mentions []sceneCandidateMention
+	}
+	grouped := map[string]*bucket{}
+	order := make([]string, 0, len(mentions))
+	for _, mention := range mentions {
+		key := normalizedSceneCandidateKey(mention.SceneKey, mention.Title, mention.SummaryHint)
+		if key == "" {
+			continue
+		}
+		if grouped[key] == nil {
+			grouped[key] = &bucket{}
+			order = append(order, key)
+		}
+		grouped[key].mentions = append(grouped[key].mentions, mention)
+	}
+
+	out := make([]sceneCandidate, 0, len(order))
+	for _, key := range order {
+		b := grouped[key]
+		if b == nil || len(b.mentions) == 0 {
+			continue
+		}
+		hasNormal := false
+		for _, mention := range b.mentions {
+			if mention.HasNormalEvidence {
+				hasNormal = true
+				break
+			}
+		}
+		if !hasNormal {
+			continue
+		}
+
+		supportMentions := make([]map[string]any, 0, len(b.mentions))
+		lineMap := map[string]MarkedLine{}
+		sceneKey := ""
+		title := ""
+		summaryHint := ""
+		sceneType := "other"
+		typeCounts := map[string]int{}
+		for _, mention := range b.mentions {
+			sceneKey = firstNonEmptyTrimmed(sceneKey, mention.SceneKey)
+			title = firstNonEmptyTrimmed(title, mention.Title)
+			summaryHint = firstNonEmptyTrimmed(summaryHint, mention.SummaryHint)
+			if t := strings.TrimSpace(mention.SceneTypeHint); t != "" {
+				typeCounts[t]++
+			}
+			supportMentions = append(supportMentions, map[string]any{
+				"scene_key":         mention.SceneKey,
+				"title":             mention.Title,
+				"summary_hint":      mention.SummaryHint,
+				"evidence_quote":    mention.EvidenceQuote,
+				"line_spans":        mention.LineSpans,
+				"confidence":        mention.Confidence,
+				"confidence_reason": mention.ConfidenceReason,
+			})
+			for _, line := range mention.ChunkLines {
+				lineKey := fmt.Sprintf("%d:%d:%s", line.Line.PageNo, line.Line.LineNo, line.Line.Content)
+				existing, exists := lineMap[lineKey]
+				if !exists || (existing.Mark == "o" && line.Mark != "o") {
+					lineMap[lineKey] = line
+				}
+			}
+		}
+		for candidateType, count := range typeCounts {
+			if count > typeCounts[sceneType] {
+				sceneType = candidateType
+			}
+		}
+		if sceneKey == "" {
+			sceneKey = normalizedSceneCandidateKey("", title, summaryHint)
+		}
+		if sceneType == "" {
+			sceneType = "other"
+		}
+		supportLines := make([]MarkedLine, 0, len(lineMap))
+		for _, line := range lineMap {
+			supportLines = append(supportLines, line)
+		}
+		sort.Slice(supportLines, func(i, j int) bool {
+			if supportLines[i].Line.PageNo != supportLines[j].Line.PageNo {
+				return supportLines[i].Line.PageNo < supportLines[j].Line.PageNo
+			}
+			if supportLines[i].Line.LineNo != supportLines[j].Line.LineNo {
+				return supportLines[i].Line.LineNo < supportLines[j].Line.LineNo
+			}
+			return supportLines[i].Mark < supportLines[j].Mark
+		})
+		out = append(out, sceneCandidate{
+			CandidateID:        fmt.Sprintf("scene_cand_%d", len(out)+1),
+			SceneKey:           sceneKey,
+			SceneTypeHint:      sceneType,
+			Title:              title,
+			SummaryHint:        summaryHint,
+			SupportingMentions: supportMentions,
+			SupportLines:       supportLines,
+		})
+	}
+	return out
+}
+
+func normalizedSceneCandidateKey(sceneKey string, title string, summaryHint string) string {
+	base := firstNonEmptyTrimmed(sceneKey, title, summaryHint)
+	base = strings.ToLower(strings.TrimSpace(base))
+	base = strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsLetter(r):
+			return unicode.ToLower(r)
+		case unicode.IsNumber(r):
+			return r
+		case r == '_':
+			return r
+		case unicode.IsSpace(r):
+			return r
+		default:
+			return ' '
+		}
+	}, base)
+	return strings.Join(strings.Fields(base), " ")
+}
+
+func normalizeSceneBlockList(items []any, candidate sceneCandidate) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		block := map[string]any{}
+		for k, v := range raw {
+			block[k] = v
+		}
+		if strings.TrimSpace(asString(block["scene_id"])) == "" {
+			block["scene_id"] = candidate.SceneKey
+		}
+		if strings.TrimSpace(asString(block["scene_type"])) == "" {
+			block["scene_type"] = candidate.SceneTypeHint
+		}
+		if strings.TrimSpace(asString(block["title"])) == "" {
+			block["title"] = candidate.Title
+		}
+		if strings.TrimSpace(asString(block["summary"])) == "" {
+			block["summary"] = candidate.SummaryHint
+		}
+		if len(normalizeProductEvidenceLines(block["line_spans"])) == 0 {
+			block["line_spans"] = flattenCandidateLineSpans(candidate.SupportingMentions)
+		}
+		out = append(out, block)
+	}
+	return out
+}
+
+func flattenCandidateLineSpans(mentions []map[string]any) []string {
+	out := make([]string, 0, len(mentions))
+	for _, mention := range mentions {
+		for _, span := range normalizeProductEvidenceLines(mention["line_spans"]) {
+			out = appendUniqueString(out, span)
+		}
+	}
+	return out
+}
+
+func dedupeFinalSceneBlocks(sceneBlocks []map[string]any) []map[string]any {
+	grouped := map[string]map[string]any{}
+	order := make([]string, 0, len(sceneBlocks))
+	for _, block := range sceneBlocks {
+		key := strings.Join([]string{
+			normalizedSceneCandidateKey(asString(block["scene_id"]), asString(block["title"]), asString(block["summary"])),
+			strings.ToLower(strings.TrimSpace(asString(block["scene_type"]))),
+		}, "|")
+		if existing, ok := grouped[key]; ok {
+			mergedSpans := normalizeProductEvidenceLines(existing["line_spans"])
+			for _, span := range normalizeProductEvidenceLines(block["line_spans"]) {
+				mergedSpans = appendUniqueString(mergedSpans, span)
+			}
+			existing["line_spans"] = mergedSpans
+			if toFloat(block["confidence"]) > toFloat(existing["confidence"]) {
+				existing["confidence"] = block["confidence"]
+			}
+			if strings.TrimSpace(asString(existing["summary"])) == "" {
+				existing["summary"] = block["summary"]
+			}
+			continue
+		}
+		cloned := map[string]any{}
+		for k, v := range block {
+			cloned[k] = v
+		}
+		grouped[key] = cloned
+		order = append(order, key)
+	}
+	out := make([]map[string]any, 0, len(order))
+	for _, key := range order {
+		out = append(out, grouped[key])
+	}
+	return out
 }
 
 func (p *SceneBlocksProcessor) writeSceneBlocksArtifact(recordID int64, rec DocMetadataInputRecord, sceneBlocks []map[string]any) error {
@@ -542,9 +1033,18 @@ func appendSceneBlocksStatus(raw string, p sceneBlocksStatusParams) (string, err
 }
 
 func loadSceneBlocksPromptFromEnv() (promptText string, promptRef string, promptErr error) {
-	promptRef = strings.TrimSpace(os.Getenv("EXTRACT_SCENE_BLOCKS_PROMPT"))
+	return loadScenePromptFromEnvKeys([]string{"ENRICH_SCENE_BLOCKS_PROMPT", "EXTRACT_SCENE_BLOCKS_PROMPT"}, "prompt-enrich-scene-blocks-v1.md")
+}
+
+func loadScenePromptFromEnvKeys(envKeys []string, defaultRef string) (promptText string, promptRef string, promptErr error) {
+	for _, key := range envKeys {
+		promptRef = strings.TrimSpace(os.Getenv(key))
+		if promptRef != "" {
+			break
+		}
+	}
 	if promptRef == "" {
-		promptRef = "prompt-generate-scene-blocks-v2.md"
+		promptRef = defaultRef
 	}
 
 	paths := make([]string, 0, 8)

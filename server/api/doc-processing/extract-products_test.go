@@ -342,13 +342,13 @@ timeout_sec = 100
 		t.Fatalf("write models file: %v", err)
 	}
 
-	t.Setenv("EXTRACT_PRODUCT_MODELS_FILE", modelsPath)
+	t.Setenv("MODEL_CONFIG_FILE", modelsPath)
 	t.Setenv("EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "gpt-5-4-mini-products-mentions")
 	t.Setenv("EXTRACT_PRODUCT_MODEL_NAME", "gpt-5-4-mini-products-relations")
 
 	ref, gotPath, cfg, err := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"EXTRACT_PRODUCT_MODELS_FILE",
+		"MODEL_CONFIG_FILE",
 	)
 	if err != nil {
 		t.Fatalf("loadModelConfigFromEnvKeys: %v", err)
