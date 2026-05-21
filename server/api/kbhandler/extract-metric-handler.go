@@ -694,7 +694,7 @@ func loadExtractMetricsModelConfig() (modelRef string, modelPath string, cfg Api
 		return "", "", ApiTypes.LLMModelDef{}, nil
 	}
 
-	modelPath, err = resolveModelsFilePathForKBHandler("EXTRACT_METRICS_MODELS_FILE")
+	modelPath, err = resolveModelsFilePathForKBHandler("MODEL_CONFIG_FILE")
 	if err != nil {
 		return modelRef, "", ApiTypes.LLMModelDef{}, err
 	}

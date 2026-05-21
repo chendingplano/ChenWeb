@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,21 +20,44 @@ import (
 )
 
 type MetricsProcessor struct {
-	InputStore      DocMetadataStore
-	Store           MetricsStore
-	Extractor       LLMJSONExtractor
-	Logger          ApiTypes.JimoLogger
-	Now             func() time.Time
-	PromptText      string
-	PromptRef       string
-	PromptPath      string
-	PromptErr       error
-	ModelRef        string
-	ModelCfgPath    string
-	ModelErr        error
-	ModelName       string
-	ChunkDir        string
-	ArtifactWebDir  string
+	InputStore                  DocMetadataStore
+	Store                       MetricsStore
+	Extractor                   LLMJSONExtractor
+	Logger                      ApiTypes.JimoLogger
+	Now                         func() time.Time
+	MentionPromptText           string
+	MentionPromptRef            string
+	MentionPromptPath           string
+	MentionPromptErr            error
+	MentionModelRef             string
+	MentionModelCfgPath         string
+	MentionModelErr             error
+	MentionModelName            string
+	MentionModelCfg             structureModelConfig
+	FallbackMentionModelRef     string
+	FallbackMentionModelCfgPath string
+	FallbackMentionModelErr     error
+	FallbackMentionModelName    string
+	FallbackMentionModelCfg     structureModelConfig
+	RelationPromptText          string
+	RelationPromptRef           string
+	RelationPromptPath          string
+	RelationPromptErr           error
+	RelationModelRef            string
+	RelationModelCfgPath        string
+	RelationModelErr            error
+	RelationModelName           string
+	RelationModelCfg            structureModelConfig
+	PromptText                  string
+	PromptRef                   string
+	PromptPath                  string
+	PromptErr                   error
+	ModelRef                    string
+	ModelCfgPath                string
+	ModelErr                    error
+	ModelName                   string
+	ChunkDir                    string
+	ArtifactWebDir              string
 }
 
 type MetricsStore interface {
@@ -55,35 +79,111 @@ type SaveMetricsRequest struct {
 	Metrics       []map[string]any
 }
 
+type metricExtractionResult struct {
+	Language         string
+	Metrics          []map[string]any
+	UncertainMetrics []map[string]any
+	ModelName        string
+}
+
+type metricCandidateMention struct {
+	MetricNameHint    string
+	SubjectHint       string
+	EvidenceQuote     string
+	SourceLineSpans   []string
+	UnitHint          string
+	ValueHint         string
+	Confidence        float64
+	ConfidenceReason  string
+	ChunkIndex        int
+	BlockLines        []BlockLine
+	HasNormalEvidence bool
+}
+
+type metricCandidate struct {
+	CandidateID        string
+	MetricNameHint     string
+	SubjectHint        string
+	UnitHint           string
+	ValueHint          string
+	SupportingMentions []map[string]any
+	SupportLines       []BlockLine
+}
+
 func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *MetricsProcessor {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26042470")
 	}
-	promptText, promptRef, promptPath, promptErr := loadMetricsPromptFromEnv()
-	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODELS_FILE")
-	applyStructureModelConfigToExtractor(extractor, modelCfg)
-	return &MetricsProcessor{
-		InputStore:   inputStore,
-		Store:        store,
-		Extractor:    extractor,
-		Logger:       logger,
-		Now:          time.Now,
-		PromptText:   promptText,
-		PromptRef:    promptRef,
-		PromptPath:   promptPath,
-		PromptErr:    promptErr,
-		ModelRef:     modelRef,
-		ModelCfgPath: modelCfgPath,
-		ModelErr:     modelErr,
-		ModelName:    modelCfg.ModelName,
-		ChunkDir:       strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		ArtifactWebDir: strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
+	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
+		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
+		"prompt-extract-metric-candidates-v1.md",
+	)
+	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
+		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
+		"prompt-enrich-metrics-v1.md",
+	)
+	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
+		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
+		"MODEL_CONFIG_FILE",
+	)
+	fallbackMentionModelRef, fallbackMentionModelCfgPath, fallbackMentionModelCfg, fallbackMentionModelErr := loadOptionalModelConfigFromEnv(
+		"EXTRACT_METRIC_CANDIDATES_MODEL_FALLBACK",
+		"MODEL_CONFIG_FILE",
+	)
+	relationModelRef, relationModelCfgPath, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
+		[]string{"ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
+		"MODEL_CONFIG_FILE",
+	)
+	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
+	p := &MetricsProcessor{
+		InputStore:                  inputStore,
+		Store:                       store,
+		Extractor:                   extractor,
+		Logger:                      logger,
+		Now:                         time.Now,
+		MentionPromptText:           mentionPromptText,
+		MentionPromptRef:            mentionPromptRef,
+		MentionPromptPath:           mentionPromptPath,
+		MentionPromptErr:            mentionPromptErr,
+		MentionModelRef:             mentionModelRef,
+		MentionModelCfgPath:         mentionModelCfgPath,
+		MentionModelErr:             mentionModelErr,
+		MentionModelName:            mentionModelCfg.ModelName,
+		MentionModelCfg:             mentionModelCfg,
+		FallbackMentionModelRef:     fallbackMentionModelRef,
+		FallbackMentionModelCfgPath: fallbackMentionModelCfgPath,
+		FallbackMentionModelErr:     fallbackMentionModelErr,
+		FallbackMentionModelName:    fallbackMentionModelCfg.ModelName,
+		FallbackMentionModelCfg:     fallbackMentionModelCfg,
+		RelationPromptText:          relationPromptText,
+		RelationPromptRef:           relationPromptRef,
+		RelationPromptPath:          relationPromptPath,
+		RelationPromptErr:           relationPromptErr,
+		RelationModelRef:            relationModelRef,
+		RelationModelCfgPath:        relationModelCfgPath,
+		RelationModelErr:            relationModelErr,
+		RelationModelName:           relationModelCfg.ModelName,
+		RelationModelCfg:            relationModelCfg,
+		PromptText:                  relationPromptText,
+		PromptRef:                   relationPromptRef,
+		PromptPath:                  relationPromptPath,
+		PromptErr:                   relationPromptErr,
+		ModelRef:                    relationModelRef,
+		ModelCfgPath:                relationModelCfgPath,
+		ModelErr:                    relationModelErr,
+		ModelName:                   relationModelCfg.ModelName,
+		ChunkDir:                    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		ArtifactWebDir:              strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 	}
+	p.forceDisableThinking()
+	applyStructureModelConfigToExtractor(extractor, p.RelationModelCfg)
+	return p
 }
 
 func (p *MetricsProcessor) Name() string { return "extract_metrics" }
 
 func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) error {
+	p.forceDisableThinking()
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
@@ -94,9 +194,13 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.Logger.Warn("processor skipped")
 		return nil
 	}
-	if p.PromptErr != nil {
-		p.Logger.Error("prompt error", "error", p.PromptErr)
-		return fmt.Errorf("(MID_26042458) load metrics prompt %q: %w", p.PromptRef, p.PromptErr)
+	if p.MentionPromptErr != nil {
+		p.Logger.Error("prompt error", "error", p.MentionPromptErr)
+		return fmt.Errorf("(MID_26042458) load metric candidates prompt %q: %w", p.MentionPromptRef, p.MentionPromptErr)
+	}
+	if p.RelationPromptErr != nil {
+		p.Logger.Error("prompt error", "error", p.RelationPromptErr)
+		return fmt.Errorf("(MID_26042458) load metrics prompt %q: %w", p.RelationPromptRef, p.RelationPromptErr)
 	}
 
 	rec, err := p.InputStore.GetInputRecord(ctx, evt.RecordID)
@@ -108,10 +212,16 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.Logger.Error("retrieve record failed", "record_id", evt.RecordID, "error", err)
 		return fmt.Errorf("(MID_26042459) load kb.inputs record %d: %w", evt.RecordID, err)
 	}
-	if p.ModelErr != nil {
-		p.Logger.Warn("metrics extraction skipped: model config error",
-			"record_id", evt.RecordID, "model_ref", p.ModelRef, "error", p.ModelErr)
-		p.persistMetricsStatus(ctx, rec, start, p.ModelErr)
+	if p.MentionModelErr != nil {
+		p.Logger.Warn("metrics extraction skipped: mention model config error",
+			"record_id", evt.RecordID, "model_ref", p.MentionModelRef, "error", p.MentionModelErr)
+		p.persistMetricsStatus(ctx, rec, start, p.MentionModelErr)
+		return nil
+	}
+	if p.RelationModelErr != nil {
+		p.Logger.Warn("metrics extraction skipped: relation model config error",
+			"record_id", evt.RecordID, "model_ref", p.RelationModelRef, "error", p.RelationModelErr)
+		p.persistMetricsStatus(ctx, rec, start, p.RelationModelErr)
 		return nil
 	}
 
@@ -162,25 +272,13 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return nil
 	}
 
-	var allMetrics []map[string]any
-	var detectedLanguage string
-	var totalUncertain int
-	for _, block := range buf.Blocks {
-		lines := make([]string, len(block.Lines))
-		for i, bl := range block.Lines {
-			lines[i] = bl.String()
-		}
-		result, err := p.extractMetricsFromLinesWithLLM(ctx, lines)
-		if err != nil {
-			p.persistMetricsStatus(ctx, rec, start, err)
-			return fmt.Errorf("(MID_26050701) extractMetrics failed for block %d, error:%w", block.Index, err)
-		}
-		if detectedLanguage == "" || detectedLanguage == "unknown" {
-			detectedLanguage = result.Language
-		}
-		allMetrics = append(allMetrics, result.Metrics...)
-		totalUncertain += len(result.UncertainMetrics)
+	result, err := p.extractMetricsFromBlocksWithLLM(ctx, buf.Blocks)
+	if err != nil {
+		p.persistMetricsStatus(ctx, rec, start, err)
+		return fmt.Errorf("(MID_26050701) extractMetrics failed, error:%w", err)
 	}
+	allMetrics := result.Metrics
+	detectedLanguage := result.Language
 	if detectedLanguage == "" {
 		detectedLanguage = "unknown"
 	}
@@ -194,8 +292,8 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		InputRecordID: evt.RecordID,
 		EventID:       eventIDFromContext(ctx),
 		Language:      detectedLanguage,
-		ModelName:     p.ModelName,
-		PromptName:    p.PromptRef,
+		ModelName:     firstNonEmptyTrimmed(result.ModelName, p.ModelName),
+		PromptName:    p.RelationPromptRef,
 		Metrics:       allMetrics,
 	})
 	if err != nil {
@@ -215,11 +313,22 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		"record_id", evt.RecordID,
 		"inserted_rows", inserted,
 		"metrics_count", len(allMetrics),
-		"uncertain_metrics_count", totalUncertain,
+		"uncertain_metrics_count", len(result.UncertainMetrics),
 		"num_blocks", len(buf.Blocks),
 	)
 	p.persistMetricsStatus(ctx, rec, start, nil)
 	return nil
+}
+
+func forceDisableThinking(cfg structureModelConfig) structureModelConfig {
+	cfg.ThinkingType = "disabled"
+	return cfg
+}
+
+func (p *MetricsProcessor) forceDisableThinking() {
+	p.MentionModelCfg = forceDisableThinking(p.MentionModelCfg)
+	p.FallbackMentionModelCfg = forceDisableThinking(p.FallbackMentionModelCfg)
+	p.RelationModelCfg = forceDisableThinking(p.RelationModelCfg)
 }
 
 func (p *MetricsProcessor) saveMetricsToFile(recordID int64, rec DocMetadataInputRecord, metrics []map[string]any) error {
@@ -343,48 +452,105 @@ func appendMetricsStatus(raw string, p metricsStatusParams) (string, error) {
 	return string(bs), nil
 }
 
-type metricExtractionResult struct {
-	Language         string
-	Metrics          []map[string]any
-	UncertainMetrics []map[string]any
-}
-
+/*
 func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, lines []string) (metricExtractionResult, error) {
 	parsedLines := parseMetricInputLines(lines)
-	userPrompt := buildMetricUserPrompt(lines, parsedLines)
+	blockLines := make([]BlockLine, 0, len(parsedLines))
+	for _, line := range parsedLines {
+		blockLines = append(blockLines, BlockLine{
+			Flag:       line.Flag,
+			LineNumber: line.LineNumber,
+			PageNumber: line.PageNumber,
+			LineType:   line.LineType,
+			Content:    line.Content,
+		})
+	}
+	return p.extractMetricsFromBlocksWithLLM(ctx, []Block{{Index: 1, Lines: blockLines}})
+}
+*/
 
-	p.Logger.Info("Ready to extract metrics",
-		"input", parsedLines,
-		"model name", p.ModelName,
-		"num_lines", len(lines),
-		"prompt", p.PromptRef)
-
-	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptText: p.PromptText,
-		ModelName:  p.ModelName,
-		InputText:  userPrompt,
-	})
-	if err != nil {
-		return metricExtractionResult{}, fmt.Errorf("(MID_26042451) extract metrics via llm: %w", err)
+func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(ctx context.Context, blocks []Block) (metricExtractionResult, error) {
+	mentions := make([]metricCandidateMention, 0, len(blocks))
+	usedMentionModel := strings.TrimSpace(p.MentionModelName)
+	detectedLanguage := "unknown"
+	for _, block := range blocks {
+		lines := make([]string, len(block.Lines))
+		for i, bl := range block.Lines {
+			lines[i] = bl.String()
+		}
+		parsedLines := parseMetricInputLines(lines)
+		userPrompt := buildMetricCandidateUserPrompt(lines, parsedLines)
+		p.Logger.Info("Ready to extract metric candidates",
+			"model name", p.MentionModelName,
+			"num_lines", len(lines),
+			"prompt", p.MentionPromptRef)
+		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, userPrompt)
+		if err != nil {
+			return metricExtractionResult{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
+		}
+		if language := strings.TrimSpace(asString(payload["language"])); language != "" && detectedLanguage == "unknown" {
+			detectedLanguage = language
+		}
+		usedMentionModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedMentionModel, p.MentionModelName))
+		raw, _ := payload["candidates"].([]any)
+		mentions = append(mentions, normalizeMetricCandidateMentions(raw, block)...)
 	}
 
-	language := strings.TrimSpace(asString(payload["language"]))
-	if language == "" {
-		language = "unknown"
+	candidates := mergeMetricMentionCandidates(mentions)
+	p.Logger.Info("Merged metric candidates",
+		"mentions_count", len(mentions),
+		"candidate_count", len(candidates),
+		"record_stage", "post_merge",
+	)
+	metrics := make([]map[string]any, 0, len(candidates))
+	uncertain := make([]map[string]any, 0)
+	usedRelationModel := strings.TrimSpace(p.RelationModelName)
+	for idx, candidate := range candidates {
+		p.Logger.Info("Start enriching metric candidate",
+			"idx", idx,
+			"total", len(candidates),
+			"candidate_id", candidate.CandidateID,
+			"model_name", p.RelationModelName,
+			"prompt_name", p.RelationPromptRef,
+		)
+		payload, err := p.extractMetricPayload(ctx, buildMetricRelationUserPrompt(candidate), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg)
+		if err != nil {
+			return metricExtractionResult{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w", err)
+		}
+		if language := strings.TrimSpace(asString(payload["language"])); language != "" && detectedLanguage == "unknown" {
+			detectedLanguage = language
+		}
+		usedRelationModel = strings.TrimSpace(firstNonEmptyTrimmed(usedRelationModel, p.RelationModelName))
+		metricsRaw, _ := payload["metrics"].([]any)
+		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
+		metrics = append(metrics, normalizeMetricList(metricsRaw)...)
+		uncertain = append(uncertain, normalizeMetricList(uncertainRaw)...)
+		p.Logger.Info("LLM responded with enriched metrics",
+			"candidate_id", candidate.CandidateID,
+			"metrics_so_far", len(metrics),
+			"uncertain_metrics_so_far", len(uncertain),
+			"model_name", p.RelationModelName,
+			"prompt_name", p.RelationPromptRef,
+		)
 	}
 
-	metricsRaw, ok := payload["metrics"].([]any)
-	if !ok {
-		return metricExtractionResult{}, fmt.Errorf("(MID_26042452) llm output field 'metrics' must be an array")
-	}
-	uncertainRaw, _ := payload["uncertain_metrics"].([]any)
+	preDedupeMetrics := len(metrics)
+	preDedupeUncertain := len(uncertain)
+	metrics = dedupeFinalMetricRows(metrics)
+	uncertain = dedupeFinalMetricRows(uncertain)
+	p.Logger.Info("Deduped final metric rows",
+		"metrics_before_dedup", preDedupeMetrics,
+		"metrics_after_dedup", len(metrics),
+		"uncertain_before_dedup", preDedupeUncertain,
+		"uncertain_after_dedup", len(uncertain),
+		"record_stage", "post_metric_dedup",
+	)
 
-	metrics := normalizeMetricList(metricsRaw)
-	uncertain := normalizeMetricList(uncertainRaw)
 	return metricExtractionResult{
-		Language:         language,
+		Language:         detectedLanguage,
 		Metrics:          metrics,
 		UncertainMetrics: uncertain,
+		ModelName:        firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
 	}, nil
 }
 
@@ -442,6 +608,30 @@ func parseMetricInputLines(lines []string) []metricParsedLine {
 	return parsedLines
 }
 
+func buildMetricCandidateUserPrompt(lines []string, parsedLines []metricParsedLine) string {
+	schema := map[string]any{
+		"language": "string",
+		"candidates": []map[string]any{{
+			"metric_name_hint":  "string",
+			"subject_hint":      "string",
+			"evidence_quote":    "string",
+			"source_line_spans": []string{"5", "12:14"},
+			"unit_hint":         "string",
+			"value_hint":        "string",
+			"confidence":        0.0,
+			"confidence_reason": "string",
+		}},
+	}
+
+	linesJSON, _ := json.Marshal(lines)
+	parsedLinesJSON, _ := json.Marshal(parsedLines)
+	schemaJSON, _ := json.Marshal(schema)
+	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nInput lines (raw, JSON array):\n" + string(linesJSON) +
+		"\n\nParsed line hints (best effort; do not treat as complete):\n" + string(parsedLinesJSON)
+}
+
+/*
 func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) string {
 	schema := map[string]any{
 		"language": "string",
@@ -501,6 +691,26 @@ func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) strin
 		"\n\nInput lines (raw, JSON array):\n" + string(linesJSON) +
 		"\n\nParsed line hints (best effort; do not treat as complete):\n" + string(parsedLinesJSON)
 }
+*/
+
+func buildMetricRelationUserPrompt(candidate metricCandidate) string {
+	lines := make([]string, 0, len(candidate.SupportLines))
+	for _, line := range candidate.SupportLines {
+		lines = append(lines, line.String())
+	}
+	linesJSON, _ := json.Marshal(lines)
+	candidateJSON, _ := json.Marshal(map[string]any{
+		"candidate_id":        candidate.CandidateID,
+		"metric_name_hint":    candidate.MetricNameHint,
+		"subject_hint":        candidate.SubjectHint,
+		"unit_hint":           candidate.UnitHint,
+		"value_hint":          candidate.ValueHint,
+		"supporting_mentions": candidate.SupportingMentions,
+	})
+	return "Return JSON only.\n\nCandidate:\n" + string(candidateJSON) +
+		"\n\nSource lines (plain):\n" + strings.Join(lines, "\n") +
+		"\n\nSource lines (raw, JSON array):\n" + string(linesJSON)
+}
 
 func normalizeMetricList(items []any) []map[string]any {
 	out := make([]map[string]any, 0, len(items))
@@ -545,6 +755,220 @@ func normalizeMetricList(items []any) []map[string]any {
 		}
 		normalized["category_paths_en"] = catPathsEn
 		out = append(out, normalized)
+	}
+	return out
+}
+
+func normalizeMetricCandidateMentions(items []any, block Block) []metricCandidateMention {
+	out := make([]metricCandidateMention, 0, len(items))
+	for _, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		spans := normalizeSourceLineSpans(raw["source_line_spans"])
+		quote := strings.TrimSpace(asString(raw["evidence_quote"]))
+		out = append(out, metricCandidateMention{
+			MetricNameHint:    strings.TrimSpace(asString(raw["metric_name_hint"])),
+			SubjectHint:       strings.TrimSpace(asString(raw["subject_hint"])),
+			EvidenceQuote:     quote,
+			SourceLineSpans:   spans,
+			UnitHint:          strings.TrimSpace(asString(raw["unit_hint"])),
+			ValueHint:         strings.TrimSpace(asString(raw["value_hint"])),
+			Confidence:        toFloat(raw["confidence"]),
+			ConfidenceReason:  strings.TrimSpace(asString(raw["confidence_reason"])),
+			ChunkIndex:        block.Index,
+			BlockLines:        append([]BlockLine(nil), block.Lines...),
+			HasNormalEvidence: metricCandidateHasNormalEvidence(block, spans, quote),
+		})
+	}
+	return out
+}
+
+func metricCandidateHasNormalEvidence(block Block, spans []string, quote string) bool {
+	lineNums := make(map[int]struct{})
+	for _, span := range spans {
+		start, end, ok := parseMetricLineSpan(span)
+		if !ok {
+			continue
+		}
+		for i := start; i <= end; i++ {
+			lineNums[i] = struct{}{}
+		}
+	}
+	for _, line := range block.Lines {
+		if line.Flag != "n" {
+			continue
+		}
+		if len(lineNums) == 0 {
+			if quote == "" || strings.Contains(strings.ToLower(line.Content), strings.ToLower(quote)) {
+				return true
+			}
+			continue
+		}
+		if _, ok := lineNums[line.LineNumber]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func parseMetricLineSpan(span string) (int, int, bool) {
+	span = strings.TrimSpace(span)
+	if span == "" {
+		return 0, 0, false
+	}
+	if strings.Contains(span, ":") {
+		parts := strings.SplitN(span, ":", 2)
+		start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+		end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err1 != nil || err2 != nil || end < start {
+			return 0, 0, false
+		}
+		return start, end, true
+	}
+	n, err := strconv.Atoi(span)
+	if err != nil {
+		return 0, 0, false
+	}
+	return n, n, true
+}
+
+func mergeMetricMentionCandidates(mentions []metricCandidateMention) []metricCandidate {
+	type bucket struct {
+		mentions []metricCandidateMention
+	}
+	grouped := map[string]*bucket{}
+	order := make([]string, 0, len(mentions))
+	for _, mention := range mentions {
+		key := normalizedMetricCandidateKey(mention.MetricNameHint, mention.SubjectHint, mention.UnitHint, mention.ValueHint)
+		if key == "" {
+			continue
+		}
+		if grouped[key] == nil {
+			grouped[key] = &bucket{}
+			order = append(order, key)
+		}
+		grouped[key].mentions = append(grouped[key].mentions, mention)
+	}
+
+	out := make([]metricCandidate, 0, len(order))
+	for _, key := range order {
+		b := grouped[key]
+		if b == nil || len(b.mentions) == 0 {
+			continue
+		}
+		hasNormal := false
+		for _, mention := range b.mentions {
+			if mention.HasNormalEvidence {
+				hasNormal = true
+				break
+			}
+		}
+		if !hasNormal {
+			continue
+		}
+		supportMentions := make([]map[string]any, 0, len(b.mentions))
+		lineMap := map[string]BlockLine{}
+		metricName := ""
+		subject := ""
+		unit := ""
+		value := ""
+		for _, mention := range b.mentions {
+			metricName = firstNonEmptyTrimmed(metricName, mention.MetricNameHint)
+			subject = firstNonEmptyTrimmed(subject, mention.SubjectHint)
+			unit = firstNonEmptyTrimmed(unit, mention.UnitHint)
+			value = firstNonEmptyTrimmed(value, mention.ValueHint)
+			supportMentions = append(supportMentions, map[string]any{
+				"metric_name_hint":  mention.MetricNameHint,
+				"subject_hint":      mention.SubjectHint,
+				"evidence_quote":    mention.EvidenceQuote,
+				"source_line_spans": mention.SourceLineSpans,
+				"unit_hint":         mention.UnitHint,
+				"value_hint":        mention.ValueHint,
+				"confidence":        mention.Confidence,
+				"confidence_reason": mention.ConfidenceReason,
+			})
+			for _, line := range mention.BlockLines {
+				lineKey := fmt.Sprintf("%d:%d:%s", line.PageNumber, line.LineNumber, line.Content)
+				existing, exists := lineMap[lineKey]
+				if !exists || (existing.Flag != "n" && line.Flag == "n") {
+					lineMap[lineKey] = line
+				}
+			}
+		}
+		supportLines := make([]BlockLine, 0, len(lineMap))
+		for _, line := range lineMap {
+			supportLines = append(supportLines, line)
+		}
+		sort.Slice(supportLines, func(i, j int) bool {
+			if supportLines[i].PageNumber != supportLines[j].PageNumber {
+				return supportLines[i].PageNumber < supportLines[j].PageNumber
+			}
+			if supportLines[i].LineNumber != supportLines[j].LineNumber {
+				return supportLines[i].LineNumber < supportLines[j].LineNumber
+			}
+			return supportLines[i].Flag < supportLines[j].Flag
+		})
+		out = append(out, metricCandidate{
+			CandidateID:        fmt.Sprintf("metric_cand_%d", len(out)+1),
+			MetricNameHint:     metricName,
+			SubjectHint:        subject,
+			UnitHint:           unit,
+			ValueHint:          value,
+			SupportingMentions: supportMentions,
+			SupportLines:       supportLines,
+		})
+	}
+	return out
+}
+
+func normalizedMetricCandidateKey(parts ...string) string {
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		part = strings.Join(strings.Fields(part), " ")
+		if part != "" {
+			normalized = append(normalized, part)
+		}
+	}
+	return strings.Join(normalized, "|")
+}
+
+func dedupeFinalMetricRows(metrics []map[string]any) []map[string]any {
+	grouped := map[string]map[string]any{}
+	order := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		key := normalizedMetricCandidateKey(
+			asString(metric["metric_name"]),
+			asString(metric["subject"]),
+			asString(metric["unit"]),
+			asString(metric["metric_value"]),
+			strings.Join(normalizeSourceLineSpans(metric["source_line_spans"]), ","),
+		)
+		if existing, ok := grouped[key]; ok {
+			mergedSpans := normalizeSourceLineSpans(existing["source_line_spans"])
+			for _, span := range normalizeSourceLineSpans(metric["source_line_spans"]) {
+				if !slices.Contains(mergedSpans, span) {
+					mergedSpans = append(mergedSpans, span)
+				}
+			}
+			existing["source_line_spans"] = mergedSpans
+			if toFloat(metric["confidence"]) > toFloat(existing["confidence"]) {
+				existing["confidence"] = metric["confidence"]
+			}
+			continue
+		}
+		cloned := map[string]any{}
+		for k, v := range metric {
+			cloned[k] = v
+		}
+		grouped[key] = cloned
+		order = append(order, key)
+	}
+	out := make([]map[string]any, 0, len(order))
+	for _, key := range order {
+		out = append(out, grouped[key])
 	}
 	return out
 }
@@ -663,6 +1087,99 @@ func toBool(v any) bool {
 	return b
 }
 
+func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText string, promptText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
+	applyStructureModelConfigToExtractor(p.Extractor, cfg)
+	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptText: promptText,
+		ModelName:  modelName,
+		InputText:  inputText,
+	})
+	p.Logger.Info("LLM response received for metrics extraction",
+		"model_name", modelName,
+		"prompt_name", p.PromptRef,
+		"extract_error", err,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if payload == nil {
+		return nil, errors.New("(MID_26042490) empty llm payload")
+	}
+	if _, ok := payload["metrics"]; ok {
+		return payload, nil
+	}
+	if _, ok := payload["candidates"]; ok {
+		return payload, nil
+	}
+	return nil, fmt.Errorf("(MID_26042491) llm output must contain 'metrics' or 'candidates'")
+}
+
+func firstPromptLine(promptText string) string {
+	promptText = strings.TrimSpace(promptText)
+	if promptText == "" {
+		return ""
+	}
+	if idx := strings.IndexByte(promptText, '\n'); idx >= 0 {
+		return strings.TrimSpace(promptText[:idx])
+	}
+	return promptText
+}
+
+func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
+	payload, err := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, p.MentionModelName, p.MentionModelCfg)
+	if err == nil {
+		return payload, strings.TrimSpace(p.MentionModelName), nil
+	}
+
+	primaryModelName := strings.TrimSpace(p.MentionModelName)
+	fallbackModelName := strings.TrimSpace(p.FallbackMentionModelName)
+	if fallbackModelName == "" {
+		return nil, primaryModelName, err
+	}
+	if p.FallbackMentionModelErr != nil {
+		return nil, fallbackModelName, fmt.Errorf("(MID_26042492) primary metric candidate extraction failed and fallback model %q is unavailable: %w", p.FallbackMentionModelRef, err)
+	}
+
+	if isEmptyMetricExtractionError(err) {
+		p.Logger.Warn("primary metric candidate extraction returned empty JSON; retrying fallback model",
+			"primary_model", primaryModelName,
+			"fallback_model", fallbackModelName,
+			"error", err,
+			"prompt_name", p.MentionPromptRef,
+		)
+	} else {
+		p.Logger.Warn("primary metric candidate extraction failed; retrying fallback model",
+			"primary_model", primaryModelName,
+			"fallback_model", fallbackModelName,
+			"error", err,
+			"prompt_name", p.MentionPromptRef,
+		)
+	}
+
+	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, fallbackModelName, p.FallbackMentionModelCfg)
+	if fallbackErr != nil {
+		if isEmptyMetricExtractionError(fallbackErr) {
+			p.Logger.Warn("fallback metric candidate extraction returned empty JSON; treating as empty result",
+				"fallback_model", fallbackModelName,
+				"error", fallbackErr,
+				"prompt_name", p.MentionPromptRef,
+			)
+			return map[string]any{"language": "unknown", "candidates": []any{}}, fallbackModelName, nil
+		}
+		return nil, fallbackModelName, fmt.Errorf("(MID_26042493) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
+	}
+	return payload, fallbackModelName, nil
+}
+
+func isEmptyMetricExtractionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.TrimSpace(err.Error())
+	return strings.Contains(msg, "unexpected end of JSON input") &&
+		strings.Contains(msg, "json:{[]}")
+}
+
 func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
 	for _, key := range []string{"EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"} {
 		promptRef = strings.TrimSpace(os.Getenv(key))
@@ -671,7 +1188,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "default_metric_prompt.txt"
+		promptRef = "prompt-enrich-metrics-v1.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -866,13 +1383,13 @@ VALUES (
 		})
 
 		var (
-			metricNameEn      any
-			subjectEn         any
-			descEn            any
-			contextEn         any
-			keywordsEnVal     any
-			unitEn            any
-			valueClassEn      any
+			metricNameEn       any
+			subjectEn          any
+			descEn             any
+			contextEn          any
+			keywordsEnVal      any
+			unitEn             any
+			valueClassEn       any
 			categoryPathsEnVal any
 		)
 		if !isEnglish {

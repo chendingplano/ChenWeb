@@ -1353,9 +1353,11 @@ func appendProductsStatus(raw string, p productsStatusParams) (string, error) {
 	return string(bs), nil
 }
 
+/*
 func loadProductsPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
 	return loadProductPromptFromEnvKeys([]string{"ENRICH_PRODUCT_RELATIONS_PROMPT", "EXTRACT_PRODUCTS_PROMPT", "EXTRACT_PRODUCT_PROMPT"}, "prompt-enrich-product-relations-v1.md")
 }
+*/
 
 func loadProductPromptFromEnvKeys(envKeys []string, defaultRef string) (promptText string, promptRef string, promptPath string, promptErr error) {
 	for _, key := range envKeys {

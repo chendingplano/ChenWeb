@@ -3,8 +3,10 @@ package docprocessing
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -73,26 +75,52 @@ func TestMetricsProcessor_ExtractsFromBlocksInContext(t *testing.T) {
 		StatusRaw:       "[]",
 	}}
 	metricsStore := &fakeMetricsStore{}
-	extractor := &fakeJSONExtractor{out: map[string]any{
-		"language": "en",
-		"metrics": []any{
-			map[string]any{
-				"metric_name":         "Latency",
-				"source_line_spans":   []any{float64(2)},
-				"subject":             "service latency",
-				"desc":                "max latency",
-				"context":             "SLA",
-				"keywords":            []any{"latency"},
-				"location_type":       "sentence",
-				"unit":                "ms",
-				"threshold_or_target": "<=200",
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{
+			"language": "en",
+			"candidates": []any{
+				map[string]any{
+					"metric_name_hint":  "Latency",
+					"subject_hint":      "service latency",
+					"evidence_quote":    "Latency must be <= 200ms",
+					"source_line_spans": []any{float64(2)},
+					"unit_hint":         "ms",
+					"value_hint":        "200",
+					"confidence":        0.9,
+				},
 			},
 		},
-		"uncertain_metrics": []any{},
+		{
+			"language": "en",
+			"metrics": []any{
+				map[string]any{
+					"metric_name":         "Latency",
+					"source_line_spans":   []any{float64(2)},
+					"subject":             "service latency",
+					"desc":                "max latency",
+					"context":             "SLA",
+					"keywords":            []any{"latency"},
+					"location_type":       "sentence",
+					"unit":                "ms",
+					"threshold_or_target": "<=200",
+				},
+			},
+			"uncertain_metrics": []any{},
+		},
 	}}
 
 	p := NewMetricsProcessor(inputStore, metricsStore, extractor, nil)
 	p.ChunkDir = tmp
+	p.MentionPromptText = "extract metric candidates"
+	p.MentionPromptRef = "prompt-extract-metric-candidates-v1.md"
+	p.MentionPromptErr = nil
+	p.MentionModelErr = nil
+	p.MentionModelName = "gpt-test-mention"
+	p.RelationPromptText = "enrich metrics"
+	p.RelationPromptRef = "prompt-enrich-metrics-v1.md"
+	p.RelationPromptErr = nil
+	p.RelationModelErr = nil
+	p.RelationModelName = "gpt-test"
 	p.PromptText = "extract metrics"
 	p.PromptErr = nil
 	p.ModelErr = nil
@@ -104,18 +132,18 @@ func TestMetricsProcessor_ExtractsFromBlocksInContext(t *testing.T) {
 	if metricsStore.saveCalled != 1 {
 		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
 	}
-	if extractor.calledCount != 1 {
-		t.Fatalf("LLM called %d times, want 1 (one block)", extractor.calledCount)
+	if extractor.calledCount != 2 {
+		t.Fatalf("LLM called %d times, want 2 (candidate + enrich)", extractor.calledCount)
 	}
-	if !strings.Contains(extractor.inputText, "Intro") {
-		t.Fatalf("overlap line content missing from LLM input; input=%q", extractor.inputText)
+	if !strings.Contains(extractor.inputTexts[0], "Intro") {
+		t.Fatalf("overlap line content missing from LLM input; input=%q", extractor.inputTexts[0])
 	}
-	if !strings.Contains(extractor.inputText, "Latency must be") {
-		t.Fatalf("normal line content missing from LLM input; input=%q", extractor.inputText)
+	if !strings.Contains(extractor.inputTexts[0], "Latency must be") {
+		t.Fatalf("normal line content missing from LLM input; input=%q", extractor.inputTexts[0])
 	}
 	// Parsed line hints should include the overlap flag.
-	if !strings.Contains(extractor.inputText, `"flag":"o"`) {
-		t.Fatalf("overlap flag missing from LLM input hints; input=%q", extractor.inputText)
+	if !strings.Contains(extractor.inputTexts[0], `"flag":"o"`) {
+		t.Fatalf("overlap flag missing from LLM input hints; input=%q", extractor.inputTexts[0])
 	}
 
 	var statusArr []map[string]any
@@ -170,26 +198,52 @@ func TestMetricsProcessor_ExtractsFromLineFileWhenNoContextBuffer(t *testing.T) 
 		StatusRaw:       "[]",
 	}}
 	metricsStore := &fakeMetricsStore{}
-	extractor := &fakeJSONExtractor{out: map[string]any{
-		"language": "en",
-		"metrics": []any{
-			map[string]any{
-				"metric_name":         "Latency",
-				"source_line_spans":   []any{float64(2)},
-				"subject":             "service latency",
-				"desc":                "max latency",
-				"context":             "SLA",
-				"keywords":            []any{"latency"},
-				"location_type":       "sentence",
-				"unit":                "ms",
-				"threshold_or_target": "<=200",
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{
+			"language": "en",
+			"candidates": []any{
+				map[string]any{
+					"metric_name_hint":  "Latency",
+					"subject_hint":      "service latency",
+					"evidence_quote":    "Latency must be <= 200ms",
+					"source_line_spans": []any{float64(2)},
+					"unit_hint":         "ms",
+					"value_hint":        "200",
+					"confidence":        0.9,
+				},
 			},
 		},
-		"uncertain_metrics": []any{},
+		{
+			"language": "en",
+			"metrics": []any{
+				map[string]any{
+					"metric_name":         "Latency",
+					"source_line_spans":   []any{float64(2)},
+					"subject":             "service latency",
+					"desc":                "max latency",
+					"context":             "SLA",
+					"keywords":            []any{"latency"},
+					"location_type":       "sentence",
+					"unit":                "ms",
+					"threshold_or_target": "<=200",
+				},
+			},
+			"uncertain_metrics": []any{},
+		},
 	}}
 
 	p := NewMetricsProcessor(inputStore, metricsStore, extractor, nil)
 	p.ChunkDir = tmp
+	p.MentionPromptText = "extract metric candidates"
+	p.MentionPromptRef = "prompt-extract-metric-candidates-v1.md"
+	p.MentionPromptErr = nil
+	p.MentionModelErr = nil
+	p.MentionModelName = "gpt-test-mention"
+	p.RelationPromptText = "enrich metrics"
+	p.RelationPromptRef = "prompt-enrich-metrics-v1.md"
+	p.RelationPromptErr = nil
+	p.RelationModelErr = nil
+	p.RelationModelName = "gpt-test"
 	p.PromptText = "extract metrics"
 	p.PromptErr = nil
 	p.ModelErr = nil
@@ -201,14 +255,301 @@ func TestMetricsProcessor_ExtractsFromLineFileWhenNoContextBuffer(t *testing.T) 
 	if metricsStore.saveCalled != 1 {
 		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
 	}
-	if extractor.calledCount != 1 {
-		t.Fatalf("LLM called %d times, want 1 (one block for single-page doc)", extractor.calledCount)
+	if extractor.calledCount != 2 {
+		t.Fatalf("LLM called %d times, want 2 (candidate + enrich for one block)", extractor.calledCount)
 	}
-	if !strings.Contains(extractor.inputText, "Intro") {
-		t.Fatalf("line 1 content missing from LLM input; input=%q", extractor.inputText)
+	if !strings.Contains(extractor.inputTexts[0], "Intro") {
+		t.Fatalf("line 1 content missing from LLM input; input=%q", extractor.inputTexts[0])
 	}
-	if !strings.Contains(extractor.inputText, "Latency must be") {
-		t.Fatalf("line 2 content missing from LLM input; input=%q", extractor.inputText)
+	if !strings.Contains(extractor.inputTexts[0], "Latency must be") {
+		t.Fatalf("line 2 content missing from LLM input; input=%q", extractor.inputTexts[0])
+	}
+}
+
+func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T) {
+	ctx, holder := withBlockBufferHolder(context.Background())
+	holder.mu.Lock()
+	holder.buffer = &BlockBuffer{
+		Blocks: []Block{
+			{
+				Index: 1,
+				Lines: []BlockLine{
+					{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
+					{Flag: "n", LineNumber: 11, PageNumber: 1, LineType: "paragraph", Content: "The service response time is monitored daily."},
+				},
+			},
+			{
+				Index: 2,
+				Lines: []BlockLine{
+					{Flag: "o", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
+					{Flag: "n", LineNumber: 12, PageNumber: 1, LineType: "paragraph", Content: "Latency violations trigger alerts."},
+				},
+			},
+		},
+	}
+	holder.mu.Unlock()
+
+	tmp := t.TempDir()
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              3101,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_3101.json"),
+		StagingFilename: filepath.Join(tmp, "ocr_rslt_3101.pdf"),
+		StatusRaw:       "[]",
+	}}
+	metricsStore := &fakeMetricsStore{}
+	extractor := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{
+				"language": "en",
+				"candidates": []any{
+					map[string]any{
+						"metric_name_hint":  "Latency",
+						"subject_hint":      "service response time",
+						"evidence_quote":    "Latency must be <= 200ms",
+						"source_line_spans": []any{float64(10), float64(11)},
+						"unit_hint":         "ms",
+						"value_hint":        "200",
+						"confidence":        0.82,
+					},
+				},
+			},
+			{
+				"language": "en",
+				"candidates": []any{
+					map[string]any{
+						"metric_name_hint":  "Latency",
+						"subject_hint":      "service response time",
+						"evidence_quote":    "Latency must be <= 200ms",
+						"source_line_spans": []any{"10:12"},
+						"unit_hint":         "ms",
+						"value_hint":        "200",
+						"confidence":        0.76,
+					},
+				},
+			},
+			{
+				"language": "en",
+				"metrics": []any{
+					map[string]any{
+						"metric_name":         "Latency",
+						"source_line_spans":   []any{"10:12"},
+						"subject":             "service response time",
+						"desc":                "maximum latency threshold",
+						"context":             "SLA monitoring",
+						"keywords":            []any{"latency"},
+						"location_type":       "sentence",
+						"unit":                "ms",
+						"metric_value":        "200",
+						"value_data_type":     "numerical",
+						"value_range_type":    "<=",
+						"threshold_or_target": "<=200",
+						"category_paths":      []any{},
+						"category_paths_en":   []any{},
+					},
+				},
+				"uncertain_metrics": []any{},
+			},
+		},
+	}
+
+	p := NewMetricsProcessor(inputStore, metricsStore, extractor, nil)
+	p.ChunkDir = tmp
+	p.MentionPromptText = "extract metric candidates"
+	p.MentionPromptRef = "prompt-extract-metric-candidates-v1.md"
+	p.MentionPromptErr = nil
+	p.MentionModelName = "mention-model"
+	p.MentionModelErr = nil
+	p.RelationPromptText = "enrich metrics"
+	p.RelationPromptRef = "prompt-enrich-metrics-v1.md"
+	p.RelationPromptErr = nil
+	p.RelationModelName = "relation-model"
+	p.RelationModelErr = nil
+	p.PromptText = p.RelationPromptText
+	p.PromptRef = p.RelationPromptRef
+	p.ModelName = p.RelationModelName
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"3101","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if extractor.calledCount != 3 {
+		t.Fatalf("calledCount=%d, want 3", extractor.calledCount)
+	}
+	if got, want := extractor.modelNames, []string{"mention-model", "mention-model", "relation-model"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("modelNames=%v, want %v", got, want)
+	}
+	if metricsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
+	}
+	if len(metricsStore.lastSave.Metrics) != 1 {
+		t.Fatalf("saved metrics=%d, want 1", len(metricsStore.lastSave.Metrics))
+	}
+	if got := strings.TrimSpace(asString(metricsStore.lastSave.Metrics[0]["metric_id"])); got != "3101_1" {
+		t.Fatalf("metric_id=%q, want 3101_1", got)
+	}
+}
+
+func TestMergeMetricCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
+	overlapOnly := []metricCandidateMention{
+		{
+			MetricNameHint:    "Latency",
+			SubjectHint:       "service response time",
+			EvidenceQuote:     "Latency must be <= 200ms",
+			SourceLineSpans:   []string{"10"},
+			UnitHint:          "ms",
+			ValueHint:         "200",
+			ChunkIndex:        1,
+			BlockLines:        []BlockLine{{Flag: "o", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
+			HasNormalEvidence: false,
+		},
+	}
+	if got := mergeMetricMentionCandidates(overlapOnly); len(got) != 0 {
+		t.Fatalf("overlap-only candidates=%d, want 0", len(got))
+	}
+
+	withNormal := append([]metricCandidateMention(nil), overlapOnly...)
+	withNormal = append(withNormal, metricCandidateMention{
+		MetricNameHint:    "Latency",
+		SubjectHint:       "service response time",
+		EvidenceQuote:     "Latency must be <= 200ms",
+		SourceLineSpans:   []string{"10"},
+		UnitHint:          "ms",
+		ValueHint:         "200",
+		ChunkIndex:        2,
+		BlockLines:        []BlockLine{{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
+		HasNormalEvidence: true,
+	})
+	merged := mergeMetricMentionCandidates(withNormal)
+	if len(merged) != 1 {
+		t.Fatalf("merged candidates=%d, want 1", len(merged))
+	}
+	if got := merged[0].MetricNameHint; got != "Latency" {
+		t.Fatalf("metric name=%q", got)
+	}
+}
+
+func TestMetricsProcessor_RetriesCandidateFallbackOnEmptyJSON(t *testing.T) {
+	ctx, holder := withBlockBufferHolder(context.Background())
+	holder.mu.Lock()
+	holder.buffer = &BlockBuffer{
+		Blocks: []Block{{
+			Index: 1,
+			Lines: []BlockLine{
+				{Flag: "n", LineNumber: 2, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
+			},
+		}},
+	}
+	holder.mu.Unlock()
+
+	tmp := t.TempDir()
+	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              3201,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_3201.json"),
+		StagingFilename: filepath.Join(tmp, "ocr_rslt_3201.pdf"),
+		StatusRaw:       "[]",
+	}}
+	metricsStore := &fakeMetricsStore{}
+	extractor := &fakeJSONExtractor{
+		errs: []error{
+			fmt.Errorf("(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+			nil,
+			nil,
+		},
+		outs: []map[string]any{
+			nil,
+			{
+				"language": "en",
+				"candidates": []any{
+					map[string]any{
+						"metric_name_hint":  "Latency",
+						"subject_hint":      "service latency",
+						"evidence_quote":    "Latency must be <= 200ms",
+						"source_line_spans": []any{float64(2)},
+						"unit_hint":         "ms",
+						"value_hint":        "200",
+						"confidence":        0.9,
+					},
+				},
+			},
+			{
+				"language": "en",
+				"metrics": []any{
+					map[string]any{
+						"metric_name":         "Latency",
+						"source_line_spans":   []any{float64(2)},
+						"subject":             "service latency",
+						"desc":                "max latency",
+						"context":             "SLA",
+						"keywords":            []any{"latency"},
+						"location_type":       "sentence",
+						"unit":                "ms",
+						"threshold_or_target": "<=200",
+					},
+				},
+				"uncertain_metrics": []any{},
+			},
+		},
+	}
+
+	p := NewMetricsProcessor(inputStore, metricsStore, extractor, nil)
+	p.ChunkDir = tmp
+	p.MentionPromptText = "extract metric candidates"
+	p.MentionPromptRef = "prompt-extract-metric-candidates-v1.md"
+	p.MentionPromptErr = nil
+	p.MentionModelErr = nil
+	p.MentionModelName = "primary-candidate-model"
+	p.FallbackMentionModelName = "fallback-candidate-model"
+	p.RelationPromptText = "enrich metrics"
+	p.RelationPromptRef = "prompt-enrich-metrics-v1.md"
+	p.RelationPromptErr = nil
+	p.RelationModelErr = nil
+	p.RelationModelName = "relation-model"
+	p.PromptText = "enrich metrics"
+	p.PromptErr = nil
+	p.ModelErr = nil
+	p.ModelName = "relation-model"
+
+	if err := p.HandleEvent(ctx, []byte(`{"record_id":"3201","force":true}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if extractor.calledCount != 3 {
+		t.Fatalf("calledCount=%d, want 3", extractor.calledCount)
+	}
+	if got, want := extractor.modelNames, []string{"primary-candidate-model", "fallback-candidate-model", "relation-model"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("modelNames=%v, want %v", got, want)
+	}
+	if metricsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
+	}
+}
+
+func TestMetricsProcessor_ForceDisablesThinkingForAllPasses(t *testing.T) {
+	p := &MetricsProcessor{
+		MentionModelCfg: structureModelConfig{
+			ModelName:    "deepseek-v4-pro",
+			ThinkingType: "enabled",
+		},
+		FallbackMentionModelCfg: structureModelConfig{
+			ModelName:    "gpt-5.4-mini",
+			ThinkingType: "enabled",
+		},
+		RelationModelCfg: structureModelConfig{
+			ModelName:    "deepseek-v4-pro",
+			ThinkingType: "enabled",
+		},
+	}
+
+	p.forceDisableThinking()
+
+	if got := p.MentionModelCfg.ThinkingType; got != "disabled" {
+		t.Fatalf("MentionModelCfg.ThinkingType=%q, want disabled", got)
+	}
+	if got := p.FallbackMentionModelCfg.ThinkingType; got != "disabled" {
+		t.Fatalf("FallbackMentionModelCfg.ThinkingType=%q, want disabled", got)
+	}
+	if got := p.RelationModelCfg.ThinkingType; got != "disabled" {
+		t.Fatalf("RelationModelCfg.ThinkingType=%q, want disabled", got)
 	}
 }
 
@@ -242,6 +583,6 @@ func osWriteFile(path string, body []byte) error {
 	return os.WriteFile(path, body, 0o644)
 }
 
-func osMkdirAll(path string) error {
-	return os.MkdirAll(path, 0o755)
-}
+// func osMkdirAll(path string) error {
+// 	return os.MkdirAll(path, 0o755)
+// }

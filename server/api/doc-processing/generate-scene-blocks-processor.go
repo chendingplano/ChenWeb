@@ -361,9 +361,11 @@ func (p *SceneBlocksProcessor) resolveInputLines(ctx context.Context, evt LineFi
 	return lines, nil
 }
 
+/*
 func buildSceneBlocksChunkText(chunk Chunk) string {
 	return buildMarkedChunkInputText(chunk.Lines)
 }
+*/
 
 func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(ctx context.Context, chunks []Chunk) (sceneExtractionResult, error) {
 	mentions := make([]sceneCandidateMention, 0, len(chunks))
