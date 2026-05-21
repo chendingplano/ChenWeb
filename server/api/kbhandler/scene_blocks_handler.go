@@ -27,7 +27,7 @@ type sceneBlockRecord struct {
 	TitleEn        string          `json:"title_en,omitempty"`
 	Summary        string          `json:"summary"`
 	SummaryEn      string          `json:"summary_en,omitempty"`
-	EvidenceLines  json.RawMessage `json:"evidence_lines,omitempty"`
+	LineSpans      json.RawMessage `json:"line_spans,omitempty"`
 	Actors         json.RawMessage `json:"actors"`
 	Resources      json.RawMessage `json:"resources"`
 	Preconditions  json.RawMessage `json:"preconditions"`
@@ -111,8 +111,12 @@ func applySceneBlockExtInfo(r *sceneBlockRecord, raw json.RawMessage) {
 	if summaryEn := strings.TrimSpace(fmt.Sprint(ext["summary_en"])); summaryEn != "" && summaryEn != "<nil>" {
 		r.SummaryEn = summaryEn
 	}
-	if evidenceLines := normalizeJSONStringArray(ext["evidence_lines"]); len(evidenceLines) > 0 {
-		r.EvidenceLines = evidenceLines
+	lineSpans := normalizeJSONStringArray(ext["line_spans"])
+	if len(lineSpans) == 0 {
+		lineSpans = normalizeJSONStringArray(ext["evidence_lines"])
+	}
+	if len(lineSpans) > 0 {
+		r.LineSpans = lineSpans
 	}
 	if keywordsEn := normalizeJSONStringArray(ext["keywords_en"]); len(keywordsEn) > 0 {
 		r.KeywordsEn = keywordsEn

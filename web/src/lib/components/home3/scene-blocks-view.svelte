@@ -143,7 +143,7 @@
 	getItemObjectId={(b) => b.object_id ?? ''}
 	getItemSecondaryId={(b) => b.scene_id ?? ''}
 	getItemSecondaryIdLabel="Scene ID"
-	getItemEvidenceLines={(b) => b.evidence_lines ?? []}
+	getItemEvidenceLines={(b) => b.line_spans ?? []}
 	getItemCreateTime={(b) => b.create_time ?? ''}
 	storagePrefix="scene-blocks"
 	itemsLabel="Scene Blocks"

@@ -721,7 +721,7 @@ export type KbSceneBlockRecord = {
 	title_en?: string;
 	summary: string;
 	summary_en?: string;
-	evidence_lines?: SourceLineSpan[];
+	line_spans?: SourceLineSpan[];
 	actors: KbSceneActor[];
 	resources: KbSceneResource[];
 	preconditions: string[];

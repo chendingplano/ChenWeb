@@ -17,7 +17,7 @@ func TestApplySceneBlockExtInfoCopiesEnglishFields(t *testing.T) {
 	applySceneBlockExtInfo(&record, json.RawMessage(`{
 		"title_en":"Application of normative references",
 		"summary_en":"How normative references are applied in the standard.",
-		"evidence_lines":["12:14","18"],
+		"line_spans":["12:14","18"],
 		"keywords_en":["references","standard"],
 		"states_en":["active"]
 	}`))
@@ -31,8 +31,8 @@ func TestApplySceneBlockExtInfoCopiesEnglishFields(t *testing.T) {
 	if string(record.KeywordsEn) != `["references","standard"]` {
 		t.Fatalf("KeywordsEn = %s", string(record.KeywordsEn))
 	}
-	if string(record.EvidenceLines) != `["12:14","18"]` {
-		t.Fatalf("EvidenceLines = %s", string(record.EvidenceLines))
+	if string(record.LineSpans) != `["12:14","18"]` {
+		t.Fatalf("LineSpans = %s", string(record.LineSpans))
 	}
 	if string(record.StatesEn) != `["active"]` {
 		t.Fatalf("StatesEn = %s", string(record.StatesEn))
@@ -45,7 +45,7 @@ func TestApplySceneBlockExtInfoIgnoresBlankAndInvalidValues(t *testing.T) {
 	applySceneBlockExtInfo(&record, json.RawMessage(`{
 		"title_en":"   ",
 		"summary_en":"",
-		"evidence_lines":["9"," ",12],
+		"line_spans":["9"," ",12],
 		"keywords_en":["keep"," ",12],
 		"states_en":"bad-shape"
 	}`))
@@ -56,10 +56,22 @@ func TestApplySceneBlockExtInfoIgnoresBlankAndInvalidValues(t *testing.T) {
 	if string(record.KeywordsEn) != `["keep"]` {
 		t.Fatalf("KeywordsEn = %s", string(record.KeywordsEn))
 	}
-	if string(record.EvidenceLines) != `["9"]` {
-		t.Fatalf("EvidenceLines = %s", string(record.EvidenceLines))
+	if string(record.LineSpans) != `["9"]` {
+		t.Fatalf("LineSpans = %s", string(record.LineSpans))
 	}
 	if !reflect.DeepEqual(record.StatesEn, json.RawMessage(nil)) {
 		t.Fatalf("StatesEn = %v", record.StatesEn)
+	}
+}
+
+func TestApplySceneBlockExtInfoFallsBackToLegacyEvidenceLines(t *testing.T) {
+	record := sceneBlockRecord{}
+
+	applySceneBlockExtInfo(&record, json.RawMessage(`{
+		"evidence_lines":["5-7","9"]
+	}`))
+
+	if string(record.LineSpans) != `["5-7","9"]` {
+		t.Fatalf("LineSpans = %s", string(record.LineSpans))
 	}
 }

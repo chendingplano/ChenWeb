@@ -526,7 +526,7 @@
 			{:else if activeSection === 'kb-input-details'}
 				<InputsMgmtView {darkMode} />
 			{:else if activeSection === 'kb-metrics'}
-				<MetricMgmtView {darkMode} />
+				<MetricMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
 			{:else if activeSection === 'kb-doc-structure'}
 				<DocStructureView {darkMode} />
 			{:else if activeSection === 'kb-scene-blocks'}

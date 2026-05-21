@@ -25,6 +25,18 @@
 	import ListPlusIcon from '@lucide/svelte/icons/list-plus';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import ActivityIcon from '@lucide/svelte/icons/activity';
+	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
+	import TagIcon from '@lucide/svelte/icons/tag';
+	import MapPinIcon from '@lucide/svelte/icons/map-pin';
+	import TypeIcon from '@lucide/svelte/icons/type';
+	import BookOpenIcon from '@lucide/svelte/icons/book-open';
+	import HashIcon from '@lucide/svelte/icons/hash';
+	import FileIcon from '@lucide/svelte/icons/file';
+	import CalendarIcon from '@lucide/svelte/icons/calendar';
 	import {
 		buildKbMetricMetadataRows,
 		buildKbMetricUpdatePayloadForMetadataEdit
@@ -35,7 +47,13 @@
 		buildKbInputUpdatePayloadForMetadataEdit
 	} from './kb-input-metadata.js';
 
-	let { darkMode = true }: { darkMode: boolean } = $props();
+	let {
+		darkMode = true,
+		onFocusModeChange
+	}: {
+		darkMode: boolean;
+		onFocusModeChange?: (focused: boolean) => void;
+	} = $props();
 
 	// ---------- Aesthetic tokens: "archival reading room" ----------
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
@@ -56,6 +74,9 @@
 	const fontMono = "'JetBrains Mono', 'IBM Plex Mono', monospace";
 	const fontSans = "'Inter Tight', system-ui, sans-serif";
 	// ---------- State ----------
+	let recordBrowserFolded = $state(false);
+	let keywordFilter = $state('');
+	let metricNameDropdownValue = $state<number | ''>('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbMetricRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
@@ -104,6 +125,9 @@
 
 	let pdfNumPages = $state(0);
 	let pdfZoom = $state(0.5);
+	let canvasW = $state(0);
+	let canvasH = $state(0);
+	let hoveredCanvasAttr = $state<string | null>(null);
 
 	type NormalizedSpan = { page_number: number; line_number: number };
 
@@ -204,6 +228,113 @@
 	let selectedMetric = $derived.by(() => {
 		if (selectedMetricId == null) return null;
 		return metrics.find((x) => x.id === selectedMetricId) ?? null;
+	});
+
+	// ---------- Keyword filter + metric name nav ----------
+	let allKeywords = $derived.by(() => {
+		const set = new Set<string>();
+		for (const m of metrics) {
+			for (const kw of (m.metric_keywords ?? [])) set.add(kw);
+			for (const kw of (m.metric_keywords_en ?? [])) set.add(kw);
+		}
+		return [...set].sort((a, b) => a.localeCompare(b));
+	});
+
+	type CanvasNode = {
+		key: string; label: string; icon: any;
+		value: string; count: number; hasValue: boolean;
+		x: number; y: number;
+		wire: { x1: number; y1: number; x2: number; y2: number };
+	};
+	type MetricsCanvas = {
+		W: number; H: number; R: number; Rsn: number;
+		lCx: number; rCx: number; cy: number;
+		connectWire: { x1: number; y1: number; x2: number; y2: number };
+		metricLabel: string; metricSubLabel: string;
+		docLabel: string; docSubLabel: string;
+		metricNodes: CanvasNode[]; docNodes: CanvasNode[];
+	};
+
+	let metricsMap = $derived.by((): MetricsCanvas | null => {
+		const W = canvasW, H = canvasH;
+		if (W < 100 || H < 100) return null;
+		const m = selectedMetric;
+		if (!m) return null;
+		const inp = currentInput;
+		const base = Math.min(W, H);
+		const R = Math.max(48, Math.min(82, base * 0.12));
+		const Rsn = 20;
+		const Rs = Math.max(90, Math.min(170, base * 0.27));
+		const lCx = W * 0.3, rCx = W * 0.7, cy = H / 2;
+		const METRIC_ANGLES = [60, 120, 180, 240, 300].map(d => d * Math.PI / 180);
+		const DOC_ANGLES = [-120, -60, 0, 60, 120].map(d => d * Math.PI / 180);
+		const kws = m.metric_keywords ?? [];
+		const metricDefs = [
+			{ key: 'mname', label: 'Name', icon: TypeIcon, value: m.metric_name || m.metric_subject || '', count: (m.metric_name || m.metric_subject) ? 1 : 0 },
+			{ key: 'conf', label: 'Confidence', icon: ActivityIcon, value: confidencePct(m.confidence), count: m.confidence != null ? 1 : 0 },
+			{ key: 'mvalue', label: 'Value', icon: TrendingUpIcon, value: [m.metric_value, m.metric_unit].filter(Boolean).join(' '), count: (m.metric_value != null || m.metric_unit) ? 1 : 0 },
+			{ key: 'loc', label: 'Location', icon: MapPinIcon, value: m.location_type || '', count: m.location_type ? 1 : 0 },
+			{ key: 'kw', label: 'Keywords', icon: TagIcon, value: kws.join(', '), count: kws.length },
+		];
+		const metricNodes: CanvasNode[] = metricDefs.map((def, i) => {
+			const ang = METRIC_ANGLES[i];
+			const sx = lCx + Math.cos(ang) * Rs, sy = cy + Math.sin(ang) * Rs;
+			return { ...def, hasValue: def.count > 0, x: sx, y: sy, wire: shortenLine(lCx, cy, sx, sy, R + 4, Rsn + 3) };
+		});
+		const docDefs = [
+			{ key: 'dtitle', label: 'Title', icon: BookOpenIcon, value: inp?.title?.trim() || inp?.name?.trim() || '', count: (inp?.title || inp?.name) ? 1 : 0 },
+			{ key: 'dtype', label: 'Type', icon: FileTextIcon, value: inp?.type || '', count: inp?.type ? 1 : 0 },
+			{ key: 'ddocno', label: 'Doc No', icon: HashIcon, value: inp?.doc_no || '', count: inp?.doc_no ? 1 : 0 },
+			{ key: 'dfile', label: 'File', icon: FileIcon, value: inp?.file_name || '', count: inp?.file_name ? 1 : 0 },
+			{ key: 'ddate', label: 'Date', icon: CalendarIcon, value: inp?.create_time?.slice(0, 10) || '', count: inp?.create_time ? 1 : 0 },
+		];
+		const docNodes: CanvasNode[] = docDefs.map((def, i) => {
+			const ang = DOC_ANGLES[i];
+			const sx = rCx + Math.cos(ang) * Rs, sy = cy + Math.sin(ang) * Rs;
+			return { ...def, hasValue: def.count > 0, x: sx, y: sy, wire: shortenLine(rCx, cy, sx, sy, R + 4, Rsn + 3) };
+		});
+		return {
+			W, H, R, Rsn, lCx, rCx, cy,
+			connectWire: shortenLine(lCx, cy, rCx, cy, R + 5, R + 5),
+			metricLabel: m.metric_name?.trim() || m.metric_subject?.trim() || `Metric #${m.id}`,
+			metricSubLabel: m.metric_name_en?.trim() || m.metric_subject_en?.trim() || '',
+			docLabel: inp?.title?.trim() || inp?.name?.trim() || (inp ? `Record #${inp.id}` : '—'),
+			docSubLabel: inp?.doc_no?.trim() || inp?.type?.trim() || '',
+			metricNodes, docNodes,
+		};
+	});
+
+	let hoveredNodeInfo = $derived.by(() => {
+		if (!hoveredCanvasAttr || !metricsMap) return null;
+		return [...metricsMap.metricNodes, ...metricsMap.docNodes].find(n => n.key === hoveredCanvasAttr) ?? null;
+	});
+
+	let filteredMetrics = $derived.by(() => {
+		const kw = keywordFilter.trim().toLowerCase();
+		if (!kw) return metrics;
+		return metrics.filter((m) =>
+			(m.metric_keywords ?? []).some((k) => k.toLowerCase().includes(kw)) ||
+			(m.metric_keywords_en ?? []).some((k) => k.toLowerCase().includes(kw)) ||
+			(m.metric_name ?? '').toLowerCase().includes(kw) ||
+			(m.metric_subject ?? '').toLowerCase().includes(kw)
+		);
+	});
+
+	let selectedMetricInFilteredIndex = $derived(
+		filteredMetrics.findIndex((m) => m.id === selectedMetricId)
+	);
+	let prevMetric = $derived(
+		selectedMetricInFilteredIndex > 0 ? filteredMetrics[selectedMetricInFilteredIndex - 1] : null
+	);
+	let nextMetric = $derived(
+		selectedMetricInFilteredIndex >= 0 && selectedMetricInFilteredIndex < filteredMetrics.length - 1
+			? filteredMetrics[selectedMetricInFilteredIndex + 1]
+			: null
+	);
+
+	// Keep metric name dropdown in sync with selected metric.
+	$effect(() => {
+		metricNameDropdownValue = selectedMetricId ?? '';
 	});
 
 	function formatCoords(coords: unknown): string {
@@ -446,7 +577,49 @@
 			}));
 	});
 
+	function handleUserRecordSelect(record: KbInputRecord) {
+		if (currentInput?.id === record.id) return;
+		currentInput = record;
+		void loadMetricsForRecord(record.id);
+	}
+
+	function enterFocusMode() {
+		if (recordBrowserFolded) return;
+		recordBrowserFolded = true;
+		onFocusModeChange?.(true);
+	}
+
+	function goBack() {
+		if (!recordBrowserFolded) return;
+		recordBrowserFolded = false;
+		selectedMetricId = null;
+		onFocusModeChange?.(false);
+	}
+
+	function goToPrevMetric() {
+		if (prevMetric) void selectMetric(prevMetric);
+	}
+
+	function goToNextMetric() {
+		if (nextMetric) void selectMetric(nextMetric);
+	}
+
+	function handleMetricNameDropdown(e: Event) {
+		const id = Number((e.target as HTMLSelectElement).value);
+		const m = metrics.find((x) => x.id === id);
+		if (m) void selectMetric(m);
+	}
+
+	function shortenLine(x1: number, y1: number, x2: number, y2: number, d1: number, d2: number) {
+		const dx = x2 - x1, dy = y2 - y1;
+		const len = Math.sqrt(dx * dx + dy * dy);
+		if (len < 1) return { x1, y1, x2, y2 };
+		const ux = dx / len, uy = dy / len;
+		return { x1: x1 + ux * d1, y1: y1 + uy * d1, x2: x2 - ux * d2, y2: y2 - uy * d2 };
+	}
+
 	async function loadMetricsForRecord(id: number) {
+		keywordFilter = '';
 		errorMsg = '';
 		loading = true;
 		metrics = [];
@@ -455,7 +628,11 @@
 		rawLines = [];
 		rawError = '';
 		rawLoading = false;
-		currentInput = null;
+		// Only clear currentInput if we're loading a different record.
+		// Clearing it for the same record opens a race window where the
+		// "expand menu → record-browser remount → auto-emit" path sees
+		// currentInput=null and re-folds both panels (flash).
+		if (currentInput?.id !== id) currentInput = null;
 		addMetricOpen = false;
 		addMetricBusyAction = null;
 		resetAddMetricPreview();
@@ -484,6 +661,7 @@
 		lastSelectedMetricDebug = `${m.id} @ ${new Date().toLocaleTimeString()}`;
 		selectedMetricId = m.id;
 		highlightSelectionVersion += 1;
+		enterFocusMode();
 		const first = normalizeMetricSpans(m)[0];
 		if (!first) return;
 
@@ -744,6 +922,12 @@
 
 </script>
 
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key === 'Escape' && recordBrowserFolded) goBack();
+	}}
+/>
+
 <div
 	class="metric-mgmt"
 	style="
@@ -782,21 +966,26 @@
 		</div>
 	</header>
 
-	<div class="body">
-		<KbInputRecordBrowser
-			{darkMode}
-			instanceKey="metrics-record-browser"
-			title="kb.inputs"
-			subtitle="Search, filter, and select input records before inspecting extracted metrics."
-			emptyTitle="No records yet"
-			emptySubtitle="Use Search or Retrieve to browse kb.inputs."
-			selectedRecordId={currentInput?.id ?? null}
-			mapRecord={mapBrowserRecord}
-			onSelect={(record) => void loadMetricsForRecord(record.id)}
-			onError={(error) => {
-				errorMsg = error.message;
-			}}
-		/>
+	<div
+		class="body"
+		style={recordBrowserFolded ? 'grid-template-columns: minmax(0, 1fr)' : ''}
+	>
+		{#if !recordBrowserFolded}
+			<KbInputRecordBrowser
+				{darkMode}
+				instanceKey="metrics-record-browser"
+				title="kb.inputs"
+				subtitle="Search, filter, and select input records before inspecting extracted metrics."
+				emptyTitle="No records yet"
+				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				autoSelectFirstRecord={false}
+				selectedRecordId={currentInput?.id ?? null}
+				mapRecord={mapBrowserRecord}
+				onSelect={handleUserRecordSelect}
+				onError={(error) => {
+					errorMsg = error.message;
+				}}
+			/>
 
 		<aside class="metric-sidebar">
 			<div class="left-meta">
@@ -806,6 +995,7 @@
 			<div class="debug-badge" aria-live="polite">
 				Debug: last selected metric = {lastSelectedMetricDebug}
 			</div>
+
 
 			<div class="metrics-list">
 				{#if errorMsg}
@@ -818,8 +1008,14 @@
 							Select a record from kb.inputs to populate the metrics index.
 						</div>
 					</div>
+				{:else if !loading && filteredMetrics.length === 0 && keywordFilter}
+					<div class="empty">
+						<div class="empty-glyph">§</div>
+						<div class="empty-title">No matches</div>
+						<div class="empty-sub">No metrics match the keyword "{keywordFilter}".</div>
+					</div>
 				{:else}
-					{#each metrics as m, idx (m.id)}
+					{#each filteredMetrics as m, idx (m.id)}
 						<button
 							type="button"
 							class="metric-card"
@@ -850,9 +1046,148 @@
 				{/if}
 			</div>
 		</aside>
+		{/if}
 
 		<!-- ============ RIGHT PANEL ============ -->
-		<section class="right">
+		<section class="right" class:focus-split={recordBrowserFolded}>
+			{#if recordBrowserFolded}
+				<div class="metric-canvas-wrap">
+					<div class="canvas-toolbar">
+						<button type="button" class="toolbar-back" onclick={goBack} title="Back to record list">
+							<ArrowLeftIcon class="toolbar-icon" />
+							<span>Back</span>
+						</button>
+						<div class="toolbar-filters">
+							<select
+								class="toolbar-select"
+								value={metricNameDropdownValue}
+								onchange={handleMetricNameDropdown}
+								title="Jump to metric by name"
+							>
+								<option value="">— Metric by name —</option>
+								{#each metrics as m (m.id)}
+									<option value={m.id}>{metricNameOf(m)}</option>
+								{/each}
+							</select>
+							<div class="toolbar-kw-wrap">
+								<input
+									class="toolbar-kw-input"
+									type="text"
+									list="metric-keywords-datalist-focus"
+									placeholder="Filter by keyword…"
+									bind:value={keywordFilter}
+								/>
+								<datalist id="metric-keywords-datalist-focus">
+									{#each allKeywords as kw (kw)}
+										<option value={kw}></option>
+									{/each}
+								</datalist>
+								{#if keywordFilter}
+									<button
+										type="button"
+										class="toolbar-kw-clear"
+										onclick={() => (keywordFilter = '')}
+										title="Clear keyword filter"
+										aria-label="Clear keyword filter"
+									>×</button>
+								{/if}
+							</div>
+						</div>
+						<div class="toolbar-nav">
+							<button
+								type="button"
+								class="toolbar-nav-btn"
+								disabled={!prevMetric}
+								onclick={goToPrevMetric}
+								title="Previous metric"
+							><ChevronLeftIcon class="toolbar-icon" /></button>
+							<span class="toolbar-nav-pos">
+								{selectedMetricInFilteredIndex >= 0
+									? `${selectedMetricInFilteredIndex + 1} / ${filteredMetrics.length}`
+									: `— / ${filteredMetrics.length}`}
+							</span>
+							<button
+								type="button"
+								class="toolbar-nav-btn"
+								disabled={!nextMetric}
+								onclick={goToNextMetric}
+								title="Next metric"
+							><ChevronRightIcon class="toolbar-icon" /></button>
+						</div>
+					</div>
+					<div class="metric-canvas" bind:clientWidth={canvasW} bind:clientHeight={canvasH}>
+					{#if metricsMap}
+						{@const map = metricsMap}
+						<svg class="canvas-wires" width={map.W} height={map.H} viewBox="0 0 {map.W} {map.H}" aria-hidden="true">
+							<line class="wire spoke" x1={map.connectWire.x1} y1={map.connectWire.y1} x2={map.connectWire.x2} y2={map.connectWire.y2} />
+							{#each map.metricNodes as n (n.key)}
+								<line class="wire" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue} x1={n.wire.x1} y1={n.wire.y1} x2={n.wire.x2} y2={n.wire.y2} />
+							{/each}
+							{#each map.docNodes as n (n.key)}
+								<line class="wire" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue} x1={n.wire.x1} y1={n.wire.y1} x2={n.wire.x2} y2={n.wire.y2} />
+							{/each}
+						</svg>
+
+						<div class="canvas-node main-node metric-node" style="left:{map.lCx - map.R}px; top:{map.cy - map.R}px; width:{map.R*2}px; height:{map.R*2}px;" title={map.metricLabel}>
+							<span class="main-node-label">{map.metricLabel}</span>
+							{#if map.metricSubLabel}<span class="main-node-sublabel">{map.metricSubLabel}</span>{/if}
+						</div>
+						<div class="main-node-cap" style="left:{map.lCx}px; top:{map.cy + map.R + 10}px;">METRIC</div>
+
+						<div class="canvas-node main-node doc-node" style="left:{map.rCx - map.R}px; top:{map.cy - map.R}px; width:{map.R*2}px; height:{map.R*2}px;" title={map.docLabel}>
+							<span class="main-node-label">{map.docLabel}</span>
+							{#if map.docSubLabel}<span class="main-node-sublabel">{map.docSubLabel}</span>{/if}
+						</div>
+						<div class="main-node-cap" style="left:{map.rCx}px; top:{map.cy + map.R + 10}px;">SOURCE DOC</div>
+
+						{#each map.metricNodes as n (n.key)}
+							{@const Icon = n.icon}
+							<button type="button" class="canvas-node sat-node" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue}
+								style="left:{n.x - map.Rsn}px; top:{n.y - map.Rsn}px; width:{map.Rsn*2}px; height:{map.Rsn*2}px;"
+								title="{n.label}{n.value ? ': ' + n.value : ''}"
+								onmouseenter={() => (hoveredCanvasAttr = n.key)}
+								onmouseleave={() => (hoveredCanvasAttr = null)}
+							><Icon class="sat-icon" />{#if n.count > 1}<span class="sat-badge">{n.count}</span>{/if}</button>
+							<div class="sat-label" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue}
+								style="left:{n.x}px; top:{n.y + map.Rsn + 5}px;">{n.label}</div>
+						{/each}
+
+						{#each map.docNodes as n (n.key)}
+							{@const Icon = n.icon}
+							<button type="button" class="canvas-node sat-node" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue}
+								style="left:{n.x - map.Rsn}px; top:{n.y - map.Rsn}px; width:{map.Rsn*2}px; height:{map.Rsn*2}px;"
+								title="{n.label}{n.value ? ': ' + n.value : ''}"
+								onmouseenter={() => (hoveredCanvasAttr = n.key)}
+								onmouseleave={() => (hoveredCanvasAttr = null)}
+							><Icon class="sat-icon" />{#if n.count > 1}<span class="sat-badge">{n.count}</span>{/if}</button>
+							<div class="sat-label" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue}
+								style="left:{n.x}px; top:{n.y + map.Rsn + 5}px;">{n.label}</div>
+						{/each}
+
+						{#if hoveredNodeInfo}
+							{@const ni = hoveredNodeInfo}
+							<div class="canvas-inspector" style="left:{Math.min(ni.x + map.Rsn + 14, map.W - 220)}px; top:{Math.max(8, ni.y - 28)}px;">
+								<div class="inspector-label">{ni.label}</div>
+								<div class="inspector-value">{ni.value || '—'}</div>
+							</div>
+						{/if}
+
+						<aside class="canvas-legend">
+							<div class="legend-h">MAP LEGEND</div>
+							<div class="legend-row"><span class="lg lg-main"></span><span>Entity</span></div>
+							<div class="legend-row"><span class="lg lg-attr"></span><span>Attribute</span></div>
+							<div class="legend-hint">Hover to inspect values</div>
+						</aside>
+					{:else}
+						<div class="canvas-empty">
+							<div class="canvas-empty-mark">◎</div>
+							<div class="canvas-empty-title">Select a metric</div>
+							<div class="canvas-empty-sub">Click a metric from the list to view its attribute map.</div>
+						</div>
+					{/if}
+					</div>
+				</div>
+			{/if}
 			<div class="doc-frame-wrap">
 				{#if !currentInput}
 					<div class="doc-empty">
@@ -1548,6 +1883,9 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: baseline;
+	}
+	.left-meta-count {
+		margin-left: auto;
 	}
 	.left-meta-title {
 		font-family: var(--font-serif);
@@ -2728,5 +3066,406 @@
 		.dialog-foot-buttons :global(button) {
 			flex: 1;
 		}
+	}
+
+	/* ---- CANVAS (metric attribute map) ---- */
+	.right.focus-split {
+		flex-direction: row;
+	}
+	.metric-canvas-wrap {
+		flex: 1 1 0;
+		min-width: 0;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		border-right: 1px solid var(--ink-line);
+		overflow: hidden;
+	}
+	.canvas-toolbar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px 12px;
+		border-bottom: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		flex-shrink: 0;
+		flex-wrap: wrap;
+	}
+	.toolbar-back {
+		all: unset;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 4px 10px 4px 6px;
+		border-radius: 6px;
+		border: 1px solid var(--ink-line);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.06em;
+		color: var(--text-secondary);
+		background: var(--panel-bg);
+		transition: border-color 120ms, color 120ms;
+	}
+	.toolbar-back:hover {
+		border-color: var(--brass);
+		color: var(--brass);
+	}
+	:global(.toolbar-icon) {
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
+		pointer-events: none;
+	}
+	.toolbar-filters {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex: 1;
+		min-width: 0;
+	}
+	.toolbar-select {
+		background: var(--panel-bg);
+		border: 1px solid var(--ink-line);
+		border-radius: 6px;
+		color: var(--text-primary);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		padding: 4px 8px;
+		max-width: 280px;
+		min-width: 0;
+	}
+	.toolbar-select:focus {
+		outline: none;
+		border-color: var(--brass);
+	}
+	.toolbar-kw-wrap {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+	}
+	.toolbar-kw-input {
+		background: var(--panel-bg);
+		border: 1px solid var(--ink-line);
+		border-radius: 6px;
+		color: var(--text-primary);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		padding: 4px 22px 4px 8px;
+		width: 180px;
+	}
+	.toolbar-kw-input:focus {
+		outline: none;
+		border-color: var(--brass);
+	}
+	.toolbar-kw-clear {
+		all: unset;
+		position: absolute;
+		right: 6px;
+		top: 50%;
+		transform: translateY(-50%);
+		cursor: pointer;
+		color: var(--text-muted);
+		font-size: 14px;
+		line-height: 1;
+		padding: 0 4px;
+	}
+	.toolbar-kw-clear:hover {
+		color: var(--brass);
+	}
+	.toolbar-nav {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		flex-shrink: 0;
+	}
+	.toolbar-nav-btn {
+		all: unset;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 26px;
+		height: 26px;
+		border-radius: 6px;
+		border: 1px solid var(--ink-line);
+		color: var(--text-secondary);
+		background: var(--panel-bg);
+		transition: border-color 120ms, color 120ms, opacity 120ms;
+	}
+	.toolbar-nav-btn:disabled {
+		opacity: 0.35;
+		cursor: not-allowed;
+	}
+	.toolbar-nav-btn:not(:disabled):hover {
+		border-color: var(--brass);
+		color: var(--brass);
+	}
+	.toolbar-nav-pos {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-muted);
+		padding: 0 6px;
+		min-width: 56px;
+		text-align: center;
+	}
+	.metric-canvas {
+		flex: 1 1 0;
+		min-width: 0;
+		min-height: 0;
+		position: relative;
+		overflow: hidden;
+		background: radial-gradient(ellipse at 30% 50%, rgba(212,162,76,0.06), transparent 55%),
+					radial-gradient(ellipse at 70% 50%, rgba(200,85,61,0.05), transparent 55%),
+					var(--page-bg);
+	}
+	.right.focus-split .doc-frame-wrap {
+		flex: 0 0 440px;
+		overflow: hidden;
+	}
+	.canvas-wires {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		overflow: visible;
+	}
+	.wire {
+		stroke: var(--ink-line);
+		stroke-width: 1.5;
+		fill: none;
+		opacity: 0.7;
+		transition: stroke 160ms, opacity 160ms;
+	}
+	.wire.spoke {
+		stroke: var(--brass);
+		stroke-width: 1;
+		opacity: 0.35;
+		stroke-dasharray: 4 4;
+	}
+	.wire.active {
+		stroke: var(--brass);
+		opacity: 1;
+	}
+	.wire.is-empty {
+		opacity: 0.2;
+	}
+	.canvas-node {
+		position: absolute;
+		transform: translate(-0%, -0%);
+		border-radius: 50%;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		text-align: center;
+		overflow: hidden;
+	}
+	.main-node {
+		background: var(--panel-bg);
+		border: 2px solid var(--ink-line);
+		padding: 8px;
+		cursor: default;
+		z-index: 2;
+	}
+	.metric-node {
+		border-color: var(--crimson);
+		box-shadow: 0 0 24px rgba(200,85,61,0.14);
+	}
+	.doc-node {
+		border-color: var(--brass);
+		box-shadow: 0 0 24px rgba(212,162,76,0.14);
+	}
+	.main-node-label {
+		font-family: var(--font-serif);
+		font-size: 12px;
+		font-weight: 600;
+		line-height: 1.2;
+		color: var(--text-primary);
+		max-width: 100%;
+		overflow: hidden;
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+	}
+	.main-node-sublabel {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		color: var(--text-muted);
+		margin-top: 4px;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.main-node-cap {
+		position: absolute;
+		transform: translateX(-50%);
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		white-space: nowrap;
+		pointer-events: none;
+	}
+	.sat-node {
+		all: unset;
+		cursor: pointer;
+		position: absolute;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--panel-bg-alt);
+		border: 1.5px solid var(--ink-line);
+		color: var(--text-secondary);
+		transition: background 140ms, border-color 140ms, color 140ms;
+		z-index: 3;
+	}
+	.sat-node:hover,
+	.sat-node.active {
+		background: var(--brass-faint);
+		border-color: var(--brass);
+		color: var(--brass);
+	}
+	.sat-node.is-empty {
+		opacity: 0.35;
+	}
+	:global(.sat-icon) {
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
+		pointer-events: none;
+	}
+	.sat-badge {
+		position: absolute;
+		top: -4px;
+		right: -4px;
+		background: var(--brass);
+		color: var(--page-bg);
+		border-radius: 50%;
+		width: 14px;
+		height: 14px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-family: var(--font-mono);
+		font-size: 8px;
+		font-weight: 700;
+		line-height: 1;
+		pointer-events: none;
+	}
+	.sat-label {
+		position: absolute;
+		transform: translateX(-50%);
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		white-space: nowrap;
+		pointer-events: none;
+		transition: color 140ms;
+	}
+	.sat-label.active {
+		color: var(--brass);
+	}
+	.sat-label.is-empty {
+		opacity: 0.35;
+	}
+	.canvas-inspector {
+		position: absolute;
+		z-index: 10;
+		background: var(--panel-bg);
+		border: 1px solid var(--brass);
+		padding: 8px 12px;
+		min-width: 120px;
+		max-width: 200px;
+		pointer-events: none;
+	}
+	.inspector-label {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--brass);
+		margin-bottom: 4px;
+	}
+	.inspector-value {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--text-primary);
+		line-height: 1.45;
+		word-break: break-word;
+	}
+	.canvas-legend {
+		position: absolute;
+		bottom: 16px;
+		right: 16px;
+		background: var(--panel-bg-alt);
+		border: 1px solid var(--ink-line);
+		padding: 10px 14px;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
+		pointer-events: none;
+	}
+	.legend-h {
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		margin-bottom: 6px;
+		font-size: 9px;
+	}
+	.legend-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-bottom: 4px;
+	}
+	.lg {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		flex-shrink: 0;
+		border: 1.5px solid;
+	}
+	.lg-main { border-color: var(--brass); background: var(--panel-bg); }
+	.lg-attr { border-color: var(--ink-line); background: var(--panel-bg-alt); }
+	.legend-hint {
+		font-size: 9px;
+		color: var(--text-muted);
+		margin-top: 6px;
+		opacity: 0.7;
+		max-width: 120px;
+		line-height: 1.4;
+	}
+	.canvas-empty {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-muted);
+		gap: 8px;
+	}
+	.canvas-empty-mark {
+		font-family: var(--font-serif);
+		font-size: 48px;
+		opacity: 0.3;
+		color: var(--brass);
+		line-height: 1;
+	}
+	.canvas-empty-title {
+		font-family: var(--font-serif);
+		font-size: 18px;
+		color: var(--text-secondary);
+	}
+	.canvas-empty-sub {
+		font-size: 12px;
+		max-width: 220px;
+		text-align: center;
+		line-height: 1.5;
 	}
 </style>

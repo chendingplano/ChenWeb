@@ -115,10 +115,11 @@ func buildSceneBlockExtInfo(block map[string]any) map[string]any {
 	if summaryEn := strings.TrimSpace(asString(block["summary_en"])); summaryEn != "" {
 		out["summary_en"] = summaryEn
 	}
-	if evidenceLines := normalizeProductEvidenceLines(block["evidence_lines"]); len(evidenceLines) > 0 {
-		out["evidence_lines"] = evidenceLines
+	lineSpans := normalizeProductEvidenceLines(block["line_spans"])
+	if len(lineSpans) == 0 {
+		lineSpans = normalizeProductEvidenceLines(block["evidence_lines"])
 	}
-	if lineSpans := normalizeProductEvidenceLines(block["line_spans"]); len(lineSpans) > 0 {
+	if len(lineSpans) > 0 {
 		out["line_spans"] = lineSpans
 	}
 	if keywordsEn := normalizeProductEvidenceLines(block["keywords_en"]); len(keywordsEn) > 0 {
