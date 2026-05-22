@@ -23,12 +23,12 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
-	"github.com/chendingplano/deepdoc/server/api/kehandler"
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
+	"github.com/chendingplano/deepdoc/server/api/kehandler"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -285,6 +285,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/inputs/upload", kbhandler.UploadInputs)
 	apiGroup.GET("/kb/inputs/:id/file", kbhandler.GetInputFile)
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
+	apiGroup.GET("/kb/metrics/search", kbhandler.SearchMetrics)
 	apiGroup.PUT("/kb/metrics/:id", kbhandler.UpdateMetric)
 	apiGroup.POST("/kb/metrics/extract", kbhandler.ExtractMetric)
 	apiGroup.POST("/kb/metrics/save", kbhandler.SaveExtractedMetrics)

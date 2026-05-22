@@ -1279,6 +1279,8 @@ CREATE TABLE IF NOT EXISTS kb.metrics (
     reasoning_tags JSONB,
     category_paths JSONB,
     category_paths_en JSONB,
+    search_document TEXT,
+    search_vector TSVECTOR,
     ext_info JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

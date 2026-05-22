@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { browser } from '$app/environment';
 	import {
 		listKbMetrics,
 		getKbInput,
-		updateKbMetric,
-		updateKbInput,
 		getRawLines,
 		extractKbMetrics,
 		saveExtractedKbMetrics,
@@ -16,7 +15,7 @@
 		type RawLine,
 		type SourceLineSpan
 	} from '$lib/services/kbService';
-	import EditableMetadataSection from '$lib/components/home3/editable-metadata-section.svelte';
+	import { searchKbMetrics, type KbMetricSearchResult } from '$lib/services/kbMetricSearch';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
@@ -37,15 +36,17 @@
 	import HashIcon from '@lucide/svelte/icons/hash';
 	import FileIcon from '@lucide/svelte/icons/file';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import XIcon from '@lucide/svelte/icons/x';
 	import {
-		buildKbMetricMetadataRows,
-		buildKbMetricUpdatePayloadForMetadataEdit
-	} from './kb-metric-metadata.js';
+		KB_METRIC_SEARCH_DEFAULTS,
+		buildKbMetricSearchParams,
+		createEmptyKbMetricSearchFilters,
+		hasKbMetricSearchFilters
+	} from './kb-metric-search-state.js';
 	import {
-		buildKbInputDocMetadataRows,
-		buildKbInputRecordMetadataRows,
-		buildKbInputUpdatePayloadForMetadataEdit
-	} from './kb-input-metadata.js';
+		metricSearchResultChips,
+		metricSearchResultSecondaryText
+	} from './kb-metric-search-result.js';
 
 	let {
 		darkMode = true,
@@ -76,6 +77,14 @@
 	// ---------- State ----------
 	let recordBrowserFolded = $state(false);
 	let keywordFilter = $state('');
+	let confidenceFilter = $state('');
+	let searchQuery = $state('');
+	let searchFilters = $state(createEmptyKbMetricSearchFilters());
+	let searchResults = $state<KbMetricSearchResult[]>([]);
+	let searchLoading = $state(false);
+	let searchError = $state('');
+	let searchHasRun = $state(false);
+	let searchTotal = $state(0);
 	let metricNameDropdownValue = $state<number | ''>('');
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbMetricRecord[]>([]);
@@ -128,7 +137,120 @@
 	let canvasW = $state(0);
 	let canvasH = $state(0);
 	let hoveredCanvasAttr = $state<string | null>(null);
+	let activeGroupKey = $state<string | null>(null);
 
+	// ---------- Focus-mode chart/PDF split (chart 2/3, PDF 1/3, draggable) ----------
+	const FOCUS_PDF_MIN = 280;
+	const FOCUS_PDF_MAX = 1460;
+	const FOCUS_PDF_DEFAULT = 480;
+	const FOCUS_PDF_WIDTH_KEY = 'metrics:focus-pdf-width';
+	let focusPdfWidth = $state(FOCUS_PDF_DEFAULT);
+	let focusResizing = $state(false);
+
+	function clampFocusPdfWidth(value: number) {
+		if (!Number.isFinite(value)) return FOCUS_PDF_DEFAULT;
+		return Math.max(FOCUS_PDF_MIN, Math.min(FOCUS_PDF_MAX, Math.round(value)));
+	}
+
+	function persistFocusPdfWidth(next: number) {
+		focusPdfWidth = clampFocusPdfWidth(next);
+		if (browser) localStorage.setItem(FOCUS_PDF_WIDTH_KEY, String(focusPdfWidth));
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		const saved = Number(localStorage.getItem(FOCUS_PDF_WIDTH_KEY));
+		if (Number.isFinite(saved) && saved > 0) {
+			focusPdfWidth = clampFocusPdfWidth(saved);
+			return;
+		}
+		// First-load default: PDF at ~1/3 of viewport so the chart gets ~2/3.
+		focusPdfWidth = clampFocusPdfWidth(Math.round(window.innerWidth / 3));
+	});
+
+	function startFocusResize(event: PointerEvent) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = focusPdfWidth;
+		focusResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		const move = (e: PointerEvent) => persistFocusPdfWidth(startWidth - (e.clientX - startX));
+		const up = () => {
+			focusResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up, { once: true });
+		window.addEventListener('pointercancel', up, { once: true });
+	}
+
+	function onFocusResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			persistFocusPdfWidth(focusPdfWidth + 24);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			persistFocusPdfWidth(focusPdfWidth - 24);
+		}
+	}
+		// ---------- Group info panel width (draggable) ----------
+		const GIP_WIDTH_KEY = 'metrics:info-panel-width';
+		const GIP_WIDTH_MIN = 220;
+		const GIP_WIDTH_MAX = 620;
+		let gipWidth = $state<number | null>(null);
+		let gipResizing = $state(false);
+
+		$effect(() => {
+			if (!browser) return;
+			const saved = Number(localStorage.getItem(GIP_WIDTH_KEY));
+			if (Number.isFinite(saved) && saved >= GIP_WIDTH_MIN && saved <= GIP_WIDTH_MAX) {
+				gipWidth = saved;
+			}
+		});
+
+		function startGipResize(event: PointerEvent) {
+			event.preventDefault();
+			const startX = event.clientX;
+			const startWidth = gipWidth ?? 340;
+			gipResizing = true;
+			document.body.style.cursor = 'col-resize';
+			document.body.style.userSelect = 'none';
+			const move = (e: PointerEvent) => {
+				const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, Math.round(startWidth + (e.clientX - startX))));
+				gipWidth = next;
+				if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
+			};
+			const up = () => {
+				gipResizing = false;
+				document.body.style.cursor = '';
+				document.body.style.userSelect = '';
+				window.removeEventListener('pointermove', move);
+				window.removeEventListener('pointerup', up);
+				window.removeEventListener('pointercancel', up);
+			};
+			window.addEventListener('pointermove', move);
+			window.addEventListener('pointerup', up, { once: true });
+			window.addEventListener('pointercancel', up, { once: true });
+		}
+
+		function onGipResizerKeydown(event: KeyboardEvent) {
+			if (event.key === 'ArrowLeft') {
+				event.preventDefault();
+				const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, (gipWidth ?? 340) - 16));
+				gipWidth = next;
+				if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
+			} else if (event.key === 'ArrowRight') {
+				event.preventDefault();
+				const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, (gipWidth ?? 340) + 16));
+				gipWidth = next;
+				if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
+			}
+		}
 	type NormalizedSpan = { page_number: number; line_number: number };
 
 	function toPositiveInt(v: unknown): number | null {
@@ -216,16 +338,7 @@
 		return map;
 	});
 
-	type MetadataLine = {
-		span_key: string;
-		line_number: number;
-		line_type: string;
-		content: string;
-		coords_text: string;
-		found: boolean;
-	};
-
-	let selectedMetric = $derived.by(() => {
+let selectedMetric = $derived.by(() => {
 		if (selectedMetricId == null) return null;
 		return metrics.find((x) => x.id === selectedMetricId) ?? null;
 	});
@@ -240,85 +353,259 @@
 		return [...set].sort((a, b) => a.localeCompare(b));
 	});
 
-	type CanvasNode = {
-		key: string; label: string; icon: any;
-		value: string; count: number; hasValue: boolean;
+	type AttrKind = 'text' | 'chips' | 'lines';
+	type LineEntry = { head: string; content: string; lineType: string };
+	type AttrDef = {
+		key: string;
+		label: string;
+		icon: any;
+		kind: AttrKind;
+		value: string;           // formatted value for `text` kind, joined for chips/lines summary
+		items: string[];         // for `chips` and `lines` kinds (joined head + content for lines)
+		entries: LineEntry[];    // structured per-line entries for `lines` kind
+		count: number;           // 1 for scalars with a value, items.length for lists, 0 if empty
+		hasValue: boolean;
+	};
+	type SatelliteNode = AttrDef & {
 		x: number; y: number;
 		wire: { x1: number; y1: number; x2: number; y2: number };
 	};
-	type MetricsCanvas = {
-		W: number; H: number; R: number; Rsn: number;
-		lCx: number; rCx: number; cy: number;
-		connectWire: { x1: number; y1: number; x2: number; y2: number };
-		metricLabel: string; metricSubLabel: string;
-		docLabel: string; docSubLabel: string;
-		metricNodes: CanvasNode[]; docNodes: CanvasNode[];
+	type GroupNode = {
+		key: string;
+		label: string;
+		icon: any;
+		count: number;       // total number of attributes in the group
+		filledCount: number; // number of attributes with a value
+		hasValue: boolean;
+		x: number; y: number;
+		wire: { x1: number; y1: number; x2: number; y2: number };
+		satellites: SatelliteNode[];
+		attrs: AttrDef[];
 	};
+	type MetricsCanvas = {
+		W: number; H: number; Rc: number; Rgn: number; Rsn: number;
+		cx: number; cy: number;
+		metricLabel: string; metricSubLabel: string;
+		groups: GroupNode[];
+	};
+
+	function buildMetricGroupAttrs(
+		m: KbMetricRecord,
+		spans: NormalizedSpan[],
+		lineByKey: Map<string, RawLine>,
+	): { metadata: AttrDef[]; context: AttrDef[]; metric: AttrDef[]; reasoning: AttrDef[]; grounding: AttrDef[] } {
+		const fmt = (v: unknown): string => (v == null || v === '') ? '' : String(v);
+		const has = (v: unknown): boolean => v != null && v !== '';
+		const textAttr = (key: string, label: string, icon: any, value: string, hasValue: boolean): AttrDef => ({
+			key, label, icon, kind: 'text', value, items: [], entries: [], count: hasValue ? 1 : 0, hasValue,
+		});
+		const chipsAttr = (key: string, label: string, icon: any, items: string[], value: string): AttrDef => ({
+			key, label, icon, kind: 'chips', value, items, entries: [], count: items.length, hasValue: items.length > 0,
+		});
+		const linesAttr = (key: string, label: string, icon: any, entries: LineEntry[]): AttrDef => {
+			const items = entries.map((e) => (e.content ? `${e.head}: ${e.content}` : e.head));
+			return {
+				key, label, icon, kind: 'lines',
+				value: items.join('\n'), items, entries,
+				count: entries.length, hasValue: entries.length > 0,
+			};
+		};
+
+		const kwItems = (m.metric_keywords ?? []).filter((v) => typeof v === 'string' && v.trim() !== '');
+		const tags = (m.reasoning_tags ?? []).filter((v) => typeof v === 'string' && v.trim() !== '');
+
+		const metadata: AttrDef[] = [
+			textAttr('metric_id', 'ID', HashIcon, String(m.id), true),
+			textAttr('name', 'Name', TypeIcon, fmt(m.metric_name), has(m.metric_name)),
+			textAttr('confidence', 'Confidence', ActivityIcon, confidencePct(m.confidence), m.confidence != null),
+			textAttr('desc', 'Desc', FileTextIcon, fmt(m.metric_desc), has(m.metric_desc)),
+			textAttr('formula', 'Formula', HashIcon, fmt(m.formula_or_definition), has(m.formula_or_definition)),
+			textAttr('explicit', 'Explicit', CalendarIcon, m.is_explicit_metric == null ? '' : (m.is_explicit_metric ? 'true' : 'false'), m.is_explicit_metric != null),
+		];
+
+		const context: AttrDef[] = [
+			textAttr('table_section', 'Section', ListIcon, fmt(m.table_name_or_section), has(m.table_name_or_section)),
+			textAttr('context', 'Context', BookOpenIcon, fmt(m.metric_context), has(m.metric_context)),
+			chipsAttr('keywords', 'Keywords', TagIcon, kwItems, kwItems.join(', ')),
+		];
+
+		const metric: AttrDef[] = [
+			textAttr('subject', 'Subject', TypeIcon, fmt(m.metric_subject), has(m.metric_subject)),
+			textAttr('frequency', 'Frequency', CalendarIcon, fmt(m.measurement_frequency), has(m.measurement_frequency)),
+			textAttr('value', 'Value', TrendingUpIcon, fmt(m.metric_value), has(m.metric_value)),
+			textAttr('threshold', 'Threshold', TrendingUpIcon, fmt(m.threshold_or_target), has(m.threshold_or_target)),
+			textAttr('unit', 'Unit', HashIcon, fmt(m.metric_unit), has(m.metric_unit)),
+			textAttr('value_class', 'Class', TagIcon, fmt(m.value_class), has(m.value_class)),
+			textAttr('value_data_type', 'Data Type', ListIcon, fmt(m.value_data_type), has(m.value_data_type)),
+			textAttr('value_range_type', 'Range Type', TrendingUpIcon, fmt(m.value_range_type), has(m.value_range_type)),
+			textAttr('location_type', 'Location', MapPinIcon, fmt(m.location_type), has(m.location_type)),
+		];
+
+		const reasoning: AttrDef[] = [
+			chipsAttr('reasoning_tags', 'Tags', TagIcon, tags, tags.join(', ')),
+		];
+
+		const groundingEntries: LineEntry[] = spans.flatMap((span) => {
+			const rawLine = lineByKey.get(`${span.page_number}:${span.line_number}`);
+			const content = rawLine?.content ?? '';
+			const lineType = rawLine?.line_type ?? '';
+			const head = `L${span.line_number} · P${span.page_number}`;
+			const segs = content.split('\n').filter((s) => s.trim() !== '');
+			if (segs.length <= 1) return [{ head, content, lineType }];
+			return segs.map((seg, i) => ({
+				head: i === 0 ? head : `${head} · ${i + 1}`,
+				content: seg,
+				lineType: i === 0 ? lineType : '',
+			}));
+		});
+		const grounding: AttrDef[] = [
+			linesAttr('source_line_spans', 'Lines', FileTextIcon, groundingEntries),
+		];
+
+		return { metadata, context, metric, reasoning, grounding };
+	}
 
 	let metricsMap = $derived.by((): MetricsCanvas | null => {
 		const W = canvasW, H = canvasH;
 		if (W < 100 || H < 100) return null;
 		const m = selectedMetric;
 		if (!m) return null;
-		const inp = currentInput;
 		const base = Math.min(W, H);
-		const R = Math.max(48, Math.min(82, base * 0.12));
-		const Rsn = 20;
-		const Rs = Math.max(90, Math.min(170, base * 0.27));
-		const lCx = W * 0.3, rCx = W * 0.7, cy = H / 2;
-		const METRIC_ANGLES = [60, 120, 180, 240, 300].map(d => d * Math.PI / 180);
-		const DOC_ANGLES = [-120, -60, 0, 60, 120].map(d => d * Math.PI / 180);
-		const kws = m.metric_keywords ?? [];
-		const metricDefs = [
-			{ key: 'mname', label: 'Name', icon: TypeIcon, value: m.metric_name || m.metric_subject || '', count: (m.metric_name || m.metric_subject) ? 1 : 0 },
-			{ key: 'conf', label: 'Confidence', icon: ActivityIcon, value: confidencePct(m.confidence), count: m.confidence != null ? 1 : 0 },
-			{ key: 'mvalue', label: 'Value', icon: TrendingUpIcon, value: [m.metric_value, m.metric_unit].filter(Boolean).join(' '), count: (m.metric_value != null || m.metric_unit) ? 1 : 0 },
-			{ key: 'loc', label: 'Location', icon: MapPinIcon, value: m.location_type || '', count: m.location_type ? 1 : 0 },
-			{ key: 'kw', label: 'Keywords', icon: TagIcon, value: kws.join(', '), count: kws.length },
+		const cx = W / 2, cy = H / 2;
+
+		// Center disc, group node, and attribute-satellite radii (modeled after
+		// the Scene Blocks chart in `kb-extraction-view.svelte`).
+		const Rc = Math.max(54, Math.min(94, base * 0.115));
+		const Rgn = Math.max(42, Math.min(58, base * 0.072));
+		const Rsn = 21;
+
+		// Distance from the center to each group node, and from each group node
+		// to its attribute satellites — clamped so satellite labels stay inside
+		// the canvas.
+		const reachY = cy - 12 - Rsn - 34;
+		const reachX = cx - 12 - 66;
+		const reach = Math.max(120, Math.min(reachY, reachX));
+		let Rs = Math.max(90, Math.min(200, base * 0.22));
+		let Rg = Math.max(Rc + Rgn + 26, Math.min(330, base * 0.34, reach - Rs));
+		if (reach - Rs < Rc + Rgn + 26) {
+			Rs = Math.max(56, reach - (Rc + Rgn + 28));
+			Rg = Rc + Rgn + 28;
+		}
+
+		const spans = normalizeMetricSpans(m);
+		const attrsByGroup = buildMetricGroupAttrs(m, spans, rawLineByKey);
+
+		type GroupSpec = {
+			key: string; label: string; icon: any;
+			angleDeg: number;
+			attrs: AttrDef[];
+		};
+
+		// 5 groups evenly spaced around the metric center (every 72°), starting
+		// at the top so the layout reads like the Scene Blocks chart.
+		const groupSpecs: GroupSpec[] = [
+			{ key: 'g_metadata',  label: 'Metadata',  icon: BookOpenIcon,   angleDeg: -90,  attrs: attrsByGroup.metadata },
+			{ key: 'g_context',   label: 'Context',   icon: TagIcon,        angleDeg: -18,  attrs: attrsByGroup.context },
+			{ key: 'g_metric',    label: 'Metric',    icon: TrendingUpIcon, angleDeg:  54,  attrs: attrsByGroup.metric },
+			{ key: 'g_grounding', label: 'Grounding', icon: MapPinIcon,     angleDeg: 126,  attrs: attrsByGroup.grounding },
+			{ key: 'g_reasoning', label: 'Reasoning', icon: ActivityIcon,   angleDeg: 198,  attrs: attrsByGroup.reasoning },
 		];
-		const metricNodes: CanvasNode[] = metricDefs.map((def, i) => {
-			const ang = METRIC_ANGLES[i];
-			const sx = lCx + Math.cos(ang) * Rs, sy = cy + Math.sin(ang) * Rs;
-			return { ...def, hasValue: def.count > 0, x: sx, y: sy, wire: shortenLine(lCx, cy, sx, sy, R + 4, Rsn + 3) };
+
+		const groups: GroupNode[] = groupSpecs.map((spec) => {
+			const ang = spec.angleDeg * Math.PI / 180;
+			const ux = Math.cos(ang), uy = Math.sin(ang);
+			const gx = cx + ux * Rg;
+			const gy = cy + uy * Rg;
+			const baseAng = Math.atan2(uy, ux);
+			const k = spec.attrs.length;
+			const span = k > 1 ? Math.min(Math.PI * 0.62, (k - 1) * 0.44) : 0;
+			const satellites: SatelliteNode[] = spec.attrs.map((def, i) => {
+				const sAng = baseAng + (k > 1 ? (i - (k - 1) / 2) * (span / (k - 1)) : 0);
+				const sx = gx + Math.cos(sAng) * Rs;
+				const sy = gy + Math.sin(sAng) * Rs;
+				return {
+					...def,
+					x: sx, y: sy,
+					wire: shortenLine(gx, gy, sx, sy, Rgn + 3, Rsn + 3),
+				};
+			});
+			const filled = spec.attrs.filter((a) => a.hasValue).length;
+			return {
+				key: spec.key,
+				label: spec.label,
+				icon: spec.icon,
+				count: spec.attrs.length,
+				filledCount: filled,
+				hasValue: filled > 0,
+				x: gx, y: gy,
+				wire: shortenLine(cx, cy, gx, gy, Rc + 5, Rgn + 3),
+				satellites,
+				attrs: spec.attrs,
+			};
 		});
-		const docDefs = [
-			{ key: 'dtitle', label: 'Title', icon: BookOpenIcon, value: inp?.title?.trim() || inp?.name?.trim() || '', count: (inp?.title || inp?.name) ? 1 : 0 },
-			{ key: 'dtype', label: 'Type', icon: FileTextIcon, value: inp?.type || '', count: inp?.type ? 1 : 0 },
-			{ key: 'ddocno', label: 'Doc No', icon: HashIcon, value: inp?.doc_no || '', count: inp?.doc_no ? 1 : 0 },
-			{ key: 'dfile', label: 'File', icon: FileIcon, value: inp?.file_name || '', count: inp?.file_name ? 1 : 0 },
-			{ key: 'ddate', label: 'Date', icon: CalendarIcon, value: inp?.create_time?.slice(0, 10) || '', count: inp?.create_time ? 1 : 0 },
-		];
-		const docNodes: CanvasNode[] = docDefs.map((def, i) => {
-			const ang = DOC_ANGLES[i];
-			const sx = rCx + Math.cos(ang) * Rs, sy = cy + Math.sin(ang) * Rs;
-			return { ...def, hasValue: def.count > 0, x: sx, y: sy, wire: shortenLine(rCx, cy, sx, sy, R + 4, Rsn + 3) };
-		});
+
 		return {
-			W, H, R, Rsn, lCx, rCx, cy,
-			connectWire: shortenLine(lCx, cy, rCx, cy, R + 5, R + 5),
+			W, H, Rc, Rgn, Rsn,
+			cx, cy,
 			metricLabel: m.metric_name?.trim() || m.metric_subject?.trim() || `Metric #${m.id}`,
 			metricSubLabel: m.metric_name_en?.trim() || m.metric_subject_en?.trim() || '',
-			docLabel: inp?.title?.trim() || inp?.name?.trim() || (inp ? `Record #${inp.id}` : '—'),
-			docSubLabel: inp?.doc_no?.trim() || inp?.type?.trim() || '',
-			metricNodes, docNodes,
+			groups,
 		};
 	});
 
-	let hoveredNodeInfo = $derived.by(() => {
+	let hoveredSatelliteInfo = $derived.by(() => {
 		if (!hoveredCanvasAttr || !metricsMap) return null;
-		return [...metricsMap.metricNodes, ...metricsMap.docNodes].find(n => n.key === hoveredCanvasAttr) ?? null;
+		for (const g of metricsMap.groups) {
+			const s = g.satellites.find((sn) => sn.key === hoveredCanvasAttr);
+			if (s) return { group: g, sat: s };
+		}
+		return null;
 	});
 
-	let filteredMetrics = $derived.by(() => {
-		const kw = keywordFilter.trim().toLowerCase();
-		if (!kw) return metrics;
-		return metrics.filter((m) =>
-			(m.metric_keywords ?? []).some((k) => k.toLowerCase().includes(kw)) ||
-			(m.metric_keywords_en ?? []).some((k) => k.toLowerCase().includes(kw)) ||
-			(m.metric_name ?? '').toLowerCase().includes(kw) ||
-			(m.metric_subject ?? '').toLowerCase().includes(kw)
-		);
+	const ALL_METRIC_KEY = '__all_metric__';
+	let activeGroup = $derived.by(() => {
+		if (!activeGroupKey || activeGroupKey === ALL_METRIC_KEY || !metricsMap) return null;
+		return metricsMap.groups.find((g) => g.key === activeGroupKey) ?? null;
 	});
+	let showAllMetricAttrs = $derived(activeGroupKey === ALL_METRIC_KEY && metricsMap != null);
+	let totalAttrCount = $derived.by(() => {
+		if (!metricsMap) return { filled: 0, total: 0 };
+		let filled = 0, total = 0;
+		for (const g of metricsMap.groups) { filled += g.filledCount; total += g.count; }
+		return { filled, total };
+	});
+
+		let filteredMetrics = $derived.by(() => {
+			let result = metrics;
+			const kw = keywordFilter.trim().toLowerCase();
+			if (kw) {
+				result = result.filter((m) =>
+					(m.metric_keywords ?? []).some((k) => k.toLowerCase().includes(kw)) ||
+					(m.metric_keywords_en ?? []).some((k) => k.toLowerCase().includes(kw)) ||
+					(m.metric_name ?? '').toLowerCase().includes(kw) ||
+					(m.metric_subject ?? '').toLowerCase().includes(kw)
+				);
+			}
+			const cf = confidenceFilter.trim();
+			if (cf) {
+				if (cf.startsWith('<')) {
+					const th = parseFloat(cf.slice(1).trim());
+					if (Number.isFinite(th)) {
+						result = result.filter((m) => (m.confidence ?? 0) < th);
+					}
+				} else {
+					const th = parseFloat(cf);
+					if (Number.isFinite(th)) {
+						result = result.filter((m) => (m.confidence ?? 0) >= th);
+					}
+				}
+			}
+			return result;
+		});
+
+	let metricSearchActive = $derived(
+		searchQuery.trim().length > 0 || hasKbMetricSearchFilters(searchFilters)
+	);
 
 	let selectedMetricInFilteredIndex = $derived(
 		filteredMetrics.findIndex((m) => m.id === selectedMetricId)
@@ -337,15 +624,6 @@
 		metricNameDropdownValue = selectedMetricId ?? '';
 	});
 
-	function formatCoords(coords: unknown): string {
-		if (!Array.isArray(coords) || coords.length < 4) return '';
-		const values = coords
-			.slice(0, 4)
-			.map((n) => (typeof n === 'number' && Number.isFinite(n) ? String(Math.trunc(n)) : ''))
-			.filter((v) => v.length > 0);
-		return values.length === 4 ? `[${values.join(', ')}]` : '';
-	}
-
 	function metricSourceRecordId(metric: KbMetricRecord | null): number | null {
 		if (!metric) return null;
 		const sourceRecordId = toPositiveInt(
@@ -354,34 +632,6 @@
 		if (sourceRecordId) return sourceRecordId;
 		return toPositiveInt(metric.input_record_id);
 	}
-
-	let currentPageLines = $derived(rawLines.filter((ln) => ln.page_number === docPage));
-
-	let selectedLineGroups = $derived.by(() => {
-		const grouped = new Map<number, MetadataLine[]>();
-		const metric = selectedMetric;
-		if (!metric) return [] as Array<{ page: number; lines: MetadataLine[] }>;
-		for (const span of normalizeMetricSpans(metric)) {
-			const key = `${span.page_number}:${span.line_number}`;
-			const ln = rawLineByKey.get(key);
-			const arr = grouped.get(span.page_number) ?? [];
-			arr.push({
-				span_key: key,
-				line_number: span.line_number,
-				line_type: ln?.line_type ?? '',
-				content: ln?.content ?? '',
-				coords_text: formatCoords(ln?.coords),
-				found: !!ln
-			});
-			grouped.set(span.page_number, arr);
-		}
-		return Array.from(grouped.entries())
-			.sort((a, b) => a[0] - b[0])
-			.map(([page, lines]) => ({
-				page,
-				lines: lines.sort((a, b) => a.line_number - b.line_number)
-			}));
-	});
 
 	function renderMetricHighlights(
 		pageNo: number,
@@ -499,69 +749,6 @@
 		return value.replace('T', ' ').slice(0, 19);
 	}
 
-	type MetadataEditorKind = 'text' | 'textarea' | 'datetime' | 'array' | 'json';
-	type MetadataRow = {
-		label: string;
-		key: string;
-		value: string;
-		rawValue: unknown;
-		editable: boolean;
-		editor?: MetadataEditorKind;
-		editKey?: string;
-		wide?: boolean;
-		pathLike?: boolean;
-	};
-
-	let metricFieldRows = $derived.by(() => {
-		return buildKbMetricMetadataRows(selectedMetric);
-	});
-
-	let filteredPageLines = $derived.by(() => {
-		const CONTEXT = 3;
-		if (selectedMetricId == null) return currentPageLines;
-		const highlightedOnPage: number[] = [];
-		for (const k of highlightKeys) {
-			const [pgStr, lnStr] = k.split(':');
-			if (Number(pgStr) === docPage) highlightedOnPage.push(Number(lnStr));
-		}
-		if (highlightedOnPage.length === 0) return [] as typeof currentPageLines;
-		const allLineNums = currentPageLines.map((l) => l.line_number);
-		const include = new Set<number>();
-		for (const hl of highlightedOnPage) {
-			const idx = allLineNums.indexOf(hl);
-			if (idx < 0) continue;
-			for (
-				let i = Math.max(0, idx - CONTEXT);
-				i <= Math.min(allLineNums.length - 1, idx + CONTEXT);
-				i++
-			) {
-				include.add(allLineNums[i]);
-			}
-		}
-		return currentPageLines.filter((l) => include.has(l.line_number));
-	});
-
-	let inputRecordMetaRows = $derived.by(() => buildKbInputRecordMetadataRows(currentInput));
-	let inputDocMetadataRows = $derived.by(() => buildKbInputDocMetadataRows(currentInput));
-
-	async function saveInputMetadataRow(row: MetadataRow, draft: string, editor: MetadataEditorKind) {
-		if (!currentInput) return;
-		const payload = buildKbInputUpdatePayloadForMetadataEdit(currentInput, row, draft, editor);
-		const updated = await updateKbInput(currentInput.id, payload);
-		currentInput = updated.record;
-	}
-
-	async function saveMetricMetadataRow(
-		row: MetadataRow,
-		draft: string,
-		editor: MetadataEditorKind
-	) {
-		if (!selectedMetric) return;
-		const payload = buildKbMetricUpdatePayloadForMetadataEdit(selectedMetric, row, draft, editor);
-		const updated = await updateKbMetric(selectedMetric.id, payload);
-		metrics = metrics.map((metric) => (metric.id === updated.record.id ? updated.record : metric));
-	}
-
 	let pagesGrouped = $derived.by(() => {
 		const map = new Map<number, RawLine[]>();
 		for (const ln of rawLines) {
@@ -655,6 +842,57 @@
 			rawLoading = false;
 			loading = false;
 		}
+	}
+
+	async function runMetricSearch() {
+		searchError = '';
+		searchHasRun = true;
+		const params = buildKbMetricSearchParams({
+			query: searchQuery,
+			page: KB_METRIC_SEARCH_DEFAULTS.page,
+			pageSize: KB_METRIC_SEARCH_DEFAULTS.pageSize,
+			filters: searchFilters
+		});
+		if (!params.q) {
+			searchResults = [];
+			searchTotal = 0;
+			searchError = 'Enter a query before searching metrics.';
+			return;
+		}
+		searchLoading = true;
+		try {
+			const response = await searchKbMetrics(params);
+			searchResults = response.results ?? [];
+			searchTotal = response.total ?? 0;
+		} catch (err) {
+			searchResults = [];
+			searchTotal = 0;
+			searchError = err instanceof Error ? err.message : 'Failed to search metrics';
+		} finally {
+			searchLoading = false;
+		}
+	}
+
+	function clearMetricSearch() {
+		searchQuery = '';
+		searchFilters = createEmptyKbMetricSearchFilters();
+		searchResults = [];
+		searchLoading = false;
+		searchError = '';
+		searchHasRun = false;
+		searchTotal = 0;
+	}
+
+	async function handleMetricSearchResultClick(result: KbMetricSearchResult) {
+		if (currentInput?.id !== result.input_record_id) {
+			await loadMetricsForRecord(result.input_record_id);
+		}
+		const target = metrics.find((metric) => metric.id === result.id);
+		if (!target) {
+			errorMsg = `Metric ${result.id} was not found in input ${result.input_record_id}.`;
+			return;
+		}
+		await selectMetric(target);
 	}
 
 	async function selectMetric(m: KbMetricRecord) {
@@ -990,16 +1228,85 @@
 		<aside class="metric-sidebar">
 			<div class="left-meta">
 				<div class="left-meta-title">Metrics</div>
-				<div class="left-meta-count">{metrics.length} found</div>
+				<div class="left-meta-count">
+					{#if metricSearchActive && searchHasRun}
+						{searchTotal} global hit{searchTotal === 1 ? '' : 's'}
+					{:else}
+						{metrics.length} found
+					{/if}
+				</div>
 			</div>
 			<div class="debug-badge" aria-live="polite">
 				Debug: last selected metric = {lastSelectedMetricDebug}
+			</div>
+
+			<div class="search-panel">
+				<div class="search-panel-head">
+					<div class="search-panel-title">Global Metric Search</div>
+					<div class="search-panel-sub">Search the whole `kb.metrics` corpus with agent-friendly filters.</div>
+				</div>
+				<div class="search-grid">
+					<input
+						class="search-input search-query"
+						type="text"
+						placeholder="Search metrics, thresholds, units, keywords…"
+						bind:value={searchQuery}
+						onkeydown={(event) => {
+							if (event.key === 'Enter') void runMetricSearch();
+						}}
+					/>
+					<input class="search-input" type="text" placeholder="Record ID" bind:value={searchFilters.inputRecordId} />
+					<select class="search-input" bind:value={searchFilters.isExplicitMetric}>
+						<option value="">Explicit metric?</option>
+						<option value="true">Explicit only</option>
+						<option value="false">Implicit only</option>
+					</select>
+					<input class="search-input" type="text" placeholder="Value class" bind:value={searchFilters.valueClass} />
+					<input class="search-input" type="text" placeholder="Value type" bind:value={searchFilters.valueDataType} />
+					<input class="search-input" type="text" placeholder="Metric unit" bind:value={searchFilters.metricUnit} />
+				</div>
+				<div class="search-actions">
+					<button type="button" class="search-btn primary" disabled={searchLoading} onclick={runMetricSearch}>
+						{searchLoading ? 'Searching…' : 'Search'}
+					</button>
+					<button type="button" class="search-btn" onclick={clearMetricSearch}>Clear</button>
+					<button
+						type="button"
+						class="search-btn"
+						disabled={!currentInput}
+						onclick={() => {
+							searchFilters = {
+								...searchFilters,
+								inputRecordId: currentInput ? String(currentInput.id) : ''
+							};
+						}}
+					>Use Current</button>
+				</div>
+				{#if searchError}
+					<div class="search-status">{searchError}</div>
+				{:else if metricSearchActive && searchHasRun}
+					<div class="search-status">
+						{searchTotal} result{searchTotal === 1 ? '' : 's'} for "{searchQuery.trim()}"
+					</div>
+				{/if}
 			</div>
 
 
 			<div class="metrics-list">
 				{#if errorMsg}
 					<div class="error">{errorMsg}</div>
+				{:else if searchLoading}
+					<div class="empty">
+						<div class="empty-glyph">⌕</div>
+						<div class="empty-title">Searching metrics</div>
+						<div class="empty-sub">Ranking results across the full metrics corpus…</div>
+					</div>
+				{:else if metricSearchActive && searchHasRun && searchResults.length === 0}
+					<div class="empty">
+						<div class="empty-glyph">⌕</div>
+						<div class="empty-title">No global matches</div>
+						<div class="empty-sub">Try broader keywords or relax one of the semantic filters.</div>
+					</div>
 				{:else if !loading && metrics.length === 0}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
@@ -1008,12 +1315,48 @@
 							Select a record from kb.inputs to populate the metrics index.
 						</div>
 					</div>
-				{:else if !loading && filteredMetrics.length === 0 && keywordFilter}
+				{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
 					<div class="empty">
 						<div class="empty-glyph">§</div>
 						<div class="empty-title">No matches</div>
-						<div class="empty-sub">No metrics match the keyword "{keywordFilter}".</div>
+						<div class="empty-sub">
+							{#if keywordFilter && confidenceFilter}
+								No metrics match keyword "{keywordFilter}" and confidence {confidenceFilter}.
+							{:else if keywordFilter}
+								No metrics match the keyword "{keywordFilter}".
+							{:else}
+								No metrics match confidence {confidenceFilter}.
+							{/if}
+						</div>
 					</div>
+				{:else if metricSearchActive && searchHasRun}
+					{#each searchResults as result, idx (result.id)}
+						<button
+							type="button"
+							class="metric-card"
+							class:selected={selectedMetricId === result.id}
+							onclick={() => handleMetricSearchResultClick(result)}
+						>
+							<div class="card-rule" aria-hidden="true"></div>
+							<div class="card-body">
+								<div class="card-row-top">
+									<div class="card-index">⌕ {String(idx + 1).padStart(3, '0')}</div>
+									<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
+								</div>
+								<div class="card-name">{result.primary_label}</div>
+								<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
+								<div class="card-foot">
+									<span class="chip">
+										<span class="chip-dot"></span>
+										record {result.input_record_id}
+									</span>
+									{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
+										<span class="chip chip-quiet">{chip}</span>
+									{/each}
+								</div>
+							</div>
+						</button>
+					{/each}
 				{:else}
 					{#each filteredMetrics as m, idx (m.id)}
 						<button
@@ -1092,6 +1435,33 @@
 									>×</button>
 								{/if}
 							</div>
+							<div class="toolbar-kw-wrap">
+								<input
+									class="toolbar-kw-input"
+									type="text"
+									list="confidence-options"
+									placeholder="Confidence…"
+									title="Filter by confidence threshold. Select or type a value like 0.85, or <0.50 for below-threshold."
+									bind:value={confidenceFilter}
+								/>
+								<datalist id="confidence-options">
+									<option value="0.90"></option>
+									<option value="0.80"></option>
+									<option value="0.70"></option>
+									<option value="0.60"></option>
+									<option value="0.50"></option>
+									<option value="<0.50"></option>
+								</datalist>
+								{#if confidenceFilter}
+									<button
+										type="button"
+										class="toolbar-kw-clear"
+										onclick={() => (confidenceFilter = '')}
+										title="Clear confidence filter"
+										aria-label="Clear confidence filter"
+									>×</button>
+								{/if}
+							</div>
 						</div>
 						<div class="toolbar-nav">
 							<button
@@ -1119,65 +1489,141 @@
 					{#if metricsMap}
 						{@const map = metricsMap}
 						<svg class="canvas-wires" width={map.W} height={map.H} viewBox="0 0 {map.W} {map.H}" aria-hidden="true">
-							<line class="wire spoke" x1={map.connectWire.x1} y1={map.connectWire.y1} x2={map.connectWire.x2} y2={map.connectWire.y2} />
-							{#each map.metricNodes as n (n.key)}
-								<line class="wire" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue} x1={n.wire.x1} y1={n.wire.y1} x2={n.wire.x2} y2={n.wire.y2} />
-							{/each}
-							{#each map.docNodes as n (n.key)}
-								<line class="wire" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue} x1={n.wire.x1} y1={n.wire.y1} x2={n.wire.x2} y2={n.wire.y2} />
+							{#each map.groups as g (g.key)}
+								<line class="wire spoke" class:active={activeGroupKey === g.key || hoveredCanvasAttr?.startsWith(g.key)} class:is-empty={!g.hasValue} x1={g.wire.x1} y1={g.wire.y1} x2={g.wire.x2} y2={g.wire.y2} />
+								{#each g.satellites as s (s.key)}
+									<line class="wire" class:active={hoveredCanvasAttr === s.key} class:is-empty={!s.hasValue} x1={s.wire.x1} y1={s.wire.y1} x2={s.wire.x2} y2={s.wire.y2} />
+								{/each}
 							{/each}
 						</svg>
 
-						<div class="canvas-node main-node metric-node" style="left:{map.lCx - map.R}px; top:{map.cy - map.R}px; width:{map.R*2}px; height:{map.R*2}px;" title={map.metricLabel}>
+						<button
+							type="button"
+							class="canvas-node main-node metric-node"
+							class:active={activeGroupKey === ALL_METRIC_KEY}
+							style="left:{map.cx - map.Rc}px; top:{map.cy - map.Rc}px; width:{map.Rc*2}px; height:{map.Rc*2}px;"
+							title="Click to inspect every attribute"
+							onclick={() => (activeGroupKey = activeGroupKey === ALL_METRIC_KEY ? null : ALL_METRIC_KEY)}
+						>
 							<span class="main-node-label">{map.metricLabel}</span>
 							{#if map.metricSubLabel}<span class="main-node-sublabel">{map.metricSubLabel}</span>{/if}
-						</div>
-						<div class="main-node-cap" style="left:{map.lCx}px; top:{map.cy + map.R + 10}px;">METRIC</div>
+						</button>
+						<div class="main-node-cap" style="left:{map.cx}px; top:{map.cy + map.Rc + 10}px;">METRIC</div>
 
-						<div class="canvas-node main-node doc-node" style="left:{map.rCx - map.R}px; top:{map.cy - map.R}px; width:{map.R*2}px; height:{map.R*2}px;" title={map.docLabel}>
-							<span class="main-node-label">{map.docLabel}</span>
-							{#if map.docSubLabel}<span class="main-node-sublabel">{map.docSubLabel}</span>{/if}
-						</div>
-						<div class="main-node-cap" style="left:{map.rCx}px; top:{map.cy + map.R + 10}px;">SOURCE DOC</div>
-
-						{#each map.metricNodes as n (n.key)}
-							{@const Icon = n.icon}
-							<button type="button" class="canvas-node sat-node" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue}
-								style="left:{n.x - map.Rsn}px; top:{n.y - map.Rsn}px; width:{map.Rsn*2}px; height:{map.Rsn*2}px;"
-								title="{n.label}{n.value ? ': ' + n.value : ''}"
-								onmouseenter={() => (hoveredCanvasAttr = n.key)}
-								onmouseleave={() => (hoveredCanvasAttr = null)}
-							><Icon class="sat-icon" />{#if n.count > 1}<span class="sat-badge">{n.count}</span>{/if}</button>
-							<div class="sat-label" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue}
-								style="left:{n.x}px; top:{n.y + map.Rsn + 5}px;">{n.label}</div>
+						{#each map.groups as g (g.key)}
+							{@const GIcon = g.icon}
+							<button
+								type="button"
+								class="canvas-node group-node-circle"
+								class:active={activeGroupKey === g.key}
+								class:is-empty={!g.hasValue}
+								style="left:{g.x - map.Rgn}px; top:{g.y - map.Rgn}px; width:{map.Rgn*2}px; height:{map.Rgn*2}px;"
+								title="Click to inspect {g.label} ({g.filledCount}/{g.count})"
+								onclick={() => (activeGroupKey = activeGroupKey === g.key ? null : g.key)}
+							>
+								<GIcon class="group-ic" />
+								<span class="group-node-label">{g.label}</span>
+							</button>
+							{#each g.satellites as s (s.key)}
+								{@const SIcon = s.icon}
+								<button
+									type="button"
+									class="canvas-node sat-node"
+									class:active={hoveredCanvasAttr === s.key}
+									class:is-empty={!s.hasValue}
+									style="left:{s.x - map.Rsn}px; top:{s.y - map.Rsn}px; width:{map.Rsn*2}px; height:{map.Rsn*2}px;"
+									title="{s.label}{s.hasValue ? ' (' + s.count + ')' : ' (empty)'}"
+									onmouseenter={() => (hoveredCanvasAttr = s.key)}
+									onmouseleave={() => (hoveredCanvasAttr = null)}
+									onclick={() => (activeGroupKey = g.key)}
+								>
+									<SIcon class="sat-icon" />
+									{#if s.count > 1}<span class="sat-badge">{s.count}</span>{/if}
+								</button>
+								<div
+									class="sat-label"
+									class:active={hoveredCanvasAttr === s.key}
+									class:is-empty={!s.hasValue}
+									style="left:{s.x}px; top:{s.y + map.Rsn + 5}px;"
+								>{s.label}</div>
+							{/each}
 						{/each}
-
-						{#each map.docNodes as n (n.key)}
-							{@const Icon = n.icon}
-							<button type="button" class="canvas-node sat-node" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue}
-								style="left:{n.x - map.Rsn}px; top:{n.y - map.Rsn}px; width:{map.Rsn*2}px; height:{map.Rsn*2}px;"
-								title="{n.label}{n.value ? ': ' + n.value : ''}"
-								onmouseenter={() => (hoveredCanvasAttr = n.key)}
-								onmouseleave={() => (hoveredCanvasAttr = null)}
-							><Icon class="sat-icon" />{#if n.count > 1}<span class="sat-badge">{n.count}</span>{/if}</button>
-							<div class="sat-label" class:active={hoveredCanvasAttr === n.key} class:is-empty={!n.hasValue}
-								style="left:{n.x}px; top:{n.y + map.Rsn + 5}px;">{n.label}</div>
-						{/each}
-
-						{#if hoveredNodeInfo}
-							{@const ni = hoveredNodeInfo}
-							<div class="canvas-inspector" style="left:{Math.min(ni.x + map.Rsn + 14, map.W - 220)}px; top:{Math.max(8, ni.y - 28)}px;">
-								<div class="inspector-label">{ni.label}</div>
-								<div class="inspector-value">{ni.value || '—'}</div>
-							</div>
-						{/if}
 
 						<aside class="canvas-legend">
 							<div class="legend-h">MAP LEGEND</div>
-							<div class="legend-row"><span class="lg lg-main"></span><span>Entity</span></div>
+							<div class="legend-row"><span class="lg lg-main"></span><span>Metric</span></div>
+							<div class="legend-row"><span class="lg lg-group"></span><span>Functional group</span></div>
 							<div class="legend-row"><span class="lg lg-attr"></span><span>Attribute</span></div>
-							<div class="legend-hint">Hover to inspect values</div>
+							<div class="legend-hint">Click a group to inspect its attribute values</div>
 						</aside>
+
+						{#if activeGroup || showAllMetricAttrs}
+							{@const sections = showAllMetricAttrs ? map.groups : (activeGroup ? [activeGroup] : [])}
+							{@const headIcon = activeGroup ? activeGroup.icon : null}
+							{@const headLabel = activeGroup ? activeGroup.label : 'All Attributes'}
+							{@const headCount = activeGroup ? `${activeGroup.filledCount}/${activeGroup.count}` : `${totalAttrCount.filled}/${totalAttrCount.total}`}
+							<aside class="group-info-panel" style:width={gipWidth != null ? `${gipWidth}px` : undefined} aria-label="{headLabel} attributes" role="region">
+								<header class="gip-head">
+									{#if headIcon}
+										{@const HI = headIcon}
+										<span class="gip-ic"><HI class="h-4 w-4" /></span>
+									{/if}
+									<span class="gip-title">{headLabel}</span>
+									<span class="gip-count mono">{headCount}</span>
+									<button type="button" class="gip-close" title="Close" aria-label="Close info panel" onclick={() => (activeGroupKey = null)}>
+										<XIcon class="h-4 w-4" />
+									</button>
+								</header>
+								<div class="gip-body">
+									{#each sections as section (section.key)}
+										{#if showAllMetricAttrs}
+											<div class="gip-section-head">
+												<span class="gip-section-label">{section.label}</span>
+												<span class="gip-section-count mono">{section.filledCount}/{section.count}</span>
+											</div>
+										{/if}
+										{#each section.attrs as a (a.key)}
+											<div class="gip-row" class:gip-row-col={a.kind !== 'text'} class:gip-row-empty={!a.hasValue}>
+												<span class="gip-label">{a.label}</span>
+												{#if !a.hasValue}
+													<span class="gip-empty">—</span>
+												{:else if a.kind === 'text'}
+													<span class="gip-val">{a.value}</span>
+												{:else if a.kind === 'chips'}
+													<div class="gip-chips">
+														{#each a.items as item, i (`${a.key}-${i}`)}<span class="gip-chip">{item}</span>{/each}
+													</div>
+												{:else}
+													<div class="gip-line-cards">
+														{#each a.entries as entry, i (`${a.key}-${i}`)}
+															<div class="gip-line-card">
+																<div class="gip-line-head">
+																	<span class="gip-line-loc">{entry.head}</span>
+																	{#if entry.lineType}
+																		<span class="gip-line-type">{entry.lineType}</span>
+																	{/if}
+																</div>
+																{#if entry.content}
+																	<div class="gip-line-body">{entry.content}</div>
+																{/if}
+															</div>
+														{/each}
+													</div>
+												{/if}
+											</div>
+										{/each}
+									{/each}
+								</div>
+								<button
+									type="button"
+									class="gip-resize-handle"
+									class:active={gipResizing}
+									aria-label="Resize attribute info panel"
+									onpointerdown={startGipResize}
+									onkeydown={onGipResizerKeydown}
+								><span class="gip-resize-grip" aria-hidden="true"></span></button>
+							</aside>
+						{/if}
 					{:else}
 						<div class="canvas-empty">
 							<div class="canvas-empty-mark">◎</div>
@@ -1187,8 +1633,18 @@
 					{/if}
 					</div>
 				</div>
+				<button
+					type="button"
+					class="focus-resize-handle"
+					class:active={focusResizing}
+					aria-label="Resize the source document panel"
+					onpointerdown={startFocusResize}
+					onkeydown={onFocusResizerKeydown}
+				>
+					<span class="focus-resize-grip" aria-hidden="true"></span>
+				</button>
 			{/if}
-			<div class="doc-frame-wrap">
+			<div class="doc-frame-wrap" style:flex-basis={recordBrowserFolded ? `${focusPdfWidth}px` : null}>
 				{#if !currentInput}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
@@ -1210,12 +1666,6 @@
 							renderHighlights={renderMetricHighlights}
 							bind:showingLines={showLines}
 							{darkMode}
-							sidebarMinWidth={140}
-							sidebarMaxWidth={620}
-							sidebarDefaultWidth={270}
-							sidebarTitle="Metadata"
-							sidebarSettingsKey="metrics-pdf-sidebar"
-							sidebarWidthSettingLabel="Metadata Panel Width"
 							onselect={handleDragSelect}
 							ondragmove={handleDragMove}
 							bind:selectedLines={pdfSelectedLines}
@@ -1266,92 +1716,6 @@
 										<ListIcon class="pvw-tb-icon" />
 									{/if}
 								</button>
-							{/snippet}
-							{#snippet sidebar()}
-								<EditableMetadataSection
-									title="kb.metrics Record"
-									rows={metricFieldRows}
-									emptyText="Select a metric to inspect its fields."
-									canEdit={true}
-									onSave={saveMetricMetadataRow}
-								/>
-
-								<EditableMetadataSection
-									title="kb.inputs Record"
-									rows={inputRecordMetaRows}
-									emptyText="No record loaded."
-									canEdit={true}
-									onSave={saveInputMetadataRow}
-								/>
-
-								<EditableMetadataSection
-									title="kb.inputs Doc Metadata"
-									rows={inputDocMetadataRows}
-									emptyText="No doc_metadata available."
-									canEdit={true}
-									onSave={saveInputMetadataRow}
-								/>
-
-								<div class="metadata-section">
-									<div class="metadata-section-title">Selected Lines (By Page)</div>
-									{#if selectedLineGroups.length === 0}
-										<div class="metadata-empty">No selected lines.</div>
-									{:else}
-										{#each selectedLineGroups as group (group.page)}
-											<div class="metadata-page-group">
-												<div class="metadata-page-title">Page {group.page}</div>
-												<div class="metadata-lines">
-													{#each group.lines as line (`${group.page}-${line.line_number}`)}
-														<div class="metadata-line-row">
-															<div class="metadata-line-head">
-																<span class="metadata-line-no">{line.span_key}</span>
-																{#if line.line_type}
-																	<span class="metadata-line-type">{line.line_type}</span>
-																{/if}
-															</div>
-															<div class="metadata-line-content">
-																{line.content || (line.found ? '—' : '(line text unavailable)')}
-																{#if line.coords_text}
-																	&nbsp;{line.coords_text}
-																{/if}
-															</div>
-														</div>
-													{/each}
-												</div>
-											</div>
-										{/each}
-									{/if}
-								</div>
-
-								<div class="metadata-section">
-									<div class="metadata-section-title">Lines — Page {docPage}</div>
-									{#if rawLoading}
-										<div class="metadata-empty">Loading…</div>
-									{:else if filteredPageLines.length === 0 && selectedMetricId != null}
-										<div class="metadata-empty">No selected lines on page {docPage}.</div>
-									{:else if filteredPageLines.length === 0}
-										<div class="metadata-empty">No lines for this page.</div>
-									{:else}
-										<div class="metadata-lines">
-											{#each filteredPageLines as line (line.line_number)}
-												<div
-													class="metadata-line-row"
-													class:hl={highlightKeys.has(`${docPage}:${line.line_number}`)}
-												>
-													<div class="metadata-line-head">
-														<span class="metadata-line-no"
-															>{String(line.line_number).padStart(4, '0')}</span
-														>
-														{#if line.line_type}
-															<span class="metadata-line-type">{line.line_type}</span>
-														{/if}
-													</div>
-													<div class="metadata-line-content">{line.content}</div>
-												</div>
-											{/each}
-										</div>
-									{/if}
-								</div>
 							{/snippet}
 							{#snippet linesView()}
 								<div class="lines-panel">
@@ -1927,6 +2291,89 @@
 	}
 	.metrics-list::-webkit-scrollbar-thumb {
 		background: var(--ink-line);
+	}
+
+	.search-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		margin: 0 16px 14px;
+		padding: 14px;
+		border: 1px solid var(--ink-line);
+		border-radius: 18px;
+		background: linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--panel-bg-alt) 88%, transparent),
+			var(--panel-bg)
+		);
+	}
+
+	.search-panel-head {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.search-panel-title {
+		font: 600 0.95rem/1.2 var(--font-sans);
+		color: var(--text-primary);
+	}
+
+	.search-panel-sub {
+		font: 500 0.78rem/1.35 var(--font-sans);
+		color: var(--text-muted);
+	}
+
+	.search-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.search-query {
+		grid-column: 1 / -1;
+	}
+
+	.search-input {
+		width: 100%;
+		border-radius: 12px;
+		border: 1px solid var(--ink-line);
+		background: color-mix(in srgb, var(--panel-bg) 88%, transparent);
+		color: var(--text-primary);
+		padding: 10px 12px;
+		font: 500 0.82rem/1.2 var(--font-sans);
+	}
+
+	.search-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.search-btn {
+		border-radius: 999px;
+		border: 1px solid var(--ink-line);
+		background: transparent;
+		color: var(--text-secondary);
+		padding: 8px 12px;
+		font: 600 0.76rem/1 var(--font-sans);
+		cursor: pointer;
+	}
+
+	.search-btn.primary {
+		border-color: color-mix(in srgb, var(--brass) 60%, var(--ink-line));
+		background: var(--brassFaint);
+		color: var(--text-primary);
+	}
+
+	.search-btn:disabled {
+		opacity: 0.55;
+		cursor: default;
+	}
+
+	.search-status {
+		font: 500 0.76rem/1.35 var(--font-sans);
+		color: var(--text-muted);
 	}
 
 	.empty {
@@ -2598,68 +3045,6 @@
 		border: 1px solid var(--ink-line);
 		background: #0a0d14;
 	}
-	.metadata-section {
-		border: 1px solid var(--ink-line-soft);
-		background: var(--panel-bg-alt);
-		padding: 10px;
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-	.metadata-section-title {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--text-muted);
-	}
-	.metadata-empty {
-		font-size: 12px;
-		color: var(--text-muted);
-	}
-	.metadata-page-group {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		padding-top: 4px;
-		border-top: 1px dashed var(--ink-line-soft);
-	}
-	.metadata-page-title {
-		font-family: var(--font-mono);
-		font-size: 11px;
-		color: var(--brass);
-	}
-	.metadata-lines {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-	.metadata-line-row {
-		padding: 6px;
-		background: var(--panel-bg);
-		border: 1px solid var(--ink-line-soft);
-	}
-	.metadata-line-row.hl {
-		background: color-mix(in srgb, var(--brass) 12%, var(--panel-bg));
-		border-color: var(--brass);
-	}
-	.metadata-line-head {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		margin-bottom: 4px;
-	}
-	.metadata-line-no,
-	.metadata-line-type {
-		font-family: var(--font-mono);
-		font-size: 10px;
-		color: var(--text-muted);
-	}
-	.metadata-line-content {
-		font-size: 12px;
-		color: var(--text-secondary);
-		line-height: 1.4;
-	}
 	:global(.pdf-highlight) {
 		position: absolute;
 		background: rgba(200, 85, 61, 0.18);
@@ -3220,8 +3605,55 @@
 					var(--page-bg);
 	}
 	.right.focus-split .doc-frame-wrap {
-		flex: 0 0 440px;
+		flex: 0 0 480px;
 		overflow: hidden;
+	}
+	.focus-resize-handle {
+		flex: 0 0 14px;
+		position: relative;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		outline: none;
+		align-self: stretch;
+		touch-action: none;
+	}
+	.focus-resize-handle::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 6px;
+		width: 2px;
+		background: var(--ink-line);
+		opacity: 0.6;
+		transition: background 140ms, opacity 140ms;
+	}
+	.focus-resize-handle:hover::before,
+	.focus-resize-handle.active::before,
+	.focus-resize-handle:focus-visible::before {
+		background: var(--brass);
+		opacity: 1;
+	}
+	.focus-resize-grip {
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		width: 7px;
+		height: 48px;
+		transform: translate(-50%, -50%);
+		border-radius: 999px;
+		background:
+			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 5px 10px repeat-y,
+			var(--panel-bg);
+		border: 1px solid var(--ink-line);
+		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
+	}
+	.focus-resize-handle.active .focus-resize-grip,
+	.focus-resize-handle:hover .focus-resize-grip,
+	.focus-resize-handle:focus-visible .focus-resize-grip {
+		border-color: var(--brass);
 	}
 	.canvas-wires {
 		position: absolute;
@@ -3268,12 +3700,75 @@
 		z-index: 2;
 	}
 	.metric-node {
-		border-color: var(--crimson);
+		all: unset;
+		position: absolute;
+		box-sizing: border-box;
+		border-radius: 50%;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		text-align: center;
+		overflow: hidden;
+		background: var(--panel-bg);
+		border: 2px solid var(--crimson);
+		padding: 8px;
+		cursor: pointer;
+		z-index: 2;
 		box-shadow: 0 0 24px rgba(200,85,61,0.14);
+		transition: box-shadow 140ms, border-color 140ms;
 	}
-	.doc-node {
+	.metric-node:hover,
+	.metric-node.active {
 		border-color: var(--brass);
-		box-shadow: 0 0 24px rgba(212,162,76,0.14);
+		box-shadow: 0 0 28px rgba(212,162,76,0.30);
+	}
+	.group-node-circle {
+		all: unset;
+		cursor: pointer;
+		position: absolute;
+		border-radius: 50%;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		text-align: center;
+		background: var(--panel-bg-alt);
+		border: 2px solid var(--ink-line);
+		color: var(--text-secondary);
+		padding: 6px;
+		transition: background 140ms, border-color 140ms, color 140ms, box-shadow 140ms;
+		z-index: 2;
+	}
+	.group-node-circle:hover,
+	.group-node-circle.active {
+		background: var(--brass-faint);
+		border-color: var(--brass);
+		color: var(--brass);
+		box-shadow: 0 0 18px rgba(212,162,76,0.18);
+	}
+	.group-node-circle.is-empty {
+		opacity: 0.45;
+	}
+	:global(.group-ic) {
+		width: 18px;
+		height: 18px;
+		flex-shrink: 0;
+		pointer-events: none;
+		margin-bottom: 2px;
+	}
+	.group-node-label {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: inherit;
+		line-height: 1.1;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		pointer-events: none;
 	}
 	.main-node-label {
 		font-family: var(--font-serif);
@@ -3373,31 +3868,6 @@
 	.sat-label.is-empty {
 		opacity: 0.35;
 	}
-	.canvas-inspector {
-		position: absolute;
-		z-index: 10;
-		background: var(--panel-bg);
-		border: 1px solid var(--brass);
-		padding: 8px 12px;
-		min-width: 120px;
-		max-width: 200px;
-		pointer-events: none;
-	}
-	.inspector-label {
-		font-family: var(--font-mono);
-		font-size: 9px;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--brass);
-		margin-bottom: 4px;
-	}
-	.inspector-value {
-		font-family: var(--font-sans);
-		font-size: 12px;
-		color: var(--text-primary);
-		line-height: 1.45;
-		word-break: break-word;
-	}
 	.canvas-legend {
 		position: absolute;
 		bottom: 16px;
@@ -3430,8 +3900,236 @@
 		flex-shrink: 0;
 		border: 1.5px solid;
 	}
-	.lg-main { border-color: var(--brass); background: var(--panel-bg); }
+	.lg-main { border-color: var(--crimson); background: var(--panel-bg); }
+	.lg-group { border-color: var(--brass); background: var(--panel-bg-alt); }
 	.lg-attr { border-color: var(--ink-line); background: var(--panel-bg-alt); }
+
+	/* ---- Group info panel (shown when a group node is clicked) ---- */
+	.group-info-panel {
+		position: absolute;
+		top: 14px;
+		left: 14px;
+		width: clamp(260px, 30%, 360px);
+		max-height: calc(100% - 28px);
+		display: flex;
+		flex-direction: column;
+		background: var(--panel-bg);
+		border: 1px solid var(--ink-line);
+		border-radius: 6px;
+		box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+		z-index: 12;
+		overflow: hidden;
+	}
+	.gip-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 12px;
+		background: var(--panel-bg-alt);
+		border-bottom: 1px solid var(--ink-line);
+	}
+	.gip-ic {
+		display: inline-flex;
+		color: var(--brass);
+		flex-shrink: 0;
+	}
+	.gip-title {
+		font-family: var(--font-serif);
+		font-size: 14px;
+		color: var(--text-primary);
+		font-weight: 600;
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.gip-count {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
+		letter-spacing: 0.06em;
+	}
+	.gip-close {
+		all: unset;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 4px;
+		color: var(--text-muted);
+		cursor: pointer;
+		transition: color 140ms, background 140ms;
+	}
+	.gip-close:hover {
+		color: var(--text-primary);
+		background: var(--ink-line-soft, rgba(148,163,184,0.16));
+	}
+	.gip-body {
+		flex: 1 1 auto;
+		overflow: auto;
+		padding: 10px 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.gip-section-head {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		margin-top: 6px;
+		padding-bottom: 4px;
+		border-bottom: 1px dashed var(--ink-line);
+	}
+	.gip-section-head:first-child {
+		margin-top: 0;
+	}
+	.gip-section-label {
+		font-family: var(--font-serif);
+		font-size: 13px;
+		color: var(--brass);
+		font-weight: 600;
+		letter-spacing: 0.02em;
+	}
+	.gip-section-count {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
+		letter-spacing: 0.06em;
+		margin-left: auto;
+	}
+	.gip-row {
+		display: flex;
+		align-items: baseline;
+		gap: 10px;
+	}
+	.gip-row-col {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 5px;
+	}
+	.gip-row-empty {
+		opacity: 0.55;
+	}
+	.gip-label {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		flex-shrink: 0;
+		min-width: 80px;
+	}
+	.gip-val {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--text-primary);
+		line-height: 1.45;
+		word-break: break-word;
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.gip-empty {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+	.gip-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+	}
+	.gip-chip {
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 8px;
+		border-radius: 999px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		font-size: 11px;
+		line-height: 1.4;
+		font-family: var(--font-sans);
+	}
+	.gip-line-cards {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.gip-line-card {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		padding: 8px 10px;
+		border: 1px solid var(--ink-line);
+		border-radius: 6px;
+		background: var(--panel-bg-alt);
+		box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+	}
+	.gip-line-head {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+	.gip-line-loc {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--brass);
+	}
+	.gip-line-type {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		padding: 1px 6px;
+		border: 1px solid var(--ink-line);
+		border-radius: 999px;
+		background: var(--panel-bg);
+	}
+	.gip-line-body {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--text-primary);
+		line-height: 1.5;
+		word-break: break-word;
+	}
+	.gip-resize-handle {
+		all: unset;
+		position: absolute;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		width: 10px;
+		cursor: col-resize;
+		z-index: 15;
+		touch-action: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 140ms;
+	}
+	.gip-resize-handle:hover,
+	.gip-resize-handle.active {
+		background: var(--brass-faint);
+	}
+	.gip-resize-grip {
+		width: 2px;
+		height: 32px;
+		border-radius: 1px;
+		background: var(--ink-line);
+		opacity: 0;
+		transition: opacity 140ms;
+		pointer-events: none;
+	}
+	.gip-resize-handle:hover .gip-resize-grip,
+	.gip-resize-handle.active .gip-resize-grip {
+		opacity: 1;
+	}
 	.legend-hint {
 		font-size: 9px;
 		color: var(--text-muted);

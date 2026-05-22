@@ -53,5 +53,24 @@ remove_toc_in_blocks = true
 prev_overlapped_pages_in_blocks = 1
 next_overlapped_pages_in_blocks = 1
 
+[metric_search]
+dictionary = "simple"
+default_page_size = 20
+max_page_size = 100
+preview_max_words = 18
+phrase_friendly = true
+min_rank = 0.0
+
+[metric_search.weights]
+metric_name = 1.8
+metric_subject = 1.5
+metric_keywords = 2.8
+metric_desc = 1.0
+metric_context = 0.8
+value_class = 0.7
+metric_unit = 0.5
+table_name_or_section = 0.4
+category_paths = 0.6
+
 [frontend]
 topic_types = ["封面/cover", "事实/fact", "范围/scope", "条款/compliance", "章节/heading", "过程/procedure", "表格/table", "需求/requirement", "公式/formula", "列表/list"]

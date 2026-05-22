@@ -269,6 +269,8 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 			"Table 2",
 			`["named_metric"]`,
 			sqlmock.AnyArg(),
+			nil,
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(101, 1))
 

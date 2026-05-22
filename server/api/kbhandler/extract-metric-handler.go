@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"strings"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
-	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/labstack/echo/v4"
 	toml "github.com/pelletier/go-toml/v2"
 )
@@ -492,6 +492,8 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		reasoning_tags JSONB,
 		category_paths JSONB,
 		category_paths_en JSONB,
+		search_document TEXT,
+		search_vector TSVECTOR,
 		ext_info JSONB,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);`

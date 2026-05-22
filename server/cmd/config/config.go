@@ -20,6 +20,28 @@ type DocGenConfig struct {
 	OutputBaseDir string `mapstructure:"output_base_dir"`
 }
 
+type MetricSearchWeightsConfig struct {
+	MetricName         float64 `mapstructure:"metric_name"`
+	MetricSubject      float64 `mapstructure:"metric_subject"`
+	MetricKeywords     float64 `mapstructure:"metric_keywords"`
+	MetricDesc         float64 `mapstructure:"metric_desc"`
+	MetricContext      float64 `mapstructure:"metric_context"`
+	ValueClass         float64 `mapstructure:"value_class"`
+	MetricUnit         float64 `mapstructure:"metric_unit"`
+	TableNameOrSection float64 `mapstructure:"table_name_or_section"`
+	CategoryPaths      float64 `mapstructure:"category_paths"`
+}
+
+type MetricSearchConfig struct {
+	Dictionary      string                    `mapstructure:"dictionary"`
+	DefaultPageSize int                       `mapstructure:"default_page_size"`
+	MaxPageSize     int                       `mapstructure:"max_page_size"`
+	PreviewMaxWords int                       `mapstructure:"preview_max_words"`
+	PhraseFriendly  bool                      `mapstructure:"phrase_friendly"`
+	MinRank         float64                   `mapstructure:"min_rank"`
+	Weights         MetricSearchWeightsConfig `mapstructure:"weights"`
+}
+
 type AppConfigDef struct {
 	AppTableNames struct {
 		TableName_ProcessStatus   string `mapstructure:"table_name_process_status"`
@@ -29,8 +51,9 @@ type AppConfigDef struct {
 		TableName_DspyPrompts     string `mapstructure:"table_name_dspy_prompts"`
 		TableName_CustRequestLogs string `mapstructure:"table_name_cust_request_logs"`
 	} `mapstructure:"app_table_names"`
-	PDFParser PDFParserConfig `mapstructure:"pdf_parser"`
-	DocGen    DocGenConfig    `mapstructure:"doc_gen"`
+	PDFParser    PDFParserConfig    `mapstructure:"pdf_parser"`
+	DocGen       DocGenConfig       `mapstructure:"doc_gen"`
+	MetricSearch MetricSearchConfig `mapstructure:"metric_search"`
 }
 
 type PDFParserConfig struct {
@@ -126,6 +149,53 @@ func GetPDFParserConfig() PDFParserConfig {
 
 func GetDocGenConfig() DocGenConfig {
 	return AppConfig.DocGen
+}
+
+func GetMetricSearchConfig() MetricSearchConfig {
+	cfg := AppConfig.MetricSearch
+	if strings.TrimSpace(cfg.Dictionary) == "" {
+		cfg.Dictionary = "simple"
+	}
+	if cfg.DefaultPageSize <= 0 {
+		cfg.DefaultPageSize = 20
+	}
+	if cfg.MaxPageSize <= 0 {
+		cfg.MaxPageSize = 100
+	}
+	if cfg.PreviewMaxWords <= 0 {
+		cfg.PreviewMaxWords = 18
+	}
+	if !viper.IsSet("metric_search.phrase_friendly") {
+		cfg.PhraseFriendly = true
+	}
+	if cfg.Weights.MetricName <= 0 {
+		cfg.Weights.MetricName = 1.8
+	}
+	if cfg.Weights.MetricSubject <= 0 {
+		cfg.Weights.MetricSubject = 1.5
+	}
+	if cfg.Weights.MetricKeywords <= 0 {
+		cfg.Weights.MetricKeywords = 2.8
+	}
+	if cfg.Weights.MetricDesc <= 0 {
+		cfg.Weights.MetricDesc = 1.0
+	}
+	if cfg.Weights.MetricContext <= 0 {
+		cfg.Weights.MetricContext = 0.8
+	}
+	if cfg.Weights.ValueClass <= 0 {
+		cfg.Weights.ValueClass = 0.7
+	}
+	if cfg.Weights.MetricUnit <= 0 {
+		cfg.Weights.MetricUnit = 0.5
+	}
+	if cfg.Weights.TableNameOrSection <= 0 {
+		cfg.Weights.TableNameOrSection = 0.4
+	}
+	if cfg.Weights.CategoryPaths <= 0 {
+		cfg.Weights.CategoryPaths = 0.6
+	}
+	return cfg
 }
 
 func NormalizeMigrationPaths(logger ApiTypes.JimoLogger, configPath string) {
