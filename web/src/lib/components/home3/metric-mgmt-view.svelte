@@ -619,6 +619,19 @@ let selectedMetric = $derived.by(() => {
 			: null
 	);
 
+	// Keep selection in sync with filter changes — if the current metric falls
+	// out of the filtered list, auto-select the first entry; if the list is
+	// empty, clear the selection so the canvas shows the empty state.
+	$effect(() => {
+		const fm = filteredMetrics;
+		if (selectedMetricId == null) return;
+		if (fm.length === 0) {
+			selectedMetricId = null;
+		} else if (!fm.some((m) => m.id === selectedMetricId)) {
+			selectedMetricId = fm[0].id;
+		}
+	});
+
 	// Keep metric name dropdown in sync with selected metric.
 	$effect(() => {
 		metricNameDropdownValue = selectedMetricId ?? '';
