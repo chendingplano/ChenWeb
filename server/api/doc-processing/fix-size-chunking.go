@@ -402,6 +402,9 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
 	}
+	if err := ReindexTopicSearchForRecord(ctx, rec.ID, s.Logger); err != nil {
+		s.Logger.Warn("reindex topic search registry failed", "record_id", rec.ID, "error", err)
+	}
 	if err := deleteSummaryFiles(s.ChunkDir, rec.ID); err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
@@ -470,6 +473,9 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 	if err := s.embedAndWriteSummaries(ctx, rec.ID, allSummaries); err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
+	}
+	if err := ReindexSummarySearchForRecord(ctx, rec.ID, s.Logger); err != nil {
+		s.Logger.Warn("reindex summary search registry failed", "record_id", rec.ID, "error", err)
 	}
 
 	if err := s.Store.InsertChunkRun(ctx, ChunkRunRecord{

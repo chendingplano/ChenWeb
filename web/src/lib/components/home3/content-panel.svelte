@@ -16,6 +16,7 @@
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
 	import SkillMgmtView from '$lib/components/home3/skill-mgmt-view.svelte';
+	import KbSearchLabView from '$lib/components/home3/kb-search-lab-view.svelte';
 	import Canvas01      from '$lib/components/shared-ui/canvas-01.svelte';
 	import Chatter01     from '$lib/components/shared-ui/chatter-01.svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
@@ -146,6 +147,8 @@
 	<div class="flex-1">
 		{#if activeMenu?.childId === 'doc-processor-dashboard'}
 			<DocProcessorDashboardView {darkMode} />
+		{:else if activeMenu?.childId === 'kb-search-lab'}
+			<KbSearchLabView {darkMode} />
 		{:else if activeMenu?.childId === 'flow'}
 			<Canvas01
 				{darkMode}

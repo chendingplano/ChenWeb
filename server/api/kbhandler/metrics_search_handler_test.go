@@ -119,6 +119,25 @@ func TestBuildMetricSearchWhereClauseUsesConfiguredQueryParser(t *testing.T) {
 	}
 }
 
+func TestBuildMetricSearchWhereClauseAddsCJKSubstringFallback(t *testing.T) {
+	cfg := metricSearchConfig{
+		dictionary:     "simple",
+		phraseFriendly: true,
+	}
+
+	whereSQL, args := buildMetricSearchWhereClause("平均瞬时日差", metricSearchFilters{}, cfg)
+
+	if !strings.Contains(whereSQL, "coalesce(m.metric_name, '') ILIKE '%' || $1 || '%'") {
+		t.Fatalf("whereSQL=%q", whereSQL)
+	}
+	if !strings.Contains(whereSQL, "coalesce(m.search_document, '') ILIKE '%' || $1 || '%'") {
+		t.Fatalf("whereSQL=%q", whereSQL)
+	}
+	if len(args) != 1 || args[0] != "平均瞬时日差" {
+		t.Fatalf("args=%v", args)
+	}
+}
+
 func TestQueryMetricSearchResultsEscapesHeadlineOptions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

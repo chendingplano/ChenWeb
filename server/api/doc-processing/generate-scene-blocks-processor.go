@@ -328,6 +328,9 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		p.persistSceneBlocksStatus(ctx, rec, start, err)
 		return nil
 	}
+	if reindexErr := ReindexSceneBlockSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex scene block search registry failed", "record_id", evt.RecordID, "error", reindexErr)
+	}
 
 	p.Logger.Info("scene blocks extracted",
 		"record_id", evt.RecordID,

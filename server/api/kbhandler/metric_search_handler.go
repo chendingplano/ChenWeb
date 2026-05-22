@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -23,6 +24,7 @@ type metricSearchFilters struct {
 }
 
 type metricSearchResult struct {
+	ArtifactID         string          `json:"artifact_id"`
 	ID                 int64           `json:"id"`
 	MetricID           string          `json:"metric_id,omitempty"`
 	InputRecordID      int64           `json:"input_record_id"`
@@ -50,6 +52,7 @@ type metricSearchResult struct {
 type metricSearchResponse struct {
 	Status         bool                 `json:"status"`
 	Query          string               `json:"query"`
+	ArtifactType   string               `json:"artifact_type"`
 	Page           int                  `json:"page"`
 	PageSize       int                  `json:"page_size"`
 	Total          int64                `json:"total"`
@@ -172,6 +175,7 @@ func SearchMetrics(c echo.Context) error {
 	return c.JSON(http.StatusOK, metricSearchResponse{
 		Status:         true,
 		Query:          queryText,
+		ArtifactType:   "metric",
 		Page:           page,
 		PageSize:       pageSize,
 		Total:          total,
@@ -221,6 +225,15 @@ func queryMetricSearchResults(db *sql.DB, queryText string, filters metricSearch
 		cfg.weights.TableNameOrSection, cfg.dictionary,
 		cfg.weights.CategoryPaths, cfg.dictionary,
 	)
+	if containsCJKText(queryText) {
+		scoreExpr = scoreExpr + `
+        + CASE WHEN coalesce(m.metric_name, '') ILIKE '%' || $1 || '%' THEN 1.25 ELSE 0 END
+        + CASE WHEN coalesce(m.metric_subject, '') ILIKE '%' || $1 || '%' THEN 0.75 ELSE 0 END
+        + CASE WHEN coalesce(m.metric_desc, '') ILIKE '%' || $1 || '%' THEN 0.40 ELSE 0 END
+        + CASE WHEN coalesce(m.metric_context, '') ILIKE '%' || $1 || '%' THEN 0.30 ELSE 0 END
+        + CASE WHEN coalesce(m.search_document, '') ILIKE '%' || $1 || '%' THEN 0.20 ELSE 0 END
+    `
+	}
 
 	minRankClause := ""
 	if cfg.minRank > 0 {
@@ -316,6 +329,8 @@ LIMIT $%d OFFSET $%d
 		if len(sourceLineSpans) > 0 {
 			record.SourceLineSpans = json.RawMessage(sourceLineSpans)
 		}
+		seq := strings.TrimSpace(firstNonEmptyString(lastMetricSequence(record.MetricID), strconv.FormatInt(record.ID, 10)))
+		record.ArtifactID = kbsearch.BuildArtifactID(record.InputRecordID, "metric", seq)
 		record.PrimaryLabel = strings.TrimSpace(firstNonEmptyString(record.MetricName, record.MetricSubject, "Metric #"+strconv.FormatInt(record.ID, 10)))
 		results = append(results, record)
 	}
@@ -331,14 +346,22 @@ func buildMetricSearchWhereClause(queryText string, filters metricSearchFilters,
 		tsQueryExpr = "plainto_tsquery"
 	}
 
-	conditions := []string{
-		fmt.Sprintf(
-			"COALESCE(m.search_vector, to_tsvector('%s', COALESCE(m.search_document, ''))) @@ %s('%s', $1)",
-			cfg.dictionary,
-			tsQueryExpr,
-			cfg.dictionary,
-		),
+	ftsClause := fmt.Sprintf(
+		"COALESCE(m.search_vector, to_tsvector('%s', COALESCE(m.search_document, ''))) @@ %s('%s', $1)",
+		cfg.dictionary,
+		tsQueryExpr,
+		cfg.dictionary,
+	)
+	if containsCJKText(queryText) {
+		ftsClause = fmt.Sprintf(`(%s
+			OR coalesce(m.metric_name, '') ILIKE '%%' || $1 || '%%'
+			OR coalesce(m.metric_subject, '') ILIKE '%%' || $1 || '%%'
+			OR coalesce(m.metric_desc, '') ILIKE '%%' || $1 || '%%'
+			OR coalesce(m.metric_context, '') ILIKE '%%' || $1 || '%%'
+			OR coalesce(m.search_document, '') ILIKE '%%' || $1 || '%%')`, ftsClause)
 	}
+
+	conditions := []string{ftsClause}
 	args := []any{queryText}
 	nextArg := 2
 
@@ -389,4 +412,13 @@ func maxInt(a, b int) int {
 
 func escapeSQLLiteral(raw string) string {
 	return strings.ReplaceAll(raw, "'", "''")
+}
+
+func lastMetricSequence(metricID string) string {
+	metricID = strings.TrimSpace(metricID)
+	if metricID == "" {
+		return ""
+	}
+	parts := strings.Split(metricID, "_")
+	return strings.TrimSpace(parts[len(parts)-1])
 }

@@ -308,6 +308,9 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	if indexErr := p.indexMetrics(evt.RecordID, allMetrics); indexErr != nil {
 		p.Logger.Warn("index metrics failed", "record_id", evt.RecordID, "error", indexErr)
 	}
+	if reindexErr := ReindexMetricSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex metric search registry failed", "record_id", evt.RecordID, "error", reindexErr)
+	}
 
 	p.Logger.Info("metrics extracted",
 		"record_id", evt.RecordID,

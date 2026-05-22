@@ -148,6 +148,7 @@
 		{
 			id: 'tools', label: 'Tools', icon: WorkflowIcon, group: 'Workspace',
 			children: [
+				{ id: 'kb-search-lab', label: 'KB Search Lab' },
 				{ id: 'flow', label: 'Flow' },
 				{ id: 'prompt-optimizer', label: 'Prompt Optimizer' },
 				{ id: 'openmetadata', label: 'OpenMetadata' }

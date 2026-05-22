@@ -342,6 +342,9 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		p.persistProductsStatus(ctx, rec, start, err)
 		return nil
 	}
+	if reindexErr := ReindexProductSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex product search registry failed", "record_id", evt.RecordID, "error", reindexErr)
+	}
 	p.Logger.Info("products extracted",
 		"record_id", evt.RecordID,
 		"inserted_rows", inserted,

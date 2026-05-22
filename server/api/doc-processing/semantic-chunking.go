@@ -257,6 +257,9 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}
+	if err := ReindexTopicSearchForRecord(ctx, rec.ID, s.Logger); err != nil {
+		s.Logger.Warn("reindex topic search registry failed", "record_id", rec.ID, "error", err)
+	}
 
 	overlapPercent := 0
 	if s.FileBlockSize > 0 {

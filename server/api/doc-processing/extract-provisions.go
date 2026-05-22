@@ -36,12 +36,12 @@ type ProvisionsProcessor struct {
 	FallbackModelCfgPath string
 	FallbackModelErr     error
 	FallbackModelName    string
-	BlockSize   int
-	PrevOverlap int
-	NextOverlap int
-	RemoveTOC   bool
-	ArtifactDir    string
-	ArtifactWebDir string
+	BlockSize            int
+	PrevOverlap          int
+	NextOverlap          int
+	RemoveTOC            bool
+	ArtifactDir          string
+	ArtifactWebDir       string
 }
 
 type ProvisionsStore interface {
@@ -96,12 +96,12 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		FallbackModelCfgPath: fallbackModelCfgPath,
 		FallbackModelErr:     fallbackModelErr,
 		FallbackModelName:    fallbackModelCfg.ModelName,
-		BlockSize:      envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
-		PrevOverlap:    prevOverlap,
-		NextOverlap:    nextOverlap,
-		RemoveTOC:      removeTOC,
-		ArtifactDir:    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		ArtifactWebDir: strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
+		BlockSize:            envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
+		PrevOverlap:          prevOverlap,
+		NextOverlap:          nextOverlap,
+		RemoveTOC:            removeTOC,
+		ArtifactDir:          strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		ArtifactWebDir:       strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 	}
 }
 
@@ -209,6 +209,9 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		p.Logger.Error("write provisions artifact error", "error", err, "record_id", evt.RecordID)
 		p.persistProvisionsStatus(ctx, rec, start, err)
 		return nil
+	}
+	if reindexErr := ReindexProvisionSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex provision search registry failed", "record_id", evt.RecordID, "error", reindexErr)
 	}
 	p.Logger.Info("provisions extracted",
 		"record_id", evt.RecordID,
@@ -352,7 +355,7 @@ func isEmptyFallbackProvisionExtractionError(err error) bool {
 }
 
 func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block Block, modelName string) (map[string]any, error) {
-	p.Logger.Info("To extract provisions", 
+	p.Logger.Info("To extract provisions",
 		"model", modelName,
 		"prompt_name", p.PromptRef,
 		"input_text", block)
@@ -502,26 +505,26 @@ func normalizeProvisionList(items []any, lineToPage map[int]int, lineText map[st
 			categoryPaths = raw["categories"]
 		}
 		normalized := map[string]any{
-			"provision_name":     provisionName,
-			"provision_name_en":  strings.TrimSpace(asString(raw["name_en"])),
-			"provision_type":     strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["provision_type"]), asString(raw["type"]))),
-			"source_text":        strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["source_text"]), provisionText)),
-			"provision":          provisionText,
-			"provision_en":       strings.TrimSpace(asString(raw["provision_en"])),
-			"provision_desc":     strings.TrimSpace(asString(raw["provision_desc"])),
-			"provision_desc_en":  strings.TrimSpace(asString(raw["provision_desc_en"])),
-			"context":            strings.TrimSpace(asString(raw["context"])),
-			"context_en":         strings.TrimSpace(asString(raw["context_en"])),
-			"subject":            strings.TrimSpace(asString(raw["subject"])),
-			"subject_en":         strings.TrimSpace(asString(raw["subject_en"])),
-			"location_type":      strings.TrimSpace(asString(raw["location_type"])),
-			"keywords":           toStringSlice(raw["keywords"]),
-			"keywords_en":        toStringSlice(raw["keywords_en"]),
-			"confidence":         toFloat(raw["confidence"]),
-			"is_explicit":        toBool(raw["is_explicit"]),
-			"need_verify":        toBool(raw["need_verify"]),
-			"category_paths":     categoryPaths,
-			"category_paths_en":  raw["category_path_en"],
+			"provision_name":    provisionName,
+			"provision_name_en": strings.TrimSpace(asString(raw["name_en"])),
+			"provision_type":    strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["provision_type"]), asString(raw["type"]))),
+			"source_text":       strings.TrimSpace(firstNonEmptyTrimmed(asString(raw["source_text"]), provisionText)),
+			"provision":         provisionText,
+			"provision_en":      strings.TrimSpace(asString(raw["provision_en"])),
+			"provision_desc":    strings.TrimSpace(asString(raw["provision_desc"])),
+			"provision_desc_en": strings.TrimSpace(asString(raw["provision_desc_en"])),
+			"context":           strings.TrimSpace(asString(raw["context"])),
+			"context_en":        strings.TrimSpace(asString(raw["context_en"])),
+			"subject":           strings.TrimSpace(asString(raw["subject"])),
+			"subject_en":        strings.TrimSpace(asString(raw["subject_en"])),
+			"location_type":     strings.TrimSpace(asString(raw["location_type"])),
+			"keywords":          toStringSlice(raw["keywords"]),
+			"keywords_en":       toStringSlice(raw["keywords_en"]),
+			"confidence":        toFloat(raw["confidence"]),
+			"is_explicit":       toBool(raw["is_explicit"]),
+			"need_verify":       toBool(raw["need_verify"]),
+			"category_paths":    categoryPaths,
+			"category_paths_en": raw["category_path_en"],
 		}
 		sourceSpans := normalizeProvisionSourceLineSpans(raw["source_line_spans"], lineToPage)
 		normalized["source_line_spans"] = sourceSpans
@@ -1228,41 +1231,41 @@ ON CONFLICT (input_record_id, prov_id) DO UPDATE SET
 		privateInfoJSON, _ := json.Marshal(dbRecord["private_info"])
 
 		_, err := s.DB.ExecContext(ctx, stmt,
-			req.InputRecordID,                                                             // $1
-			req.ExtractID,                                                                 // $2
-			req.InputFilename,                                                             // $3
-			int(toFloat(dbRecord["prov_id"])),                                             // $4
-			strings.TrimSpace(asString(dbRecord["prov_name"])),                            // $5
-			strings.TrimSpace(asString(dbRecord["prov_name_en"])),                         // $6
-			strings.TrimSpace(asString(dbRecord["provision_type"])),                       // $7
-			strings.TrimSpace(asString(dbRecord["source_text"])),                          // $8
-			string(sourceSpansJSON),                                                       // $9
-			dbRecord["provision"],                                                         // $10
-			strings.TrimSpace(asString(dbRecord["provision_en"])),                         // $11
-			strings.TrimSpace(asString(dbRecord["provision_subject"])),                    // $12
-			strings.TrimSpace(asString(dbRecord["provision_subject_en"])),                 // $13
-			strings.TrimSpace(asString(dbRecord["prov_desc"])),                            // $14
-			strings.TrimSpace(asString(dbRecord["prov_desc_en"])),                         // $15
-			strings.TrimSpace(asString(dbRecord["prov_context"])),                         // $16
-			strings.TrimSpace(asString(dbRecord["prov_context_en"])),                      // $17
-			string(keywordsJSON),                                                          // $18
-			string(keywordsEnJSON),                                                        // $19
-			string(categoryPathsJSON),                                                     // $20
-			string(categoryPathsEnJSON),                                                   // $21
-			strings.TrimSpace(asString(dbRecord["location_type"])),                        // $22
-			toFloat(dbRecord["confidence"]),                                               // $23
-			toBool(dbRecord["is_explicit"]),                                               // $24
-			toBool(dbRecord["need_verify"]),                                               // $25
-			int(toFloat(dbRecord["num_blocks"])),                                          // $26
-			int(toFloat(dbRecord["num_provisions"])),                                      // $27
-			toFloat(dbRecord["time_per_provision"]),                                       // $28
-			strings.TrimSpace(asString(dbRecord["model_name"])),                           // $29
-			strings.TrimSpace(asString(dbRecord["prompt_name"])),                          // $30
+			req.InputRecordID,                 // $1
+			req.ExtractID,                     // $2
+			req.InputFilename,                 // $3
+			int(toFloat(dbRecord["prov_id"])), // $4
+			strings.TrimSpace(asString(dbRecord["prov_name"])),                              // $5
+			strings.TrimSpace(asString(dbRecord["prov_name_en"])),                           // $6
+			strings.TrimSpace(asString(dbRecord["provision_type"])),                         // $7
+			strings.TrimSpace(asString(dbRecord["source_text"])),                            // $8
+			string(sourceSpansJSON),                                                         // $9
+			dbRecord["provision"],                                                           // $10
+			strings.TrimSpace(asString(dbRecord["provision_en"])),                           // $11
+			strings.TrimSpace(asString(dbRecord["provision_subject"])),                      // $12
+			strings.TrimSpace(asString(dbRecord["provision_subject_en"])),                   // $13
+			strings.TrimSpace(asString(dbRecord["prov_desc"])),                              // $14
+			strings.TrimSpace(asString(dbRecord["prov_desc_en"])),                           // $15
+			strings.TrimSpace(asString(dbRecord["prov_context"])),                           // $16
+			strings.TrimSpace(asString(dbRecord["prov_context_en"])),                        // $17
+			string(keywordsJSON),                                                            // $18
+			string(keywordsEnJSON),                                                          // $19
+			string(categoryPathsJSON),                                                       // $20
+			string(categoryPathsEnJSON),                                                     // $21
+			strings.TrimSpace(asString(dbRecord["location_type"])),                          // $22
+			toFloat(dbRecord["confidence"]),                                                 // $23
+			toBool(dbRecord["is_explicit"]),                                                 // $24
+			toBool(dbRecord["need_verify"]),                                                 // $25
+			int(toFloat(dbRecord["num_blocks"])),                                            // $26
+			int(toFloat(dbRecord["num_provisions"])),                                        // $27
+			toFloat(dbRecord["time_per_provision"]),                                         // $28
+			strings.TrimSpace(asString(dbRecord["model_name"])),                             // $29
+			strings.TrimSpace(asString(dbRecord["prompt_name"])),                            // $30
 			strings.TrimSpace(firstNonEmptyTrimmed(asString(dbRecord["status"]), "active")), // $31
-			string(publicInfoJSON),                                                        // $32
-			string(privateInfoJSON),                                                       // $33
-			strings.TrimSpace(asString(dbRecord["notes"])),                                // $34
-			strings.TrimSpace(asString(dbRecord["error_msg"])),                            // $35
+			string(publicInfoJSON),                                                          // $32
+			string(privateInfoJSON),                                                         // $33
+			strings.TrimSpace(asString(dbRecord["notes"])),                                  // $34
+			strings.TrimSpace(asString(dbRecord["error_msg"])),                              // $35
 		)
 		if err != nil {
 			return inserted, err
