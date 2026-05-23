@@ -1130,6 +1130,7 @@ func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText s
 	return nil, fmt.Errorf("(MID_26042491) llm output must contain 'metrics' or 'candidates'")
 }
 
+/*
 func firstPromptLine(promptText string) string {
 	promptText = strings.TrimSpace(promptText)
 	if promptText == "" {
@@ -1140,6 +1141,7 @@ func firstPromptLine(promptText string) string {
 	}
 	return promptText
 }
+*/
 
 func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
 	payload, err := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, p.MentionModelName, p.MentionModelCfg)

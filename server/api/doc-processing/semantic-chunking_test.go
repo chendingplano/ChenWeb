@@ -136,8 +136,11 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 	if err := svc.HandleInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
 		t.Fatalf("HandleInput: %v", err)
 	}
-	if ex.calls != 2 {
-		t.Fatalf("extractor calls=%d, want 2", ex.calls)
+	if ex.structuredCalls != 2 {
+		t.Fatalf("structuredCalls=%d, want 2", ex.structuredCalls)
+	}
+	if ex.calls != 0 {
+		t.Fatalf("legacy ExtractJSON calls=%d, want 0", ex.calls)
 	}
 	if st.insertCalls != 1 {
 		t.Fatalf("InsertChunkRun calls=%d, want 1", st.insertCalls)
@@ -480,10 +483,10 @@ func TestNormalizeCategorySegment_CJK(t *testing.T) {
 }
 
 type fakeSemanticExtractor struct {
-	outs   []map[string]any
-	err    error
-	calls  int
-	inputs []string
+	outs            []map[string]any
+	err             error
+	calls           int
+	inputs          []string
 	structuredCalls int
 	contractNames   []string
 }

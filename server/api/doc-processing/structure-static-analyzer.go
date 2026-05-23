@@ -191,6 +191,8 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 		if corrected == "" {
 			corrected = "unchanged"
 		}
+		// Re-number sequentially; deletions earlier in the pipeline leave gaps in the original LineNo.
+		outputLineNo := strconv.Itoa(i + 1)
 		var row []string
 		if p.OverrideOrigin {
 			lineType := line.OriginalLineType
@@ -198,7 +200,7 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 				lineType = corrected
 			}
 			row = []string{
-				strconv.Itoa(line.LineNo),
+				outputLineNo,
 				strconv.Itoa(line.PageNo),
 				lineType,
 				line.Font,
@@ -208,7 +210,7 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 			}
 		} else {
 			row = []string{
-				strconv.Itoa(line.LineNo),
+				outputLineNo,
 				strconv.Itoa(line.PageNo),
 				line.OriginalLineType,
 				corrected,
@@ -229,7 +231,37 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 	if p.Logger != nil {
 		p.Logger.Info("static analyzer output written", "output_path", filePath, "line_count", len(out.Lines), "override_origin", p.OverrideOrigin)
 	}
+	// Re-numbering changes line numbers, so any .chunks artifacts built from the
+	// old numbering are now stale. Delete them so the next chunking run rebuilds them.
+	if p.OverrideOrigin {
+		p.deleteStaleChunkArtifacts(recordID)
+	}
 	return nil
+}
+
+func (p *StaticAnalyzerProcessor) deleteStaleChunkArtifacts(recordID int64) {
+	if strings.TrimSpace(p.ArtifactDir) == "" {
+		return
+	}
+	groupID := recordID / 1000
+	recordDir := filepath.Join(p.ArtifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
+	entries, err := os.ReadDir(recordDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".chunks") {
+			continue
+		}
+		path := filepath.Join(recordDir, entry.Name())
+		if removeErr := os.Remove(path); removeErr != nil {
+			if p.Logger != nil {
+				p.Logger.Warn("failed to remove stale chunk artifact", "path", path, "error", removeErr)
+			}
+		} else if p.Logger != nil {
+			p.Logger.Info("removed stale chunk artifact", "path", path)
+		}
+	}
 }
 
 // analyzeStaticStructure
@@ -334,6 +366,19 @@ func removeStaticWeBoosWatermarkLines(lines []staticInputLine) []staticInputLine
 		return lines
 	}
 
+	// If a page has more than one watermark-like line, keep the whole document
+	// unchanged to avoid deleting legitimate content.
+	watermarkishCountByPage := make(map[int]int)
+	for _, line := range lines {
+		content := strings.TrimSpace(line.Content)
+		if content == watermark || (strings.HasPrefix(content, "www") && len(content) <= len(watermark)) {
+			watermarkishCountByPage[line.PageNo]++
+			if watermarkishCountByPage[line.PageNo] > 1 {
+				return lines
+			}
+		}
+	}
+
 	// Build removal set from exact-match lines and the "starts with www" fallback
 	// for pages that have no exact match.
 	removed := make(map[int]struct{}, len(matchesByPage))
@@ -361,14 +406,12 @@ func removeStaticWeBoosWatermarkLines(lines []staticInputLine) []staticInputLine
 		}
 	}
 
-	// Build output: skip removed lines; strip embedded watermark from remaining content.
+	// Build output: skip removed lines and preserve embedded watermark text in
+	// other content such as table rows.
 	filtered := make([]staticInputLine, 0, len(lines)-len(removed))
 	for i, line := range lines {
 		if _, ok := removed[i]; ok {
 			continue
-		}
-		if strings.Contains(line.Content, watermark) {
-			line.Content = strings.ReplaceAll(line.Content, watermark, "")
 		}
 		filtered = append(filtered, line)
 	}
@@ -638,6 +681,9 @@ func isStaticMergeableParagraph(line staticInputLine, corrected map[int]string) 
 	if strings.ToLower(strings.TrimSpace(line.OriginalLineLower)) != "paragraph" {
 		return false
 	}
+	if isStaticWatermarkLikeLine(line.Content) {
+		return false
+	}
 	if isStaticTOCLine(line) {
 		return false
 	}
@@ -646,6 +692,12 @@ func isStaticMergeableParagraph(line staticInputLine, corrected map[int]string) 
 		return false
 	}
 	return strings.TrimSpace(corrected[line.LineNo]) == "unchanged"
+}
+
+func isStaticWatermarkLikeLine(content string) bool {
+	const watermark = "www.weboos.com"
+	trimmed := strings.TrimSpace(content)
+	return trimmed == watermark || (strings.HasPrefix(trimmed, "www") && len(trimmed) <= len(watermark))
 }
 
 func parseStaticLineGeometry(raw string) (staticLineGeometry, bool) {
@@ -809,7 +861,7 @@ func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, log
 			break
 		}
 	}
-	if tocCount < 5 {
+	if tocCount < 2 {
 		logger.Warn("TOC detected but too few entries, likely a false positive",
 			"FirstTOCLineNo", lines[firstTOC].LineNo,
 			"sart", start,
@@ -847,17 +899,19 @@ func isStaticTOCLine(line staticInputLine) bool {
 	return staticTOCDotLeaderRE.MatchString(s)
 }
 
-func applyStaticHeadingLabels(lastTOC int, lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) {
+func applyStaticHeadingLabels(_ int, lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) {
 	var prevNumeric []int
 	hasNumericSeq := false
 	appendixSeq := make(map[string][]int, 8)
 
 	for i, line := range lines {
-		if lastTOC > 0 && i <= lastTOC {
+		if corrected[line.LineNo] == "toc" {
 			continue
 		}
-
-		if corrected[line.LineNo] == "toc" {
+		if line.OriginalLineLower != "paragraph" &&
+			line.OriginalLineLower != "heading" &&
+			!strings.HasPrefix(line.OriginalLineLower, "heading-") &&
+			!staticLegacyHeadingRE.MatchString(line.OriginalLineLower) {
 			continue
 		}
 		if isStaticTOCLine(line) {

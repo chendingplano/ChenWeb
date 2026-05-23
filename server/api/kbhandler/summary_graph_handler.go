@@ -44,6 +44,9 @@ func ListSummaryGraph(c echo.Context) error {
 
 	summaryTreeDir := strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
 	if summaryTreeDir == "" {
+		summaryTreeDir = strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR"))
+	}
+	if summaryTreeDir == "" {
 		logger.Error("missing ARTIFACT_WEB_DIR")
 		return c.JSON(http.StatusInternalServerError, errorResponse{
 			Status:   false,

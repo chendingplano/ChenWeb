@@ -458,8 +458,11 @@ func TestService_HandleGenerateTopicsInput_ReadsChunksAndWritesTopics(t *testing
 	if err := svc.HandleGenerateTopicsInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
 		t.Fatalf("HandleGenerateTopicsInput: %v", err)
 	}
-	if ex.calls != 2 {
-		t.Fatalf("extractor calls=%d, want 2", ex.calls)
+	if ex.structuredCalls != 2 {
+		t.Fatalf("structuredCalls=%d, want 2", ex.structuredCalls)
+	}
+	if ex.calls != 0 {
+		t.Fatalf("legacy calls=%d, want 0", ex.calls)
 	}
 	if len(ex.inputs) != 2 {
 		t.Fatalf("extractor inputs=%d, want 2", len(ex.inputs))
@@ -525,9 +528,9 @@ func TestFixedSizeChunkingService_GenerateSummaryUsesStructuredContractWhenAvail
 	ex := &fakeSemanticExtractor{
 		outs: []map[string]any{
 			{
-				"summary":      "Alarm handling summary",
-				"summary_en":   "Alarm handling summary",
-				"keywords":     []any{"alarm", "handling"},
+				"summary":       "Alarm handling summary",
+				"summary_en":    "Alarm handling summary",
+				"keywords":      []any{"alarm", "handling"},
 				"category_path": []any{"operations", "alarm_handling"},
 			},
 		},

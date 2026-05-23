@@ -376,7 +376,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(ctx context.C
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
 	for idx, chunk := range chunks {
 		startTime := time.Now()
-		p.Logger.Info("Start extracting scene candidates",
+		p.Logger.Info("extract scene candidates - llm start",
 			"idx", idx,
 			"total", len(chunks),
 			"model_name", p.MentionModelName,
@@ -389,10 +389,8 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(ctx context.C
 		usedMentionModel = strings.TrimSpace(modelName)
 		raw, _ := payload["candidates"].([]any)
 		mentions = append(mentions, normalizeSceneCandidateMentions(raw, chunk)...)
-		p.Logger.Info("LLM responded with scene candidates",
+		p.Logger.Info("extrat scene candidates - llm end",
 			"candidates_so_far", len(mentions),
-			"model_name", modelName,
-			"prompt_name", p.MentionPromptRef,
 			"ms_used", time.Since(startTime).Milliseconds(),
 		)
 	}
@@ -408,10 +406,9 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(ctx context.C
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
 		startTime := time.Now()
-		p.Logger.Info("Start enriching scene candidate",
+		p.Logger.Info("enrich scene - llm start",
 			"idx", idx,
-			"total", len(candidates),
-			"candidate_id", candidate.CandidateID,
+			"c_id", candidate.CandidateID,
 			"model_name", p.RelationModelName,
 			"prompt_name", p.RelationPromptRef,
 		)
@@ -423,12 +420,10 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(ctx context.C
 		raw, _ := payload["scene_blocks"].([]any)
 		normalized := normalizeSceneBlockList(raw, candidate)
 		sceneBlocks = append(sceneBlocks, normalized...)
-		p.Logger.Info("LLM responded with scene blocks",
-			"candidate_id", candidate.CandidateID,
+		p.Logger.Info("enrich scene - llm end",
+			"c_id", candidate.CandidateID,
 			"blocks_for_candidate", len(normalized),
 			"scene_blocks_so_far", len(sceneBlocks),
-			"model_name", modelName,
-			"prompt_name", p.RelationPromptRef,
 			"ms_used", time.Since(startTime).Milliseconds(),
 		)
 	}

@@ -218,7 +218,7 @@ func GetDocStructure(c echo.Context) error {
 		artifactDir,
 		strconv.FormatInt(inputID/1000, 10),
 		strconv.FormatInt(inputID, 10),
-		stagingRoot+"_"+parser+".txt",
+		stagingRoot+"_"+parser+".corrected",
 	)
 
 	lines, pages, err := readCorrectedLinesFile(txtPath)
@@ -663,9 +663,9 @@ func SplitDocStructureLine(c echo.Context) error {
 	// Log the modification of the original line in the manual file
 	updatedFirst := rebuilt[targetIdx]
 	if err := upsertManualFile(manualPath, manualEntry{
-		Operation: "modify",
-		Timestamp: time.Now().Format("20060102-150405"),
-		Line:      updatedFirst,
+		Operation:  "modify",
+		Timestamp:  time.Now().Format("20060102-150405"),
+		Line:       updatedFirst,
 		OldContent: original.Content,
 	}); err != nil {
 		logger.Error("upsert manual file failed", "path", manualPath, "err", err)

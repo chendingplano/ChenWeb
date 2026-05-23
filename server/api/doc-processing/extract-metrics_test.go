@@ -166,8 +166,11 @@ func TestMetricsProcessor_ExtractsFromBlocksInContext(t *testing.T) {
 	if metricsStore.saveCalled != 1 {
 		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
 	}
-	if extractor.calledCount != 2 {
-		t.Fatalf("LLM called %d times, want 2 (candidate + enrich)", extractor.calledCount)
+	if extractor.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2 (candidate + enrich)", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if !strings.Contains(extractor.inputTexts[0], "Intro") {
 		t.Fatalf("overlap line content missing from LLM input; input=%q", extractor.inputTexts[0])
@@ -289,8 +292,11 @@ func TestMetricsProcessor_ExtractsFromLineFileWhenNoContextBuffer(t *testing.T) 
 	if metricsStore.saveCalled != 1 {
 		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
 	}
-	if extractor.calledCount != 2 {
-		t.Fatalf("LLM called %d times, want 2 (candidate + enrich for one block)", extractor.calledCount)
+	if extractor.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2 (candidate + enrich for one block)", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if !strings.Contains(extractor.inputTexts[0], "Intro") {
 		t.Fatalf("line 1 content missing from LLM input; input=%q", extractor.inputTexts[0])
@@ -406,8 +412,11 @@ func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"3101","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.calledCount != 3 {
-		t.Fatalf("calledCount=%d, want 3", extractor.calledCount)
+	if extractor.structuredCalledCount != 3 {
+		t.Fatalf("structuredCalledCount=%d, want 3", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if got, want := extractor.modelNames, []string{"mention-model", "mention-model", "relation-model"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("modelNames=%v, want %v", got, want)
@@ -547,8 +556,11 @@ func TestMetricsProcessor_RetriesCandidateFallbackOnEmptyJSON(t *testing.T) {
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"3201","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.calledCount != 3 {
-		t.Fatalf("calledCount=%d, want 3", extractor.calledCount)
+	if extractor.structuredCalledCount != 3 {
+		t.Fatalf("structuredCalledCount=%d, want 3", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if got, want := extractor.modelNames, []string{"primary-candidate-model", "fallback-candidate-model", "relation-model"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("modelNames=%v, want %v", got, want)

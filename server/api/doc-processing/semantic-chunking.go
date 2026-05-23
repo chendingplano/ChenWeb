@@ -1116,7 +1116,7 @@ func isDescriptiveCategorySegment(seg string) bool {
 }
 
 func loadTopicChunkPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {
-	for _, key := range []string{"EXTRACT_TOPIC_PROMPT", "SEMANTIC_CHUNKING_PROMPT"} {
+	for _, key := range []string{"TOPIC_CHUNK_PROMPT", "EXTRACT_TOPIC_PROMPT", "SEMANTIC_CHUNKING_PROMPT"} {
 		promptRef = strings.TrimSpace(os.Getenv(key))
 		if promptRef != "" {
 			break

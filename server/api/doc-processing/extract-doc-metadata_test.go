@@ -40,14 +40,14 @@ func (f *fakeDocMetadataStore) UpdateInputMetadata(_ context.Context, id int64, 
 }
 
 type fakeJSONExtractor struct {
-	out         map[string]any
-	outs        []map[string]any
-	err         error
-	errs        []error
-	inputText   string
-	inputTexts  []string
-	modelNames  []string
-	calledCount int
+	out                   map[string]any
+	outs                  []map[string]any
+	err                   error
+	errs                  []error
+	inputText             string
+	inputTexts            []string
+	modelNames            []string
+	calledCount           int
 	structuredCalledCount int
 	contractNames         []string
 }
@@ -242,8 +242,11 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 	if st.updateReq.ErrorMsg != nil {
 		t.Fatalf("unexpected error msg: %v", *st.updateReq.ErrorMsg)
 	}
-	if ex.calledCount != 1 {
-		t.Fatalf("extract called=%d, want 1", ex.calledCount)
+	if ex.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", ex.structuredCalledCount)
+	}
+	if ex.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", ex.calledCount)
 	}
 	if !strings.Contains(ex.inputText, "1	1	heading	TestFont	12	[0,0,1,1]	Document Title") {
 		t.Fatalf("extract input should include first page line")
@@ -473,8 +476,11 @@ func TestExtractDocMetadata_PrimaryFailureRetriesFallbackModel(t *testing.T) {
 	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":10}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if ex.calledCount != 2 {
-		t.Fatalf("extract called=%d, want 2", ex.calledCount)
+	if ex.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2", ex.structuredCalledCount)
+	}
+	if ex.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", ex.calledCount)
 	}
 	if len(ex.modelNames) != 2 {
 		t.Fatalf("modelNames=%v", ex.modelNames)
@@ -523,8 +529,11 @@ func TestExtractDocMetadata_FallbackEmptyJSONIsWarning(t *testing.T) {
 	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":11}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if ex.calledCount != 2 {
-		t.Fatalf("extract called=%d, want 2", ex.calledCount)
+	if ex.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2", ex.structuredCalledCount)
+	}
+	if ex.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", ex.calledCount)
 	}
 	if st.updateCalled != 1 {
 		t.Fatalf("updateCalled=%d, want 1", st.updateCalled)

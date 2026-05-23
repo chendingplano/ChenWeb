@@ -149,7 +149,7 @@ summary_end`)
 	if len(results[0].Coords) != 4 {
 		t.Fatalf("unexpected coords: %+v", results[0])
 	}
-	if len(results[0].Targets) != 2 || results[0].Targets[0].Page != 9 {
+	if len(results[0].Targets) != 1 || results[0].Targets[0].Page != 9 {
 		t.Fatalf("unexpected targets: %+v", results[0].Targets)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

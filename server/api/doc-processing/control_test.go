@@ -77,7 +77,7 @@ func TestControlService_DefaultsToConfiguredOrder(t *testing.T) {
 	}
 }
 
-func TestControlService_SkipsGenerateSummariesWhenChunkingAlreadySelected(t *testing.T) {
+func TestControlService_RunsGenerateSummariesWhenExplicitlyRequestedWithChunking(t *testing.T) {
 	got := make([]string, 0, 3)
 	svc := &ControlService{
 		Processors: []Processor{
@@ -90,7 +90,7 @@ func TestControlService_SkipsGenerateSummariesWhenChunkingAlreadySelected(t *tes
 	payload := []byte(`{"record_id":"1","operation":["chunking","generate_summaries","extract_metrics"]}`)
 	svc.HandleEvent(context.Background(), payload)
 
-	want := []string{"chunking", "extract_metrics"}
+	want := []string{"chunking", "generate_summaries", "extract_metrics"}
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v, want %v", got, want)
 	}
@@ -101,7 +101,7 @@ func TestControlService_SkipsGenerateSummariesWhenChunkingAlreadySelected(t *tes
 	}
 }
 
-func TestControlService_DefaultOrderSkipsStandaloneGenerateProcessorsAfterChunking(t *testing.T) {
+func TestControlService_DefaultOrderRunsStandaloneGenerateProcessorsAfterChunking(t *testing.T) {
 	got := make([]string, 0, 4)
 	svc := &ControlService{
 		Processors: []Processor{
@@ -114,7 +114,7 @@ func TestControlService_DefaultOrderSkipsStandaloneGenerateProcessorsAfterChunki
 
 	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
 
-	want := []string{"chunking", "extract_metrics"}
+	want := []string{"chunking", "generate_summaries", "generate_topics", "extract_metrics"}
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v, want %v", got, want)
 	}

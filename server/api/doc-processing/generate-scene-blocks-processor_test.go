@@ -128,8 +128,11 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 		t.Fatalf("HandleEvent: %v", err)
 	}
 
-	if extractor.calledCount != 3 {
-		t.Fatalf("calledCount=%d, want 3", extractor.calledCount)
+	if extractor.structuredCalledCount != 3 {
+		t.Fatalf("structuredCalledCount=%d, want 3", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if !strings.Contains(extractor.inputText, "n\t1\t1\tparagraph\tScene introduction") {
 		t.Fatalf("scene block input missing flagged line format: %q", extractor.inputText)
@@ -264,8 +267,11 @@ func TestSceneBlocksProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testi
 		t.Fatalf("HandleEvent: %v", err)
 	}
 
-	if extractor.calledCount != 4 {
-		t.Fatalf("calledCount=%d, want 4", extractor.calledCount)
+	if extractor.structuredCalledCount != 4 {
+		t.Fatalf("structuredCalledCount=%d, want 4", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if got, want := extractor.modelNames, []string{"mention-model", "mention-model", "mention-model", "relation-model"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("modelNames=%v, want %v", got, want)

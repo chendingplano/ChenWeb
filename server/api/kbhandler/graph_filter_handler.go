@@ -122,10 +122,7 @@ func FilterGraphNodes(c echo.Context) error {
 	return c.JSON(http.StatusOK, filterGraphNodesResponse{Status: true, Matches: matches})
 }
 
-func graphFilterRootDir(mode string) string {
-	if mode == "summary" {
-		return strings.TrimSpace(os.Getenv("SUMMARY_TREE_DIR"))
-	}
+func graphFilterRootDir(_ string) string {
 	return strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR"))
 }
 

@@ -109,8 +109,11 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"4001","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.calledCount != 1 {
-		t.Fatalf("calledCount=%d, want 1", extractor.calledCount)
+	if extractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if !strings.Contains(extractor.inputText, "n\t10\t2\tparagraph\tThe operator shall inspect") {
 		t.Fatalf("block line not sent to LLM input: %q", extractor.inputText)
@@ -479,8 +482,11 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnEmptyJSON(t *testing.T) {
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6001","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.calledCount != 2 {
-		t.Fatalf("calledCount=%d, want 2", extractor.calledCount)
+	if extractor.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if len(extractor.modelNames) != 2 {
 		t.Fatalf("modelNames=%v", extractor.modelNames)
@@ -588,8 +594,11 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnExtractorError(t *testing
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6003","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.calledCount != 2 {
-		t.Fatalf("calledCount=%d, want 2", extractor.calledCount)
+	if extractor.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if extractor.modelNames[1] != "fallback-model" {
 		t.Fatalf("second model=%q, want fallback-model", extractor.modelNames[1])
@@ -639,8 +648,11 @@ func TestProvisionsProcessor_TreatsEmptyFallbackJSONAsSuccess(t *testing.T) {
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6004","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.calledCount != 2 {
-		t.Fatalf("calledCount=%d, want 2", extractor.calledCount)
+	if extractor.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if provisionsStore.saveCalled != 1 {
 		t.Fatalf("saveCalled=%d, want 1", provisionsStore.saveCalled)
@@ -684,8 +696,11 @@ func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t
 	if err != nil {
 		t.Fatalf("extractProvisionPayloadWithFallback: %v", err)
 	}
-	if extractor.calledCount != 1 {
-		t.Fatalf("calledCount=%d, want 1", extractor.calledCount)
+	if extractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if modelName != "deepseek-v4-flash" {
 		t.Fatalf("modelName=%q, want deepseek-v4-flash", modelName)

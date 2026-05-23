@@ -254,8 +254,11 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"5101","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.calledCount != 5 {
-		t.Fatalf("calledCount=%d, want 5", extractor.calledCount)
+	if extractor.structuredCalledCount != 5 {
+		t.Fatalf("structuredCalledCount=%d, want 5", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if productStore.saveCalled != 1 {
 		t.Fatalf("saveCalled=%d, want 1", productStore.saveCalled)
@@ -303,6 +306,7 @@ func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *
 
 	payload, modelName, err := p.extractProductPayloadWithFallback(
 		context.Background(),
+		"actor",
 		"input",
 		"prompt",
 		"prompt-ref",
@@ -312,8 +316,11 @@ func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *
 	if err != nil {
 		t.Fatalf("extractProductPayloadWithFallback: %v", err)
 	}
-	if extractor.calledCount != 1 {
-		t.Fatalf("calledCount=%d, want 1", extractor.calledCount)
+	if extractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
 	if modelName != "deepseek-v4-flash" {
 		t.Fatalf("modelName=%q, want deepseek-v4-flash", modelName)
@@ -340,7 +347,8 @@ func TestProductsProcessor_ExtractProductPayloadUsesStructuredContractWhenAvaila
 	p.PromptRef = "prompt-test"
 	p.ModelName = "gpt-test"
 
-	payload, err := p.extractProductPayload(context.Background(), "input text", "extract products", "prompt-test", "gpt-test", structureModelConfig{})
+	payload, err := p.extractProductPayload(context.Background(), 
+		"action", "input text", "extract products", "prompt-test", "gpt-test", structureModelConfig{})
 	if err != nil {
 		t.Fatalf("extractProductPayload: %v", err)
 	}

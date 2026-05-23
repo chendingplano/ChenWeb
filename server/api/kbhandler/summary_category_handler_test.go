@@ -116,7 +116,7 @@ func TestGetSummaryCategorySuccess(t *testing.T) {
 	artifactDir := t.TempDir()
 	summaryTreeDir := t.TempDir()
 	t.Setenv("ARTIFACT_DIR", artifactDir)
-	t.Setenv("SUMMARY_TREE_DIR", summaryTreeDir)
+	t.Setenv("ARTIFACT_WEB_DIR", artifactDir)
 
 	expectResolveInputTablePlural(mock)
 	mock.ExpectQuery(`SELECT EXISTS \(`).
@@ -181,9 +181,8 @@ summary_end`)
 
 func TestGetSummaryCategoryMissingSummariesFile(t *testing.T) {
 	artifactDir := t.TempDir()
-	summaryTreeDir := t.TempDir()
 	t.Setenv("ARTIFACT_DIR", artifactDir)
-	t.Setenv("SUMMARY_TREE_DIR", summaryTreeDir)
+	t.Setenv("ARTIFACT_WEB_DIR", artifactDir)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/summary-category?category_path=medical_standards/surgery", nil)

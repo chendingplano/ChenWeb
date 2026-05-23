@@ -108,7 +108,6 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 func (p *ProvisionsProcessor) Name() string { return "extract_provisions" }
 
 func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) error {
-	p.Logger.Info("Extract Provisions handle event")
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
@@ -181,7 +180,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		"record_id", evt.RecordID,
 		"filename", inputFilename)
 
-	result, err := p.extractProvisionsFromBlocksWithLLM(ctx, blocks)
+	result, err := p.extractProvisionsFromBlocksWithLLM(ctx, blocks, evt.RecordID)
 	if err != nil {
 		p.persistProvisionsStatus(ctx, rec, start, err)
 		return nil
@@ -253,16 +252,21 @@ func (p *ProvisionsProcessor) blockSize() int {
 	return DefaultBlockingBlockSize
 }
 
-func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(ctx context.Context, blocks []Block) (provisionExtractionResult, error) {
+func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
+	ctx context.Context, 
+	blocks []Block,
+	record_id int64) (provisionExtractionResult, error) {
 	extractID := p.Now().Format("20060102-150405")
 	language := ""
 	provisions := make([]map[string]any, 0, len(blocks))
 	usedModelName := strings.TrimSpace(p.ModelName)
 
 	for idx, block := range blocks {
-		p.Logger.Info("Start extracting provisions",
+		startTime := time.Now()
+		p.Logger.Info("extract provisions - to call llm",
 			"idx", idx,
 			"total", len(blocks),
+			"record_id", record_id,
 			"model name", p.ModelName,
 			"prompt name", p.PromptRef,
 		)
@@ -277,7 +281,9 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(ctx context.Con
 		}
 		raw := payload["provisions"].([]any)
 		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(block), blockLineText(block))...)
-		p.Logger.Info("LLM responded", "# provisions", len(provisions))
+		p.Logger.Info("extract provisions - llm responded", 
+			"# provisions", len(provisions),
+			"ms_used", time.Since(startTime).Milliseconds())
 	}
 	if language == "" {
 		language = "unknown"
@@ -369,8 +375,7 @@ func isEmptyProvisionExtractionError(err error) bool {
 func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block Block, modelName string) (map[string]any, error) {
 	p.Logger.Info("To extract provisions",
 		"model", modelName,
-		"prompt_name", p.PromptRef,
-		"input_text", block)
+		"prompt_name", p.PromptRef)
 
 	in := llmclients.JSONExtractionInput{
 		PromptText: p.PromptText,

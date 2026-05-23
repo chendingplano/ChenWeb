@@ -351,7 +351,6 @@ func extractTopicsFromLinesWithLLM(
 		logScopeName, logScopeValue,
 		"num_lines", len(linesText),
 		"model_name", modelName,
-		"inputText", strings.Join(linesText, "\n"),
 	)
 
 	llmStart := time.Now()
@@ -365,7 +364,6 @@ func extractTopicsFromLinesWithLLM(
 		"model_name", modelName,
 		"prompt_name", promptRef,
 		"record_id", record_id,
-		"parsed", parsed,
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 		"error", err,
 	)
@@ -428,7 +426,7 @@ func extractTopicsFromMarkedLinesWithLLM(
 		"record_id", record_id,
 		"model_name", modelName,
 		"prompt_name", promptRef,
-		"duration_ms", time.Since(llmStart).Milliseconds(),
+		"ms_used", time.Since(llmStart).Milliseconds(),
 		"error", err,
 	)
 	if err != nil {

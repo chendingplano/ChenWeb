@@ -231,7 +231,6 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 func (p *ProductsProcessor) Name() string { return "extract_products" }
 
 func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) error {
-	p.Logger.Info("Extract Products handle event")
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
@@ -390,13 +389,16 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
 	for idx, block := range blocks {
 		startTime := time.Now()
-		p.Logger.Info("Start extracting product mentions",
+		p.Logger.Info("extract product mentions - begin",
 			"idx", idx,
 			"total", len(blocks),
 			"model_name", p.MentionModelName,
 			"prompt_name", p.MentionPromptRef,
 		)
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, buildProductMentionsUserPrompt(block), p.MentionPromptText, p.MentionPromptRef, p.MentionModelName, p.MentionModelCfg)
+		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, 
+			"extract products", buildProductMentionsUserPrompt(block), 
+			p.MentionPromptText, p.MentionPromptRef, 
+			p.MentionModelName, p.MentionModelCfg)
 		if err != nil {
 			p.Logger.Error("failed extracting product mentions", "error", err)
 			return productExtractionResult{}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
@@ -404,7 +406,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 		usedMentionModel = strings.TrimSpace(modelName)
 		raw, _ := payload["mentions"].([]any)
 		mentions = append(mentions, normalizeProductMentions(raw, block)...)
-		p.Logger.Info("LLM responded with product mentions",
+		p.Logger.Info("extract product mentions - end",
 			"mentions_so_far", len(mentions),
 			"model_name", p.MentionModelName,
 			"prompt_name", p.MentionPromptRef,
@@ -428,7 +430,10 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			"model_name", p.RelationModelName,
 			"prompt_name", p.RelationPromptRef,
 		)
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, buildProductRelationUserPrompt(candidate), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
+		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, 
+			"product relations", buildProductRelationUserPrompt(candidate), 
+			p.RelationPromptText, p.RelationPromptRef, 
+			p.RelationModelName, p.RelationModelCfg)
 		if err != nil {
 			p.Logger.Error("failed enriching product relations", "error", err, "candidate_id", candidate.CandidateID)
 			return productExtractionResult{}, fmt.Errorf("(MID_26052020) enrich product relations via llm: %w", err)
@@ -437,12 +442,10 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 		raw, _ := payload["products"].([]any)
 		normalized := normalizeProductList(raw)
 		products = append(products, normalized...)
-		p.Logger.Info("LLM responded with product relations",
+		p.Logger.Info("extract products - end",
 			"candidate_id", candidate.CandidateID,
-			"rows_for_candidate", len(normalized),
+			"rows", len(normalized),
 			"products_so_far", len(products),
-			"model_name", p.RelationModelName,
-			"prompt_name", p.RelationPromptRef,
 			"ms_used", time.Since(startTime).Milliseconds())
 	}
 
@@ -475,9 +478,16 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 	}, nil
 }
 
-func (p *ProductsProcessor) extractProductPayloadWithFallback(ctx context.Context, inputText string, promptText string, promptRef string, modelName string, cfg structureModelConfig) (map[string]any, string, error) {
+func (p *ProductsProcessor) extractProductPayloadWithFallback(
+	ctx context.Context, 
+	opr string,
+	inputText string, 
+	promptText string, 
+	promptRef string, 
+	modelName string, 
+	cfg structureModelConfig) (map[string]any, string, error) {
 	primaryStart := time.Now()
-	payload, err := p.extractProductPayload(ctx, inputText, promptText, promptRef, modelName, cfg)
+	payload, err := p.extractProductPayload(ctx, opr, inputText, promptText, promptRef, modelName, cfg)
 	if err == nil {
 		return payload, strings.TrimSpace(modelName), nil
 	}
@@ -486,7 +496,8 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(ctx context.Contex
 	if payload != nil {
 		payloadVal = payload
 	}
-	p.Logger.Warn("primary LLM failed extracting products payload",
+	p.Logger.Warn("primary LLM failed",
+		"action", opr,
 		"error", err,
 		"model_name", modelName,
 		"fallback_model", p.FallbackModelName,
@@ -511,14 +522,15 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(ctx context.Contex
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052022) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
-	p.Logger.Warn("primary products extraction failed; retrying fallback model",
+	p.Logger.Warn("primary products; retrying fallback model",
+		"action", opr,
 		"primary_model", modelName,
 		"fallback_model", fallbackModelName,
 		"error", err,
 		"prompt_name", promptRef,
 	)
 
-	payload, fallbackErr := p.extractProductPayload(ctx, inputText, promptText, promptRef, fallbackModelName, p.FallbackModelCfg)
+	payload, fallbackErr := p.extractProductPayload(ctx, opr, inputText, promptText, promptRef, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
 		if isEmptyProductExtractionError(fallbackErr) {
 			p.Logger.Warn("fallback products extraction returned empty JSON; treating as empty result",
@@ -542,9 +554,19 @@ func isEmptyProductExtractionError(err error) bool {
 		strings.Contains(msg, "json:{[]}")
 }
 
-func (p *ProductsProcessor) extractProductPayload(ctx context.Context, inputText string, promptText string, promptRef string, modelName string, cfg structureModelConfig) (map[string]any, error) {
+func (p *ProductsProcessor) extractProductPayload(
+	ctx context.Context, 
+	opr string,
+	inputText string, 
+	promptText string, 
+	promptRef string, 
+	modelName string, 
+	cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	p.Logger.Info("To extract products",
+
+	startTime := time.Now()
+	p.Logger.Info("extract products - begin",
+		"action", opr,
 		"model", modelName,
 		"prompt_name", promptRef,
 	)
@@ -595,6 +617,10 @@ func (p *ProductsProcessor) extractProductPayload(ctx context.Context, inputText
 		return nil, fmt.Errorf("(MID_26052034) llm output field 'products' must be an array, JSON:%v", payload)
 	}
 	payload["products"] = items
+
+	p.Logger.Info("extract products - end",
+		"action", opr,
+		"ms_used", time.Since(startTime).Milliseconds())
 	return payload, nil
 }
 
@@ -1015,7 +1041,10 @@ func (p *ProductsProcessor) translateProductRows(ctx context.Context, products [
 				"confidence_reason": products[i]["confidence_reason"],
 			}},
 		})
-		payload, _, err := p.extractProductPayloadWithFallback(ctx, string(rowInput), p.TranslatePromptText, p.TranslatePromptRef, p.TranslateModelName, p.TranslateModelCfg)
+		payload, _, err := p.extractProductPayloadWithFallback(ctx, 
+			"product translation", string(rowInput), 
+			p.TranslatePromptText, p.TranslatePromptRef, 
+			p.TranslateModelName, p.TranslateModelCfg)
 		if err != nil {
 			p.Logger.Warn("translate product row failed; keeping untranslated row", "error", err, "product_name", products[i]["product_name"])
 			continue
@@ -1052,7 +1081,10 @@ func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products 
 				"evidence_quote":  products[i]["evidence_quote"],
 			}},
 		})
-		payload, _, err := p.extractProductPayloadWithFallback(ctx, string(rowInput), p.CategorizePromptText, p.CategorizePromptRef, p.CategorizeModelName, p.CategorizeModelCfg)
+		payload, _, err := p.extractProductPayloadWithFallback(ctx, 
+			"product categorize", string(rowInput), 
+			p.CategorizePromptText, p.CategorizePromptRef, 
+			p.CategorizeModelName, p.CategorizeModelCfg)
 		if err != nil {
 			p.Logger.Warn("categorize product row failed; keeping uncategorized row", "error", err, "product_name", products[i]["product_name"])
 			continue

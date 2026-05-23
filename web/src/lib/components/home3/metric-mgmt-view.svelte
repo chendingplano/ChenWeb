@@ -3793,6 +3793,7 @@ let selectedMetric = $derived.by(() => {
 		overflow: hidden;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
+			line-clamp: 3;
 		-webkit-box-orient: vertical;
 	}
 	.main-node-sublabel {

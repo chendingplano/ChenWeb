@@ -21,6 +21,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
+type chunkPhaseService interface {
+	HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error
+}
+
 func envOrDefault(key, fallback string) string {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v != "" {
@@ -37,6 +41,18 @@ func envFirst(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildChunkPhaseProcessors(
+	inputStore docprocessing.DocMetadataStore,
+	fixedChunkSvc chunkPhaseService,
+	logger ApiTypes.JimoLogger,
+) []docprocessing.Processor {
+	return []docprocessing.Processor{
+		docprocessing.NewChunkingProcessor(inputStore, fixedChunkSvc, logger),
+		docprocessing.NewGenerateSummariesProcessor(inputStore, fixedChunkSvc, logger),
+		docprocessing.NewGenerateTopicsProcessor(inputStore, fixedChunkSvc, logger),
+	}
 }
 
 func main() {
@@ -97,10 +113,9 @@ func main() {
 	metricsLLMClient := newLLMClient()
 	provisionsLLMClient := newLLMClient()
 	sceneBlocksLLMClient := newLLMClient()
-	productsLLMClient := newLLMClient()
+	// productsLLMClient := newLLMClient()
 	// structureLLMClient := newLLMClient()
 	fixedChunkLLMClient := newLLMClient()
-	topicChunkLLMClient := newLLMClient()
 
 	inputStore := docprocessing.DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
 	fixedChunkSvc := docprocessing.NewFixedSizeChunkingService(
@@ -108,16 +123,7 @@ func main() {
 		fixedChunkLLMClient,
 		logger,
 	)
-	topicChunkSvc := docprocessing.NewSemanticChunkingService(
-		docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
-		topicChunkLLMClient,
-		logger,
-	)
-	chunkSvc, err := docprocessing.NewChunkingControllerFromEnv(fixedChunkSvc, topicChunkSvc)
-	if err != nil {
-		logger.Error("failed creating chunking controller", "error", err)
-		os.Exit(1)
-	}
+	phaseProcessors := buildChunkPhaseProcessors(inputStore, fixedChunkSvc, logger)
 
 	control := &docprocessing.ControlService{
 		Logger:            logger,
@@ -128,14 +134,14 @@ func main() {
 		Processors: []docprocessing.Processor{
 			// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
 			docprocessing.NewStaticAnalyzerProcessor(inputStore, logger),
-			docprocessing.NewChunkingProcessor(inputStore, chunkSvc, logger),
-			docprocessing.NewGenerateSummariesProcessor(inputStore, fixedChunkSvc, logger),
-			docprocessing.NewGenerateTopicsProcessor(inputStore, topicChunkSvc, logger),
+			phaseProcessors[0],
+			phaseProcessors[1],
+			phaseProcessors[2],
 			docprocessing.NewExtractDocMetadataProcessor(inputStore, llmClient, logger),
 			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
 			docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
 			docprocessing.NewSceneBlocksProcessor(inputStore, docprocessing.SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, sceneBlocksLLMClient, logger),
-			docprocessing.NewProductsProcessor(inputStore, docprocessing.ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, productsLLMClient, logger),
+			// docprocessing.NewProductsProcessor(inputStore, docprocessing.ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, productsLLMClient, logger),
 		},
 	}
 
@@ -152,7 +158,8 @@ func main() {
 		"subject", subject,
 		"durable", durable,
 		"stream", streamName,
-		"chunking_method", chunkSvc.Method,
+		"chunking_method", docprocessing.ChunkingMethodFixed,
+		"generate_topics_method", docprocessing.ChunkingMethodTopic,
 		"processors", []string{"blocking", "structure_analyzer", "static_analyzer", "chunking", "generate_summaries", "generate_topics", "extract_doc_metadata", "extract_metrics", "extract_provisions", "generate_scene_blocks", "extract_products"},
 		"started_at", time.Now().Format(time.RFC3339),
 	)

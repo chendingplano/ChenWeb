@@ -70,7 +70,7 @@ func TestListSummaryGraphSuccess(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "finance", "summaries.txt"), "101_1_0001\n")
 	mustWriteFile(t, filepath.Join(root, "finance", "tax", "summaries.txt"), "101_2_0001\n")
 
-	t.Setenv("SUMMARY_TREE_DIR", root)
+	t.Setenv("ARTIFECT_WEB_DIR", root)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/summary-graph", nil)
