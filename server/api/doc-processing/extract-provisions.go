@@ -307,6 +307,18 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 		"fallback_model", p.FallbackModelName,
 		"payload", payloadVal)
 
+	if isEmptyProvisionExtractionError(err) {
+		p.Logger.Warn("primary provisions extraction returned empty JSON; treating as empty result without fallback",
+			"model_name", p.ModelName,
+			"error", err,
+			"prompt_name", p.PromptRef,
+		)
+		return map[string]any{
+			"language":   "unknown",
+			"provisions": []any{},
+		}, strings.TrimSpace(p.ModelName), nil
+	}
+
 	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
 	if fallbackModelName == "" {
 		return nil, strings.TrimSpace(p.ModelName),
@@ -326,7 +338,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 
 	payload, fallbackErr := p.extractProvisionPayload(ctx, block, fallbackModelName)
 	if fallbackErr != nil {
-		if isEmptyFallbackProvisionExtractionError(fallbackErr) {
+		if isEmptyProvisionExtractionError(fallbackErr) {
 			p.Logger.Warn("fallback provisions extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
@@ -342,7 +354,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 	return payload, fallbackModelName, nil
 }
 
-func isEmptyFallbackProvisionExtractionError(err error) bool {
+func isEmptyProvisionExtractionError(err error) bool {
 	if err == nil {
 		return false
 	}

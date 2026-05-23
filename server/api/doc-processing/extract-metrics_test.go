@@ -11,6 +11,40 @@ import (
 	"testing"
 )
 
+func TestMetricsProcessor_ExtractMetricPayloadUsesStructuredContractWhenAvailable(t *testing.T) {
+	extractor := &fakeJSONExtractor{
+		out: map[string]any{
+			"language": "en",
+			"metrics": []any{
+				map[string]any{
+					"metric_name": "Latency",
+				},
+			},
+		},
+	}
+
+	p := NewMetricsProcessor(nil, nil, extractor, nil)
+	p.PromptRef = "prompt-extract-metrics-v1.md"
+
+	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{})
+	if err != nil {
+		t.Fatalf("extractMetricPayload: %v", err)
+	}
+	if extractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
+	}
+	if len(extractor.contractNames) != 1 || extractor.contractNames[0] != "chenweb_metrics_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_metrics_extraction]", extractor.contractNames)
+	}
+	metrics, ok := payload["metrics"].([]any)
+	if !ok || len(metrics) != 1 {
+		t.Fatalf("metrics=%#v", payload["metrics"])
+	}
+}
+
 type fakeMetricsStore struct {
 	exists            bool
 	existsErr         error

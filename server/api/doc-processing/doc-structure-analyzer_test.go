@@ -42,6 +42,29 @@ func (f *fakeStructureExtractor) ExtractText(_ context.Context, in llmclients.JS
 	return f.outs[idx], nil
 }
 
+type fakeStructuredOnlyStructureExtractor struct {
+	out                   map[string]any
+	err                   error
+	inputs                []string
+	structuredCalledCount int
+	contractNames         []string
+}
+
+func (f *fakeStructuredOnlyStructureExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	f.inputs = append(f.inputs, in.InputText)
+	return map[string]any{}, nil
+}
+
+func (f *fakeStructuredOnlyStructureExtractor) ExtractStructuredJSON(_ context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error) {
+	f.structuredCalledCount++
+	f.contractNames = append(f.contractNames, contract.Name)
+	f.inputs = append(f.inputs, in.InputText)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &llmclients.StructuredOutputResult{Parsed: f.out}, nil
+}
+
 func TestStructureAnalyzer_SuccessWritesArtifactsAndStatus(t *testing.T) {
 	tmp := t.TempDir()
 	recordID := int64(7523)
@@ -148,6 +171,55 @@ timeout_sec = 120
 	}
 	if count != 2 {
 		t.Fatalf("labels lines=%d, want 2", count)
+	}
+}
+
+func TestStructureAnalyzer_UsesStructuredContractForJSONFallback(t *testing.T) {
+	extractor := &fakeStructuredOnlyStructureExtractor{
+		out: map[string]any{
+			"cover_pages": []any{1},
+			"labels": []any{
+				map[string]any{
+					"line_number":         109,
+					"corrected_line_type": "heading-1",
+					"confidence":          0.94,
+					"reason":              "Top-level section marker.",
+				},
+				map[string]any{
+					"line_number":         110,
+					"corrected_line_type": "heading-2",
+					"confidence":          0.91,
+					"reason":              "Subsection marker.",
+				},
+			},
+		},
+	}
+
+	p := &StructureAnalyzerProcessor{
+		Extractor:  extractor,
+		PromptText: "structure prompt",
+		ModelName:  "gpt-test",
+	}
+
+	lines := []structureLine{
+		{LineNumber: 109, LineType: "paragraph"},
+		{LineNumber: 110, LineType: "paragraph"},
+	}
+	out, err := p.extractAndValidateStructureOutput(context.Background(), lines, "input")
+	if err != nil {
+		t.Fatalf("extractAndValidateStructureOutput: %v", err)
+	}
+	if extractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	}
+	if len(extractor.contractNames) != 1 || extractor.contractNames[0] != "chenweb_structure_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_structure_extraction]", extractor.contractNames)
+	}
+	if len(out.CoverPages) != 1 || out.CoverPages[0] != 1 {
+		t.Fatalf("CoverPages=%v, want [1]", out.CoverPages)
+	}
+	if len(out.Labels) != 2 || out.Labels[0].CorrectedLineType != "heading-1" {
+		t.Fatalf("Labels=%#v", out.Labels)
 	}
 }
 

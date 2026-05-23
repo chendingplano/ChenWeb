@@ -48,6 +48,8 @@ type fakeJSONExtractor struct {
 	inputTexts  []string
 	modelNames  []string
 	calledCount int
+	structuredCalledCount int
+	contractNames         []string
 }
 
 func (f *fakeJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
@@ -69,6 +71,34 @@ func (f *fakeJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExt
 		return out, err
 	}
 	return f.out, f.err
+}
+
+func (f *fakeJSONExtractor) ExtractStructuredJSON(_ context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error) {
+	f.structuredCalledCount++
+	f.contractNames = append(f.contractNames, contract.Name)
+	f.inputText = in.InputText
+	f.inputTexts = append(f.inputTexts, in.InputText)
+	f.modelNames = append(f.modelNames, in.ModelName)
+	if len(f.outs) > 0 || len(f.errs) > 0 {
+		var out map[string]any
+		var err error
+		if len(f.outs) > 0 {
+			out = f.outs[0]
+			f.outs = f.outs[1:]
+		}
+		if len(f.errs) > 0 {
+			err = f.errs[0]
+			f.errs = f.errs[1:]
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &llmclients.StructuredOutputResult{Parsed: out}, nil
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &llmclients.StructuredOutputResult{Parsed: f.out}, nil
 }
 
 func TestParseLineFileGeneratedEvent(t *testing.T) {
@@ -231,6 +261,34 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 	}
 	if op := strings.TrimSpace(asString(statusArr[0]["operation"])); op != "extract_metadata" {
 		t.Fatalf("status operation=%q, want extract_metadata", op)
+	}
+}
+
+func TestExtractDocMetadata_ExtractMetadataWithModelUsesStructuredContractWhenAvailable(t *testing.T) {
+	ex := &fakeJSONExtractor{out: map[string]any{
+		"title":        "Sample Standard",
+		"doc_no":       "GB/T 123",
+		"publish_date": "2024-01-01",
+		"authors":      []any{"Org A"},
+	}}
+	svc := NewExtractDocMetadataProcessor(&fakeDocMetadataStore{}, ex, nil)
+	svc.PromptText = "extract metadata"
+
+	got, err := svc.extractMetadataWithModel(context.Background(), "input text", "docmeta-model", structureModelConfig{})
+	if err != nil {
+		t.Fatalf("extractMetadataWithModel: %v", err)
+	}
+	if ex.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", ex.structuredCalledCount)
+	}
+	if ex.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", ex.calledCount)
+	}
+	if len(ex.contractNames) != 1 || ex.contractNames[0] != "chenweb_doc_metadata_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_doc_metadata_extraction]", ex.contractNames)
+	}
+	if strings.TrimSpace(asString(got["title"])) != "Sample Standard" {
+		t.Fatalf("title=%v, want Sample Standard", got["title"])
 	}
 }
 

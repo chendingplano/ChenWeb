@@ -18,14 +18,28 @@ import (
 )
 
 type fakeMetricExtractor struct {
-	out       map[string]any
-	err       error
-	inputText string
+	out                   map[string]any
+	err                   error
+	inputText             string
+	calledCount           int
+	structuredCalledCount int
+	contractNames         []string
 }
 
 func (f *fakeMetricExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	f.calledCount++
 	f.inputText = in.InputText
 	return f.out, f.err
+}
+
+func (f *fakeMetricExtractor) ExtractStructuredJSON(_ context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error) {
+	f.structuredCalledCount++
+	f.contractNames = append(f.contractNames, contract.Name)
+	f.inputText = in.InputText
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &llmclients.StructuredOutputResult{Parsed: f.out}, nil
 }
 
 func newExtractMetricContext(t *testing.T, body string) (echo.Context, *httptest.ResponseRecorder) {
@@ -216,6 +230,82 @@ func TestExtractMetricReturnsMetricsWithoutSaving(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestExtractMetricUsesStructuredContractWhenAvailable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	tmp := t.TempDir()
+	resultPath := filepath.Join(tmp, "ocr_rslt_8.json")
+	rawPath := filepath.Join(tmp, "ocr_rslt_8.txt")
+	rawBody := "10\t1\tparagraph\tFont\t11\t[0,12,50,22]\tEnergy intensity shall be 12 kWh/m2."
+	if err := os.WriteFile(rawPath, []byte(rawBody), 0o644); err != nil {
+		t.Fatalf("write raw line file: %v", err)
+	}
+
+	expectResolveInputTablePlural(mock)
+	resultQuery := regexp.QuoteMeta(`SELECT i.result_filename FROM kb.inputs i WHERE i.id = $1`)
+	mock.ExpectQuery(resultQuery).
+		WithArgs(int64(8)).
+		WillReturnRows(sqlmock.NewRows([]string{"result_filename"}).AddRow(resultPath))
+
+	oldPromptLoader := loadMetricsPromptForExtractFn
+	oldModelLoader := loadExtractMetricsModelConfigFn
+	oldClientFactory := newExtractMetricsClientFn
+	defer func() {
+		loadMetricsPromptForExtractFn = oldPromptLoader
+		loadExtractMetricsModelConfigFn = oldModelLoader
+		newExtractMetricsClientFn = oldClientFactory
+	}()
+
+	loadMetricsPromptForExtractFn = func(_ ApiTypes.JimoLogger) (string, string, error) {
+		return "extract metrics", "prompt_extract_metrics_v1.txt", nil
+	}
+	loadExtractMetricsModelConfigFn = func() (string, string, ApiTypes.LLMModelDef, error) {
+		return "gpt-test", filepath.Join(tmp, ".models.toml"), ApiTypes.LLMModelDef{
+			ModelName:  "gpt-test",
+			APIKey:     "sk-test",
+			BaseURL:    "https://api.openai.com",
+			TimeoutSec: 60,
+		}, nil
+	}
+	fakeExtractor := &fakeMetricExtractor{
+		out: map[string]any{
+			"metrics": []any{
+				map[string]any{
+					"metric_name": "Energy intensity",
+				},
+			},
+		},
+	}
+	newExtractMetricsClientFn = func(ApiTypes.LLMModelDef, ApiTypes.JimoLogger) (metricJSONExtractor, error) {
+		return fakeExtractor, nil
+	}
+
+	c, rec := newExtractMetricContext(t, `{"record_id":8,"lines":["10"]}`)
+	if err := ExtractMetric(c); err != nil {
+		t.Fatalf("ExtractMetric returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if fakeExtractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", fakeExtractor.structuredCalledCount)
+	}
+	if fakeExtractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", fakeExtractor.calledCount)
+	}
+	if len(fakeExtractor.contractNames) != 1 || fakeExtractor.contractNames[0] != "chenweb_metric_handler_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_metric_handler_extraction]", fakeExtractor.contractNames)
 	}
 }
 

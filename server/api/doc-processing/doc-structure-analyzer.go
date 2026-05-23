@@ -350,7 +350,21 @@ func (p *StructureAnalyzerProcessor) extractAndValidateStructureOutput(ctx conte
 	}
 
 	// Backward-compatible fallback for extractors that only return JSON.
-	parsed, err := p.Extractor.ExtractJSON(ctx, in)
+	var (
+		parsed map[string]any
+		err    error
+	)
+	if structuredExtractor, ok := p.Extractor.(interface {
+		ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+	}); ok {
+		var result *llmclients.StructuredOutputResult
+		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, structureExtractionContract())
+		if result != nil {
+			parsed = result.Parsed
+		}
+	} else {
+		parsed, err = p.Extractor.ExtractJSON(ctx, in)
+	}
 	if err != nil {
 		return structureOutput{}, fmt.Errorf("(MID_26042102) structure llm request failed: %w", err)
 	}

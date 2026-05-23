@@ -244,11 +244,24 @@ func isEmptyDocMetadataExtractionError(err error) bool {
 
 func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Client, cfg)
-	return p.Client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+	in := llmclients.JSONExtractionInput{
 		PromptText: p.PromptText,
 		ModelName:  modelName,
 		InputText:  inputText,
-	})
+	}
+	if structuredExtractor, ok := p.Client.(interface {
+		ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+	}); ok {
+		result, err := structuredExtractor.ExtractStructuredJSON(ctx, in, docMetadataExtractionContract())
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return map[string]any{}, nil
+		}
+		return result.Parsed, nil
+	}
+	return p.Client.ExtractJSON(ctx, in)
 }
 
 type docMetadataExtractionOutput struct {

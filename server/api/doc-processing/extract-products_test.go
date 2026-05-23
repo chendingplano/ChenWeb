@@ -3,6 +3,7 @@ package docprocessing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -287,6 +288,41 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 	}
 	if len(artifactRecords) != 1 {
 		t.Fatalf("artifact product count=%d, want 1", len(artifactRecords))
+	}
+}
+
+func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *testing.T) {
+	extractor := &fakeJSONExtractor{
+		errs: []error{
+			errors.New("(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+		},
+	}
+
+	p := NewProductsProcessor(nil, nil, extractor, nil)
+	p.FallbackModelName = "gpt-5.4-mini"
+
+	payload, modelName, err := p.extractProductPayloadWithFallback(
+		context.Background(),
+		"input",
+		"prompt",
+		"prompt-ref",
+		"deepseek-v4-flash",
+		structureModelConfig{},
+	)
+	if err != nil {
+		t.Fatalf("extractProductPayloadWithFallback: %v", err)
+	}
+	if extractor.calledCount != 1 {
+		t.Fatalf("calledCount=%d, want 1", extractor.calledCount)
+	}
+	if modelName != "deepseek-v4-flash" {
+		t.Fatalf("modelName=%q, want deepseek-v4-flash", modelName)
+	}
+	if got := payload["products"]; got == nil {
+		t.Fatalf("products missing from payload: %#v", payload)
+	}
+	if got := payload["mentions"]; got == nil {
+		t.Fatalf("mentions missing from payload: %#v", payload)
 	}
 }
 

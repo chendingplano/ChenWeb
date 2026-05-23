@@ -1092,11 +1092,26 @@ func toBool(v any) bool {
 
 func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText string, promptText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+	in := llmclients.JSONExtractionInput{
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
-	})
+	}
+	var (
+		payload map[string]any
+		err     error
+	)
+	if structuredExtractor, ok := p.Extractor.(interface {
+		ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+	}); ok {
+		var result *llmclients.StructuredOutputResult
+		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, metricsExtractionContract())
+		if result != nil {
+			payload = result.Parsed
+		}
+	} else {
+		payload, err = p.Extractor.ExtractJSON(ctx, in)
+	}
 	p.Logger.Info("LLM response received for metrics extraction",
 		"model_name", modelName,
 		"prompt_name", p.PromptRef,

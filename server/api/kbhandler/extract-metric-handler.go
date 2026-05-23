@@ -24,6 +24,10 @@ type metricJSONExtractor interface {
 	ExtractJSON(context.Context, llmclients.JSONExtractionInput) (map[string]any, error)
 }
 
+type structuredMetricJSONExtractor interface {
+	ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+}
+
 var (
 	loadMetricsPromptForExtractFn   = loadMetricsPromptForExtract
 	loadExtractMetricsModelConfigFn = loadExtractMetricsModelConfig
@@ -60,6 +64,22 @@ func defaultNewExtractMetricsClient(cfg ApiTypes.LLMModelDef, logger ApiTypes.Ji
 		TimeoutSec:   cfg.TimeoutSec,
 		ThinkingType: cfg.ThinkingType,
 	}, logger)
+}
+
+func extractMetricHandlerContract() llmclients.StructuredOutputContract {
+	return llmclients.StructuredOutputContract{
+		Name:        "chenweb_metric_handler_extraction",
+		AllowRepair: true,
+		MaxRetries:  2,
+		Schema: []byte(`{
+			"type": "object",
+			"properties": {
+				"metrics": { "type": "array" }
+			},
+			"required": ["metrics"],
+			"additionalProperties": true
+		}`),
+	}
 }
 
 // ExtractMetric handles POST /api/v1/kb/metrics/extract
@@ -239,11 +259,21 @@ func ExtractMetric(c echo.Context) error {
 		"prompt_name", promptRef,
 		"input", composedInput)
 
-	payload, err := client.ExtractJSON(c.Request().Context(), llmclients.JSONExtractionInput{
+	in := llmclients.JSONExtractionInput{
 		PromptText: promptText,
 		ModelName:  modelCfg.ModelName,
 		InputText:  composedInput,
-	})
+	}
+	var payload map[string]any
+	if structuredClient, ok := client.(structuredMetricJSONExtractor); ok {
+		var result *llmclients.StructuredOutputResult
+		result, err = structuredClient.ExtractStructuredJSON(c.Request().Context(), in, extractMetricHandlerContract())
+		if result != nil {
+			payload = result.Parsed
+		}
+	} else {
+		payload, err = client.ExtractJSON(c.Request().Context(), in)
+	}
 
 	if err != nil {
 		logger.Error("LLM extraction failed", "err", err)

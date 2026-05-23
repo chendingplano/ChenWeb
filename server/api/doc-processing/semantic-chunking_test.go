@@ -484,6 +484,8 @@ type fakeSemanticExtractor struct {
 	err    error
 	calls  int
 	inputs []string
+	structuredCalls int
+	contractNames   []string
 }
 
 func (f *fakeSemanticExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
@@ -499,4 +501,87 @@ func (f *fakeSemanticExtractor) ExtractJSON(_ context.Context, in llmclients.JSO
 		return f.outs[len(f.outs)-1], nil
 	}
 	return f.outs[f.calls-1], nil
+}
+
+func (f *fakeSemanticExtractor) ExtractStructuredJSON(_ context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error) {
+	f.structuredCalls++
+	f.contractNames = append(f.contractNames, contract.Name)
+	f.inputs = append(f.inputs, in.InputText)
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.outs) == 0 {
+		return &llmclients.StructuredOutputResult{Parsed: map[string]any{"topics": []any{}}}, nil
+	}
+	idx := f.structuredCalls - 1
+	if idx >= len(f.outs) {
+		idx = len(f.outs) - 1
+	}
+	return &llmclients.StructuredOutputResult{Parsed: f.outs[idx]}, nil
+}
+
+type fakeStructuredSemanticExtractor struct {
+	fakeSemanticExtractor
+}
+
+func (f *fakeStructuredSemanticExtractor) ExtractStructuredJSON(_ context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error) {
+	f.structuredCalls++
+	f.contractNames = append(f.contractNames, contract.Name)
+	f.inputs = append(f.inputs, in.InputText)
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.outs) == 0 {
+		return &llmclients.StructuredOutputResult{Parsed: map[string]any{"topics": []any{}}}, nil
+	}
+	return &llmclients.StructuredOutputResult{Parsed: f.outs[0]}, nil
+}
+
+func TestExtractTopicsFromLinesWithLLM_UsesStructuredContractWhenAvailable(t *testing.T) {
+	extractor := &fakeStructuredSemanticExtractor{
+		fakeSemanticExtractor: fakeSemanticExtractor{
+			outs: []map[string]any{
+				{
+					"topics": []any{
+						map[string]any{
+							"topic_type": "requirement",
+							"lines":      []any{"1-2"},
+							"topic_desc": "alarm requirements",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	topics, err := extractTopicsFromLinesWithLLM(
+		context.Background(),
+		113,
+		extractor,
+		&fakeLogger{},
+		"deepseek-v4-flash",
+		"prompt",
+		"prompt-extract-topics",
+		[]Line{
+			{LineNo: 1, PageNo: 1, LineType: "paragraph", Content: "The device shall log all alarms."},
+		},
+		1,
+		"block_no",
+		5,
+	)
+	if err != nil {
+		t.Fatalf("extractTopicsFromLinesWithLLM: %v", err)
+	}
+	if extractor.structuredCalls != 1 {
+		t.Fatalf("structuredCalls=%d, want 1", extractor.structuredCalls)
+	}
+	if extractor.calls != 0 {
+		t.Fatalf("legacy ExtractJSON calls=%d, want 0", extractor.calls)
+	}
+	if len(extractor.contractNames) != 1 || extractor.contractNames[0] != "chenweb_topic_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_topic_extraction]", extractor.contractNames)
+	}
+	if len(topics) != 1 || topics[0].Topic != "alarm requirements" {
+		t.Fatalf("topics=%#v", topics)
+	}
 }

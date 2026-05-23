@@ -358,6 +358,43 @@ func TestSceneBlocksProcessor_ExtractSceneBlocksWithModelAppliesModelConfig(t *t
 	}
 }
 
+func TestSceneBlocksProcessor_ExtractScenePayloadUsesStructuredContractWhenAvailable(t *testing.T) {
+	extractor := &fakeJSONExtractor{
+		out: map[string]any{
+			"scene_blocks": []any{
+				map[string]any{
+					"scene_id":   "access_panel_opening",
+					"scene_type": "operation",
+					"title":      "Open access panel",
+					"summary":    "Operator opens the access panel.",
+				},
+			},
+		},
+	}
+
+	p := &SceneBlocksProcessor{
+		Extractor: extractor,
+	}
+
+	payload, err := p.extractScenePayload(context.Background(), "input lines", "prompt", "scene-model", structureModelConfig{})
+	if err != nil {
+		t.Fatalf("extractScenePayload: %v", err)
+	}
+	if extractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
+	}
+	if len(extractor.contractNames) != 1 || extractor.contractNames[0] != "chenweb_scene_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_scene_extraction]", extractor.contractNames)
+	}
+	items, ok := payload["scene_blocks"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("scene_blocks=%#v", payload["scene_blocks"])
+	}
+}
+
 func TestSceneBlocksProcessor_WriteSceneBlocksArtifactAddsCreateTimeToAllBlocks(t *testing.T) {
 	tmp := t.TempDir()
 	p := &SceneBlocksProcessor{ArtifactDir: tmp}

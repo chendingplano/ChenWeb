@@ -800,11 +800,26 @@ func (s *FixedSizeChunkingService) generateSummary(
 	inputText := buildSummaryInputText(lines, children)
 
 	// Call the LLM
-	parsed, err := s.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+	in := llmclients.JSONExtractionInput{
 		PromptText: appendLanguageInstruction(s.SummaryPromptText, inputText),
 		ModelName:  s.SummaryModelName,
 		InputText:  inputText,
-	})
+	}
+	var (
+		parsed map[string]any
+		err    error
+	)
+	if structuredExtractor, ok := s.Extractor.(interface {
+		ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+	}); ok {
+		var result *llmclients.StructuredOutputResult
+		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, summaryExtractionContract())
+		if result != nil {
+			parsed = result.Parsed
+		}
+	} else {
+		parsed, err = s.Extractor.ExtractJSON(ctx, in)
+	}
 	if err != nil {
 		return summaryGenerateResult{}, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d: %w", level, seqNo, err)
 	}

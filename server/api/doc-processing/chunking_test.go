@@ -520,6 +520,53 @@ func TestService_HandleGenerateTopicsInput_ReadsChunksAndWritesTopics(t *testing
 	}
 }
 
+func TestFixedSizeChunkingService_GenerateSummaryUsesStructuredContractWhenAvailable(t *testing.T) {
+	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeSemanticExtractor{
+		outs: []map[string]any{
+			{
+				"summary":      "Alarm handling summary",
+				"summary_en":   "Alarm handling summary",
+				"keywords":     []any{"alarm", "handling"},
+				"category_path": []any{"operations", "alarm_handling"},
+			},
+		},
+	}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.SummaryPromptText = "summary prompt"
+	svc.SummaryModelName = "summary-model"
+
+	result, err := svc.generateSummary(context.Background(), 101, 0, 1, []MarkedLine{
+		{
+			Line: Line{
+				LineNo:   1,
+				PageNo:   1,
+				LineType: "paragraph",
+				Content:  "Operator acknowledges the alarm and logs the incident.",
+			},
+			Mark: "n",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("generateSummary: %v", err)
+	}
+	if ex.structuredCalls != 1 {
+		t.Fatalf("structuredCalls=%d, want 1", ex.structuredCalls)
+	}
+	if ex.calls != 0 {
+		t.Fatalf("legacy calls=%d, want 0", ex.calls)
+	}
+	if len(ex.contractNames) != 1 || ex.contractNames[0] != "chenweb_summary_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_summary_extraction]", ex.contractNames)
+	}
+	if result.Summary != "Alarm handling summary" {
+		t.Fatalf("Summary=%q, want Alarm handling summary", result.Summary)
+	}
+	if len(result.CategoryPaths) != 2 || result.CategoryPaths[0] != "operations" {
+		t.Fatalf("CategoryPaths=%v", result.CategoryPaths)
+	}
+}
+
 func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	st := &fakeStore{rec: InputRecord{ID: 1001, StatusRaw: "[]"}}

@@ -499,7 +499,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksWithModel(ctx context.Context, 
 
 func (p *SceneBlocksProcessor) extractScenePayload(ctx context.Context, inputText string, promptText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+	payload, err := extractScenePayloadWithContract(ctx, p.Extractor, llmclients.JSONExtractionInput{
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
@@ -528,6 +528,24 @@ func (p *SceneBlocksProcessor) extractScenePayload(ctx context.Context, inputTex
 		return payload, nil
 	}
 	return nil, fmt.Errorf("(MID_26051831) llm output must contain 'scene_blocks' or 'candidates', JSON:%v", payload)
+}
+
+type structuredSceneExtractor interface {
+	ExtractStructuredJSON(ctx context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+}
+
+func extractScenePayloadWithContract(ctx context.Context, extractor LLMJSONExtractor, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	if structuredExtractor, ok := extractor.(structuredSceneExtractor); ok {
+		result, err := structuredExtractor.ExtractStructuredJSON(ctx, in, sceneExtractionContract())
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return map[string]any{}, nil
+		}
+		return result.Parsed, nil
+	}
+	return extractor.ExtractJSON(ctx, in)
 }
 
 func normalizeScenePayload(payload map[string]any) map[string]any {

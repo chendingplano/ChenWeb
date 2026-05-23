@@ -24,6 +24,10 @@ type provisionJSONExtractor interface {
 	ExtractJSON(context.Context, llmclients.JSONExtractionInput) (map[string]any, error)
 }
 
+type structuredProvisionJSONExtractor interface {
+	ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+}
+
 var (
 	loadProvisionsPromptForExtractFn   = loadProvisionsPromptForExtract
 	loadExtractProvisionsModelConfigFn = loadExtractProvisionsModelConfig
@@ -61,6 +65,23 @@ func defaultNewExtractProvisionsClient(cfg ApiTypes.LLMModelDef, logger ApiTypes
 		TimeoutSec:   cfg.TimeoutSec,
 		ThinkingType: cfg.ThinkingType,
 	}, logger)
+}
+
+func extractProvisionHandlerContract() llmclients.StructuredOutputContract {
+	return llmclients.StructuredOutputContract{
+		Name:        "chenweb_provision_handler_extraction",
+		AllowRepair: true,
+		MaxRetries:  2,
+		Schema: []byte(`{
+			"type": "object",
+			"properties": {
+				"language": { "type": "string" },
+				"provisions": { "type": "array" }
+			},
+			"required": ["provisions"],
+			"additionalProperties": true
+		}`),
+	}
 }
 
 // ExtractProvisions handles POST /api/v1/kb/provisions/extract.
@@ -271,11 +292,21 @@ func ExtractProvisions(c echo.Context) error {
 		"span_count", len(req.SourceLineSpans),
 	)
 
-	payload, err := client.ExtractJSON(c.Request().Context(), llmclients.JSONExtractionInput{
+	in := llmclients.JSONExtractionInput{
 		PromptText: promptText,
 		ModelName:  modelCfg.ModelName,
 		InputText:  composedInput,
-	})
+	}
+	var payload map[string]any
+	if structuredClient, ok := client.(structuredProvisionJSONExtractor); ok {
+		var result *llmclients.StructuredOutputResult
+		result, err = structuredClient.ExtractStructuredJSON(c.Request().Context(), in, extractProvisionHandlerContract())
+		if result != nil {
+			payload = result.Parsed
+		}
+	} else {
+		payload, err = client.ExtractJSON(c.Request().Context(), in)
+	}
 	if err != nil {
 		logger.Error("LLM extraction failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, extractProvisionResponse{

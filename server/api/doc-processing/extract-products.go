@@ -493,6 +493,15 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(ctx context.Contex
 		"payload", payloadVal,
 		"ms_used", time.Since(primaryStart).Milliseconds())
 
+	if isEmptyProductExtractionError(err) {
+		p.Logger.Warn("primary products extraction returned empty JSON; treating as empty result without fallback",
+			"model_name", modelName,
+			"error", err,
+			"prompt_name", promptRef,
+		)
+		return map[string]any{"products": []any{}, "mentions": []any{}}, strings.TrimSpace(modelName), nil
+	}
+
 	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
 	if fallbackModelName == "" {
 		return nil, strings.TrimSpace(modelName),
@@ -511,7 +520,7 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(ctx context.Contex
 
 	payload, fallbackErr := p.extractProductPayload(ctx, inputText, promptText, promptRef, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
-		if isEmptyFallbackProductExtractionError(fallbackErr) {
+		if isEmptyProductExtractionError(fallbackErr) {
 			p.Logger.Warn("fallback products extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
@@ -524,7 +533,7 @@ func (p *ProductsProcessor) extractProductPayloadWithFallback(ctx context.Contex
 	return payload, fallbackModelName, nil
 }
 
-func isEmptyFallbackProductExtractionError(err error) bool {
+func isEmptyProductExtractionError(err error) bool {
 	if err == nil {
 		return false
 	}

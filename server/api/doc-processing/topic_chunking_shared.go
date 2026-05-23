@@ -355,7 +355,7 @@ func extractTopicsFromLinesWithLLM(
 	)
 
 	llmStart := time.Now()
-	parsed, err := extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+	parsed, err := extractTopicPayload(ctx, extractor, llmclients.JSONExtractionInput{
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  strings.Join(linesText, "\n"),
@@ -418,7 +418,7 @@ func extractTopicsFromMarkedLinesWithLLM(
 	)
 
 	llmStart := time.Now()
-	parsed, err := extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+	parsed, err := extractTopicPayload(ctx, extractor, llmclients.JSONExtractionInput{
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
@@ -452,6 +452,24 @@ func extractTopicsFromMarkedLinesWithLLM(
 		return []TopicItem{}, nil
 	}
 	return normalizeExtractedTopics(rawTopics, seqStart, logger, logScopeName, logScopeValue, record_id), nil
+}
+
+type structuredTopicExtractor interface {
+	ExtractStructuredJSON(ctx context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+}
+
+func extractTopicPayload(ctx context.Context, extractor LLMJSONExtractor, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	if structuredExtractor, ok := extractor.(structuredTopicExtractor); ok {
+		result, err := structuredExtractor.ExtractStructuredJSON(ctx, in, topicExtractionContract())
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return map[string]any{}, nil
+		}
+		return result.Parsed, nil
+	}
+	return extractor.ExtractJSON(ctx, in)
 }
 
 func normalizeExtractedTopics(rawTopics []any, seqStart int, logger ApiTypes.JimoLogger, logScopeName string, logScopeValue int, recordID int64) []TopicItem {

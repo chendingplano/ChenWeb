@@ -62,18 +62,18 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 		"language": "en",
 		"provisions": []any{
 			map[string]any{
-				"name":          "inspection_requirement",
-				"type":          "mandatory",
-				"provision":     "The operator shall inspect pressure relief valves monthly.",
-				"provision_en":  "The operator shall inspect pressure relief valves monthly.",
+				"name":              "inspection_requirement",
+				"type":              "mandatory",
+				"provision":         "The operator shall inspect pressure relief valves monthly.",
+				"provision_en":      "The operator shall inspect pressure relief valves monthly.",
 				"source_line_spans": []any{float64(10)},
-				"context":       "maintenance section",
-				"subject":       "pressure relief valve inspection",
-				"location_type": "sentence",
-				"keywords":      []any{"inspection", "pressure relief valve"},
-				"confidence":    0.91,
-				"is_explicit":   true,
-				"need_verify":   false,
+				"context":           "maintenance section",
+				"subject":           "pressure relief valve inspection",
+				"location_type":     "sentence",
+				"keywords":          []any{"inspection", "pressure relief valve"},
+				"confidence":        0.91,
+				"is_explicit":       true,
+				"need_verify":       false,
 				"category_paths": []any{
 					map[string]any{
 						"category_path": []any{
@@ -325,17 +325,17 @@ func TestProvisionsProcessor_AcceptsSingleProvisionObject(t *testing.T) {
 	extractor := &fakeJSONExtractor{out: map[string]any{
 		"language": "zh",
 		"provisions": map[string]any{
-			"name":           "terminal_radiation_requirement",
-			"type":           "mandatory",
-			"provision":      "终端设备中密封源的质量应符合GB4075。",
-			"provision_en":   "The quality of sealed sources in terminal equipment shall comply with GB4075.",
+			"name":              "terminal_radiation_requirement",
+			"type":              "mandatory",
+			"provision":         "终端设备中密封源的质量应符合GB4075。",
+			"provision_en":      "The quality of sealed sources in terminal equipment shall comply with GB4075.",
 			"source_line_spans": []any{"8:181"},
-			"subject":        "医疗健康监测终端设备辐射安全要求",
-			"keywords":       []any{"终端辐射", "密封源", "GB4075"},
-			"confidence":     0.95,
-			"is_explicit":    true,
-			"need_verify":    false,
-			"category_paths": []any{},
+			"subject":           "医疗健康监测终端设备辐射安全要求",
+			"keywords":          []any{"终端辐射", "密封源", "GB4075"},
+			"confidence":        0.95,
+			"is_explicit":       true,
+			"need_verify":       false,
+			"category_paths":    []any{},
 		},
 	}}
 
@@ -383,17 +383,17 @@ func TestProvisionsProcessor_AcceptsBareProvisionObject(t *testing.T) {
 	}}
 	provisionsStore := &fakeProvisionsStore{}
 	extractor := &fakeJSONExtractor{out: map[string]any{
-		"name":           "terminal_radiation_requirement",
-		"type":           "mandatory",
-		"provision":      "终端设备中密封源的质量应符合GB4075。",
-		"provision_en":   "The quality of sealed sources in terminal equipment shall comply with GB4075.",
+		"name":              "terminal_radiation_requirement",
+		"type":              "mandatory",
+		"provision":         "终端设备中密封源的质量应符合GB4075。",
+		"provision_en":      "The quality of sealed sources in terminal equipment shall comply with GB4075.",
 		"source_line_spans": []any{"8:181"},
-		"subject":        "医疗健康监测终端设备辐射安全要求",
-		"keywords":       []any{"终端辐射", "密封源", "GB4075"},
-		"confidence":     0.95,
-		"is_explicit":    true,
-		"need_verify":    false,
-		"category_paths": []any{},
+		"subject":           "医疗健康监测终端设备辐射安全要求",
+		"keywords":          []any{"终端辐射", "密封源", "GB4075"},
+		"confidence":        0.95,
+		"is_explicit":       true,
+		"need_verify":       false,
+		"category_paths":    []any{},
 	}}
 
 	ctx, h := withBlockBufferHolder(context.Background())
@@ -446,12 +446,12 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnEmptyJSON(t *testing.T) {
 				"language": "en",
 				"provisions": []any{
 					map[string]any{
-						"name":             "logging_requirement",
-						"type":             "mandatory",
-						"provision":        "The device shall log all alarms.",
-						"provision_en":     "The device shall log all alarms.",
+						"name":              "logging_requirement",
+						"type":              "mandatory",
+						"provision":         "The device shall log all alarms.",
+						"provision_en":      "The device shall log all alarms.",
 						"source_line_spans": []any{"2:10"},
-						"confidence":       0.87,
+						"confidence":        0.87,
 					},
 				},
 			},
@@ -659,6 +659,42 @@ func TestProvisionsProcessor_TreatsEmptyFallbackJSONAsSuccess(t *testing.T) {
 	last := statusArr[len(statusArr)-1]
 	if strings.TrimSpace(asString(last["proc_status"])) != "success" {
 		t.Fatalf("proc_status=%v, want success", last["proc_status"])
+	}
+}
+
+func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *testing.T) {
+	extractor := &fakeJSONExtractor{
+		errs: []error{
+			errors.New("(MID_26050841) failed extracting provisions, error:(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+		},
+	}
+
+	p := NewProvisionsProcessor(nil, nil, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.ModelName = "deepseek-v4-flash"
+	p.FallbackModelName = "gpt-5.4-mini"
+
+	payload, modelName, err := p.extractProvisionPayloadWithFallback(context.Background(), Block{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The device shall log all alarms."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("extractProvisionPayloadWithFallback: %v", err)
+	}
+	if extractor.calledCount != 1 {
+		t.Fatalf("calledCount=%d, want 1", extractor.calledCount)
+	}
+	if modelName != "deepseek-v4-flash" {
+		t.Fatalf("modelName=%q, want deepseek-v4-flash", modelName)
+	}
+	if got := strings.TrimSpace(asString(payload["language"])); got != "unknown" {
+		t.Fatalf("language=%q, want unknown", got)
+	}
+	if got := payload["provisions"]; got == nil {
+		t.Fatalf("provisions missing from payload: %#v", payload)
 	}
 }
 
