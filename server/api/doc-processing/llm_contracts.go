@@ -1,179 +1,208 @@
 package docprocessing
 
-import llmclients "github.com/chendingplano/shared/go/api/llm"
+import (
+	"encoding/json"
+	"fmt"
+
+	llmclients "github.com/chendingplano/shared/go/api/llm"
+)
+
+const defaultStructuredContractRetries = 2
 
 func topicExtractionContract() llmclients.StructuredOutputContract {
-	return llmclients.StructuredOutputContract{
-		Name:        "chenweb_topic_extraction",
-		AllowRepair: true,
-		MaxRetries:  2,
-		Schema: []byte(`{
-			"type": "object",
-			"properties": {
-				"topics": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"properties": {
-							"topic_id": {"type": ["integer", "number", "string"]},
-							"topic_type": {"type": "string"},
-							"topic_type_en": {"type": "string"},
-							"lines": {
-								"type": "array",
-								"items": {"type": "string"}
-							},
-							"topic_keywords": {
-								"type": "array",
-								"items": {"type": "string"}
-							},
-							"topic_keywords_en": {
-								"type": "array",
-								"items": {"type": "string"}
-							},
-							"topic_desc": {"type": "string"},
-							"topic_desc_en": {"type": "string"},
-							"category_paths": {
-								"type": "array"
-							},
-							"category_paths_en": {
-								"type": "array"
-							}
-						},
-						"required": ["topic_desc"],
-						"additionalProperties": true
-					}
-				}
-			},
-			"required": ["topics"],
-			"additionalProperties": false
-		}`),
-	}
+	return newDocProcessingContract("chenweb_topic_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"topics": schemaArrayOfObjects(
+				map[string]any{
+					"topic_id":           schemaScalar("integer", "number", "string"),
+					"topic_type":         schemaString(),
+					"topic_type_en":      schemaString(),
+					"lines":              schemaStringArray(),
+					"topic_keywords":     schemaStringArray(),
+					"topic_keywords_en":  schemaStringArray(),
+					"topic_desc":         schemaString(),
+					"topic_desc_en":      schemaString(),
+					"category_paths":     schemaArray(),
+					"category_paths_en":  schemaArray(),
+				},
+				[]string{"topic_desc"},
+				true,
+			),
+		},
+		"required":             []string{"topics"},
+		"additionalProperties": false,
+	})
 }
 
 func sceneExtractionContract() llmclients.StructuredOutputContract {
-	return llmclients.StructuredOutputContract{
-		Name:        "chenweb_scene_extraction",
-		AllowRepair: true,
-		MaxRetries:  2,
-		Schema: []byte(`{
-			"type": "object",
-			"properties": {
-				"candidates": { "type": "array" },
-				"scene_blocks": { "type": "array" }
-			},
-			"anyOf": [
-				{ "required": ["candidates"] },
-				{ "required": ["scene_blocks"] }
-			],
-			"additionalProperties": false
-		}`),
-	}
+	return newDocProcessingContract("chenweb_scene_extraction", schemaObjectWithAnyOf(
+		map[string]any{
+			"candidates":   schemaArray(),
+			"scene_blocks": schemaArray(),
+		},
+		[]string{"candidates"},
+		[]string{"scene_blocks"},
+		false,
+	))
 }
 
 func docMetadataExtractionContract() llmclients.StructuredOutputContract {
-	return llmclients.StructuredOutputContract{
-		Name:        "chenweb_doc_metadata_extraction",
-		AllowRepair: true,
-		MaxRetries:  2,
-		Schema: []byte(`{
-			"type": "object",
-			"properties": {
-				"title": { "type": "string" },
-				"doc_no": { "type": "string" },
-				"publish_date": { "type": "string" },
-				"implementation_date": { "type": "string" },
-				"authors": {
-					"type": "array",
-					"items": { "type": "string" }
-				},
-				"main_drafting_persons": {
-					"type": "array",
-					"items": { "type": "string" }
-				},
-				"drafting_persons": {
-					"type": "array",
-					"items": { "type": "string" }
-				},
-				"need_more_pages": { "type": "boolean" }
-			},
-			"additionalProperties": true
-		}`),
-	}
+	return newDocProcessingContract("chenweb_doc_metadata_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"title":                 schemaString(),
+			"doc_no":                schemaString(),
+			"publish_date":          schemaString(),
+			"implementation_date":   schemaString(),
+			"authors":               schemaStringArray(),
+			"main_drafting_persons": schemaStringArray(),
+			"drafting_persons":      schemaStringArray(),
+			"need_more_pages":       map[string]any{"type": "boolean"},
+		},
+		"additionalProperties": true,
+	})
 }
 
 func metricsExtractionContract() llmclients.StructuredOutputContract {
-	return llmclients.StructuredOutputContract{
-		Name:        "chenweb_metrics_extraction",
-		AllowRepair: true,
-		MaxRetries:  2,
-		Schema: []byte(`{
-			"type": "object",
-			"properties": {
-				"language": { "type": "string" },
-				"candidates": { "type": "array" },
-				"metrics": { "type": "array" },
-				"uncertain_metrics": { "type": "array" }
-			},
-			"anyOf": [
-				{ "required": ["candidates"] },
-				{ "required": ["metrics"] }
-			],
-			"additionalProperties": true
-		}`),
-	}
+	return newDocProcessingContract("chenweb_metrics_extraction", schemaObjectWithAnyOf(
+		map[string]any{
+			"language":          schemaString(),
+			"candidates":        schemaArray(),
+			"metrics":           schemaArray(),
+			"uncertain_metrics": schemaArray(),
+		},
+		[]string{"candidates"},
+		[]string{"metrics"},
+		true,
+	))
 }
 
 func summaryExtractionContract() llmclients.StructuredOutputContract {
-	return llmclients.StructuredOutputContract{
-		Name:        "chenweb_summary_extraction",
-		AllowRepair: true,
-		MaxRetries:  2,
-		Schema: []byte(`{
-			"type": "object",
-			"properties": {
-				"summary": { "type": "string" },
-				"summary_en": { "type": "string" },
-				"text": { "type": "string" },
-				"keywords": { "type": "array" },
-				"keywords_en": { "type": "array" },
-				"category_path": { "type": "array" },
-				"category_paths": { "type": "array" },
-				"category_paths_en": { "type": "array" }
-			},
-			"additionalProperties": true
-		}`),
-	}
+	return newDocProcessingContract("chenweb_summary_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"summary":           schemaString(),
+			"summary_en":        schemaString(),
+			"text":              schemaString(),
+			"keywords":          schemaArray(),
+			"keywords_en":       schemaArray(),
+			"category_path":     schemaArray(),
+			"category_paths":    schemaArray(),
+			"category_paths_en": schemaArray(),
+		},
+		"additionalProperties": true,
+	})
 }
 
 func structureExtractionContract() llmclients.StructuredOutputContract {
-	return llmclients.StructuredOutputContract{
-		Name:        "chenweb_structure_extraction",
-		AllowRepair: true,
-		MaxRetries:  2,
-		Schema: []byte(`{
-			"type": "object",
-			"properties": {
-				"cover_pages": {
-					"type": "array",
-					"items": { "type": ["integer", "number", "string"] }
+	return newDocProcessingContract("chenweb_structure_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"cover_pages": schemaArrayOf(map[string]any{
+				"type": []string{"integer", "number", "string"},
+			}),
+			"labels": schemaArrayOfObjects(
+				map[string]any{
+					"line_number":         schemaScalar("integer", "number", "string"),
+					"corrected_line_type": schemaString(),
+					"confidence":          schemaScalar("integer", "number", "string"),
+					"reason":              schemaString(),
 				},
-				"labels": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"properties": {
-							"line_number": { "type": ["integer", "number", "string"] },
-							"corrected_line_type": { "type": "string" },
-							"confidence": { "type": ["integer", "number", "string"] },
-							"reason": { "type": "string" }
-						},
-						"required": ["line_number", "corrected_line_type", "confidence", "reason"],
-						"additionalProperties": true
-					}
-				}
-			},
-			"required": ["cover_pages", "labels"],
-			"additionalProperties": false
-		}`),
+				[]string{"line_number", "corrected_line_type", "confidence", "reason"},
+				true,
+			),
+		},
+		"required":             []string{"cover_pages", "labels"},
+		"additionalProperties": false,
+	})
+}
+
+func provisionExtractionContract() llmclients.StructuredOutputContract {
+	return newDocProcessingContract("chenweb_provision_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"language":   schemaString(),
+			"provisions": schemaArray(),
+		},
+		"required":             []string{"provisions"},
+		"additionalProperties": true,
+	})
+}
+
+func productExtractionContract() llmclients.StructuredOutputContract {
+	return newDocProcessingContract("chenweb_product_extraction", schemaObjectWithAnyOf(
+		map[string]any{
+			"products": schemaArray(),
+			"mentions": schemaArray(),
+		},
+		[]string{"products"},
+		[]string{"mentions"},
+		true,
+	))
+}
+
+func newDocProcessingContract(name string, schema map[string]any) llmclients.StructuredOutputContract {
+	return llmclients.StructuredOutputContract{
+		Name:        name,
+		AllowRepair: true,
+		MaxRetries:  defaultStructuredContractRetries,
+		Schema:      mustMarshalSchema(schema),
 	}
 }
+
+func mustMarshalSchema(schema map[string]any) []byte {
+	bs, err := json.Marshal(schema)
+	if err != nil {
+		panic(fmt.Sprintf("marshal structured output schema: %v", err))
+	}
+	return bs
+}
+
+func schemaString() map[string]any {
+	return map[string]any{"type": "string"}
+}
+
+func schemaArray() map[string]any {
+	return map[string]any{"type": "array"}
+}
+
+func schemaStringArray() map[string]any {
+	return schemaArrayOf(schemaString())
+}
+
+func schemaArrayOf(itemSchema map[string]any) map[string]any {
+	return map[string]any{
+		"type":  "array",
+		"items": itemSchema,
+	}
+}
+
+func schemaArrayOfObjects(properties map[string]any, required []string, additionalProperties bool) map[string]any {
+	return schemaArrayOf(map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"required":             required,
+		"additionalProperties": additionalProperties,
+	})
+}
+
+func schemaScalar(types ...string) map[string]any {
+	if len(types) == 1 {
+		return map[string]any{"type": types[0]}
+	}
+	return map[string]any{"type": types}
+}
+
+func schemaObjectWithAnyOf(properties map[string]any, requiredA []string, requiredB []string, additionalProperties bool) map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": properties,
+		"anyOf": []map[string]any{
+			{"required": requiredA},
+			{"required": requiredB},
+		},
+		"additionalProperties": additionalProperties,
+	}
+}
+

@@ -698,6 +698,45 @@ func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t
 	}
 }
 
+func TestProvisionsProcessor_ExtractProvisionPayloadUsesStructuredContractWhenAvailable(t *testing.T) {
+	extractor := &fakeJSONExtractor{out: map[string]any{
+		"language": "en",
+		"provisions": []any{
+			map[string]any{
+				"provision": "The device shall log all alarms.",
+			},
+		},
+	}}
+
+	p := NewProvisionsProcessor(nil, nil, extractor, nil)
+	p.PromptText = "extract provisions"
+	p.PromptRef = "prompt-test"
+	p.ModelName = "gpt-test"
+
+	payload, err := p.extractProvisionPayload(context.Background(), Block{
+		Index: 1,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The device shall log all alarms."},
+		},
+	}, "gpt-test")
+	if err != nil {
+		t.Fatalf("extractProvisionPayload: %v", err)
+	}
+	if extractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
+	}
+	if len(extractor.contractNames) != 1 || extractor.contractNames[0] != "chenweb_provision_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_provision_extraction]", extractor.contractNames)
+	}
+	items, ok := payload["provisions"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("provisions=%#v", payload["provisions"])
+	}
+}
+
 func TestControlService_ChunkingOperationDoesNotSelectProvisions(t *testing.T) {
 	got := make([]string, 0, 3)
 	svc := &ControlService{

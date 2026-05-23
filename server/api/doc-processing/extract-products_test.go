@@ -326,6 +326,39 @@ func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *
 	}
 }
 
+func TestProductsProcessor_ExtractProductPayloadUsesStructuredContractWhenAvailable(t *testing.T) {
+	extractor := &fakeJSONExtractor{out: map[string]any{
+		"products": []any{
+			map[string]any{
+				"product_name": "infusion pump",
+			},
+		},
+	}}
+
+	p := NewProductsProcessor(nil, nil, extractor, nil)
+	p.PromptText = "extract products"
+	p.PromptRef = "prompt-test"
+	p.ModelName = "gpt-test"
+
+	payload, err := p.extractProductPayload(context.Background(), "input text", "extract products", "prompt-test", "gpt-test", structureModelConfig{})
+	if err != nil {
+		t.Fatalf("extractProductPayload: %v", err)
+	}
+	if extractor.structuredCalledCount != 1 {
+		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	}
+	if extractor.calledCount != 0 {
+		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
+	}
+	if len(extractor.contractNames) != 1 || extractor.contractNames[0] != "chenweb_product_extraction" {
+		t.Fatalf("contractNames=%v, want [chenweb_product_extraction]", extractor.contractNames)
+	}
+	items, ok := payload["products"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("products=%#v", payload["products"])
+	}
+}
+
 func TestLoadProductPromptFromEnvKeys_PrefersFirstConfiguredKey(t *testing.T) {
 	tmp := t.TempDir()
 	promptPath := filepath.Join(tmp, "prompt-enrich-product-relations-v1.md")

@@ -47,6 +47,13 @@ type LLMJSONExtractor interface {
 	ExtractJSON(ctx context.Context, in llmclients.JSONExtractionInput) (map[string]any, error)
 }
 
+// LLMStructuredJSONExtractor is the preferred capability for JSON-producing
+// doc-processing call sites. Implementations may still satisfy only
+// LLMJSONExtractor during migration, but new code should prefer this path.
+type LLMStructuredJSONExtractor interface {
+	ExtractStructuredJSON(ctx context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
+}
+
 func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtractor, logger ApiTypes.JimoLogger) *ExtractDocMetadataProcessor {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26041830")
@@ -249,9 +256,7 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Conte
 		ModelName:  modelName,
 		InputText:  inputText,
 	}
-	if structuredExtractor, ok := p.Client.(interface {
-		ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
-	}); ok {
+	if structuredExtractor, ok := p.Client.(LLMStructuredJSONExtractor); ok {
 		result, err := structuredExtractor.ExtractStructuredJSON(ctx, in, docMetadataExtractionContract())
 		if err != nil {
 			return nil, err

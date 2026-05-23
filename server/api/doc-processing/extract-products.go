@@ -549,11 +549,24 @@ func (p *ProductsProcessor) extractProductPayload(ctx context.Context, inputText
 		"prompt_name", promptRef,
 	)
 
-	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+	in := llmclients.JSONExtractionInput{
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
-	})
+	}
+	var (
+		payload map[string]any
+		err     error
+	)
+	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
+		var result *llmclients.StructuredOutputResult
+		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, productExtractionContract())
+		if result != nil {
+			payload = result.Parsed
+		}
+	} else {
+		payload, err = p.Extractor.ExtractJSON(ctx, in)
+	}
 	if err != nil {
 		if payload == nil {
 			return nil, fmt.Errorf("(MID_26052030) failed extracting products, error:%w", err)

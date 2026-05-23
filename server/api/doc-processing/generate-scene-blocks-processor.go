@@ -530,12 +530,8 @@ func (p *SceneBlocksProcessor) extractScenePayload(ctx context.Context, inputTex
 	return nil, fmt.Errorf("(MID_26051831) llm output must contain 'scene_blocks' or 'candidates', JSON:%v", payload)
 }
 
-type structuredSceneExtractor interface {
-	ExtractStructuredJSON(ctx context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
-}
-
 func extractScenePayloadWithContract(ctx context.Context, extractor LLMJSONExtractor, in llmclients.JSONExtractionInput) (map[string]any, error) {
-	if structuredExtractor, ok := extractor.(structuredSceneExtractor); ok {
+	if structuredExtractor, ok := extractor.(LLMStructuredJSONExtractor); ok {
 		result, err := structuredExtractor.ExtractStructuredJSON(ctx, in, sceneExtractionContract())
 		if err != nil {
 			return nil, err

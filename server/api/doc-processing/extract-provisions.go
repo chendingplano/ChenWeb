@@ -372,11 +372,24 @@ func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block
 		"prompt_name", p.PromptRef,
 		"input_text", block)
 
-	payload, err := p.Extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+	in := llmclients.JSONExtractionInput{
 		PromptText: p.PromptText,
 		ModelName:  modelName,
 		InputText:  buildProvisionUserPrompt(block),
-	})
+	}
+	var (
+		payload map[string]any
+		err     error
+	)
+	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
+		var result *llmclients.StructuredOutputResult
+		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, provisionExtractionContract())
+		if result != nil {
+			payload = result.Parsed
+		}
+	} else {
+		payload, err = p.Extractor.ExtractJSON(ctx, in)
+	}
 	if err != nil {
 		if payload == nil {
 			return nil, fmt.Errorf("(MID_26050841) failed extracting provisions, error:%w", err)

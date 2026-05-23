@@ -1101,9 +1101,7 @@ func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText s
 		payload map[string]any
 		err     error
 	)
-	if structuredExtractor, ok := p.Extractor.(interface {
-		ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
-	}); ok {
+	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, metricsExtractionContract())
 		if result != nil {

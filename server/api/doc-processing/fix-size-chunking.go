@@ -809,9 +809,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 		parsed map[string]any
 		err    error
 	)
-	if structuredExtractor, ok := s.Extractor.(interface {
-		ExtractStructuredJSON(context.Context, llmclients.JSONExtractionInput, llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
-	}); ok {
+	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, summaryExtractionContract())
 		if result != nil {

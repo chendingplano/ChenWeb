@@ -454,12 +454,8 @@ func extractTopicsFromMarkedLinesWithLLM(
 	return normalizeExtractedTopics(rawTopics, seqStart, logger, logScopeName, logScopeValue, record_id), nil
 }
 
-type structuredTopicExtractor interface {
-	ExtractStructuredJSON(ctx context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
-}
-
 func extractTopicPayload(ctx context.Context, extractor LLMJSONExtractor, in llmclients.JSONExtractionInput) (map[string]any, error) {
-	if structuredExtractor, ok := extractor.(structuredTopicExtractor); ok {
+	if structuredExtractor, ok := extractor.(LLMStructuredJSONExtractor); ok {
 		result, err := structuredExtractor.ExtractStructuredJSON(ctx, in, topicExtractionContract())
 		if err != nil {
 			return nil, err
