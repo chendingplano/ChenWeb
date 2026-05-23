@@ -1,6 +1,7 @@
 package kbhandler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -100,6 +102,11 @@ func UpdateRecordTopic(c echo.Context) error {
 		if err := updateTopicCategoryIndex(logger, topicTreeDir, req, oldCategoryPaths, topicLines); err != nil {
 			logger.Warn("update topic category index failed", "err", err)
 		}
+	}
+	if err := docprocessing.ReplaceTopicArtifactsFromArtifactFiles(context.Background(), req.RecordID, logger); err != nil {
+		logger.Warn("refresh topic table from artifact files failed", "record_id", req.RecordID, "err", err)
+	} else if err := docprocessing.ReindexTopicSearchForRecord(context.Background(), req.RecordID, logger); err != nil {
+		logger.Warn("reindex topic search after manual update failed", "record_id", req.RecordID, "err", err)
 	}
 
 	logger.Info("update record topic success", "record_id", req.RecordID, "topic_id", req.TopicID)

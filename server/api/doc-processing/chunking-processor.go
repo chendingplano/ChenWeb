@@ -53,6 +53,29 @@ func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 }
 
 func runChunkingServiceEvent(ctx context.Context, payload []byte, inputStore DocMetadataStore, service chunkingHandler, logger ApiTypes.JimoLogger) error {
+	return runInputServiceEvent(
+		ctx,
+		payload,
+		inputStore,
+		logger,
+		service.HandleInput,
+		func(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error {
+			if bh, ok := service.(chunkingBlockHandler); ok {
+				return bh.HandleBlockInput(ctx, recordID, inputFilename, buf)
+			}
+			return fmt.Errorf("(MID_26052345) service does not support block input")
+		},
+	)
+}
+
+func runInputServiceEvent(
+	ctx context.Context,
+	payload []byte,
+	inputStore DocMetadataStore,
+	logger ApiTypes.JimoLogger,
+	handleInput func(context.Context, int64, string, []byte) error,
+	handleBlock func(context.Context, int64, string, *BlockBuffer) error,
+) error {
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
 		return fmt.Errorf("parse event payload: %w", err)
@@ -74,16 +97,14 @@ func runChunkingServiceEvent(ctx context.Context, payload []byte, inputStore Doc
 
 	// Prefer the block buffer produced by the BlockingProcessor when available.
 	if buf := BlockBufferFromContext(ctx); buf != nil {
-		if bh, ok := service.(chunkingBlockHandler); ok {
-			if inputFilename == "" {
-				inputFilename = resolveChunkingInputFilename(rec, "")
-			}
-			if err := bh.HandleBlockInput(ctx, evt.RecordID, inputFilename, buf); err != nil {
-				logger.Error("chunking processor failed (block input)", "record_id", rec.ID, "error", err)
-				return err
-			}
-			return nil
+		if inputFilename == "" {
+			inputFilename = resolveChunkingInputFilename(rec, "")
 		}
+		if err := handleBlock(ctx, evt.RecordID, inputFilename, buf); err != nil {
+			logger.Error("chunking processor failed (block input)", "record_id", rec.ID, "error", err)
+			return err
+		}
+		return nil
 	}
 
 	// Fall back to reading the input file directly.
@@ -104,7 +125,7 @@ func runChunkingServiceEvent(ctx context.Context, payload []byte, inputStore Doc
 	if inputFilename == "" {
 		inputFilename = resolveChunkingInputFilename(rec, inputPath)
 	}
-	if err := service.HandleInput(ctx, evt.RecordID, inputFilename, fileBody); err != nil {
+	if err := handleInput(ctx, evt.RecordID, inputFilename, fileBody); err != nil {
 		logger.Error("chunking processor failed", "record_id", rec.ID, "error", err)
 		return err
 	}

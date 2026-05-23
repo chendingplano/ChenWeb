@@ -45,6 +45,7 @@ func TestChunkingProcessor_HandleEvent_ReturnsServiceError(t *testing.T) {
 }
 
 func TestChunkingProcessor_HandleEvent_BlockInputFallbackWritesChunks(t *testing.T) {
+	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
 	summaryRoot := t.TempDir()
 

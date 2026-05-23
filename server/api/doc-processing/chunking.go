@@ -25,6 +25,22 @@ type chunkingBlockHandler interface {
 	HandleBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error
 }
 
+type topicGeneratingHandler interface {
+	HandleGenerateTopicsInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error
+}
+
+type topicGeneratingBlockHandler interface {
+	HandleGenerateTopicsBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error
+}
+
+type summaryGeneratingHandler interface {
+	HandleGenerateSummariesInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error
+}
+
+type summaryGeneratingBlockHandler interface {
+	HandleGenerateSummariesBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error
+}
+
 type ChunkingController struct {
 	Method string
 	Fixed  chunkingHandler
@@ -102,5 +118,85 @@ func (c *ChunkingController) LogName() string {
 		return "topic_chunking"
 	default:
 		return "chunking"
+	}
+}
+
+func (c *ChunkingController) HandleGenerateTopicsInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
+	switch strings.ToLower(strings.TrimSpace(c.Method)) {
+	case ChunkingMethodFixed:
+		if h, ok := c.Fixed.(topicGeneratingHandler); ok {
+			return h.HandleGenerateTopicsInput(ctx, recordID, inputFilename, inputFile)
+		}
+		return c.Fixed.HandleInput(ctx, recordID, inputFilename, inputFile)
+	case ChunkingMethodTopic:
+		if h, ok := c.Topic.(topicGeneratingHandler); ok {
+			return h.HandleGenerateTopicsInput(ctx, recordID, inputFilename, inputFile)
+		}
+		return c.Topic.HandleInput(ctx, recordID, inputFilename, inputFile)
+	default:
+		return fmt.Errorf("(MID_26052337) unsupported chunking method: %s", c.Method)
+	}
+}
+
+func (c *ChunkingController) HandleGenerateTopicsBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error {
+	switch strings.ToLower(strings.TrimSpace(c.Method)) {
+	case ChunkingMethodFixed:
+		if h, ok := c.Fixed.(topicGeneratingBlockHandler); ok {
+			return h.HandleGenerateTopicsBlockInput(ctx, recordID, inputFilename, buf)
+		}
+		if bh, ok := c.Fixed.(chunkingBlockHandler); ok {
+			return bh.HandleBlockInput(ctx, recordID, inputFilename, buf)
+		}
+		return fmt.Errorf("(MID_26052338) fixed-size topic generation service does not support block input")
+	case ChunkingMethodTopic:
+		if h, ok := c.Topic.(topicGeneratingBlockHandler); ok {
+			return h.HandleGenerateTopicsBlockInput(ctx, recordID, inputFilename, buf)
+		}
+		if bh, ok := c.Topic.(chunkingBlockHandler); ok {
+			return bh.HandleBlockInput(ctx, recordID, inputFilename, buf)
+		}
+		return fmt.Errorf("(MID_26052339) topic generation service does not support block input")
+	default:
+		return fmt.Errorf("(MID_26052340) unsupported chunking method: %s", c.Method)
+	}
+}
+
+func (c *ChunkingController) HandleGenerateSummariesInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
+	switch strings.ToLower(strings.TrimSpace(c.Method)) {
+	case ChunkingMethodFixed:
+		if h, ok := c.Fixed.(summaryGeneratingHandler); ok {
+			return h.HandleGenerateSummariesInput(ctx, recordID, inputFilename, inputFile)
+		}
+		return c.Fixed.HandleInput(ctx, recordID, inputFilename, inputFile)
+	case ChunkingMethodTopic:
+		if h, ok := c.Topic.(summaryGeneratingHandler); ok {
+			return h.HandleGenerateSummariesInput(ctx, recordID, inputFilename, inputFile)
+		}
+		return c.Topic.HandleInput(ctx, recordID, inputFilename, inputFile)
+	default:
+		return fmt.Errorf("(MID_26052341) unsupported chunking method: %s", c.Method)
+	}
+}
+
+func (c *ChunkingController) HandleGenerateSummariesBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error {
+	switch strings.ToLower(strings.TrimSpace(c.Method)) {
+	case ChunkingMethodFixed:
+		if h, ok := c.Fixed.(summaryGeneratingBlockHandler); ok {
+			return h.HandleGenerateSummariesBlockInput(ctx, recordID, inputFilename, buf)
+		}
+		if bh, ok := c.Fixed.(chunkingBlockHandler); ok {
+			return bh.HandleBlockInput(ctx, recordID, inputFilename, buf)
+		}
+		return fmt.Errorf("(MID_26052342) fixed-size summary generation service does not support block input")
+	case ChunkingMethodTopic:
+		if h, ok := c.Topic.(summaryGeneratingBlockHandler); ok {
+			return h.HandleGenerateSummariesBlockInput(ctx, recordID, inputFilename, buf)
+		}
+		if bh, ok := c.Topic.(chunkingBlockHandler); ok {
+			return bh.HandleBlockInput(ctx, recordID, inputFilename, buf)
+		}
+		return fmt.Errorf("(MID_26052343) summary generation service does not support block input")
+	default:
+		return fmt.Errorf("(MID_26052344) unsupported chunking method: %s", c.Method)
 	}
 }

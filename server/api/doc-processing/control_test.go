@@ -77,6 +77,54 @@ func TestControlService_DefaultsToConfiguredOrder(t *testing.T) {
 	}
 }
 
+func TestControlService_SkipsGenerateSummariesWhenChunkingAlreadySelected(t *testing.T) {
+	got := make([]string, 0, 3)
+	svc := &ControlService{
+		Processors: []Processor{
+			fakeProcessor{name: "chunking", calls: &got},
+			fakeProcessor{name: "generate_summaries", calls: &got},
+			fakeProcessor{name: "extract_metrics", calls: &got},
+		},
+	}
+
+	payload := []byte(`{"record_id":"1","operation":["chunking","generate_summaries","extract_metrics"]}`)
+	svc.HandleEvent(context.Background(), payload)
+
+	want := []string{"chunking", "extract_metrics"}
+	if len(got) != len(want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("calls[%d]=%q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestControlService_DefaultOrderSkipsStandaloneGenerateProcessorsAfterChunking(t *testing.T) {
+	got := make([]string, 0, 4)
+	svc := &ControlService{
+		Processors: []Processor{
+			fakeProcessor{name: "chunking", calls: &got},
+			fakeProcessor{name: "generate_summaries", calls: &got},
+			fakeProcessor{name: "generate_topics", calls: &got},
+			fakeProcessor{name: "extract_metrics", calls: &got},
+		},
+	}
+
+	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+
+	want := []string{"chunking", "extract_metrics"}
+	if len(got) != len(want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("calls[%d]=%q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 type fakeEventStore struct {
 	insertErr error
 }

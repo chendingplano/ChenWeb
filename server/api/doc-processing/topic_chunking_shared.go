@@ -410,11 +410,11 @@ func extractTopicsFromMarkedLinesWithLLM(
 	}
 
 	inputText := buildMarkedChunkInputText(lines)
-	logger.Info("llm call start",
+	logger.Info("extract topics llm call start",
 		logScopeName, logScopeValue,
+		"record_id", record_id,
 		"num_lines", len(lines),
 		"model_name", modelName,
-		"inputText", inputText,
 	)
 
 	llmStart := time.Now()
@@ -423,12 +423,11 @@ func extractTopicsFromMarkedLinesWithLLM(
 		ModelName:  modelName,
 		InputText:  inputText,
 	})
-	logger.Info("llm call end",
+	logger.Info("extract topics llm call end",
 		logScopeName, logScopeValue,
+		"record_id", record_id,
 		"model_name", modelName,
 		"prompt_name", promptRef,
-		"record_id", record_id,
-		"parsed", parsed,
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 		"error", err,
 	)
@@ -458,7 +457,7 @@ func extractTopicsFromMarkedLinesWithLLM(
 func normalizeExtractedTopics(rawTopics []any, seqStart int, logger ApiTypes.JimoLogger, logScopeName string, logScopeValue int, recordID int64) []TopicItem {
 	out := make([]TopicItem, 0, len(rawTopics))
 	nextSeq := seqStart
-	for _, item := range rawTopics {
+	for idx, item := range rawTopics {
 		m, ok := item.(map[string]any)
 		if !ok {
 			continue
@@ -492,14 +491,10 @@ func normalizeExtractedTopics(rawTopics []any, seqStart int, logger ApiTypes.Jim
 		logger.Info("extracted topic from LLM",
 			logScopeName, logScopeValue,
 			"record_id", recordID,
-			"nextSeq", nextSeq,
-			"item", item,
-			"topic", topic,
+			"idx", idx,
+			"total", len(rawTopics),
 			"topic_type", topicType,
 			"line_ranges", lineRanges,
-			"keywords", topicKeywords,
-			"category_path", categoryPath,
-			"category_fallback_reason", categoryFallbackReason,
 		)
 
 		if categoryFallbackReason != "" {

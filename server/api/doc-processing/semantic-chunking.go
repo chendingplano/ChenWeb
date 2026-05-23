@@ -257,6 +257,10 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
 	}
+	if err := ReplaceTopicArtifactsForRecord(ctx, rec.ID, topics, s.Logger); err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, start, err)
+		return err
+	}
 	if err := ReindexTopicSearchForRecord(ctx, rec.ID, s.Logger); err != nil {
 		s.Logger.Warn("reindex topic search registry failed", "record_id", rec.ID, "error", err)
 	}

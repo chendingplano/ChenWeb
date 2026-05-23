@@ -131,6 +131,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			return nil
 		}
 	}
+	processors = collapseRedundantChunkingProcessors(processors)
 
 	// Inject a block buffer holder into context so the blocking processor
 	// can share its output with downstream processors.
@@ -396,7 +397,7 @@ func appendControlStatus(raw string, now time.Time, procErr error) (string, erro
 
 func (s *ControlService) selectProcessors(ops []string) []Processor {
 	if len(ops) == 0 {
-		return s.Processors
+		return collapseRedundantChunkingProcessors(s.Processors)
 	}
 
 	available := make(map[string]Processor, len(s.Processors))
@@ -422,5 +423,39 @@ func (s *ControlService) selectProcessors(ops []string) []Processor {
 		}
 		selected = append(selected, p)
 	}
-	return selected
+	return collapseRedundantChunkingProcessors(selected)
+}
+
+func collapseRedundantChunkingProcessors(processors []Processor) []Processor {
+	if len(processors) == 0 {
+		return processors
+	}
+
+	hasChunking := false
+	for _, p := range processors {
+		if p == nil {
+			continue
+		}
+		if canonicalOperationName(p.Name()) == "chunking" {
+			hasChunking = true
+			break
+		}
+	}
+	if !hasChunking {
+		return processors
+	}
+
+	out := make([]Processor, 0, len(processors))
+	for _, p := range processors {
+		if p == nil {
+			continue
+		}
+		switch canonicalOperationName(p.Name()) {
+		case "generate_topics", "generate_summaries":
+			continue
+		default:
+			out = append(out, p)
+		}
+	}
+	return out
 }

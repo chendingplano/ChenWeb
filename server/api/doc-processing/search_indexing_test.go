@@ -10,6 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
 func TestBuildSummaryRegistryRowsReadsSummaryArtifacts(t *testing.T) {
@@ -33,7 +34,7 @@ summary_end
 		t.Fatalf("write file: %v", err)
 	}
 
-	rows, err := buildSummaryRegistryRows(1042, "doc.pdf")
+	rows, err := buildSummaryRegistryRowsFromFiles(1042, "doc.pdf")
 	if err != nil {
 		t.Fatalf("buildSummaryRegistryRows: %v", err)
 	}
@@ -66,7 +67,7 @@ category_paths: ["safety","battery"]
 		t.Fatalf("write file: %v", err)
 	}
 
-	rows, err := buildTopicRegistryRows(1042, "doc.pdf")
+	rows, err := buildTopicRegistryRowsFromFiles(1042, "doc.pdf")
 	if err != nil {
 		t.Fatalf("buildTopicRegistryRows: %v", err)
 	}
@@ -124,6 +125,113 @@ func TestReplaceRegistryRowsDeletesThenInserts(t *testing.T) {
 
 	if err := replaceRegistryRows(context.Background(), db, "summary", 42, rows, nil); err != nil {
 		t.Fatalf("replaceRegistryRows: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestReplaceSummaryArtifactsForRecordDeletesThenInserts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.summaries WHERE input_record_id = $1`)).
+		WithArgs(int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec("INSERT INTO kb.summaries").
+		WithArgs(
+			"42_1_0001",
+			int64(42),
+			1,
+			1,
+			`["2:10"]`,
+			`[]`,
+			`["energy"]`,
+			`[]`,
+			`["performance"]`,
+			`[]`,
+			`[]`,
+			`[]`,
+			`[]`,
+			"Energy summary",
+			"",
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	err = ReplaceSummaryArtifactsForRecord(context.Background(), 42, []SummaryItem{{
+		SummaryID:     "42_1_0001",
+		RecordID:      42,
+		Level:         1,
+		SeqNo:         1,
+		Lines:         []string{"2:10"},
+		Keywords:      []string{"energy"},
+		CategoryPaths: []string{"performance"},
+		Summary:       "Energy summary",
+	}}, nil)
+	if err != nil {
+		t.Fatalf("ReplaceSummaryArtifactsForRecord: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestReplaceTopicArtifactsForRecordDeletesThenInserts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.topics WHERE input_record_id = $1`)).
+		WithArgs(int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec("INSERT INTO kb.topics").
+		WithArgs(
+			"1",
+			int64(42),
+			1,
+			"requirement",
+			"",
+			`["2:10"]`,
+			`["battery"]`,
+			`[]`,
+			`["safety"]`,
+			`[]`,
+			`[{"path_keywords":null,"path_confidence":0,"category_path":[{"name":"safety","keywords":null,"confidence":0}]}]`,
+			`[]`,
+			"Battery charging safety",
+			"",
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	err = ReplaceTopicArtifactsForRecord(context.Background(), 42, []TopicItem{{
+		SeqNo:     1,
+		TopicType: "requirement",
+		Lines:     []string{"2:10"},
+		Keywords:  []string{"battery"},
+		Topic:     "Battery charging safety",
+		CategoryPathDetail: []CategoryPathEntry{{
+			Nodes: []CategoryPathNode{{Name: "safety"}},
+		}},
+	}}, nil)
+	if err != nil {
+		t.Fatalf("ReplaceTopicArtifactsForRecord: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)

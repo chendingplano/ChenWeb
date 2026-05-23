@@ -34,9 +34,17 @@ func ReindexSummarySearchForRecord(ctx context.Context, recordID int64, logger A
 	if err != nil {
 		return err
 	}
-	rows, err := buildSummaryRegistryRows(recordID, sourceTitle)
+	rows, err := buildSummaryRegistryRows(ctx, db, recordID, sourceTitle)
 	if err != nil {
 		return err
+	}
+	if len(rows) == 0 {
+		if err := ReplaceSummaryArtifactsFromArtifactFiles(ctx, recordID, logger); err == nil {
+			rows, err = buildSummaryRegistryRowsFromDB(ctx, db, recordID, sourceTitle)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	return replaceRegistryRows(ctx, db, searchArtifactSummary, recordID, rows, logger)
 }
@@ -50,9 +58,17 @@ func ReindexTopicSearchForRecord(ctx context.Context, recordID int64, logger Api
 	if err != nil {
 		return err
 	}
-	rows, err := buildTopicRegistryRows(recordID, sourceTitle)
+	rows, err := buildTopicRegistryRows(ctx, db, recordID, sourceTitle)
 	if err != nil {
 		return err
+	}
+	if len(rows) == 0 {
+		if err := ReplaceTopicArtifactsFromArtifactFiles(ctx, recordID, logger); err == nil {
+			rows, err = buildTopicRegistryRowsFromDB(ctx, db, recordID, sourceTitle)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	return replaceRegistryRows(ctx, db, searchArtifactTopic, recordID, rows, logger)
 }
@@ -136,7 +152,18 @@ func fetchSearchSourceTitle(ctx context.Context, db *sql.DB, recordID int64) (st
 	return strings.TrimSpace(fileName.String), nil
 }
 
-func buildSummaryRegistryRows(recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {
+func buildSummaryRegistryRows(ctx context.Context, db *sql.DB, recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {
+	rows, err := buildSummaryRegistryRowsFromDB(ctx, db, recordID, sourceTitle)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) > 0 {
+		return rows, nil
+	}
+	return buildSummaryRegistryRowsFromFiles(recordID, sourceTitle)
+}
+
+func buildSummaryRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {
 	artifactDir := strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
 	recordDir, err := buildRecordArtifactDir(artifactDir, recordID)
 	if err != nil {
@@ -179,7 +206,18 @@ func buildSummaryRegistryRows(recordID int64, sourceTitle string) ([]kbsearch.Re
 	return rows, nil
 }
 
-func buildTopicRegistryRows(recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {
+func buildTopicRegistryRows(ctx context.Context, db *sql.DB, recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {
+	rows, err := buildTopicRegistryRowsFromDB(ctx, db, recordID, sourceTitle)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) > 0 {
+		return rows, nil
+	}
+	return buildTopicRegistryRowsFromFiles(recordID, sourceTitle)
+}
+
+func buildTopicRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {
 	artifactDir := strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
 	recordDir, err := buildRecordArtifactDir(artifactDir, recordID)
 	if err != nil {
