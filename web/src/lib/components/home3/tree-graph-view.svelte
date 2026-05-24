@@ -118,6 +118,7 @@
 	const NODE_CLICK_FALLBACK_MAX_DX = 280;
 	const NODE_CLICK_FALLBACK_MAX_DY = 26;
 	const NODE_CLICK_FALLBACK_ROW_DY = 36;
+	const NODE_SELECTION_MARGIN = 8;
 
 	let {
 		mode,
@@ -1174,24 +1175,29 @@
 	) {
 		if (lastEChartsClickStamp && Math.abs(lastEChartsClickStamp - clickStamp) < 50) return;
 		const hit = findRenderedNodeHit(event);
-		if (hit && canToggleNodeExpanded(hit.node)) {
+		if (hit) {
 			selectedNodeId = hit.node.id;
 			hoveredNodeId = hit.node.id;
 			dismissedHoverNodeId = null;
 			hoverDismissPending = false;
 			clearHoverHideTimer();
-			toggleNodeAndMaybeReveal(hit.node.id);
+			if (canToggleNodeExpanded(hit.node)) {
+				toggleNodeAndMaybeReveal(hit.node.id);
+			}
 			return;
 		}
-		if (!hit && hoveredNodeId && hoverAnchor && capturedPoint && canToggleNodeExpanded(hoveredNode)) {
+		if (!hit && hoveredNodeId && hoverAnchor && capturedPoint) {
 			const dist = Math.hypot(capturedPoint.x - hoverAnchor.x, capturedPoint.y - hoverAnchor.y);
-			const clickRadius = (hoverAnchor.nodeRadius || 8) + 30;
+			const clickRadius = (hoverAnchor.nodeRadius || 8) + NODE_SELECTION_MARGIN + 22;
 			if (dist <= clickRadius) {
 				selectedNodeId = hoveredNodeId;
+				hoveredNodeId = hoveredNodeId;
 				dismissedHoverNodeId = null;
 				hoverDismissPending = false;
 				clearHoverHideTimer();
-				toggleNodeAndMaybeReveal(hoveredNodeId);
+				if (canToggleNodeExpanded(hoveredNode)) {
+					toggleNodeAndMaybeReveal(hoveredNodeId);
+				}
 			}
 		}
 	}
@@ -1997,6 +2003,15 @@
 						onmousemove={(event: MouseEvent) => {
 							if (shouldKeepHoverAlive(event.offsetX, event.offsetY)) {
 								clearHoverHideTimer();
+							}
+							if (!stagePointerDown && !miniMapDragging && hoverAnchor && hoveredNodeId) {
+								const dist = Math.hypot(
+									event.offsetX - hoverAnchor.x,
+									event.offsetY - hoverAnchor.y
+								);
+								if (dist <= hoverAnchor.nodeRadius + NODE_SELECTION_MARGIN) {
+									chartApi?.getZr?.()?.setCursorStyle?.('default');
+								}
 							}
 						}}
 					>

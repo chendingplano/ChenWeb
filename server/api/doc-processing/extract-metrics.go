@@ -272,7 +272,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return nil
 	}
 
-	result, err := p.extractMetricsFromBlocksWithLLM(ctx, buf.Blocks)
+	result, err := p.extractMetricsFromBlocksWithLLM(ctx, evt.RecordID, buf.Blocks)
 	if err != nil {
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26050701) extractMetrics failed, error:%w", err)
@@ -472,10 +472,15 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 }
 */
 
-func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(ctx context.Context, blocks []Block) (metricExtractionResult, error) {
+func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
+	ctx context.Context, 
+	record_id int64,
+	blocks []Block) (metricExtractionResult, error) {
 	mentions := make([]metricCandidateMention, 0, len(blocks))
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
 	detectedLanguage := "unknown"
+
+	// Step 1: Extract metrics
 	for _, block := range blocks {
 		lines := make([]string, len(block.Lines))
 		for i, bl := range block.Lines {
@@ -483,34 +488,48 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(ctx context.Context, 
 		}
 		parsedLines := parseMetricInputLines(lines)
 		userPrompt := buildMetricCandidateUserPrompt(lines, parsedLines)
-		p.Logger.Info("Ready to extract metric candidates",
-			"model name", p.MentionModelName,
+		p.Logger.Info("extract metric - start",
+			"record_id", record_id,
 			"num_lines", len(lines),
+			"model name", p.MentionModelName,
 			"prompt", p.MentionPromptRef)
 		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, userPrompt)
 		if err != nil {
 			return metricExtractionResult{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
 		}
+
 		if language := strings.TrimSpace(asString(payload["language"])); language != "" && detectedLanguage == "unknown" {
 			detectedLanguage = language
 		}
+	
 		usedMentionModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedMentionModel, p.MentionModelName))
 		raw, _ := payload["candidates"].([]any)
 		mentions = append(mentions, normalizeMetricCandidateMentions(raw, block)...)
+
+		p.Logger.Info("extract metric - responded",
+			"record_id", record_id,
+			"extracted", len(mentions),
+			"language", detectedLanguage,
+		)
 	}
 
+	// Step 2: Dedup
 	candidates := mergeMetricMentionCandidates(mentions)
 	p.Logger.Info("Merged metric candidates",
+		"record_id", record_id,
 		"mentions_count", len(mentions),
 		"candidate_count", len(candidates),
 		"record_stage", "post_merge",
 	)
+
+	// Step 3: Enrich
 	metrics := make([]map[string]any, 0, len(candidates))
 	uncertain := make([]map[string]any, 0)
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
-		p.Logger.Info("Start enriching metric candidate",
+		p.Logger.Info("enrich metric - start",
 			"idx", idx,
+			"record_id", record_id,
 			"total", len(candidates),
 			"candidate_id", candidate.CandidateID,
 			"model_name", p.RelationModelName,
@@ -528,12 +547,11 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(ctx context.Context, 
 		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
 		metrics = append(metrics, normalizeMetricList(metricsRaw)...)
 		uncertain = append(uncertain, normalizeMetricList(uncertainRaw)...)
-		p.Logger.Info("LLM responded with enriched metrics",
+		p.Logger.Info("enrich metrics - finished",
+			"record_id", record_id,
 			"candidate_id", candidate.CandidateID,
 			"metrics_so_far", len(metrics),
 			"uncertain_metrics_so_far", len(uncertain),
-			"model_name", p.RelationModelName,
-			"prompt_name", p.RelationPromptRef,
 		)
 	}
 
@@ -541,7 +559,8 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(ctx context.Context, 
 	preDedupeUncertain := len(uncertain)
 	metrics = dedupeFinalMetricRows(metrics)
 	uncertain = dedupeFinalMetricRows(uncertain)
-	p.Logger.Info("Deduped final metric rows",
+	p.Logger.Info("Final metric rows",
+		"record_id", record_id,
 		"metrics_before_dedup", preDedupeMetrics,
 		"metrics_after_dedup", len(metrics),
 		"uncertain_before_dedup", preDedupeUncertain,
@@ -710,7 +729,59 @@ func buildMetricRelationUserPrompt(candidate metricCandidate) string {
 		"value_hint":          candidate.ValueHint,
 		"supporting_mentions": candidate.SupportingMentions,
 	})
-	return "Return JSON only.\n\nCandidate:\n" + string(candidateJSON) +
+	schema := map[string]any{
+		"language": "string",
+		"metrics": []map[string]any{{
+			"metric_name":           "string",
+			"metric_name_en":        "string",
+			"source_line_spans":     []string{"5", "12:14"},
+			"subject":               "string",
+			"subject_en":            "string",
+			"desc":                  "string",
+			"desc_en":               "string",
+			"context":               "string",
+			"context_en":            "string",
+			"keywords":              []string{"string"},
+			"keywords_en":           []string{"string"},
+			"location_type":         "string",
+			"unit":                  "string",
+			"unit_en":               "string",
+			"metric_value":          "string",
+			"value_data_type":       "string",
+			"value_range_type":      "string",
+			"value_class":           "string",
+			"value_class_en":        "string",
+			"formula_or_definition": "string",
+			"threshold_or_target":   "string",
+			"measurement_frequency": "string",
+			"confidence":            0.0,
+			"is_explicit_metric":    true,
+			"table_name_or_section": "string",
+			"reasoning_tags":        []string{"string"},
+			"category_paths": []map[string]any{{
+				"category_path": []map[string]any{{
+					"name":       "string",
+					"keywords":   []string{"string"},
+					"confidence": 0.0,
+				}},
+				"path_keywords":   []string{"string"},
+				"path_confidence": 0.0,
+			}},
+			"category_paths_en": []map[string]any{{
+				"category_path": []map[string]any{{
+					"name":       "string",
+					"keywords":   []string{"string"},
+					"confidence": 0.0,
+				}},
+				"path_keywords":   []string{"string"},
+				"path_confidence": 0.0,
+			}},
+		}},
+		"uncertain_metrics": []any{},
+	}
+	schemaJSON, _ := json.Marshal(schema)
+	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nCandidate:\n" + string(candidateJSON) +
 		"\n\nSource lines (plain):\n" + strings.Join(lines, "\n") +
 		"\n\nSource lines (raw, JSON array):\n" + string(linesJSON)
 }
@@ -1110,11 +1181,6 @@ func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText s
 	} else {
 		payload, err = p.Extractor.ExtractJSON(ctx, in)
 	}
-	p.Logger.Info("LLM response received for metrics extraction",
-		"model_name", modelName,
-		"prompt_name", p.PromptRef,
-		"extract_error", err,
-	)
 	if err != nil {
 		return nil, err
 	}
@@ -1159,10 +1225,9 @@ func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context
 	}
 
 	if isEmptyMetricExtractionError(err) {
-		p.Logger.Warn("primary metric candidate extraction returned empty JSON; retrying fallback model",
+		p.Logger.Info("primary metric candidate extraction returned empty JSON; retrying fallback model",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
-			"error", err,
 			"prompt_name", p.MentionPromptRef,
 		)
 	} else {
@@ -1177,9 +1242,8 @@ func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context
 	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, fallbackModelName, p.FallbackMentionModelCfg)
 	if fallbackErr != nil {
 		if isEmptyMetricExtractionError(fallbackErr) {
-			p.Logger.Warn("fallback metric candidate extraction returned empty JSON; treating as empty result",
+			p.Logger.Info("fallback metric candidate extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
-				"error", fallbackErr,
 				"prompt_name", p.MentionPromptRef,
 			)
 			return map[string]any{"language": "unknown", "candidates": []any{}}, fallbackModelName, nil

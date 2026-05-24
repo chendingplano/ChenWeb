@@ -9,6 +9,7 @@
 		getProductCategory
 	} from '$lib/services/kbService';
 	import type { ArtifactCategoryItem } from '$lib/services/kbService';
+	import PdfViewWindow from './pdf-view-window.svelte';
 
 	let {
 		categoryPath,
@@ -69,6 +70,10 @@
 	const ITEM_RX = 13;
 	const MAX_ITEMS_SHOWN = 8;
 
+	function truncateLabel(s: string, maxLen = 48): string {
+		return s.length > maxLen ? s.slice(0, maxLen - 3) + '...' : s;
+	}
+
 	function groupAngle(i: number): number {
 		return (2 * Math.PI * i) / GROUP_DEFS.length - Math.PI / 2;
 	}
@@ -102,7 +107,7 @@
 				const r = await getSummaryCategory(categoryPath);
 				items = r.summaries.map((s) => ({
 					id: s.id,
-					label: (s.summaryText ?? s.id).slice(0, 48),
+					label: s.id,
 					inputId: s.inputId,
 					page: s.page
 				}));
@@ -110,7 +115,7 @@
 				const r = await getTopicCategory(categoryPath);
 				items = r.topics.map((t) => ({
 					id: t.id,
-					label: (t.topicText ?? t.id).slice(0, 48),
+					label: truncateLabel(t.topicText ?? String(t.id)),
 					inputId: t.inputId,
 					page: t.page
 				}));
@@ -124,7 +129,7 @@
 				const r = await getProvisionCategory(categoryPath, ksStoreId);
 				items = r.topics.map((t) => ({
 					id: t.id,
-					label: (t.topicText ?? t.id).slice(0, 48),
+					label: truncateLabel(t.topicText ?? String(t.id)),
 					inputId: t.inputId,
 					page: t.page
 				}));
@@ -164,24 +169,37 @@
 	}
 
 	// ---- Panel resizing ----
-	let leftWidth = $state(520);
-	let resizing = $state(false);
+	let leftWidth = $state(420);
+	let midWidth = $state(260);
+	let activeResize: 'left' | 'mid' | null = $state(null);
 	let resizeStartX = 0;
 	let resizeStartWidth = 0;
 
-	function startResize(e: PointerEvent) {
+	function startResizeLeft(e: PointerEvent) {
 		e.preventDefault();
 		resizeStartX = e.clientX;
 		resizeStartWidth = leftWidth;
-		resizing = true;
+		activeResize = 'left';
+		window.addEventListener('pointermove', onResizeMove);
+		window.addEventListener('pointerup', onResizeEnd, { once: true });
+	}
+	function startResizeMid(e: PointerEvent) {
+		e.preventDefault();
+		resizeStartX = e.clientX;
+		resizeStartWidth = midWidth;
+		activeResize = 'mid';
 		window.addEventListener('pointermove', onResizeMove);
 		window.addEventListener('pointerup', onResizeEnd, { once: true });
 	}
 	function onResizeMove(e: PointerEvent) {
-		leftWidth = Math.max(320, Math.min(720, resizeStartWidth + (e.clientX - resizeStartX)));
+		if (activeResize === 'left') {
+			leftWidth = Math.max(260, Math.min(640, resizeStartWidth + (e.clientX - resizeStartX)));
+		} else if (activeResize === 'mid') {
+			midWidth = Math.max(180, Math.min(480, resizeStartWidth + (e.clientX - resizeStartX)));
+		}
 	}
 	function onResizeEnd() {
-		resizing = false;
+		activeResize = null;
 		window.removeEventListener('pointermove', onResizeMove);
 	}
 
@@ -190,12 +208,18 @@
 		GROUP_DEFS.find((d) => d.key === selectedGroupKey)?.color ?? '#6366f1'
 	);
 
-	// PDF file URL for selected item
-	let pdfFileUrl = $derived(
-		selectedItem?.inputId
-			? `/api/v1/kb/inputs/${selectedItem.inputId}/file#page=${selectedItem.page ?? 1}&zoom=page-width`
-			: ''
-	);
+	// PDF viewer state
+	let viewerInputId = $derived(selectedItem?.inputId ?? null);
+	let viewerFileUrl = $derived(viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : '');
+	let viewerPage = $state(1);
+	let viewerZoom = $state(0.5);
+	let viewerNumPages = $state(0);
+
+	$effect(() => {
+		if (selectedItem?.page) {
+			viewerPage = selectedItem.page;
+		}
+	});
 </script>
 
 <div
@@ -217,26 +241,10 @@
 		</div>
 	</div>
 
-	<!-- Body: graph + PDF -->
+	<!-- Body: chart + info + PDF -->
 	<div class="panel-body">
 		<!-- Left: Artifact Graph -->
 		<div class="graph-pane" style="width:{leftWidth}px; flex: 0 0 {leftWidth}px;">
-			<!-- Selected instance info card -->
-			{#if selectedItem}
-				<div class="info-card" style="--c:{selectedGroupColor};">
-					<div class="info-eyebrow">{selectedGroupKey}</div>
-					<div class="info-title">{selectedItem.label}</div>
-					{#if selectedItem.sublabel}
-						<div class="info-sub">{selectedItem.sublabel}</div>
-					{/if}
-					<div class="info-meta">Input #{selectedItem.inputId} · Page {selectedItem.page}</div>
-				</div>
-			{:else}
-				<div class="info-hint">
-					Click a group circle to expand it, then click an instance to view its source.
-				</div>
-			{/if}
-
 			<!-- SVG graph -->
 			<svg
 				viewBox="0 0 {SVG_W} {SVG_H}"
@@ -296,7 +304,8 @@
 							<!-- Item node -->
 							<!-- svelte-ignore a11y_click_events_have_key_events -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<g onclick={() => selectItem(item, group.key)} style="cursor:pointer;">
+							<g onclick={(e) => { e.stopPropagation(); selectItem(item, group.key); }} style="cursor:pointer;">
+								<title>{item.label}</title>
 								<rect
 									x={ip.x - ITEM_W / 2}
 									y={ip.y - ITEM_H / 2}
@@ -331,14 +340,47 @@
 			</svg>
 		</div>
 
-		<!-- Resize handle -->
+		<!-- Resize handle: Left ↔ Middle -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="resize-handle"
-			class:resizing
-			onpointerdown={startResize}
+			class:resizing={activeResize === 'left'}
+			onpointerdown={startResizeLeft}
 			role="separator"
-			aria-label="Resize panels"
+			aria-label="Resize chart and information panels"
+		></div>
+
+		<!-- Middle: Information Panel -->
+		<div class="info-pane" style="width:{midWidth}px; flex: 0 0 {midWidth}px;">
+			<div class="info-pane-head">
+				<div class="eyebrow">Information</div>
+				{#if selectedItem}
+					<span class="info-group-badge" style="--c:{selectedGroupColor};">{selectedGroupKey}</span>
+				{/if}
+			</div>
+			{#if selectedItem}
+				<div class="info-detail" style="--c:{selectedGroupColor};">
+					<div class="info-title">{selectedItem.label}</div>
+					{#if selectedItem.sublabel}
+						<div class="info-sub">{selectedItem.sublabel}</div>
+					{/if}
+					<div class="info-meta">Input #{selectedItem.inputId} · Page {selectedItem.page}</div>
+				</div>
+			{:else}
+				<div class="info-hint">
+					Click a group circle to expand it, then click an instance to view its details.
+				</div>
+			{/if}
+		</div>
+
+		<!-- Resize handle: Middle ↔ Right -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="resize-handle"
+			class:resizing={activeResize === 'mid'}
+			onpointerdown={startResizeMid}
+			role="separator"
+			aria-label="Resize information and PDF panels"
 		></div>
 
 		<!-- Right: PDF Display -->
@@ -359,12 +401,18 @@
 				{/if}
 			</div>
 
-			{#if selectedItem && pdfFileUrl}
-				<iframe
-					title="PDF viewer for input {selectedItem.inputId}"
-					src={pdfFileUrl}
-					class="pdf-frame"
-				></iframe>
+			{#if viewerInputId && viewerFileUrl}
+				<PdfViewWindow
+					inputId={viewerInputId}
+					fileUrl={viewerFileUrl}
+					bind:page={viewerPage}
+					bind:zoom={viewerZoom}
+					bind:numPages={viewerNumPages}
+					highlightVersion={selectedItem ? `${selectedItem.id}:${selectedItem.page}` : 0}
+					sidebarSettingsKey="artifact-wiki-pdf-sidebar"
+					sidebarTitle="Artifact Info"
+					darkMode={darkMode}
+				/>
 			{:else}
 				<div class="pdf-empty">
 					<div class="pdf-empty-icon">⬡</div>
@@ -454,52 +502,76 @@
 		background: var(--bg);
 	}
 
-	.info-card {
-		flex-shrink: 0;
-		margin: 0.75rem 1rem 0;
-		padding: 0.65rem 0.9rem;
-		border-radius: 10px;
-		border-left: 3px solid var(--c);
-		background: color-mix(in srgb, var(--c) 10%, transparent);
+	/* --- Information pane --- */
+	.info-pane {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		overflow: hidden;
+		background: var(--bg);
+		border-left: 1px solid var(--border);
 	}
 
-	.info-eyebrow {
-		font-size: 0.68rem;
+	.info-pane-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.65rem 0.9rem 0.45rem;
+		border-bottom: 1px solid var(--border);
+		flex-shrink: 0;
+	}
+
+	.info-group-badge {
+		font-size: 0.65rem;
 		font-weight: 700;
 		text-transform: uppercase;
-		letter-spacing: 0.07em;
+		letter-spacing: 0.06em;
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--c) 15%, transparent);
 		color: var(--c);
-		margin-bottom: 0.25rem;
+		border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+	}
+
+	.info-detail {
+		padding: 0.85rem 0.9rem;
+		border-left: 3px solid var(--c);
+		margin: 0.75rem 0.75rem 0;
+		border-radius: 0 8px 8px 0;
+		background: color-mix(in srgb, var(--c) 8%, transparent);
 	}
 
 	.info-title {
 		font-size: 0.85rem;
 		font-weight: 600;
 		color: var(--text);
-		line-height: 1.35;
+		line-height: 1.4;
+		word-break: break-word;
 	}
 
 	.info-sub {
 		font-size: 0.75rem;
 		color: var(--muted);
-		margin-top: 0.15rem;
+		margin-top: 0.2rem;
+		word-break: break-word;
 	}
 
 	.info-meta {
 		font-size: 0.72rem;
 		color: var(--muted);
-		margin-top: 0.3rem;
+		margin-top: 0.35rem;
 	}
 
 	.info-hint {
-		flex-shrink: 0;
-		margin: 0.75rem 1rem 0;
-		padding: 0.5rem 0.8rem;
+		margin: 0.85rem 0.75rem 0;
+		padding: 0.6rem 0.8rem;
 		border-radius: 8px;
 		font-size: 0.78rem;
 		color: var(--muted);
 		border: 1px dashed var(--border);
 		text-align: center;
+		line-height: 1.5;
 	}
 
 	.artifact-svg {
@@ -591,11 +663,12 @@
 		color: #818cf8;
 	}
 
-	.pdf-frame {
-		flex: 1;
-		width: 100%;
-		border: none;
-		min-height: 0;
+	.pdf-pane :global(.doc-page-bar) {
+		border-bottom: 1px solid var(--border);
+	}
+
+	.pdf-pane :global(.pdf-stage) {
+		background: var(--bg);
 	}
 
 	.pdf-empty {

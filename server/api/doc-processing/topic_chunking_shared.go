@@ -421,7 +421,7 @@ func extractTopicsFromMarkedLinesWithLLM(
 		ModelName:  modelName,
 		InputText:  inputText,
 	})
-	logger.Info("extract topics llm call end",
+	logger.Info("extract topics llm call end  ",
 		logScopeName, logScopeValue,
 		"record_id", record_id,
 		"model_name", modelName,
@@ -500,14 +500,14 @@ func normalizeExtractedTopics(rawTopics []any, seqStart int, logger ApiTypes.Jim
 
 		categoryPath, categoryFallbackReason := normalizeAndValidateTopicCategoryPath(extractCategoryPathFromLLM(m), topicType)
 
-		logger.Info("extracted topic from LLM",
-			logScopeName, logScopeValue,
-			"record_id", recordID,
-			"idx", idx,
-			"total", len(rawTopics),
-			"topic_type", topicType,
-			"line_ranges", lineRanges,
-		)
+		// logger.Info("extracted topic from LLM",
+		// 	logScopeName, logScopeValue,
+		// 	"record_id", recordID,
+		// 	"idx", idx,
+		// 	"total", len(rawTopics),
+		// 	"topic_type", topicType,
+		// 	"line_ranges", lineRanges,
+		// )
 
 		if categoryFallbackReason != "" {
 			if kp := keywordCategoryPath(topicKeywords); kp != nil {
@@ -689,11 +689,8 @@ func findOrCreateCategorySubdir(
 
 	// Step 3: create a new directory using the normalized name (no suffix).
 	if logger != nil {
-		logger.Info("(MID_26050223) creating new category dir",
-			"node_name", node.Name,
-			"normalized_name", normalizedName,
-			"parent_dir", parentDir,
-			"exact_dir", exactDir,
+		logger.Info("(MID_26050223) creating new category dir for topics",
+			"dir", exactDir,
 		)
 	}
 	if err := os.MkdirAll(exactDir, 0o755); err != nil {

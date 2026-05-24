@@ -289,7 +289,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		"record_id", evt.RecordID,
 	)
 
-	result, err := p.extractSceneBlocksFromChunksWithLLM(ctx, chunks)
+	result, err := p.extractSceneBlocksFromChunksWithLLM(ctx, evt.RecordID, chunks)
 	if err != nil {
 		p.persistSceneBlocksStatus(ctx, rec, start, err)
 		p.Logger.Error("scene blocks extraction failed", "record_id", evt.RecordID, "error", err)
@@ -376,13 +376,17 @@ func buildSceneBlocksChunkText(chunk Chunk) string {
 }
 */
 
-func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(ctx context.Context, chunks []Chunk) (sceneExtractionResult, error) {
+func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
+	ctx context.Context, 
+	record_id int64,
+	chunks []Chunk) (sceneExtractionResult, error) {
 	mentions := make([]sceneCandidateMention, 0, len(chunks))
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
 	for idx, chunk := range chunks {
 		startTime := time.Now()
-		p.Logger.Info("extract scene candidates - llm start",
+		p.Logger.Info("extract scene - start",
 			"idx", idx,
+			"record_id", record_id,
 			"total", len(chunks),
 			"model_name", p.MentionModelName,
 			"prompt_name", p.MentionPromptRef,
@@ -394,7 +398,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(ctx context.C
 		usedMentionModel = strings.TrimSpace(modelName)
 		raw, _ := payload["candidates"].([]any)
 		mentions = append(mentions, normalizeSceneCandidateMentions(raw, chunk)...)
-		p.Logger.Info("extrat scene candidates - llm end",
+		p.Logger.Info("extract scene - end  ",
 			"candidates_so_far", len(mentions),
 			"ms_used", time.Since(startTime).Milliseconds(),
 		)
@@ -643,7 +647,52 @@ func buildSceneRelationUserPrompt(candidate sceneCandidate) string {
 		"summary_hint":        candidate.SummaryHint,
 		"supporting_mentions": candidate.SupportingMentions,
 	})
-	return "Return JSON only.\n\nCandidate:\n" + string(candidateJSON) +
+	schema := map[string]any{
+		"scene_blocks": []map[string]any{{
+			"scene_id":      "stable_snake_case_identifier",
+			"scene_type":    "string",
+			"title":         "human readable title",
+			"summary":       "string",
+			"actors":        []any{},
+			"resources":     []any{},
+			"preconditions": []string{},
+			"triggers":      []string{},
+			"states":        []string{},
+			"actions":       []any{},
+			"constraints":   []string{},
+			"decisions":     []string{},
+			"outcomes":      []string{},
+			"failure_modes": []string{},
+			"root_causes":   []string{},
+			"resolutions":   []string{},
+			"relationships": []any{},
+			"discriminators": []any{},
+			"keywords":      []string{},
+			"confidence":    0.0,
+			"source_refs":   []any{},
+			"category_paths": []map[string]any{{
+				"category_path": []map[string]any{{
+					"name":       "string",
+					"keywords":   []string{"string"},
+					"confidence": 0.0,
+				}},
+				"path_keywords":   []string{"string"},
+				"path_confidence": 0.0,
+			}},
+			"category_paths_en": []map[string]any{{
+				"category_path": []map[string]any{{
+					"name":       "string",
+					"keywords":   []string{"string"},
+					"confidence": 0.0,
+				}},
+				"path_keywords":   []string{"string"},
+				"path_confidence": 0.0,
+			}},
+		}},
+	}
+	schemaJSON, _ := json.Marshal(schema)
+	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nCandidate:\n" + string(candidateJSON) +
 		"\n\nSource lines (plain):\n" + strings.Join(lines, "\n") +
 		"\n\nSource lines (raw, JSON array):\n" + string(linesJSON)
 }
@@ -1112,7 +1161,7 @@ func writeSceneBlockTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, ob
 }
 
 func upsertSceneBlockToLeafDir(leafDir string, objectID string) error {
-	filePath := filepath.Join(leafDir, "scene_blocks.txt")
+	filePath := filepath.Join(leafDir, "scenes.txt")
 	existing := make([]string, 0)
 	if bs, err := os.ReadFile(filePath); err == nil {
 		for _, row := range strings.Split(string(bs), "\n") {
@@ -1133,7 +1182,7 @@ func removeSceneBlockTreeRecord(treeRootDir string, recordID int64) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || d.Name() != "scene_blocks.txt" {
+		if d.IsDir() || d.Name() != "scenes.txt" {
 			return nil
 		}
 		body, err := os.ReadFile(path)
