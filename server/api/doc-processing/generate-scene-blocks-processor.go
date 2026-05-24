@@ -57,6 +57,7 @@ type SceneBlocksProcessor struct {
 	NextOverlap        int
 	RemoveTOC          bool
 	ArtifactDir        string
+	ArtifactWebDir     string
 }
 
 type sceneExtractionResult struct {
@@ -195,6 +196,7 @@ func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStor
 		NextOverlap:        nextOverlap,
 		RemoveTOC:          removeTOC,
 		ArtifactDir:        strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		ArtifactWebDir:     strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 	}
 }
 
@@ -327,6 +329,9 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		p.Logger.Error("write scene blocks artifact error", "error", err, "record_id", evt.RecordID)
 		p.persistSceneBlocksStatus(ctx, rec, start, err)
 		return nil
+	}
+	if indexErr := p.indexSceneBlocks(evt.RecordID, result.SceneBlocks); indexErr != nil {
+		p.Logger.Warn("index scene blocks failed", "record_id", evt.RecordID, "error", indexErr)
 	}
 	if reindexErr := ReindexSceneBlockSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex scene block search registry failed", "record_id", evt.RecordID, "error", reindexErr)
@@ -1045,6 +1050,113 @@ func appendSceneBlocksStatus(raw string, p sceneBlocksStatusParams) (string, err
 		return "", err
 	}
 	return string(bs), nil
+}
+
+func (p *SceneBlocksProcessor) indexSceneBlocks(recordID int64, sceneBlocks []map[string]any) error {
+	if strings.TrimSpace(p.ArtifactWebDir) == "" {
+		return fmt.Errorf("(MID_26051832) missing ARTIFACT_WEB_DIR")
+	}
+	return indexSceneBlocksInTreeDir(p.Logger, p.ArtifactWebDir, recordID, sceneBlocks)
+}
+
+func indexSceneBlocksInTreeDir(logger ApiTypes.JimoLogger, treeRootDir string, recordID int64, sceneBlocks []map[string]any) error {
+	if strings.TrimSpace(treeRootDir) == "" {
+		return fmt.Errorf("(MID_26051833) scene block tree root dir is empty")
+	}
+	if recordID <= 0 {
+		return fmt.Errorf("(MID_26051834) invalid record id: %d", recordID)
+	}
+	if err := os.MkdirAll(treeRootDir, 0o755); err != nil {
+		return err
+	}
+	if err := removeSceneBlockTreeRecord(treeRootDir, recordID); err != nil {
+		return fmt.Errorf("(MID_26051835) remove old scene block tree entries for record %d: %w", recordID, err)
+	}
+	now := time.Now()
+	for _, block := range sceneBlocks {
+		objectID := strings.TrimSpace(asString(block["object_id"]))
+		if objectID == "" {
+			continue
+		}
+		if pathsRaw, ok := block["category_paths"].([]any); ok {
+			for _, entry := range parseCategoryPathsArray(pathsRaw) {
+				if err := writeSceneBlockTreeEntry(logger, treeRootDir, objectID, entry, now); err != nil {
+					return fmt.Errorf("(MID_26051836) index scene block %s path: %w", objectID, err)
+				}
+			}
+		}
+		if pathsEnRaw, ok := block["category_paths_en"].([]any); ok {
+			for _, entry := range parseCategoryPathsArray(pathsEnRaw) {
+				if err := writeSceneBlockTreeEntry(logger, treeRootDir, objectID, entry, now); err != nil {
+					return fmt.Errorf("(MID_26051837) index scene block %s en path: %w", objectID, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func writeSceneBlockTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, objectID string, pathEntry CategoryPathEntry, now time.Time) error {
+	if len(pathEntry.Nodes) == 0 {
+		return nil
+	}
+	currentDir := treeRootDir
+	for _, node := range pathEntry.Nodes {
+		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
+		if err != nil {
+			return err
+		}
+		currentDir = subdir
+	}
+	return upsertSceneBlockToLeafDir(currentDir, objectID)
+}
+
+func upsertSceneBlockToLeafDir(leafDir string, objectID string) error {
+	filePath := filepath.Join(leafDir, "scene_blocks.txt")
+	existing := make([]string, 0)
+	if bs, err := os.ReadFile(filePath); err == nil {
+		for _, row := range strings.Split(string(bs), "\n") {
+			row = strings.TrimSpace(row)
+			if row != "" {
+				existing = append(existing, row)
+			}
+		}
+	}
+	existing = appendUniqueString(existing, objectID)
+	sort.Strings(existing)
+	return os.WriteFile(filePath, []byte(strings.Join(existing, "\n")), 0o644)
+}
+
+func removeSceneBlockTreeRecord(treeRootDir string, recordID int64) error {
+	prefix := strconv.FormatInt(recordID, 10) + "_"
+	return filepath.WalkDir(treeRootDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != "scene_blocks.txt" {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rows := make([]string, 0)
+		for _, row := range strings.Split(string(body), "\n") {
+			row = strings.TrimSpace(row)
+			if row == "" || strings.HasPrefix(row, prefix) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+		if len(rows) == 0 {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
+		sort.Strings(rows)
+		return os.WriteFile(path, []byte(strings.Join(rows, "\n")), 0o644)
+	})
 }
 
 func loadSceneBlocksPromptFromEnv() (promptText string, promptRef string, promptErr error) {

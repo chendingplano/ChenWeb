@@ -26,7 +26,19 @@ You will receive:
 2. Preserve exact source meaning in measurement fields.
 3. Use low confidence instead of guessing.
 4. Leave fields empty or null rather than inventing unsupported metadata.
-5. Generate category paths only when evidence clearly supports them.
+5. Always generate `category_paths` for every metric. Use the metric name, subject, domain context, and keywords as evidence. A path of 2–4 nodes is typical. Use the input language for `category_paths` and English for `category_paths_en`. If the input is already English, populate only `category_paths` (in English) and leave `category_paths_en` empty.
+
+## Category Path Rules
+
+Each category path is a hierarchy from broad domain to specific topic. Each node has:
+- `name`: the category name (concise, no spaces — use underscores if needed)
+- `keywords`: 2–5 representative keywords for that node
+- `confidence`: 0.0–1.0
+
+`path_keywords` are the most representative keywords for the full path.
+`path_confidence` is the overall confidence for the path (typically the minimum node confidence).
+
+Generate 1–3 category paths per metric, each representing a distinct topical angle.
 
 ## Output Schema
 
@@ -61,8 +73,26 @@ You will receive:
       "is_explicit_metric": true,
       "table_name_or_section": "string",
       "reasoning_tags": ["string"],
-      "category_paths": [],
-      "category_paths_en": []
+      "category_paths": [
+        {
+          "category_path": [
+            {"name": "string", "keywords": ["string"], "confidence": 0.0},
+            {"name": "string", "keywords": ["string"], "confidence": 0.0}
+          ],
+          "path_keywords": ["string"],
+          "path_confidence": 0.0
+        }
+      ],
+      "category_paths_en": [
+        {
+          "category_path": [
+            {"name": "string", "keywords": ["string"], "confidence": 0.0},
+            {"name": "string", "keywords": ["string"], "confidence": 0.0}
+          ],
+          "path_keywords": ["string"],
+          "path_confidence": 0.0
+        }
+      ]
     }
   ],
   "uncertain_metrics": []

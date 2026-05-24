@@ -1299,6 +1299,82 @@ export async function getRecordProvisions(recordId: number): Promise<GetRecordPr
 	return result;
 }
 
+// ---------- kb.artifact-category (multi-type category lookups) ----------
+
+export type ArtifactCategoryItem = {
+	id: string;
+	label: string;
+	sublabel?: string;
+	inputId: number;
+	page: number;
+};
+
+export type GetArtifactCategoryResponse = {
+	status: boolean;
+	categoryPath: string;
+	type: string;
+	items: ArtifactCategoryItem[];
+};
+
+export type ArtifactCategoryCount = {
+	type: string;
+	count: number;
+};
+
+export type GetArtifactCategoryCountsResponse = {
+	status: boolean;
+	categoryPath: string;
+	counts: ArtifactCategoryCount[];
+};
+
+export async function getMetricCategory(
+	categoryPath: string,
+	ksStoreId?: number | null
+): Promise<GetArtifactCategoryResponse> {
+	const query = new URLSearchParams();
+	query.set('category_path', categoryPath);
+	if (ksStoreId != null) query.set('ks_store_id', String(ksStoreId));
+	return fetchOrThrow<GetArtifactCategoryResponse>(
+		`${BASE}/metric-category?${query.toString()}`,
+		'Failed to load metric category'
+	);
+}
+
+export async function getSceneCategory(
+	categoryPath: string,
+	ksStoreId?: number | null
+): Promise<GetArtifactCategoryResponse> {
+	const query = new URLSearchParams();
+	query.set('category_path', categoryPath);
+	if (ksStoreId != null) query.set('ks_store_id', String(ksStoreId));
+	return fetchOrThrow<GetArtifactCategoryResponse>(
+		`${BASE}/scene-category?${query.toString()}`,
+		'Failed to load scene category'
+	);
+}
+
+export async function getProductCategory(
+	categoryPath: string,
+	ksStoreId?: number | null
+): Promise<GetArtifactCategoryResponse> {
+	const query = new URLSearchParams();
+	query.set('category_path', categoryPath);
+	if (ksStoreId != null) query.set('ks_store_id', String(ksStoreId));
+	return fetchOrThrow<GetArtifactCategoryResponse>(
+		`${BASE}/product-category?${query.toString()}`,
+		'Failed to load product category'
+	);
+}
+
+export async function getArtifactCategoryCounts(
+	categoryPath: string
+): Promise<GetArtifactCategoryCountsResponse> {
+	return fetchOrThrow<GetArtifactCategoryCountsResponse>(
+		`${BASE}/artifact-category-counts?category_path=${encodeURIComponent(categoryPath)}`,
+		'Failed to load artifact category counts'
+	);
+}
+
 export async function filterGraphNodes(
 	params: FilterGraphNodesRequest
 ): Promise<FilterGraphNodesResponse> {

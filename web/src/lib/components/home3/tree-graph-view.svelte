@@ -130,8 +130,10 @@
 		itemLabelPlural,
 		showItemsLabel,
 		showItemNodes = false,
+		hideTabStrip = false,
 		listGraph,
-		getCategoryItems
+		getCategoryItems,
+		onOpenCategoryTab
 	}: {
 		mode: Mode;
 		darkMode?: boolean;
@@ -143,8 +145,10 @@
 		itemLabelPlural?: string;
 		showItemsLabel?: string;
 		showItemNodes?: boolean;
+		hideTabStrip?: boolean;
 		listGraph?: () => Promise<{ results: any[] }>;
 		getCategoryItems?: (categoryPath: string) => Promise<{ topics: TopicCard[] }>;
+		onOpenCategoryTab?: (categoryPath: string) => void;
 	} = $props();
 
 	let nodeStyle = $state<NodeStyle>('rect');
@@ -607,7 +611,7 @@
 					id: n.id,
 					label: n.label,
 					categoryPath: n.categoryPath,
-					metadata: n.metadata,
+					metadata: { ...n.metadata, keywords: n.metadata?.keywords ?? [] },
 					childIds: n.childIds,
 					itemIds: n.summaryIds,
 					hasItemsFile: n.hasSummariesFile,
@@ -619,7 +623,7 @@
 					id: n.id,
 					label: n.label,
 					categoryPath: n.categoryPath,
-					metadata: n.metadata,
+					metadata: { ...n.metadata, keywords: n.metadata?.keywords ?? [] },
 					childIds: n.childIds,
 					itemIds: n.topicIds,
 					hasItemsFile: n.hasTopicsFile,
@@ -643,6 +647,10 @@
 	}
 
 	function openCategoryTab(categoryPath: string) {
+		if (onOpenCategoryTab) {
+			onOpenCategoryTab(categoryPath);
+			return;
+		}
 		const prefix = mode === 'summary' ? 'category:' : 'topic-category:';
 		const nextId = `${prefix}${categoryPath}`;
 		const existing = tabs.find((t) => t.id === nextId);
@@ -928,7 +936,7 @@
 	): { x: number; y: number } | null {
 		const dataIndex = Number(event?.dataIndex);
 		if (!chartApi || !Number.isFinite(dataIndex) || dataIndex < 0) return null;
-		const seriesModel = chartApi.getModel?.().getSeriesByIndex?.(0);
+		const seriesModel = chartApi.getModel?.()?.getSeriesByIndex?.(0);
 		const seriesData = seriesModel?.getData?.();
 		const layout = seriesData?.getItemLayout?.(dataIndex);
 		const group = chartApi?._chartsViews?.[0]?.group;
@@ -1060,7 +1068,7 @@
 	}
 
 	function getRenderedNodePoint(nodeId: string): { x: number; y: number } | null {
-		const seriesModel = chartApi?.getModel?.().getSeriesByIndex?.(0);
+		const seriesModel = chartApi?.getModel?.()?.getSeriesByIndex?.(0);
 		const seriesData = seriesModel?.getData?.();
 		const group = chartApi?._chartsViews?.[0]?.group;
 		if (!seriesData || !group) return null;
@@ -1506,7 +1514,7 @@
 
 			// Split keywords across up to 2 lines. L2_MAX: chars for the keywords portion on the conf line.
 			// L3_MAX: chars for the second keywords-only line before truncation.
-			const allKws = node.metadata.keywords.map((k) => k.charAt(0).toUpperCase() + k.slice(1));
+			const allKws = (node.metadata.keywords ?? []).map((k) => k.charAt(0).toUpperCase() + k.slice(1));
 			const L2_MAX = 10;
 			const L3_MAX = 15;
 			let kws1: string;
@@ -1849,12 +1857,12 @@
 
 	<div class="hero">
 		<div>
-			<div class="eyebrow">{mode === 'summary' ? 'Document Summaries' : (heroEyebrow ?? 'Semantic Web')}</div>
-			<h2>{mode === 'summary' ? 'Summary Graph' : (heroTitle ?? 'Topic Graph')}</h2>
+			<div class="eyebrow">{heroEyebrow ?? (mode === 'summary' ? 'Document Summaries' : 'Semantic Web')}</div>
+			<h2>{heroTitle ?? (mode === 'summary' ? 'Summary Graph' : 'Topic Graph')}</h2>
 			<p>
-				{mode === 'summary'
+				{heroDescription ?? (mode === 'summary'
 					? 'Category-first workspace for browsing, editing, and opening category-path summary tabs.'
-					: (heroDescription ?? 'Category-first workspace for browsing topics indexed in the Semantic Web.')}
+					: 'Category-first workspace for browsing topics indexed in the Semantic Web.')}
 			</p>
 		</div>
 		<div class="hero-stats">
@@ -1904,6 +1912,7 @@
 	{/if}
 
 	<div class="tabbed-window">
+		{#if !hideTabStrip}
 		<div class="tabbed-window-head">
 			{#if mode === 'summary'}
 				<SummaryGraphTabs
@@ -1921,6 +1930,7 @@
 				/>
 			{/if}
 		</div>
+		{/if}
 
 		<div class="tabbed-window-body">
 			{#if activeTab.categoryPath}

@@ -20,7 +20,7 @@
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import ChunkMgmtView from '$lib/components/home3/chunk-mgmt-view.svelte';
 	import KnowledgeStoreView from '$lib/components/home3/knowledge-store-view.svelte';
-	import SummaryGraphView from '$lib/components/home3/summary-graph-view.svelte';
+	import ArtifactWikiView from '$lib/components/home3/artifact-wiki-view.svelte';
 	import SummaryTreeView from '$lib/components/home3/summary-tree-view.svelte';
 	import TopicGraphView from '$lib/components/home3/topic-graph-view.svelte';
 	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
@@ -96,7 +96,7 @@
 		},
 		{
 			id: 'kb-doc-wiki',
-			label: 'Subject Wiki',
+			label: 'Wiki',
 			description: 'Browse document knowledge',
 			icon: BookOpenIcon,
 			children: [
@@ -117,18 +117,13 @@
 				},
 				{
 					id: 'kb-summary-graph',
-					label: 'Subject Wiki',
-					description: 'Category-first summary graph'
+					label: 'Artifact Wiki',
+					description: 'Category-first artifact exploration'
 				},
 				{
 					id: 'kb-topic-tree',
 					label: 'Document Topic Tree',
 					description: 'Document-centric topic browser'
-				},
-				{
-					id: 'kb-topic-graph',
-					label: 'Topic Wiki',
-					description: 'Category-first topic graph'
 				},
 				{
 					id: 'kb-metrics',
@@ -149,11 +144,6 @@
 					id: 'kb-provision-tree',
 					label: 'Provision Tree',
 					description: 'Document-centric provision browser'
-				},
-				{
-					id: 'kb-provision-graph',
-					label: 'Provision Wiki',
-					description: 'Category-first provision graph'
 				},
 				...KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.map((section) => ({
 					id: section.id as KbSectionId,
@@ -544,7 +534,7 @@
 			{:else if activeSection === 'kb-chunks'}
 				<ChunkMgmtView {darkMode} />
 			{:else if activeSection === 'kb-summary-graph'}
-				<SummaryGraphView {darkMode} />
+				<ArtifactWikiView {darkMode} />
 			{:else if activeSection === 'kb-summary-tree'}
 				<SummaryTreeView {darkMode} />
 			{:else if activeSection === 'kb-topic-graph'}

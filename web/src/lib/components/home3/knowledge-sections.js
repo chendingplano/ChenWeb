@@ -28,6 +28,11 @@ export const KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS = [
 		id: 'kb-workflow',
 		label: 'Workflow',
 		description: 'Knowledge workflow workspace'
+	},
+	{
+		id: 'kb-product-parts',
+		label: 'Product and Parts',
+		description: 'Product and parts relation workspace'
 	}
 ];
 

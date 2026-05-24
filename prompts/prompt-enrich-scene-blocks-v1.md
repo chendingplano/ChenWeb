@@ -28,6 +28,19 @@ You will receive:
 4. Use low confidence instead of guessing.
 5. Leave arrays empty rather than inventing unsupported details.
 6. Preserve multilingual/source wording when appropriate.
+7. Always generate `category_paths` for every scene block. Use the scene type, title, summary, actors, and domain context as evidence. A path of 2–4 nodes is typical. Use the input language for `category_paths` and English for `category_paths_en`. If the input is already English, populate only `category_paths` (in English) and leave `category_paths_en` empty.
+
+## Category Path Rules
+
+Each category path is a hierarchy from broad domain to specific topic. Each node has:
+- `name`: the category name (concise, no spaces — use underscores if needed)
+- `keywords`: 2–5 representative keywords for that node
+- `confidence`: 0.0–1.0
+
+`path_keywords` are the most representative keywords for the full path.
+`path_confidence` is the overall confidence for the path (typically the minimum node confidence).
+
+Generate 1–3 category paths per scene block, each representing a distinct topical angle.
 
 ## Output Schema
 
@@ -109,6 +122,26 @@ You will receive:
           "source_id": "string",
           "evidence_type": "raw_text|summary|provision|topic|execution_trace|conversation",
           "reference": "location reference"
+        }
+      ],
+      "category_paths": [
+        {
+          "category_path": [
+            {"name": "string", "keywords": ["string"], "confidence": 0.0},
+            {"name": "string", "keywords": ["string"], "confidence": 0.0}
+          ],
+          "path_keywords": ["string"],
+          "path_confidence": 0.0
+        }
+      ],
+      "category_paths_en": [
+        {
+          "category_path": [
+            {"name": "string", "keywords": ["string"], "confidence": 0.0},
+            {"name": "string", "keywords": ["string"], "confidence": 0.0}
+          ],
+          "path_keywords": ["string"],
+          "path_confidence": 0.0
         }
       ]
     }
