@@ -38,13 +38,20 @@ export const PIPELINE_STAGES = [
 	{ id: 'extract_products', label: 'Extract Products', operations: ['extract_products'] }
 ];
 
-// All doc-processor-managed stages must finish for the active pipeline card to disappear.
+// All doc-processor-managed stages (indices 3+). Used to map status entries to UI stages.
 export const DOC_PROCESSOR_STAGES = PIPELINE_STAGES.slice(3);
 
-export const ALL_PROCESSOR_IDS = [
-	'static_analyzer', 'chunking', 'extract_doc_metadata', 'extract_metrics', 'extract_provisions',
-	'generate_summaries', 'generate_topics', 'generate_scene_blocks', 'extract_products'
+// Always executed regardless of config. "blocking" is excluded because it is rendered
+// as a separate always-on row in the UI and never appears in operation lists.
+export const MANDATORY_PROCESSOR_IDS = ['static_analyzer', 'chunking', 'extract_doc_metadata'];
+
+// Configurable via [doc-processing].required_processors in config.toml.
+export const ALL_CONFIGURABLE_PROCESSOR_IDS = [
+	'extract_metrics', 'extract_provisions', 'generate_summaries',
+	'generate_topics', 'generate_scene_blocks', 'extract_products'
 ];
+
+export const ALL_PROCESSOR_IDS = [...MANDATORY_PROCESSOR_IDS, ...ALL_CONFIGURABLE_PROCESSOR_IDS];
 
 const FINAL_STATUSES = new Set(['success', 'fail', 'failed']);
 
@@ -78,7 +85,11 @@ export function computeStages(record: PipelineRecord): StageInfo[] {
 	});
 }
 
-export function isActiveRecord(record: PipelineRecord): boolean {
+// expectedProcessorIds: the set of stage IDs that must reach a final status for the record
+// to be considered finished. Defaults to all DOC_PROCESSOR_STAGES when omitted.
+// Pass MANDATORY_PROCESSOR_IDS + required_processors from server config to match the
+// actual pipeline the backend ran.
+export function isActiveRecord(record: PipelineRecord, expectedProcessorIds?: string[]): boolean {
 	const entries = record.status ?? [];
 	if (!entries.length) return true;
 
@@ -93,7 +104,11 @@ export function isActiveRecord(record: PipelineRecord): boolean {
 		if (!FINAL_STATUSES.has(ps)) return true;
 	}
 
-	for (const stage of DOC_PROCESSOR_STAGES) {
+	const stagesToCheck = expectedProcessorIds
+		? DOC_PROCESSOR_STAGES.filter((s) => expectedProcessorIds.includes(s.id))
+		: DOC_PROCESSOR_STAGES;
+
+	for (const stage of stagesToCheck) {
 		const hasFinal = stage.operations.some((op) => FINAL_STATUSES.has(statusMap.get(op) ?? ''));
 		if (!hasFinal) return true;
 	}

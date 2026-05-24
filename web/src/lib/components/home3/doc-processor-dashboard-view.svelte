@@ -13,10 +13,11 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PauseIcon from '@lucide/svelte/icons/pause';
-	import { listKbInputs, type KbInputRecord } from '$lib/services/kbService';
+	import { listKbInputs, getKbFrontendConfig, type KbInputRecord } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import {
-		ALL_PROCESSOR_IDS,
+		ALL_CONFIGURABLE_PROCESSOR_IDS,
+		MANDATORY_PROCESSOR_IDS,
 		PIPELINE_STAGES,
 		computeStages,
 		isActiveRecord,
@@ -42,10 +43,20 @@
 	let colorError = $derived(darkMode ? '#F87171' : '#EF4444');
 	let colorErrorTint = $derived(darkMode ? 'rgba(248,113,113,0.12)' : 'rgba(239,68,68,0.10)');
 
-	// ── Types ──────────────────────────────────────────────────────────────
+	// ── Config ────────────────────────────────────────────────────────────
 
-	// Ordered subset of PIPELINE_STAGES shown in the launch/restart UI.
-	const MANUAL_PROCESSORS = PIPELINE_STAGES.filter(s => ALL_PROCESSOR_IDS.includes(s.id));
+	// Configurable processors ordered for display in the launch/restart UI.
+	const CONFIGURABLE_PROCESSORS = PIPELINE_STAGES.filter(s => ALL_CONFIGURABLE_PROCESSOR_IDS.includes(s.id));
+
+	// Mandatory processors shown as locked rows in the launch/restart UI.
+	const MANDATORY_PROCESSORS = PIPELINE_STAGES.filter(s => MANDATORY_PROCESSOR_IDS.includes(s.id));
+
+	// requiredProcessors: the configurable processors that are enabled in config.toml.
+	// Populated once on mount from GET /api/v1/kb/config.
+	let requiredProcessors = $state<string[]>(ALL_CONFIGURABLE_PROCESSOR_IDS);
+
+	// configuredProcessorIds: mandatory + required — the set isActiveRecord checks.
+	let configuredProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
 
 	// ── Active pipelines state ─────────────────────────────────────────────
 
@@ -74,7 +85,7 @@
 	let searchDialogOpen = $state(false);
 	let selectedRecords = $state<KbInputRecord[]>([]);
 	let processors = $state<Record<string, boolean>>(
-		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
+		Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, true]))
 	);
 	let showConfirm = $state(false);
 	let launching = $state(false);
@@ -85,7 +96,7 @@
 
 	let restartTarget = $state<KbInputRecord | null>(null);
 	let restartProcessors = $state<Record<string, boolean>>(
-		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
+		Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, true]))
 	);
 	let showRestartDialog = $state(false);
 	let restarting = $state(false);
@@ -172,9 +183,10 @@
 				page: 1,
 				pageSize: 20
 			});
+			const ids = configuredProcessorIds;
 			const newPipelines = (res.results ?? [])
 				.filter(r => !r.file_name?.toLowerCase().endsWith('.zip'))
-				.filter(isActiveRecord)
+				.filter(r => isActiveRecord(r, ids))
 				.slice(0, 10);
 			const newCount = newPipelines.length;
 			activePipelines = newPipelines;
@@ -186,14 +198,10 @@
 			if (prevCount === 0 && newCount > 0 && !autoSync) {
 				startAutoSync();
 			}
-			// Track consecutive empty polls; disable sync after 5 following a non-empty state
+			// Track consecutive empty polls; disable sync after 5 with no active tasks
 			if (newCount === 0) {
-				if (prevCount > 0) {
-					emptyPollCount = 1;
-				} else if (emptyPollCount > 0) {
-					emptyPollCount++;
-					if (emptyPollCount >= 5 && autoSync) stopAutoSync();
-				}
+				emptyPollCount++;
+				if (emptyPollCount >= 5 && autoSync) stopAutoSync();
 			} else {
 				emptyPollCount = 0;
 			}
@@ -205,8 +213,8 @@
 	}
 
 	async function doLaunch(record: KbInputRecord, procs: Record<string, boolean>) {
-		const chosen = ALL_PROCESSOR_IDS.filter((p) => procs[p]);
-		const allChosen = chosen.length === ALL_PROCESSOR_IDS.length;
+		const chosen = ALL_CONFIGURABLE_PROCESSOR_IDS.filter((p) => procs[p]);
+		const allChosen = chosen.length === ALL_CONFIGURABLE_PROCESSOR_IDS.length;
 		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
 		if (!allChosen) payload.operation = chosen;
 
@@ -276,15 +284,15 @@
 	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
 		const unfinishedStageIds = new Set(
 			computeStages(record)
-				.filter((stage) => stage.status !== 'success' && ALL_PROCESSOR_IDS.includes(stage.id))
+				.filter((stage) => stage.status !== 'success' && ALL_CONFIGURABLE_PROCESSOR_IDS.includes(stage.id))
 				.map((stage) => stage.id)
 		);
 
 		if (!unfinishedStageIds.size) {
-			return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]));
+			return Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, requiredProcessors.includes(p)]));
 		}
 
-		return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, unfinishedStageIds.has(p)]));
+		return Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, unfinishedStageIds.has(p)]));
 	}
 
 	function getFailedSteps(record: KbInputRecord): string[] {
@@ -339,25 +347,25 @@
 	}
 
 	function allProcessorsSelected(): boolean {
-		return ALL_PROCESSOR_IDS.every((p) => processors[p]);
+		return ALL_CONFIGURABLE_PROCESSOR_IDS.every((p) => processors[p]);
 	}
 
 	function someProcessorsSelected(): boolean {
-		return ALL_PROCESSOR_IDS.some((p) => processors[p]);
+		return ALL_CONFIGURABLE_PROCESSOR_IDS.some((p) => processors[p]);
 	}
 
 	function toggleAll() {
 		const next = !allProcessorsSelected();
-		processors = Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, next]));
+		processors = Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, next]));
 	}
 
 	function allRestartSelected(): boolean {
-		return ALL_PROCESSOR_IDS.every((p) => restartProcessors[p]);
+		return ALL_CONFIGURABLE_PROCESSOR_IDS.every((p) => restartProcessors[p]);
 	}
 
 	function toggleAllRestart() {
 		const next = !allRestartSelected();
-		restartProcessors = Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, next]));
+		restartProcessors = Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, next]));
 	}
 
 	function showTooltip(
@@ -383,6 +391,14 @@
 	}
 
 	onMount(() => {
+		getKbFrontendConfig().then((cfg) => {
+			const req = cfg.required_processors ?? [];
+			requiredProcessors = req;
+			processors = Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, req.includes(p)]));
+		}).catch(() => {
+			// Keep defaults on failure
+		});
+
 		pollPipelines();
 		syncInterval = setInterval(pollPipelines, 5000);
 		return () => { if (syncInterval !== null) clearInterval(syncInterval); };
@@ -722,18 +738,20 @@
 				<div style="font-size:12px; color:{textMuted}; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">Processors to run</div>
 
 				<div class="mb-4 space-y-1.5">
-					<!-- Always-on: blocking -->
-					<label
-						class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2"
-						style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;"
-					>
-						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
-						<span style="font-size:13px; color:{textSecondary};">blocking</span>
-						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">always on</span>
-					</label>
+					<!-- Mandatory (always-on) processors -->
+					{#each [{ id: 'blocking', label: 'Blocking' }, ...MANDATORY_PROCESSORS] as proc}
+						<label
+							class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2"
+							style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;"
+						>
+							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
+							<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
+							<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">mandatory</span>
+						</label>
+					{/each}
 
-					<!-- Selectable processors -->
-					{#each MANUAL_PROCESSORS as proc}
+					<!-- Configurable processors -->
+					{#each CONFIGURABLE_PROCESSORS as proc}
 						<label
 							class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
 							style="background:{processors[proc.id] ? accentTint : surface2}; border:1px solid {processors[proc.id] ? accent + '40' : borderColor};"
@@ -1003,12 +1021,14 @@
 			>
 				<div style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-bottom:6px;">Processors</div>
 				<div class="flex flex-wrap gap-1.5">
-					<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">blocking</span>
-					{#each ALL_PROCESSOR_IDS.filter(p => processors[p]) as p}
+					{#each ['blocking', ...MANDATORY_PROCESSOR_IDS] as p}
+						<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">{p}</span>
+					{/each}
+					{#each ALL_CONFIGURABLE_PROCESSOR_IDS.filter(p => processors[p]) as p}
 						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{p}</span>
 					{/each}
 				</div>
-				{#if ALL_PROCESSOR_IDS.every(p => processors[p])}
+				{#if ALL_CONFIGURABLE_PROCESSOR_IDS.every(p => processors[p])}
 					<div style="margin-top:6px; font-size:11px; color:{textMuted};">All processors selected — omitting operation filter.</div>
 				{/if}
 			</div>
@@ -1062,12 +1082,14 @@
 			</p>
 
 			<div class="mb-4 space-y-1.5">
-				<label class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2" style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;">
-					<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
-					<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">blocking</span>
-					<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">always on</span>
-				</label>
-				{#each MANUAL_PROCESSORS as proc}
+				{#each [{ id: 'blocking', label: 'Blocking' }, ...MANDATORY_PROCESSORS] as proc}
+					<label class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2" style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;">
+						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
+						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
+						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">mandatory</span>
+					</label>
+				{/each}
+				{#each CONFIGURABLE_PROCESSORS as proc}
 					<label
 						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
 						style="background:{restartProcessors[proc.id] ? accentTint : surface2}; border:1px solid {restartProcessors[proc.id] ? accent + '40' : borderColor};"

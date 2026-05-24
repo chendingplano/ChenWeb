@@ -13,7 +13,9 @@ import (
 )
 
 type kbFrontendConfig struct {
-	TopicTypes []string `json:"topic_types"`
+	TopicTypes          []string `json:"topic_types"`
+	MandatoryProcessors []string `json:"mandatory_processors"`
+	RequiredProcessors  []string `json:"required_processors"`
 }
 
 type kbFrontendConfigResponse struct {
@@ -21,8 +23,12 @@ type kbFrontendConfigResponse struct {
 	Config kbFrontendConfig `json:"config"`
 }
 
-// GetKbFrontendConfig reads the [frontend] section from config.toml and returns frontend
-// configuration such as the topic type list. The config file path is resolved via the
+// mandatoryProcessorIDs are always executed regardless of config or event operation list.
+// "blocking" is excluded here because it is rendered as a separate always-on row in the UI.
+var mandatoryProcessorIDs = []string{"static_analyzer", "chunking", "extract_doc_metadata"}
+
+// GetKbFrontendConfig reads the [frontend] and [doc-processing] sections from config.toml
+// and returns frontend configuration. The config file path is resolved via the
 // KB_CONFIG_FILE env var, falling back to ./config.toml.
 func GetKbFrontendConfig(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_CFG_001")
@@ -33,7 +39,11 @@ func GetKbFrontendConfig(c echo.Context) error {
 		rc.GetLogger().Warn("load kb frontend config failed", "err", err)
 		return c.JSON(http.StatusOK, kbFrontendConfigResponse{
 			Status: true,
-			Config: kbFrontendConfig{TopicTypes: []string{}},
+			Config: kbFrontendConfig{
+				TopicTypes:          []string{},
+				MandatoryProcessors: mandatoryProcessorIDs,
+				RequiredProcessors:  []string{},
+			},
 		})
 	}
 
@@ -44,6 +54,9 @@ type rawKbFrontendSection struct {
 	Frontend struct {
 		TopicTypes []string `toml:"topic_types"`
 	} `toml:"frontend"`
+	DocProcessing struct {
+		RequiredProcessors []string `toml:"required_processors"`
+	} `toml:"doc-processing"`
 }
 
 func loadKbFrontendConfig() (kbFrontendConfig, error) {
@@ -60,7 +73,15 @@ func loadKbFrontendConfig() (kbFrontendConfig, error) {
 	if types == nil {
 		types = []string{}
 	}
-	return kbFrontendConfig{TopicTypes: types}, nil
+	reqProcs := raw.DocProcessing.RequiredProcessors
+	if reqProcs == nil {
+		reqProcs = []string{}
+	}
+	return kbFrontendConfig{
+		TopicTypes:          types,
+		MandatoryProcessors: mandatoryProcessorIDs,
+		RequiredProcessors:  reqProcs,
+	}, nil
 }
 
 func resolveKbConfigFilePath() string {

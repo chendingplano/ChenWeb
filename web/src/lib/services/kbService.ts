@@ -1208,6 +1208,8 @@ export type UpdateRecordTopicPayload = {
 
 export type KbFrontendConfig = {
 	topic_types: string[];
+	mandatory_processors: string[];
+	required_processors: string[];
 };
 
 export async function getKbFrontendConfig(): Promise<KbFrontendConfig> {
