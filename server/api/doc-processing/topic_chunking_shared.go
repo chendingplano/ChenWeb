@@ -469,7 +469,7 @@ func extractTopicPayload(ctx context.Context, extractor LLMJSONExtractor, in llm
 func normalizeExtractedTopics(rawTopics []any, seqStart int, logger ApiTypes.JimoLogger, logScopeName string, logScopeValue int, recordID int64) []TopicItem {
 	out := make([]TopicItem, 0, len(rawTopics))
 	nextSeq := seqStart
-	for idx, item := range rawTopics {
+	for _, item := range rawTopics {
 		m, ok := item.(map[string]any)
 		if !ok {
 			continue

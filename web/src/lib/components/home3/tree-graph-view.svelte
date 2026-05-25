@@ -76,6 +76,12 @@
 		scaleX: number;
 		scaleY: number;
 	} | null;
+	type StageDragStart = {
+		x: number;
+		y: number;
+		offsetX: number;
+		offsetY: number;
+	} | null;
 	type RoamContext = {
 		group: any;
 		bounds: { x: number; y: number; width: number; height: number };
@@ -186,19 +192,19 @@
 	let textMain = $derived(darkMode ? '#e2e8f0' : '#0f172a');
 	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
 	let accent = $derived(
-		mode === 'summary'
-			? darkMode ? '#818cf8' : '#4f46e5'
-			: darkMode ? '#22c55e' : '#16a34a'
+		mode === 'summary' ? (darkMode ? '#818cf8' : '#4f46e5') : darkMode ? '#22c55e' : '#16a34a'
 	);
 	let warm = $derived(
-		mode === 'summary'
-			? darkMode ? '#fbbf24' : '#b45309'
-			: darkMode ? '#4ade80' : '#15803d'
+		mode === 'summary' ? (darkMode ? '#fbbf24' : '#b45309') : darkMode ? '#4ade80' : '#15803d'
 	);
 	let lineColor = $derived(
 		mode === 'summary'
-			? darkMode ? 'rgba(148, 163, 184, 0.28)' : 'rgba(100, 116, 139, 0.24)'
-			: darkMode ? 'rgba(34,197,94,0.28)' : 'rgba(22,163,74,0.24)'
+			? darkMode
+				? 'rgba(148, 163, 184, 0.28)'
+				: 'rgba(100, 116, 139, 0.24)'
+			: darkMode
+				? 'rgba(34,197,94,0.28)'
+				: 'rgba(22,163,74,0.24)'
 	);
 	let chartTheme = $derived(darkMode ? ('dark' as const) : ('light' as const));
 	let hoverGapRightX = $derived(nodeStyle === 'rect' ? 95 : 150);
@@ -223,7 +229,10 @@
 		window.addEventListener('pointerup', onInspectorResizeEnd, { once: true });
 	}
 	function onInspectorResizeMove(e: PointerEvent) {
-		inspectorWidth = Math.max(220, Math.min(600, inspectorResizeStartWidth - (e.clientX - inspectorResizeStartX)));
+		inspectorWidth = Math.max(
+			220,
+			Math.min(600, inspectorResizeStartWidth - (e.clientX - inspectorResizeStartX))
+		);
 	}
 	function onInspectorResizeEnd() {
 		inspectorResizing = false;
@@ -278,6 +287,7 @@
 	let hoverDismissPending = $state(false);
 	let miniViewport = $state({ left: 0.08, top: 0.12, width: 0.36, height: 0.42, scale: 1 });
 	let stagePointerDown = $state(false);
+	let stageDragStart = $state<StageDragStart>(null);
 	let miniMapDragging = $state(false);
 	let miniMapDragStart = $state<MiniMapDragStart>(null);
 	let miniMapDragMoved = $state(false);
@@ -289,7 +299,7 @@
 
 	onMount(() => {
 		const handlePointerUp = () => {
-			stagePointerDown = false;
+			stopStagePan(graphCanPan ? 'grab' : 'default');
 			miniMapDragging = false;
 			miniMapDragStart = null;
 		};
@@ -484,9 +494,7 @@
 
 	function addChildNodeLocal(parentId: string, child: GraphCategoryNode) {
 		nodes = [
-			...nodes.map((n) =>
-				n.id === parentId ? { ...n, childIds: [...n.childIds, child.id] } : n
-			),
+			...nodes.map((n) => (n.id === parentId ? { ...n, childIds: [...n.childIds, child.id] } : n)),
 			child
 		];
 	}
@@ -569,10 +577,14 @@
 		};
 	}
 
-	async function expandTopicItemsAsNodes(baseNodes: GraphCategoryNode[]): Promise<GraphCategoryNode[]> {
+	async function expandTopicItemsAsNodes(
+		baseNodes: GraphCategoryNode[]
+	): Promise<GraphCategoryNode[]> {
 		if (!showItemNodes || mode !== 'topic' || !getCategoryItems) return baseNodes;
 
-		const leafCategories = baseNodes.filter((node) => node.childIds.length === 0 && node.itemIds.length > 0);
+		const leafCategories = baseNodes.filter(
+			(node) => node.childIds.length === 0 && node.itemIds.length > 0
+		);
 		if (leafCategories.length === 0) return baseNodes;
 
 		const fetched = await Promise.all(
@@ -762,9 +774,7 @@
 				}
 			} catch (error) {
 				loadError =
-					error instanceof Error
-						? error.message
-						: `Failed to load topics for ${node.categoryPath}`;
+					error instanceof Error ? error.message : `Failed to load topics for ${node.categoryPath}`;
 				errorDialogOpen = true;
 			} finally {
 				categoryLoadingByPath = { ...categoryLoadingByPath, [node.categoryPath]: false };
@@ -797,9 +807,7 @@
 					confidence: Number(payload.confidence ?? 0.75),
 					keywords: Array.isArray(payload.keywords) ? (payload.keywords as string[]) : [],
 					create_time: '20260501-120000',
-					...(mode === 'summary'
-						? { category_type: String(payload.categoryType ?? 'topic') }
-						: {})
+					...(mode === 'summary' ? { category_type: String(payload.categoryType ?? 'topic') } : {})
 				},
 				childIds: [],
 				itemIds: [],
@@ -821,9 +829,7 @@
 									: n.metadata.keywords,
 								...(mode === 'summary'
 									? {
-											category_type: String(
-												payload.categoryType ?? n.metadata.category_type ?? ''
-											)
+											category_type: String(payload.categoryType ?? n.metadata.category_type ?? '')
 										}
 									: {})
 							}
@@ -1061,7 +1067,7 @@
 		const nextInfo = parseNextVirtualId(nodeId);
 		if (nextInfo) {
 			revealedPagesByNode = { ...revealedPagesByNode, [nextInfo.parentId]: nextInfo.nextPage };
-			scheduleExpandedNodeReveal(nextInfo.parentId);
+			scheduleNodeCenter(pageVirtualId(nextInfo.parentId, nextInfo.nextPage));
 			return;
 		}
 		if (isVirtualPaginationId(nodeId)) return;
@@ -1242,7 +1248,10 @@
 		}
 	}
 
-	function handleZrDoubleClickFallback(event: any, capturedPoint?: { x: number; y: number } | null) {
+	function handleZrDoubleClickFallback(
+		event: any,
+		capturedPoint?: { x: number; y: number } | null
+	) {
 		const hit = findRenderedNodeHit(event);
 		if (hit) {
 			showNodeItemsOnDoubleClick(hit.node.id);
@@ -1377,6 +1386,44 @@
 		syncMiniViewport();
 	}
 
+	function stopStagePan(cursor: 'grab' | 'default' = 'default') {
+		stagePointerDown = false;
+		stageDragStart = null;
+		chartApi?.getZr?.()?.setCursorStyle?.(cursor);
+	}
+
+	function startStagePan(event: PointerEvent) {
+		const target = event.target as HTMLElement | null;
+		if (target?.closest('.hover-card, .mini-map')) return;
+		const context = getRoamContext();
+		if (!context) return;
+		stagePointerDown = true;
+		stageDragStart = {
+			x: event.clientX,
+			y: event.clientY,
+			offsetX: context.offsetX,
+			offsetY: context.offsetY
+		};
+		(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+		chartApi?.getZr?.()?.setCursorStyle?.('grabbing');
+	}
+
+	function dragStagePan(event: PointerEvent) {
+		const target = event.target as HTMLElement | null;
+		if (target?.closest('.hover-card, .mini-map')) return;
+		const primaryDown = (event.buttons & 1) !== 0;
+		if (!primaryDown) {
+			stopStagePan(graphCanPan ? 'grab' : 'default');
+			return;
+		}
+		if (!stagePointerDown || !stageDragStart) return;
+		chartApi?.getZr?.()?.setCursorStyle?.('grabbing');
+		moveChartToOffset(
+			stageDragStart.offsetX + event.clientX - stageDragStart.x,
+			stageDragStart.offsetY + event.clientY - stageDragStart.y
+		);
+	}
+
 	function revealExpandedChildren(nodeId: string) {
 		const context = getRoamContext();
 		const node = nodes.find((n) => n.id === nodeId);
@@ -1405,6 +1452,14 @@
 		return true;
 	}
 
+	function centerRenderedNodeVertically(nodeId: string) {
+		const context = getRoamContext();
+		const point = getRenderedNodePoint(nodeId);
+		if (!context || !point) return false;
+		moveChartToOffset(context.offsetX, context.offsetY + context.stageHeight / 2 - point.y);
+		return true;
+	}
+
 	function revealPendingExpandedChildren() {
 		const nodeId = pendingRevealNodeId;
 		if (!nodeId) return;
@@ -1417,6 +1472,16 @@
 		pendingRevealNodeId = nodeId;
 		requestAnimationFrame(() => requestAnimationFrame(revealPendingExpandedChildren));
 		setTimeout(revealPendingExpandedChildren, 380);
+	}
+
+	function scheduleNodeCenter(nodeId: string) {
+		requestAnimationFrame(() =>
+			requestAnimationFrame(() => {
+				if (!centerRenderedNodeVertically(nodeId))
+					setTimeout(() => centerRenderedNodeVertically(nodeId), 180);
+			})
+		);
+		setTimeout(() => centerRenderedNodeVertically(nodeId), 420);
 	}
 
 	function toggleNodeAndMaybeReveal(nodeId: string) {
@@ -1453,10 +1518,7 @@
 		const clampedWidth = Math.min(0.92, Math.max(0.1, miniViewport.width));
 		const clampedHeight = Math.min(0.92, Math.max(0.12, miniViewport.height));
 		const nextLeft = Math.max(0, Math.min(1 - clampedWidth, normalizedCenterX - clampedWidth / 2));
-		const nextTop = Math.max(
-			0,
-			Math.min(1 - clampedHeight, normalizedCenterY - clampedHeight / 2)
-		);
+		const nextTop = Math.max(0, Math.min(1 - clampedHeight, normalizedCenterY - clampedHeight / 2));
 		moveChartToOffset(
 			-(bounds.x + nextLeft * bounds.width) * scaleX,
 			-(bounds.y + nextTop * bounds.height) * scaleY
@@ -1649,7 +1711,9 @@
 
 			// Split keywords across up to 2 lines. L2_MAX: chars for the keywords portion on the conf line.
 			// L3_MAX: chars for the second keywords-only line before truncation.
-			const allKws = (node.metadata.keywords ?? []).map((k) => k.charAt(0).toUpperCase() + k.slice(1));
+			const allKws = (node.metadata.keywords ?? []).map(
+				(k) => k.charAt(0).toUpperCase() + k.slice(1)
+			);
 			const L2_MAX = 10;
 			const L3_MAX = 15;
 			let kws1: string;
@@ -1668,7 +1732,10 @@
 						if (!done) {
 							const candidate = fit.length ? fit.join(', ') + ', ' + kw : kw;
 							if (candidate.length <= L2_MAX) fit.push(kw);
-							else { done = true; rest.push(kw); }
+							else {
+								done = true;
+								rest.push(kw);
+							}
 						} else {
 							rest.push(kw);
 						}
@@ -1704,11 +1771,12 @@
 					borderColor: isSelected || isFilterMatch ? warm : accent,
 					borderWidth: isSelected || isFilterMatch ? 2 : 1,
 					shadowBlur: isSelected || isFilterMatch ? 18 : 0,
-					shadowColor: isSelected || isFilterMatch
-						? mode === 'summary'
-							? 'rgba(129,140,248,0.5)'
-							: 'rgba(34,197,94,0.5)'
-						: 'transparent'
+					shadowColor:
+						isSelected || isFilterMatch
+							? mode === 'summary'
+								? 'rgba(129,140,248,0.5)'
+								: 'rgba(34,197,94,0.5)'
+							: 'transparent'
 				},
 				label: {
 					show: true,
@@ -1716,7 +1784,10 @@
 					color: isSelected ? '#ffffff' : textMain,
 					formatter: (params: any) => {
 						const raw = String(params.data?.name ?? '');
-						const displayName = raw.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+						const displayName = raw
+							.split('_')
+							.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+							.join(' ');
 						const name = displayName.length > 20 ? displayName.slice(0, 17) + '...' : displayName;
 						const kwsLine = kws2
 							? `{meta|${conf}  ${kws1}}\n{meta|${kws2}}`
@@ -1758,24 +1829,26 @@
 				borderColor: isSelected || isFilterMatch ? warm : accent,
 				borderWidth: isSelected || isFilterMatch ? 4 : 2,
 				shadowBlur: isSelected || isFilterMatch ? 18 : 0,
-				shadowColor: isSelected || isFilterMatch
-					? mode === 'summary'
-						? 'rgba(129, 140, 248, 0.72)'
-						: 'rgba(34, 197, 94, 0.72)'
-					: 'transparent'
+				shadowColor:
+					isSelected || isFilterMatch
+						? mode === 'summary'
+							? 'rgba(129, 140, 248, 0.72)'
+							: 'rgba(34, 197, 94, 0.72)'
+						: 'transparent'
 			},
 			label: {
 				color: isSelected || isFilterMatch ? textMain : textMuted,
 				fontWeight: isSelected || isFilterMatch ? 700 : 500,
-				backgroundColor: isSelected || isFilterMatch
-					? darkMode
-						? mode === 'summary'
-							? 'rgba(99, 102, 241, 0.16)'
-							: 'rgba(22, 163, 74, 0.16)'
-						: mode === 'summary'
-							? 'rgba(79, 70, 229, 0.12)'
-							: 'rgba(22, 163, 74, 0.12)'
-					: 'transparent',
+				backgroundColor:
+					isSelected || isFilterMatch
+						? darkMode
+							? mode === 'summary'
+								? 'rgba(99, 102, 241, 0.16)'
+								: 'rgba(22, 163, 74, 0.16)'
+							: mode === 'summary'
+								? 'rgba(79, 70, 229, 0.12)'
+								: 'rgba(22, 163, 74, 0.12)'
+						: 'transparent',
 				padding: isSelected || isFilterMatch ? [4, 8] : 0,
 				borderRadius: isSelected || isFilterMatch ? 999 : 0
 			},
@@ -1831,7 +1904,7 @@
 						}
 					},
 					emphasis: { focus: 'descendant' },
-					roam: true
+					roam: false
 				} as any
 			]
 		};
@@ -1940,19 +2013,11 @@
 					<div class="filter-grid">
 						<label class="field">
 							<span>Created After</span>
-							<input
-								type="text"
-								bind:value={filterDraft.startTime}
-								placeholder="YYYYMMDD-HHMMSS"
-							/>
+							<input type="text" bind:value={filterDraft.startTime} placeholder="YYYYMMDD-HHMMSS" />
 						</label>
 						<label class="field">
 							<span>Created Before</span>
-							<input
-								type="text"
-								bind:value={filterDraft.endTime}
-								placeholder="YYYYMMDD-HHMMSS"
-							/>
+							<input type="text" bind:value={filterDraft.endTime} placeholder="YYYYMMDD-HHMMSS" />
 						</label>
 					</div>
 					<label class="field">
@@ -1965,13 +2030,7 @@
 					</label>
 					<label class="field">
 						<span>Semantic Threshold {filterDraft.threshold.toFixed(2)}</span>
-						<input
-							type="range"
-							min="0"
-							max="1"
-							step="0.01"
-							bind:value={filterDraft.threshold}
-						/>
+						<input type="range" min="0" max="1" step="0.01" bind:value={filterDraft.threshold} />
 					</label>
 					<div class="dialog-actions">
 						<button
@@ -1993,12 +2052,15 @@
 
 	<div class="hero">
 		<div>
-			<div class="eyebrow">{heroEyebrow ?? (mode === 'summary' ? 'Document Summaries' : 'Semantic Web')}</div>
+			<div class="eyebrow">
+				{heroEyebrow ?? (mode === 'summary' ? 'Document Summaries' : 'Semantic Web')}
+			</div>
 			<h2>{heroTitle ?? (mode === 'summary' ? 'Summary Graph' : 'Topic Graph')}</h2>
 			<p>
-				{heroDescription ?? (mode === 'summary'
-					? 'Category-first workspace for browsing, editing, and opening category-path summary tabs.'
-					: 'Category-first workspace for browsing topics indexed in the Semantic Web.')}
+				{heroDescription ??
+					(mode === 'summary'
+						? 'Category-first workspace for browsing, editing, and opening category-path summary tabs.'
+						: 'Category-first workspace for browsing topics indexed in the Semantic Web.')}
 			</p>
 		</div>
 		<div class="hero-stats">
@@ -2007,9 +2069,7 @@
 			<div>
 				<span>{mode === 'summary' ? 'Mode' : 'Topics'}</span>
 				<strong>
-					{mode === 'summary'
-						? 'Phase 1 Mock'
-						: totalItemCount}
+					{mode === 'summary' ? 'Phase 1 Mock' : totalItemCount}
 				</strong>
 			</div>
 		</div>
@@ -2038,7 +2098,10 @@
 		<div class="filter-status" role="status">
 			<span>
 				Filtered level {activeFilterLevel !== null ? activeFilterLevel + 1 : '—'} from
-				<strong>{activeFilterSelectedPath}</strong>: {filterMatchNodeIds.length} match{filterMatchNodeIds.length === 1 ? '' : 'es'}
+				<strong>{activeFilterSelectedPath}</strong>: {filterMatchNodeIds.length} match{filterMatchNodeIds.length ===
+				1
+					? ''
+					: 'es'}
 				{#if bestFilterSemanticScore !== null}
 					, best semantic score {bestFilterSemanticScore.toFixed(2)}
 				{/if}
@@ -2049,23 +2112,23 @@
 
 	<div class="tabbed-window">
 		{#if !hideTabStrip}
-		<div class="tabbed-window-head">
-			{#if mode === 'summary'}
-				<SummaryGraphTabs
-					{tabs}
-					{activeTabId}
-					onSelect={(tabId) => (activeTabId = tabId)}
-					onClose={closeTab}
-				/>
-			{:else}
-				<TopicGraphTabs
-					tabs={tabs as TopicCategoryTab[]}
-					{activeTabId}
-					onSelect={(tabId) => (activeTabId = tabId)}
-					onClose={closeTab}
-				/>
-			{/if}
-		</div>
+			<div class="tabbed-window-head">
+				{#if mode === 'summary'}
+					<SummaryGraphTabs
+						{tabs}
+						{activeTabId}
+						onSelect={(tabId) => (activeTabId = tabId)}
+						onClose={closeTab}
+					/>
+				{:else}
+					<TopicGraphTabs
+						tabs={tabs as TopicCategoryTab[]}
+						{activeTabId}
+						onSelect={(tabId) => (activeTabId = tabId)}
+						onClose={closeTab}
+					/>
+				{/if}
+			</div>
 		{/if}
 
 		<div class="tabbed-window-body">
@@ -2116,20 +2179,10 @@
 						}}
 						onpointerleave={() => {
 							graphCanPan = false;
-							stagePointerDown = false;
-							chartApi?.getZr?.()?.setCursorStyle?.('default');
+							stopStagePan('default');
 						}}
-						onpointerdown={(event: PointerEvent) => {
-							const target = event.target as HTMLElement | null;
-							if (target?.closest('.hover-card, .mini-map')) return;
-							stagePointerDown = true;
-							chartApi?.getZr?.()?.setCursorStyle?.('grabbing');
-						}}
-						onpointermove={(event: PointerEvent) => {
-							const target = event.target as HTMLElement | null;
-							if (target?.closest('.hover-card, .mini-map')) return;
-							if (stagePointerDown) chartApi?.getZr?.()?.setCursorStyle?.('grabbing');
-						}}
+						onpointerdown={startStagePan}
+						onpointermove={dragStagePan}
 						onmousemove={(event: MouseEvent) => {
 							if (shouldKeepHoverAlive(event.offsetX, event.offsetY)) {
 								clearHoverHideTimer();
@@ -2151,8 +2204,8 @@
 							</div>
 						{:else if loadError}
 							<div class="empty-state">
-								{mode === 'summary' ? 'Summary Graph' : (loadErrorLabel ?? 'Semantic Web')} could not be loaded. Open
-								the error dialog for details or try again.
+								{mode === 'summary' ? 'Summary Graph' : (loadErrorLabel ?? 'Semantic Web')} could not
+								be loaded. Open the error dialog for details or try again.
 							</div>
 						{:else}
 							<div class="chart-cursor-host">
@@ -2317,9 +2370,7 @@
 									onpointerup={(event: PointerEvent) => {
 										miniMapDragging = false;
 										miniMapDragStart = null;
-										(event.currentTarget as SVGSVGElement).releasePointerCapture?.(
-											event.pointerId
-										);
+										(event.currentTarget as SVGSVGElement).releasePointerCapture?.(event.pointerId);
 									}}
 									onclick={(event: MouseEvent) => {
 										if (miniMapDragMoved) {
@@ -2430,10 +2481,7 @@
 									</div>
 								</div>
 								<div class="action-grid action-grid-top">
-									<button
-										type="button"
-										onclick={() => toggleNodeAndMaybeReveal(selectedNode.id)}
-									>
+									<button type="button" onclick={() => toggleNodeAndMaybeReveal(selectedNode.id)}>
 										{selectedNode.expanded ? 'Collapse' : 'Expand'}
 									</button>
 									<button
@@ -2651,7 +2699,11 @@
 		padding: 1.1rem 1.2rem;
 		border-radius: 24px;
 		background:
-			radial-gradient(circle at top left, rgba(var(--accent-rgb, 129, 140, 248), 0.18), transparent 42%),
+			radial-gradient(
+				circle at top left,
+				rgba(var(--accent-rgb, 129, 140, 248), 0.18),
+				transparent 42%
+			),
 			linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66));
 		border: 1px solid var(--border);
 	}
