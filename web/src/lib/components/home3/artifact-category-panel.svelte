@@ -51,23 +51,20 @@
 	];
 
 	let groups = $state<ArtifactGroup[]>(
-		GROUP_DEFS.map((d) => ({ ...d, items: [], loaded: false, loading: false, error: '', expanded: false }))
+		GROUP_DEFS.map((d) => ({ ...d, items: [], loaded: false, loading: false, error: '', expanded: true }))
 	);
 
 	let selectedItem = $state<ArtifactCategoryItem | null>(null);
 	let selectedGroupKey = $state<ArtifactGroupKey | null>(null);
 
-	// ---- SVG layout constants ----
+	// Keep the previous SVG layout helpers available while this panel is being
+	// refactored. In dev, stale HMR output can still reference these symbols.
 	const SVG_W = 820;
 	const SVG_H = 520;
 	const CX = SVG_W / 2;
 	const CY = SVG_H / 2;
-	const GROUP_R = 210; // distance from center to group circle center
-	const CIRCLE_R = 50; // group circle radius
-	const ITEM_R = 108;  // distance from group center to item node
-	const ITEM_W = 84;
-	const ITEM_H = 26;
-	const ITEM_RX = 13;
+	const GROUP_R = 210;
+	const ITEM_R = 108;
 	const MAX_ITEMS_SHOWN = 8;
 
 	function truncateLabel(s: string, maxLen = 48): string {
@@ -83,10 +80,7 @@
 		return { x: CX + GROUP_R * Math.cos(a), y: CY + GROUP_R * Math.sin(a) };
 	}
 
-	function itemPositions(
-		groupIndex: number,
-		count: number
-	): Array<{ x: number; y: number }> {
+	function itemPositions(groupIndex: number, count: number): Array<{ x: number; y: number }> {
 		const { x: gx, y: gy } = groupCenter(groupIndex);
 		const baseAngle = groupAngle(groupIndex);
 		const n = Math.min(count, MAX_ITEMS_SHOWN);
@@ -243,101 +237,59 @@
 
 	<!-- Body: chart + info + PDF -->
 	<div class="panel-body">
-		<!-- Left: Artifact Graph -->
-		<div class="graph-pane" style="width:{leftWidth}px; flex: 0 0 {leftWidth}px;">
-			<!-- SVG graph -->
-			<svg
-				viewBox="0 0 {SVG_W} {SVG_H}"
-				class="artifact-svg"
-				xmlns="http://www.w3.org/2000/svg"
-				role="img"
-				aria-label="Artifact graph for {categoryPath}"
-			>
-				<!-- Center hub -->
-				<circle cx={CX} cy={CY} r={14} class="hub-circle" />
-				<text x={CX} y={CY + 5} class="hub-label">artifacts</text>
+		<!-- Left: Artifact Table -->
+		<div class="table-pane" style="width:{leftWidth}px; flex: 0 0 {leftWidth}px;">
+			<div class="artifact-table">
+				{#each groups as group}
+					<div class="artifact-section">
+						<button
+							type="button"
+							class="section-header"
+							style="--c:{group.color};"
+							onclick={() => toggleGroup(group.key)}
+						>
+							<span class="section-dot"></span>
+							<span class="section-name">{group.label}</span>
+							<span class="section-badge">
+								{#if group.loading}…
+								{:else if group.error}!
+								{:else}{group.items.length}
+								{/if}
+							</span>
+							<span class="section-chevron" class:open={group.expanded}>›</span>
+						</button>
 
-				{#each groups as group, gi}
-					{@const gp = groupCenter(gi)}
-					<!-- Spoke from center to group -->
-					<line x1={CX} y1={CY} x2={gp.x} y2={gp.y} class="spoke" />
-
-					<!-- Group circle (clickable) -->
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<g onclick={() => toggleGroup(group.key)} style="cursor:pointer;">
-						<circle
-							cx={gp.x}
-							cy={gp.y}
-							r={CIRCLE_R}
-							fill={group.color}
-							fill-opacity={group.expanded ? 0.28 : 0.14}
-							stroke={group.color}
-							stroke-width={group.expanded ? 2.5 : 1.5}
-						/>
-						<text x={gp.x} y={gp.y - 10} class="group-name" fill={group.color}>{group.label}</text>
-						<text x={gp.x} y={gp.y + 12} class="group-count" fill={group.color}>
-							{#if group.loading}…
-							{:else if group.error}err
-							{:else}{group.items.length}
+						{#if group.expanded}
+							{#if group.loading}
+								<div class="section-empty">Loading…</div>
+							{:else if group.error}
+								<div class="section-error">{group.error}</div>
+							{:else if group.items.length === 0}
+								<div class="section-empty">No artifacts in this category.</div>
+							{:else}
+								<div class="section-rows">
+									{#each group.items as item}
+										{@const isSelected = selectedItem?.id === item.id && selectedGroupKey === group.key}
+										<button
+											type="button"
+											class="artifact-row"
+											class:selected={isSelected}
+											style="--c:{group.color};"
+											onclick={() => selectItem(item, group.key)}
+											title={item.label}
+										>
+											<span class="row-label">{item.label}</span>
+											{#if item.sublabel}
+												<span class="row-sub">{item.sublabel}</span>
+											{/if}
+										</button>
+									{/each}
+								</div>
 							{/if}
-						</text>
-					</g>
-
-					<!-- Instance nodes when expanded -->
-					{#if group.expanded && group.items.length > 0}
-						{@const positions = itemPositions(gi, group.items.length)}
-						{#each group.items.slice(0, MAX_ITEMS_SHOWN) as item, ii}
-							{@const ip = positions[ii]}
-							{@const isSelected = selectedItem?.id === item.id && selectedGroupKey === group.key}
-							<!-- Connector line -->
-							<line
-								x1={gp.x}
-								y1={gp.y}
-								x2={ip.x}
-								y2={ip.y}
-								stroke={group.color}
-								stroke-width="1"
-								stroke-opacity="0.55"
-								stroke-dasharray="3 3"
-							/>
-							<!-- Item node -->
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<g onclick={(e) => { e.stopPropagation(); selectItem(item, group.key); }} style="cursor:pointer;">
-								<title>{item.label}</title>
-								<rect
-									x={ip.x - ITEM_W / 2}
-									y={ip.y - ITEM_H / 2}
-									width={ITEM_W}
-									height={ITEM_H}
-									rx={ITEM_RX}
-									fill={isSelected ? group.color : (darkMode ? 'rgba(15,23,42,0.85)' : 'rgba(241,245,249,0.95)')}
-									fill-opacity={isSelected ? 0.9 : 1}
-									stroke={group.color}
-									stroke-width={isSelected ? 2 : 1}
-								/>
-								<text
-									x={ip.x}
-									y={ip.y + 4}
-									class="item-label"
-									fill={isSelected ? '#ffffff' : group.color}
-								>
-									{item.label.length > 10 ? item.label.slice(0, 9) + '…' : item.label}
-								</text>
-							</g>
-						{/each}
-						{#if group.items.length > MAX_ITEMS_SHOWN}
-							<text
-								x={gp.x}
-								y={gp.y + CIRCLE_R + 16}
-								class="overflow-label"
-								fill={group.color}
-							>+{group.items.length - MAX_ITEMS_SHOWN} more</text>
 						{/if}
-					{/if}
+					</div>
 				{/each}
-			</svg>
+			</div>
 		</div>
 
 		<!-- Resize handle: Left ↔ Middle -->
@@ -368,7 +320,7 @@
 				</div>
 			{:else}
 				<div class="info-hint">
-					Click a group circle to expand it, then click an instance to view its details.
+					Click an artifact row on the left to view its details.
 				</div>
 			{/if}
 		</div>
@@ -493,13 +445,147 @@
 		overflow: hidden;
 	}
 
-	/* --- Graph pane --- */
-	.graph-pane {
+	/* --- Table pane --- */
+	.table-pane {
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
 		overflow: hidden;
 		background: var(--bg);
+	}
+
+	.artifact-table {
+		flex: 1;
+		overflow-y: auto;
+		padding: 0.5rem 0;
+		scrollbar-width: thin;
+	}
+
+	.artifact-section {
+		border-bottom: 1px solid var(--border);
+	}
+	.artifact-section:last-child {
+		border-bottom: none;
+	}
+
+	.section-header {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.55rem 0.85rem;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		color: var(--text);
+		text-align: left;
+	}
+	.section-header:hover {
+		background: color-mix(in srgb, var(--c) 6%, transparent);
+	}
+
+	.section-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--c);
+		flex-shrink: 0;
+	}
+
+	.section-name {
+		font-size: 0.78rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--c);
+		flex: 1;
+	}
+
+	.section-badge {
+		font-size: 0.7rem;
+		font-weight: 700;
+		padding: 0.1rem 0.45rem;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--c) 14%, transparent);
+		color: var(--c);
+		border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+		min-width: 1.4rem;
+		text-align: center;
+	}
+
+	.section-chevron {
+		font-size: 1rem;
+		color: var(--muted);
+		transition: transform 150ms;
+		display: inline-block;
+		transform: rotate(0deg);
+	}
+	.section-chevron.open {
+		transform: rotate(90deg);
+	}
+
+	.section-empty {
+		padding: 0.35rem 0.85rem 0.55rem 2.2rem;
+		font-size: 0.75rem;
+		color: var(--muted);
+		font-style: italic;
+	}
+
+	.section-error {
+		padding: 0.35rem 0.85rem 0.55rem 2.2rem;
+		font-size: 0.75rem;
+		color: #f43f5e;
+	}
+
+	.section-rows {
+		display: flex;
+		flex-direction: column;
+		padding-bottom: 0.35rem;
+	}
+
+	.artifact-row {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		width: 100%;
+		padding: 0.32rem 0.85rem 0.32rem 2.2rem;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		text-align: left;
+		border-left: 2px solid transparent;
+	}
+	.artifact-row:hover {
+		background: color-mix(in srgb, var(--c) 8%, transparent);
+		border-left-color: color-mix(in srgb, var(--c) 40%, transparent);
+	}
+	.artifact-row.selected {
+		background: color-mix(in srgb, var(--c) 14%, transparent);
+		border-left-color: var(--c);
+	}
+
+	.row-label {
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: var(--text);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: block;
+		max-width: 100%;
+	}
+	.artifact-row.selected .row-label {
+		color: var(--c);
+	}
+
+	.row-sub {
+		font-size: 0.7rem;
+		color: var(--muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		display: block;
+		max-width: 100%;
 	}
 
 	/* --- Information pane --- */
@@ -572,54 +658,6 @@
 		border: 1px dashed var(--border);
 		text-align: center;
 		line-height: 1.5;
-	}
-
-	.artifact-svg {
-		flex: 1;
-		width: 100%;
-		height: 100%;
-		min-height: 0;
-	}
-
-	/* SVG text styles */
-	:global(.hub-circle) {
-		fill: rgba(148, 163, 184, 0.18);
-		stroke: rgba(148, 163, 184, 0.45);
-		stroke-width: 1.5;
-	}
-	:global(.hub-label) {
-		fill: rgba(148, 163, 184, 0.7);
-		font-size: 9px;
-		text-anchor: middle;
-		font-family: inherit;
-	}
-	:global(.spoke) {
-		stroke: rgba(148, 163, 184, 0.18);
-		stroke-width: 1;
-	}
-	:global(.group-name) {
-		font-size: 11px;
-		font-weight: 700;
-		text-anchor: middle;
-		font-family: inherit;
-	}
-	:global(.group-count) {
-		font-size: 16px;
-		font-weight: 700;
-		text-anchor: middle;
-		font-family: inherit;
-	}
-	:global(.item-label) {
-		font-size: 9px;
-		font-weight: 600;
-		text-anchor: middle;
-		font-family: inherit;
-	}
-	:global(.overflow-label) {
-		font-size: 9px;
-		text-anchor: middle;
-		font-family: inherit;
-		opacity: 0.75;
 	}
 
 	/* --- Resize handle --- */
