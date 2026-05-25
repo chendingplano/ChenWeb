@@ -54,6 +54,9 @@ prev_overlapped_pages_in_blocks = 1
 next_overlapped_pages_in_blocks = 1
 required_processors = ["extract_metrics", "extract_provisions", "generate_summaries", "generate_topics", "generate_scene_blocks"]
 
+[artifacts]
+artifact_graph_page_size = 30
+
 [metric_search]
 dictionary = "simple"
 default_page_size = 20

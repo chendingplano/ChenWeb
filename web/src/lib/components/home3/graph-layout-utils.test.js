@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
 	getFixedTreeLayoutWidth,
+	getFixedTreeLayoutHeight,
 	getPanOffsetToRevealRect,
 	getVisibleTreeDepth
 } from './graph-layout-utils.js';
@@ -36,6 +37,17 @@ test('getFixedTreeLayoutWidth does not stretch shallow trees to the viewport', (
 			parentChildDistance: 260
 		}),
 		780
+	);
+});
+
+test('getFixedTreeLayoutHeight grows by one canvas page per visible pagination page', () => {
+	assert.equal(
+		getFixedTreeLayoutHeight({
+			visiblePageCount: 2,
+			pageHeight: 500,
+			minHeight: 520
+		}),
+		1000
 	);
 });
 

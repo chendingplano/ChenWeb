@@ -12,6 +12,14 @@
 		toContainerLocalPoint
 	} from './summary-graph-hover-position.js';
 	import {
+		buildPaginatedChildren,
+		isVirtualPaginationId,
+		nextVirtualId,
+		pageVirtualId,
+		parseNextVirtualId
+	} from './tree-graph-pagination.js';
+	import {
+		getFixedTreeLayoutHeight,
 		getFixedTreeLayoutWidth,
 		getPanOffsetToRevealRect,
 		getVisibleTreeDepth
@@ -114,6 +122,7 @@
 	const HOVER_GAP_LEFT_X = -30;
 	const HOVER_GAP_TOP_Y = 0;
 	const HOVER_GAP_BELOW_Y = 70;
+	const SVG_FALLBACK_HEIGHT = 720;
 	const PARENT_CHILD_DISTANCE = 300;
 	const NODE_CLICK_FALLBACK_MAX_DX = 280;
 	const NODE_CLICK_FALLBACK_MAX_DY = 26;
@@ -195,6 +204,9 @@
 	let hoverGapRightX = $derived(nodeStyle === 'rect' ? 95 : 150);
 	let revealMargin = $derived(nodeStyle === 'rect' ? 112 : 96);
 	let rootId = $derived(`${mode}-root`);
+
+	const PAGE_SIZE = 30;
+	let revealedPagesByNode = $state<Record<string, number>>({});
 
 	// --- Graph nodes (unified type) ---
 	let inspectorWidth = $state(360);
@@ -295,8 +307,14 @@
 	let activeTab = $derived(tabs.find((t) => t.id === activeTabId) ?? tabs[0]);
 	let miniMapLayout = $derived.by((): MiniMapLayout => buildMiniMapLayout());
 	let visibleTreeDepth = $derived(getVisibleTreeDepth(nodes));
+	let hasPaginatedNodes = $derived(
+		visibleRoots().length > PAGE_SIZE || nodes.some((n) => n.childIds.length > PAGE_SIZE)
+	);
 	let fixedTreeLayoutWidth = $derived(
-		getFixedTreeLayoutWidth({ visibleDepth: visibleTreeDepth, parentChildDistance: PARENT_CHILD_DISTANCE })
+		getFixedTreeLayoutWidth({
+			visibleDepth: visibleTreeDepth + (hasPaginatedNodes ? 1 : 0),
+			parentChildDistance: PARENT_CHILD_DISTANCE
+		})
 	);
 	let dialogNode = $derived(selectedNode ? toDialogNode(selectedNode) : null);
 	let dialogAvailableNodes = $derived(nodes.map(toDialogNode));
@@ -314,6 +332,19 @@
 		const scores = Object.values(filterSemanticScores);
 		return scores.length > 0 ? Math.max(...scores) : null;
 	});
+	let renderedRootChildren = $derived.by(() =>
+		buildPaginatedChildNodes(rootId, visibleRoots().filter(shouldRenderNode))
+	);
+	let defaultTreeLayoutHeight = $derived(
+		(graphStageEl?.clientHeight ?? SVG_FALLBACK_HEIGHT) * 0.96
+	);
+	let fixedTreeLayoutHeight = $derived(
+		getFixedTreeLayoutHeight({
+			visiblePageCount: countPaginationPageNodes(renderedRootChildren),
+			pageHeight: defaultTreeLayoutHeight,
+			minHeight: defaultTreeLayoutHeight
+		})
+	);
 
 	// ---- Helpers ----
 
@@ -634,6 +665,7 @@
 			}
 			selectedNodeId = nodes[0]?.id ?? null;
 			clearLevelFilter();
+			revealedPagesByNode = {};
 		} catch (error) {
 			nodes = [];
 			selectedNodeId = null;
@@ -1026,6 +1058,13 @@
 		clearPendingZrClickFallback();
 		const nodeId = String(event?.data?.id ?? '');
 		if (!nodeId || nodeId === rootId) return;
+		const nextInfo = parseNextVirtualId(nodeId);
+		if (nextInfo) {
+			revealedPagesByNode = { ...revealedPagesByNode, [nextInfo.parentId]: nextInfo.nextPage };
+			scheduleExpandedNodeReveal(nextInfo.parentId);
+			return;
+		}
+		if (isVirtualPaginationId(nodeId)) return;
 		dismissedHoverNodeId = null;
 		hoverDismissPending = false;
 		selectedNodeId = nodeId;
@@ -1053,6 +1092,7 @@
 		clearPendingZrClickFallback();
 		const nodeId = String(event?.data?.id ?? '');
 		if (!nodeId || nodeId === rootId) return;
+		if (isVirtualPaginationId(nodeId)) return;
 		showNodeItemsOnDoubleClick(nodeId);
 		updateHoverNode(event, 'click');
 	}
@@ -1512,6 +1552,95 @@
 		'path://M0,0 L0.001,0 M209.999,108 L210,108 M10,12 H200 Q210,12 210,22 V86 Q210,96 200,96 H10 Q0,96 0,86 V22 Q0,12 10,12 Z';
 	const RECT_NODE_SIZE = [210, 108] as const;
 
+	// 160×32 pill symbol — ghost anchors at (0,0)/(160,32) keep bounding box correct
+	const PILL_SYMBOL =
+		'path://M0,0 L0.001,0 M159.999,32 L160,32 M8,0 H152 Q160,0 160,8 V24 Q160,32 152,32 H8 Q0,32 0,24 V8 Q0,0 8,0 Z';
+	const PILL_SIZE = [160, 32] as const;
+
+	function countPaginationPageNodes(treeNodes: Record<string, unknown>[]): number {
+		let count = 0;
+		const visit = (node: Record<string, unknown>) => {
+			if (String(node.id ?? '').startsWith('|pg|')) count += 1;
+			const children = Array.isArray(node.children) ? node.children : [];
+			for (const child of children) {
+				if (child && typeof child === 'object') visit(child as Record<string, unknown>);
+			}
+		};
+		for (const node of treeNodes) visit(node);
+		return Math.max(1, count);
+	}
+
+	function buildNextVirtualNode(parentId: string, pageNum: number): Record<string, unknown> {
+		return {
+			id: nextVirtualId(parentId, pageNum),
+			name: 'next …',
+			collapsed: false,
+			symbol: PILL_SYMBOL,
+			symbolSize: PILL_SIZE,
+			itemStyle: {
+				color: darkMode ? 'rgba(251,191,36,0.12)' : 'rgba(180,83,9,0.08)',
+				borderColor: warm,
+				borderWidth: 1.5
+			},
+			label: {
+				show: true,
+				position: 'inside',
+				verticalAlign: 'middle',
+				align: 'center',
+				color: warm,
+				fontSize: 11,
+				fontWeight: '700'
+			},
+			children: []
+		};
+	}
+
+	function buildPageVirtualNode(
+		parentId: string,
+		pageNum: number,
+		totalPages: number,
+		pageChildren: Record<string, unknown>[]
+	): Record<string, unknown> {
+		return {
+			id: pageVirtualId(parentId, pageNum),
+			name: `page ${pageNum} of ${totalPages}`,
+			collapsed: false,
+			symbol: PILL_SYMBOL,
+			symbolSize: PILL_SIZE,
+			itemStyle: {
+				color: darkMode ? 'rgba(30,41,59,0.65)' : 'rgba(226,232,240,0.65)',
+				borderColor: accent,
+				borderWidth: 1
+			},
+			label: {
+				show: true,
+				position: 'inside',
+				verticalAlign: 'middle',
+				align: 'center',
+				color: textMuted,
+				fontSize: 10,
+				fontStyle: 'italic'
+			},
+			children: pageChildren
+		};
+	}
+
+	function buildPaginatedChildNodes(
+		parentId: string,
+		allChildren: GraphCategoryNode[]
+	): Record<string, unknown>[] {
+		return buildPaginatedChildren({
+			parentId,
+			allChildren,
+			pageSize: PAGE_SIZE,
+			revealedPages: revealedPagesByNode[parentId] ?? 1,
+			buildChildNode: buildTreeNode,
+			buildPageNode: ({ parentId, pageNum, totalPages, pageChildren }) =>
+				buildPageVirtualNode(parentId, pageNum, totalPages, pageChildren),
+			buildNextNode: ({ parentId, pageNum }) => buildNextVirtualNode(parentId, pageNum)
+		});
+	}
+
 	function buildTreeNode(node: GraphCategoryNode): Record<string, unknown> {
 		const isSelected = node.id === selectedNodeId;
 		const isFilterMatch = hasActiveFilter && filterMatchNodeIdSet.has(node.id);
@@ -1608,7 +1737,7 @@
 						}
 					}
 				},
-				children: filteredChildrenOf(node).map(buildTreeNode)
+				children: buildPaginatedChildNodes(node.id, filteredChildrenOf(node))
 			};
 		}
 
@@ -1650,7 +1779,7 @@
 				padding: isSelected || isFilterMatch ? [4, 8] : 0,
 				borderRadius: isSelected || isFilterMatch ? 999 : 0
 			},
-			children: filteredChildrenOf(node).map(buildTreeNode)
+			children: buildPaginatedChildNodes(node.id, filteredChildrenOf(node))
 		};
 	}
 
@@ -1664,7 +1793,7 @@
 			itemStyle: { color: 'transparent', borderColor: 'transparent' },
 			label: { show: false },
 			lineStyle: { color: lineColor, width: 2, curveness: 0.55 },
-			children: visibleRoots().filter(shouldRenderNode).map(buildTreeNode)
+			children: renderedRootChildren
 		};
 		return {
 			backgroundColor: 'transparent',
@@ -1679,6 +1808,7 @@
 					left: '2%',
 					bottom: '2%',
 					width: fixedTreeLayoutWidth,
+					height: fixedTreeLayoutHeight,
 					layout: 'orthogonal',
 					orient: 'LR',
 					symbol: isRect ? RECT_NODE_SYMBOL : 'emptyCircle',

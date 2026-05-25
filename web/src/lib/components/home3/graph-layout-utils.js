@@ -49,6 +49,20 @@ export function getFixedTreeLayoutWidth({
 }
 
 /**
+ * @param {{ visiblePageCount: number, pageHeight: number, minHeight?: number }} params
+ * @returns {number}
+ */
+export function getFixedTreeLayoutHeight({
+	visiblePageCount,
+	pageHeight,
+	minHeight = pageHeight
+}) {
+	const pageCount = Math.max(1, Math.floor(Number(visiblePageCount) || 0));
+	const nextPageHeight = Math.max(1, Number(pageHeight) || 1);
+	return Math.max(minHeight, pageCount * nextPageHeight);
+}
+
+/**
  * @param {{
  *   rect: { left: number, right: number, top: number, bottom: number },
  *   offsetX: number,
