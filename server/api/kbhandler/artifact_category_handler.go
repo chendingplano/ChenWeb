@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -116,23 +115,7 @@ func GetMetricCategory(c echo.Context) error {
 		})
 	}
 
-	numericIDs := make([]int64, 0, len(rawIDs))
-	for _, raw := range rawIDs {
-		id, parseErr := strconv.ParseInt(raw, 10, 64)
-		if parseErr == nil && id > 0 {
-			numericIDs = append(numericIDs, id)
-		}
-	}
-	if len(numericIDs) == 0 {
-		return c.JSON(http.StatusOK, getArtifactCategoryResponse{
-			Status:       true,
-			CategoryPath: categoryPath,
-			Type:         "metrics",
-			Items:        []artifactCategoryItem{},
-		})
-	}
-
-	items, err := fetchMetricCategoryItems(ApiTypes.ProjectDBHandle, numericIDs)
+	items, err := fetchMetricCategoryItems(ApiTypes.ProjectDBHandle, rawIDs)
 	if err != nil {
 		logger.Error("fetch metric category items failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -149,7 +132,7 @@ func GetMetricCategory(c echo.Context) error {
 	})
 }
 
-func fetchMetricCategoryItems(db *sql.DB, ids []int64) ([]artifactCategoryItem, error) {
+func fetchMetricCategoryItems(db *sql.DB, ids []string) ([]artifactCategoryItem, error) {
 	if len(ids) == 0 {
 		return []artifactCategoryItem{}, nil
 	}
@@ -158,11 +141,11 @@ func fetchMetricCategoryItems(db *sql.DB, ids []int64) ([]artifactCategoryItem, 
 		args[i] = id
 	}
 	query := fmt.Sprintf(`
-SELECT m.id, m.input_record_id,
+SELECT m.metric_id, m.input_record_id,
        COALESCE(m.metric_name, ''), COALESCE(m.metric_name_en, '')
 FROM kb.metrics m
-WHERE m.id IN (%s)
-ORDER BY m.id`, buildPlaceholders(len(ids)))
+WHERE m.metric_id IN (%s)
+ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -172,9 +155,10 @@ ORDER BY m.id`, buildPlaceholders(len(ids)))
 
 	items := make([]artifactCategoryItem, 0, len(ids))
 	for rows.Next() {
-		var id, inputID int64
+		var metricID string
+		var inputID int64
 		var name, nameEn string
-		if scanErr := rows.Scan(&id, &inputID, &name, &nameEn); scanErr != nil {
+		if scanErr := rows.Scan(&metricID, &inputID, &name, &nameEn); scanErr != nil {
 			return nil, scanErr
 		}
 		label := name
@@ -182,14 +166,14 @@ ORDER BY m.id`, buildPlaceholders(len(ids)))
 			label = nameEn
 		}
 		if label == "" {
-			label = fmt.Sprintf("Metric #%d", id)
+			label = metricID
 		}
 		sublabel := ""
 		if nameEn != "" && nameEn != name {
 			sublabel = nameEn
 		}
 		items = append(items, artifactCategoryItem{
-			ID:       strconv.FormatInt(id, 10),
+			ID:       metricID,
 			Label:    label,
 			Sublabel: sublabel,
 			InputID:  inputID,

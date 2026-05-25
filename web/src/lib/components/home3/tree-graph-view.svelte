@@ -1085,7 +1085,10 @@
 
 	function showNodeItemsOnDoubleClick(nodeId: string) {
 		const node = nodes.find((n) => n.id === nodeId);
-		if (!node || !node.hasItemsFile) return;
+		if (!node) return;
+		// When an external tab opener is provided (e.g. artifact wiki), always open a tab.
+		// Otherwise guard on hasItemsFile to avoid empty tabs in summary/topic graph.
+		if (!onOpenCategoryTab && !node.hasItemsFile) return;
 		selectedNodeId = nodeId;
 		hoveredNodeId = nodeId;
 		dismissedHoverNodeId = null;
@@ -1117,31 +1120,48 @@
 	function getRenderedNodePoint(nodeId: string): { x: number; y: number } | null {
 		const seriesModel = chartApi?.getModel?.()?.getSeriesByIndex?.(0);
 		const seriesData = seriesModel?.getData?.();
-		const group = chartApi?._chartsViews?.[0]?.group;
-		if (!seriesData || !group) return null;
+		if (!seriesData) return null;
 		let point: { x: number; y: number } | null = null;
 		seriesData.each?.((dataIndex: number) => {
 			if (point) return;
 			const option = seriesData.getItemModel?.(dataIndex)?.option;
 			if (String(option?.id ?? '') !== nodeId) return;
+			// Use the symbol element's world transform (includes all parent transforms:
+			// series view group, _mainGroup layout offset, element position). This gives
+			// the correct ZRender canvas coordinate, which is directly comparable to
+			// getNativeEventPoint output (offsetX/offsetY from the canvas element).
+			const el = (seriesData as any).getItemGraphicEl?.(dataIndex);
+			if (el && typeof (el as any).transformCoordToGlobal === 'function') {
+				const pos = (el as any).transformCoordToGlobal(0, 0);
+				const x = Number(Array.isArray(pos) ? pos[0] : (pos as any)?.x);
+				const y = Number(Array.isArray(pos) ? pos[1] : (pos as any)?.y);
+				if (Number.isFinite(x) && Number.isFinite(y)) {
+					point = { x, y };
+				}
+				return;
+			}
+			// Fallback: layout coords via group transform. Note: group is the outer series
+			// view group and layout coords are in _mainGroup space (child of group), so this
+			// is slightly off by the _mainGroup offset, but better than nothing.
+			const group = chartApi?._chartsViews?.[0]?.group;
+			if (!group) return;
 			const layout = seriesData.getItemLayout?.(dataIndex);
 			const localX = Number(layout?.x ?? layout?.[0]);
 			const localY = Number(layout?.y ?? layout?.[1]);
 			if (!Number.isFinite(localX) || !Number.isFinite(localY)) return;
-			if (typeof group.transformCoordToGlobal === 'function') {
-				const global = group.transformCoordToGlobal(localX, localY);
-				const chartPoint = Array.isArray(global) ? global : [global?.x, global?.y];
-				const x = Number(chartPoint?.[0]);
-				const y = Number(chartPoint?.[1]);
+			if (typeof (group as any).transformCoordToGlobal === 'function') {
+				const pos = (group as any).transformCoordToGlobal(localX, localY);
+				const x = Number(Array.isArray(pos) ? pos[0] : (pos as any)?.x);
+				const y = Number(Array.isArray(pos) ? pos[1] : (pos as any)?.y);
 				if (Number.isFinite(x) && Number.isFinite(y)) {
-					point = normalizeChartPointToStage(x, y);
+					point = { x, y };
 				}
 				return;
 			}
-			const scaleX = Number(group?.scaleX ?? 1) || 1;
-			const scaleY = Number(group?.scaleY ?? 1) || 1;
-			const offsetX = Number(group?.x ?? 0);
-			const offsetY = Number(group?.y ?? 0);
+			const scaleX = Number((group as any)?.scaleX ?? 1) || 1;
+			const scaleY = Number((group as any)?.scaleY ?? 1) || 1;
+			const offsetX = Number((group as any)?.x ?? 0);
+			const offsetY = Number((group as any)?.y ?? 0);
 			point = { x: localX * scaleX + offsetX, y: localY * scaleY + offsetY };
 		});
 		return point;
@@ -1257,7 +1277,8 @@
 			showNodeItemsOnDoubleClick(hit.node.id);
 			return;
 		}
-		if (!hoveredNodeId || !hoverAnchor || !capturedPoint || !hoveredNode?.hasItemsFile) return;
+		const canOpenTab = onOpenCategoryTab ? true : hoveredNode?.hasItemsFile;
+		if (!hoveredNodeId || !hoverAnchor || !capturedPoint || !canOpenTab) return;
 		const dist = Math.hypot(capturedPoint.x - hoverAnchor.x, capturedPoint.y - hoverAnchor.y);
 		const clickRadius = (hoverAnchor.nodeRadius || 8) + 30;
 		if (dist <= clickRadius) showNodeItemsOnDoubleClick(hoveredNodeId);
@@ -1404,7 +1425,10 @@
 			offsetX: context.offsetX,
 			offsetY: context.offsetY
 		};
-		(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+		// Do NOT call setPointerCapture here. Capturing pointer events on graph-stage
+		// routes pointerup away from the ZRender canvas, preventing ZRender from updating
+		// _upEl. Without _upEl set, ZRender's _downEl !== _upEl check suppresses all
+		// click events, breaking node selection entirely.
 		chartApi?.getZr?.()?.setCursorStyle?.('grabbing');
 	}
 
