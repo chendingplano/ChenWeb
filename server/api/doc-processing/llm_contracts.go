@@ -130,6 +130,23 @@ func provisionExtractionContract() llmclients.StructuredOutputContract {
 	})
 }
 
+func semanticProjectionExtractionContract() llmclients.StructuredOutputContract {
+	return newDocProcessingContract("chenweb_semantic_projection_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"semantic_projection": schemaString(),
+			"language":            schemaString(),
+			"descriptive_name":    schemaString(),
+			"descriptive_name_en": schemaString(),
+			"keywords":            schemaArray(),
+			"keywords_en":         schemaArray(),
+			"category_paths":      schemaArray(),
+			"category_paths_en":   schemaArray(),
+		},
+		"additionalProperties": true,
+	})
+}
+
 func productExtractionContract() llmclients.StructuredOutputContract {
 	return newDocProcessingContract("chenweb_product_extraction", schemaObjectWithAnyOf(
 		map[string]any{

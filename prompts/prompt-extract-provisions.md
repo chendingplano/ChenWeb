@@ -80,14 +80,14 @@ ALSO provide accurate English translation if the input language is not English i
 
 A category path is made of one or more categories, forming a category path:
 ```text
-  <industry-class>/<level_2_category>/..., similar to file path.
+  <domain>/<subdomain>/<category>..., similar to file path.
 ```
 
-* `<industry-class>` is an `Industry Classification`. MUST be generic, such as 'Health', 'Medical', 'Software', 'Manufacturing', etc.
-* `<level_2_category>` MUST also be generic within its industry.
+* `<domain>` MUST be generic, such as 'Health', 'Medical', 'Software', 'Manufacturing', etc.
+* `<subdomain>` MUST also be generic within its domain.
 * Last level = most specific
 * Each level MUST be semantically narrower than its parent
-* `<industry-class>`, `<level_2_category>` and subsequent categories MUST be in the input language.
+* `<domain>`, `<subdomain>` and subsequent categories MUST be in the input language.
 * Limit the max depth of category paths to 10
 
 ### 8.2. Category Paths Extraction Rules

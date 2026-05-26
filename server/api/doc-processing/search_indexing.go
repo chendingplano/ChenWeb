@@ -17,12 +17,13 @@ import (
 )
 
 const (
-	searchArtifactSummary    = "summary"
-	searchArtifactTopic      = "topic"
-	searchArtifactSceneBlock = "scene_block"
-	searchArtifactMetric     = "metric"
-	searchArtifactProvision  = "provision"
-	searchArtifactProduct    = "product"
+	searchArtifactSummary             = "summary"
+	searchArtifactTopic               = "topic"
+	searchArtifactSceneBlock          = "scene_block"
+	searchArtifactMetric              = "metric"
+	searchArtifactProvision           = "provision"
+	searchArtifactProduct             = "product"
+	searchArtifactSemanticProjection  = "semantic_projection"
 )
 
 func ReindexSummarySearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -107,6 +108,18 @@ func ReindexProvisionSearchForRecord(ctx context.Context, recordID int64, logger
 		return err
 	}
 	return replaceRegistryRows(ctx, db, searchArtifactProvision, recordID, rows, logger)
+}
+
+func ReindexSemanticProjectionSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return fmt.Errorf("project db handle is nil")
+	}
+	rows, err := buildSemanticProjectionRegistryRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return replaceRegistryRows(ctx, db, searchArtifactSemanticProjection, recordID, rows, logger)
 }
 
 func ReindexProductSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -422,6 +435,61 @@ ORDER BY id`
 			SourceFilename:  inputFilename,
 			CategoryPaths:   json.RawMessage(categoryPaths),
 			SourceLineSpans: json.RawMessage(sourceLineSpans),
+			SemanticPayload: payload,
+		})
+	}
+	return out, rows.Err()
+}
+
+func buildSemanticProjectionRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
+	const q = `
+SELECT id, semantic_proj_id, language, descriptive_name, descriptive_name_en, keywords, keywords_en, category_paths
+FROM kb.semantic_projections
+WHERE input_record_id = $1
+ORDER BY id`
+	rows, err := db.QueryContext(ctx, q, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]kbsearch.RegistryRow, 0, 16)
+	for rows.Next() {
+		var (
+			id                int64
+			semanticProjID    string
+			language          string
+			descriptiveName   string
+			descriptiveNameEn sql.NullString
+			keywords          []byte
+			keywordsEn        []byte
+			categoryPaths     []byte
+		)
+		if err := rows.Scan(&id, &semanticProjID, &language, &descriptiveName, &descriptiveNameEn, &keywords, &keywordsEn, &categoryPaths); err != nil {
+			return nil, err
+		}
+		kw := rawJSONArrayStrings(keywords)
+		kwEn := rawJSONArrayStrings(keywordsEn)
+		searchParts := []string{descriptiveName, descriptiveNameEn.String, strings.Join(kw, " "), strings.Join(kwEn, " ")}
+		payload, _ := json.Marshal(map[string]any{
+			"language":         language,
+			"descriptive_name": descriptiveName,
+			"keywords":         kw,
+		})
+		seq := lastDelimitedToken(semanticProjID)
+		if seq == "" {
+			seq = strconv.FormatInt(id, 10)
+		}
+		out = append(out, kbsearch.RegistryRow{
+			ArtifactType:    searchArtifactSemanticProjection,
+			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactSemanticProjection, seq),
+			InputRecordID:   recordID,
+			SourceRowID:     &id,
+			PrimaryLabel:    firstNonEmpty(descriptiveName, semanticProjID),
+			SecondaryLabel:  language,
+			SearchDocument:  strings.TrimSpace(strings.Join(searchParts, " ")),
+			SnippetBasis:    firstNonEmpty(descriptiveName, descriptiveNameEn.String),
+			CategoryPaths:   json.RawMessage(categoryPaths),
 			SemanticPayload: payload,
 		})
 	}

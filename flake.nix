@@ -16,7 +16,6 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            go
             bun
             just
             nodejs_24

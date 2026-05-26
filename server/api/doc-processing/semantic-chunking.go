@@ -1031,7 +1031,7 @@ func normalizeAndValidateTopicCategoryPath(raw []string, topicType string) ([]st
 		return fallbackCategoryPath(topicType), "missing-category"
 	}
 	if len(normalized) > maxCategoryDepth {
-		return fallbackCategoryPath(topicType), "depth-exceeds-limit"
+		normalized = normalized[:maxCategoryDepth]
 	}
 	for _, seg := range normalized {
 		if len(seg) > maxCategoryNameLen {

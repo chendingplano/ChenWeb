@@ -15,15 +15,42 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// artifactCategoryItem is a lightweight record returned for any artifact type when
-// browsing by category path. It carries just enough to display the artifact in the
-// Artifact Wiki graph and to link to the source PDF.
+// artifactCategoryItem is the record returned for any artifact type when browsing
+// by category path. Metric items populate the extended fields; other types leave
+// them empty (omitempty keeps the JSON compact).
 type artifactCategoryItem struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"`
 	Sublabel string `json:"sublabel,omitempty"`
 	InputID  int64  `json:"inputId"`
 	Page     int    `json:"page"`
+
+	// Metric-specific extended fields
+	CategoryPaths    []string `json:"category_paths,omitempty"`
+	CategoryPathsEn  []string `json:"category_paths_en,omitempty"`
+	Value            *string  `json:"value,omitempty"`
+	Desc             *string  `json:"desc,omitempty"`
+	DescEn           *string         `json:"desc_en,omitempty"`
+	Confidence       *float64        `json:"confidence,omitempty"`
+	Context          *string         `json:"context,omitempty"`
+	ContextEn        *string         `json:"context_en,omitempty"`
+	Keywords         json.RawMessage `json:"keywords,omitempty"`
+	KeywordsEn       json.RawMessage `json:"keywords_en,omitempty"`
+	IsExplicitMetric *bool           `json:"is_explicit_metric,omitempty"`
+	LocationType     *string         `json:"location_type,omitempty"`
+	MeasurementFreq  *string         `json:"measurement_frequency,omitempty"`
+	ReasoningTags    json.RawMessage `json:"reasoning_tags,omitempty"`
+	SourceLineSpans  json.RawMessage `json:"source_line_spans,omitempty"`
+	Subject          *string         `json:"subject,omitempty"`
+	SubjectEn        *string         `json:"subject_en,omitempty"`
+	Source           *string         `json:"source,omitempty"`
+	Threshold        *string         `json:"threshold,omitempty"`
+	Unit             *string         `json:"unit,omitempty"`
+	UnitEn           *string         `json:"unit_en,omitempty"`
+	ValueClass       *string         `json:"value_class,omitempty"`
+	ValueClassEn     *string         `json:"value_class_en,omitempty"`
+	ValueDataType    *string         `json:"value_data_type,omitempty"`
+	ValueRangeType   *string         `json:"value_range_type,omitempty"`
 }
 
 type getArtifactCategoryResponse struct {
@@ -132,6 +159,76 @@ func GetMetricCategory(c echo.Context) error {
 	})
 }
 
+// decodeCategoryPaths normalises the two JSONB formats used for category_paths /
+// category_paths_en in kb.metrics into a flat []string of slash-joined paths.
+//
+// Supported formats (both produced by extraction pipelines):
+//
+//	Format 1: [{"category_path":[{"name":"教学仪器"},{"name":"物理仪器"}]}, …]
+//	Format 2: [[{"name":"教学仪器"},{"name":"物理仪器"}], …]
+//	Format 3: ["教学仪器/物理仪器", …]   (already a flat string array)
+func decodeCategoryPaths(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	type segNode struct {
+		Name string `json:"name"`
+	}
+	// Format 1
+	type pathPayload struct {
+		CategoryPath []segNode `json:"category_path"`
+	}
+	var fmt1 []pathPayload
+	if json.Unmarshal(raw, &fmt1) == nil && len(fmt1) > 0 && len(fmt1[0].CategoryPath) > 0 {
+		out := make([]string, 0, len(fmt1))
+		for _, p := range fmt1 {
+			names := make([]string, 0, len(p.CategoryPath))
+			for _, seg := range p.CategoryPath {
+				if n := strings.TrimSpace(seg.Name); n != "" {
+					names = append(names, n)
+				}
+			}
+			if len(names) > 0 {
+				out = append(out, strings.Join(names, "/"))
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	// Format 2
+	var fmt2 [][]segNode
+	if json.Unmarshal(raw, &fmt2) == nil && len(fmt2) > 0 {
+		out := make([]string, 0, len(fmt2))
+		for _, path := range fmt2 {
+			names := make([]string, 0, len(path))
+			for _, seg := range path {
+				if n := strings.TrimSpace(seg.Name); n != "" {
+					names = append(names, n)
+				}
+			}
+			if len(names) > 0 {
+				out = append(out, strings.Join(names, "/"))
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	// Format 3: plain string array
+	var fmt3 []string
+	if json.Unmarshal(raw, &fmt3) == nil {
+		out := make([]string, 0, len(fmt3))
+		for _, s := range fmt3 {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 func fetchMetricCategoryItems(db *sql.DB, ids []string) ([]artifactCategoryItem, error) {
 	if len(ids) == 0 {
 		return []artifactCategoryItem{}, nil
@@ -142,7 +239,25 @@ func fetchMetricCategoryItems(db *sql.DB, ids []string) ([]artifactCategoryItem,
 	}
 	query := fmt.Sprintf(`
 SELECT m.metric_id, m.input_record_id,
-       COALESCE(m.metric_name, ''), COALESCE(m.metric_name_en, '')
+       COALESCE(m.metric_name, ''), COALESCE(m.metric_name_en, ''),
+       m.category_paths, m.category_paths_en,
+       m.metric_desc, m.metric_desc_en,
+       m.confidence,
+       m.metric_context, m.metric_context_en,
+       m.metric_keywords, m.metric_keywords_en,
+       m.is_explicit_metric,
+       m.location_type,
+       m.measurement_frequency,
+       m.reasoning_tags,
+       m.source_line_spans,
+       m.metric_subject, m.metric_subject_en,
+       m.table_name_or_section,
+       m.threshold_or_target,
+       m.metric_unit, m.metric_unit_en,
+       m.value_class, m.value_class_en,
+       m.value_data_type,
+       m.value_range_type,
+       m.metric_value
 FROM kb.metrics m
 WHERE m.metric_id IN (%s)
 ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
@@ -155,12 +270,52 @@ ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 
 	items := make([]artifactCategoryItem, 0, len(ids))
 	for rows.Next() {
-		var metricID string
-		var inputID int64
-		var name, nameEn string
-		if scanErr := rows.Scan(&metricID, &inputID, &name, &nameEn); scanErr != nil {
+		var (
+			metricID, name, nameEn   string
+			inputID                  int64
+			catPaths, catPathsEn     []byte
+			desc, descEn             sql.NullString
+			confidence               sql.NullFloat64
+			ctx, ctxEn               sql.NullString
+			kw, kwEn                 []byte
+			isExplicit               sql.NullBool
+			locType                  sql.NullString
+			measFreq                 sql.NullString
+			reasoningTags            []byte
+			sourceLineSpans          []byte
+			subject, subjectEn       sql.NullString
+			tableOrSection           sql.NullString
+			threshold                sql.NullString
+			unit, unitEn             sql.NullString
+			valueClass, valueClassEn sql.NullString
+			valueDataType            sql.NullString
+			valueRangeType           sql.NullString
+			metricValue              sql.NullString
+		)
+		if scanErr := rows.Scan(
+			&metricID, &inputID, &name, &nameEn,
+			&catPaths, &catPathsEn,
+			&desc, &descEn,
+			&confidence,
+			&ctx, &ctxEn,
+			&kw, &kwEn,
+			&isExplicit,
+			&locType,
+			&measFreq,
+			&reasoningTags,
+			&sourceLineSpans,
+			&subject, &subjectEn,
+			&tableOrSection,
+			&threshold,
+			&unit, &unitEn,
+			&valueClass, &valueClassEn,
+			&valueDataType,
+			&valueRangeType,
+			&metricValue,
+		); scanErr != nil {
 			return nil, scanErr
 		}
+
 		label := name
 		if label == "" {
 			label = nameEn
@@ -172,13 +327,91 @@ ORDER BY m.metric_id`, buildPlaceholders(len(ids)))
 		if nameEn != "" && nameEn != name {
 			sublabel = nameEn
 		}
-		items = append(items, artifactCategoryItem{
+
+		item := artifactCategoryItem{
 			ID:       metricID,
 			Label:    label,
 			Sublabel: sublabel,
 			InputID:  inputID,
 			Page:     1,
-		})
+		}
+		if paths := decodeCategoryPaths(catPaths); len(paths) > 0 {
+			item.CategoryPaths = paths
+		}
+		if paths := decodeCategoryPaths(catPathsEn); len(paths) > 0 {
+			item.CategoryPathsEn = paths
+		}
+		if metricValue.Valid && metricValue.String != "" {
+			item.Value = &metricValue.String
+		}
+		if desc.Valid {
+			item.Desc = &desc.String
+		}
+		if descEn.Valid {
+			item.DescEn = &descEn.String
+		}
+		if confidence.Valid {
+			item.Confidence = &confidence.Float64
+		}
+		if ctx.Valid {
+			item.Context = &ctx.String
+		}
+		if ctxEn.Valid {
+			item.ContextEn = &ctxEn.String
+		}
+		if len(kw) > 0 {
+			item.Keywords = json.RawMessage(kw)
+		}
+		if len(kwEn) > 0 {
+			item.KeywordsEn = json.RawMessage(kwEn)
+		}
+		if isExplicit.Valid {
+			item.IsExplicitMetric = &isExplicit.Bool
+		}
+		if locType.Valid {
+			item.LocationType = &locType.String
+		}
+		if measFreq.Valid {
+			item.MeasurementFreq = &measFreq.String
+		}
+		if len(reasoningTags) > 0 {
+			item.ReasoningTags = json.RawMessage(reasoningTags)
+		}
+		if len(sourceLineSpans) > 0 {
+			item.SourceLineSpans = json.RawMessage(sourceLineSpans)
+		}
+		if subject.Valid {
+			item.Subject = &subject.String
+		}
+		if subjectEn.Valid {
+			item.SubjectEn = &subjectEn.String
+		}
+		if tableOrSection.Valid {
+			item.Source = &tableOrSection.String
+		}
+		if threshold.Valid {
+			item.Threshold = &threshold.String
+		}
+		if unit.Valid {
+			item.Unit = &unit.String
+		}
+		if unitEn.Valid {
+			item.UnitEn = &unitEn.String
+		}
+		if valueClass.Valid {
+			item.ValueClass = &valueClass.String
+		}
+		if valueClassEn.Valid {
+			item.ValueClassEn = &valueClassEn.String
+		}
+		if valueDataType.Valid {
+			item.ValueDataType = &valueDataType.String
+		}
+		if valueRangeType.Valid {
+			item.ValueRangeType = &valueRangeType.String
+		}
+
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

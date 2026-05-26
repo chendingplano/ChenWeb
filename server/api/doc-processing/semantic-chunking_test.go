@@ -208,11 +208,11 @@ func TestNormalizeAndValidateTopicCategoryPath(t *testing.T) {
 	}
 
 	path, reason = normalizeAndValidateTopicCategoryPath([]string{"a", "b", "c", "d", "e", "f", "g"}, "table")
-	if reason != "depth-exceeds-limit" {
-		t.Fatalf("reason=%q, want depth-exceeds-limit", reason)
+	if reason != "" {
+		t.Fatalf("reason=%q, want empty (path truncated not rejected)", reason)
 	}
-	if !reflect.DeepEqual(path, []string{"uncategorized", "table"}) {
-		t.Fatalf("fallback path=%v", path)
+	if !reflect.DeepEqual(path, []string{"a", "b", "c", "d", "e", "f"}) {
+		t.Fatalf("truncated path=%v, want first %d segments", path, maxCategoryDepth)
 	}
 }
 

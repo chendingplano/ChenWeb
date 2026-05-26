@@ -80,10 +80,10 @@ Your task is to generate a concise, semantically precise summary of the input te
 
 ### 2.6. Language
 
-* Match the language of the input.
+* For `summary`, `keywords`, and `categories`, match the language of the input.
 * For English / Latin-script content: use English category names.
 * For Chinese / CJK content: use Chinese category names directly.
-* ALSO provide an accurate English translation if the original language is not English.
+* ALSO provide an accurate English translation if the input language is not English and save them in `summary_en`, `keywords_en` and `categories_en`, respectively.
 
 ## 3. Output format (STRICT JSON)
 ```json

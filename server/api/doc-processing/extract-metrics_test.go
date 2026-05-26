@@ -432,7 +432,7 @@ func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T
 	}
 }
 
-func TestMergeMetricCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
+func TestMentionsAsCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
 	overlapOnly := []metricCandidateMention{
 		{
 			MetricNameHint:    "Latency",
@@ -446,7 +446,7 @@ func TestMergeMetricCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
 			HasNormalEvidence: false,
 		},
 	}
-	if got := mergeMetricMentionCandidates(overlapOnly); len(got) != 0 {
+	if got := mentionsAsCandidates(overlapOnly); len(got) != 0 {
 		t.Fatalf("overlap-only candidates=%d, want 0", len(got))
 	}
 
@@ -462,7 +462,7 @@ func TestMergeMetricCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
 		BlockLines:        []BlockLine{{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
 		HasNormalEvidence: true,
 	})
-	merged := mergeMetricMentionCandidates(withNormal)
+	merged := mentionsAsCandidates(withNormal)
 	if len(merged) != 1 {
 		t.Fatalf("merged candidates=%d, want 1", len(merged))
 	}

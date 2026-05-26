@@ -6,10 +6,12 @@
 		getProvisionCategory,
 		getMetricCategory,
 		getSceneCategory,
-		getProductCategory
+		getProductCategory,
+		getRawLines
 	} from '$lib/services/kbService';
-	import type { ArtifactCategoryItem } from '$lib/services/kbService';
+	import type { ArtifactCategoryItem, RawLine } from '$lib/services/kbService';
 	import PdfViewWindow from './pdf-view-window.svelte';
+	import type { PdfPageViewport } from './shared-pdf-viewer.svelte';
 
 	let {
 		categoryPath,
@@ -164,7 +166,7 @@
 
 	// ---- Panel resizing ----
 	let leftWidth = $state(420);
-	let midWidth = $state(260);
+	let midWidth = $state(310);
 	let activeResize: 'left' | 'mid' | null = $state(null);
 	let resizeStartX = 0;
 	let resizeStartWidth = 0;
@@ -209,10 +211,132 @@
 	let viewerZoom = $state(0.5);
 	let viewerNumPages = $state(0);
 
+	// Raw lines — loaded per inputId, used to resolve line numbers → page + coords
+	let rawLines = $state<RawLine[]>([]);
+	let rawLinesInputId = $state<number | null>(null);
+
 	$effect(() => {
-		if (selectedItem?.page) {
+		const id = viewerInputId;
+		if (id == null || id === rawLinesInputId) return;
+		rawLinesInputId = id;
+		rawLines = [];
+		getRawLines(id)
+			.then((res) => { if (id === rawLinesInputId) rawLines = res.lines ?? []; })
+			.catch(() => {});
+	});
+
+	// lineNumToPage: absolute line_number → page_number, built from rawLines
+	let lineNumToPage = $derived.by(() => {
+		const map = new Map<number, number>();
+		for (const ln of rawLines) map.set(ln.line_number, ln.page_number);
+		return map;
+	});
+
+	// Normalise source_line_spans: handles "877", "877:879", "877-879", numbers, objects
+	type NormalizedSpan = { page_number: number; line_number: number };
+	function normalizeSpans(raw: unknown): NormalizedSpan[] {
+		if (!Array.isArray(raw)) return [];
+		const lineNums: number[] = [];
+		for (const item of raw) {
+			if (typeof item === 'string') {
+				const s = item.trim();
+				const range = s.match(/^(\d+)\s*[:,-]\s*(\d+)$/);
+				if (range) {
+					const start = parseInt(range[1], 10);
+					const end = parseInt(range[2], 10);
+					for (let n = start; n <= end && n <= start + 200; n++) lineNums.push(n);
+				} else {
+					const n = parseInt(s, 10);
+					if (n > 0) lineNums.push(n);
+				}
+			} else if (typeof item === 'number' && item > 0) {
+				lineNums.push(Math.trunc(item));
+			} else if (item && typeof item === 'object') {
+				const obj = item as Record<string, unknown>;
+				const n = parseInt(String(obj.line_number ?? obj.line ?? obj.line_no ?? ''), 10);
+				if (n > 0) lineNums.push(n);
+			}
+		}
+		const out: NormalizedSpan[] = [];
+		for (const lineNo of lineNums) {
+			const pageNo = lineNumToPage.get(lineNo);
+			if (pageNo) out.push({ page_number: pageNo, line_number: lineNo });
+		}
+		return out;
+	}
+
+	// Build per-page map of RawLines to highlight for the selected item
+	let rawLineByKey = $derived.by(() => {
+		const map = new Map<string, RawLine>();
+		for (const ln of rawLines) map.set(`${ln.page_number}:${ln.line_number}`, ln);
+		return map;
+	});
+
+	let highlightLinesByPage = $derived.by(() => {
+		const map = new Map<number, RawLine[]>();
+		if (!selectedItem?.source_line_spans) return map;
+		for (const span of normalizeSpans(selectedItem.source_line_spans)) {
+			const ln = rawLineByKey.get(`${span.page_number}:${span.line_number}`);
+			if (ln && Array.isArray(ln.coords) && ln.coords.length >= 4) {
+				const arr = map.get(span.page_number) ?? [];
+				arr.push(ln);
+				map.set(span.page_number, arr);
+			}
+		}
+		return map;
+	});
+
+	// Jump to the first page that has highlighted lines whenever the selection changes
+	$effect(() => {
+		const firstPage = highlightLinesByPage.keys().next().value;
+		if (firstPage != null) {
+			viewerPage = firstPage;
+		} else if (selectedItem?.page) {
 			viewerPage = selectedItem.page;
 		}
+	});
+
+	// renderHighlights callback passed to PdfViewWindow
+	const HIGHLIGHT_EXPAND_TOP = 10;
+	const HIGHLIGHT_EXPAND_RIGHT = 20;
+
+	function renderArtifactHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+		const lines = highlightLinesByPage.get(pageNo) ?? [];
+		const rects = lines.flatMap((ln) => {
+			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
+			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
+			return [{
+				left: Math.min(vx1, vx2),
+				top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP),
+				rawBottom: Math.max(vy1, vy2),
+				width: Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT
+			}];
+		});
+		for (let i = 0; i < rects.length; i++) {
+			const rect = rects[i];
+			const bottom = rects[i + 1] ? rects[i + 1].top : rect.rawBottom;
+			const height = Math.max(0, bottom - rect.top);
+			if (rect.width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${rect.left}px`;
+			mark.style.top = `${rect.top}px`;
+			mark.style.width = `${rect.width}px`;
+			mark.style.height = `${height}px`;
+			overlay.appendChild(mark);
+		}
+	}
+
+	let highlightVersion = $derived(
+		selectedItem ? `${selectedItem.id}:${rawLines.length}` : 0
+	);
+
+	// Page number resolved from span data (may differ from the hardcoded page=1 in the DB)
+	let resolvedPage = $derived.by(() => {
+		if (highlightLinesByPage.size > 0) {
+			return highlightLinesByPage.keys().next().value ?? selectedItem?.page ?? 1;
+		}
+		return selectedItem?.page ?? 1;
 	});
 </script>
 
@@ -312,11 +436,108 @@
 			</div>
 			{#if selectedItem}
 				<div class="info-detail" style="--c:{selectedGroupColor};">
-					<div class="info-title">{selectedItem.label}</div>
-					{#if selectedItem.sublabel}
-						<div class="info-sub">{selectedItem.sublabel}</div>
-					{/if}
-					<div class="info-meta">Input #{selectedItem.inputId} · Page {selectedItem.page}</div>
+					<dl class="info-attrs">
+						<dt>ID</dt>
+						<dd>{selectedItem.id}</dd>
+						<dt>Label</dt>
+						<dd class="info-wrap">{selectedItem.label}</dd>
+						{#if selectedItem.sublabel}
+							<dt>Sublabel</dt>
+							<dd class="info-wrap">{selectedItem.sublabel}</dd>
+						{/if}
+						<dt>Input</dt>
+						<dd>#{selectedItem.inputId}</dd>
+						<dt>Page</dt>
+						<dd>{resolvedPage}</dd>
+						{#if selectedItem.value}
+							<dt>Value</dt>
+							<dd class="info-wrap">{selectedItem.value}</dd>
+						{/if}
+						{#if selectedItem.category_paths?.length}
+							<dt>Categories</dt>
+							<dd class="info-wrap info-paths">{selectedItem.category_paths.join('\n')}</dd>
+						{/if}
+						{#if selectedItem.category_paths_en?.length}
+							<dt>Categories EN</dt>
+							<dd class="info-wrap info-paths">{selectedItem.category_paths_en.join('\n')}</dd>
+						{/if}
+						{#if selectedItem.subject || selectedItem.subject_en}
+							<dt>Subject</dt>
+							<dd class="info-wrap">{[selectedItem.subject, selectedItem.subject_en].filter(Boolean).join(' / ')}</dd>
+						{/if}
+						{#if selectedItem.desc}
+							<dt>Desc</dt>
+							<dd class="info-wrap">{selectedItem.desc}</dd>
+						{/if}
+						{#if selectedItem.desc_en}
+							<dt>Desc EN</dt>
+							<dd class="info-wrap">{selectedItem.desc_en}</dd>
+						{/if}
+						{#if selectedItem.context}
+							<dt>Context</dt>
+							<dd class="info-wrap">{selectedItem.context}</dd>
+						{/if}
+						{#if selectedItem.context_en}
+							<dt>Context EN</dt>
+							<dd class="info-wrap">{selectedItem.context_en}</dd>
+						{/if}
+						{#if selectedItem.keywords?.length}
+							<dt>Keywords</dt>
+							<dd class="info-wrap">{(selectedItem.keywords as string[]).join(', ')}</dd>
+						{/if}
+						{#if selectedItem.keywords_en?.length}
+							<dt>Keywords EN</dt>
+							<dd class="info-wrap">{(selectedItem.keywords_en as string[]).join(', ')}</dd>
+						{/if}
+						{#if selectedItem.confidence !== undefined && selectedItem.confidence !== null}
+							<dt>Confidence</dt>
+							<dd>{(selectedItem.confidence as number).toFixed(3)}</dd>
+						{/if}
+						{#if selectedItem.is_explicit_metric !== undefined && selectedItem.is_explicit_metric !== null}
+							<dt>Explicit</dt>
+							<dd>{selectedItem.is_explicit_metric ? 'Yes' : 'No'}</dd>
+						{/if}
+						{#if selectedItem.location_type}
+							<dt>Location</dt>
+							<dd>{selectedItem.location_type}</dd>
+						{/if}
+						{#if selectedItem.measurement_frequency}
+							<dt>Frequency</dt>
+							<dd>{selectedItem.measurement_frequency}</dd>
+						{/if}
+						{#if selectedItem.unit || selectedItem.unit_en}
+							<dt>Unit</dt>
+							<dd>{[selectedItem.unit, selectedItem.unit_en].filter(Boolean).join(' / ')}</dd>
+						{/if}
+						{#if selectedItem.value_class || selectedItem.value_class_en}
+							<dt>Value Class</dt>
+							<dd>{[selectedItem.value_class, selectedItem.value_class_en].filter(Boolean).join(' / ')}</dd>
+						{/if}
+						{#if selectedItem.value_data_type}
+							<dt>Data Type</dt>
+							<dd>{selectedItem.value_data_type}</dd>
+						{/if}
+						{#if selectedItem.value_range_type}
+							<dt>Range Type</dt>
+							<dd>{selectedItem.value_range_type}</dd>
+						{/if}
+						{#if selectedItem.threshold}
+							<dt>Threshold</dt>
+							<dd class="info-wrap">{selectedItem.threshold}</dd>
+						{/if}
+						{#if selectedItem.source}
+							<dt>Source</dt>
+							<dd class="info-wrap">{selectedItem.source}</dd>
+						{/if}
+						{#if selectedItem.reasoning_tags?.length}
+							<dt>Tags</dt>
+							<dd class="info-wrap">{(selectedItem.reasoning_tags as string[]).join(', ')}</dd>
+						{/if}
+						{#if selectedItem.source_line_spans?.length}
+							<dt>Line Spans</dt>
+							<dd class="info-wrap info-mono">{JSON.stringify(selectedItem.source_line_spans)}</dd>
+						{/if}
+					</dl>
 				</div>
 			{:else}
 				<div class="info-hint">
@@ -349,7 +570,7 @@
 					</h4>
 				</div>
 				{#if selectedItem}
-					<span class="page-pill">page {selectedItem.page}</span>
+					<span class="page-pill">page {resolvedPage}</span>
 				{/if}
 			</div>
 
@@ -360,7 +581,8 @@
 					bind:page={viewerPage}
 					bind:zoom={viewerZoom}
 					bind:numPages={viewerNumPages}
-					highlightVersion={selectedItem ? `${selectedItem.id}:${selectedItem.page}` : 0}
+					{highlightVersion}
+					renderHighlights={renderArtifactHighlights}
 					sidebarSettingsKey="artifact-wiki-pdf-sidebar"
 					sidebarTitle="Artifact Info"
 					darkMode={darkMode}
@@ -621,32 +843,62 @@
 	}
 
 	.info-detail {
-		padding: 0.85rem 0.9rem;
+		overflow-y: auto;
+		flex: 1;
+		scrollbar-width: thin;
+		padding: 0.75rem 0.9rem 0.75rem;
 		border-left: 3px solid var(--c);
-		margin: 0.75rem 0.75rem 0;
+		margin: 0.75rem 0.75rem 0.75rem;
 		border-radius: 0 8px 8px 0;
 		background: color-mix(in srgb, var(--c) 8%, transparent);
 	}
 
-	.info-title {
-		font-size: 0.85rem;
-		font-weight: 600;
+	.info-attrs {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 0.18rem 0.65rem;
+		margin: 0;
+		padding: 0;
+	}
+
+	.info-attrs dt {
+		font-size: 0.68rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--c);
+		white-space: nowrap;
+		padding-top: 0.05rem;
+	}
+
+	.info-attrs dd {
+		font-size: 0.78rem;
 		color: var(--text);
-		line-height: 1.4;
-		word-break: break-word;
+		margin: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
-	.info-sub {
-		font-size: 0.75rem;
-		color: var(--muted);
-		margin-top: 0.2rem;
+	.info-attrs dd.info-wrap {
+		white-space: normal;
 		word-break: break-word;
+		overflow: visible;
+		text-overflow: unset;
 	}
 
-	.info-meta {
-		font-size: 0.72rem;
-		color: var(--muted);
-		margin-top: 0.35rem;
+	.info-attrs dd.info-paths {
+		white-space: pre-line;
+		line-height: 1.6;
+	}
+
+	.info-attrs dd.info-mono {
+		font-family: ui-monospace, monospace;
+		font-size: 0.7rem;
+		white-space: pre-wrap;
+		word-break: break-all;
+		overflow: visible;
+		text-overflow: unset;
 	}
 
 	.info-hint {
@@ -731,5 +983,12 @@
 		max-width: 280px;
 		line-height: 1.55;
 		margin: 0;
+	}
+	:global(.pdf-highlight) {
+		position: absolute;
+		background: rgba(251, 191, 36, 0.22);
+		border: 1px solid rgba(251, 191, 36, 0.6);
+		box-shadow: inset 0 0 0 1px rgba(253, 224, 71, 0.12);
+		pointer-events: none;
 	}
 </style>

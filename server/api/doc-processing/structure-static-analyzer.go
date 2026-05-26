@@ -687,6 +687,11 @@ func isStaticMergeableParagraph(line staticInputLine, corrected map[int]string) 
 	if isStaticTOCLine(line) {
 		return false
 	}
+
+	// if line.LineNo == 28 {
+	// 	line.LineNo = 28
+	// }
+
 	switch normalizeStaticTitle(line.Content) {
 	case "tableofcontent", "tableofcontents", "目录", "目次":
 		return false

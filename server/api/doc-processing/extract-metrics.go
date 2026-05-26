@@ -513,9 +513,10 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		)
 	}
 
-	// Step 2: Dedup
-	candidates := mergeMetricMentionCandidates(mentions)
-	p.Logger.Info("Merged metric candidates",
+	// Step 2: Skip merge — each mention becomes its own candidate to avoid
+	// spurious source_line_spans from non-adjacent blocks being combined.
+	candidates := mentionsAsCandidates(mentions)
+	p.Logger.Info("Metric candidates (merge disabled)",
 		"record_id", record_id,
 		"mentions_count", len(mentions),
 		"candidate_count", len(candidates),
@@ -908,6 +909,35 @@ func parseMetricLineSpan(span string) (int, int, bool) {
 	return n, n, true
 }
 
+func mentionsAsCandidates(mentions []metricCandidateMention) []metricCandidate {
+	out := make([]metricCandidate, 0, len(mentions))
+	for _, mention := range mentions {
+		if !mention.HasNormalEvidence {
+			continue
+		}
+		out = append(out, metricCandidate{
+			CandidateID:    fmt.Sprintf("metric_cand_%d", len(out)+1),
+			MetricNameHint: mention.MetricNameHint,
+			SubjectHint:    mention.SubjectHint,
+			UnitHint:       mention.UnitHint,
+			ValueHint:      mention.ValueHint,
+			SupportingMentions: []map[string]any{{
+				"metric_name_hint":  mention.MetricNameHint,
+				"subject_hint":      mention.SubjectHint,
+				"evidence_quote":    mention.EvidenceQuote,
+				"source_line_spans": mention.SourceLineSpans,
+				"unit_hint":         mention.UnitHint,
+				"value_hint":        mention.ValueHint,
+				"confidence":        mention.Confidence,
+				"confidence_reason": mention.ConfidenceReason,
+			}},
+			SupportLines: append([]BlockLine(nil), mention.BlockLines...),
+		})
+	}
+	return out
+}
+
+/*
 func mergeMetricMentionCandidates(mentions []metricCandidateMention) []metricCandidate {
 	type bucket struct {
 		mentions []metricCandidateMention
@@ -996,6 +1026,7 @@ func mergeMetricMentionCandidates(mentions []metricCandidateMention) []metricCan
 	}
 	return out
 }
+*/
 
 func normalizedMetricCandidateKey(parts ...string) string {
 	normalized := make([]string, 0, len(parts))
@@ -1258,8 +1289,8 @@ func isEmptyMetricExtractionError(err error) bool {
 		return false
 	}
 	msg := strings.TrimSpace(err.Error())
-	return strings.Contains(msg, "unexpected end of JSON input") &&
-		strings.Contains(msg, "json:{[]}")
+	return (strings.Contains(msg, "unexpected end of JSON input") && strings.Contains(msg, "json:{[]}")) ||
+		strings.Contains(msg, "(MID_26042490)")
 }
 
 func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {

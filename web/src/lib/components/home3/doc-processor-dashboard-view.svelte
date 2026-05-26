@@ -17,6 +17,7 @@
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import {
 		ALL_CONFIGURABLE_PROCESSOR_IDS,
+		ALL_PROCESSOR_IDS,
 		MANDATORY_PROCESSOR_IDS,
 		PIPELINE_STAGES,
 		computeStages,

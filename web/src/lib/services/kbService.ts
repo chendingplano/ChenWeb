@@ -1307,6 +1307,32 @@ export type ArtifactCategoryItem = {
 	sublabel?: string;
 	inputId: number;
 	page: number;
+	// Extended metric fields (populated only for metrics)
+	category_paths?: string[];
+	category_paths_en?: string[];
+	value?: string;
+	desc?: string;
+	desc_en?: string;
+	confidence?: number;
+	context?: string;
+	context_en?: string;
+	keywords?: string[];
+	keywords_en?: string[];
+	is_explicit_metric?: boolean;
+	location_type?: string;
+	measurement_frequency?: string;
+	reasoning_tags?: unknown[];
+	source_line_spans?: unknown[];
+	subject?: string;
+	subject_en?: string;
+	source?: string;
+	threshold?: string;
+	unit?: string;
+	unit_en?: string;
+	value_class?: string;
+	value_class_en?: string;
+	value_data_type?: string;
+	value_range_type?: string;
 };
 
 export type GetArtifactCategoryResponse = {
