@@ -306,6 +306,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	// Pass 1: extract semantic projection candidate from each chunk
 	for idx, chunk := range chunks {
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
+		startTime := time.Now()
 		p.Logger.Info("semantic projection - start",
 			"record_id", recordID,
 			"chunk_idx", idx,
@@ -325,12 +326,13 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			)
 			return semanticProjectionExtractionResult{}, fmt.Errorf("(MID_26052120) extract semantic projection candidate for chunk seq=%d: %w", chunk.SeqNo, err)
 		}
-		p.Logger.Info("semantic projection - end",
+		p.Logger.Info("semantic projection - end  ",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
 			"semantic_projection_len", len(strings.TrimSpace(asString(payload["semantic_projection"]))),
 			"keywords_count", len(toStringSlice(payload["keywords"])),
+			"ms_used", time.Since(startTime).Milliseconds(),
 		)
 
 		usedCandidateModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedCandidateModel))
@@ -353,6 +355,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	seqNos := make([]int, 0, len(candidates))
 	usedEnrichModel := strings.TrimSpace(p.EnrichModelName)
 	for _, cand := range candidates {
+		startTime := time.Now()
 		p.Logger.Info("enrich semantic projection - start",
 			"record_id", recordID,
 			"seq_no", cand.SeqNo,
@@ -377,6 +380,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			"seq_no", cand.SeqNo,
 			"language", asString(payload["language"]),
 			"descriptive_name", asString(payload["descriptive_name"]),
+			"ms_used", time.Since(startTime).Milliseconds(),
 		)
 		normalized := normalizeSemanticProjection(payload)
 		projections = append(projections, normalized)
@@ -502,11 +506,13 @@ func buildSemanticProjectionEnrichUserPrompt(cand semanticProjectionCandidate) s
 		"keywords":            cand.Keywords,
 	})
 	schema := map[string]any{
-		"language":            "string",
-		"descriptive_name":    "string",
-		"descriptive_name_en": "string",
-		"keywords":            []string{"string"},
-		"keywords_en":         []string{"string"},
+		"language":               "string",
+		"descriptive_name":       "string",
+		"descriptive_name_en":    "string",
+		"keywords":               []string{"string"},
+		"keywords_en":            []string{"string"},
+		"semantic_projection":    "string",
+		"semantic_projection_en": "string",
 		"category_paths": []map[string]any{{
 			"category_path": []map[string]any{{
 				"name":       "string",
@@ -534,13 +540,15 @@ func buildSemanticProjectionEnrichUserPrompt(cand semanticProjectionCandidate) s
 
 func normalizeSemanticProjection(raw map[string]any) map[string]any {
 	out := map[string]any{
-		"language":            strings.TrimSpace(asString(raw["language"])),
-		"descriptive_name":    strings.TrimSpace(asString(raw["descriptive_name"])),
-		"descriptive_name_en": strings.TrimSpace(asString(raw["descriptive_name_en"])),
-		"keywords":            toStringSlice(raw["keywords"]),
-		"keywords_en":         toStringSlice(raw["keywords_en"]),
-		"category_paths":      raw["category_paths"],
-		"category_paths_en":   raw["category_paths_en"],
+		"language":               strings.TrimSpace(asString(raw["language"])),
+		"descriptive_name":       strings.TrimSpace(asString(raw["descriptive_name"])),
+		"descriptive_name_en":    strings.TrimSpace(asString(raw["descriptive_name_en"])),
+		"keywords":               toStringSlice(raw["keywords"]),
+		"keywords_en":            toStringSlice(raw["keywords_en"]),
+		"semantic_projection":    strings.TrimSpace(asString(raw["semantic_projection"])),
+		"semantic_projection_en": strings.TrimSpace(asString(raw["semantic_projection_en"])),
+		"category_paths":         raw["category_paths"],
+		"category_paths_en":      raw["category_paths_en"],
 	}
 	return out
 }
@@ -649,7 +657,7 @@ func upsertSemanticProjectionToLeafDir(leafDir string, projID string) error {
 	filePath := filepath.Join(leafDir, "semantic_projections.txt")
 	existing := make([]string, 0)
 	if bs, err := os.ReadFile(filePath); err == nil {
-		for _, row := range strings.Split(string(bs), "\n") {
+		for row := range strings.SplitSeq(string(bs), "\n") {
 			row = strings.TrimSpace(row)
 			if row != "" {
 				existing = append(existing, row)
@@ -676,7 +684,7 @@ func removeSemanticProjectionTreeRecord(treeRootDir string, recordID int64) erro
 			return err
 		}
 		rows := make([]string, 0)
-		for _, row := range strings.Split(string(body), "\n") {
+		for row := range strings.SplitSeq(string(body), "\n") {
 			row = strings.TrimSpace(row)
 			if row == "" || strings.HasPrefix(row, prefix) {
 				continue
@@ -805,6 +813,8 @@ CREATE TABLE IF NOT EXISTS kb.semantic_projections (
     descriptive_name_en TEXT,
     keywords JSONB,
     keywords_en JSONB,
+    semantic_projection TEXT,
+    semantic_projection_en TEXT,
     category_paths JSONB,
     category_paths_en JSONB,
     model_name TEXT,
@@ -864,19 +874,21 @@ INSERT INTO kb.semantic_projections (
     descriptive_name_en,
     keywords,
     keywords_en,
+    semantic_projection,
+    semantic_projection_en,
     category_paths,
     category_paths_en,
     model_name,
     prompt_name,
     ext_info
 ) VALUES (
-    $1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb
+    $1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
 		strings.EqualFold(strings.TrimSpace(req.Language), "english")
 
-	var eventIDVal interface{}
+	var eventIDVal any
 	if id := strings.TrimSpace(req.EventID); id != "" {
 		eventIDVal = id
 	}
@@ -892,14 +904,16 @@ INSERT INTO kb.semantic_projections (
 		categoryPathsJSON, _ := json.Marshal(proj["category_paths"])
 
 		var (
-			descriptiveNameEn  any
-			keywordsEnVal      any
-			categoryPathsEnVal any
+			descriptiveNameEn    any
+			keywordsEnVal        any
+			semanticProjEnVal    any
+			categoryPathsEnVal   any
 		)
 		if !isEnglish {
 			descriptiveNameEn = strings.TrimSpace(asString(proj["descriptive_name_en"]))
 			kw, _ := json.Marshal(proj["keywords_en"])
 			keywordsEnVal = string(kw)
+			semanticProjEnVal = strings.TrimSpace(asString(proj["semantic_projection_en"]))
 			cp, _ := json.Marshal(proj["category_paths_en"])
 			categoryPathsEnVal = string(cp)
 		}
@@ -913,6 +927,8 @@ INSERT INTO kb.semantic_projections (
 			descriptiveNameEn,
 			string(keywordsJSON),
 			keywordsEnVal,
+			strings.TrimSpace(asString(proj["semantic_projection"])),
+			semanticProjEnVal,
 			string(categoryPathsJSON),
 			categoryPathsEnVal,
 			strings.TrimSpace(req.ModelName),

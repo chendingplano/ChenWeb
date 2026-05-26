@@ -396,7 +396,53 @@ Only extract what is explicitly supported.
 
 ---
 
-# 5. Output Format
+# 8. Keywords Rules
+
+Keywords MUST:
+
+* be concise
+* high-signal
+* semantically meaningful
+* normalized lowercase
+* no full sentences
+* no filler
+* no punctuation unless required
+* preserve exact domain terminology where needed
+
+Prefer:
+
+* concepts
+* entities
+* standards identifiers
+* obligations
+* domain phrases
+
+Examples:
+
+Good:
+
+```json
+[
+  "cold_chain",
+  "temperature_monitoring",
+  "excursion_alarm",
+  "annual_calibration",
+  "gb_15982"
+]
+```
+
+Bad:
+
+```json
+[
+  "this section explains requirements",
+  "important monitoring considerations"
+]
+```
+
+---
+
+# 6. Output Format
 
 Return JSON:
 
@@ -404,26 +450,109 @@ Return JSON:
 {
   "entities": [
     {
-        "entity":"
+        "entity":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
     }
   ],
-  "concepts": [],
-  "relationships": [],
-  "normative_statements": [],
-  "quantitative_constraints": [],
-  "temporal_constraints": [],
-  "conditional_logic": [],
-  "causal_relationships": [],
-  "assumptions": [],
-  "references": [],
-  "procedures": [],
-  "ambiguities": []
+  "concepts": [
+    {
+        "concept":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "relationships": [
+    {
+        "relation":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "normative_statements": [
+    {
+        "normative_stmt":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "quantitative_constraints": [
+    {
+        "quantitative_constraint":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "temporal_constraints": [
+    {
+        "temporal_constraint":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "conditional_logic": [
+    {
+        "conditiona_logic":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "causal_relationships": [
+    {
+        "causal_relation":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "assumptions": [
+    {
+        "assumption":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "references": [
+    {
+        "reference":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "procedures": [
+    {
+        "procedure":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "ambiguities": [
+    {
+        "ambiguity":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
 }
 ```
 
+where `lines` is a list of either a single line number or a range of consecutive line numbers, 
+identifies the lines from which artifacts are derived.
+
 ---
 
-# 6. Confidence Rules
+# 7. Confidence Rules
 
 Every extracted object MUST include confidence:
 
@@ -442,22 +571,6 @@ Interpretation:
 
 ---
 
-# 7. Language Rules
+# 8. Language Rules
 
 Preserve original terminology where meaningful.
-
-If source language is not English:
-
-include:
-
-* original text
-* English normalized equivalent (if confidently translatable)
-
-Example:
-
-```json
-{
-  "name": "冷链",
-  "name_en": "cold chain"
-}
-```

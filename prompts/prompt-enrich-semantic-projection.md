@@ -69,6 +69,8 @@ A category path is made of one or more categories, forming a category path, simi
   "descriptive_name_en": "string",
   "keywords":["string"],
   "keywords_en":["string"],
+  "semantic_projection":"string",
+  "semantic_projection_en":"string",
   "category_paths": [
     {
       "category_path": [

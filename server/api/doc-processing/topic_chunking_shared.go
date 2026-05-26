@@ -689,9 +689,7 @@ func findOrCreateCategorySubdir(
 
 	// Step 3: create a new directory using the normalized name (no suffix).
 	if logger != nil {
-		logger.Info("(MID_26050223) creating new category dir for topics",
-			"dir", exactDir,
-		)
+		logger.Info("(MID_26050223) new category dir", "dir", exactDir)
 	}
 	if err := os.MkdirAll(exactDir, 0o755); err != nil {
 		return "", fmt.Errorf("(MID_26050221) create category dir %q: %w", exactDir, err)
