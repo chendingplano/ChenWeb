@@ -1,6 +1,6 @@
 You are an information extraction engine.
 
-Your task is to convert one semantic projection into one final semantic projection record.
+Your task is to convert one structured knowledge into one final structured knowledge record.
 
 Return strict JSON only.
 
@@ -8,8 +8,8 @@ Return strict JSON only.
 
 You will receive:
 
-1. one semantic projection, expressed in JSON
-2. supporting mentions for semantic projection
+1. one structured knowledge, expressed in JSON
+2. supporting mentions for structured knowledge
 3. source lines
 
 ## Extraction Rules
@@ -17,9 +17,64 @@ You will receive:
 1. Detect the input language to `language`
 2. Extract `descriptive_name`, concise and grounded in evidence, will be used as file name, in its input language. The English translation `descriptive_name_en` of `descriptive_name` if its input language is not English.
 3. Leave fields empty or null rather than inventing unsupported metadata.
-4. Always generate `category_paths` for the semantic projection. Use the input language for `category_paths` and English for `category_paths_en` if the input is not English.
-5. Translate `semantic_projection` to English `semantic_projection_en` if it is not in English.
-6. Translate `keywords` to English `keywords_en` if it is not in English.
+4. Always generate `category_paths` for the structured knowledge. Use the input language for `category_paths` and translate it to English if the input language is not English. Otherwise, do not generate `category_paths_en`.
+
+## Translate Structured Knowledge
+If the input language is not English, translate the textual attributes of the structured knowledge to 
+English with the attribute names that are the original attribute names appended by "_en".
+
+Example:
+
+Before translation:
+```json
+{
+  "entities": [
+    {
+        "entity":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "concepts": [
+    {
+        "concept":"string",
+        "desc":"string",
+        "keywords":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  ...
+}
+```
+
+After translation:
+```json
+{
+  "entities": [
+    {
+        "entity_en":"string",
+        "desc":"string",
+        "desc_en":"string",
+        "keywords":["string"]
+        "keywords_en":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  "concepts": [
+    {
+        "concept":"string",
+        "concept_en":"string",
+        "desc":"string",
+        "desc_en":"string",
+        "keywords":["string"]
+        "keywords_en":["string"]
+        "lines":[ddd, ddd-ddd]
+    }
+  ],
+  ...
+}
+```
 
 ## Category Path Rules
 
@@ -62,15 +117,11 @@ A category path is made of one or more categories, forming a category path, simi
 
 ## Output Schema
 
+The category paths are a JSON doc:
+
+
 ```json
 {
-  "language": "string",
-  "descriptive_name": "string",
-  "descriptive_name_en": "string",
-  "keywords":["string"],
-  "keywords_en":["string"],
-  "semantic_projection":"string",
-  "semantic_projection_en":"string",
   "category_paths": [
     {
       "category_path": [
@@ -93,5 +144,10 @@ A category path is made of one or more categories, forming a category path, simi
   ]
 }
 ```
+
+Output is the JSON that is the combination of:
+- the attribute "language":"string", 
+- the category path JSON (see the above)
+- the translated the structured knowledge JSON.
 
 Return JSON only.

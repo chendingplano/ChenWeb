@@ -150,13 +150,13 @@ func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStor
 	)
 	mentionModelRef, _, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_SCENE_CANDIDATES_MODEL_NAME", "EXTRACT_SCENE_BLOCKS_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	relationModelRef, _, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
 		[]string{"ENRICH_SCENE_BLOCKS_MODEL_NAME", "EXTRACT_SCENE_BLOCKS_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
-	fallbackModelRef, _, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_SCENE_BLOCKS_MODEL_FALLBACK", "MODEL_CONFIG_FILE")
+	fallbackModelRef, _, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_SCENE_BLOCKS_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &SceneBlocksProcessor{

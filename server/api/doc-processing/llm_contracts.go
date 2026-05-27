@@ -148,6 +148,96 @@ func semanticProjectionExtractionContract() llmclients.StructuredOutputContract 
 	})
 }
 
+func structuredKnowledgeCandidateContract() llmclients.StructuredOutputContract {
+	knowledgeItemSchema := map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type":                 "object",
+			"additionalProperties": true,
+		},
+	}
+	return newDocProcessingContract("chenweb_structured_knowledge_candidate", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"entities":                 knowledgeItemSchema,
+			"concepts":                 knowledgeItemSchema,
+			"relationships":            knowledgeItemSchema,
+			"normative_statements":     knowledgeItemSchema,
+			"quantitative_constraints": knowledgeItemSchema,
+			"temporal_constraints":     knowledgeItemSchema,
+			"conditional_logic":        knowledgeItemSchema,
+			"causal_relationships":     knowledgeItemSchema,
+			"assumptions":              knowledgeItemSchema,
+			"references":               knowledgeItemSchema,
+			"procedures":               knowledgeItemSchema,
+			"ambiguities":              knowledgeItemSchema,
+		},
+		"additionalProperties": true,
+	})
+}
+
+func structuredKnowledgeEnrichContract() llmclients.StructuredOutputContract {
+	knowledgeItemSchema := map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type":                 "object",
+			"additionalProperties": true,
+		},
+	}
+	return newDocProcessingContract("chenweb_structured_knowledge_enrich", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"language":                    schemaString(),
+			"entities":                    knowledgeItemSchema,
+			"entities_en":                 knowledgeItemSchema,
+			"concepts":                    knowledgeItemSchema,
+			"concepts_en":                 knowledgeItemSchema,
+			"relationships":               knowledgeItemSchema,
+			"relationships_en":            knowledgeItemSchema,
+			"normative_statements":        knowledgeItemSchema,
+			"normative_statements_en":     knowledgeItemSchema,
+			"quantitative_constraints":    knowledgeItemSchema,
+			"quantitative_constraints_en": knowledgeItemSchema,
+			"temporal_constraints":        knowledgeItemSchema,
+			"temporal_constraints_en":     knowledgeItemSchema,
+			"conditional_logic":           knowledgeItemSchema,
+			"conditional_logic_en":        knowledgeItemSchema,
+			"causal_relationships":        knowledgeItemSchema,
+			"causal_relationships_en":     knowledgeItemSchema,
+			"assumptions":                 knowledgeItemSchema,
+			"assumptions_en":              knowledgeItemSchema,
+			"references":                  knowledgeItemSchema,
+			"references_en":               knowledgeItemSchema,
+			"procedures":                  knowledgeItemSchema,
+			"procedures_en":               knowledgeItemSchema,
+			"ambiguities":                 knowledgeItemSchema,
+			"ambiguities_en":              knowledgeItemSchema,
+			"category_paths":              schemaArray(),
+			"category_paths_en":           schemaArray(),
+		},
+		"additionalProperties": true,
+	})
+}
+
+func entityRelationExtractionContract() llmclients.StructuredOutputContract {
+	itemArray := map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type":                 "object",
+			"additionalProperties": true,
+		},
+	}
+	return newDocProcessingContract("chenweb_entity_relation_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"language":  schemaString(),
+			"entities":  itemArray,
+			"relations": itemArray,
+		},
+		"additionalProperties": true,
+	})
+}
+
 func productExtractionContract() llmclients.StructuredOutputContract {
 	return newDocProcessingContract("chenweb_product_extraction", schemaObjectWithAnyOf(
 		map[string]any{

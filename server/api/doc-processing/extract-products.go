@@ -138,11 +138,11 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	relationModelRef, relationModelCfgPath, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
 		[]string{"ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	translatePromptText, translatePromptRef, translatePromptPath, translatePromptErr := loadProductPromptFromEnvKeys(
 		[]string{"TRANSLATE_PRODUCTS_PROMPT"},
@@ -154,13 +154,13 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 	)
 	translateModelRef, _, translateModelCfg, translateModelErr := loadOptionalModelConfigFromEnvKeys(
 		[]string{"TRANSLATE_PRODUCTS_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	categorizeModelRef, _, categorizeModelCfg, categorizeModelErr := loadOptionalModelConfigFromEnvKeys(
 		[]string{"CATEGORIZE_PRODUCTS_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
-	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_CONFIG_FILE")
+	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PRODUCT_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	translateEnabled := translatePromptErr == nil && strings.TrimSpace(translatePromptText) != "" && translateModelErr == nil && strings.TrimSpace(translateModelCfg.ModelName) != ""

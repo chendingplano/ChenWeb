@@ -36,7 +36,9 @@ export const PIPELINE_STAGES = [
 	{ id: 'generate_topics', label: 'Generate Topics', operations: ['generate_topics'] },
 	{ id: 'generate_scene_blocks', label: 'Generate Scene Blocks', operations: ['generate_scene_blocks', 'extract_scene_blocks'] },
 	{ id: 'extract_products', label: 'Extract Products', operations: ['extract_products'] },
-	{ id: 'extract_semantic_projections', label: 'Extract Semantic Projection', operations: ['extract_semantic_projections'] }
+	{ id: 'extract_semantic_projections', label: 'Extract Semantic Projection', operations: ['extract_semantic_projections'] },
+	{ id: 'extract_structured_knowledge', label: 'Extract Struct. Knowledge', operations: ['extract_structured_knowledges'] },
+	{ id: 'extract_entity_relation', label: 'Extract Entity/Relation', operations: ['extract_entity_relation'] }
 ];
 
 // All doc-processor-managed stages (indices 3+). Used to map status entries to UI stages.
@@ -49,8 +51,9 @@ export const MANDATORY_PROCESSOR_IDS = ['static_analyzer', 'chunking', 'extract_
 // Configurable via [doc-processing].required_processors in config.toml.
 export const ALL_CONFIGURABLE_PROCESSOR_IDS = [
 	'extract_metrics', 'extract_provisions', 'generate_summaries',
-	'generate_topics', 'generate_scene_blocks', 'extract_products', 
-	'extract_semantic_projections'
+	'generate_topics', 'generate_scene_blocks', 'extract_products',
+	'extract_semantic_projections', 'extract_structured_knowledge',
+	'extract_entity_relation'
 ];
 
 export const ALL_PROCESSOR_IDS = [...MANDATORY_PROCESSOR_IDS, ...ALL_CONFIGURABLE_PROCESSOR_IDS];

@@ -124,15 +124,15 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	fallbackMentionModelRef, fallbackMentionModelCfgPath, fallbackMentionModelCfg, fallbackMentionModelErr := loadOptionalModelConfigFromEnv(
 		"EXTRACT_METRIC_CANDIDATES_MODEL_FALLBACK",
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	relationModelRef, relationModelCfgPath, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
 		[]string{"ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	p := &MetricsProcessor{

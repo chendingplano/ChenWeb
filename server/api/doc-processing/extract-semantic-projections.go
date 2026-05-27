@@ -103,15 +103,15 @@ func NewSemanticProjectionsProcessor(
 	)
 	candidateModelRef, candidateModelCfgPath, candidateModelCfg, candidateModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_SEMANTIC_PROJECTION_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv(
 		"EXTRACT_SEMANTIC_PROJECTION_MODEL_FALLBACK",
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	enrichModelRef, enrichModelCfgPath, enrichModelCfg, enrichModelErr := loadModelConfigFromEnvKeys(
 		[]string{"ENRICH_SEMANTIC_PROJECTION_MODEL_NAME"},
-		"MODEL_CONFIG_FILE",
+		"MODEL_DEF_FILE",
 	)
 	applyStructureModelConfigToExtractor(extractor, enrichModelCfg)
 	return &SemanticProjectionsProcessor{

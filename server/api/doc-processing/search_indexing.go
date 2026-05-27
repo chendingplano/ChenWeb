@@ -17,13 +17,16 @@ import (
 )
 
 const (
-	searchArtifactSummary             = "summary"
-	searchArtifactTopic               = "topic"
-	searchArtifactSceneBlock          = "scene_block"
-	searchArtifactMetric              = "metric"
-	searchArtifactProvision           = "provision"
-	searchArtifactProduct             = "product"
-	searchArtifactSemanticProjection  = "semantic_projection"
+	searchArtifactSummary            = "summary"
+	searchArtifactTopic              = "topic"
+	searchArtifactSceneBlock         = "scene_block"
+	searchArtifactMetric             = "metric"
+	searchArtifactProvision          = "provision"
+	searchArtifactProduct            = "product"
+	searchArtifactSemanticProjection = "semantic_projection"
+	searchArtifactKnowledge          = "knowledge"
+	searchArtifactEntity             = "entity"
+	searchArtifactRelation           = "relation"
 )
 
 func ReindexSummarySearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -120,6 +123,42 @@ func ReindexSemanticProjectionSearchForRecord(ctx context.Context, recordID int6
 		return err
 	}
 	return replaceRegistryRows(ctx, db, searchArtifactSemanticProjection, recordID, rows, logger)
+}
+
+func ReindexKnowledgeSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return fmt.Errorf("project db handle is nil")
+	}
+	rows, err := buildKnowledgeRegistryRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return replaceRegistryRows(ctx, db, searchArtifactKnowledge, recordID, rows, logger)
+}
+
+func ReindexEntitySearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return fmt.Errorf("project db handle is nil")
+	}
+	rows, err := buildEntityRegistryRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return replaceRegistryRows(ctx, db, searchArtifactEntity, recordID, rows, logger)
+}
+
+func ReindexRelationSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return fmt.Errorf("project db handle is nil")
+	}
+	rows, err := buildRelationRegistryRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return replaceRegistryRows(ctx, db, searchArtifactRelation, recordID, rows, logger)
 }
 
 func ReindexProductSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -490,6 +529,228 @@ ORDER BY id`
 			SearchDocument:  strings.TrimSpace(strings.Join(searchParts, " ")),
 			SnippetBasis:    firstNonEmpty(descriptiveName, descriptiveNameEn.String),
 			CategoryPaths:   json.RawMessage(categoryPaths),
+			SemanticPayload: payload,
+		})
+	}
+	return out, rows.Err()
+}
+
+func buildKnowledgeRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
+	const q = `
+SELECT id, knowledge_id, knowledge_type, knowledge_value, knowledge_value_en, desc_text, desc_text_en, keywords, keywords_en, category_paths, search_document
+FROM kb.knowledges
+WHERE input_record_id = $1
+ORDER BY id`
+	rows, err := db.QueryContext(ctx, q, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]kbsearch.RegistryRow, 0, 16)
+	for rows.Next() {
+		var (
+			id               int64
+			knowledgeID      string
+			knowledgeType    string
+			knowledgeValue   string
+			knowledgeValueEn sql.NullString
+			descText         string
+			descTextEn       sql.NullString
+			keywords         []byte
+			keywordsEn       []byte
+			categoryPaths    []byte
+			searchDoc        sql.NullString
+		)
+		if err := rows.Scan(&id, &knowledgeID, &knowledgeType, &knowledgeValue, &knowledgeValueEn, &descText, &descTextEn, &keywords, &keywordsEn, &categoryPaths, &searchDoc); err != nil {
+			return nil, err
+		}
+		kw := rawJSONArrayStrings(keywords)
+		kwEn := rawJSONArrayStrings(keywordsEn)
+		searchParts := []string{knowledgeType, knowledgeValue, knowledgeValueEn.String, descText, descTextEn.String, strings.Join(kw, " "), strings.Join(kwEn, " ")}
+		payload, _ := json.Marshal(map[string]any{
+			"knowledge_type":  knowledgeType,
+			"knowledge_value": knowledgeValue,
+			"desc_text":       descText,
+			"keywords":        kw,
+		})
+		seq := lastDelimitedToken(knowledgeID)
+		if seq == "" {
+			seq = strconv.FormatInt(id, 10)
+		}
+		out = append(out, kbsearch.RegistryRow{
+			ArtifactType:    searchArtifactKnowledge,
+			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactKnowledge, seq),
+			InputRecordID:   recordID,
+			SourceRowID:     &id,
+			PrimaryLabel:    firstNonEmpty(knowledgeValue, knowledgeID),
+			SecondaryLabel:  knowledgeType,
+			SearchDocument:  firstNonEmpty(searchDoc.String, strings.TrimSpace(strings.Join(searchParts, " "))),
+			SnippetBasis:    firstNonEmpty(descText, knowledgeValue),
+			CategoryPaths:   json.RawMessage(categoryPaths),
+			SemanticPayload: payload,
+		})
+	}
+	return out, rows.Err()
+}
+
+func buildEntityRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
+	const q = `
+SELECT id, entity_id, language, entity, entity_en, entity_type, entity_type_en,
+       aliases, aliases_en, desc_text, desc_text_en, keywords, keywords_en,
+       source_line_spans, search_document
+FROM kb.entities
+WHERE input_record_id = $1
+ORDER BY id`
+	rows, err := db.QueryContext(ctx, q, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]kbsearch.RegistryRow, 0, 16)
+	for rows.Next() {
+		var (
+			id              int64
+			entityID        sql.NullString
+			language        sql.NullString
+			entity          sql.NullString
+			entityEn        sql.NullString
+			entityType      sql.NullString
+			entityTypeEn    sql.NullString
+			aliases         []byte
+			aliasesEn       []byte
+			descText        sql.NullString
+			descTextEn      sql.NullString
+			keywords        []byte
+			keywordsEn      []byte
+			sourceLineSpans []byte
+			searchDoc       sql.NullString
+		)
+		if err := rows.Scan(&id, &entityID, &language, &entity, &entityEn, &entityType, &entityTypeEn,
+			&aliases, &aliasesEn, &descText, &descTextEn, &keywords, &keywordsEn,
+			&sourceLineSpans, &searchDoc); err != nil {
+			return nil, err
+		}
+		kw := rawJSONArrayStrings(keywords)
+		kwEn := rawJSONArrayStrings(keywordsEn)
+		aliasList := rawJSONArrayStrings(aliases)
+		aliasEnList := rawJSONArrayStrings(aliasesEn)
+		searchParts := []string{
+			entity.String, entityEn.String,
+			entityType.String, entityTypeEn.String,
+			strings.Join(aliasList, " "), strings.Join(aliasEnList, " "),
+			descText.String, descTextEn.String,
+			strings.Join(kw, " "), strings.Join(kwEn, " "),
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"entity":      entity.String,
+			"entity_type": entityType.String,
+			"desc":        descText.String,
+			"aliases":     aliasList,
+			"keywords":    kw,
+			"language":    language.String,
+		})
+		seq := lastDelimitedToken(entityID.String)
+		if seq == "" {
+			seq = strconv.FormatInt(id, 10)
+		}
+		spans := sourceLineSpans
+		if len(spans) == 0 {
+			spans = []byte("[]")
+		}
+		out = append(out, kbsearch.RegistryRow{
+			ArtifactType:    searchArtifactEntity,
+			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactEntity, seq),
+			InputRecordID:   recordID,
+			SourceRowID:     &id,
+			PrimaryLabel:    firstNonEmpty(entity.String, entityID.String),
+			SecondaryLabel:  firstNonEmpty(entityType.String, entityTypeEn.String),
+			SearchDocument:  firstNonEmpty(searchDoc.String, strings.TrimSpace(strings.Join(searchParts, " "))),
+			SnippetBasis:    firstNonEmpty(descText.String, entity.String),
+			CategoryPaths:   json.RawMessage("[]"),
+			SourceLineSpans: json.RawMessage(spans),
+			SemanticPayload: payload,
+		})
+	}
+	return out, rows.Err()
+}
+
+func buildRelationRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
+	const q = `
+SELECT id, relation_id, language, subject, subject_en, predicate, predicate_en,
+       object, object_en, desc_text, desc_text_en, keywords, keywords_en,
+       source_line_spans, search_document
+FROM kb.relations
+WHERE input_record_id = $1
+ORDER BY id`
+	rows, err := db.QueryContext(ctx, q, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]kbsearch.RegistryRow, 0, 16)
+	for rows.Next() {
+		var (
+			id              int64
+			relationID      sql.NullString
+			language        sql.NullString
+			subject         sql.NullString
+			subjectEn       sql.NullString
+			predicate       sql.NullString
+			predicateEn     sql.NullString
+			object          sql.NullString
+			objectEn        sql.NullString
+			descText        sql.NullString
+			descTextEn      sql.NullString
+			keywords        []byte
+			keywordsEn      []byte
+			sourceLineSpans []byte
+			searchDoc       sql.NullString
+		)
+		if err := rows.Scan(&id, &relationID, &language, &subject, &subjectEn, &predicate, &predicateEn,
+			&object, &objectEn, &descText, &descTextEn, &keywords, &keywordsEn,
+			&sourceLineSpans, &searchDoc); err != nil {
+			return nil, err
+		}
+		kw := rawJSONArrayStrings(keywords)
+		kwEn := rawJSONArrayStrings(keywordsEn)
+		spo := strings.TrimSpace(strings.Join([]string{subject.String, predicate.String, object.String}, " "))
+		searchParts := []string{
+			subject.String, subjectEn.String,
+			predicate.String, predicateEn.String,
+			object.String, objectEn.String,
+			descText.String, descTextEn.String,
+			strings.Join(kw, " "), strings.Join(kwEn, " "),
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"subject":   subject.String,
+			"predicate": predicate.String,
+			"object":    object.String,
+			"desc":      descText.String,
+			"keywords":  kw,
+			"language":  language.String,
+		})
+		seq := lastDelimitedToken(relationID.String)
+		if seq == "" {
+			seq = strconv.FormatInt(id, 10)
+		}
+		spans := sourceLineSpans
+		if len(spans) == 0 {
+			spans = []byte("[]")
+		}
+		out = append(out, kbsearch.RegistryRow{
+			ArtifactType:    searchArtifactRelation,
+			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactRelation, seq),
+			InputRecordID:   recordID,
+			SourceRowID:     &id,
+			PrimaryLabel:    firstNonEmpty(spo, relationID.String),
+			SecondaryLabel:  predicate.String,
+			SearchDocument:  firstNonEmpty(searchDoc.String, strings.TrimSpace(strings.Join(searchParts, " "))),
+			SnippetBasis:    firstNonEmpty(descText.String, spo),
+			CategoryPaths:   json.RawMessage("[]"),
+			SourceLineSpans: json.RawMessage(spans),
 			SemanticPayload: payload,
 		})
 	}
