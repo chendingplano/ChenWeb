@@ -194,6 +194,122 @@ func TestWriteSummaryTreeRootReference(t *testing.T) {
 	}
 }
 
+func TestValidateSummaryArtifacts(t *testing.T) {
+	tmp := t.TempDir()
+	treeRoot := t.TempDir()
+
+	item := SummaryItem{
+		SummaryID:     "93_0_0001",
+		RecordID:      93,
+		Level:         0,
+		SeqNo:         1,
+		Lines:         []string{"1-4"},
+		Keywords:      []string{"健康"},
+		KeywordsEn:    []string{"health"},
+		CategoryPaths: []string{"Safety Overview", "Closing Notes"},
+		Summary:       "这是一段中文总结，用于验证摘要校验。",
+		SummaryEn:     "This is an English translation.",
+	}
+	if _, err := writeSummaryFile(tmp, 93, item); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+	if err := writeSummaryTreeEntry(nil, treeRoot, item, item.CategoryPaths, nil); err != nil {
+		t.Fatalf("writeSummaryTreeEntry: %v", err)
+	}
+
+	if err := validateSummaryArtifacts(93, "zh", []SummaryItem{item}, tmp, treeRoot); err != nil {
+		t.Fatalf("validateSummaryArtifacts: %v", err)
+	}
+}
+
+func TestValidateSummaryArtifacts_FailsForLanguageMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	treeRoot := t.TempDir()
+
+	item := SummaryItem{
+		SummaryID:     "93_0_0001",
+		RecordID:      93,
+		Level:         0,
+		SeqNo:         1,
+		Lines:         []string{"1-4"},
+		Keywords:      []string{"health"},
+		CategoryPaths: []string{"Safety Overview"},
+		Summary:       "This summary is in English.",
+	}
+	if _, err := writeSummaryFile(tmp, 93, item); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+	if err := writeSummaryTreeEntry(nil, treeRoot, item, item.CategoryPaths, nil); err != nil {
+		t.Fatalf("writeSummaryTreeEntry: %v", err)
+	}
+
+	err := validateSummaryArtifacts(93, "zh", []SummaryItem{item}, tmp, treeRoot)
+	if err == nil {
+		t.Fatalf("expected language mismatch error")
+	}
+	if !strings.Contains(err.Error(), "language") {
+		t.Fatalf("expected language error, got %v", err)
+	}
+}
+
+func TestWriteSummaryTreeEntriesForItem_IndexesAllCategoryPaths(t *testing.T) {
+	tmp := t.TempDir()
+	artifactRoot := t.TempDir()
+
+	item := SummaryItem{
+		SummaryID: "124_0_0001",
+		RecordID:  124,
+		Level:     0,
+		SeqNo:     1,
+		Lines:     []string{"11-18"},
+		Keywords:  []string{"应急响应"},
+		KeywordsEn: []string{
+			"emergency response",
+		},
+		CategoryPathItems: []CategoryPathEntry{
+			{
+				Nodes: []CategoryPathNode{
+					{Name: "工业安全", Keywords: []string{"工业安全"}, Confidence: 0.9},
+					{Name: "应急管理", Keywords: []string{"应急管理"}, Confidence: 0.8},
+				},
+			},
+			{
+				Nodes: []CategoryPathNode{
+					{Name: "安全培训", Keywords: []string{"安全培训"}, Confidence: 0.7},
+					{Name: "演练计划", Keywords: []string{"演练计划"}, Confidence: 0.6},
+				},
+			},
+		},
+		CategoryPathItemsEn: []CategoryPathEntry{
+			{
+				Nodes: []CategoryPathNode{
+					{Name: "Industrial Safety", Keywords: []string{"industrial safety"}, Confidence: 0.9},
+					{Name: "Emergency Management", Keywords: []string{"emergency management"}, Confidence: 0.8},
+				},
+			},
+			{
+				Nodes: []CategoryPathNode{
+					{Name: "Safety Training", Keywords: []string{"training"}, Confidence: 0.7},
+					{Name: "Drill Planning", Keywords: []string{"drills"}, Confidence: 0.6},
+				},
+			},
+		},
+		Summary:   "这是用于验证多分类路径索引的中文摘要。",
+		SummaryEn: "This summary validates indexing across multiple category paths.",
+	}
+	if _, err := writeSummaryFile(artifactRoot, 124, item); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+
+	if err := writeSummaryTreeEntriesForItem(nil, tmp, item); err != nil {
+		t.Fatalf("writeSummaryTreeEntriesForItem: %v", err)
+	}
+
+	if err := validateSummaryArtifacts(124, "zh", []SummaryItem{item}, artifactRoot, tmp); err != nil {
+		t.Fatalf("validateSummaryArtifacts: %v", err)
+	}
+}
+
 func TestDetectContentLanguage(t *testing.T) {
 	cases := []struct {
 		input string

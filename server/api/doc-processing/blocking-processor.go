@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -88,6 +90,8 @@ func BlockBufferFromContext(ctx context.Context) *BlockBuffer {
 type BlockingProcessor struct {
 	InputStore  DocMetadataStore
 	Logger      ApiTypes.JimoLogger
+	ProcLogger  DocProcLogger
+	Now         func() time.Time
 	BlockSize   int
 	PrevOverlap int
 	NextOverlap int
@@ -102,6 +106,8 @@ func NewBlockingProcessor(store DocMetadataStore, logger ApiTypes.JimoLogger) *B
 	return &BlockingProcessor{
 		InputStore:  store,
 		Logger:      logger,
+		ProcLogger:  DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		Now:         time.Now,
 		BlockSize:   envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
 		PrevOverlap: prevOverlap,
 		NextOverlap: nextOverlap,
@@ -131,6 +137,7 @@ func blockingConfigFromViper() (prevOverlap, nextOverlap int, removeTOC bool) {
 func (p *BlockingProcessor) Name() string { return "blocking" }
 
 func (p *BlockingProcessor) HandleEvent(ctx context.Context, payload []byte) error {
+	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
 	if err != nil {
 		return fmt.Errorf("(MID_26050502) parse event payload: %w", err)
@@ -182,7 +189,43 @@ func (p *BlockingProcessor) HandleEvent(ctx context.Context, payload []byte) err
 			"num_blocks", len(buf.Blocks),
 		)
 	}
+	p.logBlockingSummary(ctx, start, p.Now(), len(buf.Blocks), totalLinesInBlocks(buf.Blocks), nil)
 	return nil
+}
+
+func (p *BlockingProcessor) logBlockingSummary(ctx context.Context, start, end time.Time, numBlocks int, numLines int, procErr error) {
+	if p.ProcLogger.DB == nil {
+		return
+	}
+	extraInfo, _ := json.Marshal(map[string]interface{}{
+		"num_blocks": numBlocks,
+		"num_lines":  numLines,
+	})
+	extraStr := string(extraInfo)
+	var errStr *string
+	if procErr != nil {
+		s := procErr.Error()
+		errStr = &s
+	}
+	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    []string{},
+		PromptName:    "",
+		EntryType:     "doc_proc_summary",
+		ExtraInfoJSON: &extraStr,
+		Errors:        errStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
+}
+
+func totalLinesInBlocks(blocks []Block) int {
+	n := 0
+	for _, b := range blocks {
+		n += len(b.Lines)
+	}
+	return n
 }
 
 func (p *BlockingProcessor) blockSize() int {

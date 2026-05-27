@@ -24,6 +24,7 @@ type MetricsProcessor struct {
 	Store                       MetricsStore
 	Extractor                   LLMJSONExtractor
 	Logger                      ApiTypes.JimoLogger
+	ProcLogger                  DocProcLogger
 	Now                         func() time.Time
 	MentionPromptText           string
 	MentionPromptRef            string
@@ -48,6 +49,12 @@ type MetricsProcessor struct {
 	RelationModelErr            error
 	RelationModelName           string
 	RelationModelCfg            structureModelConfig
+	TranslationModelRef         string
+	TranslationModelCfgPath     string
+	TranslationModelErr         error
+	TranslationModelName        string
+	TranslationModelCfg         structureModelConfig
+	TranslationEnabled          bool
 	PromptText                  string
 	PromptRef                   string
 	PromptPath                  string
@@ -84,6 +91,8 @@ type metricExtractionResult struct {
 	Metrics          []map[string]any
 	UncertainMetrics []map[string]any
 	ModelName        string
+	FallbackCount    int
+	LLMCallCount     int
 }
 
 type metricCandidateMention struct {
@@ -134,12 +143,17 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		[]string{"ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
 		"MODEL_DEF_FILE",
 	)
+	translationModelRef, translationModelCfgPath, translationModelCfg, translationModelErr := loadOptionalModelConfigFromEnv(
+		"TRANSLATION_MODEL_NAME",
+		"MODEL_DEF_FILE",
+	)
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	p := &MetricsProcessor{
 		InputStore:                  inputStore,
 		Store:                       store,
 		Extractor:                   extractor,
 		Logger:                      logger,
+		ProcLogger:                  DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:                         time.Now,
 		MentionPromptText:           mentionPromptText,
 		MentionPromptRef:            mentionPromptRef,
@@ -164,6 +178,12 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		RelationModelErr:            relationModelErr,
 		RelationModelName:           relationModelCfg.ModelName,
 		RelationModelCfg:            relationModelCfg,
+		TranslationModelRef:         translationModelRef,
+		TranslationModelCfgPath:     translationModelCfgPath,
+		TranslationModelErr:         translationModelErr,
+		TranslationModelName:        translationModelCfg.ModelName,
+		TranslationModelCfg:         translationModelCfg,
+		TranslationEnabled:          translationModelErr == nil && strings.TrimSpace(translationModelCfg.ModelName) != "",
 		PromptText:                  relationPromptText,
 		PromptRef:                   relationPromptRef,
 		PromptPath:                  relationPromptPath,
@@ -282,6 +302,12 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	if detectedLanguage == "" {
 		detectedLanguage = "unknown"
 	}
+	translationCalls, err := p.ensureMetricCategoryPathsEnglish(ctx, eventIDFromContext(ctx), allMetrics)
+	if err != nil {
+		p.persistMetricsStatus(ctx, rec, start, err)
+		return fmt.Errorf("(MID_26052720) repair metric category_paths_en failed: %w", err)
+	}
+	result.LLMCallCount += translationCalls
 
 	for i, m := range allMetrics {
 		m["metric_id"] = fmt.Sprintf("%d_%d", evt.RecordID, i+1)
@@ -320,6 +346,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		"num_blocks", len(buf.Blocks),
 	)
 	p.persistMetricsStatus(ctx, rec, start, nil)
+	p.logMetricsSummary(ctx, start, p.Now(), result, inserted, len(buf.Blocks))
 	return nil
 }
 
@@ -332,6 +359,7 @@ func (p *MetricsProcessor) forceDisableThinking() {
 	p.MentionModelCfg = forceDisableThinking(p.MentionModelCfg)
 	p.FallbackMentionModelCfg = forceDisableThinking(p.FallbackMentionModelCfg)
 	p.RelationModelCfg = forceDisableThinking(p.RelationModelCfg)
+	p.TranslationModelCfg = forceDisableThinking(p.TranslationModelCfg)
 }
 
 func (p *MetricsProcessor) saveMetricsToFile(recordID int64, rec DocMetadataInputRecord, metrics []map[string]any) error {
@@ -473,12 +501,13 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 */
 
 func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
-	ctx context.Context, 
+	ctx context.Context,
 	record_id int64,
 	blocks []Block) (metricExtractionResult, error) {
 	mentions := make([]metricCandidateMention, 0, len(blocks))
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
 	detectedLanguage := "unknown"
+	var fallbackCount, llmCallCount int
 
 	// Step 1: Extract metrics
 	for _, block := range blocks {
@@ -493,7 +522,16 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 			"num_lines", len(lines),
 			"model name", p.MentionModelName,
 			"prompt", p.MentionPromptRef)
+		callStart := p.Now()
+		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), block.Index)
 		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, userPrompt)
+		llmCallCount++
+		if err == nil && strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, callID, "extract_metric_candidates", 1,
+			[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef,
+			payload, err, callStart, p.Now())
 		if err != nil {
 			return metricExtractionResult{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
 		}
@@ -501,7 +539,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		if language := strings.TrimSpace(asString(payload["language"])); language != "" && detectedLanguage == "unknown" {
 			detectedLanguage = language
 		}
-	
+
 		usedMentionModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedMentionModel, p.MentionModelName))
 		raw, _ := payload["candidates"].([]any)
 		mentions = append(mentions, normalizeMetricCandidateMentions(raw, block)...)
@@ -536,7 +574,13 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 			"model_name", p.RelationModelName,
 			"prompt_name", p.RelationPromptRef,
 		)
+		enrichStart := p.Now()
+		enrichCallID := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), idx)
 		payload, err := p.extractMetricPayload(ctx, buildMetricRelationUserPrompt(candidate), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg)
+		llmCallCount++
+		p.logLLMCall(ctx, enrichCallID, "enrich_metrics", 2,
+			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
+			payload, err, enrichStart, p.Now())
 		if err != nil {
 			return metricExtractionResult{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w", err)
 		}
@@ -574,6 +618,8 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		Metrics:          metrics,
 		UncertainMetrics: uncertain,
 		ModelName:        firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
+		FallbackCount:    fallbackCount,
+		LLMCallCount:     llmCallCount,
 	}, nil
 }
 
@@ -1192,6 +1238,100 @@ func toBool(v any) bool {
 	return b
 }
 
+// logLLMCall writes one llm_call log entry. Errors are logged as warnings and never abort processing.
+func (p *MetricsProcessor) logLLMCall(
+	ctx context.Context,
+	callID, activity string,
+	pass int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	rec := DocProcLogRecord{
+		DocProcName:  p.Name(),
+		ModelNames:   modelNames,
+		PromptName:   promptName,
+		Pass:         &pass,
+		LLMCallID:    &callID,
+		ActivityName: &activity,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	}
+}
+
+// logMetricsSummary writes one doc_proc_summary log entry after the processor finishes.
+func (p *MetricsProcessor) logMetricsSummary(
+	ctx context.Context,
+	start, end time.Time,
+	result metricExtractionResult,
+	inserted int64,
+	numBlocks int,
+) {
+	extraInfo := map[string]any{
+		"total_metrics":     inserted,
+		"uncertain_metrics": len(result.UncertainMetrics),
+		"fallback_count":    result.FallbackCount,
+		"llm_call_count":    result.LLMCallCount,
+		"num_blocks":        numBlocks,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+
+	seen := map[string]struct{}{}
+	modelNames := make([]string, 0, 3)
+	for _, n := range []string{p.MentionModelName, p.FallbackMentionModelName, p.RelationModelName} {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		modelNames = append(modelNames, n)
+	}
+	if p.TranslationEnabled {
+		n := strings.TrimSpace(p.TranslationModelName)
+		n = strings.TrimSpace(n)
+		if n == "" {
+		} else if _, ok := seen[n]; !ok {
+			seen[n] = struct{}{}
+			modelNames = append(modelNames, n)
+		}
+	}
+
+	promptName := firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef)
+
+	rec := DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogSummary(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
+}
+
 func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText string, promptText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	in := llmclients.JSONExtractionInput{
@@ -1225,6 +1365,94 @@ func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText s
 		return payload, nil
 	}
 	return nil, fmt.Errorf("(MID_26042491) llm output must contain 'metrics' or 'candidates'")
+}
+
+func (p *MetricsProcessor) ensureMetricCategoryPathsEnglish(ctx context.Context, eventID string, metrics []map[string]any) (int, error) {
+	llmCallCount := 0
+	for i := range metrics {
+		original := parseCategoryPathsAny(metrics[i]["category_paths"])
+		if len(original) == 0 {
+			continue
+		}
+		english := parseCategoryPathsAny(metrics[i]["category_paths_en"])
+		if len(english) > 0 && summaryCategoryPathsLookEnglish(english) {
+			metrics[i]["category_paths_en"] = english
+			continue
+		}
+		if summaryCategoryPathsLookEnglish(original) {
+			metrics[i]["category_paths_en"] = original
+			continue
+		}
+		callStart := p.Now()
+		translated, payload, err := p.translateMetricCategoryPaths(ctx, original)
+		llmCallCount++
+		p.logLLMCall(
+			ctx,
+			fmt.Sprintf("%s_p3_cat%d", eventID, i),
+			"translate_metric_category_paths",
+			3,
+			[]string{strings.TrimSpace(p.TranslationModelName)},
+			"inline:summary_category_translation",
+			payload,
+			err,
+			callStart,
+			p.Now(),
+		)
+		if err != nil {
+			return llmCallCount, err
+		}
+		metrics[i]["category_paths_en"] = translated
+	}
+	return llmCallCount, nil
+}
+
+func (p *MetricsProcessor) translateMetricCategoryPaths(ctx context.Context, categoryPaths []CategoryPathEntry) ([]CategoryPathEntry, map[string]any, error) {
+	if len(categoryPaths) == 0 {
+		return nil, nil, nil
+	}
+	if !p.TranslationEnabled || strings.TrimSpace(p.TranslationModelName) == "" {
+		return nil, nil, errors.New("(MID_26052721) TRANSLATION_MODEL_NAME is required when metric category_paths_en is missing for non-English category paths")
+	}
+	if p.Extractor == nil {
+		return nil, nil, errors.New("(MID_26052722) metric extractor is nil")
+	}
+	applyStructureModelConfigToExtractor(p.Extractor, p.TranslationModelCfg)
+	inputPayload, err := json.Marshal(map[string]any{
+		"category_paths": categoryPaths,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	in := llmclients.JSONExtractionInput{
+		PromptText: summaryCategoryTranslationPrompt,
+		ModelName:  p.TranslationModelName,
+		InputText:  string(inputPayload),
+	}
+	var parsed map[string]any
+	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
+		result, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, summaryCategoryTranslationContract())
+		if extractErr != nil {
+			return nil, nil, extractErr
+		}
+		if result != nil {
+			parsed = result.Parsed
+		}
+	} else {
+		parsed, err = p.Extractor.ExtractJSON(ctx, in)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	translated := extractCategoryPathDetailEnFromLLM(parsed)
+	if len(translated) == 0 {
+		if arr, ok := parsed["category_paths_en"].([]any); ok {
+			translated = parseCategoryPathsArray(arr)
+		}
+	}
+	if len(translated) == 0 {
+		return nil, parsed, errors.New("(MID_26052723) translation returned empty category_paths_en")
+	}
+	return translated, parsed, nil
 }
 
 /*
@@ -1590,37 +1818,24 @@ func indexMetricsInTreeDir(logger ApiTypes.JimoLogger, treeRootDir string, recor
 		if metricID == "" {
 			continue
 		}
-		if pathsRaw, ok := metric["category_paths"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsRaw) {
-				if err := writeMetricTreeEntry(logger, treeRootDir, metricID, entry, now); err != nil {
-					return fmt.Errorf("(MID_26051805) index metric %s path: %w", metricID, err)
-				}
-			}
-		}
-		if pathsEnRaw, ok := metric["category_paths_en"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsEnRaw) {
-				if err := writeMetricTreeEntry(logger, treeRootDir, metricID, entry, now); err != nil {
-					return fmt.Errorf("(MID_26051806) index metric %s en path: %w", metricID, err)
-				}
+		for _, pair := range pairCategoryPathEntries(metric["category_paths"], metric["category_paths_en"]) {
+			if err := writeMetricTreeEntry(logger, treeRootDir, metricID, pair.Index, pair.Original, now); err != nil {
+				return fmt.Errorf("(MID_26051805) index metric %s path: %w", metricID, err)
 			}
 		}
 	}
 	return nil
 }
 
-func writeMetricTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, metricID string, pathEntry CategoryPathEntry, now time.Time) error {
-	if len(pathEntry.Nodes) == 0 {
+func writeMetricTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, metricID string, indexEntry CategoryPathEntry, originalEntry CategoryPathEntry, now time.Time) error {
+	leafDir, err := categoryTreeLeafDirForEntry(logger, treeRootDir, indexEntry, originalEntry, now)
+	if err != nil {
+		return err
+	}
+	if leafDir == "" {
 		return nil
 	}
-	currentDir := treeRootDir
-	for _, node := range pathEntry.Nodes {
-		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
-		if err != nil {
-			return err
-		}
-		currentDir = subdir
-	}
-	return upsertMetricToLeafDir(currentDir, metricID)
+	return upsertMetricToLeafDir(leafDir, metricID)
 }
 
 func upsertMetricToLeafDir(leafDir string, metricID string) error {

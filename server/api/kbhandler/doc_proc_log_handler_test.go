@@ -1,0 +1,81 @@
+package kbhandler
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/labstack/echo/v4"
+)
+
+func TestListDocProcLogs_UsesMSUsedResponseShape(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_proc_logs WHERE entry_type = $1")).
+		WithArgs("doc_proc_summary").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+WHERE entry_type = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
+	mock.ExpectQuery(listQuery).
+		WithArgs("doc_proc_summary", 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "entry_type",
+			"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info", "ms_used", "create_time",
+		}).AddRow(
+			int64(17), "summary run", "generate_topics", `{topic-model}`, "topic-prompt", "doc_proc_summary",
+			nil, nil, nil, nil, nil, `{"topics_generated":5}`, int64(1800), "2026-05-27T12:30:00+00:00",
+		))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/doc-proc-logs?entry_type=doc_proc_summary", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ListDocProcLogs(c); err != nil {
+		t.Fatalf("ListDocProcLogs returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	results, ok := payload["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("results=%#v", payload["results"])
+	}
+	row, ok := results[0].(map[string]any)
+	if !ok {
+		t.Fatalf("row=%#v", results[0])
+	}
+	if _, ok := row["ms_used"]; !ok {
+		t.Fatalf("expected ms_used in response row: %#v", row)
+	}
+	if _, ok := row["duration_ms"]; ok {
+		t.Fatalf("did not expect duration_ms in response row: %#v", row)
+	}
+	if _, ok := row["start_time"]; ok {
+		t.Fatalf("did not expect start_time in response row: %#v", row)
+	}
+	if _, ok := row["end_time"]; ok {
+		t.Fatalf("did not expect end_time in response row: %#v", row)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}

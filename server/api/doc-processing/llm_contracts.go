@@ -15,16 +15,16 @@ func topicExtractionContract() llmclients.StructuredOutputContract {
 		"properties": map[string]any{
 			"topics": schemaArrayOfObjects(
 				map[string]any{
-					"topic_id":           schemaScalar("integer", "number", "string"),
-					"topic_type":         schemaString(),
-					"topic_type_en":      schemaString(),
-					"lines":              schemaStringArray(),
-					"topic_keywords":     schemaStringArray(),
-					"topic_keywords_en":  schemaStringArray(),
-					"topic_desc":         schemaString(),
-					"topic_desc_en":      schemaString(),
-					"category_paths":     schemaArray(),
-					"category_paths_en":  schemaArray(),
+					"topic_id":          schemaScalar("integer", "number", "string"),
+					"topic_type":        schemaString(),
+					"topic_type_en":     schemaString(),
+					"lines":             schemaStringArray(),
+					"topic_keywords":    schemaStringArray(),
+					"topic_keywords_en": schemaStringArray(),
+					"topic_desc":        schemaString(),
+					"topic_desc_en":     schemaString(),
+					"category_paths":    schemaArray(),
+					"category_paths_en": schemaArray(),
 				},
 				[]string{"topic_desc"},
 				true,
@@ -92,6 +92,17 @@ func summaryExtractionContract() llmclients.StructuredOutputContract {
 			"category_paths_en": schemaArray(),
 		},
 		"additionalProperties": true,
+	})
+}
+
+func summaryCategoryTranslationContract() llmclients.StructuredOutputContract {
+	return newDocProcessingContract("chenweb_summary_category_translation", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"category_paths_en": schemaArray(),
+		},
+		"required":             []string{"category_paths_en"},
+		"additionalProperties": false,
 	})
 }
 
@@ -313,4 +324,3 @@ func schemaObjectWithAnyOf(properties map[string]any, requiredA []string, requir
 		"additionalProperties": additionalProperties,
 	}
 }
-

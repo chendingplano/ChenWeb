@@ -52,9 +52,9 @@ func TestNormalizeEntityRows(t *testing.T) {
 	if !reflect.DeepEqual(got["aliases"], wantAliases) {
 		t.Errorf("aliases = %#v, want %#v", got["aliases"], wantAliases)
 	}
-	wantSpans := []string{"12", "14:16"}
-	if !reflect.DeepEqual(got["source_line_spans"], wantSpans) {
-		t.Errorf("source_line_spans = %#v, want %#v", got["source_line_spans"], wantSpans)
+	wantSpans := []string{"12", "14-16"}
+	if !reflect.DeepEqual(got["line_spans"], wantSpans) {
+		t.Errorf("line_spans = %#v, want %#v", got["line_spans"], wantSpans)
 	}
 }
 

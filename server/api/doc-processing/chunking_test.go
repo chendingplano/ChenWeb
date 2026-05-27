@@ -229,6 +229,67 @@ func TestParseBlockBufferLines_SkipsTOCLines(t *testing.T) {
 	}
 }
 
+func TestParseInputLinesIncludingTOC_PreservesTOCLines(t *testing.T) {
+	input := strings.Join([]string{
+		"1\t1\ttoc\tTestFont\t12\t[0,0,1,1]\tTable of Contents",
+		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tAlpha",
+	}, "\n")
+
+	lines, err := ParseInputLinesIncludingTOC([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseInputLinesIncludingTOC: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("lines=%d, want 2", len(lines))
+	}
+	if lines[0].LineNo != 1 || lines[0].LineType != "toc" {
+		t.Fatalf("first line=%+v, want toc line 1", lines[0])
+	}
+
+	filtered, err := ParseInputLines([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseInputLines: %v", err)
+	}
+	if len(filtered) != 1 {
+		t.Fatalf("filtered lines=%d, want 1", len(filtered))
+	}
+	if filtered[0].LineNo != 2 {
+		t.Fatalf("filtered line=%+v, want line 2 only", filtered[0])
+	}
+}
+
+func TestBuildChunks_SkipsTOCLinesInRegularAndOverlap(t *testing.T) {
+	lines := []Line{
+		{LineNo: 1, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Alpha Alpha"},
+		{LineNo: 2, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Beta Beta"},
+		{LineNo: 3, PageNo: 1, LineType: "toc", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Table of Contents"},
+		{LineNo: 4, PageNo: 1, LineType: "TOC", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Chapter 1"},
+		{LineNo: 5, PageNo: 2, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Gamma Gamma"},
+		{LineNo: 6, PageNo: 2, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Delta Delta"},
+	}
+
+	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: 35, OverlapPercent: 50})
+	if err != nil {
+		t.Fatalf("BuildChunks: %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("chunks=%d, want at least 2 to exercise overlap", len(chunks))
+	}
+	for _, chunk := range chunks {
+		overlap, regular := chunkLineNumbers(chunk)
+		for _, got := range append(overlap, regular...) {
+			if got == 3 || got == 4 {
+				t.Fatalf("chunk %d includes TOC line %d; overlap=%v regular=%v", chunk.SeqNo, got, overlap, regular)
+			}
+		}
+		for _, ml := range chunk.Lines {
+			if strings.EqualFold(strings.TrimSpace(ml.Line.LineType), "toc") {
+				t.Fatalf("chunk %d includes TOC marked line: %+v", chunk.SeqNo, ml)
+			}
+		}
+	}
+}
+
 func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
@@ -390,6 +451,101 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(treeRoot, "document_overview", "closing_notes", "topics.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("topic tree should not exist after chunk-only phase, err=%v", err)
+	}
+}
+
+func TestService_HandleGenerateTopicsInput_LoadsChunkArtifactWithTOCLines(t *testing.T) {
+	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	tmp := t.TempDir()
+	treeRoot := t.TempDir()
+	input := strings.Join([]string{
+		"1\t1\ttoc\tTestFont\t12\t[0,0,1,1]\tTable of Contents",
+		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tAlpha",
+	}, "\n")
+
+	st := &fakeStore{rec: InputRecord{
+		ID:              7523,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "std_20039.pdf",
+	}}
+	ex := &fakeSemanticExtractor{
+		outs: []map[string]any{
+			{
+				"topics": []any{
+					map[string]any{
+						"topic_type":    "policy",
+						"lines":         []any{"1-2"},
+						"keywords":      []any{"alpha"},
+						"topic":         "Alpha section",
+						"category_path": []any{"document_overview"},
+					},
+				},
+			},
+		},
+	}
+	svc := NewFixedSizeChunkingService(st, ex, nil)
+	svc.ChunkDir = tmp
+	svc.ArtifactWebDir = treeRoot
+	svc.ModelErr = nil
+	svc.PromptErr = nil
+	svc.SummaryModelErr = nil
+	svc.SummaryPromptErr = nil
+	svc.ModelName = "topic-model"
+	svc.PromptText = "extract chunk topics"
+
+	targetDir := filepath.Join(tmp, "7", "7523")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	chunkArtifact := "overlap: []\nlines: [1-2]\n"
+	if err := os.WriteFile(filepath.Join(targetDir, "std_20039_opendata.chunks"), []byte(chunkArtifact), 0o644); err != nil {
+		t.Fatalf("write chunk artifact: %v", err)
+	}
+
+	if err := svc.HandleGenerateTopicsInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
+		t.Fatalf("HandleGenerateTopicsInput: %v", err)
+	}
+	if ex.calls+ex.structuredCalls != 1 {
+		t.Fatalf("extractor calls=%d structured_calls=%d, want total 1", ex.calls, ex.structuredCalls)
+	}
+	if len(ex.inputs) != 1 {
+		t.Fatalf("extractor inputs=%d, want 1", len(ex.inputs))
+	}
+	if !strings.Contains(ex.inputs[0], "Table of Contents") {
+		t.Fatalf("extractor input missing TOC line from artifact: %q", ex.inputs[0])
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "std_20039_opendata.topics")); err != nil {
+		t.Fatalf("missing topics artifact: %v", err)
+	}
+}
+
+func TestLoadChunksFromArtifactFile_IgnoresStaleTrailingLineNumbers(t *testing.T) {
+	tmp := t.TempDir()
+	targetDir := filepath.Join(tmp, "7", "7523")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	chunkArtifact := "overlap: []\nlines: [303-304]\n"
+	if err := os.WriteFile(filepath.Join(targetDir, "std_20039_opendata.chunks"), []byte(chunkArtifact), 0o644); err != nil {
+		t.Fatalf("write chunk artifact: %v", err)
+	}
+
+	lines := []Line{
+		{LineNo: 303, PageNo: 12, LineType: "paragraph", Content: "Last line"},
+	}
+	chunks, err := loadChunksFromArtifactFile(tmp, 7523, "std_20039_opendata.chunks", lines)
+	if err != nil {
+		t.Fatalf("loadChunksFromArtifactFile: %v", err)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("chunks=%d, want 1", len(chunks))
+	}
+	if len(chunks[0].Lines) != 1 {
+		t.Fatalf("chunk lines=%d, want 1", len(chunks[0].Lines))
+	}
+	if got := chunks[0].Lines[0].Line.LineNo; got != 303 {
+		t.Fatalf("line no=%d, want 303", got)
 	}
 }
 
@@ -567,6 +723,80 @@ func TestFixedSizeChunkingService_GenerateSummaryUsesStructuredContractWhenAvail
 	}
 	if len(result.CategoryPaths) != 2 || result.CategoryPaths[0] != "operations" {
 		t.Fatalf("CategoryPaths=%v", result.CategoryPaths)
+	}
+}
+
+func TestFixedSizeChunkingService_GenerateSummaryTranslatesMissingEnglishCategoryPaths(t *testing.T) {
+	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{
+				"summary":  "该文本介绍了气体防护站设计规范。",
+				"keywords": []any{"气体防护站", "设计规范"},
+				"category_paths": []any{
+					map[string]any{
+						"path_keywords":   []any{"气体防护站", "设计规范", "石油天然气"},
+						"path_confidence": 0.82,
+						"category_path": []any{
+							map[string]any{"name": "工业安全", "keywords": []any{"安全规范", "防护标准"}, "confidence": 0.9},
+							map[string]any{"name": "气体防护", "keywords": []any{"有毒气体", "应急救援"}, "confidence": 0.85},
+							map[string]any{"name": "设计规范", "keywords": []any{"气防站", "装备配置", "定员"}, "confidence": 0.8},
+						},
+					},
+				},
+			},
+			{
+				"category_paths_en": []any{
+					map[string]any{
+						"path_keywords":   []any{"gas protection station", "design specification", "oil and gas"},
+						"path_confidence": 0.82,
+						"category_path": []any{
+							map[string]any{"name": "Industrial Safety", "keywords": []any{"safety standards", "protection standards"}, "confidence": 0.9},
+							map[string]any{"name": "Gas Protection", "keywords": []any{"toxic gas", "emergency rescue"}, "confidence": 0.85},
+							map[string]any{"name": "Design Specification", "keywords": []any{"gas defense station", "equipment configuration", "staffing"}, "confidence": 0.8},
+						},
+					},
+				},
+			},
+		},
+	}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.SummaryPromptText = "summary prompt"
+	svc.SummaryModelName = "summary-model"
+	svc.TranslationEnabled = true
+	svc.TranslationModelName = "translation-model"
+
+	result, err := svc.generateSummary(context.Background(), 124, 1, 1, []MarkedLine{
+		{
+			Line: Line{
+				LineNo:   1,
+				PageNo:   1,
+				LineType: "paragraph",
+				Content:  "该文本介绍了中国石油天然气行业标准SY/T 6772-2009《气体防护站设计规范》的主要内容。",
+			},
+			Mark: "n",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("generateSummary: %v", err)
+	}
+	if ex.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2", ex.structuredCalledCount)
+	}
+	if len(ex.contractNames) != 2 || ex.contractNames[1] != "chenweb_summary_category_translation" {
+		t.Fatalf("contractNames=%v", ex.contractNames)
+	}
+	if len(result.CategoryPathItemsEn) != 1 {
+		t.Fatalf("CategoryPathItemsEn=%v, want translated path", result.CategoryPathItemsEn)
+	}
+	if got := result.CategoryPathItemsEn[0].Nodes[0].Name; got != "Industrial Safety" {
+		t.Fatalf("translated first node=%q", got)
+	}
+	if got := result.CategoryPathItems[0].Nodes[0].Name; got != "工业安全" {
+		t.Fatalf("original first node=%q", got)
+	}
+	if len(ex.modelNames) != 2 || ex.modelNames[1] != "translation-model" {
+		t.Fatalf("modelNames=%v", ex.modelNames)
 	}
 }
 
@@ -820,6 +1050,57 @@ func TestService_HandleGenerateSummariesInput_SummaryGenerationFailure(t *testin
 	}
 	if !strings.Contains(asString(summaryStatus["error"]), "summary generator boom") {
 		t.Fatalf("summary error=%v, want summary generator boom", summaryStatus["error"])
+	}
+}
+
+func TestService_HandleGenerateSummariesInput_SummarySanityCheckFailure(t *testing.T) {
+	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	st := &fakeStore{rec: InputRecord{
+		ID:              9012,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "sample.pdf",
+		SourceLanguage:  "zh",
+	}}
+	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
+	svc.ChunkDir = t.TempDir()
+	svc.ArtifactWebDir = t.TempDir()
+	svc.ChunkSize = 10
+	svc.OverlapPercent = 0
+	svc.ModelErr = nil
+	svc.PromptErr = nil
+	svc.ModelName = "topic-model"
+	svc.PromptText = "prompt"
+	svc.SummaryModelErr = nil
+	svc.SummaryPromptErr = nil
+	svc.SummaryModelName = "summary-model"
+	svc.SummaryPromptText = "summary prompt"
+	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, seqNo int, _ []MarkedLine, _ []SummaryItem) (summaryGenerateResult, error) {
+		return summaryGenerateResult{
+			Summary:       "This summary is in English.",
+			SummaryEn:     "This summary is in English.",
+			Keywords:      []string{"health"},
+			KeywordsEn:    []string{"health"},
+			CategoryPaths: []string{"Safety Overview"},
+		}, nil
+	}
+
+	if err := svc.HandleInput(context.Background(), 9012, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx")); err != nil {
+		t.Fatalf("HandleInput: %v", err)
+	}
+	st.rec.StatusRaw = st.updatedStatus
+	st.updatedStatus = ""
+	st.updatedError = nil
+
+	err := svc.HandleGenerateSummariesInput(context.Background(), 9012, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
+	if err == nil {
+		t.Fatalf("expected summary sanity check error")
+	}
+	if !strings.Contains(err.Error(), "sanity check") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, "sanity check") {
+		t.Fatalf("expected persisted sanity check error, got %v", st.updatedError)
 	}
 }
 

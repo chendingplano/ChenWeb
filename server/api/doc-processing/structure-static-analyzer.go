@@ -33,6 +33,7 @@ var (
 type StaticAnalyzerProcessor struct {
 	Store          DocMetadataStore
 	Logger         ApiTypes.JimoLogger
+	ProcLogger     DocProcLogger
 	Now            func() time.Time
 	ArtifactDir    string
 	OverrideOrigin bool
@@ -77,6 +78,7 @@ func NewStaticAnalyzerProcessor(store DocMetadataStore, logger ApiTypes.JimoLogg
 	return &StaticAnalyzerProcessor{
 		Store:          store,
 		Logger:         logger,
+		ProcLogger:     DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:            time.Now,
 		ArtifactDir:    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		OverrideOrigin: strings.ToLower(extractPrompt) != "false",
@@ -159,7 +161,36 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 	}); err != nil {
 		return fmt.Errorf("(MID_26042307) update kb.inputs status: %w", err)
 	}
+	p.logSummary(ctx, start, p.Now(), out.NumPages, out.NumLines, len(out.CorrectedType), nil)
 	return nil
+}
+
+func (p *StaticAnalyzerProcessor) logSummary(ctx context.Context, start, end time.Time, numPages, numLines, numLabeledLines int, procErr error) {
+	if p.ProcLogger.DB == nil {
+		return
+	}
+	extraInfo, _ := json.Marshal(map[string]interface{}{
+		"num_lines":         numLines,
+		"num_pages":         numPages,
+		"num_labeled_lines": numLabeledLines,
+	})
+	extraStr := string(extraInfo)
+	var errStr *string
+	if procErr != nil {
+		s := procErr.Error()
+		errStr = &s
+	}
+	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    []string{},
+		PromptName:    "",
+		EntryType:     "doc_proc_summary",
+		ExtraInfoJSON: &extraStr,
+		Errors:        errStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
 }
 
 func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFilename string, inputPath string, out staticAnalyzeResult) error {
@@ -688,9 +719,9 @@ func isStaticMergeableParagraph(line staticInputLine, corrected map[int]string) 
 		return false
 	}
 
-	// if line.LineNo == 28 {
-	// 	line.LineNo = 28
-	// }
+	if line.LineNo == 25 {
+		line.LineNo = 25
+	}
 
 	switch normalizeStaticTitle(line.Content) {
 	case "tableofcontent", "tableofcontents", "目录", "目次":

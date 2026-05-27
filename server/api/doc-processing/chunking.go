@@ -41,6 +41,18 @@ type summaryGeneratingBlockHandler interface {
 	HandleGenerateSummariesBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error
 }
 
+type docProcModelNamesProvider interface {
+	DocProcModelNames() []string
+}
+
+type docProcPromptNamesProvider interface {
+	DocProcPromptNames() []string
+}
+
+type docProcSummaryExtraInfoProvider interface {
+	DocProcSummaryExtraInfo() map[string]any
+}
+
 type ChunkingController struct {
 	Method string
 	Fixed  chunkingHandler
@@ -119,6 +131,48 @@ func (c *ChunkingController) LogName() string {
 	default:
 		return "chunking"
 	}
+}
+
+func (c *ChunkingController) DocProcModelNames() []string {
+	switch strings.ToLower(strings.TrimSpace(c.Method)) {
+	case ChunkingMethodFixed:
+		if provider, ok := c.Fixed.(docProcModelNamesProvider); ok {
+			return provider.DocProcModelNames()
+		}
+	case ChunkingMethodTopic:
+		if provider, ok := c.Topic.(docProcModelNamesProvider); ok {
+			return provider.DocProcModelNames()
+		}
+	}
+	return nil
+}
+
+func (c *ChunkingController) DocProcPromptNames() []string {
+	switch strings.ToLower(strings.TrimSpace(c.Method)) {
+	case ChunkingMethodFixed:
+		if provider, ok := c.Fixed.(docProcPromptNamesProvider); ok {
+			return provider.DocProcPromptNames()
+		}
+	case ChunkingMethodTopic:
+		if provider, ok := c.Topic.(docProcPromptNamesProvider); ok {
+			return provider.DocProcPromptNames()
+		}
+	}
+	return nil
+}
+
+func (c *ChunkingController) DocProcSummaryExtraInfo() map[string]any {
+	switch strings.ToLower(strings.TrimSpace(c.Method)) {
+	case ChunkingMethodFixed:
+		if provider, ok := c.Fixed.(docProcSummaryExtraInfoProvider); ok {
+			return provider.DocProcSummaryExtraInfo()
+		}
+	case ChunkingMethodTopic:
+		if provider, ok := c.Topic.(docProcSummaryExtraInfoProvider); ok {
+			return provider.DocProcSummaryExtraInfo()
+		}
+	}
+	return nil
 }
 
 func (c *ChunkingController) HandleGenerateTopicsInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {

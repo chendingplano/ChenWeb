@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type EntityRelationProcessor struct {
 	Store             EntityRelationStore
 	Extractor         LLMJSONExtractor
 	Logger            ApiTypes.JimoLogger
+	ProcLogger        DocProcLogger
 	Now               func() time.Time
 	PromptText        string
 	PromptRef         string
@@ -77,10 +79,13 @@ type SaveRelationsRequest struct {
 }
 
 type entityRelationExtractionResult struct {
-	Language  string
-	Entities  []map[string]any
-	Relations []map[string]any
-	ModelName string
+	Language      string
+	Entities      []map[string]any
+	Relations     []map[string]any
+	ModelName     string
+	LLMCallCount  int
+	FallbackCount int
+	FailedChunks  int
 }
 
 func NewEntityRelationProcessor(
@@ -110,6 +115,7 @@ func NewEntityRelationProcessor(
 		Store:             store,
 		Extractor:         extractor,
 		Logger:            logger,
+		ProcLogger:        DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:               time.Now,
 		PromptText:        promptText,
 		PromptRef:         promptRef,
@@ -200,7 +206,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		p.persistEntityRelationStatus(ctx, rec, start, fmt.Errorf("(MID_26052708) read line file for record_id=%d: %w", evt.RecordID, readErr))
 		return fmt.Errorf("(MID_26052709) failed reading line file, error:%w, path:%s", readErr, lineFilePath)
 	}
-	lines, parseErr := ParseInputLines(body)
+	lines, parseErr := ParseInputLinesIncludingTOC(body)
 	if parseErr != nil {
 		p.Logger.Error("parse input lines failed", "record_id", evt.RecordID, "error", parseErr)
 		p.persistEntityRelationStatus(ctx, rec, start, fmt.Errorf("(MID_26052710) parse input lines for record_id=%d: %w", evt.RecordID, parseErr))
@@ -226,11 +232,14 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		detectedLanguage = "unknown"
 	}
 
+	createTime := p.Now().UTC().Format(time.RFC3339)
 	for i := range result.Entities {
 		result.Entities[i]["entity_id"] = fmt.Sprintf("%d_e_%d", evt.RecordID, i+1)
+		result.Entities[i]["create_time"] = createTime
 	}
 	for i := range result.Relations {
 		result.Relations[i]["relation_id"] = fmt.Sprintf("%d_r_%d", evt.RecordID, i+1)
+		result.Relations[i]["create_time"] = createTime
 	}
 
 	eventID := eventIDFromContext(ctx)
@@ -281,6 +290,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		"language", detectedLanguage,
 	)
 	p.persistEntityRelationStatus(ctx, rec, start, nil)
+	p.logEntityRelationSummary(ctx, start, p.Now(), result, insertedEntities, insertedRelations, len(chunks))
 	return nil
 }
 
@@ -293,10 +303,11 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 	relations := make([]map[string]any, 0)
 	detectedLanguage := "unknown"
 	usedModel := strings.TrimSpace(p.ModelName)
+	var llmCallCount, fallbackCount, failedChunks int
 
 	for idx, chunk := range chunks {
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
-		startTime := time.Now()
+		callStart := p.Now()
 		p.Logger.Info("entity-relation start",
 			"record_id", recordID,
 			"chunk_idx", idx,
@@ -304,8 +315,17 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 			"model_name", p.ModelName,
 			"prompt", p.PromptRef,
 		)
+		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
 		payload, modelName, err := p.extractEntityRelationWithFallback(ctx, chunkText)
+		llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != "" {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, callID, "extract_entity_relation", 1,
+			[]string{strings.TrimSpace(modelName)}, p.PromptRef,
+			payload, err, callStart, p.Now())
 		if err != nil {
+			failedChunks++
 			p.Logger.Warn("entity-relation extraction failed for chunk; skipping",
 				"record_id", recordID,
 				"chunk_idx", idx,
@@ -332,7 +352,7 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 			"seq_no", chunk.SeqNo,
 			"entities", len(chunkEntities),
 			"relations", len(chunkRelations),
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 	}
 
@@ -344,10 +364,95 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 		"language", detectedLanguage,
 	)
 	return entityRelationExtractionResult{
-		Language:  detectedLanguage,
-		Entities:  entities,
-		Relations: relations,
-		ModelName: usedModel,
+		Language:      detectedLanguage,
+		Entities:      entities,
+		Relations:     relations,
+		ModelName:     usedModel,
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
+		FailedChunks:  failedChunks,
+	}
+}
+
+func (p *EntityRelationProcessor) logLLMCall(
+	ctx context.Context,
+	callID, activity string,
+	pass int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	rec := DocProcLogRecord{
+		DocProcName:  p.Name(),
+		ModelNames:   modelNames,
+		PromptName:   promptName,
+		Pass:         &pass,
+		LLMCallID:    &callID,
+		ActivityName: &activity,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	}
+}
+
+func (p *EntityRelationProcessor) logEntityRelationSummary(
+	ctx context.Context,
+	start, end time.Time,
+	result entityRelationExtractionResult,
+	insertedEntities, insertedRelations int64,
+	numChunks int,
+) {
+	extraInfo := map[string]any{
+		"total_entities":  insertedEntities,
+		"total_relations": insertedRelations,
+		"llm_call_count":  result.LLMCallCount,
+		"fallback_count":  result.FallbackCount,
+		"failed_chunks":   result.FailedChunks,
+		"num_chunks":      numChunks,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+
+	seen := map[string]struct{}{}
+	modelNames := make([]string, 0, 2)
+	for _, n := range []string{p.ModelName, p.FallbackModelName} {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		modelNames = append(modelNames, n)
+	}
+
+	rec := DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    p.PromptRef,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogSummary(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }
 
@@ -430,31 +535,66 @@ func isEmptyEntityRelationError(err error) bool {
 
 // ---- Normalization ----
 
-// normalizeLineSpansInput accepts the entity/relation prompt's `lines` array
-// (which uses `-` separators per the prompt spec) and rewrites each item so
-// that the shared normalizeSourceLineSpans (which expects `:`) can consume it.
-// Pass-through for items that are already numbers or use `:`.
-func normalizeLineSpansInput(raw any) any {
-	items, ok := raw.([]any)
+// normalizeEntityLineSpans parses a `lines` array from the LLM output (which
+// may use `-` or `:` as range separators) and returns sorted, merged spans in
+// `n-m` format (e.g. "14-16"). Single-line spans are returned as plain numbers.
+func normalizeEntityLineSpans(value any) []string {
+	items, ok := value.([]any)
 	if !ok {
-		return raw
+		return nil
 	}
-	out := make([]any, 0, len(items))
+	type span struct{ start, end int }
+	spans := make([]span, 0, len(items))
 	for _, item := range items {
 		switch v := item.(type) {
+		case float64:
+			n := int(v)
+			if n > 0 {
+				spans = append(spans, span{n, n})
+			}
 		case string:
 			s := strings.TrimSpace(v)
-			if strings.Contains(s, ":") {
-				out = append(out, s)
-				continue
+			sep := strings.IndexAny(s, "-:")
+			if sep > 0 {
+				start, err1 := strconv.Atoi(strings.TrimSpace(s[:sep]))
+				end, err2 := strconv.Atoi(strings.TrimSpace(s[sep+1:]))
+				if err1 == nil && err2 == nil && start > 0 && end >= start {
+					spans = append(spans, span{start, end})
+				}
+			} else {
+				n, err := strconv.Atoi(s)
+				if err == nil && n > 0 {
+					spans = append(spans, span{n, n})
+				}
 			}
-			if idx := strings.Index(s, "-"); idx > 0 {
-				out = append(out, s[:idx]+":"+s[idx+1:])
-				continue
+		}
+	}
+	if len(spans) == 0 {
+		return nil
+	}
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start != spans[j].start {
+			return spans[i].start < spans[j].start
+		}
+		return spans[i].end < spans[j].end
+	})
+	merged := []span{spans[0]}
+	for _, s := range spans[1:] {
+		last := &merged[len(merged)-1]
+		if s.start <= last.end+1 {
+			if s.end > last.end {
+				last.end = s.end
 			}
-			out = append(out, s)
-		default:
-			out = append(out, item)
+		} else {
+			merged = append(merged, s)
+		}
+	}
+	out := make([]string, 0, len(merged))
+	for _, s := range merged {
+		if s.start == s.end {
+			out = append(out, strconv.Itoa(s.start))
+		} else {
+			out = append(out, fmt.Sprintf("%d-%d", s.start, s.end))
 		}
 	}
 	return out
@@ -476,19 +616,19 @@ func normalizeEntityRows(raw any, chunkSeqNo int) []map[string]any {
 			continue
 		}
 		row := map[string]any{
-			"entity":            entityName,
-			"entity_en":         strings.TrimSpace(asString(m["entity_en"])),
-			"entity_type":       strings.TrimSpace(asString(m["entity_type"])),
-			"entity_type_en":    strings.TrimSpace(asString(m["entity_type_en"])),
-			"aliases":           toStringSlice(m["aliases"]),
-			"aliases_en":        toStringSlice(m["aliases_en"]),
-			"desc":              strings.TrimSpace(asString(m["desc"])),
-			"desc_en":           strings.TrimSpace(asString(m["desc_en"])),
-			"keywords":          toStringSlice(m["keywords"]),
-			"keywords_en":       toStringSlice(m["keywords_en"]),
-			"source_line_spans": normalizeSourceLineSpans(normalizeLineSpansInput(m["lines"])),
-			"confidence":        toFloat(m["confidence"]),
-			"chunk_seq_no":      chunkSeqNo,
+			"entity":         entityName,
+			"entity_en":      strings.TrimSpace(asString(m["entity_en"])),
+			"entity_type":    strings.TrimSpace(asString(m["entity_type"])),
+			"entity_type_en": strings.TrimSpace(asString(m["entity_type_en"])),
+			"aliases":        toStringSlice(m["aliases"]),
+			"aliases_en":     toStringSlice(m["aliases_en"]),
+			"desc":           strings.TrimSpace(asString(m["desc"])),
+			"desc_en":        strings.TrimSpace(asString(m["desc_en"])),
+			"keywords":       toStringSlice(m["keywords"]),
+			"keywords_en":    toStringSlice(m["keywords_en"]),
+			"line_spans":     normalizeEntityLineSpans(m["lines"]),
+			"confidence":     toFloat(m["confidence"]),
+			"chunk_seq_no":   chunkSeqNo,
 		}
 		out = append(out, row)
 	}
@@ -513,19 +653,19 @@ func normalizeRelationRows(raw any, chunkSeqNo int) []map[string]any {
 			continue
 		}
 		row := map[string]any{
-			"subject":           subject,
-			"subject_en":        strings.TrimSpace(asString(m["subject_en"])),
-			"predicate":         predicate,
-			"predicate_en":      normalizePredicate(asString(m["predicate_en"])),
-			"object":            object,
-			"object_en":         strings.TrimSpace(asString(m["object_en"])),
-			"desc":              strings.TrimSpace(asString(m["desc"])),
-			"desc_en":           strings.TrimSpace(asString(m["desc_en"])),
-			"keywords":          toStringSlice(m["keywords"]),
-			"keywords_en":       toStringSlice(m["keywords_en"]),
-			"source_line_spans": normalizeSourceLineSpans(normalizeLineSpansInput(m["lines"])),
-			"confidence":        toFloat(m["confidence"]),
-			"chunk_seq_no":      chunkSeqNo,
+			"subject":      subject,
+			"subject_en":   strings.TrimSpace(asString(m["subject_en"])),
+			"predicate":    predicate,
+			"predicate_en": normalizePredicate(asString(m["predicate_en"])),
+			"object":       object,
+			"object_en":    strings.TrimSpace(asString(m["object_en"])),
+			"desc":         strings.TrimSpace(asString(m["desc"])),
+			"desc_en":      strings.TrimSpace(asString(m["desc_en"])),
+			"keywords":     toStringSlice(m["keywords"]),
+			"keywords_en":  toStringSlice(m["keywords_en"]),
+			"line_spans":   normalizeEntityLineSpans(m["lines"]),
+			"confidence":   toFloat(m["confidence"]),
+			"chunk_seq_no": chunkSeqNo,
 		}
 		out = append(out, row)
 	}
@@ -718,7 +858,7 @@ CREATE TABLE IF NOT EXISTS kb.entities (
     desc_text_en TEXT,
     keywords JSONB,
     keywords_en JSONB,
-    source_line_spans JSONB,
+    line_spans JSONB,
     confidence DOUBLE PRECISION,
     model_name TEXT,
     prompt_name TEXT,
@@ -747,7 +887,7 @@ CREATE TABLE IF NOT EXISTS kb.relations (
     desc_text_en TEXT,
     keywords JSONB,
     keywords_en JSONB,
-    source_line_spans JSONB,
+    line_spans JSONB,
     confidence DOUBLE PRECISION,
     model_name TEXT,
     prompt_name TEXT,
@@ -841,7 +981,7 @@ INSERT INTO kb.entities (
     desc_text_en,
     keywords,
     keywords_en,
-    source_line_spans,
+    line_spans,
     confidence,
     model_name,
     prompt_name,
@@ -860,7 +1000,7 @@ INSERT INTO kb.entities (
 	for _, e := range req.Entities {
 		aliasesJSON, _ := json.Marshal(e["aliases"])
 		keywordsJSON, _ := json.Marshal(e["keywords"])
-		spansJSON, _ := json.Marshal(e["source_line_spans"])
+		spansJSON, _ := json.Marshal(e["line_spans"])
 		extInfo, _ := json.Marshal(map[string]any{
 			"language":       req.Language,
 			"schema_version": "1",
@@ -935,7 +1075,7 @@ INSERT INTO kb.relations (
     desc_text_en,
     keywords,
     keywords_en,
-    source_line_spans,
+    line_spans,
     confidence,
     model_name,
     prompt_name,
@@ -953,7 +1093,7 @@ INSERT INTO kb.relations (
 	var inserted int64
 	for _, r := range req.Relations {
 		keywordsJSON, _ := json.Marshal(r["keywords"])
-		spansJSON, _ := json.Marshal(r["source_line_spans"])
+		spansJSON, _ := json.Marshal(r["line_spans"])
 		extInfo, _ := json.Marshal(map[string]any{
 			"language":       req.Language,
 			"schema_version": "1",

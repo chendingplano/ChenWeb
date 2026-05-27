@@ -28,24 +28,25 @@ const (
 var coordinatePattern = regexp.MustCompile(`^\[\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*\]$`)
 
 type SemanticChunkingService struct {
-	Store                      Store
-	Extractor                  LLMJSONExtractor
-	Embedder                   Embedder
-	Logger                     ApiTypes.JimoLogger
-	Now                        func() time.Time
-	ChunkDir                   string
-	ArtifactWebDir             string
-	FileBlockSize              int
-	ModelRef                   string
-	ModelCfgPath               string
-	ModelErr                   error
-	ModelName                  string
-	PromptText                 string
-	PromptRef                  string
-	PromptPath                 string
-	PromptErr                  error
-	TopicEmbeddingModelName    string
-	CategorySimilarityMinScore float64
+	Store                       Store
+	Extractor                   LLMJSONExtractor
+	Embedder                    Embedder
+	Logger                      ApiTypes.JimoLogger
+	Now                         func() time.Time
+	ChunkDir                    string
+	ArtifactWebDir              string
+	FileBlockSize               int
+	ModelRef                    string
+	ModelCfgPath                string
+	ModelErr                    error
+	ModelName                   string
+	PromptText                  string
+	PromptRef                   string
+	PromptPath                  string
+	PromptErr                   error
+	TopicEmbeddingModelName     string
+	CategorySimilarityMinScore  float64
+	lastDocProcSummaryExtraInfo map[string]any
 }
 
 type SemanticPageBlock struct {
@@ -128,6 +129,40 @@ func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger 
 		TopicEmbeddingModelName:    topicEmbeddingModelName,
 		CategorySimilarityMinScore: envFloat("CATEGORY_SIMILARITY_MIN_SCORE", DefaultCategorySimilarityMinScore, 0),
 	}
+}
+
+func (s *SemanticChunkingService) DocProcModelNames() []string {
+	return dedupeNonEmpty([]string{
+		s.ModelName,
+		s.TopicEmbeddingModelName,
+	})
+}
+
+func (s *SemanticChunkingService) DocProcPromptNames() []string {
+	return dedupeNonEmpty([]string{s.PromptRef})
+}
+
+func (s *SemanticChunkingService) DocProcSummaryExtraInfo() map[string]any {
+	if len(s.lastDocProcSummaryExtraInfo) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(s.lastDocProcSummaryExtraInfo))
+	for k, v := range s.lastDocProcSummaryExtraInfo {
+		out[k] = v
+	}
+	return out
+}
+
+func (s *SemanticChunkingService) setDocProcSummaryExtraInfo(extra map[string]any) {
+	if len(extra) == 0 {
+		s.lastDocProcSummaryExtraInfo = nil
+		return
+	}
+	cloned := make(map[string]any, len(extra))
+	for k, v := range extra {
+		cloned[k] = v
+	}
+	s.lastDocProcSummaryExtraInfo = cloned
 }
 
 func (s *SemanticChunkingService) HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
@@ -233,6 +268,7 @@ func (s *SemanticChunkingService) HandleBlockInput(ctx context.Context, recordID
 // persistence for a pre-parsed set of lines. Called by both HandleInput
 // (after ParseSemanticInputLines) and HandleBlockInput (after ParseBlockBufferLines).
 func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
+	s.setDocProcSummaryExtraInfo(nil)
 	blocks := BuildSemanticPageBlocks(lines, s.FileBlockSize)
 	topics := make([]TopicItem, 0, 128)
 	seqNo := 1
@@ -303,6 +339,10 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		"filename", outputFilename,
 		"model_name", s.ModelName,
 	)
+	s.setDocProcSummaryExtraInfo(map[string]any{
+		"total_chunks":     len(blocks),
+		"topics_generated": len(topics),
+	})
 	return nil
 }
 

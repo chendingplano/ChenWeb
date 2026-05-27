@@ -132,6 +132,239 @@ func writeSummaryFile(baseDir string, recordID int64, item SummaryItem) (string,
 	return path, nil
 }
 
+func validateSummaryArtifacts(recordID int64, sourceLanguage string, summaries []SummaryItem, artifactDir string, summaryTreeDir string) error {
+	if len(summaries) == 0 {
+		return errors.New("no summaries generated")
+	}
+
+	normalizedSourceLanguage := normalizeSummarySourceLanguage(sourceLanguage)
+	seqByLevel := make(map[int][]int)
+	for _, item := range summaries {
+		if err := validateSingleSummaryArtifact(recordID, normalizedSourceLanguage, item, artifactDir, summaryTreeDir); err != nil {
+			return err
+		}
+		seqByLevel[item.Level] = append(seqByLevel[item.Level], item.SeqNo)
+	}
+
+	for level, seqs := range seqByLevel {
+		sort.Ints(seqs)
+		for i, seq := range seqs {
+			want := i + 1
+			if seq != want {
+				return fmt.Errorf("level %d seqno %d is not continuous; want %d", level, seq, want)
+			}
+		}
+	}
+	return nil
+}
+
+func validateSingleSummaryArtifact(recordID int64, sourceLanguage string, item SummaryItem, artifactDir string, summaryTreeDir string) error {
+	if strings.TrimSpace(item.SummaryID) == "" {
+		return errors.New("summary_id is empty")
+	}
+	if strings.TrimSpace(item.Summary) == "" {
+		return fmt.Errorf("summary %q is empty", item.SummaryID)
+	}
+	if item.Lines == nil {
+		return fmt.Errorf("summary %q lines must be an array", item.SummaryID)
+	}
+	recordIDInSummary, level, seqNo, ok := parseSummaryID(item.SummaryID)
+	if !ok {
+		return fmt.Errorf("summary %q has invalid summary_id format", item.SummaryID)
+	}
+	if recordIDInSummary != recordID || item.RecordID != recordID {
+		return fmt.Errorf("summary %q record_id mismatch", item.SummaryID)
+	}
+	if level != item.Level || seqNo != item.SeqNo {
+		return fmt.Errorf("summary %q level/seq mismatch", item.SummaryID)
+	}
+	if strings.TrimSpace(item.SummaryID) != buildSummaryID(recordID, item.Level, item.SeqNo) {
+		return fmt.Errorf("summary %q does not match canonical summary_id", item.SummaryID)
+	}
+	if item.Level < 0 {
+		return fmt.Errorf("summary %q level must be non-negative", item.SummaryID)
+	}
+	if err := validateSummaryLines(item.SummaryID, item.Lines); err != nil {
+		return err
+	}
+	if !hasSummaryCategoryPath(item) {
+		return fmt.Errorf("summary %q must have at least one category path", item.SummaryID)
+	}
+	if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
+		return fmt.Errorf("summary %q summary and summary_en must differ", item.SummaryID)
+	}
+	if equalTrimmedStringSlices(item.Keywords, item.KeywordsEn) {
+		return fmt.Errorf("summary %q keywords and keywords_en must differ", item.SummaryID)
+	}
+	if sourceLanguage != "" && detectContentLanguage(item.Summary) != sourceLanguage {
+		return fmt.Errorf("summary %q language mismatch: got %s want %s", item.SummaryID, detectContentLanguage(item.Summary), sourceLanguage)
+	}
+	if err := validateSummaryArtifactFile(recordID, item, artifactDir); err != nil {
+		return err
+	}
+	for _, categoryPath := range summaryCategoryPathsForValidation(item) {
+		if err := validateSummaryTreeReference(summaryTreeDir, categoryPath, item.SummaryID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSummaryArtifactFile(recordID int64, item SummaryItem, artifactDir string) error {
+	targetDir, err := buildRecordArtifactDir(artifactDir, recordID)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(targetDir, summaryFileName(item.Level, item.SeqNo))
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read summary file %q: %w", path, err)
+	}
+	text := string(body)
+	if !strings.Contains(text, fmt.Sprintf("summary_id: %q", strings.TrimSpace(item.SummaryID))) {
+		return fmt.Errorf("summary file %q missing summary_id %q", path, item.SummaryID)
+	}
+	if !strings.Contains(text, "summary_begin") || !strings.Contains(text, "summary_end") {
+		return fmt.Errorf("summary file %q missing summary markers", path)
+	}
+	if strings.TrimSpace(item.SummaryEn) != "" {
+		hasSummaryEnStart := strings.Contains(text, "summary_en_begin") || strings.Contains(text, "summary_en_start")
+		if !hasSummaryEnStart || !strings.Contains(text, "summary_en_end") {
+			return fmt.Errorf("summary file %q missing summary_en markers", path)
+		}
+	}
+	return nil
+}
+
+func validateSummaryTreeReference(summaryTreeDir string, categoryPath []string, summaryID string) error {
+	if len(categoryPath) == 0 {
+		return fmt.Errorf("summary %q has empty category path", summaryID)
+	}
+	normalizedPath := make([]string, 0, len(categoryPath))
+	for _, segment := range categoryPath {
+		normalized := normalizeCategorySegment(segment)
+		if normalized == "" {
+			return fmt.Errorf("summary %q has invalid category path segment %q", summaryID, segment)
+		}
+		normalizedPath = append(normalizedPath, normalized)
+	}
+	leaf := filepath.Join(append([]string{summaryTreeDir}, append(normalizedPath, "summaries.txt")...)...)
+	body, err := os.ReadFile(leaf)
+	if err != nil {
+		return fmt.Errorf("read summaries.txt for %q: %w", summaryID, err)
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.TrimSpace(line) == strings.TrimSpace(summaryID) {
+			return nil
+		}
+	}
+	return fmt.Errorf("summaries.txt missing summary_id %q", summaryID)
+}
+
+func validateSummaryLines(summaryID string, lines []string) error {
+	if len(lines) == 0 {
+		return fmt.Errorf("summary %q lines must not be empty", summaryID)
+	}
+	prevStart, prevEnd := 0, 0
+	for _, span := range lines {
+		start, end, ok := parseSummaryLineSpan(span)
+		if !ok {
+			return fmt.Errorf("summary %q has invalid line span %q", summaryID, span)
+		}
+		if start < prevStart || (start == prevStart && end < prevEnd) {
+			return fmt.Errorf("summary %q lines must be sorted", summaryID)
+		}
+		prevStart, prevEnd = start, end
+	}
+	return nil
+}
+
+func parseSummaryLineSpan(span string) (int, int, bool) {
+	trimmed := strings.TrimSpace(strings.Trim(span, "[]"))
+	if trimmed == "" {
+		return 0, 0, false
+	}
+	if !strings.Contains(trimmed, "-") {
+		n, err := strconv.Atoi(trimmed)
+		if err != nil || n <= 0 {
+			return 0, 0, false
+		}
+		return n, n, true
+	}
+	parts := strings.SplitN(trimmed, "-", 2)
+	start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil || start <= 0 || end < start {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func hasSummaryCategoryPath(item SummaryItem) bool {
+	return len(summaryCategoryPathsForValidation(item)) > 0
+}
+
+func summaryCategoryPathsForValidation(item SummaryItem) [][]string {
+	if len(item.CategoryPathItemsEn) > 0 {
+		out := make([][]string, 0, len(item.CategoryPathItemsEn))
+		for _, entry := range item.CategoryPathItemsEn {
+			names := entry.NodeNames()
+			if len(names) == 0 {
+				continue
+			}
+			out = append(out, names)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if len(item.CategoryPathItems) > 0 {
+		out := make([][]string, 0, len(item.CategoryPathItems))
+		for _, entry := range item.CategoryPathItems {
+			names := entry.NodeNames()
+			if len(names) == 0 {
+				continue
+			}
+			out = append(out, names)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if len(item.CategoryPaths) == 0 {
+		return nil
+	}
+	return [][]string{append([]string(nil), item.CategoryPaths...)}
+}
+
+func equalTrimmedStringSlices(a []string, b []string) bool {
+	left := trimStringSlice(a)
+	right := trimStringSlice(b)
+	if len(left) == 0 || len(right) == 0 || len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeSummarySourceLanguage(language string) string {
+	lang := strings.ToLower(strings.TrimSpace(language))
+	switch {
+	case lang == "":
+		return ""
+	case strings.HasPrefix(lang, "zh"):
+		return "zh"
+	case strings.HasPrefix(lang, "en"):
+		return "en"
+	default:
+		return ""
+	}
+}
+
 func deleteSummaryFiles(baseDir string, recordID int64) error {
 	targetDir, err := buildRecordArtifactDir(baseDir, recordID)
 	if err != nil {
@@ -295,87 +528,50 @@ func collectSummaryIDs(items []SummaryItem) []string {
 	return out
 }
 
-
 // upsertCategoryDirMetadata creates metadata.txt in dir if it does not exist,
 // or merges new keywords not already present if the file exists.
 // This covers both new directories and existing directories that are missing
 // the file (edge case: directory pre-existed without a metadata.txt).
 func upsertCategoryDirMetadata(dir, name, categoryType string, confidence float64, keywords []string, now time.Time) error {
+	return upsertCategoryDirMetadataLocalized(dir, name, name, categoryType, confidence, keywords, nil, now)
+}
+
+func upsertCategoryDirMetadataLocalized(
+	dir string,
+	originalName string,
+	englishName string,
+	categoryType string,
+	confidence float64,
+	originalKeywords []string,
+	englishKeywords []string,
+	now time.Time,
+) error {
 	metaPath := filepath.Join(dir, categoryMetadataFileName)
-	_, statErr := os.Stat(metaPath)
-	if statErr == nil {
-		return mergeCategoryDirKeywords(metaPath, keywords)
-	}
-	if !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
-	}
-	return createCategoryDirMetadata(metaPath, name, categoryType, confidence, keywords, now)
+	return upsertLocalizedCategoryMetadata(metaPath, localizedCategoryMetadata{
+		OriginalNames: appendUniqueString([]string(nil), strings.TrimSpace(originalName)),
+		Desc:          firstNonEmptyTrimmed(originalName, englishName),
+		DescEn:        localizedEnglishDesc(originalName, englishName),
+		CategoryType:  strings.TrimSpace(categoryType),
+		Confidence:    confidence,
+		Keywords:      trimStringSlice(originalKeywords),
+		KeywordsEn:    localizedEnglishKeywords(originalName, englishName, englishKeywords),
+	}, now)
 }
 
-func createCategoryDirMetadata(path, name, categoryType string, confidence float64, keywords []string, now time.Time) error {
-	if keywords == nil {
-		keywords = []string{}
+func localizedEnglishDesc(originalName string, englishName string) string {
+	original := strings.TrimSpace(originalName)
+	english := strings.TrimSpace(englishName)
+	if english == "" || english == original {
+		return ""
 	}
-	descJSON, _ := json.Marshal(name)
-	typeJSON, _ := json.Marshal(categoryType)
-	kwJSON, err := json.Marshal(keywords)
-	if err != nil {
-		return err
-	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf(`"desc":%s`, string(descJSON)) + "\n")
-	b.WriteString(fmt.Sprintf(`"category_type":%s`, string(typeJSON)) + "\n")
-	b.WriteString(fmt.Sprintf(`"confidence":%s`, strconv.FormatFloat(confidence, 'f', -1, 64)) + "\n")
-	b.WriteString(fmt.Sprintf(`"keywords":%s`, string(kwJSON)) + "\n")
-	b.WriteString(fmt.Sprintf(`"create_time":"%s"`, now.Format("20060102-150405")))
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	return english
 }
 
-// mergeCategoryDirKeywords adds any keywords not already in metadata.txt.
-func mergeCategoryDirKeywords(metaPath string, newKeywords []string) error {
-	if len(newKeywords) == 0 {
+func localizedEnglishKeywords(originalName string, englishName string, englishKeywords []string) []string {
+	if localizedEnglishDesc(originalName, englishName) == "" {
 		return nil
 	}
-	body, err := os.ReadFile(metaPath)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(body), "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSuffix(strings.TrimSpace(line), ",")
-		if !strings.HasPrefix(trimmed, `"keywords":`) {
-			continue
-		}
-		valJSON := strings.TrimSpace(strings.TrimPrefix(trimmed, `"keywords":`))
-		var existing []string
-		if err := json.Unmarshal([]byte(valJSON), &existing); err != nil {
-			return err
-		}
-		added := false
-		for _, kw := range newKeywords {
-			found := false
-			for _, e := range existing {
-				if e == kw {
-					found = true
-					break
-				}
-			}
-			if !found {
-				existing = append(existing, kw)
-				added = true
-			}
-		}
-		if !added {
-			return nil
-		}
-		kwJSON, err := json.Marshal(existing)
-		if err != nil {
-			return err
-		}
-		lines[i] = fmt.Sprintf(`"keywords":%s`, string(kwJSON))
-		return os.WriteFile(metaPath, []byte(strings.Join(lines, "\n")), 0o644)
-	}
-	return nil
+	return trimStringSlice(englishKeywords)
 }
 
 // writeSummaryTreeEntry appends summary.SummaryID to
@@ -384,6 +580,10 @@ func mergeCategoryDirKeywords(metaPath string, newKeywords []string) error {
 // pathNodes optionally provides per-node metadata (keywords, confidence) for
 // each segment of the category path; nil is safe and falls back to defaults.
 func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary SummaryItem, rawCategories []string, pathNodes []CategoryPathNode) error {
+	return writeSummaryTreeEntryLocalized(logger, baseDir, summary, rawCategories, pathNodes, nil)
+}
+
+func writeSummaryTreeEntryLocalized(logger ApiTypes.JimoLogger, baseDir string, summary SummaryItem, rawCategories []string, pathNodes []CategoryPathNode, originalPathNodes []CategoryPathNode) error {
 	categoryPath, reason := normalizeAndValidateTopicCategoryPath(rawCategories, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
 		return fmt.Errorf("(MID_26042930) summary tree category path invalid (%s): %v", reason, rawCategories)
@@ -406,7 +606,8 @@ func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary S
 	currentDir := baseDir
 	for i, seg := range categoryPath {
 		currentDir = filepath.Join(currentDir, seg)
-		name, confidence, keywords := seg, 0.0, []string(nil)
+		name, confidence := seg, 0.0
+		keywords, keywordsEn := []string(nil), []string(nil)
 		if i < len(pathNodes) {
 			if pathNodes[i].Name != "" {
 				name = pathNodes[i].Name
@@ -414,7 +615,15 @@ func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary S
 			confidence = pathNodes[i].Confidence
 			keywords = pathNodes[i].Keywords
 		}
-		if err := upsertCategoryDirMetadata(currentDir, name, defaultSummaryTreeFallbackTopicType, confidence, keywords, time.Now()); err != nil {
+		originalName := name
+		if i < len(originalPathNodes) && strings.TrimSpace(originalPathNodes[i].Name) != "" {
+			originalName = originalPathNodes[i].Name
+			if len(originalPathNodes[i].Keywords) > 0 {
+				keywords = originalPathNodes[i].Keywords
+				keywordsEn = pathNodes[i].Keywords
+			}
+		}
+		if err := upsertCategoryDirMetadataLocalized(currentDir, originalName, name, defaultSummaryTreeFallbackTopicType, confidence, keywords, keywordsEn, time.Now()); err != nil {
 			return err
 		}
 	}
@@ -433,6 +642,10 @@ func writeSummaryTreeEntry(logger ApiTypes.JimoLogger, baseDir string, summary S
 }
 
 func writeSummaryTreeRootReference(logger ApiTypes.JimoLogger, baseDir string, recordID int64, root SummaryItem, rawCategories []string, pathNodes []CategoryPathNode) error {
+	return writeSummaryTreeRootReferenceLocalized(logger, baseDir, recordID, root, rawCategories, pathNodes, nil)
+}
+
+func writeSummaryTreeRootReferenceLocalized(logger ApiTypes.JimoLogger, baseDir string, recordID int64, root SummaryItem, rawCategories []string, pathNodes []CategoryPathNode, originalPathNodes []CategoryPathNode) error {
 	if strings.TrimSpace(baseDir) == "" {
 		return errors.New("summary tree dir is empty")
 	}
@@ -467,7 +680,8 @@ func writeSummaryTreeRootReference(logger ApiTypes.JimoLogger, baseDir string, r
 	currentDir := baseDir
 	for i, seg := range categoryPath {
 		currentDir = filepath.Join(currentDir, seg)
-		name, confidence, keywords := seg, 0.0, []string(nil)
+		name, confidence := seg, 0.0
+		keywords, keywordsEn := []string(nil), []string(nil)
 		if i < len(pathNodes) {
 			if pathNodes[i].Name != "" {
 				name = pathNodes[i].Name
@@ -475,7 +689,15 @@ func writeSummaryTreeRootReference(logger ApiTypes.JimoLogger, baseDir string, r
 			confidence = pathNodes[i].Confidence
 			keywords = pathNodes[i].Keywords
 		}
-		if err := upsertCategoryDirMetadata(currentDir, name, defaultSummaryTreeFallbackTopicType, confidence, keywords, time.Now()); err != nil {
+		originalName := name
+		if i < len(originalPathNodes) && strings.TrimSpace(originalPathNodes[i].Name) != "" {
+			originalName = originalPathNodes[i].Name
+			if len(originalPathNodes[i].Keywords) > 0 {
+				keywords = originalPathNodes[i].Keywords
+				keywordsEn = pathNodes[i].Keywords
+			}
+		}
+		if err := upsertCategoryDirMetadataLocalized(currentDir, originalName, name, defaultSummaryTreeFallbackTopicType, confidence, keywords, keywordsEn, time.Now()); err != nil {
 			return err
 		}
 	}

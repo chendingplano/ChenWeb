@@ -71,6 +71,7 @@ type StructuredKnowledgeProcessor struct {
 	Store                 StructuredKnowledgeStore
 	Extractor             LLMJSONExtractor
 	Logger                ApiTypes.JimoLogger
+	ProcLogger            DocProcLogger
 	Now                   func() time.Time
 	CandidatePromptText   string
 	CandidatePromptRef    string
@@ -119,9 +120,12 @@ type SaveStructuredKnowledgeRequest struct {
 }
 
 type structuredKnowledgeExtractionResult struct {
-	Knowledges []map[string]any
-	Language   string
-	ModelName  string
+	Knowledges    []map[string]any
+	Language      string
+	ModelName     string
+	LLMCallCount  int
+	FallbackCount int
+	FailedChunks  int
 }
 
 type structuredKnowledgeCandidate struct {
@@ -165,6 +169,7 @@ func NewStructuredKnowledgeProcessor(
 		Store:                 store,
 		Extractor:             extractor,
 		Logger:                logger,
+		ProcLogger:            DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:                   time.Now,
 		CandidatePromptText:   candidatePromptText,
 		CandidatePromptRef:    candidatePromptRef,
@@ -268,7 +273,7 @@ func (p *StructuredKnowledgeProcessor) HandleEvent(ctx context.Context, payload 
 		p.persistStructuredKnowledgeStatus(ctx, rec, start, fmt.Errorf("(MID_26052608) read line file for record_id=%d: %w", evt.RecordID, readErr))
 		return fmt.Errorf("(MID_26052609) failed reading line file, error:%w, path:%s", readErr, lineFilePath)
 	}
-	lines, parseErr := ParseInputLines(body)
+	lines, parseErr := ParseInputLinesIncludingTOC(body)
 	if parseErr != nil {
 		p.Logger.Error("parse input lines failed", "record_id", evt.RecordID, "error", parseErr)
 		p.persistStructuredKnowledgeStatus(ctx, rec, start, fmt.Errorf("(MID_26052610) parse input lines for record_id=%d: %w", evt.RecordID, parseErr))
@@ -336,6 +341,7 @@ func (p *StructuredKnowledgeProcessor) HandleEvent(ctx context.Context, payload 
 		"num_chunks", len(chunks),
 	)
 	p.persistStructuredKnowledgeStatus(ctx, rec, start, nil)
+	p.logStructuredKnowledgeSummary(ctx, start, p.Now(), result, inserted, len(chunks))
 	return nil
 }
 
@@ -346,11 +352,12 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 ) (structuredKnowledgeExtractionResult, error) {
 	candidates := make([]structuredKnowledgeCandidate, 0, len(chunks))
 	usedCandidateModel := strings.TrimSpace(p.CandidateModelName)
+	var llmCallCount, fallbackCount, failedChunks int
 
 	// Pass 1: extract structured knowledge candidates from each chunk
 	for idx, chunk := range chunks {
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
-		startTime := time.Now()
+		callStart := p.Now()
 		p.Logger.Info("structured knowledge start",
 			"record_id", recordID,
 			"chunk_idx", idx,
@@ -358,9 +365,18 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 			"model_name", p.CandidateModelName,
 			"prompt", p.CandidatePromptRef,
 		)
+		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
 		userPrompt := buildKnowledgeCandidateUserPrompt(chunkText)
 		payload, modelName, err := p.extractKnowledgeCandidateWithFallback(ctx, userPrompt)
+		llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.CandidateModelName) && strings.TrimSpace(modelName) != "" {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, callID, "extract_knowledge_candidates", 1,
+			[]string{strings.TrimSpace(modelName)}, p.CandidatePromptRef,
+			payload, err, callStart, p.Now())
 		if err != nil {
+			failedChunks++
 			p.Logger.Error("raw parsed LLM payload/error",
 				"record_id", recordID,
 				"chunk_idx", idx,
@@ -381,9 +397,7 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
 			"num_lines", len(chunk.Lines),
-			"chunkText", chunkText,
-			"candidates", candidates,
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 		candidates = append(candidates, structuredKnowledgeCandidate{
 			ChunkSeqNo: chunk.SeqNo,
@@ -397,23 +411,30 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 	detectedLanguage := "unknown"
 	usedEnrichModel := strings.TrimSpace(p.EnrichModelName)
 	globalSeqNo := 1
-	for _, cand := range candidates {
-		startTime := time.Now()
+	for enrichIdx, cand := range candidates {
+		callStart := p.Now()
 		p.Logger.Info("enrich start",
 			"record_id", recordID,
 			"chunk_seq_no", cand.ChunkSeqNo,
 			"model_name", p.EnrichModelName,
 			"prompt", p.EnrichPromptRef,
 		)
+		callID := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), enrichIdx)
 		userPrompt := buildKnowledgeEnrichUserPrompt(cand)
 		enriched, err := p.extractKnowledgeEnrichPayload(ctx, userPrompt)
+		llmCallCount++
+		p.logLLMCall(ctx, callID, "enrich_structured_knowledge", 2,
+			[]string{strings.TrimSpace(p.EnrichModelName)}, p.EnrichPromptRef,
+			enriched, err, callStart, p.Now())
 		if err != nil {
 			p.Logger.Error("enrichment-pass error",
 				"record_id", recordID,
 				"chunk_seq_no", cand.ChunkSeqNo,
 				"error", err,
 			)
-			return structuredKnowledgeExtractionResult{}, fmt.Errorf("(MID_26052620) enrich structured knowledge chunk_seq=%d: %w", cand.ChunkSeqNo, err)
+			return structuredKnowledgeExtractionResult{
+				LLMCallCount: llmCallCount, FallbackCount: fallbackCount, FailedChunks: failedChunks,
+			}, fmt.Errorf("(MID_26052620) enrich structured knowledge chunk_seq=%d: %w", cand.ChunkSeqNo, err)
 		}
 		if lang := strings.TrimSpace(asString(enriched["language"])); lang != "" && detectedLanguage == "unknown" {
 			detectedLanguage = lang
@@ -422,7 +443,7 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 			"record_id", recordID,
 			"chunk_seq_no", cand.ChunkSeqNo,
 			"language", asString(enriched["language"]),
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 
 		items := flattenKnowledgeItems(recordID, enriched, cand.ChunkSeqNo, &globalSeqNo)
@@ -437,10 +458,95 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 		"language", detectedLanguage,
 	)
 	return structuredKnowledgeExtractionResult{
-		Knowledges: knowledges,
-		Language:   detectedLanguage,
-		ModelName:  firstNonEmptyTrimmed(usedEnrichModel, usedCandidateModel, p.EnrichModelName),
+		Knowledges:    knowledges,
+		Language:      detectedLanguage,
+		ModelName:     firstNonEmptyTrimmed(usedEnrichModel, usedCandidateModel, p.EnrichModelName),
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
+		FailedChunks:  failedChunks,
 	}, nil
+}
+
+func (p *StructuredKnowledgeProcessor) logLLMCall(
+	ctx context.Context,
+	callID, activity string,
+	pass int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	rec := DocProcLogRecord{
+		DocProcName:  p.Name(),
+		ModelNames:   modelNames,
+		PromptName:   promptName,
+		Pass:         &pass,
+		LLMCallID:    &callID,
+		ActivityName: &activity,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	}
+}
+
+func (p *StructuredKnowledgeProcessor) logStructuredKnowledgeSummary(
+	ctx context.Context,
+	start, end time.Time,
+	result structuredKnowledgeExtractionResult,
+	inserted int64,
+	numChunks int,
+) {
+	extraInfo := map[string]any{
+		"total_items":      inserted,
+		"candidates_count": len(result.Knowledges),
+		"llm_call_count":   result.LLMCallCount,
+		"failed_chunks":    result.FailedChunks,
+		"num_chunks":       numChunks,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+
+	seen := map[string]struct{}{}
+	modelNames := make([]string, 0, 3)
+	for _, n := range []string{p.CandidateModelName, p.FallbackModelName, p.EnrichModelName} {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		modelNames = append(modelNames, n)
+	}
+
+	promptName := firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef)
+	rec := DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogSummary(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
 }
 
 // flattenKnowledgeItems converts an enriched chunk payload into individual knowledge item maps.
@@ -653,31 +759,31 @@ func buildKnowledgeEnrichUserPrompt(cand structuredKnowledgeCandidate) string {
 	candidateJSON, _ := json.Marshal(cand.Payload)
 
 	enrichSchema := map[string]any{
-		"language":                     "string — detected language of the content",
-		"entities":                     knowledgeItemsArraySchema("entity"),
-		"entities_en":                  knowledgeItemsArraySchema("entity"),
-		"concepts":                     knowledgeItemsArraySchema("concept"),
-		"concepts_en":                  knowledgeItemsArraySchema("concept"),
-		"relationships":                knowledgeItemsArraySchema("relation"),
-		"relationships_en":             knowledgeItemsArraySchema("relation"),
-		"normative_statements":         knowledgeItemsArraySchema("normative_stmt"),
-		"normative_statements_en":      knowledgeItemsArraySchema("normative_stmt"),
-		"quantitative_constraints":     knowledgeItemsArraySchema("quantitative_constraint"),
-		"quantitative_constraints_en":  knowledgeItemsArraySchema("quantitative_constraint"),
-		"temporal_constraints":         knowledgeItemsArraySchema("temporal_constraint"),
-		"temporal_constraints_en":      knowledgeItemsArraySchema("temporal_constraint"),
-		"conditional_logic":            knowledgeItemsArraySchema("conditiona_logic"),
-		"conditional_logic_en":         knowledgeItemsArraySchema("conditiona_logic"),
-		"causal_relationships":         knowledgeItemsArraySchema("causal_relation"),
-		"causal_relationships_en":      knowledgeItemsArraySchema("causal_relation"),
-		"assumptions":                  knowledgeItemsArraySchema("assumption"),
-		"assumptions_en":               knowledgeItemsArraySchema("assumption"),
-		"references":                   knowledgeItemsArraySchema("reference"),
-		"references_en":                knowledgeItemsArraySchema("reference"),
-		"procedures":                   knowledgeItemsArraySchema("procedure"),
-		"procedures_en":                knowledgeItemsArraySchema("procedure"),
-		"ambiguities":                  knowledgeItemsArraySchema("ambiguity"),
-		"ambiguities_en":               knowledgeItemsArraySchema("ambiguity"),
+		"language":                    "string — detected language of the content",
+		"entities":                    knowledgeItemsArraySchema("entity"),
+		"entities_en":                 knowledgeItemsArraySchema("entity"),
+		"concepts":                    knowledgeItemsArraySchema("concept"),
+		"concepts_en":                 knowledgeItemsArraySchema("concept"),
+		"relationships":               knowledgeItemsArraySchema("relation"),
+		"relationships_en":            knowledgeItemsArraySchema("relation"),
+		"normative_statements":        knowledgeItemsArraySchema("normative_stmt"),
+		"normative_statements_en":     knowledgeItemsArraySchema("normative_stmt"),
+		"quantitative_constraints":    knowledgeItemsArraySchema("quantitative_constraint"),
+		"quantitative_constraints_en": knowledgeItemsArraySchema("quantitative_constraint"),
+		"temporal_constraints":        knowledgeItemsArraySchema("temporal_constraint"),
+		"temporal_constraints_en":     knowledgeItemsArraySchema("temporal_constraint"),
+		"conditional_logic":           knowledgeItemsArraySchema("conditiona_logic"),
+		"conditional_logic_en":        knowledgeItemsArraySchema("conditiona_logic"),
+		"causal_relationships":        knowledgeItemsArraySchema("causal_relation"),
+		"causal_relationships_en":     knowledgeItemsArraySchema("causal_relation"),
+		"assumptions":                 knowledgeItemsArraySchema("assumption"),
+		"assumptions_en":              knowledgeItemsArraySchema("assumption"),
+		"references":                  knowledgeItemsArraySchema("reference"),
+		"references_en":               knowledgeItemsArraySchema("reference"),
+		"procedures":                  knowledgeItemsArraySchema("procedure"),
+		"procedures_en":               knowledgeItemsArraySchema("procedure"),
+		"ambiguities":                 knowledgeItemsArraySchema("ambiguity"),
+		"ambiguities_en":              knowledgeItemsArraySchema("ambiguity"),
 		"category_paths": []map[string]any{{
 			"category_path": []map[string]any{{
 				"name":       "string",
@@ -764,18 +870,9 @@ func (p *StructuredKnowledgeProcessor) indexKnowledges(recordID int64, knowledge
 		if knowledgeID == "" {
 			continue
 		}
-		if pathsRaw, ok := k["category_paths"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsRaw) {
-				if err := writeKnowledgeTreeEntry(p.Logger, dir, knowledgeID, k, entry, now); err != nil {
-					return fmt.Errorf("(MID_26052654) index knowledge %s path: %w", knowledgeID, err)
-				}
-			}
-		}
-		if pathsEnRaw, ok := k["category_paths_en"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsEnRaw) {
-				if err := writeKnowledgeTreeEntry(p.Logger, dir, knowledgeID, k, entry, now); err != nil {
-					return fmt.Errorf("(MID_26052655) index knowledge %s en path: %w", knowledgeID, err)
-				}
+		for _, pair := range pairCategoryPathEntries(k["category_paths"], k["category_paths_en"]) {
+			if err := writeKnowledgeTreeEntry(p.Logger, dir, knowledgeID, k, pair.Index, pair.Original, now); err != nil {
+				return fmt.Errorf("(MID_26052654) index knowledge %s path: %w", knowledgeID, err)
 			}
 		}
 	}
@@ -787,21 +884,18 @@ func writeKnowledgeTreeEntry(
 	treeRootDir string,
 	knowledgeID string,
 	knowledge map[string]any,
-	pathEntry CategoryPathEntry,
+	indexEntry CategoryPathEntry,
+	originalEntry CategoryPathEntry,
 	now time.Time,
 ) error {
-	if len(pathEntry.Nodes) == 0 {
+	leafDir, err := categoryTreeLeafDirForEntry(logger, treeRootDir, indexEntry, originalEntry, now)
+	if err != nil {
+		return err
+	}
+	if leafDir == "" {
 		return nil
 	}
-	currentDir := treeRootDir
-	for _, node := range pathEntry.Nodes {
-		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
-		if err != nil {
-			return err
-		}
-		currentDir = subdir
-	}
-	return upsertKnowledgeToLeafDir(currentDir, knowledgeID, knowledge)
+	return upsertKnowledgeToLeafDir(leafDir, knowledgeID, knowledge)
 }
 
 // upsertKnowledgeToLeafDir writes full knowledge JSON objects to knowledges.txt,

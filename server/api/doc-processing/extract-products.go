@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ type ProductsProcessor struct {
 	Store                ProductsStore
 	Extractor            LLMJSONExtractor
 	Logger               ApiTypes.JimoLogger
+	ProcLogger           DocProcLogger
 	Now                  func() time.Time
 	PromptText           string
 	PromptRef            string
@@ -97,8 +99,11 @@ type SaveProductsRequest struct {
 }
 
 type productExtractionResult struct {
-	Products  []map[string]any
-	ModelName string
+	Products      []map[string]any
+	ModelName     string
+	LLMCallCount  int
+	FallbackCount int
+	MentionsCount int
 }
 
 type productMention struct {
@@ -170,6 +175,7 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		Store:                store,
 		Extractor:            extractor,
 		Logger:               logger,
+		ProcLogger:           DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:                  time.Now,
 		PromptText:           relationPromptText,
 		PromptRef:            relationPromptRef,
@@ -351,6 +357,7 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		"blocks", len(blocks),
 	)
 	p.persistProductsStatus(ctx, rec, start, nil)
+	p.logProductsSummary(ctx, start, p.Now(), result, len(blocks))
 	return nil
 }
 
@@ -385,23 +392,31 @@ func (p *ProductsProcessor) productBlockSize() int {
 }
 
 func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context, blocks []Block) (productExtractionResult, error) {
+	eventID := eventIDFromContext(ctx)
 	mentions := make([]productMention, 0, len(blocks))
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
+	llmCallCount := 0
+	fallbackCount := 0
 	for idx, block := range blocks {
-		startTime := time.Now()
+		callStart := p.Now()
 		p.Logger.Info("extract product mentions - begin",
 			"idx", idx,
 			"total", len(blocks),
 			"model_name", p.MentionModelName,
 			"prompt_name", p.MentionPromptRef,
 		)
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, 
-			"extract products", buildProductMentionsUserPrompt(block), 
-			p.MentionPromptText, p.MentionPromptRef, 
+		payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
+			"extract products", buildProductMentionsUserPrompt(block),
+			p.MentionPromptText, p.MentionPromptRef,
 			p.MentionModelName, p.MentionModelCfg)
+		llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != "" {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_b%d", eventID, idx), "extract_product_mentions", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now())
 		if err != nil {
 			p.Logger.Error("failed extracting product mentions", "error", err)
-			return productExtractionResult{}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
+			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26052020) extract product mentions via llm: %w", err)
 		}
 		usedMentionModel = strings.TrimSpace(modelName)
 		raw, _ := payload["mentions"].([]any)
@@ -410,7 +425,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			"mentions_so_far", len(mentions),
 			"model_name", p.MentionModelName,
 			"prompt_name", p.MentionPromptRef,
-			"ms_used", time.Since(startTime).Milliseconds())
+			"ms_used", time.Since(callStart).Milliseconds())
 	}
 
 	candidates := mergeProductMentionCandidates(mentions)
@@ -422,7 +437,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 	products := make([]map[string]any, 0, len(candidates))
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
-		startTime := time.Now()
+		callStart := p.Now()
 		p.Logger.Info("Start enriching product candidate",
 			"idx", idx,
 			"total", len(candidates),
@@ -430,13 +445,18 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			"model_name", p.RelationModelName,
 			"prompt_name", p.RelationPromptRef,
 		)
-		payload, modelName, err := p.extractProductPayloadWithFallback(ctx, 
-			"product relations", buildProductRelationUserPrompt(candidate), 
-			p.RelationPromptText, p.RelationPromptRef, 
+		payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
+			"product relations", buildProductRelationUserPrompt(candidate),
+			p.RelationPromptText, p.RelationPromptRef,
 			p.RelationModelName, p.RelationModelCfg)
+		llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != "" {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_product_relations", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now())
 		if err != nil {
 			p.Logger.Error("failed enriching product relations", "error", err, "candidate_id", candidate.CandidateID)
-			return productExtractionResult{}, fmt.Errorf("(MID_26052020) enrich product relations via llm: %w", err)
+			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26052020) enrich product relations via llm: %w", err)
 		}
 		usedRelationModel = strings.TrimSpace(modelName)
 		raw, _ := payload["products"].([]any)
@@ -446,7 +466,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			"candidate_id", candidate.CandidateID,
 			"rows", len(normalized),
 			"products_so_far", len(products),
-			"ms_used", time.Since(startTime).Milliseconds())
+			"ms_used", time.Since(callStart).Milliseconds())
 	}
 
 	preDedupeCount := len(products)
@@ -462,7 +482,7 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			"model_name", p.TranslateModelName,
 			"prompt_name", p.TranslatePromptRef,
 		)
-		products = p.translateProductRows(ctx, products)
+		products = p.translateProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
 	}
 	if p.CategorizeEnabled {
 		p.Logger.Info("Starting product categorization pass",
@@ -470,21 +490,24 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			"model_name", p.CategorizeModelName,
 			"prompt_name", p.CategorizePromptRef,
 		)
-		products = p.categorizeProductRows(ctx, products)
+		products = p.categorizeProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
 	}
 	return productExtractionResult{
-		Products:  products,
-		ModelName: firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
+		Products:      products,
+		ModelName:     firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
+		MentionsCount: len(mentions),
 	}, nil
 }
 
 func (p *ProductsProcessor) extractProductPayloadWithFallback(
-	ctx context.Context, 
+	ctx context.Context,
 	opr string,
-	inputText string, 
-	promptText string, 
-	promptRef string, 
-	modelName string, 
+	inputText string,
+	promptText string,
+	promptRef string,
+	modelName string,
 	cfg structureModelConfig) (map[string]any, string, error) {
 	primaryStart := time.Now()
 	payload, err := p.extractProductPayload(ctx, opr, inputText, promptText, promptRef, modelName, cfg)
@@ -555,12 +578,12 @@ func isEmptyProductExtractionError(err error) bool {
 }
 
 func (p *ProductsProcessor) extractProductPayload(
-	ctx context.Context, 
+	ctx context.Context,
 	opr string,
-	inputText string, 
-	promptText string, 
-	promptRef string, 
-	modelName string, 
+	inputText string,
+	promptText string,
+	promptRef string,
+	modelName string,
 	cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 
@@ -1030,8 +1053,99 @@ func normalizeProductEvidenceLines(value any) []string {
 	return out
 }
 
-func (p *ProductsProcessor) translateProductRows(ctx context.Context, products []map[string]any) []map[string]any {
+func (p *ProductsProcessor) logLLMCall(
+	ctx context.Context,
+	callID, activity string,
+	pass int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	if p.ProcLogger.DB == nil {
+		return
+	}
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	rec := DocProcLogRecord{
+		DocProcName:  p.Name(),
+		ModelNames:   modelNames,
+		PromptName:   promptName,
+		Pass:         &pass,
+		LLMCallID:    &callID,
+		ActivityName: &activity,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	}
+}
+
+func (p *ProductsProcessor) logProductsSummary(ctx context.Context, start, end time.Time, result productExtractionResult, numBlocks int) {
+	if p.ProcLogger.DB == nil {
+		return
+	}
+	modelNames := make([]string, 0, 3)
+	for _, n := range []string{
+		strings.TrimSpace(p.MentionModelName),
+		strings.TrimSpace(p.RelationModelName),
+		strings.TrimSpace(p.FallbackModelName),
+	} {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if !slices.Contains(modelNames, n) {
+			modelNames = append(modelNames, n)
+		}
+	}
+	if p.TranslateEnabled && strings.TrimSpace(p.TranslateModelName) != "" {
+		if !slices.Contains(modelNames, strings.TrimSpace(p.TranslateModelName)) {
+			modelNames = append(modelNames, strings.TrimSpace(p.TranslateModelName))
+		}
+	}
+	if p.CategorizeEnabled && strings.TrimSpace(p.CategorizeModelName) != "" {
+		if !slices.Contains(modelNames, strings.TrimSpace(p.CategorizeModelName)) {
+			modelNames = append(modelNames, strings.TrimSpace(p.CategorizeModelName))
+		}
+	}
+	promptName := firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef)
+	extraInfo, _ := json.Marshal(map[string]interface{}{
+		"total_products": len(result.Products),
+		"mentions_count": result.MentionsCount,
+		"llm_call_count": result.LLMCallCount,
+		"fallback_count": result.FallbackCount,
+		"num_blocks":     numBlocks,
+	})
+	extraStr := string(extraInfo)
+	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		EntryType:     "doc_proc_summary",
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
+}
+
+func (p *ProductsProcessor) translateProductRows(ctx context.Context, products []map[string]any, eventID string, llmCallCount *int, fallbackCount *int) []map[string]any {
 	for i := range products {
+		callStart := p.Now()
 		rowInput, _ := json.Marshal(map[string]any{
 			"products": []map[string]any{{
 				"product_name":      products[i]["product_name"],
@@ -1041,10 +1155,15 @@ func (p *ProductsProcessor) translateProductRows(ctx context.Context, products [
 				"confidence_reason": products[i]["confidence_reason"],
 			}},
 		})
-		payload, _, err := p.extractProductPayloadWithFallback(ctx, 
-			"product translation", string(rowInput), 
-			p.TranslatePromptText, p.TranslatePromptRef, 
+		payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
+			"product translation", string(rowInput),
+			p.TranslatePromptText, p.TranslatePromptRef,
 			p.TranslateModelName, p.TranslateModelCfg)
+		*llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.TranslateModelName) && strings.TrimSpace(modelName) != "" {
+			*fallbackCount++
+		}
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p3_t%d", eventID, i), "translate_products", 3, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.TranslatePromptRef), nil, err, callStart, p.Now())
 		if err != nil {
 			p.Logger.Warn("translate product row failed; keeping untranslated row", "error", err, "product_name", products[i]["product_name"])
 			continue
@@ -1069,8 +1188,9 @@ func (p *ProductsProcessor) translateProductRows(ctx context.Context, products [
 	return products
 }
 
-func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products []map[string]any) []map[string]any {
+func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products []map[string]any, eventID string, llmCallCount *int, fallbackCount *int) []map[string]any {
 	for i := range products {
+		callStart := p.Now()
 		rowInput, _ := json.Marshal(map[string]any{
 			"products": []map[string]any{{
 				"product_name":    products[i]["product_name"],
@@ -1081,10 +1201,15 @@ func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products 
 				"evidence_quote":  products[i]["evidence_quote"],
 			}},
 		})
-		payload, _, err := p.extractProductPayloadWithFallback(ctx, 
-			"product categorize", string(rowInput), 
-			p.CategorizePromptText, p.CategorizePromptRef, 
+		payload, modelName, err := p.extractProductPayloadWithFallback(ctx,
+			"product categorize", string(rowInput),
+			p.CategorizePromptText, p.CategorizePromptRef,
 			p.CategorizeModelName, p.CategorizeModelCfg)
+		*llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.CategorizeModelName) && strings.TrimSpace(modelName) != "" {
+			*fallbackCount++
+		}
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p4_c%d", eventID, i), "categorize_products", 4, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.CategorizePromptRef), nil, err, callStart, p.Now())
 		if err != nil {
 			p.Logger.Warn("categorize product row failed; keeping uncategorized row", "error", err, "product_name", products[i]["product_name"])
 			continue
@@ -1169,37 +1294,24 @@ func (p *ProductsProcessor) indexProductsInTree(recordID int64, products []map[s
 		if productRelID == "" {
 			continue
 		}
-		if pathsRaw, ok := product["category_paths"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsRaw) {
-				if err := writeProductTreeEntry(p.Logger, dir, productRelID, entry, now); err != nil {
-					return fmt.Errorf("(MID_26052044) index product %s path: %w", productRelID, err)
-				}
-			}
-		}
-		if pathsEnRaw, ok := product["category_paths_en"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsEnRaw) {
-				if err := writeProductTreeEntry(p.Logger, dir, productRelID, entry, now); err != nil {
-					return fmt.Errorf("(MID_26052045) index product %s en path: %w", productRelID, err)
-				}
+		for _, pair := range pairCategoryPathEntries(product["category_paths"], product["category_paths_en"]) {
+			if err := writeProductTreeEntry(p.Logger, dir, productRelID, pair.Index, pair.Original, now); err != nil {
+				return fmt.Errorf("(MID_26052044) index product %s path: %w", productRelID, err)
 			}
 		}
 	}
 	return nil
 }
 
-func writeProductTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, productRelID string, pathEntry CategoryPathEntry, now time.Time) error {
-	if len(pathEntry.Nodes) == 0 {
+func writeProductTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, productRelID string, indexEntry CategoryPathEntry, originalEntry CategoryPathEntry, now time.Time) error {
+	leafDir, err := categoryTreeLeafDirForEntry(logger, treeRootDir, indexEntry, originalEntry, now)
+	if err != nil {
+		return err
+	}
+	if leafDir == "" {
 		return nil
 	}
-	currentDir := treeRootDir
-	for _, node := range pathEntry.Nodes {
-		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
-		if err != nil {
-			return err
-		}
-		currentDir = subdir
-	}
-	return upsertProductToLeafDir(currentDir, productRelID)
+	return upsertProductToLeafDir(leafDir, productRelID)
 }
 
 func upsertProductToLeafDir(leafDir string, productRelID string) error {

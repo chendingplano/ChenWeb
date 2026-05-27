@@ -52,9 +52,15 @@ work_dir = "/Users/cding/Workspace/ChenWeb/Data/kb/.cache"
 remove_toc_in_blocks = true
 prev_overlapped_pages_in_blocks = 1
 next_overlapped_pages_in_blocks = 1
-required_processors = ["extract_metrics", "extract_provisions", "generate_summaries",
-	"generate_topics", "generate_scene_blocks", "extract_semantic_projections",
-	"extract_structured_knowledge", "extract_entity_relation"]
+required_processors = [
+	"extract_metrics", 
+	"extract_provisions", 
+	"generate_summaries",
+	"generate_topics", 
+	"generate_scene_blocks", 
+	"extract_semantic_projections",
+	"extract_structured_knowledge", 
+	"extract_entity_relation"]
 
 [artifacts]
 artifact_graph_page_size = 30

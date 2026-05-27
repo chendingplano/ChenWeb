@@ -24,6 +24,7 @@ type ExtractDocMetadataProcessor struct {
 	Store        DocMetadataStore
 	Client       LLMJSONExtractor
 	Logger       ApiTypes.JimoLogger
+	ProcLogger   DocProcLogger
 	Now          func() time.Time
 	InitialPages int
 	PromptText   string
@@ -66,6 +67,7 @@ func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtrac
 		Store:        store,
 		Client:       client,
 		Logger:       logger,
+		ProcLogger:   DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:          time.Now,
 		InitialPages: envInt("EXTRACT_DOCMETA_NUM_PAGES", 2, 1),
 		PromptText:   promptText,
@@ -148,16 +150,33 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		lastPage = maxPage
 	}
 
+	var llmCallCount int
+	var fallbackUsed bool
+	var numPagesUsed int
 	var out docMetadataExtractionOutput
 	for i := 0; i < 10; i++ {
 		if p.PromptErr != nil {
-			return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042413) load prompt file %q failed: %w", p.PromptRef, p.PromptErr))
+			procErr := fmt.Errorf("(MID_26042413) load prompt file %q failed: %w", p.PromptRef, p.PromptErr)
+			p.logDocMetaSummary(ctx, start, p.Now(), llmCallCount, fallbackUsed, numPagesUsed, maxPage, procErr)
+			return p.failAndPersist(ctx, rec, procErr)
 		}
 
 		inputText := buildInputText(linesByPage, lastPage)
+		callStart := p.Now()
+		callID := fmt.Sprintf("%s_p1_i%d", eventIDFromContext(ctx), i)
 		parsed, usedModelName, extractErr := p.extractMetadataWithFallback(ctx, inputText)
+		llmCallCount++
+		numPagesUsed = lastPage
+		if strings.TrimSpace(usedModelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(usedModelName) != "" {
+			fallbackUsed = true
+		}
+		p.logLLMCall(ctx, callID, "extract_doc_metadata", 1,
+			[]string{strings.TrimSpace(usedModelName)}, p.PromptRef,
+			parsed, extractErr, callStart, p.Now())
 		if extractErr != nil {
-			return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042414) extract metadata via llm: %w, model name:%s, prompt file:%s", extractErr, usedModelName, p.PromptRef))
+			procErr := fmt.Errorf("(MID_26042414) extract metadata via llm: %w, model name:%s, prompt file:%s", extractErr, usedModelName, p.PromptRef)
+			p.logDocMetaSummary(ctx, start, p.Now(), llmCallCount, fallbackUsed, numPagesUsed, maxPage, procErr)
+			return p.failAndPersist(ctx, rec, procErr)
 		}
 		out = parseDocMetadataOutput(parsed)
 		if !out.NeedMorePages || maxPage == 0 || lastPage >= maxPage {
@@ -196,7 +215,97 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		"model", p.ModelName,
 		"prompt", p.PromptRef,
 	)
+	p.logDocMetaSummary(ctx, start, p.Now(), llmCallCount, fallbackUsed, numPagesUsed, maxPage, nil)
 	return nil
+}
+
+func (p *ExtractDocMetadataProcessor) logLLMCall(
+	ctx context.Context,
+	callID, activity string,
+	pass int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	rec := DocProcLogRecord{
+		DocProcName:  p.Name(),
+		ModelNames:   modelNames,
+		PromptName:   promptName,
+		Pass:         &pass,
+		LLMCallID:    &callID,
+		ActivityName: &activity,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	}
+}
+
+func (p *ExtractDocMetadataProcessor) logDocMetaSummary(
+	ctx context.Context,
+	start, end time.Time,
+	llmCallCount int,
+	fallbackUsed bool,
+	numPagesUsed int,
+	numPagesAvailable int,
+	procErr error,
+) {
+	extraInfo := map[string]any{
+		"llm_call_count":      llmCallCount,
+		"fallback_used":       fallbackUsed,
+		"num_pages_used":      numPagesUsed,
+		"num_pages_available": numPagesAvailable,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+
+	modelNames := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	for _, n := range []string{p.ModelName, p.FallbackModelName} {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		modelNames = append(modelNames, n)
+	}
+
+	var errStr *string
+	if procErr != nil {
+		s := procErr.Error()
+		errStr = &s
+	}
+
+	rec := DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    p.PromptRef,
+		ExtraInfoJSON: &extraStr,
+		Errors:        errStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogSummary(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
 }
 
 func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {

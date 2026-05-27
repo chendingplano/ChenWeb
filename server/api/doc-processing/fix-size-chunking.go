@@ -38,6 +38,7 @@ type InputRecord struct {
 	StagingFilename string
 	FileName        string
 	StatusRaw       string
+	SourceLanguage  string
 }
 
 type ChunkRunRecord struct {
@@ -61,36 +62,42 @@ type Embedder interface {
 }
 
 type FixedSizeChunkingService struct {
-	Store                      Store
-	Extractor                  LLMJSONExtractor
-	Embedder                   Embedder
-	Logger                     ApiTypes.JimoLogger
-	Now                        func() time.Time
-	ChunkDir                   string
-	ArtifactWebDir             string
-	ChunkSize                  int
-	OverlapPercent             int
-	ModelRef                   string
-	ModelCfgPath               string
-	ModelErr                   error
-	ModelName                  string
-	PromptText                 string
-	PromptRef                  string
-	PromptPath                 string
-	PromptErr                  error
-	SummaryGroupSize           int
-	SummaryModelRef            string
-	SummaryModelCfgPath        string
-	SummaryModelErr            error
-	SummaryModelName           string
-	SummaryPromptText          string
-	SummaryPromptRef           string
-	SummaryPromptPath          string
-	SummaryPromptErr           error
-	TopicEmbeddingModelName    string
-	SummaryEmbeddingModelName  string
-	CategorySimilarityMinScore float64
-	GenerateSummary            func(ctx context.Context, recordID int64, level int, seqNo int, lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error)
+	Store                       Store
+	Extractor                   LLMJSONExtractor
+	Embedder                    Embedder
+	Logger                      ApiTypes.JimoLogger
+	Now                         func() time.Time
+	ChunkDir                    string
+	ArtifactWebDir              string
+	ChunkSize                   int
+	OverlapPercent              int
+	ModelRef                    string
+	ModelCfgPath                string
+	ModelErr                    error
+	ModelName                   string
+	PromptText                  string
+	PromptRef                   string
+	PromptPath                  string
+	PromptErr                   error
+	SummaryGroupSize            int
+	SummaryModelRef             string
+	SummaryModelCfgPath         string
+	SummaryModelErr             error
+	SummaryModelName            string
+	SummaryPromptText           string
+	SummaryPromptRef            string
+	SummaryPromptPath           string
+	SummaryPromptErr            error
+	TranslationModelRef         string
+	TranslationModelCfgPath     string
+	TranslationModelErr         error
+	TranslationModelName        string
+	TranslationEnabled          bool
+	TopicEmbeddingModelName     string
+	SummaryEmbeddingModelName   string
+	CategorySimilarityMinScore  float64
+	GenerateSummary             func(ctx context.Context, recordID int64, level int, seqNo int, lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error)
+	lastDocProcSummaryExtraInfo map[string]any
 }
 
 type ChunkOptions struct {
@@ -148,6 +155,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 	promptText, promptRef, promptPath, promptErr := loadFixedSizeTopicPromptFromEnv()
 	summaryModelRef, summaryModelCfgPath, summaryModelCfg, summaryModelErr := loadFixedSizeSummaryModelFromEnv()
 	summaryPromptText, summaryPromptRef, summaryPromptPath, summaryPromptErr := loadFixedSizeSummaryPromptFromEnv()
+	translationModelRef, translationModelCfgPath, translationModelCfg, translationModelErr := loadOptionalModelConfigFromEnv("TRANSLATION_MODEL_NAME", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	topicEmbeddingModelRef := strings.TrimSpace(os.Getenv("TOPIC_EMBEDDING_MODEL_NAME"))
 	var embedder Embedder
@@ -211,11 +219,56 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger
 		SummaryPromptRef:           summaryPromptRef,
 		SummaryPromptPath:          summaryPromptPath,
 		SummaryPromptErr:           summaryPromptErr,
+		TranslationModelRef:        translationModelRef,
+		TranslationModelCfgPath:    translationModelCfgPath,
+		TranslationModelErr:        translationModelErr,
+		TranslationModelName:       translationModelCfg.ModelName,
+		TranslationEnabled:         translationModelErr == nil && strings.TrimSpace(translationModelCfg.ModelName) != "",
 		Embedder:                   embedder,
 		TopicEmbeddingModelName:    topicEmbeddingModelName,
 		SummaryEmbeddingModelName:  summaryEmbeddingModelName,
 		CategorySimilarityMinScore: categorySimilarityMinScore,
 	}
+}
+
+func (s *FixedSizeChunkingService) DocProcModelNames() []string {
+	return dedupeNonEmpty([]string{
+		s.ModelName,
+		s.SummaryModelName,
+		s.TranslationModelName,
+		s.TopicEmbeddingModelName,
+		s.SummaryEmbeddingModelName,
+	})
+}
+
+func (s *FixedSizeChunkingService) DocProcPromptNames() []string {
+	return dedupeNonEmpty([]string{
+		s.PromptRef,
+		s.SummaryPromptRef,
+	})
+}
+
+func (s *FixedSizeChunkingService) DocProcSummaryExtraInfo() map[string]any {
+	if len(s.lastDocProcSummaryExtraInfo) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(s.lastDocProcSummaryExtraInfo))
+	for k, v := range s.lastDocProcSummaryExtraInfo {
+		out[k] = v
+	}
+	return out
+}
+
+func (s *FixedSizeChunkingService) setDocProcSummaryExtraInfo(extra map[string]any) {
+	if len(extra) == 0 {
+		s.lastDocProcSummaryExtraInfo = nil
+		return
+	}
+	cloned := make(map[string]any, len(extra))
+	for k, v := range extra {
+		cloned[k] = v
+	}
+	s.lastDocProcSummaryExtraInfo = cloned
 }
 
 func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
@@ -339,7 +392,7 @@ func (s *FixedSizeChunkingService) HandleGenerateTopicsInput(ctx context.Context
 		return procErr
 	}
 
-	lines, err := ParseInputLines(inputFile)
+	lines, err := ParseInputLinesIncludingTOC(inputFile)
 	if err != nil {
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, err)
 		return err
@@ -435,7 +488,7 @@ func (s *FixedSizeChunkingService) HandleGenerateSummariesInput(ctx context.Cont
 		return procErr
 	}
 
-	lines, err := ParseInputLines(inputFile)
+	lines, err := ParseInputLinesIncludingTOC(inputFile)
 	if err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
@@ -496,6 +549,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 	numPages := uniquePages(lines)
 	numLines := len(lines)
 	fileType := detectChunkStatusFileType(rec, inputFilename)
+	s.setDocProcSummaryExtraInfo(nil)
 	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: s.ChunkSize, OverlapPercent: s.OverlapPercent})
 	if err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, 0, start, err)
@@ -555,11 +609,15 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		"num_lines", numLines,
 		"num_chunks", len(chunks),
 	)
+	s.setDocProcSummaryExtraInfo(map[string]any{
+		"total_chunks": len(chunks),
+	})
 	return nil
 }
 
 func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
 	artifactBase := buildFixedSizeArtifactBase(rec, inputFilename)
+	s.setDocProcSummaryExtraInfo(nil)
 	chunks, err := loadChunksFromArtifactFile(s.ChunkDir, rec.ID, artifactBase+".chunks", lines)
 	if err != nil {
 		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, err)
@@ -635,11 +693,16 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 		"num_topics", len(topics),
 		"model_name", s.ModelName,
 	)
+	s.setDocProcSummaryExtraInfo(map[string]any{
+		"total_chunks":     len(chunks),
+		"topics_generated": len(topics),
+	})
 	return nil
 }
 
 func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
 	artifactBase := buildFixedSizeArtifactBase(rec, inputFilename)
+	s.setDocProcSummaryExtraInfo(nil)
 	chunks, err := loadChunksFromArtifactFile(s.ChunkDir, rec.ID, artifactBase+".chunks", lines)
 	if err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
@@ -706,10 +769,15 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		return err
 	}
 	for _, item := range allSummaries {
-		if err := writeSummaryTreeEntry(s.Logger, s.ArtifactWebDir, item, item.CategoryPaths, item.CategoryNodes); err != nil {
+		if err := writeSummaryTreeEntriesForItem(s.Logger, s.ArtifactWebDir, item); err != nil {
 			s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 			return err
 		}
+	}
+	if err := validateSummaryArtifacts(rec.ID, rec.SourceLanguage, allSummaries, s.ChunkDir, s.ArtifactWebDir); err != nil {
+		err = fmt.Errorf("(MID_26052701) summary sanity check failed: %w", err)
+		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
+		return err
 	}
 	if err := s.embedAndWriteSummaries(ctx, rec.ID, allSummaries); err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
@@ -744,6 +812,10 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		"num_summaries", len(allSummaries),
 		"model_name", s.SummaryModelName,
 	)
+	s.setDocProcSummaryExtraInfo(map[string]any{
+		"total_chunks":        len(chunks),
+		"summaries_generated": len(allSummaries),
+	})
 	return nil
 }
 
@@ -846,6 +918,18 @@ func (s *FixedSizeChunkingService) generateSummary(
 	}
 	categoryPathItems := extractCategoryPathDetailFromLLM(parsed)
 	categoryPathItemsEn := extractCategoryPathDetailEnFromLLM(parsed)
+	if len(categoryPathItemsEn) == 0 && len(categoryPathItems) > 0 && !summaryCategoryPathsLookEnglish(categoryPathItems) {
+		s.Logger.Warn("summary category_paths_en missing for non-English categories; translating",
+			"record_id", recordID,
+			"level", level,
+			"seq", seqNo,
+		)
+		var translateErr error
+		categoryPathItemsEn, translateErr = s.translateSummaryCategoryPaths(ctx, categoryPathItems)
+		if translateErr != nil {
+			return summaryGenerateResult{}, fmt.Errorf("(MID_26052702) translate summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
+		}
+	}
 	var nodes []CategoryPathNode
 	if len(categoryPathItems) > 0 {
 		nodes = categoryPathItems[0].Nodes
@@ -867,6 +951,106 @@ func (s *FixedSizeChunkingService) generateSummary(
 		CategoryPathItems:   categoryPathItems,
 		CategoryPathItemsEn: categoryPathItemsEn,
 	}, nil
+}
+
+const summaryCategoryTranslationPrompt = `You are a translation engine.
+
+Translate the provided category paths into English.
+
+Rules:
+- Preserve the same number of category paths and the same hierarchy depth.
+- Translate each category name to concise English noun phrases.
+- Translate category keywords and path_keywords to accurate English.
+- Preserve confidence values exactly.
+- Return strict JSON only.
+
+Output schema:
+{
+  "category_paths_en": [
+    {
+      "category_path": [
+        {
+          "name": "string",
+          "keywords": ["string"],
+          "confidence": 0.0
+        }
+      ],
+      "path_keywords": ["string"],
+      "path_confidence": 0.0
+    }
+  ]
+}`
+
+func (s *FixedSizeChunkingService) translateSummaryCategoryPaths(ctx context.Context, categoryPaths []CategoryPathEntry) ([]CategoryPathEntry, error) {
+	if len(categoryPaths) == 0 {
+		return nil, nil
+	}
+	if !s.TranslationEnabled || strings.TrimSpace(s.TranslationModelName) == "" {
+		return nil, errors.New("(MID_26052703) TRANSLATION_MODEL_NAME is required when category_paths_en is missing for non-English summary categories")
+	}
+	if s.Extractor == nil {
+		return nil, errors.New("(MID_26052704) summary extractor is nil")
+	}
+	inputPayload, err := json.Marshal(map[string]any{
+		"category_paths": categoryPaths,
+	})
+	if err != nil {
+		return nil, err
+	}
+	in := llmclients.JSONExtractionInput{
+		PromptText: summaryCategoryTranslationPrompt,
+		ModelName:  s.TranslationModelName,
+		InputText:  string(inputPayload),
+	}
+	var parsed map[string]any
+	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
+		result, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, summaryCategoryTranslationContract())
+		if extractErr != nil {
+			return nil, extractErr
+		}
+		if result != nil {
+			parsed = result.Parsed
+		}
+	} else {
+		parsed, err = s.Extractor.ExtractJSON(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+	}
+	translated := extractCategoryPathDetailEnFromLLM(parsed)
+	if len(translated) == 0 {
+		if arr, ok := parsed["category_paths_en"].([]any); ok {
+			translated = parseCategoryPathsArray(arr)
+		}
+	}
+	if len(translated) == 0 {
+		return nil, errors.New("(MID_26052705) translation returned empty category_paths_en")
+	}
+	return translated, nil
+}
+
+func summaryCategoryPathsLookEnglish(entries []CategoryPathEntry) bool {
+	if len(entries) == 0 {
+		return true
+	}
+	for _, entry := range entries {
+		for _, node := range entry.Nodes {
+			if detectContentLanguage(node.Name) != "en" {
+				return false
+			}
+			for _, kw := range node.Keywords {
+				if detectContentLanguage(kw) != "en" {
+					return false
+				}
+			}
+		}
+		for _, kw := range entry.PathKeywords {
+			if detectContentLanguage(kw) != "en" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func buildSummaryInputText(lines []MarkedLine, children []SummaryItem) string {
@@ -1077,7 +1261,19 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(
 	return nil
 }
 
+type parseInputLinesOptions struct {
+	includeTOC bool
+}
+
 func ParseInputLines(input []byte) ([]Line, error) {
+	return parseInputLines(input, parseInputLinesOptions{})
+}
+
+func ParseInputLinesIncludingTOC(input []byte) ([]Line, error) {
+	return parseInputLines(input, parseInputLinesOptions{includeTOC: true})
+}
+
+func parseInputLines(input []byte, opts parseInputLinesOptions) ([]Line, error) {
 	sc := bufio.NewScanner(strings.NewReader(string(input)))
 	sc.Buffer(make([]byte, 1024), 16*1024*1024)
 
@@ -1089,8 +1285,10 @@ func ParseInputLines(input []byte) ([]Line, error) {
 		if raw == "" {
 			continue
 		}
-		if fields := strings.Split(raw, "\t"); len(fields) >= 3 && strings.EqualFold(strings.TrimSpace(fields[2]), "TOC") {
-			continue
+		if !opts.includeTOC {
+			if fields := strings.Split(raw, "\t"); len(fields) >= 3 && strings.EqualFold(strings.TrimSpace(fields[2]), "TOC") {
+				continue
+			}
 		}
 		parsed, err := parseLine(raw)
 		if err != nil {
@@ -1141,6 +1339,7 @@ func BuildChunks(lines []Line, opts ChunkOptions) ([]Chunk, error) {
 	if opts.ChunkSize <= 0 {
 		return nil, errors.New("(MID_26042009) chunk size must be positive")
 	}
+	lines = filterTOCLines(lines)
 	if len(lines) == 0 {
 		return []Chunk{}, nil
 	}
@@ -1198,6 +1397,20 @@ func BuildChunks(lines []Line, opts ChunkOptions) ([]Chunk, error) {
 	}
 
 	return chunks, nil
+}
+
+func filterTOCLines(lines []Line) []Line {
+	if len(lines) == 0 {
+		return lines
+	}
+	filtered := lines[:0]
+	for _, line := range lines {
+		if strings.EqualFold(strings.TrimSpace(line.LineType), "TOC") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
 }
 
 func findTargetByBytes(lines []Line, start int, targetBytes int) int {
@@ -1614,8 +1827,12 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 	}
 
 	lineByNo := make(map[int]Line, len(lines))
+	maxLineNo := 0
 	for _, line := range lines {
 		lineByNo[line.LineNo] = line
+		if line.LineNo > maxLineNo {
+			maxLineNo = line.LineNo
+		}
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(string(body)))
@@ -1631,6 +1848,9 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 		for _, lineNo := range overlap {
 			line, ok := lineByNo[lineNo]
 			if !ok {
+				if lineNo > maxLineNo {
+					continue
+				}
 				return fmt.Errorf("(MID_26052332) overlap line %d not found in input", lineNo)
 			}
 			chunkLines = append(chunkLines, MarkedLine{Line: line, Mark: "o"})
@@ -1638,6 +1858,9 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 		for _, lineNo := range regular {
 			line, ok := lineByNo[lineNo]
 			if !ok {
+				if lineNo > maxLineNo {
+					continue
+				}
 				return fmt.Errorf("(MID_26052333) regular line %d not found in input", lineNo)
 			}
 			chunkLines = append(chunkLines, MarkedLine{Line: line, Mark: "n"})

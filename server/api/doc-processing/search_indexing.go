@@ -598,7 +598,7 @@ func buildEntityRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([
 	const q = `
 SELECT id, entity_id, language, entity, entity_en, entity_type, entity_type_en,
        aliases, aliases_en, desc_text, desc_text_en, keywords, keywords_en,
-       source_line_spans, search_document
+       line_spans, search_document
 FROM kb.entities
 WHERE input_record_id = $1
 ORDER BY id`
@@ -680,7 +680,7 @@ func buildRelationRegistryRows(ctx context.Context, db *sql.DB, recordID int64) 
 	const q = `
 SELECT id, relation_id, language, subject, subject_en, predicate, predicate_en,
        object, object_en, desc_text, desc_text_en, keywords, keywords_en,
-       source_line_spans, search_document
+       line_spans, search_document
 FROM kb.relations
 WHERE input_record_id = $1
 ORDER BY id`

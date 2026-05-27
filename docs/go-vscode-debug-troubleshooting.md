@@ -134,11 +134,16 @@ Failed to launch dlv: Error: timed out while waiting for DAP in reverse mode to 
 
 ### Root cause
 
-`ChenWeb/.vscode/launch.json` had `"console": "integratedTerminal"`. This forces delve to use **reverse-mode DAP**: VS Code listens on a port and waits for `dlv` to connect back. Every new integrated terminal triggers zsh + mise activation before `dlv` starts. If that is slow enough, `dlv` does not connect within the default timeout.
+`ChenWeb/.vscode/launch.json` or the workspace-root `.vscode/launch.json` had `"console": "integratedTerminal"`. This forces delve to use **reverse-mode DAP**: VS Code listens on a port and waits for `dlv` to connect back. Every new integrated terminal triggers zsh + mise activation before `dlv` starts. If that is slow enough, `dlv` does not connect within the default timeout.
 
 ### Fix
 
 Remove `"console": "integratedTerminal"` from the launch configuration. Debug output goes to VS Code's Debug Console panel (appropriate for a server that does not read stdin).
+
+Check both launch files if VS Code is opened at the workspace root:
+
+- `~/Workspace/.vscode/launch.json`
+- `~/Workspace/ChenWeb/.vscode/launch.json`
 
 ```json
 {

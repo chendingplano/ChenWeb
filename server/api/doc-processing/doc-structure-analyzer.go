@@ -25,6 +25,7 @@ type StructureAnalyzerProcessor struct {
 	Store          DocMetadataStore
 	Extractor      LLMJSONExtractor
 	Logger         ApiTypes.JimoLogger
+	ProcLogger     DocProcLogger
 	Now            func() time.Time
 	PromptText     string
 	PromptRef      string
@@ -78,6 +79,7 @@ func NewStructureAnalyzerProcessor(store DocMetadataStore, extractor LLMJSONExtr
 		Store:          store,
 		Extractor:      extractor,
 		Logger:         logger,
+		ProcLogger:     DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:            time.Now,
 		PromptText:     promptText,
 		PromptRef:      promptRef,
@@ -240,7 +242,37 @@ func (p *StructureAnalyzerProcessor) HandleEvent(ctx context.Context, payload []
 			"num_blocks", len(blocks),
 		)
 	}
+	p.logSummary(ctx, start, p.Now(), numPages, len(lines), len(output.Labels), len(output.CoverPages), nil)
 	return nil
+}
+
+func (p *StructureAnalyzerProcessor) logSummary(ctx context.Context, start, end time.Time, numPages, numLines, numLabeledLines, numCoverPages int, procErr error) {
+	if p.ProcLogger.DB == nil {
+		return
+	}
+	extraInfo, _ := json.Marshal(map[string]interface{}{
+		"num_lines":         numLines,
+		"num_pages":         numPages,
+		"num_labeled_lines": numLabeledLines,
+		"num_cover_pages":   numCoverPages,
+	})
+	extraStr := string(extraInfo)
+	var errStr *string
+	if procErr != nil {
+		s := procErr.Error()
+		errStr = &s
+	}
+	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    []string{},
+		PromptName:    "",
+		EntryType:     "doc_proc_summary",
+		ExtraInfoJSON: &extraStr,
+		Errors:        errStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
 }
 
 type structurePageBlock struct {

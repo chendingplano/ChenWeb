@@ -8,6 +8,7 @@
 	import PromptOptimizerView from '$lib/components/home3/prompt-optimizer-view.svelte';
 	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
+	import DocProcLogsView from '$lib/components/home3/doc-proc-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
 	import DiaryView from '$lib/components/home3/diary-view.svelte';
@@ -102,6 +103,7 @@
 		settings:     'Configure your workspace, models, and integrations.',
 		about:        'Version info, credits, and system information.',
 		jetstream: 'Operational monitoring and diagnostics for JetStream services.',
+		'system-admin': 'System administration: JetStream monitoring, doc processor logs, and diagnostics.',
 		'my-workspace': 'Your personal workspace: diary, notes, and resources.',
 		'knowledge-engineering': 'Manage research topic beans: articles, thoughts, designs, specs, and readings.'
 	};
@@ -171,6 +173,8 @@
 			<JetStreamEventsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-jetstream-subjects'}
 			<JetStreamSubjectsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-doc-proc-logs'}
+			<DocProcLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}
 			<DiaryView {darkMode} />
 		{:else if activeMenu?.childId === 'ke-research-topics'}

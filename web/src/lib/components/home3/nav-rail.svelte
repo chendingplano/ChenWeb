@@ -30,7 +30,8 @@
 		childTitle?: string;
 	};
 
-	type NavChild = { id: string; label: string };
+	type NavGrandchild = { id: string; label: string };
+	type NavChild = { id: string; label: string; children?: NavGrandchild[] };
 	type NavItem  = {
 		id: string;
 		label: string;
@@ -85,8 +86,9 @@
 	let effectiveWidth = $derived(expanded ? width : RAIL_WIDTH_COLLAPSED);
 	let showLabels = $derived(expanded);
 
-	// Accordion expand state per item
-	let accordionOpen = $state<Record<string, boolean>>({});
+	// Accordion expand state per item (top-level) and sub-group
+	let accordionOpen    = $state<Record<string, boolean>>({});
+	let subAccordionOpen = $state<Record<string, boolean>>({});
 
 	// Nav item definitions
 	const mainNav: NavItem[] = [
@@ -163,11 +165,22 @@
 			]
 		},
 		{
-			id: 'jetstream', label: 'JetStream', icon: ShieldIcon, group: 'System Admin',
+			id: 'system-admin', label: 'System Admin', icon: ShieldIcon, group: 'System Admin',
 			children: [
-				{ id: 'sysadmin-jetstream-logs', label: 'JetStream Logs' },
-				{ id: 'sysadmin-jetstream-events', label: 'Events' },
-				{ id: 'sysadmin-jetstream-subjects', label: 'Subjects' }
+				{
+					id: 'jetstream', label: 'JetStream',
+					children: [
+						{ id: 'sysadmin-jetstream-logs',     label: 'JetStream Logs' },
+						{ id: 'sysadmin-jetstream-events',   label: 'JetStream Events' },
+						{ id: 'sysadmin-jetstream-subjects', label: 'JetStream Subjects' }
+					]
+				},
+				{
+					id: 'sysadmin-logs', label: 'Logs',
+					children: [
+						{ id: 'sysadmin-doc-proc-logs', label: 'Doc Processor Logs' }
+					]
+				}
 			]
 		},
 		{
@@ -228,6 +241,18 @@
 
 	function toggleAccordion(id: string) {
 		accordionOpen[id] = !accordionOpen[id];
+	}
+
+	function toggleSubAccordion(id: string) {
+		subAccordionOpen[id] = !subAccordionOpen[id];
+	}
+
+	function isGrandchildActive(gc: NavGrandchild): boolean {
+		return !!activeMenu && activeMenu.childId === gc.id;
+	}
+
+	function isSubGroupActive(child: NavChild): boolean {
+		return !!child.children && child.children.some(gc => isGrandchildActive(gc));
 	}
 
 	// Hover background
@@ -332,26 +357,81 @@
 				{#if showLabels && item.children && accordionOpen[item.id]}
 					<div class="mt-0.5 mb-1 ml-3" style="border-left:2px solid {borderColor};">
 						{#each item.children as child (child.id)}
-							<button
-								onclick={() => selectItem(item, child)}
-								class="flex w-full items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors duration-150"
-								style="
-									color: {isChildActive(child) ? accent : textMuted};
-									background: {isChildActive(child) ? accentTint : 'transparent'};
-									font-size: 13px;
-								"
-								onmouseenter={(e) => {
-									const el = e.currentTarget as HTMLElement;
-									if (!isChildActive(child)) { el.style.background = hoverBg; el.style.color = textPrimary; }
-								}}
-								onmouseleave={(e) => {
-									const el = e.currentTarget as HTMLElement;
-									if (!isChildActive(child)) { el.style.background = 'transparent'; el.style.color = textMuted; }
-								}}
-							>
-								<div class="w-1 h-1 rounded-full flex-shrink-0" style="background:currentColor; opacity:0.5;"></div>
-								{child.label}
-							</button>
+							{#if child.children}
+								<!-- Sub-group: foldable header -->
+								<button
+									onclick={() => toggleSubAccordion(child.id)}
+									class="flex w-full items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors duration-150"
+									style="
+										color: {isSubGroupActive(child) ? accent : textSecondary};
+										background: {isSubGroupActive(child) ? accentTint : 'transparent'};
+										font-size: 13px; font-weight: 500;
+									"
+									onmouseenter={(e) => {
+										const el = e.currentTarget as HTMLElement;
+										if (!isSubGroupActive(child)) { el.style.background = hoverBg; el.style.color = textPrimary; }
+									}}
+									onmouseleave={(e) => {
+										const el = e.currentTarget as HTMLElement;
+										if (!isSubGroupActive(child)) { el.style.background = 'transparent'; el.style.color = isSubGroupActive(child) ? accent : textSecondary; }
+									}}
+								>
+									<span class="flex-1 text-left truncate">{child.label}</span>
+									<ChevronDownIcon
+										class="flex-shrink-0 transition-transform duration-200"
+										style="width:12px; height:12px; transform: rotate({subAccordionOpen[child.id] ? '180deg' : '0deg'});"
+									/>
+								</button>
+								<!-- Grandchildren -->
+								{#if subAccordionOpen[child.id]}
+									<div class="ml-3" style="border-left:2px solid {borderColor};">
+										{#each child.children as gc (gc.id)}
+											<button
+												onclick={() => selectItem(item, gc)}
+												class="flex w-full items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors duration-150"
+												style="
+													color: {isGrandchildActive(gc) ? accent : textMuted};
+													background: {isGrandchildActive(gc) ? accentTint : 'transparent'};
+													font-size: 13px;
+												"
+												onmouseenter={(e) => {
+													const el = e.currentTarget as HTMLElement;
+													if (!isGrandchildActive(gc)) { el.style.background = hoverBg; el.style.color = textPrimary; }
+												}}
+												onmouseleave={(e) => {
+													const el = e.currentTarget as HTMLElement;
+													if (!isGrandchildActive(gc)) { el.style.background = 'transparent'; el.style.color = textMuted; }
+												}}
+											>
+												<div class="w-1 h-1 rounded-full flex-shrink-0" style="background:currentColor; opacity:0.5;"></div>
+												{gc.label}
+											</button>
+										{/each}
+									</div>
+								{/if}
+							{:else}
+								<!-- Flat leaf child (existing behaviour) -->
+								<button
+									onclick={() => selectItem(item, child)}
+									class="flex w-full items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors duration-150"
+									style="
+										color: {isChildActive(child) ? accent : textMuted};
+										background: {isChildActive(child) ? accentTint : 'transparent'};
+										font-size: 13px;
+									"
+									onmouseenter={(e) => {
+										const el = e.currentTarget as HTMLElement;
+										if (!isChildActive(child)) { el.style.background = hoverBg; el.style.color = textPrimary; }
+									}}
+									onmouseleave={(e) => {
+										const el = e.currentTarget as HTMLElement;
+										if (!isChildActive(child)) { el.style.background = 'transparent'; el.style.color = textMuted; }
+									}}
+								>
+									<div class="w-1 h-1 rounded-full flex-shrink-0" style="background:currentColor; opacity:0.5;"></div>
+									{child.label}
+								</button>
+							{/if}
 						{/each}
 					</div>
 				{/if}

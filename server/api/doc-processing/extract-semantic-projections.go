@@ -19,36 +19,37 @@ import (
 )
 
 type SemanticProjectionsProcessor struct {
-	InputStore           DocMetadataStore
-	Store                SemanticProjectionsStore
-	Extractor            LLMJSONExtractor
-	Logger               ApiTypes.JimoLogger
-	Now                  func() time.Time
-	CandidatePromptText  string
-	CandidatePromptRef   string
-	CandidatePromptPath  string
-	CandidatePromptErr   error
-	CandidateModelRef    string
+	InputStore            DocMetadataStore
+	Store                 SemanticProjectionsStore
+	Extractor             LLMJSONExtractor
+	Logger                ApiTypes.JimoLogger
+	ProcLogger            DocProcLogger
+	Now                   func() time.Time
+	CandidatePromptText   string
+	CandidatePromptRef    string
+	CandidatePromptPath   string
+	CandidatePromptErr    error
+	CandidateModelRef     string
 	CandidateModelCfgPath string
-	CandidateModelErr    error
-	CandidateModelName   string
-	CandidateModelCfg    structureModelConfig
-	FallbackModelRef     string
-	FallbackModelCfgPath string
-	FallbackModelErr     error
-	FallbackModelName    string
-	FallbackModelCfg     structureModelConfig
-	EnrichPromptText     string
-	EnrichPromptRef      string
-	EnrichPromptPath     string
-	EnrichPromptErr      error
-	EnrichModelRef       string
-	EnrichModelCfgPath   string
-	EnrichModelErr       error
-	EnrichModelName      string
-	EnrichModelCfg       structureModelConfig
-	ArtifactDir          string
-	ArtifactWebDir       string
+	CandidateModelErr     error
+	CandidateModelName    string
+	CandidateModelCfg     structureModelConfig
+	FallbackModelRef      string
+	FallbackModelCfgPath  string
+	FallbackModelErr      error
+	FallbackModelName     string
+	FallbackModelCfg      structureModelConfig
+	EnrichPromptText      string
+	EnrichPromptRef       string
+	EnrichPromptPath      string
+	EnrichPromptErr       error
+	EnrichModelRef        string
+	EnrichModelCfgPath    string
+	EnrichModelErr        error
+	EnrichModelName       string
+	EnrichModelCfg        structureModelConfig
+	ArtifactDir           string
+	ArtifactWebDir        string
 }
 
 type SemanticProjectionsStore interface {
@@ -71,10 +72,12 @@ type SaveSemanticProjectionsRequest struct {
 }
 
 type semanticProjectionExtractionResult struct {
-	Projections []map[string]any
-	SeqNos      []int
-	Language    string
-	ModelName   string
+	Projections   []map[string]any
+	SeqNos        []int
+	Language      string
+	ModelName     string
+	LLMCallCount  int
+	FallbackCount int
 }
 
 type semanticProjectionCandidate struct {
@@ -119,6 +122,7 @@ func NewSemanticProjectionsProcessor(
 		Store:                 store,
 		Extractor:             extractor,
 		Logger:                logger,
+		ProcLogger:            DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:                   time.Now,
 		CandidatePromptText:   candidatePromptText,
 		CandidatePromptRef:    candidatePromptRef,
@@ -222,7 +226,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 		p.persistSemanticProjectionsStatus(ctx, rec, start, fmt.Errorf("(MID_26052108) read line file for record_id=%d: %w", evt.RecordID, readErr))
 		return fmt.Errorf("(MID_26052109) failed reading line file, error:%w, path:%s", readErr, lineFilePath)
 	}
-	lines, parseErr := ParseInputLines(body)
+	lines, parseErr := ParseInputLinesIncludingTOC(body)
 	if parseErr != nil {
 		p.Logger.Error("parse input lines failed", "record_id", evt.RecordID, "error", parseErr)
 		p.persistSemanticProjectionsStatus(ctx, rec, start, fmt.Errorf("(MID_26052110) parse input lines for record_id=%d: %w", evt.RecordID, parseErr))
@@ -291,6 +295,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 		"num_chunks", len(chunks),
 	)
 	p.persistSemanticProjectionsStatus(ctx, rec, start, nil)
+	p.logSemanticProjectionsSummary(ctx, start, p.Now(), result, inserted, len(chunks))
 	return nil
 }
 
@@ -302,11 +307,12 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	candidates := make([]semanticProjectionCandidate, 0, len(chunks))
 	detectedLanguage := "unknown"
 	usedCandidateModel := strings.TrimSpace(p.CandidateModelName)
+	var llmCallCount, fallbackCount int
 
 	// Pass 1: extract semantic projection candidate from each chunk
 	for idx, chunk := range chunks {
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
-		startTime := time.Now()
+		callStart := p.Now()
 		p.Logger.Info("semantic projection - start",
 			"record_id", recordID,
 			"chunk_idx", idx,
@@ -315,8 +321,16 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			"model_name", p.CandidateModelName,
 			"prompt", p.CandidatePromptRef,
 		)
+		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
 		userPrompt := buildSemanticProjectionCandidateUserPrompt(chunkText)
 		payload, modelName, err := p.extractCandidatePayloadWithFallback(ctx, userPrompt)
+		llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.CandidateModelName) && strings.TrimSpace(modelName) != "" {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, callID, "extract_semantic_projection_candidates", 1,
+			[]string{strings.TrimSpace(modelName)}, p.CandidatePromptRef,
+			payload, err, callStart, p.Now())
 		if err != nil {
 			p.Logger.Error("raw candidate LLM payload/error",
 				"record_id", recordID,
@@ -324,7 +338,8 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 				"seq_no", chunk.SeqNo,
 				"error", err,
 			)
-			return semanticProjectionExtractionResult{}, fmt.Errorf("(MID_26052120) extract semantic projection candidate for chunk seq=%d: %w", chunk.SeqNo, err)
+			return semanticProjectionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount},
+				fmt.Errorf("(MID_26052120) extract semantic projection candidate for chunk seq=%d: %w", chunk.SeqNo, err)
 		}
 		p.Logger.Info("semantic projection - end  ",
 			"record_id", recordID,
@@ -332,7 +347,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			"seq_no", chunk.SeqNo,
 			"semantic_projection_len", len(strings.TrimSpace(asString(payload["semantic_projection"]))),
 			"keywords_count", len(toStringSlice(payload["keywords"])),
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 
 		usedCandidateModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedCandidateModel))
@@ -354,23 +369,29 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	projections := make([]map[string]any, 0, len(candidates))
 	seqNos := make([]int, 0, len(candidates))
 	usedEnrichModel := strings.TrimSpace(p.EnrichModelName)
-	for _, cand := range candidates {
-		startTime := time.Now()
+	for enrichIdx, cand := range candidates {
+		callStart := p.Now()
 		p.Logger.Info("enrich semantic projection - start",
 			"record_id", recordID,
 			"seq_no", cand.SeqNo,
 			"model_name", p.EnrichModelName,
 			"prompt", p.EnrichPromptRef,
 		)
+		callID := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), enrichIdx)
 		userPrompt := buildSemanticProjectionEnrichUserPrompt(cand)
 		payload, err := p.extractEnrichPayload(ctx, userPrompt)
+		llmCallCount++
+		p.logLLMCall(ctx, callID, "enrich_semantic_projections", 2,
+			[]string{strings.TrimSpace(p.EnrichModelName)}, p.EnrichPromptRef,
+			payload, err, callStart, p.Now())
 		if err != nil {
 			p.Logger.Error("enrichment payload error",
 				"record_id", recordID,
 				"seq_no", cand.SeqNo,
 				"error", err,
 			)
-			return semanticProjectionExtractionResult{}, fmt.Errorf("(MID_26052121) enrich semantic projection seq=%d: %w", cand.SeqNo, err)
+			return semanticProjectionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount},
+				fmt.Errorf("(MID_26052121) enrich semantic projection seq=%d: %w", cand.SeqNo, err)
 		}
 		if lang := strings.TrimSpace(asString(payload["language"])); lang != "" && detectedLanguage == "unknown" {
 			detectedLanguage = lang
@@ -380,7 +401,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			"seq_no", cand.SeqNo,
 			"language", asString(payload["language"]),
 			"descriptive_name", asString(payload["descriptive_name"]),
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 		normalized := normalizeSemanticProjection(payload)
 		projections = append(projections, normalized)
@@ -395,11 +416,95 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		"language", detectedLanguage,
 	)
 	return semanticProjectionExtractionResult{
-		Projections: projections,
-		SeqNos:      seqNos,
-		Language:    detectedLanguage,
-		ModelName:   firstNonEmptyTrimmed(usedEnrichModel, usedCandidateModel, p.EnrichModelName),
+		Projections:   projections,
+		SeqNos:        seqNos,
+		Language:      detectedLanguage,
+		ModelName:     firstNonEmptyTrimmed(usedEnrichModel, usedCandidateModel, p.EnrichModelName),
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
 	}, nil
+}
+
+func (p *SemanticProjectionsProcessor) logLLMCall(
+	ctx context.Context,
+	callID, activity string,
+	pass int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	rec := DocProcLogRecord{
+		DocProcName:  p.Name(),
+		ModelNames:   modelNames,
+		PromptName:   promptName,
+		Pass:         &pass,
+		LLMCallID:    &callID,
+		ActivityName: &activity,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	}
+}
+
+func (p *SemanticProjectionsProcessor) logSemanticProjectionsSummary(
+	ctx context.Context,
+	start, end time.Time,
+	result semanticProjectionExtractionResult,
+	inserted int64,
+	numChunks int,
+) {
+	extraInfo := map[string]any{
+		"total_projections": inserted,
+		"candidates_count":  len(result.Projections),
+		"llm_call_count":    result.LLMCallCount,
+		"fallback_count":    result.FallbackCount,
+		"num_chunks":        numChunks,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+
+	seen := map[string]struct{}{}
+	modelNames := make([]string, 0, 3)
+	for _, n := range []string{p.CandidateModelName, p.FallbackModelName, p.EnrichModelName} {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		modelNames = append(modelNames, n)
+	}
+
+	promptName := firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef)
+	rec := DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogSummary(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
 }
 
 func (p *SemanticProjectionsProcessor) extractCandidatePayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
@@ -614,18 +719,9 @@ func (p *SemanticProjectionsProcessor) indexSemanticProjections(recordID int64, 
 		if projID == "" {
 			continue
 		}
-		if pathsRaw, ok := proj["category_paths"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsRaw) {
-				if err := writeSemanticProjectionTreeEntry(p.Logger, dir, projID, entry, now); err != nil {
-					return fmt.Errorf("(MID_26052154) index semantic projection %s path: %w", projID, err)
-				}
-			}
-		}
-		if pathsEnRaw, ok := proj["category_paths_en"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsEnRaw) {
-				if err := writeSemanticProjectionTreeEntry(p.Logger, dir, projID, entry, now); err != nil {
-					return fmt.Errorf("(MID_26052155) index semantic projection %s en path: %w", projID, err)
-				}
+		for _, pair := range pairCategoryPathEntries(proj["category_paths"], proj["category_paths_en"]) {
+			if err := writeSemanticProjectionTreeEntry(p.Logger, dir, projID, pair.Index, pair.Original, now); err != nil {
+				return fmt.Errorf("(MID_26052154) index semantic projection %s path: %w", projID, err)
 			}
 		}
 	}
@@ -636,21 +732,18 @@ func writeSemanticProjectionTreeEntry(
 	logger ApiTypes.JimoLogger,
 	treeRootDir string,
 	projID string,
-	pathEntry CategoryPathEntry,
+	indexEntry CategoryPathEntry,
+	originalEntry CategoryPathEntry,
 	now time.Time,
 ) error {
-	if len(pathEntry.Nodes) == 0 {
+	leafDir, err := categoryTreeLeafDirForEntry(logger, treeRootDir, indexEntry, originalEntry, now)
+	if err != nil {
+		return err
+	}
+	if leafDir == "" {
 		return nil
 	}
-	currentDir := treeRootDir
-	for _, node := range pathEntry.Nodes {
-		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
-		if err != nil {
-			return err
-		}
-		currentDir = subdir
-	}
-	return upsertSemanticProjectionToLeafDir(currentDir, projID)
+	return upsertSemanticProjectionToLeafDir(leafDir, projID)
 }
 
 func upsertSemanticProjectionToLeafDir(leafDir string, projID string) error {
@@ -904,10 +997,10 @@ INSERT INTO kb.semantic_projections (
 		categoryPathsJSON, _ := json.Marshal(proj["category_paths"])
 
 		var (
-			descriptiveNameEn    any
-			keywordsEnVal        any
-			semanticProjEnVal    any
-			categoryPathsEnVal   any
+			descriptiveNameEn  any
+			keywordsEnVal      any
+			semanticProjEnVal  any
+			categoryPathsEnVal any
 		)
 		if !isEnglish {
 			descriptiveNameEn = strings.TrimSpace(asString(proj["descriptive_name_en"]))

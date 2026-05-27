@@ -3,10 +3,12 @@ package docprocessing
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -17,7 +19,9 @@ type ChunkingProcessor struct {
 	Service    interface {
 		HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error
 	}
-	Logger ApiTypes.JimoLogger
+	Logger     ApiTypes.JimoLogger
+	ProcLogger DocProcLogger
+	Now        func() time.Time
 }
 
 func NewChunkingProcessor(
@@ -34,6 +38,8 @@ func NewChunkingProcessor(
 		InputStore: inputStore,
 		Service:    service,
 		Logger:     logger,
+		ProcLogger: DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		Now:        time.Now,
 	}
 }
 
@@ -49,7 +55,59 @@ func (p *ChunkingProcessor) LogName() string {
 }
 
 func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) error {
-	return runChunkingServiceEvent(ctx, payload, p.InputStore, p.Service, p.Logger)
+	start := p.Now()
+	procErr := runChunkingServiceEvent(ctx, payload, p.InputStore, p.Service, p.Logger)
+	p.logSummary(ctx, start, p.Now(), procErr)
+	return procErr
+}
+
+func (p *ChunkingProcessor) logSummary(ctx context.Context, start, end time.Time, procErr error) {
+	if p.ProcLogger.DB == nil {
+		return
+	}
+	extraInfo, _ := json.Marshal(map[string]interface{}{})
+	extraStr := docProcSummaryExtraInfoJSON(p.Service, extraInfo)
+	var errStr *string
+	if procErr != nil {
+		s := procErr.Error()
+		errStr = &s
+	}
+	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+		DocProcName:   p.LogName(),
+		ModelNames:    docProcSummaryModelNames(p.Service),
+		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
+		EntryType:     "doc_proc_summary",
+		ExtraInfoJSON: &extraStr,
+		Errors:        errStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
+}
+
+func docProcSummaryModelNames(service any) []string {
+	if provider, ok := service.(docProcModelNamesProvider); ok {
+		return dedupeNonEmpty(provider.DocProcModelNames())
+	}
+	return nil
+}
+
+func docProcSummaryPromptNames(service any) []string {
+	if provider, ok := service.(docProcPromptNamesProvider); ok {
+		return dedupeNonEmpty(provider.DocProcPromptNames())
+	}
+	return nil
+}
+
+func docProcSummaryExtraInfoJSON(service any, fallback []byte) string {
+	if provider, ok := service.(docProcSummaryExtraInfoProvider); ok {
+		if extra := provider.DocProcSummaryExtraInfo(); len(extra) > 0 {
+			if bs, err := json.Marshal(extra); err == nil {
+				return string(bs)
+			}
+		}
+	}
+	return string(fallback)
 }
 
 func runChunkingServiceEvent(ctx context.Context, payload []byte, inputStore DocMetadataStore, service chunkingHandler, logger ApiTypes.JimoLogger) error {

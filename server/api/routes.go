@@ -328,6 +328,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/skills", kbhandler.CreateSkill)
 	apiGroup.PUT("/kb/skills/:id", kbhandler.UpdateSkill)
 	apiGroup.DELETE("/kb/skills/:id", kbhandler.DeleteSkillRecord)
+	apiGroup.GET("/kb/doc-proc-logs", kbhandler.ListDocProcLogs)
+	apiGroup.DELETE("/kb/doc-proc-logs/old", kbhandler.DeleteOldDocProcLogs)
 	apiGroup.GET("/jetstream/monitor", jetstreamhandler.GetMonitor)
 	apiGroup.GET("/jetstream/subjects", jetstreamhandler.GetSubjects)
 	apiGroup.GET("/jetstream/nats-subjects", jetstreamhandler.ListStoredSubjects)

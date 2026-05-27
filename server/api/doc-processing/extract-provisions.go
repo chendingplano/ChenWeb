@@ -23,6 +23,7 @@ type ProvisionsProcessor struct {
 	Store                ProvisionsStore
 	Extractor            LLMJSONExtractor
 	Logger               ApiTypes.JimoLogger
+	ProcLogger           DocProcLogger
 	Now                  func() time.Time
 	PromptText           string
 	PromptRef            string
@@ -63,10 +64,12 @@ type SaveProvisionsRequest struct {
 }
 
 type provisionExtractionResult struct {
-	ExtractID  string
-	Language   string
-	Provisions []map[string]any
-	ModelName  string
+	ExtractID     string
+	Language      string
+	Provisions    []map[string]any
+	ModelName     string
+	LLMCallCount  int
+	FallbackCount int
 }
 
 func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *ProvisionsProcessor {
@@ -83,6 +86,7 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		Store:                store,
 		Extractor:            extractor,
 		Logger:               logger,
+		ProcLogger:           DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:                  time.Now,
 		PromptText:           promptText,
 		PromptRef:            promptRef,
@@ -219,7 +223,88 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		"blocks", len(blocks),
 	)
 	p.persistProvisionsStatus(ctx, rec, start, nil)
+	p.logProvisionsSummary(ctx, start, p.Now(), result, inserted, len(blocks))
 	return nil
+}
+
+func (p *ProvisionsProcessor) logLLMCall(
+	ctx context.Context,
+	callID, activity string,
+	pass int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	rec := DocProcLogRecord{
+		DocProcName:  p.Name(),
+		ModelNames:   modelNames,
+		PromptName:   promptName,
+		Pass:         &pass,
+		LLMCallID:    &callID,
+		ActivityName: &activity,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	}
+}
+
+func (p *ProvisionsProcessor) logProvisionsSummary(
+	ctx context.Context,
+	start, end time.Time,
+	result provisionExtractionResult,
+	inserted int64,
+	numBlocks int,
+) {
+	extraInfo := map[string]any{
+		"total_provisions": inserted,
+		"llm_call_count":   result.LLMCallCount,
+		"fallback_count":   result.FallbackCount,
+		"num_blocks":       numBlocks,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+
+	seen := map[string]struct{}{}
+	modelNames := make([]string, 0, 2)
+	for _, n := range []string{p.ModelName, p.FallbackModelName} {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		modelNames = append(modelNames, n)
+	}
+
+	rec := DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    p.PromptRef,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogSummary(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
 }
 
 func (p *ProvisionsProcessor) resolveBlocks(ctx context.Context, evt LineFileGeneratedEvent, rec DocMetadataInputRecord) ([]Block, error) {
@@ -253,16 +338,17 @@ func (p *ProvisionsProcessor) blockSize() int {
 }
 
 func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
-	ctx context.Context, 
+	ctx context.Context,
 	blocks []Block,
 	record_id int64) (provisionExtractionResult, error) {
 	extractID := p.Now().Format("20060102-150405")
 	language := ""
 	provisions := make([]map[string]any, 0, len(blocks))
 	usedModelName := strings.TrimSpace(p.ModelName)
+	var llmCallCount, fallbackCount int
 
 	for idx, block := range blocks {
-		startTime := time.Now()
+		callStart := p.Now()
 		p.Logger.Info("extract provisions - to call llm",
 			"idx", idx,
 			"total", len(blocks),
@@ -270,10 +356,19 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 			"model name", p.ModelName,
 			"prompt name", p.PromptRef,
 		)
+		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), idx)
 		payload, modelName, err := p.extractProvisionPayloadWithFallback(ctx, block)
+		llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != "" {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, callID, "extract_provisions", 1,
+			[]string{strings.TrimSpace(modelName)}, p.PromptRef,
+			payload, err, callStart, p.Now())
 		if err != nil {
 			p.Logger.Error("failed extracting", "error", err)
-			return provisionExtractionResult{}, fmt.Errorf("(MID_26050531) extract provisions via llm: %w", err)
+			return provisionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount},
+				fmt.Errorf("(MID_26050531) extract provisions via llm: %w", err)
 		}
 		usedModelName = strings.TrimSpace(modelName)
 		if language == "" {
@@ -281,18 +376,20 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 		}
 		raw := payload["provisions"].([]any)
 		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(block), blockLineText(block))...)
-		p.Logger.Info("extract provisions - llm responded", 
+		p.Logger.Info("extract provisions - llm responded",
 			"# provisions", len(provisions),
-			"ms_used", time.Since(startTime).Milliseconds())
+			"ms_used", time.Since(callStart).Milliseconds())
 	}
 	if language == "" {
 		language = "unknown"
 	}
 	return provisionExtractionResult{
-		ExtractID:  extractID,
-		Language:   language,
-		Provisions: provisions,
-		ModelName:  firstNonEmptyTrimmed(usedModelName, p.ModelName),
+		ExtractID:     extractID,
+		Language:      language,
+		Provisions:    provisions,
+		ModelName:     firstNonEmptyTrimmed(usedModelName, p.ModelName),
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
 	}, nil
 }
 
@@ -766,14 +863,9 @@ func (p *ProvisionsProcessor) indexProvisionsInTree(recordID int64, provisions [
 			continue
 		}
 		entry := fmt.Sprintf("%d_%d", recordID, provID)
-		for _, segs := range decodeProvisionCategoryPathSegments(prov["category_paths"]) {
-			if err := upsertProvisionIDToLeafDir(p.Logger, dir, segs, entry, now); err != nil {
+		for _, pair := range pairCategoryPathEntries(prov["category_paths"], prov["category_paths_en"]) {
+			if err := upsertProvisionIDToLeafDir(p.Logger, dir, pair.Index, pair.Original, entry, now); err != nil {
 				return fmt.Errorf("(MID_26050564) index provision %s: %w", entry, err)
-			}
-		}
-		for _, segs := range decodeProvisionCategoryPathSegments(prov["category_paths_en"]) {
-			if err := upsertProvisionIDToLeafDir(p.Logger, dir, segs, entry, now); err != nil {
-				return fmt.Errorf("(MID_26050565) index provision %s en: %w", entry, err)
 			}
 		}
 	}
@@ -812,13 +904,14 @@ func removeProvisionTreeRecord(baseDir string, recordID int64) error {
 	})
 }
 
-func upsertProvisionIDToLeafDir(_ ApiTypes.JimoLogger, baseDir string, segments []string, provisionID string, now time.Time) error {
-	if len(segments) == 0 {
+func upsertProvisionIDToLeafDir(_ ApiTypes.JimoLogger, baseDir string, indexEntry CategoryPathEntry, originalEntry CategoryPathEntry, provisionID string, now time.Time) error {
+	if len(indexEntry.Nodes) == 0 {
 		return nil
 	}
 	currentDir := baseDir
-	for _, seg := range segments {
-		normalizedSeg := normalizeCategorySegment(seg)
+	for i := range indexEntry.Nodes {
+		indexNode, originalNode := categoryNodePair(indexEntry, originalEntry, i)
+		normalizedSeg := normalizeCategorySegment(indexNode.Name)
 		if normalizedSeg == "" {
 			return fmt.Errorf("(MID_26050566) empty category segment for provision %s", provisionID)
 		}
@@ -826,7 +919,16 @@ func upsertProvisionIDToLeafDir(_ ApiTypes.JimoLogger, baseDir string, segments 
 		if err := os.MkdirAll(subdir, 0o755); err != nil {
 			return err
 		}
-		if err := upsertCategoryDirMetadata(subdir, seg, "provision", 0, nil, now); err != nil {
+		if err := upsertCategoryDirMetadataLocalized(
+			subdir,
+			firstNonEmptyTrimmed(originalNode.Name, indexNode.Name),
+			indexNode.Name,
+			"provision",
+			maxFloat(indexNode.Confidence, originalNode.Confidence),
+			trimStringSlice(originalNode.Keywords),
+			localizedEnglishKeywords(originalNode.Name, indexNode.Name, indexNode.Keywords),
+			now,
+		); err != nil {
 			return err
 		}
 		currentDir = subdir
@@ -849,60 +951,6 @@ func upsertProvisionIDToLeafDir(_ ApiTypes.JimoLogger, baseDir string, segments 
 	existing = append(existing, provisionID)
 	sort.Strings(existing)
 	return os.WriteFile(leaf, []byte(strings.Join(existing, "\n")), 0o644)
-}
-
-func decodeProvisionCategoryPathSegments(value any) [][]string {
-	if value == nil {
-		return nil
-	}
-	bs, err := json.Marshal(value)
-	if err != nil || string(bs) == "null" || string(bs) == "[]" {
-		return nil
-	}
-	type segNode struct {
-		Name string `json:"name"`
-	}
-	type pathPayload struct {
-		CategoryPath []segNode `json:"category_path"`
-	}
-	var format1 []pathPayload
-	if err := json.Unmarshal(bs, &format1); err == nil && len(format1) > 0 {
-		out := make([][]string, 0, len(format1))
-		for _, p := range format1 {
-			if len(p.CategoryPath) == 0 {
-				continue
-			}
-			names := make([]string, 0, len(p.CategoryPath))
-			for _, seg := range p.CategoryPath {
-				if name := strings.TrimSpace(seg.Name); name != "" {
-					names = append(names, name)
-				}
-			}
-			if len(names) > 0 {
-				out = append(out, names)
-			}
-		}
-		if len(out) > 0 {
-			return out
-		}
-	}
-	var format2 [][]segNode
-	if err := json.Unmarshal(bs, &format2); err == nil {
-		out := make([][]string, 0, len(format2))
-		for _, path := range format2 {
-			names := make([]string, 0, len(path))
-			for _, seg := range path {
-				if name := strings.TrimSpace(seg.Name); name != "" {
-					names = append(names, name)
-				}
-			}
-			if len(names) > 0 {
-				out = append(out, names)
-			}
-		}
-		return out
-	}
-	return nil
 }
 
 func (p *ProvisionsProcessor) writeProvisionsArtifact(recordID int64, rec DocMetadataInputRecord, provisions []map[string]any) error {

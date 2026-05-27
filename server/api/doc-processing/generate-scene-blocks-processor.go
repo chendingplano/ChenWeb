@@ -25,6 +25,7 @@ type SceneBlocksProcessor struct {
 	Store              SceneObjectsStore
 	Extractor          LLMJSONExtractor
 	Logger             ApiTypes.JimoLogger
+	ProcLogger         DocProcLogger
 	Now                func() time.Time
 	MentionPromptText  string
 	MentionPromptRef   string
@@ -61,8 +62,11 @@ type SceneBlocksProcessor struct {
 }
 
 type sceneExtractionResult struct {
-	SceneBlocks []map[string]any
-	ModelName   string
+	SceneBlocks   []map[string]any
+	ModelName     string
+	LLMCallCount  int
+	FallbackCount int
+	MentionsCount int
 }
 
 type sceneCandidateMention struct {
@@ -164,6 +168,7 @@ func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStor
 		Store:              store,
 		Extractor:          extractor,
 		Logger:             logger,
+		ProcLogger:         DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 		Now:                time.Now,
 		MentionPromptText:  mentionPromptText,
 		MentionPromptRef:   mentionPromptRef,
@@ -345,6 +350,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		"prompt_name", p.RelationPromptRef)
 
 	p.persistSceneBlocksStatus(ctx, rec, start, nil)
+	p.logSceneBlocksSummary(ctx, start, p.Now(), result, len(chunks))
 	return nil
 }
 
@@ -377,13 +383,16 @@ func buildSceneBlocksChunkText(chunk Chunk) string {
 */
 
 func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
-	ctx context.Context, 
+	ctx context.Context,
 	record_id int64,
 	chunks []Chunk) (sceneExtractionResult, error) {
+	eventID := eventIDFromContext(ctx)
 	mentions := make([]sceneCandidateMention, 0, len(chunks))
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
+	llmCallCount := 0
+	fallbackCount := 0
 	for idx, chunk := range chunks {
-		startTime := time.Now()
+		callStart := p.Now()
 		p.Logger.Info("extract scene - start",
 			"idx", idx,
 			"record_id", record_id,
@@ -392,15 +401,20 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 			"prompt_name", p.MentionPromptRef,
 		)
 		payload, modelName, err := p.extractScenePayloadWithFallback(ctx, buildSceneCandidateUserPrompt(chunk), p.MentionPromptText, p.MentionPromptRef, p.MentionModelName, p.MentionModelCfg)
+		llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != "" {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_c%d", eventID, idx), "extract_scene_block_candidates", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now())
 		if err != nil {
-			return sceneExtractionResult{}, fmt.Errorf("(MID_26051809) extract scene candidates via llm for chunk %d: %w", chunk.SeqNo, err)
+			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051809) extract scene candidates via llm for chunk %d: %w", chunk.SeqNo, err)
 		}
 		usedMentionModel = strings.TrimSpace(modelName)
 		raw, _ := payload["candidates"].([]any)
 		mentions = append(mentions, normalizeSceneCandidateMentions(raw, chunk)...)
 		p.Logger.Info("extract scene - end  ",
 			"candidates_so_far", len(mentions),
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 	}
 
@@ -414,7 +428,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 	sceneBlocks := make([]map[string]any, 0, len(candidates))
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
-		startTime := time.Now()
+		callStart := p.Now()
 		p.Logger.Info("enrich scene - llm start",
 			"idx", idx,
 			"c_id", candidate.CandidateID,
@@ -422,8 +436,13 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 			"prompt_name", p.RelationPromptRef,
 		)
 		payload, modelName, err := p.extractScenePayloadWithFallback(ctx, buildSceneRelationUserPrompt(candidate), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
+		llmCallCount++
+		if strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != "" {
+			fallbackCount++
+		}
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now())
 		if err != nil {
-			return sceneExtractionResult{}, fmt.Errorf("(MID_26051827) enrich scene blocks via llm for candidate %s: %w", candidate.CandidateID, err)
+			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051827) enrich scene blocks via llm for candidate %s: %w", candidate.CandidateID, err)
 		}
 		usedRelationModel = strings.TrimSpace(modelName)
 		raw, _ := payload["scene_blocks"].([]any)
@@ -433,7 +452,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 			"c_id", candidate.CandidateID,
 			"blocks_for_candidate", len(normalized),
 			"scene_blocks_so_far", len(sceneBlocks),
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 	}
 
@@ -446,9 +465,92 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 	)
 
 	return sceneExtractionResult{
-		SceneBlocks: sceneBlocks,
-		ModelName:   firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
+		SceneBlocks:   sceneBlocks,
+		ModelName:     firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
+		MentionsCount: len(mentions),
 	}, nil
+}
+
+func (p *SceneBlocksProcessor) logLLMCall(
+	ctx context.Context,
+	callID, activity string,
+	pass int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	if p.ProcLogger.DB == nil {
+		return
+	}
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	rec := DocProcLogRecord{
+		DocProcName:  p.Name(),
+		ModelNames:   modelNames,
+		PromptName:   promptName,
+		Pass:         &pass,
+		LLMCallID:    &callID,
+		ActivityName: &activity,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	}
+}
+
+func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start, end time.Time, result sceneExtractionResult, numChunks int) {
+	if p.ProcLogger.DB == nil {
+		return
+	}
+	modelNames := make([]string, 0, 3)
+	for _, n := range []string{
+		strings.TrimSpace(p.MentionModelName),
+		strings.TrimSpace(p.FallbackModelName),
+		strings.TrimSpace(p.RelationModelName),
+	} {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if !slices.Contains(modelNames, n) {
+			modelNames = append(modelNames, n)
+		}
+	}
+	promptName := firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef)
+	extraInfo, _ := json.Marshal(map[string]interface{}{
+		"total_scene_blocks": len(result.SceneBlocks),
+		"mentions_count":     result.MentionsCount,
+		"llm_call_count":     result.LLMCallCount,
+		"fallback_count":     result.FallbackCount,
+		"num_chunks":         numChunks,
+	})
+	extraStr := string(extraInfo)
+	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		EntryType:     "doc_proc_summary",
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}); err != nil {
+		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}
 }
 
 func (p *SceneBlocksProcessor) extractScenePayloadWithFallback(ctx context.Context, inputText string, promptText string, promptRef string, modelName string, cfg structureModelConfig) (map[string]any, string, error) {
@@ -649,27 +751,27 @@ func buildSceneRelationUserPrompt(candidate sceneCandidate) string {
 	})
 	schema := map[string]any{
 		"scene_blocks": []map[string]any{{
-			"scene_id":      "stable_snake_case_identifier",
-			"scene_type":    "string",
-			"title":         "human readable title",
-			"summary":       "string",
-			"actors":        []any{},
-			"resources":     []any{},
-			"preconditions": []string{},
-			"triggers":      []string{},
-			"states":        []string{},
-			"actions":       []any{},
-			"constraints":   []string{},
-			"decisions":     []string{},
-			"outcomes":      []string{},
-			"failure_modes": []string{},
-			"root_causes":   []string{},
-			"resolutions":   []string{},
-			"relationships": []any{},
+			"scene_id":       "stable_snake_case_identifier",
+			"scene_type":     "string",
+			"title":          "human readable title",
+			"summary":        "string",
+			"actors":         []any{},
+			"resources":      []any{},
+			"preconditions":  []string{},
+			"triggers":       []string{},
+			"states":         []string{},
+			"actions":        []any{},
+			"constraints":    []string{},
+			"decisions":      []string{},
+			"outcomes":       []string{},
+			"failure_modes":  []string{},
+			"root_causes":    []string{},
+			"resolutions":    []string{},
+			"relationships":  []any{},
 			"discriminators": []any{},
-			"keywords":      []string{},
-			"confidence":    0.0,
-			"source_refs":   []any{},
+			"keywords":       []string{},
+			"confidence":     0.0,
+			"source_refs":    []any{},
 			"category_paths": []map[string]any{{
 				"category_path": []map[string]any{{
 					"name":       "string",
@@ -1127,37 +1229,24 @@ func indexSceneBlocksInTreeDir(logger ApiTypes.JimoLogger, treeRootDir string, r
 		if objectID == "" {
 			continue
 		}
-		if pathsRaw, ok := block["category_paths"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsRaw) {
-				if err := writeSceneBlockTreeEntry(logger, treeRootDir, objectID, entry, now); err != nil {
-					return fmt.Errorf("(MID_26051836) index scene block %s path: %w", objectID, err)
-				}
-			}
-		}
-		if pathsEnRaw, ok := block["category_paths_en"].([]any); ok {
-			for _, entry := range parseCategoryPathsArray(pathsEnRaw) {
-				if err := writeSceneBlockTreeEntry(logger, treeRootDir, objectID, entry, now); err != nil {
-					return fmt.Errorf("(MID_26051837) index scene block %s en path: %w", objectID, err)
-				}
+		for _, pair := range pairCategoryPathEntries(block["category_paths"], block["category_paths_en"]) {
+			if err := writeSceneBlockTreeEntry(logger, treeRootDir, objectID, pair.Index, pair.Original, now); err != nil {
+				return fmt.Errorf("(MID_26051836) index scene block %s path: %w", objectID, err)
 			}
 		}
 	}
 	return nil
 }
 
-func writeSceneBlockTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, objectID string, pathEntry CategoryPathEntry, now time.Time) error {
-	if len(pathEntry.Nodes) == 0 {
+func writeSceneBlockTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, objectID string, indexEntry CategoryPathEntry, originalEntry CategoryPathEntry, now time.Time) error {
+	leafDir, err := categoryTreeLeafDirForEntry(logger, treeRootDir, indexEntry, originalEntry, now)
+	if err != nil {
+		return err
+	}
+	if leafDir == "" {
 		return nil
 	}
-	currentDir := treeRootDir
-	for _, node := range pathEntry.Nodes {
-		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
-		if err != nil {
-			return err
-		}
-		currentDir = subdir
-	}
-	return upsertSceneBlockToLeafDir(currentDir, objectID)
+	return upsertSceneBlockToLeafDir(leafDir, objectID)
 }
 
 func upsertSceneBlockToLeafDir(leafDir string, objectID string) error {
@@ -1275,10 +1364,10 @@ func (s SceneObjectsSQLStore) SceneObjectsExist(ctx context.Context, inputRecord
 		return false, err
 	}
 	const q = `
-SELECT 1
-FROM kb.scene_objects
-WHERE input_record_id = $1
-LIMIT 1`
+	SELECT 1
+	FROM kb.scene_objects
+	WHERE input_record_id = $1
+	LIMIT 1`
 	var one int
 	err := s.DB.QueryRowContext(ctx, q, inputRecordID).Scan(&one)
 	if err == sql.ErrNoRows {
@@ -1323,46 +1412,46 @@ func (s SceneObjectsSQLStore) UpsertSceneObject(ctx context.Context, req UpsertS
 	}
 
 	const stmt = `
-INSERT INTO kb.scene_objects (
-	object_id, input_record_id, event_id, scene_id, scene_type, title, summary,
-	actors, resources, preconditions, triggers, states, actions, constraints,
-	decisions, outcomes, failure_modes, root_causes, resolutions, relationships,
-	discriminators, keywords, confidence, source_refs, model_name, prompt_name, ext_info,
-	create_time, modify_time
-) VALUES (
-	$1, $2, $3, $4, $5, $6, $7,
-	$8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb,
-	$15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb,
-	$21::jsonb, $22::jsonb, $23, $24::jsonb, $25, $26, $27::jsonb,
-	NOW(), NOW()
-)
-ON CONFLICT (input_record_id, object_id) DO UPDATE SET
-	event_id = EXCLUDED.event_id,
-	scene_id = EXCLUDED.scene_id,
-	scene_type = EXCLUDED.scene_type,
-	title = EXCLUDED.title,
-	summary = EXCLUDED.summary,
-	actors = EXCLUDED.actors,
-	resources = EXCLUDED.resources,
-	preconditions = EXCLUDED.preconditions,
-	triggers = EXCLUDED.triggers,
-	states = EXCLUDED.states,
-	actions = EXCLUDED.actions,
-	constraints = EXCLUDED.constraints,
-	decisions = EXCLUDED.decisions,
-	outcomes = EXCLUDED.outcomes,
-	failure_modes = EXCLUDED.failure_modes,
-	root_causes = EXCLUDED.root_causes,
-	resolutions = EXCLUDED.resolutions,
-	relationships = EXCLUDED.relationships,
-	discriminators = EXCLUDED.discriminators,
-	keywords = EXCLUDED.keywords,
-	confidence = EXCLUDED.confidence,
-	source_refs = EXCLUDED.source_refs,
-	model_name = EXCLUDED.model_name,
-	prompt_name = EXCLUDED.prompt_name,
-	ext_info = EXCLUDED.ext_info,
-	modify_time = NOW()`
+	INSERT INTO kb.scene_objects (
+		object_id, input_record_id, event_id, scene_id, scene_type, title, summary,
+		actors, resources, preconditions, triggers, states, actions, constraints,
+		decisions, outcomes, failure_modes, root_causes, resolutions, relationships,
+		discriminators, keywords, confidence, source_refs, model_name, prompt_name, ext_info,
+		create_time, modify_time
+	) VALUES (
+		$1, $2, $3, $4, $5, $6, $7,
+		$8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb,
+		$15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb,
+		$21::jsonb, $22::jsonb, $23, $24::jsonb, $25, $26, $27::jsonb,
+		NOW(), NOW()
+	)
+	ON CONFLICT (input_record_id, object_id) DO UPDATE SET
+		event_id = EXCLUDED.event_id,
+		scene_id = EXCLUDED.scene_id,
+		scene_type = EXCLUDED.scene_type,
+		title = EXCLUDED.title,
+		summary = EXCLUDED.summary,
+		actors = EXCLUDED.actors,
+		resources = EXCLUDED.resources,
+		preconditions = EXCLUDED.preconditions,
+		triggers = EXCLUDED.triggers,
+		states = EXCLUDED.states,
+		actions = EXCLUDED.actions,
+		constraints = EXCLUDED.constraints,
+		decisions = EXCLUDED.decisions,
+		outcomes = EXCLUDED.outcomes,
+		failure_modes = EXCLUDED.failure_modes,
+		root_causes = EXCLUDED.root_causes,
+		resolutions = EXCLUDED.resolutions,
+		relationships = EXCLUDED.relationships,
+		discriminators = EXCLUDED.discriminators,
+		keywords = EXCLUDED.keywords,
+		confidence = EXCLUDED.confidence,
+		source_refs = EXCLUDED.source_refs,
+		model_name = EXCLUDED.model_name,
+		prompt_name = EXCLUDED.prompt_name,
+		ext_info = EXCLUDED.ext_info,
+		modify_time = NOW()`
 
 	_, err := s.DB.ExecContext(ctx, stmt,
 		strings.TrimSpace(req.ObjectID),                  // $1

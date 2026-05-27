@@ -2,7 +2,6 @@ package docprocessing
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -575,20 +574,19 @@ func indexTopicsInTreeDir(
 	}
 	now := time.Now()
 	for _, topic := range topics {
-		paths := topic.CategoryPathDetail
-		if len(paths) == 0 && len(topic.CategoryPath) > 0 {
+		if len(topic.CategoryPathDetail) == 0 && len(topic.CategoryPath) > 0 {
 			// synthesise a path entry from the flat CategoryPath
 			nodes := make([]CategoryPathNode, 0, len(topic.CategoryPath))
 			for _, seg := range topic.CategoryPath {
 				nodes = append(nodes, CategoryPathNode{Name: seg})
 			}
-			paths = []CategoryPathEntry{{Nodes: nodes}}
+			topic.CategoryPathDetail = []CategoryPathEntry{{Nodes: nodes}}
 		}
-		for _, pathEntry := range paths {
-			if len(pathEntry.Nodes) == 0 {
+		for _, pair := range pairCategoryPathEntrySlices(topic.CategoryPathDetail, topic.CategoryPathDetailEn) {
+			if len(pair.Index.Nodes) == 0 {
 				continue
 			}
-			if err := indexTopicPathInTree(logger, treeRootDir, recordID, topic, pathEntry, now); err != nil {
+			if err := indexTopicPathInTree(logger, treeRootDir, recordID, topic, pair.Index, pair.Original, now); err != nil {
 				return fmt.Errorf("(MID_26050213) index topic %d path: %w", topic.SeqNo, err)
 			}
 		}
@@ -604,18 +602,18 @@ func indexTopicPathInTree(
 	treeRootDir string,
 	recordID int64,
 	topic TopicItem,
-	pathEntry CategoryPathEntry,
+	indexEntry CategoryPathEntry,
+	originalEntry CategoryPathEntry,
 	now time.Time,
 ) error {
-	currentDir := treeRootDir
-	for _, node := range pathEntry.Nodes {
-		subdir, err := findOrCreateCategorySubdir(logger, currentDir, node, now)
-		if err != nil {
-			return err
-		}
-		currentDir = subdir
+	leafDir, err := categoryTreeLeafDirForEntry(logger, treeRootDir, indexEntry, originalEntry, now)
+	if err != nil {
+		return err
 	}
-	return upsertTopicToLeafDir(currentDir, recordID, topic)
+	if leafDir == "" {
+		return nil
+	}
+	return upsertTopicToLeafDir(leafDir, recordID, topic)
 }
 
 // findOrCreateCategorySubdir: Given a node 'CategoryPathNode', it normalize the node name
@@ -625,10 +623,11 @@ func indexTopicPathInTree(
 func findOrCreateCategorySubdir(
 	logger ApiTypes.JimoLogger,
 	parentDir string,
-	node CategoryPathNode,
+	indexNode CategoryPathNode,
+	originalNode CategoryPathNode,
 	now time.Time,
 ) (string, error) {
-	normalizedName := normalizeCategorySegment(node.Name)
+	normalizedName := normalizeCategorySegment(indexNode.Name)
 	if normalizedName == "" {
 		return "", fmt.Errorf("(MID_26051401) category name is empty")
 	}
@@ -636,7 +635,7 @@ func findOrCreateCategorySubdir(
 	// Step 1: exact name match.
 	exactDir := filepath.Join(parentDir, normalizedName)
 	if _, err := os.Stat(exactDir); err == nil {
-		mergeTopicCategoryKeywords(filepath.Join(exactDir, topicCategoryMetaFileName), node.Keywords) //nolint:errcheck
+		mergeTopicCategoryMetadata(filepath.Join(exactDir, topicCategoryMetaFileName), indexNode, originalNode, now) //nolint:errcheck
 		return exactDir, nil
 	}
 
@@ -695,7 +694,7 @@ func findOrCreateCategorySubdir(
 		return "", fmt.Errorf("(MID_26050221) create category dir %q: %w", exactDir, err)
 	}
 
-	if err := writeTopicCategoryMetadata(exactDir, node, now); err != nil {
+	if err := writeTopicCategoryMetadata(exactDir, indexNode, originalNode, now); err != nil {
 		return "", fmt.Errorf("(MID_26050222) write metadata for %q: %w", exactDir, err)
 	}
 	return exactDir, nil
@@ -894,72 +893,11 @@ func writeTopicsFileEntries(path string, entries []topicsFileEntry) error {
 
 // writeTopicCategoryMetadata writes metadata.txt for a topic category directory
 // (spec 6.5.1). Does not include category_type (unlike the summary tree metadata).
-func writeTopicCategoryMetadata(dir string, node CategoryPathNode, now time.Time) error {
+func writeTopicCategoryMetadata(dir string, indexNode CategoryPathNode, originalNode CategoryPathNode, now time.Time) error {
 	metaPath := filepath.Join(dir, topicCategoryMetaFileName)
-	if _, err := os.Stat(metaPath); err == nil {
-		// Merge keywords into existing metadata without overwriting confidence/desc.
-		return mergeTopicCategoryKeywords(metaPath, node.Keywords)
-	}
-	keywords := node.Keywords
-	if keywords == nil {
-		keywords = []string{}
-	}
-	descJSON, _ := json.Marshal(node.Name)
-	kwJSON, err := json.Marshal(keywords)
-	if err != nil {
-		return err
-	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf(`"desc":%s`, string(descJSON)) + "\n")
-	b.WriteString(fmt.Sprintf(`"confidence":%s`, strconv.FormatFloat(node.Confidence, 'f', -1, 64)) + "\n")
-	b.WriteString(fmt.Sprintf(`"keywords":%s`, string(kwJSON)) + "\n")
-	b.WriteString(fmt.Sprintf(`"create_time":"%s"`, now.Format("20060102-150405")))
-	return os.WriteFile(metaPath, []byte(b.String()), 0o644)
+	return upsertLocalizedCategoryMetadata(metaPath, buildLocalizedCategoryMetadata(indexNode, originalNode, ""), now)
 }
 
-// mergeTopicCategoryKeywords adds any new keywords to the existing metadata.txt.
-func mergeTopicCategoryKeywords(metaPath string, newKeywords []string) error {
-	if len(newKeywords) == 0 {
-		return nil
-	}
-	body, err := os.ReadFile(metaPath)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(body), "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, `"keywords":`) {
-			continue
-		}
-		valJSON := strings.TrimSpace(strings.TrimPrefix(trimmed, `"keywords":`))
-		var existing []string
-		if err := json.Unmarshal([]byte(valJSON), &existing); err != nil {
-			return err
-		}
-		added := false
-		for _, kw := range newKeywords {
-			found := false
-			for _, e := range existing {
-				if e == kw {
-					found = true
-					break
-				}
-			}
-			if !found {
-				existing = append(existing, kw)
-				added = true
-			}
-		}
-		if !added {
-			return nil
-		}
-		kwJSON, err := json.Marshal(existing)
-		if err != nil {
-			return err
-		}
-		lines[i] = fmt.Sprintf(`"keywords":%s`, string(kwJSON))
-		return os.WriteFile(metaPath, []byte(strings.Join(lines, "\n")), 0o644)
-	}
-	return nil
+func mergeTopicCategoryMetadata(metaPath string, indexNode CategoryPathNode, originalNode CategoryPathNode, now time.Time) error {
+	return upsertLocalizedCategoryMetadata(metaPath, buildLocalizedCategoryMetadata(indexNode, originalNode, ""), now)
 }

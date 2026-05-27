@@ -39,7 +39,8 @@ SELECT id,
        COALESCE(result_filename, ''),
        COALESCE(staging_filename, ''),
        COALESCE(file_name, ''),
-       COALESCE(status::text, '[]')
+       COALESCE(status::text, '[]'),
+       COALESCE(doc_metadata->>'language', '')
 FROM kb.inputs
 WHERE id = $1`
 
@@ -51,6 +52,7 @@ WHERE id = $1`
 		&rec.StagingFilename,
 		&rec.FileName,
 		&rec.StatusRaw,
+		&rec.SourceLanguage,
 	)
 	if err != nil {
 		return InputRecord{}, err
