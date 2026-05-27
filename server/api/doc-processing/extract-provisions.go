@@ -410,18 +410,6 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 		"fallback_model", p.FallbackModelName,
 		"payload", payloadVal)
 
-	if isEmptyProvisionExtractionError(err) {
-		p.Logger.Warn("primary provisions extraction returned empty JSON; treating as empty result without fallback",
-			"model_name", p.ModelName,
-			"error", err,
-			"prompt_name", p.PromptRef,
-		)
-		return map[string]any{
-			"language":   "unknown",
-			"provisions": []any{},
-		}, strings.TrimSpace(p.ModelName), nil
-	}
-
 	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
 	if fallbackModelName == "" {
 		return nil, strings.TrimSpace(p.ModelName),
@@ -432,12 +420,21 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 		return nil, fallbackModelName, fmt.Errorf("(MID_26050544) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
-	p.Logger.Warn("primary provisions extraction failed; retrying fallback model",
-		"primary_model", p.ModelName,
-		"fallback_model", fallbackModelName,
-		"error", err,
-		"prompt_name", p.PromptRef,
-	)
+	if isEmptyProvisionExtractionError(err) {
+		p.Logger.Warn("primary provisions extraction returned empty JSON; retrying fallback model",
+			"primary_model", p.ModelName,
+			"fallback_model", fallbackModelName,
+			"error", err,
+			"prompt_name", p.PromptRef,
+		)
+	} else {
+		p.Logger.Warn("primary provisions extraction failed; retrying fallback model",
+			"primary_model", p.ModelName,
+			"fallback_model", fallbackModelName,
+			"error", err,
+			"prompt_name", p.PromptRef,
+		)
+	}
 
 	payload, fallbackErr := p.extractProvisionPayload(ctx, block, fallbackModelName)
 	if fallbackErr != nil {

@@ -919,16 +919,20 @@ func (s *FixedSizeChunkingService) generateSummary(
 	categoryPathItems := extractCategoryPathDetailFromLLM(parsed)
 	categoryPathItemsEn := extractCategoryPathDetailEnFromLLM(parsed)
 	if len(categoryPathItemsEn) == 0 && len(categoryPathItems) > 0 && !summaryCategoryPathsLookEnglish(categoryPathItems) {
-		s.Logger.Warn("summary category_paths_en missing for non-English categories; translating",
-			"record_id", recordID,
-			"level", level,
-			"seq", seqNo,
-		)
+		// s.Logger.Warn("summary category_paths_en missing for non-English categories; translating",
+		// 	"record_id", recordID,
+		// 	"level", level,
+		// 	"seq", seqNo,
+		// )
 		var translateErr error
+		ss := time.Now()
 		categoryPathItemsEn, translateErr = s.translateSummaryCategoryPaths(ctx, categoryPathItems)
 		if translateErr != nil {
 			return summaryGenerateResult{}, fmt.Errorf("(MID_26052702) translate summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
 		}
+		s.Logger.Info("===== Missing english version; translate",
+			"model_name", s.TranslationModelName,
+			"ms_used", time.Since(ss).Milliseconds())
 	}
 	var nodes []CategoryPathNode
 	if len(categoryPathItems) > 0 {

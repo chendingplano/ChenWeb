@@ -79,3 +79,45 @@ func TestListDocProcLogs_UsesMSUsedResponseShape(t *testing.T) {
 		t.Fatalf("unmet db expectations: %v", err)
 	}
 }
+
+func TestListDocProcLogs_AcceptsOrderParams(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_proc_logs ")).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+ORDER BY doc_proc_name ASC\s+LIMIT \$1 OFFSET \$2`
+	mock.ExpectQuery(listQuery).
+		WithArgs(50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "entry_type",
+			"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info", "ms_used", "create_time",
+		}).AddRow(
+			int64(18), "summary run", "blocking", `{}`, "topic-prompt", "doc_proc_summary",
+			nil, nil, nil, nil, nil, `{}`, int64(0), "2026-05-27T12:30:00+00:00",
+		))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/doc-proc-logs?order_by=doc_proc_name&order_dir=asc", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ListDocProcLogs(c); err != nil {
+		t.Fatalf("ListDocProcLogs returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}

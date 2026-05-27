@@ -50,6 +50,8 @@ type deleteOldLogsResponse struct {
 //	llm_call_id   - filter by LLM call ID
 //	page          - 1-based page number (default 1)
 //	page_size     - rows per page (default 50, max 500)
+//	order_by      - allowed sortable field (default create_time)
+//	order_dir     - asc or desc (default desc)
 func ListDocProcLogs(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_DPLG_001")
 	defer rc.Close()
@@ -67,6 +69,8 @@ func ListDocProcLogs(c echo.Context) error {
 		LLMCallID:   c.QueryParam("llm_call_id"),
 		Page:        page,
 		PageSize:    pageSize,
+		OrderBy:     c.QueryParam("order_by"),
+		OrderDir:    c.QueryParam("order_dir"),
 	}
 
 	logger.Info("list doc proc logs",
@@ -74,6 +78,8 @@ func ListDocProcLogs(c echo.Context) error {
 		"doc_proc_name", f.DocProcName,
 		"page", f.Page,
 		"page_size", f.PageSize,
+		"order_by", f.OrderBy,
+		"order_dir", f.OrderDir,
 	)
 
 	store := docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle}

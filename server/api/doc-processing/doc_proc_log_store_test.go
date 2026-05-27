@@ -115,3 +115,41 @@ func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
+
+func TestSQLStoreListDocProcLogs_OrdersByAllowedField(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_proc_logs ")).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+
+	rows := sqlmock.NewRows([]string{
+		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "entry_type",
+		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
+		"ms_used", "coalesce",
+	}).AddRow(
+		int64(10), "llm call", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", EntryTypeLLMCall,
+		2, "call-1", "enrich_metrics", nil, nil, `{"source":"test"}`, int64(9300), "2026-05-27T12:00:00+00:00",
+	)
+
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+ORDER BY ms_used ASC\s+LIMIT \$1 OFFSET \$2`
+	mock.ExpectQuery(listQuery).
+		WithArgs(50, 0).
+		WillReturnRows(rows)
+
+	store := SQLStore{DB: db}
+	_, _, err = store.ListDocProcLogs(context.Background(), DocProcLogFilter{
+		OrderBy:  "ms_used",
+		OrderDir: "asc",
+	})
+	if err != nil {
+		t.Fatalf("ListDocProcLogs: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}

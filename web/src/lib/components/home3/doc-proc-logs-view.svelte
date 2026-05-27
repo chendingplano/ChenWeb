@@ -4,6 +4,10 @@
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
+	import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
+	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
+	import ArrowUpDownIcon from '@lucide/svelte/icons/arrow-up-down';
+	import EyeIcon from '@lucide/svelte/icons/eye';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -45,6 +49,8 @@
 	let pageSize     = $state(50);
 	let loading      = $state(false);
 	let error        = $state('');
+	let orderBy      = $state('create_time');
+	let orderDir     = $state<'asc' | 'desc'>('desc');
 
 	// Filters
 	let filterEntryType   = $state('');
@@ -56,13 +62,24 @@
 	let retentionError      = $state('');
 	let retentionSuccess    = $state('');
 
-	// Expanded row for artifact/extra_info detail
+	// Selected row for artifact/extra_info detail
 	let expandedRowId = $state<number | null>(null);
 
 	const entryTypeOptions = [
 		{ value: '', label: 'All types' },
 		{ value: 'llm_call', label: 'LLM Call' },
 		{ value: 'doc_proc_summary', label: 'Summary' }
+	];
+
+	const sortableColumns = [
+		{ field: 'entry_type', label: 'Type' },
+		{ field: 'doc_proc_name', label: 'Processor' },
+		{ field: 'activity_name', label: 'Activity' },
+		{ field: 'model_names', label: 'Model(s)' },
+		{ field: 'pass', label: 'Pass' },
+		{ field: 'ms_used', label: 'Duration' },
+		{ field: 'create_time', label: 'Create Time' },
+		{ field: 'errors', label: 'Errors' }
 	];
 
 	// --- Data loading ---
@@ -72,7 +89,9 @@
 		try {
 			const params = new URLSearchParams({
 				page: String(page),
-				page_size: String(pageSize)
+				page_size: String(pageSize),
+				order_by: orderBy,
+				order_dir: orderDir
 			});
 			if (filterEntryType)   params.set('entry_type',    filterEntryType);
 			if (filterDocProcName) params.set('doc_proc_name', filterDocProcName.trim());
@@ -96,6 +115,17 @@
 	}
 
 	function applyFilters() {
+		page = 1;
+		load();
+	}
+
+	function setOrder(field: string) {
+		if (orderBy === field) {
+			orderDir = orderDir === 'asc' ? 'desc' : 'asc';
+		} else {
+			orderBy = field;
+			orderDir = 'asc';
+		}
 		page = 1;
 		load();
 	}
@@ -153,8 +183,17 @@
 		return !!(row.errors && row.errors.trim());
 	}
 
-	function toggleExpand(id: number) {
+	function showDetails(id: number) {
 		expandedRowId = expandedRowId === id ? null : id;
+	}
+
+	function prettyJSON(value?: string): string {
+		if (!value) return '';
+		try {
+			return JSON.stringify(JSON.parse(value), null, 2);
+		} catch {
+			return value;
+		}
 	}
 
 	let totalPages = $derived(Math.ceil(total / pageSize) || 1);
@@ -185,8 +224,9 @@
 		<!-- Filters row -->
 		<div class="mt-4 flex flex-wrap items-end gap-3">
 			<div>
-				<label style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Entry Type</label>
+				<label for="doc-proc-log-entry-type" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Entry Type</label>
 				<select
+					id="doc-proc-log-entry-type"
 					bind:value={filterEntryType}
 					class="rounded-lg px-3 py-2 text-sm"
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary};"
@@ -197,8 +237,9 @@
 				</select>
 			</div>
 			<div>
-				<label style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Processor Name</label>
+				<label for="doc-proc-log-processor-name" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Processor Name</label>
 				<input
+					id="doc-proc-log-processor-name"
 					type="text"
 					bind:value={filterDocProcName}
 					placeholder="e.g. extract_metrics"
@@ -264,21 +305,38 @@
 				<table class="w-full text-sm border-collapse">
 					<thead>
 						<tr style="border-bottom:1px solid {borderColor}; background:{surface2};">
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Type</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Processor</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Activity</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Model(s)</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Pass</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Duration</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Create Time</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Errors</th>
+							{#each sortableColumns as column}
+								<th class="text-left px-4 py-3" style="white-space:nowrap;">
+									<button
+										onclick={() => setOrder(column.field)}
+										class="inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-xs cursor-pointer"
+										style="
+											color:{orderBy === column.field ? textPrimary : textMuted};
+											background:{orderBy === column.field ? accent + '18' : 'transparent'};
+											border:1px solid {orderBy === column.field ? accent + '55' : 'transparent'};
+											font-weight:500;
+										"
+										title={`Order by ${column.label}`}
+										aria-label={`Order by ${column.label}`}
+									>
+										<span>{column.label}</span>
+										{#if orderBy === column.field && orderDir === 'asc'}
+											<ArrowUpIcon class="w-3.5 h-3.5" />
+										{:else if orderBy === column.field && orderDir === 'desc'}
+											<ArrowDownIcon class="w-3.5 h-3.5" />
+										{:else}
+											<ArrowUpDownIcon class="w-3.5 h-3.5" />
+										{/if}
+									</button>
+								</th>
+							{/each}
+							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Actions</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each logs as row (row.id)}
 							<tr
-								onclick={() => toggleExpand(row.id)}
-								class="cursor-pointer transition-colors"
+								class="transition-colors"
 								style="
 									border-bottom:1px solid {borderColor};
 									background:{expandedRowId === row.id ? accent + '10' : 'transparent'};
@@ -321,11 +379,23 @@
 										<span style="color:{success}; font-size:12px;">OK</span>
 									{/if}
 								</td>
+								<td class="px-4 py-3">
+									<button
+										onclick={() => showDetails(row.id)}
+										class="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs cursor-pointer"
+										style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
+										aria-expanded={expandedRowId === row.id}
+										aria-label={`Show details for log ${row.id}`}
+									>
+										<EyeIcon class="w-3.5 h-3.5" />
+										Details
+									</button>
+								</td>
 							</tr>
 
 							{#if expandedRowId === row.id}
 								<tr style="background:{surface2}; border-bottom:1px solid {borderColor};">
-									<td colspan="8" class="px-6 py-4">
+									<td colspan="9" class="px-6 py-4">
 										<div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(280px,1fr));">
 											{#if row.call_reason}
 												<div>
@@ -355,7 +425,7 @@
 											<div class="mt-3">
 												<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Extra Info</div>
 												<pre class="rounded-lg p-3 overflow-x-auto text-xs"
-													style="background:{cardBg}; border:1px solid {borderColor}; color:{textSecondary}; max-height:200px;">{JSON.stringify(JSON.parse(row.extra_info), null, 2)}</pre>
+													style="background:{cardBg}; border:1px solid {borderColor}; color:{textSecondary}; max-height:200px;">{prettyJSON(row.extra_info)}</pre>
 											</div>
 										{/if}
 
@@ -363,7 +433,7 @@
 											<div class="mt-3">
 												<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Artifact</div>
 												<pre class="rounded-lg p-3 overflow-x-auto text-xs"
-													style="background:{cardBg}; border:1px solid {borderColor}; color:{textSecondary}; max-height:200px;">{JSON.stringify(JSON.parse(row.artifact), null, 2)}</pre>
+													style="background:{cardBg}; border:1px solid {borderColor}; color:{textSecondary}; max-height:200px;">{prettyJSON(row.artifact)}</pre>
 											</div>
 										{/if}
 
@@ -395,10 +465,11 @@
 
 		<div class="flex flex-wrap items-end gap-3">
 			<div>
-				<label style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">
+				<label for="doc-proc-log-retention-days" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">
 					Retain logs for (days)
 				</label>
 				<input
+					id="doc-proc-log-retention-days"
 					type="number"
 					min="1"
 					bind:value={retentionDays}

@@ -35,6 +35,8 @@ type DocProcLogFilter struct {
 	LLMCallID   string // empty = all
 	Page        int    // 1-based; 0 treated as 1
 	PageSize    int    // 0 → 50
+	OrderBy     string // empty → create_time
+	OrderDir    string // empty → desc
 }
 
 // DocProcLogRow is a row returned from ListDocProcLogs.
@@ -180,6 +182,8 @@ func (s SQLStore) ListDocProcLogs(ctx context.Context, f DocProcLogFilter) ([]Do
 		return nil, 0, err
 	}
 
+	orderBy := docProcLogOrderBy(f.OrderBy)
+	orderDir := docProcLogOrderDir(f.OrderDir)
 	listArgs := append(args, pageSize, offset)
 	listStmt := `
 SELECT id, COALESCE(call_reason,''), doc_proc_name,
@@ -190,7 +194,7 @@ SELECT id, COALESCE(call_reason,''), doc_proc_name,
        ms_used, COALESCE(to_char(create_time, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), '')
 FROM kb.doc_proc_logs
 ` + whereClause + `
-ORDER BY create_time DESC
+ORDER BY ` + orderBy + ` ` + orderDir + `
 LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 
 	rows, err := db.QueryContext(ctx, listStmt, listArgs...)
@@ -236,6 +240,34 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 		results = append(results, r)
 	}
 	return results, total, rows.Err()
+}
+
+func docProcLogOrderBy(orderBy string) string {
+	switch strings.TrimSpace(orderBy) {
+	case "entry_type":
+		return "entry_type"
+	case "doc_proc_name":
+		return "doc_proc_name"
+	case "activity_name":
+		return "activity_name"
+	case "model_names":
+		return "model_names"
+	case "pass":
+		return "pass"
+	case "ms_used":
+		return "ms_used"
+	case "errors":
+		return "errors"
+	default:
+		return "create_time"
+	}
+}
+
+func docProcLogOrderDir(orderDir string) string {
+	if strings.EqualFold(strings.TrimSpace(orderDir), "asc") {
+		return "ASC"
+	}
+	return "DESC"
 }
 
 // DeleteOldDocProcLogs removes log entries older than retentionDays days.

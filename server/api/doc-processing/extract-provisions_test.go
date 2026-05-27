@@ -674,10 +674,19 @@ func TestProvisionsProcessor_TreatsEmptyFallbackJSONAsSuccess(t *testing.T) {
 	}
 }
 
-func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *testing.T) {
+func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseRetriesFallback(t *testing.T) {
 	extractor := &fakeJSONExtractor{
 		errs: []error{
 			errors.New("(MID_26050841) failed extracting provisions, error:(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+		},
+		outs: []map[string]any{
+			nil,
+			{
+				"language": "en",
+				"provisions": []any{
+					map[string]any{"provision": "The device shall log all alarms."},
+				},
+			},
 		},
 	}
 
@@ -696,17 +705,17 @@ func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t
 	if err != nil {
 		t.Fatalf("extractProvisionPayloadWithFallback: %v", err)
 	}
-	if extractor.structuredCalledCount != 1 {
-		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)
+	if extractor.structuredCalledCount != 2 {
+		t.Fatalf("structuredCalledCount=%d, want 2", extractor.structuredCalledCount)
 	}
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
-	if modelName != "deepseek-v4-flash" {
-		t.Fatalf("modelName=%q, want deepseek-v4-flash", modelName)
+	if modelName != "gpt-5.4-mini" {
+		t.Fatalf("modelName=%q, want gpt-5.4-mini", modelName)
 	}
-	if got := strings.TrimSpace(asString(payload["language"])); got != "unknown" {
-		t.Fatalf("language=%q, want unknown", got)
+	if got := strings.TrimSpace(asString(payload["language"])); got != "en" {
+		t.Fatalf("language=%q, want en", got)
 	}
 	if got := payload["provisions"]; got == nil {
 		t.Fatalf("provisions missing from payload: %#v", payload)
