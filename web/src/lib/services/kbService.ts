@@ -1210,6 +1210,7 @@ export type KbFrontendConfig = {
 	topic_types: string[];
 	mandatory_processors: string[];
 	required_processors: string[];
+	max_doc_process_pipelines: number;
 };
 
 export async function getKbFrontendConfig(): Promise<KbFrontendConfig> {

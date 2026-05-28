@@ -55,10 +55,8 @@ type LLMStructuredJSONExtractor interface {
 	ExtractStructuredJSON(ctx context.Context, in llmclients.JSONExtractionInput, contract llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error)
 }
 
-func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtractor, logger ApiTypes.JimoLogger) *ExtractDocMetadataProcessor {
-	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26041830")
-	}
+func NewExtractDocMetadataProcessor(store DocMetadataStore, client LLMJSONExtractor, _ ApiTypes.JimoLogger) *ExtractDocMetadataProcessor {
+	logger := loggerutil.CreateDefaultLogger("MID_26041830")
 	promptText, promptRef, promptPath, promptErr := loadDocMetaPromptFromEnv()
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_FALLBACK", "EXTRACT_DOCMETA_MODELS_FILE")
@@ -206,7 +204,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		return fmt.Errorf("(MID_26042416) update kb.inputs metadata: %w", err)
 	}
 
-	p.Logger.Info("doc metadata extracted",
+	p.Logger.Info("metadata extracted",
 		"record_id", rec.ID,
 		"input_file", inputPath,
 		"title", upd.Title,
@@ -214,6 +212,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		"authors", len(upd.Authors),
 		"model", p.ModelName,
 		"prompt", p.PromptRef,
+		"ms_used", time.Since(start).Milliseconds(),
 	)
 	p.logDocMetaSummary(ctx, start, p.Now(), llmCallCount, fallbackUsed, numPagesUsed, maxPage, nil)
 	return nil

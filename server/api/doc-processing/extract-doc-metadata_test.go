@@ -17,6 +17,7 @@ type fakeDocMetadataStore struct {
 	rec          DocMetadataInputRecord
 	getErr       error
 	updateReq    DocMetadataUpdate
+	updateReqs   []DocMetadataUpdate
 	updateCalled int
 }
 
@@ -36,6 +37,10 @@ func (f *fakeDocMetadataStore) UpdateInputMetadata(_ context.Context, id int64, 
 	}
 	f.updateCalled++
 	f.updateReq = req
+	f.updateReqs = append(f.updateReqs, req)
+	if strings.TrimSpace(req.StatusRaw) != "" {
+		f.rec.StatusRaw = req.StatusRaw
+	}
 	return nil
 }
 

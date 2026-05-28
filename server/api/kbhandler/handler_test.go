@@ -225,6 +225,27 @@ func TestBuildWhereClauseExtendedFilters(t *testing.T) {
 	}
 }
 
+func TestBuildWhereClauseRunningProcessorStatus(t *testing.T) {
+	whereSQL, args, err := buildWhereClause(listInputsFilters{
+		DocType:    "all",
+		ParseState: "all",
+		ProcStatus: "running",
+	})
+	if err != nil {
+		t.Fatalf("buildWhereClause returned error: %v", err)
+	}
+	want := "LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER($1)"
+	if !strings.Contains(whereSQL, want) {
+		t.Fatalf("expected whereSQL to contain %q, got: %s", want, whereSQL)
+	}
+	if strings.Contains(whereSQL, "operation") {
+		t.Fatalf("did not expect operation restriction for running status filter, got: %s", whereSQL)
+	}
+	if len(args) != 1 || args[0] != "running" {
+		t.Fatalf("args=%v, want [running]", args)
+	}
+}
+
 func TestListInputsSuccess(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

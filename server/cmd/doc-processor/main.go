@@ -129,11 +129,12 @@ func main() {
 	phaseProcessors := buildChunkPhaseProcessors(inputStore, fixedChunkSvc, logger)
 
 	control := &docprocessing.ControlService{
-		Logger:            logger,
-		InputStore:        inputStore,
-		EventStore:        docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
-		Now:               time.Now,
-		BlockingProcessor: docprocessing.NewBlockingProcessor(inputStore, logger),
+		Logger:                 logger,
+		InputStore:             inputStore,
+		EventStore:             docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+		Now:                    time.Now,
+		MaxDocProcessPipelines: docprocessing.MaxDocProcessPipelinesFromEnv(),
+		BlockingProcessor:      docprocessing.NewBlockingProcessor(inputStore, logger),
 		Processors: []docprocessing.Processor{
 			// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
 			docprocessing.NewStaticAnalyzerProcessor(inputStore, logger),
@@ -166,6 +167,7 @@ func main() {
 		"stream", streamName,
 		"chunking_method", docprocessing.ChunkingMethodFixed,
 		"generate_topics_method", docprocessing.ChunkingMethodTopic,
+		"max_doc_process_pipelines", control.MaxDocProcessPipelines,
 		"processors", []string{"blocking", "structure_analyzer", "static_analyzer", "chunking", "generate_summaries", "generate_topics", "extract_doc_metadata", "extract_metrics", "extract_provisions", "generate_scene_blocks", "extract_semantic_projections", "extract_structured_knowledge", "extract_entity_relation", "extract_products"},
 		"started_at", time.Now().Format(time.RFC3339),
 	)

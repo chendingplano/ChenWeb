@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -31,6 +33,11 @@ type ControlService struct {
 	InputStore        DocMetadataStore
 	EventStore        EventStore
 	Now               func() time.Time
+
+	MaxDocProcessPipelines int
+	pipelineSlots          chan struct{}
+	pipelineSlotsMax       int
+	pipelineSlotsMu        sync.Mutex
 }
 
 func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
@@ -50,7 +57,12 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 		}
 	}
 
+	releaseSlot, err := s.acquirePipelineSlot(ctx)
+	if err != nil {
+		return err
+	}
 	go func() {
+		defer releaseSlot()
 		procStart := s.now()
 		procErr := s.handleEvent(withEventID(ctx, eventID), payload)
 		if s.EventStore == nil || strings.TrimSpace(eventID) == "" {
@@ -61,6 +73,46 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 		}
 	}()
 	return nil
+}
+
+func (s *ControlService) acquirePipelineSlot(ctx context.Context) (func(), error) {
+	limit := s.maxDocProcessPipelines()
+	if limit <= 0 {
+		return func() {}, nil
+	}
+	s.pipelineSlotsMu.Lock()
+	if s.pipelineSlots == nil || s.pipelineSlotsMax != limit {
+		s.pipelineSlots = make(chan struct{}, limit)
+		s.pipelineSlotsMax = limit
+	}
+	slots := s.pipelineSlots
+	s.pipelineSlotsMu.Unlock()
+
+	select {
+	case slots <- struct{}{}:
+		return func() { <-slots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *ControlService) maxDocProcessPipelines() int {
+	if s.MaxDocProcessPipelines > 0 {
+		return s.MaxDocProcessPipelines
+	}
+	return MaxDocProcessPipelinesFromEnv()
+}
+
+func MaxDocProcessPipelinesFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("MAX_DOC_PROCESS_PIPELINES"))
+	if raw == "" {
+		return 10
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 10
+	}
+	return n
 }
 
 func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error {
@@ -137,6 +189,14 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 
 	requestFailed := false
 	var firstErr error
+	s.persistPipelineStatus(ctx, evt.RecordID, "running", nil)
+	defer func() {
+		status := "success"
+		if requestFailed {
+			status = "failed"
+		}
+		s.persistPipelineStatus(ctx, evt.RecordID, status, firstErr)
+	}()
 
 	// Always run the blocking processor first, regardless of requested operations.
 	if s.BlockingProcessor != nil {
@@ -178,13 +238,13 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 			*firstErr = err
 		}
 		//if s.Logger != nil {
-			s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
-			s.Logger.Info("finish running processor",
-				"record_id", recordID,
-				"processor", processorName,
-				"proc_status", "failed",
-				"ms_used", time.Since(procStart).Milliseconds(),
-			)
+		s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
+		s.Logger.Info("finish running processor",
+			"record_id", recordID,
+			"processor", processorName,
+			"proc_status", "failed",
+			"ms_used", time.Since(procStart).Milliseconds(),
+		)
 		//}
 		return
 	}
@@ -195,6 +255,37 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 			"proc_status", "success",
 			"ms_used", time.Since(procStart).Milliseconds(),
 		)
+	}
+}
+
+func (s *ControlService) persistPipelineStatus(ctx context.Context, recordID int64, procStatus string, procErr error) {
+	if s.InputStore == nil || recordID <= 0 {
+		return
+	}
+	rec, err := s.InputStore.GetInputRecord(ctx, recordID)
+	if err != nil {
+		if s.Logger != nil {
+			s.Logger.Error("failed loading input record for doc pipeline status", "record_id", recordID, "error", err)
+		}
+		return
+	}
+	statusRaw, err := appendPipelineStatus(rec.StatusRaw, s.now(), procStatus, procErr)
+	if err != nil {
+		if s.Logger != nil {
+			s.Logger.Error("failed building doc pipeline status", "record_id", recordID, "error", err)
+		}
+		return
+	}
+	var errMsg *string
+	if procErr != nil {
+		msg := strings.TrimSpace(procErr.Error())
+		errMsg = &msg
+	}
+	if err := s.InputStore.UpdateInputMetadata(ctx, recordID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+		ErrorMsg:  errMsg,
+	}); err != nil && s.Logger != nil {
+		s.Logger.Error("failed persisting doc pipeline status", "record_id", recordID, "error", err)
 	}
 }
 
@@ -357,6 +448,45 @@ func newEventID() string {
 		return fmt.Sprintf("evt-%d", time.Now().UnixNano())
 	}
 	return "evt-" + hex.EncodeToString(bs[:])
+}
+
+func appendPipelineStatus(raw string, now time.Time, procStatus string, procErr error) (string, error) {
+	status := strings.ToLower(strings.TrimSpace(procStatus))
+	if status == "" {
+		status = "running"
+	}
+	entry := map[string]any{
+		"operation":   "doc_processing",
+		"start_time":  now.Format(defaultDocMetaStatusTime),
+		"proc_status": status,
+	}
+	if procErr != nil {
+		entry["error"] = strings.TrimSpace(procErr.Error())
+	}
+
+	entries := decodeDocMetaStatus(raw)
+	replaced := false
+	out := make([]map[string]any, 0, len(entries)+1)
+	for _, e := range entries {
+		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
+		if op != "doc_processing" {
+			out = append(out, e)
+			continue
+		}
+		if !replaced {
+			out = append(out, entry)
+			replaced = true
+		}
+	}
+	if !replaced {
+		out = append(out, entry)
+	}
+
+	bs, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(bs), nil
 }
 
 func appendControlStatus(raw string, now time.Time, procErr error) (string, error) {

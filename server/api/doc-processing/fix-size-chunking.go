@@ -147,10 +147,8 @@ type protectedBlock struct {
 // a dedicated OpenAI-compatible client if TOPIC_EMBEDDING_MODEL_NAME is set with a valid config,
 // then the extractor itself if it implements Embedder, otherwise nil. Summary embedding follows the
 // same fallback pattern via SUMMARY_EMBEDDING_MODEL_NAME. A default logger is created when none is provided.
-func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *FixedSizeChunkingService {
-	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26041901")
-	}
+func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *FixedSizeChunkingService {
+	logger := loggerutil.CreateDefaultLogger("MID_26041901")
 	modelRef, modelCfgPath, modelCfg, modelErr := loadFixedSizeTopicModelFromEnv()
 	promptText, promptRef, promptPath, promptErr := loadFixedSizeTopicPromptFromEnv()
 	summaryModelRef, summaryModelCfgPath, summaryModelCfg, summaryModelErr := loadFixedSizeSummaryModelFromEnv()
@@ -940,6 +938,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 	}
 
 	s.Logger.Info("Generated summary",
+		"record_id", recordID,
 		"model_name", s.SummaryModelName,
 		"level", level,
 		"seq", seqNo,

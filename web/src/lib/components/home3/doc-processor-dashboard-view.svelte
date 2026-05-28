@@ -58,6 +58,7 @@
 
 	// configuredProcessorIds: mandatory + required — the set isActiveRecord checks.
 	let configuredProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
+	let activePipelineLimit = $state(10);
 
 	// ── Active pipelines state ─────────────────────────────────────────────
 
@@ -182,13 +183,15 @@
 				startTime: '',
 				endTime: '',
 				page: 1,
-				pageSize: 20
+				pageSize: activePipelineLimit,
+				operation: 'doc_processing',
+				procStatus: 'running'
 			});
 			const ids = configuredProcessorIds;
 			const newPipelines = (res.results ?? [])
 				.filter(r => !r.file_name?.toLowerCase().endsWith('.zip'))
 				.filter(r => isActiveRecord(r, ids))
-				.slice(0, 10);
+				.slice(0, activePipelineLimit);
 			const newCount = newPipelines.length;
 			activePipelines = newPipelines;
 			prevActivePipelinesCount = newCount;
@@ -395,6 +398,7 @@
 		getKbFrontendConfig().then((cfg) => {
 			const req = cfg.required_processors ?? [];
 			requiredProcessors = req;
+			activePipelineLimit = Math.max(1, cfg.max_doc_process_pipelines ?? 10);
 			processors = Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, req.includes(p)]));
 		}).catch(() => {
 			// Keep defaults on failure

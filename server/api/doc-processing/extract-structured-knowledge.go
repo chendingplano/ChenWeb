@@ -138,11 +138,11 @@ func NewStructuredKnowledgeProcessor(
 	inputStore DocMetadataStore,
 	store StructuredKnowledgeStore,
 	extractor LLMJSONExtractor,
-	logger ApiTypes.JimoLogger,
+	_ ApiTypes.JimoLogger,
 ) *StructuredKnowledgeProcessor {
-	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26052601")
-	}
+	// if logger == nil {
+	logger := loggerutil.CreateDefaultLogger("MID_26052601")
+	// }
 	candidatePromptText, candidatePromptRef, candidatePromptPath, candidatePromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_STRUCTURED_KNOWLEDGE_PROMPT"},
 		"prompt-extract-structured-knowledge-v1.md",
@@ -358,7 +358,7 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 	for idx, chunk := range chunks {
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
 		callStart := p.Now()
-		p.Logger.Info("structured knowledge start",
+		p.Logger.Info("structknow start",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
@@ -392,7 +392,7 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 				"record_id", recordID, "seq_no", chunk.SeqNo)
 			continue
 		}
-		p.Logger.Info("structured knowledge done ",
+		p.Logger.Info("structknow end  ",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,

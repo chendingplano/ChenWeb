@@ -140,10 +140,10 @@ type SceneObjectsSQLStore struct {
 	DB *sql.DB
 }
 
-func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *SceneBlocksProcessor {
-	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26051801")
-	}
+func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStore, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *SceneBlocksProcessor {
+	// if logger == nil {
+	logger := loggerutil.CreateDefaultLogger("MID_26051801")
+	// }
 	mentionPromptText, mentionPromptRef, mentionPromptErr := loadScenePromptFromEnvKeys(
 		[]string{"EXTRACT_SCENE_CANDIDATES_PROMPT"},
 		"prompt-extract-scene-candidates-v1.md",
@@ -420,6 +420,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 
 	candidates := mergeSceneCandidateMentions(mentions)
 	p.Logger.Info("Merged scene candidates",
+		"record_id", record_id,
 		"mentions_count", len(mentions),
 		"candidate_count", len(candidates),
 		"record_stage", "post_merge",
@@ -429,7 +430,8 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
 		callStart := p.Now()
-		p.Logger.Info("enrich scene - llm start",
+		p.Logger.Info("enrich scene start",
+			"record_id", record_id,
 			"idx", idx,
 			"c_id", candidate.CandidateID,
 			"model_name", p.RelationModelName,
@@ -448,10 +450,11 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		raw, _ := payload["scene_blocks"].([]any)
 		normalized := normalizeSceneBlockList(raw, candidate)
 		sceneBlocks = append(sceneBlocks, normalized...)
-		p.Logger.Info("enrich scene - llm end",
+		p.Logger.Info("enrich scene end  ",
+			"record_id", record_id,
 			"c_id", candidate.CandidateID,
 			"blocks_for_candidate", len(normalized),
-			"scene_blocks_so_far", len(sceneBlocks),
+			"scene_blocks", len(sceneBlocks),
 			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 	}

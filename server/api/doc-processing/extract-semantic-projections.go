@@ -91,11 +91,9 @@ func NewSemanticProjectionsProcessor(
 	inputStore DocMetadataStore,
 	store SemanticProjectionsStore,
 	extractor LLMJSONExtractor,
-	logger ApiTypes.JimoLogger,
+	_ ApiTypes.JimoLogger,
 ) *SemanticProjectionsProcessor {
-	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26052101")
-	}
+	logger := loggerutil.CreateDefaultLogger("MID_26052101")
 	candidatePromptText, candidatePromptRef, candidatePromptPath, candidatePromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_SEMANTIC_PROJECTION_PROMPT"},
 		"prompt-extract-semantic-projection-v1.md",
@@ -313,7 +311,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	for idx, chunk := range chunks {
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
 		callStart := p.Now()
-		p.Logger.Info("semantic projection - start",
+		p.Logger.Info("semantic proj start",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
@@ -341,7 +339,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			return semanticProjectionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount},
 				fmt.Errorf("(MID_26052120) extract semantic projection candidate for chunk seq=%d: %w", chunk.SeqNo, err)
 		}
-		p.Logger.Info("semantic projection - end  ",
+		p.Logger.Info("semantic proj end  ",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,

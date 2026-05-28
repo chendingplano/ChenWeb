@@ -119,10 +119,10 @@ type metricCandidate struct {
 	SupportLines       []BlockLine
 }
 
-func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *MetricsProcessor {
-	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26042470")
-	}
+func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *MetricsProcessor {
+	// if logger == nil {
+	logger := loggerutil.CreateDefaultLogger("MID_26042470")
+	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
 		"prompt-extract-metric-candidates-v1.md",
@@ -517,11 +517,14 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		}
 		parsedLines := parseMetricInputLines(lines)
 		userPrompt := buildMetricCandidateUserPrompt(lines, parsedLines)
+		startTime := time.Now()
 		p.Logger.Info("extract metric - start",
 			"record_id", record_id,
 			"num_lines", len(lines),
 			"model name", p.MentionModelName,
-			"prompt", p.MentionPromptRef)
+			"prompt", p.MentionPromptRef,
+			)
+
 		callStart := p.Now()
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), block.Index)
 		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, userPrompt)
@@ -548,6 +551,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 			"record_id", record_id,
 			"extracted", len(mentions),
 			"language", detectedLanguage,
+			"ms_used", time.Since(startTime).Milliseconds(),
 		)
 	}
 
@@ -566,9 +570,10 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 	uncertain := make([]map[string]any, 0)
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
-		p.Logger.Info("enrich metric - start",
-			"idx", idx,
+		startTime := time.Now()
+		p.Logger.Info("enrich metric start",
 			"record_id", record_id,
+			"idx", idx,
 			"total", len(candidates),
 			"candidate_id", candidate.CandidateID,
 			"model_name", p.RelationModelName,
@@ -592,11 +597,11 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
 		metrics = append(metrics, normalizeMetricList(metricsRaw)...)
 		uncertain = append(uncertain, normalizeMetricList(uncertainRaw)...)
-		p.Logger.Info("enrich metrics - finished",
+		p.Logger.Info("enrich metric end  ",
 			"record_id", record_id,
 			"candidate_id", candidate.CandidateID,
 			"metrics_so_far", len(metrics),
-			"uncertain_metrics_so_far", len(uncertain),
+			"uncertain_so_far", len(uncertain),
 		)
 	}
 

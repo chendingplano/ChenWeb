@@ -72,10 +72,8 @@ type provisionExtractionResult struct {
 	FallbackCount int
 }
 
-func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *ProvisionsProcessor {
-	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26050520")
-	}
+func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *ProvisionsProcessor {
+	logger := loggerutil.CreateDefaultLogger("MID_26050520")
 	promptText, promptRef, promptPath, promptErr := loadProvisionsPromptFromEnv()
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_NAME", "EXTRACT_PROVISIONS_MODELS_FILE")
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_FALLBACK", "EXTRACT_PROVISIONS_MODELS_FILE")
@@ -349,10 +347,10 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 
 	for idx, block := range blocks {
 		callStart := p.Now()
-		p.Logger.Info("extract provisions - to call llm",
+		p.Logger.Info("extract provisions start",
+			"record_id", record_id,
 			"idx", idx,
 			"total", len(blocks),
-			"record_id", record_id,
 			"model name", p.ModelName,
 			"prompt name", p.PromptRef,
 		)
@@ -376,7 +374,8 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 		}
 		raw := payload["provisions"].([]any)
 		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(block), blockLineText(block))...)
-		p.Logger.Info("extract provisions - llm responded",
+		p.Logger.Info("extract provisions end  ",
+			"record_id", record_id,
 			"# provisions", len(provisions),
 			"ms_used", time.Since(callStart).Milliseconds())
 	}

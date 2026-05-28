@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -13,9 +14,10 @@ import (
 )
 
 type kbFrontendConfig struct {
-	TopicTypes          []string `json:"topic_types"`
-	MandatoryProcessors []string `json:"mandatory_processors"`
-	RequiredProcessors  []string `json:"required_processors"`
+	TopicTypes             []string `json:"topic_types"`
+	MandatoryProcessors    []string `json:"mandatory_processors"`
+	RequiredProcessors     []string `json:"required_processors"`
+	MaxDocProcessPipelines int      `json:"max_doc_process_pipelines"`
 }
 
 type kbFrontendConfigResponse struct {
@@ -40,9 +42,10 @@ func GetKbFrontendConfig(c echo.Context) error {
 		return c.JSON(http.StatusOK, kbFrontendConfigResponse{
 			Status: true,
 			Config: kbFrontendConfig{
-				TopicTypes:          []string{},
-				MandatoryProcessors: mandatoryProcessorIDs,
-				RequiredProcessors:  []string{},
+				TopicTypes:             []string{},
+				MandatoryProcessors:    mandatoryProcessorIDs,
+				RequiredProcessors:     []string{},
+				MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
 			},
 		})
 	}
@@ -78,10 +81,23 @@ func loadKbFrontendConfig() (kbFrontendConfig, error) {
 		reqProcs = []string{}
 	}
 	return kbFrontendConfig{
-		TopicTypes:          types,
-		MandatoryProcessors: mandatoryProcessorIDs,
-		RequiredProcessors:  reqProcs,
+		TopicTypes:             types,
+		MandatoryProcessors:    mandatoryProcessorIDs,
+		RequiredProcessors:     reqProcs,
+		MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
 	}, nil
+}
+
+func maxDocProcessPipelinesFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("MAX_DOC_PROCESS_PIPELINES"))
+	if raw == "" {
+		return 10
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 10
+	}
+	return n
 }
 
 func resolveKbConfigFilePath() string {

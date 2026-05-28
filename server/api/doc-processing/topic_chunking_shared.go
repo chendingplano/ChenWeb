@@ -407,9 +407,9 @@ func extractTopicsFromMarkedLinesWithLLM(
 	}
 
 	inputText := buildMarkedChunkInputText(lines)
-	logger.Info("extract topics llm call start",
-		logScopeName, logScopeValue,
+	logger.Info("extract topics start",
 		"record_id", record_id,
+		logScopeName, logScopeValue,
 		"num_lines", len(lines),
 		"model_name", modelName,
 	)
@@ -420,13 +420,13 @@ func extractTopicsFromMarkedLinesWithLLM(
 		ModelName:  modelName,
 		InputText:  inputText,
 	})
-	logger.Info("extract topics llm call end  ",
-		logScopeName, logScopeValue,
+	logger.Info("extract topics end  ",
 		"record_id", record_id,
+		logScopeName, logScopeValue,
 		"model_name", modelName,
 		"prompt_name", promptRef,
-		"ms_used", time.Since(llmStart).Milliseconds(),
 		"error", err,
+		"ms_used", time.Since(llmStart).Milliseconds(),
 	)
 	if err != nil {
 		baseURL := ""
@@ -498,15 +498,6 @@ func normalizeExtractedTopics(rawTopics []any, seqStart int, logger ApiTypes.Jim
 		topicEn := sanitizeTopicText(asString(m["topic_desc_en"]))
 
 		categoryPath, categoryFallbackReason := normalizeAndValidateTopicCategoryPath(extractCategoryPathFromLLM(m), topicType)
-
-		// logger.Info("extracted topic from LLM",
-		// 	logScopeName, logScopeValue,
-		// 	"record_id", recordID,
-		// 	"idx", idx,
-		// 	"total", len(rawTopics),
-		// 	"topic_type", topicType,
-		// 	"line_ranges", lineRanges,
-		// )
 
 		if categoryFallbackReason != "" {
 			if kp := keywordCategoryPath(topicKeywords); kp != nil {

@@ -92,11 +92,11 @@ func NewEntityRelationProcessor(
 	inputStore DocMetadataStore,
 	store EntityRelationStore,
 	extractor LLMJSONExtractor,
-	logger ApiTypes.JimoLogger,
+	_ ApiTypes.JimoLogger,
 ) *EntityRelationProcessor {
-	if logger == nil {
-		logger = loggerutil.CreateDefaultLogger("MID_26052701")
-	}
+	// if logger == nil {
+	logger := loggerutil.CreateDefaultLogger("MID_26052701")
+	// }
 	promptText, promptRef, promptPath, promptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_ENTITY_RELATION_PROMPT"},
 		"prompt-extract-entity-relation-v1.md",
@@ -308,7 +308,7 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 	for idx, chunk := range chunks {
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
 		callStart := p.Now()
-		p.Logger.Info("entity-relation start",
+		p.Logger.Info("er start",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
@@ -346,7 +346,7 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 		chunkRelations := normalizeRelationRows(payload["relations"], chunk.SeqNo)
 		entities = append(entities, chunkEntities...)
 		relations = append(relations, chunkRelations...)
-		p.Logger.Info("entity-relation done",
+		p.Logger.Info("er end  ",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
