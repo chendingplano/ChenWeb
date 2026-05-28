@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,7 +10,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
@@ -186,6 +189,111 @@ func TestSemanticChunkingService_HandleInput_WritesTopicsAndStatus(t *testing.T)
 	}
 	if got := strings.TrimSpace(asString(last["output_filename"])); got != topicPath {
 		t.Fatalf("output_filename=%q, want %q", got, topicPath)
+	}
+}
+
+func TestSemanticChunkingService_HandleInput_WritesExtractTopicLogs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
+		WithArgs(
+			"extract topics",
+			"generate_topics",
+			"{topic-model}",
+			"topic-prompt",
+			int64(7523),
+			strPtrValue("100%"),
+			"extract_topics",
+			nil,
+			sqlmock.AnyArg(),
+			strPtrValue("generate_topic"),
+			jsonWithFieldMatcher{field: "Topic", want: "Cover page"},
+			nil,
+			jsonWithFieldMatcher{field: "topics_so_far", want: float64(2)},
+			int64PtrValue(0),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
+		WithArgs(
+			"extract topics",
+			"generate_topics",
+			"{topic-model}",
+			"topic-prompt",
+			int64(7523),
+			strPtrValue("100%"),
+			"extract_topics",
+			nil,
+			sqlmock.AnyArg(),
+			strPtrValue("generate_topic"),
+			jsonWithFieldMatcher{field: "Topic", want: "Section A"},
+			nil,
+			jsonWithFieldMatcher{field: "topics_so_far", want: float64(2)},
+			int64PtrValue(0),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	tmp := t.TempDir()
+	treeRoot := t.TempDir()
+	input := strings.Join([]string{
+		"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tCover",
+		"2\t2\tparagraph\tTestFont\t12\t[0,0,1,1]\tSection A",
+	}, "\n")
+	ex := &fakeSemanticExtractor{
+		outs: []map[string]any{
+			{
+				"topics": []any{
+					map[string]any{
+						"topic_type": "cover",
+						"lines":      []any{"1"},
+						"keywords":   []any{"cover"},
+						"topic":      "Cover page",
+						"category_path": []any{
+							"document_overview",
+						},
+					},
+					map[string]any{
+						"topic_type": "policy",
+						"lines":      []any{"2"},
+						"keywords":   []any{"section", "policy"},
+						"topic":      "Section A",
+						"category_path": []any{
+							"document_overview",
+							"section_a",
+						},
+					},
+				},
+			},
+		},
+	}
+	st := &fakeStore{rec: InputRecord{
+		ID:              7523,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "std_20039.pdf",
+	}}
+	svc := NewSemanticChunkingService(st, ex, nil)
+	svc.ChunkDir = tmp
+	svc.ArtifactWebDir = treeRoot
+	svc.FileBlockSize = 3
+	svc.ModelErr = nil
+	svc.ModelName = "topic-model"
+	svc.PromptRef = "topic-prompt"
+	svc.ProcLogger = DocProcLogger{DB: db}
+	svc.Now = fixedTimeSequence(
+		t,
+		"2026-05-28T12:00:00Z",
+		"2026-05-28T12:00:00.900Z",
+	)
+
+	if err := svc.HandleInput(context.Background(), 7523, "sample.txt", []byte(input)); err != nil {
+		t.Fatalf("HandleInput: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
 	}
 }
 
@@ -586,5 +694,85 @@ func TestExtractTopicsFromLinesWithLLM_UsesStructuredContractWhenAvailable(t *te
 	}
 	if len(topics) != 1 || topics[0].Topic != "alarm requirements" {
 		t.Fatalf("topics=%#v", topics)
+	}
+}
+
+type jsonWithFieldMatcher struct {
+	field string
+	want  any
+}
+
+func (m jsonWithFieldMatcher) Match(v driver.Value) bool {
+	var raw string
+	switch value := v.(type) {
+	case string:
+		raw = value
+	case *string:
+		if value == nil {
+			return false
+		}
+		raw = *value
+	default:
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return false
+	}
+	got, ok := payload[m.field]
+	if !ok {
+		return false
+	}
+	return reflect.DeepEqual(got, m.want)
+}
+
+type stringPtrMatcher string
+
+func (m stringPtrMatcher) Match(v driver.Value) bool {
+	switch value := v.(type) {
+	case string:
+		return value == string(m)
+	case *string:
+		return value != nil && *value == string(m)
+	default:
+		return false
+	}
+}
+
+func strPtrValue(v string) sqlmock.Argument { return stringPtrMatcher(v) }
+
+type int64PtrMatcher int64
+
+func (m int64PtrMatcher) Match(v driver.Value) bool {
+	switch value := v.(type) {
+	case int64:
+		return value == int64(m)
+	case *int64:
+		return value != nil && *value == int64(m)
+	default:
+		return false
+	}
+}
+
+func int64PtrValue(v int64) sqlmock.Argument { return int64PtrMatcher(v) }
+
+func fixedTimeSequence(t *testing.T, values ...string) func() time.Time {
+	t.Helper()
+	times := make([]time.Time, 0, len(values))
+	for _, value := range values {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			t.Fatalf("time.Parse(%q): %v", value, err)
+		}
+		times = append(times, parsed)
+	}
+	idx := 0
+	return func() time.Time {
+		if idx >= len(times) {
+			return times[len(times)-1]
+		}
+		v := times[idx]
+		idx++
+		return v
 	}
 }

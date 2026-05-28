@@ -23,6 +23,8 @@ INSERT INTO kb.doc_proc_logs (
     doc_proc_name,
     model_names,
     prompt_name,
+    record_id,
+    proc_progress,
     entry_type,
     pass,
     llm_call_id,
@@ -33,15 +35,17 @@ INSERT INTO kb.doc_proc_logs (
     ms_used,
     create_time
 ) VALUES (
-    $1, $2, $3::text[], $4, $5, $6, $7, $8,
-    $9::jsonb, $10, $11::jsonb,
-    $12, NOW()
+    $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
+    $11::jsonb, $12, $13::jsonb,
+    $14, NOW()
 )`)
 	mock.ExpectExec(insertQuery).
 		WithArgs(
 			nil,
 			"generate_summaries",
 			"{}",
+			nil,
+			nil,
 			nil,
 			EntryTypeSummary,
 			nil,
@@ -59,7 +63,7 @@ INSERT INTO kb.doc_proc_logs (
 		DocProcName:   "generate_summaries",
 		ExtraInfoJSON: &extra,
 		MSUsed:        &msUsed,
-	}); err != nil {
+	}, "MID-26052803"); err != nil {
 		t.Fatalf("LogSummary: %v", err)
 	}
 
@@ -80,11 +84,11 @@ func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 
 	rows := sqlmock.NewRows([]string{
-		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "entry_type",
+		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "record_id", "proc_progress", "entry_type",
 		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
 		"ms_used", "coalesce",
 	}).AddRow(
-		int64(9), "summary call", "generate_topics", `{topic-model}`, "topic-prompt", EntryTypeSummary,
+		int64(9), "summary call", "generate_topics", `{topic-model}`, "topic-prompt", int64(81), "66% (2/3)", EntryTypeSummary,
 		nil, nil, nil, nil, nil, `{"topics_generated":7}`, int64(2400), "2026-05-27T12:00:00+00:00",
 	)
 
@@ -107,6 +111,12 @@ func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 	if got[0].MSUsed == nil || *got[0].MSUsed != 2400 {
 		t.Fatalf("MSUsed=%v, want 2400", got[0].MSUsed)
 	}
+	if got[0].RecordID == nil || *got[0].RecordID != 81 {
+		t.Fatalf("RecordID=%v, want 81", got[0].RecordID)
+	}
+	if got[0].ProcProgress == nil || *got[0].ProcProgress != "66% (2/3)" {
+		t.Fatalf("ProcProgress=%v, want 66%% (2/3)", got[0].ProcProgress)
+	}
 	if got[0].CreateTime != "2026-05-27T12:00:00+00:00" {
 		t.Fatalf("CreateTime=%q", got[0].CreateTime)
 	}
@@ -127,11 +137,11 @@ func TestSQLStoreListDocProcLogs_OrdersByAllowedField(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 
 	rows := sqlmock.NewRows([]string{
-		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "entry_type",
+		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "record_id", "proc_progress", "entry_type",
 		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
 		"ms_used", "coalesce",
 	}).AddRow(
-		int64(10), "llm call", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", EntryTypeLLMCall,
+		int64(10), "llm call", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", int64(55), nil, EntryTypeLLMCall,
 		2, "call-1", "enrich_metrics", nil, nil, `{"source":"test"}`, int64(9300), "2026-05-27T12:00:00+00:00",
 	)
 

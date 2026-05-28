@@ -3,7 +3,7 @@
 	import { shouldShowOverflowScrollbar } from '$lib/components/home3/kb-import-status-dialog.js';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
-	import { listKbInputs, uploadKbInputs } from '$lib/services/kbService';
+	import { listKbInputs, uploadKbInputs, deleteKbInput } from '$lib/services/kbService';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -69,6 +69,11 @@
 	let searchLoading = $state(false);
 	let searchError = $state('');
 	let searchSelected = $state<number | null>(null);
+	// Delete confirmation
+	let deleteConfirmRecord = $state<KbInputRecord | null>(null);
+	let deleteError = $state('');
+	let deleteSubmitting = $state(false);
+
 	let uploadType = $state('pdf');
 	let uploadTitle = $state('');
 	let uploadDocNo = $state('');
@@ -301,6 +306,33 @@
 		searchOpen = false;
 	}
 
+	function openDeleteConfirm(record: KbInputRecord) {
+		deleteConfirmRecord = record;
+		deleteError = '';
+		deleteSubmitting = false;
+	}
+
+	function closeDeleteConfirm() {
+		deleteConfirmRecord = null;
+		deleteError = '';
+		deleteSubmitting = false;
+	}
+
+	async function confirmDelete() {
+		if (!deleteConfirmRecord) return;
+		deleteSubmitting = true;
+		deleteError = '';
+		try {
+			await deleteKbInput(deleteConfirmRecord.id);
+			closeDeleteConfirm();
+			await loadRecords();
+		} catch (err) {
+			deleteError = err instanceof Error ? err.message : 'Failed to delete record';
+		} finally {
+			deleteSubmitting = false;
+		}
+	}
+
 	async function runSearch() {
 		searchLoading = true;
 		searchError = '';
@@ -473,12 +505,13 @@
 						<th class="cell head">Create Time</th>
 						<th class="cell head">Modify Time</th>
 						<th class="cell head">Status</th>
+					<th class="cell head">Actions</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#if !loading && records.length === 0}
 						<tr>
-							<td class="cell" colspan={13} style="text-align:center; color:{textMuted};">No records</td>
+							<td class="cell" colspan={14} style="text-align:center; color:{textMuted};">No records</td>
 						</tr>
 					{:else}
 						{#each records as record (record.id)}
@@ -501,6 +534,14 @@
 										style="height:28px; padding:0 10px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
 									>
 										View
+									</button>
+								</td>
+								<td class="cell">
+									<button
+										onclick={() => openDeleteConfirm(record)}
+										style="height:28px; padding:0 10px; border:1px solid rgba(239,68,68,0.4); border-radius:8px; background:rgba(239,68,68,0.1); color:#ef4444; font-size:12px; cursor:pointer;"
+									>
+										Delete
 									</button>
 								</td>
 							</tr>
@@ -919,6 +960,53 @@
 						<span style="font-size:12px; color:#ef4444;">{uploadError}</span>
 					{/if}
 				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if deleteConfirmRecord}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center p-6"
+		style="background:rgba(15,23,42,0.72); backdrop-filter:blur(3px);"
+		onclick={closeDeleteConfirm}
+		onkeydown={(e) => { if (e.key === 'Escape') closeDeleteConfirm(); }}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="w-full max-w-md rounded-xl overflow-hidden"
+			style="background:{cardBg}; border:1px solid {borderColor};"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Delete confirmation"
+			tabindex="0"
+		>
+			<div class="px-5 py-4" style="border-bottom:1px solid {borderColor};">
+				<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">Delete Record</h3>
+			</div>
+			<div class="px-5 py-4">
+				<p style="font-size:14px; color:{textSecondary}; margin-bottom:8px;">
+					Are you sure you want to delete record <span style="color:{textPrimary}; font-weight:600;">#{deleteConfirmRecord.id}</span>
+					{#if deleteConfirmRecord.file_name}— <span style="color:{textPrimary};">{deleteConfirmRecord.file_name}</span>{/if}?
+				</p>
+				<p style="font-size:12px; color:#ef4444;">This action cannot be undone.</p>
+				{#if deleteError}
+					<div style="margin-top:10px; font-size:12px; color:#ef4444;">{deleteError}</div>
+				{/if}
+			</div>
+			<div class="flex items-center justify-end gap-2 px-5 py-3" style="border-top:1px solid {borderColor};">
+				<button
+					onclick={closeDeleteConfirm}
+					style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:13px; cursor:pointer;"
+				>Cancel</button>
+				<button
+					onclick={confirmDelete}
+					disabled={deleteSubmitting}
+					style="height:34px; padding:0 16px; border:none; border-radius:8px; background:#ef4444; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{deleteSubmitting ? 0.6 : 1};"
+				>{deleteSubmitting ? 'Deleting…' : 'Delete'}</button>
 			</div>
 		</div>
 	</div>

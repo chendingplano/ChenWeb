@@ -32,6 +32,7 @@
 		model_names: string[];
 		prompt_name: string;
 		entry_type: string;
+		proc_progress?: string;
 		pass?: number;
 		llm_call_id?: string;
 		activity_name?: string;
@@ -68,7 +69,9 @@
 	const entryTypeOptions = [
 		{ value: '', label: 'All types' },
 		{ value: 'llm_call', label: 'LLM Call' },
-		{ value: 'doc_proc_summary', label: 'Summary' }
+		{ value: 'doc_proc_summary', label: 'Summary' },
+		{ value: 'generate_summary', label: 'Generate Summary' },
+		{ value: 'generate_summary_finish', label: 'Generate Summary Finish' }
 	];
 
 	const sortableColumns = [
@@ -177,6 +180,14 @@
 
 	function entryTypeBadge(t: string): string {
 		return t === 'llm_call' ? accent : warning;
+	}
+
+	function entryTypeLabel(t: string): string {
+		if (t === 'llm_call') return 'LLM Call';
+		if (t === 'doc_proc_summary') return 'Summary';
+		if (t === 'generate_summary') return 'Gen Summary';
+		if (t === 'generate_summary_finish') return 'Gen Finish';
+		return t;
 	}
 
 	function hasErrors(row: LogRow): boolean {
@@ -347,7 +358,7 @@
 										class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
 										style="background:{entryTypeBadge(row.entry_type)}22; color:{entryTypeBadge(row.entry_type)};"
 									>
-										{row.entry_type === 'llm_call' ? 'LLM Call' : 'Summary'}
+										{entryTypeLabel(row.entry_type)}
 									</span>
 								</td>
 								<td class="px-4 py-3" style="color:{textPrimary}; white-space:nowrap;">
@@ -419,6 +430,12 @@
 												<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Create Time</div>
 												<div style="font-size:12px; color:{textSecondary};">{formatTime(row.create_time)}</div>
 											</div>
+											{#if row.proc_progress}
+												<div>
+													<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Progress</div>
+													<div style="font-size:13px; color:{textSecondary};">{row.proc_progress}</div>
+												</div>
+											{/if}
 										</div>
 
 										{#if row.extra_info}

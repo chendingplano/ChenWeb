@@ -112,6 +112,7 @@ func categoryPathNames(nodes []CategoryPathNode) []string {
 	return out
 }
 
+/*
 func summaryTreeIndexData(item SummaryItem) ([]string, []CategoryPathNode, []CategoryPathNode) {
 	if len(item.CategoryPathItemsEn) > 0 {
 		indexNodes := append([]CategoryPathNode(nil), item.CategoryPathItemsEn[0].Nodes...)
@@ -127,6 +128,7 @@ func summaryTreeIndexData(item SummaryItem) ([]string, []CategoryPathNode, []Cat
 	}
 	return append([]string(nil), item.CategoryPaths...), append([]CategoryPathNode(nil), item.CategoryNodes...), append([]CategoryPathNode(nil), item.CategoryNodes...)
 }
+*/
 
 func summaryTreeIndexPairs(item SummaryItem) []categoryPathPair {
 	if len(item.CategoryPathItemsEn) > 0 {

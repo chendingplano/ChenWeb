@@ -407,7 +407,7 @@ func (p *EntityRelationProcessor) logLLMCall(
 		Errors:       errStr,
 		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052807"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -451,7 +451,7 @@ func (p *EntityRelationProcessor) logEntityRelationSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052808"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }

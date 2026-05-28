@@ -1138,3 +1138,50 @@ func parseRawLine(s string) (rawLine, bool) {
 		Coords:     coords,
 	}, true
 }
+
+// DeleteInput handles DELETE /api/v1/kb/inputs/:id
+func DeleteInput(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_M_400")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	idStr := strings.TrimSpace(c.Param("id"))
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid id (CWB_KB_M_401)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	inputTable, err := resolveInputTable(db)
+	if err != nil {
+		logger.Error("resolve kb input table failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to resolve kb input table (CWB_KB_M_402)",
+		})
+	}
+
+	query := fmt.Sprintf("DELETE FROM %s WHERE id = $1", inputTable)
+	result, err := db.Exec(query, id)
+	if err != nil {
+		logger.Error("delete kb input failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to delete kb input (CWB_KB_M_403)",
+		})
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		logger.Error("rows affected delete kb input failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to verify kb input delete (CWB_KB_M_404)",
+		})
+	}
+	if affected == 0 {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status: false, ErrorMsg: "record not found (CWB_KB_M_405)",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]bool{"status": true})
+}

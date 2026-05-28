@@ -56,12 +56,13 @@ func (p *ChunkingProcessor) LogName() string {
 
 func (p *ChunkingProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	start := p.Now()
+	recordID := docProcLogRecordIDFromPayload(payload)
 	procErr := runChunkingServiceEvent(ctx, payload, p.InputStore, p.Service, p.Logger)
-	p.logSummary(ctx, start, p.Now(), procErr)
+	p.logSummary(ctx, recordID, start, p.Now(), procErr)
 	return procErr
 }
 
-func (p *ChunkingProcessor) logSummary(ctx context.Context, start, end time.Time, procErr error) {
+func (p *ChunkingProcessor) logSummary(ctx context.Context, recordID *int64, start, end time.Time, procErr error) {
 	if p.ProcLogger.DB == nil {
 		return
 	}
@@ -76,13 +77,23 @@ func (p *ChunkingProcessor) logSummary(ctx context.Context, start, end time.Time
 		DocProcName:   p.LogName(),
 		ModelNames:    docProcSummaryModelNames(p.Service),
 		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
+		RecordID:      recordID,
 		EntryType:     "doc_proc_summary",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
-	}); err != nil {
+	}, "MID-26052802"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
+}
+
+func docProcLogRecordIDFromPayload(payload []byte) *int64 {
+	evt, err := ParseLineFileGeneratedEvent(payload)
+	if err != nil || evt.RecordID <= 0 {
+		return nil
+	}
+	recordID := evt.RecordID
+	return &recordID
 }
 
 func docProcSummaryModelNames(service any) []string {

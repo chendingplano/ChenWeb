@@ -1089,7 +1089,7 @@ func (p *ProductsProcessor) logLLMCall(
 		Errors:       errStr,
 		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052810"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -1138,7 +1138,7 @@ func (p *ProductsProcessor) logProductsSummary(ctx context.Context, start, end t
 		EntryType:     "doc_proc_summary",
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
-	}); err != nil {
+	}, "MID-26052810"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }

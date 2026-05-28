@@ -523,7 +523,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 			"num_lines", len(lines),
 			"model name", p.MentionModelName,
 			"prompt", p.MentionPromptRef,
-			)
+		)
 
 		callStart := p.Now()
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), block.Index)
@@ -570,7 +570,6 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 	uncertain := make([]map[string]any, 0)
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
-		startTime := time.Now()
 		p.Logger.Info("enrich metric start",
 			"record_id", record_id,
 			"idx", idx,
@@ -1277,7 +1276,7 @@ func (p *MetricsProcessor) logLLMCall(
 		Errors:       errStr,
 		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec); err != nil {
+	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052809"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -1332,7 +1331,7 @@ func (p *MetricsProcessor) logMetricsSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052809"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }

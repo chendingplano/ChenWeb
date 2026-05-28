@@ -31,10 +31,10 @@ func TestListDocProcLogs_UsesMSUsedResponseShape(t *testing.T) {
 	mock.ExpectQuery(listQuery).
 		WithArgs("doc_proc_summary", 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "entry_type",
+			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "record_id", "proc_progress", "entry_type",
 			"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info", "ms_used", "create_time",
 		}).AddRow(
-			int64(17), "summary run", "generate_topics", `{topic-model}`, "topic-prompt", "doc_proc_summary",
+			int64(17), "summary run", "generate_topics", `{topic-model}`, "topic-prompt", int64(81), "66% (2/3)", "doc_proc_summary",
 			nil, nil, nil, nil, nil, `{"topics_generated":5}`, int64(1800), "2026-05-27T12:30:00+00:00",
 		))
 
@@ -64,6 +64,12 @@ func TestListDocProcLogs_UsesMSUsedResponseShape(t *testing.T) {
 	}
 	if _, ok := row["ms_used"]; !ok {
 		t.Fatalf("expected ms_used in response row: %#v", row)
+	}
+	if got := row["record_id"]; got != float64(81) {
+		t.Fatalf("record_id=%v, want 81", got)
+	}
+	if got := row["proc_progress"]; got != "66% (2/3)" {
+		t.Fatalf("proc_progress=%v, want 66%% (2/3)", got)
 	}
 	if _, ok := row["duration_ms"]; ok {
 		t.Fatalf("did not expect duration_ms in response row: %#v", row)
@@ -98,10 +104,10 @@ func TestListDocProcLogs_AcceptsOrderParams(t *testing.T) {
 	mock.ExpectQuery(listQuery).
 		WithArgs(50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "entry_type",
+			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "record_id", "proc_progress", "entry_type",
 			"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info", "ms_used", "create_time",
 		}).AddRow(
-			int64(18), "summary run", "blocking", `{}`, "topic-prompt", "doc_proc_summary",
+			int64(18), "summary run", "blocking", `{}`, "topic-prompt", int64(18), nil, "doc_proc_summary",
 			nil, nil, nil, nil, nil, `{}`, int64(0), "2026-05-27T12:30:00+00:00",
 		))
 

@@ -18,6 +18,7 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
+	"github.com/google/uuid"
 )
 
 const (
@@ -64,6 +65,8 @@ type Embedder interface {
 type FixedSizeChunkingService struct {
 	Store                       Store
 	Extractor                   LLMJSONExtractor
+	FallbackExtractor           LLMJSONExtractor
+	FallbackModelName           string
 	Embedder                    Embedder
 	Logger                      ApiTypes.JimoLogger
 	Now                         func() time.Time
@@ -96,8 +99,39 @@ type FixedSizeChunkingService struct {
 	TopicEmbeddingModelName     string
 	SummaryEmbeddingModelName   string
 	CategorySimilarityMinScore  float64
+	ProcLogger                  DocProcLogger
 	GenerateSummary             func(ctx context.Context, recordID int64, level int, seqNo int, lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error)
 	lastDocProcSummaryExtraInfo map[string]any
+	summaryProgressTracker      *summaryProgressTracker
+}
+
+type summaryProgressTracker struct {
+	Total        int
+	Completed    int
+	LastProgress string
+	Persist      func(progress string) error
+}
+
+func (t *summaryProgressTracker) advance() string {
+	if t == nil {
+		return ""
+	}
+	if t.Completed < t.Total {
+		t.Completed++
+	}
+	progress := formatSummaryProgress(t.Completed, t.Total)
+	t.LastProgress = progress
+	return progress
+}
+
+func (t *summaryProgressTracker) current() string {
+	if t == nil {
+		return ""
+	}
+	if t.LastProgress != "" {
+		return t.LastProgress
+	}
+	return formatSummaryProgress(t.Completed, t.Total)
 }
 
 type ChunkOptions struct {
@@ -155,6 +189,25 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 	summaryPromptText, summaryPromptRef, summaryPromptPath, summaryPromptErr := loadFixedSizeSummaryPromptFromEnv()
 	translationModelRef, translationModelCfgPath, translationModelCfg, translationModelErr := loadOptionalModelConfigFromEnv("TRANSLATION_MODEL_NAME", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
+	var fallbackExtractor LLMJSONExtractor
+	var fallbackModelName string
+	if fallbackModelRef := strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_FALLBACK")); fallbackModelRef != "" {
+		_, _, fallbackCfg, _ := loadOptionalModelConfigFromEnv("EXTRACT_TOPIC_FALLBACK", "CHUNK_EXTRACT_TOPIC_MODELS_FILE")
+		if strings.TrimSpace(fallbackCfg.ModelName) == "" {
+			fallbackCfg.ModelName = fallbackModelRef
+		}
+		timeoutSec := fallbackCfg.TimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = 60
+		}
+		fallbackExtractor = &llmclients.OpenAIJSONClient{
+			HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+			ModelName:  fallbackCfg.ModelName,
+			APIKey:     fallbackCfg.APIKey,
+			BaseURL:    fallbackCfg.BaseURL,
+		}
+		fallbackModelName = fallbackCfg.ModelName
+	}
 	topicEmbeddingModelRef := strings.TrimSpace(os.Getenv("TOPIC_EMBEDDING_MODEL_NAME"))
 	var embedder Embedder
 	var topicEmbeddingModelName string
@@ -194,6 +247,8 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 	return &FixedSizeChunkingService{
 		Store:                      store,
 		Extractor:                  extractor,
+		FallbackExtractor:          fallbackExtractor,
+		FallbackModelName:          fallbackModelName,
 		Logger:                     logger,
 		Now:                        time.Now,
 		ChunkDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
@@ -226,12 +281,14 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		TopicEmbeddingModelName:    topicEmbeddingModelName,
 		SummaryEmbeddingModelName:  summaryEmbeddingModelName,
 		CategorySimilarityMinScore: categorySimilarityMinScore,
+		ProcLogger:                 DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 	}
 }
 
 func (s *FixedSizeChunkingService) DocProcModelNames() []string {
 	return dedupeNonEmpty([]string{
 		s.ModelName,
+		s.FallbackModelName,
 		s.SummaryModelName,
 		s.TranslationModelName,
 		s.TopicEmbeddingModelName,
@@ -638,9 +695,34 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 			"chunk_seqno",
 			chunk.SeqNo,
 		)
-		if chunkErr != nil {
-			s.failAndPersistTopics(ctx, rec, inputFilename, start, len(topics), fmt.Errorf("(MID_26042016) %w", chunkErr))
-			return chunkErr
+		if chunkErr != nil || len(chunkTopics) == 0 {
+			if s.FallbackExtractor != nil {
+				fbTopics, fbErr := extractTopicsFromMarkedLinesWithLLM(
+					ctx,
+					rec.ID,
+					s.FallbackExtractor,
+					s.Logger,
+					s.FallbackModelName,
+					s.PromptText,
+					s.PromptRef,
+					chunk.Lines,
+					seqStart,
+					"chunk_seqno",
+					chunk.SeqNo,
+				)
+				if fbErr != nil || len(fbTopics) == 0 {
+					s.Logger.Warn("topic generation empty for both primary and fallback, continuing",
+						"record_id", rec.ID, "chunk_seqno", chunk.SeqNo,
+						"primary_error", chunkErr, "fallback_error", fbErr,
+					)
+					chunkTopics = []TopicItem{}
+				} else {
+					chunkTopics = fbTopics
+				}
+			} else if chunkErr != nil {
+				s.failAndPersistTopics(ctx, rec, inputFilename, start, len(topics), fmt.Errorf("(MID_26042016) %w", chunkErr))
+				return chunkErr
+			}
 		}
 		topics = append(topics, chunkTopics...)
 		seqStart += len(chunkTopics)
@@ -701,10 +783,35 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
 	artifactBase := buildFixedSizeArtifactBase(rec, inputFilename)
 	s.setDocProcSummaryExtraInfo(nil)
+	s.summaryProgressTracker = nil
+	defer func() { s.summaryProgressTracker = nil }()
 	chunks, err := loadChunksFromArtifactFile(s.ChunkDir, rec.ID, artifactBase+".chunks", lines)
 	if err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
+	}
+	totalSummaries := totalPlannedSummaries(len(chunks), s.SummaryGroupSize)
+	s.summaryProgressTracker = &summaryProgressTracker{
+		Total: totalSummaries,
+		Persist: func(progress string) error {
+			statusRaw, err := appendSummariesStatus(rec.StatusRaw, summaryStatusParams{
+				RecordID:      rec.ID,
+				FileType:      detectChunkStatusFileType(rec, inputFilename),
+				InputFilename: inputFilename,
+				Start:         start,
+				DurationMs:    time.Since(start).Milliseconds(),
+				ProcStatus:    "running",
+				ProcProgress:  progress,
+			})
+			if err != nil {
+				return err
+			}
+			if err := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, nil); err != nil {
+				return err
+			}
+			rec.StatusRaw = statusRaw
+			return nil
+		},
 	}
 
 	if err := deleteSummaryFiles(s.ChunkDir, rec.ID); err != nil {
@@ -795,6 +902,8 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		InputFilename: inputFilename,
 		Start:         start,
 		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "success",
+		ProcProgress:  s.currentSummaryProgress(),
 		ProcErr:       nil,
 	})
 	if err != nil {
@@ -812,6 +921,9 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 	)
 	s.setDocProcSummaryExtraInfo(map[string]any{
 		"total_chunks":        len(chunks),
+		"total_lines":         len(lines),
+		"num_summaries":       len(allSummaries),
+		"proc_progress":       s.currentSummaryProgress(),
 		"summaries_generated": len(allSummaries),
 	})
 	return nil
@@ -860,12 +972,64 @@ func (s *FixedSizeChunkingService) generateSummary(
 	lines []MarkedLine, children []SummaryItem) (summaryGenerateResult, error) {
 
 	startTime := time.Now()
+	callID := uuid.NewString()
+	lineSpans := summaryLogLineSpans(lines, children)
+	logSummaryCall := func(procErr error) {
+		if resolveDocProcLogDB(s.ProcLogger.DB) == nil {
+			return
+		}
+		extraJSON := docProcJSONOrNil(map[string]any{
+			"level": level,
+			"seqno": seqNo,
+			"lines": lineSpans,
+		})
+		var errStr *string
+		if procErr != nil {
+			msg := procErr.Error()
+			errStr = &msg
+		}
+		procProgress := s.currentSummaryProgress()
+		if procErr == nil && s.summaryProgressTracker != nil {
+			procProgress = s.summaryProgressTracker.advance()
+			if s.summaryProgressTracker.Persist != nil && procProgress != "" {
+				if err := s.summaryProgressTracker.Persist(procProgress); err != nil {
+					s.Logger.Warn("failed to persist generate_summaries progress", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
+				}
+			}
+		}
+		activityName := "generate_summary"
+		if err := s.ProcLogger.LogGenerateSummary(ctx, DocProcLogRecord{
+			CallReason:    "generate summary",
+			DocProcName:   "generate_summary",
+			ModelNames:    dedupeNonEmpty([]string{s.SummaryModelName}),
+			PromptName:    s.SummaryPromptRef,
+			RecordID:      &recordID,
+			ProcProgress:  nullableStringPtr(procProgress),
+			LLMCallID:     &callID,
+			ActivityName:  &activityName,
+			ExtraInfoJSON: extraJSON,
+			Errors:        errStr,
+			MSUsed:        int64Ptr(time.Since(startTime).Milliseconds()),
+		}, "MID-26052814"); err != nil {
+			s.Logger.Warn("failed to write generate_summary log", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
+		}
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logSummaryCall(fmt.Errorf("panic: %v", r))
+			panic(r)
+		}
+	}()
 
 	if s.GenerateSummary != nil {
-		return s.GenerateSummary(ctx, recordID, level, seqNo, lines, children)
+		result, err := s.GenerateSummary(ctx, recordID, level, seqNo, lines, children)
+		logSummaryCall(err)
+		return result, err
 	}
 	if s.Extractor == nil {
-		return summaryGenerateResult{}, errors.New("(MID_26042904) summary extractor is nil")
+		err := errors.New("(MID_26042904) summary extractor is nil")
+		logSummaryCall(err)
+		return summaryGenerateResult{}, err
 	}
 	inputText := buildSummaryInputText(lines, children)
 
@@ -889,7 +1053,9 @@ func (s *FixedSizeChunkingService) generateSummary(
 		parsed, err = s.Extractor.ExtractJSON(ctx, in)
 	}
 	if err != nil {
-		return summaryGenerateResult{}, fmt.Errorf("(MID_26042905) generate summary for level %d seq %d: %w", level, seqNo, err)
+		err = fmt.Errorf("(MID_26042905) generate summary for level %d seq %d: %w", level, seqNo, err)
+		logSummaryCall(err)
+		return summaryGenerateResult{}, err
 	}
 	summary := sanitizeTopicText(asString(parsed["summary"]))
 	if summary == "" {
@@ -926,7 +1092,9 @@ func (s *FixedSizeChunkingService) generateSummary(
 		ss := time.Now()
 		categoryPathItemsEn, translateErr = s.translateSummaryCategoryPaths(ctx, categoryPathItems)
 		if translateErr != nil {
-			return summaryGenerateResult{}, fmt.Errorf("(MID_26052702) translate summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
+			err := fmt.Errorf("(MID_26052702) translate summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
+			logSummaryCall(err)
+			return summaryGenerateResult{}, err
 		}
 		s.Logger.Info("===== Missing english version; translate",
 			"model_name", s.TranslationModelName,
@@ -944,7 +1112,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 		"seq", seqNo,
 		"ms_used", time.Since(startTime).Milliseconds())
 
-	return summaryGenerateResult{
+	result := summaryGenerateResult{
 		Summary:             summary,
 		SummaryEn:           summaryEn,
 		Keywords:            keywords,
@@ -953,7 +1121,30 @@ func (s *FixedSizeChunkingService) generateSummary(
 		CategoryNodes:       nodes,
 		CategoryPathItems:   categoryPathItems,
 		CategoryPathItemsEn: categoryPathItemsEn,
-	}, nil
+	}
+	logSummaryCall(nil)
+	return result, nil
+}
+
+func summaryLogLineSpans(lines []MarkedLine, children []SummaryItem) []string {
+	if len(lines) > 0 {
+		_, regularLines := chunkLineNumbers(Chunk{Lines: lines})
+		return lineRangesFromNumbers(regularLines)
+	}
+	var ranges []string
+	for _, child := range children {
+		ranges = append(ranges, child.Lines...)
+	}
+	return ranges
+}
+
+func docProcJSONOrNil(v any) *string {
+	bs, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	s := string(bs)
+	return &s
 }
 
 const summaryCategoryTranslationPrompt = `You are a translation engine.
@@ -1155,6 +1346,8 @@ func (s *FixedSizeChunkingService) failAndPersistSummaries(
 		InputFilename: inputFilename,
 		Start:         start,
 		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "failed",
+		ProcProgress:  s.currentSummaryProgress(),
 		ProcErr:       procErr,
 	})
 	if err != nil {
@@ -1167,6 +1360,45 @@ func (s *FixedSizeChunkingService) failAndPersistSummaries(
 		return
 	}
 	s.Logger.Error("summary generation failed", "record_id", rec.ID, "error", procErr)
+}
+
+func (s *FixedSizeChunkingService) currentSummaryProgress() string {
+	if s.summaryProgressTracker == nil {
+		return ""
+	}
+	return s.summaryProgressTracker.current()
+}
+
+func totalPlannedSummaries(leafCount int, groupSize int) int {
+	if leafCount <= 0 {
+		return 0
+	}
+	if groupSize <= 1 {
+		groupSize = DefaultSummaryGroupSize
+	}
+	total := 0
+	levelCount := leafCount
+	for {
+		total += levelCount
+		if levelCount <= 1 {
+			return total
+		}
+		levelCount = (levelCount + groupSize - 1) / groupSize
+	}
+}
+
+func formatSummaryProgress(completed int, total int) string {
+	if total <= 0 {
+		return ""
+	}
+	if completed < 0 {
+		completed = 0
+	}
+	if completed > total {
+		completed = total
+	}
+	percent := (completed * 100) / total
+	return fmt.Sprintf("%d%% (%d/%d)", percent, completed, total)
 }
 
 const (
@@ -1673,6 +1905,8 @@ type summaryStatusParams struct {
 	InputFilename string
 	Start         time.Time
 	DurationMs    int64
+	ProcStatus    string
+	ProcProgress  string
 	ProcErr       error
 }
 
@@ -1776,7 +2010,12 @@ func appendSummariesStatus(raw string, p summaryStatusParams) (string, error) {
 		"start_time":     p.Start.Format(defaultStatusTime),
 		"ms_used":        p.DurationMs,
 	}
-	if p.ProcErr == nil {
+	if strings.TrimSpace(p.ProcProgress) != "" {
+		entry["progress"] = sanitizeUTF8Text(strings.TrimSpace(p.ProcProgress))
+	}
+	if strings.TrimSpace(p.ProcStatus) != "" {
+		entry["proc_status"] = sanitizeUTF8Text(strings.TrimSpace(p.ProcStatus))
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"
@@ -1851,20 +2090,18 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 		for _, lineNo := range overlap {
 			line, ok := lineByNo[lineNo]
 			if !ok {
-				if lineNo > maxLineNo {
-					continue
-				}
-				return fmt.Errorf("(MID_26052332) overlap line %d not found in input", lineNo)
+				// Skip lines absent from the filtered input (e.g. TOC lines recorded
+				// in artifacts created before TOC filtering was enforced in BuildChunks).
+				continue
 			}
 			chunkLines = append(chunkLines, MarkedLine{Line: line, Mark: "o"})
 		}
 		for _, lineNo := range regular {
 			line, ok := lineByNo[lineNo]
 			if !ok {
-				if lineNo > maxLineNo {
-					continue
-				}
-				return fmt.Errorf("(MID_26052333) regular line %d not found in input", lineNo)
+				// Skip lines absent from the filtered input (e.g. TOC lines recorded
+				// in artifacts created before TOC filtering was enforced in BuildChunks).
+				continue
 			}
 			chunkLines = append(chunkLines, MarkedLine{Line: line, Mark: "n"})
 		}

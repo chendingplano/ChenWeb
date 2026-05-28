@@ -270,7 +270,7 @@ func (p *StructureAnalyzerProcessor) logSummary(ctx context.Context, start, end 
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
-	}); err != nil {
+	}, "MID-26052804"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }

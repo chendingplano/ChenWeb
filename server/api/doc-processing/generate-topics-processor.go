@@ -42,6 +42,7 @@ func (p *GenerateTopicsProcessor) Name() string { return "generate_topics" }
 
 func (p *GenerateTopicsProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	start := p.Now()
+	recordID := docProcLogRecordIDFromPayload(payload)
 	var procErr error
 	if svc, ok := p.Service.(topicGeneratingHandler); ok {
 		procErr = runInputServiceEvent(
@@ -60,31 +61,82 @@ func (p *GenerateTopicsProcessor) HandleEvent(ctx context.Context, payload []byt
 	} else {
 		procErr = runChunkingServiceEvent(ctx, payload, p.InputStore, p.Service, p.Logger)
 	}
-	p.logSummary(ctx, start, p.Now(), procErr)
+	p.logSummary(ctx, recordID, start, p.Now(), procErr)
 	return procErr
 }
 
-func (p *GenerateTopicsProcessor) logSummary(ctx context.Context, start, end time.Time, procErr error) {
+func (p *GenerateTopicsProcessor) logSummary(ctx context.Context, recordID *int64, start, end time.Time, procErr error) {
 	if resolveDocProcLogDB(p.ProcLogger.DB) == nil {
 		return
 	}
 	extraInfo, _ := json.Marshal(map[string]interface{}{})
 	extraStr := docProcSummaryExtraInfoJSON(p.Service, extraInfo)
 	msUsed := end.Sub(start).Milliseconds()
+	finishExtraStr := generateTopicsFinishExtraInfoJSON(p.Service, msUsed)
 	var errStr *string
 	if procErr != nil {
 		s := procErr.Error()
 		errStr = &s
 	}
+	procProgress := docProcSummaryProgress(p.Service)
+	activityName := "extract_topics"
+	if err := p.ProcLogger.LogExtractTopicsFinish(ctx, DocProcLogRecord{
+		CallReason:    "extract topics",
+		DocProcName:   "generate_topics",
+		RecordID:      recordID,
+		ProcProgress:  nullableStringPtr(extractTopicsFinishProgress(procProgress)),
+		ActivityName:  &activityName,
+		ExtraInfoJSON: &finishExtraStr,
+		Errors:        errStr,
+		MSUsed:        &msUsed,
+	}, "MID-26052816"); err != nil {
+		p.Logger.Warn("failed to write extract_topics_finish log", "error", err)
+	}
 	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
 		DocProcName:   p.Name(),
 		ModelNames:    docProcSummaryModelNames(p.Service),
 		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
+		RecordID:      recordID,
 		EntryType:     "doc_proc_summary",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        &msUsed,
-	}); err != nil {
+	}, "MID-26052816"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
+}
+
+func generateTopicsFinishExtraInfoJSON(service any, totalTimeMs int64) string {
+	extra := map[string]any{
+		"total_time_ms": totalTimeMs,
+	}
+	if provider, ok := service.(docProcSummaryExtraInfoProvider); ok {
+		if raw := provider.DocProcSummaryExtraInfo(); len(raw) > 0 {
+			if value, ok := raw["total_topics"]; ok {
+				extra["total_topics"] = value
+			} else if value, ok := raw["topics_generated"]; ok {
+				extra["total_topics"] = value
+			}
+			if value, ok := raw["total_chunks"]; ok {
+				extra["total_chunks"] = value
+			}
+			if value, ok := raw["total_lines"]; ok {
+				extra["total_lines"] = value
+			}
+		}
+	}
+	bs, err := json.Marshal(extra)
+	if err != nil {
+		return `{}`
+	}
+	return string(bs)
+}
+
+func extractTopicsFinishProgress(progress *string) string {
+	if progress != nil {
+		if value := strings.TrimSpace(*progress); value != "" {
+			return value
+		}
+	}
+	return "100%"
 }

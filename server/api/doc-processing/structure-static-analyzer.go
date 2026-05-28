@@ -161,11 +161,11 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 	}); err != nil {
 		return fmt.Errorf("(MID_26042307) update kb.inputs status: %w", err)
 	}
-	p.logSummary(ctx, start, p.Now(), out.NumPages, out.NumLines, len(out.CorrectedType), nil)
+	p.logSummary(ctx, rec.ID, start, p.Now(), out.NumPages, out.NumLines, len(out.CorrectedType), nil)
 	return nil
 }
 
-func (p *StaticAnalyzerProcessor) logSummary(ctx context.Context, start, end time.Time, numPages, numLines, numLabeledLines int, procErr error) {
+func (p *StaticAnalyzerProcessor) logSummary(ctx context.Context, recordID int64, start, end time.Time, numPages, numLines, numLabeledLines int, procErr error) {
 	if p.ProcLogger.DB == nil {
 		return
 	}
@@ -180,16 +180,16 @@ func (p *StaticAnalyzerProcessor) logSummary(ctx context.Context, start, end tim
 		s := procErr.Error()
 		errStr = &s
 	}
-	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+	if err := p.ProcLogger.LogStaticAnalyzer(ctx, DocProcLogRecord{
 		DocProcName:   p.Name(),
 		ModelNames:    []string{},
 		PromptName:    "",
-		EntryType:     "doc_proc_summary",
+		RecordID:      int64Ptr(recordID),
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
-	}); err != nil {
-		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	}, "MID-26052814"); err != nil {
+		p.Logger.Warn("failed to write static_analyzer log", "error", err)
 	}
 }
 

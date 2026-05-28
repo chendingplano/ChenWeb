@@ -124,19 +124,41 @@ func TestGenerateTopicsProcessor_WritesSummaryLog(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	procProgress := "100%"
+	activityName := "extract_topics"
+	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
+		WithArgs(
+			"extract topics",
+			"generate_topics",
+			"{}",
+			nil,
+			int64(81),
+			&procProgress,
+			"extract_topics_finish",
+			nil,
+			nil,
+			&activityName,
+			nil,
+			nil,
+			"{\"total_chunks\":4,\"total_lines\":20,\"total_time_ms\":1500,\"total_topics\":6}",
+			int64(1500),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
 		WithArgs(
 			nil,
 			"generate_topics",
 			"{topic-model,topic-embed-model}",
 			"topic-prompt",
+			int64(81),
+			nil,
 			EntryTypeSummary,
 			nil,
 			nil,
 			nil,
 			nil,
 			nil,
-			"{\"topics_generated\":6,\"total_chunks\":4}",
+			jsonWithFieldMatcher{field: "topics_generated", want: float64(6)},
 			int64(1500),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -151,7 +173,10 @@ func TestGenerateTopicsProcessor_WritesSummaryLog(t *testing.T) {
 		modelNames:  []string{"topic-model", "topic-embed-model"},
 		promptNames: []string{"topic-prompt"},
 		extraInfo: map[string]any{
+			"proc_progress":    "100%",
 			"total_chunks":     4,
+			"total_lines":      20,
+			"total_topics":     6,
 			"topics_generated": 6,
 		},
 	}
@@ -196,12 +221,34 @@ func TestGenerateSummariesProcessor_WritesSummaryLog(t *testing.T) {
 	ApiTypes.ProjectDBHandle = db
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
+	activityName := "generate_summary"
+	procProgress := "100% (3/3)"
+	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
+		WithArgs(
+			"generate summary",
+			"generate_summary",
+			"{summary-model,summary-embed-model}",
+			"summary-prompt",
+			int64(81),
+			&procProgress,
+			"generate_summary_finish",
+			nil,
+			nil,
+			&activityName,
+			nil,
+			nil,
+			"{\"num_summaries\":3,\"total_lines\":20,\"total_time_ms\":800}",
+			int64(800),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
 		WithArgs(
 			nil,
 			"generate_summaries",
 			"{summary-model,summary-embed-model}",
 			"summary-prompt",
+			int64(81),
+			&procProgress,
 			EntryTypeSummary,
 			nil,
 			nil,
@@ -224,6 +271,9 @@ func TestGenerateSummariesProcessor_WritesSummaryLog(t *testing.T) {
 		promptNames: []string{"summary-prompt"},
 		extraInfo: map[string]any{
 			"total_chunks":        2,
+			"total_lines":         20,
+			"num_summaries":       3,
+			"proc_progress":       "100% (3/3)",
 			"summaries_generated": 3,
 		},
 	}
@@ -274,6 +324,8 @@ func TestChunkingProcessor_WritesMethodSpecificSummaryLog(t *testing.T) {
 			"topic_chunking",
 			"{topic-model,summary-model,topic-embed-model}",
 			"topic-prompt,summary-prompt",
+			int64(81),
+			nil,
 			EntryTypeSummary,
 			nil,
 			nil,

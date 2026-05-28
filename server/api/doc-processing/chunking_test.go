@@ -59,6 +59,7 @@ type fakeStore struct {
 	insertedRun   ChunkRunRecord
 	insertCalls   int
 	updatedStatus string
+	updateHistory []string
 	updatedError  *string
 	updateCalls   int
 }
@@ -85,6 +86,7 @@ func (f *fakeStore) UpdateInputStatus(_ context.Context, id int64, statusJSON st
 	}
 	f.updateCalls++
 	f.updatedStatus = statusJSON
+	f.updateHistory = append(f.updateHistory, statusJSON)
 	f.updatedError = errorMsg
 	return nil
 }
@@ -549,6 +551,57 @@ func TestLoadChunksFromArtifactFile_IgnoresStaleTrailingLineNumbers(t *testing.T
 	}
 }
 
+// TestLoadChunksFromArtifactFile_SkipsTOCLinesFromStaleArtifact ensures that
+// line numbers present in an old artifact but absent from the filtered input
+// (e.g. TOC lines that were recorded before BuildChunks started filtering them)
+// are silently skipped rather than causing an error.  This is the regression
+// scenario for record 162: artifact has "lines: [1-25]" where line 25 is toc,
+// but the block-based topic-gen path passes TOC-filtered lines to
+// loadChunksFromArtifactFile, so line 25 is not in lineByNo.
+func TestLoadChunksFromArtifactFile_SkipsTOCLinesFromStaleArtifact(t *testing.T) {
+	tmp := t.TempDir()
+	targetDir := filepath.Join(tmp, "0", "162")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Artifact written by old code: lines 1-25, where line 25 is a toc line.
+	chunkArtifact := "overlap: []\nlines: [1-25]\n\noverlap: [21-25]\nlines: [26-30]\n"
+	if err := os.WriteFile(filepath.Join(targetDir, "std_33830_opendata.chunks"), []byte(chunkArtifact), 0o644); err != nil {
+		t.Fatalf("write chunk artifact: %v", err)
+	}
+
+	// lineByNo built by ParseBlockBufferLines — TOC lines are filtered out.
+	lines := make([]Line, 0, 30)
+	for i := 1; i <= 30; i++ {
+		lt := "paragraph"
+		if i == 25 {
+			lt = "toc" // this line is absent from the filtered set
+			continue
+		}
+		lines = append(lines, Line{LineNo: i, PageNo: 1, LineType: lt, Content: "text"})
+	}
+
+	chunks, err := loadChunksFromArtifactFile(tmp, 162, "std_33830_opendata.chunks", lines)
+	if err != nil {
+		t.Fatalf("loadChunksFromArtifactFile returned error: %v", err)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("chunks=%d, want 2", len(chunks))
+	}
+	// Chunk 1: lines 1-24 (25 skipped as absent/TOC)
+	for _, ml := range chunks[0].Lines {
+		if ml.Line.LineNo == 25 {
+			t.Fatalf("chunk 1 contains TOC line 25 — should have been skipped")
+		}
+	}
+	// Chunk 2 overlap: lines 21-24 (25 skipped); regular: lines 26-30
+	for _, ml := range chunks[1].Lines {
+		if ml.Line.LineNo == 25 {
+			t.Fatalf("chunk 2 contains TOC line 25 in overlap — should have been skipped")
+		}
+	}
+}
+
 func TestService_HandleGenerateTopicsInput_ReadsChunksAndWritesTopics(t *testing.T) {
 	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
@@ -987,6 +1040,28 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 	if summaryStatus["proc_status"] != "success" {
 		t.Fatalf("summary proc_status=%v, want success", summaryStatus["proc_status"])
 	}
+	if summaryStatus["progress"] != "100% (3/3)" {
+		t.Fatalf("summary progress=%v, want 100%% (3/3)", summaryStatus["progress"])
+	}
+	if st.updateCalls < 3 {
+		t.Fatalf("updateCalls=%d, want at least 3 summary progress updates", st.updateCalls)
+	}
+	foundIntermediate := false
+	for _, raw := range st.updateHistory {
+		var entries []map[string]any
+		if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+			t.Fatalf("status history json: %v", err)
+		}
+		for _, entry := range entries {
+			if entry["operation"] == "generate_summaries" && entry["proc_status"] == "running" && entry["progress"] == "33% (1/3)" {
+				foundIntermediate = true
+				break
+			}
+		}
+	}
+	if !foundIntermediate {
+		t.Fatalf("missing intermediate summary progress update in history: %#v", st.updateHistory)
+	}
 }
 
 func TestService_HandleGenerateSummariesInput_SummaryGenerationFailure(t *testing.T) {
@@ -1048,8 +1123,39 @@ func TestService_HandleGenerateSummariesInput_SummaryGenerationFailure(t *testin
 	if summaryStatus["proc_status"] != "failed" {
 		t.Fatalf("summary proc_status=%v, want failed", summaryStatus["proc_status"])
 	}
+	if summaryStatus["progress"] != "" && summaryStatus["progress"] != nil {
+		t.Fatalf("summary progress=%v, want empty progress on first-summary failure", summaryStatus["progress"])
+	}
 	if !strings.Contains(asString(summaryStatus["error"]), "summary generator boom") {
 		t.Fatalf("summary error=%v, want summary generator boom", summaryStatus["error"])
+	}
+}
+
+func TestTotalPlannedSummaries(t *testing.T) {
+	tests := []struct {
+		leafCount int
+		groupSize int
+		want      int
+	}{
+		{leafCount: 0, groupSize: 5, want: 0},
+		{leafCount: 1, groupSize: 5, want: 1},
+		{leafCount: 2, groupSize: 5, want: 3},
+		{leafCount: 5, groupSize: 5, want: 6},
+		{leafCount: 12, groupSize: 5, want: 16},
+	}
+	for _, tt := range tests {
+		if got := totalPlannedSummaries(tt.leafCount, tt.groupSize); got != tt.want {
+			t.Fatalf("totalPlannedSummaries(%d, %d)=%d, want %d", tt.leafCount, tt.groupSize, got, tt.want)
+		}
+	}
+}
+
+func TestFormatSummaryProgress(t *testing.T) {
+	if got := formatSummaryProgress(2, 3); got != "66% (2/3)" {
+		t.Fatalf("formatSummaryProgress(2, 3)=%q, want 66%% (2/3)", got)
+	}
+	if got := formatSummaryProgress(3, 3); got != "100% (3/3)" {
+		t.Fatalf("formatSummaryProgress(3, 3)=%q, want 100%% (3/3)", got)
 	}
 }
 

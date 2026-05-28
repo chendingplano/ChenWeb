@@ -934,6 +934,22 @@ export async function updateKnowledgeStore(
 	return response.json() as Promise<KnowledgeStoreResponse>;
 }
 
+export async function deleteKbInput(id: number): Promise<{ status: boolean }> {
+	const response = await fetch(`${BASE}/inputs/${encodeURIComponent(String(id))}`, {
+		method: 'DELETE',
+		credentials: 'same-origin'
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to delete kb input (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<{ status: boolean }>;
+}
+
 export async function deleteKnowledgeStore(id: number): Promise<{ status: boolean }> {
 	const response = await fetch(`${BASE}/stores/${encodeURIComponent(String(id))}`, {
 		method: 'DELETE',

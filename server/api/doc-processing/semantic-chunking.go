@@ -15,6 +15,7 @@ import (
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
+	"github.com/google/uuid"
 )
 
 const (
@@ -47,6 +48,8 @@ type SemanticChunkingService struct {
 	TopicEmbeddingModelName     string
 	CategorySimilarityMinScore  float64
 	lastDocProcSummaryExtraInfo map[string]any
+	ProcLogger                  DocProcLogger
+	NewLLMCallID                func() string
 }
 
 type SemanticPageBlock struct {
@@ -128,6 +131,8 @@ func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger 
 		PromptErr:                  promptErr,
 		TopicEmbeddingModelName:    topicEmbeddingModelName,
 		CategorySimilarityMinScore: envFloat("CATEGORY_SIMILARITY_MIN_SCORE", DefaultCategorySimilarityMinScore, 0),
+		ProcLogger:                 DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		NewLLMCallID:               uuid.NewString,
 	}
 }
 
@@ -272,12 +277,15 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 	blocks := BuildSemanticPageBlocks(lines, s.FileBlockSize)
 	topics := make([]TopicItem, 0, 128)
 	seqNo := 1
+	topicsSoFar := 0
 	for _, block := range blocks {
-		blockTopics, blockErr := s.extractTopicsForBlock(ctx, rec.ID, block, seqNo)
+		blockTopics, blockMSUsed, blockErr := s.extractTopicsForBlock(ctx, rec.ID, block, seqNo)
 		if blockErr != nil {
 			s.failAndPersist(ctx, rec, inputFilename, start, blockErr)
 			return blockErr
 		}
+		topicsSoFar += len(blockTopics)
+		s.logExtractTopics(ctx, rec.ID, block, len(blocks), blockTopics, topicsSoFar, blockMSUsed)
 		topics = append(topics, blockTopics...)
 		seqNo += len(blockTopics)
 	}
@@ -340,7 +348,10 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		"model_name", s.ModelName,
 	)
 	s.setDocProcSummaryExtraInfo(map[string]any{
+		"proc_progress":    "100%",
 		"total_chunks":     len(blocks),
+		"total_lines":      len(lines),
+		"total_topics":     len(topics),
 		"topics_generated": len(topics),
 	})
 	return nil
@@ -434,7 +445,8 @@ func (s *SemanticChunkingService) extractTopicsForBlock(
 	ctx context.Context,
 	record_id int64,
 	block SemanticPageBlock,
-	seqStart int) ([]TopicItem, error) {
+	seqStart int) ([]TopicItem, int64, error) {
+	start := s.Now()
 	topics, err := extractTopicsFromLinesWithLLM(
 		ctx,
 		record_id,
@@ -449,9 +461,87 @@ func (s *SemanticChunkingService) extractTopicsForBlock(
 		block.BlockNo,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26042109) %w", err)
+		return nil, 0, fmt.Errorf("(MID_26042109) %w", err)
 	}
-	return topics, nil
+	return topics, s.Now().Sub(start).Milliseconds(), nil
+}
+
+func (s *SemanticChunkingService) logExtractTopics(ctx context.Context, recordID int64, block SemanticPageBlock, totalChunks int, topics []TopicItem, topicsSoFar int, msUsed int64) {
+	if resolveDocProcLogDB(s.ProcLogger.DB) == nil || len(topics) == 0 {
+		return
+	}
+	progress := extractTopicsProgress(block.BlockNo, totalChunks)
+	extraJSON := docProcJSONOrNil(map[string]any{
+		"chunk":         block.BlockNo,
+		"total_chunks":  totalChunks,
+		"num_topics":    len(topics),
+		"topics_so_far": topicsSoFar,
+		"percent":       progress,
+		"lines":         semanticBlockLineSpans(block.Lines),
+	})
+	callID := ""
+	if s.NewLLMCallID != nil {
+		callID = strings.TrimSpace(s.NewLLMCallID())
+	}
+	var callIDPtr *string
+	if callID != "" {
+		callIDPtr = &callID
+	}
+	activityName := "generate_topic"
+	for _, topic := range topics {
+		artifactJSON := docProcJSONOrNil(topic)
+		if err := s.ProcLogger.LogExtractTopics(ctx, DocProcLogRecord{
+			CallReason:    "extract topics",
+			DocProcName:   "generate_topics",
+			ModelNames:    topicExtractionModelNames(s),
+			PromptName:    strings.TrimSpace(s.PromptRef),
+			RecordID:      &recordID,
+			ProcProgress:  nullableStringPtr(progress),
+			LLMCallID:     callIDPtr,
+			ActivityName:  &activityName,
+			ArtifactJSON:  artifactJSON,
+			ExtraInfoJSON: extraJSON,
+			MSUsed:        int64Ptr(msUsed),
+		}, "MID-26052816"); err != nil {
+			s.Logger.Warn("failed to write extract_topics log", "record_id", recordID, "block_no", block.BlockNo, "topic_seq", topic.SeqNo, "error", err)
+		}
+	}
+}
+
+func extractTopicsProgress(chunkIdx, totalChunks int) string {
+	if totalChunks <= 0 {
+		return "0%"
+	}
+	if chunkIdx < 0 {
+		chunkIdx = 0
+	}
+	percent := (chunkIdx * 100) / totalChunks
+	if percent > 100 {
+		percent = 100
+	}
+	return fmt.Sprintf("%d%%", percent)
+}
+
+func semanticBlockLineSpans(lines []Line) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	lineNos := make([]int, 0, len(lines))
+	for _, line := range lines {
+		if line.LineNo > 0 {
+			lineNos = append(lineNos, line.LineNo)
+		}
+	}
+	return lineRangesFromNumbers(lineNos)
+}
+
+func topicExtractionModelNames(service *SemanticChunkingService) []string {
+	if service == nil {
+		return nil
+	}
+	return dedupeNonEmpty([]string{
+		strings.TrimSpace(service.ModelName),
+	})
 }
 
 type legacyTopicRow struct {

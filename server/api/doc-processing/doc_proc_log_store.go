@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -11,6 +14,16 @@ import (
 
 const EntryTypeLLMCall = "llm_call"
 const EntryTypeSummary = "doc_proc_summary"
+const EntryTypeGenerateSummary = "generate_summary"
+const EntryTypeGenerateSummaryFinish = "generate_summary_finish"
+const EntryTypeExtractTopics = "extract_topics"
+const EntryTypeExtractTopicsFinish = "extract_topics_finish"
+const EntryTypeStaticAnalyzer = "static_analyzer"
+const EntryTypeBlocking = "blocking"
+const EntryTypeExtractMetrics = "extract_metrics"
+const EntryTypeExtractMetricsFinish = "extract_metrics_finish"
+const EntryTypeExtractProjections = "extract_projections"
+const EntryTypeEnrichProjections = "enrich_projections"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
@@ -18,7 +31,9 @@ type DocProcLogRecord struct {
 	DocProcName   string
 	ModelNames    []string
 	PromptName    string
-	EntryType     string // EntryTypeLLMCall | EntryTypeSummary
+	RecordID      *int64
+	ProcProgress  *string
+	EntryType     string // EntryTypeLLMCall | EntryTypeSummary | ...
 	Pass          *int
 	LLMCallID     *string
 	ActivityName  *string
@@ -26,6 +41,7 @@ type DocProcLogRecord struct {
 	Errors        *string
 	ExtraInfoJSON *string // serialized JSON, nil → NULL
 	MSUsed        *int64
+	LogLoc        *string // "<filename>_<line>" of the Log* call site
 }
 
 // DocProcLogFilter specifies optional server-side filters for ListDocProcLogs.
@@ -46,6 +62,8 @@ type DocProcLogRow struct {
 	DocProcName   string
 	ModelNames    []string
 	PromptName    string
+	RecordID      *int64
+	ProcProgress  *string
 	EntryType     string
 	Pass          *int
 	LLMCallID     *string
@@ -54,6 +72,7 @@ type DocProcLogRow struct {
 	Errors        *string
 	ExtraInfoJSON *string
 	MSUsed        *int64
+	LogLoc        *string
 	CreateTime    string
 }
 
@@ -62,27 +81,117 @@ type DocProcLogger struct {
 	DB *sql.DB
 }
 
+// callerLoc returns "<basename>_<line>" for the caller at the given depth.
+// depth 2 = the caller of the Log* method (the log instrument site).
+func callerLoc(depth int) *string {
+	_, file, line, ok := runtime.Caller(depth)
+	if !ok {
+		return nil
+	}
+	s := filepath.Base(file) + "_" + strconv.Itoa(line)
+	return &s
+}
+
 // LogLLMCall inserts an llm_call entry. Callers marshal the artifact to JSON before passing it.
-func (l DocProcLogger) LogLLMCall(ctx context.Context, rec DocProcLogRecord) error {
+func (l DocProcLogger) LogLLMCall(ctx context.Context, rec DocProcLogRecord, loc string) error {
 	rec.EntryType = EntryTypeLLMCall
-	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec)
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
 // LogSummary inserts a doc_proc_summary entry.
-func (l DocProcLogger) LogSummary(ctx context.Context, rec DocProcLogRecord) error {
+func (l DocProcLogger) LogSummary(ctx context.Context, rec DocProcLogRecord, loc string) error {
 	rec.EntryType = EntryTypeSummary
-	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec)
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
-func insertDocProcLog(ctx context.Context, db *sql.DB, rec DocProcLogRecord) error {
+func (l DocProcLogger) LogGenerateSummary(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeGenerateSummary
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogGenerateSummaryFinish(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeGenerateSummaryFinish
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractTopics(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractTopics
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractTopicsFinish(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractTopicsFinish
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogStaticAnalyzer(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeStaticAnalyzer
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogBlocking(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeBlocking
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractMetrics(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractMetrics
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractMetricsFinish(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractMetricsFinish
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+// LogExtractProjections logs a per-chunk Pass 1 entry and the finish record for
+// extract_semantic_projections (both share entry_type = 'extract_projections' per spec).
+func (l DocProcLogger) LogExtractProjections(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractProjections
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+// LogEnrichProjections logs a per-block Pass 2 entry for extract_semantic_projections.
+func (l DocProcLogger) LogEnrichProjections(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeEnrichProjections
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func allowedDocProcLogEntryType(entryType string) bool {
+	switch entryType {
+	case EntryTypeLLMCall, EntryTypeSummary,
+		EntryTypeGenerateSummary, EntryTypeGenerateSummaryFinish,
+		EntryTypeExtractTopics, EntryTypeExtractTopicsFinish,
+		EntryTypeStaticAnalyzer, EntryTypeBlocking,
+		EntryTypeExtractMetrics, EntryTypeExtractMetricsFinish,
+		EntryTypeExtractProjections, EntryTypeEnrichProjections:
+		return true
+	default:
+		return false
+	}
+}
+
+func insertDocProcLog(ctx context.Context, db *sql.DB, rec DocProcLogRecord, loc string) error {
 	if db == nil {
 		return errors.New("db is nil")
 	}
 	if strings.TrimSpace(rec.DocProcName) == "" {
 		return errors.New("doc_proc_name is required")
 	}
-	if rec.EntryType != EntryTypeLLMCall && rec.EntryType != EntryTypeSummary {
-		return errors.New("entry_type must be 'llm_call' or 'doc_proc_summary'")
+	if !allowedDocProcLogEntryType(rec.EntryType) {
+		return errors.New("entry_type is not allowed")
 	}
 
 	modelNamesArr := "{}"
@@ -96,6 +205,8 @@ INSERT INTO kb.doc_proc_logs (
     doc_proc_name,
     model_names,
     prompt_name,
+    record_id,
+    proc_progress,
     entry_type,
     pass,
     llm_call_id,
@@ -104,17 +215,20 @@ INSERT INTO kb.doc_proc_logs (
     errors,
     extra_info,
     ms_used,
+    log_loc,
     create_time
 ) VALUES (
-    $1, $2, $3::text[], $4, $5, $6, $7, $8,
-    $9::jsonb, $10, $11::jsonb,
-    $12, NOW()
+    $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
+    $11::jsonb, $12, $13::jsonb,
+    $14, $15, NOW()
 )`
 	_, err := db.ExecContext(ctx, stmt,
 		nullableString(rec.CallReason),
 		rec.DocProcName,
 		modelNamesArr,
 		nullableString(rec.PromptName),
+		rec.RecordID,
+		rec.ProcProgress,
 		rec.EntryType,
 		rec.Pass,
 		rec.LLMCallID,
@@ -123,13 +237,43 @@ INSERT INTO kb.doc_proc_logs (
 		rec.Errors,
 		rec.ExtraInfoJSON,
 		rec.MSUsed,
+		loc,
 	)
+	if err != nil {
+		return err
+	}
+	if rec.RecordID != nil && rec.ProcProgress != nil && strings.TrimSpace(*rec.ProcProgress) != "" {
+		_ = updateStatusProgress(ctx, db, *rec.RecordID, rec.DocProcName, strings.TrimSpace(*rec.ProcProgress))
+	}
+	return nil
+}
+
+// updateStatusProgress sets the `progress` field of the matching operation entry inside
+// kb.inputs.status (a JSONB array) for the given record. Failures are tolerated by callers.
+func updateStatusProgress(ctx context.Context, db *sql.DB, recordID int64, operation, progress string) error {
+	const stmt = `
+UPDATE kb.inputs
+SET status = (
+    SELECT jsonb_agg(
+        CASE
+            WHEN elem->>'operation' = $2
+            THEN jsonb_set(elem, '{progress}', to_jsonb($3::text))
+            ELSE elem
+        END
+    )
+    FROM jsonb_array_elements(COALESCE(status, '[]'::jsonb)) AS elem
+),
+modify_time = NOW()
+WHERE id = $1
+  AND status IS NOT NULL
+  AND jsonb_typeof(status) = 'array'`
+	_, err := db.ExecContext(ctx, stmt, recordID, operation, progress)
 	return err
 }
 
 // InsertDocProcLog inserts a log record from an SQLStore (satisfies existing pattern).
-func (s SQLStore) InsertDocProcLog(ctx context.Context, rec DocProcLogRecord) error {
-	return insertDocProcLog(ctx, resolveDocProcLogDB(s.DB), rec)
+func (s SQLStore) InsertDocProcLog(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	return insertDocProcLog(ctx, resolveDocProcLogDB(s.DB), rec, loc)
 }
 
 // ListDocProcLogs returns paginated log rows with optional filtering.
@@ -188,10 +332,10 @@ func (s SQLStore) ListDocProcLogs(ctx context.Context, f DocProcLogFilter) ([]Do
 	listStmt := `
 SELECT id, COALESCE(call_reason,''), doc_proc_name,
        COALESCE(model_names, ARRAY[]::text[]),
-       COALESCE(prompt_name,''), entry_type,
+       COALESCE(prompt_name,''), record_id, proc_progress, entry_type,
        pass, llm_call_id, activity_name,
        artifact::text, errors, extra_info::text,
-       ms_used, COALESCE(to_char(create_time, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), '')
+       ms_used, log_loc, COALESCE(to_char(create_time, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), '')
 FROM kb.doc_proc_logs
 ` + whereClause + `
 ORDER BY ` + orderBy + ` ` + orderDir + `
@@ -215,6 +359,8 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 			&r.DocProcName,
 			pq_text_array(&modelArr),
 			&r.PromptName,
+			&r.RecordID,
+			&r.ProcProgress,
 			&r.EntryType,
 			&r.Pass,
 			&r.LLMCallID,
@@ -223,6 +369,7 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 			&r.Errors,
 			&extraInfo,
 			&msUsed,
+			&r.LogLoc,
 			&r.CreateTime,
 		); err != nil {
 			return nil, 0, err
@@ -308,6 +455,10 @@ func nullableString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func nullableStringPtr(s string) *string {
+	return nullableString(s)
 }
 
 // itoa is a compact int-to-string helper used for query building only.
