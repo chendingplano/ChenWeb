@@ -184,9 +184,10 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			return nil
 		}
 	}
-	// Inject a block buffer holder into context so the blocking processor
-	// can share its output with downstream processors.
+	// Inject buffer holders so blocking and chunking processors can share
+	// their output with downstream processors via context.
 	ctx, _ = withBlockBufferHolder(ctx)
+	ctx, _ = withChunkBufferHolder(ctx)
 
 	// Clear any stale stop_requested flag left over from a previous run that was
 	// killed before the deferred ClearStopRequested could execute. Without this,

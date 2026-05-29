@@ -445,7 +445,7 @@ func TestMentionsAsCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
 			UnitHint:          "ms",
 			ValueHint:         "200",
 			ChunkIndex:        1,
-			BlockLines:        []BlockLine{{Flag: "o", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
+			ChunkLines:        []BlockLine{{Flag: "o", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
 			HasNormalEvidence: false,
 		},
 	}
@@ -462,7 +462,7 @@ func TestMentionsAsCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
 		UnitHint:          "ms",
 		ValueHint:         "200",
 		ChunkIndex:        2,
-		BlockLines:        []BlockLine{{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
+		ChunkLines:        []BlockLine{{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"}},
 		HasNormalEvidence: true,
 	})
 	merged := mentionsAsCandidates(withNormal)

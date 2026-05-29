@@ -164,9 +164,9 @@ func ExtractMetric(c echo.Context) error {
 		selectedSet[n] = true
 	}
 
-	// Apply the blocking process: parse each raw line (dropping font/size/coord),
+	// Apply the chunking process: parse each raw line (dropping font/size/coord),
 	// set the flag to 'n' for selected lines and 'o' for overlap lines.
-	blockLines := make([]docprocessing.BlockLine, 0, len(wanted)+len(overlap))
+	chunkLines := make([]docprocessing.BlockLine, 0, len(wanted)+len(overlap))
 	for _, raw := range strings.Split(string(rawBytes), "\n") {
 		bl, parseErr := docprocessing.ParseRawLineToBlockLine(strings.TrimRight(raw, "\r"))
 		if parseErr != nil {
@@ -174,23 +174,23 @@ func ExtractMetric(c echo.Context) error {
 		}
 		if selectedSet[bl.LineNumber] {
 			bl.Flag = "n"
-			blockLines = append(blockLines, bl)
+			chunkLines = append(chunkLines, bl)
 		} else if overlap[bl.LineNumber] {
 			bl.Flag = "o"
-			blockLines = append(blockLines, bl)
+			chunkLines = append(chunkLines, bl)
 		}
 	}
 
-	if len(blockLines) == 0 {
+	if len(chunkLines) == 0 {
 		return c.JSON(http.StatusBadRequest, extractMetricResponse{
 			Status: false,
 			Error:  "specified lines not found in file (CWB_KB_M_411)",
 		})
 	}
 
-	// Compose the block input string: <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
+	// Compose the chunk input string: <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
 	var sb strings.Builder
-	for _, bl := range blockLines {
+	for _, bl := range chunkLines {
 		sb.WriteString(bl.String())
 		sb.WriteByte('\n')
 	}

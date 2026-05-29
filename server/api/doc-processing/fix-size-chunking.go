@@ -610,6 +610,7 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, 0, start, err)
 		return err
 	}
+	storeChunksInContext(ctx, chunks)
 
 	stagingName := strings.TrimSpace(rec.StagingFilename)
 	if stagingName == "" {

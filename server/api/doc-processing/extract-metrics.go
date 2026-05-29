@@ -99,13 +99,13 @@ type metricCandidateMention struct {
 	Confidence        float64
 	ConfidenceReason  string
 	ChunkIndex        int
-	BlockLines        []BlockLine
+	ChunkLines        []BlockLine
 	HasNormalEvidence bool
 }
 
 type metricCandidate struct {
 	CandidateID        string
-	BlockIndex         int
+	ChunkIndex         int
 	MetricNameHint     string
 	SubjectHint        string
 	UnitHint           string
@@ -115,22 +115,22 @@ type metricCandidate struct {
 }
 
 type candidateBatch struct {
-	blockIdx   int
+	chunkIdx   int
 	candidates []metricCandidate
 }
 
-func groupCandidatesByBlock(candidates []metricCandidate, maxGroupSize int) []candidateBatch {
+func groupCandidatesByChunk(candidates []metricCandidate, maxGroupSize int) []candidateBatch {
 	if maxGroupSize <= 0 {
 		maxGroupSize = 5
 	}
 	var batches []candidateBatch
 	for i := 0; i < len(candidates); {
-		blockIdx := candidates[i].BlockIndex
+		chunkIdx := candidates[i].ChunkIndex
 		j := i
-		for j < len(candidates) && candidates[j].BlockIndex == blockIdx && j-i < maxGroupSize {
+		for j < len(candidates) && candidates[j].ChunkIndex == chunkIdx && j-i < maxGroupSize {
 			j++
 		}
-		batches = append(batches, candidateBatch{blockIdx: blockIdx, candidates: candidates[i:j]})
+		batches = append(batches, candidateBatch{chunkIdx: chunkIdx, candidates: candidates[i:j]})
 		i = j
 	}
 	return batches
@@ -279,9 +279,14 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		}
 	}
 
-	// Get blocks from context (set by BlockingProcessor), or build them from the line file.
-	buf := BlockBufferFromContext(ctx)
-	if buf == nil {
+	// Prefer chunks from the chunking processor (smaller, better for extraction).
+	// Fall back to blocks from the blocking processor, or build blocks from file.
+	var inputChunks []Block
+	if chunkBuf := ChunkBufferFromContext(ctx); chunkBuf != nil {
+		inputChunks = chunksToBlocks(chunkBuf.Chunks)
+	} else if blockBuf := BlockBufferFromContext(ctx); blockBuf != nil {
+		inputChunks = blockBuf.Blocks
+	} else {
 		body, readErr := os.ReadFile(lineFilePath)
 		if readErr != nil {
 			p.Logger.Error("read line file failed", "record_id", evt.RecordID, "path", lineFilePath, "error", readErr)
@@ -289,21 +294,22 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 			return fmt.Errorf("(MID_26050708) failed reading line file, error:%w, path:%s", readErr, lineFilePath)
 		}
 		bPrev, bNext, bRemoveTOC := blockingConfigFromViper()
-		buf, err = buildBlocks(body, envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1), bPrev, bNext, bRemoveTOC)
-		if err != nil {
-			p.Logger.Error("build blocks failed", "record_id", evt.RecordID, "error", err)
-			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) build blocks for record_id=%d: %w", evt.RecordID, err))
-			return fmt.Errorf("(MID_26050702) failed building blocks, error:%w", err)
+		buf, buildErr := buildBlocks(body, envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1), bPrev, bNext, bRemoveTOC)
+		if buildErr != nil {
+			p.Logger.Error("build blocks failed", "record_id", evt.RecordID, "error", buildErr)
+			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) build blocks for record_id=%d: %w", evt.RecordID, buildErr))
+			return fmt.Errorf("(MID_26050702) failed building blocks, error:%w", buildErr)
 		}
+		inputChunks = buf.Blocks
 	}
-	if len(buf.Blocks) == 0 {
-		err := fmt.Errorf("(MID_26042460) no blocks found for record_id=%d", evt.RecordID)
-		p.Logger.Error("no blocks", "record_id", evt.RecordID, "line_file", lineFilePath)
+	if len(inputChunks) == 0 {
+		err := fmt.Errorf("(MID_26042460) no chunks found for record_id=%d", evt.RecordID)
+		p.Logger.Error("no chunks", "record_id", evt.RecordID, "line_file", lineFilePath)
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return nil
 	}
 
-	result, err := p.extractMetricsFromBlocksWithLLM(ctx, evt.RecordID, buf.Blocks)
+	result, err := p.extractMetricsFromChunksWithLLM(ctx, evt.RecordID, inputChunks)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) || isCtxStopped(ctx) {
 			p.stopAndPersistMetrics(context.Background(), rec, start)
@@ -348,10 +354,10 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		"inserted_rows", inserted,
 		"metrics_count", len(allMetrics),
 		"uncertain_metrics_count", len(result.UncertainMetrics),
-		"num_blocks", len(buf.Blocks),
+		"num_chunks", len(inputChunks),
 	)
 	p.persistMetricsStatus(ctx, rec, start, nil)
-	p.logMetricsSummary(ctx, start, p.Now(), result, inserted, len(buf.Blocks))
+	p.logMetricsSummary(ctx, start, p.Now(), result, inserted, len(inputChunks))
 	return nil
 }
 
@@ -531,37 +537,37 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 }
 */
 
-func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
+func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	ctx context.Context,
 	record_id int64,
-	blocks []Block) (metricExtractionResult, error) {
-	mentions := make([]metricCandidateMention, 0, len(blocks))
+	chunks []Block) (metricExtractionResult, error) {
+	mentions := make([]metricCandidateMention, 0, len(chunks))
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
 	detectedLanguage := "unknown"
 	var fallbackCount, llmCallCount int
 
 	// Step 1: Extract metrics
-	for _, block := range blocks {
+	for _, chunk := range chunks {
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
 		}
-		userPrompt := buildMetricCandidateUserPrompt(block.Lines)
+		userPrompt := buildMetricCandidateUserPrompt(chunk.Lines)
 		startTime := time.Now()
 		p.Logger.Info("extract metric start",
 			"record_id", record_id,
-			"num_lines", len(block.Lines),
+			"num_lines", len(chunk.Lines),
 			"model name", p.MentionModelName,
 			"prompt", p.MentionPromptRef,
 		)
 
 		callStart := p.Now()
-		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), block.Index)
+		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), chunk.Index)
 		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, userPrompt)
 		llmCallCount++
 		if err == nil && strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) {
 			fallbackCount++
 		}
-		p.logExtractMetricsBlock(ctx, callID, block.Index, len(blocks), len(mentions),
+		p.logExtractMetricsChunk(ctx, callID, chunk.Index, len(chunks), len(mentions),
 			[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef,
 			payload, err, callStart, p.Now())
 		if err != nil {
@@ -577,7 +583,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 
 		usedMentionModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedMentionModel, p.MentionModelName))
 		raw, _ := payload["candidates"].([]any)
-		mentions = append(mentions, normalizeMetricCandidateMentions(raw, block)...)
+		mentions = append(mentions, normalizeMetricCandidateMentions(raw, chunk)...)
 
 		p.Logger.Info("extract metric end  ",
 			"record_id", record_id,
@@ -597,11 +603,11 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		"record_stage", "post_merge",
 	)
 
-	// Step 3: Enrich (batched by block)
+	// Step 3: Enrich (batched by chunk)
 	metrics := make([]map[string]any, 0, len(candidates))
 	uncertain := make([]map[string]any, 0)
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
-	batches := groupCandidatesByBlock(candidates, p.MetricEnrichGroupSize)
+	batches := groupCandidatesByChunk(candidates, p.MetricEnrichGroupSize)
 	for batchIdx, batch := range batches {
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
@@ -615,7 +621,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 			"record_id", record_id,
 			"batch", batchIdx+1,
 			"total_batches", len(batches),
-			"block_idx", batch.blockIdx,
+			"block_idx", batch.chunkIdx,
 			"candidate_ids", candidateIDs,
 			"model_name", p.RelationModelName,
 			"prompt_name", p.RelationPromptRef,
@@ -624,7 +630,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), batchIdx+1)
 		payload, err := p.extractMetricPayload(ctx, buildMetricRelationBatchPrompt(batch.candidates), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "MID-26052903")
 		llmCallCount++
-		p.logEnrichMetricsBlock(ctx, enrichCallID, batch.blockIdx, len(batches), len(metrics),
+		p.logEnrichMetricsChunk(ctx, enrichCallID, batch.chunkIdx, len(batches), len(metrics),
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
 			payload, err, enrichStart, p.Now())
 		if err != nil {
@@ -907,7 +913,7 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 		"uncertain_metrics": []any{},
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	// Merge support lines from all candidates (same block); deduplicate by page+line number.
+	// Merge support lines from all candidates (same chunk); deduplicate by page+line number.
 	seen := make(map[[2]int]struct{})
 	merged := make([]BlockLine, 0)
 	for _, c := range candidates {
@@ -991,7 +997,7 @@ func normalizeMetricCandidateMentions(items []any, block Block) []metricCandidat
 			Confidence:        toFloat(raw["confidence"]),
 			ConfidenceReason:  strings.TrimSpace(asString(raw["confidence_reason"])),
 			ChunkIndex:        block.Index,
-			BlockLines:        append([]BlockLine(nil), block.Lines...),
+			ChunkLines:        append([]BlockLine(nil), block.Lines...),
 			HasNormalEvidence: metricCandidateHasNormalEvidence(block, spans, quote),
 		})
 	}
@@ -1055,7 +1061,7 @@ func mentionsAsCandidates(mentions []metricCandidateMention) []metricCandidate {
 		}
 		out = append(out, metricCandidate{
 			CandidateID:    fmt.Sprintf("metric_cand_%d", len(out)+1),
-			BlockIndex:     mention.ChunkIndex,
+			ChunkIndex:     mention.ChunkIndex,
 			MetricNameHint: mention.MetricNameHint,
 			SubjectHint:    mention.SubjectHint,
 			UnitHint:       mention.UnitHint,
@@ -1070,7 +1076,7 @@ func mentionsAsCandidates(mentions []metricCandidateMention) []metricCandidate {
 				"confidence":        mention.Confidence,
 				"confidence_reason": mention.ConfidenceReason,
 			}},
-			SupportLines: append([]BlockLine(nil), mention.BlockLines...),
+			SupportLines: append([]BlockLine(nil), mention.ChunkLines...),
 		})
 	}
 	return out
@@ -1374,21 +1380,21 @@ func (p *MetricsProcessor) logLLMCall(
 	}
 }
 
-// logExtractMetricsBlock writes one extract_metrics log entry for a single Pass 1 block.
-func (p *MetricsProcessor) logExtractMetricsBlock(
+// logExtractMetricsChunk writes one extract_metrics log entry for a single Pass 1 chunk.
+func (p *MetricsProcessor) logExtractMetricsChunk(
 	ctx context.Context,
 	callID string,
-	blockIdx, totalBlocks, metricsSoFar int,
+	chunkIdx, totalChunks, metricsSoFar int,
 	modelNames []string, promptName string,
 	payload map[string]any, callErr error,
 	start, end time.Time,
 ) {
 	candidates, _ := payload["candidates"].([]any)
 	numMetrics := len(candidates)
-	percent := fmt.Sprintf("%.0f%%", float64(blockIdx)/float64(totalBlocks)*100)
+	percent := fmt.Sprintf("%.0f%%", float64(chunkIdx)/float64(totalChunks)*100)
 	extraInfo := map[string]any{
-		"block":          blockIdx,
-		"total_blocks":   totalBlocks,
+		"chunk":          chunkIdx,
+		"total_chunks":   totalChunks,
 		"num_metrics":    numMetrics,
 		"metrics_so_far": metricsSoFar,
 		"percent":        percent,
@@ -1429,21 +1435,21 @@ func (p *MetricsProcessor) logExtractMetricsBlock(
 	}
 }
 
-// logEnrichMetricsBlock writes one enrich_metrics log entry for a single Pass 2 candidate.
-func (p *MetricsProcessor) logEnrichMetricsBlock(
+// logEnrichMetricsChunk writes one enrich_metrics log entry for a single Pass 2 chunk batch.
+func (p *MetricsProcessor) logEnrichMetricsChunk(
 	ctx context.Context,
 	callID string,
-	blockIdx, totalBlocks, metricsSoFar int,
+	chunkIdx, totalChunks, metricsSoFar int,
 	modelNames []string, promptName string,
 	payload map[string]any, callErr error,
 	start, end time.Time,
 ) {
 	metricsRaw, _ := payload["metrics"].([]any)
 	numMetrics := len(metricsRaw)
-	percent := fmt.Sprintf("%.0f%%", float64(blockIdx)/float64(totalBlocks)*100)
+	percent := fmt.Sprintf("%.0f%%", float64(chunkIdx)/float64(totalChunks)*100)
 	extraInfo := map[string]any{
-		"block":          blockIdx,
-		"total_blocks":   totalBlocks,
+		"chunk":          chunkIdx,
+		"total_chunks":   totalChunks,
 		"num_metrics":    numMetrics,
 		"metrics_so_far": metricsSoFar,
 		"percent":        percent,
@@ -1490,14 +1496,14 @@ func (p *MetricsProcessor) logMetricsSummary(
 	start, end time.Time,
 	result metricExtractionResult,
 	inserted int64,
-	numBlocks int,
+	numChunks int,
 ) {
 	extraInfo := map[string]any{
 		"total_metrics":     inserted,
 		"uncertain_metrics": len(result.UncertainMetrics),
 		"fallback_count":    result.FallbackCount,
 		"llm_call_count":    result.LLMCallCount,
-		"num_blocks":        numBlocks,
+		"num_chunks":        numChunks,
 	}
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
@@ -1642,6 +1648,31 @@ func isEmptyMetricExtractionError(err error) bool {
 	msg := strings.TrimSpace(err.Error())
 	return (strings.Contains(msg, "unexpected end of JSON input") && strings.Contains(msg, "json:{[]}")) ||
 		strings.Contains(msg, "(MID_26042490)")
+}
+
+// chunksToBlocks converts Chunk values (from the chunking processor) into Block
+// values so that the metrics extractor can process them uniformly. The Mark field
+// "o" (overlap) maps to Flag "o"; everything else maps to Flag "n" (normal).
+func chunksToBlocks(chunks []Chunk) []Block {
+	blocks := make([]Block, 0, len(chunks))
+	for _, c := range chunks {
+		lines := make([]BlockLine, 0, len(c.Lines))
+		for _, ml := range c.Lines {
+			flag := "n"
+			if strings.EqualFold(strings.TrimSpace(ml.Mark), "o") {
+				flag = "o"
+			}
+			lines = append(lines, BlockLine{
+				Flag:       flag,
+				LineNumber: ml.Line.LineNo,
+				PageNumber: ml.Line.PageNo,
+				LineType:   ml.Line.LineType,
+				Content:    ml.Line.Content,
+			})
+		}
+		blocks = append(blocks, Block{Index: c.SeqNo, Lines: lines})
+	}
+	return blocks
 }
 
 func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath string, promptErr error) {

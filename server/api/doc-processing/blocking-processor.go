@@ -85,6 +85,51 @@ func BlockBufferFromContext(ctx context.Context) *BlockBuffer {
 	return h.buffer
 }
 
+// --- context-based chunk buffer sharing ---
+
+type chunkBufferCtxKey struct{}
+
+type chunkBufferHolder struct {
+	mu     sync.Mutex
+	buffer *ChunkBuffer
+}
+
+// ChunkBuffer is the in-memory output of the chunking processor.
+type ChunkBuffer struct {
+	Chunks []Chunk
+}
+
+// withChunkBufferHolder injects a mutable chunk buffer holder into ctx.
+// The chunking processor writes its result into the holder; downstream
+// processors can retrieve it via ChunkBufferFromContext.
+func withChunkBufferHolder(ctx context.Context) (context.Context, *chunkBufferHolder) {
+	h := &chunkBufferHolder{}
+	return context.WithValue(ctx, chunkBufferCtxKey{}, h), h
+}
+
+// ChunkBufferFromContext returns the ChunkBuffer populated by the chunking
+// processor, or nil if none is available in this context.
+func ChunkBufferFromContext(ctx context.Context) *ChunkBuffer {
+	h, _ := ctx.Value(chunkBufferCtxKey{}).(*chunkBufferHolder)
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.buffer
+}
+
+// storeChunksInContext stores chunks in the chunk buffer holder, if present.
+func storeChunksInContext(ctx context.Context, chunks []Chunk) {
+	h, _ := ctx.Value(chunkBufferCtxKey{}).(*chunkBufferHolder)
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.buffer = &ChunkBuffer{Chunks: chunks}
+}
+
 // --- BlockingProcessor ---
 
 type BlockingProcessor struct {
