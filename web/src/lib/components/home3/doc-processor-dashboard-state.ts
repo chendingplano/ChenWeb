@@ -46,10 +46,11 @@ export const DOC_PROCESSOR_STAGES = PIPELINE_STAGES.slice(3);
 
 // Always executed regardless of config. "blocking" is excluded because it is rendered
 // as a separate always-on row in the UI and never appears in operation lists.
-export const MANDATORY_PROCESSOR_IDS = ['static_analyzer', 'chunking', 'extract_doc_metadata'];
+export const MANDATORY_PROCESSOR_IDS: string[] = [];
 
 // Configurable via [doc-processing].required_processors in config.toml.
 export const ALL_CONFIGURABLE_PROCESSOR_IDS = [
+	'static_analyzer', 'chunking', 'extract_doc_metadata',
 	'extract_metrics', 'extract_provisions', 'generate_summaries',
 	'generate_topics', 'generate_scene_blocks', 'extract_products',
 	'extract_semantic_projections', 'extract_structured_knowledge',

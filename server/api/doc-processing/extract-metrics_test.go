@@ -26,7 +26,7 @@ func TestMetricsProcessor_ExtractMetricPayloadUsesStructuredContractWhenAvailabl
 	p := NewMetricsProcessor(nil, nil, extractor, nil)
 	p.PromptRef = "prompt-extract-metrics-v1.md"
 
-	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{})
+	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{}, "MID-26052908")
 	if err != nil {
 		t.Fatalf("extractMetricPayload: %v", err)
 	}
@@ -384,10 +384,13 @@ func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T
 						"value_data_type":     "numerical",
 						"value_range_type":    "<=",
 						"threshold_or_target": "<=200",
-						"category_paths":      []any{},
-						"category_paths_en":   []any{},
 					},
 				},
+				"uncertain_metrics": []any{},
+			},
+			{
+				"language":          "en",
+				"metrics":           []any{},
 				"uncertain_metrics": []any{},
 			},
 		},
@@ -412,13 +415,13 @@ func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"3101","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if extractor.structuredCalledCount != 3 {
-		t.Fatalf("structuredCalledCount=%d, want 3", extractor.structuredCalledCount)
+	if extractor.structuredCalledCount != 4 {
+		t.Fatalf("structuredCalledCount=%d, want 4 (2 candidate passes + 2 enrich batches, one per block)", extractor.structuredCalledCount)
 	}
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
-	if got, want := extractor.modelNames, []string{"mention-model", "mention-model", "relation-model"}; !reflect.DeepEqual(got, want) {
+	if got, want := extractor.modelNames, []string{"mention-model", "mention-model", "relation-model", "relation-model"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("modelNames=%v, want %v", got, want)
 	}
 	if metricsStore.saveCalled != 1 {
@@ -429,133 +432,6 @@ func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T
 	}
 	if got := strings.TrimSpace(asString(metricsStore.lastSave.Metrics[0]["metric_id"])); got != "3101_1" {
 		t.Fatalf("metric_id=%q, want 3101_1", got)
-	}
-}
-
-func TestMetricsProcessor_RepairsMissingEnglishCategoryPathsBeforeIndexing(t *testing.T) {
-	ctx, holder := withBlockBufferHolder(context.Background())
-	holder.mu.Lock()
-	holder.buffer = &BlockBuffer{
-		Blocks: []Block{{
-			Index: 1,
-			Lines: []BlockLine{
-				{Flag: "n", LineNumber: 1, PageNumber: 1, LineType: "paragraph", Content: "本标准规定了时延要求。"},
-			},
-		}},
-	}
-	holder.mu.Unlock()
-
-	tmp := t.TempDir()
-	artifactWebDir := filepath.Join(tmp, "artifact_web")
-	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
-		ID:              3301,
-		ParserName:      "opendata",
-		ResultFilename:  filepath.Join(tmp, "ocr_rslt_3301.json"),
-		StagingFilename: filepath.Join(tmp, "ocr_rslt_3301.pdf"),
-		StatusRaw:       "[]",
-	}}
-	metricsStore := &fakeMetricsStore{}
-	extractor := &fakeJSONExtractor{
-		outs: []map[string]any{
-			{
-				"language": "zh",
-				"candidates": []any{
-					map[string]any{
-						"metric_name_hint":  "时延",
-						"subject_hint":      "系统性能",
-						"evidence_quote":    "本标准规定了时延要求。",
-						"source_line_spans": []any{float64(1)},
-						"unit_hint":         "ms",
-						"value_hint":        "200",
-						"confidence":        0.88,
-					},
-				},
-			},
-			{
-				"language": "zh",
-				"metrics": []any{
-					map[string]any{
-						"metric_name":       "时延",
-						"metric_name_en":    "Latency",
-						"source_line_spans": []any{float64(1)},
-						"subject":           "系统性能",
-						"subject_en":        "System Performance",
-						"desc":              "最大允许时延",
-						"desc_en":           "Maximum allowed latency",
-						"keywords":          []any{"时延"},
-						"keywords_en":       []any{"latency"},
-						"location_type":     "sentence",
-						"unit":              "毫秒",
-						"unit_en":           "ms",
-						"metric_value":      "200",
-						"category_paths": []any{
-							map[string]any{
-								"category_path": []any{
-									map[string]any{"name": "标准文件", "keywords": []any{"规范"}, "confidence": 0.9},
-								},
-								"path_keywords":   []any{"规范"},
-								"path_confidence": 0.9,
-							},
-						},
-						"category_paths_en": []any{},
-					},
-				},
-				"uncertain_metrics": []any{},
-			},
-			{
-				"category_paths_en": []any{
-					map[string]any{
-						"category_path": []any{
-							map[string]any{"name": "Standards", "keywords": []any{"standards"}, "confidence": 0.95},
-						},
-						"path_keywords":   []any{"standards"},
-						"path_confidence": 0.95,
-					},
-				},
-			},
-		},
-	}
-
-	p := NewMetricsProcessor(inputStore, metricsStore, extractor, nil)
-	p.ChunkDir = tmp
-	p.ArtifactWebDir = artifactWebDir
-	p.MentionPromptText = "extract metric candidates"
-	p.MentionPromptRef = "prompt-extract-metric-candidates-v1.md"
-	p.MentionPromptErr = nil
-	p.MentionModelName = "mention-model"
-	p.MentionModelErr = nil
-	p.RelationPromptText = "enrich metrics"
-	p.RelationPromptRef = "prompt-enrich-metrics-v1.md"
-	p.RelationPromptErr = nil
-	p.RelationModelName = "relation-model"
-	p.RelationModelErr = nil
-	p.TranslationEnabled = true
-	p.TranslationModelName = "translation-model"
-	p.TranslationModelCfg = structureModelConfig{ModelName: "translation-model"}
-
-	if err := p.HandleEvent(ctx, []byte(`{"record_id":"3301","force":true}`)); err != nil {
-		t.Fatalf("HandleEvent: %v", err)
-	}
-	if extractor.structuredCalledCount != 3 {
-		t.Fatalf("structuredCalledCount=%d, want 3", extractor.structuredCalledCount)
-	}
-	if metricsStore.saveCalled != 1 {
-		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
-	}
-	gotPathsEn := parseCategoryPathsAny(metricsStore.lastSave.Metrics[0]["category_paths_en"])
-	if len(gotPathsEn) != 1 || len(gotPathsEn[0].Nodes) != 1 || gotPathsEn[0].Nodes[0].Name != "Standards" {
-		t.Fatalf("category_paths_en=%#v, want translated English path", metricsStore.lastSave.Metrics[0]["category_paths_en"])
-	}
-	leaf := filepath.Join(artifactWebDir, "standards", "metrics.txt")
-	body, err := os.ReadFile(leaf)
-	if err != nil {
-		t.Fatalf("read indexed metrics: %v", err)
-	}
-	if strings.TrimSpace(string(body)) != "3301_1" {
-		t.Fatalf("metrics.txt=%q, want 3301_1", strings.TrimSpace(string(body)))
-	}
-	if _, err := os.Stat(filepath.Join(artifactWebDir, "标准文件")); !os.IsNotExist(err) {
-		t.Fatalf("unexpected non-English category dir created: err=%v", err)
 	}
 }
 

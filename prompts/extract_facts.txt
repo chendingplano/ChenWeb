@@ -51,6 +51,3 @@ Example:
 - Avoid duplication or overlap
 - Prefer precise, minimal wording
 - If no valid facts are found, return an empty array []
-
-## Input
-<CONTENT>

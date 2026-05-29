@@ -11,13 +11,17 @@ DO NOT extract anything else (no concepts, no normative statements, no constrain
 
 # 1. Inputs
 
-The input is a sequence of lines with the following format:
+The input is a JSON:
 
-```text
-<flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
+```json
+[
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  ...
+]
 ```
-
-where `<flag>` indicates whether the line is an overlapped line (`o`) or a normal line (`n`).
+where: 
+- "flag" indicates whether the entry is an overlapped entry ("o") or a normal entry ("n)
 
 Treat overlap lines (`o`) as **context only** — do not produce an extraction whose evidence rests solely on `o` lines.
 

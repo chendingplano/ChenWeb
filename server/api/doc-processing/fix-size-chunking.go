@@ -1898,6 +1898,7 @@ func normalizeChunkFlag(mark string) string {
 	return "n"
 }
 
+/*
 func formatMarkedChunkLine(line Line, mark string) string {
 	base := strings.TrimSpace(lineRawForChunking(line))
 	if base == "" {
@@ -1905,6 +1906,7 @@ func formatMarkedChunkLine(line Line, mark string) string {
 	}
 	return normalizeChunkFlag(mark) + "\t" + base
 }
+*/
 
 func buildMarkedChunkInputText(lines []MarkedLine) string {
 	return markedLinesToJSON(lines)

@@ -13,11 +13,17 @@ Your objective is to preserve retrieval-critical meaning while removing linguist
 ---
 
 ## 1. Inputs
-The input is a sequence of lines with the following format for lines:
-```text
-<flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
+
+The input is a JSON:
+```json
+[
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  ...
+]
 ```
-where `<flag>` indicates whether the line is an overlapped line ('o') or normal line ('n').
+where: 
+- "flag" indicates whether the entry is an overlapped entry ("o") or a normal entry ("n)
 
 --- 
 ## 2. Core Objective

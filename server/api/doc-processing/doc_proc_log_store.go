@@ -30,6 +30,7 @@ const EntryTypeEnrichSceneBlocks = "enrich_scene_blocks"
 const EntryTypeExtractStructuredKnowledge = "extract_structured_knowledge"
 const EntryTypeEnrichStructuredKnowledge = "enrich_structured_knowledge"
 const EntryTypeExtractEntityRelation = "extract_entity_relation"
+const EntryTypeEnrichMetrics = "enrich_metrics"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
@@ -160,6 +161,12 @@ func (l DocProcLogger) LogExtractMetricsFinish(ctx context.Context, rec DocProcL
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+func (l DocProcLogger) LogEnrichMetrics(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeEnrichMetrics
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 // LogExtractProjections logs a per-chunk Pass 1 entry and the finish record for
 // extract_semantic_projections (both share entry_type = 'extract_projections' per spec).
 func (l DocProcLogger) LogExtractProjections(ctx context.Context, rec DocProcLogRecord, loc string) error {
@@ -217,7 +224,7 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeGenerateSummary, EntryTypeGenerateSummaryFinish,
 		EntryTypeExtractTopics, EntryTypeExtractTopicsFinish,
 		EntryTypeStaticAnalyzer, EntryTypeBlocking,
-		EntryTypeExtractMetrics, EntryTypeExtractMetricsFinish,
+		EntryTypeExtractMetrics, EntryTypeExtractMetricsFinish, EntryTypeEnrichMetrics,
 		EntryTypeExtractProjections, EntryTypeEnrichProjections,
 		EntryTypeExtractProvisions,
 		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,

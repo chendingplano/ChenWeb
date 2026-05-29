@@ -7,11 +7,16 @@ The input may come from standards, laws, regulations, technical documents, compl
 Return strict JSON only.
 
 ## Inputs
-Each format of lines in the input is:
-```text
-<flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
+The input is a JSON:
+```json
+[
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  ...
+]
 ```
-where `<flag>` indicates whether the line is an overlapped line ('o') or normal line ('n').
+where: 
+- "flag" indicates whether the entry is an overlapped entry ("o") or a normal entry ("n)
 
 **IMPORTANT** NEVER extract products from the overlapped lines alone, unless the products live in both the overlapped and normal lines.
 

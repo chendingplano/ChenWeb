@@ -49,12 +49,6 @@ type MetricsProcessor struct {
 	RelationModelErr            error
 	RelationModelName           string
 	RelationModelCfg            structureModelConfig
-	TranslationModelRef         string
-	TranslationModelCfgPath     string
-	TranslationModelErr         error
-	TranslationModelName        string
-	TranslationModelCfg         structureModelConfig
-	TranslationEnabled          bool
 	PromptText                  string
 	PromptRef                   string
 	PromptPath                  string
@@ -64,7 +58,7 @@ type MetricsProcessor struct {
 	ModelErr                    error
 	ModelName                   string
 	ChunkDir                    string
-	ArtifactWebDir              string
+	MetricEnrichGroupSize       int
 }
 
 type MetricsStore interface {
@@ -111,12 +105,35 @@ type metricCandidateMention struct {
 
 type metricCandidate struct {
 	CandidateID        string
+	BlockIndex         int
 	MetricNameHint     string
 	SubjectHint        string
 	UnitHint           string
 	ValueHint          string
 	SupportingMentions []map[string]any
 	SupportLines       []BlockLine
+}
+
+type candidateBatch struct {
+	blockIdx   int
+	candidates []metricCandidate
+}
+
+func groupCandidatesByBlock(candidates []metricCandidate, maxGroupSize int) []candidateBatch {
+	if maxGroupSize <= 0 {
+		maxGroupSize = 5
+	}
+	var batches []candidateBatch
+	for i := 0; i < len(candidates); {
+		blockIdx := candidates[i].BlockIndex
+		j := i
+		for j < len(candidates) && candidates[j].BlockIndex == blockIdx && j-i < maxGroupSize {
+			j++
+		}
+		batches = append(batches, candidateBatch{blockIdx: blockIdx, candidates: candidates[i:j]})
+		i = j
+	}
+	return batches
 }
 
 func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *MetricsProcessor {
@@ -143,10 +160,10 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		[]string{"ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
 		"MODEL_DEF_FILE",
 	)
-	translationModelRef, translationModelCfgPath, translationModelCfg, translationModelErr := loadOptionalModelConfigFromEnv(
-		"TRANSLATION_MODEL_NAME",
-		"MODEL_DEF_FILE",
-	)
+	enrichGroupSize := 5
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("METRIC_ENRICH_GROUP_SIZE"))); err == nil && v > 0 {
+		enrichGroupSize = v
+	}
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	p := &MetricsProcessor{
 		InputStore:                  inputStore,
@@ -178,12 +195,6 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		RelationModelErr:            relationModelErr,
 		RelationModelName:           relationModelCfg.ModelName,
 		RelationModelCfg:            relationModelCfg,
-		TranslationModelRef:         translationModelRef,
-		TranslationModelCfgPath:     translationModelCfgPath,
-		TranslationModelErr:         translationModelErr,
-		TranslationModelName:        translationModelCfg.ModelName,
-		TranslationModelCfg:         translationModelCfg,
-		TranslationEnabled:          translationModelErr == nil && strings.TrimSpace(translationModelCfg.ModelName) != "",
 		PromptText:                  relationPromptText,
 		PromptRef:                   relationPromptRef,
 		PromptPath:                  relationPromptPath,
@@ -193,7 +204,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		ModelErr:                    relationModelErr,
 		ModelName:                   relationModelCfg.ModelName,
 		ChunkDir:                    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		ArtifactWebDir:              strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
+		MetricEnrichGroupSize:       enrichGroupSize,
 	}
 	p.forceDisableThinking()
 	applyStructureModelConfigToExtractor(extractor, p.RelationModelCfg)
@@ -306,13 +317,6 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	if detectedLanguage == "" {
 		detectedLanguage = "unknown"
 	}
-	translationCalls, err := p.ensureMetricCategoryPathsEnglish(ctx, eventIDFromContext(ctx), allMetrics)
-	if err != nil {
-		p.persistMetricsStatus(ctx, rec, start, err)
-		return fmt.Errorf("(MID_26052720) repair metric category_paths_en failed: %w", err)
-	}
-	result.LLMCallCount += translationCalls
-
 	for i, m := range allMetrics {
 		m["metric_id"] = fmt.Sprintf("%d_%d", evt.RecordID, i+1)
 		allMetrics[i] = m
@@ -335,9 +339,6 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.Logger.Warn("save metrics to file failed", "record_id", evt.RecordID, "error", fileErr)
 	}
 
-	if indexErr := p.indexMetrics(evt.RecordID, allMetrics); indexErr != nil {
-		p.Logger.Warn("index metrics failed", "record_id", evt.RecordID, "error", indexErr)
-	}
 	if reindexErr := ReindexMetricSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex metric search registry failed", "record_id", evt.RecordID, "error", reindexErr)
 	}
@@ -363,7 +364,6 @@ func (p *MetricsProcessor) forceDisableThinking() {
 	p.MentionModelCfg = forceDisableThinking(p.MentionModelCfg)
 	p.FallbackMentionModelCfg = forceDisableThinking(p.FallbackMentionModelCfg)
 	p.RelationModelCfg = forceDisableThinking(p.RelationModelCfg)
-	p.TranslationModelCfg = forceDisableThinking(p.TranslationModelCfg)
 }
 
 func (p *MetricsProcessor) saveMetricsToFile(recordID int64, rec DocMetadataInputRecord, metrics []map[string]any) error {
@@ -561,7 +561,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		if err == nil && strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, callID, "extract_metric_candidates", 1,
+		p.logExtractMetricsBlock(ctx, callID, block.Index, len(blocks), len(mentions),
 			[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef,
 			payload, err, callStart, p.Now())
 		if err != nil {
@@ -597,28 +597,34 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		"record_stage", "post_merge",
 	)
 
-	// Step 3: Enrich
+	// Step 3: Enrich (batched by block)
 	metrics := make([]map[string]any, 0, len(candidates))
 	uncertain := make([]map[string]any, 0)
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
-	for idx, candidate := range candidates {
+	batches := groupCandidatesByBlock(candidates, p.MetricEnrichGroupSize)
+	for batchIdx, batch := range batches {
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
 		}
 		startTime := time.Now()
-		p.Logger.Info("enrich metric start",
+		candidateIDs := make([]string, 0, len(batch.candidates))
+		for _, c := range batch.candidates {
+			candidateIDs = append(candidateIDs, c.CandidateID)
+		}
+		p.Logger.Info("enrich metric batch start",
 			"record_id", record_id,
-			"idx", idx,
-			"total", len(candidates),
-			"candidate_id", candidate.CandidateID,
+			"batch", batchIdx+1,
+			"total_batches", len(batches),
+			"block_idx", batch.blockIdx,
+			"candidate_ids", candidateIDs,
 			"model_name", p.RelationModelName,
 			"prompt_name", p.RelationPromptRef,
 		)
 		enrichStart := p.Now()
-		enrichCallID := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), idx)
-		payload, err := p.extractMetricPayload(ctx, buildMetricRelationUserPrompt(candidate), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "MID-26052903")
+		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), batchIdx+1)
+		payload, err := p.extractMetricPayload(ctx, buildMetricRelationBatchPrompt(batch.candidates), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "MID-26052903")
 		llmCallCount++
-		p.logLLMCall(ctx, enrichCallID, "enrich_metrics", 2,
+		p.logEnrichMetricsBlock(ctx, enrichCallID, batch.blockIdx, len(batches), len(metrics),
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
 			payload, err, enrichStart, p.Now())
 		if err != nil {
@@ -635,9 +641,9 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
 		metrics = append(metrics, normalizeMetricList(metricsRaw)...)
 		uncertain = append(uncertain, normalizeMetricList(uncertainRaw)...)
-		p.Logger.Info("enrich metric end  ",
+		p.Logger.Info("enrich metric batch end",
 			"record_id", record_id,
-			"candidate_id", candidate.CandidateID,
+			"batch", batchIdx+1,
 			"metrics_so_far", len(metrics),
 			"uncertain_so_far", len(uncertain),
 			"ms_used", time.Since(startTime).Milliseconds(),
@@ -667,6 +673,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 	}, nil
 }
 
+/*
 // metricParsedLine mirrors the block format: <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
 type metricParsedLine struct {
 	Flag       string `json:"flag"`
@@ -724,6 +731,7 @@ func parseMetricInputLines(lines []string) ([]metricParsedLine, error) {
 	}
 	return parsedLines, nil
 }
+*/
 
 func buildMetricCandidateUserPrompt(lines []BlockLine) string {
 	schema := map[string]any{
@@ -844,24 +852,6 @@ func buildMetricRelationUserPrompt(candidate metricCandidate) string {
 			"is_explicit_metric":    true,
 			"table_name_or_section": "string",
 			"reasoning_tags":        []string{"string"},
-			"category_paths": []map[string]any{{
-				"category_path": []map[string]any{{
-					"name":       "string",
-					"keywords":   []string{"string"},
-					"confidence": 0.0,
-				}},
-				"path_keywords":   []string{"string"},
-				"path_confidence": 0.0,
-			}},
-			"category_paths_en": []map[string]any{{
-				"category_path": []map[string]any{{
-					"name":       "string",
-					"keywords":   []string{"string"},
-					"confidence": 0.0,
-				}},
-				"path_keywords":   []string{"string"},
-				"path_confidence": 0.0,
-			}},
 		}},
 		"uncertain_metrics": []any{},
 	}
@@ -869,6 +859,77 @@ func buildMetricRelationUserPrompt(candidate metricCandidate) string {
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
 		"\n\nCandidate:\n" + string(candidateJSON) +
 		"\n\nSource lines (JSON array):\n" + blockLinesToJSON(candidate.SupportLines)
+}
+
+func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
+	candidatesData := make([]map[string]any, 0, len(candidates))
+	for _, c := range candidates {
+		candidatesData = append(candidatesData, map[string]any{
+			"candidate_id":        c.CandidateID,
+			"metric_name_hint":    c.MetricNameHint,
+			"subject_hint":        c.SubjectHint,
+			"unit_hint":           c.UnitHint,
+			"value_hint":          c.ValueHint,
+			"supporting_mentions": c.SupportingMentions,
+		})
+	}
+	candidatesJSON, _ := json.Marshal(candidatesData)
+	schema := map[string]any{
+		"language": "string",
+		"metrics": []map[string]any{{
+			"metric_name":           "string",
+			"metric_name_en":        "string",
+			"source_line_spans":     []string{"5", "12:14"},
+			"subject":               "string",
+			"subject_en":            "string",
+			"desc":                  "string",
+			"desc_en":               "string",
+			"context":               "string",
+			"context_en":            "string",
+			"keywords":              []string{"string"},
+			"keywords_en":           []string{"string"},
+			"location_type":         "string",
+			"unit":                  "string",
+			"unit_en":               "string",
+			"metric_value":          "string",
+			"value_data_type":       "string",
+			"value_range_type":      "string",
+			"value_class":           "string",
+			"value_class_en":        "string",
+			"formula_or_definition": "string",
+			"threshold_or_target":   "string",
+			"measurement_frequency": "string",
+			"confidence":            0.0,
+			"is_explicit_metric":    true,
+			"table_name_or_section": "string",
+			"reasoning_tags":        []string{"string"},
+		}},
+		"uncertain_metrics": []any{},
+	}
+	schemaJSON, _ := json.Marshal(schema)
+	// Merge support lines from all candidates (same block); deduplicate by page+line number.
+	seen := make(map[[2]int]struct{})
+	merged := make([]BlockLine, 0)
+	for _, c := range candidates {
+		for _, l := range c.SupportLines {
+			key := [2]int{l.PageNumber, l.LineNumber}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, l)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		if merged[i].PageNumber != merged[j].PageNumber {
+			return merged[i].PageNumber < merged[j].PageNumber
+		}
+		return merged[i].LineNumber < merged[j].LineNumber
+	})
+	sourceLines := blockLinesToJSON(merged)
+	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nCandidates:\n" + string(candidatesJSON) +
+		"\n\nSource lines (JSON array):\n" + sourceLines
 }
 
 func normalizeMetricList(items []any) []map[string]any {
@@ -906,13 +967,6 @@ func normalizeMetricList(items []any) []map[string]any {
 			"reasoning_tags":        toStringSlice(raw["reasoning_tags"]),
 		}
 		normalized["source_line_spans"] = normalizeSourceLineSpans(raw["source_line_spans"])
-		normalized["category_paths"] = raw["category_paths"]
-		// handle spec typo "caetgory_paths_en"
-		catPathsEn := raw["category_paths_en"]
-		if catPathsEn == nil {
-			catPathsEn = raw["caetgory_paths_en"]
-		}
-		normalized["category_paths_en"] = catPathsEn
 		out = append(out, normalized)
 	}
 	return out
@@ -1001,6 +1055,7 @@ func mentionsAsCandidates(mentions []metricCandidateMention) []metricCandidate {
 		}
 		out = append(out, metricCandidate{
 			CandidateID:    fmt.Sprintf("metric_cand_%d", len(out)+1),
+			BlockIndex:     mention.ChunkIndex,
 			MetricNameHint: mention.MetricNameHint,
 			SubjectHint:    mention.SubjectHint,
 			UnitHint:       mention.UnitHint,
@@ -1319,6 +1374,116 @@ func (p *MetricsProcessor) logLLMCall(
 	}
 }
 
+// logExtractMetricsBlock writes one extract_metrics log entry for a single Pass 1 block.
+func (p *MetricsProcessor) logExtractMetricsBlock(
+	ctx context.Context,
+	callID string,
+	blockIdx, totalBlocks, metricsSoFar int,
+	modelNames []string, promptName string,
+	payload map[string]any, callErr error,
+	start, end time.Time,
+) {
+	candidates, _ := payload["candidates"].([]any)
+	numMetrics := len(candidates)
+	percent := fmt.Sprintf("%.0f%%", float64(blockIdx)/float64(totalBlocks)*100)
+	extraInfo := map[string]any{
+		"block":          blockIdx,
+		"total_blocks":   totalBlocks,
+		"num_metrics":    numMetrics,
+		"metrics_so_far": metricsSoFar,
+		"percent":        percent,
+	}
+	extraBytes, _ := json.Marshal(extraInfo)
+	extraStr := string(extraBytes)
+
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	activity := "extract_metric_candidates"
+	rec := DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogExtractMetrics(ctx, rec, "MID-26052809"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("extract_metrics log skipped: doc processor stopped by user request", "call_id", callID)
+		} else {
+			p.Logger.Warn("failed to write extract_metrics log", "call_id", callID, "error", err)
+		}
+	}
+}
+
+// logEnrichMetricsBlock writes one enrich_metrics log entry for a single Pass 2 candidate.
+func (p *MetricsProcessor) logEnrichMetricsBlock(
+	ctx context.Context,
+	callID string,
+	blockIdx, totalBlocks, metricsSoFar int,
+	modelNames []string, promptName string,
+	payload map[string]any, callErr error,
+	start, end time.Time,
+) {
+	metricsRaw, _ := payload["metrics"].([]any)
+	numMetrics := len(metricsRaw)
+	percent := fmt.Sprintf("%.0f%%", float64(blockIdx)/float64(totalBlocks)*100)
+	extraInfo := map[string]any{
+		"block":          blockIdx,
+		"total_blocks":   totalBlocks,
+		"num_metrics":    numMetrics,
+		"metrics_so_far": metricsSoFar,
+		"percent":        percent,
+	}
+	extraBytes, _ := json.Marshal(extraInfo)
+	extraStr := string(extraBytes)
+
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	activity := "enrich_metrics"
+	rec := DocProcLogRecord{
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogEnrichMetrics(ctx, rec, "MID-26052809"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("enrich_metrics log skipped: doc processor stopped by user request", "call_id", callID)
+		} else {
+			p.Logger.Warn("failed to write enrich_metrics log", "call_id", callID, "error", err)
+		}
+	}
+}
+
 // logMetricsSummary writes one doc_proc_summary log entry after the processor finishes.
 func (p *MetricsProcessor) logMetricsSummary(
 	ctx context.Context,
@@ -1350,16 +1515,6 @@ func (p *MetricsProcessor) logMetricsSummary(
 		seen[n] = struct{}{}
 		modelNames = append(modelNames, n)
 	}
-	if p.TranslationEnabled {
-		n := strings.TrimSpace(p.TranslationModelName)
-		n = strings.TrimSpace(n)
-		if n == "" {
-		} else if _, ok := seen[n]; !ok {
-			seen[n] = struct{}{}
-			modelNames = append(modelNames, n)
-		}
-	}
-
 	promptName := firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef)
 
 	rec := DocProcLogRecord{
@@ -1379,12 +1534,12 @@ func (p *MetricsProcessor) logMetricsSummary(
 }
 
 func (p *MetricsProcessor) extractMetricPayload(
-	ctx context.Context, 
-	inputText string, 
-	promptText string, 
-	modelName string, 
+	ctx context.Context,
+	inputText string,
+	promptText string,
+	modelName string,
 	cfg structureModelConfig,
-	caller_loc string) (map[string]any, error) {
+	_ string) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	in := llmclients.JSONExtractionInput{
 		PromptText: promptText,
@@ -1396,7 +1551,7 @@ func (p *MetricsProcessor) extractMetricPayload(
 		err     error
 	)
 
-	p.Logger.Info("inputText", "caller", caller_loc, "inputText", inputText)
+	// p.Logger.Info("inputText", "caller", caller_loc, "inputText", inputText)
 
 	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
@@ -1422,93 +1577,6 @@ func (p *MetricsProcessor) extractMetricPayload(
 	return nil, fmt.Errorf("(MID_26042491) llm output must contain 'metrics' or 'candidates'")
 }
 
-func (p *MetricsProcessor) ensureMetricCategoryPathsEnglish(ctx context.Context, eventID string, metrics []map[string]any) (int, error) {
-	llmCallCount := 0
-	for i := range metrics {
-		original := parseCategoryPathsAny(metrics[i]["category_paths"])
-		if len(original) == 0 {
-			continue
-		}
-		english := parseCategoryPathsAny(metrics[i]["category_paths_en"])
-		if len(english) > 0 && summaryCategoryPathsLookEnglish(english) {
-			metrics[i]["category_paths_en"] = english
-			continue
-		}
-		if summaryCategoryPathsLookEnglish(original) {
-			metrics[i]["category_paths_en"] = original
-			continue
-		}
-		callStart := p.Now()
-		translated, payload, err := p.translateMetricCategoryPaths(ctx, original)
-		llmCallCount++
-		p.logLLMCall(
-			ctx,
-			fmt.Sprintf("%s_p3_cat%d", eventID, i),
-			"translate_metric_category_paths",
-			3,
-			[]string{strings.TrimSpace(p.TranslationModelName)},
-			"inline:summary_category_translation",
-			payload,
-			err,
-			callStart,
-			p.Now(),
-		)
-		if err != nil {
-			return llmCallCount, err
-		}
-		metrics[i]["category_paths_en"] = translated
-	}
-	return llmCallCount, nil
-}
-
-func (p *MetricsProcessor) translateMetricCategoryPaths(ctx context.Context, categoryPaths []CategoryPathEntry) ([]CategoryPathEntry, map[string]any, error) {
-	if len(categoryPaths) == 0 {
-		return nil, nil, nil
-	}
-	if !p.TranslationEnabled || strings.TrimSpace(p.TranslationModelName) == "" {
-		return nil, nil, errors.New("(MID_26052721) TRANSLATION_MODEL_NAME is required when metric category_paths_en is missing for non-English category paths")
-	}
-	if p.Extractor == nil {
-		return nil, nil, errors.New("(MID_26052722) metric extractor is nil")
-	}
-	applyStructureModelConfigToExtractor(p.Extractor, p.TranslationModelCfg)
-	inputPayload, err := json.Marshal(map[string]any{
-		"category_paths": categoryPaths,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	in := llmclients.JSONExtractionInput{
-		PromptText: summaryCategoryTranslationPrompt,
-		ModelName:  p.TranslationModelName,
-		InputText:  string(inputPayload),
-	}
-	var parsed map[string]any
-	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
-		result, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, summaryCategoryTranslationContract())
-		if extractErr != nil {
-			return nil, nil, extractErr
-		}
-		if result != nil {
-			parsed = result.Parsed
-		}
-	} else {
-		parsed, err = p.Extractor.ExtractJSON(ctx, in)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	translated := extractCategoryPathDetailEnFromLLM(parsed)
-	if len(translated) == 0 {
-		if arr, ok := parsed["category_paths_en"].([]any); ok {
-			translated = parseCategoryPathsArray(arr)
-		}
-	}
-	if len(translated) == 0 {
-		return nil, parsed, errors.New("(MID_26052723) translation returned empty category_paths_en")
-	}
-	return translated, parsed, nil
-}
 
 /*
 func firstPromptLine(promptText string) string {
@@ -1774,21 +1842,19 @@ VALUES (
 		sourceSpansJSON, _ := json.Marshal(metric["source_line_spans"])
 		keywordsJSON, _ := json.Marshal(metric["keywords"])
 		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
-		categoryPathsJSON, _ := json.Marshal(metric["category_paths"])
 		extInfo, _ := json.Marshal(map[string]any{
 			"language":       req.Language,
 			"schema_version": "2",
 		})
 
 		var (
-			metricNameEn       any
-			subjectEn          any
-			descEn             any
-			contextEn          any
-			keywordsEnVal      any
-			unitEn             any
-			valueClassEn       any
-			categoryPathsEnVal any
+			metricNameEn  any
+			subjectEn     any
+			descEn        any
+			contextEn     any
+			keywordsEnVal any
+			unitEn        any
+			valueClassEn  any
 		)
 		if !isEnglish {
 			metricNameEn = strings.TrimSpace(asString(metric["metric_name_en"]))
@@ -1799,8 +1865,6 @@ VALUES (
 			keywordsEnVal = string(kw)
 			unitEn = strings.TrimSpace(asString(metric["unit_en"]))
 			valueClassEn = strings.TrimSpace(asString(metric["value_class_en"]))
-			cp, _ := json.Marshal(metric["category_paths_en"])
-			categoryPathsEnVal = string(cp)
 		}
 
 		_, err := s.DB.ExecContext(ctx, stmt,
@@ -1835,8 +1899,8 @@ VALUES (
 			toBool(metric["is_explicit_metric"]),
 			strings.TrimSpace(asString(metric["table_name_or_section"])),
 			string(reasoningTagsJSON),
-			string(categoryPathsJSON),
-			categoryPathsEnVal,
+			nil,
+			nil,
 			string(extInfo),
 		)
 		if err != nil {
@@ -1847,96 +1911,3 @@ VALUES (
 	return inserted, nil
 }
 
-func (p *MetricsProcessor) indexMetrics(recordID int64, metrics []map[string]any) error {
-	if strings.TrimSpace(p.ArtifactWebDir) == "" {
-		return fmt.Errorf("(MID_26051801) missing ARTIFACT_WEB_DIR")
-	}
-	return indexMetricsInTreeDir(p.Logger, p.ArtifactWebDir, recordID, metrics)
-}
-
-func indexMetricsInTreeDir(logger ApiTypes.JimoLogger, treeRootDir string, recordID int64, metrics []map[string]any) error {
-	if strings.TrimSpace(treeRootDir) == "" {
-		return fmt.Errorf("(MID_26051802) metric tree root dir is empty")
-	}
-	if recordID <= 0 {
-		return fmt.Errorf("(MID_26051803) invalid record id: %d", recordID)
-	}
-	if err := os.MkdirAll(treeRootDir, 0o755); err != nil {
-		return err
-	}
-	if err := removeMetricTreeRecord(treeRootDir, recordID); err != nil {
-		return fmt.Errorf("(MID_26051804) remove old metric tree entries for record %d: %w", recordID, err)
-	}
-	now := time.Now()
-	for _, metric := range metrics {
-		metricID := strings.TrimSpace(asString(metric["metric_id"]))
-		if metricID == "" {
-			continue
-		}
-		for _, pair := range pairCategoryPathEntries(metric["category_paths"], metric["category_paths_en"]) {
-			if err := writeMetricTreeEntry(logger, treeRootDir, metricID, pair.Index, pair.Original, now); err != nil {
-				return fmt.Errorf("(MID_26051805) index metric %s path: %w", metricID, err)
-			}
-		}
-	}
-	return nil
-}
-
-func writeMetricTreeEntry(logger ApiTypes.JimoLogger, treeRootDir string, metricID string, indexEntry CategoryPathEntry, originalEntry CategoryPathEntry, now time.Time) error {
-	leafDir, err := categoryTreeLeafDirForEntry(logger, treeRootDir, indexEntry, originalEntry, now)
-	if err != nil {
-		return err
-	}
-	if leafDir == "" {
-		return nil
-	}
-	return upsertMetricToLeafDir(leafDir, metricID)
-}
-
-func upsertMetricToLeafDir(leafDir string, metricID string) error {
-	filePath := filepath.Join(leafDir, "metrics.txt")
-	existing := make([]string, 0)
-	if bs, err := os.ReadFile(filePath); err == nil {
-		for _, row := range strings.Split(string(bs), "\n") {
-			row = strings.TrimSpace(row)
-			if row != "" {
-				existing = append(existing, row)
-			}
-		}
-	}
-	existing = appendUniqueString(existing, metricID)
-	sort.Strings(existing)
-	return os.WriteFile(filePath, []byte(strings.Join(existing, "\n")), 0o644)
-}
-
-func removeMetricTreeRecord(treeRootDir string, recordID int64) error {
-	prefix := strconv.FormatInt(recordID, 10) + "_"
-	return filepath.WalkDir(treeRootDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || d.Name() != "metrics.txt" {
-			return nil
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		rows := make([]string, 0)
-		for _, row := range strings.Split(string(body), "\n") {
-			row = strings.TrimSpace(row)
-			if row == "" || strings.HasPrefix(row, prefix) {
-				continue
-			}
-			rows = append(rows, row)
-		}
-		if len(rows) == 0 {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			return nil
-		}
-		sort.Strings(rows)
-		return os.WriteFile(path, []byte(strings.Join(rows, "\n")), 0o644)
-	})
-}

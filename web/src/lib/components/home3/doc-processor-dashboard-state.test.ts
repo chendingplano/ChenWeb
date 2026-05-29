@@ -54,12 +54,12 @@ test('record is finished when extract_products is not in expected set and all ot
 	assert.equal(isActiveRecord(record, expected), false, 'should be finished without extract_products');
 });
 
-test('record is still active when a mandatory processor is missing', () => {
+test('record is still active when a processor is missing', () => {
 	const record = makeRecord([
 		{ operation: 'static_analyzer', proc_status: 'success' },
 		// chunking missing
 		{ operation: 'extract_doc_metadata', proc_status: 'success' }
 	]);
 
-	assert.equal(isActiveRecord(record, MANDATORY_PROCESSOR_IDS), true, 'missing chunking keeps record active');
+	assert.equal(isActiveRecord(record, ['static_analyzer', 'chunking', 'extract_doc_metadata']), true, 'missing chunking keeps record active');
 });

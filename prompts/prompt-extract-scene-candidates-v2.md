@@ -6,14 +6,19 @@ Return strict JSON only.
 
 ## Input Format
 
-Each line is:
+The input is a JSON:
 
-```text
-<flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
+```json
+[
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  ...
+]
 ```
+where: 
+- "flag" indicates whether the entry is an overlapped entry ("o") or a normal entry ("n)
 
-- `flag` is `n` for normal or `o` for overlap.
-- Do not extract a candidate from overlap-only evidence unless the same scene is also supported by normal lines.
+Do not extract a candidate from overlap-only evidence unless the same scene is also supported by normal lines.
 
 ## What Counts As A Scene Candidate
 

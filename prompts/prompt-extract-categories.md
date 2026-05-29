@@ -4,13 +4,16 @@ Your task is to extract hierarchical categories, along with descriptions, keywor
 
 ## Input
 
-The input format is:
-```text
-<line_number> <content>
-<line_number> <content>
-...
+The input is a JSON:
+```json
+[
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
+  ...
+]
 ```
-where: `<line_number>` is a sequence number starting from 1 and `<content>` is the content of the artifact.
+where: 
+- "flag" indicates whether the entry is an overlapped entry ("o") or a normal entry ("n)
 
 It extracts one or more category paths for each line.
 
