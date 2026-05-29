@@ -773,24 +773,13 @@ func buildSceneCandidateUserPrompt(chunk Chunk) string {
 			"confidence_reason": "brief reason",
 		}},
 	}
-	lines := make([]string, 0, len(chunk.Lines))
-	for _, line := range chunk.Lines {
-		lines = append(lines, formatMarkedChunkLine(line.Line, line.Mark))
-	}
-	linesJSON, _ := json.Marshal(lines)
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
 		"\n\nChunk index: " + strconv.Itoa(chunk.SeqNo) +
-		"\n\nInput chunk lines (plain):\n" + strings.Join(lines, "\n") +
-		"\n\nInput chunk lines (raw, JSON array):\n" + string(linesJSON)
+		"\n\nInput chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
 }
 
 func buildSceneRelationUserPrompt(candidate sceneCandidate) string {
-	lines := make([]string, 0, len(candidate.SupportLines))
-	for _, line := range candidate.SupportLines {
-		lines = append(lines, formatMarkedChunkLine(line.Line, line.Mark))
-	}
-	linesJSON, _ := json.Marshal(lines)
 	candidateJSON, _ := json.Marshal(map[string]any{
 		"candidate_id":        candidate.CandidateID,
 		"scene_key":           candidate.SceneKey,
@@ -845,8 +834,7 @@ func buildSceneRelationUserPrompt(candidate sceneCandidate) string {
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
 		"\n\nCandidate:\n" + string(candidateJSON) +
-		"\n\nSource lines (plain):\n" + strings.Join(lines, "\n") +
-		"\n\nSource lines (raw, JSON array):\n" + string(linesJSON)
+		"\n\nSource lines (JSON array):\n" + markedLinesToJSON(candidate.SupportLines)
 }
 
 func normalizeSceneCandidateMentions(items []any, chunk Chunk) []sceneCandidateMention {

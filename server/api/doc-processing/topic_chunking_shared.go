@@ -338,17 +338,9 @@ func extractTopicsFromLinesWithLLM(
 		return nil, errors.New("(MID_26042802) topic extractor is nil")
 	}
 
-	linesText := make([]string, 0, len(lines))
-	for _, line := range lines {
-		ll := formatMarkedChunkLine(line, "n")
-		if strings.TrimSpace(ll) != "" {
-			linesText = append(linesText, ll)
-		}
-	}
-
 	logger.Info("llm call start",
 		logScopeName, logScopeValue,
-		"num_lines", len(linesText),
+		"num_lines", len(lines),
 		"model_name", modelName,
 	)
 
@@ -356,7 +348,7 @@ func extractTopicsFromLinesWithLLM(
 	parsed, err := extractTopicPayload(ctx, extractor, llmclients.JSONExtractionInput{
 		PromptText: promptText,
 		ModelName:  modelName,
-		InputText:  strings.Join(linesText, "\n"),
+		InputText:  rawLinesToJSON(lines),
 	})
 	logger.Info("llm call end",
 		logScopeName, logScopeValue,

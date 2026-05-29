@@ -624,16 +624,10 @@ func buildProvisionUserPrompt(block Block) string {
 			"category_path_en":  []any{},
 		}},
 	}
-	lines := make([]string, 0, len(block.Lines))
-	for _, line := range block.Lines {
-		lines = append(lines, line.String())
-	}
-	linesJSON, _ := json.Marshal(lines)
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
 		"\n\nBlock index: " + strconv.Itoa(block.Index) +
-		"\n\nInput block lines (plain):\n" + strings.Join(lines, "\n") +
-		"\n\nInput block lines (raw, JSON array):\n" + string(linesJSON)
+		"\n\nInput block lines (JSON array):\n" + blockLinesToJSON(block.Lines)
 }
 
 func blockLineToPage(block Block) map[int]int {

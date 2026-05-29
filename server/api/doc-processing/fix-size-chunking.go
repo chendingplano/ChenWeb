@@ -1907,15 +1907,7 @@ func formatMarkedChunkLine(line Line, mark string) string {
 }
 
 func buildMarkedChunkInputText(lines []MarkedLine) string {
-	parts := make([]string, 0, len(lines))
-	for _, line := range lines {
-		raw := formatMarkedChunkLine(line.Line, line.Mark)
-		if strings.TrimSpace(raw) == "" {
-			continue
-		}
-		parts = append(parts, raw)
-	}
-	return strings.Join(parts, "\n")
+	return markedLinesToJSON(lines)
 }
 
 func lineRawByteSize(line Line) int {

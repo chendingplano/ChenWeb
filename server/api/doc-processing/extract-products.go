@@ -714,24 +714,13 @@ func buildProductMentionsUserPrompt(block Block) string {
 			"confidence_reason": "brief reason",
 		}},
 	}
-	lines := make([]string, 0, len(block.Lines))
-	for _, line := range block.Lines {
-		lines = append(lines, line.String())
-	}
-	linesJSON, _ := json.Marshal(lines)
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
 		"\n\nBlock index: " + strconv.Itoa(block.Index) +
-		"\n\nInput block lines (plain):\n" + strings.Join(lines, "\n") +
-		"\n\nInput block lines (raw, JSON array):\n" + string(linesJSON)
+		"\n\nInput block lines (JSON array):\n" + blockLinesToJSON(block.Lines)
 }
 
 func buildProductRelationUserPrompt(candidate productCandidate) string {
-	lines := make([]string, 0, len(candidate.SupportLines))
-	for _, line := range candidate.SupportLines {
-		lines = append(lines, line.String())
-	}
-	linesJSON, _ := json.Marshal(lines)
 	candidateJSON, _ := json.Marshal(map[string]any{
 		"candidate_id":        candidate.CandidateID,
 		"product_name":        candidate.ProductName,
@@ -740,8 +729,7 @@ func buildProductRelationUserPrompt(candidate productCandidate) string {
 		"supporting_mentions": candidate.SupportingMentions,
 	})
 	return "Return JSON only.\n\nCandidate:\n" + string(candidateJSON) +
-		"\n\nSource lines (plain):\n" + strings.Join(lines, "\n") +
-		"\n\nSource lines (raw, JSON array):\n" + string(linesJSON)
+		"\n\nSource lines (JSON array):\n" + blockLinesToJSON(candidate.SupportLines)
 }
 
 func normalizeProductMentions(items []any, block Block) []productMention {

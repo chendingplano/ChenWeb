@@ -545,16 +545,11 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
 		}
-		lines := make([]string, len(block.Lines))
-		for i, bl := range block.Lines {
-			lines[i] = bl.String()
-		}
-		parsedLines := parseMetricInputLines(lines)
-		userPrompt := buildMetricCandidateUserPrompt(lines, parsedLines)
+		userPrompt := buildMetricCandidateUserPrompt(block.Lines)
 		startTime := time.Now()
 		p.Logger.Info("extract metric start",
 			"record_id", record_id,
-			"num_lines", len(lines),
+			"num_lines", len(block.Lines),
 			"model name", p.MentionModelName,
 			"prompt", p.MentionPromptRef,
 		)
@@ -621,7 +616,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		)
 		enrichStart := p.Now()
 		enrichCallID := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), idx)
-		payload, err := p.extractMetricPayload(ctx, buildMetricRelationUserPrompt(candidate), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg)
+		payload, err := p.extractMetricPayload(ctx, buildMetricRelationUserPrompt(candidate), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "MID-26052903")
 		llmCallCount++
 		p.logLLMCall(ctx, enrichCallID, "enrich_metrics", 2,
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
@@ -681,31 +676,31 @@ type metricParsedLine struct {
 	Content    string `json:"content"`
 }
 
-func parseMetricInputLine(line string) (metricParsedLine, bool) {
+func parseMetricInputLine(line string) (metricParsedLine, bool, error) {
 	raw := strings.TrimSpace(line)
 	if raw == "" {
-		return metricParsedLine{}, false
+		return metricParsedLine{}, false, nil
 	}
 	// Block format: <flag>\t<line_number>\t<page_number>\t<line_type>\t<content>
 	fields := strings.Split(raw, "\t")
 	if len(fields) != 5 {
-		return metricParsedLine{}, false
+		return metricParsedLine{}, false, fmt.Errorf("expected 5 tab-separated fields, got %d: %q", len(fields), raw)
 	}
 	flag := strings.TrimSpace(fields[0])
 	if flag != "o" && flag != "n" {
-		return metricParsedLine{}, false
+		return metricParsedLine{}, false, fmt.Errorf("invalid flag %q (expected 'o' or 'n'): %q", flag, raw)
 	}
 	lineNo, err := strconv.Atoi(strings.TrimSpace(fields[1]))
 	if err != nil || lineNo < 1 {
-		return metricParsedLine{}, false
+		return metricParsedLine{}, false, fmt.Errorf("invalid line_number %q: %q", fields[1], raw)
 	}
 	pageNo, err := strconv.Atoi(strings.TrimSpace(fields[2]))
 	if err != nil || pageNo < 1 {
-		return metricParsedLine{}, false
+		return metricParsedLine{}, false, fmt.Errorf("invalid page_number %q: %q", fields[2], raw)
 	}
 	lineType := strings.TrimSpace(fields[3])
 	if lineType == "" {
-		return metricParsedLine{}, false
+		return metricParsedLine{}, false, fmt.Errorf("empty line_type: %q", raw)
 	}
 	return metricParsedLine{
 		Flag:       flag,
@@ -713,20 +708,24 @@ func parseMetricInputLine(line string) (metricParsedLine, bool) {
 		PageNumber: pageNo,
 		LineType:   lineType,
 		Content:    strings.TrimSpace(fields[4]),
-	}, true
+	}, true, nil
 }
 
-func parseMetricInputLines(lines []string) []metricParsedLine {
+func parseMetricInputLines(lines []string) ([]metricParsedLine, error) {
 	parsedLines := make([]metricParsedLine, 0, len(lines))
 	for _, raw := range lines {
-		if line, ok := parseMetricInputLine(raw); ok {
+		line, ok, err := parseMetricInputLine(raw)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			parsedLines = append(parsedLines, line)
 		}
 	}
-	return parsedLines
+	return parsedLines, nil
 }
 
-func buildMetricCandidateUserPrompt(lines []string, parsedLines []metricParsedLine) string {
+func buildMetricCandidateUserPrompt(lines []BlockLine) string {
 	schema := map[string]any{
 		"language": "string",
 		"candidates": []map[string]any{{
@@ -740,13 +739,9 @@ func buildMetricCandidateUserPrompt(lines []string, parsedLines []metricParsedLi
 			"confidence_reason": "string",
 		}},
 	}
-
-	linesJSON, _ := json.Marshal(lines)
-	parsedLinesJSON, _ := json.Marshal(parsedLines)
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nInput lines (raw, JSON array):\n" + string(linesJSON) +
-		"\n\nParsed line hints (best effort; do not treat as complete):\n" + string(parsedLinesJSON)
+		"\n\nInput lines (JSON array):\n" + blockLinesToJSON(lines)
 }
 
 /*
@@ -812,11 +807,6 @@ func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) strin
 */
 
 func buildMetricRelationUserPrompt(candidate metricCandidate) string {
-	lines := make([]string, 0, len(candidate.SupportLines))
-	for _, line := range candidate.SupportLines {
-		lines = append(lines, line.String())
-	}
-	linesJSON, _ := json.Marshal(lines)
 	candidateJSON, _ := json.Marshal(map[string]any{
 		"candidate_id":        candidate.CandidateID,
 		"metric_name_hint":    candidate.MetricNameHint,
@@ -878,8 +868,7 @@ func buildMetricRelationUserPrompt(candidate metricCandidate) string {
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
 		"\n\nCandidate:\n" + string(candidateJSON) +
-		"\n\nSource lines (plain):\n" + strings.Join(lines, "\n") +
-		"\n\nSource lines (raw, JSON array):\n" + string(linesJSON)
+		"\n\nSource lines (JSON array):\n" + blockLinesToJSON(candidate.SupportLines)
 }
 
 func normalizeMetricList(items []any) []map[string]any {
@@ -1389,7 +1378,13 @@ func (p *MetricsProcessor) logMetricsSummary(
 	}
 }
 
-func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText string, promptText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
+func (p *MetricsProcessor) extractMetricPayload(
+	ctx context.Context, 
+	inputText string, 
+	promptText string, 
+	modelName string, 
+	cfg structureModelConfig,
+	caller_loc string) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	in := llmclients.JSONExtractionInput{
 		PromptText: promptText,
@@ -1401,7 +1396,7 @@ func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText s
 		err     error
 	)
 
-	p.Logger.Info("inputText", "inputText", inputText)
+	p.Logger.Info("inputText", "caller", caller_loc, "inputText", inputText)
 
 	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
@@ -1529,7 +1524,7 @@ func firstPromptLine(promptText string) string {
 */
 
 func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
-	payload, err := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, p.MentionModelName, p.MentionModelCfg)
+	payload, err := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, p.MentionModelName, p.MentionModelCfg, "MID-26052901")
 	if err == nil {
 		return payload, strings.TrimSpace(p.MentionModelName), nil
 	}
@@ -1558,7 +1553,7 @@ func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context
 		)
 	}
 
-	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, fallbackModelName, p.FallbackMentionModelCfg)
+	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, fallbackModelName, p.FallbackMentionModelCfg, "MID-26052902")
 	if fallbackErr != nil {
 		if isEmptyMetricExtractionError(fallbackErr) {
 			p.Logger.Info("fallback metric candidate extraction returned empty JSON; treating as empty result",
