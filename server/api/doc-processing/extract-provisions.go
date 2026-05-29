@@ -184,6 +184,10 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 
 	result, err := p.extractProvisionsFromBlocksWithLLM(ctx, blocks, evt.RecordID)
 	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			p.stopAndPersistProvisions(context.Background(), rec, start)
+			return ErrPipelineStopped
+		}
 		p.persistProvisionsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -221,19 +225,23 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		"blocks", len(blocks),
 	)
 	p.persistProvisionsStatus(ctx, rec, start, nil)
-	p.logProvisionsSummary(ctx, start, p.Now(), result, inserted, len(blocks))
+	p.logProvisionsSummary(ctx, start, p.Now(), result, inserted, len(blocks), evt.RecordID)
 	return nil
 }
 
 func (p *ProvisionsProcessor) logLLMCall(
 	ctx context.Context,
 	callID, activity string,
-	pass int,
 	modelNames []string,
 	promptName string,
 	payload map[string]any,
 	callErr error,
 	start, end time.Time,
+	recordID int64,
+	blockIdx int,
+	totalBlocks int,
+	provisionsSoFar int,
+	numInBlock int,
 ) {
 	var artifactStr *string
 	if payload != nil {
@@ -247,18 +255,36 @@ func (p *ProvisionsProcessor) logLLMCall(
 		s := callErr.Error()
 		errStr = &s
 	}
-	rec := DocProcLogRecord{
-		DocProcName:  p.Name(),
-		ModelNames:   modelNames,
-		PromptName:   promptName,
-		Pass:         &pass,
-		LLMCallID:    &callID,
-		ActivityName: &activity,
-		ArtifactJSON: artifactStr,
-		Errors:       errStr,
-		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	percent := 0
+	if totalBlocks > 0 {
+		percent = (blockIdx + 1) * 100 / totalBlocks
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052811"); err != nil {
+	progress := fmt.Sprintf("%d%% (%d/%d)", percent, blockIdx+1, totalBlocks)
+	extraInfo := map[string]any{
+		"block":             blockIdx + 1,
+		"total_blocks":      totalBlocks,
+		"num_provisions":    numInBlock,
+		"provisions_so_far": provisionsSoFar,
+		"percent":           fmt.Sprintf("%d%%", percent),
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+	callReason := "extract compliance provisions"
+	rec := DocProcLogRecord{
+		CallReason:    callReason,
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogExtractProvisions(ctx, rec, "MID-26052811"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -269,6 +295,7 @@ func (p *ProvisionsProcessor) logProvisionsSummary(
 	result provisionExtractionResult,
 	inserted int64,
 	numBlocks int,
+	recordID int64,
 ) {
 	extraInfo := map[string]any{
 		"total_provisions": inserted,
@@ -293,10 +320,16 @@ func (p *ProvisionsProcessor) logProvisionsSummary(
 		modelNames = append(modelNames, n)
 	}
 
+	progress := "100%"
+	activityName := "extract_provisions"
 	rec := DocProcLogRecord{
+		CallReason:    "extract compliance provisions",
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    p.PromptRef,
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		ActivityName:  &activityName,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
@@ -346,6 +379,9 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 	var llmCallCount, fallbackCount int
 
 	for idx, block := range blocks {
+		if isCtxStopped(ctx) {
+			return provisionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount}, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		p.Logger.Info("extract provisions start",
 			"record_id", record_id,
@@ -360,9 +396,16 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != "" {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, callID, "extract_provisions", 1,
+		numInBlock := 0
+		if err == nil && payload != nil {
+			if raw, ok := payload["provisions"].([]any); ok {
+				numInBlock = len(raw)
+			}
+		}
+		p.logLLMCall(ctx, callID, "extract_provisions",
 			[]string{strings.TrimSpace(modelName)}, p.PromptRef,
-			payload, err, callStart, p.Now())
+			payload, err, callStart, p.Now(),
+			record_id, idx, len(blocks), len(provisions), numInBlock)
 		if err != nil {
 			p.Logger.Error("failed extracting", "error", err)
 			return provisionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount},
@@ -1025,6 +1068,7 @@ type provisionsStatusParams struct {
 	InputFilename string
 	Start         time.Time
 	DurationMs    int64
+	ProcStatus    string
 	ProcErr       error
 }
 
@@ -1054,6 +1098,27 @@ func (p *ProvisionsProcessor) persistProvisionsStatus(ctx context.Context, rec D
 	}
 }
 
+func (p *ProvisionsProcessor) stopAndPersistProvisions(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
+	statusRaw, err := appendProvisionsStatus(rec.StatusRaw, provisionsStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectProvisionsFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+	})
+	if err != nil {
+		p.Logger.Error("(MID_26052841) failed building provisions stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+	}); updateErr != nil {
+		p.Logger.Error("(MID_26052842) failed persisting provisions stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	p.Logger.Info("(MID_26052843) extract_provisions stopped by user request", "record_id", rec.ID)
+}
+
 func detectProvisionsFileType(rec DocMetadataInputRecord) string {
 	for _, candidate := range []string{rec.FileName, rec.StagingFilename, rec.ResultFilename} {
 		ext := strings.ToLower(strings.TrimSpace(filepath.Ext(strings.TrimSpace(candidate))))
@@ -1074,7 +1139,12 @@ func appendProvisionsStatus(raw string, p provisionsStatusParams) (string, error
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
 	}
-	if p.ProcErr == nil {
+	if override := strings.TrimSpace(p.ProcStatus); override != "" {
+		entry["proc_status"] = override
+		if p.ProcErr != nil {
+			entry["error"] = strings.TrimSpace(p.ProcErr.Error())
+		}
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"

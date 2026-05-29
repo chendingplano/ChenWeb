@@ -69,6 +69,11 @@ func (p *GenerateSummariesProcessor) logSummary(ctx context.Context, recordID *i
 	if resolveDocProcLogDB(p.ProcLogger.DB) == nil {
 		return
 	}
+	// Use a background context for DB writes: the pipeline context may already
+	// be cancelled (e.g. due to a user stop), but the log must still be written.
+	if ctx.Err() != nil {
+		ctx = context.Background()
+	}
 	extraInfo, _ := json.Marshal(map[string]interface{}{})
 	extraStr := docProcSummaryExtraInfoJSON(p.Service, extraInfo)
 	msUsed := end.Sub(start).Milliseconds()

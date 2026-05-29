@@ -32,6 +32,7 @@ type ControlService struct {
 	Logger            ApiTypes.JimoLogger
 	InputStore        DocMetadataStore
 	EventStore        EventStore
+	StopStore         StopRequestStore
 	Now               func() time.Time
 
 	MaxDocProcessPipelines int
@@ -187,15 +188,40 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// can share its output with downstream processors.
 	ctx, _ = withBlockBufferHolder(ctx)
 
+	// Clear any stale stop_requested flag left over from a previous run that was
+	// killed before the deferred ClearStopRequested could execute. Without this,
+	// pollForStop would cancel the new context within 1 s of startup.
+	if s.StopStore != nil {
+		if err := s.StopStore.ClearStopRequested(ctx, evt.RecordID); err != nil && s.Logger != nil {
+			s.Logger.Warn("failed to clear stale stop_requested flag at pipeline start", "record_id", evt.RecordID, "error", err)
+		}
+	}
+
+	// Wrap with a cancellable context so a user stop request can interrupt
+	// in-flight LLM calls. pollForStop cancels the context (with cause
+	// ErrPipelineStopped) when it detects the stop flag in the database.
+	if s.StopStore != nil {
+		var cancelCause context.CancelCauseFunc
+		ctx, cancelCause = context.WithCancelCause(ctx)
+		defer cancelCause(nil) // ensures polling goroutine exits when pipeline completes
+		go s.pollForStop(ctx, evt.RecordID, cancelCause)
+	}
+
 	requestFailed := false
+	requestStopped := false
 	var firstErr error
 	s.persistPipelineStatus(ctx, evt.RecordID, "running", nil)
 	defer func() {
 		status := "success"
-		if requestFailed {
+		if requestStopped {
+			status = "stopped"
+		} else if requestFailed {
 			status = "failed"
 		}
-		s.persistPipelineStatus(ctx, evt.RecordID, status, firstErr)
+		s.persistPipelineStatus(context.Background(), evt.RecordID, status, firstErr)
+		if requestStopped && s.StopStore != nil {
+			_ = s.StopStore.ClearStopRequested(context.Background(), evt.RecordID)
+		}
 	}()
 
 	// Always run the blocking processor first, regardless of requested operations.
@@ -207,7 +233,26 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		if p == nil {
 			continue
 		}
+		// Fast stop check: if the context was already cancelled by pollForStop,
+		// skip remaining processors without attempting any LLM work.
+		if isCtxStopped(ctx) {
+			requestStopped = true
+			if s.Logger != nil {
+				s.Logger.Info("doc processor stop requested, halting pipeline", "record_id", evt.RecordID)
+			}
+			return nil
+		}
 		s.runSingleProcessor(ctx, payload, p, evt.RecordID, &requestFailed, &firstErr)
+		// If a processor failed due to a user stop, treat it as stopped, not failed.
+		if requestFailed && isCtxStopped(ctx) {
+			requestFailed = false
+			firstErr = nil
+			requestStopped = true
+			if s.Logger != nil {
+				s.Logger.Info("doc processor stop detected after processor", "record_id", evt.RecordID, "processor", p.Name())
+			}
+			return nil
+		}
 	}
 	if s.Logger != nil {
 		status := "success"
@@ -237,15 +282,19 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 		if *firstErr == nil {
 			*firstErr = err
 		}
-		//if s.Logger != nil {
-		s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
+		procStatus := "failed"
+		if errors.Is(err, ErrPipelineStopped) || isCtxStopped(ctx) {
+			procStatus = "stopped"
+			s.Logger.Info("processor stopped by user request", "processor", processorName, "record_id", recordID)
+		} else {
+			s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
+		}
 		s.Logger.Info("finish running processor",
 			"record_id", recordID,
 			"processor", processorName,
-			"proc_status", "failed",
+			"proc_status", procStatus,
 			"ms_used", time.Since(procStart).Milliseconds(),
 		)
-		//}
 		return
 	}
 	if s.Logger != nil {
@@ -372,6 +421,28 @@ func (s *ControlService) persistControlFailure(ctx context.Context, rec DocMetad
 	}
 }
 
+// pollForStop polls the database every second and cancels the pipeline context
+// (with cause ErrPipelineStopped) if a stop request is detected. It exits when
+// ctx is cancelled (either by the stop itself or by the pipeline completing).
+func (s *ControlService) pollForStop(ctx context.Context, recordID int64, cancelCause context.CancelCauseFunc) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if ok, _ := s.StopStore.IsStopRequested(context.Background(), recordID); ok {
+				if s.Logger != nil {
+					s.Logger.Info("stop request detected, cancelling pipeline context", "record_id", recordID)
+				}
+				cancelCause(ErrPipelineStopped)
+				return
+			}
+		}
+	}
+}
+
 func (s *ControlService) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
@@ -474,6 +545,9 @@ func appendPipelineStatus(raw string, now time.Time, procStatus string, procErr 
 			continue
 		}
 		if !replaced {
+			if originalStart := strings.TrimSpace(asString(e["start_time"])); originalStart != "" {
+				entry["start_time"] = originalStart
+			}
 			out = append(out, entry)
 			replaced = true
 		}

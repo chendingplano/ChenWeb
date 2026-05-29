@@ -295,6 +295,10 @@ func (p *StructuredKnowledgeProcessor) HandleEvent(ctx context.Context, payload 
 
 	result, err := p.extractStructuredKnowledgeFromChunks(ctx, evt.RecordID, chunks)
 	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			p.stopAndPersistStructuredKnowledge(context.Background(), rec, start)
+			return ErrPipelineStopped
+		}
 		p.persistStructuredKnowledgeStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26052615) extractStructuredKnowledge failed, error:%w", err)
 	}
@@ -341,7 +345,7 @@ func (p *StructuredKnowledgeProcessor) HandleEvent(ctx context.Context, payload 
 		"num_chunks", len(chunks),
 	)
 	p.persistStructuredKnowledgeStatus(ctx, rec, start, nil)
-	p.logStructuredKnowledgeSummary(ctx, start, p.Now(), result, inserted, len(chunks))
+	p.logStructuredKnowledgeSummary(ctx, start, p.Now(), result, inserted, len(chunks), evt.RecordID)
 	return nil
 }
 
@@ -356,6 +360,11 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 
 	// Pass 1: extract structured knowledge candidates from each chunk
 	for idx, chunk := range chunks {
+		if isCtxStopped(ctx) {
+			return structuredKnowledgeExtractionResult{
+				LLMCallCount: llmCallCount, FallbackCount: fallbackCount, FailedChunks: failedChunks,
+			}, ErrPipelineStopped
+		}
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
 		callStart := p.Now()
 		p.Logger.Info("structknow start",
@@ -374,7 +383,8 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 		}
 		p.logLLMCall(ctx, callID, "extract_knowledge_candidates", 1,
 			[]string{strings.TrimSpace(modelName)}, p.CandidatePromptRef,
-			payload, err, callStart, p.Now())
+			payload, err, callStart, p.Now(),
+			recordID, idx, len(chunks))
 		if err != nil {
 			failedChunks++
 			p.Logger.Error("raw parsed LLM payload/error",
@@ -412,6 +422,11 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 	usedEnrichModel := strings.TrimSpace(p.EnrichModelName)
 	globalSeqNo := 1
 	for enrichIdx, cand := range candidates {
+		if isCtxStopped(ctx) {
+			return structuredKnowledgeExtractionResult{
+				LLMCallCount: llmCallCount, FallbackCount: fallbackCount, FailedChunks: failedChunks,
+			}, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		p.Logger.Info("enrich start",
 			"record_id", recordID,
@@ -425,7 +440,8 @@ func (p *StructuredKnowledgeProcessor) extractStructuredKnowledgeFromChunks(
 		llmCallCount++
 		p.logLLMCall(ctx, callID, "enrich_structured_knowledge", 2,
 			[]string{strings.TrimSpace(p.EnrichModelName)}, p.EnrichPromptRef,
-			enriched, err, callStart, p.Now())
+			enriched, err, callStart, p.Now(),
+			recordID, enrichIdx, len(candidates))
 		if err != nil {
 			p.Logger.Error("enrichment-pass error",
 				"record_id", recordID,
@@ -476,6 +492,9 @@ func (p *StructuredKnowledgeProcessor) logLLMCall(
 	payload map[string]any,
 	callErr error,
 	start, end time.Time,
+	recordID int64,
+	itemIdx int,
+	totalItems int,
 ) {
 	var artifactStr *string
 	if payload != nil {
@@ -489,18 +508,47 @@ func (p *StructuredKnowledgeProcessor) logLLMCall(
 		s := callErr.Error()
 		errStr = &s
 	}
-	rec := DocProcLogRecord{
-		DocProcName:  p.Name(),
-		ModelNames:   modelNames,
-		PromptName:   promptName,
-		Pass:         &pass,
-		LLMCallID:    &callID,
-		ActivityName: &activity,
-		ArtifactJSON: artifactStr,
-		Errors:       errStr,
-		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	percent := 0
+	if totalItems > 0 {
+		if pass == 1 {
+			percent = (itemIdx + 1) * 100 / totalItems / 2
+		} else {
+			percent = (itemIdx+1)*100/totalItems/2 + 50
+		}
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052813"); err != nil {
+	passLabel := fmt.Sprintf("pass %d", pass)
+	progress := fmt.Sprintf("%d%% (%s: %d/%d)", percent, passLabel, itemIdx+1, totalItems)
+	extraInfo := map[string]any{
+		"chunk":        itemIdx + 1,
+		"total_chunks": totalItems,
+		"percent":      progress,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+	callReason := "extract structured knowledge"
+	if pass == 2 {
+		callReason = "enrich structured knowledge"
+	}
+	rec := DocProcLogRecord{
+		CallReason:    callReason,
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		Pass:          &pass,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	logFn := p.ProcLogger.LogExtractStructuredKnowledge
+	if pass == 2 {
+		logFn = p.ProcLogger.LogEnrichStructuredKnowledge
+	}
+	if err := logFn(ctx, rec, "MID-26052813"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -511,6 +559,7 @@ func (p *StructuredKnowledgeProcessor) logStructuredKnowledgeSummary(
 	result structuredKnowledgeExtractionResult,
 	inserted int64,
 	numChunks int,
+	recordID int64,
 ) {
 	extraInfo := map[string]any{
 		"total_items":      inserted,
@@ -536,11 +585,17 @@ func (p *StructuredKnowledgeProcessor) logStructuredKnowledgeSummary(
 		modelNames = append(modelNames, n)
 	}
 
+	progress := "100%"
+	activityName := "extract_structured_knowledge"
 	promptName := firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef)
 	rec := DocProcLogRecord{
+		CallReason:    "extract structured knowledge",
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		ActivityName:  &activityName,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
@@ -998,6 +1053,7 @@ type structuredKnowledgeStatusParams struct {
 	InputFilename string
 	Start         time.Time
 	DurationMs    int64
+	ProcStatus    string
 	ProcErr       error
 }
 
@@ -1042,6 +1098,27 @@ func (p *StructuredKnowledgeProcessor) persistStructuredKnowledgeStatus(
 	}
 }
 
+func (p *StructuredKnowledgeProcessor) stopAndPersistStructuredKnowledge(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
+	statusRaw, err := appendStructuredKnowledgeStatus(rec.StatusRaw, structuredKnowledgeStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectStructuredKnowledgeFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+	})
+	if err != nil {
+		p.Logger.Error("(MID_26052841) failed building structured knowledge stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+	}); updateErr != nil {
+		p.Logger.Error("(MID_26052842) failed persisting structured knowledge stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	p.Logger.Info("(MID_26052843) extract_structured_knowledge stopped by user request", "record_id", rec.ID)
+}
+
 func appendStructuredKnowledgeStatus(raw string, p structuredKnowledgeStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
 	entry := map[string]any{
@@ -1052,7 +1129,12 @@ func appendStructuredKnowledgeStatus(raw string, p structuredKnowledgeStatusPara
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
 	}
-	if p.ProcErr == nil {
+	if override := strings.TrimSpace(p.ProcStatus); override != "" {
+		entry["proc_status"] = override
+		if p.ProcErr != nil {
+			entry["error"] = strings.TrimSpace(p.ProcErr.Error())
+		}
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"

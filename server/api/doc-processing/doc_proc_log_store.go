@@ -24,6 +24,12 @@ const EntryTypeExtractMetrics = "extract_metrics"
 const EntryTypeExtractMetricsFinish = "extract_metrics_finish"
 const EntryTypeExtractProjections = "extract_projections"
 const EntryTypeEnrichProjections = "enrich_projections"
+const EntryTypeExtractProvisions = "extract_provisions"
+const EntryTypeExtractSceneBlocks = "extract_scene_blocks"
+const EntryTypeEnrichSceneBlocks = "enrich_scene_blocks"
+const EntryTypeExtractStructuredKnowledge = "extract_structured_knowledge"
+const EntryTypeEnrichStructuredKnowledge = "enrich_structured_knowledge"
+const EntryTypeExtractEntityRelation = "extract_entity_relation"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
@@ -169,6 +175,42 @@ func (l DocProcLogger) LogEnrichProjections(ctx context.Context, rec DocProcLogR
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+func (l DocProcLogger) LogExtractProvisions(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractProvisions
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractSceneBlocks(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractSceneBlocks
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogEnrichSceneBlocks(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeEnrichSceneBlocks
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractStructuredKnowledge(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractStructuredKnowledge
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogEnrichStructuredKnowledge(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeEnrichStructuredKnowledge
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractEntityRelation(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractEntityRelation
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 func allowedDocProcLogEntryType(entryType string) bool {
 	switch entryType {
 	case EntryTypeLLMCall, EntryTypeSummary,
@@ -176,7 +218,11 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractTopics, EntryTypeExtractTopicsFinish,
 		EntryTypeStaticAnalyzer, EntryTypeBlocking,
 		EntryTypeExtractMetrics, EntryTypeExtractMetricsFinish,
-		EntryTypeExtractProjections, EntryTypeEnrichProjections:
+		EntryTypeExtractProjections, EntryTypeEnrichProjections,
+		EntryTypeExtractProvisions,
+		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,
+		EntryTypeExtractStructuredKnowledge, EntryTypeEnrichStructuredKnowledge,
+		EntryTypeExtractEntityRelation:
 		return true
 	default:
 		return false

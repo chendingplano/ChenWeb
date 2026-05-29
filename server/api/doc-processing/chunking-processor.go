@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -170,7 +171,9 @@ func runInputServiceEvent(
 			inputFilename = resolveChunkingInputFilename(rec, "")
 		}
 		if err := handleBlock(ctx, evt.RecordID, inputFilename, buf); err != nil {
-			logger.Error("chunking processor failed (block input)", "record_id", rec.ID, "error", err)
+			if !errors.Is(err, ErrPipelineStopped) {
+				logger.Error("chunking processor failed (block input)", "record_id", rec.ID, "error", err)
+			}
 			return err
 		}
 		return nil
@@ -195,7 +198,9 @@ func runInputServiceEvent(
 		inputFilename = resolveChunkingInputFilename(rec, inputPath)
 	}
 	if err := handleInput(ctx, evt.RecordID, inputFilename, fileBody); err != nil {
-		logger.Error("chunking processor failed", "record_id", rec.ID, "error", err)
+		if !errors.Is(err, ErrPipelineStopped) {
+			logger.Error("chunking processor failed", "record_id", rec.ID, "error", err)
+		}
 		return err
 	}
 	return nil

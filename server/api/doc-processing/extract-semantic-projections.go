@@ -246,6 +246,10 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 
 	result, err := p.extractSemanticProjectionsFromChunks(ctx, evt.RecordID, chunks)
 	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			p.stopAndPersistSemanticProjections(context.Background(), rec, start)
+			return ErrPipelineStopped
+		}
 		p.persistSemanticProjectionsStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26052115) extractSemanticProjections failed, error:%w", err)
 	}
@@ -309,6 +313,9 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 
 	// Pass 1: extract semantic projection candidate from each chunk
 	for idx, chunk := range chunks {
+		if isCtxStopped(ctx) {
+			return semanticProjectionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount}, ErrPipelineStopped
+		}
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
 		callStart := p.Now()
 		p.Logger.Info("semantic proj start",
@@ -368,6 +375,9 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	seqNos := make([]int, 0, len(candidates))
 	usedEnrichModel := strings.TrimSpace(p.EnrichModelName)
 	for enrichIdx, cand := range candidates {
+		if isCtxStopped(ctx) {
+			return semanticProjectionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount}, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		p.Logger.Info("enrich semantic projection - start",
 			"record_id", recordID,
@@ -801,6 +811,7 @@ type semanticProjectionsStatusParams struct {
 	InputFilename string
 	Start         time.Time
 	DurationMs    int64
+	ProcStatus    string
 	ProcErr       error
 }
 
@@ -812,6 +823,27 @@ func detectSemanticProjectionsFileType(rec DocMetadataInputRecord) string {
 		}
 	}
 	return ""
+}
+
+func (p *SemanticProjectionsProcessor) stopAndPersistSemanticProjections(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
+	statusRaw, err := appendSemanticProjectionsStatus(rec.StatusRaw, semanticProjectionsStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectSemanticProjectionsFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+	})
+	if err != nil {
+		p.Logger.Error("(MID_26052841) failed building semantic projections stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+	}); updateErr != nil {
+		p.Logger.Error("(MID_26052842) failed persisting semantic projections stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	p.Logger.Info("(MID_26052843) extract_semantic_projections stopped by user request", "record_id", rec.ID)
 }
 
 func (p *SemanticProjectionsProcessor) persistSemanticProjectionsStatus(
@@ -855,7 +887,12 @@ func appendSemanticProjectionsStatus(raw string, p semanticProjectionsStatusPara
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
 	}
-	if p.ProcErr == nil {
+	if override := strings.TrimSpace(p.ProcStatus); override != "" {
+		entry["proc_status"] = override
+		if p.ProcErr != nil {
+			entry["error"] = strings.TrimSpace(p.ProcErr.Error())
+		}
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"

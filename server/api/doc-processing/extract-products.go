@@ -319,6 +319,10 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 
 	result, err := p.extractProductsFromBlocksWithLLM(ctx, blocks)
 	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			p.stopAndPersistProducts(context.Background(), rec, start)
+			return ErrPipelineStopped
+		}
 		p.persistProductsStatus(ctx, rec, start, err)
 		return nil
 	}
@@ -398,6 +402,9 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 	llmCallCount := 0
 	fallbackCount := 0
 	for idx, block := range blocks {
+		if isCtxStopped(ctx) {
+			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		p.Logger.Info("extract product mentions - begin",
 			"idx", idx,
@@ -437,6 +444,9 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 	products := make([]map[string]any, 0, len(candidates))
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
+		if isCtxStopped(ctx) {
+			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		p.Logger.Info("Start enriching product candidate",
 			"idx", idx,
@@ -482,7 +492,11 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			"model_name", p.TranslateModelName,
 			"prompt_name", p.TranslatePromptRef,
 		)
-		products = p.translateProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
+		var translateErr error
+		products, translateErr = p.translateProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
+		if translateErr != nil {
+			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, translateErr
+		}
 	}
 	if p.CategorizeEnabled {
 		p.Logger.Info("Starting product categorization pass",
@@ -490,7 +504,11 @@ func (p *ProductsProcessor) extractProductsFromBlocksWithLLM(ctx context.Context
 			"model_name", p.CategorizeModelName,
 			"prompt_name", p.CategorizePromptRef,
 		)
-		products = p.categorizeProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
+		var categorizeErr error
+		products, categorizeErr = p.categorizeProductRows(ctx, products, eventID, &llmCallCount, &fallbackCount)
+		if categorizeErr != nil {
+			return productExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, categorizeErr
+		}
 	}
 	return productExtractionResult{
 		Products:      products,
@@ -1143,8 +1161,11 @@ func (p *ProductsProcessor) logProductsSummary(ctx context.Context, start, end t
 	}
 }
 
-func (p *ProductsProcessor) translateProductRows(ctx context.Context, products []map[string]any, eventID string, llmCallCount *int, fallbackCount *int) []map[string]any {
+func (p *ProductsProcessor) translateProductRows(ctx context.Context, products []map[string]any, eventID string, llmCallCount *int, fallbackCount *int) ([]map[string]any, error) {
 	for i := range products {
+		if isCtxStopped(ctx) {
+			return products, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		rowInput, _ := json.Marshal(map[string]any{
 			"products": []map[string]any{{
@@ -1185,11 +1206,14 @@ func (p *ProductsProcessor) translateProductRows(ctx context.Context, products [
 			}
 		}
 	}
-	return products
+	return products, nil
 }
 
-func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products []map[string]any, eventID string, llmCallCount *int, fallbackCount *int) []map[string]any {
+func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products []map[string]any, eventID string, llmCallCount *int, fallbackCount *int) ([]map[string]any, error) {
 	for i := range products {
+		if isCtxStopped(ctx) {
+			return products, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		rowInput, _ := json.Marshal(map[string]any{
 			"products": []map[string]any{{
@@ -1225,7 +1249,7 @@ func (p *ProductsProcessor) categorizeProductRows(ctx context.Context, products 
 		products[i]["category_paths"] = first["category_paths"]
 		products[i]["category_paths_en"] = first["category_paths_en"]
 	}
-	return products
+	return products, nil
 }
 
 func (p *ProductsProcessor) buildProductOutputRows(products []map[string]any, now time.Time, numBlocks int, modelName string) []map[string]any {
@@ -1443,6 +1467,7 @@ type productsStatusParams struct {
 	InputFilename string
 	Start         time.Time
 	DurationMs    int64
+	ProcStatus    string
 	ProcErr       error
 }
 
@@ -1482,6 +1507,27 @@ func detectProductsFileType(rec DocMetadataInputRecord) string {
 	return ""
 }
 
+func (p *ProductsProcessor) stopAndPersistProducts(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
+	statusRaw, err := appendProductsStatus(rec.StatusRaw, productsStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectProductsFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+	})
+	if err != nil {
+		p.Logger.Error("(MID_26052841) failed building products stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+	}); updateErr != nil {
+		p.Logger.Error("(MID_26052842) failed persisting products stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	p.Logger.Info("(MID_26052843) extract_products stopped by user request", "record_id", rec.ID)
+}
+
 func appendProductsStatus(raw string, p productsStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
 	entry := map[string]any{
@@ -1492,7 +1538,12 @@ func appendProductsStatus(raw string, p productsStatusParams) (string, error) {
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
 	}
-	if p.ProcErr == nil {
+	if override := strings.TrimSpace(p.ProcStatus); override != "" {
+		entry["proc_status"] = override
+		if p.ProcErr != nil {
+			entry["error"] = strings.TrimSpace(p.ProcErr.Error())
+		}
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"

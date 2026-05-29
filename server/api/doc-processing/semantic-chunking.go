@@ -97,6 +97,7 @@ type topicChunkStatusParams struct {
 	Start          time.Time
 	DurationMs     int64
 	ProcErr        error
+	Progress       string
 }
 
 func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger ApiTypes.JimoLogger) *SemanticChunkingService {
@@ -275,6 +276,16 @@ func (s *SemanticChunkingService) HandleBlockInput(ctx context.Context, recordID
 func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
 	s.setDocProcSummaryExtraInfo(nil)
 	blocks := BuildSemanticPageBlocks(lines, s.FileBlockSize)
+	totalChunks := len(blocks)
+
+	if updatedRaw, err := updateTopicChunkStatusProgress(rec.StatusRaw, extractTopicsProgressFull(0, totalChunks)); err == nil {
+		if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, updatedRaw, nil); updateErr == nil {
+			rec.StatusRaw = updatedRaw
+		} else {
+			s.Logger.Warn("failed to persist initial topic progress", "record_id", rec.ID, "error", updateErr)
+		}
+	}
+
 	topics := make([]TopicItem, 0, 128)
 	seqNo := 1
 	topicsSoFar := 0
@@ -285,7 +296,15 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 			return blockErr
 		}
 		topicsSoFar += len(blockTopics)
-		s.logExtractTopics(ctx, rec.ID, block, len(blocks), blockTopics, topicsSoFar, blockMSUsed)
+		chunkProgress := extractTopicsProgressFull(block.BlockNo, totalChunks)
+		if updatedRaw, err := updateTopicChunkStatusProgress(rec.StatusRaw, chunkProgress); err == nil {
+			if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, updatedRaw, nil); updateErr == nil {
+				rec.StatusRaw = updatedRaw
+			} else {
+				s.Logger.Warn("failed to persist topic progress", "record_id", rec.ID, "block_no", block.BlockNo, "error", updateErr)
+			}
+		}
+		s.logExtractTopics(ctx, rec.ID, block, totalChunks, blockTopics, topicsSoFar, blockMSUsed)
 		topics = append(topics, blockTopics...)
 		seqNo += len(blockTopics)
 	}
@@ -333,6 +352,7 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 		Start:          start,
 		DurationMs:     time.Since(start).Milliseconds(),
 		ProcErr:        nil,
+		Progress:       extractTopicsProgressFull(totalChunks, totalChunks),
 	})
 	if err != nil {
 		return err
@@ -467,16 +487,16 @@ func (s *SemanticChunkingService) extractTopicsForBlock(
 }
 
 func (s *SemanticChunkingService) logExtractTopics(ctx context.Context, recordID int64, block SemanticPageBlock, totalChunks int, topics []TopicItem, topicsSoFar int, msUsed int64) {
-	if resolveDocProcLogDB(s.ProcLogger.DB) == nil || len(topics) == 0 {
+	if resolveDocProcLogDB(s.ProcLogger.DB) == nil {
 		return
 	}
-	progress := extractTopicsProgress(block.BlockNo, totalChunks)
+	chunkProgress := extractTopicsProgressFull(block.BlockNo, totalChunks)
 	extraJSON := docProcJSONOrNil(map[string]any{
 		"chunk":         block.BlockNo,
 		"total_chunks":  totalChunks,
 		"num_topics":    len(topics),
 		"topics_so_far": topicsSoFar,
-		"percent":       progress,
+		"percent":       extractTopicsProgress(block.BlockNo, totalChunks),
 		"lines":         semanticBlockLineSpans(block.Lines),
 	})
 	callID := ""
@@ -488,23 +508,21 @@ func (s *SemanticChunkingService) logExtractTopics(ctx context.Context, recordID
 		callIDPtr = &callID
 	}
 	activityName := "generate_topic"
-	for _, topic := range topics {
-		artifactJSON := docProcJSONOrNil(topic)
-		if err := s.ProcLogger.LogExtractTopics(ctx, DocProcLogRecord{
-			CallReason:    "extract topics",
-			DocProcName:   "generate_topics",
-			ModelNames:    topicExtractionModelNames(s),
-			PromptName:    strings.TrimSpace(s.PromptRef),
-			RecordID:      &recordID,
-			ProcProgress:  nullableStringPtr(progress),
-			LLMCallID:     callIDPtr,
-			ActivityName:  &activityName,
-			ArtifactJSON:  artifactJSON,
-			ExtraInfoJSON: extraJSON,
-			MSUsed:        int64Ptr(msUsed),
-		}, "MID-26052816"); err != nil {
-			s.Logger.Warn("failed to write extract_topics log", "record_id", recordID, "block_no", block.BlockNo, "topic_seq", topic.SeqNo, "error", err)
-		}
+	artifactJSON := docProcJSONOrNil(topics)
+	if err := s.ProcLogger.LogExtractTopics(ctx, DocProcLogRecord{
+		CallReason:    "extract topics",
+		DocProcName:   "generate_topics",
+		ModelNames:    topicExtractionModelNames(s),
+		PromptName:    strings.TrimSpace(s.PromptRef),
+		RecordID:      &recordID,
+		ProcProgress:  nullableStringPtr(chunkProgress),
+		LLMCallID:     callIDPtr,
+		ActivityName:  &activityName,
+		ArtifactJSON:  artifactJSON,
+		ExtraInfoJSON: extraJSON,
+		MSUsed:        int64Ptr(msUsed),
+	}, "MID-26052816"); err != nil {
+		s.Logger.Warn("failed to write extract_topics log", "record_id", recordID, "block_no", block.BlockNo, "error", err)
 	}
 }
 
@@ -520,6 +538,50 @@ func extractTopicsProgress(chunkIdx, totalChunks int) string {
 		percent = 100
 	}
 	return fmt.Sprintf("%d%%", percent)
+}
+
+func extractTopicsProgressFull(chunkIdx, totalChunks int) string {
+	if totalChunks <= 0 {
+		return "0%"
+	}
+	if chunkIdx < 0 {
+		chunkIdx = 0
+	}
+	percent := (chunkIdx * 100) / totalChunks
+	if percent > 100 {
+		percent = 100
+	}
+	return fmt.Sprintf("%d%% (%d/%d)", percent, chunkIdx, totalChunks)
+}
+
+// updateTopicChunkStatusProgress updates only the progress field of the
+// generate_topics entry in the status JSON. Creates a minimal running entry
+// if none exists yet.
+func updateTopicChunkStatusProgress(raw string, progress string) (string, error) {
+	entries := decodeStatus(raw)
+	updated := false
+	out := make([]map[string]any, 0, len(entries)+1)
+	for _, e := range entries {
+		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
+		if op == "generate_topics" {
+			e["progress"] = progress
+			e["proc_status"] = "running"
+			updated = true
+		}
+		out = append(out, e)
+	}
+	if !updated {
+		out = append(out, map[string]any{
+			"operation":   "generate_topics",
+			"proc_status": "running",
+			"progress":    progress,
+		})
+	}
+	bs, err := json.Marshal(out)
+	if err != nil {
+		return raw, err
+	}
+	return string(bs), nil
 }
 
 func semanticBlockLineSpans(lines []Line) []string {
@@ -824,6 +886,9 @@ func appendTopicChunkStatus(raw string, p topicChunkStatusParams) (string, error
 	} else {
 		entry["proc_status"] = "failed"
 		entry["error"] = p.ProcErr.Error()
+	}
+	if p.Progress != "" {
+		entry["progress"] = p.Progress
 	}
 
 	replaced := false

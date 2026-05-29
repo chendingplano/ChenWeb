@@ -294,6 +294,10 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 
 	result, err := p.extractMetricsFromBlocksWithLLM(ctx, evt.RecordID, buf.Blocks)
 	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) || isCtxStopped(ctx) {
+			p.stopAndPersistMetrics(context.Background(), rec, start)
+			return ErrPipelineStopped
+		}
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26050701) extractMetrics failed, error:%w", err)
 	}
@@ -404,6 +408,7 @@ type metricsStatusParams struct {
 	InputFilename string
 	Start         time.Time
 	DurationMs    int64
+	ProcStatus    string
 	ProcErr       error
 }
 
@@ -443,6 +448,27 @@ func (p *MetricsProcessor) persistMetricsStatus(ctx context.Context, rec DocMeta
 	}
 }
 
+func (p *MetricsProcessor) stopAndPersistMetrics(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
+	statusRaw, err := appendMetricsStatus(rec.StatusRaw, metricsStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectMetricsFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+	})
+	if err != nil {
+		p.Logger.Error("(MID_26052841) failed building metrics stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+	}); updateErr != nil {
+		p.Logger.Error("(MID_26052842) failed persisting metrics stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	p.Logger.Info("(MID_26052843) extract_metrics stopped by user request", "record_id", rec.ID)
+}
+
 func appendMetricsStatus(raw string, p metricsStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
 	entry := map[string]any{
@@ -453,7 +479,12 @@ func appendMetricsStatus(raw string, p metricsStatusParams) (string, error) {
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
 	}
-	if p.ProcErr == nil {
+	if override := strings.TrimSpace(p.ProcStatus); override != "" {
+		entry["proc_status"] = override
+		if p.ProcErr != nil {
+			entry["error"] = strings.TrimSpace(p.ProcErr.Error())
+		}
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"
@@ -511,6 +542,9 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 
 	// Step 1: Extract metrics
 	for _, block := range blocks {
+		if isCtxStopped(ctx) {
+			return metricExtractionResult{}, ErrPipelineStopped
+		}
 		lines := make([]string, len(block.Lines))
 		for i, bl := range block.Lines {
 			lines[i] = bl.String()
@@ -518,7 +552,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		parsedLines := parseMetricInputLines(lines)
 		userPrompt := buildMetricCandidateUserPrompt(lines, parsedLines)
 		startTime := time.Now()
-		p.Logger.Info("extract metric - start",
+		p.Logger.Info("extract metric start",
 			"record_id", record_id,
 			"num_lines", len(lines),
 			"model name", p.MentionModelName,
@@ -536,6 +570,9 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 			[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef,
 			payload, err, callStart, p.Now())
 		if err != nil {
+			if isCtxStopped(ctx) {
+				return metricExtractionResult{}, ErrPipelineStopped
+			}
 			return metricExtractionResult{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
 		}
 
@@ -547,7 +584,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 		raw, _ := payload["candidates"].([]any)
 		mentions = append(mentions, normalizeMetricCandidateMentions(raw, block)...)
 
-		p.Logger.Info("extract metric - responded",
+		p.Logger.Info("extract metric end  ",
 			"record_id", record_id,
 			"extracted", len(mentions),
 			"language", detectedLanguage,
@@ -570,6 +607,10 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 	uncertain := make([]map[string]any, 0)
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
+		if isCtxStopped(ctx) {
+			return metricExtractionResult{}, ErrPipelineStopped
+		}
+		startTime := time.Now()
 		p.Logger.Info("enrich metric start",
 			"record_id", record_id,
 			"idx", idx,
@@ -586,6 +627,9 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
 			payload, err, enrichStart, p.Now())
 		if err != nil {
+			if isCtxStopped(ctx) {
+				return metricExtractionResult{}, ErrPipelineStopped
+			}
 			return metricExtractionResult{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w", err)
 		}
 		if language := strings.TrimSpace(asString(payload["language"])); language != "" && detectedLanguage == "unknown" {
@@ -601,6 +645,7 @@ func (p *MetricsProcessor) extractMetricsFromBlocksWithLLM(
 			"candidate_id", candidate.CandidateID,
 			"metrics_so_far", len(metrics),
 			"uncertain_so_far", len(uncertain),
+			"ms_used", time.Since(startTime).Milliseconds(),
 		)
 	}
 
@@ -1277,7 +1322,11 @@ func (p *MetricsProcessor) logLLMCall(
 		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
 	}
 	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052809"); err != nil {
-		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("llm_call log skipped: doc processor stopped by user request", "call_id", callID)
+		} else {
+			p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+		}
 	}
 }
 
@@ -1332,7 +1381,11 @@ func (p *MetricsProcessor) logMetricsSummary(
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
 	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052809"); err != nil {
-		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("doc_proc_summary log skipped: doc processor stopped by user request")
+		} else {
+			p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+		}
 	}
 }
 
@@ -1347,6 +1400,9 @@ func (p *MetricsProcessor) extractMetricPayload(ctx context.Context, inputText s
 		payload map[string]any
 		err     error
 	)
+
+	p.Logger.Info("inputText", "inputText", inputText)
+
 	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, metricsExtractionContract())

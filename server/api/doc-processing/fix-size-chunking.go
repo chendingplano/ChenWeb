@@ -679,9 +679,31 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 		return err
 	}
 
+	totalChunks := len(chunks)
+	initialProgress := extractTopicsProgressFull(0, totalChunks)
+	s.Logger.Info("(MID_26052801) extract_topics: starting, updating status to initial progress",
+		"record_id", rec.ID, "total_chunks", totalChunks, "progress", initialProgress)
+	if updatedRaw, uErr := updateTopicChunkStatusProgress(rec.StatusRaw, initialProgress); uErr == nil {
+		if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, updatedRaw, nil); updateErr == nil {
+			rec.StatusRaw = updatedRaw
+		} else {
+			s.Logger.Warn("(MID_26052802) failed to persist initial topic progress", "record_id", rec.ID, "error", updateErr)
+		}
+	}
+
 	topics := make([]TopicItem, 0, len(chunks))
 	seqStart := 1
+	topicsSoFar := 0
+	stopTopics := func(bgCtx context.Context) {
+		s.stopAndPersistTopics(bgCtx, rec, inputFilename, start, len(topics))
+	}
 	for _, chunk := range chunks {
+		// Check for user stop before each LLM call.
+		if CheckAndHandleStop(ctx, stopTopics) {
+			return ErrPipelineStopped
+		}
+
+		chunkStart := s.Now()
 		chunkTopics, chunkErr := extractTopicsFromMarkedLinesWithLLM(
 			ctx,
 			rec.ID,
@@ -695,8 +717,15 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 			"chunk_seqno",
 			chunk.SeqNo,
 		)
+		chunkMSUsed := s.Now().Sub(chunkStart).Milliseconds()
+		usedFallback := false
 		if chunkErr != nil || len(chunkTopics) == 0 {
 			if s.FallbackExtractor != nil {
+				// Check for stop before attempting the fallback LLM call.
+				if CheckAndHandleStop(ctx, stopTopics) {
+					return ErrPipelineStopped
+				}
+				fbStart := s.Now()
 				fbTopics, fbErr := extractTopicsFromMarkedLinesWithLLM(
 					ctx,
 					rec.ID,
@@ -710,7 +739,11 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 					"chunk_seqno",
 					chunk.SeqNo,
 				)
+				chunkMSUsed = s.Now().Sub(fbStart).Milliseconds()
 				if fbErr != nil || len(fbTopics) == 0 {
+					if CheckAndHandleStop(ctx, stopTopics) {
+						return ErrPipelineStopped
+					}
 					s.Logger.Warn("topic generation empty for both primary and fallback, continuing",
 						"record_id", rec.ID, "chunk_seqno", chunk.SeqNo,
 						"primary_error", chunkErr, "fallback_error", fbErr,
@@ -718,12 +751,35 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 					chunkTopics = []TopicItem{}
 				} else {
 					chunkTopics = fbTopics
+					usedFallback = true
 				}
 			} else if chunkErr != nil {
+				if CheckAndHandleStop(ctx, stopTopics) {
+					return ErrPipelineStopped
+				}
 				s.failAndPersistTopics(ctx, rec, inputFilename, start, len(topics), fmt.Errorf("(MID_26042016) %w", chunkErr))
 				return chunkErr
 			}
 		}
+		topicsSoFar += len(chunkTopics)
+		chunkProgress := extractTopicsProgressFull(chunk.SeqNo, totalChunks)
+
+		s.Logger.Info("(MID_26052803) extract_topics: chunk done, updating status progress",
+			"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "total_chunks", totalChunks,
+			"progress", chunkProgress, "num_topics", len(chunkTopics), "topics_so_far", topicsSoFar)
+		if updatedRaw, uErr := updateTopicChunkStatusProgress(rec.StatusRaw, chunkProgress); uErr == nil {
+			if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, updatedRaw, nil); updateErr == nil {
+				rec.StatusRaw = updatedRaw
+			} else {
+				s.Logger.Warn("(MID_26052804) failed to persist topic progress",
+					"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "error", updateErr)
+			}
+		}
+
+		s.Logger.Info("(MID_26052805) extract_topics: inserting doc_proc_logs record",
+			"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "num_topics", len(chunkTopics))
+		s.logExtractTopicsChunk(ctx, rec.ID, chunk, totalChunks, chunkTopics, topicsSoFar, chunkMSUsed, chunkProgress, usedFallback)
+
 		topics = append(topics, chunkTopics...)
 		seqStart += len(chunkTopics)
 	}
@@ -759,6 +815,7 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 		Start:          start,
 		DurationMs:     time.Since(start).Milliseconds(),
 		ProcErr:        nil,
+		Progress:       extractTopicsProgressFull(totalChunks, totalChunks),
 	})
 	if err != nil {
 		return err
@@ -778,6 +835,57 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 		"topics_generated": len(topics),
 	})
 	return nil
+}
+
+func (s *FixedSizeChunkingService) logExtractTopicsChunk(
+	ctx context.Context,
+	recordID int64,
+	chunk Chunk,
+	totalChunks int,
+	topics []TopicItem,
+	topicsSoFar int,
+	msUsed int64,
+	chunkProgress string,
+	usedFallback bool,
+) {
+	if resolveDocProcLogDB(s.ProcLogger.DB) == nil {
+		s.Logger.Warn("(MID_26052806) extract_topics: ProcLogger DB is nil, skipping doc_proc_logs insert",
+			"record_id", recordID, "chunk_seqno", chunk.SeqNo)
+		return
+	}
+	_, regularLines := chunkLineNumbers(chunk)
+	extraJSON := docProcJSONOrNil(map[string]any{
+		"chunk":         chunk.SeqNo,
+		"total_chunks":  totalChunks,
+		"num_topics":    len(topics),
+		"topics_so_far": topicsSoFar,
+		"percent":       extractTopicsProgress(chunk.SeqNo, totalChunks),
+		"lines":         lineRangesFromNumbers(regularLines),
+		"used_fallback": usedFallback,
+	})
+	callID := uuid.NewString()
+	activityName := "generate_topic"
+	modelNames := dedupeNonEmpty([]string{s.ModelName})
+	if usedFallback && strings.TrimSpace(s.FallbackModelName) != "" {
+		modelNames = dedupeNonEmpty([]string{s.FallbackModelName})
+	}
+	artifactJSON := docProcJSONOrNil(topics)
+	if err := s.ProcLogger.LogExtractTopics(ctx, DocProcLogRecord{
+		CallReason:    "extract topics",
+		DocProcName:   "generate_topics",
+		ModelNames:    modelNames,
+		PromptName:    strings.TrimSpace(s.PromptRef),
+		RecordID:      &recordID,
+		ProcProgress:  nullableStringPtr(chunkProgress),
+		LLMCallID:     &callID,
+		ActivityName:  &activityName,
+		ArtifactJSON:  artifactJSON,
+		ExtraInfoJSON: extraJSON,
+		MSUsed:        int64Ptr(msUsed),
+	}, "MID-26052807"); err != nil {
+		s.Logger.Warn("(MID_26052808) failed to write extract_topics log",
+			"record_id", recordID, "chunk_seqno", chunk.SeqNo, "error", err)
+	}
 }
 
 func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Context, rec InputRecord, inputFilename string, start time.Time, lines []Line) error {
@@ -821,8 +929,16 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 
 	leafSummaries := make([]SummaryItem, 0, len(chunks))
 	for _, chunk := range chunks {
+		if isCtxStopped(ctx) {
+			s.stopAndPersistSummaries(context.Background(), rec, inputFilename, start)
+			return ErrPipelineStopped
+		}
 		res, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunk.Lines, nil)
 		if summaryErr != nil {
+			if isCtxStopped(ctx) {
+				s.stopAndPersistSummaries(context.Background(), rec, inputFilename, start)
+				return ErrPipelineStopped
+			}
 			s.failAndPersistSummaries(ctx, rec, inputFilename, start, summaryErr)
 			return summaryErr
 		}
@@ -850,9 +966,16 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 	}
 
 	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
+		if isCtxStopped(ctx) {
+			return summaryGenerateResult{}, ErrPipelineStopped
+		}
 		return s.generateSummary(ctx, rec.ID, level, seqNo, nil, children)
 	})
 	if err != nil {
+		if isCtxStopped(ctx) {
+			s.stopAndPersistSummaries(context.Background(), rec, inputFilename, start)
+			return ErrPipelineStopped
+		}
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
 	}
@@ -978,6 +1101,11 @@ func (s *FixedSizeChunkingService) generateSummary(
 		if resolveDocProcLogDB(s.ProcLogger.DB) == nil {
 			return
 		}
+		// Use background context when pipeline context is already cancelled (e.g. user stop).
+		logCtx := ctx
+		if logCtx.Err() != nil {
+			logCtx = context.Background()
+		}
 		extraJSON := docProcJSONOrNil(map[string]any{
 			"level": level,
 			"seqno": seqNo,
@@ -998,7 +1126,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 			}
 		}
 		activityName := "generate_summary"
-		if err := s.ProcLogger.LogGenerateSummary(ctx, DocProcLogRecord{
+		if err := s.ProcLogger.LogGenerateSummary(logCtx, DocProcLogRecord{
 			CallReason:    "generate summary",
 			DocProcName:   "generate_summary",
 			ModelNames:    dedupeNonEmpty([]string{s.SummaryModelName}),
@@ -1333,6 +1461,35 @@ func (s *FixedSizeChunkingService) failAndPersistTopics(
 	s.Logger.Error("topic generation failed", "record_id", rec.ID, "error", procErr)
 }
 
+// stopAndPersistTopics writes a "stopped" status entry to kb.inputs.status and
+// logs a finish record to kb.doc_proc_logs. ctx must be a live context (use
+// context.Background() when the pipeline context is already cancelled).
+func (s *FixedSizeChunkingService) stopAndPersistTopics(
+	ctx context.Context,
+	rec InputRecord,
+	inputFilename string,
+	start time.Time,
+	numTopics int,
+) {
+	statusRaw, err := appendTopicStatus(rec.StatusRaw, topicStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectChunkStatusFileType(rec, inputFilename),
+		InputFilename: inputFilename,
+		NumTopics:     numTopics,
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+	})
+	if err != nil {
+		s.Logger.Error("(MID_26052821) failed building topic stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, nil); updateErr != nil {
+		s.Logger.Error("(MID_26052822) failed persisting topic stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	s.Logger.Info("(MID_26052823) topic generation stopped by user request", "record_id", rec.ID, "topics_so_far", numTopics)
+}
+
 func (s *FixedSizeChunkingService) failAndPersistSummaries(
 	ctx context.Context,
 	rec InputRecord,
@@ -1360,6 +1517,25 @@ func (s *FixedSizeChunkingService) failAndPersistSummaries(
 		return
 	}
 	s.Logger.Error("summary generation failed", "record_id", rec.ID, "error", procErr)
+}
+
+func (s *FixedSizeChunkingService) stopAndPersistSummaries(ctx context.Context, rec InputRecord, inputFilename string, start time.Time) {
+	statusRaw, err := appendSummariesStatus(rec.StatusRaw, summaryStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectChunkStatusFileType(rec, inputFilename),
+		InputFilename: inputFilename,
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+	})
+	if err != nil {
+		s.Logger.Error("(MID_26052831) failed building summaries stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, nil); updateErr != nil {
+		s.Logger.Error("(MID_26052832) failed persisting summaries stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	s.Logger.Info("(MID_26052833) summary generation stopped by user request", "record_id", rec.ID)
 }
 
 func (s *FixedSizeChunkingService) currentSummaryProgress() string {
@@ -1897,6 +2073,10 @@ type topicStatusParams struct {
 	Start          time.Time
 	DurationMs     int64
 	ProcErr        error
+	Progress       string
+	// ProcStatus overrides the auto-derived proc_status ("success"/"failed") when non-empty.
+	// Use "stopped" to record a user-requested stop.
+	ProcStatus string
 }
 
 type summaryStatusParams struct {
@@ -1969,7 +2149,15 @@ func appendTopicStatus(raw string, p topicStatusParams) (string, error) {
 	if strings.TrimSpace(p.OutputFilename) != "" {
 		entry["output_filename"] = sanitizeUTF8Text(p.OutputFilename)
 	}
-	if p.ProcErr == nil {
+	if strings.TrimSpace(p.Progress) != "" {
+		entry["progress"] = sanitizeUTF8Text(strings.TrimSpace(p.Progress))
+	}
+	if override := strings.TrimSpace(p.ProcStatus); override != "" {
+		entry["proc_status"] = override
+		if p.ProcErr != nil {
+			entry["error"] = sanitizeUTF8Text(p.ProcErr.Error())
+		}
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"

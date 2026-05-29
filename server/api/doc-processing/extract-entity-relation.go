@@ -226,7 +226,15 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		return nil
 	}
 
-	result := p.extractEntityRelationFromChunks(ctx, evt.RecordID, chunks)
+	result, err := p.extractEntityRelationFromChunks(ctx, evt.RecordID, chunks)
+	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			p.stopAndPersistEntityRelation(context.Background(), rec, start)
+			return ErrPipelineStopped
+		}
+		p.persistEntityRelationStatus(ctx, rec, start, err)
+		return fmt.Errorf("(MID_26052717) extractEntityRelation failed, error:%w", err)
+	}
 	detectedLanguage := result.Language
 	if detectedLanguage == "" {
 		detectedLanguage = "unknown"
@@ -290,7 +298,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		"language", detectedLanguage,
 	)
 	p.persistEntityRelationStatus(ctx, rec, start, nil)
-	p.logEntityRelationSummary(ctx, start, p.Now(), result, insertedEntities, insertedRelations, len(chunks))
+	p.logEntityRelationSummary(ctx, start, p.Now(), result, insertedEntities, insertedRelations, len(chunks), evt.RecordID)
 	return nil
 }
 
@@ -298,7 +306,7 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 	ctx context.Context,
 	recordID int64,
 	chunks []Chunk,
-) entityRelationExtractionResult {
+) (entityRelationExtractionResult, error) {
 	entities := make([]map[string]any, 0)
 	relations := make([]map[string]any, 0)
 	detectedLanguage := "unknown"
@@ -306,6 +314,11 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 	var llmCallCount, fallbackCount, failedChunks int
 
 	for idx, chunk := range chunks {
+		if isCtxStopped(ctx) {
+			return entityRelationExtractionResult{
+				LLMCallCount: llmCallCount, FallbackCount: fallbackCount, FailedChunks: failedChunks,
+			}, ErrPipelineStopped
+		}
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
 		callStart := p.Now()
 		p.Logger.Info("er start",
@@ -323,7 +336,8 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 		}
 		p.logLLMCall(ctx, callID, "extract_entity_relation", 1,
 			[]string{strings.TrimSpace(modelName)}, p.PromptRef,
-			payload, err, callStart, p.Now())
+			payload, err, callStart, p.Now(),
+			recordID, idx, len(chunks))
 		if err != nil {
 			failedChunks++
 			p.Logger.Warn("entity-relation extraction failed for chunk; skipping",
@@ -371,7 +385,7 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 		LLMCallCount:  llmCallCount,
 		FallbackCount: fallbackCount,
 		FailedChunks:  failedChunks,
-	}
+	}, nil
 }
 
 func (p *EntityRelationProcessor) logLLMCall(
@@ -383,6 +397,9 @@ func (p *EntityRelationProcessor) logLLMCall(
 	payload map[string]any,
 	callErr error,
 	start, end time.Time,
+	recordID int64,
+	chunkIdx int,
+	totalChunks int,
 ) {
 	var artifactStr *string
 	if payload != nil {
@@ -396,18 +413,34 @@ func (p *EntityRelationProcessor) logLLMCall(
 		s := callErr.Error()
 		errStr = &s
 	}
-	rec := DocProcLogRecord{
-		DocProcName:  p.Name(),
-		ModelNames:   modelNames,
-		PromptName:   promptName,
-		Pass:         &pass,
-		LLMCallID:    &callID,
-		ActivityName: &activity,
-		ArtifactJSON: artifactStr,
-		Errors:       errStr,
-		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	percent := 0
+	if totalChunks > 0 {
+		percent = (chunkIdx + 1) * 100 / totalChunks
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052807"); err != nil {
+	progress := fmt.Sprintf("%d%% (%d/%d)", percent, chunkIdx+1, totalChunks)
+	extraInfo := map[string]any{
+		"chunk":        chunkIdx + 1,
+		"total_chunks": totalChunks,
+		"percent":      progress,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+	rec := DocProcLogRecord{
+		CallReason:    "extract entities and relations",
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		Pass:          &pass,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogExtractEntityRelation(ctx, rec, "MID-26052807"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -418,6 +451,7 @@ func (p *EntityRelationProcessor) logEntityRelationSummary(
 	result entityRelationExtractionResult,
 	insertedEntities, insertedRelations int64,
 	numChunks int,
+	recordID int64,
 ) {
 	extraInfo := map[string]any{
 		"total_entities":  insertedEntities,
@@ -444,10 +478,16 @@ func (p *EntityRelationProcessor) logEntityRelationSummary(
 		modelNames = append(modelNames, n)
 	}
 
+	progress := "100%"
+	activityName := "extract_entity_relation"
 	rec := DocProcLogRecord{
+		CallReason:    "extract entities and relations",
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    p.PromptRef,
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		ActivityName:  &activityName,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
@@ -749,6 +789,7 @@ type entityRelationStatusParams struct {
 	InputFilename string
 	Start         time.Time
 	DurationMs    int64
+	ProcStatus    string
 	ProcErr       error
 }
 
@@ -793,6 +834,27 @@ func (p *EntityRelationProcessor) persistEntityRelationStatus(
 	}
 }
 
+func (p *EntityRelationProcessor) stopAndPersistEntityRelation(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
+	statusRaw, err := appendEntityRelationStatus(rec.StatusRaw, entityRelationStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectEntityRelationFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+	})
+	if err != nil {
+		p.Logger.Error("(MID_26052841) failed building entity-relation stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+	}); updateErr != nil {
+		p.Logger.Error("(MID_26052842) failed persisting entity-relation stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	p.Logger.Info("(MID_26052843) extract_entity_relation stopped by user request", "record_id", rec.ID)
+}
+
 func appendEntityRelationStatus(raw string, p entityRelationStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
 	entry := map[string]any{
@@ -803,7 +865,12 @@ func appendEntityRelationStatus(raw string, p entityRelationStatusParams) (strin
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
 	}
-	if p.ProcErr == nil {
+	if override := strings.TrimSpace(p.ProcStatus); override != "" {
+		entry["proc_status"] = override
+		if p.ProcErr != nil {
+			entry["error"] = strings.TrimSpace(p.ProcErr.Error())
+		}
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"

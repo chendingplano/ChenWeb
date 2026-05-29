@@ -58,12 +58,12 @@ export const ALL_CONFIGURABLE_PROCESSOR_IDS = [
 
 export const ALL_PROCESSOR_IDS = [...MANDATORY_PROCESSOR_IDS, ...ALL_CONFIGURABLE_PROCESSOR_IDS];
 
-const FINAL_STATUSES = new Set(['success', 'fail', 'failed']);
+const FINAL_STATUSES = new Set(['success', 'fail', 'failed', 'stopped']);
 
 export function resolveEntryStatus(entry: StatusEntry): StageStatus {
 	const ps = (entry.proc_status ?? entry['proc-status'] ?? entry.status ?? '').toLowerCase();
 	if (ps === 'success') return 'success';
-	if (ps === 'fail' || ps === 'failed' || ps === 'error') return 'failed';
+	if (ps === 'fail' || ps === 'failed' || ps === 'error' || ps === 'stopped') return 'failed';
 	if (entry.progress !== undefined) return 'in-progress';
 	if (!ps) return 'in-progress';
 	return 'in-progress';

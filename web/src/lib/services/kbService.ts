@@ -1593,3 +1593,18 @@ export async function searchSummaryTreeMock(
 		total: results.length
 	});
 }
+
+export async function stopKbInput(id: number): Promise<void> {
+	const response = await fetch(`${BASE}/inputs/${encodeURIComponent(String(id))}/stop`, {
+		method: 'POST',
+		credentials: 'same-origin'
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to stop pipeline (${response.status})`;
+		throw new Error(msg);
+	}
+}

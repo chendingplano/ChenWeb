@@ -13,7 +13,7 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PauseIcon from '@lucide/svelte/icons/pause';
-	import { listKbInputs, getKbFrontendConfig, type KbInputRecord } from '$lib/services/kbService';
+	import { listKbInputs, getKbFrontendConfig, stopKbInput, type KbInputRecord } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import {
 		ALL_CONFIGURABLE_PROCESSOR_IDS,
@@ -93,6 +93,25 @@
 	let launching = $state(false);
 	let launchError = $state('');
 	let launchToast = $state<{ kind: 'success' | 'error'; msg: string } | null>(null);
+
+	// ── Stop state ─────────────────────────────────────────────────────────
+
+	let stoppingIds = $state<Set<number>>(new Set());
+
+	async function doStop(record: KbInputRecord) {
+		if (stoppingIds.has(record.id)) return;
+		stoppingIds = new Set([...stoppingIds, record.id]);
+		try {
+			await stopKbInput(record.id);
+			launchToast = { kind: 'success', msg: `Stop requested for record #${record.id}` };
+			setTimeout(() => { launchToast = null; }, 4000);
+		} catch (err) {
+			launchToast = { kind: 'error', msg: err instanceof Error ? err.message : 'Stop failed' };
+			setTimeout(() => { launchToast = null; }, 4000);
+		} finally {
+			stoppingIds = new Set([...stoppingIds].filter((id) => id !== record.id));
+		}
+	}
 
 	// ── Restart dialog state ───────────────────────────────────────────────
 
@@ -588,15 +607,18 @@
 							</div>
 							<div class="flex flex-shrink-0 items-center gap-2">
 								<span style="font-size:11px; color:{textMuted}; font-family:monospace;">{formatTime(record.modify_time)}</span>
-								<!-- Stop button (disabled, no API) -->
+								<!-- Stop button -->
 								<button
-									disabled
-									title="Stop — not yet implemented"
+									onclick={() => doStop(record)}
+									disabled={stoppingIds.has(record.id)}
+									title="Request pipeline stop"
 									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
-									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:not-allowed; opacity:0.5;"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(record.id) ? 'not-allowed' : 'pointer'}; opacity:{stoppingIds.has(record.id) ? 0.5 : 1};"
+									onmouseenter={(e) => { if (!stoppingIds.has(record.id)) (e.currentTarget as HTMLElement).style.background = colorErrorTint; }}
+									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; }}
 								>
 									<SquareIcon class="h-3 w-3" />
-									Stop
+									{stoppingIds.has(record.id) ? 'Stopping…' : 'Stop'}
 								</button>
 								<!-- Restart button -->
 								<button

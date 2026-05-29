@@ -296,6 +296,10 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 
 	result, err := p.extractSceneBlocksFromChunksWithLLM(ctx, evt.RecordID, chunks)
 	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			p.stopAndPersistSceneBlocks(context.Background(), rec, start)
+			return ErrPipelineStopped
+		}
 		p.persistSceneBlocksStatus(ctx, rec, start, err)
 		p.Logger.Error("scene blocks extraction failed", "record_id", evt.RecordID, "error", err)
 		return nil
@@ -350,7 +354,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		"prompt_name", p.RelationPromptRef)
 
 	p.persistSceneBlocksStatus(ctx, rec, start, nil)
-	p.logSceneBlocksSummary(ctx, start, p.Now(), result, len(chunks))
+	p.logSceneBlocksSummary(ctx, start, p.Now(), result, len(chunks), evt.RecordID)
 	return nil
 }
 
@@ -392,6 +396,9 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 	llmCallCount := 0
 	fallbackCount := 0
 	for idx, chunk := range chunks {
+		if isCtxStopped(ctx) {
+			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		p.Logger.Info("extract scene - start",
 			"idx", idx,
@@ -405,7 +412,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != "" {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_c%d", eventID, idx), "extract_scene_block_candidates", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now())
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_c%d", eventID, idx), "extract_scene_block_candidates", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now(), record_id, idx, len(chunks))
 		if err != nil {
 			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051809) extract scene candidates via llm for chunk %d: %w", chunk.SeqNo, err)
 		}
@@ -429,6 +436,9 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 	sceneBlocks := make([]map[string]any, 0, len(candidates))
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	for idx, candidate := range candidates {
+		if isCtxStopped(ctx) {
+			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
+		}
 		callStart := p.Now()
 		p.Logger.Info("enrich scene start",
 			"record_id", record_id,
@@ -442,7 +452,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != "" {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now())
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now(), record_id, idx, len(candidates))
 		if err != nil {
 			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051827) enrich scene blocks via llm for candidate %s: %w", candidate.CandidateID, err)
 		}
@@ -485,6 +495,9 @@ func (p *SceneBlocksProcessor) logLLMCall(
 	payload map[string]any,
 	callErr error,
 	start, end time.Time,
+	recordID int64,
+	itemIdx int,
+	totalItems int,
 ) {
 	if p.ProcLogger.DB == nil {
 		return
@@ -501,23 +514,52 @@ func (p *SceneBlocksProcessor) logLLMCall(
 		s := callErr.Error()
 		errStr = &s
 	}
-	rec := DocProcLogRecord{
-		DocProcName:  p.Name(),
-		ModelNames:   modelNames,
-		PromptName:   promptName,
-		Pass:         &pass,
-		LLMCallID:    &callID,
-		ActivityName: &activity,
-		ArtifactJSON: artifactStr,
-		Errors:       errStr,
-		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+	percent := 0
+	if totalItems > 0 {
+		if pass == 1 {
+			percent = (itemIdx + 1) * 100 / totalItems / 2
+		} else {
+			percent = (itemIdx+1)*100/totalItems/2 + 50
+		}
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052815"); err != nil {
+	passLabel := fmt.Sprintf("pass %d", pass)
+	progress := fmt.Sprintf("%d%% (%s: %d/%d)", percent, passLabel, itemIdx+1, totalItems)
+	extraInfo := map[string]any{
+		"chunk":        itemIdx + 1,
+		"total_chunks": totalItems,
+		"percent":      progress,
+	}
+	extraJSON, _ := json.Marshal(extraInfo)
+	extraStr := string(extraJSON)
+	callReason := "extract scene blocks"
+	if pass == 2 {
+		callReason = "enrich scene blocks"
+	}
+	rec := DocProcLogRecord{
+		CallReason:    callReason,
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		Pass:          &pass,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	logFn := p.ProcLogger.LogExtractSceneBlocks
+	if pass == 2 {
+		logFn = p.ProcLogger.LogEnrichSceneBlocks
+	}
+	if err := logFn(ctx, rec, "MID-26052815"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
 
-func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start, end time.Time, result sceneExtractionResult, numChunks int) {
+func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start, end time.Time, result sceneExtractionResult, numChunks int, recordID int64) {
 	if p.ProcLogger.DB == nil {
 		return
 	}
@@ -544,11 +586,16 @@ func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start,
 		"num_chunks":         numChunks,
 	})
 	extraStr := string(extraInfo)
+	progress := "100%"
+	activityName := "extract_scene_blocks"
 	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+		CallReason:    "extract scene blocks",
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
-		EntryType:     "doc_proc_summary",
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		ActivityName:  &activityName,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}, "MID-26052815"); err != nil {
@@ -1117,6 +1164,7 @@ type sceneBlocksStatusParams struct {
 	InputFilename string
 	Start         time.Time
 	DurationMs    int64
+	ProcStatus    string
 	ProcErr       error
 	ModelName     string
 	PromptName    string
@@ -1150,6 +1198,29 @@ func (p *SceneBlocksProcessor) persistSceneBlocksStatus(ctx context.Context, rec
 	}
 }
 
+func (p *SceneBlocksProcessor) stopAndPersistSceneBlocks(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
+	statusRaw, err := appendSceneBlocksStatus(rec.StatusRaw, sceneBlocksStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectSceneBlocksFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "stopped",
+		ModelName:     strings.TrimSpace(p.ModelName),
+		PromptName:    strings.TrimSpace(p.PromptRef),
+	})
+	if err != nil {
+		p.Logger.Error("(MID_26052841) failed building scene blocks stopped status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
+		StatusRaw: statusRaw,
+	}); updateErr != nil {
+		p.Logger.Error("(MID_26052842) failed persisting scene blocks stopped status", "record_id", rec.ID, "error", updateErr)
+	}
+	p.Logger.Info("(MID_26052843) generate_scene_blocks stopped by user request", "record_id", rec.ID)
+}
+
 func detectSceneBlocksFileType(rec DocMetadataInputRecord) string {
 	for _, candidate := range []string{rec.FileName, rec.StagingFilename, rec.ResultFilename} {
 		ext := strings.ToLower(strings.TrimSpace(filepath.Ext(strings.TrimSpace(candidate))))
@@ -1176,7 +1247,12 @@ func appendSceneBlocksStatus(raw string, p sceneBlocksStatusParams) (string, err
 		"model_name":     p.ModelName,
 		"prompt_name":    p.PromptName,
 	}
-	if p.ProcErr == nil {
+	if override := strings.TrimSpace(p.ProcStatus); override != "" {
+		entry["proc_status"] = override
+		if p.ProcErr != nil {
+			entry["error"] = strings.TrimSpace(p.ProcErr.Error())
+		}
+	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {
 		entry["proc_status"] = "failed"
