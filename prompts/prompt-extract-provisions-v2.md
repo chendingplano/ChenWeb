@@ -81,75 +81,14 @@ For every extracted provisions, produce a structured record with the following f
 IMPORTANT: for `name`, `provision`, `provision_desc`, `keywords`, `context` and `subject`, generate them in the input language.
 ALSO provide accurate English translation if the input language is not English in `name_en`, `provision_en`, `provision_desc_en`, `keywords_en`, `context_en` and `subject_en`, respectively.
 
-## 8. Extract Category Paths
-
-### 8.1. Category structure
-
-A category path is made of one or more categories, forming a category path:
-```text
-  <domain>/<subdomain>/<category>..., similar to file path.
-```
-
-* `<domain>` MUST be generic, such as 'Health', 'Medical', 'Software', 'Manufacturing', etc.
-* `<subdomain>` MUST also be generic within its domain.
-* Last level = most specific
-* Each level MUST be semantically narrower than its parent
-* `<domain>`, `<subdomain>` and subsequent categories MUST be in the input language.
-* Limit the max depth of category paths to 10
-
-### 8.2. Category Paths Extraction Rules
-
-* Extract multiple category paths per provision
-* Provide both category-level keywords and path-level keywords
-* Keywords MUST:
-
-  * Be directly grounded in the input
-  * Be specific and meaningful (not generic words)
-  * Help distinguish this topic from others
-  * Keywords are in its input language
-
-### 8.3. Confidence
-
-* Provide a confidence score between 0 and 1 for each category path
-* Confidence reflects:
-
-  * Clarity of the topic in the input
-  * Completeness of the category path
-  * Strength of supporting evidence
-* Use:
-
-  * ≥0.85 → strong, explicit topic
-  * 0.6–0.85 → reasonably clear topic
-  * <0.6 → weak or inferred topic (avoid if possible)
-
-### 8.4. Category Quality
-
-* Use canonical noun phrases
-* Avoid verbs, sentences, or vague terms
-* Avoid generic categories such as:
-
-  * "general", "other", "miscellaneous"
-
-### 8.5. Consistency
-
-* Reuse common top-level categories when appropriate
-* Keep naming style consistent across all paths
-
-### 8.6. Language
-
-* Match the language of the input.
-* For English / Latin-script content: use English category names.
-* For Chinese / CJK content: use Chinese category names directly.
-* ALSO provide an accurate English translation if the original language is not English.
-
-## 9. Confidence Scoring
+## 8. Confidence Scoring
 Assign a confidence score (0.0–1.0) for each provision based on:
 - Strength of normative signal (e.g., "shall" > "should")
 - Clarity of obligation or recommendation
 - Completeness of the extracted statement
 - Ambiguity in language or context
 
-## 10. Normalization Rules
+## 9. Normalization Rules
 
 Apply these rules according to the language of each category segment:
 
@@ -186,29 +125,7 @@ Apply these rules according to the language of each category segment:
       "confidence": 0.0,
       "is_explicit": true or false,
       "need_verify": true or false,
-      "category_paths": [
-        {
-          "category_path": [
-            {
-              "name": "category-name",
-              "keywords": ["keyword", "keyword"...],
-              "confidence": ddd
-            },
-            {
-              <the next category>
-            },
-            ...
-          ],
-          "path_keywords": ["keyword", "keyword"...],
-          "path_confidence": ddd
-        }
-      ]
-      "category_paths_en": [// the accurate English translation of 'category_path' only when its input language is not English!]
-    },
-    {
-      <next provision>
-    },
-    ...
+    }
   ]
 }
 ```

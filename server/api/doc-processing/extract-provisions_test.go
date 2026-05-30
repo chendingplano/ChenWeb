@@ -623,7 +623,7 @@ func TestProvisionsProcessor_TreatsEmptyFallbackJSONAsSuccess(t *testing.T) {
 	extractor := &fakeJSONExtractor{
 		errs: []error{
 			errors.New("primary model failed"),
-			errors.New("(MID_26050841) failed extracting provisions, error:(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+			errors.New("(MID_26050841) failed extracting provisions, error:(MID_26050174) failed resolveScopedString, error:(MID_26052920) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
 		},
 	}
 
@@ -677,7 +677,7 @@ func TestProvisionsProcessor_TreatsEmptyFallbackJSONAsSuccess(t *testing.T) {
 func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseRetriesFallback(t *testing.T) {
 	extractor := &fakeJSONExtractor{
 		errs: []error{
-			errors.New("(MID_26050841) failed extracting provisions, error:(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+			errors.New("(MID_26050841) failed extracting provisions, error:(MID_26050174) failed resolveScopedString, error:(MID_26052921) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
 		},
 		outs: []map[string]any{
 			nil,
@@ -742,7 +742,7 @@ func TestProvisionsProcessor_ExtractProvisionPayloadUsesStructuredContractWhenAv
 		Lines: []BlockLine{
 			{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The device shall log all alarms."},
 		},
-	}, "gpt-test")
+	}, "gpt-test", extractor)
 	if err != nil {
 		t.Fatalf("extractProvisionPayload: %v", err)
 	}

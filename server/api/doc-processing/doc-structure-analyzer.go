@@ -503,6 +503,14 @@ func parseTOMLMap(data []byte, out any) error {
 	return toml.Unmarshal(data, out)
 }
 
+func extractorTimeoutSec(ext LLMJSONExtractor) int {
+	client, ok := ext.(*llmclients.OpenAIJSONClient)
+	if !ok || client == nil || client.HTTPClient == nil {
+		return 0
+	}
+	return int(client.HTTPClient.Timeout.Seconds())
+}
+
 func applyStructureModelConfigToExtractor(extractor LLMJSONExtractor, cfg structureModelConfig) {
 	client, ok := extractor.(*llmclients.OpenAIJSONClient)
 	if !ok || client == nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -37,6 +39,7 @@ type ProvisionsProcessor struct {
 	FallbackModelCfgPath string
 	FallbackModelErr     error
 	FallbackModelName    string
+	FallbackExtractor    LLMJSONExtractor
 	BlockSize            int
 	PrevOverlap          int
 	NextOverlap          int
@@ -78,6 +81,14 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_NAME", "EXTRACT_PROVISIONS_MODELS_FILE")
 	fallbackModelRef, fallbackModelCfgPath, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_PROVISIONS_MODEL_FALLBACK", "EXTRACT_PROVISIONS_MODELS_FILE")
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
+	var fallbackExtractor LLMJSONExtractor
+	if fallbackModelErr == nil && strings.TrimSpace(fallbackModelCfg.ModelName) != "" {
+		fe := &llmclients.OpenAIJSONClient{
+			HTTPClient: &http.Client{Timeout: 100 * time.Second},
+		}
+		applyStructureModelConfigToExtractor(fe, fallbackModelCfg)
+		fallbackExtractor = fe
+	}
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &ProvisionsProcessor{
 		InputStore:           inputStore,
@@ -98,6 +109,7 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		FallbackModelCfgPath: fallbackModelCfgPath,
 		FallbackModelErr:     fallbackModelErr,
 		FallbackModelName:    fallbackModelCfg.ModelName,
+		FallbackExtractor:    fallbackExtractor,
 		BlockSize:            envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
 		PrevOverlap:          prevOverlap,
 		NextOverlap:          nextOverlap,
@@ -165,6 +177,8 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		}
 	}
 
+	p.persistProvisionsRunningStatus(ctx, rec, start)
+
 	blocks, err := p.resolveBlocks(ctx, evt, rec)
 	if err != nil {
 		p.persistProvisionsStatus(ctx, rec, start, err)
@@ -177,10 +191,10 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		return nil
 	}
 
-	p.Logger.Info("Before calling LLM",
-		"num_blocks", len(blocks),
-		"record_id", evt.RecordID,
-		"filename", inputFilename)
+	// p.Logger.Info("Before calling LLM",
+	// 	"num_blocks", len(blocks),
+	// 	"record_id", evt.RecordID,
+	// 	"filename", inputFilename)
 
 	result, err := p.extractProvisionsFromBlocksWithLLM(ctx, blocks, evt.RecordID)
 	if err != nil {
@@ -264,7 +278,7 @@ func (p *ProvisionsProcessor) logLLMCall(
 		"block":             blockIdx + 1,
 		"total_blocks":      totalBlocks,
 		"num_provisions":    numInBlock,
-		"provisions_so_far": provisionsSoFar,
+		"provisions_before": provisionsSoFar,
 		"percent":           fmt.Sprintf("%d%%", percent),
 	}
 	extraJSON, _ := json.Marshal(extraInfo)
@@ -284,7 +298,7 @@ func (p *ProvisionsProcessor) logLLMCall(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogExtractProvisions(ctx, rec, "MID-26052811"); err != nil {
+	if err := p.ProcLogger.LogExtractProvisions(ctx, rec, "MID-26052831"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -333,8 +347,8 @@ func (p *ProvisionsProcessor) logProvisionsSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052811"); err != nil {
-		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	if err := p.ProcLogger.LogExtractProvisions(ctx, rec, "MID-26052832"); err != nil {
+		p.Logger.Warn("failed to write extract_provisions log", "error", err)
 	}
 }
 
@@ -436,7 +450,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 }
 
 func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Context, block Block) (map[string]any, string, error) {
-	payload, err := p.extractProvisionPayload(ctx, block, p.ModelName)
+	payload, err := p.extractProvisionPayload(ctx, block, p.ModelName, p.Extractor)
 	if err == nil {
 		return payload, strings.TrimSpace(p.ModelName), nil
 	}
@@ -446,11 +460,18 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 		payloadVal = payload
 	}
 
-	p.Logger.Warn("primary LLM failed extracting provisions",
-		"error", err,
-		"model_name", p.ModelName,
-		"fallback_model", p.FallbackModelName,
-		"payload", payloadVal)
+	if ApiUtils.IsEmptyJSONResponse(err) {
+		p.Logger.Info("primary provisions extraction returned empty JSON. Try fallback if available",
+			"fallback_model", p.FallbackModelName,
+		)
+	} else {
+		p.Logger.Warn("primary LLM failed extracting provisions",
+			"error", err,
+			"model_name", p.ModelName,
+			"timeout_sec", extractorTimeoutSec(p.Extractor),
+			"fallback_model", p.FallbackModelName,
+			"payload", payloadVal)
+	}
 
 	fallbackModelName := strings.TrimSpace(p.FallbackModelName)
 	if fallbackModelName == "" {
@@ -462,25 +483,13 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 		return nil, fallbackModelName, fmt.Errorf("(MID_26050544) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
-	if isEmptyProvisionExtractionError(err) {
-		p.Logger.Warn("primary provisions extraction returned empty JSON; retrying fallback model",
-			"primary_model", p.ModelName,
-			"fallback_model", fallbackModelName,
-			"error", err,
-			"prompt_name", p.PromptRef,
-		)
-	} else {
-		p.Logger.Warn("primary provisions extraction failed; retrying fallback model",
-			"primary_model", p.ModelName,
-			"fallback_model", fallbackModelName,
-			"error", err,
-			"prompt_name", p.PromptRef,
-		)
+	fallbackExt := p.FallbackExtractor
+	if fallbackExt == nil {
+		fallbackExt = p.Extractor
 	}
-
-	payload, fallbackErr := p.extractProvisionPayload(ctx, block, fallbackModelName)
+	payload, fallbackErr := p.extractProvisionPayload(ctx, block, fallbackModelName, fallbackExt)
 	if fallbackErr != nil {
-		if isEmptyProvisionExtractionError(fallbackErr) {
+		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
 			p.Logger.Warn("fallback provisions extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
@@ -496,22 +505,10 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 	return payload, fallbackModelName, nil
 }
 
-func isEmptyProvisionExtractionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.TrimSpace(err.Error())
-	if msg == "" {
-		return false
-	}
-	return strings.Contains(msg, "unexpected end of JSON input") &&
-		strings.Contains(msg, "json:{[]}")
-}
-
-func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block Block, modelName string) (map[string]any, error) {
-	p.Logger.Info("To extract provisions",
-		"model", modelName,
-		"prompt_name", p.PromptRef)
+func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block Block, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
+	// p.Logger.Info("To extract provisions",
+	// 	"model", modelName,
+	// 	"prompt_name", p.PromptRef)
 
 	in := llmclients.JSONExtractionInput{
 		PromptText: p.PromptText,
@@ -522,14 +519,14 @@ func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block
 		payload map[string]any
 		err     error
 	)
-	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
+	if structuredExtractor, ok := extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, provisionExtractionContract())
 		if result != nil {
 			payload = result.Parsed
 		}
 	} else {
-		payload, err = p.Extractor.ExtractJSON(ctx, in)
+		payload, err = extractor.ExtractJSON(ctx, in)
 	}
 	if err != nil {
 		if payload == nil {
@@ -1089,6 +1086,28 @@ func (p *ProvisionsProcessor) persistProvisionsStatus(ctx context.Context, rec D
 		ErrorMsg:  errMsg,
 	}); err != nil {
 		p.Logger.Error("failed persisting provisions status", "record_id", rec.ID, "error", err)
+	}
+}
+
+func (p *ProvisionsProcessor) persistProvisionsRunningStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
+	p.Logger.Info("(MID_26052910) updating kb.inputs.status extract_provisions entry to running",
+		"record_id", rec.ID,
+		"start_time", start.Format(defaultDocMetaStatusTime),
+	)
+	statusRaw, err := appendProvisionsStatus(rec.StatusRaw, provisionsStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectProvisionsFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		ProcStatus:    "running",
+	})
+	if err != nil {
+		p.Logger.Error("(MID_26052911) failed building provisions running status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if err := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{StatusRaw: statusRaw}); err != nil {
+		p.Logger.Error("(MID_26052912) failed persisting provisions running status", "record_id", rec.ID, "error", err)
+		return
 	}
 }
 

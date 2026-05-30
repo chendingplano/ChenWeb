@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -332,7 +333,7 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Co
 
 	parsed, fallbackErr := p.extractMetadataWithModel(ctx, inputText, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
-		if isEmptyDocMetadataExtractionError(fallbackErr) {
+		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
 			p.Logger.Warn("fallback doc metadata extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
@@ -343,18 +344,6 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Co
 		return nil, fallbackModelName, fmt.Errorf("(MID_26051003) primary extraction failed: %w; fallback extraction failed: %v", err, fallbackErr)
 	}
 	return parsed, fallbackModelName, nil
-}
-
-func isEmptyDocMetadataExtractionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.TrimSpace(err.Error())
-	if msg == "" {
-		return false
-	}
-	return strings.Contains(msg, "unexpected end of JSON input") &&
-		strings.Contains(msg, "json:{[]}")
 }
 
 func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {

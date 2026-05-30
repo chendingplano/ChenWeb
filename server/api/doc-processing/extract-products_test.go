@@ -297,7 +297,7 @@ func TestProductsProcessor_HandleEvent_MultiPassPipeline(t *testing.T) {
 func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *testing.T) {
 	extractor := &fakeJSONExtractor{
 		errs: []error{
-			errors.New("(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+			errors.New("(MID_26050174) failed resolveScopedString, error:(MID_26052923) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
 		},
 	}
 

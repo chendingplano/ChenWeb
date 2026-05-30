@@ -69,7 +69,7 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 	sceneStore := &fakeSceneObjectsStore{}
 	extractor := &fakeJSONExtractor{
 		errs: []error{
-			fmt.Errorf("(MID_26050174) failed resolveScopedString, error:(MID_26050177) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
+			fmt.Errorf("(MID_26050174) failed resolveScopedString, error:(MID_26052922) failed resolveScopedString, error:(MID_26050142) decode llm response: unexpected end of JSON input, json:{[]}"),
 			nil,
 			nil,
 		},

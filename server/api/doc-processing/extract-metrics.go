@@ -818,7 +818,6 @@ func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) strin
 		"\n\nInput lines (raw, JSON array):\n" + string(linesJSON) +
 		"\n\nParsed line hints (best effort; do not treat as complete):\n" + string(parsedLinesJSON)
 }
-*/
 
 func buildMetricRelationUserPrompt(candidate metricCandidate) string {
 	candidateJSON, _ := json.Marshal(map[string]any{
@@ -866,6 +865,7 @@ func buildMetricRelationUserPrompt(candidate metricCandidate) string {
 		"\n\nCandidate:\n" + string(candidateJSON) +
 		"\n\nSource lines (JSON array):\n" + blockLinesToJSON(candidate.SupportLines)
 }
+*/
 
 func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 	candidatesData := make([]map[string]any, 0, len(candidates))
@@ -1338,6 +1338,7 @@ func toBool(v any) bool {
 }
 
 // logLLMCall writes one llm_call log entry. Errors are logged as warnings and never abort processing.
+/*
 func (p *MetricsProcessor) logLLMCall(
 	ctx context.Context,
 	callID, activity string,
@@ -1371,7 +1372,7 @@ func (p *MetricsProcessor) logLLMCall(
 		Errors:       errStr,
 		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052809"); err != nil {
+	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052810"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			p.Logger.Info("llm_call log skipped: doc processor stopped by user request", "call_id", callID)
 		} else {
@@ -1379,6 +1380,7 @@ func (p *MetricsProcessor) logLLMCall(
 		}
 	}
 }
+*/
 
 // logExtractMetricsChunk writes one extract_metrics log entry for a single Pass 1 chunk.
 func (p *MetricsProcessor) logExtractMetricsChunk(
@@ -1426,7 +1428,7 @@ func (p *MetricsProcessor) logExtractMetricsChunk(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogExtractMetrics(ctx, rec, "MID-26052809"); err != nil {
+	if err := p.ProcLogger.LogExtractMetrics(ctx, rec, "MID-26052811"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			p.Logger.Info("extract_metrics log skipped: doc processor stopped by user request", "call_id", callID)
 		} else {
@@ -1481,7 +1483,7 @@ func (p *MetricsProcessor) logEnrichMetricsChunk(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogEnrichMetrics(ctx, rec, "MID-26052809"); err != nil {
+	if err := p.ProcLogger.LogEnrichMetrics(ctx, rec, "MID-26052812"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			p.Logger.Info("enrich_metrics log skipped: doc processor stopped by user request", "call_id", callID)
 		} else {
@@ -1530,7 +1532,7 @@ func (p *MetricsProcessor) logMetricsSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052809"); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052813"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			p.Logger.Info("doc_proc_summary log skipped: doc processor stopped by user request")
 		} else {
@@ -1582,7 +1584,6 @@ func (p *MetricsProcessor) extractMetricPayload(
 	}
 	return nil, fmt.Errorf("(MID_26042491) llm output must contain 'metrics' or 'candidates'")
 }
-
 
 /*
 func firstPromptLine(promptText string) string {
@@ -1941,4 +1942,3 @@ VALUES (
 	}
 	return inserted, nil
 }
-
