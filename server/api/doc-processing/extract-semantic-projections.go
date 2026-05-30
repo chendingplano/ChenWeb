@@ -297,7 +297,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 		"num_chunks", len(chunks),
 	)
 	p.persistSemanticProjectionsStatus(ctx, rec, start, nil)
-	p.logSemanticProjectionsSummary(ctx, start, p.Now(), result, inserted, len(chunks))
+	p.logSemanticProjectionsSummary(ctx, evt.RecordID, start, p.Now(), len(chunks))
 	return nil
 }
 
@@ -312,6 +312,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	var llmCallCount, fallbackCount int
 
 	// Pass 1: extract semantic projection candidate from each chunk
+	completedChunks := 0
 	for idx, chunk := range chunks {
 		if isCtxStopped(ctx) {
 			return semanticProjectionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount}, ErrPipelineStopped
@@ -328,12 +329,16 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		)
 		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
 		userPrompt := buildSemanticProjectionCandidateUserPrompt(chunkText)
+		// p.Logger.Info("llm call", "inputText", userPrompt)
 		payload, modelName, err := p.extractCandidatePayloadWithFallback(ctx, userPrompt)
 		llmCallCount++
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.CandidateModelName) && strings.TrimSpace(modelName) != "" {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, callID, "extract_semantic_projection_candidates", 1,
+		if err == nil {
+			completedChunks++
+		}
+		p.logExtractProjectionsChunk(ctx, recordID, callID, idx+1, len(chunks), completedChunks,
 			[]string{strings.TrimSpace(modelName)}, p.CandidatePromptRef,
 			payload, err, callStart, p.Now())
 		if err != nil {
@@ -374,6 +379,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	projections := make([]map[string]any, 0, len(candidates))
 	seqNos := make([]int, 0, len(candidates))
 	usedEnrichModel := strings.TrimSpace(p.EnrichModelName)
+	completedProjections := 0
 	for enrichIdx, cand := range candidates {
 		if isCtxStopped(ctx) {
 			return semanticProjectionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount}, ErrPipelineStopped
@@ -387,9 +393,13 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		)
 		callID := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), enrichIdx)
 		userPrompt := buildSemanticProjectionEnrichUserPrompt(cand)
+		p.Logger.Info("llm call", "inputText", userPrompt)
 		payload, err := p.extractEnrichPayload(ctx, userPrompt)
 		llmCallCount++
-		p.logLLMCall(ctx, callID, "enrich_semantic_projections", 2,
+		if err == nil {
+			completedProjections++
+		}
+		p.logEnrichProjectionsChunk(ctx, recordID, callID, enrichIdx+1, len(candidates), completedProjections,
 			[]string{strings.TrimSpace(p.EnrichModelName)}, p.EnrichPromptRef,
 			payload, err, callStart, p.Now())
 		if err != nil {
@@ -433,16 +443,32 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	}, nil
 }
 
-func (p *SemanticProjectionsProcessor) logLLMCall(
+func (p *SemanticProjectionsProcessor) logExtractProjectionsChunk(
 	ctx context.Context,
-	callID, activity string,
-	pass int,
+	recordID int64,
+	callID string,
+	chunkNo, totalChunks, completedChunks int,
 	modelNames []string,
 	promptName string,
 	payload map[string]any,
 	callErr error,
 	start, end time.Time,
 ) {
+	overallPercent := 0
+	perPassPercent := 0
+	if totalChunks > 0 {
+		overallPercent = completedChunks * 100 / totalChunks / 2
+		perPassPercent = chunkNo * 100 / totalChunks
+	}
+	progressStr := fmt.Sprintf("%d%% (pass 1: %d/%d)", overallPercent, completedChunks, totalChunks)
+	extraInfo := map[string]any{
+		"chunk":        chunkNo,
+		"total_chunks": totalChunks,
+		"percent":      fmt.Sprintf("%d%% (%d/%d)", perPassPercent, chunkNo, totalChunks),
+	}
+	extraBytes, _ := json.Marshal(extraInfo)
+	extraStr := string(extraBytes)
+
 	var artifactStr *string
 	if payload != nil {
 		if bs, err := json.Marshal(payload); err == nil {
@@ -455,35 +481,105 @@ func (p *SemanticProjectionsProcessor) logLLMCall(
 		s := callErr.Error()
 		errStr = &s
 	}
+	pass := 1
+	activity := "extract_projection"
 	rec := DocProcLogRecord{
-		DocProcName:  p.Name(),
-		ModelNames:   modelNames,
-		PromptName:   promptName,
-		Pass:         &pass,
-		LLMCallID:    &callID,
-		ActivityName: &activity,
-		ArtifactJSON: artifactStr,
-		Errors:       errStr,
-		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:    "extract semantic projections",
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		RecordID:      &recordID,
+		ProcProgress:  &progressStr,
+		Pass:          &pass,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052812"); err != nil {
-		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	if err := p.ProcLogger.LogExtractProjections(ctx, rec, "MID-26052813"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("extract_projections log skipped: doc processor stopped", "call_id", callID)
+		} else {
+			p.Logger.Warn("failed to write extract_projections log", "call_id", callID, "error", err)
+		}
+	}
+}
+
+func (p *SemanticProjectionsProcessor) logEnrichProjectionsChunk(
+	ctx context.Context,
+	recordID int64,
+	callID string,
+	enrichNo, totalProjections, completedProjections int,
+	modelNames []string,
+	promptName string,
+	payload map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	overallPercent := 50
+	perPassPercent := 0
+	if totalProjections > 0 {
+		overallPercent = completedProjections*100/totalProjections/2 + 50
+		perPassPercent = enrichNo * 100 / totalProjections
+	}
+	progressStr := fmt.Sprintf("%d%% (pass 2: %d/%d)", overallPercent, completedProjections, totalProjections)
+	extraInfo := map[string]any{
+		"chunk":        enrichNo,
+		"total_chunks": totalProjections,
+		"percent":      fmt.Sprintf("%d%%", perPassPercent),
+	}
+	extraBytes, _ := json.Marshal(extraInfo)
+	extraStr := string(extraBytes)
+
+	var artifactStr *string
+	if payload != nil {
+		if bs, err := json.Marshal(payload); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	pass := 2
+	activity := "enrich_projection"
+	rec := DocProcLogRecord{
+		CallReason:    "enrich semantic projections",
+		DocProcName:   p.Name(),
+		ModelNames:    modelNames,
+		PromptName:    promptName,
+		RecordID:      &recordID,
+		ProcProgress:  &progressStr,
+		Pass:          &pass,
+		LLMCallID:     &callID,
+		ActivityName:  &activity,
+		ArtifactJSON:  artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogEnrichProjections(ctx, rec, "MID-26052814"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("enrich_projections log skipped: doc processor stopped", "call_id", callID)
+		} else {
+			p.Logger.Warn("failed to write enrich_projections log", "call_id", callID, "error", err)
+		}
 	}
 }
 
 func (p *SemanticProjectionsProcessor) logSemanticProjectionsSummary(
 	ctx context.Context,
+	recordID int64,
 	start, end time.Time,
-	result semanticProjectionExtractionResult,
-	inserted int64,
 	numChunks int,
 ) {
 	extraInfo := map[string]any{
-		"total_projections": inserted,
-		"candidates_count":  len(result.Projections),
-		"llm_call_count":    result.LLMCallCount,
-		"fallback_count":    result.FallbackCount,
-		"num_chunks":        numChunks,
+		"total_chunks":  numChunks,
+		"total_time_ms": end.Sub(start).Milliseconds(),
 	}
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
@@ -503,15 +599,25 @@ func (p *SemanticProjectionsProcessor) logSemanticProjectionsSummary(
 	}
 
 	promptName := firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef)
+	progress := "100%"
+	activity := "extract_projections"
 	rec := DocProcLogRecord{
+		CallReason:    "extract projections",
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		ActivityName:  &activity,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052812"); err != nil {
-		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+	if err := p.ProcLogger.LogExtractProjections(ctx, rec, "MID-26052815"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("extract_projections summary log skipped: doc processor stopped")
+		} else {
+			p.Logger.Warn("failed to write extract_projections summary log", "error", err)
+		}
 	}
 }
 
