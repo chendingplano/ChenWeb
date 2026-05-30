@@ -134,11 +134,11 @@ func TestSceneBlocksProcessor_RetriesFallbackOnEmptyJSON(t *testing.T) {
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
-	if !strings.Contains(extractor.inputText, "n\t1\t1\tparagraph\tScene introduction") {
-		t.Fatalf("scene block input missing flagged line format: %q", extractor.inputText)
+	if !strings.Contains(extractor.inputText, `"content":"Scene introduction"`) {
+		t.Fatalf("scene block input missing first source line: %q", extractor.inputText)
 	}
-	if !strings.Contains(extractor.inputText, "n\t2\t1\tparagraph\tOperator opens the access panel.") {
-		t.Fatalf("scene block input missing second flagged line: %q", extractor.inputText)
+	if !strings.Contains(extractor.inputText, `"content":"Operator opens the access panel."`) {
+		t.Fatalf("scene block input missing second source line: %q", extractor.inputText)
 	}
 	if len(extractor.modelNames) != 3 {
 		t.Fatalf("modelNames=%v", extractor.modelNames)

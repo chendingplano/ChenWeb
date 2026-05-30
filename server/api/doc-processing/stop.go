@@ -157,7 +157,7 @@ func (s StopRequestSQLStore) MarkDocProcessingStopped(ctx context.Context, id in
 	if !isRunning {
 		return nil
 	}
-	statusJSON, err := appendPipelineStatus(raw, time.Now(), "stopped", nil)
+	statusJSON, err := appendPipelineStatus(raw, time.Now(), "stopped", "", nil)
 	if err != nil {
 		return err
 	}

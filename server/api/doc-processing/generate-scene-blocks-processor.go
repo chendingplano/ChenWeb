@@ -91,6 +91,12 @@ type sceneCandidate struct {
 	SummaryHint        string
 	SupportingMentions []map[string]any
 	SupportLines       []MarkedLine
+	PrimaryChunkIndex  int
+}
+
+type candidateChunkGroup struct {
+	ChunkIndex int
+	Candidates []sceneCandidate
 }
 
 type SceneObjectsStore interface {
@@ -294,7 +300,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		"record_id", evt.RecordID,
 	)
 
-	result, err := p.extractSceneBlocksFromChunksWithLLM(ctx, evt.RecordID, chunks)
+	result, err := p.extractSceneBlocksFromChunksWithLLM(ctx, evt.RecordID, chunks, rec, start)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			p.stopAndPersistSceneBlocks(context.Background(), rec, start)
@@ -389,7 +395,10 @@ func buildSceneBlocksChunkText(chunk Chunk) string {
 func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 	ctx context.Context,
 	record_id int64,
-	chunks []Chunk) (sceneExtractionResult, error) {
+	chunks []Chunk,
+	rec DocMetadataInputRecord,
+	start time.Time,
+) (sceneExtractionResult, error) {
 	eventID := eventIDFromContext(ctx)
 	mentions := make([]sceneCandidateMention, 0, len(chunks))
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
@@ -403,7 +412,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		p.Logger.Info("extract scene - start",
 			"idx", idx,
 			"record_id", record_id,
-			"total", len(chunks),
+			"total chunks", len(chunks),
 			"model_name", p.MentionModelName,
 			"prompt_name", p.MentionPromptRef,
 		)
@@ -413,6 +422,8 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 			fallbackCount++
 		}
 		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_c%d", eventID, idx), "extract_scene_block_candidates", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now(), record_id, idx, len(chunks))
+		p1Percent := (idx + 1) * 100 / len(chunks) / 2
+		p.persistSceneBlocksInProgressStatus(ctx, rec, start, fmt.Sprintf("%d%% (pass 1: %d/%d)", p1Percent, idx+1, len(chunks)))
 		if err != nil {
 			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051809) extract scene candidates via llm for chunk %d: %w", chunk.SeqNo, err)
 		}
@@ -420,6 +431,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		raw, _ := payload["candidates"].([]any)
 		mentions = append(mentions, normalizeSceneCandidateMentions(raw, chunk)...)
 		p.Logger.Info("extract scene - end  ",
+			"extracted", len(raw),
 			"candidates_so_far", len(mentions),
 			"ms_used", time.Since(callStart).Milliseconds(),
 		)
@@ -435,35 +447,44 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 
 	sceneBlocks := make([]map[string]any, 0, len(candidates))
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
-	for idx, candidate := range candidates {
+	chunkGroups := groupSceneCandidatesByChunk(candidates)
+	for groupIdx, group := range chunkGroups {
 		if isCtxStopped(ctx) {
 			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
 		}
 		callStart := p.Now()
+		candidateIDs := make([]string, 0, len(group.Candidates))
+		for _, c := range group.Candidates {
+			candidateIDs = append(candidateIDs, c.CandidateID)
+		}
 		p.Logger.Info("enrich scene start",
 			"record_id", record_id,
-			"idx", idx,
-			"c_id", candidate.CandidateID,
+			"group_idx", groupIdx,
+			"chunk_index", group.ChunkIndex,
+			"candidates", candidateIDs,
 			"model_name", p.RelationModelName,
 			"prompt_name", p.RelationPromptRef,
 		)
-		payload, modelName, err := p.extractScenePayloadWithFallback(ctx, buildSceneRelationUserPrompt(candidate), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
+		payload, modelName, err := p.extractScenePayloadWithFallback(ctx, buildSceneRelationUserPromptForGroup(group.Candidates), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
 		llmCallCount++
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != "" {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_c%d", eventID, idx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now(), record_id, idx, len(candidates))
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_g%d", eventID, groupIdx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now(), record_id, groupIdx, len(chunkGroups))
+		p2Percent := (groupIdx+1)*100/len(chunkGroups)/2 + 50
+		p.persistSceneBlocksInProgressStatus(ctx, rec, start, fmt.Sprintf("%d%% (pass 2: %d/%d)", p2Percent, groupIdx+1, len(chunkGroups)))
 		if err != nil {
-			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051827) enrich scene blocks via llm for candidate %s: %w", candidate.CandidateID, err)
+			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051827) enrich scene blocks via llm for chunk group %d (candidates: %v): %w", group.ChunkIndex, candidateIDs, err)
 		}
 		usedRelationModel = strings.TrimSpace(modelName)
 		raw, _ := payload["scene_blocks"].([]any)
-		normalized := normalizeSceneBlockList(raw, candidate)
+		normalized := normalizeSceneBlockListForGroup(raw, group.Candidates)
 		sceneBlocks = append(sceneBlocks, normalized...)
 		p.Logger.Info("enrich scene end  ",
 			"record_id", record_id,
-			"c_id", candidate.CandidateID,
-			"blocks_for_candidate", len(normalized),
+			"group_idx", groupIdx,
+			"chunk_index", group.ChunkIndex,
+			"blocks_for_group", len(normalized),
 			"scene_blocks", len(sceneBlocks),
 			"ms_used", time.Since(callStart).Milliseconds(),
 		)
@@ -604,6 +625,8 @@ func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start,
 }
 
 func (p *SceneBlocksProcessor) extractScenePayloadWithFallback(ctx context.Context, inputText string, promptText string, promptRef string, modelName string, cfg structureModelConfig) (map[string]any, string, error) {
+	// p.Logger.Info("call llm", "inputText", inputText)
+
 	payload, err := p.extractScenePayload(ctx, inputText, promptText, modelName, cfg)
 	if err == nil {
 		return payload, strings.TrimSpace(modelName), nil
@@ -779,14 +802,39 @@ func buildSceneCandidateUserPrompt(chunk Chunk) string {
 		"\n\nInput chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
 }
 
-func buildSceneRelationUserPrompt(candidate sceneCandidate) string {
-	candidateJSON, _ := json.Marshal(map[string]any{
-		"candidate_id":        candidate.CandidateID,
-		"scene_key":           candidate.SceneKey,
-		"scene_type_hint":     candidate.SceneTypeHint,
-		"title":               candidate.Title,
-		"summary_hint":        candidate.SummaryHint,
-		"supporting_mentions": candidate.SupportingMentions,
+func buildSceneRelationUserPromptForGroup(candidates []sceneCandidate) string {
+	candidateList := make([]map[string]any, 0, len(candidates))
+	lineMap := map[string]MarkedLine{}
+	for _, candidate := range candidates {
+		candidateList = append(candidateList, map[string]any{
+			"candidate_id":        candidate.CandidateID,
+			"scene_key":           candidate.SceneKey,
+			"scene_type_hint":     candidate.SceneTypeHint,
+			"title":               candidate.Title,
+			"summary_hint":        candidate.SummaryHint,
+			"supporting_mentions": candidate.SupportingMentions,
+		})
+		for _, line := range candidate.SupportLines {
+			lineKey := fmt.Sprintf("%d:%d:%s", line.Line.PageNo, line.Line.LineNo, line.Line.Content)
+			existing, exists := lineMap[lineKey]
+			if !exists || (existing.Mark == "o" && line.Mark != "o") {
+				lineMap[lineKey] = line
+			}
+		}
+	}
+	candidatesJSON, _ := json.Marshal(candidateList)
+	supportLines := make([]MarkedLine, 0, len(lineMap))
+	for _, line := range lineMap {
+		supportLines = append(supportLines, line)
+	}
+	sort.Slice(supportLines, func(i, j int) bool {
+		if supportLines[i].Line.PageNo != supportLines[j].Line.PageNo {
+			return supportLines[i].Line.PageNo < supportLines[j].Line.PageNo
+		}
+		if supportLines[i].Line.LineNo != supportLines[j].Line.LineNo {
+			return supportLines[i].Line.LineNo < supportLines[j].Line.LineNo
+		}
+		return supportLines[i].Mark < supportLines[j].Mark
 	})
 	schema := map[string]any{
 		"scene_blocks": []map[string]any{{
@@ -833,8 +881,8 @@ func buildSceneRelationUserPrompt(candidate sceneCandidate) string {
 	}
 	schemaJSON, _ := json.Marshal(schema)
 	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nCandidate:\n" + string(candidateJSON) +
-		"\n\nSource lines (JSON array):\n" + markedLinesToJSON(candidate.SupportLines)
+		"\n\nCandidates:\n" + string(candidatesJSON) +
+		"\n\nSource lines (JSON array):\n" + markedLinesToJSON(supportLines)
 }
 
 func normalizeSceneCandidateMentions(items []any, chunk Chunk) []sceneCandidateMention {
@@ -989,6 +1037,7 @@ func mergeSceneCandidateMentions(mentions []sceneCandidateMention) []sceneCandid
 			SummaryHint:        summaryHint,
 			SupportingMentions: supportMentions,
 			SupportLines:       supportLines,
+			PrimaryChunkIndex:  b.mentions[0].ChunkIndex,
 		})
 	}
 	return out
@@ -1039,6 +1088,68 @@ func normalizeSceneBlockList(items []any, candidate sceneCandidate) []map[string
 		}
 		if len(normalizeProductEvidenceLines(block["line_spans"])) == 0 {
 			block["line_spans"] = flattenCandidateLineSpans(candidate.SupportingMentions)
+		}
+		out = append(out, block)
+	}
+	return out
+}
+
+func groupSceneCandidatesByChunk(candidates []sceneCandidate) []candidateChunkGroup {
+	order := make([]int, 0, len(candidates))
+	seen := map[int]bool{}
+	groups := make(map[int][]sceneCandidate)
+	for _, c := range candidates {
+		ci := c.PrimaryChunkIndex
+		if !seen[ci] {
+			seen[ci] = true
+			order = append(order, ci)
+		}
+		groups[ci] = append(groups[ci], c)
+	}
+	out := make([]candidateChunkGroup, 0, len(order))
+	for _, ci := range order {
+		out = append(out, candidateChunkGroup{ChunkIndex: ci, Candidates: groups[ci]})
+	}
+	return out
+}
+
+func normalizeSceneBlockListForGroup(items []any, candidates []sceneCandidate) []map[string]any {
+	if len(candidates) == 1 {
+		return normalizeSceneBlockList(items, candidates[0])
+	}
+	candByKey := make(map[string]sceneCandidate, len(candidates))
+	for _, c := range candidates {
+		if key := strings.ToLower(strings.TrimSpace(c.SceneKey)); key != "" {
+			candByKey[key] = c
+		}
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		block := map[string]any{}
+		for k, v := range raw {
+			block[k] = v
+		}
+		sid := strings.ToLower(strings.TrimSpace(asString(block["scene_id"])))
+		if cand, ok := candByKey[sid]; ok {
+			if strings.TrimSpace(asString(block["scene_id"])) == "" {
+				block["scene_id"] = cand.SceneKey
+			}
+			if strings.TrimSpace(asString(block["scene_type"])) == "" {
+				block["scene_type"] = cand.SceneTypeHint
+			}
+			if strings.TrimSpace(asString(block["title"])) == "" {
+				block["title"] = cand.Title
+			}
+			if strings.TrimSpace(asString(block["summary"])) == "" {
+				block["summary"] = cand.SummaryHint
+			}
+			if len(normalizeProductEvidenceLines(block["line_spans"])) == 0 {
+				block["line_spans"] = flattenCandidateLineSpans(cand.SupportingMentions)
+			}
 		}
 		out = append(out, block)
 	}
@@ -1153,6 +1264,7 @@ type sceneBlocksStatusParams struct {
 	Start         time.Time
 	DurationMs    int64
 	ProcStatus    string
+	Progress      string
 	ProcErr       error
 	ModelName     string
 	PromptName    string
@@ -1183,6 +1295,27 @@ func (p *SceneBlocksProcessor) persistSceneBlocksStatus(ctx context.Context, rec
 		ErrorMsg:  errMsg,
 	}); err != nil {
 		p.Logger.Error("failed persisting scene blocks status", "record_id", rec.ID, "error", err)
+	}
+}
+
+func (p *SceneBlocksProcessor) persistSceneBlocksInProgressStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, progress string) {
+	statusRaw, err := appendSceneBlocksStatus(rec.StatusRaw, sceneBlocksStatusParams{
+		RecordID:      rec.ID,
+		FileType:      detectSceneBlocksFileType(rec),
+		InputFilename: strings.TrimSpace(rec.ResultFilename),
+		Start:         start,
+		DurationMs:    time.Since(start).Milliseconds(),
+		ProcStatus:    "in_progress",
+		Progress:      progress,
+		ModelName:     strings.TrimSpace(p.ModelName),
+		PromptName:    strings.TrimSpace(p.PromptRef),
+	})
+	if err != nil {
+		p.Logger.Warn("failed building scene blocks in-progress status", "record_id", rec.ID, "error", err)
+		return
+	}
+	if err := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{StatusRaw: statusRaw}); err != nil {
+		p.Logger.Warn("failed persisting scene blocks in-progress status", "record_id", rec.ID, "error", err)
 	}
 }
 
@@ -1234,6 +1367,9 @@ func appendSceneBlocksStatus(raw string, p sceneBlocksStatusParams) (string, err
 		"ms_used":        p.DurationMs,
 		"model_name":     p.ModelName,
 		"prompt_name":    p.PromptName,
+	}
+	if progress := strings.TrimSpace(p.Progress); progress != "" {
+		entry["progress"] = progress
 	}
 	if override := strings.TrimSpace(p.ProcStatus); override != "" {
 		entry["proc_status"] = override

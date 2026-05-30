@@ -211,7 +211,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	requestFailed := false
 	requestStopped := false
 	var firstErr error
-	s.persistPipelineStatus(ctx, evt.RecordID, "running", nil)
+	s.persistPipelineStatus(ctx, evt.RecordID, "running", "", nil)
 	defer func() {
 		status := "success"
 		if requestStopped {
@@ -219,7 +219,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		} else if requestFailed {
 			status = "failed"
 		}
-		s.persistPipelineStatus(context.Background(), evt.RecordID, status, firstErr)
+		s.persistPipelineStatus(context.Background(), evt.RecordID, status, "", firstErr)
 		if requestStopped && s.StopStore != nil {
 			_ = s.StopStore.ClearStopRequested(context.Background(), evt.RecordID)
 		}
@@ -278,6 +278,7 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 			"processor", processorName,
 		)
 	}
+	s.persistPipelineStatus(ctx, recordID, "running", processorName, nil)
 	if err := p.HandleEvent(ctx, payload); err != nil {
 		*requestFailed = true
 		if *firstErr == nil {
@@ -308,7 +309,7 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 	}
 }
 
-func (s *ControlService) persistPipelineStatus(ctx context.Context, recordID int64, procStatus string, procErr error) {
+func (s *ControlService) persistPipelineStatus(ctx context.Context, recordID int64, procStatus string, processorName string, procErr error) {
 	if s.InputStore == nil || recordID <= 0 {
 		return
 	}
@@ -319,7 +320,7 @@ func (s *ControlService) persistPipelineStatus(ctx context.Context, recordID int
 		}
 		return
 	}
-	statusRaw, err := appendPipelineStatus(rec.StatusRaw, s.now(), procStatus, procErr)
+	statusRaw, err := appendPipelineStatus(rec.StatusRaw, s.now(), procStatus, processorName, procErr)
 	if err != nil {
 		if s.Logger != nil {
 			s.Logger.Error("failed building doc pipeline status", "record_id", recordID, "error", err)
@@ -522,7 +523,7 @@ func newEventID() string {
 	return "evt-" + hex.EncodeToString(bs[:])
 }
 
-func appendPipelineStatus(raw string, now time.Time, procStatus string, procErr error) (string, error) {
+func appendPipelineStatus(raw string, now time.Time, procStatus string, processorName string, procErr error) (string, error) {
 	status := strings.ToLower(strings.TrimSpace(procStatus))
 	if status == "" {
 		status = "running"
@@ -531,6 +532,9 @@ func appendPipelineStatus(raw string, now time.Time, procStatus string, procErr 
 		"operation":   "doc_processing",
 		"start_time":  now.Format(defaultDocMetaStatusTime),
 		"proc_status": status,
+	}
+	if processorName != "" {
+		entry["doc_processor_name"] = processorName
 	}
 	if procErr != nil {
 		entry["error"] = strings.TrimSpace(procErr.Error())

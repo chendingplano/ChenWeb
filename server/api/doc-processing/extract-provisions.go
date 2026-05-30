@@ -191,11 +191,6 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		return nil
 	}
 
-	// p.Logger.Info("Before calling LLM",
-	// 	"num_blocks", len(blocks),
-	// 	"record_id", evt.RecordID,
-	// 	"filename", inputFilename)
-
 	result, err := p.extractProvisionsFromBlocksWithLLM(ctx, blocks, evt.RecordID)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
@@ -431,9 +426,11 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 		}
 		raw := payload["provisions"].([]any)
 		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(block), blockLineText(block))...)
+
 		p.Logger.Info("extract provisions end  ",
 			"record_id", record_id,
-			"# provisions", len(provisions),
+			"extracted provisions", len(raw),
+			"total provisions", len(provisions),
 			"ms_used", time.Since(callStart).Milliseconds())
 	}
 	if language == "" {
