@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -313,6 +314,11 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 	usedModel := strings.TrimSpace(p.ModelName)
 	var llmCallCount, fallbackCount, failedChunks int
 
+	p.Logger.Info("entity-relation", "total_chunks", len(chunks),
+		"model_name", p.ModelName,
+		"prompt", p.PromptRef,
+	)
+
 	for idx, chunk := range chunks {
 		if isCtxStopped(ctx) {
 			return entityRelationExtractionResult{
@@ -321,23 +327,48 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 		}
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
 		callStart := p.Now()
-		p.Logger.Info("er start",
+		p.Logger.Info("entity-relation start",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
-			"model_name", p.ModelName,
-			"prompt", p.PromptRef,
 		)
 		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
+		// p.Logger.Info("llm call", "inputText", chunkText)
 		payload, modelName, err := p.extractEntityRelationWithFallback(ctx, chunkText)
 		llmCallCount++
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != "" {
 			fallbackCount++
 		}
+		var chunkEntityCount, chunkRelationCount int
+		if err == nil {
+			usedModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedModel))
+			if payload != nil {
+				if lang := strings.TrimSpace(asString(payload["language"])); lang != "" && detectedLanguage == "unknown" {
+					detectedLanguage = lang
+				}
+				chunkEntities := normalizeEntityRows(payload["entities"], chunk.SeqNo)
+				chunkRelations := normalizeRelationRows(payload["relations"], chunk.SeqNo)
+				chunkEntityCount = len(chunkEntities)
+				chunkRelationCount = len(chunkRelations)
+				entities = append(entities, chunkEntities...)
+				relations = append(relations, chunkRelations...)
+				num_entities := fmt.Sprintf("entities:%d/%d", chunkEntityCount, len(entities))
+				num_relations := fmt.Sprintf("relations:%d/%d", chunkRelationCount, len(relations))
+				p.Logger.Info("entity-relation end  ",
+					"record_id", recordID,
+					"chunk_idx", idx,
+					"seq_no", chunk.SeqNo,
+					"entities", num_entities,
+					"relations", num_relations,
+					"ms_used", time.Since(callStart).Milliseconds(),
+				)
+			}
+		}
 		p.logLLMCall(ctx, callID, "extract_entity_relation", 1,
 			[]string{strings.TrimSpace(modelName)}, p.PromptRef,
 			payload, err, callStart, p.Now(),
-			recordID, idx, len(chunks))
+			recordID, idx, len(chunks),
+			chunkEntityCount, len(entities), chunkRelationCount, len(relations))
 		if err != nil {
 			failedChunks++
 			p.Logger.Warn("entity-relation extraction failed for chunk; skipping",
@@ -348,26 +379,6 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 			)
 			continue
 		}
-		usedModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedModel))
-		if payload == nil {
-			continue
-		}
-		if lang := strings.TrimSpace(asString(payload["language"])); lang != "" && detectedLanguage == "unknown" {
-			detectedLanguage = lang
-		}
-
-		chunkEntities := normalizeEntityRows(payload["entities"], chunk.SeqNo)
-		chunkRelations := normalizeRelationRows(payload["relations"], chunk.SeqNo)
-		entities = append(entities, chunkEntities...)
-		relations = append(relations, chunkRelations...)
-		p.Logger.Info("er end  ",
-			"record_id", recordID,
-			"chunk_idx", idx,
-			"seq_no", chunk.SeqNo,
-			"entities", len(chunkEntities),
-			"relations", len(chunkRelations),
-			"ms_used", time.Since(callStart).Milliseconds(),
-		)
 	}
 
 	p.Logger.Info("entity-relation final results",
@@ -400,6 +411,8 @@ func (p *EntityRelationProcessor) logLLMCall(
 	recordID int64,
 	chunkIdx int,
 	totalChunks int,
+	chunkEntityCount, totalEntityCount int,
+	chunkRelationCount, totalRelationCount int,
 ) {
 	var artifactStr *string
 	if payload != nil {
@@ -419,9 +432,13 @@ func (p *EntityRelationProcessor) logLLMCall(
 	}
 	progress := fmt.Sprintf("%d%% (%d/%d)", percent, chunkIdx+1, totalChunks)
 	extraInfo := map[string]any{
-		"chunk":        chunkIdx + 1,
-		"total_chunks": totalChunks,
-		"percent":      progress,
+		"chunk":                 chunkIdx + 1,
+		"total_chunks":          totalChunks,
+		"percent":               progress,
+		"chunk_entity_count":    chunkEntityCount,
+		"total_entity_count":    totalEntityCount,
+		"chunk_relation_count":  chunkRelationCount,
+		"total_relation_count":  totalRelationCount,
 	}
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
@@ -511,12 +528,16 @@ func (p *EntityRelationProcessor) extractEntityRelationWithFallback(ctx context.
 		return nil, fallbackModelName, fmt.Errorf("(MID_26052720) primary entity-relation extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
-	p.Logger.Warn("primary entity-relation extraction failed; retrying fallback model",
-		"primary_model", primaryModelName,
-		"fallback_model", fallbackModelName,
-		"error", err,
-		"prompt_name", p.PromptRef,
-	)
+	if ApiUtils.IsEmptyJSONResponse(err) {
+		p.Logger.Info("primary timeout. Try the fallback")
+	} else {
+		p.Logger.Warn("primary entity-relation extraction failed; retrying fallback model",
+			"primary_model", primaryModelName,
+			"fallback_model", fallbackModelName,
+			"error", err,
+			"prompt_name", p.PromptRef,
+		)
+	}
 
 	fallbackPayload, fallbackErr := p.extractEntityRelationPayload(ctx, inputText, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {

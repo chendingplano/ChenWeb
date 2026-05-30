@@ -393,7 +393,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		)
 		callID := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), enrichIdx)
 		userPrompt := buildSemanticProjectionEnrichUserPrompt(cand)
-		p.Logger.Info("llm call", "inputText", userPrompt)
+		// p.Logger.Info("llm call", "inputText", userPrompt)
 		payload, err := p.extractEnrichPayload(ctx, userPrompt)
 		llmCallCount++
 		if err == nil {
