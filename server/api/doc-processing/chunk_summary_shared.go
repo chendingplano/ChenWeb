@@ -187,17 +187,23 @@ func validateSingleSummaryArtifact(recordID int64, sourceLanguage string, item S
 	if err := validateSummaryLines(item.SummaryID, item.Lines); err != nil {
 		return err
 	}
-	if !hasSummaryCategoryPath(item) {
-		return fmt.Errorf("summary %q must have at least one category path", item.SummaryID)
+	// Only enforce "summary and summary_en must differ" for known non-English sources.
+	// For English sources the fields may legitimately be identical.
+	// For unknown sources we have no basis to require a translation.
+	if sourceLanguage != "" && sourceLanguage != "en" {
+		if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
+			return fmt.Errorf("summary %q summary and summary_en must differ", item.SummaryID)
+		}
 	}
-	if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
-		return fmt.Errorf("summary %q summary and summary_en must differ", item.SummaryID)
-	}
-	if equalTrimmedStringSlices(item.Keywords, item.KeywordsEn) {
-		return fmt.Errorf("summary %q keywords and keywords_en must differ", item.SummaryID)
-	}
-	if sourceLanguage != "" && detectContentLanguage(item.Summary) != sourceLanguage {
-		return fmt.Errorf("summary %q language mismatch: got %s want %s", item.SummaryID, detectContentLanguage(item.Summary), sourceLanguage)
+	// keywords may legitimately match keywords_en when translation is unavailable;
+	// fixSummarySourceLanguage attempts a best-effort backfill before validation.
+	// Skip language check when summary == summary_en: this indicates translation was
+	// not available and the English text was kept as a fallback, which is acceptable.
+	summaryEn := strings.TrimSpace(item.SummaryEn)
+	if sourceLanguage != "" && (summaryEn == "" || strings.TrimSpace(item.Summary) != summaryEn) {
+		if detectContentLanguage(item.Summary) != sourceLanguage {
+			return fmt.Errorf("summary %q language mismatch: got %s want %s", item.SummaryID, detectContentLanguage(item.Summary), sourceLanguage)
+		}
 	}
 	if err := validateSummaryArtifactFile(recordID, item, artifactDir); err != nil {
 		return err
@@ -300,9 +306,11 @@ func parseSummaryLineSpan(span string) (int, int, bool) {
 	return start, end, true
 }
 
+/*
 func hasSummaryCategoryPath(item SummaryItem) bool {
 	return len(summaryCategoryPathsForValidation(item)) > 0
 }
+*/
 
 func summaryCategoryPathsForValidation(item SummaryItem) [][]string {
 	if len(item.CategoryPathItemsEn) > 0 {

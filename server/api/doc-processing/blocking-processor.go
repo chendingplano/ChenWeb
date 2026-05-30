@@ -85,6 +85,16 @@ func BlockBufferFromContext(ctx context.Context) *BlockBuffer {
 	return h.buffer
 }
 
+func clearBlockBufferInContext(ctx context.Context) {
+	h, _ := ctx.Value(blockBufferCtxKey{}).(*blockBufferHolder)
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.buffer = nil
+}
+
 // --- context-based chunk buffer sharing ---
 
 type chunkBufferCtxKey struct{}

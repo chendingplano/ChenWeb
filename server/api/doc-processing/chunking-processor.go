@@ -79,7 +79,7 @@ func (p *ChunkingProcessor) logSummary(ctx context.Context, recordID *int64, sta
 		ModelNames:    docProcSummaryModelNames(p.Service),
 		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
 		RecordID:      recordID,
-		EntryType:     "doc_proc_summary",
+		EntryType:     "chunking",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),

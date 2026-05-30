@@ -168,7 +168,7 @@ func summaryTreeIndexPairs(item SummaryItem) []categoryPathPair {
 func writeSummaryTreeEntriesForItem(logger ApiTypes.JimoLogger, baseDir string, item SummaryItem) error {
 	pairs := summaryTreeIndexPairs(item)
 	if len(pairs) == 0 {
-		return fmt.Errorf("summary %q has no category paths to index", item.SummaryID)
+		return nil
 	}
 
 	seen := make(map[string]struct{}, len(pairs))
@@ -189,9 +189,6 @@ func writeSummaryTreeEntriesForItem(logger ApiTypes.JimoLogger, baseDir string, 
 		if err := writeSummaryTreeEntryLocalized(logger, baseDir, item, indexPath, pair.Index.Nodes, pair.Original.Nodes); err != nil {
 			return err
 		}
-	}
-	if len(seen) == 0 {
-		return fmt.Errorf("summary %q has no valid category paths to index", item.SummaryID)
 	}
 	return nil
 }

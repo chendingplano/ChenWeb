@@ -610,6 +610,10 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, 0, start, err)
 		return err
 	}
+	if err := validateChunksNonEmpty(chunks, "built chunks"); err != nil {
+		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, 0, start, err)
+		return err
+	}
 	storeChunksInContext(ctx, chunks)
 
 	stagingName := strings.TrimSpace(rec.StagingFilename)
@@ -765,9 +769,9 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 		topicsSoFar += len(chunkTopics)
 		chunkProgress := extractTopicsProgressFull(chunk.SeqNo, totalChunks)
 
-		s.Logger.Info("(MID_26052803) extract_topics: chunk done, updating status progress",
-			"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "total_chunks", totalChunks,
-			"progress", chunkProgress, "num_topics", len(chunkTopics), "topics_so_far", topicsSoFar)
+		// s.Logger.Info("(MID_26052803) extract_topics: chunk done, updating status progress",
+		// 	"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "total_chunks", totalChunks,
+		// 	"progress", chunkProgress, "num_topics", len(chunkTopics), "topics_so_far", topicsSoFar)
 		if updatedRaw, uErr := updateTopicChunkStatusProgress(rec.StatusRaw, chunkProgress); uErr == nil {
 			if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, updatedRaw, nil); updateErr == nil {
 				rec.StatusRaw = updatedRaw
@@ -777,8 +781,8 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 			}
 		}
 
-		s.Logger.Info("(MID_26052805) extract_topics: inserting doc_proc_logs record",
-			"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "num_topics", len(chunkTopics))
+		// s.Logger.Info("(MID_26052805) extract_topics: inserting doc_proc_logs record",
+		// 	"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "num_topics", len(chunkTopics))
 		s.logExtractTopicsChunk(ctx, rec.ID, chunk, totalChunks, chunkTopics, topicsSoFar, chunkMSUsed, chunkProgress, usedFallback)
 
 		topics = append(topics, chunkTopics...)
@@ -1003,6 +1007,12 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 			return err
 		}
 	}
+	var fixErr error
+	allSummaries, fixErr = s.fixSummarySourceLanguage(ctx, rec.SourceLanguage, allSummaries)
+	if fixErr != nil {
+		s.failAndPersistSummaries(ctx, rec, inputFilename, start, fixErr)
+		return fixErr
+	}
 	if err := validateSummaryArtifacts(rec.ID, rec.SourceLanguage, allSummaries, s.ChunkDir, s.ArtifactWebDir); err != nil {
 		err = fmt.Errorf("(MID_26052701) summary sanity check failed: %w", err)
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
@@ -1139,7 +1149,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 			ExtraInfoJSON: extraJSON,
 			Errors:        errStr,
 			MSUsed:        int64Ptr(time.Since(startTime).Milliseconds()),
-		}, "MID-26052814"); err != nil {
+		}, "MID-26052850"); err != nil {
 			s.Logger.Warn("failed to write generate_summary log", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
 		}
 	}
@@ -1157,6 +1167,11 @@ func (s *FixedSizeChunkingService) generateSummary(
 	}
 	if s.Extractor == nil {
 		err := errors.New("(MID_26042904) summary extractor is nil")
+		logSummaryCall(err)
+		return summaryGenerateResult{}, err
+	}
+	if len(lines) == 0 && len(children) == 0 {
+		err := fmt.Errorf("(MID_26053001) empty summary input for level %d seq %d", level, seqNo)
 		logSummaryCall(err)
 		return summaryGenerateResult{}, err
 	}
@@ -1205,8 +1220,10 @@ func (s *FixedSizeChunkingService) generateSummary(
 	rawPath := extractCategoryPathFromLLM(parsed)
 	path, reason := normalizeAndValidateTopicCategoryPath(rawPath, defaultSummaryTreeFallbackTopicType)
 	if reason != "" {
-		s.Logger.Warn("(MID_26042906) invalid category path in summary response; using empty path",
-			"level", level, "seq", seqNo, "reason", reason, "raw_path", rawPath)
+		if reason != "missing-category" {
+			s.Logger.Warn("(MID_26042906) invalid category path in summary response; using empty path",
+				"level", level, "seq", seqNo, "reason", reason, "raw_path", rawPath)
+		}
 		path = nil
 	}
 	categoryPathItems := extractCategoryPathDetailFromLLM(parsed)
@@ -1275,6 +1292,35 @@ func docProcJSONOrNil(v any) *string {
 	s := string(bs)
 	return &s
 }
+
+const summaryTextTranslationPrompt = `You are a translation engine.
+
+Translate the provided English summary text to the specified target language.
+
+Rules:
+- Translate accurately, preserving meaning, technical terms, and nuance.
+- Do not translate proper nouns or domain-specific abbreviations unless a widely accepted translation exists.
+- Return strict JSON only.
+
+Output schema:
+{
+  "summary": "translated text"
+}`
+
+const summaryKeywordsTranslationPrompt = `You are a translation engine.
+
+Translate the provided English keywords to the specified target language.
+
+Rules:
+- Preserve keyword meaning and keep each keyword concise.
+- Preserve domain-specific terms and abbreviations unless a well-known translation exists.
+- Return the same number of keywords in the same order.
+- Return strict JSON only.
+
+Output schema:
+{
+  "keywords": ["translated keyword"]
+}`
 
 const summaryCategoryTranslationPrompt = `You are a translation engine.
 
@@ -1350,6 +1396,166 @@ func (s *FixedSizeChunkingService) translateSummaryCategoryPaths(ctx context.Con
 		return nil, errors.New("(MID_26052705) translation returned empty category_paths_en")
 	}
 	return translated, nil
+}
+
+func summaryLanguageName(langCode string) string {
+	switch langCode {
+	case "zh":
+		return "Chinese (Simplified)"
+	default:
+		return langCode
+	}
+}
+
+func (s *FixedSizeChunkingService) translateSummaryText(ctx context.Context, targetLang, text string) (string, error) {
+	if !s.TranslationEnabled || strings.TrimSpace(s.TranslationModelName) == "" {
+		return "", fmt.Errorf("(MID_26052901) TRANSLATION_MODEL_NAME is required to translate summary to %q", targetLang)
+	}
+	if s.Extractor == nil {
+		return "", errors.New("(MID_26052902) summary extractor is nil")
+	}
+	inputPayload, err := json.Marshal(map[string]any{
+		"target_language": targetLang,
+		"text":            text,
+	})
+	if err != nil {
+		return "", err
+	}
+	in := llmclients.JSONExtractionInput{
+		PromptText: summaryTextTranslationPrompt,
+		ModelName:  s.TranslationModelName,
+		InputText:  string(inputPayload),
+	}
+	var parsed map[string]any
+	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
+		result, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, summaryTextTranslationContract())
+		if extractErr != nil {
+			return "", extractErr
+		}
+		if result != nil {
+			parsed = result.Parsed
+		}
+	} else {
+		parsed, err = s.Extractor.ExtractJSON(ctx, in)
+		if err != nil {
+			return "", err
+		}
+	}
+	translated := sanitizeTopicText(asString(parsed["summary"]))
+	if translated == "" {
+		return "", fmt.Errorf("(MID_26052903) translation to %q returned empty summary", targetLang)
+	}
+	return translated, nil
+}
+
+func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context, targetLang string, keywords []string) ([]string, error) {
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+	if !s.TranslationEnabled || strings.TrimSpace(s.TranslationModelName) == "" {
+		return nil, fmt.Errorf("(MID_26053001) TRANSLATION_MODEL_NAME is required to translate summary keywords to %q", targetLang)
+	}
+	if s.Extractor == nil {
+		return nil, errors.New("(MID_26053002) summary extractor is nil")
+	}
+	inputPayload, err := json.Marshal(map[string]any{
+		"target_language": targetLang,
+		"keywords":        keywords,
+	})
+	if err != nil {
+		return nil, err
+	}
+	in := llmclients.JSONExtractionInput{
+		PromptText: summaryKeywordsTranslationPrompt,
+		ModelName:  s.TranslationModelName,
+		InputText:  string(inputPayload),
+	}
+	var parsed map[string]any
+	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
+		result, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, summaryKeywordsTranslationContract())
+		if extractErr != nil {
+			return nil, extractErr
+		}
+		if result != nil {
+			parsed = result.Parsed
+		}
+	} else {
+		parsed, err = s.Extractor.ExtractJSON(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+	}
+	translated := compactTopicArray(parsed["keywords"])
+	if len(translated) == 0 {
+		return nil, fmt.Errorf("(MID_26053003) translation to %q returned empty keywords", targetLang)
+	}
+	return translated, nil
+}
+
+// fixSummarySourceLanguage translates Summary to the source language for any item
+// where Summary and SummaryEn are identical (indicating the LLM returned the same
+// English text for both), and also translates Keywords when Keywords and
+// KeywordsEn are still identical English fallbacks. Translation failures are logged
+// as warnings and the English text is kept as fallback — this method never returns
+// an error.
+func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context, sourceLanguage string, summaries []SummaryItem) ([]SummaryItem, error) {
+	normalizedLang := normalizeSummarySourceLanguage(sourceLanguage)
+	if normalizedLang == "" || normalizedLang == "en" {
+		return summaries, nil
+	}
+	langName := summaryLanguageName(normalizedLang)
+	for i, item := range summaries {
+		originalSummary := item.Summary
+		originalKeywords := append([]string(nil), item.Keywords...)
+		changed := false
+		summaryEn := strings.TrimSpace(item.SummaryEn)
+		if summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
+			translated, err := s.translateSummaryText(ctx, langName, summaryEn)
+			if err != nil {
+				s.Logger.Warn("(MID_26052904) failed to translate summary to source language; keeping English",
+					"summary_id", item.SummaryID,
+					"target_lang", normalizedLang,
+					"error", err,
+				)
+			} else {
+				summaries[i].Summary = translated
+				changed = true
+				s.Logger.Info("translated summary to source language",
+					"summary_id", item.SummaryID,
+					"target_lang", normalizedLang,
+				)
+			}
+		}
+		if len(item.KeywordsEn) > 0 && equalTrimmedStringSlices(item.Keywords, item.KeywordsEn) {
+			translatedKeywords, err := s.translateSummaryKeywords(ctx, langName, item.KeywordsEn)
+			if err != nil {
+				s.Logger.Warn("(MID_26053004) failed to translate summary keywords to source language; keeping English",
+					"summary_id", item.SummaryID,
+					"target_lang", normalizedLang,
+					"error", err,
+				)
+			} else {
+				summaries[i].Keywords = translatedKeywords
+				changed = true
+				s.Logger.Info("translated summary keywords to source language",
+					"summary_id", item.SummaryID,
+					"target_lang", normalizedLang,
+				)
+			}
+		}
+		if !changed {
+			continue
+		}
+		if _, err := writeSummaryFile(s.ChunkDir, item.RecordID, summaries[i]); err != nil {
+			s.Logger.Warn("(MID_26052905) failed to re-write summary file after translation; keeping original",
+				"summary_id", item.SummaryID,
+				"error", err,
+			)
+			summaries[i].Summary = originalSummary
+			summaries[i].Keywords = originalKeywords
+		}
+	}
+	return summaries, nil
 }
 
 func summaryCategoryPathsLookEnglish(entries []CategoryPathEntry) bool {
@@ -1808,6 +2014,9 @@ func BuildChunks(lines []Line, opts ChunkOptions) ([]Chunk, error) {
 		seq++
 	}
 
+	if err := validateChunksNonEmpty(chunks, "built chunks"); err != nil {
+		return nil, err
+	}
 	return chunks, nil
 }
 
@@ -2270,11 +2479,14 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 			return nil
 		}
 		chunkLines := make([]MarkedLine, 0, len(overlap)+len(regular))
+		missingOverlap := make([]int, 0, len(overlap))
+		missingRegular := make([]int, 0, len(regular))
 		for _, lineNo := range overlap {
 			line, ok := lineByNo[lineNo]
 			if !ok {
 				// Skip lines absent from the filtered input (e.g. TOC lines recorded
 				// in artifacts created before TOC filtering was enforced in BuildChunks).
+				missingOverlap = append(missingOverlap, lineNo)
 				continue
 			}
 			chunkLines = append(chunkLines, MarkedLine{Line: line, Mark: "o"})
@@ -2284,9 +2496,22 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 			if !ok {
 				// Skip lines absent from the filtered input (e.g. TOC lines recorded
 				// in artifacts created before TOC filtering was enforced in BuildChunks).
+				missingRegular = append(missingRegular, lineNo)
 				continue
 			}
 			chunkLines = append(chunkLines, MarkedLine{Line: line, Mark: "n"})
+		}
+		if len(chunkLines) == 0 {
+			return fmt.Errorf(
+				"(MID_26053002) chunk artifact %s for record %d seq %d references only missing/filtered lines: overlap=%s regular=%s missing_overlap=%s missing_regular=%s",
+				fileName,
+				recordID,
+				seqNo,
+				formatLineNumberRanges(overlap),
+				formatLineNumberRanges(regular),
+				formatLineNumberRanges(missingOverlap),
+				formatLineNumberRanges(missingRegular),
+			)
 		}
 		chunks = append(chunks, Chunk{SeqNo: seqNo, Lines: chunkLines})
 		seqNo++
@@ -2326,7 +2551,19 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 	if err := appendChunk(); err != nil {
 		return nil, err
 	}
+	if err := validateChunksNonEmpty(chunks, "loaded chunks"); err != nil {
+		return nil, err
+	}
 	return chunks, nil
+}
+
+func validateChunksNonEmpty(chunks []Chunk, source string) error {
+	for _, chunk := range chunks {
+		if len(chunk.Lines) == 0 {
+			return fmt.Errorf("(MID_26053003) %s contain empty chunk seq %d", source, chunk.SeqNo)
+		}
+	}
+	return nil
 }
 
 func parseLineNumberRanges(raw string) ([]int, error) {

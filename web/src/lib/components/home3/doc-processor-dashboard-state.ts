@@ -22,6 +22,15 @@ export type StageInfo = {
 	entry?: StatusEntry;
 };
 
+export const ALWAYS_VISIBLE_PIPELINE_STAGE_IDS = [
+	'staged',
+	'parsing',
+	'converting',
+	'static_analyzer',
+	'chunking',
+	'extract_doc_metadata'
+];
+
 // 'operations' lists all status operation names this stage may emit, including legacy aliases.
 export const PIPELINE_STAGES = [
 	{ id: 'staged', label: 'Staged', operations: [] as string[] },
@@ -36,9 +45,24 @@ export const PIPELINE_STAGES = [
 	{ id: 'generate_topics', label: 'Generate Topics', operations: ['generate_topics'] },
 	{ id: 'generate_scene_blocks', label: 'Generate Scene Blocks', operations: ['generate_scene_blocks', 'extract_scene_blocks'] },
 	{ id: 'extract_products', label: 'Extract Products', operations: ['extract_products'] },
-	{ id: 'extract_semantic_projections', label: 'Extract Semantic Projection', operations: ['extract_semantic_projections'] },
+	{
+		id: 'extract_semantic_projections',
+		label: 'Extract Semantic Projection',
+		operations: [
+			'extract_semantic_projections',
+			'extract-semantic-projections',
+			'extract-semantic-projection'
+		]
+	},
 	{ id: 'extract_structured_knowledge', label: 'Extract Struct. Knowledge', operations: ['extract_structured_knowledges'] },
-	{ id: 'extract_entity_relation', label: 'Extract Entity/Relation', operations: ['extract_entity_relation'] }
+	{
+		id: 'extract_entity_relation',
+		label: 'Extract Entity/Relation',
+		operations: [
+			'extract_entity_relation',
+			'extract-entity-relation'
+		]
+	}
 ];
 
 // All doc-processor-managed stages (indices 3+). Used to map status entries to UI stages.
@@ -89,6 +113,12 @@ export function computeStages(record: PipelineRecord): StageInfo[] {
 		const { status, entry } = stageFor(stage.operations);
 		return { id: stage.id, label: stage.label, status, entry };
 	});
+}
+
+export function visibleStages(stages: StageInfo[], requiredProcessorIds?: string[]): StageInfo[] {
+	if (!requiredProcessorIds?.length) return stages;
+	const visibleIds = new Set([...ALWAYS_VISIBLE_PIPELINE_STAGE_IDS, ...requiredProcessorIds]);
+	return stages.filter((stage) => visibleIds.has(stage.id));
 }
 
 // expectedProcessorIds: the set of stage IDs that must reach a final status for the record

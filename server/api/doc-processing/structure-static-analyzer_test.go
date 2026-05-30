@@ -935,3 +935,55 @@ func TestStaticAnalyzer_WriteCorrectedArtifact_LeavesExistingOriginUntouched(t *
 		t.Fatalf("expected output write log, got %#v", logger.infos)
 	}
 }
+
+func TestStaticAnalyzer_WriteCorrectedArtifact_RemovesStaleChunksBesideInputFile(t *testing.T) {
+	tmp := t.TempDir()
+	inputPath := filepath.Join(tmp, "ocr_rslt_166_opendata.txt")
+	chunkPath := filepath.Join(tmp, "std_33830_opendata.chunks")
+	keepPath := filepath.Join(tmp, "std_33830_opendata.topics")
+
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tF\t12\t[0,0,1,1]\tCurrent line\n"), 0o644); err != nil {
+		t.Fatalf("write input file: %v", err)
+	}
+	if err := os.WriteFile(chunkPath, []byte("overlap: []\nlines: [1]\n"), 0o644); err != nil {
+		t.Fatalf("write chunk file: %v", err)
+	}
+	if err := os.WriteFile(keepPath, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write keep file: %v", err)
+	}
+
+	logger := &fakeLogger{}
+	p := &StaticAnalyzerProcessor{
+		OverrideOrigin: true,
+		Logger:         logger,
+	}
+	out := staticAnalyzeResult{
+		Lines: []staticInputLine{
+			{
+				LineNo:           1,
+				PageNo:           1,
+				OriginalLineType: "heading-1",
+				Font:             "F",
+				FontSize:         "12",
+				Coordinate:       "[0,0,1,1]",
+				Content:          "Updated line",
+			},
+		},
+		CorrectedType: map[int]string{1: "unchanged"},
+		OutputChanged: true,
+	}
+
+	if err := p.writeCorrectedArtifact(166, filepath.Base(inputPath), inputPath, out); err != nil {
+		t.Fatalf("writeCorrectedArtifact: %v", err)
+	}
+
+	if _, err := os.Stat(chunkPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("chunk file exists=%v, want removed", err == nil)
+	}
+	if _, err := os.Stat(keepPath); err != nil {
+		t.Fatalf("keep file stat: %v", err)
+	}
+	if _, ok := findInfoLog(logger.infos, "removed stale chunk artifact"); !ok {
+		t.Fatalf("expected stale chunk removal log, got %#v", logger.infos)
+	}
+}

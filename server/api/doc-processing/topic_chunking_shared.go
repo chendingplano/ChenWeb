@@ -13,6 +13,7 @@ import (
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 const DefaultChunkTopicModelName = "gpt-5-4-mini"
@@ -172,7 +173,13 @@ func writeCombinedChunkFile(chunkDir string, recordID int64, fileName string, ch
 		b.WriteString(formatLineNumberRanges(regularLines))
 		b.WriteByte('\n')
 	}
-	if err := os.WriteFile(path, []byte(strings.TrimRight(b.String(), "\n")), 0o644); err != nil {
+	content := strings.TrimRight(b.String(), "\n")
+	loggerutil.CreateDefaultLogger("MID_26053003").Info("chunk artifact content before write",
+		"record_id", recordID,
+		"path", path,
+		"content", content,
+	)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -492,10 +499,12 @@ func normalizeExtractedTopics(rawTopics []any, seqStart int, logger ApiTypes.Jim
 		categoryPath, categoryFallbackReason := normalizeAndValidateTopicCategoryPath(extractCategoryPathFromLLM(m), topicType)
 
 		if categoryFallbackReason != "" {
-			if kp := keywordCategoryPath(topicKeywords); kp != nil {
-				categoryPath = kp
+			if categoryFallbackReason != "missing-category" {
+				if kp := keywordCategoryPath(topicKeywords); kp != nil {
+					categoryPath = kp
+				}
 			}
-			if logger != nil {
+			if logger != nil && categoryFallbackReason != "missing-category" {
 				logger.Warn("topic category fallback applied",
 					logScopeName, logScopeValue,
 					"record_id", recordID,

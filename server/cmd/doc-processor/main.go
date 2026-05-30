@@ -19,6 +19,7 @@ import (
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
 type chunkPhaseService interface {
@@ -53,6 +54,54 @@ func buildChunkPhaseProcessors(
 		docprocessing.NewGenerateSummariesProcessor(inputStore, fixedChunkSvc, logger),
 		docprocessing.NewGenerateTopicsProcessor(inputStore, fixedChunkSvc, logger),
 	}
+}
+
+func normalizeProcessorName(raw string) string {
+	name := strings.ToLower(strings.TrimSpace(raw))
+	name = strings.ReplaceAll(name, "-", "_")
+	switch name {
+	case "extract_metadata":
+		return "extract_doc_metadata"
+	default:
+		return name
+	}
+}
+
+func configuredProcessorNames() []string {
+	return viper.GetStringSlice("doc-processing.required_processors")
+}
+
+func filterConfiguredProcessors(
+	processors []docprocessing.Processor,
+	required []string,
+) []docprocessing.Processor {
+	mandatory := map[string]struct{}{
+		"static_analyzer":      {},
+		"chunking":             {},
+		"extract_doc_metadata": {},
+	}
+	enabled := make(map[string]struct{}, len(required))
+	for _, name := range required {
+		if normalized := normalizeProcessorName(name); normalized != "" {
+			enabled[normalized] = struct{}{}
+		}
+	}
+
+	filtered := make([]docprocessing.Processor, 0, len(processors))
+	for _, p := range processors {
+		if p == nil {
+			continue
+		}
+		name := normalizeProcessorName(p.Name())
+		if _, ok := mandatory[name]; ok {
+			filtered = append(filtered, p)
+			continue
+		}
+		if _, ok := enabled[name]; ok {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
 }
 
 func main() {
@@ -136,7 +185,7 @@ func main() {
 		Now:                    time.Now,
 		MaxDocProcessPipelines: docprocessing.MaxDocProcessPipelinesFromEnv(),
 		BlockingProcessor:      docprocessing.NewBlockingProcessor(inputStore, logger),
-		Processors: []docprocessing.Processor{
+		Processors: filterConfiguredProcessors([]docprocessing.Processor{
 			// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
 			docprocessing.NewStaticAnalyzerProcessor(inputStore, logger),
 			phaseProcessors[0],
@@ -150,7 +199,12 @@ func main() {
 			docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
 			docprocessing.NewSceneBlocksProcessor(inputStore, docprocessing.SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, sceneBlocksLLMClient, logger),
 			// docprocessing.NewProductsProcessor(inputStore, docprocessing.ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, productsLLMClient, logger),
-		},
+		}, configuredProcessorNames()),
+	}
+
+	processorNames := []string{"blocking"}
+	for _, p := range control.Processors {
+		processorNames = append(processorNames, p.Name())
 	}
 
 	go func() {
@@ -169,7 +223,8 @@ func main() {
 		"chunking_method", docprocessing.ChunkingMethodFixed,
 		"generate_topics_method", docprocessing.ChunkingMethodTopic,
 		"max_doc_process_pipelines", control.MaxDocProcessPipelines,
-		"processors", []string{"blocking", "structure_analyzer", "static_analyzer", "chunking", "generate_summaries", "generate_topics", "extract_doc_metadata", "extract_metrics", "extract_provisions", "generate_scene_blocks", "extract_semantic_projections", "extract_structured_knowledge", "extract_entity_relation", "extract_products"},
+		"configured_required_processors", configuredProcessorNames(),
+		"processors", processorNames,
 		"started_at", time.Now().Format(time.RFC3339),
 	)
 

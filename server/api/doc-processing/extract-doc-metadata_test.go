@@ -172,9 +172,25 @@ func TestResolveInputFilePath(t *testing.T) {
 		t.Fatalf("path=%q, want %q", got2, "/tmp/out/custom.txt")
 	}
 
+	got2b, err := ResolveInputFilePath(LineFileGeneratedEvent{RecordID: 1, Filename: "custom.origin"}, "/tmp/out/ocr_rslt_101.json", "opendata", "/tmp/staging/source.pdf")
+	if err != nil {
+		t.Fatalf("ResolveInputFilePath relative origin: %v", err)
+	}
+	if got2b != "/tmp/out/custom.txt" {
+		t.Fatalf("path=%q, want %q", got2b, "/tmp/out/custom.txt")
+	}
+
 	_, err = ResolveInputFilePath(LineFileGeneratedEvent{RecordID: 1, Filename: "sub/rel.txt"}, "/tmp/out/ocr_rslt_101.json", "opendata", "/tmp/staging/source.pdf")
 	if err == nil {
 		t.Fatalf("expected relative path with separator to fail")
+	}
+
+	gotAbsOrigin, err := ResolveInputFilePath(LineFileGeneratedEvent{RecordID: 1, Filename: "/tmp/out/custom.origin"}, "/tmp/out/ocr_rslt_101.json", "opendata", "/tmp/staging/source.pdf")
+	if err != nil {
+		t.Fatalf("ResolveInputFilePath absolute origin: %v", err)
+	}
+	if gotAbsOrigin != "/tmp/out/custom.txt" {
+		t.Fatalf("path=%q, want %q", gotAbsOrigin, "/tmp/out/custom.txt")
 	}
 
 	t.Setenv("DATA_HOME_DIR", "/tmp/repo")

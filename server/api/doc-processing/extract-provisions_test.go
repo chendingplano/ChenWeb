@@ -765,6 +765,7 @@ func TestControlService_ChunkingOperationDoesNotSelectProvisions(t *testing.T) {
 	got := make([]string, 0, 3)
 	svc := &ControlService{
 		Processors: []Processor{
+			fakeProcessor{name: "static_analyzer", calls: &got},
 			fakeProcessor{name: "chunking", calls: &got},
 			fakeProcessor{name: "extract_provisions", calls: &got},
 		},
@@ -772,7 +773,7 @@ func TestControlService_ChunkingOperationDoesNotSelectProvisions(t *testing.T) {
 
 	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1","operation":"chunking"}`))
 
-	want := []string{"chunking"}
+	want := []string{"static_analyzer", "chunking"}
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v, want %v", got, want)
 	}

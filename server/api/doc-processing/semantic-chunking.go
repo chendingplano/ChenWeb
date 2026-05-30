@@ -1223,7 +1223,7 @@ func normalizeAndValidateTopicCategoryPath(raw []string, topicType string) ([]st
 		normalized = append(normalized, s)
 	}
 	if len(normalized) == 0 {
-		return fallbackCategoryPath(topicType), "missing-category"
+		return nil, "missing-category"
 	}
 	if len(normalized) > maxCategoryDepth {
 		normalized = normalized[:maxCategoryDepth]

@@ -244,6 +244,9 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			return nil
 		}
 		s.runSingleProcessor(ctx, payload, p, evt.RecordID, &requestFailed, &firstErr)
+		if !requestFailed && canonicalOperationName(p.Name()) == "static_analyzer" {
+			clearBlockBufferInContext(ctx)
+		}
 		// If a processor failed due to a user stop, treat it as stopped, not failed.
 		if requestFailed && isCtxStopped(ctx) {
 			requestFailed = false
@@ -615,10 +618,15 @@ func (s *ControlService) selectProcessors(ops []string) []Processor {
 		available[canonicalOperationName(p.Name())] = p
 	}
 
-	selected := make([]Processor, 0, len(ops))
-	for _, op := range ops {
+	expanded := expandProcessorDependencies(ops)
+	selected := make([]Processor, 0, len(expanded))
+	seen := make(map[string]struct{}, len(expanded))
+	for _, op := range expanded {
 		key := canonicalOperationName(op)
 		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
 			continue
 		}
 		p, ok := available[key]
@@ -628,7 +636,40 @@ func (s *ControlService) selectProcessors(ops []string) []Processor {
 			}
 			continue
 		}
+		seen[key] = struct{}{}
 		selected = append(selected, p)
 	}
 	return selected
+}
+
+func expandProcessorDependencies(ops []string) []string {
+	if len(ops) == 0 {
+		return nil
+	}
+	expanded := make([]string, 0, len(ops)+2)
+	appendOnce := func(op string) {
+		key := canonicalOperationName(op)
+		if key == "" {
+			return
+		}
+		for _, existing := range expanded {
+			if canonicalOperationName(existing) == key {
+				return
+			}
+		}
+		expanded = append(expanded, key)
+	}
+
+	for _, raw := range ops {
+		op := canonicalOperationName(raw)
+		switch op {
+		case "chunking":
+			appendOnce("static_analyzer")
+		case "generate_summaries", "generate_topics":
+			appendOnce("static_analyzer")
+			appendOnce("chunking")
+		}
+		appendOnce(op)
+	}
+	return expanded
 }

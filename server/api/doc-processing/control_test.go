@@ -36,10 +36,54 @@ func (f fakeProcessor) HandleEvent(_ context.Context, _ []byte) error {
 	return f.retErr
 }
 
+type blockBufferSettingProcessor struct {
+	name  string
+	calls *[]string
+}
+
+func (p blockBufferSettingProcessor) Name() string { return p.name }
+
+func (p blockBufferSettingProcessor) HandleEvent(ctx context.Context, _ []byte) error {
+	if p.calls != nil {
+		*p.calls = append(*p.calls, p.name)
+	}
+	h, _ := ctx.Value(blockBufferCtxKey{}).(*blockBufferHolder)
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	h.buffer = &BlockBuffer{
+		Blocks: []Block{{
+			Index: 1,
+			Lines: []BlockLine{{Flag: "n", LineNumber: 430, PageNumber: 1, LineType: "paragraph", Content: "stale"}},
+		}},
+	}
+	h.mu.Unlock()
+	return nil
+}
+
+type blockBufferExpectNilProcessor struct {
+	name  string
+	calls *[]string
+}
+
+func (p blockBufferExpectNilProcessor) Name() string { return p.name }
+
+func (p blockBufferExpectNilProcessor) HandleEvent(ctx context.Context, _ []byte) error {
+	if p.calls != nil {
+		*p.calls = append(*p.calls, p.name)
+	}
+	if buf := BlockBufferFromContext(ctx); buf != nil {
+		return errors.New("expected cleared block buffer after static analyzer")
+	}
+	return nil
+}
+
 func TestControlService_UsesOperationOrder(t *testing.T) {
 	got := make([]string, 0, 3)
 	svc := &ControlService{
 		Processors: []Processor{
+			fakeProcessor{name: "static_analyzer", calls: &got},
 			fakeProcessor{name: "chunking", calls: &got},
 			fakeProcessor{name: "extract_doc_metadata", calls: &got},
 			fakeProcessor{name: "extract_metrics", calls: &got},
@@ -49,7 +93,7 @@ func TestControlService_UsesOperationOrder(t *testing.T) {
 	payload := []byte(`{"record_id":"1","operation":["extract_metrics","chunking"]}`)
 	svc.HandleEvent(context.Background(), payload)
 
-	want := []string{"extract_metrics", "chunking"}
+	want := []string{"extract_metrics", "static_analyzer", "chunking"}
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v, want %v", got, want)
 	}
@@ -87,6 +131,7 @@ func TestControlService_RunsGenerateSummariesWhenExplicitlyRequestedWithChunking
 	got := make([]string, 0, 3)
 	svc := &ControlService{
 		Processors: []Processor{
+			fakeProcessor{name: "static_analyzer", calls: &got},
 			fakeProcessor{name: "chunking", calls: &got},
 			fakeProcessor{name: "generate_summaries", calls: &got},
 			fakeProcessor{name: "extract_metrics", calls: &got},
@@ -96,7 +141,55 @@ func TestControlService_RunsGenerateSummariesWhenExplicitlyRequestedWithChunking
 	payload := []byte(`{"record_id":"1","operation":["chunking","generate_summaries","extract_metrics"]}`)
 	svc.HandleEvent(context.Background(), payload)
 
-	want := []string{"chunking", "generate_summaries", "extract_metrics"}
+	want := []string{"static_analyzer", "chunking", "generate_summaries", "extract_metrics"}
+	if len(got) != len(want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("calls[%d]=%q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestControlService_GenerateSummariesRequestRunsDependenciesFirst(t *testing.T) {
+	got := make([]string, 0, 3)
+	svc := &ControlService{
+		Processors: []Processor{
+			fakeProcessor{name: "static_analyzer", calls: &got},
+			fakeProcessor{name: "chunking", calls: &got},
+			fakeProcessor{name: "generate_summaries", calls: &got},
+		},
+	}
+
+	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1","operation":["generate_summaries"]}`))
+
+	want := []string{"static_analyzer", "chunking", "generate_summaries"}
+	if len(got) != len(want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("calls[%d]=%q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestControlService_StaticAnalyzerClearsStaleBlockBuffer(t *testing.T) {
+	got := make([]string, 0, 3)
+	svc := &ControlService{
+		BlockingProcessor: blockBufferSettingProcessor{name: "blocking", calls: &got},
+		Processors: []Processor{
+			fakeProcessor{name: "static_analyzer", calls: &got},
+			blockBufferExpectNilProcessor{name: "chunking", calls: &got},
+		},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{"record_id":"1","operation":["chunking"]}`))
+	if err != nil {
+		t.Fatalf("handleEvent returned error: %v", err)
+	}
+	want := []string{"blocking", "static_analyzer", "chunking"}
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v, want %v", got, want)
 	}

@@ -562,7 +562,7 @@ func (p *SemanticProjectionsProcessor) logEnrichProjectionsChunk(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogEnrichProjections(ctx, rec, "MID-26052814"); err != nil {
+	if err := p.ProcLogger.LogEnrichProjections(ctx, rec, "MID-26052852"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			p.Logger.Info("enrich_projections log skipped: doc processor stopped", "call_id", callID)
 		} else {

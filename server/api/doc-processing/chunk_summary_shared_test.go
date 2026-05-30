@@ -252,6 +252,35 @@ func TestValidateSummaryArtifacts_FailsForLanguageMismatch(t *testing.T) {
 	}
 }
 
+func TestValidateSummaryArtifacts_AllowsMissingCategoryPaths(t *testing.T) {
+	tmp := t.TempDir()
+	treeRoot := t.TempDir()
+
+	item := SummaryItem{
+		SummaryID: "93_0_0001",
+		RecordID:  93,
+		Level:     0,
+		SeqNo:     1,
+		Lines:     []string{"1-4"},
+		Keywords:  []string{"健康"},
+		KeywordsEn: []string{
+			"health",
+		},
+		Summary:   "这是一段中文总结，用于验证缺失分类路径时仍可通过校验。",
+		SummaryEn: "This summary validates successfully without category paths.",
+	}
+	if _, err := writeSummaryFile(tmp, 93, item); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+	if err := writeSummaryTreeEntriesForItem(nil, treeRoot, item); err != nil {
+		t.Fatalf("writeSummaryTreeEntriesForItem: %v", err)
+	}
+
+	if err := validateSummaryArtifacts(93, "zh", []SummaryItem{item}, tmp, treeRoot); err != nil {
+		t.Fatalf("validateSummaryArtifacts: %v", err)
+	}
+}
+
 func TestWriteSummaryTreeEntriesForItem_IndexesAllCategoryPaths(t *testing.T) {
 	tmp := t.TempDir()
 	artifactRoot := t.TempDir()

@@ -324,6 +324,38 @@ func TestNormalizeAndValidateTopicCategoryPath(t *testing.T) {
 	}
 }
 
+func TestNormalizeAndValidateTopicCategoryPath_AllowsMissingCategory(t *testing.T) {
+	path, reason := normalizeAndValidateTopicCategoryPath(nil, "policy")
+	if reason != "missing-category" {
+		t.Fatalf("reason=%q, want missing-category", reason)
+	}
+	if path != nil {
+		t.Fatalf("path=%v, want nil", path)
+	}
+}
+
+func TestNormalizeExtractedTopics_MissingCategoryDoesNotWarn(t *testing.T) {
+	logger := &fakeLogger{}
+
+	topics := normalizeExtractedTopics([]any{
+		map[string]any{
+			"topic":      "Alarm handling procedure",
+			"topic_type": "policy",
+			"keywords":   []any{"alarm", "handling"},
+		},
+	}, 12, logger, "chunk_seqno", 3, 165)
+
+	if len(topics) != 1 {
+		t.Fatalf("len(topics)=%d, want 1", len(topics))
+	}
+	if len(topics[0].CategoryPath) != 0 {
+		t.Fatalf("CategoryPath=%v, want empty", topics[0].CategoryPath)
+	}
+	if len(logger.warns) != 0 {
+		t.Fatalf("warns=%v, want none", logger.warns)
+	}
+}
+
 func TestWriteTopicsCategoryTree_Deterministic(t *testing.T) {
 	tmp := t.TempDir()
 	topics := []TopicItem{

@@ -5,6 +5,7 @@ import {
 	computeStages,
 	isActiveRecord,
 	MANDATORY_PROCESSOR_IDS,
+	visibleStages,
 	type StatusEntry
 } from './doc-processor-dashboard-state.ts';
 
@@ -62,4 +63,50 @@ test('record is still active when a processor is missing', () => {
 	]);
 
 	assert.equal(isActiveRecord(record, ['static_analyzer', 'chunking', 'extract_doc_metadata']), true, 'missing chunking keeps record active');
+});
+
+test('semantic projections stage recognizes legacy hyphenated in-progress status and progress', () => {
+	const record = makeRecord([
+		{ operation: 'extract-semantic-projections', proc_status: 'running', progress: '42% (pass 1: 8/19)' }
+	]);
+
+	const stages = computeStages(record);
+	const semanticProjection = stages.find((stage) => stage.id === 'extract_semantic_projections');
+
+	assert.ok(semanticProjection);
+	assert.equal(semanticProjection.status, 'in-progress');
+	assert.equal(semanticProjection.entry?.progress, '42% (pass 1: 8/19)');
+});
+
+test('visible stages hide processors that are not enabled in config', () => {
+	const stages = visibleStages(computeStages(makeRecord([])), [
+		'extract_metrics',
+		'extract_provisions',
+		'generate_summaries',
+		'generate_topics',
+		'generate_scene_blocks',
+		'extract_semantic_projections',
+		'extract_entity_relation'
+	]);
+
+	const stageIds = stages.map((stage) => stage.id);
+
+	assert.equal(stageIds.includes('extract_products'), false);
+	assert.equal(stageIds.includes('extract_structured_knowledge'), false);
+	assert.equal(stageIds.includes('extract_semantic_projections'), true);
+	assert.equal(stageIds.includes('generate_summaries'), true);
+	assert.equal(stageIds.includes('extract_doc_metadata'), true);
+});
+
+test('entity relation stage recognizes legacy hyphenated in-progress status and progress', () => {
+	const record = makeRecord([
+		{ operation: 'extract-entity-relation', proc_status: 'running', progress: '67% (8/12)' }
+	]);
+
+	const stages = computeStages(record);
+	const entityRelation = stages.find((stage) => stage.id === 'extract_entity_relation');
+
+	assert.ok(entityRelation);
+	assert.equal(entityRelation.status, 'in-progress');
+	assert.equal(entityRelation.entry?.progress, '67% (8/12)');
 });

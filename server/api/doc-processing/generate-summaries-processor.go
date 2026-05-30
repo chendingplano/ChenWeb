@@ -96,7 +96,7 @@ func (p *GenerateSummariesProcessor) logSummary(ctx context.Context, recordID *i
 		ExtraInfoJSON: &finishExtraStr,
 		Errors:        errStr,
 		MSUsed:        &msUsed,
-	}, "MID-26052814"); err != nil {
+	}, "MID-26052854"); err != nil {
 		p.Logger.Warn("failed to write generate_summary_finish log", "error", err)
 	}
 
@@ -106,11 +106,11 @@ func (p *GenerateSummariesProcessor) logSummary(ctx context.Context, recordID *i
 		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
 		RecordID:      recordID,
 		ProcProgress:  procProgress,
-		EntryType:     "doc_proc_summary",
+		EntryType:     "generate_summary",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        &msUsed,
-	}, "MID-26052814"); err != nil {
+	}, "MID-26052855"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }

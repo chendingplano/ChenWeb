@@ -188,7 +188,7 @@ func (p *StaticAnalyzerProcessor) logSummary(ctx context.Context, recordID int64
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
-	}, "MID-26052814"); err != nil {
+	}, "MID-26052851"); err != nil {
 		p.Logger.Warn("failed to write static_analyzer log", "error", err)
 	}
 }
@@ -256,7 +256,7 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 			b.WriteByte('\n')
 		}
 	}
-	if err := os.WriteFile(filePath, []byte(b.String()), 0o644); err != nil {
+	if err := writeAtomicFile(filePath, []byte(b.String()), 0o644); err != nil {
 		return fmt.Errorf("(MID_26042309) write corrected file: %w", err)
 	}
 	if p.Logger != nil {
@@ -265,34 +265,84 @@ func (p *StaticAnalyzerProcessor) writeCorrectedArtifact(recordID int64, inputFi
 	// Re-numbering changes line numbers, so any .chunks artifacts built from the
 	// old numbering are now stale. Delete them so the next chunking run rebuilds them.
 	if p.OverrideOrigin {
-		p.deleteStaleChunkArtifacts(recordID)
+		p.deleteStaleChunkArtifacts(inputPath, recordID)
 	}
 	return nil
 }
 
-func (p *StaticAnalyzerProcessor) deleteStaleChunkArtifacts(recordID int64) {
-	if strings.TrimSpace(p.ArtifactDir) == "" {
-		return
-	}
-	groupID := recordID / 1000
-	recordDir := filepath.Join(p.ArtifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
-	entries, err := os.ReadDir(recordDir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".chunks") {
+func (p *StaticAnalyzerProcessor) deleteStaleChunkArtifacts(inputPath string, recordID int64) {
+	recordDirs := staleChunkCandidateDirs(inputPath, p.ArtifactDir, recordID)
+	seen := make(map[string]struct{}, len(recordDirs))
+	for _, recordDir := range recordDirs {
+		recordDir = strings.TrimSpace(recordDir)
+		if recordDir == "" {
 			continue
 		}
-		path := filepath.Join(recordDir, entry.Name())
-		if removeErr := os.Remove(path); removeErr != nil {
-			if p.Logger != nil {
-				p.Logger.Warn("failed to remove stale chunk artifact", "path", path, "error", removeErr)
+		recordDir = filepath.Clean(recordDir)
+		if _, ok := seen[recordDir]; ok {
+			continue
+		}
+		seen[recordDir] = struct{}{}
+		entries, err := os.ReadDir(recordDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".chunks") {
+				continue
 			}
-		} else if p.Logger != nil {
-			p.Logger.Info("removed stale chunk artifact", "path", path)
+			path := filepath.Join(recordDir, entry.Name())
+			if removeErr := os.Remove(path); removeErr != nil {
+				if p.Logger != nil {
+					p.Logger.Warn("failed to remove stale chunk artifact", "path", path, "error", removeErr)
+				}
+			} else if p.Logger != nil {
+				p.Logger.Info("removed stale chunk artifact", "path", path)
+			}
 		}
 	}
+}
+
+func staleChunkCandidateDirs(inputPath, artifactDir string, recordID int64) []string {
+	dirs := make([]string, 0, 2)
+	if dir := strings.TrimSpace(filepath.Dir(strings.TrimSpace(inputPath))); dir != "" && dir != "." {
+		dirs = append(dirs, dir)
+	}
+	if artifactDir = strings.TrimSpace(artifactDir); artifactDir != "" && recordID > 0 {
+		groupID := recordID / 1000
+		dirs = append(dirs, filepath.Join(artifactDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10)))
+	}
+	return dirs
+}
+
+func writeAtomicFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		_ = tmp.Close()
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 // analyzeStaticStructure

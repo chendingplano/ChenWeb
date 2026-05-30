@@ -111,12 +111,12 @@ func ResolveInputFilePath(evt LineFileGeneratedEvent, resultFilename string, par
 			if !filepath.IsAbs(f) {
 				return "", fmt.Errorf("filename with path must be absolute: %s", f)
 			}
-			return filepath.Clean(f), nil
+			return normalizeWorkingLineFilePath(filepath.Clean(f)), nil
 		}
 		if resultPath == "" {
 			return "", errors.New("missing result filename")
 		}
-		return filepath.Join(filepath.Dir(resultPath), f), nil
+		return normalizeWorkingLineFilePath(filepath.Join(filepath.Dir(resultPath), f)), nil
 	}
 
 	if resultPath == "" {
@@ -133,7 +133,15 @@ func ResolveInputFilePath(evt LineFileGeneratedEvent, resultFilename string, par
 	if root == "" {
 		root = "result"
 	}
-	return filepath.Join(filepath.Dir(resultPath), root+"_"+strings.TrimSpace(parserName)+".txt"), nil
+	return normalizeWorkingLineFilePath(filepath.Join(filepath.Dir(resultPath), root+"_"+strings.TrimSpace(parserName)+".txt")), nil
+}
+
+func normalizeWorkingLineFilePath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if strings.HasSuffix(strings.ToLower(trimmed), ".origin") {
+		return trimmed[:len(trimmed)-len(".origin")] + ".txt"
+	}
+	return trimmed
 }
 
 func parseOperations(v any) []string {

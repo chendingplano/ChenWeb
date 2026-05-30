@@ -22,6 +22,7 @@
 		PIPELINE_STAGES,
 		computeStages,
 		isActiveRecord,
+		visibleStages,
 		type StageInfo,
 		type StageStatus,
 		type StatusEntry
@@ -583,7 +584,7 @@
 		{:else}
 			<div class="space-y-3">
 				{#each activePipelines as record (record.id)}
-					{@const stages = computeStages(record)}
+					{@const stages = visibleStages(computeStages(record), requiredProcessors)}
 					<div
 						class="rounded-xl p-4"
 						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"

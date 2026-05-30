@@ -94,7 +94,7 @@ func (p *GenerateTopicsProcessor) logSummary(ctx context.Context, recordID *int6
 		ExtraInfoJSON: &finishExtraStr,
 		Errors:        errStr,
 		MSUsed:        &msUsed,
-	}, "MID-26052816"); err != nil {
+	}, "MID-26052856"); err != nil {
 		p.Logger.Warn("failed to write extract_topics_finish log", "error", err)
 	}
 	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
@@ -102,11 +102,11 @@ func (p *GenerateTopicsProcessor) logSummary(ctx context.Context, recordID *int6
 		ModelNames:    docProcSummaryModelNames(p.Service),
 		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
 		RecordID:      recordID,
-		EntryType:     "doc_proc_summary",
+		EntryType:     "generate_topics",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        &msUsed,
-	}, "MID-26052816"); err != nil {
+	}, "MID-26052857"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }

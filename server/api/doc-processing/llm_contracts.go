@@ -106,6 +106,28 @@ func summaryCategoryTranslationContract() llmclients.StructuredOutputContract {
 	})
 }
 
+func summaryTextTranslationContract() llmclients.StructuredOutputContract {
+	return newDocProcessingContract("chenweb_summary_text_translation", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"summary": schemaString(),
+		},
+		"required":             []string{"summary"},
+		"additionalProperties": false,
+	})
+}
+
+func summaryKeywordsTranslationContract() llmclients.StructuredOutputContract {
+	return newDocProcessingContract("chenweb_summary_keywords_translation", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"keywords": schemaStringArray(),
+		},
+		"required":             []string{"keywords"},
+		"additionalProperties": false,
+	})
+}
+
 func structureExtractionContract() llmclients.StructuredOutputContract {
 	return newDocProcessingContract("chenweb_structure_extraction", map[string]any{
 		"type": "object",

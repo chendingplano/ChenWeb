@@ -13,6 +13,7 @@ import (
 
 type fakeLogger struct {
 	infos  []fakeLogEntry
+	warns  []fakeLogEntry
 	errors []fakeLogEntry
 }
 
@@ -23,9 +24,12 @@ type fakeLogEntry struct {
 
 func (f *fakeLogger) Debug(string, ...any) {}
 func (f *fakeLogger) Line(string, ...any)  {}
-func (f *fakeLogger) Warn(string, ...any)  {}
 func (f *fakeLogger) Trace(string)         {}
 func (f *fakeLogger) Close()               {}
+
+func (f *fakeLogger) Warn(message string, args ...any) {
+	f.warns = append(f.warns, fakeLogEntry{message: message, args: append([]any(nil), args...)})
+}
 
 func (f *fakeLogger) Error(message string, args ...any) {
 	f.errors = append(f.errors, fakeLogEntry{message: message, args: append([]any(nil), args...)})
@@ -602,6 +606,36 @@ func TestLoadChunksFromArtifactFile_SkipsTOCLinesFromStaleArtifact(t *testing.T)
 	}
 }
 
+func TestLoadChunksFromArtifactFile_ErrorsOnEmptyChunkFromStaleArtifact(t *testing.T) {
+	tmp := t.TempDir()
+	targetDir := filepath.Join(tmp, "0", "162")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	chunkArtifact := "overlap: []\nlines: [25]\n\noverlap: []\nlines: [26-27]\n"
+	if err := os.WriteFile(filepath.Join(targetDir, "std_33830_opendata.chunks"), []byte(chunkArtifact), 0o644); err != nil {
+		t.Fatalf("write chunk artifact: %v", err)
+	}
+
+	lines := []Line{
+		{LineNo: 26, PageNo: 1, LineType: "paragraph", Content: "Alpha"},
+		{LineNo: 27, PageNo: 1, LineType: "paragraph", Content: "Beta"},
+	}
+
+	chunks, err := loadChunksFromArtifactFile(tmp, 162, "std_33830_opendata.chunks", lines)
+	if err == nil {
+		t.Fatalf("loadChunksFromArtifactFile returned nil error, chunks=%v", chunks)
+	}
+	if !strings.Contains(err.Error(), "references only missing/filtered lines") {
+		t.Fatalf("error=%v, want missing/filtered lines error", err)
+	}
+	for _, want := range []string{"seq 1", "overlap=[]", "regular=[25]", "missing_regular=[25]"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error=%v, want substring %q", err, want)
+		}
+	}
+}
+
 func TestService_HandleGenerateTopicsInput_ReadsChunksAndWritesTopics(t *testing.T) {
 	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
@@ -779,6 +813,70 @@ func TestFixedSizeChunkingService_GenerateSummaryUsesStructuredContractWhenAvail
 	}
 }
 
+func TestFixedSizeChunkingService_GenerateSummaryMissingCategoryDoesNotWarn(t *testing.T) {
+	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeSemanticExtractor{
+		outs: []map[string]any{
+			{
+				"summary":    "Alarm handling summary",
+				"summary_en": "Alarm handling summary",
+				"keywords":   []any{"alarm", "handling"},
+			},
+		},
+	}
+	logger := &fakeLogger{}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.Logger = logger
+	svc.SummaryPromptText = "summary prompt"
+	svc.SummaryModelName = "summary-model"
+
+	result, err := svc.generateSummary(context.Background(), 101, 0, 1, []MarkedLine{
+		{
+			Line: Line{
+				LineNo:   1,
+				PageNo:   1,
+				LineType: "paragraph",
+				Content:  "Operator acknowledges the alarm and logs the incident.",
+			},
+			Mark: "n",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("generateSummary: %v", err)
+	}
+	if len(result.CategoryPaths) != 0 {
+		t.Fatalf("CategoryPaths=%v, want empty", result.CategoryPaths)
+	}
+	if len(logger.warns) != 0 {
+		t.Fatalf("warns=%v, want none", logger.warns)
+	}
+}
+
+func TestFixedSizeChunkingService_GenerateSummaryErrorsOnEmptyInput(t *testing.T) {
+	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeSemanticExtractor{
+		outs: []map[string]any{
+			{
+				"summary": "should not be used",
+			},
+		},
+	}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.SummaryPromptText = "summary prompt"
+	svc.SummaryModelName = "summary-model"
+
+	_, err := svc.generateSummary(context.Background(), 101, 0, 1, nil, nil)
+	if err == nil {
+		t.Fatal("generateSummary returned nil error")
+	}
+	if !strings.Contains(err.Error(), "empty summary input") {
+		t.Fatalf("error=%v, want empty summary input error", err)
+	}
+	if ex.calls != 0 || ex.structuredCalls != 0 {
+		t.Fatalf("extractor should not be called, calls=%d structuredCalls=%d", ex.calls, ex.structuredCalls)
+	}
+}
+
 func TestFixedSizeChunkingService_GenerateSummaryTranslatesMissingEnglishCategoryPaths(t *testing.T) {
 	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	ex := &fakeJSONExtractor{
@@ -850,6 +948,57 @@ func TestFixedSizeChunkingService_GenerateSummaryTranslatesMissingEnglishCategor
 	}
 	if len(ex.modelNames) != 2 || ex.modelNames[1] != "translation-model" {
 		t.Fatalf("modelNames=%v", ex.modelNames)
+	}
+}
+
+func TestFixedSizeChunkingService_FixSummarySourceLanguage_TranslatesKeywordsToSourceLanguage(t *testing.T) {
+	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{"summary": "这是英文摘要的中文翻译。"},
+			{"keywords": []any{"安全", "健康"}},
+		},
+	}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.ChunkDir = t.TempDir()
+	svc.TranslationEnabled = true
+	svc.TranslationModelName = "translation-model"
+
+	summaries := []SummaryItem{
+		{
+			SummaryID:  "124_0_0001",
+			RecordID:   124,
+			Level:      0,
+			SeqNo:      1,
+			Lines:      []string{"1-2"},
+			Summary:    "This summary is in English.",
+			SummaryEn:  "This summary is in English.",
+			Keywords:   []string{"safety", "health"},
+			KeywordsEn: []string{"safety", "health"},
+		},
+	}
+	if _, err := writeSummaryFile(svc.ChunkDir, summaries[0].RecordID, summaries[0]); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+
+	got, err := svc.fixSummarySourceLanguage(context.Background(), "zh", summaries)
+	if err != nil {
+		t.Fatalf("fixSummarySourceLanguage: %v", err)
+	}
+	if got[0].Summary != "这是英文摘要的中文翻译。" {
+		t.Fatalf("Summary=%q", got[0].Summary)
+	}
+	if strings.Join(got[0].Keywords, ",") != "安全,健康" {
+		t.Fatalf("Keywords=%v", got[0].Keywords)
+	}
+	if len(ex.contractNames) != 2 {
+		t.Fatalf("contractNames=%v", ex.contractNames)
+	}
+	if ex.contractNames[0] != "chenweb_summary_text_translation" {
+		t.Fatalf("first contract=%v", ex.contractNames)
+	}
+	if ex.contractNames[1] != "chenweb_summary_keywords_translation" {
+		t.Fatalf("second contract=%v", ex.contractNames)
 	}
 }
 
@@ -1159,8 +1308,14 @@ func TestFormatSummaryProgress(t *testing.T) {
 	}
 }
 
-func TestService_HandleGenerateSummariesInput_SummarySanityCheckFailure(t *testing.T) {
+func TestService_HandleGenerateSummariesInput_TranslatesEnglishFallbackKeywords(t *testing.T) {
 	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{"summary": "这是中文摘要。"},
+			{"keywords": []any{"健康"}},
+		},
+	}
 	st := &fakeStore{rec: InputRecord{
 		ID:              9012,
 		StatusRaw:       "[]",
@@ -1168,7 +1323,7 @@ func TestService_HandleGenerateSummariesInput_SummarySanityCheckFailure(t *testi
 		StagingFilename: "sample.pdf",
 		SourceLanguage:  "zh",
 	}}
-	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
+	svc := NewFixedSizeChunkingService(st, ex, nil)
 	svc.ChunkDir = t.TempDir()
 	svc.ArtifactWebDir = t.TempDir()
 	svc.ChunkSize = 10
@@ -1181,6 +1336,8 @@ func TestService_HandleGenerateSummariesInput_SummarySanityCheckFailure(t *testi
 	svc.SummaryPromptErr = nil
 	svc.SummaryModelName = "summary-model"
 	svc.SummaryPromptText = "summary prompt"
+	svc.TranslationEnabled = true
+	svc.TranslationModelName = "translation-model"
 	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, seqNo int, _ []MarkedLine, _ []SummaryItem) (summaryGenerateResult, error) {
 		return summaryGenerateResult{
 			Summary:       "This summary is in English.",
@@ -1198,15 +1355,23 @@ func TestService_HandleGenerateSummariesInput_SummarySanityCheckFailure(t *testi
 	st.updatedStatus = ""
 	st.updatedError = nil
 
-	err := svc.HandleGenerateSummariesInput(context.Background(), 9012, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx"))
-	if err == nil {
-		t.Fatalf("expected summary sanity check error")
+	if err := svc.HandleGenerateSummariesInput(context.Background(), 9012, "sample.txt", []byte("1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tx")); err != nil {
+		t.Fatalf("HandleGenerateSummariesInput: %v", err)
 	}
-	if !strings.Contains(err.Error(), "sanity check") {
-		t.Fatalf("unexpected error: %v", err)
+	if st.updatedError != nil {
+		t.Fatalf("expected no persisted error, got %v", *st.updatedError)
 	}
-	if st.updatedError == nil || !strings.Contains(*st.updatedError, "sanity check") {
-		t.Fatalf("expected persisted sanity check error, got %v", st.updatedError)
+	artifactDir, err := buildRecordArtifactDir(svc.ChunkDir, 9012)
+	if err != nil {
+		t.Fatalf("buildRecordArtifactDir: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(artifactDir, "summary_0_0001.txt"))
+	if err != nil {
+		t.Fatalf("read summary file: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `keywords: ["健康"]`) {
+		t.Fatalf("summary file missing translated keywords: %q", text)
 	}
 }
 
