@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -421,7 +422,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != "" {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_c%d", eventID, idx), "extract_scene_block_candidates", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), nil, err, callStart, p.Now(), record_id, idx, len(chunks))
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_c%d", eventID, idx), "extract_scene_block_candidates", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), payload, err, callStart, p.Now(), record_id, idx, len(chunks), len(mentions))
 		p1Percent := (idx + 1) * 100 / len(chunks) / 2
 		p.persistSceneBlocksInProgressStatus(ctx, rec, start, fmt.Sprintf("%d%% (pass 1: %d/%d)", p1Percent, idx+1, len(chunks)))
 		if err != nil {
@@ -470,7 +471,7 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != "" {
 			fallbackCount++
 		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_g%d", eventID, groupIdx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), nil, err, callStart, p.Now(), record_id, groupIdx, len(chunkGroups))
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_g%d", eventID, groupIdx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), payload, err, callStart, p.Now(), record_id, groupIdx, len(chunkGroups), len(sceneBlocks))
 		p2Percent := (groupIdx+1)*100/len(chunkGroups)/2 + 50
 		p.persistSceneBlocksInProgressStatus(ctx, rec, start, fmt.Sprintf("%d%% (pass 2: %d/%d)", p2Percent, groupIdx+1, len(chunkGroups)))
 		if err != nil {
@@ -519,6 +520,7 @@ func (p *SceneBlocksProcessor) logLLMCall(
 	recordID int64,
 	itemIdx int,
 	totalItems int,
+	runningTotal int,
 ) {
 	if p.ProcLogger.DB == nil {
 		return
@@ -545,10 +547,35 @@ func (p *SceneBlocksProcessor) logLLMCall(
 	}
 	passLabel := fmt.Sprintf("pass %d", pass)
 	progress := fmt.Sprintf("%d%% (%s: %d/%d)", percent, passLabel, itemIdx+1, totalItems)
-	extraInfo := map[string]any{
-		"chunk":        itemIdx + 1,
-		"total_chunks": totalItems,
-		"percent":      progress,
+	var extraInfo map[string]any
+	if pass == 1 {
+		numScens := 0
+		if payload != nil {
+			if raw, ok := payload["candidates"].([]any); ok {
+				numScens = len(raw)
+			}
+		}
+		extraInfo = map[string]any{
+			"chunk":        itemIdx + 1,
+			"num_scens":    numScens,
+			"total_so_far": runningTotal,
+			"percent":      progress,
+			"total_chunks": totalItems,
+		}
+	} else {
+		numScenes := 0
+		if payload != nil {
+			if raw, ok := payload["scene_blocks"].([]any); ok {
+				numScenes = len(raw)
+			}
+		}
+		extraInfo = map[string]any{
+			"chunk":        itemIdx + 1,
+			"num_scenes":   numScenes,
+			"total_scenes": runningTotal,
+			"percent":      progress,
+			"total_chunks": totalItems,
+		}
 	}
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
@@ -641,7 +668,7 @@ func (p *SceneBlocksProcessor) extractScenePayloadWithFallback(ctx context.Conte
 		return nil, fallbackModelName, fmt.Errorf("(MID_26051825) primary extraction failed and fallback model %q is unavailable: %w", p.FallbackModelRef, err)
 	}
 
-	if isEmptySceneBlocksExtractionError(err) {
+	if ApiUtils.IsEmptyJSONResponse(err) {
 		p.Logger.Warn("primary scene extraction returned empty JSON; retrying fallback model",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
@@ -659,7 +686,7 @@ func (p *SceneBlocksProcessor) extractScenePayloadWithFallback(ctx context.Conte
 
 	payload, fallbackErr := p.extractScenePayload(ctx, inputText, promptText, fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
-		if isEmptySceneBlocksExtractionError(fallbackErr) {
+		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
 			p.Logger.Warn("fallback scene extraction returned empty JSON; treating as empty result",
 				"fallback_model", fallbackModelName,
 				"error", fallbackErr,
@@ -769,18 +796,6 @@ func looksLikeSceneCandidateRecord(payload map[string]any) bool {
 		}
 	}
 	return false
-}
-
-func isEmptySceneBlocksExtractionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.TrimSpace(err.Error())
-	if msg == "" {
-		return false
-	}
-	return strings.Contains(msg, "unexpected end of JSON input") &&
-		strings.Contains(msg, "json:{[]}")
 }
 
 func buildSceneCandidateUserPrompt(chunk Chunk) string {
