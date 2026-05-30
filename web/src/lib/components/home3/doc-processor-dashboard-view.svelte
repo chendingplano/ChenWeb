@@ -431,11 +431,11 @@
 				docProcName: stageId,
 				recordId,
 				page: 1,
-				pageSize: 1,
+				pageSize: 10,
 				orderBy: 'create_time',
 				orderDir: 'desc'
 			});
-			const progress = res.results?.[0]?.proc_progress?.trim() || null;
+			const progress = res.results?.find((row) => row.proc_progress?.trim())?.proc_progress?.trim() || null;
 			stageProgressCache = { ...stageProgressCache, [cacheKey]: progress };
 			if (tooltipState && tooltipState.recordId === recordId && tooltipState.stageId === stageId) {
 				tooltipState = {

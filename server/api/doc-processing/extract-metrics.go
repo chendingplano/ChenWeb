@@ -357,7 +357,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		"num_chunks", len(inputChunks),
 	)
 	p.persistMetricsStatus(ctx, rec, start, nil)
-	p.logMetricsSummary(ctx, start, p.Now(), result, inserted, len(inputChunks))
+	p.logMetricsSummary(ctx, evt.RecordID, start, p.Now(), result, inserted, len(inputChunks))
 	return nil
 }
 
@@ -567,7 +567,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		if err == nil && strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) {
 			fallbackCount++
 		}
-		p.logExtractMetricsChunk(ctx, callID, chunk.Index, len(chunks), len(mentions),
+		p.logExtractMetricsChunk(ctx, record_id, callID, chunk.Index, len(chunks), len(mentions),
 			[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef,
 			payload, err, callStart, p.Now())
 		if err != nil {
@@ -608,6 +608,11 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	uncertain := make([]map[string]any, 0)
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	batches := groupCandidatesByChunk(candidates, p.MetricEnrichGroupSize)
+	p.Logger.Info("extract metrics", 
+		"model_name", p.RelationModelName,
+		"prompt_name", p.RelationPromptRef,
+		"total batches", len(batches),
+	)
 	for batchIdx, batch := range batches {
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
@@ -617,20 +622,18 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		for _, c := range batch.candidates {
 			candidateIDs = append(candidateIDs, c.CandidateID)
 		}
-		p.Logger.Info("enrich metric batch start",
+		batch_str := fmt.Sprintf("batch:%d/%d", batchIdx+1, len(batches))
+		p.Logger.Info("enrich metric start",
 			"record_id", record_id,
-			"batch", batchIdx+1,
+			"batch", batch_str,
 			"total_batches", len(batches),
-			"block_idx", batch.chunkIdx,
 			"candidate_ids", candidateIDs,
-			"model_name", p.RelationModelName,
-			"prompt_name", p.RelationPromptRef,
 		)
 		enrichStart := p.Now()
 		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), batchIdx+1)
 		payload, err := p.extractMetricPayload(ctx, buildMetricRelationBatchPrompt(batch.candidates), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "MID-26052903")
 		llmCallCount++
-		p.logEnrichMetricsChunk(ctx, enrichCallID, batch.chunkIdx, len(batches), len(metrics),
+		p.logEnrichMetricsChunk(ctx, record_id, enrichCallID, batch.chunkIdx, len(batches), len(metrics),
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
 			payload, err, enrichStart, p.Now())
 		if err != nil {
@@ -647,9 +650,9 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
 		metrics = append(metrics, normalizeMetricList(metricsRaw)...)
 		uncertain = append(uncertain, normalizeMetricList(uncertainRaw)...)
-		p.Logger.Info("enrich metric batch end",
+		p.Logger.Info("enrich metric end  ",
 			"record_id", record_id,
-			"batch", batchIdx+1,
+			"batch", batch_str,
 			"metrics_so_far", len(metrics),
 			"uncertain_so_far", len(uncertain),
 			"ms_used", time.Since(startTime).Milliseconds(),
@@ -1385,6 +1388,7 @@ func (p *MetricsProcessor) logLLMCall(
 // logExtractMetricsChunk writes one extract_metrics log entry for a single Pass 1 chunk.
 func (p *MetricsProcessor) logExtractMetricsChunk(
 	ctx context.Context,
+	recordID int64,
 	callID string,
 	chunkIdx, totalChunks, metricsSoFar int,
 	modelNames []string, promptName string,
@@ -1403,6 +1407,7 @@ func (p *MetricsProcessor) logExtractMetricsChunk(
 	}
 	extraBytes, _ := json.Marshal(extraInfo)
 	extraStr := string(extraBytes)
+	procProgress := percent
 
 	var artifactStr *string
 	if payload != nil {
@@ -1418,9 +1423,12 @@ func (p *MetricsProcessor) logExtractMetricsChunk(
 	}
 	activity := "extract_metric_candidates"
 	rec := DocProcLogRecord{
+		CallReason:    p.Name(),
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
+		RecordID:      int64Ptr(recordID),
+		ProcProgress:  &procProgress,
 		LLMCallID:     &callID,
 		ActivityName:  &activity,
 		ArtifactJSON:  artifactStr,
@@ -1440,6 +1448,7 @@ func (p *MetricsProcessor) logExtractMetricsChunk(
 // logEnrichMetricsChunk writes one enrich_metrics log entry for a single Pass 2 chunk batch.
 func (p *MetricsProcessor) logEnrichMetricsChunk(
 	ctx context.Context,
+	recordID int64,
 	callID string,
 	chunkIdx, totalChunks, metricsSoFar int,
 	modelNames []string, promptName string,
@@ -1458,6 +1467,7 @@ func (p *MetricsProcessor) logEnrichMetricsChunk(
 	}
 	extraBytes, _ := json.Marshal(extraInfo)
 	extraStr := string(extraBytes)
+	procProgress := percent
 
 	var artifactStr *string
 	if payload != nil {
@@ -1473,9 +1483,12 @@ func (p *MetricsProcessor) logEnrichMetricsChunk(
 	}
 	activity := "enrich_metrics"
 	rec := DocProcLogRecord{
+		CallReason:    p.Name(),
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
+		RecordID:      int64Ptr(recordID),
+		ProcProgress:  &procProgress,
 		LLMCallID:     &callID,
 		ActivityName:  &activity,
 		ArtifactJSON:  artifactStr,
@@ -1495,6 +1508,7 @@ func (p *MetricsProcessor) logEnrichMetricsChunk(
 // logMetricsSummary writes one doc_proc_summary log entry after the processor finishes.
 func (p *MetricsProcessor) logMetricsSummary(
 	ctx context.Context,
+	recordID int64,
 	start, end time.Time,
 	result metricExtractionResult,
 	inserted int64,
@@ -1524,11 +1538,15 @@ func (p *MetricsProcessor) logMetricsSummary(
 		modelNames = append(modelNames, n)
 	}
 	promptName := firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef)
+	progress := "100%"
 
 	rec := DocProcLogRecord{
+		CallReason:    p.Name(),
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
+		RecordID:      int64Ptr(recordID),
+		ProcProgress:  &progress,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}

@@ -278,7 +278,7 @@ func (p *ProvisionsProcessor) logLLMCall(
 	}
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
-	callReason := "extract compliance provisions"
+	callReason := p.Name()
 	rec := DocProcLogRecord{
 		CallReason:    callReason,
 		DocProcName:   p.Name(),
@@ -332,7 +332,7 @@ func (p *ProvisionsProcessor) logProvisionsSummary(
 	progress := "100%"
 	activityName := "extract_provisions"
 	rec := DocProcLogRecord{
-		CallReason:    "extract compliance provisions",
+		CallReason:    p.Name(),
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    p.PromptRef,

@@ -33,11 +33,12 @@ INSERT INTO kb.doc_proc_logs (
     errors,
     extra_info,
     ms_used,
+    log_loc,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, NOW()
+    $14, $15, NOW()
 )`)
 	mock.ExpectExec(insertQuery).
 		WithArgs(
@@ -55,6 +56,7 @@ INSERT INTO kb.doc_proc_logs (
 			nil,
 			&extra,
 			&msUsed,
+			"MID-26052803",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -65,6 +67,93 @@ INSERT INTO kb.doc_proc_logs (
 		MSUsed:        &msUsed,
 	}, "MID-26052803"); err != nil {
 		t.Fatalf("LogSummary: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestDocProcLoggerLogExtractMetrics_IncludesCallReasonRecordIDAndProgress(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	extra := `{"percent":"50%"}`
+	recordID := int64(170)
+	progress := "50%"
+	insertQuery := regexp.QuoteMeta(`
+INSERT INTO kb.doc_proc_logs (
+    call_reason,
+    doc_proc_name,
+    model_names,
+    prompt_name,
+    record_id,
+    proc_progress,
+    entry_type,
+    pass,
+    llm_call_id,
+    activity_name,
+    artifact,
+    errors,
+    extra_info,
+    ms_used,
+    log_loc,
+    create_time
+) VALUES (
+    $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
+    $11::jsonb, $12, $13::jsonb,
+    $14, $15, NOW()
+)`)
+	mock.ExpectExec(insertQuery).
+		WithArgs(
+			strPtrValue("extract_metrics"),
+			"extract_metrics",
+			"{}",
+			nil,
+			int64PtrValue(recordID),
+			strPtrValue(progress),
+			EntryTypeExtractMetrics,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			&extra,
+			nil,
+			"MID-26052811",
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	updateQuery := regexp.QuoteMeta(`
+UPDATE kb.inputs
+SET status = (
+    SELECT jsonb_agg(
+        CASE
+            WHEN elem->>'operation' = $2
+            THEN jsonb_set(elem, '{progress}', to_jsonb($3::text))
+            ELSE elem
+        END
+    )
+    FROM jsonb_array_elements(COALESCE(status, '[]'::jsonb)) AS elem
+),
+modify_time = NOW()
+WHERE id = $1`)
+	mock.ExpectExec(updateQuery).
+		WithArgs(recordID, "extract_metrics", progress).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	logger := DocProcLogger{DB: db}
+	if err := logger.LogExtractMetrics(context.Background(), DocProcLogRecord{
+		CallReason:    "extract_metrics",
+		DocProcName:   "extract_metrics",
+		RecordID:      &recordID,
+		ProcProgress:  &progress,
+		ExtraInfoJSON: &extra,
+	}, "MID-26052811"); err != nil {
+		t.Fatalf("LogExtractMetrics: %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
