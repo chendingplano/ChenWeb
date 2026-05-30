@@ -56,6 +56,7 @@ type DocProcLogFilter struct {
 	EntryType   string // empty = all
 	DocProcName string // empty = all
 	LLMCallID   string // empty = all
+	RecordID    *int64 // nil = all
 	Page        int    // 1-based; 0 treated as 1
 	PageSize    int    // 0 → 50
 	OrderBy     string // empty → create_time
@@ -365,6 +366,11 @@ func (s SQLStore) ListDocProcLogs(ctx context.Context, f DocProcLogFilter) ([]Do
 	if f.LLMCallID != "" {
 		where = append(where, "llm_call_id = $"+itoa(argIdx))
 		args = append(args, f.LLMCallID)
+		argIdx++
+	}
+	if f.RecordID != nil {
+		where = append(where, "record_id = $"+itoa(argIdx))
+		args = append(args, *f.RecordID)
 		argIdx++
 	}
 

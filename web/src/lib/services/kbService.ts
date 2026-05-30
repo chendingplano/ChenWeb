@@ -32,12 +32,15 @@ export type KbInputRecord = {
 	owner?: number;
 	status: Array<{
 		operation?: string;
+		doc_processor_name?: string;
+		'doc-processor-name'?: string;
 		time?: string;
 		start_time?: string;
 		status?: string;
 		proc_status?: string;
 		'proc-status'?: string;
 		error?: string;
+		progress?: string;
 	}>;
 	create_time: string;
 	modify_time: string;
@@ -100,6 +103,24 @@ function buildQuery(params: ListKbInputsParams): string {
 	return query.toString();
 }
 
+export type DocProcLogRecord = {
+	id: number;
+	call_reason: string;
+	doc_proc_name: string;
+	record_id?: number;
+	proc_progress?: string;
+	entry_type: string;
+	create_time: string;
+};
+
+export type ListDocProcLogsResponse = {
+	status: boolean;
+	results: DocProcLogRecord[];
+	page: number;
+	page_size: number;
+	total: number;
+};
+
 export async function listKbInputs(params: ListKbInputsParams): Promise<ListKbInputsResponse> {
 	const response = await fetch(`${BASE}/inputs?${buildQuery(params)}`, {
 		method: 'GET',
@@ -114,6 +135,27 @@ export async function listKbInputs(params: ListKbInputsParams): Promise<ListKbIn
 		throw new Error(msg);
 	}
 	return response.json();
+}
+
+export async function listDocProcLogs(params: {
+	docProcName?: string;
+	recordId?: number;
+	page?: number;
+	pageSize?: number;
+	orderBy?: string;
+	orderDir?: 'asc' | 'desc';
+}): Promise<ListDocProcLogsResponse> {
+	const query = new URLSearchParams();
+	if (params.docProcName?.trim()) query.set('doc_proc_name', params.docProcName.trim());
+	if (params.recordId != null) query.set('record_id', String(params.recordId));
+	query.set('page', String(params.page ?? 1));
+	query.set('page_size', String(params.pageSize ?? 1));
+	query.set('order_by', params.orderBy ?? 'create_time');
+	query.set('order_dir', params.orderDir ?? 'desc');
+	return fetchOrThrow<ListDocProcLogsResponse>(
+		`${BASE}/doc-proc-logs?${query.toString()}`,
+		'Failed to list doc proc logs'
+	);
 }
 
 // ---------- kb.metrics / raw-lines / single input ----------

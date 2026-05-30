@@ -74,10 +74,21 @@ func ListDocProcLogs(c echo.Context) error {
 		OrderBy:     c.QueryParam("order_by"),
 		OrderDir:    c.QueryParam("order_dir"),
 	}
+	if recordIDRaw := c.QueryParam("record_id"); recordIDRaw != "" {
+		recordID, err := strconv.ParseInt(recordIDRaw, 10, 64)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{
+				Status:   false,
+				ErrorMsg: "query param 'record_id' must be an integer (CWB_DPLG_005)",
+			})
+		}
+		f.RecordID = &recordID
+	}
 
 	logger.Info("list doc proc logs",
 		"entry_type", f.EntryType,
 		"doc_proc_name", f.DocProcName,
+		"record_id", f.RecordID,
 		"page", f.Page,
 		"page_size", f.PageSize,
 		"order_by", f.OrderBy,

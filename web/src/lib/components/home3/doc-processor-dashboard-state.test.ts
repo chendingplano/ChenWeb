@@ -110,3 +110,16 @@ test('entity relation stage recognizes legacy hyphenated in-progress status and 
 	assert.equal(entityRelation.status, 'in-progress');
 	assert.equal(entityRelation.entry?.progress, '67% (8/12)');
 });
+
+test('entity relation stage recognizes doc_processing entry with doc_processor_name', () => {
+	const record = makeRecord([
+		{ operation: 'doc_processing', proc_status: 'running', doc_processor_name: 'extract_entity_relation' }
+	]);
+
+	const stages = computeStages(record);
+	const entityRelation = stages.find((stage) => stage.id === 'extract_entity_relation');
+
+	assert.ok(entityRelation);
+	assert.equal(entityRelation.status, 'in-progress');
+	assert.equal(entityRelation.entry?.doc_processor_name, 'extract_entity_relation');
+});

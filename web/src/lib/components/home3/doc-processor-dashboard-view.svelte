@@ -13,7 +13,7 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PauseIcon from '@lucide/svelte/icons/pause';
-	import { listKbInputs, getKbFrontendConfig, stopKbInput, type KbInputRecord } from '$lib/services/kbService';
+	import { listDocProcLogs, listKbInputs, getKbFrontendConfig, stopKbInput, type KbInputRecord } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import {
 		ALL_CONFIGURABLE_PROCESSOR_IDS,
@@ -73,9 +73,12 @@
 		label: string;
 		status: StageStatus;
 		entry?: StatusEntry;
+		progress?: string;
+		progressLoading?: boolean;
 		x: number;
 		y: number;
 	} | null>(null);
+	let stageProgressCache = $state<Record<string, string | null>>({});
 
 	// ── Sync control state ────────────────────────────────────────────────
 	let autoSync = $state(true);
@@ -399,19 +402,57 @@
 	) {
 		const el = e.currentTarget as HTMLElement;
 		const rect = el.getBoundingClientRect();
+		const cacheKey = `${recordId}:${stage.id}`;
+		const cachedProgress = stageProgressCache[cacheKey];
 		tooltipState = {
 			recordId,
 			stageId: stage.id,
 			label: stage.label,
 			status: stage.status,
 			entry: stage.entry,
+			progress: stage.entry?.progress ?? cachedProgress ?? undefined,
+			progressLoading: stage.status === 'in-progress' && !stage.entry?.progress && cachedProgress === undefined,
 			x: rect.left + rect.width / 2,
 			y: rect.top
 		};
+		if (stage.status === 'in-progress' && !stage.entry?.progress && cachedProgress === undefined) {
+			void hydrateTooltipProgress(recordId, stage.id);
+		}
 	}
 
 	function hideTooltip() {
 		tooltipState = null;
+	}
+
+	async function hydrateTooltipProgress(recordId: number, stageId: string) {
+		const cacheKey = `${recordId}:${stageId}`;
+		try {
+			const res = await listDocProcLogs({
+				docProcName: stageId,
+				recordId,
+				page: 1,
+				pageSize: 1,
+				orderBy: 'create_time',
+				orderDir: 'desc'
+			});
+			const progress = res.results?.[0]?.proc_progress?.trim() || null;
+			stageProgressCache = { ...stageProgressCache, [cacheKey]: progress };
+			if (tooltipState && tooltipState.recordId === recordId && tooltipState.stageId === stageId) {
+				tooltipState = {
+					...tooltipState,
+					progress: progress ?? undefined,
+					progressLoading: false
+				};
+			}
+		} catch {
+			stageProgressCache = { ...stageProgressCache, [cacheKey]: null };
+			if (tooltipState && tooltipState.recordId === recordId && tooltipState.stageId === stageId) {
+				tooltipState = {
+					...tooltipState,
+					progressLoading: false
+				};
+			}
+		}
 	}
 
 	onMount(() => {
@@ -469,8 +510,10 @@
 				{tooltipState.label} · {tooltipState.status}
 			</div>
 			{#if tooltipState.entry}
-				{#if tooltipState.entry.progress}
-					<div style="font-size:12px; color:{textSecondary};">Progress: {tooltipState.entry.progress}</div>
+				{#if tooltipState.progress}
+					<div style="font-size:12px; color:{textSecondary};">Progress: {tooltipState.progress}</div>
+				{:else if tooltipState.progressLoading}
+					<div style="font-size:12px; color:{textMuted};">Loading progress…</div>
 				{/if}
 				{#if tooltipState.entry.time || tooltipState.entry.start_time}
 					<div style="font-size:11px; color:{textMuted}; font-family:monospace; margin-top:2px;">

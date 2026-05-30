@@ -2,6 +2,8 @@ export type StageStatus = 'pending' | 'in-progress' | 'success' | 'failed';
 
 export type StatusEntry = {
 	operation?: string;
+	doc_processor_name?: string;
+	'doc-processor-name'?: string;
 	time?: string;
 	start_time?: string;
 	status?: string;
@@ -85,6 +87,10 @@ export const ALL_PROCESSOR_IDS = [...MANDATORY_PROCESSOR_IDS, ...ALL_CONFIGURABL
 
 const FINAL_STATUSES = new Set(['success', 'fail', 'failed', 'stopped']);
 
+function normalizeOperationName(value?: string): string {
+	return (value ?? '').trim().toLowerCase().replace(/-/g, '_');
+}
+
 export function resolveEntryStatus(entry: StatusEntry): StageStatus {
 	const ps = (entry.proc_status ?? entry['proc-status'] ?? entry.status ?? '').toLowerCase();
 	if (ps === 'success') return 'success';
@@ -95,22 +101,27 @@ export function resolveEntryStatus(entry: StatusEntry): StageStatus {
 }
 
 export function computeStages(record: PipelineRecord): StageInfo[] {
-	const statusMap = new Map<string, StatusEntry>();
-	for (const e of record.status ?? []) {
-		if (e.operation) statusMap.set(e.operation, e);
-	}
+	const entries = record.status ?? [];
 
-	function stageFor(operations: string[]): { status: StageStatus; entry?: StatusEntry } {
-		for (const op of operations) {
-			const e = statusMap.get(op);
-			if (e) return { status: resolveEntryStatus(e), entry: e };
+	function stageFor(stageId: string, operations: string[]): { status: StageStatus; entry?: StatusEntry } {
+		const expectedNames = new Set([stageId, ...operations].map(normalizeOperationName));
+		for (const entry of entries) {
+			const operationName = normalizeOperationName(entry.operation);
+			if (expectedNames.has(operationName)) {
+				return { status: resolveEntryStatus(entry), entry };
+			}
+			if (operationName !== 'doc_processing') continue;
+			const processorName = normalizeOperationName(entry.doc_processor_name ?? entry['doc-processor-name']);
+			if (expectedNames.has(processorName)) {
+				return { status: resolveEntryStatus(entry), entry };
+			}
 		}
 		return { status: 'pending' };
 	}
 
 	return PIPELINE_STAGES.map((stage) => {
 		if (stage.id === 'staged') return { id: 'staged', label: stage.label, status: 'success' as StageStatus };
-		const { status, entry } = stageFor(stage.operations);
+		const { status, entry } = stageFor(stage.id, stage.operations);
 		return { id: stage.id, label: stage.label, status, entry };
 	});
 }
