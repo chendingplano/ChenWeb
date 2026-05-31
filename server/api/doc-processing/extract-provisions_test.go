@@ -105,6 +105,7 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	p.PromptErr = nil
 	p.ModelErr = nil
 	p.ModelName = "gpt-test"
+	p.ExtractProvisionsInput = "blocks"
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"4001","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -307,6 +308,7 @@ func TestProvisionsProcessor_FallsBackToInputFileWhenBlockBufferMissing(t *testi
 	p.PromptErr = nil
 	p.ModelErr = nil
 	p.ModelName = "gpt-test"
+	p.ExtractProvisionsInput = "blocks"
 
 	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"5001","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -364,6 +366,7 @@ func TestProvisionsProcessor_AcceptsSingleProvisionObject(t *testing.T) {
 	p.PromptErr = nil
 	p.ModelErr = nil
 	p.ModelName = "primary-model"
+	p.ExtractProvisionsInput = "blocks"
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6000","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -421,6 +424,7 @@ func TestProvisionsProcessor_AcceptsBareProvisionObject(t *testing.T) {
 	p.PromptErr = nil
 	p.ModelErr = nil
 	p.ModelName = "primary-model"
+	p.ExtractProvisionsInput = "blocks"
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6004","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -484,6 +488,7 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnEmptyJSON(t *testing.T) {
 	p.ModelErr = nil
 	p.ModelName = "primary-model"
 	p.FallbackModelName = "fallback-model"
+	p.ExtractProvisionsInput = "blocks"
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6001","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -541,6 +546,7 @@ func TestProvisionsProcessor_FailsOnEmptyJSONWithoutCallbackModel(t *testing.T) 
 	p.PromptErr = nil
 	p.ModelErr = nil
 	p.ModelName = "primary-model"
+	p.ExtractProvisionsInput = "blocks"
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6002","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -596,6 +602,7 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnExtractorError(t *testing
 	p.ModelErr = nil
 	p.ModelName = "primary-model"
 	p.FallbackModelName = "fallback-model"
+	p.ExtractProvisionsInput = "blocks"
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6003","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -650,6 +657,7 @@ func TestProvisionsProcessor_TreatsEmptyFallbackJSONAsSuccess(t *testing.T) {
 	p.ModelErr = nil
 	p.ModelName = "primary-model"
 	p.FallbackModelName = "fallback-model"
+	p.ExtractProvisionsInput = "blocks"
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"6004","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -702,12 +710,12 @@ func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseRetriesFallback
 	p.ModelName = "deepseek-v4-flash"
 	p.FallbackModelName = "gpt-5.4-mini"
 
-	payload, modelName, err := p.extractProvisionPayloadWithFallback(context.Background(), Block{
+	payload, modelName, err := p.extractProvisionPayloadWithFallback(context.Background(), buildProvisionUserPrompt(Block{
 		Index: 1,
 		Lines: []BlockLine{
 			{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The device shall log all alarms."},
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("extractProvisionPayloadWithFallback: %v", err)
 	}
@@ -743,14 +751,14 @@ func TestProvisionsProcessor_ExtractProvisionPayloadUsesStructuredContractWhenAv
 	p.PromptRef = "prompt-test"
 	p.ModelName = "gpt-test"
 
-	payload, err := p.extractProvisionPayload(context.Background(), Block{
+	payload, err := p.extractProvisionPayloadFromText(context.Background(), buildProvisionUserPrompt(Block{
 		Index: 1,
 		Lines: []BlockLine{
 			{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The device shall log all alarms."},
 		},
-	}, "gpt-test", extractor)
+	}), "gpt-test", extractor)
 	if err != nil {
-		t.Fatalf("extractProvisionPayload: %v", err)
+		t.Fatalf("extractProvisionPayloadFromText: %v", err)
 	}
 	if extractor.structuredCalledCount != 1 {
 		t.Fatalf("structuredCalledCount=%d, want 1", extractor.structuredCalledCount)

@@ -47,6 +47,7 @@ type ProvisionsProcessor struct {
 	ArtifactDir               string
 	ArtifactWebDir            string
 	ExtractProvisionsMaxTasks int
+	ExtractProvisionsInput    string // "chunks" (default) or "blocks"
 }
 
 type ProvisionsStore interface {
@@ -118,7 +119,15 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		ArtifactDir:               strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		ArtifactWebDir:            strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 		ExtractProvisionsMaxTasks: envInt("EXTRACT_PROVISIONS_MAX_TASKS", 1, 1),
+		ExtractProvisionsInput:    extractProvisionsInputFromEnv(),
 	}
+}
+
+func extractProvisionsInputFromEnv() string {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("EXTRACT_PROVISIONS_INPUT"))) == "blocks" {
+		return "blocks"
+	}
+	return "chunks"
 }
 
 func (p *ProvisionsProcessor) Name() string { return "extract_provisions" }
@@ -181,28 +190,50 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 
 	p.persistProvisionsRunningStatus(ctx, rec, start)
 
-	blocks, err := p.resolveBlocks(ctx, evt, rec)
-	if err != nil {
-		p.persistProvisionsStatus(ctx, rec, start, err)
-		p.Logger.Error("resolveBlocks error", "error", err, "record_id", evt.RecordID)
-		return nil
-	}
-	if len(blocks) == 0 {
-		err := fmt.Errorf("(MID_26050526) no blocks found for record_id=%d", evt.RecordID)
-		p.persistProvisionsStatus(ctx, rec, start, err)
-		return nil
-	}
+	var result provisionExtractionResult
+	var numUnits int
+	var extractErr error
 
-	result, err := p.extractProvisionsFromBlocksWithLLM(ctx, blocks, evt.RecordID)
-	if err != nil {
-		if errors.Is(err, ErrPipelineStopped) {
+	if p.ExtractProvisionsInput == "blocks" {
+		var blocks []Block
+		blocks, extractErr = p.resolveBlocks(ctx, evt, rec)
+		if extractErr != nil {
+			p.persistProvisionsStatus(ctx, rec, start, extractErr)
+			p.Logger.Error("resolveBlocks error", "error", extractErr, "record_id", evt.RecordID)
+			return nil
+		}
+		if len(blocks) == 0 {
+			e := fmt.Errorf("(MID_26050526) no blocks found for record_id=%d", evt.RecordID)
+			p.persistProvisionsStatus(ctx, rec, start, e)
+			return nil
+		}
+		numUnits = len(blocks)
+		result, extractErr = p.extractProvisionsFromBlocksWithLLM(ctx, blocks, evt.RecordID)
+	} else {
+		var chunks []Chunk
+		chunks, extractErr = p.resolveChunks(ctx, evt, rec)
+		if extractErr != nil {
+			p.persistProvisionsStatus(ctx, rec, start, extractErr)
+			p.Logger.Error("resolveChunks error", "error", extractErr, "record_id", evt.RecordID)
+			return nil
+		}
+		if len(chunks) == 0 {
+			e := fmt.Errorf("(MID_26053115) no chunks found for record_id=%d", evt.RecordID)
+			p.persistProvisionsStatus(ctx, rec, start, e)
+			return nil
+		}
+		numUnits = len(chunks)
+		result, extractErr = p.extractProvisionsFromChunksWithLLM(ctx, chunks, evt.RecordID)
+	}
+	if extractErr != nil {
+		if errors.Is(extractErr, ErrPipelineStopped) {
 			p.stopAndPersistProvisions(context.Background(), rec, start)
 			return ErrPipelineStopped
 		}
-		p.persistProvisionsStatus(ctx, rec, start, err)
+		p.persistProvisionsStatus(ctx, rec, start, extractErr)
 		return nil
 	}
-	outputRows := p.buildProvisionOutputRows(result.Provisions, start, len(blocks), time.Since(start).Milliseconds(), result.ModelName)
+	outputRows := p.buildProvisionOutputRows(result.Provisions, start, numUnits, time.Since(start).Milliseconds(), result.ModelName)
 
 	inserted, err := p.Store.SaveProvisions(ctx, SaveProvisionsRequest{
 		InputRecordID: evt.RecordID,
@@ -233,10 +264,10 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		"record_id", evt.RecordID,
 		"inserted_rows", inserted,
 		"provisions_count", len(outputRows),
-		"blocks", len(blocks),
+		"units", numUnits,
 	)
 	p.persistProvisionsStatus(ctx, rec, start, nil)
-	p.logProvisionsSummary(ctx, start, p.Now(), result, inserted, len(blocks), evt.RecordID)
+	p.logProvisionsSummary(ctx, start, p.Now(), result, inserted, numUnits, evt.RecordID)
 	return nil
 }
 
@@ -372,6 +403,182 @@ func (p *ProvisionsProcessor) resolveBlocks(ctx context.Context, evt LineFileGen
 	return buf.Blocks, nil
 }
 
+func (p *ProvisionsProcessor) resolveChunks(ctx context.Context, evt LineFileGeneratedEvent, rec DocMetadataInputRecord) ([]Chunk, error) {
+	if buf := ChunkBufferFromContext(ctx); buf != nil {
+		return buf.Chunks, nil
+	}
+	lineFilePath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26053101) resolve input file for record_id=%d: %w", evt.RecordID, err)
+	}
+	body, err := os.ReadFile(lineFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("(MID_26053102) input file not exist: %s", lineFilePath)
+		}
+		return nil, fmt.Errorf("(MID_26053103) read input file: %w", err)
+	}
+	lines, err := ParseInputLinesIncludingTOC(body)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26053104) parse input lines: %w", err)
+	}
+	artifactDir := strings.TrimSpace(p.ArtifactDir)
+	if artifactDir == "" {
+		artifactDir = strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
+	}
+	artifactBase := buildChunkArtifactBaseName(rec.StagingFilename, rec.ParserName)
+	chunks, err := loadChunksFromArtifactFile(artifactDir, evt.RecordID, artifactBase+".chunks", lines)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26053105) load chunk artifact: %w", err)
+	}
+	return chunks, nil
+}
+
+func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Context, chunks []Chunk, recordID int64) (provisionExtractionResult, error) {
+	extractID := p.Now().Format("20060102-150405")
+
+	type chunkResult struct {
+		payload    map[string]any
+		modelName  string
+		isFallback bool
+		numInChunk int
+	}
+
+	results, runErr := runConcurrent(ctx, p.ExtractProvisionsMaxTasks, len(chunks), func(jobCtx context.Context, idx int) (chunkResult, error) {
+		if isCtxStopped(jobCtx) {
+			return chunkResult{}, ErrPipelineStopped
+		}
+		chunk := chunks[idx]
+		callStart := p.Now()
+		p.Logger.Info("extract provisions start",
+			"record_id", recordID,
+			"idx", idx,
+			"total", len(chunks),
+			"model name", p.ModelName,
+			"prompt name", p.PromptRef,
+		)
+		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
+		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, buildProvisionUserPromptFromChunk(chunk))
+		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
+		numInChunk := 0
+		if err == nil && payload != nil {
+			if raw, ok := payload["provisions"].([]any); ok {
+				numInChunk = len(raw)
+			}
+		}
+		p.logLLMCall(ctx, callID, "extract_provisions",
+			[]string{strings.TrimSpace(modelName)}, p.PromptRef,
+			payload, err, callStart, p.Now(),
+			recordID, idx, len(chunks), 0, numInChunk)
+		if err != nil {
+			p.Logger.Error("failed extracting from chunk", "error", err)
+			return chunkResult{}, fmt.Errorf("(MID_26053106) extract provisions from chunk via llm: %w", err)
+		}
+		p.Logger.Info("extract provisions end  ",
+			"record_id", recordID,
+			"extracted provisions", numInChunk,
+			"ms_used", time.Since(callStart).Milliseconds())
+		return chunkResult{
+			payload:    payload,
+			modelName:  modelName,
+			isFallback: isFallback,
+			numInChunk: numInChunk,
+		}, nil
+	})
+
+	if runErr != nil {
+		if errors.Is(runErr, ErrPipelineStopped) {
+			return provisionExtractionResult{}, ErrPipelineStopped
+		}
+		return provisionExtractionResult{}, runErr
+	}
+
+	language := ""
+	provisions := make([]map[string]any, 0, len(chunks))
+	usedModelName := strings.TrimSpace(p.ModelName)
+	var llmCallCount, fallbackCount int
+
+	for i, res := range results {
+		llmCallCount++
+		if res.isFallback {
+			fallbackCount++
+		}
+		if strings.TrimSpace(res.modelName) != "" {
+			usedModelName = strings.TrimSpace(res.modelName)
+		}
+		if language == "" {
+			language = strings.TrimSpace(asString(res.payload["language"]))
+		}
+		raw := res.payload["provisions"].([]any)
+		provisions = append(provisions, normalizeProvisionList(raw, chunkLineToPage(chunks[i]), chunkLineText(chunks[i]))...)
+	}
+
+	if language == "" {
+		language = "unknown"
+	}
+	return provisionExtractionResult{
+		ExtractID:     extractID,
+		Language:      language,
+		Provisions:    provisions,
+		ModelName:     firstNonEmptyTrimmed(usedModelName, p.ModelName),
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
+	}, nil
+}
+
+func buildProvisionUserPromptFromChunk(chunk Chunk) string {
+	schema := map[string]any{
+		"language": "string",
+		"provisions": []map[string]any{{
+			"name":              "string",
+			"name_en":           "string",
+			"type":              "mandatory|recommended|optional",
+			"provision":         "string",
+			"provision_en":      "string",
+			"provision_desc":    "string",
+			"provision_desc_en": "string",
+			"source_line_spans": []string{"2:10"},
+			"context":           "string",
+			"context_en":        "string",
+			"subject":           "string",
+			"subject_en":        "string",
+			"location_type":     "string",
+			"keywords":          []string{"string"},
+			"keywords_en":       []string{"string"},
+			"confidence":        0.0,
+			"is_explicit":       true,
+			"need_verify":       false,
+			"category_paths":    []any{},
+			"category_path_en":  []any{},
+		}},
+	}
+	schemaJSON, _ := json.Marshal(schema)
+	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nChunk index: " + strconv.Itoa(chunk.SeqNo) +
+		"\n\nInput chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
+}
+
+func chunkLineToPage(chunk Chunk) map[int]int {
+	out := make(map[int]int, len(chunk.Lines))
+	for _, ml := range chunk.Lines {
+		if ml.Line.LineNo > 0 && ml.Line.PageNo > 0 {
+			out[ml.Line.LineNo] = ml.Line.PageNo
+		}
+	}
+	return out
+}
+
+func chunkLineText(chunk Chunk) map[string]string {
+	out := make(map[string]string, len(chunk.Lines))
+	for _, ml := range chunk.Lines {
+		if ml.Line.LineNo <= 0 || ml.Line.PageNo <= 0 {
+			continue
+		}
+		out[fmt.Sprintf("%d:%d", ml.Line.PageNo, ml.Line.LineNo)] = strings.TrimSpace(ml.Line.Content)
+	}
+	return out
+}
+
 func (p *ProvisionsProcessor) blockSize() int {
 	if p.BlockSize >= 1 {
 		return p.BlockSize
@@ -406,7 +613,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 			"prompt name", p.PromptRef,
 		)
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), idx)
-		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, block)
+		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, buildProvisionUserPrompt(block))
 		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
 		numInBlock := 0
 		if err == nil && payload != nil {
@@ -474,8 +681,8 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 	}, nil
 }
 
-func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Context, block Block) (map[string]any, string, error) {
-	payload, err := p.extractProvisionPayload(ctx, block, p.ModelName, p.Extractor)
+func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
+	payload, err := p.extractProvisionPayloadFromText(ctx, inputText, p.ModelName, p.Extractor)
 	if err == nil {
 		return payload, strings.TrimSpace(p.ModelName), nil
 	}
@@ -512,7 +719,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 	if fallbackExt == nil {
 		fallbackExt = p.Extractor
 	}
-	payload, fallbackErr := p.extractProvisionPayload(ctx, block, fallbackModelName, fallbackExt)
+	payload, fallbackErr := p.extractProvisionPayloadFromText(ctx, inputText, fallbackModelName, fallbackExt)
 	if fallbackErr != nil {
 		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
 			p.Logger.Warn("fallback provisions extraction returned empty JSON; treating as empty result",
@@ -530,15 +737,11 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 	return payload, fallbackModelName, nil
 }
 
-func (p *ProvisionsProcessor) extractProvisionPayload(ctx context.Context, block Block, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
-	// p.Logger.Info("To extract provisions",
-	// 	"model", modelName,
-	// 	"prompt_name", p.PromptRef)
-
+func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Context, inputText string, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
 	in := llmclients.JSONExtractionInput{
 		PromptText: p.PromptText,
 		ModelName:  modelName,
-		InputText:  buildProvisionUserPrompt(block),
+		InputText:  inputText,
 	}
 	var (
 		payload map[string]any
