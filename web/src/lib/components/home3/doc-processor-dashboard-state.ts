@@ -64,6 +64,14 @@ export const PIPELINE_STAGES = [
 			'extract_entity_relation',
 			'extract-entity-relation'
 		]
+	},
+	{
+		id: 'extract_inventory_items',
+		label: 'Extract Inventory Items',
+		operations: [
+			'extract_inventory_items',
+			'extract-inventory-items'
+		]
 	}
 ];
 
@@ -80,7 +88,7 @@ export const ALL_CONFIGURABLE_PROCESSOR_IDS = [
 	'extract_metrics', 'extract_provisions', 'generate_summaries',
 	'generate_topics', 'generate_scene_blocks', 'extract_products',
 	'extract_semantic_projections', 'extract_structured_knowledge',
-	'extract_entity_relation'
+	'extract_entity_relation', 'extract_inventory_items'
 ];
 
 export const ALL_PROCESSOR_IDS = [...MANDATORY_PROCESSOR_IDS, ...ALL_CONFIGURABLE_PROCESSOR_IDS];

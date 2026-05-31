@@ -1,0 +1,17 @@
+{
+  "version": "2026-05-31-v1",
+  "ranges": {
+    "pump": {
+      "power": { "min": 0.1, "max": 10000000, "unit": "W" },
+      "pressure": { "min": 0, "max": 10000, "unit": "bar" }
+    },
+    "bearing": {
+      "inner_diameter": { "min": 0.1, "max": 10000, "unit": "mm" },
+      "outer_diameter": { "min": 0.1, "max": 10000, "unit": "mm" }
+    },
+    "motor": {
+      "power": { "min": 0.1, "max": 10000000, "unit": "W" },
+      "voltage": { "min": 1, "max": 1000000, "unit": "V" }
+    }
+  }
+}

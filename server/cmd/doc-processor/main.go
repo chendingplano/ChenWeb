@@ -165,6 +165,7 @@ func main() {
 	semanticProjectionsLLMClient := newLLMClient()
 	knowledgeLLMClient := newLLMClient()
 	entityRelationLLMClient := newLLMClient()
+	inventoryItemsLLMClient := newLLMClient()
 	// productsLLMClient := newLLMClient()
 	// structureLLMClient := newLLMClient()
 	fixedChunkLLMClient := newLLMClient()
@@ -195,6 +196,7 @@ func main() {
 			docprocessing.NewSemanticProjectionsProcessor(inputStore, docprocessing.SemanticProjectionsSQLStore{DB: ApiTypes.ProjectDBHandle}, semanticProjectionsLLMClient, logger),
 			docprocessing.NewStructuredKnowledgeProcessor(inputStore, docprocessing.StructuredKnowledgeSQLStore{DB: ApiTypes.ProjectDBHandle}, knowledgeLLMClient, logger),
 			docprocessing.NewEntityRelationProcessor(inputStore, docprocessing.EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, entityRelationLLMClient, logger),
+			docprocessing.NewInventoryItemsProcessor(inputStore, docprocessing.InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, inventoryItemsLLMClient, logger),
 			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
 			docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
 			docprocessing.NewSceneBlocksProcessor(inputStore, docprocessing.SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, sceneBlocksLLMClient, logger),

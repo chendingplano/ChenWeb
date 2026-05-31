@@ -8,14 +8,20 @@ import (
 )
 
 type artifactSearchFilters struct {
-	InputRecordID *int64   `json:"input_record_id,omitempty"`
-	ArtifactTypes []string `json:"artifact_types,omitempty"`
-	CategoryPath  string   `json:"category_path,omitempty"`
-	TopicType     string   `json:"topic_type,omitempty"`
-	SceneType     string   `json:"scene_type,omitempty"`
-	ProvisionType string   `json:"provision_type,omitempty"`
-	ProductType   string   `json:"product_type,omitempty"`
-	RelationType  string   `json:"relation_type,omitempty"`
+	InputRecordID     *int64   `json:"input_record_id,omitempty"`
+	ArtifactTypes     []string `json:"artifact_types,omitempty"`
+	CategoryPath      string   `json:"category_path,omitempty"`
+	TopicType         string   `json:"topic_type,omitempty"`
+	SceneType         string   `json:"scene_type,omitempty"`
+	ProvisionType     string   `json:"provision_type,omitempty"`
+	ProductType       string   `json:"product_type,omitempty"`
+	RelationType      string   `json:"relation_type,omitempty"`
+	InventoryCategory string   `json:"item_category,omitempty"`
+	Manufacturer      string   `json:"manufacturer,omitempty"`
+	Brand             string   `json:"brand,omitempty"`
+	ModelNumber       string   `json:"model_number,omitempty"`
+	PartNumber        string   `json:"part_number,omitempty"`
+	ValidationStatus  string   `json:"validation_status,omitempty"`
 }
 
 type artifactSearchResult struct {

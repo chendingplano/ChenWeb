@@ -210,6 +210,36 @@ func buildRegistrySearchWhereClause(artifactType string, queryText string, filte
 		args = append(args, filters.RelationType)
 		nextArg++
 	}
+	if filters.InventoryCategory != "" {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(sa.semantic_payload->>'item_category', '') = $%d", nextArg))
+		args = append(args, filters.InventoryCategory)
+		nextArg++
+	}
+	if filters.Manufacturer != "" {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(sa.semantic_payload->>'manufacturer', '') = $%d", nextArg))
+		args = append(args, filters.Manufacturer)
+		nextArg++
+	}
+	if filters.Brand != "" {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(sa.semantic_payload->>'brand', '') = $%d", nextArg))
+		args = append(args, filters.Brand)
+		nextArg++
+	}
+	if filters.ModelNumber != "" {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(sa.semantic_payload->>'model_number', '') = $%d", nextArg))
+		args = append(args, filters.ModelNumber)
+		nextArg++
+	}
+	if filters.PartNumber != "" {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(sa.semantic_payload->>'part_number', '') = $%d", nextArg))
+		args = append(args, filters.PartNumber)
+		nextArg++
+	}
+	if filters.ValidationStatus != "" {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(sa.semantic_payload->>'validation_status', '') = $%d", nextArg))
+		args = append(args, filters.ValidationStatus)
+		nextArg++
+	}
 
 	return strings.Join(clauses, " AND "), args
 }

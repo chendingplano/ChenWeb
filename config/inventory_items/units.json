@@ -1,0 +1,17 @@
+{
+  "version": "2026-05-31-v1",
+  "units": {
+    "w": { "canonical": "W", "factor": 1 },
+    "watt": { "canonical": "W", "factor": 1 },
+    "watts": { "canonical": "W", "factor": 1 },
+    "kw": { "canonical": "W", "factor": 1000 },
+    "v": { "canonical": "V", "factor": 1 },
+    "volt": { "canonical": "V", "factor": 1 },
+    "mm": { "canonical": "mm", "factor": 1 },
+    "cm": { "canonical": "mm", "factor": 10 },
+    "m": { "canonical": "mm", "factor": 1000 },
+    "bar": { "canonical": "bar", "factor": 1 },
+    "kpa": { "canonical": "kPa", "factor": 1 },
+    "mpa": { "canonical": "MPa", "factor": 1 }
+  }
+}

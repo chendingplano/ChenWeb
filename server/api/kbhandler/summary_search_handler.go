@@ -62,13 +62,19 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 		})
 	}
 	filters := artifactSearchFilters{
-		InputRecordID: inputRecordID,
-		CategoryPath:  strings.TrimSpace(c.QueryParam("category_path")),
-		TopicType:     strings.TrimSpace(c.QueryParam("topic_type")),
-		SceneType:     strings.TrimSpace(c.QueryParam("scene_type")),
-		ProvisionType: strings.TrimSpace(c.QueryParam("provision_type")),
-		ProductType:   strings.TrimSpace(c.QueryParam("product_type")),
-		RelationType:  strings.TrimSpace(c.QueryParam("relation_type")),
+		InputRecordID:     inputRecordID,
+		CategoryPath:      strings.TrimSpace(c.QueryParam("category_path")),
+		TopicType:         strings.TrimSpace(c.QueryParam("topic_type")),
+		SceneType:         strings.TrimSpace(c.QueryParam("scene_type")),
+		ProvisionType:     strings.TrimSpace(c.QueryParam("provision_type")),
+		ProductType:       strings.TrimSpace(c.QueryParam("product_type")),
+		RelationType:      strings.TrimSpace(c.QueryParam("relation_type")),
+		InventoryCategory: strings.TrimSpace(c.QueryParam("item_category")),
+		Manufacturer:      strings.TrimSpace(c.QueryParam("manufacturer")),
+		Brand:             strings.TrimSpace(c.QueryParam("brand")),
+		ModelNumber:       strings.TrimSpace(c.QueryParam("model_number")),
+		PartNumber:        strings.TrimSpace(c.QueryParam("part_number")),
+		ValidationStatus:  strings.TrimSpace(c.QueryParam("validation_status")),
 	}
 	if strings.TrimSpace(artifactType) == "all" {
 		filters.ArtifactTypes = parseCSVValues(c.QueryParam("artifact_types"))
