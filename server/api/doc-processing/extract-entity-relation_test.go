@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -232,6 +234,241 @@ func TestEntityRelationExtractionContractShape(t *testing.T) {
 		if _, ok := props[key]; !ok {
 			t.Errorf("schema properties missing %q: %v", key, props)
 		}
+	}
+}
+
+// erSimpleExtractor is a non-thread-safe extractor that returns a fixed result for every call.
+// It does NOT implement LLMStructuredJSONExtractor, so extractEntityRelationPayload uses ExtractJSON.
+type erSimpleExtractor struct {
+	out map[string]any
+	err error
+}
+
+func (e *erSimpleExtractor) ExtractJSON(_ context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+	return e.out, e.err
+}
+
+// erSeqExtractor pops one out/err pair per call (thread-safe for concurrent use).
+type erSeqExtractor struct {
+	mu   sync.Mutex
+	outs []map[string]any
+	errs []error
+}
+
+func (e *erSeqExtractor) ExtractJSON(_ context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out map[string]any
+	var err error
+	if len(e.outs) > 0 {
+		out = e.outs[0]
+		e.outs = e.outs[1:]
+	}
+	if len(e.errs) > 0 {
+		err = e.errs[0]
+		e.errs = e.errs[1:]
+	}
+	return out, err
+}
+
+// erBlockingExtractor blocks each call until a gate signal is received.
+// It is thread-safe and tracks the maximum number of concurrent callers.
+type erBlockingExtractor struct {
+	mu          sync.Mutex
+	inFlight    int
+	MaxInFlight int
+	ready       chan struct{}
+	readyOnce   sync.Once
+	readyAt     int // close ready when inFlight reaches this value
+	gate        chan struct{}
+	out         map[string]any
+}
+
+func (e *erBlockingExtractor) ExtractJSON(ctx context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+	e.mu.Lock()
+	e.inFlight++
+	if e.inFlight > e.MaxInFlight {
+		e.MaxInFlight = e.inFlight
+	}
+	if e.inFlight >= e.readyAt {
+		e.readyOnce.Do(func() { close(e.ready) })
+	}
+	e.mu.Unlock()
+
+	defer func() {
+		e.mu.Lock()
+		e.inFlight--
+		e.mu.Unlock()
+	}()
+
+	select {
+	case <-e.gate:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return e.out, nil
+}
+
+func makeTestChunk(seqNo int) Chunk {
+	return Chunk{
+		SeqNo: seqNo,
+		Lines: []MarkedLine{{Line: Line{Content: "text", LineNo: seqNo}, Mark: "r"}},
+	}
+}
+
+func makeTestProcessor(ext LLMJSONExtractor, maxTasks int) *EntityRelationProcessor {
+	return &EntityRelationProcessor{
+		Logger:                        loggerutil.CreateDefaultLogger("TEST_ER"),
+		Extractor:                     ext,
+		Now:                           time.Now,
+		ModelName:                     "test-model",
+		ExtractEntityRelationMaxTasks: maxTasks,
+	}
+}
+
+func entityPayload(entityName string) map[string]any {
+	return map[string]any{
+		"language": "en",
+		"entities": []any{
+			map[string]any{"entity": entityName, "confidence": 0.9},
+		},
+		"relations": []any{},
+	}
+}
+
+// TestExtractEntityRelationConcurrencyBound verifies that at most MaxTasks
+// goroutines call the extractor concurrently.
+func TestExtractEntityRelationConcurrencyBound(t *testing.T) {
+	const numChunks = 4
+	const maxTasks = 2
+
+	ext := &erBlockingExtractor{
+		ready:   make(chan struct{}),
+		readyAt: maxTasks,
+		gate:    make(chan struct{}, numChunks),
+		out:     entityPayload("ent"),
+	}
+
+	chunks := make([]Chunk, numChunks)
+	for i := range chunks {
+		chunks[i] = makeTestChunk(i + 1)
+	}
+
+	p := makeTestProcessor(ext, maxTasks)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.extractEntityRelationFromChunks(context.Background(), 1, chunks)
+		done <- err
+	}()
+
+	// Wait until maxTasks workers are simultaneously inside ExtractJSON.
+	select {
+	case <-ext.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for workers to reach maxTasks in-flight")
+	}
+
+	// Release all workers.
+	for range numChunks {
+		ext.gate <- struct{}{}
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for extraction to complete")
+	}
+
+	ext.mu.Lock()
+	got := ext.MaxInFlight
+	ext.mu.Unlock()
+	if got != maxTasks {
+		t.Errorf("MaxInFlight = %d, want %d", got, maxTasks)
+	}
+}
+
+// TestExtractEntityRelationChunkOrder verifies that entities from multiple
+// concurrent workers are aggregated in chunk-index order, not completion order.
+func TestExtractEntityRelationChunkOrder(t *testing.T) {
+	seqNos := []int{10, 20, 30}
+	chunks := make([]Chunk, len(seqNos))
+	for i, sn := range seqNos {
+		chunks[i] = makeTestChunk(sn)
+	}
+
+	// Each call returns a single entity; chunk_seq_no is set by processChunk from the actual chunk.
+	ext := &erSeqExtractor{
+		outs: []map[string]any{
+			entityPayload("alpha"),
+			entityPayload("beta"),
+			entityPayload("gamma"),
+		},
+		errs: []error{nil, nil, nil},
+	}
+
+	p := makeTestProcessor(ext, len(chunks)) // fully concurrent
+	result, err := p.extractEntityRelationFromChunks(context.Background(), 1, chunks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Entities) != 3 {
+		t.Fatalf("expected 3 entities, got %d", len(result.Entities))
+	}
+	for i, sn := range seqNos {
+		got, _ := result.Entities[i]["chunk_seq_no"].(int)
+		if got != sn {
+			t.Errorf("entities[%d].chunk_seq_no = %d, want %d (chunk order not preserved)", i, got, sn)
+		}
+	}
+}
+
+// TestExtractEntityRelationSkipsFailedChunks verifies that an LLM error on one
+// chunk increments failedChunks but does not abort sibling chunks.
+func TestExtractEntityRelationSkipsFailedChunks(t *testing.T) {
+	ext := &erSeqExtractor{
+		outs: []map[string]any{
+			entityPayload("alpha"),
+			nil,
+			entityPayload("gamma"),
+		},
+		errs: []error{
+			nil,
+			errors.New("llm transport error"),
+			nil,
+		},
+	}
+
+	chunks := []Chunk{makeTestChunk(1), makeTestChunk(2), makeTestChunk(3)}
+	p := makeTestProcessor(ext, 1) // sequential for determinism
+	result, err := p.extractEntityRelationFromChunks(context.Background(), 1, chunks)
+	if err != nil {
+		t.Fatalf("LLM error on one chunk must not abort extraction, got err=%v", err)
+	}
+	if result.FailedChunks != 1 {
+		t.Errorf("FailedChunks = %d, want 1", result.FailedChunks)
+	}
+	if len(result.Entities) != 2 {
+		t.Errorf("expected 2 entities from successful chunks, got %d", len(result.Entities))
+	}
+}
+
+// TestExtractEntityRelationStopPropagation verifies that a pipeline-stop context
+// causes extractEntityRelationFromChunks to return ErrPipelineStopped.
+func TestExtractEntityRelationStopPropagation(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrPipelineStopped)
+
+	ext := &erSimpleExtractor{out: entityPayload("any")}
+	chunks := []Chunk{makeTestChunk(1), makeTestChunk(2)}
+	p := makeTestProcessor(ext, 1)
+
+	_, err := p.extractEntityRelationFromChunks(ctx, 1, chunks)
+	if !errors.Is(err, ErrPipelineStopped) {
+		t.Errorf("expected ErrPipelineStopped, got %v", err)
 	}
 }
 
