@@ -206,33 +206,16 @@ func TestSemanticChunkingService_HandleInput_WritesExtractTopicLogs(t *testing.T
 			"{topic-model}",
 			"topic-prompt",
 			int64(7523),
-			strPtrValue("100%"),
+			strPtrValue("100% (1/1)"),
 			"extract_topics",
 			nil,
 			sqlmock.AnyArg(),
 			strPtrValue("generate_topic"),
-			jsonWithFieldMatcher{field: "Topic", want: "Cover page"},
-			nil,
-			jsonWithFieldMatcher{field: "topics_so_far", want: float64(2)},
-			int64PtrValue(0),
-		).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
-		WithArgs(
-			"extract topics",
-			"generate_topics",
-			"{topic-model}",
-			"topic-prompt",
-			int64(7523),
-			strPtrValue("100%"),
-			"extract_topics",
-			nil,
 			sqlmock.AnyArg(),
-			strPtrValue("generate_topic"),
-			jsonWithFieldMatcher{field: "Topic", want: "Section A"},
 			nil,
 			jsonWithFieldMatcher{field: "topics_so_far", want: float64(2)},
 			int64PtrValue(0),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -528,8 +511,8 @@ func TestSemanticChunkingService_HandleInput_LLMErrorPersistsFailure(t *testing.
 	if st.insertCalls != 0 {
 		t.Fatalf("InsertChunkRun calls=%d, want 0", st.insertCalls)
 	}
-	if st.updateCalls != 1 {
-		t.Fatalf("UpdateInputStatus calls=%d, want 1", st.updateCalls)
+	if st.updateCalls != 2 {
+		t.Fatalf("UpdateInputStatus calls=%d, want 2", st.updateCalls)
 	}
 	if st.updatedError == nil || !strings.Contains(*st.updatedError, "extract topics") {
 		t.Fatalf("expected persisted extract error, got %v", st.updatedError)

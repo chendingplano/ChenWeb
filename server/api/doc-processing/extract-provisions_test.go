@@ -115,7 +115,10 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
-	if !strings.Contains(extractor.inputText, "n\t10\t2\tparagraph\tThe operator shall inspect") {
+	if !strings.Contains(extractor.inputText, `"flag":"n"`) ||
+		!strings.Contains(extractor.inputText, `"line_number":10`) ||
+		!strings.Contains(extractor.inputText, `"page_number":2`) ||
+		!strings.Contains(extractor.inputText, `"content":"The operator shall inspect pressure relief valves monthly."`) {
 		t.Fatalf("block line not sent to LLM input: %q", extractor.inputText)
 	}
 	if provisionsStore.saveCalled != 1 {
@@ -308,7 +311,10 @@ func TestProvisionsProcessor_FallsBackToInputFileWhenBlockBufferMissing(t *testi
 	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"5001","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
-	if !strings.Contains(extractor.inputText, "n\t1\t1\tparagraph\tThe device must log alarms.") {
+	if !strings.Contains(extractor.inputText, `"flag":"n"`) ||
+		!strings.Contains(extractor.inputText, `"line_number":1`) ||
+		!strings.Contains(extractor.inputText, `"page_number":1`) ||
+		!strings.Contains(extractor.inputText, `"content":"The device must log alarms."`) {
 		t.Fatalf("fallback block input not built from line file: %q", extractor.inputText)
 	}
 }

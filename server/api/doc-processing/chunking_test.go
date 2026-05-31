@@ -710,10 +710,10 @@ func TestService_HandleGenerateTopicsInput_ReadsChunksAndWritesTopics(t *testing
 	if len(ex.inputs) != 2 {
 		t.Fatalf("extractor inputs=%d, want 2", len(ex.inputs))
 	}
-	if !strings.Contains(ex.inputs[0], "n\t1\t1\tparagraph\tAlpha") {
+	if !strings.Contains(ex.inputs[0], `"flag":"n"`) || !strings.Contains(ex.inputs[0], `"line_number":1`) || !strings.Contains(ex.inputs[0], `"content":"Alpha"`) {
 		t.Fatalf("first topic chunk missing flagged line format: %q", ex.inputs[0])
 	}
-	if !strings.Contains(ex.inputs[1], "o\t2\t1\tparagraph\tBeta") {
+	if !strings.Contains(ex.inputs[1], `"flag":"o"`) || !strings.Contains(ex.inputs[1], `"line_number":2`) || !strings.Contains(ex.inputs[1], `"content":"Beta"`) {
 		t.Fatalf("second topic chunk missing overlap flag format: %q", ex.inputs[1])
 	}
 
@@ -1272,8 +1272,8 @@ func TestService_HandleGenerateSummariesInput_SummaryGenerationFailure(t *testin
 	if summaryStatus["proc_status"] != "failed" {
 		t.Fatalf("summary proc_status=%v, want failed", summaryStatus["proc_status"])
 	}
-	if summaryStatus["progress"] != "" && summaryStatus["progress"] != nil {
-		t.Fatalf("summary progress=%v, want empty progress on first-summary failure", summaryStatus["progress"])
+	if summaryStatus["progress"] != "0% (0/1)" {
+		t.Fatalf("summary progress=%v, want 0%% (0/1) on first-summary failure", summaryStatus["progress"])
 	}
 	if !strings.Contains(asString(summaryStatus["error"]), "summary generator boom") {
 		t.Fatalf("summary error=%v, want summary generator boom", summaryStatus["error"])

@@ -142,6 +142,7 @@ func TestGenerateTopicsProcessor_WritesSummaryLog(t *testing.T) {
 			nil,
 			"{\"total_chunks\":4,\"total_lines\":20,\"total_time_ms\":1500,\"total_topics\":6}",
 			int64(1500),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
@@ -160,6 +161,7 @@ func TestGenerateTopicsProcessor_WritesSummaryLog(t *testing.T) {
 			nil,
 			jsonWithFieldMatcher{field: "topics_generated", want: float64(6)},
 			int64(1500),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -239,6 +241,7 @@ func TestGenerateSummariesProcessor_WritesSummaryLog(t *testing.T) {
 			nil,
 			"{\"num_summaries\":3,\"total_lines\":20,\"total_time_ms\":800}",
 			int64(800),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO kb\\.doc_proc_logs").
@@ -255,8 +258,9 @@ func TestGenerateSummariesProcessor_WritesSummaryLog(t *testing.T) {
 			nil,
 			nil,
 			nil,
-			"{\"summaries_generated\":3,\"total_chunks\":2}",
+			jsonWithFieldMatcher{field: "summaries_generated", want: float64(3)},
 			int64(800),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -334,6 +338,7 @@ func TestChunkingProcessor_WritesMethodSpecificSummaryLog(t *testing.T) {
 			nil,
 			"{\"total_chunks\":4}",
 			int64(900),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

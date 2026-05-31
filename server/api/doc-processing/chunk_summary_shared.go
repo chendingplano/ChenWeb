@@ -1,6 +1,7 @@
 package docprocessing
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -405,10 +407,80 @@ func deleteSummaryFiles(baseDir string, recordID int64) error {
 	return nil
 }
 
+// runConcurrent executes n jobs with up to maxTasks goroutines in flight.
+// Results are returned in the original index order. The first error cancels remaining jobs.
+func runConcurrent[T any](ctx context.Context, maxTasks, n int, fn func(ctx context.Context, i int) (T, error)) ([]T, error) {
+	results := make([]T, n)
+	if n == 0 {
+		return results, nil
+	}
+	if maxTasks <= 1 || n == 1 {
+		for i := range n {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			res, err := fn(ctx, i)
+			if err != nil {
+				return nil, err
+			}
+			results[i] = res
+		}
+		return results, nil
+	}
+
+	type jobResult struct {
+		idx int
+		val T
+		err error
+	}
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, maxTasks)
+	resultCh := make(chan jobResult, n)
+	var wg sync.WaitGroup
+
+	for i := range n {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			if cancelCtx.Err() != nil {
+				resultCh <- jobResult{idx: idx, err: cancelCtx.Err()}
+				return
+			}
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			val, err := fn(cancelCtx, idx)
+			if err != nil {
+				cancel()
+			}
+			resultCh <- jobResult{idx: idx, val: val, err: err}
+		}(i)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	var firstErr error
+	for r := range resultCh {
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
+		if r.err == nil {
+			results[r.idx] = r.val
+		}
+	}
+	return results, firstErr
+}
+
 func buildSummaryTree(
 	recordID int64,
 	leafs []SummaryItem,
 	groupSize int,
+	maxTasks int,
 	summarize func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error),
 ) ([]SummaryItem, SummaryItem, error) {
 	if len(leafs) == 0 {
@@ -421,22 +493,28 @@ func buildSummaryTree(
 	current := append([]SummaryItem(nil), leafs...)
 	level := 1
 	for len(current) > 1 {
-		next := make([]SummaryItem, 0, (len(current)+groupSize-1)/groupSize)
-		for i := 0; i < len(current); i += groupSize {
-			end := min(i+groupSize, len(current))
-			children := append([]SummaryItem(nil), current[i:end]...)
-			seqNo := len(next) + 1
-			res, err := summarize(level, seqNo, children)
-			if err != nil {
-				return nil, SummaryItem{}, err
+		numGroups := (len(current) + groupSize - 1) / groupSize
+		groups := make([][]SummaryItem, numGroups)
+		for i := range numGroups {
+			end := min((i+1)*groupSize, len(current))
+			groups[i] = append([]SummaryItem(nil), current[i*groupSize:end]...)
+		}
+		parents, err := runConcurrent(context.Background(), maxTasks, numGroups, func(workerCtx context.Context, i int) (SummaryItem, error) {
+			if workerCtx.Err() != nil {
+				return SummaryItem{}, workerCtx.Err()
 			}
-			parent := SummaryItem{
+			seqNo := i + 1
+			res, err := summarize(level, seqNo, groups[i])
+			if err != nil {
+				return SummaryItem{}, err
+			}
+			return SummaryItem{
 				SummaryID:           buildSummaryID(recordID, level, seqNo),
 				RecordID:            recordID,
 				Level:               level,
 				SeqNo:               seqNo,
-				Lines:               mergeSummaryLineRanges(children),
-				Children:            collectSummaryIDs(children),
+				Lines:               mergeSummaryLineRanges(groups[i]),
+				Children:            collectSummaryIDs(groups[i]),
 				Keywords:            res.Keywords,
 				KeywordsEn:          res.KeywordsEn,
 				CategoryPaths:       res.CategoryPaths,
@@ -445,11 +523,13 @@ func buildSummaryTree(
 				CategoryPathItemsEn: res.CategoryPathItemsEn,
 				Summary:             sanitizeTopicText(res.Summary),
 				SummaryEn:           sanitizeTopicText(res.SummaryEn),
-			}
-			next = append(next, parent)
-			all = append(all, parent)
+			}, nil
+		})
+		if err != nil {
+			return nil, SummaryItem{}, err
 		}
-		current = next
+		all = append(all, parents...)
+		current = parents
 		level++
 	}
 	return all, current[0], nil

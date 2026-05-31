@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -83,6 +84,7 @@ type FixedSizeChunkingService struct {
 	PromptPath                  string
 	PromptErr                   error
 	SummaryGroupSize            int
+	GenerateSummaryMaxTasks     int
 	SummaryModelRef             string
 	SummaryModelCfgPath         string
 	SummaryModelErr             error
@@ -106,6 +108,7 @@ type FixedSizeChunkingService struct {
 }
 
 type summaryProgressTracker struct {
+	mu           sync.Mutex
 	Total        int
 	Completed    int
 	LastProgress string
@@ -116,11 +119,13 @@ func (t *summaryProgressTracker) advance() string {
 	if t == nil {
 		return ""
 	}
+	t.mu.Lock()
 	if t.Completed < t.Total {
 		t.Completed++
 	}
 	progress := formatSummaryProgress(t.Completed, t.Total)
 	t.LastProgress = progress
+	t.mu.Unlock()
 	return progress
 }
 
@@ -128,6 +133,8 @@ func (t *summaryProgressTracker) current() string {
 	if t == nil {
 		return ""
 	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if t.LastProgress != "" {
 		return t.LastProgress
 	}
@@ -264,6 +271,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		PromptPath:                 promptPath,
 		PromptErr:                  promptErr,
 		SummaryGroupSize:           envInt("SUMMARY_GROUP_SIZE", DefaultSummaryGroupSize, 1),
+		GenerateSummaryMaxTasks:    envInt("GENERATE_SUMMARY_MAX_TASKS", 1, 1),
 		SummaryModelRef:            summaryModelRef,
 		SummaryModelCfgPath:        summaryModelCfgPath,
 		SummaryModelErr:            summaryModelErr,
@@ -932,23 +940,19 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		return err
 	}
 
-	leafSummaries := make([]SummaryItem, 0, len(chunks))
-	for _, chunk := range chunks {
-		if isCtxStopped(ctx) {
-			s.stopAndPersistSummaries(context.Background(), rec, inputFilename, start)
-			return ErrPipelineStopped
-		}
-		res, summaryErr := s.generateSummary(ctx, rec.ID, 0, chunk.SeqNo, chunk.Lines, nil)
-		if summaryErr != nil {
-			if isCtxStopped(ctx) {
-				s.stopAndPersistSummaries(context.Background(), rec, inputFilename, start)
-				return ErrPipelineStopped
-			}
-			s.failAndPersistSummaries(ctx, rec, inputFilename, start, summaryErr)
-			return summaryErr
+	s.Logger.Info("generate summaries",
+		"record_id", rec.ID,
+		"model_name", s.SummaryModelName,
+		"prompt", s.PromptRef)
+
+	leafSummaries, leafErr := runConcurrent(ctx, s.GenerateSummaryMaxTasks, len(chunks), func(genCtx context.Context, i int) (SummaryItem, error) {
+		chunk := chunks[i]
+		res, err := s.generateSummary(genCtx, rec.ID, 0, chunk.SeqNo, chunk.Lines, nil)
+		if err != nil {
+			return SummaryItem{}, err
 		}
 		_, regularLines := chunkLineNumbers(chunk)
-		item := SummaryItem{
+		return SummaryItem{
 			SummaryID:           buildSummaryID(rec.ID, 0, chunk.SeqNo),
 			RecordID:            rec.ID,
 			Level:               0,
@@ -962,15 +966,24 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 			CategoryPathItemsEn: res.CategoryPathItemsEn,
 			Summary:             sanitizeTopicText(res.Summary),
 			SummaryEn:           sanitizeTopicText(res.SummaryEn),
+		}, nil
+	})
+	if leafErr != nil {
+		if isCtxStopped(ctx) {
+			s.stopAndPersistSummaries(context.Background(), rec, inputFilename, start)
+			return ErrPipelineStopped
 		}
+		s.failAndPersistSummaries(ctx, rec, inputFilename, start, leafErr)
+		return leafErr
+	}
+	for _, item := range leafSummaries {
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
 			s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 			return err
 		}
-		leafSummaries = append(leafSummaries, item)
 	}
 
-	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
+	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, s.GenerateSummaryMaxTasks, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
 		if isCtxStopped(ctx) {
 			return summaryGenerateResult{}, ErrPipelineStopped
 		}
@@ -1109,6 +1122,15 @@ func (s *FixedSizeChunkingService) generateSummary(
 	callID := uuid.NewString()
 	lineSpans := summaryLogLineSpans(lines, children)
 	logSummaryCall := func(procErr error) {
+		procProgress := s.currentSummaryProgress()
+		if procErr == nil && s.summaryProgressTracker != nil {
+			procProgress = s.summaryProgressTracker.advance()
+			if s.summaryProgressTracker.Persist != nil && procProgress != "" {
+				if err := s.summaryProgressTracker.Persist(procProgress); err != nil {
+					s.Logger.Warn("failed to persist generate_summaries progress", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
+				}
+			}
+		}
 		if resolveDocProcLogDB(s.ProcLogger.DB) == nil {
 			return
 		}
@@ -1126,15 +1148,6 @@ func (s *FixedSizeChunkingService) generateSummary(
 		if procErr != nil {
 			msg := procErr.Error()
 			errStr = &msg
-		}
-		procProgress := s.currentSummaryProgress()
-		if procErr == nil && s.summaryProgressTracker != nil {
-			procProgress = s.summaryProgressTracker.advance()
-			if s.summaryProgressTracker.Persist != nil && procProgress != "" {
-				if err := s.summaryProgressTracker.Persist(procProgress); err != nil {
-					s.Logger.Warn("failed to persist generate_summaries progress", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
-				}
-			}
 		}
 		activityName := "generate_summary"
 		if err := s.ProcLogger.LogGenerateSummary(logCtx, DocProcLogRecord{
@@ -1176,6 +1189,12 @@ func (s *FixedSizeChunkingService) generateSummary(
 		return summaryGenerateResult{}, err
 	}
 	inputText := buildSummaryInputText(lines, children)
+
+	s.Logger.Info("summary start",
+		"record_id", recordID,
+		"level", level,
+		"seq", seqNo,
+		"call_id", callID[:8])
 
 	// Call the LLM
 	in := llmclients.JSONExtractionInput{
@@ -1251,11 +1270,11 @@ func (s *FixedSizeChunkingService) generateSummary(
 		nodes = categoryPathItems[0].Nodes
 	}
 
-	s.Logger.Info("Generated summary",
+	s.Logger.Info("summary end  ",
 		"record_id", recordID,
-		"model_name", s.SummaryModelName,
 		"level", level,
 		"seq", seqNo,
+		"call_id", callID[:8],
 		"ms_used", time.Since(startTime).Milliseconds())
 
 	result := summaryGenerateResult{
@@ -2407,6 +2426,9 @@ func appendSummariesStatus(raw string, p summaryStatusParams) (string, error) {
 	}
 	if strings.TrimSpace(p.ProcStatus) != "" {
 		entry["proc_status"] = sanitizeUTF8Text(strings.TrimSpace(p.ProcStatus))
+		if p.ProcErr != nil {
+			entry["error"] = sanitizeUTF8Text(p.ProcErr.Error())
+		}
 	} else if p.ProcErr == nil {
 		entry["proc_status"] = "success"
 	} else {

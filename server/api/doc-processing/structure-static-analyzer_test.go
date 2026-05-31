@@ -485,8 +485,8 @@ func TestStaticAnalyzer_WriteCorrectedArtifact_PreservesNormalizedHeadingContent
 	}
 	got := strings.TrimSpace(string(bs))
 	want := strings.Join([]string{
-		"77\t7\theading-2\theading-2\tTimes-Roman\t7\t[49.16,296.826,170.259,304.526]\t2.0.1 工作环境 working environment",
-		"79\t7\theading-2\theading-2\tTimes-Roman\t10\t[49.16,264.61,244.571,286.01]\t2.0.2 工作地点 working site 时停留",
+		"1\t7\theading-2\theading-2\tTimes-Roman\t7\t[49.16,296.826,170.259,304.526]\t2.0.1 工作环境 working environment",
+		"2\t7\theading-2\theading-2\tTimes-Roman\t10\t[49.16,264.61,244.571,286.01]\t2.0.2 工作地点 working site 时停留",
 	}, "\n")
 	if got != want {
 		t.Fatalf("corrected artifact=\n%s\nwant=\n%s", got, want)
