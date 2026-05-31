@@ -1,0 +1,30 @@
+{
+  "version": "2026-05-31-v1",
+  "categories": {
+    "pump": {
+      "required_attrs": ["manufacturer"],
+      "specs": {
+        "power": { "canonical_unit": "W", "aliases": ["wattage", "rated_power"] },
+        "pressure": { "canonical_unit": "bar", "aliases": ["working_pressure", "rated_pressure"] }
+      }
+    },
+    "bearing": {
+      "required_attrs": ["manufacturer"],
+      "specs": {
+        "inner_diameter": { "canonical_unit": "mm", "aliases": ["id", "bore"] },
+        "outer_diameter": { "canonical_unit": "mm", "aliases": ["od"] }
+      }
+    },
+    "motor": {
+      "required_attrs": ["manufacturer"],
+      "specs": {
+        "power": { "canonical_unit": "W", "aliases": ["wattage", "rated_power"] },
+        "voltage": { "canonical_unit": "V", "aliases": ["rated_voltage"] }
+      }
+    },
+    "unknown": {
+      "required_attrs": [],
+      "specs": {}
+    }
+  }
+}

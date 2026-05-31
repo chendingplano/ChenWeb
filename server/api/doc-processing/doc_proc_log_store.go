@@ -30,6 +30,7 @@ const EntryTypeEnrichSceneBlocks = "enrich_scene_blocks"
 const EntryTypeExtractStructuredKnowledge = "extract_structured_knowledge"
 const EntryTypeEnrichStructuredKnowledge = "enrich_structured_knowledge"
 const EntryTypeExtractEntityRelation = "extract_entity_relation"
+const EntryTypeExtractInventoryItems = "extract_inventory_items"
 const EntryTypeEnrichMetrics = "enrich_metrics"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
@@ -219,6 +220,12 @@ func (l DocProcLogger) LogExtractEntityRelation(ctx context.Context, rec DocProc
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+func (l DocProcLogger) LogExtractInventoryItems(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractInventoryItems
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 func allowedDocProcLogEntryType(entryType string) bool {
 	switch entryType {
 	case EntryTypeLLMCall, EntryTypeSummary,
@@ -230,7 +237,7 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractProvisions,
 		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,
 		EntryTypeExtractStructuredKnowledge, EntryTypeEnrichStructuredKnowledge,
-		EntryTypeExtractEntityRelation:
+		EntryTypeExtractEntityRelation, EntryTypeExtractInventoryItems:
 		return true
 	default:
 		return false

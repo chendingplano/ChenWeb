@@ -1,0 +1,8 @@
+{
+  "version": "2026-05-31-v1",
+  "aliases": {
+    "bosch": ["bsch"],
+    "pump": ["pmp"],
+    "bearing": ["brg"]
+  }
+}
