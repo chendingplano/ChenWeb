@@ -40,12 +40,13 @@ type ProvisionsProcessor struct {
 	FallbackModelErr     error
 	FallbackModelName    string
 	FallbackExtractor    LLMJSONExtractor
-	BlockSize            int
-	PrevOverlap          int
-	NextOverlap          int
-	RemoveTOC            bool
-	ArtifactDir          string
-	ArtifactWebDir       string
+	BlockSize                 int
+	PrevOverlap               int
+	NextOverlap               int
+	RemoveTOC                 bool
+	ArtifactDir               string
+	ArtifactWebDir            string
+	ExtractProvisionsMaxTasks int
 }
 
 type ProvisionsStore interface {
@@ -114,8 +115,9 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		PrevOverlap:          prevOverlap,
 		NextOverlap:          nextOverlap,
 		RemoveTOC:            removeTOC,
-		ArtifactDir:          strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		ArtifactWebDir:       strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
+		ArtifactDir:               strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		ArtifactWebDir:            strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
+		ExtractProvisionsMaxTasks: envInt("EXTRACT_PROVISIONS_MAX_TASKS", 1, 1),
 	}
 }
 
@@ -382,15 +384,19 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 	blocks []Block,
 	record_id int64) (provisionExtractionResult, error) {
 	extractID := p.Now().Format("20060102-150405")
-	language := ""
-	provisions := make([]map[string]any, 0, len(blocks))
-	usedModelName := strings.TrimSpace(p.ModelName)
-	var llmCallCount, fallbackCount int
 
-	for idx, block := range blocks {
-		if isCtxStopped(ctx) {
-			return provisionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount}, ErrPipelineStopped
+	type blockResult struct {
+		payload    map[string]any
+		modelName  string
+		isFallback bool
+		numInBlock int
+	}
+
+	results, runErr := runConcurrent(ctx, p.ExtractProvisionsMaxTasks, len(blocks), func(jobCtx context.Context, idx int) (blockResult, error) {
+		if isCtxStopped(jobCtx) {
+			return blockResult{}, ErrPipelineStopped
 		}
+		block := blocks[idx]
 		callStart := p.Now()
 		p.Logger.Info("extract provisions start",
 			"record_id", record_id,
@@ -400,11 +406,8 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 			"prompt name", p.PromptRef,
 		)
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), idx)
-		payload, modelName, err := p.extractProvisionPayloadWithFallback(ctx, block)
-		llmCallCount++
-		if strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != "" {
-			fallbackCount++
-		}
+		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, block)
+		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
 		numInBlock := 0
 		if err == nil && payload != nil {
 			if raw, ok := payload["provisions"].([]any); ok {
@@ -414,25 +417,50 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 		p.logLLMCall(ctx, callID, "extract_provisions",
 			[]string{strings.TrimSpace(modelName)}, p.PromptRef,
 			payload, err, callStart, p.Now(),
-			record_id, idx, len(blocks), len(provisions), numInBlock)
+			record_id, idx, len(blocks), 0, numInBlock)
 		if err != nil {
 			p.Logger.Error("failed extracting", "error", err)
-			return provisionExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount},
-				fmt.Errorf("(MID_26050531) extract provisions via llm: %w", err)
+			return blockResult{}, fmt.Errorf("(MID_26050531) extract provisions via llm: %w", err)
 		}
-		usedModelName = strings.TrimSpace(modelName)
-		if language == "" {
-			language = strings.TrimSpace(asString(payload["language"]))
-		}
-		raw := payload["provisions"].([]any)
-		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(block), blockLineText(block))...)
-
 		p.Logger.Info("extract provisions end  ",
 			"record_id", record_id,
-			"extracted provisions", len(raw),
-			"total provisions", len(provisions),
+			"extracted provisions", numInBlock,
 			"ms_used", time.Since(callStart).Milliseconds())
+		return blockResult{
+			payload:    payload,
+			modelName:  modelName,
+			isFallback: isFallback,
+			numInBlock: numInBlock,
+		}, nil
+	})
+
+	if runErr != nil {
+		if errors.Is(runErr, ErrPipelineStopped) {
+			return provisionExtractionResult{}, ErrPipelineStopped
+		}
+		return provisionExtractionResult{}, runErr
 	}
+
+	language := ""
+	provisions := make([]map[string]any, 0, len(blocks))
+	usedModelName := strings.TrimSpace(p.ModelName)
+	var llmCallCount, fallbackCount int
+
+	for i, res := range results {
+		llmCallCount++
+		if res.isFallback {
+			fallbackCount++
+		}
+		if strings.TrimSpace(res.modelName) != "" {
+			usedModelName = strings.TrimSpace(res.modelName)
+		}
+		if language == "" {
+			language = strings.TrimSpace(asString(res.payload["language"]))
+		}
+		raw := res.payload["provisions"].([]any)
+		provisions = append(provisions, normalizeProvisionList(raw, blockLineToPage(blocks[i]), blockLineText(blocks[i]))...)
+	}
+
 	if language == "" {
 		language = "unknown"
 	}
