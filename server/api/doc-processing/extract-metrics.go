@@ -1596,7 +1596,7 @@ func (p *MetricsProcessor) logEnrichMetricsChunk(
 	}
 }
 
-// logMetricsSummary writes one doc_proc_summary log entry after the processor finishes.
+// logMetricsSummary writes one extract_metrics log entry after the processor finishes.
 func (p *MetricsProcessor) logMetricsSummary(
 	ctx context.Context,
 	recordID int64,
@@ -1641,11 +1641,11 @@ func (p *MetricsProcessor) logMetricsSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052813"); err != nil {
+	if err := p.ProcLogger.LogExtractMetricsSummary(ctx, rec, "MID-26052813"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			p.Logger.Info("doc_proc_summary log skipped: doc processor stopped by user request")
+			p.Logger.Info("extract_metrics log skipped: doc processor stopped by user request")
 		} else {
-			p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+			p.Logger.Warn("failed to write extract_metrics log", "error", err)
 		}
 	}
 }

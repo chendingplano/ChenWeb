@@ -252,8 +252,8 @@ func (p *ExtractDocMetadataProcessor) logLLMCall(
 		Errors:       errStr,
 		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052805"); err != nil {
-		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	if err := p.ProcLogger.LogExtractDocMetadata(ctx, rec, "MID-26052805"); err != nil {
+		p.Logger.Warn("failed to write extract_doc_metadata log", "call_id", callID, "error", err)
 	}
 }
 

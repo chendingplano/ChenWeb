@@ -56,7 +56,6 @@ required_processors = [
 	"extract_metrics", 
 	"extract_provisions", 
 	"generate_summaries",
-	"generate_topics", 
 	"generate_scene_blocks", 
 	"extract_semantic_projections",
 	"extract_entity_relation",

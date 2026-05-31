@@ -32,6 +32,7 @@ const EntryTypeEnrichStructuredKnowledge = "enrich_structured_knowledge"
 const EntryTypeExtractEntityRelation = "extract_entity_relation"
 const EntryTypeExtractInventoryItems = "extract_inventory_items"
 const EntryTypeEnrichMetrics = "enrich_metrics"
+const EntryTypeExtractDocMetadata = "extract_doc_metadata"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
@@ -108,9 +109,22 @@ func (l DocProcLogger) LogLLMCall(ctx context.Context, rec DocProcLogRecord, loc
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+func (l DocProcLogger) LogExtractDocMetadata(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractDocMetadata
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 // LogSummary inserts a doc_proc_summary entry.
 func (l DocProcLogger) LogSummary(ctx context.Context, rec DocProcLogRecord, loc string) error {
 	rec.EntryType = EntryTypeSummary
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+// LogExtractMetricsSummary inserts an extract_metrics summary entry.
+func (l DocProcLogger) LogExtractMetricsSummary(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractMetrics
 	rec.LogLoc = callerLoc(2)
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
