@@ -1,9 +1,16 @@
 package docprocessing
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 func TestNormalizeSemanticProjection_Basic(t *testing.T) {
@@ -165,5 +172,225 @@ func TestAppendSemanticProjectionsStatus_Replaces(t *testing.T) {
 	}
 	if entries[0]["proc_status"] != "success" {
 		t.Errorf("expected replaced entry to be success")
+	}
+}
+
+// ---- concurrent extraction tests ----
+
+// noopLogger is a thread-safe no-op logger for use in concurrent tests where fakeLogger
+// would race (it appends to slices without a mutex).
+type noopLogger struct{}
+
+func (noopLogger) Debug(string, ...any)       {}
+func (noopLogger) Line(string, ...any)        {}
+func (noopLogger) Trace(string)               {}
+func (noopLogger) Close()                     {}
+func (noopLogger) Warn(string, ...any)        {}
+func (noopLogger) Error(string, ...any)       {}
+func (noopLogger) Info(string, ...any)        {}
+
+// semProjTestExtractor is a thread-safe LLM extractor for concurrent extraction tests.
+// P1 (candidate) calls are identified by candidateModel; all other calls are treated as P2.
+// When blockP1=true, P1 calls block until releaseP1 is closed, allowing in-flight measurement.
+type semProjTestExtractor struct {
+	mu             sync.Mutex
+	candidateModel string
+	inFlight       int
+	maxInFlight    int
+	arrivedP1      int
+	wantP1         int        // close p1Ready when arrivedP1 reaches this
+	p1Ready        chan struct{}
+	releaseP1      chan struct{} // close to unblock blocked P1 callers
+	blockP1        bool
+	failOnP1       int // return error on the Nth P1 call (1-indexed, 0 = never)
+	p1CallCount    int
+}
+
+func (e *semProjTestExtractor) ExtractJSON(ctx context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	isP1 := in.ModelName == e.candidateModel
+
+	e.mu.Lock()
+	e.inFlight++
+	if e.inFlight > e.maxInFlight {
+		e.maxInFlight = e.inFlight
+	}
+	var shouldFail bool
+	if isP1 {
+		e.p1CallCount++
+		if e.failOnP1 > 0 && e.p1CallCount == e.failOnP1 {
+			shouldFail = true
+		}
+		if e.blockP1 {
+			e.arrivedP1++
+			if e.p1Ready != nil && e.arrivedP1 >= e.wantP1 {
+				select {
+				case <-e.p1Ready:
+				default:
+					close(e.p1Ready)
+				}
+			}
+		}
+	}
+	e.mu.Unlock()
+
+	defer func() {
+		e.mu.Lock()
+		e.inFlight--
+		e.mu.Unlock()
+	}()
+
+	if isP1 && e.blockP1 && e.releaseP1 != nil {
+		select {
+		case <-e.releaseP1:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	if shouldFail {
+		return nil, errors.New("extraction boom")
+	}
+
+	if isP1 {
+		return map[string]any{
+			"semantic_projection": "sp-" + strings.TrimSpace(in.ModelName),
+			"keywords":            []any{"kw"},
+		}, nil
+	}
+	return map[string]any{
+		"language":            "zh",
+		"descriptive_name":    "dname",
+		"descriptive_name_en": "dname-en",
+		"keywords":            []any{"kw"},
+		"keywords_en":         []any{"kw-en"},
+		"category_paths":      []any{},
+		"category_paths_en":   []any{},
+	}, nil
+}
+
+func makeTestSemProjChunks(n int) []Chunk {
+	chunks := make([]Chunk, n)
+	for i := range n {
+		chunks[i] = Chunk{
+			SeqNo: i + 1,
+			Lines: []MarkedLine{{Line: Line{Raw: fmt.Sprintf("line %d", i+1), LineNo: i + 1}}},
+		}
+	}
+	return chunks
+}
+
+func newTestSemProjProcessor(ext LLMJSONExtractor, maxTasks int) *SemanticProjectionsProcessor {
+	return &SemanticProjectionsProcessor{
+		Extractor:           ext,
+		Logger:              noopLogger{},
+		ProcLogger:          DocProcLogger{},
+		Now:                 time.Now,
+		CandidateModelName:  "candidate-model",
+		CandidatePromptText: "p1-prompt",
+		EnrichModelName:     "enrich-model",
+		EnrichPromptText:    "p2-prompt",
+		MaxTasks:            maxTasks,
+	}
+}
+
+// TestExtractSemanticProjections_SequentialCorrectness verifies basic correctness
+// with MaxTasks=1 (sequential path).
+func TestExtractSemanticProjections_SequentialCorrectness(t *testing.T) {
+	ext := &semProjTestExtractor{candidateModel: "candidate-model"}
+	p := newTestSemProjProcessor(ext, 1)
+	chunks := makeTestSemProjChunks(3)
+
+	result, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Projections) != 3 {
+		t.Fatalf("got %d projections, want 3", len(result.Projections))
+	}
+	for i, sn := range result.SeqNos {
+		if sn != i+1 {
+			t.Errorf("SeqNos[%d]=%d, want %d", i, sn, i+1)
+		}
+	}
+}
+
+// TestExtractSemanticProjections_DeterministicOrder verifies that concurrent execution
+// (MaxTasks=3, all chunks in parallel) still produces projections in SeqNo order.
+func TestExtractSemanticProjections_DeterministicOrder(t *testing.T) {
+	ext := &semProjTestExtractor{candidateModel: "candidate-model"}
+	p := newTestSemProjProcessor(ext, 3)
+	chunks := makeTestSemProjChunks(3)
+
+	result, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Projections) != 3 {
+		t.Fatalf("got %d projections, want 3", len(result.Projections))
+	}
+	for i, sn := range result.SeqNos {
+		if sn != i+1 {
+			t.Errorf("SeqNos[%d]=%d, want %d (ordering not preserved)", i, sn, i+1)
+		}
+	}
+}
+
+// TestExtractSemanticProjections_ConcurrentBounded verifies that MaxTasks=2 limits
+// concurrent LLM calls to at most 2 even with 3 chunks.
+func TestExtractSemanticProjections_ConcurrentBounded(t *testing.T) {
+	releaseCh := make(chan struct{})
+	ext := &semProjTestExtractor{
+		candidateModel: "candidate-model",
+		blockP1:        true,
+		wantP1:         2,
+		p1Ready:        make(chan struct{}),
+		releaseP1:      releaseCh,
+	}
+	p := newTestSemProjProcessor(ext, 2)
+	chunks := makeTestSemProjChunks(3)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks)
+		done <- err
+	}()
+
+	// Wait until MaxTasks goroutines are blocked inside P1.
+	select {
+	case <-ext.p1Ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for concurrent P1 callers")
+	}
+
+	ext.mu.Lock()
+	maxSeen := ext.maxInFlight
+	ext.mu.Unlock()
+	if maxSeen > 2 {
+		t.Errorf("maxInFlight=%d exceeded MaxTasks=2", maxSeen)
+	}
+
+	close(releaseCh)
+
+	if err := <-done; err != nil {
+		t.Fatalf("unexpected error after release: %v", err)
+	}
+}
+
+// TestExtractSemanticProjections_FailFast verifies that a P1 error cancels sibling jobs
+// and returns the first error without persisting a success status.
+func TestExtractSemanticProjections_FailFast(t *testing.T) {
+	ext := &semProjTestExtractor{
+		candidateModel: "candidate-model",
+		failOnP1:       1, // fail the very first P1 call
+	}
+	p := newTestSemProjProcessor(ext, 2)
+	chunks := makeTestSemProjChunks(3)
+
+	_, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "extraction boom") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -59,6 +60,26 @@ type MetricsProcessor struct {
 	ModelName                   string
 	ChunkDir                    string
 	MetricEnrichGroupSize       int
+	MaxTasks                    int
+}
+
+type metricsProgressTracker struct {
+	mu        sync.Mutex
+	Total     int
+	Completed int
+}
+
+func (t *metricsProgressTracker) advance() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.Completed < t.Total {
+		t.Completed++
+	}
+	pct := 0
+	if t.Total > 0 {
+		pct = t.Completed * 100 / t.Total
+	}
+	return fmt.Sprintf("%d%% (%d/%d)", pct, t.Completed, t.Total)
 }
 
 type MetricsStore interface {
@@ -164,6 +185,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("METRIC_ENRICH_GROUP_SIZE"))); err == nil && v > 0 {
 		enrichGroupSize = v
 	}
+	maxTasks := envInt("EXTRACT_METRICS_MAX_TASKS", 1, 1)
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	p := &MetricsProcessor{
 		InputStore:                  inputStore,
@@ -205,6 +227,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		ModelName:                   relationModelCfg.ModelName,
 		ChunkDir:                    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		MetricEnrichGroupSize:       enrichGroupSize,
+		MaxTasks:                    maxTasks,
 	}
 	p.forceDisableThinking()
 	applyStructureModelConfigToExtractor(extractor, p.RelationModelCfg)
@@ -279,34 +302,37 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		}
 	}
 
-	// Prefer chunks from the chunking processor (smaller, better for extraction).
-	// Fall back to blocks from the blocking processor, or build blocks from file.
-	var inputChunks []Block
-	if chunkBuf := ChunkBufferFromContext(ctx); chunkBuf != nil {
-		inputChunks = chunksToBlocks(chunkBuf.Chunks)
-	} else if blockBuf := BlockBufferFromContext(ctx); blockBuf != nil {
-		inputChunks = blockBuf.Blocks
-	} else {
-		body, readErr := os.ReadFile(lineFilePath)
-		if readErr != nil {
-			p.Logger.Error("read line file failed", "record_id", evt.RecordID, "path", lineFilePath, "error", readErr)
-			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042466) read line file for record_id=%d: %w", evt.RecordID, readErr))
-			return fmt.Errorf("(MID_26050708) failed reading line file, error:%w, path:%s", readErr, lineFilePath)
-		}
-		bPrev, bNext, bRemoveTOC := blockingConfigFromViper()
-		buf, buildErr := buildBlocks(body, envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1), bPrev, bNext, bRemoveTOC)
-		if buildErr != nil {
-			p.Logger.Error("build blocks failed", "record_id", evt.RecordID, "error", buildErr)
-			p.persistMetricsStatus(ctx, rec, start, fmt.Errorf("(MID_26042461) build blocks for record_id=%d: %w", evt.RecordID, buildErr))
-			return fmt.Errorf("(MID_26050702) failed building blocks, error:%w", buildErr)
-		}
-		inputChunks = buf.Blocks
+	// Load the source line file so chunk line numbers can be resolved.
+	lineBody, readErr := os.ReadFile(lineFilePath)
+	if readErr != nil {
+		p.Logger.Error("read line file failed", "record_id", evt.RecordID, "path", lineFilePath, "error", readErr)
+		procErr := fmt.Errorf("(MID_26042466) read line file for record_id=%d: %w", evt.RecordID, readErr)
+		p.persistMetricsStatus(ctx, rec, start, procErr)
+		return procErr
 	}
+	lines, parseErr := ParseInputLines(lineBody)
+	if parseErr != nil {
+		p.Logger.Error("parse line file failed", "record_id", evt.RecordID, "error", parseErr)
+		procErr := fmt.Errorf("(MID_26042467) parse line file for record_id=%d: %w", evt.RecordID, parseErr)
+		p.persistMetricsStatus(ctx, rec, start, procErr)
+		return procErr
+	}
+
+	// Load chunks from the persisted .chunks artifact; chunking must have run first.
+	artifactBase := buildChunkArtifactBaseName(rec.StagingFilename, rec.ParserName)
+	chunks, chunksErr := loadChunksFromArtifactFile(p.ChunkDir, evt.RecordID, artifactBase+".chunks", lines)
+	if chunksErr != nil {
+		p.Logger.Error("load chunks file failed", "record_id", evt.RecordID, "error", chunksErr)
+		procErr := fmt.Errorf("(MID_26042468) load chunks for record_id=%d: %w", evt.RecordID, chunksErr)
+		p.persistMetricsStatus(ctx, rec, start, procErr)
+		return procErr
+	}
+	inputChunks := chunksToBlocks(chunks)
 	if len(inputChunks) == 0 {
-		err := fmt.Errorf("(MID_26042460) no chunks found for record_id=%d", evt.RecordID)
-		p.Logger.Error("no chunks", "record_id", evt.RecordID, "line_file", lineFilePath)
-		p.persistMetricsStatus(ctx, rec, start, err)
-		return nil
+		procErr := fmt.Errorf("(MID_26042460) no chunks found for record_id=%d", evt.RecordID)
+		p.Logger.Error("no chunks", "record_id", evt.RecordID, "chunks_file", artifactBase+".chunks")
+		p.persistMetricsStatus(ctx, rec, start, procErr)
+		return procErr
 	}
 
 	result, err := p.extractMetricsFromChunksWithLLM(ctx, evt.RecordID, inputChunks)
@@ -541,60 +567,98 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	ctx context.Context,
 	record_id int64,
 	chunks []Block) (metricExtractionResult, error) {
-	mentions := make([]metricCandidateMention, 0, len(chunks))
-	usedMentionModel := strings.TrimSpace(p.MentionModelName)
-	detectedLanguage := "unknown"
-	var fallbackCount, llmCallCount int
 
-	// Step 1: Extract metrics
-	for _, chunk := range chunks {
-		if isCtxStopped(ctx) {
-			return metricExtractionResult{}, ErrPipelineStopped
+	maxTasks := p.MaxTasks
+	if maxTasks <= 0 {
+		maxTasks = 1
+	}
+
+	// ── Pass 1: concurrent candidate extraction ──────────────────────────────
+	type pass1Result struct {
+		mentions    []metricCandidateMention
+		language    string
+		modelName   string
+		didFallback bool
+	}
+
+	tracker := &metricsProgressTracker{Total: len(chunks)}
+
+	p.Logger.Info("extract metric",
+		"record_id", record_id,
+		"chunks", len(chunks),
+		"model name", p.MentionModelName,
+		"prompt", p.MentionPromptRef,
+	)
+	pass1Results, pass1Err := runConcurrent(ctx, maxTasks, len(chunks), func(concCtx context.Context, i int) (pass1Result, error) {
+		chunk := chunks[i]
+		if isCtxStopped(concCtx) {
+			return pass1Result{}, ErrPipelineStopped
 		}
 		userPrompt := buildMetricCandidateUserPrompt(chunk.Lines)
-		startTime := time.Now()
+		chunkStart := time.Now()
 		p.Logger.Info("extract metric start",
 			"record_id", record_id,
 			"num_lines", len(chunk.Lines),
-			"model name", p.MentionModelName,
-			"prompt", p.MentionPromptRef,
+			"chunk", i,
 		)
-
 		callStart := p.Now()
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), chunk.Index)
-		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, userPrompt)
-		llmCallCount++
-		if err == nil && strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) {
-			fallbackCount++
-		}
-		p.logExtractMetricsChunk(ctx, record_id, callID, chunk.Index, len(chunks), len(mentions),
+		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(concCtx, userPrompt)
+		progress := tracker.advance()
+		p.logExtractMetricsChunk(ctx, record_id, callID, chunk.Index, len(chunks),
 			[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef,
-			payload, err, callStart, p.Now())
+			payload, err, callStart, p.Now(), progress)
 		if err != nil {
-			if isCtxStopped(ctx) {
-				return metricExtractionResult{}, ErrPipelineStopped
+			if isCtxStopped(concCtx) {
+				return pass1Result{}, ErrPipelineStopped
 			}
-			return metricExtractionResult{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
+			return pass1Result{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
 		}
-
-		if language := strings.TrimSpace(asString(payload["language"])); language != "" && detectedLanguage == "unknown" {
-			detectedLanguage = language
-		}
-
-		usedMentionModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedMentionModel, p.MentionModelName))
+		lang := strings.TrimSpace(asString(payload["language"]))
+		usedModel := strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.MentionModelName))
+		didFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName)
 		raw, _ := payload["candidates"].([]any)
-		mentions = append(mentions, normalizeMetricCandidateMentions(raw, chunk)...)
-
+		result := pass1Result{
+			mentions:    normalizeMetricCandidateMentions(raw, chunk),
+			language:    lang,
+			modelName:   usedModel,
+			didFallback: didFallback,
+		}
 		p.Logger.Info("extract metric end  ",
 			"record_id", record_id,
-			"extracted", len(mentions),
-			"language", detectedLanguage,
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"extracted", len(result.mentions),
+			"language", lang,
+			"ms_used", time.Since(chunkStart).Milliseconds(),
 		)
+		return result, nil
+	})
+
+	if pass1Err != nil {
+		if isCtxStopped(ctx) {
+			return metricExtractionResult{}, ErrPipelineStopped
+		}
+		return metricExtractionResult{}, pass1Err
 	}
 
-	// Step 2: Skip merge — each mention becomes its own candidate to avoid
-	// spurious source_line_spans from non-adjacent blocks being combined.
+	// Merge pass1 results in chunk-index order (deterministic)
+	mentions := make([]metricCandidateMention, 0, len(chunks))
+	detectedLanguage := "unknown"
+	usedMentionModel := strings.TrimSpace(p.MentionModelName)
+	var fallbackCount int
+	llmCallCount := len(chunks)
+
+	for _, r := range pass1Results {
+		mentions = append(mentions, r.mentions...)
+		if r.language != "" && detectedLanguage == "unknown" {
+			detectedLanguage = r.language
+		}
+		usedMentionModel = strings.TrimSpace(firstNonEmptyTrimmed(r.modelName, usedMentionModel, p.MentionModelName))
+		if r.didFallback {
+			fallbackCount++
+		}
+	}
+
+	// ── Step 2 (deterministic): convert mentions to candidates ───────────────
 	candidates := mentionsAsCandidates(mentions)
 	p.Logger.Info("Metric candidates (merge disabled)",
 		"record_id", record_id,
@@ -603,60 +667,89 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		"record_stage", "post_merge",
 	)
 
-	// Step 3: Enrich (batched by chunk)
-	metrics := make([]map[string]any, 0, len(candidates))
-	uncertain := make([]map[string]any, 0)
-	usedRelationModel := strings.TrimSpace(p.RelationModelName)
+	// ── Pass 2: concurrent enrichment batches ────────────────────────────────
+	type pass2Result struct {
+		metrics   []map[string]any
+		uncertain []map[string]any
+		language  string
+	}
+
 	batches := groupCandidatesByChunk(candidates, p.MetricEnrichGroupSize)
-	p.Logger.Info("extract metrics", 
+	p.Logger.Info("extract metrics",
 		"model_name", p.RelationModelName,
 		"prompt_name", p.RelationPromptRef,
 		"total batches", len(batches),
 	)
-	for batchIdx, batch := range batches {
-		if isCtxStopped(ctx) {
-			return metricExtractionResult{}, ErrPipelineStopped
+
+	tracker.mu.Lock()
+	tracker.Total += len(batches)
+	tracker.mu.Unlock()
+
+	pass2Results, pass2Err := runConcurrent(ctx, maxTasks, len(batches), func(concCtx context.Context, i int) (pass2Result, error) {
+		batch := batches[i]
+		if isCtxStopped(concCtx) {
+			return pass2Result{}, ErrPipelineStopped
 		}
-		startTime := time.Now()
 		candidateIDs := make([]string, 0, len(batch.candidates))
 		for _, c := range batch.candidates {
 			candidateIDs = append(candidateIDs, c.CandidateID)
 		}
-		batch_str := fmt.Sprintf("batch:%d/%d", batchIdx+1, len(batches))
+		batchStart := time.Now()
 		p.Logger.Info("enrich metric start",
 			"record_id", record_id,
-			"batch", batch_str,
+			"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
 			"total_batches", len(batches),
-			"candidate_ids", candidateIDs,
 		)
 		enrichStart := p.Now()
-		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), batchIdx+1)
-		payload, err := p.extractMetricPayload(ctx, buildMetricRelationBatchPrompt(batch.candidates), p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "MID-26052903")
-		llmCallCount++
-		p.logEnrichMetricsChunk(ctx, record_id, enrichCallID, batch.chunkIdx, len(batches), len(metrics),
+		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), i+1)
+		payload, err := p.extractMetricPayload(concCtx, buildMetricRelationBatchPrompt(batch.candidates),
+			p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "MID-26052903")
+		progress := tracker.advance()
+		p.logEnrichMetricsChunk(ctx, record_id, enrichCallID, batch.chunkIdx, len(batches),
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
-			payload, err, enrichStart, p.Now())
+			payload, err, enrichStart, p.Now(), progress)
 		if err != nil {
-			if isCtxStopped(ctx) {
-				return metricExtractionResult{}, ErrPipelineStopped
+			if isCtxStopped(concCtx) {
+				return pass2Result{}, ErrPipelineStopped
 			}
-			return metricExtractionResult{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w", err)
+			return pass2Result{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w", err)
 		}
-		if language := strings.TrimSpace(asString(payload["language"])); language != "" && detectedLanguage == "unknown" {
-			detectedLanguage = language
-		}
-		usedRelationModel = strings.TrimSpace(firstNonEmptyTrimmed(usedRelationModel, p.RelationModelName))
+		lang := strings.TrimSpace(asString(payload["language"]))
 		metricsRaw, _ := payload["metrics"].([]any)
 		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
-		metrics = append(metrics, normalizeMetricList(metricsRaw)...)
-		uncertain = append(uncertain, normalizeMetricList(uncertainRaw)...)
+		result := pass2Result{
+			metrics:   normalizeMetricList(metricsRaw),
+			uncertain: normalizeMetricList(uncertainRaw),
+			language:  lang,
+		}
 		p.Logger.Info("enrich metric end  ",
 			"record_id", record_id,
-			"batch", batch_str,
-			"metrics_so_far", len(metrics),
-			"uncertain_so_far", len(uncertain),
-			"ms_used", time.Since(startTime).Milliseconds(),
+			"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
+			"metrics_in_batch", len(result.metrics),
+			"ms_used", time.Since(batchStart).Milliseconds(),
 		)
+		return result, nil
+	})
+
+	if pass2Err != nil {
+		if isCtxStopped(ctx) {
+			return metricExtractionResult{}, ErrPipelineStopped
+		}
+		return metricExtractionResult{}, pass2Err
+	}
+
+	// Merge pass2 results in batch-index order (deterministic)
+	metrics := make([]map[string]any, 0, len(candidates))
+	uncertain := make([]map[string]any, 0)
+	usedRelationModel := strings.TrimSpace(p.RelationModelName)
+	llmCallCount += len(batches)
+
+	for _, r := range pass2Results {
+		metrics = append(metrics, r.metrics...)
+		uncertain = append(uncertain, r.uncertain...)
+		if r.language != "" && detectedLanguage == "unknown" {
+			detectedLanguage = r.language
+		}
 	}
 
 	preDedupeMetrics := len(metrics)
@@ -1390,24 +1483,23 @@ func (p *MetricsProcessor) logExtractMetricsChunk(
 	ctx context.Context,
 	recordID int64,
 	callID string,
-	chunkIdx, totalChunks, metricsSoFar int,
+	chunkIdx, totalChunks int,
 	modelNames []string, promptName string,
 	payload map[string]any, callErr error,
 	start, end time.Time,
+	progress string,
 ) {
 	candidates, _ := payload["candidates"].([]any)
 	numMetrics := len(candidates)
-	percent := fmt.Sprintf("%.0f%%", float64(chunkIdx)/float64(totalChunks)*100)
 	extraInfo := map[string]any{
-		"chunk":          chunkIdx,
-		"total_chunks":   totalChunks,
-		"num_metrics":    numMetrics,
-		"metrics_so_far": metricsSoFar,
-		"percent":        percent,
+		"chunk":        chunkIdx,
+		"total_chunks": totalChunks,
+		"num_metrics":  numMetrics,
+		"percent":      progress,
 	}
 	extraBytes, _ := json.Marshal(extraInfo)
 	extraStr := string(extraBytes)
-	procProgress := percent
+	procProgress := progress
 
 	var artifactStr *string
 	if payload != nil {
@@ -1450,24 +1542,23 @@ func (p *MetricsProcessor) logEnrichMetricsChunk(
 	ctx context.Context,
 	recordID int64,
 	callID string,
-	chunkIdx, totalChunks, metricsSoFar int,
+	chunkIdx, totalChunks int,
 	modelNames []string, promptName string,
 	payload map[string]any, callErr error,
 	start, end time.Time,
+	progress string,
 ) {
 	metricsRaw, _ := payload["metrics"].([]any)
 	numMetrics := len(metricsRaw)
-	percent := fmt.Sprintf("%.0f%%", float64(chunkIdx)/float64(totalChunks)*100)
 	extraInfo := map[string]any{
-		"chunk":          chunkIdx,
-		"total_chunks":   totalChunks,
-		"num_metrics":    numMetrics,
-		"metrics_so_far": metricsSoFar,
-		"percent":        percent,
+		"chunk":        chunkIdx,
+		"total_chunks": totalChunks,
+		"num_metrics":  numMetrics,
+		"percent":      progress,
 	}
 	extraBytes, _ := json.Marshal(extraInfo)
 	extraStr := string(extraBytes)
-	procProgress := percent
+	procProgress := progress
 
 	var artifactStr *string
 	if payload != nil {

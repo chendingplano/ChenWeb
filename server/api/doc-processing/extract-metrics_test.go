@@ -3,12 +3,18 @@ package docprocessing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 func TestMetricsProcessor_ExtractMetricPayloadUsesStructuredContractWhenAvailable(t *testing.T) {
@@ -81,26 +87,21 @@ func (f *fakeMetricsStore) SaveMetrics(_ context.Context, req SaveMetricsRequest
 	return int64(len(req.Metrics)), nil
 }
 
-// TestMetricsProcessor_ExtractsFromBlocksInContext verifies that HandleEvent uses
-// a BlockBuffer injected via context (as BlockingProcessor would provide) and
-// passes block-format lines to the LLM.
-func TestMetricsProcessor_ExtractsFromBlocksInContext(t *testing.T) {
-	ctx, holder := withBlockBufferHolder(context.Background())
-	holder.mu.Lock()
-	holder.buffer = &BlockBuffer{
-		Blocks: []Block{{
-			Index: 1,
-			Lines: []BlockLine{
-				{Flag: "o", LineNumber: 1, PageNumber: 1, LineType: "heading", Content: "Intro"},
-				{Flag: "n", LineNumber: 2, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
-			},
-		}},
-	}
-	holder.mu.Unlock()
-
+// TestMetricsProcessor_ExtractsFromChunksArtifact verifies that HandleEvent loads
+// chunks from the persisted .chunks file and passes block-format lines to the LLM,
+// preserving overlap flags.
+func TestMetricsProcessor_ExtractsFromChunksArtifact(t *testing.T) {
 	tmp := t.TempDir()
-	resultFilename := filepath.Join(tmp, "ocr_rslt_2005.json")
 	stagingFilename := filepath.Join(tmp, "ocr_rslt_2005.pdf")
+	resultFilename := filepath.Join(tmp, "ocr_rslt_2005.json")
+
+	writeTestArtifacts(t, tmp, 2005, stagingFilename, "opendata",
+		strings.Join([]string{
+			"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tIntro",
+			"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLatency must be <= 200ms",
+		}, "\n"),
+		"overlap: [1]\nlines: [2]\n",
+	)
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              2005,
 		ParserName:      "opendata",
@@ -160,7 +161,7 @@ func TestMetricsProcessor_ExtractsFromBlocksInContext(t *testing.T) {
 	p.ModelErr = nil
 	p.ModelName = "gpt-test"
 
-	if err := p.HandleEvent(ctx, []byte(`{"record_id":"2005","force":true}`)); err != nil {
+	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"2005","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
 	if metricsStore.saveCalled != 1 {
@@ -212,20 +213,19 @@ func TestMetricsProcessor_ExtractsFromBlocksInContext(t *testing.T) {
 }
 
 // TestMetricsProcessor_ExtractsFromLineFileWhenNoContextBuffer verifies that when
-// no BlockBuffer is in context, HandleEvent reads the canonical line file, builds
-// blocks, and passes them to the LLM.
-func TestMetricsProcessor_ExtractsFromLineFileWhenNoContextBuffer(t *testing.T) {
+// TestMetricsProcessor_ExtractsFromLineFileViaChunksArtifact verifies that HandleEvent
+// reads the line file and .chunks artifact, then passes the resolved lines to the LLM.
+func TestMetricsProcessor_ExtractsFromLineFileViaChunksArtifact(t *testing.T) {
 	tmp := t.TempDir()
 	recordID := int64(3001)
 
-	lineFileBody := strings.Join([]string{
-		"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tIntro",
-		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLatency must be <= 200ms",
-	}, "\n")
-	lineFilePath := filepath.Join(tmp, "ocr_rslt_3001_opendata.txt")
-	if err := osWriteFile(lineFilePath, []byte(lineFileBody)); err != nil {
-		t.Fatalf("write line file: %v", err)
-	}
+	writeTestArtifacts(t, tmp, recordID, filepath.Join(tmp, "ocr_rslt_3001.pdf"), "opendata",
+		strings.Join([]string{
+			"1\t1\theading\tTestFont\t12\t[0,0,1,1]\tIntro",
+			"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLatency must be <= 200ms",
+		}, "\n"),
+		"lines: [1, 2]\n",
+	)
 
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              recordID,
@@ -307,29 +307,17 @@ func TestMetricsProcessor_ExtractsFromLineFileWhenNoContextBuffer(t *testing.T) 
 }
 
 func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T) {
-	ctx, holder := withBlockBufferHolder(context.Background())
-	holder.mu.Lock()
-	holder.buffer = &BlockBuffer{
-		Blocks: []Block{
-			{
-				Index: 1,
-				Lines: []BlockLine{
-					{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
-					{Flag: "n", LineNumber: 11, PageNumber: 1, LineType: "paragraph", Content: "The service response time is monitored daily."},
-				},
-			},
-			{
-				Index: 2,
-				Lines: []BlockLine{
-					{Flag: "o", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
-					{Flag: "n", LineNumber: 12, PageNumber: 1, LineType: "paragraph", Content: "Latency violations trigger alerts."},
-				},
-			},
-		},
-	}
-	holder.mu.Unlock()
-
 	tmp := t.TempDir()
+
+	writeTestArtifacts(t, tmp, 3101, filepath.Join(tmp, "ocr_rslt_3101.pdf"), "opendata",
+		strings.Join([]string{
+			"10\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLatency must be <= 200ms",
+			"11\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tThe service response time is monitored daily.",
+			"12\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLatency violations trigger alerts.",
+		}, "\n"),
+		"lines: [10, 11]\n\noverlap: [10]\nlines: [12]\n",
+	)
+
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              3101,
 		ParserName:      "opendata",
@@ -412,7 +400,7 @@ func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T
 	p.PromptRef = p.RelationPromptRef
 	p.ModelName = p.RelationModelName
 
-	if err := p.HandleEvent(ctx, []byte(`{"record_id":"3101","force":true}`)); err != nil {
+	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"3101","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
 	if extractor.structuredCalledCount != 4 {
@@ -475,19 +463,13 @@ func TestMentionsAsCandidates_DropsOverlapOnlyCandidates(t *testing.T) {
 }
 
 func TestMetricsProcessor_RetriesCandidateFallbackOnEmptyJSON(t *testing.T) {
-	ctx, holder := withBlockBufferHolder(context.Background())
-	holder.mu.Lock()
-	holder.buffer = &BlockBuffer{
-		Blocks: []Block{{
-			Index: 1,
-			Lines: []BlockLine{
-				{Flag: "n", LineNumber: 2, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
-			},
-		}},
-	}
-	holder.mu.Unlock()
-
 	tmp := t.TempDir()
+
+	writeTestArtifacts(t, tmp, 3201, filepath.Join(tmp, "ocr_rslt_3201.pdf"), "opendata",
+		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLatency must be <= 200ms\n",
+		"lines: [2]\n",
+	)
+
 	inputStore := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
 		ID:              3201,
 		ParserName:      "opendata",
@@ -556,7 +538,7 @@ func TestMetricsProcessor_RetriesCandidateFallbackOnEmptyJSON(t *testing.T) {
 	p.ModelErr = nil
 	p.ModelName = "relation-model"
 
-	if err := p.HandleEvent(ctx, []byte(`{"record_id":"3201","force":true}`)); err != nil {
+	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"3201","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
 	}
 	if extractor.structuredCalledCount != 3 {
@@ -628,10 +610,417 @@ func TestLoadMetricsPromptFromEnv_UsesPromptDir(t *testing.T) {
 	}
 }
 
-func osWriteFile(path string, body []byte) error {
-	return os.WriteFile(path, body, 0o644)
+// writeTestArtifacts creates the canonical line file and the .chunks artifact file
+// under chunkDir so HandleEvent can load them without a live pipeline context.
+// stagingFilename is the full path used as rec.StagingFilename (e.g. "{tmp}/foo.pdf").
+// lineFileContent uses 7-field TSV: lineNo\tpageNo\tlineType\tfont\tsize\tcoord\tcontent
+// chunksContent uses the .chunks format: "overlap: [...]\nlines: [...]"
+func writeTestArtifacts(t *testing.T, chunkDir string, recordID int64, stagingFilename, parserName, lineFileContent, chunksContent string) {
+	t.Helper()
+	root := strings.TrimSuffix(filepath.Base(stagingFilename), filepath.Ext(stagingFilename))
+	lineFilePath := filepath.Join(chunkDir, root+"_"+parserName+".txt")
+	if err := os.WriteFile(lineFilePath, []byte(lineFileContent), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+	artifactDir := filepath.Join(chunkDir, fmt.Sprintf("%d", recordID/1000), fmt.Sprintf("%d", recordID))
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	chunksPath := filepath.Join(artifactDir, root+"_"+parserName+".chunks")
+	if err := os.WriteFile(chunksPath, []byte(chunksContent), 0o644); err != nil {
+		t.Fatalf("write chunks file: %v", err)
+	}
 }
 
 // func osMkdirAll(path string) error {
 // 	return os.MkdirAll(path, 0o755)
 // }
+
+// ── concurrency test helpers ──────────────────────────────────────────────────
+
+// metricsBlockingExtractor implements LLMJSONExtractor.
+// All calls block on gate; it tracks the maximum simultaneous in-flight count.
+type metricsBlockingExtractor struct {
+	mu          sync.Mutex
+	inFlight    int
+	MaxInFlight int
+	ready       chan struct{}
+	readyOnce   sync.Once
+	readyAt     int // close ready when inFlight reaches this value
+	gate        chan struct{}
+	out         map[string]any
+	err         error
+}
+
+func (e *metricsBlockingExtractor) ExtractJSON(ctx context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+	e.mu.Lock()
+	e.inFlight++
+	if e.inFlight > e.MaxInFlight {
+		e.MaxInFlight = e.inFlight
+	}
+	if e.inFlight >= e.readyAt {
+		e.readyOnce.Do(func() { close(e.ready) })
+	}
+	e.mu.Unlock()
+
+	defer func() {
+		e.mu.Lock()
+		e.inFlight--
+		e.mu.Unlock()
+	}()
+
+	select {
+	case <-e.gate:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if e.err != nil {
+		return nil, e.err
+	}
+	return e.out, nil
+}
+
+// metricsBiPhaseExtractor handles pass1 (non-blocking) and pass2 (blocking).
+// The first totalPass1 calls return pass1Out immediately; subsequent calls block.
+type metricsBiPhaseExtractor struct {
+	mu          sync.Mutex
+	calls       int
+	totalPass1  int
+	pass1Out    map[string]any
+	inFlight    int
+	MaxInFlight int
+	ready       chan struct{}
+	readyOnce   sync.Once
+	readyAt     int
+	gate        chan struct{}
+	pass2Out    map[string]any
+}
+
+func (e *metricsBiPhaseExtractor) ExtractJSON(ctx context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+	e.mu.Lock()
+	n := e.calls
+	e.calls++
+	if n < e.totalPass1 {
+		out := e.pass1Out
+		e.mu.Unlock()
+		return out, nil
+	}
+	e.inFlight++
+	if e.inFlight > e.MaxInFlight {
+		e.MaxInFlight = e.inFlight
+	}
+	if e.inFlight >= e.readyAt {
+		e.readyOnce.Do(func() { close(e.ready) })
+	}
+	e.mu.Unlock()
+
+	defer func() {
+		e.mu.Lock()
+		e.inFlight--
+		e.mu.Unlock()
+	}()
+
+	select {
+	case <-e.gate:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return e.pass2Out, nil
+}
+
+// metricsSeqErrExtractor returns preset outputs then errors for selected calls.
+type metricsSeqErrExtractor struct {
+	mu   sync.Mutex
+	outs []map[string]any
+	errs []error
+}
+
+func (e *metricsSeqErrExtractor) ExtractJSON(_ context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out map[string]any
+	var err error
+	if len(e.outs) > 0 {
+		out = e.outs[0]
+		e.outs = e.outs[1:]
+	}
+	if len(e.errs) > 0 {
+		err = e.errs[0]
+		e.errs = e.errs[1:]
+	}
+	return out, err
+}
+
+func makeTestMetricsProcessor(ext LLMJSONExtractor, maxTasks int) *MetricsProcessor {
+	return &MetricsProcessor{
+		Logger:                loggerutil.CreateDefaultLogger("TEST_METRICS"),
+		ProcLogger:            DocProcLogger{DB: nil},
+		Now:                   time.Now,
+		Extractor:             ext,
+		MentionPromptText:     "candidates prompt",
+		MentionPromptRef:      "test-candidates-prompt",
+		MentionModelName:      "test-mention-model",
+		RelationPromptText:    "enrich prompt",
+		RelationPromptRef:     "test-enrich-prompt",
+		RelationModelName:     "test-relation-model",
+		MetricEnrichGroupSize: 1,
+		MaxTasks:              maxTasks,
+	}
+}
+
+// makeMetricsBlock creates a Block with one normal line at the given line number.
+func makeMetricsBlock(idx, lineNum int) Block {
+	return Block{
+		Index: idx,
+		Lines: []BlockLine{
+			{Flag: "n", LineNumber: lineNum, Content: fmt.Sprintf("metric text %d", lineNum)},
+		},
+	}
+}
+
+// pass1NoCandidates is the extractor output for a Pass 1 chunk with no candidates.
+var pass1NoCandidates = map[string]any{
+	"language":   "en",
+	"candidates": []any{},
+}
+
+// pass1WithCandidate returns a Pass 1 output containing one candidate referencing lineNum.
+func pass1WithCandidate(lineNum int) map[string]any {
+	return map[string]any{
+		"language": "en",
+		"candidates": []any{
+			map[string]any{
+				"metric_name_hint":  "Metric",
+				"subject_hint":      "system",
+				"evidence_quote":    fmt.Sprintf("metric text %d", lineNum),
+				"source_line_spans": []any{float64(lineNum)},
+				"unit_hint":         "",
+				"value_hint":        "",
+				"confidence":        0.9,
+			},
+		},
+	}
+}
+
+// pass2EnrichOut is a minimal Pass 2 enrichment output.
+var pass2EnrichOut = map[string]any{
+	"language": "en",
+	"metrics": []any{
+		map[string]any{
+			"metric_name":       "Metric",
+			"source_line_spans": []any{float64(1)},
+		},
+	},
+	"uncertain_metrics": []any{},
+}
+
+// ── concurrency bound tests ───────────────────────────────────────────────────
+
+// TestMetricsProcessor_Pass1ConcurrencyBound verifies that at most MaxTasks
+// goroutines call the extractor simultaneously during Pass 1.
+func TestMetricsProcessor_Pass1ConcurrencyBound(t *testing.T) {
+	const numChunks = 4
+	const maxTasks = 2
+
+	ext := &metricsBlockingExtractor{
+		ready:   make(chan struct{}),
+		readyAt: maxTasks,
+		gate:    make(chan struct{}, numChunks),
+		out:     pass1NoCandidates,
+	}
+
+	blocks := make([]Block, numChunks)
+	for i := range blocks {
+		blocks[i] = makeMetricsBlock(i+1, i+1)
+	}
+
+	p := makeTestMetricsProcessor(ext, maxTasks)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+		done <- err
+	}()
+
+	select {
+	case <-ext.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for workers to reach maxTasks in-flight")
+	}
+
+	for range numChunks {
+		ext.gate <- struct{}{}
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for extraction to complete")
+	}
+
+	ext.mu.Lock()
+	got := ext.MaxInFlight
+	ext.mu.Unlock()
+	if got != maxTasks {
+		t.Errorf("Pass1 MaxInFlight = %d, want %d", got, maxTasks)
+	}
+}
+
+// TestMetricsProcessor_Pass2ConcurrencyBound verifies that at most MaxTasks
+// goroutines call the extractor simultaneously during Pass 2 enrichment.
+func TestMetricsProcessor_Pass2ConcurrencyBound(t *testing.T) {
+	const numChunks = 3
+	const maxTasks = 2
+
+	// Pass 1: numChunks non-blocking calls each returning one candidate.
+	// Pass 2: numChunks blocking calls (MetricEnrichGroupSize=1 → one batch per candidate).
+	ext := &metricsBiPhaseExtractor{
+		totalPass1: numChunks,
+		pass1Out:   pass1WithCandidate(1),
+		ready:      make(chan struct{}),
+		readyAt:    maxTasks,
+		gate:       make(chan struct{}, numChunks),
+		pass2Out:   pass2EnrichOut,
+	}
+
+	blocks := make([]Block, numChunks)
+	for i := range blocks {
+		blocks[i] = makeMetricsBlock(i+1, 1)
+	}
+
+	p := makeTestMetricsProcessor(ext, maxTasks)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+		done <- err
+	}()
+
+	select {
+	case <-ext.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Pass 2 workers to reach maxTasks in-flight")
+	}
+
+	for range numChunks {
+		ext.gate <- struct{}{}
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for extraction to complete")
+	}
+
+	ext.mu.Lock()
+	got := ext.MaxInFlight
+	ext.mu.Unlock()
+	if got != maxTasks {
+		t.Errorf("Pass2 MaxInFlight = %d, want %d", got, maxTasks)
+	}
+}
+
+// TestMetricsProcessor_Pass1DeterministicOrder verifies that metrics from
+// sequential pass 1 and pass 2 execution are collected correctly.
+func TestMetricsProcessor_Pass1DeterministicOrder(t *testing.T) {
+	lineNums := []int{10, 20, 30}
+	blocks := make([]Block, len(lineNums))
+	for i, ln := range lineNums {
+		blocks[i] = makeMetricsBlock(i+1, ln)
+	}
+
+	// 3 pass-1 responses + 3 pass-2 enrich responses (one batch per candidate).
+	enrichOut := func(lineNum int) map[string]any {
+		return map[string]any{
+			"language": "en",
+			"metrics": []any{
+				map[string]any{
+					"metric_name":       fmt.Sprintf("Metric%d", lineNum),
+					"source_line_spans": []any{float64(lineNum)},
+				},
+			},
+			"uncertain_metrics": []any{},
+		}
+	}
+	ext := &metricsSeqErrExtractor{
+		outs: []map[string]any{
+			pass1WithCandidate(lineNums[0]),
+			pass1WithCandidate(lineNums[1]),
+			pass1WithCandidate(lineNums[2]),
+			enrichOut(lineNums[0]),
+			enrichOut(lineNums[1]),
+			enrichOut(lineNums[2]),
+		},
+		errs: []error{nil, nil, nil, nil, nil, nil},
+	}
+
+	p := makeTestMetricsProcessor(ext, 1) // sequential — deterministic call order
+	result, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// After dedup, 3 distinct metrics (different metric_name values).
+	if len(result.Metrics) != 3 {
+		t.Fatalf("expected 3 metrics after dedup, got %d", len(result.Metrics))
+	}
+}
+
+// TestMetricsProcessor_Pass1FailFast verifies that a Pass 1 LLM error causes
+// extractMetricsFromChunksWithLLM to return that error.
+func TestMetricsProcessor_Pass1FailFast(t *testing.T) {
+	ext := &metricsSeqErrExtractor{
+		outs: []map[string]any{pass1NoCandidates, nil, pass1NoCandidates},
+		errs: []error{nil, errors.New("candidate extraction boom"), nil},
+	}
+
+	blocks := []Block{
+		makeMetricsBlock(1, 1),
+		makeMetricsBlock(2, 2),
+		makeMetricsBlock(3, 3),
+	}
+
+	p := makeTestMetricsProcessor(ext, 1) // sequential so the error always fires
+	_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "candidate extraction boom") {
+		t.Errorf("error does not contain expected message: %v", err)
+	}
+}
+
+// TestMetricsProcessor_Pass2FailFast verifies that a Pass 2 LLM error causes
+// extractMetricsFromChunksWithLLM to return that error.
+func TestMetricsProcessor_Pass2FailFast(t *testing.T) {
+	// Pass 1: 2 chunks, each with one candidate → 2 batches for pass 2.
+	// Pass 2: first batch succeeds, second fails.
+	ext := &metricsSeqErrExtractor{
+		outs: []map[string]any{
+			pass1WithCandidate(1),
+			pass1WithCandidate(1),
+			pass2EnrichOut,
+			nil,
+		},
+		errs: []error{nil, nil, nil, errors.New("enrich batch boom")},
+	}
+
+	blocks := []Block{
+		makeMetricsBlock(1, 1),
+		makeMetricsBlock(2, 1),
+	}
+
+	p := makeTestMetricsProcessor(ext, 1) // sequential so the error always fires
+	_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+	if err == nil {
+		t.Fatal("expected error from Pass 2, got nil")
+	}
+	if !strings.Contains(err.Error(), "enrich batch boom") {
+		t.Errorf("error does not contain expected message: %v", err)
+	}
+}
