@@ -26,6 +26,7 @@
 	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
 	import SceneBlocksView from '$lib/components/home3/scene-blocks-view.svelte';
 	import ProductsView from '$lib/components/home3/products-view.svelte';
+	import CategoryReviewView from '$lib/components/home3/category-review-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import {
 		getProvisionCategory,
@@ -51,6 +52,7 @@
 		| 'kb-scene-blocks'
 		| 'kb-products'
 		| 'kb-chunks'
+		| 'kb-category-review'
 		| 'kb-summary-graph'
 		| 'kb-summary-tree'
 		| 'kb-topic-graph'
@@ -162,6 +164,11 @@
 					id: 'kb-chunks',
 					label: 'Document Chunking',
 					description: 'Browse chunk output'
+				},
+				{
+					id: 'kb-category-review',
+					label: 'Category Review',
+					description: 'Curate the inventory category ontology'
 				}
 			]
 		}
@@ -241,7 +248,9 @@
 	let hoverBg = $derived(darkMode ? 'rgba(45,51,72,0.6)' : 'rgba(228,230,235,0.7)');
 
 	let needsActiveStore = $derived(
-		activeSection !== 'kb-search' && !isUnderConstructionKnowledgeSection(activeSection)
+		activeSection !== 'kb-search' &&
+			activeSection !== 'kb-category-review' &&
+			!isUnderConstructionKnowledgeSection(activeSection)
 	);
 
 	function selectSection(id: KbSectionId) {
@@ -254,7 +263,8 @@
 		if (id === 'kb-import') {
 			injestionOpen = true;
 		}
-		if (id === 'kb-chunks') {
+		const docProcItem = menuItems.find((item) => item.id === 'kb-chunks');
+		if (id === 'kb-chunks' || docProcItem?.children?.some((child) => child.id === id)) {
 			documentProcessingOpen = true;
 		}
 		const docWikiItem = menuItems.find((item) => item.id === 'kb-doc-wiki');
@@ -533,6 +543,8 @@
 				/>
 			{:else if activeSection === 'kb-chunks'}
 				<ChunkMgmtView {darkMode} />
+			{:else if activeSection === 'kb-category-review'}
+				<CategoryReviewView {darkMode} />
 			{:else if activeSection === 'kb-summary-graph'}
 				<ArtifactWikiView {darkMode} />
 			{:else if activeSection === 'kb-summary-tree'}

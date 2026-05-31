@@ -22,44 +22,45 @@ import (
 )
 
 type SceneBlocksProcessor struct {
-	InputStore         DocMetadataStore
-	Store              SceneObjectsStore
-	Extractor          LLMJSONExtractor
-	Logger             ApiTypes.JimoLogger
-	ProcLogger         DocProcLogger
-	Now                func() time.Time
-	MentionPromptText  string
-	MentionPromptRef   string
-	MentionPromptErr   error
-	MentionModelRef    string
-	MentionModelErr    error
-	MentionModelName   string
-	MentionModelCfg    structureModelConfig
-	RelationPromptText string
-	RelationPromptRef  string
-	RelationPromptErr  error
-	RelationModelRef   string
-	RelationModelErr   error
-	RelationModelName  string
-	RelationModelCfg   structureModelConfig
-	PromptText         string
-	PromptRef          string
-	PromptErr          error
-	ModelRef           string
-	ModelErr           error
-	ModelName          string
-	ModelCfg           structureModelConfig
-	FallbackModelRef   string
-	FallbackModelErr   error
-	FallbackModelName  string
-	FallbackModelCfg   structureModelConfig
-	ChunkSize          int
-	OverlapPercent     int
-	PrevOverlap        int
-	NextOverlap        int
-	RemoveTOC          bool
-	ArtifactDir        string
-	ArtifactWebDir     string
+	InputStore                  DocMetadataStore
+	Store                       SceneObjectsStore
+	Extractor                   LLMJSONExtractor
+	Logger                      ApiTypes.JimoLogger
+	ProcLogger                  DocProcLogger
+	Now                         func() time.Time
+	MentionPromptText           string
+	MentionPromptRef            string
+	MentionPromptErr            error
+	MentionModelRef             string
+	MentionModelErr             error
+	MentionModelName            string
+	MentionModelCfg             structureModelConfig
+	RelationPromptText          string
+	RelationPromptRef           string
+	RelationPromptErr           error
+	RelationModelRef            string
+	RelationModelErr            error
+	RelationModelName           string
+	RelationModelCfg            structureModelConfig
+	PromptText                  string
+	PromptRef                   string
+	PromptErr                   error
+	ModelRef                    string
+	ModelErr                    error
+	ModelName                   string
+	ModelCfg                    structureModelConfig
+	FallbackModelRef            string
+	FallbackModelErr            error
+	FallbackModelName           string
+	FallbackModelCfg            structureModelConfig
+	ChunkSize                   int
+	OverlapPercent              int
+	PrevOverlap                 int
+	NextOverlap                 int
+	RemoveTOC                   bool
+	ArtifactDir                 string
+	ArtifactWebDir              string
+	GenerateSceneBlocksMaxTasks int
 }
 
 type sceneExtractionResult struct {
@@ -171,44 +172,45 @@ func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStor
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &SceneBlocksProcessor{
-		InputStore:         inputStore,
-		Store:              store,
-		Extractor:          extractor,
-		Logger:             logger,
-		ProcLogger:         DocProcLogger{DB: ApiTypes.ProjectDBHandle},
-		Now:                time.Now,
-		MentionPromptText:  mentionPromptText,
-		MentionPromptRef:   mentionPromptRef,
-		MentionPromptErr:   mentionPromptErr,
-		MentionModelRef:    mentionModelRef,
-		MentionModelErr:    mentionModelErr,
-		MentionModelName:   mentionModelCfg.ModelName,
-		MentionModelCfg:    mentionModelCfg,
-		RelationPromptText: relationPromptText,
-		RelationPromptRef:  relationPromptRef,
-		RelationPromptErr:  relationPromptErr,
-		RelationModelRef:   relationModelRef,
-		RelationModelErr:   relationModelErr,
-		RelationModelName:  relationModelCfg.ModelName,
-		RelationModelCfg:   relationModelCfg,
-		PromptText:         relationPromptText,
-		PromptRef:          relationPromptRef,
-		PromptErr:          relationPromptErr,
-		ModelRef:           relationModelRef,
-		ModelErr:           relationModelErr,
-		ModelName:          relationModelCfg.ModelName,
-		ModelCfg:           relationModelCfg,
-		FallbackModelRef:   fallbackModelRef,
-		FallbackModelErr:   fallbackModelErr,
-		FallbackModelName:  fallbackModelCfg.ModelName,
-		FallbackModelCfg:   fallbackModelCfg,
-		ChunkSize:          envInt("CHUNK_SIZE", DefaultChunkSize, 1),
-		OverlapPercent:     envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
-		PrevOverlap:        prevOverlap,
-		NextOverlap:        nextOverlap,
-		RemoveTOC:          removeTOC,
-		ArtifactDir:        strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		ArtifactWebDir:     strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
+		InputStore:                  inputStore,
+		Store:                       store,
+		Extractor:                   extractor,
+		Logger:                      logger,
+		ProcLogger:                  DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		Now:                         time.Now,
+		MentionPromptText:           mentionPromptText,
+		MentionPromptRef:            mentionPromptRef,
+		MentionPromptErr:            mentionPromptErr,
+		MentionModelRef:             mentionModelRef,
+		MentionModelErr:             mentionModelErr,
+		MentionModelName:            mentionModelCfg.ModelName,
+		MentionModelCfg:             mentionModelCfg,
+		RelationPromptText:          relationPromptText,
+		RelationPromptRef:           relationPromptRef,
+		RelationPromptErr:           relationPromptErr,
+		RelationModelRef:            relationModelRef,
+		RelationModelErr:            relationModelErr,
+		RelationModelName:           relationModelCfg.ModelName,
+		RelationModelCfg:            relationModelCfg,
+		PromptText:                  relationPromptText,
+		PromptRef:                   relationPromptRef,
+		PromptErr:                   relationPromptErr,
+		ModelRef:                    relationModelRef,
+		ModelErr:                    relationModelErr,
+		ModelName:                   relationModelCfg.ModelName,
+		ModelCfg:                    relationModelCfg,
+		FallbackModelRef:            fallbackModelRef,
+		FallbackModelErr:            fallbackModelErr,
+		FallbackModelName:           fallbackModelCfg.ModelName,
+		FallbackModelCfg:            fallbackModelCfg,
+		ChunkSize:                   envInt("CHUNK_SIZE", DefaultChunkSize, 1),
+		OverlapPercent:              envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
+		PrevOverlap:                 prevOverlap,
+		NextOverlap:                 nextOverlap,
+		RemoveTOC:                   removeTOC,
+		ArtifactDir:                 strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		ArtifactWebDir:              strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
+		GenerateSceneBlocksMaxTasks: envInt("GENERATE_SCENE_BLOCKS_MAX_TASKS", 1, 1),
 	}
 }
 
@@ -401,41 +403,69 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 	start time.Time,
 ) (sceneExtractionResult, error) {
 	eventID := eventIDFromContext(ctx)
-	mentions := make([]sceneCandidateMention, 0, len(chunks))
 	usedMentionModel := strings.TrimSpace(p.MentionModelName)
-	llmCallCount := 0
-	fallbackCount := 0
-	for idx, chunk := range chunks {
-		if isCtxStopped(ctx) {
-			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
+
+	type pass1ChunkResult struct {
+		mentions   []sceneCandidateMention
+		modelName  string
+		isFallback bool
+	}
+
+	p.Logger.Info("extract scene blocks",
+			"record_id", record_id,
+			"model_names", fmt.Sprintf("%s/%s", p.MentionModelName, p.RelationModelName),
+			"prompt_names", fmt.Sprintf("%s/%s", p.RelationPromptRef, p.MentionPromptRef),
+		)
+
+	pass1Results, pass1Err := runConcurrent(ctx, p.GenerateSceneBlocksMaxTasks, len(chunks), func(jobCtx context.Context, idx int) (pass1ChunkResult, error) {
+		if isCtxStopped(jobCtx) {
+			return pass1ChunkResult{}, ErrPipelineStopped
 		}
+		chunk := chunks[idx]
 		callStart := p.Now()
-		p.Logger.Info("extract scene - start",
+		p.Logger.Info("extract scene start",
 			"idx", idx,
 			"record_id", record_id,
 			"total chunks", len(chunks),
-			"model_name", p.MentionModelName,
-			"prompt_name", p.MentionPromptRef,
 		)
-		payload, modelName, err := p.extractScenePayloadWithFallback(ctx, buildSceneCandidateUserPrompt(chunk), p.MentionPromptText, p.MentionPromptRef, p.MentionModelName, p.MentionModelCfg)
-		llmCallCount++
-		if strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != "" {
-			fallbackCount++
-		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_c%d", eventID, idx), "extract_scene_block_candidates", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), payload, err, callStart, p.Now(), record_id, idx, len(chunks), len(mentions))
+		payload, modelName, err := p.extractScenePayloadWithFallback(jobCtx, buildSceneCandidateUserPrompt(chunk), p.MentionPromptText, p.MentionPromptRef, p.MentionModelName, p.MentionModelCfg)
+		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName) && strings.TrimSpace(modelName) != ""
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p1_c%d", eventID, idx), "extract_scene_block_candidates", 1, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef), payload, err, callStart, p.Now(), record_id, idx, len(chunks), 0)
 		p1Percent := (idx + 1) * 100 / len(chunks) / 2
 		p.persistSceneBlocksInProgressStatus(ctx, rec, start, fmt.Sprintf("%d%% (pass 1: %d/%d)", p1Percent, idx+1, len(chunks)))
 		if err != nil {
-			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051809) extract scene candidates via llm for chunk %d: %w", chunk.SeqNo, err)
+			return pass1ChunkResult{}, fmt.Errorf("(MID_26051809) extract scene candidates via llm for chunk %d: %w", chunk.SeqNo, err)
 		}
-		usedMentionModel = strings.TrimSpace(modelName)
 		raw, _ := payload["candidates"].([]any)
-		mentions = append(mentions, normalizeSceneCandidateMentions(raw, chunk)...)
-		p.Logger.Info("extract scene - end  ",
+		mentions := normalizeSceneCandidateMentions(raw, chunk)
+		p.Logger.Info("extract scene end  ",
 			"extracted", len(raw),
-			"candidates_so_far", len(mentions),
 			"ms_used", time.Since(callStart).Milliseconds(),
 		)
+		return pass1ChunkResult{
+			mentions:   mentions,
+			modelName:  modelName,
+			isFallback: isFallback,
+		}, nil
+	})
+	if pass1Err != nil {
+		if isCtxStopped(ctx) {
+			return sceneExtractionResult{}, ErrPipelineStopped
+		}
+		return sceneExtractionResult{}, pass1Err
+	}
+
+	llmCallCount := len(chunks)
+	fallbackCount := 0
+	mentions := make([]sceneCandidateMention, 0, len(chunks))
+	for _, r := range pass1Results {
+		if r.isFallback {
+			fallbackCount++
+		}
+		if strings.TrimSpace(r.modelName) != "" {
+			usedMentionModel = strings.TrimSpace(r.modelName)
+		}
+		mentions = append(mentions, r.mentions...)
 	}
 
 	candidates := mergeSceneCandidateMentions(mentions)
@@ -446,49 +476,70 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		"record_stage", "post_merge",
 	)
 
-	sceneBlocks := make([]map[string]any, 0, len(candidates))
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
 	chunkGroups := groupSceneCandidatesByChunk(candidates)
-	for groupIdx, group := range chunkGroups {
-		if isCtxStopped(ctx) {
-			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, ErrPipelineStopped
+
+	type pass2GroupResult struct {
+		blocks     []map[string]any
+		modelName  string
+		isFallback bool
+	}
+
+	pass2Results, pass2Err := runConcurrent(ctx, p.GenerateSceneBlocksMaxTasks, len(chunkGroups), func(jobCtx context.Context, groupIdx int) (pass2GroupResult, error) {
+		if isCtxStopped(jobCtx) {
+			return pass2GroupResult{}, ErrPipelineStopped
 		}
+		group := chunkGroups[groupIdx]
 		callStart := p.Now()
 		candidateIDs := make([]string, 0, len(group.Candidates))
 		for _, c := range group.Candidates {
 			candidateIDs = append(candidateIDs, c.CandidateID)
 		}
-		p.Logger.Info("enrich scene start",
+		p.Logger.Info("enrich scene start ",
 			"record_id", record_id,
 			"group_idx", groupIdx,
 			"chunk_index", group.ChunkIndex,
-			"candidates", candidateIDs,
-			"model_name", p.RelationModelName,
-			"prompt_name", p.RelationPromptRef,
 		)
-		payload, modelName, err := p.extractScenePayloadWithFallback(ctx, buildSceneRelationUserPromptForGroup(group.Candidates), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
-		llmCallCount++
-		if strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != "" {
-			fallbackCount++
-		}
-		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_g%d", eventID, groupIdx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), payload, err, callStart, p.Now(), record_id, groupIdx, len(chunkGroups), len(sceneBlocks))
+		payload, modelName, err := p.extractScenePayloadWithFallback(jobCtx, buildSceneRelationUserPromptForGroup(group.Candidates), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
+		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.RelationModelName) && strings.TrimSpace(modelName) != ""
+		p.logLLMCall(ctx, fmt.Sprintf("%s_p2_g%d", eventID, groupIdx), "enrich_scene_blocks", 2, []string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef), payload, err, callStart, p.Now(), record_id, groupIdx, len(chunkGroups), 0)
 		p2Percent := (groupIdx+1)*100/len(chunkGroups)/2 + 50
 		p.persistSceneBlocksInProgressStatus(ctx, rec, start, fmt.Sprintf("%d%% (pass 2: %d/%d)", p2Percent, groupIdx+1, len(chunkGroups)))
 		if err != nil {
-			return sceneExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, MentionsCount: len(mentions)}, fmt.Errorf("(MID_26051827) enrich scene blocks via llm for chunk group %d (candidates: %v): %w", group.ChunkIndex, candidateIDs, err)
+			return pass2GroupResult{}, fmt.Errorf("(MID_26051827) enrich scene blocks via llm for chunk group %d (candidates: %v): %w", group.ChunkIndex, candidateIDs, err)
 		}
-		usedRelationModel = strings.TrimSpace(modelName)
 		raw, _ := payload["scene_blocks"].([]any)
 		normalized := normalizeSceneBlockListForGroup(raw, group.Candidates)
-		sceneBlocks = append(sceneBlocks, normalized...)
-		p.Logger.Info("enrich scene end  ",
+		p.Logger.Info("enrich scene end   ",
 			"record_id", record_id,
 			"group_idx", groupIdx,
 			"chunk_index", group.ChunkIndex,
 			"blocks_for_group", len(normalized),
-			"scene_blocks", len(sceneBlocks),
 			"ms_used", time.Since(callStart).Milliseconds(),
 		)
+		return pass2GroupResult{
+			blocks:     normalized,
+			modelName:  modelName,
+			isFallback: isFallback,
+		}, nil
+	})
+	if pass2Err != nil {
+		if isCtxStopped(ctx) {
+			return sceneExtractionResult{}, ErrPipelineStopped
+		}
+		return sceneExtractionResult{}, pass2Err
+	}
+
+	llmCallCount += len(chunkGroups)
+	sceneBlocks := make([]map[string]any, 0, len(chunkGroups))
+	for _, r := range pass2Results {
+		if r.isFallback {
+			fallbackCount++
+		}
+		if strings.TrimSpace(r.modelName) != "" {
+			usedRelationModel = strings.TrimSpace(r.modelName)
+		}
+		sceneBlocks = append(sceneBlocks, r.blocks...)
 	}
 
 	preDedupeCount := len(sceneBlocks)

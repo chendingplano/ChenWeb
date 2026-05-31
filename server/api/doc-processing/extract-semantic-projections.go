@@ -335,7 +335,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		// Pass 1: extract semantic projection candidate
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
 		callStart := p.Now()
-		p.Logger.Info("semantic proj start  ",
+		p.Logger.Info("semantic proj start       ",
 			"record_id", recordID,
 			"chunk_idx", i,
 			"seq_no", chunk.SeqNo,
@@ -368,7 +368,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			return semanticProjectionWorkerResult{},
 				fmt.Errorf("(MID_26052120) extract semantic projection candidate for chunk seq=%d: %w", chunk.SeqNo, err)
 		}
-		p.Logger.Info("semantic proj end    ",
+		p.Logger.Info("semantic proj end         ",
 			"record_id", recordID,
 			"chunk_idx", i,
 			"seq_no", chunk.SeqNo,
@@ -430,7 +430,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		}
 
 		lang := strings.TrimSpace(asString(payload2["language"]))
-		p.Logger.Info("semantic proj end  ",
+		p.Logger.Info("semantic proj end         ",
 			"record_id", recordID,
 			"seq_no", cand.SeqNo,
 			"language", lang,

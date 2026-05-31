@@ -304,6 +304,8 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/scene-blocks", kbhandler.ListSceneBlocks)
 	apiGroup.GET("/kb/products", kbhandler.ListProducts)
 	apiGroup.GET("/kb/inventory-items", kbhandler.ListInventoryItems)
+	apiGroup.GET("/kb/inventory-categories", kbhandler.ListInventoryCategories)
+	apiGroup.PATCH("/kb/inventory-categories/:key", kbhandler.UpdateInventoryCategory)
 	apiGroup.GET("/kb/summary-graph", kbhandler.ListSummaryGraph)
 	apiGroup.GET("/kb/summary-category", kbhandler.GetSummaryCategory)
 	apiGroup.GET("/kb/record-summaries", kbhandler.GetRecordSummaries)

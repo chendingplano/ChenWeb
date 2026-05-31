@@ -1650,3 +1650,93 @@ export async function stopKbInput(id: number): Promise<void> {
 		throw new Error(msg);
 	}
 }
+
+// ---------- Inventory Categories (Category Review) ----------
+
+export type InventoryCategoryStatus =
+	| 'pending_review'
+	| 'approved'
+	| 'rejected'
+	| 'merged';
+
+export type InventorySpecSchema = {
+	canonical_unit: string;
+	aliases: string[];
+};
+
+export type InventoryPlausibleRange = {
+	min?: number | null;
+	max?: number | null;
+	unit?: string;
+};
+
+export type InventoryCategoryRecord = {
+	category_key: string;
+	status: InventoryCategoryStatus;
+	canonical_of?: string;
+	display_names: string[];
+	required_attrs: string[];
+	specs: Record<string, InventorySpecSchema>;
+	plausible_ranges: Record<string, InventoryPlausibleRange>;
+	seen_count: number;
+};
+
+export type ListInventoryCategoriesResponse = {
+	status: boolean;
+	results: InventoryCategoryRecord[];
+	total: number;
+};
+
+export type UpdateInventoryCategoryPayload = {
+	status?: InventoryCategoryStatus;
+	canonical_of?: string;
+	required_attrs?: string[];
+	specs?: Record<string, InventorySpecSchema>;
+	plausible_ranges?: Record<string, InventoryPlausibleRange>;
+};
+
+/**
+ * List inventory categories from the ontology registry. When `status` is
+ * `pending_review`, results are ordered by `seen_count` descending
+ * (highest-impact first), matching the Category Review workflow.
+ */
+export async function listInventoryCategories(
+	status: InventoryCategoryStatus | 'all' = 'pending_review',
+	limit = 100
+): Promise<ListInventoryCategoriesResponse> {
+	const params = new URLSearchParams();
+	if (status && status !== 'all') params.set('status', status);
+	params.set('limit', String(limit));
+	return fetchOrThrow<ListInventoryCategoriesResponse>(
+		`${BASE}/inventory-categories?${params.toString()}`,
+		'Failed to list inventory categories'
+	);
+}
+
+/**
+ * Update (approve / reject / merge / edit schema of) an inventory category.
+ * All payload fields are optional — only supplied fields are updated.
+ */
+export async function updateInventoryCategory(
+	key: string,
+	payload: UpdateInventoryCategoryPayload
+): Promise<{ status: boolean; result: InventoryCategoryRecord }> {
+	const response = await fetch(
+		`${BASE}/inventory-categories/${encodeURIComponent(key)}`,
+		{
+			method: 'PATCH',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload)
+		}
+	);
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to update category (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json();
+}

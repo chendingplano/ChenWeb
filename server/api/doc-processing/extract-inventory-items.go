@@ -48,10 +48,14 @@ type InventoryItemsProcessor struct {
 	FallbackModelErr  error
 	FallbackModelName string
 	FallbackModelCfg  structureModelConfig
-	ArtifactDir       string
-	Dictionary        inventoryDictionary
-	DictionaryDir     string
-	DictionaryErr     error
+	ArtifactDir                   string
+	Dictionary                    inventoryDictionary
+	DictionaryDir                 string
+	DictionaryErr                 error
+	ExtractInventoryItemsMaxTasks int
+	CategoryRegistry              InventoryCategoryRegistry
+	CategoryCurator               InventoryCategoryCurator
+	categorySeedDone              bool
 }
 
 type InventoryItemsStore interface {
@@ -88,15 +92,15 @@ type inventoryDictionary struct {
 	Units           map[string]inventoryUnitRule
 	Aliases         map[string]string
 	Standards       map[string][]string
-	PlausibleRanges map[string]map[string]inventoryPlausibleRange
+	PlausibleRanges map[string]map[string]InventoryPlausibleRange
 }
 
 type inventoryCategorySchema struct {
 	RequiredAttrs []string                       `json:"required_attrs"`
-	Specs         map[string]inventorySpecSchema `json:"specs"`
+	Specs         map[string]InventorySpecSchema `json:"specs"`
 }
 
-type inventorySpecSchema struct {
+type InventorySpecSchema struct {
 	CanonicalUnit string   `json:"canonical_unit"`
 	Aliases       []string `json:"aliases"`
 }
@@ -106,7 +110,7 @@ type inventoryUnitRule struct {
 	Factor    float64 `json:"factor"`
 }
 
-type inventoryPlausibleRange struct {
+type InventoryPlausibleRange struct {
 	Min  *float64 `json:"min"`
 	Max  *float64 `json:"max"`
 	Unit string   `json:"unit"`
@@ -134,6 +138,18 @@ func NewInventoryItemsProcessor(
 	dictDir := resolveInventoryDictionaryDir()
 	dict, dictErr := loadInventoryDictionaryDir(dictDir)
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
+	registry := InventoryCategoryRegistry{DB: ApiTypes.ProjectDBHandle}
+	var categoryEmbedder Embedder
+	if e, ok := extractor.(Embedder); ok {
+		categoryEmbedder = e
+	}
+	curator := InventoryCategoryCurator{
+		Registry:       registry,
+		Embedder:       categoryEmbedder,
+		EmbedModelName: strings.TrimSpace(os.Getenv("INVENTORY_CATEGORY_EMBEDDING_MODEL_NAME")),
+		FuzzyThreshold: envFloat("INVENTORY_CATEGORY_FUZZY_THRESHOLD", defaultInventoryCategoryFuzzyThreshold, 0),
+		Logger:         logger,
+	}
 	return &InventoryItemsProcessor{
 		InputStore:        inputStore,
 		Store:             store,
@@ -155,10 +171,13 @@ func NewInventoryItemsProcessor(
 		FallbackModelErr:  fallbackModelErr,
 		FallbackModelName: fallbackModelCfg.ModelName,
 		FallbackModelCfg:  fallbackModelCfg,
-		ArtifactDir:       strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		Dictionary:        dict,
-		DictionaryDir:     dictDir,
-		DictionaryErr:     dictErr,
+		ArtifactDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		Dictionary:                    dict,
+		DictionaryDir:                 dictDir,
+		DictionaryErr:                 dictErr,
+		ExtractInventoryItemsMaxTasks: envInt("EXTRACT_INTENTORY_ITEMS_MAX_TASKS", 1, 1),
+		CategoryRegistry:              registry,
+		CategoryCurator:               curator,
 	}
 }
 
@@ -179,12 +198,23 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	if p.DictionaryErr != nil {
 		return fmt.Errorf("(MID_26053104) load inventory dictionary %q: %w", p.DictionaryDir, p.DictionaryErr)
 	}
+	if p.ModelErr != nil {
+		return fmt.Errorf("(MID_26053119) load inventory items model config: %w", p.ModelErr)
+	}
+	if p.FallbackModelErr != nil {
+		return fmt.Errorf("(MID_26053120) load inventory items fallback model config: %w", p.FallbackModelErr)
+	}
 	if p.InputStore == nil {
 		return errors.New("(MID_26053105) input store is nil")
 	}
 	if p.Store == nil {
 		return errors.New("(MID_26053106) inventory items store is nil")
 	}
+
+	// Reload boundary: refresh the live category vocabulary from the registry
+	// (approved ∪ pending) so admitted categories become known vocabulary and
+	// the LLM converges on existing names instead of re-inventing synonyms.
+	p.refreshCategoryVocabulary(ctx)
 
 	rec, err := p.InputStore.GetInputRecord(ctx, evt.RecordID)
 	if err != nil {
@@ -193,10 +223,6 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 			return nil
 		}
 		return fmt.Errorf("(MID_26053107) load kb.inputs record %d: %w", evt.RecordID, err)
-	}
-	if p.ModelErr != nil {
-		p.persistInventoryItemsStatus(ctx, rec, start, p.ModelErr)
-		return nil
 	}
 
 	lineFilePath, lineFileErr := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
@@ -274,6 +300,11 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	if reindexErr := ReindexInventoryItemSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex inventory item search registry failed", "record_id", evt.RecordID, "error", reindexErr)
 	}
+	// Post-pass: admit any novel item_category values into the registry. Decoupled
+	// from the extraction hot path; best-effort so curation never fails a document.
+	if curErr := p.CategoryCurator.CurateObservedCategories(ctx, collectInventoryItemCategories(result.Items)); curErr != nil {
+		p.Logger.Warn("inventory category curation failed", "record_id", evt.RecordID, "error", curErr)
+	}
 	p.Logger.Info("inventory items extracted",
 		"record_id", evt.RecordID,
 		"inserted_items", inserted,
@@ -292,39 +323,78 @@ func (p *InventoryItemsProcessor) now() time.Time {
 	return time.Now()
 }
 
+type inventoryChunkOutcome struct {
+	items     []map[string]any
+	modelName string
+	language  string
+	failed    bool
+	fallback  bool
+}
+
 func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Context, recordID int64, chunks []Chunk) (inventoryItemsExtractionResult, error) {
+	eventID := eventIDFromContext(ctx)
+	outcomes, runErr := runConcurrent(ctx, p.ExtractInventoryItemsMaxTasks, len(chunks), func(runCtx context.Context, i int) (inventoryChunkOutcome, error) {
+		chunk := chunks[i]
+		inputText := p.buildInventoryItemsUserInput(chunk)
+		callStart := p.now()
+		callID := fmt.Sprintf("%s_p1_c%d", eventID, i)
+		p.Logger.Info("extract inventory items start",
+			"record_id", recordID,
+			"chunk_idx", i,
+			"seq_no", chunk.SeqNo,
+			"model_name", p.ModelName,
+			"prompt", p.PromptRef,
+		)
+		payload, modelName, err := p.extractInventoryItemsWithFallback(runCtx, inputText)
+		if isCtxStopped(runCtx) {
+			return inventoryChunkOutcome{}, ErrPipelineStopped
+		}
+		wasFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
+		var chunkItems []map[string]any
+		var chunkLang string
+		if err == nil && payload != nil {
+			if lang := strings.TrimSpace(asString(payload["language"])); lang != "" {
+				chunkLang = lang
+			}
+			chunkItems = normalizeInventoryItemRows(payload["items"], chunk.SeqNo, p.Dictionary)
+		}
+		// totalCount unknown during concurrent execution; pass 0
+		p.logInventoryItemsLLMCall(ctx, callID, []string{strings.TrimSpace(modelName)}, payload, err, callStart, p.now(), recordID, i, len(chunks), len(chunkItems), 0)
+		if err != nil {
+			p.Logger.Warn("inventory item extraction failed for chunk; skipping", "record_id", recordID, "chunk_idx", i, "error", err)
+			return inventoryChunkOutcome{failed: true, fallback: wasFallback}, nil
+		}
+		return inventoryChunkOutcome{
+			items:     chunkItems,
+			modelName: modelName,
+			language:  chunkLang,
+			fallback:  wasFallback,
+		}, nil
+	})
+	if runErr != nil {
+		return inventoryItemsExtractionResult{}, runErr
+	}
+
 	items := make([]map[string]any, 0)
 	detectedLanguage := "unknown"
 	usedModel := strings.TrimSpace(p.ModelName)
 	var llmCallCount, fallbackCount, failedChunks int
-	for idx, chunk := range chunks {
-		if isCtxStopped(ctx) {
-			return inventoryItemsExtractionResult{LLMCallCount: llmCallCount, FallbackCount: fallbackCount, FailedChunks: failedChunks}, ErrPipelineStopped
-		}
-		inputText := p.buildInventoryItemsUserInput(chunk)
-		callStart := p.now()
-		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
-		payload, modelName, err := p.extractInventoryItemsWithFallback(ctx, inputText)
+	for _, outcome := range outcomes {
 		llmCallCount++
-		if strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != "" {
+		if outcome.fallback {
 			fallbackCount++
 		}
-		chunkItemCount := 0
-		if err == nil && payload != nil {
-			usedModel = strings.TrimSpace(firstNonEmptyTrimmed(modelName, usedModel))
-			if lang := strings.TrimSpace(asString(payload["language"])); lang != "" && detectedLanguage == "unknown" {
-				detectedLanguage = lang
-			}
-			chunkItems := normalizeInventoryItemRows(payload["items"], chunk.SeqNo, p.Dictionary)
-			chunkItemCount = len(chunkItems)
-			items = append(items, chunkItems...)
-		}
-		p.logInventoryItemsLLMCall(ctx, callID, []string{strings.TrimSpace(modelName)}, payload, err, callStart, p.now(), recordID, idx, len(chunks), chunkItemCount, len(items))
-		if err != nil {
+		if outcome.failed {
 			failedChunks++
-			p.Logger.Warn("inventory item extraction failed for chunk; skipping", "record_id", recordID, "chunk_idx", idx, "error", err)
 			continue
 		}
+		if outcome.language != "" && detectedLanguage == "unknown" {
+			detectedLanguage = outcome.language
+		}
+		if strings.TrimSpace(outcome.modelName) != "" {
+			usedModel = strings.TrimSpace(outcome.modelName)
+		}
+		items = append(items, outcome.items...)
 	}
 	return inventoryItemsExtractionResult{
 		Language:      detectedLanguage,
@@ -430,12 +500,13 @@ func normalizeInventoryItemRows(raw any, chunkSeqNo int, dict inventoryDictionar
 			continue
 		}
 		category := normalizeInventoryToken(firstNonEmptyTrimmed(asString(m["item_category"]), "unknown"))
+		_, categoryKnown := dict.Categories[category]
 		rawSpecs := normalizeInventorySpecs(m["raw_specs"], category, dict)
 		normalizedSpecs := normalizeInventorySpecUnits(rawSpecs, dict)
 		missing := missingRequiredInventoryAttrs(m, normalizedSpecs, category, dict)
 		confidence := toFloat(m["confidence"])
 		rangeFlags := validateInventoryPlausibleRanges(normalizedSpecs, category, dict)
-		flags := buildInventoryValidationFlags(missing, rangeFlags, confidence, normalizeEntityLineSpans(m["lines"]))
+		flags := buildInventoryValidationFlags(missing, rangeFlags, confidence, normalizeEntityLineSpans(m["lines"]), categoryKnown)
 		row := map[string]any{
 			"item_name":              itemName,
 			"canonical_name":         strings.TrimSpace(asString(m["canonical_name"])),
@@ -639,8 +710,11 @@ func validateInventoryPlausibleRanges(specs []map[string]any, category string, d
 	return uniqueSortedStrings(flags)
 }
 
-func buildInventoryValidationFlags(missing []string, rangeFlags []string, confidence float64, spans []string) []string {
+func buildInventoryValidationFlags(missing []string, rangeFlags []string, confidence float64, spans []string, categoryKnown bool) []string {
 	flags := make([]string, 0, 4)
+	if !categoryKnown {
+		flags = append(flags, "unknown_category")
+	}
 	if len(missing) > 0 {
 		flags = append(flags, "missing_required_attrs")
 	}
@@ -759,8 +833,8 @@ func loadInventoryDictionaryDir(dir string) (inventoryDictionary, error) {
 		return inventoryDictionary{}, err
 	}
 	var aliasFile struct {
-		Version string            `json:"version"`
-		Aliases map[string]string `json:"aliases"`
+		Version string              `json:"version"`
+		Aliases map[string][]string `json:"aliases"`
 	}
 	if err := readInventoryJSON(filepath.Join(dir, "aliases.json"), &aliasFile); err != nil && !os.IsNotExist(err) {
 		return inventoryDictionary{}, err
@@ -774,7 +848,7 @@ func loadInventoryDictionaryDir(dir string) (inventoryDictionary, error) {
 	}
 	var rangeFile struct {
 		Version string                                        `json:"version"`
-		Ranges  map[string]map[string]inventoryPlausibleRange `json:"ranges"`
+		Ranges  map[string]map[string]InventoryPlausibleRange `json:"ranges"`
 	}
 	if err := readInventoryJSON(filepath.Join(dir, "plausible_ranges.json"), &rangeFile); err != nil && !os.IsNotExist(err) {
 		return inventoryDictionary{}, err
@@ -785,7 +859,7 @@ func loadInventoryDictionaryDir(dir string) (inventoryDictionary, error) {
 		Units:           map[string]inventoryUnitRule{},
 		Aliases:         map[string]string{},
 		Standards:       map[string][]string{},
-		PlausibleRanges: map[string]map[string]inventoryPlausibleRange{},
+		PlausibleRanges: map[string]map[string]InventoryPlausibleRange{},
 	}
 	if dict.Version == "" {
 		dict.Version = "unknown"
@@ -795,7 +869,7 @@ func loadInventoryDictionaryDir(dir string) (inventoryDictionary, error) {
 		if key == "" {
 			continue
 		}
-		specs := map[string]inventorySpecSchema{}
+		specs := map[string]InventorySpecSchema{}
 		for specName, spec := range schema.Specs {
 			specs[normalizeInventoryToken(specName)] = spec
 		}
@@ -815,11 +889,16 @@ func loadInventoryDictionaryDir(dir string) (inventoryDictionary, error) {
 		}
 		dict.Units[key] = rule
 	}
-	for alias, canonical := range aliasFile.Aliases {
-		aliasKey := normalizeInventoryToken(alias)
+	for canonical, aliases := range aliasFile.Aliases {
 		canonicalKey := normalizeInventoryToken(canonical)
-		if aliasKey != "" && canonicalKey != "" {
-			dict.Aliases[aliasKey] = canonicalKey
+		if canonicalKey == "" {
+			continue
+		}
+		for _, alias := range aliases {
+			aliasKey := normalizeInventoryToken(alias)
+			if aliasKey != "" {
+				dict.Aliases[aliasKey] = canonicalKey
+			}
 		}
 	}
 	for category, values := range standardsFile.Standards {
@@ -834,7 +913,7 @@ func loadInventoryDictionaryDir(dir string) (inventoryDictionary, error) {
 		if categoryKey == "" {
 			continue
 		}
-		dict.PlausibleRanges[categoryKey] = map[string]inventoryPlausibleRange{}
+		dict.PlausibleRanges[categoryKey] = map[string]InventoryPlausibleRange{}
 		for specName, specRange := range specs {
 			specKey := normalizeInventoryToken(specName)
 			if specKey == "" {
@@ -1251,6 +1330,13 @@ SELECT id, inventory_item_id, item_name, canonical_name, item_category, manufact
 FROM kb.inventory_items
 WHERE input_record_id = $1
 ORDER BY id`
+	// Category review status is derived from the registry at read time (not frozen
+	// on instance rows) so approving a category later never requires rewriting
+	// millions of item rows. Best-effort: on failure status falls back gracefully.
+	categoryStatuses, statusErr := InventoryCategoryRegistry{DB: db}.CategoryStatuses(ctx)
+	if statusErr != nil {
+		categoryStatuses = nil
+	}
 	rows, err := db.QueryContext(ctx, q, recordID)
 	if err != nil {
 		return nil, err
@@ -1282,12 +1368,14 @@ ORDER BY id`
 		if err := rows.Scan(&id, &inventoryItemID, &itemName, &canonicalName, &itemCategory, &manufacturer, &brand, &modelNumber, &partNumber, &normalizedSpecs, &standards, &aliases, &sourceLineSpans, &validationFlags, &missingRequiredAttrs, &dedupeKey, &confidence, &confidenceReason, &searchDoc); err != nil {
 			return nil, err
 		}
+		categoryStatus := deriveInventoryCategoryStatus(categoryStatuses, itemCategory)
 		validationStatus := "valid"
-		if len(jsonArrayOrEmptyBytes(validationFlags)) > 2 {
+		if len(jsonArrayOrEmptyBytes(validationFlags)) > 2 || categoryStatus != "approved" {
 			validationStatus = "needs_review"
 		}
 		payload, _ := json.Marshal(map[string]any{
 			"item_category":          itemCategory,
+			"category_status":        categoryStatus,
 			"manufacturer":           manufacturer,
 			"brand":                  brand,
 			"model_number":           modelNumber,

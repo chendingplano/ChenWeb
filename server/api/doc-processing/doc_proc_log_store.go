@@ -251,7 +251,8 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractProvisions,
 		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,
 		EntryTypeExtractStructuredKnowledge, EntryTypeEnrichStructuredKnowledge,
-		EntryTypeExtractEntityRelation, EntryTypeExtractInventoryItems:
+		EntryTypeExtractEntityRelation, EntryTypeExtractInventoryItems,
+		EntryTypeExtractDocMetadata:
 		return true
 	default:
 		return false

@@ -39,7 +39,7 @@ func TestLoadInventoryDictionaryDirAndValidateItem(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "aliases.json"), []byte(`{
 		"version": "aliases-v1",
-		"aliases": {"pmp": "pump"}
+		"aliases": {"pump": ["pmp"]}
 	}`), 0o644); err != nil {
 		t.Fatalf("write aliases: %v", err)
 	}
