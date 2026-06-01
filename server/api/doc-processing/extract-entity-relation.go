@@ -896,41 +896,38 @@ func (p *EntityRelationProcessor) persistEntityRelationStatus(
 		msg := strings.TrimSpace(procErr.Error())
 		errMsg = &msg
 	}
-	statusRaw, err := appendEntityRelationStatus(rec.StatusRaw, entityRelationStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectEntityRelationFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       procErr,
-	})
-	if err != nil {
-		p.Logger.Error("failed building entity-relation status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
-		ErrorMsg:  errMsg,
+	if updateErr := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendEntityRelationStatus(current, entityRelationStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectEntityRelationFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcErr:       procErr,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
 	}); updateErr != nil {
 		p.Logger.Error("failed persisting entity-relation status", "record_id", rec.ID, "error", updateErr)
 	}
 }
 
 func (p *EntityRelationProcessor) stopAndPersistEntityRelation(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
-	statusRaw, err := appendEntityRelationStatus(rec.StatusRaw, entityRelationStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectEntityRelationFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "stopped",
-	})
-	if err != nil {
-		p.Logger.Error("(MID_26052841) failed building entity-relation stopped status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
+	if updateErr := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendEntityRelationStatus(current, entityRelationStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectEntityRelationFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "stopped",
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
 	}); updateErr != nil {
 		p.Logger.Error("(MID_26052842) failed persisting entity-relation stopped status", "record_id", rec.ID, "error", updateErr)
 	}

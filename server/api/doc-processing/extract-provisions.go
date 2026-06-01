@@ -1297,21 +1297,19 @@ func (p *ProvisionsProcessor) persistProvisionsStatus(ctx context.Context, rec D
 		msg := strings.TrimSpace(procErr.Error())
 		errMsg = &msg
 	}
-	statusRaw, err := appendProvisionsStatus(rec.StatusRaw, provisionsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectProvisionsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       procErr,
-	})
-	if err != nil {
-		p.Logger.Error("failed building provisions status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if err := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
-		ErrorMsg:  errMsg,
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendProvisionsStatus(current, provisionsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectProvisionsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcErr:       procErr,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
 	}); err != nil {
 		p.Logger.Error("failed persisting provisions status", "record_id", rec.ID, "error", err)
 	}
@@ -1322,38 +1320,38 @@ func (p *ProvisionsProcessor) persistProvisionsRunningStatus(ctx context.Context
 		"record_id", rec.ID,
 		"start_time", start.Format(defaultDocMetaStatusTime),
 	)
-	statusRaw, err := appendProvisionsStatus(rec.StatusRaw, provisionsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectProvisionsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		ProcStatus:    "running",
-	})
-	if err != nil {
-		p.Logger.Error("(MID_26052911) failed building provisions running status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if err := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{StatusRaw: statusRaw}); err != nil {
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendProvisionsStatus(current, provisionsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectProvisionsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			ProcStatus:    "running",
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
+	}); err != nil {
 		p.Logger.Error("(MID_26052912) failed persisting provisions running status", "record_id", rec.ID, "error", err)
 		return
 	}
 }
 
 func (p *ProvisionsProcessor) stopAndPersistProvisions(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
-	statusRaw, err := appendProvisionsStatus(rec.StatusRaw, provisionsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectProvisionsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "stopped",
-	})
-	if err != nil {
-		p.Logger.Error("(MID_26052841) failed building provisions stopped status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
+	if updateErr := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendProvisionsStatus(current, provisionsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectProvisionsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "stopped",
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
 	}); updateErr != nil {
 		p.Logger.Error("(MID_26052842) failed persisting provisions stopped status", "record_id", rec.ID, "error", updateErr)
 	}

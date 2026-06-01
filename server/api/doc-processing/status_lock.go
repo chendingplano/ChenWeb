@@ -28,6 +28,17 @@ func lockRecordStatus(id int64) func() {
 	return m.Unlock
 }
 
+// withRecordStatusLock runs fn while holding the per-record status lock. Use it
+// to make a GetInputRecord -> append*Status -> Update* sequence atomic when the
+// write path is not UpdateInputMetadata (e.g. the chunk-phase
+// Store.UpdateInputStatus). fn MUST re-read the current status inside the
+// callback so it merges onto the freshest value.
+func withRecordStatusLock(id int64, fn func() error) error {
+	unlock := lockRecordStatus(id)
+	defer unlock()
+	return fn()
+}
+
 // statusStore is the minimal surface updateInputStatusAtomic needs. It is
 // satisfied by DocMetadataStore.
 type statusStore interface {

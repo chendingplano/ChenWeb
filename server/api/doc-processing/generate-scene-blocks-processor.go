@@ -1342,66 +1342,64 @@ func (p *SceneBlocksProcessor) persistSceneBlocksStatus(ctx context.Context, rec
 		msg := strings.TrimSpace(procErr.Error())
 		errMsg = &msg
 	}
-	statusRaw, err := appendSceneBlocksStatus(rec.StatusRaw, sceneBlocksStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectSceneBlocksFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       procErr,
-		ModelName:     strings.TrimSpace(p.ModelName),
-		PromptName:    strings.TrimSpace(p.PromptRef),
-	})
-	if err != nil {
-		p.Logger.Error("failed building scene blocks status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if err := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
-		ErrorMsg:  errMsg,
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendSceneBlocksStatus(current, sceneBlocksStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectSceneBlocksFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcErr:       procErr,
+			ModelName:     strings.TrimSpace(p.ModelName),
+			PromptName:    strings.TrimSpace(p.PromptRef),
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
 	}); err != nil {
 		p.Logger.Error("failed persisting scene blocks status", "record_id", rec.ID, "error", err)
 	}
 }
 
 func (p *SceneBlocksProcessor) persistSceneBlocksInProgressStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, progress string) {
-	statusRaw, err := appendSceneBlocksStatus(rec.StatusRaw, sceneBlocksStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectSceneBlocksFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "in_progress",
-		Progress:      progress,
-		ModelName:     strings.TrimSpace(p.ModelName),
-		PromptName:    strings.TrimSpace(p.PromptRef),
-	})
-	if err != nil {
-		p.Logger.Warn("failed building scene blocks in-progress status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if err := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{StatusRaw: statusRaw}); err != nil {
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendSceneBlocksStatus(current, sceneBlocksStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectSceneBlocksFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "in_progress",
+			Progress:      progress,
+			ModelName:     strings.TrimSpace(p.ModelName),
+			PromptName:    strings.TrimSpace(p.PromptRef),
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
+	}); err != nil {
 		p.Logger.Warn("failed persisting scene blocks in-progress status", "record_id", rec.ID, "error", err)
 	}
 }
 
 func (p *SceneBlocksProcessor) stopAndPersistSceneBlocks(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
-	statusRaw, err := appendSceneBlocksStatus(rec.StatusRaw, sceneBlocksStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectSceneBlocksFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "stopped",
-		ModelName:     strings.TrimSpace(p.ModelName),
-		PromptName:    strings.TrimSpace(p.PromptRef),
-	})
-	if err != nil {
-		p.Logger.Error("(MID_26052841) failed building scene blocks stopped status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
+	if updateErr := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendSceneBlocksStatus(current, sceneBlocksStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectSceneBlocksFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "stopped",
+			ModelName:     strings.TrimSpace(p.ModelName),
+			PromptName:    strings.TrimSpace(p.PromptRef),
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
 	}); updateErr != nil {
 		p.Logger.Error("(MID_26052842) failed persisting scene blocks stopped status", "record_id", rec.ID, "error", updateErr)
 	}

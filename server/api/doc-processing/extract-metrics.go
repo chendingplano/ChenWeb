@@ -460,41 +460,38 @@ func (p *MetricsProcessor) persistMetricsStatus(ctx context.Context, rec DocMeta
 		msg := strings.TrimSpace(procErr.Error())
 		errMsg = &msg
 	}
-	statusRaw, err := appendMetricsStatus(rec.StatusRaw, metricsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectMetricsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       procErr,
-	})
-	if err != nil {
-		p.Logger.Error("failed building metrics status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if err := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
-		ErrorMsg:  errMsg,
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendMetricsStatus(current, metricsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectMetricsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcErr:       procErr,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
 	}); err != nil {
 		p.Logger.Error("failed persisting metrics status", "record_id", rec.ID, "error", err)
 	}
 }
 
 func (p *MetricsProcessor) stopAndPersistMetrics(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
-	statusRaw, err := appendMetricsStatus(rec.StatusRaw, metricsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectMetricsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "stopped",
-	})
-	if err != nil {
-		p.Logger.Error("(MID_26052841) failed building metrics stopped status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
+	if updateErr := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendMetricsStatus(current, metricsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectMetricsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "stopped",
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
 	}); updateErr != nil {
 		p.Logger.Error("(MID_26052842) failed persisting metrics stopped status", "record_id", rec.ID, "error", updateErr)
 	}

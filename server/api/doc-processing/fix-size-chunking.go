@@ -696,12 +696,10 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 	initialProgress := extractTopicsProgressFull(0, totalChunks)
 	s.Logger.Info("(MID_26052801) extract_topics: starting, updating status to initial progress",
 		"record_id", rec.ID, "total_chunks", totalChunks, "progress", initialProgress)
-	if updatedRaw, uErr := updateTopicChunkStatusProgress(rec.StatusRaw, initialProgress); uErr == nil {
-		if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, updatedRaw, nil); updateErr == nil {
-			rec.StatusRaw = updatedRaw
-		} else {
-			s.Logger.Warn("(MID_26052802) failed to persist initial topic progress", "record_id", rec.ID, "error", updateErr)
-		}
+	if updateErr := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+		return updateTopicChunkStatusProgress(current, initialProgress)
+	}); updateErr != nil {
+		s.Logger.Warn("(MID_26052802) failed to persist initial topic progress", "record_id", rec.ID, "error", updateErr)
 	}
 
 	topics := make([]TopicItem, 0, len(chunks))
@@ -780,13 +778,11 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 		// s.Logger.Info("(MID_26052803) extract_topics: chunk done, updating status progress",
 		// 	"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "total_chunks", totalChunks,
 		// 	"progress", chunkProgress, "num_topics", len(chunkTopics), "topics_so_far", topicsSoFar)
-		if updatedRaw, uErr := updateTopicChunkStatusProgress(rec.StatusRaw, chunkProgress); uErr == nil {
-			if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, updatedRaw, nil); updateErr == nil {
-				rec.StatusRaw = updatedRaw
-			} else {
-				s.Logger.Warn("(MID_26052804) failed to persist topic progress",
-					"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "error", updateErr)
-			}
+		if updateErr := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+			return updateTopicChunkStatusProgress(current, chunkProgress)
+		}); updateErr != nil {
+			s.Logger.Warn("(MID_26052804) failed to persist topic progress",
+				"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "error", updateErr)
 		}
 
 		// s.Logger.Info("(MID_26052805) extract_topics: inserting doc_proc_logs record",
@@ -819,21 +815,19 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 		s.Logger.Warn("reindex topic search registry failed", "record_id", rec.ID, "error", err)
 	}
 
-	statusRaw, err := appendTopicStatus(rec.StatusRaw, topicStatusParams{
-		RecordID:       rec.ID,
-		FileType:       detectChunkStatusFileType(rec, inputFilename),
-		InputFilename:  inputFilename,
-		OutputFilename: outputFilename,
-		NumTopics:      len(topics),
-		Start:          start,
-		DurationMs:     time.Since(start).Milliseconds(),
-		ProcErr:        nil,
-		Progress:       extractTopicsProgressFull(totalChunks, totalChunks),
-	})
-	if err != nil {
-		return err
-	}
-	if err := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, nil); err != nil {
+	if err := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+		return appendTopicStatus(current, topicStatusParams{
+			RecordID:       rec.ID,
+			FileType:       detectChunkStatusFileType(rec, inputFilename),
+			InputFilename:  inputFilename,
+			OutputFilename: outputFilename,
+			NumTopics:      len(topics),
+			Start:          start,
+			DurationMs:     time.Since(start).Milliseconds(),
+			ProcErr:        nil,
+			Progress:       extractTopicsProgressFull(totalChunks, totalChunks),
+		})
+	}); err != nil {
 		return err
 	}
 
@@ -915,23 +909,17 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 	s.summaryProgressTracker = &summaryProgressTracker{
 		Total: totalSummaries,
 		Persist: func(progress string) error {
-			statusRaw, err := appendSummariesStatus(rec.StatusRaw, summaryStatusParams{
-				RecordID:      rec.ID,
-				FileType:      detectChunkStatusFileType(rec, inputFilename),
-				InputFilename: inputFilename,
-				Start:         start,
-				DurationMs:    time.Since(start).Milliseconds(),
-				ProcStatus:    "running",
-				ProcProgress:  progress,
+			return s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+				return appendSummariesStatus(current, summaryStatusParams{
+					RecordID:      rec.ID,
+					FileType:      detectChunkStatusFileType(rec, inputFilename),
+					InputFilename: inputFilename,
+					Start:         start,
+					DurationMs:    time.Since(start).Milliseconds(),
+					ProcStatus:    "running",
+					ProcProgress:  progress,
+				})
 			})
-			if err != nil {
-				return err
-			}
-			if err := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, nil); err != nil {
-				return err
-			}
-			rec.StatusRaw = statusRaw
-			return nil
 		},
 	}
 
@@ -1043,20 +1031,18 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		s.Logger.Warn("reindex summary search registry failed", "record_id", rec.ID, "error", err)
 	}
 
-	statusRaw, err := appendSummariesStatus(rec.StatusRaw, summaryStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectChunkStatusFileType(rec, inputFilename),
-		InputFilename: inputFilename,
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "success",
-		ProcProgress:  s.currentSummaryProgress(),
-		ProcErr:       nil,
-	})
-	if err != nil {
-		return err
-	}
-	if err := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, nil); err != nil {
+	if err := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+		return appendSummariesStatus(current, summaryStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectChunkStatusFileType(rec, inputFilename),
+			InputFilename: inputFilename,
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "success",
+			ProcProgress:  s.currentSummaryProgress(),
+			ProcErr:       nil,
+		})
+	}); err != nil {
 		return err
 	}
 
@@ -1658,6 +1644,30 @@ func (s *FixedSizeChunkingService) failAndPersist(
 	s.Logger.Error("chunking failed", "record_id", rec.ID, "error", procErr)
 }
 
+// updateInputStatusLocked re-reads the record's status under the per-record
+// status lock, applies build to the freshest status JSON, and persists it via
+// Store.UpdateInputStatus. Phase B summary/topic writes run concurrently with
+// sibling processors, so they must merge onto the current DB value rather than a
+// stale local copy of rec.StatusRaw.
+func (s *FixedSizeChunkingService) updateInputStatusLocked(
+	ctx context.Context,
+	recordID int64,
+	errMsg *string,
+	build func(current string) (string, error),
+) error {
+	return withRecordStatusLock(recordID, func() error {
+		fresh, err := s.Store.GetInputRecord(ctx, recordID)
+		if err != nil {
+			return err
+		}
+		statusRaw, err := build(fresh.StatusRaw)
+		if err != nil {
+			return err
+		}
+		return s.Store.UpdateInputStatus(ctx, recordID, statusRaw, errMsg)
+	})
+}
+
 func (s *FixedSizeChunkingService) failAndPersistTopics(
 	ctx context.Context,
 	rec InputRecord,
@@ -1666,21 +1676,18 @@ func (s *FixedSizeChunkingService) failAndPersistTopics(
 	numTopics int,
 	procErr error,
 ) {
-	statusRaw, err := appendTopicStatus(rec.StatusRaw, topicStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectChunkStatusFileType(rec, inputFilename),
-		InputFilename: inputFilename,
-		NumTopics:     numTopics,
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       procErr,
-	})
-	if err != nil {
-		s.Logger.Error("failed building topic status", "record_id", rec.ID, "error", err)
-		return
-	}
 	errMsg := sanitizeUTF8Text(procErr.Error())
-	if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, &errMsg); updateErr != nil {
+	if updateErr := s.updateInputStatusLocked(ctx, rec.ID, &errMsg, func(current string) (string, error) {
+		return appendTopicStatus(current, topicStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectChunkStatusFileType(rec, inputFilename),
+			InputFilename: inputFilename,
+			NumTopics:     numTopics,
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcErr:       procErr,
+		})
+	}); updateErr != nil {
 		s.Logger.Error("failed persisting topic failure status", "record_id", rec.ID, "error", updateErr)
 		return
 	}
@@ -1697,20 +1704,17 @@ func (s *FixedSizeChunkingService) stopAndPersistTopics(
 	start time.Time,
 	numTopics int,
 ) {
-	statusRaw, err := appendTopicStatus(rec.StatusRaw, topicStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectChunkStatusFileType(rec, inputFilename),
-		InputFilename: inputFilename,
-		NumTopics:     numTopics,
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "stopped",
-	})
-	if err != nil {
-		s.Logger.Error("(MID_26052821) failed building topic stopped status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, nil); updateErr != nil {
+	if updateErr := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+		return appendTopicStatus(current, topicStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectChunkStatusFileType(rec, inputFilename),
+			InputFilename: inputFilename,
+			NumTopics:     numTopics,
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "stopped",
+		})
+	}); updateErr != nil {
 		s.Logger.Error("(MID_26052822) failed persisting topic stopped status", "record_id", rec.ID, "error", updateErr)
 	}
 	s.Logger.Info("(MID_26052823) topic generation stopped by user request", "record_id", rec.ID, "topics_so_far", numTopics)
@@ -1723,22 +1727,19 @@ func (s *FixedSizeChunkingService) failAndPersistSummaries(
 	start time.Time,
 	procErr error,
 ) {
-	statusRaw, err := appendSummariesStatus(rec.StatusRaw, summaryStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectChunkStatusFileType(rec, inputFilename),
-		InputFilename: inputFilename,
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "failed",
-		ProcProgress:  s.currentSummaryProgress(),
-		ProcErr:       procErr,
-	})
-	if err != nil {
-		s.Logger.Error("failed building summary status", "record_id", rec.ID, "error", err)
-		return
-	}
 	errMsg := sanitizeUTF8Text(procErr.Error())
-	if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, &errMsg); updateErr != nil {
+	if updateErr := s.updateInputStatusLocked(ctx, rec.ID, &errMsg, func(current string) (string, error) {
+		return appendSummariesStatus(current, summaryStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectChunkStatusFileType(rec, inputFilename),
+			InputFilename: inputFilename,
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "failed",
+			ProcProgress:  s.currentSummaryProgress(),
+			ProcErr:       procErr,
+		})
+	}); updateErr != nil {
 		s.Logger.Error("failed persisting summary failure status", "record_id", rec.ID, "error", updateErr)
 		return
 	}
@@ -1746,19 +1747,16 @@ func (s *FixedSizeChunkingService) failAndPersistSummaries(
 }
 
 func (s *FixedSizeChunkingService) stopAndPersistSummaries(ctx context.Context, rec InputRecord, inputFilename string, start time.Time) {
-	statusRaw, err := appendSummariesStatus(rec.StatusRaw, summaryStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectChunkStatusFileType(rec, inputFilename),
-		InputFilename: inputFilename,
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "stopped",
-	})
-	if err != nil {
-		s.Logger.Error("(MID_26052831) failed building summaries stopped status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := s.Store.UpdateInputStatus(ctx, rec.ID, statusRaw, nil); updateErr != nil {
+	if updateErr := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+		return appendSummariesStatus(current, summaryStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectChunkStatusFileType(rec, inputFilename),
+			InputFilename: inputFilename,
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "stopped",
+		})
+	}); updateErr != nil {
 		s.Logger.Error("(MID_26052832) failed persisting summaries stopped status", "record_id", rec.ID, "error", updateErr)
 	}
 	s.Logger.Info("(MID_26052833) summary generation stopped by user request", "record_id", rec.ID)

@@ -1182,40 +1182,40 @@ func (p *InventoryItemsProcessor) persistInventoryItemsStatus(ctx context.Contex
 		msg := strings.TrimSpace(procErr.Error())
 		errMsg = &msg
 	}
-	statusRaw, err := appendInventoryItemsStatus(rec.StatusRaw, inventoryItemsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectInventoryItemsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       procErr,
-	})
-	if err != nil {
-		p.Logger.Error("failed building inventory items status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
-		ErrorMsg:  errMsg,
+	if updateErr := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendInventoryItemsStatus(current, inventoryItemsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectInventoryItemsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcErr:       procErr,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
 	}); updateErr != nil {
 		p.Logger.Error("failed persisting inventory items status", "record_id", rec.ID, "error", updateErr)
 	}
 }
 
 func (p *InventoryItemsProcessor) stopAndPersistInventoryItems(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
-	statusRaw, err := appendInventoryItemsStatus(rec.StatusRaw, inventoryItemsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectInventoryItemsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "stopped",
+	_ = updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendInventoryItemsStatus(current, inventoryItemsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectInventoryItemsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "stopped",
+		})
+		if err != nil {
+			p.Logger.Error("failed building inventory items stopped status", "record_id", rec.ID, "error", err)
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
 	})
-	if err != nil {
-		p.Logger.Error("failed building inventory items stopped status", "record_id", rec.ID, "error", err)
-		return
-	}
-	_ = p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{StatusRaw: statusRaw})
 }
 
 func (p *InventoryItemsProcessor) logInventoryItemsLLMCall(ctx context.Context, callID string, modelNames []string, payload map[string]any, callErr error, start, end time.Time, recordID int64, chunkIdx, totalChunks, chunkCount, totalCount int) {

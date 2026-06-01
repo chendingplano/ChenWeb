@@ -987,20 +987,19 @@ func detectSemanticProjectionsFileType(rec DocMetadataInputRecord) string {
 }
 
 func (p *SemanticProjectionsProcessor) stopAndPersistSemanticProjections(ctx context.Context, rec DocMetadataInputRecord, start time.Time) {
-	statusRaw, err := appendSemanticProjectionsStatus(rec.StatusRaw, semanticProjectionsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectSemanticProjectionsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcStatus:    "stopped",
-	})
-	if err != nil {
-		p.Logger.Error("(MID_26052841) failed building semantic projections stopped status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if updateErr := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
+	if updateErr := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendSemanticProjectionsStatus(current, semanticProjectionsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectSemanticProjectionsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "stopped",
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
 	}); updateErr != nil {
 		p.Logger.Error("(MID_26052842) failed persisting semantic projections stopped status", "record_id", rec.ID, "error", updateErr)
 	}
@@ -1018,21 +1017,19 @@ func (p *SemanticProjectionsProcessor) persistSemanticProjectionsStatus(
 		msg := strings.TrimSpace(procErr.Error())
 		errMsg = &msg
 	}
-	statusRaw, err := appendSemanticProjectionsStatus(rec.StatusRaw, semanticProjectionsStatusParams{
-		RecordID:      rec.ID,
-		FileType:      detectSemanticProjectionsFileType(rec),
-		InputFilename: strings.TrimSpace(rec.ResultFilename),
-		Start:         start,
-		DurationMs:    time.Since(start).Milliseconds(),
-		ProcErr:       procErr,
-	})
-	if err != nil {
-		p.Logger.Error("failed building semantic projections status", "record_id", rec.ID, "error", err)
-		return
-	}
-	if err := p.InputStore.UpdateInputMetadata(ctx, rec.ID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
-		ErrorMsg:  errMsg,
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendSemanticProjectionsStatus(current, semanticProjectionsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectSemanticProjectionsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcErr:       procErr,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
 	}); err != nil {
 		p.Logger.Error("failed persisting semantic projections status", "record_id", rec.ID, "error", err)
 	}
