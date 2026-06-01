@@ -47,15 +47,15 @@
 
 	// ── Config ────────────────────────────────────────────────────────────
 
-	// Configurable processors ordered for display in the launch/restart UI.
-	const CONFIGURABLE_PROCESSORS = PIPELINE_STAGES.filter(s => ALL_CONFIGURABLE_PROCESSOR_IDS.includes(s.id));
-
 	// Mandatory processors shown as locked rows in the launch/restart UI.
 	const MANDATORY_PROCESSORS = PIPELINE_STAGES.filter(s => MANDATORY_PROCESSOR_IDS.includes(s.id));
 
 	// requiredProcessors: the configurable processors that are enabled in config.toml.
 	// Populated once on mount from GET /api/v1/kb/config.
 	let requiredProcessors = $state<string[]>(ALL_CONFIGURABLE_PROCESSOR_IDS);
+
+	// Only show processors present in requiredProcessors (from config).
+	let CONFIGURABLE_PROCESSORS = $derived(PIPELINE_STAGES.filter(s => requiredProcessors.includes(s.id)));
 
 	// configuredProcessorIds: mandatory + required — the set isActiveRecord checks.
 	let configuredProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
@@ -240,8 +240,8 @@
 	}
 
 	async function doLaunch(record: KbInputRecord, procs: Record<string, boolean>) {
-		const chosen = ALL_CONFIGURABLE_PROCESSOR_IDS.filter((p) => procs[p]);
-		const allChosen = chosen.length === ALL_CONFIGURABLE_PROCESSOR_IDS.length;
+		const chosen = requiredProcessors.filter((p) => procs[p]);
+		const allChosen = chosen.length === requiredProcessors.length;
 		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
 		if (!allChosen) payload.operation = chosen;
 
@@ -374,25 +374,25 @@
 	}
 
 	function allProcessorsSelected(): boolean {
-		return ALL_CONFIGURABLE_PROCESSOR_IDS.every((p) => processors[p]);
+		return requiredProcessors.every((p) => processors[p]);
 	}
 
 	function someProcessorsSelected(): boolean {
-		return ALL_CONFIGURABLE_PROCESSOR_IDS.some((p) => processors[p]);
+		return requiredProcessors.some((p) => processors[p]);
 	}
 
 	function toggleAll() {
 		const next = !allProcessorsSelected();
-		processors = Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, next]));
+		processors = Object.fromEntries(requiredProcessors.map((p) => [p, next]));
 	}
 
 	function allRestartSelected(): boolean {
-		return ALL_CONFIGURABLE_PROCESSOR_IDS.every((p) => restartProcessors[p]);
+		return requiredProcessors.every((p) => restartProcessors[p]);
 	}
 
 	function toggleAllRestart() {
 		const next = !allRestartSelected();
-		restartProcessors = Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, next]));
+		restartProcessors = Object.fromEntries(requiredProcessors.map((p) => [p, next]));
 	}
 
 	function showTooltip(
@@ -1095,11 +1095,11 @@
 					{#each ['blocking', ...MANDATORY_PROCESSOR_IDS] as p}
 						<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">{p}</span>
 					{/each}
-					{#each ALL_CONFIGURABLE_PROCESSOR_IDS.filter(p => processors[p]) as p}
+					{#each requiredProcessors.filter(p => processors[p]) as p}
 						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{p}</span>
 					{/each}
 				</div>
-				{#if ALL_CONFIGURABLE_PROCESSOR_IDS.every(p => processors[p])}
+				{#if requiredProcessors.every(p => processors[p])}
 					<div style="margin-top:6px; font-size:11px; color:{textMuted};">All processors selected — omitting operation filter.</div>
 				{/if}
 			</div>

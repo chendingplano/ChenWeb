@@ -424,7 +424,7 @@
 
 	.dialog {
 		width: min(1180px, 100%);
-		max-height: min(88vh, 980px);
+		max-height: min(94vh, 1320px);
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -649,7 +649,7 @@
 		flex: 1 1 320px;
 		border-top: 1px solid #1f2530;
 		border-bottom: 1px solid #1f2530;
-		min-height: 360px;
+		min-height: 460px;
 		background: #121720;
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 		overflow: auto;
