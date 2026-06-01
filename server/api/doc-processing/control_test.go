@@ -114,6 +114,7 @@ func (p blockBufferExpectNilProcessor) HandleEvent(ctx context.Context, _ []byte
 }
 
 func TestControlService_UsesOperationOrder(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	got := make([]string, 0, 3)
 	svc := &ControlService{
 		Processors: []Processor{
@@ -139,6 +140,7 @@ func TestControlService_UsesOperationOrder(t *testing.T) {
 }
 
 func TestControlService_DefaultsToConfiguredOrder(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	got := make([]string, 0, 3)
 	svc := &ControlService{
 		Processors: []Processor{
@@ -162,6 +164,7 @@ func TestControlService_DefaultsToConfiguredOrder(t *testing.T) {
 }
 
 func TestControlService_RunsGenerateSummariesWhenExplicitlyRequestedWithChunking(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	got := make([]string, 0, 3)
 	svc := &ControlService{
 		Processors: []Processor{
@@ -187,6 +190,7 @@ func TestControlService_RunsGenerateSummariesWhenExplicitlyRequestedWithChunking
 }
 
 func TestControlService_GenerateSummariesRequestRunsDependenciesFirst(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	got := make([]string, 0, 3)
 	svc := &ControlService{
 		Processors: []Processor{
@@ -235,6 +239,7 @@ func TestControlService_StaticAnalyzerClearsStaleBlockBuffer(t *testing.T) {
 }
 
 func TestControlService_DefaultOrderRunsStandaloneGenerateProcessorsAfterChunking(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	got := make([]string, 0, 4)
 	svc := &ControlService{
 		Processors: []Processor{
@@ -445,6 +450,158 @@ func TestProcessorLogName_PrefersMethodSpecificLogName(t *testing.T) {
 	p := fakeProcessor{name: "chunking", logName: "topic_chunking"}
 	if got := processorLogName(p); got != "topic_chunking" {
 		t.Fatalf("processorLogName=%q, want topic_chunking", got)
+	}
+}
+
+// --- concurrent test helpers for two-phase controller ---
+
+type concurrentRecorder struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *concurrentRecorder) add(s string) { r.mu.Lock(); r.calls = append(r.calls, s); r.mu.Unlock() }
+
+type recordingProcessor struct {
+	name string
+	rec  *concurrentRecorder
+	hook func() // optional, to assert overlap
+}
+
+func (p recordingProcessor) Name() string { return p.name }
+func (p recordingProcessor) LogName() string { return p.name }
+
+func (p recordingProcessor) HandleEvent(_ context.Context, _ []byte) error {
+	p.rec.add("start:" + p.name)
+	if p.hook != nil {
+		p.hook()
+	}
+	p.rec.add("end:" + p.name)
+	return nil
+}
+
+type failingRecordingProcessor struct {
+	name string
+	rec  *concurrentRecorder
+}
+
+func (p failingRecordingProcessor) Name() string { return p.name }
+func (p failingRecordingProcessor) LogName() string { return p.name }
+
+func (p failingRecordingProcessor) HandleEvent(_ context.Context, _ []byte) error {
+	p.rec.add("start:" + p.name)
+	p.rec.add("end:" + p.name)
+	return errors.New("simulated failure")
+}
+
+func indexOf(ss []string, target string) int {
+	for i, s := range ss {
+		if s == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func indexOfPrefix(ss []string, targets ...string) int {
+	for i, s := range ss {
+		for _, t := range targets {
+			if s == t {
+				return i
+			}
+		}
+	}
+	return len(ss)
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// --- two-phase tests ---
+
+func TestTwoPhase_PhaseABeforePhaseB(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "true")
+	rec := &concurrentRecorder{}
+	svc := &ControlService{
+		Processors: []Processor{
+			recordingProcessor{name: "static_analyzer", rec: rec},
+			recordingProcessor{name: "chunking", rec: rec},
+			recordingProcessor{name: "extract_doc_metadata", rec: rec},
+			recordingProcessor{name: "extract_metrics", rec: rec},
+			recordingProcessor{name: "generate_topics", rec: rec},
+		},
+	}
+	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+
+	// Every Phase A end appears before any Phase B start.
+	firstPhaseB := indexOfPrefix(rec.calls, "start:extract_metrics", "start:generate_topics")
+	for _, a := range []string{"end:static_analyzer", "end:chunking", "end:extract_doc_metadata"} {
+		if idx := indexOf(rec.calls, a); idx == -1 || idx > firstPhaseB {
+			t.Fatalf("%s did not complete before Phase B (calls=%v)", a, rec.calls)
+		}
+	}
+}
+
+func TestTwoPhase_PhaseBOverlaps(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "true")
+	rec := &concurrentRecorder{}
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	hook := func() { started <- struct{}{}; <-release }
+	svc := &ControlService{
+		Processors: []Processor{
+			recordingProcessor{name: "extract_metrics", rec: rec, hook: hook},
+			recordingProcessor{name: "generate_topics", rec: rec, hook: hook},
+		},
+	}
+	done := make(chan struct{})
+	go func() { svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`)); close(done) }()
+	<-started
+	<-started // both must start before either is released → proves overlap
+	close(release)
+	<-done
+}
+
+func TestTwoPhase_FlagOffIsSequential(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	got := make([]string, 0, 3)
+	svc := &ControlService{
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &got},
+			fakeProcessor{name: "generate_topics", calls: &got},
+		},
+	}
+	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	want := []string{"extract_metrics", "generate_topics"}
+	if !equalStrings(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestTwoPhase_FailureIsolation(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "true")
+	rec := &concurrentRecorder{}
+	svc := &ControlService{
+		Processors: []Processor{
+			failingRecordingProcessor{name: "extract_metrics", rec: rec},
+			recordingProcessor{name: "generate_topics", rec: rec},
+		},
+	}
+	err := svc.handleEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	if err == nil {
+		t.Fatal("expected failure error")
+	}
+	if indexOf(rec.calls, "end:generate_topics") == -1 {
+		t.Fatal("sibling did not complete despite peer failure")
 	}
 }
 

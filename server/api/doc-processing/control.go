@@ -104,6 +104,14 @@ func (s *ControlService) maxDocProcessPipelines() int {
 	return MaxDocProcessPipelinesFromEnv()
 }
 
+// RunDocProcessorConcurrentFromEnv reports whether Phase B processors run
+// concurrently. Defaults to true; set RUN_DOC_PROCESSOR_CONCURRENT=false to
+// fall back to the sequential pipeline.
+func RunDocProcessorConcurrentFromEnv() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("RUN_DOC_PROCESSOR_CONCURRENT")))
+	return v != "false"
+}
+
 func MaxDocProcessPipelinesFromEnv() int {
 	raw := strings.TrimSpace(os.Getenv("MAX_DOC_PROCESS_PIPELINES"))
 	if raw == "" {
@@ -230,33 +238,13 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		s.runSingleProcessor(ctx, payload, s.BlockingProcessor, evt.RecordID, &requestFailed, &firstErr)
 	}
 
-	for _, p := range processors {
-		if p == nil {
-			continue
-		}
-		// Fast stop check: if the context was already cancelled by pollForStop,
-		// skip remaining processors without attempting any LLM work.
-		if isCtxStopped(ctx) {
-			requestStopped = true
-			if s.Logger != nil {
-				s.Logger.Info("doc processor stop requested, halting pipeline", "record_id", evt.RecordID)
-			}
-			return nil
-		}
-		s.runSingleProcessor(ctx, payload, p, evt.RecordID, &requestFailed, &firstErr)
-		if !requestFailed && canonicalOperationName(p.Name()) == "static_analyzer" {
-			clearBlockBufferInContext(ctx)
-		}
-		// If a processor failed due to a user stop, treat it as stopped, not failed.
-		if requestFailed && isCtxStopped(ctx) {
-			requestFailed = false
-			firstErr = nil
-			requestStopped = true
-			if s.Logger != nil {
-				s.Logger.Info("doc processor stop detected after processor", "record_id", evt.RecordID, "processor", p.Name())
-			}
-			return nil
-		}
+	if RunDocProcessorConcurrentFromEnv() {
+		s.runProcessorsTwoPhase(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr)
+	} else {
+		s.runProcessorsSequential(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr)
+	}
+	if requestStopped {
+		return nil
 	}
 	if s.Logger != nil {
 		status := "success"
@@ -343,6 +331,114 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 		if *firstErr == nil {
 			*firstErr = res.err
 		}
+	}
+}
+
+// runProcessorsSequential runs all processors in order exactly as the original
+// sequential loop did. Used as the fallback when RUN_DOC_PROCESSOR_CONCURRENT=false.
+func (s *ControlService) runProcessorsSequential(
+	ctx context.Context, payload []byte, processors []Processor,
+	recordID int64, requestFailed, requestStopped *bool, firstErr *error,
+) {
+	for _, p := range processors {
+		if p == nil {
+			continue
+		}
+		if isCtxStopped(ctx) {
+			*requestStopped = true
+			if s.Logger != nil {
+				s.Logger.Info("doc processor stop requested, halting pipeline", "record_id", recordID)
+			}
+			return
+		}
+		s.runSingleProcessor(ctx, payload, p, recordID, requestFailed, firstErr)
+		if !*requestFailed && canonicalOperationName(p.Name()) == "static_analyzer" {
+			clearBlockBufferInContext(ctx)
+		}
+		if *requestFailed && isCtxStopped(ctx) {
+			*requestFailed = false
+			*firstErr = nil
+			*requestStopped = true
+			if s.Logger != nil {
+				s.Logger.Info("doc processor stop detected after processor", "record_id", recordID, "processor", p.Name())
+			}
+			return
+		}
+	}
+}
+
+// runProcessorsTwoPhase runs Phase A processors (mandatory, sequential) and then
+// fans out Phase B (configurable, concurrent) under a WaitGroup. Each goroutine
+// runs independently via runSingleProcessorCollect so shared controller state is
+// not mutated. A panic in a Phase B processor is recovered and recorded as a
+// failure without crashing the parent.
+func (s *ControlService) runProcessorsTwoPhase(
+	ctx context.Context, payload []byte, processors []Processor,
+	recordID int64, requestFailed, requestStopped *bool, firstErr *error,
+) {
+	var phaseB []Processor
+	for _, p := range processors {
+		if p == nil {
+			continue
+		}
+		if !isPhaseAProcessor(p.Name()) {
+			phaseB = append(phaseB, p)
+			continue
+		}
+		if isCtxStopped(ctx) {
+			*requestStopped = true
+			return
+		}
+		s.runSingleProcessor(ctx, payload, p, recordID, requestFailed, firstErr)
+		if !*requestFailed && canonicalOperationName(p.Name()) == "static_analyzer" {
+			clearBlockBufferInContext(ctx)
+		}
+		if *requestFailed && isCtxStopped(ctx) {
+			*requestFailed = false
+			*firstErr = nil
+			*requestStopped = true
+			return
+		}
+	}
+	if isCtxStopped(ctx) {
+		*requestStopped = true
+		return
+	}
+	if len(phaseB) == 0 {
+		return
+	}
+
+	results := make([]procResult, len(phaseB))
+	var wg sync.WaitGroup
+	for i, p := range phaseB {
+		wg.Add(1)
+		go func(i int, p Processor) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					results[i] = procResult{failed: true, err: fmt.Errorf("(MID_26060101) processor %q panicked: %v", p.Name(), r)}
+					if s.Logger != nil {
+						s.Logger.Error("doc processor panicked", "processor", p.Name(), "record_id", recordID, "panic", r)
+					}
+				}
+			}()
+			results[i] = s.runSingleProcessorCollect(ctx, payload, p, recordID)
+		}(i, p)
+	}
+	wg.Wait()
+
+	for _, r := range results {
+		if r.failed {
+			*requestFailed = true
+			if *firstErr == nil {
+				*firstErr = r.err
+			}
+		}
+	}
+	if isCtxStopped(ctx) {
+		*requestFailed = false
+		*firstErr = nil
+		*requestStopped = true
 	}
 }
 
