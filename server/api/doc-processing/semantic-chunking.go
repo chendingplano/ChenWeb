@@ -108,7 +108,7 @@ func NewSemanticChunkingService(store Store, extractor LLMJSONExtractor, logger 
 	promptText, promptRef, promptPath, promptErr := loadTopicChunkPromptFromEnv()
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	var embedder Embedder
-	topicEmbeddingModelName := strings.TrimSpace(os.Getenv("TOPIC_EMBEDDING_MODEL_NAME"))
+	topicEmbeddingModelName := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME"))
 	if e, ok := extractor.(Embedder); ok {
 		embedder = e
 	}

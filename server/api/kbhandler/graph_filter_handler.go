@@ -217,9 +217,9 @@ func resolveGraphFilterModelsFilePath() (string, error) {
 
 func graphFilterEmbeddingModelEnv(mode string) string {
 	if mode == "summary" {
-		return "SUMMARY_EMBEDDING_MODEL_NAME"
+		return "EMBEDDING_MODEL_NAME"
 	}
-	return "TOPIC_EMBEDDING_MODEL_NAME"
+	return "EMBEDDING_MODEL_NAME"
 }
 
 func filterGraphSemanticMatches(ctx context.Context, params graphFilterSemanticParams) ([]graphFilterSemanticMatch, error) {

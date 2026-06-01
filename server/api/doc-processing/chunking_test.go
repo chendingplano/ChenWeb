@@ -297,7 +297,7 @@ func TestBuildChunks_SkipsTOCLinesInRegularAndOverlap(t *testing.T) {
 }
 
 func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
 	treeRoot := t.TempDir()
 	input := strings.Join([]string{
@@ -461,7 +461,7 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 }
 
 func TestService_HandleGenerateTopicsInput_LoadsChunkArtifactWithTOCLines(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
 	treeRoot := t.TempDir()
 	input := strings.Join([]string{
@@ -637,7 +637,7 @@ func TestLoadChunksFromArtifactFile_ErrorsOnEmptyChunkFromStaleArtifact(t *testi
 }
 
 func TestService_HandleGenerateTopicsInput_ReadsChunksAndWritesTopics(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
 	treeRoot := t.TempDir()
 	input := strings.Join([]string{
@@ -767,7 +767,7 @@ func TestService_HandleGenerateTopicsInput_ReadsChunksAndWritesTopics(t *testing
 }
 
 func TestFixedSizeChunkingService_GenerateSummaryUsesStructuredContractWhenAvailable(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	ex := &fakeSemanticExtractor{
 		outs: []map[string]any{
 			{
@@ -814,7 +814,7 @@ func TestFixedSizeChunkingService_GenerateSummaryUsesStructuredContractWhenAvail
 }
 
 func TestFixedSizeChunkingService_GenerateSummaryMissingCategoryDoesNotWarn(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	ex := &fakeSemanticExtractor{
 		outs: []map[string]any{
 			{
@@ -853,7 +853,7 @@ func TestFixedSizeChunkingService_GenerateSummaryMissingCategoryDoesNotWarn(t *t
 }
 
 func TestFixedSizeChunkingService_GenerateSummaryErrorsOnEmptyInput(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	ex := &fakeSemanticExtractor{
 		outs: []map[string]any{
 			{
@@ -878,7 +878,7 @@ func TestFixedSizeChunkingService_GenerateSummaryErrorsOnEmptyInput(t *testing.T
 }
 
 func TestFixedSizeChunkingService_GenerateSummaryTranslatesMissingEnglishCategoryPaths(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	ex := &fakeJSONExtractor{
 		outs: []map[string]any{
 			{
@@ -952,7 +952,7 @@ func TestFixedSizeChunkingService_GenerateSummaryTranslatesMissingEnglishCategor
 }
 
 func TestFixedSizeChunkingService_FixSummarySourceLanguage_TranslatesKeywordsToSourceLanguage(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	ex := &fakeJSONExtractor{
 		outs: []map[string]any{
 			{"summary": "这是英文摘要的中文翻译。"},
@@ -1003,7 +1003,7 @@ func TestFixedSizeChunkingService_FixSummarySourceLanguage_TranslatesKeywordsToS
 }
 
 func TestService_HandleInput_MissingInputFilename(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	st := &fakeStore{rec: InputRecord{ID: 1001, StatusRaw: "[]"}}
 	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = t.TempDir()
@@ -1030,7 +1030,7 @@ func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 }
 
 func TestNewService_UsesRequiredAndDefaultChunkEnv(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	t.Setenv("CHUNK_SIZE", "")
 	t.Setenv("CHUNK_OVERLAP_PERCENT", "")
 	t.Setenv("ARTIFACT_DIR", "")
@@ -1048,7 +1048,7 @@ func TestNewService_UsesRequiredAndDefaultChunkEnv(t *testing.T) {
 }
 
 func TestService_HandleInput_MissingChunkDir(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	st := &fakeStore{rec: InputRecord{ID: 2002, StatusRaw: "[]"}}
 	svc := NewFixedSizeChunkingService(st, &fakeSemanticExtractor{}, nil)
 	svc.ChunkDir = ""
@@ -1074,7 +1074,7 @@ func TestService_HandleInput_MissingChunkDir(t *testing.T) {
 }
 
 func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
 	summaryTreeRoot := t.TempDir()
 	input := strings.Join([]string{
@@ -1214,7 +1214,7 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 }
 
 func TestService_HandleGenerateSummariesInput_SummaryGenerationFailure(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	st := &fakeStore{rec: InputRecord{
 		ID:              9001,
 		StatusRaw:       "[]",
@@ -1309,7 +1309,7 @@ func TestFormatSummaryProgress(t *testing.T) {
 }
 
 func TestService_HandleGenerateSummariesInput_TranslatesEnglishFallbackKeywords(t *testing.T) {
-	t.Setenv("SUMMARY_EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	ex := &fakeJSONExtractor{
 		outs: []map[string]any{
 			{"summary": "这是中文摘要。"},

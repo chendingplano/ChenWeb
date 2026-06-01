@@ -185,9 +185,9 @@ type protectedBlock struct {
 //
 // NewFixedSizeChunkingService constructs the service by loading all model configs, prompts, and
 // embedding settings from environment variables. The topic embedder is resolved in priority order:
-// a dedicated OpenAI-compatible client if TOPIC_EMBEDDING_MODEL_NAME is set with a valid config,
+// a dedicated OpenAI-compatible client if EMBEDDING_MODEL_NAME is set with a valid config,
 // then the extractor itself if it implements Embedder, otherwise nil. Summary embedding follows the
-// same fallback pattern via SUMMARY_EMBEDDING_MODEL_NAME. A default logger is created when none is provided.
+// same fallback pattern via EMBEDDING_MODEL_NAME. A default logger is created when none is provided.
 func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *FixedSizeChunkingService {
 	logger := loggerutil.CreateDefaultLogger("MID_26041901")
 	modelRef, modelCfgPath, modelCfg, modelErr := loadFixedSizeTopicModelFromEnv()
@@ -215,11 +215,11 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		}
 		fallbackModelName = fallbackCfg.ModelName
 	}
-	topicEmbeddingModelRef := strings.TrimSpace(os.Getenv("TOPIC_EMBEDDING_MODEL_NAME"))
+	topicEmbeddingModelRef := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME"))
 	var embedder Embedder
 	var topicEmbeddingModelName string
 	if topicEmbeddingModelRef != "" {
-		_, _, embCfg, embErr := loadModelConfigFromEnv("TOPIC_EMBEDDING_MODEL_NAME", "")
+		_, _, embCfg, embErr := loadModelConfigFromEnv("EMBEDDING_MODEL_NAME", "")
 		if embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
 			timeoutSec := embCfg.TimeoutSec
 			if timeoutSec <= 0 {
@@ -239,13 +239,13 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 	} else if e, ok := extractor.(Embedder); ok {
 		embedder = e
 	}
-	summaryEmbeddingModelRef := strings.TrimSpace(os.Getenv("SUMMARY_EMBEDDING_MODEL_NAME"))
+	summaryEmbeddingModelRef := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME"))
 	if summaryEmbeddingModelRef == "" {
-		logger.Error("SUMMARY_EMBEDDING_MODEL_NAME is not defined")
-		panic("SUMMARY_EMBEDDING_MODEL_NAME is not defined")
+		logger.Error("EMBEDDING_MODEL_NAME is not defined")
+		panic("EMBEDDING_MODEL_NAME is not defined")
 	}
 	var summaryEmbeddingModelName string
-	if _, _, embCfg, embErr := loadModelConfigFromEnv("SUMMARY_EMBEDDING_MODEL_NAME", ""); embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
+	if _, _, embCfg, embErr := loadModelConfigFromEnv("EMBEDDING_MODEL_NAME", ""); embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
 		summaryEmbeddingModelName = embCfg.ModelName
 	} else {
 		summaryEmbeddingModelName = summaryEmbeddingModelRef

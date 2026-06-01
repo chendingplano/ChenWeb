@@ -95,7 +95,7 @@ base_url = %q
 timeout_sec = 5
 `, embeddingServer.URL))
 	t.Setenv("ARTIFACT_WEB_DIR", root)
-	t.Setenv("TOPIC_EMBEDDING_MODEL_NAME", "topic-embedding")
+	t.Setenv("EMBEDDING_MODEL_NAME", "topic-embedding")
 	t.Setenv("MODELS_FILE", modelsPath)
 
 	e := echo.New()
@@ -134,7 +134,7 @@ api_key = "test-key"
 base_url = "https://example.test/v1"
 timeout_sec = 12
 `)
-	t.Setenv("TOPIC_EMBEDDING_MODEL_NAME", "topic-embedding")
+	t.Setenv("EMBEDDING_MODEL_NAME", "topic-embedding")
 	t.Setenv("MODELS_FILE", modelsPath)
 
 	embedderCfg := newGraphFilterEmbedder("topic")
@@ -159,7 +159,7 @@ func TestNewGraphFilterEmbedderReportsRequiredModeEnv(t *testing.T) {
 
 	embedderCfg := newGraphFilterEmbedder("summary")
 
-	if embedderCfg.Err == nil || !strings.Contains(embedderCfg.Err.Error(), "SUMMARY_EMBEDDING_MODEL_NAME") {
-		t.Fatalf("expected missing SUMMARY_EMBEDDING_MODEL_NAME error, got %+v", embedderCfg.Err)
+	if embedderCfg.Err == nil || !strings.Contains(embedderCfg.Err.Error(), "EMBEDDING_MODEL_NAME") {
+		t.Fatalf("expected missing EMBEDDING_MODEL_NAME error, got %+v", embedderCfg.Err)
 	}
 }

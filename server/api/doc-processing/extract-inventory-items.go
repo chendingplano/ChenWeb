@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -139,14 +140,33 @@ func NewInventoryItemsProcessor(
 	dict, dictErr := loadInventoryDictionaryDir(dictDir)
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	registry := InventoryCategoryRegistry{DB: ApiTypes.ProjectDBHandle}
+	categoryEmbedModelRef := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME"))
+	if categoryEmbedModelRef == "" {
+		logger.Error("EMBEDDING_MODEL_NAME is not defined")
+		panic("EMBEDDING_MODEL_NAME is not defined")
+	}
 	var categoryEmbedder Embedder
-	if e, ok := extractor.(Embedder); ok {
+	var categoryEmbedModelName string
+	if _, _, embCfg, embErr := loadModelConfigFromEnv("EMBEDDING_MODEL_NAME", ""); embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
+		timeoutSec := embCfg.TimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = 60
+		}
+		categoryEmbedder = &llmclients.OpenAIJSONClient{
+			HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+			ModelName:  embCfg.ModelName,
+			APIKey:     embCfg.APIKey,
+			BaseURL:    embCfg.BaseURL,
+		}
+		categoryEmbedModelName = embCfg.ModelName
+	} else if e, ok := extractor.(Embedder); ok {
 		categoryEmbedder = e
+		categoryEmbedModelName = categoryEmbedModelRef
 	}
 	curator := InventoryCategoryCurator{
 		Registry:       registry,
 		Embedder:       categoryEmbedder,
-		EmbedModelName: strings.TrimSpace(os.Getenv("INVENTORY_CATEGORY_EMBEDDING_MODEL_NAME")),
+		EmbedModelName: categoryEmbedModelName,
 		FuzzyThreshold: envFloat("INVENTORY_CATEGORY_FUZZY_THRESHOLD", defaultInventoryCategoryFuzzyThreshold, 0),
 		Logger:         logger,
 	}
@@ -333,7 +353,17 @@ type inventoryChunkOutcome struct {
 
 func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Context, recordID int64, chunks []Chunk) (inventoryItemsExtractionResult, error) {
 	eventID := eventIDFromContext(ctx)
+
+	startTime := time.Now()
+
+	p.Logger.Info("extract inventory items start",
+		"record_id", recordID,
+		"model_name", p.ModelName,
+		"prompt", p.PromptRef,
+	)
+
 	outcomes, runErr := runConcurrent(ctx, p.ExtractInventoryItemsMaxTasks, len(chunks), func(runCtx context.Context, i int) (inventoryChunkOutcome, error) {
+		localStart := time.Now()
 		chunk := chunks[i]
 		inputText := p.buildInventoryItemsUserInput(chunk)
 		callStart := p.now()
@@ -342,8 +372,6 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 			"record_id", recordID,
 			"chunk_idx", i,
 			"seq_no", chunk.SeqNo,
-			"model_name", p.ModelName,
-			"prompt", p.PromptRef,
 		)
 		payload, modelName, err := p.extractInventoryItemsWithFallback(runCtx, inputText)
 		if isCtxStopped(runCtx) {
@@ -364,6 +392,15 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 			p.Logger.Warn("inventory item extraction failed for chunk; skipping", "record_id", recordID, "chunk_idx", i, "error", err)
 			return inventoryChunkOutcome{failed: true, fallback: wasFallback}, nil
 		}
+
+		p.Logger.Info("extract inventory items end  ",
+			"record_id", recordID,
+			"chunk_idx", i,
+			"seq_no", chunk.SeqNo,
+			"extracted", len(chunkItems),
+			"ms_used", time.Since(localStart).Milliseconds(),
+		)
+
 		return inventoryChunkOutcome{
 			items:     chunkItems,
 			modelName: modelName,
@@ -396,6 +433,13 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 		}
 		items = append(items, outcome.items...)
 	}
+
+	p.Logger.Info("extract inventory items finished",
+		"record_id", recordID,
+		"extracted", len(items),
+		"ms_used", time.Since(startTime).Milliseconds(),
+	)
+
 	return inventoryItemsExtractionResult{
 		Language:      detectedLanguage,
 		Items:         dedupeInventoryItemRows(items),
