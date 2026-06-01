@@ -225,6 +225,7 @@ func main() {
 		"chunking_method", docprocessing.ChunkingMethodFixed,
 		"generate_topics_method", docprocessing.ChunkingMethodTopic,
 		"max_doc_process_pipelines", control.MaxDocProcessPipelines,
+		"run_doc_processor_concurrent", docprocessing.RunDocProcessorConcurrentFromEnv(),
 		"configured_required_processors", configuredProcessorNames(),
 		"processors", processorNames,
 		"started_at", time.Now().Format(time.RFC3339),
