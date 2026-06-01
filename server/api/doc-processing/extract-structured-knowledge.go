@@ -599,7 +599,7 @@ func (p *StructuredKnowledgeProcessor) logStructuredKnowledgeSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052813"); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, "extract_structured_knowledge", rec, "MID-26052813"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }

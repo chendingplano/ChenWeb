@@ -303,7 +303,7 @@ func (p *ExtractDocMetadataProcessor) logDocMetaSummary(
 		Errors:        errStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052806"); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, "extract_doc_metadata", rec, "MID-26052806"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }

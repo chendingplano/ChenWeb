@@ -74,12 +74,11 @@ func (p *ChunkingProcessor) logSummary(ctx context.Context, recordID *int64, sta
 		s := procErr.Error()
 		errStr = &s
 	}
-	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+	if err := p.ProcLogger.LogSummary(ctx, "chunking", DocProcLogRecord{
 		DocProcName:   p.LogName(),
 		ModelNames:    docProcSummaryModelNames(p.Service),
 		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
 		RecordID:      recordID,
-		EntryType:     "chunking",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),

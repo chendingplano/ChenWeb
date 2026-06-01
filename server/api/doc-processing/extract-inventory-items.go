@@ -29,26 +29,26 @@ const (
 )
 
 type InventoryItemsProcessor struct {
-	InputStore        DocMetadataStore
-	Store             InventoryItemsStore
-	Extractor         LLMJSONExtractor
-	Logger            ApiTypes.JimoLogger
-	ProcLogger        DocProcLogger
-	Now               func() time.Time
-	PromptText        string
-	PromptRef         string
-	PromptPath        string
-	PromptErr         error
-	ModelRef          string
-	ModelCfgPath      string
-	ModelErr          error
-	ModelName         string
-	ModelCfg          structureModelConfig
-	FallbackModelRef  string
-	FallbackModelPath string
-	FallbackModelErr  error
-	FallbackModelName string
-	FallbackModelCfg  structureModelConfig
+	InputStore                    DocMetadataStore
+	Store                         InventoryItemsStore
+	Extractor                     LLMJSONExtractor
+	Logger                        ApiTypes.JimoLogger
+	ProcLogger                    DocProcLogger
+	Now                           func() time.Time
+	PromptText                    string
+	PromptRef                     string
+	PromptPath                    string
+	PromptErr                     error
+	ModelRef                      string
+	ModelCfgPath                  string
+	ModelErr                      error
+	ModelName                     string
+	ModelCfg                      structureModelConfig
+	FallbackModelRef              string
+	FallbackModelPath             string
+	FallbackModelErr              error
+	FallbackModelName             string
+	FallbackModelCfg              structureModelConfig
 	ArtifactDir                   string
 	Dictionary                    inventoryDictionary
 	DictionaryDir                 string
@@ -185,26 +185,26 @@ func NewInventoryItemsProcessor(
 		Logger:         logger,
 	}
 	return &InventoryItemsProcessor{
-		InputStore:        inputStore,
-		Store:             store,
-		Extractor:         extractor,
-		Logger:            logger,
-		ProcLogger:        DocProcLogger{DB: ApiTypes.ProjectDBHandle},
-		Now:               time.Now,
-		PromptText:        promptText,
-		PromptRef:         promptRef,
-		PromptPath:        promptPath,
-		PromptErr:         promptErr,
-		ModelRef:          modelRef,
-		ModelCfgPath:      modelCfgPath,
-		ModelErr:          modelErr,
-		ModelName:         modelCfg.ModelName,
-		ModelCfg:          modelCfg,
-		FallbackModelRef:  fallbackModelRef,
-		FallbackModelPath: fallbackModelPath,
-		FallbackModelErr:  fallbackModelErr,
-		FallbackModelName: fallbackModelCfg.ModelName,
-		FallbackModelCfg:  fallbackModelCfg,
+		InputStore:                    inputStore,
+		Store:                         store,
+		Extractor:                     extractor,
+		Logger:                        logger,
+		ProcLogger:                    DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		Now:                           time.Now,
+		PromptText:                    promptText,
+		PromptRef:                     promptRef,
+		PromptPath:                    promptPath,
+		PromptErr:                     promptErr,
+		ModelRef:                      modelRef,
+		ModelCfgPath:                  modelCfgPath,
+		ModelErr:                      modelErr,
+		ModelName:                     modelCfg.ModelName,
+		ModelCfg:                      modelCfg,
+		FallbackModelRef:              fallbackModelRef,
+		FallbackModelPath:             fallbackModelPath,
+		FallbackModelErr:              fallbackModelErr,
+		FallbackModelName:             fallbackModelCfg.ModelName,
+		FallbackModelCfg:              fallbackModelCfg,
 		ArtifactDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		Dictionary:                    dict,
 		DictionaryDir:                 dictDir,
@@ -301,6 +301,7 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 		return nil
 	}
 
+	p.persistInventoryItemsInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(chunks)))
 	result, err := p.extractInventoryItemsFromChunks(ctx, evt.RecordID, chunks)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
@@ -1126,6 +1127,7 @@ type inventoryItemsStatusParams struct {
 	Start         time.Time
 	DurationMs    int64
 	ProcStatus    string
+	Progress      string
 	ProcErr       error
 }
 
@@ -1138,6 +1140,9 @@ func appendInventoryItemsStatus(raw string, p inventoryItemsStatusParams) (strin
 		"input_filename": strings.TrimSpace(p.InputFilename),
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
+	}
+	if progress := strings.TrimSpace(p.Progress); progress != "" {
+		entry["progress"] = progress
 	}
 	if override := strings.TrimSpace(p.ProcStatus); override != "" {
 		entry["proc_status"] = override
@@ -1197,6 +1202,26 @@ func (p *InventoryItemsProcessor) persistInventoryItemsStatus(ctx context.Contex
 		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
 	}); updateErr != nil {
 		p.Logger.Error("failed persisting inventory items status", "record_id", rec.ID, "error", updateErr)
+	}
+}
+
+func (p *InventoryItemsProcessor) persistInventoryItemsInProgressStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, progress string) {
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendInventoryItemsStatus(current, inventoryItemsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectInventoryItemsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "in_progress",
+			Progress:      progress,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
+	}); err != nil {
+		p.Logger.Warn("failed persisting inventory items in-progress status", "record_id", rec.ID, "error", err)
 	}
 }
 
@@ -1286,7 +1311,7 @@ func (p *InventoryItemsProcessor) logInventoryItemsSummary(ctx context.Context, 
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26053142"); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, "extract_inventory_items", rec, "MID-26053142"); err != nil {
 		p.Logger.Warn("failed to write inventory items summary log", "error", err)
 	}
 }

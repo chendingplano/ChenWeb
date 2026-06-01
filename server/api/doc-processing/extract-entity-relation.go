@@ -25,27 +25,27 @@ import (
 // search registry. It does NOT generate category paths and does NOT touch
 // ARTIFACT_WEB_DIR.
 type EntityRelationProcessor struct {
-	InputStore        DocMetadataStore
-	Store             EntityRelationStore
-	Extractor         LLMJSONExtractor
-	Logger            ApiTypes.JimoLogger
-	ProcLogger        DocProcLogger
-	Now               func() time.Time
-	PromptText        string
-	PromptRef         string
-	PromptPath        string
-	PromptErr         error
-	ModelRef          string
-	ModelCfgPath      string
-	ModelErr          error
-	ModelName         string
-	ModelCfg          structureModelConfig
-	FallbackModelRef  string
-	FallbackModelPath string
-	FallbackModelErr  error
-	FallbackModelName string
-	FallbackModelCfg  structureModelConfig
-	ArtifactDir                  string
+	InputStore                    DocMetadataStore
+	Store                         EntityRelationStore
+	Extractor                     LLMJSONExtractor
+	Logger                        ApiTypes.JimoLogger
+	ProcLogger                    DocProcLogger
+	Now                           func() time.Time
+	PromptText                    string
+	PromptRef                     string
+	PromptPath                    string
+	PromptErr                     error
+	ModelRef                      string
+	ModelCfgPath                  string
+	ModelErr                      error
+	ModelName                     string
+	ModelCfg                      structureModelConfig
+	FallbackModelRef              string
+	FallbackModelPath             string
+	FallbackModelErr              error
+	FallbackModelName             string
+	FallbackModelCfg              structureModelConfig
+	ArtifactDir                   string
 	ExtractEntityRelationMaxTasks int
 }
 
@@ -125,27 +125,27 @@ func NewEntityRelationProcessor(
 	)
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	return &EntityRelationProcessor{
-		InputStore:        inputStore,
-		Store:             store,
-		Extractor:         extractor,
-		Logger:            logger,
-		ProcLogger:        DocProcLogger{DB: ApiTypes.ProjectDBHandle},
-		Now:               time.Now,
-		PromptText:        promptText,
-		PromptRef:         promptRef,
-		PromptPath:        promptPath,
-		PromptErr:         promptErr,
-		ModelRef:          modelRef,
-		ModelCfgPath:      modelCfgPath,
-		ModelErr:          modelErr,
-		ModelName:         modelCfg.ModelName,
-		ModelCfg:          modelCfg,
-		FallbackModelRef:  fallbackModelRef,
-		FallbackModelPath: fallbackModelPath,
-		FallbackModelErr:  fallbackModelErr,
-		FallbackModelName: fallbackModelCfg.ModelName,
-		FallbackModelCfg:  fallbackModelCfg,
-		ArtifactDir:                  strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		InputStore:                    inputStore,
+		Store:                         store,
+		Extractor:                     extractor,
+		Logger:                        logger,
+		ProcLogger:                    DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		Now:                           time.Now,
+		PromptText:                    promptText,
+		PromptRef:                     promptRef,
+		PromptPath:                    promptPath,
+		PromptErr:                     promptErr,
+		ModelRef:                      modelRef,
+		ModelCfgPath:                  modelCfgPath,
+		ModelErr:                      modelErr,
+		ModelName:                     modelCfg.ModelName,
+		ModelCfg:                      modelCfg,
+		FallbackModelRef:              fallbackModelRef,
+		FallbackModelPath:             fallbackModelPath,
+		FallbackModelErr:              fallbackModelErr,
+		FallbackModelName:             fallbackModelCfg.ModelName,
+		FallbackModelCfg:              fallbackModelCfg,
+		ArtifactDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		ExtractEntityRelationMaxTasks: envInt("EXTRACT_ENTITY_RELATION_MAX_TASKS", 1, 1),
 	}
 }
@@ -241,6 +241,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		return nil
 	}
 
+	p.persistEntityRelationInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(chunks)))
 	result, err := p.extractEntityRelationFromChunks(ctx, evt.RecordID, chunks)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
@@ -493,13 +494,13 @@ func (p *EntityRelationProcessor) logLLMCall(
 	}
 	progress := fmt.Sprintf("%d%% (%d/%d)", percent, chunkIdx+1, totalChunks)
 	extraInfo := map[string]any{
-		"chunk":                 chunkIdx + 1,
-		"total_chunks":          totalChunks,
-		"percent":               progress,
-		"chunk_entity_count":    chunkEntityCount,
-		"total_entity_count":    totalEntityCount,
-		"chunk_relation_count":  chunkRelationCount,
-		"total_relation_count":  totalRelationCount,
+		"chunk":                chunkIdx + 1,
+		"total_chunks":         totalChunks,
+		"percent":              progress,
+		"chunk_entity_count":   chunkEntityCount,
+		"total_entity_count":   totalEntityCount,
+		"chunk_relation_count": chunkRelationCount,
+		"total_relation_count": totalRelationCount,
 	}
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
@@ -569,7 +570,7 @@ func (p *EntityRelationProcessor) logEntityRelationSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, rec, "MID-26052808"); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, "extract_entity_relation", rec, "MID-26052808"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }
@@ -872,6 +873,7 @@ type entityRelationStatusParams struct {
 	Start         time.Time
 	DurationMs    int64
 	ProcStatus    string
+	Progress      string
 	ProcErr       error
 }
 
@@ -883,6 +885,26 @@ func detectEntityRelationFileType(rec DocMetadataInputRecord) string {
 		}
 	}
 	return ""
+}
+
+func (p *EntityRelationProcessor) persistEntityRelationInProgressStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, progress string) {
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendEntityRelationStatus(current, entityRelationStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectEntityRelationFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "in_progress",
+			Progress:      progress,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
+	}); err != nil {
+		p.Logger.Warn("failed persisting entity-relation in-progress status", "record_id", rec.ID, "error", err)
+	}
 }
 
 func (p *EntityRelationProcessor) persistEntityRelationStatus(
@@ -943,6 +965,9 @@ func appendEntityRelationStatus(raw string, p entityRelationStatusParams) (strin
 		"input_filename": strings.TrimSpace(p.InputFilename),
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
+	}
+	if progress := strings.TrimSpace(p.Progress); progress != "" {
+		entry["progress"] = progress
 	}
 	if override := strings.TrimSpace(p.ProcStatus); override != "" {
 		entry["proc_status"] = override

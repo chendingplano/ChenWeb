@@ -97,12 +97,11 @@ func (p *GenerateTopicsProcessor) logSummary(ctx context.Context, recordID *int6
 	}, "MID-26052856"); err != nil {
 		p.Logger.Warn("failed to write extract_topics_finish log", "error", err)
 	}
-	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+	if err := p.ProcLogger.LogSummary(ctx, "generate_topics", DocProcLogRecord{
 		DocProcName:   p.Name(),
 		ModelNames:    docProcSummaryModelNames(p.Service),
 		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
 		RecordID:      recordID,
-		EntryType:     "generate_topics",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        &msUsed,

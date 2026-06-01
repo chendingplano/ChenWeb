@@ -100,13 +100,12 @@ func (p *GenerateSummariesProcessor) logSummary(ctx context.Context, recordID *i
 		p.Logger.Warn("failed to write generate_summary_finish log", "error", err)
 	}
 
-	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+	if err := p.ProcLogger.LogSummary(ctx, "generate_summaries", DocProcLogRecord{
 		DocProcName:   p.Name(),
 		ModelNames:    docProcSummaryModelNames(p.Service),
 		PromptName:    strings.Join(docProcSummaryPromptNames(p.Service), ","),
 		RecordID:      recordID,
 		ProcProgress:  procProgress,
-		EntryType:     "generate_summary",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        &msUsed,

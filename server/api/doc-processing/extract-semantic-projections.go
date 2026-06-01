@@ -247,6 +247,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 		return nil
 	}
 
+	p.persistSemanticProjectionsInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(chunks)))
 	result, err := p.extractSemanticProjectionsFromChunks(ctx, evt.RecordID, chunks)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
@@ -973,6 +974,7 @@ type semanticProjectionsStatusParams struct {
 	Start         time.Time
 	DurationMs    int64
 	ProcStatus    string
+	Progress      string
 	ProcErr       error
 }
 
@@ -1004,6 +1006,26 @@ func (p *SemanticProjectionsProcessor) stopAndPersistSemanticProjections(ctx con
 		p.Logger.Error("(MID_26052842) failed persisting semantic projections stopped status", "record_id", rec.ID, "error", updateErr)
 	}
 	p.Logger.Info("(MID_26052843) extract_semantic_projections stopped by user request", "record_id", rec.ID)
+}
+
+func (p *SemanticProjectionsProcessor) persistSemanticProjectionsInProgressStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, progress string) {
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendSemanticProjectionsStatus(current, semanticProjectionsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectSemanticProjectionsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "in_progress",
+			Progress:      progress,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
+	}); err != nil {
+		p.Logger.Warn("failed persisting semantic projections in-progress status", "record_id", rec.ID, "error", err)
+	}
 }
 
 func (p *SemanticProjectionsProcessor) persistSemanticProjectionsStatus(
@@ -1044,6 +1066,9 @@ func appendSemanticProjectionsStatus(raw string, p semanticProjectionsStatusPara
 		"input_filename": strings.TrimSpace(p.InputFilename),
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
+	}
+	if progress := strings.TrimSpace(p.Progress); progress != "" {
+		entry["progress"] = progress
 	}
 	if override := strings.TrimSpace(p.ProcStatus); override != "" {
 		entry["proc_status"] = override

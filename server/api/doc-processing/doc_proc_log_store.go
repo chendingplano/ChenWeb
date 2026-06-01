@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -13,7 +14,6 @@ import (
 )
 
 const EntryTypeLLMCall = "llm_call"
-const EntryTypeSummary = "doc_proc_summary"
 const EntryTypeGenerateSummary = "generate_summary"
 const EntryTypeGenerateSummaryFinish = "generate_summary_finish"
 const EntryTypeExtractTopics = "extract_topics"
@@ -33,6 +33,8 @@ const EntryTypeExtractEntityRelation = "extract_entity_relation"
 const EntryTypeExtractInventoryItems = "extract_inventory_items"
 const EntryTypeEnrichMetrics = "enrich_metrics"
 const EntryTypeExtractDocMetadata = "extract_doc_metadata"
+const EntryTypeChunking = "chunking"
+const EntryTypeGenerateSceneBlocks = "generate_scene_blocks"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
@@ -115,9 +117,10 @@ func (l DocProcLogger) LogExtractDocMetadata(ctx context.Context, rec DocProcLog
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
-// LogSummary inserts a doc_proc_summary entry.
-func (l DocProcLogger) LogSummary(ctx context.Context, rec DocProcLogRecord, loc string) error {
-	rec.EntryType = EntryTypeSummary
+// LogSummary inserts a per-operation summary row. Every summary shares
+// entry_type = doc_proc_summary; the operation is identified by rec.DocProcName.
+func (l DocProcLogger) LogSummary(ctx context.Context, entry_type string, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = entry_type
 	rec.LogLoc = callerLoc(2)
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
@@ -242,7 +245,7 @@ func (l DocProcLogger) LogExtractInventoryItems(ctx context.Context, rec DocProc
 
 func allowedDocProcLogEntryType(entryType string) bool {
 	switch entryType {
-	case EntryTypeLLMCall, EntryTypeSummary,
+	case EntryTypeLLMCall,
 		EntryTypeGenerateSummary, EntryTypeGenerateSummaryFinish,
 		EntryTypeExtractTopics, EntryTypeExtractTopicsFinish,
 		EntryTypeStaticAnalyzer, EntryTypeBlocking,
@@ -252,6 +255,8 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,
 		EntryTypeExtractStructuredKnowledge, EntryTypeEnrichStructuredKnowledge,
 		EntryTypeExtractEntityRelation, EntryTypeExtractInventoryItems,
+		EntryTypeChunking,
+		EntryTypeGenerateSceneBlocks,
 		EntryTypeExtractDocMetadata:
 		return true
 	default:
@@ -267,7 +272,7 @@ func insertDocProcLog(ctx context.Context, db *sql.DB, rec DocProcLogRecord, loc
 		return errors.New("doc_proc_name is required")
 	}
 	if !allowedDocProcLogEntryType(rec.EntryType) {
-		return errors.New("entry_type is not allowed")
+		return fmt.Errorf("entry_type is not allowed:%s", rec.EntryType)
 	}
 
 	modelNamesArr := "{}"

@@ -335,6 +335,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		return procErr
 	}
 
+	p.persistMetricsInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(inputChunks)))
 	result, err := p.extractMetricsFromChunksWithLLM(ctx, evt.RecordID, inputChunks)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) || isCtxStopped(ctx) {
@@ -441,6 +442,7 @@ type metricsStatusParams struct {
 	Start         time.Time
 	DurationMs    int64
 	ProcStatus    string
+	Progress      string
 	ProcErr       error
 }
 
@@ -452,6 +454,26 @@ func detectMetricsFileType(rec DocMetadataInputRecord) string {
 		}
 	}
 	return ""
+}
+
+func (p *MetricsProcessor) persistMetricsInProgressStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, progress string) {
+	if err := updateInputStatusAtomic(ctx, p.InputStore, rec.ID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendMetricsStatus(current, metricsStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectMetricsFileType(rec),
+			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "in_progress",
+			Progress:      progress,
+		})
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
+	}); err != nil {
+		p.Logger.Warn("failed persisting metrics in-progress status", "record_id", rec.ID, "error", err)
+	}
 }
 
 func (p *MetricsProcessor) persistMetricsStatus(ctx context.Context, rec DocMetadataInputRecord, start time.Time, procErr error) {
@@ -507,6 +529,9 @@ func appendMetricsStatus(raw string, p metricsStatusParams) (string, error) {
 		"input_filename": strings.TrimSpace(p.InputFilename),
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
+	}
+	if progress := strings.TrimSpace(p.Progress); progress != "" {
+		entry["progress"] = progress
 	}
 	if override := strings.TrimSpace(p.ProcStatus); override != "" {
 		entry["proc_status"] = override

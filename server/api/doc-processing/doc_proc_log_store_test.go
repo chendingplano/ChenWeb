@@ -48,7 +48,7 @@ INSERT INTO kb.doc_proc_logs (
 			nil,
 			nil,
 			nil,
-			EntryTypeSummary,
+			"doc_proc_summary",
 			nil,
 			nil,
 			nil,
@@ -61,7 +61,7 @@ INSERT INTO kb.doc_proc_logs (
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	logger := DocProcLogger{DB: db}
-	if err := logger.LogSummary(context.Background(), DocProcLogRecord{
+	if err := logger.LogSummary(context.Background(), "test_entry_type", DocProcLogRecord{
 		DocProcName:   "generate_summaries",
 		ExtraInfoJSON: &extra,
 		MSUsed:        &msUsed,
@@ -115,7 +115,7 @@ INSERT INTO kb.doc_proc_logs (
 			nil,
 			int64PtrValue(recordID),
 			strPtrValue(progress),
-			EntryTypeExtractMetrics,
+			"extract_metrics",
 			nil,
 			nil,
 			nil,
@@ -169,7 +169,7 @@ func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_proc_logs WHERE entry_type = $1")).
-		WithArgs(EntryTypeSummary).
+		WithArgs("test_entry_type").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 
 	rows := sqlmock.NewRows([]string{
@@ -177,17 +177,17 @@ func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
 		"ms_used", "log_loc", "coalesce",
 	}).AddRow(
-		int64(9), "summary call", "generate_topics", `{topic-model}`, "topic-prompt", int64(81), "66% (2/3)", EntryTypeSummary,
+		int64(9), "summary call", "generate_topics", `{topic-model}`, "topic-prompt", int64(81), "66% (2/3)", "test_entry_type",
 		nil, nil, nil, nil, nil, `{"topics_generated":7}`, int64(2400), "generate_phase_processors_test.go_123", "2026-05-27T12:00:00+00:00",
 	)
 
 	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+WHERE entry_type = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
 	mock.ExpectQuery(listQuery).
-		WithArgs(EntryTypeSummary, 50, 0).
+		WithArgs("test_entry_type", 50, 0).
 		WillReturnRows(rows)
 
 	store := SQLStore{DB: db}
-	got, total, err := store.ListDocProcLogs(context.Background(), DocProcLogFilter{EntryType: EntryTypeSummary})
+	got, total, err := store.ListDocProcLogs(context.Background(), DocProcLogFilter{EntryType: "test_entry_type"})
 	if err != nil {
 		t.Fatalf("ListDocProcLogs: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestSQLStoreListDocProcLogs_OrdersByAllowedField(t *testing.T) {
 		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
 		"ms_used", "log_loc", "coalesce",
 	}).AddRow(
-		int64(10), "llm call", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", int64(55), nil, EntryTypeLLMCall,
+		int64(10), "llm call", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", int64(55), nil, "test_entry_type",
 		2, "call-1", "enrich_metrics", nil, nil, `{"source":"test"}`, int64(9300), "doc_proc_log_store_test.go_234", "2026-05-27T12:00:00+00:00",
 	)
 

@@ -1137,11 +1137,10 @@ func (p *ProductsProcessor) logProductsSummary(ctx context.Context, start, end t
 		"num_blocks":     numBlocks,
 	})
 	extraStr := string(extraInfo)
-	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+	if err := p.ProcLogger.LogSummary(ctx, "extract_products", DocProcLogRecord{
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
-		EntryType:     "doc_proc_summary",
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}, "MID-26052810"); err != nil {

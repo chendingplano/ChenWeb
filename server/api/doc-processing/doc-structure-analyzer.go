@@ -262,11 +262,10 @@ func (p *StructureAnalyzerProcessor) logSummary(ctx context.Context, start, end 
 		s := procErr.Error()
 		errStr = &s
 	}
-	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+	if err := p.ProcLogger.LogSummary(ctx, "structure_analyzer", DocProcLogRecord{
 		DocProcName:   p.Name(),
 		ModelNames:    []string{},
 		PromptName:    "",
-		EntryType:     "doc_proc_summary",
 		ExtraInfoJSON: &extraStr,
 		Errors:        errStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),

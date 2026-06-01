@@ -412,10 +412,10 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 	}
 
 	p.Logger.Info("extract scene blocks",
-			"record_id", record_id,
-			"model_names", fmt.Sprintf("%s/%s", p.MentionModelName, p.RelationModelName),
-			"prompt_names", fmt.Sprintf("%s/%s", p.RelationPromptRef, p.MentionPromptRef),
-		)
+		"record_id", record_id,
+		"model_names", fmt.Sprintf("%s/%s", p.MentionModelName, p.RelationModelName),
+		"prompt_names", fmt.Sprintf("%s/%s", p.RelationPromptRef, p.MentionPromptRef),
+	)
 
 	pass1Results, pass1Err := runConcurrent(ctx, p.GenerateSceneBlocksMaxTasks, len(chunks), func(jobCtx context.Context, idx int) (pass1ChunkResult, error) {
 		if isCtxStopped(jobCtx) {
@@ -653,7 +653,7 @@ func (p *SceneBlocksProcessor) logLLMCall(
 	if pass == 2 {
 		logFn = p.ProcLogger.LogEnrichSceneBlocks
 	}
-	if err := logFn(ctx, rec, "MID-26052815"); err != nil {
+	if err := logFn(ctx, rec, "MID-2605060101"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
 	}
 }
@@ -687,7 +687,7 @@ func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start,
 	extraStr := string(extraInfo)
 	progress := "100%"
 	activityName := "extract_scene_blocks"
-	if err := p.ProcLogger.LogSummary(ctx, DocProcLogRecord{
+	if err := p.ProcLogger.LogSummary(ctx, "generate_scene_blocks", DocProcLogRecord{
 		CallReason:    "extract scene blocks",
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
