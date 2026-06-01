@@ -63,6 +63,8 @@ type InventoryItemsStore interface {
 	InventoryItemsExist(ctx context.Context, inputRecordID int64) (bool, error)
 	DeleteInventoryItemsByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error)
 	SaveInventoryItems(ctx context.Context, req SaveInventoryItemsRequest) (int64, error)
+	DeleteInventoryItemDuplicatesByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error)
+	SaveInventoryItemDuplicates(ctx context.Context, req SaveInventoryItemDuplicatesRequest) (int64, error)
 }
 
 type InventoryItemsSQLStore struct {
@@ -78,9 +80,21 @@ type SaveInventoryItemsRequest struct {
 	Items         []map[string]any
 }
 
+// SaveInventoryItemDuplicatesRequest carries the discarded duplicate rows for a
+// record. Each item must already have inventory_item_id and duplicate_of set.
+type SaveInventoryItemDuplicatesRequest struct {
+	InputRecordID int64
+	EventID       string
+	Language      string
+	ModelName     string
+	PromptName    string
+	Items         []map[string]any
+}
+
 type inventoryItemsExtractionResult struct {
 	Language      string
 	Items         []map[string]any
+	Duplicates    []map[string]any
 	ModelName     string
 	LLMCallCount  int
 	FallbackCount int
@@ -252,6 +266,7 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	}
 	if evt.Force {
 		_, _ = p.Store.DeleteInventoryItemsByInputRecordID(ctx, evt.RecordID)
+		_, _ = p.Store.DeleteInventoryItemDuplicatesByInputRecordID(ctx, evt.RecordID)
 	} else {
 		exists, existErr := p.Store.InventoryItemsExist(ctx, evt.RecordID)
 		if existErr != nil {
@@ -301,6 +316,17 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 		result.Items[i]["inventory_item_id"] = fmt.Sprintf("%d_i_%d", evt.RecordID, i+1)
 		result.Items[i]["create_time"] = createTime
 	}
+	// Point each discarded duplicate at the surviving row it collapsed into. The
+	// survivor for a group is the row whose dedupe_key matches the duplicate's.
+	survivorByDedupeKey := make(map[string]string, len(result.Items))
+	for _, item := range result.Items {
+		survivorByDedupeKey[asString(item["dedupe_key"])] = asString(item["inventory_item_id"])
+	}
+	for j := range result.Duplicates {
+		result.Duplicates[j]["inventory_item_id"] = fmt.Sprintf("%d_d_%d", evt.RecordID, j+1)
+		result.Duplicates[j]["create_time"] = createTime
+		result.Duplicates[j]["duplicate_of"] = survivorByDedupeKey[asString(result.Duplicates[j]["dedupe_key"])]
+	}
 
 	inserted, err := p.Store.SaveInventoryItems(ctx, SaveInventoryItemsRequest{
 		InputRecordID: evt.RecordID,
@@ -313,6 +339,20 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	if err != nil {
 		p.persistInventoryItemsStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26053114) save inventory items: %w", err)
+	}
+	// Persist the discarded duplicates to the audit table. Best-effort: the
+	// survivors are already saved, so a failure here must not fail the document.
+	if len(result.Duplicates) > 0 {
+		if _, dupErr := p.Store.SaveInventoryItemDuplicates(ctx, SaveInventoryItemDuplicatesRequest{
+			InputRecordID: evt.RecordID,
+			EventID:       eventIDFromContext(ctx),
+			Language:      language,
+			ModelName:     firstNonEmptyTrimmed(result.ModelName, p.ModelName),
+			PromptName:    p.PromptRef,
+			Items:         result.Duplicates,
+		}); dupErr != nil {
+			p.Logger.Warn("save inventory item duplicates failed", "record_id", evt.RecordID, "error", dupErr)
+		}
 	}
 	if fileErr := writeInventoryItemsArtifactFile(p.ArtifactDir, evt.RecordID, rec, result.Items); fileErr != nil {
 		p.Logger.Warn("save inventory items artifact failed", "record_id", evt.RecordID, "error", fileErr)
@@ -371,7 +411,6 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 		p.Logger.Info("extract inventory items start",
 			"record_id", recordID,
 			"chunk_idx", i,
-			"seq_no", chunk.SeqNo,
 		)
 		payload, modelName, err := p.extractInventoryItemsWithFallback(runCtx, inputText)
 		if isCtxStopped(runCtx) {
@@ -396,7 +435,6 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 		p.Logger.Info("extract inventory items end  ",
 			"record_id", recordID,
 			"chunk_idx", i,
-			"seq_no", chunk.SeqNo,
 			"extracted", len(chunkItems),
 			"ms_used", time.Since(localStart).Milliseconds(),
 		)
@@ -434,15 +472,20 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 		items = append(items, outcome.items...)
 	}
 
+	survivors, duplicates := dedupeInventoryItemRows(items)
+
 	p.Logger.Info("extract inventory items finished",
 		"record_id", recordID,
 		"extracted", len(items),
+		"unique", len(survivors),
+		"duplicates", len(duplicates),
 		"ms_used", time.Since(startTime).Milliseconds(),
 	)
 
 	return inventoryItemsExtractionResult{
 		Language:      detectedLanguage,
-		Items:         dedupeInventoryItemRows(items),
+		Items:         survivors,
+		Duplicates:    duplicates,
 		ModelName:     usedModel,
 		LLMCallCount:  llmCallCount,
 		FallbackCount: fallbackCount,
@@ -773,6 +816,13 @@ func buildInventoryValidationFlags(missing []string, rangeFlags []string, confid
 }
 
 func buildInventoryDedupeKey(category string, row map[string]any, specs []map[string]any) string {
+	// The name is part of the identity: two items that differ only in name are
+	// distinct items, not duplicates. Without it, every spec-less item in a
+	// category (e.g. raw materials with no manufacturer/model/part) would collapse
+	// to a single "<category>||||" key and all but the highest-confidence one would
+	// be deleted. Overlapping-chunk duplicates share identical source text and thus
+	// an identical name, so including the name does not weaken true-duplicate merging.
+	name := normalizeInventoryKeyPart(firstNonEmptyTrimmed(asString(row["canonical_name"]), asString(row["item_name"])))
 	manufacturer := normalizeInventoryKeyPart(firstNonEmptyTrimmed(asString(row["manufacturer"]), asString(row["brand"])))
 	model := normalizeInventoryKeyPart(asString(row["model_number"]))
 	part := normalizeInventoryKeyPart(asString(row["part_number"]))
@@ -789,6 +839,7 @@ func buildInventoryDedupeKey(category string, row map[string]any, specs []map[st
 	sort.Strings(specParts)
 	return strings.Join([]string{
 		normalizeInventoryKeyPart(category),
+		name,
 		manufacturer,
 		model,
 		part,
@@ -837,24 +888,91 @@ func uniqueSortedStrings(items []string) []string {
 	return out
 }
 
-func dedupeInventoryItemRows(items []map[string]any) []map[string]any {
-	seen := map[string]int{}
-	out := make([]map[string]any, 0, len(items))
+// dedupeInventoryItemRows collapses raw extractions that refer to the same item
+// (identical dedupe_key). Within each group it keeps the highest-confidence row as
+// the survivor, unions the multi-valued provenance fields (source line spans,
+// aliases, standards) from every member into that survivor, and records how many
+// raw mentions collapsed into it (ext_info.mention_count). The discarded members
+// are returned separately so the caller can persist them for audit / recovery
+// instead of dropping them silently.
+func dedupeInventoryItemRows(items []map[string]any) (survivors, duplicates []map[string]any) {
+	order := make([]string, 0, len(items))
+	groups := map[string][]map[string]any{}
 	for _, item := range items {
-		key := strings.TrimSpace(asString(item["dedupe_key"]))
-		if key == "" {
-			key = strings.TrimSpace(asString(item["item_name"]))
+		key := dedupeGroupKey(item)
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
 		}
-		if idx, ok := seen[key]; ok {
-			if toFloat(item["confidence"]) > toFloat(out[idx]["confidence"]) {
-				out[idx] = item
-			}
-			continue
-		}
-		seen[key] = len(out)
-		out = append(out, item)
+		groups[key] = append(groups[key], item)
 	}
+	for _, key := range order {
+		members := groups[key]
+		survivorIdx := 0
+		for i := 1; i < len(members); i++ {
+			if toFloat(members[i]["confidence"]) > toFloat(members[survivorIdx]["confidence"]) {
+				survivorIdx = i
+			}
+		}
+		survivor := members[survivorIdx]
+		for i, m := range members {
+			if i == survivorIdx {
+				continue
+			}
+			survivor["source_line_spans"] = unionStringList(survivor["source_line_spans"], m["source_line_spans"])
+			survivor["aliases"] = unionStringList(survivor["aliases"], m["aliases"])
+			survivor["standards"] = unionStringList(survivor["standards"], m["standards"])
+			duplicates = append(duplicates, m)
+		}
+		survivor["mention_count"] = len(members)
+		survivors = append(survivors, survivor)
+	}
+	return survivors, duplicates
+}
+
+func dedupeGroupKey(item map[string]any) string {
+	key := strings.TrimSpace(asString(item["dedupe_key"]))
+	if key == "" {
+		key = strings.TrimSpace(asString(item["item_name"]))
+	}
+	return key
+}
+
+// unionStringList merges two string-list values (each may be []string or []any)
+// into a single deduplicated, sorted []string. Used to combine provenance fields
+// across collapsed duplicate mentions without losing any value.
+func unionStringList(a, b any) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, v := range []any{a, b} {
+		for _, s := range toStringList(v) {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if _, ok := seen[s]; ok {
+				continue
+			}
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
 	return out
+}
+
+func toStringList(v any) []string {
+	switch x := v.(type) {
+	case []string:
+		return x
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, e := range x {
+			out = append(out, asString(e))
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func loadInventoryDictionaryDir(dir string) (inventoryDictionary, error) {
@@ -1217,6 +1335,42 @@ CREATE TABLE IF NOT EXISTS kb.inventory_items (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_kb_inventory_items_input_item_idx ON kb.inventory_items(input_record_id, inventory_item_id);
 CREATE INDEX IF NOT EXISTS idx_kb_inventory_items_input_record_id ON kb.inventory_items(input_record_id);
+CREATE TABLE IF NOT EXISTS kb.inventory_item_duplicates (
+    id BIGSERIAL PRIMARY KEY,
+    event_id TEXT,
+    input_record_id BIGINT NOT NULL,
+    inventory_item_id TEXT NOT NULL,
+    duplicate_of TEXT NOT NULL,
+    language TEXT,
+    item_name TEXT,
+    canonical_name TEXT,
+    item_category TEXT,
+    manufacturer TEXT,
+    brand TEXT,
+    model_number TEXT,
+    part_number TEXT,
+    normalized_specs JSONB,
+    raw_specs JSONB,
+    standards JSONB,
+    aliases JSONB,
+    evidence_quote TEXT,
+    source_line_spans JSONB,
+    validation_flags JSONB,
+    missing_required_attrs JSONB,
+    dedupe_key TEXT,
+    schema_version TEXT,
+    dictionary_version TEXT,
+    confidence DOUBLE PRECISION,
+    confidence_reason TEXT,
+    model_name TEXT,
+    prompt_name TEXT,
+    ext_info JSONB,
+    create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    modify_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_kb_inventory_item_duplicates_input_item_idx ON kb.inventory_item_duplicates(input_record_id, inventory_item_id);
+CREATE INDEX IF NOT EXISTS idx_kb_inventory_item_duplicates_input_record_id ON kb.inventory_item_duplicates(input_record_id);
+CREATE INDEX IF NOT EXISTS idx_kb_inventory_item_duplicates_duplicate_of ON kb.inventory_item_duplicates(duplicate_of);
 `
 	_, err := s.DB.ExecContext(ctx, ddl)
 	return err
@@ -1306,6 +1460,98 @@ ON CONFLICT (input_record_id, inventory_item_id) DO UPDATE SET
 		spans, _ := json.Marshal(item["source_line_spans"])
 		flags, _ := json.Marshal(item["validation_flags"])
 		missing, _ := json.Marshal(item["missing_required_attrs"])
+		mentionCount := 1
+		if mc := int(toFloat(item["mention_count"])); mc > 0 {
+			mentionCount = mc
+		}
+		extInfo, _ := json.Marshal(map[string]any{
+			"language":       req.Language,
+			"schema_version": inventoryItemsSchemaVersion,
+			"chunk_seq_no":   item["chunk_seq_no"],
+			"mention_count":  mentionCount,
+		})
+		res, err := s.DB.ExecContext(ctx, stmt,
+			eventIDVal,
+			req.InputRecordID,
+			strings.TrimSpace(asString(item["inventory_item_id"])),
+			strings.TrimSpace(req.Language),
+			strings.TrimSpace(asString(item["item_name"])),
+			strings.TrimSpace(asString(item["canonical_name"])),
+			strings.TrimSpace(asString(item["item_category"])),
+			strings.TrimSpace(asString(item["manufacturer"])),
+			strings.TrimSpace(asString(item["brand"])),
+			strings.TrimSpace(asString(item["model_number"])),
+			strings.TrimSpace(asString(item["part_number"])),
+			string(normalizedSpecs),
+			string(rawSpecs),
+			string(standards),
+			string(aliases),
+			strings.TrimSpace(asString(item["evidence_quote"])),
+			string(spans),
+			string(flags),
+			string(missing),
+			strings.TrimSpace(asString(item["dedupe_key"])),
+			strings.TrimSpace(asString(item["schema_version"])),
+			strings.TrimSpace(asString(item["dictionary_version"])),
+			toFloat(item["confidence"]),
+			strings.TrimSpace(asString(item["confidence_reason"])),
+			strings.TrimSpace(req.ModelName),
+			strings.TrimSpace(req.PromptName),
+			string(extInfo),
+		)
+		if err != nil {
+			return inserted, err
+		}
+		affected, _ := res.RowsAffected()
+		inserted += affected
+	}
+	return inserted, nil
+}
+
+func (s InventoryItemsSQLStore) DeleteInventoryItemDuplicatesByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error) {
+	if err := s.ensureTables(ctx); err != nil {
+		return 0, err
+	}
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM kb.inventory_item_duplicates WHERE input_record_id = $1`, inputRecordID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (s InventoryItemsSQLStore) SaveInventoryItemDuplicates(ctx context.Context, req SaveInventoryItemDuplicatesRequest) (int64, error) {
+	if err := s.ensureTables(ctx); err != nil {
+		return 0, err
+	}
+	if len(req.Items) == 0 {
+		return 0, nil
+	}
+	const stmt = `
+INSERT INTO kb.inventory_item_duplicates (
+    event_id, input_record_id, inventory_item_id, duplicate_of, language,
+    item_name, canonical_name, item_category, manufacturer, brand, model_number, part_number,
+    normalized_specs, raw_specs, standards, aliases, evidence_quote, source_line_spans,
+    validation_flags, missing_required_attrs, dedupe_key, schema_version, dictionary_version,
+    confidence, confidence_reason, model_name, prompt_name, ext_info
+) VALUES (
+    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18::jsonb,
+    $19::jsonb,$20::jsonb,$21,$22,$23,$24,$25,$26,$27,$28::jsonb
+)
+ON CONFLICT (input_record_id, inventory_item_id) DO NOTHING`
+
+	var eventIDVal any
+	if id := strings.TrimSpace(req.EventID); id != "" {
+		eventIDVal = id
+	}
+	var inserted int64
+	for _, item := range req.Items {
+		normalizedSpecs, _ := json.Marshal(item["normalized_specs"])
+		rawSpecs, _ := json.Marshal(item["raw_specs"])
+		standards, _ := json.Marshal(item["standards"])
+		aliases, _ := json.Marshal(item["aliases"])
+		spans, _ := json.Marshal(item["source_line_spans"])
+		flags, _ := json.Marshal(item["validation_flags"])
+		missing, _ := json.Marshal(item["missing_required_attrs"])
 		extInfo, _ := json.Marshal(map[string]any{
 			"language":       req.Language,
 			"schema_version": inventoryItemsSchemaVersion,
@@ -1315,6 +1561,7 @@ ON CONFLICT (input_record_id, inventory_item_id) DO UPDATE SET
 			eventIDVal,
 			req.InputRecordID,
 			strings.TrimSpace(asString(item["inventory_item_id"])),
+			strings.TrimSpace(asString(item["duplicate_of"])),
 			strings.TrimSpace(req.Language),
 			strings.TrimSpace(asString(item["item_name"])),
 			strings.TrimSpace(asString(item["canonical_name"])),

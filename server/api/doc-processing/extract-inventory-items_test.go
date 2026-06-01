@@ -98,8 +98,8 @@ func TestLoadInventoryDictionaryDirAndValidateItem(t *testing.T) {
 	if flags := normalized[0]["validation_flags"].([]string); len(flags) != 0 {
 		t.Fatalf("validation_flags=%#v, want empty", flags)
 	}
-	if key := normalized[0]["dedupe_key"]; key != "pump|bosch|||power=1500W" {
-		t.Fatalf("dedupe_key=%q, want pump|bosch|||power=1500W", key)
+	if key := normalized[0]["dedupe_key"]; key != "pump|boschpump15kw|bosch|||power=1500W" {
+		t.Fatalf("dedupe_key=%q, want pump|boschpump15kw|bosch|||power=1500W", key)
 	}
 
 	row["raw_specs"] = []any{map[string]any{"name": "power", "value": 3, "unit": "kw"}}
@@ -132,6 +132,62 @@ func TestNormalizeInventoryItemRowsMarksMissingRequiredAttrs(t *testing.T) {
 	}
 	if got := rows[0]["validation_flags"]; !reflect.DeepEqual(got, []string{"missing_required_attrs", "low_confidence"}) {
 		t.Fatalf("validation_flags=%#v", got)
+	}
+}
+
+func TestDedupeKeepsDistinctSpeclessItemsInSameCategory(t *testing.T) {
+	dict := inventoryDictionary{Version: "dict-v1", Categories: map[string]inventoryCategorySchema{"material": {}}}
+	rows := normalizeInventoryItemRows([]any{
+		map[string]any{"item_name": "氢氧化钙", "item_category": "material", "lines": []any{"590"}, "confidence": 0.95},
+		map[string]any{"item_name": "氯化钠", "item_category": "material", "lines": []any{"591"}, "confidence": 0.80},
+	}, 1, dict)
+	if len(rows) != 2 {
+		t.Fatalf("normalized rows=%d, want 2", len(rows))
+	}
+	if rows[0]["dedupe_key"] == rows[1]["dedupe_key"] {
+		t.Fatalf("distinct materials share dedupe_key %q — would collapse", rows[0]["dedupe_key"])
+	}
+	survivors, dupes := dedupeInventoryItemRows(rows)
+	if len(survivors) != 2 {
+		t.Fatalf("dedupe collapsed distinct items: got %d survivors, want 2", len(survivors))
+	}
+	if len(dupes) != 0 {
+		t.Fatalf("dedupe produced %d duplicates, want 0", len(dupes))
+	}
+}
+
+func TestDedupeCollapsesIdenticalItems(t *testing.T) {
+	dict := inventoryDictionary{Version: "dict-v1", Categories: map[string]inventoryCategorySchema{"material": {}}}
+	rows := normalizeInventoryItemRows([]any{
+		map[string]any{"item_name": "氢氧化钙", "item_category": "material", "lines": []any{"590"}, "confidence": 0.80, "aliases": []any{"消石灰"}},
+		map[string]any{"item_name": "氢氧化钙", "item_category": "material", "lines": []any{"596"}, "confidence": 0.95, "aliases": []any{"Ca(OH)2"}},
+	}, 1, dict)
+	survivors, dupes := dedupeInventoryItemRows(rows)
+	if len(survivors) != 1 {
+		t.Fatalf("identical items not collapsed: got %d survivors, want 1", len(survivors))
+	}
+	if len(dupes) != 1 {
+		t.Fatalf("expected 1 discarded duplicate, got %d", len(dupes))
+	}
+	survivor := survivors[0]
+	if got := toFloat(survivor["confidence"]); got != 0.95 {
+		t.Fatalf("kept confidence=%v, want 0.95 (higher-confidence wins)", got)
+	}
+	// Provenance from both mentions must be merged into the survivor.
+	if got := survivor["mention_count"]; got != 2 {
+		t.Fatalf("mention_count=%v, want 2", got)
+	}
+	spans := toStringList(survivor["source_line_spans"])
+	if !reflect.DeepEqual(spans, []string{"590", "596"}) {
+		t.Fatalf("merged source_line_spans=%#v, want [590 596]", spans)
+	}
+	aliases := toStringList(survivor["aliases"])
+	if !reflect.DeepEqual(aliases, []string{"Ca(OH)2", "消石灰"}) {
+		t.Fatalf("merged aliases=%#v, want [Ca(OH)2 消石灰]", aliases)
+	}
+	// The discarded duplicate keeps its own original confidence for audit.
+	if got := toFloat(dupes[0]["confidence"]); got != 0.80 {
+		t.Fatalf("duplicate confidence=%v, want 0.80 (original retained)", got)
 	}
 }
 
@@ -310,6 +366,70 @@ func TestInventoryItemsSQLStoreSaveExistAndDelete(t *testing.T) {
 	}
 	if deleted != 1 {
 		t.Fatalf("deleted=%d, want 1", deleted)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestInventoryItemDuplicatesSQLStoreSaveAndDelete(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	store := InventoryItemsSQLStore{DB: db}
+
+	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS kb").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO kb.inventory_item_duplicates").
+		WithArgs(
+			"evt-1", int64(7), "7_d_1", "7_i_1", "en",
+			"氢氧化钙", "氢氧化钙", "material", "", "", "", "",
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "用 Ca(OH)2",
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "material|氢氧化钙||||",
+			inventoryItemsSchemaVersion, "dict-v1", 0.80, "lower conf", "gpt-test",
+			"prompt-extract-inventory-items-v1.md", sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	inserted, err := store.SaveInventoryItemDuplicates(context.Background(), SaveInventoryItemDuplicatesRequest{
+		InputRecordID: 7,
+		EventID:       "evt-1",
+		Language:      "en",
+		ModelName:     "gpt-test",
+		PromptName:    "prompt-extract-inventory-items-v1.md",
+		Items: []map[string]any{{
+			"inventory_item_id":      "7_d_1",
+			"duplicate_of":           "7_i_1",
+			"item_name":              "氢氧化钙",
+			"canonical_name":         "氢氧化钙",
+			"item_category":          "material",
+			"evidence_quote":         "用 Ca(OH)2",
+			"dedupe_key":             "material|氢氧化钙||||",
+			"schema_version":         inventoryItemsSchemaVersion,
+			"dictionary_version":     "dict-v1",
+			"confidence":             0.80,
+			"confidence_reason":      "lower conf",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SaveInventoryItemDuplicates: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted=%d, want 1", inserted)
+	}
+
+	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS kb").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM kb.inventory_item_duplicates WHERE input_record_id =").
+		WithArgs(int64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	deleted, err := store.DeleteInventoryItemDuplicatesByInputRecordID(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("DeleteInventoryItemDuplicatesByInputRecordID: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted=%d, want 2", deleted)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
