@@ -45,7 +45,12 @@ type fakeStatusStore struct {
 func (s *fakeStatusStore) GetInputRecord(_ context.Context, _ int64) (DocMetadataInputRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return DocMetadataInputRecord{StatusRaw: s.raw}, nil
+	return DocMetadataInputRecord{
+		ID:             7,
+		StatusRaw:      s.raw,
+		ParserName:     "opendata",
+		ResultFilename: "/dev/null",
+	}, nil
 }
 
 func (s *fakeStatusStore) UpdateInputMetadata(_ context.Context, _ int64, upd DocMetadataUpdate) error {

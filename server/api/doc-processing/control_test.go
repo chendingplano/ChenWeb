@@ -446,6 +446,91 @@ func waitForProcessorStarts(t *testing.T, started <-chan struct{}, want int) {
 	}
 }
 
+func TestTwoPhase_NoLostStatusEntries(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "true")
+	store := &fakeStatusStore{raw: "[]"}
+	svc := &ControlService{
+		// InputStore is nil so the controller's own preflight/storage is
+		// bypassed; each statusWritingProcessor carries its own store ref.
+		Processors: []Processor{
+			&statusWritingProcessor{name: "extract_metrics", store: store, id: 7},
+			&statusWritingProcessor{name: "extract_provisions", store: store, id: 7},
+			&statusWritingProcessor{name: "generate_summaries", store: store, id: 7},
+			&statusWritingProcessor{name: "generate_topics", store: store, id: 7},
+			&statusWritingProcessor{name: "generate_scene_blocks", store: store, id: 7},
+			&statusWritingProcessor{name: "extract_semantic_projections", store: store, id: 7},
+			&statusWritingProcessor{name: "extract_entity_relation", store: store, id: 7},
+			&statusWritingProcessor{name: "extract_inventory_items", store: store, id: 7},
+		},
+	}
+	_ = svc.handleEvent(context.Background(), []byte(`{"record_id":"7"}`))
+
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(store.raw), &arr); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	seen := map[string]struct{}{}
+	for _, entry := range arr {
+		op := strings.ToLower(strings.TrimSpace(asString(entry["operation"])))
+		if op == "doc_processing" || op == "doc_processor" {
+			continue
+		}
+		seen[op] = struct{}{}
+	}
+	for _, name := range []string{
+		"extract_metrics", "extract_provisions", "generate_summaries", "generate_topics",
+		"generate_scene_blocks", "extract_semantic_projections", "extract_entity_relation", "extract_inventory_items",
+	} {
+		if _, ok := seen[name]; !ok {
+			t.Errorf("missing status entry for %q; got entries: %v", name, seen)
+		}
+	}
+}
+
+type statusWritingProcessor struct {
+	name   string
+	store  DocMetadataStore
+	id     int64
+	called int
+}
+
+func (p *statusWritingProcessor) Name() string { return p.name }
+func (p *statusWritingProcessor) LogName() string { return p.name }
+func (p *statusWritingProcessor) HandleEvent(ctx context.Context, payload []byte) error {
+	p.called++
+	return updateInputStatusAtomic(context.Background(), p.store, p.id, func(cur string) (DocMetadataUpdate, error) {
+		var arr []map[string]any
+		_ = json.Unmarshal([]byte(cur), &arr)
+		arr = append(arr, map[string]any{"operation": p.Name(), "proc_status": "success"})
+		b, _ := json.Marshal(arr)
+		return DocMetadataUpdate{StatusRaw: string(b)}, nil
+	})
+}
+
+func TestChunkBufferConcurrentReads_NoRace(t *testing.T) {
+	ctx := context.Background()
+	ctx, _ = withChunkBufferHolder(ctx)
+
+	chunks := []Chunk{
+		{SeqNo: 1, Lines: []MarkedLine{{Line: Line{}, Mark: "r"}}},
+		{SeqNo: 2, Lines: []MarkedLine{{Line: Line{}, Mark: "r"}}},
+	}
+	storeChunksInContext(ctx, chunks)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			buf := ChunkBufferFromContext(ctx)
+			if buf == nil || len(buf.Chunks) != 2 {
+				// read-only, no mutation — -race must stay clean
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func TestProcessorLogName_PrefersMethodSpecificLogName(t *testing.T) {
 	p := fakeProcessor{name: "chunking", logName: "topic_chunking"}
 	if got := processorLogName(p); got != "topic_chunking" {
