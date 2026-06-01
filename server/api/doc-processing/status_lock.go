@@ -1,6 +1,9 @@
 package docprocessing
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // recordStatusLockShards is the number of mutexes striping kb.inputs.status
 // writes by record_id. A fixed array keeps memory bounded and leak-free.
@@ -23,4 +26,34 @@ func lockRecordStatus(id int64) func() {
 	m := &recordStatusLocks[shard]
 	m.Lock()
 	return m.Unlock
+}
+
+// statusStore is the minimal surface updateInputStatusAtomic needs. It is
+// satisfied by DocMetadataStore.
+type statusStore interface {
+	GetInputRecord(ctx context.Context, id int64) (DocMetadataInputRecord, error)
+	UpdateInputMetadata(ctx context.Context, id int64, upd DocMetadataUpdate) error
+}
+
+// updateInputStatusAtomic performs the kb.inputs.status read-modify-write under
+// the per-record lock. mutate receives the current status JSON and returns the
+// DocMetadataUpdate to persist (its StatusRaw must be the new status array;
+// other fields may also be set and are written under the same lock).
+func updateInputStatusAtomic(
+	ctx context.Context,
+	store statusStore,
+	id int64,
+	mutate func(currentStatusRaw string) (DocMetadataUpdate, error),
+) error {
+	unlock := lockRecordStatus(id)
+	defer unlock()
+	rec, err := store.GetInputRecord(ctx, id)
+	if err != nil {
+		return err
+	}
+	upd, err := mutate(rec.StatusRaw)
+	if err != nil {
+		return err
+	}
+	return store.UpdateInputMetadata(ctx, id, upd)
 }
