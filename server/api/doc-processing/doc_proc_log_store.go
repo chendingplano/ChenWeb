@@ -15,7 +15,6 @@ import (
 
 const EntryTypeLLMCall = "llm_call"
 const EntryTypeGenerateSummary = "generate_summary"
-const EntryTypeGenerateSummaryFinish = "generate_summary_finish"
 const EntryTypeExtractTopics = "extract_topics"
 const EntryTypeExtractTopicsFinish = "extract_topics_finish"
 const EntryTypeStaticAnalyzer = "static_analyzer"
@@ -23,7 +22,6 @@ const EntryTypeBlocking = "blocking"
 const EntryTypeExtractMetrics = "extract_metrics"
 const EntryTypeExtractMetricsFinish = "extract_metrics_finish"
 const EntryTypeExtractProjections = "extract_projections"
-const EntryTypeEnrichProjections = "enrich_projections"
 const EntryTypeExtractProvisions = "extract_provisions"
 const EntryTypeExtractSceneBlocks = "extract_scene_blocks"
 const EntryTypeEnrichSceneBlocks = "enrich_scene_blocks"
@@ -31,7 +29,6 @@ const EntryTypeExtractStructuredKnowledge = "extract_structured_knowledge"
 const EntryTypeEnrichStructuredKnowledge = "enrich_structured_knowledge"
 const EntryTypeExtractEntityRelation = "extract_entity_relation"
 const EntryTypeExtractInventoryItems = "extract_inventory_items"
-const EntryTypeEnrichMetrics = "enrich_metrics"
 const EntryTypeExtractDocMetadata = "extract_doc_metadata"
 const EntryTypeChunking = "chunking"
 const EntryTypeGenerateSceneBlocks = "generate_scene_blocks"
@@ -139,7 +136,7 @@ func (l DocProcLogger) LogGenerateSummary(ctx context.Context, rec DocProcLogRec
 }
 
 func (l DocProcLogger) LogGenerateSummaryFinish(ctx context.Context, rec DocProcLogRecord, loc string) error {
-	rec.EntryType = EntryTypeGenerateSummaryFinish
+	rec.EntryType = EntryTypeGenerateSummary
 	rec.LogLoc = callerLoc(2)
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
@@ -181,7 +178,7 @@ func (l DocProcLogger) LogExtractMetricsFinish(ctx context.Context, rec DocProcL
 }
 
 func (l DocProcLogger) LogEnrichMetrics(ctx context.Context, rec DocProcLogRecord, loc string) error {
-	rec.EntryType = EntryTypeEnrichMetrics
+	rec.EntryType = EntryTypeExtractMetrics
 	rec.LogLoc = callerLoc(2)
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
@@ -196,7 +193,7 @@ func (l DocProcLogger) LogExtractProjections(ctx context.Context, rec DocProcLog
 
 // LogEnrichProjections logs a per-block Pass 2 entry for extract_semantic_projections.
 func (l DocProcLogger) LogEnrichProjections(ctx context.Context, rec DocProcLogRecord, loc string) error {
-	rec.EntryType = EntryTypeEnrichProjections
+	rec.EntryType = EntryTypeExtractProjections
 	rec.LogLoc = callerLoc(2)
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
@@ -246,11 +243,11 @@ func (l DocProcLogger) LogExtractInventoryItems(ctx context.Context, rec DocProc
 func allowedDocProcLogEntryType(entryType string) bool {
 	switch entryType {
 	case EntryTypeLLMCall,
-		EntryTypeGenerateSummary, EntryTypeGenerateSummaryFinish,
+		EntryTypeGenerateSummary,
 		EntryTypeExtractTopics, EntryTypeExtractTopicsFinish,
 		EntryTypeStaticAnalyzer, EntryTypeBlocking,
-		EntryTypeExtractMetrics, EntryTypeExtractMetricsFinish, EntryTypeEnrichMetrics,
-		EntryTypeExtractProjections, EntryTypeEnrichProjections,
+		EntryTypeExtractMetrics, EntryTypeExtractMetricsFinish,
+		EntryTypeExtractProjections,
 		EntryTypeExtractProvisions,
 		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,
 		EntryTypeExtractStructuredKnowledge, EntryTypeEnrichStructuredKnowledge,

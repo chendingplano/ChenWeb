@@ -269,6 +269,7 @@
 			showConfirm = false;
 			if (failures.length === 0) {
 				const n = selectedRecords.length;
+				if (!autoSync) startAutoSync();
 				launchToast = { kind: 'success', msg: `Launched ${n} record${n !== 1 ? 's' : ''}` };
 			} else {
 				const firstMsg = failures[0].reason instanceof Error ? failures[0].reason.message : 'unknown error';

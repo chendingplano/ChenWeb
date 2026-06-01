@@ -68,10 +68,19 @@
 
 	const entryTypeOptions = [
 		{ value: '', label: 'All types' },
-		{ value: 'llm_call', label: 'LLM Call' },
-		{ value: 'doc_proc_summary', label: 'Summary' },
-		{ value: 'generate_summary', label: 'Generate Summary' },
-		{ value: 'generate_summary_finish', label: 'Generate Summary Finish' }
+		{ value: 'extract_metrics', label: 'extract_metrics' },
+		{ value: 'extract_provisions', label: 'extract_provisions' },
+		{ value: 'static_analyzer', label: 'static_analyzer' },
+		{ value: 'extract_inventory_items', label: 'extract_inventory_items' },
+		{ value: 'chunking', label: 'chunking' },
+		{ value: 'extract_scene_blocks', label: 'extract_scene_blocks' },
+		{ value: 'generate_scene_blocks', label: 'generate_scene_blocks' },
+		{ value: 'enrich_scene_blocks', label: 'enrich_scene_blocks' },
+		{ value: 'blocking', label: 'blocking' },
+		{ value: 'extract_entity_relation', label: 'extract_entity_relation' },
+		{ value: 'extract_projections', label: 'extract_projections' },
+		{ value: 'generate_summary', label: 'generate_summary' },
+		{ value: 'extract_doc_metadata', label: 'extract_doc_metadata' }
 	];
 
 	const sortableColumns = [
@@ -183,10 +192,6 @@
 	}
 
 	function entryTypeLabel(t: string): string {
-		if (t === 'llm_call') return 'LLM Call';
-		if (t === 'doc_proc_summary') return 'Summary';
-		if (t === 'generate_summary') return 'Gen Summary';
-		if (t === 'generate_summary_finish') return 'Gen Finish';
 		return t;
 	}
 

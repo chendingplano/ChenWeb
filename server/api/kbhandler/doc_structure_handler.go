@@ -222,7 +222,7 @@ func GetDocStructure(c echo.Context) error {
 	)
 
 	lines, pages, err := readCorrectedLinesFile(txtPath)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		logger.Error("read txt structure file failed", "path", txtPath, "err", err)
 		return c.JSON(http.StatusNotFound, errorResponse{
 			Status:   false,
