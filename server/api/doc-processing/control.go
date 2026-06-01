@@ -272,7 +272,28 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	return firstErr
 }
 
-func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte, p Processor, recordID int64, requestFailed *bool, firstErr *error) {
+// isPhaseAProcessor reports whether the named processor is a mandatory,
+// sequential Phase A processor. Must stay in sync with the mandatory set in
+// cmd/doc-processor/main.go filterConfiguredProcessors.
+func isPhaseAProcessor(name string) bool {
+	switch canonicalOperationName(name) {
+	case "static_analyzer", "chunking", "extract_doc_metadata":
+		return true
+	default:
+		return false
+	}
+}
+
+type procResult struct {
+	failed  bool
+	stopped bool
+	err     error
+}
+
+// runSingleProcessorCollect runs one processor and returns its outcome without
+// mutating shared controller state, so it is safe to call from concurrent
+// goroutines. All status writes inside go through the per-record status lock.
+func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload []byte, p Processor, recordID int64) procResult {
 	procStart := s.now()
 	processorName := processorLogName(p)
 	if s.Logger != nil {
@@ -283,24 +304,26 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 	}
 	s.persistPipelineStatus(ctx, recordID, "running", processorName, nil)
 	if err := p.HandleEvent(ctx, payload); err != nil {
-		*requestFailed = true
-		if *firstErr == nil {
-			*firstErr = err
-		}
+		res := procResult{failed: true, err: err}
 		procStatus := "failed"
 		if errors.Is(err, ErrPipelineStopped) || isCtxStopped(ctx) {
+			res.stopped = true
 			procStatus = "stopped"
-			s.Logger.Info("processor stopped by user request", "processor", processorName, "record_id", recordID)
-		} else {
+			if s.Logger != nil {
+				s.Logger.Info("processor stopped by user request", "processor", processorName, "record_id", recordID)
+			}
+		} else if s.Logger != nil {
 			s.Logger.Error("doc processor failed", "processor", processorName, "error", err)
 		}
-		s.Logger.Info("finish running processor",
-			"record_id", recordID,
-			"processor", processorName,
-			"proc_status", procStatus,
-			"ms_used", time.Since(procStart).Milliseconds(),
-		)
-		return
+		if s.Logger != nil {
+			s.Logger.Info("finish running processor",
+				"record_id", recordID,
+				"processor", processorName,
+				"proc_status", procStatus,
+				"ms_used", time.Since(procStart).Milliseconds(),
+			)
+		}
+		return res
 	}
 	if s.Logger != nil {
 		s.Logger.Info("finish running processor",
@@ -309,6 +332,17 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 			"proc_status", "success",
 			"ms_used", time.Since(procStart).Milliseconds(),
 		)
+	}
+	return procResult{}
+}
+
+func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte, p Processor, recordID int64, requestFailed *bool, firstErr *error) {
+	res := s.runSingleProcessorCollect(ctx, payload, p, recordID)
+	if res.failed {
+		*requestFailed = true
+		if *firstErr == nil {
+			*firstErr = res.err
+		}
 	}
 }
 

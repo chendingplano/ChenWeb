@@ -14,6 +14,19 @@ import (
 	"time"
 )
 
+func TestIsPhaseAProcessor(t *testing.T) {
+	for _, name := range []string{"static_analyzer", "chunking", "extract_doc_metadata", "extract_metadata"} {
+		if !isPhaseAProcessor(name) {
+			t.Errorf("%q should be Phase A", name)
+		}
+	}
+	for _, name := range []string{"extract_metrics", "generate_topics", "extract_entity_relation"} {
+		if isPhaseAProcessor(name) {
+			t.Errorf("%q should be Phase B", name)
+		}
+	}
+}
+
 func TestPersistPipelineStatus_ConcurrentNoLostUpdates(t *testing.T) {
 	store := &fakeStatusStore{raw: "[]"}
 	svc := &ControlService{InputStore: store, Now: time.Now}
