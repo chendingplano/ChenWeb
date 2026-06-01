@@ -8,12 +8,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 type fakeDocMetadataStore struct {
+	// mu guards all fields. The doc pipeline writes from a background goroutine
+	// (HandleJetStreamEvent) while tests read concurrently via accessors, so the
+	// store must be synchronized to stay race-free under -race.
+	mu           sync.Mutex
 	rec          DocMetadataInputRecord
 	getErr       error
 	updateReq    DocMetadataUpdate
@@ -22,6 +27,8 @@ type fakeDocMetadataStore struct {
 }
 
 func (f *fakeDocMetadataStore) GetInputRecord(_ context.Context, id int64) (DocMetadataInputRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.getErr != nil {
 		return DocMetadataInputRecord{}, f.getErr
 	}
@@ -32,6 +39,8 @@ func (f *fakeDocMetadataStore) GetInputRecord(_ context.Context, id int64) (DocM
 }
 
 func (f *fakeDocMetadataStore) UpdateInputMetadata(_ context.Context, id int64, req DocMetadataUpdate) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if id != f.rec.ID {
 		return errors.New("wrong id")
 	}
@@ -42,6 +51,16 @@ func (f *fakeDocMetadataStore) UpdateInputMetadata(_ context.Context, id int64, 
 		f.rec.StatusRaw = req.StatusRaw
 	}
 	return nil
+}
+
+// statusUpdates returns a snapshot of the recorded update requests under the
+// lock, for tests that poll while the pipeline goroutine is still writing.
+func (f *fakeDocMetadataStore) statusUpdates() []DocMetadataUpdate {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]DocMetadataUpdate, len(f.updateReqs))
+	copy(out, f.updateReqs)
+	return out
 }
 
 type fakeJSONExtractor struct {

@@ -316,29 +316,19 @@ func (s *ControlService) persistPipelineStatus(ctx context.Context, recordID int
 	if s.InputStore == nil || recordID <= 0 {
 		return
 	}
-	rec, err := s.InputStore.GetInputRecord(ctx, recordID)
-	if err != nil {
-		if s.Logger != nil {
-			s.Logger.Error("failed loading input record for doc pipeline status", "record_id", recordID, "error", err)
+	err := updateInputStatusAtomic(ctx, s.InputStore, recordID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := appendPipelineStatus(current, s.now(), procStatus, processorName, procErr)
+		if err != nil {
+			return DocMetadataUpdate{}, err
 		}
-		return
-	}
-	statusRaw, err := appendPipelineStatus(rec.StatusRaw, s.now(), procStatus, processorName, procErr)
-	if err != nil {
-		if s.Logger != nil {
-			s.Logger.Error("failed building doc pipeline status", "record_id", recordID, "error", err)
+		var errMsg *string
+		if procErr != nil {
+			msg := strings.TrimSpace(procErr.Error())
+			errMsg = &msg
 		}
-		return
-	}
-	var errMsg *string
-	if procErr != nil {
-		msg := strings.TrimSpace(procErr.Error())
-		errMsg = &msg
-	}
-	if err := s.InputStore.UpdateInputMetadata(ctx, recordID, DocMetadataUpdate{
-		StatusRaw: statusRaw,
-		ErrorMsg:  errMsg,
-	}); err != nil && s.Logger != nil {
+		return DocMetadataUpdate{StatusRaw: statusRaw, ErrorMsg: errMsg}, nil
+	})
+	if err != nil && s.Logger != nil {
 		s.Logger.Error("failed persisting doc pipeline status", "record_id", recordID, "error", err)
 	}
 }

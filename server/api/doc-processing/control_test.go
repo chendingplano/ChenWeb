@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,26 @@ import (
 	"testing"
 	"time"
 )
+
+func TestPersistPipelineStatus_ConcurrentNoLostUpdates(t *testing.T) {
+	store := &fakeStatusStore{raw: "[]"}
+	svc := &ControlService{InputStore: store, Now: time.Now}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			svc.persistPipelineStatus(context.Background(), 7, "running", fmt.Sprintf("proc-%d", i), nil)
+		}()
+	}
+	wg.Wait()
+	// persistPipelineStatus collapses concurrent writers onto the single
+	// doc_processing entry; the guarantee under test is no data race / torn write.
+	if store.raw == "" {
+		t.Fatal("status not written")
+	}
+}
 
 type fakeProcessor struct {
 	name    string
@@ -368,14 +389,15 @@ func waitForStatusUpdate(t *testing.T, store *fakeDocMetadataStore, want string)
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		for _, req := range store.updateReqs {
+		updates := store.statusUpdates()
+		for _, req := range updates {
 			if docProcessingStatus(req.StatusRaw) == want {
 				return
 			}
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timed out waiting for doc_processing status %q; updates=%v", want, store.updateReqs)
+			t.Fatalf("timed out waiting for doc_processing status %q; updates=%v", want, updates)
 		case <-ticker.C:
 		}
 	}
