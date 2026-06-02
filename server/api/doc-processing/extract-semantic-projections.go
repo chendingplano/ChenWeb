@@ -76,6 +76,7 @@ type SaveSemanticProjectionsRequest struct {
 type semanticProjectionExtractionResult struct {
 	Projections   []map[string]any
 	SeqNos        []int
+	LineSpans     [][]string
 	Language      string
 	ModelName     string
 	LLMCallCount  int
@@ -265,6 +266,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 	createTime := p.Now().Format(defaultDocMetaStatusTime)
 	for i, proj := range result.Projections {
 		proj["semantic_proj_id"] = fmt.Sprintf("%d_0_%d", evt.RecordID, result.SeqNos[i])
+		proj["line_spans"] = result.LineSpans[i]
 		proj["create_time"] = createTime
 		result.Projections[i] = proj
 	}
@@ -308,6 +310,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 type semanticProjectionWorkerResult struct {
 	seqNo          int
 	projection     map[string]any // nil when chunk was skipped (empty semantic_projection)
+	lineSpans      []string
 	language       string
 	candidateModel string
 	llmCallCount   int
@@ -332,6 +335,8 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		if isCtxStopped(jobCtx) {
 			return semanticProjectionWorkerResult{}, ErrPipelineStopped
 		}
+
+		lineSpans := chunkLineSpans(chunk.Lines)
 
 		// Pass 1: extract semantic projection candidate
 		chunkText := buildMarkedChunkInputText(chunk.Lines)
@@ -385,6 +390,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 				"record_id", recordID, "seq_no", chunk.SeqNo)
 			return semanticProjectionWorkerResult{
 				seqNo:          chunk.SeqNo,
+				lineSpans:      lineSpans,
 				candidateModel: usedCandidateModel,
 				llmCallCount:   llmCallCount,
 				fallbackCount:  fallbackCount,
@@ -442,6 +448,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		return semanticProjectionWorkerResult{
 			seqNo:          chunk.SeqNo,
 			projection:     normalized,
+			lineSpans:      lineSpans,
 			language:       lang,
 			candidateModel: usedCandidateModel,
 			llmCallCount:   llmCallCount,
@@ -459,6 +466,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	// Collect results in chunk-index (SeqNo) order — runConcurrent preserves original index order.
 	projections := make([]map[string]any, 0, len(workerResults))
 	seqNos := make([]int, 0, len(workerResults))
+	lineSpansList := make([][]string, 0, len(workerResults))
 	detectedLanguage := "unknown"
 	var llmCallCount, fallbackCount int
 	usedCandidateModel := strings.TrimSpace(p.CandidateModelName)
@@ -477,6 +485,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		}
 		projections = append(projections, r.projection)
 		seqNos = append(seqNos, r.seqNo)
+		lineSpansList = append(lineSpansList, r.lineSpans)
 	}
 
 	p.Logger.Info("semantic projections final results",
@@ -489,6 +498,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	return semanticProjectionExtractionResult{
 		Projections:   projections,
 		SeqNos:        seqNos,
+		LineSpans:     lineSpansList,
 		Language:      detectedLanguage,
 		ModelName:     firstNonEmptyTrimmed(p.EnrichModelName, usedCandidateModel),
 		LLMCallCount:  llmCallCount,
@@ -813,6 +823,16 @@ func buildSemanticProjectionEnrichUserPrompt(cand semanticProjectionCandidate) s
 		"\n\nSource chunk lines:\n" + chunkText
 }
 
+func chunkLineSpans(lines []MarkedLine) []string {
+	nums := make([]int, 0, len(lines))
+	for _, ml := range lines {
+		if ml.Mark != "o" {
+			nums = append(nums, ml.Line.LineNo)
+		}
+	}
+	return lineRangesFromNumbers(nums)
+}
+
 func normalizeSemanticProjection(raw map[string]any) map[string]any {
 	out := map[string]any{
 		"language":               strings.TrimSpace(asString(raw["language"])),
@@ -1128,6 +1148,7 @@ CREATE TABLE IF NOT EXISTS kb.semantic_projections (
     semantic_projection_en TEXT,
     category_paths JSONB,
     category_paths_en JSONB,
+    line_spans JSONB,
     model_name TEXT,
     prompt_name TEXT,
     search_document TEXT,
@@ -1189,11 +1210,12 @@ INSERT INTO kb.semantic_projections (
     semantic_projection_en,
     category_paths,
     category_paths_en,
+    line_spans,
     model_name,
     prompt_name,
     ext_info
 ) VALUES (
-    $1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15::jsonb
+    $1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15,$16::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -1229,6 +1251,8 @@ INSERT INTO kb.semantic_projections (
 			categoryPathsEnVal = string(cp)
 		}
 
+		lineSpansJSON, _ := json.Marshal(proj["line_spans"])
+
 		_, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
 			req.InputRecordID,
@@ -1242,6 +1266,7 @@ INSERT INTO kb.semantic_projections (
 			semanticProjEnVal,
 			string(categoryPathsJSON),
 			categoryPathsEnVal,
+			string(lineSpansJSON),
 			strings.TrimSpace(req.ModelName),
 			strings.TrimSpace(req.PromptName),
 			string(extInfo),

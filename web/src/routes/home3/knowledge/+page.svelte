@@ -23,6 +23,8 @@
 	import ChunkMgmtView from '$lib/components/home3/chunk-mgmt-view.svelte';
 	import KnowledgeStoreView from '$lib/components/home3/knowledge-store-view.svelte';
 	import ArtifactWikiView from '$lib/components/home3/artifact-wiki-view.svelte';
+	import LlmWikiV2View from '$lib/components/home3/llm-wiki-v2-view.svelte';
+	import LlmWikiV3View from '$lib/components/home3/llm-wiki-v3-view.svelte';
 	import SummaryTreeView from '$lib/components/home3/summary-tree-view.svelte';
 	import TopicGraphView from '$lib/components/home3/topic-graph-view.svelte';
 	import TopicTreeView from '$lib/components/home3/topic-tree-view.svelte';
@@ -63,6 +65,8 @@
 		| 'kb-semantic-projections'
 		| 'kb-doc-wiki'
 		| 'kb-llm-wiki'
+		| 'kb-llm-wiki-v2'
+		| 'kb-llm-wiki-v3'
 		| 'kb-references'
 		| 'kb-formulas'
 		| 'kb-tables'
@@ -109,6 +113,16 @@
 					id: 'kb-llm-wiki',
 					label: 'LLM Wiki',
 					description: 'The Deep Wiki entrance to SemOS'
+				},
+				{
+					id: 'kb-llm-wiki-v2',
+					label: 'LLM Wiki v2',
+					description: 'Improved SemOS knowledge atlas'
+				},
+				{
+					id: 'kb-llm-wiki-v3',
+					label: 'LLM Wiki v3',
+					description: 'Artistic wired knowledge atlas'
 				},
 				{
 					id: 'kb-input-details',
@@ -232,7 +246,9 @@
 	let initialSection = $derived(
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
 	);
-	let activeSection = $state<KbSectionId>('kb-search');
+	let activeSection = $state<KbSectionId>(
+		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
+	);
 
 	$effect(() => {
 		const found = menuItems.some(
@@ -266,6 +282,8 @@
 
 	let needsActiveStore = $derived(
 		activeSection !== 'kb-search' &&
+			activeSection !== 'kb-llm-wiki-v2' &&
+			activeSection !== 'kb-llm-wiki-v3' &&
 			activeSection !== 'kb-category-review' &&
 			!isUnderConstructionKnowledgeSection(activeSection)
 	);
@@ -581,6 +599,10 @@
 				<KnowledgeStoreView {darkMode} />
 			{:else if activeSection === 'kb-import'}
 				<KbImportView {darkMode} />
+			{:else if activeSection === 'kb-llm-wiki-v2'}
+				<LlmWikiV2View {darkMode} />
+			{:else if activeSection === 'kb-llm-wiki-v3'}
+				<LlmWikiV3View {darkMode} />
 			{:else if activeSection === 'kb-input-details'}
 				<InputsMgmtView {darkMode} />
 			{:else if activeSection === 'kb-metrics'}
