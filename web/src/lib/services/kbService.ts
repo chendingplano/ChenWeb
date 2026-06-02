@@ -1751,6 +1751,59 @@ export async function listKbInventoryItems(
 	);
 }
 
+// ---------- Semantic Projections (extracted, read-only) ----------
+
+/** One node in a category path: a category name with its keywords and score. */
+export type SemanticCategoryNode = {
+	name?: string;
+	keywords?: string[];
+	confidence?: number;
+};
+
+/** A single ranked category path attached to a semantic projection. */
+export type SemanticCategoryPath = {
+	category_path?: SemanticCategoryNode[];
+	path_keywords?: string[];
+	path_confidence?: number;
+};
+
+export type KbSemanticProjectionRecord = {
+	id: number;
+	semantic_proj_id: string;
+	input_record_id?: number;
+	event_id?: string;
+	language?: string;
+	descriptive_name?: string;
+	descriptive_name_en?: string;
+	keywords?: string[];
+	keywords_en?: string[];
+	semantic_projection?: string;
+	semantic_projection_en?: string;
+	category_paths?: SemanticCategoryPath[];
+	category_paths_en?: SemanticCategoryPath[];
+	model_name?: string;
+	prompt_name?: string;
+	create_time?: string;
+};
+
+export type ListKbSemanticProjectionsResponse = {
+	status: boolean;
+	input_id?: number;
+	file_name?: string;
+	results: KbSemanticProjectionRecord[];
+	total: number;
+};
+
+/** List the persisted semantic-projection rows for a single `kb.inputs` record. */
+export async function listKbSemanticProjections(
+	inputRecordId: number
+): Promise<ListKbSemanticProjectionsResponse> {
+	return fetchOrThrow<ListKbSemanticProjectionsResponse>(
+		`${BASE}/semantic-projections?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to list kb semantic projections'
+	);
+}
+
 // ---------- Inventory Categories (Category Review) ----------
 
 export type InventoryCategoryStatus =
