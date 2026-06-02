@@ -797,9 +797,7 @@ export type ListKbSceneBlocksResponse = {
 	total: number;
 };
 
-export async function listKbSceneBlocks(
-	inputRecordId: number
-): Promise<ListKbSceneBlocksResponse> {
+export async function listKbSceneBlocks(inputRecordId: number): Promise<ListKbSceneBlocksResponse> {
 	const result = await fetchOrThrow<ListKbSceneBlocksResponse>(
 		`${BASE}/scene-blocks?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
 		'Failed to retrieve scene blocks'
@@ -1279,7 +1277,9 @@ export async function getKbFrontendConfig(): Promise<KbFrontendConfig> {
 	return response.config;
 }
 
-export async function updateRecordTopic(payload: UpdateRecordTopicPayload): Promise<{ status: boolean }> {
+export async function updateRecordTopic(
+	payload: UpdateRecordTopicPayload
+): Promise<{ status: boolean }> {
 	const response = await fetch(`${BASE}/record-topic`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
@@ -1806,11 +1806,7 @@ export async function listKbSemanticProjections(
 
 // ---------- Inventory Categories (Category Review) ----------
 
-export type InventoryCategoryStatus =
-	| 'pending_review'
-	| 'approved'
-	| 'rejected'
-	| 'merged';
+export type InventoryCategoryStatus = 'pending_review' | 'approved' | 'rejected' | 'merged';
 
 export type InventorySpecSchema = {
 	canonical_unit: string;
@@ -1874,21 +1870,84 @@ export async function updateInventoryCategory(
 	key: string,
 	payload: UpdateInventoryCategoryPayload
 ): Promise<{ status: boolean; result: InventoryCategoryRecord }> {
-	const response = await fetch(
-		`${BASE}/inventory-categories/${encodeURIComponent(key)}`,
-		{
-			method: 'PATCH',
-			credentials: 'same-origin',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(payload)
-		}
-	);
+	const response = await fetch(`${BASE}/inventory-categories/${encodeURIComponent(key)}`, {
+		method: 'PATCH',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
 	if (!response.ok) {
 		const parsed = await response.json().catch(() => null);
 		const msg =
 			parsed && typeof parsed.error_msg === 'string'
 				? parsed.error_msg
 				: `Failed to update category (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json();
+}
+
+// ---------- Deep Wiki entrance ----------
+
+export type WikiCounts = {
+	documents: number;
+	content_segments: number;
+	topics: number;
+	semantic_projections: number;
+	metrics: number;
+	provisions: number;
+	parts_components: number;
+	scenes: number;
+	entities: number;
+	relations: number;
+};
+
+export type WikiRecentDoc = {
+	id: number;
+	title: string;
+	type: string;
+	time: string | null;
+};
+
+export type WikiProcessed = {
+	record_id: number | null;
+	title: string;
+	processor: string;
+	time: string;
+};
+
+export type WikiError = {
+	record_id: number | null;
+	title: string;
+	processor: string;
+	message: string;
+	time: string;
+};
+
+export type WikiOverviewResponse = {
+	status: boolean;
+	counts: WikiCounts;
+	recent_adds: WikiRecentDoc[];
+	recent_edits: WikiRecentDoc[];
+	recent_processed: WikiProcessed[];
+	errors: WikiError[];
+};
+
+/**
+ * Fetches the corpus-wide counts and recent activity that power the SemOS
+ * Deep Wiki entrance page (Panels A and C).
+ */
+export async function getWikiOverview(): Promise<WikiOverviewResponse> {
+	const response = await fetch(`${BASE}/wiki-overview`, {
+		method: 'GET',
+		credentials: 'same-origin'
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to load wiki overview (${response.status})`;
 		throw new Error(msg);
 	}
 	return response.json();

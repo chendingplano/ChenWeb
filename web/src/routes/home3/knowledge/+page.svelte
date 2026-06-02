@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
@@ -61,6 +62,7 @@
 		| 'kb-inventory-items'
 		| 'kb-semantic-projections'
 		| 'kb-doc-wiki'
+		| 'kb-llm-wiki'
 		| 'kb-references'
 		| 'kb-formulas'
 		| 'kb-tables'
@@ -103,6 +105,11 @@
 			description: 'Browse document knowledge',
 			icon: BookOpenIcon,
 			children: [
+				{
+					id: 'kb-llm-wiki',
+					label: 'LLM Wiki',
+					description: 'The Deep Wiki entrance to SemOS'
+				},
 				{
 					id: 'kb-input-details',
 					label: 'Document Metadata',
@@ -230,8 +237,7 @@
 	$effect(() => {
 		const found = menuItems.some(
 			(item) =>
-				item.id === initialSection ||
-				item.children?.some((child) => child.id === initialSection)
+				item.id === initialSection || item.children?.some((child) => child.id === initialSection)
 		);
 		if (found) {
 			activeSection = initialSection;
@@ -265,6 +271,11 @@
 	);
 
 	function selectSection(id: KbSectionId) {
+		if (id === 'kb-llm-wiki') {
+			// LLM Wiki is the standalone Deep Wiki entrance, not an inline section.
+			goto('/deep-wiki');
+			return;
+		}
 		if (id === 'kb-doc-wiki') {
 			activeSection = 'kb-input-details';
 			documentWikiOpen = true;
@@ -338,8 +349,12 @@
 						onclick={() => (menuCollapsed = true)}
 						class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
 						style="border:none; background:transparent; color:{textMuted};"
-						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = accent; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
+						onmouseenter={(e) => {
+							(e.currentTarget as HTMLElement).style.color = accent;
+						}}
+						onmouseleave={(e) => {
+							(e.currentTarget as HTMLElement).style.color = textMuted;
+						}}
 						aria-label="Collapse menu"
 						title="Collapse menu"
 					>
@@ -352,8 +367,12 @@
 					onclick={() => (menuCollapsed = false)}
 					class="flex h-8 w-full cursor-pointer items-center justify-center rounded-lg transition-colors duration-150"
 					style="border:none; background:transparent; color:{textMuted};"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = accent; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textMuted; }}
+					onmouseenter={(e) => {
+						(e.currentTarget as HTMLElement).style.color = accent;
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.color = textMuted;
+					}}
 					aria-label="Expand menu"
 					title="Expand menu"
 				>
@@ -386,13 +405,17 @@
 								aria-label={item.label}
 								onmouseenter={(e) => {
 									const el = e.currentTarget as HTMLElement;
-									if (!item.children?.some((child) => isChildActive(child.id))) el.style.background = hoverBg;
+									if (!item.children?.some((child) => isChildActive(child.id)))
+										el.style.background = hoverBg;
 									el.style.color = textPrimary;
 								}}
 								onmouseleave={(e) => {
 									const el = e.currentTarget as HTMLElement;
-									if (!item.children?.some((child) => isChildActive(child.id))) el.style.background = 'transparent';
-									el.style.color = item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary;
+									if (!item.children?.some((child) => isChildActive(child.id)))
+										el.style.background = 'transparent';
+									el.style.color = item.children?.some((child) => isChildActive(child.id))
+										? accent
+										: textSecondary;
 								}}
 							>
 								<item.icon class="h-5 w-5 flex-shrink-0" />
@@ -401,7 +424,9 @@
 							<!-- Expanded: full collapsible parent -->
 							<div
 								class="rounded-lg"
-								style="background:{item.children?.some((child) => isChildActive(child.id)) ? accentTint : 'transparent'};"
+								style="background:{item.children?.some((child) => isChildActive(child.id))
+									? accentTint
+									: 'transparent'};"
 							>
 								<button
 									type="button"
@@ -410,15 +435,23 @@
 									style="
 										color:{item.children?.some((child) => isChildActive(child.id)) ? accent : textSecondary};
 										border:none;
-										border-left:2px solid {item.children?.some((child) => isChildActive(child.id)) ? accent : 'transparent'};
+										border-left:2px solid {item.children?.some((child) => isChildActive(child.id))
+										? accent
+										: 'transparent'};
 									"
 								>
 									<item.icon class="h-5 w-5 flex-shrink-0" />
 									<span class="min-w-0 flex-1">
-										<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
-										<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
+										<span class="block truncate" style="font-size:14px; font-weight:600;"
+											>{item.label}</span
+										>
+										<span class="block truncate" style="font-size:12px; color:{textMuted};"
+											>{item.description}</span
+										>
 									</span>
-									<span style="font-size:12px; color:{textMuted};">{isParentOpen(item) ? '−' : '+'}</span>
+									<span style="font-size:12px; color:{textMuted};"
+										>{isParentOpen(item) ? '−' : '+'}</span
+									>
 								</button>
 								{#if isParentOpen(item)}
 									<div class="pr-2 pb-2 pl-6">
@@ -433,10 +466,18 @@
 													border:none;
 												"
 											>
-												<span style="font-size:12px; color:{isChildActive(child.id) ? accent : textMuted};">•</span>
+												<span
+													style="font-size:12px; color:{isChildActive(child.id)
+														? accent
+														: textMuted};">•</span
+												>
 												<span class="min-w-0">
-													<span class="block truncate" style="font-size:13px; font-weight:600;">{child.label}</span>
-													<span class="block truncate" style="font-size:11px; color:{textMuted};">{child.description}</span>
+													<span class="block truncate" style="font-size:13px; font-weight:600;"
+														>{child.label}</span
+													>
+													<span class="block truncate" style="font-size:11px; color:{textMuted};"
+														>{child.description}</span
+													>
 												</span>
 											</button>
 										{/each}
@@ -457,7 +498,9 @@
 								background:{activeSection === item.id ? accentTint : 'transparent'};
 								color:{activeSection === item.id ? accent : textSecondary};
 								border:none;
-								border-left:{!menuCollapsed && activeSection === item.id ? '2px solid ' + accent : '2px solid transparent'};
+								border-left:{!menuCollapsed && activeSection === item.id
+								? '2px solid ' + accent
+								: '2px solid transparent'};
 							"
 							title={menuCollapsed ? item.label : undefined}
 							aria-label={item.label}
@@ -475,8 +518,12 @@
 							<item.icon class="h-5 w-5 flex-shrink-0" />
 							{#if !menuCollapsed}
 								<span class="min-w-0 flex-1">
-									<span class="block truncate" style="font-size:14px; font-weight:600;">{item.label}</span>
-									<span class="block truncate" style="font-size:12px; color:{textMuted};">{item.description}</span>
+									<span class="block truncate" style="font-size:14px; font-weight:600;"
+										>{item.label}</span
+									>
+									<span class="block truncate" style="font-size:12px; color:{textMuted};"
+										>{item.description}</span
+									>
 								</span>
 							{/if}
 						</button>
@@ -577,8 +624,7 @@
 					showItemNodes={true}
 					listGraph={() => listProvisionGraph(knowledgeStoreState.activeStore?.id ?? null)}
 					getCategoryItems={(categoryPath) =>
-						getProvisionCategory(categoryPath, knowledgeStoreState.activeStore?.id ?? null)
-					}
+						getProvisionCategory(categoryPath, knowledgeStoreState.activeStore?.id ?? null)}
 				/>
 			{:else if activeSection === 'kb-provision-tree'}
 				<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
