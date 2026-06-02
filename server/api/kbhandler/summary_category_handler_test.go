@@ -114,7 +114,6 @@ func TestGetSummaryCategorySuccess(t *testing.T) {
 	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
 
 	artifactDir := t.TempDir()
-	summaryTreeDir := t.TempDir()
 	t.Setenv("ARTIFACT_DIR", artifactDir)
 	t.Setenv("ARTIFACT_WEB_DIR", artifactDir)
 
@@ -132,7 +131,7 @@ func TestGetSummaryCategorySuccess(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"staging_filename", "parser_name", "file_name"}).
 			AddRow("sample.pdf", "pdfplumber", "/tmp/standards/sample.pdf"))
 
-	mustWriteFile(t, filepath.Join(summaryTreeDir, "finance", "tax", "summaries.txt"), "1042_1_0001\n")
+	mustWriteFile(t, filepath.Join(artifactDir, "finance", "tax", "summaries.txt"), "1042_1_0001\n")
 	mustWriteFile(t, filepath.Join(artifactDir, "1", "1042", "summary_1_0001.txt"), `summary_id: "1042_1_0001"
 record_id: 1042
 level: 1

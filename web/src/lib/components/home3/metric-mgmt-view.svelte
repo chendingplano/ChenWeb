@@ -198,59 +198,62 @@
 			persistFocusPdfWidth(focusPdfWidth - 24);
 		}
 	}
-		// ---------- Group info panel width (draggable) ----------
-		const GIP_WIDTH_KEY = 'metrics:info-panel-width';
-		const GIP_WIDTH_MIN = 220;
-		const GIP_WIDTH_MAX = 620;
-		let gipWidth = $state<number | null>(null);
-		let gipResizing = $state(false);
+	// ---------- Group info panel width (draggable) ----------
+	const GIP_WIDTH_KEY = 'metrics:info-panel-width';
+	const GIP_WIDTH_MIN = 220;
+	const GIP_WIDTH_MAX = 620;
+	let gipWidth = $state<number | null>(null);
+	let gipResizing = $state(false);
 
-		$effect(() => {
-			if (!browser) return;
-			const saved = Number(localStorage.getItem(GIP_WIDTH_KEY));
-			if (Number.isFinite(saved) && saved >= GIP_WIDTH_MIN && saved <= GIP_WIDTH_MAX) {
-				gipWidth = saved;
-			}
-		});
+	$effect(() => {
+		if (!browser) return;
+		const saved = Number(localStorage.getItem(GIP_WIDTH_KEY));
+		if (Number.isFinite(saved) && saved >= GIP_WIDTH_MIN && saved <= GIP_WIDTH_MAX) {
+			gipWidth = saved;
+		}
+	});
 
-		function startGipResize(event: PointerEvent) {
+	function startGipResize(event: PointerEvent) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = gipWidth ?? 340;
+		gipResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		const move = (e: PointerEvent) => {
+			const next = Math.max(
+				GIP_WIDTH_MIN,
+				Math.min(GIP_WIDTH_MAX, Math.round(startWidth + (e.clientX - startX)))
+			);
+			gipWidth = next;
+			if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
+		};
+		const up = () => {
+			gipResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up, { once: true });
+		window.addEventListener('pointercancel', up, { once: true });
+	}
+
+	function onGipResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
 			event.preventDefault();
-			const startX = event.clientX;
-			const startWidth = gipWidth ?? 340;
-			gipResizing = true;
-			document.body.style.cursor = 'col-resize';
-			document.body.style.userSelect = 'none';
-			const move = (e: PointerEvent) => {
-				const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, Math.round(startWidth + (e.clientX - startX))));
-				gipWidth = next;
-				if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
-			};
-			const up = () => {
-				gipResizing = false;
-				document.body.style.cursor = '';
-				document.body.style.userSelect = '';
-				window.removeEventListener('pointermove', move);
-				window.removeEventListener('pointerup', up);
-				window.removeEventListener('pointercancel', up);
-			};
-			window.addEventListener('pointermove', move);
-			window.addEventListener('pointerup', up, { once: true });
-			window.addEventListener('pointercancel', up, { once: true });
+			const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, (gipWidth ?? 340) - 16));
+			gipWidth = next;
+			if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, (gipWidth ?? 340) + 16));
+			gipWidth = next;
+			if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
 		}
-
-		function onGipResizerKeydown(event: KeyboardEvent) {
-			if (event.key === 'ArrowLeft') {
-				event.preventDefault();
-				const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, (gipWidth ?? 340) - 16));
-				gipWidth = next;
-				if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
-			} else if (event.key === 'ArrowRight') {
-				event.preventDefault();
-				const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, (gipWidth ?? 340) + 16));
-				gipWidth = next;
-				if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
-			}
-		}
+	}
 	type NormalizedSpan = { page_number: number; line_number: number };
 
 	function toPositiveInt(v: unknown): number | null {
@@ -338,7 +341,7 @@
 		return map;
 	});
 
-let selectedMetric = $derived.by(() => {
+	let selectedMetric = $derived.by(() => {
 		if (selectedMetricId == null) return null;
 		return metrics.find((x) => x.id === selectedMetricId) ?? null;
 	});
@@ -347,8 +350,8 @@ let selectedMetric = $derived.by(() => {
 	let allKeywords = $derived.by(() => {
 		const set = new Set<string>();
 		for (const m of metrics) {
-			for (const kw of (m.metric_keywords ?? [])) set.add(kw);
-			for (const kw of (m.metric_keywords_en ?? [])) set.add(kw);
+			for (const kw of m.metric_keywords ?? []) set.add(kw);
+			for (const kw of m.metric_keywords_en ?? []) set.add(kw);
 		}
 		return [...set].sort((a, b) => a.localeCompare(b));
 	});
@@ -360,89 +363,187 @@ let selectedMetric = $derived.by(() => {
 		label: string;
 		icon: any;
 		kind: AttrKind;
-		value: string;           // formatted value for `text` kind, joined for chips/lines summary
-		items: string[];         // for `chips` and `lines` kinds (joined head + content for lines)
-		entries: LineEntry[];    // structured per-line entries for `lines` kind
-		count: number;           // 1 for scalars with a value, items.length for lists, 0 if empty
+		value: string; // formatted value for `text` kind, joined for chips/lines summary
+		items: string[]; // for `chips` and `lines` kinds (joined head + content for lines)
+		entries: LineEntry[]; // structured per-line entries for `lines` kind
+		count: number; // 1 for scalars with a value, items.length for lists, 0 if empty
 		hasValue: boolean;
 	};
 	type SatelliteNode = AttrDef & {
-		x: number; y: number;
+		x: number;
+		y: number;
 		wire: { x1: number; y1: number; x2: number; y2: number };
 	};
 	type GroupNode = {
 		key: string;
 		label: string;
 		icon: any;
-		count: number;       // total number of attributes in the group
+		count: number; // total number of attributes in the group
 		filledCount: number; // number of attributes with a value
 		hasValue: boolean;
-		x: number; y: number;
+		x: number;
+		y: number;
 		wire: { x1: number; y1: number; x2: number; y2: number };
 		satellites: SatelliteNode[];
 		attrs: AttrDef[];
 	};
 	type MetricsCanvas = {
-		W: number; H: number; Rc: number; Rgn: number; Rsn: number;
-		cx: number; cy: number;
-		metricLabel: string; metricSubLabel: string;
+		W: number;
+		H: number;
+		Rc: number;
+		Rgn: number;
+		Rsn: number;
+		cx: number;
+		cy: number;
+		metricLabel: string;
+		metricSubLabel: string;
 		groups: GroupNode[];
 	};
 
 	function buildMetricGroupAttrs(
 		m: KbMetricRecord,
 		spans: NormalizedSpan[],
-		lineByKey: Map<string, RawLine>,
-	): { metadata: AttrDef[]; context: AttrDef[]; metric: AttrDef[]; reasoning: AttrDef[]; grounding: AttrDef[] } {
-		const fmt = (v: unknown): string => (v == null || v === '') ? '' : String(v);
+		lineByKey: Map<string, RawLine>
+	): {
+		metadata: AttrDef[];
+		context: AttrDef[];
+		metric: AttrDef[];
+		reasoning: AttrDef[];
+		grounding: AttrDef[];
+	} {
+		const fmt = (v: unknown): string => (v == null || v === '' ? '' : String(v));
 		const has = (v: unknown): boolean => v != null && v !== '';
-		const textAttr = (key: string, label: string, icon: any, value: string, hasValue: boolean): AttrDef => ({
-			key, label, icon, kind: 'text', value, items: [], entries: [], count: hasValue ? 1 : 0, hasValue,
+		const textAttr = (
+			key: string,
+			label: string,
+			icon: any,
+			value: string,
+			hasValue: boolean
+		): AttrDef => ({
+			key,
+			label,
+			icon,
+			kind: 'text',
+			value,
+			items: [],
+			entries: [],
+			count: hasValue ? 1 : 0,
+			hasValue
 		});
-		const chipsAttr = (key: string, label: string, icon: any, items: string[], value: string): AttrDef => ({
-			key, label, icon, kind: 'chips', value, items, entries: [], count: items.length, hasValue: items.length > 0,
+		const chipsAttr = (
+			key: string,
+			label: string,
+			icon: any,
+			items: string[],
+			value: string
+		): AttrDef => ({
+			key,
+			label,
+			icon,
+			kind: 'chips',
+			value,
+			items,
+			entries: [],
+			count: items.length,
+			hasValue: items.length > 0
 		});
 		const linesAttr = (key: string, label: string, icon: any, entries: LineEntry[]): AttrDef => {
 			const items = entries.map((e) => (e.content ? `${e.head}: ${e.content}` : e.head));
 			return {
-				key, label, icon, kind: 'lines',
-				value: items.join('\n'), items, entries,
-				count: entries.length, hasValue: entries.length > 0,
+				key,
+				label,
+				icon,
+				kind: 'lines',
+				value: items.join('\n'),
+				items,
+				entries,
+				count: entries.length,
+				hasValue: entries.length > 0
 			};
 		};
 
-		const kwItems = (m.metric_keywords ?? []).filter((v) => typeof v === 'string' && v.trim() !== '');
+		const kwItems = (m.metric_keywords ?? []).filter(
+			(v) => typeof v === 'string' && v.trim() !== ''
+		);
 		const tags = (m.reasoning_tags ?? []).filter((v) => typeof v === 'string' && v.trim() !== '');
 
 		const metadata: AttrDef[] = [
 			textAttr('metric_id', 'ID', HashIcon, String(m.id), true),
 			textAttr('name', 'Name', TypeIcon, fmt(m.metric_name), has(m.metric_name)),
-			textAttr('confidence', 'Confidence', ActivityIcon, confidencePct(m.confidence), m.confidence != null),
+			textAttr(
+				'confidence',
+				'Confidence',
+				ActivityIcon,
+				confidencePct(m.confidence),
+				m.confidence != null
+			),
 			textAttr('desc', 'Desc', FileTextIcon, fmt(m.metric_desc), has(m.metric_desc)),
-			textAttr('formula', 'Formula', HashIcon, fmt(m.formula_or_definition), has(m.formula_or_definition)),
-			textAttr('explicit', 'Explicit', CalendarIcon, m.is_explicit_metric == null ? '' : (m.is_explicit_metric ? 'true' : 'false'), m.is_explicit_metric != null),
+			textAttr(
+				'formula',
+				'Formula',
+				HashIcon,
+				fmt(m.formula_or_definition),
+				has(m.formula_or_definition)
+			),
+			textAttr(
+				'explicit',
+				'Explicit',
+				CalendarIcon,
+				m.is_explicit_metric == null ? '' : m.is_explicit_metric ? 'true' : 'false',
+				m.is_explicit_metric != null
+			)
 		];
 
 		const context: AttrDef[] = [
-			textAttr('table_section', 'Section', ListIcon, fmt(m.table_name_or_section), has(m.table_name_or_section)),
+			textAttr(
+				'table_section',
+				'Section',
+				ListIcon,
+				fmt(m.table_name_or_section),
+				has(m.table_name_or_section)
+			),
 			textAttr('context', 'Context', BookOpenIcon, fmt(m.metric_context), has(m.metric_context)),
-			chipsAttr('keywords', 'Keywords', TagIcon, kwItems, kwItems.join(', ')),
+			chipsAttr('keywords', 'Keywords', TagIcon, kwItems, kwItems.join(', '))
 		];
 
 		const metric: AttrDef[] = [
 			textAttr('subject', 'Subject', TypeIcon, fmt(m.metric_subject), has(m.metric_subject)),
-			textAttr('frequency', 'Frequency', CalendarIcon, fmt(m.measurement_frequency), has(m.measurement_frequency)),
+			textAttr(
+				'frequency',
+				'Frequency',
+				CalendarIcon,
+				fmt(m.measurement_frequency),
+				has(m.measurement_frequency)
+			),
 			textAttr('value', 'Value', TrendingUpIcon, fmt(m.metric_value), has(m.metric_value)),
-			textAttr('threshold', 'Threshold', TrendingUpIcon, fmt(m.threshold_or_target), has(m.threshold_or_target)),
+			textAttr(
+				'threshold',
+				'Threshold',
+				TrendingUpIcon,
+				fmt(m.threshold_or_target),
+				has(m.threshold_or_target)
+			),
 			textAttr('unit', 'Unit', HashIcon, fmt(m.metric_unit), has(m.metric_unit)),
 			textAttr('value_class', 'Class', TagIcon, fmt(m.value_class), has(m.value_class)),
-			textAttr('value_data_type', 'Data Type', ListIcon, fmt(m.value_data_type), has(m.value_data_type)),
-			textAttr('value_range_type', 'Range Type', TrendingUpIcon, fmt(m.value_range_type), has(m.value_range_type)),
-			textAttr('location_type', 'Location', MapPinIcon, fmt(m.location_type), has(m.location_type)),
+			textAttr(
+				'value_data_type',
+				'Data Type',
+				ListIcon,
+				fmt(m.value_data_type),
+				has(m.value_data_type)
+			),
+			textAttr(
+				'value_range_type',
+				'Range Type',
+				TrendingUpIcon,
+				fmt(m.value_range_type),
+				has(m.value_range_type)
+			),
+			textAttr('location_type', 'Location', MapPinIcon, fmt(m.location_type), has(m.location_type))
 		];
 
 		const reasoning: AttrDef[] = [
-			chipsAttr('reasoning_tags', 'Tags', TagIcon, tags, tags.join(', ')),
+			chipsAttr('reasoning_tags', 'Tags', TagIcon, tags, tags.join(', '))
 		];
 
 		const groundingEntries: LineEntry[] = spans.flatMap((span) => {
@@ -455,23 +556,25 @@ let selectedMetric = $derived.by(() => {
 			return segs.map((seg, i) => ({
 				head: i === 0 ? head : `${head} · ${i + 1}`,
 				content: seg,
-				lineType: i === 0 ? lineType : '',
+				lineType: i === 0 ? lineType : ''
 			}));
 		});
 		const grounding: AttrDef[] = [
-			linesAttr('source_line_spans', 'Lines', FileTextIcon, groundingEntries),
+			linesAttr('source_line_spans', 'Lines', FileTextIcon, groundingEntries)
 		];
 
 		return { metadata, context, metric, reasoning, grounding };
 	}
 
 	let metricsMap = $derived.by((): MetricsCanvas | null => {
-		const W = canvasW, H = canvasH;
+		const W = canvasW,
+			H = canvasH;
 		if (W < 100 || H < 100) return null;
 		const m = selectedMetric;
 		if (!m) return null;
 		const base = Math.min(W, H);
-		const cx = W / 2, cy = H / 2;
+		const cx = W / 2,
+			cy = H / 2;
 
 		// Center disc, group node, and attribute-satellite radii (modeled after
 		// the Scene Blocks chart in `kb-extraction-view.svelte`).
@@ -496,7 +599,9 @@ let selectedMetric = $derived.by(() => {
 		const attrsByGroup = buildMetricGroupAttrs(m, spans, rawLineByKey);
 
 		type GroupSpec = {
-			key: string; label: string; icon: any;
+			key: string;
+			label: string;
+			icon: any;
 			angleDeg: number;
 			attrs: AttrDef[];
 		};
@@ -504,16 +609,47 @@ let selectedMetric = $derived.by(() => {
 		// 5 groups evenly spaced around the metric center (every 72°), starting
 		// at the top so the layout reads like the Scene Blocks chart.
 		const groupSpecs: GroupSpec[] = [
-			{ key: 'g_metadata',  label: 'Metadata',  icon: BookOpenIcon,   angleDeg: -90,  attrs: attrsByGroup.metadata },
-			{ key: 'g_context',   label: 'Context',   icon: TagIcon,        angleDeg: -18,  attrs: attrsByGroup.context },
-			{ key: 'g_metric',    label: 'Metric',    icon: TrendingUpIcon, angleDeg:  54,  attrs: attrsByGroup.metric },
-			{ key: 'g_grounding', label: 'Grounding', icon: MapPinIcon,     angleDeg: 126,  attrs: attrsByGroup.grounding },
-			{ key: 'g_reasoning', label: 'Reasoning', icon: ActivityIcon,   angleDeg: 198,  attrs: attrsByGroup.reasoning },
+			{
+				key: 'g_metadata',
+				label: 'Metadata',
+				icon: BookOpenIcon,
+				angleDeg: -90,
+				attrs: attrsByGroup.metadata
+			},
+			{
+				key: 'g_context',
+				label: 'Context',
+				icon: TagIcon,
+				angleDeg: -18,
+				attrs: attrsByGroup.context
+			},
+			{
+				key: 'g_metric',
+				label: 'Metric',
+				icon: TrendingUpIcon,
+				angleDeg: 54,
+				attrs: attrsByGroup.metric
+			},
+			{
+				key: 'g_grounding',
+				label: 'Grounding',
+				icon: MapPinIcon,
+				angleDeg: 126,
+				attrs: attrsByGroup.grounding
+			},
+			{
+				key: 'g_reasoning',
+				label: 'Reasoning',
+				icon: ActivityIcon,
+				angleDeg: 198,
+				attrs: attrsByGroup.reasoning
+			}
 		];
 
 		const groups: GroupNode[] = groupSpecs.map((spec) => {
-			const ang = spec.angleDeg * Math.PI / 180;
-			const ux = Math.cos(ang), uy = Math.sin(ang);
+			const ang = (spec.angleDeg * Math.PI) / 180;
+			const ux = Math.cos(ang),
+				uy = Math.sin(ang);
 			const gx = cx + ux * Rg;
 			const gy = cy + uy * Rg;
 			const baseAng = Math.atan2(uy, ux);
@@ -525,8 +661,9 @@ let selectedMetric = $derived.by(() => {
 				const sy = gy + Math.sin(sAng) * Rs;
 				return {
 					...def,
-					x: sx, y: sy,
-					wire: shortenLine(gx, gy, sx, sy, Rgn + 3, Rsn + 3),
+					x: sx,
+					y: sy,
+					wire: shortenLine(gx, gy, sx, sy, Rgn + 3, Rsn + 3)
 				};
 			});
 			const filled = spec.attrs.filter((a) => a.hasValue).length;
@@ -537,19 +674,25 @@ let selectedMetric = $derived.by(() => {
 				count: spec.attrs.length,
 				filledCount: filled,
 				hasValue: filled > 0,
-				x: gx, y: gy,
+				x: gx,
+				y: gy,
 				wire: shortenLine(cx, cy, gx, gy, Rc + 5, Rgn + 3),
 				satellites,
-				attrs: spec.attrs,
+				attrs: spec.attrs
 			};
 		});
 
 		return {
-			W, H, Rc, Rgn, Rsn,
-			cx, cy,
+			W,
+			H,
+			Rc,
+			Rgn,
+			Rsn,
+			cx,
+			cy,
 			metricLabel: m.metric_name?.trim() || m.metric_subject?.trim() || `Metric #${m.id}`,
 			metricSubLabel: m.metric_name_en?.trim() || m.metric_subject_en?.trim() || '',
-			groups,
+			groups
 		};
 	});
 
@@ -570,38 +713,43 @@ let selectedMetric = $derived.by(() => {
 	let showAllMetricAttrs = $derived(activeGroupKey === ALL_METRIC_KEY && metricsMap != null);
 	let totalAttrCount = $derived.by(() => {
 		if (!metricsMap) return { filled: 0, total: 0 };
-		let filled = 0, total = 0;
-		for (const g of metricsMap.groups) { filled += g.filledCount; total += g.count; }
+		let filled = 0,
+			total = 0;
+		for (const g of metricsMap.groups) {
+			filled += g.filledCount;
+			total += g.count;
+		}
 		return { filled, total };
 	});
 
-		let filteredMetrics = $derived.by(() => {
-			let result = metrics;
-			const kw = keywordFilter.trim().toLowerCase();
-			if (kw) {
-				result = result.filter((m) =>
+	let filteredMetrics = $derived.by(() => {
+		let result = metrics;
+		const kw = keywordFilter.trim().toLowerCase();
+		if (kw) {
+			result = result.filter(
+				(m) =>
 					(m.metric_keywords ?? []).some((k) => k.toLowerCase().includes(kw)) ||
 					(m.metric_keywords_en ?? []).some((k) => k.toLowerCase().includes(kw)) ||
 					(m.metric_name ?? '').toLowerCase().includes(kw) ||
 					(m.metric_subject ?? '').toLowerCase().includes(kw)
-				);
-			}
-			const cf = confidenceFilter.trim();
-			if (cf) {
-				if (cf.startsWith('<')) {
-					const th = parseFloat(cf.slice(1).trim());
-					if (Number.isFinite(th)) {
-						result = result.filter((m) => (m.confidence ?? 0) < th);
-					}
-				} else {
-					const th = parseFloat(cf);
-					if (Number.isFinite(th)) {
-						result = result.filter((m) => (m.confidence ?? 0) >= th);
-					}
+			);
+		}
+		const cf = confidenceFilter.trim();
+		if (cf) {
+			if (cf.startsWith('<')) {
+				const th = parseFloat(cf.slice(1).trim());
+				if (Number.isFinite(th)) {
+					result = result.filter((m) => (m.confidence ?? 0) < th);
+				}
+			} else {
+				const th = parseFloat(cf);
+				if (Number.isFinite(th)) {
+					result = result.filter((m) => (m.confidence ?? 0) >= th);
 				}
 			}
-			return result;
-		});
+		}
+		return result;
+	});
 
 	let metricSearchActive = $derived(
 		searchQuery.trim().length > 0 || hasKbMetricSearchFilters(searchFilters)
@@ -707,12 +855,14 @@ let selectedMetric = $derived.by(() => {
 		}
 	}
 
-	function handleDragSelect(ranges: Array<{
-		pageNumber: number;
-		viewportY1: number;
-		viewportY2: number;
-		viewport: PdfPageViewport;
-	}>) {
+	function handleDragSelect(
+		ranges: Array<{
+			pageNumber: number;
+			viewportY1: number;
+			viewportY2: number;
+			viewport: PdfPageViewport;
+		}>
+	) {
 		pdfDragPreviewLines = [];
 		const selected: number[] = [];
 		for (const { pageNumber, viewportY1, viewportY2, viewport } of ranges) {
@@ -735,12 +885,14 @@ let selectedMetric = $derived.by(() => {
 		}
 	}
 
-	function handleDragMove(ranges: Array<{
-		pageNumber: number;
-		viewportY1: number;
-		viewportY2: number;
-		viewport: PdfPageViewport;
-	}>) {
+	function handleDragMove(
+		ranges: Array<{
+			pageNumber: number;
+			viewportY1: number;
+			viewportY2: number;
+			viewport: PdfPageViewport;
+		}>
+	) {
 		const selected: number[] = [];
 		for (const { pageNumber, viewportY1, viewportY2, viewport } of ranges) {
 			const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
@@ -811,10 +963,12 @@ let selectedMetric = $derived.by(() => {
 	}
 
 	function shortenLine(x1: number, y1: number, x2: number, y2: number, d1: number, d2: number) {
-		const dx = x2 - x1, dy = y2 - y1;
+		const dx = x2 - x1,
+			dy = y2 - y1;
 		const len = Math.sqrt(dx * dx + dy * dy);
 		if (len < 1) return { x1, y1, x2, y2 };
-		const ux = dx / len, uy = dy / len;
+		const ux = dx / len,
+			uy = dy / len;
 		return { x1: x1 + ux * d1, y1: y1 + uy * d1, x2: x2 - ux * d2, y2: y2 - uy * d2 };
 	}
 
@@ -1003,174 +1157,172 @@ let selectedMetric = $derived.by(() => {
 		return count;
 	}
 
-
-		// ---------- Add Metric dialog ----------
-		// Reads from addMetricBufferLines (set during drag-select) instead of
-		// pdfSelectedLines so the buffer survives click-away clearing.
-		let addMetricDialogLines = $derived.by(() => {
-			const seen = new Set<string>();
-			const result: Array<RawLine & { key: string }> = [];
-			for (const lineNo of addMetricBufferLines) {
-				for (const ln of rawLines) {
-					if (ln.line_number !== lineNo) continue;
-					const key = `${ln.page_number}:${ln.line_number}`;
-					if (seen.has(key)) continue;
-					seen.add(key);
-					result.push({ ...ln, key });
-				}
+	// ---------- Add Metric dialog ----------
+	// Reads from addMetricBufferLines (set during drag-select) instead of
+	// pdfSelectedLines so the buffer survives click-away clearing.
+	let addMetricDialogLines = $derived.by(() => {
+		const seen = new Set<string>();
+		const result: Array<RawLine & { key: string }> = [];
+		for (const lineNo of addMetricBufferLines) {
+			for (const ln of rawLines) {
+				if (ln.line_number !== lineNo) continue;
+				const key = `${ln.page_number}:${ln.line_number}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				result.push({ ...ln, key });
 			}
-			return result.sort((a, b) => a.line_number - b.line_number);
-		});
-
-		function startEditDialogLine(key: string, content: string) {
-			addMetricEditKey = key;
-			addMetricEditContent = content;
 		}
+		return result.sort((a, b) => a.line_number - b.line_number);
+	});
 
-		function cancelEditDialogLine() {
+	function startEditDialogLine(key: string, content: string) {
+		addMetricEditKey = key;
+		addMetricEditContent = content;
+	}
+
+	function cancelEditDialogLine() {
+		addMetricEditKey = null;
+		addMetricEditContent = '';
+	}
+
+	async function saveEditDialogLine(pageNo: number, lineNo: number) {
+		if (!currentInput || !addMetricEditKey) return;
+		const confirmed = window.confirm('Save changes to the original file?');
+		if (!confirmed) return;
+		addMetricBusyAction = 'line';
+		try {
+			await updateRawLine({
+				input_record_id: currentInput.id,
+				page_number: pageNo,
+				line_number: lineNo,
+				content: addMetricEditContent
+			});
+			rawLines = rawLines.map((l) =>
+				l.page_number === pageNo && l.line_number === lineNo
+					? { ...l, content: addMetricEditContent }
+					: l
+			);
 			addMetricEditKey = null;
 			addMetricEditContent = '';
+			addMetricBufferLines = [];
+			resetAddMetricPreview();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to save line');
+		} finally {
+			addMetricBusyAction = null;
 		}
+	}
 
-		async function saveEditDialogLine(pageNo: number, lineNo: number) {
-			if (!currentInput || !addMetricEditKey) return;
-			const confirmed = window.confirm('Save changes to the original file?');
-			if (!confirmed) return;
-			addMetricBusyAction = 'line';
-			try {
-				await updateRawLine({
-					input_record_id: currentInput.id,
-					page_number: pageNo,
-					line_number: lineNo,
-					content: addMetricEditContent
-				});
-				rawLines = rawLines.map((l) =>
-					l.page_number === pageNo && l.line_number === lineNo
-						? { ...l, content: addMetricEditContent }
-						: l
-				);
-				addMetricEditKey = null;
-				addMetricEditContent = '';
-				addMetricBufferLines = [];
-				resetAddMetricPreview();
-			} catch (err) {
-				alert(err instanceof Error ? err.message : 'Failed to save line');
-			} finally {
-				addMetricBusyAction = null;
-			}
+	function deleteDialogLine(key: string) {
+		const removedLines: number[] = [];
+		for (const ln of addMetricDialogLines) {
+			if (ln.key === key) removedLines.push(ln.line_number);
 		}
+		if (removedLines.length === 0) return;
+		addMetricBufferLines = addMetricBufferLines.filter((ln) => !removedLines.includes(ln));
+		resetAddMetricPreview();
+	}
 
-		function deleteDialogLine(key: string) {
-			const removedLines: number[] = [];
-			for (const ln of addMetricDialogLines) {
-				if (ln.key === key) removedLines.push(ln.line_number);
-			}
-			if (removedLines.length === 0) return;
-			addMetricBufferLines = addMetricBufferLines.filter((ln) => !removedLines.includes(ln));
+	let canAddPrevious = $derived.by(() => {
+		if (addMetricBufferLines.length === 0 || rawLines.length === 0) return false;
+		const minLine = Math.min(...addMetricBufferLines);
+		return rawLines.some((ln) => ln.line_number < minLine);
+	});
+	let canAddNext = $derived.by(() => {
+		if (addMetricBufferLines.length === 0 || rawLines.length === 0) return false;
+		const maxLine = Math.max(...addMetricBufferLines);
+		return rawLines.some((ln) => ln.line_number > maxLine);
+	});
+
+	function addPreviousLine() {
+		if (addMetricBufferLines.length === 0) return;
+		const minLine = Math.min(...addMetricBufferLines);
+		const prev = rawLines
+			.filter((ln) => ln.line_number < minLine && !addMetricBufferLines.includes(ln.line_number))
+			.sort((a, b) => b.line_number - a.line_number)[0];
+		if (prev) {
+			addMetricBufferLines = [prev.line_number, ...addMetricBufferLines];
 			resetAddMetricPreview();
 		}
+	}
 
-		let canAddPrevious = $derived.by(() => {
-			if (addMetricBufferLines.length === 0 || rawLines.length === 0) return false;
-			const minLine = Math.min(...addMetricBufferLines);
-			return rawLines.some((ln) => ln.line_number < minLine);
-		});
-		let canAddNext = $derived.by(() => {
-			if (addMetricBufferLines.length === 0 || rawLines.length === 0) return false;
-			const maxLine = Math.max(...addMetricBufferLines);
-			return rawLines.some((ln) => ln.line_number > maxLine);
-		});
-
-		function addPreviousLine() {
-			if (addMetricBufferLines.length === 0) return;
-			const minLine = Math.min(...addMetricBufferLines);
-			const prev = rawLines
-				.filter((ln) => ln.line_number < minLine && !addMetricBufferLines.includes(ln.line_number))
-				.sort((a, b) => b.line_number - a.line_number)[0];
-			if (prev) {
-				addMetricBufferLines = [prev.line_number, ...addMetricBufferLines];
-				resetAddMetricPreview();
-			}
+	function addNextLine() {
+		if (addMetricBufferLines.length === 0) return;
+		const maxLine = Math.max(...addMetricBufferLines);
+		const next = rawLines
+			.filter((ln) => ln.line_number > maxLine && !addMetricBufferLines.includes(ln.line_number))
+			.sort((a, b) => a.line_number - b.line_number)[0];
+		if (next) {
+			addMetricBufferLines = [...addMetricBufferLines, next.line_number];
+			resetAddMetricPreview();
 		}
+	}
 
-		function addNextLine() {
-			if (addMetricBufferLines.length === 0) return;
-			const maxLine = Math.max(...addMetricBufferLines);
-			const next = rawLines
-				.filter((ln) => ln.line_number > maxLine && !addMetricBufferLines.includes(ln.line_number))
-				.sort((a, b) => a.line_number - b.line_number)[0];
-			if (next) {
-				addMetricBufferLines = [...addMetricBufferLines, next.line_number];
-				resetAddMetricPreview();
+	async function extractMetric() {
+		if (!currentInput || addMetricDialogLines.length === 0) return;
+		addMetricBusyAction = 'extract';
+		try {
+			const nums = [...new Set(addMetricDialogLines.map((l) => l.line_number))].sort(
+				(a, b) => a - b
+			);
+			const lineSpecs: string[] = [];
+			let i = 0;
+			while (i < nums.length) {
+				let j = i;
+				while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+				lineSpecs.push(i === j ? `${nums[i]}` : `${nums[i]}-${nums[j]}`);
+				i = j + 1;
 			}
+			const result = await extractKbMetrics({
+				record_id: currentInput.id,
+				lines: lineSpecs
+			});
+			extractedMetricsPreview = result.metrics ?? [];
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to extract metrics');
+		} finally {
+			addMetricBusyAction = null;
 		}
+	}
 
-		async function extractMetric() {
-			if (!currentInput || addMetricDialogLines.length === 0) return;
-			addMetricBusyAction = 'extract';
-			try {
-				const nums = [...new Set(addMetricDialogLines.map((l) => l.line_number))].sort(
-					(a, b) => a - b
-				);
-				const lineSpecs: string[] = [];
-				let i = 0;
-				while (i < nums.length) {
-					let j = i;
-					while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
-					lineSpecs.push(i === j ? `${nums[i]}` : `${nums[i]}-${nums[j]}`);
-					i = j + 1;
-				}
-				const result = await extractKbMetrics({
-					record_id: currentInput.id,
-					lines: lineSpecs
-				});
-				extractedMetricsPreview = result.metrics ?? [];
-			} catch (err) {
-				alert(err instanceof Error ? err.message : 'Failed to extract metrics');
-			} finally {
-				addMetricBusyAction = null;
-			}
+	async function saveExtractedMetricsPreview() {
+		if (!currentInput || extractedMetricsPreview.length === 0) return;
+		addMetricBusyAction = 'save';
+		try {
+			await saveExtractedKbMetrics({
+				record_id: currentInput.id,
+				metrics: extractedMetricsPreview
+			});
+			const refreshed = await listKbMetrics(currentInput.id);
+			metrics = refreshed.results ?? [];
+			closeAddMetricDialog();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to save metrics');
+		} finally {
+			addMetricBusyAction = null;
 		}
+	}
 
-		async function saveExtractedMetricsPreview() {
-			if (!currentInput || extractedMetricsPreview.length === 0) return;
-			addMetricBusyAction = 'save';
-			try {
-				await saveExtractedKbMetrics({
-					record_id: currentInput.id,
-					metrics: extractedMetricsPreview
-				});
-				const refreshed = await listKbMetrics(currentInput.id);
-				metrics = refreshed.results ?? [];
-				closeAddMetricDialog();
-			} catch (err) {
-				alert(err instanceof Error ? err.message : 'Failed to save metrics');
-			} finally {
-				addMetricBusyAction = null;
-			}
+	async function extractProvision() {
+		if (!currentInput || addMetricDialogLines.length === 0) return;
+		addMetricBusyAction = 'provision';
+		try {
+			const spans: SourceLineSpan[] = addMetricDialogLines.map((l) => ({
+				page_number: l.page_number,
+				line_number: l.line_number
+			}));
+			await createKbProvision({
+				input_record_id: currentInput.id,
+				provision_name: `Provision from ${currentInput.id}`,
+				source_line_spans: spans
+			});
+			closeAddMetricDialog();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to create provision');
+		} finally {
+			addMetricBusyAction = null;
 		}
-
-		async function extractProvision() {
-			if (!currentInput || addMetricDialogLines.length === 0) return;
-			addMetricBusyAction = 'provision';
-			try {
-				const spans: SourceLineSpan[] = addMetricDialogLines.map((l) => ({
-					page_number: l.page_number,
-					line_number: l.line_number
-				}));
-				await createKbProvision({
-					input_record_id: currentInput.id,
-					provision_name: `Provision from ${currentInput.id}`,
-					source_line_spans: spans
-				});
-				closeAddMetricDialog();
-			} catch (err) {
-				alert(err instanceof Error ? err.message : 'Failed to create provision');
-			} finally {
-				addMetricBusyAction = null;
-			}
-		}
-
+	}
 </script>
 
 <svelte:window
@@ -1217,10 +1369,7 @@ let selectedMetric = $derived.by(() => {
 		</div>
 	</header>
 
-	<div
-		class="body"
-		style={recordBrowserFolded ? 'grid-template-columns: minmax(0, 1fr)' : ''}
-	>
+	<div class="body" style={recordBrowserFolded ? 'grid-template-columns: minmax(0, 1fr)' : ''}>
 		{#if !recordBrowserFolded}
 			<KbInputRecordBrowser
 				{darkMode}
@@ -1238,170 +1387,198 @@ let selectedMetric = $derived.by(() => {
 				}}
 			/>
 
-		<aside class="metric-sidebar">
-			<div class="left-meta">
-				<div class="left-meta-title">Metrics</div>
-				<div class="left-meta-count">
-					{#if metricSearchActive && searchHasRun}
-						{searchTotal} global hit{searchTotal === 1 ? '' : 's'}
-					{:else}
-						{metrics.length} found
+			<aside class="metric-sidebar">
+				<div class="left-meta">
+					<div class="left-meta-title">Metrics</div>
+					<div class="left-meta-count">
+						{#if metricSearchActive && searchHasRun}
+							{searchTotal} global hit{searchTotal === 1 ? '' : 's'}
+						{:else}
+							{metrics.length} found
+						{/if}
+					</div>
+				</div>
+				<div class="debug-badge" aria-live="polite">
+					Debug: last selected metric = {lastSelectedMetricDebug}
+				</div>
+
+				<div class="search-panel">
+					<div class="search-panel-head">
+						<div class="search-panel-title">Global Metric Search</div>
+						<div class="search-panel-sub">
+							Search the whole `kb.metrics` corpus with agent-friendly filters.
+						</div>
+					</div>
+					<div class="search-grid">
+						<input
+							class="search-input search-query"
+							type="text"
+							placeholder="Search metrics, thresholds, units, keywords…"
+							bind:value={searchQuery}
+							onkeydown={(event) => {
+								if (event.key === 'Enter') void runMetricSearch();
+							}}
+						/>
+						<input
+							class="search-input"
+							type="text"
+							placeholder="Record ID"
+							bind:value={searchFilters.inputRecordId}
+						/>
+						<select class="search-input" bind:value={searchFilters.isExplicitMetric}>
+							<option value="">Explicit metric?</option>
+							<option value="true">Explicit only</option>
+							<option value="false">Implicit only</option>
+						</select>
+						<input
+							class="search-input"
+							type="text"
+							placeholder="Value class"
+							bind:value={searchFilters.valueClass}
+						/>
+						<input
+							class="search-input"
+							type="text"
+							placeholder="Value type"
+							bind:value={searchFilters.valueDataType}
+						/>
+						<input
+							class="search-input"
+							type="text"
+							placeholder="Metric unit"
+							bind:value={searchFilters.metricUnit}
+						/>
+					</div>
+					<div class="search-actions">
+						<button
+							type="button"
+							class="search-btn primary"
+							disabled={searchLoading}
+							onclick={runMetricSearch}
+						>
+							{searchLoading ? 'Searching…' : 'Search'}
+						</button>
+						<button type="button" class="search-btn" onclick={clearMetricSearch}>Clear</button>
+						<button
+							type="button"
+							class="search-btn"
+							disabled={!currentInput}
+							onclick={() => {
+								searchFilters = {
+									...searchFilters,
+									inputRecordId: currentInput ? String(currentInput.id) : ''
+								};
+							}}>Use Current</button
+						>
+					</div>
+					{#if searchError}
+						<div class="search-status">{searchError}</div>
+					{:else if metricSearchActive && searchHasRun}
+						<div class="search-status">
+							{searchTotal} result{searchTotal === 1 ? '' : 's'} for "{searchQuery.trim()}"
+						</div>
 					{/if}
 				</div>
-			</div>
-			<div class="debug-badge" aria-live="polite">
-				Debug: last selected metric = {lastSelectedMetricDebug}
-			</div>
 
-			<div class="search-panel">
-				<div class="search-panel-head">
-					<div class="search-panel-title">Global Metric Search</div>
-					<div class="search-panel-sub">Search the whole `kb.metrics` corpus with agent-friendly filters.</div>
-				</div>
-				<div class="search-grid">
-					<input
-						class="search-input search-query"
-						type="text"
-						placeholder="Search metrics, thresholds, units, keywords…"
-						bind:value={searchQuery}
-						onkeydown={(event) => {
-							if (event.key === 'Enter') void runMetricSearch();
-						}}
-					/>
-					<input class="search-input" type="text" placeholder="Record ID" bind:value={searchFilters.inputRecordId} />
-					<select class="search-input" bind:value={searchFilters.isExplicitMetric}>
-						<option value="">Explicit metric?</option>
-						<option value="true">Explicit only</option>
-						<option value="false">Implicit only</option>
-					</select>
-					<input class="search-input" type="text" placeholder="Value class" bind:value={searchFilters.valueClass} />
-					<input class="search-input" type="text" placeholder="Value type" bind:value={searchFilters.valueDataType} />
-					<input class="search-input" type="text" placeholder="Metric unit" bind:value={searchFilters.metricUnit} />
-				</div>
-				<div class="search-actions">
-					<button type="button" class="search-btn primary" disabled={searchLoading} onclick={runMetricSearch}>
-						{searchLoading ? 'Searching…' : 'Search'}
-					</button>
-					<button type="button" class="search-btn" onclick={clearMetricSearch}>Clear</button>
-					<button
-						type="button"
-						class="search-btn"
-						disabled={!currentInput}
-						onclick={() => {
-							searchFilters = {
-								...searchFilters,
-								inputRecordId: currentInput ? String(currentInput.id) : ''
-							};
-						}}
-					>Use Current</button>
-				</div>
-				{#if searchError}
-					<div class="search-status">{searchError}</div>
-				{:else if metricSearchActive && searchHasRun}
-					<div class="search-status">
-						{searchTotal} result{searchTotal === 1 ? '' : 's'} for "{searchQuery.trim()}"
-					</div>
-				{/if}
-			</div>
-
-
-			<div class="metrics-list">
-				{#if errorMsg}
-					<div class="error">{errorMsg}</div>
-				{:else if searchLoading}
-					<div class="empty">
-						<div class="empty-glyph">⌕</div>
-						<div class="empty-title">Searching metrics</div>
-						<div class="empty-sub">Ranking results across the full metrics corpus…</div>
-					</div>
-				{:else if metricSearchActive && searchHasRun && searchResults.length === 0}
-					<div class="empty">
-						<div class="empty-glyph">⌕</div>
-						<div class="empty-title">No global matches</div>
-						<div class="empty-sub">Try broader keywords or relax one of the semantic filters.</div>
-					</div>
-				{:else if !loading && metrics.length === 0}
-					<div class="empty">
-						<div class="empty-glyph">§</div>
-						<div class="empty-title">No metrics yet</div>
-						<div class="empty-sub">
-							Select a record from kb.inputs to populate the metrics index.
+				<div class="metrics-list">
+					{#if errorMsg}
+						<div class="error">{errorMsg}</div>
+					{:else if searchLoading}
+						<div class="empty">
+							<div class="empty-glyph">⌕</div>
+							<div class="empty-title">Searching metrics</div>
+							<div class="empty-sub">Ranking results across the full metrics corpus…</div>
 						</div>
-					</div>
-				{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
-					<div class="empty">
-						<div class="empty-glyph">§</div>
-						<div class="empty-title">No matches</div>
-						<div class="empty-sub">
-							{#if keywordFilter && confidenceFilter}
-								No metrics match keyword "{keywordFilter}" and confidence {confidenceFilter}.
-							{:else if keywordFilter}
-								No metrics match the keyword "{keywordFilter}".
-							{:else}
-								No metrics match confidence {confidenceFilter}.
-							{/if}
-						</div>
-					</div>
-				{:else if metricSearchActive && searchHasRun}
-					{#each searchResults as result, idx (result.id)}
-						<button
-							type="button"
-							class="metric-card"
-							class:selected={selectedMetricId === result.id}
-							onclick={() => handleMetricSearchResultClick(result)}
-						>
-							<div class="card-rule" aria-hidden="true"></div>
-							<div class="card-body">
-								<div class="card-row-top">
-									<div class="card-index">⌕ {String(idx + 1).padStart(3, '0')}</div>
-									<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
-								</div>
-								<div class="card-name">{result.primary_label}</div>
-								<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
-								<div class="card-foot">
-									<span class="chip">
-										<span class="chip-dot"></span>
-										record {result.input_record_id}
-									</span>
-									{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
-										<span class="chip chip-quiet">{chip}</span>
-									{/each}
-								</div>
+					{:else if metricSearchActive && searchHasRun && searchResults.length === 0}
+						<div class="empty">
+							<div class="empty-glyph">⌕</div>
+							<div class="empty-title">No global matches</div>
+							<div class="empty-sub">
+								Try broader keywords or relax one of the semantic filters.
 							</div>
-						</button>
-					{/each}
-				{:else}
-					{#each filteredMetrics as m, idx (m.id)}
-						<button
-							type="button"
-							class="metric-card"
-							class:selected={selectedMetricId === m.id}
-							onclick={(event) => onMetricCardClick(event, m)}
-						>
-							<div class="card-rule" aria-hidden="true"></div>
-							<div class="card-body">
-								<div class="card-row-top">
-									<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
-									<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
-								</div>
-								<div class="card-name">{metricNameOf(m)}</div>
-								{#if m.metric_desc}
-									<div class="card-desc">{m.metric_desc}</div>
+						</div>
+					{:else if !loading && metrics.length === 0}
+						<div class="empty">
+							<div class="empty-glyph">§</div>
+							<div class="empty-title">No metrics yet</div>
+							<div class="empty-sub">
+								Select a record from kb.inputs to populate the metrics index.
+							</div>
+						</div>
+					{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
+						<div class="empty">
+							<div class="empty-glyph">§</div>
+							<div class="empty-title">No matches</div>
+							<div class="empty-sub">
+								{#if keywordFilter && confidenceFilter}
+									No metrics match keyword "{keywordFilter}" and confidence {confidenceFilter}.
+								{:else if keywordFilter}
+									No metrics match the keyword "{keywordFilter}".
+								{:else}
+									No metrics match confidence {confidenceFilter}.
 								{/if}
-								<div class="card-foot">
-									<span class="chip">
-										<span class="chip-dot"></span>
-										{spanCount(m)} span{spanCount(m) === 1 ? '' : 's'}
-									</span>
-									{#if m.metric_unit}<span class="chip chip-mono">{m.metric_unit}</span>{/if}
-									{#if m.location_type}<span class="chip chip-quiet">{m.location_type}</span>{/if}
-								</div>
 							</div>
-						</button>
-					{/each}
-				{/if}
-			</div>
-		</aside>
+						</div>
+					{:else if metricSearchActive && searchHasRun}
+						{#each searchResults as result, idx (result.id)}
+							<button
+								type="button"
+								class="metric-card"
+								class:selected={selectedMetricId === result.id}
+								onclick={() => handleMetricSearchResultClick(result)}
+							>
+								<div class="card-rule" aria-hidden="true"></div>
+								<div class="card-body">
+									<div class="card-row-top">
+										<div class="card-index">⌕ {String(idx + 1).padStart(3, '0')}</div>
+										<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
+									</div>
+									<div class="card-name">{result.primary_label}</div>
+									<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
+									<div class="card-foot">
+										<span class="chip">
+											<span class="chip-dot"></span>
+											record {result.input_record_id}
+										</span>
+										{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
+											<span class="chip chip-quiet">{chip}</span>
+										{/each}
+									</div>
+								</div>
+							</button>
+						{/each}
+					{:else}
+						{#each filteredMetrics as m, idx (m.id)}
+							<button
+								type="button"
+								class="metric-card"
+								class:selected={selectedMetricId === m.id}
+								onclick={(event) => onMetricCardClick(event, m)}
+							>
+								<div class="card-rule" aria-hidden="true"></div>
+								<div class="card-body">
+									<div class="card-row-top">
+										<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
+										<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
+									</div>
+									<div class="card-name">{metricNameOf(m)}</div>
+									{#if m.metric_desc}
+										<div class="card-desc">{m.metric_desc}</div>
+									{/if}
+									<div class="card-foot">
+										<span class="chip">
+											<span class="chip-dot"></span>
+											{spanCount(m)} span{spanCount(m) === 1 ? '' : 's'}
+										</span>
+										{#if m.metric_unit}<span class="chip chip-mono">{m.metric_unit}</span>{/if}
+										{#if m.location_type}<span class="chip chip-quiet">{m.location_type}</span>{/if}
+									</div>
+								</div>
+							</button>
+						{/each}
+					{/if}
+				</div>
+			</aside>
 		{/if}
 
 		<!-- ============ RIGHT PANEL ============ -->
@@ -1444,8 +1621,8 @@ let selectedMetric = $derived.by(() => {
 										class="toolbar-kw-clear"
 										onclick={() => (keywordFilter = '')}
 										title="Clear keyword filter"
-										aria-label="Clear keyword filter"
-									>×</button>
+										aria-label="Clear keyword filter">×</button
+									>
 								{/if}
 							</div>
 							<div class="toolbar-kw-wrap">
@@ -1471,8 +1648,8 @@ let selectedMetric = $derived.by(() => {
 										class="toolbar-kw-clear"
 										onclick={() => (confidenceFilter = '')}
 										title="Clear confidence filter"
-										aria-label="Clear confidence filter"
-									>×</button>
+										aria-label="Clear confidence filter">×</button
+									>
 								{/if}
 							</div>
 						</div>
@@ -1482,8 +1659,8 @@ let selectedMetric = $derived.by(() => {
 								class="toolbar-nav-btn"
 								disabled={!prevMetric}
 								onclick={goToPrevMetric}
-								title="Previous metric"
-							><ChevronLeftIcon class="toolbar-icon" /></button>
+								title="Previous metric"><ChevronLeftIcon class="toolbar-icon" /></button
+							>
 							<span class="toolbar-nav-pos">
 								{selectedMetricInFilteredIndex >= 0
 									? `${selectedMetricInFilteredIndex + 1} / ${filteredMetrics.length}`
@@ -1494,156 +1671,78 @@ let selectedMetric = $derived.by(() => {
 								class="toolbar-nav-btn"
 								disabled={!nextMetric}
 								onclick={goToNextMetric}
-								title="Next metric"
-							><ChevronRightIcon class="toolbar-icon" /></button>
+								title="Next metric"><ChevronRightIcon class="toolbar-icon" /></button
+							>
 						</div>
 					</div>
 					<div class="metric-canvas" bind:clientWidth={canvasW} bind:clientHeight={canvasH}>
-					{#if metricsMap}
-						{@const map = metricsMap}
-						<svg class="canvas-wires" width={map.W} height={map.H} viewBox="0 0 {map.W} {map.H}" aria-hidden="true">
-							{#each map.groups as g (g.key)}
-								<line class="wire spoke" class:active={activeGroupKey === g.key || hoveredCanvasAttr?.startsWith(g.key)} class:is-empty={!g.hasValue} x1={g.wire.x1} y1={g.wire.y1} x2={g.wire.x2} y2={g.wire.y2} />
-								{#each g.satellites as s (s.key)}
-									<line class="wire" class:active={hoveredCanvasAttr === s.key} class:is-empty={!s.hasValue} x1={s.wire.x1} y1={s.wire.y1} x2={s.wire.x2} y2={s.wire.y2} />
-								{/each}
-							{/each}
-						</svg>
-
-						<button
-							type="button"
-							class="canvas-node main-node metric-node"
-							class:active={activeGroupKey === ALL_METRIC_KEY}
-							style="left:{map.cx - map.Rc}px; top:{map.cy - map.Rc}px; width:{map.Rc*2}px; height:{map.Rc*2}px;"
-							title="Click to inspect every attribute"
-							onclick={() => (activeGroupKey = activeGroupKey === ALL_METRIC_KEY ? null : ALL_METRIC_KEY)}
-						>
-							<span class="main-node-label">{map.metricLabel}</span>
-							{#if map.metricSubLabel}<span class="main-node-sublabel">{map.metricSubLabel}</span>{/if}
-						</button>
-						<div class="main-node-cap" style="left:{map.cx}px; top:{map.cy + map.Rc + 10}px;">METRIC</div>
-
-						{#each map.groups as g (g.key)}
-							{@const GIcon = g.icon}
-							<button
-								type="button"
-								class="canvas-node group-node-circle"
-								class:active={activeGroupKey === g.key}
-								class:is-empty={!g.hasValue}
-								style="left:{g.x - map.Rgn}px; top:{g.y - map.Rgn}px; width:{map.Rgn*2}px; height:{map.Rgn*2}px;"
-								title="Click to inspect {g.label} ({g.filledCount}/{g.count})"
-								onclick={() => (activeGroupKey = activeGroupKey === g.key ? null : g.key)}
-							>
-								<GIcon class="group-ic" />
-								<span class="group-node-label">{g.label}</span>
-							</button>
-							{#each g.satellites as s (s.key)}
-								{@const SIcon = s.icon}
-								<button
-									type="button"
-									class="canvas-node sat-node"
-									class:active={hoveredCanvasAttr === s.key}
-									class:is-empty={!s.hasValue}
-									style="left:{s.x - map.Rsn}px; top:{s.y - map.Rsn}px; width:{map.Rsn*2}px; height:{map.Rsn*2}px;"
-									title="{s.label}{s.hasValue ? ' (' + s.count + ')' : ' (empty)'}"
-									onmouseenter={() => (hoveredCanvasAttr = s.key)}
-									onmouseleave={() => (hoveredCanvasAttr = null)}
-									onclick={() => (activeGroupKey = g.key)}
-								>
-									<SIcon class="sat-icon" />
-									{#if s.count > 1}<span class="sat-badge">{s.count}</span>{/if}
-								</button>
-								<div
-									class="sat-label"
-									class:active={hoveredCanvasAttr === s.key}
-									class:is-empty={!s.hasValue}
-									style="left:{s.x}px; top:{s.y + map.Rsn + 5}px;"
-								>{s.label}</div>
-							{/each}
-						{/each}
-
-						<aside class="canvas-legend">
-							<div class="legend-h">MAP LEGEND</div>
-							<div class="legend-row"><span class="lg lg-main"></span><span>Metric</span></div>
-							<div class="legend-row"><span class="lg lg-group"></span><span>Functional group</span></div>
-							<div class="legend-row"><span class="lg lg-attr"></span><span>Attribute</span></div>
-							<div class="legend-hint">Click a group to inspect its attribute values</div>
-						</aside>
-
-						{#if activeGroup || showAllMetricAttrs}
-							{@const sections = showAllMetricAttrs ? map.groups : (activeGroup ? [activeGroup] : [])}
-							{@const headIcon = activeGroup ? activeGroup.icon : null}
-							{@const headLabel = activeGroup ? activeGroup.label : 'All Attributes'}
-							{@const headCount = activeGroup ? `${activeGroup.filledCount}/${activeGroup.count}` : `${totalAttrCount.filled}/${totalAttrCount.total}`}
-							<aside class="group-info-panel" style:width={gipWidth != null ? `${gipWidth}px` : undefined} aria-label="{headLabel} attributes" role="region">
-								<header class="gip-head">
-									{#if headIcon}
-										{@const HI = headIcon}
-										<span class="gip-ic"><HI class="h-4 w-4" /></span>
+						{#if metricsMap}
+							{@const map = metricsMap}
+							<div class="attr-view">
+								<div class="attr-view-header">
+									<div class="attr-view-name">{map.metricLabel}</div>
+									{#if map.metricSubLabel}
+										<div class="attr-view-subname">{map.metricSubLabel}</div>
 									{/if}
-									<span class="gip-title">{headLabel}</span>
-									<span class="gip-count mono">{headCount}</span>
-									<button type="button" class="gip-close" title="Close" aria-label="Close info panel" onclick={() => (activeGroupKey = null)}>
-										<XIcon class="h-4 w-4" />
-									</button>
-								</header>
-								<div class="gip-body">
-									{#each sections as section (section.key)}
-										{#if showAllMetricAttrs}
-											<div class="gip-section-head">
-												<span class="gip-section-label">{section.label}</span>
-												<span class="gip-section-count mono">{section.filledCount}/{section.count}</span>
-											</div>
-										{/if}
-										{#each section.attrs as a (a.key)}
-											<div class="gip-row" class:gip-row-col={a.kind !== 'text'} class:gip-row-empty={!a.hasValue}>
-												<span class="gip-label">{a.label}</span>
-												{#if !a.hasValue}
-													<span class="gip-empty">—</span>
-												{:else if a.kind === 'text'}
-													<span class="gip-val">{a.value}</span>
-												{:else if a.kind === 'chips'}
-													<div class="gip-chips">
-														{#each a.items as item, i (`${a.key}-${i}`)}<span class="gip-chip">{item}</span>{/each}
-													</div>
-												{:else}
-													<div class="gip-line-cards">
-														{#each a.entries as entry, i (`${a.key}-${i}`)}
-															<div class="gip-line-card">
-																<div class="gip-line-head">
-																	<span class="gip-line-loc">{entry.head}</span>
-																	{#if entry.lineType}
-																		<span class="gip-line-type">{entry.lineType}</span>
+								</div>
+								{#each map.groups as g (g.key)}
+									{@const GIcon = g.icon}
+									<section class="attr-group" class:attr-group-empty={!g.hasValue}>
+										<div class="attr-group-head">
+											<span class="attr-group-ic"><GIcon class="h-4 w-4" /></span>
+											<span class="attr-group-label">{g.label}</span>
+											<span class="attr-group-count">{g.filledCount}/{g.count}</span>
+										</div>
+										<div class="attr-group-body">
+											{#each g.attrs as a (a.key)}
+												<div
+													class="gip-row"
+													class:gip-row-col={a.kind !== 'text'}
+													class:gip-row-empty={!a.hasValue}
+												>
+													<span class="gip-label">{a.label}</span>
+													{#if !a.hasValue}
+														<span class="gip-empty">—</span>
+													{:else if a.kind === 'text'}
+														<span class="gip-val">{a.value}</span>
+													{:else if a.kind === 'chips'}
+														<div class="gip-chips">
+															{#each a.items as item, i (`${a.key}-${i}`)}<span class="gip-chip"
+																	>{item}</span
+																>{/each}
+														</div>
+													{:else}
+														<div class="gip-line-cards">
+															{#each a.entries as entry, i (`${a.key}-${i}`)}
+																<div class="gip-line-card">
+																	<div class="gip-line-head">
+																		<span class="gip-line-loc">{entry.head}</span>
+																		{#if entry.lineType}
+																			<span class="gip-line-type">{entry.lineType}</span>
+																		{/if}
+																	</div>
+																	{#if entry.content}
+																		<div class="gip-line-body">{entry.content}</div>
 																	{/if}
 																</div>
-																{#if entry.content}
-																	<div class="gip-line-body">{entry.content}</div>
-																{/if}
-															</div>
-														{/each}
-													</div>
-												{/if}
-											</div>
-										{/each}
-									{/each}
+															{/each}
+														</div>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									</section>
+								{/each}
+							</div>
+						{:else}
+							<div class="canvas-empty">
+								<div class="canvas-empty-mark">◎</div>
+								<div class="canvas-empty-title">Select a metric</div>
+								<div class="canvas-empty-sub">
+									Click a metric from the list to view its attribute map.
 								</div>
-								<button
-									type="button"
-									class="gip-resize-handle"
-									class:active={gipResizing}
-									aria-label="Resize attribute info panel"
-									onpointerdown={startGipResize}
-									onkeydown={onGipResizerKeydown}
-								><span class="gip-resize-grip" aria-hidden="true"></span></button>
-							</aside>
+							</div>
 						{/if}
-					{:else}
-						<div class="canvas-empty">
-							<div class="canvas-empty-mark">◎</div>
-							<div class="canvas-empty-title">Select a metric</div>
-							<div class="canvas-empty-sub">Click a metric from the list to view its attribute map.</div>
-						</div>
-					{/if}
 					</div>
 				</div>
 				<button
@@ -1657,7 +1756,10 @@ let selectedMetric = $derived.by(() => {
 					<span class="focus-resize-grip" aria-hidden="true"></span>
 				</button>
 			{/if}
-			<div class="doc-frame-wrap" style:flex-basis={recordBrowserFolded ? `${focusPdfWidth}px` : null}>
+			<div
+				class="doc-frame-wrap"
+				style:flex-basis={recordBrowserFolded ? `${focusPdfWidth}px` : null}
+			>
 				{#if !currentInput}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
@@ -1918,214 +2020,257 @@ let selectedMetric = $derived.by(() => {
 </div>
 
 {#if addMetricOpen}
+	<div
+		class="dialog-overlay"
+		aria-hidden="true"
+		onclick={closeAddMetricDialog}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') closeAddMetricDialog();
+		}}
+	>
 		<div
-			class="dialog-overlay"
-			aria-hidden="true"
-			onclick={closeAddMetricDialog}
-			onkeydown={(e) => {
-				if (e.key === 'Escape') closeAddMetricDialog();
-			}}
+			class="dialog am-dialog"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Add metric"
+			tabindex="0"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
 		>
-			<div
-				class="dialog am-dialog"
-				role="dialog"
-				aria-modal="true"
-				aria-label="Add metric"
-				tabindex="0"
-				onclick={(e) => e.stopPropagation()}
-				onkeydown={(e) => e.stopPropagation()}
-			>
-				<div class="dialog-head">
-					<div>
-						<div class="dialog-eyebrow">KB.Metrics</div>
-						<h2 class="dialog-title">Add Metric</h2>
-						<p class="dialog-subtitle">Review selected lines, extract candidate metrics, remove any you do not want, then save the remaining metrics to the database.</p>
+			<div class="dialog-head">
+				<div>
+					<div class="dialog-eyebrow">KB.Metrics</div>
+					<h2 class="dialog-title">Add Metric</h2>
+					<p class="dialog-subtitle">
+						Review selected lines, extract candidate metrics, remove any you do not want, then save
+						the remaining metrics to the database.
+					</p>
+				</div>
+			</div>
+
+			<div class="dialog-controls am-body">
+				{#if addMetricDialogLines.length === 0}
+					<div class="dialog-section am-empty-section">
+						<div class="empty-glyph">§</div>
+						<div class="empty-title">No lines selected</div>
+						<div class="empty-sub">
+							Drag to select lines on the PDF, then open this dialog again.
+						</div>
 					</div>
-				</div>
-
-				<div class="dialog-controls am-body">
-					{#if addMetricDialogLines.length === 0}
-						<div class="dialog-section am-empty-section">
-							<div class="empty-glyph">§</div>
-							<div class="empty-title">No lines selected</div>
-							<div class="empty-sub">Drag to select lines on the PDF, then open this dialog again.</div>
+				{:else}
+					<div class="dialog-section">
+						<div class="dialog-section-head">
+							<span class="dialog-section-title">Selected Lines</span>
+							<span class="dialog-section-copy"
+								>{addMetricDialogLines.length} line{addMetricDialogLines.length === 1 ? '' : 's'} selected</span
+							>
+							<button
+								type="button"
+								class="am-btn am-btn-head-add"
+								disabled={!canAddPrevious}
+								onclick={addPreviousLine}>+ Add</button
+							>
 						</div>
-					{:else}
-						<div class="dialog-section">
-							<div class="dialog-section-head">
-								<span class="dialog-section-title">Selected Lines</span>
-								<span class="dialog-section-copy">{addMetricDialogLines.length} line{addMetricDialogLines.length === 1 ? '' : 's'} selected</span>
-								<button type="button" class="am-btn am-btn-head-add" disabled={!canAddPrevious} onclick={addPreviousLine}>+ Add</button>
-							</div>
-							<div class="am-table-wrap">
-								<table class="am-table">
-									<thead>
-										<tr>
-											<th class="am-col-line">Line #</th>
-											<th class="am-col-page">Page</th>
-											<th class="am-col-type">Type</th>
-											<th class="am-col-content">Content</th>
-											<th class="am-col-actions"></th>
+						<div class="am-table-wrap">
+							<table class="am-table">
+								<thead>
+									<tr>
+										<th class="am-col-line">Line #</th>
+										<th class="am-col-page">Page</th>
+										<th class="am-col-type">Type</th>
+										<th class="am-col-content">Content</th>
+										<th class="am-col-actions"></th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each addMetricDialogLines as line (line.key)}
+										<tr class="am-row">
+											<td class="am-mono">{line.line_number}</td>
+											<td class="am-mono">{line.page_number}</td>
+											<td><span class="am-type-badge">{line.line_type}</span></td>
+											<td class="am-content-cell">
+												{#if addMetricEditKey === line.key}
+													<input
+														class="am-edit-input"
+														type="text"
+														bind:value={addMetricEditContent}
+														onkeydown={(e) => {
+															if (e.key === 'Escape') cancelEditDialogLine();
+															if (e.key === 'Enter')
+																saveEditDialogLine(line.page_number, line.line_number);
+														}}
+													/>
+												{:else}
+													<span class="am-content-text">{line.content}</span>
+												{/if}
+											</td>
+											<td class="am-action-cell">
+												{#if addMetricEditKey === line.key}
+													<button
+														type="button"
+														class="am-btn am-btn-save"
+														disabled={addMetricBusy}
+														onclick={() => saveEditDialogLine(line.page_number, line.line_number)}
+														>Save</button
+													>
+													<button
+														type="button"
+														class="am-btn am-btn-cancel-row"
+														onclick={cancelEditDialogLine}>Cancel</button
+													>
+												{:else}
+													<button
+														type="button"
+														class="am-btn am-btn-edit"
+														onclick={() => startEditDialogLine(line.key, line.content)}>Edit</button
+													>
+													<button
+														type="button"
+														class="am-btn am-btn-delete"
+														onclick={() => deleteDialogLine(line.key)}>Remove</button
+													>
+												{/if}
+											</td>
 										</tr>
-									</thead>
-									<tbody>
-										{#each addMetricDialogLines as line (line.key)}
-											<tr class="am-row">
-												<td class="am-mono">{line.line_number}</td>
-												<td class="am-mono">{line.page_number}</td>
-												<td><span class="am-type-badge">{line.line_type}</span></td>
-												<td class="am-content-cell">
-													{#if addMetricEditKey === line.key}
-														<input
-															class="am-edit-input"
-															type="text"
-															bind:value={addMetricEditContent}
-															onkeydown={(e) => {
-																if (e.key === 'Escape') cancelEditDialogLine();
-																if (e.key === 'Enter') saveEditDialogLine(line.page_number, line.line_number);
-															}}
-														/>
-													{:else}
-														<span class="am-content-text">{line.content}</span>
-													{/if}
-												</td>
-												<td class="am-action-cell">
-													{#if addMetricEditKey === line.key}
-														<button type="button" class="am-btn am-btn-save"
-															disabled={addMetricBusy}
-															onclick={() => saveEditDialogLine(line.page_number, line.line_number)}
-														>Save</button>
-														<button type="button" class="am-btn am-btn-cancel-row"
-															onclick={cancelEditDialogLine}
-														>Cancel</button>
-													{:else}
-														<button type="button" class="am-btn am-btn-edit"
-															onclick={() => startEditDialogLine(line.key, line.content)}
-														>Edit</button>
-														<button type="button" class="am-btn am-btn-delete"
-															onclick={() => deleteDialogLine(line.key)}
-														>Remove</button>
-													{/if}
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-								<div class="am-table-foot">
-									<button type="button" class="am-btn am-btn-foot-add" disabled={!canAddNext} onclick={addNextLine}>+ Add</button>
-								</div>
-							</div>
-						</div>
-
-						<div class="dialog-section">
-							<div class="dialog-section-head">
-								<span class="dialog-section-title">Extracted Metrics</span>
-								<span class="dialog-section-copy">{extractedMetricsPreview.length} metric{extractedMetricsPreview.length === 1 ? '' : 's'} ready</span>
-							</div>
-							{#if addMetricBusyAction === 'extract'}
-								<div class="am-status-row" aria-live="polite">
-									<span class="am-spinner" aria-hidden="true"></span>
-									<span>Extracting metrics from the selected lines…</span>
-								</div>
-							{:else if extractedMetricsPreview.length === 0}
-								<div class="metadata-empty">
-									Press <strong>Extract Metric</strong> to preview the metrics returned by the backend.
-								</div>
-							{:else}
-								<div class="am-preview-list">
-									{#each extractedMetricsPreview as metric, idx (`${previewMetricNameOf(metric, idx)}-${idx}`)}
-										<div class="am-preview-card">
-											<div class="am-preview-head">
-												<div>
-													<div class="am-preview-name">{previewMetricNameOf(metric, idx)}</div>
-													<div class="am-preview-meta">
-														<span>{confidencePct(metric.confidence)}</span>
-														{#if metric.location_type}<span>{metric.location_type}</span>{/if}
-														{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
-													</div>
-												</div>
-												<button
-													type="button"
-													class="am-btn am-btn-delete"
-													disabled={addMetricBusy}
-													onclick={() => removeExtractedMetricPreview(idx)}
-												>Remove</button>
-											</div>
-											{#if metric.metric_desc}
-												<div class="am-preview-desc">{metric.metric_desc}</div>
-											{/if}
-											<div class="am-preview-fields">
-												{#if metric.metric_value}<span class="chip chip-mono">{metric.metric_value}</span>{/if}
-												{#if metric.value_data_type}<span class="chip chip-quiet">{metric.value_data_type}</span>{/if}
-												{#if metric.table_name_or_section}<span class="chip">{metric.table_name_or_section}</span>{/if}
-											</div>
-										</div>
 									{/each}
-								</div>
-							{/if}
+								</tbody>
+							</table>
+							<div class="am-table-foot">
+								<button
+									type="button"
+									class="am-btn am-btn-foot-add"
+									disabled={!canAddNext}
+									onclick={addNextLine}>+ Add</button
+								>
+							</div>
 						</div>
-					{/if}
-				</div>
+					</div>
 
-				<div class="dialog-foot">
-					<div class="dialog-foot-hint">
-						<button
-							type="button"
-							class="am-btn-foot am-btn-help"
-							onclick={() => {
-								alert(
-									'Select PDF lines to extract a metric or provision.\n\n' +
+					<div class="dialog-section">
+						<div class="dialog-section-head">
+							<span class="dialog-section-title">Extracted Metrics</span>
+							<span class="dialog-section-copy"
+								>{extractedMetricsPreview.length} metric{extractedMetricsPreview.length === 1
+									? ''
+									: 's'} ready</span
+							>
+						</div>
+						{#if addMetricBusyAction === 'extract'}
+							<div class="am-status-row" aria-live="polite">
+								<span class="am-spinner" aria-hidden="true"></span>
+								<span>Extracting metrics from the selected lines…</span>
+							</div>
+						{:else if extractedMetricsPreview.length === 0}
+							<div class="metadata-empty">
+								Press <strong>Extract Metric</strong> to preview the metrics returned by the backend.
+							</div>
+						{:else}
+							<div class="am-preview-list">
+								{#each extractedMetricsPreview as metric, idx (`${previewMetricNameOf(metric, idx)}-${idx}`)}
+									<div class="am-preview-card">
+										<div class="am-preview-head">
+											<div>
+												<div class="am-preview-name">{previewMetricNameOf(metric, idx)}</div>
+												<div class="am-preview-meta">
+													<span>{confidencePct(metric.confidence)}</span>
+													{#if metric.location_type}<span>{metric.location_type}</span>{/if}
+													{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
+												</div>
+											</div>
+											<button
+												type="button"
+												class="am-btn am-btn-delete"
+												disabled={addMetricBusy}
+												onclick={() => removeExtractedMetricPreview(idx)}>Remove</button
+											>
+										</div>
+										{#if metric.metric_desc}
+											<div class="am-preview-desc">{metric.metric_desc}</div>
+										{/if}
+										<div class="am-preview-fields">
+											{#if metric.metric_value}<span class="chip chip-mono"
+													>{metric.metric_value}</span
+												>{/if}
+											{#if metric.value_data_type}<span class="chip chip-quiet"
+													>{metric.value_data_type}</span
+												>{/if}
+											{#if metric.table_name_or_section}<span class="chip"
+													>{metric.table_name_or_section}</span
+												>{/if}
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<div class="dialog-foot">
+				<div class="dialog-foot-hint">
+					<button
+						type="button"
+						class="am-btn-foot am-btn-help"
+						onclick={() => {
+							alert(
+								'Select PDF lines to extract a metric or provision.\n\n' +
 									'• Drag on the PDF to select lines\n' +
 									'• Edit: modify line content (saves to the original file)\n' +
 									'• Remove: remove a line from this selection\n' +
 									'• Extract Provision: create a new provision from the remaining lines\n' +
 									'• Extract Metric: preview metrics returned from the backend\n' +
 									'• Save: persist the remaining preview metrics to kb.metrics'
-								);
-							}}
-						>Help</button>
-					</div>
-					<div class="dialog-foot-buttons">
-						<button
-							type="button"
-							class="am-btn-foot am-btn-foot-cancel"
-							onclick={closeAddMetricDialog}
-						>Close</button>
-						<button
-							type="button"
-							class="am-btn-foot am-btn-foot-extract dialog-search-btn"
-							disabled={addMetricDialogLines.length === 0 || addMetricBusy}
-							onclick={extractProvision}
-						>{addMetricBusyAction === 'provision' ? 'Saving…' : 'Extract Provision'}</button>
-						<button
-							type="button"
-							class="am-btn-foot am-btn-foot-extract dialog-search-btn"
-							disabled={addMetricDialogLines.length === 0 || addMetricBusy}
-							onclick={extractMetric}
-						>
-							{#if addMetricBusyAction === 'extract'}
-								<span class="am-btn-inline"><span class="am-spinner" aria-hidden="true"></span>Extracting…</span>
-							{:else}
-								Extract Metric
-							{/if}
-						</button>
-						<button
-							type="button"
-							class="am-btn-foot am-btn-foot-save dialog-search-btn"
-							disabled={extractedMetricsPreview.length === 0 || addMetricBusy}
-							onclick={saveExtractedMetricsPreview}
-						>
-							{#if addMetricBusyAction === 'save'}
-								<span class="am-btn-inline"><span class="am-spinner" aria-hidden="true"></span>Saving…</span>
-							{:else}
-								Save
-							{/if}
-						</button>
-					</div>
+							);
+						}}>Help</button
+					>
+				</div>
+				<div class="dialog-foot-buttons">
+					<button
+						type="button"
+						class="am-btn-foot am-btn-foot-cancel"
+						onclick={closeAddMetricDialog}>Close</button
+					>
+					<button
+						type="button"
+						class="am-btn-foot am-btn-foot-extract dialog-search-btn"
+						disabled={addMetricDialogLines.length === 0 || addMetricBusy}
+						onclick={extractProvision}
+						>{addMetricBusyAction === 'provision' ? 'Saving…' : 'Extract Provision'}</button
+					>
+					<button
+						type="button"
+						class="am-btn-foot am-btn-foot-extract dialog-search-btn"
+						disabled={addMetricDialogLines.length === 0 || addMetricBusy}
+						onclick={extractMetric}
+					>
+						{#if addMetricBusyAction === 'extract'}
+							<span class="am-btn-inline"
+								><span class="am-spinner" aria-hidden="true"></span>Extracting…</span
+							>
+						{:else}
+							Extract Metric
+						{/if}
+					</button>
+					<button
+						type="button"
+						class="am-btn-foot am-btn-foot-save dialog-search-btn"
+						disabled={extractedMetricsPreview.length === 0 || addMetricBusy}
+						onclick={saveExtractedMetricsPreview}
+					>
+						{#if addMetricBusyAction === 'save'}
+							<span class="am-btn-inline"
+								><span class="am-spinner" aria-hidden="true"></span>Saving…</span
+							>
+						{:else}
+							Save
+						{/if}
+					</button>
 				</div>
 			</div>
 		</div>
-	{/if}
+	</div>
+{/if}
+
 <style>
 	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
 
@@ -2920,7 +3065,9 @@ let selectedMetric = $derived.by(() => {
 		background: rgba(93, 175, 168, 0.1);
 		border: 1px solid rgba(93, 175, 168, 0.28);
 		color: var(--teal);
-		transition: background 120ms, border-color 120ms;
+		transition:
+			background 120ms,
+			border-color 120ms;
 		margin-left: auto;
 	}
 	.am-btn-head-add:hover:not(:disabled) {
@@ -2951,7 +3098,9 @@ let selectedMetric = $derived.by(() => {
 		background: rgba(93, 175, 168, 0.1);
 		border: 1px solid rgba(93, 175, 168, 0.28);
 		color: var(--teal);
-		transition: background 120ms, border-color 120ms;
+		transition:
+			background 120ms,
+			border-color 120ms;
 	}
 	.am-btn-foot-add:hover:not(:disabled) {
 		background: rgba(93, 175, 168, 0.2);
@@ -3503,7 +3652,9 @@ let selectedMetric = $derived.by(() => {
 		letter-spacing: 0.06em;
 		color: var(--text-secondary);
 		background: var(--panel-bg);
-		transition: border-color 120ms, color 120ms;
+		transition:
+			border-color 120ms,
+			color 120ms;
 	}
 	.toolbar-back:hover {
 		border-color: var(--brass);
@@ -3589,7 +3740,10 @@ let selectedMetric = $derived.by(() => {
 		border: 1px solid var(--ink-line);
 		color: var(--text-secondary);
 		background: var(--panel-bg);
-		transition: border-color 120ms, color 120ms, opacity 120ms;
+		transition:
+			border-color 120ms,
+			color 120ms,
+			opacity 120ms;
 	}
 	.toolbar-nav-btn:disabled {
 		opacity: 0.35;
@@ -3611,11 +3765,19 @@ let selectedMetric = $derived.by(() => {
 		flex: 1 1 0;
 		min-width: 0;
 		min-height: 0;
-		position: relative;
-		overflow: hidden;
-		background: radial-gradient(ellipse at 30% 50%, rgba(212,162,76,0.06), transparent 55%),
-					radial-gradient(ellipse at 70% 50%, rgba(200,85,61,0.05), transparent 55%),
-					var(--page-bg);
+		overflow-y: auto;
+		overflow-x: hidden;
+		background:
+			radial-gradient(ellipse at 30% 50%, rgba(212, 162, 76, 0.06), transparent 55%),
+			radial-gradient(ellipse at 70% 50%, rgba(200, 85, 61, 0.05), transparent 55%), var(--page-bg);
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-line) transparent;
+	}
+	.metric-canvas::-webkit-scrollbar {
+		width: 8px;
+	}
+	.metric-canvas::-webkit-scrollbar-thumb {
+		background: var(--ink-line);
 	}
 	.right.focus-split .doc-frame-wrap {
 		flex: 0 0 480px;
@@ -3641,7 +3803,9 @@ let selectedMetric = $derived.by(() => {
 		width: 2px;
 		background: var(--ink-line);
 		opacity: 0.6;
-		transition: background 140ms, opacity 140ms;
+		transition:
+			background 140ms,
+			opacity 140ms;
 	}
 	.focus-resize-handle:hover::before,
 	.focus-resize-handle.active::before,
@@ -3679,7 +3843,9 @@ let selectedMetric = $derived.by(() => {
 		stroke-width: 1.5;
 		fill: none;
 		opacity: 0.7;
-		transition: stroke 160ms, opacity 160ms;
+		transition:
+			stroke 160ms,
+			opacity 160ms;
 	}
 	.wire.spoke {
 		stroke: var(--brass);
@@ -3728,13 +3894,15 @@ let selectedMetric = $derived.by(() => {
 		padding: 8px;
 		cursor: pointer;
 		z-index: 2;
-		box-shadow: 0 0 24px rgba(200,85,61,0.14);
-		transition: box-shadow 140ms, border-color 140ms;
+		box-shadow: 0 0 24px rgba(200, 85, 61, 0.14);
+		transition:
+			box-shadow 140ms,
+			border-color 140ms;
 	}
 	.metric-node:hover,
 	.metric-node.active {
 		border-color: var(--brass);
-		box-shadow: 0 0 28px rgba(212,162,76,0.30);
+		box-shadow: 0 0 28px rgba(212, 162, 76, 0.3);
 	}
 	.group-node-circle {
 		all: unset;
@@ -3750,7 +3918,11 @@ let selectedMetric = $derived.by(() => {
 		border: 2px solid var(--ink-line);
 		color: var(--text-secondary);
 		padding: 6px;
-		transition: background 140ms, border-color 140ms, color 140ms, box-shadow 140ms;
+		transition:
+			background 140ms,
+			border-color 140ms,
+			color 140ms,
+			box-shadow 140ms;
 		z-index: 2;
 	}
 	.group-node-circle:hover,
@@ -3758,7 +3930,7 @@ let selectedMetric = $derived.by(() => {
 		background: var(--brass-faint);
 		border-color: var(--brass);
 		color: var(--brass);
-		box-shadow: 0 0 18px rgba(212,162,76,0.18);
+		box-shadow: 0 0 18px rgba(212, 162, 76, 0.18);
 	}
 	.group-node-circle.is-empty {
 		opacity: 0.45;
@@ -3793,7 +3965,7 @@ let selectedMetric = $derived.by(() => {
 		overflow: hidden;
 		display: -webkit-box;
 		-webkit-line-clamp: 3;
-			line-clamp: 3;
+		line-clamp: 3;
 		-webkit-box-orient: vertical;
 	}
 	.main-node-sublabel {
@@ -3828,7 +4000,10 @@ let selectedMetric = $derived.by(() => {
 		background: var(--panel-bg-alt);
 		border: 1.5px solid var(--ink-line);
 		color: var(--text-secondary);
-		transition: background 140ms, border-color 140ms, color 140ms;
+		transition:
+			background 140ms,
+			border-color 140ms,
+			color 140ms;
 		z-index: 3;
 	}
 	.sat-node:hover,
@@ -3914,9 +4089,18 @@ let selectedMetric = $derived.by(() => {
 		flex-shrink: 0;
 		border: 1.5px solid;
 	}
-	.lg-main { border-color: var(--crimson); background: var(--panel-bg); }
-	.lg-group { border-color: var(--brass); background: var(--panel-bg-alt); }
-	.lg-attr { border-color: var(--ink-line); background: var(--panel-bg-alt); }
+	.lg-main {
+		border-color: var(--crimson);
+		background: var(--panel-bg);
+	}
+	.lg-group {
+		border-color: var(--brass);
+		background: var(--panel-bg-alt);
+	}
+	.lg-attr {
+		border-color: var(--ink-line);
+		background: var(--panel-bg-alt);
+	}
 
 	/* ---- Group info panel (shown when a group node is clicked) ---- */
 	.group-info-panel {
@@ -3930,7 +4114,7 @@ let selectedMetric = $derived.by(() => {
 		background: var(--panel-bg);
 		border: 1px solid var(--ink-line);
 		border-radius: 6px;
-		box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+		box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 		z-index: 12;
 		overflow: hidden;
 	}
@@ -3974,11 +4158,13 @@ let selectedMetric = $derived.by(() => {
 		border-radius: 4px;
 		color: var(--text-muted);
 		cursor: pointer;
-		transition: color 140ms, background 140ms;
+		transition:
+			color 140ms,
+			background 140ms;
 	}
 	.gip-close:hover {
 		color: var(--text-primary);
-		background: var(--ink-line-soft, rgba(148,163,184,0.16));
+		background: var(--ink-line-soft, rgba(148, 163, 184, 0.16));
 	}
 	.gip-body {
 		flex: 1 1 auto;
@@ -4079,7 +4265,7 @@ let selectedMetric = $derived.by(() => {
 		border: 1px solid var(--ink-line);
 		border-radius: 6px;
 		background: var(--panel-bg-alt);
-		box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
 	}
 	.gip-line-head {
 		display: flex;
@@ -4144,21 +4330,80 @@ let selectedMetric = $derived.by(() => {
 	.gip-resize-handle.active .gip-resize-grip {
 		opacity: 1;
 	}
-	.legend-hint {
-		font-size: 9px;
-		color: var(--text-muted);
-		margin-top: 6px;
-		opacity: 0.7;
-		max-width: 120px;
-		line-height: 1.4;
+	/* ---- Attribute text view ---- */
+	.attr-view {
+		padding: 16px 20px 40px;
+		display: flex;
+		flex-direction: column;
 	}
+	.attr-view-header {
+		padding-bottom: 16px;
+		border-bottom: 1px solid var(--ink-line);
+		margin-bottom: 4px;
+	}
+	.attr-view-name {
+		font-family: var(--font-serif);
+		font-size: 22px;
+		font-weight: 500;
+		line-height: 1.25;
+		color: var(--text-primary);
+	}
+	.attr-view-subname {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-muted);
+		margin-top: 4px;
+		letter-spacing: 0.04em;
+	}
+	.attr-group {
+		background: color-mix(in srgb, var(--panel-bg-alt) 95%, white);
+		border: 1px solid var(--ink-line-soft);
+		border-radius: 10px;
+		padding: 12px 14px;
+		margin-top: 10px;
+	}
+	.attr-group-empty {
+		opacity: 0.55;
+	}
+	.attr-group-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
+	}
+	.attr-group-ic {
+		display: inline-flex;
+		color: var(--brass);
+		flex-shrink: 0;
+	}
+	.attr-group-label {
+		font-family: var(--font-serif);
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--brass);
+		flex: 1;
+		letter-spacing: 0.01em;
+	}
+	.attr-group-count {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
+		letter-spacing: 0.06em;
+	}
+	.attr-group-body {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding-left: 8px;
+	}
+
 	.canvas-empty {
-		position: absolute;
-		inset: 0;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
+		min-height: 100%;
+		padding: 60px 20px;
 		color: var(--text-muted);
 		gap: 8px;
 	}

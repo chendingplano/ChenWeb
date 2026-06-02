@@ -1,6 +1,5 @@
 <script lang="ts">
-	import PanelsTopLeftIcon from '@lucide/svelte/icons/panels-top-left';
-	import Rows3Icon from '@lucide/svelte/icons/rows-3';
+	import { browser } from '$app/environment';
 	import {
 		getRecordSummaries,
 		listSummaryGraph,
@@ -10,116 +9,150 @@
 	import KbInputRecordBrowser from './kb-input-record-browser.svelte';
 	import PdfViewWindow from './pdf-view-window.svelte';
 	import {
-		buildTopicCategoryMetadataByPath,
 		buildTopicCategoryPathDisplay,
+		buildTopicCategoryMetadataByPath,
+		formatTopicCategoryConfidence,
 		type TopicCategoryPathMetadata
 	} from './topic-category-paths';
-	import {
-		createSummaryTreeState,
-		selectRecordSummaryTarget,
-		selectSummaryTreeRecord,
-		toggleSummaryTreeListMode
-	} from './summary-tree-state.js';
-	import type { SummaryRecordTarget, SummaryTreeRecord } from './summary-types';
+	import type { SummaryTreeRecord, SummaryTreeSummary } from './summary-types';
+	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
+	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import BookOpenIcon from '@lucide/svelte/icons/book-open';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import TagIcon from '@lucide/svelte/icons/tag';
+	import MapPinIcon from '@lucide/svelte/icons/map-pin';
+	import NetworkIcon from '@lucide/svelte/icons/network';
+	import HashIcon from '@lucide/svelte/icons/hash';
+	import ActivityIcon from '@lucide/svelte/icons/activity';
 
 	let {
 		darkMode = true,
-		browserInstanceKey = 'summary-tree'
-	}: { darkMode?: boolean; browserInstanceKey?: string } = $props();
+		browserInstanceKey = 'summary-tree',
+		onFocusModeChange
+	}: {
+		darkMode?: boolean;
+		browserInstanceKey?: string;
+		onFocusModeChange?: (focused: boolean) => void;
+	} = $props();
 
-	let panelBg = $derived(darkMode ? '#161c2b' : '#ffffff');
-	let panelAlt = $derived(darkMode ? '#0f172a' : '#eef2ff');
-	let border = $derived(darkMode ? '#2b3548' : '#dbe3f0');
-	let textMain = $derived(darkMode ? '#e2e8f0' : '#0f172a');
-	let textMuted = $derived(darkMode ? '#94a3b8' : '#64748b');
-	let accent = $derived(darkMode ? '#818cf8' : '#4f46e5');
+	// ---------- Aesthetic tokens (archival reading room, blue/indigo accent) ----------
+	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
+	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
+	let panelBgAlt = $derived(darkMode ? '#1C212C' : '#F0EADB');
+	let inkLine = $derived(darkMode ? '#2A3140' : '#D7CFB8');
+	let inkLineSoft = $derived(darkMode ? '#1F2530' : '#E5DEC8');
+	let textPrimary = $derived(darkMode ? '#EDE7D3' : '#1A1410');
+	let textSecondary = $derived(darkMode ? '#B5AE94' : '#5C5345');
+	let textMuted = $derived(darkMode ? '#7C7560' : '#8F8472');
+	let brass = $derived(darkMode ? '#D4A24C' : '#B8801E');
+	let brassFaint = $derived(darkMode ? 'rgba(212,162,76,0.12)' : 'rgba(184,128,30,0.10)');
+	let crimson = $derived(darkMode ? '#C8553D' : '#A23E26');
+	let crimsonFaint = $derived(darkMode ? 'rgba(200,85,61,0.18)' : 'rgba(162,62,38,0.12)');
+	let teal = $derived(darkMode ? '#5DAFA8' : '#2D7B73');
 
-	let loadError = $state('');
-	let errorDialogOpen = $state(false);
-	let summaryLoadingByRecordId = $state<Record<number, boolean>>({});
-	let recordCache = $state<Record<number, SummaryTreeRecord>>({});
-	let treeState = $state(createSummaryTreeState());
+	const fontSerif = "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
+	const fontMono = "'JetBrains Mono', 'IBM Plex Mono', monospace";
+	const fontSans = "'Inter Tight', system-ui, sans-serif";
+
+	// ---------- State ----------
+	let recordBrowserFolded = $state(false);
+	let keywordFilter = $state('');
+	let confidenceFilter = $state('');
+	let currentRecord = $state<SummaryTreeRecord | null>(null);
+	let summaries = $state<SummaryTreeSummary[]>([]);
+	let selectedSummaryId = $state<string | null>(null);
+	let summaryNameDropdownValue = $state<string>('');
+	let loading = $state(false);
+	let errorMsg = $state('');
+
 	let categoryMetadataByPath = $state<Record<string, TopicCategoryPathMetadata>>({});
 	let categoryMetadataLoaded = $state(false);
-	let truncatedCategoryPaths = $state<Record<string, boolean>>({});
+
 	let docPage = $state(1);
 	let pdfZoom = $state(0.5);
 	let pdfNumPages = $state(0);
-	let selectedRecordWidth = $state(340);
-	let isResizingRecord = $state(false);
+	let highlightSelectionVersion = $state(0);
 
-	function startRecordResize(e: PointerEvent) {
-		isResizingRecord = true;
-		const startX = e.clientX;
-		const startWidth = selectedRecordWidth;
+	// ---------- Focus-mode info/PDF split (50/50, each panel min 25% of viewport) ----------
+	const FOCUS_PDF_DEFAULT = 480;
+	const FOCUS_PDF_WIDTH_KEY = 'summary-tree:focus-pdf-width';
+	let focusPdfWidth = $state(FOCUS_PDF_DEFAULT);
+	let focusResizing = $state(false);
+
+	function focusPdfBounds() {
+		if (!browser) return { min: 280, max: 1460 };
+		const vw = window.innerWidth;
+		return { min: Math.round(vw * 0.25), max: Math.round(vw * 0.75) };
+	}
+
+	function clampFocusPdfWidth(value: number) {
+		const { min, max } = focusPdfBounds();
+		if (!Number.isFinite(value)) return Math.round((min + max) / 2);
+		return Math.max(min, Math.min(max, Math.round(value)));
+	}
+
+	function persistFocusPdfWidth(next: number) {
+		focusPdfWidth = clampFocusPdfWidth(next);
+		if (browser) localStorage.setItem(FOCUS_PDF_WIDTH_KEY, String(focusPdfWidth));
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		const saved = Number(localStorage.getItem(FOCUS_PDF_WIDTH_KEY));
+		if (Number.isFinite(saved) && saved > 0) {
+			focusPdfWidth = clampFocusPdfWidth(saved);
+			return;
+		}
+		focusPdfWidth = clampFocusPdfWidth(Math.round(window.innerWidth / 2));
+	});
+
+	function startFocusResize(event: PointerEvent) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = focusPdfWidth;
+		focusResizing = true;
 		document.body.style.cursor = 'col-resize';
-		function onMove(ev: PointerEvent) {
-			selectedRecordWidth = Math.max(200, Math.min(640, startWidth + ev.clientX - startX));
-		}
-		function onUp() {
-			isResizingRecord = false;
+		document.body.style.userSelect = 'none';
+		const move = (e: PointerEvent) => persistFocusPdfWidth(startWidth - (e.clientX - startX));
+		const up = () => {
+			focusResizing = false;
 			document.body.style.cursor = '';
-			window.removeEventListener('pointermove', onMove);
-			window.removeEventListener('pointerup', onUp);
-			window.removeEventListener('pointercancel', onUp);
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up, { once: true });
+		window.addEventListener('pointercancel', up, { once: true });
+	}
+
+	function onFocusResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			persistFocusPdfWidth(focusPdfWidth + 24);
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			persistFocusPdfWidth(focusPdfWidth - 24);
 		}
-		window.addEventListener('pointermove', onMove);
-		window.addEventListener('pointerup', onUp, { once: true });
-		window.addEventListener('pointercancel', onUp, { once: true });
 	}
 
-	let activeRecord = $derived(
-		treeState.selectedRecordId != null ? (recordCache[treeState.selectedRecordId] ?? null) : null
-	);
-	let selectedSummary = $derived(
-		activeRecord?.summaries.find((summary) => summary.id === treeState.selectedSummaryId) ?? null
-	);
-	let viewerInputId = $derived(treeState.selectedPdfTarget?.inputId ?? activeRecord?.id ?? null);
-	let viewerFileUrl = $derived(viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : '');
-	let viewerIsPdf = $derived((activeRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf'));
-	let selectedSummaryCategoryPaths = $derived(
-		selectedSummary?.categoryPaths?.map((path) =>
-			buildTopicCategoryPathDisplay(path, categoryMetadataByPath)
-		) ?? []
-	);
+	// ---------- Category metadata (for confidence + path display) ----------
+	$effect(() => {
+		if (!categoryMetadataLoaded) void ensureCategoryMetadata();
+	});
 
-	type SummaryPdfViewport = {
-		convertToViewportRectangle: (rect: number[]) => number[];
-	};
-
-	function formatCoords(coords: number[]) {
-		if (!Array.isArray(coords) || coords.length < 4) return '—';
-		return `[${coords.map((n) => Math.trunc(n)).join(', ')}]`;
-	}
-
-	function formatTargets(targets: SummaryRecordTarget[]) {
-		if (!Array.isArray(targets) || targets.length === 0) return '—';
-		return targets
-			.filter((target) => Array.isArray(target.coords) && target.coords.length >= 4)
-			.map((target) => `p.${target.page} ${formatCoords(target.coords)}`)
-			.join('\n');
-	}
-
-	function renderSummaryHighlight(pageNo: number, viewport: SummaryPdfViewport, overlay: HTMLDivElement) {
-		if (!selectedSummary) return;
-		const targets = selectedSummary.targets?.filter(
-			(target) => target.page === pageNo && Array.isArray(target.coords) && target.coords.length >= 4
-		);
-		if (!targets || targets.length === 0) return;
-		for (const target of targets) {
-			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
-			const left = Math.max(0, Math.min(vx1, vx2) - 5);
-			const top = Math.max(0, Math.min(vy1, vy2) - 4);
-			const width = Math.abs(vx2 - vx1) + 10;
-			const height = Math.abs(vy2 - vy1) + 8;
-			if (width < 1 || height < 1) continue;
-			const box = document.createElement('div');
-			box.className = 'pdf-highlight';
-			box.style.left = `${left}px`;
-			box.style.top = `${top}px`;
-			box.style.width = `${width}px`;
-			box.style.height = `${height}px`;
-			overlay.appendChild(box);
+	async function ensureCategoryMetadata() {
+		if (categoryMetadataLoaded) return;
+		categoryMetadataLoaded = true;
+		try {
+			const response = await listSummaryGraph();
+			categoryMetadataByPath = buildTopicCategoryMetadataByPath(
+				(response.results ?? []) as unknown as TopicCategoryNodeApi[]
+			);
+		} catch (error) {
+			console.warn('failed to load summary category metadata', error);
 		}
 	}
 
@@ -154,108 +187,6 @@
 		};
 	}
 
-	$effect(() => {
-		const selectedPage = treeState.selectedPdfTarget?.page;
-		if (selectedPage) {
-			docPage = selectedPage;
-		}
-	});
-
-	$effect(() => {
-		if (activeRecord) {
-			void ensureRecordSummaries(activeRecord.id);
-		}
-	});
-
-	$effect(() => {
-		if (!categoryMetadataLoaded) {
-			void ensureCategoryMetadata();
-		}
-	});
-
-	async function ensureRecordSummaries(recordId: number) {
-		const current = recordCache[recordId];
-		if (!current || current.summaries.length > 0 || summaryLoadingByRecordId[recordId]) return;
-
-		summaryLoadingByRecordId = { ...summaryLoadingByRecordId, [recordId]: true };
-		try {
-			const response = await getRecordSummaries(recordId);
-			recordCache = {
-				...recordCache,
-				[recordId]: {
-					...current,
-					summaries: response.summaries.map((summary) => ({ ...summary, recordId }))
-				}
-			};
-			if (
-				treeState.selectedRecordId === recordId &&
-				response.summaries[0] &&
-				!treeState.selectedPdfTarget
-			) {
-				treeState = selectRecordSummaryTarget(treeState, {
-					recordId,
-					summaryId: response.summaries[0].id,
-					inputId: response.summaries[0].inputId,
-					page: response.summaries[0].page
-				});
-			}
-		} catch (error) {
-			loadError =
-				error instanceof Error ? error.message : `Failed to load summaries for record ${recordId}`;
-			errorDialogOpen = true;
-		} finally {
-			summaryLoadingByRecordId = { ...summaryLoadingByRecordId, [recordId]: false };
-		}
-	}
-
-	async function ensureCategoryMetadata() {
-		if (categoryMetadataLoaded) return;
-		categoryMetadataLoaded = true;
-		try {
-			const response = await listSummaryGraph();
-			categoryMetadataByPath = buildTopicCategoryMetadataByPath(
-				(response.results ?? []) as unknown as TopicCategoryNodeApi[]
-			);
-		} catch (error) {
-			console.warn('failed to load summary category metadata', error);
-		}
-	}
-
-	function trackPathOverflow(node: HTMLElement, pathKey: string) {
-		let currentPathKey = pathKey;
-		const update = () => {
-			const next = node.scrollWidth > node.clientWidth + 1;
-			if (truncatedCategoryPaths[currentPathKey] !== next) {
-				truncatedCategoryPaths = { ...truncatedCategoryPaths, [currentPathKey]: next };
-			}
-		};
-		const resizeObserver = new ResizeObserver(update);
-		resizeObserver.observe(node);
-		queueMicrotask(update);
-		return {
-			update(nextPathKey: string) {
-				currentPathKey = nextPathKey;
-				queueMicrotask(update);
-			},
-			destroy() {
-				resizeObserver.disconnect();
-			}
-		};
-	}
-
-	function handleRecordSelect(record: KbInputRecord) {
-		const mapped = mapKbInputToSummaryTreeRecord(record);
-		recordCache = {
-			...recordCache,
-			[record.id]: {
-				...(recordCache[record.id] ?? mapped),
-				...mapped,
-				summaries: recordCache[record.id]?.summaries ?? []
-			}
-		};
-		treeState = selectSummaryTreeRecord(treeState, record.id);
-	}
-
 	function mapBrowserRecord(record: KbInputRecord) {
 		const mapped = mapKbInputToSummaryTreeRecord(record);
 		return {
@@ -268,388 +199,1348 @@
 			badges: [mapped.docType]
 		};
 	}
+
+	// ---------- Confidence (max over a summary's category paths) ----------
+	function summaryConfidence(s: SummaryTreeSummary): number | null {
+		let best: number | null = null;
+		for (const raw of s.categoryPaths ?? []) {
+			const c = categoryMetadataByPath[raw.trim()]?.confidence;
+			if (Number.isFinite(c)) best = best == null ? (c as number) : Math.max(best, c as number);
+		}
+		return best;
+	}
+	function confidenceLabel(s: SummaryTreeSummary): string {
+		const c = summaryConfidence(s);
+		return c == null ? '—' : formatTopicCategoryConfidence(c);
+	}
+
+	function formatCoords(coords: number[]): string {
+		if (!Array.isArray(coords) || coords.length < 4) return '';
+		return `[${coords.map((n) => Math.trunc(n)).join(', ')}]`;
+	}
+
+	function summaryLabel(s: SummaryTreeSummary, idx: number): string {
+		const snippet = (s.summaryText ?? '').trim().replace(/\s+/g, ' ').slice(0, 52);
+		return `p.${s.page} · ${snippet || s.keywords?.[0] || `Summary ${idx + 1}`}`;
+	}
+
+	// ---------- Attribute model (mirrors the metrics info panel) ----------
+	type AttrKind = 'text' | 'chips' | 'lines';
+	type LineEntry = { head: string; content: string; lineType: string };
+	type AttrDef = {
+		key: string;
+		label: string;
+		icon: any;
+		kind: AttrKind;
+		value: string;
+		items: string[];
+		entries: LineEntry[];
+		count: number;
+		hasValue: boolean;
+	};
+	type GroupNode = {
+		key: string;
+		label: string;
+		icon: any;
+		count: number;
+		filledCount: number;
+		hasValue: boolean;
+		attrs: AttrDef[];
+	};
+
+	function buildSummaryGroups(s: SummaryTreeSummary): GroupNode[] {
+		const fmt = (v: unknown): string => (v == null || v === '' ? '' : String(v));
+		const has = (v: unknown): boolean => v != null && v !== '';
+		const textAttr = (key: string, label: string, icon: any, value: string, hasValue: boolean): AttrDef => ({
+			key, label, icon, kind: 'text', value, items: [], entries: [], count: hasValue ? 1 : 0, hasValue
+		});
+		const chipsAttr = (key: string, label: string, icon: any, items: string[]): AttrDef => ({
+			key, label, icon, kind: 'chips', value: items.join(', '), items, entries: [], count: items.length, hasValue: items.length > 0
+		});
+		const linesAttr = (key: string, label: string, icon: any, entries: LineEntry[]): AttrDef => ({
+			key, label, icon, kind: 'lines',
+			value: entries.map((e) => (e.content ? `${e.head}: ${e.content}` : e.head)).join('\n'),
+			items: entries.map((e) => (e.content ? `${e.head}: ${e.content}` : e.head)),
+			entries, count: entries.length, hasValue: entries.length > 0
+		});
+
+		const kwItems = (s.keywords ?? []).filter((v) => typeof v === 'string' && v.trim() !== '');
+		const catItems = (s.categoryPaths ?? []).map((raw) => {
+			const d = buildTopicCategoryPathDisplay(raw, categoryMetadataByPath);
+			return d.confidenceLabel ? `${d.path} · ${d.confidenceLabel}` : d.path;
+		});
+		const targetEntries: LineEntry[] = (s.targets ?? [])
+			.filter((t) => Array.isArray(t.coords) && t.coords.length >= 4)
+			.map((t) => ({ head: `p.${t.page}`, content: formatCoords(t.coords), lineType: '' }));
+
+		const metadata: AttrDef[] = [
+			textAttr('summary_id', 'Summary ID', HashIcon, fmt(s.id), has(s.id)),
+			textAttr('record_id', 'Record ID', HashIcon, fmt(s.recordId), has(s.recordId)),
+			textAttr('input_id', 'Input ID', HashIcon, fmt(s.inputId), has(s.inputId)),
+			textAttr('page', 'Page', MapPinIcon, fmt(s.page), has(s.page)),
+			textAttr('confidence', 'Confidence', ActivityIcon, confidenceLabel(s), summaryConfidence(s) != null)
+		];
+		const content: AttrDef[] = [
+			textAttr('summary_text', 'Summary', FileTextIcon, fmt(s.summaryText), has(s.summaryText))
+		];
+		const keywords: AttrDef[] = [chipsAttr('keywords', 'Keywords', TagIcon, kwItems)];
+		const categories: AttrDef[] = [chipsAttr('category_paths', 'Category Paths', NetworkIcon, catItems)];
+		const targets: AttrDef[] = [linesAttr('targets', 'Targets', MapPinIcon, targetEntries)];
+
+		const specs: Array<{ key: string; label: string; icon: any; attrs: AttrDef[] }> = [
+			{ key: 'g_metadata', label: 'Metadata', icon: BookOpenIcon, attrs: metadata },
+			{ key: 'g_content', label: 'Content', icon: FileTextIcon, attrs: content },
+			{ key: 'g_keywords', label: 'Keywords', icon: TagIcon, attrs: keywords },
+			{ key: 'g_categories', label: 'Categories', icon: NetworkIcon, attrs: categories },
+			{ key: 'g_targets', label: 'Targets', icon: MapPinIcon, attrs: targets }
+		];
+		return specs.map((spec) => {
+			const filled = spec.attrs.filter((a) => a.hasValue).length;
+			return {
+				key: spec.key,
+				label: spec.label,
+				icon: spec.icon,
+				count: spec.attrs.length,
+				filledCount: filled,
+				hasValue: filled > 0,
+				attrs: spec.attrs
+			};
+		});
+	}
+
+	let selectedSummary = $derived.by(() => {
+		if (selectedSummaryId == null) return null;
+		return summaries.find((s) => s.id === selectedSummaryId) ?? null;
+	});
+
+	let summaryGroups = $derived.by(() => (selectedSummary ? buildSummaryGroups(selectedSummary) : []));
+
+	let summaryDisplayLabel = $derived.by(() => {
+		const s = selectedSummary;
+		if (!s) return '';
+		const idx = summaries.findIndex((x) => x.id === s.id);
+		return summaryLabel(s, idx >= 0 ? idx : 0);
+	});
+
+	// ---------- Keyword list + filters ----------
+	let allKeywords = $derived.by(() => {
+		const set = new Set<string>();
+		for (const s of summaries) for (const kw of s.keywords ?? []) set.add(kw);
+		return [...set].sort((a, b) => a.localeCompare(b));
+	});
+
+	let filteredSummaries = $derived.by(() => {
+		let result = summaries;
+		const kw = keywordFilter.trim().toLowerCase();
+		if (kw) {
+			result = result.filter(
+				(s) =>
+					(s.keywords ?? []).some((k) => k.toLowerCase().includes(kw)) ||
+					(s.summaryText ?? '').toLowerCase().includes(kw)
+			);
+		}
+		const cf = confidenceFilter.trim();
+		if (cf) {
+			if (cf.startsWith('<')) {
+				const th = parseFloat(cf.slice(1).trim());
+				if (Number.isFinite(th)) result = result.filter((s) => (summaryConfidence(s) ?? 0) < th);
+			} else {
+				const th = parseFloat(cf);
+				if (Number.isFinite(th)) result = result.filter((s) => (summaryConfidence(s) ?? 0) >= th);
+			}
+		}
+		return result;
+	});
+
+	let selectedSummaryInFilteredIndex = $derived(
+		filteredSummaries.findIndex((s) => s.id === selectedSummaryId)
+	);
+	let prevSummary = $derived(
+		selectedSummaryInFilteredIndex > 0 ? filteredSummaries[selectedSummaryInFilteredIndex - 1] : null
+	);
+	let nextSummary = $derived(
+		selectedSummaryInFilteredIndex >= 0 &&
+			selectedSummaryInFilteredIndex < filteredSummaries.length - 1
+			? filteredSummaries[selectedSummaryInFilteredIndex + 1]
+			: null
+	);
+
+	// Keep selection valid as the filtered list changes.
+	$effect(() => {
+		const fs = filteredSummaries;
+		if (selectedSummaryId == null) return;
+		if (fs.length === 0) {
+			selectedSummaryId = null;
+		} else if (!fs.some((s) => s.id === selectedSummaryId)) {
+			selectedSummaryId = fs[0].id;
+		}
+	});
+
+	$effect(() => {
+		summaryNameDropdownValue = selectedSummaryId ?? '';
+	});
+
+	// ---------- PDF viewer derived ----------
+	let viewerInputId = $derived(selectedSummary?.inputId ?? currentRecord?.id ?? null);
+	let viewerFileUrl = $derived(
+		viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file#page=${docPage}&zoom=page-width` : ''
+	);
+	let viewerIsPdf = $derived((currentRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf'));
+
+	type SummaryPdfViewport = { convertToViewportRectangle: (rect: number[]) => number[] };
+
+	function renderSummaryHighlight(pageNo: number, viewport: SummaryPdfViewport, overlay: HTMLDivElement) {
+		const s = selectedSummary;
+		if (!s) return;
+		const targets = (s.targets ?? []).filter(
+			(t) => t.page === pageNo && Array.isArray(t.coords) && t.coords.length >= 4
+		);
+		for (const target of targets) {
+			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
+			const left = Math.max(0, Math.min(vx1, vx2) - 5);
+			const top = Math.max(0, Math.min(vy1, vy2) - 4);
+			const width = Math.abs(vx2 - vx1) + 10;
+			const height = Math.abs(vy2 - vy1) + 8;
+			if (width < 1 || height < 1) continue;
+			const box = document.createElement('div');
+			box.className = 'pdf-highlight';
+			box.style.left = `${left}px`;
+			box.style.top = `${top}px`;
+			box.style.width = `${width}px`;
+			box.style.height = `${height}px`;
+			overlay.appendChild(box);
+		}
+	}
+
+	// ---------- Handlers ----------
+	async function handleRecordSelect(record: KbInputRecord) {
+		if (currentRecord?.id === record.id) return;
+		currentRecord = mapKbInputToSummaryTreeRecord(record);
+		selectedSummaryId = null;
+		summaries = [];
+		errorMsg = '';
+		loading = true;
+		docPage = 1;
+		pdfNumPages = 0;
+		try {
+			const response = await getRecordSummaries(record.id);
+			summaries = (response.summaries ?? []).map((s) => ({ ...s, recordId: record.id }));
+		} catch (error) {
+			errorMsg =
+				error instanceof Error ? error.message : `Failed to load summaries for record ${record.id}`;
+		} finally {
+			loading = false;
+		}
+	}
+
+	function enterFocusMode() {
+		if (recordBrowserFolded) return;
+		recordBrowserFolded = true;
+		onFocusModeChange?.(true);
+	}
+
+	function goBack() {
+		if (!recordBrowserFolded) return;
+		recordBrowserFolded = false;
+		selectedSummaryId = null;
+		onFocusModeChange?.(false);
+	}
+
+	function selectSummary(s: SummaryTreeSummary) {
+		selectedSummaryId = s.id;
+		highlightSelectionVersion += 1;
+		docPage = s.page > 0 ? s.page : 1;
+		enterFocusMode();
+	}
+
+	function onSummaryCardClick(event: MouseEvent, s: SummaryTreeSummary) {
+		event.preventDefault();
+		event.stopPropagation();
+		selectSummary(s);
+	}
+
+	function goToPrevSummary() {
+		if (prevSummary) selectSummary(prevSummary);
+	}
+	function goToNextSummary() {
+		if (nextSummary) selectSummary(nextSummary);
+	}
+	function handleSummaryNameDropdown(e: Event) {
+		const id = (e.target as HTMLSelectElement).value;
+		const s = summaries.find((x) => x.id === id);
+		if (s) selectSummary(s);
+	}
 </script>
 
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key === 'Escape' && recordBrowserFolded) goBack();
+	}}
+/>
+
 <div
-	class="tree-shell"
-	style={`--panel:${panelBg}; --panel-alt:${panelAlt}; --border:${border}; --text:${textMain}; --muted:${textMuted}; --accent:${accent}; --panel-bg:${panelBg}; --panel-bg-alt:${panelAlt}; --ink-line:${border}; --ink-line-soft:rgba(148, 163, 184, 0.16); --text-primary:${textMain}; --text-secondary:${textMuted}; --text-muted:${textMuted}; --brass:#d8a74b; --crimson:#fca5a5; --font-mono:ui-monospace, SFMono-Regular, Menlo, monospace; --font-serif:\"Iowan Old Style\", \"Palatino Linotype\", \"Book Antiqua\", Georgia, serif;`}
+	class="summary-tree"
+	style="
+		--page-bg:{pageBg};
+		--panel-bg:{panelBg};
+		--panel-bg-alt:{panelBgAlt};
+		--ink-line:{inkLine};
+		--ink-line-soft:{inkLineSoft};
+		--text-primary:{textPrimary};
+		--text-secondary:{textSecondary};
+		--text-muted:{textMuted};
+		--brass:{brass};
+		--brass-faint:{brassFaint};
+		--crimson:{crimson};
+		--crimson-faint:{crimsonFaint};
+		--teal:{teal};
+		--font-serif:{fontSerif};
+		--font-mono:{fontMono};
+		--font-sans:{fontSans};
+	"
 >
-	{#if errorDialogOpen && loadError}
-		<div
-			class="error-overlay"
-			role="presentation"
-			tabindex="-1"
-			onclick={() => (errorDialogOpen = false)}
-			onkeydown={(event) => {
-				if (event.key === 'Escape') errorDialogOpen = false;
-			}}
-		>
-			<div
-				class="error-dialog"
-				role="dialog"
-				aria-modal="true"
-				aria-label="Summary Tree Load Error"
-				tabindex="0"
-				onclick={(event) => event.stopPropagation()}
-				onkeydown={(event) => event.stopPropagation()}
+	<header class="header">
+		<div class="header-left">
+			<div class="eyebrow">Knowledge System · Document Summaries</div>
+			<h1 class="display">Document&nbsp;<span class="amp">Tree</span></h1>
+			<div class="subtitle">
+				A document-centric reading room for extracted summaries — locate, verify, return to source.
+			</div>
+		</div>
+		<div class="header-right">
+			<span class="meta-label">RECORD</span><span class="meta-val">{currentRecord?.id ?? '—'}</span>
+			<span class="meta-label">TYPE</span><span class="meta-val">{currentRecord?.docType ?? '—'}</span>
+			<span class="meta-label">SUMMARIES</span><span class="meta-val"
+				>{summaries.length.toString().padStart(3, '0')}</span
 			>
-				<div class="eyebrow">Load Error</div>
-				<h3>Could not load summary tree data</h3>
-				<p class="dialog-copy">{loadError}</p>
-				<div class="dialog-actions">
-					<button type="button" class="ghost" onclick={() => (errorDialogOpen = false)}>Close</button>
+		</div>
+	</header>
+
+	<div class="body" style={recordBrowserFolded ? 'grid-template-columns: minmax(0, 1fr)' : ''}>
+		{#if !recordBrowserFolded}
+			<KbInputRecordBrowser
+				{darkMode}
+				instanceKey={browserInstanceKey}
+				title="kb.inputs"
+				subtitle="Search, filter, and select input records before inspecting their summaries."
+				emptyTitle="No records yet"
+				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+				autoSelectFirstRecord={false}
+				selectedRecordId={currentRecord?.id ?? null}
+				mapRecord={mapBrowserRecord}
+				onSelect={handleRecordSelect}
+				onError={(error) => {
+					errorMsg = error.message;
+				}}
+			/>
+
+			<aside class="summary-sidebar">
+				<div class="left-meta">
+					<div class="left-meta-title">Summaries</div>
+					<div class="left-meta-count">{summaries.length} found</div>
 				</div>
-			</div>
-		</div>
-	{/if}
 
-	<div class="hero">
-		<div>
-			<div class="eyebrow">Document Summaries</div>
-			<h2>Summary Tree</h2>
-			<p>Document-centric browser over <code>kb.inputs</code> with a shared record browser on the left.</p>
-		</div>
-		<div class="hero-actions">
-			<button type="button" class="ghost" onclick={() => (treeState = toggleSummaryTreeListMode(treeState))}>
-				{#if treeState.listMode === 'compact'}
-					<PanelsTopLeftIcon class="h-4 w-4" />
-					Expanded View
-				{:else}
-					<Rows3Icon class="h-4 w-4" />
-					Compact View
-				{/if}
-			</button>
-		</div>
-	</div>
-
-	<div class="workspace">
-		<KbInputRecordBrowser
-			{darkMode}
-			instanceKey={browserInstanceKey}
-			title="kb.inputs"
-			subtitle="Search, filter, and select records before inspecting their summaries."
-			emptyTitle="No records found."
-			emptySubtitle="Use Search or Retrieve to browse kb.inputs for summaries."
-			selectedRecordId={treeState.selectedRecordId}
-			renderMode={treeState.listMode === 'cards' ? 'cards' : 'compact'}
-			mapRecord={mapBrowserRecord}
-			onSelect={handleRecordSelect}
-		/>
-
-		<div class="right-panel">
-			<div class="right-tabs">
-				<div class="tab active">PDF Display</div>
-				{#if activeRecord}
-					<div class="tab passive" title={activeRecord.fileName}>{activeRecord.fileName}</div>
-				{/if}
-			</div>
-
-			{#if activeRecord}
-				<div class="detail-grid">
-					<div class="detail-card" style="width:{selectedRecordWidth}px;min-width:{selectedRecordWidth}px;max-width:{selectedRecordWidth}px;">
-						<div class="eyebrow">Selected Record</div>
-						<h3>{activeRecord.title}</h3>
-						<div class="detail-meta">
-							<span>{activeRecord.docNo}</span>
-							<span>{activeRecord.docType}</span>
-							<span>{activeRecord.parserName}</span>
+				<div class="summary-list">
+					{#if errorMsg}
+						<div class="error">{errorMsg}</div>
+					{:else if loading}
+						<div class="empty">
+							<div class="empty-glyph">⌕</div>
+							<div class="empty-title">Loading summaries</div>
+							<div class="empty-sub">Reading summaries for the selected record…</div>
 						</div>
-						<div class="topic-snippets">
-							{#each activeRecord.summaries as summary}
-								<button
-									type="button"
-									class:selected={treeState.selectedSummaryId === summary.id}
-									class="snippet"
-									onclick={() =>
-										(treeState = selectRecordSummaryTarget(treeState, {
-											recordId: activeRecord.id,
-											summaryId: summary.id,
-											inputId: summary.inputId,
-											page: summary.page
-										}))}
-								>
-									<div class="snippet-head">
-										<div class="keyword-row">
-											{#each summary.keywords.slice(0, 4) as kw}
-												<span class="keyword">{kw}</span>
-											{/each}
-										</div>
-										<span>p.{summary.page}</span>
+					{:else if !currentRecord}
+						<div class="empty">
+							<div class="empty-glyph">§</div>
+							<div class="empty-title">No record selected</div>
+							<div class="empty-sub">Select a record from kb.inputs to populate the summaries index.</div>
+						</div>
+					{:else if summaries.length === 0}
+						<div class="empty">
+							<div class="empty-glyph">§</div>
+							<div class="empty-title">No summaries yet</div>
+							<div class="empty-sub">This record has no extracted summaries.</div>
+						</div>
+					{:else}
+						{#each summaries as s, idx (s.id)}
+							<button
+								type="button"
+								class="summary-card"
+								class:selected={selectedSummaryId === s.id}
+								onclick={(event) => onSummaryCardClick(event, s)}
+							>
+								<div class="card-rule" aria-hidden="true"></div>
+								<div class="card-body">
+									<div class="card-row-top">
+										<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
+										<div class="card-conf" title="Confidence">{confidenceLabel(s)}</div>
 									</div>
-									<p>{summary.summaryText}</p>
-								</button>
-							{/each}
+									<div class="card-name">p.{s.page}</div>
+									{#if s.summaryText}
+										<div class="card-desc">{s.summaryText}</div>
+									{/if}
+									<div class="card-foot">
+										<span class="chip">
+											<span class="chip-dot"></span>
+											{(s.targets ?? []).length} target{(s.targets ?? []).length === 1 ? '' : 's'}
+										</span>
+										{#each (s.keywords ?? []).slice(0, 3) as kw (kw)}
+											<span class="chip chip-quiet">{kw}</span>
+										{/each}
+									</div>
+								</div>
+							</button>
+						{/each}
+					{/if}
+				</div>
+			</aside>
+		{/if}
+
+		<!-- ============ RIGHT PANEL ============ -->
+		<section class="right" class:focus-split={recordBrowserFolded}>
+			{#if recordBrowserFolded}
+				<div class="metric-canvas-wrap">
+					<div class="canvas-toolbar">
+						<button type="button" class="toolbar-back" onclick={goBack} title="Back to record list">
+							<ArrowLeftIcon class="toolbar-icon" />
+							<span>Back</span>
+						</button>
+						<div class="toolbar-filters">
+							<select
+								class="toolbar-select"
+								value={summaryNameDropdownValue}
+								onchange={handleSummaryNameDropdown}
+								title="Jump to summary"
+							>
+								<option value="">— Summary by name —</option>
+								{#each summaries as s, idx (s.id)}
+									<option value={s.id}>{summaryLabel(s, idx)}</option>
+								{/each}
+							</select>
+							<div class="toolbar-kw-wrap">
+								<input
+									class="toolbar-kw-input"
+									type="text"
+									list="summary-keywords-datalist-focus"
+									placeholder="Filter by keyword…"
+									bind:value={keywordFilter}
+								/>
+								<datalist id="summary-keywords-datalist-focus">
+									{#each allKeywords as kw (kw)}
+										<option value={kw}></option>
+									{/each}
+								</datalist>
+								{#if keywordFilter}
+									<button
+										type="button"
+										class="toolbar-kw-clear"
+										onclick={() => (keywordFilter = '')}
+										title="Clear keyword filter"
+										aria-label="Clear keyword filter"
+									>×</button>
+								{/if}
+							</div>
+							<div class="toolbar-kw-wrap">
+								<input
+									class="toolbar-kw-input"
+									type="text"
+									list="summary-confidence-options"
+									placeholder="Confidence…"
+									title="Filter by category confidence. Type a value like 0.85, or <0.50 for below-threshold."
+									bind:value={confidenceFilter}
+								/>
+								<datalist id="summary-confidence-options">
+									<option value="0.90"></option>
+									<option value="0.80"></option>
+									<option value="0.70"></option>
+									<option value="0.60"></option>
+									<option value="0.50"></option>
+									<option value="<0.50"></option>
+								</datalist>
+								{#if confidenceFilter}
+									<button
+										type="button"
+										class="toolbar-kw-clear"
+										onclick={() => (confidenceFilter = '')}
+										title="Clear confidence filter"
+										aria-label="Clear confidence filter"
+									>×</button>
+								{/if}
+							</div>
+						</div>
+						<div class="toolbar-nav">
+							<button
+								type="button"
+								class="toolbar-nav-btn"
+								disabled={!prevSummary}
+								onclick={goToPrevSummary}
+								title="Previous summary"
+							><ChevronLeftIcon class="toolbar-icon" /></button>
+							<span class="toolbar-nav-pos">
+								{selectedSummaryInFilteredIndex >= 0
+									? `${selectedSummaryInFilteredIndex + 1} / ${filteredSummaries.length}`
+									: `— / ${filteredSummaries.length}`}
+							</span>
+							<button
+								type="button"
+								class="toolbar-nav-btn"
+								disabled={!nextSummary}
+								onclick={goToNextSummary}
+								title="Next summary"
+							><ChevronRightIcon class="toolbar-icon" /></button>
 						</div>
 					</div>
-
-					<button
-						type="button"
-						class="record-resize-handle"
-						class:active={isResizingRecord}
-						aria-label="Resize selected record panel"
-						onpointerdown={startRecordResize}
-					>
-						<span class="record-resize-grip" aria-hidden="true"></span>
-					</button>
-
-					<div class="pdf-card">
-						<div class="eyebrow">PDF Display</div>
-						{#if viewerInputId && treeState.selectedPdfTarget && viewerIsPdf}
-							<PdfViewWindow
-								inputId={viewerInputId}
-								fileUrl={viewerFileUrl}
-								bind:page={docPage}
-								bind:zoom={pdfZoom}
-								bind:numPages={pdfNumPages}
-								highlightVersion={selectedSummary
-									? `${selectedSummary.id}:${selectedSummary.targets.map((target) => `${target.page}:${target.coords.join(',')}`).join('|')}`
-									: 'summary-tree'}
-								renderHighlights={renderSummaryHighlight}
-								sidebarMinWidth={240}
-								sidebarMaxWidth={520}
-								sidebarDefaultWidth={320}
-								sidebarTitle="Selected Summary"
-								sidebarSettingsKey="summary-tree-pdf-sidebar"
-								sidebarWidthSettingLabel="Panel Width"
-							>
-								{#snippet sidebar()}
-									{#if selectedSummary}
-										<div class="topic-sidebar-block">
-											<div class="topic-sidebar-row">
-												<span>Summary ID</span>
-												<strong>{selectedSummary.id}</strong>
-											</div>
-											<div class="topic-sidebar-row">
-												<span>Record ID</span>
-												<strong>{selectedSummary.recordId}</strong>
-											</div>
-											<div class="topic-sidebar-row">
-												<span>Page</span>
-												<strong>{selectedSummary.page}</strong>
-											</div>
-											<div class="topic-sidebar-row">
-												<span>Targets</span>
-												<strong>{formatTargets(selectedSummary.targets)}</strong>
-											</div>
+					<div class="metric-canvas">
+						{#if selectedSummary}
+							<div class="attr-view">
+								<div class="attr-view-header">
+									<div class="attr-view-name">{summaryDisplayLabel}</div>
+								</div>
+								{#each summaryGroups as g (g.key)}
+									{@const GIcon = g.icon}
+									<section class="attr-group" class:attr-group-empty={!g.hasValue}>
+										<div class="attr-group-head">
+											<span class="attr-group-ic"><GIcon class="h-4 w-4" /></span>
+											<span class="attr-group-label">{g.label}</span>
+											<span class="attr-group-count">{g.filledCount}/{g.count}</span>
 										</div>
-										<div class="topic-sidebar-block">
-											<div class="topic-sidebar-label">Category Paths</div>
-											{#if selectedSummaryCategoryPaths.length > 0}
-												<div class="category-path-list">
-													{#each selectedSummaryCategoryPaths as categoryPath, idx (`${categoryPath.path}-${idx}`)}
-														<div class="category-path-row">
-															<div class="category-path-line">
-																<div
-																	class="category-path-segments"
-																	use:trackPathOverflow={categoryPath.path}
-																>
-																	{#each categoryPath.segments as segment, segmentIdx (`${segment.path}-${segmentIdx}`)}
-																		<span class="keyword-chip category-path-chip" title={segment.tooltip}
-																			>{segment.label}</span
-																		>
-																		{#if segmentIdx < categoryPath.segments.length - 1}
-																			<span class="category-path-separator">/</span>
-																		{/if}
-																	{/each}
-																</div>
-																{#if truncatedCategoryPaths[categoryPath.path]}
-																	<span class="category-path-ellipsis" title={categoryPath.path}>…</span>
-																{/if}
-																{#if categoryPath.confidenceLabel}
-																	<span class="category-path-confidence"
-																		>{categoryPath.confidenceLabel}</span
-																	>
-																{/if}
-															</div>
+										<div class="attr-group-body">
+											{#each g.attrs as a (a.key)}
+												<div class="gip-row" class:gip-row-col={a.kind !== 'text'} class:gip-row-empty={!a.hasValue}>
+													<span class="gip-label">{a.label}</span>
+													{#if !a.hasValue}
+														<span class="gip-empty">—</span>
+													{:else if a.kind === 'text'}
+														<span class="gip-val">{a.value}</span>
+													{:else if a.kind === 'chips'}
+														<div class="gip-chips">
+															{#each a.items as item, i (`${a.key}-${i}`)}<span class="gip-chip">{item}</span>{/each}
 														</div>
-													{/each}
+													{:else}
+														<div class="gip-line-cards">
+															{#each a.entries as entry, i (`${a.key}-${i}`)}
+																<div class="gip-line-card">
+																	<div class="gip-line-head">
+																		<span class="gip-line-loc">{entry.head}</span>
+																		{#if entry.lineType}
+																			<span class="gip-line-type">{entry.lineType}</span>
+																		{/if}
+																	</div>
+																	{#if entry.content}
+																		<div class="gip-line-body">{entry.content}</div>
+																	{/if}
+																</div>
+															{/each}
+														</div>
+													{/if}
 												</div>
-											{:else}
-												<p class="topic-sidebar-copy muted">No category paths assigned.</p>
-											{/if}
+											{/each}
 										</div>
-										<div class="topic-sidebar-block">
-											<div class="topic-sidebar-label">Summary</div>
-											<p class="topic-sidebar-copy">{selectedSummary.summaryText}</p>
-										</div>
-									{:else}
-										<div class="topic-sidebar-empty">Select a summary to inspect it alongside the source PDF.</div>
-									{/if}
-								{/snippet}
-							</PdfViewWindow>
-						{:else if viewerInputId && treeState.selectedPdfTarget}
-							<iframe class="pdf-fallback-frame" title={activeRecord.fileName} src={viewerFileUrl}></iframe>
-						{:else if summaryLoadingByRecordId[activeRecord.id]}
-							<div class="empty-state pdf-empty">Loading summaries for the selected record…</div>
-						{:else if activeRecord.summaries.length === 0}
-							<div class="empty-state pdf-empty">No summaries are available for this record yet.</div>
+									</section>
+								{/each}
+							</div>
 						{:else}
-							<div class="empty-state pdf-empty">Select a summary to move the PDF display to the relevant page.</div>
+							<div class="canvas-empty">
+								<div class="canvas-empty-mark">◎</div>
+								<div class="canvas-empty-title">Select a summary</div>
+								<div class="canvas-empty-sub">Click a summary from the list to view its attributes.</div>
+							</div>
 						{/if}
 					</div>
 				</div>
-			{:else}
-				<div class="empty-state">Select a record from the left panel to inspect its summaries.</div>
+				<button
+					type="button"
+					class="focus-resize-handle"
+					class:active={focusResizing}
+					aria-label="Resize the source document panel"
+					onpointerdown={startFocusResize}
+					onkeydown={onFocusResizerKeydown}
+				>
+					<span class="focus-resize-grip" aria-hidden="true"></span>
+				</button>
 			{/if}
-		</div>
+			<div class="doc-frame-wrap" style:flex-basis={recordBrowserFolded ? `${focusPdfWidth}px` : null}>
+				{#if !currentRecord}
+					<div class="doc-empty">
+						<div class="doc-empty-mark">⌬</div>
+						<div class="doc-empty-title">Awaiting selection</div>
+						<div class="doc-empty-sub">
+							Once you select a record, the original document appears here.<br />
+							Click any summary on the left to jump to its source page.
+						</div>
+					</div>
+				{:else if viewerInputId && viewerIsPdf}
+					<PdfViewWindow
+						inputId={viewerInputId}
+						fileUrl={viewerFileUrl}
+						bind:page={docPage}
+						bind:zoom={pdfZoom}
+						bind:numPages={pdfNumPages}
+						highlightVersion={selectedSummary
+							? `${selectedSummary.id}:${highlightSelectionVersion}`
+							: 'summary-tree'}
+						renderHighlights={renderSummaryHighlight}
+						{darkMode}
+					/>
+				{:else if viewerInputId}
+					<iframe class="doc-frame" title={currentRecord.fileName} src={viewerFileUrl}></iframe>
+				{:else}
+					<div class="doc-empty">
+						<div class="doc-empty-mark">⌬</div>
+						<div class="doc-empty-title">No document</div>
+						<div class="doc-empty-sub">This record has no displayable source document.</div>
+					</div>
+				{/if}
+			</div>
+		</section>
 	</div>
 </div>
 
 <style>
-	.tree-shell {
-		position: relative;
-		display: flex;
+	@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap');
+
+	.summary-tree {
 		height: 100%;
+		min-height: 100%;
+		display: flex;
 		flex-direction: column;
-		color: var(--text);
+		background: var(--page-bg);
+		color: var(--text-primary);
+		font-family: var(--font-sans);
+		overflow: hidden;
 	}
 
-	.error-overlay {
-		position: absolute;
-		inset: 0;
-		z-index: 24;
+	/* ---------- HEADER ---------- */
+	.header {
 		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 1.5rem;
-		background: rgba(2, 6, 23, 0.62);
-		backdrop-filter: blur(10px);
-	}
-
-	.error-dialog {
-		width: min(540px, 100%);
-		border-radius: 22px;
-		border: 1px solid rgba(248, 113, 113, 0.28);
-		background: #111827;
-		padding: 1.25rem;
-		box-shadow: 0 30px 80px rgba(15, 23, 42, 0.5);
-	}
-
-	.dialog-copy { margin-top: 0.55rem; color: var(--muted); }
-
-	.dialog-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.75rem;
-		margin-top: 1rem;
-	}
-
-	.hero {
-		display: flex;
-		align-items: flex-end;
 		justify-content: space-between;
-		gap: 1rem;
-		margin-bottom: 1rem;
-		padding: 1.1rem 1.2rem;
-		border-radius: 24px;
-		background:
-			radial-gradient(circle at top right, rgba(129, 140, 248, 0.15), transparent 42%),
-			linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66));
-		border: 1px solid var(--border);
+		align-items: flex-end;
+		padding: 24px 40px 18px;
+		border-bottom: 1px solid var(--ink-line);
+		position: relative;
+		gap: 24px;
+		flex-shrink: 0;
+	}
+	.header::after {
+		content: '';
+		position: absolute;
+		left: 40px;
+		right: 40px;
+		bottom: -1px;
+		height: 1px;
+		background: linear-gradient(90deg, var(--brass), transparent 35%, transparent 65%, var(--brass));
+		opacity: 0.45;
+	}
+	.eyebrow {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.18em;
+		text-transform: uppercase;
+		color: var(--brass);
+		margin-bottom: 6px;
+	}
+	.display {
+		font-family: var(--font-serif);
+		font-size: 40px;
+		line-height: 1;
+		font-weight: 500;
+		letter-spacing: -0.01em;
+		margin: 0 0 8px;
+	}
+	.display .amp {
+		font-style: italic;
+		color: var(--brass);
+		font-weight: 400;
+	}
+	.subtitle {
+		font-family: var(--font-serif);
+		font-style: italic;
+		font-size: 15px;
+		color: var(--text-secondary);
+		max-width: 520px;
+	}
+	.header-right {
+		display: grid;
+		grid-template-columns: auto auto;
+		gap: 6px 18px;
+		align-items: baseline;
+		padding: 12px 18px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+	}
+	.meta-label {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.16em;
+		color: var(--text-muted);
+		text-transform: uppercase;
+	}
+	.meta-val {
+		font-family: var(--font-mono);
+		font-size: 13px;
+		color: var(--text-primary);
+		text-align: right;
+		min-width: 60px;
 	}
 
-	.eyebrow { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-	h2, h3, p { margin: 0; }
-	h2 { margin-top: 0.3rem; font-size: 1.5rem; }
-	.hero p { margin-top: 0.45rem; max-width: 52rem; color: var(--muted); }
+	/* ---------- BODY ---------- */
+	.body {
+		flex: 1;
+		height: 100%;
+		display: grid;
+		grid-template-columns: auto 360px minmax(0, 1fr);
+		min-height: 0;
+		min-width: 0;
+		overflow: hidden;
+	}
+	@media (max-width: 1480px) {
+		.body {
+			grid-template-columns: auto 320px minmax(0, 1fr);
+		}
+	}
 
-	.hero-actions { display: flex; gap: 0.75rem; }
-
-	.ghost {
+	/* ---------- SUMMARY SIDEBAR ---------- */
+	.summary-sidebar {
+		display: flex;
+		flex-direction: column;
+		border-right: 1px solid var(--ink-line);
+		background: var(--panel-bg);
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+	}
+	.error {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--crimson);
+		padding: 8px 10px;
+		background: var(--crimson-faint);
+		border-left: 3px solid var(--crimson);
+	}
+	.left-meta {
+		padding: 18px 24px 8px;
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+	}
+	.left-meta-title {
+		font-family: var(--font-serif);
+		font-size: 22px;
+		font-weight: 500;
+		color: var(--text-primary);
+	}
+	.left-meta-count {
+		margin-left: auto;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.1em;
+		color: var(--text-muted);
+		text-transform: uppercase;
+	}
+	.summary-list {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 8px 16px 24px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-line) transparent;
+	}
+	.summary-list::-webkit-scrollbar {
+		width: 8px;
+	}
+	.summary-list::-webkit-scrollbar-thumb {
+		background: var(--ink-line);
+	}
+	.empty {
+		text-align: center;
+		padding: 60px 20px;
+		color: var(--text-muted);
+	}
+	.empty-glyph {
+		font-family: var(--font-serif);
+		font-size: 56px;
+		color: var(--brass);
+		opacity: 0.4;
+		line-height: 1;
+		margin-bottom: 12px;
+	}
+	.empty-title {
+		font-family: var(--font-serif);
+		font-size: 18px;
+		color: var(--text-secondary);
+		margin-bottom: 4px;
+	}
+	.empty-sub {
+		font-size: 12px;
+		max-width: 240px;
+		margin: 0 auto;
+		line-height: 1.5;
+	}
+	.summary-card {
+		all: unset;
+		cursor: pointer;
+		display: flex;
+		background: var(--panel-bg-alt);
+		border: 1px solid var(--ink-line-soft);
+		position: relative;
+		transition: border-color 150ms, background 150ms;
+	}
+	.summary-card:hover {
+		border-color: var(--brass);
+		background: var(--panel-bg);
+	}
+	.summary-card.selected {
+		border-color: var(--crimson);
+		background: var(--panel-bg);
+	}
+	.card-rule {
+		width: 4px;
+		background: var(--ink-line);
+		flex-shrink: 0;
+		transition: background 150ms;
+	}
+	.summary-card:hover .card-rule {
+		background: var(--brass);
+	}
+	.summary-card.selected .card-rule {
+		background: var(--crimson);
+	}
+	.card-body {
+		padding: 12px 14px 12px 12px;
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.card-row-top {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+	}
+	.card-index {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.1em;
+		color: var(--text-muted);
+		text-transform: uppercase;
+	}
+	.card-conf {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--teal);
+		font-weight: 600;
+	}
+	.card-name {
+		font-family: var(--font-serif);
+		font-size: 17px;
+		line-height: 1.2;
+		font-weight: 500;
+		color: var(--text-primary);
+	}
+	.summary-card.selected .card-name {
+		color: var(--crimson);
+	}
+	.card-desc {
+		font-size: 12px;
+		line-height: 1.45;
+		color: var(--text-secondary);
+		display: -webkit-box;
+		line-clamp: 2;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.card-foot {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+		margin-top: 2px;
+	}
+	.chip {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.5rem;
-		border-radius: 14px;
-		padding: 0.8rem 1rem;
-		border: 1px solid rgba(148, 163, 184, 0.16);
-		cursor: pointer;
-		background: rgba(15, 23, 42, 0.36);
-		color: var(--text);
+		gap: 5px;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		padding: 3px 8px;
+		background: transparent;
+		border: 1px solid var(--ink-line);
+		color: var(--text-secondary);
+	}
+	.chip-dot {
+		width: 4px;
+		height: 4px;
+		background: var(--brass);
+		border-radius: 50%;
+	}
+	.chip-quiet {
+		color: var(--text-muted);
 	}
 
-	.workspace {
-		display: grid;
-		min-height: 0;
-		flex: 1;
-		grid-template-columns: auto minmax(0, 1fr);
-		gap: 1rem;
-	}
-
-	.right-panel {
-		min-height: 0;
-		border-radius: 24px;
-		border: 1px solid var(--border);
-		background: var(--panel);
+	/* ---------- RIGHT ---------- */
+	.right {
 		display: flex;
 		flex-direction: column;
-		padding: 1rem;
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		background: var(--page-bg);
+		overflow: hidden;
+	}
+	.right.focus-split {
+		flex-direction: row;
+	}
+	.metric-canvas-wrap {
+		flex: 1 1 0;
+		min-width: 25%;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		border-right: 1px solid var(--ink-line);
+		overflow: hidden;
+	}
+	.canvas-toolbar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px 12px;
+		border-bottom: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		flex-shrink: 0;
+		flex-wrap: wrap;
+	}
+	.toolbar-back {
+		all: unset;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 4px 10px 4px 6px;
+		border-radius: 6px;
+		border: 1px solid var(--ink-line);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.06em;
+		color: var(--text-secondary);
+		background: var(--panel-bg);
+		transition: border-color 120ms, color 120ms;
+	}
+	.toolbar-back:hover {
+		border-color: var(--brass);
+		color: var(--brass);
+	}
+	:global(.toolbar-icon) {
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
+		pointer-events: none;
+	}
+	.toolbar-filters {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex: 1;
+		min-width: 0;
+	}
+	.toolbar-select {
+		background: var(--panel-bg);
+		border: 1px solid var(--ink-line);
+		border-radius: 6px;
+		color: var(--text-primary);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		padding: 4px 8px;
+		max-width: 280px;
+		min-width: 0;
+	}
+	.toolbar-select:focus {
+		outline: none;
+		border-color: var(--brass);
+	}
+	.toolbar-kw-wrap {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+	}
+	.toolbar-kw-input {
+		background: var(--panel-bg);
+		border: 1px solid var(--ink-line);
+		border-radius: 6px;
+		color: var(--text-primary);
+		font-family: var(--font-mono);
+		font-size: 11px;
+		padding: 4px 22px 4px 8px;
+		width: 180px;
+	}
+	.toolbar-kw-input:focus {
+		outline: none;
+		border-color: var(--brass);
+	}
+	.toolbar-kw-clear {
+		all: unset;
+		position: absolute;
+		right: 6px;
+		top: 50%;
+		transform: translateY(-50%);
+		cursor: pointer;
+		color: var(--text-muted);
+		font-size: 14px;
+		line-height: 1;
+		padding: 0 4px;
+	}
+	.toolbar-kw-clear:hover {
+		color: var(--brass);
+	}
+	.toolbar-nav {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		flex-shrink: 0;
+	}
+	.toolbar-nav-btn {
+		all: unset;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 26px;
+		height: 26px;
+		border-radius: 6px;
+		border: 1px solid var(--ink-line);
+		color: var(--text-secondary);
+		background: var(--panel-bg);
+		transition: border-color 120ms, color 120ms, opacity 120ms;
+	}
+	.toolbar-nav-btn:disabled {
+		opacity: 0.35;
+		cursor: not-allowed;
+	}
+	.toolbar-nav-btn:not(:disabled):hover {
+		border-color: var(--brass);
+		color: var(--brass);
+	}
+	.toolbar-nav-pos {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-muted);
+		padding: 0 6px;
+		min-width: 56px;
+		text-align: center;
+	}
+	.metric-canvas {
+		flex: 1 1 0;
+		min-width: 0;
+		min-height: 0;
+		overflow-y: auto;
+		overflow-x: hidden;
+		background: radial-gradient(ellipse at 30% 50%, rgba(212, 162, 76, 0.06), transparent 55%),
+			radial-gradient(ellipse at 70% 50%, rgba(200, 85, 61, 0.05), transparent 55%), var(--page-bg);
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-line) transparent;
+	}
+	.metric-canvas::-webkit-scrollbar {
+		width: 8px;
+	}
+	.metric-canvas::-webkit-scrollbar-thumb {
+		background: var(--ink-line);
 	}
 
-	.right-tabs { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-bottom: 1rem; }
-	.tab { border-radius: 14px; padding: 0.72rem 0.9rem; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.3); font-weight: 700; }
-	.tab.active { border-color: rgba(129, 140, 248, 0.36); background: rgba(99, 102, 241, 0.16); color: #c7d2fe; }
-	.tab.passive { color: var(--muted); }
+	/* ---- Focus split resize handle ---- */
+	.focus-resize-handle {
+		flex: 0 0 14px;
+		position: relative;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		outline: none;
+		align-self: stretch;
+		touch-action: none;
+	}
+	.focus-resize-handle::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 6px;
+		width: 2px;
+		background: var(--ink-line);
+		opacity: 0.6;
+		transition: background 140ms, opacity 140ms;
+	}
+	.focus-resize-handle:hover::before,
+	.focus-resize-handle.active::before,
+	.focus-resize-handle:focus-visible::before {
+		background: var(--brass);
+		opacity: 1;
+	}
+	.focus-resize-grip {
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		width: 7px;
+		height: 48px;
+		transform: translate(-50%, -50%);
+		border-radius: 999px;
+		background: radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 5px 10px
+				repeat-y,
+			var(--panel-bg);
+		border: 1px solid var(--ink-line);
+		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
+	}
+	.focus-resize-handle.active .focus-resize-grip,
+	.focus-resize-handle:hover .focus-resize-grip,
+	.focus-resize-handle:focus-visible .focus-resize-grip {
+		border-color: var(--brass);
+	}
 
-	.detail-grid { display: flex; min-height: 0; flex: 1; gap: 0; }
-	.detail-card { flex: none; display: flex; flex-direction: column; min-height: 0; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.26); padding: 1rem; }
-	.pdf-card { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.26); padding: 1rem; }
+	/* ---- Attribute text view ---- */
+	.attr-view {
+		padding: 16px 20px 40px;
+		display: flex;
+		flex-direction: column;
+	}
+	.attr-view-header {
+		padding-bottom: 16px;
+		border-bottom: 1px solid var(--ink-line);
+		margin-bottom: 4px;
+	}
+	.attr-view-name {
+		font-family: var(--font-serif);
+		font-size: 22px;
+		font-weight: 500;
+		line-height: 1.25;
+		color: var(--text-primary);
+	}
+	.attr-group {
+		background: color-mix(in srgb, var(--panel-bg-alt) 90%, white);
+		border: 1px solid var(--ink-line-soft);
+		border-radius: 10px;
+		padding: 12px 14px;
+		margin-top: 10px;
+	}
+	.attr-group-empty {
+		opacity: 0.55;
+	}
+	.attr-group-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
+	}
+	.attr-group-ic {
+		display: inline-flex;
+		color: var(--brass);
+		flex-shrink: 0;
+	}
+	.attr-group-label {
+		font-family: var(--font-serif);
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--brass);
+		flex: 1;
+		letter-spacing: 0.01em;
+	}
+	.attr-group-count {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
+		letter-spacing: 0.06em;
+	}
+	.attr-group-body {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding-left: 8px;
+	}
 
-	.record-resize-handle { flex: none; position: relative; width: 16px; padding: 0; border: 0; background: transparent; cursor: col-resize; outline: none; user-select: none; }
-	.record-resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: 7px; width: 1px; background: var(--ink-line); opacity: 0.8; }
-	.record-resize-grip { position: absolute; top: 50%; left: 50%; width: 8px; height: 52px; transform: translate(-50%, -50%); border-radius: 999px; background: radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y, var(--panel-bg); border: 1px solid var(--ink-line-soft); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14); }
-	.record-resize-handle.active .record-resize-grip, .record-resize-handle:hover .record-resize-grip, .record-resize-handle:focus-visible .record-resize-grip { border-color: #22c55e; }
-	.detail-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.75rem 0; }
-	.detail-meta span { border-radius: 999px; padding: 0.25rem 0.55rem; background: rgba(148, 163, 184, 0.12); font-size: 0.72rem; color: var(--muted); }
+	/* ---- Attribute rows (shared with the metrics info panel) ---- */
+	.gip-row {
+		display: flex;
+		align-items: baseline;
+		gap: 10px;
+	}
+	.gip-row-col {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 5px;
+	}
+	.gip-row-empty {
+		opacity: 0.55;
+	}
+	.gip-label {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		flex-shrink: 0;
+		min-width: 80px;
+	}
+	.gip-val {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--text-primary);
+		line-height: 1.45;
+		word-break: break-word;
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.gip-empty {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+	.gip-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+	}
+	.gip-chip {
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 8px;
+		border-radius: 999px;
+		border: 1px solid var(--ink-line);
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		font-size: 11px;
+		line-height: 1.4;
+		font-family: var(--font-sans);
+	}
+	.gip-line-cards {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.gip-line-card {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		padding: 8px 10px;
+		border: 1px solid var(--ink-line);
+		border-radius: 6px;
+		background: var(--panel-bg-alt);
+		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+	}
+	.gip-line-head {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+	.gip-line-loc {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--brass);
+	}
+	.gip-line-type {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		padding: 1px 6px;
+		border: 1px solid var(--ink-line);
+		border-radius: 999px;
+		background: var(--panel-bg);
+	}
+	.gip-line-body {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--text-primary);
+		line-height: 1.5;
+		word-break: break-word;
+	}
 
-	.topic-snippets { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 0.75rem; margin-top: 1rem; overflow: auto; padding-right: 0.25rem; }
+	.canvas-empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		min-height: 100%;
+		padding: 60px 20px;
+		color: var(--text-muted);
+		gap: 8px;
+	}
+	.canvas-empty-mark {
+		font-family: var(--font-serif);
+		font-size: 48px;
+		opacity: 0.3;
+		color: var(--brass);
+		line-height: 1;
+	}
+	.canvas-empty-title {
+		font-family: var(--font-serif);
+		font-size: 18px;
+		color: var(--text-secondary);
+	}
+	.canvas-empty-sub {
+		font-size: 12px;
+		max-width: 220px;
+		text-align: center;
+		line-height: 1.5;
+	}
 
-	.snippet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
-	.snippet { position: relative; border-radius: 16px; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.34); padding: 0.85rem; text-align: left; color: inherit; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
-	.snippet:hover { border-color: rgba(129, 140, 248, 0.34); }
-	.snippet.selected { border-color: rgba(165, 180, 252, 0.58); background: linear-gradient(180deg, rgba(99, 102, 241, 0.14), rgba(99, 102, 241, 0.06)), rgba(15, 23, 42, 0.9); box-shadow: 0 0 0 1px rgba(165, 180, 252, 0.18) inset, 0 16px 36px rgba(15, 23, 42, 0.24); transform: translateY(-1px); }
-	.snippet p { margin-top: 0.5rem; font-size: 0.84rem; color: var(--muted); line-height: 1.5; }
-	.snippet.selected p { color: #e0e7ff; }
-
-	.keyword-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-	.keyword { border-radius: 999px; padding: 0.18rem 0.48rem; background: rgba(129, 140, 248, 0.14); font-size: 0.7rem; font-weight: 600; color: #c7d2fe; }
-
-	.empty-state { display: flex; flex: 1; align-items: center; justify-content: center; border-radius: 18px; border: 1px dashed rgba(148, 163, 184, 0.2); background: rgba(2, 6, 23, 0.28); padding: 1rem; text-align: center; color: var(--muted); }
-
-	.pdf-card :global(.doc-page-bar) { margin-top: 0.85rem; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px 16px 0 0; }
-	.pdf-card :global(.pdf-stage) { margin-top: -1px; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 0 0 16px 16px; background: rgba(2, 6, 23, 0.28); }
-
-	.topic-sidebar { width: 100%; height: 100%; min-width: 0; padding: 1rem 1rem 1rem 0; background: rgba(15, 23, 42, 0.82); overflow: auto; }
-	.topic-sidebar-title, .topic-sidebar-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
-	.topic-sidebar-title { margin-bottom: 0.85rem; }
-	.topic-sidebar-block + .topic-sidebar-block { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(148, 163, 184, 0.1); }
-	.topic-sidebar-row { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 0.6rem; margin-bottom: 0.6rem; align-items: start; }
-	.topic-sidebar-row span { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-	.topic-sidebar-row strong, .topic-sidebar-copy { min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
-
-	.topic-sidebar-copy { margin-top: 0.55rem; font-size: 0.88rem; line-height: 1.6; color: var(--text); }
-	.topic-sidebar-empty { color: var(--muted); }
-	.topic-sidebar-empty { font-size: 0.9rem; line-height: 1.6; }
-
-	.pdf-fallback-frame { margin-top: 0.85rem; width: 100%; min-height: 540px; flex: 1; border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 16px; background: white; }
-
-	:global(.pdf-highlight) { position: absolute; background: rgba(129, 140, 248, 0.25); outline: 1px solid rgba(129, 140, 248, 0.8); border-radius: 2px; }
-
-	.keyword-chip { display: inline-flex; align-items: center; padding: 0.32rem 0.58rem; border-radius: 999px; border: 1px solid rgba(165, 180, 252, 0.22); background: rgba(99, 102, 241, 0.12); font-size: 0.78rem; color: #c7d2fe; }
-	.category-path-list { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
-	.category-path-row { min-width: 0; }
-	.category-path-line { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
-	.category-path-segments { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; }
-	.category-path-chip { vertical-align: middle; }
-	.category-path-separator { display: inline-block; margin: 0 0.28rem; color: var(--muted); vertical-align: middle; }
-	.category-path-ellipsis { flex: none; cursor: help; font-size: 0.82rem; font-weight: 700; color: var(--muted); user-select: none; letter-spacing: 0.04em; }
-	.category-path-confidence { flex: none; font-size: 0.76rem; font-weight: 700; color: var(--muted); }
-	.topic-sidebar-copy.muted { color: var(--muted); }
-
-	@media (max-width: 980px) {
-		.workspace { grid-template-columns: minmax(0, 1fr); }
-		.detail-grid { flex-direction: column; }
-		.detail-card { flex: none; width: 100% !important; min-width: unset !important; max-width: unset !important; margin-bottom: 0.75rem; }
-		.pdf-card { flex: 1; }
-		.record-resize-handle { display: none; }
+	/* ---- PDF panel ---- */
+	.doc-frame-wrap {
+		flex: 1;
+		height: 100%;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		padding: 12px 20px 16px;
+		gap: 12px;
+		overflow: hidden;
+	}
+	.right.focus-split .doc-frame-wrap {
+		flex: 0 0 480px;
+		min-width: 25%;
+		overflow: hidden;
+	}
+	.doc-frame {
+		flex: 1;
+		width: 100%;
+		min-width: 0;
+		min-height: 0;
+		border: 1px solid var(--ink-line);
+		background: #0a0d14;
+	}
+	:global(.pdf-highlight) {
+		position: absolute;
+		background: rgba(200, 85, 61, 0.18);
+		border: 1px solid rgba(200, 85, 61, 0.9);
+		box-shadow: inset 0 0 0 1px rgba(255, 210, 179, 0.22);
+	}
+	.doc-empty {
+		text-align: center;
+		padding: 80px 20px;
+		color: var(--text-muted);
+		margin: auto;
+	}
+	.doc-empty-mark {
+		font-size: 56px;
+		color: var(--brass);
+		opacity: 0.35;
+		line-height: 1;
+		margin-bottom: 16px;
+	}
+	.doc-empty-title {
+		font-family: var(--font-serif);
+		font-size: 26px;
+		color: var(--text-secondary);
+		margin-bottom: 8px;
+	}
+	.doc-empty-sub {
+		font-size: 13px;
+		line-height: 1.6;
 	}
 </style>

@@ -214,26 +214,42 @@ func GetDocStructure(c echo.Context) error {
 		})
 	}
 
-	txtPath := filepath.Join(
+	artifactBase := filepath.Join(
 		artifactDir,
 		strconv.FormatInt(inputID/1000, 10),
 		strconv.FormatInt(inputID, 10),
-		stagingRoot+"_"+parser+".corrected",
 	)
+	correctedPath := filepath.Join(artifactBase, stagingRoot+"_"+parser+".corrected")
+	txtPath := filepath.Join(artifactBase, stagingRoot+"_"+parser+".txt")
 
-	lines, pages, err := readCorrectedLinesFile(txtPath)
-	if err != nil && !os.IsNotExist(err) {
-		logger.Error("read txt structure file failed", "path", txtPath, "err", err)
-		return c.JSON(http.StatusNotFound, errorResponse{
-			Status:   false,
-			ErrorMsg: fmt.Sprintf("structure file not found: %s (CWB_KB_DS_025)", filepath.Base(txtPath)),
-		})
+	resolvedPath := correctedPath
+	lines, pages, err := readCorrectedLinesFile(correctedPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Error("read corrected structure file failed", "path", correctedPath, "err", err)
+			return c.JSON(http.StatusNotFound, errorResponse{
+				Status:   false,
+				ErrorMsg: fmt.Sprintf("structure file not found: %s (CWB_KB_DS_025)", filepath.Base(correctedPath)),
+			})
+		}
+		// Fall back to .txt when .corrected does not exist
+		resolvedPath = txtPath
+		lines, pages, err = readCorrectedLinesFile(txtPath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				logger.Error("read txt structure file failed", "path", txtPath, "err", err)
+			}
+			return c.JSON(http.StatusNotFound, errorResponse{
+				Status:   false,
+				ErrorMsg: fmt.Sprintf("structure file not found: %s (CWB_KB_DS_026)", filepath.Base(txtPath)),
+			})
+		}
 	}
 
 	resp := docStructureResponse{
 		Status:        true,
 		InputID:       inputID,
-		CorrectedFile: txtPath,
+		CorrectedFile: resolvedPath,
 		Lines:         lines,
 		Pages:         pages,
 		Total:         len(lines),

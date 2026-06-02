@@ -548,7 +548,7 @@
 			{:else if activeSection === 'kb-summary-graph'}
 				<ArtifactWikiView {darkMode} />
 			{:else if activeSection === 'kb-summary-tree'}
-				<SummaryTreeView {darkMode} />
+				<SummaryTreeView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
 			{:else if activeSection === 'kb-topic-graph'}
 				<TopicGraphView {darkMode} />
 			{:else if activeSection === 'kb-topic-tree'}

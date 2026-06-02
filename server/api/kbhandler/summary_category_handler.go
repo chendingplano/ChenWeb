@@ -232,7 +232,7 @@ func readSummaryArtifactFile(path string) (parsedSummaryFile, error) {
 		line := strings.TrimRight(scanner.Text(), "\r")
 		trimmed := strings.TrimSpace(line)
 		switch {
-		case trimmed == "summary_begin:":
+		case trimmed == "summary_begin:" || trimmed == "summary_begin":
 			inSummary = true
 			continue
 		case trimmed == "summary_end":
