@@ -16,6 +16,7 @@
 	import WorkflowIcon from '@lucide/svelte/icons/workflow';
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
+	import ProvisionMgmtView from '$lib/components/home3/provision-mgmt-view.svelte';
 	import InputsMgmtView from '$lib/components/home3/inputs-mgmt-view.svelte';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import ChunkMgmtView from '$lib/components/home3/chunk-mgmt-view.svelte';
@@ -27,12 +28,9 @@
 	import SceneBlocksView from '$lib/components/home3/scene-blocks-view.svelte';
 	import ProductsView from '$lib/components/home3/products-view.svelte';
 	import CategoryReviewView from '$lib/components/home3/category-review-view.svelte';
+	import InventoryItemsView from '$lib/components/home3/inventory-items-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
-	import {
-		getProvisionCategory,
-		getRecordProvisions,
-		listProvisionGraph
-	} from '$lib/services/kbService';
+	import { getProvisionCategory, listProvisionGraph } from '$lib/services/kbService';
 	import {
 		KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS,
 		isUnderConstructionKnowledgeSection
@@ -59,6 +57,7 @@
 		| 'kb-topic-tree'
 		| 'kb-provision-graph'
 		| 'kb-provision-tree'
+		| 'kb-inventory-items'
 		| 'kb-doc-wiki'
 		| 'kb-references'
 		| 'kb-formulas'
@@ -144,8 +143,13 @@
 				},
 				{
 					id: 'kb-provision-tree',
-					label: 'Provision Tree',
+					label: 'Provisions',
 					description: 'Document-centric provision browser'
+				},
+				{
+					id: 'kb-inventory-items',
+					label: 'Inventory Items',
+					description: 'Document-centric inventory item browser'
 				},
 				...KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.map((section) => ({
 					id: section.id as KbSectionId,
@@ -570,19 +574,9 @@
 					}
 				/>
 			{:else if activeSection === 'kb-provision-tree'}
-				<TopicTreeView
-					{darkMode}
-					browserInstanceKey="provision-tree"
-					heroEyebrow="Compliance Provisions"
-					heroTitle="Provision Tree"
-					heroDescription="Document-centric browser over compliance provisions extracted from chunks."
-					sidebarTitle="Selected Provision"
-					loadErrorTitle="Provision Tree"
-					itemSingular="provision"
-					itemPlural="provisions"
-					getRecordItems={getRecordProvisions}
-					listCategoryGraph={() => listProvisionGraph(knowledgeStoreState.activeStore?.id ?? null)}
-				/>
+				<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
+			{:else if activeSection === 'kb-inventory-items'}
+				<InventoryItemsView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
 			{:else if isUnderConstructionKnowledgeSection(activeSection)}
 				<div
 					class="flex h-full flex-col items-center justify-center p-8"

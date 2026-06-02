@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -955,5 +956,166 @@ func CreateProvision(c echo.Context) error {
 		ProvID:        nextProvID,
 		ProvisionName: provisionName,
 		SpanCount:     len(spans),
+	})
+}
+
+// provisionRecordJSON is the per-record payload returned by ListProvisions.
+// Field names mirror the canonical kb.provisions columns written by
+// SaveExtractedProvisions, so the frontend can render every attribute group
+// (Metadata / Statement / Context / Provenance / Grounding) without remapping.
+type provisionRecordJSON struct {
+	ID                  int64           `json:"id"`
+	InputRecordID       int64           `json:"input_record_id"`
+	ProvID              int             `json:"prov_id"`
+	InputFilename       string          `json:"input_filename"`
+	ProvName            *string         `json:"prov_name,omitempty"`
+	ProvNameEn          *string         `json:"prov_name_en,omitempty"`
+	ProvisionType       *string         `json:"provision_type,omitempty"`
+	SourceText          *string         `json:"source_text,omitempty"`
+	SourceLineSpans     json.RawMessage `json:"source_line_spans,omitempty"`
+	Provision           *string         `json:"provision,omitempty"`
+	ProvisionEn         *string         `json:"provision_en,omitempty"`
+	ProvisionSubject    *string         `json:"provision_subject,omitempty"`
+	ProvisionSubjectEn  *string         `json:"provision_subject_en,omitempty"`
+	ProvDesc            *string         `json:"prov_desc,omitempty"`
+	ProvDescEn          *string         `json:"prov_desc_en,omitempty"`
+	ProvContext         *string         `json:"prov_context,omitempty"`
+	ProvContextEn       *string         `json:"prov_context_en,omitempty"`
+	ProvisionKeywords   json.RawMessage `json:"provision_keywords,omitempty"`
+	ProvisionKeywordsEn json.RawMessage `json:"provision_keywords_en,omitempty"`
+	CategoryPaths       json.RawMessage `json:"category_paths,omitempty"`
+	CategoryPathsEn     json.RawMessage `json:"category_paths_en,omitempty"`
+	LocationType        *string         `json:"location_type,omitempty"`
+	Confidence          *float64        `json:"confidence,omitempty"`
+	IsExplicit          *bool           `json:"is_explicit,omitempty"`
+	NeedVerify          *bool           `json:"need_verify,omitempty"`
+	ModelName           *string         `json:"model_name,omitempty"`
+	PromptName          *string         `json:"prompt_name,omitempty"`
+	CreatedAt           string          `json:"created_at,omitempty"`
+}
+
+type listProvisionsResponse struct {
+	Status  bool                  `json:"status"`
+	Results []provisionRecordJSON `json:"results"`
+	Total   int                   `json:"total"`
+}
+
+// ListProvisions handles GET /api/v1/kb/provisions?input_record_id=N.
+// It returns every provision row for one input record, ordered by prov_id,
+// mirroring ListMetrics so the Provision Window can render the same
+// record-browser → list → focus-mode flow used by the Metric Window.
+func ListProvisions(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_LPROV_001")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	idStr := strings.TrimSpace(c.QueryParam("input_record_id"))
+	if idStr == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "input_record_id is required (CWB_KB_LPROV_010)",
+		})
+	}
+	inputID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || inputID <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid input_record_id (CWB_KB_LPROV_011)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	const query = `
+SELECT
+    p.id, p.input_record_id, p.prov_id, COALESCE(p.input_filename, '') AS input_filename,
+    p.prov_name, p.prov_name_en, p.provision_type, p.source_text, p.source_line_spans,
+    p.provision, p.provision_en, p.provision_subject, p.provision_subject_en,
+    p.prov_desc, p.prov_desc_en, p.prov_context, p.prov_context_en,
+    p.provision_keywords, p.provision_keywords_en, p.category_paths, p.category_paths_en,
+    p.location_type, p.confidence, p.is_explicit, p.need_verify, p.model_name, p.prompt_name,
+    COALESCE(to_char(p.create_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
+FROM kb.provisions p
+WHERE p.input_record_id = $1
+ORDER BY p.prov_id ASC
+`
+	rows, err := db.Query(query, inputID)
+	if err != nil {
+		logger.Error("query kb.provisions failed", "input_record_id", inputID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to retrieve kb provisions (CWB_KB_LPROV_020)",
+		})
+	}
+	defer rows.Close()
+
+	out := make([]provisionRecordJSON, 0)
+	for rows.Next() {
+		var (
+			r               provisionRecordJSON
+			spansBytes      []byte
+			keywordsBytes   []byte
+			keywordsEnBytes []byte
+			categoryBytes   []byte
+			categoryEnBytes []byte
+			confidence      sql.NullFloat64
+			isExplicit      sql.NullBool
+			needVerify      sql.NullBool
+		)
+		if err := rows.Scan(
+			&r.ID, &r.InputRecordID, &r.ProvID, &r.InputFilename,
+			&r.ProvName, &r.ProvNameEn, &r.ProvisionType, &r.SourceText, &spansBytes,
+			&r.Provision, &r.ProvisionEn, &r.ProvisionSubject, &r.ProvisionSubjectEn,
+			&r.ProvDesc, &r.ProvDescEn, &r.ProvContext, &r.ProvContextEn,
+			&keywordsBytes, &keywordsEnBytes, &categoryBytes, &categoryEnBytes,
+			&r.LocationType, &confidence, &isExplicit, &needVerify, &r.ModelName, &r.PromptName,
+			&r.CreatedAt,
+		); err != nil {
+			logger.Error("scan kb.provisions row failed", "err", err)
+			return c.JSON(http.StatusInternalServerError, errorResponse{
+				Status:   false,
+				ErrorMsg: "failed to scan kb provisions (CWB_KB_LPROV_021)",
+			})
+		}
+		if len(spansBytes) > 0 {
+			r.SourceLineSpans = json.RawMessage(spansBytes)
+		}
+		if len(keywordsBytes) > 0 {
+			r.ProvisionKeywords = json.RawMessage(keywordsBytes)
+		}
+		if len(keywordsEnBytes) > 0 {
+			r.ProvisionKeywordsEn = json.RawMessage(keywordsEnBytes)
+		}
+		if len(categoryBytes) > 0 {
+			r.CategoryPaths = json.RawMessage(categoryBytes)
+		}
+		if len(categoryEnBytes) > 0 {
+			r.CategoryPathsEn = json.RawMessage(categoryEnBytes)
+		}
+		if confidence.Valid {
+			v := confidence.Float64
+			r.Confidence = &v
+		}
+		if isExplicit.Valid {
+			v := isExplicit.Bool
+			r.IsExplicit = &v
+		}
+		if needVerify.Valid {
+			v := needVerify.Bool
+			r.NeedVerify = &v
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		logger.Error("iterate kb.provisions failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to iterate kb provisions (CWB_KB_LPROV_022)",
+		})
+	}
+
+	return c.JSON(http.StatusOK, listProvisionsResponse{
+		Status:  true,
+		Results: out,
+		Total:   len(out),
 	})
 }

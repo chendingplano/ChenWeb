@@ -1482,6 +1482,50 @@ export async function filterGraphNodes(
 
 // ---------- kb.provisions ----------
 
+export type KbProvisionRecord = {
+	id: number;
+	input_record_id: number;
+	prov_id: number;
+	input_filename?: string;
+	prov_name?: string;
+	prov_name_en?: string;
+	provision_type?: string;
+	source_text?: string;
+	source_line_spans?: Array<string | SourceLineSpan>;
+	provision?: string;
+	provision_en?: string;
+	provision_subject?: string;
+	provision_subject_en?: string;
+	prov_desc?: string;
+	prov_desc_en?: string;
+	prov_context?: string;
+	prov_context_en?: string;
+	provision_keywords?: string[];
+	provision_keywords_en?: string[];
+	category_paths?: unknown;
+	category_paths_en?: unknown;
+	location_type?: string;
+	confidence?: number;
+	is_explicit?: boolean;
+	need_verify?: boolean;
+	model_name?: string;
+	prompt_name?: string;
+	created_at?: string;
+};
+
+export type ListKbProvisionsResponse = {
+	status: boolean;
+	results: KbProvisionRecord[];
+	total: number;
+};
+
+export async function listKbProvisions(inputRecordId: number): Promise<ListKbProvisionsResponse> {
+	return fetchOrThrow<ListKbProvisionsResponse>(
+		`${BASE}/provisions?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to list kb provisions'
+	);
+}
+
 export type CreateKbProvisionPayload = {
 	input_record_id: number;
 	provision_name?: string;
@@ -1649,6 +1693,62 @@ export async function stopKbInput(id: number): Promise<void> {
 				: `Failed to stop pipeline (${response.status})`;
 		throw new Error(msg);
 	}
+}
+
+// ---------- Inventory Items (extracted item instances) ----------
+
+export type InventoryItemSpec = {
+	name?: string;
+	value?: string | number;
+	unit?: string;
+};
+
+export type KbInventoryItemRecord = {
+	id: number;
+	inventory_item_id: string;
+	input_record_id?: number;
+	item_name?: string;
+	canonical_name?: string;
+	item_category?: string;
+	manufacturer?: string;
+	brand?: string;
+	model_number?: string;
+	part_number?: string;
+	normalized_specs?: InventoryItemSpec[];
+	raw_specs?: InventoryItemSpec[];
+	standards?: string[];
+	aliases?: string[];
+	evidence_quote?: string;
+	source_line_spans?: SourceLineSpan[];
+	validation_flags?: string[];
+	missing_required_attrs?: string[];
+	dedupe_key?: string;
+	schema_version?: string;
+	dictionary_version?: string;
+	confidence?: number;
+	confidence_reason?: string;
+	model_name?: string;
+	prompt_name?: string;
+	create_time?: string;
+	modify_time?: string;
+};
+
+export type ListKbInventoryItemsResponse = {
+	status: boolean;
+	input_id?: number;
+	file_name?: string;
+	results: KbInventoryItemRecord[];
+	total: number;
+};
+
+/** List the persisted inventory item rows for a single `kb.inputs` record. */
+export async function listKbInventoryItems(
+	inputRecordId: number
+): Promise<ListKbInventoryItemsResponse> {
+	return fetchOrThrow<ListKbInventoryItemsResponse>(
+		`${BASE}/inventory-items?input_record_id=${encodeURIComponent(String(inputRecordId))}`,
+		'Failed to list kb inventory items'
+	);
 }
 
 // ---------- Inventory Categories (Category Review) ----------
