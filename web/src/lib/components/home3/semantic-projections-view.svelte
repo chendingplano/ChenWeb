@@ -10,6 +10,8 @@
 		type SemanticCategoryPath,
 		type RawLine
 	} from '$lib/services/kbService';
+	import { buildSemanticProjectionHighlightRect } from './semantic-projection-highlight-rect.js';
+	import { normalizeSemanticProjectionLineRefs } from './semantic-projection-line-spans.js';
 	import KbInputRecordBrowser from '$lib/components/home3/kb-input-record-browser.svelte';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
@@ -152,54 +154,9 @@
 
 	type NormalizedSpan = { page_number: number; line_number: number };
 
-	function toPositiveInt(v: unknown): number | null {
-		const n = typeof v === 'string' ? Number(v.trim()) : Number(v);
-		if (!Number.isFinite(n)) return null;
-		const i = Math.trunc(n);
-		return i > 0 ? i : null;
-	}
-
-	// Maps line_number → page_number, built from the loaded raw lines.
-	let lineNumToPage = $derived.by(() => {
-		const map = new Map<number, number>();
-		for (const ln of rawLines) {
-			if (!map.has(ln.line_number)) map.set(ln.line_number, ln.page_number);
-		}
-		return map;
-	});
-
-	// source_line_spans uses line-number spans only ("12", "13-15").
-	// Page numbers are resolved via lineNumToPage.
+	// line_spans uses line-number spans only ("12", "13-15").
 	function normalizeItemSpans(m: KbSemanticProjectionRecord | undefined): NormalizedSpan[] {
-		const raw = (m as { source_line_spans?: unknown })?.source_line_spans;
-		if (!Array.isArray(raw)) return [];
-		const lineNums: number[] = [];
-		for (const item of raw) {
-			if (typeof item === 'string') {
-				const s = item.trim();
-				const mm = s.match(/^(\d+)\s*[:,-]\s*(\d+)$/);
-				if (mm) {
-					const start = parseInt(mm[1], 10);
-					const end = parseInt(mm[2], 10);
-					for (let n = start; n <= end && n <= start + 200; n++) lineNums.push(n);
-				} else {
-					const n = parseInt(s, 10);
-					if (n > 0) lineNums.push(n);
-				}
-			} else if (typeof item === 'number' && item > 0) {
-				lineNums.push(Math.trunc(item));
-			} else if (item && typeof item === 'object') {
-				const obj = item as Record<string, unknown>;
-				const l = toPositiveInt(obj.line_number ?? obj.line ?? obj.line_no ?? obj.lineNo);
-				if (l) lineNums.push(l);
-			}
-		}
-		const out: NormalizedSpan[] = [];
-		for (const lineNo of lineNums) {
-			const pageNo = lineNumToPage.get(lineNo);
-			if (pageNo) out.push({ page_number: pageNo, line_number: lineNo });
-		}
-		return out;
+		return normalizeSemanticProjectionLineRefs(m?.line_spans, rawLines);
 	}
 
 	let highlightKeys = $derived.by(() => {
@@ -329,6 +286,7 @@
 		summary: AttrDef[];
 		keywords: AttrDef[];
 		categories: AttrDef[];
+		grounding: AttrDef[];
 		provenance: AttrDef[];
 	} {
 		const fmt = (v: unknown): string => (v == null || v === '' ? '' : String(v));
@@ -437,6 +395,23 @@
 			linesAttr('category_paths_en', 'Category Paths (EN)', ListTreeIcon, pathEntries(m.category_paths_en))
 		];
 
+		const groundingEntries: LineEntry[] = normalizeItemSpans(m).flatMap((span) => {
+			const rawLine = rawLineByKey.get(`${span.page_number}:${span.line_number}`);
+			const content = rawLine?.content ?? '';
+			const lineType = rawLine?.line_type ?? '';
+			const head = `L${span.line_number} · P${span.page_number}`;
+			const segs = content.split('\n').filter((s) => s.trim() !== '');
+			if (segs.length <= 1) return [{ head, content, lineType }];
+			return segs.map((seg, i) => ({
+				head: i === 0 ? head : `${head} · ${i + 1}`,
+				content: seg,
+				lineType: i === 0 ? lineType : ''
+			}));
+		});
+		const grounding: AttrDef[] = [
+			linesAttr('line_spans', 'Lines', FileTextIcon, groundingEntries)
+		];
+
 		const provenance: AttrDef[] = [
 			textAttr('model_name', 'Model', ActivityIcon, fmt(m.model_name), has(m.model_name)),
 			textAttr('prompt_name', 'Prompt', FileTextIcon, fmt(m.prompt_name), has(m.prompt_name)),
@@ -444,7 +419,7 @@
 			textAttr('create_time', 'Created', ActivityIcon, formatMaybeDate(m.create_time), has(m.create_time))
 		];
 
-		return { identity, summary, keywords, categories, provenance };
+		return { identity, summary, keywords, categories, grounding, provenance };
 	}
 
 	let itemMap = $derived.by((): ItemCanvas | null => {
@@ -459,6 +434,7 @@
 			{ key: 'summary', label: 'Projection', icon: FileTextIcon, attrs: attrsByGroup.summary },
 			{ key: 'keywords', label: 'Keywords', icon: TagIcon, attrs: attrsByGroup.keywords },
 			{ key: 'categories', label: 'Categories', icon: ListTreeIcon, attrs: attrsByGroup.categories },
+			{ key: 'grounding', label: 'Grounding', icon: ListIcon, attrs: attrsByGroup.grounding },
 			{ key: 'provenance', label: 'Provenance', icon: ActivityIcon, attrs: attrsByGroup.provenance }
 		];
 
@@ -552,37 +528,17 @@
 		viewport: PdfPageViewport,
 		overlay: HTMLDivElement
 	) {
-		const HIGHLIGHT_EXPAND_TOP_PX = 10;
-		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
 		const lines = selectedLinesByPage.get(pageNo) ?? [];
-		const rects = lines.flatMap((ln) => {
-			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
-			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
-			return [
-				{
-					lineNumber: ln.line_number,
-					left: Math.min(vx1, vx2),
-					top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
-					rawBottom: Math.max(vy1, vy2),
-					width: Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX
-				}
-			];
-		});
-		for (let i = 0; i < rects.length; i += 1) {
-			const rect = rects[i];
-			const nextRect = rects[i + 1];
-			const bottom = nextRect ? nextRect.top : rect.rawBottom;
-			const height = Math.max(0, bottom - rect.top);
-			if (rect.width < 1 || height < 1) continue;
-			const mark = document.createElement('div');
-			mark.className = 'pdf-highlight';
-			mark.style.left = `${rect.left}px`;
-			mark.style.top = `${rect.top}px`;
-			mark.style.width = `${rect.width}px`;
-			mark.style.height = `${height}px`;
-			mark.title = `line ${rect.lineNumber}`;
-			overlay.appendChild(mark);
-		}
+		const rect = buildSemanticProjectionHighlightRect(lines, viewport);
+		if (!rect) return;
+		const mark = document.createElement('div');
+		mark.className = 'pdf-highlight';
+		mark.style.left = `${rect.left}px`;
+		mark.style.top = `${rect.top}px`;
+		mark.style.width = `${rect.width}px`;
+		mark.style.height = `${rect.height}px`;
+		mark.title = rect.lineCount === 1 ? '1 line' : `${rect.lineCount} lines`;
+		overlay.appendChild(mark);
 	}
 
 	function formatMaybeDate(value?: string): string {
@@ -1562,9 +1518,9 @@
 	}
 	:global(.pdf-highlight) {
 		position: absolute;
-		background: rgba(200, 85, 61, 0.18);
-		border: 1px solid rgba(200, 85, 61, 0.9);
-		box-shadow: inset 0 0 0 1px rgba(255, 210, 179, 0.22);
+		background: rgba(250, 204, 21, 0.22);
+		border: 1px solid rgba(234, 179, 8, 0.95);
+		box-shadow: inset 0 0 0 1px rgba(254, 240, 138, 0.28);
 	}
 	.doc-foot-hint {
 		font-size: 12px;

@@ -28,6 +28,7 @@ type semanticProjectionRecord struct {
 	SemanticProjectionEn string          `json:"semantic_projection_en,omitempty"`
 	CategoryPaths        json.RawMessage `json:"category_paths"`
 	CategoryPathsEn      json.RawMessage `json:"category_paths_en"`
+	LineSpans            json.RawMessage `json:"line_spans"`
 	ModelName            string          `json:"model_name,omitempty"`
 	PromptName           string          `json:"prompt_name,omitempty"`
 	CreateTime           string          `json:"create_time"`
@@ -80,6 +81,7 @@ SELECT
 	id, semantic_proj_id, input_record_id, event_id, language,
 	descriptive_name, descriptive_name_en, keywords, keywords_en,
 	semantic_projection, semantic_projection_en, category_paths, category_paths_en,
+	line_spans,
 	model_name, prompt_name, create_time
 FROM kb.semantic_projections
 WHERE input_record_id = $1
@@ -108,6 +110,7 @@ ORDER BY id`
 			semanticProjectionEn sql.NullString
 			categoryPaths        []byte
 			categoryPathsEn      []byte
+			lineSpans            []byte
 			modelName            sql.NullString
 			promptName           sql.NullString
 			createTime           time.Time
@@ -116,6 +119,7 @@ ORDER BY id`
 			&r.ID, &r.SemanticProjID, &r.InputRecordID, &eventID, &language,
 			&descriptiveName, &descriptiveNameEn, &keywords, &keywordsEn,
 			&semanticProjection, &semanticProjectionEn, &categoryPaths, &categoryPathsEn,
+			&lineSpans,
 			&modelName, &promptName, &createTime,
 		); err != nil {
 			logger.Error("scan kb.semantic_projections row failed", "err", err, "input_id", inputID)
@@ -136,6 +140,7 @@ ORDER BY id`
 		r.KeywordsEn = jsonArrayOrEmpty(keywordsEn)
 		r.CategoryPaths = jsonArrayOrEmpty(categoryPaths)
 		r.CategoryPathsEn = jsonArrayOrEmpty(categoryPathsEn)
+		r.LineSpans = jsonArrayOrEmpty(lineSpans)
 		r.CreateTime = createTime.Format(time.RFC3339)
 		results = append(results, r)
 	}

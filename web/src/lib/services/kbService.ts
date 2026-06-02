@@ -1781,6 +1781,7 @@ export type KbSemanticProjectionRecord = {
 	semantic_projection_en?: string;
 	category_paths?: SemanticCategoryPath[];
 	category_paths_en?: SemanticCategoryPath[];
+	line_spans?: SourceLineSpan[];
 	model_name?: string;
 	prompt_name?: string;
 	create_time?: string;
