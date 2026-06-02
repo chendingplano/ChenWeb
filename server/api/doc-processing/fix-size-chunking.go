@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -814,6 +815,10 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 	if err := ReindexTopicSearchForRecord(ctx, rec.ID, s.Logger); err != nil {
 		s.Logger.Warn("reindex topic search registry failed", "record_id", rec.ID, "error", err)
 	}
+	// Derive chunk -> topic "has-topic" line_overlap edges (registry-sourced ids).
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, rec.ID, searchArtifactTopic, RelationHasTopic, chunksToBlocks(chunks)); connErr != nil {
+		s.Logger.Warn("write has-topic connections failed", "record_id", rec.ID, "error", connErr)
+	}
 
 	if err := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
 		return appendTopicStatus(current, topicStatusParams{
@@ -939,13 +944,12 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		if err != nil {
 			return SummaryItem{}, err
 		}
-		_, regularLines := chunkLineNumbers(chunk)
 		return SummaryItem{
 			SummaryID:           buildSummaryID(rec.ID, 0, chunk.SeqNo),
 			RecordID:            rec.ID,
 			Level:               0,
 			SeqNo:               chunk.SeqNo,
-			Lines:               lineRangesFromNumbers(regularLines),
+			Lines:               summaryInputLineRanges(chunk.Lines),
 			Keywords:            res.Keywords,
 			KeywordsEn:          res.KeywordsEn,
 			CategoryPaths:       res.CategoryPaths,
@@ -1029,6 +1033,24 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 	}
 	if err := ReindexSummarySearchForRecord(ctx, rec.ID, s.Logger); err != nil {
 		s.Logger.Warn("reindex summary search registry failed", "record_id", rec.ID, "error", err)
+	}
+	// Derive chunk -> summary "has-summary" line_overlap edges for Level-0 summaries
+	// only. Higher-level (wide-span) summaries are excluded from line_overlap and are
+	// related via the summary rollup tree (structural) instead. See
+	// KnowledgeStore/Capsules/coding-capsules/deep-wiki/artifact-graph-creation.md
+	level0SummaryRefs := make([]ArtifactRef, 0, len(allSummaries))
+	for _, item := range allSummaries {
+		if item.Level != 0 {
+			continue
+		}
+		level0SummaryRefs = append(level0SummaryRefs, ArtifactRef{
+			Type:  searchArtifactSummary,
+			ID:    kbsearch.BuildArtifactID(rec.ID, searchArtifactSummary, strconv.Itoa(item.SeqNo)),
+			Spans: item.Lines,
+		})
+	}
+	if connErr := WriteLineOverlapConnectionsForRefs(ctx, rec.ID, searchArtifactSummary, RelationHasSummary, chunksToBlocks(chunks), level0SummaryRefs); connErr != nil {
+		s.Logger.Warn("write has-summary connections failed", "record_id", rec.ID, "error", connErr)
 	}
 
 	if err := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
@@ -1279,14 +1301,23 @@ func (s *FixedSizeChunkingService) generateSummary(
 
 func summaryLogLineSpans(lines []MarkedLine, children []SummaryItem) []string {
 	if len(lines) > 0 {
-		_, regularLines := chunkLineNumbers(Chunk{Lines: lines})
-		return lineRangesFromNumbers(regularLines)
+		return summaryInputLineRanges(lines)
 	}
 	var ranges []string
 	for _, child := range children {
 		ranges = append(ranges, child.Lines...)
 	}
 	return ranges
+}
+
+func summaryInputLineRanges(lines []MarkedLine) []string {
+	nums := make([]int, 0, len(lines))
+	for _, ml := range lines {
+		if ml.Line.LineNo > 0 {
+			nums = append(nums, ml.Line.LineNo)
+		}
+	}
+	return lineRangesFromNumbers(nums)
 }
 
 func docProcJSONOrNil(v any) *string {
@@ -2001,6 +2032,7 @@ func BuildChunks(lines []Line, opts ChunkOptions) ([]Chunk, error) {
 				end = start + 1
 			}
 		}
+		end = extendChunkEndToMinimumRegularBytes(lines, start, end, prevEnd, minRegularBytes(opts.ChunkSize), blocks)
 
 		c := Chunk{SeqNo: seq, Lines: make([]MarkedLine, 0, end-start)}
 		for i := start; i < end; i++ {
@@ -2027,6 +2059,7 @@ func BuildChunks(lines []Line, opts ChunkOptions) ([]Chunk, error) {
 		if nextStart <= start {
 			nextStart = start + 1
 		}
+		nextStart = trimOverlapStartToMaxBytes(lines, nextStart, end, maxOverlapBytes(opts.ChunkSize))
 		start = nextStart
 		seq++
 	}
@@ -2034,7 +2067,112 @@ func BuildChunks(lines []Line, opts ChunkOptions) ([]Chunk, error) {
 	if err := validateChunksNonEmpty(chunks, "built chunks"); err != nil {
 		return nil, err
 	}
+	if err := validateChunkSizeSanity(chunks, opts.ChunkSize); err != nil {
+		return nil, err
+	}
 	return chunks, nil
+}
+
+func extendChunkEndToMinimumRegularBytes(lines []Line, start int, end int, prevEnd int, minBytes int, blocks []*protectedBlock) int {
+	if minBytes <= 0 || end >= len(lines) {
+		return end
+	}
+	for end < len(lines) && regularBytesInRange(lines, start, end, prevEnd) < minBytes {
+		next := adjustChunkEnd(start, end+1, len(lines), blocks)
+		if next <= end {
+			next = end + 1
+		}
+		end = min(next, len(lines))
+	}
+	return end
+}
+
+func regularBytesInRange(lines []Line, start int, end int, prevEnd int) int {
+	size := 0
+	for i := max(start, prevEnd); i < end && i < len(lines); i++ {
+		size += lineRawByteSize(lines[i])
+	}
+	return size
+}
+
+func trimOverlapStartToMaxBytes(lines []Line, start int, end int, maxBytes int) int {
+	if start >= end {
+		return start
+	}
+	for end-start > 1 && lineRangeByteSize(lines, start, end) > maxBytes {
+		start++
+	}
+	return start
+}
+
+func lineRangeByteSize(lines []Line, start int, end int) int {
+	size := 0
+	for i := max(0, start); i < end && i < len(lines); i++ {
+		size += lineRawByteSize(lines[i])
+	}
+	return size
+}
+
+func maxOverlapBytes(minBytes int) int {
+	if minBytes <= 0 {
+		return 0
+	}
+	return minBytes * 20 / 100
+}
+
+func minRegularBytes(minBytes int) int {
+	if minBytes <= 0 {
+		return 0
+	}
+	return (minBytes*80 + 99) / 100
+}
+
+func validateChunkSizeSanity(chunks []Chunk, minBytes int) error {
+	if minBytes <= 0 {
+		return nil
+	}
+	minRegular := minRegularBytes(minBytes)
+	maxOverlap := maxOverlapBytes(minBytes)
+	for i := 0; i < len(chunks); i++ {
+		chunk := chunks[i]
+		regularBytes := 0
+		overlapBytes := 0
+		overlapCount := 0
+		for _, ml := range chunk.Lines {
+			if strings.EqualFold(strings.TrimSpace(ml.Mark), "o") {
+				overlapBytes += lineRawByteSize(ml.Line)
+				overlapCount++
+				continue
+			}
+			regularBytes += lineRawByteSize(ml.Line)
+		}
+		overlapLines, regularLines := chunkLineNumbers(chunk)
+		if overlapCount > 1 && overlapBytes > maxOverlap {
+			return fmt.Errorf(
+				"(MID_26060202) chunk sanity check failed: chunk %d overlap payload is too large: overlap_bytes=%d max_overlap_bytes=%d overlap=%s lines=%s",
+				chunk.SeqNo,
+				overlapBytes,
+				maxOverlap,
+				formatLineNumberRanges(overlapLines),
+				formatLineNumberRanges(regularLines),
+			)
+		}
+		if i == len(chunks)-1 {
+			continue
+		}
+		if regularBytes >= minRegular {
+			continue
+		}
+		return fmt.Errorf(
+			"(MID_26060201) chunk sanity check failed: non-final chunk %d regular payload is too small: regular_bytes=%d min_regular_bytes=%d overlap=%s lines=%s",
+			chunk.SeqNo,
+			regularBytes,
+			minRegular,
+			formatLineNumberRanges(overlapLines),
+			formatLineNumberRanges(regularLines),
+		)
+	}
+	return nil
 }
 
 func filterTOCLines(lines []Line) []Line {

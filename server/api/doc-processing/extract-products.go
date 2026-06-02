@@ -354,6 +354,10 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	if reindexErr := ReindexProductSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex product search registry failed", "record_id", evt.RecordID, "error", reindexErr)
 	}
+	// Derive chunk -> product "has-part-component" line_overlap edges (registry-sourced ids).
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, evt.RecordID, searchArtifactProduct, RelationHasPartComponent, blocks); connErr != nil {
+		p.Logger.Warn("write has-part-component connections failed", "record_id", evt.RecordID, "error", connErr)
+	}
 	p.Logger.Info("products extracted",
 		"record_id", evt.RecordID,
 		"inserted_rows", inserted,

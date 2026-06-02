@@ -270,8 +270,8 @@ func TestBuildChunks_SkipsTOCLinesInRegularAndOverlap(t *testing.T) {
 		{LineNo: 2, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Beta Beta"},
 		{LineNo: 3, PageNo: 1, LineType: "toc", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Table of Contents"},
 		{LineNo: 4, PageNo: 1, LineType: "TOC", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Chapter 1"},
-		{LineNo: 5, PageNo: 2, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Gamma Gamma"},
-		{LineNo: 6, PageNo: 2, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Delta Delta"},
+		{LineNo: 5, PageNo: 2, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Gamma Gamma Gamma Gamma"},
+		{LineNo: 6, PageNo: 2, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "Delta Delta Delta Delta"},
 	}
 
 	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: 35, OverlapPercent: 50})
@@ -293,6 +293,138 @@ func TestBuildChunks_SkipsTOCLinesInRegularAndOverlap(t *testing.T) {
 				t.Fatalf("chunk %d includes TOC marked line: %+v", chunk.SeqNo, ml)
 			}
 		}
+	}
+}
+
+func TestValidateChunkSizeSanityRejectsShortNonFinalChunk(t *testing.T) {
+	chunks := []Chunk{
+		{
+			SeqNo: 1,
+			Lines: []MarkedLine{
+				{Line: Line{LineNo: 890, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("alpha ", 30)}, Mark: "n"},
+			},
+		},
+		{
+			SeqNo: 2,
+			Lines: []MarkedLine{
+				{Line: Line{LineNo: 898, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "context"}, Mark: "o"},
+				{Line: Line{LineNo: 905, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "short"}, Mark: "n"},
+			},
+		},
+		{
+			SeqNo: 3,
+			Lines: []MarkedLine{
+				{Line: Line{LineNo: 906, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("omega ", 30)}, Mark: "n"},
+			},
+		},
+	}
+
+	err := validateChunkSizeSanity(chunks, 100)
+	if err == nil {
+		t.Fatal("validateChunkSizeSanity returned nil, want error")
+	}
+	for _, want := range []string{"non-final chunk 2", "regular_bytes=", "min_regular_bytes=80", "lines=[905]"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error=%q, want substring %q", err.Error(), want)
+		}
+	}
+}
+
+func TestValidateChunkSizeSanityAllowsShortFinalChunk(t *testing.T) {
+	chunks := []Chunk{
+		{
+			SeqNo: 1,
+			Lines: []MarkedLine{
+				{Line: Line{LineNo: 1, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("alpha ", 30)}, Mark: "n"},
+			},
+		},
+		{
+			SeqNo: 2,
+			Lines: []MarkedLine{
+				{Line: Line{LineNo: 2, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "short"}, Mark: "n"},
+			},
+		},
+	}
+
+	if err := validateChunkSizeSanity(chunks, 100); err != nil {
+		t.Fatalf("validateChunkSizeSanity: %v", err)
+	}
+}
+
+func TestValidateChunkSizeSanityRejectsLargeMultiLineOverlap(t *testing.T) {
+	chunks := []Chunk{
+		{
+			SeqNo: 1,
+			Lines: []MarkedLine{
+				{Line: Line{LineNo: 1, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("overlap ", 10)}, Mark: "o"},
+				{Line: Line{LineNo: 2, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("overlap ", 10)}, Mark: "o"},
+				{Line: Line{LineNo: 3, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("regular ", 30)}, Mark: "n"},
+			},
+		},
+	}
+
+	err := validateChunkSizeSanity(chunks, 100)
+	if err == nil {
+		t.Fatal("validateChunkSizeSanity returned nil, want error")
+	}
+	for _, want := range []string{"chunk 1", "overlap_bytes=", "max_overlap_bytes=20", "overlap=[1-2]"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error=%q, want substring %q", err.Error(), want)
+		}
+	}
+}
+
+func TestBuildChunks_ExtendsNonFinalChunkWhenOverlapConsumesTarget(t *testing.T) {
+	lines := []Line{
+		{LineNo: 1, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "intro"},
+		{LineNo: 2, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("overlap ", 30)},
+		{LineNo: 3, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: "short"},
+		{LineNo: 4, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("regular ", 30)},
+		{LineNo: 5, PageNo: 1, LineType: "paragraph", Font: "TestFont", FontSize: "12", Coordinate: "[0,0,1,1]", Content: strings.Repeat("tail ", 30)},
+	}
+
+	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: 100, OverlapPercent: 50})
+	if err != nil {
+		t.Fatalf("BuildChunks: %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("chunks=%d, want at least 2", len(chunks))
+	}
+
+	overlap, regular := chunkLineNumbers(chunks[1])
+	if got := formatLineNumberRanges(overlap); got != "[2]" {
+		t.Fatalf("chunk 2 overlap=%s, want [2]", got)
+	}
+	if got := formatLineNumberRanges(regular); got != "[3-4]" {
+		t.Fatalf("chunk 2 regular=%s, want [3-4]", got)
+	}
+}
+
+func TestBuildChunks_TrimsOverlapToTwentyPercentOrOneLine(t *testing.T) {
+	lines := make([]Line, 0, 12)
+	for lineNo := 1; lineNo <= 12; lineNo++ {
+		lines = append(lines, Line{
+			LineNo:     lineNo,
+			PageNo:     1,
+			LineType:   "paragraph",
+			Font:       "TestFont",
+			FontSize:   "12",
+			Coordinate: "[0,0,1,1]",
+			Content:    "abcdefghij",
+		})
+	}
+
+	chunks, err := BuildChunks(lines, ChunkOptions{ChunkSize: 100, OverlapPercent: 90})
+	if err != nil {
+		t.Fatalf("BuildChunks: %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("chunks=%d, want at least 2", len(chunks))
+	}
+
+	overlap, _ := chunkLineNumbers(chunks[1])
+	if len(overlap) != 1 {
+		t.Fatalf("chunk 2 overlap=%v, want one overlap line", overlap)
 	}
 }
 
@@ -1210,6 +1342,59 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 	}
 	if !foundIntermediate {
 		t.Fatalf("missing intermediate summary progress update in history: %#v", st.updateHistory)
+	}
+}
+
+func TestService_HandleGenerateSummariesInput_LeafLinesIncludeSingleOverlap(t *testing.T) {
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	tmp := t.TempDir()
+	recordDir := filepath.Join(tmp, "0", "173")
+	if err := os.MkdirAll(recordDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(recordDir, "std_1351666_opendata.chunks"),
+		[]byte("overlap: [784]\nlines: [785-804]\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write chunk artifact: %v", err)
+	}
+
+	inputLines := make([]string, 0, 21)
+	for lineNo := 784; lineNo <= 804; lineNo++ {
+		inputLines = append(inputLines, asString(lineNo)+"\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tLine "+asString(lineNo))
+	}
+	input := strings.Join(inputLines, "\n")
+	st := &fakeStore{rec: InputRecord{
+		ID:              173,
+		ParserName:      "opendata",
+		StagingFilename: "std_1351666.pdf",
+	}}
+	svc := NewFixedSizeChunkingService(st, nil, nil)
+	svc.ChunkDir = tmp
+	svc.ArtifactWebDir = t.TempDir()
+	svc.SummaryModelErr = nil
+	svc.SummaryPromptErr = nil
+	svc.SummaryModelName = "summary-model"
+	svc.SummaryPromptText = "summarize chunk"
+	svc.SummaryGroupSize = 10
+	svc.GenerateSummary = func(_ context.Context, _ int64, _ int, _ int, lines []MarkedLine, _ []SummaryItem) (summaryGenerateResult, error) {
+		if got := formatLineNumberRanges(chunkLineNosFromMarkedLines(lines)); got != "[784-804]" {
+			t.Fatalf("summary input lines=%s, want [784-804]", got)
+		}
+		return summaryGenerateResult{Summary: "summary"}, nil
+	}
+
+	if err := svc.HandleGenerateSummariesInput(context.Background(), 173, "std_1351666.txt", []byte(input)); err != nil {
+		t.Fatalf("HandleGenerateSummariesInput: %v", err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(recordDir, "summary_0_0001.txt"))
+	if err != nil {
+		t.Fatalf("read summary artifact: %v", err)
+	}
+	if !strings.Contains(string(body), "lines: [784-804]") {
+		t.Fatalf("summary artifact=%q, want lines [784-804]", string(body))
 	}
 }
 

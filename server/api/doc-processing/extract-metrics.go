@@ -376,6 +376,13 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.Logger.Warn("reindex metric search registry failed", "record_id", evt.RecordID, "error", reindexErr)
 	}
 
+	// Derive chunk -> metric "has-metrics" line_overlap edges for the artifact graph.
+	// Refs are sourced from kb.search_artifacts (reindexed just above) so target_id
+	// matches the canonical artifact identity used across the system.
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, evt.RecordID, searchArtifactMetric, RelationHasMetrics, inputChunks); connErr != nil {
+		p.Logger.Warn("write has-metrics connections failed", "record_id", evt.RecordID, "error", connErr)
+	}
+
 	p.Logger.Info("metrics extracted",
 		"record_id", evt.RecordID,
 		"inserted_rows", inserted,

@@ -354,6 +354,10 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 	if reindexErr := ReindexSceneBlockSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex scene block search registry failed", "record_id", evt.RecordID, "error", reindexErr)
 	}
+	// Derive chunk -> scene "has-scene" line_overlap edges (registry-sourced ids).
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, evt.RecordID, searchArtifactSceneBlock, RelationHasScene, chunksToBlocks(chunks)); connErr != nil {
+		p.Logger.Warn("write has-scene connections failed", "record_id", evt.RecordID, "error", connErr)
+	}
 
 	p.Logger.Info("scene blocks extracted",
 		"record_id", evt.RecordID,

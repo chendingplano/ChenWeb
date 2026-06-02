@@ -194,6 +194,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 	var numUnits int
 	var extractErr error
 
+	var chunkBlocks []Block
 	if p.ExtractProvisionsInput == "blocks" {
 		var blocks []Block
 		blocks, extractErr = p.resolveBlocks(ctx, evt, rec)
@@ -208,6 +209,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 			return nil
 		}
 		numUnits = len(blocks)
+		chunkBlocks = blocks
 		result, extractErr = p.extractProvisionsFromBlocksWithLLM(ctx, blocks, evt.RecordID)
 	} else {
 		var chunks []Chunk
@@ -223,6 +225,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 			return nil
 		}
 		numUnits = len(chunks)
+		chunkBlocks = chunksToBlocks(chunks)
 		result, extractErr = p.extractProvisionsFromChunksWithLLM(ctx, chunks, evt.RecordID)
 	}
 	if extractErr != nil {
@@ -259,6 +262,10 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 	}
 	if reindexErr := ReindexProvisionSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex provision search registry failed", "record_id", evt.RecordID, "error", reindexErr)
+	}
+	// Derive chunk -> provision "has-provision" line_overlap edges (registry-sourced ids).
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, evt.RecordID, searchArtifactProvision, RelationHasProvision, chunkBlocks); connErr != nil {
+		p.Logger.Warn("write has-provision connections failed", "record_id", evt.RecordID, "error", connErr)
 	}
 	p.Logger.Info("provisions extracted",
 		"record_id", evt.RecordID,

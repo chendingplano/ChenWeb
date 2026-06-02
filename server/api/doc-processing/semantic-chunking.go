@@ -327,6 +327,10 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 	if err := ReindexTopicSearchForRecord(ctx, rec.ID, s.Logger); err != nil {
 		s.Logger.Warn("reindex topic search registry failed", "record_id", rec.ID, "error", err)
 	}
+	// Derive chunk -> topic "has-topic" line_overlap edges (registry-sourced ids).
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, rec.ID, searchArtifactTopic, RelationHasTopic, semanticBlocksToBlocks(blocks)); connErr != nil {
+		s.Logger.Warn("write has-topic connections failed", "record_id", rec.ID, "error", connErr)
+	}
 
 	overlapPercent := 0
 	if s.FileBlockSize > 0 {
@@ -405,6 +409,25 @@ func ParseSemanticInputLines(input []byte) ([]Line, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// semanticBlocksToBlocks converts semantic page blocks into the generic Block
+// form used for line_overlap connection derivation (Index = BlockNo).
+func semanticBlocksToBlocks(blocks []SemanticPageBlock) []Block {
+	out := make([]Block, 0, len(blocks))
+	for _, b := range blocks {
+		lines := make([]BlockLine, 0, len(b.Lines))
+		for _, l := range b.Lines {
+			lines = append(lines, BlockLine{
+				LineNumber: l.LineNo,
+				PageNumber: l.PageNo,
+				LineType:   l.LineType,
+				Content:    l.Content,
+			})
+		}
+		out = append(out, Block{Index: b.BlockNo, Lines: lines})
+	}
+	return out
 }
 
 func BuildSemanticPageBlocks(lines []Line, fileBlockSize int) []SemanticPageBlock {
