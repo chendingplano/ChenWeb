@@ -22,6 +22,7 @@
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import ChunkMgmtView from '$lib/components/home3/chunk-mgmt-view.svelte';
 	import KnowledgeStoreView from '$lib/components/home3/knowledge-store-view.svelte';
+	import KbSearchResultsView from '$lib/components/home3/kb-search-results-view.svelte';
 	import ArtifactWikiView from '$lib/components/home3/artifact-wiki-view.svelte';
 	import LlmWikiV2View from '$lib/components/home3/llm-wiki-v2-view.svelte';
 	import LlmWikiV3View from '$lib/components/home3/llm-wiki-v3-view.svelte';
@@ -249,6 +250,7 @@
 	let activeSection = $state<KbSectionId>(
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
 	);
+	let searchQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
 
 	$effect(() => {
 		const found = menuItems.some(
@@ -596,7 +598,11 @@
 					</div>
 				</div>
 			{:else if activeSection === 'kb-search'}
-				<KnowledgeStoreView {darkMode} />
+				{#if searchQuery}
+					<KbSearchResultsView {darkMode} initialQuery={searchQuery} />
+				{:else}
+					<KnowledgeStoreView {darkMode} />
+				{/if}
 			{:else if activeSection === 'kb-import'}
 				<KbImportView {darkMode} />
 			{:else if activeSection === 'kb-llm-wiki-v2'}

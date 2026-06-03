@@ -174,6 +174,12 @@ func ReindexProductSearchForRecord(ctx context.Context, recordID int64, logger A
 }
 
 func replaceRegistryRows(ctx context.Context, db *sql.DB, artifactType string, recordID int64, rows []kbsearch.RegistryRow, logger ApiTypes.JimoLogger) error {
+	// Best-effort semantic enrichment. Only when the hybrid-search feature flag is
+	// on (which requires the pgvector migration applied); otherwise rows stay
+	// lexical-only and InsertSearchRegistryRows uses the embedding-free statement.
+	if kbsearch.SemanticSearchEnabled() {
+		embedRegistryRows(ctx, rows, logger)
+	}
 	deleted, err := kbsearch.DeleteSearchRegistryRowsForRecord(ctx, db, artifactType, recordID)
 	if err != nil {
 		return err
