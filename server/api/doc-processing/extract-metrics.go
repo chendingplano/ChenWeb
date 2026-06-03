@@ -297,6 +297,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		}
 		if exists {
 			p.Logger.Info("metrics extraction skipped", "record_id", evt.RecordID, "reason", "metrics already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactMetric, evt.RecordID, p.Logger, ReindexMetricSearchForRecord)
 			p.persistMetricsStatus(ctx, rec, start, nil)
 			return nil
 		}

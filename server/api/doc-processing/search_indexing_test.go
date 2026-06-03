@@ -83,6 +83,7 @@ category_paths: ["safety","battery"]
 }
 
 func TestReplaceRegistryRowsDeletesThenInserts(t *testing.T) {
+	t.Setenv("SEARCH_SEMANTIC_ENABLED", "")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)

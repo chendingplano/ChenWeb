@@ -199,6 +199,18 @@ func replaceRegistryRows(ctx context.Context, db *sql.DB, artifactType string, r
 	return nil
 }
 
+func reindexExistingSearchOnSkip(ctx context.Context, artifactType string, recordID int64, logger ApiTypes.JimoLogger, reindex func(context.Context, int64, ApiTypes.JimoLogger) error) {
+	if reindex == nil {
+		return
+	}
+	if err := reindex(ctx, recordID, logger); err != nil && logger != nil {
+		logger.Warn("reindex search registry for existing artifacts failed",
+			"artifact_type", artifactType,
+			"input_record_id", recordID,
+			"error", err)
+	}
+}
+
 func fetchSearchSourceTitle(ctx context.Context, db *sql.DB, recordID int64) (string, error) {
 	var fileName sql.NullString
 	if err := db.QueryRowContext(ctx, `SELECT file_name FROM kb.inputs WHERE id = $1`, recordID).Scan(&fileName); err != nil {

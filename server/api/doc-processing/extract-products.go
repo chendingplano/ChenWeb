@@ -295,6 +295,7 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 		}
 		if exists {
 			p.Logger.Info("products extraction skipped", "record_id", evt.RecordID, "reason", "products already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactProduct, evt.RecordID, p.Logger, ReindexProductSearchForRecord)
 			p.persistProductsStatus(ctx, rec, start, nil)
 			return nil
 		}

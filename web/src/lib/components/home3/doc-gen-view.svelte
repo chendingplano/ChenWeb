@@ -15,8 +15,16 @@
 	let textMuted   = $derived(darkMode ? '#64748B' : '#9CA3AF');
 
 	type Tab = 'generate' | 'history' | 'queries';
+	type TabOption = { id: Tab; label: string };
+	const baseTabs: TabOption[] = [
+		{ id: 'generate', label: 'Generate' },
+		{ id: 'history', label: 'History' }
+	];
 	let activeTab = $state<Tab>('generate');
 	let isAdmin = $state(false);
+	let visibleTabs = $derived<TabOption[]>(
+		isAdmin ? [...baseTabs, { id: 'queries', label: 'SQL Queries' }] : baseTabs
+	);
 
 	// --- Generate tab state ---
 	let requestName  = $state('');
@@ -239,9 +247,9 @@
 <div class="flex flex-col h-full overflow-y-auto p-6" style="background:{pageBg};">
 	<!-- Tab bar -->
 	<div class="flex gap-1 mb-6 p-1 rounded-xl flex-shrink-0" style="background:{surface2}; border:1px solid {borderColor}; width:fit-content;">
-		{#each ([['generate','Generate'],['history','History'],isAdmin ? ['queries','SQL Queries'] : null] as const).filter(Boolean) as [id, label]}
+		{#each visibleTabs as { id, label } (id)}
 			<button
-				onclick={() => { activeTab = id as Tab; if (id === 'history') loadHistory(); if (id === 'queries') loadQueryList(); }}
+				onclick={() => { activeTab = id; if (id === 'history') loadHistory(); if (id === 'queries') loadQueryList(); }}
 				class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors duration-150"
 				style="background:{activeTab === id ? accent : 'transparent'}; color:{activeTab === id ? 'white' : textSecondary};"
 			>{label}</button>

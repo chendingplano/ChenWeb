@@ -1,17 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { getWikiOverview, type WikiOverviewResponse } from '$lib/services/kbService';
-	import { getLocale, setLocale, locales } from '$lib/paraglide/runtime.js';
-	import FilesIcon from '@lucide/svelte/icons/files';
-	import FileSearchIcon from '@lucide/svelte/icons/file-search';
-	import PresentationIcon from '@lucide/svelte/icons/presentation';
-	import GlobeIcon from '@lucide/svelte/icons/globe';
-	import NetworkIcon from '@lucide/svelte/icons/network';
-	import ChartBarIcon from '@lucide/svelte/icons/chart-bar';
-	import BoxesIcon from '@lucide/svelte/icons/boxes';
-	import ScaleIcon from '@lucide/svelte/icons/scale';
-	import ClapperboardIcon from '@lucide/svelte/icons/clapperboard';
+	import SemosKbHero from '$lib/components/home3/semos-kb-hero.svelte';
 
 	// ---------------------------------------------------------------------------
 	// Data
@@ -35,99 +25,10 @@
 	onMount(load);
 
 	// ---------------------------------------------------------------------------
-	// Navigation targets (shared by hero stat nodes and the Panel B directory)
+	// Navigation targets for the Panel B directory
 	// ---------------------------------------------------------------------------
 	const KNOWLEDGE = '/home3/knowledge?section=';
 	const GRAPH_HREF = '/knowledge-graph';
-
-	type ArtifactKey =
-		| 'documents'
-		| 'content_segments'
-		| 'topics'
-		| 'semantic_projections'
-		| 'metrics'
-		| 'provisions'
-		| 'parts_components'
-		| 'scenes'
-		| 'entities'
-		| 'relations';
-
-	type StatNode = {
-		n: number;
-		label: string;
-		keys: ArtifactKey[];
-		icon: typeof FilesIcon;
-		href: string;
-	};
-
-	// The nine corpus dimensions that orbit the SemOS KB core (Panel A), numbered
-	// and ordered to match the system diagram. "Entities and Relations" is one node
-	// (the graph), so its value sums both counts.
-	const STAT_NODES: StatNode[] = [
-		{
-			n: 1,
-			label: 'Documents',
-			keys: ['documents'],
-			icon: FilesIcon,
-			href: KNOWLEDGE + 'kb-input-details'
-		},
-		{
-			n: 2,
-			label: 'Content Segments',
-			keys: ['content_segments'],
-			icon: FileSearchIcon,
-			href: KNOWLEDGE + 'kb-chunks'
-		},
-		{
-			n: 3,
-			label: 'Topics',
-			keys: ['topics'],
-			icon: PresentationIcon,
-			href: KNOWLEDGE + 'kb-topic-tree'
-		},
-		{
-			n: 4,
-			label: 'Semantic Projections',
-			keys: ['semantic_projections'],
-			icon: GlobeIcon,
-			href: KNOWLEDGE + 'kb-semantic-projections'
-		},
-		{
-			n: 5,
-			label: 'Entities & Relations',
-			keys: ['entities', 'relations'],
-			icon: NetworkIcon,
-			href: GRAPH_HREF
-		},
-		{
-			n: 6,
-			label: 'Metrics',
-			keys: ['metrics'],
-			icon: ChartBarIcon,
-			href: KNOWLEDGE + 'kb-metrics'
-		},
-		{
-			n: 7,
-			label: 'Parts & Components',
-			keys: ['parts_components'],
-			icon: BoxesIcon,
-			href: KNOWLEDGE + 'kb-products'
-		},
-		{
-			n: 8,
-			label: 'Provisions',
-			keys: ['provisions'],
-			icon: ScaleIcon,
-			href: KNOWLEDGE + 'kb-provision-tree'
-		},
-		{
-			n: 9,
-			label: 'Scenes',
-			keys: ['scenes'],
-			icon: ClapperboardIcon,
-			href: KNOWLEDGE + 'kb-scene-blocks'
-		}
-	];
 
 	// The eight portals (Panel B) — each a doorway into a browse/search surface.
 	const PORTALS: { label: string; blurb: string; href: string }[] = [
@@ -152,29 +53,6 @@
 		},
 		{ label: 'Graphs', blurb: 'browse and search entities and relations', href: GRAPH_HREF }
 	];
-
-	// ---------------------------------------------------------------------------
-	// Radial geometry — places the nine nodes evenly around the emblem
-	// ---------------------------------------------------------------------------
-	const RING_RADIUS = 248;
-	const positioned = $derived(
-		STAT_NODES.map((node, i) => {
-			const angle = ((-90 + (360 / STAT_NODES.length) * i) * Math.PI) / 180;
-			const counts = overview?.counts;
-			const value = counts ? node.keys.reduce((sum, k) => sum + (counts[k] ?? 0), 0) : null;
-			return {
-				...node,
-				x: Math.round(Math.cos(angle) * RING_RADIUS),
-				y: Math.round(Math.sin(angle) * RING_RADIUS),
-				value
-			};
-		})
-	);
-
-	// Collapse the constellation into a stacked grid only once the ring (a ~620px
-	// box of nodes orbiting the emblem) can no longer fit the Panel A column.
-	let heroWidth = $state(1200);
-	const compact = $derived(heroWidth < 680);
 
 	// ---------------------------------------------------------------------------
 	// Formatting helpers
@@ -206,35 +84,6 @@
 		return Number.isNaN(d.getTime()) ? '' : d.toLocaleString();
 	}
 
-	// ---------------------------------------------------------------------------
-	// Search + language
-	// ---------------------------------------------------------------------------
-	let query = $state('');
-	function runSearch(event: SubmitEvent) {
-		event.preventDefault();
-		const q = query.trim();
-		goto(`/home3/knowledge?section=kb-search${q ? `&q=${encodeURIComponent(q)}` : ''}`);
-	}
-
-	const LOCALE_LABELS: Record<string, string> = { en: 'English', 'zh-cn': '中文' };
-	let currentLocale = $state<string>('en');
-	onMount(() => {
-		try {
-			currentLocale = getLocale();
-		} catch {
-			currentLocale = 'en';
-		}
-	});
-	function changeLocale(event: Event) {
-		const next = (event.target as HTMLSelectElement).value;
-		currentLocale = next;
-		try {
-			setLocale(next as (typeof locales)[number]);
-		} catch {
-			/* setLocale handles its own reload strategy; ignore failures */
-		}
-	}
-
 	const totalDocs = $derived(overview?.counts.documents ?? null);
 </script>
 
@@ -247,114 +96,31 @@
 </svelte:head>
 
 <div class="wiki">
-	<!-- ===================== PANEL A + PANEL B ===================== -->
-	<div class="masthead">
-		<!-- Panel A: radial hero -------------------------------------------- -->
-		<section class="panel-a" aria-label="Corpus overview" bind:clientWidth={heroWidth}>
-			<p class="eyebrow">The deep knowledge base</p>
-			<h1 class="wordmark">SemOS</h1>
+	<!-- ===================== PANEL A: reusable SemOS KB hero ===================== -->
+	<!-- Full width so the hero clears its compact breakpoint and renders the wired
+	     diagram identically to the LLM Wiki v3 Top Panel. -->
+	<SemosKbHero darkMode={false} {overview} {loading} />
 
-			<div class="hero-ring" class:compact>
-				{#if !compact}
-					<svg class="connectors" viewBox="-320 -320 640 640" aria-hidden="true">
-						{#each positioned as n (n.n)}
-							<line x1="0" y1="0" x2={n.x} y2={n.y} />
-						{/each}
-					</svg>
-				{/if}
-
-				<!-- The SemOS KB core: a workstation onto the knowledge base -->
-				<div class="core" aria-hidden="true">
-					<svg viewBox="0 0 240 214" class="core-svg">
-						<!-- monitor bezel + screen -->
-						<rect x="22" y="6" width="196" height="138" rx="14" class="mon-bezel" />
-						<rect x="33" y="17" width="174" height="116" rx="7" class="mon-screen" />
-						<!-- on-screen knowledge core: cloud, database, linked nodes -->
-						<path
-							class="scr-stroke"
-							d="M150 44c0-6-5-11-11-11-1-5-6-9-12-9-5 0-10 3-11 8-5 0-9 4-9 9 0 5 4 9 10 9h35c5 0 9-4 9-8 0-3-2-5-5-6z"
-						/>
-						<g class="scr-node">
-							<circle cx="74" cy="60" r="6" />
-							<circle cx="166" cy="96" r="6" />
-							<circle cx="92" cy="108" r="6" />
-						</g>
-						<g class="scr-link">
-							<line x1="74" y1="60" x2="120" y2="86" />
-							<line x1="166" y1="96" x2="120" y2="86" />
-							<line x1="92" y1="108" x2="120" y2="86" />
-						</g>
-						<!-- central database cylinder -->
-						<g class="scr-db">
-							<ellipse cx="120" cy="74" rx="17" ry="6" />
-							<path d="M103 74v18c0 3 8 6 17 6s17-3 17-6V74" />
-							<path class="scr-db-line" d="M103 83c0 3 8 6 17 6s17-3 17-6" />
-						</g>
-						<text x="120" y="125" class="mon-label">SemOS KB</text>
-						<!-- stand -->
-						<rect x="109" y="144" width="22" height="26" rx="3" class="mon-stand" />
-						<rect x="84" y="170" width="72" height="12" rx="6" class="mon-stand" />
-					</svg>
-				</div>
-
-				<div class="stat-grid">
-					{#each positioned as n (n.n)}
-						{@const Icon = n.icon}
-						<a class="stat-node" href={n.href} style={compact ? '' : `--x:${n.x}px; --y:${n.y}px`}>
-							<span class="stat-icon"><Icon size={20} strokeWidth={1.75} /></span>
-							<span class="stat-label"><span class="stat-n">{n.n}</span>{n.label}</span>
-							<span class="stat-value">{fmt(n.value)}</span>
-						</a>
-					{/each}
-				</div>
-			</div>
-
-			<!-- search + language -->
-			<form class="search" onsubmit={runSearch} role="search">
-				<svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
-					<circle cx="11" cy="11" r="7" />
-					<line x1="21" y1="21" x2="16.65" y2="16.65" />
-				</svg>
-				<input
-					type="search"
-					placeholder="Search the knowledge base"
-					aria-label="Search the knowledge base"
-					bind:value={query}
-					autocomplete="off"
-				/>
-				<label class="lang">
-					<span class="sr-only">Language</span>
-					<select value={currentLocale} onchange={changeLocale} aria-label="Select language">
-						{#each locales as code}
-							<option value={code}>{LOCALE_LABELS[code] ?? code}</option>
-						{/each}
-					</select>
-				</label>
-				<button type="submit">Search</button>
-			</form>
-		</section>
-
-		<!-- Panel B: portal directory --------------------------------------- -->
-		<section class="panel-b" aria-label="Browse by artifact type">
-			<h2 class="panel-title">Explore the wiki</h2>
-			<nav class="portals">
-				{#each PORTALS as p (p.label)}
-					<a class="portal" href={p.href}>
-						<span class="portal-label">{p.label}</span>
-						<span class="portal-blurb">{p.blurb}</span>
-					</a>
-				{/each}
-			</nav>
-			<p class="panel-foot">
-				{#if totalDocs != null}
-					Artifacts are linked through relations, forming one navigable wiki across
-					{fmt(totalDocs)} documents.
-				{:else}
-					Artifacts are linked through relations, forming one navigable wiki.
-				{/if}
-			</p>
-		</section>
-	</div>
+	<!-- ===================== PANEL B: portal directory ===================== -->
+	<section class="panel-b" aria-label="Browse by artifact type">
+		<h2 class="panel-title">Explore the wiki</h2>
+		<nav class="portals">
+			{#each PORTALS as p (p.label)}
+				<a class="portal" href={p.href}>
+					<span class="portal-label">{p.label}</span>
+					<span class="portal-blurb">{p.blurb}</span>
+				</a>
+			{/each}
+		</nav>
+		<p class="panel-foot">
+			{#if totalDocs != null}
+				Artifacts are linked through relations, forming one navigable wiki across
+				{fmt(totalDocs)} documents.
+			{:else}
+				Artifacts are linked through relations, forming one navigable wiki.
+			{/if}
+		</p>
+	</section>
 
 	<!-- ===================== PANEL C ===================== -->
 	<section class="panel-c" aria-label="Recent activity">
@@ -522,304 +288,24 @@
 		overflow-x: clip;
 	}
 
-	/* ---- Masthead: Panel A | Panel B -------------------------------------- */
-	.masthead {
-		display: grid;
-		grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
-		gap: clamp(1.5rem, 3vw, 3.5rem);
-		max-width: 1320px;
-		margin: 0 auto;
-		align-items: start;
-	}
-
-	/* ---- Panel A ---------------------------------------------------------- */
-	.panel-a {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		text-align: center;
-	}
-	.eyebrow {
-		margin: 0;
-		font-size: 0.72rem;
-		letter-spacing: 0.22em;
-		text-transform: uppercase;
-		color: var(--ink-faint);
-	}
-	.wordmark {
-		margin: 0.15rem 0 0;
-		font-family: var(--serif);
-		font-weight: 400;
-		font-size: clamp(2.6rem, 4.4vw, 3.6rem);
-		letter-spacing: -0.01em;
-		color: var(--ink);
-	}
-
-	.hero-ring {
-		position: relative;
-		width: 100%;
-		height: 632px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		margin: 0.25rem 0 1.5rem;
-	}
-	.connectors {
-		position: absolute;
-		inset: 0;
-		width: 100%;
-		height: 100%;
-		pointer-events: none;
-	}
-	.connectors line {
-		stroke: var(--accent);
-		stroke-width: 1.25;
-		stroke-dasharray: 2 6;
-		stroke-linecap: round;
-		opacity: 0.5;
-	}
-
-	/* SemOS KB core: the workstation monitor ------------------------------- */
-	.core {
-		position: relative;
-		width: 252px;
-		z-index: 2;
-	}
-	.core-svg {
-		width: 100%;
-		height: auto;
-		overflow: visible;
-	}
-	.mon-bezel {
-		fill: var(--ink);
-	}
-	.mon-screen {
-		fill: var(--surface);
-	}
-	.scr-stroke {
-		fill: none;
-		stroke: var(--ink-faint);
-		stroke-width: 2.25;
-		stroke-linejoin: round;
-	}
-	.scr-node circle {
-		fill: var(--accent);
-	}
-	.scr-link line {
-		stroke: var(--ink-faint);
-		stroke-width: 1.5;
-	}
-	.scr-db ellipse {
-		fill: var(--accent-tint);
-		stroke: var(--accent-strong);
-		stroke-width: 2;
-	}
-	.scr-db path {
-		fill: none;
-		stroke: var(--accent-strong);
-		stroke-width: 2;
-	}
-	.mon-label {
-		fill: var(--accent-strong);
-		font-family: var(--serif);
-		font-size: 16px;
-		font-weight: 600;
-		text-anchor: middle;
-		letter-spacing: 0.01em;
-	}
-	.mon-stand {
-		fill: var(--ink-soft);
-	}
-
-	/* In radial mode the grid wrapper is transparent so each node positions
-	   absolutely against .hero-ring; in compact mode it becomes a real grid. */
-	.stat-grid {
-		display: contents;
-	}
-
-	/* Stat node -------------------------------------------------------------*/
-	.stat-node {
-		position: absolute;
-		left: 50%;
-		top: 50%;
-		transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y)));
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.3rem;
-		width: 146px;
-		padding: 0.55rem 0.45rem;
-		border-radius: 14px;
-		text-decoration: none;
-		color: var(--ink);
-		z-index: 3;
-		transition:
-			background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
-			box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1);
-	}
-	.stat-icon {
-		display: grid;
-		place-items: center;
-		width: 46px;
-		height: 46px;
-		border-radius: 50%;
-		background: var(--accent-tint);
-		color: var(--accent-strong);
-		border: 1px solid oklch(0.87 0.035 210);
-		transition:
-			transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-			background-color 180ms ease;
-	}
-	.stat-node:hover {
-		background: var(--surface);
-		box-shadow: 0 6px 22px oklch(0.4 0.02 270 / 0.1);
-	}
-	.stat-node:hover .stat-icon {
-		transform: translateY(-2px);
-		background: oklch(0.92 0.05 210);
-	}
-	.stat-node:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-	.stat-label {
-		font-size: 0.78rem;
-		font-weight: 600;
-		line-height: 1.2;
-		color: var(--ink);
-	}
-	.stat-n {
-		color: var(--accent-strong);
-		font-weight: 700;
-		margin-right: 0.25rem;
-	}
-	.stat-value {
-		font-family: var(--serif);
-		font-size: 1.4rem;
-		line-height: 1;
-		color: var(--ink-soft);
-		font-variant-numeric: tabular-nums;
-	}
-	.stat-node:hover .stat-value {
-		color: var(--accent-strong);
-	}
-
-	/* Compact: constellation becomes a grid of chips ---------------------- */
-	.hero-ring.compact {
-		height: auto;
-		flex-direction: column;
-		gap: 1.25rem;
-		padding: 1.5rem 0 0;
-	}
-	.hero-ring.compact .core {
-		margin-bottom: 0.25rem;
-		width: 220px;
-	}
-	.hero-ring.compact .stat-grid {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 0.5rem;
-		width: 100%;
-	}
-	.hero-ring.compact .stat-node {
-		position: static;
-		transform: none;
-		width: auto;
-		border: 1px solid var(--line);
-	}
-
-	/* Search ---------------------------------------------------------------*/
-	.search {
-		display: flex;
-		align-items: stretch;
-		width: min(640px, 100%);
-		background: var(--surface);
-		border: 1px solid var(--line);
-		border-radius: 14px;
-		box-shadow: 0 2px 10px oklch(0.4 0.02 270 / 0.05);
-		overflow: hidden;
-		transition:
-			border-color 180ms ease,
-			box-shadow 180ms ease;
-	}
-	.search:focus-within {
-		border-color: var(--accent);
-		box-shadow: 0 0 0 3px var(--accent-tint);
-	}
-	.search-icon {
-		width: 20px;
-		height: 20px;
-		align-self: center;
-		margin-left: 0.85rem;
-		fill: none;
-		stroke: var(--ink-faint);
-		stroke-width: 2;
-		stroke-linecap: round;
-	}
-	.search input {
-		flex: 1;
-		border: 0;
-		background: transparent;
-		padding: 0.85rem 0.75rem;
-		font-size: 0.95rem;
-		color: var(--ink);
-		min-width: 0;
-	}
-	.search input:focus {
-		outline: none;
-	}
-	.lang {
-		display: flex;
-		align-items: center;
-		border-left: 1px solid var(--line);
-	}
-	.lang select {
-		height: 100%;
-		border: 0;
-		background: transparent;
-		padding: 0 0.5rem;
-		font-size: 0.85rem;
-		color: var(--ink-soft);
-		cursor: pointer;
-	}
-	.lang select:focus {
-		outline: none;
-		color: var(--accent-strong);
-	}
-	.search button {
-		border: 0;
-		background: var(--accent);
-		color: oklch(0.99 0.01 210);
-		padding: 0 1.35rem;
-		font-size: 0.9rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: background-color 160ms ease;
-	}
-	.search button:hover {
-		background: var(--accent-strong);
-	}
-	.search button:focus-visible {
-		outline: 2px solid var(--accent-strong);
-		outline-offset: 2px;
-	}
-
-	/* ---- Panel B ---------------------------------------------------------- */
+	/* ---- Panel B: full-width directory below the hero (Top/Middle/Bottom) -- */
 	.panel-b {
-		border-left: 1px solid var(--line);
-		padding-left: clamp(1.25rem, 2.5vw, 2.5rem);
-		padding-top: 2.6rem;
+		max-width: 1320px;
+		margin: clamp(2rem, 4vw, 3.5rem) auto 0;
+		border-top: 1px solid var(--line);
+		padding-top: clamp(1.5rem, 3vw, 2.5rem);
 	}
 	.panel-title {
 		font-family: var(--serif);
 		font-weight: 400;
 		font-size: 1.35rem;
-		margin: 0 0 0.35rem;
+		margin: 0 0 0.85rem;
 		color: var(--ink);
 	}
 	.portals {
-		display: flex;
-		flex-direction: column;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 0 clamp(1rem, 3vw, 2.5rem);
 	}
 	.portal {
 		display: flex;
@@ -1052,30 +538,8 @@
 		text-align: center;
 	}
 
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
-	}
-
 	/* ---- Responsive ------------------------------------------------------- */
 	@media (max-width: 980px) {
-		.masthead {
-			grid-template-columns: 1fr;
-		}
-		.panel-b {
-			border-left: 0;
-			border-top: 1px solid var(--line);
-			padding-left: 0;
-			padding-top: 1.5rem;
-			margin-top: 1rem;
-		}
 		.panel-foot {
 			max-width: none;
 		}
@@ -1083,25 +547,6 @@
 	@media (max-width: 760px) {
 		.activity {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-	}
-	@media (max-width: 540px) {
-		/* let the search controls wrap instead of overflowing */
-		.search {
-			flex-wrap: wrap;
-		}
-		.search input {
-			flex: 1 1 100%;
-			order: -1;
-			border-bottom: 1px solid var(--line);
-		}
-		.lang {
-			flex: 1;
-			border-left: 0;
-		}
-		.search button {
-			flex: 1;
-			padding: 0.75rem 1rem;
 		}
 	}
 	@media (max-width: 480px) {
@@ -1114,10 +559,7 @@
 		.sk-bar {
 			animation: none;
 		}
-		.stat-node,
-		.stat-icon,
 		.portal,
-		.search,
 		.feed li a {
 			transition: none;
 		}

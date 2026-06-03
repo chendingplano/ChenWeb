@@ -39,6 +39,7 @@ func TestDeleteSearchRegistryRowsForRecord(t *testing.T) {
 }
 
 func TestInsertSearchRegistryRowsUpsertsNormalizedRows(t *testing.T) {
+	t.Setenv("SEARCH_SEMANTIC_ENABLED", "")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -72,6 +73,59 @@ func TestInsertSearchRegistryRowsUpsertsNormalizedRows(t *testing.T) {
 		CategoryPaths:   json.RawMessage(`["performance"]`),
 		SourceLineSpans: json.RawMessage(`["10:11"]`),
 		SemanticPayload: json.RawMessage(`{"kind":"summary"}`),
+	}}
+
+	inserted, err := kbsearch.InsertSearchRegistryRows(context.Background(), db, rows)
+	if err != nil {
+		t.Fatalf("InsertSearchRegistryRows returned error: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted=%d", inserted)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestInsertSearchRegistryRowsSemanticModeWritesEmbedding(t *testing.T) {
+	t.Setenv("SEARCH_SEMANTIC_ENABLED", "true")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("INSERT INTO kb.search_artifacts").
+		WithArgs(
+			"summary", "42_sum_1", int64(42), nil,
+			"Energy summary", "Level 1",
+			"Energy summary category performance",
+			"Energy summary",
+			"doc.pdf",
+			"doc.pdf",
+			`["performance"]`,
+			`["10:11"]`,
+			`{"kind":"summary"}`,
+			"Energy summary category performance",
+			kbsearch.FormatVectorLiteral([]float64{0.125, -0.5, 1}),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	rows := []kbsearch.RegistryRow{{
+		ArtifactType:    "summary",
+		ArtifactID:      "42_sum_1",
+		InputRecordID:   42,
+		PrimaryLabel:    "Energy summary",
+		SecondaryLabel:  "Level 1",
+		SearchDocument:  "Energy summary category performance",
+		SnippetBasis:    "Energy summary",
+		SourceTitle:     "doc.pdf",
+		SourceFilename:  "doc.pdf",
+		CategoryPaths:   json.RawMessage(`["performance"]`),
+		SourceLineSpans: json.RawMessage(`["10:11"]`),
+		SemanticPayload: json.RawMessage(`{"kind":"summary"}`),
+		EmbeddingText:   "Energy summary category performance",
+		Embedding:       []float64{0.125, -0.5, 1},
 	}}
 
 	inserted, err := kbsearch.InsertSearchRegistryRows(context.Background(), db, rows)
@@ -328,6 +382,109 @@ func TestBuildRegistrySearchWhereClauseAddsCJKSubstringFallback(t *testing.T) {
 	}
 	if len(args) != 2 || args[0] != "平均瞬时日差" || args[1] != "metric" {
 		t.Fatalf("args=%v", args)
+	}
+}
+
+func TestRegistryLexicalBackendDefaultsToPostgres(t *testing.T) {
+	t.Setenv("SEARCH_LEXICAL_BACKEND", "")
+
+	if got := registryLexicalBackend(); got != lexicalBackendPostgres {
+		t.Fatalf("backend=%q, want %q", got, lexicalBackendPostgres)
+	}
+}
+
+func TestRegistryLexicalBackendAllowsParadeDB(t *testing.T) {
+	t.Setenv("SEARCH_LEXICAL_BACKEND", " ParadeDB ")
+
+	if got := registryLexicalBackend(); got != lexicalBackendParadeDB {
+		t.Fatalf("backend=%q, want %q", got, lexicalBackendParadeDB)
+	}
+}
+
+func TestQueryRegistrySearchResultsUsesParadeDBLexicalSQL(t *testing.T) {
+	t.Setenv("SEARCH_LEXICAL_BACKEND", "paradedb")
+	t.Setenv("SEARCH_SEMANTIC_ENABLED", "")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1").
+		WithArgs("battery", "topic", 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+		}).AddRow(
+			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, 2.7, "Battery safety",
+		))
+
+	results, err := queryRegistrySearchResults(db, "topic", "battery", artifactSearchFilters{}, 1, 20, registrySearchConfig{
+		dictionary:      "simple",
+		previewMaxWords: 18,
+		phraseFriendly:  true,
+	})
+	if err != nil {
+		t.Fatalf("queryRegistrySearchResults returned error: %v", err)
+	}
+	if len(results) != 1 || results[0].Score != 2.7 {
+		t.Fatalf("results=%#v", results)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCountRegistrySearchResultsUsesParadeDBLexicalSQL(t *testing.T) {
+	t.Setenv("SEARCH_LEXICAL_BACKEND", "paradedb")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM kb\\.search_artifacts sa WHERE .*sa\\.search_document \\|\\|\\| \\$1").
+		WithArgs("pump", "product").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(3)))
+
+	total, err := countRegistrySearchResults(db, "product", "pump", artifactSearchFilters{}, registrySearchConfig{
+		dictionary:     "simple",
+		phraseFriendly: true,
+	})
+	if err != nil {
+		t.Fatalf("countRegistrySearchResults returned error: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("total=%d", total)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestHybridSearchParadeDBUsesBM25AndPgvectorSQL(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("WITH lexical AS .*pdb\\.score\\(sa\\.artifact_id\\).*sa\\.search_document \\|\\|\\| \\$1.*sa\\.embedding <=> \\$2::vector").
+		WithArgs("battery", kbsearch.FormatVectorLiteral([]float64{0.25, 0.75}), "topic", 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label", "source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+		}).AddRow(
+			"topic", "9_tpc_1", int64(9), "Battery safety", "requirement", "battery.pdf", "battery.pdf", `["2:14"]`, `{"kind":"topic"}`, 0.031, "Battery safety",
+		))
+
+	results, err := queryHybridSearchResultsParadeDB(db, "topic", "battery", []float64{0.25, 0.75}, artifactSearchFilters{}, 1, 20)
+	if err != nil {
+		t.Fatalf("queryHybridSearchResultsParadeDB returned error: %v", err)
+	}
+	if len(results) != 1 || results[0].ArtifactID != "9_tpc_1" {
+		t.Fatalf("results=%#v", results)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
 	}
 }
 

@@ -274,6 +274,7 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 			return fmt.Errorf("(MID_26053108) check inventory items for record_id=%d: %w", evt.RecordID, existErr)
 		}
 		if exists {
+			reindexExistingSearchOnSkip(ctx, searchArtifactInventoryItem, evt.RecordID, p.Logger, ReindexInventoryItemSearchForRecord)
 			p.persistInventoryItemsStatus(ctx, rec, start, nil)
 			return nil
 		}

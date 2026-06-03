@@ -21,25 +21,25 @@ import (
 )
 
 type ProvisionsProcessor struct {
-	InputStore           DocMetadataStore
-	Store                ProvisionsStore
-	Extractor            LLMJSONExtractor
-	Logger               ApiTypes.JimoLogger
-	ProcLogger           DocProcLogger
-	Now                  func() time.Time
-	PromptText           string
-	PromptRef            string
-	PromptPath           string
-	PromptErr            error
-	ModelRef             string
-	ModelCfgPath         string
-	ModelErr             error
-	ModelName            string
-	FallbackModelRef     string
-	FallbackModelCfgPath string
-	FallbackModelErr     error
-	FallbackModelName    string
-	FallbackExtractor    LLMJSONExtractor
+	InputStore                DocMetadataStore
+	Store                     ProvisionsStore
+	Extractor                 LLMJSONExtractor
+	Logger                    ApiTypes.JimoLogger
+	ProcLogger                DocProcLogger
+	Now                       func() time.Time
+	PromptText                string
+	PromptRef                 string
+	PromptPath                string
+	PromptErr                 error
+	ModelRef                  string
+	ModelCfgPath              string
+	ModelErr                  error
+	ModelName                 string
+	FallbackModelRef          string
+	FallbackModelCfgPath      string
+	FallbackModelErr          error
+	FallbackModelName         string
+	FallbackExtractor         LLMJSONExtractor
 	BlockSize                 int
 	PrevOverlap               int
 	NextOverlap               int
@@ -93,29 +93,29 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	}
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &ProvisionsProcessor{
-		InputStore:           inputStore,
-		Store:                store,
-		Extractor:            extractor,
-		Logger:               logger,
-		ProcLogger:           DocProcLogger{DB: ApiTypes.ProjectDBHandle},
-		Now:                  time.Now,
-		PromptText:           promptText,
-		PromptRef:            promptRef,
-		PromptPath:           promptPath,
-		PromptErr:            promptErr,
-		ModelRef:             modelRef,
-		ModelCfgPath:         modelCfgPath,
-		ModelErr:             modelErr,
-		ModelName:            modelCfg.ModelName,
-		FallbackModelRef:     fallbackModelRef,
-		FallbackModelCfgPath: fallbackModelCfgPath,
-		FallbackModelErr:     fallbackModelErr,
-		FallbackModelName:    fallbackModelCfg.ModelName,
-		FallbackExtractor:    fallbackExtractor,
-		BlockSize:            envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
-		PrevOverlap:          prevOverlap,
-		NextOverlap:          nextOverlap,
-		RemoveTOC:            removeTOC,
+		InputStore:                inputStore,
+		Store:                     store,
+		Extractor:                 extractor,
+		Logger:                    logger,
+		ProcLogger:                DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		Now:                       time.Now,
+		PromptText:                promptText,
+		PromptRef:                 promptRef,
+		PromptPath:                promptPath,
+		PromptErr:                 promptErr,
+		ModelRef:                  modelRef,
+		ModelCfgPath:              modelCfgPath,
+		ModelErr:                  modelErr,
+		ModelName:                 modelCfg.ModelName,
+		FallbackModelRef:          fallbackModelRef,
+		FallbackModelCfgPath:      fallbackModelCfgPath,
+		FallbackModelErr:          fallbackModelErr,
+		FallbackModelName:         fallbackModelCfg.ModelName,
+		FallbackExtractor:         fallbackExtractor,
+		BlockSize:                 envInt("INPUT_BLOCK_SIZE", DefaultBlockingBlockSize, 1),
+		PrevOverlap:               prevOverlap,
+		NextOverlap:               nextOverlap,
+		RemoveTOC:                 removeTOC,
 		ArtifactDir:               strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		ArtifactWebDir:            strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 		ExtractProvisionsMaxTasks: envInt("EXTRACT_PROVISIONS_MAX_TASKS", 1, 1),
@@ -183,6 +183,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		}
 		if exists {
 			p.Logger.Info("provisions extraction skipped", "record_id", evt.RecordID, "reason", "provisions already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactProvision, evt.RecordID, p.Logger, ReindexProvisionSearchForRecord)
 			p.persistProvisionsStatus(ctx, rec, start, nil)
 			return nil
 		}

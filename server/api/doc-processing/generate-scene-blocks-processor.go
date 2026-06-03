@@ -274,6 +274,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 		}
 		if exists {
 			p.Logger.Info("scene blocks extraction skipped", "record_id", evt.RecordID, "reason", "scene objects already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactSceneBlock, evt.RecordID, p.Logger, ReindexSceneBlockSearchForRecord)
 			p.persistSceneBlocksStatus(ctx, rec, start, nil)
 			return nil
 		}

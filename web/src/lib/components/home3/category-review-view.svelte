@@ -514,20 +514,20 @@
 		</aside>
 
 		<!-- Left resize handle -->
-		<div
+		<button
+			type="button"
 			class="cr-divider"
 			onmousedown={startDragLeft}
 			onmouseenter={() => (leftDivHover = true)}
 			onmouseleave={() => (leftDivHover = false)}
-			role="separator"
-			aria-orientation="vertical"
-			aria-label="Drag to resize category list"
+			aria-label="Resize category list"
 		>
 			<div
 				class="cr-divider-line"
 				style="background:{leftDivHover || isDraggingLeft ? accent : borderColor}; width:{leftDivHover || isDraggingLeft ? '2px' : '1px'};"
+				aria-hidden="true"
 			></div>
-		</div>
+		</button>
 
 		<!-- Right side: Category Under Review + Related Categories -->
 		<div class="flex min-h-0 flex-1 overflow-hidden">
@@ -891,20 +891,20 @@
 			</main>
 
 			<!-- Right resize handle -->
-			<div
+			<button
+				type="button"
 				class="cr-divider"
 				onmousedown={startDragRight}
 				onmouseenter={() => (rightDivHover = true)}
 				onmouseleave={() => (rightDivHover = false)}
-				role="separator"
-				aria-orientation="vertical"
-				aria-label="Drag to resize related categories"
+				aria-label="Resize related categories"
 			>
 				<div
 					class="cr-divider-line"
 					style="background:{rightDivHover || isDraggingRight ? accent : borderColor}; width:{rightDivHover || isDraggingRight ? '2px' : '1px'};"
+					aria-hidden="true"
 				></div>
-			</div>
+			</button>
 
 			<!-- Related Categories panel -->
 			<div
@@ -1191,6 +1191,9 @@
 		align-items: stretch;
 		justify-content: center;
 		z-index: 10;
+		padding: 0;
+		border: 0;
+		background: transparent;
 	}
 	.cr-divider-line {
 		height: 100%;

@@ -1,3 +1,7 @@
+/**
+ * @param {import('$lib/services/kbMetricSearch').KbMetricSearchResult | null | undefined} result
+ * @returns {string}
+ */
 export function metricSearchResultSecondaryText(result) {
 	return (
 		result?.snippet?.trim() ||
@@ -7,6 +11,10 @@ export function metricSearchResultSecondaryText(result) {
 	);
 }
 
+/**
+ * @param {import('$lib/services/kbMetricSearch').KbMetricSearchResult | null | undefined} result
+ * @returns {string[]}
+ */
 export function metricSearchResultChips(result) {
 	const chips = [];
 	if (result?.metric_unit) chips.push(result.metric_unit);

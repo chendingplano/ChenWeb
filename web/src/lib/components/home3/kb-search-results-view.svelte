@@ -11,9 +11,20 @@
 		type KbSearchResult
 	} from '$lib/services/kbArtifactSearch';
 	import { kbSearchArtifactOptions } from '$lib/components/home3/kb-search-lab-state';
+	import {
+		buildKbSearchPaginationItems,
+		clampKbSearchPage
+	} from '$lib/components/home3/kb-search-pagination';
 
-	let { darkMode = true, initialQuery = '' }: { darkMode: boolean; initialQuery?: string } =
-		$props();
+	let {
+		darkMode = true,
+		initialQuery = '',
+		initialPage = 1
+	}: { darkMode: boolean; initialQuery?: string; initialPage?: number } = $props();
+
+	function normalizeRequestedPage(page: number): number {
+		return Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1;
+	}
 
 	const PAGE_SIZE = 20;
 	const artifactOptions = kbSearchArtifactOptions.map((option) => ({
@@ -24,7 +35,7 @@
 	let query = $state(initialQuery.trim());
 	let submittedQuery = $state(initialQuery.trim());
 	let artifactType = $state<KbSearchArtifactType>('all');
-	let pageNumber = $state(1);
+	let pageNumber = $state(normalizeRequestedPage(initialPage));
 	let loading = $state(false);
 	let error = $state('');
 	let payload = $state<KbSearchResponse | null>(null);
@@ -37,6 +48,7 @@
 	let firstResult = $derived(total === 0 ? 0 : (pageNumber - 1) * PAGE_SIZE + 1);
 	let lastResult = $derived(Math.min(pageNumber * PAGE_SIZE, total));
 	let hasQuery = $derived(submittedQuery.trim().length > 0);
+	let paginationItems = $derived(buildKbSearchPaginationItems(pageNumber, totalPages));
 
 	let pageBg = $derived(darkMode ? 'oklch(16% 0.013 250)' : 'oklch(96% 0.012 84)');
 	let surface = $derived(darkMode ? 'oklch(20% 0.018 250)' : 'oklch(99% 0.006 84)');
@@ -97,9 +109,10 @@
 		return typeof result.score === 'number' ? result.score.toFixed(3) : '';
 	}
 
-	function buildSearchUrl(q: string): string {
+	function buildSearchUrl(q: string, nextPage = 1): string {
 		const params = new URLSearchParams({ section: 'kb-search' });
 		if (q.trim()) params.set('q', q.trim());
+		if (nextPage > 1) params.set('page', String(nextPage));
 		if (!darkMode) params.set('dark', '0');
 		return `/home3/knowledge?${params.toString()}`;
 	}
@@ -122,6 +135,18 @@
 				pageSize: PAGE_SIZE
 			});
 			if (lastRequestKey === requestKey) {
+				const resolvedTotalPages = Math.max(
+					1,
+					Math.ceil((nextPayload.total ?? nextPayload.results?.length ?? 0) / PAGE_SIZE)
+				);
+				const resolvedPage = clampKbSearchPage(nextPage, resolvedTotalPages);
+				if (resolvedPage !== nextPage && (nextPayload.total ?? 0) > 0) {
+					pageNumber = resolvedPage;
+					goto(buildSearchUrl(trimmed, resolvedPage));
+					void fetchResults(trimmed, resolvedPage);
+					return;
+				}
+				pageNumber = resolvedPage;
 				payload = nextPayload;
 			}
 		} catch (err) {
@@ -141,7 +166,7 @@
 		const trimmed = query.trim();
 		pageNumber = 1;
 		submittedQuery = trimmed;
-		goto(buildSearchUrl(trimmed));
+		goto(buildSearchUrl(trimmed, 1));
 		void fetchResults(trimmed, 1);
 	}
 
@@ -151,37 +176,78 @@
 		pageNumber = 1;
 		payload = null;
 		error = '';
-		goto(buildSearchUrl(''));
+		goto(buildSearchUrl('', 1));
 	}
 
 	function selectArtifactType(nextType: KbSearchArtifactType) {
 		if (artifactType === nextType) return;
 		artifactType = nextType;
 		pageNumber = 1;
+		goto(buildSearchUrl(submittedQuery, 1));
 		void fetchResults(submittedQuery, 1);
 	}
 
 	function goToPage(nextPage: number) {
 		if (nextPage < 1 || nextPage > totalPages || loading) return;
 		pageNumber = nextPage;
+		goto(buildSearchUrl(submittedQuery, nextPage));
 		void fetchResults(submittedQuery, nextPage);
 	}
 
 	$effect(() => {
 		const next = initialQuery.trim();
+		const nextPage = normalizeRequestedPage(initialPage);
 		if (!didInitialSearch) {
 			didInitialSearch = true;
-			if (next) void fetchResults(next, 1);
+			pageNumber = nextPage;
+			if (next) void fetchResults(next, nextPage);
 			return;
 		}
-		if (next !== submittedQuery) {
+		if (next !== submittedQuery || nextPage !== pageNumber) {
 			query = next;
 			submittedQuery = next;
-			pageNumber = 1;
-			void fetchResults(next, 1);
+			pageNumber = nextPage;
+			void fetchResults(next, nextPage);
 		}
 	});
 </script>
+
+{#snippet paginationControls(position: 'top' | 'bottom')}
+	{#if totalPages > 1}
+		<nav class="pagination {position}" aria-label="Search result pages">
+			<button type="button" onclick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1}>
+				<ChevronLeftIcon size={18} />
+				Previous
+			</button>
+			<div class="pagination-pages" aria-label="Page numbers">
+				{#each paginationItems as item}
+					{#if item === 'ellipsis'}
+						<span class="pagination-ellipsis" aria-hidden="true">...</span>
+					{:else}
+						<button
+							type="button"
+							class:current={item === pageNumber}
+							aria-current={item === pageNumber ? 'page' : undefined}
+							aria-label={`Go to page ${item}`}
+							onclick={() => goToPage(item)}
+						>
+							{item}
+						</button>
+					{/if}
+				{/each}
+			</div>
+			<span class="pagination-summary">Page {pageNumber} of {totalPages}</span>
+			<button
+				type="button"
+				onclick={() => goToPage(pageNumber + 1)}
+				disabled={pageNumber >= totalPages}
+			>
+				Next
+				<ChevronRightIcon size={18} />
+			</button>
+		</nav>
+	{/if}
+{/snippet}
 
 <section
 	class="search-page"
@@ -250,6 +316,8 @@
 				narrower slice of the knowledge base.
 			</div>
 
+			{@render paginationControls('top')}
+
 			<div class="result-list" aria-label="Search results">
 				{#each results as result, index}
 					<article class="result-item">
@@ -276,21 +344,7 @@
 				{/each}
 			</div>
 
-			<nav class="pagination" aria-label="Search result pages">
-				<button type="button" onclick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1}>
-					<ChevronLeftIcon size={18} />
-					Previous
-				</button>
-				<span>Page {pageNumber} of {totalPages}</span>
-				<button
-					type="button"
-					onclick={() => goToPage(pageNumber + 1)}
-					disabled={pageNumber >= totalPages}
-				>
-					Next
-					<ChevronRightIcon size={18} />
-				</button>
-			</nav>
+			{@render paginationControls('bottom')}
 		{:else if hasQuery}
 			<div class="empty-state">
 				<h2>No results found</h2>
@@ -538,10 +592,22 @@
 		display: flex;
 		align-items: center;
 		justify-content: flex-end;
+		flex-wrap: wrap;
 		gap: 14px;
 		margin-top: 28px;
 		color: var(--text-secondary);
 		font-size: 0.86rem;
+	}
+
+	.pagination.top {
+		justify-content: space-between;
+		margin-top: 16px;
+		padding: 12px 0 2px;
+		border-top: 1px solid var(--border);
+	}
+
+	.pagination.bottom {
+		margin-top: 28px;
 	}
 
 	.pagination button {
@@ -555,6 +621,37 @@
 		background: var(--surface);
 		color: var(--text-primary);
 		cursor: pointer;
+	}
+
+	.pagination-pages {
+		display: inline-flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.pagination-pages button {
+		min-width: 34px;
+		justify-content: center;
+		padding: 0 10px;
+	}
+
+	.pagination-pages button.current {
+		border-color: color-mix(in oklch, var(--accent) 70%, var(--border));
+		background: var(--accent-soft);
+		color: var(--text-primary);
+	}
+
+	.pagination-ellipsis {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 18px;
+		color: var(--text-muted);
+	}
+
+	.pagination-summary {
+		white-space: nowrap;
 	}
 
 	.pagination button:disabled {

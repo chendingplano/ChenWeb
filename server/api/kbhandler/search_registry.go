@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,13 @@ import (
 const (
 	rrfK                 = 60
 	hybridCandidateLimit = 200
+)
+
+type lexicalBackend string
+
+const (
+	lexicalBackendPostgres lexicalBackend = "postgres"
+	lexicalBackendParadeDB lexicalBackend = "paradedb"
 )
 
 type registrySearchConfig struct {
@@ -40,7 +48,25 @@ func loadRegistrySearchConfig() registrySearchConfig {
 	}
 }
 
+func registryLexicalBackend() lexicalBackend {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SEARCH_LEXICAL_BACKEND"))) {
+	case "paradedb", "bm25":
+		return lexicalBackendParadeDB
+	default:
+		return lexicalBackendPostgres
+	}
+}
+
 func countRegistrySearchResults(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, cfg registrySearchConfig) (int64, error) {
+	if registryLexicalBackend() == lexicalBackendParadeDB {
+		if total, err := countRegistrySearchResultsParadeDB(db, artifactType, queryText, filters); err == nil {
+			return total, nil
+		}
+	}
+	return countRegistrySearchResultsPostgres(db, artifactType, queryText, filters, cfg)
+}
+
+func countRegistrySearchResultsPostgres(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, cfg registrySearchConfig) (int64, error) {
 	whereSQL, args := buildRegistrySearchWhereClause(artifactType, queryText, filters, cfg)
 	sqlText := fmt.Sprintf(`SELECT COUNT(*) FROM kb.search_artifacts sa WHERE %s`, whereSQL)
 	var total int64
@@ -48,18 +74,42 @@ func countRegistrySearchResults(db *sql.DB, artifactType string, queryText strin
 	return total, err
 }
 
+func countRegistrySearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters) (int64, error) {
+	whereSQL, args := buildParadeDBSearchWhereClause(artifactType, queryText, filters, 2)
+	sqlText := fmt.Sprintf(`SELECT COUNT(*) FROM kb.search_artifacts sa WHERE %s`, whereSQL)
+	var total int64
+	err := db.QueryRow(sqlText, args...).Scan(&total)
+	return total, err
+}
+
 func queryRegistrySearchResults(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, page int, pageSize int, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+	backend := registryLexicalBackend()
+
 	// Hybrid path (flag-gated): fuse lexical BM25-style ranking with pgvector cosine
 	// via RRF. Best-effort — if the query can't be embedded or the hybrid query
 	// errors, fall through to the original lexical-only search below.
 	if kbsearch.SemanticSearchEnabled() {
 		if vec, ok := computeQueryEmbedding(context.Background(), queryText); ok {
+			if backend == lexicalBackendParadeDB {
+				if results, err := queryHybridSearchResultsParadeDB(db, artifactType, queryText, vec, filters, page, pageSize); err == nil {
+					return results, nil
+				}
+			}
 			if results, err := queryHybridSearchResults(db, artifactType, queryText, vec, filters, page, pageSize, cfg); err == nil {
 				return results, nil
 			}
 		}
 	}
 
+	if backend == lexicalBackendParadeDB {
+		if results, err := queryRegistrySearchResultsParadeDB(db, artifactType, queryText, filters, page, pageSize, cfg); err == nil {
+			return results, nil
+		}
+	}
+	return queryRegistrySearchResultsPostgres(db, artifactType, queryText, filters, page, pageSize, cfg)
+}
+
+func queryRegistrySearchResultsPostgres(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, page int, pageSize int, cfg registrySearchConfig) ([]artifactSearchResult, error) {
 	whereSQL, args := buildRegistrySearchWhereClause(artifactType, queryText, filters, cfg)
 	offset := (page - 1) * pageSize
 	args = append(args, pageSize, offset)
@@ -134,6 +184,58 @@ LIMIT $%d OFFSET $%d`,
 	return scanArtifactSearchRows(rows, pageSize)
 }
 
+func queryRegistrySearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, page int, pageSize int, cfg registrySearchConfig) ([]artifactSearchResult, error) {
+	whereSQL, args := buildParadeDBSearchWhereClause(artifactType, queryText, filters, 2)
+	offset := (page - 1) * pageSize
+	args = append(args, pageSize, offset)
+
+	minRankClause := ""
+	if cfg.minRank > 0 {
+		minRankClause = fmt.Sprintf("WHERE score >= %f", cfg.minRank)
+	}
+
+	sqlText := fmt.Sprintf(`
+WITH ranked AS (
+	SELECT
+		sa.artifact_type,
+		sa.artifact_id,
+		sa.input_record_id,
+		COALESCE(sa.primary_label, '') AS primary_label,
+		COALESCE(sa.secondary_label, '') AS secondary_label,
+		COALESCE(sa.source_title, '') AS source_title,
+		COALESCE(sa.source_filename, '') AS source_filename,
+		COALESCE(sa.source_line_spans, '[]'::jsonb) AS source_line_spans,
+		COALESCE(sa.semantic_payload, '{}'::jsonb) AS semantic_payload,
+		pdb.score(sa.artifact_id) AS score,
+		COALESCE(
+			NULLIF(pdb.snippet(sa.search_document, max_num_chars => %d), ''),
+			NULLIF(sa.snippet_basis, ''),
+			NULLIF(sa.search_document, ''),
+			COALESCE(sa.primary_label, '')
+		) AS snippet
+	FROM kb.search_artifacts sa
+	WHERE %s
+)
+SELECT artifact_type, artifact_id, input_record_id, primary_label, secondary_label, source_title, source_filename, source_line_spans, semantic_payload, score, snippet
+FROM ranked
+%s
+ORDER BY score DESC, artifact_id ASC
+LIMIT $%d OFFSET $%d`,
+		maxInt(80, cfg.previewMaxWords*12),
+		whereSQL,
+		minRankClause,
+		len(args)-1, len(args),
+	)
+
+	rows, err := db.Query(sqlText, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanArtifactSearchRows(rows, pageSize)
+}
+
 // scanArtifactSearchRows scans the shared 11-column result shape (used by both the
 // lexical and hybrid queries) into artifactSearchResult values.
 func scanArtifactSearchRows(rows *sql.Rows, capacity int) ([]artifactSearchResult, error) {
@@ -187,6 +289,22 @@ func buildRegistrySearchWhereClause(artifactType string, queryText string, filte
 	}
 
 	clauses, args, _ := appendArtifactFilterClauses([]string{ftsClause}, []any{queryText}, 2, artifactType, filters)
+	return strings.Join(clauses, " AND "), args
+}
+
+func buildParadeDBSearchWhereClause(artifactType string, queryText string, filters artifactSearchFilters, startArg int) (string, []any) {
+	// ParadeDB's modern SQL API uses field-level text operators. The BM25
+	// migration indexes these columns with a jieba tokenizer, so this path does
+	// not need the PostgreSQL FTS CJK substring fallback.
+	searchClause := `(
+		sa.search_document ||| $1
+		OR sa.primary_label ||| $1
+		OR sa.secondary_label ||| $1
+		OR sa.snippet_basis ||| $1
+		OR sa.source_title ||| $1
+		OR sa.source_filename ||| $1
+	)`
+	clauses, args, _ := appendArtifactFilterClauses([]string{searchClause}, []any{queryText}, startArg, artifactType, filters)
 	return strings.Join(clauses, " AND "), args
 }
 
@@ -401,6 +519,83 @@ LIMIT $%d OFFSET $%d`,
 	args := make([]any, 0, len(structuralArgs)+4)
 	args = append(args, queryText, kbsearch.FormatVectorLiteral(vec))
 	args = append(args, structuralArgs...)
+	args = append(args, pageSize, offset)
+
+	rows, err := db.Query(sqlText, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanArtifactSearchRows(rows, pageSize)
+}
+
+func queryHybridSearchResultsParadeDB(db *sql.DB, artifactType string, queryText string, vec []float64, filters artifactSearchFilters, page int, pageSize int) ([]artifactSearchResult, error) {
+	offset := (page - 1) * pageSize
+
+	lexicalWhereSQL, lexicalArgs := buildParadeDBSearchWhereClause(artifactType, queryText, filters, 3)
+	structuralClauses, structuralArgs, nextArg := buildStructuralFilterClauses(artifactType, filters, 3)
+	structuralSQL := ""
+	if len(structuralClauses) > 0 {
+		structuralSQL = " AND " + strings.Join(structuralClauses, " AND ")
+	}
+
+	pageSizeArg := nextArg
+	offsetArg := nextArg + 1
+
+	sqlText := fmt.Sprintf(`
+WITH lexical AS (
+	SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id,
+		ROW_NUMBER() OVER (ORDER BY pdb.score(sa.artifact_id) DESC, sa.artifact_id ASC) AS rnk
+	FROM kb.search_artifacts sa
+	WHERE %s
+	ORDER BY rnk
+	LIMIT %d
+),
+semantic AS (
+	SELECT sa.artifact_type AS artifact_type, sa.artifact_id AS artifact_id,
+		ROW_NUMBER() OVER (ORDER BY sa.embedding <=> $2::vector ASC, sa.artifact_id ASC) AS rnk
+	FROM kb.search_artifacts sa
+	WHERE sa.embedding IS NOT NULL%s
+	ORDER BY rnk
+	LIMIT %d
+),
+fused AS (
+	SELECT
+		COALESCE(l.artifact_type, s.artifact_type) AS artifact_type,
+		COALESCE(l.artifact_id, s.artifact_id) AS artifact_id,
+		COALESCE(1.0 / (%d + l.rnk), 0.0) + COALESCE(1.0 / (%d + s.rnk), 0.0) AS score
+	FROM lexical l
+	FULL OUTER JOIN semantic s
+		ON l.artifact_type = s.artifact_type AND l.artifact_id = s.artifact_id
+)
+SELECT
+	sa.artifact_type,
+	sa.artifact_id,
+	sa.input_record_id,
+	COALESCE(sa.primary_label, '') AS primary_label,
+	COALESCE(sa.secondary_label, '') AS secondary_label,
+	COALESCE(sa.source_title, '') AS source_title,
+	COALESCE(sa.source_filename, '') AS source_filename,
+	COALESCE(sa.source_line_spans, '[]'::jsonb) AS source_line_spans,
+	COALESCE(sa.semantic_payload, '{}'::jsonb) AS semantic_payload,
+	f.score AS score,
+	COALESCE(NULLIF(sa.snippet_basis, ''), NULLIF(sa.search_document, ''), COALESCE(sa.primary_label, '')) AS snippet
+FROM fused f
+JOIN kb.search_artifacts sa
+	ON sa.artifact_type = f.artifact_type AND sa.artifact_id = f.artifact_id
+ORDER BY f.score DESC, sa.artifact_id ASC
+LIMIT $%d OFFSET $%d`,
+		lexicalWhereSQL,
+		hybridCandidateLimit,
+		structuralSQL,
+		hybridCandidateLimit,
+		rrfK, rrfK,
+		pageSizeArg, offsetArg,
+	)
+
+	args := make([]any, 0, len(structuralArgs)+4)
+	args = append(args, queryText, kbsearch.FormatVectorLiteral(vec))
+	args = append(args, lexicalArgs[1:]...)
 	args = append(args, pageSize, offset)
 
 	rows, err := db.Query(sqlText, args...)

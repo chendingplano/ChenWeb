@@ -305,8 +305,9 @@
 		</header>
 
 		<section>
-			<label>Status</label>
+			<label for="issue-status">Status</label>
 			<select
+				id="issue-status"
 				value={iss.status}
 				onchange={(e) =>
 					changeStatus((e.currentTarget as HTMLSelectElement).value as IssueStatus)}
@@ -318,8 +319,9 @@
 		</section>
 
 		<section>
-			<label>Assignee</label>
+			<label for="issue-assignee">Assignee</label>
 			<select
+				id="issue-assignee"
 				value={iss.assignee_agent_id ?? ''}
 				onchange={(e) => assignAgent((e.currentTarget as HTMLSelectElement).value)}
 			>
@@ -332,14 +334,14 @@
 
 		{#if iss.description}
 			<section>
-				<label>Description</label>
+				<p class="section-title">Description</p>
 				<p class="desc">{iss.description}</p>
 			</section>
 		{/if}
 
 		<section class="runs">
 			<div class="runs-head">
-				<label>Agent Runs</label>
+				<p class="section-title">Agent Runs</p>
 				<button
 					class="run-btn"
 					onclick={launchRun}
@@ -399,7 +401,7 @@
 		</section>
 
 		<section class="comments">
-			<label>Comments</label>
+			<p class="section-title">Comments</p>
 			{#if loadingComments}
 				<p class="muted">Loading…</p>
 			{:else if commentsError}
@@ -471,6 +473,13 @@
 		font-size: 11px;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+	.section-title {
+		color: var(--sub);
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		margin: 0;
 	}
 	select,
 	textarea {

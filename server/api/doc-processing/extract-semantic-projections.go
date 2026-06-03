@@ -217,6 +217,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 		if exists {
 			p.Logger.Info("semantic projections extraction skipped",
 				"record_id", evt.RecordID, "reason", "semantic projections already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactSemanticProjection, evt.RecordID, p.Logger, ReindexSemanticProjectionSearchForRecord)
 			p.persistSemanticProjectionsStatus(ctx, rec, start, nil)
 			return nil
 		}
@@ -328,7 +329,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		"record_id", recordID,
 		"model_names", fmt.Sprintf("%s/%s", p.CandidateModelName, p.EnrichModelName),
 		"prompts", fmt.Sprintf("%s/%s", p.CandidatePromptRef, p.EnrichPromptRef),
-		)
+	)
 
 	workerResults, runErr := runConcurrent(ctx, p.MaxTasks, len(chunks), func(jobCtx context.Context, i int) (semanticProjectionWorkerResult, error) {
 		chunk := chunks[i]

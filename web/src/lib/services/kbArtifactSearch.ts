@@ -47,20 +47,21 @@ export type KbSearchResponse = {
 	[key: string]: unknown;
 };
 
-const endpointByType: Record<KbSearchArtifactType, string> = {
-	all: '/api/v1/kb/search',
-	metrics: '/api/v1/kb/metrics/search',
-	summaries: '/api/v1/kb/summaries/search',
-	topics: '/api/v1/kb/topics/search',
-	'scene-blocks': '/api/v1/kb/scene-blocks/search',
-	provisions: '/api/v1/kb/provisions/search',
-	products: '/api/v1/kb/products/search'
+const KB_SEARCH_ENDPOINT = '/api/v1/kb/search';
+
+const artifactTypeFilterByScope: Partial<Record<KbSearchArtifactType, string>> = {
+	metrics: 'metric',
+	summaries: 'summary',
+	topics: 'topic',
+	'scene-blocks': 'scene_block',
+	provisions: 'provision',
+	products: 'product'
 };
 
-export async function searchKbArtifacts(
+export function buildKbArtifactSearchUrl(
 	artifactType: KbSearchArtifactType,
 	params: KbSearchParams
-): Promise<KbSearchResponse> {
+): string {
 	const search = new URLSearchParams();
 	search.set('q', params.q);
 	search.set('page', String(params.page ?? 1));
@@ -70,6 +71,11 @@ export async function searchKbArtifacts(
 	}
 	if (params.artifactTypes?.trim()) {
 		search.set('artifact_types', params.artifactTypes.trim());
+	} else {
+		const scopedArtifactType = artifactTypeFilterByScope[artifactType];
+		if (scopedArtifactType) {
+			search.set('artifact_types', scopedArtifactType);
+		}
 	}
 	if (params.categoryPath?.trim()) {
 		search.set('category_path', params.categoryPath.trim());
@@ -90,11 +96,45 @@ export async function searchKbArtifacts(
 		search.set('relation_type', params.relationType.trim());
 	}
 
-	const res = await fetch(`${endpointByType[artifactType]}?${search.toString()}`, {
-		method: 'GET',
-		headers: { Accept: 'application/json' }
-	});
-	const payload = (await res.json()) as KbSearchResponse;
+	return `${KB_SEARCH_ENDPOINT}?${search.toString()}`;
+}
+
+export async function searchKbArtifacts(
+	artifactType: KbSearchArtifactType,
+	params: KbSearchParams
+): Promise<KbSearchResponse> {
+	// A search with no matches is a valid outcome, and the backend (or a proxy in
+	// front of it) may answer with a dropped connection or an empty body rather
+	// than a JSON envelope. Treat those as "zero results" instead of surfacing a
+	// raw network error. Genuine HTTP error statuses that carry a body still throw.
+	const emptyResponse: KbSearchResponse = {
+		status: true,
+		query: params.q,
+		page: params.page ?? 1,
+		page_size: params.pageSize ?? 20,
+		total: 0,
+		results: []
+	};
+
+	let res: Response;
+	try {
+		res = await fetch(buildKbArtifactSearchUrl(artifactType, params), {
+			method: 'GET',
+			headers: { Accept: 'application/json' }
+		});
+	} catch {
+		// Network-level failure (e.g. ERR_EMPTY_RESPONSE): the connection closed
+		// before any response. Acceptable here — report it as no results.
+		return emptyResponse;
+	}
+
+	const body = (await res.text()).trim();
+	if (!body) {
+		// Empty body (including 204 / dropped payload) — also no results.
+		return emptyResponse;
+	}
+
+	const payload = JSON.parse(body) as KbSearchResponse;
 	if (!res.ok) {
 		throw new Error(String(payload.error ?? payload.error_msg ?? `HTTP ${res.status}`));
 	}

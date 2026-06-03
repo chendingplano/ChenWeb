@@ -210,6 +210,8 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		if entitiesExist || relationsExist {
 			p.Logger.Info("entity-relation extraction skipped",
 				"record_id", evt.RecordID, "reason", "rows already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactEntity, evt.RecordID, p.Logger, ReindexEntitySearchForRecord)
+			reindexExistingSearchOnSkip(ctx, searchArtifactRelation, evt.RecordID, p.Logger, ReindexRelationSearchForRecord)
 			p.persistEntityRelationStatus(ctx, rec, start, nil)
 			return nil
 		}

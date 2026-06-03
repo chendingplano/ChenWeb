@@ -262,6 +262,7 @@ func (p *StructuredKnowledgeProcessor) HandleEvent(ctx context.Context, payload 
 		if exists {
 			p.Logger.Info("structured knowledge extraction skipped",
 				"record_id", evt.RecordID, "reason", "structured knowledges already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactKnowledge, evt.RecordID, p.Logger, ReindexKnowledgeSearchForRecord)
 			p.persistStructuredKnowledgeStatus(ctx, rec, start, nil)
 			return nil
 		}

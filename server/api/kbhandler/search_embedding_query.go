@@ -2,8 +2,10 @@ package kbhandler
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -25,10 +27,15 @@ func newSearchQueryEmbedder() (client *llmclients.OpenAIJSONClient, modelName st
 	if !found || strings.TrimSpace(cfg.ModelName) == "" {
 		return nil, "", false
 	}
+	timeoutSec := cfg.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = 60
+	}
 	return &llmclients.OpenAIJSONClient{
-		ModelName: cfg.ModelName,
-		APIKey:    cfg.APIKey,
-		BaseURL:   cfg.BaseURL,
+		ModelName:  cfg.ModelName,
+		APIKey:     cfg.APIKey,
+		BaseURL:    cfg.BaseURL,
+		HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
 	}, cfg.ModelName, true
 }
 
