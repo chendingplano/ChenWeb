@@ -9,5 +9,9 @@
     "preview": "cd web && bun run preview",
     "check": "cd web && bun run check",
     "check:watch": "cd web && bun run check:watch"
+  },
+  "dependencies": {
+    "baseline-browser-mapping": "^2.10.33",
+    "caniuse-lite": "^1.0.30001793"
   }
 }

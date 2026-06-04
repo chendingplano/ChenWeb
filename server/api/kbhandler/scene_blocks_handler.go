@@ -46,7 +46,6 @@ type sceneBlockRecord struct {
 	Keywords       json.RawMessage `json:"keywords"`
 	KeywordsEn     json.RawMessage `json:"keywords_en,omitempty"`
 	Confidence     float64         `json:"confidence"`
-	SourceRefs     json.RawMessage `json:"source_refs"`
 	ModelName      string          `json:"model_name"`
 	PromptName     string          `json:"prompt_name"`
 	CreateTime     string          `json:"create_time"`
@@ -166,7 +165,8 @@ SELECT
 	id, object_id, event_id, scene_id, scene_type, title, summary,
 	actors, resources, preconditions, triggers, states, actions, constraints,
 	decisions, outcomes, failure_modes, root_causes, resolutions, relationships,
-	discriminators, keywords, confidence, source_refs, model_name, prompt_name, ext_info,
+	discriminators, keywords, confidence, model_name, prompt_name, ext_info,
+	line_spans,
 	create_time, modify_time
 FROM kb.scene_objects
 WHERE input_record_id = $1
@@ -200,8 +200,8 @@ ORDER BY id`
 			relations  []byte
 			discrim    []byte
 			keywords   []byte
-			srcRefs    []byte
 			extInfo    []byte
+			lineSpans  []byte
 			createTime time.Time
 			modifyTime time.Time
 		)
@@ -209,7 +209,8 @@ ORDER BY id`
 			&r.ID, &r.ObjectID, &r.EventID, &r.SceneID, &r.SceneType, &r.Title, &r.Summary,
 			&actors, &resources, &precond, &triggers, &states, &actions, &constr,
 			&decisions, &outcomes, &failure, &rootCauses, &resolution, &relations,
-			&discrim, &keywords, &r.Confidence, &srcRefs, &r.ModelName, &r.PromptName, &extInfo,
+			&discrim, &keywords, &r.Confidence, &r.ModelName, &r.PromptName, &extInfo,
+			&lineSpans,
 			&createTime, &modifyTime,
 		); err != nil {
 			logger.Error("scan kb.scene_objects row failed", "err", err, "input_id", inputID)
@@ -232,8 +233,10 @@ ORDER BY id`
 		r.Relationships = jsonArrayOrEmpty(relations)
 		r.Discriminators = jsonArrayOrEmpty(discrim)
 		r.Keywords = jsonArrayOrEmpty(keywords)
-		r.SourceRefs = jsonArrayOrEmpty(srcRefs)
 		applySceneBlockExtInfo(&r, json.RawMessage(extInfo))
+		if ls := jsonArrayOrEmpty(lineSpans); string(ls) != "[]" {
+			r.LineSpans = ls
+		}
 		r.CreateTime = createTime.Format(time.RFC3339)
 		r.ModifyTime = modifyTime.Format(time.RFC3339)
 		results = append(results, r)

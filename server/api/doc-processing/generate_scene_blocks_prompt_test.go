@@ -8,14 +8,14 @@ import (
 )
 
 func TestLoadSceneBlocksPromptFromEnvDefaultsToEnrichmentPrompt(t *testing.T) {
-	prevPrompt := os.Getenv("EXTRACT_SCENE_BLOCKS_PROMPT")
+	prevPrompt := os.Getenv("EXTRACT_SCENE_CANDIDATES_PROMPT")
 	prevDir := os.Getenv("PROMPT_DIR")
 	t.Cleanup(func() {
-		_ = os.Setenv("EXTRACT_SCENE_BLOCKS_PROMPT", prevPrompt)
+		_ = os.Setenv("EXTRACT_SCENE_CANDIDATES_PROMPT", prevPrompt)
 		_ = os.Setenv("PROMPT_DIR", prevDir)
 	})
 
-	_ = os.Unsetenv("EXTRACT_SCENE_BLOCKS_PROMPT")
+	_ = os.Unsetenv("EXTRACT_SCENE_CANDIDATES_PROMPT")
 	_ = os.Unsetenv("PROMPT_DIR")
 
 	wd, err := os.Getwd()

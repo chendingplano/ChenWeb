@@ -336,7 +336,7 @@ func buildTopicRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kbse
 
 func buildSceneBlockRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
 	const q = `
-SELECT id, object_id, title, scene_type, summary, keywords, source_refs, search_document
+SELECT id, object_id, title, scene_type, summary, keywords, line_spans, search_document
 FROM kb.scene_objects
 WHERE input_record_id = $1
 ORDER BY id`
@@ -354,11 +354,11 @@ ORDER BY id`
 			title      string
 			sceneType  string
 			summary    string
-			keywords   []byte
-			sourceRefs []byte
-			searchDoc  string
+			keywords  []byte
+			lineSpans []byte
+			searchDoc string
 		)
-		if err := rows.Scan(&id, &objectID, &title, &sceneType, &summary, &keywords, &sourceRefs, &searchDoc); err != nil {
+		if err := rows.Scan(&id, &objectID, &title, &sceneType, &summary, &keywords, &lineSpans, &searchDoc); err != nil {
 			return nil, err
 		}
 		payload, _ := json.Marshal(map[string]any{
@@ -379,7 +379,7 @@ ORDER BY id`
 			SecondaryLabel:  sceneType,
 			SearchDocument:  firstNonEmpty(searchDoc, strings.Join([]string{title, summary}, " ")),
 			SnippetBasis:    firstNonEmpty(summary, title),
-			SourceLineSpans: json.RawMessage(sourceRefs),
+			SourceLineSpans: json.RawMessage(lineSpans),
 			SemanticPayload: payload,
 		})
 	}

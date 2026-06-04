@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { getLocale, locales, setLocale } from '$lib/paraglide/runtime.js';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
@@ -10,11 +12,13 @@
 		type KbSearchResponse,
 		type KbSearchResult
 	} from '$lib/services/kbArtifactSearch';
+	import { metricIdFromArtifactId } from '$lib/services/metricWikiService';
 	import { kbSearchArtifactOptions } from '$lib/components/home3/kb-search-lab-state';
 	import {
 		buildKbSearchPaginationItems,
 		clampKbSearchPage
 	} from '$lib/components/home3/kb-search-pagination';
+	import { getKbFrontendConfig } from '$lib/services/kbService';
 
 	let {
 		darkMode = true,
@@ -27,6 +31,7 @@
 	}
 
 	const PAGE_SIZE = 20;
+	const LOCALE_LABELS: Record<string, string> = { en: 'English', 'zh-cn': '中文' };
 	const artifactOptions = kbSearchArtifactOptions.map((option) => ({
 		...option,
 		label: option.value === 'all' ? 'All' : option.label
@@ -36,6 +41,8 @@
 	let submittedQuery = $state(initialQuery.trim());
 	let artifactType = $state<KbSearchArtifactType>('all');
 	let pageNumber = $state(normalizeRequestedPage(initialPage));
+	let currentLocale = $state<string>('en');
+	let supportedLanguages = $state<string[]>(['en', 'zh-cn']);
 	let loading = $state(false);
 	let error = $state('');
 	let payload = $state<KbSearchResponse | null>(null);
@@ -107,6 +114,22 @@
 
 	function formatScore(result: KbSearchResult): string {
 		return typeof result.score === 'number' ? result.score.toFixed(3) : '';
+	}
+
+	// resultHref links a result to its detail page. Metric results open their
+	// wiki page (lazily generated on first view); other types keep the existing
+	// behaviour of linking back to the current search.
+	function resultHref(result: KbSearchResult): string {
+		const isMetric =
+			String(result.artifact_type ?? payload?.artifact_type ?? artifactType).toLowerCase() ===
+			'metric';
+		if (isMetric) {
+			const metricId = metricIdFromArtifactId(result.artifact_id);
+			if (metricId) {
+				return `/home3/knowledge?section=kb-metric-wiki&metric_id=${encodeURIComponent(metricId)}&dark=${darkMode ? '1' : '0'}`;
+			}
+		}
+		return `/home3/knowledge?section=kb-search&q=${encodeURIComponent(submittedQuery)}`;
 	}
 
 	function buildSearchUrl(q: string, nextPage = 1): string {
@@ -194,6 +217,16 @@
 		void fetchResults(submittedQuery, nextPage);
 	}
 
+	function changeLocale(event: Event) {
+		const next = (event.target as HTMLSelectElement).value;
+		currentLocale = next;
+		try {
+			setLocale(next as (typeof locales)[number]);
+		} catch {
+			/* setLocale owns its own reload strategy. */
+		}
+	}
+
 	$effect(() => {
 		const next = initialQuery.trim();
 		const nextPage = normalizeRequestedPage(initialPage);
@@ -209,6 +242,29 @@
 			pageNumber = nextPage;
 			void fetchResults(next, nextPage);
 		}
+	});
+
+	onMount(() => {
+		try {
+			currentLocale = getLocale();
+		} catch {
+			currentLocale = 'en';
+		}
+
+		void getKbFrontendConfig()
+			.then((config) => {
+				const configured = (config.supported_languages ?? [])
+					.map((lang) => lang.trim().toLowerCase())
+					.filter(Boolean);
+				supportedLanguages =
+					configured.length > 0 ? configured : Array.from(new Set([currentLocale, 'en', 'zh-cn']));
+				if (!supportedLanguages.includes(currentLocale)) {
+					supportedLanguages = Array.from(new Set([currentLocale, ...supportedLanguages]));
+				}
+			})
+			.catch(() => {
+				supportedLanguages = Array.from(new Set([currentLocale, 'en', 'zh-cn']));
+			});
 	});
 </script>
 
@@ -278,6 +334,14 @@
 					<XIcon size={16} />
 				</button>
 			{/if}
+			<label class="language-select">
+				<span class="sr-only">Language</span>
+				<select value={currentLocale} onchange={changeLocale} aria-label="Select language">
+					{#each supportedLanguages as code (code)}
+						<option value={code}>{LOCALE_LABELS[code] ?? code.toUpperCase()}</option>
+					{/each}
+				</select>
+			</label>
 			<button class="submit-button" type="submit" disabled={loading || !query.trim()}>
 				{loading ? 'Searching' : 'Search'}
 			</button>
@@ -312,8 +376,8 @@
 			</div>
 		{:else if hasQuery && results.length > 0}
 			<div class="suggestion">
-				Showing results for <strong>{submittedQuery}</strong>. Refine by artifact type when you need a
-				narrower slice of the knowledge base.
+				Showing results for <strong>{submittedQuery}</strong>. Refine by artifact type when you need
+				a narrower slice of the knowledge base.
 			</div>
 
 			{@render paginationControls('top')}
@@ -324,7 +388,7 @@
 						<article class="result-item">
 							<div class="thumb" aria-hidden="true">{resultType(result).slice(0, 1)}</div>
 							<div class="result-body">
-								<a class="result-title" href={`/home3/knowledge?section=kb-search&q=${encodeURIComponent(submittedQuery)}`}>
+								<a class="result-title" href={resultHref(result)}>
 									{resultTitle(result, index)}
 								</a>
 								<div class="meta-line">
@@ -358,7 +422,9 @@
 		{:else}
 			<div class="empty-state">
 				<h2>Enter a query to search SemOS</h2>
-				<p>Search across documents, topics, metrics, scenes, provisions, products, and summaries.</p>
+				<p>
+					Search across documents, topics, metrics, scenes, provisions, products, and summaries.
+				</p>
 			</div>
 		{/if}
 	</div>
@@ -370,7 +436,11 @@
 		height: 100%;
 		overflow: auto;
 		background:
-			radial-gradient(circle at 52% 0%, color-mix(in oklch, var(--accent) 10%, transparent), transparent 34rem),
+			radial-gradient(
+				circle at 52% 0%,
+				color-mix(in oklch, var(--accent) 10%, transparent),
+				transparent 34rem
+			),
 			var(--page-bg);
 		color: var(--text-primary);
 	}
@@ -423,7 +493,7 @@
 	.search-form {
 		flex-shrink: 0;
 		display: grid;
-		grid-template-columns: auto minmax(0, 1fr) auto auto;
+		grid-template-columns: auto minmax(0, 1fr) auto auto auto;
 		align-items: center;
 		height: 46px;
 		min-height: 46px;
@@ -470,6 +540,49 @@
 	.icon-button:hover {
 		background: var(--surface-soft);
 		color: var(--text-primary);
+	}
+
+	.language-select {
+		position: relative;
+		display: flex;
+		align-items: center;
+		height: 100%;
+	}
+
+	.language-select::after {
+		content: '';
+		position: absolute;
+		right: 14px;
+		width: 8px;
+		height: 8px;
+		border-right: 1.6px solid currentColor;
+		border-bottom: 1.6px solid currentColor;
+		transform: translateY(-30%) rotate(45deg);
+		pointer-events: none;
+		opacity: 0.72;
+	}
+
+	.language-select select {
+		appearance: none;
+		min-width: 88px;
+		height: 100%;
+		padding: 0 34px 0 14px;
+		border: 0;
+		border-left: 1px solid var(--border);
+		background: var(--surface);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 0.95rem;
+		cursor: pointer;
+		outline: none;
+	}
+
+	.language-select select:hover {
+		background: var(--surface-soft);
+	}
+
+	.language-select select:focus-visible {
+		background: color-mix(in oklch, var(--surface) 72%, var(--accent-soft));
 	}
 
 	.submit-button {
@@ -553,8 +666,7 @@
 		padding-right: 10px;
 		overflow-y: auto;
 		scrollbar-width: thin;
-		scrollbar-color: color-mix(in oklch, var(--accent) 42%, var(--border))
-			transparent;
+		scrollbar-color: color-mix(in oklch, var(--accent) 42%, var(--border)) transparent;
 	}
 
 	.result-scroll::-webkit-scrollbar {
@@ -777,7 +889,18 @@
 		}
 
 		.search-form {
-			grid-template-columns: auto minmax(0, 1fr) auto;
+			grid-template-columns: auto minmax(0, 1fr) auto auto;
+		}
+
+		.language-select {
+			grid-column: 1 / -1;
+			height: 44px;
+			border-top: 1px solid var(--border);
+		}
+
+		.language-select select {
+			width: 100%;
+			border-left: 0;
 		}
 
 		.submit-button {

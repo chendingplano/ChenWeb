@@ -17,6 +17,7 @@
 	import WorkflowIcon from '@lucide/svelte/icons/workflow';
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
+	import MetricWikiView from '$lib/components/home3/metric-wiki-view.svelte';
 	import ProvisionMgmtView from '$lib/components/home3/provision-mgmt-view.svelte';
 	import InputsMgmtView from '$lib/components/home3/inputs-mgmt-view.svelte';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
@@ -50,6 +51,7 @@
 		| 'kb-import'
 		| 'kb-input-details'
 		| 'kb-metrics'
+		| 'kb-metric-wiki'
 		| 'kb-doc-structure'
 		| 'kb-scene-blocks'
 		| 'kb-products'
@@ -244,16 +246,23 @@
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
 	);
 	let searchQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
+	let metricWikiId = $derived(page.url.searchParams.get('metric_id')?.trim() ?? '');
 	let searchPageNumber = $derived.by(() => {
 		const rawPage = Number(page.url.searchParams.get('page') ?? '1');
 		return Number.isFinite(rawPage) ? Math.max(1, Math.trunc(rawPage)) : 1;
 	});
 
+	// Sections that are reachable by deep link / navigation but are not menu items
+	// (e.g. the metric wiki opened from a search result).
+	const virtualSections: KbSectionId[] = ['kb-metric-wiki'];
+
 	$effect(() => {
-		const found = menuItems.some(
-			(item) =>
-				item.id === initialSection || item.children?.some((child) => child.id === initialSection)
-		);
+		const found =
+			virtualSections.includes(initialSection) ||
+			menuItems.some(
+				(item) =>
+					item.id === initialSection || item.children?.some((child) => child.id === initialSection)
+			);
 		if (found) {
 			activeSection = initialSection;
 		}
@@ -282,6 +291,7 @@
 	let needsActiveStore = $derived(
 		activeSection !== 'kb-search' &&
 			activeSection !== 'kb-llm-wiki-v3' &&
+			activeSection !== 'kb-metric-wiki' &&
 			activeSection !== 'kb-category-review' &&
 			!isUnderConstructionKnowledgeSection(activeSection)
 	);
@@ -611,6 +621,12 @@
 				<InputsMgmtView {darkMode} />
 			{:else if activeSection === 'kb-metrics'}
 				<MetricMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
+			{:else if activeSection === 'kb-metric-wiki'}
+				{#if metricWikiId}
+					<MetricWikiView {darkMode} metricId={metricWikiId} />
+				{:else}
+					<KnowledgeStoreView {darkMode} />
+				{/if}
 			{:else if activeSection === 'kb-doc-structure'}
 				<DocStructureView {darkMode} />
 			{:else if activeSection === 'kb-scene-blocks'}

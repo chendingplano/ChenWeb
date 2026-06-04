@@ -26,17 +26,20 @@ type ConnectionSQLStore struct {
 
 const connectionInsertSQL = `
 INSERT INTO kb.artifact_connections
-    (input_record_id, source_type, source_id, target_type, target_id,
+    (source_record_id, target_record_id, source_type, source_id, target_type, target_id,
      relation_name, relation_method, confidence, overlap, provenance,
-     semantic_signature, extra_info)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     semantic_signature, source_desc, target_desc, extra_info)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 ON CONFLICT (relation_method, source_type, source_id, target_type, target_id, relation_name)
 DO UPDATE SET
-    input_record_id    = EXCLUDED.input_record_id,
+    source_record_id   = EXCLUDED.source_record_id,
+    target_record_id   = EXCLUDED.target_record_id,
     confidence         = EXCLUDED.confidence,
     overlap            = EXCLUDED.overlap,
     provenance         = EXCLUDED.provenance,
     semantic_signature = EXCLUDED.semantic_signature,
+    source_desc        = EXCLUDED.source_desc,
+    target_desc        = EXCLUDED.target_desc,
     extra_info         = EXCLUDED.extra_info,
     create_time        = NOW()
 `
@@ -59,7 +62,8 @@ func (s *ConnectionSQLStore) ReplaceConnections(ctx context.Context, inputRecord
 
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM kb.artifact_connections
-		 WHERE input_record_id = $1 AND relation_method = $2 AND relation_name = ANY($3)`,
+		 WHERE source_record_id = $1 AND target_record_id = $1
+		   AND relation_method = $2 AND relation_name = ANY($3)`,
 		inputRecordID, relationMethod, pq.Array(relationNames),
 	); err != nil {
 		return fmt.Errorf("(CWB_CONN_004) delete existing connections: %w", err)
@@ -92,10 +96,26 @@ func (s *ConnectionSQLStore) ReplaceConnections(ctx context.Context, inputRecord
 		if c.SemanticSignature != "" {
 			signature = c.SemanticSignature
 		}
+		sourceRecordID := c.SourceRecordID
+		if sourceRecordID <= 0 {
+			sourceRecordID = inputRecordID
+		}
+		targetRecordID := c.TargetRecordID
+		if targetRecordID <= 0 {
+			targetRecordID = inputRecordID
+		}
+		sourceDesc := c.SourceDesc
+		if sourceDesc == "" {
+			sourceDesc = connectionEndpointDesc(c.SourceType, c.SourceID)
+		}
+		targetDesc := c.TargetDesc
+		if targetDesc == "" {
+			targetDesc = connectionEndpointDesc(c.TargetType, c.TargetID)
+		}
 		if _, err := stmt.ExecContext(ctx,
-			c.InputRecordID, c.SourceType, c.SourceID, c.TargetType, c.TargetID,
+			sourceRecordID, targetRecordID, c.SourceType, c.SourceID, c.TargetType, c.TargetID,
 			c.RelationName, relationMethod, confidence, overlap, provenance,
-			signature, extraInfo,
+			signature, sourceDesc, targetDesc, extraInfo,
 		); err != nil {
 			return fmt.Errorf("(CWB_CONN_009) insert connection %s->%s (%s): %w",
 				c.SourceID, c.TargetID, c.RelationName, err)

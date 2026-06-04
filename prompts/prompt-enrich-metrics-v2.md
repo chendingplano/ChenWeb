@@ -26,7 +26,7 @@ You will receive:
 2. Preserve exact source meaning in measurement fields.
 3. Use low confidence instead of guessing.
 4. Leave fields empty or null rather than inventing unsupported metadata.
-5. Always generate `category_paths` for every metric. Use the metric name, subject, domain context, and keywords as evidence. A path of 2–4 nodes is typical. Use the input language for `category_paths` and English for `category_paths_en`. If the input is already English, populate only `category_paths` (in English) and leave `category_paths_en` empty.
+5. Always generate `metric_categories` for every metric.
 
 ## Output Schema
 
@@ -46,6 +46,8 @@ You will receive:
       "context_en": "string",
       "keywords": ["string"],
       "keywords_en": ["string"],
+      "metric_categories": "string",
+      "metric_categories_en": "string",
       "unit": "string",
       "unit_en": "string",
       "metric_value": "string",

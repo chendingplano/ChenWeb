@@ -114,6 +114,7 @@ type UpsertSceneObjectRequest struct {
 	SceneBlock    map[string]any
 	ModelName     string
 	PromptName    string
+	LineSpans     []string
 	ExtInfo       map[string]any
 }
 
@@ -144,6 +145,14 @@ func buildSceneBlockExtInfo(block map[string]any) map[string]any {
 	return out
 }
 
+func buildSceneBlockLineSpans(block map[string]any) []string {
+	spans := normalizeProductEvidenceLines(block["line_spans"])
+	if len(spans) == 0 {
+		spans = normalizeProductEvidenceLines(block["evidence_lines"])
+	}
+	return spans
+}
+
 type SceneObjectsSQLStore struct {
 	DB *sql.DB
 }
@@ -157,18 +166,18 @@ func NewSceneBlocksProcessor(inputStore DocMetadataStore, store SceneObjectsStor
 		"prompt-extract-scene-candidates-v1.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptErr := loadScenePromptFromEnvKeys(
-		[]string{"ENRICH_SCENE_BLOCKS_PROMPT", "EXTRACT_SCENE_BLOCKS_PROMPT"},
+		[]string{"ENRICH_SCENE_BLOCKS_PROMPT", "EXTRACT_SCENE_CANDIDATES_PROMPT"},
 		"prompt-enrich-scene-blocks-v1.md",
 	)
 	mentionModelRef, _, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
-		[]string{"EXTRACT_SCENE_CANDIDATES_MODEL_NAME", "EXTRACT_SCENE_BLOCKS_MODEL_NAME"},
+		[]string{"EXTRACT_SCENE_CANDIDATES_MODEL_NAME"},
 		"MODEL_DEF_FILE",
 	)
 	relationModelRef, _, relationModelCfg, relationModelErr := loadModelConfigFromEnvKeys(
-		[]string{"ENRICH_SCENE_BLOCKS_MODEL_NAME", "EXTRACT_SCENE_BLOCKS_MODEL_NAME"},
+		[]string{"ENRICH_SCENE_BLOCKS_MODEL_NAME"},
 		"MODEL_DEF_FILE",
 	)
-	fallbackModelRef, _, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_SCENE_BLOCKS_MODEL_FALLBACK", "MODEL_DEF_FILE")
+	fallbackModelRef, _, fallbackModelCfg, fallbackModelErr := loadOptionalModelConfigFromEnv("EXTRACT_SCENE_CANDIDATES_MODEL_FALLBACK", "MODEL_DEF_FILE")
 	applyStructureModelConfigToExtractor(extractor, relationModelCfg)
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
 	return &SceneBlocksProcessor{
@@ -329,6 +338,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 			SceneBlock:    block,
 			ModelName:     strings.TrimSpace(result.ModelName),
 			PromptName:    strings.TrimSpace(p.RelationPromptRef),
+			LineSpans:     buildSceneBlockLineSpans(block),
 			ExtInfo:       buildSceneBlockExtInfo(block),
 		}
 		if err := p.Store.UpsertSceneObject(ctx, req); err != nil {
@@ -929,7 +939,7 @@ func buildSceneRelationUserPromptForGroup(candidates []sceneCandidate) string {
 			"discriminators": []any{},
 			"keywords":       []string{},
 			"confidence":     0.0,
-			"source_refs":    []any{},
+			"line_spans":     []string{"12", "18-20"},
 			"category_paths": []map[string]any{{
 				"category_path": []map[string]any{{
 					"name":       "string",
@@ -1570,7 +1580,7 @@ func removeSceneBlockTreeRecord(treeRootDir string, recordID int64) error {
 }
 
 func loadSceneBlocksPromptFromEnv() (promptText string, promptRef string, promptErr error) {
-	return loadScenePromptFromEnvKeys([]string{"ENRICH_SCENE_BLOCKS_PROMPT", "EXTRACT_SCENE_BLOCKS_PROMPT"}, "prompt-enrich-scene-blocks-v1.md")
+	return loadScenePromptFromEnvKeys([]string{"ENRICH_SCENE_BLOCKS_PROMPT", "EXTRACT_SCENE_CANDIDATES_PROMPT"}, "prompt-enrich-scene-blocks-v1.md")
 }
 
 func loadScenePromptFromEnvKeys(envKeys []string, defaultRef string) (promptText string, promptRef string, promptErr error) {
@@ -1682,19 +1692,25 @@ func (s SceneObjectsSQLStore) UpsertSceneObject(ctx context.Context, req UpsertS
 	if extInfo == nil {
 		extInfo = map[string]any{}
 	}
+	lineSpans := req.LineSpans
+	if lineSpans == nil {
+		lineSpans = []string{}
+	}
 
 	const stmt = `
 	INSERT INTO kb.scene_objects (
 		object_id, input_record_id, event_id, scene_id, scene_type, title, summary,
 		actors, resources, preconditions, triggers, states, actions, constraints,
 		decisions, outcomes, failure_modes, root_causes, resolutions, relationships,
-		discriminators, keywords, confidence, source_refs, model_name, prompt_name, ext_info,
+		discriminators, keywords, confidence, model_name, prompt_name, ext_info,
+		line_spans,
 		create_time, modify_time
 	) VALUES (
 		$1, $2, $3, $4, $5, $6, $7,
 		$8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb,
 		$15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb,
-		$21::jsonb, $22::jsonb, $23, $24::jsonb, $25, $26, $27::jsonb,
+		$21::jsonb, $22::jsonb, $23, $24, $25, $26::jsonb,
+		$27::jsonb,
 		NOW(), NOW()
 	)
 	ON CONFLICT (input_record_id, object_id) DO UPDATE SET
@@ -1719,10 +1735,10 @@ func (s SceneObjectsSQLStore) UpsertSceneObject(ctx context.Context, req UpsertS
 		discriminators = EXCLUDED.discriminators,
 		keywords = EXCLUDED.keywords,
 		confidence = EXCLUDED.confidence,
-		source_refs = EXCLUDED.source_refs,
 		model_name = EXCLUDED.model_name,
 		prompt_name = EXCLUDED.prompt_name,
 		ext_info = EXCLUDED.ext_info,
+		line_spans = EXCLUDED.line_spans,
 		modify_time = NOW()`
 
 	_, err := s.DB.ExecContext(ctx, stmt,
@@ -1749,10 +1765,10 @@ func (s SceneObjectsSQLStore) UpsertSceneObject(ctx context.Context, req UpsertS
 		toJSON(block["discriminators"]),                  // $21
 		toJSON(block["keywords"]),                        // $22
 		toFloat(block["confidence"]),                     // $23
-		toJSON(block["source_refs"]),                     // $24
-		strings.TrimSpace(req.ModelName),                 // $25
-		strings.TrimSpace(req.PromptName),                // $26
-		toJSON(extInfo),                                  // $27
+		strings.TrimSpace(req.ModelName),                 // $24
+		strings.TrimSpace(req.PromptName),                // $25
+		toJSON(extInfo),                                  // $26
+		toJSON(lineSpans),                                // $27
 	)
 	return err
 }

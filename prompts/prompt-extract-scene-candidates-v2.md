@@ -45,6 +45,23 @@ Do not extract:
 6. `summary_hint` should be one short sentence.
 7. If there are no scene candidates, return an empty `candidates` array.
 
+`line_spans` Encoding Rules:
+
+Extract the line numbers of the lines based on which a scene candidate is extracted into `line_spans`.
+Each item in `line_spans` MUST be a string in one of ONLY these formats:
+   - single line:
+     "21"
+   - inclusive contiguous range:
+     "25-40"
+
+2. NEVER enumerate contiguous lines individually.
+
+BAD:
+["25", "26", "27", "28", "29", "30"]
+
+GOOD:
+["25-30"]
+
 ## Output Schema
 
 ```json
@@ -56,7 +73,7 @@ Do not extract:
       "title": "human readable title",
       "summary_hint": "one sentence description of the scene",
       "evidence_quote": "short exact quote from the input",
-      "evidence_lines": ["12", "13-15"],
+      "line_spans": ["12", "16-20"],
       "confidence": 0.0,
       "confidence_reason": "brief reason"
     }

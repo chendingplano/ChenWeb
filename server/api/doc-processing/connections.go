@@ -9,7 +9,8 @@ import (
 // kb.artifact_connections. See
 // KnowledgeStore/Capsules/coding-capsules/deep-wiki/artifact-graph-creation.md
 type Connection struct {
-	InputRecordID     int64
+	SourceRecordID    int64
+	TargetRecordID    int64
 	SourceType        string
 	SourceID          string
 	TargetType        string
@@ -20,6 +21,8 @@ type Connection struct {
 	Overlap           *OverlapInfo
 	Provenance        map[string]any
 	SemanticSignature string
+	SourceDesc        string
+	TargetDesc        string
 	ExtraInfo         map[string]any
 }
 
@@ -89,18 +92,25 @@ func DeriveLineOverlapConnections(recordID int64, targetType, relationName strin
 				continue
 			}
 			out = append(out, Connection{
-				InputRecordID:  recordID,
+				SourceRecordID: recordID,
+				TargetRecordID: recordID,
 				SourceType:     artifactTypeChunk,
 				SourceID:       ChunkConnectionID(recordID, ch.Index),
 				TargetType:     targetType,
 				TargetID:       t.ID,
 				RelationName:   relationName,
 				RelationMethod: RelationMethodLineOverlap,
+				SourceDesc:     connectionEndpointDesc(artifactTypeChunk, ChunkConnectionID(recordID, ch.Index)),
+				TargetDesc:     connectionEndpointDesc(targetType, t.ID),
 				Overlap:        &OverlapInfo{OverlapCount: len(overlap), OverlapLines: overlap},
 			})
 		}
 	}
 	return out
+}
+
+func connectionEndpointDesc(artifactType, artifactID string) string {
+	return fmt.Sprintf("%s:%s", artifactType, artifactID)
 }
 
 // overlapLines returns the sorted set of line numbers present in both the chunk

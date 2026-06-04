@@ -15,6 +15,7 @@ import (
 
 type kbFrontendConfig struct {
 	TopicTypes             []string `json:"topic_types"`
+	SupportedLanguages     []string `json:"supported_languages"`
 	MandatoryProcessors    []string `json:"mandatory_processors"`
 	RequiredProcessors     []string `json:"required_processors"`
 	MaxDocProcessPipelines int      `json:"max_doc_process_pipelines"`
@@ -43,6 +44,7 @@ func GetKbFrontendConfig(c echo.Context) error {
 			Status: true,
 			Config: kbFrontendConfig{
 				TopicTypes:             []string{},
+				SupportedLanguages:     defaultSupportedLanguages(),
 				MandatoryProcessors:    mandatoryProcessorIDs,
 				RequiredProcessors:     []string{},
 				MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
@@ -55,7 +57,8 @@ func GetKbFrontendConfig(c echo.Context) error {
 
 type rawKbFrontendSection struct {
 	Frontend struct {
-		TopicTypes []string `toml:"topic_types"`
+		TopicTypes         []string `toml:"topic_types"`
+		SupportedLanguages []string `toml:"supported_languages"`
 	} `toml:"frontend"`
 	DocProcessing struct {
 		RequiredProcessors []string `toml:"required_processors"`
@@ -76,16 +79,25 @@ func loadKbFrontendConfig() (kbFrontendConfig, error) {
 	if types == nil {
 		types = []string{}
 	}
+	supportedLanguages := raw.Frontend.SupportedLanguages
+	if len(supportedLanguages) == 0 {
+		supportedLanguages = defaultSupportedLanguages()
+	}
 	reqProcs := raw.DocProcessing.RequiredProcessors
 	if reqProcs == nil {
 		reqProcs = []string{}
 	}
 	return kbFrontendConfig{
 		TopicTypes:             types,
+		SupportedLanguages:     supportedLanguages,
 		MandatoryProcessors:    mandatoryProcessorIDs,
 		RequiredProcessors:     reqProcs,
 		MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
 	}, nil
+}
+
+func defaultSupportedLanguages() []string {
+	return []string{"en", "zh-cn"}
 }
 
 func maxDocProcessPipelinesFromEnv() int {

@@ -84,8 +84,11 @@ func TestDeriveLineOverlapConnections_singleChunkSingleTarget(t *testing.T) {
 	if c.RelationName != "has-metrics" || c.RelationMethod != "line_overlap" {
 		t.Errorf("unexpected relation: %q / %q", c.RelationName, c.RelationMethod)
 	}
-	if c.InputRecordID != 42 {
-		t.Errorf("unexpected input_record_id: %d", c.InputRecordID)
+	if c.SourceRecordID != 42 || c.TargetRecordID != 42 {
+		t.Errorf("unexpected record ids: source=%d target=%d", c.SourceRecordID, c.TargetRecordID)
+	}
+	if c.SourceDesc != "chunk:42_1" || c.TargetDesc != "metric:42_1" {
+		t.Errorf("unexpected endpoint descs: %q / %q", c.SourceDesc, c.TargetDesc)
 	}
 	if c.Overlap == nil || c.Overlap.OverlapCount != 3 {
 		t.Fatalf("expected overlap count 3, got %+v", c.Overlap)
