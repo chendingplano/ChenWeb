@@ -1994,10 +1994,11 @@ INSERT INTO kb.metrics (
 	reasoning_tags,
 	category_paths,
 	category_paths_en,
+	search_document,
 	ext_info
 )
 VALUES (
-	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb,$33::jsonb,$34::jsonb
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb,$33::jsonb,$34,$35::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -2038,6 +2039,8 @@ VALUES (
 			valueClassEn = strings.TrimSpace(asString(metric["value_class_en"]))
 		}
 
+		searchDocument := buildMetricSearchDocument(metric, !isEnglish)
+
 		_, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
 			req.InputRecordID,
@@ -2072,6 +2075,7 @@ VALUES (
 			string(reasoningTagsJSON),
 			nil,
 			nil,
+			searchDocument,
 			string(extInfo),
 		)
 		if err != nil {

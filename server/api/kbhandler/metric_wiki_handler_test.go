@@ -1,13 +1,19 @@
 package kbhandler
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/labstack/echo/v4"
 )
 
@@ -68,19 +74,74 @@ func TestGetMetricWikiBadID(t *testing.T) {
 	}
 }
 
-func TestGetMetricWikiCacheMiss(t *testing.T) {
+func TestGetMetricWikiCacheMissGenerates(t *testing.T) {
 	artifactDir := t.TempDir()
 	t.Setenv("ARTIFACT_DIR", artifactDir)
 	if err := os.MkdirAll(filepath.Join(artifactDir, "0", "5"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
+	generated := []byte(`{"metric_id":"5_3","title":"Generated"}`)
+	orig := buildMetricWikiPageFn
+	buildMetricWikiPageFn = func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, metricID, lang string) (json.RawMessage, error) {
+		return json.RawMessage(generated), nil
+	}
+	defer func() { buildMetricWikiPageFn = orig }()
+
 	c, rec := newMetricWikiContext(t, "5_3", "")
 	if err := GetMetricWiki(c); err != nil {
 		t.Fatalf("GetMetricWiki err = %v", err)
 	}
-	// Generation is not wired until Chunk 2; a miss is reported, not a crash.
-	if rec.Code != http.StatusNotImplemented {
-		t.Errorf("status = %d, want 501; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp metricWikiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Status || !resp.Generated {
+		t.Errorf("resp status=%v generated=%v, want true/true", resp.Status, resp.Generated)
+	}
+	// The page must have been persisted to the cache path.
+	saved, err := os.ReadFile(filepath.Join(artifactDir, "0", "5", "wikipage_metric_5_3.en.json"))
+	if err != nil {
+		t.Fatalf("page not saved: %v", err)
+	}
+	if string(saved) != string(generated) {
+		t.Errorf("saved = %s, want %s", saved, generated)
+	}
+}
+
+func TestGetMetricWikiSingleFlight(t *testing.T) {
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+	if err := os.MkdirAll(filepath.Join(artifactDir, "0", "5"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int32
+	orig := buildMetricWikiPageFn
+	buildMetricWikiPageFn = func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, metricID, lang string) (json.RawMessage, error) {
+		atomic.AddInt32(&calls, 1)
+		time.Sleep(20 * time.Millisecond) // widen the race window
+		return json.RawMessage(`{"metric_id":"5_3"}`), nil
+	}
+	defer func() { buildMetricWikiPageFn = orig }()
+
+	const n = 8
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for range n {
+		go func() {
+			defer wg.Done()
+			c, _ := newMetricWikiContext(t, "5_3", "")
+			_ = GetMetricWiki(c)
+		}()
+	}
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("generator called %d times, want 1 (single-flight)", got)
 	}
 }
 
@@ -97,18 +158,18 @@ func TestParseMetricID(t *testing.T) {
 	}
 
 	for _, bad := range []string{
-		"",        // empty
-		"5",       // no seqno
-		"5_",      // empty seqno
-		"_3",      // empty record id
-		"5_0",     // seqno must be >= 1
-		"0_3",     // record id must be >= 1
-		"x_3",     // non-numeric record id
-		"5_x",     // non-numeric seqno
-		"5_3_1",   // too many parts
-		"5__3",    // empty middle
-		" 5_3",    // surrounding space is not trimmed by the parser
-		"-5_3",    // negative
+		"",      // empty
+		"5",     // no seqno
+		"5_",    // empty seqno
+		"_3",    // empty record id
+		"5_0",   // seqno must be >= 1
+		"0_3",   // record id must be >= 1
+		"x_3",   // non-numeric record id
+		"5_x",   // non-numeric seqno
+		"5_3_1", // too many parts
+		"5__3",  // empty middle
+		" 5_3",  // surrounding space is not trimmed by the parser
+		"-5_3",  // negative
 	} {
 		if rid, seq, err := parseMetricID(bad); err == nil {
 			t.Errorf("parseMetricID(%q) = (%d, %d, nil), want error", bad, rid, seq)

@@ -8,10 +8,31 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
+
+// metricWikiGenLocks serializes generation per (metric_id, lang) so concurrent
+// first-hits do not generate the same page more than once.
+var (
+	metricWikiGenMu    sync.Mutex
+	metricWikiGenLocks = map[string]*sync.Mutex{}
+)
+
+func lockMetricWikiGen(key string) func() {
+	metricWikiGenMu.Lock()
+	lk, ok := metricWikiGenLocks[key]
+	if !ok {
+		lk = &sync.Mutex{}
+		metricWikiGenLocks[key] = lk
+	}
+	metricWikiGenMu.Unlock()
+	lk.Lock()
+	return lk.Unlock
+}
 
 type metricWikiResponse struct {
 	Status    bool            `json:"status"`
@@ -72,12 +93,38 @@ func GetMetricWiki(c echo.Context) error {
 		})
 	}
 
-	// Cache miss: generation is wired in Chunk 2.
-	logger.Info("metric wiki cache miss (generation not yet implemented)", "metric_id", metricID, "lang", lang)
-	return c.JSON(http.StatusNotImplemented, errorResponse{
-		Status:   false,
-		ErrorMsg: "wiki page not generated yet (CWB_KB_MWIKI_040)",
-	})
+	// Cache miss: generate under a per-(metric,lang) lock so concurrent first
+	// hits collapse into a single generation.
+	if lang == "" {
+		lang = "en"
+	}
+	unlock := lockMetricWikiGen(metricID + ":" + lang)
+	defer unlock()
+
+	// Double-check: another request may have generated the page while we waited.
+	if data, err := os.ReadFile(pagePath); err == nil {
+		return c.JSON(http.StatusOK, metricWikiResponse{Status: true, Generated: false, Page: json.RawMessage(data)})
+	}
+
+	logger.Info("metric wiki cache miss, generating", "metric_id", metricID, "lang", lang)
+	page, err := buildMetricWikiPageFn(c.Request().Context(), ApiTypes.ProjectDBHandle, logger, recordID, metricID, lang)
+	if err != nil {
+		logger.Error("generate metric wiki page failed", "metric_id", metricID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("failed to generate wiki page (CWB_KB_MWIKI_030): %v", err),
+		})
+	}
+	if err := saveMetricWikiPage(pagePath, page); err != nil {
+		logger.Error("save metric wiki page failed", "metric_id", metricID, "path", pagePath, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to save wiki page (CWB_KB_MWIKI_031)",
+		})
+	}
+
+	logger.Info("metric wiki page generated", "metric_id", metricID, "lang", lang, "path", pagePath)
+	return c.JSON(http.StatusOK, metricWikiResponse{Status: true, Generated: true, Page: page})
 }
 
 // metricWikiLangs is the set of page languages supported for now. English is
