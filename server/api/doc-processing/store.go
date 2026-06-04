@@ -40,7 +40,7 @@ SELECT id,
        COALESCE(staging_filename, ''),
        COALESCE(file_name, ''),
        COALESCE(status::text, '[]'),
-       COALESCE(doc_metadata->>'language', '')
+       COALESCE(doc_metadata->'metadata'->>'language', doc_metadata->>'language', '')
 FROM kb.inputs
 WHERE id = $1`
 

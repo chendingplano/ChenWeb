@@ -53,6 +53,7 @@ type SummaryItem struct {
 	CategoryPathItemsEn []CategoryPathEntry // English translations
 	Summary             string
 	SummaryEn           string
+	Language            string
 	Embedding           []float64
 }
 
@@ -102,6 +103,7 @@ func writeSummaryFile(baseDir string, recordID int64, item SummaryItem) (string,
 	b.WriteString("children: ")
 	b.WriteString(formatQuotedArray(item.Children))
 	b.WriteByte('\n')
+	b.WriteString(fmt.Sprintf("language: %q\n", strings.TrimSpace(item.Language)))
 	b.WriteString("keywords: ")
 	b.WriteString(formatQuotedArray(item.Keywords))
 	b.WriteByte('\n')
@@ -136,7 +138,7 @@ func writeSummaryFile(baseDir string, recordID int64, item SummaryItem) (string,
 
 func validateSummaryArtifacts(recordID int64, sourceLanguage string, summaries []SummaryItem, artifactDir string, summaryTreeDir string) error {
 	if len(summaries) == 0 {
-		return errors.New("no summaries generated")
+		return errors.New("(MID-26060403) no summaries generated")
 	}
 
 	normalizedSourceLanguage := normalizeSummarySourceLanguage(sourceLanguage)
@@ -153,7 +155,7 @@ func validateSummaryArtifacts(recordID int64, sourceLanguage string, summaries [
 		for i, seq := range seqs {
 			want := i + 1
 			if seq != want {
-				return fmt.Errorf("level %d seqno %d is not continuous; want %d", level, seq, want)
+				return fmt.Errorf("(MID-26060402) level %d seqno %d is not continuous; want %d", level, seq, want)
 			}
 		}
 	}
@@ -162,29 +164,29 @@ func validateSummaryArtifacts(recordID int64, sourceLanguage string, summaries [
 
 func validateSingleSummaryArtifact(recordID int64, sourceLanguage string, item SummaryItem, artifactDir string, summaryTreeDir string) error {
 	if strings.TrimSpace(item.SummaryID) == "" {
-		return errors.New("summary_id is empty")
+		return errors.New("(MID-26060412) summary_id is empty")
 	}
 	if strings.TrimSpace(item.Summary) == "" {
-		return fmt.Errorf("summary %q is empty", item.SummaryID)
+		return fmt.Errorf("(MID-26060413) summary %q is empty", item.SummaryID)
 	}
 	if item.Lines == nil {
-		return fmt.Errorf("summary %q lines must be an array", item.SummaryID)
+		return fmt.Errorf("(MID-26060414) summary %q lines must be an array", item.SummaryID)
 	}
 	recordIDInSummary, level, seqNo, ok := parseSummaryID(item.SummaryID)
 	if !ok {
-		return fmt.Errorf("summary %q has invalid summary_id format", item.SummaryID)
+		return fmt.Errorf("(MID-26060415) summary %q has invalid summary_id format", item.SummaryID)
 	}
 	if recordIDInSummary != recordID || item.RecordID != recordID {
-		return fmt.Errorf("summary %q record_id mismatch", item.SummaryID)
+		return fmt.Errorf("(MID-26060416) summary %q record_id mismatch", item.SummaryID)
 	}
 	if level != item.Level || seqNo != item.SeqNo {
-		return fmt.Errorf("summary %q level/seq mismatch", item.SummaryID)
+		return fmt.Errorf("(MID-26060417) summary %q level/seq mismatch", item.SummaryID)
 	}
 	if strings.TrimSpace(item.SummaryID) != buildSummaryID(recordID, item.Level, item.SeqNo) {
-		return fmt.Errorf("summary %q does not match canonical summary_id", item.SummaryID)
+		return fmt.Errorf("(MID-26060418) summary %q does not match canonical summary_id", item.SummaryID)
 	}
 	if item.Level < 0 {
-		return fmt.Errorf("summary %q level must be non-negative", item.SummaryID)
+		return fmt.Errorf("(MID-26060419) summary %q level must be non-negative", item.SummaryID)
 	}
 	if err := validateSummaryLines(item.SummaryID, item.Lines); err != nil {
 		return err
@@ -194,7 +196,7 @@ func validateSingleSummaryArtifact(recordID int64, sourceLanguage string, item S
 	// For unknown sources we have no basis to require a translation.
 	if sourceLanguage != "" && sourceLanguage != "en" {
 		if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
-			return fmt.Errorf("summary %q summary and summary_en must differ", item.SummaryID)
+			return fmt.Errorf("(MID-26060420) summary %q summary and summary_en must differ", item.SummaryID)
 		}
 	}
 	// keywords may legitimately match keywords_en when translation is unavailable;
@@ -204,7 +206,7 @@ func validateSingleSummaryArtifact(recordID int64, sourceLanguage string, item S
 	summaryEn := strings.TrimSpace(item.SummaryEn)
 	if sourceLanguage != "" && (summaryEn == "" || strings.TrimSpace(item.Summary) != summaryEn) {
 		if detectContentLanguage(item.Summary) != sourceLanguage {
-			return fmt.Errorf("summary %q language mismatch: got %s want %s", item.SummaryID, detectContentLanguage(item.Summary), sourceLanguage)
+			return fmt.Errorf("(MID-26060421) summary %q language mismatch: got %s want %s", item.SummaryID, detectContentLanguage(item.Summary), sourceLanguage)
 		}
 	}
 	if err := validateSummaryArtifactFile(recordID, item, artifactDir); err != nil {
@@ -226,19 +228,19 @@ func validateSummaryArtifactFile(recordID int64, item SummaryItem, artifactDir s
 	path := filepath.Join(targetDir, summaryFileName(item.Level, item.SeqNo))
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read summary file %q: %w", path, err)
+		return fmt.Errorf("(MID-26060405) read summary file %q: %w", path, err)
 	}
 	text := string(body)
 	if !strings.Contains(text, fmt.Sprintf("summary_id: %q", strings.TrimSpace(item.SummaryID))) {
-		return fmt.Errorf("summary file %q missing summary_id %q", path, item.SummaryID)
+		return fmt.Errorf("(MID-26060406) summary file %q missing summary_id %q", path, item.SummaryID)
 	}
 	if !strings.Contains(text, "summary_begin") || !strings.Contains(text, "summary_end") {
-		return fmt.Errorf("summary file %q missing summary markers", path)
+		return fmt.Errorf("(MID-26060407) summary file %q missing summary markers", path)
 	}
 	if strings.TrimSpace(item.SummaryEn) != "" {
 		hasSummaryEnStart := strings.Contains(text, "summary_en_begin") || strings.Contains(text, "summary_en_start")
 		if !hasSummaryEnStart || !strings.Contains(text, "summary_en_end") {
-			return fmt.Errorf("summary file %q missing summary_en markers", path)
+			return fmt.Errorf("(MID-26060408) summary file %q missing summary_en markers", path)
 		}
 	}
 	return nil
@@ -271,16 +273,16 @@ func validateSummaryTreeReference(summaryTreeDir string, categoryPath []string, 
 
 func validateSummaryLines(summaryID string, lines []string) error {
 	if len(lines) == 0 {
-		return fmt.Errorf("summary %q lines must not be empty", summaryID)
+		return fmt.Errorf("(MID-26060409) summary %q lines must not be empty", summaryID)
 	}
 	prevStart, prevEnd := 0, 0
 	for _, span := range lines {
 		start, end, ok := parseSummaryLineSpan(span)
 		if !ok {
-			return fmt.Errorf("summary %q has invalid line span %q", summaryID, span)
+			return fmt.Errorf("(MID-26060410) summary %q has invalid line span %q", summaryID, span)
 		}
 		if start < prevStart || (start == prevStart && end < prevEnd) {
-			return fmt.Errorf("summary %q lines must be sorted", summaryID)
+			return fmt.Errorf("(MID-26060411) summary %q lines must be sorted", summaryID)
 		}
 		prevStart, prevEnd = start, end
 	}

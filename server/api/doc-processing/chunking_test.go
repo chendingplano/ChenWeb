@@ -1134,6 +1134,110 @@ func TestFixedSizeChunkingService_FixSummarySourceLanguage_TranslatesKeywordsToS
 	}
 }
 
+func TestFixedSizeChunkingService_FixSummarySourceLanguage_TranslatesEnglishSummaryWithoutSummaryEn(t *testing.T) {
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{"summary": "这是英文摘要的中文翻译。"},
+		},
+	}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.ChunkDir = t.TempDir()
+	svc.TranslationEnabled = true
+	svc.TranslationModelName = "translation-model"
+
+	summaries := []SummaryItem{
+		{
+			SummaryID: "177_0_0014",
+			RecordID:  177,
+			Level:     0,
+			SeqNo:     14,
+			Lines:     []string{"245-273"},
+			Summary:   "The document outlines the assessment system for elderly ability.",
+			Language:  "zh",
+		},
+	}
+	if _, err := writeSummaryFile(svc.ChunkDir, summaries[0].RecordID, summaries[0]); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+
+	got, err := svc.fixSummarySourceLanguage(context.Background(), "zh", summaries)
+	if err != nil {
+		t.Fatalf("fixSummarySourceLanguage: %v", err)
+	}
+	if got[0].Summary != "这是英文摘要的中文翻译。" {
+		t.Fatalf("Summary=%q", got[0].Summary)
+	}
+	if got[0].SummaryEn != "The document outlines the assessment system for elderly ability." {
+		t.Fatalf("SummaryEn=%q", got[0].SummaryEn)
+	}
+
+	artifactDir, err := buildRecordArtifactDir(svc.ChunkDir, summaries[0].RecordID)
+	if err != nil {
+		t.Fatalf("buildRecordArtifactDir: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(artifactDir, "summary_0_0014.txt"))
+	if err != nil {
+		t.Fatalf("read summary file: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "summary_en_begin\nThe document outlines the assessment system for elderly ability.\nsummary_en_end") {
+		t.Fatalf("summary file missing english summary block: %q", text)
+	}
+}
+
+func TestFixedSizeChunkingService_FixSummarySourceLanguage_BackfillsMissingEnglishSummaryBlock(t *testing.T) {
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{"summary": "A social participation total of 0-2 indicates intact ability."},
+		},
+	}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.ChunkDir = t.TempDir()
+	svc.TranslationEnabled = true
+	svc.TranslationModelName = "translation-model"
+
+	summaries := []SummaryItem{
+		{
+			SummaryID: "177_0_0006",
+			RecordID:  177,
+			Level:     0,
+			SeqNo:     6,
+			Lines:     []string{"100-115"},
+			Summary:   "社会参与总分0～2分为能力完好，3～7分为轻度受损，8～13分为中度受损，≥14分为重度受损。",
+			Language:  "zh",
+		},
+	}
+	if _, err := writeSummaryFile(svc.ChunkDir, summaries[0].RecordID, summaries[0]); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+
+	got, err := svc.fixSummarySourceLanguage(context.Background(), "zh", summaries)
+	if err != nil {
+		t.Fatalf("fixSummarySourceLanguage: %v", err)
+	}
+	if got[0].Summary != "社会参与总分0～2分为能力完好，3～7分为轻度受损，8～13分为中度受损，≥14分为重度受损。" {
+		t.Fatalf("Summary=%q", got[0].Summary)
+	}
+	if got[0].SummaryEn != "A social participation total of 0-2 indicates intact ability." {
+		t.Fatalf("SummaryEn=%q", got[0].SummaryEn)
+	}
+
+	artifactDir, err := buildRecordArtifactDir(svc.ChunkDir, summaries[0].RecordID)
+	if err != nil {
+		t.Fatalf("buildRecordArtifactDir: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(artifactDir, "summary_0_0006.txt"))
+	if err != nil {
+		t.Fatalf("read summary file: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "summary_en_begin\nA social participation total of 0-2 indicates intact ability.\nsummary_en_end") {
+		t.Fatalf("summary file missing english summary block: %q", text)
+	}
+}
+
 func TestService_HandleInput_MissingInputFilename(t *testing.T) {
 	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	st := &fakeStore{rec: InputRecord{ID: 1001, StatusRaw: "[]"}}

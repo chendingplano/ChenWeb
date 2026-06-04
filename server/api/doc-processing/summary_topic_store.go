@@ -46,16 +46,11 @@ INSERT INTO kb.summaries (
     child_summary_ids,
     keywords,
     keywords_en,
-    category_paths,
-    category_paths_en,
-    category_nodes,
-    category_path_items,
-    category_path_items_en,
     summary_text,
-    summary_text_en
+    summary_text_en,
+    language
 ) VALUES (
-    $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb,
-    $11::jsonb, $12::jsonb, $13::jsonb, $14, $15
+    $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11
 )`
 	for _, item := range summaries {
 		if _, err := tx.ExecContext(ctx, insertSQL,
@@ -67,13 +62,9 @@ INSERT INTO kb.summaries (
 			mustJSONString(item.Children, []string{}),
 			mustJSONString(item.Keywords, []string{}),
 			mustJSONString(item.KeywordsEn, []string{}),
-			mustJSONString(item.CategoryPaths, []string{}),
-			mustJSONString(summaryCategoryNames(item.CategoryPathItemsEn), []string{}),
-			mustJSONString(item.CategoryNodes, []CategoryPathNode{}),
-			mustJSONString(item.CategoryPathItems, []CategoryPathEntry{}),
-			mustJSONString(item.CategoryPathItemsEn, []CategoryPathEntry{}),
 			strings.TrimSpace(item.Summary),
 			strings.TrimSpace(item.SummaryEn),
+			strings.TrimSpace(item.Language),
 		); err != nil {
 			return err
 		}
@@ -183,9 +174,13 @@ func ReplaceSummaryArtifactsFromArtifactFiles(ctx context.Context, recordID int6
 			Level:         item.Level,
 			SeqNo:         item.SeqNo,
 			Lines:         append([]string(nil), item.Lines...),
+			Children:      append([]string(nil), item.Children...),
 			Keywords:      append([]string(nil), item.Keywords...),
+			KeywordsEn:    append([]string(nil), item.KeywordsEn...),
 			CategoryPaths: append([]string(nil), item.CategoryPaths...),
 			Summary:       item.SummaryText,
+			SummaryEn:     item.SummaryTextEn,
+			Language:      item.Language,
 		})
 	}
 	return ReplaceSummaryArtifactsForRecord(ctx, recordID, summaries, logger)
@@ -231,7 +226,7 @@ func ReplaceTopicArtifactsFromArtifactFiles(ctx context.Context, recordID int64,
 
 func buildSummaryRegistryRowsFromDB(ctx context.Context, db *sql.DB, recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {
 	const q = `
-SELECT id, summary_id, summary_level, summary_seq_no, source_line_spans, keywords, category_paths, summary_text, summary_text_en, search_document
+SELECT id, summary_id, summary_level, summary_seq_no, source_line_spans, keywords, summary_text, summary_text_en, search_document
 FROM kb.summaries
 WHERE input_record_id = $1
 ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
@@ -250,17 +245,15 @@ ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
 			seqNo           int
 			sourceLineSpans []byte
 			keywords        []byte
-			categoryPaths   []byte
 			summaryText     string
 			summaryTextEn   string
 			searchDocument  string
 		)
-		if err := rows.Scan(&id, &summaryID, &level, &seqNo, &sourceLineSpans, &keywords, &categoryPaths, &summaryText, &summaryTextEn, &searchDocument); err != nil {
+		if err := rows.Scan(&id, &summaryID, &level, &seqNo, &sourceLineSpans, &keywords, &summaryText, &summaryTextEn, &searchDocument); err != nil {
 			return nil, err
 		}
 		payload, _ := json.Marshal(map[string]any{
 			"keywords":        rawJSONArrayStrings(keywords),
-			"category_paths":  rawJSONArrayStrings(categoryPaths),
 			"level":           level,
 			"seq_no":          seqNo,
 			"summary_text":    summaryText,
@@ -277,7 +270,6 @@ ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
 			SnippetBasis:    firstNonEmpty(summaryText, summaryTextEn),
 			SourceTitle:     sourceTitle,
 			SourceFilename:  sourceTitle,
-			CategoryPaths:   json.RawMessage(categoryPaths),
 			SourceLineSpans: json.RawMessage(sourceLineSpans),
 			SemanticPayload: payload,
 		})
@@ -342,13 +334,6 @@ ORDER BY topic_seq_no ASC, id ASC`
 		})
 	}
 	return out, rows.Err()
-}
-
-func summaryCategoryNames(items []CategoryPathEntry) []string {
-	if len(items) == 0 {
-		return []string{}
-	}
-	return append([]string(nil), items[0].NodeNames()...)
 }
 
 func topicCategoryNames(items []CategoryPathEntry) []string {

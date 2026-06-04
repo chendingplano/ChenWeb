@@ -968,6 +968,10 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, leafErr)
 		return leafErr
 	}
+	for i := range leafSummaries {
+		leafSummaries[i].Language = rec.SourceLanguage
+	}
+	s.Logger.Info("writing leaf summary files", "record_id", rec.ID, "count", len(leafSummaries), "source_language", rec.SourceLanguage)
 	for _, item := range leafSummaries {
 		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
 			s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
@@ -989,6 +993,10 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
 	}
+	for i := range allSummaries {
+		allSummaries[i].Language = rec.SourceLanguage
+	}
+	s.Logger.Info("writing non-leaf summary files", "record_id", rec.ID, "count", len(allSummaries), "source_language", rec.SourceLanguage)
 	for _, item := range allSummaries {
 		if item.Level == 0 {
 			continue
@@ -1019,7 +1027,7 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		return fixErr
 	}
 	if err := validateSummaryArtifacts(rec.ID, rec.SourceLanguage, allSummaries, s.ChunkDir, s.ArtifactWebDir); err != nil {
-		err = fmt.Errorf("(MID_26052701) summary sanity check failed: %w", err)
+		err = fmt.Errorf("(MID_26060401) summary sanity check failed: %w", err)
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
 	}
@@ -1027,6 +1035,7 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
 	}
+	s.Logger.Info("upserting summaries to kb.summaries", "record_id", rec.ID, "count", len(allSummaries), "source_language", rec.SourceLanguage)
 	if err := ReplaceSummaryArtifactsForRecord(ctx, rec.ID, allSummaries, s.Logger); err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
@@ -1438,6 +1447,8 @@ func summaryLanguageName(langCode string) string {
 	switch langCode {
 	case "zh":
 		return "Chinese (Simplified)"
+	case "en":
+		return "English"
 	default:
 		return langCode
 	}
@@ -1542,10 +1553,35 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 	langName := summaryLanguageName(normalizedLang)
 	for i, item := range summaries {
 		originalSummary := item.Summary
+		originalSummaryEn := item.SummaryEn
 		originalKeywords := append([]string(nil), item.Keywords...)
 		changed := false
+		summary := strings.TrimSpace(item.Summary)
 		summaryEn := strings.TrimSpace(item.SummaryEn)
-		if summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
+		if summaryEn == "" && summary != "" && detectContentLanguage(summary) == normalizedLang {
+			translated, err := s.translateSummaryText(ctx, summaryLanguageName("en"), summary)
+			if err != nil {
+				s.Logger.Warn("(MID_26052906) failed to translate summary to English; keeping missing summary_en",
+					"summary_id", item.SummaryID,
+					"source_lang", normalizedLang,
+					"error", err,
+				)
+			} else {
+				summaryEn = translated
+				summaries[i].SummaryEn = translated
+				changed = true
+				s.Logger.Info("translated summary to english",
+					"summary_id", item.SummaryID,
+					"source_lang", normalizedLang,
+				)
+			}
+		}
+		if summaryEn == "" && summary != "" && detectContentLanguage(summary) == "en" {
+			summaryEn = summary
+			summaries[i].SummaryEn = summary
+			changed = true
+		}
+		if summaryEn != "" && summary == summaryEn {
 			translated, err := s.translateSummaryText(ctx, langName, summaryEn)
 			if err != nil {
 				s.Logger.Warn("(MID_26052904) failed to translate summary to source language; keeping English",
@@ -1588,6 +1624,7 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 				"error", err,
 			)
 			summaries[i].Summary = originalSummary
+			summaries[i].SummaryEn = originalSummaryEn
 			summaries[i].Keywords = originalKeywords
 		}
 	}

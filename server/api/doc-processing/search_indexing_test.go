@@ -157,26 +157,21 @@ func TestReplaceSummaryArtifactsForRecordDeletesThenInserts(t *testing.T) {
 			`[]`,
 			`["energy"]`,
 			`[]`,
-			`["performance"]`,
-			`[]`,
-			`[]`,
-			`[]`,
-			`[]`,
 			"Energy summary",
+			"",
 			"",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	err = ReplaceSummaryArtifactsForRecord(context.Background(), 42, []SummaryItem{{
-		SummaryID:     "42_1_0001",
-		RecordID:      42,
-		Level:         1,
-		SeqNo:         1,
-		Lines:         []string{"2:10"},
-		Keywords:      []string{"energy"},
-		CategoryPaths: []string{"performance"},
-		Summary:       "Energy summary",
+		SummaryID: "42_1_0001",
+		RecordID:  42,
+		Level:     1,
+		SeqNo:     1,
+		Lines:     []string{"2:10"},
+		Keywords:  []string{"energy"},
+		Summary:   "Energy summary",
 	}}, nil)
 	if err != nil {
 		t.Fatalf("ReplaceSummaryArtifactsForRecord: %v", err)

@@ -28,7 +28,7 @@ func buildRecordArtifactDir(baseDir string, recordID int64) (string, error) {
 	groupID := recordID / 1000
 	targetDir := filepath.Join(baseDir, strconv.FormatInt(groupID, 10), strconv.FormatInt(recordID, 10))
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
+		return "", fmt.Errorf("mkdir error, %v", err)
 	}
 	return targetDir, nil
 }

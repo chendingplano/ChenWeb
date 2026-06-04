@@ -835,9 +835,13 @@ type summaryArtifactRecord struct {
 	Level         int
 	SeqNo         int
 	Keywords      []string
+	KeywordsEn    []string
 	CategoryPaths []string
 	SummaryText   string
+	SummaryTextEn string
 	Lines         []string
+	Children      []string
+	Language      string
 }
 
 func parseSummaryArtifactFile(path string) (summaryArtifactRecord, error) {
@@ -849,7 +853,9 @@ func parseSummaryArtifactFile(path string) (summaryArtifactRecord, error) {
 	scanner := bufio.NewScanner(strings.NewReader(string(body)))
 	scanner.Buffer(make([]byte, 1024), 8*1024*1024)
 	var summaryLines []string
+	var summaryEnLines []string
 	inSummary := false
+	inSummaryEn := false
 	for scanner.Scan() {
 		line := strings.TrimRight(scanner.Text(), "\r")
 		trimmed := strings.TrimSpace(line)
@@ -861,8 +867,20 @@ func parseSummaryArtifactFile(path string) (summaryArtifactRecord, error) {
 			inSummary = false
 			continue
 		}
+		if trimmed == "summary_en_begin" {
+			inSummaryEn = true
+			continue
+		}
+		if trimmed == "summary_en_end" {
+			inSummaryEn = false
+			continue
+		}
 		if inSummary {
 			summaryLines = append(summaryLines, line)
+			continue
+		}
+		if inSummaryEn {
+			summaryEnLines = append(summaryEnLines, line)
 			continue
 		}
 		switch {
@@ -872,6 +890,12 @@ func parseSummaryArtifactFile(path string) (summaryArtifactRecord, error) {
 			out.Level, _ = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(trimmed, "level:")))
 		case strings.HasPrefix(trimmed, "lines:"):
 			out.Lines = parseQuotedStringArraySearch(strings.TrimSpace(strings.TrimPrefix(trimmed, "lines:")))
+		case strings.HasPrefix(trimmed, "children:"):
+			out.Children = parseQuotedStringArraySearch(strings.TrimSpace(strings.TrimPrefix(trimmed, "children:")))
+		case strings.HasPrefix(trimmed, "language:"):
+			out.Language = strings.Trim(strings.TrimSpace(strings.TrimPrefix(trimmed, "language:")), `"`)
+		case strings.HasPrefix(trimmed, "keywords_en:"):
+			out.KeywordsEn = parseQuotedStringArraySearch(strings.TrimSpace(strings.TrimPrefix(trimmed, "keywords_en:")))
 		case strings.HasPrefix(trimmed, "keywords:"):
 			out.Keywords = parseQuotedStringArraySearch(strings.TrimSpace(strings.TrimPrefix(trimmed, "keywords:")))
 		case strings.HasPrefix(trimmed, "category_paths:"):
@@ -879,6 +903,7 @@ func parseSummaryArtifactFile(path string) (summaryArtifactRecord, error) {
 		}
 	}
 	out.SummaryText = strings.TrimSpace(strings.Join(summaryLines, "\n"))
+	out.SummaryTextEn = strings.TrimSpace(strings.Join(summaryEnLines, "\n"))
 	_, level, seqNo, ok := parseSummaryID(out.SummaryID)
 	if ok {
 		out.Level = level
