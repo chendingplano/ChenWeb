@@ -288,6 +288,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/inputs/:id/stop", kbhandler.StopPipeline)
 	apiGroup.GET("/kb/metrics", kbhandler.ListMetrics)
 	apiGroup.GET("/kb/metrics/search", kbhandler.SearchMetrics)
+	apiGroup.GET("/kb/metrics/:metric_id/wiki", kbhandler.GetMetricWiki)
 	apiGroup.GET("/kb/search", kbhandler.SearchAllArtifacts)
 	apiGroup.POST("/kb/search/backfill-embeddings", kbhandler.BackfillSearchEmbeddings)
 	apiGroup.GET("/kb/summaries/search", kbhandler.SearchSummaries)
