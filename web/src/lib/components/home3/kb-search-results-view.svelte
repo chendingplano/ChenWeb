@@ -318,33 +318,35 @@
 
 			{@render paginationControls('top')}
 
-			<div class="result-list" aria-label="Search results">
-				{#each results as result, index}
-					<article class="result-item">
-						<div class="thumb" aria-hidden="true">{resultType(result).slice(0, 1)}</div>
-						<div class="result-body">
-							<a class="result-title" href={`/home3/knowledge?section=kb-search&q=${encodeURIComponent(submittedQuery)}`}>
-								{resultTitle(result, index)}
-							</a>
-							<div class="meta-line">
-								<span>{resultType(result)}</span>
-								{#if resultRecord(result)}
-									<span>{resultRecord(result)}</span>
-								{/if}
-								<span>{resultSource(result)}</span>
-								{#if formatScore(result)}
-									<span>score {formatScore(result)}</span>
+			<div class="result-scroll" aria-label="Search results page">
+				<div class="result-list" aria-label="Search results">
+					{#each results as result, index}
+						<article class="result-item">
+							<div class="thumb" aria-hidden="true">{resultType(result).slice(0, 1)}</div>
+							<div class="result-body">
+								<a class="result-title" href={`/home3/knowledge?section=kb-search&q=${encodeURIComponent(submittedQuery)}`}>
+									{resultTitle(result, index)}
+								</a>
+								<div class="meta-line">
+									<span>{resultType(result)}</span>
+									{#if resultRecord(result)}
+										<span>{resultRecord(result)}</span>
+									{/if}
+									<span>{resultSource(result)}</span>
+									{#if formatScore(result)}
+										<span>score {formatScore(result)}</span>
+									{/if}
+								</div>
+								{#if resultSnippet(result)}
+									<p class="snippet">{resultSnippet(result)}</p>
 								{/if}
 							</div>
-							{#if resultSnippet(result)}
-								<p class="snippet">{resultSnippet(result)}</p>
-							{/if}
-						</div>
-					</article>
-				{/each}
-			</div>
+						</article>
+					{/each}
+				</div>
 
-			{@render paginationControls('bottom')}
+				{@render paginationControls('bottom')}
+			</div>
 		{:else if hasQuery}
 			<div class="empty-state">
 				<h2>No results found</h2>
@@ -365,6 +367,7 @@
 <style>
 	.search-page {
 		min-height: 100%;
+		height: 100%;
 		overflow: auto;
 		background:
 			radial-gradient(circle at 52% 0%, color-mix(in oklch, var(--accent) 10%, transparent), transparent 34rem),
@@ -374,11 +377,17 @@
 
 	.search-shell {
 		width: min(1120px, calc(100% - 48px));
+		min-height: 0;
+		height: 100%;
+		box-sizing: border-box;
 		margin: 0 auto;
 		padding: 48px 0 72px;
+		display: flex;
+		flex-direction: column;
 	}
 
 	.search-header {
+		flex-shrink: 0;
 		display: flex;
 		align-items: end;
 		justify-content: space-between;
@@ -412,9 +421,12 @@
 	}
 
 	.search-form {
+		flex-shrink: 0;
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr) auto auto;
 		align-items: center;
+		height: 46px;
+		min-height: 46px;
 		margin-top: 22px;
 		background: var(--surface);
 		border: 1px solid var(--border-strong);
@@ -477,6 +489,7 @@
 	}
 
 	.scope-row {
+		flex-shrink: 0;
 		display: flex;
 		align-items: center;
 		gap: 12px;
@@ -513,6 +526,7 @@
 
 	.suggestion,
 	.status {
+		flex-shrink: 0;
 		max-width: 75ch;
 		margin-top: 22px;
 		color: var(--text-secondary);
@@ -529,7 +543,29 @@
 	}
 
 	.result-list {
-		margin-top: 24px;
+		margin-top: 0;
+	}
+
+	.result-scroll {
+		flex: 1 1 auto;
+		min-height: 0;
+		margin-top: 18px;
+		padding-right: 10px;
+		overflow-y: auto;
+		scrollbar-width: thin;
+		scrollbar-color: color-mix(in oklch, var(--accent) 42%, var(--border))
+			transparent;
+	}
+
+	.result-scroll::-webkit-scrollbar {
+		width: 10px;
+	}
+
+	.result-scroll::-webkit-scrollbar-thumb {
+		background: color-mix(in oklch, var(--accent) 38%, var(--border));
+		border: 3px solid transparent;
+		border-radius: 999px;
+		background-clip: padding-box;
 	}
 
 	.result-item {
@@ -589,6 +625,7 @@
 	}
 
 	.pagination {
+		flex-shrink: 0;
 		display: flex;
 		align-items: center;
 		justify-content: flex-end;
@@ -723,6 +760,7 @@
 		.search-shell {
 			width: min(100% - 28px, 1120px);
 			padding-top: 28px;
+			padding-bottom: 36px;
 		}
 
 		.search-header {
