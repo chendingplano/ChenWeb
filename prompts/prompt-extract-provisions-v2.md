@@ -63,7 +63,7 @@ For every extracted provisions, produce a structured record with the following f
 
 * `name`: normalized short name of the provision in its input language.
 * `name_en`: English translation of `name`.
-* `source_line_spans`: source page/line references that support extraction, formatted as `["<page>:<line>", ...]`
+* `source_line_spans`: line numbers that reference the input lines supporting extraction, formatted as `["20" ,"25-29"]`. Never enumerate lines. For continuous line numbers, use a range: `<start>`-`<end>`.
 * `provision`: exact provision text in the input language
 * `provision_en`: English translation of `provision` 
 * `location_type`: one of `sentence`, `paragraph`, `bullet`, `table_row`, `table_cell`, `heading_context`, `mixed`
@@ -114,7 +114,7 @@ Apply these rules according to the language of each category segment:
       "provision_en": "<English translation or same as original if English>",
       "provision_desc": <the description about the provision>,
       "provision_desc_en": <the English translation of provision_desc>,
-      "source_line_spans": ["<page>:<line>", "<page>:<line>"],
+      "source_line_spans": ["20", "25-29"],
       "context":"<the context>",
       "context_en":"<the English translation of the context if its input lanuage is not English>",
       "subject":"<the provision's subject>",

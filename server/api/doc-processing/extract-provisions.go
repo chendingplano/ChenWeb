@@ -545,7 +545,7 @@ func buildProvisionUserPromptFromChunk(chunk Chunk) string {
 			"provision_en":      "string",
 			"provision_desc":    "string",
 			"provision_desc_en": "string",
-			"source_line_spans": []string{"2:10"},
+			"source_line_spans": []string{"12", "16-19"},
 			"context":           "string",
 			"context_en":        "string",
 			"subject":           "string",
@@ -579,10 +579,10 @@ func chunkLineToPage(chunk Chunk) map[int]int {
 func chunkLineText(chunk Chunk) map[string]string {
 	out := make(map[string]string, len(chunk.Lines))
 	for _, ml := range chunk.Lines {
-		if ml.Line.LineNo <= 0 || ml.Line.PageNo <= 0 {
+		if ml.Line.LineNo <= 0 {
 			continue
 		}
-		out[fmt.Sprintf("%d:%d", ml.Line.PageNo, ml.Line.LineNo)] = strings.TrimSpace(ml.Line.Content)
+		out[strconv.Itoa(ml.Line.LineNo)] = strings.TrimSpace(ml.Line.Content)
 	}
 	return out
 }
@@ -826,6 +826,9 @@ func looksLikeProvisionRecord(payload map[string]any) bool {
 			if _, ok := payload[key].([]any); ok {
 				return true
 			}
+			if _, ok := payload[key].([]string); ok {
+				return true
+			}
 		}
 	}
 	return false
@@ -842,7 +845,7 @@ func buildProvisionUserPrompt(block Block) string {
 			"provision_en":      "string",
 			"provision_desc":    "string",
 			"provision_desc_en": "string",
-			"source_line_spans": []string{"2:10"},
+			"source_line_spans": []string{"12", "16-19"},
 			"context":           "string",
 			"context_en":        "string",
 			"subject":           "string",
@@ -876,10 +879,10 @@ func blockLineToPage(block Block) map[int]int {
 func blockLineText(block Block) map[string]string {
 	out := make(map[string]string, len(block.Lines))
 	for _, line := range block.Lines {
-		if line.LineNumber <= 0 || line.PageNumber <= 0 {
+		if line.LineNumber <= 0 {
 			continue
 		}
-		out[fmt.Sprintf("%d:%d", line.PageNumber, line.LineNumber)] = strings.TrimSpace(line.Content)
+		out[strconv.Itoa(line.LineNumber)] = strings.TrimSpace(line.Content)
 	}
 	return out
 }
@@ -934,66 +937,98 @@ func sourceTextFromSpans(spans []string, lineText map[string]string) string {
 		return ""
 	}
 	parts := make([]string, 0, len(spans))
+	seen := make(map[string]struct{}, len(spans))
 	for _, span := range spans {
-		text := strings.TrimSpace(lineText[strings.TrimSpace(span)])
-		if text != "" {
-			parts = append(parts, text)
+		for _, lineNo := range expandLineSpan(span) {
+			key := strconv.Itoa(lineNo)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			text := strings.TrimSpace(lineText[key])
+			if text != "" {
+				parts = append(parts, text)
+			}
 		}
 	}
 	return strings.Join(parts, "\n")
 }
 
 func normalizeProvisionSourceLineSpans(value any, lineToPage map[int]int) []string {
-	items, ok := value.([]any)
-	if !ok {
-		return nil
-	}
+	_ = lineToPage
+	lineNumbers := make([]int, 0, 4)
 
-	out := make([]string, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	appendSpan := func(span string) {
-		span = strings.TrimSpace(span)
-		if span == "" {
-			return
-		}
-		if _, ok := seen[span]; ok {
-			return
-		}
-		seen[span] = struct{}{}
-		out = append(out, span)
-	}
-
-	formatLineSpan := func(pageNo int, lineNo int) string {
-		if lineNo <= 0 {
-			return ""
-		}
-		if pageNo > 0 {
-			return fmt.Sprintf("%d:%d", pageNo, lineNo)
-		}
-		return strconv.Itoa(lineNo)
-	}
-
-	for _, item := range items {
+	appendSpanValue := func(item any) {
 		switch v := item.(type) {
 		case map[string]any:
 			lineNo := int(toFloat(v["line_number"]))
-			pageNo := int(toFloat(v["page_number"]))
-			if pageNo <= 0 && lineNo > 0 {
-				pageNo = lineToPage[lineNo]
+			if lineNo > 0 {
+				lineNumbers = append(lineNumbers, lineNo)
 			}
-			appendSpan(formatLineSpan(pageNo, lineNo))
 		case float64:
 			lineNo := int(v)
-			appendSpan(formatLineSpan(lineToPage[lineNo], lineNo))
+			if lineNo > 0 {
+				lineNumbers = append(lineNumbers, lineNo)
+			}
+		case int:
+			if v > 0 {
+				lineNumbers = append(lineNumbers, v)
+			}
+		case int64:
+			if v > 0 {
+				lineNumbers = append(lineNumbers, int(v))
+			}
 		case string:
-			appendSpan(v)
+			s := strings.TrimSpace(v)
+			if s == "" {
+				return
+			}
+			if pageLine := strings.SplitN(s, ":", 2); len(pageLine) == 2 {
+				if lineNo, err := strconv.Atoi(strings.TrimSpace(pageLine[1])); err == nil && lineNo > 0 {
+					lineNumbers = append(lineNumbers, lineNo)
+					return
+				}
+			}
+			if _, _, ok := parseMetricLineSpan(s); ok {
+				lineNumbers = append(lineNumbers, expandLineSpan(s)...)
+				return
+			}
+			if lineNo, err := strconv.Atoi(s); err == nil && lineNo > 0 {
+				lineNumbers = append(lineNumbers, lineNo)
+			}
 		}
 	}
 
-	if len(out) == 0 {
+	switch v := value.(type) {
+	case []any:
+		for _, item := range v {
+			appendSpanValue(item)
+		}
+	case []string:
+		for _, item := range v {
+			appendSpanValue(item)
+		}
+	case []int:
+		for _, item := range v {
+			appendSpanValue(item)
+		}
+	case []int64:
+		for _, item := range v {
+			appendSpanValue(item)
+		}
+	case []float64:
+		for _, item := range v {
+			appendSpanValue(item)
+		}
+	case string, map[string]any, float64, int, int64:
+		appendSpanValue(v)
+	default:
 		return nil
 	}
-	return out
+	if len(lineNumbers) == 0 {
+		return nil
+	}
+	return lineRangesFromNumbers(lineNumbers)
 }
 
 func (p *ProvisionsProcessor) buildProvisionOutputRows(provisions []map[string]any, now time.Time, numBlocks int, durationMs int64, modelName string) []map[string]any {

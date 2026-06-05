@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -66,7 +67,7 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 				"type":              "mandatory",
 				"provision":         "The operator shall inspect pressure relief valves monthly.",
 				"provision_en":      "The operator shall inspect pressure relief valves monthly.",
-				"source_line_spans": []any{float64(10)},
+				"source_line_spans": []any{float64(10), float64(11)},
 				"context":           "maintenance section",
 				"subject":           "pressure relief valve inspection",
 				"location_type":     "sentence",
@@ -137,7 +138,7 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if got := provisionsStore.lastSave.Provisions[0]["provision_subject"]; got != "pressure relief valve inspection" {
 		t.Fatalf("provision_subject=%v", got)
 	}
-	if got := provisionsStore.lastSave.Provisions[0]["source_line_spans"]; len(got.([]string)) != 1 || got.([]string)[0] != "2:10" {
+	if got := provisionsStore.lastSave.Provisions[0]["source_line_spans"]; len(got.([]string)) != 1 || got.([]string)[0] != "10-11" {
 		t.Fatalf("source_line_spans=%v", got)
 	}
 	if got := strings.TrimSpace(asString(provisionsStore.lastSave.Provisions[0]["source_text"])); got != "The operator shall inspect pressure relief valves monthly." {
@@ -258,7 +259,7 @@ func TestBuildProvisionDBRecord_NonEnglishPreservesOriginal(t *testing.T) {
 		"provision_keywords": []string{"消防员", "体格检查"},
 		"confidence":         0.95,
 		"source_text":        "100 消防员体格检查应符合下列标准:",
-		"source_line_spans":  []string{"6:100"},
+		"source_line_spans":  []string{"100"},
 		"num_blocks":         2,
 		"num_provisions":     3,
 		"time_per_provision": int64(12),
@@ -340,7 +341,7 @@ func TestProvisionsProcessor_AcceptsSingleProvisionObject(t *testing.T) {
 			"type":              "mandatory",
 			"provision":         "终端设备中密封源的质量应符合GB4075。",
 			"provision_en":      "The quality of sealed sources in terminal equipment shall comply with GB4075.",
-			"source_line_spans": []any{"8:181"},
+			"source_line_spans": []any{"181"},
 			"subject":           "医疗健康监测终端设备辐射安全要求",
 			"keywords":          []any{"终端辐射", "密封源", "GB4075"},
 			"confidence":        0.95,
@@ -399,7 +400,7 @@ func TestProvisionsProcessor_AcceptsBareProvisionObject(t *testing.T) {
 		"type":              "mandatory",
 		"provision":         "终端设备中密封源的质量应符合GB4075。",
 		"provision_en":      "The quality of sealed sources in terminal equipment shall comply with GB4075.",
-		"source_line_spans": []any{"8:181"},
+		"source_line_spans": []any{"181"},
 		"subject":           "医疗健康监测终端设备辐射安全要求",
 		"keywords":          []any{"终端辐射", "密封源", "GB4075"},
 		"confidence":        0.95,
@@ -463,7 +464,7 @@ func TestProvisionsProcessor_RetriesWithCallbackModelOnEmptyJSON(t *testing.T) {
 						"type":              "mandatory",
 						"provision":         "The device shall log all alarms.",
 						"provision_en":      "The device shall log all alarms.",
-						"source_line_spans": []any{"2:10"},
+						"source_line_spans": []any{"10"},
 						"confidence":        0.87,
 					},
 				},
@@ -772,6 +773,37 @@ func TestProvisionsProcessor_ExtractProvisionPayloadUsesStructuredContractWhenAv
 	items, ok := payload["provisions"].([]any)
 	if !ok || len(items) != 1 {
 		t.Fatalf("provisions=%#v", payload["provisions"])
+	}
+}
+
+func TestNormalizeProvisionSourceLineSpans_UsesCanonicalLineOnlyRanges(t *testing.T) {
+	got := normalizeProvisionSourceLineSpans([]any{
+		float64(15),
+		map[string]any{"line_number": float64(16), "page_number": float64(4)},
+		"17-19",
+	}, nil)
+	want := []string{"15-19"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeProvisionSourceLineSpans=%v, want %v", got, want)
+	}
+}
+
+func TestNormalizeProvisionSourceLineSpans_AcceptsStringSlices(t *testing.T) {
+	got := normalizeProvisionSourceLineSpans([]string{"48", "49", "50-51"}, nil)
+	want := []string{"48-51"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeProvisionSourceLineSpans string slice=%v, want %v", got, want)
+	}
+}
+
+func TestSourceTextFromChunkLineOnlySpans(t *testing.T) {
+	text := sourceTextFromSpans([]string{"12", "16-17"}, map[string]string{
+		"12": "Alpha",
+		"16": "Beta",
+		"17": "Gamma",
+	})
+	if text != "Alpha\nBeta\nGamma" {
+		t.Fatalf("sourceTextFromSpans=%q", text)
 	}
 }
 

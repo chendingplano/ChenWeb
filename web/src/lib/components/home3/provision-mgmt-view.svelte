@@ -251,10 +251,9 @@
 		return map;
 	});
 
-	// Provision source_line_spans are stored either as "page:line" strings
-	// (e.g. "3:90" — written by CreateProvision) or as {page_number, line_number}
-	// objects (written by the extraction pipeline). A bare "90" is treated as a
-	// line number whose page is resolved via lineNumToPage.
+	// Provision source_line_spans are now canonical line-only spans such as "90"
+	// or "90-93". Legacy "page:line" strings and {page_number, line_number}
+	// objects are still accepted while older rows are being read back.
 	function normalizeMetricSpans(m: KbProvisionRecord | undefined): NormalizedSpan[] {
 		const raw = (m as { source_line_spans?: unknown })?.source_line_spans;
 		if (!Array.isArray(raw)) return [];
@@ -263,13 +262,22 @@
 			const page = pageNo && pageNo > 0 ? pageNo : lineNumToPage.get(lineNo);
 			if (page) out.push({ page_number: page, line_number: lineNo });
 		};
+		const pushRange = (start: number, end: number, pageNo?: number | null) => {
+			for (let lineNo = start; lineNo <= end && lineNo <= start + 200; lineNo += 1) {
+				pushLine(lineNo, pageNo);
+			}
+		};
 		for (const item of raw) {
 			if (typeof item === 'string') {
 				const s = item.trim().replace(/^\[|\]$/g, '');
-				const mm = s.match(/^(\d+)\s*:\s*(\d+)$/);
-				if (mm) {
-					// "page:line"
-					pushLine(parseInt(mm[2], 10), parseInt(mm[1], 10));
+				const pageLine = s.match(/^(\d+)\s*:\s*(\d+)$/);
+				if (pageLine) {
+					pushLine(parseInt(pageLine[2], 10), parseInt(pageLine[1], 10));
+					continue;
+				}
+				const range = s.match(/^(\d+)\s*-\s*(\d+)$/);
+				if (range) {
+					pushRange(parseInt(range[1], 10), parseInt(range[2], 10));
 				} else {
 					const n = parseInt(s, 10);
 					if (n > 0) pushLine(n);
