@@ -16,6 +16,7 @@ The input is a JSON array:
 ```
 
 `flag = "o"` means overlap/context. Do not emit an item whose evidence rests only on overlap lines.
+`flag = "n"` means the normal lines.
 
 ## What Counts
 

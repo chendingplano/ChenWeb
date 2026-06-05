@@ -365,7 +365,8 @@ func appendArtifactFilterClauses(clauses []string, args []any, nextArg int, arti
 		nextArg++
 	}
 	if filters.InventoryCategory != "" {
-		clauses = append(clauses, fmt.Sprintf("COALESCE(sa.semantic_payload->>'item_category', '') = $%d", nextArg))
+		// item_categories is a JSON array in the semantic payload; match membership.
+		clauses = append(clauses, fmt.Sprintf("COALESCE(sa.semantic_payload->'item_categories', '[]'::jsonb) @> to_jsonb($%d::text)", nextArg))
 		args = append(args, filters.InventoryCategory)
 		nextArg++
 	}

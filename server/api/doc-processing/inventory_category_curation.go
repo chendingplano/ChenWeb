@@ -106,8 +106,10 @@ func (c InventoryCategoryCurator) embed(ctx context.Context, surface string) []f
 func collectInventoryItemCategories(items []map[string]any) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {
-		if cat := strings.TrimSpace(asString(item["item_category"])); cat != "" {
-			out = append(out, cat)
+		for _, cat := range toStringSlice(item["item_categories"]) {
+			if cat = strings.TrimSpace(cat); cat != "" {
+				out = append(out, cat)
+			}
 		}
 	}
 	return out
@@ -119,6 +121,7 @@ func collectInventoryItemCategories(items []map[string]any) []string {
 // admitted — even if still pending review — is treated as known vocabulary and
 // no longer trips the unknown_category flag; its review state is surfaced
 // separately at read time.
+/* Chen Ding, 2026/06/06. Seed approved categories is turned off for now
 func (p *InventoryItemsProcessor) refreshCategoryVocabulary(ctx context.Context) {
 	if p.CategoryRegistry.DB == nil {
 		return
@@ -149,6 +152,7 @@ func (p *InventoryItemsProcessor) refreshCategoryVocabulary(ctx context.Context)
 		p.Dictionary.Categories[key] = inventoryCategorySchemaFromRecord(rec)
 	}
 }
+*/
 
 func dedupeNonEmptyNormalized(values []string) []string {
 	seen := map[string]struct{}{}

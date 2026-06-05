@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"testing"
 	"time"
 
@@ -75,9 +76,9 @@ func TestLoadInventoryDictionaryDirAndValidateItem(t *testing.T) {
 	}
 
 	row := map[string]any{
-		"item_name":     "Bosch Pump 1.5kW",
-		"item_category": "pump",
-		"manufacturer":  "Bosch",
+		"item_name":       "Bosch Pump 1.5kW",
+		"item_categories": []any{"pump"},
+		"manufacturer":    "Bosch",
 		"raw_specs": []any{
 			map[string]any{"name": "wattage", "value": 1.5, "unit": "kw"},
 		},
@@ -118,10 +119,10 @@ func TestNormalizeInventoryItemRowsMarksMissingRequiredAttrs(t *testing.T) {
 	}
 	rows := normalizeInventoryItemRows([]any{
 		map[string]any{
-			"item_name":     "Bearing 10",
-			"item_category": "bearing",
-			"lines":         []any{"42"},
-			"confidence":    0.52,
+			"item_name":       "Bearing 10",
+			"item_categories": []any{"bearing"},
+			"lines":           []any{"42"},
+			"confidence":      0.52,
 		},
 	}, 7, dict)
 	if len(rows) != 1 {
@@ -138,8 +139,8 @@ func TestNormalizeInventoryItemRowsMarksMissingRequiredAttrs(t *testing.T) {
 func TestDedupeKeepsDistinctSpeclessItemsInSameCategory(t *testing.T) {
 	dict := inventoryDictionary{Version: "dict-v1", Categories: map[string]inventoryCategorySchema{"material": {}}}
 	rows := normalizeInventoryItemRows([]any{
-		map[string]any{"item_name": "氢氧化钙", "item_category": "material", "lines": []any{"590"}, "confidence": 0.95},
-		map[string]any{"item_name": "氯化钠", "item_category": "material", "lines": []any{"591"}, "confidence": 0.80},
+		map[string]any{"item_name": "氢氧化钙", "item_categories": []any{"material"}, "lines": []any{"590"}, "confidence": 0.95},
+		map[string]any{"item_name": "氯化钠", "item_categories": []any{"material"}, "lines": []any{"591"}, "confidence": 0.80},
 	}, 1, dict)
 	if len(rows) != 2 {
 		t.Fatalf("normalized rows=%d, want 2", len(rows))
@@ -159,8 +160,8 @@ func TestDedupeKeepsDistinctSpeclessItemsInSameCategory(t *testing.T) {
 func TestDedupeCollapsesIdenticalItems(t *testing.T) {
 	dict := inventoryDictionary{Version: "dict-v1", Categories: map[string]inventoryCategorySchema{"material": {}}}
 	rows := normalizeInventoryItemRows([]any{
-		map[string]any{"item_name": "氢氧化钙", "item_category": "material", "lines": []any{"590"}, "confidence": 0.80, "aliases": []any{"消石灰"}},
-		map[string]any{"item_name": "氢氧化钙", "item_category": "material", "lines": []any{"596"}, "confidence": 0.95, "aliases": []any{"Ca(OH)2"}},
+		map[string]any{"item_name": "氢氧化钙", "item_categories": []any{"material"}, "lines": []any{"590"}, "confidence": 0.80, "aliases": []any{"消石灰"}},
+		map[string]any{"item_name": "氢氧化钙", "item_categories": []any{"material"}, "lines": []any{"596"}, "confidence": 0.95, "aliases": []any{"Ca(OH)2"}},
 	}, 1, dict)
 	survivors, dupes := dedupeInventoryItemRows(rows)
 	if len(survivors) != 1 {
@@ -247,19 +248,104 @@ func TestWriteInventoryItemsArtifactFile(t *testing.T) {
 	}
 }
 
+func TestRefreshInventoryItemsArtifactFileIncludesConnectedArtifacts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT inventory_item_id, item_name, canonical_name, item_categories, manufacturer, brand,
+       model_number, part_number, normalized_specs, raw_specs, standards, aliases,
+       evidence_quote, source_line_spans, validation_flags, missing_required_attrs,
+       dedupe_key, schema_version, dictionary_version, confidence, confidence_reason,
+       connected_artifacts, ext_info
+FROM kb.inventory_items
+WHERE input_record_id = $1
+ORDER BY id`)).
+		WithArgs(int64(100)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"inventory_item_id", "item_name", "canonical_name", "item_categories", "manufacturer", "brand",
+			"model_number", "part_number", "normalized_specs", "raw_specs", "standards", "aliases",
+			"evidence_quote", "source_line_spans", "validation_flags", "missing_required_attrs",
+			"dedupe_key", "schema_version", "dictionary_version", "confidence", "confidence_reason",
+			"connected_artifacts", "ext_info",
+		}).AddRow(
+			"100_i_1",
+			"Bosch Pump",
+			"Bosch Pump",
+			[]byte(`["pump"]`),
+			"Bosch",
+			"",
+			"",
+			"",
+			[]byte(`[{"name":"power","value":1500,"unit":"W"}]`),
+			[]byte(`[{"name":"power","value":1500,"unit":"w"}]`),
+			[]byte(`["ISO 9001"]`),
+			[]byte(`["Pmp"]`),
+			"Pump, Bosch, 1500w",
+			[]byte(`["5"]`),
+			[]byte(`[]`),
+			[]byte(`[]`),
+			"pump|bosch|||power=1500W",
+			inventoryItemsSchemaVersion,
+			"dict-v1",
+			0.9,
+			"explicit",
+			[]byte(`{"chunks":["100_ch_1"],"semantic_projects":["100_prj_1"],"topics":[],"scenes":[],"provisions":[],"entities":[],"metrics":[]}`),
+			[]byte(`{"chunk_seq_no":1,"mention_count":2}`),
+		))
+
+	tmp := t.TempDir()
+	rec := DocMetadataInputRecord{StagingFilename: "manual.pdf", ParserName: "opendata"}
+	if err := refreshInventoryItemsArtifactFile(context.Background(), db, tmp, 100, rec); err != nil {
+		t.Fatalf("refreshInventoryItemsArtifactFile: %v", err)
+	}
+
+	path := filepath.Join(tmp, "0", "100", "manual_opendata.inventory_items")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(body, &rows); err != nil {
+		t.Fatalf("unmarshal artifact: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("artifact rows len=%d, want 1", len(rows))
+	}
+	got, ok := rows[0]["connected_artifacts"].(map[string]any)
+	if !ok {
+		t.Fatalf("connected_artifacts missing or wrong type: %#v", rows[0]["connected_artifacts"])
+	}
+	if !reflect.DeepEqual(got["chunks"], []any{"100_ch_1"}) {
+		t.Fatalf("connected_artifacts.chunks=%#v, want [100_ch_1]", got["chunks"])
+	}
+	if rows[0]["mention_count"] != float64(2) {
+		t.Fatalf("mention_count=%v, want 2", rows[0]["mention_count"])
+	}
+	if rows[0]["chunk_seq_no"] != float64(1) {
+		t.Fatalf("chunk_seq_no=%v, want 1", rows[0]["chunk_seq_no"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestInventoryItemsProcessorUsesStructuredContractAndNormalizes(t *testing.T) {
 	fake := &fakeJSONExtractor{out: map[string]any{
 		"language": "en",
 		"items": []any{
 			map[string]any{
-				"item_name":      "Pump, Bosch, 1500w",
-				"canonical_name": "Bosch pump",
-				"item_category":  "pump",
-				"manufacturer":   "Bosch",
-				"raw_specs":      []any{map[string]any{"name": "power", "value": 1500, "unit": "w"}},
-				"evidence_quote": "Pump, Bosch, 1500w",
-				"lines":          []any{"5"},
-				"confidence":     0.9,
+				"item_name":       "Pump, Bosch, 1500w",
+				"canonical_name":  "Bosch pump",
+				"item_categories": []any{"pump"},
+				"manufacturer":    "Bosch",
+				"raw_specs":       []any{map[string]any{"name": "power", "value": 1500, "unit": "w"}},
+				"evidence_quote":  "Pump, Bosch, 1500w",
+				"lines":           []any{"5"},
+				"confidence":      0.9,
 			},
 		},
 	}}
@@ -319,7 +405,7 @@ func TestInventoryItemsSQLStoreSaveExistAndDelete(t *testing.T) {
 			"inventory_item_id":      "7_i_1",
 			"item_name":              "Bosch Pump",
 			"canonical_name":         "Bosch Pump",
-			"item_category":          "pump",
+			"item_categories":        []string{"pump"},
 			"manufacturer":           "Bosch",
 			"normalized_specs":       []map[string]any{{"name": "power", "value": 1500, "unit": "W"}},
 			"raw_specs":              []map[string]any{{"name": "power", "value": 1500, "unit": "w"}},
@@ -385,7 +471,7 @@ func TestInventoryItemDuplicatesSQLStoreSaveAndDelete(t *testing.T) {
 	mock.ExpectExec("INSERT INTO kb.inventory_item_duplicates").
 		WithArgs(
 			"evt-1", int64(7), "7_d_1", "7_i_1", "en",
-			"氢氧化钙", "氢氧化钙", "material", "", "", "", "",
+			"氢氧化钙", "氢氧化钙", `["material"]`, "", "", "", "",
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "用 Ca(OH)2",
 			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "material|氢氧化钙||||",
 			inventoryItemsSchemaVersion, "dict-v1", 0.80, "lower conf", "gpt-test",
@@ -399,17 +485,17 @@ func TestInventoryItemDuplicatesSQLStoreSaveAndDelete(t *testing.T) {
 		ModelName:     "gpt-test",
 		PromptName:    "prompt-extract-inventory-items-v1.md",
 		Items: []map[string]any{{
-			"inventory_item_id":      "7_d_1",
-			"duplicate_of":           "7_i_1",
-			"item_name":              "氢氧化钙",
-			"canonical_name":         "氢氧化钙",
-			"item_category":          "material",
-			"evidence_quote":         "用 Ca(OH)2",
-			"dedupe_key":             "material|氢氧化钙||||",
-			"schema_version":         inventoryItemsSchemaVersion,
-			"dictionary_version":     "dict-v1",
-			"confidence":             0.80,
-			"confidence_reason":      "lower conf",
+			"inventory_item_id":  "7_d_1",
+			"duplicate_of":       "7_i_1",
+			"item_name":          "氢氧化钙",
+			"canonical_name":     "氢氧化钙",
+			"item_categories":    []string{"material"},
+			"evidence_quote":     "用 Ca(OH)2",
+			"dedupe_key":         "material|氢氧化钙||||",
+			"schema_version":     inventoryItemsSchemaVersion,
+			"dictionary_version": "dict-v1",
+			"confidence":         0.80,
+			"confidence_reason":  "lower conf",
 		}},
 	})
 	if err != nil {

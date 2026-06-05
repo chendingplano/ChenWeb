@@ -245,11 +245,6 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 		return errors.New("(MID_26053106) inventory items store is nil")
 	}
 
-	// Reload boundary: refresh the live category vocabulary from the registry
-	// (approved ∪ pending) so admitted categories become known vocabulary and
-	// the LLM converges on existing names instead of re-inventing synonyms.
-	p.refreshCategoryVocabulary(ctx)
-
 	rec, err := p.InputStore.GetInputRecord(ctx, evt.RecordID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -362,11 +357,6 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	if reindexErr := ReindexInventoryItemSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex inventory item search registry failed", "record_id", evt.RecordID, "error", reindexErr)
 	}
-	// Post-pass: admit any novel item_category values into the registry. Decoupled
-	// from the extraction hot path; best-effort so curation never fails a document.
-	if curErr := p.CategoryCurator.CurateObservedCategories(ctx, collectInventoryItemCategories(result.Items)); curErr != nil {
-		p.Logger.Warn("inventory category curation failed", "record_id", evt.RecordID, "error", curErr)
-	}
 	p.Logger.Info("inventory items extracted",
 		"record_id", evt.RecordID,
 		"inserted_items", inserted,
@@ -404,15 +394,15 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 		"prompt", p.PromptRef,
 	)
 
-	outcomes, runErr := runConcurrent(ctx, p.ExtractInventoryItemsMaxTasks, len(chunks), func(runCtx context.Context, i int) (inventoryChunkOutcome, error) {
+	outcomes, runErr := runConcurrent(ctx, p.ExtractInventoryItemsMaxTasks, len(chunks), func(runCtx context.Context, chunk_id int) (inventoryChunkOutcome, error) {
 		localStart := time.Now()
-		chunk := chunks[i]
+		chunk := chunks[chunk_id]
 		inputText := p.buildInventoryItemsUserInput(chunk)
 		callStart := p.now()
-		callID := fmt.Sprintf("%s_p1_c%d", eventID, i)
+		callID := fmt.Sprintf("%s_p1_c%d", eventID, chunk_id+1)
 		p.Logger.Info("extract inventory items start",
 			"record_id", recordID,
-			"chunk_idx", i,
+			"chunk_idx", chunk_id+1,
 		)
 		payload, modelName, err := p.extractInventoryItemsWithFallback(runCtx, inputText)
 		if isCtxStopped(runCtx) {
@@ -428,15 +418,15 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 			chunkItems = normalizeInventoryItemRows(payload["items"], chunk.SeqNo, p.Dictionary)
 		}
 		// totalCount unknown during concurrent execution; pass 0
-		p.logInventoryItemsLLMCall(ctx, callID, []string{strings.TrimSpace(modelName)}, payload, err, callStart, p.now(), recordID, i, len(chunks), len(chunkItems), 0)
+		p.logInventoryItemsLLMCall(ctx, callID, []string{strings.TrimSpace(modelName)}, payload, err, callStart, p.now(), recordID, chunk_id, len(chunks), len(chunkItems), 0)
 		if err != nil {
-			p.Logger.Warn("inventory item extraction failed for chunk; skipping", "record_id", recordID, "chunk_idx", i, "error", err)
+			p.Logger.Warn("inventory item extraction failed for chunk; skipping", "record_id", recordID, "chunk_idx", chunk_id, "error", err)
 			return inventoryChunkOutcome{failed: true, fallback: wasFallback}, nil
 		}
 
 		p.Logger.Info("extract inventory items end  ",
 			"record_id", recordID,
-			"chunk_idx", i,
+			"chunk_idx", chunk_id+1,
 			"extracted", len(chunkItems),
 			"ms_used", time.Since(localStart).Milliseconds(),
 		)
@@ -496,14 +486,15 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 }
 
 func (p *InventoryItemsProcessor) buildInventoryItemsUserInput(chunk Chunk) string {
-	contextJSON, _ := json.Marshal(map[string]any{
-		"schema_version":     inventoryItemsSchemaVersion,
-		"dictionary_version": p.Dictionary.Version,
-		"categories":         p.Dictionary.Categories,
-	})
-	return "Dictionary context:\n" + string(contextJSON) +
-		"\n\nChunk sequence: " + strconv.Itoa(chunk.SeqNo) +
-		"\n\nInput chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
+	// contextJSON, _ := json.Marshal(map[string]any{
+	// 	"schema_version":     inventoryItemsSchemaVersion,
+	// 	"dictionary_version": p.Dictionary.Version,
+	// 	"categories":         p.Dictionary.Categories,
+	// })
+	// return "Dictionary context:\n" + string(contextJSON) +
+	// 	"\n\nChunk sequence: " + strconv.Itoa(chunk.SeqNo) +
+	// 	"\n\nInput chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
+	return "Input chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
 }
 
 func (p *InventoryItemsProcessor) extractInventoryItemsWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
@@ -588,18 +579,27 @@ func normalizeInventoryItemRows(raw any, chunkSeqNo int, dict inventoryDictionar
 		if itemName == "" {
 			continue
 		}
-		category := normalizeInventoryToken(firstNonEmptyTrimmed(asString(m["item_category"]), "unknown"))
-		_, categoryKnown := dict.Categories[category]
-		rawSpecs := normalizeInventorySpecs(m["raw_specs"], category, dict)
+		categories := normalizeInventoryCategories(m["item_categories"])
+		// The first category is the primary one used for the single-schema
+		// normalization steps (spec names, required attrs, plausible ranges).
+		primaryCategory := categories[0]
+		categoryKnown := true
+		for _, c := range categories {
+			if _, ok := dict.Categories[c]; !ok {
+				categoryKnown = false
+				break
+			}
+		}
+		rawSpecs := normalizeInventorySpecs(m["raw_specs"], primaryCategory, dict)
 		normalizedSpecs := normalizeInventorySpecUnits(rawSpecs, dict)
-		missing := missingRequiredInventoryAttrs(m, normalizedSpecs, category, dict)
+		missing := missingRequiredInventoryAttrs(m, normalizedSpecs, primaryCategory, dict)
 		confidence := toFloat(m["confidence"])
-		rangeFlags := validateInventoryPlausibleRanges(normalizedSpecs, category, dict)
+		rangeFlags := validateInventoryPlausibleRanges(normalizedSpecs, primaryCategory, dict)
 		flags := buildInventoryValidationFlags(missing, rangeFlags, confidence, normalizeEntityLineSpans(m["lines"]), categoryKnown)
 		row := map[string]any{
 			"item_name":              itemName,
 			"canonical_name":         strings.TrimSpace(asString(m["canonical_name"])),
-			"item_category":          category,
+			"item_categories":        categories,
 			"manufacturer":           strings.TrimSpace(asString(m["manufacturer"])),
 			"brand":                  strings.TrimSpace(asString(m["brand"])),
 			"model_number":           strings.TrimSpace(asString(m["model_number"])),
@@ -612,7 +612,7 @@ func normalizeInventoryItemRows(raw any, chunkSeqNo int, dict inventoryDictionar
 			"source_line_spans":      normalizeEntityLineSpans(m["lines"]),
 			"validation_flags":       flags,
 			"missing_required_attrs": missing,
-			"dedupe_key":             buildInventoryDedupeKey(category, m, normalizedSpecs),
+			"dedupe_key":             buildInventoryDedupeKey(inventoryDedupeCategorySegment(categories), m, normalizedSpecs),
 			"schema_version":         inventoryItemsSchemaVersion,
 			"dictionary_version":     dict.Version,
 			"confidence":             confidence,
@@ -815,6 +815,49 @@ func buildInventoryValidationFlags(missing []string, rangeFlags []string, confid
 		flags = append(flags, "missing_source_lines")
 	}
 	return flags
+}
+
+// normalizeInventoryCategories parses the LLM's item_categories field (an array of
+// category surface forms) into a deduplicated, normalized list of category keys. It
+// tolerates a scalar string for resilience. The result always has at least one element
+// ("unknown") so downstream single-schema steps (specs / required attrs) have a primary
+// category to key on.
+func normalizeInventoryCategories(raw any) []string {
+	vals := toStringSlice(raw)
+	if len(vals) == 0 {
+		if s := strings.TrimSpace(asString(raw)); s != "" {
+			vals = []string{s}
+		}
+	}
+	out := make([]string, 0, len(vals))
+	seen := make(map[string]struct{}, len(vals))
+	for _, v := range vals {
+		c := normalizeInventoryToken(strings.TrimSpace(v))
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	if len(out) == 0 {
+		out = append(out, normalizeInventoryToken("unknown"))
+	}
+	return out
+}
+
+// inventoryDedupeCategorySegment builds the deterministic category segment of the dedupe
+// key from an item's (possibly multiple) categories: normalized, sorted, comma-joined so
+// the segment is stable regardless of the order the model emitted the categories in.
+func inventoryDedupeCategorySegment(categories []string) string {
+	if len(categories) == 0 {
+		return ""
+	}
+	sorted := append([]string(nil), categories...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, ",")
 }
 
 func buildInventoryDedupeKey(category string, row map[string]any, specs []map[string]any) string {
@@ -1121,6 +1164,124 @@ func writeInventoryItemsArtifactFile(artifactDir string, recordID int64, rec Doc
 	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, rows, ".inventory_items", "MID_26053140")
 }
 
+func refreshInventoryItemsArtifactFile(ctx context.Context, db *sql.DB, artifactDir string, recordID int64, rec DocMetadataInputRecord) error {
+	rows, err := loadPersistedInventoryItemArtifactRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return writeInventoryItemsArtifactFile(artifactDir, recordID, rec, rows)
+}
+
+func loadPersistedInventoryItemArtifactRows(ctx context.Context, db *sql.DB, recordID int64) ([]map[string]any, error) {
+	const q = `
+SELECT inventory_item_id, item_name, canonical_name, item_categories, manufacturer, brand,
+       model_number, part_number, normalized_specs, raw_specs, standards, aliases,
+       evidence_quote, source_line_spans, validation_flags, missing_required_attrs,
+       dedupe_key, schema_version, dictionary_version, confidence, confidence_reason,
+       connected_artifacts, ext_info
+FROM kb.inventory_items
+WHERE input_record_id = $1
+ORDER BY id`
+	rows, err := db.QueryContext(ctx, q, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]map[string]any, 0, 16)
+	for rows.Next() {
+		var (
+			inventoryItemID      string
+			itemName             string
+			canonicalName        string
+			itemCategories       []byte
+			manufacturer         string
+			brand                string
+			modelNumber          string
+			partNumber           string
+			normalizedSpecs      []byte
+			rawSpecs             []byte
+			standards            []byte
+			aliases              []byte
+			evidenceQuote        string
+			sourceLineSpans      []byte
+			validationFlags      []byte
+			missingRequiredAttrs []byte
+			dedupeKey            string
+			schemaVersion        string
+			dictionaryVersion    string
+			confidence           float64
+			confidenceReason     string
+			connectedArtifacts   []byte
+			extInfo              []byte
+		)
+		if err := rows.Scan(
+			&inventoryItemID, &itemName, &canonicalName, &itemCategories, &manufacturer, &brand,
+			&modelNumber, &partNumber, &normalizedSpecs, &rawSpecs, &standards, &aliases,
+			&evidenceQuote, &sourceLineSpans, &validationFlags, &missingRequiredAttrs,
+			&dedupeKey, &schemaVersion, &dictionaryVersion, &confidence, &confidenceReason,
+			&connectedArtifacts, &extInfo,
+		); err != nil {
+			return nil, err
+		}
+
+		row := map[string]any{
+			"inventory_item_id":      strings.TrimSpace(inventoryItemID),
+			"item_name":              strings.TrimSpace(itemName),
+			"canonical_name":         strings.TrimSpace(canonicalName),
+			"item_categories":        jsonColumnToValue(itemCategories, []any{}),
+			"manufacturer":           strings.TrimSpace(manufacturer),
+			"brand":                  strings.TrimSpace(brand),
+			"model_number":           strings.TrimSpace(modelNumber),
+			"part_number":            strings.TrimSpace(partNumber),
+			"normalized_specs":       jsonColumnToValue(normalizedSpecs, []any{}),
+			"raw_specs":              jsonColumnToValue(rawSpecs, []any{}),
+			"standards":              jsonColumnToValue(standards, []any{}),
+			"aliases":                jsonColumnToValue(aliases, []any{}),
+			"evidence_quote":         strings.TrimSpace(evidenceQuote),
+			"source_line_spans":      jsonColumnToValue(sourceLineSpans, []any{}),
+			"validation_flags":       jsonColumnToValue(validationFlags, []any{}),
+			"missing_required_attrs": jsonColumnToValue(missingRequiredAttrs, []any{}),
+			"dedupe_key":             strings.TrimSpace(dedupeKey),
+			"schema_version":         strings.TrimSpace(schemaVersion),
+			"dictionary_version":     strings.TrimSpace(dictionaryVersion),
+			"confidence":             confidence,
+			"confidence_reason":      strings.TrimSpace(confidenceReason),
+			"connected_artifacts":    jsonColumnToValue(connectedArtifacts, map[string]any{}),
+		}
+
+		if ext := jsonColumnObject(extInfo); ext != nil {
+			if chunkSeqNo, ok := ext["chunk_seq_no"]; ok {
+				row["chunk_seq_no"] = chunkSeqNo
+			}
+			if mentionCount, ok := ext["mention_count"]; ok {
+				row["mention_count"] = mentionCount
+			}
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func jsonColumnToValue(raw []byte, fallback any) any {
+	if len(raw) == 0 {
+		return fallback
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil || v == nil {
+		return fallback
+	}
+	return v
+}
+
+func jsonColumnObject(raw []byte) map[string]any {
+	v, ok := jsonColumnToValue(raw, map[string]any{}).(map[string]any)
+	if !ok || v == nil {
+		return nil
+	}
+	return v
+}
+
 type inventoryItemsStatusParams struct {
 	RecordID      int64
 	FileType      string
@@ -1333,7 +1494,7 @@ CREATE TABLE IF NOT EXISTS kb.inventory_items (
     language TEXT,
     item_name TEXT,
     canonical_name TEXT,
-    item_category TEXT,
+    item_categories JSONB DEFAULT '[]'::jsonb,
     manufacturer TEXT,
     brand TEXT,
     model_number TEXT,
@@ -1355,6 +1516,7 @@ CREATE TABLE IF NOT EXISTS kb.inventory_items (
     prompt_name TEXT,
     search_document TEXT,
     search_vector TSVECTOR,
+    connected_artifacts JSONB DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     modify_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1370,7 +1532,7 @@ CREATE TABLE IF NOT EXISTS kb.inventory_item_duplicates (
     language TEXT,
     item_name TEXT,
     canonical_name TEXT,
-    item_category TEXT,
+    item_categories JSONB DEFAULT '[]'::jsonb,
     manufacturer TEXT,
     brand TEXT,
     model_number TEXT,
@@ -1428,6 +1590,35 @@ func (s InventoryItemsSQLStore) DeleteInventoryItemsByInputRecordID(ctx context.
 	return res.RowsAffected()
 }
 
+// parseJSONStringArray decodes a JSONB string-array column (e.g. item_categories) into a
+// trimmed, non-empty []string. Invalid/empty input yields nil.
+func parseJSONStringArray(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, v := range arr {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// inventoryCategoriesJSON marshals an item's normalized item_categories list into a JSON
+// array string for the JSONB column, defaulting to "[]" so the column is never null.
+func inventoryCategoriesJSON(raw any) string {
+	bs, err := json.Marshal(raw)
+	if err != nil || len(bs) == 0 || string(bs) == "null" {
+		return "[]"
+	}
+	return string(bs)
+}
+
 func (s InventoryItemsSQLStore) SaveInventoryItems(ctx context.Context, req SaveInventoryItemsRequest) (int64, error) {
 	if err := s.ensureTables(ctx); err != nil {
 		return 0, err
@@ -1438,19 +1629,19 @@ func (s InventoryItemsSQLStore) SaveInventoryItems(ctx context.Context, req Save
 	const stmt = `
 INSERT INTO kb.inventory_items (
     event_id, input_record_id, inventory_item_id, language,
-    item_name, canonical_name, item_category, manufacturer, brand, model_number, part_number,
+    item_name, canonical_name, item_categories, manufacturer, brand, model_number, part_number,
     normalized_specs, raw_specs, standards, aliases, evidence_quote, source_line_spans,
     validation_flags, missing_required_attrs, dedupe_key, schema_version, dictionary_version,
     confidence, confidence_reason, model_name, prompt_name, ext_info
 ) VALUES (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17::jsonb,
+    $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17::jsonb,
     $18::jsonb,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27::jsonb
 )
 ON CONFLICT (input_record_id, inventory_item_id) DO UPDATE SET
     language = EXCLUDED.language,
     item_name = EXCLUDED.item_name,
     canonical_name = EXCLUDED.canonical_name,
-    item_category = EXCLUDED.item_category,
+    item_categories = EXCLUDED.item_categories,
     manufacturer = EXCLUDED.manufacturer,
     brand = EXCLUDED.brand,
     model_number = EXCLUDED.model_number,
@@ -1503,7 +1694,7 @@ ON CONFLICT (input_record_id, inventory_item_id) DO UPDATE SET
 			strings.TrimSpace(req.Language),
 			strings.TrimSpace(asString(item["item_name"])),
 			strings.TrimSpace(asString(item["canonical_name"])),
-			strings.TrimSpace(asString(item["item_category"])),
+			inventoryCategoriesJSON(item["item_categories"]),
 			strings.TrimSpace(asString(item["manufacturer"])),
 			strings.TrimSpace(asString(item["brand"])),
 			strings.TrimSpace(asString(item["model_number"])),
@@ -1555,12 +1746,12 @@ func (s InventoryItemsSQLStore) SaveInventoryItemDuplicates(ctx context.Context,
 	const stmt = `
 INSERT INTO kb.inventory_item_duplicates (
     event_id, input_record_id, inventory_item_id, duplicate_of, language,
-    item_name, canonical_name, item_category, manufacturer, brand, model_number, part_number,
+    item_name, canonical_name, item_categories, manufacturer, brand, model_number, part_number,
     normalized_specs, raw_specs, standards, aliases, evidence_quote, source_line_spans,
     validation_flags, missing_required_attrs, dedupe_key, schema_version, dictionary_version,
     confidence, confidence_reason, model_name, prompt_name, ext_info
 ) VALUES (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18::jsonb,
+    $1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18::jsonb,
     $19::jsonb,$20::jsonb,$21,$22,$23,$24,$25,$26,$27,$28::jsonb
 )
 ON CONFLICT (input_record_id, inventory_item_id) DO NOTHING`
@@ -1591,7 +1782,7 @@ ON CONFLICT (input_record_id, inventory_item_id) DO NOTHING`
 			strings.TrimSpace(req.Language),
 			strings.TrimSpace(asString(item["item_name"])),
 			strings.TrimSpace(asString(item["canonical_name"])),
-			strings.TrimSpace(asString(item["item_category"])),
+			inventoryCategoriesJSON(item["item_categories"]),
 			strings.TrimSpace(asString(item["manufacturer"])),
 			strings.TrimSpace(asString(item["brand"])),
 			strings.TrimSpace(asString(item["model_number"])),
@@ -1640,7 +1831,7 @@ func ReindexInventoryItemSearchForRecord(ctx context.Context, recordID int64, lo
 
 func buildInventoryItemRegistryRows(ctx context.Context, db *sql.DB, recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {
 	const q = `
-SELECT id, inventory_item_id, item_name, canonical_name, item_category, manufacturer, brand,
+SELECT id, inventory_item_id, item_name, canonical_name, item_categories, manufacturer, brand,
        model_number, part_number, normalized_specs, standards, aliases, source_line_spans,
        validation_flags, missing_required_attrs, dedupe_key, confidence, confidence_reason,
        search_document
@@ -1650,7 +1841,7 @@ ORDER BY id`
 	// Category review status is derived from the registry at read time (not frozen
 	// on instance rows) so approving a category later never requires rewriting
 	// millions of item rows. Best-effort: on failure status falls back gracefully.
-	categoryStatuses, statusErr := InventoryCategoryRegistry{DB: db}.CategoryStatuses(ctx)
+	categoryStatuses, statusErr := artifactCategoryRegistry{DB: db}.categoryStatuses(ctx, searchArtifactInventoryItem)
 	if statusErr != nil {
 		categoryStatuses = nil
 	}
@@ -1666,7 +1857,7 @@ ORDER BY id`
 			inventoryItemID      string
 			itemName             string
 			canonicalName        string
-			itemCategory         string
+			itemCategories       []byte
 			manufacturer         string
 			brand                string
 			modelNumber          string
@@ -1682,16 +1873,21 @@ ORDER BY id`
 			confidenceReason     string
 			searchDoc            string
 		)
-		if err := rows.Scan(&id, &inventoryItemID, &itemName, &canonicalName, &itemCategory, &manufacturer, &brand, &modelNumber, &partNumber, &normalizedSpecs, &standards, &aliases, &sourceLineSpans, &validationFlags, &missingRequiredAttrs, &dedupeKey, &confidence, &confidenceReason, &searchDoc); err != nil {
+		if err := rows.Scan(&id, &inventoryItemID, &itemName, &canonicalName, &itemCategories, &manufacturer, &brand, &modelNumber, &partNumber, &normalizedSpecs, &standards, &aliases, &sourceLineSpans, &validationFlags, &missingRequiredAttrs, &dedupeKey, &confidence, &confidenceReason, &searchDoc); err != nil {
 			return nil, err
 		}
-		categoryStatus := deriveInventoryCategoryStatus(categoryStatuses, itemCategory)
+		categoryList := parseJSONStringArray(itemCategories)
+		primaryCategory := ""
+		if len(categoryList) > 0 {
+			primaryCategory = categoryList[0]
+		}
+		categoryStatus := deriveInventoryCategoriesStatus(categoryStatuses, categoryList)
 		validationStatus := "valid"
 		if len(jsonArrayOrEmptyBytes(validationFlags)) > 2 || categoryStatus != "approved" {
 			validationStatus = "needs_review"
 		}
 		payload, _ := json.Marshal(map[string]any{
-			"item_category":          itemCategory,
+			"item_categories":        json.RawMessage(jsonArrayOrEmptyBytes(itemCategories)),
 			"category_status":        categoryStatus,
 			"manufacturer":           manufacturer,
 			"brand":                  brand,
@@ -1717,8 +1913,8 @@ ORDER BY id`
 			InputRecordID:   recordID,
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(itemName, canonicalName, inventoryItemID),
-			SecondaryLabel:  firstNonEmpty(itemCategory, manufacturer),
-			SearchDocument:  firstNonEmpty(searchDoc, strings.TrimSpace(strings.Join([]string{itemName, canonicalName, itemCategory, manufacturer, brand, modelNumber, partNumber, dedupeKey}, " "))),
+			SecondaryLabel:  firstNonEmpty(primaryCategory, manufacturer),
+			SearchDocument:  firstNonEmpty(searchDoc, strings.TrimSpace(strings.Join(append([]string{itemName, canonicalName}, append(categoryList, manufacturer, brand, modelNumber, partNumber, dedupeKey)...), " "))),
 			SnippetBasis:    firstNonEmpty(confidenceReason, itemName),
 			SourceTitle:     sourceTitle,
 			SourceFilename:  sourceTitle,

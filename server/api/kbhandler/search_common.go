@@ -16,7 +16,7 @@ type artifactSearchFilters struct {
 	ProvisionType     string   `json:"provision_type,omitempty"`
 	ProductType       string   `json:"product_type,omitempty"`
 	RelationType      string   `json:"relation_type,omitempty"`
-	InventoryCategory string   `json:"item_category,omitempty"`
+	InventoryCategory string   `json:"item_categories,omitempty"`
 	Manufacturer      string   `json:"manufacturer,omitempty"`
 	Brand             string   `json:"brand,omitempty"`
 	ModelNumber       string   `json:"model_number,omitempty"`

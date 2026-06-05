@@ -69,7 +69,7 @@ func searchRegistryArtifacts(c echo.Context, artifactType string) error {
 		ProvisionType:     strings.TrimSpace(c.QueryParam("provision_type")),
 		ProductType:       strings.TrimSpace(c.QueryParam("product_type")),
 		RelationType:      strings.TrimSpace(c.QueryParam("relation_type")),
-		InventoryCategory: strings.TrimSpace(c.QueryParam("item_category")),
+		InventoryCategory: strings.TrimSpace(c.QueryParam("item_categories")),
 		Manufacturer:      strings.TrimSpace(c.QueryParam("manufacturer")),
 		Brand:             strings.TrimSpace(c.QueryParam("brand")),
 		ModelNumber:       strings.TrimSpace(c.QueryParam("model_number")),

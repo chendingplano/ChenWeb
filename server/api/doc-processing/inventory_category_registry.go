@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS kb.artifact_categories (
     modify_time       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     category_id       BIGINT GENERATED ALWAYS AS IDENTITY,
     search_document   TEXT NOT NULL DEFAULT '',
-    CONSTRAINT artifact_categories_pkey PRIMARY KEY (category_key)
+    CONSTRAINT artifact_categories_pkey PRIMARY KEY (category_id),
+    CONSTRAINT artifact_categories_type_key_uniq UNIQUE (category_type, category_key)
 );
 CREATE INDEX IF NOT EXISTS idx_kb_artifact_categories_status ON kb.artifact_categories(status);
 CREATE INDEX IF NOT EXISTS idx_kb_artifact_categories_seen_count ON kb.artifact_categories(seen_count DESC);
@@ -95,7 +96,7 @@ func (r InventoryCategoryRegistry) SeedApprovedCategories(ctx context.Context, d
 INSERT INTO kb.artifact_categories (
     category_key, category_type, status, display_names, required_attrs, specs, plausible_ranges, search_document
 ) VALUES ($1, 'inventory', 'approved', $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6)
-ON CONFLICT (category_key) DO UPDATE SET
+ON CONFLICT (category_type, category_key) DO UPDATE SET
     category_type    = 'inventory',
     required_attrs   = CASE WHEN kb.artifact_categories.status = 'approved' THEN EXCLUDED.required_attrs ELSE kb.artifact_categories.required_attrs END,
     specs            = CASE WHEN kb.artifact_categories.status = 'approved' THEN EXCLUDED.specs ELSE kb.artifact_categories.specs END,
@@ -225,7 +226,7 @@ func (r InventoryCategoryRegistry) mintCategory(ctx context.Context, key, surfac
 INSERT INTO kb.artifact_categories (
     category_key, category_type, status, display_names, embedding, seen_count, search_document
 ) VALUES ($1, 'inventory', 'pending_review', $2::jsonb, $3::jsonb, 1, $1)
-ON CONFLICT (category_key) DO UPDATE SET
+ON CONFLICT (category_type, category_key) DO UPDATE SET
     category_type = 'inventory',
     seen_count   = kb.artifact_categories.seen_count + 1,
     last_seen_at = NOW(),
@@ -359,14 +360,32 @@ func deriveInventoryCategoryStatus(statuses map[string]string, itemCategory stri
 	}
 }
 
+// deriveInventoryCategoriesStatus collapses the per-category review statuses of an item
+// (which may carry multiple categories) into a single read-path status. The item is only
+// "approved" when every one of its categories is approved; otherwise the first
+// non-approved status is surfaced so a pending/rejected category flags the whole item.
+func deriveInventoryCategoriesStatus(statuses map[string]string, categories []string) string {
+	if len(categories) == 0 {
+		return InventoryCategoryStatusPending
+	}
+	for _, c := range categories {
+		if s := deriveInventoryCategoryStatus(statuses, c); s != InventoryCategoryStatusApproved {
+			return s
+		}
+	}
+	return InventoryCategoryStatusApproved
+}
+
 // inventoryCategorySchemaFromRecord converts a registry row into the in-memory
 // dictionary schema shape so admitted categories merge into the live dictionary.
+/*
 func inventoryCategorySchemaFromRecord(rec InventoryCategoryRecord) inventoryCategorySchema {
 	return inventoryCategorySchema{
 		RequiredAttrs: rec.RequiredAttrs,
 		Specs:         rec.Specs,
 	}
 }
+*/
 
 // ErrInventoryCategoryNotFound is returned by PatchCategory when the key does not exist.
 var ErrInventoryCategoryNotFound = errors.New("inventory category not found")

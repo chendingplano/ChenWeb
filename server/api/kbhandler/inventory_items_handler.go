@@ -19,7 +19,7 @@ type inventoryItemRecord struct {
 	InventoryItemID      string          `json:"inventory_item_id"`
 	ItemName             string          `json:"item_name"`
 	CanonicalName        string          `json:"canonical_name"`
-	ItemCategory         string          `json:"item_category"`
+	ItemCategories       json.RawMessage `json:"item_categories"`
 	Manufacturer         string          `json:"manufacturer,omitempty"`
 	Brand                string          `json:"brand,omitempty"`
 	ModelNumber          string          `json:"model_number,omitempty"`
@@ -84,7 +84,7 @@ func ListInventoryItems(c echo.Context) error {
 
 	const q = `
 SELECT
-	id, inventory_item_id, item_name, canonical_name, item_category,
+	id, inventory_item_id, item_name, canonical_name, item_categories,
 	manufacturer, brand, model_number, part_number,
 	normalized_specs, raw_specs, standards, aliases,
 	evidence_quote, source_line_spans, validation_flags, missing_required_attrs,
@@ -107,6 +107,7 @@ ORDER BY id`
 	for rows.Next() {
 		var (
 			r                    inventoryItemRecord
+			itemCategories       []byte
 			normalizedSpecs      []byte
 			rawSpecs             []byte
 			standards            []byte
@@ -118,7 +119,7 @@ ORDER BY id`
 			modifyTime           time.Time
 		)
 		if err := rows.Scan(
-			&r.ID, &r.InventoryItemID, &r.ItemName, &r.CanonicalName, &r.ItemCategory,
+			&r.ID, &r.InventoryItemID, &r.ItemName, &r.CanonicalName, &itemCategories,
 			&r.Manufacturer, &r.Brand, &r.ModelNumber, &r.PartNumber,
 			&normalizedSpecs, &rawSpecs, &standards, &aliases,
 			&r.EvidenceQuote, &sourceLineSpans, &validationFlags, &missingRequiredAttrs,
@@ -131,6 +132,7 @@ ORDER BY id`
 				ErrorMsg: "failed to read inventory items (CWB_KB_INV_021)",
 			})
 		}
+		r.ItemCategories = jsonArrayOrEmpty(itemCategories)
 		r.NormalizedSpecs = jsonArrayOrEmpty(normalizedSpecs)
 		r.RawSpecs = jsonArrayOrEmpty(rawSpecs)
 		r.Standards = jsonArrayOrEmpty(standards)

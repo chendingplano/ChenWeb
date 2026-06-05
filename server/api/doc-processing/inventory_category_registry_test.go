@@ -26,10 +26,10 @@ func TestNormalizeInventoryItemRowsFlagsUnknownCategory(t *testing.T) {
 	}
 	rows := normalizeInventoryItemRows([]any{
 		map[string]any{
-			"item_name":     "理疗仪",
-			"item_category": "medical_device", // not in dict
-			"lines":         []any{"296"},
-			"confidence":    0.95,
+			"item_name":       "理疗仪",
+			"item_categories": []any{"medical_device"}, // not in dict
+			"lines":           []any{"296"},
+			"confidence":      0.95,
 		},
 	}, 1, dict)
 	if len(rows) != 1 {
@@ -83,10 +83,10 @@ func TestInventoryCategoryCosine(t *testing.T) {
 
 func TestCollectAndDedupeInventoryItemCategories(t *testing.T) {
 	items := []map[string]any{
-		{"item_category": "medical_device"},
-		{"item_category": "Medical Device"}, // same after normalization
-		{"item_category": ""},               // dropped
-		{"item_category": "pump"},
+		{"item_categories": []any{"medical_device"}},
+		{"item_categories": []any{"Medical Device"}}, // same after normalization
+		{"item_categories": []any{""}},               // dropped
+		{"item_categories": []any{"pump"}},
 	}
 	got := dedupeNonEmptyNormalized(collectInventoryItemCategories(items))
 	if len(got) != 2 {

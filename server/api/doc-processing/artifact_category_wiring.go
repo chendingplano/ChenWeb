@@ -90,6 +90,7 @@ func (e searchCategoryEmbedder) EmbedCategory(ctx context.Context, text string) 
 // ontology entry. Thinking is forced off, mirroring the metrics passes.
 type llmCategoryCreator struct {
 	extractor     LLMJSONExtractor
+	promptRef	  string
 	promptText    string
 	modelName     string
 	modelCfg      structureModelConfig
@@ -101,7 +102,7 @@ type llmCategoryCreator struct {
 }
 
 func newLLMCategoryCreator(db *sql.DB, logger ApiTypes.JimoLogger) (*llmCategoryCreator, error) {
-	promptText, _, _, promptErr := loadProductPromptFromEnvKeys([]string{"CREATE_ARTIFACT_CATEGORY_PROMPT"}, "")
+	promptText, promptRef, _, promptErr := loadProductPromptFromEnvKeys([]string{"CREATE_ARTIFACT_CATEGORY_PROMPT"}, "")
 	if promptErr != nil {
 		return nil, promptErr
 	}
@@ -120,6 +121,7 @@ func newLLMCategoryCreator(db *sql.DB, logger ApiTypes.JimoLogger) (*llmCategory
 	}
 	return &llmCategoryCreator{
 		extractor:     extractor,
+		promptRef:	   promptRef,
 		promptText:    promptText,
 		modelName:     modelCfg.ModelName,
 		modelCfg:      forceDisableThinking(modelCfg),
@@ -155,12 +157,23 @@ func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, cate
 	if c.newLLMCallID != nil {
 		callID = strings.TrimSpace(c.newLLMCallID())
 	}
+	c.logger.Info("Create Category start",
+		"modelName", modelName,
+		"promptName", c.promptRef,
+		"rawKey", rawKey,
+		"categoryType", categoryType,
+	)
 	start := time.Now()
 	payload, err := c.extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
 		PromptText: c.promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
 	})
+
+	c.logger.Info("Create Category end  ",
+		"ms_used", time.Since(start).Milliseconds(),
+	)
+
 	c.logCategoryLLMCall(ctx, callID, rawKey, categoryType, modelName, inputText, payload, err, start, time.Now())
 	return payload, err
 }
@@ -213,9 +226,14 @@ func (c *llmCategoryCreator) logCategoryLLMCall(
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
 	logErr := c.procLogger.LogLLMCall(ctx, rec, "MID-26060501")
-	c.printCategoryLLMDebugLog(callID, rawKey, categoryType, modelName, rec, logErr == nil, logErr)
+	if logErr != nil {
+		c.logger.Error("failed log llm call", "error", logErr, "record", rec)
+	}
+
+	// c.printCategoryLLMDebugLog(callID, rawKey, categoryType, modelName, rec, logErr == nil, logErr)
 }
 
+/*
 func (c *llmCategoryCreator) printCategoryLLMDebugLog(
 	callID string,
 	rawKey string,
@@ -250,3 +268,4 @@ func (c *llmCategoryCreator) printCategoryLLMDebugLog(
 	}
 	fmt.Printf("artifact category llm_call: %+v\n", fields)
 }
+*/

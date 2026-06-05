@@ -32,14 +32,14 @@ func TestListInventoryItemsReturnsRows(t *testing.T) {
 	mock.ExpectQuery("FROM kb.inventory_items").
 		WithArgs(int64(12)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "inventory_item_id", "item_name", "canonical_name", "item_category",
+			"id", "inventory_item_id", "item_name", "canonical_name", "item_categories",
 			"manufacturer", "brand", "model_number", "part_number",
 			"normalized_specs", "raw_specs", "standards", "aliases",
 			"evidence_quote", "source_line_spans", "validation_flags", "missing_required_attrs",
 			"dedupe_key", "schema_version", "dictionary_version", "confidence", "confidence_reason",
 			"model_name", "prompt_name", "create_time", "modify_time",
 		}).AddRow(
-			int64(1), "12_i_1", "Bosch Pump", "Bosch pump", "pump",
+			int64(1), "12_i_1", "Bosch Pump", "Bosch pump", `["pump"]`,
 			"Bosch", "Bosch", "", "",
 			`[{"name":"power","value":1500,"unit":"W"}]`, `[{"name":"power","value":1500,"unit":"w"}]`, `["ISO 9001"]`, `["Pmp Bsch"]`,
 			"Pump, Bosch, 1500w", `["5"]`, `[]`, `[]`,
@@ -86,12 +86,12 @@ func TestSearchInventoryItemsAppliesInventoryFilters(t *testing.T) {
 		}).AddRow(
 			"inventory_item", "12_inv_1", int64(12), "Bosch Pump", "pump",
 			"manual.pdf", "manual.pdf", `["5"]`,
-			`{"item_category":"pump","manufacturer":"Bosch","brand":"Bosch","model_number":"1500"}`,
+			`{"item_categories":["pump"],"manufacturer":"Bosch","brand":"Bosch","model_number":"1500"}`,
 			0.8, "Bosch Pump",
 		))
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/inventory-items/search?q=pump&item_category=pump&manufacturer=Bosch&brand=Bosch&model_number=1500", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/inventory-items/search?q=pump&item_categories=pump&manufacturer=Bosch&brand=Bosch&model_number=1500", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	if err := SearchInventoryItems(c); err != nil {
@@ -119,7 +119,7 @@ func TestBuildRegistrySearchWhereClauseIncludesInventoryFilters(t *testing.T) {
 	where, args := buildRegistrySearchWhereClause("inventory_item", "pump", filters, registrySearchConfig{dictionary: "simple", phraseFriendly: true})
 	for _, fragment := range []string{
 		"sa.artifact_type = $2",
-		"semantic_payload->>'item_category'",
+		"semantic_payload->'item_categories'",
 		"semantic_payload->>'manufacturer'",
 		"semantic_payload->>'brand'",
 		"semantic_payload->>'model_number'",

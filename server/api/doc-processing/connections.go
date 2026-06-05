@@ -54,14 +54,15 @@ const artifactTypeChunk = "chunk"
 
 // relation_name values from the Deep Wiki connection catalog (+deep-wiki-rqmt.md).
 const (
-	RelationHasMetrics       = "has-metrics"
-	RelationHasTopic         = "has-topic"
-	RelationHasProvision     = "has-provision"
-	RelationHasPartComponent = "has-part-component"
-	RelationHasScene         = "has-scene"
-	RelationHasSummary       = "has-summary"
-	RelationEntityRelations  = "entity relations"
-	RelationBelongToCategory = "belong-to-category"
+	RelationHasMetrics        = "has-metrics"
+	RelationHasInventoryItems = "has-inventory-items"
+	RelationHasTopic          = "has-topic"
+	RelationHasProvision      = "has-provision"
+	RelationHasPartComponent  = "has-part-component"
+	RelationHasScene          = "has-scene"
+	RelationHasSummary        = "has-summary"
+	RelationEntityRelations   = "entity relations"
+	RelationBelongToCategory  = "belong-to-category"
 )
 
 // ChunkConnectionID returns the positional identifier used for a chunk endpoint.

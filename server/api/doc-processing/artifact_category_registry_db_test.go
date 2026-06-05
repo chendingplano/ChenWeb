@@ -50,11 +50,43 @@ func TestMintCategoryReturnsCategoryID(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("INSERT INTO kb\\.artifact_categories").
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO kb.artifact_categories (
+    category_key, category_type, status, display_names, aliases, acronyms,
+    category_desc, category_keywords, match_keys, search_document, required_attrs,
+    specs, plausible_ranges, parent_categories, related_categories, embedding, seen_count
+) VALUES ($1, $2, 'pending_review', $3::jsonb, $4::jsonb, $5::jsonb, $6, $7::jsonb,
+    $8::jsonb, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, 1)
+ON CONFLICT (category_type, category_key) DO UPDATE SET
+    seen_count   = kb.artifact_categories.seen_count + 1,
+    last_seen_at = NOW()
+RETURNING category_id`)).
+		WithArgs(
+			"response time",
+			"metric",
+			`["Latency"]`,
+			`[]`,
+			`["RT"]`,
+			"",
+			`[]`,
+			`["response time","latency","rt"]`,
+			"response time Latency RT",
+			`[]`,
+			`{}`,
+			`{}`,
+			`["performance metric"]`,
+			`["throughput"]`,
+			`[0.1,0.2]`,
+		).
 		WillReturnRows(sqlmock.NewRows([]string{"category_id"}).AddRow(int64(99)))
 
 	reg := artifactCategoryRegistry{DB: db}
-	c := createdCategory{CategoryKey: "Response Time", DisplayNames: []string{"Latency"}, Acronyms: []string{"RT"}}
+	c := createdCategory{
+		CategoryKey:       "Response Time",
+		DisplayNames:      []string{"Latency"},
+		Acronyms:          []string{"RT"},
+		ParentCategories:  []string{"performance metric"},
+		RelatedCategories: []string{"throughput"},
+	}
 	id, err := reg.mintCategory(context.Background(), c, "metric", []float64{0.1, 0.2})
 	if err != nil {
 		t.Fatalf("mintCategory error: %v", err)
@@ -81,6 +113,36 @@ func TestAbsorbAliasIssuesConditionalUpdate(t *testing.T) {
 	reg := artifactCategoryRegistry{DB: db}
 	if err := reg.absorbAlias(context.Background(), 7, "RT"); err != nil {
 		t.Fatalf("absorbAlias error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCategoryStatusesLoadsScopedType(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"category_key", "status"}).
+		AddRow("furniture", InventoryCategoryStatusApproved).
+		AddRow("medical instrument", InventoryCategoryStatusPending)
+	mock.ExpectQuery("SELECT category_key, status FROM kb\\.artifact_categories WHERE category_type = \\$1").
+		WithArgs("inventory_item").
+		WillReturnRows(rows)
+
+	reg := artifactCategoryRegistry{DB: db}
+	got, err := reg.categoryStatuses(context.Background(), "inventory_item")
+	if err != nil {
+		t.Fatalf("categoryStatuses error: %v", err)
+	}
+	if got["furniture"] != InventoryCategoryStatusApproved {
+		t.Fatalf("furniture status=%q, want approved", got["furniture"])
+	}
+	if got["medical instrument"] != InventoryCategoryStatusPending {
+		t.Fatalf("medical instrument status=%q, want pending_review", got["medical instrument"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

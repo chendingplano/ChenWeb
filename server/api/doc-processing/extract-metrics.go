@@ -708,7 +708,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 			return pass1Result{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
 		}
 		lang := strings.ToLower(strings.TrimSpace(asString(payload["language"])))
-		if lang == "Chinese" || lang == "中文" || lang == "zh-cn"{
+		if lang == "chinese" || lang == "中文" || lang == "zh-cn"{
 			lang = "zh"
 		}
 		usedModel := strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.MentionModelName))

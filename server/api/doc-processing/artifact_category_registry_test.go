@@ -75,21 +75,26 @@ func TestBuildCategorySearchDocumentSkipsEmptyFields(t *testing.T) {
 
 func TestParseCreateCategoryResponse(t *testing.T) {
 	payload := map[string]any{
-		"category_key":  "Response Time",
-		"display_names": []any{"Response Time", "Latency"},
-		"aliases":       []any{"response latency"},
-		"acronyms":      []any{"RT"},
-		"description":   "How long to respond.",
-		"keywords":      []any{"delay", "ms"},
+		"canonical_key":       "response_time",
+		"canonical_name":      "Response Time",
+		"aliases":             []any{"response latency"},
+		"acronyms":            []any{"RT"},
+		"description":         "How long to respond.",
+		"keywords":            []any{"delay", "ms"},
+		"typical_attributes":  []any{map[string]any{"name": "unit", "description": "Milliseconds"}},
+		"typical_specs":       map[string]any{"unit": "ms"},
+		"common_value_ranges": []any{map[string]any{"range": "0-5000 ms"}},
+		"subcategory_of":      []any{"performance_metric", "api_metric"},
+		"related_categories":  []any{"throughput", "error_rate"},
 	}
 	got, err := parseCreateCategoryResponse(payload)
 	if err != nil {
 		t.Fatalf("parseCreateCategoryResponse error: %v", err)
 	}
-	if got.CategoryKey != "Response Time" {
-		t.Errorf("CategoryKey = %q, want %q", got.CategoryKey, "Response Time")
+	if got.CategoryKey != "response time" {
+		t.Errorf("CategoryKey = %q, want %q", got.CategoryKey, "response time")
 	}
-	if !reflect.DeepEqual(got.DisplayNames, []string{"Response Time", "Latency"}) {
+	if !reflect.DeepEqual(got.DisplayNames, []string{"Response Time"}) {
 		t.Errorf("DisplayNames = %#v", got.DisplayNames)
 	}
 	if !reflect.DeepEqual(got.Aliases, []string{"response latency"}) {
@@ -103,6 +108,21 @@ func TestParseCreateCategoryResponse(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Keywords, []string{"delay", "ms"}) {
 		t.Errorf("Keywords = %#v", got.Keywords)
+	}
+	if !reflect.DeepEqual(got.RequiredAttrs, []any{map[string]any{"name": "unit", "description": "Milliseconds"}}) {
+		t.Errorf("RequiredAttrs = %#v", got.RequiredAttrs)
+	}
+	if !reflect.DeepEqual(got.Specs, map[string]any{"unit": "ms"}) {
+		t.Errorf("Specs = %#v", got.Specs)
+	}
+	if !reflect.DeepEqual(got.PlausibleRanges, []any{map[string]any{"range": "0-5000 ms"}}) {
+		t.Errorf("PlausibleRanges = %#v", got.PlausibleRanges)
+	}
+	if !reflect.DeepEqual(got.ParentCategories, []string{"performance metric", "api metric"}) {
+		t.Errorf("ParentCategories = %#v", got.ParentCategories)
+	}
+	if !reflect.DeepEqual(got.RelatedCategories, []string{"throughput", "error rate"}) {
+		t.Errorf("RelatedCategories = %#v", got.RelatedCategories)
 	}
 }
 

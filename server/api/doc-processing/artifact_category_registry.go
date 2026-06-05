@@ -62,23 +62,25 @@ func (r artifactCategoryRegistry) mintCategory(ctx context.Context, c createdCat
 	if searchDoc == "" {
 		searchDoc = buildCategorySearchDocument(key, c.DisplayNames, c.Aliases, c.Acronyms, c.Keywords, c.Description)
 	}
-	displayNamesJSON, _ := json.Marshal(c.DisplayNames)
-	aliasesJSON, _ := json.Marshal(c.Aliases)
-	acronymsJSON, _ := json.Marshal(c.Acronyms)
-	keywordsJSON, _ := json.Marshal(c.Keywords)
-	requiredJSON, _ := json.Marshal(orEmptySlice(c.RequiredAttrs))
+	displayNamesJSON, _ := json.Marshal(orEmptySlice(c.DisplayNames))
+	aliasesJSON, _ := json.Marshal(orEmptySlice(c.Aliases))
+	acronymsJSON, _ := json.Marshal(orEmptySlice(c.Acronyms))
+	keywordsJSON, _ := json.Marshal(orEmptySlice(c.Keywords))
+	requiredJSON, _ := json.Marshal(orEmptyJSONArray(c.RequiredAttrs))
 	matchKeysJSON, _ := json.Marshal(matchKeys)
-	specsJSON, _ := json.Marshal(orEmptyMap(c.Specs))
-	rangesJSON, _ := json.Marshal(orEmptyMap(c.PlausibleRanges))
+	specsJSON, _ := json.Marshal(orEmptyJSONObject(c.Specs))
+	rangesJSON, _ := json.Marshal(orEmptyJSONValue(c.PlausibleRanges, map[string]any{}))
+	parentCategoriesJSON, _ := json.Marshal(orEmptySlice(c.ParentCategories))
+	relatedCategoriesJSON, _ := json.Marshal(orEmptySlice(c.RelatedCategories))
 	embeddingJSON, _ := json.Marshal(embedding)
 
 	const stmt = `
 INSERT INTO kb.artifact_categories (
     category_key, category_type, status, display_names, aliases, acronyms,
     category_desc, category_keywords, match_keys, search_document, required_attrs,
-    specs, plausible_ranges, embedding, seen_count
+    specs, plausible_ranges, parent_categories, related_categories, embedding, seen_count
 ) VALUES ($1, $2, 'pending_review', $3::jsonb, $4::jsonb, $5::jsonb, $6, $7::jsonb,
-    $8::jsonb, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, 1)
+    $8::jsonb, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, 1)
 ON CONFLICT (category_type, category_key) DO UPDATE SET
     seen_count   = kb.artifact_categories.seen_count + 1,
     last_seen_at = NOW()
@@ -87,7 +89,7 @@ RETURNING category_id`
 	err := r.DB.QueryRowContext(ctx, stmt,
 		key, categoryType, string(displayNamesJSON), string(aliasesJSON), string(acronymsJSON),
 		c.Description, string(keywordsJSON), string(matchKeysJSON), searchDoc, string(requiredJSON),
-		string(specsJSON), string(rangesJSON), string(embeddingJSON),
+		string(specsJSON), string(rangesJSON), string(parentCategoriesJSON), string(relatedCategoriesJSON), string(embeddingJSON),
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("(MID_26060412) mint category %q: %w", key, err)
@@ -113,6 +115,25 @@ WHERE category_id = $1 AND NOT (match_keys @> to_jsonb($2::text))`
 	return nil
 }
 
+// categoryStatuses returns the current review status of every category within one
+// category_type, keyed by canonical category_key.
+func (r artifactCategoryRegistry) categoryStatuses(ctx context.Context, categoryType string) (map[string]string, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT category_key, status FROM kb.artifact_categories WHERE category_type = $1`, categoryType)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26060601) load category statuses: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var key, status string
+		if err := rows.Scan(&key, &status); err != nil {
+			return nil, err
+		}
+		out[key] = status
+	}
+	return out, rows.Err()
+}
+
 func orEmptySlice(s []string) []string {
 	if s == nil {
 		return []string{}
@@ -120,11 +141,22 @@ func orEmptySlice(s []string) []string {
 	return s
 }
 
-func orEmptyMap(m map[string]any) map[string]any {
-	if m == nil {
-		return map[string]any{}
+func orEmptyJSONArray(v []any) []any {
+	if v == nil {
+		return []any{}
 	}
-	return m
+	return v
+}
+
+func orEmptyJSONObject(v any) any {
+	return orEmptyJSONValue(v, map[string]any{})
+}
+
+func orEmptyJSONValue(v any, empty any) any {
+	if v == nil {
+		return empty
+	}
+	return v
 }
 
 // categoryEmbeddingMinDims guards against comparing empty/degenerate vectors.
@@ -213,16 +245,18 @@ func categoryCosine(a, b []float64) float64 {
 
 // createdCategory is the parsed output of the CREATE_ARTIFACT_CATEGORY LLM call.
 type createdCategory struct {
-	CategoryKey     string
-	DisplayNames    []string
-	Aliases         []string
-	Acronyms        []string
-	Description     string
-	Keywords        []string
-	RequiredAttrs   []string
-	Specs           map[string]any
-	PlausibleRanges map[string]any
-	SearchDocument  string
+	CategoryKey       string
+	DisplayNames      []string
+	Aliases           []string
+	Acronyms          []string
+	Description       string
+	Keywords          []string
+	RequiredAttrs     []any
+	Specs             any
+	PlausibleRanges   any
+	ParentCategories  []string
+	RelatedCategories []string
+	SearchDocument    string
 }
 
 // parseCreateCategoryResponse converts the LLM JSON payload into a createdCategory.
@@ -231,16 +265,24 @@ func parseCreateCategoryResponse(payload map[string]any) (createdCategory, error
 	var c createdCategory
 	c.CategoryKey = strings.TrimSpace(jsonString(payload["category_key"]))
 	if c.CategoryKey == "" {
-		return createdCategory{}, fmt.Errorf("(MID_26060401) create category response missing category_key")
+		c.CategoryKey = normalizeCategoryKey(strings.ReplaceAll(strings.TrimSpace(jsonString(payload["canonical_key"])), "_", " "))
+		if c.CategoryKey == "" {
+			return createdCategory{}, fmt.Errorf("(MID_26060601) create category response missing category_key/canonical_key")
+		}
 	}
-	c.DisplayNames = jsonStringSlice(payload["display_names"])
+	c.DisplayNames = jsonStringSlice(firstNonNil(payload["display_names"], payload["canonical_name"]))
 	c.Aliases = jsonStringSlice(payload["aliases"])
 	c.Acronyms = jsonStringSlice(payload["acronyms"])
 	c.Description = strings.TrimSpace(jsonString(payload["description"]))
 	c.Keywords = jsonStringSlice(payload["keywords"])
-	c.RequiredAttrs = jsonStringSlice(payload["required_attrs"])
-	c.Specs, _ = payload["specs"].(map[string]any)
-	c.PlausibleRanges, _ = payload["plausible_ranges"].(map[string]any)
+	c.RequiredAttrs = jsonArray(firstNonNil(payload["required_attrs"], payload["typical_attributes"]))
+	c.Specs = payload["specs"]
+	if c.Specs == nil {
+		c.Specs = payload["typical_specs"]
+	}
+	c.PlausibleRanges = firstNonNil(payload["plausible_ranges"], payload["common_value_ranges"])
+	c.ParentCategories = normalizeCategoryStringSlice(firstNonNil(payload["parent_categories"], payload["subcategory_of"]))
+	c.RelatedCategories = normalizeCategoryStringSlice(payload["related_categories"])
 	c.SearchDocument = strings.TrimSpace(jsonString(payload["search_document"]))
 	return c, nil
 }
@@ -276,6 +318,44 @@ func jsonStringSlice(v any) []string {
 		}
 	}
 	return out
+}
+
+func jsonArray(v any) []any {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case []any:
+		return t
+	case []string:
+		out := make([]any, 0, len(t))
+		for _, s := range t {
+			out = append(out, s)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func normalizeCategoryStringSlice(v any) []string {
+	raw := jsonStringSlice(v)
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		norm := normalizeCategoryKey(strings.ReplaceAll(item, "_", " "))
+		if norm != "" {
+			out = append(out, norm)
+		}
+	}
+	return out
+}
+
+func firstNonNil(values ...any) any {
+	for _, v := range values {
+		if v != nil {
+			return v
+		}
+	}
+	return nil
 }
 
 // normalizeCategoryKey produces the canonical lookup form of a category key:
