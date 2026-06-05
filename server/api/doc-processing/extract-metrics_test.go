@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -812,6 +813,214 @@ var pass2EnrichOut = map[string]any{
 		},
 	},
 	"uncertain_metrics": []any{},
+}
+
+func TestNormalizeMetricListPreservesMetricCategoriesAndCategoryPaths(t *testing.T) {
+	categoryPaths := []any{
+		map[string]any{
+			"category_path": []any{
+				map[string]any{"name": "Public Health", "keywords": []any{"health"}, "confidence": 0.9},
+				map[string]any{"name": "Vaccination", "keywords": []any{"vaccine"}, "confidence": 0.8},
+			},
+			"path_keywords":   []any{"vaccination"},
+			"path_confidence": 0.8,
+		},
+	}
+	got := normalizeMetricList([]any{
+		map[string]any{
+			"metric_name":       "Coverage",
+			"source_line_spans": []any{"22-45"},
+			"metric_categories": " Public Health, Vaccination ",
+			"category_paths":    categoryPaths,
+		},
+	})
+	if len(got) != 1 {
+		t.Fatalf("normalizeMetricList len=%d", len(got))
+	}
+	if !reflect.DeepEqual(got[0]["metric_categories"], []string{"public_health", "vaccination"}) {
+		t.Fatalf("metric_categories=%#v", got[0]["metric_categories"])
+	}
+	if !reflect.DeepEqual(got[0]["source_line_spans"], []string{"22:45"}) {
+		t.Fatalf("source_line_spans=%#v", got[0]["source_line_spans"])
+	}
+	if got[0]["category_paths"] == nil {
+		t.Fatal("category_paths should be preserved")
+	}
+}
+
+func TestBuildMetricRelationBatchPromptIncludesMetricCategorySchema(t *testing.T) {
+	prompt := buildMetricRelationBatchPrompt([]metricCandidate{
+		{
+			CandidateID:    "metric_cand_1",
+			MetricNameHint: "Latency",
+			SupportLines: []BlockLine{
+				{Flag: "n", LineNumber: 2, PageNumber: 1, LineType: "paragraph", Content: "Latency must be <= 200ms"},
+			},
+		},
+	})
+	if !strings.Contains(prompt, `"metric_categories"`) {
+		t.Fatalf("metric_categories missing from relation batch schema: %s", prompt)
+	}
+	if !strings.Contains(prompt, `"metric_categories_en"`) {
+		t.Fatalf("metric_categories_en missing from relation batch schema: %s", prompt)
+	}
+}
+
+func TestDedupeFinalMetricRowsMergesMetricCategoriesEn(t *testing.T) {
+	got := dedupeFinalMetricRows([]map[string]any{
+		{
+			"metric_name":          "Latency",
+			"subject":              "API",
+			"unit":                 "ms",
+			"metric_value":         "200",
+			"source_line_spans":    []any{"10"},
+			"metric_categories":    []any{"performance"},
+			"metric_categories_en": []any{"Performance"},
+			"confidence":           0.7,
+		},
+		{
+			"metric_name":          "Latency",
+			"subject":              "API",
+			"unit":                 "ms",
+			"metric_value":         "200",
+			"source_line_spans":    []any{"10"},
+			"metric_categories":    []any{"quality"},
+			"metric_categories_en": []any{"Quality"},
+			"confidence":           0.9,
+		},
+	})
+	if len(got) != 1 {
+		t.Fatalf("deduped rows=%d, want 1", len(got))
+	}
+	if !reflect.DeepEqual(got[0]["metric_categories"], []string{"performance", "quality"}) {
+		t.Fatalf("metric_categories=%#v", got[0]["metric_categories"])
+	}
+	if !reflect.DeepEqual(got[0]["metric_categories_en"], []string{"performance", "quality"}) {
+		t.Fatalf("metric_categories_en=%#v", got[0]["metric_categories_en"])
+	}
+	if gotConfidence := toFloat(got[0]["confidence"]); gotConfidence != 0.9 {
+		t.Fatalf("confidence=%v, want 0.9", gotConfidence)
+	}
+}
+
+func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("CREATE SCHEMA IF NOT EXISTS kb;").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO kb.metrics").
+		WithArgs(
+			nil,
+			int64(42),
+			"42_1",
+			"Latency",
+			"Latency",
+			`["10"]`,
+			"API",
+			"API",
+			"Maximum latency",
+			"Maximum latency",
+			"SLA",
+			"SLA",
+			`["latency"]`,
+			`["latency"]`,
+			"relation-model",
+			"prompt-enrich-metrics-v1.md",
+			"sentence",
+			"ms",
+			"ms",
+			"200",
+			"number",
+			"maximum",
+			"performance",
+			"performance",
+			"",
+			"<=200",
+			"daily",
+			0.91,
+			true,
+			"SLA",
+			`["named_metric"]`,
+			`["performance"]`,
+			`["performance_en"]`,
+			"null",
+			"null",
+			"{}",
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	store := MetricsSQLStore{DB: db}
+	inserted, err := store.SaveMetrics(context.Background(), SaveMetricsRequest{
+		InputRecordID: int64(42),
+		Language:      "zh",
+		ModelName:     "relation-model",
+		PromptName:    "prompt-enrich-metrics-v1.md",
+		Metrics: []map[string]any{
+			{
+				"metric_id":             "42_1",
+				"metric_name":           "Latency",
+				"metric_name_en":        "Latency",
+				"source_line_spans":     []string{"10"},
+				"subject":               "API",
+				"subject_en":            "API",
+				"desc":                  "Maximum latency",
+				"desc_en":               "Maximum latency",
+				"context":               "SLA",
+				"context_en":            "SLA",
+				"keywords":              []string{"latency"},
+				"keywords_en":           []string{"latency"},
+				"location_type":         "sentence",
+				"unit":                  "ms",
+				"unit_en":               "ms",
+				"metric_value":          "200",
+				"value_data_type":       "number",
+				"value_range_type":      "maximum",
+				"value_class":           "performance",
+				"value_class_en":        "performance",
+				"threshold_or_target":   "<=200",
+				"measurement_frequency": "daily",
+				"confidence":            0.91,
+				"is_explicit_metric":    true,
+				"table_name_or_section": "SLA",
+				"reasoning_tags":        []string{"named_metric"},
+				"metric_categories":     []string{"performance"},
+				"metric_categories_en":  []string{"performance_en"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveMetrics returned error: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted=%d, want 1", inserted)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMetricCategoryKeysFromMetricFallsBackToCategoryPaths(t *testing.T) {
+	metric := map[string]any{
+		"category_paths": []any{
+			map[string]any{
+				"category_path": []any{
+					map[string]any{"name": "System Safety"},
+					map[string]any{"name": "Alarm Thresholds"},
+				},
+			},
+		},
+	}
+	got := metricCategoryKeysFromMetric(metric)
+	want := []string{"system_safety", "alarm_thresholds"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("metricCategoryKeysFromMetric=%v, want %v", got, want)
+	}
 }
 
 // ── concurrency bound tests ───────────────────────────────────────────────────

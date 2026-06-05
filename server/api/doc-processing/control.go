@@ -246,6 +246,11 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	if requestStopped {
 		return nil
 	}
+
+	// Phase C (post-process): now that every doc processor has finished, index the
+	// artifacts of the invoked processors that defer indexing to this phase. This is the
+	// only place cross-artifact indexing (e.g. metrics) may run, so it sees all outputs.
+	s.runPostProcessIndexing(ctx, processors, evt.RecordID)
 	if s.Logger != nil {
 		status := "success"
 		if requestFailed {
@@ -258,6 +263,44 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		)
 	}
 	return firstErr
+}
+
+// PostProcessIndexer is implemented by processors that index their artifacts in
+// Phase C (post-process) rather than inside HandleEvent. Phase C runs once, after every
+// doc processor in the pipeline has finished, so cross-artifact indexing (for example
+// metrics, which links to semantic_projections, topics, scenes, provisions, entities and
+// inventory items) can see every processor's output regardless of Phase B ordering.
+// Implementations must be idempotent.
+type PostProcessIndexer interface {
+	PostProcessIndex(ctx context.Context, recordID int64) error
+}
+
+// runPostProcessIndexing executes Phase C: for each invoked processor that implements
+// PostProcessIndexer, run its indexing step. Errors are logged and do not abort the other
+// processors' indexing. The caller skips this when the pipeline was stopped.
+func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors []Processor, recordID int64) {
+	if isCtxStopped(ctx) {
+		return
+	}
+	for _, p := range processors {
+		indexer, ok := p.(PostProcessIndexer)
+		if !ok {
+			continue
+		}
+		name := processorLogName(p)
+		if s.Logger != nil {
+			s.Logger.Info("post-process indexing start", "record_id", recordID, "processor", name)
+		}
+		if err := indexer.PostProcessIndex(ctx, recordID); err != nil {
+			if s.Logger != nil {
+				s.Logger.Error("post-process indexing failed", "record_id", recordID, "processor", name, "error", err)
+			}
+			continue
+		}
+		if s.Logger != nil {
+			s.Logger.Info("post-process indexing finished", "record_id", recordID, "processor", name)
+		}
+	}
 }
 
 // isPhaseAProcessor reports whether the named processor is a mandatory,

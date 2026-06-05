@@ -190,7 +190,15 @@ func buildConnectedArtifacts(ctx context.Context, db *sql.DB, recordID int64, in
 	}
 	refsByType := make(map[string][]ArtifactRef, len(registryTypes))
 	for _, atype := range registryTypes {
-		refs, err := loadArtifactRefsFromRegistry(ctx, db, recordID, atype)
+		var (
+			refs []ArtifactRef
+			err  error
+		)
+		if atype == searchArtifactSemanticProjection {
+			refs, err = loadSemanticProjectionRefsForConnections(ctx, db, recordID)
+		} else {
+			refs, err = loadArtifactRefsFromRegistry(ctx, db, recordID, atype)
+		}
 		if err != nil {
 			if logger != nil {
 				logger.Warn("metrics indexing: load registry refs failed", "record_id", recordID, "artifact_type", atype, "error", err.Error())
@@ -198,6 +206,13 @@ func buildConnectedArtifacts(ctx context.Context, db *sql.DB, recordID int64, in
 			continue
 		}
 		refsByType[atype] = refs
+		if logger != nil && atype == searchArtifactSemanticProjection {
+			logger.Info("metrics indexing: loaded semantic projection refs",
+				"record_id", recordID,
+				"semantic_projection_ref_count", len(refs),
+				"semantic_projection_ref_sample", summarizeArtifactRefs(refs, 8),
+			)
+		}
 	}
 
 	updated := 0
@@ -230,7 +245,14 @@ func buildConnectedArtifacts(ctx context.Context, db *sql.DB, recordID int64, in
 			logger.Warn("metrics indexing error: empty chunks", "record_id", recordID, "metric_id", m.MetricID)
 		}
 		if len(ca.SemanticProjects) == 0 && logger != nil {
-			logger.Warn("metrics indexing error: empty semantic_projects", "record_id", recordID, "metric_id", m.MetricID)
+			logger.Warn("metrics indexing error: empty semantic_projects",
+				"record_id", recordID,
+				"metric_id", m.MetricID,
+				"metric_source_spans", m.SourceSpans,
+				"metric_line_numbers", sortedLineSetKeys(metricLines),
+				"semantic_projection_ref_count", len(refsByType[searchArtifactSemanticProjection]),
+				"semantic_projection_ref_sample", summarizeArtifactRefs(refsByType[searchArtifactSemanticProjection], 8),
+			)
 		}
 
 		payload, err := json.Marshal(ca)
@@ -263,9 +285,74 @@ func overlappingRefIDs(refs []ArtifactRef, metricLines map[int]struct{}) []strin
 	return out
 }
 
+func loadSemanticProjectionRefsForConnections(ctx context.Context, db *sql.DB, recordID int64) ([]ArtifactRef, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT semantic_proj_id, COALESCE(line_spans, '[]'::jsonb)
+		 FROM kb.semantic_projections
+		 WHERE input_record_id = $1
+		 ORDER BY id`,
+		recordID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	refs := make([]ArtifactRef, 0, 16)
+	for rows.Next() {
+		var (
+			projID   string
+			spansRaw []byte
+		)
+		if err := rows.Scan(&projID, &spansRaw); err != nil {
+			return nil, err
+		}
+		var raw any
+		if len(spansRaw) > 0 {
+			_ = json.Unmarshal(spansRaw, &raw)
+		}
+		refs = append(refs, ArtifactRef{
+			Type:  searchArtifactSemanticProjection,
+			ID:    strings.TrimSpace(projID),
+			Spans: normalizeSourceLineSpans(raw),
+		})
+	}
+	return refs, rows.Err()
+}
+
+func summarizeArtifactRefs(refs []ArtifactRef, limit int) []string {
+	if len(refs) == 0 || limit <= 0 {
+		return []string{}
+	}
+	if len(refs) < limit {
+		limit = len(refs)
+	}
+	out := make([]string, 0, limit+1)
+	for _, ref := range refs[:limit] {
+		out = append(out, fmt.Sprintf("%s:%v", strings.TrimSpace(ref.ID), ref.Spans))
+	}
+	if len(refs) > limit {
+		out = append(out, fmt.Sprintf("... +%d more", len(refs)-limit))
+	}
+	return out
+}
+
+func sortedLineSetKeys(set map[int]struct{}) []int {
+	if len(set) == 0 {
+		return []int{}
+	}
+	out := make([]int, 0, len(set))
+	for n := range set {
+		out = append(out, n)
+	}
+	sort.Ints(out)
+	return out
+}
+
 // upsertMetricCategoryInstances resolves each metric's category keys to
-// kb.artifact_categories.category_id and upserts a kb.category_instance row. Returns
-// the number of category_instance rows upserted.
+// kb.artifact_categories.category_id, creating missing artifact categories first, and
+// upserts a kb.category_instance row. Returns the number of category_instance rows
+// upserted.
 func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, metrics []indexedMetric, logger ApiTypes.JimoLogger) int {
 	extraInfo, _ := json.Marshal(map[string]any{"artifact_type": "metric", "source": "extract_metrics"})
 	count := 0
@@ -277,18 +364,10 @@ func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int
 			continue
 		}
 		for _, key := range m.Categories {
-			var categoryID int64
-			err := db.QueryRowContext(ctx,
-				`SELECT category_id FROM kb.artifact_categories WHERE category_key = $1`, key).Scan(&categoryID)
-			if err == sql.ErrNoRows {
-				if logger != nil {
-					logger.Warn("metrics indexing: category key not found", "record_id", recordID, "metric_id", m.MetricID, "category_key", key)
-				}
-				continue
-			}
+			categoryID, err := upsertMetricArtifactCategory(ctx, db, key)
 			if err != nil {
 				if logger != nil {
-					logger.Warn("metrics indexing: category lookup failed", "record_id", recordID, "metric_id", m.MetricID, "category_key", key, "error", err.Error())
+					logger.Warn("metrics indexing: upsert artifact category failed", "record_id", recordID, "metric_id", m.MetricID, "category_key", key, "error", err.Error())
 				}
 				continue
 			}
@@ -307,6 +386,38 @@ func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int
 		}
 	}
 	return count
+}
+
+func upsertMetricArtifactCategory(ctx context.Context, db *sql.DB, key string) (int64, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return 0, fmt.Errorf("empty category key")
+	}
+	var categoryID int64
+	err := db.QueryRowContext(ctx,
+		`INSERT INTO kb.artifact_categories (
+		     category_key, category_type, display_names, search_document, seen_count
+		 )
+		 VALUES ($1, 'metric', to_jsonb(ARRAY[$1]::text[]), $1, 1)
+		 ON CONFLICT (category_key) DO UPDATE SET
+		     seen_count = kb.artifact_categories.seen_count + 1,
+		     last_seen_at = NOW(),
+		     display_names = CASE
+		         WHEN kb.artifact_categories.display_names @> to_jsonb($1::text) THEN kb.artifact_categories.display_names
+		         ELSE kb.artifact_categories.display_names || to_jsonb($1::text)
+		     END,
+		     search_document = CASE
+		         WHEN COALESCE(kb.artifact_categories.search_document, '') = '' THEN EXCLUDED.search_document
+		         ELSE kb.artifact_categories.search_document
+		     END
+		 RETURNING category_id`, key).Scan(&categoryID)
+	if err != nil {
+		return 0, err
+	}
+	if categoryID == 0 {
+		return 0, fmt.Errorf("artifact category %q has no category_id", key)
+	}
+	return categoryID, nil
 }
 
 // semProjForIndex carries the semantic projection fields needed to derive a metric's

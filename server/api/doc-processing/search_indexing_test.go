@@ -82,6 +82,56 @@ category_paths: ["safety","battery"]
 	}
 }
 
+func TestBuildSemanticProjectionRegistryRowsIncludesLineSpans(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{
+		"id",
+		"semantic_proj_id",
+		"language",
+		"descriptive_name",
+		"descriptive_name_en",
+		"keywords",
+		"keywords_en",
+		"category_paths",
+		"line_spans",
+	}).AddRow(
+		int64(7),
+		"177_0_2",
+		"en",
+		"Artifact connections",
+		nil,
+		[]byte(`["metric"]`),
+		[]byte(`[]`),
+		[]byte(`[{"category_path":[{"name":"metrics","keywords":["metric"],"confidence":0.9}],"path_keywords":["metric"],"path_confidence":0.9}]`),
+		[]byte(`["22-45"]`),
+	)
+	mock.ExpectQuery("FROM kb.semantic_projections").
+		WithArgs(int64(177)).
+		WillReturnRows(rows)
+
+	got, err := buildSemanticProjectionRegistryRows(context.Background(), db, 177)
+	if err != nil {
+		t.Fatalf("buildSemanticProjectionRegistryRows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if string(got[0].SourceLineSpans) != `["22-45"]` {
+		t.Fatalf("SourceLineSpans=%s", got[0].SourceLineSpans)
+	}
+	if got[0].ArtifactID != "177_0_2" {
+		t.Fatalf("ArtifactID=%q", got[0].ArtifactID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func TestReplaceRegistryRowsDeletesThenInserts(t *testing.T) {
 	t.Setenv("SEARCH_SEMANTIC_ENABLED", "")
 	db, mock, err := sqlmock.New()

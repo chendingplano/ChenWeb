@@ -297,7 +297,8 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		}
 		if exists {
 			p.Logger.Info("metrics extraction skipped", "record_id", evt.RecordID, "reason", "metrics already exist and force=false")
-			reindexExistingSearchOnSkip(ctx, searchArtifactMetric, evt.RecordID, p.Logger, ReindexMetricSearchForRecord)
+			// Indexing (search registry + connections) is deferred to Phase C
+			// (PostProcessIndex), which reindexes existing metrics too.
 			p.persistMetricsStatus(ctx, rec, start, nil)
 			return nil
 		}
@@ -373,20 +374,12 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.Logger.Warn("save metrics to file failed", "record_id", evt.RecordID, "error", fileErr)
 	}
 
-	if reindexErr := ReindexMetricSearchForRecord(ctx, evt.RecordID, p.Logger); reindexErr != nil {
-		p.Logger.Warn("reindex metric search registry failed", "record_id", evt.RecordID, "error", reindexErr)
-	}
-
-	// Derive chunk -> metric "has-metrics" line_overlap edges for the artifact graph.
-	// Refs are sourced from kb.search_artifacts (reindexed just above) so target_id
-	// matches the canonical artifact identity used across the system.
-	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, evt.RecordID, searchArtifactMetric, RelationHasMetrics, inputChunks); connErr != nil {
-		p.Logger.Warn("write has-metrics connections failed", "record_id", evt.RecordID, "error", connErr)
-	}
-
-	// Post-save metrics indexing: connected_artifacts JSON, category_instance rows,
-	// category-path metrics.txt entries, and hybrid_search semantic links.
-	IndexMetricsForRecord(ctx, evt.RecordID, inputChunks, p.Logger)
+	// Artifact indexing (search registry, line-overlap connections, connected_artifacts,
+	// category_instance, category-path metrics.txt, and hybrid_search links) is
+	// intentionally NOT done here. It runs in Phase C (post-process) via
+	// PostProcessIndex, after every doc processor finishes, because metric indexing reads
+	// other processors' artifacts (semantic_projections, topics, scenes, provisions,
+	// entities, inventory_items) that may not exist yet during Phase B.
 
 	p.Logger.Info("metrics extracted",
 		"record_id", evt.RecordID,
@@ -398,6 +391,72 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	p.persistMetricsStatus(ctx, rec, start, nil)
 	p.logMetricsSummary(ctx, evt.RecordID, start, p.Now(), result, inserted, len(inputChunks))
 	return nil
+}
+
+// PostProcessIndex runs the metrics indexing workflow in Phase C, after all doc
+// processors have finished. It is invoked by the pipeline controller for every record
+// whose pipeline included extract_metrics. Running here (rather than inside HandleEvent)
+// guarantees that the artifacts metric indexing depends on — semantic_projections,
+// topics, scenes, provisions, entities, inventory_items, and their kb.search_artifacts
+// rows — are already present, regardless of Phase B ordering. It is idempotent and safe
+// to run for both freshly-extracted and pre-existing (skipped) metrics.
+func (p *MetricsProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
+	rec, err := p.InputStore.GetInputRecord(ctx, recordID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("(MID_26060501) load kb.inputs record %d: %w", recordID, err)
+	}
+
+	exists, err := p.Store.MetricsExist(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26060502) check metrics exist for record %d: %w", recordID, err)
+	}
+	if !exists {
+		return nil
+	}
+
+	// Chunks back connected_artifacts.chunks and the has-metrics line-overlap edges. If
+	// they cannot be loaded, indexing still proceeds for the remaining outputs.
+	chunks, chunkErr := p.loadRecordChunks(rec, recordID)
+	if chunkErr != nil {
+		p.Logger.Warn("post-process metrics: load chunks failed; indexing without chunk overlap",
+			"record_id", recordID, "error", chunkErr)
+	}
+
+	if reindexErr := ReindexMetricSearchForRecord(ctx, recordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex metric search registry failed", "record_id", recordID, "error", reindexErr)
+	}
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, recordID, searchArtifactMetric, RelationHasMetrics, chunks); connErr != nil {
+		p.Logger.Warn("write has-metrics connections failed", "record_id", recordID, "error", connErr)
+	}
+	IndexMetricsForRecord(ctx, recordID, chunks, p.Logger)
+	return nil
+}
+
+// loadRecordChunks resolves and loads the record's persisted chunk blocks from the
+// .chunks artifact, mirroring HandleEvent's loader but without status side effects so it
+// is safe to call from the Phase C post-process step.
+func (p *MetricsProcessor) loadRecordChunks(rec DocMetadataInputRecord, recordID int64) ([]Block, error) {
+	lineFilePath, err := ResolveInputFilePath(LineFileGeneratedEvent{RecordID: recordID}, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
+	if err != nil {
+		return nil, fmt.Errorf("resolve line file: %w", err)
+	}
+	lineBody, err := os.ReadFile(lineFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("read line file: %w", err)
+	}
+	lines, err := ParseInputLines(lineBody)
+	if err != nil {
+		return nil, fmt.Errorf("parse line file: %w", err)
+	}
+	artifactBase := buildChunkArtifactBaseName(rec.StagingFilename, rec.ParserName)
+	chunks, err := loadChunksFromArtifactFile(p.ChunkDir, recordID, artifactBase+".chunks", lines)
+	if err != nil {
+		return nil, fmt.Errorf("load chunks: %w", err)
+	}
+	return chunksToBlocks(chunks), nil
 }
 
 func forceDisableThinking(cfg structureModelConfig) structureModelConfig {
@@ -987,6 +1046,8 @@ func buildMetricRelationUserPrompt(candidate metricCandidate) string {
 			"is_explicit_metric":    true,
 			"table_name_or_section": "string",
 			"reasoning_tags":        []string{"string"},
+			"metric_categories":     []string{"category_key"},
+			"metric_categories_en":  []string{"category_key_en"},
 		}},
 		"uncertain_metrics": []any{},
 	}
@@ -1039,6 +1100,8 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 			"is_explicit_metric":    true,
 			"table_name_or_section": "string",
 			"reasoning_tags":        []string{"string"},
+			"metric_categories":     []string{"category_key"},
+			"metric_categories_en":  []string{"category_key_en"},
 		}},
 		"uncertain_metrics": []any{},
 	}
@@ -1101,6 +1164,10 @@ func normalizeMetricList(items []any) []map[string]any {
 			"is_explicit_metric":    toBool(raw["is_explicit_metric"]),
 			"table_name_or_section": strings.TrimSpace(asString(raw["table_name_or_section"])),
 			"reasoning_tags":        toStringSlice(raw["reasoning_tags"]),
+			"metric_categories":     metricCategoryKeysFromValue(raw["metric_categories"]),
+			"metric_categories_en":  metricCategoryKeysFromValue(raw["metric_categories_en"]),
+			"category_paths":        raw["category_paths"],
+			"category_paths_en":     raw["category_paths_en"],
 		}
 		normalized["source_line_spans"] = normalizeSourceLineSpans(raw["source_line_spans"])
 		out = append(out, normalized)
@@ -1167,17 +1234,21 @@ func parseMetricLineSpan(span string) (int, int, bool) {
 	if span == "" {
 		return 0, 0, false
 	}
-	if strings.Contains(span, ":") {
-		parts := strings.SplitN(span, ":", 2)
+	sepIdx := strings.Index(span, ":")
+	if sepIdx < 0 {
+		sepIdx = strings.Index(span, "-")
+	}
+	if sepIdx > 0 {
+		parts := []string{span[:sepIdx], span[sepIdx+1:]}
 		start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
 		end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-		if err1 != nil || err2 != nil || end < start {
+		if err1 != nil || err2 != nil || start <= 0 || end < start {
 			return 0, 0, false
 		}
 		return start, end, true
 	}
 	n, err := strconv.Atoi(span)
-	if err != nil {
+	if err != nil || n <= 0 {
 		return 0, 0, false
 	}
 	return n, n, true
@@ -1334,6 +1405,20 @@ func dedupeFinalMetricRows(metrics []map[string]any) []map[string]any {
 				}
 			}
 			existing["source_line_spans"] = mergedSpans
+			mergedCategories := metricCategoryKeysFromValue(existing["metric_categories"])
+			for _, category := range metricCategoryKeysFromValue(metric["metric_categories"]) {
+				mergedCategories = appendUniqueString(mergedCategories, category)
+			}
+			if len(mergedCategories) > 0 {
+				existing["metric_categories"] = mergedCategories
+			}
+			mergedCategoriesEn := metricCategoryKeysFromValue(existing["metric_categories_en"])
+			for _, category := range metricCategoryKeysFromValue(metric["metric_categories_en"]) {
+				mergedCategoriesEn = appendUniqueString(mergedCategoriesEn, category)
+			}
+			if len(mergedCategoriesEn) > 0 {
+				existing["metric_categories_en"] = mergedCategoriesEn
+			}
 			if toFloat(metric["confidence"]) > toFloat(existing["confidence"]) {
 				existing["confidence"] = metric["confidence"]
 			}
@@ -1376,17 +1461,9 @@ func normalizeSourceLineSpans(value any) []string {
 			}
 		case string:
 			s := strings.TrimSpace(v)
-			if idx := strings.Index(s, ":"); idx > 0 {
-				start, err1 := strconv.Atoi(strings.TrimSpace(s[:idx]))
-				end, err2 := strconv.Atoi(strings.TrimSpace(s[idx+1:]))
-				if err1 == nil && err2 == nil && start > 0 && end >= start {
-					spans = append(spans, lineSpan{start, end})
-				}
-			} else {
-				n, err := strconv.Atoi(s)
-				if err == nil && n > 0 {
-					spans = append(spans, lineSpan{n, n})
-				}
+			start, end, ok := parseMetricLineSpan(s)
+			if ok {
+				spans = append(spans, lineSpan{start, end})
 			}
 		}
 	}
@@ -1426,15 +1503,64 @@ func normalizeSourceLineSpans(value any) []string {
 }
 
 func toStringSlice(v any) []string {
-	arr, ok := v.([]any)
-	if !ok {
+	switch x := v.(type) {
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			s := strings.TrimSpace(asString(item))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		return trimStringSlice(x)
+	case string:
+		s := strings.TrimSpace(x)
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	default:
 		return nil
 	}
-	out := make([]string, 0, len(arr))
-	for _, item := range arr {
-		s := strings.TrimSpace(asString(item))
-		if s != "" {
-			out = append(out, s)
+}
+
+func metricCategoryKeysFromValue(v any) []string {
+	raw := toStringSlice(v)
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		for _, part := range strings.Split(item, ",") {
+			key := normalizeCategorySegment(part)
+			if key != "" {
+				out = appendUniqueString(out, key)
+			}
+		}
+	}
+	return out
+}
+
+func metricCategoryKeysFromMetric(metric map[string]any) []string {
+	keys := metricCategoryKeysFromValue(metric["metric_categories"])
+	if len(keys) > 0 {
+		return keys
+	}
+	return metricCategoryKeysFromCategoryPaths(metric["category_paths_en"], metric["category_paths"])
+}
+
+func metricCategoryKeysFromCategoryPaths(rawPaths ...any) []string {
+	out := []string{}
+	for _, raw := range rawPaths {
+		for _, entry := range parseCategoryPathsAny(raw) {
+			for _, node := range entry.Nodes {
+				key := normalizeCategorySegment(node.Name)
+				if key != "" {
+					out = appendUniqueString(out, key)
+				}
+			}
+		}
+		if len(out) > 0 {
+			return out
 		}
 	}
 	return out
@@ -2004,6 +2130,7 @@ INSERT INTO kb.metrics (
 	table_name_or_section,
 	reasoning_tags,
 	metric_categories,
+	metric_categories_en,
 	category_paths,
 	category_paths_en,
 	connected_artifacts,
@@ -2011,7 +2138,7 @@ INSERT INTO kb.metrics (
 	ext_info
 )
 VALUES (
-	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33::jsonb,$34::jsonb,$35::jsonb,$36,$37::jsonb
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36::jsonb,$37,$38::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -2056,8 +2183,12 @@ VALUES (
 
 		// metric_categories is a TEXT column; store the category keys as a JSON array
 		// string so the post-save indexing step can parse them back for category_instance.
-		metricCategoriesJSON, _ := json.Marshal(toStringSlice(metric["metric_categories"]))
+		metricCategoriesJSON, _ := json.Marshal(metricCategoryKeysFromMetric(metric))
 		metricCategoriesText := string(metricCategoriesJSON)
+		metricCategoriesEnJSON, _ := json.Marshal(metricCategoryKeysFromValue(metric["metric_categories_en"]))
+		metricCategoriesEnText := string(metricCategoriesEnJSON)
+		categoryPathsJSON, _ := json.Marshal(metric["category_paths"])
+		categoryPathsEnJSON, _ := json.Marshal(metric["category_paths_en"])
 
 		_, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
@@ -2092,8 +2223,9 @@ VALUES (
 			strings.TrimSpace(asString(metric["table_name_or_section"])),
 			string(reasoningTagsJSON),
 			metricCategoriesText,
-			nil,
-			nil,
+			metricCategoriesEnText,
+			string(categoryPathsJSON),
+			string(categoryPathsEnJSON),
 			"{}",
 			searchDocument,
 			string(extInfo),

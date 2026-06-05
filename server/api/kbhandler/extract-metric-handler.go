@@ -550,11 +550,11 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		metric_value, value_data_type, value_range_type, value_class, value_class_en,
 		formula_or_definition, threshold_or_target, measurement_frequency,
 		confidence, is_explicit_metric, table_name_or_section, reasoning_tags,
-		metric_categories, category_paths, category_paths_en, connected_artifacts, ext_info
+		metric_categories, metric_categories_en, category_paths, category_paths_en, connected_artifacts, ext_info
 	) VALUES (
 		$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,
 		$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,
-		$32,$33::jsonb,$34::jsonb,$35::jsonb,$36::jsonb
+		$32,$33,$34::jsonb,$35::jsonb,$36::jsonb,$37::jsonb
 	)`
 
 	extInfo, _ := json.Marshal(map[string]any{
@@ -585,6 +585,7 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		// metric_categories is a TEXT column holding a JSON array of category keys, so
 		// the post-save indexing step can resolve them to category_instance rows.
 		metricCategoriesJSON, _ := json.Marshal(anyAsStringSlice(m["metric_categories"]))
+		metricCategoriesEnJSON, _ := json.Marshal(anyAsStringSlice(m["metric_categories_en"]))
 
 		_, err := db.Exec(stmt,
 			"rest-api",
@@ -619,6 +620,7 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 			strings.TrimSpace(anyAsString(m["table_name_or_section"])),
 			string(reasoningJSON),
 			string(metricCategoriesJSON),
+			string(metricCategoriesEnJSON),
 			string(categoryPathsJSON),
 			categoryPathsEnVal,
 			"{}",

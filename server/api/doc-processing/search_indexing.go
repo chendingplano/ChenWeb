@@ -349,11 +349,11 @@ ORDER BY id`
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
-			id         int64
-			objectID   string
-			title      string
-			sceneType  string
-			summary    string
+			id        int64
+			objectID  string
+			title     string
+			sceneType string
+			summary   string
 			keywords  []byte
 			lineSpans []byte
 			searchDoc string
@@ -500,7 +500,7 @@ ORDER BY id`
 
 func buildSemanticProjectionRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
 	const q = `
-SELECT id, semantic_proj_id, language, descriptive_name, descriptive_name_en, keywords, keywords_en, category_paths
+SELECT id, semantic_proj_id, language, descriptive_name, descriptive_name_en, keywords, keywords_en, category_paths, line_spans
 FROM kb.semantic_projections
 WHERE input_record_id = $1
 ORDER BY id`
@@ -521,8 +521,9 @@ ORDER BY id`
 			keywords          []byte
 			keywordsEn        []byte
 			categoryPaths     []byte
+			lineSpans         []byte
 		)
-		if err := rows.Scan(&id, &semanticProjID, &language, &descriptiveName, &descriptiveNameEn, &keywords, &keywordsEn, &categoryPaths); err != nil {
+		if err := rows.Scan(&id, &semanticProjID, &language, &descriptiveName, &descriptiveNameEn, &keywords, &keywordsEn, &categoryPaths, &lineSpans); err != nil {
 			return nil, err
 		}
 		kw := rawJSONArrayStrings(keywords)
@@ -537,9 +538,13 @@ ORDER BY id`
 		if seq == "" {
 			seq = strconv.FormatInt(id, 10)
 		}
+		artifactID := strings.TrimSpace(semanticProjID)
+		if artifactID == "" {
+			artifactID = kbsearch.BuildArtifactID(recordID, searchArtifactSemanticProjection, seq)
+		}
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactSemanticProjection,
-			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactSemanticProjection, seq),
+			ArtifactID:      artifactID,
 			InputRecordID:   recordID,
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(descriptiveName, semanticProjID),
@@ -547,6 +552,7 @@ ORDER BY id`
 			SearchDocument:  strings.TrimSpace(strings.Join(searchParts, " ")),
 			SnippetBasis:    firstNonEmpty(descriptiveName, descriptiveNameEn.String),
 			CategoryPaths:   json.RawMessage(categoryPaths),
+			SourceLineSpans: json.RawMessage(lineSpans),
 			SemanticPayload: payload,
 		})
 	}

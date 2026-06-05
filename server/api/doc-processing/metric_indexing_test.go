@@ -1,12 +1,18 @@
 package docprocessing
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"runtime"
 	"sort"
+	"strings"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestParseMetricCategoriesText(t *testing.T) {
@@ -56,6 +62,19 @@ func TestLineSetFromSpansAndOverlap(t *testing.T) {
 	}
 }
 
+func TestLineSetFromSpansAndOverlapAcceptsHyphenRanges(t *testing.T) {
+	set := lineSetFromSpans([]string{"34"})
+	if !spansOverlapLineSet([]string{"22-45"}, set) {
+		t.Error("expected semantic projection range 22-45 to overlap metric line 34")
+	}
+
+	got := normalizeSourceLineSpans([]any{"22-45"})
+	want := []string{"22:45"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeSourceLineSpans hyphen range = %v, want %v", got, want)
+	}
+}
+
 func TestChunkOverlapsLineSet(t *testing.T) {
 	ch := Block{Index: 2, Lines: []BlockLine{{LineNumber: 5}, {LineNumber: 6}}}
 	if !chunkOverlapsLineSet(ch, lineSetFromSpans([]string{"6"})) {
@@ -101,6 +120,33 @@ func TestConnectedArtifactsMarshalsEmptyArrays(t *testing.T) {
 	want := `{"chunks":[],"semantic_projects":[],"topics":[],"scenes":[],"provisions":[],"entities":[],"inv_items":[]}`
 	if string(bs) != want {
 		t.Errorf("connected_artifacts JSON = %s, want %s", bs, want)
+	}
+}
+
+func TestUpsertMetricCategoryInstancesCreatesMissingArtifactCategory(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	metrics := []indexedMetric{{
+		MetricID:   "100_1",
+		Categories: []string{"energy_efficiency"},
+	}}
+
+	mock.ExpectQuery("INSERT INTO kb\\.artifact_categories").
+		WithArgs("energy_efficiency").
+		WillReturnRows(sqlmock.NewRows([]string{"category_id"}).AddRow(int64(42)))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.category_instance (category_id, artifact_id, input_record_id, extra_info)`)).
+		WithArgs(int64(42), "100_1", int64(100), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if got := upsertMetricCategoryInstances(context.Background(), db, 100, metrics, nil); got != 1 {
+		t.Fatalf("upsertMetricCategoryInstances = %d, want 1", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
@@ -179,4 +225,35 @@ func TestMetricsTxtLeafDirUpsertAndRemove(t *testing.T) {
 	if string(body) != "200_1" {
 		t.Errorf("after remove(100), metrics.txt = %q, want %q", body, "200_1")
 	}
+}
+
+func TestArtifactConnectionsHybridSearchPartitionMigrationExists(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../../.."))
+	migrationDir := filepath.Join(repoRoot, "project_migrations")
+
+	entries, err := os.ReadDir(migrationDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", migrationDir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(migrationDir, entry.Name()))
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", entry.Name(), err)
+		}
+		text := string(body)
+		if strings.Contains(text, "artifact_connections_hybrid_search") &&
+			strings.Contains(text, "FOR VALUES IN ('hybrid_search')") {
+			return
+		}
+	}
+
+	t.Fatal("expected a kb.artifact_connections hybrid_search partition migration")
 }

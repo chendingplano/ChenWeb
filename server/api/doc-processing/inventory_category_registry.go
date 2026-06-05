@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Review status values for kb.inventory_categories.status.
+// Review status values for inventory rows in kb.artifact_categories.status.
 const (
 	InventoryCategoryStatusPending  = "pending_review"
 	InventoryCategoryStatusApproved = "approved"
@@ -48,8 +48,9 @@ func (r InventoryCategoryRegistry) ensureTables(ctx context.Context) error {
 	}
 	const ddl = `
 CREATE SCHEMA IF NOT EXISTS kb;
-CREATE TABLE IF NOT EXISTS kb.inventory_categories (
-    category_key      TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS kb.artifact_categories (
+    category_key      TEXT NOT NULL,
+    category_type     TEXT NOT NULL,
     status            TEXT NOT NULL DEFAULT 'pending_review',
     canonical_of      TEXT,
     display_names     JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -61,10 +62,13 @@ CREATE TABLE IF NOT EXISTS kb.inventory_categories (
     first_seen_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     create_time       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    modify_time       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    modify_time       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    category_id       BIGINT GENERATED ALWAYS AS IDENTITY,
+    search_document   TEXT NOT NULL DEFAULT '',
+    CONSTRAINT artifact_categories_pkey PRIMARY KEY (category_key)
 );
-CREATE INDEX IF NOT EXISTS idx_kb_inventory_categories_status ON kb.inventory_categories(status);
-CREATE INDEX IF NOT EXISTS idx_kb_inventory_categories_seen_count ON kb.inventory_categories(seen_count DESC);
+CREATE INDEX IF NOT EXISTS idx_kb_artifact_categories_status ON kb.artifact_categories(status);
+CREATE INDEX IF NOT EXISTS idx_kb_artifact_categories_seen_count ON kb.artifact_categories(seen_count DESC);
 `
 	_, err := r.DB.ExecContext(ctx, ddl)
 	return err
@@ -88,14 +92,15 @@ func (r InventoryCategoryRegistry) SeedApprovedCategories(ctx context.Context, d
 		ranges, _ := json.Marshal(dict.PlausibleRanges[key])
 		displayNames, _ := json.Marshal([]string{category})
 		const stmt = `
-INSERT INTO kb.inventory_categories (
-    category_key, status, display_names, required_attrs, specs, plausible_ranges
-) VALUES ($1, 'approved', $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb)
+INSERT INTO kb.artifact_categories (
+    category_key, category_type, status, display_names, required_attrs, specs, plausible_ranges, search_document
+) VALUES ($1, 'inventory', 'approved', $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6)
 ON CONFLICT (category_key) DO UPDATE SET
-    required_attrs   = CASE WHEN kb.inventory_categories.status = 'approved' THEN EXCLUDED.required_attrs ELSE kb.inventory_categories.required_attrs END,
-    specs            = CASE WHEN kb.inventory_categories.status = 'approved' THEN EXCLUDED.specs ELSE kb.inventory_categories.specs END,
-    plausible_ranges = CASE WHEN kb.inventory_categories.status = 'approved' THEN EXCLUDED.plausible_ranges ELSE kb.inventory_categories.plausible_ranges END`
-		if _, err := r.DB.ExecContext(ctx, stmt, key, string(displayNames), string(requiredAttrs), string(specs), string(ranges)); err != nil {
+    category_type    = 'inventory',
+    required_attrs   = CASE WHEN kb.artifact_categories.status = 'approved' THEN EXCLUDED.required_attrs ELSE kb.artifact_categories.required_attrs END,
+    specs            = CASE WHEN kb.artifact_categories.status = 'approved' THEN EXCLUDED.specs ELSE kb.artifact_categories.specs END,
+    plausible_ranges = CASE WHEN kb.artifact_categories.status = 'approved' THEN EXCLUDED.plausible_ranges ELSE kb.artifact_categories.plausible_ranges END`
+		if _, err := r.DB.ExecContext(ctx, stmt, key, string(displayNames), string(requiredAttrs), string(specs), string(ranges), key); err != nil {
 			return fmt.Errorf("(MID_26053161) seed inventory category %q: %w", key, err)
 		}
 	}
@@ -112,8 +117,8 @@ func (r InventoryCategoryRegistry) LoadActiveCategories(ctx context.Context) (ma
 	const q = `
 SELECT category_key, status, COALESCE(canonical_of, ''), display_names,
        required_attrs, specs, plausible_ranges, embedding, seen_count
-FROM kb.inventory_categories
-WHERE status IN ('approved', 'pending_review')`
+FROM kb.artifact_categories
+WHERE category_type = 'inventory' AND status IN ('approved', 'pending_review')`
 	rows, err := r.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26053162) load active categories: %w", err)
@@ -196,14 +201,14 @@ func (r InventoryCategoryRegistry) ObserveCategory(
 // seen count, refreshes last_seen, and appends the surface form to display_names.
 func (r InventoryCategoryRegistry) touchCategory(ctx context.Context, key, surfaceForm string) error {
 	const stmt = `
-UPDATE kb.inventory_categories SET
+UPDATE kb.artifact_categories SET
     seen_count    = seen_count + 1,
     last_seen_at  = NOW(),
     display_names = CASE
         WHEN display_names @> to_jsonb($2::text) THEN display_names
         ELSE display_names || to_jsonb($2::text)
     END
-WHERE category_key = $1`
+WHERE category_key = $1 AND category_type = 'inventory'`
 	_, err := r.DB.ExecContext(ctx, stmt, key, strings.TrimSpace(surfaceForm))
 	if err != nil {
 		return fmt.Errorf("(MID_26053163) touch inventory category %q: %w", key, err)
@@ -217,15 +222,16 @@ func (r InventoryCategoryRegistry) mintCategory(ctx context.Context, key, surfac
 	displayNames, _ := json.Marshal([]string{strings.TrimSpace(surfaceForm)})
 	embJSON, _ := json.Marshal(embedding)
 	const stmt = `
-INSERT INTO kb.inventory_categories (
-    category_key, status, display_names, embedding, seen_count
-) VALUES ($1, 'pending_review', $2::jsonb, $3::jsonb, 1)
+INSERT INTO kb.artifact_categories (
+    category_key, category_type, status, display_names, embedding, seen_count, search_document
+) VALUES ($1, 'inventory', 'pending_review', $2::jsonb, $3::jsonb, 1, $1)
 ON CONFLICT (category_key) DO UPDATE SET
-    seen_count   = kb.inventory_categories.seen_count + 1,
+    category_type = 'inventory',
+    seen_count   = kb.artifact_categories.seen_count + 1,
     last_seen_at = NOW(),
     embedding    = CASE
-        WHEN jsonb_array_length(kb.inventory_categories.embedding) = 0 THEN EXCLUDED.embedding
-        ELSE kb.inventory_categories.embedding
+        WHEN jsonb_array_length(kb.artifact_categories.embedding) = 0 THEN EXCLUDED.embedding
+        ELSE kb.artifact_categories.embedding
     END`
 	if _, err := r.DB.ExecContext(ctx, stmt, key, string(displayNames), string(embJSON)); err != nil {
 		return fmt.Errorf("(MID_26053164) mint inventory category %q: %w", key, err)
@@ -240,7 +246,7 @@ func (r InventoryCategoryRegistry) CategoryStatuses(ctx context.Context) (map[st
 	if err := r.ensureTables(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := r.DB.QueryContext(ctx, `SELECT category_key, status FROM kb.inventory_categories`)
+	rows, err := r.DB.QueryContext(ctx, `SELECT category_key, status FROM kb.artifact_categories WHERE category_type = 'inventory'`)
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26053165) load category statuses: %w", err)
 	}
@@ -268,8 +274,8 @@ func (r InventoryCategoryRegistry) ListPendingForReview(ctx context.Context, lim
 	const q = `
 SELECT category_key, status, COALESCE(canonical_of, ''), display_names,
        required_attrs, specs, plausible_ranges, embedding, seen_count
-FROM kb.inventory_categories
-WHERE status = 'pending_review'
+FROM kb.artifact_categories
+WHERE category_type = 'inventory' AND status = 'pending_review'
 ORDER BY seen_count DESC, first_seen_at ASC
 LIMIT $1`
 	rows, err := r.DB.QueryContext(ctx, q, limit)
@@ -396,15 +402,16 @@ func (r InventoryCategoryRegistry) ListCategoriesByStatus(ctx context.Context, s
 		rows, err = r.DB.QueryContext(ctx, `
 SELECT category_key, status, COALESCE(canonical_of, ''), display_names,
        required_attrs, specs, plausible_ranges, embedding, seen_count
-FROM kb.inventory_categories
+FROM kb.artifact_categories
+WHERE category_type = 'inventory'
 ORDER BY seen_count DESC, first_seen_at ASC
 LIMIT $1`, limit)
 	} else {
 		rows, err = r.DB.QueryContext(ctx, `
 SELECT category_key, status, COALESCE(canonical_of, ''), display_names,
        required_attrs, specs, plausible_ranges, embedding, seen_count
-FROM kb.inventory_categories
-WHERE status = $1
+FROM kb.artifact_categories
+WHERE category_type = 'inventory' AND status = $1
 ORDER BY seen_count DESC, first_seen_at ASC
 LIMIT $2`, status, limit)
 	}
@@ -470,7 +477,7 @@ func (r InventoryCategoryRegistry) PatchCategory(ctx context.Context, key string
 	if len(setClauses) > 0 {
 		setClauses = append(setClauses, "modify_time = NOW()")
 		query := fmt.Sprintf(
-			`UPDATE kb.inventory_categories SET %s WHERE category_key = $%d`,
+			`UPDATE kb.artifact_categories SET %s WHERE category_type = 'inventory' AND category_key = $%d`,
 			strings.Join(setClauses, ", "), argIdx,
 		)
 		args = append(args, key)
@@ -487,7 +494,7 @@ func (r InventoryCategoryRegistry) PatchCategory(ctx context.Context, key string
 	rows, err := r.DB.QueryContext(ctx, `
 SELECT category_key, status, COALESCE(canonical_of, ''), display_names,
        required_attrs, specs, plausible_ranges, embedding, seen_count
-FROM kb.inventory_categories WHERE category_key = $1`, key)
+FROM kb.artifact_categories WHERE category_type = 'inventory' AND category_key = $1`, key)
 	if err != nil {
 		return InventoryCategoryRecord{}, fmt.Errorf("(MID_26053169) re-fetch inventory category %q: %w", key, err)
 	}
