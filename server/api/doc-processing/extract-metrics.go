@@ -384,6 +384,10 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.Logger.Warn("write has-metrics connections failed", "record_id", evt.RecordID, "error", connErr)
 	}
 
+	// Post-save metrics indexing: connected_artifacts JSON, category_instance rows,
+	// category-path metrics.txt entries, and hybrid_search semantic links.
+	IndexMetricsForRecord(ctx, evt.RecordID, inputChunks, p.Logger)
+
 	p.Logger.Info("metrics extracted",
 		"record_id", evt.RecordID,
 		"inserted_rows", inserted,
@@ -1912,13 +1916,20 @@ CREATE TABLE IF NOT EXISTS kb.metrics (
     is_explicit_metric BOOLEAN,
     table_name_or_section TEXT,
     reasoning_tags JSONB,
+    metric_categories TEXT NOT NULL DEFAULT '',
+    metric_categories_en TEXT,
     category_paths JSONB,
     category_paths_en JSONB,
+    connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     search_document TEXT,
     search_vector TSVECTOR,
     ext_info JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories TEXT NOT NULL DEFAULT '';
+ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories_en TEXT;
+ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb;
 `
 	_, err := s.DB.ExecContext(ctx, ddl)
 	return err
@@ -1992,13 +2003,15 @@ INSERT INTO kb.metrics (
 	is_explicit_metric,
 	table_name_or_section,
 	reasoning_tags,
+	metric_categories,
 	category_paths,
 	category_paths_en,
+	connected_artifacts,
 	search_document,
 	ext_info
 )
 VALUES (
-	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb,$33::jsonb,$34,$35::jsonb
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33::jsonb,$34::jsonb,$35::jsonb,$36,$37::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -2041,6 +2054,11 @@ VALUES (
 
 		searchDocument := buildMetricSearchDocument(metric, !isEnglish)
 
+		// metric_categories is a TEXT column; store the category keys as a JSON array
+		// string so the post-save indexing step can parse them back for category_instance.
+		metricCategoriesJSON, _ := json.Marshal(toStringSlice(metric["metric_categories"]))
+		metricCategoriesText := string(metricCategoriesJSON)
+
 		_, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
 			req.InputRecordID,
@@ -2073,8 +2091,10 @@ VALUES (
 			toBool(metric["is_explicit_metric"]),
 			strings.TrimSpace(asString(metric["table_name_or_section"])),
 			string(reasoningTagsJSON),
+			metricCategoriesText,
 			nil,
 			nil,
+			"{}",
 			searchDocument,
 			string(extInfo),
 		)

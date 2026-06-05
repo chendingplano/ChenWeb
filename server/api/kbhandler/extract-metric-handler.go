@@ -308,6 +308,14 @@ func SaveExtractedMetrics(c echo.Context) error {
 			Error:  "metrics must not be empty (CWB_KB_M_433)",
 		})
 	}
+	for i, m := range req.Metrics {
+		if len(anyAsStringSlice(m["metric_categories"])) == 0 {
+			return c.JSON(http.StatusBadRequest, saveExtractedMetricsResponse{
+				Status: false,
+				Error:  fmt.Sprintf("metric[%d] has empty metric_categories (CWB_KB_M_435)", i),
+			})
+		}
+	}
 
 	inserted, err := saveExtractedMetrics(ApiTypes.ProjectDBHandle, req.RecordID, req.Metrics)
 	if err != nil {
@@ -317,6 +325,16 @@ func SaveExtractedMetrics(c echo.Context) error {
 			Error:  fmt.Sprintf("failed to save metrics (CWB_KB_M_434): %v", err),
 		})
 	}
+
+	// Run the same post-save metrics indexing workflow as the document processor:
+	// refresh kb.search_artifacts first, then connected_artifacts / category_instance /
+	// category-path metrics.txt / hybrid_search links. Chunks are not available in the
+	// REST context, so connected_artifacts.chunks is left empty (logged as an indexing
+	// note) while the remaining outputs index normally.
+	if reindexErr := docprocessing.ReindexMetricSearchForRecord(c.Request().Context(), req.RecordID, logger); reindexErr != nil {
+		logger.Warn("reindex metric search registry failed", "record_id", req.RecordID, "error", reindexErr)
+	}
+	docprocessing.IndexMetricsForRecord(c.Request().Context(), req.RecordID, nil, logger)
 
 	return c.JSON(http.StatusOK, saveExtractedMetricsResponse{
 		Status:   true,
@@ -457,6 +475,7 @@ func normalizeExtractedMetrics(items []any) []map[string]any {
 			"is_explicit_metric":    boolVal(raw, "is_explicit_metric"),
 			"table_name_or_section": stringVal(raw, "table_name_or_section"),
 			"reasoning_tags":        anySlice(raw, "reasoning_tags"),
+			"metric_categories":     anySlice(raw, "metric_categories"),
 		}
 		out = append(out, m)
 	}
@@ -500,13 +519,19 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		is_explicit_metric BOOLEAN,
 		table_name_or_section TEXT,
 		reasoning_tags JSONB,
+		metric_categories TEXT NOT NULL DEFAULT '',
+		metric_categories_en TEXT,
 		category_paths JSONB,
 		category_paths_en JSONB,
+		connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
 		search_document TEXT,
 		search_vector TSVECTOR,
 		ext_info JSONB,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-	);`
+	);
+	ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories TEXT NOT NULL DEFAULT '';
+	ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories_en TEXT;
+	ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb;`
 	if _, err := db.Exec(ddl); err != nil {
 		return 0, err
 	}
@@ -525,11 +550,11 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		metric_value, value_data_type, value_range_type, value_class, value_class_en,
 		formula_or_definition, threshold_or_target, measurement_frequency,
 		confidence, is_explicit_metric, table_name_or_section, reasoning_tags,
-		category_paths, category_paths_en, ext_info
+		metric_categories, category_paths, category_paths_en, connected_artifacts, ext_info
 	) VALUES (
 		$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,
 		$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,
-		$32::jsonb,$33::jsonb,$34::jsonb
+		$32,$33::jsonb,$34::jsonb,$35::jsonb,$36::jsonb
 	)`
 
 	extInfo, _ := json.Marshal(map[string]any{
@@ -556,6 +581,10 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 			bs, _ := json.Marshal(v)
 			categoryPathsEnVal = string(bs)
 		}
+
+		// metric_categories is a TEXT column holding a JSON array of category keys, so
+		// the post-save indexing step can resolve them to category_instance rows.
+		metricCategoriesJSON, _ := json.Marshal(anyAsStringSlice(m["metric_categories"]))
 
 		_, err := db.Exec(stmt,
 			"rest-api",
@@ -589,8 +618,10 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 			boolVal(m, "is_explicit_metric"),
 			strings.TrimSpace(anyAsString(m["table_name_or_section"])),
 			string(reasoningJSON),
+			string(metricCategoriesJSON),
 			string(categoryPathsJSON),
 			categoryPathsEnVal,
+			"{}",
 			string(extInfo),
 		)
 		if err != nil {
@@ -643,6 +674,22 @@ func anyAsString(v any) string {
 		}
 		return fmt.Sprintf("%v", x)
 	}
+}
+
+// anyAsStringSlice converts a []any (or nil) of metric category keys into a trimmed,
+// non-empty []string suitable for JSON-encoding into the metric_categories column.
+func anyAsStringSlice(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return []string{}
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s := strings.TrimSpace(anyAsString(item)); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func anySlice(m map[string]any, key string, fallbacks ...string) []any {

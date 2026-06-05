@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/lib/pq"
@@ -124,6 +125,97 @@ func (s *ConnectionSQLStore) ReplaceConnections(ctx context.Context, inputRecord
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("(CWB_CONN_010) commit: %w", err)
+	}
+	return nil
+}
+
+// ReplaceConnectionsBySource idempotently replaces a document's outgoing edges that
+// originate from one source_type, scoped by the source side only. Unlike
+// ReplaceConnections (which is intra-document: source_record_id = target_record_id), the
+// delete here does NOT constrain target_record_id, so it correctly cleans cross-document
+// edges (e.g. a metric semantically linked to artifacts in other documents). Used for the
+// hybrid_search / semantically_related metric connections.
+func (s *ConnectionSQLStore) ReplaceConnectionsBySource(ctx context.Context, sourceRecordID int64, sourceType, relationMethod string, relationNames []string, conns []Connection) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("(CWB_CONN_011) nil connection store db handle")
+	}
+	if strings.TrimSpace(sourceType) == "" {
+		return fmt.Errorf("(CWB_CONN_012) sourceType must be non-empty for source-scoped delete")
+	}
+	if len(relationNames) == 0 {
+		return fmt.Errorf("(CWB_CONN_013) relationNames must be non-empty for source-scoped delete")
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("(CWB_CONN_014) begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM kb.artifact_connections
+		 WHERE source_type = $1 AND source_record_id = $2
+		   AND relation_method = $3 AND relation_name = ANY($4)`,
+		sourceType, sourceRecordID, relationMethod, pq.Array(relationNames),
+	); err != nil {
+		return fmt.Errorf("(CWB_CONN_015) delete existing source connections: %w", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, connectionInsertSQL)
+	if err != nil {
+		return fmt.Errorf("(CWB_CONN_016) prepare insert: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, c := range conns {
+		overlap, err := encodeJSONB(c.Overlap)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_017) encode overlap: %w", err)
+		}
+		provenance, err := encodeJSONB(c.Provenance)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_018) encode provenance: %w", err)
+		}
+		extraInfo, err := encodeJSONB(c.ExtraInfo)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_019) encode extra_info: %w", err)
+		}
+		var confidence any
+		if c.Confidence != 0 {
+			confidence = c.Confidence
+		}
+		var signature any
+		if c.SemanticSignature != "" {
+			signature = c.SemanticSignature
+		}
+		srcRecordID := c.SourceRecordID
+		if srcRecordID <= 0 {
+			srcRecordID = sourceRecordID
+		}
+		targetRecordID := c.TargetRecordID
+		if targetRecordID <= 0 {
+			targetRecordID = sourceRecordID
+		}
+		sourceDesc := c.SourceDesc
+		if sourceDesc == "" {
+			sourceDesc = connectionEndpointDesc(c.SourceType, c.SourceID)
+		}
+		targetDesc := c.TargetDesc
+		if targetDesc == "" {
+			targetDesc = connectionEndpointDesc(c.TargetType, c.TargetID)
+		}
+		if _, err := stmt.ExecContext(ctx,
+			srcRecordID, targetRecordID, c.SourceType, c.SourceID, c.TargetType, c.TargetID,
+			c.RelationName, relationMethod, confidence, overlap, provenance,
+			signature, sourceDesc, targetDesc, extraInfo,
+		); err != nil {
+			return fmt.Errorf("(CWB_CONN_020) insert connection %s->%s (%s): %w",
+				c.SourceID, c.TargetID, c.RelationName, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("(CWB_CONN_025) commit: %w", err)
 	}
 	return nil
 }

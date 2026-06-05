@@ -358,8 +358,10 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 			true,
 			"Table 2",
 			`["named_metric"]`,
+			`["energy_eff"]`,
 			sqlmock.AnyArg(),
 			nil,
+			"{}",
 			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(101, 1))
@@ -383,7 +385,8 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 				"confidence": 0.91,
 				"is_explicit_metric": true,
 				"table_name_or_section": "Table 2",
-				"reasoning_tags": ["named_metric"]
+				"reasoning_tags": ["named_metric"],
+				"metric_categories": ["energy_eff"]
 			}
 		]
 	}`)
