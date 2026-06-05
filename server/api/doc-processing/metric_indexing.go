@@ -106,7 +106,8 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 	}
 
 	connectedCount := buildConnectedArtifacts(ctx, db, recordID, inputChunks, metrics, logger)
-	categoryInstances := upsertMetricCategoryInstances(ctx, db, recordID, metrics, logger)
+	resolver := newMetricCategoryResolver(db, logger)
+	categoryInstances := upsertMetricCategoryInstances(ctx, db, recordID, metrics, resolver, logger)
 	categoryPathMetrics := indexMetricsByCategoryPaths(ctx, db, recordID, metrics, logger)
 	semanticLinks := connectMetricArtifacts(ctx, db, recordID, metrics, logger)
 
@@ -206,13 +207,13 @@ func buildConnectedArtifacts(ctx context.Context, db *sql.DB, recordID int64, in
 			continue
 		}
 		refsByType[atype] = refs
-		if logger != nil && atype == searchArtifactSemanticProjection {
-			logger.Info("metrics indexing: loaded semantic projection refs",
-				"record_id", recordID,
-				"semantic_projection_ref_count", len(refs),
-				"semantic_projection_ref_sample", summarizeArtifactRefs(refs, 8),
-			)
-		}
+		// if logger != nil && atype == searchArtifactSemanticProjection {
+		// 	logger.Info("metrics indexing: loaded semantic projection refs",
+		// 		"record_id", recordID,
+		// 		"semantic_projection_ref_count", len(refs),
+		// 		"semantic_projection_ref_sample", summarizeArtifactRefs(refs, 8),
+		// 	)
+		// }
 	}
 
 	updated := 0
@@ -353,9 +354,24 @@ func sortedLineSetKeys(set map[int]struct{}) []int {
 // kb.artifact_categories.category_id, creating missing artifact categories first, and
 // upserts a kb.category_instance row. Returns the number of category_instance rows
 // upserted.
-func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, metrics []indexedMetric, logger ApiTypes.JimoLogger) int {
+// metricCategoryResolver resolves a batch of raw category keys to
+// kb.artifact_categories category_ids (creating missing categories via the LLM,
+// concurrently and coalesced). It returns normalizedKey -> category_id plus per-key
+// errors. *categoryResolver satisfies it; tests inject a fake.
+type metricCategoryResolver interface {
+	ResolveBatch(ctx context.Context, categoryType string, reqs []categoryRequest, maxConcurrency int) (map[string]int64, map[string]error)
+}
+
+// upsertMetricCategoryInstances resolves every metric's category keys in one Phase C
+// batch (concurrent create + process-wide single-flight) and upserts a
+// kb.category_instance row per (metric, resolved category). Returns the number of
+// category_instance rows upserted.
+func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, metrics []indexedMetric, resolver metricCategoryResolver, logger ApiTypes.JimoLogger) int {
 	extraInfo, _ := json.Marshal(map[string]any{"artifact_type": "metric", "source": "extract_metrics"})
-	count := 0
+
+	// Gather every (key, evidence) across all metrics into a single batch so the
+	// resolver can dedup, cluster intra-batch synonyms, and create concurrently.
+	var reqs []categoryRequest
 	for _, m := range metrics {
 		if len(m.Categories) == 0 {
 			if logger != nil {
@@ -363,13 +379,28 @@ func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int
 			}
 			continue
 		}
+		evidence := map[string]any{"artifact_kind": "metric", "search_document": m.SearchDocument}
 		for _, key := range m.Categories {
-			categoryID, err := upsertMetricArtifactCategory(ctx, db, key)
-			if err != nil {
-				if logger != nil {
-					logger.Warn("metrics indexing: upsert artifact category failed", "record_id", recordID, "metric_id", m.MetricID, "category_key", key, "error", err.Error())
-				}
-				continue
+			reqs = append(reqs, categoryRequest{RawKey: key, Evidence: evidence})
+		}
+	}
+	if len(reqs) == 0 {
+		return 0
+	}
+
+	ids, errs := resolver.ResolveBatch(ctx, "metric", reqs, categoryResolveMaxConcurrency())
+	if logger != nil {
+		for nk, err := range errs {
+			logger.Warn("metrics indexing: resolve artifact category failed", "record_id", recordID, "category_key", nk, "error", err.Error())
+		}
+	}
+
+	count := 0
+	for _, m := range metrics {
+		for _, key := range m.Categories {
+			categoryID, ok := ids[normalizeCategoryKey(key)]
+			if !ok {
+				continue // unresolved; already surfaced via errs above
 			}
 			if _, err := db.ExecContext(ctx,
 				`INSERT INTO kb.category_instance (category_id, artifact_id, input_record_id, extra_info)
@@ -386,38 +417,6 @@ func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int
 		}
 	}
 	return count
-}
-
-func upsertMetricArtifactCategory(ctx context.Context, db *sql.DB, key string) (int64, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return 0, fmt.Errorf("empty category key")
-	}
-	var categoryID int64
-	err := db.QueryRowContext(ctx,
-		`INSERT INTO kb.artifact_categories (
-		     category_key, category_type, display_names, search_document, seen_count
-		 )
-		 VALUES ($1, 'metric', to_jsonb(ARRAY[$1]::text[]), $1, 1)
-		 ON CONFLICT (category_key) DO UPDATE SET
-		     seen_count = kb.artifact_categories.seen_count + 1,
-		     last_seen_at = NOW(),
-		     display_names = CASE
-		         WHEN kb.artifact_categories.display_names @> to_jsonb($1::text) THEN kb.artifact_categories.display_names
-		         ELSE kb.artifact_categories.display_names || to_jsonb($1::text)
-		     END,
-		     search_document = CASE
-		         WHEN COALESCE(kb.artifact_categories.search_document, '') = '' THEN EXCLUDED.search_document
-		         ELSE kb.artifact_categories.search_document
-		     END
-		 RETURNING category_id`, key).Scan(&categoryID)
-	if err != nil {
-		return 0, err
-	}
-	if categoryID == 0 {
-		return 0, fmt.Errorf("artifact category %q has no category_id", key)
-	}
-	return categoryID, nil
 }
 
 // semProjForIndex carries the semantic projection fields needed to derive a metric's

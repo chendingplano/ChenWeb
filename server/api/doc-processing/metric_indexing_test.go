@@ -123,7 +123,28 @@ func TestConnectedArtifactsMarshalsEmptyArrays(t *testing.T) {
 	}
 }
 
-func TestUpsertMetricCategoryInstancesCreatesMissingArtifactCategory(t *testing.T) {
+type fakeMetricCategoryResolver struct {
+	id    int64
+	err   error
+	calls []string
+}
+
+func (f *fakeMetricCategoryResolver) ResolveBatch(_ context.Context, _ string, reqs []categoryRequest, _ int) (map[string]int64, map[string]error) {
+	ids := make(map[string]int64)
+	errs := make(map[string]error)
+	for _, r := range reqs {
+		f.calls = append(f.calls, r.RawKey)
+		nk := normalizeCategoryKey(r.RawKey)
+		if f.err != nil {
+			errs[nk] = f.err
+			continue
+		}
+		ids[nk] = f.id
+	}
+	return ids, errs
+}
+
+func TestUpsertMetricCategoryInstancesResolvesAndUpserts(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -131,19 +152,23 @@ func TestUpsertMetricCategoryInstancesCreatesMissingArtifactCategory(t *testing.
 	defer db.Close()
 
 	metrics := []indexedMetric{{
-		MetricID:   "100_1",
-		Categories: []string{"energy_efficiency"},
+		MetricID:       "100_1",
+		Categories:     []string{"energy_efficiency"},
+		SearchDocument: "energy efficiency rating 5 stars",
 	}}
 
-	mock.ExpectQuery("INSERT INTO kb\\.artifact_categories").
-		WithArgs("energy_efficiency").
-		WillReturnRows(sqlmock.NewRows([]string{"category_id"}).AddRow(int64(42)))
+	// Category resolution is delegated to the resolver (faked here); this function
+	// only upserts the category_instance row with the returned category_id.
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.category_instance (category_id, artifact_id, input_record_id, extra_info)`)).
 		WithArgs(int64(42), "100_1", int64(100), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if got := upsertMetricCategoryInstances(context.Background(), db, 100, metrics, nil); got != 1 {
+	resolver := &fakeMetricCategoryResolver{id: 42}
+	if got := upsertMetricCategoryInstances(context.Background(), db, 100, metrics, resolver, nil); got != 1 {
 		t.Fatalf("upsertMetricCategoryInstances = %d, want 1", got)
+	}
+	if len(resolver.calls) != 1 || resolver.calls[0] != "energy_efficiency" {
+		t.Fatalf("resolver calls = %#v, want [energy_efficiency]", resolver.calls)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
