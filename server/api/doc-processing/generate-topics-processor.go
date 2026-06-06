@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -14,11 +15,12 @@ import (
 // GenerateTopicsProcessor re-runs the semantic chunking service (which produces
 // the generate_topics status entry) as a standalone pipeline step.
 type GenerateTopicsProcessor struct {
-	InputStore DocMetadataStore
-	Service    chunkingHandler
-	Logger     ApiTypes.JimoLogger
-	ProcLogger DocProcLogger
-	Now        func() time.Time
+	InputStore  DocMetadataStore
+	Service     chunkingHandler
+	Logger      ApiTypes.JimoLogger
+	ProcLogger  DocProcLogger
+	Now         func() time.Time
+	ArtifactDir string
 }
 
 func NewGenerateTopicsProcessor(
@@ -30,11 +32,12 @@ func NewGenerateTopicsProcessor(
 		logger = loggerutil.CreateDefaultLogger("MID_26051302")
 	}
 	return &GenerateTopicsProcessor{
-		InputStore: inputStore,
-		Service:    service,
-		Logger:     logger,
-		ProcLogger: DocProcLogger{DB: ApiTypes.ProjectDBHandle},
-		Now:        time.Now,
+		InputStore:  inputStore,
+		Service:     service,
+		Logger:      logger,
+		ProcLogger:  DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		Now:         time.Now,
+		ArtifactDir: strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 	}
 }
 

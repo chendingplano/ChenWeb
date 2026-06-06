@@ -1037,6 +1037,7 @@ CREATE TABLE IF NOT EXISTS kb.entities (
     prompt_name TEXT,
     search_document TEXT,
     search_vector TSVECTOR,
+    connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1066,6 +1067,7 @@ CREATE TABLE IF NOT EXISTS kb.relations (
     prompt_name TEXT,
     search_document TEXT,
     search_vector TSVECTOR,
+    connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

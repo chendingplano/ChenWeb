@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
@@ -244,6 +246,7 @@ func buildSummaryRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kb
 		return nil, err
 	}
 	sort.Strings(paths)
+	weights := appconfig.GetSummarySearchWeightsConfig()
 	rows := make([]kbsearch.RegistryRow, 0, len(paths))
 	for _, path := range paths {
 		item, err := parseSummaryArtifactFile(path)
@@ -258,13 +261,20 @@ func buildSummaryRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kb
 			"summary_text":   item.SummaryText,
 			"lines":          item.Lines,
 		})
+		searchDoc := buildSummarySearchDocument(weights, summarySearchFields{
+			SummaryText:   item.SummaryText,
+			SummaryTextEn: item.SummaryTextEn,
+			Keywords:      item.Keywords,
+			KeywordsEn:    item.KeywordsEn,
+			CategoryPaths: item.CategoryPaths,
+		})
 		rows = append(rows, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactSummary,
 			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactSummary, strconv.Itoa(item.SeqNo)),
 			InputRecordID:   recordID,
 			PrimaryLabel:    firstNonEmpty(item.SummaryText, item.SummaryID),
 			SecondaryLabel:  fmt.Sprintf("Level %d", item.Level),
-			SearchDocument:  strings.TrimSpace(strings.Join([]string{item.SummaryText, strings.Join(item.Keywords, " "), strings.Join(item.CategoryPaths, " ")}, " ")),
+			SearchDocument:  searchDoc,
 			SnippetBasis:    item.SummaryText,
 			SourceTitle:     sourceTitle,
 			SourceFilename:  sourceTitle,
@@ -298,6 +308,7 @@ func buildTopicRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kbse
 		return nil, err
 	}
 	sort.Strings(paths)
+	weights := appconfig.GetTopicSearchWeightsConfig()
 	rows := make([]kbsearch.RegistryRow, 0, len(paths)*4)
 	for _, path := range paths {
 		topics, err := parseTopicArtifactFile(path)
@@ -315,13 +326,22 @@ func buildTopicRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kbse
 				"category_paths_en": item.CategoryPathsEn,
 				"source_line_specs": item.Lines,
 			})
+			searchDoc := buildTopicSearchDocument(weights, topicSearchFields{
+				TopicType:       item.TopicType,
+				TopicDesc:       item.TopicDesc,
+				TopicDescEn:     item.TopicDescEn,
+				Keywords:        item.Keywords,
+				KeywordsEn:      item.KeywordsEn,
+				CategoryPaths:   item.CategoryPaths,
+				CategoryPathsEn: item.CategoryPathsEn,
+			})
 			rows = append(rows, kbsearch.RegistryRow{
 				ArtifactType:    searchArtifactTopic,
 				ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactTopic, item.TopicID),
 				InputRecordID:   recordID,
 				PrimaryLabel:    firstNonEmpty(item.TopicDesc, item.TopicID),
 				SecondaryLabel:  item.TopicType,
-				SearchDocument:  strings.TrimSpace(strings.Join([]string{item.TopicType, item.TopicDesc, item.TopicDescEn, strings.Join(item.Keywords, " "), strings.Join(item.KeywordsEn, " "), strings.Join(item.CategoryPaths, " "), strings.Join(item.CategoryPathsEn, " ")}, " ")),
+				SearchDocument:  searchDoc,
 				SnippetBasis:    firstNonEmpty(item.TopicDesc, item.TopicDescEn),
 				SourceTitle:     sourceTitle,
 				SourceFilename:  sourceTitle,
@@ -346,6 +366,7 @@ ORDER BY id`
 	}
 	defer rows.Close()
 
+	weights := appconfig.GetSceneBlockSearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
@@ -361,15 +382,22 @@ ORDER BY id`
 		if err := rows.Scan(&id, &objectID, &title, &sceneType, &summary, &keywords, &lineSpans, &searchDoc); err != nil {
 			return nil, err
 		}
+		kw := rawJSONArrayStrings(keywords)
 		payload, _ := json.Marshal(map[string]any{
 			"scene_type": sceneType,
 			"summary":    summary,
-			"keywords":   rawJSONArrayStrings(keywords),
+			"keywords":   kw,
 		})
 		seq := lastDelimitedToken(objectID)
 		if seq == "" {
 			seq = strconv.FormatInt(id, 10)
 		}
+		weightedSearchDoc := buildSceneBlockSearchDocument(weights, sceneBlockSearchFields{
+			Title:     title,
+			SceneType: sceneType,
+			Summary:   summary,
+			Keywords:  kw,
+		})
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactSceneBlock,
 			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactSceneBlock, seq),
@@ -377,7 +405,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(title, objectID),
 			SecondaryLabel:  sceneType,
-			SearchDocument:  firstNonEmpty(searchDoc, strings.Join([]string{title, summary}, " ")),
+			SearchDocument:  firstNonEmpty(weightedSearchDoc, searchDoc, strings.Join([]string{title, summary}, " ")),
 			SnippetBasis:    firstNonEmpty(summary, title),
 			SourceLineSpans: json.RawMessage(lineSpans),
 			SemanticPayload: payload,
@@ -452,6 +480,7 @@ ORDER BY id`
 	}
 	defer rows.Close()
 
+	weights := appconfig.GetProvisionSearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
@@ -474,6 +503,13 @@ ORDER BY id`
 			"prov_desc":      provDesc,
 			"keywords":       rawJSONArrayStrings(keywords),
 		})
+		searchDocWeighted := buildProvisionRegistrySearchDocument(weights, provisionSearchFields{
+			ProvisionName: provName,
+			ProvisionType: provisionType,
+			ProvisionDesc: provDesc,
+			Keywords:      rawJSONArrayStrings(keywords),
+			CategoryPaths: flattenSearchCategoryPaths(categoryPaths),
+		})
 		artifactID := provID
 		if strings.TrimSpace(artifactID) == "" {
 			artifactID = strconv.FormatInt(id, 10)
@@ -486,7 +522,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(provName, provID),
 			SecondaryLabel:  provisionType,
-			SearchDocument:  firstNonEmpty(searchDoc, strings.Join([]string{provName, provDesc, provisionType}, " ")),
+			SearchDocument:  firstNonEmpty(searchDocWeighted, searchDoc, strings.Join([]string{provName, provDesc, provisionType}, " ")),
 			SnippetBasis:    firstNonEmpty(provDesc, provName),
 			SourceTitle:     inputFilename,
 			SourceFilename:  inputFilename,
@@ -500,7 +536,7 @@ ORDER BY id`
 
 func buildSemanticProjectionRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
 	const q = `
-SELECT id, semantic_proj_id, language, descriptive_name, descriptive_name_en, keywords, keywords_en, category_paths, line_spans
+SELECT id, semantic_proj_id, language, descriptive_name, descriptive_name_en, keywords, keywords_en, semantic_projection, semantic_projection_en, category_paths, category_paths_en, line_spans
 FROM kb.semantic_projections
 WHERE input_record_id = $1
 ORDER BY id`
@@ -510,25 +546,38 @@ ORDER BY id`
 	}
 	defer rows.Close()
 
+	weights := appconfig.GetSemanticProjectionSearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
-			id                int64
-			semanticProjID    string
-			language          string
-			descriptiveName   string
-			descriptiveNameEn sql.NullString
-			keywords          []byte
-			keywordsEn        []byte
-			categoryPaths     []byte
-			lineSpans         []byte
+			id                   int64
+			semanticProjID       string
+			language             string
+			descriptiveName      string
+			descriptiveNameEn    sql.NullString
+			keywords             []byte
+			keywordsEn           []byte
+			semanticProjection   sql.NullString
+			semanticProjectionEn sql.NullString
+			categoryPaths        []byte
+			categoryPathsEn      []byte
+			lineSpans            []byte
 		)
-		if err := rows.Scan(&id, &semanticProjID, &language, &descriptiveName, &descriptiveNameEn, &keywords, &keywordsEn, &categoryPaths, &lineSpans); err != nil {
+		if err := rows.Scan(&id, &semanticProjID, &language, &descriptiveName, &descriptiveNameEn, &keywords, &keywordsEn, &semanticProjection, &semanticProjectionEn, &categoryPaths, &categoryPathsEn, &lineSpans); err != nil {
 			return nil, err
 		}
 		kw := rawJSONArrayStrings(keywords)
 		kwEn := rawJSONArrayStrings(keywordsEn)
-		searchParts := []string{descriptiveName, descriptiveNameEn.String, strings.Join(kw, " "), strings.Join(kwEn, " ")}
+		searchDoc := buildSemanticProjectionSearchDocument(weights, semanticProjectionSearchFields{
+			DescriptiveName:      descriptiveName,
+			DescriptiveNameEn:    descriptiveNameEn.String,
+			Keywords:             kw,
+			KeywordsEn:           kwEn,
+			SemanticProjection:   semanticProjection.String,
+			SemanticProjectionEn: semanticProjectionEn.String,
+			CategoryPaths:        flattenSearchCategoryPaths(categoryPaths),
+			CategoryPathsEn:      flattenSearchCategoryPaths(categoryPathsEn),
+		})
 		payload, _ := json.Marshal(map[string]any{
 			"language":         language,
 			"descriptive_name": descriptiveName,
@@ -549,7 +598,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(descriptiveName, semanticProjID),
 			SecondaryLabel:  language,
-			SearchDocument:  strings.TrimSpace(strings.Join(searchParts, " ")),
+			SearchDocument:  searchDoc,
 			SnippetBasis:    firstNonEmpty(descriptiveName, descriptiveNameEn.String),
 			CategoryPaths:   json.RawMessage(categoryPaths),
 			SourceLineSpans: json.RawMessage(lineSpans),
@@ -557,6 +606,225 @@ ORDER BY id`
 		})
 	}
 	return out, rows.Err()
+}
+
+type semanticProjectionSearchFields struct {
+	DescriptiveName      string
+	DescriptiveNameEn    string
+	Keywords             []string
+	KeywordsEn           []string
+	SemanticProjection   string
+	SemanticProjectionEn string
+	CategoryPaths        []string
+	CategoryPathsEn      []string
+}
+
+type sceneBlockSearchFields struct {
+	Title     string
+	SceneType string
+	Summary   string
+	Keywords  []string
+}
+
+type summarySearchFields struct {
+	SummaryText   string
+	SummaryTextEn string
+	Keywords      []string
+	KeywordsEn    []string
+	CategoryPaths []string
+}
+
+type topicSearchFields struct {
+	TopicType       string
+	TopicDesc       string
+	TopicDescEn     string
+	Keywords        []string
+	KeywordsEn      []string
+	CategoryPaths   []string
+	CategoryPathsEn []string
+}
+
+type provisionSearchFields struct {
+	ProvisionName string
+	ProvisionType string
+	ProvisionDesc string
+	Keywords      []string
+	CategoryPaths []string
+}
+
+type entitySearchFields struct {
+	Entity       string
+	EntityEn     string
+	EntityType   string
+	EntityTypeEn string
+	Aliases      []string
+	AliasesEn    []string
+	DescText     string
+	DescTextEn   string
+	Keywords     []string
+	KeywordsEn   []string
+}
+
+type relationSearchFields struct {
+	Subject     string
+	SubjectEn   string
+	Predicate   string
+	PredicateEn string
+	Object      string
+	ObjectEn    string
+	DescText    string
+	DescTextEn  string
+	Keywords    []string
+	KeywordsEn  []string
+}
+
+func buildSemanticProjectionSearchDocument(weights appconfig.SemanticProjectionSearchWeightsConfig, fields semanticProjectionSearchFields) string {
+	parts := make([]string, 0, 16)
+	parts = appendWeightedText(parts, fields.DescriptiveName, weightToSearchRepeats(weights.DescriptiveName))
+	parts = appendWeightedText(parts, fields.DescriptiveNameEn, weightToSearchRepeats(weights.DescriptiveName))
+	parts = appendWeightedText(parts, strings.Join(fields.Keywords, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, strings.Join(fields.KeywordsEn, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, fields.SemanticProjection, weightToSearchRepeats(weights.SemanticProjection))
+	parts = appendWeightedText(parts, fields.SemanticProjectionEn, weightToSearchRepeats(weights.SemanticProjection))
+	parts = appendWeightedText(parts, strings.Join(fields.CategoryPaths, " "), weightToSearchRepeats(weights.CategoryPaths))
+	parts = appendWeightedText(parts, strings.Join(fields.CategoryPathsEn, " "), weightToSearchRepeats(weights.CategoryPaths))
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func buildSceneBlockSearchDocument(weights appconfig.SceneBlockSearchWeightsConfig, fields sceneBlockSearchFields) string {
+	parts := make([]string, 0, 8)
+	parts = appendWeightedText(parts, fields.Title, weightToSearchRepeats(weights.Title))
+	parts = appendWeightedText(parts, fields.SceneType, weightToSearchRepeats(weights.SceneType))
+	parts = appendWeightedText(parts, fields.Summary, weightToSearchRepeats(weights.Summary))
+	parts = appendWeightedText(parts, strings.Join(fields.Keywords, " "), weightToSearchRepeats(weights.Keywords))
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func buildSummarySearchDocument(weights appconfig.SummarySearchWeightsConfig, fields summarySearchFields) string {
+	parts := make([]string, 0, 10)
+	parts = appendWeightedText(parts, fields.SummaryText, weightToSearchRepeats(weights.SummaryText))
+	parts = appendWeightedText(parts, fields.SummaryTextEn, weightToSearchRepeats(weights.SummaryText))
+	parts = appendWeightedText(parts, strings.Join(fields.Keywords, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, strings.Join(fields.KeywordsEn, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, strings.Join(fields.CategoryPaths, " "), weightToSearchRepeats(weights.CategoryPaths))
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func buildTopicSearchDocument(weights appconfig.TopicSearchWeightsConfig, fields topicSearchFields) string {
+	parts := make([]string, 0, 12)
+	parts = appendWeightedText(parts, fields.TopicType, weightToSearchRepeats(weights.TopicType))
+	parts = appendWeightedText(parts, fields.TopicDesc, weightToSearchRepeats(weights.TopicDesc))
+	parts = appendWeightedText(parts, fields.TopicDescEn, weightToSearchRepeats(weights.TopicDesc))
+	parts = appendWeightedText(parts, strings.Join(fields.Keywords, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, strings.Join(fields.KeywordsEn, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, strings.Join(fields.CategoryPaths, " "), weightToSearchRepeats(weights.CategoryPaths))
+	parts = appendWeightedText(parts, strings.Join(fields.CategoryPathsEn, " "), weightToSearchRepeats(weights.CategoryPaths))
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func buildProvisionRegistrySearchDocument(weights appconfig.ProvisionSearchWeightsConfig, fields provisionSearchFields) string {
+	parts := make([]string, 0, 8)
+	parts = appendWeightedText(parts, fields.ProvisionName, weightToSearchRepeats(weights.ProvisionName))
+	parts = appendWeightedText(parts, fields.ProvisionType, weightToSearchRepeats(weights.ProvisionType))
+	parts = appendWeightedText(parts, fields.ProvisionDesc, weightToSearchRepeats(weights.ProvisionDesc))
+	parts = appendWeightedText(parts, strings.Join(fields.Keywords, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, strings.Join(fields.CategoryPaths, " "), weightToSearchRepeats(weights.CategoryPaths))
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func buildEntitySearchDocument(weights appconfig.EntitySearchWeightsConfig, fields entitySearchFields) string {
+	parts := make([]string, 0, 14)
+	parts = appendWeightedText(parts, fields.Entity, weightToSearchRepeats(weights.Entity))
+	parts = appendWeightedText(parts, fields.EntityEn, weightToSearchRepeats(weights.Entity))
+	parts = appendWeightedText(parts, fields.EntityType, weightToSearchRepeats(weights.EntityType))
+	parts = appendWeightedText(parts, fields.EntityTypeEn, weightToSearchRepeats(weights.EntityType))
+	parts = appendWeightedText(parts, strings.Join(fields.Aliases, " "), weightToSearchRepeats(weights.Aliases))
+	parts = appendWeightedText(parts, strings.Join(fields.AliasesEn, " "), weightToSearchRepeats(weights.Aliases))
+	parts = appendWeightedText(parts, fields.DescText, weightToSearchRepeats(weights.DescText))
+	parts = appendWeightedText(parts, fields.DescTextEn, weightToSearchRepeats(weights.DescText))
+	parts = appendWeightedText(parts, strings.Join(fields.Keywords, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, strings.Join(fields.KeywordsEn, " "), weightToSearchRepeats(weights.Keywords))
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func buildRelationSearchDocument(weights appconfig.RelationSearchWeightsConfig, fields relationSearchFields) string {
+	parts := make([]string, 0, 16)
+	parts = appendWeightedText(parts, fields.Subject, weightToSearchRepeats(weights.Subject))
+	parts = appendWeightedText(parts, fields.SubjectEn, weightToSearchRepeats(weights.Subject))
+	parts = appendWeightedText(parts, fields.Predicate, weightToSearchRepeats(weights.Predicate))
+	parts = appendWeightedText(parts, fields.PredicateEn, weightToSearchRepeats(weights.Predicate))
+	parts = appendWeightedText(parts, fields.Object, weightToSearchRepeats(weights.Object))
+	parts = appendWeightedText(parts, fields.ObjectEn, weightToSearchRepeats(weights.Object))
+	parts = appendWeightedText(parts, fields.DescText, weightToSearchRepeats(weights.DescText))
+	parts = appendWeightedText(parts, fields.DescTextEn, weightToSearchRepeats(weights.DescText))
+	parts = appendWeightedText(parts, strings.Join(fields.Keywords, " "), weightToSearchRepeats(weights.Keywords))
+	parts = appendWeightedText(parts, strings.Join(fields.KeywordsEn, " "), weightToSearchRepeats(weights.Keywords))
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func appendWeightedText(dst []string, text string, repeats int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" || repeats <= 0 {
+		return dst
+	}
+	for i := 0; i < repeats; i++ {
+		dst = append(dst, text)
+	}
+	return dst
+}
+
+func weightToSearchRepeats(weight float64) int {
+	if weight <= 0 {
+		return 0
+	}
+	repeats := int(math.Round(weight * 2))
+	if repeats < 1 {
+		return 1
+	}
+	return repeats
+}
+
+func flattenSearchCategoryPaths(raw []byte) []string {
+	return flattenSearchJSONTerms(raw)
+}
+
+func flattenSearchJSONTerms(raw []byte) []string {
+	var decoded any
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil
+	}
+	out := make([]string, 0, 8)
+	collectCategoryPathTerms(decoded, &out)
+	return uniqueStrings(out)
+}
+
+func collectCategoryPathTerms(v any, out *[]string) {
+	switch x := v.(type) {
+	case string:
+		if s := strings.TrimSpace(x); s != "" {
+			*out = append(*out, s)
+		}
+	case []any:
+		for _, item := range x {
+			collectCategoryPathTerms(item, out)
+		}
+	case map[string]any:
+		if name, ok := x["name"].(string); ok {
+			collectCategoryPathTerms(name, out)
+		}
+		if kws, ok := x["keywords"]; ok {
+			collectCategoryPathTerms(kws, out)
+		}
+		if pks, ok := x["path_keywords"]; ok {
+			collectCategoryPathTerms(pks, out)
+		}
+		if cp, ok := x["category_path"]; ok {
+			collectCategoryPathTerms(cp, out)
+		}
+	}
 }
 
 func buildKnowledgeRegistryRows(ctx context.Context, db *sql.DB, recordID int64) ([]kbsearch.RegistryRow, error) {
@@ -632,6 +900,7 @@ ORDER BY id`
 	}
 	defer rows.Close()
 
+	weights := appconfig.GetEntitySearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
@@ -683,6 +952,18 @@ ORDER BY id`
 		if len(spans) == 0 {
 			spans = []byte("[]")
 		}
+		weightedSearchDoc := buildEntitySearchDocument(weights, entitySearchFields{
+			Entity:       entity.String,
+			EntityEn:     entityEn.String,
+			EntityType:   entityType.String,
+			EntityTypeEn: entityTypeEn.String,
+			Aliases:      aliasList,
+			AliasesEn:    aliasEnList,
+			DescText:     descText.String,
+			DescTextEn:   descTextEn.String,
+			Keywords:     kw,
+			KeywordsEn:   kwEn,
+		})
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactEntity,
 			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactEntity, seq),
@@ -690,7 +971,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(entity.String, entityID.String),
 			SecondaryLabel:  firstNonEmpty(entityType.String, entityTypeEn.String),
-			SearchDocument:  firstNonEmpty(searchDoc.String, strings.TrimSpace(strings.Join(searchParts, " "))),
+			SearchDocument:  firstNonEmpty(weightedSearchDoc, searchDoc.String, strings.TrimSpace(strings.Join(searchParts, " "))),
 			SnippetBasis:    firstNonEmpty(descText.String, entity.String),
 			CategoryPaths:   json.RawMessage("[]"),
 			SourceLineSpans: json.RawMessage(spans),
@@ -714,6 +995,7 @@ ORDER BY id`
 	}
 	defer rows.Close()
 
+	weights := appconfig.GetRelationSearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
@@ -764,6 +1046,18 @@ ORDER BY id`
 		if len(spans) == 0 {
 			spans = []byte("[]")
 		}
+		weightedSearchDoc := buildRelationSearchDocument(weights, relationSearchFields{
+			Subject:     subject.String,
+			SubjectEn:   subjectEn.String,
+			Predicate:   predicate.String,
+			PredicateEn: predicateEn.String,
+			Object:      object.String,
+			ObjectEn:    objectEn.String,
+			DescText:    descText.String,
+			DescTextEn:  descTextEn.String,
+			Keywords:    kw,
+			KeywordsEn:  kwEn,
+		})
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactRelation,
 			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactRelation, seq),
@@ -771,7 +1065,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(spo, relationID.String),
 			SecondaryLabel:  predicate.String,
-			SearchDocument:  firstNonEmpty(searchDoc.String, strings.TrimSpace(strings.Join(searchParts, " "))),
+			SearchDocument:  firstNonEmpty(weightedSearchDoc, searchDoc.String, strings.TrimSpace(strings.Join(searchParts, " "))),
 			SnippetBasis:    firstNonEmpty(descText.String, spo),
 			CategoryPaths:   json.RawMessage("[]"),
 			SourceLineSpans: json.RawMessage(spans),

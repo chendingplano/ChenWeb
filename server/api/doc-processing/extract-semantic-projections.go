@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -437,7 +438,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 				fmt.Errorf("(MID_26052121) enrich semantic projection seq=%d: %w", cand.SeqNo, err)
 		}
 
-		lang := strings.TrimSpace(asString(payload2["language"]))
+		lang := ApiUtils.NormalizeLang(strings.TrimSpace(asString(payload2["language"])))
 		p.Logger.Info("semantic proj end         ",
 			"record_id", recordID,
 			"seq_no", cand.SeqNo,
@@ -1154,6 +1155,7 @@ CREATE TABLE IF NOT EXISTS kb.semantic_projections (
     prompt_name TEXT,
     search_document TEXT,
     search_vector TSVECTOR,
+    connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -70,7 +70,7 @@ type searchCategoryEmbedder struct {
 }
 
 func newSearchCategoryEmbedder() searchCategoryEmbedder {
-	emb, model, ok := newSearchEmbedder()
+	emb, model, _, ok := newSearchEmbedder()
 	return searchCategoryEmbedder{embedder: emb, model: model, enabled: ok && kbsearch.SemanticSearchEnabled()}
 }
 

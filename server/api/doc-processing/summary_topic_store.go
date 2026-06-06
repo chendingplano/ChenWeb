@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
@@ -236,6 +237,7 @@ ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
 	}
 	defer rows.Close()
 
+	weights := appconfig.GetSummarySearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
@@ -259,6 +261,11 @@ ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
 			"summary_text":    summaryText,
 			"summary_text_en": summaryTextEn,
 		})
+		weightedSearchDoc := buildSummarySearchDocument(weights, summarySearchFields{
+			SummaryText:   summaryText,
+			SummaryTextEn: summaryTextEn,
+			Keywords:      rawJSONArrayStrings(keywords),
+		})
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactSummary,
 			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactSummary, strconv.Itoa(seqNo)),
@@ -266,7 +273,7 @@ ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(summaryText, summaryTextEn, summaryID),
 			SecondaryLabel:  fmt.Sprintf("Level %d", level),
-			SearchDocument:  firstNonEmpty(searchDocument, strings.TrimSpace(summaryText+" "+summaryTextEn), summaryText, summaryTextEn),
+			SearchDocument:  firstNonEmpty(weightedSearchDoc, searchDocument, strings.TrimSpace(summaryText+" "+summaryTextEn), summaryText, summaryTextEn),
 			SnippetBasis:    firstNonEmpty(summaryText, summaryTextEn),
 			SourceTitle:     sourceTitle,
 			SourceFilename:  sourceTitle,
@@ -289,6 +296,7 @@ ORDER BY topic_seq_no ASC, id ASC`
 	}
 	defer rows.Close()
 
+	weights := appconfig.GetTopicSearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
@@ -317,6 +325,15 @@ ORDER BY topic_seq_no ASC, id ASC`
 			"category_paths_en": rawJSONArrayStrings(categoryPathsEn),
 			"source_line_specs": rawJSONArrayStrings(sourceLineSpans),
 		})
+		weightedSearchDoc := buildTopicSearchDocument(weights, topicSearchFields{
+			TopicType:       topicType,
+			TopicDesc:       topicDesc,
+			TopicDescEn:     topicDescEn,
+			Keywords:        rawJSONArrayStrings(keywords),
+			KeywordsEn:      rawJSONArrayStrings(keywordsEn),
+			CategoryPaths:   rawJSONArrayStrings(categoryPaths),
+			CategoryPathsEn: rawJSONArrayStrings(categoryPathsEn),
+		})
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactTopic,
 			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactTopic, topicID),
@@ -324,7 +341,7 @@ ORDER BY topic_seq_no ASC, id ASC`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(topicDesc, topicDescEn, topicID),
 			SecondaryLabel:  topicType,
-			SearchDocument:  firstNonEmpty(searchDocument, strings.TrimSpace(strings.Join([]string{topicType, topicDesc, topicDescEn, jsonArrayTextBytes(keywords), jsonArrayTextBytes(keywordsEn), jsonArrayTextBytes(categoryPaths), jsonArrayTextBytes(categoryPathsEn)}, " "))),
+			SearchDocument:  firstNonEmpty(weightedSearchDoc, searchDocument, strings.TrimSpace(strings.Join([]string{topicType, topicDesc, topicDescEn, jsonArrayTextBytes(keywords), jsonArrayTextBytes(keywordsEn), jsonArrayTextBytes(categoryPaths), jsonArrayTextBytes(categoryPathsEn)}, " "))),
 			SnippetBasis:    firstNonEmpty(topicDesc, topicDescEn),
 			SourceTitle:     sourceTitle,
 			SourceFilename:  sourceTitle,

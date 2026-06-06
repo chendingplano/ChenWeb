@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -1850,6 +1851,7 @@ ORDER BY id`
 		return nil, err
 	}
 	defer rows.Close()
+	weights := appconfig.GetInventoryItemSearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
@@ -1886,6 +1888,20 @@ ORDER BY id`
 		if len(jsonArrayOrEmptyBytes(validationFlags)) > 2 || categoryStatus != "approved" {
 			validationStatus = "needs_review"
 		}
+		weightedSearchDoc := buildInventoryItemSearchDocument(weights, inventoryItemSearchFields{
+			ItemName:         itemName,
+			CanonicalName:    canonicalName,
+			ItemCategories:   categoryList,
+			Manufacturer:     manufacturer,
+			Brand:            brand,
+			ModelNumber:      modelNumber,
+			PartNumber:       partNumber,
+			Aliases:          parseJSONStringArray(aliases),
+			Standards:        flattenSearchJSONTerms(standards),
+			NormalizedSpecs:  flattenSearchJSONTerms(normalizedSpecs),
+			DedupeKey:        dedupeKey,
+			ConfidenceReason: confidenceReason,
+		})
 		payload, _ := json.Marshal(map[string]any{
 			"item_categories":        json.RawMessage(jsonArrayOrEmptyBytes(itemCategories)),
 			"category_status":        categoryStatus,
@@ -1914,7 +1930,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(itemName, canonicalName, inventoryItemID),
 			SecondaryLabel:  firstNonEmpty(primaryCategory, manufacturer),
-			SearchDocument:  firstNonEmpty(searchDoc, strings.TrimSpace(strings.Join(append([]string{itemName, canonicalName}, append(categoryList, manufacturer, brand, modelNumber, partNumber, dedupeKey)...), " "))),
+			SearchDocument:  firstNonEmpty(weightedSearchDoc, searchDoc, strings.TrimSpace(strings.Join(append([]string{itemName, canonicalName}, append(categoryList, manufacturer, brand, modelNumber, partNumber, dedupeKey)...), " "))),
 			SnippetBasis:    firstNonEmpty(confidenceReason, itemName),
 			SourceTitle:     sourceTitle,
 			SourceFilename:  sourceTitle,
@@ -1924,6 +1940,38 @@ ORDER BY id`
 		})
 	}
 	return out, rows.Err()
+}
+
+type inventoryItemSearchFields struct {
+	ItemName         string
+	CanonicalName    string
+	ItemCategories   []string
+	Manufacturer     string
+	Brand            string
+	ModelNumber      string
+	PartNumber       string
+	Aliases          []string
+	Standards        []string
+	NormalizedSpecs  []string
+	DedupeKey        string
+	ConfidenceReason string
+}
+
+func buildInventoryItemSearchDocument(weights appconfig.InventoryItemSearchWeightsConfig, fields inventoryItemSearchFields) string {
+	parts := make([]string, 0, 16)
+	parts = appendWeightedText(parts, fields.ItemName, weightToSearchRepeats(weights.ItemName))
+	parts = appendWeightedText(parts, fields.CanonicalName, weightToSearchRepeats(weights.CanonicalName))
+	parts = appendWeightedText(parts, strings.Join(fields.ItemCategories, " "), weightToSearchRepeats(weights.ItemCategories))
+	parts = appendWeightedText(parts, fields.Manufacturer, weightToSearchRepeats(weights.Manufacturer))
+	parts = appendWeightedText(parts, fields.Brand, weightToSearchRepeats(weights.Brand))
+	parts = appendWeightedText(parts, fields.ModelNumber, weightToSearchRepeats(weights.ModelNumber))
+	parts = appendWeightedText(parts, fields.PartNumber, weightToSearchRepeats(weights.PartNumber))
+	parts = appendWeightedText(parts, strings.Join(fields.Aliases, " "), weightToSearchRepeats(weights.Aliases))
+	parts = appendWeightedText(parts, strings.Join(fields.Standards, " "), weightToSearchRepeats(weights.Standards))
+	parts = appendWeightedText(parts, strings.Join(fields.NormalizedSpecs, " "), weightToSearchRepeats(weights.NormalizedSpecs))
+	parts = appendWeightedText(parts, fields.DedupeKey, weightToSearchRepeats(weights.DedupeKey))
+	parts = appendWeightedText(parts, fields.ConfidenceReason, weightToSearchRepeats(weights.ConfidenceReason))
+	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
 func jsonArrayOrEmptyBytes(raw []byte) []byte {

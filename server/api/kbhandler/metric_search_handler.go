@@ -67,11 +67,12 @@ type metricSearchConfig struct {
 	previewMaxWords int
 	phraseFriendly  bool
 	minRank         float64
-	weights         appconfig.MetricSearchWeightsConfig
+	weights         appconfig.ArtifactSearchWeightsConfig
 }
 
 func loadMetricSearchConfig() metricSearchConfig {
-	cfg := appconfig.GetMetricSearchConfig()
+	cfg := appconfig.GetArtifactSearchConfig()
+	weights := appconfig.GetMetricSearchWeightsConfig()
 	return metricSearchConfig{
 		dictionary:      sanitizeTSConfig(cfg.Dictionary),
 		defaultPageSize: cfg.DefaultPageSize,
@@ -79,7 +80,7 @@ func loadMetricSearchConfig() metricSearchConfig {
 		previewMaxWords: cfg.PreviewMaxWords,
 		phraseFriendly:  cfg.PhraseFriendly,
 		minRank:         cfg.MinRank,
-		weights:         cfg.Weights,
+		weights:         weights,
 	}
 }
 

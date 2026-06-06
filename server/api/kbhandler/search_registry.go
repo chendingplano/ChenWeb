@@ -37,7 +37,7 @@ type registrySearchConfig struct {
 }
 
 func loadRegistrySearchConfig() registrySearchConfig {
-	cfg := appconfig.GetMetricSearchConfig()
+	cfg := appconfig.GetArtifactSearchConfig()
 	return registrySearchConfig{
 		dictionary:      sanitizeTSConfig(cfg.Dictionary),
 		defaultPageSize: cfg.DefaultPageSize,

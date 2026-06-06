@@ -819,7 +819,6 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, rec.ID, searchArtifactTopic, RelationHasTopic, chunksToBlocks(chunks)); connErr != nil {
 		s.Logger.Warn("write has-topic connections failed", "record_id", rec.ID, "error", connErr)
 	}
-
 	if err := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
 		return appendTopicStatus(current, topicStatusParams{
 			RecordID:       rec.ID,

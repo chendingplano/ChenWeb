@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/ApiUtils"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -707,8 +708,8 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 			}
 			return pass1Result{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
 		}
-		lang := strings.ToLower(strings.TrimSpace(asString(payload["language"])))
-		if lang == "chinese" || lang == "中文" || lang == "zh-cn"{
+		lang := ApiUtils.NormalizeLang(asString(payload["language"]))
+		if lang == "chinese" || lang == "中文" || lang == "zh-cn" {
 			lang = "zh"
 		}
 		usedModel := strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.MentionModelName))

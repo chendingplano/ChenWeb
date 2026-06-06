@@ -29,6 +29,7 @@ import (
 // so indexing works off the stored source of truth.
 type indexedArtifact struct {
 	ID             string
+	UpdateKey      any
 	SourceSpans    []string
 	Categories     []string
 	SearchDocument string
@@ -63,10 +64,12 @@ type artifactConnectedFamily struct {
 
 var artifactConnectedFamilies = []artifactConnectedFamily{
 	{searchArtifactSemanticProjection, "semantic_projects"},
+	{searchArtifactSummary, "summaries"},
 	{searchArtifactTopic, "topics"},
 	{searchArtifactSceneBlock, "scenes"},
 	{searchArtifactProvision, "provisions"},
 	{searchArtifactEntity, "entities"},
+	{searchArtifactRelation, "relations"},
 	{searchArtifactMetric, "metrics"},
 	{searchArtifactInventoryItem, "inv_items"},
 }
@@ -127,7 +130,7 @@ func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID i
 		if len(ca["chunks"]) == 0 && logger != nil {
 			logger.Warn(cfg.LogPrefix+" error: empty chunks", "record_id", recordID, "artifact_id", a.ID)
 		}
-		if len(ca["semantic_projects"]) == 0 && logger != nil {
+		if semanticProjects, ok := ca["semantic_projects"]; ok && len(semanticProjects) == 0 && logger != nil {
 			logger.Warn(cfg.LogPrefix+" error: empty semantic_projects",
 				"record_id", recordID,
 				"artifact_id", a.ID,
@@ -144,7 +147,11 @@ func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID i
 			}
 			continue
 		}
-		if _, err := db.ExecContext(ctx, updateStmt, string(payload), recordID, a.ID); err != nil {
+		updateKey := a.UpdateKey
+		if updateKey == nil {
+			updateKey = a.ID
+		}
+		if _, err := db.ExecContext(ctx, updateStmt, string(payload), recordID, updateKey); err != nil {
 			if logger != nil {
 				logger.Warn(cfg.LogPrefix+": update connected_artifacts failed", "record_id", recordID, "artifact_id", a.ID, "error", err.Error())
 			}
@@ -359,13 +366,13 @@ type hybridCandidate struct {
 // call. Returns the total number of edges written. (Metric spec 3.1.5; inventory 3.3.5
 // reuses the identical policy.)
 func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, logger ApiTypes.JimoLogger) int {
-	scfg := appconfig.GetMetricSearchConfig()
+	scfg := appconfig.GetArtifactSearchConfig()
 	dict := sanitizeTSDictionary(scfg.Dictionary)
 	minRank := scfg.MinRank
 	minCosine := metricConnectMinCosine()
 	maxLinks := metricConnectMaxLinks()
 
-	embedder, embModel, embOK := newSearchEmbedder()
+	embedder, embModel, _, embOK := newSearchEmbedder()
 	semanticOn := kbsearch.SemanticSearchEnabled() && embOK
 
 	allAccepted := make([]Connection, 0, len(artifacts))

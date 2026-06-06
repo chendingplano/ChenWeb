@@ -20,15 +20,15 @@ const maxEmbeddingRunes = 6000
 // newSearchEmbedder builds an Embedder from EMBEDDING_MODEL_NAME (+ .models.toml),
 // mirroring the chunking service's resolution. Returns ok=false when no embedding
 // model is configured, in which case the caller proceeds lexical-only.
-func newSearchEmbedder() (embedder Embedder, modelName string, ok bool) {
+func newSearchEmbedder() (embedder Embedder, modelName string, timeoutSec int, ok bool) {
 	if strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME")) == "" {
-		return nil, "", false
+		return nil, "", 0, false
 	}
 	_, _, cfg, err := loadModelConfigFromEnv("EMBEDDING_MODEL_NAME", "")
 	if err != nil || strings.TrimSpace(cfg.ModelName) == "" {
-		return nil, "", false
+		return nil, "", 0, false
 	}
-	timeoutSec := cfg.TimeoutSec
+	timeoutSec = cfg.TimeoutSec
 	if timeoutSec <= 0 {
 		timeoutSec = 60
 	}
@@ -38,7 +38,7 @@ func newSearchEmbedder() (embedder Embedder, modelName string, ok bool) {
 		APIKey:     cfg.APIKey,
 		BaseURL:    cfg.BaseURL,
 	}
-	return client, cfg.ModelName, true
+	return client, cfg.ModelName, timeoutSec, true
 }
 
 // embedRegistryRows fills EmbeddingText + Embedding on each row in place, best-effort.
@@ -48,7 +48,7 @@ func embedRegistryRows(ctx context.Context, rows []kbsearch.RegistryRow, logger 
 	if len(rows) == 0 {
 		return
 	}
-	embedder, modelName, ok := newSearchEmbedder()
+	embedder, modelName, timeoutSec, ok := newSearchEmbedder()
 	if !ok {
 		if logger != nil {
 			logger.Warn("semantic search enabled but no embedding model configured; indexing lexical-only",
@@ -71,6 +71,7 @@ func embedRegistryRows(ctx context.Context, rows []kbsearch.RegistryRow, logger 
 				logger.Warn("embedding failed; row indexed lexical-only",
 					"artifact_type", rows[i].ArtifactType,
 					"artifact_id", rows[i].ArtifactID,
+					"embedding_timeout_sec", timeoutSec,
 					"error", err.Error())
 			}
 			continue

@@ -30,9 +30,9 @@ const (
 )
 
 // metricConnectMinCosine is the minimum embedding cosine similarity for the semantic
-// acceptance channel (env METRIC_CONNECT_MIN_COSINE, default 0.75).
+// acceptance channel (env ARTIFACT_CONNECT_MIN_COSINE, default 0.75).
 func metricConnectMinCosine() float64 {
-	if v := strings.TrimSpace(os.Getenv("METRIC_CONNECT_MIN_COSINE")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("ARTIFACT_CONNECT_MIN_COSINE")); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			return f
 		}
@@ -41,9 +41,9 @@ func metricConnectMinCosine() float64 {
 }
 
 // metricConnectMaxLinks caps accepted semantic links per metric (env
-// METRIC_CONNECT_MAX_LINKS, default 10).
+// ARTIFACT_CONNECT_MAX_LINKS, default 10).
 func metricConnectMaxLinks() int {
-	if v := strings.TrimSpace(os.Getenv("METRIC_CONNECT_MAX_LINKS")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("ARTIFACT_CONNECT_MAX_LINKS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
@@ -78,10 +78,12 @@ type indexedMetric struct {
 type connectedArtifacts struct {
 	Chunks           []string `json:"chunks"`
 	SemanticProjects []string `json:"semantic_projects"`
+	Summaries        []string `json:"summaries"`
 	Topics           []string `json:"topics"`
 	Scenes           []string `json:"scenes"`
 	Provisions       []string `json:"provisions"`
 	Entities         []string `json:"entities"`
+	Relations        []string `json:"relations"`
 	InvItems         []string `json:"inv_items"`
 }
 

@@ -65,7 +65,7 @@ required_processors = [
 [artifacts]
 artifact_graph_page_size = 30
 
-[metric_search]
+[artifact_search]
 dictionary = "simple"
 default_page_size = 20
 max_page_size = 100
@@ -73,7 +73,7 @@ preview_max_words = 18
 phrase_friendly = true
 min_rank = 0.0
 
-[metric_search.weights]
+[metric_search_weights]
 metric_name = 1.8
 metric_subject = 1.5
 metric_keywords = 2.8
@@ -83,6 +83,64 @@ value_class = 0.7
 metric_unit = 0.5
 table_name_or_section = 0.4
 category_paths = 0.6
+
+[semantic_projections_search_weights]
+descriptive_name = 1.8
+keywords = 2.4
+semantic_projection = 1.0
+category_paths = 0.6
+
+[inventory_items_search_weights]
+item_name = 2.0
+canonical_name = 1.8
+item_categories = 2.2
+manufacturer = 0.8
+brand = 1.0
+model_number = 1.3
+part_number = 1.3
+aliases = 1.2
+standards = 0.8
+normalized_specs = 0.7
+dedupe_key = 0.5
+confidence_reason = 0.4
+
+[scene_blocks_search_weights]
+title = 1.8
+scene_type = 1.2
+summary = 1.0
+keywords = 2.2
+
+[provisions_search_weights]
+provision_name = 1.8
+provision_type = 1.2
+provision_desc = 1.0
+keywords = 2.2
+category_paths = 0.6
+
+[summaries_search_weights]
+summary_text = 1.8
+keywords = 2.2
+category_paths = 0.8
+
+[topics_search_weights]
+topic_type = 1.2
+topic_desc = 1.8
+keywords = 2.2
+category_paths = 0.8
+
+[entities_search_weights]
+entity = 1.8
+entity_type = 1.2
+aliases = 1.2
+desc_text = 1.0
+keywords = 2.2
+
+[relations_search_weights]
+subject = 1.6
+predicate = 1.6
+object = 1.6
+desc_text = 1.0
+keywords = 2.0
 
 [frontend]
 topic_types = ["封面/cover", "事实/fact", "范围/scope", "条款/compliance", "章节/heading", "过程/procedure", "表格/table", "需求/requirement", "公式/formula", "列表/list"]

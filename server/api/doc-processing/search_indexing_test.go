@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
@@ -83,6 +85,17 @@ category_paths: ["safety","battery"]
 }
 
 func TestBuildSemanticProjectionRegistryRowsIncludesLineSpans(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() {
+		appconfig.AppConfig = oldConfig
+	})
+	appconfig.AppConfig.SemanticProjectionSearchWeights = appconfig.SemanticProjectionSearchWeightsConfig{
+		DescriptiveName:    1.0,
+		Keywords:           1.0,
+		SemanticProjection: 1.0,
+		CategoryPaths:      1.0,
+	}
+
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -97,7 +110,10 @@ func TestBuildSemanticProjectionRegistryRowsIncludesLineSpans(t *testing.T) {
 		"descriptive_name_en",
 		"keywords",
 		"keywords_en",
+		"semantic_projection",
+		"semantic_projection_en",
 		"category_paths",
+		"category_paths_en",
 		"line_spans",
 	}).AddRow(
 		int64(7),
@@ -107,7 +123,10 @@ func TestBuildSemanticProjectionRegistryRowsIncludesLineSpans(t *testing.T) {
 		nil,
 		[]byte(`["metric"]`),
 		[]byte(`[]`),
+		"Projection body",
+		nil,
 		[]byte(`[{"category_path":[{"name":"metrics","keywords":["metric"],"confidence":0.9}],"path_keywords":["metric"],"path_confidence":0.9}]`),
+		[]byte(`[]`),
 		[]byte(`["22-45"]`),
 	)
 	mock.ExpectQuery("FROM kb.semantic_projections").
@@ -129,6 +148,247 @@ func TestBuildSemanticProjectionRegistryRowsIncludesLineSpans(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestBuildSemanticProjectionRegistryRowsAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() {
+		appconfig.AppConfig = oldConfig
+	})
+	appconfig.AppConfig.SemanticProjectionSearchWeights = appconfig.SemanticProjectionSearchWeightsConfig{
+		DescriptiveName:    2.0,
+		Keywords:           1.0,
+		SemanticProjection: 0.5,
+		CategoryPaths:      0.5,
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{
+		"id",
+		"semantic_proj_id",
+		"language",
+		"descriptive_name",
+		"descriptive_name_en",
+		"keywords",
+		"keywords_en",
+		"semantic_projection",
+		"semantic_projection_en",
+		"category_paths",
+		"category_paths_en",
+		"line_spans",
+	}).AddRow(
+		int64(8),
+		"177_0_3",
+		"en",
+		"Artifact connections",
+		nil,
+		[]byte(`["metric"]`),
+		[]byte(`[]`),
+		"Projection body",
+		nil,
+		[]byte(`[{"category_path":[{"name":"metrics","keywords":["metric"],"confidence":0.9}],"path_keywords":["metric"],"path_confidence":0.9}]`),
+		[]byte(`[]`),
+		[]byte(`["30-31"]`),
+	)
+	mock.ExpectQuery("FROM kb.semantic_projections").
+		WithArgs(int64(177)).
+		WillReturnRows(rows)
+
+	got, err := buildSemanticProjectionRegistryRows(context.Background(), db, 177)
+	if err != nil {
+		t.Fatalf("buildSemanticProjectionRegistryRows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if strings.Count(got[0].SearchDocument, "Artifact connections") <= strings.Count(got[0].SearchDocument, "Projection body") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
+	}
+	if !strings.Contains(got[0].SearchDocument, "metric") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
+	}
+}
+
+func TestBuildSceneBlockRegistryRowsAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() {
+		appconfig.AppConfig = oldConfig
+	})
+	appconfig.AppConfig.SceneBlockSearchWeights = appconfig.SceneBlockSearchWeightsConfig{
+		Title:     2.0,
+		SceneType: 1.0,
+		Summary:   0.5,
+		Keywords:  1.0,
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{
+		"id", "object_id", "title", "scene_type", "summary", "keywords", "line_spans", "search_document",
+	}).AddRow(
+		int64(4), "42_1", "Startup sequence", "procedure", "System boots and validates.", []byte(`["boot","validate"]`), []byte(`["8:10"]`), "",
+	)
+	mock.ExpectQuery("FROM kb.scene_objects").
+		WithArgs(int64(42)).
+		WillReturnRows(rows)
+
+	got, err := buildSceneBlockRegistryRows(context.Background(), db, 42)
+	if err != nil {
+		t.Fatalf("buildSceneBlockRegistryRows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if strings.Count(got[0].SearchDocument, "Startup sequence") <= strings.Count(got[0].SearchDocument, "System boots and validates.") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
+	}
+	if !strings.Contains(got[0].SearchDocument, "boot validate") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
+	}
+}
+
+func TestBuildSummaryRegistryRowsFromDBAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() { appconfig.AppConfig = oldConfig })
+	appconfig.AppConfig.SummarySearchWeights = appconfig.SummarySearchWeightsConfig{SummaryText: 2.0, Keywords: 1.0, CategoryPaths: 1.0}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"id", "summary_id", "summary_level", "summary_seq_no", "source_line_spans", "keywords", "summary_text", "summary_text_en", "search_document"}).
+		AddRow(int64(1), "42_0_1", 0, 1, []byte(`["1:2"]`), []byte(`["energy"]`), "Primary summary", "English summary", "")
+	mock.ExpectQuery("FROM kb.summaries").WithArgs(int64(42)).WillReturnRows(rows)
+
+	got, err := buildSummaryRegistryRowsFromDB(context.Background(), db, 42, "doc.pdf")
+	if err != nil {
+		t.Fatalf("buildSummaryRegistryRowsFromDB: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if strings.Count(got[0].SearchDocument, "Primary summary") <= strings.Count(got[0].SearchDocument, "energy") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
+	}
+}
+
+func TestBuildTopicRegistryRowsFromDBAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() { appconfig.AppConfig = oldConfig })
+	appconfig.AppConfig.TopicSearchWeights = appconfig.TopicSearchWeightsConfig{TopicType: 0.5, TopicDesc: 2.0, Keywords: 1.0, CategoryPaths: 1.0}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"id", "topic_id", "topic_type", "topic_desc", "topic_desc_en", "keywords", "keywords_en", "category_paths", "category_paths_en", "source_line_spans", "search_document"}).
+		AddRow(int64(1), "1", "requirement", "Battery safety", "", []byte(`["battery"]`), []byte(`[]`), []byte(`["safety"]`), []byte(`[]`), []byte(`["3:5"]`), "")
+	mock.ExpectQuery("FROM kb.topics").WithArgs(int64(42)).WillReturnRows(rows)
+
+	got, err := buildTopicRegistryRowsFromDB(context.Background(), db, 42, "doc.pdf")
+	if err != nil {
+		t.Fatalf("buildTopicRegistryRowsFromDB: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if strings.Count(got[0].SearchDocument, "Battery safety") <= strings.Count(got[0].SearchDocument, "requirement") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
+	}
+}
+
+func TestBuildProvisionRegistryRowsAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() { appconfig.AppConfig = oldConfig })
+	appconfig.AppConfig.ProvisionSearchWeights = appconfig.ProvisionSearchWeightsConfig{ProvisionName: 0.5, ProvisionType: 0.5, ProvisionDesc: 2.0, Keywords: 1.0, CategoryPaths: 1.0}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"id", "prov_id", "prov_name", "provision_type", "prov_desc", "provision_keywords", "category_paths", "source_line_spans", "input_filename", "search_document"}).
+		AddRow(int64(1), "p1", "Voltage limit", "mandatory", "Keep voltage below threshold", []byte(`["voltage"]`), []byte(`["electrical"]`), []byte(`["8:9"]`), "doc.pdf", "")
+	mock.ExpectQuery("FROM kb.provisions").WithArgs(int64(42)).WillReturnRows(rows)
+
+	got, err := buildProvisionRegistryRows(context.Background(), db, 42)
+	if err != nil {
+		t.Fatalf("buildProvisionRegistryRows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if strings.Count(got[0].SearchDocument, "Keep voltage below threshold") <= strings.Count(got[0].SearchDocument, "Voltage limit") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
+	}
+}
+
+func TestBuildEntityRegistryRowsAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() { appconfig.AppConfig = oldConfig })
+	appconfig.AppConfig.EntitySearchWeights = appconfig.EntitySearchWeightsConfig{Entity: 2.0, EntityType: 0.5, Aliases: 0.5, DescText: 0.5, Keywords: 1.0}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"id", "entity_id", "language", "entity", "entity_en", "entity_type", "entity_type_en", "aliases", "aliases_en", "desc_text", "desc_text_en", "keywords", "keywords_en", "line_spans", "search_document"}).
+		AddRow(int64(1), "e1", "en", "Transformer", "", "equipment", "", []byte(`["converter"]`), []byte(`[]`), "Power device", "", []byte(`["power"]`), []byte(`[]`), []byte(`["10:11"]`), "")
+	mock.ExpectQuery("FROM kb.entities").WithArgs(int64(42)).WillReturnRows(rows)
+
+	got, err := buildEntityRegistryRows(context.Background(), db, 42)
+	if err != nil {
+		t.Fatalf("buildEntityRegistryRows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if strings.Count(got[0].SearchDocument, "Transformer") <= strings.Count(got[0].SearchDocument, "equipment") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
+	}
+}
+
+func TestBuildRelationRegistryRowsAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() { appconfig.AppConfig = oldConfig })
+	appconfig.AppConfig.RelationSearchWeights = appconfig.RelationSearchWeightsConfig{Subject: 2.0, Predicate: 0.5, Object: 0.5, DescText: 0.5, Keywords: 1.0}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"id", "relation_id", "language", "subject", "subject_en", "predicate", "predicate_en", "object", "object_en", "desc_text", "desc_text_en", "keywords", "keywords_en", "line_spans", "search_document"}).
+		AddRow(int64(1), "r1", "en", "Battery", "", "requires", "", "Cooling", "", "Battery requires cooling", "", []byte(`["thermal"]`), []byte(`[]`), []byte(`["12:13"]`), "")
+	mock.ExpectQuery("FROM kb.relations").WithArgs(int64(42)).WillReturnRows(rows)
+
+	got, err := buildRelationRegistryRows(context.Background(), db, 42)
+	if err != nil {
+		t.Fatalf("buildRelationRegistryRows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if strings.Count(got[0].SearchDocument, "Battery") <= strings.Count(got[0].SearchDocument, "requires") {
+		t.Fatalf("search_document=%q", got[0].SearchDocument)
 	}
 }
 

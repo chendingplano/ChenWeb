@@ -331,7 +331,6 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, rec.ID, searchArtifactTopic, RelationHasTopic, semanticBlocksToBlocks(blocks)); connErr != nil {
 		s.Logger.Warn("write has-topic connections failed", "record_id", rec.ID, "error", connErr)
 	}
-
 	overlapPercent := 0
 	if s.FileBlockSize > 0 {
 		overlapPercent = 100 / s.FileBlockSize

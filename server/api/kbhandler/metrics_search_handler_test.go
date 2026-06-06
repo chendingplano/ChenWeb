@@ -151,7 +151,7 @@ func TestQueryMetricSearchResultsEscapesHeadlineOptions(t *testing.T) {
 		maxPageSize:     100,
 		previewMaxWords: 18,
 		phraseFriendly:  true,
-		weights:         appconfig.GetMetricSearchConfig().Weights,
+		weights:         appconfig.GetMetricSearchWeightsConfig(),
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta("WITH query_input AS")).

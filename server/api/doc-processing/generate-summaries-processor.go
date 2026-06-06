@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -14,11 +15,12 @@ import (
 // GenerateSummariesProcessor re-runs the fixed-size chunking service (which
 // produces the generate_summaries status entry) as a standalone pipeline step.
 type GenerateSummariesProcessor struct {
-	InputStore DocMetadataStore
-	Service    chunkingHandler
-	Logger     ApiTypes.JimoLogger
-	ProcLogger DocProcLogger
-	Now        func() time.Time
+	InputStore  DocMetadataStore
+	Service     chunkingHandler
+	Logger      ApiTypes.JimoLogger
+	ProcLogger  DocProcLogger
+	Now         func() time.Time
+	ArtifactDir string
 }
 
 func NewGenerateSummariesProcessor(
@@ -30,11 +32,12 @@ func NewGenerateSummariesProcessor(
 		logger = loggerutil.CreateDefaultLogger("MID_26051301")
 	}
 	return &GenerateSummariesProcessor{
-		InputStore: inputStore,
-		Service:    service,
-		Logger:     logger,
-		ProcLogger: DocProcLogger{DB: ApiTypes.ProjectDBHandle},
-		Now:        time.Now,
+		InputStore:  inputStore,
+		Service:     service,
+		Logger:      logger,
+		ProcLogger:  DocProcLogger{DB: ApiTypes.ProjectDBHandle},
+		Now:         time.Now,
+		ArtifactDir: strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 	}
 }
 

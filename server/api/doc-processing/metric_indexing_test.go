@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
 func TestParseMetricCategoriesText(t *testing.T) {
@@ -107,19 +109,222 @@ func TestConnectedArtifactsMarshalsEmptyArrays(t *testing.T) {
 	ca := connectedArtifacts{
 		Chunks:           []string{},
 		SemanticProjects: []string{},
+		Summaries:        []string{},
 		Topics:           []string{},
 		Scenes:           []string{},
 		Provisions:       []string{},
 		Entities:         []string{},
+		Relations:        []string{},
 		InvItems:         []string{},
 	}
 	bs, err := json.Marshal(ca)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	want := `{"chunks":[],"semantic_projects":[],"topics":[],"scenes":[],"provisions":[],"entities":[],"inv_items":[]}`
+	want := `{"chunks":[],"semantic_projects":[],"summaries":[],"topics":[],"scenes":[],"provisions":[],"entities":[],"relations":[],"inv_items":[]}`
 	if string(bs) != want {
 		t.Errorf("connected_artifacts JSON = %s, want %s", bs, want)
+	}
+}
+
+type jsonSubstringArg struct {
+	want []string
+}
+
+func (m jsonSubstringArg) Match(v driver.Value) bool {
+	s, ok := v.(string)
+	if !ok {
+		return false
+	}
+	for _, want := range m.want {
+		if !strings.Contains(s, want) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestIndexSemanticProjectionsForRecordBuildsConnectedArtifacts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery("SELECT semantic_proj_id,").
+		WithArgs(int64(100)).
+		WillReturnRows(sqlmock.NewRows([]string{"semantic_proj_id", "line_spans"}).
+			AddRow("100_0_1", []byte(`["5:6"]`)))
+
+	for _, tc := range []struct {
+		artifactType string
+		artifactID   string
+	}{
+		{searchArtifactTopic, "100_tpc_1"},
+		{searchArtifactSceneBlock, "100_scn_1"},
+		{searchArtifactProvision, "100_prv_1"},
+		{searchArtifactEntity, "100_ent_1"},
+		{searchArtifactMetric, "100_met_1"},
+		{searchArtifactInventoryItem, "100_inv_1"},
+	} {
+		mock.ExpectQuery("SELECT artifact_id, source_line_spans\\s+FROM kb.search_artifacts").
+			WithArgs(tc.artifactType, int64(100)).
+			WillReturnRows(sqlmock.NewRows([]string{"artifact_id", "source_line_spans"}).
+				AddRow(tc.artifactID, []byte(`["5:6"]`)))
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_projections SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND semantic_proj_id = $3")).
+		WithArgs(sqlmock.AnyArg(), int64(100), "100_0_1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	IndexSemanticProjectionsForRecord(context.Background(), 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 5}}}}, nil)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestBuildArtifactConnectedArtifactsDoesNotRequireSemanticProjectsForSemanticProjectionSource(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	for _, tc := range []struct {
+		artifactType string
+		artifactID   string
+	}{
+		{searchArtifactTopic, "100_tpc_1"},
+		{searchArtifactSceneBlock, "100_scn_1"},
+		{searchArtifactProvision, "100_prv_1"},
+		{searchArtifactEntity, "100_ent_1"},
+		{searchArtifactMetric, "100_met_1"},
+		{searchArtifactInventoryItem, "100_inv_1"},
+	} {
+		mock.ExpectQuery("SELECT artifact_id, source_line_spans\\s+FROM kb.search_artifacts").
+			WithArgs(tc.artifactType, int64(100)).
+			WillReturnRows(sqlmock.NewRows([]string{"artifact_id", "source_line_spans"}).
+				AddRow(tc.artifactID, []byte(`["5:6"]`)))
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_projections SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND semantic_proj_id = $3")).
+		WithArgs(sqlmock.AnyArg(), int64(100), "100_0_1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	got := buildArtifactConnectedArtifacts(context.Background(), db, 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 5}}}}, []indexedArtifact{{
+		ID:          "100_0_1",
+		SourceSpans: []string{"5:6"},
+	}}, semanticProjectionIndexConfig, nil)
+	if got != 1 {
+		t.Fatalf("buildArtifactConnectedArtifacts updated=%d, want 1", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestBuildArtifactConnectedArtifactsUsesUpdateKeyAndIncludesSummaryRelationRefs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	for _, tc := range []struct {
+		artifactType string
+		artifactID   string
+	}{
+		{searchArtifactSemanticProjection, "100_0_1"},
+		{searchArtifactSummary, "100_sum_1"},
+		{searchArtifactSceneBlock, "100_scn_1"},
+		{searchArtifactProvision, "100_prv_1"},
+		{searchArtifactEntity, "100_ent_1"},
+		{searchArtifactRelation, "100_rel_1"},
+		{searchArtifactMetric, "100_met_1"},
+		{searchArtifactInventoryItem, "100_inv_1"},
+	} {
+		if tc.artifactType == searchArtifactSemanticProjection {
+			mock.ExpectQuery("SELECT semantic_proj_id,").
+				WithArgs(int64(100)).
+				WillReturnRows(sqlmock.NewRows([]string{"semantic_proj_id", "line_spans"}).
+					AddRow(tc.artifactID, []byte(`["5:6"]`)))
+			continue
+		}
+		mock.ExpectQuery("SELECT artifact_id, source_line_spans\\s+FROM kb.search_artifacts").
+			WithArgs(tc.artifactType, int64(100)).
+			WillReturnRows(sqlmock.NewRows([]string{"artifact_id", "source_line_spans"}).
+				AddRow(tc.artifactID, []byte(`["5:6"]`)))
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.topics SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND topic_id = $3")).
+		WithArgs(jsonSubstringArg{want: []string{`"summaries":["100_sum_1"]`, `"relations":["100_rel_1"]`}}, int64(100), "1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	got := buildArtifactConnectedArtifacts(context.Background(), db, 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 5}}}}, []indexedArtifact{{
+		ID:          "100_tpc_1",
+		UpdateKey:   "1",
+		SourceSpans: []string{"5:6"},
+	}}, topicIndexConfig, nil)
+	if got != 1 {
+		t.Fatalf("buildArtifactConnectedArtifacts updated=%d, want 1", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestBuildArtifactConnectedArtifactsUsesIntegerUpdateKeyForProvisions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	for _, tc := range []struct {
+		artifactType string
+		artifactID   string
+	}{
+		{searchArtifactSemanticProjection, "100_0_1"},
+		{searchArtifactSummary, "100_sum_1"},
+		{searchArtifactTopic, "100_tpc_1"},
+		{searchArtifactSceneBlock, "100_scn_1"},
+		{searchArtifactEntity, "100_ent_1"},
+		{searchArtifactRelation, "100_rel_1"},
+		{searchArtifactMetric, "100_met_1"},
+		{searchArtifactInventoryItem, "100_inv_1"},
+	} {
+		if tc.artifactType == searchArtifactSemanticProjection {
+			mock.ExpectQuery("SELECT semantic_proj_id,").
+				WithArgs(int64(100)).
+				WillReturnRows(sqlmock.NewRows([]string{"semantic_proj_id", "line_spans"}).
+					AddRow(tc.artifactID, []byte(`["5:6"]`)))
+			continue
+		}
+		mock.ExpectQuery("SELECT artifact_id, source_line_spans\\s+FROM kb.search_artifacts").
+			WithArgs(tc.artifactType, int64(100)).
+			WillReturnRows(sqlmock.NewRows([]string{"artifact_id", "source_line_spans"}).
+				AddRow(tc.artifactID, []byte(`["5:6"]`)))
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.provisions SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND prov_id = $3")).
+		WithArgs(sqlmock.AnyArg(), int64(100), 7).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	got := buildArtifactConnectedArtifacts(context.Background(), db, 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 5}}}}, []indexedArtifact{{
+		ID:          "100_prv_7",
+		UpdateKey:   7,
+		SourceSpans: []string{"5:6"},
+	}}, provisionIndexConfig, nil)
+	if got != 1 {
+		t.Fatalf("buildArtifactConnectedArtifacts updated=%d, want 1", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
@@ -192,8 +397,8 @@ func TestSanitizeTSDictionary(t *testing.T) {
 }
 
 func TestMetricConnectEnvDefaults(t *testing.T) {
-	t.Setenv("METRIC_CONNECT_MIN_COSINE", "")
-	t.Setenv("METRIC_CONNECT_MAX_LINKS", "")
+	t.Setenv("ARTIFACT_CONNECT_MIN_COSINE", "")
+	t.Setenv("ARTIFACT_CONNECT_MAX_LINKS", "")
 	if got := metricConnectMinCosine(); got != defaultMetricConnectMinCosine {
 		t.Errorf("default min cosine = %v, want %v", got, defaultMetricConnectMinCosine)
 	}
@@ -201,8 +406,8 @@ func TestMetricConnectEnvDefaults(t *testing.T) {
 		t.Errorf("default max links = %v, want %v", got, defaultMetricConnectMaxLinks)
 	}
 
-	t.Setenv("METRIC_CONNECT_MIN_COSINE", "0.9")
-	t.Setenv("METRIC_CONNECT_MAX_LINKS", "3")
+	t.Setenv("ARTIFACT_CONNECT_MIN_COSINE", "0.9")
+	t.Setenv("ARTIFACT_CONNECT_MAX_LINKS", "3")
 	if got := metricConnectMinCosine(); got != 0.9 {
 		t.Errorf("min cosine = %v, want 0.9", got)
 	}
@@ -211,7 +416,7 @@ func TestMetricConnectEnvDefaults(t *testing.T) {
 	}
 
 	// Invalid values fall back to defaults.
-	t.Setenv("METRIC_CONNECT_MAX_LINKS", "0")
+	t.Setenv("ARTIFACT_CONNECT_MAX_LINKS", "0")
 	if got := metricConnectMaxLinks(); got != defaultMetricConnectMaxLinks {
 		t.Errorf("invalid max links = %v, want default %v", got, defaultMetricConnectMaxLinks)
 	}
