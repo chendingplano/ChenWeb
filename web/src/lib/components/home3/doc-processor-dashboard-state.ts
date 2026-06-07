@@ -113,16 +113,24 @@ export function computeStages(record: PipelineRecord): StageInfo[] {
 
 	function stageFor(stageId: string, operations: string[]): { status: StageStatus; entry?: StatusEntry } {
 		const expectedNames = new Set([stageId, ...operations].map(normalizeOperationName));
+		let matchedStageEntry: StatusEntry | undefined;
+
 		for (const entry of entries) {
 			const operationName = normalizeOperationName(entry.operation);
-			if (expectedNames.has(operationName)) {
-				return { status: resolveEntryStatus(entry), entry };
+			if (operationName === 'doc_processing') {
+				const processorName = normalizeOperationName(entry.doc_processor_name ?? entry['doc-processor-name']);
+				if (expectedNames.has(processorName)) {
+					return { status: resolveEntryStatus(entry), entry };
+				}
+				continue;
 			}
-			if (operationName !== 'doc_processing') continue;
-			const processorName = normalizeOperationName(entry.doc_processor_name ?? entry['doc-processor-name']);
-			if (expectedNames.has(processorName)) {
-				return { status: resolveEntryStatus(entry), entry };
+			if (expectedNames.has(operationName) && !matchedStageEntry) {
+				matchedStageEntry = entry;
 			}
+		}
+
+		if (matchedStageEntry) {
+			return { status: resolveEntryStatus(matchedStageEntry), entry: matchedStageEntry };
 		}
 		return { status: 'pending' };
 	}

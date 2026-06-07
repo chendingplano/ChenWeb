@@ -2,9 +2,13 @@ package docprocessing
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
@@ -16,6 +20,13 @@ import (
 // accepts up to ~8191 tokens; for CJK text tokens roughly track runes, so a
 // conservative rune budget avoids request failures on very large artifacts.
 const maxEmbeddingRunes = 6000
+const defaultEmbeddingMaxGoroutines = 20
+const defaultEmbeddingBatchSize = 8
+const embeddingMaxAttempts = 3
+
+type batchEmbedder interface {
+	EmbedBatch(ctx context.Context, in llmclients.EmbedBatchInput) ([][]float64, error)
+}
 
 // newSearchEmbedder builds an Embedder from EMBEDDING_MODEL_NAME (+ .models.toml),
 // mirroring the chunking service's resolution. Returns ok=false when no embedding
@@ -44,7 +55,10 @@ func newSearchEmbedder() (embedder Embedder, modelName string, timeoutSec int, o
 // embedRegistryRows fills EmbeddingText + Embedding on each row in place, best-effort.
 // Embedding is never fatal to reindexing: a missing model, per-row API failures, and
 // dimension mismatches are logged and leave that row lexical-only (NULL embedding).
-func embedRegistryRows(ctx context.Context, rows []kbsearch.RegistryRow, logger ApiTypes.JimoLogger) {
+func embedRegistryRows(
+	ctx context.Context,
+	rows []kbsearch.RegistryRow,
+	logger ApiTypes.JimoLogger) {
 	if len(rows) == 0 {
 		return
 	}
@@ -56,38 +70,56 @@ func embedRegistryRows(ctx context.Context, rows []kbsearch.RegistryRow, logger 
 		}
 		return
 	}
+	maxWorkers := embeddingMaxGoroutines()
+	if maxWorkers > len(rows) {
+		maxWorkers = len(rows)
+	}
+	if maxWorkers <= 1 {
+		maxWorkers = 1
+	}
+	batchSize := embeddingBatchSize()
+	if batchSize <= 1 {
+		batchSize = 1
+	}
+
+	work := make(chan int, len(rows))
+	var wg sync.WaitGroup
+
+	taskStartTime := time.Now()
+	if logger != nil {
+		logger.Info("embedding rows start",
+			"embedding_model", modelName,
+			"artifact_type", rows[0].ArtifactType,
+			"embedding_timeout_sec", timeoutSec,
+			"total_rows", len(rows),
+			"concurrent_workers", maxWorkers,
+			"batch_size", batchSize)
+	}
+
+	for range maxWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				indices, ok := dequeueEmbeddingBatch(work, batchSize)
+				if !ok {
+					return
+				}
+				embedRowBatch(ctx, embedder, modelName, timeoutSec, rows, indices, logger)
+			}
+		}()
+	}
+
 	for i := range rows {
-		text := strings.TrimSpace(rows[i].EmbeddingText)
-		if text == "" {
-			text = strings.TrimSpace(rows[i].SearchDocument)
-		}
-		if text == "" {
-			continue
-		}
-		text = truncateRunes(text, maxEmbeddingRunes)
-		vec, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: modelName, InputText: text})
-		if err != nil {
-			if logger != nil {
-				logger.Warn("embedding failed; row indexed lexical-only",
-					"artifact_type", rows[i].ArtifactType,
-					"artifact_id", rows[i].ArtifactID,
-					"embedding_timeout_sec", timeoutSec,
-					"error", err.Error())
-			}
-			continue
-		}
-		if len(vec) != kbsearch.EmbeddingDim {
-			if logger != nil {
-				logger.Warn("embedding dimension mismatch; row indexed lexical-only",
-					"artifact_type", rows[i].ArtifactType,
-					"artifact_id", rows[i].ArtifactID,
-					"got_dim", len(vec),
-					"want_dim", kbsearch.EmbeddingDim)
-			}
-			continue
-		}
-		rows[i].EmbeddingText = text
-		rows[i].Embedding = vec
+		work <- i
+	}
+	close(work)
+	wg.Wait()
+	if logger != nil {
+		logger.Info("embedding rows end  ",
+			"total_rows", len(rows),
+			"concurrent_workers", maxWorkers,
+			"total_time_ms", time.Since(taskStartTime).Milliseconds())
 	}
 }
 
@@ -100,4 +132,235 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string(r[:max])
+}
+
+func embeddingMaxGoroutines() int {
+	raw := strings.TrimSpace(os.Getenv("EMBEDDING_MAX_GOROUTINES"))
+	if raw == "" {
+		return defaultEmbeddingMaxGoroutines
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return defaultEmbeddingMaxGoroutines
+	}
+	return n
+}
+
+func embeddingBatchSize() int {
+	raw := strings.TrimSpace(os.Getenv("EMBEDDING_BATCH_SIZE"))
+	if raw == "" {
+		return defaultEmbeddingBatchSize
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return defaultEmbeddingBatchSize
+	}
+	return n
+}
+
+func dequeueEmbeddingBatch(work <-chan int, batchSize int) ([]int, bool) {
+	first, ok := <-work
+	if !ok {
+		return nil, false
+	}
+	indices := make([]int, 0, batchSize)
+	indices = append(indices, first)
+	for len(indices) < batchSize {
+		select {
+		case idx, ok := <-work:
+			if !ok {
+				return indices, true
+			}
+			indices = append(indices, idx)
+		default:
+			return indices, true
+		}
+	}
+	return indices, true
+}
+
+func embedRowBatch(
+	ctx context.Context,
+	embedder Embedder,
+	modelName string,
+	timeoutSec int,
+	rows []kbsearch.RegistryRow,
+	indices []int,
+	logger ApiTypes.JimoLogger,
+) {
+	texts := make([]string, 0, len(indices))
+	rowIndices := make([]int, 0, len(indices))
+	for _, i := range indices {
+		text := strings.TrimSpace(rows[i].EmbeddingText)
+		if text == "" {
+			text = strings.TrimSpace(rows[i].SearchDocument)
+		}
+		if text == "" {
+			continue
+		}
+		text = truncateRunes(text, maxEmbeddingRunes)
+		texts = append(texts, text)
+		rowIndices = append(rowIndices, i)
+	}
+	if len(texts) == 0 {
+		return
+	}
+
+	vecs, err := embedBatchWithRetry(ctx, embedder, modelName, texts, timeoutSec, rows, rowIndices, logger)
+	if err != nil {
+		for _, i := range rowIndices {
+			if logger != nil {
+				logger.Warn("embedding failed; row indexed lexical-only",
+					"artifact_type", rows[i].ArtifactType,
+					"artifact_id", rows[i].ArtifactID,
+					"embedding_timeout_sec", timeoutSec,
+					"error", err.Error())
+			}
+		}
+		return
+	}
+	if len(vecs) != len(rowIndices) {
+		if logger != nil {
+			for _, i := range rowIndices {
+				logger.Warn("embedding batch size mismatch; row indexed lexical-only",
+					"artifact_type", rows[i].ArtifactType,
+					"artifact_id", rows[i].ArtifactID,
+					"got_embeddings", len(vecs),
+					"want_embeddings", len(rowIndices))
+			}
+		}
+		return
+	}
+
+	for pos, i := range rowIndices {
+		vec := vecs[pos]
+		if len(vec) != kbsearch.EmbeddingDim {
+			if logger != nil {
+				logger.Warn("embedding dimension mismatch; row indexed lexical-only",
+					"artifact_type", rows[i].ArtifactType,
+					"artifact_id", rows[i].ArtifactID,
+					"got_dim", len(vec),
+					"want_dim", kbsearch.EmbeddingDim)
+			}
+			continue
+		}
+		rows[i].EmbeddingText = texts[pos]
+		rows[i].Embedding = vec
+	}
+}
+
+func embedWithRetry(
+	ctx context.Context,
+	embedder Embedder,
+	modelName string,
+	text string,
+	timeoutSec int,
+	row kbsearch.RegistryRow,
+	logger ApiTypes.JimoLogger,
+) ([]float64, error) {
+	var lastErr error
+	for attempt := 1; attempt <= embeddingMaxAttempts; attempt++ {
+		vec, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: modelName, InputText: text})
+		if err == nil {
+			return vec, nil
+		}
+		lastErr = err
+		if attempt == embeddingMaxAttempts || !isRetryableEmbeddingError(err) {
+			return nil, lastErr
+		}
+		if logger != nil {
+			logger.Info("embedding transient failure; retrying",
+				"artifact_type", row.ArtifactType,
+				"artifact_id", row.ArtifactID,
+				"attempt", attempt,
+				"max_attempts", embeddingMaxAttempts,
+				"embedding_timeout_sec", timeoutSec,
+				"error", err.Error())
+		}
+		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
+func embedBatchWithRetry(
+	ctx context.Context,
+	embedder Embedder,
+	modelName string,
+	texts []string,
+	timeoutSec int,
+	rows []kbsearch.RegistryRow,
+	rowIndices []int,
+	logger ApiTypes.JimoLogger,
+) ([][]float64, error) {
+	if len(texts) == 1 {
+		vec, err := embedWithRetry(ctx, embedder, modelName, texts[0], timeoutSec, rows[rowIndices[0]], logger)
+		if err != nil {
+			return nil, err
+		}
+		return [][]float64{vec}, nil
+	}
+	batcher, ok := embedder.(batchEmbedder)
+	if !ok {
+		out := make([][]float64, 0, len(texts))
+		for pos, text := range texts {
+			vec, err := embedWithRetry(ctx, embedder, modelName, text, timeoutSec, rows[rowIndices[pos]], logger)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, vec)
+		}
+		return out, nil
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= embeddingMaxAttempts; attempt++ {
+		vecs, err := batcher.EmbedBatch(ctx, llmclients.EmbedBatchInput{
+			ModelName:  modelName,
+			InputTexts: texts,
+		})
+		if err == nil {
+			return vecs, nil
+		}
+		lastErr = err
+		if attempt == embeddingMaxAttempts || !isRetryableEmbeddingError(err) {
+			return nil, lastErr
+		}
+		if logger != nil {
+			logger.Info("embedding transient batch failure; retrying",
+				"artifact_type", rows[rowIndices[0]].ArtifactType,
+				"artifact_id", rows[rowIndices[0]].ArtifactID,
+				"attempt", attempt,
+				"max_attempts", embeddingMaxAttempts,
+				"embedding_timeout_sec", timeoutSec,
+				"batch_size", len(texts),
+				"error", err.Error())
+		}
+		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
+func isRetryableEmbeddingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "Client.Timeout exceeded") {
+		return true
+	}
+	return strings.Contains(msg, "status 429") ||
+		strings.Contains(msg, "status 500") ||
+		strings.Contains(msg, "status 502") ||
+		strings.Contains(msg, "status 503") ||
+		strings.Contains(msg, "status 504")
 }

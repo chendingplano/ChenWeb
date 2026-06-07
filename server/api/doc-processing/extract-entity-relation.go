@@ -108,9 +108,7 @@ func NewEntityRelationProcessor(
 	extractor LLMJSONExtractor,
 	_ ApiTypes.JimoLogger,
 ) *EntityRelationProcessor {
-	// if logger == nil {
 	logger := loggerutil.CreateDefaultLogger("MID_26052701")
-	// }
 	promptText, promptRef, promptPath, promptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_ENTITY_RELATION_PROMPT"},
 		"prompt-extract-entity-relation-v1.md",
@@ -598,6 +596,7 @@ func (p *EntityRelationProcessor) extractEntityRelationWithFallback(ctx context.
 		p.Logger.Warn("primary entity-relation extraction failed; retrying fallback model",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
+			"timeout", p.ModelCfg.TimeoutSec,
 			"error", err,
 			"prompt_name", p.PromptRef,
 		)

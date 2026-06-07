@@ -2,10 +2,13 @@ package docprocessing
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -59,5 +62,239 @@ timeout_sec = 1
 	}
 	if got != 1 {
 		t.Fatalf("embedding_timeout_sec=%v, want 1", got)
+	}
+}
+
+func TestEmbedRegistryRows_UsesBoundedConcurrency(t *testing.T) {
+	var current int32
+	var maxSeen int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inFlight := atomic.AddInt32(&current, 1)
+		defer atomic.AddInt32(&current, -1)
+
+		for {
+			prev := atomic.LoadInt32(&maxSeen)
+			if inFlight <= prev || atomic.CompareAndSwapInt32(&maxSeen, prev, inFlight) {
+				break
+			}
+		}
+
+		time.Sleep(75 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{
+				"embedding": make([]float64, kbsearch.EmbeddingDim),
+			}},
+		})
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[embedding-test]
+host = "cloud"
+model_name = "text-embedding-3-small"
+api_key = "sk-test"
+base_url = "` + server.URL + `"
+timeout_sec = 5
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
+	t.Setenv("EMBEDDING_MODEL_NAME", "embedding-test")
+	t.Setenv("MODELS_FILE", modelsPath)
+	t.Setenv("EMBEDDING_MAX_GOROUTINES", "2")
+	t.Setenv("EMBEDDING_BATCH_SIZE", "1")
+
+	rows := make([]kbsearch.RegistryRow, 6)
+	for i := range rows {
+		rows[i] = kbsearch.RegistryRow{
+			ArtifactType:   "relation",
+			ArtifactID:     strconv.Itoa(i + 1),
+			EmbeddingText:  "relation text",
+			SearchDocument: "relation text",
+		}
+	}
+
+	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+
+	if got := atomic.LoadInt32(&maxSeen); got != 2 {
+		t.Fatalf("max concurrent requests=%d, want 2", got)
+	}
+	for i, row := range rows {
+		if len(row.Embedding) != kbsearch.EmbeddingDim {
+			t.Fatalf("row %d embedding len=%d, want %d", i, len(row.Embedding), kbsearch.EmbeddingDim)
+		}
+	}
+}
+
+func TestEmbedRegistryRows_BatchesMultipleRowsPerRequest(t *testing.T) {
+	var requests int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+
+		var body struct {
+			Input any `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		inputs, ok := body.Input.([]any)
+		if !ok {
+			t.Fatalf("input type=%T, want []any", body.Input)
+		}
+		embs := make([]map[string]any, 0, len(inputs))
+		for range inputs {
+			embs = append(embs, map[string]any{
+				"embedding": make([]float64, kbsearch.EmbeddingDim),
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": embs})
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[embedding-test]
+host = "cloud"
+model_name = "text-embedding-3-small"
+api_key = "sk-test"
+base_url = "` + server.URL + `"
+timeout_sec = 5
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
+	t.Setenv("EMBEDDING_MODEL_NAME", "embedding-test")
+	t.Setenv("MODELS_FILE", modelsPath)
+	t.Setenv("EMBEDDING_MAX_GOROUTINES", "1")
+	t.Setenv("EMBEDDING_BATCH_SIZE", "3")
+
+	rows := make([]kbsearch.RegistryRow, 6)
+	for i := range rows {
+		rows[i] = kbsearch.RegistryRow{
+			ArtifactType:   "relation",
+			ArtifactID:     strconv.Itoa(i + 1),
+			EmbeddingText:  "relation text",
+			SearchDocument: "relation text",
+		}
+	}
+
+	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+
+	if got := atomic.LoadInt32(&requests); got != 2 {
+		t.Fatalf("requests=%d, want 2", got)
+	}
+	for i, row := range rows {
+		if len(row.Embedding) != kbsearch.EmbeddingDim {
+			t.Fatalf("row %d embedding len=%d, want %d", i, len(row.Embedding), kbsearch.EmbeddingDim)
+		}
+	}
+}
+
+func TestEmbedRegistryRows_RetriesTransientEmbeddingFailures(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt := atomic.AddInt32(&attempts, 1)
+		if attempt < 3 {
+			time.Sleep(1100 * time.Millisecond)
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{
+				"embedding": make([]float64, kbsearch.EmbeddingDim),
+			}},
+		})
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[embedding-test]
+host = "cloud"
+model_name = "text-embedding-3-small"
+api_key = "sk-test"
+base_url = "` + server.URL + `"
+timeout_sec = 1
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
+	t.Setenv("EMBEDDING_MODEL_NAME", "embedding-test")
+	t.Setenv("MODELS_FILE", modelsPath)
+	t.Setenv("EMBEDDING_MAX_GOROUTINES", "1")
+	t.Setenv("EMBEDDING_BATCH_SIZE", "1")
+
+	rows := []kbsearch.RegistryRow{{
+		ArtifactType:   "entity",
+		ArtifactID:     "177_art_166",
+		EmbeddingText:  "entity text",
+		SearchDocument: "entity text",
+	}}
+
+	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Fatalf("attempts=%d, want 3", got)
+	}
+	if len(rows[0].Embedding) != kbsearch.EmbeddingDim {
+		t.Fatalf("embedding len=%d, want %d", len(rows[0].Embedding), kbsearch.EmbeddingDim)
+	}
+}
+
+func TestEmbedRegistryRows_DoesNotRetryPermanentEmbeddingFailures(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad request"}`))
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[embedding-test]
+host = "cloud"
+model_name = "text-embedding-3-small"
+api_key = "sk-test"
+base_url = "` + server.URL + `"
+timeout_sec = 5
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
+	t.Setenv("EMBEDDING_MODEL_NAME", "embedding-test")
+	t.Setenv("MODELS_FILE", modelsPath)
+	t.Setenv("EMBEDDING_MAX_GOROUTINES", "1")
+
+	rows := []kbsearch.RegistryRow{{
+		ArtifactType:   "entity",
+		ArtifactID:     "177_art_166",
+		EmbeddingText:  "entity text",
+		SearchDocument: "entity text",
+	}}
+
+	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("attempts=%d, want 1", got)
+	}
+	if len(rows[0].Embedding) != 0 {
+		t.Fatalf("embedding len=%d, want 0", len(rows[0].Embedding))
 	}
 }

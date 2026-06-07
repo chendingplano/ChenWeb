@@ -422,6 +422,49 @@ func TestMetricConnectEnvDefaults(t *testing.T) {
 	}
 }
 
+func TestParseVectorLiteral(t *testing.T) {
+	got, err := parseVectorLiteral("[0.25, -0.5, 1]")
+	if err != nil {
+		t.Fatalf("parseVectorLiteral returned error: %v", err)
+	}
+	want := []float64{0.25, -0.5, 1}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseVectorLiteral = %v, want %v", got, want)
+	}
+}
+
+func TestHydrateArtifactEmbeddingsLoadsStoredVectors(t *testing.T) {
+	t.Setenv("SEARCH_SEMANTIC_ENABLED", "true")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	vecText := "[" + strings.TrimSpace(strings.Repeat("0.1,", 1535)) + "0.1]"
+	mock.ExpectQuery("SELECT artifact_id, embedding::text\\s+FROM kb.search_artifacts").
+		WithArgs(searchArtifactEntity, int64(177)).
+		WillReturnRows(sqlmock.NewRows([]string{"artifact_id", "embedding"}).
+			AddRow("177_art_1", vecText))
+
+	artifacts := []indexedArtifact{
+		{ID: "177_art_1"},
+		{ID: "177_art_2"},
+	}
+	hydrateArtifactEmbeddings(context.Background(), db, 177, searchArtifactEntity, artifacts, nil, "entity indexing")
+
+	if got := len(artifacts[0].Embedding); got != 1536 {
+		t.Fatalf("hydrated embedding len = %d, want 1536", got)
+	}
+	if len(artifacts[1].Embedding) != 0 {
+		t.Fatalf("unexpected embedding for second artifact: len=%d", len(artifacts[1].Embedding))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMetricsTxtLeafDirUpsertAndRemove(t *testing.T) {
 	dir := t.TempDir()
 	leaf := filepath.Join(dir, "energy", "efficiency")

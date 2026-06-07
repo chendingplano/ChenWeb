@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 func (p *SceneBlocksProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
@@ -165,6 +166,10 @@ func (p *ProvisionsProcessor) loadRecordChunks(rec DocMetadataInputRecord, recor
 }
 
 func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
+	start := time.Now()
+	if p.Logger != nil {
+		p.Logger.Info("entity-relation post-process start", "record_id", recordID)
+	}
 	rec, err := p.InputStore.GetInputRecord(ctx, recordID)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -182,23 +187,68 @@ func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID
 		return fmt.Errorf("(APID_26060609) check relations exist for record %d: %w", recordID, err)
 	}
 	if !entitiesExist && !relationsExist {
+		if p.Logger != nil {
+			p.Logger.Info("entity-relation post-process skipped: no artifacts",
+				"record_id", recordID,
+				"ms_used", time.Since(start).Milliseconds(),
+			)
+		}
 		return nil
 	}
 
+	chunkStart := time.Now()
 	chunks, chunkErr := p.loadRecordChunks(rec, recordID)
 	if chunkErr != nil {
 		p.Logger.Warn("post-process entity relation: load chunks failed; indexing without chunk overlap",
 			"record_id", recordID, "error", chunkErr)
+	} else if p.Logger != nil {
+		p.Logger.Info("entity-relation post-process chunks loaded",
+			"record_id", recordID,
+			"chunks", len(chunks),
+			"ms_used", time.Since(chunkStart).Milliseconds(),
+		)
 	}
 
+	entityReindexStart := time.Now()
 	if reindexErr := ReindexEntitySearchForRecord(ctx, recordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex entity search registry failed", "record_id", recordID, "error", reindexErr)
+	} else if p.Logger != nil {
+		p.Logger.Info("entity-relation post-process entity reindex finished",
+			"record_id", recordID,
+			"ms_used", time.Since(entityReindexStart).Milliseconds(),
+		)
 	}
+	relationReindexStart := time.Now()
 	if reindexErr := ReindexRelationSearchForRecord(ctx, recordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex relation search registry failed", "record_id", recordID, "error", reindexErr)
+	} else if p.Logger != nil {
+		p.Logger.Info("entity-relation post-process relation reindex finished",
+			"record_id", recordID,
+			"ms_used", time.Since(relationReindexStart).Milliseconds(),
+		)
 	}
+	entityIndexStart := time.Now()
 	IndexEntitiesForRecord(ctx, recordID, chunks, p.Logger)
+	if p.Logger != nil {
+		p.Logger.Info("entity-relation post-process entity indexing finished",
+			"record_id", recordID,
+			"ms_used", time.Since(entityIndexStart).Milliseconds(),
+		)
+	}
+	relationIndexStart := time.Now()
 	IndexRelationsForRecord(ctx, recordID, chunks, p.Logger)
+	if p.Logger != nil {
+		p.Logger.Info("entity-relation post-process relation indexing finished",
+			"record_id", recordID,
+			"ms_used", time.Since(relationIndexStart).Milliseconds(),
+		)
+		p.Logger.Info("entity-relation post-process finished",
+			"record_id", recordID,
+			"entities_exist", entitiesExist,
+			"relations_exist", relationsExist,
+			"total_ms", time.Since(start).Milliseconds(),
+		)
+	}
 	return nil
 }
 

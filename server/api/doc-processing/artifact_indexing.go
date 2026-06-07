@@ -33,6 +33,7 @@ type indexedArtifact struct {
 	SourceSpans    []string
 	Categories     []string
 	SearchDocument string
+	Embedding      []float64
 }
 
 // artifactIndexConfig parameterizes the shared indexing helpers for one artifact family.
@@ -79,6 +80,7 @@ var artifactConnectedFamilies = []artifactConnectedFamily{
 // every other family. Returns the number of artifacts whose connected_artifacts was
 // written.
 func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID int64, inputChunks []Block, artifacts []indexedArtifact, cfg artifactIndexConfig, logger ApiTypes.JimoLogger) int {
+	start := time.Now()
 	// Target families are every connected family except the source family itself.
 	targets := make([]artifactConnectedFamily, 0, len(artifactConnectedFamilies))
 	for _, fam := range artifactConnectedFamilies {
@@ -89,7 +91,9 @@ func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID i
 	}
 
 	refsByType := make(map[string][]ArtifactRef, len(targets))
+	totalRefs := 0
 	for _, fam := range targets {
+		familyStart := time.Now()
 		var (
 			refs []ArtifactRef
 			err  error
@@ -106,6 +110,15 @@ func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID i
 			continue
 		}
 		refsByType[fam.regType] = refs
+		totalRefs += len(refs)
+		if logger != nil {
+			logger.Info(cfg.LogPrefix+" connected-artifacts refs loaded",
+				"record_id", recordID,
+				"artifact_type", fam.regType,
+				"ref_count", len(refs),
+				"ms_used", time.Since(familyStart).Milliseconds(),
+			)
+		}
 	}
 
 	updateStmt := fmt.Sprintf("UPDATE %s SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND %s = $3", cfg.Table, cfg.IDColumn)
@@ -159,7 +172,110 @@ func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID i
 		}
 		updated++
 	}
+	if logger != nil {
+		logger.Info(cfg.LogPrefix+" connected-artifacts finished",
+			"record_id", recordID,
+			"artifacts", len(artifacts),
+			"target_families", len(targets),
+			"total_refs", totalRefs,
+			"updated", updated,
+			"ms_used", time.Since(start).Milliseconds(),
+		)
+	}
 	return updated
+}
+
+func hydrateArtifactEmbeddings(ctx context.Context, db *sql.DB, recordID int64, artifactType string, artifacts []indexedArtifact, logger ApiTypes.JimoLogger, logPrefix string) {
+	if db == nil || len(artifacts) == 0 || !kbsearch.SemanticSearchEnabled() {
+		return
+	}
+	start := time.Now()
+	rows, err := db.QueryContext(ctx,
+		`SELECT artifact_id, embedding::text
+		 FROM kb.search_artifacts
+		 WHERE artifact_type = $1 AND input_record_id = $2 AND embedding IS NOT NULL`,
+		artifactType, recordID,
+	)
+	if err != nil {
+		if logger != nil {
+			logger.Warn(logPrefix+": load stored embeddings failed", "record_id", recordID, "artifact_type", artifactType, "error", err.Error())
+		}
+		return
+	}
+	defer func() { _ = rows.Close() }()
+
+	embeddingsByID := make(map[string][]float64, len(artifacts))
+	for rows.Next() {
+		var artifactID string
+		var raw string
+		if err := rows.Scan(&artifactID, &raw); err != nil {
+			if logger != nil {
+				logger.Warn(logPrefix+": scan stored embedding failed", "record_id", recordID, "artifact_type", artifactType, "error", err.Error())
+			}
+			return
+		}
+		vec, err := parseVectorLiteral(raw)
+		if err != nil {
+			if logger != nil {
+				logger.Warn(logPrefix+": parse stored embedding failed",
+					"record_id", recordID,
+					"artifact_type", artifactType,
+					"artifact_id", artifactID,
+					"error", err.Error())
+			}
+			continue
+		}
+		if len(vec) == kbsearch.EmbeddingDim {
+			embeddingsByID[strings.TrimSpace(artifactID)] = vec
+		}
+	}
+	if err := rows.Err(); err != nil {
+		if logger != nil {
+			logger.Warn(logPrefix+": iterate stored embeddings failed", "record_id", recordID, "artifact_type", artifactType, "error", err.Error())
+		}
+		return
+	}
+
+	hydrated := 0
+	for i := range artifacts {
+		if vec, ok := embeddingsByID[strings.TrimSpace(artifacts[i].ID)]; ok {
+			artifacts[i].Embedding = vec
+			hydrated++
+		}
+	}
+	if logger != nil {
+		logger.Info(logPrefix+" stored embeddings hydrated",
+			"record_id", recordID,
+			"artifact_type", artifactType,
+			"artifacts", len(artifacts),
+			"hydrated", hydrated,
+			"ms_used", time.Since(start).Milliseconds(),
+		)
+	}
+}
+
+func parseVectorLiteral(raw string) ([]float64, error) {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "[")
+	raw = strings.TrimSuffix(raw, "]")
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []float64{}, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]float64, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		f, err := strconv.ParseFloat(part, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse vector float %q: %w", part, err)
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 // upsertArtifactCategoryInstances resolves every artifact's category keys in one Phase C
@@ -366,6 +482,7 @@ type hybridCandidate struct {
 // call. Returns the total number of edges written. (Metric spec 3.1.5; inventory 3.3.5
 // reuses the identical policy.)
 func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, logger ApiTypes.JimoLogger) int {
+	start := time.Now()
 	scfg := appconfig.GetArtifactSearchConfig()
 	dict := sanitizeTSDictionary(scfg.Dictionary)
 	minRank := scfg.MinRank
@@ -373,21 +490,30 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 	maxLinks := metricConnectMaxLinks()
 
 	embedder, embModel, _, embOK := newSearchEmbedder()
-	semanticOn := kbsearch.SemanticSearchEnabled() && embOK
+	semanticFeatureOn := kbsearch.SemanticSearchEnabled()
 
 	allAccepted := make([]Connection, 0, len(artifacts))
+	queriedArtifacts := 0
+	reusedEmbeddings := 0
+	fallbackEmbeddings := 0
 	for _, a := range artifacts {
 		query := strings.TrimSpace(a.SearchDocument)
 		if query == "" {
 			continue
 		}
+		queriedArtifacts++
 
 		var vec []float64
 		useSem := false
-		if semanticOn {
+		if semanticFeatureOn && len(a.Embedding) == kbsearch.EmbeddingDim {
+			vec = a.Embedding
+			useSem = true
+			reusedEmbeddings++
+		} else if semanticFeatureOn && embOK {
 			if v, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: embModel, InputText: truncateRunes(query, maxEmbeddingRunes)}); err == nil && len(v) == kbsearch.EmbeddingDim {
 				vec = v
 				useSem = true
+				fallbackEmbeddings++
 			}
 		}
 
@@ -449,6 +575,18 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 			logger.Warn(cfg.LogPrefix+": replace semantic connections failed", "record_id", recordID, "error", err.Error())
 		}
 		return 0
+	}
+	if logger != nil {
+		logger.Info(cfg.LogPrefix+" semantic-linking finished",
+			"record_id", recordID,
+			"artifacts", len(artifacts),
+			"queried_artifacts", queriedArtifacts,
+			"accepted_links", len(allAccepted),
+			"semantic_search_enabled", semanticFeatureOn,
+			"reused_embeddings", reusedEmbeddings,
+			"fallback_embeddings", fallbackEmbeddings,
+			"ms_used", time.Since(start).Milliseconds(),
+		)
 	}
 	return len(allAccepted)
 }

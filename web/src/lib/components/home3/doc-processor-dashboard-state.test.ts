@@ -123,3 +123,17 @@ test('entity relation stage recognizes doc_processing entry with doc_processor_n
 	assert.equal(entityRelation.status, 'in-progress');
 	assert.equal(entityRelation.entry?.doc_processor_name, 'extract_entity_relation');
 });
+
+test('live doc_processing entry overrides stale stage success for the running processor', () => {
+	const record = makeRecord([
+		{ operation: 'extract_inventory_items', proc_status: 'success' },
+		{ operation: 'doc_processing', proc_status: 'running', doc_processor_name: 'extract_inventory_items' }
+	]);
+
+	const stages = computeStages(record);
+	const inventoryItems = stages.find((stage) => stage.id === 'extract_inventory_items');
+
+	assert.ok(inventoryItems);
+	assert.equal(inventoryItems.status, 'in-progress');
+	assert.equal(inventoryItems.entry?.doc_processor_name, 'extract_inventory_items');
+});
