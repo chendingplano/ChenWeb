@@ -87,16 +87,23 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			rc := EchoFactory.NewFromEcho(c, "CWB_RTR_076")
 			path := c.Request().URL.Path
 			ctx := c.Request().Context()
+			reqID, _ := c.Get(string(ApiTypes.RequestIDKey)).(string)
+			if reqID == "" {
+				reqID, _ = ctx.Value(ApiTypes.RequestIDKey).(string)
+			}
+			if reqID == "" {
+				reqID = ApiUtils.GenerateRequestID("e")
+			}
 			new_ctx := context.WithValue(ctx, ApiTypes.CallFlowKey, "CWB_RTS_072")
-			reqID := ApiUtils.GenerateRequestID("e")
 			new_ctx1 := context.WithValue(new_ctx, ApiTypes.RequestIDKey, reqID)
 
 			// Create a new request with the updated context
 			newReq := c.Request().WithContext(new_ctx1)
 			c.SetRequest(newReq)
+			c.Set(string(ApiTypes.RequestIDKey), reqID)
+			rc := EchoFactory.NewFromEcho(c, "CWB_RTR_076")
 
 			// Public endpoints.
 			// IMPORTANT: need to load from a configuration file!

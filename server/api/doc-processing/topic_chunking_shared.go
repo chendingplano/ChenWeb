@@ -177,7 +177,6 @@ func writeCombinedChunkFile(chunkDir string, recordID int64, fileName string, ch
 	loggerutil.CreateDefaultLogger("MID_26053003").Info("chunk artifact content before write",
 		"record_id", recordID,
 		"path", path,
-		"content", content,
 	)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return "", err

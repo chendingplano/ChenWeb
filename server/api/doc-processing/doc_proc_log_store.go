@@ -262,6 +262,7 @@ func allowedDocProcLogEntryType(entryType string) bool {
 }
 
 func insertDocProcLog(ctx context.Context, db *sql.DB, rec DocProcLogRecord, loc string) error {
+	recordDocProcLogSpan(ctx, rec)
 	if db == nil {
 		return errors.New("db is nil")
 	}

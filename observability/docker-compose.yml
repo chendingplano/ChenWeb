@@ -1,0 +1,37 @@
+name: chenweb-observability
+
+services:
+  clickstack:
+    image: clickhouse/clickstack-all-in-one:latest
+    container_name: chenweb-clickstack
+    ports:
+      - "8088:8080"
+      - "18123:8123"
+      - "19000:9000"
+    volumes:
+      - clickstack-data:/var/lib/clickhouse
+
+  chenweb-app-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: chenweb-app-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      - clickstack
+    ports:
+      - "14317:4317"
+      - "14318:4318"
+    volumes:
+      - ./otel-app-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+
+  chenweb-log-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: chenweb-log-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      - clickstack
+    volumes:
+      - ./otel-filelog-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ${CHENWEB_LOG_DIR:-/Users/cding/Apps/ChenWebLog}:/var/log/chenweb:ro
+
+volumes:
+  clickstack-data:

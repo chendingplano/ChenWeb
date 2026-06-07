@@ -41,6 +41,27 @@ run = 'go tool air'
 [tasks.dev-web]
 run = "cd web && bun run dev"
 
+[tasks.docker-start]
+run = "colima start"
+
+[tasks.docker-stop]
+run = "colima stop"
+
+[tasks.docker-status]
+run = "colima status"
+
+[tasks.obs-up]
+run = "docker compose -f observability/docker-compose.yml up -d"
+
+[tasks.obs-down]
+run = "docker compose -f observability/docker-compose.yml down"
+
+[tasks.obs-logs]
+run = "docker compose -f observability/docker-compose.yml logs -f"
+
+[tasks.obs-ui]
+run = "printf 'HyperDX UI: http://localhost:8088\\nOTLP HTTP: http://localhost:14318\\nOTLP gRPC: localhost:14317\\n'"
+
 [tasks.publish]
 run = '''
 mise build-web

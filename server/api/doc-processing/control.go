@@ -15,6 +15,10 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Processor interface {
@@ -65,7 +69,14 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 	go func() {
 		defer releaseSlot()
 		procStart := s.now()
-		procErr := s.handleEvent(withEventID(ctx, eventID), payload)
+		var procErr error
+		procCtx := withEventID(ctx, eventID)
+		if evt, err := ParseLineFileGeneratedEvent(payload); err == nil {
+			var spanEnd func(error)
+			procCtx, spanEnd = s.startPipelineTrace(procCtx, subject, eventID, evt)
+			defer func() { spanEnd(procErr) }()
+		}
+		procErr = s.handleEvent(procCtx, payload)
 		if s.EventStore == nil || strings.TrimSpace(eventID) == "" {
 			return
 		}
@@ -74,6 +85,19 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 		}
 	}()
 	return nil
+}
+
+func (s *ControlService) startPipelineTrace(ctx context.Context, subject string, eventID string, evt LineFileGeneratedEvent) (context.Context, func(error)) {
+	ctx, span := startPipelineSpan(ctx, subject, eventID, evt)
+	return ctx, func(err error) {
+		status := "success"
+		if err != nil {
+			status = "failed"
+		}
+		span.SetAttributes(attribute.String("pipeline.status", status))
+		endSpanWithStatus(span, status, err)
+		span.End()
+	}
 }
 
 func (s *ControlService) acquirePipelineSlot(ctx context.Context) (func(), error) {
@@ -276,31 +300,68 @@ type PostProcessIndexer interface {
 }
 
 // runPostProcessIndexing executes Phase C: for each invoked processor that implements
-// PostProcessIndexer, run its indexing step. Errors are logged and do not abort the other
-// processors' indexing. The caller skips this when the pipeline was stopped.
+// PostProcessIndexer, run its indexing step concurrently (one goroutine per processor).
+// Errors are logged and do not abort sibling processors' indexing. The caller skips this
+// when the pipeline was stopped.
 func (s *ControlService) runPostProcessIndexing(ctx context.Context, processors []Processor, recordID int64) {
 	if isCtxStopped(ctx) {
 		return
 	}
+	ctx, phaseSpan := startPhaseSpan(ctx, "C", recordID, processors)
+	defer phaseSpan.End()
+
+	var wg sync.WaitGroup
 	for _, p := range processors {
 		indexer, ok := p.(PostProcessIndexer)
 		if !ok {
 			continue
 		}
-		name := processorLogName(p)
-		if s.Logger != nil {
-			s.Logger.Info("post-process indexing start", "record_id", recordID, "processor", name)
-		}
-		if err := indexer.PostProcessIndex(ctx, recordID); err != nil {
+		wg.Add(1)
+		go func(p Processor, indexer PostProcessIndexer) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					if s.Logger != nil {
+						s.Logger.Error("post-process indexing panicked", "record_id", recordID, "processor", processorLogName(p), "panic", r)
+					}
+				}
+			}()
+
+			startTime := time.Now()
+			name := processorLogName(p)
 			if s.Logger != nil {
-				s.Logger.Error("post-process indexing failed", "record_id", recordID, "processor", name, "error", err)
+				s.Logger.Info("post-process indexing start", "record_id", recordID, "processor", name)
 			}
-			continue
-		}
-		if s.Logger != nil {
-			s.Logger.Info("post-process indexing finished", "record_id", recordID, "processor", name)
-		}
+			indexCtx, indexSpan := otel.Tracer(docProcessorTracerName).Start(ctx, "doc_processor.post_process_index",
+				trace.WithAttributes(
+					attribute.Int64("doc.record_id", recordID),
+					attribute.String("processor.name", name),
+					attribute.String("processor.phase", "C"),
+				),
+			)
+			if err := indexer.PostProcessIndex(indexCtx, recordID); err != nil {
+				indexSpan.RecordError(err)
+				indexSpan.SetStatus(codes.Error, err.Error())
+				indexSpan.SetAttributes(attribute.String("index.status", "failed"))
+				indexSpan.End()
+				if s.Logger != nil {
+					s.Logger.Error("post-process indexing failed", "record_id", recordID, "processor", name, "error", err)
+				}
+				return
+			}
+			indexSpan.SetAttributes(attribute.String("index.status", "success"))
+			indexSpan.SetStatus(codes.Ok, "success")
+			indexSpan.End()
+			if s.Logger != nil {
+				s.Logger.Info("post-process indexing finished",
+					"record_id", recordID,
+					"processor", name,
+					"ms_used", time.Since(startTime).Milliseconds(),
+				)
+			}
+		}(p, indexer)
 	}
+	wg.Wait()
 }
 
 // isPhaseAProcessor reports whether the named processor is a mandatory,
@@ -327,6 +388,8 @@ type procResult struct {
 func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload []byte, p Processor, recordID int64) procResult {
 	procStart := s.now()
 	processorName := processorLogName(p)
+	ctx, span := startProcessorSpan(ctx, p, processorPhase(p), recordID)
+	defer span.End()
 	if s.Logger != nil {
 		s.Logger.Info("start running processor",
 			"record_id", recordID,
@@ -354,6 +417,7 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 				"ms_used", time.Since(procStart).Milliseconds(),
 			)
 		}
+		setProcessorSpanResult(span, procStatus, err, time.Since(procStart).Milliseconds())
 		return res
 	}
 	if s.Logger != nil {
@@ -364,6 +428,7 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 			"ms_used", time.Since(procStart).Milliseconds(),
 		)
 	}
+	setProcessorSpanResult(span, "success", nil, time.Since(procStart).Milliseconds())
 	return procResult{}
 }
 
@@ -383,6 +448,19 @@ func (s *ControlService) runProcessorsSequential(
 	ctx context.Context, payload []byte, processors []Processor,
 	recordID int64, requestFailed, requestStopped *bool, firstErr *error,
 ) {
+	phaseA, phaseB := splitProcessorsByPhase(processors)
+	phaseACtx, phaseASpan := startPhaseSpan(ctx, "A", recordID, phaseA)
+	phaseAEnded := false
+	endPhaseA := func() {
+		if !phaseAEnded {
+			phaseASpan.End()
+			phaseAEnded = true
+		}
+	}
+	defer endPhaseA()
+	var phaseBSpan trace.Span
+	phaseBCtx := ctx
+	phaseBStarted := false
 	for _, p := range processors {
 		if p == nil {
 			continue
@@ -394,7 +472,17 @@ func (s *ControlService) runProcessorsSequential(
 			}
 			return
 		}
-		s.runSingleProcessor(ctx, payload, p, recordID, requestFailed, firstErr)
+		runCtx := phaseACtx
+		if !isPhaseAProcessor(p.Name()) {
+			if !phaseBStarted {
+				endPhaseA()
+				phaseBCtx, phaseBSpan = startPhaseSpan(ctx, "B", recordID, phaseB)
+				phaseBStarted = true
+				defer phaseBSpan.End()
+			}
+			runCtx = phaseBCtx
+		}
+		s.runSingleProcessor(runCtx, payload, p, recordID, requestFailed, firstErr)
 		if !*requestFailed && canonicalOperationName(p.Name()) == "static_analyzer" {
 			clearBlockBufferInContext(ctx)
 		}
@@ -419,20 +507,18 @@ func (s *ControlService) runProcessorsTwoPhase(
 	ctx context.Context, payload []byte, processors []Processor,
 	recordID int64, requestFailed, requestStopped *bool, firstErr *error,
 ) {
-	var phaseB []Processor
-	for _, p := range processors {
+	phaseA, phaseB := splitProcessorsByPhase(processors)
+	phaseACtx, phaseASpan := startPhaseSpan(ctx, "A", recordID, phaseA)
+	for _, p := range phaseA {
 		if p == nil {
-			continue
-		}
-		if !isPhaseAProcessor(p.Name()) {
-			phaseB = append(phaseB, p)
 			continue
 		}
 		if isCtxStopped(ctx) {
 			*requestStopped = true
+			phaseASpan.End()
 			return
 		}
-		s.runSingleProcessor(ctx, payload, p, recordID, requestFailed, firstErr)
+		s.runSingleProcessor(phaseACtx, payload, p, recordID, requestFailed, firstErr)
 		if !*requestFailed && canonicalOperationName(p.Name()) == "static_analyzer" {
 			clearBlockBufferInContext(ctx)
 		}
@@ -440,9 +526,11 @@ func (s *ControlService) runProcessorsTwoPhase(
 			*requestFailed = false
 			*firstErr = nil
 			*requestStopped = true
+			phaseASpan.End()
 			return
 		}
 	}
+	phaseASpan.End()
 	if isCtxStopped(ctx) {
 		*requestStopped = true
 		return
@@ -451,6 +539,8 @@ func (s *ControlService) runProcessorsTwoPhase(
 		return
 	}
 
+	phaseBCtx, phaseBSpan := startPhaseSpan(ctx, "B", recordID, phaseB)
+	defer phaseBSpan.End()
 	results := make([]procResult, len(phaseB))
 	var wg sync.WaitGroup
 	for i, p := range phaseB {
@@ -465,7 +555,7 @@ func (s *ControlService) runProcessorsTwoPhase(
 					}
 				}
 			}()
-			results[i] = s.runSingleProcessorCollect(ctx, payload, p, recordID)
+			results[i] = s.runSingleProcessorCollect(phaseBCtx, payload, p, recordID)
 		}(i, p)
 	}
 	wg.Wait()
@@ -518,12 +608,34 @@ func processorLogName(p Processor) string {
 	return p.Name()
 }
 
+func splitProcessorsByPhase(processors []Processor) ([]Processor, []Processor) {
+	phaseA := make([]Processor, 0, len(processors))
+	phaseB := make([]Processor, 0, len(processors))
+	for _, p := range processors {
+		if p == nil {
+			continue
+		}
+		if isPhaseAProcessor(p.Name()) {
+			phaseA = append(phaseA, p)
+			continue
+		}
+		phaseB = append(phaseB, p)
+	}
+	return phaseA, phaseB
+}
+
 func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGeneratedEvent) bool {
 	if s.InputStore == nil {
 		return true
 	}
+	_, recordSpan := otel.Tracer(docProcessorTracerName).Start(ctx, "doc_processor.record.load",
+		trace.WithAttributes(attribute.Int64("doc.record_id", evt.RecordID)),
+	)
 	rec, err := s.InputStore.GetInputRecord(ctx, evt.RecordID)
 	if err != nil {
+		recordSpan.RecordError(err)
+		recordSpan.SetStatus(codes.Error, err.Error())
+		recordSpan.End()
 		if errors.Is(err, sql.ErrNoRows) {
 			if s.Logger != nil {
 				s.Logger.Error("kb.inputs record not found", "record_id", evt.RecordID)
@@ -535,6 +647,12 @@ func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGenerat
 		}
 		return false
 	}
+	recordSpan.SetAttributes(
+		attribute.String("doc.parser_name", strings.TrimSpace(rec.ParserName)),
+		attribute.String("doc.result_filename", strings.TrimSpace(rec.ResultFilename)),
+	)
+	recordSpan.SetStatus(codes.Ok, "success")
+	recordSpan.End()
 
 	if strings.TrimSpace(rec.ParserName) == "" {
 		s.persistControlFailure(ctx, rec, errors.New("(MID_26042401) missing parser name"))
@@ -545,24 +663,58 @@ func (s *ControlService) preflightInput(ctx context.Context, evt LineFileGenerat
 		return false
 	}
 
+	_, resolveSpan := otel.Tracer(docProcessorTracerName).Start(ctx, "doc_processor.input_file.resolve",
+		trace.WithAttributes(
+			attribute.Int64("doc.record_id", evt.RecordID),
+			attribute.String("doc.parser_name", strings.TrimSpace(rec.ParserName)),
+		),
+	)
 	inputPath, err := ResolveInputFilePath(evt, rec.ResultFilename, rec.ParserName, rec.StagingFilename)
 	if err != nil {
+		resolveSpan.RecordError(err)
+		resolveSpan.SetStatus(codes.Error, err.Error())
+		resolveSpan.End()
 		s.persistControlFailure(ctx, rec, err)
 		return false
 	}
+	resolveSpan.SetAttributes(attribute.String("doc.input_path", inputPath))
+	resolveSpan.SetStatus(codes.Ok, "success")
+	resolveSpan.End()
+
+	_, validateSpan := otel.Tracer(docProcessorTracerName).Start(ctx, "doc_processor.input_file.validate",
+		trace.WithAttributes(
+			attribute.Int64("doc.record_id", evt.RecordID),
+			attribute.String("doc.input_path", inputPath),
+		),
+	)
 	fi, err := os.Stat(inputPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			s.persistControlFailure(ctx, rec, fmt.Errorf("(MID_26042405) input file not exist: %s", inputPath))
+			procErr := fmt.Errorf("(MID_26042405) input file not exist: %s", inputPath)
+			validateSpan.RecordError(procErr)
+			validateSpan.SetStatus(codes.Error, procErr.Error())
+			validateSpan.End()
+			s.persistControlFailure(ctx, rec, procErr)
 			return false
 		}
-		s.persistControlFailure(ctx, rec, fmt.Errorf("(MID_26042406) stat input file: %w", err))
+		procErr := fmt.Errorf("(MID_26042406) stat input file: %w", err)
+		validateSpan.RecordError(procErr)
+		validateSpan.SetStatus(codes.Error, procErr.Error())
+		validateSpan.End()
+		s.persistControlFailure(ctx, rec, procErr)
 		return false
 	}
 	if fi.Size() == 0 {
-		s.persistControlFailure(ctx, rec, errors.New("(MID_26042403) input file empty"))
+		procErr := errors.New("(MID_26042403) input file empty")
+		validateSpan.RecordError(procErr)
+		validateSpan.SetStatus(codes.Error, procErr.Error())
+		validateSpan.End()
+		s.persistControlFailure(ctx, rec, procErr)
 		return false
 	}
+	validateSpan.SetAttributes(attribute.Int64("doc.input_size_bytes", fi.Size()))
+	validateSpan.SetStatus(codes.Ok, "success")
+	validateSpan.End()
 	return true
 }
 

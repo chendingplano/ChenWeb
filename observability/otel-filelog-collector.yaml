@@ -1,0 +1,42 @@
+receivers:
+  filelog:
+    include:
+      - /var/log/chenweb/app.log
+    start_at: end
+    operators:
+      - type: json_parser
+        id: parse_json_log
+        on_error: send_quiet
+
+processors:
+  batch:
+    timeout: 2s
+  resource:
+    attributes:
+      - key: service.name
+        value: chenweb
+        action: upsert
+      - key: telemetry.source
+        value: chenweb-filelog
+        action: upsert
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickstack:9000?dial_timeout=10s
+    database: default
+    username: default
+    password: ""
+    ttl: 720h
+    create_schema: false
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+service:
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [resource, batch]
+      exporters: [clickhouse]

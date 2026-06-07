@@ -19,6 +19,7 @@ import (
 	"github.com/chendingplano/shared/go/api/databaseutil"
 	"github.com/chendingplano/shared/go/api/libmanager"
 	"github.com/chendingplano/shared/go/api/loggerutil"
+	"github.com/chendingplano/shared/go/api/observability"
 	"github.com/chendingplano/shared/go/api/security"
 	"github.com/chendingplano/shared/go/api/sysdatastores"
 	"github.com/joho/godotenv"
@@ -90,6 +91,28 @@ func main() {
 		"port", ApiTypes.CommonConfig.AppInfo.AppPort)
 
 	e := echo.New()
+	obsCfg := observability.ConfigFromEnv("chenweb")
+	obsShutdown, err := observability.Init(ctx, obsCfg)
+	if err != nil {
+		logger.Error("failed to initialize observability", "error", err, "enabled", obsCfg.Enabled)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := obsShutdown(shutdownCtx); err != nil {
+			logger.Warn("failed to shutdown observability", "error", err)
+		}
+	}()
+	if obsCfg.Enabled {
+		logger.Info("observability enabled",
+			"service", obsCfg.ServiceName,
+			"environment", obsCfg.Environment,
+			"otlp_endpoint", obsCfg.OTLPEndpoint)
+	} else {
+		logger.Info("observability disabled")
+	}
+	e.Use(observability.RequestMiddleware(obsCfg))
 
 	// ✅ Enable CORS
 	logger.Info("Configure CORS", "loc", "CWB_DDM_045")

@@ -18,6 +18,7 @@ import (
 	"github.com/chendingplano/shared/go/api/databaseutil"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
+	"github.com/chendingplano/shared/go/api/observability"
 	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
@@ -114,6 +115,28 @@ func main() {
 	logger := loggerutil.CreateDefaultLogger("CWB_DOCPROC_001")
 	defer logger.Close()
 	ApiUtils.LoadLibConfig("CWB_DOCPROC_002")
+
+	obsCfg := observability.ConfigFromEnv("chenweb-doc-processor")
+	obsShutdown, err := observability.Init(ctx, obsCfg)
+	if err != nil {
+		logger.Error("failed to initialize observability", "error", err, "enabled", obsCfg.Enabled)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := obsShutdown(shutdownCtx); err != nil {
+			logger.Warn("failed to shutdown observability", "error", err)
+		}
+	}()
+	if obsCfg.Enabled {
+		logger.Info("observability enabled",
+			"service", obsCfg.ServiceName,
+			"environment", obsCfg.Environment,
+			"otlp_endpoint", obsCfg.OTLPEndpoint)
+	} else {
+		logger.Info("observability disabled")
+	}
 
 	configPath := envFirst("DOC_PROCESSOR_CONFIG", "EXTRACT_DOCMETA_CONFIG", "FILE_CONVERTER_CONFIG")
 	if configPath == "" {
