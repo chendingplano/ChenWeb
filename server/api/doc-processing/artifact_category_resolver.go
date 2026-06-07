@@ -20,41 +20,19 @@ type categoryCreator interface {
 	CreateCategory(ctx context.Context, rawKey, categoryType string, evidence map[string]any) (createdCategory, error)
 }
 
-// categoryEmbedder embeds category text for the semantic match channel. ok is
-// false when embedding is unavailable (semantic search disabled, no model, etc.).
-type categoryEmbedder interface {
-	EmbedCategory(ctx context.Context, text string) ([]float64, bool)
-}
-
-// categoryResolver implements the Identify Artifact Categories procedure: it
-// resolves a raw category key to a kb.artifact_categories.category_id, matching an
-// existing category (exact/alias, then semantic) before creating a new one. The
-// active-category snapshot is loaded once per type and grows as new categories are
-// minted within the pass.
+// categoryResolver implements the Identify Artifact Categories procedure: it resolves a
+// raw category key to a kb.artifact_categories.category_id. It looks up the key in the
+// process-wide category index (exact/alias match) before creating a new category via the
+// LLM. The index field is globalCategoryIndex in production; tests inject a fresh
+// categoryIndex per test for isolation.
 type categoryResolver struct {
-	reg             artifactCategoryRegistry
-	creator         categoryCreator
-	embedder        categoryEmbedder
-	cosineThreshold float64
-
-	// mu guards loaded/snapshot/byKey, which are mutated by addToSnapshot from
-	// concurrent create goroutines during ResolveBatch.
-	mu       sync.Mutex
-	loaded   map[string]bool
-	snapshot map[string][]artifactCategoryRecord
-	byKey    map[string]map[string]artifactCategoryRecord
+	reg     artifactCategoryRegistry
+	creator categoryCreator
+	index   *categoryIndex
 }
 
-func newCategoryResolver(reg artifactCategoryRegistry, creator categoryCreator, embedder categoryEmbedder, cosineThreshold float64) *categoryResolver {
-	return &categoryResolver{
-		reg:             reg,
-		creator:         creator,
-		embedder:        embedder,
-		cosineThreshold: cosineThreshold,
-		loaded:          map[string]bool{},
-		snapshot:        map[string][]artifactCategoryRecord{},
-		byKey:           map[string]map[string]artifactCategoryRecord{},
-	}
+func newCategoryResolver(reg artifactCategoryRegistry, creator categoryCreator) *categoryResolver {
+	return &categoryResolver{reg: reg, creator: creator, index: globalCategoryIndex}
 }
 
 // Resolve returns the category_id for rawKey under categoryType, creating the
@@ -65,24 +43,15 @@ func (cr *categoryResolver) Resolve(ctx context.Context, rawKey, categoryType st
 	if normKey == "" {
 		return 0, fmt.Errorf("(MID_26060420) empty category key")
 	}
-	if err := cr.ensureLoaded(ctx, categoryType); err != nil {
+	if err := cr.ensureIndexLoaded(ctx, categoryType); err != nil {
 		return 0, err
 	}
 
-	var queryVec []float64
-	if cr.embedder != nil {
-		if v, ok := cr.embedder.EmbedCategory(ctx, normKey); ok {
-			queryVec = v
-		}
-	}
-
-	if matched, ok := matchCategoryInSnapshot(normKey, queryVec, cr.snapshot[categoryType], cr.cosineThreshold); ok {
-		canonical := resolveCanonicalCategory(matched, cr.byKey[categoryType])
-		// Absorb the surface form so the next lookup hits the deterministic layer.
-		if err := cr.reg.absorbAlias(ctx, canonical.CategoryID, normKey); err != nil {
+	if id, ok := cr.index.lookup(categoryType, normKey); ok {
+		if err := cr.reg.absorbAlias(ctx, id, normKey); err != nil {
 			return 0, err
 		}
-		return canonical.CategoryID, nil
+		return id, nil
 	}
 
 	if cr.creator == nil {
@@ -98,15 +67,11 @@ type categoryRequest struct {
 	Evidence map[string]any
 }
 
-// ResolveBatch resolves many raw keys of one categoryType in a single pass and is
-// the concurrent replacement for looping Resolve. It (1) normalizes and dedups the
-// keys, (2) matches each against the existing snapshot (exact/alias, then semantic),
-// (3) clusters the still-novel keys so intra-batch synonyms collapse to a single
-// create, then (4) creates one category per cluster concurrently — bounded by
-// maxConcurrency and coalesced process-wide by categoryCreateGroup. It returns a map
-// from normalized key to category_id; keys that could not be resolved are absent from
-// ids and present in errs (callers log and continue). Cluster members that are aliases
-// of a created representative are absorbed and mapped to the same id.
+// ResolveBatch resolves many raw keys of one categoryType in a single pass. It
+// normalizes and dedups, looks each up in the process-wide index, and concurrently
+// creates any still-missing categories — bounded by maxConcurrency and coalesced
+// process-wide by categoryCreateGroup. Returns a map from normalized key to
+// category_id; keys that failed are absent from ids and present in errs.
 func (cr *categoryResolver) ResolveBatch(ctx context.Context, categoryType string, reqs []categoryRequest, maxConcurrency int) (map[string]int64, map[string]error) {
 	ids := make(map[string]int64)
 	errs := make(map[string]error)
@@ -139,39 +104,29 @@ func (cr *categoryResolver) ResolveBatch(ctx context.Context, categoryType strin
 		return ids, errs
 	}
 
-	if err := cr.ensureLoaded(ctx, categoryType); err != nil {
+	if err := cr.ensureIndexLoaded(ctx, categoryType); err != nil {
 		for _, d := range distinct {
 			errs[d.norm] = err
 		}
 		return ids, errs
 	}
 
-	// Phase 1/2 — embed every distinct key (bounded concurrent), then match each
-	// against the existing snapshot (exact/alias + semantic). Misses fall through.
-	keys := make([]string, len(distinct))
-	for i, d := range distinct {
-		keys[i] = d.norm
-	}
-	vecs := cr.embedKeys(ctx, keys, maxConcurrency)
-
+	// Phase 1 — index lookup; collect misses.
 	type missEntry struct {
 		norm     string
 		evidence map[string]any
-		vec      []float64
 	}
 	var misses []missEntry
 	for _, d := range distinct {
-		vec := vecs[d.norm]
-		if matched, ok := matchCategoryInSnapshot(d.norm, vec, cr.snapshot[categoryType], cr.cosineThreshold); ok {
-			canonical := resolveCanonicalCategory(matched, cr.byKey[categoryType])
-			if err := cr.reg.absorbAlias(ctx, canonical.CategoryID, d.norm); err != nil {
+		if id, ok := cr.index.lookup(categoryType, d.norm); ok {
+			if err := cr.reg.absorbAlias(ctx, id, d.norm); err != nil {
 				errs[d.norm] = err
 				continue
 			}
-			ids[d.norm] = canonical.CategoryID
+			ids[d.norm] = id
 			continue
 		}
-		misses = append(misses, missEntry{norm: d.norm, evidence: d.evidence, vec: vec})
+		misses = append(misses, missEntry{norm: d.norm, evidence: d.evidence})
 	}
 	if len(misses) == 0 {
 		return ids, errs
@@ -183,47 +138,26 @@ func (cr *categoryResolver) ResolveBatch(ctx context.Context, categoryType strin
 		return ids, errs
 	}
 
-	// Phase 3a — cluster misses so two novel keys that are aliases of each other
-	// collapse to one create; the rest of the cluster is absorbed as aliases.
-	missVecs := make([][]float64, len(misses))
-	for i := range misses {
-		missVecs[i] = misses[i].vec
-	}
-	clusters := clusterCategoryMisses(missVecs, cr.cosineThreshold)
-
-	// Phase 3b — create one category per cluster representative, concurrently.
+	// Phase 2 — create each miss concurrently, bounded by maxConcurrency.
 	var (
 		mu  sync.Mutex
 		wg  sync.WaitGroup
 		sem = make(chan struct{}, maxConcurrency)
 	)
-	for _, members := range clusters {
+	for _, m := range misses {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-
-			rep := misses[members[0]]
-			id, err := cr.createAndMint(ctx, categoryType, rep.norm, rep.evidence)
-
+			id, err := cr.createAndMint(ctx, categoryType, m.norm, m.evidence)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				for _, mi := range members {
-					errs[misses[mi].norm] = err
-				}
+				errs[m.norm] = err
 				return
 			}
-			ids[rep.norm] = id
-			for _, mi := range members[1:] {
-				alias := misses[mi].norm
-				if aerr := cr.reg.absorbAlias(ctx, id, alias); aerr != nil {
-					errs[alias] = aerr
-					continue
-				}
-				ids[alias] = id
-			}
+			ids[m.norm] = id
 		}()
 	}
 	wg.Wait()
@@ -231,10 +165,11 @@ func (cr *categoryResolver) ResolveBatch(ctx context.Context, categoryType strin
 }
 
 // createAndMint creates a category via the LLM and persists it, coalescing concurrent
-// creates of the same (categoryType, normKey) across the process via categoryCreateGroup
-// so only one LLM call is made per novel key. The shared work runs on a detached context
-// (context.WithoutCancel): one caller giving up must not cancel a create another pipeline
-// is awaiting. mintCategory's ON CONFLICT remains the cross-process safety net.
+// creates of the same (categoryType, normKey) via categoryCreateGroup so only one LLM
+// call is made per novel key. The shared work runs on a detached context so one caller
+// cancelling does not abort a create another pipeline is awaiting. After a successful
+// create, the canonical key and the original normKey (the "translation cache") are both
+// written to the process-wide index.
 func (cr *categoryResolver) createAndMint(ctx context.Context, categoryType, normKey string, evidence map[string]any) (int64, error) {
 	ch := categoryCreateGroup.DoChan(categoryType+"\x00"+normKey, func() (any, error) {
 		bg := context.WithoutCancel(ctx)
@@ -242,21 +177,22 @@ func (cr *categoryResolver) createAndMint(ctx context.Context, categoryType, nor
 		if err != nil {
 			return nil, fmt.Errorf("(MID_26060421) create category %q: %w", normKey, err)
 		}
-		var newVec []float64
-		if cr.embedder != nil {
-			text := created.SearchDocument
-			if text == "" {
-				text = normKey
-			}
-			if v, ok := cr.embedder.EmbedCategory(bg, text); ok {
-				newVec = v
-			}
-		}
-		id, err := cr.reg.mintCategory(bg, created, categoryType, newVec)
+		id, err := cr.reg.mintCategory(bg, created, categoryType, nil)
 		if err != nil {
 			return nil, err
 		}
-		cr.addToSnapshot(categoryType, created, id, newVec)
+		// Populate the index with the canonical key and all LLM-returned surface forms.
+		cr.index.put(categoryType, normalizeCategoryKey(created.CategoryKey), id, 1)
+		cr.index.putAll(categoryType, normalizeCategoryKeys(created.DisplayNames), id)
+		cr.index.putAll(categoryType, normalizeCategoryKeys(created.Aliases), id)
+		cr.index.putAll(categoryType, normalizeCategoryKeys(created.Acronyms), id)
+		// Also index the original normKey — this is the translation cache: next time
+		// the same non-English (or alternate-form) key appears it hits the index directly.
+		cr.index.put(categoryType, normKey, id, 1)
+		if aerr := cr.reg.absorbAlias(bg, id, normKey); aerr != nil {
+			// best-effort: keeps the DB match_keys in sync for cross-process loads
+			_ = aerr
+		}
 		return id, nil
 	})
 
@@ -271,97 +207,19 @@ func (cr *categoryResolver) createAndMint(ctx context.Context, categoryType, nor
 	}
 }
 
-// embedKeys embeds each key for the semantic match channel, bounded by maxConcurrency.
-// Keys the embedder cannot embed are simply absent from the result (lexical-only).
-func (cr *categoryResolver) embedKeys(ctx context.Context, keys []string, maxConcurrency int) map[string][]float64 {
-	out := make(map[string][]float64, len(keys))
-	if cr.embedder == nil {
-		return out
-	}
-	var (
-		mu  sync.Mutex
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, maxConcurrency)
-	)
-	for _, k := range keys {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if v, ok := cr.embedder.EmbedCategory(ctx, k); ok {
-				mu.Lock()
-				out[k] = v
-				mu.Unlock()
-			}
-		}()
-	}
-	wg.Wait()
-	return out
-}
-
-// clusterCategoryMisses groups novel keys whose embeddings are within cosineThreshold
-// so intra-batch synonyms collapse to one create. It is a greedy single-pass grouping
-// against each cluster's representative (first member). Keys without a usable embedding
-// each form their own cluster (they fall through to the cross-batch merge path). Returns
-// clusters as index slices into the input; the first index of each is the representative.
-func clusterCategoryMisses(vecs [][]float64, cosineThreshold float64) [][]int {
-	var clusters [][]int
-	var repVecs [][]float64
-	for i, v := range vecs {
-		placed := false
-		if len(v) >= categoryEmbeddingMinDims {
-			for ci, rv := range repVecs {
-				if len(rv) == len(v) && categoryCosine(v, rv) >= cosineThreshold {
-					clusters[ci] = append(clusters[ci], i)
-					placed = true
-					break
-				}
-			}
-		}
-		if !placed {
-			clusters = append(clusters, []int{i})
-			repVecs = append(repVecs, v)
-		}
-	}
-	return clusters
-}
-
-func (cr *categoryResolver) ensureLoaded(ctx context.Context, categoryType string) error {
-	if cr.loaded[categoryType] {
+// ensureIndexLoaded populates the process-wide index for categoryType from the DB if it
+// has not been loaded yet. Alias conflicts detected during load are written to
+// kb.category_alias_conflicts (best-effort; logged but not fatal).
+func (cr *categoryResolver) ensureIndexLoaded(ctx context.Context, categoryType string) error {
+	if cr.index.isLoaded(categoryType) {
 		return nil
 	}
-	recs, err := cr.reg.loadActiveCategories(ctx, categoryType)
+	conflicts, err := cr.reg.loadIntoIndex(ctx, categoryType, cr.index)
 	if err != nil {
 		return err
 	}
-	cr.snapshot[categoryType] = recs
-	byKey := make(map[string]artifactCategoryRecord, len(recs))
-	for _, rec := range recs {
-		byKey[rec.CategoryKey] = rec
+	for _, c := range conflicts {
+		_ = cr.reg.logAliasConflict(ctx, categoryType, c.Alias, c.IDs)
 	}
-	cr.byKey[categoryType] = byKey
-	cr.loaded[categoryType] = true
 	return nil
-}
-
-// addToSnapshot makes a freshly minted category resolvable by later keys in the
-// same pass without reloading from the DB.
-func (cr *categoryResolver) addToSnapshot(categoryType string, c createdCategory, id int64, vec []float64) {
-	cr.mu.Lock()
-	defer cr.mu.Unlock()
-	key := normalizeCategoryKey(c.CategoryKey)
-	rec := artifactCategoryRecord{
-		CategoryID:   id,
-		CategoryKey:  key,
-		CategoryType: categoryType,
-		Status:       "pending_review",
-		MatchKeys:    buildArtifactMatchKeys(key, c.DisplayNames, c.Aliases, c.Acronyms),
-		Embedding:    vec,
-	}
-	cr.snapshot[categoryType] = append(cr.snapshot[categoryType], rec)
-	if cr.byKey[categoryType] == nil {
-		cr.byKey[categoryType] = map[string]artifactCategoryRecord{}
-	}
-	cr.byKey[categoryType][key] = rec
 }

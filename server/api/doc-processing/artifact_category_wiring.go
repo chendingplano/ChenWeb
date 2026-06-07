@@ -11,25 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
-// defaultCategoryMatchMinCosine is the semantic acceptance threshold for matching a
-// raw category key to an existing category (env CATEGORY_MATCH_MIN_COSINE).
-const defaultCategoryMatchMinCosine = 0.80
-
-func categoryMatchMinCosine() float64 {
-	if v := strings.TrimSpace(os.Getenv("CATEGORY_MATCH_MIN_COSINE")); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
-	}
-	return defaultCategoryMatchMinCosine
-}
-
-// defaultCategoryResolveMaxConcurrency bounds concurrent category embeds + LLM creates
+// defaultCategoryResolveMaxConcurrency bounds concurrent LLM creates
 // per ResolveBatch call (env CATEGORY_RESOLVE_MAX_CONCURRENCY). Set to 1 for fully
 // serial behavior (debugging or rate-limited model endpoints).
 const defaultCategoryResolveMaxConcurrency = 8
@@ -44,7 +30,7 @@ func categoryResolveMaxConcurrency() int {
 }
 
 // newMetricCategoryResolver builds the category resolver used by metric indexing,
-// wiring the real LLM creator and embedder from environment configuration.
+// wiring the real LLM creator from environment configuration.
 func newMetricCategoryResolver(db *sql.DB, logger ApiTypes.JimoLogger) *categoryResolver {
 	// creator stays a nil interface (not a typed-nil pointer) when unavailable, so
 	// the resolver's nil-creator guard fires instead of panicking on a miss.
@@ -57,33 +43,7 @@ func newMetricCategoryResolver(db *sql.DB, logger ApiTypes.JimoLogger) *category
 	} else {
 		creator = c
 	}
-	return newCategoryResolver(artifactCategoryRegistry{DB: db}, creator, newSearchCategoryEmbedder(), categoryMatchMinCosine())
-}
-
-// searchCategoryEmbedder embeds category text for the semantic match channel,
-// reusing the shared search embedder. It returns ok=false (lexical-only) whenever
-// semantic search is disabled, no model is configured, or the dimension mismatches.
-type searchCategoryEmbedder struct {
-	embedder Embedder
-	model    string
-	enabled  bool
-}
-
-func newSearchCategoryEmbedder() searchCategoryEmbedder {
-	emb, model, _, ok := newSearchEmbedder()
-	return searchCategoryEmbedder{embedder: emb, model: model, enabled: ok && kbsearch.SemanticSearchEnabled()}
-}
-
-func (e searchCategoryEmbedder) EmbedCategory(ctx context.Context, text string) ([]float64, bool) {
-	text = strings.TrimSpace(text)
-	if !e.enabled || e.embedder == nil || text == "" {
-		return nil, false
-	}
-	v, err := e.embedder.Embed(ctx, llmclients.EmbedInput{ModelName: e.model, InputText: truncateRunes(text, maxEmbeddingRunes)})
-	if err != nil || len(v) != kbsearch.EmbeddingDim {
-		return nil, false
-	}
-	return v, true
+	return newCategoryResolver(artifactCategoryRegistry{DB: db}, creator)
 }
 
 // llmCategoryCreator calls the CREATE_ARTIFACT_CATEGORY LLM to mint a new category

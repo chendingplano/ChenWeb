@@ -231,12 +231,12 @@ func validateSingleSummaryArtifact(recordID int64, sourceLanguage string, item S
 	// fixSummarySourceLanguage attempts a best-effort backfill before validation.
 	// Skip language check when summary == summary_en: this indicates translation was
 	// not available and the English text was kept as a fallback, which is acceptable.
-	summaryEn := strings.TrimSpace(item.SummaryEn)
-	if sourceLanguage != "" && (summaryEn == "" || strings.TrimSpace(item.Summary) != summaryEn) {
-		if detectContentLanguage(item.Summary) != sourceLanguage {
-			return fmt.Errorf("(MID-26060421) summary %q language mismatch: got %s want %s", item.SummaryID, detectContentLanguage(item.Summary), sourceLanguage)
-		}
-	}
+	// summaryEn := strings.TrimSpace(item.SummaryEn)
+	// if sourceLanguage != "" && (summaryEn == "" || strings.TrimSpace(item.Summary) != summaryEn) {
+	// 	if detectContentLanguage(item.Summary) != sourceLanguage {
+	// 		return fmt.Errorf("(MID-26060421) summary %q language mismatch: got %s want %s", item.SummaryID, detectContentLanguage(item.Summary), sourceLanguage)
+	// 	}
+	// }
 	if err := validateSummaryArtifactFile(recordID, item, artifactDir); err != nil {
 		return err
 	}

@@ -119,6 +119,98 @@ func TestAbsorbAliasIssuesConditionalUpdate(t *testing.T) {
 	}
 }
 
+func TestLoadIntoIndexPopulatesFromMatchKeys(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("SELECT .* FROM kb\\.artifact_categories").
+		WithArgs("metric").
+		WillReturnRows(
+			sqlmock.NewRows([]string{"category_id", "category_key", "status", "canonical_of", "match_keys", "seen_count"}).
+				AddRow(int64(1), "latency", "approved", "", []byte(`["latency","rt"]`), int64(10)).
+				AddRow(int64(2), "throughput", "approved", "", []byte(`["throughput"]`), int64(5)),
+		)
+
+	reg := artifactCategoryRegistry{DB: db}
+	idx := newCategoryIndex()
+	conflicts, err := reg.loadIntoIndex(context.Background(), "metric", idx)
+	if err != nil {
+		t.Fatalf("loadIntoIndex: %v", err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("unexpected conflicts: %v", conflicts)
+	}
+	if id, ok := idx.lookup("metric", "latency"); !ok || id != 1 {
+		t.Errorf("latency → %d (%v), want 1", id, ok)
+	}
+	if id, ok := idx.lookup("metric", "rt"); !ok || id != 1 {
+		t.Errorf("rt → %d (%v), want 1", id, ok)
+	}
+	if id, ok := idx.lookup("metric", "throughput"); !ok || id != 2 {
+		t.Errorf("throughput → %d (%v), want 2", id, ok)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestLoadIntoIndexDetectsConflict(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	// Both rows share "rt"; row 1 has higher seen_count and wins.
+	mock.ExpectQuery("SELECT .* FROM kb\\.artifact_categories").
+		WithArgs("metric").
+		WillReturnRows(
+			sqlmock.NewRows([]string{"category_id", "category_key", "status", "canonical_of", "match_keys", "seen_count"}).
+				AddRow(int64(1), "response time", "approved", "", []byte(`["response time","rt"]`), int64(20)).
+				AddRow(int64(2), "reaction time", "approved", "", []byte(`["reaction time","rt"]`), int64(3)),
+		)
+
+	reg := artifactCategoryRegistry{DB: db}
+	idx := newCategoryIndex()
+	conflicts, err := reg.loadIntoIndex(context.Background(), "metric", idx)
+	if err != nil {
+		t.Fatalf("loadIntoIndex: %v", err)
+	}
+	if len(conflicts) != 1 || conflicts[0].Alias != "rt" {
+		t.Fatalf("conflicts = %v, want [{Alias:rt ...}]", conflicts)
+	}
+	id, _ := idx.lookup("metric", "rt")
+	if id != 1 {
+		t.Fatalf("rt → %d, want 1 (higher seen_count wins)", id)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestLogAliasConflictUpsertsRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("INSERT INTO kb\\.category_alias_conflicts").
+		WithArgs("rt", "metric", "[1,2]").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	reg := artifactCategoryRegistry{DB: db}
+	if err := reg.logAliasConflict(context.Background(), "metric", "rt", []int64{1, 2}); err != nil {
+		t.Fatalf("logAliasConflict: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestCategoryStatusesLoadsScopedType(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

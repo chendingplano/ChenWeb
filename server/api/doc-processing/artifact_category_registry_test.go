@@ -5,6 +5,79 @@ import (
 	"testing"
 )
 
+// ---- categoryIndex tests ----
+
+func TestCategoryIndexLookupMiss(t *testing.T) {
+	idx := newCategoryIndex()
+	if _, ok := idx.lookup("metric", "latency"); ok {
+		t.Fatal("expected miss on empty index")
+	}
+}
+
+func TestCategoryIndexPutAndLookup(t *testing.T) {
+	idx := newCategoryIndex()
+	idx.put("metric", "latency", 7, 0)
+	id, ok := idx.lookup("metric", "latency")
+	if !ok || id != 7 {
+		t.Fatalf("lookup = (%d, %v), want (7, true)", id, ok)
+	}
+}
+
+func TestCategoryIndexPutConflictHigherSeenCountWins(t *testing.T) {
+	idx := newCategoryIndex()
+	idx.put("metric", "rt", 1, 5)   // seen_count=5
+	conflict := idx.put("metric", "rt", 2, 10) // seen_count=10 wins
+	if !conflict {
+		t.Fatal("expected conflict=true")
+	}
+	id, _ := idx.lookup("metric", "rt")
+	if id != 2 {
+		t.Fatalf("id = %d, want 2 (higher seen_count wins)", id)
+	}
+}
+
+func TestCategoryIndexPutConflictExistingWinsWhenHigher(t *testing.T) {
+	idx := newCategoryIndex()
+	idx.put("metric", "rt", 1, 10) // seen_count=10
+	conflict := idx.put("metric", "rt", 2, 5) // seen_count=5 loses
+	if !conflict {
+		t.Fatal("expected conflict=true")
+	}
+	id, _ := idx.lookup("metric", "rt")
+	if id != 1 {
+		t.Fatalf("id = %d, want 1 (existing higher seen_count kept)", id)
+	}
+}
+
+func TestCategoryIndexPutAllSetsMultipleKeys(t *testing.T) {
+	idx := newCategoryIndex()
+	idx.putAll("metric", []string{"latency", "response time", "rt"}, 7)
+	for _, k := range []string{"latency", "response time", "rt"} {
+		if id, ok := idx.lookup("metric", k); !ok || id != 7 {
+			t.Errorf("lookup(%q) = (%d, %v), want (7, true)", k, id, ok)
+		}
+	}
+}
+
+func TestCategoryIndexIsLoadedAndMarkLoaded(t *testing.T) {
+	idx := newCategoryIndex()
+	if idx.isLoaded("metric") {
+		t.Fatal("expected not loaded initially")
+	}
+	idx.markLoaded("metric")
+	if !idx.isLoaded("metric") {
+		t.Fatal("expected loaded after markLoaded")
+	}
+}
+
+func TestCategoryIndexTypeIsolation(t *testing.T) {
+	idx := newCategoryIndex()
+	idx.put("metric", "latency", 1, 0)
+	if _, ok := idx.lookup("inventory_item", "latency"); ok {
+		t.Fatal("key in 'metric' should not be visible under 'inventory_item'")
+	}
+}
+
 func TestNormalizeCategoryKey(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -137,7 +210,7 @@ func TestMatchCategoryInSnapshotMatchesAlias(t *testing.T) {
 		{CategoryID: 1, CategoryKey: "throughput", MatchKeys: []string{"throughput"}},
 		{CategoryID: 2, CategoryKey: "response time", MatchKeys: []string{"response time", "rt"}},
 	}
-	got, ok := matchCategoryInSnapshot("rt", nil, snap, 0.8)
+	got, ok := matchCategoryInSnapshot("rt", snap)
 	if !ok || got.CategoryID != 2 {
 		t.Fatalf("matchCategoryInSnapshot = (%+v, %v), want id 2", got, ok)
 	}
@@ -145,28 +218,8 @@ func TestMatchCategoryInSnapshotMatchesAlias(t *testing.T) {
 
 func TestMatchCategoryInSnapshotNoMatch(t *testing.T) {
 	snap := []artifactCategoryRecord{{CategoryID: 1, CategoryKey: "throughput", MatchKeys: []string{"throughput"}}}
-	if _, ok := matchCategoryInSnapshot("latency", nil, snap, 0.8); ok {
+	if _, ok := matchCategoryInSnapshot("latency", snap); ok {
 		t.Fatal("expected no match")
-	}
-}
-
-func TestMatchCategoryInSnapshotCosineAboveThreshold(t *testing.T) {
-	snap := []artifactCategoryRecord{
-		{CategoryID: 1, CategoryKey: "throughput", MatchKeys: []string{"throughput"}, Embedding: []float64{0, 1}},
-		{CategoryID: 2, CategoryKey: "response time", MatchKeys: []string{"response time"}, Embedding: []float64{1, 0}},
-	}
-	got, ok := matchCategoryInSnapshot("reaction time", []float64{0.99, 0.01}, snap, 0.8)
-	if !ok || got.CategoryID != 2 {
-		t.Fatalf("matchCategoryInSnapshot = (%+v, %v), want id 2 via cosine", got, ok)
-	}
-}
-
-func TestMatchCategoryInSnapshotCosineBelowThreshold(t *testing.T) {
-	snap := []artifactCategoryRecord{
-		{CategoryID: 2, CategoryKey: "response time", MatchKeys: []string{"response time"}, Embedding: []float64{1, 0}},
-	}
-	if _, ok := matchCategoryInSnapshot("reaction time", []float64{0, 1}, snap, 0.8); ok {
-		t.Fatal("expected no cosine match below threshold")
 	}
 }
 

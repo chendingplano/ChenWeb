@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -17,8 +17,70 @@ type artifactCategoryRegistry struct {
 	DB *sql.DB
 }
 
+// loadIntoIndex loads all approved ∪ pending_review rows for categoryType from the DB,
+// populates idx with their match_keys, and returns any alias conflicts found. Records
+// are processed in descending seen_count order so the higher-seen_count entry wins on
+// conflict.
+func (r artifactCategoryRegistry) loadIntoIndex(ctx context.Context, categoryType string, idx *categoryIndex) ([]aliasConflict, error) {
+	const q = `
+SELECT category_id, category_key, status, COALESCE(canonical_of, ''), match_keys, seen_count
+FROM kb.artifact_categories
+WHERE category_type = $1 AND status IN ('approved', 'pending_review')
+ORDER BY seen_count DESC`
+	rows, err := r.DB.QueryContext(ctx, q, categoryType)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26060701) load categories into index: %w", err)
+	}
+	defer rows.Close()
+
+	// conflictMap accumulates all IDs seen for a conflicting key so logAliasConflict
+	// gets the full picture, not just the first two.
+	conflictMap := map[string]map[int64]struct{}{}
+	for rows.Next() {
+		var (
+			rec       artifactCategoryRecord
+			matchKeys []byte
+			seenCount int64
+		)
+		if err := rows.Scan(&rec.CategoryID, &rec.CategoryKey, &rec.Status, &rec.CanonicalOf, &matchKeys, &seenCount); err != nil {
+			return nil, err
+		}
+		rec.CategoryType = categoryType
+		_ = json.Unmarshal(matchKeys, &rec.MatchKeys)
+
+		for _, mk := range rec.MatchKeys {
+			if conflict := idx.put(categoryType, mk, rec.CategoryID, seenCount); conflict {
+				// Record both IDs in the conflict map.
+				if conflictMap[mk] == nil {
+					conflictMap[mk] = map[int64]struct{}{}
+					// The existing winner is already in the index; pull it out.
+					if winner, ok := idx.lookup(categoryType, mk); ok {
+						conflictMap[mk][winner] = struct{}{}
+					}
+				}
+				conflictMap[mk][rec.CategoryID] = struct{}{}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	idx.markLoaded(categoryType)
+
+	var out []aliasConflict
+	for alias, idSet := range conflictMap {
+		ids := make([]int64, 0, len(idSet))
+		for id := range idSet {
+			ids = append(ids, id)
+		}
+		out = append(out, aliasConflict{Alias: alias, IDs: ids})
+	}
+	return out, nil
+}
+
 // loadActiveCategories returns the approved ∪ pending_review categories of a type as
-// an in-memory snapshot for match-before-mint resolution.
+// an in-memory snapshot. Retained for the inventory registry which uses the old
+// snapshot-style resolution path.
 func (r artifactCategoryRegistry) loadActiveCategories(ctx context.Context, categoryType string) ([]artifactCategoryRecord, error) {
 	const q = `
 SELECT category_id, category_key, status, COALESCE(canonical_of, ''), match_keys, embedding
@@ -115,6 +177,36 @@ WHERE category_id = $1 AND NOT (match_keys @> to_jsonb($2::text))`
 	return nil
 }
 
+// logAliasConflict upserts a conflict record for alias within categoryType. categoryIDs
+// is the full set of category IDs that share the alias. Stored as jsonb.
+func (r artifactCategoryRegistry) logAliasConflict(ctx context.Context, categoryType, alias string, categoryIDs []int64) error {
+	idsJSON, err := json.Marshal(categoryIDs)
+	if err != nil {
+		return fmt.Errorf("(MID_26060702) marshal conflict ids for %q: %w", alias, err)
+	}
+	const stmt = `
+INSERT INTO kb.category_alias_conflicts (alias, category_type, category_ids, detected_at)
+VALUES ($1, $2, $3::jsonb, NOW())
+ON CONFLICT (category_type, alias) DO UPDATE
+    SET category_ids = EXCLUDED.category_ids,
+        detected_at  = NOW()`
+	if _, err := r.DB.ExecContext(ctx, stmt, alias, categoryType, string(idsJSON)); err != nil {
+		return fmt.Errorf("(MID_26060703) log alias conflict %q: %w", alias, err)
+	}
+	return nil
+}
+
+// normalizeCategoryKeys normalizes a slice of raw keys, dropping empties.
+func normalizeCategoryKeys(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	for _, s := range raw {
+		if k := normalizeCategoryKey(s); k != "" {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 // categoryStatuses returns the current review status of every category within one
 // category_type, keyed by canonical category_key.
 func (r artifactCategoryRegistry) categoryStatuses(ctx context.Context, categoryType string) (map[string]string, error) {
@@ -159,11 +251,8 @@ func orEmptyJSONValue(v any, empty any) any {
 	return v
 }
 
-// categoryEmbeddingMinDims guards against comparing empty/degenerate vectors.
-const categoryEmbeddingMinDims = 2
-
 // artifactCategoryRecord is an in-memory snapshot row of kb.artifact_categories
-// used for match-before-mint resolution.
+// used by the inventory registry's snapshot-style resolution path.
 type artifactCategoryRecord struct {
 	CategoryID   int64
 	CategoryKey  string
@@ -174,34 +263,104 @@ type artifactCategoryRecord struct {
 	Embedding    []float64
 }
 
-// matchCategoryInSnapshot resolves a normalized key against an in-memory snapshot.
-// Tier 1/2 (deterministic): the key appears in a record's match_keys (which holds
-// the canonical key plus all normalized aliases/acronyms). Tier 3 (semantic): the
-// best cosine similarity between queryEmbedding and a record's embedding clears
-// cosineThreshold. Returns the matched record and true, or false when nothing
-// matches.
-func matchCategoryInSnapshot(normKey string, queryEmbedding []float64, snapshot []artifactCategoryRecord, cosineThreshold float64) (artifactCategoryRecord, bool) {
+// aliasConflict records a normalized key that maps to two or more category IDs.
+type aliasConflict struct {
+	Alias string
+	IDs   []int64
+}
+
+// categoryIndex is the process-wide in-memory lookup table that maps
+// (categoryType, normalizedKey) → category_id. All writes are protected by a
+// RWMutex; reads use RLock. Tests inject a fresh instance per test to avoid
+// cross-test pollution via globalCategoryIndex.
+type categoryIndex struct {
+	mu      sync.RWMutex
+	loaded  map[string]bool
+	byType  map[string]map[string]int64 // [categoryType][normalizedKey] → categoryID
+	seenBy  map[string]map[string]int64 // [categoryType][normalizedKey] → seen_count (conflict resolution)
+}
+
+func newCategoryIndex() *categoryIndex {
+	return &categoryIndex{
+		loaded: map[string]bool{},
+		byType: map[string]map[string]int64{},
+		seenBy: map[string]map[string]int64{},
+	}
+}
+
+// globalCategoryIndex is the process-wide singleton used by all categoryResolver
+// instances. Tests inject a fresh categoryIndex per test to avoid cross-test pollution.
+var globalCategoryIndex = newCategoryIndex()
+
+// lookup returns the category_id for normKey within categoryType, or false if absent.
+func (ci *categoryIndex) lookup(categoryType, normKey string) (int64, bool) {
+	ci.mu.RLock()
+	defer ci.mu.RUnlock()
+	m := ci.byType[categoryType]
+	if m == nil {
+		return 0, false
+	}
+	id, ok := m[normKey]
+	return id, ok
+}
+
+// isLoaded reports whether the index has been populated from the DB for categoryType.
+func (ci *categoryIndex) isLoaded(categoryType string) bool {
+	ci.mu.RLock()
+	defer ci.mu.RUnlock()
+	return ci.loaded[categoryType]
+}
+
+// markLoaded marks categoryType as fully loaded from the DB.
+func (ci *categoryIndex) markLoaded(categoryType string) {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	ci.loaded[categoryType] = true
+}
+
+// put adds normKey→id to the index. seenCount is used to resolve conflicts: the entry
+// with the higher seen_count wins. Returns true if a conflict was detected (a different
+// id already occupied this key).
+func (ci *categoryIndex) put(categoryType, normKey string, id, seenCount int64) (conflict bool) {
+	if normKey == "" {
+		return false
+	}
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	m := ci.byType[categoryType]
+	if m == nil {
+		m = map[string]int64{}
+		ci.byType[categoryType] = m
+		ci.seenBy[categoryType] = map[string]int64{}
+	}
+	sc := ci.seenBy[categoryType]
+	if existing, ok := m[normKey]; ok && existing != id {
+		conflict = true
+		if seenCount <= sc[normKey] {
+			return // existing has higher or equal seen_count; do not overwrite
+		}
+	}
+	m[normKey] = id
+	sc[normKey] = seenCount
+	return
+}
+
+// putAll calls put for each key, using seenCount=0 (appropriate for newly minted
+// categories). Empty strings are skipped.
+func (ci *categoryIndex) putAll(categoryType string, keys []string, id int64) {
+	for _, k := range keys {
+		ci.put(categoryType, k, id, 0)
+	}
+}
+
+// matchCategoryInSnapshot resolves a normalized key against an in-memory snapshot via
+// exact match on each record's match_keys (canonical key + all aliases/acronyms).
+func matchCategoryInSnapshot(normKey string, snapshot []artifactCategoryRecord) (artifactCategoryRecord, bool) {
 	for _, rec := range snapshot {
 		for _, mk := range rec.MatchKeys {
 			if mk == normKey {
 				return rec, true
 			}
-		}
-	}
-	if len(queryEmbedding) >= categoryEmbeddingMinDims {
-		var best artifactCategoryRecord
-		bestScore := 0.0
-		found := false
-		for _, rec := range snapshot {
-			if len(rec.Embedding) != len(queryEmbedding) {
-				continue
-			}
-			if score := categoryCosine(queryEmbedding, rec.Embedding); score > bestScore {
-				best, bestScore, found = rec, score, true
-			}
-		}
-		if found && bestScore >= cosineThreshold {
-			return best, true
 		}
 	}
 	return artifactCategoryRecord{}, false
@@ -224,23 +383,6 @@ func resolveCanonicalCategory(rec artifactCategoryRecord, byKey map[string]artif
 		rec = next
 	}
 	return rec
-}
-
-// categoryCosine returns the cosine similarity of two equal-length vectors.
-func categoryCosine(a, b []float64) float64 {
-	if len(a) == 0 || len(a) != len(b) {
-		return 0
-	}
-	var dot, na, nb float64
-	for i := range a {
-		dot += a[i] * b[i]
-		na += a[i] * a[i]
-		nb += b[i] * b[i]
-	}
-	if na == 0 || nb == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
 
 // createdCategory is the parsed output of the CREATE_ARTIFACT_CATEGORY LLM call.
