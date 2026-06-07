@@ -573,7 +573,7 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 			metricNameEn = v
 		}
 
-		metricID := fmt.Sprintf("%d_%d", inputRecordID, existingCount+int64(i)+1)
+		metricID := fmt.Sprintf("%d_mtc_%d", inputRecordID, existingCount+int64(i)+1)
 
 		categoryPathsJSON, _ := json.Marshal(m["category_paths"])
 		var categoryPathsEnVal any

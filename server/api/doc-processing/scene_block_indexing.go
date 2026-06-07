@@ -40,13 +40,11 @@ func IndexSceneBlocksForRecord(ctx context.Context, recordID int64, inputChunks 
 		return
 	}
 	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, blocks, sceneBlockIndexConfig, logger)
-	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, blocks, sceneBlockIndexConfig, logger)
 	if logger != nil {
 		logger.Info("scene blocks indexing result",
 			"record_id", recordID,
 			"scene_blocks", len(blocks),
 			"connected_artifacts", connectedCount,
-			"semantic_links", semanticLinks,
 		)
 	}
 }

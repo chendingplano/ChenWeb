@@ -76,7 +76,7 @@ type summaryClusterState struct {
 }
 
 func buildSummaryID(recordID int64, level int, seqNo int) string {
-	return fmt.Sprintf("%d_%d_%04d", recordID, level, seqNo)
+	return fmt.Sprintf("%d_sum_%d_%04d", recordID, level, seqNo)
 }
 
 func summaryFileName(level int, seqNo int) string {
@@ -142,6 +142,34 @@ func validateSummaryArtifacts(recordID int64, sourceLanguage string, summaries [
 	}
 
 	normalizedSourceLanguage := normalizeSummarySourceLanguage(sourceLanguage)
+
+	// When the document has >= 5 chunks, resolve the canonical language by
+	// majority vote among the metadata language and all level-0 summary languages.
+	numChunks := 0
+	for _, item := range summaries {
+		if item.Level == 0 {
+			numChunks++
+		}
+	}
+	if numChunks >= 5 {
+		votes := map[string]int{}
+		if normalizedSourceLanguage != "" {
+			votes[normalizedSourceLanguage]++
+		}
+		for _, item := range summaries {
+			if item.Level == 0 {
+				votes[detectContentLanguage(item.Summary)]++
+			}
+		}
+		best, bestCount := normalizedSourceLanguage, votes[normalizedSourceLanguage]
+		for lang, count := range votes {
+			if count > bestCount {
+				best, bestCount = lang, count
+			}
+		}
+		normalizedSourceLanguage = best
+	}
+
 	seqByLevel := make(map[int][]int)
 	for _, item := range summaries {
 		if err := validateSingleSummaryArtifact(recordID, normalizedSourceLanguage, item, artifactDir, summaryTreeDir); err != nil {
@@ -1130,7 +1158,7 @@ func removeRecordFromClusters(clusters []SummaryCluster, recordID int64) []Summa
 
 func parseSummaryIDRecordID(summaryID string) int64 {
 	parts := strings.Split(strings.TrimSpace(summaryID), "_")
-	if len(parts) != 3 {
+	if len(parts) != 4 || parts[1] != "sum" {
 		return 0
 	}
 	id, _ := strconv.ParseInt(parts[0], 10, 64)

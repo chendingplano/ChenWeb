@@ -311,7 +311,7 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	language := firstNonEmptyTrimmed(result.Language, "unknown")
 	createTime := p.now().UTC().Format(time.RFC3339)
 	for i := range result.Items {
-		result.Items[i]["inventory_item_id"] = fmt.Sprintf("%d_i_%d", evt.RecordID, i+1)
+		result.Items[i]["inventory_item_id"] = fmt.Sprintf("%d_inv_%d", evt.RecordID, i+1)
 		result.Items[i]["create_time"] = createTime
 	}
 	// Point each discarded duplicate at the surviving row it collapsed into. The
@@ -321,7 +321,7 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 		survivorByDedupeKey[asString(item["dedupe_key"])] = asString(item["inventory_item_id"])
 	}
 	for j := range result.Duplicates {
-		result.Duplicates[j]["inventory_item_id"] = fmt.Sprintf("%d_d_%d", evt.RecordID, j+1)
+		result.Duplicates[j]["inventory_item_id"] = fmt.Sprintf("%d_dup_%d", evt.RecordID, j+1)
 		result.Duplicates[j]["create_time"] = createTime
 		result.Duplicates[j]["duplicate_of"] = survivorByDedupeKey[asString(result.Duplicates[j]["dedupe_key"])]
 	}

@@ -330,7 +330,7 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 
 	outputRows := p.buildProductOutputRows(result.Products, start, len(blocks), result.ModelName)
 	for i := range outputRows {
-		outputRows[i]["product_rel_id"] = fmt.Sprintf("%d_%d", evt.RecordID, i+1)
+		outputRows[i]["product_rel_id"] = fmt.Sprintf("%d_prd_%d", evt.RecordID, i+1)
 	}
 
 	inserted, err := p.Store.SaveProducts(ctx, SaveProductsRequest{

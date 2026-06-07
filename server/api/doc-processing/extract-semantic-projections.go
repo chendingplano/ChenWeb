@@ -267,7 +267,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 	}
 	createTime := p.Now().Format(defaultDocMetaStatusTime)
 	for i, proj := range result.Projections {
-		proj["semantic_proj_id"] = fmt.Sprintf("%d_0_%d", evt.RecordID, result.SeqNos[i])
+		proj["semantic_proj_id"] = fmt.Sprintf("%d_smp_%d", evt.RecordID, result.SeqNos[i])
 		proj["line_spans"] = result.LineSpans[i]
 		proj["create_time"] = createTime
 		result.Projections[i] = proj

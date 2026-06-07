@@ -243,9 +243,9 @@ func sameTopicLines(left []string, right []string) bool {
 func buildTopicCategoryRecordID(recordID int64, topicID string, ordinal int) string {
 	topicID = strings.TrimSpace(topicID)
 	if topicID != "" {
-		return fmt.Sprintf("%d_%s", recordID, topicID)
+		return topicID
 	}
-	return fmt.Sprintf("%d_%d", recordID, ordinal)
+	return fmt.Sprintf("%d_tpc_%d", recordID, ordinal)
 }
 
 func readTopicIDsForCategory(topicTreeDir string, categoryPath string) ([]string, error) {

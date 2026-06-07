@@ -646,7 +646,7 @@ func flattenKnowledgeItems(recordID int64, enriched map[string]any, chunkSeqNo i
 			}
 
 			knowledge := map[string]any{
-				"knowledge_id":    fmt.Sprintf("%d_0_%d", recordID, *globalSeqNo),
+				"knowledge_id":    fmt.Sprintf("%d_knw_%d", recordID, *globalSeqNo),
 				"knowledge_type":  ktype,
 				"knowledge_value": primaryValue,
 				"desc_text":       strings.TrimSpace(asString(item["desc"])),

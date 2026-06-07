@@ -258,11 +258,11 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 
 	createTime := p.Now().UTC().Format(time.RFC3339)
 	for i := range result.Entities {
-		result.Entities[i]["entity_id"] = fmt.Sprintf("%d_e_%d", evt.RecordID, i+1)
+		result.Entities[i]["entity_id"] = fmt.Sprintf("%d_ent_%d", evt.RecordID, i+1)
 		result.Entities[i]["create_time"] = createTime
 	}
 	for i := range result.Relations {
-		result.Relations[i]["relation_id"] = fmt.Sprintf("%d_r_%d", evt.RecordID, i+1)
+		result.Relations[i]["relation_id"] = fmt.Sprintf("%d_rel_%d", evt.RecordID, i+1)
 		result.Relations[i]["create_time"] = createTime
 	}
 

@@ -283,6 +283,7 @@ func parseVectorLiteral(raw string) ([]float64, error) {
 // kb.category_instance row per (artifact, resolved category). Returns the number of
 // category_instance rows upserted.
 func upsertArtifactCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, resolver categoryBatchResolver, logger ApiTypes.JimoLogger) int {
+	start := time.Now()
 	extraInfo, _ := json.Marshal(map[string]any{"artifact_type": cfg.CategoryType, "source": cfg.InstanceSource})
 
 	// Gather every (key, evidence) across all artifacts into a single batch so the
@@ -304,6 +305,13 @@ func upsertArtifactCategoryInstances(ctx context.Context, db *sql.DB, recordID i
 		return 0
 	}
 
+	if logger != nil {
+		logger.Info(cfg.LogPrefix+" category-instances start",
+			"record_id", recordID,
+			"artifacts", len(artifacts),
+			"category_requests", len(reqs),
+		)
+	}
 	ids, errs := resolver.ResolveBatch(ctx, cfg.CategoryType, reqs, categoryResolveMaxConcurrency())
 	if logger != nil {
 		for nk, err := range errs {
@@ -331,6 +339,13 @@ func upsertArtifactCategoryInstances(ctx context.Context, db *sql.DB, recordID i
 			}
 			count++
 		}
+	}
+	if logger != nil {
+		logger.Info(cfg.LogPrefix+" category-instances finished",
+			"record_id", recordID,
+			"category_instances", count,
+			"ms_used", time.Since(start).Milliseconds(),
+		)
 	}
 	return count
 }
@@ -364,6 +379,14 @@ func indexArtifactsByCategoryPaths(ctx context.Context, db *sql.DB, recordID int
 		return 0
 	}
 
+	if logger != nil {
+		logger.Info(cfg.LogPrefix+" category-paths start",
+			"record_id", recordID,
+			"artifacts", len(artifacts),
+			"semantic_projections", len(projs),
+		)
+	}
+	start := time.Now()
 	now := time.Now()
 	indexed := 0
 	for _, a := range artifacts {
@@ -376,7 +399,7 @@ func indexArtifactsByCategoryPaths(ctx context.Context, db *sql.DB, recordID int
 		}
 		if len(pairs) == 0 {
 			if logger != nil {
-				logger.Warn(cfg.LogPrefix+" error: no category paths for artifact", "record_id", recordID, "artifact_id", a.ID)
+				logger.Warn(cfg.LogPrefix+" error: no category paths for artifact", "record_id", recordID, cfg.IDColumn, a.ID, "source_spans", a.SourceSpans)
 			}
 			continue
 		}
@@ -419,6 +442,14 @@ func indexArtifactsByCategoryPaths(ctx context.Context, db *sql.DB, recordID int
 		if wrote {
 			indexed++
 		}
+	}
+	if logger != nil {
+		logger.Info(cfg.LogPrefix+" category-paths finished",
+			"record_id", recordID,
+			"artifacts", len(artifacts),
+			"indexed", indexed,
+			"ms_used", time.Since(start).Milliseconds(),
+		)
 	}
 	return indexed
 }
@@ -496,7 +527,23 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 	queriedArtifacts := 0
 	reusedEmbeddings := 0
 	fallbackEmbeddings := 0
-	for _, a := range artifacts {
+	if logger != nil {
+		logger.Info(cfg.LogPrefix+" semantic-linking start",
+			"record_id", recordID,
+			"artifacts", len(artifacts),
+			"semantic_enabled", semanticFeatureOn,
+		)
+	}
+	for i, a := range artifacts {
+		if logger != nil && i > 0 && i%50 == 0 {
+			logger.Info(cfg.LogPrefix+" semantic-linking progress",
+				"record_id", recordID,
+				"artifact_index", i,
+				"total_artifacts", len(artifacts),
+				"accepted_links_so_far", len(allAccepted),
+				"ms_used", time.Since(start).Milliseconds(),
+			)
+		}
 		query := strings.TrimSpace(a.SearchDocument)
 		if query == "" {
 			continue

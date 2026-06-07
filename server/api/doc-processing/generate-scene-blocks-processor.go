@@ -327,7 +327,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 	eventID := eventIDFromContext(ctx)
 	for idx := range result.SceneBlocks {
 		block := result.SceneBlocks[idx]
-		objectID := fmt.Sprintf("%d_%d", evt.RecordID, idx+1)
+		objectID := fmt.Sprintf("%d_sbk_%d", evt.RecordID, idx+1)
 		if strings.TrimSpace(asString(block["scene_id"])) == "" {
 			block["scene_id"] = objectID
 		}

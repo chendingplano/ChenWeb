@@ -337,7 +337,7 @@ func buildTopicRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kbse
 			})
 			rows = append(rows, kbsearch.RegistryRow{
 				ArtifactType:    searchArtifactTopic,
-				ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactTopic, item.TopicID),
+				ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactTopic, lastDelimitedToken(item.TopicID)),
 				InputRecordID:   recordID,
 				PrimaryLabel:    firstNonEmpty(item.TopicDesc, item.TopicID),
 				SecondaryLabel:  item.TopicType,
@@ -1301,12 +1301,12 @@ func trimStringSlice(in []string) []string {
 
 func parseSummaryID(summaryID string) (int64, int, int, bool) {
 	parts := strings.Split(strings.TrimSpace(summaryID), "_")
-	if len(parts) != 3 {
+	if len(parts) != 4 || parts[1] != "sum" {
 		return 0, 0, 0, false
 	}
 	recordID, err1 := strconv.ParseInt(parts[0], 10, 64)
-	level, err2 := strconv.Atoi(parts[1])
-	seqNo, err3 := strconv.Atoi(parts[2])
+	level, err2 := strconv.Atoi(parts[2])
+	seqNo, err3 := strconv.Atoi(parts[3])
 	return recordID, level, seqNo, err1 == nil && err2 == nil && err3 == nil
 }
 

@@ -237,7 +237,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		p.persistProvisionsStatus(ctx, rec, start, extractErr)
 		return nil
 	}
-	outputRows := p.buildProvisionOutputRows(result.Provisions, start, numUnits, time.Since(start).Milliseconds(), result.ModelName)
+	outputRows := p.buildProvisionOutputRows(evt.RecordID, result.Provisions, start, numUnits, time.Since(start).Milliseconds(), result.ModelName)
 
 	inserted, err := p.Store.SaveProvisions(ctx, SaveProvisionsRequest{
 		InputRecordID: evt.RecordID,
@@ -1031,7 +1031,7 @@ func normalizeProvisionSourceLineSpans(value any, lineToPage map[int]int) []stri
 	return lineRangesFromNumbers(lineNumbers)
 }
 
-func (p *ProvisionsProcessor) buildProvisionOutputRows(provisions []map[string]any, now time.Time, numBlocks int, durationMs int64, modelName string) []map[string]any {
+func (p *ProvisionsProcessor) buildProvisionOutputRows(recordID int64, provisions []map[string]any, now time.Time, numBlocks int, durationMs int64, modelName string) []map[string]any {
 	out := make([]map[string]any, 0, len(provisions))
 	timeText := now.Format(defaultDocMetaStatusTime)
 	timePerProvision := float64(0)
@@ -1044,7 +1044,7 @@ func (p *ProvisionsProcessor) buildProvisionOutputRows(provisions []map[string]a
 			"source_line_spans": provision["source_line_spans"],
 		}
 		out = append(out, map[string]any{
-			"prov_id":               i + 1,
+			"prov_id":               fmt.Sprintf("%d_prv_%d", recordID, i+1),
 			"prov_name":             strings.TrimSpace(asString(provision["provision_name"])),
 			"prov_name_en":          strings.TrimSpace(asString(provision["provision_name_en"])),
 			"provision":             strings.TrimSpace(asString(provision["provision"])),
@@ -1105,7 +1105,7 @@ func buildProvisionDBRecord(provision map[string]any, language string) map[strin
 	}
 
 	return map[string]any{
-		"prov_id":               int(toFloat(provision["prov_id"])),
+		"prov_id":               strings.TrimSpace(asString(provision["prov_id"])),
 		"prov_name":             strings.TrimSpace(asString(provision["prov_name"])),
 		"prov_name_en":          strings.TrimSpace(asString(provision["prov_name_en"])),
 		"provision_type":        strings.TrimSpace(asString(publicInfo["provision_type"])),
@@ -1159,11 +1159,10 @@ func (p *ProvisionsProcessor) indexProvisionsInTree(recordID int64, provisions [
 	}
 	now := p.Now()
 	for _, prov := range provisions {
-		provID := int(toFloat(prov["prov_id"]))
-		if provID <= 0 {
+		entry := strings.TrimSpace(asString(prov["prov_id"]))
+		if entry == "" {
 			continue
 		}
-		entry := fmt.Sprintf("%d_%d", recordID, provID)
 		for _, pair := range pairCategoryPathEntries(prov["category_paths"], prov["category_paths_en"]) {
 			if err := upsertProvisionIDToLeafDir(p.Logger, dir, pair.Index, pair.Original, entry, now); err != nil {
 				return fmt.Errorf("(MID_26050564) index provision %s: %w", entry, err)
@@ -1300,7 +1299,7 @@ func (p *ProvisionsProcessor) writeProvisionsArtifact(recordID int64, rec DocMet
 func buildProvisionFileRecord(row map[string]any) map[string]any {
 	publicInfo, _ := row["public_info"].(map[string]any)
 	return map[string]any{
-		"prov_id":           int(toFloat(row["prov_id"])),
+		"prov_id":           strings.TrimSpace(asString(row["prov_id"])),
 		"prov_name":         strings.TrimSpace(asString(row["prov_name"])),
 		"prov_name_en":      strings.TrimSpace(asString(row["prov_name_en"])),
 		"prov_type":         strings.TrimSpace(asString(publicInfo["provision_type"])),
@@ -1660,7 +1659,7 @@ ON CONFLICT (input_record_id, prov_id) DO UPDATE SET
 			req.InputRecordID,                 // $1
 			req.ExtractID,                     // $2
 			req.InputFilename,                 // $3
-			int(toFloat(dbRecord["prov_id"])), // $4
+			strings.TrimSpace(asString(dbRecord["prov_id"])), // $4
 			strings.TrimSpace(asString(dbRecord["prov_name"])),                              // $5
 			strings.TrimSpace(asString(dbRecord["prov_name_en"])),                           // $6
 			strings.TrimSpace(asString(dbRecord["provision_type"])),                         // $7

@@ -354,7 +354,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		detectedLanguage = "unknown"
 	}
 	for i, m := range allMetrics {
-		m["metric_id"] = fmt.Sprintf("%d_%d", evt.RecordID, i+1)
+		m["metric_id"] = fmt.Sprintf("%d_mtc_%d", evt.RecordID, i+1)
 		allMetrics[i] = m
 	}
 

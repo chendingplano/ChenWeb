@@ -119,7 +119,6 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 	resolver := newMetricCategoryResolver(db, logger)
 	categoryInstances := upsertArtifactCategoryInstances(ctx, db, recordID, artifacts, metricIndexConfig, resolver, logger)
 	categoryPathMetrics := indexArtifactsByCategoryPaths(ctx, db, recordID, artifacts, metricIndexConfig, logger)
-	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, artifacts, metricIndexConfig, logger)
 
 	if logger != nil {
 		logger.Info("metrics indexing result",
@@ -127,7 +126,6 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 			"connected_artifacts_metrics", connectedCount,
 			"category_instances", categoryInstances,
 			"category_path_metrics", categoryPathMetrics,
-			"semantic_links", semanticLinks,
 		)
 	}
 }

@@ -158,10 +158,10 @@ func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, cate
 		callID = strings.TrimSpace(c.newLLMCallID())
 	}
 	c.logger.Info("Create Category start",
+		"categoryType", categoryType,
+		"rawKey", rawKey,
 		"modelName", modelName,
 		"promptName", c.promptRef,
-		"rawKey", rawKey,
-		"categoryType", categoryType,
 	)
 	start := time.Now()
 	payload, err := c.extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
@@ -171,6 +171,8 @@ func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, cate
 	})
 
 	c.logger.Info("Create Category end  ",
+		"categoryType", categoryType,
+		"rawKey", rawKey,
 		"ms_used", time.Since(start).Milliseconds(),
 	)
 

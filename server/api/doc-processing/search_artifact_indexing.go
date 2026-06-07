@@ -122,17 +122,12 @@ func indexArtifactsByOverlapAndConnect(ctx context.Context, recordID int64, inpu
 	connectStart := time.Now()
 	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, artifacts, cfg, logger)
 	connectMs := time.Since(connectStart).Milliseconds()
-	semanticStart := time.Now()
-	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, artifacts, cfg, logger)
-	semanticMs := time.Since(semanticStart).Milliseconds()
 	if logger != nil {
 		logger.Info(cfg.LogPrefix+" result",
 			"record_id", recordID,
 			"artifacts", len(artifacts),
 			"connected_artifacts", connectedCount,
-			"semantic_links", semanticLinks,
 			"connected_artifacts_ms", connectMs,
-			"semantic_links_ms", semanticMs,
 			"total_ms", time.Since(start).Milliseconds(),
 		)
 	}
@@ -190,7 +185,7 @@ func loadIndexedTopicsForRecord(ctx context.Context, db *sql.DB, recordID int64)
 			_ = json.Unmarshal(spansRaw, &spansAny)
 		}
 		out = append(out, indexedArtifact{
-			ID:             kbsearch.BuildArtifactID(recordID, searchArtifactTopic, strings.TrimSpace(topicID)),
+			ID:             kbsearch.BuildArtifactID(recordID, searchArtifactTopic, lastDelimitedToken(topicID)),
 			UpdateKey:      strings.TrimSpace(topicID),
 			SourceSpans:    normalizeSourceLineSpans(spansAny),
 			SearchDocument: strings.TrimSpace(searchDoc),

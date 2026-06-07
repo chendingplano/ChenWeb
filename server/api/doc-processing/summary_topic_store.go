@@ -123,7 +123,7 @@ INSERT INTO kb.topics (
     $11::jsonb, $12::jsonb, $13, $14
 )`
 	for _, item := range topics {
-		topicID := strings.TrimSpace(strconv.Itoa(item.SeqNo))
+		topicID := fmt.Sprintf("%d_tpc_%d", recordID, item.SeqNo)
 		if _, err := tx.ExecContext(ctx, insertSQL,
 			topicID,
 			recordID,
@@ -336,7 +336,7 @@ ORDER BY topic_seq_no ASC, id ASC`
 		})
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactTopic,
-			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactTopic, topicID),
+			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactTopic, lastDelimitedToken(topicID)),
 			InputRecordID:   recordID,
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(topicDesc, topicDescEn, topicID),

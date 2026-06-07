@@ -202,18 +202,18 @@ func parseSummaryGraphMetadata(body []byte) (summaryGraphMetadata, bool) {
 
 func parseSummaryIDParts(summaryID string) (recordID int64, level int, seqNo int, ok bool) {
 	parts := strings.Split(strings.TrimSpace(summaryID), "_")
-	if len(parts) != 3 {
+	if len(parts) != 4 || parts[1] != "sum" {
 		return 0, 0, 0, false
 	}
 	recordID, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || recordID <= 0 {
 		return 0, 0, 0, false
 	}
-	level, err = strconv.Atoi(parts[1])
+	level, err = strconv.Atoi(parts[2])
 	if err != nil || level < 0 {
 		return 0, 0, 0, false
 	}
-	seqNo, err = strconv.Atoi(parts[2])
+	seqNo, err = strconv.Atoi(parts[3])
 	if err != nil || seqNo <= 0 {
 		return 0, 0, 0, false
 	}

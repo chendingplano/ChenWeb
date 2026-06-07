@@ -47,7 +47,7 @@ type getRecordProvisionsResponse struct {
 type provisionRow struct {
 	ItemID           string
 	InputRecordID    int64
-	ProvID           int
+	ProvID           string
 	ProvName         string
 	ProvNameEn       string
 	ProvisionType    string
@@ -585,7 +585,7 @@ JOIN %s i ON i.id = p.input_record_id`, provNameEnExpr, subjectExpr, keywordsExp
 			}
 		}
 		rec.SourceLineSpans = decodeJSONStringArray(sourceLineSpansRaw)
-		baseID := formatProvisionID(rec.InputRecordID, rec.ProvID)
+		baseID := rec.ProvID
 		seenItemIDs[baseID]++
 		if seenItemIDs[baseID] == 1 {
 			rec.ItemID = baseID
@@ -822,9 +822,6 @@ func convertProvisionSourceSpans(spans []string) []string {
 	return out
 }
 
-func formatProvisionID(recordID int64, provID int) string {
-	return fmt.Sprintf("%d_%d", recordID, provID)
-}
 
 func appendIfMissing(values []string, value string) []string {
 	for _, existing := range values {
@@ -848,7 +845,7 @@ type createProvisionRequest struct {
 
 type createProvisionResponse struct {
 	Status        bool   `json:"status"`
-	ProvID        int    `json:"prov_id"`
+	ProvID        string `json:"prov_id"`
 	ProvisionName string `json:"provision_name,omitempty"`
 	SpanCount     int    `json:"span_count,omitempty"`
 	Message       string `json:"message,omitempty"`
@@ -893,17 +890,18 @@ func CreateProvision(c echo.Context) error {
 
 	db := ApiTypes.ProjectDBHandle
 
-	var nextProvID int
+	var existingCount int
 	if err := db.QueryRow(
-		`SELECT COALESCE(MAX(prov_id), 0) + 1 FROM kb.provisions WHERE input_record_id = $1`,
+		`SELECT COUNT(*) FROM kb.provisions WHERE input_record_id = $1`,
 		req.InputRecordID,
-	).Scan(&nextProvID); err != nil {
-		logger.Error("failed to get next prov_id", "input_record_id", req.InputRecordID, "err", err)
+	).Scan(&existingCount); err != nil {
+		logger.Error("failed to get provision count", "input_record_id", req.InputRecordID, "err", err)
 		return c.JSON(http.StatusInternalServerError, createProvisionResponse{
 			Status:  false,
 			Message: "failed to create provision (CWB_KB_CPROV_020)",
 		})
 	}
+	nextProvID := fmt.Sprintf("%d_prv_%d", req.InputRecordID, existingCount+1)
 	logger.Info("next prov_id determined", "input_record_id", req.InputRecordID, "prov_id", nextProvID)
 
 	spans := make([]string, 0, len(req.SourceLineSpans))
@@ -914,7 +912,7 @@ func CreateProvision(c echo.Context) error {
 
 	provisionName := strings.TrimSpace(req.ProvisionName)
 	if provisionName == "" {
-		provisionName = fmt.Sprintf("Provision %d", nextProvID)
+		provisionName = fmt.Sprintf("Provision %s", nextProvID)
 	}
 
 	logger.Info("inserting provision",
@@ -966,7 +964,7 @@ func CreateProvision(c echo.Context) error {
 type provisionRecordJSON struct {
 	ID                  int64           `json:"id"`
 	InputRecordID       int64           `json:"input_record_id"`
-	ProvID              int             `json:"prov_id"`
+	ProvID              string          `json:"prov_id"`
 	InputFilename       string          `json:"input_filename"`
 	ProvName            *string         `json:"prov_name,omitempty"`
 	ProvNameEn          *string         `json:"prov_name_en,omitempty"`

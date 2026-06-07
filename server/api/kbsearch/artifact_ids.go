@@ -19,6 +19,18 @@ func ArtifactTypeCode(artifactType string) string {
 		return "prv"
 	case "product":
 		return "prd"
+	case "semantic_projection":
+		return "smp"
+	case "knowledge":
+		return "knw"
+	case "entity":
+		return "ent"
+	case "relation":
+		return "rel"
+	case "inventory_item":
+		return "inv"
+	case "inventory_item_duplicate":
+		return "dup"
 	default:
 		return "art"
 	}
