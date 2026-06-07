@@ -433,6 +433,9 @@ func (p *MetricsProcessor) PostProcessIndex(ctx context.Context, recordID int64)
 		p.Logger.Warn("write has-metrics connections failed", "record_id", recordID, "error", connErr)
 	}
 	IndexMetricsForRecord(ctx, recordID, chunks, p.Logger)
+	if refreshErr := refreshMetricArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ChunkDir, recordID, rec); refreshErr != nil {
+		p.Logger.Warn("refresh metric artifact failed", "record_id", recordID, "error", refreshErr)
+	}
 	return nil
 }
 
@@ -1795,6 +1798,7 @@ func (p *MetricsProcessor) logMetricsSummary(
 	}
 	promptName := firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef)
 	progress := "100%"
+	activityName := "extract_metrics_finish"
 
 	rec := DocProcLogRecord{
 		CallReason:    p.Name(),
@@ -1803,10 +1807,11 @@ func (p *MetricsProcessor) logMetricsSummary(
 		PromptName:    promptName,
 		RecordID:      int64Ptr(recordID),
 		ProcProgress:  &progress,
+		ActivityName:  &activityName,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogExtractMetricsSummary(ctx, rec, "MID-26052813"); err != nil {
+	if err := p.ProcLogger.LogExtractMetricsSummary(ctx, rec, "MID-26060802"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			p.Logger.Info("extract_metrics log skipped: doc processor stopped by user request")
 		} else {
@@ -2241,4 +2246,144 @@ VALUES (
 		inserted++
 	}
 	return inserted, nil
+}
+
+// ---- Phase C artifact file refresh ----
+
+// loadPersistedMetricArtifactRows loads all metric rows for a record from the DB,
+// including connected_artifacts populated by Phase C.
+func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID int64) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT metric_id,
+		       COALESCE(metric_name, ''),
+		       COALESCE(metric_name_en, ''),
+		       COALESCE(source_line_spans, '[]'::jsonb),
+		       COALESCE(metric_subject, ''),
+		       COALESCE(metric_subject_en, ''),
+		       COALESCE(metric_desc, ''),
+		       COALESCE(metric_desc_en, ''),
+		       COALESCE(metric_context, ''),
+		       COALESCE(metric_context_en, ''),
+		       COALESCE(metric_keywords, '[]'::jsonb),
+		       COALESCE(metric_keywords_en, '[]'::jsonb),
+		       COALESCE(location_type, ''),
+		       COALESCE(metric_unit, ''),
+		       COALESCE(metric_unit_en, ''),
+		       COALESCE(metric_value, ''),
+		       COALESCE(value_data_type, ''),
+		       COALESCE(value_range_type, ''),
+		       COALESCE(value_class, ''),
+		       COALESCE(value_class_en, ''),
+		       COALESCE(formula_or_definition, ''),
+		       COALESCE(threshold_or_target, ''),
+		       COALESCE(measurement_frequency, ''),
+		       COALESCE(confidence, 0),
+		       COALESCE(is_explicit_metric, false),
+		       COALESCE(table_name_or_section, ''),
+		       COALESCE(reasoning_tags, '[]'::jsonb),
+		       COALESCE(metric_categories, ''),
+		       COALESCE(metric_categories_en, ''),
+		       COALESCE(category_paths, '[]'::jsonb),
+		       COALESCE(category_paths_en, '[]'::jsonb),
+		       COALESCE(search_document, ''),
+		       COALESCE(connected_artifacts, '{}'::jsonb)
+		FROM kb.metrics
+		WHERE input_record_id = $1
+		ORDER BY id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []map[string]any
+	for rows.Next() {
+		var (
+			metricID, metricName, metricNameEn            string
+			sourceLineSpansRaw                             []byte
+			metricSubject, metricSubjectEn                string
+			metricDesc, metricDescEn                      string
+			metricContext, metricContextEn                string
+			metricKeywordsRaw, metricKeywordsEnRaw        []byte
+			locationType                                  string
+			metricUnit, metricUnitEn                      string
+			metricValue                                   string
+			valueDataType, valueRangeType                 string
+			valueClass, valueClassEn                      string
+			formulaOrDef, thresholdOrTarget, measFreq     string
+			confidence                                    float64
+			isExplicit                                    bool
+			tableNameOrSection                            string
+			reasoningTagsRaw                              []byte
+			metricCategories, metricCategoriesEn          string
+			categoryPathsRaw, categoryPathsEnRaw          []byte
+			searchDocument                                string
+			connectedArtifactsRaw                        []byte
+		)
+		if err := rows.Scan(
+			&metricID, &metricName, &metricNameEn,
+			&sourceLineSpansRaw,
+			&metricSubject, &metricSubjectEn,
+			&metricDesc, &metricDescEn,
+			&metricContext, &metricContextEn,
+			&metricKeywordsRaw, &metricKeywordsEnRaw,
+			&locationType,
+			&metricUnit, &metricUnitEn,
+			&metricValue,
+			&valueDataType, &valueRangeType,
+			&valueClass, &valueClassEn,
+			&formulaOrDef, &thresholdOrTarget, &measFreq,
+			&confidence, &isExplicit, &tableNameOrSection,
+			&reasoningTagsRaw,
+			&metricCategories, &metricCategoriesEn,
+			&categoryPathsRaw, &categoryPathsEnRaw,
+			&searchDocument,
+			&connectedArtifactsRaw,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"metric_id":              strings.TrimSpace(metricID),
+			"metric_name":            strings.TrimSpace(metricName),
+			"metric_name_en":         strings.TrimSpace(metricNameEn),
+			"source_line_spans":      jsonColumnToValue(sourceLineSpansRaw, []any{}),
+			"metric_subject":         strings.TrimSpace(metricSubject),
+			"metric_subject_en":      strings.TrimSpace(metricSubjectEn),
+			"metric_desc":            strings.TrimSpace(metricDesc),
+			"metric_desc_en":         strings.TrimSpace(metricDescEn),
+			"metric_context":         strings.TrimSpace(metricContext),
+			"metric_context_en":      strings.TrimSpace(metricContextEn),
+			"keywords":               jsonColumnToValue(metricKeywordsRaw, []any{}),
+			"keywords_en":            jsonColumnToValue(metricKeywordsEnRaw, []any{}),
+			"location_type":          strings.TrimSpace(locationType),
+			"metric_unit":            strings.TrimSpace(metricUnit),
+			"metric_unit_en":         strings.TrimSpace(metricUnitEn),
+			"metric_value":           strings.TrimSpace(metricValue),
+			"value_data_type":        strings.TrimSpace(valueDataType),
+			"value_range_type":       strings.TrimSpace(valueRangeType),
+			"value_class":            strings.TrimSpace(valueClass),
+			"value_class_en":         strings.TrimSpace(valueClassEn),
+			"formula_or_definition":  strings.TrimSpace(formulaOrDef),
+			"threshold_or_target":    strings.TrimSpace(thresholdOrTarget),
+			"measurement_frequency":  strings.TrimSpace(measFreq),
+			"confidence":             confidence,
+			"is_explicit_metric":     isExplicit,
+			"table_name_or_section":  strings.TrimSpace(tableNameOrSection),
+			"reasoning_tags":         jsonColumnToValue(reasoningTagsRaw, []any{}),
+			"metric_categories":      strings.TrimSpace(metricCategories),
+			"metric_categories_en":   strings.TrimSpace(metricCategoriesEn),
+			"category_paths":         jsonColumnToValue(categoryPathsRaw, []any{}),
+			"category_paths_en":      jsonColumnToValue(categoryPathsEnRaw, []any{}),
+			"search_document":        strings.TrimSpace(searchDocument),
+			"connected_artifacts":    jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+		})
+	}
+	return out, rows.Err()
+}
+
+func refreshMetricArtifactFile(ctx context.Context, db *sql.DB, artifactDir string, recordID int64, rec DocMetadataInputRecord) error {
+	rows, err := loadPersistedMetricArtifactRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, rows, ".metrics", "MID_26060703")
 }

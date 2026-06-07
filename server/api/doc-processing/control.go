@@ -257,15 +257,17 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		}
 	}()
 
+	var allProcResults []procResult
+
 	// Always run the blocking processor first, regardless of requested operations.
 	if s.BlockingProcessor != nil {
-		s.runSingleProcessor(ctx, payload, s.BlockingProcessor, evt.RecordID, &requestFailed, &firstErr)
+		s.runSingleProcessor(ctx, payload, s.BlockingProcessor, evt.RecordID, &requestFailed, &firstErr, &allProcResults)
 	}
 
 	if RunDocProcessorConcurrentFromEnv() {
-		s.runProcessorsTwoPhase(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr)
+		s.runProcessorsTwoPhase(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr, &allProcResults)
 	} else {
-		s.runProcessorsSequential(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr)
+		s.runProcessorsSequential(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr, &allProcResults)
 	}
 	if requestStopped {
 		return nil
@@ -275,17 +277,20 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	// artifacts of the invoked processors that defer indexing to this phase. This is the
 	// only place cross-artifact indexing (e.g. metrics) may run, so it sees all outputs.
 	s.runPostProcessIndexing(ctx, processors, evt.RecordID)
+
+	pipelineMSUsed := time.Since(requestStart).Milliseconds()
+	status := "success"
+	if requestFailed {
+		status = "failed"
+	}
 	if s.Logger != nil {
-		status := "success"
-		if requestFailed {
-			status = "failed"
-		}
 		s.Logger.Info("finish processing request",
 			"record_id", evt.RecordID,
 			"proc_status", status,
-			"ms_used", time.Since(requestStart).Milliseconds(),
+			"ms_used", pipelineMSUsed,
 		)
 	}
+	s.logPipelineFinish(context.Background(), evt.RecordID, pipelineMSUsed, allProcResults)
 	return firstErr
 }
 
@@ -377,9 +382,11 @@ func isPhaseAProcessor(name string) bool {
 }
 
 type procResult struct {
-	failed  bool
-	stopped bool
-	err     error
+	failed    bool
+	stopped   bool
+	err       error
+	operation string
+	msUsed    int64
 }
 
 // runSingleProcessorCollect runs one processor and returns its outcome without
@@ -398,7 +405,7 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 	}
 	s.persistPipelineStatus(ctx, recordID, "running", processorName, nil)
 	if err := p.HandleEvent(ctx, payload); err != nil {
-		res := procResult{failed: true, err: err}
+		res := procResult{failed: true, err: err, operation: processorName, msUsed: time.Since(procStart).Milliseconds()}
 		procStatus := "failed"
 		if errors.Is(err, ErrPipelineStopped) || isCtxStopped(ctx) {
 			res.stopped = true
@@ -414,26 +421,30 @@ func (s *ControlService) runSingleProcessorCollect(ctx context.Context, payload 
 				"record_id", recordID,
 				"processor", processorName,
 				"proc_status", procStatus,
-				"ms_used", time.Since(procStart).Milliseconds(),
+				"ms_used", res.msUsed,
 			)
 		}
-		setProcessorSpanResult(span, procStatus, err, time.Since(procStart).Milliseconds())
+		setProcessorSpanResult(span, procStatus, err, res.msUsed)
 		return res
 	}
+	res := procResult{operation: processorName, msUsed: time.Since(procStart).Milliseconds()}
 	if s.Logger != nil {
 		s.Logger.Info("finish running processor",
 			"record_id", recordID,
 			"processor", processorName,
 			"proc_status", "success",
-			"ms_used", time.Since(procStart).Milliseconds(),
+			"ms_used", res.msUsed,
 		)
 	}
-	setProcessorSpanResult(span, "success", nil, time.Since(procStart).Milliseconds())
-	return procResult{}
+	setProcessorSpanResult(span, "success", nil, res.msUsed)
+	return res
 }
 
-func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte, p Processor, recordID int64, requestFailed *bool, firstErr *error) {
+func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte, p Processor, recordID int64, requestFailed *bool, firstErr *error, summaries *[]procResult) {
 	res := s.runSingleProcessorCollect(ctx, payload, p, recordID)
+	if summaries != nil {
+		*summaries = append(*summaries, res)
+	}
 	if res.failed {
 		*requestFailed = true
 		if *firstErr == nil {
@@ -447,6 +458,7 @@ func (s *ControlService) runSingleProcessor(ctx context.Context, payload []byte,
 func (s *ControlService) runProcessorsSequential(
 	ctx context.Context, payload []byte, processors []Processor,
 	recordID int64, requestFailed, requestStopped *bool, firstErr *error,
+	summaries *[]procResult,
 ) {
 	phaseA, phaseB := splitProcessorsByPhase(processors)
 	phaseACtx, phaseASpan := startPhaseSpan(ctx, "A", recordID, phaseA)
@@ -482,7 +494,7 @@ func (s *ControlService) runProcessorsSequential(
 			}
 			runCtx = phaseBCtx
 		}
-		s.runSingleProcessor(runCtx, payload, p, recordID, requestFailed, firstErr)
+		s.runSingleProcessor(runCtx, payload, p, recordID, requestFailed, firstErr, summaries)
 		if !*requestFailed && canonicalOperationName(p.Name()) == "static_analyzer" {
 			clearBlockBufferInContext(ctx)
 		}
@@ -506,6 +518,7 @@ func (s *ControlService) runProcessorsSequential(
 func (s *ControlService) runProcessorsTwoPhase(
 	ctx context.Context, payload []byte, processors []Processor,
 	recordID int64, requestFailed, requestStopped *bool, firstErr *error,
+	summaries *[]procResult,
 ) {
 	phaseA, phaseB := splitProcessorsByPhase(processors)
 	phaseACtx, phaseASpan := startPhaseSpan(ctx, "A", recordID, phaseA)
@@ -518,7 +531,7 @@ func (s *ControlService) runProcessorsTwoPhase(
 			phaseASpan.End()
 			return
 		}
-		s.runSingleProcessor(phaseACtx, payload, p, recordID, requestFailed, firstErr)
+		s.runSingleProcessor(phaseACtx, payload, p, recordID, requestFailed, firstErr, summaries)
 		if !*requestFailed && canonicalOperationName(p.Name()) == "static_analyzer" {
 			clearBlockBufferInContext(ctx)
 		}
@@ -560,6 +573,9 @@ func (s *ControlService) runProcessorsTwoPhase(
 	}
 	wg.Wait()
 
+	if summaries != nil {
+		*summaries = append(*summaries, results...)
+	}
 	for _, r := range results {
 		if r.failed {
 			*requestFailed = true
@@ -572,6 +588,49 @@ func (s *ControlService) runProcessorsTwoPhase(
 		*requestFailed = false
 		*firstErr = nil
 		*requestStopped = true
+	}
+}
+
+type pipelineProcSummaryJSON struct {
+	Operation  string `json:"operation"`
+	ProcStatus string `json:"proc_status"`
+	MSUsed     int64  `json:"ms_used"`
+}
+
+func (s *ControlService) logPipelineFinish(ctx context.Context, recordID int64, msUsed int64, results []procResult) {
+	summaries := make([]pipelineProcSummaryJSON, len(results))
+	for i, r := range results {
+		procStatus := "success"
+		if r.stopped {
+			procStatus = "stopped"
+		} else if r.failed {
+			procStatus = "failed"
+		}
+		summaries[i] = pipelineProcSummaryJSON{
+			Operation:  r.operation,
+			ProcStatus: procStatus,
+			MSUsed:     r.msUsed,
+		}
+	}
+	extraInfoBytes, err := json.Marshal(summaries)
+	if err != nil {
+		if s.Logger != nil {
+			s.Logger.Warn("logPipelineFinish: failed marshalling extra_info", "record_id", recordID, "error", err)
+		}
+		return
+	}
+	extraInfoStr := string(extraInfoBytes)
+	activityName := "pipeline finish"
+	logger := DocProcLogger{}
+	if err := logger.LogPipelineFinish(ctx, DocProcLogRecord{
+		CallReason:    "pipeline finish",
+		DocProcName:   "pipeline",
+		RecordID:      int64Ptr(recordID),
+		ActivityName:  &activityName,
+		MSUsed:        int64Ptr(msUsed),
+		ExtraInfoJSON: &extraInfoStr,
+	}, "MID-26060801"); err != nil && s.Logger != nil {
+		s.Logger.Warn("failed to write pipeline finish log", "record_id", recordID, "error", err)
 	}
 }
 

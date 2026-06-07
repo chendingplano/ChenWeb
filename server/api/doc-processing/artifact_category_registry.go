@@ -45,7 +45,7 @@ ORDER BY seen_count DESC`
 		if err := rows.Scan(&rec.CategoryID, &rec.CategoryKey, &rec.Status, &rec.CanonicalOf, &matchKeys, &seenCount); err != nil {
 			return nil, err
 		}
-		rec.CategoryType = categoryType
+		// rec.CategoryType = categoryType
 		_ = json.Unmarshal(matchKeys, &rec.MatchKeys)
 
 		for _, mk := range rec.MatchKeys {
@@ -274,10 +274,10 @@ type aliasConflict struct {
 // RWMutex; reads use RLock. Tests inject a fresh instance per test to avoid
 // cross-test pollution via globalCategoryIndex.
 type categoryIndex struct {
-	mu      sync.RWMutex
-	loaded  map[string]bool
-	byType  map[string]map[string]int64 // [categoryType][normalizedKey] → categoryID
-	seenBy  map[string]map[string]int64 // [categoryType][normalizedKey] → seen_count (conflict resolution)
+	mu     sync.RWMutex
+	loaded map[string]bool
+	byType map[string]map[string]int64 // [categoryType][normalizedKey] → categoryID
+	seenBy map[string]map[string]int64 // [categoryType][normalizedKey] → seen_count (conflict resolution)
 }
 
 func newCategoryIndex() *categoryIndex {

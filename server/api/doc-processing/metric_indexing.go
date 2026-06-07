@@ -23,10 +23,10 @@ const (
 // KnowledgeStore/Capsules/coding-capsules/llm-wiki/hybrid-search.md. Inventory-item
 // connect (spec 3.3.5) reuses these same constants per "same as 3.1.5".
 const (
-	rrfKMetricConnect                 = 60
-	hybridCandidateLimitMetricConnect = 200
-	defaultMetricConnectMinCosine     = 0.75
-	defaultMetricConnectMaxLinks      = 10
+	// rrfKMetricConnect                 = 60
+	// hybridCandidateLimitMetricConnect = 200
+	defaultMetricConnectMinCosine = 0.75
+	defaultMetricConnectMaxLinks  = 10
 )
 
 // metricConnectMinCosine is the minimum embedding cosine similarity for the semantic

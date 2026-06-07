@@ -383,7 +383,7 @@ func (p *ProvisionsProcessor) logProvisionsSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogExtractProvisions(ctx, rec, "MID-26052832"); err != nil {
+	if err := p.ProcLogger.LogExtractProvisionsFinish(ctx, rec, "MID-26052832"); err != nil {
 		p.Logger.Warn("failed to write extract_provisions log", "error", err)
 	}
 }
@@ -1317,9 +1317,10 @@ func buildProvisionFileRecord(row map[string]any) map[string]any {
 		"keywords_en":       row["provision_keywords_en"],
 		"confidence":        toFloat(row["confidence"]),
 		"is_explicit":       toBool(row["is_explicit"]),
-		"need_verify":       toBool(row["need_verify"]),
-		"category_paths":    row["category_paths"],
-		"category_paths_en": row["category_paths_en"],
+		"need_verify":          toBool(row["need_verify"]),
+		"category_paths":       row["category_paths"],
+		"category_paths_en":    row["category_paths_en"],
+		"connected_artifacts":  row["connected_artifacts"],
 	}
 }
 
@@ -1698,4 +1699,125 @@ ON CONFLICT (input_record_id, prov_id) DO UPDATE SET
 		inserted++
 	}
 	return inserted, nil
+}
+
+// ---- Phase C artifact file refresh ----
+
+// loadPersistedProvisionArtifactRows loads all provision rows for a record from the DB,
+// including connected_artifacts populated by Phase C, and returns them as rows ready
+// for buildProvisionFileRecord.
+func loadPersistedProvisionArtifactRows(ctx context.Context, db *sql.DB, recordID int64) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT COALESCE(prov_id, ''),
+		       COALESCE(prov_name, ''),
+		       COALESCE(prov_name_en, ''),
+		       COALESCE(provision_type, ''),
+		       COALESCE(source_line_spans, '[]'::jsonb),
+		       COALESCE(provision, ''),
+		       COALESCE(provision_en, ''),
+		       COALESCE(provision_subject, ''),
+		       COALESCE(provision_subject_en, ''),
+		       COALESCE(prov_desc, ''),
+		       COALESCE(prov_desc_en, ''),
+		       COALESCE(prov_context, ''),
+		       COALESCE(prov_context_en, ''),
+		       COALESCE(provision_keywords, '[]'::jsonb),
+		       COALESCE(provision_keywords_en, '[]'::jsonb),
+		       COALESCE(category_paths, '[]'::jsonb),
+		       COALESCE(category_paths_en, '[]'::jsonb),
+		       COALESCE(location_type, ''),
+		       COALESCE(confidence, 0),
+		       COALESCE(is_explicit, false),
+		       COALESCE(need_verify, false),
+		       COALESCE(public_info, '{}'::jsonb),
+		       COALESCE(connected_artifacts, '{}'::jsonb)
+		FROM kb.provisions
+		WHERE input_record_id = $1
+		ORDER BY id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []map[string]any
+	for rows.Next() {
+		var (
+			provID, provName, provNameEn        string
+			provisionType                       string
+			sourceLineSpansRaw                  []byte
+			provision, provisionEn              string
+			provisionSubject, provisionSubjectEn string
+			provDesc, provDescEn                string
+			provContext, provContextEn          string
+			keywordsRaw, keywordsEnRaw          []byte
+			categoryPathsRaw, categoryPathsEnRaw []byte
+			locationType                        string
+			confidence                          float64
+			isExplicit, needVerify              bool
+			publicInfoRaw                       []byte
+			connectedArtifactsRaw               []byte
+		)
+		if err := rows.Scan(
+			&provID, &provName, &provNameEn,
+			&provisionType,
+			&sourceLineSpansRaw,
+			&provision, &provisionEn,
+			&provisionSubject, &provisionSubjectEn,
+			&provDesc, &provDescEn,
+			&provContext, &provContextEn,
+			&keywordsRaw, &keywordsEnRaw,
+			&categoryPathsRaw, &categoryPathsEnRaw,
+			&locationType,
+			&confidence, &isExplicit, &needVerify,
+			&publicInfoRaw,
+			&connectedArtifactsRaw,
+		); err != nil {
+			return nil, err
+		}
+		// Build public_info so buildProvisionFileRecord can read provision_type from it.
+		publicInfo := jsonColumnObject(publicInfoRaw)
+		if publicInfo == nil {
+			publicInfo = map[string]any{}
+		}
+		if strings.TrimSpace(asString(publicInfo["provision_type"])) == "" && provisionType != "" {
+			publicInfo["provision_type"] = provisionType
+		}
+		out = append(out, map[string]any{
+			"prov_id":              strings.TrimSpace(provID),
+			"prov_name":            strings.TrimSpace(provName),
+			"prov_name_en":         strings.TrimSpace(provNameEn),
+			"source_line_spans":    jsonColumnToValue(sourceLineSpansRaw, []any{}),
+			"provision":            strings.TrimSpace(provision),
+			"provision_en":         strings.TrimSpace(provisionEn),
+			"provision_subject":    strings.TrimSpace(provisionSubject),
+			"provision_subject_en": strings.TrimSpace(provisionSubjectEn),
+			"prov_desc":            strings.TrimSpace(provDesc),
+			"prov_desc_en":         strings.TrimSpace(provDescEn),
+			"prov_context":         strings.TrimSpace(provContext),
+			"prov_context_en":      strings.TrimSpace(provContextEn),
+			"provision_keywords":   jsonColumnToValue(keywordsRaw, []any{}),
+			"provision_keywords_en": jsonColumnToValue(keywordsEnRaw, []any{}),
+			"category_paths":       jsonColumnToValue(categoryPathsRaw, []any{}),
+			"category_paths_en":    jsonColumnToValue(categoryPathsEnRaw, []any{}),
+			"location_type":        strings.TrimSpace(locationType),
+			"confidence":           confidence,
+			"is_explicit":          isExplicit,
+			"need_verify":          needVerify,
+			"public_info":          publicInfo,
+			"connected_artifacts":  jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+		})
+	}
+	return out, rows.Err()
+}
+
+func refreshProvisionArtifactFile(ctx context.Context, db *sql.DB, artifactDir string, recordID int64, rec DocMetadataInputRecord) error {
+	rows, err := loadPersistedProvisionArtifactRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	fileRecords := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		fileRecords = append(fileRecords, buildProvisionFileRecord(row))
+	}
+	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, fileRecords, ".provisions", "MID_26060704")
 }

@@ -677,7 +677,7 @@ func (p *SemanticProjectionsProcessor) logSemanticProjectionsSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogExtractProjections(ctx, rec, "MID-26052815"); err != nil {
+	if err := p.ProcLogger.LogExtractProjectionsFinish(ctx, rec, "MID-26060805"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			p.Logger.Info("extract_projections summary log skipped: doc processor stopped")
 		} else {
@@ -1189,6 +1189,92 @@ func (s SemanticProjectionsSQLStore) DeleteSemanticProjectionsByInputRecordID(ct
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// ---- Phase C artifact file refresh ----
+
+func loadPersistedSemanticProjectionArtifactRows(ctx context.Context, db *sql.DB, recordID int64) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT COALESCE(semantic_proj_id, ''),
+		       COALESCE(language, ''),
+		       COALESCE(descriptive_name, ''),
+		       COALESCE(descriptive_name_en, ''),
+		       COALESCE(keywords, '[]'::jsonb),
+		       COALESCE(keywords_en, '[]'::jsonb),
+		       COALESCE(semantic_projection, ''),
+		       COALESCE(semantic_projection_en, ''),
+		       COALESCE(category_paths, '[]'::jsonb),
+		       COALESCE(category_paths_en, '[]'::jsonb),
+		       COALESCE(line_spans, '[]'::jsonb),
+		       COALESCE(model_name, ''),
+		       COALESCE(prompt_name, ''),
+		       COALESCE(search_document, ''),
+		       COALESCE(connected_artifacts, '{}'::jsonb),
+		       COALESCE(ext_info, '{}'::jsonb),
+		       to_char(create_time AT TIME ZONE 'UTC', 'YYYYMMDD-HH24MISS')
+		FROM kb.semantic_projections
+		WHERE input_record_id = $1
+		ORDER BY id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []map[string]any
+	for rows.Next() {
+		var (
+			semanticProjID, language               string
+			descriptiveName, descriptiveNameEn     string
+			keywordsRaw, keywordsEnRaw             []byte
+			semanticProjection, semanticProjEn     string
+			categoryPathsRaw, categoryPathsEnRaw   []byte
+			lineSpansRaw                           []byte
+			modelName, promptName, searchDocument  string
+			connectedArtifactsRaw, extInfoRaw      []byte
+			createTime                             string
+		)
+		if err := rows.Scan(
+			&semanticProjID, &language,
+			&descriptiveName, &descriptiveNameEn,
+			&keywordsRaw, &keywordsEnRaw,
+			&semanticProjection, &semanticProjEn,
+			&categoryPathsRaw, &categoryPathsEnRaw,
+			&lineSpansRaw,
+			&modelName, &promptName, &searchDocument,
+			&connectedArtifactsRaw, &extInfoRaw,
+			&createTime,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"semantic_proj_id":        strings.TrimSpace(semanticProjID),
+			"language":                strings.TrimSpace(language),
+			"descriptive_name":        strings.TrimSpace(descriptiveName),
+			"descriptive_name_en":     strings.TrimSpace(descriptiveNameEn),
+			"keywords":                jsonColumnToValue(keywordsRaw, []any{}),
+			"keywords_en":             jsonColumnToValue(keywordsEnRaw, []any{}),
+			"semantic_projection":     strings.TrimSpace(semanticProjection),
+			"semantic_projection_en":  strings.TrimSpace(semanticProjEn),
+			"category_paths":          jsonColumnToValue(categoryPathsRaw, []any{}),
+			"category_paths_en":       jsonColumnToValue(categoryPathsEnRaw, []any{}),
+			"line_spans":              jsonColumnToValue(lineSpansRaw, []any{}),
+			"model_name":              strings.TrimSpace(modelName),
+			"prompt_name":             strings.TrimSpace(promptName),
+			"search_document":         strings.TrimSpace(searchDocument),
+			"connected_artifacts":     jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+			"ext_info":                jsonColumnToValue(extInfoRaw, map[string]any{}),
+			"create_time":             strings.TrimSpace(createTime),
+		})
+	}
+	return out, rows.Err()
+}
+
+func refreshSemanticProjectionArtifactFile(ctx context.Context, db *sql.DB, artifactDir string, recordID int64, rec DocMetadataInputRecord) error {
+	rows, err := loadPersistedSemanticProjectionArtifactRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, rows, ".semantic_projections", "MID_26060706")
 }
 
 func (s SemanticProjectionsSQLStore) SaveSemanticProjections(ctx context.Context, req SaveSemanticProjectionsRequest) (int64, error) {

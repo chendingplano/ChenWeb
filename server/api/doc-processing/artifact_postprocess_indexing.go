@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
 func (p *SceneBlocksProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
@@ -39,6 +41,9 @@ func (p *SceneBlocksProcessor) PostProcessIndex(ctx context.Context, recordID in
 		p.Logger.Warn("write has-scene connections failed", "record_id", recordID, "error", connErr)
 	}
 	IndexSceneBlocksForRecord(ctx, recordID, chunks, p.Logger)
+	if refreshErr := refreshSceneBlockArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ArtifactDir, recordID, rec); refreshErr != nil {
+		p.Logger.Warn("refresh scene block artifact failed", "record_id", recordID, "error", refreshErr)
+	}
 	return nil
 }
 
@@ -146,6 +151,9 @@ func (p *ProvisionsProcessor) PostProcessIndex(ctx context.Context, recordID int
 		p.Logger.Warn("reindex provision search registry failed", "record_id", recordID, "error", reindexErr)
 	}
 	IndexProvisionsForRecord(ctx, recordID, chunks, p.Logger)
+	if refreshErr := refreshProvisionArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ArtifactDir, recordID, rec); refreshErr != nil {
+		p.Logger.Warn("refresh provision artifact failed", "record_id", recordID, "error", refreshErr)
+	}
 	return nil
 }
 
@@ -248,6 +256,12 @@ func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID
 			"relations_exist", relationsExist,
 			"total_ms", time.Since(start).Milliseconds(),
 		)
+	}
+	if refreshErr := refreshEntityArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ArtifactDir, recordID, rec); refreshErr != nil {
+		p.Logger.Warn("refresh entity artifact failed", "record_id", recordID, "error", refreshErr)
+	}
+	if refreshErr := refreshRelationArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ArtifactDir, recordID, rec); refreshErr != nil {
+		p.Logger.Warn("refresh relation artifact failed", "record_id", recordID, "error", refreshErr)
 	}
 	return nil
 }

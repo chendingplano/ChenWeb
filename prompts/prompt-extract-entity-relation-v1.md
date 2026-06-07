@@ -170,6 +170,8 @@ BAD: `["25", "26", "27", "28", "29", "30"]`
 
 3. Only include line numbers that actually appear in the input chunk.
 
+4. `lines` MUST not be empty. `lines` serves as the grounding true!
+
 ## 5.3 Ignore Empty Artifacts
 
 If `entities` or `relations` would be empty, still emit it as `[]`.

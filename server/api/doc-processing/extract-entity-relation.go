@@ -558,7 +558,7 @@ func (p *EntityRelationProcessor) logEntityRelationSummary(
 	}
 
 	progress := "100%"
-	activityName := "extract_entity_relation"
+	activityName := "extract_entity_relation_finish"
 	rec := DocProcLogRecord{
 		CallReason:    "extract entities and relations",
 		DocProcName:   p.Name(),
@@ -570,7 +570,7 @@ func (p *EntityRelationProcessor) logEntityRelationSummary(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, "extract_entity_relation", rec, "MID-26052808"); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, "extract_entity_relation_finish", rec, "MID-26052808"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
 }
@@ -1321,4 +1321,177 @@ INSERT INTO kb.relations (
 func isLanguageEnglish(language string) bool {
 	s := strings.TrimSpace(language)
 	return strings.EqualFold(s, "en") || strings.EqualFold(s, "english")
+}
+
+// ---- Phase C artifact file refresh ----
+
+// loadPersistedEntityArtifactRows loads all entity rows for a record from the DB,
+// including connected_artifacts populated by Phase C, and returns them as artifact maps
+// ready to be written to the .entities file.
+func loadPersistedEntityArtifactRows(ctx context.Context, db *sql.DB, recordID int64) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT entity_id,
+		       COALESCE(entity, ''),
+		       COALESCE(entity_en, ''),
+		       COALESCE(entity_type, ''),
+		       COALESCE(entity_type_en, ''),
+		       COALESCE(aliases, '[]'::jsonb),
+		       COALESCE(aliases_en, '[]'::jsonb),
+		       COALESCE(desc_text, ''),
+		       COALESCE(desc_text_en, ''),
+		       COALESCE(keywords, '[]'::jsonb),
+		       COALESCE(keywords_en, '[]'::jsonb),
+		       COALESCE(line_spans, '[]'::jsonb),
+		       COALESCE(confidence, 0),
+		       COALESCE(model_name, ''),
+		       COALESCE(prompt_name, ''),
+		       COALESCE(search_document, ''),
+		       COALESCE(connected_artifacts, '{}'::jsonb),
+		       COALESCE(ext_info, '{}'::jsonb)
+		FROM kb.entities
+		WHERE input_record_id = $1
+		ORDER BY id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []map[string]any
+	for rows.Next() {
+		var (
+			entityID, entity, entityEn, entityType, entityTypeEn string
+			aliasesRaw, aliasesEnRaw                             []byte
+			descText, descTextEn                                 string
+			keywordsRaw, keywordsEnRaw                           []byte
+			lineSpansRaw                                         []byte
+			confidence                                           float64
+			modelName, promptName, searchDocument                string
+			connectedArtifactsRaw, extInfoRaw                   []byte
+		)
+		if err := rows.Scan(
+			&entityID, &entity, &entityEn, &entityType, &entityTypeEn,
+			&aliasesRaw, &aliasesEnRaw,
+			&descText, &descTextEn,
+			&keywordsRaw, &keywordsEnRaw,
+			&lineSpansRaw,
+			&confidence, &modelName, &promptName, &searchDocument,
+			&connectedArtifactsRaw, &extInfoRaw,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"entity_id":           strings.TrimSpace(entityID),
+			"entity":              strings.TrimSpace(entity),
+			"entity_en":           strings.TrimSpace(entityEn),
+			"entity_type":         strings.TrimSpace(entityType),
+			"entity_type_en":      strings.TrimSpace(entityTypeEn),
+			"aliases":             jsonColumnToValue(aliasesRaw, []any{}),
+			"aliases_en":          jsonColumnToValue(aliasesEnRaw, []any{}),
+			"desc_text":           strings.TrimSpace(descText),
+			"desc_text_en":        strings.TrimSpace(descTextEn),
+			"keywords":            jsonColumnToValue(keywordsRaw, []any{}),
+			"keywords_en":         jsonColumnToValue(keywordsEnRaw, []any{}),
+			"line_spans":          jsonColumnToValue(lineSpansRaw, []any{}),
+			"confidence":          confidence,
+			"model_name":          strings.TrimSpace(modelName),
+			"prompt_name":         strings.TrimSpace(promptName),
+			"search_document":     strings.TrimSpace(searchDocument),
+			"connected_artifacts": jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+			"ext_info":            jsonColumnToValue(extInfoRaw, map[string]any{}),
+		})
+	}
+	return out, rows.Err()
+}
+
+func refreshEntityArtifactFile(ctx context.Context, db *sql.DB, artifactDir string, recordID int64, rec DocMetadataInputRecord) error {
+	rows, err := loadPersistedEntityArtifactRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, rows, ".entities", "MID_26060701")
+}
+
+// loadPersistedRelationArtifactRows loads all relation rows for a record from the DB,
+// including connected_artifacts populated by Phase C.
+func loadPersistedRelationArtifactRows(ctx context.Context, db *sql.DB, recordID int64) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT relation_id,
+		       COALESCE(subject, ''),
+		       COALESCE(subject_en, ''),
+		       COALESCE(predicate, ''),
+		       COALESCE(predicate_en, ''),
+		       COALESCE(object, ''),
+		       COALESCE(object_en, ''),
+		       COALESCE(desc_text, ''),
+		       COALESCE(desc_text_en, ''),
+		       COALESCE(keywords, '[]'::jsonb),
+		       COALESCE(keywords_en, '[]'::jsonb),
+		       COALESCE(line_spans, '[]'::jsonb),
+		       COALESCE(confidence, 0),
+		       COALESCE(model_name, ''),
+		       COALESCE(prompt_name, ''),
+		       COALESCE(search_document, ''),
+		       COALESCE(connected_artifacts, '{}'::jsonb),
+		       COALESCE(ext_info, '{}'::jsonb)
+		FROM kb.relations
+		WHERE input_record_id = $1
+		ORDER BY id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []map[string]any
+	for rows.Next() {
+		var (
+			relationID, subject, subjectEn, predicate, predicateEn string
+			object, objectEn                                        string
+			descText, descTextEn                                    string
+			keywordsRaw, keywordsEnRaw                              []byte
+			lineSpansRaw                                            []byte
+			confidence                                              float64
+			modelName, promptName, searchDocument                   string
+			connectedArtifactsRaw, extInfoRaw                      []byte
+		)
+		if err := rows.Scan(
+			&relationID, &subject, &subjectEn, &predicate, &predicateEn,
+			&object, &objectEn,
+			&descText, &descTextEn,
+			&keywordsRaw, &keywordsEnRaw,
+			&lineSpansRaw,
+			&confidence, &modelName, &promptName, &searchDocument,
+			&connectedArtifactsRaw, &extInfoRaw,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"relation_id":         strings.TrimSpace(relationID),
+			"subject":             strings.TrimSpace(subject),
+			"subject_en":          strings.TrimSpace(subjectEn),
+			"predicate":           strings.TrimSpace(predicate),
+			"predicate_en":        strings.TrimSpace(predicateEn),
+			"object":              strings.TrimSpace(object),
+			"object_en":           strings.TrimSpace(objectEn),
+			"desc_text":           strings.TrimSpace(descText),
+			"desc_text_en":        strings.TrimSpace(descTextEn),
+			"keywords":            jsonColumnToValue(keywordsRaw, []any{}),
+			"keywords_en":         jsonColumnToValue(keywordsEnRaw, []any{}),
+			"line_spans":          jsonColumnToValue(lineSpansRaw, []any{}),
+			"confidence":          confidence,
+			"model_name":          strings.TrimSpace(modelName),
+			"prompt_name":         strings.TrimSpace(promptName),
+			"search_document":     strings.TrimSpace(searchDocument),
+			"connected_artifacts": jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+			"ext_info":            jsonColumnToValue(extInfoRaw, map[string]any{}),
+		})
+	}
+	return out, rows.Err()
+}
+
+func refreshRelationArtifactFile(ctx context.Context, db *sql.DB, artifactDir string, recordID int64, rec DocMetadataInputRecord) error {
+	rows, err := loadPersistedRelationArtifactRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, rows, ".relations", "MID_26060702")
 }

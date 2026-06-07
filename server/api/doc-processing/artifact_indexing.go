@@ -13,9 +13,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
-	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 // This file holds the artifact-agnostic Phase C (post-process) indexing engine shared by
@@ -496,6 +494,7 @@ func removeArtifactTreeRecord(treeRootDir string, recordID int64, filename strin
 }
 
 // hybridCandidate is one row returned by the artifact connect hybrid query.
+/*
 type hybridCandidate struct {
 	artifactType string
 	artifactID   string
@@ -505,6 +504,7 @@ type hybridCandidate struct {
 	cosineSim    sql.NullFloat64
 	lexScore     sql.NullFloat64
 }
+*/
 
 // connectArtifactsBySearch creates source-artifact -> artifact semantic-similarity edges.
 // It runs the hybrid (lexical + pgvector) search per artifact, applies the acceptance
@@ -512,6 +512,7 @@ type hybridCandidate struct {
 // idempotently replaces the document's edges for this source family in one source-scoped
 // call. Returns the total number of edges written. (Metric spec 3.1.5; inventory 3.3.5
 // reuses the identical policy.)
+/*
 func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, logger ApiTypes.JimoLogger) int {
 	start := time.Now()
 	scfg := appconfig.GetArtifactSearchConfig()
@@ -637,11 +638,13 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 	}
 	return len(allAccepted)
 }
+*/
 
 // queryArtifactHybridCandidates runs the lexical (+ optional semantic) RRF search over
 // kb.search_artifacts and returns the fused candidates with their component scores.
 // Params: $1 = query text, $2 = self artifact_id (excluded), $3 = query embedding vector
 // (hybrid path only). selfType is the source artifact_type excluded from results.
+/*
 func queryArtifactHybridCandidates(ctx context.Context, db *sql.DB, dict, query string, vec []float64, useSem bool, selfType, selfID string, limit int) ([]hybridCandidate, error) {
 	if limit <= 0 {
 		limit = defaultMetricConnectMaxLinks
@@ -730,10 +733,12 @@ LIMIT %d`,
 	}
 	return out, rows.Err()
 }
+*/
 
 // sanitizeArtifactType guards an artifact_type identifier (interpolated into SQL) against
 // injection by allowing only letters/underscore; anything else falls back to a value that
 // matches nothing meaningful.
+/*
 func sanitizeArtifactType(t string) string {
 	t = strings.TrimSpace(t)
 	for _, r := range t {
@@ -743,6 +748,7 @@ func sanitizeArtifactType(t string) string {
 	}
 	return t
 }
+*/
 
 // metricsToIndexedArtifacts adapts the metric-specific view to the generic one.
 func metricsToIndexedArtifacts(metrics []indexedMetric) []indexedArtifact {

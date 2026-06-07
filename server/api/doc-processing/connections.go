@@ -69,7 +69,7 @@ const (
 // Chunks are not first-class DB rows; they are addressed by (record, index), and
 // line_overlap edges are recomputed on every reprocess, so positional ids are safe.
 func ChunkConnectionID(recordID int64, chunkIndex int) string {
-	return fmt.Sprintf("%d_%d", recordID, chunkIndex)
+	return fmt.Sprintf("%d_chk_%d", recordID, chunkIndex)
 }
 
 // DeriveLineOverlapConnections builds chunk -> artifact line_overlap edges: one

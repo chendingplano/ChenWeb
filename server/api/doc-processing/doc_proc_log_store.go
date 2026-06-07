@@ -13,8 +13,10 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
+const EntryTypePipelineFinish = "pipeline finish"
 const EntryTypeLLMCall = "llm_call"
 const EntryTypeGenerateSummary = "generate_summary"
+const EntryTypeGenerateSummaryFinish = "generate_summary_finish"
 const EntryTypeExtractTopics = "extract_topics"
 const EntryTypeExtractTopicsFinish = "extract_topics_finish"
 const EntryTypeStaticAnalyzer = "static_analyzer"
@@ -22,16 +24,21 @@ const EntryTypeBlocking = "blocking"
 const EntryTypeExtractMetrics = "extract_metrics"
 const EntryTypeExtractMetricsFinish = "extract_metrics_finish"
 const EntryTypeExtractProjections = "extract_projections"
+const EntryTypeExtractProjectionsFinish = "extract_projections_finish"
 const EntryTypeExtractProvisions = "extract_provisions"
+const EntryTypeExtractProvisionsFinish = "extract_provisions_finish"
 const EntryTypeExtractSceneBlocks = "extract_scene_blocks"
 const EntryTypeEnrichSceneBlocks = "enrich_scene_blocks"
+const EntryTypeExtractSceneBlocksFinish = "extract_scene_blocks_finish"
 const EntryTypeExtractStructuredKnowledge = "extract_structured_knowledge"
 const EntryTypeEnrichStructuredKnowledge = "enrich_structured_knowledge"
 const EntryTypeExtractEntityRelation = "extract_entity_relation"
+const EntryTypeExtractEntityRelationFinish = "extract_entity_relation_finish"
 const EntryTypeExtractInventoryItems = "extract_inventory_items"
+const EntryTypeExtractInventoryItemsFinish = "extract_inventory_items_finish"
 const EntryTypeExtractDocMetadata = "extract_doc_metadata"
 const EntryTypeChunking = "chunking"
-const EntryTypeGenerateSceneBlocks = "generate_scene_blocks"
+const EntryTypeGenerateTopics = "generate_topics"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
@@ -136,7 +143,7 @@ func (l DocProcLogger) LogGenerateSummary(ctx context.Context, rec DocProcLogRec
 }
 
 func (l DocProcLogger) LogGenerateSummaryFinish(ctx context.Context, rec DocProcLogRecord, loc string) error {
-	rec.EntryType = EntryTypeGenerateSummary
+	rec.EntryType = EntryTypeGenerateSummaryFinish
 	rec.LogLoc = callerLoc(2)
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
@@ -191,6 +198,12 @@ func (l DocProcLogger) LogExtractProjections(ctx context.Context, rec DocProcLog
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+func (l DocProcLogger) LogExtractProjectionsFinish(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractProjectionsFinish
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 // LogEnrichProjections logs a per-block Pass 2 entry for extract_semantic_projections.
 func (l DocProcLogger) LogEnrichProjections(ctx context.Context, rec DocProcLogRecord, loc string) error {
 	rec.EntryType = EntryTypeExtractProjections
@@ -200,6 +213,12 @@ func (l DocProcLogger) LogEnrichProjections(ctx context.Context, rec DocProcLogR
 
 func (l DocProcLogger) LogExtractProvisions(ctx context.Context, rec DocProcLogRecord, loc string) error {
 	rec.EntryType = EntryTypeExtractProvisions
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractProvisionsFinish(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractProvisionsFinish
 	rec.LogLoc = callerLoc(2)
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
@@ -240,20 +259,31 @@ func (l DocProcLogger) LogExtractInventoryItems(ctx context.Context, rec DocProc
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+func (l DocProcLogger) LogPipelineFinish(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypePipelineFinish
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 func allowedDocProcLogEntryType(entryType string) bool {
 	switch entryType {
-	case EntryTypeLLMCall,
+	case EntryTypePipelineFinish,
+		EntryTypeLLMCall,
 		EntryTypeGenerateSummary,
+		EntryTypeGenerateSummaryFinish,
 		EntryTypeExtractTopics, EntryTypeExtractTopicsFinish,
 		EntryTypeStaticAnalyzer, EntryTypeBlocking,
 		EntryTypeExtractMetrics, EntryTypeExtractMetricsFinish,
 		EntryTypeExtractProjections,
-		EntryTypeExtractProvisions,
+		EntryTypeExtractProjectionsFinish,
+		EntryTypeExtractProvisions, EntryTypeExtractProvisionsFinish,
 		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,
 		EntryTypeExtractStructuredKnowledge, EntryTypeEnrichStructuredKnowledge,
-		EntryTypeExtractEntityRelation, EntryTypeExtractInventoryItems,
+		EntryTypeExtractEntityRelation, EntryTypeExtractEntityRelationFinish,
+		EntryTypeExtractInventoryItems, EntryTypeExtractInventoryItemsFinish,
+		EntryTypeExtractSceneBlocksFinish,
 		EntryTypeChunking,
-		EntryTypeGenerateSceneBlocks,
+		EntryTypeGenerateTopics,
 		EntryTypeExtractDocMetadata:
 		return true
 	default:

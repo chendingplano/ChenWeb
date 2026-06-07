@@ -1474,7 +1474,7 @@ func (p *InventoryItemsProcessor) logInventoryItemsSummary(ctx context.Context, 
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogSummary(ctx, "extract_inventory_items", rec, "MID-26053142"); err != nil {
+	if err := p.ProcLogger.LogSummary(ctx, "extract_inventory_items_finish", rec, "MID-26053142"); err != nil {
 		p.Logger.Warn("failed to write inventory items summary log", "error", err)
 	}
 }

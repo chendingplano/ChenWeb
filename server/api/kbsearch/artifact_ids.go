@@ -31,6 +31,8 @@ func ArtifactTypeCode(artifactType string) string {
 		return "inv"
 	case "inventory_item_duplicate":
 		return "dup"
+	case "chunk":
+		return "chk"
 	default:
 		return "art"
 	}

@@ -86,6 +86,7 @@ type FixedSizeChunkingService struct {
 	PromptErr                   error
 	SummaryGroupSize            int
 	GenerateSummaryMaxTasks     int
+	ExtractTopicsMaxTasks       int
 	SummaryModelRef             string
 	SummaryModelCfgPath         string
 	SummaryModelErr             error
@@ -273,6 +274,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		PromptErr:                  promptErr,
 		SummaryGroupSize:           envInt("SUMMARY_GROUP_SIZE", DefaultSummaryGroupSize, 1),
 		GenerateSummaryMaxTasks:    envInt("GENERATE_SUMMARY_MAX_TASKS", 1, 1),
+		ExtractTopicsMaxTasks:      envInt("EXTRACT_TOPICS_MAX_TASKS", 1, 1),
 		SummaryModelRef:            summaryModelRef,
 		SummaryModelCfgPath:        summaryModelCfgPath,
 		SummaryModelErr:            summaryModelErr,
@@ -703,59 +705,30 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 		s.Logger.Warn("(MID_26052802) failed to persist initial topic progress", "record_id", rec.ID, "error", updateErr)
 	}
 
-	topics := make([]TopicItem, 0, len(chunks))
-	seqStart := 1
-	topicsSoFar := 0
-	stopTopics := func(bgCtx context.Context) {
-		s.stopAndPersistTopics(bgCtx, rec, inputFilename, start, len(topics))
+	type chunkTopicsResult struct {
+		chunk        Chunk
+		topics       []TopicItem
+		usedFallback bool
+		msUsed       int64
 	}
-	for _, chunk := range chunks {
-		// Check for user stop before each LLM call.
-		if CheckAndHandleStop(ctx, stopTopics) {
-			return ErrPipelineStopped
-		}
-
+	chunkResults, runErr := runConcurrent(ctx, s.ExtractTopicsMaxTasks, len(chunks), func(runCtx context.Context, i int) (chunkTopicsResult, error) {
+		chunk := chunks[i]
 		chunkStart := s.Now()
 		chunkTopics, chunkErr := extractTopicsFromMarkedLinesWithLLM(
-			ctx,
-			rec.ID,
-			s.Extractor,
-			s.Logger,
-			s.ModelName,
-			s.PromptText,
-			s.PromptRef,
-			chunk.Lines,
-			seqStart,
-			"chunk_seqno",
-			chunk.SeqNo,
+			runCtx, rec.ID, s.Extractor, s.Logger, s.ModelName, s.PromptText, s.PromptRef,
+			chunk.Lines, 1, "chunk_seqno", chunk.SeqNo,
 		)
 		chunkMSUsed := s.Now().Sub(chunkStart).Milliseconds()
 		usedFallback := false
 		if chunkErr != nil || len(chunkTopics) == 0 {
 			if s.FallbackExtractor != nil {
-				// Check for stop before attempting the fallback LLM call.
-				if CheckAndHandleStop(ctx, stopTopics) {
-					return ErrPipelineStopped
-				}
 				fbStart := s.Now()
 				fbTopics, fbErr := extractTopicsFromMarkedLinesWithLLM(
-					ctx,
-					rec.ID,
-					s.FallbackExtractor,
-					s.Logger,
-					s.FallbackModelName,
-					s.PromptText,
-					s.PromptRef,
-					chunk.Lines,
-					seqStart,
-					"chunk_seqno",
-					chunk.SeqNo,
+					runCtx, rec.ID, s.FallbackExtractor, s.Logger, s.FallbackModelName, s.PromptText, s.PromptRef,
+					chunk.Lines, 1, "chunk_seqno", chunk.SeqNo,
 				)
 				chunkMSUsed = s.Now().Sub(fbStart).Milliseconds()
 				if fbErr != nil || len(fbTopics) == 0 {
-					if CheckAndHandleStop(ctx, stopTopics) {
-						return ErrPipelineStopped
-					}
 					s.Logger.Warn("topic generation empty for both primary and fallback, continuing",
 						"record_id", rec.ID, "chunk_seqno", chunk.SeqNo,
 						"primary_error", chunkErr, "fallback_error", fbErr,
@@ -766,32 +739,34 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 					usedFallback = true
 				}
 			} else if chunkErr != nil {
-				if CheckAndHandleStop(ctx, stopTopics) {
-					return ErrPipelineStopped
-				}
-				s.failAndPersistTopics(ctx, rec, inputFilename, start, len(topics), fmt.Errorf("(MID_26042016) %w", chunkErr))
-				return chunkErr
+				return chunkTopicsResult{}, fmt.Errorf("(MID_26042016) %w", chunkErr)
 			}
 		}
-		topicsSoFar += len(chunkTopics)
 		chunkProgress := extractTopicsProgressFull(chunk.SeqNo, totalChunks)
-
-		// s.Logger.Info("(MID_26052803) extract_topics: chunk done, updating status progress",
-		// 	"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "total_chunks", totalChunks,
-		// 	"progress", chunkProgress, "num_topics", len(chunkTopics), "topics_so_far", topicsSoFar)
 		if updateErr := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
 			return updateTopicChunkStatusProgress(current, chunkProgress)
 		}); updateErr != nil {
 			s.Logger.Warn("(MID_26052804) failed to persist topic progress",
 				"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "error", updateErr)
 		}
+		return chunkTopicsResult{chunk: chunk, topics: chunkTopics, usedFallback: usedFallback, msUsed: chunkMSUsed}, nil
+	})
+	if runErr != nil {
+		if isCtxStopped(ctx) {
+			s.stopAndPersistTopics(context.Background(), rec, inputFilename, start, 0)
+			return ErrPipelineStopped
+		}
+		s.failAndPersistTopics(ctx, rec, inputFilename, start, 0, runErr)
+		return runErr
+	}
 
-		// s.Logger.Info("(MID_26052805) extract_topics: inserting doc_proc_logs record",
-		// 	"record_id", rec.ID, "chunk_seqno", chunk.SeqNo, "num_topics", len(chunkTopics))
-		s.logExtractTopicsChunk(ctx, rec.ID, chunk, totalChunks, chunkTopics, topicsSoFar, chunkMSUsed, chunkProgress, usedFallback)
-
-		topics = append(topics, chunkTopics...)
-		seqStart += len(chunkTopics)
+	topics := make([]TopicItem, 0, len(chunks))
+	topicsSoFar := 0
+	for _, res := range chunkResults {
+		topicsSoFar += len(res.topics)
+		chunkProgress := extractTopicsProgressFull(res.chunk.SeqNo, totalChunks)
+		s.logExtractTopicsChunk(ctx, rec.ID, res.chunk, totalChunks, res.topics, topicsSoFar, res.msUsed, chunkProgress, res.usedFallback)
+		topics = append(topics, res.topics...)
 	}
 	topics = dedupeTopicItems(topics)
 

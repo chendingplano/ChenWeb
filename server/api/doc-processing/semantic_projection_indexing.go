@@ -51,6 +51,9 @@ func (p *SemanticProjectionsProcessor) PostProcessIndex(ctx context.Context, rec
 		p.Logger.Warn("reindex semantic projection search registry failed", "record_id", recordID, "error", reindexErr)
 	}
 	IndexSemanticProjectionsForRecord(ctx, recordID, chunks, p.Logger)
+	if refreshErr := refreshSemanticProjectionArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ArtifactDir, recordID, rec); refreshErr != nil {
+		p.Logger.Warn("refresh semantic projection artifact failed", "record_id", recordID, "error", refreshErr)
+	}
 	return nil
 }
 

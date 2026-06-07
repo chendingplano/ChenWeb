@@ -702,7 +702,7 @@ func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start,
 	extraStr := string(extraInfo)
 	progress := "100%"
 	activityName := "extract_scene_blocks"
-	if err := p.ProcLogger.LogSummary(ctx, "generate_scene_blocks", DocProcLogRecord{
+	if err := p.ProcLogger.LogSummary(ctx, "extract_scene_blocks_finish", DocProcLogRecord{
 		CallReason:    "extract scene blocks",
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
@@ -713,7 +713,7 @@ func (p *SceneBlocksProcessor) logSceneBlocksSummary(ctx context.Context, start,
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}, "MID-26052815"); err != nil {
-		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
+		p.Logger.Warn("failed to write generate_scene_blocks_finish log", "error", err)
 	}
 }
 
@@ -1771,4 +1771,121 @@ func (s SceneObjectsSQLStore) UpsertSceneObject(ctx context.Context, req UpsertS
 		toJSON(lineSpans),                                // $27
 	)
 	return err
+}
+
+// ---- Phase C artifact file refresh ----
+
+// loadPersistedSceneBlockArtifactRows loads all scene block rows for a record from the DB,
+// including connected_artifacts populated by Phase C.
+func loadPersistedSceneBlockArtifactRows(ctx context.Context, db *sql.DB, recordID int64) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT object_id,
+		       COALESCE(scene_id, ''),
+		       COALESCE(scene_type, ''),
+		       COALESCE(title, ''),
+		       COALESCE(summary, ''),
+		       COALESCE(actors, '[]'::jsonb),
+		       COALESCE(resources, '[]'::jsonb),
+		       COALESCE(preconditions, '[]'::jsonb),
+		       COALESCE(triggers, '[]'::jsonb),
+		       COALESCE(states, '[]'::jsonb),
+		       COALESCE(actions, '[]'::jsonb),
+		       COALESCE(constraints, '[]'::jsonb),
+		       COALESCE(decisions, '[]'::jsonb),
+		       COALESCE(outcomes, '[]'::jsonb),
+		       COALESCE(failure_modes, '[]'::jsonb),
+		       COALESCE(root_causes, '[]'::jsonb),
+		       COALESCE(resolutions, '[]'::jsonb),
+		       COALESCE(relationships, '[]'::jsonb),
+		       COALESCE(discriminators, '[]'::jsonb),
+		       COALESCE(keywords, '[]'::jsonb),
+		       COALESCE(confidence, 0),
+		       COALESCE(model_name, ''),
+		       COALESCE(prompt_name, ''),
+		       COALESCE(line_spans, '[]'::jsonb),
+		       COALESCE(search_document, ''),
+		       COALESCE(connected_artifacts, '{}'::jsonb),
+		       COALESCE(ext_info, '{}'::jsonb),
+		       to_char(create_time AT TIME ZONE 'UTC', 'YYYYMMDD-HH24MISS')
+		FROM kb.scene_objects
+		WHERE input_record_id = $1
+		ORDER BY id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []map[string]any
+	for rows.Next() {
+		var (
+			objectID, sceneID, sceneType, title, summary string
+			actorsRaw, resourcesRaw, preconditionsRaw    []byte
+			triggersRaw, statesRaw, actionsRaw           []byte
+			constraintsRaw, decisionsRaw, outcomesRaw    []byte
+			failureModesRaw, rootCausesRaw               []byte
+			resolutionsRaw, relationshipsRaw             []byte
+			discriminatorsRaw, keywordsRaw               []byte
+			confidence                                   float64
+			modelName, promptName                        string
+			lineSpansRaw                                 []byte
+			searchDocument                               string
+			connectedArtifactsRaw, extInfoRaw            []byte
+			createTime                                   string
+		)
+		if err := rows.Scan(
+			&objectID, &sceneID, &sceneType, &title, &summary,
+			&actorsRaw, &resourcesRaw, &preconditionsRaw,
+			&triggersRaw, &statesRaw, &actionsRaw,
+			&constraintsRaw, &decisionsRaw, &outcomesRaw,
+			&failureModesRaw, &rootCausesRaw,
+			&resolutionsRaw, &relationshipsRaw,
+			&discriminatorsRaw, &keywordsRaw,
+			&confidence, &modelName, &promptName,
+			&lineSpansRaw,
+			&searchDocument,
+			&connectedArtifactsRaw, &extInfoRaw,
+			&createTime,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"object_id":           strings.TrimSpace(objectID),
+			"scene_id":            strings.TrimSpace(sceneID),
+			"scene_type":          strings.TrimSpace(sceneType),
+			"title":               strings.TrimSpace(title),
+			"summary":             strings.TrimSpace(summary),
+			"actors":              jsonColumnToValue(actorsRaw, []any{}),
+			"resources":           jsonColumnToValue(resourcesRaw, []any{}),
+			"preconditions":       jsonColumnToValue(preconditionsRaw, []any{}),
+			"triggers":            jsonColumnToValue(triggersRaw, []any{}),
+			"states":              jsonColumnToValue(statesRaw, []any{}),
+			"actions":             jsonColumnToValue(actionsRaw, []any{}),
+			"constraints":         jsonColumnToValue(constraintsRaw, []any{}),
+			"decisions":           jsonColumnToValue(decisionsRaw, []any{}),
+			"outcomes":            jsonColumnToValue(outcomesRaw, []any{}),
+			"failure_modes":       jsonColumnToValue(failureModesRaw, []any{}),
+			"root_causes":         jsonColumnToValue(rootCausesRaw, []any{}),
+			"resolutions":         jsonColumnToValue(resolutionsRaw, []any{}),
+			"relationships":       jsonColumnToValue(relationshipsRaw, []any{}),
+			"discriminators":      jsonColumnToValue(discriminatorsRaw, []any{}),
+			"keywords":            jsonColumnToValue(keywordsRaw, []any{}),
+			"confidence":          confidence,
+			"model_name":          strings.TrimSpace(modelName),
+			"prompt_name":         strings.TrimSpace(promptName),
+			"line_spans":          jsonColumnToValue(lineSpansRaw, []any{}),
+			"search_document":     strings.TrimSpace(searchDocument),
+			"connected_artifacts": jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+			"ext_info":            jsonColumnToValue(extInfoRaw, map[string]any{}),
+			"create_time":         strings.TrimSpace(createTime),
+		})
+	}
+	return out, rows.Err()
+}
+
+func refreshSceneBlockArtifactFile(ctx context.Context, db *sql.DB, artifactDir string, recordID int64, rec DocMetadataInputRecord) error {
+	rows, err := loadPersistedSceneBlockArtifactRows(ctx, db, recordID)
+	if err != nil {
+		return err
+	}
+	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, rows, ".scene_blocks", "MID_26060705")
 }
