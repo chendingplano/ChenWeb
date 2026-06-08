@@ -116,6 +116,17 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 
 	artifacts := metricsToIndexedArtifacts(metrics)
 	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, artifacts, metricIndexConfig, logger)
+
+	// Enrich artifacts that the LLM gave no categories by deriving category keys from
+	// overlapping semantic projections, so that upsertArtifactCategoryInstances can still
+	// create category_instance rows for them.
+	semProjs, semProjErr := loadSemanticProjectionsForCategoryPaths(ctx, db, recordID)
+	if semProjErr != nil && logger != nil {
+		logger.Warn("metrics indexing: load semantic projections for category enrichment failed",
+			"record_id", recordID, "error", semProjErr)
+	}
+	enrichArtifactCategoriesFromSemProjs(artifacts, semProjs)
+
 	resolver := newMetricCategoryResolver(db, logger)
 	categoryInstances := upsertArtifactCategoryInstances(ctx, db, recordID, artifacts, metricIndexConfig, resolver, logger)
 	categoryPathMetrics := indexArtifactsByCategoryPaths(ctx, db, recordID, artifacts, metricIndexConfig, logger)
@@ -315,6 +326,37 @@ func sanitizeTSDictionary(d string) string {
 		}
 	}
 	return d
+}
+
+// enrichArtifactCategoriesFromSemProjs fills in Categories for artifacts that have none,
+// deriving category keys from overlapping semantic projections. This covers the case where
+// the LLM did not assign metric_categories at extraction time but the metric's source lines
+// fall inside a semantic projection that does have category paths.
+func enrichArtifactCategoriesFromSemProjs(artifacts []indexedArtifact, projs []semProjForIndex) {
+	for i := range artifacts {
+		if len(artifacts[i].Categories) > 0 {
+			continue
+		}
+		artifactLines := lineSetFromSpans(artifacts[i].SourceSpans)
+		for _, pj := range projs {
+			if !spansOverlapLineSet(pj.spans, artifactLines) {
+				continue
+			}
+			// Prefer English category paths; fall back to original-language paths.
+			for _, raw := range []any{pj.categoryPathsEn, pj.categoryPaths} {
+				for _, entry := range parseCategoryPathsAny(raw) {
+					for _, name := range categoryPathNames(entry.Nodes) {
+						if key := normalizeCategorySegment(name); key != "" {
+							artifacts[i].Categories = appendUniqueString(artifacts[i].Categories, key)
+						}
+					}
+				}
+				if len(artifacts[i].Categories) > 0 {
+					break
+				}
+			}
+		}
+	}
 }
 
 func lineSetFromSpans(spans []string) map[int]struct{} {

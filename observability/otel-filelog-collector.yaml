@@ -24,8 +24,8 @@ exporters:
   clickhouse:
     endpoint: tcp://clickstack:9000?dial_timeout=10s
     database: default
-    username: default
-    password: ""
+    username: worker
+    password: worker
     ttl: 720h
     create_schema: false
     retry_on_failure:

@@ -894,17 +894,18 @@ func normalizeStaticLineType(lineType string) string {
 	return lineType
 }
 
-// applyStaticTOCLabels identifies lines that are likely part of a table of contents based on their content and proximity to
-// a TOC title, and updates the corrected map with "toc" for those lines. It returns the last pos in 'lines' of the TOC title if found,
-// or -1 if no TOC is detected.
+// applyStaticTOCLabels identifies lines that are part of a table of contents and
+// updates the corrected map with "toc" for those lines. It returns the index in
+// 'lines' of the last TOC-marked line, or -1 if no TOC is detected.
 func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) int {
+	// Find the TOC title line.
 	start := -1
-	// startPage := 0
+	tocPage := 0
 	for i, line := range lines {
 		n := normalizeStaticTitle(line.Content)
 		if n == "tableofcontent" || n == "tableofcontents" || n == "目录" || n == "目次" {
 			start = i
-			// startPage = line.PageNo
+			tocPage = line.PageNo
 			break
 		}
 	}
@@ -912,60 +913,72 @@ func applyStaticTOCLabels(lines []staticInputLine, corrected map[int]string, log
 		return -1
 	}
 
+	// Find the first actual TOC entry on the title page.
 	firstTOC := -1
-	gapBefore := 0
 	for i := start + 1; i < len(lines); i++ {
-		// if lines[i].PageNo != startPage {
-		// 	return -1
-		// }
-
+		if lines[i].PageNo != tocPage {
+			break
+		}
 		if isStaticTOCLine(lines[i]) {
 			firstTOC = i
 			break
-		}
-		gapBefore++
-		if gapBefore > 2 {
-			return -1
 		}
 	}
 	if firstTOC < 0 {
 		return -1
 	}
 
-	lastTOC := firstTOC
+	// Determine the full extent of the TOC region page by page.
+	// On the title page, every line from start through the end of the page is included.
+	// Subsequent pages are included only if they contain at least one TOC entry.
 	tocCount := 0
-	gap := 0
-	for i := firstTOC; i < len(lines); i++ {
-		if isStaticTOCLine(lines[i]) {
-			tocCount++
-			lastTOC = i
-			gap = 0
-			continue
+	endIdx := start
+	currentPage := tocPage
+
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+
+		if line.PageNo != currentPage {
+			// Peek ahead: does this new page have any TOC entries?
+			nextPage := line.PageNo
+			hasTOC := false
+			for j := i; j < len(lines) && lines[j].PageNo == nextPage; j++ {
+				if isStaticTOCLine(lines[j]) {
+					hasTOC = true
+					break
+				}
+			}
+			if !hasTOC {
+				break
+			}
+			currentPage = nextPage
 		}
-		gap++
-		if gap > 3 {
-			break
+
+		endIdx = i
+		if isStaticTOCLine(line) {
+			tocCount++
 		}
 	}
+
 	if tocCount < 2 {
 		logger.Warn("TOC detected but too few entries, likely a false positive",
 			"FirstTOCLineNo", lines[firstTOC].LineNo,
-			"sart", start,
-			"lastTOC", lastTOC,
+			"Start", start,
+			"EndIdx", endIdx,
 			"TOCCount", tocCount)
 		return -1
 	}
 
-	for i := start; i <= lastTOC; i++ {
+	for i := start; i <= endIdx; i++ {
 		corrected[lines[i].LineNo] = "toc"
 	}
 
 	logger.Info("TOC detected and labeled",
 		"FirstTOCLineNo", lines[firstTOC].LineNo,
 		"Start", start,
-		"LastTOC", lastTOC,
+		"EndIdx", endIdx,
 		"TOCCount", tocCount)
-	return lastTOC
+	return endIdx
 }
 
 func normalizeStaticTitle(s string) string {
@@ -979,7 +992,10 @@ func isStaticTOCLine(line staticInputLine) bool {
 		return false
 	}
 	stripped := strings.ReplaceAll(s, " ", "")
-	if strings.Contains(stripped, "…") || strings.Contains(stripped, "...") || strings.Contains(stripped, "．．") {
+	if strings.Contains(stripped, "…") ||
+		strings.Contains(stripped, "...") ||
+		strings.Contains(stripped, "．．") ||
+		strings.Contains(stripped, "··") {
 		return true
 	}
 	return staticTOCDotLeaderRE.MatchString(s)

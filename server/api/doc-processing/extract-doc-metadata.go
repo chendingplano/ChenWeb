@@ -135,10 +135,16 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		return p.failAndPersist(ctx, rec, errors.New("input file empty"))
 	}
 
+	readStart := p.Now()
 	linesByPage, maxPage, err := readLineFile(inputPath)
 	if err != nil {
 		return p.failAndPersist(ctx, rec, err)
 	}
+	p.Logger.Debug("file read complete",
+		"record_id", rec.ID,
+		"max_page", maxPage,
+		"ms_used", p.Now().Sub(readStart).Milliseconds(),
+	)
 
 	start := p.Now()
 	lastPage := p.InitialPages
@@ -161,9 +167,22 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		}
 
 		inputText := buildInputText(linesByPage, lastPage)
+		p.Logger.Debug("llm call starting",
+			"record_id", rec.ID,
+			"pages_used", lastPage,
+			"input_chars", len(inputText),
+			"model", p.ModelName,
+			"attempt", i,
+		)
 		callStart := p.Now()
 		callID := fmt.Sprintf("%s_p1_i%d", eventIDFromContext(ctx), i)
 		parsed, usedModelName, extractErr := p.extractMetadataWithFallback(ctx, inputText)
+		p.Logger.Debug("llm call finished",
+			"record_id", rec.ID,
+			"model_used", usedModelName,
+			"ms_used", p.Now().Sub(callStart).Milliseconds(),
+			"error", extractErr,
+		)
 		llmCallCount++
 		numPagesUsed = lastPage
 		if strings.TrimSpace(usedModelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(usedModelName) != "" {
@@ -353,8 +372,14 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Conte
 		ModelName:  modelName,
 		InputText:  inputText,
 	}
+	apiStart := time.Now()
 	if structuredExtractor, ok := p.Client.(LLMStructuredJSONExtractor); ok {
 		result, err := structuredExtractor.ExtractStructuredJSON(ctx, in, docMetadataExtractionContract())
+		p.Logger.Debug("structured llm api returned",
+			"model", modelName,
+			"ms_used", time.Since(apiStart).Milliseconds(),
+			"error", err,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -363,7 +388,13 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Conte
 		}
 		return result.Parsed, nil
 	}
-	return p.Client.ExtractJSON(ctx, in)
+	result, err := p.Client.ExtractJSON(ctx, in)
+	p.Logger.Debug("unstructured llm api returned",
+		"model", modelName,
+		"ms_used", time.Since(apiStart).Milliseconds(),
+		"error", err,
+	)
+	return result, err
 }
 
 type docMetadataExtractionOutput struct {

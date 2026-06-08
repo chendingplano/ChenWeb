@@ -21,7 +21,7 @@ Create or copy the ClickStack ingestion API key from HyperDX, then run ChenWeb w
 ```bash
 export OBSERVABILITY_ENABLED=true
 export OTEL_SERVICE_NAME=chenweb
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=${CLICKSTACK_API_KEY}"
 export JIMO_LOG_FORMAT=json
 export FILE_LOGGER=lumberjack
@@ -34,8 +34,8 @@ If ClickStack is running without an ingestion key requirement, leave `CLICKSTACK
 ## Ports
 
 - HyperDX UI: `http://localhost:8088`
-- OTLP HTTP: `http://localhost:4318`
-- OTLP gRPC: `localhost:4317`
+- OTLP HTTP: `http://localhost:14318`
+- OTLP gRPC: `localhost:14317`
 - ClickHouse HTTP, if exposed by the image: `http://localhost:18123`
 - ClickHouse native, if exposed by the image: `localhost:19000`
 
