@@ -38,9 +38,9 @@ export const PIPELINE_STAGES = [
 	{ id: 'staged', label: 'Staged', operations: [] as string[] },
 	{ id: 'parsing', label: 'PDF Parser', operations: ['parsing', 'parsed'] },
 	{ id: 'converting', label: 'Result Convert', operations: ['converting', 'converted', 'line-file-generated'] },
-	{ id: 'static_analyzer', label: 'Static Analyzer', operations: ['static_analyzer', 'static_analzyer', 'structure_analyzer'] },
+	{ id: 'static_analyzer', label: 'Doc Structure Analyzer', operations: ['static_analyzer', 'static_analzyer', 'structure_analyzer'] },
 	{ id: 'chunking', label: 'Chunking', operations: ['chunking', 'chunked'] },
-	{ id: 'extract_doc_metadata', label: 'Extract Metadata', operations: ['extract_doc_metadata', 'extract_metadata'] },
+	{ id: 'extract_doc_metadata', label: 'Extract Doc Metadata', operations: ['extract_doc_metadata', 'extract_metadata'] },
 	{ id: 'extract_metrics', label: 'Extract Metrics', operations: ['extract_metrics'] },
 	{ id: 'extract_provisions', label: 'Extract Provisions', operations: ['extract_provisions'] },
 	{ id: 'generate_summaries', label: 'Generate Summaries', operations: ['generate_summaries'] },
@@ -80,11 +80,19 @@ export const DOC_PROCESSOR_STAGES = PIPELINE_STAGES.slice(3);
 
 // Always executed regardless of config. "blocking" is excluded because it is rendered
 // as a separate always-on row in the UI and never appears in operation lists.
-export const MANDATORY_PROCESSOR_IDS: string[] = [];
+export const MANDATORY_PROCESSOR_IDS: string[] = ['chunking', 'extract_doc_metadata', 'static_analyzer'];
+
+// Ordered list for the "Processors to run" checkbox UI (mandatory section).
+// Does not include parse_file / convert_parse_result — those are pre-processor optionals.
+export const MANDATORY_DISPLAY_STAGES: { id: string; label: string }[] = [
+	{ id: 'blocking', label: 'Blocking' },
+	{ id: 'chunking', label: 'Chunking' },
+	{ id: 'extract_doc_metadata', label: 'Extract Doc Metadata' },
+	{ id: 'static_analyzer', label: 'Doc Structure Analyzer' },
+];
 
 // Configurable via [doc-processing].required_processors in config.toml.
 export const ALL_CONFIGURABLE_PROCESSOR_IDS = [
-	'static_analyzer', 'chunking', 'extract_doc_metadata',
 	'extract_metrics', 'extract_provisions', 'generate_summaries',
 	'generate_topics', 'generate_scene_blocks', 'extract_products',
 	'extract_semantic_projections', 'extract_structured_knowledge',

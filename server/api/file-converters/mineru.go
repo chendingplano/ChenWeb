@@ -209,9 +209,20 @@ func parseMineruHTMLTableRows(htmlBody string) [][]string {
 }
 
 func mineruBBoxStr(raw json.RawMessage) string {
-	s := strings.TrimSpace(string(raw))
-	if s == "" || s == "null" {
-		return "[]"
+	if len(raw) == 0 {
+		return ""
 	}
-	return s
+	var nums []json.Number
+	if err := json.Unmarshal(raw, &nums); err != nil {
+		return ""
+	}
+	parts := make([]string, 0, len(nums))
+	for _, n := range nums {
+		token := strings.TrimSpace(string(n))
+		if _, err := strconv.ParseFloat(token, 64); err != nil {
+			continue
+		}
+		parts = append(parts, token)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }

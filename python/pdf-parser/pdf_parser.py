@@ -176,14 +176,6 @@ def _parsed_stream() -> str:
     return _env("PDF_PARSED_EVENT_STREAM")
 
 
-def _doc_processor_mode() -> str:
-    return _env("DOC_PROCESSOR_MODE", "auto").lower()
-
-
-def should_publish_parsed_event() -> bool:
-    return _doc_processor_mode() == "auto"
-
-
 # ---------------------------------------------------------------------------
 # Parser registry and dispatch
 # ---------------------------------------------------------------------------
@@ -528,13 +520,6 @@ class JetStreamBus:
             await self._nc.close()
 
     async def publish_parsed(self, result: dict) -> None:
-        if not should_publish_parsed_event():
-            log.info(
-                "(MID_2026060901) parsed event publish skipped record_id=%s DOC_PROCESSOR_MODE=%s",
-                result.get("record_id"),
-                _doc_processor_mode(),
-            )
-            return
         payload = {
             "record_id": result.get("record_id"),
             "type": "pdf",
@@ -546,13 +531,6 @@ class JetStreamBus:
 
 
 async def publish_parsed_event_once(result: dict) -> None:
-    if not should_publish_parsed_event():
-        log.info(
-            "(MID_2026060902) parsed event publish skipped record_id=%s DOC_PROCESSOR_MODE=%s",
-            result.get("record_id"),
-            _doc_processor_mode(),
-        )
-        return
     if NATS is None:
         raise RuntimeError("nats-py is not installed. Run: uv pip install nats-py")
 

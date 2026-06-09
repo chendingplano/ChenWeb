@@ -536,6 +536,12 @@
 		if (r) pickSearchResult(r);
 	}
 
+	let pageJumpInput = $state('1');
+
+	$effect(() => {
+		pageJumpInput = String(page);
+	});
+
 	function prevPage() {
 		if (page <= 1) return;
 		page -= 1;
@@ -547,6 +553,49 @@
 		page += 1;
 		loadRecords();
 	}
+
+	function goToPage(target: number) {
+		const clamped = Math.max(1, Math.min(totalPages, target));
+		if (clamped === page) return;
+		page = clamped;
+		loadRecords();
+	}
+
+	function jumpToPage() {
+		const parsed = parseInt(pageJumpInput, 10);
+		if (!Number.isFinite(parsed)) {
+			pageJumpInput = String(page);
+			return;
+		}
+		goToPage(parsed);
+	}
+
+	function changePageSize(newSize: number) {
+		pageSize = newSize;
+		page = 1;
+		loadRecords();
+	}
+
+	let visiblePageNumbers = $derived.by(() => {
+		const delta = 2;
+		const pages: Array<number | null> = [];
+		const left = Math.max(1, page - delta);
+		const right = Math.min(totalPages, page + delta);
+
+		if (left > 1) {
+			pages.push(1);
+			if (left > 2) pages.push(null);
+		}
+		for (let i = left; i <= right; i++) pages.push(i);
+		if (right < totalPages) {
+			if (right < totalPages - 1) pages.push(null);
+			pages.push(totalPages);
+		}
+		return pages;
+	});
+
+	let recordRangeStart = $derived((page - 1) * pageSize + 1);
+	let recordRangeEnd = $derived(Math.min(page * pageSize, total));
 
 	onMount(() => {
 		loadRecords();
@@ -574,9 +623,9 @@
 	});
 </script>
 
-<div class="p-6">
+<div class="kb-import-root" style="background:{pageBg};">
 	<div
-		class="rounded-xl p-6 mb-6"
+		class="rounded-xl p-6 kb-import-header"
 		style="background:{cardBg}; border:1px solid {borderColor};"
 	>
 		<div class="flex items-start justify-between gap-4">
@@ -613,10 +662,10 @@
 	</div>
 
 	<div
-		class="rounded-xl overflow-hidden"
+		class="rounded-xl overflow-hidden kb-import-table-card"
 		style="background:{cardBg}; border:1px solid {borderColor};"
 	>
-		<div class="overflow-auto">
+		<div class="kb-import-table-scroll">
 			<table style="width:100%; border-collapse:collapse; min-width:960px;">
 				<thead style="background:{pageBg};">
 					<tr>
@@ -680,27 +729,75 @@
 		</div>
 
 		<div
-			class="flex items-center justify-between px-4 py-3"
+			class="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
 			style="border-top:1px solid {borderColor}; background:{pageBg};"
 		>
-			<div style="font-size:12px; color:{textMuted};">
-				Total: {total} | Page {page} / {totalPages}
+			<!-- Left: range + page size -->
+			<div class="flex items-center gap-3" style="font-size:12px; color:{textMuted};">
+				{#if total > 0}
+					<span>
+						{recordRangeStart}–{recordRangeEnd} of {total}
+					</span>
+				{:else}
+					<span>0 records</span>
+				{/if}
+				<label class="flex items-center gap-1">
+					<span>Per page:</span>
+					<select
+						value={pageSize}
+						onchange={(e) => changePageSize(Number((e.currentTarget as HTMLSelectElement).value))}
+						style="height:26px; border:1px solid {borderColor}; border-radius:6px; background:{surface2}; color:{textSecondary}; font-size:12px; padding:0 4px; cursor:pointer;"
+					>
+						{#each [20, 50, 100, 200] as n}
+							<option value={n}>{n}</option>
+						{/each}
+					</select>
+				</label>
 			</div>
-			<div class="flex items-center gap-2">
+
+			<!-- Center: page buttons -->
+			<div class="flex items-center gap-1">
 				<button
 					onclick={prevPage}
 					disabled={page <= 1 || loading}
-					style="height:30px; padding:0 10px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer; opacity:{page <= 1 || loading ? 0.5 : 1};"
-				>
-					Prev
-				</button>
+					style="height:28px; min-width:28px; padding:0 8px; border:1px solid {borderColor}; border-radius:6px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer; opacity:{page <= 1 || loading ? 0.4 : 1};"
+				>‹</button>
+
+				{#each visiblePageNumbers as p}
+					{#if p === null}
+						<span style="padding:0 4px; color:{textMuted}; font-size:12px;">…</span>
+					{:else}
+						<button
+							onclick={() => goToPage(p)}
+							disabled={loading}
+							style="height:28px; min-width:28px; padding:0 6px; border:1px solid {p === page ? accent : borderColor}; border-radius:6px; background:{p === page ? accent + '22' : surface2}; color:{p === page ? accent : textSecondary}; font-size:12px; font-weight:{p === page ? 700 : 400}; cursor:pointer; opacity:{loading ? 0.6 : 1};"
+						>{p}</button>
+					{/if}
+				{/each}
+
 				<button
 					onclick={nextPage}
 					disabled={page >= totalPages || loading}
-					style="height:30px; padding:0 10px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer; opacity:{page >= totalPages || loading ? 0.5 : 1};"
-				>
-					Next
-				</button>
+					style="height:28px; min-width:28px; padding:0 8px; border:1px solid {borderColor}; border-radius:6px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer; opacity:{page >= totalPages || loading ? 0.4 : 1};"
+				>›</button>
+			</div>
+
+			<!-- Right: jump to page -->
+			<div class="flex items-center gap-1" style="font-size:12px; color:{textMuted};">
+				<span>Go to</span>
+				<input
+					type="number"
+					min="1"
+					max={totalPages}
+					bind:value={pageJumpInput}
+					onkeydown={(e) => { if (e.key === 'Enter') jumpToPage(); }}
+					style="width:52px; height:26px; border:1px solid {borderColor}; border-radius:6px; background:{surface2}; color:{textSecondary}; font-size:12px; padding:0 6px; text-align:center;"
+				/>
+				<button
+					onclick={jumpToPage}
+					disabled={loading}
+					style="height:26px; padding:0 10px; border:1px solid {borderColor}; border-radius:6px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer; opacity:{loading ? 0.5 : 1};"
+				>Go</button>
 			</div>
 		</div>
 	</div>
@@ -1256,5 +1353,32 @@
 		font-size: 12px;
 		font-weight: 600;
 		letter-spacing: 0.02em;
+	}
+
+	.kb-import-root {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 0;
+		padding: 24px;
+		gap: 16px;
+		overflow: hidden;
+	}
+
+	.kb-import-header {
+		flex-shrink: 0;
+	}
+
+	.kb-import-table-card {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.kb-import-table-scroll {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
 	}
 </style>

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,14 +91,32 @@ func NewService(store Store, logger *slog.Logger) *Service {
 }
 
 func ParseRequest(payload []byte) (ConvertRequest, error) {
-	var req ConvertRequest
-	if err := json.Unmarshal(payload, &req); err != nil {
+	// Use RawMessage for record_id so both JSON number (Python parser) and
+	// JSON string (manual UI trigger) are accepted.
+	var raw struct {
+		RecordID       json.RawMessage `json:"record_id"`
+		ResultFilename string          `json:"result_filename"`
+		FileFormat     string          `json:"file_format"`
+		Type           string          `json:"type"`
+		Status         string          `json:"status"`
+		Force          *bool           `json:"force,omitempty"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
 		return ConvertRequest{}, fmt.Errorf("(MID_26041101) decode request: %w", err)
 	}
-	if req.RecordID <= 0 {
-		return ConvertRequest{}, fmt.Errorf("(MID_26041102) invalid record_id: %d", req.RecordID)
+	ridStr := strings.Trim(strings.TrimSpace(string(raw.RecordID)), `"`)
+	rid, err := strconv.ParseInt(ridStr, 10, 64)
+	if err != nil || rid <= 0 {
+		return ConvertRequest{}, fmt.Errorf("(MID_26041102) invalid record_id: %s", raw.RecordID)
 	}
-	return req, nil
+	return ConvertRequest{
+		RecordID:       rid,
+		ResultFilename: raw.ResultFilename,
+		FileFormat:     raw.FileFormat,
+		Type:           raw.Type,
+		Status:         raw.Status,
+		Force:          raw.Force,
+	}, nil
 }
 
 func shouldForceReprocess(req ConvertRequest) bool {
@@ -105,6 +124,18 @@ func shouldForceReprocess(req ConvertRequest) bool {
 		return true
 	}
 	return *req.Force
+}
+
+func docProcessorModeFromEnv() string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("DOC_PROCESSOR_MODE")))
+	if mode == "" {
+		return "auto"
+	}
+	return mode
+}
+
+func shouldPublishLineFileGeneratedEvent() bool {
+	return docProcessorModeFromEnv() == "auto"
 }
 
 func (s *Service) HandleMessage(ctx context.Context, payload []byte) error {
@@ -465,6 +496,13 @@ func preferredOpenDataJSONName(path string) string {
 
 func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64, lineFilePath string) error {
 	if s.Publisher == nil {
+		return nil
+	}
+	if !shouldPublishLineFileGeneratedEvent() {
+		s.Logger.Info("skip line-file-generated publish because DOC_PROCESSOR_MODE is not auto",
+			"record_id", recordID,
+			"doc_processor_mode", docProcessorModeFromEnv(),
+		)
 		return nil
 	}
 	subject := strings.TrimSpace(s.PublishSubject)

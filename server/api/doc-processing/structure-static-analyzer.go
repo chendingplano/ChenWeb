@@ -169,7 +169,7 @@ func (p *StaticAnalyzerProcessor) logSummary(ctx context.Context, recordID int64
 	if p.ProcLogger.DB == nil {
 		return
 	}
-	extraInfo, _ := json.Marshal(map[string]interface{}{
+	extraInfo, _ := json.Marshal(map[string]any{
 		"num_lines":         numLines,
 		"num_pages":         numPages,
 		"num_labeled_lines": numLabeledLines,
@@ -367,7 +367,7 @@ func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnal
 		line, err := parseStaticInputLine(raw)
 		if err != nil {
 			logger.Error("Failed to parse static input line", "Error", err)
-			continue
+			return staticAnalyzeResult{}, err
 		}
 		if _, exists := seenLineNo[line.LineNo]; exists {
 			continue

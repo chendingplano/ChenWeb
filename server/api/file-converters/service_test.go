@@ -667,6 +667,44 @@ func TestHandleRequestSuccessAppendsConvertedStatus(t *testing.T) {
 	}
 }
 
+func TestHandleRequestSkipsPublishWhenDocProcessorModeIsNotAuto(t *testing.T) {
+	t.Setenv("DOC_PROCESSOR_MODE", "dev")
+	tmp := t.TempDir()
+	jsonPath := filepath.Join(tmp, "source_opendata.json")
+	if err := os.WriteFile(jsonPath, []byte(`{"kids":[{"type":"paragraph","page number":1,"content":"ok","bounding box":[1,2,3,4]}]}`), 0o644); err != nil {
+		t.Fatalf("write json: %v", err)
+	}
+
+	st := &fakeStore{rec: InputRecord{
+		ID:             11,
+		Type:           "pdf",
+		ParserName:     "opendata",
+		StatusRaw:      `[{"operation":"parsed","proc-status":"success"}]`,
+		FileName:       filepath.Join(tmp, "source.pdf"),
+		ResultFilename: filepath.Base(jsonPath),
+	}}
+
+	svc := NewService(st, slog.Default())
+	pub := &fakePublisher{}
+	svc.Publisher = pub
+	svc.Now = func() time.Time { return time.Date(2026, 4, 9, 17, 0, 30, 0, time.Local) }
+
+	err := svc.HandleRequest(context.Background(), ConvertRequest{
+		RecordID:       11,
+		ResultFilename: filepath.Base(jsonPath),
+		FileFormat:     "json",
+	})
+	if err != nil {
+		t.Fatalf("HandleRequest: %v", err)
+	}
+	if st.updateCalls != 1 {
+		t.Fatalf("expected updateCalls=1, got %d", st.updateCalls)
+	}
+	if pub.calls != 0 {
+		t.Fatalf("expected no publish when DOC_PROCESSOR_MODE=dev, got %d", pub.calls)
+	}
+}
+
 func TestHandleRequestDiscoversParserFilesByNamingConvention(t *testing.T) {
 	tmp := t.TempDir()
 	// An unrelated file that should not be converted.
@@ -683,11 +721,11 @@ func TestHandleRequestDiscoversParserFilesByNamingConvention(t *testing.T) {
 	}
 
 	st := &fakeStore{rec: InputRecord{
-		ID:        20,
-		Type:      "pdf",
+		ID:         20,
+		Type:       "pdf",
 		ParserName: "opendata",
-		StatusRaw: `[{"operation":"parsed","proc-status":"success"}]`,
-		FileName:  filepath.Join(tmp, "stdGk_3032172.pdf"),
+		StatusRaw:  `[{"operation":"parsed","proc-status":"success"}]`,
+		FileName:   filepath.Join(tmp, "stdGk_3032172.pdf"),
 	}}
 
 	svc := NewService(st, slog.Default())
@@ -1002,11 +1040,11 @@ func TestHandleRequestConvertsAllParserFiles(t *testing.T) {
 	}
 
 	st := &fakeStore{rec: InputRecord{
-		ID:        301,
-		Type:      "pdf",
+		ID:         301,
+		Type:       "pdf",
 		ParserName: "mineru",
-		StatusRaw: `[{"operation":"parsed","proc-status":"success"}]`,
-		FileName:  filepath.Join(tmp, "doc.pdf"),
+		StatusRaw:  `[{"operation":"parsed","proc-status":"success"}]`,
+		FileName:   filepath.Join(tmp, "doc.pdf"),
 	}}
 
 	pub := &fakePublisher{}
@@ -1096,19 +1134,19 @@ func TestConvertMineruFile_BasicTypes(t *testing.T) {
 	if len(lines) != 5 {
 		t.Fatalf("expected 5 lines (heading, paragraph, 2 list-items, equation), got %d:\n%s", len(lines), string(got))
 	}
-	if !strings.Contains(lines[0], "1\t1\theading(1)\tunknown-font\t12\t[10,20,30,40]\tTitle") {
+	if !strings.Contains(lines[0], "1\t1\theading(1)\tunknown-font\t12\t[10, 20, 30, 40]\tTitle") {
 		t.Fatalf("unexpected heading line: %s", lines[0])
 	}
-	if !strings.Contains(lines[1], "2\t1\tparagraph\tunknown-font\t12\t[10,50,30,60]\tBody text") {
+	if !strings.Contains(lines[1], "2\t1\tparagraph\tunknown-font\t12\t[10, 50, 30, 60]\tBody text") {
 		t.Fatalf("unexpected paragraph line: %s", lines[1])
 	}
-	if !strings.Contains(lines[2], "3\t1\tlist-item\tunknown-font\t12\t[10,70,30,90]\titem one") {
+	if !strings.Contains(lines[2], "3\t1\tlist-item\tunknown-font\t12\t[10, 70, 30, 90]\titem one") {
 		t.Fatalf("unexpected list-item 1: %s", lines[2])
 	}
-	if !strings.Contains(lines[3], "4\t1\tlist-item\tunknown-font\t12\t[10,70,30,90]\titem two") {
+	if !strings.Contains(lines[3], "4\t1\tlist-item\tunknown-font\t12\t[10, 70, 30, 90]\titem two") {
 		t.Fatalf("unexpected list-item 2: %s", lines[3])
 	}
-	if !strings.Contains(lines[4], "5\t1\tequation\tunknown-font\t12\t[10,100,30,110]\t$$E=mc^2$$") {
+	if !strings.Contains(lines[4], "5\t1\tequation\tunknown-font\t12\t[10, 100, 30, 110]\t$$E=mc^2$$") {
 		t.Fatalf("unexpected equation line: %s", lines[4])
 	}
 	for _, line := range lines {
@@ -1202,16 +1240,16 @@ func TestConvertMineruFile_TableWithCaptionBodyFootnote(t *testing.T) {
 		t.Fatalf("read output: %v", err)
 	}
 	text := string(got)
-	if !strings.Contains(text, "table-caption\tunknown-font\t12\t[100,200,500,400]\t表3.1 评价等级") {
+	if !strings.Contains(text, "table-caption\tunknown-font\t12\t[100, 200, 500, 400]\t表3.1 评价等级") {
 		t.Fatalf("missing table-caption: %s", text)
 	}
-	if !strings.Contains(text, "table-row\tunknown-font\t12\t[100,200,500,400]\t|评分|等级|") {
+	if !strings.Contains(text, "table-row\tunknown-font\t12\t[100, 200, 500, 400]\t|评分|等级|") {
 		t.Fatalf("missing table-row header: %s", text)
 	}
-	if !strings.Contains(text, "table-row\tunknown-font\t12\t[100,200,500,400]\t|90|优秀|") {
+	if !strings.Contains(text, "table-row\tunknown-font\t12\t[100, 200, 500, 400]\t|90|优秀|") {
 		t.Fatalf("missing table-row data: %s", text)
 	}
-	if !strings.Contains(text, "table-footnote\tunknown-font\t12\t[100,200,500,400]\t注：分数为整数") {
+	if !strings.Contains(text, "table-footnote\tunknown-font\t12\t[100, 200, 500, 400]\t注：分数为整数") {
 		t.Fatalf("missing table-footnote: %s", text)
 	}
 	lines := strings.Split(strings.TrimSpace(text), "\n")

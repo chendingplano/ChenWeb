@@ -11,7 +11,8 @@
 	let subjectOptions = $state<string[]>([]);
 	let subjectsLoading = $state(false);
 	let subjectsError = $state('');
-	let payload = $state('{"record_ids":[123],"doc-processors":["extract_metrics"],"failed-proc-only":true}');
+	let payload = $state('');
+	let lastSuggestedPayload = $state('');
 	let loading = $state(false);
 	let error = $state('');
 	let success = $state('');
@@ -25,7 +26,47 @@
 	let accent = $derived(darkMode ? '#818CF8' : '#6366F1');
 	let danger = $derived(darkMode ? '#F87171' : '#DC2626');
 	let ok = $derived(darkMode ? '#34D399' : '#059669');
-	const requiredPayloadSubjects = new Set(['kb.pdf.parsed', 'kb.pdf.staged', 'kb.pdf.start-doc-processing']);
+	const requiredPayloadSubjects = new Set([
+		'kb.pdf.parsed',
+		'kb.pdf.staged',
+		'kb.pdf.start-doc-processing',
+		'kb.line-file-generated'
+	]);
+	const payloadExamples: Record<string, string> = {
+		'kb.pdf.parsed': '{"record_id":376,"type":"pdf","status":"success","force":true}',
+		'kb.pdf.staged': '{"record_id":376,"type":"pdf","status":"success","force":true}',
+		'kb.pdf.start-doc-processing':
+			'{"record_ids":[376],"doc-processors":["extract_metrics"],"failed-proc-only":true}',
+		'kb.line-file-generated': '{"record_id":376}'
+	};
+
+	function payloadHelpForSubject(selectedSubject: string): string {
+		if (selectedSubject === 'kb.pdf.start-doc-processing') {
+			return 'Required: `all` or `record_ids` or `record_id`. Optional: `doc-processors`, `failed-proc-only`. `all` may be `parsed`, `failed-procs`, or `with-failed-procs`.';
+		}
+		if (selectedSubject === 'kb.pdf.parsed' || selectedSubject === 'kb.pdf.staged') {
+			return 'Required: `record_id`, `type`, `status`. Optional: `force`.';
+		}
+		if (selectedSubject === 'kb.line-file-generated') {
+			return 'Required: `record_id`.';
+		}
+		return '';
+	}
+
+	function exampleForSubject(selectedSubject: string): string {
+		return payloadExamples[selectedSubject] ?? '';
+	}
+
+	function suggestPayloadForSubject(selectedSubject: string, force = false) {
+		const example = exampleForSubject(selectedSubject);
+		if (!example) {
+			return;
+		}
+		if (force || payload.trim() === '' || payload === lastSuggestedPayload) {
+			payload = example;
+			lastSuggestedPayload = example;
+		}
+	}
 
 	function validatePayloadForSubject(selectedSubject: string, rawPayload: string): string | null {
 		if (!requiredPayloadSubjects.has(selectedSubject)) {
@@ -48,8 +89,17 @@
 			if (!hasAll && !hasRecordIDs && !hasRecordID) {
 				return `Payload field 'all', 'record_ids', or 'record_id' is required for subject ${selectedSubject}`;
 			}
-			if (hasAll && !['parsed', 'failed-procs', 'with-failed-procs'].includes(String(parsed.all).trim())) {
+			if (
+				hasAll &&
+				!['parsed', 'failed-procs', 'with-failed-procs'].includes(String(parsed.all).trim())
+			) {
 				return `Payload field 'all' must be parsed, failed-procs, or with-failed-procs`;
+			}
+			return null;
+		}
+		if (selectedSubject === 'kb.line-file-generated') {
+			if (!('record_id' in parsed) || parsed.record_id == null) {
+				return `Payload field 'record_id' is required for subject ${selectedSubject}`;
 			}
 			return null;
 		}
@@ -95,6 +145,7 @@
 			subjectOptions = next;
 			if (next.length > 0 && !next.includes(subject)) {
 				subject = next[0];
+				suggestPayloadForSubject(subject);
 			}
 		} catch (err) {
 			subjectOptions = [];
@@ -173,6 +224,8 @@
 				</div>
 				<select
 					bind:value={subject}
+					onchange={(event) =>
+						suggestPayloadForSubject((event.currentTarget as HTMLSelectElement).value)}
 					style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
 					disabled={subjectsLoading || subjectOptions.length === 0}
 				>
@@ -193,10 +246,17 @@
 
 			<label class="grid gap-1.5">
 				<span style="font-size:12px; color:{textSecondary};">Payload (raw string)</span>
-				{#if requiredPayloadSubjects.has(subject)}
+				{#if payloadHelpForSubject(subject)}
 					<div style="font-size:12px; color:{textSecondary};">
-						Required fields for `{subject}`: `record_id`, `type`, `status`. Optional: `force`
-						(boolean, default `true`).
+						{payloadHelpForSubject(subject)}
+						<button
+							type="button"
+							onclick={() => suggestPayloadForSubject(subject, true)}
+							class="ml-2 inline-flex cursor-pointer items-center rounded-md px-2 py-0.5"
+							style="background:{surface2}; border:1px solid {borderColor}; color:{accent}; font-size:12px;"
+						>
+							Use example
+						</button>
 					</div>
 				{/if}
 				<textarea

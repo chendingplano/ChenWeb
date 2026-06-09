@@ -18,6 +18,7 @@
 	import {
 		ALL_CONFIGURABLE_PROCESSOR_IDS,
 		ALL_PROCESSOR_IDS,
+		MANDATORY_DISPLAY_STAGES,
 		MANDATORY_PROCESSOR_IDS,
 		PIPELINE_STAGES,
 		computeStages,
@@ -46,9 +47,6 @@
 	let colorErrorTint = $derived(darkMode ? 'rgba(248,113,113,0.12)' : 'rgba(239,68,68,0.10)');
 
 	// ── Config ────────────────────────────────────────────────────────────
-
-	// Mandatory processors shown as locked rows in the launch/restart UI.
-	const MANDATORY_PROCESSORS = PIPELINE_STAGES.filter(s => MANDATORY_PROCESSOR_IDS.includes(s.id));
 
 	// requiredProcessors: the configurable processors that are enabled in config.toml.
 	// Populated once on mount from GET /api/v1/kb/config.
@@ -93,6 +91,8 @@
 	let processors = $state<Record<string, boolean>>(
 		Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, true]))
 	);
+	let parseFileChecked = $state(false);
+	let convertChecked = $state(false);
 	let showConfirm = $state(false);
 	let launching = $state(false);
 	let launchError = $state('');
@@ -123,6 +123,8 @@
 	let restartProcessors = $state<Record<string, boolean>>(
 		Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, true]))
 	);
+	let restartParseFile = $state(false);
+	let restartConvert = $state(false);
 	let showRestartDialog = $state(false);
 	let restarting = $state(false);
 	let restartError = $state('');
@@ -239,22 +241,41 @@
 		}
 	}
 
-	async function doLaunch(record: KbInputRecord, procs: Record<string, boolean>) {
-		const chosen = requiredProcessors.filter((p) => procs[p]);
-		const allChosen = chosen.length === requiredProcessors.length;
-		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
-		if (!allChosen) payload.operation = chosen;
-
+	async function publishEvent(subject: string, payload: Record<string, unknown>) {
 		const res = await fetch('/api/v1/jetstream/events', {
 			method: 'POST',
 			credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ subject: 'kb.line-file-generated', payload: JSON.stringify(payload) })
+			body: JSON.stringify({ subject, payload: JSON.stringify(payload) })
 		});
 		if (!res.ok) {
 			const body = await res.json().catch(() => null);
 			throw new Error(body?.error_msg ?? body?.message ?? `Request failed (${res.status})`);
 		}
+	}
+
+	async function doLaunch(
+		record: KbInputRecord,
+		procs: Record<string, boolean>,
+		reParse: boolean,
+		reConvert: boolean
+	) {
+		// Re-parse triggers the whole downstream chain automatically (in auto mode).
+		// Re-convert triggers convert + downstream doc processing.
+		// Both supersede a standalone doc-processor publish to avoid double-processing.
+		if (reParse) {
+			await publishEvent('kb.pdf.staged', { record_id: String(record.id), force: true });
+			return;
+		}
+		if (reConvert) {
+			await publishEvent('kb.pdf.parsed', { record_id: String(record.id), type: 'pdf', status: 'success', force: true });
+			return;
+		}
+		const chosen = requiredProcessors.filter((p) => procs[p]);
+		const allChosen = chosen.length === requiredProcessors.length;
+		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
+		if (!allChosen) payload.operation = chosen;
+		await publishEvent('kb.line-file-generated', payload);
 	}
 
 	async function confirmLaunch() {
@@ -263,7 +284,7 @@
 		launchError = '';
 		try {
 			const results = await Promise.allSettled(
-				selectedRecords.map((rec) => doLaunch(rec, processors))
+				selectedRecords.map((rec) => doLaunch(rec, processors, parseFileChecked, convertChecked))
 			);
 			const failures = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
 			showConfirm = false;
@@ -288,7 +309,7 @@
 		restarting = true;
 		restartError = '';
 		try {
-			await doLaunch(restartTarget, restartProcessors);
+			await doLaunch(restartTarget, restartProcessors, restartParseFile, restartConvert);
 			showRestartDialog = false;
 			restartTarget = null;
 			launchToast = { kind: 'success', msg: `Restart triggered` };
@@ -305,6 +326,8 @@
 	function openRestart(record: KbInputRecord) {
 		restartTarget = record;
 		restartProcessors = getDefaultRestartProcessors(record);
+		restartParseFile = false;
+		restartConvert = false;
 		restartError = '';
 		showRestartDialog = true;
 	}
@@ -379,7 +402,7 @@
 	}
 
 	function someProcessorsSelected(): boolean {
-		return requiredProcessors.some((p) => processors[p]);
+		return parseFileChecked || convertChecked || requiredProcessors.some((p) => processors[p]);
 	}
 
 	function toggleAll() {
@@ -810,14 +833,49 @@
 				<div style="font-size:12px; color:{textMuted}; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.08em; font-weight:600;">Processors to run</div>
 
 				<div class="mb-4 space-y-1.5">
+					<!-- Optional pre-processor: Parse File -->
+					<label
+						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+						style="background:{parseFileChecked ? accentTint : surface2}; border:1px solid {parseFileChecked ? accent + '40' : borderColor};"
+						onmouseenter={(e) => { if (!parseFileChecked) (e.currentTarget as HTMLElement).style.background = surface3; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = parseFileChecked ? accentTint : surface2; }}
+					>
+						<input type="checkbox" bind:checked={parseFileChecked} class="sr-only" />
+						{#if parseFileChecked}
+							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+						{:else}
+							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+						{/if}
+						<span style="font-size:13px; color:{parseFileChecked ? textPrimary : textSecondary}; font-family:monospace;">parse_file</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Parse File</span>
+					</label>
+
+					<!-- Optional pre-processor: Convert Parse Result -->
+					<label
+						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+						style="background:{convertChecked ? accentTint : surface2}; border:1px solid {convertChecked ? accent + '40' : borderColor};"
+						onmouseenter={(e) => { if (!convertChecked) (e.currentTarget as HTMLElement).style.background = surface3; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = convertChecked ? accentTint : surface2; }}
+					>
+						<input type="checkbox" bind:checked={convertChecked} class="sr-only" />
+						{#if convertChecked}
+							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+						{:else}
+							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+						{/if}
+						<span style="font-size:13px; color:{convertChecked ? textPrimary : textSecondary}; font-family:monospace;">convert_parse_result</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Convert Parse Result</span>
+					</label>
+
 					<!-- Mandatory (always-on) processors -->
-					{#each [{ id: 'blocking', label: 'Blocking' }, ...MANDATORY_PROCESSORS] as proc}
+					{#each MANDATORY_DISPLAY_STAGES as proc}
 						<label
 							class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2"
 							style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;"
 						>
 							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
 							<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
+							<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
 							<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">mandatory</span>
 						</label>
 					{/each}
@@ -1093,14 +1151,26 @@
 			>
 				<div style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; font-weight:600; margin-bottom:6px;">Processors</div>
 				<div class="flex flex-wrap gap-1.5">
-					{#each ['blocking', ...MANDATORY_PROCESSOR_IDS] as p}
-						<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">{p}</span>
-					{/each}
-					{#each requiredProcessors.filter(p => processors[p]) as p}
-						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{p}</span>
-					{/each}
+					{#if parseFileChecked}
+						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">parse_file</span>
+					{/if}
+					{#if convertChecked && !parseFileChecked}
+						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">convert_parse_result</span>
+					{/if}
+					{#if !parseFileChecked && !convertChecked}
+						{#each MANDATORY_DISPLAY_STAGES as stage}
+							<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">{stage.id}</span>
+						{/each}
+						{#each requiredProcessors.filter(p => processors[p]) as p}
+							<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{p}</span>
+						{/each}
+					{/if}
 				</div>
-				{#if requiredProcessors.every(p => processors[p])}
+				{#if parseFileChecked}
+					<div style="margin-top:6px; font-size:11px; color:{textMuted};">Triggers parse → convert → all doc processors (auto chain).</div>
+				{:else if convertChecked}
+					<div style="margin-top:6px; font-size:11px; color:{textMuted};">Triggers convert → all doc processors (auto chain).</div>
+				{:else if requiredProcessors.every(p => processors[p])}
 					<div style="margin-top:6px; font-size:11px; color:{textMuted};">All processors selected — omitting operation filter.</div>
 				{/if}
 			</div>
@@ -1154,17 +1224,57 @@
 			</p>
 
 			<div class="mb-4 space-y-1.5">
-				{#each [{ id: 'blocking', label: 'Blocking' }, ...MANDATORY_PROCESSORS] as proc}
+				<!-- Optional pre-processor: Parse File -->
+				<label
+					class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+					style="background:{restartParseFile ? accentTint : surface2}; border:1px solid {restartParseFile ? accent + '40' : borderColor};"
+					onmouseenter={(e) => { if (!restartParseFile) (e.currentTarget as HTMLElement).style.background = surface3; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartParseFile ? accentTint : surface2; }}
+				>
+					<input type="checkbox" bind:checked={restartParseFile} class="sr-only" />
+					{#if restartParseFile}
+						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+					{:else}
+						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+					{/if}
+					<span style="font-size:13px; color:{restartParseFile ? textPrimary : textSecondary}; font-family:monospace;">parse_file</span>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Parse File</span>
+				</label>
+
+				<!-- Optional pre-processor: Convert Parse Result -->
+				<label
+					class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+					style="background:{restartConvert ? accentTint : surface2}; border:1px solid {restartConvert ? accent + '40' : borderColor};"
+					onmouseenter={(e) => { if (!restartConvert) (e.currentTarget as HTMLElement).style.background = surface3; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartConvert ? accentTint : surface2; }}
+				>
+					<input type="checkbox" bind:checked={restartConvert} class="sr-only" />
+					{#if restartConvert}
+						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+					{:else}
+						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+					{/if}
+					<span style="font-size:13px; color:{restartConvert ? textPrimary : textSecondary}; font-family:monospace;">convert_parse_result</span>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Convert Parse Result</span>
+				</label>
+
+				<!-- Mandatory (always-on) processors -->
+				{#each MANDATORY_DISPLAY_STAGES as proc}
 					<label class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2" style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;">
 						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
 						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
 						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">mandatory</span>
 					</label>
 				{/each}
+
+				<!-- Configurable processors -->
 				{#each CONFIGURABLE_PROCESSORS as proc}
 					<label
 						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
 						style="background:{restartProcessors[proc.id] ? accentTint : surface2}; border:1px solid {restartProcessors[proc.id] ? accent + '40' : borderColor};"
+						onmouseenter={(e) => { if (!restartProcessors[proc.id]) (e.currentTarget as HTMLElement).style.background = surface3; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartProcessors[proc.id] ? accentTint : surface2; }}
 					>
 						<input type="checkbox" bind:checked={restartProcessors[proc.id]} class="sr-only" />
 						{#if restartProcessors[proc.id]}
@@ -1173,6 +1283,7 @@
 							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
 						{/if}
 						<span style="font-size:13px; color:{restartProcessors[proc.id] ? textPrimary : textSecondary}; font-family:monospace;">{proc.id}</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
 					</label>
 				{/each}
 			</div>
