@@ -4,6 +4,8 @@
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
 	import { listKbInputs, uploadKbInputs, deleteKbInput, checkKbInputMD5s } from '$lib/services/kbService';
+	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
+	import { createDefaultRecordBrowserFilters } from '$lib/components/home3/topic-tree-record-browser.js';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -34,6 +36,15 @@
 	let fileName = $state('');
 	let startTime = $state('');
 	let endTime = $state('');
+	// Extra list filters applied from the search dialog.
+	let recordId = $state('');
+	let title = $state('');
+	let docNo = $state('');
+	let parserName = $state('');
+	let pipelineFilter = $state('');
+	let procStatus = $state('all');
+	let modifyStartTime = $state('');
+	let modifyEndTime = $state('');
 	let page = $state(1);
 	let pageSize = $state(50);
 	let sortField = $state('create_time');
@@ -55,22 +66,6 @@
 
 	// Search dialog
 	let searchOpen = $state(false);
-	let searchRecordId = $state('');
-	let searchTitle = $state('');
-	let searchDocNo = $state('');
-	let searchFileName = $state('');
-	let searchDocType = $state('all');
-	let searchParserName = $state('');
-	let searchOperation = $state('');
-	let searchProcStatus = $state('all');
-	let searchCreateStart = $state('');
-	let searchCreateEnd = $state('');
-	let searchModifyStart = $state('');
-	let searchModifyEnd = $state('');
-	let searchResults = $state<KbInputRecord[]>([]);
-	let searchLoading = $state(false);
-	let searchError = $state('');
-	let searchSelected = $state<number | null>(null);
 	// Delete confirmation
 	let deleteConfirmRecord = $state<KbInputRecord | null>(null);
 	let deleteError = $state('');
@@ -400,6 +395,14 @@
 				fileName,
 				startTime,
 				endTime,
+				recordId,
+				title,
+				docNo,
+				parserName,
+				pipelineFilter,
+				procStatus: pipelineFilter.trim() ? '' : procStatus === 'all' ? '' : procStatus,
+				modifyStartTime,
+				modifyEndTime,
 				page,
 				pageSize,
 				orderBy: sortField,
@@ -426,27 +429,26 @@
 		loadRecords();
 	}
 
-	function openSearch() {
-		searchOpen = true;
-		searchSelected = null;
-		searchResults = [];
-		searchError = '';
-		searchRecordId = '';
-		searchTitle = '';
-		searchDocNo = '';
-		searchFileName = '';
-		searchDocType = 'all';
-		searchParserName = '';
-		searchOperation = '';
-		searchProcStatus = 'all';
-		searchCreateStart = '';
-		searchCreateEnd = '';
-		searchModifyStart = '';
-		searchModifyEnd = '';
-	}
+	type RecordBrowserFilters = ReturnType<typeof createDefaultRecordBrowserFilters>;
 
-	function closeSearch() {
+	// Apply the filters chosen in the search dialog to the main list and reload.
+	function applySearchFilters(_records: KbInputRecord[], filters: RecordBrowserFilters) {
 		searchOpen = false;
+		recordId = filters.searchRecordId ?? '';
+		title = filters.searchTitle ?? '';
+		docNo = filters.searchDocNo ?? '';
+		fileName = filters.searchFileName ?? '';
+		docType = filters.searchDocType ?? 'all';
+		parserName = filters.searchParserName ?? '';
+		pipelineFilter = filters.searchOperation ?? '';
+		procStatus = filters.searchProcStatus ?? 'all';
+		startTime = filters.searchCreateStart ?? '';
+		endTime = filters.searchCreateEnd ?? '';
+		modifyStartTime = filters.searchModifyStart ?? '';
+		modifyEndTime = filters.searchModifyEnd ?? '';
+		parseState = 'all';
+		page = 1;
+		loadRecords();
 	}
 
 	function openDeleteConfirm(record: KbInputRecord) {
@@ -474,81 +476,6 @@
 		} finally {
 			deleteSubmitting = false;
 		}
-	}
-
-	async function runSearch() {
-		searchLoading = true;
-		searchError = '';
-		try {
-			const res = await listKbInputs({
-				recordId: searchRecordId,
-				docType: searchDocType,
-				parseState: 'all',
-				title: searchTitle,
-				docNo: searchDocNo,
-				fileName: searchFileName,
-				parserName: searchParserName,
-				operation: searchOperation,
-				procStatus: searchProcStatus === 'all' ? '' : searchProcStatus,
-				startTime: searchCreateStart,
-				endTime: searchCreateEnd,
-				modifyStartTime: searchModifyStart,
-				modifyEndTime: searchModifyEnd,
-				page: 1,
-				pageSize: 50,
-				ksStoreId: knowledgeStoreState.activeStoreId ?? undefined
-			});
-			searchResults = res.results ?? [];
-		} catch (err) {
-			searchError = err instanceof Error ? err.message : 'Search failed';
-		} finally {
-			searchLoading = false;
-		}
-	}
-
-	function recordDisplayName(r: KbInputRecord): string {
-		return r.title?.trim() || r.name?.trim() || r.file_name?.trim() || `Input #${r.id}`;
-	}
-
-	function recordDisplayDocNo(r: KbInputRecord): string {
-		return r.doc_no?.trim() || '—';
-	}
-
-	function searchStatusText(record: KbInputRecord): { operation: string; procStatus: string } {
-		const items = record.status ?? [];
-		const desiredOperation = searchOperation.trim().toLowerCase();
-		const matched =
-			desiredOperation !== ''
-				? [...items]
-						.reverse()
-						.find((item) => (item?.operation ?? '').trim().toLowerCase() === desiredOperation)
-				: [...items].reverse().find((item) => item != null);
-		if (!matched) return { operation: '—', procStatus: 'pending' };
-		return {
-			operation: matched.operation?.trim() || '—',
-			procStatus:
-				matched.proc_status?.trim() ||
-				matched['proc-status']?.trim() ||
-				matched.status?.trim() ||
-				'pending'
-		};
-	}
-
-	function pickSearchResult(r: KbInputRecord) {
-		searchOpen = false;
-		// Apply matching search criteria to the list filters and show that record
-		docType = searchDocType !== 'all' ? searchDocType : 'all';
-		parseState = 'all';
-		fileName = searchFileName;
-		startTime = searchCreateStart;
-		endTime = searchCreateEnd;
-		page = 1;
-		loadRecords();
-	}
-
-	function confirmSearchSelection() {
-		const r = searchResults.find((x) => x.id === searchSelected);
-		if (r) pickSearchResult(r);
 	}
 
 	let pageJumpInput = $state('1');
@@ -652,7 +579,7 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<button
-					onclick={openSearch}
+					onclick={() => { searchOpen = true; }}
 					style="height:38px; padding:0 14px; border:1px solid {borderColor}; border-radius:10px; background:{surface2}; color:{textPrimary}; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;"
 				>
 					Search
@@ -833,248 +760,11 @@
 	</div>
 </div>
 
-{#if searchOpen}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-6"
-		style="background:rgba(8,10,14,0.72); backdrop-filter:blur(3px);"
-		aria-hidden="true"
-	>
-		<div
-			class="flex flex-col overflow-hidden"
-			style="
-				width:100%; max-width:1100px; max-height:min(90vh,940px);
-				background:{cardBg}; border:1px solid {borderColor}; border-radius:20px;
-				box-shadow:0 30px 80px rgba(0,0,0,0.55);
-				min-width:720px; min-height:600px; resize:both;
-			"
-			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => { if (e.key === 'Escape') closeSearch(); e.stopPropagation(); }}
-			role="dialog"
-			aria-modal="true"
-			aria-label="Find a document"
-			tabindex="0"
-		>
-			<!-- Header -->
-			<div class="flex-shrink-0 px-6 py-5" style="border-bottom:1px solid {borderColor};">
-				<div style="font-size:10px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase; color:{accent}; margin-bottom:4px;">kb.inputs</div>
-				<div style="font-size:22px; font-weight:700; color:{textPrimary}; margin-bottom:4px;">Find a record</div>
-				<div style="font-size:13px; color:{textSecondary};">
-					Search by record metadata, parser pipeline state, and create or modify windows.
-				</div>
-				<div style="margin-top:6px; font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:{textMuted};">
-					Store scope:&nbsp;
-					{#if knowledgeStoreState.activeStore}
-						<span style="color:{accent}; font-weight:700;">{knowledgeStoreState.activeStore.ks_name}</span>
-						<span style="opacity:0.55;"> #{knowledgeStoreState.activeStore.id}</span>
-					{:else}
-						<span style="color:#ef4444; text-transform:none; letter-spacing:0; font-weight:400;">No active store — results will not be scoped</span>
-					{/if}
-				</div>
-			</div>
-
-			<!-- Scrollable controls + results -->
-			<div class="flex-1 overflow-auto flex flex-col" style="min-height:0;">
-				<div class="flex-shrink-0 p-5 flex flex-col gap-3">
-
-					<!-- Identity section -->
-					<div class="rounded-xl p-4" style="border:1px solid {borderColor}; background:{surface2};">
-						<div style="font-size:10px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:{accent}; margin-bottom:8px;">Identity</div>
-						<div class="grid gap-2" style="grid-template-columns:0.7fr 0.7fr 1.2fr 1fr 1.4fr;">
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Record ID</span>
-								<input type="text" bind:value={searchRecordId} placeholder="84"
-									onkeydown={(e) => { if (e.key === 'Enter') runSearch(); }}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Type</span>
-								<select bind:value={searchDocType}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:13px;">
-									{#each docTypeOptions as o}<option value={o}>{o}</option>{/each}
-								</select>
-							</label>
-							<label class="flex flex-col gap-1" style="grid-column:span 2;">
-								<span style="font-size:11px; color:{textMuted};">Title contains</span>
-								<input type="text" bind:value={searchTitle} placeholder="Input title, standard title…"
-									onkeydown={(e) => { if (e.key === 'Enter') runSearch(); }}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Doc No contains</span>
-								<input type="text" bind:value={searchDocNo} placeholder="GB/T 123…"
-									onkeydown={(e) => { if (e.key === 'Enter') runSearch(); }}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1" style="grid-column:span 4;">
-								<span style="font-size:11px; color:{textMuted};">File name contains</span>
-								<input type="text" bind:value={searchFileName} placeholder="report, spec, drawing…"
-									onkeydown={(e) => { if (e.key === 'Enter') runSearch(); }}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:13px;" />
-							</label>
-						</div>
-					</div>
-
-					<!-- Processing Status section -->
-					<div class="rounded-xl p-4" style="border:1px solid {borderColor}; background:{surface2};">
-						<div style="font-size:10px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:{accent}; margin-bottom:8px;">Processing Status</div>
-						<div class="grid gap-2" style="grid-template-columns:repeat(3,minmax(0,1fr));">
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Parser name</span>
-								<input type="text" bind:value={searchParserName} placeholder="mineru, docling…"
-									onkeydown={(e) => { if (e.key === 'Enter') runSearch(); }}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Operation</span>
-								<input type="text" bind:value={searchOperation} placeholder="extract_metadata"
-									onkeydown={(e) => { if (e.key === 'Enter') runSearch(); }}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Proc status</span>
-								<select bind:value={searchProcStatus}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:13px;">
-									{#each procStatusOptions as o}<option value={o}>{o}</option>{/each}
-								</select>
-							</label>
-						</div>
-					</div>
-
-					<!-- Time Windows section -->
-					<div class="rounded-xl p-4" style="border:1px solid {borderColor}; background:{surface2};">
-						<div style="font-size:10px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:{accent}; margin-bottom:8px;">Time Windows</div>
-						<div class="grid gap-2" style="grid-template-columns:repeat(4,minmax(0,1fr));">
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Create time from</span>
-								<input type="datetime-local" bind:value={searchCreateStart}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:12px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Create time to</span>
-								<input type="datetime-local" bind:value={searchCreateEnd}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:12px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Modify time from</span>
-								<input type="datetime-local" bind:value={searchModifyStart}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:12px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Modify time to</span>
-								<input type="datetime-local" bind:value={searchModifyEnd}
-									style="height:32px; border:1px solid {borderColor}; background:{cardBg}; color:{textPrimary}; border-radius:8px; padding:0 8px; font-size:12px;" />
-							</label>
-						</div>
-					</div>
-
-					<!-- Toolbar -->
-					<div class="flex items-center justify-between gap-3">
-						<div style="font-size:12px; color:{textSecondary};">Leave fields empty to broaden the search. Results capped to 50 records.</div>
-						<div class="flex items-center gap-2">
-							<button
-								onclick={() => {
-									searchRecordId = ''; searchTitle = ''; searchDocNo = ''; searchFileName = '';
-									searchDocType = 'all'; searchParserName = ''; searchOperation = '';
-									searchProcStatus = 'all'; searchCreateStart = ''; searchCreateEnd = '';
-									searchModifyStart = ''; searchModifyEnd = '';
-									searchResults = []; searchSelected = null; searchError = '';
-								}}
-								style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:13px; cursor:pointer;"
-							>Reset</button>
-							<button
-								onclick={runSearch}
-								disabled={searchLoading}
-								style="height:34px; min-width:120px; padding:0 16px; border:none; border-radius:8px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{searchLoading ? 0.6 : 1};"
-							>{searchLoading ? 'Searching…' : 'Search'}</button>
-						</div>
-					</div>
-				</div>
-
-				{#if searchError}
-					<div style="margin:0 20px 12px; padding:10px 14px; border-radius:8px; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); color:#ef4444; font-size:13px;">{searchError}</div>
-				{/if}
-
-				<!-- Results -->
-				<div class="flex-1 overflow-auto" style="min-height:160px; border-top:1px solid {borderColor};">
-					{#if searchResults.length === 0 && !searchLoading}
-						<div class="flex flex-col items-center justify-center h-full py-12" style="color:{textMuted};">
-							<div style="font-size:2rem; margin-bottom:8px; opacity:0.35;">⌕</div>
-							<div style="font-size:14px; font-weight:600; color:{textSecondary}; margin-bottom:4px;">Run a search to see records.</div>
-							<div style="font-size:12px;">Use any combination of filters to narrow the list.</div>
-						</div>
-					{:else}
-						<table style="width:100%; border-collapse:collapse; font-size:12px;">
-							<thead style="position:sticky; top:0; background:{cardBg}; z-index:1;">
-								<tr style="border-bottom:1px solid {borderColor};">
-									<th style="padding:8px 12px; text-align:left; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:{textMuted}; white-space:nowrap;">ID</th>
-									<th style="padding:8px 12px; text-align:left; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:{textMuted};">Type</th>
-									<th style="padding:8px 12px; text-align:left; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:{textMuted};">Title / Doc No</th>
-									<th style="padding:8px 12px; text-align:left; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:{textMuted};">File name</th>
-									<th style="padding:8px 12px; text-align:left; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:{textMuted};">Parser</th>
-									<th style="padding:8px 12px; text-align:left; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:{textMuted};">Status</th>
-									<th style="padding:8px 12px; text-align:left; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:{textMuted}; white-space:nowrap;">Created</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each searchResults as r (r.id)}
-									{@const statusSummary = searchStatusText(r)}
-									<tr
-										onclick={() => (searchSelected = r.id)}
-										ondblclick={() => pickSearchResult(r)}
-										style="
-											border-bottom:1px solid {borderColor};
-											background:{searchSelected === r.id ? accent + '18' : 'transparent'};
-											cursor:pointer;
-											outline:{searchSelected === r.id ? '1px solid ' + accent + '44' : 'none'};
-										"
-										onmouseenter={(e) => { if (searchSelected !== r.id) (e.currentTarget as HTMLElement).style.background = surface2; }}
-										onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = searchSelected === r.id ? accent + '18' : 'transparent'; }}
-									>
-										<td style="padding:8px 12px; font-family:monospace; color:{textPrimary}; white-space:nowrap;">{r.id}</td>
-										<td style="padding:8px 12px; color:{textSecondary};">{r.type}</td>
-										<td style="padding:8px 12px; max-width:220px;">
-											<div style="font-weight:500; color:{textPrimary}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{recordDisplayName(r)}</div>
-											<div style="font-size:11px; font-family:monospace; color:{textMuted}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{recordDisplayDocNo(r)}</div>
-										</td>
-										<td style="padding:8px 12px; color:{textSecondary}; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{r.file_name ?? '—'}</td>
-										<td style="padding:8px 12px; font-family:monospace; color:{textMuted};">{r.parser_name || '—'}</td>
-										<td style="padding:8px 12px;">
-											<div style="display:flex; flex-direction:column; gap:2px;">
-												<span style="font-family:monospace; font-size:11px; color:{textSecondary};">{statusSummary.operation}</span>
-												<span style="
-													font-size:10px; font-weight:600; padding:1px 6px; border-radius:4px; width:fit-content;
-													background:{statusSummary.procStatus.toLowerCase() === 'success' ? 'rgba(34,197,94,0.15)' : statusSummary.procStatus.toLowerCase().startsWith('fail') ? 'rgba(239,68,68,0.15)' : surface2};
-													color:{statusSummary.procStatus.toLowerCase() === 'success' ? '#22c55e' : statusSummary.procStatus.toLowerCase().startsWith('fail') ? '#ef4444' : textMuted};
-												">{statusSummary.procStatus}</span>
-											</div>
-										</td>
-										<td style="padding:8px 12px; font-family:monospace; color:{textMuted}; white-space:nowrap;">{(r.create_time ?? '').slice(0, 19).replace('T', ' ')}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					{/if}
-				</div>
-			</div>
-
-			<!-- Footer -->
-			<div class="flex-shrink-0 flex items-center justify-between px-5 py-3" style="border-top:1px solid {borderColor};">
-				<div style="font-size:12px; color:{textMuted};">Double-click a row, or select &amp; press Apply Filters.</div>
-				<div class="flex items-center gap-2">
-					<button
-						onclick={closeSearch}
-						style="height:34px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:13px; cursor:pointer;"
-					>Cancel</button>
-					<button
-						onclick={confirmSearchSelection}
-						disabled={searchSelected == null}
-						style="height:34px; min-width:120px; padding:0 16px; border:none; border-radius:8px; background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{searchSelected == null ? 0.45 : 1};"
-					>Apply Filters</button>
-				</div>
-			</div>
-		</div>
-	</div>
-{/if}
+<KbInputSearchDialog
+	bind:open={searchOpen}
+	scopeToActiveStore={true}
+	onSelect={applySearchFilters}
+/>
 
 {#if uploadDialogOpen}
 	<div

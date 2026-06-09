@@ -151,7 +151,7 @@ class TestRepoFileProcessing:
 
         monkeypatch.setitem(pdf_parser_module.PARSER_REGISTRY, "opendata", FakeBackend)
         monkeypatch.setattr(pdf_parser_module, "find_duplicate_processed_record", lambda *args: None)
-        monkeypatch.setattr(pdf_parser_module, "record_parsing", lambda *args: args[2])
+        monkeypatch.setattr(pdf_parser_module, "record_parse_active", lambda *args: args[2])
         monkeypatch.setattr(pdf_parser_module, "record_parsed_success", lambda *args: args[2])
         monkeypatch.setattr(
             pdf_parser_module,
@@ -210,7 +210,7 @@ class TestRepoFileProcessing:
 
         monkeypatch.setitem(pdf_parser_module.PARSER_REGISTRY, "opendata", FakeBackend)
         monkeypatch.setattr(pdf_parser_module, "find_duplicate_processed_record", lambda *args: None)
-        monkeypatch.setattr(pdf_parser_module, "record_parsing", lambda *args: args[2])
+        monkeypatch.setattr(pdf_parser_module, "record_parse_active", lambda *args: args[2])
         monkeypatch.setattr(pdf_parser_module, "record_parsed_success", fake_record_parsed_success)
 
         old_home = os.environ.get("DATA_HOME_DIR")
@@ -271,7 +271,7 @@ class TestRepoFileProcessing:
 
         monkeypatch.setitem(pdf_parser_module.PARSER_REGISTRY, "opendata", FakeBackend)
         monkeypatch.setattr(pdf_parser_module, "find_duplicate_processed_record", lambda *args: None)
-        monkeypatch.setattr(pdf_parser_module, "record_parsing", lambda *args: args[2])
+        monkeypatch.setattr(pdf_parser_module, "record_parse_active", lambda *args: args[2])
         monkeypatch.setattr(pdf_parser_module, "record_parsed_success", fake_record_parsed_success)
         monkeypatch.setenv("DATA_HOME_DIR", str(repo_root))
         monkeypatch.setenv("DATA_BACKUP_DIR", str(backup_root))

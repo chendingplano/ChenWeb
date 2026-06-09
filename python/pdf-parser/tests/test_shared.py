@@ -1,9 +1,9 @@
 import json
 import os
 import tempfile
-from shared import decode_status, has_operation, upsert_status, replace_status_entry
+from shared import decode_status, has_operation, upsert_status
 from shared import file_md5, copy_file, unique_path, resolve_source_path, choose_repo_dir, relativize_to_data_home, relativize_to_backup_root, resolve_repo_path, resolve_backup_path
-from shared import fetch_candidates, fetch_record_by_id, find_duplicate_processed_record, has_md5_record, record_duplicated
+from shared import claim_candidates, fetch_record_by_id, find_duplicate_processed_record, has_md5_record, record_duplicated
 from shared import record_parsed_failure, record_parsed_success
 
 
@@ -71,30 +71,40 @@ class TestUpsertStatus:
         assert result[1]["progress"] == "50%"
 
 
-class TestReplaceStatusEntry:
-    def test_replace_parsing_with_parsed(self):
-        raw = json.dumps([{"operation": "parsing", "progress": "80%"}])
-        new_entry = {"operation": "parsed", "proc-status": "success", "ms-used": 5000}
-        result = json.loads(replace_status_entry(raw, "parsing", new_entry))
-        assert len(result) == 1
-        assert result[0]["operation"] == "parsed"
-        assert result[0]["proc-status"] == "success"
-        assert "progress" not in result[0]
+class TestSingleEntryInvariant:
+    """The fixed operation key means the lifecycle never produces a duplicate
+    entry, no matter how many times proc_status is upserted."""
 
-    def test_append_when_old_op_not_found(self):
-        raw = json.dumps([{"operation": "other"}])
-        new_entry = {"operation": "parsed", "proc-status": "failed"}
-        result = json.loads(replace_status_entry(raw, "parsing", new_entry))
-        assert len(result) == 2
-        assert result[1]["operation"] == "parsed"
+    def test_active_then_success_stays_one_entry(self):
+        raw = json.dumps([])
+        raw = upsert_status(raw, "parsed", {"proc_status": "active", "progress": "0%"})
+        raw = upsert_status(raw, "parsed", {"proc_status": "active", "progress": "80%"})
+        raw = upsert_status(raw, "parsed", {"proc_status": "success", "progress": "100%"})
+        result = json.loads(raw)
+        parsed = [e for e in result if e["operation"] == "parsed"]
+        assert len(parsed) == 1
+        assert parsed[0]["proc_status"] == "success"
+        assert parsed[0]["progress"] == "100%"
 
-    def test_preserves_other_entries(self):
-        raw = json.dumps([{"operation": "analyze"}, {"operation": "parsing"}])
-        new_entry = {"operation": "parsed", "proc-status": "success"}
-        result = json.loads(replace_status_entry(raw, "parsing", new_entry))
+    def test_late_failure_does_not_append_second_entry(self):
+        # The original bug: a success entry already exists, then a late failure
+        # arrives. With a fixed operation key it overwrites in place rather than
+        # appending a second "parsed" entry.
+        raw = json.dumps([{"operation": "parsed", "proc_status": "success"}])
+        raw = upsert_status(raw, "parsed", {"proc_status": "fail", "error": "boom"})
+        result = json.loads(raw)
+        parsed = [e for e in result if e["operation"] == "parsed"]
+        assert len(parsed) == 1
+        assert parsed[0]["proc_status"] == "fail"
+
+    def test_preserves_other_operations(self):
+        raw = json.dumps([{"operation": "analyze"}, {"operation": "parsed", "proc_status": "active"}])
+        raw = upsert_status(raw, "parsed", {"proc_status": "success"})
+        result = json.loads(raw)
         assert len(result) == 2
         assert result[0]["operation"] == "analyze"
         assert result[1]["operation"] == "parsed"
+        assert result[1]["proc_status"] == "success"
 
 
 class TestFileMd5:
@@ -227,14 +237,14 @@ class _FakeConn:
 class TestRecordDuplicated:
     def test_record_duplicated_includes_start_time(self):
         conn = _FakeConn()
-        raw = json.dumps([{"operation": "parsing", "progress": "50%"}])
+        raw = json.dumps([{"operation": "parsed", "proc_status": "active", "progress": "50%"}])
         updated = record_duplicated(conn, 21, raw, 20, "20260410 16:24:29")
         entries = json.loads(updated)
 
         assert conn.commit_called is True
         assert len(entries) == 1
         assert entries[0]["operation"] == "parsed"
-        assert entries[0]["proc-status"] == "duplicated"
+        assert entries[0]["proc_status"] == "duplicated"
         assert entries[0]["dup_rcd_id"] == 20
         assert entries[0]["start_time"] == "20260410 16:24:29"
 
@@ -242,7 +252,7 @@ class TestRecordDuplicated:
 class TestRecordParsedStatus:
     def test_record_parsed_success_includes_parser_name_in_status(self):
         conn = _FakeConn()
-        raw = json.dumps([{"operation": "parsing", "progress": "50%"}])
+        raw = json.dumps([{"operation": "parsed", "proc_status": "active", "progress": "50%"}])
 
         updated = record_parsed_success(
             conn,
@@ -259,13 +269,14 @@ class TestRecordParsedStatus:
         entries = json.loads(updated)
 
         assert conn.commit_called is True
+        assert len(entries) == 1
         assert entries[0]["operation"] == "parsed"
-        assert entries[0]["proc-status"] == "success"
+        assert entries[0]["proc_status"] == "success"
         assert entries[0]["parser_name"] == "mineru"
 
     def test_record_parsed_failure_includes_parser_name_in_status(self):
         conn = _FakeConn()
-        raw = json.dumps([{"operation": "parsing", "progress": "50%"}])
+        raw = json.dumps([{"operation": "parsed", "proc_status": "active", "progress": "50%"}])
 
         updated = record_parsed_failure(
             conn,
@@ -279,22 +290,27 @@ class TestRecordParsedStatus:
         entries = json.loads(updated)
 
         assert conn.commit_called is True
+        assert len(entries) == 1
         assert entries[0]["operation"] == "parsed"
-        assert entries[0]["proc-status"] == "failed"
+        assert entries[0]["proc_status"] == "fail"
         assert entries[0]["parser_name"] == "mineru"
 
 
 class TestReadQueriesCloseTransactions:
-    def test_fetch_candidates_commits_after_select(self):
+    def test_claim_candidates_stamps_active_and_commits(self):
         conn = _FakeConn()
         conn.rows = [
             (11, "doc.pdf", "/tmp/doc.pdf", "docling", "[]", "md5", "", ""),
         ]
 
-        records = fetch_candidates(conn, 25)
+        records = claim_candidates(conn, 25, 1800)
 
         assert conn.commit_called is True
         assert records[0]["id"] == 11
+        # The claim stamps the single "parsed" entry as active.
+        entries = json.loads(records[0]["status"])
+        assert entries[0]["operation"] == "parsed"
+        assert entries[0]["proc_status"] == "active"
 
     def test_fetch_record_by_id_commits_after_select(self):
         conn = _FakeConn()

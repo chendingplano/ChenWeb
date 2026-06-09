@@ -18,6 +18,14 @@ log = logging.getLogger(__name__)
 
 TIME_FORMAT = "%Y%m%d %H:%M:%S"
 
+# Fixed operation identifier for the PDF parser stage. It NEVER changes across the
+# record lifecycle — it is the stable dedup key. The lifecycle state lives in the
+# entry's `proc_status` field: "active" (in-progress) -> "success" / "fail", plus
+# "duplicated". Because the operation is constant, every status write upserts the
+# same single entry, so a record can never accumulate two "parsed" entries.
+# See docs/superpowers/specs/2026-04-07-unified-pdf-parser-service-design.md
+PARSE_OPERATION = "parsed"
+
 # ---------------------------------------------------------------------------
 # Status helpers
 # ---------------------------------------------------------------------------
@@ -66,26 +74,6 @@ def upsert_status(raw_status: str, operation: str, patch: dict) -> str:
         current = dict(entries[idx]) if isinstance(entries[idx], dict) else {}
         current.update(merged)
         entries[idx] = current
-
-    return json.dumps(entries)
-
-
-def replace_status_entry(raw_status: str, old_op: str, new_entry: dict) -> str:
-    """Replace an entry matching old_op with new_entry (full replacement, not merge).
-
-    If old_op is not found, appends new_entry.
-    """
-    entries = decode_status(raw_status)
-    op = old_op.strip().lower()
-    idx = next(
-        (i for i, e in enumerate(entries) if e.get("operation", "").strip().lower() == op),
-        None,
-    )
-
-    if idx is None:
-        entries.append(new_entry)
-    else:
-        entries[idx] = new_entry
 
     return json.dumps(entries)
 
@@ -256,8 +244,22 @@ def pg_connect(dsn: dict):
 # DB queries
 # ---------------------------------------------------------------------------
 
-def fetch_candidates(conn, batch_size: int) -> list[dict]:
-    """Fetch PDF records that have no 'parsing' or 'parsed' status entry."""
+def claim_candidates(conn, batch_size: int, claim_timeout: int) -> list[dict]:
+    """Atomically claim eligible PDF records in a single transaction.
+
+    Eligibility:
+      - type = 'pdf', AND
+      - no `operation = "parsed"` entry at all, OR a stale claim: an entry with
+        `proc_status = "active"` whose row modify_time is older than claim_timeout
+        seconds (a worker that died mid-parse).
+
+    The SELECT takes `FOR UPDATE SKIP LOCKED`, so two concurrent workers / service
+    instances can never claim the same row. Each claimed row is immediately stamped
+    `proc_status = "active"` and the whole batch is committed before the (slow)
+    parse begins, so the claim is visible to everyone else. This replaces the old
+    check-then-act `fetch_candidates`, which left a TOCTOU window between selecting
+    a row and marking it in-progress.
+    """
     sql = """
         SELECT id,
                COALESCE(staging_filename, ''),
@@ -271,31 +273,51 @@ def fetch_candidates(conn, batch_size: int) -> list[dict]:
         WHERE LOWER(type) = 'pdf'
           AND (
               status IS NULL
+              OR NOT jsonb_path_exists(status, '$[*] ? (@.operation == "parsed")')
               OR (
-                  NOT jsonb_path_exists(status, '$[*] ? (@.operation == "parsing")')
-                  AND NOT jsonb_path_exists(status, '$[*] ? (@.operation == "parsed")')
+                  jsonb_path_exists(status, '$[*] ? (@.operation == "parsed" && @.proc_status == "active")')
+                  AND modify_time < NOW() - make_interval(secs => %s)
               )
           )
         ORDER BY id ASC
         LIMIT %s
+        FOR UPDATE SKIP LOCKED
     """
+    claimed: list[dict] = []
+    start_time = datetime.now().strftime(TIME_FORMAT)
     with conn.cursor() as cur:
-        cur.execute(sql, (batch_size,))
+        cur.execute(sql, (claim_timeout, batch_size))
         rows = cur.fetchall()
+
+        for r in rows:
+            rec = {
+                "id": r[0],
+                "name": r[1],
+                "file_name": r[2],
+                "parser_name": r[3],
+                "status": r[4],
+                "md5": r[5],
+                "result_filename": r[6],
+                "backup_filename": r[7],
+            }
+            # Stamp proc_status=active in the same locked transaction so the claim
+            # is durable and visible once committed.
+            rec["status"] = upsert_status(
+                rec["status"], PARSE_OPERATION,
+                {
+                    "proc_status": "active",
+                    "progress": "0%",
+                    "start_time": start_time,
+                    "ms_used": 0,
+                },
+            )
+            cur.execute(
+                "UPDATE kb.inputs SET status = %s::jsonb, modify_time = NOW() WHERE id = %s",
+                (rec["status"], rec["id"]),
+            )
+            claimed.append(rec)
     conn.commit()
-    return [
-        {
-            "id": r[0],
-            "name": r[1],
-            "file_name": r[2],
-            "parser_name": r[3],
-            "status": r[4],
-            "md5": r[5],
-            "result_filename": r[6],
-            "backup_filename": r[7],
-        }
-        for r in rows
-    ]
+    return claimed
 
 
 def fetch_record_by_id(conn, rec_id: int) -> dict | None:
@@ -345,10 +367,11 @@ def find_duplicate_processed_record(conn, rec_id: int, md5_hex: str) -> int | No
     """Find another record with same MD5 that was successfully parsed.
 
     Only records whose status contains a "parsed" entry with
-    ``proc-status == "success"`` count as a true duplicate.  Records that
-    are themselves merely marked "duplicated" are ignored so that when every
-    copy is "duplicated" (e.g. the original was deleted), one of them will
-    still be processed.
+    ``proc_status == "success"`` count as a true duplicate.  Failures are not
+    counted, so a transient failure (e.g. a shutdown mid-parse) on one copy still
+    lets another copy be retried.  Records merely marked "duplicated" are likewise
+    ignored so that when every copy is "duplicated" (e.g. the original was
+    deleted), one of them will still be processed.
     """
     if not md5_hex:
         return None
@@ -359,7 +382,7 @@ def find_duplicate_processed_record(conn, rec_id: int, md5_hex: str) -> int | No
           AND md5 = %s
           AND jsonb_path_exists(
               COALESCE(status, '[]'::jsonb),
-              '$[*] ? (@.operation == "parsed" && @."proc-status" == "success")'
+              '$[*] ? (@.operation == "parsed" && @.proc_status == "success")'
           )
         ORDER BY id ASC
         LIMIT 1
@@ -389,17 +412,18 @@ def insert_staged_pdf_record(conn, file_path: str, md5_hex: str) -> None:
 # DB status updates
 # ---------------------------------------------------------------------------
 
-def record_parsing(
+def record_parse_active(
     conn, rec_id: int, raw_status: str,
     start_time: str, ms_used: int, progress_pct: int,
 ) -> str:
-    """Set or update the 'parsing' status entry with progress."""
+    """Upsert the single 'parsed' entry to proc_status='active' with progress."""
     new_status = upsert_status(
-        raw_status, "parsing",
+        raw_status, PARSE_OPERATION,
         {
+            "proc_status": "active",
             "progress": f"{progress_pct}%",
             "start_time": start_time,
-            "ms-used": ms_used,
+            "ms_used": ms_used,
         },
     )
     sql = """
@@ -419,17 +443,19 @@ def record_parsed_success(
     result_filename: str, file_name: str, backup_filename: str,
     parser_name: str, num_pages: int,
 ) -> str:
-    """Replace 'parsing' entry with 'parsed' success entry."""
-    new_entry = {
-        "operation": "parsed",
-        "proc-status": "success",
-        "parser_name": parser_name,
-        "start_time": start_time,
-        "ms-used": ms_used,
-        "num_pages": num_pages,
-        "error": "",
-    }
-    new_status = replace_status_entry(raw_status, "parsing", new_entry)
+    """Upsert the single 'parsed' entry to proc_status='success'."""
+    new_status = upsert_status(
+        raw_status, PARSE_OPERATION,
+        {
+            "proc_status": "success",
+            "progress": "100%",
+            "parser_name": parser_name,
+            "start_time": start_time,
+            "ms_used": ms_used,
+            "num_pages": num_pages,
+            "error": "",
+        },
+    )
     sql = """
         UPDATE kb.inputs
         SET status          = %s::jsonb,
@@ -454,16 +480,17 @@ def record_parsed_failure(
     conn, rec_id: int, raw_status: str,
     start_time: str, ms_used: int, error: str, parser_name: str,
 ) -> str:
-    """Replace 'parsing' entry with 'parsed' failure entry."""
-    new_entry = {
-        "operation": "parsed",
-        "proc-status": "failed",
-        "parser_name": parser_name,
-        "start_time": start_time,
-        "ms-used": ms_used,
-        "error": error,
-    }
-    new_status = replace_status_entry(raw_status, "parsing", new_entry)
+    """Upsert the single 'parsed' entry to proc_status='fail'."""
+    new_status = upsert_status(
+        raw_status, PARSE_OPERATION,
+        {
+            "proc_status": "fail",
+            "parser_name": parser_name,
+            "start_time": start_time,
+            "ms_used": ms_used,
+            "error": error,
+        },
+    )
     sql = """
         UPDATE kb.inputs
         SET status    = %s::jsonb,
@@ -481,13 +508,14 @@ def record_duplicated(
     conn, rec_id: int, raw_status: str, dup_rcd_id: int, start_time: str,
 ) -> str:
     """Mark a record as duplicated (another record with same MD5 was already parsed)."""
-    new_entry = {
-        "operation": "parsed",
-        "proc-status": "duplicated",
-        "dup_rcd_id": dup_rcd_id,
-        "start_time": start_time,
-    }
-    new_status = replace_status_entry(raw_status, "parsing", new_entry)
+    new_status = upsert_status(
+        raw_status, PARSE_OPERATION,
+        {
+            "proc_status": "duplicated",
+            "dup_rcd_id": dup_rcd_id,
+            "start_time": start_time,
+        },
+    )
     sql = """
         UPDATE kb.inputs
         SET status    = %s::jsonb,

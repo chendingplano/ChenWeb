@@ -35,12 +35,12 @@ from typing import Callable
 from shared import (
     TIME_FORMAT,
     pg_connect,
-    fetch_candidates,
+    claim_candidates,
     fetch_record_by_id,
     has_operation,
     scan_staging_once,
     find_duplicate_processed_record,
-    record_parsing,
+    record_parse_active,
     record_parsed_success,
     record_parsed_failure,
     record_duplicated,
@@ -122,6 +122,16 @@ def _batch_size() -> int:
         return int(_env("PDF_BATCH_SIZE", "25"))
     except ValueError:
         return 25
+
+
+def _claim_timeout() -> int:
+    """Seconds before a proc_status='active' claim is treated as stale and
+    reclaimable (crash recovery). Progress updates keep modify_time fresh while a
+    parse is genuinely running, so a live parse is never reclaimed."""
+    try:
+        return int(_env("PDF_CLAIM_TIMEOUT", "1800"))
+    except ValueError:
+        return 1800
 
 
 def _default_parser() -> str:
@@ -398,13 +408,14 @@ def _process_record(
             record_dir = str(Path(repo_pdf_path).parent)
             backup_path = (rec.get("backup_filename") or "").strip()
 
-        # Initial "parsing" status
-        raw_status = record_parsing(conn, rec_id, raw_status, parse_start, 0, 0)
+        # Initial in-progress status (idempotent: in poll mode the claim already
+        # stamped proc_status=active; this merges/refreshes it).
+        raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, 0, 0)
 
         # Throttled progress callback
         def _db_progress(ms_used: int, pct: int) -> None:
             nonlocal raw_status
-            raw_status = record_parsing(conn, rec_id, raw_status, parse_start, ms_used, pct)
+            raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, ms_used, pct)
 
         throttled = make_throttled_progress(_db_progress, min_interval=3.0)
 
@@ -634,9 +645,10 @@ async def run_jetstream() -> None:
                     if not rec:
                         raise ValueError(f"kb.inputs record not found id={rec_id}")
 
-                    # Skip records already parsed — handles JetStream redelivery
-                    # that occurs when NATS drops between parse completion and ACK.
-                    if has_operation(rec["status"], "parsing", "parsed"):
+                    # Skip records already parsed/in-progress — handles JetStream
+                    # redelivery that occurs when NATS drops between parse completion
+                    # and ACK. The lifecycle uses a single "parsed" operation.
+                    if has_operation(rec["status"], "parsed"):
                         log.info(
                             "(MID_2026040716) record id=%s already parsed — acking redelivered message",
                             rec_id,
@@ -685,6 +697,7 @@ def run() -> None:
     staging_dir = _staging_dir()
     poll_interval = _poll_interval()
     batch_size = _batch_size()
+    claim_timeout = _claim_timeout()
     default_parser = _default_parser()
 
     log.info("(MID_2026040703) starting unified pdf_parser service")
@@ -692,8 +705,8 @@ def run() -> None:
     log.info("  repo_dirs=%s", repo_dirs)
     log.info("  backup_dir=%s", backup_dir)
     log.info("  staging_dir=%s", staging_dir if staging_dir else "(not set)")
-    log.info("  poll_interval=%ss batch_size=%s default_parser=%s",
-             poll_interval, batch_size, default_parser)
+    log.info("  poll_interval=%ss batch_size=%s claim_timeout=%ss default_parser=%s",
+             poll_interval, batch_size, claim_timeout, default_parser)
     forced = _forced_parser()
     if forced:
         log.info("  PDF_PARSER_NAME=%s (overrides per-record parser_name)", forced)
@@ -719,13 +732,14 @@ def run() -> None:
                 log.info("(MID_2026040705) connected to postgres")
 
             scan_staging_once(conn, staging_dir, backup_dir)
-            records = fetch_candidates(conn, batch_size)
+            # Atomic claim: each returned record is locked (FOR UPDATE SKIP LOCKED)
+            # and already stamped proc_status=active in a committed transaction, so
+            # no other worker/instance can take it.
+            records = claim_candidates(conn, batch_size, claim_timeout)
             if not records:
                 log.debug("(MID_2026040706) nothing to process")
             else:
                 for rec in records:
-                    if has_operation(rec["status"], "parsing", "parsed"):
-                        continue
                     result = _process_record(
                         conn, rec, backend_cache,
                         repo_dirs, backup_dir, staging_dir, default_parser,
