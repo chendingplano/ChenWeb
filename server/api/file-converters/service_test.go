@@ -983,3 +983,212 @@ func TestConvertMineruFile_BasicTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestConvertMineruFile_OutputPathNaming(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "std_1521701_mineru.json")
+	if err := os.WriteFile(in, []byte(`{"pages":[]}`), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	want := filepath.Join(tmp, "std_1521701_mineru.txt")
+	if out != want {
+		t.Fatalf("expected %s, got %s", want, out)
+	}
+	if strings.Contains(filepath.Base(out), "_mineru_mineru") {
+		t.Fatalf("double _mineru suffix: %s", out)
+	}
+}
+
+func TestConvertMineruFile_WritesReadOnlyOriginFile(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "doc_mineru.json")
+	content := `{"pages":[{"page_number":1,"items":[{"type":"text","text":"hello","bbox":[1,2,3,4]}]}]}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	originPath := strings.TrimSuffix(out, filepath.Ext(out)) + ".origin"
+	origin, err := os.ReadFile(originPath)
+	if err != nil {
+		t.Fatalf("read origin: %v", err)
+	}
+	txt, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read txt: %v", err)
+	}
+	if string(origin) != string(txt) {
+		t.Fatalf("origin mismatch: origin=%q txt=%q", string(origin), string(txt))
+	}
+	info, err := os.Stat(originPath)
+	if err != nil {
+		t.Fatalf("stat origin: %v", err)
+	}
+	if info.Mode().Perm() != 0o444 {
+		t.Fatalf("origin mode=%#o, want 0444", info.Mode().Perm())
+	}
+}
+
+func TestConvertMineruFile_TableWithCaptionBodyFootnote(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "doc_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 3,
+      "items": [
+        {
+          "type": "table",
+          "table_caption": ["表3.1 评价等级"],
+          "table_footnote": ["注：分数为整数"],
+          "table_body": "<table><tr><td>评分</td><td>等级</td></tr><tr><td>90</td><td>优秀</td></tr></table>",
+          "bbox": [100,200,500,400]
+        }
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	text := string(got)
+	if !strings.Contains(text, "table-caption\tunknown-font\t12\t[100,200,500,400]\t表3.1 评价等级") {
+		t.Fatalf("missing table-caption: %s", text)
+	}
+	if !strings.Contains(text, "table-row\tunknown-font\t12\t[100,200,500,400]\t|评分|等级|") {
+		t.Fatalf("missing table-row header: %s", text)
+	}
+	if !strings.Contains(text, "table-row\tunknown-font\t12\t[100,200,500,400]\t|90|优秀|") {
+		t.Fatalf("missing table-row data: %s", text)
+	}
+	if !strings.Contains(text, "table-footnote\tunknown-font\t12\t[100,200,500,400]\t注：分数为整数") {
+		t.Fatalf("missing table-footnote: %s", text)
+	}
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines (caption+2 rows+footnote), got %d:\n%s", len(lines), text)
+	}
+}
+
+func TestConvertMineruFile_TableHTMLEntityDecoding(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "doc_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 1,
+      "items": [
+        {
+          "type": "table",
+          "table_caption": [],
+          "table_footnote": [],
+          "table_body": "<table><tr><td>A&lt;B</td><td>C&amp;D</td></tr></table>",
+          "bbox": [0,0,100,100]
+        }
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !strings.Contains(string(got), "|A<B|C&D|") {
+		t.Fatalf("expected HTML entities decoded, got: %s", string(got))
+	}
+}
+
+func TestConvertMineruFile_TablePipeEscaping(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "doc_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 1,
+      "items": [
+        {
+          "type": "table",
+          "table_caption": [],
+          "table_footnote": [],
+          "table_body": "<table><tr><td>A|B</td><td>C</td></tr></table>",
+          "bbox": [0,0,100,100]
+        }
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !strings.Contains(string(got), `|A\|B|C|`) {
+		t.Fatalf("expected pipe escaped in cell, got: %s", string(got))
+	}
+}
+
+func TestConvertMineruFile_RemovesRepeatedContent(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "doc_mineru.json")
+	content := `{
+  "pages": [
+    {"page_number":1,"items":[
+      {"type":"text","text":"running-header","bbox":[0,0,10,10]},
+      {"type":"text","text":"page-1-body","bbox":[10,10,20,20]}
+    ]},
+    {"page_number":2,"items":[
+      {"type":"text","text":"running-header","bbox":[0,0,10,10]},
+      {"type":"text","text":"page-2-body","bbox":[10,10,20,20]}
+    ]},
+    {"page_number":3,"items":[
+      {"type":"text","text":"running-header","bbox":[0,0,10,10]},
+      {"type":"text","text":"page-3-body","bbox":[10,10,20,20]}
+    ]}
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	text := string(got)
+	if strings.Contains(text, "running-header") {
+		t.Fatalf("expected repeated running-header removed, got: %s", text)
+	}
+	if !strings.Contains(text, "page-1-body") || !strings.Contains(text, "page-2-body") || !strings.Contains(text, "page-3-body") {
+		t.Fatalf("expected page body lines to remain, got: %s", text)
+	}
+}
