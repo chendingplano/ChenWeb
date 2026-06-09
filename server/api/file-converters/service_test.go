@@ -775,7 +775,7 @@ func TestHandleRequestUnsupportedParserIsNonRetryable(t *testing.T) {
 	st := &fakeStore{rec: InputRecord{
 		ID:         29,
 		Type:       "pdf",
-		ParserName: "mineru",
+		ParserName: "xyz",
 		StatusRaw:  `[{"operation":"parsed","proc-status":"success"}]`,
 		FileName:   filepath.Join(tmp, "source.pdf"),
 	}}
@@ -794,7 +794,7 @@ func TestHandleRequestUnsupportedParserIsNonRetryable(t *testing.T) {
 	if st.updateCalls != 1 {
 		t.Fatalf("expected update status call")
 	}
-	if st.updatedError == nil || !strings.Contains(*st.updatedError, `unsupported parser_name="mineru"`) {
+	if st.updatedError == nil || !strings.Contains(*st.updatedError, `unsupported parser_name="xyz"`) {
 		t.Fatalf("expected persisted unsupported parser error, got: %v", st.updatedError)
 	}
 }
