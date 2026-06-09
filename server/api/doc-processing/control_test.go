@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -263,6 +264,185 @@ func TestControlService_DefaultOrderRunsStandaloneGenerateProcessorsAfterChunkin
 	}
 }
 
+func TestDefaultEventSubjectIsStartDocProcessing(t *testing.T) {
+	if DefaultEventSubject != "kb.pdf.start-doc-processing" {
+		t.Fatalf("DefaultEventSubject=%q, want kb.pdf.start-doc-processing", DefaultEventSubject)
+	}
+}
+
+func TestParseStartDocProcessingEvent_RecordRanges(t *testing.T) {
+	cmd, err := ParseStartDocProcessingEvent([]byte(`{
+		"record_ids": [12, "22-24", " 31 "],
+		"doc-processors": ["extract-metrics", "generate_topics"],
+		"failed-proc-only": false
+	}`))
+	if err != nil {
+		t.Fatalf("ParseStartDocProcessingEvent: %v", err)
+	}
+	wantIDs := []int64{12, 22, 23, 24, 31}
+	if fmt.Sprint(cmd.RecordIDs) != fmt.Sprint(wantIDs) {
+		t.Fatalf("record ids=%v, want %v", cmd.RecordIDs, wantIDs)
+	}
+	wantOps := []string{"extract_metrics", "generate_topics"}
+	if fmt.Sprint(cmd.DocProcessors) != fmt.Sprint(wantOps) {
+		t.Fatalf("processors=%v, want %v", cmd.DocProcessors, wantOps)
+	}
+	if cmd.FailedProcOnly {
+		t.Fatalf("FailedProcOnly=true, want false")
+	}
+}
+
+func TestParseStartDocProcessingEvent_RejectsInvalidAllAndMissingTargets(t *testing.T) {
+	if _, err := ParseStartDocProcessingEvent([]byte(`{"all":"bogus"}`)); err == nil {
+		t.Fatalf("invalid all should fail")
+	}
+	if _, err := ParseStartDocProcessingEvent([]byte(`{"doc-processors":["extract_metrics"]}`)); err == nil {
+		t.Fatalf("missing all and record_ids should fail")
+	}
+}
+
+func TestControlService_StartDocProcessingAllParsed(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	dir := t.TempDir()
+	writeLineFile(t, filepath.Join(dir, "source_opendata.txt"))
+	got := make([]string, 0, 4)
+	store := &fakeDocProcessingCommandStore{
+		parsed: []DocMetadataInputRecord{
+			{ID: 12, ParserName: "opendata", ResultFilename: filepath.Join(dir, "result.json"), StagingFilename: filepath.Join(dir, "source.pdf"), StatusRaw: `[{"operation":"parsed","proc-status":"success"}]`},
+			{ID: 22, ParserName: "opendata", ResultFilename: filepath.Join(dir, "result.json"), StagingFilename: filepath.Join(dir, "source.pdf"), StatusRaw: `[{"operation":"parsed","proc-status":"success"}]`},
+		},
+	}
+	svc := &ControlService{
+		InputStore: store,
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &got},
+		},
+	}
+
+	err := svc.HandleStartDocProcessingEvent(context.Background(), []byte(`{
+		"all": "parsed",
+		"doc-processors": ["extract_metrics"],
+		"failed-proc-only": false
+	}`))
+	if err != nil {
+		t.Fatalf("HandleStartDocProcessingEvent: %v", err)
+	}
+	want := []string{"extract_metrics", "extract_metrics"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+}
+
+func TestControlService_StartDocProcessingFiltersFailedProcessorsByDefault(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	dir := t.TempDir()
+	writeLineFile(t, filepath.Join(dir, "source_opendata.txt"))
+	got := make([]string, 0, 2)
+	store := &fakeDocProcessingCommandStore{
+		records: map[int64]DocMetadataInputRecord{
+			7: {ID: 7, ParserName: "opendata", ResultFilename: filepath.Join(dir, "result.json"), StagingFilename: filepath.Join(dir, "source.pdf"), StatusRaw: `[
+				{"operation":"extract_metrics","proc_status":"failed"},
+				{"operation":"generate_topics","proc_status":"success"}
+			]`},
+		},
+	}
+	svc := &ControlService{
+		InputStore: store,
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &got},
+			fakeProcessor{name: "generate_topics", calls: &got},
+		},
+	}
+
+	err := svc.HandleStartDocProcessingEvent(context.Background(), []byte(`{
+		"record_ids": [7],
+		"doc-processors": ["extract_metrics", "generate_topics"]
+	}`))
+	if err != nil {
+		t.Fatalf("HandleStartDocProcessingEvent: %v", err)
+	}
+	want := []string{"extract_metrics"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+}
+
+func TestDocProcessorModeFromEnvDefaultsToAuto(t *testing.T) {
+	t.Setenv("DOC_PROCESSOR_MODE", "")
+	mode, err := DocProcessorModeFromEnv()
+	if err != nil {
+		t.Fatalf("DocProcessorModeFromEnv: %v", err)
+	}
+	if mode != DocProcessorModeAuto {
+		t.Fatalf("mode=%q, want %q", mode, DocProcessorModeAuto)
+	}
+}
+
+func TestDocProcessorModeFromEnvRejectsInvalidValues(t *testing.T) {
+	t.Setenv("DOC_PROCESSOR_MODE", "local")
+	if _, err := DocProcessorModeFromEnv(); err == nil {
+		t.Fatalf("invalid DOC_PROCESSOR_MODE should fail")
+	}
+}
+
+func TestControlService_DefaultSubjectUsesAutoModeByDefault(t *testing.T) {
+	t.Setenv("DOC_PROCESSOR_MODE", "")
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	got := make([]string, 0, 1)
+	svc := &ControlService{
+		Processors: []Processor{fakeProcessor{name: "extract_metrics", calls: &got}},
+	}
+
+	err := svc.handleDefaultSubjectEvent(context.Background(), []byte(`{"record_id":"1"}`))
+	if err != nil {
+		t.Fatalf("handleDefaultSubjectEvent: %v", err)
+	}
+	if fmt.Sprint(got) != fmt.Sprint([]string{"extract_metrics"}) {
+		t.Fatalf("calls=%v, want extract_metrics", got)
+	}
+}
+
+func TestControlService_DefaultSubjectUsesDevModeWhenConfigured(t *testing.T) {
+	t.Setenv("DOC_PROCESSOR_MODE", "dev")
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	dir := t.TempDir()
+	writeLineFile(t, filepath.Join(dir, "source_opendata.txt"))
+	got := make([]string, 0, 2)
+	store := &fakeDocProcessingCommandStore{
+		records: map[int64]DocMetadataInputRecord{
+			9: {ID: 9, ParserName: "opendata", ResultFilename: filepath.Join(dir, "result.json"), StagingFilename: filepath.Join(dir, "source.pdf"), StatusRaw: `[
+				{"operation":"extract_metrics","proc_status":"failed"},
+				{"operation":"generate_topics","proc_status":"success"}
+			]`},
+		},
+	}
+	svc := &ControlService{
+		InputStore: store,
+		Processors: []Processor{
+			fakeProcessor{name: "extract_metrics", calls: &got},
+			fakeProcessor{name: "generate_topics", calls: &got},
+		},
+	}
+
+	err := svc.handleDefaultSubjectEvent(context.Background(), []byte(`{
+		"record_ids": [9],
+		"doc-processors": ["extract_metrics", "generate_topics"]
+	}`))
+	if err != nil {
+		t.Fatalf("handleDefaultSubjectEvent: %v", err)
+	}
+	if fmt.Sprint(got) != fmt.Sprint([]string{"extract_metrics"}) {
+		t.Fatalf("calls=%v, want extract_metrics", got)
+	}
+}
+
+func writeLineFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+}
+
 type fakeEventStore struct {
 	insertErr error
 }
@@ -494,7 +674,7 @@ type statusWritingProcessor struct {
 	called int
 }
 
-func (p *statusWritingProcessor) Name() string { return p.name }
+func (p *statusWritingProcessor) Name() string    { return p.name }
 func (p *statusWritingProcessor) LogName() string { return p.name }
 func (p *statusWritingProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	p.called++
@@ -538,6 +718,47 @@ func TestProcessorLogName_PrefersMethodSpecificLogName(t *testing.T) {
 	}
 }
 
+type fakeDocProcessingCommandStore struct {
+	records    map[int64]DocMetadataInputRecord
+	parsed     []DocMetadataInputRecord
+	withFailed []DocMetadataInputRecord
+}
+
+func (f *fakeDocProcessingCommandStore) GetInputRecord(_ context.Context, id int64) (DocMetadataInputRecord, error) {
+	if f.records != nil {
+		if rec, ok := f.records[id]; ok {
+			return rec, nil
+		}
+	}
+	for _, rec := range append(append([]DocMetadataInputRecord{}, f.parsed...), f.withFailed...) {
+		if rec.ID == id {
+			return rec, nil
+		}
+	}
+	return DocMetadataInputRecord{}, sql.ErrNoRows
+}
+
+func (f *fakeDocProcessingCommandStore) UpdateInputMetadata(_ context.Context, id int64, req DocMetadataUpdate) error {
+	if f.records == nil {
+		f.records = map[int64]DocMetadataInputRecord{}
+	}
+	rec := f.records[id]
+	rec.ID = id
+	if strings.TrimSpace(req.StatusRaw) != "" {
+		rec.StatusRaw = req.StatusRaw
+	}
+	f.records[id] = rec
+	return nil
+}
+
+func (f *fakeDocProcessingCommandStore) ListParsedInputRecords(_ context.Context) ([]DocMetadataInputRecord, error) {
+	return append([]DocMetadataInputRecord{}, f.parsed...), nil
+}
+
+func (f *fakeDocProcessingCommandStore) ListRecordsWithFailedDocProcessors(_ context.Context) ([]DocMetadataInputRecord, error) {
+	return append([]DocMetadataInputRecord{}, f.withFailed...), nil
+}
+
 // --- concurrent test helpers for two-phase controller ---
 
 type concurrentRecorder struct {
@@ -553,7 +774,7 @@ type recordingProcessor struct {
 	hook func() // optional, to assert overlap
 }
 
-func (p recordingProcessor) Name() string { return p.name }
+func (p recordingProcessor) Name() string    { return p.name }
 func (p recordingProcessor) LogName() string { return p.name }
 
 func (p recordingProcessor) HandleEvent(_ context.Context, _ []byte) error {
@@ -570,7 +791,7 @@ type failingRecordingProcessor struct {
 	rec  *concurrentRecorder
 }
 
-func (p failingRecordingProcessor) Name() string { return p.name }
+func (p failingRecordingProcessor) Name() string    { return p.name }
 func (p failingRecordingProcessor) LogName() string { return p.name }
 
 func (p failingRecordingProcessor) HandleEvent(_ context.Context, _ []byte) error {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -170,9 +171,10 @@ type PublishEventRequest struct {
 
 func validateSubjectPayload(subject string, payload string) error {
 	requiredFields := map[string][]string{
-		"kb.pdf.parsed":          {"record_id", "type", "status"},
-		"kb.pdf.staged":          {"record_id", "type", "status"},
-		"kb.line-file-generated": {"record_id"},
+		"kb.pdf.parsed":               {"record_id", "type", "status"},
+		"kb.pdf.staged":               {"record_id", "type", "status"},
+		"kb.line-file-generated":      {"record_id"},
+		"kb.pdf.start-doc-processing": {},
 	}
 	fields, ok := requiredFields[subject]
 	if !ok {
@@ -187,6 +189,12 @@ func validateSubjectPayload(subject string, payload string) error {
 	var decoded map[string]any
 	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
 		return fmt.Errorf("payload must be valid JSON object for subject %s", subject)
+	}
+	if subject == "kb.pdf.start-doc-processing" {
+		if _, err := docprocessing.ParseStartDocProcessingEvent([]byte(body)); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	for _, key := range fields {

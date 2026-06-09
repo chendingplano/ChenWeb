@@ -13,7 +13,12 @@ Optional env vars:
   PDF_BACKUP_DIR                  Backup directory for originals
   PDF_POLL_INTERVAL               Seconds between DB polls (default: 10)
   PDF_BATCH_SIZE                  Records per poll (default: 25)
-  PDF_DEFAULT_PARSER              Default parser name (default: opendata)
+  PDF_PARSER_NAME                 Force all records to use this parser:
+                                    "opendata" → opendataloader-pdf (default)
+                                    "mineru"   → MinerU
+                                  Overrides the per-record parser_name field.
+  PDF_DEFAULT_PARSER              Fallback parser when PDF_PARSER_NAME is unset
+                                  and the record carries no parser_name (default: opendata)
 """
 
 import json
@@ -123,6 +128,11 @@ def _default_parser() -> str:
     return _env("PDF_DEFAULT_PARSER", "opendata")
 
 
+def _forced_parser() -> str:
+    """Return PDF_PARSER_NAME when set; empty string otherwise."""
+    return _env("PDF_PARSER_NAME")
+
+
 def _pipeline_mode() -> str:
     mode = _env("PDF_PIPELINE_MODE", "poll").lower()
     if mode not in {"poll", "jetstream"}:
@@ -164,6 +174,14 @@ def _stage_stream() -> str:
 
 def _parsed_stream() -> str:
     return _env("PDF_PARSED_EVENT_STREAM")
+
+
+def _doc_processor_mode() -> str:
+    return _env("DOC_PROCESSOR_MODE", "auto").lower()
+
+
+def should_publish_parsed_event() -> bool:
+    return _doc_processor_mode() == "auto"
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +336,8 @@ def _process_record(
     rec_id = rec["id"]
     raw_status = rec["status"]
     md5_hex = (rec.get("md5") or "").strip()
-    parser_name = (rec.get("parser_name") or "").strip() or default_parser
+    forced = _forced_parser()
+    parser_name = forced or (rec.get("parser_name") or "").strip() or default_parser
 
     log.info(
         "(MID_2026041301) received request record id=%s parser=%s name=%s",
@@ -330,7 +349,7 @@ def _process_record(
         source_file, from_staging = _resolve_input_file(rec, staging_dir, repo_dirs)
     except ValueError as exc:
         parse_start = datetime.now().strftime(TIME_FORMAT)
-        record_parsed_failure(conn, rec_id, raw_status, parse_start, 0, str(exc))
+        record_parsed_failure(conn, rec_id, raw_status, parse_start, 0, str(exc), parser_name)
         log.error("(MID_2026040703) %s", exc)
         return {
             "record_id": rec_id,
@@ -443,7 +462,7 @@ def _process_record(
 
     except Exception as exc:
         ms_used = int((datetime.now() - parse_start_dt).total_seconds() * 1000)
-        record_parsed_failure(conn, rec_id, raw_status, parse_start, ms_used, str(exc))
+        record_parsed_failure(conn, rec_id, raw_status, parse_start, ms_used, str(exc), parser_name)
         log.error("(MID_2026040702) failed to process record id=%s: %s", rec_id, exc)
         return {
             "record_id": rec_id,
@@ -509,6 +528,13 @@ class JetStreamBus:
             await self._nc.close()
 
     async def publish_parsed(self, result: dict) -> None:
+        if not should_publish_parsed_event():
+            log.info(
+                "(MID_2026060901) parsed event publish skipped record_id=%s DOC_PROCESSOR_MODE=%s",
+                result.get("record_id"),
+                _doc_processor_mode(),
+            )
+            return
         payload = {
             "record_id": result.get("record_id"),
             "type": "pdf",
@@ -520,6 +546,13 @@ class JetStreamBus:
 
 
 async def publish_parsed_event_once(result: dict) -> None:
+    if not should_publish_parsed_event():
+        log.info(
+            "(MID_2026060902) parsed event publish skipped record_id=%s DOC_PROCESSOR_MODE=%s",
+            result.get("record_id"),
+            _doc_processor_mode(),
+        )
+        return
     if NATS is None:
         raise RuntimeError("nats-py is not installed. Run: uv pip install nats-py")
 
@@ -558,6 +591,9 @@ async def run_jetstream() -> None:
 
     log.info("(MID_2026040711) starting pdf_parser service in jetstream mode")
     log.info("  stage_subject=%s parsed_subject=%s durable=%s", _stage_subject(), _parsed_subject(), _stage_durable())
+    forced = _forced_parser()
+    if forced:
+        log.info("  PDF_PARSER_NAME=%s (overrides per-record parser_name)", forced)
 
     for d in repo_dirs:
         Path(d).mkdir(parents=True, exist_ok=True)
@@ -569,22 +605,35 @@ async def run_jetstream() -> None:
     await bus.connect()
 
     stop = asyncio.Event()
+    _active_fetch: asyncio.Task | None = None
+    loop = asyncio.get_running_loop()
 
-    def _stop(_sig, _frame):
+    def _handle_signal() -> None:
         log.info("(MID_2026040712) shutdown signal received")
         stop.set()
+        if _active_fetch is not None and not _active_fetch.done():
+            _active_fetch.cancel()
 
-    signal.signal(signal.SIGINT, _stop)
-    signal.signal(signal.SIGTERM, _stop)
+    for _sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(_sig, _handle_signal)
+        except (NotImplementedError, OSError):
+            signal.signal(_sig, lambda s, f: _handle_signal())
 
     sub = await bus._js.pull_subscribe(_stage_subject(), durable=_stage_durable())
 
     try:
         while not stop.is_set():
             try:
-                msgs = await sub.fetch(1, timeout=1)
+                _active_fetch = asyncio.ensure_future(sub.fetch(1, timeout=2))
+                msgs = await _active_fetch
+            except asyncio.CancelledError:
+                break
             except Exception:
                 msgs = []
+            finally:
+                _active_fetch = None
+
             if not msgs:
                 continue
             for msg in msgs:
@@ -607,12 +656,36 @@ async def run_jetstream() -> None:
                     if not rec:
                         raise ValueError(f"kb.inputs record not found id={rec_id}")
 
-                    result = _process_record(
-                        conn, rec, backend_cache,
-                        repo_dirs, backup_dir, staging_dir, default_parser,
+                    # Skip records already parsed — handles JetStream redelivery
+                    # that occurs when NATS drops between parse completion and ACK.
+                    if has_operation(rec["status"], "parsing", "parsed"):
+                        log.info(
+                            "(MID_2026040716) record id=%s already parsed — acking redelivered message",
+                            rec_id,
+                        )
+                        await msg.ack()
+                        continue
+
+                    # Run the synchronous (potentially long) parse in a thread so
+                    # the event loop stays live and NATS pings/reconnects can fire.
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda: _process_record(
+                            conn, rec, backend_cache,
+                            repo_dirs, backup_dir, staging_dir, default_parser,
+                        ),
                     )
-                    await bus.publish_parsed(result)
+
+                    # ACK before publishing: even if publish fails, the record
+                    # won't be re-parsed on the next redelivery.
                     await msg.ack()
+                    try:
+                        await bus.publish_parsed(result)
+                    except Exception as pub_exc:
+                        log.error(
+                            "(MID_2026040717) publish parsed event failed id=%s: %s",
+                            rec_id, pub_exc,
+                        )
                 except Exception as exc:
                     log.error("(MID_2026040713) jetstream stage event handling failed payload=%s error=%s", payload, exc)
                     if should_drop_stage_event(exc):
@@ -620,7 +693,11 @@ async def run_jetstream() -> None:
                     else:
                         await msg.nak()
     finally:
-        await bus.close()
+        log.info("(MID_2026040715) closing NATS connection")
+        try:
+            await asyncio.wait_for(bus.close(), timeout=3.0)
+        except Exception:
+            pass
         conn.close()
 
 def run() -> None:
@@ -639,6 +716,9 @@ def run() -> None:
     log.info("  staging_dir=%s", staging_dir if staging_dir else "(not set)")
     log.info("  poll_interval=%ss batch_size=%s default_parser=%s",
              poll_interval, batch_size, default_parser)
+    forced = _forced_parser()
+    if forced:
+        log.info("  PDF_PARSER_NAME=%s (overrides per-record parser_name)", forced)
 
     for d in repo_dirs:
         Path(d).mkdir(parents=True, exist_ok=True)

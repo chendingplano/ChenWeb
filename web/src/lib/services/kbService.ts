@@ -389,6 +389,19 @@ export async function uploadKbInputs(
 	return response.json() as Promise<UploadKbInputsResponse>;
 }
 
+export async function checkKbInputMD5s(md5s: string[]): Promise<Set<string>> {
+	if (md5s.length === 0) return new Set();
+	const response = await fetch(`${BASE}/inputs/check-md5`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ md5s })
+	});
+	if (!response.ok) return new Set();
+	const data = await response.json();
+	return new Set<string>((data.existing ?? []) as string[]);
+}
+
 export type RawLine = {
 	line_number: number;
 	page_number: number;

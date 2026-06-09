@@ -3,7 +3,7 @@
 	import { shouldShowOverflowScrollbar } from '$lib/components/home3/kb-import-status-dialog.js';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
-	import { listKbInputs, uploadKbInputs, deleteKbInput } from '$lib/services/kbService';
+	import { listKbInputs, uploadKbInputs, deleteKbInput, checkKbInputMD5s } from '$lib/services/kbService';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -85,6 +85,77 @@
 	let uploadParserName = $state<(typeof uploadParserOptions)[number]>('docling');
 	let selectedFiles = $state<File[]>([]);
 	let filePicker = $state<HTMLInputElement | null>(null);
+	let dirPicker = $state<HTMLInputElement | null>(null);
+	let uploadRecursive = $state(true);
+	let uploadDirProcessing = $state(false);
+	let uploadSkippedCount = $state(0);
+
+	const typeExtensions: Record<string, string[]> = {
+		pdf: ['.pdf'],
+		doc: ['.doc', '.docx'],
+		excel: ['.xls', '.xlsx'],
+		ppt: ['.ppt', '.pptx'],
+		text: ['.txt'],
+		json: ['.json'],
+		xml: ['.xml'],
+		markdown: ['.md', '.markdown'],
+		typst: ['.typ'],
+		zip: ['.zip']
+	};
+
+	function fileMD5Hex(buffer: ArrayBuffer): string {
+		const bytes = new Uint8Array(buffer);
+		function safeAdd(x: number, y: number): number {
+			const lsw = (x & 0xffff) + (y & 0xffff);
+			return (((x >> 16) + (y >> 16) + (lsw >> 16)) << 16) | (lsw & 0xffff);
+		}
+		function rol(n: number, s: number): number { return (n << s) | (n >>> (32 - s)); }
+		function cmn(q: number, a: number, b: number, x: number, s: number, t: number): number {
+			return safeAdd(rol(safeAdd(safeAdd(a, q), safeAdd(x, t)), s), b);
+		}
+		function ff(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn((b & c) | (~b & d), a, b, x, s, t); }
+		function gg(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn((b & d) | (c & ~d), a, b, x, s, t); }
+		function hh(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+		function ii(a: number, b: number, c: number, d: number, x: number, s: number, t: number) { return cmn(c ^ (b | ~d), a, b, x, s, t); }
+
+		const len8 = bytes.length;
+		const len32 = Math.ceil((len8 + 9) / 64) * 16;
+		const w = new Int32Array(len32);
+		for (let i = 0; i < len8; i++) w[i >> 2] |= bytes[i] << ((i % 4) * 8);
+		w[len8 >> 2] |= 0x80 << ((len8 % 4) * 8);
+		w[len32 - 2] = len8 * 8;
+
+		let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+		for (let i = 0; i < len32; i += 16) {
+			const [aa, bb, cc, dd] = [a, b, c, d];
+			a=ff(a,b,c,d,w[i+0],7,-680876936); d=ff(d,a,b,c,w[i+1],12,-389564586); c=ff(c,d,a,b,w[i+2],17,606105819); b=ff(b,c,d,a,w[i+3],22,-1044525330);
+			a=ff(a,b,c,d,w[i+4],7,-176418897); d=ff(d,a,b,c,w[i+5],12,1200080426); c=ff(c,d,a,b,w[i+6],17,-1473231341); b=ff(b,c,d,a,w[i+7],22,-45705983);
+			a=ff(a,b,c,d,w[i+8],7,1770035416); d=ff(d,a,b,c,w[i+9],12,-1958414417); c=ff(c,d,a,b,w[i+10],17,-42063); b=ff(b,c,d,a,w[i+11],22,-1990404162);
+			a=ff(a,b,c,d,w[i+12],7,1804603682); d=ff(d,a,b,c,w[i+13],12,-40341101); c=ff(c,d,a,b,w[i+14],17,-1502002290); b=ff(b,c,d,a,w[i+15],22,1236535329);
+			a=gg(a,b,c,d,w[i+1],5,-165796510); d=gg(d,a,b,c,w[i+6],9,-1069501632); c=gg(c,d,a,b,w[i+11],14,643717713); b=gg(b,c,d,a,w[i+0],20,-373897302);
+			a=gg(a,b,c,d,w[i+5],5,-701558691); d=gg(d,a,b,c,w[i+10],9,38016083); c=gg(c,d,a,b,w[i+15],14,-660478335); b=gg(b,c,d,a,w[i+4],20,-405537848);
+			a=gg(a,b,c,d,w[i+9],5,568446438); d=gg(d,a,b,c,w[i+14],9,-1019803690); c=gg(c,d,a,b,w[i+3],14,-187363961); b=gg(b,c,d,a,w[i+8],20,1163531501);
+			a=gg(a,b,c,d,w[i+13],5,-1444681467); d=gg(d,a,b,c,w[i+2],9,-51403784); c=gg(c,d,a,b,w[i+7],14,1735328473); b=gg(b,c,d,a,w[i+12],20,-1926607734);
+			a=hh(a,b,c,d,w[i+5],4,-378558); d=hh(d,a,b,c,w[i+8],11,-2022574463); c=hh(c,d,a,b,w[i+11],16,1839030562); b=hh(b,c,d,a,w[i+14],23,-35309556);
+			a=hh(a,b,c,d,w[i+1],4,-1530992060); d=hh(d,a,b,c,w[i+4],11,1272893353); c=hh(c,d,a,b,w[i+7],16,-155497632); b=hh(b,c,d,a,w[i+10],23,-1094730640);
+			a=hh(a,b,c,d,w[i+13],4,681279174); d=hh(d,a,b,c,w[i+0],11,-358537222); c=hh(c,d,a,b,w[i+3],16,-722521979); b=hh(b,c,d,a,w[i+6],23,76029189);
+			a=hh(a,b,c,d,w[i+9],4,-640364487); d=hh(d,a,b,c,w[i+12],11,-421815835); c=hh(c,d,a,b,w[i+15],16,530742520); b=hh(b,c,d,a,w[i+2],23,-995338651);
+			a=ii(a,b,c,d,w[i+0],6,-198630844); d=ii(d,a,b,c,w[i+7],10,1126891415); c=ii(c,d,a,b,w[i+14],15,-1416354905); b=ii(b,c,d,a,w[i+5],21,-57434055);
+			a=ii(a,b,c,d,w[i+12],6,1700485571); d=ii(d,a,b,c,w[i+3],10,-1894986606); c=ii(c,d,a,b,w[i+10],15,-1051523); b=ii(b,c,d,a,w[i+1],21,-2054922799);
+			a=ii(a,b,c,d,w[i+8],6,1873313359); d=ii(d,a,b,c,w[i+15],10,-30611744); c=ii(c,d,a,b,w[i+6],15,-1560198380); b=ii(b,c,d,a,w[i+13],21,1309151649);
+			a=ii(a,b,c,d,w[i+4],6,-145523070); d=ii(d,a,b,c,w[i+11],10,-1120210379); c=ii(c,d,a,b,w[i+2],15,718787259); b=ii(b,c,d,a,w[i+9],21,-343485551);
+			a=safeAdd(a,aa); b=safeAdd(b,bb); c=safeAdd(c,cc); d=safeAdd(d,dd);
+		}
+		return [a, b, c, d].map(n =>
+			[(n&0xff),((n>>8)&0xff),((n>>16)&0xff),((n>>24)&0xff)]
+				.map(v => v.toString(16).padStart(2,'0')).join('')
+		).join('');
+	}
+
+	async function computeFileMD5(file: File): Promise<string> {
+		const buf = await file.arrayBuffer();
+		return fileMD5Hex(buf);
+	}
 
 	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
 
@@ -189,7 +260,10 @@
 		uploadKsDesc = '';
 		uploadParserName = 'opendata';		// The default PDF parser
 		selectedFiles = [];
+		uploadSkippedCount = 0;
+		uploadDirProcessing = false;
 		if (filePicker) filePicker.value = '';
+		if (dirPicker) dirPicker.value = '';
 	}
 
 	function openUploadDialog() {
@@ -212,9 +286,63 @@
 		filePicker?.click();
 	}
 
+	function triggerDirPicker() {
+		dirPicker?.click();
+	}
+
 	function onFileSelection(event: Event) {
 		const input = event.currentTarget as HTMLInputElement;
 		selectedFiles = Array.from(input.files ?? []);
+		uploadSkippedCount = 0;
+	}
+
+	async function onDirSelection(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const all = Array.from(input.files ?? []);
+		if (all.length === 0) return;
+
+		const exts = typeExtensions[uploadType] ?? [];
+		let candidates = all.filter(f => {
+			const lower = f.name.toLowerCase();
+			return exts.some(e => lower.endsWith(e));
+		});
+
+		if (!uploadRecursive) {
+			candidates = candidates.filter(f => {
+				const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? f.name;
+				return (rel.match(/\//g) ?? []).length <= 1;
+			});
+		}
+
+		if (candidates.length === 0) {
+			selectedFiles = [];
+			uploadSkippedCount = 0;
+			uploadError = `No ${uploadType} files found in the selected directory.`;
+			return;
+		}
+
+		uploadDirProcessing = true;
+		uploadError = '';
+		try {
+			const md5List = await Promise.all(candidates.map(computeFileMD5));
+			const existing = await checkKbInputMD5s(md5List);
+			const kept: File[] = [];
+			let skipped = 0;
+			for (let i = 0; i < candidates.length; i++) {
+				if (existing.has(md5List[i])) {
+					skipped++;
+				} else {
+					kept.push(candidates[i]);
+				}
+			}
+			selectedFiles = kept;
+			uploadSkippedCount = skipped;
+		} catch {
+			selectedFiles = candidates;
+			uploadSkippedCount = 0;
+		} finally {
+			uploadDirProcessing = false;
+		}
 	}
 
 	async function submitUpload() {
@@ -915,8 +1043,15 @@
 					</label>
 
 					<div class="rounded-lg p-3" style="border:1px solid {borderColor}; background:{surface2};">
-						<div style="font-size:12px; color:{textMuted}; margin-bottom:6px;">Selected Files</div>
-						{#if selectedFiles.length === 0}
+						<div class="flex items-center justify-between" style="margin-bottom:6px;">
+							<span style="font-size:12px; color:{textMuted};">Selected Files</span>
+							{#if uploadSkippedCount > 0}
+								<span style="font-size:11px; color:#f59e0b;">{uploadSkippedCount} skipped (duplicate MD5)</span>
+							{/if}
+						</div>
+						{#if uploadDirProcessing}
+							<div style="font-size:12px; color:{textSecondary};">Checking for duplicates…</div>
+						{:else if selectedFiles.length === 0}
 							<div style="font-size:12px; color:{textSecondary};">No files selected yet.</div>
 						{:else}
 							<div class="space-y-1" style="max-height:90px; overflow:auto;">
@@ -939,8 +1074,9 @@
 				</div>
 
 				<input bind:this={filePicker} type="file" multiple class="hidden" onchange={onFileSelection} />
+				<input bind:this={dirPicker} type="file" class="hidden" onchange={onDirSelection} webkitdirectory />
 
-				<div class="mt-4 flex items-center gap-2">
+				<div class="mt-4 flex flex-wrap items-center gap-2">
 					<button
 						onclick={triggerFilePicker}
 						type="button"
@@ -948,6 +1084,18 @@
 					>
 						Browse and Pick Files
 					</button>
+					<button
+						onclick={triggerDirPicker}
+						type="button"
+						disabled={uploadDirProcessing}
+						style="height:36px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textPrimary}; font-size:13px; cursor:pointer; opacity:{uploadDirProcessing ? 0.6 : 1};"
+					>
+						Browse Directory
+					</button>
+					<label class="flex items-center gap-1.5" style="font-size:13px; color:{textSecondary}; cursor:pointer; user-select:none;">
+						<input type="checkbox" bind:checked={uploadRecursive} style="width:14px; height:14px; accent-color:{accent}; cursor:pointer;" />
+						Recursive
+					</label>
 					<button
 						onclick={submitUpload}
 						disabled={uploadSubmitting}

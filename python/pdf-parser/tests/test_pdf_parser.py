@@ -8,6 +8,7 @@ from pdf_parser import (
     get_backend,
     make_throttled_progress,
     PARSER_REGISTRY,
+    should_publish_parsed_event,
     should_drop_stage_event,
     _repo_dirs,
     _process_record,
@@ -44,6 +45,20 @@ class TestConfig:
     def test_repo_dirs_use_data_home_dir_directly(self, monkeypatch):
         monkeypatch.setenv("DATA_HOME_DIR", "/Users/cding/Apps/SemOS")
         assert _repo_dirs() == ["/Users/cding/Apps/SemOS"]
+
+    def test_should_publish_parsed_event_defaults_to_auto(self, monkeypatch):
+        monkeypatch.delenv("DOC_PROCESSOR_MODE", raising=False)
+        assert should_publish_parsed_event()
+
+    def test_should_publish_parsed_event_only_in_auto_mode(self, monkeypatch):
+        monkeypatch.setenv("DOC_PROCESSOR_MODE", "auto")
+        assert should_publish_parsed_event()
+
+        monkeypatch.setenv("DOC_PROCESSOR_MODE", "dev")
+        assert not should_publish_parsed_event()
+
+        monkeypatch.setenv("DOC_PROCESSOR_MODE", "unexpected")
+        assert not should_publish_parsed_event()
 
 
 class TestThrottledProgress:

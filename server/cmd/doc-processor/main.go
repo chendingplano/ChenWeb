@@ -164,6 +164,11 @@ func main() {
 	subject := envOrDefault("DOC_PROCESSOR_EVENT_SUBJECT", docprocessing.DefaultEventSubject)
 	durable := envOrDefault("DOC_PROCESSOR_EVENT_DURABLE", "doc-processor")
 	streamName := envFirst("DOC_PROCESSOR_EVENT_STREAM", "EXTRACT_DOCMETA_EVENT_STREAM")
+	docProcessorMode, err := docprocessing.DocProcessorModeFromEnv()
+	if err != nil {
+		logger.Error("invalid DOC_PROCESSOR_MODE", "error", err)
+		os.Exit(1)
+	}
 
 	ns, err := fileconverters.NewNATSSubscriber(natsURL)
 	if err != nil {
@@ -245,6 +250,7 @@ func main() {
 		"subject", subject,
 		"durable", durable,
 		"stream", streamName,
+		"doc_processor_mode", docProcessorMode,
 		"chunking_method", docprocessing.ChunkingMethodFixed,
 		"generate_topics_method", docprocessing.ChunkingMethodTopic,
 		"max_doc_process_pipelines", control.MaxDocProcessPipelines,

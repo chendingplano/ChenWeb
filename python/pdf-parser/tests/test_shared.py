@@ -4,6 +4,7 @@ import tempfile
 from shared import decode_status, has_operation, upsert_status, replace_status_entry
 from shared import file_md5, copy_file, unique_path, resolve_source_path, choose_repo_dir, relativize_to_data_home, relativize_to_backup_root, resolve_repo_path, resolve_backup_path
 from shared import fetch_candidates, fetch_record_by_id, find_duplicate_processed_record, has_md5_record, record_duplicated
+from shared import record_parsed_failure, record_parsed_success
 
 
 class TestDecodeStatus:
@@ -236,6 +237,51 @@ class TestRecordDuplicated:
         assert entries[0]["proc-status"] == "duplicated"
         assert entries[0]["dup_rcd_id"] == 20
         assert entries[0]["start_time"] == "20260410 16:24:29"
+
+
+class TestRecordParsedStatus:
+    def test_record_parsed_success_includes_parser_name_in_status(self):
+        conn = _FakeConn()
+        raw = json.dumps([{"operation": "parsing", "progress": "50%"}])
+
+        updated = record_parsed_success(
+            conn,
+            21,
+            raw,
+            "20260609 05:08:02",
+            536254,
+            "Artifacts/0/21/doc_mineru.json",
+            "Artifacts/0/21/doc.pdf",
+            "Backup/doc.pdf",
+            "mineru",
+            59,
+        )
+        entries = json.loads(updated)
+
+        assert conn.commit_called is True
+        assert entries[0]["operation"] == "parsed"
+        assert entries[0]["proc-status"] == "success"
+        assert entries[0]["parser_name"] == "mineru"
+
+    def test_record_parsed_failure_includes_parser_name_in_status(self):
+        conn = _FakeConn()
+        raw = json.dumps([{"operation": "parsing", "progress": "50%"}])
+
+        updated = record_parsed_failure(
+            conn,
+            22,
+            raw,
+            "20260609 05:08:02",
+            1200,
+            "mineru exited 1",
+            "mineru",
+        )
+        entries = json.loads(updated)
+
+        assert conn.commit_called is True
+        assert entries[0]["operation"] == "parsed"
+        assert entries[0]["proc-status"] == "failed"
+        assert entries[0]["parser_name"] == "mineru"
 
 
 class TestReadQueriesCloseTransactions:

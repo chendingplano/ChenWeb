@@ -66,6 +66,79 @@ WHERE id = $1`
 	return rec, nil
 }
 
+func (s DocMetadataSQLStore) ListParsedInputRecords(ctx context.Context) ([]DocMetadataInputRecord, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	const stmt = `
+SELECT id,
+       COALESCE(parser_name, ''),
+       COALESCE(result_filename, ''),
+       COALESCE(staging_filename, ''),
+       COALESCE(status::text, '[]'),
+       COALESCE(file_name, '')
+FROM kb.inputs
+WHERE LOWER(COALESCE(type, '')) = 'pdf'
+  AND jsonb_path_exists(status, '$[*] ? (@.operation == "parsed" && (@."proc-status" == "success" || @.proc_status == "success"))')
+ORDER BY id`
+	return s.listInputRecords(ctx, stmt)
+}
+
+func (s DocMetadataSQLStore) ListRecordsWithFailedDocProcessors(ctx context.Context) ([]DocMetadataInputRecord, error) {
+	if s.DB == nil {
+		return nil, errors.New("db is nil")
+	}
+	const stmt = `
+SELECT id,
+       COALESCE(parser_name, ''),
+       COALESCE(result_filename, ''),
+       COALESCE(staging_filename, ''),
+       COALESCE(status::text, '[]'),
+       COALESCE(file_name, '')
+FROM kb.inputs
+WHERE jsonb_path_exists(status, '$[*] ? (@.proc_status == "failed" || @."proc-status" == "failed")')
+ORDER BY id`
+	records, err := s.listInputRecords(ctx, stmt)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]DocMetadataInputRecord, 0, len(records))
+	for _, rec := range records {
+		if len(failedDocProcessorNames(rec.StatusRaw)) > 0 {
+			filtered = append(filtered, rec)
+		}
+	}
+	return filtered, nil
+}
+
+func (s DocMetadataSQLStore) listInputRecords(ctx context.Context, stmt string) ([]DocMetadataInputRecord, error) {
+	rows, err := s.DB.QueryContext(ctx, stmt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]DocMetadataInputRecord, 0)
+	for rows.Next() {
+		var rec DocMetadataInputRecord
+		if err := rows.Scan(
+			&rec.ID,
+			&rec.ParserName,
+			&rec.ResultFilename,
+			&rec.StagingFilename,
+			&rec.StatusRaw,
+			&rec.FileName,
+		); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 func (s DocMetadataSQLStore) UpdateInputMetadata(ctx context.Context, id int64, req DocMetadataUpdate) error {
 	if s.DB == nil {
 		return errors.New("db is nil")

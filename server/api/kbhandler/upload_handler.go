@@ -1,7 +1,9 @@
 package kbhandler
 
 import (
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -162,7 +164,7 @@ func UploadInputs(c echo.Context) error {
 	}
 
 	for _, fileHeader := range files {
-		destPath, stageName, err := stageUploadFile(stagingDir, fileHeader)
+		destPath, stageName, fileMD5, err := stageUploadFile(stagingDir, fileHeader)
 		if err != nil {
 			rollback()
 			logger.Error("stage upload file failed", "filename", fileHeader.Filename, "err", err)
@@ -190,6 +192,7 @@ func UploadInputs(c echo.Context) error {
 				ParserName:     parserName,
 				StagingName:    stageName,
 				StagingAbsPath: destPath,
+				MD5:            &fileMD5,
 			},
 		)
 		if err != nil {
@@ -233,6 +236,7 @@ type uploadedInputInsert struct {
 	ParserName     string
 	StagingName    string
 	StagingAbsPath string
+	MD5            *string
 }
 
 func insertUploadedInputRecord(tx *sql.Tx, inputTable string, req uploadedInputInsert) (int64, error) {
@@ -251,6 +255,7 @@ INSERT INTO %s (
     parser_name,
     staging_filename,
     file_name,
+    md5,
     status
 ) VALUES (
     $1,
@@ -266,6 +271,7 @@ INSERT INTO %s (
     $11,
     $12,
     $13,
+    $14,
     '[]'::jsonb
 )
 RETURNING id`, inputTable)
@@ -286,40 +292,42 @@ RETURNING id`, inputTable)
 		req.ParserName,
 		req.StagingName,
 		req.StagingAbsPath,
+		req.MD5,
 	).Scan(&id); err != nil {
 		return 0, err
 	}
 	return id, nil
 }
 
-func stageUploadFile(stagingDir string, fileHeader *multipart.FileHeader) (destPath string, savedName string, err error) {
+func stageUploadFile(stagingDir string, fileHeader *multipart.FileHeader) (destPath string, savedName string, md5Hex string, err error) {
 	baseName := filepath.Base(strings.TrimSpace(fileHeader.Filename))
 	if baseName == "" || baseName == "." {
-		return "", "", fmt.Errorf("invalid filename")
+		return "", "", "", fmt.Errorf("invalid filename")
 	}
 
 	destPath, err = uniqueStagePath(stagingDir, baseName)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	src, err := fileHeader.Open()
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	defer src.Close()
 
 	dst, err := os.Create(destPath)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	defer dst.Close()
 
-	if _, err := io.Copy(dst, src); err != nil {
-		return "", "", err
+	h := md5.New()
+	if _, err := io.Copy(io.MultiWriter(dst, h), src); err != nil {
+		return "", "", "", err
 	}
 
-	return destPath, filepath.Base(destPath), nil
+	return destPath, filepath.Base(destPath), hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func uniqueStagePath(dir, fileName string) (string, error) {

@@ -12,7 +12,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/pathutil"
 )
 
-const DefaultEventSubject = "kb.line-file-generated"
+const DefaultEventSubject = "kb.pdf.start-doc-processing"
 
 type LineFileGeneratedEvent struct {
 	RecordID   int64
@@ -173,6 +173,8 @@ func canonicalOperationName(raw string) string {
 	op := strings.ToLower(strings.TrimSpace(raw))
 	op = strings.ReplaceAll(op, "-", "_")
 	switch op {
+	case "chunked":
+		return "chunking"
 	case "extract_metadata":
 		return "extract_doc_metadata"
 	default:

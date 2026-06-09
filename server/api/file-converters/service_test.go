@@ -66,14 +66,16 @@ func (f *fakeStore) UpdateInputStatus(_ context.Context, id int64, statusJSON st
 }
 
 type fakePublisher struct {
-	subject string
-	payload []byte
-	calls   int
+	subject  string
+	payload  []byte
+	payloads [][]byte
+	calls    int
 }
 
 func (f *fakePublisher) Publish(_ context.Context, subject string, payload []byte) error {
 	f.subject = subject
 	f.payload = append([]byte(nil), payload...)
+	f.payloads = append(f.payloads, append([]byte(nil), payload...))
 	f.calls++
 	return nil
 }
@@ -598,7 +600,7 @@ func TestConvertOpenDataFile_WithPagesKey(t *testing.T) {
 
 func TestHandleRequestSuccessAppendsConvertedStatus(t *testing.T) {
 	tmp := t.TempDir()
-	jsonPath := filepath.Join(tmp, "ocr_result.json")
+	jsonPath := filepath.Join(tmp, "source_opendata.json")
 	if err := os.WriteFile(jsonPath, []byte(`{"kids":[{"type":"paragraph","page number":1,"content":"ok","bounding box":[1,2,3,4]}]}`), 0o644); err != nil {
 		t.Fatalf("write json: %v", err)
 	}
@@ -665,34 +667,27 @@ func TestHandleRequestSuccessAppendsConvertedStatus(t *testing.T) {
 	}
 }
 
-func TestHandleRequestOpenDataPrefersDocumentJSONOverParseResultWrapper(t *testing.T) {
+func TestHandleRequestDiscoversParserFilesByNamingConvention(t *testing.T) {
 	tmp := t.TempDir()
-	wrapperPath := filepath.Join(tmp, "parse_result_20.json")
-	sourceJSON := filepath.Join(tmp, "stdGk_3032172.json")
-
-	if err := os.WriteFile(wrapperPath, []byte(`{
-  "input_id": 20,
-  "source_pdf": "/tmp/stdGk_3032172.pdf",
-  "generated_at": "2026-04-12T13:38:05.687550+00:00",
-  "engine": "opendata",
-  "pages": []
-}`), 0o644); err != nil {
-		t.Fatalf("write wrapper json: %v", err)
+	// An unrelated file that should not be converted.
+	unrelated := filepath.Join(tmp, "parse_result_20.json")
+	if err := os.WriteFile(unrelated, []byte(`{"ignored":true}`), 0o644); err != nil {
+		t.Fatalf("write unrelated json: %v", err)
 	}
+	// The correctly-named parser output file.
+	sourceJSON := filepath.Join(tmp, "stdGk_3032172_opendata.json")
 	if err := os.WriteFile(sourceJSON, []byte(`{
-  "file name":"stdGk_3032172.pdf",
   "kids":[{"type":"paragraph","page number":1,"content":"hello","bounding box":[1,2,3,4]}]
 }`), 0o644); err != nil {
 		t.Fatalf("write source json: %v", err)
 	}
 
 	st := &fakeStore{rec: InputRecord{
-		ID:             20,
-		Type:           "pdf",
-		ParserName:     "opendata",
-		StatusRaw:      `[{"operation":"parsed","proc-status":"success"}]`,
-		FileName:       filepath.Join(tmp, "stdGk_3032172.pdf"),
-		ResultFilename: filepath.Base(wrapperPath),
+		ID:        20,
+		Type:      "pdf",
+		ParserName: "opendata",
+		StatusRaw: `[{"operation":"parsed","proc-status":"success"}]`,
+		FileName:  filepath.Join(tmp, "stdGk_3032172.pdf"),
 	}}
 
 	svc := NewService(st, slog.Default())
@@ -701,10 +696,12 @@ func TestHandleRequestOpenDataPrefersDocumentJSONOverParseResultWrapper(t *testi
 		t.Fatalf("HandleRequest: %v", err)
 	}
 
-	wrapperTxt := expectedOpenDataOutputPath(wrapperPath)
-	if _, err := os.Stat(wrapperTxt); !os.IsNotExist(err) {
-		t.Fatalf("expected no wrapper txt output, got err=%v", err)
+	// The unrelated file must not produce any output.
+	unrelatedTxt := expectedOpenDataOutputPath(unrelated)
+	if _, err := os.Stat(unrelatedTxt); !os.IsNotExist(err) {
+		t.Fatalf("expected no output for unrelated file, got err=%v", err)
 	}
+	// The correctly-named parser output file must be converted.
 	sourceTxt := expectedOpenDataOutputPath(sourceJSON)
 	out, err := os.ReadFile(sourceTxt)
 	if err != nil {
@@ -767,7 +764,8 @@ func TestHandleRequestFailureDoesNotPublishLineFileGeneratedEvent(t *testing.T) 
 
 func TestHandleRequestUnsupportedParserIsNonRetryable(t *testing.T) {
 	tmp := t.TempDir()
-	jsonPath := filepath.Join(tmp, "source.json")
+	// File is named <stem>_<parser>.json so the scanner discovers it and extracts parser="xyz".
+	jsonPath := filepath.Join(tmp, "source_xyz.json")
 	if err := os.WriteFile(jsonPath, []byte(`{"kids":[{"type":"paragraph","content":"x"}]}`), 0o644); err != nil {
 		t.Fatalf("write json: %v", err)
 	}
@@ -781,10 +779,7 @@ func TestHandleRequestUnsupportedParserIsNonRetryable(t *testing.T) {
 	}}
 
 	svc := NewService(st, slog.Default())
-	err := svc.HandleRequest(context.Background(), ConvertRequest{
-		RecordID:       29,
-		ResultFilename: filepath.Base(jsonPath),
-	})
+	err := svc.HandleRequest(context.Background(), ConvertRequest{RecordID: 29})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -992,6 +987,77 @@ func TestHandleRequestMineruSuccess(t *testing.T) {
 	}
 	if ev.RecordID != 203 || ev.Status != "success" || ev.LineFileFilename != outPath {
 		t.Fatalf("unexpected event: %+v", ev)
+	}
+}
+
+func TestHandleRequestConvertsAllParserFiles(t *testing.T) {
+	tmp := t.TempDir()
+	openDataJSON := filepath.Join(tmp, "doc_opendata.json")
+	if err := os.WriteFile(openDataJSON, []byte(`{"kids":[{"type":"paragraph","page number":1,"content":"from opendata","bounding box":[1,2,3,4]}]}`), 0o644); err != nil {
+		t.Fatalf("write opendata json: %v", err)
+	}
+	mineruJSON := filepath.Join(tmp, "doc_mineru.json")
+	if err := os.WriteFile(mineruJSON, []byte(`{"pages":[{"page_number":1,"items":[{"type":"text","text":"from mineru","bbox":[1,2,3,4]}]}]}`), 0o644); err != nil {
+		t.Fatalf("write mineru json: %v", err)
+	}
+
+	st := &fakeStore{rec: InputRecord{
+		ID:        301,
+		Type:      "pdf",
+		ParserName: "mineru",
+		StatusRaw: `[{"operation":"parsed","proc-status":"success"}]`,
+		FileName:  filepath.Join(tmp, "doc.pdf"),
+	}}
+
+	pub := &fakePublisher{}
+	svc := NewService(st, slog.Default())
+	svc.Publisher = pub
+
+	err := svc.HandleRequest(context.Background(), ConvertRequest{RecordID: 301})
+	if err != nil {
+		t.Fatalf("HandleRequest: %v", err)
+	}
+	if st.updateCalls != 1 {
+		t.Fatalf("expected updateCalls=1, got %d", st.updateCalls)
+	}
+	if st.updatedError != nil {
+		t.Fatalf("expected nil error, got %v", *st.updatedError)
+	}
+	if pub.calls != 2 {
+		t.Fatalf("expected 2 publish calls (one per parser), got %d", pub.calls)
+	}
+
+	openDataTxt := expectedOpenDataOutputPath(openDataJSON)
+	if out, err := os.ReadFile(openDataTxt); err != nil {
+		t.Fatalf("read opendata txt: %v", err)
+	} else if !strings.Contains(string(out), "from opendata") {
+		t.Fatalf("unexpected opendata txt content: %s", out)
+	}
+
+	mineruTxt := expectedMineruOutputPath(mineruJSON)
+	if out, err := os.ReadFile(mineruTxt); err != nil {
+		t.Fatalf("read mineru txt: %v", err)
+	} else if !strings.Contains(string(out), "from mineru") {
+		t.Fatalf("unexpected mineru txt content: %s", out)
+	}
+
+	// Each event must reference its own line file.
+	lineFiles := map[string]bool{}
+	for _, payload := range pub.payloads {
+		var ev LineFileGeneratedEvent
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		if ev.RecordID != 301 || ev.Status != "success" {
+			t.Fatalf("unexpected event fields: %+v", ev)
+		}
+		lineFiles[ev.LineFileFilename] = true
+	}
+	if !lineFiles[openDataTxt] {
+		t.Fatalf("missing event for opendata line file %s", openDataTxt)
+	}
+	if !lineFiles[mineruTxt] {
+		t.Fatalf("missing event for mineru line file %s", mineruTxt)
 	}
 }
 

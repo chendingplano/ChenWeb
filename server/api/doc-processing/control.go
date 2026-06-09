@@ -39,6 +39,7 @@ type ControlService struct {
 	StopStore         StopRequestStore
 	Now               func() time.Time
 
+	DocProcessorMode       string
 	MaxDocProcessPipelines int
 	pipelineSlots          chan struct{}
 	pipelineSlotsMax       int
@@ -71,12 +72,16 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 		procStart := s.now()
 		var procErr error
 		procCtx := withEventID(ctx, eventID)
-		if evt, err := ParseLineFileGeneratedEvent(payload); err == nil {
+		if strings.TrimSpace(subject) == DefaultEventSubject {
+			procErr = s.handleDefaultSubjectEvent(procCtx, payload)
+		} else {
 			var spanEnd func(error)
-			procCtx, spanEnd = s.startPipelineTrace(procCtx, subject, eventID, evt)
-			defer func() { spanEnd(procErr) }()
+			if evt, err := ParseLineFileGeneratedEvent(payload); err == nil {
+				procCtx, spanEnd = s.startPipelineTrace(procCtx, subject, eventID, evt)
+				defer func() { spanEnd(procErr) }()
+			}
+			procErr = s.handleEvent(procCtx, payload)
 		}
-		procErr = s.handleEvent(procCtx, payload)
 		if s.EventStore == nil || strings.TrimSpace(eventID) == "" {
 			return
 		}
@@ -85,6 +90,209 @@ func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject strin
 		}
 	}()
 	return nil
+}
+
+const (
+	DocProcessorModeAuto = "auto"
+	DocProcessorModeDev  = "dev"
+)
+
+func DocProcessorModeFromEnv() (string, error) {
+	return normalizeDocProcessorMode(os.Getenv("DOC_PROCESSOR_MODE"))
+}
+
+func normalizeDocProcessorMode(raw string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "" {
+		return DocProcessorModeAuto, nil
+	}
+	switch mode {
+	case DocProcessorModeAuto, DocProcessorModeDev:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid DOC_PROCESSOR_MODE %q; allowed values are %q and %q", raw, DocProcessorModeAuto, DocProcessorModeDev)
+	}
+}
+
+func (s *ControlService) docProcessorMode() (string, error) {
+	if strings.TrimSpace(s.DocProcessorMode) != "" {
+		return normalizeDocProcessorMode(s.DocProcessorMode)
+	}
+	return DocProcessorModeFromEnv()
+}
+
+func (s *ControlService) handleDefaultSubjectEvent(ctx context.Context, payload []byte) error {
+	mode, err := s.docProcessorMode()
+	if err != nil {
+		if s.Logger != nil {
+			s.Logger.Error("invalid doc processor mode", "error", err)
+		}
+		return err
+	}
+	switch mode {
+	case DocProcessorModeAuto:
+		return s.handleEvent(ctx, payload)
+	case DocProcessorModeDev:
+		return s.HandleStartDocProcessingEvent(ctx, payload)
+	default:
+		return fmt.Errorf("invalid doc processor mode %q", mode)
+	}
+}
+
+type parsedInputRecordLister interface {
+	ListParsedInputRecords(ctx context.Context) ([]DocMetadataInputRecord, error)
+}
+
+type failedDocProcessorRecordLister interface {
+	ListRecordsWithFailedDocProcessors(ctx context.Context) ([]DocMetadataInputRecord, error)
+}
+
+func (s *ControlService) HandleStartDocProcessingEvent(ctx context.Context, payload []byte) error {
+	cmd, err := ParseStartDocProcessingEvent(payload)
+	if err != nil {
+		if s.Logger != nil {
+			s.Logger.Error("doc processor failed parsing start command", "error", err)
+		}
+		return err
+	}
+	records, err := s.resolveStartDocProcessingRecords(ctx, cmd)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, rec := range records {
+		ops := append([]string(nil), cmd.DocProcessors...)
+		if len(ops) == 0 && cmd.FailedProcOnly {
+			ops = failedDocProcessorNames(rec.StatusRaw)
+		} else if cmd.FailedProcOnly {
+			ops = intersectProcessorNames(ops, failedDocProcessorNames(rec.StatusRaw))
+		}
+		if cmd.FailedProcOnly && len(ops) == 0 {
+			if s.Logger != nil {
+				s.Logger.Info("doc processor skipped record, no failed processors selected",
+					"record_id", rec.ID,
+					"requested_processors", cmd.DocProcessors,
+				)
+			}
+			continue
+		}
+		eventPayload, err := buildLineFileGeneratedPayload(rec.ID, cmd.Filename, ops)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err := s.handleEvent(ctx, eventPayload); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s *ControlService) resolveStartDocProcessingRecords(ctx context.Context, cmd StartDocProcessingEvent) ([]DocMetadataInputRecord, error) {
+	switch cmd.All {
+	case "parsed":
+		lister, ok := s.InputStore.(parsedInputRecordLister)
+		if !ok {
+			return nil, errors.New("input store does not support listing parsed records")
+		}
+		return lister.ListParsedInputRecords(ctx)
+	case "failed-procs", "with-failed-procs":
+		lister, ok := s.InputStore.(failedDocProcessorRecordLister)
+		if !ok {
+			return nil, errors.New("input store does not support listing records with failed doc processors")
+		}
+		return lister.ListRecordsWithFailedDocProcessors(ctx)
+	}
+	records := make([]DocMetadataInputRecord, 0, len(cmd.RecordIDs))
+	for _, id := range cmd.RecordIDs {
+		rec := DocMetadataInputRecord{ID: id}
+		if s.InputStore != nil {
+			loaded, err := s.InputStore.GetInputRecord(ctx, id)
+			if err != nil {
+				return nil, fmt.Errorf("load kb.inputs record %d: %w", id, err)
+			}
+			rec = loaded
+		}
+		records = append(records, rec)
+	}
+	return records, nil
+}
+
+func buildLineFileGeneratedPayload(recordID int64, filename string, operations []string) ([]byte, error) {
+	body := map[string]any{"record_id": strconv.FormatInt(recordID, 10)}
+	if strings.TrimSpace(filename) != "" {
+		body["filename"] = strings.TrimSpace(filename)
+	}
+	if len(operations) > 0 {
+		body["operation"] = operations
+	}
+	return json.Marshal(body)
+}
+
+func intersectProcessorNames(requested []string, failed []string) []string {
+	failedSet := make(map[string]struct{}, len(failed))
+	for _, name := range failed {
+		if key := canonicalOperationName(name); key != "" {
+			failedSet[key] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(requested))
+	seen := map[string]struct{}{}
+	for _, name := range requested {
+		key := canonicalOperationName(name)
+		if key == "" {
+			continue
+		}
+		if _, ok := failedSet[key]; !ok {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
+}
+
+func failedDocProcessorNames(statusRaw string) []string {
+	entries := decodeDocMetaStatus(statusRaw)
+	out := make([]string, 0, len(entries))
+	seen := map[string]struct{}{}
+	for _, entry := range entries {
+		if statusValue(entry) != "failed" {
+			continue
+		}
+		op := canonicalOperationName(asString(entry["operation"]))
+		if !isDocProcessorStatusOperation(op) {
+			continue
+		}
+		if _, ok := seen[op]; ok {
+			continue
+		}
+		seen[op] = struct{}{}
+		out = append(out, op)
+	}
+	return out
+}
+
+func statusValue(entry map[string]any) string {
+	return strings.ToLower(strings.TrimSpace(firstNonEmptyTrimmed(
+		asString(entry["proc_status"]),
+		asString(entry["proc-status"]),
+		asString(entry["status"]),
+	)))
+}
+
+func isDocProcessorStatusOperation(op string) bool {
+	switch canonicalOperationName(op) {
+	case "", "parsed", "parsing", "converted", "converting", "doc_processing", "doc_processor":
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *ControlService) startPipelineTrace(ctx context.Context, subject string, eventID string, evt LineFileGeneratedEvent) (context.Context, func(error)) {

@@ -11,7 +11,7 @@
 	let subjectOptions = $state<string[]>([]);
 	let subjectsLoading = $state(false);
 	let subjectsError = $state('');
-	let payload = $state('{"record_id":123,"type":"pdf","status":"success","force":true}');
+	let payload = $state('{"record_ids":[123],"doc-processors":["extract_metrics"],"failed-proc-only":true}');
 	let loading = $state(false);
 	let error = $state('');
 	let success = $state('');
@@ -25,7 +25,7 @@
 	let accent = $derived(darkMode ? '#818CF8' : '#6366F1');
 	let danger = $derived(darkMode ? '#F87171' : '#DC2626');
 	let ok = $derived(darkMode ? '#34D399' : '#059669');
-	const requiredPayloadSubjects = new Set(['kb.pdf.parsed', 'kb.pdf.staged']);
+	const requiredPayloadSubjects = new Set(['kb.pdf.parsed', 'kb.pdf.staged', 'kb.pdf.start-doc-processing']);
 
 	function validatePayloadForSubject(selectedSubject: string, rawPayload: string): string | null {
 		if (!requiredPayloadSubjects.has(selectedSubject)) {
@@ -40,6 +40,18 @@
 			parsed = JSON.parse(body) as Record<string, unknown>;
 		} catch {
 			return `Payload must be valid JSON for subject ${selectedSubject}`;
+		}
+		if (selectedSubject === 'kb.pdf.start-doc-processing') {
+			const hasAll = typeof parsed.all === 'string' && parsed.all.trim() !== '';
+			const hasRecordIDs = Array.isArray(parsed.record_ids) && parsed.record_ids.length > 0;
+			const hasRecordID = parsed.record_id != null;
+			if (!hasAll && !hasRecordIDs && !hasRecordID) {
+				return `Payload field 'all', 'record_ids', or 'record_id' is required for subject ${selectedSubject}`;
+			}
+			if (hasAll && !['parsed', 'failed-procs', 'with-failed-procs'].includes(String(parsed.all).trim())) {
+				return `Payload field 'all' must be parsed, failed-procs, or with-failed-procs`;
+			}
+			return null;
 		}
 		for (const key of ['record_id', 'type', 'status']) {
 			if (!(key in parsed) || parsed[key] == null) {
@@ -69,8 +81,9 @@
 			if (!res.ok || !data.ok) {
 				throw new Error(data.message ?? `Failed to load subjects (${res.status})`);
 			}
-			const next = Array.isArray(data.subjects)
-				? data.subjects
+			const rawSubjects: unknown = data.subjects;
+			const next = Array.isArray(rawSubjects)
+				? rawSubjects
 						.filter(
 							(v: unknown): v is { subject?: string; is_active?: boolean } =>
 								typeof v === 'object' && v !== null

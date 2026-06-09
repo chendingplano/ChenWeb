@@ -140,7 +140,7 @@ func (s *Service) Run(ctx context.Context, sub Subscriber, subject string, durab
 
 func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 	start := s.Now()
-	var lineFilePath string
+	var lineFilePaths []string
 	var procErr error
 	defer func() {
 		status := "success"
@@ -150,7 +150,7 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 		s.Logger.Info("finished processing converter record",
 			"record_id", req.RecordID,
 			"status", status,
-			"line_file", lineFilePath,
+			"line_files", lineFilePaths,
 			"duration_ms", time.Since(start).Milliseconds(),
 		)
 	}()
@@ -169,7 +169,7 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 		return nil
 	}
 
-	lineFilePath, procErr = s.convert(ctx, req, rec)
+	lineFilePaths, procErr = s.convert(ctx, rec)
 
 	durationMs := time.Since(start).Milliseconds()
 	updatedStatus, statusErr := appendConvertedStatus(rec.StatusRaw, start, durationMs, procErr)
@@ -187,56 +187,102 @@ func (s *Service) HandleRequest(ctx context.Context, req ConvertRequest) error {
 		procErr = errors.Join(procErr, fmt.Errorf("(MID_26041106) update record status: %w", err))
 		return procErr
 	}
-	if emitErr := s.emitLineFileGeneratedEvent(ctx, req, lineFilePath, procErr); emitErr != nil {
-		procErr = errors.Join(procErr, emitErr)
-		return procErr
+	for _, lineFilePath := range lineFilePaths {
+		if emitErr := s.emitLineFileGeneratedEvent(ctx, req.RecordID, lineFilePath); emitErr != nil {
+			procErr = errors.Join(procErr, emitErr)
+		}
 	}
-
 	return procErr
 }
 
-func (s *Service) convert(_ context.Context, req ConvertRequest, rec InputRecord) (string, error) {
+type parserJSONFile struct {
+	path   string
+	parser string
+}
+
+func findParserJSONs(dir, stem string) []parserJSONFile {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	prefix := strings.ToLower(stem) + "_"
+	var out []parserJSONFile
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.EqualFold(filepath.Ext(name), ".json") {
+			continue
+		}
+		base := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+		if !strings.HasPrefix(base, prefix) {
+			continue
+		}
+		parserName := base[len(prefix):]
+		if parserName == "" {
+			continue
+		}
+		out = append(out, parserJSONFile{
+			path:   filepath.Join(dir, name),
+			parser: parserName,
+		})
+	}
+	return out
+}
+
+func convertOneParserFile(inputPath, parserName string) (string, error) {
+	switch parserName {
+	case "opendata":
+		return ConvertOpenDataFile(inputPath)
+	case "mineru":
+		return ConvertMineruFile(inputPath)
+	case "paddleocr":
+		return "", fmt.Errorf("(MID_26042601) parser_name=%q: %w", parserName, ErrParserNotImplemented)
+	case "docline":
+		return "", fmt.Errorf("(MID_26042603) parser_name=%q: %w", parserName, ErrParserNotImplemented)
+	default:
+		return "", fmt.Errorf("(MID_26041110) unsupported parser_name=%q: %w", parserName, ErrUnsupportedParserName)
+	}
+}
+
+func (s *Service) convert(_ context.Context, rec InputRecord) ([]string, error) {
 	if !strings.EqualFold(strings.TrimSpace(rec.Type), "pdf") {
-		return "", fmt.Errorf("(MID_26041107) record_id=%d type=%q is not pdf", rec.ID, rec.Type)
+		return nil, fmt.Errorf("(MID_26041107) record_id=%d type=%q is not pdf", rec.ID, rec.Type)
 	}
 	if !HasParsedSuccess(rec.StatusRaw) {
-		return "", fmt.Errorf("(MID_26041108) record_id=%d: %w", rec.ID, ErrMissingParsedSuccess)
+		return nil, fmt.Errorf("(MID_26041108) record_id=%d: %w", rec.ID, ErrMissingParsedSuccess)
 	}
 
-	inputFile, err := resolveInputFile(req, rec)
-	if err != nil {
-		return "", err
+	resolvedFileName := pathutil.ResolveDataHomePath(rec.FileName)
+	recordDir := filepath.Dir(resolvedFileName)
+	stem := strings.TrimSuffix(filepath.Base(resolvedFileName), filepath.Ext(resolvedFileName))
+
+	parserFiles := findParserJSONs(recordDir, stem)
+	if len(parserFiles) == 0 {
+		return nil, fmt.Errorf("(MID_26041111) record_id=%d stem=%q dir=%q: %w",
+			rec.ID, stem, recordDir, ErrResultFileNotFound)
 	}
 
-	parser := strings.ToLower(strings.TrimSpace(rec.ParserName))
-	switch parser {
-	case "", "opendata":
-		openDataInput, err := resolveOpenDataInputFile(inputFile)
+	var outPaths []string
+	var errs []error
+	for _, pf := range parserFiles {
+		out, err := convertOneParserFile(pf.path, pf.parser)
 		if err != nil {
-			return "", err
+			errs = append(errs, err)
+			s.Logger.Warn("parser conversion failed",
+				"record_id", rec.ID, "parser", pf.parser, "error", err)
+			continue
 		}
-		out, err := ConvertOpenDataFile(openDataInput)
-		if err != nil {
-			return "", fmt.Errorf("(MID_26041109) opendata convert failed: %w", err)
-		}
-		return out, nil
-
-	case "paddleocr":
-		return "", fmt.Errorf("(MID_26042601) parser_name=%q: %w", rec.ParserName, ErrParserNotImplemented)
-
-	case "mineru":
-		out, err := ConvertMineruFile(inputFile)
-		if err != nil {
-			return "", fmt.Errorf("(MID_26042602) mineru convert failed: %w", err)
-		}
-		return out, nil
-
-	case "docline":
-		return "", fmt.Errorf("(MID_26042603) converter for parser_name=%q not supported yet: %w", rec.ParserName, ErrParserNotImplemented)
-
-	default:
-		return "", fmt.Errorf("(MID_26041110) unsupported parser_name=%q: %w", rec.ParserName, ErrUnsupportedParserName)
+		s.Logger.Info("converted parser output",
+			"record_id", rec.ID, "parser", pf.parser, "line_file", out)
+		outPaths = append(outPaths, out)
 	}
+
+	if len(outPaths) == 0 {
+		return nil, errors.Join(errs...)
+	}
+	return outPaths, errors.Join(errs...)
 }
 
 func resolveOpenDataInputFile(path string) (string, error) {
@@ -417,11 +463,8 @@ func preferredOpenDataJSONName(path string) string {
 	return strings.TrimSuffix(filepath.Base(sourcePDF), filepath.Ext(sourcePDF)) + ".json"
 }
 
-func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, req ConvertRequest, lineFilePath string, procErr error) error {
+func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64, lineFilePath string) error {
 	if s.Publisher == nil {
-		return nil
-	}
-	if procErr != nil {
 		return nil
 	}
 	subject := strings.TrimSpace(s.PublishSubject)
@@ -430,13 +473,12 @@ func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, req ConvertReq
 	}
 
 	ev := LineFileGeneratedEvent{
-		RecordID:         req.RecordID,
+		RecordID:         recordID,
 		Type:             "pdf",
+		Status:           "success",
 		FileFormat:       "txt",
-		ResultFilename:   strings.TrimSpace(req.ResultFilename),
 		LineFileFilename: strings.TrimSpace(lineFilePath),
 	}
-	ev.Status = "success"
 
 	payload, err := json.Marshal(ev)
 	if err != nil {

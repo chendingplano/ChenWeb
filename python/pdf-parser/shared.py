@@ -423,6 +423,7 @@ def record_parsed_success(
     new_entry = {
         "operation": "parsed",
         "proc-status": "success",
+        "parser_name": parser_name,
         "start_time": start_time,
         "ms-used": ms_used,
         "num_pages": num_pages,
@@ -451,12 +452,13 @@ def record_parsed_success(
 
 def record_parsed_failure(
     conn, rec_id: int, raw_status: str,
-    start_time: str, ms_used: int, error: str,
+    start_time: str, ms_used: int, error: str, parser_name: str,
 ) -> str:
     """Replace 'parsing' entry with 'parsed' failure entry."""
     new_entry = {
         "operation": "parsed",
         "proc-status": "failed",
+        "parser_name": parser_name,
         "start_time": start_time,
         "ms-used": ms_used,
         "error": error,
