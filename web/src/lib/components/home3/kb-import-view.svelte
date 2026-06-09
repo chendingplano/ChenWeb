@@ -36,6 +36,8 @@
 	let endTime = $state('');
 	let page = $state(1);
 	let pageSize = $state(50);
+	let sortField = $state('create_time');
+	let sortDir = $state<'asc' | 'desc'>('desc');
 	let total = $state(0);
 	let records = $state<KbInputRecord[]>([]);
 	let loading = $state(false);
@@ -400,6 +402,8 @@
 				endTime,
 				page,
 				pageSize,
+				orderBy: sortField,
+				orderDir: sortDir,
 				ksStoreId: knowledgeStoreState.activeStore?.id ?? null
 			});
 			records = result.results ?? [];
@@ -409,6 +413,17 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	function toggleSort(field: string) {
+		if (sortField === field) {
+			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortField = field;
+			sortDir = 'asc';
+		}
+		page = 1;
+		loadRecords();
 	}
 
 	function openSearch() {
@@ -666,21 +681,36 @@
 		style="background:{cardBg}; border:1px solid {borderColor};"
 	>
 		<div class="kb-import-table-scroll">
+			{#snippet sortHead(label: string, field: string)}
+				<th class="cell head">
+					<button
+						type="button"
+						onclick={() => toggleSort(field)}
+						title="Sort by {label}"
+						style="display:inline-flex; align-items:center; gap:4px; background:none; border:none; padding:0; margin:0; font:inherit; color:inherit; cursor:pointer; white-space:nowrap;"
+					>
+						<span>{label}</span>
+						<span style="font-size:10px; line-height:1; opacity:{sortField === field ? 1 : 0.3}; color:{sortField === field ? accent : 'inherit'};">
+							{sortField === field ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+						</span>
+					</button>
+				</th>
+			{/snippet}
 			<table style="width:100%; border-collapse:collapse; min-width:960px;">
 				<thead style="background:{pageBg};">
 					<tr>
-						<th class="cell head">ID</th>
-						<th class="cell head">Title</th>
-						<th class="cell head">Doc No</th>
-						<th class="cell head">Type</th>
-						<th class="cell head">File Name</th>
-						<th class="cell head">Parser</th>
+						{@render sortHead('ID', 'id')}
+						{@render sortHead('Title', 'title')}
+						{@render sortHead('Doc No', 'doc_no')}
+						{@render sortHead('Type', 'type')}
+						{@render sortHead('File Name', 'file_name')}
+						{@render sortHead('Parser', 'parser_name')}
 						<th class="cell head">Parsing</th>
 						<th class="cell head">Time</th>
 						<th class="cell head">Convert</th>
 						<th class="cell head">Time</th>
-						<th class="cell head">Create Time</th>
-						<th class="cell head">Modify Time</th>
+						{@render sortHead('Create Time', 'create_time')}
+						{@render sortHead('Modify Time', 'modify_time')}
 						<th class="cell head">Status</th>
 					<th class="cell head">Actions</th>
 					</tr>

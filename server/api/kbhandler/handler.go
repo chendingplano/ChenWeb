@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
@@ -76,6 +77,7 @@ type listInputsFilters struct {
 	ParserName      string
 	Operation       string
 	ProcStatus      string
+	PipelineFilter  string
 	ExcludeDocType  string
 	CreateTimeStart *time.Time
 	CreateTimeEnd   *time.Time
@@ -152,6 +154,7 @@ func ListInputs(c echo.Context) error {
 		ParserName:      c.QueryParam("parser_name"),
 		Operation:       c.QueryParam("operation"),
 		ProcStatus:      c.QueryParam("proc_status"),
+		PipelineFilter:  c.QueryParam("pipeline_filter"),
 		ExcludeDocType:  c.QueryParam("exclude_doc_type"),
 		CreateTimeStart: createStartTime,
 		CreateTimeEnd:   createEndTime,
@@ -173,6 +176,7 @@ func ListInputs(c echo.Context) error {
 		"parser_name", strings.TrimSpace(filters.ParserName),
 		"operation", strings.TrimSpace(filters.Operation),
 		"proc_status", strings.TrimSpace(filters.ProcStatus),
+		"pipeline_filter", strings.TrimSpace(filters.PipelineFilter),
 		"exclude_doc_type", strings.TrimSpace(filters.ExcludeDocType),
 		"create_start_time", formatOptionalTime(filters.CreateTimeStart),
 		"create_end_time", formatOptionalTime(filters.CreateTimeEnd),
@@ -256,7 +260,7 @@ func ListInputs(c echo.Context) error {
 		})
 	}
 
-	results, err := queryInputs(db, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL, args, pageSize, offset)
+	results, err := queryInputs(db, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL, args, pageSize, offset, c.QueryParam("order_by"), c.QueryParam("order_dir"))
 	if err != nil {
 		logger.Error("query kb input failed", "table", inputTable, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -267,6 +271,35 @@ func ListInputs(c echo.Context) error {
 
 	if results == nil {
 		results = []inputRecord{}
+	}
+
+	// Auto-heal stuck pipelines: doc_processing is "running" with a named
+	// processor, but all direct processor entries are final — the pipeline
+	// coordinator deferred finalization never ran (typically a Phase C crash).
+	if strings.EqualFold(strings.TrimSpace(filters.Operation), "doc_processing") &&
+		strings.EqualFold(strings.TrimSpace(filters.ProcStatus), "running") {
+		store := docprocessing.StopRequestSQLStore{DB: db}
+		kept := make([]inputRecord, 0, len(results))
+		fixedCount := 0
+		for _, rec := range results {
+			stuck, fixErr := store.FixStuckPipeline(c.Request().Context(), rec.ID)
+			if fixErr != nil {
+				logger.Warn("stuck pipeline check failed", "record_id", rec.ID, "error", fixErr)
+				kept = append(kept, rec)
+				continue
+			}
+			if stuck {
+				logger.Info("auto-fixed stuck pipeline", "record_id", rec.ID)
+				fixedCount++
+				continue
+			}
+			kept = append(kept, rec)
+		}
+		results = kept
+		total -= int64(fixedCount)
+		if total < 0 {
+			total = 0
+		}
 	}
 
 	logger.Info("list kb inputs result",
@@ -328,7 +361,37 @@ func queryTotalCount(db *sql.DB, inputTable, whereSQL string, args []any) (int64
 	return total, nil
 }
 
-func queryInputs(db *sql.DB, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL string, args []any, limit, offset int) ([]inputRecord, error) {
+// resolveOrderClause maps a client-supplied order_by/order_dir pair to a safe
+// SQL ORDER BY clause. Only whitelisted columns are sortable; anything else
+// falls back to the default create_time ordering. A secondary sort on i.id
+// keeps results deterministic across pages.
+func resolveOrderClause(orderBy, orderDir, parserNameColumnExpr string) string {
+	columns := map[string]string{
+		"id":          "i.id",
+		"title":       "i.title",
+		"doc_no":      "i.doc_no",
+		"type":        "i.type",
+		"file_name":   "i.file_name",
+		"parser_name": parserNameColumnExpr,
+		"create_time": "i.create_time",
+		"modify_time": "i.modify_time",
+	}
+
+	expr, ok := columns[strings.ToLower(strings.TrimSpace(orderBy))]
+	if !ok {
+		expr = "i.create_time"
+		orderDir = "desc"
+	}
+
+	dir := "DESC"
+	if strings.EqualFold(strings.TrimSpace(orderDir), "asc") {
+		dir = "ASC"
+	}
+
+	return fmt.Sprintf("ORDER BY %s %s NULLS LAST, i.id %s", expr, dir, dir)
+}
+
+func queryInputs(db *sql.DB, inputTable, nameColumnExpr, parserNameColumnExpr, whereSQL string, args []any, limit, offset int, orderBy, orderDir string) ([]inputRecord, error) {
 	query := fmt.Sprintf(`
 SELECT
     i.id,
@@ -362,7 +425,8 @@ FROM %s i
 	}
 	limitPos := len(args) + 1
 	offsetPos := len(args) + 2
-	query += fmt.Sprintf(" ORDER BY i.create_time DESC LIMIT $%d OFFSET $%d", limitPos, offsetPos)
+	orderClause := resolveOrderClause(orderBy, orderDir, parserNameColumnExpr)
+	query += fmt.Sprintf(" %s LIMIT $%d OFFSET $%d", orderClause, limitPos, offsetPos)
 	args = append(args, limit, offset)
 
 	rows, err := db.Query(query, args...)
@@ -607,21 +671,61 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	if parserName := strings.TrimSpace(filters.ParserName); parserName != "" {
 		whereParts = append(whereParts, fmt.Sprintf("%s ILIKE %s", parserNameExpr, nextArg("%"+parserName+"%")))
 	}
-	operation := strings.TrimSpace(filters.Operation)
-	procStatus := strings.TrimSpace(filters.ProcStatus)
-	if operation != "" || procStatus != "" {
-		statusParts := make([]string, 0, 2)
-		if operation != "" {
-			statusParts = append(statusParts, fmt.Sprintf("LOWER(COALESCE(st->>'operation', '')) = LOWER(%s)", nextArg(operation)))
+	pipelineFilter := strings.TrimSpace(strings.ToLower(filters.PipelineFilter))
+	switch pipelineFilter {
+	case "", "all":
+		operation := strings.TrimSpace(filters.Operation)
+		procStatus := strings.TrimSpace(filters.ProcStatus)
+		if operation != "" || procStatus != "" {
+			statusParts := make([]string, 0, 2)
+			if operation != "" {
+				statusParts = append(statusParts, fmt.Sprintf("LOWER(COALESCE(st->>'operation', '')) = LOWER(%s)", nextArg(operation)))
+			}
+			if procStatus != "" {
+				statusParts = append(statusParts, fmt.Sprintf("LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER(%s)", nextArg(procStatus)))
+			}
+			whereParts = append(whereParts, fmt.Sprintf(`EXISTS (
+				SELECT 1
+				FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+				WHERE %s
+			)`, strings.Join(statusParts, " AND ")))
 		}
-		if procStatus != "" {
-			statusParts = append(statusParts, fmt.Sprintf("LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER(%s)", nextArg(procStatus)))
-		}
-		whereParts = append(whereParts, fmt.Sprintf(`EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE %s
-		)`, strings.Join(statusParts, " AND ")))
+	case "parsed_success":
+		whereParts = append(whereParts, `EXISTS (
+			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			WHERE LOWER(COALESCE(st->>'operation', '')) = 'parsed'
+			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = 'success'
+		)`)
+	case "parse_failed":
+		whereParts = append(whereParts, `EXISTS (
+			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			WHERE LOWER(COALESCE(st->>'operation', '')) = 'parsed'
+			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) <> 'success'
+		)`)
+	case "parsed_not_started":
+		whereParts = append(whereParts, `(EXISTS (
+			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			WHERE LOWER(COALESCE(st->>'operation', '')) = 'parsed'
+			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = 'success'
+		) AND NOT EXISTS (
+			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			WHERE LOWER(COALESCE(st->>'operation', '')) = 'doc_processing'
+		))`)
+	case "all_processors_success":
+		whereParts = append(whereParts, `(EXISTS (
+			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			WHERE LOWER(COALESCE(st->>'operation', '')) = 'doc_processing'
+		) AND NOT EXISTS (
+			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			WHERE LOWER(COALESCE(st->>'operation', '')) = 'doc_processing'
+			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) <> 'success'
+		))`)
+	case "failed_processors":
+		whereParts = append(whereParts, `EXISTS (
+			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			WHERE LOWER(COALESCE(st->>'operation', '')) = 'doc_processing'
+			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = 'failed'
+		)`)
 	}
 
 	if filters.CreateTimeStart != nil {

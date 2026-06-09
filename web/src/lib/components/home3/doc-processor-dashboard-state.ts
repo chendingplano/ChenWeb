@@ -119,13 +119,14 @@ export function computeStages(record: PipelineRecord): StageInfo[] {
 	function stageFor(stageId: string, operations: string[]): { status: StageStatus; entry?: StatusEntry } {
 		const expectedNames = new Set([stageId, ...operations].map(normalizeOperationName));
 		let matchedStageEntry: StatusEntry | undefined;
+		let docProcessingEntry: StatusEntry | undefined;
 
 		for (const entry of entries) {
 			const operationName = normalizeOperationName(entry.operation);
 			if (operationName === 'doc_processing') {
 				const processorName = normalizeOperationName(entry.doc_processor_name ?? entry['doc-processor-name']);
 				if (expectedNames.has(processorName)) {
-					return { status: resolveEntryStatus(entry), entry };
+					docProcessingEntry = entry;
 				}
 				continue;
 			}
@@ -134,8 +135,14 @@ export function computeStages(record: PipelineRecord): StageInfo[] {
 			}
 		}
 
+		// Direct processor entry takes precedence: it is written after the processor
+		// completes and remains authoritative even when doc_processing still names
+		// this stage (e.g. after a crash before the pipeline coordinator finalized).
 		if (matchedStageEntry) {
 			return { status: resolveEntryStatus(matchedStageEntry), entry: matchedStageEntry };
+		}
+		if (docProcessingEntry) {
+			return { status: resolveEntryStatus(docProcessingEntry), entry: docProcessingEntry };
 		}
 		return { status: 'pending' };
 	}

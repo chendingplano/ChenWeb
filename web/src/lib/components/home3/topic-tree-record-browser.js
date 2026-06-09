@@ -82,11 +82,14 @@ export function buildTopicTreeListParams({
 		title: normalizedFilters.searchTitle?.trim() || '',
 		docNo: normalizedFilters.searchDocNo?.trim() || '',
 		parserName: normalizedFilters.searchParserName?.trim() || '',
-		operation: normalizedFilters.searchOperation?.trim() || '',
+		pipelineFilter: normalizedFilters.searchOperation?.trim() || '',
+		operation: '',
 		procStatus:
-			normalizedFilters.searchProcStatus?.trim() && normalizedFilters.searchProcStatus !== 'all'
-				? normalizedFilters.searchProcStatus.trim()
-				: '',
+			normalizedFilters.searchOperation?.trim()
+				? ''
+				: normalizedFilters.searchProcStatus?.trim() && normalizedFilters.searchProcStatus !== 'all'
+					? normalizedFilters.searchProcStatus.trim()
+					: '',
 		modifyStartTime: normalizedFilters.searchModifyStart?.trim() || '',
 		modifyEndTime: normalizedFilters.searchModifyEnd?.trim() || ''
 	};

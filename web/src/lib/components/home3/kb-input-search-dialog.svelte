@@ -18,10 +18,20 @@
 	} = $props();
 
 	const docTypeOptions = ['all', 'pdf', 'doc', 'excel', 'ppt', 'text', 'markdown'];
+	const parserNameOptions = ['', 'mineru', 'opendata', 'paddleocr', 'docling'];
 	const procStatusOptions = ['all', 'success', 'fail'];
+	const operationOptions = [
+		{ value: '', label: 'All' },
+		{ value: 'parsed_success', label: 'Parsed' },
+		{ value: 'parse_failed', label: 'Parse Failed' },
+		{ value: 'parsed_not_started', label: 'Parsed Not Started' },
+		{ value: 'all_processors_success', label: 'All Processors Success' },
+		{ value: 'failed_processors', label: 'Failed Processors' }
+	];
 
 	let searchLoading = $state(false);
 	let searchResults = $state<KbInputRecord[]>([]);
+	let searchTotal = $state<number | null>(null);
 	let searchSelected = $state<Set<number>>(new Set());
 	let searchError = $state('');
 	let searchRecordId = $state('');
@@ -50,6 +60,7 @@
 	function applyFilters(filters: RecordBrowserFilters) {
 		searchSelected = new Set();
 		searchResults = [];
+		searchTotal = null;
 		searchError = '';
 		searchRecordId = filters.searchRecordId ?? '';
 		searchTitle = filters.searchTitle ?? '';
@@ -85,6 +96,7 @@
 	async function runSearch() {
 		searchLoading = true;
 		searchError = '';
+		searchTotal = null;
 		searchSelected = new Set();
 		try {
 			const res = await listKbInputs({
@@ -95,8 +107,9 @@
 				docNo: searchDocNo,
 				fileName: searchFileName,
 				parserName: searchParserName,
-				operation: searchOperation,
-				procStatus: searchProcStatus === 'all' ? '' : searchProcStatus,
+				pipelineFilter: searchOperation || undefined,
+				operation: '',
+				procStatus: searchOperation ? '' : (searchProcStatus === 'all' ? '' : searchProcStatus),
 				startTime: searchCreateStart,
 				endTime: searchCreateEnd,
 				modifyStartTime: searchModifyStart,
@@ -106,6 +119,7 @@
 				ksStoreId: scopeToActiveStore ? (knowledgeStoreState.activeStoreId ?? undefined) : undefined
 			});
 			searchResults = res.results ?? [];
+			searchTotal = res.total ?? searchResults.length;
 		} catch (err) {
 			searchError = err instanceof Error ? err.message : 'Search failed';
 		} finally {
@@ -147,16 +161,8 @@
 
 	function searchStatusText(record: KbInputRecord): { operation: string; procStatus: string } {
 		const items = record.status ?? [];
-		const desiredOperation = searchOperation.trim().toLowerCase();
-		const matched =
-			desiredOperation !== ''
-				? [...items]
-						.reverse()
-						.find((item) => (item?.operation ?? '').trim().toLowerCase() === desiredOperation)
-				: [...items].reverse().find((item) => item != null);
-
+		const matched = [...items].reverse().find((item) => item != null);
 		if (!matched) return { operation: '—', procStatus: 'pending' };
-
 		return {
 			operation: matched.operation?.trim() || '—',
 			procStatus:
@@ -258,24 +264,30 @@
 						<div class="dialog-grid dialog-grid-time">
 							<label class="field dialog-field">
 								<span class="field-label">Parser name</span>
-								<input type="text" bind:value={searchParserName} placeholder="mineru, pdf-parser…" onkeydown={(e) => {
-									if (e.key === 'Enter') void runSearch();
-								}} />
-							</label>
-							<label class="field dialog-field">
-								<span class="field-label">Operation</span>
-								<input type="text" bind:value={searchOperation} placeholder="extract_metadata" onkeydown={(e) => {
-									if (e.key === 'Enter') void runSearch();
-								}} />
-							</label>
-							<label class="field dialog-field">
-								<span class="field-label">Proc status</span>
-								<select bind:value={searchProcStatus}>
-									{#each procStatusOptions as option}
-										<option value={option}>{option}</option>
+								<select bind:value={searchParserName}>
+									{#each parserNameOptions as opt}
+										<option value={opt}>{opt === '' ? 'All' : opt}</option>
 									{/each}
 								</select>
 							</label>
+							<label class="field dialog-field">
+								<span class="field-label">Operation</span>
+								<select bind:value={searchOperation} onchange={() => { if (searchOperation) searchProcStatus = 'all'; }}>
+									{#each operationOptions as opt}
+										<option value={opt.value}>{opt.label}</option>
+									{/each}
+								</select>
+							</label>
+							{#if !searchOperation}
+								<label class="field dialog-field">
+									<span class="field-label">Proc status</span>
+									<select bind:value={searchProcStatus}>
+										{#each procStatusOptions as option}
+											<option value={option}>{option}</option>
+										{/each}
+									</select>
+								</label>
+							{/if}
 						</div>
 					</div>
 
@@ -312,6 +324,18 @@
 
 				{#if searchError}
 					<div class="error dialog-error">{searchError}</div>
+				{/if}
+
+				{#if searchTotal !== null && !searchLoading}
+					<div class="results-count">
+						{#if searchTotal === 0}
+							No records matched.
+						{:else if searchResults.length < searchTotal}
+							Showing <strong>{searchResults.length}</strong> of <strong>{searchTotal}</strong> records
+						{:else}
+							<strong>{searchTotal}</strong> {searchTotal === 1 ? 'record' : 'records'} matched
+						{/if}
+					</div>
 				{/if}
 
 				<div class="dialog-results">
@@ -417,14 +441,14 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 1.5rem;
+		padding: 0.75rem;
 		background: rgba(2, 6, 23, 0.68);
 		backdrop-filter: blur(10px);
 	}
 
 	.dialog {
-		width: min(1180px, 100%);
-		max-height: min(94vh, 1320px);
+		width: min(1440px, 100%);
+		max-height: min(96vh, 1320px);
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -643,6 +667,22 @@
 	.dialog-error {
 		margin: 0 32px 16px;
 		color: #fca5a5;
+	}
+
+	.results-count {
+		padding: 6px 28px;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		letter-spacing: 0.08em;
+		color: #9ca3af;
+		background: #111827;
+		border-top: 1px solid #1f2530;
+		flex: 0 0 auto;
+	}
+
+	.results-count strong {
+		color: #d4a24c;
+		font-weight: 600;
 	}
 
 	.dialog-results {

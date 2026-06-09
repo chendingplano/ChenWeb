@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
+	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import XCircleIcon from '@lucide/svelte/icons/x-circle';
 	import ClockIcon from '@lucide/svelte/icons/clock';
@@ -119,6 +120,25 @@
 		} finally {
 			stoppingIds = new Set([...stoppingIds].filter((id) => id !== record.id));
 		}
+	}
+
+	// ── Detail dialog state ────────────────────────────────────────────────
+
+	let detailRecord = $state<KbInputRecord | null>(null);
+	let detailRawJsonEl = $state<HTMLElement | null>(null);
+	let detailHasOverflow = $state(false);
+
+	async function openDetail(record: KbInputRecord) {
+		detailRecord = record;
+		detailHasOverflow = false;
+		await tick();
+		if (detailRawJsonEl) {
+			detailHasOverflow = detailRawJsonEl.scrollHeight > detailRawJsonEl.clientHeight;
+		}
+	}
+
+	function closeDetail() {
+		detailRecord = null;
 	}
 
 	// ── Restart dialog state ───────────────────────────────────────────────
@@ -679,6 +699,18 @@
 							</div>
 							<div class="flex flex-shrink-0 items-center gap-2">
 								<span style="font-size:11px; color:{textMuted}; font-family:monospace;">{formatTime(record.modify_time)}</span>
+								<!-- Detail button -->
+								<button
+									onclick={() => openDetail(record)}
+									title="View status details"
+									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:pointer;"
+									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; (e.currentTarget as HTMLElement).style.color = accent; }}
+									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
+								>
+									<FileTextIcon class="h-3 w-3" />
+									Detail
+								</button>
 								<!-- Stop button -->
 								<button
 									onclick={() => doStop(record)}
@@ -1329,6 +1361,92 @@
 					<RefreshCwIcon class="h-4 w-4" />
 					{restarting ? 'Restarting…' : 'Restart'}
 				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- ════════════════════════════════════════════════════════════
+     Detail Dialog
+══════════════════════════════════════════════════════════════ -->
+{#if detailRecord}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center"
+		style="background:rgba(0,0,0,0.65); backdrop-filter:blur(6px);"
+		onmousedown={(e) => { if (e.target === e.currentTarget) closeDetail(); }}
+	>
+		<div
+			class="mx-4 w-full max-w-4xl rounded-2xl overflow-hidden"
+			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.45); max-height:90vh; display:flex; flex-direction:column;"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			tabindex="0"
+		>
+			<!-- Header -->
+			<div class="flex items-center justify-between px-5 py-3.5 flex-shrink-0" style="border-bottom:1px solid {borderColor};">
+				<div class="flex items-center gap-2">
+					<span style="font-family:monospace; font-size:11px; font-weight:600; color:{accent}; background:{accentTint}; border:1px solid {accent}30; border-radius:6px; padding:1px 7px;">#{detailRecord.id}</span>
+					<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin:0;">{recordTitle(detailRecord)} — Status</h3>
+				</div>
+				<button
+					onclick={closeDetail}
+					style="height:30px; padding:0 14px; border:1px solid {borderColor}; border-radius:8px; background:{surface2}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+				>Close</button>
+			</div>
+
+			<!-- Body -->
+			<div class="grid gap-4 p-5 overflow-auto flex-1" style="grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items:start;">
+				<!-- Readable -->
+				<div class="rounded-xl p-3" style="border:1px solid {borderColor}; background:{surface2};">
+					<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">Readable</div>
+					{#if !detailRecord.status?.length}
+						<div style="font-size:12px; color:{textMuted};">No status entries.</div>
+					{:else}
+						<div class="space-y-2">
+							{#each detailRecord.status as item, idx}
+								{@const ps = (item.proc_status ?? item['proc-status'] ?? item.status ?? '').toLowerCase()}
+								<div class="rounded-lg p-2.5" style="border:1px solid {borderColor}; background:{cardBg};">
+									<div style="font-size:11px; font-weight:600; color:{textSecondary}; margin-bottom:7px; text-transform:uppercase; letter-spacing:0.08em;">
+										Entry #{idx + 1}
+									</div>
+									<div class="grid gap-y-1 gap-x-3" style="grid-template-columns: 110px 1fr;">
+										<span style="font-size:11px; color:{textMuted};">operation</span>
+										<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.operation ?? '—'}</span>
+										<span style="font-size:11px; color:{textMuted};">proc_status</span>
+										<span style="font-size:12px; font-family:monospace; font-weight:600;
+											color:{ps === 'success' ? colorSuccess : ps === 'failed' || ps === 'fail' ? colorError : textPrimary};">
+											{item.proc_status ?? item['proc-status'] ?? '—'}
+										</span>
+										<span style="font-size:11px; color:{textMuted};">start_time</span>
+										<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.start_time ?? '—'}</span>
+										{#if item.doc_processor_name}
+											<span style="font-size:11px; color:{textMuted};">processor</span>
+											<span style="font-size:12px; color:{textPrimary}; font-family:monospace;">{item.doc_processor_name}</span>
+										{/if}
+										{#if item.error}
+											<span style="font-size:11px; color:{textMuted};">error</span>
+											<span style="font-size:12px; color:{colorError}; word-break:break-word;">{item.error}</span>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
+				<!-- Raw JSON -->
+				<div class="rounded-xl p-3 flex flex-col" style="border:1px solid {borderColor}; background:{surface2}; min-height:0;">
+					<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px;">Raw JSON</div>
+					<pre
+						bind:this={detailRawJsonEl}
+						style="margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; color:{textPrimary}; overflow-y:{detailHasOverflow ? 'auto' : 'visible'}; max-height:420px;"
+					>{JSON.stringify(detailRecord.status ?? [], null, 2)}</pre>
+				</div>
 			</div>
 		</div>
 	</div>
