@@ -52,8 +52,12 @@
 	// Populated once on mount from GET /api/v1/kb/config.
 	let requiredProcessors = $state<string[]>(ALL_CONFIGURABLE_PROCESSOR_IDS);
 
-	// Only show processors present in requiredProcessors (from config).
-	let CONFIGURABLE_PROCESSORS = $derived(PIPELINE_STAGES.filter(s => requiredProcessors.includes(s.id)));
+	let selectableProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
+
+	// Show Phase A processors plus processors present in requiredProcessors (from config).
+	let CONFIGURABLE_PROCESSORS = $derived(selectableProcessorIds
+		.map(id => PIPELINE_STAGES.find(s => s.id === id))
+		.filter(s => s !== undefined));
 
 	// configuredProcessorIds: mandatory + required — the set isActiveRecord checks.
 	let configuredProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
@@ -89,7 +93,7 @@
 	let searchDialogOpen = $state(false);
 	let selectedRecords = $state<KbInputRecord[]>([]);
 	let processors = $state<Record<string, boolean>>(
-		Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, true]))
+		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
 	);
 	let parseFileChecked = $state(false);
 	let convertChecked = $state(false);
@@ -121,7 +125,7 @@
 
 	let restartTarget = $state<KbInputRecord | null>(null);
 	let restartProcessors = $state<Record<string, boolean>>(
-		Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, true]))
+		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
 	);
 	let restartParseFile = $state(false);
 	let restartConvert = $state(false);
@@ -271,8 +275,8 @@
 			await publishEvent('kb.pdf.parsed', { record_id: String(record.id), type: 'pdf', status: 'success', force: true });
 			return;
 		}
-		const chosen = requiredProcessors.filter((p) => procs[p]);
-		const allChosen = chosen.length === requiredProcessors.length;
+		const chosen = selectableProcessorIds.filter((p) => procs[p]);
+		const allChosen = chosen.length === selectableProcessorIds.length;
 		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
 		if (!allChosen) payload.operation = chosen;
 		await publishEvent('kb.line-file-generated', payload);
@@ -335,15 +339,15 @@
 	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
 		const unfinishedStageIds = new Set(
 			computeStages(record)
-				.filter((stage) => stage.status !== 'success' && ALL_CONFIGURABLE_PROCESSOR_IDS.includes(stage.id))
+				.filter((stage) => stage.status !== 'success' && ALL_PROCESSOR_IDS.includes(stage.id))
 				.map((stage) => stage.id)
 		);
 
 		if (!unfinishedStageIds.size) {
-			return Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, requiredProcessors.includes(p)]));
+			return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, selectableProcessorIds.includes(p)]));
 		}
 
-		return Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, unfinishedStageIds.has(p)]));
+		return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, unfinishedStageIds.has(p)]));
 	}
 
 	function getFailedSteps(record: KbInputRecord): string[] {
@@ -398,25 +402,25 @@
 	}
 
 	function allProcessorsSelected(): boolean {
-		return requiredProcessors.every((p) => processors[p]);
+		return selectableProcessorIds.every((p) => processors[p]);
 	}
 
 	function someProcessorsSelected(): boolean {
-		return parseFileChecked || convertChecked || requiredProcessors.some((p) => processors[p]);
+		return parseFileChecked || convertChecked || selectableProcessorIds.some((p) => processors[p]);
 	}
 
 	function toggleAll() {
 		const next = !allProcessorsSelected();
-		processors = Object.fromEntries(requiredProcessors.map((p) => [p, next]));
+		processors = Object.fromEntries(selectableProcessorIds.map((p) => [p, next]));
 	}
 
 	function allRestartSelected(): boolean {
-		return requiredProcessors.every((p) => restartProcessors[p]);
+		return selectableProcessorIds.every((p) => restartProcessors[p]);
 	}
 
 	function toggleAllRestart() {
 		const next = !allRestartSelected();
-		restartProcessors = Object.fromEntries(requiredProcessors.map((p) => [p, next]));
+		restartProcessors = Object.fromEntries(selectableProcessorIds.map((p) => [p, next]));
 	}
 
 	function showTooltip(
@@ -484,7 +488,7 @@
 			const req = cfg.required_processors ?? [];
 			requiredProcessors = req;
 			activePipelineLimit = Math.max(1, cfg.max_doc_process_pipelines ?? 10);
-			processors = Object.fromEntries(ALL_CONFIGURABLE_PROCESSOR_IDS.map((p) => [p, req.includes(p)]));
+			processors = Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, MANDATORY_PROCESSOR_IDS.includes(p) || req.includes(p)]));
 		}).catch(() => {
 			// Keep defaults on failure
 		});
@@ -1154,23 +1158,21 @@
 					{#if parseFileChecked}
 						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">parse_file</span>
 					{/if}
-					{#if convertChecked && !parseFileChecked}
+					{#if convertChecked}
 						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">convert_parse_result</span>
 					{/if}
-					{#if !parseFileChecked && !convertChecked}
-						{#each MANDATORY_DISPLAY_STAGES as stage}
-							<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">{stage.id}</span>
-						{/each}
-						{#each requiredProcessors.filter(p => processors[p]) as p}
-							<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{p}</span>
-						{/each}
-					{/if}
+					{#each MANDATORY_DISPLAY_STAGES as stage}
+						<span style="font-family:monospace; background:{surface3}; border:1px solid {borderColor}; padding:1px 8px; border-radius:999px; font-size:11px; color:{colorSuccess};">{stage.id}</span>
+					{/each}
+					{#each selectableProcessorIds.filter(p => processors[p]) as p}
+						<span style="font-family:monospace; background:{accentTint}; border:1px solid {accent}30; padding:1px 8px; border-radius:999px; font-size:11px; color:{accent};">{p}</span>
+					{/each}
 				</div>
 				{#if parseFileChecked}
 					<div style="margin-top:6px; font-size:11px; color:{textMuted};">Triggers parse → convert → all doc processors (auto chain).</div>
 				{:else if convertChecked}
 					<div style="margin-top:6px; font-size:11px; color:{textMuted};">Triggers convert → all doc processors (auto chain).</div>
-				{:else if requiredProcessors.every(p => processors[p])}
+				{:else if selectableProcessorIds.every(p => processors[p])}
 					<div style="margin-top:6px; font-size:11px; color:{textMuted};">All processors selected — omitting operation filter.</div>
 				{/if}
 			</div>
@@ -1312,11 +1314,11 @@
 				>Cancel</button>
 				<button
 					onclick={confirmRestart}
-					disabled={restarting || !ALL_PROCESSOR_IDS.some(p => restartProcessors[p])}
+					disabled={restarting || !(restartParseFile || restartConvert || selectableProcessorIds.some(p => restartProcessors[p]))}
 					class="flex items-center gap-2 rounded-lg px-4 py-2"
 					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none;
 					       cursor:{restarting ? 'not-allowed' : 'pointer'};
-					       opacity:{restarting || !ALL_PROCESSOR_IDS.some(p => restartProcessors[p]) ? '0.6' : '1'};"
+					       opacity:{restarting || !(restartParseFile || restartConvert || selectableProcessorIds.some(p => restartProcessors[p])) ? '0.6' : '1'};"
 					onmouseenter={(e) => {
 						if (!restarting) (e.currentTarget as HTMLElement).style.opacity = '0.88';
 					}}

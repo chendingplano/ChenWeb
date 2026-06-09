@@ -4,14 +4,23 @@ import assert from 'node:assert/strict';
 import {
 	computeStages,
 	isActiveRecord,
+	ALL_PROCESSOR_IDS,
 	MANDATORY_PROCESSOR_IDS,
+	MANDATORY_DISPLAY_STAGES,
 	visibleStages,
 	type StatusEntry
-} from './doc-processor-dashboard-state.ts';
+} from './doc-processor-dashboard-state';
 
 function makeRecord(status: StatusEntry[]) {
 	return { status };
 }
+
+test('only blocking is locked in the processor selection UI', () => {
+	assert.deepEqual(MANDATORY_DISPLAY_STAGES.map((stage) => stage.id), ['blocking']);
+	for (const processorID of ['static_analyzer', 'chunking', 'extract_doc_metadata']) {
+		assert.equal(ALL_PROCESSOR_IDS.includes(processorID), true);
+	}
+});
 
 test('scene blocks stage treats extract_scene_blocks success as finished', () => {
 	const record = makeRecord([

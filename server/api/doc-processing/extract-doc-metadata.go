@@ -732,7 +732,22 @@ func copyExtractedDocMetadata(parsed map[string]any) map[string]any {
 		}
 		out[key] = v
 	}
+	normalizeDocMetadataLanguage(out)
 	return out
+}
+
+func normalizeDocMetadataLanguage(metadata map[string]any) {
+	if len(metadata) == 0 {
+		return
+	}
+	if lang := ApiUtils.NormalizeLang(asString(metadata["language"])); lang != "" {
+		metadata["language"] = lang
+	}
+	if nested, ok := metadata["metadata"].(map[string]any); ok {
+		if lang := ApiUtils.NormalizeLang(asString(nested["language"])); lang != "" {
+			nested["language"] = lang
+		}
+	}
 }
 
 const defaultDocMetaPrompt = `You extract document metadata from line-based document text.

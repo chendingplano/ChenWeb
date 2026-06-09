@@ -78,17 +78,14 @@ export const PIPELINE_STAGES = [
 // All doc-processor-managed stages (indices 3+). Used to map status entries to UI stages.
 export const DOC_PROCESSOR_STAGES = PIPELINE_STAGES.slice(3);
 
-// Always executed regardless of config. "blocking" is excluded because it is rendered
-// as a separate always-on row in the UI and never appears in operation lists.
+// Phase A processors that can be explicitly requested. The blocking processor
+// always runs before these and never appears in operation lists.
 export const MANDATORY_PROCESSOR_IDS: string[] = ['chunking', 'extract_doc_metadata', 'static_analyzer'];
 
-// Ordered list for the "Processors to run" checkbox UI (mandatory section).
+// Ordered list for the "Processors to run" locked section.
 // Does not include parse_file / convert_parse_result — those are pre-processor optionals.
 export const MANDATORY_DISPLAY_STAGES: { id: string; label: string }[] = [
 	{ id: 'blocking', label: 'Blocking' },
-	{ id: 'chunking', label: 'Chunking' },
-	{ id: 'extract_doc_metadata', label: 'Extract Doc Metadata' },
-	{ id: 'static_analyzer', label: 'Doc Structure Analyzer' },
 ];
 
 // Configurable via [doc-processing].required_processors in config.toml.

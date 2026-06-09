@@ -282,6 +282,9 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 	if st.updateReq.ErrorMsg != nil {
 		t.Fatalf("unexpected error msg: %v", *st.updateReq.ErrorMsg)
 	}
+	if got := asString(st.updateReq.DocMetadata["language"]); got != "zh" {
+		t.Fatalf("doc metadata language=%q, want zh", got)
+	}
 	if ex.structuredCalledCount != 1 {
 		t.Fatalf("structuredCalledCount=%d, want 1", ex.structuredCalledCount)
 	}
@@ -304,6 +307,44 @@ func TestExtractDocMetadata_SuccessPersistsMetadata(t *testing.T) {
 	}
 	if op := strings.TrimSpace(asString(statusArr[0]["operation"])); op != "extract_metadata" {
 		t.Fatalf("status operation=%q, want extract_metadata", op)
+	}
+}
+
+func TestExtractDocMetadata_NormalizesNestedMetadataLanguage(t *testing.T) {
+	tmp := t.TempDir()
+	lineFile := filepath.Join(tmp, "ocr_rslt_18_opendata.txt")
+	content := "1\t1\theading\tTestFont\t12\t[0,0,1,1]\t中文标准\n"
+	if err := os.WriteFile(lineFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	st := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              18,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(tmp, "ocr_rslt_18.json"),
+		StagingFilename: filepath.Join(tmp, "ocr_rslt_18.pdf"),
+		StatusRaw:       "[]",
+	}}
+	ex := &fakeJSONExtractor{out: map[string]any{
+		"title": "中文标准",
+		"metadata": map[string]any{
+			"language": "中文",
+		},
+	}}
+	svc := NewExtractDocMetadataProcessor(st, ex, nil)
+	svc.ModelErr = nil
+	svc.InitialPages = 1
+	svc.PromptText = "extract metadata"
+
+	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":18}`)); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	metadata, ok := st.updateReq.DocMetadata["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested metadata=%T, want map[string]any", st.updateReq.DocMetadata["metadata"])
+	}
+	if got := asString(metadata["language"]); got != "zh" {
+		t.Fatalf("nested metadata language=%q, want zh", got)
 	}
 }
 
