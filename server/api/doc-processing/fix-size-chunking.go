@@ -1522,6 +1522,14 @@ func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context,
 func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context, sourceLanguage string, summaries []SummaryItem) ([]SummaryItem, error) {
 	normalizedLang := normalizeSummarySourceLanguage(sourceLanguage)
 	if normalizedLang == "" || normalizedLang == "en" {
+		for _, item := range summaries {
+			if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
+				s.Logger.Warn("(MID_26060801) summary and summary_en are identical for English/unknown source; ignoring",
+					"summary_id", item.SummaryID,
+					"source_lang", normalizedLang,
+				)
+			}
+		}
 		return summaries, nil
 	}
 	langName := summaryLanguageName(normalizedLang)

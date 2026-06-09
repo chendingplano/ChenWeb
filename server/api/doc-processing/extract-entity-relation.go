@@ -397,7 +397,6 @@ func (p *EntityRelationProcessor) processChunk(
 		"record_id", recordID,
 		"chunk_idx", idx,
 		"seq_no", chunk.SeqNo,
-		"chunkText", chunkText,
 	)
 	callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
 	payload, modelName, err := p.extractEntityRelationWithFallback(ctx, chunkText)

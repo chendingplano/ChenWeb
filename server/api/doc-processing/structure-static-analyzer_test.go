@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -621,6 +622,27 @@ func TestStaticAnalyzer_RemovesRepeatedPageImageArtifactsWithNearOriginCoordinat
 		if _, ok := out.CorrectedType[removed]; ok {
 			t.Fatalf("line %d still present in corrected map", removed)
 		}
+	}
+}
+
+func TestStaticAnalyzer_KeepsPageImagesWhenDocumentIsImageOnly(t *testing.T) {
+	// Image-only documents (scanned PDFs) have no text lines. Removing all image
+	// lines would leave an empty document; the guard should preserve them.
+	var lines []string
+	for i := 1; i <= 40; i++ {
+		lines = append(lines, fmt.Sprintf(
+			"%d\t%d\timage\tunknown-font\t12\t[0,0,595.44,842.4]\tstdGk_3020436_images/imageFile%d.png",
+			i, i, i,
+		))
+	}
+	body := strings.Join(lines, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := len(out.Lines); got != 40 {
+		t.Fatalf("len(Lines)=%d, want 40 (images must not be removed from image-only documents)", got)
 	}
 }
 

@@ -593,6 +593,10 @@ func removeStaticPageImageArtifacts(lines []staticInputLine) []staticInputLine {
 	if len(removed) == 0 {
 		return lines
 	}
+	if len(removed) >= len(lines) {
+		// Removing would leave an empty document; images are the content, not artifacts.
+		return lines
+	}
 
 	filtered := make([]staticInputLine, 0, len(lines)-len(removed))
 	for i, line := range lines {

@@ -32,6 +32,9 @@ func boolPtr(v bool) *bool { return &v }
 
 func expectedOpenDataOutputPath(inputJSONPath string) string {
 	root := strings.TrimSuffix(inputJSONPath, filepath.Ext(inputJSONPath))
+	if strings.HasSuffix(strings.ToLower(root), "_opendata") {
+		return root + ".txt"
+	}
 	return root + "_opendata.txt"
 }
 
@@ -549,6 +552,47 @@ func TestConvertOpenDataFile_KeepsRepeatedContentWhenBelowPercentThreshold(t *te
 	text := string(got)
 	if strings.Count(text, "www.weboos.com") != 9 {
 		t.Fatalf("expected repeated line below threshold to remain, got: %s", text)
+	}
+}
+
+func TestConvertOpenDataFile_WithPagesKey(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "result_opendata.json")
+	content := `{
+  "pages": [
+    {"type":"paragraph","page number":1,"font":"SimSun","font size":12,"content":"hello","bounding box":[1,2,3,4]},
+    {"type":"image","page number":2,"source":"img/b.png","bounding box":[5,6,7,8]}
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertOpenDataFile(in)
+	if err != nil {
+		t.Fatalf("ConvertOpenDataFile: %v", err)
+	}
+
+	if out != in[:len(in)-len(".json")]+".txt" {
+		t.Fatalf("expected output path %s, got %s", in[:len(in)-len(".json")]+".txt", out)
+	}
+	if filepath.Base(out) == "result_opendata_opendata.txt" {
+		t.Fatalf("output path has double _opendata suffix: %s", out)
+	}
+
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "paragraph") || !strings.Contains(lines[0], "hello") {
+		t.Fatalf("unexpected line0: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "image") || !strings.Contains(lines[1], "img/b.png") {
+		t.Fatalf("unexpected line1: %s", lines[1])
 	}
 }
 

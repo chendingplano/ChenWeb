@@ -724,6 +724,23 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 			modelName:   usedModel,
 			didFallback: didFallback,
 		}
+		for _, mention := range result.mentions {
+			if len(mention.SourceLineSpans) == 0 {
+				p.Logger.Error("pass1: candidate has empty source_line_spans",
+					"record_id", record_id,
+					"chunk_index", chunk.Index,
+					"metric_name_hint", mention.MetricNameHint,
+					"evidence_quote", mention.EvidenceQuote,
+				)
+			} else {
+				p.Logger.Info("pass1: candidate source_line_spans",
+					"record_id", record_id,
+					"chunk_index", chunk.Index,
+					"metric_name_hint", mention.MetricNameHint,
+					"source_line_spans", mention.SourceLineSpans,
+				)
+			}
+		}
 		p.Logger.Info("extract metric end  ",
 			"record_id", record_id,
 			"extracted", len(result.mentions),
@@ -822,6 +839,25 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 			metrics:   normalizeMetricList(metricsRaw),
 			uncertain: normalizeMetricList(uncertainRaw),
 			language:  lang,
+		}
+		for j, m := range result.metrics {
+			spans, _ := m["source_line_spans"].([]string)
+			if len(spans) == 0 {
+				p.Logger.Error("pass2: enriched metric has empty source_line_spans",
+					"record_id", record_id,
+					"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
+					"metric_index", j,
+					"metric_name", m["metric_name"],
+				)
+			} else {
+				p.Logger.Info("pass2: metric source_line_spans",
+					"record_id", record_id,
+					"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
+					"metric_index", j,
+					"metric_name", m["metric_name"],
+					"source_line_spans", spans,
+				)
+			}
 		}
 		p.Logger.Info("enrich metric end  ",
 			"record_id", record_id,
@@ -1447,8 +1483,18 @@ func dedupeFinalMetricRows(metrics []map[string]any) []map[string]any {
 }
 
 func normalizeSourceLineSpans(value any) []string {
-	items, ok := value.([]any)
-	if !ok {
+	var items []any
+	switch v := value.(type) {
+	case []any:
+		items = v
+	case []string:
+		// Already normalized by a prior normalizeSourceLineSpans call; convert back to
+		// []any so the parsing/merging logic below can run uniformly.
+		items = make([]any, len(v))
+		for i, s := range v {
+			items[i] = s
+		}
+	default:
 		return nil
 	}
 

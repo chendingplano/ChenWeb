@@ -110,10 +110,10 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 	}
 
 	if strings.TrimSpace(rec.ParserName) == "" {
-		return p.failAndPersist(ctx, rec, errors.New("missing parser name"))
+		return p.failAndPersist(ctx, rec, errors.New("(MID-26060811) missing parser name"))
 	}
 	if strings.TrimSpace(rec.ResultFilename) == "" {
-		return p.failAndPersist(ctx, rec, errors.New("missing result filename"))
+		return p.failAndPersist(ctx, rec, errors.New("(MID-26060812) missing result filename"))
 	}
 	if p.ModelErr != nil {
 		return p.failAndPersist(ctx, rec, p.ModelErr)
@@ -132,7 +132,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 		return p.failAndPersist(ctx, rec, fmt.Errorf("(MID_26042412) stat input file: %w", err))
 	}
 	if fi.Size() == 0 {
-		return p.failAndPersist(ctx, rec, errors.New("input file empty"))
+		return p.failAndPersist(ctx, rec, fmt.Errorf("(MID-26060810) input file empty, inputPath:%s", inputPath))
 	}
 
 	readStart := p.Now()
@@ -502,7 +502,7 @@ func loadDocMetaPromptFromEnv() (promptText string, promptRef string, promptPath
 		return text, promptRef, candidate, nil
 	}
 	if lastErr == nil {
-		lastErr = errors.New("no candidate path available")
+		lastErr = errors.New("(MID-26060813) no candidate path available")
 	}
 	return "", promptRef, "", fmt.Errorf("(MID_26042418) prompt file not found: %w", lastErr)
 }

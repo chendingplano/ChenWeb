@@ -190,7 +190,7 @@ func validateSummaryArtifacts(recordID int64, sourceLanguage string, summaries [
 	return nil
 }
 
-func validateSingleSummaryArtifact(recordID int64, sourceLanguage string, item SummaryItem, artifactDir string, summaryTreeDir string) error {
+func validateSingleSummaryArtifact(recordID int64, _ string, item SummaryItem, artifactDir string, summaryTreeDir string) error {
 	if strings.TrimSpace(item.SummaryID) == "" {
 		return errors.New("(MID-26060412) summary_id is empty")
 	}
@@ -219,14 +219,9 @@ func validateSingleSummaryArtifact(recordID int64, sourceLanguage string, item S
 	if err := validateSummaryLines(item.SummaryID, item.Lines); err != nil {
 		return err
 	}
-	// Only enforce "summary and summary_en must differ" for known non-English sources.
-	// For English sources the fields may legitimately be identical.
-	// For unknown sources we have no basis to require a translation.
-	if sourceLanguage != "" && sourceLanguage != "en" {
-		if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
-			return fmt.Errorf("(MID-26060420) summary %q summary and summary_en must differ", item.SummaryID)
-		}
-	}
+	// fixSummarySourceLanguage already attempts translation when summary == summary_en
+	// for non-English sources (warns on failure) and warns for English/unknown sources.
+	// No hard error here — a failed translation is acceptable as a fallback.
 	// keywords may legitimately match keywords_en when translation is unavailable;
 	// fixSummarySourceLanguage attempts a best-effort backfill before validation.
 	// Skip language check when summary == summary_en: this indicates translation was

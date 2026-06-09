@@ -14,6 +14,7 @@ import (
 type openDataDocument struct {
 	NumberOfPages int              `json:"number of pages"`
 	Kids          []map[string]any `json:"kids"`
+	Pages         []map[string]any `json:"pages"`
 }
 
 type extractedOpenDataLine struct {
@@ -66,7 +67,11 @@ func ConvertOpenDataFile(inputPath string) (string, error) {
 		return "", fmt.Errorf("parse opendata json: %w", err)
 	}
 
-	items := extractOpenDataLineItems(doc.Kids)
+	nodes := doc.Kids
+	if len(nodes) == 0 {
+		nodes = doc.Pages
+	}
+	items := extractOpenDataLineItems(nodes)
 	items = filterPageNumberLines(items)
 	items = filterRepeatedContentLines(items, doc.NumberOfPages)
 	lines := formatOpenDataLines(items)
@@ -120,6 +125,9 @@ func writeReadOnlyFile(path string, data []byte, perm os.FileMode) error {
 
 func openDataOutputPath(inputPath string) string {
 	root := strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
+	if strings.HasSuffix(strings.ToLower(root), "_opendata") {
+		return root + ".txt"
+	}
 	return root + "_opendata.txt"
 }
 
