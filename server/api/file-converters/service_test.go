@@ -924,3 +924,62 @@ func TestHandleMessageFiltersByTypeAndStatus(t *testing.T) {
 		t.Fatalf("expected no update for ignored message")
 	}
 }
+
+func TestConvertMineruFile_BasicTypes(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "result_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 1,
+      "items": [
+        {"type":"text","text":"Title","text_level":1,"bbox":[10,20,30,40]},
+        {"type":"text","text":"Body text","bbox":[10,50,30,60]},
+        {"type":"header","text":"HEADER","bbox":[0,0,10,10]},
+        {"type":"footer","text":"FOOTER","bbox":[0,0,10,10]},
+        {"type":"page_number","text":"1","bbox":[0,0,10,10]},
+        {"type":"list","list_items":["item one","item two"],"bbox":[10,70,30,90]},
+        {"type":"equation","text":"$$E=mc^2$$","bbox":[10,100,30,110]}
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines (heading, paragraph, 2 list-items, equation), got %d:\n%s", len(lines), string(got))
+	}
+	if !strings.Contains(lines[0], "1\t1\theading(1)\tunknown-font\t12\t[10,20,30,40]\tTitle") {
+		t.Fatalf("unexpected heading line: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "2\t1\tparagraph\tunknown-font\t12\t[10,50,30,60]\tBody text") {
+		t.Fatalf("unexpected paragraph line: %s", lines[1])
+	}
+	if !strings.Contains(lines[2], "3\t1\tlist-item\tunknown-font\t12\t[10,70,30,90]\titem one") {
+		t.Fatalf("unexpected list-item 1: %s", lines[2])
+	}
+	if !strings.Contains(lines[3], "4\t1\tlist-item\tunknown-font\t12\t[10,70,30,90]\titem two") {
+		t.Fatalf("unexpected list-item 2: %s", lines[3])
+	}
+	if !strings.Contains(lines[4], "5\t1\tequation\tunknown-font\t12\t[10,100,30,110]\t$$E=mc^2$$") {
+		t.Fatalf("unexpected equation line: %s", lines[4])
+	}
+	for _, line := range lines {
+		for _, banned := range []string{"HEADER", "FOOTER"} {
+			if strings.Contains(line, banned) {
+				t.Fatalf("unexpected content %q in output line: %s", banned, line)
+			}
+		}
+	}
+}
