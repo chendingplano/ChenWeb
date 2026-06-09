@@ -925,6 +925,76 @@ func TestHandleMessageFiltersByTypeAndStatus(t *testing.T) {
 	}
 }
 
+func expectedMineruOutputPath(inputJSONPath string) string {
+	root := strings.TrimSuffix(inputJSONPath, filepath.Ext(inputJSONPath))
+	if strings.HasSuffix(strings.ToLower(root), "_mineru") {
+		return root + ".txt"
+	}
+	return root + "_mineru.txt"
+}
+
+func TestHandleRequestMineruSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	jsonPath := filepath.Join(tmp, "std_1521701_mineru.json")
+	inputJSON := `{
+  "pages": [
+    {"page_number":1,"items":[
+      {"type":"text","text":"Hello","bbox":[1,2,3,4]}
+    ]}
+  ]
+}`
+	if err := os.WriteFile(jsonPath, []byte(inputJSON), 0o644); err != nil {
+		t.Fatalf("write json: %v", err)
+	}
+
+	st := &fakeStore{rec: InputRecord{
+		ID:             203,
+		Type:           "pdf",
+		ParserName:     "mineru",
+		StatusRaw:      `[{"operation":"parsed","proc-status":"success"}]`,
+		FileName:       filepath.Join(tmp, "std_1521701.pdf"),
+		ResultFilename: filepath.Base(jsonPath),
+	}}
+
+	svc := NewService(st, slog.Default())
+	pub := &fakePublisher{}
+	svc.Publisher = pub
+
+	err := svc.HandleRequest(context.Background(), ConvertRequest{
+		RecordID:       203,
+		ResultFilename: filepath.Base(jsonPath),
+	})
+	if err != nil {
+		t.Fatalf("HandleRequest: %v", err)
+	}
+	if st.updateCalls != 1 {
+		t.Fatalf("expected updateCalls=1, got %d", st.updateCalls)
+	}
+	if st.updatedError != nil {
+		t.Fatalf("expected nil error, got %v", *st.updatedError)
+	}
+	if pub.calls != 1 {
+		t.Fatalf("expected 1 publish, got %d", pub.calls)
+	}
+
+	outPath := expectedMineruOutputPath(jsonPath)
+	if _, err := os.Stat(outPath); err != nil {
+		t.Fatalf("expected output txt: %v", err)
+	}
+	originPath := strings.TrimSuffix(outPath, filepath.Ext(outPath)) + ".origin"
+	if _, err := os.Stat(originPath); err != nil {
+		t.Fatalf("expected origin file: %v", err)
+	}
+
+	var ev LineFileGeneratedEvent
+	if err := json.Unmarshal(pub.payload, &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if ev.RecordID != 203 || ev.Status != "success" || ev.LineFileFilename != outPath {
+		t.Fatalf("unexpected event: %+v", ev)
+	}
+}
+
 func TestConvertMineruFile_BasicTypes(t *testing.T) {
 	tmp := t.TempDir()
 	in := filepath.Join(tmp, "result_mineru.json")

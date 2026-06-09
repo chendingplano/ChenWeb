@@ -225,7 +225,11 @@ func (s *Service) convert(_ context.Context, req ConvertRequest, rec InputRecord
 		return "", fmt.Errorf("(MID_26042601) parser_name=%q: %w", rec.ParserName, ErrParserNotImplemented)
 
 	case "mineru":
-		return "", fmt.Errorf("(MID_26042602) converter for parser_name=%q not supported yet: %w", rec.ParserName, ErrParserNotImplemented)
+		out, err := ConvertMineruFile(inputFile)
+		if err != nil {
+			return "", fmt.Errorf("(MID_26042602) mineru convert failed: %w", err)
+		}
+		return out, nil
 
 	case "docline":
 		return "", fmt.Errorf("(MID_26042603) converter for parser_name=%q not supported yet: %w", rec.ParserName, ErrParserNotImplemented)
