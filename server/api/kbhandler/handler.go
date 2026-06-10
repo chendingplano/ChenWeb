@@ -628,29 +628,19 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 		whereParts = append(whereParts, fmt.Sprintf("LOWER(i.type) <> LOWER(%s)", nextArg(excludeDocType)))
 	}
 
+	// parse_state, pipeline_state and has_failed_proc are denormalized rollup
+	// columns on kb.inputs, kept in sync with the status JSON by DB triggers (see
+	// project_migrations/20260609000002_add_kb_inputs_status_rollups.sql). They
+	// replace the per-row jsonb_array_elements scans these filters used to do.
 	parseState := normalizeParseState(filters.ParseState)
 	switch parseState {
 	case "all":
 	case "pending":
-		whereParts = append(whereParts, `NOT EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) IN ('parsing', 'parse')
-		)`)
+		whereParts = append(whereParts, "i.parse_state = 'pending'")
 	case "parsed_success":
-		whereParts = append(whereParts, `EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) IN ('parsing', 'parse')
-			  AND LOWER(COALESCE(st->>'status', '')) = 'success'
-		)`)
+		whereParts = append(whereParts, "i.parse_state = 'parsed_success'")
 	case "parsed_failed":
-		whereParts = append(whereParts, `EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) IN ('parsing', 'parse')
-			  AND LOWER(COALESCE(st->>'status', '')) <> 'success'
-		)`)
+		whereParts = append(whereParts, "i.parse_state = 'parsed_failed'")
 	default:
 		return "", nil, fmt.Errorf("invalid parse_state: %q (CWB_KB_031)", parseState)
 	}
@@ -677,55 +667,47 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 		operation := strings.TrimSpace(filters.Operation)
 		procStatus := strings.TrimSpace(filters.ProcStatus)
 		if operation != "" || procStatus != "" {
-			statusParts := make([]string, 0, 2)
-			if operation != "" {
-				statusParts = append(statusParts, fmt.Sprintf("LOWER(COALESCE(st->>'operation', '')) = LOWER(%s)", nextArg(operation)))
-			}
-			if procStatus != "" {
-				statusParts = append(statusParts, fmt.Sprintf("LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER(%s)", nextArg(procStatus)))
-			}
-			whereParts = append(whereParts, fmt.Sprintf(`EXISTS (
-				SELECT 1
-				FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
+			// The aggregate "doc_processing" control entry lives in the
+			// pipeline_state rollup, not the per-processor child table; map it
+			// directly. Every other operation is a per-processor row.
+			if canonicalOp(operation) == "doc_processing" {
+				if procStatus != "" {
+					whereParts = append(whereParts, fmt.Sprintf("i.pipeline_state = LOWER(%s)", nextArg(procStatus)))
+				} else {
+					whereParts = append(whereParts, "i.pipeline_state <> 'pending'")
+				}
+			} else {
+				statusParts := []string{"ps.record_id = i.id"}
+				if operation != "" {
+					statusParts = append(statusParts, fmt.Sprintf("ps.processor = kb.canonical_op(%s)", nextArg(operation)))
+				}
+				if procStatus != "" {
+					statusParts = append(statusParts, fmt.Sprintf("ps.proc_status = LOWER(%s)", nextArg(procStatus)))
+				}
+				existsClause := fmt.Sprintf(`EXISTS (
+				SELECT 1 FROM kb.input_proc_status ps
 				WHERE %s
-			)`, strings.Join(statusParts, " AND ")))
+			)`, strings.Join(statusParts, " AND "))
+				if operation == "" && procStatus != "" {
+					// A bare proc_status filter historically also matched the
+					// aggregate "doc_processing" entry (which lives in
+					// pipeline_state, not the child table); keep that behavior.
+					whereParts = append(whereParts, fmt.Sprintf("(%s OR i.pipeline_state = LOWER(%s))", existsClause, nextArg(procStatus)))
+				} else {
+					whereParts = append(whereParts, existsClause)
+				}
+			}
 		}
 	case "parsed_success":
-		whereParts = append(whereParts, `EXISTS (
-			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = 'parsed'
-			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = 'success'
-		)`)
+		whereParts = append(whereParts, "i.parse_state = 'parsed_success'")
 	case "parse_failed":
-		whereParts = append(whereParts, `EXISTS (
-			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = 'parsed'
-			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) <> 'success'
-		)`)
+		whereParts = append(whereParts, "i.parse_state = 'parsed_failed'")
 	case "parsed_not_started":
-		whereParts = append(whereParts, `(EXISTS (
-			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = 'parsed'
-			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = 'success'
-		) AND NOT EXISTS (
-			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = 'doc_processing'
-		))`)
+		whereParts = append(whereParts, "i.parse_state = 'parsed_success' AND i.pipeline_state = 'pending'")
 	case "all_processors_success":
-		whereParts = append(whereParts, `(EXISTS (
-			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = 'doc_processing'
-		) AND NOT EXISTS (
-			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = 'doc_processing'
-			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) <> 'success'
-		))`)
+		whereParts = append(whereParts, "i.pipeline_state = 'success'")
 	case "failed_processors":
-		whereParts = append(whereParts, `EXISTS (
-			SELECT 1 FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = 'doc_processing'
-			AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = 'failed'
-		)`)
+		whereParts = append(whereParts, "i.pipeline_state = 'failed'")
 	}
 
 	if filters.CreateTimeStart != nil {
@@ -742,6 +724,21 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	}
 
 	return strings.Join(whereParts, " AND "), args, nil
+}
+
+// canonicalOp mirrors canonicalOperationName in the docprocessing package and
+// the kb.canonical_op SQL function: it lowercases, maps '-' to '_', and folds
+// the two legacy operation aliases. Kept local to avoid a package dependency.
+func canonicalOp(raw string) string {
+	op := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(raw)), "-", "_")
+	switch op {
+	case "chunked":
+		return "chunking"
+	case "extract_metadata":
+		return "extract_doc_metadata"
+	default:
+		return op
+	}
 }
 
 func normalizeParseState(raw string) string {

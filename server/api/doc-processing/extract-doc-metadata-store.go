@@ -70,6 +70,8 @@ func (s DocMetadataSQLStore) ListParsedInputRecords(ctx context.Context) ([]DocM
 	if s.DB == nil {
 		return nil, errors.New("db is nil")
 	}
+	// parse_state is a denormalized rollup column maintained by a DB trigger;
+	// it replaces the per-row jsonb_path_exists scan over status.
 	const stmt = `
 SELECT id,
        COALESCE(parser_name, ''),
@@ -79,7 +81,7 @@ SELECT id,
        COALESCE(file_name, '')
 FROM kb.inputs
 WHERE LOWER(COALESCE(type, '')) = 'pdf'
-  AND jsonb_path_exists(status, '$[*] ? (@.operation == "parsed" && (@."proc-status" == "success" || @.proc_status == "success"))')
+  AND parse_state = 'parsed_success'
 ORDER BY id`
 	return s.listInputRecords(ctx, stmt)
 }
@@ -88,6 +90,10 @@ func (s DocMetadataSQLStore) ListRecordsWithFailedDocProcessors(ctx context.Cont
 	if s.DB == nil {
 		return nil, errors.New("db is nil")
 	}
+	// has_failed_proc is a denormalized rollup column (true only for real doc
+	// processor failures, excluding parse/convert) maintained by a DB trigger.
+	// It replaces the per-row jsonb_path_exists scan. The failedDocProcessorNames
+	// post-filter is kept to preserve exact per-processor semantics.
 	const stmt = `
 SELECT id,
        COALESCE(parser_name, ''),
@@ -96,7 +102,7 @@ SELECT id,
        COALESCE(status::text, '[]'),
        COALESCE(file_name, '')
 FROM kb.inputs
-WHERE jsonb_path_exists(status, '$[*] ? (@.proc_status == "failed" || @."proc-status" == "failed")')
+WHERE has_failed_proc
 ORDER BY id`
 	records, err := s.listInputRecords(ctx, stmt)
 	if err != nil {

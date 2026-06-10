@@ -1,11 +1,22 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import SquareIcon from '@lucide/svelte/icons/square';
+	import CheckSquareIcon from '@lucide/svelte/icons/check-square';
 	import { shouldShowOverflowScrollbar } from '$lib/components/home3/kb-import-status-dialog.js';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import type { KbInputRecord, ParseState } from '$lib/services/kbService';
-	import { listKbInputs, uploadKbInputs, deleteKbInput, checkKbInputMD5s } from '$lib/services/kbService';
+	import { listKbInputs, uploadKbInputs, deleteKbInput, checkKbInputMD5s, getKbFrontendConfig } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import { createDefaultRecordBrowserFilters } from '$lib/components/home3/topic-tree-record-browser.js';
+	import {
+		ALL_CONFIGURABLE_PROCESSOR_IDS,
+		ALL_PROCESSOR_IDS,
+		MANDATORY_DISPLAY_STAGES,
+		MANDATORY_PROCESSOR_IDS,
+		PIPELINE_STAGES,
+		computeStages
+	} from './doc-processor-dashboard-state';
 
 	let { darkMode = true }: { darkMode: boolean } = $props();
 
@@ -70,6 +81,27 @@
 	let deleteConfirmRecord = $state<KbInputRecord | null>(null);
 	let deleteError = $state('');
 	let deleteSubmitting = $state(false);
+
+	// ── Restart pipeline dialog (mirrors the doc-processor dashboard) ──────
+	// requiredProcessors: the configurable processors enabled in config.toml.
+	let requiredProcessors = $state<string[]>(ALL_CONFIGURABLE_PROCESSOR_IDS);
+	let selectableProcessorIds = $derived([...MANDATORY_PROCESSOR_IDS, ...requiredProcessors]);
+	let CONFIGURABLE_PROCESSORS = $derived(
+		selectableProcessorIds
+			.map((id) => PIPELINE_STAGES.find((s) => s.id === id))
+			.filter((s) => s !== undefined)
+	);
+
+	let restartTarget = $state<KbInputRecord | null>(null);
+	let restartProcessors = $state<Record<string, boolean>>(
+		Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, true]))
+	);
+	let restartParseFile = $state(false);
+	let restartConvert = $state(false);
+	let showRestartDialog = $state(false);
+	let restarting = $state(false);
+	let restartError = $state('');
+	let restartToast = $state<{ kind: 'success' | 'error'; msg: string } | null>(null);
 
 	let uploadType = $state('pdf');
 	let uploadTitle = $state('');
@@ -159,11 +191,15 @@
 	let pageBg = $derived(darkMode ? '#171B26' : '#F2F4F7');
 	let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
 	let surface2 = $derived(darkMode ? '#252A3A' : '#ECEEF2');
+	let surface3 = $derived(darkMode ? '#1A1E2C' : '#F8F9FB');
 	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB');
 	let accent = $derived(darkMode ? '#818CF8' : '#6366F1');
+	let accentTint = $derived(darkMode ? 'rgba(129,140,248,0.15)' : 'rgba(99,102,241,0.10)');
 	let textPrimary = $derived(darkMode ? '#E2E8F0' : '#111827');
 	let textSecondary = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
+	let colorSuccess = $derived(darkMode ? '#34D399' : '#10B981');
+	let colorError = $derived(darkMode ? '#F87171' : '#EF4444');
 
 	type StatusItem = KbInputRecord['status'][number];
 
@@ -478,6 +514,94 @@
 		}
 	}
 
+	// ── Restart pipeline ──────────────────────────────────────────────────
+
+	async function publishEvent(subject: string, payload: Record<string, unknown>) {
+		const res = await fetch('/api/v1/jetstream/events', {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ subject, payload: JSON.stringify(payload) })
+		});
+		if (!res.ok) {
+			const body = await res.json().catch(() => null);
+			throw new Error(body?.error_msg ?? body?.message ?? `Request failed (${res.status})`);
+		}
+	}
+
+	async function doLaunch(
+		record: KbInputRecord,
+		procs: Record<string, boolean>,
+		reParse: boolean,
+		reConvert: boolean
+	) {
+		// Re-parse triggers the whole downstream chain automatically (in auto mode).
+		// Re-convert triggers convert + downstream doc processing.
+		// Both supersede a standalone doc-processor publish to avoid double-processing.
+		if (reParse) {
+			await publishEvent('kb.pdf.staged', { record_id: String(record.id), type: record.type ?? 'pdf', status: 'success', force: true });
+			return;
+		}
+		if (reConvert) {
+			await publishEvent('kb.pdf.parsed', { record_id: String(record.id), type: 'pdf', status: 'success', force: true });
+			return;
+		}
+		const chosen = selectableProcessorIds.filter((p) => procs[p]);
+		const allChosen = chosen.length === selectableProcessorIds.length;
+		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
+		if (!allChosen) payload.operation = chosen;
+		await publishEvent('kb.line-file-generated', payload);
+	}
+
+	function getDefaultRestartProcessors(record: KbInputRecord): Record<string, boolean> {
+		const unfinishedStageIds = new Set(
+			computeStages(record)
+				.filter((stage) => stage.status !== 'success' && ALL_PROCESSOR_IDS.includes(stage.id))
+				.map((stage) => stage.id)
+		);
+
+		if (!unfinishedStageIds.size) {
+			return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, selectableProcessorIds.includes(p)]));
+		}
+
+		return Object.fromEntries(ALL_PROCESSOR_IDS.map((p) => [p, unfinishedStageIds.has(p)]));
+	}
+
+	function openRestart(record: KbInputRecord) {
+		restartTarget = record;
+		restartProcessors = getDefaultRestartProcessors(record);
+		restartParseFile = false;
+		restartConvert = false;
+		restartError = '';
+		showRestartDialog = true;
+	}
+
+	async function confirmRestart() {
+		if (!restartTarget) return;
+		restarting = true;
+		restartError = '';
+		try {
+			await doLaunch(restartTarget, restartProcessors, restartParseFile, restartConvert);
+			showRestartDialog = false;
+			restartTarget = null;
+			restartToast = { kind: 'success', msg: 'Restart triggered' };
+			setTimeout(() => { restartToast = null; }, 4000);
+		} catch (err) {
+			restartError = err instanceof Error ? err.message : 'Restart failed';
+		} finally {
+			restarting = false;
+		}
+	}
+
+	function allRestartSelected(): boolean {
+		return selectableProcessorIds.every((p) => restartProcessors[p]);
+	}
+
+	function toggleAllRestart() {
+		const next = !allRestartSelected();
+		restartProcessors = Object.fromEntries(selectableProcessorIds.map((p) => [p, next]));
+	}
+
 	let pageJumpInput = $state('1');
 
 	$effect(() => {
@@ -541,6 +665,13 @@
 
 	onMount(() => {
 		loadRecords();
+		getKbFrontendConfig()
+			.then((cfg) => {
+				requiredProcessors = cfg.required_processors ?? ALL_CONFIGURABLE_PROCESSOR_IDS;
+			})
+			.catch(() => {
+				// Keep defaults on failure
+			});
 	});
 
 	$effect(() => {
@@ -671,12 +802,21 @@
 									</button>
 								</td>
 								<td class="cell">
-									<button
-										onclick={() => openDeleteConfirm(record)}
-										style="height:28px; padding:0 10px; border:1px solid rgba(239,68,68,0.4); border-radius:8px; background:rgba(239,68,68,0.1); color:#ef4444; font-size:12px; cursor:pointer;"
-									>
-										Delete
-									</button>
+									<div class="flex items-center gap-2">
+										<button
+											onclick={() => openRestart(record)}
+											style="display:inline-flex; align-items:center; gap:4px; height:28px; padding:0 10px; border:1px solid {accent}40; border-radius:8px; background:{accentTint}; color:{accent}; font-size:12px; cursor:pointer;"
+										>
+											<RefreshCwIcon class="h-3.5 w-3.5" />
+											Restart
+										</button>
+										<button
+											onclick={() => openDeleteConfirm(record)}
+											style="height:28px; padding:0 10px; border:1px solid rgba(239,68,68,0.4); border-radius:8px; background:rgba(239,68,68,0.1); color:#ef4444; font-size:12px; cursor:pointer;"
+										>
+											Delete
+										</button>
+									</div>
 								</td>
 							</tr>
 						{/each}
@@ -972,6 +1112,141 @@
 					disabled={deleteSubmitting}
 					style="height:34px; padding:0 16px; border:none; border-radius:8px; background:#ef4444; color:white; font-size:13px; font-weight:600; cursor:pointer; opacity:{deleteSubmitting ? 0.6 : 1};"
 				>{deleteSubmitting ? 'Deleting…' : 'Delete'}</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if restartToast}
+	<div
+		class="fixed right-6 top-6 z-50 flex items-center gap-2 rounded-xl px-4 py-3"
+		style="background:{restartToast.kind === 'success' ? colorSuccess : colorError}; color:white; font-size:13px; font-weight:600; box-shadow:0 16px 40px rgba(0,0,0,0.35);"
+	>
+		{restartToast.msg}
+	</div>
+{/if}
+
+{#if showRestartDialog && restartTarget}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-40 flex items-center justify-center"
+		style="background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);"
+		onmousedown={(e) => { if (e.target === e.currentTarget) { showRestartDialog = false; restartError = ''; } }}
+	>
+		<div
+			class="mx-4 w-full max-w-md rounded-2xl p-6"
+			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
+		>
+			<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0 0 4px;">Restart pipeline</h3>
+			<p style="font-size:13px; color:{textSecondary}; margin:0 0 16px;">
+				Record <span style="color:{accent}; font-family:monospace; font-weight:600;">#{restartTarget.id}</span>
+				— select processors to re-run:
+			</p>
+
+			<div class="mb-4 space-y-1.5">
+				<!-- Optional pre-processor: Parse File -->
+				<label
+					class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+					style="background:{restartParseFile ? accentTint : surface2}; border:1px solid {restartParseFile ? accent + '40' : borderColor};"
+					onmouseenter={(e) => { if (!restartParseFile) (e.currentTarget as HTMLElement).style.background = surface3; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartParseFile ? accentTint : surface2; }}
+				>
+					<input type="checkbox" bind:checked={restartParseFile} class="sr-only" />
+					{#if restartParseFile}
+						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+					{:else}
+						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+					{/if}
+					<span style="font-size:13px; color:{restartParseFile ? textPrimary : textSecondary}; font-family:monospace;">parse_file</span>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Parse File</span>
+				</label>
+
+				<!-- Optional pre-processor: Convert Parse Result -->
+				<label
+					class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+					style="background:{restartConvert ? accentTint : surface2}; border:1px solid {restartConvert ? accent + '40' : borderColor};"
+					onmouseenter={(e) => { if (!restartConvert) (e.currentTarget as HTMLElement).style.background = surface3; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartConvert ? accentTint : surface2; }}
+				>
+					<input type="checkbox" bind:checked={restartConvert} class="sr-only" />
+					{#if restartConvert}
+						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+					{:else}
+						<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+					{/if}
+					<span style="font-size:13px; color:{restartConvert ? textPrimary : textSecondary}; font-family:monospace;">convert_parse_result</span>
+					<span style="font-size:12px; color:{textMuted}; margin-left:6px;">Convert Parse Result</span>
+				</label>
+
+				<!-- Mandatory (always-on) processors -->
+				{#each MANDATORY_DISPLAY_STAGES as proc}
+					<label class="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2" style="background:{surface2}; border:1px solid {borderColor}; opacity:0.6;">
+						<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{colorSuccess};" />
+						<span style="font-size:13px; color:{textSecondary}; font-family:monospace;">{proc.id}</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
+						<span style="font-size:10px; color:{textMuted}; margin-left:auto; font-family:monospace;">mandatory</span>
+					</label>
+				{/each}
+
+				<!-- Configurable processors -->
+				{#each CONFIGURABLE_PROCESSORS as proc}
+					<label
+						class="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2"
+						style="background:{restartProcessors[proc.id] ? accentTint : surface2}; border:1px solid {restartProcessors[proc.id] ? accent + '40' : borderColor};"
+						onmouseenter={(e) => { if (!restartProcessors[proc.id]) (e.currentTarget as HTMLElement).style.background = surface3; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = restartProcessors[proc.id] ? accentTint : surface2; }}
+					>
+						<input type="checkbox" bind:checked={restartProcessors[proc.id]} class="sr-only" />
+						{#if restartProcessors[proc.id]}
+							<CheckSquareIcon class="h-4 w-4 flex-shrink-0" style="color:{accent};" />
+						{:else}
+							<SquareIcon class="h-4 w-4 flex-shrink-0" style="color:{textMuted};" />
+						{/if}
+						<span style="font-size:13px; color:{restartProcessors[proc.id] ? textPrimary : textSecondary}; font-family:monospace;">{proc.id}</span>
+						<span style="font-size:12px; color:{textMuted}; margin-left:6px;">{proc.label}</span>
+					</label>
+				{/each}
+			</div>
+
+			<div class="mb-4 flex">
+				<button
+					onclick={toggleAllRestart}
+					class="rounded-lg px-3 py-1.5"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+				>{allRestartSelected() ? 'Deselect all' : 'Select all'}</button>
+			</div>
+
+			{#if restartError}
+				<div style="font-size:12px; color:{colorError}; margin-bottom:12px;">{restartError}</div>
+			{/if}
+
+			<div class="flex justify-end gap-2">
+				<button
+					onclick={() => { showRestartDialog = false; restartError = ''; }}
+					class="rounded-lg px-4 py-2"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; cursor:pointer;"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+				>Cancel</button>
+				<button
+					onclick={confirmRestart}
+					disabled={restarting || !(restartParseFile || restartConvert || selectableProcessorIds.some(p => restartProcessors[p]))}
+					class="flex items-center gap-2 rounded-lg px-4 py-2"
+					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none;
+					       cursor:{restarting ? 'not-allowed' : 'pointer'};
+					       opacity:{restarting || !(restartParseFile || restartConvert || selectableProcessorIds.some(p => restartProcessors[p])) ? '0.6' : '1'};"
+					onmouseenter={(e) => {
+						if (!restarting) (e.currentTarget as HTMLElement).style.opacity = '0.88';
+					}}
+					onmouseleave={(e) => {
+						(e.currentTarget as HTMLElement).style.opacity = restarting ? '0.6' : '1';
+					}}
+				>
+					<RefreshCwIcon class="h-4 w-4" />
+					{restarting ? 'Restarting…' : 'Restart'}
+				</button>
 			</div>
 		</div>
 	</div>

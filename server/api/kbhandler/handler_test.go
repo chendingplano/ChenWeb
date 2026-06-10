@@ -66,17 +66,17 @@ func TestBuildWhereClauseParseStates(t *testing.T) {
 		{
 			name:       "pending",
 			parseState: "pending",
-			wantPart:   "NOT EXISTS",
+			wantPart:   "i.parse_state = 'pending'",
 		},
 		{
 			name:       "parsed_success",
 			parseState: "parsed_success",
-			wantPart:   "LOWER(COALESCE(st->>'status', '')) = 'success'",
+			wantPart:   "i.parse_state = 'parsed_success'",
 		},
 		{
 			name:       "parsed_failed",
 			parseState: "parsed_failed",
-			wantPart:   "LOWER(COALESCE(st->>'status', '')) <> 'success'",
+			wantPart:   "i.parse_state = 'parsed_failed'",
 		},
 	}
 
@@ -88,9 +88,6 @@ func TestBuildWhereClauseParseStates(t *testing.T) {
 			})
 			if err != nil {
 				t.Fatalf("buildWhereClause returned error: %v", err)
-			}
-			if !strings.Contains(whereSQL, "LOWER(COALESCE(st->>'operation', '')) IN ('parsing', 'parse')") {
-				t.Fatalf("expected whereSQL to include parse/parsing operation matching, got: %s", whereSQL)
 			}
 			if !strings.Contains(whereSQL, tc.wantPart) {
 				t.Fatalf("expected whereSQL to contain %q, got: %s", tc.wantPart, whereSQL)
@@ -208,8 +205,8 @@ func TestBuildWhereClauseExtendedFilters(t *testing.T) {
 		"COALESCE(i.name, i.staging_filename, '') ILIKE $5",
 		"COALESCE(i.file_name, '') ILIKE $6",
 		"COALESCE(i.parser_name, '') ILIKE $7",
-		"LOWER(COALESCE(st->>'operation', '')) = LOWER($8)",
-		"LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER($9)",
+		"ps.processor = kb.canonical_op($8)",
+		"ps.proc_status = LOWER($9)",
 		"i.create_time >= $10",
 		"i.create_time <= $11",
 		"i.modify_time >= $12",
@@ -234,15 +231,19 @@ func TestBuildWhereClauseRunningProcessorStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildWhereClause returned error: %v", err)
 	}
-	want := "LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER($1)"
+	want := "ps.proc_status = LOWER($1)"
 	if !strings.Contains(whereSQL, want) {
 		t.Fatalf("expected whereSQL to contain %q, got: %s", want, whereSQL)
 	}
-	if strings.Contains(whereSQL, "operation") {
+	// A bare proc_status filter also matches the aggregate pipeline_state.
+	if !strings.Contains(whereSQL, "i.pipeline_state = LOWER($2)") {
+		t.Fatalf("expected whereSQL to include pipeline_state fallback, got: %s", whereSQL)
+	}
+	if strings.Contains(whereSQL, "ps.processor") {
 		t.Fatalf("did not expect operation restriction for running status filter, got: %s", whereSQL)
 	}
-	if len(args) != 1 || args[0] != "running" {
-		t.Fatalf("args=%v, want [running]", args)
+	if len(args) != 2 || args[0] != "running" || args[1] != "running" {
+		t.Fatalf("args=%v, want [running running]", args)
 	}
 }
 
@@ -259,12 +260,7 @@ func TestListInputsSuccess(t *testing.T) {
 
 	expectResolveInputTablePlural(mock)
 
-	countQuery := regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i WHERE LOWER(i.type) = LOWER($1) AND EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) IN ('parsing', 'parse')
-			  AND LOWER(COALESCE(st->>'status', '')) = 'success'
-		) AND COALESCE(i.file_name, '') ILIKE $2`)
+	countQuery := regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i WHERE LOWER(i.type) = LOWER($1) AND i.parse_state = 'parsed_success' AND COALESCE(i.file_name, '') ILIKE $2`)
 	mock.ExpectQuery(countQuery).
 		WithArgs("pdf", "%report%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
@@ -298,12 +294,7 @@ SELECT
     i.notes,
     i.error_msg
 FROM kb.inputs i
- WHERE LOWER(i.type) = LOWER($1) AND EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) IN ('parsing', 'parse')
-			  AND LOWER(COALESCE(st->>'status', '')) = 'success'
-		) AND COALESCE(i.file_name, '') ILIKE $2 ORDER BY i.create_time DESC LIMIT $3 OFFSET $4`)
+ WHERE LOWER(i.type) = LOWER($1) AND i.parse_state = 'parsed_success' AND COALESCE(i.file_name, '') ILIKE $2 ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $3 OFFSET $4`)
 	rows := sqlmock.NewRows([]string{
 		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",
@@ -455,7 +446,7 @@ func TestListInputsDataQueryFailure(t *testing.T) {
     i.notes,
     i.error_msg
 FROM kb.inputs i
- ORDER BY i.create_time DESC LIMIT $1 OFFSET $2`)).
+ ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $1 OFFSET $2`)).
 		WithArgs(50, 0).
 		WillReturnError(errors.New("data query failed"))
 
@@ -488,7 +479,7 @@ func TestListInputsPageSizeCap(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	expectResolveNameColumnStaging(mock)
 	expectResolveParserNameColumn(mock, true)
-	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC LIMIT $1 OFFSET $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $1 OFFSET $2`)).
 		WithArgs(500, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
@@ -527,7 +518,7 @@ func TestListInputsWithDateQueryParams(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
 	expectResolveNameColumnStaging(mock)
 	expectResolveParserNameColumn(mock, true)
-	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC LIMIT $3 OFFSET $4`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $3 OFFSET $4`)).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 20, 20).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "parser_name", "type", "title", "doc_no", "source", "file_name",
@@ -565,11 +556,9 @@ func TestListInputsExtendedQueryParams(t *testing.T) {
 	expectResolveParserNameColumn(mock, true)
 
 	countQuery := regexp.QuoteMeta(`SELECT COUNT(1) FROM kb.inputs i WHERE i.id = $1 AND LOWER(i.type) = LOWER($2) AND COALESCE(i.title, '') ILIKE $3 AND COALESCE(i.doc_no, '') ILIKE $4 AND COALESCE(i.staging_filename, '') ILIKE $5 AND COALESCE(i.file_name, '') ILIKE $6 AND COALESCE(i.parser_name, '') ILIKE $7 AND EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = LOWER($8)
-			  AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER($9)
-		) AND i.create_time >= $10 AND i.create_time <= $11 AND i.modify_time >= $12 AND i.modify_time <= $13`)
+				SELECT 1 FROM kb.input_proc_status ps
+				WHERE ps.record_id = i.id AND ps.processor = kb.canonical_op($8) AND ps.proc_status = LOWER($9)
+			) AND i.create_time >= $10 AND i.create_time <= $11 AND i.modify_time >= $12 AND i.modify_time <= $13`)
 	mock.ExpectQuery(countQuery).
 		WithArgs(int64(84), "pdf", "%Title%", "%GB/T%", "%Input%", "%std%", "%mineru%", "extract_metadata", "success", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
@@ -603,11 +592,9 @@ func TestListInputsExtendedQueryParams(t *testing.T) {
     i.error_msg
 FROM kb.inputs i
  WHERE i.id = $1 AND LOWER(i.type) = LOWER($2) AND COALESCE(i.title, '') ILIKE $3 AND COALESCE(i.doc_no, '') ILIKE $4 AND COALESCE(i.staging_filename, '') ILIKE $5 AND COALESCE(i.file_name, '') ILIKE $6 AND COALESCE(i.parser_name, '') ILIKE $7 AND EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements(COALESCE(i.status, '[]'::jsonb)) AS st
-			WHERE LOWER(COALESCE(st->>'operation', '')) = LOWER($8)
-			  AND LOWER(COALESCE(NULLIF(st->>'proc_status', ''), NULLIF(st->>'proc-status', ''), st->>'status', '')) = LOWER($9)
-		) AND i.create_time >= $10 AND i.create_time <= $11 AND i.modify_time >= $12 AND i.modify_time <= $13 ORDER BY i.create_time DESC LIMIT $14 OFFSET $15`)
+				SELECT 1 FROM kb.input_proc_status ps
+				WHERE ps.record_id = i.id AND ps.processor = kb.canonical_op($8) AND ps.proc_status = LOWER($9)
+			) AND i.create_time >= $10 AND i.create_time <= $11 AND i.modify_time >= $12 AND i.modify_time <= $13 ORDER BY i.create_time DESC NULLS LAST, i.id DESC LIMIT $14 OFFSET $15`)
 	rows := sqlmock.NewRows([]string{
 		"id", "name", "parser_name", "type", "tenant_id", "ks_store_id", "title", "doc_no", "ks_desc", "source", "file_name",
 		"backup_filename", "result_filename", "publish_date", "authors", "owner",

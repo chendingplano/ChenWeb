@@ -260,6 +260,12 @@ def claim_candidates(conn, batch_size: int, claim_timeout: int) -> list[dict]:
     check-then-act `fetch_candidates`, which left a TOCTOU window between selecting
     a row and marking it in-progress.
     """
+    # parse_state is a denormalized rollup column on kb.inputs maintained by a DB
+    # trigger from kb.inputs.status (see
+    # ChenWeb/project_migrations/20260609000002_add_kb_inputs_status_rollups.sql).
+    # 'pending'  == no parse entry yet (never parsed);
+    # 'parsing'  == a parse is in progress (proc_status active).
+    # These replace the per-row jsonb_path_exists scans and use idx on parse_state.
     sql = """
         SELECT id,
                COALESCE(staging_filename, ''),
@@ -272,10 +278,9 @@ def claim_candidates(conn, batch_size: int, claim_timeout: int) -> list[dict]:
         FROM kb.inputs
         WHERE LOWER(type) = 'pdf'
           AND (
-              status IS NULL
-              OR NOT jsonb_path_exists(status, '$[*] ? (@.operation == "parsed")')
+              parse_state = 'pending'
               OR (
-                  jsonb_path_exists(status, '$[*] ? (@.operation == "parsed" && @.proc_status == "active")')
+                  parse_state = 'parsing'
                   AND modify_time < NOW() - make_interval(secs => %s)
               )
           )
@@ -375,15 +380,14 @@ def find_duplicate_processed_record(conn, rec_id: int, md5_hex: str) -> int | No
     """
     if not md5_hex:
         return None
+    # parse_state = 'parsed_success' is the trigger-maintained rollup equivalent of
+    # a status entry with operation 'parsed' and proc_status 'success'.
     sql = """
         SELECT id
         FROM kb.inputs
         WHERE id <> %s
           AND md5 = %s
-          AND jsonb_path_exists(
-              COALESCE(status, '[]'::jsonb),
-              '$[*] ? (@.operation == "parsed" && @.proc_status == "success")'
-          )
+          AND parse_state = 'parsed_success'
         ORDER BY id ASC
         LIMIT 1
     """

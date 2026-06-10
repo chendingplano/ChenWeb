@@ -14,7 +14,7 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import PauseIcon from '@lucide/svelte/icons/pause';
-	import { listDocProcLogs, listKbInputs, getKbFrontendConfig, stopKbInput, type KbInputRecord } from '$lib/services/kbService';
+	import { listDocProcLogs, listKbInputs, getKbFrontendConfig, stopKbInput, type KbInputRecord, type ParseState } from '$lib/services/kbService';
 	import KbInputSearchDialog from '$lib/components/home3/kb-input-search-dialog.svelte';
 	import {
 		ALL_CONFIGURABLE_PROCESSOR_IDS,
@@ -88,6 +88,103 @@
 	let syncInterval: ReturnType<typeof setInterval> | null = null;
 	let emptyPollCount = 0;
 	let prevActivePipelinesCount = 0;
+
+	// ── PDF Parsing monitor state ──────────────────────────────────────────
+
+	const PDF_ACTIVE_LIMIT = 20;
+	let pdfActiveParsing = $state<KbInputRecord[]>([]);
+	let pdfParsingLoading = $state(true);
+	let pdfParsingError = $state('');
+	let pdfStats = $state({ total: 0, success: 0, failed: 0, active: 0, waiting: 0 });
+
+	// Pie chart segments (parsed-success / parsed-failed / active / waiting)
+	let pieData = $derived([
+		{ key: 'success', label: 'Parsed Success', value: pdfStats.success, color: colorSuccess },
+		{ key: 'failed', label: 'Parsed Failed', value: pdfStats.failed, color: colorError },
+		{ key: 'active', label: 'Active', value: pdfStats.active, color: accent },
+		{ key: 'waiting', label: 'Waiting', value: pdfStats.waiting, color: textMuted }
+	]);
+	let pieTotal = $derived(pieData.reduce((sum, d) => sum + d.value, 0));
+
+	// Donut geometry — circumference of an r=42 circle.
+	const DONUT_C = 2 * Math.PI * 42;
+	let pieSegments = $derived.by(() => {
+		const total = pieTotal;
+		let acc = 0;
+		return pieData.map((d) => {
+			const frac = total > 0 ? d.value / total : 0;
+			const seg = { ...d, frac, dash: frac * DONUT_C, offset: -acc * DONUT_C };
+			acc += frac;
+			return seg;
+		});
+	});
+
+	// Bar chart series (new records / parsed-success / parsed-failed / wait)
+	let barData = $derived([
+		{ label: 'New Records', value: pdfStats.total, color: accent },
+		{ label: 'Parsed Success', value: pdfStats.success, color: colorSuccess },
+		{ label: 'Parsed Failed', value: pdfStats.failed, color: colorError },
+		{ label: 'Wait', value: pdfStats.waiting, color: textMuted }
+	]);
+	let barMax = $derived(Math.max(1, ...barData.map((b) => b.value)));
+
+	// Read a 0–100 percentage from a parsing entry's free-form progress string
+	// ("45%", "3/10", …). Returns null when no numeric progress is available.
+	function parseProgressPercent(record: KbInputRecord): number | null {
+		const entry = (record.status ?? []).find((e) => (e.operation ?? '').toLowerCase() === 'parsing');
+		const raw = entry?.progress?.trim();
+		if (!raw) return null;
+		const pct = raw.match(/(\d+(?:\.\d+)?)\s*%/);
+		if (pct) return Math.max(0, Math.min(100, parseFloat(pct[1])));
+		const ratio = raw.match(/(\d+)\s*\/\s*(\d+)/);
+		if (ratio) {
+			const a = parseFloat(ratio[1]);
+			const b = parseFloat(ratio[2]);
+			if (b > 0) return Math.max(0, Math.min(100, (a / b) * 100));
+		}
+		return null;
+	}
+
+	function parsingProgressText(record: KbInputRecord): string {
+		const entry = (record.status ?? []).find((e) => (e.operation ?? '').toLowerCase() === 'parsing');
+		return entry?.progress?.trim() ?? '';
+	}
+
+	async function pollPdfParsing() {
+		const base = {
+			docType: 'all',
+			parseState: 'all' as ParseState,
+			fileName: '',
+			startTime: '',
+			endTime: '',
+			page: 1,
+			pageSize: 1
+		};
+		try {
+			const [activeRes, successRes, failedRes, waitingRes, totalRes] = await Promise.all([
+				listKbInputs({ ...base, pageSize: PDF_ACTIVE_LIMIT, operation: 'parsing', procStatus: 'running' }),
+				listKbInputs({ ...base, operation: 'parsed', procStatus: 'success' }),
+				listKbInputs({ ...base, operation: 'parsed', procStatus: 'fail' }),
+				listKbInputs({ ...base, parseState: 'pending' }),
+				listKbInputs({ ...base })
+			]);
+			pdfActiveParsing = (activeRes.results ?? []).filter(
+				(r) => !r.file_name?.toLowerCase().endsWith('.zip')
+			);
+			pdfStats = {
+				total: totalRes.total ?? 0,
+				success: successRes.total ?? 0,
+				failed: failedRes.total ?? 0,
+				active: activeRes.total ?? 0,
+				waiting: waitingRes.total ?? 0
+			};
+			pdfParsingError = '';
+		} catch (err) {
+			pdfParsingError = err instanceof Error ? err.message : 'Failed to load PDF parsing status';
+		} finally {
+			pdfParsingLoading = false;
+		}
+	}
 
 	// ── Manual launch state ────────────────────────────────────────────────
 
@@ -263,6 +360,7 @@
 		} finally {
 			pipelinesLoading = false;
 		}
+		void pollPdfParsing();
 	}
 
 	async function publishEvent(subject: string, payload: Record<string, unknown>) {
@@ -288,7 +386,7 @@
 		// Re-convert triggers convert + downstream doc processing.
 		// Both supersede a standalone doc-processor publish to avoid double-processing.
 		if (reParse) {
-			await publishEvent('kb.pdf.staged', { record_id: String(record.id), force: true });
+			await publishEvent('kb.pdf.staged', { record_id: String(record.id), type: record.type ?? 'pdf', status: 'success', force: true });
 			return;
 		}
 		if (reConvert) {
@@ -787,6 +885,223 @@
 						<!-- Status line -->
 						<div class="mt-3" style="font-size:11px; color:{textMuted}; font-family:monospace; border-top:1px solid {borderColor}; padding-top:8px;">
 							Last: {lastStatusText(record)}
+						</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</section>
+
+	<!-- ── Section divider ────────────────────────────────────── -->
+	<div style="height:1px; background:{borderColor}; margin:0 24px;"></div>
+
+	<!-- ════════════════════════════════════════════════════════
+	     Section 1b — PDF Parsing Status
+	══════════════════════════════════════════════════════════ -->
+	<section class="p-6">
+
+		<!-- Section header -->
+		<div class="mb-4 flex items-start justify-between">
+			<div>
+				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">PDF Parsing</h2>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">Live PDF parse status, throughput and queue health</p>
+			</div>
+			<button
+				onclick={pollPdfParsing}
+				class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-none"
+				style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-weight:500; cursor:pointer;"
+				onmouseenter={(e) => {
+					(e.currentTarget as HTMLElement).style.color = textPrimary;
+					(e.currentTarget as HTMLElement).style.borderColor = accent + '60';
+				}}
+				onmouseleave={(e) => {
+					(e.currentTarget as HTMLElement).style.color = textSecondary;
+					(e.currentTarget as HTMLElement).style.borderColor = borderColor;
+				}}
+			>
+				<RefreshCwIcon class="h-3 w-3" />
+				Refresh
+			</button>
+		</div>
+
+		{#if pdfParsingError}
+			<div
+				class="mb-4 flex items-center gap-3 rounded-xl p-4"
+				style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:13px;"
+			>
+				<AlertCircleIcon class="h-4 w-4 flex-shrink-0" />
+				{pdfParsingError}
+			</div>
+		{/if}
+
+		<!-- Charts -->
+		<div class="mb-5 grid gap-4" style="grid-template-columns: minmax(0,1fr) minmax(0,1fr);">
+
+			<!-- Pie / donut chart -->
+			<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
+				<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">Parse State Distribution</div>
+				<div class="flex items-center gap-5">
+					<div class="relative flex-shrink-0" style="width:120px; height:120px;">
+						<svg viewBox="0 0 120 120" style="width:120px; height:120px; transform:rotate(-90deg);">
+							<circle cx="60" cy="60" r="42" fill="none" stroke={surface2} stroke-width="18" />
+							{#if pieTotal > 0}
+								{#each pieSegments as seg (seg.key)}
+									<circle
+										cx="60" cy="60" r="42" fill="none"
+										stroke={seg.color} stroke-width="18"
+										stroke-dasharray="{seg.dash} {DONUT_C - seg.dash}"
+										stroke-dashoffset={seg.offset}
+									/>
+								{/each}
+							{/if}
+						</svg>
+						<div class="absolute inset-0 flex flex-col items-center justify-center">
+							<span style="font-size:20px; font-weight:700; color:{textPrimary}; line-height:1;">{pieTotal}</span>
+							<span style="font-size:10px; color:{textMuted}; text-transform:uppercase; letter-spacing:0.06em;">total</span>
+						</div>
+					</div>
+					<div class="flex-1 space-y-1.5">
+						{#each pieData as d (d.key)}
+							<div class="flex items-center justify-between gap-2">
+								<div class="flex items-center gap-2 min-w-0">
+									<span style="width:9px; height:9px; border-radius:2px; background:{d.color}; flex-shrink:0;"></span>
+									<span style="font-size:12px; color:{textSecondary};" class="truncate">{d.label}</span>
+								</div>
+								<div class="flex items-center gap-2 flex-shrink-0">
+									<span style="font-size:12px; font-weight:600; color:{textPrimary}; font-variant-numeric:tabular-nums;">{d.value}</span>
+									<span style="font-size:11px; color:{textMuted}; font-variant-numeric:tabular-nums; min-width:34px; text-align:right;">
+										{pieTotal > 0 ? Math.round((d.value / pieTotal) * 100) : 0}%
+									</span>
+								</div>
+							</div>
+						{/each}
+					</div>
+				</div>
+			</div>
+
+			<!-- Bar chart -->
+			<div class="rounded-xl p-4" style="background:{cardBg}; border:1px solid {borderColor};">
+				<div style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">Throughput</div>
+				<div class="flex items-end justify-around gap-3" style="height:120px;">
+					{#each barData as b (b.label)}
+						<div class="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
+							<span style="font-size:12px; font-weight:600; color:{textPrimary}; font-variant-numeric:tabular-nums;">{b.value}</span>
+							<div
+								class="w-full rounded-t-md"
+								style="height:{Math.max(2, (b.value / barMax) * 84)}px; max-width:48px; background:{b.color}; transition:height 0.3s ease;"
+							></div>
+							<span style="font-size:10px; color:{textMuted}; text-align:center; line-height:1.2; height:24px;">{b.label}</span>
+						</div>
+					{/each}
+				</div>
+			</div>
+		</div>
+
+		<!-- Active PDF parsing list -->
+		<div class="mb-2" style="font-size:11px; font-weight:600; color:{textMuted}; text-transform:uppercase; letter-spacing:0.08em;">
+			Active PDF Parsing
+			<span style="color:{accent}; margin-left:4px;">({pdfStats.active})</span>
+		</div>
+
+		{#if pdfParsingLoading}
+			<div class="space-y-2">
+				{#each Array(2) as _, i}
+					<div class="rounded-xl" style="height:64px; background:{surface2}; border:1px solid {borderColor}; opacity:{1 - i * 0.3};"></div>
+				{/each}
+			</div>
+		{:else if pdfActiveParsing.length === 0}
+			<div
+				class="flex flex-col items-center rounded-xl py-10"
+				style="background:{surface2}; border:1px solid {borderColor};"
+			>
+				<FileTextIcon class="mb-3 h-8 w-8" style="color:{textMuted}; opacity:0.4;" />
+				<p style="font-size:13px; font-weight:500; color:{textSecondary}; margin:0 0 4px;">No PDFs parsing right now</p>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">Records currently in the PDF parser appear here.</p>
+			</div>
+		{:else}
+			<div class="space-y-2">
+				{#each pdfActiveParsing as record (record.id)}
+					{@const pct = parseProgressPercent(record)}
+					{@const progressText = parsingProgressText(record)}
+					<div
+						class="rounded-xl p-3.5"
+						style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 1px 3px rgba(0,0,0,0.20);"
+					>
+						<div class="flex items-center justify-between gap-3">
+							<div class="flex items-center gap-2 min-w-0">
+								<span
+									style="font-family:monospace; font-size:10px; font-weight:600; color:{accent};
+									       background:{accentTint}; border:1px solid {accent}30; border-radius:6px; padding:1px 6px; flex-shrink:0;"
+								>#{record.id}</span>
+								<span
+									class="truncate"
+									style="font-size:13px; font-weight:500; color:{textPrimary}; max-width:360px;"
+									title={record.file_name ?? recordTitle(record)}
+								>{record.file_name?.trim() || recordTitle(record)}</span>
+							</div>
+							<div class="flex flex-shrink-0 items-center gap-2">
+								<!-- Detail -->
+								<button
+									onclick={() => openDetail(record)}
+									title="View status details"
+									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:pointer;"
+									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; (e.currentTarget as HTMLElement).style.color = accent; }}
+									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
+								>
+									<FileTextIcon class="h-3 w-3" />
+									Detail
+								</button>
+								<!-- Restart -->
+								<button
+									onclick={() => openRestart(record)}
+									title="Restart parsing"
+									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+									style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; font-weight:500; cursor:pointer;"
+									onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.background = accent + '25'; }}
+									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = accentTint; }}
+								>
+									<PlayIcon class="h-3 w-3" />
+									Restart
+								</button>
+								<!-- Abort -->
+								<button
+									onclick={() => doStop(record)}
+									disabled={stoppingIds.has(record.id)}
+									title="Abort parsing"
+									class="flex items-center gap-1 rounded-lg px-2.5 py-1.5"
+									style="background:{surface2}; border:1px solid {borderColor}; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(record.id) ? 'not-allowed' : 'pointer'}; opacity:{stoppingIds.has(record.id) ? 0.5 : 1};"
+									onmouseenter={(e) => { if (!stoppingIds.has(record.id)) { (e.currentTarget as HTMLElement).style.background = colorErrorTint; (e.currentTarget as HTMLElement).style.color = colorError; } }}
+									onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.background = surface2; (e.currentTarget as HTMLElement).style.color = textMuted; }}
+								>
+									<XCircleIcon class="h-3 w-3" />
+									{stoppingIds.has(record.id) ? 'Aborting…' : 'Abort'}
+								</button>
+							</div>
+						</div>
+
+						<!-- Progress bar -->
+						<div class="mt-3 flex items-center gap-3">
+							<div
+								class="relative flex-1 overflow-hidden rounded-full"
+								style="height:7px; background:{surface2};"
+							>
+								{#if pct !== null}
+									<div
+										class="h-full rounded-full"
+										style="width:{pct}%; background:{accent}; transition:width 0.3s ease;"
+									></div>
+								{:else}
+									<!-- Indeterminate stripe while parsing with no numeric progress -->
+									<div
+										class="absolute inset-y-0 rounded-full"
+										style="width:35%; background:{accent}; animation:pdf-parse-indeterminate 1.4s ease-in-out infinite;"
+									></div>
+								{/if}
+							</div>
+							<span style="font-size:11px; color:{textSecondary}; font-family:monospace; min-width:48px; text-align:right;">
+								{pct !== null ? `${Math.round(pct)}%` : (progressText || 'parsing…')}
+							</span>
 						</div>
 					</div>
 				{/each}
@@ -1460,5 +1775,9 @@
 	@keyframes pulse-ring {
 		0%, 100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.4); }
 		50%       { box-shadow: 0 0 0 4px rgba(129, 140, 248, 0); }
+	}
+	@keyframes pdf-parse-indeterminate {
+		0%   { left: -35%; }
+		100% { left: 100%; }
 	}
 </style>
