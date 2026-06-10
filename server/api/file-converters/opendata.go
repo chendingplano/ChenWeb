@@ -702,10 +702,12 @@ func asInt(v any) int {
 	return 0
 }
 
+/*
 func asBBox(v any) [4]float64 {
 	bb, _ := asBBoxWithOK(v)
 	return bb
 }
+*/
 
 func asBBoxWithOK(v any) ([4]float64, bool) {
 	var out [4]float64

@@ -81,9 +81,24 @@ func (f *fakePublisher) Publish(_ context.Context, subject string, payload []byt
 }
 
 func TestHasParsedSuccess(t *testing.T) {
-	raw := `[{"operation":"parsed","proc-status":"success"}]`
-	if !HasParsedSuccess(raw) {
-		t.Fatalf("expected parsed success")
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"hyphen key", `[{"operation":"parsed","proc-status":"success"}]`, true},
+		{"underscore key (mineru/python parser)", `[{"operation":"parsed","proc_status":"success"}]`, true},
+		{"legacy status key", `[{"operation":"parsed","status":"success"}]`, true},
+		{"missing success", `[{"operation":"parsed","proc-status":"failed"}]`, false},
+		{"wrong operation", `[{"operation":"converted","proc-status":"success"}]`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := HasParsedSuccess(tc.raw)
+			if got != tc.want {
+				t.Fatalf("HasParsedSuccess(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
 	}
 }
 

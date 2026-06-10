@@ -221,7 +221,7 @@ WHERE id = $3`)
 		WithArgs(relativeHomePath, relativeBackupPath, int64(53)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if err := processStagingOnce(context.Background(), testLogger{}, db, stagingDir, backupDir, homeDir, nil); err != nil {
+	if err := processStagingOnce(context.Background(), testLogger{}, db, stagingDir, backupDir, homeDir, nil, nil); err != nil {
 		t.Fatalf("processStagingOnce: %v", err)
 	}
 
@@ -314,7 +314,7 @@ WHERE id = $3`)
 		WithArgs(filepath.Join("Artifacts", "0", "11", "doc.pdf"), filepath.Join("backup", "doc.pdf"), int64(11)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if err := processStagingOnce(context.Background(), testLogger{}, db, stagingDir, backupDir, homeDir, nil); err != nil {
+	if err := processStagingOnce(context.Background(), testLogger{}, db, stagingDir, backupDir, homeDir, nil, nil); err != nil {
 		t.Fatalf("processStagingOnce: %v", err)
 	}
 

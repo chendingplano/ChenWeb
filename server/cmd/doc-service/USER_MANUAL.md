@@ -2,7 +2,7 @@
 
 The PDF parser is a two-tier system for ingesting and OCR-processing PDF files.
 
-- **Go staging service** (`server/cmd/pdfparser/`) — watches a staging directory, deduplicates files by MD5, distributes them to backup and repository directories, and records each file in the `kb.inputs` database table.
+- **Go staging service** (`server/cmd/doc-service/`) — watches a staging directory, deduplicates files by MD5, distributes them to backup and repository directories, and records each file in the `kb.inputs` database table.
 - **Python OCR service** (`python/pdf-parser/`) — polls `kb.inputs` for unprocessed rows and dispatches PDFs to an OCR backend (OpenDataLoader or PaddleOCR).
 
 The Go service runs first; the Python service picks up where it leaves off.

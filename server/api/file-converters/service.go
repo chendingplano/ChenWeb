@@ -6,11 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -316,6 +314,7 @@ func (s *Service) convert(_ context.Context, rec InputRecord) ([]string, error) 
 	return outPaths, errors.Join(errs...)
 }
 
+/*
 func resolveOpenDataInputFile(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -493,6 +492,7 @@ func preferredOpenDataJSONName(path string) string {
 	}
 	return strings.TrimSuffix(filepath.Base(sourcePDF), filepath.Ext(sourcePDF)) + ".json"
 }
+*/
 
 func (s *Service) emitLineFileGeneratedEvent(ctx context.Context, recordID int64, lineFilePath string) error {
 	if s.Publisher == nil {
@@ -618,6 +618,9 @@ func HasOperationSuccess(rawStatus string, operation string) bool {
 			continue
 		}
 		proc := strings.ToLower(strings.TrimSpace(asString(e["proc-status"])))
+		if proc == "" {
+			proc = strings.ToLower(strings.TrimSpace(asString(e["proc_status"])))
+		}
 		if proc == "success" {
 			return true
 		}

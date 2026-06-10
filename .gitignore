@@ -44,5 +44,6 @@ pdfparser
 __pycache__
 
 doc-processor
+doc-service
 service-pdf-parser
 parser-result-converter

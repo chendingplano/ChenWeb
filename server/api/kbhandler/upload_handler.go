@@ -30,6 +30,7 @@ var allowedUploadTypes = map[string]struct{}{
 	"pdf":      {},
 	"zip":      {},
 	"doc":      {},
+	"docx":     {},
 	"excel":    {},
 	"ppt":      {},
 	"text":     {},

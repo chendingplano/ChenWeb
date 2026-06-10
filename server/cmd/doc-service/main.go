@@ -7,11 +7,13 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -31,7 +33,316 @@ import (
 const (
 	stagingWatchDebounce    = 500 * time.Millisecond
 	stagingFallbackInterval = 10 * time.Second
+	statusTimeLayout        = "20060102 15:04:05"
 )
+
+type statusEntry map[string]any
+
+type docParseJob struct {
+	recordID        int64
+	homePath        string
+	homeDir         string // DATA_HOME_DIR root; used to compute relative paths for DB
+	fileType        string
+	stagingFilename string // kb.inputs.staging_filename; used to derive output file name
+}
+
+func maxDocGoroutines() int {
+	v := strings.TrimSpace(os.Getenv("MAX_DOC_GOROUTINE"))
+	if v == "" {
+		return 4
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 4
+	}
+	return n
+}
+
+func decodeStatusEntries(raw string) []statusEntry {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return []statusEntry{}
+	}
+	var arr []statusEntry
+	if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+		return arr
+	}
+	var one statusEntry
+	if err := json.Unmarshal([]byte(raw), &one); err == nil {
+		return []statusEntry{one}
+	}
+	return []statusEntry{}
+}
+
+func statusEntryAsString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", x)
+	}
+}
+
+func appendParsedStatus(rawStatus string, start time.Time, durationMs int64, procErr error) (string, error) {
+	entries := decodeStatusEntries(rawStatus)
+	entry := statusEntry{
+		"operation":  "parsed",
+		"start_time": start.Format(statusTimeLayout),
+		"ms-used":    durationMs,
+	}
+	if procErr == nil {
+		entry["proc-status"] = "success"
+	} else {
+		entry["proc-status"] = "failed"
+		entry["error"] = procErr.Error()
+	}
+
+	replaced := false
+	dedup := make([]statusEntry, 0, len(entries)+1)
+	for _, e := range entries {
+		op := strings.ToLower(strings.TrimSpace(statusEntryAsString(e["operation"])))
+		if op != "parsed" {
+			dedup = append(dedup, e)
+			continue
+		}
+		if !replaced {
+			dedup = append(dedup, entry)
+			replaced = true
+		}
+	}
+	if !replaced {
+		dedup = append(dedup, entry)
+	}
+
+	out, err := json.Marshal(dedup)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// sofficeBinary resolves the LibreOffice CLI binary. Checks SOFFICE_PATH env
+// first, then PATH, then the macOS app bundle.
+func sofficeBinary() (string, error) {
+	if path := strings.TrimSpace(os.Getenv("SOFFICE_PATH")); path != "" {
+		return path, nil
+	}
+	if path, err := exec.LookPath("soffice"); err == nil {
+		return path, nil
+	}
+	const macPath = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+	if _, err := os.Stat(macPath); err == nil {
+		return macPath, nil
+	}
+	return "", fmt.Errorf("(CWB_DOCX_007) soffice not found; install LibreOffice or set SOFFICE_PATH")
+}
+
+// convertDocxToPDF converts the file at docxPath to PDF using LibreOffice
+// headless, writing the output into the same directory alongside the original.
+// Returns the PDF path, the trimmed soffice output, and any error.
+// The context controls the subprocess lifetime — callers should supply a timeout.
+func convertDocxToPDF(ctx context.Context, docxPath string) (pdfPath string, cmdOut string, err error) {
+	soffice, err := sofficeBinary()
+	if err != nil {
+		return "", "", err
+	}
+	outDir := filepath.Dir(docxPath)
+	cmd := exec.CommandContext(ctx, soffice,
+		"--headless", "--norestore", "--nofirststartwizard",
+		"--convert-to", "pdf", "--outdir", outDir, docxPath)
+	raw, runErr := cmd.CombinedOutput()
+	cmdOut = strings.TrimSpace(string(raw))
+	if runErr != nil {
+		return "", cmdOut, fmt.Errorf("(CWB_DOCX_008) soffice convert failed: %w", runErr)
+	}
+	stem := strings.TrimSuffix(filepath.Base(docxPath), filepath.Ext(docxPath))
+	pdfPath = filepath.Join(outDir, stem+".pdf")
+	if _, err := os.Stat(pdfPath); err != nil {
+		return "", cmdOut, fmt.Errorf("(CWB_DOCX_008) expected pdf output not found at %s: %w", pdfPath, err)
+	}
+	return pdfPath, cmdOut, nil
+}
+
+func appendReroutedStatus(rawStatus string, start time.Time, originalDocxRelPath, pdfRelPath string) (string, error) {
+	entries := decodeStatusEntries(rawStatus)
+	entry := statusEntry{
+		"operation":           "docx-rerouted",
+		"start_time":          start.Format(statusTimeLayout),
+		"note":                "image-only docx: converted to pdf and routed to pdf pipeline",
+		"original_docx_path":  originalDocxRelPath,
+		"pdf_path":            pdfRelPath,
+	}
+	entries = append(entries, entry)
+	out, err := json.Marshal(entries)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func rerouteDocxAsPDF(ctx context.Context, db *sql.DB, recordID int64, pdfRelPath, statusJSON string) error {
+	const stmt = `
+UPDATE kb.inputs
+SET type = 'pdf',
+    file_name = $1,
+    result_filename = '',
+    status = $2::jsonb,
+    modify_time = NOW()
+WHERE id = $3`
+	_, err := db.ExecContext(ctx, stmt, pdfRelPath, statusJSON, recordID)
+	return err
+}
+
+func updateParsedStatus(ctx context.Context, db *sql.DB, recordID int64, resultFilename, statusJSON string) error {
+	const stmt = `
+UPDATE kb.inputs
+SET result_filename = $1,
+    status = $2::jsonb,
+    modify_time = NOW()
+WHERE id = $3`
+	_, err := db.ExecContext(ctx, stmt, resultFilename, statusJSON, recordID)
+	return err
+}
+
+func runDocParseWorker(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, jobs <-chan docParseJob, publisher *stageEventPublisher) {
+	var parser DocxParser
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job, ok := <-jobs:
+			if !ok {
+				return
+			}
+			start := time.Now()
+			// Output path: ARTIFACT_DIR/<group>/<record_id>/<staging_filename_root>_docx.txt
+			outputPath := docxOutputPath(filepath.Dir(job.homePath), job.stagingFilename)
+			lineFilePath, lineCount, parseErr := parser.Parse(job.homePath, outputPath)
+			durationMs := time.Since(start).Milliseconds()
+
+			var rawStatus string
+			if err := db.QueryRowContext(ctx,
+				`SELECT COALESCE(status::text, '[]') FROM kb.inputs WHERE id = $1`,
+				job.recordID,
+			).Scan(&rawStatus); err != nil {
+				logger.Error("docx worker: fetch status failed", "record_id", job.recordID, "error", err)
+				rawStatus = "[]"
+			}
+
+			if errors.Is(parseErr, ErrDocImageOnly) {
+				logger.Info("docx worker: image-only docx detected, converting to pdf",
+					"record_id", job.recordID, "path", job.homePath)
+
+				convCtx, convCancel := context.WithTimeout(ctx, 2*time.Minute)
+				logger.Info("docx worker: running soffice conversion",
+					"record_id", job.recordID,
+					"soffice", func() string { p, _ := sofficeBinary(); return p }(),
+					"docx", job.homePath,
+					"outdir", filepath.Dir(job.homePath))
+				pdfPath, sofficeOut, convErr := convertDocxToPDF(convCtx, job.homePath)
+				convCancel()
+				if sofficeOut != "" {
+					logger.Info("docx worker: soffice output",
+						"record_id", job.recordID, "output", sofficeOut)
+				}
+				if convErr != nil {
+					logger.Error("docx worker: docx-to-pdf conversion failed",
+						"record_id", job.recordID, "path", job.homePath, "error", convErr)
+					parseErr = convErr
+					goto normalFlow
+				}
+				logger.Info("docx worker: docx converted to pdf; both files saved",
+					"record_id", job.recordID, "docx", job.homePath, "pdf", pdfPath)
+
+				docxRelPath, relErr := relativePathFromHomeDir(job.homeDir, job.homePath)
+				if relErr != nil {
+					logger.Error("docx worker: resolve docx relative path failed",
+						"record_id", job.recordID, "docx", job.homePath, "error", relErr)
+					parseErr = relErr
+					goto normalFlow
+				}
+				pdfRelPath, relErr := relativePathFromHomeDir(job.homeDir, pdfPath)
+				if relErr != nil {
+					logger.Error("docx worker: resolve pdf relative path failed",
+						"record_id", job.recordID, "pdf", pdfPath, "error", relErr)
+					parseErr = relErr
+					goto normalFlow
+				}
+				updatedStatus, err := appendReroutedStatus(rawStatus, start, docxRelPath, pdfRelPath)
+				if err != nil {
+					logger.Error("docx worker: build rerouted status failed", "record_id", job.recordID, "error", err)
+					continue
+				}
+				if err := rerouteDocxAsPDF(ctx, db, job.recordID, pdfRelPath, updatedStatus); err != nil {
+					logger.Error("docx worker: reroute db update failed", "record_id", job.recordID, "error", err)
+					continue
+				}
+				if publisher == nil {
+					logger.Warn("docx worker: publisher is nil, skipping pdf stage event",
+						"record_id", job.recordID, "pdf", pdfPath)
+					continue
+				}
+				if err := publisher.Publish(stageEvent{
+					RecordID:   job.recordID,
+					Type:       "pdf",
+					Status:     "success",
+					Force:      true,
+					FileFormat: "pdf",
+					FileName:   pdfPath,
+				}); err != nil {
+					logger.Error("docx worker: publish pdf stage event failed",
+						"record_id", job.recordID, "pdf", pdfPath, "error", err)
+					continue
+				}
+				logger.Info("docx worker: pdf stage event published",
+					"record_id", job.recordID, "pdf", pdfPath, "subject", publisher.subject)
+				continue
+			}
+
+		normalFlow:
+
+			updatedStatus, err := appendParsedStatus(rawStatus, start, durationMs, parseErr)
+			if err != nil {
+				logger.Error("docx worker: build parsed status failed", "record_id", job.recordID, "error", err)
+				continue
+			}
+
+			resultFilename := ""
+			if parseErr == nil {
+				resultFilename = lineFilePath
+			}
+			if err := updateParsedStatus(ctx, db, job.recordID, resultFilename, updatedStatus); err != nil {
+				logger.Error("docx worker: update parsed status failed", "record_id", job.recordID, "error", err)
+			}
+
+			if parseErr != nil {
+				logger.Error("docx worker: parse failed",
+					"record_id", job.recordID, "path", job.homePath, "type", job.fileType, "error", parseErr)
+				continue
+			}
+
+			logger.Info("docx worker: document parsed",
+				"record_id", job.recordID, "path", job.homePath, "type", job.fileType,
+				"line_file", lineFilePath, "lines", lineCount, "duration_ms", durationMs)
+
+			if publisher != nil {
+				if err := publisher.Publish(stageEvent{
+					RecordID:   job.recordID,
+					Type:       job.fileType,
+					Status:     "success",
+					Force:      true,
+					FileFormat: job.fileType,
+					FileName:   job.homePath,
+				}); err != nil {
+					logger.Error("docx worker: publish stage event failed",
+						"record_id", job.recordID, "error", err)
+				}
+			}
+		}
+	}
+}
 
 func main() {
 	var (
@@ -107,7 +418,14 @@ func main() {
 		defer publisher.Close()
 	}
 
-	go runStagingThread(ctx, logger, ApiTypes.ProjectDBHandle, stagingDir, backupDir, homeDir, publisher)
+	numDocWorkers := maxDocGoroutines()
+	docParseCh := make(chan docParseJob, numDocWorkers)
+	for i := 0; i < numDocWorkers; i++ {
+		go runDocParseWorker(ctx, logger, ApiTypes.ProjectDBHandle, docParseCh, publisher)
+	}
+	logger.Info("docx parse workers started", "count", numDocWorkers)
+
+	go runStagingThread(ctx, logger, ApiTypes.ProjectDBHandle, stagingDir, backupDir, homeDir, publisher, docParseCh)
 	logger.Info("staging thread started", "staging_dir", stagingDir, "backup_dir", backupDir, "home_dir", homeDir)
 
 	quit := make(chan os.Signal, 1)
@@ -116,7 +434,7 @@ func main() {
 	logger.Info("shutdown signal received; stopping")
 }
 
-func runStagingThread(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, stagingDir, backupDir, homeDir string, publisher *stageEventPublisher) {
+func runStagingThread(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, stagingDir, backupDir, homeDir string, publisher *stageEventPublisher, docParseCh chan docParseJob) {
 	logger.Info("staging thread started",
 		"fallback_interval", stagingFallbackInterval.String(),
 		"watch_debounce", stagingWatchDebounce.String(),
@@ -126,7 +444,7 @@ func runStagingThread(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.D
 	)
 
 	process := func() error {
-		return processStagingOnce(ctx, logger, db, stagingDir, backupDir, homeDir, publisher)
+		return processStagingOnce(ctx, logger, db, stagingDir, backupDir, homeDir, publisher, docParseCh)
 	}
 
 	if err := process(); err != nil {
@@ -267,7 +585,7 @@ func shouldProcessStagingEvent(event fsnotify.Event) bool {
 	return event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) != 0
 }
 
-func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, stagingDir, backupDir, homeDir string, publisher *stageEventPublisher) error {
+func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, stagingDir, backupDir, homeDir string, publisher *stageEventPublisher, docParseCh chan docParseJob) error {
 	if err := os.MkdirAll(stagingDir, 0755); err != nil {
 		return fmt.Errorf("ensure staging dir failed: %w", err)
 	}
@@ -325,6 +643,19 @@ func processStagingOnce(ctx context.Context, logger ApiTypes.JimoLogger, db *sql
 			"record_id", recordID,
 			"updated_existing_row", updated,
 		)
+
+		if strings.EqualFold(fileType, "doc") || strings.EqualFold(fileType, "docx") {
+			if docParseCh != nil {
+				select {
+				case docParseCh <- docParseJob{recordID: recordID, homePath: homePath, homeDir: homeDir, fileType: fileType, stagingFilename: entry.Name()}:
+				default:
+					logger.Warn("docx parse queue full; dropping job",
+						"record_id", recordID, "path", homePath, "type", fileType)
+				}
+			}
+			continue
+		}
+
 		if publisher != nil && strings.EqualFold(fileType, "pdf") {
 			if err := publisher.Publish(stageEvent{
 				RecordID:   recordID,
