@@ -292,7 +292,7 @@ class TestRecordParsedStatus:
         assert conn.commit_called is True
         assert len(entries) == 1
         assert entries[0]["operation"] == "parsed"
-        assert entries[0]["proc_status"] == "fail"
+        assert entries[0]["proc_status"] == "failed"
         assert entries[0]["parser_name"] == "mineru"
 
 

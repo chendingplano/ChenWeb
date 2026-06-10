@@ -419,6 +419,7 @@ def insert_staged_pdf_record(conn, file_path: str, md5_hex: str) -> None:
 def record_parse_active(
     conn, rec_id: int, raw_status: str,
     start_time: str, ms_used: int, progress_pct: int,
+    parser_name: str = "", num_pages: int = 0,
 ) -> str:
     """Upsert the single 'parsed' entry to proc_status='active' with progress."""
     new_status = upsert_status(
@@ -428,6 +429,8 @@ def record_parse_active(
             "progress": f"{progress_pct}%",
             "start_time": start_time,
             "ms_used": ms_used,
+            "parser_name": parser_name,
+            "num_pages": num_pages,
         },
     )
     sql = """
@@ -488,7 +491,7 @@ def record_parsed_failure(
     new_status = upsert_status(
         raw_status, PARSE_OPERATION,
         {
-            "proc_status": "fail",
+            "proc_status": "failed",
             "parser_name": parser_name,
             "start_time": start_time,
             "ms_used": ms_used,

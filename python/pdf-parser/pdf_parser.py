@@ -234,7 +234,7 @@ def should_drop_stage_event(exc: Exception) -> bool:
 # ---------------------------------------------------------------------------
 
 def make_throttled_progress(
-    db_update: Callable[[int, int], None],
+    db_update: Callable[[int, int, int], None],
     min_interval: float = 3.0,
 ) -> Callable[[int, int], None]:
     """Wrap a DB progress-update callback with a time-based throttle.
@@ -243,7 +243,7 @@ def make_throttled_progress(
     seconds have elapsed since the last DB write.
 
     Args:
-        db_update: Callable(ms_used, progress_pct) that writes to DB.
+        db_update: Callable(ms_used, progress_pct, total_pages) that writes to DB.
         min_interval: Minimum seconds between DB writes.
 
     Returns:
@@ -256,7 +256,7 @@ def make_throttled_progress(
         if state["last_write"] == 0.0 or (now - state["last_write"]) >= min_interval:
             ms_used = int((now - state["start"]) * 1000)
             pct = int(page_finished * 100 / total_pages) if total_pages > 0 else 0
-            db_update(ms_used, pct)
+            db_update(ms_used, pct, total_pages)
             state["last_write"] = now
 
     return throttled
@@ -410,12 +410,12 @@ def _process_record(
 
         # Initial in-progress status (idempotent: in poll mode the claim already
         # stamped proc_status=active; this merges/refreshes it).
-        raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, 0, 0)
+        raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, 0, 0, parser_name)
 
         # Throttled progress callback
-        def _db_progress(ms_used: int, pct: int) -> None:
+        def _db_progress(ms_used: int, pct: int, n_pages: int = 0) -> None:
             nonlocal raw_status
-            raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, ms_used, pct)
+            raw_status = record_parse_active(conn, rec_id, raw_status, parse_start, ms_used, pct, parser_name, n_pages)
 
         throttled = make_throttled_progress(_db_progress, min_interval=3.0)
 

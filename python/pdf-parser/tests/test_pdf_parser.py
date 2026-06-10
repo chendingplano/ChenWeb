@@ -50,7 +50,7 @@ class TestThrottledProgress:
     def test_first_call_always_fires(self):
         db_calls = []
 
-        def db_update(ms_used, pct):
+        def db_update(ms_used, pct, total_pages):
             db_calls.append((ms_used, pct))
 
         throttled = make_throttled_progress(db_update, min_interval=3.0)
@@ -60,7 +60,7 @@ class TestThrottledProgress:
     def test_suppresses_rapid_calls(self):
         db_calls = []
 
-        def db_update(ms_used, pct):
+        def db_update(ms_used, pct, total_pages):
             db_calls.append(pct)
 
         throttled = make_throttled_progress(db_update, min_interval=3.0)
@@ -72,7 +72,7 @@ class TestThrottledProgress:
     def test_fires_after_interval(self):
         db_calls = []
 
-        def db_update(ms_used, pct):
+        def db_update(ms_used, pct, total_pages):
             db_calls.append(pct)
 
         throttled = make_throttled_progress(db_update, min_interval=0.0)
