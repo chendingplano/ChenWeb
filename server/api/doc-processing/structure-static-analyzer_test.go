@@ -40,7 +40,7 @@ func TestStaticAnalyzer_SuccessWritesCorrectedAndStatus(t *testing.T) {
 		FileName:        "source.pdf",
 		StatusRaw:       "[]",
 	}}
-	p := NewStaticAnalyzerProcessor(store, nil)
+	p := NewStaticAnalyzerProcessor(store, nil, nil)
 
 	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"9001"}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -118,7 +118,7 @@ func TestStaticAnalyzer_MissingArtifactDirFailsFast(t *testing.T) {
 	t.Setenv("ARTIFACT_DIR", "")
 	t.Setenv("EXTRACT_DOCMETA_PROMPT", "false")
 	store := &fakeDocMetadataStore{}
-	p := NewStaticAnalyzerProcessor(store, nil)
+	p := NewStaticAnalyzerProcessor(store, nil, nil)
 	err := p.HandleEvent(context.Background(), []byte(`{"record_id":"1"}`))
 	if err == nil || !strings.Contains(err.Error(), "missing ARTIFACT_DIR") {
 		t.Fatalf("err=%v, want missing ARTIFACT_DIR", err)
@@ -859,7 +859,7 @@ func TestStaticAnalyzer_HandleEvent_WritesMergeOnlyOverrideOutput(t *testing.T) 
 		StatusRaw:       "[]",
 	}}
 	logger := &fakeLogger{}
-	p := NewStaticAnalyzerProcessor(store, logger)
+	p := NewStaticAnalyzerProcessor(store, nil, logger)
 
 	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"9012"}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)

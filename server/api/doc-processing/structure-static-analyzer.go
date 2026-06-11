@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -37,6 +38,28 @@ type StaticAnalyzerProcessor struct {
 	Now            func() time.Time
 	ArtifactDir    string
 	OverrideOrigin bool
+	TOCDetector    *staticTOCDetector
+}
+
+// staticTOCDetector holds the LLM client and configuration for LLM-based TOC line detection.
+// When nil or not ready, detection falls back to static pattern matching.
+type staticTOCDetector struct {
+	Client            LLMJSONExtractor
+	PromptText        string
+	PromptRef         string
+	PromptErr         error
+	ModelName         string
+	ModelCfg          structureModelConfig
+	FallbackModelName string
+	FallbackModelCfg  structureModelConfig
+	FallbackModelErr  error
+	NumPages          int
+	FallbackPages     int
+	Logger            ApiTypes.JimoLogger
+}
+
+func (d *staticTOCDetector) isReady() bool {
+	return d != nil && d.Client != nil && d.PromptErr == nil && d.ModelName != ""
 }
 
 type staticInputLine struct {
@@ -70,11 +93,38 @@ type staticStatusParams struct {
 	ProcErr         error
 }
 
-func NewStaticAnalyzerProcessor(store DocMetadataStore, logger ApiTypes.JimoLogger) *StaticAnalyzerProcessor {
+func NewStaticAnalyzerProcessor(store DocMetadataStore, client LLMJSONExtractor, logger ApiTypes.JimoLogger) *StaticAnalyzerProcessor {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26042301")
 	}
 	extractPrompt := strings.TrimSpace(os.Getenv("EXTRACT_DOCMETA_PROMPT"))
+
+	var tocDetector *staticTOCDetector
+	if client != nil {
+		promptText, promptRef, _, promptErr := loadTOCDetectPromptFromEnv()
+		modelRef, _, modelCfg, modelErr := loadModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_NAME", "EXTRACT_DOCMETA_MODELS_FILE")
+		fallbackRef, _, fallbackCfg, fallbackErr := loadOptionalModelConfigFromEnv("EXTRACT_DOCMETA_MODEL_FALLBACK", "EXTRACT_DOCMETA_MODELS_FILE")
+		_ = modelRef
+		_ = fallbackRef
+		if modelErr != nil {
+			promptErr = modelErr
+		}
+		tocDetector = &staticTOCDetector{
+			Client:            client,
+			PromptText:        promptText,
+			PromptRef:         promptRef,
+			PromptErr:         promptErr,
+			ModelName:         modelCfg.ModelName,
+			ModelCfg:          modelCfg,
+			FallbackModelName: fallbackCfg.ModelName,
+			FallbackModelCfg:  fallbackCfg,
+			FallbackModelErr:  fallbackErr,
+			NumPages:          envInt("DETECT_TOC_NUM_PAGES", 3, 1),
+			FallbackPages:     envInt("DETECT_TOC_FALLBACK_PAGES", 5, 1),
+			Logger:            logger,
+		}
+	}
+
 	return &StaticAnalyzerProcessor{
 		Store:          store,
 		Logger:         logger,
@@ -82,6 +132,7 @@ func NewStaticAnalyzerProcessor(store DocMetadataStore, logger ApiTypes.JimoLogg
 		Now:            time.Now,
 		ArtifactDir:    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		OverrideOrigin: strings.ToLower(extractPrompt) != "false",
+		TOCDetector:    tocDetector,
 	}
 }
 
@@ -133,7 +184,7 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 		return p.failAndPersist(ctx, rec, start, inputFilename, 0, 0, 0, fmt.Errorf("(MID_26042305) read input file: %w", err))
 	}
 
-	out, err := analyzeStaticStructure(body, p.Logger)
+	out, err := analyzeStaticStructureCtx(ctx, body, p.Logger, p.TOCDetector)
 	if err != nil {
 		return p.failAndPersist(ctx, rec, start, inputFilename, 0, 0, 0, err)
 	}
@@ -345,9 +396,14 @@ func writeAtomicFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-// analyzeStaticStructure
-// This is the main function for static analysis.
+// analyzeStaticStructure is the main entry for pure-static analysis (no LLM). Tests use this.
 func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnalyzeResult, error) {
+	return analyzeStaticStructureCtx(context.Background(), body, logger, nil)
+}
+
+// analyzeStaticStructureCtx is the full implementation. When toc is ready, LLM detects TOC lines;
+// otherwise falls back to static pattern matching.
+func analyzeStaticStructureCtx(ctx context.Context, body []byte, logger ApiTypes.JimoLogger, toc *staticTOCDetector) (staticAnalyzeResult, error) {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26051001")
 	}
@@ -366,8 +422,8 @@ func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnal
 		numLines++
 		line, err := parseStaticInputLine(raw)
 		if err != nil {
-			logger.Error("Failed to parse static input line", "Error", err)
-			return staticAnalyzeResult{}, err
+			logger.Warn("skipping malformed input line", "Error", err, "raw", raw)
+			continue
 		}
 		if _, exists := seenLineNo[line.LineNo]; exists {
 			continue
@@ -390,7 +446,13 @@ func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnal
 		corrected[line.LineNo] = "unchanged"
 	}
 
-	lastTOC := applyStaticDetectTableOfContent(lines, corrected, logger)
+	logger.Info("detect table of content invoked", "line_count", len(lines))
+	var lastTOC int
+	if toc.isReady() {
+		lastTOC = applyLLMTOCLabels(ctx, lines, corrected, toc)
+	} else {
+		lastTOC = applyStaticTOCLabels(lines, corrected, logger)
+	}
 	applyStaticDetectHeadings(lastTOC, lines, corrected, logger)
 	lines = applyStaticMergeLines(lines, corrected, logger)
 	applyStaticDetectItemLists(lines, corrected, logger)
@@ -412,6 +474,239 @@ func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnal
 		NumLines:      numLines,
 		OutputChanged: outputChanged,
 	}, nil
+}
+
+// applyLLMTOCLabels uses the LLM to detect TOC lines and updates the corrected map.
+// It falls back to static detection if the LLM call fails.
+func applyLLMTOCLabels(ctx context.Context, lines []staticInputLine, corrected map[int]string, toc *staticTOCDetector) int {
+	_, firstTOC := findStaticTOCHint(lines)
+
+	// Collect the page range to send to the LLM.
+	pageSet := make(map[int]struct{}, toc.NumPages)
+	if firstTOC >= 0 {
+		startPage := lines[firstTOC].PageNo
+		for p := startPage; p < startPage+toc.NumPages; p++ {
+			pageSet[p] = struct{}{}
+		}
+	} else {
+		for p := 1; p <= toc.FallbackPages; p++ {
+			pageSet[p] = struct{}{}
+		}
+	}
+
+	var targetLines []staticInputLine
+	for _, line := range lines {
+		if _, ok := pageSet[line.PageNo]; ok {
+			targetLines = append(targetLines, line)
+		}
+	}
+	if len(targetLines) == 0 {
+		return -1
+	}
+
+	inputJSON := staticInputLinesToJSON(targetLines)
+	tocLineNums, usedModel, err := toc.detectTOCLines(ctx, inputJSON)
+	if err != nil {
+		toc.Logger.Warn("LLM TOC detection failed, falling back to static detection",
+			"error", err,
+			"prompt", toc.PromptRef,
+		)
+		return applyStaticTOCLabels(lines, corrected, toc.Logger)
+	}
+
+	if len(tocLineNums) == 0 {
+		toc.Logger.Info("LLM TOC detection: no TOC lines found", "model", usedModel)
+		return -1
+	}
+
+	toc.Logger.Info("LLM TOC detection succeeded",
+		"model", usedModel,
+		"toc_line_count", len(tocLineNums),
+	)
+
+	lineNoSet := make(map[int]struct{}, len(tocLineNums))
+	for _, n := range tocLineNums {
+		lineNoSet[n] = struct{}{}
+	}
+
+	lastIdx := -1
+	for i, line := range lines {
+		if _, ok := lineNoSet[line.LineNo]; ok {
+			corrected[line.LineNo] = "toc"
+			lastIdx = i
+		}
+	}
+	return lastIdx
+}
+
+// findStaticTOCHint returns the index of the TOC title line (start) and
+// the index of the first actual TOC entry (firstTOC) using static patterns.
+// Returns (-1, -1) if no TOC title is found.
+func findStaticTOCHint(lines []staticInputLine) (start, firstTOC int) {
+	start = -1
+	tocPage := 0
+	for i, line := range lines {
+		n := normalizeStaticTitle(line.Content)
+		if n == "tableofcontent" || n == "tableofcontents" || n == "目录" || n == "目次" {
+			start = i
+			tocPage = line.PageNo
+			break
+		}
+	}
+	if start < 0 {
+		return -1, -1
+	}
+	firstTOC = -1
+	for i := start + 1; i < len(lines); i++ {
+		if lines[i].PageNo != tocPage {
+			break
+		}
+		if isStaticTOCLine(lines[i]) {
+			firstTOC = i
+			break
+		}
+	}
+	return start, firstTOC
+}
+
+// detectTOCLines calls the LLM (with fallback) and returns the line numbers identified as TOC.
+func (d *staticTOCDetector) detectTOCLines(ctx context.Context, inputJSON string) ([]int, string, error) {
+	result, err := d.callLLM(ctx, d.ModelName, d.ModelCfg, inputJSON)
+	if err == nil {
+		return parseTOCDetectionResult(result), d.ModelName, nil
+	}
+
+	if d.FallbackModelName == "" || d.FallbackModelErr != nil {
+		return nil, d.ModelName, fmt.Errorf("(MID_26061101) TOC LLM detection failed and fallback not configured: %w", err)
+	}
+
+	d.Logger.Warn("primary TOC LLM call failed, trying fallback",
+		"primary_model", d.ModelName,
+		"fallback_model", d.FallbackModelName,
+		"error", err,
+	)
+	result, fallbackErr := d.callLLM(ctx, d.FallbackModelName, d.FallbackModelCfg, inputJSON)
+	if fallbackErr != nil {
+		return nil, d.FallbackModelName, fmt.Errorf("(MID_26061102) TOC primary failed: %w; fallback failed: %v", err, fallbackErr)
+	}
+	return parseTOCDetectionResult(result), d.FallbackModelName, nil
+}
+
+func (d *staticTOCDetector) callLLM(ctx context.Context, modelName string, cfg structureModelConfig, inputJSON string) (map[string]any, error) {
+	applyStructureModelConfigToExtractor(d.Client, cfg)
+	in := llmclients.JSONExtractionInput{
+		PromptText: d.PromptText,
+		ModelName:  modelName,
+		InputText:  inputJSON,
+	}
+	if structured, ok := d.Client.(LLMStructuredJSONExtractor); ok {
+		result, err := structured.ExtractStructuredJSON(ctx, in, tocDetectionContract())
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			return map[string]any{}, nil
+		}
+		return result.Parsed, nil
+	}
+	return d.Client.ExtractJSON(ctx, in)
+}
+
+func parseTOCDetectionResult(parsed map[string]any) []int {
+	raw, ok := parsed["toc_line_numbers"]
+	if !ok {
+		return nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]int, 0, len(arr))
+	for _, v := range arr {
+		n := int(toFloat(v))
+		if n > 0 {
+			result = append(result, n)
+		}
+	}
+	return result
+}
+
+// staticInputLinesToJSON serialises static input lines as a JSON array for LLM input.
+func staticInputLinesToJSON(lines []staticInputLine) string {
+	type lineObj struct {
+		Flag       string `json:"flag"`
+		LineNumber int    `json:"line_number"`
+		PageNumber int    `json:"page_number"`
+		LineType   string `json:"line_type"`
+		Content    string `json:"content"`
+	}
+	objs := make([]lineObj, 0, len(lines))
+	for _, line := range lines {
+		if strings.EqualFold(line.OriginalLineLower, "image") {
+			continue
+		}
+		objs = append(objs, lineObj{
+			Flag:       "n",
+			LineNumber: line.LineNo,
+			PageNumber: line.PageNo,
+			LineType:   line.OriginalLineType,
+			Content:    line.Content,
+		})
+	}
+	bs, _ := json.Marshal(objs)
+	return string(bs)
+}
+
+// loadTOCDetectPromptFromEnv loads the TOC detection prompt from the DETECT_TOC_LINES_PROMPT env var.
+func loadTOCDetectPromptFromEnv() (promptText, promptRef, promptPath string, promptErr error) {
+	promptRef = strings.TrimSpace(os.Getenv("DETECT_TOC_LINES_PROMPT"))
+	if promptRef == "" {
+		return "", "", "", fmt.Errorf("(MID_26061103) DETECT_TOC_LINES_PROMPT not set")
+	}
+
+	paths := make([]string, 0, 5)
+	addCandidate := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		for _, existing := range paths {
+			if existing == p {
+				return
+			}
+		}
+		paths = append(paths, p)
+	}
+
+	if filepath.IsAbs(promptRef) {
+		addCandidate(promptRef)
+	} else {
+		addCandidate(promptRef)
+		if promptDir := strings.TrimSpace(os.Getenv("PROMPT_DIR")); promptDir != "" {
+			addCandidate(filepath.Join(promptDir, promptRef))
+		}
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", promptRef))
+		addCandidate(filepath.Join("server", "cmd", "doc-processor", "prompts", promptRef))
+		addCandidate(filepath.Join("prompts", promptRef))
+	}
+
+	var lastErr error
+	for _, candidate := range paths {
+		bs, err := os.ReadFile(candidate)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		text := strings.TrimSpace(string(bs))
+		if text == "" {
+			return "", promptRef, candidate, fmt.Errorf("(MID_26061104) TOC detect prompt file is empty")
+		}
+		return text, promptRef, candidate, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("(MID_26061105) no candidate path available")
+	}
+	return "", promptRef, "", fmt.Errorf("(MID_26061106) TOC detect prompt file not found: %w", lastErr)
 }
 
 func applyStaticRemoveFullPageImageArtifactLines(lines []staticInputLine, logger ApiTypes.JimoLogger) []staticInputLine {
@@ -512,13 +807,6 @@ func applyStaticCorrectHeadings(lines []staticInputLine, logger ApiTypes.JimoLog
 		}
 	}
 	return lines
-}
-
-func applyStaticDetectTableOfContent(lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) int {
-	if logger != nil {
-		logger.Info("detect table of content invoked", "line_count", len(lines))
-	}
-	return applyStaticTOCLabels(lines, corrected, logger)
 }
 
 func applyStaticDetectHeadings(lastTOC int, lines []staticInputLine, corrected map[int]string, logger ApiTypes.JimoLogger) {

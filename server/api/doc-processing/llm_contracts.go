@@ -283,6 +283,17 @@ func productExtractionContract() llmclients.StructuredOutputContract {
 	))
 }
 
+func tocDetectionContract() llmclients.StructuredOutputContract {
+	return newDocProcessingContract("chenweb_toc_detection", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"toc_line_numbers": schemaArrayOf(schemaScalar("integer", "number")),
+		},
+		"required":             []string{"toc_line_numbers"},
+		"additionalProperties": false,
+	})
+}
+
 func newDocProcessingContract(name string, schema map[string]any) llmclients.StructuredOutputContract {
 	return llmclients.StructuredOutputContract{
 		Name:        name,

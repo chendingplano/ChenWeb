@@ -187,6 +187,7 @@ func main() {
 		}
 	}
 	llmClient := newLLMClient()
+	staticAnalyzerLLMClient := newLLMClient()
 	metricsLLMClient := newLLMClient()
 	provisionsLLMClient := newLLMClient()
 	sceneBlocksLLMClient := newLLMClient()
@@ -216,7 +217,7 @@ func main() {
 		BlockingProcessor:      docprocessing.NewBlockingProcessor(inputStore, logger),
 		Processors: filterConfiguredProcessors([]docprocessing.Processor{
 			// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
-			docprocessing.NewStaticAnalyzerProcessor(inputStore, logger),
+			docprocessing.NewStaticAnalyzerProcessor(inputStore, staticAnalyzerLLMClient, logger),
 			phaseProcessors[0],
 			phaseProcessors[1],
 			phaseProcessors[2],
