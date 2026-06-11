@@ -4,10 +4,12 @@ import (
 	"archive/zip"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -503,5 +505,90 @@ RETURNING id`)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestMaxDocGoroutines_DefaultsToFour(t *testing.T) {
+	t.Setenv("MAX_DOC_GOROUTINE", "")
+	if got := maxDocGoroutines(); got != 4 {
+		t.Errorf("maxDocGoroutines() = %d, want 4", got)
+	}
+}
+
+func TestMaxDocGoroutines_ReadsEnvVar(t *testing.T) {
+	t.Setenv("MAX_DOC_GOROUTINE", "8")
+	if got := maxDocGoroutines(); got != 8 {
+		t.Errorf("maxDocGoroutines() = %d, want 8", got)
+	}
+}
+
+func TestMaxDocGoroutines_InvalidFallsBackToFour(t *testing.T) {
+	t.Setenv("MAX_DOC_GOROUTINE", "bad")
+	if got := maxDocGoroutines(); got != 4 {
+		t.Errorf("maxDocGoroutines() = %d, want 4 for invalid input", got)
+	}
+}
+
+func TestAppendParsedStatus_AddsSuccessEntry(t *testing.T) {
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	got, err := appendParsedStatus("[]", start, 150, nil)
+	if err != nil {
+		t.Fatalf("appendParsedStatus: %v", err)
+	}
+	if !strings.Contains(got, `"parsed"`) || !strings.Contains(got, `"success"`) {
+		t.Errorf("expected parsed/success entry in %q", got)
+	}
+}
+
+func TestAppendParsedStatus_AddsFailedEntry(t *testing.T) {
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	got, err := appendParsedStatus("[]", start, 50, errors.New("parse error"))
+	if err != nil {
+		t.Fatalf("appendParsedStatus: %v", err)
+	}
+	if !strings.Contains(got, `"failed"`) || !strings.Contains(got, "parse error") {
+		t.Errorf("expected failed entry with error message in %q", got)
+	}
+}
+
+func TestAppendParsedStatus_ReplacesExistingParsedEntry(t *testing.T) {
+	existing := `[{"operation":"parsed","proc-status":"failed","error":"old"}]`
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	got, err := appendParsedStatus(existing, start, 100, nil)
+	if err != nil {
+		t.Fatalf("appendParsedStatus: %v", err)
+	}
+	if count := strings.Count(got, `"parsed"`); count != 1 {
+		t.Errorf("expected exactly 1 parsed entry, got %d in %q", count, got)
+	}
+	if strings.Contains(got, "old") {
+		t.Errorf("expected old error to be replaced in %q", got)
+	}
+}
+
+func TestAppendReroutedStatus_RecordsNoteAndPaths(t *testing.T) {
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	got, err := appendReroutedStatus("[]", start,
+		"docx: converted to pdf and routed to pdf+mineru pipeline",
+		"Artifacts/0/410/doc.docx", "Artifacts/0/410/doc.pdf")
+	if err != nil {
+		t.Fatalf("appendReroutedStatus: %v", err)
+	}
+	for _, want := range []string{"docx-rerouted", "pdf+mineru", "doc.docx", "doc.pdf"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in rerouted status %q", want, got)
+		}
+	}
+}
+
+func TestAppendReroutedStatus_PreservesExistingEntries(t *testing.T) {
+	existing := `[{"operation":"converted","proc-status":"success"}]`
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	got, err := appendReroutedStatus(existing, start, "doc: ...", "a.doc", "a.pdf")
+	if err != nil {
+		t.Fatalf("appendReroutedStatus: %v", err)
+	}
+	if !strings.Contains(got, "converted") || !strings.Contains(got, "docx-rerouted") {
+		t.Errorf("expected both converted and docx-rerouted entries in %q", got)
 	}
 }

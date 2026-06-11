@@ -103,7 +103,7 @@
 	let restartError = $state('');
 	let restartToast = $state<{ kind: 'success' | 'error'; msg: string } | null>(null);
 
-	let uploadType = $state('pdf');
+	let uploadType = $state('');
 	let uploadTitle = $state('');
 	let uploadDocNo = $state('');
 	let uploadAuthors = $state('');
@@ -281,9 +281,17 @@
 		);
 	}
 
+	function typeFromExtension(filename: string): string {
+		const lower = filename.toLowerCase();
+		for (const [type, exts] of Object.entries(typeExtensions)) {
+			if (exts.some(e => lower.endsWith(e))) return type;
+		}
+		return '';
+	}
+
 	function resetUploadDialog() {
 		uploadError = '';
-		uploadType = 'pdf';
+		uploadType = '';
 		uploadTitle = '';
 		uploadDocNo = '';
 		uploadAuthors = '';
@@ -327,6 +335,11 @@
 		const input = event.currentTarget as HTMLInputElement;
 		selectedFiles = Array.from(input.files ?? []);
 		uploadSkippedCount = 0;
+		if (selectedFiles.length === 1) {
+			uploadType = typeFromExtension(selectedFiles[0].name);
+		} else {
+			uploadType = '';
+		}
 	}
 
 	async function onDirSelection(event: Event) {
@@ -334,11 +347,7 @@
 		const all = Array.from(input.files ?? []);
 		if (all.length === 0) return;
 
-		const exts = typeExtensions[uploadType] ?? [];
-		let candidates = all.filter(f => {
-			const lower = f.name.toLowerCase();
-			return exts.some(e => lower.endsWith(e));
-		});
+		let candidates = all.filter(f => typeFromExtension(f.name) !== '');
 
 		if (!uploadRecursive) {
 			candidates = candidates.filter(f => {
@@ -350,9 +359,11 @@
 		if (candidates.length === 0) {
 			selectedFiles = [];
 			uploadSkippedCount = 0;
-			uploadError = `No ${uploadType} files found in the selected directory.`;
+			uploadError = 'No files with recognized extensions found in the selected directory.';
 			return;
 		}
+
+		uploadType = '';
 
 		uploadDirProcessing = true;
 		uploadError = '';
@@ -394,22 +405,46 @@
 			return;
 		}
 
+		const commonPayload = {
+			title: uploadTitle,
+			doc_no: uploadDocNo,
+			authors: uploadAuthors,
+			public_info: uploadPublicInfo,
+			private_info: uploadPrivateInfo,
+			notes: uploadNotes,
+			ks_desc: uploadKsDesc,
+			parser_name: uploadParserName,
+			ks_store_id: activeStore.id,
+			tenant_id: activeStore.tenant_id
+		};
+
 		uploadSubmitting = true;
 		try {
-			await uploadKbInputs({
-				type: uploadType,
-				title: uploadTitle,
-				doc_no: uploadDocNo,
-				authors: uploadAuthors,
-				public_info: uploadPublicInfo,
-				private_info: uploadPrivateInfo,
-				notes: uploadNotes,
-				ks_desc: uploadKsDesc,
-				parser_name: uploadParserName,
-				ks_store_id: activeStore.id,
-				tenant_id: activeStore.tenant_id,
-				files: selectedFiles
-			});
+			if (selectedFiles.length === 1) {
+				if (!uploadType) {
+					uploadError = 'Please select a file type from the Type dropdown.';
+					uploadSubmitting = false;
+					return;
+				}
+				await uploadKbInputs({ ...commonPayload, type: uploadType, files: selectedFiles });
+			} else {
+				// Group by type derived from each file's extension; skip unrecognized
+				const groups = new Map<string, File[]>();
+				for (const file of selectedFiles) {
+					const t = typeFromExtension(file.name);
+					if (!t) continue;
+					if (!groups.has(t)) groups.set(t, []);
+					groups.get(t)!.push(file);
+				}
+				if (groups.size === 0) {
+					uploadError = 'No files with recognized extensions to upload.';
+					uploadSubmitting = false;
+					return;
+				}
+				for (const [t, files] of groups) {
+					await uploadKbInputs({ ...commonPayload, type: t, files });
+				}
+			}
 			closeUploadDialog();
 			resetUploadDialog();
 			page = 1;
@@ -954,24 +989,17 @@
 						<span style="font-size:12px; color:{textMuted};">Type</span>
 						<select
 							bind:value={uploadType}
-							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
+							disabled={selectedFiles.length > 1}
+							style="height:36px; border:1px solid {uploadType === '' && selectedFiles.length === 1 ? '#ef4444' : borderColor}; background:{surface2}; color:{uploadType ? textPrimary : textMuted}; border-radius:8px; padding:0 10px; opacity:{selectedFiles.length > 1 ? 0.5 : 1};"
 						>
+							<option value="" disabled>-- select type --</option>
 							{#each docTypeOptions.filter((option) => option !== 'all') as option}
 								<option value={option}>{option}</option>
 							{/each}
 						</select>
-					</label>
-
-					<label class="flex flex-col gap-1.5">
-						<span style="font-size:12px; color:{textMuted};">Parser Name</span>
-						<select
-							bind:value={uploadParserName}
-							style="height:36px; border:1px solid {borderColor}; background:{surface2}; color:{textPrimary}; border-radius:8px; padding:0 10px;"
-						>
-							{#each uploadParserOptions as option}
-								<option value={option}>{option}</option>
-							{/each}
-						</select>
+						{#if selectedFiles.length > 1}
+							<span style="font-size:11px; color:{textMuted};">Determined by each file's extension</span>
+						{/if}
 					</label>
 
 					<label class="flex flex-col gap-1.5">

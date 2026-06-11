@@ -11,6 +11,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/database"
 	"github.com/chendingplano/deepdoc/server/api/docgenworker"
+	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
@@ -190,6 +191,12 @@ func main() {
 	}
 
 	logger.Info("migrations completed successfully")
+
+	if err := kbhandler.CheckSearchBackend(project_db); err != nil {
+		logger.Error("search backend check failed; system exit", "error", err, "loc", "CWB_DDM_200")
+		os.Exit(1)
+	}
+	logger.Info("search backend verified", "loc", "CWB_DDM_201")
 
 	// Prompt Optimizer initialization: load the AES-GCM key used to encrypt
 	// per-user API keys at rest, then seed the built-in templates so every

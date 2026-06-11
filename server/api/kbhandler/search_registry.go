@@ -50,11 +50,38 @@ func loadRegistrySearchConfig() registrySearchConfig {
 
 func registryLexicalBackend() lexicalBackend {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("SEARCH_LEXICAL_BACKEND"))) {
-	case "paradedb", "bm25":
-		return lexicalBackendParadeDB
-	default:
+	case "postgres", "pg", "tsvector":
 		return lexicalBackendPostgres
+	default:
+		return lexicalBackendParadeDB
 	}
+}
+
+// CheckSearchBackend verifies the configured search backend is available.
+// When the effective backend is paradedb (the default), it confirms the
+// pg_search extension is installed and returns a fatal-worthy error if not.
+// Call this once at startup after migrations have run.
+func CheckSearchBackend(db *sql.DB) error {
+	if registryLexicalBackend() != lexicalBackendParadeDB {
+		return nil
+	}
+	return CheckParadeDBInstalled(db)
+}
+
+// CheckParadeDBInstalled verifies that the pg_search extension is present in the
+// database. Call this at startup when the lexical backend is paradedb; the
+// extension must be installed before any BM25 query can run.
+func CheckParadeDBInstalled(db *sql.DB) error {
+	var exists bool
+	err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_search')`).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("could not query pg_extension for pg_search: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("ParadeDB (pg_search) extension is not installed; " +
+			"install pg_search on the PostgreSQL server or set SEARCH_LEXICAL_BACKEND=postgres to use tsvector")
+	}
+	return nil
 }
 
 func countRegistrySearchResults(db *sql.DB, artifactType string, queryText string, filters artifactSearchFilters, cfg registrySearchConfig) (int64, error) {

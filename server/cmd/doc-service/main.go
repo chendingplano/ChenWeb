@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -139,25 +138,25 @@ func sofficeBinary() (string, error) {
 	return "", fmt.Errorf("(CWB_DOCX_007) soffice not found; install LibreOffice or set SOFFICE_PATH")
 }
 
-// convertDocxToPDF converts the file at docxPath to PDF using LibreOffice
+// convertToPDF converts the file at srcPath (.doc or .docx) to PDF using LibreOffice
 // headless, writing the output into the same directory alongside the original.
 // Returns the PDF path, the trimmed soffice output, and any error.
 // The context controls the subprocess lifetime — callers should supply a timeout.
-func convertDocxToPDF(ctx context.Context, docxPath string) (pdfPath string, cmdOut string, err error) {
+func convertToPDF(ctx context.Context, srcPath string) (pdfPath string, cmdOut string, err error) {
 	soffice, err := sofficeBinary()
 	if err != nil {
 		return "", "", err
 	}
-	outDir := filepath.Dir(docxPath)
+	outDir := filepath.Dir(srcPath)
 	cmd := exec.CommandContext(ctx, soffice,
 		"--headless", "--norestore", "--nofirststartwizard",
-		"--convert-to", "pdf", "--outdir", outDir, docxPath)
+		"--convert-to", "pdf", "--outdir", outDir, srcPath)
 	raw, runErr := cmd.CombinedOutput()
 	cmdOut = strings.TrimSpace(string(raw))
 	if runErr != nil {
 		return "", cmdOut, fmt.Errorf("(CWB_DOCX_008) soffice convert failed: %w", runErr)
 	}
-	stem := strings.TrimSuffix(filepath.Base(docxPath), filepath.Ext(docxPath))
+	stem := strings.TrimSuffix(filepath.Base(srcPath), filepath.Ext(srcPath))
 	pdfPath = filepath.Join(outDir, stem+".pdf")
 	if _, err := os.Stat(pdfPath); err != nil {
 		return "", cmdOut, fmt.Errorf("(CWB_DOCX_008) expected pdf output not found at %s: %w", pdfPath, err)
@@ -165,14 +164,14 @@ func convertDocxToPDF(ctx context.Context, docxPath string) (pdfPath string, cmd
 	return pdfPath, cmdOut, nil
 }
 
-func appendReroutedStatus(rawStatus string, start time.Time, originalDocxRelPath, pdfRelPath string) (string, error) {
+func appendReroutedStatus(rawStatus string, start time.Time, note, originalRelPath, pdfRelPath string) (string, error) {
 	entries := decodeStatusEntries(rawStatus)
 	entry := statusEntry{
-		"operation":           "docx-rerouted",
-		"start_time":          start.Format(statusTimeLayout),
-		"note":                "image-only docx: converted to pdf and routed to pdf pipeline",
-		"original_docx_path":  originalDocxRelPath,
-		"pdf_path":            pdfRelPath,
+		"operation":          "docx-rerouted",
+		"start_time":         start.Format(statusTimeLayout),
+		"note":               note,
+		"original_docx_path": originalRelPath,
+		"pdf_path":           pdfRelPath,
 	}
 	entries = append(entries, entry)
 	out, err := json.Marshal(entries)
@@ -182,7 +181,7 @@ func appendReroutedStatus(rawStatus string, start time.Time, originalDocxRelPath
 	return string(out), nil
 }
 
-func rerouteDocxAsPDF(ctx context.Context, db *sql.DB, recordID int64, pdfRelPath, statusJSON string) error {
+func rerouteAsPDF(ctx context.Context, db *sql.DB, recordID int64, pdfRelPath, statusJSON string) error {
 	const stmt = `
 UPDATE kb.inputs
 SET type = 'pdf',
@@ -193,6 +192,85 @@ SET type = 'pdf',
 WHERE id = $3`
 	_, err := db.ExecContext(ctx, stmt, pdfRelPath, statusJSON, recordID)
 	return err
+}
+
+// setRecordParserName forces the per-record PDF parser backend (e.g. "mineru").
+// Best-effort: the parser_name column is optional in some deployments, so callers
+// should log — not fail — when this returns an error.
+func setRecordParserName(ctx context.Context, db *sql.DB, recordID int64, parserName string) error {
+	const stmt = `UPDATE kb.inputs SET parser_name = $1, modify_time = NOW() WHERE id = $2`
+	_, err := db.ExecContext(ctx, stmt, parserName, recordID)
+	return err
+}
+
+// rerouteToPDFPipeline converts job.homePath (.doc or .docx) to PDF, repoints the
+// kb.inputs record at the PDF, optionally forces a PDF parser backend, and publishes
+// a kb.pdf.staged event so the PDF/mineru pipeline takes over. note explains why the
+// reroute happened (recorded in the docx-rerouted status entry).
+//
+// This is the shared path for both .doc files (which need layout-accurate pages,
+// HTML tables, and image OCR that only the PDF pipeline provides) and image-only
+// .docx files. Returns an error the caller should record as a parse failure.
+func rerouteToPDFPipeline(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, publisher *stageEventPublisher, job docParseJob, rawStatus string, start time.Time, note, parserName string) error {
+	convCtx, convCancel := context.WithTimeout(ctx, 2*time.Minute)
+	logger.Info("docx worker: running soffice pdf conversion",
+		"record_id", job.recordID,
+		"soffice", func() string { p, _ := sofficeBinary(); return p }(),
+		"src", job.homePath, "outdir", filepath.Dir(job.homePath))
+	pdfPath, sofficeOut, convErr := convertToPDF(convCtx, job.homePath)
+	convCancel()
+	if sofficeOut != "" {
+		logger.Info("docx worker: soffice output", "record_id", job.recordID, "output", sofficeOut)
+	}
+	if convErr != nil {
+		return convErr
+	}
+	logger.Info("docx worker: converted to pdf; both files saved",
+		"record_id", job.recordID, "src", job.homePath, "pdf", pdfPath)
+
+	srcRelPath, err := relativePathFromHomeDir(job.homeDir, job.homePath)
+	if err != nil {
+		return fmt.Errorf("resolve source relative path: %w", err)
+	}
+	pdfRelPath, err := relativePathFromHomeDir(job.homeDir, pdfPath)
+	if err != nil {
+		return fmt.Errorf("resolve pdf relative path: %w", err)
+	}
+
+	updatedStatus, err := appendReroutedStatus(rawStatus, start, note, srcRelPath, pdfRelPath)
+	if err != nil {
+		return fmt.Errorf("build rerouted status: %w", err)
+	}
+	if err := rerouteAsPDF(ctx, db, job.recordID, pdfRelPath, updatedStatus); err != nil {
+		return fmt.Errorf("reroute db update: %w", err)
+	}
+	// Force the requested parser (e.g. mineru for image OCR). Best-effort: the
+	// parser_name column is optional, so a failure here only logs a warning.
+	if parserName != "" {
+		if err := setRecordParserName(ctx, db, job.recordID, parserName); err != nil {
+			logger.Warn("docx worker: could not set parser_name (column may be absent); using pipeline default",
+				"record_id", job.recordID, "parser_name", parserName, "error", err)
+		}
+	}
+
+	if publisher == nil {
+		logger.Warn("docx worker: publisher is nil, skipping pdf stage event",
+			"record_id", job.recordID, "pdf", pdfPath)
+		return nil
+	}
+	if err := publisher.Publish(stageEvent{
+		RecordID:   job.recordID,
+		Type:       "pdf",
+		Status:     "success",
+		Force:      true,
+		FileFormat: "pdf",
+		FileName:   pdfPath,
+	}); err != nil {
+		return fmt.Errorf("publish pdf stage event: %w", err)
+	}
+	logger.Info("docx worker: pdf stage event published",
+		"record_id", job.recordID, "pdf", pdfPath, "subject", publisher.subject)
+	return nil
 }
 
 func updateParsedStatus(ctx context.Context, db *sql.DB, recordID int64, resultFilename, statusJSON string) error {
@@ -206,8 +284,17 @@ WHERE id = $3`
 	return err
 }
 
+// pdfPipelineParser is the PDF parser backend forced for documents rerouted from
+// the doc pipeline. MinerU gives layout-accurate page numbers, HTML tables, image
+// OCR, and formula recognition — none of which survive a flat text extraction.
+const pdfPipelineParser = "mineru"
+
+// runDocParseWorker processes staged .doc/.docx files. Both formats are converted to
+// PDF and routed through the PDF+mineru pipeline. Direct .docx text extraction was
+// dropped: .docx XML carries no rendered page layout (page numbers can't be recovered),
+// and mineru natively produces HTML tables, image OCR, and formula LaTeX that a text
+// extractor cannot. See doc-2026061003-docx-parser.md (Bug 3) for the full rationale.
 func runDocParseWorker(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, jobs <-chan docParseJob, publisher *stageEventPublisher) {
-	var parser DocxParser
 	for {
 		select {
 		case <-ctx.Done():
@@ -217,130 +304,50 @@ func runDocParseWorker(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.
 				return
 			}
 			start := time.Now()
-			// Output path: ARTIFACT_DIR/<group>/<record_id>/<staging_filename_root>_docx.txt
-			outputPath := docxOutputPath(filepath.Dir(job.homePath), job.stagingFilename)
-			lineFilePath, lineCount, parseErr := parser.Parse(job.homePath, outputPath)
-			durationMs := time.Since(start).Milliseconds()
+			rawStatus := fetchRecordStatus(ctx, logger, db, job.recordID)
 
-			var rawStatus string
-			if err := db.QueryRowContext(ctx,
-				`SELECT COALESCE(status::text, '[]') FROM kb.inputs WHERE id = $1`,
-				job.recordID,
-			).Scan(&rawStatus); err != nil {
-				logger.Error("docx worker: fetch status failed", "record_id", job.recordID, "error", err)
-				rawStatus = "[]"
+			ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(job.homePath)), ".")
+			if ext == "" {
+				ext = "doc"
 			}
+			note := fmt.Sprintf("%s: converted to pdf and routed to pdf+mineru pipeline", ext)
 
-			if errors.Is(parseErr, ErrDocImageOnly) {
-				logger.Info("docx worker: image-only docx detected, converting to pdf",
-					"record_id", job.recordID, "path", job.homePath)
-
-				convCtx, convCancel := context.WithTimeout(ctx, 2*time.Minute)
-				logger.Info("docx worker: running soffice conversion",
-					"record_id", job.recordID,
-					"soffice", func() string { p, _ := sofficeBinary(); return p }(),
-					"docx", job.homePath,
-					"outdir", filepath.Dir(job.homePath))
-				pdfPath, sofficeOut, convErr := convertDocxToPDF(convCtx, job.homePath)
-				convCancel()
-				if sofficeOut != "" {
-					logger.Info("docx worker: soffice output",
-						"record_id", job.recordID, "output", sofficeOut)
-				}
-				if convErr != nil {
-					logger.Error("docx worker: docx-to-pdf conversion failed",
-						"record_id", job.recordID, "path", job.homePath, "error", convErr)
-					parseErr = convErr
-					goto normalFlow
-				}
-				logger.Info("docx worker: docx converted to pdf; both files saved",
-					"record_id", job.recordID, "docx", job.homePath, "pdf", pdfPath)
-
-				docxRelPath, relErr := relativePathFromHomeDir(job.homeDir, job.homePath)
-				if relErr != nil {
-					logger.Error("docx worker: resolve docx relative path failed",
-						"record_id", job.recordID, "docx", job.homePath, "error", relErr)
-					parseErr = relErr
-					goto normalFlow
-				}
-				pdfRelPath, relErr := relativePathFromHomeDir(job.homeDir, pdfPath)
-				if relErr != nil {
-					logger.Error("docx worker: resolve pdf relative path failed",
-						"record_id", job.recordID, "pdf", pdfPath, "error", relErr)
-					parseErr = relErr
-					goto normalFlow
-				}
-				updatedStatus, err := appendReroutedStatus(rawStatus, start, docxRelPath, pdfRelPath)
-				if err != nil {
-					logger.Error("docx worker: build rerouted status failed", "record_id", job.recordID, "error", err)
-					continue
-				}
-				if err := rerouteDocxAsPDF(ctx, db, job.recordID, pdfRelPath, updatedStatus); err != nil {
-					logger.Error("docx worker: reroute db update failed", "record_id", job.recordID, "error", err)
-					continue
-				}
-				if publisher == nil {
-					logger.Warn("docx worker: publisher is nil, skipping pdf stage event",
-						"record_id", job.recordID, "pdf", pdfPath)
-					continue
-				}
-				if err := publisher.Publish(stageEvent{
-					RecordID:   job.recordID,
-					Type:       "pdf",
-					Status:     "success",
-					Force:      true,
-					FileFormat: "pdf",
-					FileName:   pdfPath,
-				}); err != nil {
-					logger.Error("docx worker: publish pdf stage event failed",
-						"record_id", job.recordID, "pdf", pdfPath, "error", err)
-					continue
-				}
-				logger.Info("docx worker: pdf stage event published",
-					"record_id", job.recordID, "pdf", pdfPath, "subject", publisher.subject)
-				continue
-			}
-
-		normalFlow:
-
-			updatedStatus, err := appendParsedStatus(rawStatus, start, durationMs, parseErr)
-			if err != nil {
-				logger.Error("docx worker: build parsed status failed", "record_id", job.recordID, "error", err)
-				continue
-			}
-
-			resultFilename := ""
-			if parseErr == nil {
-				resultFilename = lineFilePath
-			}
-			if err := updateParsedStatus(ctx, db, job.recordID, resultFilename, updatedStatus); err != nil {
-				logger.Error("docx worker: update parsed status failed", "record_id", job.recordID, "error", err)
-			}
-
-			if parseErr != nil {
-				logger.Error("docx worker: parse failed",
-					"record_id", job.recordID, "path", job.homePath, "type", job.fileType, "error", parseErr)
-				continue
-			}
-
-			logger.Info("docx worker: document parsed",
-				"record_id", job.recordID, "path", job.homePath, "type", job.fileType,
-				"line_file", lineFilePath, "lines", lineCount, "duration_ms", durationMs)
-
-			if publisher != nil {
-				if err := publisher.Publish(stageEvent{
-					RecordID:   job.recordID,
-					Type:       job.fileType,
-					Status:     "success",
-					Force:      true,
-					FileFormat: job.fileType,
-					FileName:   job.homePath,
-				}); err != nil {
-					logger.Error("docx worker: publish stage event failed",
-						"record_id", job.recordID, "error", err)
-				}
+			logger.Info("docx worker: routing document to pdf+mineru pipeline",
+				"record_id", job.recordID, "path", job.homePath, "ext", ext)
+			if err := rerouteToPDFPipeline(ctx, logger, db, publisher, job, rawStatus, start,
+				note, pdfPipelineParser); err != nil {
+				logger.Error("docx worker: reroute to pdf+mineru failed",
+					"record_id", job.recordID, "path", job.homePath, "error", err)
+				recordParseFailure(ctx, logger, db, job.recordID, rawStatus, start, err)
 			}
 		}
+	}
+}
+
+// fetchRecordStatus reads the current kb.inputs.status JSON for a record, falling
+// back to an empty array when the row can't be read.
+func fetchRecordStatus(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, recordID int64) string {
+	var rawStatus string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(status::text, '[]') FROM kb.inputs WHERE id = $1`,
+		recordID,
+	).Scan(&rawStatus); err != nil {
+		logger.Error("docx worker: fetch status failed", "record_id", recordID, "error", err)
+		return "[]"
+	}
+	return rawStatus
+}
+
+// recordParseFailure appends a parsed/failed status entry for a record after a
+// non-recoverable error (e.g. a failed PDF reroute).
+func recordParseFailure(ctx context.Context, logger ApiTypes.JimoLogger, db *sql.DB, recordID int64, rawStatus string, start time.Time, cause error) {
+	updatedStatus, err := appendParsedStatus(rawStatus, start, time.Since(start).Milliseconds(), cause)
+	if err != nil {
+		logger.Error("docx worker: build failed status failed", "record_id", recordID, "error", err)
+		return
+	}
+	if err := updateParsedStatus(ctx, db, recordID, "", updatedStatus); err != nil {
+		logger.Error("docx worker: update failed status failed", "record_id", recordID, "error", err)
 	}
 }
 
