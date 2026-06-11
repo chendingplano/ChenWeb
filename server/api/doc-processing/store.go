@@ -185,15 +185,21 @@ INSERT INTO kb.chunks (
 	chunking_size,
 	overlap_percent,
 	notes,
+	overlap_lines,
+	normal_lines,
+	chunk_lines,
 	create_time,
 	update_time
-) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`
 	_, err := s.DB.ExecContext(ctx, stmt,
 		rec.SourceRecordID,
 		method,
 		rec.ChunkingSize,
 		rec.OverlapPercent,
 		strings.TrimSpace(rec.Notes),
+		strings.TrimSpace(rec.OverlapLines),
+		strings.TrimSpace(rec.NormalLines),
+		strings.TrimSpace(rec.ChunkLines),
 	)
 	return err
 }

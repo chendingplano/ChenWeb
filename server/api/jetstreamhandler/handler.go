@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -217,6 +218,56 @@ func validateSubjectPayload(subject string, payload string) error {
 	}
 
 	return nil
+}
+
+func normalizeSubjectPayload(subject string, payload string) (string, error) {
+	if _, ok := map[string]bool{
+		"kb.pdf.parsed":          true,
+		"kb.pdf.staged":          true,
+		"kb.line-file-generated": true,
+	}[subject]; !ok {
+		return payload, nil
+	}
+
+	var decoded map[string]any
+	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(payload)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return "", fmt.Errorf("payload must be valid JSON object for subject %s", subject)
+	}
+
+	if raw, ok := decoded["record_id"]; ok && raw != nil {
+		recordID, err := normalizeRecordID(raw)
+		if err != nil {
+			return "", fmt.Errorf("payload field 'record_id' must be a positive integer for subject %s", subject)
+		}
+		decoded["record_id"] = recordID
+	}
+
+	out, err := json.Marshal(decoded)
+	if err != nil {
+		return "", fmt.Errorf("failed to normalize payload for subject %s", subject)
+	}
+	return string(out), nil
+}
+
+func normalizeRecordID(value any) (int64, error) {
+	switch v := value.(type) {
+	case json.Number:
+		n, err := v.Int64()
+		if err != nil || n <= 0 {
+			return 0, err
+		}
+		return n, nil
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || n <= 0 {
+			return 0, err
+		}
+		return n, nil
+	default:
+		return 0, fmt.Errorf("unsupported record_id type %T", value)
+	}
 }
 
 type StoredSubject struct {
@@ -624,6 +675,15 @@ func PublishEvent(c echo.Context) error {
 			"subject": req.Subject,
 		})
 	}
+	normalizedPayload, err := normalizeSubjectPayload(req.Subject, req.Payload)
+	if err != nil {
+		logger.Warn("invalid event payload", "subject", req.Subject, "error", err)
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"ok":      false,
+			"message": err.Error(),
+			"subject": req.Subject,
+		})
+	}
 
 	connURL := natsURL()
 	opts, authMode := natsConnectOptions()
@@ -648,7 +708,7 @@ func PublishEvent(c echo.Context) error {
 		})
 	}
 
-	ack, err := js.Publish(req.Subject, []byte(req.Payload))
+	ack, err := js.Publish(req.Subject, []byte(normalizedPayload))
 	if err != nil {
 		logger.Error("failed to publish event", "subject", req.Subject, "error", err)
 		return c.JSON(http.StatusBadGateway, map[string]any{

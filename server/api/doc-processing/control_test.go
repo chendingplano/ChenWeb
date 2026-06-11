@@ -308,8 +308,8 @@ func TestControlService_StartDocProcessingAllParsed(t *testing.T) {
 	got := make([]string, 0, 4)
 	store := &fakeDocProcessingCommandStore{
 		parsed: []DocMetadataInputRecord{
-			{ID: 12, ParserName: "opendata", ResultFilename: filepath.Join(dir, "result.json"), StagingFilename: filepath.Join(dir, "source.pdf"), StatusRaw: `[{"operation":"parsed","proc-status":"success"}]`},
-			{ID: 22, ParserName: "opendata", ResultFilename: filepath.Join(dir, "result.json"), StagingFilename: filepath.Join(dir, "source.pdf"), StatusRaw: `[{"operation":"parsed","proc-status":"success"}]`},
+			{ID: 12, ParserName: "opendata", ResultFilename: filepath.Join(dir, "result.json"), StagingFilename: filepath.Join(dir, "source.pdf"), StatusRaw: `[{"operation":"parsed","procstatus":"success"}]`},
+			{ID: 22, ParserName: "opendata", ResultFilename: filepath.Join(dir, "result.json"), StagingFilename: filepath.Join(dir, "source.pdf"), StatusRaw: `[{"operation":"parsed","procstatus":"success"}]`},
 		},
 	}
 	svc := &ControlService{

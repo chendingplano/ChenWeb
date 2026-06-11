@@ -247,8 +247,8 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if _, ok := last["ms-used"]; ok {
 		t.Fatalf("ms-used should not be present (renamed to ms_used)")
 	}
-	if _, ok := last["proc-status"]; ok {
-		t.Fatalf("proc-status should not be present (use proc_status only)")
+	if _, ok := last["proc_status"]; ok {
+		t.Fatalf("proc_status should not be present (use proc_status only)")
 	}
 }
 

@@ -13,7 +13,7 @@ The `parser-result-converter` service consumes JetStream messages for parsed PDF
 - Loads `kb.inputs` by `record_id`
 - Validates record state before conversion:
   - `type == pdf`
-  - `status` contains parsed success (`operation=parsed`, `proc-status=success`)
+  - `status` contains parsed success (`operation=parsed`, `proc_status=success`)
 - Uses converter by `parser_name`:
   - empty / `opendata`: converts JSON to `.txt`
   - `paddleocr`: currently returns not-implemented

@@ -1,7 +1,7 @@
 import json
 import os
 import tempfile
-from shared import decode_status, has_operation, upsert_status
+from shared import decode_status, has_operation, has_parse_success_or_active, upsert_status
 from shared import file_md5, copy_file, unique_path, resolve_source_path, choose_repo_dir, relativize_to_data_home, relativize_to_backup_root, resolve_repo_path, resolve_backup_path
 from shared import claim_candidates, fetch_record_by_id, find_duplicate_processed_record, has_md5_record, record_duplicated
 from shared import record_parsed_failure, record_parsed_success
@@ -48,6 +48,24 @@ class TestHasOperation:
     def test_case_insensitive(self):
         raw = json.dumps([{"operation": "PARSING"}])
         assert has_operation(raw, "parsing") is True
+
+
+class TestHasParseSuccessOrActive:
+    def test_failed_parse_is_not_already_parsed(self):
+        raw = json.dumps([{"operation": "parsed", "proc_status": "failed"}])
+        assert has_parse_success_or_active(raw) is False
+
+    def test_success_parse_is_already_parsed(self):
+        raw = json.dumps([{"operation": "parsed", "proc_status": "success"}])
+        assert has_parse_success_or_active(raw) is True
+
+    def test_active_parse_is_in_progress(self):
+        raw = json.dumps([{"operation": "parsed", "proc_status": "active"}])
+        assert has_parse_success_or_active(raw) is True
+
+    def test_accepts_legacy_hyphen_status_key(self):
+        raw = json.dumps([{"operation": "parsed", "proc-status": "success"}])
+        assert has_parse_success_or_active(raw) is True
 
 
 class TestUpsertStatus:

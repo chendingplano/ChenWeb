@@ -86,11 +86,11 @@ func TestHasParsedSuccess(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{"hyphen key", `[{"operation":"parsed","proc-status":"success"}]`, true},
+		{"hyphen key", `[{"operation":"parsed","proc_status":"success"}]`, true},
 		{"underscore key (mineru/python parser)", `[{"operation":"parsed","proc_status":"success"}]`, true},
 		{"legacy status key", `[{"operation":"parsed","status":"success"}]`, true},
-		{"missing success", `[{"operation":"parsed","proc-status":"failed"}]`, false},
-		{"wrong operation", `[{"operation":"converted","proc-status":"success"}]`, false},
+		{"missing success", `[{"operation":"parsed","proc_status":"failed"}]`, false},
+		{"wrong operation", `[{"operation":"converted","proc_status":"success"}]`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -624,7 +624,7 @@ func TestHandleRequestSuccessAppendsConvertedStatus(t *testing.T) {
 		ID:             11,
 		Type:           "pdf",
 		ParserName:     "opendata",
-		StatusRaw:      `[{"operation":"parsed","proc-status":"success"}]`,
+		StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:       filepath.Join(tmp, "source.pdf"),
 		ResultFilename: filepath.Base(jsonPath),
 	}}
@@ -661,7 +661,7 @@ func TestHandleRequestSuccessAppendsConvertedStatus(t *testing.T) {
 		t.Fatalf("unmarshal status: %v", err)
 	}
 	last := entries[len(entries)-1]
-	if last["operation"] != "converted" || last["proc-status"] != "success" {
+	if last["operation"] != "converted" || last["proc_status"] != "success" {
 		t.Fatalf("unexpected status entry: %+v", last)
 	}
 
@@ -694,7 +694,7 @@ func TestHandleRequestSkipsPublishWhenDocProcessorModeIsNotAuto(t *testing.T) {
 		ID:             11,
 		Type:           "pdf",
 		ParserName:     "opendata",
-		StatusRaw:      `[{"operation":"parsed","proc-status":"success"}]`,
+		StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:       filepath.Join(tmp, "source.pdf"),
 		ResultFilename: filepath.Base(jsonPath),
 	}}
@@ -739,7 +739,7 @@ func TestHandleRequestDiscoversParserFilesByNamingConvention(t *testing.T) {
 		ID:         20,
 		Type:       "pdf",
 		ParserName: "opendata",
-		StatusRaw:  `[{"operation":"parsed","proc-status":"success"}]`,
+		StatusRaw:  `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:   filepath.Join(tmp, "stdGk_3032172.pdf"),
 	}}
 
@@ -788,7 +788,7 @@ func TestHandleRequestFailureAppendsFailedStatus(t *testing.T) {
 	if st.updatedError == nil || *st.updatedError == "" {
 		t.Fatalf("expected error message to be persisted")
 	}
-	if !strings.Contains(st.updatedStatus, `"operation":"converted"`) || !strings.Contains(st.updatedStatus, `"proc-status":"failed"`) {
+	if !strings.Contains(st.updatedStatus, `"operation":"converted"`) || !strings.Contains(st.updatedStatus, `"proc_status":"failed"`) {
 		t.Fatalf("missing converted failed status: %s", st.updatedStatus)
 	}
 }
@@ -827,7 +827,7 @@ func TestHandleRequestUnsupportedParserIsNonRetryable(t *testing.T) {
 		ID:         29,
 		Type:       "pdf",
 		ParserName: "xyz",
-		StatusRaw:  `[{"operation":"parsed","proc-status":"success"}]`,
+		StatusRaw:  `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:   filepath.Join(tmp, "source.pdf"),
 	}}
 
@@ -848,7 +848,7 @@ func TestHandleRequestUnsupportedParserIsNonRetryable(t *testing.T) {
 }
 
 func TestAppendConvertedStatusOverridesExistingConvertedEntry(t *testing.T) {
-	raw := `[{"operation":"parsed","proc-status":"success"},{"operation":"converted","proc-status":"success","start_time":"x","ms-used":1},{"operation":"converted","proc-status":"failed","start_time":"y","ms-used":2}]`
+	raw := `[{"operation":"parsed","proc_status":"success"},{"operation":"converted","proc_status":"success","start_time":"x","ms-used":1},{"operation":"converted","proc_status":"failed","start_time":"y","ms-used":2}]`
 	start := time.Date(2026, 4, 12, 8, 57, 6, 0, time.Local)
 	out, err := appendConvertedStatus(raw, start, 9, errors.New("boom"))
 	if err != nil {
@@ -863,8 +863,8 @@ func TestAppendConvertedStatusOverridesExistingConvertedEntry(t *testing.T) {
 	for _, e := range entries {
 		if strings.EqualFold(fmt.Sprint(e["operation"]), "converted") {
 			converted++
-			if fmt.Sprint(e["proc-status"]) != "failed" {
-				t.Fatalf("expected converted proc-status failed, got %v", e["proc-status"])
+			if fmt.Sprint(e["proc_status"]) != "failed" {
+				t.Fatalf("expected converted proc_status failed, got %v", e["proc_status"])
 			}
 			if fmt.Sprint(e["error"]) != "boom" {
 				t.Fatalf("expected converted error boom, got %v", e["error"])
@@ -904,7 +904,7 @@ func TestHandleRequestSkipsWhenForceFalseAndConvertedAlreadySucceeded(t *testing
 		ID:         13,
 		Type:       "pdf",
 		ParserName: "opendata",
-		StatusRaw:  `[{"operation":"parsed","proc-status":"success"},{"operation":"converted","proc-status":"success"}]`,
+		StatusRaw:  `[{"operation":"parsed","proc_status":"success"},{"operation":"converted","proc_status":"success"}]`,
 		FileName:   "/tmp/source.pdf",
 	}}
 
@@ -958,7 +958,7 @@ func TestHandleMessageFiltersByTypeAndStatus(t *testing.T) {
 		ID:             99,
 		Type:           "pdf",
 		ParserName:     "opendata",
-		StatusRaw:      `[{"operation":"parsed","proc-status":"success"}]`,
+		StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:       "/tmp/a.pdf",
 		ResultFilename: "/tmp/a.json",
 	}}
@@ -999,7 +999,7 @@ func TestHandleRequestMineruSuccess(t *testing.T) {
 		ID:             203,
 		Type:           "pdf",
 		ParserName:     "mineru",
-		StatusRaw:      `[{"operation":"parsed","proc-status":"success"}]`,
+		StatusRaw:      `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:       filepath.Join(tmp, "std_1521701.pdf"),
 		ResultFilename: filepath.Base(jsonPath),
 	}}
@@ -1058,7 +1058,7 @@ func TestHandleRequestConvertsAllParserFiles(t *testing.T) {
 		ID:         301,
 		Type:       "pdf",
 		ParserName: "mineru",
-		StatusRaw:  `[{"operation":"parsed","proc-status":"success"}]`,
+		StatusRaw:  `[{"operation":"parsed","proc_status":"success"}]`,
 		FileName:   filepath.Join(tmp, "doc.pdf"),
 	}}
 

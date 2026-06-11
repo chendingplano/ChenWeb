@@ -50,6 +50,9 @@ type ChunkRunRecord struct {
 	ChunkingSize   int
 	OverlapPercent int
 	Notes          string
+	OverlapLines   string
+	NormalLines    string
+	ChunkLines     string
 }
 
 type Store interface {
@@ -643,11 +646,15 @@ func (s *FixedSizeChunkingService) handleChunkLines(ctx context.Context, rec Inp
 		"num_chunks", len(chunks),
 	)
 
+	overlapLines, normalLines, chunkLines := buildChunkLineInfo(chunks)
 	if err := s.Store.InsertChunkRun(ctx, ChunkRunRecord{
 		SourceRecordID: rec.ID,
 		ChunkingMethod: "fix-size",
 		ChunkingSize:   s.ChunkSize,
 		OverlapPercent: s.OverlapPercent,
+		OverlapLines:   overlapLines,
+		NormalLines:    normalLines,
+		ChunkLines:     chunkLines,
 	}); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, numPages, numLines, len(chunks), start, err)
 		return err
@@ -1521,6 +1528,7 @@ func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context,
 // an error.
 func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context, sourceLanguage string, summaries []SummaryItem) ([]SummaryItem, error) {
 	normalizedLang := normalizeSummarySourceLanguage(sourceLanguage)
+	/*
 	if normalizedLang == "" || normalizedLang == "en" {
 		for _, item := range summaries {
 			if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
@@ -1532,6 +1540,7 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 		}
 		return summaries, nil
 	}
+	*/
 	langName := summaryLanguageName(normalizedLang)
 	for i, item := range summaries {
 		originalSummary := item.Summary

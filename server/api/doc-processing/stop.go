@@ -239,7 +239,7 @@ func isStuckPipeline(entries []map[string]any) bool {
 }
 
 func stuckEntryProcStatus(e map[string]any) string {
-	for _, key := range []string{"proc_status", "proc-status", "status"} {
+	for _, key := range []string{"proc_status", "proc_status", "status"} {
 		if ps := strings.ToLower(strings.TrimSpace(asString(e[key]))); ps != "" {
 			return ps
 		}

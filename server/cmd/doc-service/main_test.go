@@ -552,7 +552,7 @@ func TestAppendParsedStatus_AddsFailedEntry(t *testing.T) {
 }
 
 func TestAppendParsedStatus_ReplacesExistingParsedEntry(t *testing.T) {
-	existing := `[{"operation":"parsed","proc-status":"failed","error":"old"}]`
+	existing := `[{"operation":"parsed","proc_status":"failed","error":"old"}]`
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	got, err := appendParsedStatus(existing, start, 100, nil)
 	if err != nil {
@@ -582,7 +582,7 @@ func TestAppendReroutedStatus_RecordsNoteAndPaths(t *testing.T) {
 }
 
 func TestAppendReroutedStatus_PreservesExistingEntries(t *testing.T) {
-	existing := `[{"operation":"converted","proc-status":"success"}]`
+	existing := `[{"operation":"converted","proc_status":"success"}]`
 	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	got, err := appendReroutedStatus(existing, start, "doc: ...", "a.doc", "a.pdf")
 	if err != nil {

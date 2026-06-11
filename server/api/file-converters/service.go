@@ -617,7 +617,7 @@ func HasOperationSuccess(rawStatus string, operation string) bool {
 		if op != wantOp {
 			continue
 		}
-		proc := strings.ToLower(strings.TrimSpace(asString(e["proc-status"])))
+		proc := strings.ToLower(strings.TrimSpace(asString(e["proc_status"])))
 		if proc == "" {
 			proc = strings.ToLower(strings.TrimSpace(asString(e["proc_status"])))
 		}
@@ -642,9 +642,9 @@ func appendConvertedStatus(raw string, start time.Time, durationMs int64, procEr
 		"ms-used":    durationMs,
 	}
 	if procErr == nil {
-		entry["proc-status"] = "success"
+		entry["proc_status"] = "success"
 	} else {
-		entry["proc-status"] = "failed"
+		entry["proc_status"] = "failed"
 		entry["error"] = procErr.Error()
 	}
 

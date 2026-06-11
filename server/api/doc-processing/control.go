@@ -281,7 +281,6 @@ func failedDocProcessorNames(statusRaw string) []string {
 func statusValue(entry map[string]any) string {
 	return strings.ToLower(strings.TrimSpace(firstNonEmptyTrimmed(
 		asString(entry["proc_status"]),
-		asString(entry["proc-status"]),
 		asString(entry["status"]),
 	)))
 }

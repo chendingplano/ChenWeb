@@ -8,6 +8,7 @@ from pdf_parser import (
     get_backend,
     make_throttled_progress,
     PARSER_REGISTRY,
+    should_skip_existing_parse,
     should_drop_stage_event,
     _repo_dirs,
     _process_record,
@@ -90,6 +91,23 @@ class TestJetStreamErrorHandling:
 
     def test_retry_other_errors(self):
         assert not should_drop_stage_event(RuntimeError("postgres temporarily unavailable"))
+
+
+class TestRestartForceHandling:
+    def test_force_does_not_skip_successfully_parsed_record(self):
+        raw = '[{"operation":"parsed","proc_status":"success"}]'
+
+        assert should_skip_existing_parse(raw, force=True) is False
+
+    def test_non_force_skips_successfully_parsed_record(self):
+        raw = '[{"operation":"parsed","proc_status":"success"}]'
+
+        assert should_skip_existing_parse(raw, force=False) is True
+
+    def test_force_still_skips_active_parse(self):
+        raw = '[{"operation":"parsed","proc_status":"active"}]'
+
+        assert should_skip_existing_parse(raw, force=True) is True
 
 
 class TestRepoFileProcessing:
@@ -185,6 +203,55 @@ class TestRepoFileProcessing:
         assert repo_pdf.exists()
         assert result["status"] == "success"
         assert result["result_filename"] == str(Path("Artifacts") / "0" / "76" / "stdGk_517071_opendata.json")
+
+    def test_force_process_record_bypasses_duplicate_shortcut(self, tmp_path, monkeypatch):
+        repo_pdf = tmp_path / "SemOS" / "Artifacts" / "0" / "76" / "stdGk_517071.pdf"
+        repo_pdf.parent.mkdir(parents=True)
+        repo_pdf.write_bytes(b"%PDF-1.4\n")
+
+        calls = {"parse": 0}
+
+        class FakeBackend:
+            def init(self):
+                pass
+
+            def parse(self, pdf_path, output_dir, on_progress):
+                calls["parse"] += 1
+                on_progress(1, 1)
+                return {"total_pages": 1, "pages": [{"text": "ok"}], "engine": "opendata"}
+
+        monkeypatch.setitem(pdf_parser_module.PARSER_REGISTRY, "opendata", FakeBackend)
+        monkeypatch.setattr(
+            pdf_parser_module,
+            "find_duplicate_processed_record",
+            lambda *args: (_ for _ in ()).throw(AssertionError("force should bypass duplicate lookup")),
+        )
+        monkeypatch.setattr(pdf_parser_module, "record_parse_active", lambda *args: args[2])
+        monkeypatch.setattr(pdf_parser_module, "record_parsed_success", lambda *args: args[2])
+        monkeypatch.setenv("DATA_HOME_DIR", str(tmp_path / "SemOS"))
+
+        result = _process_record(
+            conn=object(),
+            rec={
+                "id": 76,
+                "name": "stdGk_517071.pdf",
+                "file_name": str(repo_pdf),
+                "backup_filename": "",
+                "result_filename": "",
+                "parser_name": "opendata",
+                "status": '[{"operation":"parsed","proc_status":"success"}]',
+                "md5": "known-md5",
+            },
+            backend_cache={},
+            repo_dirs=[str(tmp_path / "SemOS")],
+            backup_dir=str(tmp_path / "backup"),
+            staging_dir=str(tmp_path / "staging"),
+            default_parser="opendata",
+            force=True,
+        )
+
+        assert calls["parse"] == 1
+        assert result["status"] == "success"
 
     def test_process_record_persists_relative_paths(self, tmp_path, monkeypatch):
         repo_root = tmp_path / "SemOS"

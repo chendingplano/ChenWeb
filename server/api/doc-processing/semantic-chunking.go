@@ -335,12 +335,16 @@ func (s *SemanticChunkingService) handleSemanticLines(ctx context.Context, rec I
 	if s.FileBlockSize > 0 {
 		overlapPercent = 100 / s.FileBlockSize
 	}
+	overlapLines, normalLines, chunkLines := buildBlockLineInfo(blocks)
 	if err := s.Store.InsertChunkRun(ctx, ChunkRunRecord{
 		SourceRecordID: rec.ID,
 		ChunkingMethod: ChunkingMethodTopic,
 		ChunkingSize:   s.FileBlockSize,
 		OverlapPercent: overlapPercent,
 		Notes:          "semantic topic chunking with 1-page overlap",
+		OverlapLines:   overlapLines,
+		NormalLines:    normalLines,
+		ChunkLines:     chunkLines,
 	}); err != nil {
 		s.failAndPersist(ctx, rec, inputFilename, start, err)
 		return err
@@ -481,6 +485,40 @@ func BuildSemanticPageBlocks(lines []Line, fileBlockSize int) []SemanticPageBloc
 		})
 	}
 	return blocks
+}
+
+// buildBlockLineInfo returns overlap_lines, normal_lines, and chunk_lines
+// aggregated from semantic page blocks as JSON arrays for kb.chunks.
+// Semantic chunking has no overlap markers — overlap_lines is always "[]".
+func buildBlockLineInfo(blocks []SemanticPageBlock) (overlapLinesJSON, normalLinesJSON, chunkLinesJSON string) {
+	normals := make([]string, 0, len(blocks))
+	texts := make([]string, 0, len(blocks))
+
+	for _, block := range blocks {
+		lineNos := make([]int, 0, len(block.Lines))
+		var sb strings.Builder
+		for i, line := range block.Lines {
+			if line.LineNo > 0 {
+				lineNos = append(lineNos, line.LineNo)
+			}
+			if i > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(line.Raw)
+		}
+		normals = append(normals, formatLineNumberRanges(lineNos))
+		texts = append(texts, sb.String())
+	}
+
+	overlapLinesJSON = "[]"
+	if b, err := json.Marshal(normals); err == nil {
+		normalLinesJSON = string(b)
+	}
+	if b, err := json.Marshal(texts); err == nil {
+		chunkLinesJSON = string(b)
+	}
+
+	return
 }
 
 func (s *SemanticChunkingService) extractTopicsForBlock(

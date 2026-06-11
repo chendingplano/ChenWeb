@@ -21,9 +21,7 @@ node_modules
 *.tar
 *.gz
 *.pt
-tax/pb_data
-tax/migrations
-tax/web/build
-tax/server/api/webbuild
-shared/svelte/dist
+web/build
+ChenWeb/server/api/webbuild
+ChenWeb/shared/svelte/dist
 ChenWeb/web/build

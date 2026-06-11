@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -242,6 +243,41 @@ func formatLineNumberRange(start, end int) string {
 		return strconv.Itoa(start)
 	}
 	return fmt.Sprintf("%d-%d", start, end)
+}
+
+// buildChunkLineInfo returns overlap_lines, normal_lines, and chunk_lines
+// aggregated from all chunks as JSON arrays suitable for storage in kb.chunks.
+func buildChunkLineInfo(chunks []Chunk) (overlapLinesJSON, normalLinesJSON, chunkLinesJSON string) {
+	overlaps := make([]string, 0, len(chunks))
+	normals := make([]string, 0, len(chunks))
+	texts := make([]string, 0, len(chunks))
+
+	for _, c := range chunks {
+		o, n := chunkLineNumbers(c)
+		overlaps = append(overlaps, formatLineNumberRanges(o))
+		normals = append(normals, formatLineNumberRanges(n))
+
+		var sb strings.Builder
+		for i, ml := range c.Lines {
+			if i > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(ml.Line.Raw)
+		}
+		texts = append(texts, sb.String())
+	}
+
+	if b, err := json.Marshal(overlaps); err == nil {
+		overlapLinesJSON = string(b)
+	}
+	if b, err := json.Marshal(normals); err == nil {
+		normalLinesJSON = string(b)
+	}
+	if b, err := json.Marshal(texts); err == nil {
+		chunkLinesJSON = string(b)
+	}
+
+	return
 }
 
 func writeTopicsCategoryTreeToDir(logger ApiTypes.JimoLogger, targetDir string, recordID int64, topics []TopicItem) error {

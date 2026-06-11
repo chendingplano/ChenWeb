@@ -92,9 +92,9 @@ func appendParsedStatus(rawStatus string, start time.Time, durationMs int64, pro
 		"ms-used":    durationMs,
 	}
 	if procErr == nil {
-		entry["proc-status"] = "success"
+		entry["proc_status"] = "success"
 	} else {
-		entry["proc-status"] = "failed"
+		entry["proc_status"] = "failed"
 		entry["error"] = procErr.Error()
 	}
 

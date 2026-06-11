@@ -37,7 +37,7 @@ from shared import (
     pg_connect,
     claim_candidates,
     fetch_record_by_id,
-    has_operation,
+    has_parse_success_or_active,
     scan_staging_once,
     find_duplicate_processed_record,
     record_parse_active,
@@ -229,6 +229,48 @@ def should_drop_stage_event(exc: Exception) -> bool:
     )
 
 
+def should_skip_existing_parse(raw_status: str, force: bool = False) -> bool:
+    """Return True when a stage event should not start a parse.
+
+    Force restart bypasses successful parsed records, but still respects an
+    active parser claim so repeated clicks do not launch concurrent parses.
+    """
+    if force:
+        return _has_parse_proc_status(raw_status, "active")
+    return has_parse_success_or_active(raw_status)
+
+
+def _has_parse_proc_status(raw_status: str, *statuses: str) -> bool:
+    wanted = {s.strip().lower() for s in statuses if s.strip()}
+    if not wanted:
+        return False
+
+    raw_status = (raw_status or "").strip()
+    if not raw_status or raw_status == "null":
+        return False
+    try:
+        decoded = json.loads(raw_status)
+    except json.JSONDecodeError:
+        return False
+
+    entries = decoded if isinstance(decoded, list) else [decoded]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("operation", "")).strip().lower() != "parsed":
+            continue
+
+        proc_status = str(entry.get("proc_status", "")).strip().lower()
+        if not proc_status:
+            proc_status = str(entry.get("proc-status", "")).strip().lower()
+        if not proc_status:
+            proc_status = str(entry.get("status", "")).strip().lower()
+        if proc_status in wanted:
+            return True
+
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Progress throttle
 # ---------------------------------------------------------------------------
@@ -334,6 +376,7 @@ def _process_record(
     conn, rec: dict, backend_cache: dict[str, ParserBackend],
     repo_dirs: list[str], backup_dir: str, staging_dir: str,
     default_parser: str,
+    force: bool = False,
 ) -> dict:
     rec_id = rec["id"]
     raw_status = rec["status"]
@@ -367,19 +410,20 @@ def _process_record(
         md5_hex = file_md5(source_file)
 
     # Duplicate check
-    duplicate_check_time = datetime.now().strftime(TIME_FORMAT)
-    dup_rcd_id = find_duplicate_processed_record(conn, rec_id, md5_hex)
-    if dup_rcd_id is not None:
-        record_duplicated(conn, rec_id, raw_status, dup_rcd_id, duplicate_check_time)
-        log.info("(MID_2026040709) record id=%s marked duplicated (dup_rcd_id=%s)", rec_id, dup_rcd_id)
-        return {
-            "record_id": rec_id,
-            "type": "pdf",
-            "status": "failed",
-            "file_format": "json",
-            "result_filename": "",
-            "error": f"duplicated record (dup_rcd_id={dup_rcd_id})",
-        }
+    if not force:
+        duplicate_check_time = datetime.now().strftime(TIME_FORMAT)
+        dup_rcd_id = find_duplicate_processed_record(conn, rec_id, md5_hex)
+        if dup_rcd_id is not None:
+            record_duplicated(conn, rec_id, raw_status, dup_rcd_id, duplicate_check_time)
+            log.info("(MID_2026040709) record id=%s marked duplicated (dup_rcd_id=%s)", rec_id, dup_rcd_id)
+            return {
+                "record_id": rec_id,
+                "type": "pdf",
+                "status": "failed",
+                "file_format": "json",
+                "result_filename": "",
+                "error": f"duplicated record (dup_rcd_id={dup_rcd_id})",
+            }
 
     parse_start_dt = datetime.now()
     parse_start = parse_start_dt.strftime(TIME_FORMAT)
@@ -632,6 +676,7 @@ async def run_jetstream() -> None:
                     rec_id = int(payload.get("record_id") or 0)
                     msg_type = str(payload.get("type", "")).strip().lower()
                     msg_status = str(payload.get("status", "")).strip().lower()
+                    force = payload.get("force") is True
                     if rec_id <= 0:
                         raise ValueError("missing/invalid record_id")
                     if msg_type and msg_type != "pdf":
@@ -648,7 +693,7 @@ async def run_jetstream() -> None:
                     # Skip records already parsed/in-progress — handles JetStream
                     # redelivery that occurs when NATS drops between parse completion
                     # and ACK. The lifecycle uses a single "parsed" operation.
-                    if has_operation(rec["status"], "parsed"):
+                    if should_skip_existing_parse(rec["status"], force=force):
                         log.info(
                             "(MID_2026040716) record id=%s already parsed — acking redelivered message",
                             rec_id,
@@ -663,6 +708,7 @@ async def run_jetstream() -> None:
                         lambda: _process_record(
                             conn, rec, backend_cache,
                             repo_dirs, backup_dir, staging_dir, default_parser,
+                            force=force,
                         ),
                     )
 

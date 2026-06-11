@@ -53,6 +53,29 @@ def has_operation(raw_status: str, *operations: str) -> bool:
     return any(e.get("operation", "").strip().lower() in ops for e in entries)
 
 
+def has_parse_success_or_active(raw_status: str) -> bool:
+    """Return true when the parser stage is already done or currently claimed.
+
+    A failed parsed entry must remain retryable; only successful parses and live
+    active claims should cause a redelivered parse event to be acknowledged.
+    """
+    for entry in decode_status(raw_status):
+        operation = str(entry.get("operation", "")).strip().lower()
+        if operation != PARSE_OPERATION:
+            continue
+
+        proc_status = str(entry.get("proc_status", "")).strip().lower()
+        if not proc_status:
+            proc_status = str(entry.get("proc-status", "")).strip().lower()
+        if not proc_status:
+            proc_status = str(entry.get("status", "")).strip().lower()
+
+        if proc_status in {"success", "active"}:
+            return True
+
+    return False
+
+
 def upsert_status(raw_status: str, operation: str, patch: dict) -> str:
     """Update an existing status entry by operation name, or append a new one.
 
