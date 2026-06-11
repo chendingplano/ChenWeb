@@ -1173,6 +1173,56 @@ func TestConvertMineruFile_BasicTypes(t *testing.T) {
 	}
 }
 
+func TestConvertMineruFile_ImageWithCaptionAndFootnote(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "doc_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 8,
+      "items": [
+        {
+          "type": "image",
+          "img_path": "images/1f20c6a5.jpg",
+          "image_caption": ["图1 室内家庭场景"],
+          "image_footnote": ["注：示意图"],
+          "bbox": [227, 96, 801, 352]
+        },
+        {"type": "text", "text": "正文段落", "bbox": [79, 395, 931, 429]}
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines (caption, image, footnote, paragraph), got %d:\n%s", len(lines), string(got))
+	}
+	if !strings.Contains(lines[0], "image-caption") || !strings.Contains(lines[0], "图1 室内家庭场景") {
+		t.Fatalf("unexpected image-caption line: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "image") || !strings.Contains(lines[1], "images/1f20c6a5.jpg") {
+		t.Fatalf("unexpected image line: %s", lines[1])
+	}
+	if !strings.Contains(lines[2], "image-footnote") || !strings.Contains(lines[2], "注：示意图") {
+		t.Fatalf("unexpected image-footnote line: %s", lines[2])
+	}
+	if !strings.Contains(lines[3], "paragraph") || !strings.Contains(lines[3], "正文段落") {
+		t.Fatalf("unexpected paragraph line: %s", lines[3])
+	}
+}
+
 func TestConvertMineruFile_OutputPathNaming(t *testing.T) {
 	tmp := t.TempDir()
 	in := filepath.Join(tmp, "std_1521701_mineru.json")

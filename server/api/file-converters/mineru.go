@@ -21,14 +21,17 @@ type mineruPage struct {
 }
 
 type mineruItem struct {
-	Type          string          `json:"type"`
-	Text          string          `json:"text"`
-	TextLevel     *int            `json:"text_level"`
-	ListItems     []string        `json:"list_items"`
-	TableCaption  []string        `json:"table_caption"`
-	TableFootnote []string        `json:"table_footnote"`
-	TableBody     string          `json:"table_body"`
-	BBox          json.RawMessage `json:"bbox"`
+	Type           string          `json:"type"`
+	Text           string          `json:"text"`
+	TextLevel      *int            `json:"text_level"`
+	ListItems      []string        `json:"list_items"`
+	TableCaption   []string        `json:"table_caption"`
+	TableFootnote  []string        `json:"table_footnote"`
+	TableBody      string          `json:"table_body"`
+	ImgPath        string          `json:"img_path"`
+	ImageCaption   []string        `json:"image_caption"`
+	ImageFootnote  []string        `json:"image_footnote"`
+	BBox           json.RawMessage `json:"bbox"`
 }
 
 func ConvertMineruFile(inputPath string) (string, error) {
@@ -150,6 +153,37 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 						items = append(items, extractedOpenDataLine{
 							Page:    pageStr,
 							Type:    "table-footnote",
+							BBox:    bbox,
+							Content: f,
+						})
+					}
+				}
+
+			case "image":
+				bbox := mineruBBoxStr(item.BBox)
+				for _, cap := range item.ImageCaption {
+					if c := strings.TrimSpace(cap); c != "" {
+						items = append(items, extractedOpenDataLine{
+							Page:    pageStr,
+							Type:    "image-caption",
+							BBox:    bbox,
+							Content: c,
+						})
+					}
+				}
+				if imgPath := strings.TrimSpace(item.ImgPath); imgPath != "" {
+					items = append(items, extractedOpenDataLine{
+						Page:    pageStr,
+						Type:    "image",
+						BBox:    bbox,
+						Content: imgPath,
+					})
+				}
+				for _, fn := range item.ImageFootnote {
+					if f := strings.TrimSpace(fn); f != "" {
+						items = append(items, extractedOpenDataLine{
+							Page:    pageStr,
+							Type:    "image-footnote",
 							BBox:    bbox,
 							Content: f,
 						})
