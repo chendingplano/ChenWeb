@@ -287,7 +287,7 @@ func tocDetectionContract() llmclients.StructuredOutputContract {
 	return newDocProcessingContract("chenweb_toc_detection", map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"toc_line_numbers": schemaArrayOf(schemaScalar("integer", "number")),
+			"toc_line_numbers": schemaStringArray(),
 		},
 		"required":             []string{"toc_line_numbers"},
 		"additionalProperties": false,

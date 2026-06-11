@@ -29,6 +29,8 @@ var (
 	staticTOCDotLeaderRE    = regexp.MustCompile(`\.{3,}`)
 	staticPageImagePathRE   = regexp.MustCompile(`^(.+)/imageFile(\d+)\.png$`)
 	staticLegacyHeadingRE   = regexp.MustCompile(`^heading\((\d+)\)$`)
+	// matches 6 or more consecutive \dots (each separated by optional spaces/tabs)
+	staticDotsSeqRE = regexp.MustCompile(`\\dots(?:[ \t]*\\dots){5,}`)
 )
 
 type StaticAnalyzerProcessor struct {
@@ -56,6 +58,7 @@ type staticTOCDetector struct {
 	NumPages          int
 	FallbackPages     int
 	Logger            ApiTypes.JimoLogger
+	ProcLogger        *DocProcLogger
 }
 
 func (d *staticTOCDetector) isReady() bool {
@@ -109,6 +112,7 @@ func NewStaticAnalyzerProcessor(store DocMetadataStore, client LLMJSONExtractor,
 		if modelErr != nil {
 			promptErr = modelErr
 		}
+		pl := DocProcLogger{DB: ApiTypes.ProjectDBHandle}
 		tocDetector = &staticTOCDetector{
 			Client:            client,
 			PromptText:        promptText,
@@ -122,6 +126,7 @@ func NewStaticAnalyzerProcessor(store DocMetadataStore, client LLMJSONExtractor,
 			NumPages:          envInt("DETECT_TOC_NUM_PAGES", 3, 1),
 			FallbackPages:     envInt("DETECT_TOC_FALLBACK_PAGES", 5, 1),
 			Logger:            logger,
+			ProcLogger:        &pl,
 		}
 	}
 
@@ -184,7 +189,7 @@ func (p *StaticAnalyzerProcessor) HandleEvent(ctx context.Context, payload []byt
 		return p.failAndPersist(ctx, rec, start, inputFilename, 0, 0, 0, fmt.Errorf("(MID_26042305) read input file: %w", err))
 	}
 
-	out, err := analyzeStaticStructureCtx(ctx, body, p.Logger, p.TOCDetector)
+	out, err := analyzeStaticStructureCtx(ctx, body, p.Logger, p.TOCDetector, &rec.ID)
 	if err != nil {
 		return p.failAndPersist(ctx, rec, start, inputFilename, 0, 0, 0, err)
 	}
@@ -398,12 +403,12 @@ func writeAtomicFile(path string, data []byte, perm os.FileMode) error {
 
 // analyzeStaticStructure is the main entry for pure-static analysis (no LLM). Tests use this.
 func analyzeStaticStructure(body []byte, logger ApiTypes.JimoLogger) (staticAnalyzeResult, error) {
-	return analyzeStaticStructureCtx(context.Background(), body, logger, nil)
+	return analyzeStaticStructureCtx(context.Background(), body, logger, nil, nil)
 }
 
 // analyzeStaticStructureCtx is the full implementation. When toc is ready, LLM detects TOC lines;
 // otherwise falls back to static pattern matching.
-func analyzeStaticStructureCtx(ctx context.Context, body []byte, logger ApiTypes.JimoLogger, toc *staticTOCDetector) (staticAnalyzeResult, error) {
+func analyzeStaticStructureCtx(ctx context.Context, body []byte, logger ApiTypes.JimoLogger, toc *staticTOCDetector, recordID *int64) (staticAnalyzeResult, error) {
 	if logger == nil {
 		logger = loggerutil.CreateDefaultLogger("MID_26051001")
 	}
@@ -439,6 +444,7 @@ func analyzeStaticStructureCtx(ctx context.Context, body []byte, logger ApiTypes
 	}
 	lines = applyStaticRemoveFullPageImageArtifactLines(lines, logger)
 	lines = applyStaticRemoveWeBoosWatermarkLines(lines, logger)
+	lines = applyStaticTruncateDots(lines, logger)
 	lines = applyStaticCorrectHeadings(lines, logger)
 
 	corrected := make(map[int]string, len(lines))
@@ -449,7 +455,7 @@ func analyzeStaticStructureCtx(ctx context.Context, body []byte, logger ApiTypes
 	logger.Info("detect table of content invoked", "line_count", len(lines))
 	var lastTOC int
 	if toc.isReady() {
-		lastTOC = applyLLMTOCLabels(ctx, lines, corrected, toc)
+		lastTOC = applyLLMTOCLabels(ctx, lines, corrected, toc, recordID)
 	} else {
 		lastTOC = applyStaticTOCLabels(lines, corrected, logger)
 	}
@@ -478,7 +484,7 @@ func analyzeStaticStructureCtx(ctx context.Context, body []byte, logger ApiTypes
 
 // applyLLMTOCLabels uses the LLM to detect TOC lines and updates the corrected map.
 // It falls back to static detection if the LLM call fails.
-func applyLLMTOCLabels(ctx context.Context, lines []staticInputLine, corrected map[int]string, toc *staticTOCDetector) int {
+func applyLLMTOCLabels(ctx context.Context, lines []staticInputLine, corrected map[int]string, toc *staticTOCDetector, recordID *int64) int {
 	_, firstTOC := findStaticTOCHint(lines)
 
 	// Collect the page range to send to the LLM.
@@ -504,8 +510,14 @@ func applyLLMTOCLabels(ctx context.Context, lines []staticInputLine, corrected m
 		return -1
 	}
 
+	callID := fmt.Sprintf("%s_detect_toc", eventIDFromContext(ctx))
+	startTime := time.Now()
 	inputJSON := staticInputLinesToJSON(targetLines)
 	tocLineNums, usedModel, err := toc.detectTOCLines(ctx, inputJSON)
+	elapsed := time.Since(startTime)
+
+	logTOCDetectionCall(ctx, toc, callID, usedModel, recordID, tocLineNums, err, elapsed)
+
 	if err != nil {
 		toc.Logger.Warn("LLM TOC detection failed, falling back to static detection",
 			"error", err,
@@ -522,6 +534,8 @@ func applyLLMTOCLabels(ctx context.Context, lines []staticInputLine, corrected m
 	toc.Logger.Info("LLM TOC detection succeeded",
 		"model", usedModel,
 		"toc_line_count", len(tocLineNums),
+		"toc_lines", tocLineNums,
+		"ms_used", elapsed.Milliseconds(),
 	)
 
 	lineNoSet := make(map[int]struct{}, len(tocLineNums))
@@ -577,7 +591,7 @@ func (d *staticTOCDetector) detectTOCLines(ctx context.Context, inputJSON string
 	}
 
 	if d.FallbackModelName == "" || d.FallbackModelErr != nil {
-		return nil, d.ModelName, fmt.Errorf("(MID_26061101) TOC LLM detection failed and fallback not configured: %w", err)
+		return nil, d.ModelName, fmt.Errorf("(MID_26061101) TOC LLM detection failed and fallback not configured: %w, result:%s", err, result)
 	}
 
 	d.Logger.Warn("primary TOC LLM call failed, trying fallback",
@@ -623,12 +637,68 @@ func parseTOCDetectionResult(parsed map[string]any) []int {
 	}
 	result := make([]int, 0, len(arr))
 	for _, v := range arr {
+		s, isStr := v.(string)
+		if isStr {
+			if idx := strings.Index(s, "-"); idx > 0 {
+				from, err1 := strconv.Atoi(strings.TrimSpace(s[:idx]))
+				to, err2 := strconv.Atoi(strings.TrimSpace(s[idx+1:]))
+				if err1 == nil && err2 == nil && from > 0 && to >= from {
+					for n := from; n <= to; n++ {
+						result = append(result, n)
+					}
+					continue
+				}
+			}
+			n, err := strconv.Atoi(strings.TrimSpace(s))
+			if err == nil && n > 0 {
+				result = append(result, n)
+			}
+			continue
+		}
 		n := int(toFloat(v))
 		if n > 0 {
 			result = append(result, n)
 		}
 	}
 	return result
+}
+
+func logTOCDetectionCall(ctx context.Context, toc *staticTOCDetector, callID, usedModel string, recordID *int64, tocLineNums []int, callErr error, elapsed time.Duration) {
+	if toc.ProcLogger == nil || toc.ProcLogger.DB == nil {
+		return
+	}
+	var artifactStr *string
+	if callErr == nil && tocLineNums != nil {
+		if bs, err := json.Marshal(map[string]any{"toc_line_numbers": tocLineNums}); err == nil {
+			s := string(bs)
+			artifactStr = &s
+		}
+	}
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	modelNames := []string{}
+	if usedModel != "" {
+		modelNames = []string{strings.TrimSpace(usedModel)}
+	}
+	activity := "detect_toc_lines"
+	rec := DocProcLogRecord{
+		CallReason:   "detect toc lines",
+		DocProcName:  "static_analyzer",
+		ModelNames:   modelNames,
+		PromptName:   toc.PromptRef,
+		RecordID:     recordID,
+		ActivityName: &activity,
+		LLMCallID:    &callID,
+		ArtifactJSON: artifactStr,
+		Errors:       errStr,
+		MSUsed:       int64Ptr(elapsed.Milliseconds()),
+	}
+	if err := toc.ProcLogger.LogLLMCall(ctx, rec, "MID-26061201"); err != nil {
+		toc.Logger.Warn("failed to write detect_toc_lines log", "call_id", callID, "error", err)
+	}
 }
 
 // staticInputLinesToJSON serialises static input lines as a JSON array for LLM input.
@@ -792,6 +862,22 @@ func removeStaticWeBoosWatermarkLines(lines []staticInputLine) []staticInputLine
 		filtered = append(filtered, line)
 	}
 	return filtered
+}
+
+func applyStaticTruncateDots(lines []staticInputLine, logger ApiTypes.JimoLogger) []staticInputLine {
+	if logger != nil {
+		logger.Info("truncate long dots sequences invoked", "line_count", len(lines))
+	}
+	for i, line := range lines {
+		if !strings.Contains(line.Content, `\dots`) {
+			continue
+		}
+		replaced := staticDotsSeqRE.ReplaceAllString(line.Content, `\dots \dots \dots \dots \dots`)
+		if replaced != line.Content {
+			lines[i].Content = replaced
+		}
+	}
+	return lines
 }
 
 func applyStaticCorrectHeadings(lines []staticInputLine, logger ApiTypes.JimoLogger) []staticInputLine {

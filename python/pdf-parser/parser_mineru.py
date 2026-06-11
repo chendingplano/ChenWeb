@@ -125,6 +125,21 @@ class MineruParser(ParserBackend):
         with open(content_list_path, "r", encoding="utf-8") as f:
             content_list = json.load(f)
 
+        # Copy images from MinerU's nested output dir to output_dir/images/ so
+        # that img_path values ("images/foo.png") in the content list resolve
+        # correctly relative to the aggregated result JSON at output_dir/.
+        images_src_dir = os.path.join(os.path.dirname(content_list_path), "images")
+        images_dst_dir = os.path.join(output_dir, "images")
+        image_count = 0
+        if os.path.isdir(images_src_dir):
+            os.makedirs(images_dst_dir, exist_ok=True)
+            for img_file in os.listdir(images_src_dir):
+                src = os.path.join(images_src_dir, img_file)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(images_dst_dir, img_file))
+                    image_count += 1
+            log.info("mineru: copied %d image(s) to %s", image_count, images_dst_dir)
+
         # Group content items by page_idx so downstream consumers see pages.
         pages_map: dict[int, list[Any]] = {}
         for item in content_list if isinstance(content_list, list) else []:
@@ -145,8 +160,8 @@ class MineruParser(ParserBackend):
 
         on_progress(max(total_pages, 1), max(total_pages, 1))
         log.info(
-            "mineru finished: pages=%d content_list=%s",
-            total_pages, content_list_path,
+            "mineru finished: pages=%d images=%d content_list=%s",
+            total_pages, image_count, content_list_path,
         )
 
         return {
@@ -154,4 +169,6 @@ class MineruParser(ParserBackend):
             "total_pages": total_pages,
             "engine": "mineru",
             "content_list_path": content_list_path,
+            "images_dir": images_dst_dir if image_count > 0 else "",
+            "image_count": image_count,
         }

@@ -1009,3 +1009,54 @@ func TestStaticAnalyzer_WriteCorrectedArtifact_RemovesStaleChunksBesideInputFile
 		t.Fatalf("expected stale chunk removal log, got %#v", logger.infos)
 	}
 }
+
+func TestApplyStaticTruncateDots(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		want    string
+	}{
+		{
+			name:  "exactly 6 dots truncated to 5",
+			input: `\dots \dots \dots \dots \dots \dots`,
+			want:  `\dots \dots \dots \dots \dots`,
+		},
+		{
+			name:  "long sequence from ADR example",
+			input: `\eta \dots \dots \dots \dots \dots \dots \dots \dots \dots \dots \dots \dots`,
+			want:  `\eta \dots \dots \dots \dots \dots`,
+		},
+		{
+			name:  "exactly 5 dots unchanged",
+			input: `\dots \dots \dots \dots \dots`,
+			want:  `\dots \dots \dots \dots \dots`,
+		},
+		{
+			name:  "4 dots unchanged",
+			input: `\dots \dots \dots \dots`,
+			want:  `\dots \dots \dots \dots`,
+		},
+		{
+			name:  "no dots unchanged",
+			input: `some text`,
+			want:  `some text`,
+		},
+		{
+			name:  "dots without spaces",
+			input: `\dots\dots\dots\dots\dots\dots`,
+			want:  `\dots \dots \dots \dots \dots`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := []staticInputLine{
+				{LineNo: 1, PageNo: 1, OriginalLineType: "equation", Font: "F", FontSize: "12", Coordinate: "[0,0,1,1]", Content: tc.input},
+			}
+			result := applyStaticTruncateDots(lines, nil)
+			if got := result[0].Content; got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
