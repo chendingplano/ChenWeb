@@ -536,6 +536,42 @@
 		return selectableProcessorIds.every((p) => restartProcessors[p]);
 	}
 
+	function selectFailedProcessors() {
+		const failedStageIds = new Set<string>();
+		for (const rec of selectedRecords) {
+			for (const stage of computeStages(rec)) {
+				if (stage.status === 'failed') failedStageIds.add(stage.id);
+			}
+		}
+		if (failedStageIds.size === 0) return;
+		// 'parsing' → parseFileChecked; 'converting' → convertChecked (parse takes priority).
+		// If parse failed, launching parse_file re-chains the full downstream automatically.
+		const hasParseFailed = failedStageIds.has('parsing');
+		const hasConvertFailed = failedStageIds.has('converting');
+		parseFileChecked = hasParseFailed;
+		convertChecked = !hasParseFailed && hasConvertFailed;
+		processors = Object.fromEntries(
+			ALL_PROCESSOR_IDS.map((p) => [p, !hasParseFailed && !hasConvertFailed && failedStageIds.has(p)])
+		);
+	}
+
+	function selectIncompletedProcessors() {
+		const incompleteStageIds = new Set<string>();
+		for (const rec of selectedRecords) {
+			for (const stage of computeStages(rec)) {
+				if (stage.status !== 'success') incompleteStageIds.add(stage.id);
+			}
+		}
+		if (incompleteStageIds.size === 0) return;
+		const hasParseIncomplete = incompleteStageIds.has('parsing');
+		const hasConvertIncomplete = incompleteStageIds.has('converting');
+		parseFileChecked = hasParseIncomplete;
+		convertChecked = !hasParseIncomplete && hasConvertIncomplete;
+		processors = Object.fromEntries(
+			ALL_PROCESSOR_IDS.map((p) => [p, !hasParseIncomplete && !hasConvertIncomplete && incompleteStageIds.has(p)])
+		);
+	}
+
 	function toggleAllRestart() {
 		const next = !allRestartSelected();
 		restartProcessors = Object.fromEntries(selectableProcessorIds.map((p) => [p, next]));
@@ -1261,15 +1297,35 @@
 
 				<!-- Toggle all + launch -->
 				<div class="flex items-center justify-between">
-					<button
-						onclick={toggleAll}
-						class="rounded-lg px-3 py-1.5"
-						style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
-						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-					>
-						{allProcessorsSelected() ? 'Deselect all' : 'Select all'}
-					</button>
+					<div class="flex items-center gap-2">
+						<button
+							onclick={toggleAll}
+							class="rounded-lg px-3 py-1.5"
+							style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+							onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
+						>
+							{allProcessorsSelected() ? 'Deselect all' : 'Select all'}
+						</button>
+						<button
+							onclick={selectFailedProcessors}
+							class="rounded-lg px-3 py-1.5"
+							style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:12px; cursor:pointer;"
+							onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '60'; }}
+							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '30'; }}
+						>
+							Select Failed
+						</button>
+						<button
+							onclick={selectIncompletedProcessors}
+							class="rounded-lg px-3 py-1.5"
+							style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; cursor:pointer;"
+							onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '60'; }}
+							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '30'; }}
+						>
+							Select Incompleted
+						</button>
+					</div>
 
 					<button
 						onclick={() => { launchError = ''; showConfirm = true; }}

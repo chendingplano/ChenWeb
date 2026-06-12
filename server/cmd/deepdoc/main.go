@@ -216,7 +216,7 @@ func main() {
 	// Agent-platform background workers (M1b). No-op unless
 	// AGENT_PLATFORM_ENABLE_WORKERS=true; fails fast if Docker is unreachable
 	// (unless AGENT_PLATFORM_FORCE_DRYRUN=true, which keeps execution in-process).
-	if err := agentplatformhandler.StartWorkers(ctx, logger, 2); err != nil {
+	if err := agentplatformhandler.StartWorkers(context.Background(), logger, 2); err != nil {
 		logger.Error("failed to start agent-platform workers",
 			"error", err, "loc", "CWB_DDM_169")
 		os.Exit(1)

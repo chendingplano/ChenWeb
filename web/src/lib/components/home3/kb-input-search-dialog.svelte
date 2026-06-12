@@ -180,6 +180,81 @@
 	function inputDisplayDocNo(record: KbInputRecord) {
 		return record.doc_no?.trim() || '';
 	}
+
+	// ── Status / detail dialog ────────────────────────────────────────────────
+	let statusDialogOpen = $state(false);
+	let statusDialogRecord = $state<KbInputRecord | null>(null);
+	let statusDialogTitle = $state('');
+	let statusDialogItems = $state<KbInputRecord['status']>([]);
+
+	type FlatRow = { key: string; value: string | null; depth: number };
+
+	function tryParseJsonLike(v: unknown): unknown {
+		if (typeof v !== 'string') return v;
+		const t = v.trim();
+		if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+			try { return JSON.parse(t); } catch { /* noop */ }
+		}
+		return v;
+	}
+
+	function flattenNestedForDisplay(obj: unknown, depth = 0): FlatRow[] {
+		const rows: FlatRow[] = [];
+		if (obj === null || obj === undefined || typeof obj !== 'object') return rows;
+		const entries: Array<[string, unknown]> = Array.isArray(obj)
+			? (obj as unknown[]).map((v, i) => [`[${i}]`, v] as [string, unknown])
+			: Object.entries(obj as Record<string, unknown>);
+		for (const [k, v] of entries) {
+			const parsed = tryParseJsonLike(v);
+			if (parsed !== null && parsed !== undefined && typeof parsed === 'object') {
+				const isArr = Array.isArray(parsed);
+				const len = isArr ? (parsed as unknown[]).length : Object.keys(parsed as object).length;
+				if (len === 0) {
+					rows.push({ key: k, value: isArr ? '[]' : '{}', depth });
+				} else if (isArr && (parsed as unknown[]).every(item => item === null || typeof item !== 'object')) {
+					rows.push({ key: k, value: (parsed as unknown[]).map(item => item === null ? 'null' : String(item)).join(', '), depth });
+				} else {
+					rows.push({ key: k, value: null, depth });
+					rows.push(...flattenNestedForDisplay(parsed, depth + 1));
+				}
+			} else {
+				rows.push({ key: k, value: v === null || v === undefined ? '—' : String(v).trim() || '—', depth });
+			}
+		}
+		return rows;
+	}
+
+	let statusDialogDocMeta = $derived.by((): FlatRow[] => {
+		if (!statusDialogRecord) return [];
+		const rec = statusDialogRecord as Record<string, unknown>;
+		let meta: unknown = rec.doc_metadata;
+		if (typeof meta === 'string') {
+			try { meta = JSON.parse(meta); } catch { return []; }
+		}
+		if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return [];
+		return flattenNestedForDisplay(meta);
+	});
+
+	let statusDialogRecordRows = $derived.by((): FlatRow[] => {
+		if (!statusDialogRecord) return [];
+		const filtered: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(statusDialogRecord as Record<string, unknown>)) {
+			if (k !== 'status' && k !== 'doc_metadata') filtered[k] = v;
+		}
+		return flattenNestedForDisplay(filtered);
+	});
+
+	function openStatusDialog(record: KbInputRecord) {
+		statusDialogRecord = record;
+		statusDialogItems = record.status ?? [];
+		statusDialogTitle = `Record ID: ${record.id}`;
+		statusDialogOpen = true;
+	}
+
+	function closeStatusDialog() {
+		statusDialogOpen = false;
+		statusDialogRecord = null;
+	}
 </script>
 
 {#if open}
@@ -365,10 +440,10 @@
 									<th>Type</th>
 									<th>Title / Doc No</th>
 									<th>File name</th>
-									<th>Parser</th>
 									<th>Status</th>
 									<th>Created</th>
 									<th>Updated</th>
+									<th>Detail</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -395,7 +470,6 @@
 											<div class="result-secondary mono">{inputDisplayDocNo(record) || '—'}</div>
 										</td>
 										<td class="ellipsis">{record.file_name ?? '—'}</td>
-										<td class="mono muted">{record.parser_name || '—'}</td>
 										<td>
 											<div class="status-stack">
 												<span class="status-chip mono">{statusSummary.operation}</span>
@@ -411,6 +485,14 @@
 										</td>
 										<td class="mono muted">{(record.create_time ?? '').slice(0, 19).replace('T', ' ')}</td>
 										<td class="mono muted">{(record.modify_time ?? '').slice(0, 19).replace('T', ' ')}</td>
+										<td>
+											<button
+												class="view-btn"
+												onclick={(e) => { e.stopPropagation(); openStatusDialog(record); }}
+											>
+												View
+											</button>
+										</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -427,6 +509,94 @@
 						{searchSelected.size > 0 ? `Select (${searchSelected.size})` : 'Select'}
 					</button>
 				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if statusDialogOpen}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="view-dialog-overlay"
+		onmousedown={(e) => { if (e.target === e.currentTarget) closeStatusDialog(); }}
+		onkeydown={(e) => { if (e.key === 'Escape') closeStatusDialog(); }}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="view-dialog"
+			onmousedown={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Record details"
+			tabindex="0"
+		>
+			<div class="view-dialog-head">
+				<h3 class="view-dialog-title">{statusDialogTitle}</h3>
+				<button class="btn btn-ghost view-close-btn" onclick={closeStatusDialog}>Close</button>
+			</div>
+			<div class="view-dialog-body">
+				{#if statusDialogRecord}
+					<div class="view-section">
+						<div class="view-section-label">Record Fields</div>
+						<div class="view-rows-box">
+							{#each statusDialogRecordRows as row}
+								<div class="view-row" style="padding-left:{row.depth * 16}px;">
+									<span class="view-key" class:view-key-header={row.value === null}>{row.key}</span>
+									{#if row.value !== null}
+										<span class="view-val">{row.value}</span>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</div>
+
+					<div class="view-section">
+						<div class="view-section-label">
+							Doc Metadata ({statusDialogDocMeta.filter(r => r.depth === 0).length} {statusDialogDocMeta.filter(r => r.depth === 0).length === 1 ? 'field' : 'fields'})
+						</div>
+						{#if statusDialogDocMeta.length === 0}
+							<div class="view-empty">No doc_metadata available.</div>
+						{:else}
+							<div class="view-rows-box">
+								{#each statusDialogDocMeta as row}
+									<div class="view-row" style="padding-left:{row.depth * 16}px;">
+										<span class="view-key" class:view-key-header={row.value === null}>{row.key}</span>
+										{#if row.value !== null}
+											<span class="view-val">{row.value}</span>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<div class="view-section">
+						<div class="view-section-label">
+							Status ({statusDialogItems.length} {statusDialogItems.length === 1 ? 'entry' : 'entries'})
+						</div>
+						{#if statusDialogItems.length === 0}
+							<div class="view-empty">No status entries.</div>
+						{:else}
+							<div class="view-entries">
+								{#each statusDialogItems as item, idx}
+									<div class="view-entry">
+										<div class="view-entry-head">Entry #{idx + 1}</div>
+										<div class="view-entry-grid">
+											{#each Object.entries(item as Record<string, unknown>) as [key, val]}
+												<span class="view-key">{key}</span>
+												<span class="view-val">
+													{val === null || val === undefined ? '—' : typeof val === 'object' ? JSON.stringify(val) : String(val)}
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -867,5 +1037,164 @@
 		.dialog-field-wide {
 			grid-column: auto;
 		}
+	}
+
+	.view-btn {
+		height: 24px;
+		padding: 0 10px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 6px;
+		background: rgba(255, 255, 255, 0.04);
+		color: #9ca3af;
+		font-size: 11px;
+		font-family: 'JetBrains Mono', monospace;
+		cursor: pointer;
+		transition: background 100ms, color 100ms, border-color 100ms;
+	}
+
+	.view-btn:hover {
+		background: rgba(212, 162, 76, 0.12);
+		color: #d4a24c;
+		border-color: rgba(212, 162, 76, 0.3);
+	}
+
+	.view-dialog-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.75rem;
+		background: rgba(2, 6, 23, 0.72);
+		backdrop-filter: blur(10px);
+	}
+
+	.view-dialog {
+		display: flex;
+		flex-direction: column;
+		width: min(1046px, calc(100vw - 48px));
+		max-height: calc(100vh - 48px);
+		overflow: hidden;
+		resize: both;
+		min-width: 480px;
+		min-height: 200px;
+		border-radius: 20px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		background: #111827;
+		color: #f3eedf;
+		font-family: 'Inter Tight', system-ui, sans-serif;
+	}
+
+	.view-dialog-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 16px 24px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+		flex-shrink: 0;
+	}
+
+	.view-dialog-title {
+		margin: 0;
+		font-size: 15px;
+		font-weight: 600;
+		color: #f3eedf;
+		font-family: 'JetBrains Mono', monospace;
+	}
+
+	.view-close-btn {
+		height: 30px;
+		padding: 0 12px;
+		font-size: 12px;
+	}
+
+	.view-dialog-body {
+		flex: 1;
+		overflow-y: auto;
+		min-height: 0;
+		padding: 16px 24px;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.view-section-label {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #9ca3af;
+		margin-bottom: 6px;
+	}
+
+	.view-rows-box {
+		border: 1px solid rgba(148, 163, 184, 0.12);
+		border-radius: 12px;
+		padding: 8px 12px;
+		background: #1a202b;
+	}
+
+	.view-row {
+		display: flex;
+		align-items: baseline;
+		min-height: 22px;
+		gap: 8px;
+		padding: 2px 0;
+	}
+
+	.view-key {
+		font-size: 12px;
+		width: 140px;
+		flex-shrink: 0;
+		word-break: break-all;
+		color: #9ca3af;
+		font-family: 'JetBrains Mono', monospace;
+	}
+
+	.view-key-header {
+		color: #b5ae94;
+		font-weight: 600;
+	}
+
+	.view-val {
+		font-size: 12px;
+		color: #f3eedf;
+		word-break: break-word;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.view-empty {
+		font-size: 12px;
+		color: #9ca3af;
+	}
+
+	.view-entries {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.view-entry {
+		border: 1px solid rgba(148, 163, 184, 0.12);
+		border-radius: 12px;
+		padding: 8px 12px;
+		background: #1a202b;
+	}
+
+	.view-entry-head {
+		font-size: 12px;
+		font-weight: 600;
+		color: #f3eedf;
+		margin-bottom: 6px;
+		font-family: 'JetBrains Mono', monospace;
+	}
+
+	.view-entry-grid {
+		display: grid;
+		grid-template-columns: 160px 1fr;
+		gap: 4px;
 	}
 </style>

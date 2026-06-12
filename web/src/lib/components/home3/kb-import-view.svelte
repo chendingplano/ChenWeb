@@ -66,8 +66,9 @@
 	let error = $state('');
 	let statusDialogOpen = $state(false);
 	let statusDialogTitle = $state('');
+	let statusDialogRecord = $state<KbInputRecord | null>(null);
 	let statusDialogItems = $state<KbInputRecord['status']>([]);
-	let statusDialogRawJson = $state('[]');
+	let statusDialogRawJson = $state('{}');
 	let statusDialogRawJsonEl = $state<HTMLElement | null>(null);
 	let statusDialogHasOverflow = $state(false);
 	let uploadDialogOpen = $state(false);
@@ -255,10 +256,10 @@
 	}
 
 	async function openStatusDialog(record: KbInputRecord) {
-		const items = record.status ?? [];
-		statusDialogItems = items;
-		statusDialogTitle = `Record ID: ${record.id}, Field 'Status'`;
-		statusDialogRawJson = JSON.stringify(items, null, 2);
+		statusDialogRecord = record;
+		statusDialogItems = record.status ?? [];
+		statusDialogTitle = `Record ID: ${record.id}`;
+		statusDialogRawJson = JSON.stringify(record, null, 2);
 		statusDialogOpen = true;
 		await tick();
 		updateStatusDialogOverflow();
@@ -266,6 +267,7 @@
 
 	function closeStatusDialog() {
 		statusDialogOpen = false;
+		statusDialogRecord = null;
 		statusDialogHasOverflow = false;
 	}
 
@@ -696,6 +698,63 @@
 
 	let recordRangeStart = $derived((page - 1) * pageSize + 1);
 	let recordRangeEnd = $derived(Math.min(page * pageSize, total));
+
+	type FlatRow = { key: string; value: string | null; depth: number };
+
+	function tryParseJsonLike(v: unknown): unknown {
+		if (typeof v !== 'string') return v;
+		const t = v.trim();
+		if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+			try { return JSON.parse(t); } catch { /* noop */ }
+		}
+		return v;
+	}
+
+	function flattenNestedForDisplay(obj: unknown, depth = 0): FlatRow[] {
+		const rows: FlatRow[] = [];
+		if (obj === null || obj === undefined || typeof obj !== 'object') return rows;
+		const entries: Array<[string, unknown]> = Array.isArray(obj)
+			? (obj as unknown[]).map((v, i) => [`[${i}]`, v] as [string, unknown])
+			: Object.entries(obj as Record<string, unknown>);
+		for (const [k, v] of entries) {
+			const parsed = tryParseJsonLike(v);
+			if (parsed !== null && parsed !== undefined && typeof parsed === 'object') {
+				const isArr = Array.isArray(parsed);
+				const len = isArr ? (parsed as unknown[]).length : Object.keys(parsed as object).length;
+				if (len === 0) {
+					rows.push({ key: k, value: isArr ? '[]' : '{}', depth });
+				} else if (isArr && (parsed as unknown[]).every(item => item === null || typeof item !== 'object')) {
+					rows.push({ key: k, value: (parsed as unknown[]).map(item => item === null ? 'null' : String(item)).join(', '), depth });
+				} else {
+					rows.push({ key: k, value: null, depth });
+					rows.push(...flattenNestedForDisplay(parsed, depth + 1));
+				}
+			} else {
+				rows.push({ key: k, value: v === null || v === undefined ? '—' : String(v).trim() || '—', depth });
+			}
+		}
+		return rows;
+	}
+
+	let statusDialogDocMeta = $derived.by((): FlatRow[] => {
+		if (!statusDialogRecord) return [];
+		const rec = statusDialogRecord as Record<string, unknown>;
+		let meta: unknown = rec.doc_metadata;
+		if (typeof meta === 'string') {
+			try { meta = JSON.parse(meta); } catch { return []; }
+		}
+		if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return [];
+		return flattenNestedForDisplay(meta);
+	});
+
+	let statusDialogRecordRows = $derived.by((): FlatRow[] => {
+		if (!statusDialogRecord) return [];
+		const filtered: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(statusDialogRecord as Record<string, unknown>)) {
+			if (k !== 'status' && k !== 'doc_metadata') filtered[k] = v;
+		}
+		return flattenNestedForDisplay(filtered);
+	});
 
 	onMount(() => {
 		loadRecords();
@@ -1282,17 +1341,17 @@
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center p-6"
 		style="background:rgba(15,23,42,0.62);"
-		onclick={closeStatusDialog}
+		onmousedown={(e) => { if (e.target === e.currentTarget) closeStatusDialog(); }}
 		onkeydown={(e) => {
-			if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') closeStatusDialog();
+			if (e.key === 'Escape') closeStatusDialog();
 		}}
 		role="button"
 		tabindex="0"
 	>
 		<div
-			class="w-full max-w-4xl rounded-xl overflow-hidden"
-			style="background:{cardBg}; border:1px solid {borderColor};"
-			onclick={(e) => e.stopPropagation()}
+			class="rounded-xl"
+			style="background:{cardBg}; border:1px solid {borderColor}; display:flex; flex-direction:column; width:min(1046px, calc(100vw - 48px)); max-height:calc(100vh - 48px); overflow:hidden; resize:both; min-width:480px; min-height:200px;"
+			onmousedown={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
@@ -1301,7 +1360,7 @@
 		>
 			<div
 				class="flex items-center justify-between px-4 py-3"
-				style="border-bottom:1px solid {borderColor};"
+				style="border-bottom:1px solid {borderColor}; flex-shrink:0;"
 			>
 				<h3 style="font-size:15px; font-weight:600; color:{textPrimary};">{statusDialogTitle}</h3>
 				<button
@@ -1312,51 +1371,72 @@
 				</button>
 			</div>
 
-			<div class="grid gap-4 p-4" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items:stretch;">
-				<div class="rounded-lg p-3" style="border:1px solid {borderColor}; background:{surface2};">
-					<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:8px;">Readable</div>
-					{#if statusDialogItems.length === 0}
-						<div style="font-size:12px; color:{textMuted};">No status entries.</div>
-					{:else}
-						<div class="space-y-2">
-							{#each statusDialogItems as item, idx}
-								<div
-									class="rounded-lg p-2"
-									style="border:1px solid {borderColor}; background:{cardBg};"
-								>
-									<div style="font-size:12px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">
-										Entry #{idx + 1}
-									</div>
-									<div class="grid gap-1" style="grid-template-columns: 120px 1fr;">
-										<span style="font-size:12px; color:{textMuted};">operation</span>
-										<span style="font-size:12px; color:{textPrimary};">{item.operation ?? ''}</span>
-										<span style="font-size:12px; color:{textMuted};">proc_status</span>
-										<span style="font-size:12px; color:{textPrimary};">{item.proc_status ?? item['proc-status'] ?? ''}</span>
-										<span style="font-size:12px; color:{textMuted};">start_time</span>
-										<span style="font-size:12px; color:{textPrimary};">{item.start_time ?? ''}</span>
-										<span style="font-size:12px; color:{textMuted};">time</span>
-										<span style="font-size:12px; color:{textPrimary};">{item.time ?? ''}</span>
-										<span style="font-size:12px; color:{textMuted};">status</span>
-										<span style="font-size:12px; color:{textPrimary};">{item.status ?? ''}</span>
-										<span style="font-size:12px; color:{textMuted};">error</span>
-										<span style="font-size:12px; color:{textPrimary};">{item.error ?? ''}</span>
-									</div>
+			<div class="p-4 space-y-4" style="flex:1; overflow-y:auto; min-height:0;">
+				{#if statusDialogRecord}
+					<!-- Record Fields -->
+					<div>
+						<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:6px;">Record Fields</div>
+						<div class="rounded-lg p-2" style="border:1px solid {borderColor}; background:{surface2};">
+							{#each statusDialogRecordRows as row}
+								<div style="display:flex; align-items:baseline; padding-left:{row.depth * 16}px; min-height:20px; gap:8px; padding-top:2px; padding-bottom:2px;">
+									<span style="font-size:12px; width:140px; flex-shrink:0; word-break:break-all; color:{row.value === null ? textSecondary : textMuted}; font-weight:{row.value === null ? '600' : '400'};">{row.key}</span>
+									{#if row.value !== null}
+										<span style="font-size:12px; color:{textPrimary}; word-break:break-word; flex:1; min-width:0;">{row.value}</span>
+									{/if}
 								</div>
 							{/each}
 						</div>
-					{/if}
-				</div>
+					</div>
 
-				<div
-					class="rounded-lg p-3 flex flex-col"
-					style="border:1px solid {borderColor}; background:{surface2}; min-height:0;"
-				>
-					<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:8px;">Raw JSON</div>
-					<pre
-						bind:this={statusDialogRawJsonEl}
-						style="margin:0; flex:1; min-height:0; overflow-x:hidden; overflow-y:{statusDialogHasOverflow ? 'auto' : 'hidden'}; white-space:pre-wrap; word-break:break-word; font-size:12px; color:{textPrimary};"
-					>{statusDialogRawJson}</pre>
-				</div>
+					<!-- Doc Metadata -->
+					<div>
+						<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:6px;">
+							Doc Metadata ({statusDialogDocMeta.filter(r => r.depth === 0).length} {statusDialogDocMeta.filter(r => r.depth === 0).length === 1 ? 'field' : 'fields'})
+						</div>
+						{#if statusDialogDocMeta.length === 0}
+							<div style="font-size:12px; color:{textMuted};">No doc_metadata available.</div>
+						{:else}
+							<div class="rounded-lg p-2" style="border:1px solid {borderColor}; background:{surface2};">
+								{#each statusDialogDocMeta as row}
+									<div style="display:flex; align-items:baseline; padding-left:{row.depth * 16}px; min-height:20px; gap:8px; padding-top:2px; padding-bottom:2px;">
+										<span style="font-size:12px; width:140px; flex-shrink:0; word-break:break-all; color:{row.value === null ? textSecondary : textMuted}; font-weight:{row.value === null ? '600' : '400'};">{row.key}</span>
+										{#if row.value !== null}
+											<span style="font-size:12px; color:{textPrimary}; word-break:break-word; flex:1; min-width:0;">{row.value}</span>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<!-- Status entries -->
+					<div>
+						<div style="font-size:12px; font-weight:600; color:{textSecondary}; margin-bottom:6px;">
+							Status ({statusDialogItems.length} {statusDialogItems.length === 1 ? 'entry' : 'entries'})
+						</div>
+						{#if statusDialogItems.length === 0}
+							<div style="font-size:12px; color:{textMuted};">No status entries.</div>
+						{:else}
+							<div class="space-y-2">
+								{#each statusDialogItems as item, idx}
+									<div class="rounded-lg p-2" style="border:1px solid {borderColor}; background:{surface2};">
+										<div style="font-size:12px; font-weight:600; color:{textPrimary}; margin-bottom:6px;">
+											Entry #{idx + 1}
+										</div>
+										<div class="grid gap-1" style="grid-template-columns: 160px 1fr;">
+											{#each Object.entries(item as Record<string, unknown>) as [key, val]}
+												<span style="font-size:12px; color:{textMuted}; word-break:break-all;">{key}</span>
+												<span style="font-size:12px; color:{textPrimary}; word-break:break-word;">
+													{val === null || val === undefined ? '—' : typeof val === 'object' ? JSON.stringify(val) : String(val)}
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>

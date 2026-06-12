@@ -6,8 +6,10 @@ The host-side runner `ClaudeCodeRunner` at
 [`shared/go/api/llm/agentrun/runner_claude.go`](../../../shared/go/api/llm/agentrun/runner_claude.go)
 launches this image once per `ap_task_run` row whose assigned agent has
 `runtime_kind = 'claude_code'`. The container reads `/workspace/ISSUE.md`,
-invokes the Claude Code CLI in `--print` mode, and lets it edit files in
-`/workspace`. Host-side `Collect` then walks the workdir for artifacts.
+invokes the Claude Code CLI in `--print --output-format stream-json --verbose`
+mode, and lets it edit files in `/workspace`. The JSONL stdout stream is
+normalized by ChenWeb into `ap_agent_trace` and exported as OpenTelemetry span
+data for HyperDX. Host-side `Collect` then walks the workdir for artifacts.
 
 ## Build
 
@@ -56,7 +58,7 @@ under `/tmp/claude-test/`.
 ## Security notes
 
 - The image runs as a non-root user (`agent`).
-- `--dangerously-skip-permissions` is set in the entrypoint because the
+- `--permission-mode bypassPermissions` is set in the entrypoint because the
   container boundary is the trust boundary: ephemeral FS, a single bind
   mount, network-scoped via Docker bridge, host-enforced CPU/memory caps.
 - No secrets are baked into the image. API keys arrive per-run via

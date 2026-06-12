@@ -6,7 +6,9 @@ The host-side runner `CodexRunner` at
 [`shared/go/api/llm/agentrun/runner_codex.go`](../../../shared/go/api/llm/agentrun/runner_codex.go)
 launches this image once per `ap_task_run` row whose assigned agent has
 `runtime_kind = 'codex'`. The container reads `/workspace/ISSUE.md`,
-invokes `codex exec --full-auto`, and lets it edit files in `/workspace`.
+invokes `codex exec --json --sandbox workspace-write`, and lets it edit files
+in `/workspace`. The JSONL stdout stream is normalized by ChenWeb into
+`ap_agent_trace` and exported as OpenTelemetry span data for HyperDX.
 Host-side `Collect` then walks the workdir for artifacts.
 
 ## Build
@@ -48,7 +50,7 @@ under `/tmp/codex-test/`.
 |---|---|
 | `/workspace/ISSUE.md` | Host worker's `CodexRunner.Prepare` |
 | `/workspace/*` (output) | The agent; read back by `CodexRunner.Collect` |
-| `OPENAI_API_KEY` | Server env → passed via `docker run --env` |
+| `OPENAI_API_KEY` or `CODEX_API_KEY` | Server env → passed via `docker run --env` |
 | `--network=bridge` | `DockerSandbox` (agent must reach `api.openai.com`) |
 | `--memory 2048m --cpus 2` | `DockerSandbox` defaults |
 | Lifetime | Host worker enforces a 15-minute ctx timeout |
@@ -64,11 +66,10 @@ under `/tmp/codex-test/`.
 - Host workdirs (`<AGENT_PLATFORM_WORKDIR_ROOT>/<run_id>/`) are removed on
   success by the worker. Failed runs keep the workdir for debugging.
 
-## Verification
+## Trace output
 
-The `codex exec --full-auto "<prompt>"` invocation in
-[`entrypoint.sh`](entrypoint.sh) is the documented non-interactive form
-at image build time. If an upgraded CLI changes this surface, pin
-`CODEX_VERSION` at build, retest, and rebuild. Operators can override
-the image tag via `AGENT_PLATFORM_CODEX_IMAGE` without touching the
-server binary.
+The `codex exec --json "<prompt>"` invocation in [`entrypoint.sh`](entrypoint.sh)
+is the documented non-interactive JSONL surface at image build time. If an
+upgraded CLI changes this surface, pin `CODEX_VERSION` at build, retest, and
+rebuild. Operators can override the image tag via `AGENT_PLATFORM_CODEX_IMAGE`
+without touching the server binary.

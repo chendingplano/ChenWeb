@@ -28,13 +28,21 @@ if [ ! -f ISSUE.md ]; then
     exit 2
 fi
 
-if [ -z "${OPENAI_API_KEY:-}" ]; then
-    echo "ERROR: OPENAI_API_KEY is required (inject via docker run --env)" >&2
+if [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${CODEX_API_KEY:-}" ]; then
+    echo "ERROR: OPENAI_API_KEY or CODEX_API_KEY is required (inject via docker run --env)" >&2
     exit 3
 fi
 
-# `codex exec` is the non-interactive subcommand; --full-auto approves
-# file edits without prompting. The container is the trust boundary
-# (ephemeral FS, single bind mount, host-enforced caps), so auto-apply
-# is acceptable.
-exec codex exec --full-auto "$(cat ISSUE.md)"
+# `codex exec --json` emits JSONL on stdout so the ChenWeb worker can
+# normalize model usage, tool calls, and the final answer into ap_agent_trace.
+# The container is the trust boundary (ephemeral FS, single bind mount,
+# host-enforced caps), so workspace edits are acceptable.
+if [ -z "${CODEX_API_KEY:-}" ] && [ -n "${OPENAI_API_KEY:-}" ]; then
+    export CODEX_API_KEY="$OPENAI_API_KEY"
+fi
+
+exec codex exec \
+    --json \
+    --sandbox workspace-write \
+    --skip-git-repo-check \
+    "$(cat ISSUE.md)"

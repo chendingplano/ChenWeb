@@ -160,9 +160,11 @@ func (w *worker) executeRun(parent context.Context, run TaskRun) {
 	// Event pump: drain runner events to DB until the channel closes.
 	events := make(chan agentrun.Event, 64)
 	pumpDone := make(chan struct{})
+	capturedEvents := make([]agentrun.Event, 0, 256)
 	go func() {
 		defer close(pumpDone)
 		for ev := range events {
+			capturedEvents = append(capturedEvents, ev)
 			w.insertEvent(run.WorkspaceID, run.ID, ev)
 		}
 	}()
@@ -184,6 +186,32 @@ func (w *worker) executeRun(parent context.Context, run TaskRun) {
 		}
 	} else {
 		w.logger.Warn("collect failed", "run", run.ID, "err", err.Error())
+	}
+
+	if trace, ok, err := normalizeTraceFromEvents(context.Background(), spec.RuntimeKind, run.ID, promptFromTaskSpec(spec), capturedEvents); err != nil {
+		w.logger.Warn("normalize agent trace failed", "run", run.ID, "runtime_kind", spec.RuntimeKind, "err", err.Error())
+		w.insertEvent(run.WorkspaceID, run.ID, agentrun.Event{
+			Kind:    agentrun.EventError,
+			Payload: "normalize agent trace: " + err.Error(),
+			At:      time.Now(),
+		})
+	} else if ok {
+		if err := upsertTaskRunTrace(w.db, run.WorkspaceID, run.ID, trace); err != nil {
+			w.logger.Warn("store agent trace failed", "run", run.ID, "runtime_kind", spec.RuntimeKind, "err", err.Error())
+			w.insertEvent(run.WorkspaceID, run.ID, agentrun.Event{
+				Kind:    agentrun.EventError,
+				Payload: "store agent trace: " + err.Error(),
+				At:      time.Now(),
+			})
+		} else {
+			recordAgentTraceSpan(context.Background(), run.WorkspaceID, trace)
+			w.insertEvent(run.WorkspaceID, run.ID, agentrun.Event{
+				Kind:    agentrun.EventStatus,
+				Payload: "trace_ready",
+				At:      time.Now(),
+			})
+			publishTo(run.WorkspaceID, "run.trace", map[string]string{"run_id": run.ID})
+		}
 	}
 
 	// Terminal status + cleanup.
@@ -247,7 +275,7 @@ func envSecretsForKind(kind string) map[string]string {
 	case "claude_code", "openclaw":
 		keys = []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY"}
 	case "codex", "opencode":
-		keys = []string{"OPENAI_API_KEY"}
+		keys = []string{"OPENAI_API_KEY", "CODEX_API_KEY"}
 	}
 	out := map[string]string{}
 	for _, k := range keys {

@@ -441,8 +441,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	// is poll-friendly until the M2 WebSocket lands.
 	apiGroup.POST("/ap/w/:slug/issues/:num/run", agentplatformhandler.RunIssue)
 	apiGroup.GET("/ap/w/:slug/issues/:num/runs", agentplatformhandler.ListIssueRuns)
+	apiGroup.GET("/ap/w/:slug/traces", agentplatformhandler.ListTaskRunTraces)
 	apiGroup.GET("/ap/w/:slug/runs/:id", agentplatformhandler.GetTaskRun)
 	apiGroup.GET("/ap/w/:slug/runs/:id/events", agentplatformhandler.ListRunEvents)
+	apiGroup.GET("/ap/w/:slug/runs/:id/trace", agentplatformhandler.GetTaskRunTrace)
+	apiGroup.POST("/ap/w/:slug/runs/:id/trace/evaluate", agentplatformhandler.EvaluateTaskRunTrace)
 	apiGroup.POST("/ap/w/:slug/runs/:id/cancel", agentplatformhandler.CancelTaskRun)
 
 	// Knowledge Engineering endpoints — reads/writes RTB files under ARTIFACT_DIR/Topics/.

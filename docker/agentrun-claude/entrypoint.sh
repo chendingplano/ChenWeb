@@ -34,10 +34,14 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     exit 3
 fi
 
-# --dangerously-skip-permissions is acceptable here because the container
-# itself is the trust boundary: ephemeral, single-mount /workspace, no
-# other paths accessible.
+# stream-json emits machine-readable events so the ChenWeb worker can
+# normalize model usage, tool calls, and the final answer into ap_agent_trace.
+# bypassPermissions is acceptable here because the container itself is the
+# trust boundary: ephemeral, single-mount /workspace, no other paths accessible.
 exec claude \
     --print \
-    --dangerously-skip-permissions \
+    --output-format stream-json \
+    --verbose \
+    --permission-mode bypassPermissions \
+    --no-session-persistence \
     "$(cat ISSUE.md)"

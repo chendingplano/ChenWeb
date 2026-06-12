@@ -1,6 +1,10 @@
 package agentplatformhandler
 
-import "time"
+import (
+	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/agenttrace"
+)
 
 // ErrorResponse mirrors promptoptimizerhandler.ErrorResponse so the frontend
 // can handle errors uniformly across ChenWeb API surfaces.
@@ -194,4 +198,48 @@ type Artifact struct {
 	Kind      string    `json:"kind"`
 	SizeBytes int64     `json:"size_bytes"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type AgentTraceRecord struct {
+	ID              string                `json:"id"`
+	WorkspaceID     string                `json:"workspace_id"`
+	TaskRunID       string                `json:"task_run_id"`
+	AgentKind       string                `json:"agent_kind"`
+	ProviderTraceID string                `json:"provider_trace_id"`
+	InputText       string                `json:"input_text"`
+	OutputText      string                `json:"output_text"`
+	ToolCallCount   int64                 `json:"tool_call_count"`
+	Usage           agenttrace.TokenUsage `json:"usage"`
+	TotalLatencyMS  *int64                `json:"total_latency_ms,omitempty"`
+	TotalCostUSD    *float64              `json:"total_cost_usd,omitempty"`
+	Trace           agenttrace.Trace      `json:"trace"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
+}
+
+type AgentTraceSummary struct {
+	ID              string                `json:"id"`
+	WorkspaceID     string                `json:"workspace_id"`
+	TaskRunID       string                `json:"task_run_id"`
+	AgentKind       string                `json:"agent_kind"`
+	ProviderTraceID string                `json:"provider_trace_id"`
+	OutputText      string                `json:"output_text"`
+	ToolCallCount   int64                 `json:"tool_call_count"`
+	Usage           agenttrace.TokenUsage `json:"usage"`
+	TotalLatencyMS  *int64                `json:"total_latency_ms,omitempty"`
+	TotalCostUSD    *float64              `json:"total_cost_usd,omitempty"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
+}
+
+type TraceListFilter struct {
+	AgentKind string
+	Limit     int
+}
+
+type TraceEvaluationRequest struct {
+	ContainsAnswer []string `json:"contains_answer"`
+	UsedTools      []string `json:"used_tools"`
+	AvoidedTools   []string `json:"avoided_tools"`
+	MaxTokens      *int     `json:"max_tokens"`
 }
