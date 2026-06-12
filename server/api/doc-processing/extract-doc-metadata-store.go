@@ -16,6 +16,7 @@ type DocMetadataInputRecord struct {
 	StagingFilename string
 	StatusRaw       string
 	FileName        string
+	Title           string
 }
 
 type DocMetadataUpdate struct {
@@ -44,7 +45,8 @@ SELECT id,
        COALESCE(result_filename, ''),
        COALESCE(staging_filename, ''),
        COALESCE(status::text, '[]'),
-       COALESCE(file_name, '')
+       COALESCE(file_name, ''),
+       COALESCE(title, '')
 FROM kb.inputs
 WHERE id = $1`
 
@@ -56,6 +58,7 @@ WHERE id = $1`
 		&rec.StagingFilename,
 		&rec.StatusRaw,
 		&rec.FileName,
+		&rec.Title,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -78,7 +81,8 @@ SELECT id,
        COALESCE(result_filename, ''),
        COALESCE(staging_filename, ''),
        COALESCE(status::text, '[]'),
-       COALESCE(file_name, '')
+       COALESCE(file_name, ''),
+       COALESCE(title, '')
 FROM kb.inputs
 WHERE LOWER(COALESCE(type, '')) = 'pdf'
   AND parse_state = 'parsed_success'
@@ -100,7 +104,8 @@ SELECT id,
        COALESCE(result_filename, ''),
        COALESCE(staging_filename, ''),
        COALESCE(status::text, '[]'),
-       COALESCE(file_name, '')
+       COALESCE(file_name, ''),
+       COALESCE(title, '')
 FROM kb.inputs
 WHERE has_failed_proc
 ORDER BY id`
@@ -134,6 +139,7 @@ func (s DocMetadataSQLStore) listInputRecords(ctx context.Context, stmt string) 
 			&rec.StagingFilename,
 			&rec.StatusRaw,
 			&rec.FileName,
+			&rec.Title,
 		); err != nil {
 			return nil, err
 		}

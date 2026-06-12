@@ -56,6 +56,13 @@ type EntityRelationStore interface {
 	RelationsExist(ctx context.Context, inputRecordID int64) (bool, error)
 	DeleteRelationsByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error)
 	SaveRelations(ctx context.Context, req SaveRelationsRequest) (int64, error)
+	// GetChunkSummaries returns a map[seqNo]summaryText for level-0 (chunk-level)
+	// summaries of the given record, used to build entity_context.
+	GetChunkSummaries(ctx context.Context, inputRecordID int64) (map[int]string, error)
+	// AppendSummaryKeywordsToEntitySearch fetches all keywords from kb.summaries
+	// for the record and appends them to each entity row's search_document and
+	// search_vector.  It is a no-op if no summaries exist yet.
+	AppendSummaryKeywordsToEntitySearch(ctx context.Context, inputRecordID int64) error
 }
 
 type EntityRelationSQLStore struct {
@@ -68,6 +75,7 @@ type SaveEntitiesRequest struct {
 	Language      string
 	ModelName     string
 	PromptName    string
+	DocName       string
 	Entities      []map[string]any
 }
 
@@ -266,6 +274,13 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		result.Relations[i]["create_time"] = createTime
 	}
 
+	chunkSummaries, sumErr := p.Store.GetChunkSummaries(ctx, evt.RecordID)
+	if sumErr != nil {
+		p.Logger.Warn("get chunk summaries failed; entity_context will be empty", "record_id", evt.RecordID, "error", sumErr)
+		chunkSummaries = map[int]string{}
+	}
+	buildEntityContextForEntities(result.Entities, chunks, lines, chunkSummaries, envInt("ARTIFACT_CONTEXT_SIZE", 3, 0))
+
 	eventID := eventIDFromContext(ctx)
 	insertedEntities, err := p.Store.SaveEntities(ctx, SaveEntitiesRequest{
 		InputRecordID: evt.RecordID,
@@ -273,6 +288,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		Language:      detectedLanguage,
 		ModelName:     firstNonEmptyTrimmed(result.ModelName, p.ModelName),
 		PromptName:    p.PromptRef,
+		DocName:       strings.TrimSpace(rec.Title),
 		Entities:      result.Entities,
 	})
 	if err != nil {
@@ -290,6 +306,10 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 	if err != nil {
 		p.persistEntityRelationStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26052716) insert relations failed, error:%w", err)
+	}
+
+	if appendErr := p.Store.AppendSummaryKeywordsToEntitySearch(ctx, evt.RecordID); appendErr != nil {
+		p.Logger.Warn("append summary keywords to entity search failed", "record_id", evt.RecordID, "error", appendErr)
 	}
 
 	if fileErr := p.saveEntitiesToFile(evt.RecordID, rec, result.Entities); fileErr != nil {
@@ -796,6 +816,149 @@ func normalizeRelationRows(raw any, chunkSeqNo int) []map[string]any {
 	return out
 }
 
+// ---- Entity context ----
+
+// parseLineSpanRange parses a single span string ("14" or "14-16") into (start, end).
+// Returns (0, 0) on parse failure.
+func parseLineSpanRange(s string) (start, end int) {
+	s = strings.TrimSpace(s)
+	sep := strings.IndexAny(s, "-:")
+	if sep > 0 {
+		a, err1 := strconv.Atoi(strings.TrimSpace(s[:sep]))
+		b, err2 := strconv.Atoi(strings.TrimSpace(s[sep+1:]))
+		if err1 == nil && err2 == nil && a > 0 && b >= a {
+			return a, b
+		}
+		return 0, 0
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0, 0
+	}
+	return n, n
+}
+
+// buildEntityContextForEntities sets the "entity_context" key on each entity map.
+// For every entity it groups its line_spans by chunk, then for each chunk builds:
+//
+//	chunk_summary + (leading_lines + line_range) per span in that chunk
+//
+// Multiple per-chunk contexts are separated by "\n\n".
+func buildEntityContextForEntities(
+	entities []map[string]any,
+	chunks []Chunk,
+	allLines []Line,
+	chunkSummaries map[int]string,
+	contextSize int,
+) {
+	if len(entities) == 0 {
+		return
+	}
+
+	// line number → document line
+	lineByNo := make(map[int]Line, len(allLines))
+	sortedNos := make([]int, 0, len(allLines))
+	for _, l := range allLines {
+		lineByNo[l.LineNo] = l
+		sortedNos = append(sortedNos, l.LineNo)
+	}
+	sort.Ints(sortedNos)
+
+	// document line number → chunk SeqNo
+	lineToChunk := make(map[int]int, len(allLines))
+	for _, c := range chunks {
+		for _, ml := range c.Lines {
+			if ml.Line.LineNo > 0 {
+				lineToChunk[ml.Line.LineNo] = c.SeqNo
+			}
+		}
+	}
+
+	type spanRange struct{ start, end int }
+
+	for _, entity := range entities {
+		spans := toStringSlice(entity["line_spans"])
+		if len(spans) == 0 {
+			continue
+		}
+
+		// Group spans by chunk SeqNo, preserving first-seen order.
+		chunkSpans := make(map[int][]spanRange)
+		var chunkOrder []int
+		chunkSeen := make(map[int]bool)
+
+		for _, span := range spans {
+			st, en := parseLineSpanRange(span)
+			if st <= 0 {
+				continue
+			}
+			seqNo := 0
+			found := false
+			for lineNo := st; lineNo <= en; lineNo++ {
+				if sn, ok := lineToChunk[lineNo]; ok {
+					seqNo, found = sn, true
+					break
+				}
+			}
+			if !found {
+				if csn, ok := entity["chunk_seq_no"].(int); ok {
+					seqNo = csn
+				}
+			}
+			chunkSpans[seqNo] = append(chunkSpans[seqNo], spanRange{st, en})
+			if !chunkSeen[seqNo] {
+				chunkSeen[seqNo] = true
+				chunkOrder = append(chunkOrder, seqNo)
+			}
+		}
+		sort.Ints(chunkOrder)
+
+		var chunkContexts []string
+		for _, seqNo := range chunkOrder {
+			summary := strings.TrimSpace(chunkSummaries[seqNo])
+			var spanTexts []string
+
+			for _, sr := range chunkSpans[seqNo] {
+				// Collect contextSize leading lines (lines before sr.start).
+				leadingStart := sort.SearchInts(sortedNos, sr.start)
+				leadStart := leadingStart - contextSize
+				if leadStart < 0 {
+					leadStart = 0
+				}
+				var parts []string
+				for _, lineNo := range sortedNos[leadStart:leadingStart] {
+					if c := strings.TrimSpace(lineByNo[lineNo].Content); c != "" {
+						parts = append(parts, c)
+					}
+				}
+				// Span lines.
+				for lineNo := sr.start; lineNo <= sr.end; lineNo++ {
+					if l, ok := lineByNo[lineNo]; ok {
+						if c := strings.TrimSpace(l.Content); c != "" {
+							parts = append(parts, c)
+						}
+					}
+				}
+				if len(parts) > 0 {
+					spanTexts = append(spanTexts, strings.Join(parts, "\n"))
+				}
+			}
+
+			if len(spanTexts) == 0 {
+				continue
+			}
+			var contextParts []string
+			if summary != "" {
+				contextParts = append(contextParts, summary)
+			}
+			contextParts = append(contextParts, strings.Join(spanTexts, "\n\n"))
+			chunkContexts = append(chunkContexts, strings.Join(contextParts, "\n"))
+		}
+
+		entity["entity_context"] = strings.Join(chunkContexts, "\n\n")
+	}
+}
+
 // normalizePredicate lowercases and replaces internal whitespace with single
 // underscores so callers see e.g. "Depends On" -> "depends_on".
 func normalizePredicate(raw string) string {
@@ -1034,12 +1197,17 @@ CREATE TABLE IF NOT EXISTS kb.entities (
     confidence DOUBLE PRECISION,
     model_name TEXT,
     prompt_name TEXT,
+    entity_context TEXT,
+    doc_name TEXT,
     search_document TEXT,
     search_vector TSVECTOR,
     connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE kb.entities ADD COLUMN IF NOT EXISTS entity_context TEXT;
+ALTER TABLE kb.entities ADD COLUMN IF NOT EXISTS doc_name TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_kb_entities_input_record_id ON kb.entities (input_record_id);
 CREATE INDEX IF NOT EXISTS idx_kb_entities_entity_id ON kb.entities (entity_id);
@@ -1159,9 +1327,11 @@ INSERT INTO kb.entities (
     confidence,
     model_name,
     prompt_name,
+    entity_context,
+    doc_name,
     ext_info
 ) VALUES (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18,$19::jsonb
+    $1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21::jsonb
 )`
 
 	isEnglish := isLanguageEnglish(req.Language)
@@ -1198,6 +1368,17 @@ INSERT INTO kb.entities (
 			keywordsEnVal = string(ke)
 		}
 
+		entityContextVal := strings.TrimSpace(asString(e["entity_context"]))
+		var entityContextArg any
+		if entityContextVal != "" {
+			entityContextArg = entityContextVal
+		}
+		docNameVal := strings.TrimSpace(req.DocName)
+		var docNameArg any
+		if docNameVal != "" {
+			docNameArg = docNameVal
+		}
+
 		if _, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
 			req.InputRecordID,
@@ -1217,6 +1398,8 @@ INSERT INTO kb.entities (
 			toFloat(e["confidence"]),
 			strings.TrimSpace(req.ModelName),
 			strings.TrimSpace(req.PromptName),
+			entityContextArg,
+			docNameArg,
 			string(extInfo),
 		); err != nil {
 			return inserted, err
@@ -1323,6 +1506,81 @@ func isLanguageEnglish(language string) bool {
 	return strings.EqualFold(s, "en") || strings.EqualFold(s, "english")
 }
 
+func (s EntityRelationSQLStore) GetChunkSummaries(ctx context.Context, inputRecordID int64) (map[int]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT summary_seq_no, COALESCE(summary_text, '')
+		FROM kb.summaries
+		WHERE input_record_id = $1 AND summary_level = 0
+		ORDER BY summary_seq_no`, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	result := make(map[int]string)
+	for rows.Next() {
+		var seqNo int
+		var text string
+		if err := rows.Scan(&seqNo, &text); err != nil {
+			return nil, err
+		}
+		result[seqNo] = text
+	}
+	return result, rows.Err()
+}
+
+func (s EntityRelationSQLStore) AppendSummaryKeywordsToEntitySearch(ctx context.Context, inputRecordID int64) error {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT COALESCE(keywords, '[]'::jsonb), COALESCE(keywords_en, '[]'::jsonb)
+		FROM kb.summaries
+		WHERE input_record_id = $1`, inputRecordID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	seen := make(map[string]struct{})
+	var parts []string
+	for rows.Next() {
+		var kwRaw, kwEnRaw []byte
+		if err := rows.Scan(&kwRaw, &kwEnRaw); err != nil {
+			return err
+		}
+		for _, kw := range rawJSONArrayStrings(kwRaw) {
+			kw = strings.TrimSpace(kw)
+			if kw == "" {
+				continue
+			}
+			if _, ok := seen[kw]; !ok {
+				seen[kw] = struct{}{}
+				parts = append(parts, kw)
+			}
+		}
+		for _, kw := range rawJSONArrayStrings(kwEnRaw) {
+			kw = strings.TrimSpace(kw)
+			if kw == "" {
+				continue
+			}
+			if _, ok := seen[kw]; !ok {
+				seen[kw] = struct{}{}
+				parts = append(parts, kw)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	extra := strings.Join(parts, " ")
+	_, err = s.DB.ExecContext(ctx, `
+		UPDATE kb.entities
+		SET search_document = trim(concat_ws(' ', search_document, $2)),
+		    search_vector   = to_tsvector('simple', trim(concat_ws(' ', search_document, $2)))
+		WHERE input_record_id = $1`, inputRecordID, extra)
+	return err
+}
+
 // ---- Phase C artifact file refresh ----
 
 // loadPersistedEntityArtifactRows loads all entity rows for a record from the DB,
@@ -1345,6 +1603,8 @@ func loadPersistedEntityArtifactRows(ctx context.Context, db *sql.DB, recordID i
 		       COALESCE(confidence, 0),
 		       COALESCE(model_name, ''),
 		       COALESCE(prompt_name, ''),
+		       COALESCE(entity_context, ''),
+		       COALESCE(doc_name, ''),
 		       COALESCE(search_document, ''),
 		       COALESCE(connected_artifacts, '{}'::jsonb),
 		       COALESCE(ext_info, '{}'::jsonb)
@@ -1365,7 +1625,8 @@ func loadPersistedEntityArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			keywordsRaw, keywordsEnRaw                           []byte
 			lineSpansRaw                                         []byte
 			confidence                                           float64
-			modelName, promptName, searchDocument                string
+			modelName, promptName                                string
+			entityContext, docName, searchDocument               string
 			connectedArtifactsRaw, extInfoRaw                   []byte
 		)
 		if err := rows.Scan(
@@ -1374,7 +1635,8 @@ func loadPersistedEntityArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			&descText, &descTextEn,
 			&keywordsRaw, &keywordsEnRaw,
 			&lineSpansRaw,
-			&confidence, &modelName, &promptName, &searchDocument,
+			&confidence, &modelName, &promptName,
+			&entityContext, &docName, &searchDocument,
 			&connectedArtifactsRaw, &extInfoRaw,
 		); err != nil {
 			return nil, err
@@ -1395,6 +1657,8 @@ func loadPersistedEntityArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			"confidence":          confidence,
 			"model_name":          strings.TrimSpace(modelName),
 			"prompt_name":         strings.TrimSpace(promptName),
+			"entity_context":      strings.TrimSpace(entityContext),
+			"doc_name":            strings.TrimSpace(docName),
 			"search_document":     strings.TrimSpace(searchDocument),
 			"connected_artifacts": jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
 			"ext_info":            jsonColumnToValue(extInfoRaw, map[string]any{}),

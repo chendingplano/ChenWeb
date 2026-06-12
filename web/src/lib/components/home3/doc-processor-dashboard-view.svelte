@@ -86,6 +86,7 @@
 	// ── Sync control state ────────────────────────────────────────────────
 	let autoSync = $state(true);
 	let syncInterval: ReturnType<typeof setInterval> | null = null;
+	let pdfPollInterval: ReturnType<typeof setInterval> | null = null;
 	let emptyPollCount = 0;
 	let prevActivePipelinesCount = 0;
 
@@ -130,12 +131,26 @@
 
 	// Read a 0–100 percentage from a parsing entry's free-form progress string
 	// ("45%", "3/10", …). Returns null when no numeric progress is available.
+	// The PDF parser writes operation="parsed" (proc_status: active → success/fail).
+	// Match any of the canonical parse operation names so progress is found.
+	function findParseEntry(record: KbInputRecord) {
+		const PARSE_OPS = new Set(['parsed', 'parsing', 'parse']);
+		return (record.status ?? []).find((e) => PARSE_OPS.has((e.operation ?? '').toLowerCase()));
+	}
+
 	function parseProgressPercent(record: KbInputRecord): number | null {
-		const entry = (record.status ?? []).find((e) => (e.operation ?? '').toLowerCase() === 'parsing');
+		const entry = findParseEntry(record);
 		const raw = entry?.progress?.trim();
 		if (!raw) return null;
 		const pct = raw.match(/(\d+(?:\.\d+)?)\s*%/);
-		if (pct) return Math.max(0, Math.min(100, parseFloat(pct[1])));
+		if (pct) {
+			const value = Math.max(0, Math.min(100, parseFloat(pct[1])));
+			// 0% while actively parsing means no real page progress yet —
+			// return null so the indeterminate animation plays instead of a flat bar.
+			const isActive = (entry?.proc_status ?? (entry as Record<string, unknown>)?.['proc-status'] ?? '').toString().toLowerCase() === 'active';
+			if (value === 0 && isActive) return null;
+			return value;
+		}
 		const ratio = raw.match(/(\d+)\s*\/\s*(\d+)/);
 		if (ratio) {
 			const a = parseFloat(ratio[1]);
@@ -146,8 +161,22 @@
 	}
 
 	function parsingProgressText(record: KbInputRecord): string {
-		const entry = (record.status ?? []).find((e) => (e.operation ?? '').toLowerCase() === 'parsing');
-		return entry?.progress?.trim() ?? '';
+		const entry = findParseEntry(record);
+		const raw = entry?.progress?.trim() ?? '';
+		const isActive = (entry?.proc_status ?? (entry as Record<string, unknown>)?.['proc-status'] ?? '').toString().toLowerCase() === 'active';
+		if (raw === '0%' && isActive) {
+			// Show server-side elapsed time (ms_used advances via heartbeat every 15 s).
+			const msUsed = (entry as Record<string, unknown>)?.ms_used;
+			if (typeof msUsed === 'number' && msUsed > 0) {
+				const secs = Math.floor(msUsed / 1000);
+				if (secs < 60) return `${secs}s`;
+				const mins = Math.floor(secs / 60);
+				const remSecs = secs % 60;
+				return remSecs > 0 ? `${mins}m ${remSecs}s` : `${mins}m`;
+			}
+			return ''; // template falls through to 'parsing…'
+		}
+		return raw;
 	}
 
 	async function pollPdfParsing() {
@@ -162,9 +191,9 @@
 		};
 		try {
 			const [activeRes, successRes, failedRes, waitingRes, totalRes] = await Promise.all([
-				listKbInputs({ ...base, pageSize: PDF_ACTIVE_LIMIT, operation: 'parsing', procStatus: 'running' }),
-				listKbInputs({ ...base, operation: 'parsed', procStatus: 'success' }),
-				listKbInputs({ ...base, operation: 'parsed', procStatus: 'fail' }),
+				listKbInputs({ ...base, pageSize: PDF_ACTIVE_LIMIT, parseState: 'parsing' }),
+				listKbInputs({ ...base, parseState: 'parsed_success' }),
+				listKbInputs({ ...base, parseState: 'parsed_failed' }),
 				listKbInputs({ ...base, parseState: 'pending' }),
 				listKbInputs({ ...base })
 			]);
@@ -183,6 +212,15 @@
 			pdfParsingError = err instanceof Error ? err.message : 'Failed to load PDF parsing status';
 		} finally {
 			pdfParsingLoading = false;
+		}
+		// If active parses detected while pipeline sync is paused, wake it back up.
+		if (pdfStats.active > 0 && !autoSync) {
+			startAutoSync();
+		}
+		// Stop the dedicated PDF keepalive once there's nothing left to watch.
+		if (pdfStats.active === 0 && pdfPollInterval !== null) {
+			clearInterval(pdfPollInterval);
+			pdfPollInterval = null;
 		}
 	}
 
@@ -303,6 +341,11 @@
 		autoSync = true;
 		emptyPollCount = 0;
 		syncInterval = setInterval(pollPipelines, 5000);
+		// Cancel the PDF-only keepalive — full sync covers it now.
+		if (pdfPollInterval !== null) {
+			clearInterval(pdfPollInterval);
+			pdfPollInterval = null;
+		}
 	}
 
 	function stopAutoSync() {
@@ -311,6 +354,11 @@
 			syncInterval = null;
 		}
 		autoSync = false;
+		// Keep the PDF section live with a dedicated interval so active parses
+		// continue to update (and can wake full sync back up) even while paused.
+		if (pdfPollInterval === null) {
+			pdfPollInterval = setInterval(pollPdfParsing, 5000);
+		}
 	}
 
 	function toggleSync() {
@@ -344,12 +392,13 @@
 			lastPoll = new Date().toLocaleTimeString();
 			pipelinesError = '';
 
-			// Turn sync back on when pipelines appear while sync was off
-			if (prevCount === 0 && newCount > 0 && !autoSync) {
+			// Turn sync back on when pipelines or active parses appear while sync was off
+			if (!autoSync && (newCount > 0 || pdfStats.active > 0)) {
 				startAutoSync();
 			}
-			// Track consecutive empty polls; disable sync after 5 with no active tasks
-			if (newCount === 0) {
+			// Track consecutive empty polls; disable sync after 5 with no active tasks.
+			// Keep syncing as long as PDF parsing is active (pdfStats from previous poll).
+			if (newCount === 0 && pdfStats.active === 0) {
 				emptyPollCount++;
 				if (emptyPollCount >= 5 && autoSync) stopAutoSync();
 			} else {
@@ -529,6 +578,11 @@
 
 	function toggleAll() {
 		const next = !allProcessorsSelected();
+		if (!next) {
+			// Deselect all: also clear the optional pre-processors.
+			parseFileChecked = false;
+			convertChecked = false;
+		}
 		processors = Object.fromEntries(selectableProcessorIds.map((p) => [p, next]));
 	}
 
@@ -649,7 +703,10 @@
 
 		pollPipelines();
 		syncInterval = setInterval(pollPipelines, 5000);
-		return () => { if (syncInterval !== null) clearInterval(syncInterval); };
+		return () => {
+			if (syncInterval !== null) clearInterval(syncInterval);
+			if (pdfPollInterval !== null) clearInterval(pdfPollInterval);
+		};
 	});
 </script>
 

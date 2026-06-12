@@ -31,6 +31,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/kehandler"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
+	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -206,6 +207,7 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Add the endpoint '/api/config' (public endpoint for frontend to fetch config)
 	e.GET("/api/config", confighandler.GetConfig)
+	e.POST("/api/internal/mitmproxy/ingest", proxytracehandler.IngestMitmExchange)
 
 	// Create the routing group '/api/v1'
 	apiGroup := e.Group("/api/v1")

@@ -4729,3 +4729,42 @@ Project ID: liquid-force-430923-d2
 Organization: No organization
 ```
 Normally you need to choose 'Generative Language Client'.
+
+# How to Start AgentDog
+1. Start mitmproxy capture from ChenWeb:
+```text
+cd /Users/cding/Workspace/ChenWeb
+export MITM_TRACE_INGEST_TOKEN=YOUR_TOKEN
+export MITMTRACE_JSONL_PATH="$HOME/.mitmproxy/chenweb-llm-trace.jsonl"
+./tools/mitmproxy/start_llm_trace_capture.sh
+```
+
+2. Launch VS Code through that proxy:
+```text
+export HTTP_PROXY=http://127.0.0.1:8081
+export HTTPS_PROXY=http://127.0.0.1:8081
+export NO_PROXY=127.0.0.1,localhost
+export MITMTRACE_AGENT_NAME="VS Code"
+open -na "Visual Studio Code"
+```
+
+3. Then use Codex or Claude Code in that new VS Code instance.
+
+4. In HyperDX, search for:
+```text
+span.name:"agent_proxy.http_exchange"
+```
+
+and then narrow with:
+```text
+agent.kind:"claude_code"
+agent.kind:"codex"
+llm.provider:"anthropic"
+llm.provider:"openai"
+```
+
+Two important gotchas:
+* If you launch VS Code normally from Dock/Spotlight, it usually won’t inherit the proxy env, so traffic won’t be captured.
+* On macOS, mitmproxy needs its CA cert trusted to decrypt HTTPS traffic. The mitmproxy docs call this out explicitly: the client must trust mitmproxy’s CA certificate, and local/macOS capture is supported via proxy/local capture modes. Sources: mitmproxy certificates, mitmproxy modes, HyperDX sources/traces.
+
+So the short version is: HyperDX is healthy, but capture is not active yet. Start mitmproxy, relaunch VS Code through it, generate one Codex/Claude request, and then search span.name:"agent_proxy.http_exchange".

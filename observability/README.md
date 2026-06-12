@@ -92,3 +92,28 @@ length, latency, and cost. Full prompt/output content is excluded unless
 
 Use this module for agent behavior evaluation and API access. Use OpenTelemetry
 for transport, storage, and dashboards.
+
+## VS Code Proxy Capture
+
+For Claude Code or Codex sessions launched directly from VS Code, ChenWeb can
+also ingest `mitmproxy`-captured LLM HTTP traffic and emit it to HyperDX as
+`agent_proxy.http_exchange` spans.
+
+The local ingest endpoint is:
+
+```text
+POST /api/internal/mitmproxy/ingest
+```
+
+It is protected by the `MITM_TRACE_INGEST_TOKEN` environment variable and is
+intended for local-only use with the helper addon in:
+
+```text
+tools/mitmproxy/
+```
+
+Search HyperDX for:
+
+```text
+span.name:"agent_proxy.http_exchange"
+```

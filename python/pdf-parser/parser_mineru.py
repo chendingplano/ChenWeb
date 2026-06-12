@@ -21,15 +21,30 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from typing import Any, Callable
 
 from parser_base import ParserBackend
 
 log = logging.getLogger(__name__)
 
+# Matches "X/Y" in tqdm output like "Processing pages: 60%|██| 3/5 [00:06<00:04]"
+_PAGE_PROGRESS_RE = re.compile(r'\b(\d+)/(\d+)\b')
+
 
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
+
+
+def _get_pdf_page_count(pdf_path: str) -> int:
+    """Return the page count of the PDF, or 0 if it cannot be determined."""
+    try:
+        import fitz  # PyMuPDF — available in the parser venv
+        with fitz.open(pdf_path) as doc:
+            return len(doc)
+    except Exception as exc:
+        log.debug("_get_pdf_page_count fitz failed: %s", exc)
+    return 0
 
 
 class MineruParser(ParserBackend):
@@ -71,7 +86,11 @@ class MineruParser(ParserBackend):
         output_dir: str,
         on_progress: Callable[[int, int], None],
     ) -> dict[str, Any]:
-        on_progress(0, 1)
+        # Use the real page count so the dashboard shows accurate total from
+        # the start rather than the placeholder value of 1.
+        pdf_page_count = _get_pdf_page_count(pdf_path)
+        total_pages_hint = max(pdf_page_count, 1)
+        on_progress(0, total_pages_hint)
 
         cmd: list[str] = [self._cli, "-p", pdf_path, "-o", output_dir]
         if self._backend:
@@ -80,6 +99,33 @@ class MineruParser(ParserBackend):
             cmd += self._extra_args
 
         log.info("running mineru: %s", " ".join(cmd))
+
+        # MinerU is a long-running subprocess. tqdm uses \r (not \n) for
+        # progress updates, so line-by-line reading can block for minutes
+        # without yielding anything. A heartbeat thread calls on_progress
+        # every 15 s so ms_used keeps advancing in the DB.
+        #
+        # psycopg2 connections are not thread-safe, so we guard all
+        # on_progress calls with a non-blocking lock: the heartbeat skips
+        # a tick if the main thread is currently doing a DB write.
+        _progress_lock = threading.Lock()
+        # Shared mutable state for heartbeat thread (dict is GIL-safe).
+        _state: dict[str, int] = {"pages_done": 0, "total": total_pages_hint}
+        _stop_heartbeat = threading.Event()
+
+        def _heartbeat() -> None:
+            while not _stop_heartbeat.wait(timeout=15.0):
+                if _progress_lock.acquire(blocking=False):
+                    try:
+                        on_progress(_state["pages_done"], _state["total"])
+                    except Exception as exc:
+                        log.debug("heartbeat on_progress error: %s", exc)
+                    finally:
+                        _progress_lock.release()
+
+        heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True)
+        heartbeat_thread.start()
+
         # Stream output line-by-line so the stdout/stderr pipe can never fill
         # and deadlock a long-running mineru subprocess. Keep last N lines for
         # the error message on non-zero exit.
@@ -92,14 +138,34 @@ class MineruParser(ParserBackend):
         )
         tail: list[str] = []
         assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.rstrip()
-            if not line:
-                continue
-            log.info("[mineru] %s", line)
-            tail.append(line)
-            if len(tail) > 50:
-                tail.pop(0)
+        try:
+            for raw_line in proc.stdout:
+                # tqdm uses \r to overwrite the current line; take the last
+                # non-empty segment so log output is clean.
+                segments = [s for s in raw_line.rstrip('\n').split('\r') if s.strip()]
+                line = segments[-1] if segments else raw_line.rstrip()
+                if not line:
+                    continue
+                log.info("[mineru] %s", line)
+                tail.append(line)
+                if len(tail) > 50:
+                    tail.pop(0)
+
+                # Extract page progress from tqdm lines, e.g.
+                # "Processing pages: 60%|██| 3/5 [00:06<00:04]"
+                for seg in segments or [line]:
+                    m = _PAGE_PROGRESS_RE.search(seg)
+                    if m:
+                        x, y = int(m.group(1)), int(m.group(2))
+                        if y > 0:
+                            _state["pages_done"] = x
+                            if y > _state["total"]:
+                                _state["total"] = y
+                            break
+        finally:
+            _stop_heartbeat.set()
+            heartbeat_thread.join(timeout=5)
+
         rc = proc.wait()
         if rc != 0:
             raise RuntimeError(

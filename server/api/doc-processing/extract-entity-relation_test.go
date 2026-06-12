@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -507,5 +508,74 @@ func TestEntityRelationExtractionUsesFallbackOnPrimaryError(t *testing.T) {
 	ents, _ := payload["entities"].([]any)
 	if len(ents) != 1 {
 		t.Errorf("entities len=%d, want 1: %#v", len(ents), payload)
+	}
+}
+
+func TestParseLineSpanRange(t *testing.T) {
+	cases := []struct{ in string; wantS, wantE int }{
+		{"14", 14, 14},
+		{"14-16", 14, 16},
+		{"14:16", 14, 16},
+		{"  5  ", 5, 5},
+		{"0", 0, 0},    // zero is invalid
+		{"-1", 0, 0},
+		{"abc", 0, 0},
+		{"14-12", 0, 0}, // end < start
+	}
+	for _, c := range cases {
+		s, e := parseLineSpanRange(c.in)
+		if s != c.wantS || e != c.wantE {
+			t.Errorf("parseLineSpanRange(%q) = (%d,%d), want (%d,%d)", c.in, s, e, c.wantS, c.wantE)
+		}
+	}
+}
+
+func TestBuildEntityContextForEntities(t *testing.T) {
+	// Three document lines; chunk covers lines 2-3; level-0 summary for seqNo=1.
+	lines := []Line{
+		{LineNo: 1, Content: "intro line"},
+		{LineNo: 2, Content: "entity line A"},
+		{LineNo: 3, Content: "entity line B"},
+	}
+	chunks := []Chunk{
+		{
+			SeqNo: 1,
+			Lines: []MarkedLine{
+				{Line: lines[1], Mark: "r"},
+				{Line: lines[2], Mark: "r"},
+			},
+		},
+	}
+	summaries := map[int]string{1: "chunk one summary"}
+	entities := []map[string]any{
+		{
+			"entity":       "TestEntity",
+			"line_spans":   []string{"2-3"},
+			"chunk_seq_no": 1,
+		},
+	}
+
+	buildEntityContextForEntities(entities, chunks, lines, summaries, 1)
+
+	ctx, ok := entities[0]["entity_context"].(string)
+	if !ok || ctx == "" {
+		t.Fatalf("entity_context not set or empty: %#v", entities[0]["entity_context"])
+	}
+	if !strings.Contains(ctx, "chunk one summary") {
+		t.Errorf("entity_context missing chunk summary; got:\n%s", ctx)
+	}
+	if !strings.Contains(ctx, "entity line A") {
+		t.Errorf("entity_context missing span line; got:\n%s", ctx)
+	}
+	if !strings.Contains(ctx, "intro line") {
+		t.Errorf("entity_context missing leading line; got:\n%s", ctx)
+	}
+}
+
+func TestBuildEntityContextForEntities_NoSpans(t *testing.T) {
+	entities := []map[string]any{{"entity": "X", "line_spans": []string{}}}
+	buildEntityContextForEntities(entities, nil, nil, nil, 3)
+	if _, ok := entities[0]["entity_context"]; ok {
+		t.Errorf("expected no entity_context key for empty spans, got %v", entities[0]["entity_context"])
 	}
 }

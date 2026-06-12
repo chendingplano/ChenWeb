@@ -11,7 +11,7 @@ import type {
 
 const BASE = '/api/v1/kb';
 
-export type ParseState = 'all' | 'pending' | 'parsed_success' | 'parsed_failed';
+export type ParseState = 'all' | 'pending' | 'parsing' | 'parsed_success' | 'parsed_failed';
 
 export type KbInputRecord = {
 	id: number;

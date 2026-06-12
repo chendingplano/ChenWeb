@@ -637,6 +637,8 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 	case "all":
 	case "pending":
 		whereParts = append(whereParts, "i.parse_state = 'pending'")
+	case "parsing":
+		whereParts = append(whereParts, "i.parse_state = 'parsing'")
 	case "parsed_success":
 		whereParts = append(whereParts, "i.parse_state = 'parsed_success'")
 	case "parsed_failed":
@@ -747,6 +749,8 @@ func normalizeParseState(raw string) string {
 		return "all"
 	case "pending":
 		return "pending"
+	case "parsing", "active":
+		return "parsing"
 	case "parsed_success", "success":
 		return "parsed_success"
 	case "parsed_failed", "failed":
@@ -758,7 +762,7 @@ func normalizeParseState(raw string) string {
 
 func isValidParseState(raw string) bool {
 	switch normalizeParseState(raw) {
-	case "all", "pending", "parsed_success", "parsed_failed":
+	case "all", "pending", "parsing", "parsed_success", "parsed_failed":
 		return true
 	default:
 		return false

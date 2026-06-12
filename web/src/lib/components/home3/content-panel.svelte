@@ -113,7 +113,7 @@
 </script>
 
 <main
-	class="flex-1 overflow-y-auto flex flex-col min-w-0"
+	class="relative flex-1 overflow-y-auto flex flex-col min-w-0"
 	style="background:{pageBg}; scrollbar-width:thin; scrollbar-color:{borderColor} transparent;"
 >
 	<!-- Topbar: breadcrumb + shelf toggle -->

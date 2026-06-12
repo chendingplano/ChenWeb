@@ -187,6 +187,15 @@
 	let statusDialogTitle = $state('');
 	let statusDialogItems = $state<KbInputRecord['status']>([]);
 
+	// Reset status dialog when the search dialog closes (statusDialogOpen lives outside
+	// the {#if open} block, so it would otherwise persist after the parent closes).
+	$effect(() => {
+		if (!open) {
+			statusDialogOpen = false;
+			statusDialogRecord = null;
+		}
+	});
+
 	type FlatRow = { key: string; value: string | null; depth: number };
 
 	function tryParseJsonLike(v: unknown): unknown {
@@ -258,7 +267,7 @@
 </script>
 
 {#if open}
-	<div class="dialog-overlay" aria-hidden="true">
+	<div class="dialog-overlay">
 		<div
 			class="dialog"
 			onclick={(e) => e.stopPropagation()}
