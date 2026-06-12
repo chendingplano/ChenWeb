@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"golang.org/x/net/html"
 )
 
 type mineruDocument struct {
@@ -21,17 +19,17 @@ type mineruPage struct {
 }
 
 type mineruItem struct {
-	Type           string          `json:"type"`
-	Text           string          `json:"text"`
-	TextLevel      *int            `json:"text_level"`
-	ListItems      []string        `json:"list_items"`
-	TableCaption   []string        `json:"table_caption"`
-	TableFootnote  []string        `json:"table_footnote"`
-	TableBody      string          `json:"table_body"`
-	ImgPath        string          `json:"img_path"`
-	ImageCaption   []string        `json:"image_caption"`
-	ImageFootnote  []string        `json:"image_footnote"`
-	BBox           json.RawMessage `json:"bbox"`
+	Type          string          `json:"type"`
+	Text          string          `json:"text"`
+	TextLevel     *int            `json:"text_level"`
+	ListItems     []string        `json:"list_items"`
+	TableCaption  []string        `json:"table_caption"`
+	TableFootnote []string        `json:"table_footnote"`
+	TableBody     string          `json:"table_body"`
+	ImgPath       string          `json:"img_path"`
+	ImageCaption  []string        `json:"image_caption"`
+	ImageFootnote []string        `json:"image_footnote"`
+	BBox          json.RawMessage `json:"bbox"`
 }
 
 func ConvertMineruFile(inputPath string) (string, error) {
@@ -119,12 +117,21 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 				}
 
 			case "equation":
+				bbox := mineruBBoxStr(item.BBox)
 				if content := strings.TrimSpace(item.Text); content != "" {
 					items = append(items, extractedOpenDataLine{
 						Page:    pageStr,
 						Type:    "equation",
-						BBox:    mineruBBoxStr(item.BBox),
+						BBox:    bbox,
 						Content: content,
+					})
+				}
+				if imgPath := strings.TrimSpace(item.ImgPath); imgPath != "" {
+					items = append(items, extractedOpenDataLine{
+						Page:    pageStr,
+						Type:    "equation-image",
+						BBox:    bbox,
+						Content: imgPath,
 					})
 				}
 
@@ -140,12 +147,20 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 						})
 					}
 				}
-				for _, row := range parseMineruHTMLTableRows(item.TableBody) {
+				if imgPath := strings.TrimSpace(item.ImgPath); imgPath != "" {
 					items = append(items, extractedOpenDataLine{
 						Page:    pageStr,
-						Type:    "table-row",
+						Type:    "table-image",
 						BBox:    bbox,
-						Content: markdownRow(row),
+						Content: imgPath,
+					})
+				}
+				if tableBody := strings.TrimSpace(item.TableBody); tableBody != "" {
+					items = append(items, extractedOpenDataLine{
+						Page:    pageStr,
+						Type:    "table",
+						BBox:    bbox,
+						Content: tableBody,
 					})
 				}
 				for _, fn := range item.TableFootnote {
@@ -193,53 +208,6 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 		}
 	}
 	return items
-}
-
-func parseMineruHTMLTableRows(htmlBody string) [][]string {
-	if strings.TrimSpace(htmlBody) == "" {
-		return nil
-	}
-	z := html.NewTokenizer(strings.NewReader(htmlBody))
-	var rows [][]string
-	var currentRow []string
-	var cellBuf strings.Builder
-	inCell := false
-	for {
-		tt := z.Next()
-		if tt == html.ErrorToken {
-			break
-		}
-		switch tt {
-		case html.StartTagToken:
-			name, _ := z.TagName()
-			switch string(name) {
-			case "tr":
-				currentRow = []string{}
-			case "td", "th":
-				inCell = true
-				cellBuf.Reset()
-			}
-		case html.EndTagToken:
-			name, _ := z.TagName()
-			switch string(name) {
-			case "td", "th":
-				if inCell {
-					currentRow = append(currentRow, strings.TrimSpace(cellBuf.String()))
-					inCell = false
-				}
-			case "tr":
-				if currentRow != nil {
-					rows = append(rows, currentRow)
-					currentRow = nil
-				}
-			}
-		case html.TextToken:
-			if inCell {
-				cellBuf.Write(z.Text())
-			}
-		}
-	}
-	return rows
 }
 
 func mineruBBoxStr(raw json.RawMessage) string {

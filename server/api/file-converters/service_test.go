@@ -1223,6 +1223,48 @@ func TestConvertMineruFile_ImageWithCaptionAndFootnote(t *testing.T) {
 	}
 }
 
+func TestConvertMineruFile_EquationWithImagePath(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "doc_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 11,
+      "items": [
+        {
+          "type": "equation",
+          "text": "$$E=mc^2$$",
+          "img_path": "images/equation-11-1.jpg",
+          "bbox": [159,487,897,521]
+        }
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected equation and equation-image lines, got %d:\n%s", len(lines), string(got))
+	}
+	if !strings.Contains(lines[0], "equation\tunknown-font\t12\t[159, 487, 897, 521]\t$$E=mc^2$$") {
+		t.Fatalf("unexpected equation line: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "equation-image\tunknown-font\t12\t[159, 487, 897, 521]\timages/equation-11-1.jpg") {
+		t.Fatalf("unexpected equation-image line: %s", lines[1])
+	}
+}
+
 func TestConvertMineruFile_OutputPathNaming(t *testing.T) {
 	tmp := t.TempDir()
 	in := filepath.Join(tmp, "std_1521701_mineru.json")
@@ -1284,6 +1326,7 @@ func TestConvertMineruFile_TableWithCaptionBodyFootnote(t *testing.T) {
       "items": [
         {
           "type": "table",
+          "img_path": "images/table-3-1.jpg",
           "table_caption": ["表3.1 评价等级"],
           "table_footnote": ["注：分数为整数"],
           "table_body": "<table><tr><td>评分</td><td>等级</td></tr><tr><td>90</td><td>优秀</td></tr></table>",
@@ -1308,22 +1351,22 @@ func TestConvertMineruFile_TableWithCaptionBodyFootnote(t *testing.T) {
 	if !strings.Contains(text, "table-caption\tunknown-font\t12\t[100, 200, 500, 400]\t表3.1 评价等级") {
 		t.Fatalf("missing table-caption: %s", text)
 	}
-	if !strings.Contains(text, "table-row\tunknown-font\t12\t[100, 200, 500, 400]\t|评分|等级|") {
-		t.Fatalf("missing table-row header: %s", text)
+	if !strings.Contains(text, "table-image\tunknown-font\t12\t[100, 200, 500, 400]\timages/table-3-1.jpg") {
+		t.Fatalf("missing table-image: %s", text)
 	}
-	if !strings.Contains(text, "table-row\tunknown-font\t12\t[100, 200, 500, 400]\t|90|优秀|") {
-		t.Fatalf("missing table-row data: %s", text)
+	if !strings.Contains(text, "table\tunknown-font\t12\t[100, 200, 500, 400]\t<table><tr><td>评分</td><td>等级</td></tr><tr><td>90</td><td>优秀</td></tr></table>") {
+		t.Fatalf("missing table HTML body: %s", text)
 	}
 	if !strings.Contains(text, "table-footnote\tunknown-font\t12\t[100, 200, 500, 400]\t注：分数为整数") {
 		t.Fatalf("missing table-footnote: %s", text)
 	}
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	if len(lines) != 4 {
-		t.Fatalf("expected 4 lines (caption+2 rows+footnote), got %d:\n%s", len(lines), text)
+		t.Fatalf("expected 4 lines (caption+image+table+footnote), got %d:\n%s", len(lines), text)
 	}
 }
 
-func TestConvertMineruFile_TableHTMLEntityDecoding(t *testing.T) {
+func TestConvertMineruFile_TablePreservesHTMLBody(t *testing.T) {
 	tmp := t.TempDir()
 	in := filepath.Join(tmp, "doc_mineru.json")
 	content := `{
@@ -1353,12 +1396,16 @@ func TestConvertMineruFile_TableHTMLEntityDecoding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	if !strings.Contains(string(got), "|A<B|C&D|") {
-		t.Fatalf("expected HTML entities decoded, got: %s", string(got))
+	text := string(got)
+	if !strings.Contains(text, "table\tunknown-font\t12\t[0, 0, 100, 100]\t<table><tr><td>A&lt;B</td><td>C&amp;D</td></tr></table>") {
+		t.Fatalf("expected HTML table body preserved, got: %s", text)
+	}
+	if strings.Contains(text, "table-row") || strings.Contains(text, "|A<B|C&D|") {
+		t.Fatalf("expected no markdown table-row output, got: %s", text)
 	}
 }
 
-func TestConvertMineruFile_TablePipeEscaping(t *testing.T) {
+func TestConvertMineruFile_TableHTMLMayContainPipes(t *testing.T) {
 	tmp := t.TempDir()
 	in := filepath.Join(tmp, "doc_mineru.json")
 	content := `{
@@ -1388,8 +1435,12 @@ func TestConvertMineruFile_TablePipeEscaping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	if !strings.Contains(string(got), `|A\|B|C|`) {
-		t.Fatalf("expected pipe escaped in cell, got: %s", string(got))
+	text := string(got)
+	if !strings.Contains(text, "<table><tr><td>A|B</td><td>C</td></tr></table>") {
+		t.Fatalf("expected pipe preserved inside HTML table body, got: %s", text)
+	}
+	if strings.Contains(text, `A\|B`) {
+		t.Fatalf("expected no markdown pipe escaping in HTML table body, got: %s", text)
 	}
 }
 

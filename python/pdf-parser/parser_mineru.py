@@ -18,6 +18,7 @@ import glob
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from typing import Any, Callable
@@ -125,6 +126,16 @@ class MineruParser(ParserBackend):
         with open(content_list_path, "r", encoding="utf-8") as f:
             content_list = json.load(f)
 
+        middle_json_path = content_list_path.replace("_content_list.json", "_middle.json")
+        equation_image_count = 0
+        if os.path.isfile(middle_json_path) and isinstance(content_list, list):
+            try:
+                with open(middle_json_path, "r", encoding="utf-8") as f:
+                    middle_json = json.load(f)
+                equation_image_count = annotate_equation_image_paths(content_list, middle_json)
+            except Exception as exc:
+                log.warning("mineru: failed to annotate equation image paths: %s", exc)
+
         # Copy images from MinerU's nested output dir to output_dir/images/ so
         # that img_path values ("images/foo.png") in the content list resolve
         # correctly relative to the aggregated result JSON at output_dir/.
@@ -160,8 +171,8 @@ class MineruParser(ParserBackend):
 
         on_progress(max(total_pages, 1), max(total_pages, 1))
         log.info(
-            "mineru finished: pages=%d images=%d content_list=%s",
-            total_pages, image_count, content_list_path,
+            "mineru finished: pages=%d images=%d equation_images=%d content_list=%s",
+            total_pages, image_count, equation_image_count, content_list_path,
         )
 
         return {
@@ -172,3 +183,71 @@ class MineruParser(ParserBackend):
             "images_dir": images_dst_dir if image_count > 0 else "",
             "image_count": image_count,
         }
+
+
+def annotate_equation_image_paths(content_list: list[Any], middle_json: Any) -> int:
+    equation_images = _extract_equation_images(middle_json)
+    if not equation_images:
+        return 0
+
+    by_content: dict[str, list[str]] = {}
+    for equation in equation_images:
+        key = _normalize_equation_text(equation.get("content", ""))
+        image_path = _normalize_mineru_image_path(equation.get("image_path", ""))
+        if key and image_path:
+            by_content.setdefault(key, []).append(image_path)
+
+    changed = 0
+    for item in content_list:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type", "")).strip().lower() != "equation":
+            continue
+        if str(item.get("img_path", "")).strip():
+            continue
+
+        key = _normalize_equation_text(str(item.get("text", "")))
+        candidates = by_content.get(key) or []
+        if not candidates:
+            continue
+
+        item["img_path"] = candidates.pop(0)
+        changed += 1
+
+    return changed
+
+
+def _extract_equation_images(value: Any) -> list[dict[str, str]]:
+    found: list[dict[str, str]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            node_type = str(node.get("type", "")).strip().lower()
+            image_path = str(node.get("image_path", "")).strip()
+            content = str(node.get("content", "")).strip()
+            if image_path and content and "equation" in node_type:
+                found.append({"content": content, "image_path": image_path})
+            for child in node.values():
+                walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    walk(value)
+    return found
+
+
+def _normalize_equation_text(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"^\s*(\$\$|\\\[)", "", text)
+    text = re.sub(r"(\$\$|\\\])\s*$", "", text)
+    return re.sub(r"\s+", "", text)
+
+
+def _normalize_mineru_image_path(image_path: str) -> str:
+    image_path = image_path.strip()
+    if not image_path:
+        return ""
+    if image_path.startswith("images/"):
+        return image_path
+    return "images/" + image_path

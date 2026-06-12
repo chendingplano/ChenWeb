@@ -477,8 +477,7 @@
 				page,
 				pageSize,
 				orderBy: sortField,
-				orderDir: sortDir,
-				ksStoreId: knowledgeStoreState.activeStore?.id ?? null
+				orderDir: sortDir
 			});
 			records = result.results ?? [];
 			total = result.total ?? 0;
@@ -937,7 +936,6 @@
 
 <KbInputSearchDialog
 	bind:open={searchOpen}
-	scopeToActiveStore={true}
 	onSelect={applySearchFilters}
 />
 
