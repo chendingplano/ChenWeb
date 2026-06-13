@@ -32,7 +32,8 @@ const EntryTypeEnrichSceneBlocks = "enrich_scene_blocks"
 const EntryTypeExtractSceneBlocksFinish = "extract_scene_blocks_finish"
 const EntryTypeExtractStructuredKnowledge = "extract_structured_knowledge"
 const EntryTypeEnrichStructuredKnowledge = "enrich_structured_knowledge"
-const EntryTypeExtractEntityRelation = "extract_entity_relation"
+const EntryTypeExtractEntities = "extract_entities"
+const EntryTypeExtractRelations = "extract_relations"
 const EntryTypeExtractEntityRelationFinish = "extract_entity_relation_finish"
 const EntryTypeExtractInventoryItems = "extract_inventory_items"
 const EntryTypeExtractInventoryItemsFinish = "extract_inventory_items_finish"
@@ -247,8 +248,14 @@ func (l DocProcLogger) LogEnrichStructuredKnowledge(ctx context.Context, rec Doc
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
-func (l DocProcLogger) LogExtractEntityRelation(ctx context.Context, rec DocProcLogRecord, loc string) error {
-	rec.EntryType = EntryTypeExtractEntityRelation
+func (l DocProcLogger) LogExtractEntities(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractEntities
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
+func (l DocProcLogger) LogExtractRelations(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeExtractRelations
 	rec.LogLoc = callerLoc(2)
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
@@ -279,7 +286,9 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractProvisions, EntryTypeExtractProvisionsFinish,
 		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,
 		EntryTypeExtractStructuredKnowledge, EntryTypeEnrichStructuredKnowledge,
-		EntryTypeExtractEntityRelation, EntryTypeExtractEntityRelationFinish,
+		EntryTypeExtractEntities, 
+		EntryTypeExtractRelations, 
+		EntryTypeExtractEntityRelationFinish,
 		EntryTypeExtractInventoryItems, EntryTypeExtractInventoryItemsFinish,
 		EntryTypeExtractSceneBlocksFinish,
 		EntryTypeChunking,

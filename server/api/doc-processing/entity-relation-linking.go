@@ -463,6 +463,14 @@ func resolveAndLinkRelations(
 	nextEntityIndex int,
 	createTime string,
 ) ([]map[string]any, []map[string]any) {
+	// id -> entity, so a relation can inherit line grounding from its endpoints.
+	idToEntity := make(map[string]map[string]any, len(entities))
+	for _, e := range entities {
+		if id := strings.TrimSpace(asString(e["entity_id"])); id != "" {
+			idToEntity[id] = e
+		}
+	}
+
 	resolve := func(surface string) string {
 		f := normalizeSurfaceForm(surface)
 		if f == "" {
@@ -494,6 +502,7 @@ func resolveAndLinkRelations(
 			"create_time":       createTime,
 		}
 		entities = append(entities, prov)
+		idToEntity[id] = prov
 		idx[f] = id
 		return id
 	}
@@ -506,6 +515,14 @@ func resolveAndLinkRelations(
 		r["subject_entity_id"] = subjID
 		r["object_entity_id"] = objID
 
+		// The Phase 2 window input carries entity context text but not line
+		// numbers, so the model cannot cite `lines` reliably. Ground the relation
+		// at the union of its endpoints' spans, which downstream search indexing
+		// uses to resolve chunks / semantic projections.
+		if derived := relationSpansFromEndpoints(idToEntity[subjID], idToEntity[objID]); len(derived) > 0 {
+			r["line_spans"] = derived
+		}
+
 		key := subjID + "\x00" + normalizePredicate(asString(r["predicate"])) + "\x00" + objID
 		if _, ok := seen[key]; ok {
 			continue
@@ -513,5 +530,43 @@ func resolveAndLinkRelations(
 		seen[key] = struct{}{}
 		deduped = append(deduped, r)
 	}
+
+	// Provisional entities have no spans of their own; ground each at the lines of
+	// the relations that reference it, so it indexes cleanly (matches the relation
+	// grounding above). A provisional entity referenced only by spanless relations
+	// stays ungrounded (genuinely no evidence in the document).
+	backfillProvisionalEntitySpans(deduped, idToEntity)
+
 	return deduped, entities
+}
+
+// backfillProvisionalEntitySpans sets each provisional entity's line_spans to the
+// union of the spans of every relation that references it.
+func backfillProvisionalEntitySpans(relations []map[string]any, idToEntity map[string]map[string]any) {
+	for _, r := range relations {
+		spans := toStringSlice(r["line_spans"])
+		if len(spans) == 0 {
+			continue
+		}
+		for _, idKey := range []string{"subject_entity_id", "object_entity_id"} {
+			e := idToEntity[strings.TrimSpace(asString(r[idKey]))]
+			if e == nil || asString(e["entity_status"]) != entityStatusProvisional {
+				continue
+			}
+			e["line_spans"] = sortedUniqueSpans(append(toStringSlice(e["line_spans"]), spans...))
+		}
+	}
+}
+
+// relationSpansFromEndpoints returns the sorted union of the subject and object
+// entities' line_spans, used to ground a relation that has no spans of its own.
+func relationSpansFromEndpoints(subject, object map[string]any) []string {
+	var spans []string
+	if subject != nil {
+		spans = append(spans, toStringSlice(subject["line_spans"])...)
+	}
+	if object != nil {
+		spans = append(spans, toStringSlice(object["line_spans"])...)
+	}
+	return sortedUniqueSpans(spans)
 }

@@ -173,6 +173,26 @@ func TestResolveAndLinkRelationsLinksAndDedups(t *testing.T) {
 	}
 }
 
+func TestResolveAndLinkRelationsGroundsSpansFromEndpoints(t *testing.T) {
+	entities := []map[string]any{
+		{"entity_id": "9_ent_1", "entity": "Acme", "line_spans": []string{"10-12"}},
+		{"entity_id": "9_ent_2", "entity": "Globex", "line_spans": []string{"40"}},
+	}
+	idx := buildEntityResolutionIndex(entities)
+	relations := []map[string]any{
+		// No line_spans of its own (Phase 2 window input lacks line numbers).
+		{"subject": "Acme", "predicate": "supplies", "object": "Globex"},
+	}
+	got, _ := resolveAndLinkRelations(relations, entities, idx, 9, len(entities)+1, "2026-06-13T00:00:00Z")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 relation, got %d", len(got))
+	}
+	spans := toStringSlice(got[0]["line_spans"])
+	if len(spans) != 2 || spans[0] != "10-12" || spans[1] != "40" {
+		t.Errorf("relation line_spans = %v, want union of endpoints [10-12 40]", spans)
+	}
+}
+
 func TestBuildRelationWindowInputText(t *testing.T) {
 	window := []map[string]any{
 		{
@@ -220,5 +240,25 @@ func TestResolveAndLinkRelationsCreatesProvisionalEntity(t *testing.T) {
 	}
 	if got[0]["object_entity_id"] != prov["entity_id"] {
 		t.Errorf("relation object should link to provisional id %v, got %v", prov["entity_id"], got[0]["object_entity_id"])
+	}
+}
+
+func TestResolveAndLinkRelationsBackfillsProvisionalEntitySpans(t *testing.T) {
+	entities := []map[string]any{
+		{"entity_id": "7_ent_1", "entity": "Acme", "line_spans": []string{"10-12"}},
+	}
+	idx := buildEntityResolutionIndex(entities)
+	relations := []map[string]any{
+		// Object "Initech" is unresolved -> provisional; relation is grounded by Acme.
+		{"subject": "Acme", "predicate": "acquires", "object": "Initech"},
+	}
+	_, outEntities := resolveAndLinkRelations(relations, entities, idx, 7, len(entities)+1, "2026-06-13T00:00:00Z")
+	if len(outEntities) != 2 {
+		t.Fatalf("expected a provisional entity, got %d", len(outEntities))
+	}
+	prov := outEntities[1]
+	spans := toStringSlice(prov["line_spans"])
+	if len(spans) != 1 || spans[0] != "10-12" {
+		t.Errorf("provisional entity line_spans = %v, want [10-12] backfilled from the relation", spans)
 	}
 }

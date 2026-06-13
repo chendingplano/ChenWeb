@@ -539,7 +539,7 @@ func (p *EntityRelationProcessor) processChunk(
 	}
 
 	// Global totals are unknown during concurrent execution; pass 0.
-	p.logLLMCall(ctx, callID, "extract_entity_relation", 1,
+	p.logLLMCall(ctx, callID, "extract_entities", 1,
 		[]string{strings.TrimSpace(modelName)}, p.PromptRef,
 		payload, err, callStart, p.Now(),
 		recordID, idx, totalChunks,
@@ -704,7 +704,7 @@ func (p *EntityRelationProcessor) logLLMCall(
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
 	rec := DocProcLogRecord{
-		CallReason:    "extract entities and relations",
+		CallReason:    "extract entities",
 		DocProcName:   p.Name(),
 		ModelNames:    modelNames,
 		PromptName:    promptName,
@@ -718,8 +718,15 @@ func (p *EntityRelationProcessor) logLLMCall(
 		ExtraInfoJSON: &extraStr,
 		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
 	}
-	if err := p.ProcLogger.LogExtractEntityRelation(ctx, rec, "MID-26052807"); err != nil {
-		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+	if activity == "extract_relations" {
+		if err := p.ProcLogger.LogExtractRelations(ctx, rec, "MID-26061301"); err != nil {
+			p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+		}
+
+	} else {
+		if err := p.ProcLogger.LogExtractEntities(ctx, rec, "MID-26061302"); err != nil {
+			p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)
+		}
 	}
 }
 
