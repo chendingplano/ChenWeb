@@ -252,7 +252,11 @@ func structuredKnowledgeEnrichContract() llmclients.StructuredOutputContract {
 	})
 }
 
-func entityRelationExtractionContract() llmclients.StructuredOutputContract {
+// entityExtractionContract is the Phase 1 (ADR 2026061302 D2) contract: the
+// model extracts entities only. Relations are produced by the separate Phase 2
+// pass (relationExtractionContract), so the schema constrains output to
+// {language, entities} and saves the relation-output tokens Phase 1 used to spend.
+func entityExtractionContract() llmclients.StructuredOutputContract {
 	itemArray := map[string]any{
 		"type": "array",
 		"items": map[string]any{
@@ -260,11 +264,30 @@ func entityRelationExtractionContract() llmclients.StructuredOutputContract {
 			"additionalProperties": true,
 		},
 	}
-	return newDocProcessingContract("chenweb_entity_relation_extraction", map[string]any{
+	return newDocProcessingContract("chenweb_entity_extraction", map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"language": schemaString(),
+			"entities": itemArray,
+		},
+		"additionalProperties": true,
+	})
+}
+
+// relationExtractionContract is the Phase 2 (ADR 2026061302 D5) contract: the
+// model receives a window's entity list and returns only relations among them.
+func relationExtractionContract() llmclients.StructuredOutputContract {
+	itemArray := map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type":                 "object",
+			"additionalProperties": true,
+		},
+	}
+	return newDocProcessingContract("chenweb_relation_extraction", map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"language":  schemaString(),
-			"entities":  itemArray,
 			"relations": itemArray,
 		},
 		"additionalProperties": true,

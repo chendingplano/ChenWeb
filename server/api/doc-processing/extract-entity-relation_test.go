@@ -218,8 +218,8 @@ func TestWriteEntityRelationArtifactFileEmptyIsNoop(t *testing.T) {
 	}
 }
 
-func TestEntityRelationExtractionContractShape(t *testing.T) {
-	contract := entityRelationExtractionContract()
+func TestEntityExtractionContractShape(t *testing.T) {
+	contract := entityExtractionContract()
 	if contract.Name == "" {
 		t.Fatal("contract name empty")
 	}
@@ -231,7 +231,25 @@ func TestEntityRelationExtractionContractShape(t *testing.T) {
 		t.Fatalf("schema unmarshal: %v", err)
 	}
 	props, _ := schema["properties"].(map[string]any)
-	for _, key := range []string{"language", "entities", "relations"} {
+	for _, key := range []string{"language", "entities"} {
+		if _, ok := props[key]; !ok {
+			t.Errorf("schema properties missing %q: %v", key, props)
+		}
+	}
+	// Phase 1 is entity-only: relations must NOT be in the schema (ADR 2026061302 D2).
+	if _, ok := props["relations"]; ok {
+		t.Errorf("entity contract should not contain 'relations': %v", props)
+	}
+}
+
+func TestRelationExtractionContractShape(t *testing.T) {
+	contract := relationExtractionContract()
+	var schema map[string]any
+	if err := json.Unmarshal(contract.Schema, &schema); err != nil {
+		t.Fatalf("schema unmarshal: %v", err)
+	}
+	props, _ := schema["properties"].(map[string]any)
+	for _, key := range []string{"language", "relations"} {
 		if _, ok := props[key]; !ok {
 			t.Errorf("schema properties missing %q: %v", key, props)
 		}
@@ -561,14 +579,38 @@ func TestBuildEntityContextForEntities(t *testing.T) {
 	if !ok || ctx == "" {
 		t.Fatalf("entity_context not set or empty: %#v", entities[0]["entity_context"])
 	}
-	if !strings.Contains(ctx, "chunk one summary") {
-		t.Errorf("entity_context missing chunk summary; got:\n%s", ctx)
+	if !strings.Contains(ctx, "Summary: chunk one summary") {
+		t.Errorf("entity_context missing prefixed chunk summary; got:\n%s", ctx)
 	}
 	if !strings.Contains(ctx, "entity line A") {
 		t.Errorf("entity_context missing span line; got:\n%s", ctx)
 	}
 	if !strings.Contains(ctx, "intro line") {
 		t.Errorf("entity_context missing leading line; got:\n%s", ctx)
+	}
+}
+
+func TestNormalizeEntityRowsCategories(t *testing.T) {
+	raw := []any{
+		map[string]any{
+			"entity":            "FDA",
+			"entity_categories": []any{"regulation", "agency"},
+		},
+		map[string]any{
+			"entity": "TCP",
+			// no entity_categories field — should result in nil/empty slice
+		},
+	}
+	out := normalizeEntityRows(raw, 1)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(out))
+	}
+	cats := out[0]["entity_categories"].([]string)
+	if len(cats) != 2 || cats[0] != "regulation" || cats[1] != "agency" {
+		t.Errorf("entity_categories = %v, want [regulation agency]", cats)
+	}
+	if cats2 := toStringSlice(out[1]["entity_categories"]); len(cats2) != 0 {
+		t.Errorf("expected empty categories for entity without field, got %v", cats2)
 	}
 }
 
