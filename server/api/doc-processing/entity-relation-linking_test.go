@@ -84,37 +84,61 @@ func TestConsolidateEntitiesNoDuplicates(t *testing.T) {
 	}
 }
 
+// linesForPages builds a contiguous []Line, assigning each line number in
+// [first,last] (inclusive) to the given page. Pages are declared as
+// page -> [2]int{first, last}.
+func linesForPages(spec map[int][2]int) []Line {
+	var out []Line
+	for pg, r := range spec {
+		for ln := r[0]; ln <= r[1]; ln++ {
+			out = append(out, Line{LineNo: ln, PageNo: pg, Content: "line " + itoa(ln)})
+		}
+	}
+	return out
+}
+
+func windowNames(w relationWindow) map[string]bool {
+	names := map[string]bool{}
+	for _, e := range w.Entities {
+		names[asString(e["entity"])] = true
+	}
+	return names
+}
+
 func TestBuildRelationWindowsSingleWindowForSmallDoc(t *testing.T) {
+	// Two pages, both inside one 20-page window.
+	lines := linesForPages(map[int][2]int{1: {1, 10}, 2: {11, 25}})
 	entities := []map[string]any{
 		{"entity": "A", "line_spans": []string{"5"}},
 		{"entity": "B", "line_spans": []string{"20"}},
 	}
-	windows := buildRelationWindows(entities, 200, 10)
+	windows := buildRelationWindows(entities, lines, 20, 20)
 	if len(windows) != 1 {
 		t.Fatalf("expected 1 window, got %d", len(windows))
 	}
-	if len(windows[0]) != 2 {
-		t.Errorf("window should hold both entities, got %d", len(windows[0]))
+	if len(windows[0].Entities) != 2 {
+		t.Errorf("window should hold both entities, got %d", len(windows[0].Entities))
+	}
+	if len(windows[0].Lines) == 0 {
+		t.Errorf("window should carry source lines, got 0")
 	}
 }
 
 func TestBuildRelationWindowsSplitsDistantClusters(t *testing.T) {
+	// Two clusters on distant pages; 1-page windows keep them apart.
+	lines := linesForPages(map[int][2]int{1: {1, 10}, 5: {500, 510}})
 	entities := []map[string]any{
 		{"entity": "A", "line_spans": []string{"5"}},
 		{"entity": "B", "line_spans": []string{"8"}},
 		{"entity": "C", "line_spans": []string{"500"}},
 		{"entity": "D", "line_spans": []string{"505"}},
 	}
-	windows := buildRelationWindows(entities, 100, 10)
+	windows := buildRelationWindows(entities, lines, 1, 10)
 	if len(windows) < 2 {
 		t.Fatalf("expected distant clusters to split into >=2 windows, got %d", len(windows))
 	}
-	// No single window should contain an entity from both clusters.
 	for _, w := range windows {
-		names := map[string]bool{}
-		for _, e := range w {
-			names[asString(e["entity"])] = true
-		}
+		names := windowNames(w)
 		if (names["A"] || names["B"]) && (names["C"] || names["D"]) {
 			t.Errorf("window mixes distant clusters: %v", names)
 		}
@@ -122,21 +146,20 @@ func TestBuildRelationWindowsSplitsDistantClusters(t *testing.T) {
 }
 
 func TestBuildRelationWindowsOverlapSharesBoundaryEntity(t *testing.T) {
-	// Entities spaced so a boundary falls between them; overlap should put the
-	// boundary pair together in at least one window.
+	// Page 1 = lines 1-99, page 2 = lines 100-200. With 1-page windows, B (line
+	// 95, page 1) and C (line 104, page 2) fall in different page windows; a
+	// 20-line overlap pulls B into page 2's window so the boundary pair co-occurs.
+	lines := linesForPages(map[int][2]int{1: {1, 99}, 2: {100, 200}})
 	entities := []map[string]any{
 		{"entity": "A", "line_spans": []string{"1"}},
 		{"entity": "B", "line_spans": []string{"95"}},
 		{"entity": "C", "line_spans": []string{"104"}},
 		{"entity": "D", "line_spans": []string{"200"}},
 	}
-	windows := buildRelationWindows(entities, 100, 20)
+	windows := buildRelationWindows(entities, lines, 1, 20)
 	together := false
 	for _, w := range windows {
-		names := map[string]bool{}
-		for _, e := range w {
-			names[asString(e["entity"])] = true
-		}
+		names := windowNames(w)
 		if names["B"] && names["C"] {
 			together = true
 		}
@@ -194,21 +217,31 @@ func TestResolveAndLinkRelationsGroundsSpansFromEndpoints(t *testing.T) {
 }
 
 func TestBuildRelationWindowInputText(t *testing.T) {
-	window := []map[string]any{
-		{
-			"entity_id":      "7_ent_1",
-			"entity":         "Acme Corporation",
-			"entity_type":    "org",
-			"aliases":        []string{"Acme"},
-			"entity_context": "Summary: vendors.\nAcme Corporation supplies Globex.",
+	window := relationWindow{
+		Entities: []map[string]any{
+			{
+				"entity_id":   "7_ent_1",
+				"entity":      "Acme Corporation",
+				"entity_type": "org",
+				"aliases":     []string{"Acme"},
+			},
+			{
+				"entity_id": "7_ent_2",
+				"entity":    "Globex",
+			},
 		},
-		{
-			"entity_id": "7_ent_2",
-			"entity":    "Globex",
+		Lines: []Line{
+			{LineNo: 1, PageNo: 3, Content: "Acme Corporation supplies Globex."},
 		},
+		PageLo: 3,
+		PageHi: 4,
 	}
 	out := buildRelationWindowInputText(window)
-	for _, want := range []string{"7_ent_1", "Acme Corporation", "(org)", "aliases: Acme", "Globex", "supplies Globex"} {
+	// Roster (id/name/type/aliases) and the contiguous source text are both present.
+	for _, want := range []string{
+		"7_ent_1", "Acme Corporation", "(org)", "aliases: Acme", "Globex",
+		"Source text (pages 3-4)", "Acme Corporation supplies Globex.",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("window input text missing %q\n---\n%s", want, out)
 		}

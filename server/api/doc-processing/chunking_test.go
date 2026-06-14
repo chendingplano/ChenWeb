@@ -1134,6 +1134,74 @@ func TestFixedSizeChunkingService_FixSummarySourceLanguage_TranslatesKeywordsToS
 	}
 }
 
+func TestFixedSizeChunkingService_FixSummarySourceLanguage_BackfillsMissingKeywordsEnBeforeTranslating(t *testing.T) {
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeJSONExtractor{
+		outs: []map[string]any{
+			{"keywords": []any{"生活垃圾分类", "可回收物", "有害垃圾", "其他垃圾", "垃圾分类要求", "易腐垃圾处置"}},
+		},
+	}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.ChunkDir = t.TempDir()
+	svc.TranslationEnabled = true
+	svc.TranslationModelName = "translation-model"
+
+	keywords := []string{
+		"household waste classification",
+		"recyclable waste",
+		"hazardous waste",
+		"other waste",
+		"waste sorting requirements",
+		"perishable waste disposal",
+	}
+	summaries := []SummaryItem{
+		{
+			SummaryID: "416_sum_0_0004",
+			RecordID:  416,
+			Level:     0,
+			SeqNo:     4,
+			Lines:     []string{"61-86"},
+			Summary:   "输入内容定义了家庭垃圾类别。",
+			SummaryEn: "The input defines household waste categories.",
+			Keywords:  keywords,
+			Language:  "zh",
+		},
+	}
+	if _, err := writeSummaryFile(svc.ChunkDir, summaries[0].RecordID, summaries[0]); err != nil {
+		t.Fatalf("writeSummaryFile: %v", err)
+	}
+
+	got, err := svc.fixSummarySourceLanguage(context.Background(), "zh", summaries)
+	if err != nil {
+		t.Fatalf("fixSummarySourceLanguage: %v", err)
+	}
+	if strings.Join(got[0].KeywordsEn, "|") != strings.Join(keywords, "|") {
+		t.Fatalf("KeywordsEn=%v, want copied English keywords %v", got[0].KeywordsEn, keywords)
+	}
+	wantKeywords := []string{"生活垃圾分类", "可回收物", "有害垃圾", "其他垃圾", "垃圾分类要求", "易腐垃圾处置"}
+	if strings.Join(got[0].Keywords, "|") != strings.Join(wantKeywords, "|") {
+		t.Fatalf("Keywords=%v, want %v", got[0].Keywords, wantKeywords)
+	}
+	if len(ex.contractNames) != 1 || ex.contractNames[0] != "chenweb_summary_keywords_translation" {
+		t.Fatalf("contractNames=%v", ex.contractNames)
+	}
+	artifactDir, err := buildRecordArtifactDir(svc.ChunkDir, summaries[0].RecordID)
+	if err != nil {
+		t.Fatalf("buildRecordArtifactDir: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(artifactDir, "summary_0_0004.txt"))
+	if err != nil {
+		t.Fatalf("read summary file: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `keywords_en: ["household waste classification", "recyclable waste", "hazardous waste", "other waste", "waste sorting requirements", "perishable waste disposal"]`) {
+		t.Fatalf("summary file missing backfilled keywords_en: %q", text)
+	}
+	if !strings.Contains(text, `keywords: ["生活垃圾分类", "可回收物", "有害垃圾", "其他垃圾", "垃圾分类要求", "易腐垃圾处置"]`) {
+		t.Fatalf("summary file missing translated keywords: %q", text)
+	}
+}
+
 func TestFixedSizeChunkingService_FixSummarySourceLanguage_TranslatesEnglishSummaryWithoutSummaryEn(t *testing.T) {
 	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	ex := &fakeJSONExtractor{

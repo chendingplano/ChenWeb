@@ -301,102 +301,151 @@ func entitySpanInterval(e map[string]any) (minStart, maxEnd int, ok bool) {
 	return minStart, maxEnd, ok
 }
 
+// relationWindow is one Phase 2 unit (Change 01, 2026-06-14): the entities
+// positioned in a contiguous page range, together with the line-file text for
+// that range. The window carries the source text once (contiguous) instead of a
+// per-entity entity_context, which removes the large per-entity duplication and
+// preserves the connective prose in which relations are actually stated.
+type relationWindow struct {
+	Entities []map[string]any
+	Lines    []Line // contiguous source lines covering [PageLo, PageHi]
+	PageLo   int
+	PageHi   int
+}
+
 // buildRelationWindows partitions entities into overlapping positional windows
-// (D5). A window covers windowSize document lines; consecutive windows step by
-// (windowSize - overlap) lines, so adjacent windows share an `overlap`-line band
-// and a relation straddling a boundary lands in a window holding both endpoints.
+// (D5). RELATION_WINDOW_SIZE is expressed in *pages* (windowPages); each window
+// covers a contiguous page range and carries the line-file text for that range
+// (Change 01). Adjacent windows share an `overlap`-*line* band at the page
+// boundary, so a relation straddling the boundary still lands in a window holding
+// both endpoints.
 //
 // An entity belongs to a window when any of its line spans intersects the
-// window. Entities without parseable spans cannot be placed positionally and are
-// included in every window so relations involving them remain discoverable.
-// When no entity has a span, a single window containing all entities is returned.
-func buildRelationWindows(entities []map[string]any, windowSize, overlap int) [][]map[string]any {
+// window's line range. Entities without parseable spans cannot be placed
+// positionally and are included in every window so relations involving them
+// remain discoverable. When no positional/line information is available, a single
+// window containing all entities (and all lines) is returned.
+func buildRelationWindows(entities []map[string]any, allLines []Line, windowPages, overlap int) []relationWindow {
 	if len(entities) == 0 {
 		return nil
 	}
-	if windowSize <= 0 {
-		windowSize = 200
+	if windowPages <= 0 {
+		windowPages = 20
 	}
 	if overlap < 0 {
 		overlap = 0
 	}
-	if overlap >= windowSize {
-		overlap = windowSize - 1
+
+	// Sort lines by LineNo and index each page's [first,last] line bounds.
+	lines := make([]Line, len(allLines))
+	copy(lines, allLines)
+	sort.SliceStable(lines, func(i, j int) bool { return lines[i].LineNo < lines[j].LineNo })
+
+	type pageBound struct{ first, last int }
+	bounds := make(map[int]pageBound)
+	var pages []int
+	for _, l := range lines {
+		if b, ok := bounds[l.PageNo]; ok {
+			if l.LineNo < b.first {
+				b.first = l.LineNo
+			}
+			if l.LineNo > b.last {
+				b.last = l.LineNo
+			}
+			bounds[l.PageNo] = b
+		} else {
+			bounds[l.PageNo] = pageBound{l.LineNo, l.LineNo}
+			pages = append(pages, l.PageNo)
+		}
 	}
+	sort.Ints(pages)
+
+	// Degenerate: no usable page/line info -> one window with everything.
+	if len(pages) == 0 {
+		return []relationWindow{{Entities: entities, Lines: lines}}
+	}
+	minLine := lines[0].LineNo
 
 	var spanless []map[string]any
-	var positioned []map[string]any
-	minLine, maxLine := 0, 0
-	haveBounds := false
 	for _, e := range entities {
-		st, en, ok := entitySpanInterval(e)
-		if !ok {
+		if _, _, ok := entitySpanInterval(e); !ok {
 			spanless = append(spanless, e)
-			continue
-		}
-		positioned = append(positioned, e)
-		if !haveBounds {
-			minLine, maxLine, haveBounds = st, en, true
-			continue
-		}
-		if st < minLine {
-			minLine = st
-		}
-		if en > maxLine {
-			maxLine = en
 		}
 	}
 
-	if !haveBounds {
-		// Nothing positioned: one window with everything.
-		return [][]map[string]any{entities}
-	}
-
-	step := windowSize - overlap
-	if step <= 0 {
-		step = 1
-	}
-
-	var windows [][]map[string]any
+	var windows []relationWindow
 	var prevKey string
-	for lo := minLine; lo <= maxLine; lo += step {
-		hi := lo + windowSize - 1
-		window := make([]map[string]any, 0)
+	for i := 0; i < len(pages); i += windowPages {
+		pLo := pages[i]
+		hiIdx := i + windowPages - 1
+		if hiIdx >= len(pages) {
+			hiIdx = len(pages) - 1
+		}
+		pHi := pages[hiIdx]
+
+		loLine := bounds[pLo].first - overlap
+		if loLine < minLine {
+			loLine = minLine
+		}
+		hiLine := bounds[pHi].last
+
+		// Positioned entities whose span intersects this window's line range.
+		var winEntities []map[string]any
 		var keyParts []string
-		for i, e := range positioned {
-			st, en, _ := entitySpanInterval(e)
-			if st <= hi && en >= lo {
-				window = append(window, e)
-				keyParts = append(keyParts, fmt.Sprintf("%d", i))
+		for idx, e := range entities {
+			st, en, ok := entitySpanInterval(e)
+			if !ok {
+				continue
+			}
+			if st <= hiLine && en >= loLine {
+				winEntities = append(winEntities, e)
+				keyParts = append(keyParts, fmt.Sprintf("%d", idx))
 			}
 		}
-		if len(window) == 0 {
+		if len(winEntities) == 0 {
 			continue
 		}
-		// Skip windows identical to the previous one (clustered entities).
+		// Skip windows whose positioned-entity set repeats the previous one
+		// (clustered entities spanning several empty page-steps).
 		key := strings.Join(keyParts, ",")
 		if key == prevKey {
 			continue
 		}
 		prevKey = key
-		window = append(window, spanless...)
-		windows = append(windows, window)
+
+		// Materialize the contiguous source text for the window's line range.
+		var winLines []Line
+		for _, l := range lines {
+			if l.LineNo >= loLine && l.LineNo <= hiLine {
+				winLines = append(winLines, l)
+			}
+		}
+
+		winEntities = append(winEntities, spanless...)
+		windows = append(windows, relationWindow{
+			Entities: winEntities,
+			Lines:    winLines,
+			PageLo:   pLo,
+			PageHi:   pHi,
+		})
 	}
 
 	if len(windows) == 0 {
-		// All positioned entities fell outside any step (degenerate); one window.
-		return [][]map[string]any{entities}
+		// All positioned entities fell outside any window (degenerate); one window.
+		return []relationWindow{{Entities: entities, Lines: lines}}
 	}
 	return windows
 }
 
-// buildRelationWindowInputText renders a window's entity list (id, name, type,
-// aliases, and materialized entity_context) as the Phase 2 LLM input. The model
-// is instructed (by the relation prompt) to connect only entities in this list.
-func buildRelationWindowInputText(window []map[string]any) string {
+// buildRelationWindowInputText renders a window as the Phase 2 LLM input: the
+// entity roster (id, name, type, aliases — so relations stay entity-linked per
+// D1/D4) followed by the contiguous source text for the window's page range
+// (Change 01). The model is instructed (by the relation prompt) to connect only
+// entities in the roster, using the source text as evidence.
+func buildRelationWindowInputText(w relationWindow) string {
 	var b strings.Builder
 	b.WriteString("Entities in this window:\n\n")
-	for _, e := range window {
+	for _, e := range w.Entities {
 		id := strings.TrimSpace(asString(e["entity_id"]))
 		name := strings.TrimSpace(asString(e["entity"]))
 		b.WriteString("- [")
@@ -413,15 +462,21 @@ func buildRelationWindowInputText(window []map[string]any) string {
 			b.WriteString(strings.Join(aliases, ", "))
 		}
 		b.WriteString("\n")
-		if c := strings.TrimSpace(asString(e["entity_context"])); c != "" {
-			b.WriteString("  context:\n")
-			for _, line := range strings.Split(c, "\n") {
-				b.WriteString("    ")
-				b.WriteString(line)
-				b.WriteString("\n")
-			}
+	}
+
+	b.WriteString("\nSource text")
+	switch {
+	case w.PageLo > 0 && w.PageHi > w.PageLo:
+		fmt.Fprintf(&b, " (pages %d-%d)", w.PageLo, w.PageHi)
+	case w.PageLo > 0:
+		fmt.Fprintf(&b, " (page %d)", w.PageLo)
+	}
+	b.WriteString(":\n\n")
+	for _, l := range w.Lines {
+		if c := strings.TrimSpace(l.Content); c != "" {
+			b.WriteString(c)
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 	return b.String()
 }

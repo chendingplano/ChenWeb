@@ -1546,6 +1546,7 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 		originalSummary := item.Summary
 		originalSummaryEn := item.SummaryEn
 		originalKeywords := append([]string(nil), item.Keywords...)
+		originalKeywordsEn := append([]string(nil), item.KeywordsEn...)
 		changed := false
 		summary := strings.TrimSpace(item.Summary)
 		summaryEn := strings.TrimSpace(item.SummaryEn)
@@ -1589,8 +1590,18 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 				)
 			}
 		}
-		if len(item.KeywordsEn) > 0 && equalTrimmedStringSlices(item.Keywords, item.KeywordsEn) {
-			translatedKeywords, err := s.translateSummaryKeywords(ctx, langName, item.KeywordsEn)
+		keywordsEn := trimStringSlice(item.KeywordsEn)
+		if len(keywordsEn) == 0 && normalizedLang != "" && normalizedLang != "en" && allSummaryKeywordsLanguage(item.Keywords, "en") {
+			keywordsEn = trimStringSlice(item.Keywords)
+			summaries[i].KeywordsEn = append([]string(nil), keywordsEn...)
+			changed = true
+			s.Logger.Info("backfilled english summary keywords",
+				"summary_id", item.SummaryID,
+				"target_lang", normalizedLang,
+			)
+		}
+		if len(keywordsEn) > 0 && equalTrimmedStringSlices(item.Keywords, keywordsEn) {
+			translatedKeywords, err := s.translateSummaryKeywords(ctx, langName, keywordsEn)
 			if err != nil {
 				s.Logger.Warn("(MID_26053004) failed to translate summary keywords to source language; keeping English",
 					"summary_id", item.SummaryID,
@@ -1617,9 +1628,23 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 			summaries[i].Summary = originalSummary
 			summaries[i].SummaryEn = originalSummaryEn
 			summaries[i].Keywords = originalKeywords
+			summaries[i].KeywordsEn = originalKeywordsEn
 		}
 	}
 	return summaries, nil
+}
+
+func allSummaryKeywordsLanguage(keywords []string, language string) bool {
+	trimmed := trimStringSlice(keywords)
+	if len(trimmed) == 0 {
+		return false
+	}
+	for _, keyword := range trimmed {
+		if detectContentLanguage(keyword) != language {
+			return false
+		}
+	}
+	return true
 }
 
 func summaryCategoryPathsLookEnglish(entries []CategoryPathEntry) bool {

@@ -78,11 +78,6 @@ type EntityRelationStore interface {
 	// for the record and appends them to each entity row's search_document and
 	// search_vector.  It is a no-op if no summaries exist yet.
 	AppendSummaryKeywordsToEntitySearch(ctx context.Context, inputRecordID int64) error
-	// AppendSemanticProjectionKeywordsToEntitySearch fetches all keywords from
-	// kb.semantic_projections for the record and appends them to each entity
-	// row's search_document and search_vector.  It is a no-op if no projections
-	// exist yet.
-	AppendSemanticProjectionKeywordsToEntitySearch(ctx context.Context, inputRecordID int64) error
 }
 
 type EntityRelationSQLStore struct {
@@ -171,8 +166,8 @@ func NewEntityRelationProcessor(
 		RelationPromptRef:             relPromptRef,
 		RelationPromptPath:            relPromptPath,
 		RelationPromptErr:             relPromptErr,
-		RelationWindowSize:            envInt("RELATION_WINDOW_SIZE", 200, 1),
-		RelationWindowOverlap:         envInt("RELATION_WINDOW_OVERLAP", 10, 0),
+		RelationWindowSize:            envInt("RELATION_WINDOW_SIZE", 20, 1), // pages (Change 01)
+		RelationWindowOverlap:         envInt("RELATION_WINDOW_OVERLAP", 20, 0), // lines
 		ModelRef:                      modelRef,
 		ModelCfgPath:                  modelCfgPath,
 		ModelErr:                      modelErr,
@@ -229,6 +224,8 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		return nil
 	}
 
+	// If evt.Force is not true and entities and relations are already there,
+	// the request will be skipped.
 	if evt.Force {
 		_, _ = p.Store.DeleteEntitiesByInputRecordID(ctx, evt.RecordID)
 		_, _ = p.Store.DeleteRelationsByInputRecordID(ctx, evt.RecordID)
@@ -255,6 +252,8 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		}
 	}
 
+	// Ready to process. 
+	// Step 1: retrieve the chunks.
 	body, readErr := os.ReadFile(lineFilePath)
 	if readErr != nil {
 		p.Logger.Error("read line file failed", "record_id", evt.RecordID, "path", lineFilePath, "error", readErr)
@@ -281,8 +280,9 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		return nil
 	}
 
+	// Step 2: extract entities
 	p.persistEntityRelationInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(chunks)))
-	result, err := p.extractEntityRelationFromChunks(ctx, evt.RecordID, chunks)
+	result, err := p.extractEntitiesFromChunks(ctx, evt.RecordID, chunks)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			p.stopAndPersistEntityRelation(context.Background(), rec, start)
@@ -298,6 +298,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 
 	createTime := p.Now().UTC().Format(time.RFC3339)
 
+	// Step 3: Consolidate entities
 	// Phase 1.5 — consolidate duplicate entities extracted across chunks into a
 	// single canonical entity before assigning ids (ADR 2026061302 D6), so a
 	// relation endpoint resolves to exactly one entity_id.
@@ -308,6 +309,11 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		result.Entities[i]["create_time"] = createTime
 	}
 
+	p.Logger.Info("consolidate entities",
+		"record_id", evt.RecordID,
+		"entities", len(result.Entities),
+	)
+
 	chunkSummaries, sumErr := p.Store.GetChunkSummaries(ctx, evt.RecordID)
 	if sumErr != nil {
 		p.Logger.Warn("get chunk summaries failed; entity_context will be empty", "record_id", evt.RecordID, "error", sumErr)
@@ -315,13 +321,14 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 	}
 	buildEntityContextForEntities(result.Entities, chunks, lines, chunkSummaries, envInt("ARTIFACT_CONTEXT_SIZE", 3, 0))
 
+	// Step 4: extract relations
 	// Phase 2 (D5) — extract relations per overlapping positional window using the
 	// entity-aware relation prompt. With the entity-only Phase 1 prompt this is the
 	// sole source of relations (result.Relations is empty before this point). If
 	// the relation prompt is unavailable or the pass fails, any relations the
 	// Phase 1 prompt happened to return are kept as a fallback.
 	if strings.TrimSpace(p.RelationPromptText) != "" && p.RelationPromptErr == nil {
-		windows := buildRelationWindows(result.Entities, p.RelationWindowSize, p.RelationWindowOverlap)
+		windows := buildRelationWindows(result.Entities, lines, p.RelationWindowSize, p.RelationWindowOverlap)
 		windowRelations, relErr := p.extractRelationsFromWindows(ctx, evt.RecordID, windows)
 		if relErr != nil {
 			if errors.Is(relErr, ErrPipelineStopped) {
@@ -354,9 +361,20 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		evt.RecordID, len(result.Entities)+1, createTime,
 	)
 	provisionalCount := len(result.Entities) - consolidatedEntityCount
+	var unlinkedRelations int
 	for i := range result.Relations {
 		result.Relations[i]["relation_id"] = fmt.Sprintf("%d_rel_%d", evt.RecordID, i+1)
 		result.Relations[i]["create_time"] = createTime
+		if strings.TrimSpace(asString(result.Relations[i]["subject_entity_id"])) == "" ||
+			strings.TrimSpace(asString(result.Relations[i]["object_entity_id"])) == "" {
+			unlinkedRelations++
+		}
+	}
+	if unlinkedRelations > 0 {
+		p.Logger.Warn("relations with missing entity IDs after linking; reprocess with force=true to backfill old rows",
+			"record_id", evt.RecordID,
+			"unlinked_relations", unlinkedRelations,
+		)
 	}
 	p.Logger.Info("entity-relation linking",
 		"record_id", evt.RecordID,
@@ -393,12 +411,17 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		return fmt.Errorf("(MID_26052716) insert relations failed, error:%w", err)
 	}
 
+	// if debugID := evt.RecordID; debugID == 416 {
+	// 	debugLogEntitySearchDocument(ctx, p.Store, debugID, "after SaveEntities (trigger baseline)", p.Logger)
+	// }
+
 	if appendErr := p.Store.AppendSummaryKeywordsToEntitySearch(ctx, evt.RecordID); appendErr != nil {
 		p.Logger.Warn("append summary keywords to entity search failed", "record_id", evt.RecordID, "error", appendErr)
 	}
-	if appendErr := p.Store.AppendSemanticProjectionKeywordsToEntitySearch(ctx, evt.RecordID); appendErr != nil {
-		p.Logger.Warn("append semantic projection keywords to entity search failed", "record_id", evt.RecordID, "error", appendErr)
-	}
+	// if debugID := evt.RecordID; debugID == 416 {
+	// 	debugLogEntitySearchDocument(ctx, p.Store, debugID, "after AppendSummaryKeywords", p.Logger)
+	// }
+
 
 	if fileErr := p.saveEntitiesToFile(evt.RecordID, rec, result.Entities); fileErr != nil {
 		p.Logger.Warn("save entities to file failed", "record_id", evt.RecordID, "error", fileErr)
@@ -426,12 +449,12 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 	return nil
 }
 
-func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
+func (p *EntityRelationProcessor) extractEntitiesFromChunks(
 	ctx context.Context,
 	recordID int64,
 	chunks []Chunk,
 ) (entityRelationExtractionResult, error) {
-	p.Logger.Info("entity-relation", "total_chunks", len(chunks),
+	p.Logger.Info("extract entities", "total_chunks", len(chunks),
 		"model_name", p.ModelName,
 		"prompt", p.PromptRef,
 	)
@@ -474,7 +497,7 @@ func (p *EntityRelationProcessor) extractEntityRelationFromChunks(
 		relations = append(relations, r.Relations...)
 	}
 
-	p.Logger.Info("entity-relation final results",
+	p.Logger.Info("extract entities final results",
 		"record_id", recordID,
 		"total_chunks", len(chunks),
 		"entities", len(entities),
@@ -501,7 +524,7 @@ func (p *EntityRelationProcessor) processChunk(
 ) entityRelationChunkResult {
 	chunkText := buildMarkedChunkInputText(chunk.Lines)
 	callStart := p.Now()
-	p.Logger.Info("entity-relation start",
+	p.Logger.Info("extract entities start",
 		"record_id", recordID,
 		"chunk_idx", idx,
 		"seq_no", chunk.SeqNo,
@@ -528,7 +551,7 @@ func (p *EntityRelationProcessor) processChunk(
 		chunkRelations = normalizeRelationRows(payload["relations"], chunk.SeqNo)
 		chunkEntityCount = len(chunkEntities)
 		chunkRelationCount = len(chunkRelations)
-		p.Logger.Info("entity-relation end  ",
+		p.Logger.Info("extract entities end  ",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
@@ -582,7 +605,7 @@ type relationWindowResult struct {
 func (p *EntityRelationProcessor) extractRelationsFromWindows(
 	ctx context.Context,
 	recordID int64,
-	windows [][]map[string]any,
+	windows []relationWindow,
 ) ([]map[string]any, error) {
 	results, runErr := runConcurrent(ctx, p.ExtractEntityRelationMaxTasks, len(windows),
 		func(workerCtx context.Context, i int) (relationWindowResult, error) {
@@ -614,14 +637,16 @@ func (p *EntityRelationProcessor) processRelationWindow(
 	recordID int64,
 	idx int,
 	totalWindows int,
-	window []map[string]any,
+	window relationWindow,
 ) relationWindowResult {
 	inputText := buildRelationWindowInputText(window)
 	callStart := p.Now()
-	p.Logger.Info("relation window start",
+	p.Logger.Info("extract relations start",
 		"record_id", recordID,
 		"window_idx", idx,
-		"entities", len(window),
+		"entities", len(window.Entities),
+		"pages", fmt.Sprintf("%d-%d", window.PageLo, window.PageHi),
+		"input len", len(inputText),
 	)
 	callID := fmt.Sprintf("%s_p2_w%d", eventIDFromContext(ctx), idx)
 	payload, modelName, err := p.extractRelationsWithFallback(ctx, inputText)
@@ -631,7 +656,7 @@ func (p *EntityRelationProcessor) processRelationWindow(
 	if err == nil && payload != nil {
 		detectedLanguage = strings.TrimSpace(asString(payload["language"]))
 		relations = normalizeRelationRows(payload["relations"], 0)
-		p.Logger.Info("relation window end  ",
+		p.Logger.Info("extract relations end  ",
 			"record_id", recordID,
 			"window_idx", idx,
 			"relations", len(relations),
@@ -1457,6 +1482,7 @@ CREATE TABLE IF NOT EXISTS kb.relations (
     prompt_name TEXT,
     subject_entity_id TEXT,
     object_entity_id TEXT,
+    categories JSONB,
     search_document TEXT,
     search_vector TSVECTOR,
     connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -1466,6 +1492,8 @@ CREATE TABLE IF NOT EXISTS kb.relations (
 
 ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS subject_entity_id TEXT;
 ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS object_entity_id TEXT;
+ALTER TABLE kb.relations DROP COLUMN IF EXISTS source_line_spans;
+ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS categories JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_kb_relations_input_record_id ON kb.relations (input_record_id);
 CREATE INDEX IF NOT EXISTS idx_kb_relations_relation_id ON kb.relations (relation_id);
@@ -1682,9 +1710,10 @@ INSERT INTO kb.relations (
     prompt_name,
     subject_entity_id,
     object_entity_id,
+    categories,
     ext_info
 ) VALUES (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21::jsonb
+    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21::jsonb,$22::jsonb
 )`
 
 	isEnglish := isLanguageEnglish(req.Language)
@@ -1728,6 +1757,12 @@ INSERT INTO kb.relations (
 			objectEntityIDArg = v
 		}
 
+		var categoriesArg any
+		if cats := toStringSlice(r["relation_categories"]); len(cats) > 0 {
+			catsJSON, _ := json.Marshal(cats)
+			categoriesArg = string(catsJSON)
+		}
+
 		if _, err := s.DB.ExecContext(ctx, stmt,
 			eventIDVal,
 			req.InputRecordID,
@@ -1749,6 +1784,7 @@ INSERT INTO kb.relations (
 			strings.TrimSpace(req.PromptName),
 			subjectEntityIDArg,
 			objectEntityIDArg,
+			categoriesArg,
 			string(extInfo),
 		); err != nil {
 			return inserted, err
@@ -1756,6 +1792,24 @@ INSERT INTO kb.relations (
 		inserted++
 	}
 	return inserted, nil
+}
+
+func debugLogEntitySearchDocument(ctx context.Context, store EntityRelationStore, recordID int64, label string, logger ApiTypes.JimoLogger) {
+	sqlStore, ok := store.(EntityRelationSQLStore)
+	if !ok {
+		return
+	}
+	entityID := fmt.Sprintf("%d_ent_55", recordID)
+	var doc string
+	err := sqlStore.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(search_document, '') FROM kb.entities WHERE input_record_id = $1 AND entity_id = $2`,
+		recordID, entityID,
+	).Scan(&doc)
+	if err != nil {
+		logger.Info("[DEBUG] search_document query failed", "label", label, "entity_id", entityID, "error", err)
+		return
+	}
+	logger.Info("[DEBUG] search_document", "label", label, "entity_id", entityID, "len", len(doc), "content", doc)
 }
 
 func isLanguageEnglish(language string) bool {
@@ -1838,58 +1892,6 @@ func (s EntityRelationSQLStore) AppendSummaryKeywordsToEntitySearch(ctx context.
 	return err
 }
 
-func (s EntityRelationSQLStore) AppendSemanticProjectionKeywordsToEntitySearch(ctx context.Context, inputRecordID int64) error {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT COALESCE(keywords, '[]'::jsonb), COALESCE(keywords_en, '[]'::jsonb)
-		FROM kb.semantic_projections
-		WHERE input_record_id = $1`, inputRecordID)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	seen := make(map[string]struct{})
-	var parts []string
-	for rows.Next() {
-		var kwRaw, kwEnRaw []byte
-		if err := rows.Scan(&kwRaw, &kwEnRaw); err != nil {
-			return err
-		}
-		for _, kw := range rawJSONArrayStrings(kwRaw) {
-			kw = strings.TrimSpace(kw)
-			if kw == "" {
-				continue
-			}
-			if _, ok := seen[kw]; !ok {
-				seen[kw] = struct{}{}
-				parts = append(parts, kw)
-			}
-		}
-		for _, kw := range rawJSONArrayStrings(kwEnRaw) {
-			kw = strings.TrimSpace(kw)
-			if kw == "" {
-				continue
-			}
-			if _, ok := seen[kw]; !ok {
-				seen[kw] = struct{}{}
-				parts = append(parts, kw)
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if len(parts) == 0 {
-		return nil
-	}
-	extra := strings.Join(parts, " ")
-	_, err = s.DB.ExecContext(ctx, `
-		UPDATE kb.entities
-		SET search_document = trim(concat_ws(' ', search_document, $2::text)),
-		    search_vector   = to_tsvector('simple', trim(concat_ws(' ', search_document, $2::text)))
-		WHERE input_record_id = $1`, inputRecordID, extra)
-	return err
-}
 
 // ---- Phase C artifact file refresh ----
 
@@ -2013,6 +2015,7 @@ func loadPersistedRelationArtifactRows(ctx context.Context, db *sql.DB, recordID
 		       COALESCE(prompt_name, ''),
 		       COALESCE(subject_entity_id, ''),
 		       COALESCE(object_entity_id, ''),
+		       COALESCE(categories, '[]'::jsonb),
 		       COALESCE(search_document, ''),
 		       COALESCE(connected_artifacts, '{}'::jsonb),
 		       COALESCE(ext_info, '{}'::jsonb)
@@ -2035,6 +2038,7 @@ func loadPersistedRelationArtifactRows(ctx context.Context, db *sql.DB, recordID
 			confidence                                              float64
 			modelName, promptName                                   string
 			subjectEntityID, objectEntityID                         string
+			categoriesRaw                                           []byte
 			searchDocument                                          string
 			connectedArtifactsRaw, extInfoRaw                      []byte
 		)
@@ -2045,7 +2049,8 @@ func loadPersistedRelationArtifactRows(ctx context.Context, db *sql.DB, recordID
 			&keywordsRaw, &keywordsEnRaw,
 			&lineSpansRaw,
 			&confidence, &modelName, &promptName,
-			&subjectEntityID, &objectEntityID, &searchDocument,
+			&subjectEntityID, &objectEntityID,
+			&categoriesRaw, &searchDocument,
 			&connectedArtifactsRaw, &extInfoRaw,
 		); err != nil {
 			return nil, err
@@ -2068,6 +2073,7 @@ func loadPersistedRelationArtifactRows(ctx context.Context, db *sql.DB, recordID
 			"prompt_name":         strings.TrimSpace(promptName),
 			"subject_entity_id":   strings.TrimSpace(subjectEntityID),
 			"object_entity_id":    strings.TrimSpace(objectEntityID),
+			"categories":          jsonColumnToValue(categoriesRaw, []any{}),
 			"search_document":     strings.TrimSpace(searchDocument),
 			"connected_artifacts": jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
 			"ext_info":            jsonColumnToValue(extInfoRaw, map[string]any{}),
