@@ -220,6 +220,94 @@ func (s *ConnectionSQLStore) ReplaceConnectionsBySource(ctx context.Context, sou
 	return nil
 }
 
+// ReplaceRecordConnectionsByMethod idempotently replaces every intra-document edge a
+// processor produced under one relation_method, regardless of relation_name. Unlike
+// ReplaceConnections (which scope-deletes by an explicit relation_name set), this deletes
+// all (source_record_id = target_record_id = recordID, relation_method) rows and reinserts
+// conns. It is the right primitive when the relation_names are open-ended — e.g. the
+// canonical relation store (ADR 2026061401), whose subject->object edge name is the
+// extracted predicate itself and therefore cannot be enumerated up front.
+func (s *ConnectionSQLStore) ReplaceRecordConnectionsByMethod(ctx context.Context, recordID int64, relationMethod string, conns []Connection) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("(CWB_CONN_026) nil connection store db handle")
+	}
+	if strings.TrimSpace(relationMethod) == "" {
+		return fmt.Errorf("(CWB_CONN_027) relationMethod must be non-empty for method-scoped delete")
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("(CWB_CONN_028) begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM kb.artifact_connections
+		 WHERE source_record_id = $1 AND target_record_id = $1 AND relation_method = $2`,
+		recordID, relationMethod,
+	); err != nil {
+		return fmt.Errorf("(CWB_CONN_029) delete existing record connections: %w", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, connectionInsertSQL)
+	if err != nil {
+		return fmt.Errorf("(CWB_CONN_030) prepare insert: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, c := range conns {
+		overlap, err := encodeJSONB(c.Overlap)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_031) encode overlap: %w", err)
+		}
+		provenance, err := encodeJSONB(c.Provenance)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_032) encode provenance: %w", err)
+		}
+		extraInfo, err := encodeJSONB(c.ExtraInfo)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_033) encode extra_info: %w", err)
+		}
+		var confidence any
+		if c.Confidence != 0 {
+			confidence = c.Confidence
+		}
+		var signature any
+		if c.SemanticSignature != "" {
+			signature = c.SemanticSignature
+		}
+		sourceRecordID := c.SourceRecordID
+		if sourceRecordID <= 0 {
+			sourceRecordID = recordID
+		}
+		targetRecordID := c.TargetRecordID
+		if targetRecordID <= 0 {
+			targetRecordID = recordID
+		}
+		sourceDesc := c.SourceDesc
+		if sourceDesc == "" {
+			sourceDesc = connectionEndpointDesc(c.SourceType, c.SourceID)
+		}
+		targetDesc := c.TargetDesc
+		if targetDesc == "" {
+			targetDesc = connectionEndpointDesc(c.TargetType, c.TargetID)
+		}
+		if _, err := stmt.ExecContext(ctx,
+			sourceRecordID, targetRecordID, c.SourceType, c.SourceID, c.TargetType, c.TargetID,
+			c.RelationName, relationMethod, confidence, overlap, provenance,
+			signature, sourceDesc, targetDesc, extraInfo,
+		); err != nil {
+			return fmt.Errorf("(CWB_CONN_034) insert connection %s->%s (%s): %w",
+				c.SourceID, c.TargetID, c.RelationName, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("(CWB_CONN_035) commit: %w", err)
+	}
+	return nil
+}
+
 // WriteLineOverlapConnectionsForRefs derives and idempotently replaces chunk ->
 // artifact line_overlap edges from explicitly supplied refs. Used where the caller
 // must filter which artifacts participate (e.g. only Level-0 summaries) and so

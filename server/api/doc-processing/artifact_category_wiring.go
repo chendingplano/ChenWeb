@@ -108,7 +108,18 @@ func (c *llmCategoryCreator) CreateCategory(ctx context.Context, rawKey, categor
 	if err != nil {
 		return createdCategory{}, err
 	}
-	return parseCreateCategoryResponse(payload)
+	cat, parseErr := parseCreateCategoryResponse(payload)
+	if parseErr != nil {
+		// LLM returned a structurally valid response but omitted category_key/canonical_key
+		// (e.g. a bare translations dict). Fall back to the normalized raw key so the
+		// category is still created with minimal metadata rather than being silently dropped.
+		if c.logger != nil {
+			c.logger.Warn("category creator: LLM response missing key, falling back to raw key",
+				"raw_key", rawKey, "category_type", categoryType, "error", parseErr.Error())
+		}
+		cat = createdCategory{CategoryKey: normalizeCategoryKey(rawKey)}
+	}
+	return cat, nil
 }
 
 func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, categoryType, modelName string, cfg structureModelConfig) (map[string]any, error) {

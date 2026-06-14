@@ -245,6 +245,9 @@ func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID
 	}
 	relationIndexStart := time.Now()
 	IndexRelationsForRecord(ctx, recordID, chunks, p.Logger)
+	// Canonical relation store (ADR 2026061401): materialize subject->object,
+	// predicate-of, and belong-to-category edges into kb.artifact_connections.
+	IndexRelationGraphForRecord(ctx, recordID, p.Logger)
 	if p.Logger != nil {
 		p.Logger.Info("entity-relation post-process relation indexing finished",
 			"record_id", recordID,

@@ -63,6 +63,23 @@ const (
 	RelationHasSummary        = "has-summary"
 	RelationEntityRelations   = "entity relations"
 	RelationBelongToCategory  = "belong-to-category"
+	RelationHasPredicate      = "has-predicate"
+)
+
+// Canonical relation store (ADR 2026061401). All edges produced by the
+// entity-relation processor's graph step share one relation_method so they can be
+// replaced idempotently as a group, and carry endpoints typed by the artifact-type
+// registry (D2).
+const (
+	// RelationMethodEntityRelation tags every edge the relation-graph step writes
+	// (subject->object, predicate-of, belong-to-category), enabling a single
+	// method-scoped idempotent replace per record.
+	RelationMethodEntityRelation = "entity_relation"
+
+	// artifactTypeCategory / artifactTypeRelationPredicate are the artifact_type
+	// discriminators for the dictionary endpoints promoted to artifacts in D2.
+	artifactTypeCategory          = "category"
+	artifactTypeRelationPredicate = "relation_predicate"
 )
 
 // ChunkConnectionID returns the positional identifier used for a chunk endpoint.
