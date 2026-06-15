@@ -39,12 +39,12 @@ func TestGetMetricWikiCacheHit(t *testing.T) {
 	if err := os.MkdirAll(recordDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	pageJSON := `{"metric_id":"5_3","title":"Switching Frequency"}`
-	if err := os.WriteFile(filepath.Join(recordDir, "wikipage_metric_5_3.en.json"), []byte(pageJSON), 0o644); err != nil {
+	pageJSON := `{"metric_id":"5_mtc_3","title":"Switching Frequency"}`
+	if err := os.WriteFile(filepath.Join(recordDir, "wikipage_metric_5_mtc_3.en.json"), []byte(pageJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	c, rec := newMetricWikiContext(t, "5_3", "")
+	c, rec := newMetricWikiContext(t, "5_mtc_3", "")
 	if err := GetMetricWiki(c); err != nil {
 		t.Fatalf("GetMetricWiki err = %v", err)
 	}
@@ -81,14 +81,14 @@ func TestGetMetricWikiCacheMissGenerates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	generated := []byte(`{"metric_id":"5_3","title":"Generated"}`)
+	generated := []byte(`{"metric_id":"5_mtc_3","title":"Generated"}`)
 	orig := buildMetricWikiPageFn
 	buildMetricWikiPageFn = func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, metricID, lang string) (json.RawMessage, error) {
 		return json.RawMessage(generated), nil
 	}
 	defer func() { buildMetricWikiPageFn = orig }()
 
-	c, rec := newMetricWikiContext(t, "5_3", "")
+	c, rec := newMetricWikiContext(t, "5_mtc_3", "")
 	if err := GetMetricWiki(c); err != nil {
 		t.Fatalf("GetMetricWiki err = %v", err)
 	}
@@ -103,9 +103,46 @@ func TestGetMetricWikiCacheMissGenerates(t *testing.T) {
 		t.Errorf("resp status=%v generated=%v, want true/true", resp.Status, resp.Generated)
 	}
 	// The page must have been persisted to the cache path.
-	saved, err := os.ReadFile(filepath.Join(artifactDir, "0", "5", "wikipage_metric_5_3.en.json"))
+	saved, err := os.ReadFile(filepath.Join(artifactDir, "0", "5", "wikipage_metric_5_mtc_3.en.json"))
 	if err != nil {
 		t.Fatalf("page not saved: %v", err)
+	}
+	if string(saved) != string(generated) {
+		t.Errorf("saved = %s, want %s", saved, generated)
+	}
+}
+
+func TestGetMetricWikiLegacyIDNormalizesToCanonicalMetricID(t *testing.T) {
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+	if err := os.MkdirAll(filepath.Join(artifactDir, "0", "5"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	generated := []byte(`{"metric_id":"5_mtc_3","title":"Generated"}`)
+	orig := buildMetricWikiPageFn
+	buildMetricWikiPageFn = func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, metricID, lang string) (json.RawMessage, error) {
+		if recordID != 5 {
+			t.Fatalf("recordID=%d, want 5", recordID)
+		}
+		if metricID != "5_mtc_3" {
+			t.Fatalf("metricID=%q, want canonical 5_mtc_3", metricID)
+		}
+		return json.RawMessage(generated), nil
+	}
+	defer func() { buildMetricWikiPageFn = orig }()
+
+	c, rec := newMetricWikiContext(t, "5_3", "")
+	if err := GetMetricWiki(c); err != nil {
+		t.Fatalf("GetMetricWiki err = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	saved, err := os.ReadFile(filepath.Join(artifactDir, "0", "5", "wikipage_metric_5_mtc_3.en.json"))
+	if err != nil {
+		t.Fatalf("canonical page not saved: %v", err)
 	}
 	if string(saved) != string(generated) {
 		t.Errorf("saved = %s, want %s", saved, generated)
@@ -124,7 +161,7 @@ func TestGetMetricWikiSingleFlight(t *testing.T) {
 	buildMetricWikiPageFn = func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, metricID, lang string) (json.RawMessage, error) {
 		atomic.AddInt32(&calls, 1)
 		time.Sleep(20 * time.Millisecond) // widen the race window
-		return json.RawMessage(`{"metric_id":"5_3"}`), nil
+		return json.RawMessage(`{"metric_id":"5_mtc_3"}`), nil
 	}
 	defer func() { buildMetricWikiPageFn = orig }()
 
@@ -134,7 +171,7 @@ func TestGetMetricWikiSingleFlight(t *testing.T) {
 	for range n {
 		go func() {
 			defer wg.Done()
-			c, _ := newMetricWikiContext(t, "5_3", "")
+			c, _ := newMetricWikiContext(t, "5_mtc_3", "")
 			_ = GetMetricWiki(c)
 		}()
 	}
@@ -151,10 +188,20 @@ func TestParseMetricID(t *testing.T) {
 		t.Fatalf("parseMetricID(\"5_3\") = (%d, %d, %v), want (5, 3, nil)", rid, seq, err)
 	}
 
+	rid, seq, err = parseMetricID("5_mtc_3")
+	if err != nil || rid != 5 || seq != 3 {
+		t.Fatalf("parseMetricID(\"5_mtc_3\") = (%d, %d, %v), want (5, 3, nil)", rid, seq, err)
+	}
+
 	// record ids and seqnos can be multi-digit.
 	rid, seq, err = parseMetricID("1234_57")
 	if err != nil || rid != 1234 || seq != 57 {
 		t.Fatalf("parseMetricID(\"1234_57\") = (%d, %d, %v), want (1234, 57, nil)", rid, seq, err)
+	}
+
+	rid, seq, err = parseMetricID("1234_mtc_57")
+	if err != nil || rid != 1234 || seq != 57 {
+		t.Fatalf("parseMetricID(\"1234_mtc_57\") = (%d, %d, %v), want (1234, 57, nil)", rid, seq, err)
 	}
 
 	for _, bad := range []string{

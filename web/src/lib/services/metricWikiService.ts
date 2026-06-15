@@ -54,14 +54,14 @@ export type MetricWikiResponse = {
 	error_msg?: string;
 };
 
-// metricIdFromArtifactId recovers a metric_id ("<record_id>_<seqno>") from a
-// search-artifacts artifact_id ("<record_id>_mtc_<seqno>"). Returns null when
-// the value is not a metric artifact id.
+// metricIdFromArtifactId returns the canonical metric_id
+// ("<record_id>_mtc_<seqno>") from a metric search-artifact id. Returns null
+// when the value is not a metric artifact id.
 export function metricIdFromArtifactId(artifactId: string | undefined | null): string | null {
 	if (!artifactId) return null;
 	const idx = artifactId.indexOf('_mtc_');
 	if (idx <= 0) return null;
-	return artifactId.slice(0, idx) + '_' + artifactId.slice(idx + '_mtc_'.length);
+	return artifactId;
 }
 
 // getMetricWiki fetches (and, on a cache miss, triggers generation of) a metric

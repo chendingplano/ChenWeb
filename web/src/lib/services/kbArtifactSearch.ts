@@ -3,9 +3,12 @@ export type KbSearchArtifactType =
 	| 'metrics'
 	| 'summaries'
 	| 'topics'
+	| 'content-segments'
+	| 'semantic-projections'
+	| 'entities'
+	| 'relations'
 	| 'scene-blocks'
-	| 'provisions'
-	| 'products';
+	| 'provisions';
 
 export type KbSearchParams = {
 	q: string;
@@ -53,9 +56,12 @@ const artifactTypeFilterByScope: Partial<Record<KbSearchArtifactType, string>> =
 	metrics: 'metric',
 	summaries: 'summary',
 	topics: 'topic',
+	'content-segments': 'chunk',
+	'semantic-projections': 'semantic_projection',
+	entities: 'entity',
+	relations: 'relation',
 	'scene-blocks': 'scene_block',
-	provisions: 'provision',
-	products: 'product'
+	provisions: 'provision'
 };
 
 export function buildKbArtifactSearchUrl(

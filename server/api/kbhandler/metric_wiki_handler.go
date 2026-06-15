@@ -43,21 +43,23 @@ type metricWikiResponse struct {
 // GetMetricWiki handles GET /api/v1/kb/metrics/:metric_id/wiki?lang=<lang>.
 //
 // It returns the metric's cached wiki page JSON, generating it on first request
-// when absent. metric_id has the form "<record_id>_<seqno>" and is required;
-// an empty/invalid value is an error.
+// when absent. metric_id is normally stored as "<record_id>_mtc_<seqno>"; the
+// legacy "<record_id>_<seqno>" form is accepted and normalized. An empty or
+// malformed value is an error.
 func GetMetricWiki(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_MWIKI_001")
 	defer rc.Close()
 	logger := rc.GetLogger()
 
 	metricID := strings.TrimSpace(c.Param("metric_id"))
-	recordID, _, err := parseMetricID(metricID)
+	recordID, seqno, err := parseMetricID(metricID)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
 			ErrorMsg: "missing or invalid metric_id (CWB_KB_MWIKI_010)",
 		})
 	}
+	metricID = canonicalMetricID(recordID, seqno)
 
 	lang := strings.TrimSpace(c.QueryParam("lang"))
 	artifactDir := strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
@@ -153,21 +155,27 @@ func metricWikiPath(artifactDir string, recordID int64, metricID, lang string) (
 	return filepath.Join(recordDir, name), nil
 }
 
-// parseMetricID splits a metric_id of the form "<record_id>_<seqno>" into its
-// numeric parts. Both parts must be positive integers (record_id >= 1,
-// seqno >= 1). The input is not trimmed: surrounding whitespace is an error.
+// parseMetricID splits a metric_id into its numeric parts. The canonical form
+// is "<record_id>_mtc_<seqno>", but the legacy "<record_id>_<seqno>" form is
+// still accepted for compatibility. Both numeric parts must be positive
+// integers. The input is not trimmed: surrounding whitespace is an error.
 //
-// metric_id is assigned by the metrics extractor as "<record_id>_<seqno>" with
-// seqno starting at 1, and is never null/empty for a persisted metric (see
-// doc-processor/extract-metrics-spec.md). A malformed value is treated as an
-// error by callers.
+// metric_id is assigned by the metrics extractor as "<record_id>_mtc_<seqno>"
+// with seqno starting at 1, and is never null/empty for a persisted metric. A
+// malformed value is treated as an error by callers.
 func parseMetricID(metricID string) (recordID int64, seqno int, err error) {
-	idx := strings.LastIndex(metricID, "_")
-	if idx <= 0 || idx == len(metricID)-1 {
-		return 0, 0, fmt.Errorf("invalid metric_id %q: expected \"<record_id>_<seqno>\"", metricID)
+	var ridPart, seqPart string
+	switch parts := strings.Split(metricID, "_"); len(parts) {
+	case 2:
+		ridPart, seqPart = parts[0], parts[1]
+	case 3:
+		if parts[1] != "mtc" {
+			return 0, 0, fmt.Errorf("invalid metric_id %q: expected \"<record_id>_mtc_<seqno>\"", metricID)
+		}
+		ridPart, seqPart = parts[0], parts[2]
+	default:
+		return 0, 0, fmt.Errorf("invalid metric_id %q: expected \"<record_id>_mtc_<seqno>\"", metricID)
 	}
-	ridPart := metricID[:idx]
-	seqPart := metricID[idx+1:]
 
 	rid, err := strconv.ParseInt(ridPart, 10, 64)
 	if err != nil || rid <= 0 {
@@ -178,4 +186,8 @@ func parseMetricID(metricID string) (recordID int64, seqno int, err error) {
 		return 0, 0, fmt.Errorf("invalid metric_id %q: seqno must be a positive integer", metricID)
 	}
 	return rid, seq, nil
+}
+
+func canonicalMetricID(recordID int64, seqno int) string {
+	return fmt.Sprintf("%d_mtc_%d", recordID, seqno)
 }

@@ -151,11 +151,14 @@
 				</label>
 			{/if}
 
-			{#if artifactType === 'products'}
+			{#if artifactType === 'all'}
 				<label class="flex flex-col gap-2 text-sm">
 					<span style="color:{textSecondary};">Product Type</span>
 					<input bind:value={productType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="equipment" />
 				</label>
+			{/if}
+
+			{#if artifactType === 'all' || artifactType === 'relations'}
 				<label class="flex flex-col gap-2 text-sm">
 					<span style="color:{textSecondary};">Relation Type</span>
 					<input bind:value={relationType} class="rounded-xl px-3 py-2" style="background:{surface2}; border:1px solid {borderColor};" placeholder="maintenance_requirement" />

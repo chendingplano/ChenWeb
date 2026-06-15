@@ -423,7 +423,8 @@
 			<div class="empty-state">
 				<h2>Enter a query to search SemOS</h2>
 				<p>
-					Search across documents, topics, metrics, scenes, provisions, products, and summaries.
+					Search across topics, metrics, summaries, content segments, semantic projections,
+					entities, relations, scenes, and provisions.
 				</p>
 			</div>
 		{/if}

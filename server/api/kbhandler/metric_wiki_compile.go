@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -33,6 +34,11 @@ type metricWikiDocMeta struct {
 func compileMetricWikiContext(db *sql.DB, recordID int64, metricID string) (metricWikiContext, error) {
 	if db == nil {
 		return metricWikiContext{}, fmt.Errorf("nil DB handle")
+	}
+
+	if rid, seqno, err := parseMetricID(metricID); err == nil {
+		recordID = rid
+		metricID = canonicalMetricID(rid, seqno)
 	}
 
 	metric, err := fetchMetricByMetricID(db, metricID)
@@ -70,7 +76,8 @@ FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.metric_id = $1
 `
-	var (
+	load := func(id string) (metricRecord, error) {
+		var (
 		r               metricRecord
 		spansBytes      []byte
 		keywordsBytes   []byte
@@ -78,8 +85,8 @@ WHERE m.metric_id = $1
 		reasoningBytes  []byte
 		confidence      sql.NullFloat64
 		isExplicit      sql.NullBool
-	)
-	err := db.QueryRow(query, metricID).Scan(
+		)
+		err := db.QueryRow(query, id).Scan(
 		&r.ID, &r.InputRecordID, &r.MetricID, &r.EventID, &r.InputFilename,
 		&r.MetricName, &r.MetricNameEn, &spansBytes, &r.MetricSubject, &r.MetricSubjectEn,
 		&r.MetricDesc, &r.MetricDescEn, &r.MetricContext, &r.MetricContextEn,
@@ -88,30 +95,55 @@ WHERE m.metric_id = $1
 		&r.FormulaOrDefinition, &r.ThresholdOrTarget, &r.MeasurementFreq,
 		&confidence, &isExplicit, &r.TableNameOrSection, &reasoningBytes, &r.CreatedAt,
 	)
-	if err != nil {
+		if err != nil {
+			return metricRecord{}, err
+		}
+		if len(spansBytes) > 0 {
+			r.SourceLineSpans = json.RawMessage(spansBytes)
+		}
+		if len(keywordsBytes) > 0 {
+			r.MetricKeywords = json.RawMessage(keywordsBytes)
+		}
+		if len(keywordsEnBytes) > 0 {
+			r.MetricKeywordsEn = json.RawMessage(keywordsEnBytes)
+		}
+		if len(reasoningBytes) > 0 {
+			r.ReasoningTags = json.RawMessage(reasoningBytes)
+		}
+		if confidence.Valid {
+			v := confidence.Float64
+			r.Confidence = &v
+		}
+		if isExplicit.Valid {
+			v := isExplicit.Bool
+			r.IsExplicitMetric = &v
+		}
+		return r, nil
+	}
+
+	r, err := load(metricID)
+	if err == nil {
+		return r, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
 		return metricRecord{}, fmt.Errorf("metric %q not found: %w", metricID, err)
 	}
-	if len(spansBytes) > 0 {
-		r.SourceLineSpans = json.RawMessage(spansBytes)
+
+	if rid, seqno, parseErr := parseMetricID(metricID); parseErr == nil {
+		legacyID := fmt.Sprintf("%d_%d", rid, seqno)
+		canonicalID := canonicalMetricID(rid, seqno)
+		fallbackID := legacyID
+		if metricID == legacyID {
+			fallbackID = canonicalID
+		}
+		if fallbackID != metricID {
+			if r, fallbackErr := load(fallbackID); fallbackErr == nil {
+				return r, nil
+			}
+		}
 	}
-	if len(keywordsBytes) > 0 {
-		r.MetricKeywords = json.RawMessage(keywordsBytes)
-	}
-	if len(keywordsEnBytes) > 0 {
-		r.MetricKeywordsEn = json.RawMessage(keywordsEnBytes)
-	}
-	if len(reasoningBytes) > 0 {
-		r.ReasoningTags = json.RawMessage(reasoningBytes)
-	}
-	if confidence.Valid {
-		v := confidence.Float64
-		r.Confidence = &v
-	}
-	if isExplicit.Valid {
-		v := isExplicit.Bool
-		r.IsExplicitMetric = &v
-	}
-	return r, nil
+
+	return metricRecord{}, fmt.Errorf("metric %q not found: %w", metricID, err)
 }
 
 // fetchWikiDocMeta loads grounding metadata for the source document.

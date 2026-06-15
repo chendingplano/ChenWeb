@@ -2,7 +2,9 @@ package kbhandler
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -83,7 +85,7 @@ func WikiOverview(c echo.Context) error {
 		})
 	}
 
-	inputTable, err := resolveInputTable(db)
+	inputTable, err := resolveWikiOverviewInputTable(db)
 	if err != nil {
 		logger.Error("resolve kb input table failed", "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -99,7 +101,7 @@ func WikiOverview(c echo.Context) error {
 		SemanticProjections: countRows(db, logger, "SELECT COUNT(*) FROM kb.semantic_projections"),
 		Metrics:             countRows(db, logger, "SELECT COUNT(*) FROM kb.metrics"),
 		Provisions:          countRows(db, logger, "SELECT COUNT(*) FROM kb.provisions"),
-		PartsComponents:     countRows(db, logger, "SELECT COUNT(*) FROM kb.products"),
+		PartsComponents:     countRows(db, logger, "SELECT COUNT(*) FROM kb.inventory_items"),
 		Scenes:              countRows(db, logger, "SELECT COUNT(*) FROM kb.scene_objects"),
 		Entities:            countRows(db, logger, "SELECT COUNT(*) FROM kb.entities"),
 		Relations:           countRows(db, logger, "SELECT COUNT(*) FROM kb.relations"),
@@ -115,6 +117,32 @@ func WikiOverview(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+// resolveWikiOverviewInputTable follows the Deep Wiki landing-page contract:
+// counts and activity should read from kb.inputs when it exists. The older
+// singular kb.input remains a compatibility fallback for environments that
+// have not yet migrated.
+func resolveWikiOverviewInputTable(db *sql.DB) (string, error) {
+	const query = `
+SELECT
+	to_regclass($1)::text AS singular,
+	to_regclass($2)::text AS plural
+`
+
+	var singular sql.NullString
+	var plural sql.NullString
+	if err := db.QueryRow(query, kbInputTableSingular, kbInputTablePlural).Scan(&singular, &plural); err != nil {
+		return "", err
+	}
+
+	if plural.Valid && strings.TrimSpace(plural.String) != "" {
+		return plural.String, nil
+	}
+	if singular.Valid && strings.TrimSpace(singular.String) != "" {
+		return singular.String, nil
+	}
+	return "", fmt.Errorf("neither %s nor %s exists", kbInputTablePlural, kbInputTableSingular)
 }
 
 // countRows runs a COUNT(*) query and returns 0 on any error so one missing or
