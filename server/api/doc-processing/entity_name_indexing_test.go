@@ -20,49 +20,42 @@ func TestNormalizeEntityNameKey(t *testing.T) {
 
 func TestBuildEntityNameGraphConnections(t *testing.T) {
 	rows := []entityNameGraphRow{
-		{EntityID: "100_ent_1", Entity: "艾克米公司", EntityEN: "Acme Corporation"},
+		{EntityID: "100_ent_1", Entity: "艾克米公司", EntityEN: "Acme Corporation", Categories: []string{"Company", "Vendor"}},
 		{EntityID: "100_ent_2", Entity: "Fallback Name"},
 		{EntityID: "", EntityEN: "Missing ID"},
 	}
+	// "company" resolves; "vendor" is unresolved (absent from the map) and is skipped.
+	categoryIDs := map[string]int64{"company": 5}
 
-	conns := buildEntityNameGraphConnections(100, rows)
-	if len(conns) != 2 {
-		t.Fatalf("want 2 connections, got %d: %+v", len(conns), conns)
+	conns := buildEntityNameGraphConnections(100, rows, categoryIDs)
+	// ent_1 name edge + ent_1 company edge + ent_2 name edge = 3.
+	if len(conns) != 3 {
+		t.Fatalf("want 3 connections, got %d: %+v", len(conns), conns)
 	}
 
+	// Edge 1 — name dictionary edge for the first entity.
 	if conns[0].SourceType != artifactTypeEntityName ||
 		conns[0].SourceID != "acme_corporation" ||
 		conns[0].TargetType != searchArtifactEntity ||
 		conns[0].TargetID != "100_ent_1" ||
 		conns[0].RelationName != RelationHasInstance ||
 		conns[0].RelationMethod != RelationMethodEntityName {
-		t.Errorf("first connection wrong: %+v", conns[0])
+		t.Errorf("name connection wrong: %+v", conns[0])
 	}
 
-	if conns[1].SourceID != "fallback_name" || conns[1].TargetID != "100_ent_2" {
-		t.Errorf("fallback connection wrong: %+v", conns[1])
+	// Edge 2 — belong-to-category edge for the resolved "company" category.
+	if conns[1].SourceType != searchArtifactEntity ||
+		conns[1].SourceID != "100_ent_1" ||
+		conns[1].TargetType != artifactTypeCategory ||
+		conns[1].TargetID != "5" ||
+		conns[1].RelationName != RelationBelongToCategory ||
+		conns[1].RelationMethod != RelationMethodEntityName ||
+		conns[1].ExtraInfo["category_key"] != "company" {
+		t.Errorf("category connection wrong: %+v", conns[1])
 	}
-}
 
-func TestEntityNameCategoryRequests(t *testing.T) {
-	rows := []entityNameGraphRow{
-		{EntityID: "100_ent_1", Entity: "农村生活垃圾分类处理规范", EntityEN: "Rural Domestic Waste Classification and Treatment Specification"},
-		{EntityID: "100_ent_2", Entity: "设施配置"},
-		{EntityID: "100_ent_3"},
-	}
-
-	reqs := entityNameCategoryRequests(rows)
-	if len(reqs) != 2 {
-		t.Fatalf("want 2 requests, got %d: %+v", len(reqs), reqs)
-	}
-	if reqs[0].RawKey != "Rural Domestic Waste Classification and Treatment Specification" {
-		t.Errorf("first RawKey = %q", reqs[0].RawKey)
-	}
-	if reqs[1].RawKey != "设施配置" {
-		t.Errorf("second RawKey = %q", reqs[1].RawKey)
-	}
-	if reqs[0].Evidence["artifact_kind"] != entityNameCategoryType ||
-		reqs[0].Evidence["entity_id"] != "100_ent_1" {
-		t.Errorf("evidence wrong: %+v", reqs[0].Evidence)
+	// Third entity (no ID) is skipped; second entity's name edge is last.
+	if conns[2].SourceID != "fallback_name" || conns[2].TargetID != "100_ent_2" {
+		t.Errorf("fallback connection wrong: %+v", conns[2])
 	}
 }

@@ -276,6 +276,37 @@ func TestResolveAndLinkRelationsCreatesProvisionalEntity(t *testing.T) {
 	}
 }
 
+func TestResolveAndLinkRelationsStripsLLMCategorySuffix(t *testing.T) {
+	// The LLM sometimes appends "(category)" to entity names in relations, e.g.
+	// "GB/T 1.1-2009 (标准)" when the entity is stored as "GB/T 1.1-2009".
+	entities := []map[string]any{
+		{"entity_id": "416_ent_201", "entity": "农村生活垃圾分类处理规范"},
+		{"entity_id": "416_ent_202", "entity": "GB/T 1.1-2009"},
+	}
+	idx := buildEntityResolutionIndex(entities)
+	relations := []map[string]any{
+		{
+			"subject":   "农村生活垃圾分类处理规范 (标准)",
+			"predicate": "遵循",
+			"object":    "GB/T 1.1-2009 (标准)",
+		},
+	}
+	got, outEntities := resolveAndLinkRelations(relations, entities, idx, 416, len(entities)+1, "2026-06-15T00:00:00Z")
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 relation, got %d", len(got))
+	}
+	if got[0]["subject_entity_id"] != "416_ent_201" {
+		t.Errorf("subject_entity_id = %v, want 416_ent_201", got[0]["subject_entity_id"])
+	}
+	if got[0]["object_entity_id"] != "416_ent_202" {
+		t.Errorf("object_entity_id = %v, want 416_ent_202", got[0]["object_entity_id"])
+	}
+	if len(outEntities) != 2 {
+		t.Errorf("no provisional entity should be created, got %d entities", len(outEntities))
+	}
+}
+
 func TestResolveAndLinkRelationsBackfillsProvisionalEntitySpans(t *testing.T) {
 	entities := []map[string]any{
 		{"entity_id": "7_ent_1", "entity": "Acme", "line_spans": []string{"10-12"}},

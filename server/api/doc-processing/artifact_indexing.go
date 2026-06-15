@@ -139,10 +139,13 @@ func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID i
 		}
 
 		if len(ca["chunks"]) == 0 && logger != nil {
-			logger.Warn(cfg.LogPrefix+" error: empty chunks", "record_id", recordID, "artifact_id", a.ID)
+			logger.Warn(cfg.LogPrefix+" error: empty chunks", 
+				"record_id", recordID, 
+				"artifact_id", a.ID,
+				"sourceSpan", a.SourceSpans)
 		}
 		if semanticProjects, ok := ca["semantic_projects"]; ok && len(semanticProjects) == 0 && logger != nil {
-			logger.Warn(cfg.LogPrefix+" error: empty semantic_projects",
+			logger.Warn(cfg.LogPrefix+" error: empty semantic_projections",
 				"record_id", recordID,
 				"artifact_id", a.ID,
 				"source_spans", a.SourceSpans,

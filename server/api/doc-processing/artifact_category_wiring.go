@@ -192,7 +192,7 @@ func (c *llmCategoryCreator) logCategoryLLMCall(
 		ModelNames:    []string{modelName},
 		PromptName:    "CREATE_ARTIFACT_CATEGORY_PROMPT",
 		LLMCallID:     nullableStringPtr(callID),
-		ActivityName:  nullableStringPtr("create_artifact_category"),
+		ActivityName:  nullableStringPtr(fmt.Sprintf("category_%s", categoryType)),
 		ArtifactJSON:  artifactStr,
 		Errors:        errStr,
 		ExtraInfoJSON: &extraStr,

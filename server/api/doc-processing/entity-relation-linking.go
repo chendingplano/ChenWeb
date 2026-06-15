@@ -504,6 +504,24 @@ func buildEntityResolutionIndex(entities []map[string]any) entityResolutionIndex
 	return idx
 }
 
+// stripCategorySuffix removes a trailing " (category)" appended by the LLM, e.g.
+// "GB/T 1.1-2009 (标准)" → ("GB/T 1.1-2009", true). Returns (s, false) unchanged
+// when no such suffix is present.
+func stripCategorySuffix(s string) (string, bool) {
+	if !strings.HasSuffix(s, ")") {
+		return s, false
+	}
+	i := strings.LastIndex(s, "(")
+	if i < 1 {
+		return s, false
+	}
+	stripped := strings.TrimSpace(s[:i])
+	if stripped == "" {
+		return s, false
+	}
+	return stripped, true
+}
+
 // resolveAndLinkRelations resolves each relation's subject/object to a canonical
 // entity_id (D1). Unresolved endpoints are promoted to provisional entities
 // (D4) rather than dropped; the relation then links to the new entity_id.
@@ -533,6 +551,15 @@ func resolveAndLinkRelations(
 		}
 		if id, ok := idx[f]; ok {
 			return id
+		}
+		// The LLM sometimes appends " (category)" to entity names in relations.
+		// Strip the suffix and retry before minting a provisional entity.
+		if stripped, ok := stripCategorySuffix(strings.TrimSpace(surface)); ok {
+			if fs := normalizeSurfaceForm(stripped); fs != "" {
+				if id, ok2 := idx[fs]; ok2 {
+					return id
+				}
+			}
 		}
 		// Mint a provisional entity for the unresolved endpoint.
 		id := fmt.Sprintf("%d_ent_%d", recordID, nextEntityIndex)
