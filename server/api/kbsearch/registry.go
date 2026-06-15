@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/lib/pq"
 )
 
 type RegistryRow struct {
@@ -22,6 +24,7 @@ type RegistryRow struct {
 	CategoryPaths   json.RawMessage
 	SourceLineSpans json.RawMessage
 	SemanticPayload json.RawMessage
+	Keywords        []string
 	// EmbeddingText is the exact text that was embedded (stored for re-embedding /
 	// debugging). Embedding is the pgvector value; nil when no embedding was
 	// computed, in which case a NULL vector is stored and the row is lexical-only.
@@ -59,9 +62,10 @@ INSERT INTO kb.search_artifacts (
 	category_paths,
 	source_line_spans,
 	semantic_payload,
+	keywords,
 	updated_at
 ) VALUES (
-	$1, $2, $3, $4, $5, $6, $7, to_tsvector('simple', $7), $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, NOW()
+	$1, $2, $3, $4, $5, $6, $7, to_tsvector('simple', $7), $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14, NOW()
 )
 ON CONFLICT (artifact_type, artifact_id) DO UPDATE SET
 	input_record_id = EXCLUDED.input_record_id,
@@ -76,6 +80,7 @@ ON CONFLICT (artifact_type, artifact_id) DO UPDATE SET
 	category_paths = EXCLUDED.category_paths,
 	source_line_spans = EXCLUDED.source_line_spans,
 	semantic_payload = EXCLUDED.semantic_payload,
+	keywords = EXCLUDED.keywords,
 	updated_at = NOW()`
 
 // insertStmtSemantic adds embedding_text ($14) and embedding ($15::vector). Used
@@ -97,11 +102,12 @@ INSERT INTO kb.search_artifacts (
 	category_paths,
 	source_line_spans,
 	semantic_payload,
+	keywords,
 	embedding_text,
 	embedding,
 	updated_at
 ) VALUES (
-	$1, $2, $3, $4, $5, $6, $7, to_tsvector('simple', $7), $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14, $15::vector, NOW()
+	$1, $2, $3, $4, $5, $6, $7, to_tsvector('simple', $7), $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14, $15, $16::vector, NOW()
 )
 ON CONFLICT (artifact_type, artifact_id) DO UPDATE SET
 	input_record_id = EXCLUDED.input_record_id,
@@ -116,6 +122,7 @@ ON CONFLICT (artifact_type, artifact_id) DO UPDATE SET
 	category_paths = EXCLUDED.category_paths,
 	source_line_spans = EXCLUDED.source_line_spans,
 	semantic_payload = EXCLUDED.semantic_payload,
+	keywords = EXCLUDED.keywords,
 	embedding_text = EXCLUDED.embedding_text,
 	embedding = EXCLUDED.embedding,
 	updated_at = NOW()`
@@ -139,6 +146,10 @@ func InsertSearchRegistryRows(ctx context.Context, db *sql.DB, rows []RegistryRo
 		categoryPaths := normalizeJSONArg(row.CategoryPaths, "[]")
 		sourceLineSpans := normalizeJSONArg(row.SourceLineSpans, "[]")
 		semanticPayload := normalizeJSONArg(row.SemanticPayload, "{}")
+		kw := row.Keywords
+		if kw == nil {
+			kw = []string{}
+		}
 		args := []any{
 			strings.TrimSpace(row.ArtifactType),
 			strings.TrimSpace(row.ArtifactID),
@@ -153,9 +164,10 @@ func InsertSearchRegistryRows(ctx context.Context, db *sql.DB, rows []RegistryRo
 			categoryPaths,
 			sourceLineSpans,
 			semanticPayload,
+			pq.Array(kw), // $14 keywords
 		}
 		if semantic {
-			args = append(args, embeddingTextArg(row), formatEmbeddingArg(row.Embedding))
+			args = append(args, embeddingTextArg(row), formatEmbeddingArg(row.Embedding)) // $15, $16
 		}
 		res, err := db.ExecContext(ctx, stmt, args...)
 		if err != nil {

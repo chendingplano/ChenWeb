@@ -166,7 +166,7 @@ func NewEntityRelationProcessor(
 		RelationPromptRef:             relPromptRef,
 		RelationPromptPath:            relPromptPath,
 		RelationPromptErr:             relPromptErr,
-		RelationWindowSize:            envInt("RELATION_WINDOW_SIZE", 20, 1), // pages (Change 01)
+		RelationWindowSize:            envInt("RELATION_WINDOW_SIZE", 20, 1),    // pages (Change 01)
 		RelationWindowOverlap:         envInt("RELATION_WINDOW_OVERLAP", 20, 0), // lines
 		ModelRef:                      modelRef,
 		ModelCfgPath:                  modelCfgPath,
@@ -252,7 +252,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		}
 	}
 
-	// Ready to process. 
+	// Ready to process.
 	// Step 1: retrieve the chunks.
 	body, readErr := os.ReadFile(lineFilePath)
 	if readErr != nil {
@@ -421,7 +421,6 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 	// if debugID := evt.RecordID; debugID == 416 {
 	// 	debugLogEntitySearchDocument(ctx, p.Store, debugID, "after AppendSummaryKeywords", p.Logger)
 	// }
-
 
 	if fileErr := p.saveEntitiesToFile(evt.RecordID, rec, result.Entities); fileErr != nil {
 		p.Logger.Warn("save entities to file failed", "record_id", evt.RecordID, "error", fileErr)
@@ -1460,6 +1459,23 @@ CREATE INDEX IF NOT EXISTS idx_kb_entities_input_record_id ON kb.entities (input
 CREATE INDEX IF NOT EXISTS idx_kb_entities_entity_id ON kb.entities (entity_id);
 CREATE INDEX IF NOT EXISTS idx_kb_entities_entity_status ON kb.entities (entity_status);
 
+CREATE TABLE IF NOT EXISTS kb.entity_names (
+    name_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name_key TEXT NOT NULL,
+    name_raw TEXT NOT NULL DEFAULT '',
+    display_names JSONB NOT NULL DEFAULT '[]'::jsonb,
+    aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+    name_desc TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending_review',
+    seen_count BIGINT NOT NULL DEFAULT 0,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    create_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+    modify_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT entity_names_key_uniq UNIQUE (name_key)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_entity_names_seen_count ON kb.entity_names USING btree (seen_count DESC);
+
 CREATE TABLE IF NOT EXISTS kb.relations (
     id BIGSERIAL PRIMARY KEY,
     event_id TEXT,
@@ -1892,7 +1908,6 @@ func (s EntityRelationSQLStore) AppendSummaryKeywordsToEntitySearch(ctx context.
 	return err
 }
 
-
 // ---- Phase C artifact file refresh ----
 
 // loadPersistedEntityArtifactRows loads all entity rows for a record from the DB,
@@ -1944,7 +1959,7 @@ func loadPersistedEntityArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			categoriesRaw                                        []byte
 			entityStatus                                         string
 			searchDocument                                       string
-			connectedArtifactsRaw, extInfoRaw                   []byte
+			connectedArtifactsRaw, extInfoRaw                    []byte
 		)
 		if err := rows.Scan(
 			&entityID, &entity, &entityEn, &entityType, &entityTypeEn,
@@ -2031,15 +2046,15 @@ func loadPersistedRelationArtifactRows(ctx context.Context, db *sql.DB, recordID
 	for rows.Next() {
 		var (
 			relationID, subject, subjectEn, predicate, predicateEn string
-			object, objectEn                                        string
-			descText, descTextEn                                    string
-			keywordsRaw, keywordsEnRaw                              []byte
-			lineSpansRaw                                            []byte
-			confidence                                              float64
-			modelName, promptName                                   string
-			subjectEntityID, objectEntityID                         string
-			categoriesRaw                                           []byte
-			searchDocument                                          string
+			object, objectEn                                       string
+			descText, descTextEn                                   string
+			keywordsRaw, keywordsEnRaw                             []byte
+			lineSpansRaw                                           []byte
+			confidence                                             float64
+			modelName, promptName                                  string
+			subjectEntityID, objectEntityID                        string
+			categoriesRaw                                          []byte
+			searchDocument                                         string
 			connectedArtifactsRaw, extInfoRaw                      []byte
 		)
 		if err := rows.Scan(

@@ -254,8 +254,8 @@ ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
 		if err := rows.Scan(&id, &summaryID, &level, &seqNo, &sourceLineSpans, &keywords, &summaryText, &summaryTextEn, &searchDocument); err != nil {
 			return nil, err
 		}
+		kw := rawJSONArrayStrings(keywords)
 		payload, _ := json.Marshal(map[string]any{
-			"keywords":        rawJSONArrayStrings(keywords),
 			"level":           level,
 			"seq_no":          seqNo,
 			"summary_text":    summaryText,
@@ -264,7 +264,7 @@ ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
 		weightedSearchDoc := buildSummarySearchDocument(weights, summarySearchFields{
 			SummaryText:   summaryText,
 			SummaryTextEn: summaryTextEn,
-			Keywords:      rawJSONArrayStrings(keywords),
+			Keywords:      kw,
 		})
 		out = append(out, kbsearch.RegistryRow{
 			ArtifactType:    searchArtifactSummary,
@@ -279,6 +279,7 @@ ORDER BY summary_level ASC, summary_seq_no ASC, id ASC`
 			SourceFilename:  sourceTitle,
 			SourceLineSpans: json.RawMessage(sourceLineSpans),
 			SemanticPayload: payload,
+			Keywords:        kw,
 		})
 	}
 	return out, rows.Err()
@@ -315,11 +316,11 @@ ORDER BY topic_seq_no ASC, id ASC`
 		if err := rows.Scan(&id, &topicID, &topicType, &topicDesc, &topicDescEn, &keywords, &keywordsEn, &categoryPaths, &categoryPathsEn, &sourceLineSpans, &searchDocument); err != nil {
 			return nil, err
 		}
+		kw := rawJSONArrayStrings(keywords)
 		payload, _ := json.Marshal(map[string]any{
 			"topic_type":        topicType,
 			"topic_desc":        topicDesc,
 			"topic_desc_en":     topicDescEn,
-			"keywords":          rawJSONArrayStrings(keywords),
 			"keywords_en":       rawJSONArrayStrings(keywordsEn),
 			"category_paths":    rawJSONArrayStrings(categoryPaths),
 			"category_paths_en": rawJSONArrayStrings(categoryPathsEn),
@@ -329,7 +330,7 @@ ORDER BY topic_seq_no ASC, id ASC`
 			TopicType:       topicType,
 			TopicDesc:       topicDesc,
 			TopicDescEn:     topicDescEn,
-			Keywords:        rawJSONArrayStrings(keywords),
+			Keywords:        kw,
 			KeywordsEn:      rawJSONArrayStrings(keywordsEn),
 			CategoryPaths:   rawJSONArrayStrings(categoryPaths),
 			CategoryPathsEn: rawJSONArrayStrings(categoryPathsEn),
@@ -348,6 +349,7 @@ ORDER BY topic_seq_no ASC, id ASC`
 			CategoryPaths:   json.RawMessage(categoryPaths),
 			SourceLineSpans: json.RawMessage(sourceLineSpans),
 			SemanticPayload: payload,
+			Keywords:        kw,
 		})
 	}
 	return out, rows.Err()

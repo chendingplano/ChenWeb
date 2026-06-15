@@ -92,7 +92,7 @@ INSERT INTO kb.doc_proc_logs (
 			nil,
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
-			"MID-26060501",
+			"MID-26061501",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -185,7 +185,7 @@ INSERT INTO kb.doc_proc_logs (
 			strPtrValue("primary failed"),
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
-			"MID-26060501",
+			"MID-26061502",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(insertQuery).
@@ -204,7 +204,7 @@ INSERT INTO kb.doc_proc_logs (
 			nil,
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
-			"MID-26060501",
+			"MID-26061503",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

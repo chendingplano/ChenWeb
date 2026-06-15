@@ -11,6 +11,7 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
+	"github.com/lib/pq"
 )
 
 // Hybrid-search tuning. rrfK is the standard Reciprocal Rank Fusion constant;
@@ -177,6 +178,7 @@ ranked AS (
 		COALESCE(sa.source_filename, '') AS source_filename,
 		COALESCE(sa.source_line_spans, '[]'::jsonb) AS source_line_spans,
 		COALESCE(sa.semantic_payload, '{}'::jsonb) AS semantic_payload,
+		COALESCE(sa.keywords, '{}') AS keywords,
 		%s AS score,
 		ts_headline(
 			'%s',
@@ -188,7 +190,7 @@ ranked AS (
 	CROSS JOIN query_input
 	WHERE %s
 )
-SELECT artifact_type, artifact_id, input_record_id, primary_label, secondary_label, source_title, source_filename, source_line_spans, semantic_payload, score, snippet
+SELECT artifact_type, artifact_id, input_record_id, primary_label, secondary_label, source_title, source_filename, source_line_spans, semantic_payload, keywords, score, snippet
 FROM ranked
 %s
 ORDER BY score DESC, artifact_id ASC
@@ -233,6 +235,7 @@ WITH ranked AS (
 		COALESCE(sa.source_filename, '') AS source_filename,
 		COALESCE(sa.source_line_spans, '[]'::jsonb) AS source_line_spans,
 		COALESCE(sa.semantic_payload, '{}'::jsonb) AS semantic_payload,
+		COALESCE(sa.keywords, '{}') AS keywords,
 		pdb.score(sa.artifact_id) AS score,
 		COALESCE(
 			NULLIF(pdb.snippet(sa.search_document, max_num_chars => %d), ''),
@@ -243,7 +246,7 @@ WITH ranked AS (
 	FROM kb.search_artifacts sa
 	WHERE %s
 )
-SELECT artifact_type, artifact_id, input_record_id, primary_label, secondary_label, source_title, source_filename, source_line_spans, semantic_payload, score, snippet
+SELECT artifact_type, artifact_id, input_record_id, primary_label, secondary_label, source_title, source_filename, source_line_spans, semantic_payload, keywords, score, snippet
 FROM ranked
 %s
 ORDER BY score DESC, artifact_id ASC
@@ -263,7 +266,7 @@ LIMIT $%d OFFSET $%d`,
 	return scanArtifactSearchRows(rows, pageSize)
 }
 
-// scanArtifactSearchRows scans the shared 11-column result shape (used by both the
+// scanArtifactSearchRows scans the shared 12-column result shape (used by both the
 // lexical and hybrid queries) into artifactSearchResult values.
 func scanArtifactSearchRows(rows *sql.Rows, capacity int) ([]artifactSearchResult, error) {
 	if capacity < 0 {
@@ -284,6 +287,7 @@ func scanArtifactSearchRows(rows *sql.Rows, capacity int) ([]artifactSearchResul
 			&item.SourceFilename,
 			&sourceLineSpans,
 			&semanticPayload,
+			pq.Array(&item.Keywords),
 			&item.Score,
 			&item.Snippet,
 		); err != nil {
@@ -519,6 +523,7 @@ SELECT
 	COALESCE(sa.source_filename, '') AS source_filename,
 	COALESCE(sa.source_line_spans, '[]'::jsonb) AS source_line_spans,
 	COALESCE(sa.semantic_payload, '{}'::jsonb) AS semantic_payload,
+	COALESCE(sa.keywords, '{}') AS keywords,
 	f.score AS score,
 	ts_headline(
 		'%s',
@@ -606,6 +611,7 @@ SELECT
 	COALESCE(sa.source_filename, '') AS source_filename,
 	COALESCE(sa.source_line_spans, '[]'::jsonb) AS source_line_spans,
 	COALESCE(sa.semantic_payload, '{}'::jsonb) AS semantic_payload,
+	COALESCE(sa.keywords, '{}') AS keywords,
 	f.score AS score,
 	COALESCE(NULLIF(sa.snippet_basis, ''), NULLIF(sa.search_document, ''), COALESCE(sa.primary_label, '')) AS snippet
 FROM fused f

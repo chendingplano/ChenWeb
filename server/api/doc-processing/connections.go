@@ -64,6 +64,7 @@ const (
 	RelationEntityRelations   = "entity relations"
 	RelationBelongToCategory  = "belong-to-category"
 	RelationHasPredicate      = "has-predicate"
+	RelationHasInstance       = "has-instance"
 )
 
 // Canonical relation store (ADR 2026061401). All edges produced by the
@@ -75,11 +76,13 @@ const (
 	// (subject->object, predicate-of, belong-to-category), enabling a single
 	// method-scoped idempotent replace per record.
 	RelationMethodEntityRelation = "entity_relation"
+	RelationMethodEntityName     = "entity_name"
 
 	// artifactTypeCategory / artifactTypeRelationPredicate are the artifact_type
 	// discriminators for the dictionary endpoints promoted to artifacts in D2.
 	artifactTypeCategory          = "category"
 	artifactTypeRelationPredicate = "relation_predicate"
+	artifactTypeEntityName        = "entity_name"
 )
 
 // ChunkConnectionID returns the positional identifier used for a chunk endpoint.

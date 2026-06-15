@@ -237,6 +237,7 @@ func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID
 	}
 	entityIndexStart := time.Now()
 	IndexEntitiesForRecord(ctx, recordID, chunks, p.Logger)
+	IndexEntityNamesForRecord(ctx, recordID, p.Logger)
 	if p.Logger != nil {
 		p.Logger.Info("entity-relation post-process entity indexing finished",
 			"record_id", recordID,

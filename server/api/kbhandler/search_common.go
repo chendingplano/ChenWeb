@@ -36,6 +36,7 @@ type artifactSearchResult struct {
 	SourceFilename  string          `json:"source_filename,omitempty"`
 	SourceLineSpans json.RawMessage `json:"source_line_spans,omitempty"`
 	SemanticPayload json.RawMessage `json:"semantic_payload,omitempty"`
+	Keywords        []string        `json:"keywords,omitempty"`
 }
 
 type artifactSearchResponse struct {

@@ -254,7 +254,6 @@ func buildSummaryRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kb
 			return nil, err
 		}
 		payload, _ := json.Marshal(map[string]any{
-			"keywords":       item.Keywords,
 			"category_paths": item.CategoryPaths,
 			"level":          item.Level,
 			"seq_no":         item.SeqNo,
@@ -281,6 +280,7 @@ func buildSummaryRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kb
 			CategoryPaths:   mustJSON(item.CategoryPaths, []string{}),
 			SourceLineSpans: mustJSON(item.Lines, []string{}),
 			SemanticPayload: payload,
+			Keywords:        item.Keywords,
 		})
 	}
 	return rows, nil
@@ -320,7 +320,6 @@ func buildTopicRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kbse
 				"topic_type":        item.TopicType,
 				"topic_desc":        item.TopicDesc,
 				"topic_desc_en":     item.TopicDescEn,
-				"keywords":          item.Keywords,
 				"keywords_en":       item.KeywordsEn,
 				"category_paths":    item.CategoryPaths,
 				"category_paths_en": item.CategoryPathsEn,
@@ -348,6 +347,7 @@ func buildTopicRegistryRowsFromFiles(recordID int64, sourceTitle string) ([]kbse
 				CategoryPaths:   mustJSON(item.CategoryPaths, []string{}),
 				SourceLineSpans: mustJSON(item.Lines, []string{}),
 				SemanticPayload: payload,
+				Keywords:        item.Keywords,
 			})
 		}
 	}
@@ -386,7 +386,6 @@ ORDER BY id`
 		payload, _ := json.Marshal(map[string]any{
 			"scene_type": sceneType,
 			"summary":    summary,
-			"keywords":   kw,
 		})
 		seq := lastDelimitedToken(objectID)
 		if seq == "" {
@@ -409,6 +408,7 @@ ORDER BY id`
 			SnippetBasis:    firstNonEmpty(summary, title),
 			SourceLineSpans: json.RawMessage(lineSpans),
 			SemanticPayload: payload,
+			Keywords:        kw,
 		})
 	}
 	return out, rows.Err()
@@ -498,16 +498,16 @@ ORDER BY id`
 		if err := rows.Scan(&id, &provID, &provName, &provisionType, &provDesc, &keywords, &categoryPaths, &sourceLineSpans, &inputFilename, &searchDoc); err != nil {
 			return nil, err
 		}
+		kw := rawJSONArrayStrings(keywords)
 		payload, _ := json.Marshal(map[string]any{
 			"provision_type": provisionType,
 			"prov_desc":      provDesc,
-			"keywords":       rawJSONArrayStrings(keywords),
 		})
 		searchDocWeighted := buildProvisionRegistrySearchDocument(weights, provisionSearchFields{
 			ProvisionName: provName,
 			ProvisionType: provisionType,
 			ProvisionDesc: provDesc,
-			Keywords:      rawJSONArrayStrings(keywords),
+			Keywords:      kw,
 			CategoryPaths: flattenSearchCategoryPaths(categoryPaths),
 		})
 		artifactID := provID
@@ -529,6 +529,7 @@ ORDER BY id`
 			CategoryPaths:   json.RawMessage(categoryPaths),
 			SourceLineSpans: json.RawMessage(sourceLineSpans),
 			SemanticPayload: payload,
+			Keywords:        kw,
 		})
 	}
 	return out, rows.Err()
@@ -581,7 +582,6 @@ ORDER BY id`
 		payload, _ := json.Marshal(map[string]any{
 			"language":         language,
 			"descriptive_name": descriptiveName,
-			"keywords":         kw,
 		})
 		seq := lastDelimitedToken(semanticProjID)
 		if seq == "" {
@@ -603,6 +603,7 @@ ORDER BY id`
 			CategoryPaths:   json.RawMessage(categoryPaths),
 			SourceLineSpans: json.RawMessage(lineSpans),
 			SemanticPayload: payload,
+			Keywords:        kw,
 		})
 	}
 	return out, rows.Err()
@@ -864,7 +865,6 @@ ORDER BY id`
 			"knowledge_type":  knowledgeType,
 			"knowledge_value": knowledgeValue,
 			"desc_text":       descText,
-			"keywords":        kw,
 		})
 		seq := lastDelimitedToken(knowledgeID)
 		if seq == "" {
@@ -881,6 +881,7 @@ ORDER BY id`
 			SnippetBasis:    firstNonEmpty(descText, knowledgeValue),
 			CategoryPaths:   json.RawMessage(categoryPaths),
 			SemanticPayload: payload,
+			Keywords:        kw,
 		})
 	}
 	return out, rows.Err()
@@ -941,7 +942,6 @@ ORDER BY id`
 			"entity_type": entityType.String,
 			"desc":        descText.String,
 			"aliases":     aliasList,
-			"keywords":    kw,
 			"language":    language.String,
 		})
 		seq := lastDelimitedToken(entityID.String)
@@ -976,6 +976,7 @@ ORDER BY id`
 			CategoryPaths:   json.RawMessage("[]"),
 			SourceLineSpans: json.RawMessage(spans),
 			SemanticPayload: payload,
+			Keywords:        kw,
 		})
 	}
 	return out, rows.Err()
@@ -1035,7 +1036,6 @@ ORDER BY id`
 			"predicate": predicate.String,
 			"object":    object.String,
 			"desc":      descText.String,
-			"keywords":  kw,
 			"language":  language.String,
 		})
 		seq := lastDelimitedToken(relationID.String)
@@ -1070,6 +1070,7 @@ ORDER BY id`
 			CategoryPaths:   json.RawMessage("[]"),
 			SourceLineSpans: json.RawMessage(spans),
 			SemanticPayload: payload,
+			Keywords:        kw,
 		})
 	}
 	return out, rows.Err()
