@@ -48,51 +48,43 @@ func GetArtifactWiki(c echo.Context) error {
 	shouldIncludeArticle := includeArticle != "0" && includeArticle != "false"
 
 	var (
-		payload     artifactWikiMetricPayload
+		payload     artifactWikiPayload
 		artifactDir string
+		provider    artifactWikiProvider
 		err         error
 	)
-	switch artifactType {
-	case "metric":
-		payload, err = getArtifactWikiMetricPayloadFn(c.Request().Context(), ApiTypes.ProjectDBHandle, logger, artifactID, lang)
-		if err != nil {
-			logger.Error("load metric artifact wiki payload failed", "artifact_id", artifactID, "err", err)
-			return c.JSON(http.StatusInternalServerError, errorResponse{
-				Status:   false,
-				ErrorMsg: "failed to load artifact wiki payload (CWB_KB_AWIKI_020)",
-			})
-		}
-		artifactDir = strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
-		if _, err = artifactWikiPagePath(artifactDir, artifactType, payload.RecordID, payload.ArtifactID, lang); err != nil {
-			return c.JSON(http.StatusBadRequest, errorResponse{
-				Status:   false,
-				ErrorMsg: fmt.Sprintf("invalid artifact wiki path: %v (CWB_KB_AWIKI_021)", err),
-			})
-		}
-	default:
+	provider, ok := getArtifactWikiProvider(artifactType)
+	if !ok {
 		return c.JSON(http.StatusBadRequest, errorResponse{
 			Status:   false,
 			ErrorMsg: fmt.Sprintf("unsupported artifact_type %q (CWB_KB_AWIKI_013)", artifactType),
+		})
+	}
+	payload, err = provider.loadPayload(c.Request().Context(), ApiTypes.ProjectDBHandle, logger, artifactID, lang)
+	if err != nil {
+		logger.Error("load artifact wiki payload failed", "artifact_type", artifactType, "artifact_id", artifactID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to load artifact wiki payload (CWB_KB_AWIKI_020)",
+		})
+	}
+	artifactDir = strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
+	if _, err = artifactWikiPagePath(artifactDir, artifactType, payload.RecordID, payload.ArtifactID, lang); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("invalid artifact wiki path: %v (CWB_KB_AWIKI_021)", err),
 		})
 	}
 
 	var article json.RawMessage
 	fresh := false
 	if shouldIncludeArticle {
-		switch artifactType {
-		case "metric":
-			article, fresh, err = loadOrCreateMetricArtifactWikiArticle(c.Request().Context(), ApiTypes.ProjectDBHandle, logger, artifactDir, payload.RecordID, payload.ArtifactID, lang)
-			if err != nil {
-				logger.Error("load metric artifact wiki article failed", "artifact_id", payload.ArtifactID, "lang", lang, "err", err)
-				return c.JSON(http.StatusInternalServerError, errorResponse{
-					Status:   false,
-					ErrorMsg: "failed to load artifact wiki article (CWB_KB_AWIKI_022)",
-				})
-			}
-		default:
+		article, fresh, err = loadOrCreateArtifactWikiArticle(c.Request().Context(), ApiTypes.ProjectDBHandle, logger, artifactDir, artifactType, payload, lang)
+		if err != nil {
+			logger.Error("load artifact wiki article failed", "artifact_type", artifactType, "artifact_id", payload.ArtifactID, "lang", lang, "err", err)
 			return c.JSON(http.StatusInternalServerError, errorResponse{
 				Status:   false,
-				ErrorMsg: "failed to generate artifact wiki article (CWB_KB_AWIKI_025)",
+				ErrorMsg: "failed to load artifact wiki article (CWB_KB_AWIKI_022)",
 			})
 		}
 	}
@@ -126,20 +118,20 @@ func artifactWikiPagePath(artifactDir, artifactType string, recordID int64, arti
 	return filepath.Join(recordDir, name), nil
 }
 
-func buildArtifactWikiMetricPayload(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactID, lang string) (artifactWikiMetricPayload, error) {
+func buildArtifactWikiMetricPayload(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactID, lang string) (artifactWikiPayload, error) {
 	mctx, err := compileMetricWikiContext(db, 0, artifactID)
 	if err != nil {
-		return artifactWikiMetricPayload{}, err
+		return artifactWikiPayload{}, err
 	}
 	recordJSON, err := json.Marshal(mctx.Metric)
 	if err != nil {
-		return artifactWikiMetricPayload{}, err
+		return artifactWikiPayload{}, err
 	}
 	docJSON, err := json.Marshal(mctx.Document)
 	if err != nil {
-		return artifactWikiMetricPayload{}, err
+		return artifactWikiPayload{}, err
 	}
-	return artifactWikiMetricPayload{
+	return artifactWikiPayload{
 		RecordID:       mctx.RecordID,
 		ArtifactID:     mctx.MetricID,
 		Record:         json.RawMessage(recordJSON),
@@ -216,6 +208,59 @@ func loadOrCreateMetricArtifactWikiArticle(ctx context.Context, db *sql.DB, logg
 	}
 
 	translatedArticle, err := translateArtifactWikiMetricArticleFn(ctx, logger, json.RawMessage(englishArticle), lang)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := saveMetricWikiPage(targetPath, translatedArticle); err != nil {
+		return nil, false, err
+	}
+	return translatedArticle, true, nil
+}
+
+func loadOrCreateArtifactWikiArticle(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactDir, artifactType string, payload artifactWikiPayload, lang string) (json.RawMessage, bool, error) {
+	if artifactType == "metric" {
+		return loadOrCreateMetricArtifactWikiArticle(ctx, db, logger, artifactDir, payload.RecordID, payload.ArtifactID, lang)
+	}
+
+	targetPath, err := artifactWikiPagePath(artifactDir, artifactType, payload.RecordID, payload.ArtifactID, lang)
+	if err != nil {
+		return nil, false, err
+	}
+	if article, readErr := os.ReadFile(targetPath); readErr == nil {
+		return json.RawMessage(article), false, nil
+	} else if !os.IsNotExist(readErr) {
+		return nil, false, readErr
+	}
+
+	englishPath, err := artifactWikiPagePath(artifactDir, artifactType, payload.RecordID, payload.ArtifactID, "en")
+	if err != nil {
+		return nil, false, err
+	}
+	var englishArticle json.RawMessage
+	if article, readErr := os.ReadFile(englishPath); readErr == nil {
+		englishArticle = json.RawMessage(article)
+	} else if !os.IsNotExist(readErr) {
+		return nil, false, readErr
+	} else {
+		englishArticle, err = buildGenericArtifactWikiArticleFn(ctx, logger, payload, artifactType, "en")
+		if err != nil {
+			return nil, false, err
+		}
+		if err := saveMetricWikiPage(englishPath, englishArticle); err != nil {
+			return nil, false, err
+		}
+	}
+
+	if lang == "en" {
+		if targetPath != englishPath {
+			if err := saveMetricWikiPage(targetPath, englishArticle); err != nil {
+				return nil, false, err
+			}
+		}
+		return englishArticle, true, nil
+	}
+
+	translatedArticle, err := translateGenericArtifactWikiArticleFn(ctx, logger, englishArticle, lang)
 	if err != nil {
 		return nil, false, err
 	}

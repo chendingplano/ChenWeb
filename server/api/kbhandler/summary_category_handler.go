@@ -262,6 +262,11 @@ func readSummaryArtifactFile(path string) (parsedSummaryFile, error) {
 		return parsedSummaryFile{}, err
 	}
 	out.summaryText = strings.TrimSpace(strings.Join(summaryLines, "\n"))
+	if out.seqNo <= 0 {
+		if seq, ok := parseSummaryArtifactSeq(path, out.summaryID); ok {
+			out.seqNo = seq
+		}
+	}
 	if out.keywords == nil {
 		out.keywords = []string{}
 	}
@@ -305,6 +310,37 @@ func parseQuotedStringArray(raw string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+func parseSummaryArtifactSeq(path string, summaryID string) (int, bool) {
+	if summaryID != "" {
+		parts := strings.Split(strings.TrimSpace(summaryID), "_")
+		if len(parts) >= 3 {
+			raw := strings.TrimSpace(parts[len(parts)-1])
+			if raw != "" {
+				if seq, err := strconv.Atoi(strings.TrimLeft(raw, "0")); err == nil && seq > 0 {
+					return seq, true
+				}
+				if seq, err := strconv.Atoi(raw); err == nil && seq > 0 {
+					return seq, true
+				}
+			}
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	parts := strings.Split(base, "_")
+	if len(parts) >= 3 {
+		raw := strings.TrimSpace(parts[len(parts)-1])
+		if raw != "" {
+			if seq, err := strconv.Atoi(strings.TrimLeft(raw, "0")); err == nil && seq > 0 {
+				return seq, true
+			}
+			if seq, err := strconv.Atoi(raw); err == nil && seq > 0 {
+				return seq, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func fetchSummaryArtifactMeta(db *sql.DB, inputTable string, stagingExpr string, parserExpr string, recordID int64) (summaryArtifactMeta, error) {

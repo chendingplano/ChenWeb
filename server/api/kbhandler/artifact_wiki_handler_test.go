@@ -166,7 +166,7 @@ func TestGetArtifactWikiRequiresArtifactID(t *testing.T) {
 
 func TestGetArtifactWikiRejectsUnsupportedArtifactType(t *testing.T) {
 	t.Setenv("ARTIFACT_DIR", t.TempDir())
-	c, rec := newArtifactWikiContext(t, "summary", "5_sum_1", "")
+	c, rec := newArtifactWikiContext(t, "mystery", "5_x_1", "")
 	if err := GetArtifactWiki(c); err != nil {
 		t.Fatalf("GetArtifactWiki err = %v", err)
 	}
@@ -350,5 +350,181 @@ func TestGetArtifactWikiGeneratesTargetLanguageDirectlyWhenTranslationModelMissi
 	}
 	if string(saved) != string(generatedChineseArticle) {
 		t.Fatalf("saved article = %s, want %s", saved, generatedChineseArticle)
+	}
+}
+
+func TestGetArtifactWikiSupportsNonMetricProvider(t *testing.T) {
+	t.Setenv("ARTIFACT_DIR", t.TempDir())
+
+	origProvider := artifactWikiProviders["summary"]
+	artifactWikiProviders["summary"] = artifactWikiProvider{
+		loadPayload: func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactID, lang string) (artifactWikiPayload, error) {
+			return artifactWikiPayload{
+				RecordID:       7,
+				ArtifactID:     artifactID,
+				Record:         json.RawMessage(`{"summary_id":"7_sum_1","summary_text":"Energy summary"}`),
+				SourceDocument: json.RawMessage(`{"record_id":7,"title":"doc.pdf","file_name":"doc.pdf","type":"pdf"}`),
+				Generated: artifactWikiGeneratedMeta{
+					Lang:       "en",
+					SourceHash: "sha256:test",
+				},
+			}, nil
+		},
+	}
+	defer func() { artifactWikiProviders["summary"] = origProvider }()
+
+	origBuild := buildGenericArtifactWikiArticleFn
+	buildGenericArtifactWikiArticleFn = func(ctx context.Context, logger ApiTypes.JimoLogger, payload artifactWikiPayload, artifactType, lang string) (json.RawMessage, error) {
+		return json.RawMessage(`{"title":"Energy summary","lead":"A summary page."}`), nil
+	}
+	defer func() { buildGenericArtifactWikiArticleFn = origBuild }()
+
+	c, rec := newArtifactWikiContext(t, "summary", "7_sum_1", "en")
+	if err := GetArtifactWiki(c); err != nil {
+		t.Fatalf("GetArtifactWiki err = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp artifactWikiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ArtifactType != "summary" || resp.ArtifactID != "7_sum_1" {
+		t.Fatalf("artifact identity = %s/%s", resp.ArtifactType, resp.ArtifactID)
+	}
+	if string(resp.Record) != `{"summary_id":"7_sum_1","summary_text":"Energy summary"}` {
+		t.Fatalf("record = %s", resp.Record)
+	}
+}
+
+func TestGetArtifactWikiNonMetricCacheMissGenerates(t *testing.T) {
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+	if err := os.MkdirAll(filepath.Join(artifactDir, "0", "7"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origProvider := artifactWikiProviders["summary"]
+	artifactWikiProviders["summary"] = artifactWikiProvider{
+		loadPayload: func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactID, lang string) (artifactWikiPayload, error) {
+			return artifactWikiPayload{
+				RecordID:       7,
+				ArtifactID:     artifactID,
+				Record:         json.RawMessage(`{"summary_id":"7_sum_1","summary_text":"Energy summary"}`),
+				SourceDocument: json.RawMessage(`{"record_id":7,"title":"doc.pdf","file_name":"doc.pdf","type":"pdf"}`),
+				Generated: artifactWikiGeneratedMeta{
+					Lang:       "en",
+					SourceHash: "sha256:test",
+				},
+			}, nil
+		},
+	}
+	defer func() { artifactWikiProviders["summary"] = origProvider }()
+
+	origBuild := buildGenericArtifactWikiArticleFn
+	buildGenericArtifactWikiArticleFn = func(ctx context.Context, logger ApiTypes.JimoLogger, payload artifactWikiPayload, artifactType, lang string) (json.RawMessage, error) {
+		if artifactType != "summary" {
+			t.Fatalf("artifactType = %q, want summary", artifactType)
+		}
+		if lang != "en" {
+			t.Fatalf("lang = %q, want en", lang)
+		}
+		return json.RawMessage(`{"title":"Energy summary","lead":"A generated summary page."}`), nil
+	}
+	defer func() { buildGenericArtifactWikiArticleFn = origBuild }()
+
+	c, rec := newArtifactWikiContext(t, "summary", "7_sum_1", "en")
+	if err := GetArtifactWiki(c); err != nil {
+		t.Fatalf("GetArtifactWiki err = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp artifactWikiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Fresh {
+		t.Fatalf("fresh = %v, want true", resp.Fresh)
+	}
+	if string(resp.Article) != `{"title":"Energy summary","lead":"A generated summary page."}` {
+		t.Fatalf("article = %s", resp.Article)
+	}
+	saved, err := os.ReadFile(filepath.Join(artifactDir, "0", "7", "wikipage_summary_7_sum_1.en.json"))
+	if err != nil {
+		t.Fatalf("generated article not saved: %v", err)
+	}
+	if string(saved) != `{"title":"Energy summary","lead":"A generated summary page."}` {
+		t.Fatalf("saved article = %s", saved)
+	}
+}
+
+func TestGetArtifactWikiNonMetricTranslatesFromEnglishCache(t *testing.T) {
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+	t.Setenv("TRANSLATION_MODEL_NAME", "configured-translation-model")
+
+	recordDir := filepath.Join(artifactDir, "0", "7")
+	if err := os.MkdirAll(recordDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	englishArticle := json.RawMessage(`{"title":"Energy summary","lead":"English page."}`)
+	if err := os.WriteFile(filepath.Join(recordDir, "wikipage_summary_7_sum_1.en.json"), englishArticle, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origProvider := artifactWikiProviders["summary"]
+	artifactWikiProviders["summary"] = artifactWikiProvider{
+		loadPayload: func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactID, lang string) (artifactWikiPayload, error) {
+			return artifactWikiPayload{
+				RecordID:       7,
+				ArtifactID:     artifactID,
+				Record:         json.RawMessage(`{"summary_id":"7_sum_1","summary_text":"Energy summary"}`),
+				SourceDocument: json.RawMessage(`{"record_id":7,"title":"doc.pdf","file_name":"doc.pdf","type":"pdf"}`),
+				Generated: artifactWikiGeneratedMeta{
+					Lang:       "zh-cn",
+					SourceHash: "sha256:test",
+				},
+			}, nil
+		},
+	}
+	defer func() { artifactWikiProviders["summary"] = origProvider }()
+
+	origTranslate := translateGenericArtifactWikiArticleFn
+	translateGenericArtifactWikiArticleFn = func(ctx context.Context, logger ApiTypes.JimoLogger, article json.RawMessage, targetLang string) (json.RawMessage, error) {
+		if string(article) != string(englishArticle) {
+			t.Fatalf("translate source article = %s, want %s", article, englishArticle)
+		}
+		if targetLang != "zh-cn" {
+			t.Fatalf("targetLang = %q, want zh-cn", targetLang)
+		}
+		return json.RawMessage(`{"title":"能源总结","lead":"中文页面。"}`), nil
+	}
+	defer func() { translateGenericArtifactWikiArticleFn = origTranslate }()
+
+	c, rec := newArtifactWikiContext(t, "summary", "7_sum_1", "zh-cn")
+	if err := GetArtifactWiki(c); err != nil {
+		t.Fatalf("GetArtifactWiki err = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp artifactWikiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if string(resp.Article) != `{"title":"能源总结","lead":"中文页面。"}` {
+		t.Fatalf("article = %s", resp.Article)
+	}
+	saved, err := os.ReadFile(filepath.Join(recordDir, "wikipage_summary_7_sum_1.zh-cn.json"))
+	if err != nil {
+		t.Fatalf("translated article not saved: %v", err)
+	}
+	if string(saved) != `{"title":"能源总结","lead":"中文页面。"}` {
+		t.Fatalf("saved article = %s", saved)
 	}
 }
