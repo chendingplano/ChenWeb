@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -79,14 +80,20 @@ func GetMetricWiki(c echo.Context) error {
 		})
 	}
 
+	needsRefresh := false
 	// Cache hit: return the saved page verbatim.
 	if data, err := os.ReadFile(pagePath); err == nil {
-		logger.Info("metric wiki cache hit", "metric_id", metricID, "lang", lang, "path", pagePath)
-		return c.JSON(http.StatusOK, metricWikiResponse{
-			Status:    true,
-			Generated: false,
-			Page:      json.RawMessage(data),
-		})
+		if shouldRefreshMetricWikiCachedPageForLanguage(data, lang) {
+			needsRefresh = true
+			logger.Info("metric wiki cache hit needs language refresh", "metric_id", metricID, "lang", lang, "path", pagePath)
+		} else {
+			logger.Info("metric wiki cache hit", "metric_id", metricID, "lang", lang, "path", pagePath)
+			return c.JSON(http.StatusOK, metricWikiResponse{
+				Status:    true,
+				Generated: false,
+				Page:      json.RawMessage(data),
+			})
+		}
 	} else if !os.IsNotExist(err) {
 		logger.Error("read metric wiki page failed", "metric_id", metricID, "path", pagePath, "err", err)
 		return c.JSON(http.StatusInternalServerError, errorResponse{
@@ -104,8 +111,10 @@ func GetMetricWiki(c echo.Context) error {
 	defer unlock()
 
 	// Double-check: another request may have generated the page while we waited.
-	if data, err := os.ReadFile(pagePath); err == nil {
-		return c.JSON(http.StatusOK, metricWikiResponse{Status: true, Generated: false, Page: json.RawMessage(data)})
+	if !needsRefresh {
+		if data, err := os.ReadFile(pagePath); err == nil {
+			return c.JSON(http.StatusOK, metricWikiResponse{Status: true, Generated: false, Page: json.RawMessage(data)})
+		}
 	}
 
 	logger.Info("metric wiki cache miss, generating", "metric_id", metricID, "lang", lang)
@@ -190,4 +199,41 @@ func parseMetricID(metricID string) (recordID int64, seqno int, err error) {
 
 func canonicalMetricID(recordID int64, seqno int) string {
 	return fmt.Sprintf("%d_mtc_%d", recordID, seqno)
+}
+
+func shouldRefreshMetricWikiCachedPageForLanguage(data []byte, lang string) bool {
+	lang = strings.TrimSpace(strings.ToLower(lang))
+	if lang != "zh-cn" {
+		return false
+	}
+
+	var page metricWikiPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return false
+	}
+
+	prose := strings.Join([]string{
+		page.Lead,
+		page.Definition,
+		page.Background,
+		page.HowUsed,
+		page.ChoosingValues,
+		page.InThisCorpus.SourceExcerpt,
+		page.InThisCorpus.ChunkSummary,
+	}, "\n")
+
+	hasHan := false
+	hasASCIIWord := false
+	for _, r := range prose {
+		switch {
+		case unicode.Is(unicode.Han, r):
+			hasHan = true
+		case r <= unicode.MaxASCII && unicode.IsLetter(r):
+			hasASCIIWord = true
+		}
+		if hasHan {
+			return false
+		}
+	}
+	return hasASCIIWord
 }

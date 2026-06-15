@@ -18,6 +18,7 @@
 	import KbImportView from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 	import MetricWikiView from '$lib/components/home3/metric-wiki-view.svelte';
+	import ArtifactWikiPage from '$lib/components/home3/artifact-wiki-page.svelte';
 	import ProvisionMgmtView from '$lib/components/home3/provision-mgmt-view.svelte';
 	import InputsMgmtView from '$lib/components/home3/inputs-mgmt-view.svelte';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
@@ -52,6 +53,7 @@
 		| 'kb-input-details'
 		| 'kb-metrics'
 		| 'kb-metric-wiki'
+		| 'kb-artifact-wiki'
 		| 'kb-doc-structure'
 		| 'kb-scene-blocks'
 		| 'kb-products'
@@ -247,6 +249,9 @@
 	);
 	let searchQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
 	let metricWikiId = $derived(page.url.searchParams.get('metric_id')?.trim() ?? '');
+	let artifactWikiType = $derived(page.url.searchParams.get('artifact_type')?.trim() ?? '');
+	let artifactWikiId = $derived(page.url.searchParams.get('artifact_id')?.trim() ?? '');
+	let artifactWikiLang = $derived(page.url.searchParams.get('lang')?.trim() ?? 'en');
 	let searchPageNumber = $derived.by(() => {
 		const rawPage = Number(page.url.searchParams.get('page') ?? '1');
 		return Number.isFinite(rawPage) ? Math.max(1, Math.trunc(rawPage)) : 1;
@@ -254,7 +259,7 @@
 
 	// Sections that are reachable by deep link / navigation but are not menu items
 	// (e.g. the metric wiki opened from a search result).
-	const virtualSections: KbSectionId[] = ['kb-metric-wiki'];
+	const virtualSections: KbSectionId[] = ['kb-metric-wiki', 'kb-artifact-wiki'];
 
 	$effect(() => {
 		const found =
@@ -292,6 +297,7 @@
 		activeSection !== 'kb-search' &&
 			activeSection !== 'kb-llm-wiki-v3' &&
 			activeSection !== 'kb-metric-wiki' &&
+			activeSection !== 'kb-artifact-wiki' &&
 			activeSection !== 'kb-category-review' &&
 			!isUnderConstructionKnowledgeSection(activeSection)
 	);
@@ -626,6 +632,19 @@
 					<MetricWikiView {darkMode} metricId={metricWikiId} />
 				{:else}
 					<KnowledgeStoreView {darkMode} />
+				{/if}
+			{:else if activeSection === 'kb-artifact-wiki'}
+				{#if artifactWikiType && artifactWikiId}
+					<ArtifactWikiPage
+						{darkMode}
+						artifactType={artifactWikiType}
+						artifactId={artifactWikiId}
+						lang={artifactWikiLang}
+					/>
+				{:else}
+					<div class="flex h-full items-center justify-center p-8" style="color:{textSecondary};">
+						Artifact wiki for <code>{artifactWikiType || 'unknown'}</code> is not wired yet.
+					</div>
 				{/if}
 			{:else if activeSection === 'kb-doc-structure'}
 				<DocStructureView {darkMode} />

@@ -1,6 +1,9 @@
 package kbhandler
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func wikiStrPtr(s string) *string { return &s }
 
@@ -92,5 +95,19 @@ func TestParseMetricWikiProse(t *testing.T) {
 	}
 	if len(prose.RelatedMetrics) != 2 || prose.RelatedMetrics[0] != "A" || prose.RelatedMetrics[1] != "B" {
 		t.Errorf("related = %v, want [A B] (empties dropped)", prose.RelatedMetrics)
+	}
+}
+
+func TestMetricWikiPromptTextIncludesRequestedOutputLanguage(t *testing.T) {
+	t.Setenv("WIKIPAGE_CREATION_PROMPT", "")
+
+	zhPrompt := metricWikiPromptText("zh-cn")
+	if !strings.Contains(zhPrompt, "Simplified Chinese (zh-CN)") {
+		t.Fatalf("zh prompt missing Chinese instruction: %q", zhPrompt)
+	}
+
+	enPrompt := metricWikiPromptText("en")
+	if !strings.Contains(enPrompt, "human-readable prose fields in English") {
+		t.Fatalf("en prompt missing English instruction: %q", enPrompt)
 	}
 }

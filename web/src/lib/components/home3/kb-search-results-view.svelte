@@ -12,7 +12,7 @@
 		type KbSearchResponse,
 		type KbSearchResult
 	} from '$lib/services/kbArtifactSearch';
-	import { metricIdFromArtifactId } from '$lib/services/metricWikiService';
+	import { buildArtifactWikiHref } from '$lib/services/artifactWikiService';
 	import { kbSearchArtifactOptions } from '$lib/components/home3/kb-search-lab-state';
 	import {
 		buildKbSearchPaginationItems,
@@ -116,18 +116,21 @@
 		return typeof result.score === 'number' ? result.score.toFixed(3) : '';
 	}
 
-	// resultHref links a result to its detail page. Metric results open their
-	// wiki page (lazily generated on first view); other types keep the existing
-	// behaviour of linking back to the current search.
+	// resultHref links a result to its generic wiki page whenever the search row
+	// has both artifact_type and artifact_id. Unsupported rows fall back to the
+	// current search page.
 	function resultHref(result: KbSearchResult): string {
-		const isMetric =
-			String(result.artifact_type ?? payload?.artifact_type ?? artifactType).toLowerCase() ===
-			'metric';
-		if (isMetric) {
-			const metricId = metricIdFromArtifactId(result.artifact_id);
-			if (metricId) {
-				return `/home3/knowledge?section=kb-metric-wiki&metric_id=${encodeURIComponent(metricId)}&dark=${darkMode ? '1' : '0'}`;
-			}
+		const resolvedArtifactType = String(
+			result.artifact_type ?? payload?.artifact_type ?? artifactType
+		).trim();
+		const resolvedArtifactID = String(result.artifact_id ?? '').trim();
+		if (resolvedArtifactType && resolvedArtifactID) {
+			return buildArtifactWikiHref({
+				artifactType: resolvedArtifactType,
+				artifactId: resolvedArtifactID,
+				lang: currentLocale,
+				darkMode
+			});
 		}
 		return `/home3/knowledge?section=kb-search&q=${encodeURIComponent(submittedQuery)}`;
 	}

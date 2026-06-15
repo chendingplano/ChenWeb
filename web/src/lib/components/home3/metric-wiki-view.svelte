@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { getMetricWiki, type MetricWikiPage } from '$lib/services/metricWikiService';
+	import { metricWikiCopyForLang } from './metric-wiki-i18n';
 
 	let {
 		metricId,
 		darkMode = true,
-		lang
-	}: { metricId: string; darkMode?: boolean; lang?: string } = $props();
+		lang,
+		showInfobox = true
+	}: { metricId: string; darkMode?: boolean; lang?: string; showInfobox?: boolean } = $props();
 
 	let page = $state<MetricWikiPage | null>(null);
 	let loading = $state(true);
@@ -20,6 +22,7 @@
 	let inkSoft = $derived(darkMode ? 'oklch(72% 0.02 250)' : 'oklch(46% 0.02 250)');
 	let accent = $derived(darkMode ? 'oklch(74% 0.16 190)' : 'oklch(48% 0.12 190)');
 	let accentTint = $derived(darkMode ? 'oklch(28% 0.05 190)' : 'oklch(95% 0.03 190)');
+	let copy = $derived(metricWikiCopyForLang(lang));
 
 	async function load() {
 		loading = true;
@@ -50,11 +53,11 @@
 	let proseSections = $derived.by<Section[]>(() => {
 		if (!page) return [];
 		const out: Section[] = [];
-		if (page.definition) out.push({ heading: 'Definition', body: page.definition });
-		if (page.background) out.push({ heading: 'Background', body: page.background, general: true });
-		if (page.how_used) out.push({ heading: 'How it is used', body: page.how_used, general: true });
+		if (page.definition) out.push({ heading: copy.definition, body: page.definition });
+		if (page.background) out.push({ heading: copy.background, body: page.background, general: true });
+		if (page.how_used) out.push({ heading: copy.howUsed, body: page.how_used, general: true });
 		if (page.choosing_values)
-			out.push({ heading: 'Choosing values', body: page.choosing_values, general: true });
+			out.push({ heading: copy.choosingValues, body: page.choosing_values, general: true });
 		return out;
 	});
 
@@ -67,13 +70,13 @@
 			const v = value === undefined || value === null ? '' : String(value).trim();
 			if (v) rows.push({ label, value: v });
 		};
-		add('Value', ib.value);
-		add('Unit', ib.unit);
-		add('Range type', ib.range_type);
-		add('Threshold / target', ib.threshold_or_target);
-		add('Measurement frequency', ib.measurement_frequency);
-		add('Subject', ib.subject);
-		if (typeof ib.confidence === 'number') add('Confidence', ib.confidence.toFixed(2));
+		add(copy.value, ib.value);
+		add(copy.unit, ib.unit);
+		add(copy.rangeType, ib.range_type);
+		add(copy.thresholdOrTarget, ib.threshold_or_target);
+		add(copy.measurementFrequency, ib.measurement_frequency);
+		add(copy.subject, ib.subject);
+		if (typeof ib.confidence === 'number') add(copy.confidence, ib.confidence.toFixed(2));
 		return rows;
 	});
 </script>
@@ -85,26 +88,31 @@
 	{#if loading}
 		<div class="state">
 			<div class="spinner" aria-hidden="true"></div>
-			<p class="state-title">Building this page…</p>
-			<p class="state-sub">Compiling what the knowledge base knows about this metric.</p>
+			<p class="state-title">{copy.buildingTitle}</p>
+			<p class="state-sub">{copy.buildingSub}</p>
+			<div class="skeleton" aria-hidden="true">
+				<span class="skeleton-line wide"></span>
+				<span class="skeleton-line"></span>
+				<span class="skeleton-line narrow"></span>
+			</div>
 		</div>
 	{:else if error}
 		<div class="state">
-			<p class="state-title error">Could not load this page</p>
+			<p class="state-title error">{copy.loadErrorTitle}</p>
 			<p class="state-sub">{error}</p>
-			<button class="retry" onclick={load}>Try again</button>
+			<button class="retry" onclick={load}>{copy.retry}</button>
 		</div>
 	{:else if page}
 		<article class="article">
 			<header class="head">
-				<p class="eyebrow">SemOS metric</p>
+				<p class="eyebrow">{copy.eyebrow}</p>
 				<h1>{page.title}</h1>
 				{#if page.in_this_corpus?.source_document?.title}
-					<p class="source">from {page.in_this_corpus.source_document.title}</p>
+					<p class="source">{copy.sourcePrefix} {page.in_this_corpus.source_document.title}</p>
 				{/if}
 			</header>
 
-			<div class="layout">
+			<div class="layout" class:no-infobox={!showInfobox}>
 				<div class="main">
 					{#if page.lead}
 						<p class="lead">{page.lead}</p>
@@ -115,8 +123,8 @@
 							<h2>
 								{section.heading}
 								{#if section.general}
-									<span class="tag" title="General background, not specific to this corpus"
-										>general background</span
+									<span class="tag" title={copy.generalBackgroundTitle}
+										>{copy.generalBackground}</span
 									>
 								{/if}
 							</h2>
@@ -126,7 +134,7 @@
 
 					{#if page.in_this_corpus?.source_excerpt || page.in_this_corpus?.chunk_summary}
 						<section class="block">
-							<h2>In this corpus <span class="tag grounded">grounded</span></h2>
+							<h2>{copy.inThisCorpus} <span class="tag grounded">{copy.grounded}</span></h2>
 							{#if page.in_this_corpus.source_excerpt}
 								<blockquote>{page.in_this_corpus.source_excerpt}</blockquote>
 							{/if}
@@ -134,14 +142,14 @@
 								<p>{page.in_this_corpus.chunk_summary}</p>
 							{/if}
 							{#if page.in_this_corpus.source_document?.file_name}
-								<p class="cite">Source: {page.in_this_corpus.source_document.file_name}</p>
+								<p class="cite">{copy.sourceLabel} {page.in_this_corpus.source_document.file_name}</p>
 							{/if}
 						</section>
 					{/if}
 
 					{#if page.related_metrics && page.related_metrics.length}
 						<section class="block">
-							<h2>Related metrics</h2>
+							<h2>{copy.relatedMetrics}</h2>
 							<ul class="related">
 								{#each page.related_metrics as rel}
 									<li>{rel}</li>
@@ -151,25 +159,27 @@
 					{/if}
 				</div>
 
-				<aside class="infobox">
-					<div class="infobox-title">{page.title}</div>
-					{#if infoRows.length}
-						<dl>
-							{#each infoRows as row}
-								<dt>{row.label}</dt>
-								<dd>{row.value}</dd>
-							{/each}
-						</dl>
-					{:else}
-						<p class="infobox-empty">No structured values recorded.</p>
-					{/if}
-				</aside>
+				{#if showInfobox}
+					<aside class="infobox">
+						<div class="infobox-title">{page.title}</div>
+						{#if infoRows.length}
+							<dl>
+								{#each infoRows as row}
+									<dt>{row.label}</dt>
+									<dd>{row.value}</dd>
+								{/each}
+							</dl>
+						{:else}
+							<p class="infobox-empty">{copy.noStructuredValues}</p>
+						{/if}
+					</aside>
+				{/if}
 			</div>
 
 			<footer class="foot">
-				<span>metric_id {page.metric_id}</span>
-				{#if page.generated?.model}<span>generated by {page.generated.model}</span>{/if}
-				{#if generated}<span>freshly generated</span>{/if}
+				<span>{copy.metricIdLabel} {page.metric_id}</span>
+				{#if page.generated?.model}<span>{copy.generatedByPrefix} {page.generated.model}</span>{/if}
+				{#if generated}<span>{copy.freshlyGenerated}</span>{/if}
 			</footer>
 		</article>
 	{/if}
@@ -220,6 +230,9 @@
 		grid-template-columns: 1fr 300px;
 		gap: 2rem;
 		align-items: start;
+	}
+	.layout.no-infobox {
+		grid-template-columns: minmax(0, 1fr);
 	}
 	.lead {
 		font-size: 1.1rem;
@@ -376,9 +389,44 @@
 		border-top-color: var(--accent);
 		animation: spin 0.8s linear infinite;
 	}
+	.skeleton {
+		width: min(34rem, 100%);
+		display: grid;
+		gap: 0.6rem;
+		margin-top: 0.9rem;
+	}
+	.skeleton-line {
+		height: 0.7rem;
+		border-radius: 999px;
+		background: linear-gradient(
+			90deg,
+			color-mix(in oklch, var(--surface) 72%, transparent) 0%,
+			color-mix(in oklch, var(--accent-tint) 78%, white 8%) 50%,
+			color-mix(in oklch, var(--surface) 72%, transparent) 100%
+		);
+		background-size: 220% 100%;
+		animation: shimmer 1.35s ease-in-out infinite;
+	}
+	.skeleton-line.wide {
+		width: 100%;
+	}
+	.skeleton-line {
+		width: 82%;
+	}
+	.skeleton-line.narrow {
+		width: 64%;
+	}
 	@keyframes spin {
 		to {
 			transform: rotate(360deg);
+		}
+	}
+	@keyframes shimmer {
+		0% {
+			background-position: 100% 0;
+		}
+		100% {
+			background-position: -100% 0;
 		}
 	}
 	@media (max-width: 760px) {

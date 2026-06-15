@@ -81,13 +81,13 @@ func buildMetricWikiPage(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLo
 }
 
 // generateMetricWikiPage calls the configured LLM to write the prose sections,
-// assembles them with the grounded fields, and returns the marshaled page JSON.
-// English is always generated; lang is recorded in the page metadata.
+// assembles them with the grounded fields, and returns the marshaled page JSON
+// in the requested language.
 func generateMetricWikiPage(ctx context.Context, logger ApiTypes.JimoLogger, mctx metricWikiContext, lang string) (json.RawMessage, error) {
 	if lang == "" {
 		lang = "en"
 	}
-	prompt := metricWikiPromptText()
+	prompt := metricWikiPromptText(lang)
 	inputText, err := metricWikiFactsJSON(mctx)
 	if err != nil {
 		return nil, fmt.Errorf("encode metric facts: %w", err)
@@ -274,15 +274,27 @@ Return ONLY a single JSON object with these string fields (no markdown, no extra
 // metricWikiPromptText returns the generation prompt: a file named by
 // WIKIPAGE_CREATION_PROMPT under prompts/ when set and readable, else the
 // built-in default.
-func metricWikiPromptText() string {
+func metricWikiPromptText(lang string) string {
+	base := metricWikiDefaultPrompt
 	if ref := strings.TrimSpace(os.Getenv("WIKIPAGE_CREATION_PROMPT")); ref != "" {
 		if bs, err := os.ReadFile(filepath.Join("prompts", ref)); err == nil {
 			if text := strings.TrimSpace(string(bs)); text != "" {
-				return text
+				base = text
 			}
 		}
 	}
-	return metricWikiDefaultPrompt
+	return strings.TrimSpace(base) + "\n\n" + metricWikiOutputLanguageInstruction(lang)
+}
+
+func metricWikiOutputLanguageInstruction(lang string) string {
+	switch strings.TrimSpace(strings.ToLower(lang)) {
+	case "", "en":
+		return "Output language requirement: write all human-readable prose fields in English."
+	case "zh-cn":
+		return "Output language requirement: write all human-readable prose fields in Simplified Chinese (zh-CN). Do not default to English."
+	default:
+		return fmt.Sprintf("Output language requirement: write all human-readable prose fields in %s.", lang)
+	}
 }
 
 // metricWikiFactsJSON serializes the grounded facts the model is allowed to use.
@@ -343,6 +355,7 @@ func ptrStr(s *string) string {
 	}
 	return strings.TrimSpace(*s)
 }
+
 
 func stringSliceVal(m map[string]any, key string) []string {
 	arr := anySlice(m, key)

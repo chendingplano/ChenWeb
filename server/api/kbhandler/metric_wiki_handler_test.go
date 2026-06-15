@@ -112,6 +112,54 @@ func TestGetMetricWikiCacheMissGenerates(t *testing.T) {
 	}
 }
 
+func TestGetMetricWikiRefreshesStaleChineseCache(t *testing.T) {
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+	recordDir := filepath.Join(artifactDir, "0", "5")
+	if err := os.MkdirAll(recordDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := `{"metric_id":"5_mtc_3","title":"主观评价占比","lead":"The proportion of subjective evaluation is a metric.","generated":{"lang":"zh-cn"}}`
+	if err := os.WriteFile(filepath.Join(recordDir, "wikipage_metric_5_mtc_3.zh-cn.json"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshed := []byte(`{"metric_id":"5_mtc_3","title":"主观评价占比","lead":"主观评价占总评分的20%。","generated":{"lang":"zh-cn"}}`)
+	orig := buildMetricWikiPageFn
+	buildMetricWikiPageFn = func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, recordID int64, metricID, lang string) (json.RawMessage, error) {
+		if lang != "zh-cn" {
+			t.Fatalf("lang = %q, want zh-cn", lang)
+		}
+		return json.RawMessage(refreshed), nil
+	}
+	defer func() { buildMetricWikiPageFn = orig }()
+
+	c, rec := newMetricWikiContext(t, "5_mtc_3", "zh-cn")
+	if err := GetMetricWiki(c); err != nil {
+		t.Fatalf("GetMetricWiki err = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp metricWikiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Generated {
+		t.Fatalf("generated = %v, want true", resp.Generated)
+	}
+	if string(resp.Page) != string(refreshed) {
+		t.Fatalf("page = %s, want %s", resp.Page, refreshed)
+	}
+	saved, err := os.ReadFile(filepath.Join(recordDir, "wikipage_metric_5_mtc_3.zh-cn.json"))
+	if err != nil {
+		t.Fatalf("refreshed page not saved: %v", err)
+	}
+	if string(saved) != string(refreshed) {
+		t.Fatalf("saved = %s, want %s", saved, refreshed)
+	}
+}
+
 func TestGetMetricWikiLegacyIDNormalizesToCanonicalMetricID(t *testing.T) {
 	artifactDir := t.TempDir()
 	t.Setenv("ARTIFACT_DIR", artifactDir)
