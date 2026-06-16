@@ -122,12 +122,17 @@ func indexArtifactsByOverlapAndConnect(ctx context.Context, recordID int64, inpu
 	connectStart := time.Now()
 	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, artifacts, cfg, logger)
 	connectMs := time.Since(connectStart).Milliseconds()
+	categoryPathStart := time.Now()
+	categoryPathCount := indexArtifactsByCategoryPaths(ctx, db, recordID, artifacts, cfg, logger)
+	categoryPathMs := time.Since(categoryPathStart).Milliseconds()
 	if logger != nil {
 		logger.Info(cfg.LogPrefix+" result",
 			"record_id", recordID,
 			"artifacts", len(artifacts),
 			"connected_artifacts", connectedCount,
 			"connected_artifacts_ms", connectMs,
+			"category_path_items", categoryPathCount,
+			"category_path_ms", categoryPathMs,
 			"total_ms", time.Since(start).Milliseconds(),
 		)
 	}

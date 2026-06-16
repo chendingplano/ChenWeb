@@ -886,7 +886,7 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 	s.setDocProcSummaryExtraInfo(nil)
 	s.summaryProgressTracker = nil
 	defer func() { s.summaryProgressTracker = nil }()
-	chunks, err := loadChunksFromArtifactFile(s.ChunkDir, rec.ID, artifactBase+".chunks", lines)
+	chunks, err := s.loadOrBuildChunksForSummaries(ctx, rec, artifactBase, lines)
 	if err != nil {
 		s.failAndPersistSummaries(ctx, rec, inputFilename, start, err)
 		return err
@@ -1072,6 +1072,36 @@ func (s *FixedSizeChunkingService) handleGenerateSummariesLines(ctx context.Cont
 		"summaries_generated": len(allSummaries),
 	})
 	return nil
+}
+
+func (s *FixedSizeChunkingService) loadOrBuildChunksForSummaries(ctx context.Context, rec InputRecord, artifactBase string, lines []Line) ([]Chunk, error) {
+	chunks, err := loadChunksFromArtifactFile(s.ChunkDir, rec.ID, artifactBase+".chunks", lines)
+	if err == nil {
+		return chunks, nil
+	}
+	if !isChunkArtifactNotFoundError(err) {
+		return nil, err
+	}
+
+	chunks, err = BuildChunks(lines, ChunkOptions{ChunkSize: s.ChunkSize, OverlapPercent: s.OverlapPercent})
+	if err != nil {
+		return nil, err
+	}
+	if err := validateChunksNonEmpty(chunks, "built chunks"); err != nil {
+		return nil, err
+	}
+	storeChunksInContext(ctx, chunks)
+	if _, err := writeCombinedChunkFile(s.ChunkDir, rec.ID, artifactBase+".chunks", chunks); err != nil {
+		return nil, err
+	}
+	if s.Logger != nil {
+		s.Logger.Info("summary generation built missing chunk artifact",
+			"record_id", rec.ID,
+			"artifact_base", artifactBase,
+			"num_chunks", len(chunks),
+		)
+	}
+	return chunks, nil
 }
 
 // ParseBlockBufferLines converts a BlockBuffer to a sorted, deduplicated slice
@@ -2655,6 +2685,10 @@ func buildFixedSizeArtifactBase(rec InputRecord, inputFilename string) string {
 		stagingName = inputFilename
 	}
 	return buildChunkArtifactBaseName(stagingName, rec.ParserName)
+}
+
+func isChunkArtifactNotFoundError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "(MID_26052331)")
 }
 
 func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string, lines []Line) ([]Chunk, error) {

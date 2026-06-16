@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"os"
@@ -10,10 +11,12 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
@@ -378,6 +381,215 @@ func TestUpsertMetricCategoryInstancesResolvesAndUpserts(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
+}
+
+func TestSearchArtifactIndexersWriteCategoryTreeFiles(t *testing.T) {
+	type testCase struct {
+		name          string
+		cfg           artifactIndexConfig
+		loadArtifacts func(context.Context, *sql.DB, int64) ([]indexedArtifact, error)
+		run           func(context.Context, int64, []Block, ApiTypes.JimoLogger)
+		artifactID    string
+		updateKey     any
+		sourceSpans   string
+		rowQuery      string
+		rowValues     []any
+		leafFile      string
+	}
+
+	testCases := []testCase{
+		{
+			name:        "scenes",
+			cfg:         sceneBlockIndexConfig,
+			loadArtifacts: loadIndexedSceneBlocksForRecord,
+			run:         IndexSceneBlocksForRecord,
+			artifactID:  "100_scn_1",
+			sourceSpans: `["15"]`,
+			rowQuery:    "SELECT object_id,\\s+COALESCE\\(line_spans, '\\[\\]'::jsonb\\),\\s+COALESCE\\(search_document, ''\\)",
+			rowValues:   []any{"100_scn_1", []byte(`["15"]`), "Scene search document"},
+			leafFile:    filepath.Join("public_health", "scenes.txt"),
+		},
+		{
+			name:          "summaries",
+			cfg:           summaryIndexConfig,
+			loadArtifacts: loadIndexedSummariesForRecord,
+			run:           IndexSummariesForRecord,
+			artifactID:    "100_sum_1",
+			updateKey:     "100_1_0001",
+			sourceSpans:   `["15"]`,
+			rowQuery:      "SELECT summary_id, summary_seq_no, COALESCE\\(source_line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\)",
+			rowValues:     []any{"100_1_0001", 1, []byte(`["15"]`), "Summary search document"},
+			leafFile:      filepath.Join("public_health", "summaries.txt"),
+		},
+		{
+			name:          "topics",
+			cfg:           topicIndexConfig,
+			loadArtifacts: loadIndexedTopicsForRecord,
+			run:           IndexTopicsForRecord,
+			artifactID:    "100_tpc_1",
+			updateKey:     "100_1",
+			sourceSpans:   `["15"]`,
+			rowQuery:      "SELECT topic_id, COALESCE\\(source_line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\)",
+			rowValues:     []any{"100_1", []byte(`["15"]`), "Topic search document"},
+			leafFile:      filepath.Join("public_health", "topics.txt"),
+		},
+		{
+			name:          "provisions",
+			cfg:           provisionIndexConfig,
+			loadArtifacts: loadIndexedProvisionsForRecord,
+			run:           IndexProvisionsForRecord,
+			artifactID:    "100_prv_7",
+			updateKey:     7,
+			sourceSpans:   `["15"]`,
+			rowQuery:      "SELECT prov_id, id, COALESCE\\(source_line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\)",
+			rowValues:     []any{"7", int64(7), []byte(`["15"]`), "Provision search document"},
+			leafFile:      filepath.Join("public_health", "provisions.txt"),
+		},
+		{
+			name:          "entities",
+			cfg:           entityIndexConfig,
+			loadArtifacts: loadIndexedEntitiesForRecord,
+			run:           IndexEntitiesForRecord,
+			artifactID:    "100_ent_1",
+			updateKey:     "100_ent_1",
+			sourceSpans:   `["15"]`,
+			rowQuery:      "SELECT entity_id, id, COALESCE\\(line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\)",
+			rowValues:     []any{"100_ent_1", int64(1), []byte(`["15"]`), "Entity search document"},
+			leafFile:      filepath.Join("public_health", "entities.txt"),
+		},
+		{
+			name:          "relations",
+			cfg:           relationIndexConfig,
+			loadArtifacts: loadIndexedRelationsForRecord,
+			run:           IndexRelationsForRecord,
+			artifactID:    "100_rel_1",
+			updateKey:     "100_rel_1",
+			sourceSpans:   `["15"]`,
+			rowQuery:      "SELECT relation_id, id, COALESCE\\(line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\)",
+			rowValues:     []any{"100_rel_1", int64(1), []byte(`["15"]`), "Relation search document"},
+			leafFile:      filepath.Join("public_health", "relations.txt"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			defer db.Close()
+
+			oldDB := ApiTypes.ProjectDBHandle
+			ApiTypes.ProjectDBHandle = db
+			defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+			tmp := t.TempDir()
+			t.Setenv("ARTIFACT_WEB_DIR", tmp)
+
+			mock.ExpectQuery(tc.rowQuery).
+				WithArgs(int64(100)).
+				WillReturnRows(newMockRows(tc.rowValues...))
+
+			expectConnectedArtifactLookups(mock, int64(100), tc.cfg.SelfType)
+
+			updateKey := tc.updateKey
+			if updateKey == nil {
+				updateKey = tc.artifactID
+			}
+			mock.ExpectExec(regexp.QuoteMeta("UPDATE " + tc.cfg.Table + " SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND " + tc.cfg.IDColumn + " = $3")).
+				WithArgs(sqlmock.AnyArg(), int64(100), updateKey).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			mock.ExpectQuery("SELECT COALESCE\\(line_spans, '\\[\\]'::jsonb\\),\\s+COALESCE\\(category_paths, '\\[\\]'::jsonb\\),\\s+COALESCE\\(category_paths_en, '\\[\\]'::jsonb\\)\\s+FROM kb.semantic_projections\\s+WHERE input_record_id = \\$1").
+				WithArgs(int64(100)).
+				WillReturnRows(sqlmock.NewRows([]string{"line_spans", "category_paths", "category_paths_en"}).
+					AddRow(
+						[]byte(`["12-18"]`),
+						[]byte(`[{"category_path":[{"name":"公共卫生","keywords":["公共卫生"],"confidence":0.9}]}]`),
+						[]byte(`[{"category_path":[{"name":"Public Health","keywords":["health"],"confidence":0.95}]}]`),
+					))
+
+			tc.run(context.Background(), 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 15}}}}, nil)
+
+			leafPath := filepath.Join(tmp, tc.leafFile)
+			body, err := os.ReadFile(leafPath)
+			if err != nil {
+				t.Fatalf("read category tree leaf %s: %v", leafPath, err)
+			}
+			if strings.TrimSpace(string(body)) != tc.artifactID {
+				t.Fatalf("%s content=%q, want %q", leafPath, string(body), tc.artifactID)
+			}
+
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
+	}
+}
+
+func expectConnectedArtifactLookups(mock sqlmock.Sqlmock, recordID int64, selfType string) {
+	for _, fam := range artifactConnectedFamilies {
+		if fam.regType == selfType {
+			continue
+		}
+		if fam.regType == searchArtifactSemanticProjection {
+			mock.ExpectQuery("SELECT semantic_proj_id, COALESCE\\(line_spans, '\\[\\]'::jsonb\\)\\s+FROM kb.semantic_projections\\s+WHERE input_record_id = \\$1\\s+ORDER BY id").
+				WithArgs(recordID).
+				WillReturnRows(sqlmock.NewRows([]string{"semantic_proj_id", "line_spans"}).
+					AddRow("100_0_1", []byte(`["12-18"]`)))
+			continue
+		}
+		mock.ExpectQuery("SELECT artifact_id, source_line_spans\\s+FROM kb.search_artifacts\\s+WHERE artifact_type = \\$1 AND input_record_id = \\$2").
+			WithArgs(fam.regType, recordID).
+			WillReturnRows(sqlmock.NewRows([]string{"artifact_id", "source_line_spans"}).
+				AddRow(registryArtifactIDForType(fam.regType, recordID), []byte(`["30"]`)))
+	}
+}
+
+func registryArtifactIDForType(artifactType string, recordID int64) string {
+	switch artifactType {
+	case searchArtifactSummary:
+		return kbsearch.BuildArtifactID(recordID, artifactType, "1")
+	case searchArtifactTopic:
+		return kbsearch.BuildArtifactID(recordID, artifactType, "1")
+	case searchArtifactSceneBlock:
+		return kbsearch.BuildArtifactID(recordID, artifactType, "1")
+	case searchArtifactProvision:
+		return kbsearch.BuildArtifactID(recordID, artifactType, "1")
+	case searchArtifactEntity:
+		return kbsearch.BuildArtifactID(recordID, artifactType, "1")
+	case searchArtifactRelation:
+		return kbsearch.BuildArtifactID(recordID, artifactType, "1")
+	case searchArtifactMetric:
+		return kbsearch.BuildArtifactID(recordID, artifactType, "1")
+	case searchArtifactInventoryItem:
+		return strconv.FormatInt(recordID, 10) + "_inv_1"
+	default:
+		return strconv.FormatInt(recordID, 10) + "_x_1"
+	}
+}
+
+func rowColumns(n int) []string {
+	switch n {
+	case 3:
+		return []string{"c1", "c2", "c3"}
+	case 4:
+		return []string{"c1", "c2", "c3", "c4"}
+	default:
+		out := make([]string, n)
+		for i := range out {
+			out[i] = "c" + strconv.Itoa(i+1)
+		}
+		return out
+	}
+}
+
+func newMockRows(values ...any) *sqlmock.Rows {
+	driverValues := make([]driver.Value, len(values))
+	for i, v := range values {
+		driverValues[i] = v
+	}
+	return sqlmock.NewRows(rowColumns(len(values))).AddRow(driverValues...)
 }
 
 func TestSanitizeTSDictionary(t *testing.T) {

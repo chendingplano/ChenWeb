@@ -1517,6 +1517,61 @@ func TestService_HandleGenerateSummariesInput_WritesSummariesTree(t *testing.T) 
 	}
 }
 
+func TestService_HandleGenerateSummariesInput_BuildsChunksWhenChunkingWasNotRun(t *testing.T) {
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	tmp := t.TempDir()
+	summaryTreeRoot := t.TempDir()
+	input := strings.Join([]string{
+		"1\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tAlpha",
+		"2\t1\tparagraph\tTestFont\t12\t[0,0,1,1]\tBeta",
+	}, "\n")
+
+	st := &fakeStore{rec: InputRecord{
+		ID:              8451,
+		StatusRaw:       "[]",
+		ParserName:      "opendata",
+		StagingFilename: "sample.pdf",
+	}}
+	svc := NewFixedSizeChunkingService(st, nil, nil)
+	svc.ChunkDir = tmp
+	svc.ArtifactWebDir = summaryTreeRoot
+	svc.ChunkSize = 50
+	svc.OverlapPercent = 0
+	svc.SummaryModelName = "summary-model"
+	svc.SummaryPromptText = "summarize chunk"
+	svc.SummaryGroupSize = 4
+	svc.GenerateSummary = func(_ context.Context, _ int64, level int, seqNo int, lines []MarkedLine, _ []SummaryItem) (summaryGenerateResult, error) {
+		if level != 0 {
+			t.Fatalf("unexpected non-leaf summary level=%d seq=%d", level, seqNo)
+		}
+		return summaryGenerateResult{
+			Summary:       "leaf summary",
+			CategoryPaths: []string{"Safety Overview"},
+		}, nil
+	}
+
+	if err := svc.HandleGenerateSummariesInput(context.Background(), 8451, "sample.txt", []byte(input)); err != nil {
+		t.Fatalf("HandleGenerateSummariesInput without chunking: %v", err)
+	}
+
+	recordDir := filepath.Join(tmp, "8", "8451")
+	if _, err := os.Stat(filepath.Join(recordDir, "sample_opendata.chunks")); err != nil {
+		t.Fatalf("missing generated chunk artifact: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(recordDir, "summary_0_0001.txt")); err != nil {
+		t.Fatalf("missing summary artifact: %v", err)
+	}
+
+	treeLeaf := filepath.Join(summaryTreeRoot, "safety_overview", "summaries.txt")
+	treeBody, err := os.ReadFile(treeLeaf)
+	if err != nil {
+		t.Fatalf("read summary tree leaf: %v", err)
+	}
+	if strings.TrimSpace(string(treeBody)) != buildSummaryID(8451, 0, 1) {
+		t.Fatalf("unexpected summary tree content: %q", strings.TrimSpace(string(treeBody)))
+	}
+}
+
 func TestService_HandleGenerateSummariesInput_LeafLinesIncludeSingleOverlap(t *testing.T) {
 	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
