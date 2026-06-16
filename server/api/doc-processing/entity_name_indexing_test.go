@@ -25,12 +25,12 @@ func TestBuildEntityNameGraphConnections(t *testing.T) {
 		{EntityID: "", EntityEN: "Missing ID"},
 	}
 	// "company" resolves; "vendor" is unresolved (absent from the map) and is skipped.
-	categoryIDs := map[string]int64{"company": 5}
+	categories := map[string]resolvedCategory{"company": {ID: 5, Type: "entity", Key: "company"}}
 
-	conns := buildEntityNameGraphConnections(100, rows, categoryIDs)
+	conns := buildEntityNameGraphConnections(100, rows)
 	// ent_1 name edge + ent_1 company edge + ent_2 name edge = 3.
-	if len(conns) != 3 {
-		t.Fatalf("want 3 connections, got %d: %+v", len(conns), conns)
+	if len(conns) != 2 {
+		t.Fatalf("want 2 name connections, got %d: %+v", len(conns), conns)
 	}
 
 	// Edge 1 — name dictionary edge for the first entity.
@@ -43,19 +43,22 @@ func TestBuildEntityNameGraphConnections(t *testing.T) {
 		t.Errorf("name connection wrong: %+v", conns[0])
 	}
 
-	// Edge 2 — belong-to-category edge for the resolved "company" category.
-	if conns[1].SourceType != searchArtifactEntity ||
-		conns[1].SourceID != "100_ent_1" ||
-		conns[1].TargetType != artifactTypeCategory ||
-		conns[1].TargetID != "5" ||
-		conns[1].RelationName != RelationBelongToCategory ||
-		conns[1].RelationMethod != RelationMethodEntityName ||
-		conns[1].ExtraInfo["category_key"] != "company" {
-		t.Errorf("category connection wrong: %+v", conns[1])
+	categoryConns := buildEntityCategoryConnections(100, rows, categories)
+	if len(categoryConns) != 1 {
+		t.Fatalf("want 1 category connection, got %d: %+v", len(categoryConns), categoryConns)
+	}
+	if categoryConns[0].SourceType != searchArtifactEntity ||
+		categoryConns[0].SourceID != "100_ent_1" ||
+		categoryConns[0].TargetType != "entity" ||
+		categoryConns[0].TargetID != "company" ||
+		categoryConns[0].TargetRecordID != 5 ||
+		categoryConns[0].RelationName != RelationBelongTo ||
+		categoryConns[0].RelationMethod != RelationMethodCategoryName {
+		t.Errorf("category connection wrong: %+v", categoryConns[0])
 	}
 
 	// Third entity (no ID) is skipped; second entity's name edge is last.
-	if conns[2].SourceID != "fallback_name" || conns[2].TargetID != "100_ent_2" {
-		t.Errorf("fallback connection wrong: %+v", conns[2])
+	if conns[1].SourceID != "fallback_name" || conns[1].TargetID != "100_ent_2" {
+		t.Errorf("fallback connection wrong: %+v", conns[1])
 	}
 }

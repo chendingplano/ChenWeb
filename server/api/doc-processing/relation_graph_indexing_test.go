@@ -4,10 +4,10 @@ import (
 	"testing"
 )
 
-// TestBuildRelationGraphConnections_AllThreeEdgeKinds verifies one fully-linked,
-// categorized relation materializes the three canonical triples of ADR 2026061401:
-// subject->object, predicate-of, and belong-to-category.
-func TestBuildRelationGraphConnections_AllThreeEdgeKinds(t *testing.T) {
+// TestBuildRelationGraphConnections verifies one fully-linked relation materializes
+// subject->object and predicate-of edges. Category membership is written separately
+// under relation_method=category_name.
+func TestBuildRelationGraphConnections(t *testing.T) {
 	rows := []relationGraphRow{{
 		RelationID:      "100_rel_1",
 		SubjectEntityID: "100_ent_1",
@@ -16,14 +16,14 @@ func TestBuildRelationGraphConnections_AllThreeEdgeKinds(t *testing.T) {
 		PredicateEN:     "Depends On",
 		Categories:      []string{"Dependency"},
 	}}
-	categoryIDs := map[string]int64{normalizeCategoryKey("Dependency"): 7}
+	categories := map[string]resolvedCategory{normalizeCategoryKey("Dependency"): {ID: 7, Type: "relation", Key: "dependency"}}
 
-	conns := buildRelationGraphConnections(100, rows, categoryIDs)
-	if len(conns) != 3 {
-		t.Fatalf("want 3 connections, got %d: %+v", len(conns), conns)
+	conns := buildRelationGraphConnections(100, rows)
+	if len(conns) != 2 {
+		t.Fatalf("want 2 connections, got %d: %+v", len(conns), conns)
 	}
 
-	var subjObj, predOf, belong *Connection
+	var subjObj, predOf *Connection
 	for i := range conns {
 		c := &conns[i]
 		if c.RelationMethod != RelationMethodEntityRelation {
@@ -34,13 +34,11 @@ func TestBuildRelationGraphConnections_AllThreeEdgeKinds(t *testing.T) {
 			subjObj = c
 		case "predicate_of":
 			predOf = c
-		case "belong_to_category":
-			belong = c
 		}
 	}
 
-	if subjObj == nil || predOf == nil || belong == nil {
-		t.Fatalf("missing an edge kind: subjObj=%v predOf=%v belong=%v", subjObj, predOf, belong)
+	if subjObj == nil || predOf == nil {
+		t.Fatalf("missing an edge kind: subjObj=%v predOf=%v", subjObj, predOf)
 	}
 
 	// Edge 1: subject entity -> object entity, named by the normalized predicate.
@@ -59,11 +57,16 @@ func TestBuildRelationGraphConnections_AllThreeEdgeKinds(t *testing.T) {
 		t.Errorf("predicate_of edge wrong: %+v", predOf)
 	}
 
-	// Edge 3: relation -> category (by surrogate category_id).
-	if belong.SourceType != searchArtifactRelation || belong.SourceID != "100_rel_1" ||
-		belong.TargetType != artifactTypeCategory || belong.TargetID != "7" ||
-		belong.RelationName != RelationBelongToCategory {
-		t.Errorf("belong_to_category edge wrong: %+v", belong)
+	categoryConns := buildRelationCategoryConnections(100, rows, categories)
+	if len(categoryConns) != 1 {
+		t.Fatalf("want 1 category connection, got %d: %+v", len(categoryConns), categoryConns)
+	}
+	if categoryConns[0].SourceType != searchArtifactRelation || categoryConns[0].SourceID != "100_rel_1" ||
+		categoryConns[0].TargetType != "relation" || categoryConns[0].TargetID != "dependency" ||
+		categoryConns[0].TargetRecordID != 7 ||
+		categoryConns[0].RelationName != RelationBelongTo ||
+		categoryConns[0].RelationMethod != RelationMethodCategoryName {
+		t.Errorf("category edge wrong: %+v", categoryConns[0])
 	}
 }
 
@@ -79,7 +82,7 @@ func TestBuildRelationGraphConnections_UnlinkedAndUnresolved(t *testing.T) {
 		Categories:      []string{"Unmapped"}, // not in categoryIDs
 	}}
 
-	conns := buildRelationGraphConnections(100, rows, map[string]int64{})
+	conns := buildRelationGraphConnections(100, rows)
 	if len(conns) != 1 {
 		t.Fatalf("want 1 connection (predicate_of only), got %d: %+v", len(conns), conns)
 	}
@@ -98,7 +101,7 @@ func TestBuildRelationGraphConnections_PredicateFallback(t *testing.T) {
 		Predicate:       "Is Part Of",
 		PredicateEN:     "",
 	}}
-	conns := buildRelationGraphConnections(100, rows, map[string]int64{})
+	conns := buildRelationGraphConnections(100, rows)
 	for _, c := range conns {
 		if c.ExtraInfo["edge_kind"] == "subject_object" && c.RelationName != "is_part_of" {
 			t.Errorf("fallback predicate key = %q, want %q", c.RelationName, "is_part_of")

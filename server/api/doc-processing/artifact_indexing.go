@@ -13,14 +13,15 @@ import (
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
+	"github.com/lib/pq"
 )
 
 // This file holds the artifact-agnostic Phase C (post-process) indexing engine shared by
-// the metric (spec 3.1) and inventory-item (spec 3.3) indexers. Both families run the
-// same four steps — connected_artifacts by line overlap, category_instance upserts,
-// category-path tree files, and hybrid_search semantic links — so the logic lives here
-// once and each family supplies only an artifactIndexConfig.
+// several artifact families. It covers connected_artifacts by line overlap, category
+// membership edges, category-path tree files, and hybrid_search semantic links.
 
 // indexedArtifact is the persisted view of one source artifact used by the shared
 // indexing steps. It is loaded from the family's table (kb.metrics / kb.inventory_items)
@@ -38,7 +39,7 @@ type indexedArtifact struct {
 type artifactIndexConfig struct {
 	SelfType             string // kb.search_artifacts.artifact_type of the source family
 	CategoryType         string // kb.artifact_categories.category_type
-	InstanceSource       string // extra_info "source" tag written on category_instance
+	InstanceSource       string // extra_info "source" tag written on category edges
 	Table                string // source SQL table, e.g. "kb.metrics"
 	IDColumn             string // id column in Table, e.g. "metric_id"
 	CategoryTreeFilename string // per-leaf index file, e.g. "metrics.txt"
@@ -51,6 +52,12 @@ type artifactIndexConfig struct {
 // errors. *categoryResolver satisfies it; tests inject a fake.
 type categoryBatchResolver interface {
 	ResolveBatch(ctx context.Context, categoryType string, reqs []categoryRequest, maxConcurrency int) (map[string]int64, map[string]error)
+}
+
+type resolvedCategory struct {
+	ID   int64
+	Type string
+	Key  string
 }
 
 // artifactConnectedFamily maps a registry artifact type to its JSON key inside a
@@ -80,67 +87,87 @@ var artifactConnectedFamilies = []artifactConnectedFamily{
 func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID int64, inputChunks []Block, artifacts []indexedArtifact, cfg artifactIndexConfig, logger ApiTypes.JimoLogger) int {
 	start := time.Now()
 	// Target families are every connected family except the source family itself.
-	targets := make([]artifactConnectedFamily, 0, len(artifactConnectedFamilies))
+	targetTypes := make([]string, 0, len(artifactConnectedFamilies))
+	jsonKeyByType := make(map[string]string, len(artifactConnectedFamilies))
 	for _, fam := range artifactConnectedFamilies {
 		if fam.regType == cfg.SelfType {
 			continue
 		}
-		targets = append(targets, fam)
+		targetTypes = append(targetTypes, fam.regType)
+		jsonKeyByType[fam.regType] = fam.jsonKey
 	}
 
-	refsByType := make(map[string][]ArtifactRef, len(targets))
-	totalRefs := 0
-	for _, fam := range targets {
-		familyStart := time.Now()
-		var (
-			refs []ArtifactRef
-			err  error
-		)
-		if fam.regType == searchArtifactSemanticProjection {
-			refs, err = loadSemanticProjectionRefsForConnections(ctx, db, recordID)
-		} else {
-			refs, err = loadArtifactRefsFromRegistry(ctx, db, recordID, fam.regType)
-		}
-		if err != nil {
-			if logger != nil {
-				logger.Warn(cfg.LogPrefix+": load registry refs failed", "record_id", recordID, "artifact_type", fam.regType, "error", err.Error())
-			}
-			continue
-		}
-		refsByType[fam.regType] = refs
-		totalRefs += len(refs)
+	// Artifact<->artifact line-overlap edges are computed in a single SQL self-join over
+	// the unified registry, using each row's kb.search_artifacts.line_range int8multirange
+	// and the GiST-indexed `&&` operator (see artifact-connections.md §2.2). Both source and
+	// target families are in the registry by this point: the source family was reindexed
+	// immediately before this step, and the current pipeline already requires targets to be
+	// registered. Chunk edges are NOT in the registry (chunks are the in-memory []Block), so
+	// they remain computed in Go below — this is the agreed hybrid for step 3.
+	overlapBySrc := make(map[string]map[string][]string) // src artifact_id -> jsonKey -> []tgt id
+	rows, err := db.QueryContext(ctx,
+		`SELECT s.artifact_id, t.artifact_type, t.artifact_id
+		 FROM kb.search_artifacts s
+		 JOIN kb.search_artifacts t
+		   ON t.input_record_id = s.input_record_id
+		  AND t.artifact_type = ANY($2)
+		  AND s.line_range && t.line_range
+		 WHERE s.input_record_id = $1 AND s.artifact_type = $3
+		 ORDER BY s.artifact_id, t.artifact_type, t.artifact_id`,
+		recordID, pq.Array(targetTypes), cfg.SelfType)
+	if err != nil {
 		if logger != nil {
-			logger.Info(cfg.LogPrefix+" connected-artifacts refs loaded",
-				"record_id", recordID,
-				"artifact_type", fam.regType,
-				"ref_count", len(refs),
-				"ms_used", time.Since(familyStart).Milliseconds(),
-			)
+			logger.Warn(cfg.LogPrefix+": connected-artifacts overlap query failed", "record_id", recordID, "error", err.Error())
 		}
+	} else {
+		for rows.Next() {
+			var srcID, tgtType, tgtID string
+			if scanErr := rows.Scan(&srcID, &tgtType, &tgtID); scanErr != nil {
+				if logger != nil {
+					logger.Warn(cfg.LogPrefix+": connected-artifacts scan failed", "record_id", recordID, "error", scanErr.Error())
+				}
+				break
+			}
+			jsonKey := jsonKeyByType[tgtType]
+			if jsonKey == "" {
+				continue
+			}
+			byKey := overlapBySrc[srcID]
+			if byKey == nil {
+				byKey = make(map[string][]string)
+				overlapBySrc[srcID] = byKey
+			}
+			byKey[jsonKey] = appendUniqueString(byKey[jsonKey], tgtID)
+		}
+		_ = rows.Close()
 	}
 
 	updateStmt := fmt.Sprintf("UPDATE %s SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND %s = $3", cfg.Table, cfg.IDColumn)
 
+	totalEdges := 0
 	updated := 0
 	for _, a := range artifacts {
 		artifactLines := lineSetFromSpans(a.SourceSpans)
 
 		ca := map[string][]string{"chunks": {}}
-		for _, fam := range targets {
-			ca[fam.jsonKey] = []string{}
+		for _, t := range targetTypes {
+			ca[jsonKeyByType[t]] = []string{}
 		}
+		// Chunk edges: in-memory line overlap against the document's chunks.
 		for _, ch := range inputChunks {
 			if chunkOverlapsLineSet(ch, artifactLines) {
 				ca["chunks"] = appendUniqueString(ca["chunks"], ChunkConnectionID(recordID, ch.Index))
 			}
 		}
-		for _, fam := range targets {
-			ca[fam.jsonKey] = overlappingRefIDs(refsByType[fam.regType], artifactLines)
+		// Artifact<->artifact edges: from the registry self-join above.
+		for jsonKey, ids := range overlapBySrc[a.ID] {
+			ca[jsonKey] = ids
+			totalEdges += len(ids)
 		}
 
 		if len(ca["chunks"]) == 0 && logger != nil {
-			logger.Warn(cfg.LogPrefix+" error: empty chunks", 
-				"record_id", recordID, 
+			logger.Warn(cfg.LogPrefix+" error: empty chunks",
+				"record_id", recordID,
 				"artifact_id", a.ID,
 				"sourceSpan", a.SourceSpans)
 		}
@@ -150,7 +177,6 @@ func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID i
 				"artifact_id", a.ID,
 				"source_spans", a.SourceSpans,
 				"line_numbers", sortedLineSetKeys(artifactLines),
-				"semantic_projection_ref_count", len(refsByType[searchArtifactSemanticProjection]),
 			)
 		}
 
@@ -177,8 +203,8 @@ func buildArtifactConnectedArtifacts(ctx context.Context, db *sql.DB, recordID i
 		logger.Info(cfg.LogPrefix+" connected-artifacts finished",
 			"record_id", recordID,
 			"artifacts", len(artifacts),
-			"target_families", len(targets),
-			"total_refs", totalRefs,
+			"target_families", len(targetTypes),
+			"total_edges", totalEdges,
 			"updated", updated,
 			"ms_used", time.Since(start).Milliseconds(),
 		)
@@ -279,13 +305,11 @@ func parseVectorLiteral(raw string) ([]float64, error) {
 	return out, nil
 }
 
-// upsertArtifactCategoryInstances resolves every artifact's category keys in one Phase C
-// batch (concurrent create + process-wide single-flight) and upserts a
-// kb.category_instance row per (artifact, resolved category). Returns the number of
-// category_instance rows upserted.
-func upsertArtifactCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, resolver categoryBatchResolver, logger ApiTypes.JimoLogger) int {
+// upsertArtifactCategoryConnections resolves every artifact's category keys in one Phase
+// C batch and writes one kb.artifact_connections category_name edge per resolved
+// (artifact, category) membership.
+func upsertArtifactCategoryConnections(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, resolver categoryBatchResolver, logger ApiTypes.JimoLogger) int {
 	start := time.Now()
-	extraInfo, _ := json.Marshal(map[string]any{"artifact_type": cfg.CategoryType, "source": cfg.InstanceSource})
 
 	// Gather every (key, evidence) across all artifacts into a single batch so the
 	// resolver can dedup, cluster intra-batch synonyms, and create concurrently.
@@ -303,11 +327,15 @@ func upsertArtifactCategoryInstances(ctx context.Context, db *sql.DB, recordID i
 		}
 	}
 	if len(reqs) == 0 {
+		store := &ConnectionSQLStore{DB: db}
+		if err := store.ReplaceConnectionsBySource(ctx, recordID, cfg.SelfType, RelationMethodCategoryName, []string{RelationBelongTo}, nil); err != nil && logger != nil {
+			logger.Warn(cfg.LogPrefix+": clear category connections failed", "record_id", recordID, "error", err.Error())
+		}
 		return 0
 	}
 
 	if logger != nil {
-		logger.Info(cfg.LogPrefix+" category-instances start",
+		logger.Info(cfg.LogPrefix+" category-connections start",
 			"record_id", recordID,
 			"artifacts", len(artifacts),
 			"category_requests", len(reqs),
@@ -320,35 +348,123 @@ func upsertArtifactCategoryInstances(ctx context.Context, db *sql.DB, recordID i
 		}
 	}
 
-	count := 0
-	for _, a := range artifacts {
-		for _, key := range a.Categories {
-			categoryID, ok := ids[normalizeCategoryKey(key)]
-			if !ok {
-				continue // unresolved; already surfaced via errs above
-			}
-			if _, err := db.ExecContext(ctx,
-				`INSERT INTO kb.category_instance (category_id, artifact_id, input_record_id, extra_info)
-				 VALUES ($1, $2, $3, $4::jsonb)
-				 ON CONFLICT (category_id, artifact_id)
-				 DO UPDATE SET input_record_id = EXCLUDED.input_record_id, extra_info = EXCLUDED.extra_info`,
-				categoryID, a.ID, recordID, string(extraInfo)); err != nil {
-				if logger != nil {
-					logger.Warn(cfg.LogPrefix+": upsert category_instance failed", "record_id", recordID, "artifact_id", a.ID, "category_id", categoryID, "error", err.Error())
-				}
-				continue
-			}
-			count++
+	categories := loadResolvedCategoriesForKeys(ctx, db, cfg.CategoryType, ids, logger, cfg.LogPrefix)
+	conns := buildArtifactCategoryConnections(recordID, artifacts, cfg, categories)
+	store := &ConnectionSQLStore{DB: db}
+	if err := store.ReplaceConnectionsBySource(ctx, recordID, cfg.SelfType, RelationMethodCategoryName, []string{RelationBelongTo}, conns); err != nil {
+		if logger != nil {
+			logger.Warn(cfg.LogPrefix+": replace category connections failed", "record_id", recordID, "error", err.Error())
 		}
+		return 0
 	}
 	if logger != nil {
-		logger.Info(cfg.LogPrefix+" category-instances finished",
+		logger.Info(cfg.LogPrefix+" category-connections finished",
 			"record_id", recordID,
-			"category_instances", count,
+			"category_connections", len(conns),
 			"ms_used", time.Since(start).Milliseconds(),
 		)
 	}
-	return count
+	return len(conns)
+}
+
+func loadResolvedCategoriesForKeys(ctx context.Context, db *sql.DB, categoryType string, ids map[string]int64, logger ApiTypes.JimoLogger, logPrefix string) map[string]resolvedCategory {
+	out := make(map[string]resolvedCategory, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+
+	uniqueIDs := make([]int64, 0, len(ids))
+	seen := map[int64]struct{}{}
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+
+	byID := map[int64]resolvedCategory{}
+	rows, err := db.QueryContext(ctx,
+		`SELECT category_id, category_type, category_key
+		 FROM kb.artifact_categories
+		 WHERE category_id = ANY($1)`,
+		pq.Array(uniqueIDs),
+	)
+	if err != nil {
+		if logger != nil {
+			logger.Warn(logPrefix+": load resolved artifact categories failed", "error", err.Error())
+		}
+	} else {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var cat resolvedCategory
+			if err := rows.Scan(&cat.ID, &cat.Type, &cat.Key); err != nil {
+				if logger != nil {
+					logger.Warn(logPrefix+": scan resolved artifact category failed", "error", err.Error())
+				}
+				continue
+			}
+			cat.Type = strings.TrimSpace(cat.Type)
+			cat.Key = strings.TrimSpace(cat.Key)
+			byID[cat.ID] = cat
+		}
+		if err := rows.Err(); err != nil && logger != nil {
+			logger.Warn(logPrefix+": iterate resolved artifact categories failed", "error", err.Error())
+		}
+	}
+
+	for normKey, id := range ids {
+		cat, ok := byID[id]
+		if !ok {
+			cat = resolvedCategory{ID: id, Type: categoryType, Key: normKey}
+		}
+		if cat.Type == "" {
+			cat.Type = categoryType
+		}
+		if cat.Key == "" {
+			cat.Key = normKey
+		}
+		out[normKey] = cat
+	}
+	return out
+}
+
+func buildArtifactCategoryConnections(recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, categories map[string]resolvedCategory) []Connection {
+	conns := make([]Connection, 0)
+	for _, a := range artifacts {
+		artifactID := strings.TrimSpace(a.ID)
+		if artifactID == "" {
+			continue
+		}
+		for _, key := range a.Categories {
+			normKey := normalizeCategoryKey(key)
+			cat, ok := categories[normKey]
+			if !ok || cat.ID <= 0 {
+				continue
+			}
+			targetType := firstNonEmptyTrimmed(cat.Type, cfg.CategoryType)
+			targetID := firstNonEmptyTrimmed(cat.Key, normKey)
+			conns = append(conns, Connection{
+				SourceRecordID: recordID,
+				TargetRecordID: recordID,
+				SourceType:     cfg.SelfType,
+				SourceID:       artifactID,
+				TargetType:     targetType,
+				TargetID:       targetID,
+				RelationName:   RelationBelongTo,
+				RelationMethod: RelationMethodCategoryName,
+				ExtraInfo: map[string]any{
+					"source":       cfg.InstanceSource,
+					"category_id":  cat.ID,
+					"category_key": targetID,
+				},
+			})
+		}
+	}
+	return conns
 }
 
 // indexArtifactsByCategoryPaths writes each artifact_id into the family's per-leaf index
@@ -497,7 +613,6 @@ func removeArtifactTreeRecord(treeRootDir string, recordID int64, filename strin
 }
 
 // hybridCandidate is one row returned by the artifact connect hybrid query.
-/*
 type hybridCandidate struct {
 	artifactType string
 	artifactID   string
@@ -507,7 +622,6 @@ type hybridCandidate struct {
 	cosineSim    sql.NullFloat64
 	lexScore     sql.NullFloat64
 }
-*/
 
 // connectArtifactsBySearch creates source-artifact -> artifact semantic-similarity edges.
 // It runs the hybrid (lexical + pgvector) search per artifact, applies the acceptance
@@ -515,7 +629,6 @@ type hybridCandidate struct {
 // idempotently replaces the document's edges for this source family in one source-scoped
 // call. Returns the total number of edges written. (Metric spec 3.1.5; inventory 3.3.5
 // reuses the identical policy.)
-/*
 func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, logger ApiTypes.JimoLogger) int {
 	start := time.Now()
 	scfg := appconfig.GetArtifactSearchConfig()
@@ -641,13 +754,11 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 	}
 	return len(allAccepted)
 }
-*/
 
 // queryArtifactHybridCandidates runs the lexical (+ optional semantic) RRF search over
 // kb.search_artifacts and returns the fused candidates with their component scores.
 // Params: $1 = query text, $2 = self artifact_id (excluded), $3 = query embedding vector
 // (hybrid path only). selfType is the source artifact_type excluded from results.
-/*
 func queryArtifactHybridCandidates(ctx context.Context, db *sql.DB, dict, query string, vec []float64, useSem bool, selfType, selfID string, limit int) ([]hybridCandidate, error) {
 	if limit <= 0 {
 		limit = defaultMetricConnectMaxLinks
@@ -736,12 +847,10 @@ LIMIT %d`,
 	}
 	return out, rows.Err()
 }
-*/
 
 // sanitizeArtifactType guards an artifact_type identifier (interpolated into SQL) against
 // injection by allowing only letters/underscore; anything else falls back to a value that
 // matches nothing meaningful.
-/*
 func sanitizeArtifactType(t string) string {
 	t = strings.TrimSpace(t)
 	for _, r := range t {
@@ -751,7 +860,6 @@ func sanitizeArtifactType(t string) string {
 	}
 	return t
 }
-*/
 
 // metricsToIndexedArtifacts adapts the metric-specific view to the generic one.
 func metricsToIndexedArtifacts(metrics []indexedMetric) []indexedArtifact {

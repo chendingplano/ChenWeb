@@ -3,8 +3,6 @@ package docprocessing
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -14,8 +12,8 @@ import (
 
 // entity_name_indexing.go catalogues kb.entities.entity_en as a name dictionary and
 // connects each dictionary key to the entity instance row it names. It also resolves
-// the entity's own kb.entities.categories to kb.artifact_categories and projects the
-// (entity, category) membership — entity *names* are never treated as categories
+// the entity's own kb.entities.categories to kb.artifact_categories and writes
+// category_name membership edges — entity *names* are never treated as categories
 // (ADR 2026061502, Problem 02); only the explicit categories column is.
 
 // entityCategoryType is the kb.artifact_categories.category_type used to resolve an
@@ -51,17 +49,22 @@ func IndexEntityNamesForRecord(ctx context.Context, recordID int64, logger ApiTy
 		return
 	}
 
-	// Resolve the entity's declared categories (kb.entities.categories) in one batch,
-	// then reuse the id map for both the category_instance projection and the
-	// belong-to-category edges so the projection and the canonical store stay consistent.
+	// Resolve the entity's declared categories (kb.entities.categories) in one batch.
 	categoryIDs := resolveEntityCategoryIDs(ctx, db, recordID, rows, logger)
-	instances := upsertEntityCategoryInstances(ctx, db, recordID, rows, categoryIDs, logger)
+	categories := loadResolvedCategoriesForKeys(ctx, db, entityCategoryType, categoryIDs, logger, "entity name indexing")
 	nameMisses := catalogueEntityNames(ctx, db, rows, logger)
-	conns := buildEntityNameGraphConnections(recordID, rows, categoryIDs)
+	conns := buildEntityNameGraphConnections(recordID, rows)
 	store := &ConnectionSQLStore{DB: db}
 	if err := store.ReplaceRecordConnectionsByMethod(ctx, recordID, RelationMethodEntityName, conns); err != nil {
 		if logger != nil {
 			logger.Warn("entity name indexing: replace connections failed", "record_id", recordID, "error", err.Error())
+		}
+		return
+	}
+	categoryConns := buildEntityCategoryConnections(recordID, rows, categories)
+	if err := store.ReplaceConnectionsBySource(ctx, recordID, searchArtifactEntity, RelationMethodCategoryName, []string{RelationBelongTo}, categoryConns); err != nil {
+		if logger != nil {
+			logger.Warn("entity name indexing: replace category connections failed", "record_id", recordID, "error", err.Error())
 		}
 		return
 	}
@@ -71,7 +74,7 @@ func IndexEntityNamesForRecord(ctx context.Context, recordID int64, logger ApiTy
 			"record_id", recordID,
 			"entities", len(rows),
 			"connections", len(conns),
-			"category_instances", instances,
+			"category_connections", len(categoryConns),
 			"name_catalogue_misses", nameMisses,
 			"ms_used", time.Since(start).Milliseconds(),
 		)
@@ -107,7 +110,7 @@ func normalizeEntityNameKey(raw string) string {
 	return strings.Trim(b.String(), "_")
 }
 
-func buildEntityNameGraphConnections(recordID int64, rows []entityNameGraphRow, categoryIDs map[string]int64) []Connection {
+func buildEntityNameGraphConnections(recordID int64, rows []entityNameGraphRow) []Connection {
 	conns := make([]Connection, 0, len(rows))
 	for _, r := range rows {
 		entityID := strings.TrimSpace(r.EntityID)
@@ -133,28 +136,23 @@ func buildEntityNameGraphConnections(recordID int64, rows []entityNameGraphRow, 
 				},
 			})
 		}
-
-		// Edge 2 — category membership: entity -> category, one edge per resolved
-		// category. kb.category_instance is the membership projection (D4).
-		for _, key := range r.Categories {
-			categoryID, ok := categoryIDs[normalizeCategoryKey(key)]
-			if !ok {
-				continue
-			}
-			conns = append(conns, Connection{
-				SourceRecordID: recordID,
-				TargetRecordID: recordID,
-				SourceType:     searchArtifactEntity,
-				SourceID:       entityID,
-				TargetType:     artifactTypeCategory,
-				TargetID:       strconv.FormatInt(categoryID, 10),
-				RelationName:   RelationBelongToCategory,
-				RelationMethod: RelationMethodEntityName,
-				ExtraInfo:      map[string]any{"edge_kind": "belong_to_category", "category_key": normalizeCategoryKey(key)},
-			})
-		}
 	}
 	return conns
+}
+
+func buildEntityCategoryConnections(recordID int64, rows []entityNameGraphRow, categories map[string]resolvedCategory) []Connection {
+	artifacts := make([]indexedArtifact, 0, len(rows))
+	for _, r := range rows {
+		entityID := strings.TrimSpace(r.EntityID)
+		if entityID == "" {
+			continue
+		}
+		artifacts = append(artifacts, indexedArtifact{
+			ID:         entityID,
+			Categories: r.Categories,
+		})
+	}
+	return buildArtifactCategoryConnections(recordID, artifacts, entityIndexConfig, categories)
 }
 
 func catalogueEntityNames(ctx context.Context, db *sql.DB, rows []entityNameGraphRow, logger ApiTypes.JimoLogger) int {
@@ -209,39 +207,6 @@ func resolveEntityCategoryIDs(ctx context.Context, db *sql.DB, recordID int64, r
 		}
 	}
 	return ids
-}
-
-// upsertEntityCategoryInstances writes one kb.category_instance row per
-// (entity, resolved category). Returns the number of rows upserted.
-func upsertEntityCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, rows []entityNameGraphRow, categoryIDs map[string]int64, logger ApiTypes.JimoLogger) int {
-	extraInfo, _ := json.Marshal(map[string]any{"artifact_type": entityCategoryType, "source": "extract_entity_relation"})
-	count := 0
-	for _, r := range rows {
-		entityID := strings.TrimSpace(r.EntityID)
-		if entityID == "" {
-			continue
-		}
-		for _, key := range r.Categories {
-			categoryID, ok := categoryIDs[normalizeCategoryKey(key)]
-			if !ok {
-				continue
-			}
-			if _, err := db.ExecContext(ctx,
-				`INSERT INTO kb.category_instance (category_id, artifact_id, input_record_id, extra_info)
-				 VALUES ($1, $2, $3, $4::jsonb)
-				 ON CONFLICT (category_id, artifact_id)
-				 DO UPDATE SET input_record_id = EXCLUDED.input_record_id, extra_info = EXCLUDED.extra_info`,
-				categoryID, entityID, recordID, string(extraInfo)); err != nil {
-				if logger != nil {
-					logger.Warn("entity name indexing: upsert category_instance failed",
-						"record_id", recordID, "entity_id", entityID, "category_id", categoryID, "error", err.Error())
-				}
-				continue
-			}
-			count++
-		}
-	}
-	return count
 }
 
 func loadEntityNameGraphRows(ctx context.Context, db *sql.DB, recordID int64) ([]entityNameGraphRow, error) {

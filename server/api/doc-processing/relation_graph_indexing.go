@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,15 +14,12 @@ import (
 // (ADR 2026061401, D6). For every row in kb.relations it materializes the relation
 // as a set of triples in kb.artifact_connections:
 //
-//   1. subject->object : (entity:subject_entity_id) --[predicate_en]--> (entity:object_entity_id)
-//   2. predicate-of     : (relation_predicate:predicate_key) --[has-predicate]--> (relation:relation_id)
-//   3. belong-to-category: (relation:relation_id) --[belong-to-category]--> (category:category_id)
+//  1. subject->object : (entity:subject_entity_id) --[predicate_en]--> (entity:object_entity_id)
+//  2. predicate-of     : (relation_predicate:predicate_key) --[has-predicate]--> (relation:relation_id)
 //
-// All three share relation_method = entity_relation so a single method-scoped replace
-// keeps the record's edges idempotent across reprocessing. Categories are also written
-// to kb.category_instance (the membership projection, D4) so the rest of the system's
-// category browsing keeps working, and predicates are catalogued in the
-// kb.relation_predicates dictionary (D2).
+// Category membership is written separately as category_name edges in
+// kb.artifact_connections. Predicates are catalogued in the kb.relation_predicates
+// dictionary (D2).
 //
 // relationCategoryType is the kb.artifact_categories.category_type used to resolve a
 // relation's categories. Predicates get their own dictionary table and are not
@@ -64,22 +60,27 @@ func IndexRelationGraphForRecord(ctx context.Context, recordID int64, logger Api
 	}
 
 	// Resolve every relation category in one batch (creating missing categories via the
-	// LLM, coalesced process-wide), then reuse the id map for both category_instance
-	// rows and the belong-to-category edges so the projection and the canonical store
-	// stay consistent.
+	// LLM, coalesced process-wide).
 	categoryIDs := resolveRelationCategoryIDs(ctx, db, recordID, rows, logger)
-	instances := upsertRelationCategoryInstances(ctx, db, recordID, rows, categoryIDs, logger)
+	categories := loadResolvedCategoriesForKeys(ctx, db, relationCategoryType, categoryIDs, logger, "relation graph indexing")
 
 	// Catalogue each distinct predicate in the kb.relation_predicates dictionary (D2).
 	// The predicate-of edge only needs the predicate_key, so a catalogue failure is
 	// logged but does not drop the edge.
 	predicateMisses := catalogueRelationPredicates(ctx, db, rows, logger)
 
-	conns := buildRelationGraphConnections(recordID, rows, categoryIDs)
+	conns := buildRelationGraphConnections(recordID, rows)
 	store := &ConnectionSQLStore{DB: db}
 	if err := store.ReplaceRecordConnectionsByMethod(ctx, recordID, RelationMethodEntityRelation, conns); err != nil {
 		if logger != nil {
 			logger.Warn("relation graph indexing: replace connections failed", "record_id", recordID, "error", err.Error())
+		}
+		return
+	}
+	categoryConns := buildRelationCategoryConnections(recordID, rows, categories)
+	if err := store.ReplaceConnectionsBySource(ctx, recordID, searchArtifactRelation, RelationMethodCategoryName, []string{RelationBelongTo}, categoryConns); err != nil {
+		if logger != nil {
+			logger.Warn("relation graph indexing: replace category connections failed", "record_id", recordID, "error", err.Error())
 		}
 		return
 	}
@@ -89,7 +90,7 @@ func IndexRelationGraphForRecord(ctx context.Context, recordID int64, logger Api
 			"record_id", recordID,
 			"relations", len(rows),
 			"connections", len(conns),
-			"category_instances", instances,
+			"category_connections", len(categoryConns),
 			"predicate_catalogue_misses", predicateMisses,
 			"ms_used", time.Since(start).Milliseconds(),
 		)
@@ -107,9 +108,8 @@ func relationPredicateKey(r relationGraphRow) string {
 }
 
 // buildRelationGraphConnections turns relations into the canonical triples of ADR
-// 2026061401 (D3). Pure: no DB, no side effects — it is the unit under test. The three
-// edge kinds share relation_method = entity_relation so they are replaced as a group.
-func buildRelationGraphConnections(recordID int64, rows []relationGraphRow, categoryIDs map[string]int64) []Connection {
+// 2026061401 (D3). Pure: no DB, no side effects.
+func buildRelationGraphConnections(recordID int64, rows []relationGraphRow) []Connection {
 	conns := make([]Connection, 0, len(rows)*2)
 	for _, r := range rows {
 		predicateKey := relationPredicateKey(r)
@@ -147,28 +147,23 @@ func buildRelationGraphConnections(recordID int64, rows []relationGraphRow, cate
 				ExtraInfo:      map[string]any{"edge_kind": "predicate_of"},
 			})
 		}
-
-		// Edge 3 — category membership: relation -> category, one edge per resolved
-		// category. kb.category_instance is the membership projection (D4).
-		for _, key := range r.Categories {
-			categoryID, ok := categoryIDs[normalizeCategoryKey(key)]
-			if !ok {
-				continue
-			}
-			conns = append(conns, Connection{
-				SourceRecordID: recordID,
-				TargetRecordID: recordID,
-				SourceType:     searchArtifactRelation,
-				SourceID:       r.RelationID,
-				TargetType:     artifactTypeCategory,
-				TargetID:       strconv.FormatInt(categoryID, 10),
-				RelationName:   RelationBelongToCategory,
-				RelationMethod: RelationMethodEntityRelation,
-				ExtraInfo:      map[string]any{"edge_kind": "belong_to_category", "category_key": normalizeCategoryKey(key)},
-			})
-		}
 	}
 	return conns
+}
+
+func buildRelationCategoryConnections(recordID int64, rows []relationGraphRow, categories map[string]resolvedCategory) []Connection {
+	artifacts := make([]indexedArtifact, 0, len(rows))
+	for _, r := range rows {
+		relationID := strings.TrimSpace(r.RelationID)
+		if relationID == "" {
+			continue
+		}
+		artifacts = append(artifacts, indexedArtifact{
+			ID:         relationID,
+			Categories: r.Categories,
+		})
+	}
+	return buildArtifactCategoryConnections(recordID, artifacts, relationIndexConfig, categories)
 }
 
 // catalogueRelationPredicates upserts each distinct predicate_key into the
@@ -280,35 +275,6 @@ func resolveRelationCategoryIDs(ctx context.Context, db *sql.DB, recordID int64,
 		}
 	}
 	return ids
-}
-
-// upsertRelationCategoryInstances writes one kb.category_instance row per
-// (relation, resolved category). Returns the number of rows upserted.
-func upsertRelationCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, rows []relationGraphRow, categoryIDs map[string]int64, logger ApiTypes.JimoLogger) int {
-	extraInfo, _ := json.Marshal(map[string]any{"artifact_type": relationCategoryType, "source": "extract_entity_relation"})
-	count := 0
-	for _, r := range rows {
-		for _, key := range r.Categories {
-			categoryID, ok := categoryIDs[normalizeCategoryKey(key)]
-			if !ok {
-				continue
-			}
-			if _, err := db.ExecContext(ctx,
-				`INSERT INTO kb.category_instance (category_id, artifact_id, input_record_id, extra_info)
-				 VALUES ($1, $2, $3, $4::jsonb)
-				 ON CONFLICT (category_id, artifact_id)
-				 DO UPDATE SET input_record_id = EXCLUDED.input_record_id, extra_info = EXCLUDED.extra_info`,
-				categoryID, r.RelationID, recordID, string(extraInfo)); err != nil {
-				if logger != nil {
-					logger.Warn("relation graph indexing: upsert category_instance failed",
-						"record_id", recordID, "relation_id", r.RelationID, "category_id", categoryID, "error", err.Error())
-				}
-				continue
-			}
-			count++
-		}
-	}
-	return count
 }
 
 // upsertRelationPredicate idempotently catalogues a predicate in the

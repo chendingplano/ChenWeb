@@ -62,7 +62,7 @@ const (
 	RelationHasScene          = "has-scene"
 	RelationHasSummary        = "has-summary"
 	RelationEntityRelations   = "entity relations"
-	RelationBelongToCategory  = "belong-to-category"
+	RelationBelongTo          = "belong_to"
 	RelationHasPredicate      = "has-predicate"
 	RelationHasInstance       = "has-instance"
 )
@@ -73,10 +73,11 @@ const (
 // registry (D2).
 const (
 	// RelationMethodEntityRelation tags every edge the relation-graph step writes
-	// (subject->object, predicate-of, belong-to-category), enabling a single
-	// method-scoped idempotent replace per record.
+	// (subject->object and predicate-of), enabling a single method-scoped idempotent
+	// replace per record.
 	RelationMethodEntityRelation = "entity_relation"
 	RelationMethodEntityName     = "entity_name"
+	RelationMethodCategoryName   = "category_name"
 
 	// artifactTypeCategory / artifactTypeRelationPredicate are the artifact_type
 	// discriminators for the dictionary endpoints promoted to artifacts in D2.

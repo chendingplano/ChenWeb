@@ -23,10 +23,10 @@ const (
 // KnowledgeStore/Capsules/coding-capsules/llm-wiki/hybrid-search.md. Inventory-item
 // connect (spec 3.3.5) reuses these same constants per "same as 3.1.5".
 const (
-	// rrfKMetricConnect                 = 60
-	// hybridCandidateLimitMetricConnect = 200
-	defaultMetricConnectMinCosine = 0.75
-	defaultMetricConnectMaxLinks  = 10
+	rrfKMetricConnect                 = 60
+	hybridCandidateLimitMetricConnect = 200
+	defaultMetricConnectMinCosine     = 0.75
+	defaultMetricConnectMaxLinks      = 10
 )
 
 // metricConnectMinCosine is the minimum embedding cosine similarity for the semantic
@@ -88,7 +88,7 @@ type connectedArtifacts struct {
 }
 
 // IndexMetricsForRecord runs the post-save metrics indexing workflow (outputs 2-5 of
-// spec 3.1): connected_artifacts JSON, category_instance rows, category-path metrics.txt
+// spec 3.1): connected_artifacts JSON, category_name edges, category-path metrics.txt
 // entries, and hybrid_search semantic links. Output 1 (kb.search_artifacts) is handled
 // separately by ReindexMetricSearchForRecord, which the caller must run first. Each step
 // is best-effort and logged; a failure in one step does not abort the others.
@@ -118,8 +118,8 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, artifacts, metricIndexConfig, logger)
 
 	// Enrich artifacts that the LLM gave no categories by deriving category keys from
-	// overlapping semantic projections, so that upsertArtifactCategoryInstances can still
-	// create category_instance rows for them.
+	// overlapping semantic projections, so that category membership edges can still be
+	// written for them.
 	semProjs, semProjErr := loadSemanticProjectionsForCategoryPaths(ctx, db, recordID)
 	if semProjErr != nil && logger != nil {
 		logger.Warn("metrics indexing: load semantic projections for category enrichment failed",
@@ -128,15 +128,17 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 	enrichArtifactCategoriesFromSemProjs(artifacts, semProjs)
 
 	resolver := newMetricCategoryResolver(db, logger)
-	categoryInstances := upsertArtifactCategoryInstances(ctx, db, recordID, artifacts, metricIndexConfig, resolver, logger)
+	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, artifacts, metricIndexConfig, resolver, logger)
 	categoryPathMetrics := indexArtifactsByCategoryPaths(ctx, db, recordID, artifacts, metricIndexConfig, logger)
+	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, artifacts, metricIndexConfig, logger)
 
 	if logger != nil {
 		logger.Info("metrics indexing result",
 			"record_id", recordID,
 			"connected_artifacts_metrics", connectedCount,
-			"category_instances", categoryInstances,
+			"category_connections", categoryConnections,
 			"category_path_metrics", categoryPathMetrics,
+			"semantic_links", semanticLinks,
 		)
 	}
 }
@@ -198,7 +200,7 @@ func parseMetricCategoriesText(s string) []string {
 // upsertMetricCategoryInstances is the metric-family entry point retained for tests; it
 // delegates to the shared engine.
 func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, metrics []indexedMetric, resolver categoryBatchResolver, logger ApiTypes.JimoLogger) int {
-	return upsertArtifactCategoryInstances(ctx, db, recordID, metricsToIndexedArtifacts(metrics), metricIndexConfig, resolver, logger)
+	return upsertArtifactCategoryConnections(ctx, db, recordID, metricsToIndexedArtifacts(metrics), metricIndexConfig, resolver, logger)
 }
 
 // upsertMetricToLeafDir / removeMetricTreeRecord are metric-named shims over the shared
@@ -209,51 +211,6 @@ func upsertMetricToLeafDir(leafDir, metricID string) error {
 
 func removeMetricTreeRecord(treeRootDir string, recordID int64) error {
 	return removeArtifactTreeRecord(treeRootDir, recordID, "metrics.txt")
-}
-
-func overlappingRefIDs(refs []ArtifactRef, lines map[int]struct{}) []string {
-	out := []string{}
-	for _, ref := range refs {
-		if spansOverlapLineSet(ref.Spans, lines) {
-			out = appendUniqueString(out, ref.ID)
-		}
-	}
-	return out
-}
-
-func loadSemanticProjectionRefsForConnections(ctx context.Context, db *sql.DB, recordID int64) ([]ArtifactRef, error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT semantic_proj_id, COALESCE(line_spans, '[]'::jsonb)
-		 FROM kb.semantic_projections
-		 WHERE input_record_id = $1
-		 ORDER BY id`,
-		recordID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	refs := make([]ArtifactRef, 0, 16)
-	for rows.Next() {
-		var (
-			projID   string
-			spansRaw []byte
-		)
-		if err := rows.Scan(&projID, &spansRaw); err != nil {
-			return nil, err
-		}
-		var raw any
-		if len(spansRaw) > 0 {
-			_ = json.Unmarshal(spansRaw, &raw)
-		}
-		refs = append(refs, ArtifactRef{
-			Type:  searchArtifactSemanticProjection,
-			ID:    strings.TrimSpace(projID),
-			Spans: normalizeSourceLineSpans(raw),
-		})
-	}
-	return refs, rows.Err()
 }
 
 func sortedLineSetKeys(set map[int]struct{}) []int {

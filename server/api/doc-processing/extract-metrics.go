@@ -376,7 +376,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	}
 
 	// Artifact indexing (search registry, line-overlap connections, connected_artifacts,
-	// category_instance, category-path metrics.txt, and hybrid_search links) is
+	// category_name links, category-path metrics.txt, and hybrid_search links) is
 	// intentionally NOT done here. It runs in Phase C (post-process) via
 	// PostProcessIndex, after every doc processor finishes, because metric indexing reads
 	// other processors' artifacts (semantic_projections, topics, scenes, provisions,
@@ -2238,7 +2238,7 @@ VALUES (
 		searchDocument := buildMetricSearchDocument(metric, !isEnglish)
 
 		// metric_categories is a TEXT column; store the category keys as a JSON array
-		// string so the post-save indexing step can parse them back for category_instance.
+		// string so the post-save indexing step can parse them back for category links.
 		metricCategoriesJSON, _ := json.Marshal(metricCategoryKeysFromMetric(metric))
 		metricCategoriesText := string(metricCategoriesJSON)
 		metricCategoriesEnJSON, _ := json.Marshal(metricCategoryKeysFromValue(metric["metric_categories_en"]))
@@ -2344,26 +2344,26 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 	var out []map[string]any
 	for rows.Next() {
 		var (
-			metricID, metricName, metricNameEn            string
-			sourceLineSpansRaw                             []byte
-			metricSubject, metricSubjectEn                string
-			metricDesc, metricDescEn                      string
-			metricContext, metricContextEn                string
-			metricKeywordsRaw, metricKeywordsEnRaw        []byte
-			locationType                                  string
-			metricUnit, metricUnitEn                      string
-			metricValue                                   string
-			valueDataType, valueRangeType                 string
-			valueClass, valueClassEn                      string
-			formulaOrDef, thresholdOrTarget, measFreq     string
-			confidence                                    float64
-			isExplicit                                    bool
-			tableNameOrSection                            string
-			reasoningTagsRaw                              []byte
-			metricCategories, metricCategoriesEn          string
-			categoryPathsRaw, categoryPathsEnRaw          []byte
-			searchDocument                                string
-			connectedArtifactsRaw                        []byte
+			metricID, metricName, metricNameEn        string
+			sourceLineSpansRaw                        []byte
+			metricSubject, metricSubjectEn            string
+			metricDesc, metricDescEn                  string
+			metricContext, metricContextEn            string
+			metricKeywordsRaw, metricKeywordsEnRaw    []byte
+			locationType                              string
+			metricUnit, metricUnitEn                  string
+			metricValue                               string
+			valueDataType, valueRangeType             string
+			valueClass, valueClassEn                  string
+			formulaOrDef, thresholdOrTarget, measFreq string
+			confidence                                float64
+			isExplicit                                bool
+			tableNameOrSection                        string
+			reasoningTagsRaw                          []byte
+			metricCategories, metricCategoriesEn      string
+			categoryPathsRaw, categoryPathsEnRaw      []byte
+			searchDocument                            string
+			connectedArtifactsRaw                     []byte
 		)
 		if err := rows.Scan(
 			&metricID, &metricName, &metricNameEn,
@@ -2388,39 +2388,39 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 			return nil, err
 		}
 		out = append(out, map[string]any{
-			"metric_id":              strings.TrimSpace(metricID),
-			"metric_name":            strings.TrimSpace(metricName),
-			"metric_name_en":         strings.TrimSpace(metricNameEn),
-			"source_line_spans":      jsonColumnToValue(sourceLineSpansRaw, []any{}),
-			"metric_subject":         strings.TrimSpace(metricSubject),
-			"metric_subject_en":      strings.TrimSpace(metricSubjectEn),
-			"metric_desc":            strings.TrimSpace(metricDesc),
-			"metric_desc_en":         strings.TrimSpace(metricDescEn),
-			"metric_context":         strings.TrimSpace(metricContext),
-			"metric_context_en":      strings.TrimSpace(metricContextEn),
-			"keywords":               jsonColumnToValue(metricKeywordsRaw, []any{}),
-			"keywords_en":            jsonColumnToValue(metricKeywordsEnRaw, []any{}),
-			"location_type":          strings.TrimSpace(locationType),
-			"metric_unit":            strings.TrimSpace(metricUnit),
-			"metric_unit_en":         strings.TrimSpace(metricUnitEn),
-			"metric_value":           strings.TrimSpace(metricValue),
-			"value_data_type":        strings.TrimSpace(valueDataType),
-			"value_range_type":       strings.TrimSpace(valueRangeType),
-			"value_class":            strings.TrimSpace(valueClass),
-			"value_class_en":         strings.TrimSpace(valueClassEn),
-			"formula_or_definition":  strings.TrimSpace(formulaOrDef),
-			"threshold_or_target":    strings.TrimSpace(thresholdOrTarget),
-			"measurement_frequency":  strings.TrimSpace(measFreq),
-			"confidence":             confidence,
-			"is_explicit_metric":     isExplicit,
-			"table_name_or_section":  strings.TrimSpace(tableNameOrSection),
-			"reasoning_tags":         jsonColumnToValue(reasoningTagsRaw, []any{}),
-			"metric_categories":      strings.TrimSpace(metricCategories),
-			"metric_categories_en":   strings.TrimSpace(metricCategoriesEn),
-			"category_paths":         jsonColumnToValue(categoryPathsRaw, []any{}),
-			"category_paths_en":      jsonColumnToValue(categoryPathsEnRaw, []any{}),
-			"search_document":        strings.TrimSpace(searchDocument),
-			"connected_artifacts":    jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+			"metric_id":             strings.TrimSpace(metricID),
+			"metric_name":           strings.TrimSpace(metricName),
+			"metric_name_en":        strings.TrimSpace(metricNameEn),
+			"source_line_spans":     jsonColumnToValue(sourceLineSpansRaw, []any{}),
+			"metric_subject":        strings.TrimSpace(metricSubject),
+			"metric_subject_en":     strings.TrimSpace(metricSubjectEn),
+			"metric_desc":           strings.TrimSpace(metricDesc),
+			"metric_desc_en":        strings.TrimSpace(metricDescEn),
+			"metric_context":        strings.TrimSpace(metricContext),
+			"metric_context_en":     strings.TrimSpace(metricContextEn),
+			"keywords":              jsonColumnToValue(metricKeywordsRaw, []any{}),
+			"keywords_en":           jsonColumnToValue(metricKeywordsEnRaw, []any{}),
+			"location_type":         strings.TrimSpace(locationType),
+			"metric_unit":           strings.TrimSpace(metricUnit),
+			"metric_unit_en":        strings.TrimSpace(metricUnitEn),
+			"metric_value":          strings.TrimSpace(metricValue),
+			"value_data_type":       strings.TrimSpace(valueDataType),
+			"value_range_type":      strings.TrimSpace(valueRangeType),
+			"value_class":           strings.TrimSpace(valueClass),
+			"value_class_en":        strings.TrimSpace(valueClassEn),
+			"formula_or_definition": strings.TrimSpace(formulaOrDef),
+			"threshold_or_target":   strings.TrimSpace(thresholdOrTarget),
+			"measurement_frequency": strings.TrimSpace(measFreq),
+			"confidence":            confidence,
+			"is_explicit_metric":    isExplicit,
+			"table_name_or_section": strings.TrimSpace(tableNameOrSection),
+			"reasoning_tags":        jsonColumnToValue(reasoningTagsRaw, []any{}),
+			"metric_categories":     strings.TrimSpace(metricCategories),
+			"metric_categories_en":  strings.TrimSpace(metricCategoriesEn),
+			"category_paths":        jsonColumnToValue(categoryPathsRaw, []any{}),
+			"category_paths_en":     jsonColumnToValue(categoryPathsEnRaw, []any{}),
+			"search_document":       strings.TrimSpace(searchDocument),
+			"connected_artifacts":   jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
 		})
 	}
 	return out, rows.Err()

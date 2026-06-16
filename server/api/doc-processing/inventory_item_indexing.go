@@ -26,7 +26,7 @@ var inventoryItemIndexConfig = artifactIndexConfig{
 }
 
 // IndexInventoryItemsForRecord runs the post-save inventory-item indexing workflow
-// (spec 3.3.2-3.3.5): connected_artifacts JSON, category_instance rows, category-path
+// (spec 3.3.2-3.3.5): connected_artifacts JSON, category_name edges, category-path
 // inventory_items.txt entries, and hybrid_search semantic links. Step 3.3.1
 // (kb.search_artifacts) is handled separately by ReindexInventoryItemSearchForRecord,
 // which the caller runs first. Each step is best-effort and logged; a failure in one step
@@ -55,15 +55,17 @@ func IndexInventoryItemsForRecord(ctx context.Context, recordID int64, inputChun
 
 	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, items, inventoryItemIndexConfig, logger)
 	resolver := newMetricCategoryResolver(db, logger) // category resolver is category-type-agnostic
-	categoryInstances := upsertArtifactCategoryInstances(ctx, db, recordID, items, inventoryItemIndexConfig, resolver, logger)
+	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, items, inventoryItemIndexConfig, resolver, logger)
 	categoryPathItems := indexArtifactsByCategoryPaths(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
+	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
 
 	if logger != nil {
 		logger.Info("inventory items indexing result",
 			"record_id", recordID,
 			"connected_artifacts_items", connectedCount,
-			"category_instances", categoryInstances,
+			"category_connections", categoryConnections,
 			"category_path_items", categoryPathItems,
+			"semantic_links", semanticLinks,
 		)
 	}
 }
