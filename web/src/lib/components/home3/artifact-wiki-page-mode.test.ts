@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { usesLegacyMetricWikiLayout } from './artifact-wiki-page-mode.js';
 
-test('uses legacy metric wiki layout for metrics', () => {
-	assert.equal(usesLegacyMetricWikiLayout('metric'), true);
+test('generic artifact wiki route does not keep a metric-only left-panel branch', () => {
+	assert.equal(usesLegacyMetricWikiLayout('metric'), false);
 });
 
 test('does not use legacy metric wiki layout for non-metric artifacts', () => {

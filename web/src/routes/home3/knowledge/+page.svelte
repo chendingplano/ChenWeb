@@ -37,6 +37,7 @@
 	import SemanticProjectionsView from '$lib/components/home3/semantic-projections-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import { getProvisionCategory, listProvisionGraph } from '$lib/services/kbService';
+	import { parseKbSearchArtifactType } from '$lib/services/kbArtifactSearch';
 	import {
 		KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS,
 		isUnderConstructionKnowledgeSection
@@ -248,6 +249,9 @@
 		(page.url.searchParams.get('section') as KbSectionId | null) ?? 'kb-search'
 	);
 	let searchQuery = $derived(page.url.searchParams.get('q')?.trim() ?? '');
+	let searchArtifactType = $derived(
+		parseKbSearchArtifactType(page.url.searchParams.get('scope'))
+	);
 	let metricWikiId = $derived(page.url.searchParams.get('metric_id')?.trim() ?? '');
 	let artifactWikiType = $derived(page.url.searchParams.get('artifact_type')?.trim() ?? '');
 	let artifactWikiId = $derived(page.url.searchParams.get('artifact_id')?.trim() ?? '');
@@ -615,6 +619,7 @@
 						{darkMode}
 						initialQuery={searchQuery}
 						initialPage={searchPageNumber}
+						initialArtifactType={searchArtifactType}
 					/>
 				{:else}
 					<KnowledgeStoreView {darkMode} />

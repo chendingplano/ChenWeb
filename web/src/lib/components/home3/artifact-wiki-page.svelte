@@ -5,8 +5,7 @@
 		type ArtifactWikiResponse
 	} from '$lib/services/artifactWikiService';
 	import ArtifactRecordInspector from './artifact-record-inspector.svelte';
-	import MetricWikiView from './metric-wiki-view.svelte';
-	import { usesLegacyMetricWikiLayout } from './artifact-wiki-page-mode.js';
+	import ArtifactWikiArticleView from './artifact-wiki-article-view.svelte';
 
 	let {
 		artifactType,
@@ -27,8 +26,6 @@
 	let articleError = $state('');
 	let recordError = $state('');
 	let lastKey = $state('');
-	let useLegacyMetricLayout = $derived(usesLegacyMetricWikiLayout(artifactType));
-
 	let pageBg = $derived(darkMode ? 'oklch(16% 0.013 250)' : 'oklch(96% 0.012 84)');
 	let surface = $derived(darkMode ? 'oklch(20% 0.018 250)' : 'oklch(99% 0.006 84)');
 	let border = $derived(darkMode ? 'oklch(30% 0.02 250)' : 'oklch(88% 0.012 84)');
@@ -66,55 +63,25 @@
 		recordPayload = null;
 		articlePayload = null;
 		void loadRecord();
-		if (!useLegacyMetricLayout) {
-			void loadArticle();
-		}
+		void loadArticle();
 	});
-
-	type MetricArticle = {
-		title?: string;
-		lead?: string;
-		definition?: string;
-		background?: string;
-		how_used?: string;
-		choosing_values?: string;
-		related_metrics?: string[];
-	};
-
-	let metricArticle = $derived((articlePayload?.article ?? {}) as MetricArticle);
 </script>
 
 <div class="artifact-page" style="--bg:{pageBg}; --surface:{surface}; --border:{border}; --ink:{ink}; --ink-soft:{inkSoft};">
 	<div class="layout">
 		<article class="article">
-			{#if useLegacyMetricLayout}
-				<MetricWikiView metricId={artifactId} {lang} {darkMode} showInfobox={false} />
-			{:else}
-				{#if articleError}
-					<p class="state error">{articleError}</p>
-				{:else if articleLoading && !articlePayload}
-					<p class="state">Building article…</p>
-				{:else}
-					<header class="head">
-						<p class="eyebrow">{artifactType} wiki</p>
-						<h1>{metricArticle.title ?? artifactId}</h1>
-					</header>
-					{#if metricArticle.lead}<p class="lead">{metricArticle.lead}</p>{/if}
-					{#each [
-						['Definition', metricArticle.definition],
-						['Background', metricArticle.background],
-						['How it is used', metricArticle.how_used],
-						['Choosing values', metricArticle.choosing_values]
-					] as [heading, body]}
-						{#if body}
-							<section class="block">
-								<h2>{heading}</h2>
-								<p>{body}</p>
-							</section>
-						{/if}
-					{/each}
-				{/if}
-			{/if}
+			<ArtifactWikiArticleView
+				article={(articlePayload?.article ?? null) as Record<string, unknown> | null}
+				{artifactType}
+				artifactId={artifactId}
+				{darkMode}
+				{lang}
+				showInfobox={false}
+				loading={articleLoading}
+				error={articleError}
+				generated={articlePayload?.fresh ?? false}
+				retry={loadArticle}
+			/>
 		</article>
 
 		<div class="sidebar">
@@ -150,51 +117,13 @@
 		background: var(--surface);
 		border: 1px solid var(--border);
 		border-radius: 18px;
-		padding: 1.5rem;
+		padding: 0;
 		overflow: hidden;
-	}
-	.head {
-		margin-bottom: 1rem;
-		padding-bottom: 1rem;
-		border-bottom: 1px solid var(--border);
-	}
-	.eyebrow {
-		margin: 0 0 0.4rem;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--ink-soft);
-	}
-	h1, h2, p {
-		margin: 0;
-	}
-	h1 {
-		font-size: 2rem;
-	}
-	.lead {
-		margin-bottom: 1rem;
-		line-height: 1.65;
-	}
-	.block + .block {
-		margin-top: 1rem;
-	}
-	h2 {
-		font-size: 1.1rem;
-		margin-bottom: 0.45rem;
-	}
-	.block p {
-		line-height: 1.65;
 	}
 	.sidebar {
 		align-self: start;
 		position: sticky;
 		top: 1rem;
-	}
-	.state {
-		color: var(--ink-soft);
-	}
-	.state.error {
-		color: #dc2626;
 	}
 	.sidebar-note {
 		margin: 0.75rem 0 0;

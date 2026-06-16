@@ -1,14 +1,19 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import { getLocale, locales, setLocale } from '$lib/paraglide/runtime.js';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import {
+		buildKbSearchPageHref,
+		matchesKbSearchHistorySnapshot,
+		parseKbSearchArtifactType,
 		searchKbArtifacts,
 		type KbSearchArtifactType,
+		type KbSearchHistorySnapshot,
 		type KbSearchResponse,
 		type KbSearchResult
 	} from '$lib/services/kbArtifactSearch';
@@ -23,8 +28,14 @@
 	let {
 		darkMode = true,
 		initialQuery = '',
-		initialPage = 1
-	}: { darkMode: boolean; initialQuery?: string; initialPage?: number } = $props();
+		initialPage = 1,
+		initialArtifactType = 'all'
+	}: {
+		darkMode: boolean;
+		initialQuery?: string;
+		initialPage?: number;
+		initialArtifactType?: KbSearchArtifactType;
+	} = $props();
 
 	function normalizeRequestedPage(page: number): number {
 		return Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1;
@@ -39,7 +50,7 @@
 
 	let query = $state(initialQuery.trim());
 	let submittedQuery = $state(initialQuery.trim());
-	let artifactType = $state<KbSearchArtifactType>('all');
+	let artifactType = $state<KbSearchArtifactType>(parseKbSearchArtifactType(initialArtifactType));
 	let pageNumber = $state(normalizeRequestedPage(initialPage));
 	let currentLocale = $state<string>('en');
 	let supportedLanguages = $state<string[]>(['en', 'zh-cn']);
@@ -48,6 +59,12 @@
 	let payload = $state<KbSearchResponse | null>(null);
 	let lastRequestKey = '';
 	let didInitialSearch = false;
+	let lastPersistedSnapshot = '';
+	let routerReady = $state(false);
+
+	afterNavigate(() => {
+		routerReady = true;
+	});
 
 	let total = $derived(payload?.total ?? 0);
 	let results = $derived(payload?.results ?? []);
@@ -132,15 +149,58 @@
 				darkMode
 			});
 		}
-		return `/home3/knowledge?section=kb-search&q=${encodeURIComponent(submittedQuery)}`;
+		return buildSearchUrl(submittedQuery, pageNumber);
 	}
 
 	function buildSearchUrl(q: string, nextPage = 1): string {
-		const params = new URLSearchParams({ section: 'kb-search' });
-		if (q.trim()) params.set('q', q.trim());
-		if (nextPage > 1) params.set('page', String(nextPage));
-		if (!darkMode) params.set('dark', '0');
-		return `/home3/knowledge?${params.toString()}`;
+		return buildKbSearchPageHref({
+			q,
+			page: nextPage,
+			artifactType,
+			darkMode
+		});
+	}
+
+	function buildHistorySnapshot(): KbSearchHistorySnapshot {
+		return {
+			query,
+			submittedQuery,
+			artifactType,
+			pageNumber,
+			currentLocale,
+			error,
+			payload
+		};
+	}
+
+	function toPlainHistorySnapshot(snapshot: KbSearchHistorySnapshot): KbSearchHistorySnapshot {
+		return JSON.parse(JSON.stringify(snapshot)) as KbSearchHistorySnapshot;
+	}
+
+	function restoreFromHistorySnapshot(snapshot: KbSearchHistorySnapshot) {
+		query = snapshot.query;
+		submittedQuery = snapshot.submittedQuery;
+		artifactType = snapshot.artifactType;
+		pageNumber = normalizeRequestedPage(snapshot.pageNumber);
+		currentLocale = snapshot.currentLocale || currentLocale;
+		error = snapshot.error;
+		payload = snapshot.payload;
+		loading = false;
+	}
+
+	function getMatchingHistorySnapshot(
+		nextQuery: string,
+		nextPage: number,
+		nextArtifactType: KbSearchArtifactType
+	): KbSearchHistorySnapshot | null {
+		const snapshot = page.state?.kbSearchResults;
+		return matchesKbSearchHistorySnapshot(snapshot, {
+			query: nextQuery,
+			pageNumber: nextPage,
+			artifactType: nextArtifactType
+		})
+			? snapshot
+			: null;
 	}
 
 	async function fetchResults(nextQuery = submittedQuery, nextPage = pageNumber) {
@@ -233,18 +293,45 @@
 	$effect(() => {
 		const next = initialQuery.trim();
 		const nextPage = normalizeRequestedPage(initialPage);
+		const nextArtifactType = parseKbSearchArtifactType(initialArtifactType);
 		if (!didInitialSearch) {
 			didInitialSearch = true;
+			artifactType = nextArtifactType;
 			pageNumber = nextPage;
+			const snapshot = getMatchingHistorySnapshot(next, nextPage, nextArtifactType);
+			if (snapshot) {
+				restoreFromHistorySnapshot(snapshot);
+				return;
+			}
 			if (next) void fetchResults(next, nextPage);
 			return;
 		}
-		if (next !== submittedQuery || nextPage !== pageNumber) {
+		if (
+			next !== submittedQuery ||
+			nextPage !== pageNumber ||
+			nextArtifactType !== artifactType
+		) {
 			query = next;
 			submittedQuery = next;
+			artifactType = nextArtifactType;
 			pageNumber = nextPage;
+			const snapshot = getMatchingHistorySnapshot(next, nextPage, nextArtifactType);
+			if (snapshot) {
+				restoreFromHistorySnapshot(snapshot);
+				return;
+			}
 			void fetchResults(next, nextPage);
 		}
+	});
+
+	$effect(() => {
+		if (!routerReady) return;
+		const snapshot = toPlainHistorySnapshot(buildHistorySnapshot());
+		const serialized = JSON.stringify(snapshot);
+		if (serialized === lastPersistedSnapshot) return;
+		lastPersistedSnapshot = serialized;
+		const currentState = page.state ? JSON.parse(JSON.stringify(page.state)) : {};
+		replaceState('', { ...currentState, kbSearchResults: snapshot });
 	});
 
 	onMount(() => {

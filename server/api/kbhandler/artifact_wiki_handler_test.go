@@ -528,3 +528,140 @@ func TestGetArtifactWikiNonMetricTranslatesFromEnglishCache(t *testing.T) {
 		t.Fatalf("saved article = %s", saved)
 	}
 }
+
+func TestGetArtifactWikiNonMetricGeneratesTargetLanguageDirectlyWhenTranslationModelMissing(t *testing.T) {
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+	t.Setenv("TRANSLATION_MODEL_NAME", "")
+	if err := os.MkdirAll(filepath.Join(artifactDir, "0", "7"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origProvider := artifactWikiProviders["entity"]
+	artifactWikiProviders["entity"] = artifactWikiProvider{
+		loadPayload: func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactID, lang string) (artifactWikiPayload, error) {
+			return artifactWikiPayload{
+				RecordID:       7,
+				ArtifactID:     artifactID,
+				Record:         json.RawMessage(`{"entity_id":"7_ent_1","entity":"Intelligent Software"}`),
+				SourceDocument: json.RawMessage(`{"record_id":7,"title":"doc.pdf","file_name":"doc.pdf","type":"pdf"}`),
+				Generated: artifactWikiGeneratedMeta{
+					Lang:       "zh-cn",
+					SourceHash: "sha256:test",
+				},
+			}, nil
+		},
+	}
+	defer func() { artifactWikiProviders["entity"] = origProvider }()
+
+	origBuild := buildGenericArtifactWikiArticleFn
+	buildGenericArtifactWikiArticleFn = func(ctx context.Context, logger ApiTypes.JimoLogger, payload artifactWikiPayload, artifactType, lang string) (json.RawMessage, error) {
+		if artifactType != "entity" {
+			t.Fatalf("artifactType = %q, want entity", artifactType)
+		}
+		if lang != "zh-cn" {
+			t.Fatalf("lang = %q, want zh-cn", lang)
+		}
+		return json.RawMessage(`{"title":"智能软件","lead":"中文页面。"}`), nil
+	}
+	defer func() { buildGenericArtifactWikiArticleFn = origBuild }()
+
+	origTranslate := translateGenericArtifactWikiArticleFn
+	translateGenericArtifactWikiArticleFn = func(ctx context.Context, logger ApiTypes.JimoLogger, article json.RawMessage, targetLang string) (json.RawMessage, error) {
+		t.Fatalf("translate should not be called when translation model is missing")
+		return nil, nil
+	}
+	defer func() { translateGenericArtifactWikiArticleFn = origTranslate }()
+
+	c, rec := newArtifactWikiContext(t, "entity", "7_ent_1", "zh-cn")
+	if err := GetArtifactWiki(c); err != nil {
+		t.Fatalf("GetArtifactWiki err = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp artifactWikiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if string(resp.Article) != `{"title":"智能软件","lead":"中文页面。"}` {
+		t.Fatalf("article = %s", resp.Article)
+	}
+}
+
+func TestGetArtifactWikiNonMetricRefreshesStaleTargetLanguageCache(t *testing.T) {
+	artifactDir := t.TempDir()
+	t.Setenv("ARTIFACT_DIR", artifactDir)
+	t.Setenv("TRANSLATION_MODEL_NAME", "configured-translation-model")
+
+	recordDir := filepath.Join(artifactDir, "0", "7")
+	if err := os.MkdirAll(recordDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	englishArticle := json.RawMessage(`{
+  "title":"Intelligent Software",
+  "lead":"English article.",
+  "definition":"Software with intelligent functions.",
+  "background":"English background.",
+  "generated":{"lang":"en"}
+}`)
+	if err := os.WriteFile(filepath.Join(recordDir, "wikipage_entity_7_ent_1.en.json"), englishArticle, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleZhArticle := json.RawMessage(`{
+  "title":"Intelligent Software",
+  "lead":"English article.",
+  "definition":"Software with intelligent functions.",
+  "background":"English background.",
+  "generated":{"lang":"zh-cn"}
+}`)
+	if err := os.WriteFile(filepath.Join(recordDir, "wikipage_entity_7_ent_1.zh-cn.json"), staleZhArticle, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origProvider := artifactWikiProviders["entity"]
+	artifactWikiProviders["entity"] = artifactWikiProvider{
+		loadPayload: func(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactID, lang string) (artifactWikiPayload, error) {
+			return artifactWikiPayload{
+				RecordID:       7,
+				ArtifactID:     artifactID,
+				Record:         json.RawMessage(`{"entity_id":"7_ent_1","entity":"Intelligent Software"}`),
+				SourceDocument: json.RawMessage(`{"record_id":7,"title":"doc.pdf","file_name":"doc.pdf","type":"pdf"}`),
+				Generated: artifactWikiGeneratedMeta{
+					Lang:       "zh-cn",
+					SourceHash: "sha256:test",
+				},
+			}, nil
+		},
+	}
+	defer func() { artifactWikiProviders["entity"] = origProvider }()
+
+	origTranslate := translateGenericArtifactWikiArticleFn
+	translateGenericArtifactWikiArticleFn = func(ctx context.Context, logger ApiTypes.JimoLogger, article json.RawMessage, targetLang string) (json.RawMessage, error) {
+		if string(article) != string(englishArticle) {
+			t.Fatalf("translate source article = %s, want %s", article, englishArticle)
+		}
+		return json.RawMessage(`{"title":"智能软件","lead":"中文页面。","definition":"具备智能功能的软件。","background":"中文背景。","generated":{"lang":"zh-cn"}}`), nil
+	}
+	defer func() { translateGenericArtifactWikiArticleFn = origTranslate }()
+
+	c, rec := newArtifactWikiContext(t, "entity", "7_ent_1", "zh-cn")
+	if err := GetArtifactWiki(c); err != nil {
+		t.Fatalf("GetArtifactWiki err = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp artifactWikiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Fresh {
+		t.Fatalf("fresh = %v, want true after stale cache refresh", resp.Fresh)
+	}
+	if string(resp.Article) == string(staleZhArticle) {
+		t.Fatalf("article should have been refreshed")
+	}
+}

@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildKbArtifactSearchUrl } from './kbArtifactSearch.js';
+import {
+	buildKbArtifactSearchUrl,
+	buildKbSearchPageHref,
+	matchesKbSearchHistorySnapshot,
+	parseKbSearchArtifactType
+} from './kbArtifactSearch.js';
 import { kbSearchArtifactOptions } from '$lib/components/home3/kb-search-lab-state';
 
 test('metric scope uses the hybrid registry endpoint with artifact_types filter', () => {
@@ -81,4 +86,68 @@ test('change 02 search chips remove products and expose the new artifact familie
 		'Provisions'
 	]);
 	assert.equal(labels.includes('Products'), false);
+});
+
+test('search page href preserves non-default artifact scope', () => {
+	assert.equal(
+		buildKbSearchPageHref({
+			q: '人工智能',
+			page: 3,
+			artifactType: 'metrics',
+			darkMode: false
+		}),
+		'/home3/knowledge?section=kb-search&q=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&page=3&scope=metrics&dark=0'
+	);
+});
+
+test('search page href omits default scope and first page noise', () => {
+	assert.equal(
+		buildKbSearchPageHref({
+			q: 'battery',
+			page: 1,
+			artifactType: 'all',
+			darkMode: true
+		}),
+		'/home3/knowledge?section=kb-search&q=battery'
+	);
+});
+
+test('invalid artifact scopes fall back to all', () => {
+	assert.equal(parseKbSearchArtifactType('metrics'), 'metrics');
+	assert.equal(parseKbSearchArtifactType('unknown-scope'), 'all');
+	assert.equal(parseKbSearchArtifactType(''), 'all');
+});
+
+test('history snapshot only restores when route state matches', () => {
+	const snapshot = {
+		query: '人工智能',
+		submittedQuery: '人工智能',
+		artifactType: 'metrics',
+		pageNumber: 2,
+		currentLocale: 'zh-cn',
+		error: '',
+		payload: {
+			status: true,
+			query: '人工智能',
+			total: 1,
+			results: [{ artifact_id: '1', artifact_type: 'metric', primary_label: 'foo' }]
+		}
+	};
+
+	assert.equal(
+		matchesKbSearchHistorySnapshot(snapshot, {
+			query: '人工智能',
+			pageNumber: 2,
+			artifactType: 'metrics'
+		}),
+		true
+	);
+	assert.equal(
+		matchesKbSearchHistorySnapshot(snapshot, {
+			query: '人工智能',
+			pageNumber: 2,
+			artifactType: 'all'
+		}),
+		false
+	);
 });

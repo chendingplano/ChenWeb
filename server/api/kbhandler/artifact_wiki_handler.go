@@ -156,6 +156,40 @@ func shouldGenerateMetricArtifactWikiArticleDirectly(lang string) bool {
 	return lang != "en" && strings.TrimSpace(os.Getenv("TRANSLATION_MODEL_NAME")) == ""
 }
 
+func shouldGenerateGenericArtifactWikiArticleDirectly(lang string) bool {
+	lang = normalizeArtifactWikiLang(lang)
+	return lang != "en" && strings.TrimSpace(os.Getenv("TRANSLATION_MODEL_NAME")) == ""
+}
+
+func shouldRefreshGenericArtifactWikiCachedPageForLanguage(data []byte, lang string) bool {
+	lang = strings.TrimSpace(strings.ToLower(lang))
+	if lang != "zh-cn" {
+		return false
+	}
+
+	var page genericArtifactWikiPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return false
+	}
+
+	prose := strings.Join([]string{
+		page.Title,
+		page.Lead,
+		page.Definition,
+		page.Background,
+		page.HowUsed,
+		page.ChoosingValues,
+	}, " ")
+	prose = strings.TrimSpace(prose)
+	if prose == "" {
+		return false
+	}
+	if containsCJKText(prose) {
+		return false
+	}
+	return strings.ContainsAny(prose, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+}
+
 func loadOrCreateMetricArtifactWikiArticle(ctx context.Context, db *sql.DB, logger ApiTypes.JimoLogger, artifactDir string, recordID int64, artifactID, lang string) (json.RawMessage, bool, error) {
 	targetPath, err := artifactWikiPagePath(artifactDir, "metric", recordID, artifactID, lang)
 	if err != nil {
@@ -226,10 +260,26 @@ func loadOrCreateArtifactWikiArticle(ctx context.Context, db *sql.DB, logger Api
 	if err != nil {
 		return nil, false, err
 	}
+	needsRefresh := false
 	if article, readErr := os.ReadFile(targetPath); readErr == nil {
-		return json.RawMessage(article), false, nil
+		if shouldRefreshGenericArtifactWikiCachedPageForLanguage(article, lang) {
+			needsRefresh = true
+		} else {
+			return json.RawMessage(article), false, nil
+		}
 	} else if !os.IsNotExist(readErr) {
 		return nil, false, readErr
+	}
+
+	if shouldGenerateGenericArtifactWikiArticleDirectly(lang) {
+		article, genErr := buildGenericArtifactWikiArticleFn(ctx, logger, payload, artifactType, lang)
+		if genErr != nil {
+			return nil, false, genErr
+		}
+		if saveErr := saveMetricWikiPage(targetPath, article); saveErr != nil {
+			return nil, false, saveErr
+		}
+		return article, true, nil
 	}
 
 	englishPath, err := artifactWikiPagePath(artifactDir, artifactType, payload.RecordID, payload.ArtifactID, "en")
@@ -257,7 +307,7 @@ func loadOrCreateArtifactWikiArticle(ctx context.Context, db *sql.DB, logger Api
 				return nil, false, err
 			}
 		}
-		return englishArticle, true, nil
+		return englishArticle, !needsRefresh || targetPath == englishPath || needsRefresh, nil
 	}
 
 	translatedArticle, err := translateGenericArtifactWikiArticleFn(ctx, logger, englishArticle, lang)

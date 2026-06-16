@@ -50,7 +50,30 @@ export type KbSearchResponse = {
 	[key: string]: unknown;
 };
 
+export type KbSearchHistorySnapshot = {
+	query: string;
+	submittedQuery: string;
+	artifactType: KbSearchArtifactType;
+	pageNumber: number;
+	currentLocale: string;
+	error: string;
+	payload: KbSearchResponse | null;
+};
+
 const KB_SEARCH_ENDPOINT = '/api/v1/kb/search';
+const KB_SEARCH_PAGE_PATH = '/home3/knowledge';
+const kbSearchArtifactTypeValues = new Set<KbSearchArtifactType>([
+	'all',
+	'metrics',
+	'summaries',
+	'topics',
+	'content-segments',
+	'semantic-projections',
+	'entities',
+	'relations',
+	'scene-blocks',
+	'provisions'
+]);
 
 const artifactTypeFilterByScope: Partial<Record<KbSearchArtifactType, string>> = {
 	metrics: 'metric',
@@ -63,6 +86,46 @@ const artifactTypeFilterByScope: Partial<Record<KbSearchArtifactType, string>> =
 	'scene-blocks': 'scene_block',
 	provisions: 'provision'
 };
+
+export function parseKbSearchArtifactType(value: string | null | undefined): KbSearchArtifactType {
+	const trimmed = value?.trim() as KbSearchArtifactType | undefined;
+	return trimmed && kbSearchArtifactTypeValues.has(trimmed) ? trimmed : 'all';
+}
+
+export function buildKbSearchPageHref({
+	q,
+	page = 1,
+	artifactType = 'all',
+	darkMode = true
+}: {
+	q: string;
+	page?: number;
+	artifactType?: KbSearchArtifactType;
+	darkMode?: boolean;
+}): string {
+	const params = new URLSearchParams({ section: 'kb-search' });
+	if (q.trim()) params.set('q', q.trim());
+	if (page > 1) params.set('page', String(page));
+	if (artifactType !== 'all') params.set('scope', artifactType);
+	if (!darkMode) params.set('dark', '0');
+	return `${KB_SEARCH_PAGE_PATH}?${params.toString()}`;
+}
+
+export function matchesKbSearchHistorySnapshot(
+	snapshot: KbSearchHistorySnapshot | null | undefined,
+	params: {
+		query: string;
+		pageNumber: number;
+		artifactType: KbSearchArtifactType;
+	}
+): snapshot is KbSearchHistorySnapshot {
+	if (!snapshot) return false;
+	return (
+		snapshot.submittedQuery.trim() === params.query.trim() &&
+		snapshot.pageNumber === params.pageNumber &&
+		snapshot.artifactType === params.artifactType
+	);
+}
 
 export function buildKbArtifactSearchUrl(
 	artifactType: KbSearchArtifactType,
