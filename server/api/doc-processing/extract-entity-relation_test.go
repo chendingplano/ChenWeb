@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -290,6 +291,56 @@ func (e *erSeqExtractor) ExtractJSON(_ context.Context, _ llmclients.JSONExtract
 	return out, err
 }
 
+type erHandleEventInputStore struct {
+	rec DocMetadataInputRecord
+}
+
+func (s *erHandleEventInputStore) GetInputRecord(_ context.Context, id int64) (DocMetadataInputRecord, error) {
+	if id != s.rec.ID {
+		return DocMetadataInputRecord{}, errors.New("not found")
+	}
+	return s.rec, nil
+}
+
+func (s *erHandleEventInputStore) UpdateInputMetadata(_ context.Context, id int64, req DocMetadataUpdate) error {
+	if id != s.rec.ID {
+		return errors.New("not found")
+	}
+	s.rec.StatusRaw = req.StatusRaw
+	return nil
+}
+
+type erHandleEventEntityStore struct {
+	savedEntities  SaveEntitiesRequest
+	savedRelations SaveRelationsRequest
+}
+
+func (s *erHandleEventEntityStore) EntitiesExist(context.Context, int64) (bool, error) {
+	return false, nil
+}
+
+func (s *erHandleEventEntityStore) DeleteEntitiesByInputRecordID(context.Context, int64) (int64, error) {
+	return 0, nil
+}
+
+func (s *erHandleEventEntityStore) SaveEntities(_ context.Context, req SaveEntitiesRequest) (int64, error) {
+	s.savedEntities = req
+	return int64(len(req.Entities)), nil
+}
+
+func (s *erHandleEventEntityStore) RelationsExist(context.Context, int64) (bool, error) {
+	return false, nil
+}
+
+func (s *erHandleEventEntityStore) DeleteRelationsByInputRecordID(context.Context, int64) (int64, error) {
+	return 0, nil
+}
+
+func (s *erHandleEventEntityStore) SaveRelations(_ context.Context, req SaveRelationsRequest) (int64, error) {
+	s.savedRelations = req
+	return int64(len(req.Relations)), nil
+}
+
 // erBlockingExtractor blocks each call until a gate signal is received.
 // It is thread-safe and tracks the maximum number of concurrent callers.
 type erBlockingExtractor struct {
@@ -342,6 +393,91 @@ func makeTestProcessor(ext LLMJSONExtractor, maxTasks int) *EntityRelationProces
 		Now:                           time.Now,
 		ModelName:                     "test-model",
 		ExtractEntityRelationMaxTasks: maxTasks,
+	}
+}
+
+func TestHandleEventDoesNotGenerateEntityContext(t *testing.T) {
+	const recordID int64 = 101
+	tmp := t.TempDir()
+	lineFile := filepath.Join(tmp, "sample_marker.txt")
+	lineContent := "1\t1\tparagraph\tArial\t12\t[0,0,1,1]\tEntity Alpha appears here\n"
+	if err := os.WriteFile(lineFile, []byte(lineContent), 0o644); err != nil {
+		t.Fatalf("write line file: %v", err)
+	}
+	targetDir := filepath.Join(tmp, "0", "101")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "sample_marker.chunks"), []byte("overlap: []\nlines: [1]\n"), 0o644); err != nil {
+		t.Fatalf("write chunks file: %v", err)
+	}
+
+	inputStore := &erHandleEventInputStore{rec: DocMetadataInputRecord{
+		ID:              recordID,
+		ParserName:      "marker",
+		ResultFilename:  lineFile,
+		StagingFilename: "sample.pdf",
+		StatusRaw:       "[]",
+		Title:           "Sample Document",
+	}}
+	entityStore := &erHandleEventEntityStore{}
+	p := &EntityRelationProcessor{
+		InputStore: inputStore,
+		Store:      entityStore,
+		Logger:     &fakeLogger{},
+		Extractor: &erSimpleExtractor{out: map[string]any{
+			"language": "en",
+			"entities": []any{
+				map[string]any{"entity": "Entity Alpha", "lines": []any{"1"}, "confidence": 0.9},
+			},
+			"relations": []any{},
+		}},
+		Now:                           time.Now,
+		PromptText:                    "extract entities",
+		PromptRef:                     "test-prompt",
+		ModelName:                     "test-model",
+		RelationPromptText:            "",
+		RelationPromptErr:             errors.New("relation prompt intentionally disabled"),
+		ArtifactDir:                   tmp,
+		ExtractEntityRelationMaxTasks: 1,
+	}
+
+	payload := []byte(`{"record_id":101,"force":true,"type":"pdf","status":"success"}`)
+	if err := p.HandleEvent(context.Background(), payload); err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+	if len(entityStore.savedEntities.Entities) != 1 {
+		t.Fatalf("saved entities=%d, want 1", len(entityStore.savedEntities.Entities))
+	}
+	if got := strings.TrimSpace(asString(entityStore.savedEntities.Entities[0]["entity_context"])); got != "" {
+		t.Fatalf("entity_context should not be generated before SaveEntities, got %q", got)
+	}
+}
+
+func TestEntitySearchDocumentDedupeMigrationExists(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../../.."))
+	path := filepath.Join(repoRoot, "project_migrations", "20260617000003_dedupe_kb_entity_search_document.sql")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", path, err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"CREATE OR REPLACE FUNCTION kb.entity_search_document",
+		"jsonb_array_elements_text",
+		"DISTINCT ON",
+		"lower(part)",
+		"UPDATE kb.entities",
+		"entity_context = NULL",
+		"search_vector = to_tsvector",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("migration %s missing %q", path, want)
+		}
 	}
 }
 
@@ -530,12 +666,15 @@ func TestEntityRelationExtractionUsesFallbackOnPrimaryError(t *testing.T) {
 }
 
 func TestParseLineSpanRange(t *testing.T) {
-	cases := []struct{ in string; wantS, wantE int }{
+	cases := []struct {
+		in           string
+		wantS, wantE int
+	}{
 		{"14", 14, 14},
 		{"14-16", 14, 16},
 		{"14:16", 14, 16},
 		{"  5  ", 5, 5},
-		{"0", 0, 0},    // zero is invalid
+		{"0", 0, 0}, // zero is invalid
 		{"-1", 0, 0},
 		{"abc", 0, 0},
 		{"14-12", 0, 0}, // end < start

@@ -71,13 +71,6 @@ type EntityRelationStore interface {
 	RelationsExist(ctx context.Context, inputRecordID int64) (bool, error)
 	DeleteRelationsByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error)
 	SaveRelations(ctx context.Context, req SaveRelationsRequest) (int64, error)
-	// GetChunkSummaries returns a map[seqNo]summaryText for level-0 (chunk-level)
-	// summaries of the given record, used to build entity_context.
-	GetChunkSummaries(ctx context.Context, inputRecordID int64) (map[int]string, error)
-	// AppendSummaryKeywordsToEntitySearch fetches all keywords from kb.summaries
-	// for the record and appends them to each entity row's search_document and
-	// search_vector.  It is a no-op if no summaries exist yet.
-	AppendSummaryKeywordsToEntitySearch(ctx context.Context, inputRecordID int64) error
 }
 
 type EntityRelationSQLStore struct {
@@ -314,13 +307,6 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		"entities", len(result.Entities),
 	)
 
-	chunkSummaries, sumErr := p.Store.GetChunkSummaries(ctx, evt.RecordID)
-	if sumErr != nil {
-		p.Logger.Warn("get chunk summaries failed; entity_context will be empty", "record_id", evt.RecordID, "error", sumErr)
-		chunkSummaries = map[int]string{}
-	}
-	buildEntityContextForEntities(result.Entities, chunks, lines, chunkSummaries, envInt("ARTIFACT_CONTEXT_SIZE", 3, 0))
-
 	// Step 4: extract relations
 	// Phase 2 (D5) — extract relations per overlapping positional window using the
 	// entity-aware relation prompt. With the entity-only Phase 1 prompt this is the
@@ -410,17 +396,6 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		p.persistEntityRelationStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26052716) insert relations failed, error:%w", err)
 	}
-
-	// if debugID := evt.RecordID; debugID == 416 {
-	// 	debugLogEntitySearchDocument(ctx, p.Store, debugID, "after SaveEntities (trigger baseline)", p.Logger)
-	// }
-
-	if appendErr := p.Store.AppendSummaryKeywordsToEntitySearch(ctx, evt.RecordID); appendErr != nil {
-		p.Logger.Warn("append summary keywords to entity search failed", "record_id", evt.RecordID, "error", appendErr)
-	}
-	// if debugID := evt.RecordID; debugID == 416 {
-	// 	debugLogEntitySearchDocument(ctx, p.Store, debugID, "after AppendSummaryKeywords", p.Logger)
-	// }
 
 	if fileErr := p.saveEntitiesToFile(evt.RecordID, rec, result.Entities); fileErr != nil {
 		p.Logger.Warn("save entities to file failed", "record_id", evt.RecordID, "error", fileErr)
@@ -1642,11 +1617,7 @@ INSERT INTO kb.entities (
 			keywordsEnVal = string(ke)
 		}
 
-		entityContextVal := strings.TrimSpace(asString(e["entity_context"]))
 		var entityContextArg any
-		if entityContextVal != "" {
-			entityContextArg = entityContextVal
-		}
 		docNameVal := strings.TrimSpace(req.DocName)
 		var docNameArg any
 		if docNameVal != "" {
@@ -1851,59 +1822,6 @@ func (s EntityRelationSQLStore) GetChunkSummaries(ctx context.Context, inputReco
 		result[seqNo] = text
 	}
 	return result, rows.Err()
-}
-
-func (s EntityRelationSQLStore) AppendSummaryKeywordsToEntitySearch(ctx context.Context, inputRecordID int64) error {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT COALESCE(keywords, '[]'::jsonb), COALESCE(keywords_en, '[]'::jsonb)
-		FROM kb.summaries
-		WHERE input_record_id = $1`, inputRecordID)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	seen := make(map[string]struct{})
-	var parts []string
-	for rows.Next() {
-		var kwRaw, kwEnRaw []byte
-		if err := rows.Scan(&kwRaw, &kwEnRaw); err != nil {
-			return err
-		}
-		for _, kw := range rawJSONArrayStrings(kwRaw) {
-			kw = strings.TrimSpace(kw)
-			if kw == "" {
-				continue
-			}
-			if _, ok := seen[kw]; !ok {
-				seen[kw] = struct{}{}
-				parts = append(parts, kw)
-			}
-		}
-		for _, kw := range rawJSONArrayStrings(kwEnRaw) {
-			kw = strings.TrimSpace(kw)
-			if kw == "" {
-				continue
-			}
-			if _, ok := seen[kw]; !ok {
-				seen[kw] = struct{}{}
-				parts = append(parts, kw)
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if len(parts) == 0 {
-		return nil
-	}
-	extra := strings.Join(parts, " ")
-	_, err = s.DB.ExecContext(ctx, `
-		UPDATE kb.entities
-		SET search_document = trim(concat_ws(' ', search_document, $2::text)),
-		    search_vector   = to_tsvector('simple', trim(concat_ws(' ', search_document, $2::text)))
-		WHERE input_record_id = $1`, inputRecordID, extra)
-	return err
 }
 
 // ---- Phase C artifact file refresh ----
