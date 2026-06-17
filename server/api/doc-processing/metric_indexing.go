@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -72,21 +71,6 @@ type indexedMetric struct {
 	SearchDocument string
 }
 
-// connectedArtifacts is the JSON shape stored in kb.metrics.connected_artifacts. The
-// engine now builds this as a generic map; the struct is retained for the marshal-shape
-// test and as documentation of the metric family's fields.
-type connectedArtifacts struct {
-	Chunks           []string `json:"chunks"`
-	SemanticProjects []string `json:"semantic_projects"`
-	Summaries        []string `json:"summaries"`
-	Topics           []string `json:"topics"`
-	Scenes           []string `json:"scenes"`
-	Provisions       []string `json:"provisions"`
-	Entities         []string `json:"entities"`
-	Relations        []string `json:"relations"`
-	InvItems         []string `json:"inv_items"`
-}
-
 // IndexMetricsForRecord runs the post-save metrics indexing workflow (outputs 2-5 of
 // spec 3.1): connected_artifacts JSON, category_name edges, category-path metrics.txt
 // entries, and hybrid_search semantic links. Output 1 (kb.search_artifacts) is handled
@@ -123,7 +107,6 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 	}
 
 	artifacts := metricsToIndexedArtifacts(metrics)
-	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, artifacts, metricIndexConfig, logger)
 
 	// Enrich artifacts that the LLM gave no categories by deriving category keys from
 	// overlapping semantic projections, so that category membership edges can still be
@@ -143,7 +126,6 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 	if logger != nil {
 		logger.Info("metrics indexing result",
 			"record_id", recordID,
-			"connected_artifacts_metrics", connectedCount,
 			"category_connections", categoryConnections,
 			"category_path_metrics", categoryPathMetrics,
 			"semantic_links", semanticLinks,
@@ -219,18 +201,6 @@ func upsertMetricToLeafDir(leafDir, metricID string) error {
 
 func removeMetricTreeRecord(treeRootDir string, recordID int64) error {
 	return removeArtifactTreeRecord(treeRootDir, recordID, "metrics.txt")
-}
-
-func sortedLineSetKeys(set map[int]struct{}) []int {
-	if len(set) == 0 {
-		return []int{}
-	}
-	out := make([]int, 0, len(set))
-	for n := range set {
-		out = append(out, n)
-	}
-	sort.Ints(out)
-	return out
 }
 
 // semProjForIndex carries the semantic projection fields needed to derive an artifact's

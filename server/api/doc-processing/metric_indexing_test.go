@@ -4,11 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -85,172 +83,6 @@ func TestChunkOverlapsLineSet(t *testing.T) {
 	}
 	if chunkOverlapsLineSet(ch, lineSetFromSpans([]string{"9"})) {
 		t.Error("did not expect chunk to overlap line 9")
-	}
-}
-
-func TestConnectedArtifactsMarshalsEmptyArrays(t *testing.T) {
-	ca := connectedArtifacts{
-		Chunks:           []string{},
-		SemanticProjects: []string{},
-		Summaries:        []string{},
-		Topics:           []string{},
-		Scenes:           []string{},
-		Provisions:       []string{},
-		Entities:         []string{},
-		Relations:        []string{},
-		InvItems:         []string{},
-	}
-	bs, err := json.Marshal(ca)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	want := `{"chunks":[],"semantic_projects":[],"summaries":[],"topics":[],"scenes":[],"provisions":[],"entities":[],"relations":[],"inv_items":[]}`
-	if string(bs) != want {
-		t.Errorf("connected_artifacts JSON = %s, want %s", bs, want)
-	}
-}
-
-type jsonSubstringArg struct {
-	want []string
-}
-
-func (m jsonSubstringArg) Match(v driver.Value) bool {
-	s, ok := v.(string)
-	if !ok {
-		return false
-	}
-	for _, want := range m.want {
-		if !strings.Contains(s, want) {
-			return false
-		}
-	}
-	return true
-}
-
-func TestIndexSemanticProjectionsForRecordBuildsConnectedArtifacts(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
-	}
-	defer db.Close()
-
-	oldDB := ApiTypes.ProjectDBHandle
-	ApiTypes.ProjectDBHandle = db
-	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
-
-	mock.ExpectQuery("SELECT semantic_proj_id,").
-		WithArgs(int64(100)).
-		WillReturnRows(sqlmock.NewRows([]string{"semantic_proj_id", "line_spans"}).
-			AddRow("100_0_1", []byte(`["5:6"]`)))
-
-	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.search_artifacts s")).
-		WithArgs(int64(100), sqlmock.AnyArg(), searchArtifactSemanticProjection).
-		WillReturnRows(sqlmock.NewRows([]string{"src_id", "artifact_type", "tgt_id"}).
-			AddRow("100_0_1", searchArtifactTopic, "100_tpc_1"))
-
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_projections SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND semantic_proj_id = $3")).
-		WithArgs(sqlmock.AnyArg(), int64(100), "100_0_1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	IndexSemanticProjectionsForRecord(context.Background(), 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 5}}}}, nil)
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
-	}
-}
-
-func TestBuildArtifactConnectedArtifactsDoesNotRequireSemanticProjectsForSemanticProjectionSource(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
-	}
-	defer db.Close()
-
-	// Artifact<->artifact edges now come from a single registry self-join; with the
-	// source family being semantic_projection, semantic_projects is not a target and no
-	// empty-semantic_projections warning applies. Empty result is fine: the chunk overlap
-	// still makes connected_artifacts non-empty.
-	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.search_artifacts s")).
-		WithArgs(int64(100), sqlmock.AnyArg(), searchArtifactSemanticProjection).
-		WillReturnRows(sqlmock.NewRows([]string{"src_id", "artifact_type", "tgt_id"}))
-
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.semantic_projections SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND semantic_proj_id = $3")).
-		WithArgs(sqlmock.AnyArg(), int64(100), "100_0_1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	got := buildArtifactConnectedArtifacts(context.Background(), db, 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 5}}}}, []indexedArtifact{{
-		ID:          "100_0_1",
-		SourceSpans: []string{"5:6"},
-	}}, semanticProjectionIndexConfig, nil)
-	if got != 1 {
-		t.Fatalf("buildArtifactConnectedArtifacts updated=%d, want 1", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
-	}
-}
-
-func TestBuildArtifactConnectedArtifactsUsesUpdateKeyAndIncludesSummaryRelationRefs(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
-	}
-	defer db.Close()
-
-	// One registry self-join returns all artifact<->artifact overlaps for the source
-	// topic, keyed by the source artifact_id. Rows for other families confirm they are
-	// folded into the right connected_artifacts keys.
-	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.search_artifacts s")).
-		WithArgs(int64(100), sqlmock.AnyArg(), searchArtifactTopic).
-		WillReturnRows(sqlmock.NewRows([]string{"src_id", "artifact_type", "tgt_id"}).
-			AddRow("100_tpc_1", searchArtifactSummary, "100_sum_1").
-			AddRow("100_tpc_1", searchArtifactRelation, "100_rel_1"))
-
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.topics SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND topic_id = $3")).
-		WithArgs(jsonSubstringArg{want: []string{`"summaries":["100_sum_1"]`, `"relations":["100_rel_1"]`}}, int64(100), "1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	got := buildArtifactConnectedArtifacts(context.Background(), db, 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 5}}}}, []indexedArtifact{{
-		ID:          "100_tpc_1",
-		UpdateKey:   "1",
-		SourceSpans: []string{"5:6"},
-	}}, topicIndexConfig, nil)
-	if got != 1 {
-		t.Fatalf("buildArtifactConnectedArtifacts updated=%d, want 1", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
-	}
-}
-
-func TestBuildArtifactConnectedArtifactsUsesIntegerUpdateKeyForProvisions(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
-	}
-	defer db.Close()
-
-	// Source provision uses an integer update key (prov_id) distinct from its logical
-	// artifact_id ("100_prv_7"); the self-join is keyed by artifact_id while the UPDATE
-	// targets prov_id. Empty overlap is fine here — chunk overlap drives the update.
-	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.search_artifacts s")).
-		WithArgs(int64(100), sqlmock.AnyArg(), searchArtifactProvision).
-		WillReturnRows(sqlmock.NewRows([]string{"src_id", "artifact_type", "tgt_id"}))
-
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.provisions SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND prov_id = $3")).
-		WithArgs(sqlmock.AnyArg(), int64(100), 7).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	got := buildArtifactConnectedArtifacts(context.Background(), db, 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 5}}}}, []indexedArtifact{{
-		ID:          "100_prv_7",
-		UpdateKey:   7,
-		SourceSpans: []string{"5:6"},
-	}}, provisionIndexConfig, nil)
-	if got != 1 {
-		t.Fatalf("buildArtifactConnectedArtifacts updated=%d, want 1", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
@@ -452,16 +284,8 @@ func TestSearchArtifactIndexersWriteCategoryTreeFiles(t *testing.T) {
 				WithArgs(int64(100)).
 				WillReturnRows(newMockRows(tc.rowValues...))
 
-			expectConnectedArtifactLookups(mock, int64(100), tc.cfg.SelfType)
-
-			updateKey := tc.updateKey
-			if updateKey == nil {
-				updateKey = tc.artifactID
-			}
-			mock.ExpectExec(regexp.QuoteMeta("UPDATE "+tc.cfg.Table+" SET connected_artifacts = $1::jsonb WHERE input_record_id = $2 AND "+tc.cfg.IDColumn+" = $3")).
-				WithArgs(sqlmock.AnyArg(), int64(100), updateKey).
-				WillReturnResult(sqlmock.NewResult(0, 1))
-
+			// connected_artifacts is computed on demand now; indexing only writes the
+			// category-path tree files, so the next query is the category-paths lookup.
 			mock.ExpectQuery("SELECT COALESCE\\(line_spans, '\\[\\]'::jsonb\\),\\s+COALESCE\\(category_paths, '\\[\\]'::jsonb\\),\\s+COALESCE\\(category_paths_en, '\\[\\]'::jsonb\\)\\s+FROM kb.semantic_projections\\s+WHERE input_record_id = \\$1").
 				WithArgs(int64(100)).
 				WillReturnRows(sqlmock.NewRows([]string{"line_spans", "category_paths", "category_paths_en"}).
@@ -487,16 +311,6 @@ func TestSearchArtifactIndexersWriteCategoryTreeFiles(t *testing.T) {
 			}
 		})
 	}
-}
-
-// expectConnectedArtifactLookups mocks the single registry self-join that
-// buildArtifactConnectedArtifacts now issues for artifact<->artifact line-overlap edges.
-// Empty rows are fine for these tests: they assert category-tree output, and the
-// connected_artifacts UPDATE still fires from chunk overlap.
-func expectConnectedArtifactLookups(mock sqlmock.Sqlmock, recordID int64, selfType string) {
-	mock.ExpectQuery(regexp.QuoteMeta("FROM kb.search_artifacts s")).
-		WithArgs(recordID, sqlmock.AnyArg(), selfType).
-		WillReturnRows(sqlmock.NewRows([]string{"src_id", "artifact_type", "tgt_id"}))
 }
 
 func rowColumns(n int) []string {

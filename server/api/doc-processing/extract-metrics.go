@@ -2108,7 +2108,6 @@ CREATE TABLE IF NOT EXISTS kb.metrics (
     metric_categories_en TEXT,
     category_paths JSONB,
     category_paths_en JSONB,
-    connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     search_document TEXT,
     search_vector TSVECTOR,
     ext_info JSONB,
@@ -2117,7 +2116,6 @@ CREATE TABLE IF NOT EXISTS kb.metrics (
 
 ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories TEXT NOT NULL DEFAULT '';
 ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories_en TEXT;
-ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb;
 `
 	_, err := s.DB.ExecContext(ctx, ddl)
 	return err
@@ -2195,12 +2193,11 @@ INSERT INTO kb.metrics (
 	metric_categories_en,
 	category_paths,
 	category_paths_en,
-	connected_artifacts,
 	search_document,
 	ext_info
 )
 VALUES (
-	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36::jsonb,$37,$38::jsonb
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb
 )`
 
 	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
@@ -2288,7 +2285,6 @@ VALUES (
 			metricCategoriesEnText,
 			string(categoryPathsJSON),
 			string(categoryPathsEnJSON),
-			"{}",
 			searchDocument,
 			string(extInfo),
 		)

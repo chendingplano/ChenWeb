@@ -40,14 +40,12 @@ func IndexSceneBlocksForRecord(ctx context.Context, recordID int64, inputChunks 
 	if len(blocks) == 0 {
 		return
 	}
-	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, blocks, sceneBlockIndexConfig, logger)
 	categoryPathStart := time.Now()
 	categoryPathCount := indexArtifactsByCategoryPaths(ctx, db, recordID, blocks, sceneBlockIndexConfig, logger)
 	if logger != nil {
 		logger.Info("scene blocks indexing result",
 			"record_id", recordID,
 			"scene_blocks", len(blocks),
-			"connected_artifacts", connectedCount,
 			"category_path_items", categoryPathCount,
 			"category_path_ms", time.Since(categoryPathStart).Milliseconds(),
 		)

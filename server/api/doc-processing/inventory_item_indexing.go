@@ -53,7 +53,6 @@ func IndexInventoryItemsForRecord(ctx context.Context, recordID int64, inputChun
 		logger.Info("inventory items indexing start", "record_id", recordID, "inventory_items", len(items))
 	}
 
-	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, items, inventoryItemIndexConfig, logger)
 	resolver := newMetricCategoryResolver(db, logger) // category resolver is category-type-agnostic
 	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, items, inventoryItemIndexConfig, resolver, logger)
 	categoryPathItems := indexArtifactsByCategoryPaths(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
@@ -62,7 +61,6 @@ func IndexInventoryItemsForRecord(ctx context.Context, recordID int64, inputChun
 	if logger != nil {
 		logger.Info("inventory items indexing result",
 			"record_id", recordID,
-			"connected_artifacts_items", connectedCount,
 			"category_connections", categoryConnections,
 			"category_path_items", categoryPathItems,
 			"semantic_links", semanticLinks,

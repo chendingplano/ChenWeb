@@ -646,7 +646,6 @@ func (p *EntityRelationProcessor) processRelationWindow(
 		"entities", len(window.Entities),
 		"pages", fmt.Sprintf("%d-%d", window.PageLo, window.PageHi),
 		"input len", len(inputText),
-		"inputText", inputText,
 	)
 	callID := fmt.Sprintf("%s_p2_w%d", eventIDFromContext(ctx), idx)
 	payload, modelName, err := p.extractRelationsWithFallback(ctx, inputText)
@@ -1446,7 +1445,6 @@ CREATE TABLE IF NOT EXISTS kb.entities (
     entity_status TEXT NOT NULL DEFAULT 'extracted',
     search_document TEXT,
     search_vector TSVECTOR,
-    connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1502,7 +1500,6 @@ CREATE TABLE IF NOT EXISTS kb.relations (
     categories JSONB,
     search_document TEXT,
     search_vector TSVECTOR,
-    connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

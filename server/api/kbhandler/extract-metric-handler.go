@@ -523,15 +523,13 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		metric_categories_en TEXT,
 		category_paths JSONB,
 		category_paths_en JSONB,
-		connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
 		search_document TEXT,
 		search_vector TSVECTOR,
 		ext_info JSONB,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 	ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories TEXT NOT NULL DEFAULT '';
-	ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories_en TEXT;
-	ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb;`
+	ALTER TABLE kb.metrics ADD COLUMN IF NOT EXISTS metric_categories_en TEXT;`
 	if _, err := db.Exec(ddl); err != nil {
 		return 0, err
 	}
@@ -550,11 +548,11 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 		metric_value, value_data_type, value_range_type, value_class, value_class_en,
 		formula_or_definition, threshold_or_target, measurement_frequency,
 		confidence, is_explicit_metric, table_name_or_section, reasoning_tags,
-		metric_categories, metric_categories_en, category_paths, category_paths_en, connected_artifacts, ext_info
+		metric_categories, metric_categories_en, category_paths, category_paths_en, ext_info
 	) VALUES (
 		$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,
 		$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,
-		$32,$33,$34::jsonb,$35::jsonb,$36::jsonb,$37::jsonb
+		$32,$33,$34::jsonb,$35::jsonb,$36::jsonb
 	)`
 
 	extInfo, _ := json.Marshal(map[string]any{
@@ -623,7 +621,6 @@ func saveExtractedMetrics(db *sql.DB, inputRecordID int64, metrics []map[string]
 			string(metricCategoriesEnJSON),
 			string(categoryPathsJSON),
 			categoryPathsEnVal,
-			"{}",
 			string(extInfo),
 		)
 		if err != nil {

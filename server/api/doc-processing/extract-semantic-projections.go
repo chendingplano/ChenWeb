@@ -1155,7 +1155,6 @@ CREATE TABLE IF NOT EXISTS kb.semantic_projections (
     prompt_name TEXT,
     search_document TEXT,
     search_vector TSVECTOR,
-    connected_artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

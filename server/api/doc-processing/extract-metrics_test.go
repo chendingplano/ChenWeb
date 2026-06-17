@@ -949,7 +949,6 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 			`["performance_en"]`,
 			"null",
 			"null",
-			"{}",
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 		).

@@ -1517,7 +1517,6 @@ CREATE TABLE IF NOT EXISTS kb.inventory_items (
     prompt_name TEXT,
     search_document TEXT,
     search_vector TSVECTOR,
-    connected_artifacts JSONB DEFAULT '{}'::jsonb,
     ext_info JSONB,
     create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     modify_time TIMESTAMPTZ NOT NULL DEFAULT NOW()

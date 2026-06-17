@@ -362,7 +362,6 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 			`["energy_efficiency"]`,
 			sqlmock.AnyArg(),
 			nil,
-			"{}",
 			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(101, 1))

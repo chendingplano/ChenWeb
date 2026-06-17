@@ -11,16 +11,6 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
-var semanticProjectionIndexConfig = artifactIndexConfig{
-	SelfType:             searchArtifactSemanticProjection,
-	CategoryType:         "semantic_projection",
-	InstanceSource:       "extract_semantic_projections",
-	Table:                "kb.semantic_projections",
-	IDColumn:             "semantic_proj_id",
-	CategoryTreeFilename: "semantic_projections.txt",
-	LogPrefix:            "semantic projections indexing",
-}
-
 // PostProcessIndex runs the semantic projection indexing workflow in Phase C, after all
 // doc processors have finished. This ensures connected_artifacts sees later artifacts
 // like topics, scenes, provisions, entities, metrics, and inventory items.
@@ -83,12 +73,10 @@ func IndexSemanticProjectionsForRecord(ctx context.Context, recordID int64, inpu
 	if len(artifacts) == 0 {
 		return
 	}
-	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, artifacts, semanticProjectionIndexConfig, logger)
 	if logger != nil {
 		logger.Info("semantic projections indexing result",
 			"record_id", recordID,
 			"semantic_projections", len(artifacts),
-			"connected_artifacts_projections", connectedCount,
 		)
 	}
 }
