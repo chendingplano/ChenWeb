@@ -57,10 +57,25 @@ export const PIPELINE_STAGES = [
 		]
 	},
 	{ id: 'extract_structured_knowledge', label: 'Extract Struct. Knowledge', operations: ['extract_structured_knowledges'] },
+	// ADR 2026061702: entity and relation extraction are independent processors.
+	// The legacy combined ops are kept as aliases on both stages so historical
+	// records (run before the split) still display as complete on both.
 	{
-		id: 'extract_entity_relation',
-		label: 'Extract Entity/Relation',
+		id: 'extract_entity',
+		label: 'Extract Entity',
 		operations: [
+			'extract_entity',
+			'extract-entity',
+			'extract_entity_relation',
+			'extract-entity-relation'
+		]
+	},
+	{
+		id: 'extract_relation',
+		label: 'Extract Relation',
+		operations: [
+			'extract_relation',
+			'extract-relation',
 			'extract_entity_relation',
 			'extract-entity-relation'
 		]
@@ -93,10 +108,33 @@ export const ALL_CONFIGURABLE_PROCESSOR_IDS = [
 	'extract_metrics', 'extract_provisions', 'generate_summaries',
 	'generate_topics', 'generate_scene_blocks', 'extract_products',
 	'extract_semantic_projections', 'extract_structured_knowledge',
-	'extract_entity_relation', 'extract_inventory_items'
+	'extract_entity', 'extract_relation', 'extract_inventory_items'
 ];
 
 export const ALL_PROCESSOR_IDS = [...MANDATORY_PROCESSOR_IDS, ...ALL_CONFIGURABLE_PROCESSOR_IDS];
+
+export const ENTITY_PROCESSOR_ID = 'extract_entity';
+export const RELATION_PROCESSOR_ID = 'extract_relation';
+
+// entityExtractionSucceeded reports whether extract_entity has already completed
+// successfully for a record (so its entities exist for relation linking).
+export function entityExtractionSucceeded(record: PipelineRecord): boolean {
+	const stage = computeStages(record).find((s) => s.id === ENTITY_PROCESSOR_ID);
+	return stage?.status === 'success';
+}
+
+// enforceEntityBeforeRelation applies the extract_entity -> extract_relation
+// dependency (ADR 2026061702): relation extraction is free-form, but its endpoints
+// are linked (in Phase C) against entities from extract_entity. If extract_entity
+// has not already succeeded for the record, selecting extract_relation forces
+// extract_entity to be included too. Order-free — both run in parallel; this only
+// guarantees the entities exist for the link step. Returns the resolved id list.
+export function enforceEntityBeforeRelation(chosen: string[], entityAlreadySucceeded: boolean): string[] {
+	if (!chosen.includes(RELATION_PROCESSOR_ID)) return chosen;
+	if (entityAlreadySucceeded) return chosen;
+	if (chosen.includes(ENTITY_PROCESSOR_ID)) return chosen;
+	return [...chosen, ENTITY_PROCESSOR_ID];
+}
 
 const FINAL_STATUSES = new Set(['success', 'fail', 'failed', 'stopped']);
 

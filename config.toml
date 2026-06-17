@@ -59,7 +59,8 @@ required_processors = [
 	"generate_topics",
 	"generate_scene_blocks", 
 	"extract_semantic_projections",
-	"extract_entity_relation",
+	"extract_entity",
+	"extract_relation",
 	"extract_inventory_items"]
 
 [artifacts]

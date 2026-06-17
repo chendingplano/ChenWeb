@@ -53,6 +53,18 @@ type EntityRelationProcessor struct {
 	FallbackModelCfg              structureModelConfig
 	ArtifactDir                   string
 	ExtractEntityRelationMaxTasks int
+	// StatusOperation is the doc_proc status operation this processor logs under.
+	// Empty defaults to "extract_entity_relation" (the legacy combined processor).
+	// The split processors (ADR 2026061702) set "extract_entity" / "extract_relation".
+	StatusOperation string
+}
+
+// statusOp returns the doc_proc operation name for status entries.
+func (p *EntityRelationProcessor) statusOp() string {
+	if op := strings.TrimSpace(p.StatusOperation); op != "" {
+		return op
+	}
+	return "extract_entity_relation"
 }
 
 // Entity provenance markers stored in kb.entities.entity_status (ADR 2026061302 D4).
@@ -530,7 +542,6 @@ func (p *EntityRelationProcessor) processChunk(
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
 			"entities", fmt.Sprintf("entities:%d", chunkEntityCount),
-			"relations", fmt.Sprintf("relations:%d", chunkRelationCount),
 			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 	}
@@ -790,10 +801,14 @@ func (p *EntityRelationProcessor) extractEntityRelationWithFallback(ctx context.
 // window's entity-list input text, with the same primary/fallback model policy.
 func (p *EntityRelationProcessor) extractRelationsWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
 	promptText, promptRef := p.RelationPromptText, p.RelationPromptRef
+	usedFallback := false
 	if strings.TrimSpace(promptText) == "" {
 		// No dedicated relation prompt configured; fall back to the combined prompt.
 		promptText, promptRef = p.PromptText, p.PromptRef
+		usedFallback = true
 	}
+	// p.Logger.Info("relation extraction prompt selected",
+	// 	"prompt_ref", promptRef, "fell_back_to_entity_prompt", usedFallback)
 	return p.extractStructuredWithFallback(ctx, promptText, promptRef, inputText,
 		relationExtractionContract(),
 		map[string]any{"language": "unknown", "relations": []any{}})
@@ -1012,6 +1027,16 @@ func normalizeRelationRows(raw any, chunkSeqNo int) []map[string]any {
 		if subject == "" || predicate == "" || object == "" {
 			continue
 		}
+		// v2 free-form prompt (ADR 2026061702) cites each endpoint's lines; v1 had a
+		// single `lines`. Capture both: endpoint lines feed Phase C line-overlap
+		// linking; line_spans falls back to their union when no top-level `lines`.
+		subjectLines := normalizeEntityLineSpans(m["subject_lines"])
+		predicateLines := normalizeEntityLineSpans(m["predicate_lines"])
+		objectLines := normalizeEntityLineSpans(m["object_lines"])
+		lineSpans := normalizeEntityLineSpans(m["lines"])
+		if len(lineSpans) == 0 {
+			lineSpans = sortedUniqueSpans(append(append(append([]string{}, subjectLines...), predicateLines...), objectLines...))
+		}
 		row := map[string]any{
 			"subject":             subject,
 			"subject_en":          strings.TrimSpace(asString(m["subject_en"])),
@@ -1023,7 +1048,10 @@ func normalizeRelationRows(raw any, chunkSeqNo int) []map[string]any {
 			"desc_en":             strings.TrimSpace(asString(m["desc_en"])),
 			"keywords":            toStringSlice(m["keywords"]),
 			"keywords_en":         toStringSlice(m["keywords_en"]),
-			"line_spans":          normalizeEntityLineSpans(m["lines"]),
+			"line_spans":          lineSpans,
+			"subject_lines":       subjectLines,
+			"predicate_lines":     predicateLines,
+			"object_lines":        objectLines,
 			"confidence":          toFloat(m["confidence"]),
 			"chunk_seq_no":        chunkSeqNo,
 			"relation_categories": toStringSlice(m["relation_categories"]),
@@ -1251,6 +1279,7 @@ type entityRelationStatusParams struct {
 	RecordID      int64
 	FileType      string
 	InputFilename string
+	Operation     string // doc_proc status operation; defaults to extract_entity_relation
 	Start         time.Time
 	DurationMs    int64
 	ProcStatus    string
@@ -1274,6 +1303,7 @@ func (p *EntityRelationProcessor) persistEntityRelationInProgressStatus(ctx cont
 			RecordID:      rec.ID,
 			FileType:      detectEntityRelationFileType(rec),
 			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Operation:     p.statusOp(),
 			Start:         start,
 			DurationMs:    time.Since(start).Milliseconds(),
 			ProcStatus:    "in_progress",
@@ -1304,6 +1334,7 @@ func (p *EntityRelationProcessor) persistEntityRelationStatus(
 			RecordID:      rec.ID,
 			FileType:      detectEntityRelationFileType(rec),
 			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Operation:     p.statusOp(),
 			Start:         start,
 			DurationMs:    time.Since(start).Milliseconds(),
 			ProcErr:       procErr,
@@ -1323,6 +1354,7 @@ func (p *EntityRelationProcessor) stopAndPersistEntityRelation(ctx context.Conte
 			RecordID:      rec.ID,
 			FileType:      detectEntityRelationFileType(rec),
 			InputFilename: strings.TrimSpace(rec.ResultFilename),
+			Operation:     p.statusOp(),
 			Start:         start,
 			DurationMs:    time.Since(start).Milliseconds(),
 			ProcStatus:    "stopped",
@@ -1339,10 +1371,14 @@ func (p *EntityRelationProcessor) stopAndPersistEntityRelation(ctx context.Conte
 
 func appendEntityRelationStatus(raw string, p entityRelationStatusParams) (string, error) {
 	entries := decodeDocMetaStatus(raw)
+	operation := strings.TrimSpace(p.Operation)
+	if operation == "" {
+		operation = "extract_entity_relation"
+	}
 	entry := map[string]any{
 		"record_id":      strconv.FormatInt(p.RecordID, 10),
 		"file_type":      strings.ToLower(strings.TrimSpace(p.FileType)),
-		"operation":      "extract_entity_relation",
+		"operation":      operation,
 		"input_filename": strings.TrimSpace(p.InputFilename),
 		"start_time":     p.Start.Format(defaultDocMetaStatusTime),
 		"ms_used":        p.DurationMs,
@@ -1483,6 +1519,9 @@ ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS subject_entity_id TEXT;
 ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS object_entity_id TEXT;
 ALTER TABLE kb.relations DROP COLUMN IF EXISTS source_line_spans;
 ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS categories JSONB;
+ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS subject_lines JSONB;
+ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS predicate_lines JSONB;
+ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS object_lines JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_kb_relations_input_record_id ON kb.relations (input_record_id);
 CREATE INDEX IF NOT EXISTS idx_kb_relations_relation_id ON kb.relations (relation_id);
@@ -1696,9 +1735,12 @@ INSERT INTO kb.relations (
     subject_entity_id,
     object_entity_id,
     categories,
+    subject_lines,
+    predicate_lines,
+    object_lines,
     ext_info
 ) VALUES (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21::jsonb,$22::jsonb
+    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21::jsonb,$23::jsonb,$24::jsonb,$25::jsonb,$22::jsonb
 )`
 
 	isEnglish := isLanguageEnglish(req.Language)
@@ -1711,6 +1753,9 @@ INSERT INTO kb.relations (
 	for _, r := range req.Relations {
 		keywordsJSON, _ := json.Marshal(r["keywords"])
 		spansJSON, _ := json.Marshal(r["line_spans"])
+		subjectLinesJSON, _ := json.Marshal(toStringSlice(r["subject_lines"]))
+		predicateLinesJSON, _ := json.Marshal(toStringSlice(r["predicate_lines"]))
+		objectLinesJSON, _ := json.Marshal(toStringSlice(r["object_lines"]))
 		extInfo, _ := json.Marshal(map[string]any{
 			"language":       req.Language,
 			"schema_version": "1",
@@ -1771,6 +1816,9 @@ INSERT INTO kb.relations (
 			objectEntityIDArg,
 			categoriesArg,
 			string(extInfo),
+			string(subjectLinesJSON),
+			string(predicateLinesJSON),
+			string(objectLinesJSON),
 		); err != nil {
 			return inserted, err
 		}

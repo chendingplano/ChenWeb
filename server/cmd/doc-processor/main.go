@@ -224,7 +224,11 @@ func main() {
 			docprocessing.NewExtractDocMetadataProcessor(inputStore, llmClient, logger),
 			docprocessing.NewSemanticProjectionsProcessor(inputStore, docprocessing.SemanticProjectionsSQLStore{DB: ApiTypes.ProjectDBHandle}, semanticProjectionsLLMClient, logger),
 			docprocessing.NewStructuredKnowledgeProcessor(inputStore, docprocessing.StructuredKnowledgeSQLStore{DB: ApiTypes.ProjectDBHandle}, knowledgeLLMClient, logger),
-			docprocessing.NewEntityRelationProcessor(inputStore, docprocessing.EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, entityRelationLLMClient, logger),
+			// ADR 2026061702: entity and relation extraction are split into two
+			// independent processors that run in parallel (concurrent mode). Endpoint
+			// linking happens once in Phase C, owned by the relation processor.
+			docprocessing.NewEntityProcessor(inputStore, docprocessing.EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, entityRelationLLMClient, logger),
+			docprocessing.NewRelationProcessor(inputStore, docprocessing.EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, entityRelationLLMClient, logger),
 			docprocessing.NewInventoryItemsProcessor(inputStore, docprocessing.InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, inventoryItemsLLMClient, logger),
 			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
 			docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
