@@ -17,6 +17,7 @@ type DocMetadataInputRecord struct {
 	StatusRaw       string
 	FileName        string
 	Title           string
+	DocMetadataJSON string // raw JSON from kb.inputs.doc_metadata; "" when not loaded
 }
 
 type DocMetadataUpdate struct {
@@ -46,7 +47,8 @@ SELECT id,
        COALESCE(staging_filename, ''),
        COALESCE(status::text, '[]'),
        COALESCE(file_name, ''),
-       COALESCE(title, '')
+       COALESCE(title, ''),
+       COALESCE(doc_metadata::text, '')
 FROM kb.inputs
 WHERE id = $1`
 
@@ -59,6 +61,7 @@ WHERE id = $1`
 		&rec.StatusRaw,
 		&rec.FileName,
 		&rec.Title,
+		&rec.DocMetadataJSON,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

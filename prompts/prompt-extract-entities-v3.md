@@ -13,16 +13,19 @@ DO NOT extract relations, concepts, normative statements, constraints, causal ru
 The input is a JSON:
 
 ```json
-[
+{ "doc_context": "GB/T 50378-2019 绿色建筑评价标准 | GB/T 50378-2019", "lines": [
   { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
   { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
   ...
-]
+] }
 ```
 where:
-- "flag" indicates whether the entry is an overlapped entry ("o") or a normal entry ("n)
+- `doc_context` is a document-level description (title, standard number) to help situate the chunk — **use it for background context only**. Do NOT produce extractions from doc_context itself; all extracted evidence must be grounded in the `lines` array.
+- `lines` entries: "flag" indicates whether the entry is an overlapped entry ("o") or a normal entry ("n")
 
 Treat overlap lines (`o`) as **context only** — do not produce an extraction whose evidence rests solely on `o` lines.
+
+**Full-JSON fallback:** when `doc_context` is absent, the input is the bare array `[...]` with no wrapper. Handle both shapes.
 
 ---
 

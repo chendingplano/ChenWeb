@@ -11,16 +11,19 @@ If the input contains no relations, return an empty `relations` array.
 The input is a JSON:
 
 ```json
-[
+{ "doc_context": "GB/T 50378-2019 绿色建筑评价标准 | GB/T 50378-2019", "lines": [
   { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
   { "flag": "n", "line_number": 42, "page_number": 3, "line_type": "text", "content": "..." },
   ...
-]
+] }
 ```
-where: 
-- "flag" indicates whether the entry is an overlapped entry (`"o"`) or a normal entry (`"n"`)
+where:
+- `doc_context` is a document-level description (title, standard number) to help situate the chunk — **use it for background context only**. Do NOT produce relations from doc_context itself; all extracted evidence must be grounded in the `lines` array.
+- `lines` entries: "flag" indicates whether the entry is an overlapped entry (`"o"`) or a normal entry (`"n"`)
 
 Treat overlap lines (`o`) as **context only** — do not produce an extraction whose evidence rests solely on `o` lines.
+
+**Full-JSON fallback:** when `doc_context` is absent, the input is the bare array `[...]` with no wrapper. Handle both shapes.
 ---
 
 # 2. What Counts as a Relation
@@ -40,7 +43,8 @@ Predicate vocabulary: use any explicit verb / verb phrase from the text, normali
 Do NOT extract:
 
 - vague or generic relations ("is related to", "concerns", "has");
-- relations that are only implied or inferred, not stated in the **source text**.
+- relations that are only implied or inferred, not stated in the **source text**;
+- relations whose `subject` or `object` is a **list**, a **clause**, or an **action** rather than a single named entity — split or fix these per §3.5.
 
 ---
 
@@ -69,6 +73,39 @@ This dedups whole *relations*. Deduplicating the *entities* sitting at a relatio
 - Resolve pronouns and back-references ("it", "the device", "this standard") to the explicit named entity **only when the source text makes the referent unambiguous**; otherwise keep the surface form as written. Do not infer an endpoint that is not stated.
 - Use the **same** surface form for the same real-world entity every time it appears across relations — do not alternate between a synonym and an abbreviation within one extraction.
 - `subject_lines` / `object_lines` MUST point to where that endpoint actually appears in the relation's own evidence, so positional (line-overlap) matching can work.
+
+## 3.5 Endpoints MUST be atomic, entity-shaped
+
+Each `subject` and `object` MUST name **exactly one** thing — a single concrete or conceptual **entity** (a noun phrase), the same kind of thing the entity extractor would name. An endpoint that is a list, a clause, or an action can never match a real entity downstream and pollutes the graph.
+
+**Rule 1 — Split coordinated lists.** If a subject or object joins several things with a conjunction or enumeration comma (`A、B和C`, `A, B, and C`, `A/B`), do NOT emit one relation with the whole list as an endpoint. Emit **one relation per item**, repeating the other two parts of the triple. For the split endpoint's lines, cite the line where **that item** appears (use the same lines for every item only when the whole list sits on one line).
+
+- **Shared-head coordination.** Coordinated items often share one trailing head noun: `收集、运输车辆` means `收集车辆` + `运输车辆`; `分类投放、收集设施` means `分类投放设施` + `分类收集设施`; `collection and transport vehicles` means `collection vehicle` + `transport vehicle`. **Distribute the shared head** across each item and split into separate endpoints.
+  - GOOD: `… — 配备 — 收集车辆` and `… — 配备 — 运输车辆`
+  - BAD:  `… — 配备 — 收集、运输车辆`
+- **Exception:** do NOT split when the coordinated form is a single established compound term naming one thing (e.g. `购销协议` / `purchase-and-sale agreement` is one concept, not two). When unsure whether splitting yields real, separate entities, keep it whole.
+
+- GOOD:
+  - `household waste — is_divided_into — perishable waste`
+  - `household waste — is_divided_into — recyclables`
+  - `household waste — is_divided_into — hazardous waste`
+  - `household waste — is_divided_into — other waste`
+- BAD:
+  - `household waste — is_divided_into — perishable waste, recyclables, hazardous waste and other waste`
+
+**Rule 2 — No clauses or predicates as endpoints.** An endpoint is a noun-phrase entity, never a verb phrase, an action, or a full statement. The "action" belongs in `predicate`, not in `subject`/`object`.
+
+- BAD object (a predicate): `promote seed germination and root elongation`
+- BAD object (a clause): `villagers carry out source separation and reduction of household waste`
+- If a real entity is named *inside* such a phrase, use that entity as the endpoint; otherwise **drop the relation** rather than store the clause. E.g. prefer object `seed germination index` over the clause describing it.
+
+**Rule 3 — Prefer the core entity over an embedded qualifier.** When an endpoint is an entity wrapped in a descriptive/relative clause, use the established entity name as the endpoint. Keep a distinguishing qualifier only when it is itself the named entity (e.g. a standard's full title like `GB 14554 odor pollutant emission standard` stays whole).
+
+- PREFER object `administrative village` over `administrative village in an area that has a domestic-waste incineration plant`.
+- A **relative-clause marker** (`的` in Chinese; `that` / `which` / `who` / `with` in English) signals a modified noun phrase: the core entity is the **head noun** after it. A `、` *inside* the modifier is internal punctuation, NOT an endpoint-list separator — do not split on it.
+  - PREFER subject `废旧物品公司` over `与主管部门签订购、销协议的废旧物品公司` (the `购、销` is inside the modifier; the entity is `废旧物品公司`).
+
+**Self-check:** if an endpoint contains a conjunction joining multiple entities, or reads as a sentence/action rather than a name, it violates §3.5 — split it (Rule 1), trim it (Rule 3), or drop the relation (Rule 2).
 
 ---
 

@@ -190,6 +190,49 @@ func NewEntityRelationProcessor(
 
 func (p *EntityRelationProcessor) Name() string { return "extract_entity_relation" }
 
+// buildDocContextLine returns a compact one-line document description from the
+// record's title and doc_metadata. Returns "" when no useful info is available.
+func buildDocContextLine(rec DocMetadataInputRecord) string {
+	var parts []string
+	if t := strings.TrimSpace(rec.Title); t != "" {
+		parts = append(parts, t)
+	}
+	if rec.DocMetadataJSON != "" {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(rec.DocMetadataJSON), &m); err == nil {
+			if dn := strings.TrimSpace(asString(m["doc_no"])); dn != "" {
+				// Include doc_no only if it's not already embedded in the title.
+				if !strings.Contains(strings.ToLower(strings.Join(parts, " ")), strings.ToLower(dn)) {
+					parts = append(parts, dn)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, " | ")
+}
+
+// wrapLinesWithDocContext wraps a lines JSON array in a context envelope:
+//
+//	{"doc_context": "<title and doc_no>", "lines": [...]}
+//
+// Both extraction prompts (entity v3, relation v2) describe this input shape.
+// Falls back to the bare linesJSON when docCtx is empty.
+func wrapLinesWithDocContext(linesJSON, docCtx string) string {
+	docCtx = strings.TrimSpace(docCtx)
+	if docCtx == "" {
+		return linesJSON
+	}
+	type envelope struct {
+		DocContext string          `json:"doc_context"`
+		Lines      json.RawMessage `json:"lines"`
+	}
+	bs, err := json.Marshal(envelope{DocContext: docCtx, Lines: json.RawMessage(linesJSON)})
+	if err != nil {
+		return linesJSON
+	}
+	return string(bs)
+}
+
 func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byte) error {
 	start := p.Now()
 	evt, err := ParseLineFileGeneratedEvent(payload)
@@ -287,7 +330,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 
 	// Step 2: extract entities
 	p.persistEntityRelationInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(chunks)))
-	result, err := p.extractEntitiesFromChunks(ctx, evt.RecordID, chunks)
+	result, err := p.extractEntitiesFromChunks(ctx, evt.RecordID, chunks, buildDocContextLine(rec))
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			p.stopAndPersistEntityRelation(context.Background(), rec, start)
@@ -439,6 +482,7 @@ func (p *EntityRelationProcessor) extractEntitiesFromChunks(
 	ctx context.Context,
 	recordID int64,
 	chunks []Chunk,
+	docCtx string,
 ) (entityRelationExtractionResult, error) {
 	p.Logger.Info("extract entities", "total_chunks", len(chunks),
 		"model_name", p.ModelName,
@@ -450,7 +494,7 @@ func (p *EntityRelationProcessor) extractEntitiesFromChunks(
 			if isCtxStopped(workerCtx) {
 				return entityRelationChunkResult{}, ErrPipelineStopped
 			}
-			return p.processChunk(workerCtx, recordID, i, len(chunks), chunks[i]), nil
+			return p.processChunk(workerCtx, recordID, i, len(chunks), chunks[i], docCtx), nil
 		},
 	)
 	if runErr != nil {
@@ -507,8 +551,9 @@ func (p *EntityRelationProcessor) processChunk(
 	idx int,
 	totalChunks int,
 	chunk Chunk,
+	docCtx string,
 ) entityRelationChunkResult {
-	chunkText := buildMarkedChunkInputText(chunk.Lines)
+	chunkText := wrapLinesWithDocContext(buildMarkedChunkInputText(chunk.Lines), docCtx)
 	callStart := p.Now()
 	p.Logger.Info("extract entities start",
 		"record_id", recordID,
@@ -801,11 +846,11 @@ func (p *EntityRelationProcessor) extractEntityRelationWithFallback(ctx context.
 // window's entity-list input text, with the same primary/fallback model policy.
 func (p *EntityRelationProcessor) extractRelationsWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
 	promptText, promptRef := p.RelationPromptText, p.RelationPromptRef
-	usedFallback := false
+	// usedFallback := false
 	if strings.TrimSpace(promptText) == "" {
 		// No dedicated relation prompt configured; fall back to the combined prompt.
 		promptText, promptRef = p.PromptText, p.PromptRef
-		usedFallback = true
+		// usedFallback = true
 	}
 	// p.Logger.Info("relation extraction prompt selected",
 	// 	"prompt_ref", promptRef, "fell_back_to_entity_prompt", usedFallback)
@@ -1827,6 +1872,7 @@ INSERT INTO kb.relations (
 	return inserted, nil
 }
 
+/*
 func debugLogEntitySearchDocument(ctx context.Context, store EntityRelationStore, recordID int64, label string, logger ApiTypes.JimoLogger) {
 	sqlStore, ok := store.(EntityRelationSQLStore)
 	if !ok {
@@ -1844,6 +1890,7 @@ func debugLogEntitySearchDocument(ctx context.Context, store EntityRelationStore
 	}
 	logger.Info("[DEBUG] search_document", "label", label, "entity_id", entityID, "len", len(doc), "content", doc)
 }
+*/
 
 func isLanguageEnglish(language string) bool {
 	s := strings.TrimSpace(language)

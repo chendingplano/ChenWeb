@@ -45,19 +45,19 @@ type ReconcileConfig struct {
 
 // Candidate decision values (mirror kb.entity_merge_candidates.decision).
 const (
-	decisionPending    = "pending"
-	decisionAutoMerge  = "auto_merge"
+	// decisionPending    = "pending"
+	// decisionAutoMerge  = "auto_merge"
 	decisionAutoReject = "auto_reject"
 	decisionNeedsHuman = "needs_human"
 	decisionApplied    = "applied"
-	decisionDismissed  = "dismissed"
+	// decisionDismissed  = "dismissed"
 )
 
 // Merge methods (mirror kb.entity_merges.method).
 const (
-	mergeMethodRule  = "rule"
-	mergeMethodLLM   = "llm"
-	mergeMethodHuman = "human"
+	mergeMethodRule = "rule"
+	mergeMethodLLM  = "llm"
+	// mergeMethodHuman = "human"
 )
 
 // ---- seams ----

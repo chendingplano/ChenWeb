@@ -189,9 +189,11 @@ func parseMetricCategoriesText(s string) []string {
 
 // upsertMetricCategoryInstances is the metric-family entry point retained for tests; it
 // delegates to the shared engine.
+/*
 func upsertMetricCategoryInstances(ctx context.Context, db *sql.DB, recordID int64, metrics []indexedMetric, resolver categoryBatchResolver, logger ApiTypes.JimoLogger) int {
 	return upsertArtifactCategoryConnections(ctx, db, recordID, metricsToIndexedArtifacts(metrics), metricIndexConfig, resolver, logger)
 }
+*/
 
 // upsertMetricToLeafDir / removeMetricTreeRecord are metric-named shims over the shared
 // category-tree helpers, retained for tests.

@@ -34,6 +34,7 @@ import (
 type extractionPrep struct {
 	evt    LineFileGeneratedEvent
 	rec    DocMetadataInputRecord
+	docCtx string
 	lines  []Line
 	chunks []Chunk
 	start  time.Time
@@ -61,6 +62,12 @@ func (p *EntityRelationProcessor) prepareForExtraction(ctx context.Context, payl
 			return extractionPrep{}, false, nil
 		}
 		return extractionPrep{}, false, fmt.Errorf("(MID_26052704) load kb.inputs record %d: %w", evt.RecordID, err)
+	}
+	docCtx := buildDocContextLine(rec)
+	if docCtx != "" {
+		p.Logger.Info("document context for extraction",
+			"record_id", evt.RecordID,
+			"doc_context", docCtx)
 	}
 	if p.ModelErr != nil {
 		p.Logger.Warn("extraction skipped: model config error", "record_id", evt.RecordID, "error", p.ModelErr)
@@ -92,7 +99,7 @@ func (p *EntityRelationProcessor) prepareForExtraction(ctx context.Context, payl
 		p.persistEntityRelationStatus(ctx, rec, start, fmt.Errorf("(MID_26052714) no chunks found for record_id=%d", evt.RecordID))
 		return extractionPrep{}, false, nil
 	}
-	return extractionPrep{evt: evt, rec: rec, lines: lines, chunks: chunks, start: start}, true, nil
+	return extractionPrep{evt: evt, rec: rec, docCtx: docCtx, lines: lines, chunks: chunks, start: start}, true, nil
 }
 
 // handleEntityExtraction is Phase 1 only: extract + consolidate + save entities.
@@ -124,7 +131,7 @@ func (p *EntityRelationProcessor) handleEntityExtraction(ctx context.Context, pa
 	}
 
 	p.persistEntityRelationInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(prep.chunks)))
-	result, err := p.extractEntitiesFromChunks(ctx, evt.RecordID, prep.chunks)
+	result, err := p.extractEntitiesFromChunks(ctx, evt.RecordID, prep.chunks, prep.docCtx)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			p.stopAndPersistEntityRelation(context.Background(), rec, start)
@@ -201,7 +208,7 @@ func (p *EntityRelationProcessor) handleRelationExtraction(ctx context.Context, 
 	}
 
 	p.persistEntityRelationInProgressStatus(ctx, rec, start, "0%")
-	relations, language, err := p.extractFreeformRelations(ctx, evt.RecordID, prep.chunks)
+	relations, language, err := p.extractFreeformRelations(ctx, evt.RecordID, prep.chunks, prep.docCtx)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			p.stopAndPersistEntityRelation(context.Background(), rec, start)

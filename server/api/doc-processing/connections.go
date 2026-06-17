@@ -81,7 +81,7 @@ const (
 
 	// artifactTypeCategory / artifactTypeRelationPredicate are the artifact_type
 	// discriminators for the dictionary endpoints promoted to artifacts in D2.
-	artifactTypeCategory          = "category"
+	// artifactTypeCategory          = "category"
 	artifactTypeRelationPredicate = "relation_predicate"
 	artifactTypeEntityName        = "entity_name"
 )

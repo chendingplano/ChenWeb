@@ -513,7 +513,7 @@ func TestExtractEntityRelationConcurrencyBound(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks)
+			_, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks, "")
 		done <- err
 	}()
 
@@ -566,7 +566,7 @@ func TestExtractEntityRelationChunkOrder(t *testing.T) {
 	}
 
 	p := makeTestProcessor(ext, len(chunks)) // fully concurrent
-	result, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks)
+	result, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestExtractEntityRelationSkipsFailedChunks(t *testing.T) {
 
 	chunks := []Chunk{makeTestChunk(1), makeTestChunk(2), makeTestChunk(3)}
 	p := makeTestProcessor(ext, 1) // sequential for determinism
-	result, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks)
+	result, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks, "")
 	if err != nil {
 		t.Fatalf("LLM error on one chunk must not abort extraction, got err=%v", err)
 	}
@@ -621,7 +621,7 @@ func TestExtractEntityRelationStopPropagation(t *testing.T) {
 	chunks := []Chunk{makeTestChunk(1), makeTestChunk(2)}
 	p := makeTestProcessor(ext, 1)
 
-	_, err := p.extractEntitiesFromChunks(ctx, 1, chunks)
+	_, err := p.extractEntitiesFromChunks(ctx, 1, chunks, "")
 	if !errors.Is(err, ErrPipelineStopped) {
 		t.Errorf("expected ErrPipelineStopped, got %v", err)
 	}

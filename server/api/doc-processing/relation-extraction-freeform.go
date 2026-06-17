@@ -65,13 +65,14 @@ func (p *EntityRelationProcessor) extractFreeformRelations(
 	ctx context.Context,
 	recordID int64,
 	chunks []Chunk,
+	docCtx string,
 ) ([]map[string]any, string, error) {
 	results, runErr := runConcurrent(ctx, p.ExtractEntityRelationMaxTasks, len(chunks),
 		func(workerCtx context.Context, i int) (relationWindowResult, error) {
 			if isCtxStopped(workerCtx) {
 				return relationWindowResult{}, ErrPipelineStopped
 			}
-			return p.processFreeformRelationChunk(workerCtx, recordID, i, len(chunks), chunks[i]), nil
+			return p.processFreeformRelationChunk(workerCtx, recordID, i, len(chunks), chunks[i], docCtx), nil
 		},
 	)
 	if runErr != nil {
@@ -100,8 +101,9 @@ func (p *EntityRelationProcessor) processFreeformRelationChunk(
 	recordID int64,
 	idx, totalChunks int,
 	chunk Chunk,
+	docCtx string,
 ) relationWindowResult {
-	inputText := buildChunkRelationInputJSON(chunk.Lines)
+	inputText := wrapLinesWithDocContext(buildChunkRelationInputJSON(chunk.Lines), docCtx)
 	callStart := p.Now()
 	p.Logger.Info("extract relation start",
 		"record_id", recordID, "chunk_idx", idx, "seq_no", chunk.SeqNo,
