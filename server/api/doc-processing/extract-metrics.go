@@ -1884,26 +1884,32 @@ func (p *MetricsProcessor) extractMetricPayload(
 		err     error
 	)
 
-	// p.Logger.Info("inputText", "caller", caller_loc, "inputText", inputText)
-
 	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, metricsExtractionContract())
-		if result != nil {
-			payload = result.Parsed
+		if err != nil {
+			return nil, fmt.Errorf("(MID-26061701) failed extracting metrics, error:%v", err)
 		}
+
+		if result == nil {
+			return nil, fmt.Errorf("(MID-26061702) no metrics extracted")
+		}
+		payload = result.Parsed
 	} else {
 		payload, err = p.Extractor.ExtractJSON(ctx, in)
+		if err != nil {
+			return nil, fmt.Errorf("(MID-26061703) failed extracting metrics, error:%v", err)
+		}
+
+		if payload == nil {
+			return nil, fmt.Errorf("(MID-26061704) no metrics extracted")
+		}
 	}
-	if err != nil {
-		return nil, err
-	}
-	if payload == nil {
-		return nil, errors.New("(MID_26042490) empty llm payload")
-	}
+
 	if _, ok := payload["metrics"]; ok {
 		return payload, nil
 	}
+
 	if _, ok := payload["candidates"]; ok {
 		return payload, nil
 	}
@@ -2332,7 +2338,7 @@ func loadPersistedMetricArtifactRows(ctx context.Context, db *sql.DB, recordID i
 		       COALESCE(category_paths, '[]'::jsonb),
 		       COALESCE(category_paths_en, '[]'::jsonb),
 		       COALESCE(search_document, ''),
-		       COALESCE(connected_artifacts, '{}'::jsonb)
+		       kb.connected_artifacts(input_record_id, 'metric', id)
 		FROM kb.metrics
 		WHERE input_record_id = $1
 		ORDER BY id`, recordID)

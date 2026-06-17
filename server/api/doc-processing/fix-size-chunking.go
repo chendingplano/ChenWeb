@@ -1545,7 +1545,7 @@ func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context,
 	}
 	translated := compactTopicArray(parsed["keywords"])
 	if len(translated) == 0 {
-		return nil, fmt.Errorf("(MID_26053003) translation to %q returned empty keywords", targetLang)
+		return nil, fmt.Errorf("(MID_26053053) translation to %q returned empty keywords", targetLang)
 	}
 	return translated, nil
 }
@@ -2805,7 +2805,7 @@ func loadChunksFromArtifactFile(chunkDir string, recordID int64, fileName string
 func validateChunksNonEmpty(chunks []Chunk, source string) error {
 	for _, chunk := range chunks {
 		if len(chunk.Lines) == 0 {
-			return fmt.Errorf("(MID_26053003) %s contain empty chunk seq %d", source, chunk.SeqNo)
+			return fmt.Errorf("(MID_26053054) %s contain empty chunk seq %d", source, chunk.SeqNo)
 		}
 	}
 	return nil

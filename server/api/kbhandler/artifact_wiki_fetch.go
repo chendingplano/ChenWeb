@@ -654,7 +654,7 @@ SELECT
 	COALESCE(keywords, '[]'::jsonb), COALESCE(keywords_en, '[]'::jsonb), COALESCE(line_spans, '[]'::jsonb),
 	COALESCE(confidence, 0), COALESCE(model_name, ''), COALESCE(prompt_name, ''),
 	COALESCE(entity_context, ''), COALESCE(doc_name, ''), COALESCE(categories, '[]'::jsonb),
-	COALESCE(entity_status, ''), COALESCE(search_document, ''), COALESCE(connected_artifacts, '{}'::jsonb),
+	COALESCE(entity_status, ''), COALESCE(search_document, ''), kb.connected_artifacts(input_record_id, 'entity', id),
 	COALESCE(ext_info, '{}'::jsonb), COALESCE(to_char(create_time, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), '')
 FROM kb.entities
 WHERE input_record_id = $1 AND entity_id = $2
@@ -707,7 +707,7 @@ SELECT
 	COALESCE(keywords, '[]'::jsonb), COALESCE(keywords_en, '[]'::jsonb), COALESCE(line_spans, '[]'::jsonb),
 	COALESCE(confidence, 0), COALESCE(model_name, ''), COALESCE(prompt_name, ''),
 	COALESCE(subject_entity_id, ''), COALESCE(object_entity_id, ''), COALESCE(categories, '[]'::jsonb),
-	COALESCE(search_document, ''), COALESCE(connected_artifacts, '{}'::jsonb), COALESCE(ext_info, '{}'::jsonb),
+	COALESCE(search_document, ''), kb.connected_artifacts(input_record_id, 'relation', id), COALESCE(ext_info, '{}'::jsonb),
 	COALESCE(to_char(create_time, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), '')
 FROM kb.relations
 WHERE input_record_id = $1 AND relation_id = $2

@@ -114,6 +114,14 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 		logger.Info("metrics indexing start", "record_id", recordID, "metrics", len(metrics))
 	}
 
+	// Persist canonical fixed-size chunk line ranges for on-demand kb.connected_artifacts()
+	// (Option A). Idempotent; skipped when chunks failed to load so we never wipe the set.
+	if len(inputChunks) > 0 {
+		if err := replaceChunkRangesForRecord(ctx, db, recordID, inputChunks); err != nil && logger != nil {
+			logger.Warn("metrics indexing: replace chunk_ranges failed", "record_id", recordID, "error", err.Error())
+		}
+	}
+
 	artifacts := metricsToIndexedArtifacts(metrics)
 	connectedCount := buildArtifactConnectedArtifacts(ctx, db, recordID, inputChunks, artifacts, metricIndexConfig, logger)
 

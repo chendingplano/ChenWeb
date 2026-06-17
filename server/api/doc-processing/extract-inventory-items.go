@@ -1179,7 +1179,7 @@ SELECT inventory_item_id, item_name, canonical_name, item_categories, manufactur
        model_number, part_number, normalized_specs, raw_specs, standards, aliases,
        evidence_quote, source_line_spans, validation_flags, missing_required_attrs,
        dedupe_key, schema_version, dictionary_version, confidence, confidence_reason,
-       connected_artifacts, ext_info
+       kb.connected_artifacts(input_record_id, 'inventory_item', id), ext_info
 FROM kb.inventory_items
 WHERE input_record_id = $1
 ORDER BY id`

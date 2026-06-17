@@ -1804,7 +1804,7 @@ func loadPersistedSceneBlockArtifactRows(ctx context.Context, db *sql.DB, record
 		       COALESCE(prompt_name, ''),
 		       COALESCE(line_spans, '[]'::jsonb),
 		       COALESCE(search_document, ''),
-		       COALESCE(connected_artifacts, '{}'::jsonb),
+		       kb.connected_artifacts(input_record_id, 'scene_block', id),
 		       COALESCE(ext_info, '{}'::jsonb),
 		       to_char(create_time AT TIME ZONE 'UTC', 'YYYYMMDD-HH24MISS')
 		FROM kb.scene_objects

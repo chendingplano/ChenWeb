@@ -705,7 +705,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 			"fallback_model", p.FallbackModelName,
 		)
 	} else {
-		p.Logger.Warn("primary LLM failed extracting provisions",
+		p.Logger.Warn("primary LLM failed extracting provisions. Try the fallback!",
 			"error", err,
 			"model_name", p.ModelName,
 			"timeout_sec", extractorTimeoutSec(p.Extractor),
@@ -1730,7 +1730,7 @@ func loadPersistedProvisionArtifactRows(ctx context.Context, db *sql.DB, recordI
 		       COALESCE(is_explicit, false),
 		       COALESCE(need_verify, false),
 		       COALESCE(public_info, '{}'::jsonb),
-		       COALESCE(connected_artifacts, '{}'::jsonb)
+		       kb.connected_artifacts(input_record_id, 'provision', id)
 		FROM kb.provisions
 		WHERE input_record_id = $1
 		ORDER BY id`, recordID)

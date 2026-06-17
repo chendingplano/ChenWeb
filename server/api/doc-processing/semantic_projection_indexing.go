@@ -65,6 +65,14 @@ func IndexSemanticProjectionsForRecord(ctx context.Context, recordID int64, inpu
 		}
 		return
 	}
+	// Persist the canonical fixed-size chunk line ranges so kb.connected_artifacts() can
+	// compute chunk edges on demand (Option A). Skip when chunks failed to load so we never
+	// wipe a previously-populated set.
+	if len(inputChunks) > 0 {
+		if err := replaceChunkRangesForRecord(ctx, db, recordID, inputChunks); err != nil && logger != nil {
+			logger.Warn("semantic projections indexing: replace chunk_ranges failed", "record_id", recordID, "error", err.Error())
+		}
+	}
 	artifacts, err := loadIndexedSemanticProjectionsForRecord(ctx, db, recordID)
 	if err != nil {
 		if logger != nil {

@@ -646,6 +646,7 @@ func (p *EntityRelationProcessor) processRelationWindow(
 		"entities", len(window.Entities),
 		"pages", fmt.Sprintf("%d-%d", window.PageLo, window.PageHi),
 		"input len", len(inputText),
+		"inputText", inputText,
 	)
 	callID := fmt.Sprintf("%s_p2_w%d", eventIDFromContext(ctx), idx)
 	payload, modelName, err := p.extractRelationsWithFallback(ctx, inputText)
@@ -851,7 +852,7 @@ func (p *EntityRelationProcessor) extractStructuredWithFallback(
 	if ApiUtils.IsEmptyJSONResponse(err) {
 		p.Logger.Info("primary timeout. Try the fallback")
 	} else {
-		p.Logger.Warn("primary extraction failed; retrying fallback model",
+		p.Logger.Warn("primary extraction failed; retrying fallback model. Try the fallback!",
 			"primary_model", primaryModelName,
 			"fallback_model", fallbackModelName,
 			"timeout", p.ModelCfg.TimeoutSec,
@@ -1935,7 +1936,7 @@ func loadPersistedEntityArtifactRows(ctx context.Context, db *sql.DB, recordID i
 		       COALESCE(categories, '[]'::jsonb),
 		       COALESCE(entity_status, 'extracted'),
 		       COALESCE(search_document, ''),
-		       COALESCE(connected_artifacts, '{}'::jsonb),
+		       kb.connected_artifacts(input_record_id, 'entity', id),
 		       COALESCE(ext_info, '{}'::jsonb)
 		FROM kb.entities
 		WHERE input_record_id = $1
@@ -2032,7 +2033,7 @@ func loadPersistedRelationArtifactRows(ctx context.Context, db *sql.DB, recordID
 		       COALESCE(object_entity_id, ''),
 		       COALESCE(categories, '[]'::jsonb),
 		       COALESCE(search_document, ''),
-		       COALESCE(connected_artifacts, '{}'::jsonb),
+		       kb.connected_artifacts(input_record_id, 'relation', id),
 		       COALESCE(ext_info, '{}'::jsonb)
 		FROM kb.relations
 		WHERE input_record_id = $1

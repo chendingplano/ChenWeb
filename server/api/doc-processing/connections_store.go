@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -339,6 +341,77 @@ func WriteLineOverlapConnectionsFromRegistry(ctx context.Context, recordID int64
 	conns := DeriveLineOverlapConnections(recordID, targetType, relationName, chunks, refs)
 	store := &ConnectionSQLStore{DB: db}
 	return store.ReplaceConnections(ctx, recordID, RelationMethodLineOverlap, []string{relationName}, conns)
+}
+
+// replaceChunkRangesForRecord idempotently rewrites kb.chunk_ranges for one document from
+// the canonical fixed-size chunk blocks. chunk_id matches ChunkConnectionID (the positional
+// id used in connected_artifacts.chunks), and source_line_spans is the chunk's line set
+// coalesced into "a:b"/"n" runs so the generated line_range can drive the on-demand
+// kb.connected_artifacts() overlap query. Callers pass the canonical fixed-size blocks
+// (the .chunks artifact file), not semantic chunks.
+func replaceChunkRangesForRecord(ctx context.Context, db *sql.DB, recordID int64, chunks []Block) error {
+	if db == nil {
+		return fmt.Errorf("(CWB_CONN_025) project db handle is nil")
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM kb.chunk_ranges WHERE input_record_id = $1`, recordID); err != nil {
+		return err
+	}
+	const stmt = `INSERT INTO kb.chunk_ranges (input_record_id, chunk_id, source_line_spans)
+	              VALUES ($1, $2, $3::jsonb)
+	              ON CONFLICT (input_record_id, chunk_id)
+	              DO UPDATE SET source_line_spans = EXCLUDED.source_line_spans`
+	for _, ch := range chunks {
+		spans := blockLinesToSpans(ch.Lines)
+		spansJSON, _ := json.Marshal(spans)
+		if _, err := tx.ExecContext(ctx, stmt, recordID, ChunkConnectionID(recordID, ch.Index), string(spansJSON)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// blockLinesToSpans collapses a block's (possibly unsorted, duplicated) line numbers into
+// sorted "a:b" / "n" run strings, matching the span format parsed by
+// kb.line_spans_to_int8multirange and parseMetricLineSpan.
+func blockLinesToSpans(lines []BlockLine) []string {
+	nums := make([]int, 0, len(lines))
+	for _, l := range lines {
+		if l.LineNumber > 0 {
+			nums = append(nums, l.LineNumber)
+		}
+	}
+	sort.Ints(nums)
+	out := []string{}
+	for i := 0; i < len(nums); {
+		start := nums[i]
+		end := start
+		j := i + 1
+		for j < len(nums) {
+			if nums[j] == end {
+				j++ // duplicate
+				continue
+			}
+			if nums[j] == end+1 {
+				end = nums[j]
+				j++
+				continue
+			}
+			break
+		}
+		if start == end {
+			out = append(out, strconv.Itoa(start))
+		} else {
+			out = append(out, strconv.Itoa(start)+":"+strconv.Itoa(end))
+		}
+		i = j
+	}
+	return out
 }
 
 // loadArtifactRefsFromRegistry reads the canonical artifact_id and source line

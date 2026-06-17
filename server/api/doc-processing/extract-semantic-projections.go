@@ -1209,7 +1209,7 @@ func loadPersistedSemanticProjectionArtifactRows(ctx context.Context, db *sql.DB
 		       COALESCE(model_name, ''),
 		       COALESCE(prompt_name, ''),
 		       COALESCE(search_document, ''),
-		       COALESCE(connected_artifacts, '{}'::jsonb),
+		       kb.connected_artifacts(input_record_id, 'semantic_projection', id),
 		       COALESCE(ext_info, '{}'::jsonb),
 		       to_char(create_time AT TIME ZONE 'UTC', 'YYYYMMDD-HH24MISS')
 		FROM kb.semantic_projections

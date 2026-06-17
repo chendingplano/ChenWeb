@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+func TestBlockLinesToSpans(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []int
+		want []string
+	}{
+		{"empty", nil, []string{}},
+		{"single", []int{5}, []string{"5"}},
+		{"contiguous run", []int{10, 11, 12}, []string{"10:12"}},
+		{"unsorted + duplicates", []int{12, 10, 11, 11}, []string{"10:12"}},
+		{"disjoint runs", []int{1, 2, 5, 7, 8, 9}, []string{"1:2", "5", "7:9"}},
+		{"drops non-positive", []int{0, -3, 4}, []string{"4"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lines := make([]BlockLine, len(c.in))
+			for i, n := range c.in {
+				lines[i] = BlockLine{LineNumber: n}
+			}
+			got := blockLinesToSpans(lines)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("blockLinesToSpans(%v) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 func TestArtifactRefFromRegistry(t *testing.T) {
 	// String spans (metric/provision form).
 	r := artifactRefFromRegistry("metric", "42_mtc_1", []byte(`["3","5:6"]`))
