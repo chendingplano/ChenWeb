@@ -392,6 +392,7 @@ func makeTestProcessor(ext LLMJSONExtractor, maxTasks int) *EntityRelationProces
 		Extractor:                     ext,
 		Now:                           time.Now,
 		ModelName:                     "test-model",
+		LLMController:                 newLLMCallController(llmCallControllerConfig{DefaultLimit: maxTasks, LeaseTTL: 320 * time.Second}),
 		ExtractEntityRelationMaxTasks: maxTasks,
 	}
 }
@@ -513,7 +514,7 @@ func TestExtractEntityRelationConcurrencyBound(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-			_, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks, "")
+		_, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks, "")
 		done <- err
 	}()
 
@@ -543,6 +544,67 @@ func TestExtractEntityRelationConcurrencyBound(t *testing.T) {
 	ext.mu.Unlock()
 	if got != maxTasks {
 		t.Errorf("MaxInFlight = %d, want %d", got, maxTasks)
+	}
+}
+
+func TestExtractEntityRelationModelPermitBound(t *testing.T) {
+	const numChunks = 4
+	const maxTasks = 4
+
+	ext := &erBlockingExtractor{
+		ready:   make(chan struct{}),
+		readyAt: 1,
+		gate:    make(chan struct{}, numChunks),
+		out:     entityPayload("ent"),
+	}
+
+	chunks := make([]Chunk, numChunks)
+	for i := range chunks {
+		chunks[i] = makeTestChunk(i + 1)
+	}
+
+	p := makeTestProcessor(ext, maxTasks)
+	p.LLMController = newLLMCallController(llmCallControllerConfig{
+		DefaultLimit: 1,
+		LeaseTTL:     320 * time.Second,
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.extractEntitiesFromChunks(context.Background(), 1, chunks, "")
+		done <- err
+	}()
+
+	select {
+	case <-ext.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first worker to enter ExtractJSON")
+	}
+
+	select {
+	case err := <-done:
+		t.Fatalf("extraction should still be running behind the model permit, got early err=%v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	for range numChunks {
+		ext.gate <- struct{}{}
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for extraction to complete")
+	}
+
+	ext.mu.Lock()
+	got := ext.MaxInFlight
+	ext.mu.Unlock()
+	if got != 1 {
+		t.Errorf("MaxInFlight = %d, want 1 with model permit limit", got)
 	}
 }
 

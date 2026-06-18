@@ -86,7 +86,7 @@ func TestHasParsedSuccess(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{"hyphen key", `[{"operation":"parsed","proc_status":"success"}]`, true},
+		{"hyphen key", `[{"operation":"parsed","proc-status":"success"}]`, true},
 		{"underscore key (mineru/python parser)", `[{"operation":"parsed","proc_status":"success"}]`, true},
 		{"legacy status key", `[{"operation":"parsed","status":"success"}]`, true},
 		{"missing success", `[{"operation":"parsed","proc_status":"failed"}]`, false},

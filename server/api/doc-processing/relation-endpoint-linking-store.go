@@ -16,7 +16,8 @@ func (s EntityRelationSQLStore) LoadEntitiesForRecord(ctx context.Context, recor
 		return nil, err
 	}
 	const q = `
-SELECT entity_id, entity, entity_en, entity_type, entity_type_en,
+SELECT COALESCE(entity_id, ''), COALESCE(entity, ''), COALESCE(entity_en, ''),
+       COALESCE(entity_type, ''), COALESCE(entity_type_en, ''),
        COALESCE(aliases, '[]'::jsonb), COALESCE(aliases_en, '[]'::jsonb),
        COALESCE(line_spans, '[]'::jsonb), COALESCE(categories, '[]'::jsonb),
        COALESCE(entity_status, 'extracted')
@@ -61,8 +62,9 @@ func (s EntityRelationSQLStore) LoadRelationsForRecord(ctx context.Context, reco
 		return nil, err
 	}
 	const q = `
-SELECT relation_id, subject, subject_en, predicate, predicate_en, object, object_en,
-       desc_text, desc_text_en,
+SELECT COALESCE(relation_id, ''), COALESCE(subject, ''), COALESCE(subject_en, ''),
+       COALESCE(predicate, ''), COALESCE(predicate_en, ''), COALESCE(object, ''),
+       COALESCE(object_en, ''), COALESCE(desc_text, ''), COALESCE(desc_text_en, ''),
        COALESCE(keywords, '[]'::jsonb), COALESCE(keywords_en, '[]'::jsonb),
        COALESCE(line_spans, '[]'::jsonb), COALESCE(categories, '[]'::jsonb),
        COALESCE(subject_lines, '[]'::jsonb), COALESCE(predicate_lines, '[]'::jsonb),

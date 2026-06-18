@@ -302,7 +302,7 @@ func TestExtractProductPayloadWithFallback_EmptyPrimaryResponseSkipsFallback(t *
 	}
 
 	p := NewProductsProcessor(nil, nil, extractor, nil)
-	p.FallbackModelName = "gpt-5.4-mini"
+	p.FallbackModelName = "qwen-plus"
 
 	payload, modelName, err := p.extractProductPayloadWithFallback(
 		context.Background(),
@@ -401,16 +401,16 @@ func TestLoadModelConfigFromEnvKeys_PrefersFirstConfiguredKey(t *testing.T) {
 	tmp := t.TempDir()
 	modelsPath := filepath.Join(tmp, ".models.toml")
 	modelsBody := `
-[gpt-5-4-mini-products-mentions]
+[deepseek-v4-flash-products-mentions]
 host = "cloud"
-model_name = "gpt-5.4-mini"
+model_name = "deepseek-v4-flash"
 api_key = "sk-test-mentions"
 base_url = "https://api.openai.com"
 timeout_sec = 90
 
-[gpt-5-4-mini-products-relations]
+[deepseek-v4-flash-products-relations]
 host = "cloud"
-model_name = "gpt-5.4-mini"
+model_name = "deepseek-v4-flash"
 api_key = "sk-test-relations"
 base_url = "https://api.openai.com"
 timeout_sec = 100
@@ -420,8 +420,8 @@ timeout_sec = 100
 	}
 
 	t.Setenv("MODEL_DEF_FILE", modelsPath)
-	t.Setenv("EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "gpt-5-4-mini-products-mentions")
-	t.Setenv("EXTRACT_PRODUCT_MODEL_NAME", "gpt-5-4-mini-products-relations")
+	t.Setenv("EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "deepseek-v4-flash-products-mentions")
+	t.Setenv("EXTRACT_PRODUCT_MODEL_NAME", "deepseek-v4-flash-products-relations")
 
 	ref, gotPath, cfg, err := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_PRODUCT_MENTIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
@@ -430,7 +430,7 @@ timeout_sec = 100
 	if err != nil {
 		t.Fatalf("loadModelConfigFromEnvKeys: %v", err)
 	}
-	if ref != "gpt-5-4-mini-products-mentions" {
+	if ref != "deepseek-v4-flash-products-mentions" {
 		t.Fatalf("modelRef=%q", ref)
 	}
 	if gotPath != modelsPath {

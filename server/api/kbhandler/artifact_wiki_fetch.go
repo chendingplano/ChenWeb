@@ -60,6 +60,7 @@ LIMIT 1`
 	return r, nil
 }
 
+/*
 func fetchSceneBlockByObjectID(db *sql.DB, artifactID string) (sceneBlockRecord, error) {
 	const q = `
 SELECT
@@ -281,6 +282,7 @@ LIMIT 1`
 	}
 	return r, nil
 }
+*/
 
 func fetchSceneBlockByArtifactID(db *sql.DB, artifactID string) (sceneBlockRecord, int64, error) {
 	recordID, seqNo, err := parseArtifactSearchIDSeq(artifactID, "scene_block")

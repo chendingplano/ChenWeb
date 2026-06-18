@@ -405,12 +405,18 @@ type createdCategory struct {
 // It requires a non-empty category_key; all other fields are optional.
 func parseCreateCategoryResponse(payload map[string]any) (createdCategory, error) {
 	var c createdCategory
-	c.CategoryKey = strings.TrimSpace(jsonString(payload["category_key"]))
+	c.CategoryKey = normalizeCategoryKey(strings.ReplaceAll(strings.TrimSpace(jsonString(payload["category_key"])), "_", " "))
 	if c.CategoryKey == "" {
 		c.CategoryKey = normalizeCategoryKey(strings.ReplaceAll(strings.TrimSpace(jsonString(payload["canonical_key"])), "_", " "))
-		if c.CategoryKey == "" {
-			return createdCategory{}, fmt.Errorf("(MID_26060601) create category response missing category_key/canonical_key")
-		}
+	}
+	if c.CategoryKey == "" {
+		c.CategoryKey = normalizeCategoryKey(strings.ReplaceAll(strings.TrimSpace(jsonString(payload["canonical_name"])), "_", " "))
+	}
+	if c.CategoryKey == "" {
+		c.CategoryKey = normalizeCategoryKey(strings.ReplaceAll(strings.TrimSpace(jsonString(jsonObjectField(payload["translations"], "en"))), "_", " "))
+	}
+	if c.CategoryKey == "" {
+		return createdCategory{}, fmt.Errorf("(MID_26060601) create category response missing category_key/canonical_key")
 	}
 	c.DisplayNames = jsonStringSlice(firstNonNil(payload["display_names"], payload["canonical_name"]))
 	c.Aliases = jsonStringSlice(payload["aliases"])
@@ -435,6 +441,13 @@ func jsonString(v any) string {
 		return s
 	}
 	return ""
+}
+
+func jsonObjectField(v any, key string) any {
+	if m, ok := v.(map[string]any); ok {
+		return m[key]
+	}
+	return nil
 }
 
 // jsonStringSlice coerces a JSON array (or single string) into a []string of

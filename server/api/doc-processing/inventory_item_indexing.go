@@ -16,13 +16,14 @@ import (
 // almost identical to metric indexing (spec 3.1); both run the same Phase C engine and
 // differ only in this config and how their source rows are loaded.
 var inventoryItemIndexConfig = artifactIndexConfig{
-	SelfType:             searchArtifactInventoryItem,
-	CategoryType:         "inventory_item",
-	InstanceSource:       "extract_inventory_items",
-	Table:                "kb.inventory_items",
-	IDColumn:             "inventory_item_id",
-	CategoryTreeFilename: "inventory_items.txt",
-	LogPrefix:            "inventory items indexing",
+	SelfType:                   searchArtifactInventoryItem,
+	CategoryType:               "inventory_item",
+	InstanceSource:             "extract_inventory_items",
+	Table:                      "kb.inventory_items",
+	IDColumn:                   "inventory_item_id",
+	CategoryTreeFilename:       "inventory_items.txt",
+	LogPrefix:                  "inventory items indexing",
+	WarnOnMissingCategoryPaths: true,
 }
 
 // IndexInventoryItemsForRecord runs the post-save inventory-item indexing workflow
@@ -31,7 +32,13 @@ var inventoryItemIndexConfig = artifactIndexConfig{
 // (kb.search_artifacts) is handled separately by ReindexInventoryItemSearchForRecord,
 // which the caller runs first. Each step is best-effort and logged; a failure in one step
 // does not abort the others.
-func IndexInventoryItemsForRecord(ctx context.Context, recordID int64, inputChunks []Block, logger ApiTypes.JimoLogger) {
+func IndexInventoryItemsForRecord(
+	ctx context.Context,
+	recordID int64,
+	model_name string,
+	prompt_ref string,
+	inputChunks []Block,
+	logger ApiTypes.JimoLogger) {
 	db := ApiTypes.ProjectDBHandle
 	if db == nil {
 		if logger != nil {
@@ -54,7 +61,8 @@ func IndexInventoryItemsForRecord(ctx context.Context, recordID int64, inputChun
 	}
 
 	resolver := newMetricCategoryResolver(db, logger) // category resolver is category-type-agnostic
-	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, items, inventoryItemIndexConfig, resolver, logger)
+	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID,
+		model_name, prompt_ref, items, inventoryItemIndexConfig, resolver, logger)
 	categoryPathItems := indexArtifactsByCategoryPaths(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
 	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
 
@@ -149,7 +157,7 @@ func (p *InventoryItemsProcessor) PostProcessIndex(ctx context.Context, recordID
 	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, recordID, searchArtifactInventoryItem, RelationHasInventoryItems, chunks); connErr != nil {
 		p.Logger.Warn("write has-inventory-items connections failed", "record_id", recordID, "error", connErr)
 	}
-	IndexInventoryItemsForRecord(ctx, recordID, chunks, p.Logger)
+	IndexInventoryItemsForRecord(ctx, recordID, p.ModelName, p.PromptRef, chunks, p.Logger)
 	if refreshErr := refreshInventoryItemsArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ArtifactDir, recordID, rec); refreshErr != nil {
 		p.Logger.Warn("refresh inventory items artifact failed", "record_id", recordID, "error", refreshErr)
 	}

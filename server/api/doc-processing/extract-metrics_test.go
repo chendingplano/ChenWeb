@@ -563,7 +563,7 @@ func TestMetricsProcessor_ForceDisablesThinkingForAllPasses(t *testing.T) {
 			ThinkingType: "enabled",
 		},
 		FallbackMentionModelCfg: structureModelConfig{
-			ModelName:    "gpt-5.4-mini",
+			ModelName:    "deepseek-v4-flash",
 			ThinkingType: "enabled",
 		},
 		RelationModelCfg: structureModelConfig{

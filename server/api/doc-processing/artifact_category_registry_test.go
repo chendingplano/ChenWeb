@@ -199,6 +199,36 @@ func TestParseCreateCategoryResponse(t *testing.T) {
 	}
 }
 
+func TestParseCreateCategoryResponseFallsBackToCanonicalName(t *testing.T) {
+	payload := map[string]any{
+		"canonical_name": "Device Configuration",
+		"description":    "Configuration settings for a device.",
+	}
+	got, err := parseCreateCategoryResponse(payload)
+	if err != nil {
+		t.Fatalf("parseCreateCategoryResponse error: %v", err)
+	}
+	if got.CategoryKey != "device configuration" {
+		t.Fatalf("CategoryKey = %q, want %q", got.CategoryKey, "device configuration")
+	}
+}
+
+func TestParseCreateCategoryResponseFallsBackToEnglishTranslation(t *testing.T) {
+	payload := map[string]any{
+		"translations": map[string]any{
+			"en": "Response Time",
+			"zh": "回應時間",
+		},
+	}
+	got, err := parseCreateCategoryResponse(payload)
+	if err != nil {
+		t.Fatalf("parseCreateCategoryResponse error: %v", err)
+	}
+	if got.CategoryKey != "response time" {
+		t.Fatalf("CategoryKey = %q, want %q", got.CategoryKey, "response time")
+	}
+}
+
 func TestParseCreateCategoryResponseRejectsMissingKey(t *testing.T) {
 	if _, err := parseCreateCategoryResponse(map[string]any{"description": "x"}); err == nil {
 		t.Fatal("expected error for missing category_key, got nil")

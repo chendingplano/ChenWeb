@@ -10,7 +10,48 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
+
+type fakeTOCStructuredExtractor struct {
+	calls       []string
+	results     map[string]map[string]any
+	errors      map[string]error
+	callByModel map[string]int
+}
+
+func (f *fakeTOCStructuredExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	if f.callByModel == nil {
+		f.callByModel = map[string]int{}
+	}
+	model := strings.TrimSpace(in.ModelName)
+	f.calls = append(f.calls, model)
+	f.callByModel[model]++
+	if err := f.errors[model]; err != nil {
+		return nil, err
+	}
+	if out := f.results[model]; out != nil {
+		return out, nil
+	}
+	return map[string]any{}, nil
+}
+
+func (f *fakeTOCStructuredExtractor) ExtractStructuredJSON(_ context.Context, in llmclients.JSONExtractionInput, _ llmclients.StructuredOutputContract) (*llmclients.StructuredOutputResult, error) {
+	if f.callByModel == nil {
+		f.callByModel = map[string]int{}
+	}
+	model := strings.TrimSpace(in.ModelName)
+	f.calls = append(f.calls, model)
+	f.callByModel[model]++
+	if err := f.errors[model]; err != nil {
+		return nil, err
+	}
+	if out := f.results[model]; out != nil {
+		return &llmclients.StructuredOutputResult{Parsed: out}, nil
+	}
+	return &llmclients.StructuredOutputResult{Parsed: map[string]any{}}, nil
+}
 
 func TestStaticAnalyzer_SuccessWritesCorrectedAndStatus(t *testing.T) {
 	tmp := t.TempDir()
@@ -1012,9 +1053,9 @@ func TestStaticAnalyzer_WriteCorrectedArtifact_RemovesStaleChunksBesideInputFile
 
 func TestApplyStaticTruncateDots(t *testing.T) {
 	cases := []struct {
-		name    string
-		input   string
-		want    string
+		name  string
+		input string
+		want  string
 	}{
 		{
 			name:  "exactly 6 dots truncated to 5",
@@ -1058,5 +1099,65 @@ func TestApplyStaticTruncateDots(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestStaticTOCDetector_SkipsPrimaryDuringProviderCooldown(t *testing.T) {
+	t.Setenv("DETECT_TOC_PROVIDER_COOLDOWN_SEC", "3600")
+
+	extractor := &fakeTOCStructuredExtractor{
+		results: map[string]map[string]any{
+			"fallback-model": {"toc_line_numbers": []any{4, 5}},
+		},
+		errors: map[string]error{
+			"primary-model": &llmclients.StructuredOutputError{
+				Kind: llmclients.ErrStructuredOutputProvider,
+				Err:  errors.New(`(MID_26050141) openai request failed with status 402: {"error":{"message":"Insufficient Balance","code":"invalid_request_error"}}`),
+			},
+		},
+	}
+	logger := &fakeLogger{}
+	detector := &staticTOCDetector{
+		Client:            extractor,
+		PromptText:        "detect toc",
+		ModelName:         "primary-model",
+		FallbackModelName: "fallback-model",
+		Logger:            logger,
+	}
+
+	got, usedModel, err := detector.detectTOCLines(context.Background(), `[{"line_number":4}]`)
+	if err != nil {
+		t.Fatalf("first detectTOCLines error = %v", err)
+	}
+	if usedModel != "fallback-model" {
+		t.Fatalf("first usedModel=%q, want fallback-model", usedModel)
+	}
+	if len(got) != 2 || got[0] != 4 || got[1] != 5 {
+		t.Fatalf("first toc lines=%v, want [4 5]", got)
+	}
+
+	got, usedModel, err = detector.detectTOCLines(context.Background(), `[{"line_number":4}]`)
+	if err != nil {
+		t.Fatalf("second detectTOCLines error = %v", err)
+	}
+	if usedModel != "fallback-model" {
+		t.Fatalf("second usedModel=%q, want fallback-model", usedModel)
+	}
+	if extractor.callByModel["primary-model"] != 1 {
+		t.Fatalf("primary-model calls=%d, want 1", extractor.callByModel["primary-model"])
+	}
+	if extractor.callByModel["fallback-model"] != 2 {
+		t.Fatalf("fallback-model calls=%d, want 2", extractor.callByModel["fallback-model"])
+	}
+
+	foundSkipLog := false
+	for _, entry := range logger.infos {
+		if entry.message == "skipping primary TOC LLM call during provider cooldown" {
+			foundSkipLog = true
+			break
+		}
+	}
+	if !foundSkipLog {
+		t.Fatalf("expected cooldown skip log, got infos=%+v", logger.infos)
 	}
 }

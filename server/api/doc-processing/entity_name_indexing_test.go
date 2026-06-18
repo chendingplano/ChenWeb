@@ -1,6 +1,9 @@
 package docprocessing
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestNormalizeEntityNameKey(t *testing.T) {
 	cases := map[string]string{
@@ -60,5 +63,23 @@ func TestBuildEntityNameGraphConnections(t *testing.T) {
 	// Third entity (no ID) is skipped; second entity's name edge is last.
 	if conns[1].SourceID != "fallback_name" || conns[1].TargetID != "100_ent_2" {
 		t.Errorf("fallback connection wrong: %+v", conns[1])
+	}
+}
+
+func TestLogEntityCategoryResolveFailureIncludesModelName(t *testing.T) {
+	logger := &fakeLogger{}
+	err := errors.New(`(MID_26060421) create category "铁路测量": (MID_26050140) llm response is not valid json: structured output provider failure: (MID_26050141) openai request failed with status 429: {"error":{"message":"Rate limit reached for deepseek-v4-flash in organization org-test on tokens per min (TPM): Limit 200000, Used 200000, Requested 1600. Please try again in 480ms.","type":"tokens"}}; response=""`)
+
+	logEntityCategoryResolveFailure(logger, 387, "铁路测量", err)
+
+	if len(logger.warns) != 1 {
+		t.Fatalf("warn count=%d, want 1", len(logger.warns))
+	}
+	entry := logger.warns[0]
+	if entry.message != "entity name indexing: resolve entity category failed" {
+		t.Fatalf("message=%q", entry.message)
+	}
+	if got, ok := logValue(entry.args, "model_name"); !ok || got != "deepseek-v4-flash" {
+		t.Fatalf("model_name=%v ok=%v, want deepseek-v4-flash", got, ok)
 	}
 }

@@ -709,7 +709,7 @@ func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseRetriesFallback
 	p.PromptText = "extract provisions"
 	p.PromptRef = "prompt-test"
 	p.ModelName = "deepseek-v4-flash"
-	p.FallbackModelName = "gpt-5.4-mini"
+	p.FallbackModelName = "qwen-plus"
 
 	payload, modelName, err := p.extractProvisionPayloadWithFallback(context.Background(), buildProvisionUserPrompt(Block{
 		Index: 1,
@@ -726,8 +726,8 @@ func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseRetriesFallback
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
-	if modelName != "gpt-5.4-mini" {
-		t.Fatalf("modelName=%q, want gpt-5.4-mini", modelName)
+	if modelName != "qwen-plus" {
+		t.Fatalf("modelName=%q, want qwen-plus", modelName)
 	}
 	if got := strings.TrimSpace(asString(payload["language"])); got != "en" {
 		t.Fatalf("language=%q, want en", got)

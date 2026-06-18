@@ -189,10 +189,10 @@ type protectedBlock struct {
 // cmd/doc-processor/main.go with a SQL store, an OpenAI-compatible JSON client, and a logger.
 //
 // NewFixedSizeChunkingService constructs the service by loading all model configs, prompts, and
-// embedding settings from environment variables. The topic embedder is resolved in priority order:
-// a dedicated OpenAI-compatible client if EMBEDDING_MODEL_NAME is set with a valid config,
-// then the extractor itself if it implements Embedder, otherwise nil. Summary embedding follows the
-// same fallback pattern via EMBEDDING_MODEL_NAME. A default logger is created when none is provided.
+// embedding settings from environment variables. Topic and summary embeddings
+// both use EMBEDDING_MODEL_NAME. If that ref is not a full .models.toml entry
+// and the extractor itself implements Embedder, the extractor is used as a
+// fallback. A default logger is created when none is provided.
 func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *FixedSizeChunkingService {
 	logger := loggerutil.CreateDefaultLogger("MID_26041901")
 	modelRef, modelCfgPath, modelCfg, modelErr := loadFixedSizeTopicModelFromEnv()
@@ -220,40 +220,11 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		}
 		fallbackModelName = fallbackCfg.ModelName
 	}
-	topicEmbeddingModelRef := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME"))
-	var embedder Embedder
-	var topicEmbeddingModelName string
-	if topicEmbeddingModelRef != "" {
-		_, _, embCfg, embErr := loadModelConfigFromEnv("EMBEDDING_MODEL_NAME", "")
-		if embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
-			timeoutSec := embCfg.TimeoutSec
-			if timeoutSec <= 0 {
-				timeoutSec = 60
-			}
-			embedder = &llmclients.OpenAIJSONClient{
-				HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-				ModelName:  embCfg.ModelName,
-				APIKey:     embCfg.APIKey,
-				BaseURL:    embCfg.BaseURL,
-			}
-			topicEmbeddingModelName = embCfg.ModelName
-		} else if e, ok := extractor.(Embedder); ok {
-			embedder = e
-			topicEmbeddingModelName = topicEmbeddingModelRef
-		}
-	} else if e, ok := extractor.(Embedder); ok {
-		embedder = e
-	}
+	embedder, embeddingModelName := resolveChunkingEmbedder(extractor, "EMBEDDING_MODEL_NAME")
 	summaryEmbeddingModelRef := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME"))
 	if summaryEmbeddingModelRef == "" {
 		logger.Error("EMBEDDING_MODEL_NAME is not defined")
 		panic("EMBEDDING_MODEL_NAME is not defined")
-	}
-	var summaryEmbeddingModelName string
-	if _, _, embCfg, embErr := loadModelConfigFromEnv("EMBEDDING_MODEL_NAME", ""); embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
-		summaryEmbeddingModelName = embCfg.ModelName
-	} else {
-		summaryEmbeddingModelName = summaryEmbeddingModelRef
 	}
 	categorySimilarityMinScore := envFloat("CATEGORY_SIMILARITY_MIN_SCORE", DefaultCategorySimilarityMinScore, 0)
 	return &FixedSizeChunkingService{
@@ -292,11 +263,48 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		TranslationModelName:       translationModelCfg.ModelName,
 		TranslationEnabled:         translationModelErr == nil && strings.TrimSpace(translationModelCfg.ModelName) != "",
 		Embedder:                   embedder,
-		TopicEmbeddingModelName:    topicEmbeddingModelName,
-		SummaryEmbeddingModelName:  summaryEmbeddingModelName,
+		TopicEmbeddingModelName:    embeddingModelName,
+		SummaryEmbeddingModelName:  embeddingModelName,
 		CategorySimilarityMinScore: categorySimilarityMinScore,
 		ProcLogger:                 DocProcLogger{DB: ApiTypes.ProjectDBHandle},
 	}
+}
+
+func resolveChunkingEmbedder(extractor LLMJSONExtractor, modelRefEnvs ...string) (Embedder, string) {
+	modelRefEnv := ""
+	modelRefValue := ""
+	for _, key := range modelRefEnvs {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			modelRefEnv = key
+			modelRefValue = value
+			break
+		}
+	}
+	if modelRefValue == "" {
+		if e, ok := extractor.(Embedder); ok {
+			return e, ""
+		}
+		return nil, ""
+	}
+
+	_, _, embCfg, embErr := loadModelConfigFromEnv(modelRefEnv, "")
+	if embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
+		timeoutSec := embCfg.TimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = 60
+		}
+		return &llmclients.OpenAIJSONClient{
+			HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+			ModelName:           embCfg.ModelName,
+			APIKey:              embCfg.APIKey,
+			BaseURL:             embCfg.BaseURL,
+			EmbeddingDimensions: kbsearch.EmbeddingDimensionsForModel(embCfg.ModelName, embCfg.BaseURL),
+		}, embCfg.ModelName
+	}
+	if e, ok := extractor.(Embedder); ok {
+		return e, modelRefValue
+	}
+	return nil, ""
 }
 
 func (s *FixedSizeChunkingService) DocProcModelNames() []string {
@@ -1220,6 +1228,8 @@ func (s *FixedSizeChunkingService) generateSummary(
 
 	s.Logger.Info("summary start",
 		"record_id", recordID,
+		"model", s.SummaryModelName,
+		"prompt", s.SummaryPromptRef,
 		"level", level,
 		"seq", seqNo,
 		"call_id", callID[:8])
@@ -1231,14 +1241,16 @@ func (s *FixedSizeChunkingService) generateSummary(
 		InputText:  inputText,
 	}
 	var (
-		parsed map[string]any
-		err    error
+		parsed      map[string]any
+		rawResponse string
+		err         error
 	)
 	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, summaryExtractionContract())
 		if result != nil {
 			parsed = result.Parsed
+			rawResponse = strings.TrimSpace(result.Raw)
 		}
 	} else {
 		parsed, err = s.Extractor.ExtractJSON(ctx, in)
@@ -1253,8 +1265,15 @@ func (s *FixedSizeChunkingService) generateSummary(
 		summary = sanitizeTopicText(asString(parsed["text"]))
 		s.Logger.Error("failed retrieving summary", "prompt", s.SummaryPromptText,
 			"model_name", s.SummaryModelName,
+			"prompt_ref", s.SummaryPromptRef,
+			"level", level,
+			"seq", seqNo,
+			"reason", "llm response missing both summary and text fields",
+			"parsed_response", parsed,
+			"raw_response", rawResponse,
 			"input text", inputText,
-			"fallback", summary)
+			"ms_used", time.Since(startTime).Milliseconds(),
+			"summary", summary)
 	}
 	if summary == "" {
 		summary = fallbackSummaryText(inputText)
@@ -1559,17 +1578,17 @@ func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context,
 func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context, sourceLanguage string, summaries []SummaryItem) ([]SummaryItem, error) {
 	normalizedLang := normalizeSummarySourceLanguage(sourceLanguage)
 	/*
-	if normalizedLang == "" || normalizedLang == "en" {
-		for _, item := range summaries {
-			if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
-				s.Logger.Warn("(MID_26060801) summary and summary_en are identical for English/unknown source; ignoring",
-					"summary_id", item.SummaryID,
-					"source_lang", normalizedLang,
-				)
+		if normalizedLang == "" || normalizedLang == "en" {
+			for _, item := range summaries {
+				if summaryEn := strings.TrimSpace(item.SummaryEn); summaryEn != "" && strings.TrimSpace(item.Summary) == summaryEn {
+					s.Logger.Warn("(MID_26060801) summary and summary_en are identical for English/unknown source; ignoring",
+						"summary_id", item.SummaryID,
+						"source_lang", normalizedLang,
+					)
+				}
 			}
+			return summaries, nil
 		}
-		return summaries, nil
-	}
 	*/
 	langName := summaryLanguageName(normalizedLang)
 	for i, item := range summaries {
@@ -1920,10 +1939,10 @@ const (
 	embedRetryDelay = 3 * time.Second
 )
 
-func (s *FixedSizeChunkingService) embedWithRetry(ctx context.Context, input llmclients.EmbedInput) ([]float64, error) {
+func (s *FixedSizeChunkingService) embedWithRetry(ctx context.Context, embedder Embedder, input llmclients.EmbedInput) ([]float64, error) {
 	var lastErr error
 	for attempt := 1; attempt <= embedMaxRetries; attempt++ {
-		vec, err := s.Embedder.Embed(ctx, input)
+		vec, err := embedder.Embed(ctx, input)
 		if err == nil {
 			return vec, nil
 		}
@@ -1957,7 +1976,7 @@ func (s *FixedSizeChunkingService) embedAndWriteTopics(ctx context.Context, reco
 	}
 
 	for _, topic := range topics {
-		vec, err := s.embedWithRetry(ctx, llmclients.EmbedInput{
+		vec, err := s.embedWithRetry(ctx, s.Embedder, llmclients.EmbedInput{
 			ModelName: s.TopicEmbeddingModelName,
 			InputText: topic.Topic,
 		})
@@ -1995,7 +2014,7 @@ func (s *FixedSizeChunkingService) embedAndWriteSummaries(
 		if summaryText == "" {
 			continue
 		}
-		vec, err := s.embedWithRetry(ctx, llmclients.EmbedInput{
+		vec, err := s.embedWithRetry(ctx, s.Embedder, llmclients.EmbedInput{
 			ModelName: s.SummaryEmbeddingModelName,
 			InputText: summaryText,
 		})
@@ -2984,6 +3003,7 @@ func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg st
 	if strings.TrimSpace(modelDef.ModelName) == "" {
 		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042019) model %q in %s missing model_name", modelRef, modelPath)
 	}
+	llmclients.RegisterModelBudget(modelDef)
 	return modelRef, modelPath, structureModelConfig{
 		ModelName:    strings.TrimSpace(modelDef.ModelName),
 		APIKey:       strings.TrimSpace(modelDef.APIKey),
@@ -3026,6 +3046,7 @@ func loadFixedSizeSummaryModelFromEnv() (modelRef string, modelPath string, cfg 
 	if strings.TrimSpace(modelDef.ModelName) == "" {
 		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042908) model %q in %s missing model_name", modelRef, modelPath)
 	}
+	llmclients.RegisterModelBudget(modelDef)
 	return modelRef, modelPath, structureModelConfig{
 		ModelName:    strings.TrimSpace(modelDef.ModelName),
 		APIKey:       strings.TrimSpace(modelDef.APIKey),

@@ -4768,3 +4768,44 @@ Two important gotchas:
 * On macOS, mitmproxy needs its CA cert trusted to decrypt HTTPS traffic. The mitmproxy docs call this out explicitly: the client must trust mitmproxy’s CA certificate, and local/macOS capture is supported via proxy/local capture modes. Sources: mitmproxy certificates, mitmproxy modes, HyperDX sources/traces.
 
 So the short version is: HyperDX is healthy, but capture is not active yet. Start mitmproxy, relaunch VS Code through it, generate one Codex/Claude request, and then search span.name:"agent_proxy.http_exchange".
+
+# How to Restart Tmux
+* Kratos: cd kratos; sh start.sh
+* PDF Python: cd ChenWeb/python/pdf-parser; sh start.sh
+* JetStream: cd shared/go/cmd/nets-server; sh start.sh 
+* Converter: cd ChenWeb/server/cmd/parser-result-converter; sh start.sh  
+* mitmproxy: 
+  * mitmweb --listen-host 127.0.0.1 --listen-port 8081      # Web version
+  * mitmproxy --listen-host 127.0.0.1 --listen-port 8081    # Interactive UI
+  * mitmdump --listen-host 127.0.0.1 --listen-port 8081     # headless, non-interactive
+* cc switch: cd ThirdParty/cc-switch; sh start.sh 
+* Start docker: cd ChenWeb; mise docker-start
+* Start Clickhose: cd ChenWeb; mise obs-up
+* Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
+
+*Resolve Certificate Issue*
+
+If mitmproxy reports certificate error, do the following:
+Run: 
+```text
+ls -l ~/.mitmproxy/mitmproxy-ca-cert.pem
+```
+It should show the content.
+
+Next run the following to inspect its fingerprint:
+```text
+* Run: openssl x509 \
+  -in ~/.mitmproxy/mitmproxy-ca-cert.pem \
+  -noout -subject -issuer -fingerprint -sha256
+```
+
+Then run the following to install the certificate (on MacOS):
+```text
+sudo security add-trusted-cert \
+  -d \
+  -r trustRoot \
+  -p ssl \
+  -p basic \
+  -k /Library/Keychains/System.keychain \
+  "$HOME/.mitmproxy/mitmproxy-ca-cert.pem"
+```

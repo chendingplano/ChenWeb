@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -82,6 +81,7 @@ type genericArtifactWikiPage struct {
 	Generated      artifactWikiGeneratedMeta `json:"generated"`
 }
 
+/*
 type genericArtifactWikiContext struct {
 	ArtifactType   string          `json:"artifact_type"`
 	ArtifactID     string          `json:"artifact_id"`
@@ -89,6 +89,7 @@ type genericArtifactWikiContext struct {
 	Record         json.RawMessage `json:"record"`
 	SourceDocument json.RawMessage `json:"source_document,omitempty"`
 }
+*/
 
 func getArtifactWikiProvider(artifactType string) (artifactWikiProvider, bool) {
 	provider, ok := artifactWikiProviders[strings.TrimSpace(artifactType)]
@@ -265,6 +266,7 @@ func buildArtifactWikiPayloadFromRecord(db *sql.DB, recordID int64, artifactID, 
 	return buildArtifactWikiPayloadFromTypedRecord(db, recordID, artifactID, lang, record)
 }
 
+/*
 func parseArtifactRecordIDPrefix(raw, sep string) (int64, error) {
 	parts := strings.SplitN(strings.TrimSpace(raw), sep, 2)
 	if len(parts) != 2 {
@@ -288,6 +290,7 @@ func parseArtifactTwoPartID(raw, sep string) (int64, int, error) {
 	}
 	return recordID, seqNo, nil
 }
+*/
 
 func findSummaryArtifactPath(recordDir string, seqNo int) (string, error) {
 	paths, err := filepath.Glob(filepath.Join(recordDir, "summary_*_*.txt"))

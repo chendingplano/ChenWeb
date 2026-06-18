@@ -619,7 +619,7 @@ func HasOperationSuccess(rawStatus string, operation string) bool {
 		}
 		proc := strings.ToLower(strings.TrimSpace(asString(e["proc_status"])))
 		if proc == "" {
-			proc = strings.ToLower(strings.TrimSpace(asString(e["proc_status"])))
+			proc = strings.ToLower(strings.TrimSpace(asString(e["proc-status"])))
 		}
 		if proc == "success" {
 			return true

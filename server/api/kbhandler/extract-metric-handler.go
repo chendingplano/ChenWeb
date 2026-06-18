@@ -54,11 +54,15 @@ type saveExtractedMetricsResponse struct {
 
 func defaultNewExtractMetricsClient(cfg ApiTypes.LLMModelDef, logger ApiTypes.JimoLogger) (metricJSONExtractor, error) {
 	return llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
-		ModelName:    cfg.ModelName,
-		APIKey:       cfg.APIKey,
-		BaseURL:      cfg.BaseURL,
-		TimeoutSec:   cfg.TimeoutSec,
-		ThinkingType: cfg.ThinkingType,
+		ModelName:            cfg.ModelName,
+		APIKey:               cfg.APIKey,
+		BaseURL:              cfg.BaseURL,
+		TimeoutSec:           cfg.TimeoutSec,
+		ThinkingType:         cfg.ThinkingType,
+		MaxInflight:          cfg.MaxInflight,
+		MaxRequestsPerMinute: cfg.MaxRequestsPerMinute,
+		MaxTokensPerMinute:   cfg.MaxTokensPerMinute,
+		TokenReservePerCall:  cfg.TokenReservePerCall,
 	}, logger)
 }
 
@@ -334,7 +338,21 @@ func SaveExtractedMetrics(c echo.Context) error {
 	if reindexErr := docprocessing.ReindexMetricSearchForRecord(c.Request().Context(), req.RecordID, logger); reindexErr != nil {
 		logger.Warn("reindex metric search registry failed", "record_id", req.RecordID, "error", reindexErr)
 	}
-	docprocessing.IndexMetricsForRecord(c.Request().Context(), req.RecordID, nil, logger)
+	modelName := ""
+	if _, _, modelCfg, err := loadExtractMetricsModelConfigFn(); err != nil {
+		logger.Warn("load extract metrics model config for indexing failed", "record_id", req.RecordID, "error", err)
+	} else {
+		modelName = strings.TrimSpace(modelCfg.ModelName)
+	}
+
+	indexPromptRef := ""
+	if _, promptRef, err := loadMetricsPromptForExtractFn(logger); err != nil {
+		logger.Warn("load metrics prompt for indexing failed", "record_id", req.RecordID, "error", err)
+	} else {
+		indexPromptRef = strings.TrimSpace(promptRef)
+	}
+
+	docprocessing.IndexMetricsForRecord(c.Request().Context(), req.RecordID, modelName, indexPromptRef, nil, logger)
 
 	return c.JSON(http.StatusOK, saveExtractedMetricsResponse{
 		Status:   true,

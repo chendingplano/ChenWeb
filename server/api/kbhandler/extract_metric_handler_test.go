@@ -63,9 +63,9 @@ func newSaveExtractedMetricsContext(t *testing.T, body string) (echo.Context, *h
 func TestLoadExtractMetricsModelConfig(t *testing.T) {
 	modelsPath := filepath.Join(t.TempDir(), ".models.toml")
 	content := `
-[gpt-5-4-mini]
+[deepseek-v4-flash]
 host = "cloud"
-model_name = "gpt-5.4-mini"
+model_name = "deepseek-v4-flash"
 api_key = "sk-test"
 base_url = "https://api.openai.com"
 timeout_sec = 120
@@ -75,20 +75,20 @@ thinking_type = "enabled"
 		t.Fatalf("write .models.toml: %v", err)
 	}
 
-	t.Setenv("EXTRACT_METRICS_MODEL_NAME", "gpt-5-4-mini")
+	t.Setenv("EXTRACT_METRICS_MODEL_NAME", "deepseek-v4-flash")
 	t.Setenv("MODELS_FILE", modelsPath)
 
 	modelRef, modelPath, cfg, err := loadExtractMetricsModelConfig()
 	if err != nil {
 		t.Fatalf("loadExtractMetricsModelConfig error: %v", err)
 	}
-	if modelRef != "gpt-5-4-mini" {
+	if modelRef != "deepseek-v4-flash" {
 		t.Fatalf("modelRef=%q", modelRef)
 	}
 	if modelPath != modelsPath {
 		t.Fatalf("modelPath=%q, want %q", modelPath, modelsPath)
 	}
-	if cfg.ModelName != "gpt-5.4-mini" {
+	if cfg.ModelName != "deepseek-v4-flash" {
 		t.Fatalf("cfg.ModelName=%q", cfg.ModelName)
 	}
 	if cfg.APIKey != "sk-test" {
@@ -108,9 +108,9 @@ thinking_type = "enabled"
 func TestLoadExtractMetricsModelConfig_RequiresExplicitAttributes(t *testing.T) {
 	modelsPath := filepath.Join(t.TempDir(), ".models.toml")
 	content := `
-[gpt-5-4-mini]
+[deepseek-v4-flash]
 host = "cloud"
-model_name = "gpt-5.4-mini"
+model_name = "deepseek-v4-flash"
 api_key = ""
 base_url = "https://api.openai.com"
 timeout_sec = 120
@@ -119,7 +119,7 @@ timeout_sec = 120
 		t.Fatalf("write .models.toml: %v", err)
 	}
 
-	t.Setenv("EXTRACT_METRICS_MODEL_NAME", "gpt-5-4-mini")
+	t.Setenv("EXTRACT_METRICS_MODEL_NAME", "deepseek-v4-flash")
 	t.Setenv("MODELS_FILE", modelsPath)
 
 	_, _, _, err := loadExtractMetricsModelConfig()
@@ -329,7 +329,7 @@ func TestSaveExtractedMetricsPersistsProvidedMetrics(t *testing.T) {
 		WithArgs(
 			"rest-api",
 			int64(7),
-			"7_1",
+			"7_mtc_1",
 			"Energy intensity",
 			nil,
 			`["10:11"]`,

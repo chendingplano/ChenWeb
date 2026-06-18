@@ -11,13 +11,14 @@ import (
 )
 
 var sceneBlockIndexConfig = artifactIndexConfig{
-	SelfType:             searchArtifactSceneBlock,
-	CategoryType:         "scene_block",
-	InstanceSource:       "generate_scene_blocks",
-	Table:                "kb.scene_objects",
-	IDColumn:             "object_id",
-	CategoryTreeFilename: "scenes.txt",
-	LogPrefix:            "scene blocks indexing",
+	SelfType:                   searchArtifactSceneBlock,
+	CategoryType:               "scene_block",
+	InstanceSource:             "generate_scene_blocks",
+	Table:                      "kb.scene_objects",
+	IDColumn:                   "object_id",
+	CategoryTreeFilename:       "scenes.txt",
+	LogPrefix:                  "scene blocks indexing",
+	WarnOnMissingCategoryPaths: true,
 }
 
 // IndexSceneBlocksForRecord runs the Phase C scene-block indexing workflow: populate

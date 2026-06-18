@@ -344,6 +344,7 @@ func loadWikiModelDef(modelRefEnv string) (string, ApiTypes.LLMModelDef, error) 
 	case modelDef.TimeoutSec <= 0:
 		return modelRef, ApiTypes.LLMModelDef{}, fmt.Errorf("model %q missing or invalid timeout_sec", modelRef)
 	}
+	llmclients.RegisterModelBudget(modelDef)
 	return modelRef, modelDef, nil
 }
 

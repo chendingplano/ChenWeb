@@ -101,7 +101,7 @@ WHERE artifact_type = $3 AND artifact_id = $4`
 			continue
 		}
 		vec, ok := embed(ctx, text)
-		if !ok || len(vec) != EmbeddingDim {
+		if !ok || len(vec) != ConfiguredEmbeddingDim() {
 			res.Failed++
 			continue
 		}

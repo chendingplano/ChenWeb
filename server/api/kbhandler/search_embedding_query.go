@@ -32,10 +32,11 @@ func newSearchQueryEmbedder() (client *llmclients.OpenAIJSONClient, modelName st
 		timeoutSec = 60
 	}
 	return &llmclients.OpenAIJSONClient{
-		ModelName:  cfg.ModelName,
-		APIKey:     cfg.APIKey,
-		BaseURL:    cfg.BaseURL,
-		HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+		ModelName:           cfg.ModelName,
+		APIKey:              cfg.APIKey,
+		BaseURL:             cfg.BaseURL,
+		EmbeddingDimensions: kbsearch.EmbeddingDimensionsForModel(cfg.ModelName, cfg.BaseURL),
+		HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
 	}, cfg.ModelName, true
 }
 
@@ -58,7 +59,7 @@ func computeQueryEmbedding(ctx context.Context, queryText string) ([]float64, bo
 	if err != nil {
 		return nil, false
 	}
-	if len(vec) != kbsearch.EmbeddingDim {
+	if len(vec) != kbsearch.ConfiguredEmbeddingDim() {
 		return nil, false
 	}
 	return vec, true

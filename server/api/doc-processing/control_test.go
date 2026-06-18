@@ -367,6 +367,94 @@ func TestControlService_StartDocProcessingFiltersFailedProcessorsByDefault(t *te
 	}
 }
 
+func TestHandleEvent_ResetsOnlySelectedProcessorStatusesBeforeRerun(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(inputPath, []byte("1\t1\tparagraph\tFont\t10\t[0,0,1,1]\ttext\n"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	var done sync.WaitGroup
+	done.Add(1)
+
+	store := &fakeDocMetadataStore{
+		rec: DocMetadataInputRecord{
+			ID:              7,
+			ParserName:      "opendata",
+			ResultFilename:  "result.json",
+			StagingFilename: inputPath,
+			StatusRaw: `[
+				{"operation":"extract_metrics","proc_status":"success"},
+				{"operation":"generate_topics","proc_status":"success"},
+				{"operation":"extract_products","proc_status":"success"}
+			]`,
+		},
+	}
+	svc := &ControlService{
+		InputStore: store,
+		Processors: []Processor{
+			&blockingConcurrencyProcessor{
+				name:    "extract_metrics",
+				started: started,
+				release: release,
+				done:    &done,
+			},
+			fakeProcessor{name: "generate_topics"},
+			fakeProcessor{name: "extract_products"},
+		},
+		Now: time.Now,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.handleEvent(context.Background(), []byte(`{
+			"record_id":"7",
+			"filename":"`+inputPath+`",
+			"operation":["extract_metrics","generate_topics"]
+		}`))
+	}()
+
+	waitForProcessorStarts(t, started, 1)
+
+	updates := store.statusUpdates()
+	if len(updates) < 2 {
+		t.Fatalf("status updates=%d, want at least 2", len(updates))
+	}
+	firstEntries := decodeDocMetaStatus(updates[0].StatusRaw)
+	assertStatusOps(t, firstEntries, []string{"extract_products"})
+
+	secondEntries := decodeDocMetaStatus(updates[1].StatusRaw)
+	assertStatusOps(t, secondEntries, []string{"extract_products", "doc_processing"})
+
+	close(release)
+	done.Wait()
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("handleEvent: %v", err)
+	}
+}
+
+func TestResetRequestedProcessorStatuses_ClearsLegacyAliases(t *testing.T) {
+	raw := `[
+		{"operation":"extract_scene_blocks","proc_status":"success"},
+		{"operation":"extract_entity_relation","proc_status":"success"},
+		{"operation":"extract_relation","proc_status":"success"},
+		{"operation":"extract_inventory_items","proc_status":"success"},
+		{"operation":"doc_processing","proc_status":"running","doc_processor_name":"extract_scene_blocks"}
+	]`
+
+	got, err := resetRequestedProcessorStatuses(raw, []string{"generate_scene_blocks", "extract_entity"})
+	if err != nil {
+		t.Fatalf("resetRequestedProcessorStatuses: %v", err)
+	}
+
+	entries := decodeDocMetaStatus(got)
+	assertStatusOps(t, entries, []string{"extract_relation", "extract_inventory_items", "doc_processing"})
+}
+
 func TestDocProcessorModeFromEnvDefaultsToAuto(t *testing.T) {
 	t.Setenv("DOC_PROCESSOR_MODE", "")
 	mode, err := DocProcessorModeFromEnv()
@@ -598,6 +686,17 @@ func waitForStatusUpdate(t *testing.T, store *fakeDocMetadataStore, want string)
 			t.Fatalf("timed out waiting for doc_processing status %q; updates=%v", want, updates)
 		case <-ticker.C:
 		}
+	}
+}
+
+func assertStatusOps(t *testing.T, entries []map[string]any, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		got = append(got, canonicalOperationName(asString(entry["operation"])))
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("status ops=%v, want %v", got, want)
 	}
 }
 

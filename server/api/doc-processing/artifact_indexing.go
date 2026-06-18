@@ -36,13 +36,14 @@ type indexedArtifact struct {
 
 // artifactIndexConfig parameterizes the shared indexing helpers for one artifact family.
 type artifactIndexConfig struct {
-	SelfType             string // kb.search_artifacts.artifact_type of the source family
-	CategoryType         string // kb.artifact_categories.category_type
-	InstanceSource       string // extra_info "source" tag written on category edges
-	Table                string // source SQL table, e.g. "kb.metrics"
-	IDColumn             string // id column in Table, e.g. "metric_id"
-	CategoryTreeFilename string // per-leaf index file, e.g. "metrics.txt"
-	LogPrefix            string // log message prefix, e.g. "metrics indexing"
+	SelfType                   string // kb.search_artifacts.artifact_type of the source family
+	CategoryType               string // kb.artifact_categories.category_type
+	InstanceSource             string // extra_info "source" tag written on category edges
+	Table                      string // source SQL table, e.g. "kb.metrics"
+	IDColumn                   string // id column in Table, e.g. "metric_id"
+	CategoryTreeFilename       string // per-leaf index file, e.g. "metrics.txt"
+	LogPrefix                  string // log message prefix, e.g. "metrics indexing"
+	WarnOnMissingCategoryPaths bool   // whether missing semantic-projection overlap is unexpected
 }
 
 // categoryBatchResolver resolves a batch of raw category keys to
@@ -99,7 +100,7 @@ func hydrateArtifactEmbeddings(ctx context.Context, db *sql.DB, recordID int64, 
 			}
 			continue
 		}
-		if len(vec) == kbsearch.EmbeddingDim {
+		if len(vec) == kbsearch.ConfiguredEmbeddingDim() {
 			embeddingsByID[strings.TrimSpace(artifactID)] = vec
 		}
 	}
@@ -155,7 +156,16 @@ func parseVectorLiteral(raw string) ([]float64, error) {
 // upsertArtifactCategoryConnections resolves every artifact's category keys in one Phase
 // C batch and writes one kb.artifact_connections category_name edge per resolved
 // (artifact, category) membership.
-func upsertArtifactCategoryConnections(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, resolver categoryBatchResolver, logger ApiTypes.JimoLogger) int {
+func upsertArtifactCategoryConnections(
+	ctx context.Context,
+	db *sql.DB,
+	recordID int64,
+	model_name string,
+	prompt_ref string,
+	artifacts []indexedArtifact,
+	cfg artifactIndexConfig,
+	resolver categoryBatchResolver,
+	logger ApiTypes.JimoLogger) int {
 	start := time.Now()
 
 	// Gather every (key, evidence) across all artifacts into a single batch so the
@@ -164,7 +174,12 @@ func upsertArtifactCategoryConnections(ctx context.Context, db *sql.DB, recordID
 	for _, a := range artifacts {
 		if len(a.Categories) == 0 {
 			if logger != nil {
-				logger.Warn(cfg.LogPrefix+" error: empty categories", "record_id", recordID, "artifact_id", a.ID)
+				logger.Warn(cfg.LogPrefix+" error: empty categories",
+					"record_id", recordID,
+					"artifact_id", a.ID,
+					"model", model_name,
+					"prompt", prompt_ref,
+				)
 			}
 			continue
 		}
@@ -176,7 +191,12 @@ func upsertArtifactCategoryConnections(ctx context.Context, db *sql.DB, recordID
 	if len(reqs) == 0 {
 		store := &ConnectionSQLStore{DB: db}
 		if err := store.ReplaceConnectionsBySource(ctx, recordID, cfg.SelfType, RelationMethodCategoryName, []string{RelationBelongTo}, nil); err != nil && logger != nil {
-			logger.Warn(cfg.LogPrefix+": clear category connections failed", "record_id", recordID, "error", err.Error())
+			logger.Warn(cfg.LogPrefix+": clear category connections failed",
+				"record_id", recordID,
+				"error", err.Error(),
+				"model", model_name,
+				"prompt", prompt_ref,
+			)
 		}
 		return 0
 	}
@@ -186,12 +206,20 @@ func upsertArtifactCategoryConnections(ctx context.Context, db *sql.DB, recordID
 			"record_id", recordID,
 			"artifacts", len(artifacts),
 			"category_requests", len(reqs),
+			"model", model_name,
+			"prompt", prompt_ref,
 		)
 	}
 	ids, errs := resolver.ResolveBatch(ctx, cfg.CategoryType, reqs, categoryResolveMaxConcurrency())
 	if logger != nil {
 		for nk, err := range errs {
-			logger.Warn(cfg.LogPrefix+": resolve artifact category failed", "record_id", recordID, "category_key", nk, "error", err.Error())
+			logger.Warn(cfg.LogPrefix+": resolve artifact category failed",
+				"record_id", recordID,
+				"category_key", nk,
+				"error", err.Error(),
+				"model", model_name,
+				"prompt", prompt_ref,
+			)
 		}
 	}
 
@@ -200,7 +228,12 @@ func upsertArtifactCategoryConnections(ctx context.Context, db *sql.DB, recordID
 	store := &ConnectionSQLStore{DB: db}
 	if err := store.ReplaceConnectionsBySource(ctx, recordID, cfg.SelfType, RelationMethodCategoryName, []string{RelationBelongTo}, conns); err != nil {
 		if logger != nil {
-			logger.Warn(cfg.LogPrefix+": replace category connections failed", "record_id", recordID, "error", err.Error())
+			logger.Warn(cfg.LogPrefix+": replace category connections failed",
+				"record_id", recordID,
+				"error", err.Error(),
+				"model", model_name,
+				"prompt", prompt_ref,
+			)
 		}
 		return 0
 	}
@@ -209,6 +242,8 @@ func upsertArtifactCategoryConnections(ctx context.Context, db *sql.DB, recordID
 			"record_id", recordID,
 			"category_connections", len(conns),
 			"ms_used", time.Since(start).Milliseconds(),
+			"model", model_name,
+			"prompt", prompt_ref,
 		)
 	}
 	return len(conns)
@@ -353,6 +388,7 @@ func indexArtifactsByCategoryPaths(ctx context.Context, db *sql.DB, recordID int
 	start := time.Now()
 	now := time.Now()
 	indexed := 0
+	missingCategoryPaths := 0
 	for _, a := range artifacts {
 		artifactLines := lineSetFromSpans(a.SourceSpans)
 		var pairs []categoryPathPair
@@ -362,7 +398,8 @@ func indexArtifactsByCategoryPaths(ctx context.Context, db *sql.DB, recordID int
 			}
 		}
 		if len(pairs) == 0 {
-			if logger != nil {
+			missingCategoryPaths++
+			if logger != nil && cfg.WarnOnMissingCategoryPaths {
 				logger.Warn(cfg.LogPrefix+" error: no category paths for artifact", "record_id", recordID, cfg.IDColumn, a.ID, "source_spans", a.SourceSpans)
 			}
 			continue
@@ -412,6 +449,7 @@ func indexArtifactsByCategoryPaths(ctx context.Context, db *sql.DB, recordID int
 			"record_id", recordID,
 			"artifacts", len(artifacts),
 			"indexed", indexed,
+			"missing_category_paths", missingCategoryPaths,
 			"ms_used", time.Since(start).Milliseconds(),
 		)
 	}
@@ -516,12 +554,12 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 
 		var vec []float64
 		useSem := false
-		if semanticFeatureOn && len(a.Embedding) == kbsearch.EmbeddingDim {
+		if semanticFeatureOn && len(a.Embedding) == kbsearch.ConfiguredEmbeddingDim() {
 			vec = a.Embedding
 			useSem = true
 			reusedEmbeddings++
 		} else if semanticFeatureOn && embOK {
-			if v, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: embModel, InputText: truncateRunes(query, maxEmbeddingRunes)}); err == nil && len(v) == kbsearch.EmbeddingDim {
+			if v, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: embModel, InputText: truncateRunes(query, maxEmbeddingRunes)}); err == nil && len(v) == kbsearch.ConfiguredEmbeddingDim() {
 				vec = v
 				useSem = true
 				fallbackEmbeddings++

@@ -3,6 +3,8 @@ package docprocessing
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -202,11 +204,44 @@ func resolveEntityCategoryIDs(ctx context.Context, db *sql.DB, recordID int64, r
 	ids, errs := resolver.ResolveBatch(ctx, entityCategoryType, reqs, categoryResolveMaxConcurrency())
 	if logger != nil {
 		for nk, err := range errs {
-			logger.Warn("entity name indexing: resolve entity category failed",
-				"record_id", recordID, "category_key", nk, "error", err.Error())
+			logEntityCategoryResolveFailure(logger, recordID, nk, err)
 		}
 	}
 	return ids
+}
+
+var providerRateLimitModelPattern = regexp.MustCompile(`Rate limit reached for ([^ ]+)`)
+
+func logEntityCategoryResolveFailure(logger ApiTypes.JimoLogger, recordID int64, categoryKey string, err error) {
+	if logger == nil || err == nil {
+		return
+	}
+	args := []any{
+		"record_id", recordID,
+		"category_key", categoryKey,
+	}
+	if modelName := modelNameFromError(err); modelName != "" {
+		args = append(args, "model_name", modelName)
+	}
+	args = append(args, "error", err.Error())
+	logger.Warn("entity name indexing: resolve entity category failed", args...)
+}
+
+func modelNameFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	if matches := providerRateLimitModelPattern.FindStringSubmatch(msg); len(matches) == 2 {
+		return strings.TrimSpace(matches[1])
+	}
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		msg = strings.TrimSpace(current.Error())
+		if matches := providerRateLimitModelPattern.FindStringSubmatch(msg); len(matches) == 2 {
+			return strings.TrimSpace(matches[1])
+		}
+	}
+	return ""
 }
 
 func loadEntityNameGraphRows(ctx context.Context, db *sql.DB, recordID int64) ([]entityNameGraphRow, error) {

@@ -184,6 +184,7 @@ func resolveGraphFilterEmbeddingConfig(modelRef string) (ApiTypes.LLMModelDef, b
 	cfg.ModelName = strings.TrimSpace(cfg.ModelName)
 	cfg.APIKey = strings.TrimSpace(firstNonEmpty(cfg.APIKey, os.Getenv("KB_GRAPH_FILTER_EMBEDDING_API_KEY"), os.Getenv("SHARED_LLM_API_KEY")))
 	cfg.BaseURL = strings.TrimSpace(firstNonEmpty(cfg.BaseURL, os.Getenv("KB_GRAPH_FILTER_EMBEDDING_BASE_URL"), os.Getenv("SHARED_LLM_BASE_URL")))
+	llmclients.RegisterModelBudget(cfg)
 	return cfg, true
 }
 

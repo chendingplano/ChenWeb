@@ -17,7 +17,7 @@ import (
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
-const DefaultChunkTopicModelName = "gpt-5-4-mini"
+const DefaultChunkTopicModelName = "deepseek-v4-flash"
 
 func buildRecordArtifactDir(baseDir string, recordID int64) (string, error) {
 	if strings.TrimSpace(baseDir) == "" {

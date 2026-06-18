@@ -57,7 +57,7 @@ func TestApplyStructureModelConfigToExtractor_ClearsThinkingTypeWhenUnset(t *tes
 	}
 
 	applyStructureModelConfigToExtractor(client, structureModelConfig{
-		ModelName:    "gpt-5.4-mini",
+		ModelName:    "deepseek-v4-flash",
 		APIKey:       "sk-test",
 		BaseURL:      "https://api.openai.com",
 		TimeoutSec:   42,

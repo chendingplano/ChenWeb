@@ -28,6 +28,12 @@ type batchEmbedder interface {
 	EmbedBatch(ctx context.Context, in llmclients.EmbedBatchInput) ([][]float64, error)
 }
 
+type preparedEmbedding struct {
+	rowIndex int
+	text     string
+	runes    int
+}
+
 // newSearchEmbedder builds an Embedder from EMBEDDING_MODEL_NAME (+ .models.toml),
 // mirroring the chunking service's resolution. Returns ok=false when no embedding
 // model is configured, in which case the caller proceeds lexical-only.
@@ -44,10 +50,11 @@ func newSearchEmbedder() (embedder Embedder, modelName string, timeoutSec int, o
 		timeoutSec = 60
 	}
 	client := &llmclients.OpenAIJSONClient{
-		HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-		ModelName:  cfg.ModelName,
-		APIKey:     cfg.APIKey,
-		BaseURL:    cfg.BaseURL,
+		HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+		ModelName:           cfg.ModelName,
+		APIKey:              cfg.APIKey,
+		BaseURL:             cfg.BaseURL,
+		EmbeddingDimensions: kbsearch.EmbeddingDimensionsForModel(cfg.ModelName, cfg.BaseURL),
 	}
 	return client, cfg.ModelName, timeoutSec, true
 }
@@ -78,6 +85,9 @@ func embedRegistryRows(
 		maxWorkers = 1
 	}
 	batchSize := embeddingBatchSize()
+	if maxItems := kbsearch.EmbeddingMaxBatchItemsForModel(modelName, ""); maxItems > 0 && batchSize > maxItems {
+		batchSize = maxItems
+	}
 	if batchSize <= 1 {
 		batchSize = 1
 	}
@@ -188,8 +198,7 @@ func embedRowBatch(
 	indices []int,
 	logger ApiTypes.JimoLogger,
 ) {
-	texts := make([]string, 0, len(indices))
-	rowIndices := make([]int, 0, len(indices))
+	prepared := make([]preparedEmbedding, 0, len(indices))
 	for _, i := range indices {
 		text := strings.TrimSpace(rows[i].EmbeddingText)
 		if text == "" {
@@ -199,11 +208,51 @@ func embedRowBatch(
 			continue
 		}
 		text = truncateRunes(text, maxEmbeddingRunes)
-		texts = append(texts, text)
-		rowIndices = append(rowIndices, i)
+		prepared = append(prepared, preparedEmbedding{
+			rowIndex: i,
+			text:     text,
+			runes:    len([]rune(text)),
+		})
 	}
-	if len(texts) == 0 {
+	if len(prepared) == 0 {
 		return
+	}
+
+	maxBatchRunes := kbsearch.EmbeddingMaxBatchRunesForModel(modelName, "")
+	maxBatchItems := kbsearch.EmbeddingMaxBatchItemsForModel(modelName, "")
+	for start := 0; start < len(prepared); {
+		end := start
+		totalRunes := 0
+		for end < len(prepared) {
+			if maxBatchItems > 0 && end-start >= maxBatchItems {
+				break
+			}
+			nextRunes := totalRunes + prepared[end].runes
+			if maxBatchRunes > 0 && end > start && nextRunes > maxBatchRunes {
+				break
+			}
+			totalRunes = nextRunes
+			end++
+		}
+		embedPreparedRegistryRows(ctx, embedder, modelName, timeoutSec, rows, prepared[start:end], logger)
+		start = end
+	}
+}
+
+func embedPreparedRegistryRows(
+	ctx context.Context,
+	embedder Embedder,
+	modelName string,
+	timeoutSec int,
+	rows []kbsearch.RegistryRow,
+	prepared []preparedEmbedding,
+	logger ApiTypes.JimoLogger,
+) {
+	texts := make([]string, 0, len(prepared))
+	rowIndices := make([]int, 0, len(prepared))
+	for _, item := range prepared {
+		texts = append(texts, item.text)
+		rowIndices = append(rowIndices, item.rowIndex)
 	}
 
 	vecs, err := embedBatchWithRetry(ctx, embedder, modelName, texts, timeoutSec, rows, rowIndices, logger)
@@ -234,13 +283,13 @@ func embedRowBatch(
 
 	for pos, i := range rowIndices {
 		vec := vecs[pos]
-		if len(vec) != kbsearch.EmbeddingDim {
+		if len(vec) != kbsearch.ConfiguredEmbeddingDim() {
 			if logger != nil {
 				logger.Warn("embedding dimension mismatch; row indexed lexical-only",
 					"artifact_type", rows[i].ArtifactType,
 					"artifact_id", rows[i].ArtifactID,
 					"got_dim", len(vec),
-					"want_dim", kbsearch.EmbeddingDim)
+					"want_dim", kbsearch.ConfiguredEmbeddingDim())
 			}
 			continue
 		}
@@ -359,6 +408,11 @@ func isRetryableEmbeddingError(err error) bool {
 		return true
 	}
 	return strings.Contains(msg, "status 429") ||
+		strings.Contains(msg, "status 520") ||
+		strings.Contains(msg, "status 521") ||
+		strings.Contains(msg, "status 522") ||
+		strings.Contains(msg, "status 523") ||
+		strings.Contains(msg, "status 524") ||
 		strings.Contains(msg, "status 500") ||
 		strings.Contains(msg, "status 502") ||
 		strings.Contains(msg, "status 503") ||

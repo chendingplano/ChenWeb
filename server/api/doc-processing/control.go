@@ -278,6 +278,91 @@ func failedDocProcessorNames(statusRaw string) []string {
 	return out
 }
 
+func (s *ControlService) resetProcessorStatuses(ctx context.Context, recordID int64, processors []Processor) {
+	if s.InputStore == nil || recordID <= 0 || len(processors) == 0 {
+		return
+	}
+	names := make([]string, 0, len(processors))
+	for _, p := range processors {
+		if p == nil {
+			continue
+		}
+		if name := canonicalOperationName(p.Name()); isDocProcessorStatusOperation(name) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	if err := updateInputStatusAtomic(ctx, s.InputStore, recordID, func(current string) (DocMetadataUpdate, error) {
+		statusRaw, err := resetRequestedProcessorStatuses(current, names)
+		if err != nil {
+			return DocMetadataUpdate{}, err
+		}
+		return DocMetadataUpdate{StatusRaw: statusRaw}, nil
+	}); err != nil && s.Logger != nil {
+		s.Logger.Error("failed resetting selected doc processor statuses", "record_id", recordID, "processors", names, "error", err)
+	}
+}
+
+func resetRequestedProcessorStatuses(raw string, requested []string) (string, error) {
+	targets := make(map[string]struct{}, len(requested))
+	for _, name := range requested {
+		for _, alias := range processorStatusAliases(name) {
+			targets[alias] = struct{}{}
+		}
+	}
+	if len(targets) == 0 {
+		if strings.TrimSpace(raw) == "" {
+			return "[]", nil
+		}
+		return raw, nil
+	}
+
+	entries := decodeDocMetaStatus(raw)
+	out := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		op := canonicalOperationName(asString(entry["operation"]))
+		if _, ok := targets[op]; ok {
+			continue
+		}
+		out = append(out, entry)
+	}
+
+	bs, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(bs), nil
+}
+
+func processorStatusAliases(name string) []string {
+	key := canonicalOperationName(name)
+	switch key {
+	case "chunking":
+		return []string{"chunking", "chunked"}
+	case "extract_doc_metadata":
+		return []string{"extract_doc_metadata", "extract_metadata"}
+	case "generate_scene_blocks":
+		return []string{"generate_scene_blocks", "extract_scene_blocks"}
+	case "extract_semantic_projections":
+		return []string{"extract_semantic_projections", "extract_semantic_projection"}
+	case "extract_entity":
+		return []string{"extract_entity", "extract_entity_relation"}
+	case "extract_relation":
+		return []string{"extract_relation", "extract_entity_relation"}
+	case "extract_inventory_items":
+		return []string{"extract_inventory_items"}
+	case "extract_structured_knowledge":
+		return []string{"extract_structured_knowledge", "extract_structured_knowledges"}
+	default:
+		if key == "" {
+			return nil
+		}
+		return []string{key}
+	}
+}
+
 func statusValue(entry map[string]any) string {
 	return strings.ToLower(strings.TrimSpace(firstNonEmptyTrimmed(
 		asString(entry["proc_status"]),
@@ -422,6 +507,9 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			}
 			return nil
 		}
+	}
+	if len(processors) > 0 {
+		s.resetProcessorStatuses(ctx, evt.RecordID, processors)
 	}
 	// Inject buffer holders so blocking and chunking processors can share
 	// their output with downstream processors via context.

@@ -313,6 +313,54 @@ func TestSearchArtifactIndexersWriteCategoryTreeFiles(t *testing.T) {
 	}
 }
 
+func TestIndexRelationsForRecordDoesNotWarnWhenSemanticProjectionCoverageIsMissing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	t.Setenv("ARTIFACT_WEB_DIR", t.TempDir())
+
+	mock.ExpectQuery("SELECT relation_id, id, COALESCE\\(line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\)").
+		WithArgs(int64(100)).
+		WillReturnRows(newMockRows("100_rel_1", int64(1), []byte(`["992:994"]`), "Relation search document"))
+
+	mock.ExpectQuery("SELECT COALESCE\\(line_spans, '\\[\\]'::jsonb\\),\\s+COALESCE\\(category_paths, '\\[\\]'::jsonb\\),\\s+COALESCE\\(category_paths_en, '\\[\\]'::jsonb\\)\\s+FROM kb.semantic_projections\\s+WHERE input_record_id = \\$1").
+		WithArgs(int64(100)).
+		WillReturnRows(sqlmock.NewRows([]string{"line_spans", "category_paths", "category_paths_en"}).
+			AddRow(
+				[]byte(`["12-18"]`),
+				[]byte(`[{"category_path":[{"name":"公共卫生","keywords":["公共卫生"],"confidence":0.9}]}]`),
+				[]byte(`[{"category_path":[{"name":"Public Health","keywords":["health"],"confidence":0.95}]}]`),
+			))
+
+	logger := &fakeLogger{}
+	IndexRelationsForRecord(context.Background(), 100, []Block{{Index: 1, Lines: []BlockLine{{LineNumber: 993}}}}, logger)
+
+	for _, entry := range logger.warns {
+		if entry.message == "relation indexing error: no category paths for artifact" {
+			t.Fatalf("unexpected warning: %+v", entry)
+		}
+	}
+
+	finished, ok := findInfoLog(logger.infos, "relation indexing category-paths finished")
+	if !ok {
+		t.Fatalf("missing finished log; got infos=%+v", logger.infos)
+	}
+	if got, _ := logValue(finished.args, "missing_category_paths"); got != 1 {
+		t.Fatalf("missing_category_paths=%v, want 1", got)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func rowColumns(n int) []string {
 	switch n {
 	case 3:

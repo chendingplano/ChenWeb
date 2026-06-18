@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -59,10 +60,58 @@ type staticTOCDetector struct {
 	FallbackPages     int
 	Logger            ApiTypes.JimoLogger
 	ProcLogger        *DocProcLogger
+	mu                sync.Mutex
+	primaryRetryAfter time.Time
 }
 
 func (d *staticTOCDetector) isReady() bool {
 	return d != nil && d.Client != nil && d.PromptErr == nil && d.ModelName != ""
+}
+
+func tocProviderCooldown() time.Duration {
+	secs := envInt("DETECT_TOC_PROVIDER_COOLDOWN_SEC", 300, 1)
+	return time.Duration(secs) * time.Second
+}
+
+func isProviderCooldownError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if !errors.Is(err, llmclients.ErrStructuredOutputProvider) {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "status 402") ||
+		strings.Contains(msg, "insufficient balance") ||
+		strings.Contains(msg, "status 429") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "too many requests")
+}
+
+func (d *staticTOCDetector) primaryRetryDeadline(now time.Time) time.Time {
+	if d == nil {
+		return time.Time{}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.primaryRetryAfter.After(now) {
+		return d.primaryRetryAfter
+	}
+	return time.Time{}
+}
+
+func (d *staticTOCDetector) markPrimaryRetryCooldown(now time.Time, err error) time.Time {
+	if d == nil || !isProviderCooldownError(err) {
+		return time.Time{}
+	}
+	deadline := now.Add(tocProviderCooldown())
+	d.mu.Lock()
+	if deadline.After(d.primaryRetryAfter) {
+		d.primaryRetryAfter = deadline
+	}
+	deadline = d.primaryRetryAfter
+	d.mu.Unlock()
+	return deadline
 }
 
 type staticInputLine struct {
@@ -585,6 +634,25 @@ func findStaticTOCHint(lines []staticInputLine) (start, firstTOC int) {
 
 // detectTOCLines calls the LLM (with fallback) and returns the line numbers identified as TOC.
 func (d *staticTOCDetector) detectTOCLines(ctx context.Context, inputJSON string) ([]int, string, error) {
+	now := time.Now()
+	if retryAfter := d.primaryRetryDeadline(now); !retryAfter.IsZero() {
+		if d.FallbackModelName != "" && d.FallbackModelErr == nil {
+			if d.Logger != nil {
+				d.Logger.Info("skipping primary TOC LLM call during provider cooldown",
+					"primary_model", d.ModelName,
+					"fallback_model", d.FallbackModelName,
+					"retry_after", retryAfter.UTC().Format(time.RFC3339),
+				)
+			}
+			result, fallbackErr := d.callLLM(ctx, d.FallbackModelName, d.FallbackModelCfg, inputJSON)
+			if fallbackErr != nil {
+				return nil, d.FallbackModelName, fmt.Errorf("(MID_26061104) TOC primary in cooldown until %s; fallback failed: %v", retryAfter.UTC().Format(time.RFC3339), fallbackErr)
+			}
+			return parseTOCDetectionResult(result), d.FallbackModelName, nil
+		}
+		return nil, d.ModelName, fmt.Errorf("(MID_26061105) TOC primary model %q is in provider cooldown until %s", d.ModelName, retryAfter.UTC().Format(time.RFC3339))
+	}
+
 	result, err := d.callLLM(ctx, d.ModelName, d.ModelCfg, inputJSON)
 	if err == nil {
 		return parseTOCDetectionResult(result), d.ModelName, nil
@@ -599,6 +667,15 @@ func (d *staticTOCDetector) detectTOCLines(ctx context.Context, inputJSON string
 		"fallback_model", d.FallbackModelName,
 		"error", err,
 	)
+	retryAfter := d.markPrimaryRetryCooldown(now, err)
+	if !retryAfter.IsZero() && d.Logger != nil {
+		d.Logger.Warn("primary TOC LLM provider unavailable; enabling cooldown",
+			"primary_model", d.ModelName,
+			"retry_after", retryAfter.UTC().Format(time.RFC3339),
+			"cooldown_seconds", int(tocProviderCooldown().Seconds()),
+			"error", err,
+		)
+	}
 	result, fallbackErr := d.callLLM(ctx, d.FallbackModelName, d.FallbackModelCfg, inputJSON)
 	if fallbackErr != nil {
 		return nil, d.FallbackModelName, fmt.Errorf("(MID_26061102) TOC primary failed: %w; fallback failed: %v", err, fallbackErr)

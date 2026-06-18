@@ -51,6 +51,7 @@ type EntityRelationProcessor struct {
 	FallbackModelErr              error
 	FallbackModelName             string
 	FallbackModelCfg              structureModelConfig
+	LLMController                 llmPermitController
 	ArtifactDir                   string
 	ExtractEntityRelationMaxTasks int
 	// StatusOperation is the doc_proc status operation this processor logs under.
@@ -183,6 +184,7 @@ func NewEntityRelationProcessor(
 		FallbackModelErr:              fallbackModelErr,
 		FallbackModelName:             fallbackModelCfg.ModelName,
 		FallbackModelCfg:              fallbackModelCfg,
+		LLMController:                 defaultDocProcessorLLMController,
 		ArtifactDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		ExtractEntityRelationMaxTasks: envInt("EXTRACT_ENTITY_RELATION_MAX_TASKS", 1, 1),
 	}
@@ -915,6 +917,12 @@ func (p *EntityRelationProcessor) extractStructuredPayload(
 	cfg structureModelConfig,
 	contract llmclients.StructuredOutputContract,
 ) (map[string]any, error) {
+	permit, err := p.acquireLLMPermit(ctx, modelName)
+	if err != nil {
+		return nil, err
+	}
+	defer permit.Release()
+
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	in := llmclients.JSONExtractionInput{
 		PromptText: promptText,
@@ -922,25 +930,43 @@ func (p *EntityRelationProcessor) extractStructuredPayload(
 		InputText:  inputText,
 	}
 	var (
-		payload map[string]any
-		err     error
+		payload    map[string]any
+		extractErr error
 	)
 	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
-		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, contract)
+		result, extractErr = structuredExtractor.ExtractStructuredJSON(ctx, in, contract)
 		if result != nil {
 			payload = result.Parsed
 		}
 	} else {
-		payload, err = p.Extractor.ExtractJSON(ctx, in)
+		payload, extractErr = p.Extractor.ExtractJSON(ctx, in)
 	}
-	if err != nil {
-		return nil, err
+	if extractErr != nil {
+		return nil, extractErr
 	}
 	if payload == nil {
 		return nil, errors.New("(MID_26052730) empty llm payload")
 	}
 	return payload, nil
+}
+
+func (p *EntityRelationProcessor) acquireLLMPermit(ctx context.Context, modelName string) (llmCallPermit, error) {
+	if _, ok := p.Extractor.(*llmclients.OpenAIJSONClient); ok {
+		return &acquiredLLMPermit{}, nil
+	}
+	controller := p.LLMController
+	if controller == nil {
+		controller = defaultDocProcessorLLMController
+	}
+	permit, err := controller.Acquire(ctx, modelName)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26061801) acquire llm permit for model %q: %w", strings.TrimSpace(modelName), err)
+	}
+	if permit == nil {
+		return &acquiredLLMPermit{}, nil
+	}
+	return permit, nil
 }
 
 func isEmptyEntityRelationError(err error) bool {

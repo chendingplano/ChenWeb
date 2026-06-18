@@ -453,7 +453,7 @@ func TestNewExtractDocMetadataProcessor_UsesConfiguredLLMName(t *testing.T) {
 	modelsPath := filepath.Join(tmp, ".models.toml")
 	modelsBody := `
 [docmeta-test]
-model_name = "gpt-5.4-mini"
+model_name = "deepseek-v4-flash"
 base_url = "https://api.openai.com"
 api_key = "test-key"
 timeout_sec = 30
@@ -473,8 +473,8 @@ timeout_sec = 30
 	if svc.ModelRef != "docmeta-test" {
 		t.Fatalf("ModelRef=%q, want docmeta-test", svc.ModelRef)
 	}
-	if svc.ModelName != "gpt-5.4-mini" {
-		t.Fatalf("ModelName=%q, want gpt-5.4-mini", svc.ModelName)
+	if svc.ModelName != "deepseek-v4-flash" {
+		t.Fatalf("ModelName=%q, want deepseek-v4-flash", svc.ModelName)
 	}
 }
 
@@ -489,7 +489,7 @@ api_key = "ollama"
 timeout_sec = 30
 
 [docmeta-fallback]
-model_name = "gpt-5.4-mini"
+model_name = "deepseek-v4-flash"
 base_url = "https://api.openai.com"
 api_key = "test-key"
 timeout_sec = 60
@@ -513,8 +513,8 @@ timeout_sec = 60
 	if svc.FallbackModelRef != "docmeta-fallback" {
 		t.Fatalf("FallbackModelRef=%q, want docmeta-fallback", svc.FallbackModelRef)
 	}
-	if svc.FallbackModelName != "gpt-5.4-mini" {
-		t.Fatalf("FallbackModelName=%q, want gpt-5.4-mini", svc.FallbackModelName)
+	if svc.FallbackModelName != "deepseek-v4-flash" {
+		t.Fatalf("FallbackModelName=%q, want deepseek-v4-flash", svc.FallbackModelName)
 	}
 }
 
@@ -551,7 +551,7 @@ func TestExtractDocMetadata_PrimaryFailureRetriesFallbackModel(t *testing.T) {
 	svc := NewExtractDocMetadataProcessor(st, ex, nil)
 	svc.ModelErr = nil
 	svc.ModelName = "gemma4:26b"
-	svc.FallbackModelName = "gpt-5.4-mini"
+	svc.FallbackModelName = "deepseek-v4-flash"
 	svc.PromptText = "extract metadata"
 
 	if err := svc.HandleEvent(context.Background(), []byte(`{"record_id":10}`)); err != nil {
@@ -569,7 +569,7 @@ func TestExtractDocMetadata_PrimaryFailureRetriesFallbackModel(t *testing.T) {
 	if ex.modelNames[0] != "gemma4:26b" {
 		t.Fatalf("primary model=%q", ex.modelNames[0])
 	}
-	if ex.modelNames[1] != "gpt-5.4-mini" {
+	if ex.modelNames[1] != "deepseek-v4-flash" {
 		t.Fatalf("fallback model=%q", ex.modelNames[1])
 	}
 	if st.updateReq.Title != "Fallback Title" {

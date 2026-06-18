@@ -13,33 +13,36 @@ import (
 )
 
 var summaryIndexConfig = artifactIndexConfig{
-	SelfType:             searchArtifactSummary,
-	CategoryType:         "summary",
-	InstanceSource:       "generate_summaries",
-	Table:                "kb.summaries",
-	IDColumn:             "summary_id",
-	CategoryTreeFilename: "summaries.txt",
-	LogPrefix:            "summary indexing",
+	SelfType:                   searchArtifactSummary,
+	CategoryType:               "summary",
+	InstanceSource:             "generate_summaries",
+	Table:                      "kb.summaries",
+	IDColumn:                   "summary_id",
+	CategoryTreeFilename:       "summaries.txt",
+	LogPrefix:                  "summary indexing",
+	WarnOnMissingCategoryPaths: true,
 }
 
 var topicIndexConfig = artifactIndexConfig{
-	SelfType:             searchArtifactTopic,
-	CategoryType:         "topic",
-	InstanceSource:       "generate_topics",
-	Table:                "kb.topics",
-	IDColumn:             "topic_id",
-	CategoryTreeFilename: "topics.txt",
-	LogPrefix:            "topic indexing",
+	SelfType:                   searchArtifactTopic,
+	CategoryType:               "topic",
+	InstanceSource:             "generate_topics",
+	Table:                      "kb.topics",
+	IDColumn:                   "topic_id",
+	CategoryTreeFilename:       "topics.txt",
+	LogPrefix:                  "topic indexing",
+	WarnOnMissingCategoryPaths: true,
 }
 
 var provisionIndexConfig = artifactIndexConfig{
-	SelfType:             searchArtifactProvision,
-	CategoryType:         "provision",
-	InstanceSource:       "extract_provisions",
-	Table:                "kb.provisions",
-	IDColumn:             "prov_id",
-	CategoryTreeFilename: "provisions.txt",
-	LogPrefix:            "provision indexing",
+	SelfType:                   searchArtifactProvision,
+	CategoryType:               "provision",
+	InstanceSource:             "extract_provisions",
+	Table:                      "kb.provisions",
+	IDColumn:                   "prov_id",
+	CategoryTreeFilename:       "provisions.txt",
+	LogPrefix:                  "provision indexing",
+	WarnOnMissingCategoryPaths: true,
 }
 
 var entityIndexConfig = artifactIndexConfig{

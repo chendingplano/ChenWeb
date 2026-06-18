@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -592,6 +594,51 @@ func TestService_HandleInput_WritesChunksAndStatus(t *testing.T) {
 	}
 }
 
+func TestFixedSizeChunkingService_SummaryEmbeddingUsesEmbeddingModelConfig(t *testing.T) {
+	tmp := t.TempDir()
+
+	goodServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2,0.3]}]}`))
+	}))
+	defer goodServer.Close()
+
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[good-embedding]
+host = "cloud"
+model_name = "text-embedding-v4"
+api_key = "sk-test"
+base_url = "` + goodServer.URL + `"
+timeout_sec = 5
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+
+	t.Setenv("MODELS_FILE", modelsPath)
+	t.Setenv("EMBEDDING_MODEL_NAME", "good-embedding")
+	t.Setenv("EMBEDDING_DIMENSIONS", "3")
+
+	svc := NewFixedSizeChunkingService(&fakeStore{}, &fakeSemanticExtractor{}, nil)
+	svc.ChunkDir = tmp
+
+	err := svc.embedAndWriteSummaries(context.Background(), 416, []SummaryItem{{
+		SummaryID: "416_sum_0_0001",
+		Level:     0,
+		SeqNo:     1,
+		Summary:   "summary text",
+	}})
+	if err != nil {
+		t.Fatalf("embedAndWriteSummaries: %v", err)
+	}
+
+	embedPath := filepath.Join(tmp, "0", "416", "embeddings", summaryEmbedFileName(0, 1))
+	if _, err := os.Stat(embedPath); err != nil {
+		t.Fatalf("missing summary embedding file: %v", err)
+	}
+}
+
 func TestService_HandleGenerateTopicsInput_LoadsChunkArtifactWithTOCLines(t *testing.T) {
 	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
 	tmp := t.TempDir()
@@ -981,6 +1028,63 @@ func TestFixedSizeChunkingService_GenerateSummaryMissingCategoryDoesNotWarn(t *t
 	}
 	if len(logger.warns) != 0 {
 		t.Fatalf("warns=%v, want none", logger.warns)
+	}
+}
+
+func TestFixedSizeChunkingService_GenerateSummaryLogsReasonWhenSummaryMissing(t *testing.T) {
+	t.Setenv("EMBEDDING_MODEL_NAME", "test-summary-embed-model")
+	ex := &fakeSemanticExtractor{
+		outs: []map[string]any{
+			{
+				"keywords":      []any{"alarm", "handling"},
+				"category_path": []any{"operations", "alarm_handling"},
+			},
+		},
+	}
+	logger := &fakeLogger{}
+	svc := NewFixedSizeChunkingService(&fakeStore{}, ex, nil)
+	svc.Logger = logger
+	svc.SummaryPromptText = "summary prompt"
+	svc.SummaryModelName = "summary-model"
+
+	result, err := svc.generateSummary(context.Background(), 101, 0, 1, []MarkedLine{
+		{
+			Line: Line{
+				LineNo:   1,
+				PageNo:   1,
+				LineType: "paragraph",
+				Content:  "Operator acknowledges the alarm and logs the incident.",
+			},
+			Mark: "n",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("generateSummary: %v", err)
+	}
+	if strings.TrimSpace(result.Summary) == "" {
+		t.Fatal("expected fallback summary to be populated")
+	}
+	entry, ok := findInfoLog(logger.errors, "failed retrieving summary")
+	if !ok {
+		t.Fatalf("expected failed retrieving summary log, got errors=%v", logger.errors)
+	}
+	reason, ok := logValue(entry.args, "reason")
+	if !ok {
+		t.Fatalf("expected reason in log args=%v", entry.args)
+	}
+	if got := strings.TrimSpace(reason.(string)); got == "" {
+		t.Fatalf("expected non-empty reason, got %q", got)
+	}
+	parsed, ok := logValue(entry.args, "parsed_response")
+	if !ok {
+		t.Fatalf("expected parsed_response in log args=%v", entry.args)
+	}
+	parsedMap, ok := parsed.(map[string]any)
+	if !ok {
+		t.Fatalf("parsed_response type=%T, want map[string]any", parsed)
+	}
+	if _, ok := parsedMap["keywords"]; !ok {
+		t.Fatalf("parsed_response=%v, want keywords payload", parsedMap)
 	}
 }
 

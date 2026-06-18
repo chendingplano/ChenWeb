@@ -432,7 +432,7 @@ func (p *MetricsProcessor) PostProcessIndex(ctx context.Context, recordID int64)
 	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, recordID, searchArtifactMetric, RelationHasMetrics, chunks); connErr != nil {
 		p.Logger.Warn("write has-metrics connections failed", "record_id", recordID, "error", connErr)
 	}
-	IndexMetricsForRecord(ctx, recordID, chunks, p.Logger)
+	IndexMetricsForRecord(ctx, recordID, p.RelationModelName, p.RelationPromptRef, chunks, p.Logger)
 	if refreshErr := refreshMetricArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ChunkDir, recordID, rec); refreshErr != nil {
 		p.Logger.Warn("refresh metric artifact failed", "record_id", recordID, "error", refreshErr)
 	}

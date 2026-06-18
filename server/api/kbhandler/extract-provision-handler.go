@@ -55,11 +55,15 @@ type saveExtractedProvisionsResponse struct {
 
 func defaultNewExtractProvisionsClient(cfg ApiTypes.LLMModelDef, logger ApiTypes.JimoLogger) (provisionJSONExtractor, error) {
 	return llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
-		ModelName:    cfg.ModelName,
-		APIKey:       cfg.APIKey,
-		BaseURL:      cfg.BaseURL,
-		TimeoutSec:   cfg.TimeoutSec,
-		ThinkingType: cfg.ThinkingType,
+		ModelName:            cfg.ModelName,
+		APIKey:               cfg.APIKey,
+		BaseURL:              cfg.BaseURL,
+		TimeoutSec:           cfg.TimeoutSec,
+		ThinkingType:         cfg.ThinkingType,
+		MaxInflight:          cfg.MaxInflight,
+		MaxRequestsPerMinute: cfg.MaxRequestsPerMinute,
+		MaxTokensPerMinute:   cfg.MaxTokensPerMinute,
+		TokenReservePerCall:  cfg.TokenReservePerCall,
 	}, logger)
 }
 
@@ -614,5 +618,6 @@ func loadExtractProvisionsModelConfig() (modelRef string, modelPath string, cfg 
 		return modelRef, modelPath, ApiTypes.LLMModelDef{}, fmt.Errorf("(CWB_KB_P_425) model %q invalid timeout_sec", modelRef)
 	}
 
+	llmclients.RegisterModelBudget(modelDef)
 	return modelRef, modelPath, modelDef, nil
 }

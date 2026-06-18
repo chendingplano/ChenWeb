@@ -210,7 +210,7 @@ WHERE m.id = $1
 		"threshold_or_target", "measurement_frequency", "confidence", "is_explicit_metric",
 		"table_name_or_section", "reasoning_tags", "created_at",
 	}).AddRow(
-		int64(11), int64(7), "7_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
+			int64(11), int64(7), "7_mtc_1", "evt-11", "input_7.pdf", "Updated Metric", "Updated Metric EN",
 		`["5","12:14"]`, "Energy usage", "Energy usage EN", "Metric description", "Metric description EN",
 		"Metric context", "Metric context EN", `["energy","intensity"]`, `["energy","intensity"]`, "gpt-4.1",
 		"table", "kWh", "kWh", "12.3", "number", "exact", "performance", "performance",

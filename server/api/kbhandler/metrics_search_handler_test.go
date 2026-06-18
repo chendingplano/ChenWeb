@@ -55,7 +55,7 @@ func TestSearchMetricsReturnsRankedHybridResults(t *testing.T) {
 			"value_class", "value_class_en", "value_data_type", "is_explicit_metric", "table_name_or_section",
 			"metric_keywords", "metric_keywords_en", "source_line_spans", "score", "snippet",
 		}).AddRow(
-			int64(22), "7_1", int64(7), "input_7.pdf", "Energy intensity", "Energy intensity",
+				int64(22), "7_mtc_1", int64(7), "input_7.pdf", "Energy intensity", "Energy intensity",
 			"Building envelope", "Building envelope", "12", "kWh/m2", "kWh/m2",
 			"performance", "performance", "number", true, "Table 2",
 			`["energy","intensity"]`, `["energy","intensity"]`, `["10:11"]`, 0.9132, "Energy intensity target is 12 kWh/m2",

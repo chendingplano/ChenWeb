@@ -453,6 +453,7 @@ func loadModelConfigFromEnv(modelRefEnv string, modelsFileEnv string) (modelRef 
 	if strings.TrimSpace(modelDef.ModelName) == "" {
 		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042106) model %q in %s missing model_name", modelRef, modelPath)
 	}
+	llmclients.RegisterModelBudget(modelDef)
 	cfg = structureModelConfig{
 		ModelName:    strings.TrimSpace(modelDef.ModelName),
 		APIKey:       strings.TrimSpace(modelDef.APIKey),

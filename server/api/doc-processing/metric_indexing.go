@@ -53,13 +53,14 @@ func metricConnectMaxLinks() int {
 // metricIndexConfig binds the shared artifact-indexing engine (artifact_indexing.go) to
 // the metric family (spec 3.1).
 var metricIndexConfig = artifactIndexConfig{
-	SelfType:             searchArtifactMetric,
-	CategoryType:         "metric",
-	InstanceSource:       "extract_metrics",
-	Table:                "kb.metrics",
-	IDColumn:             "metric_id",
-	CategoryTreeFilename: "metrics.txt",
-	LogPrefix:            "metrics indexing",
+	SelfType:                   searchArtifactMetric,
+	CategoryType:               "metric",
+	InstanceSource:             "extract_metrics",
+	Table:                      "kb.metrics",
+	IDColumn:                   "metric_id",
+	CategoryTreeFilename:       "metrics.txt",
+	LogPrefix:                  "metrics indexing",
+	WarnOnMissingCategoryPaths: true,
 }
 
 // indexedMetric is the persisted view of one metric used by the post-save indexing
@@ -76,7 +77,13 @@ type indexedMetric struct {
 // entries, and hybrid_search semantic links. Output 1 (kb.search_artifacts) is handled
 // separately by ReindexMetricSearchForRecord, which the caller must run first. Each step
 // is best-effort and logged; a failure in one step does not abort the others.
-func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Block, logger ApiTypes.JimoLogger) {
+func IndexMetricsForRecord(
+	ctx context.Context,
+	recordID int64,
+	model_name string,
+	prompt_ref string,
+	inputChunks []Block,
+	logger ApiTypes.JimoLogger) {
 	db := ApiTypes.ProjectDBHandle
 	if db == nil {
 		if logger != nil {
@@ -119,7 +126,8 @@ func IndexMetricsForRecord(ctx context.Context, recordID int64, inputChunks []Bl
 	enrichArtifactCategoriesFromSemProjs(artifacts, semProjs)
 
 	resolver := newMetricCategoryResolver(db, logger)
-	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, artifacts, metricIndexConfig, resolver, logger)
+	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, model_name, prompt_ref,
+		artifacts, metricIndexConfig, resolver, logger)
 	categoryPathMetrics := indexArtifactsByCategoryPaths(ctx, db, recordID, artifacts, metricIndexConfig, logger)
 	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, artifacts, metricIndexConfig, logger)
 
