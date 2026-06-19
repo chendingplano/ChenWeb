@@ -60,6 +60,7 @@ func IndexInventoryItemsForRecord(
 		logger.Info("inventory items indexing start", "record_id", recordID, "inventory_items", len(items))
 	}
 
+	runArtifactHydrationForSemanticLinking(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
 	resolver := newMetricCategoryResolver(db, logger) // category resolver is category-type-agnostic
 	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID,
 		model_name, prompt_ref, items, inventoryItemIndexConfig, resolver, logger)

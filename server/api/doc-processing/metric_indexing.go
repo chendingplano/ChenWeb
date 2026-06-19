@@ -124,6 +124,7 @@ func IndexMetricsForRecord(
 			"record_id", recordID, "error", semProjErr)
 	}
 	enrichArtifactCategoriesFromSemProjs(artifacts, semProjs)
+	runArtifactHydrationForSemanticLinking(ctx, db, recordID, artifacts, metricIndexConfig, logger)
 
 	resolver := newMetricCategoryResolver(db, logger)
 	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, model_name, prompt_ref,

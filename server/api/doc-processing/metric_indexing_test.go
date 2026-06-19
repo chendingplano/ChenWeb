@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -463,6 +466,88 @@ func TestHydrateArtifactEmbeddingsLoadsStoredVectors(t *testing.T) {
 	}
 	if len(artifacts[1].Embedding) != 0 {
 		t.Fatalf("unexpected embedding for second artifact: len=%d", len(artifacts[1].Embedding))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestConnectArtifactsBySearchBatchesFallbackEmbeddings(t *testing.T) {
+	t.Setenv("SEARCH_SEMANTIC_ENABLED", "true")
+	t.Setenv("EMBEDDING_MODEL_NAME", "embedding-test")
+	t.Setenv("EMBEDDING_MAX_GOROUTINES", "1")
+	t.Setenv("EMBEDDING_BATCH_SIZE", "8")
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+
+		var body struct {
+			Input any `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		inputs, ok := body.Input.([]any)
+		if !ok {
+			t.Fatalf("input type=%T, want []any", body.Input)
+		}
+		embs := make([]map[string]any, 0, len(inputs))
+		for range inputs {
+			embs = append(embs, map[string]any{
+				"embedding": make([]float64, 1536),
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": embs})
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, ".models.toml")
+	modelsBody := `
+[embedding-test]
+host = "cloud"
+model_name = "text-embedding-3-small"
+api_key = "sk-test"
+base_url = "` + server.URL + `"
+timeout_sec = 5
+`
+	if err := os.WriteFile(modelsPath, []byte(modelsBody), 0o644); err != nil {
+		t.Fatalf("write models file: %v", err)
+	}
+	t.Setenv("MODELS_FILE", modelsPath)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	artifacts := []indexedArtifact{
+		{ID: "100_met_1", SearchDocument: "energy efficiency rating"},
+		{ID: "100_met_2", SearchDocument: "pump efficiency curve"},
+	}
+
+	for _, artifact := range artifacts {
+		mock.ExpectQuery(`(?s)WITH lexical .*FULL OUTER JOIN semantic s.*LIMIT \d+`).
+			WithArgs(strings.TrimSpace(artifact.SearchDocument), artifact.ID, sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{
+				"artifact_type", "artifact_id", "input_record_id", "primary_label", "rrf_score", "lex_score", "cosine_sim",
+			}))
+	}
+	mock.ExpectBegin()
+	mock.ExpectExec(`DELETE FROM kb\.artifact_connections`).
+		WithArgs(searchArtifactMetric, int64(100), RelationMethodHybridSearch, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectPrepare(`INSERT INTO kb\.artifact_connections`)
+	mock.ExpectCommit()
+
+	if got := connectArtifactsBySearch(context.Background(), db, 100, artifacts, metricIndexConfig, nil); got != 0 {
+		t.Fatalf("connectArtifactsBySearch = %d, want 0", got)
+	}
+	if requests != 1 {
+		t.Fatalf("embedding requests=%d, want 1", requests)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

@@ -14,7 +14,6 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/lib/pq"
 )
 
@@ -58,6 +57,14 @@ type resolvedCategory struct {
 	ID   int64
 	Type string
 	Key  string
+}
+
+var hydrateArtifactEmbeddingsFunc = func(ctx context.Context, db *sql.DB, recordID int64, artifactType string, artifacts []indexedArtifact, logger ApiTypes.JimoLogger, logPrefix string) {
+	hydrateArtifactEmbeddings(ctx, db, recordID, artifactType, artifacts, logger, logPrefix)
+}
+
+func runArtifactHydrationForSemanticLinking(ctx context.Context, db *sql.DB, recordID int64, artifacts []indexedArtifact, cfg artifactIndexConfig, logger ApiTypes.JimoLogger) {
+	hydrateArtifactEmbeddingsFunc(ctx, db, recordID, cfg.SelfType, artifacts, logger, cfg.LogPrefix)
 }
 
 func hydrateArtifactEmbeddings(ctx context.Context, db *sql.DB, recordID int64, artifactType string, artifacts []indexedArtifact, logger ApiTypes.JimoLogger, logPrefix string) {
@@ -522,7 +529,7 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 	minCosine := metricConnectMinCosine()
 	maxLinks := metricConnectMaxLinks()
 
-	embedder, embModel, _, embOK := newSearchEmbedder()
+	embedder, embModel, timeoutSec, embOK := newSearchEmbedder()
 	semanticFeatureOn := kbsearch.SemanticSearchEnabled()
 
 	allAccepted := make([]Connection, 0, len(artifacts))
@@ -535,6 +542,9 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 			"artifacts", len(artifacts),
 			"semantic_enabled", semanticFeatureOn,
 		)
+	}
+	if semanticFeatureOn && embOK {
+		reusedEmbeddings, fallbackEmbeddings = fillMissingArtifactEmbeddings(ctx, embedder, embModel, timeoutSec, artifacts, logger)
 	}
 	for i, a := range artifacts {
 		if logger != nil && i > 0 && i%50 == 0 {
@@ -557,13 +567,6 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 		if semanticFeatureOn && len(a.Embedding) == kbsearch.ConfiguredEmbeddingDim() {
 			vec = a.Embedding
 			useSem = true
-			reusedEmbeddings++
-		} else if semanticFeatureOn && embOK {
-			if v, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: embModel, InputText: truncateRunes(query, maxEmbeddingRunes)}); err == nil && len(v) == kbsearch.ConfiguredEmbeddingDim() {
-				vec = v
-				useSem = true
-				fallbackEmbeddings++
-			}
 		}
 
 		candidates, err := queryArtifactHybridCandidates(ctx, db, dict, query, vec, useSem, cfg.SelfType, a.ID, maxLinks*5)
@@ -638,6 +641,88 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 		)
 	}
 	return len(allAccepted)
+}
+
+func fillMissingArtifactEmbeddings(
+	ctx context.Context,
+	embedder Embedder,
+	modelName string,
+	timeoutSec int,
+	artifacts []indexedArtifact,
+	logger ApiTypes.JimoLogger,
+) (reused int, fallback int) {
+	prepared := make([]preparedEmbedding, 0, len(artifacts))
+	rows := make([]kbsearch.RegistryRow, len(artifacts))
+	for i := range artifacts {
+		if len(artifacts[i].Embedding) == kbsearch.ConfiguredEmbeddingDim() {
+			reused++
+			continue
+		}
+		text := strings.TrimSpace(artifacts[i].SearchDocument)
+		if text == "" {
+			continue
+		}
+		text = truncateRunes(text, maxEmbeddingRunes)
+		prepared = append(prepared, preparedEmbedding{
+			rowIndex: i,
+			text:     text,
+			runes:    len([]rune(text)),
+		})
+		rows[i] = kbsearch.RegistryRow{
+			ArtifactType: artifacts[i].ID,
+			ArtifactID:   artifacts[i].ID,
+		}
+	}
+	if len(prepared) == 0 {
+		return reused, fallback
+	}
+
+	maxBatchRunes := kbsearch.EmbeddingMaxBatchRunesForModel(modelName, "")
+	maxBatchItems := kbsearch.EmbeddingMaxBatchItemsForModel(modelName, "")
+	if batchSize := embeddingBatchSize(); maxBatchItems <= 0 || (batchSize > 0 && batchSize < maxBatchItems) {
+		maxBatchItems = batchSize
+	}
+	if maxBatchItems <= 0 {
+		maxBatchItems = len(prepared)
+	}
+
+	for start := 0; start < len(prepared); {
+		end := start
+		totalRunes := 0
+		for end < len(prepared) {
+			if end-start >= maxBatchItems {
+				break
+			}
+			nextRunes := totalRunes + prepared[end].runes
+			if maxBatchRunes > 0 && end > start && nextRunes > maxBatchRunes {
+				break
+			}
+			totalRunes = nextRunes
+			end++
+		}
+		if end == start {
+			end++
+		}
+		batch := prepared[start:end]
+		texts := make([]string, 0, len(batch))
+		rowIndices := make([]int, 0, len(batch))
+		for _, item := range batch {
+			texts = append(texts, item.text)
+			rowIndices = append(rowIndices, item.rowIndex)
+		}
+		vecs, err := embedBatchWithRetry(ctx, embedder, modelName, texts, timeoutSec, rows, rowIndices, logger)
+		if err == nil && len(vecs) == len(rowIndices) {
+			for pos, idx := range rowIndices {
+				if len(vecs[pos]) != kbsearch.ConfiguredEmbeddingDim() {
+					continue
+				}
+				artifacts[idx].Embedding = vecs[pos]
+				fallback++
+			}
+		}
+		start = end
+	}
+	return reused, fallback
 }
 
 // queryArtifactHybridCandidates runs the lexical (+ optional semantic) RRF search over
