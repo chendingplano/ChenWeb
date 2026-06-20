@@ -95,7 +95,8 @@
 		{
 			id: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, group: 'Workspace',
 			children: [
-				{ id: 'doc-processor-dashboard', label: 'Doc Processor' }
+				{ id: 'doc-processor-dashboard', label: 'Doc Processor' },
+				{ id: 'llm-activities', label: 'LLM Activities' }
 			]
 		},
 		{ id: 'chat', label: 'Chat', icon: MessageSquareIcon, group: 'Workspace' },
@@ -179,6 +180,12 @@
 					id: 'sysadmin-logs', label: 'Logs',
 					children: [
 						{ id: 'sysadmin-doc-proc-logs', label: 'Doc Processor Logs' }
+					]
+				},
+				{
+					id: 'sysadmin-llm', label: 'LLM',
+					children: [
+						{ id: 'sysadmin-llm-accounts', label: 'LLM Accounts' }
 					]
 				}
 			]

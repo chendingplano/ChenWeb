@@ -13,6 +13,8 @@
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
 	import DiaryView from '$lib/components/home3/diary-view.svelte';
 	import ResearchTopicsView from '$lib/components/home3/research-topics-view.svelte';
+	import LLMActivitiesView from '$lib/components/home3/llm-activities-view.svelte';
+	import LLMAccountsView from '$lib/components/home3/llm-accounts-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
@@ -149,6 +151,8 @@
 	<div class="flex-1">
 		{#if activeMenu?.childId === 'doc-processor-dashboard'}
 			<DocProcessorDashboardView {darkMode} />
+		{:else if activeMenu?.childId === 'llm-activities'}
+			<LLMActivitiesView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-search-lab'}
 			<KbSearchLabView {darkMode} />
 		{:else if activeMenu?.childId === 'flow'}
@@ -175,6 +179,8 @@
 			<JetStreamSubjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-proc-logs'}
 			<DocProcLogsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-accounts'}
+			<LLMAccountsView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}
 			<DiaryView {darkMode} />
 		{:else if activeMenu?.childId === 'ke-research-topics'}
