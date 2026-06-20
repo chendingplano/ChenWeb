@@ -117,6 +117,13 @@ type legacyArtifactSearchConfig struct {
 	Weights         ArtifactSearchWeightsConfig `mapstructure:"weights"`
 }
 
+type LLMConfig struct {
+	WorkspaceTimezone     string `mapstructure:"workspace_timezone"`
+	UsageRetentionDays    int    `mapstructure:"usage_retention_days"`
+	ArchiveRoot           string `mapstructure:"archive_root"`
+	ReconciliationRunHour int    `mapstructure:"reconciliation_run_hour"`
+}
+
 type AppConfigDef struct {
 	AppTableNames struct {
 		TableName_ProcessStatus   string `mapstructure:"table_name_process_status"`
@@ -139,6 +146,7 @@ type AppConfigDef struct {
 	TopicSearchWeights              TopicSearchWeightsConfig              `mapstructure:"topics_search_weights"`
 	EntitySearchWeights             EntitySearchWeightsConfig             `mapstructure:"entities_search_weights"`
 	RelationSearchWeights           RelationSearchWeightsConfig           `mapstructure:"relations_search_weights"`
+	LLM                             LLMConfig                             `mapstructure:"llm"`
 }
 
 type PDFParserConfig struct {
@@ -230,6 +238,23 @@ func GetProcessStatusTableName() string {
 
 func GetPDFParserConfig() PDFParserConfig {
 	return AppConfig.PDFParser
+}
+
+func GetLLMConfig() LLMConfig {
+	cfg := AppConfig.LLM
+	if strings.TrimSpace(cfg.WorkspaceTimezone) == "" {
+		cfg.WorkspaceTimezone = "America/Chicago"
+	}
+	if cfg.UsageRetentionDays <= 0 {
+		cfg.UsageRetentionDays = 30
+	}
+	if strings.TrimSpace(cfg.ArchiveRoot) == "" {
+		cfg.ArchiveRoot = "Data/llm-logs"
+	}
+	if cfg.ReconciliationRunHour <= 0 || cfg.ReconciliationRunHour > 23 {
+		cfg.ReconciliationRunHour = 2
+	}
+	return cfg
 }
 
 func GetDocGenConfig() DocGenConfig {

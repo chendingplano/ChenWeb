@@ -29,6 +29,8 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/jetstreamhandler"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/deepdoc/server/api/kehandler"
+	"github.com/chendingplano/deepdoc/server/api/llmadminhandler"
+	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
@@ -269,6 +271,13 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.DELETE("/ai-assistant/skills/:id", aiassistanthandler.DeleteSkill)
 	apiGroup.POST("/ai-assistant/knowledge-base/documents", aiassistanthandler.ImportDocument)
 	apiGroup.DELETE("/ai-assistant/knowledge-base/documents/:id", aiassistanthandler.DeleteDocument)
+
+	// LLM accounts/admin endpoints
+	apiGroup.GET("/llm/accounts", llmadminhandler.ListAccounts)
+	apiGroup.POST("/llm/accounts", llmadminhandler.CreateAccount)
+	apiGroup.POST("/llm/accounts/import-models-toml", llmadminhandler.ImportModelsTOMLPreview)
+	apiGroup.GET("/llm/reports/daily", llmreporthandler.ListDailyReports)
+	apiGroup.GET("/llm/usage-events", llmreporthandler.ListUsageEvents)
 
 	// Chatter (home3 chat page) endpoints
 	apiGroup.GET("/chatter/settings", chatterhandler.GetSettings)

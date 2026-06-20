@@ -1,0 +1,149 @@
+package llmadminhandler
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/labstack/echo/v4"
+)
+
+type stubAdminStore struct {
+	listAccountsResult   []Account
+	listAccountsErr      error
+	createAccountResult  Account
+	createAccountErr     error
+	lastCreateAccountReq CreateAccountInput
+}
+
+func (s *stubAdminStore) ListAccounts(_ context.Context) ([]Account, error) {
+	return s.listAccountsResult, s.listAccountsErr
+}
+
+func (s *stubAdminStore) CreateAccount(_ context.Context, in CreateAccountInput) (Account, error) {
+	s.lastCreateAccountReq = in
+	return s.createAccountResult, s.createAccountErr
+}
+
+func TestImportModelsTOMLPreviewReturnsParsedAccountsAndProfiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, ".models.toml")
+	raw := `
+[deepseek-v4-flash]
+host = "cloud"
+model_name = "deepseek-v4-flash"
+api_key = "sk-deepseek"
+base_url = "https://api.deepseek.com"
+timeout_sec = 200
+
+[deepseek-v4-pro]
+host = "cloud"
+model_name = "deepseek-v4-pro"
+api_key = "sk-deepseek"
+base_url = "https://api.deepseek.com"
+timeout_sec = 300
+`
+	if err := os.WriteFile(modelsPath, []byte(raw), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	t.Setenv("CHENWEB_MODELS_TOML", modelsPath)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/llm/accounts/import-models-toml", strings.NewReader("{}"))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ImportModelsTOMLPreview(c); err != nil {
+		t.Fatalf("ImportModelsTOMLPreview() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"accounts"`) || !strings.Contains(body, `"profiles"`) {
+		t.Fatalf("unexpected body = %s", body)
+	}
+	if !strings.Contains(body, `deepseek-v4-flash`) || !strings.Contains(body, `deepseek-v4-pro`) {
+		t.Fatalf("expected profile names in body = %s", body)
+	}
+}
+
+func TestListAccountsReturnsStoreRows(t *testing.T) {
+	prev := adminStoreFactory
+	t.Cleanup(func() { adminStoreFactory = prev })
+	adminStoreFactory = func() accountAdminStore {
+		return &stubAdminStore{
+			listAccountsResult: []Account{{
+				ID:           "acct_1",
+				AccountName:  "DeepSeek Prod",
+				Provider:     "deepseek",
+				ProfileCount: 2,
+			}},
+		}
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/accounts", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ListAccounts(c); err != nil {
+		t.Fatalf("ListAccounts() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"DeepSeek Prod"`) {
+		t.Fatalf("unexpected body = %s", rec.Body.String())
+	}
+}
+
+func TestCreateAccountPersistsRequest(t *testing.T) {
+	prev := adminStoreFactory
+	t.Cleanup(func() { adminStoreFactory = prev })
+	store := &stubAdminStore{
+		createAccountResult: Account{
+			ID:          "acct_1",
+			AccountName: "DeepSeek Prod",
+			Provider:    "deepseek",
+		},
+	}
+	adminStoreFactory = func() accountAdminStore { return store }
+
+	payload := map[string]any{
+		"account_name":              "DeepSeek Prod",
+		"provider":                  "deepseek",
+		"base_url":                  "https://api.deepseek.com",
+		"api_key":                   "sk-deepseek",
+		"status":                    "active",
+		"reconciliation_kind":       "deepseek_balance",
+		"is_reconciliation_enabled": true,
+		"default_model_name":        "deepseek-v4-flash",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/llm/accounts", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := CreateAccount(c); err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if store.lastCreateAccountReq.AccountName != "DeepSeek Prod" || store.lastCreateAccountReq.APIKeyRef != "sk-deepseek" {
+		t.Fatalf("unexpected create request = %+v", store.lastCreateAccountReq)
+	}
+}
