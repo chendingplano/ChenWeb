@@ -63,8 +63,10 @@ func (s EntityRelationSQLStore) LoadRelationsForRecord(ctx context.Context, reco
 	}
 	const q = `
 SELECT COALESCE(relation_id, ''), COALESCE(subject, ''), COALESCE(subject_en, ''),
+       COALESCE(subject_desc, ''),
        COALESCE(predicate, ''), COALESCE(predicate_en, ''), COALESCE(object, ''),
-       COALESCE(object_en, ''), COALESCE(desc_text, ''), COALESCE(desc_text_en, ''),
+       COALESCE(object_en, ''), COALESCE(object_desc, ''),
+       COALESCE(desc_text, ''), COALESCE(desc_text_en, ''),
        COALESCE(keywords, '[]'::jsonb), COALESCE(keywords_en, '[]'::jsonb),
        COALESCE(line_spans, '[]'::jsonb), COALESCE(categories, '[]'::jsonb),
        COALESCE(subject_lines, '[]'::jsonb), COALESCE(predicate_lines, '[]'::jsonb),
@@ -80,14 +82,16 @@ FROM kb.relations WHERE input_record_id = $1`
 	var out []map[string]any
 	for rows.Next() {
 		var (
-			relID, subj, subjEn, pred, predEn, obj, objEn string
-			desc, descEn                                  string
-			keywords, keywordsEn, lineSpans, categories   []byte
-			subjLines, predLines, objLines                []byte
-			confidence                                    float64
-			language                                      string
+			relID, subj, subjEn, subjDesc         string
+			pred, predEn, obj, objEn, objDesc     string
+			desc, descEn                          string
+			keywords, keywordsEn, lineSpans, categories []byte
+			subjLines, predLines, objLines        []byte
+			confidence                            float64
+			language                              string
 		)
-		if err := rows.Scan(&relID, &subj, &subjEn, &pred, &predEn, &obj, &objEn,
+		if err := rows.Scan(&relID, &subj, &subjEn, &subjDesc,
+			&pred, &predEn, &obj, &objEn, &objDesc,
 			&desc, &descEn, &keywords, &keywordsEn, &lineSpans, &categories,
 			&subjLines, &predLines, &objLines, &confidence, &language); err != nil {
 			return nil, err
@@ -97,10 +101,12 @@ FROM kb.relations WHERE input_record_id = $1`
 			"relation_id":         relID,
 			"subject":             subj,
 			"subject_en":          subjEn,
+			"subject_desc":        subjDesc,
 			"predicate":           pred,
 			"predicate_en":        predEn,
 			"object":              obj,
 			"object_en":           objEn,
+			"object_desc":         objDesc,
 			"desc":                desc,
 			"desc_en":             descEn,
 			"keywords":            scanJSONStrings(keywords),

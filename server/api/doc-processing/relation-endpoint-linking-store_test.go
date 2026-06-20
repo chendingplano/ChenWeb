@@ -58,10 +58,13 @@ func TestLoadRelationsForRecord_CoalescesNullableTextColumns(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	rows := sqlmock.NewRows([]string{
-		"relation_id", "subject", "subject_en", "predicate", "predicate_en", "object", "object_en",
+		"relation_id", "subject", "subject_en", "subject_desc",
+		"predicate", "predicate_en", "object", "object_en", "object_desc",
 		"desc_text", "desc_text_en", "coalesce", "coalesce", "coalesce", "coalesce",
 		"coalesce", "coalesce", "coalesce", "coalesce", "coalesce",
-	}).AddRow("r1", "Acme", "", "uses", "", "Widget", "", "", "",
+	}).AddRow("r1", "Acme", "", "a standard",
+		"uses", "", "Widget", "", "a product",
+		"", "",
 		[]byte(`[]`), []byte(`[]`), []byte(`["10:12"]`), []byte(`[]`),
 		[]byte(`["10"]`), []byte(`["11"]`), []byte(`["12"]`), 0.75, "en")
 	mock.ExpectQuery("SELECT COALESCE\\(relation_id, ''\\), COALESCE\\(subject, ''\\), COALESCE\\(subject_en, ''\\),").
@@ -79,11 +82,17 @@ func TestLoadRelationsForRecord_CoalescesNullableTextColumns(t *testing.T) {
 	if got[0]["subject_en"] != "" {
 		t.Fatalf("subject_en=%v, want empty string", got[0]["subject_en"])
 	}
+	if got[0]["subject_desc"] != "a standard" {
+		t.Fatalf("subject_desc=%v, want 'a standard'", got[0]["subject_desc"])
+	}
 	if got[0]["predicate_en"] != "" {
 		t.Fatalf("predicate_en=%v, want empty string", got[0]["predicate_en"])
 	}
 	if got[0]["object_en"] != "" {
 		t.Fatalf("object_en=%v, want empty string", got[0]["object_en"])
+	}
+	if got[0]["object_desc"] != "a product" {
+		t.Fatalf("object_desc=%v, want 'a product'", got[0]["object_desc"])
 	}
 	if got[0]["desc"] != "" {
 		t.Fatalf("desc=%v, want empty string", got[0]["desc"])

@@ -544,7 +544,7 @@ func resolveAndLinkRelations(
 		}
 	}
 
-	resolve := func(surface string) string {
+	resolve := func(surface, desc string) string {
 		f := normalizeSurfaceForm(surface)
 		if f == "" {
 			return ""
@@ -572,7 +572,7 @@ func resolveAndLinkRelations(
 			"entity_type_en":    "",
 			"aliases":           []string{},
 			"aliases_en":        []string{},
-			"desc":              "",
+			"desc":              strings.TrimSpace(desc),
 			"desc_en":           "",
 			"keywords":          []string{},
 			"keywords_en":       []string{},
@@ -592,8 +592,8 @@ func resolveAndLinkRelations(
 	deduped := make([]map[string]any, 0, len(relations))
 	seen := make(map[string]struct{})
 	for _, r := range relations {
-		subjID := resolve(asString(r["subject"]))
-		objID := resolve(asString(r["object"]))
+		subjID := resolve(asString(r["subject"]), asString(r["subject_desc"]))
+		objID := resolve(asString(r["object"]), asString(r["object_desc"]))
 		r["subject_entity_id"] = subjID
 		r["object_entity_id"] = objID
 

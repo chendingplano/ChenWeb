@@ -123,7 +123,6 @@ func (p *EntityRelationProcessor) processFreeformRelationChunk(
 		p.Logger.Info("extract relation end  ",
 			"record_id", recordID, "chunk_idx", idx,
 			"relations", len(relations),
-			"payload", payload,
 			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 	}

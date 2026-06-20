@@ -103,7 +103,7 @@ func linkRelationEndpoints(
 
 	// resolve links one endpoint, minting a provisional (seeded with its own line
 	// spans) when neither name nor unambiguous position resolves it.
-	resolve := func(surface string, endpointLines []string) string {
+	resolve := func(surface, desc string, endpointLines []string) string {
 		if id, ok := matchByName(surface); ok {
 			return id
 		}
@@ -120,7 +120,7 @@ func linkRelationEndpoints(
 			"entity_type_en":    "",
 			"aliases":           []string{},
 			"aliases_en":        []string{},
-			"desc":              "",
+			"desc":              strings.TrimSpace(desc),
 			"desc_en":           "",
 			"keywords":          []string{},
 			"keywords_en":       []string{},
@@ -148,8 +148,8 @@ func linkRelationEndpoints(
 		objLines := toStringSlice(r["object_lines"])
 		predLines := toStringSlice(r["predicate_lines"])
 
-		subjID := resolve(asString(r["subject"]), subjLines)
-		objID := resolve(asString(r["object"]), objLines)
+		subjID := resolve(asString(r["subject"]), asString(r["subject_desc"]), subjLines)
+		objID := resolve(asString(r["object"]), asString(r["object_desc"]), objLines)
 		r["subject_entity_id"] = subjID
 		r["object_entity_id"] = objID
 
