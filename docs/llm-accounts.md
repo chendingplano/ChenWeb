@@ -73,6 +73,7 @@ Covered now:
 - `OpenAIJSONClient` embedding calls can now capture request/response bodies and provider token usage when the embedding API returns it.
 - when the client supplies `provider + base_url + api_key + profile_name`, ChenWeb can resolve the matching account/profile row before inserting the usage event.
 - embedding clients that are built from `.models.toml` in doc-processing and kbhandler now also preserve the profile name on the client configuration.
+- `deepdoc` now runs LLM usage retention automatically: it deletes `llm_usage_event` rows and whole archived day directories older than `llm.usage_retention_days`.
 
 Not fully covered yet:
 

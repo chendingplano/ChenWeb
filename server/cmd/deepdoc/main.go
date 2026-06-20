@@ -198,6 +198,25 @@ func main() {
 			"error", err, "loc", "CWB_DDM_202")
 		os.Exit(1)
 	}
+	llmCfg := config.GetLLMConfig()
+	llmLoc, err := time.LoadLocation(llmCfg.WorkspaceTimezone)
+	if err != nil {
+		logger.Error("failed to load llm workspace timezone",
+			"error", err, "timezone", llmCfg.WorkspaceTimezone, "loc", "CWB_DDM_203")
+		os.Exit(1)
+	}
+	llmusage.StartBackgroundRetention(
+		context.Background(),
+		&llmusage.RetentionRunner{
+			DB:            ApiTypes.ProjectDBHandle,
+			ArchiveRoot:   llmCfg.ArchiveRoot,
+			WorkspaceTZ:   llmLoc,
+			RetentionDays: llmCfg.UsageRetentionDays,
+		},
+		logger,
+		llmLoc,
+		llmCfg.ReconciliationRunHour,
+	)
 
 	if err := kbhandler.CheckSearchBackend(project_db); err != nil {
 		logger.Error("search backend check failed; system exit", "error", err, "loc", "CWB_DDM_200")
