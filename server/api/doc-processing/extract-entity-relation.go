@@ -242,6 +242,7 @@ func (p *EntityRelationProcessor) HandleEvent(ctx context.Context, payload []byt
 		p.Logger.Error("parse input file failed", "error", err)
 		return fmt.Errorf("(MID_26052702) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		p.Logger.Warn("entity-relation processor skipped")
 		return nil
@@ -924,12 +925,11 @@ func (p *EntityRelationProcessor) extractStructuredPayload(
 	defer permit.Release()
 
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	in := llmclients.JSONExtractionInput{
-		PromptName: firstNonEmptyTrimmed(p.PromptRef, p.RelationPromptRef),
-		PromptText: promptText,
-		ModelName:  modelName,
-		InputText:  inputText,
+	callReason := "extract_entities"
+	if strings.TrimSpace(promptText) == strings.TrimSpace(p.RelationPromptText) {
+		callReason = "extract_relations"
 	}
+	in := newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.PromptRef, p.RelationPromptRef), promptText, modelName, inputText, callReason, "MID-CWB-ENTITY-RELATION")
 	var (
 		payload    map[string]any
 		extractErr error
@@ -1883,33 +1883,33 @@ INSERT INTO kb.relations (
 		}
 
 		if _, err := s.DB.ExecContext(ctx, stmt,
-			eventIDVal,              // $1
-			req.InputRecordID,       // $2
+			eventIDVal,        // $1
+			req.InputRecordID, // $2
 			strings.TrimSpace(asString(r["relation_id"])), // $3
 			strings.TrimSpace(req.Language),               // $4
 			strings.TrimSpace(asString(r["subject"])),     // $5
-			subjectEnVal,            // $6
-			subjectDescVal,          // $7
-			strings.TrimSpace(asString(r["predicate"])),   // $8
-			predicateEnVal,          // $9
-			strings.TrimSpace(asString(r["object"])),      // $10
-			objectEnVal,             // $11
-			objectDescVal,           // $12
-			strings.TrimSpace(asString(r["desc"])),        // $13
-			descEnVal,               // $14
-			string(keywordsJSON),    // $15
-			keywordsEnVal,           // $16
-			string(spansJSON),       // $17
-			toFloat(r["confidence"]),// $18
-			strings.TrimSpace(req.ModelName),  // $19
-			strings.TrimSpace(req.PromptName), // $20
-			subjectEntityIDArg,      // $21
-			objectEntityIDArg,       // $22
-			categoriesArg,           // $23
-			string(extInfo),         // $24
-			string(subjectLinesJSON),   // $25
-			string(predicateLinesJSON), // $26
-			string(objectLinesJSON),    // $27
+			subjectEnVal,   // $6
+			subjectDescVal, // $7
+			strings.TrimSpace(asString(r["predicate"])), // $8
+			predicateEnVal,                           // $9
+			strings.TrimSpace(asString(r["object"])), // $10
+			objectEnVal,                              // $11
+			objectDescVal,                            // $12
+			strings.TrimSpace(asString(r["desc"])),   // $13
+			descEnVal,                                // $14
+			string(keywordsJSON),                     // $15
+			keywordsEnVal,                            // $16
+			string(spansJSON),                        // $17
+			toFloat(r["confidence"]),                 // $18
+			strings.TrimSpace(req.ModelName),         // $19
+			strings.TrimSpace(req.PromptName),        // $20
+			subjectEntityIDArg,                       // $21
+			objectEntityIDArg,                        // $22
+			categoriesArg,                            // $23
+			string(extInfo),                          // $24
+			string(subjectLinesJSON),                 // $25
+			string(predicateLinesJSON),               // $26
+			string(objectLinesJSON),                  // $27
 		); err != nil {
 			return inserted, err
 		}

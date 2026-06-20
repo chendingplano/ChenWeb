@@ -105,6 +105,7 @@ func (p *StructureAnalyzerProcessor) HandleEvent(ctx context.Context, payload []
 	if err != nil {
 		return fmt.Errorf("(MID_26042147) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
@@ -367,12 +368,7 @@ func (p *StructureAnalyzerProcessor) analyzeStructureBlock(ctx context.Context, 
 }
 
 func (p *StructureAnalyzerProcessor) extractAndValidateStructureOutput(ctx context.Context, lines []structureLine, inputText string) (structureOutput, error) {
-	in := llmclients.JSONExtractionInput{
-		PromptName: p.PromptRef,
-		PromptText: p.PromptText,
-		ModelName:  p.ModelName,
-		InputText:  inputText,
-	}
+	in := newLLMJSONInput(ctx, p.PromptRef, p.PromptText, p.ModelName, inputText, "extract_doc_structure", "MID-CWB-EXTRACT-DOC-STRUCTURE")
 	if textExtractor, ok := p.Extractor.(LLMTextExtractor); ok {
 		rawText, err := textExtractor.ExtractText(ctx, in)
 		if err != nil {

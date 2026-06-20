@@ -27,9 +27,12 @@ type UsageEvent struct {
 	AccountID        string    `json:"account_id"`
 	AccountName      string    `json:"account_name"`
 	ProfileID        string    `json:"profile_id"`
+	RecordID         *int64    `json:"record_id"`
 	Provider         string    `json:"provider"`
 	ModelName        string    `json:"model_name"`
 	PromptName       string    `json:"prompt_name"`
+	CallReason       string    `json:"call_reason"`
+	CallLoc          string    `json:"call_loc"`
 	RequestStartedAt time.Time `json:"request_started_at"`
 	InputTokens      int64     `json:"input_tokens"`
 	OutputTokens     int64     `json:"output_tokens"`
@@ -104,8 +107,8 @@ LIMIT $1`
 }
 
 func (s *Store) ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error) {
-	const query = `SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.provider, evt.model_name, evt.prompt_name,
-request_started_at, input_tokens, output_tokens, total_tokens, latency_ms, error_message
+	const query = `SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id, evt.provider, evt.model_name, evt.prompt_name,
+evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, latency_ms, error_message
 FROM llm_usage_event evt
 JOIN llm_account acct ON acct.id = evt.account_id
 ORDER BY evt.request_started_at DESC
@@ -118,14 +121,18 @@ LIMIT $1`
 	out := []UsageEvent{}
 	for rows.Next() {
 		var row UsageEvent
+		var recordID sql.NullInt64
 		if err := rows.Scan(
 			&row.ID,
 			&row.AccountID,
 			&row.AccountName,
 			&row.ProfileID,
+			&recordID,
 			&row.Provider,
 			&row.ModelName,
 			&row.PromptName,
+			&row.CallReason,
+			&row.CallLoc,
 			&row.RequestStartedAt,
 			&row.InputTokens,
 			&row.OutputTokens,
@@ -134,6 +141,9 @@ LIMIT $1`
 			&row.ErrorMessage,
 		); err != nil {
 			return nil, err
+		}
+		if recordID.Valid {
+			row.RecordID = &recordID.Int64
 		}
 		out = append(out, row)
 	}

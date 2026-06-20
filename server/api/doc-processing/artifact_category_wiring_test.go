@@ -13,6 +13,7 @@ import (
 type stubLLMJSONExtractor struct {
 	results []stubLLMJSONResult
 	calls   int
+	inputs  []llmclients.JSONExtractionInput
 }
 
 type stubLLMJSONResult struct {
@@ -20,7 +21,8 @@ type stubLLMJSONResult struct {
 	err     error
 }
 
-func (s *stubLLMJSONExtractor) ExtractJSON(_ context.Context, _ llmclients.JSONExtractionInput) (map[string]any, error) {
+func (s *stubLLMJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	s.inputs = append(s.inputs, in)
 	if s.calls >= len(s.results) {
 		return nil, errors.New("unexpected ExtractJSON call")
 	}
@@ -87,12 +89,12 @@ INSERT INTO kb.doc_proc_logs (
 			"llm_call",
 			nil,
 			strPtrValue("call-1"),
-			strPtrValue("create_artifact_category"),
+			strPtrValue("category_metric"),
 			sqlmock.AnyArg(),
 			nil,
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
-			"MID-26061501",
+			"MID-26060501",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -131,8 +133,11 @@ INSERT INTO kb.doc_proc_logs (
 	if extractor.calls != 1 {
 		t.Fatalf("ExtractJSON calls = %d, want 1", extractor.calls)
 	}
-	if len(logger.infoMessages) != 1 || logger.infoMessages[0] != "artifact category llm_call" {
-		t.Fatalf("infoMessages = %#v, want one debug print", logger.infoMessages)
+	if len(extractor.inputs) != 1 || extractor.inputs[0].PromptName != "CREATE_ARTIFACT_CATEGORY_PROMPT" {
+		t.Fatalf("PromptName = %q, want CREATE_ARTIFACT_CATEGORY_PROMPT", firstPromptName(extractor.inputs))
+	}
+	if len(logger.infoMessages) != 2 || logger.infoMessages[0] != "Create Category start" || logger.infoMessages[1] != "Create Category end  " {
+		t.Fatalf("infoMessages = %#v, want start/end logs", logger.infoMessages)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -180,12 +185,12 @@ INSERT INTO kb.doc_proc_logs (
 			"llm_call",
 			nil,
 			strPtrValue("call-1"),
-			strPtrValue("create_artifact_category"),
+			strPtrValue("category_metric"),
 			nil,
 			strPtrValue("primary failed"),
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
-			"MID-26061502",
+			"MID-26060501",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(insertQuery).
@@ -199,12 +204,12 @@ INSERT INTO kb.doc_proc_logs (
 			"llm_call",
 			nil,
 			strPtrValue("call-2"),
-			strPtrValue("create_artifact_category"),
+			strPtrValue("category_metric"),
 			sqlmock.AnyArg(),
 			nil,
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
-			"MID-26061503",
+			"MID-26060501",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -250,10 +255,25 @@ INSERT INTO kb.doc_proc_logs (
 	if extractor.calls != 2 {
 		t.Fatalf("ExtractJSON calls = %d, want 2", extractor.calls)
 	}
-	if len(logger.infoMessages) != 2 {
-		t.Fatalf("infoMessages = %#v, want one print per LLM call", logger.infoMessages)
+	if len(extractor.inputs) != 2 {
+		t.Fatalf("len(inputs) = %d, want 2", len(extractor.inputs))
+	}
+	for i, in := range extractor.inputs {
+		if in.PromptName != "CREATE_ARTIFACT_CATEGORY_PROMPT" {
+			t.Fatalf("inputs[%d].PromptName = %q, want CREATE_ARTIFACT_CATEGORY_PROMPT", i, in.PromptName)
+		}
+	}
+	if len(logger.infoMessages) != 4 {
+		t.Fatalf("infoMessages = %#v, want start/end logs for primary and fallback", logger.infoMessages)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
+}
+
+func firstPromptName(inputs []llmclients.JSONExtractionInput) string {
+	if len(inputs) == 0 {
+		return ""
+	}
+	return inputs[0].PromptName
 }

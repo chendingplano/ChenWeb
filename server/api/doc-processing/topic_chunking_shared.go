@@ -387,12 +387,7 @@ func extractTopicsFromLinesWithLLM(
 	)
 
 	llmStart := time.Now()
-	parsed, err := extractTopicPayload(ctx, extractor, llmclients.JSONExtractionInput{
-		PromptName: promptRef,
-		PromptText: promptText,
-		ModelName:  modelName,
-		InputText:  rawLinesToJSON(lines),
-	})
+	parsed, err := extractTopicPayload(ctx, extractor, newLLMJSONInput(withLLMRecordID(ctx, record_id), promptRef, promptText, modelName, rawLinesToJSON(lines), "extract_topics", "MID-CWB-EXTRACT-TOPICS-RAW"))
 	logger.Info("llm call end",
 		logScopeName, logScopeValue,
 		"model_name", modelName,
@@ -450,12 +445,7 @@ func extractTopicsFromMarkedLinesWithLLM(
 	)
 
 	llmStart := time.Now()
-	parsed, err := extractTopicPayload(ctx, extractor, llmclients.JSONExtractionInput{
-		PromptName: promptRef,
-		PromptText: promptText,
-		ModelName:  modelName,
-		InputText:  inputText,
-	})
+	parsed, err := extractTopicPayload(ctx, extractor, newLLMJSONInput(withLLMRecordID(ctx, record_id), promptRef, promptText, modelName, inputText, "extract_topics", "MID-CWB-EXTRACT-TOPICS-MARKED"))
 	logger.Info("extract topics end  ",
 		"record_id", record_id,
 		logScopeName, logScopeValue,

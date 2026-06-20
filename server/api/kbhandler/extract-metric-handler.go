@@ -245,10 +245,13 @@ func ExtractMetric(c echo.Context) error {
 		"input", composedInput)
 
 	in := llmclients.JSONExtractionInput{
-		PromptName: promptRef,
+		PromptName: llmclients.EnsurePromptName(promptRef, "extract_metrics_preview", "MID-CWB-KBH-EXTRACT-METRIC", modelCfg.ModelName),
 		PromptText: promptText,
 		ModelName:  modelCfg.ModelName,
 		InputText:  composedInput,
+		RecordID:   req.RecordID,
+		CallReason: "extract_metrics_preview",
+		CallLoc:    "MID-CWB-KBH-EXTRACT-METRIC",
 	}
 	var payload map[string]any
 	if structuredClient, ok := client.(structuredJSONExtractor); ok {

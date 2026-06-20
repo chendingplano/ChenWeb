@@ -116,3 +116,10 @@ For daily reports:
 - `spend_amount` is `opening_balance - closing_balance`
 
 `account_name` lives in `llm_account`, so report and activity views should usually join that table instead of duplicating the name into every downstream table.
+
+For per-call usage rows in `llm_usage_event`:
+
+- `prompt_name` should never be blank going forward; callers now pass it explicitly and the shared sink falls back to a `missing_prompt_name@...` marker if a caller omits it.
+- `record_id` stores the ChenWeb input record when the LLM call belongs to a doc-processing or KB workflow.
+- `call_reason` stores the business reason for the call, such as `extract_metrics`, `enrich_scene_blocks`, or `generate_summary`.
+- `call_loc` stores a stable source marker such as `MID-CWB-...` so we can trace where the call originated in code.

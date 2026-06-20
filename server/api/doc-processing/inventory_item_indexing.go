@@ -155,6 +155,9 @@ func (p *InventoryItemsProcessor) PostProcessIndex(ctx context.Context, recordID
 	if reindexErr := ReindexInventoryItemSearchForRecord(ctx, recordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex inventory item search registry failed", "record_id", recordID, "error", reindexErr)
 	}
+	if semClusterErr := semClusterInventoryItems(ctx, ApiTypes.ProjectDBHandle, recordID, p.Logger); semClusterErr != nil {
+		p.Logger.Warn("inventory item semantic clustering failed (non-fatal)", "record_id", recordID, "error", semClusterErr)
+	}
 	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, recordID, searchArtifactInventoryItem, RelationHasInventoryItems, chunks); connErr != nil {
 		p.Logger.Warn("write has-inventory-items connections failed", "record_id", recordID, "error", connErr)
 	}

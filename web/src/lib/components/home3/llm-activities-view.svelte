@@ -291,9 +291,22 @@
 							<tr>
 								<td>
 									<div class="cell-primary">{fmtDate(event.request_started_at)}</div>
-									<div class="cell-secondary">{event.account_name || event.account_id}</div>
+									<div class="cell-secondary">
+										{event.account_name || event.account_id}
+										{#if event.record_id != null}
+											· record {event.record_id}
+										{/if}
+									</div>
 								</td>
-								<td>{event.prompt_name || 'Unnamed prompt'}</td>
+								<td>
+									<div class="cell-primary">{event.prompt_name}</div>
+									<div class="cell-secondary">
+										{event.call_reason || 'no reason'}
+										{#if event.call_loc}
+											· {event.call_loc}
+										{/if}
+									</div>
+								</td>
 								<td>
 									<div class="cell-primary">{event.model_name}</div>
 									<div class="cell-secondary">{event.provider}</div>

@@ -19,9 +19,12 @@ export type LLMUsageEvent = {
 	account_id: string;
 	account_name: string;
 	profile_id: string;
+	record_id: number | null;
 	provider: string;
 	model_name: string;
 	prompt_name: string;
+	call_reason: string;
+	call_loc: string;
 	request_started_at: string;
 	input_tokens: number;
 	output_tokens: number;

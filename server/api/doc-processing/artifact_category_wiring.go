@@ -50,7 +50,7 @@ func newMetricCategoryResolver(db *sql.DB, logger ApiTypes.JimoLogger) *category
 // ontology entry. Thinking is forced off, mirroring the metrics passes.
 type llmCategoryCreator struct {
 	extractor     LLMJSONExtractor
-	promptRef	  string
+	promptRef     string
 	promptText    string
 	modelName     string
 	modelCfg      structureModelConfig
@@ -81,7 +81,7 @@ func newLLMCategoryCreator(db *sql.DB, logger ApiTypes.JimoLogger) (*llmCategory
 	}
 	return &llmCategoryCreator{
 		extractor:     extractor,
-		promptRef:	   promptRef,
+		promptRef:     promptRef,
 		promptText:    promptText,
 		modelName:     modelCfg.ModelName,
 		modelCfg:      forceDisableThinking(modelCfg),
@@ -124,6 +124,7 @@ func (c *llmCategoryCreator) CreateCategory(ctx context.Context, rawKey, categor
 
 func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, categoryType, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(c.extractor, cfg)
+	promptName := firstNonEmptyTrimmed(c.promptRef, "CREATE_ARTIFACT_CATEGORY_PROMPT")
 	callID := ""
 	if c.newLLMCallID != nil {
 		callID = strings.TrimSpace(c.newLLMCallID())
@@ -132,14 +133,18 @@ func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, cate
 		"categoryType", categoryType,
 		"rawKey", rawKey,
 		"modelName", modelName,
-		"promptName", c.promptRef,
+		"promptName", promptName,
 	)
 	start := time.Now()
-	payload, err := c.extractor.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptText: c.promptText,
-		ModelName:  modelName,
-		InputText:  inputText,
-	})
+	payload, err := c.extractor.ExtractJSON(ctx, newLLMJSONInput(
+		ctx,
+		promptName,
+		c.promptText,
+		modelName,
+		inputText,
+		"create_artifact_category",
+		"MID-CWB-CREATE-ARTIFACT-CATEGORY",
+	))
 
 	c.logger.Info("Create Category end  ",
 		"categoryType", categoryType,

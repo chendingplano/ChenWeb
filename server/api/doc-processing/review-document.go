@@ -198,6 +198,7 @@ func (p *ReviewProcessor) HandleEvent(ctx context.Context, payload []byte) error
 // PostProcessIndex runs all enabled reviewers as concurrent goroutines, collects
 // their findings, and persists them to kb.doc_review_findings.
 func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
+	ctx = withLLMRecordID(ctx, recordID)
 	start := p.Now()
 	p.Logger.Info("document review start", "record_id", recordID)
 

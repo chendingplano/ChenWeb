@@ -56,10 +56,12 @@ func translateArtifactWikiMetricArticle(ctx context.Context, logger ApiTypes.Jim
 	}
 
 	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptName: "metric_wiki_translation_prompt",
+		PromptName: llmclients.EnsurePromptName("metric_wiki_translation_prompt", "translate_metric_wiki", "MID-CWB-TRANSLATE-METRIC-WIKI", cfg.ModelName),
 		PromptText: metricWikiTranslationPrompt,
 		ModelName:  cfg.ModelName,
 		InputText:  string(inputText),
+		CallReason: "translate_metric_wiki",
+		CallLoc:    "MID-CWB-TRANSLATE-METRIC-WIKI",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("translate metric wiki page: %w", err)

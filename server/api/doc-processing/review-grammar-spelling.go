@@ -6,20 +6,19 @@ import (
 	"os"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 // grammarSpellingReviewer checks grammar, spelling, and basic language quality.
 // P1, StrategyChunk, one-shot (no tool use). Uses a cheap model.
 type grammarSpellingReviewer struct {
-	client   LLMJSONExtractor
-	logger   ApiTypes.JimoLogger
+	client     LLMJSONExtractor
+	logger     ApiTypes.JimoLogger
 	chunkStore SQLStore // for loading chunks
 	maxTasks   int
 }
 
-func (r *grammarSpellingReviewer) Name() string      { return "grammar_spelling" }
-func (r *grammarSpellingReviewer) Group() string     { return "P1" }
+func (r *grammarSpellingReviewer) Name() string             { return "grammar_spelling" }
+func (r *grammarSpellingReviewer) Group() string            { return "P1" }
 func (r *grammarSpellingReviewer) Strategy() ReviewStrategy { return StrategyChunk }
 
 func (r *grammarSpellingReviewer) ReviewDocument(
@@ -138,11 +137,7 @@ func (r *grammarSpellingReviewer) processWindow(
 		"lines", fmt.Sprintf("%d-%d", w.startLine, w.endLine),
 	)
 
-	payload, err := r.client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptText: cfg.PromptText,
-		ModelName:  cfg.ModelName,
-		InputText:  w.inputJSON,
-	})
+	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_grammar_spelling", "MID-CWB-REVIEW-GRAMMAR"))
 	if err != nil {
 		r.logger.Warn("grammar review window failed; skipping",
 			"record_id", recordID,

@@ -242,6 +242,7 @@ func (p *ProductsProcessor) HandleEvent(ctx context.Context, payload []byte) err
 	if err != nil {
 		return fmt.Errorf("(MID_26052002) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
@@ -617,12 +618,11 @@ func (p *ProductsProcessor) extractProductPayload(
 		"prompt_name", promptRef,
 	)
 
-	in := llmclients.JSONExtractionInput{
-		PromptName: promptRef,
-		PromptText: promptText,
-		ModelName:  modelName,
-		InputText:  inputText,
+	callReason := strings.TrimSpace(opr)
+	if callReason == "" {
+		callReason = "extract_products"
 	}
+	in := newLLMJSONInput(ctx, promptRef, promptText, modelName, inputText, callReason, "MID-CWB-EXTRACT-PRODUCTS")
 	var (
 		payload map[string]any
 		err     error

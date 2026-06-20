@@ -277,10 +277,13 @@ func ExtractProvisions(c echo.Context) error {
 	)
 
 	in := llmclients.JSONExtractionInput{
-		PromptName: promptRef,
+		PromptName: llmclients.EnsurePromptName(promptRef, "extract_provisions_preview", "MID-CWB-KBH-EXTRACT-PROVISION", modelCfg.ModelName),
 		PromptText: promptText,
 		ModelName:  modelCfg.ModelName,
 		InputText:  composedInput,
+		RecordID:   req.RecordID,
+		CallReason: "extract_provisions_preview",
+		CallLoc:    "MID-CWB-KBH-EXTRACT-PROVISION",
 	}
 	var payload map[string]any
 	if structuredClient, ok := client.(structuredJSONExtractor); ok {

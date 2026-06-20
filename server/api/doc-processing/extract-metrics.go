@@ -245,6 +245,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.Logger.Error("parse input file failed", "error", err)
 		return fmt.Errorf("(MID_26042457) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		p.Logger.Warn("processor skipped")
 		return nil
@@ -1872,14 +1873,17 @@ func (p *MetricsProcessor) extractMetricPayload(
 	promptText string,
 	modelName string,
 	cfg structureModelConfig,
-	_ string) (map[string]any, error) {
+	loc string) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	in := llmclients.JSONExtractionInput{
-		PromptName: firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef),
-		PromptText: promptText,
-		ModelName:  modelName,
-		InputText:  inputText,
+	callReason := "extract_metric_candidates"
+	if strings.TrimSpace(promptText) == strings.TrimSpace(p.RelationPromptText) {
+		callReason = "enrich_metrics"
 	}
+	callLoc := strings.TrimSpace(loc)
+	if callLoc == "" {
+		callLoc = "MID-CWB-EXTRACT-METRICS"
+	}
+	in := newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef), promptText, modelName, inputText, callReason, callLoc)
 	var (
 		payload map[string]any
 		err     error

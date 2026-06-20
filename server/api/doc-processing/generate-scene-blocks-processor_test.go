@@ -231,10 +231,10 @@ func TestSceneBlocksProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testi
 			{
 				"scene_blocks": []any{
 					map[string]any{
-						"scene_id":    "access_panel_opening",
-						"scene_type":  "operation",
-						"title":       "Open access panel",
-						"summary":     "Operator opens the access panel to inspect the wiring bay.",
+						"scene_id":   "access_panel_opening",
+						"scene_type": "operation",
+						"title":      "Open access panel",
+						"summary":    "Operator opens the access panel to inspect the wiring bay.",
 						"line_spans": []any{"1-3"},
 						"confidence": 0.93,
 					},
@@ -378,7 +378,8 @@ func TestSceneBlocksProcessor_ExtractScenePayloadUsesStructuredContractWhenAvail
 	}
 
 	p := &SceneBlocksProcessor{
-		Extractor: extractor,
+		Extractor:         extractor,
+		RelationPromptRef: "prompt-enrich-scene-blocks-v1.md",
 	}
 
 	payload, err := p.extractScenePayload(context.Background(), "input lines", "prompt", "scene-model", structureModelConfig{})
@@ -393,6 +394,9 @@ func TestSceneBlocksProcessor_ExtractScenePayloadUsesStructuredContractWhenAvail
 	}
 	if len(extractor.contractNames) != 1 || extractor.contractNames[0] != "chenweb_scene_extraction" {
 		t.Fatalf("contractNames=%v, want [chenweb_scene_extraction]", extractor.contractNames)
+	}
+	if len(extractor.promptNames) != 1 || extractor.promptNames[0] != "prompt-enrich-scene-blocks-v1.md" {
+		t.Fatalf("promptNames=%v, want [prompt-enrich-scene-blocks-v1.md]", extractor.promptNames)
 	}
 	items, ok := payload["scene_blocks"].([]any)
 	if !ok || len(items) != 1 {

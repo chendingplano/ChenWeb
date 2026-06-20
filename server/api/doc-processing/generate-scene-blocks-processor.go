@@ -232,6 +232,7 @@ func (p *SceneBlocksProcessor) HandleEvent(ctx context.Context, payload []byte) 
 	if err != nil {
 		return fmt.Errorf("(MID_26051802) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 
 	if p.MentionPromptErr != nil {
 		p.Logger.Error("prompt error", "prompt_name", p.MentionPromptRef, "error", p.MentionPromptErr)
@@ -771,11 +772,11 @@ func (p *SceneBlocksProcessor) extractSceneBlocksWithModel(ctx context.Context, 
 
 func (p *SceneBlocksProcessor) extractScenePayload(ctx context.Context, inputText string, promptText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	payload, err := extractScenePayloadWithContract(ctx, p.Extractor, llmclients.JSONExtractionInput{
-		PromptText: promptText,
-		ModelName:  modelName,
-		InputText:  inputText,
-	})
+	callReason := "extract_scene_block_candidates"
+	if strings.TrimSpace(promptText) == strings.TrimSpace(p.RelationPromptText) {
+		callReason = "enrich_scene_blocks"
+	}
+	payload, err := extractScenePayloadWithContract(ctx, p.Extractor, newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef, p.PromptRef), promptText, modelName, inputText, callReason, "MID-CWB-SCENE-BLOCKS"))
 	if err != nil {
 		return payload, err
 	}

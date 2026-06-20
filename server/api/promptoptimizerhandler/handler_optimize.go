@@ -185,7 +185,10 @@ func OptimizePrompt(c echo.Context) error {
 	}
 
 	llmReq := llm.Request{
-		Model: model.Model,
+		Model:      model.Model,
+		PromptName: llm.EnsurePromptName(strings.TrimSpace(tpl.Name), "prompt_optimizer_"+req.Kind, "MID-CWB-PROMPT-OPTIMIZER", model.Model),
+		CallReason: "prompt_optimizer_" + req.Kind,
+		CallLoc:    "MID-CWB-PROMPT-OPTIMIZER",
 		Messages: []llm.Message{
 			{Role: llm.RoleUser, Content: finalPrompt},
 		},

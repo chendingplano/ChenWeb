@@ -332,6 +332,7 @@ func (s *FixedSizeChunkingService) setDocProcSummaryExtraInfo(extra map[string]a
 }
 
 func (s *FixedSizeChunkingService) HandleInput(ctx context.Context, recordID int64, inputFilename string, inputFile []byte) error {
+	ctx = withLLMRecordID(ctx, recordID)
 	if s.Store == nil {
 		return errors.New("(MID_26042012) store is nil")
 	}
@@ -1218,12 +1219,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 		"call_id", callID[:8])
 
 	// Call the LLM
-	in := llmclients.JSONExtractionInput{
-		PromptName: s.SummaryPromptRef,
-		PromptText: appendLanguageInstruction(s.SummaryPromptText, inputText),
-		ModelName:  s.SummaryModelName,
-		InputText:  inputText,
-	}
+	in := newLLMJSONInput(ctx, s.SummaryPromptRef, appendLanguageInstruction(s.SummaryPromptText, inputText), s.SummaryModelName, inputText, "generate_summary", "MID-CWB-GENERATE-SUMMARY")
 	var (
 		parsed      map[string]any
 		rawResponse string
@@ -1425,12 +1421,7 @@ func (s *FixedSizeChunkingService) translateSummaryCategoryPaths(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	in := llmclients.JSONExtractionInput{
-		PromptName: s.SummaryPromptRef,
-		PromptText: summaryCategoryTranslationPrompt,
-		ModelName:  s.TranslationModelName,
-		InputText:  string(inputPayload),
-	}
+	in := newLLMJSONInput(ctx, s.SummaryPromptRef, summaryCategoryTranslationPrompt, s.TranslationModelName, string(inputPayload), "translate_summary_category_paths", "MID-CWB-TRANSLATE-SUMMARY-CATEGORY")
 	var parsed map[string]any
 	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
 		result, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, summaryCategoryTranslationContract())
@@ -1483,12 +1474,7 @@ func (s *FixedSizeChunkingService) translateSummaryText(ctx context.Context, tar
 	if err != nil {
 		return "", err
 	}
-	in := llmclients.JSONExtractionInput{
-		PromptName: s.SummaryPromptRef,
-		PromptText: summaryTextTranslationPrompt,
-		ModelName:  s.TranslationModelName,
-		InputText:  string(inputPayload),
-	}
+	in := newLLMJSONInput(ctx, s.SummaryPromptRef, summaryTextTranslationPrompt, s.TranslationModelName, string(inputPayload), "translate_summary_text", "MID-CWB-TRANSLATE-SUMMARY-TEXT")
 	var parsed map[string]any
 	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
 		result, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, summaryTextTranslationContract())
@@ -1528,12 +1514,7 @@ func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	in := llmclients.JSONExtractionInput{
-		PromptName: s.SummaryPromptRef,
-		PromptText: summaryKeywordsTranslationPrompt,
-		ModelName:  s.TranslationModelName,
-		InputText:  string(inputPayload),
-	}
+	in := newLLMJSONInput(ctx, s.SummaryPromptRef, summaryKeywordsTranslationPrompt, s.TranslationModelName, string(inputPayload), "translate_summary_keywords", "MID-CWB-TRANSLATE-SUMMARY-KEYWORDS")
 	var parsed map[string]any
 	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
 		result, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, summaryKeywordsTranslationContract())

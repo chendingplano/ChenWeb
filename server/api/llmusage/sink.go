@@ -86,9 +86,13 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	}
 
 	latencyMS := finishedAt.Sub(startedAt).Milliseconds()
-	metadataJSON, err := json.Marshal(map[string]any{
+	metadata := map[string]any{
 		"capture_source": "shared_llm",
-	})
+	}
+	if strings.TrimSpace(record.PromptName) == "" {
+		metadata["prompt_name_missing"] = true
+	}
+	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return err
 	}
@@ -97,13 +101,20 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
     id, account_id, profile_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
     input_tokens, output_tokens, total_tokens, latency_ms, http_status,
-    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json
+    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
+    record_id, call_reason, call_loc
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19::jsonb
+    $15, $16, $17, $18, $19::jsonb,
+    $20, $21, $22
 )`
+
+	var recordID any
+	if record.RecordID > 0 {
+		recordID = record.RecordID
+	}
 
 	_, err = s.DB.ExecContext(
 		ctx,
@@ -127,6 +138,9 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		outputRef,
 		record.ProviderRequestID,
 		string(metadataJSON),
+		recordID,
+		record.CallReason,
+		record.CallLoc,
 	)
 	return err
 }

@@ -138,6 +138,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 	if err != nil {
 		return fmt.Errorf("(MID_26050521) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
@@ -746,12 +747,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 }
 
 func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Context, inputText string, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
-	in := llmclients.JSONExtractionInput{
-		PromptName: p.PromptRef,
-		PromptText: p.PromptText,
-		ModelName:  modelName,
-		InputText:  inputText,
-	}
+	in := newLLMJSONInput(ctx, p.PromptRef, p.PromptText, modelName, inputText, "extract_provisions", "MID-CWB-EXTRACT-PROVISIONS")
 	var (
 		payload map[string]any
 		err     error

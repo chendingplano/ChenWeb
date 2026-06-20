@@ -208,6 +208,7 @@ func (p *StructuredKnowledgeProcessor) HandleEvent(ctx context.Context, payload 
 		p.Logger.Error("parse input file failed", "error", err)
 		return fmt.Errorf("(MID_26052602) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		p.Logger.Warn("structured knowledge processor skipped")
 		return nil
@@ -728,12 +729,11 @@ func (p *StructuredKnowledgeProcessor) extractKnowledgePayloadWithContract(
 	contract llmclients.StructuredOutputContract,
 ) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	in := llmclients.JSONExtractionInput{
-		PromptName: firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef),
-		PromptText: promptText,
-		ModelName:  modelName,
-		InputText:  inputText,
+	callReason := "extract_structured_knowledge_candidates"
+	if strings.TrimSpace(promptText) == strings.TrimSpace(p.EnrichPromptText) {
+		callReason = "enrich_structured_knowledge"
 	}
+	in := newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef), promptText, modelName, inputText, callReason, "MID-CWB-STRUCTURED-KNOWLEDGE")
 	var (
 		payload map[string]any
 		err     error

@@ -76,10 +76,12 @@ func buildArtifactWikiArticle(ctx context.Context, logger ApiTypes.JimoLogger, p
 	}
 
 	out, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptName: "generic_artifact_wiki_prompt",
+		PromptName: llmclients.EnsurePromptName("generic_artifact_wiki_prompt", "generate_generic_artifact_wiki", "MID-CWB-GENERIC-ARTIFACT-WIKI", cfg.ModelName),
 		PromptText: genericArtifactWikiPrompt + "\n\n" + metricWikiOutputLanguageInstruction("en"),
 		ModelName:  cfg.ModelName,
 		InputText:  string(inputJSON),
+		CallReason: "generate_generic_artifact_wiki",
+		CallLoc:    "MID-CWB-GENERIC-ARTIFACT-WIKI",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generate generic artifact wiki article: %w", err)
@@ -144,10 +146,12 @@ func translateGenericArtifactWikiArticle(ctx context.Context, logger ApiTypes.Ji
 	}
 
 	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
-		PromptName: "metric_wiki_translation_prompt",
+		PromptName: llmclients.EnsurePromptName("metric_wiki_translation_prompt", "translate_generic_artifact_wiki", "MID-CWB-TRANSLATE-GENERIC-ARTIFACT-WIKI", cfg.ModelName),
 		PromptText: metricWikiTranslationPrompt,
 		ModelName:  cfg.ModelName,
 		InputText:  string(inputText),
+		CallReason: "translate_generic_artifact_wiki",
+		CallLoc:    "MID-CWB-TRANSLATE-GENERIC-ARTIFACT-WIKI",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("translate generic wiki page: %w", err)

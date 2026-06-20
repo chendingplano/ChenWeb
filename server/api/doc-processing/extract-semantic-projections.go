@@ -164,6 +164,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 		p.Logger.Error("parse input file failed", "error", err)
 		return fmt.Errorf("(MID_26052102) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		p.Logger.Warn("semantic projections processor skipped")
 		return nil
@@ -739,12 +740,11 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionPayload(
 	// extractor inside concurrent goroutines causes a data race. The constructor
 	// already applies the enrich config once, and modelName is carried in the
 	// JSONExtractionInput so the correct model is selected per-call.
-	in := llmclients.JSONExtractionInput{
-		PromptName: firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef),
-		PromptText: promptText,
-		ModelName:  modelName,
-		InputText:  inputText,
+	callReason := "extract_semantic_projection_candidates"
+	if strings.TrimSpace(promptText) == strings.TrimSpace(p.EnrichPromptText) {
+		callReason = "enrich_semantic_projections"
 	}
+	in := newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef), promptText, modelName, inputText, callReason, "MID-CWB-SEMANTIC-PROJECTIONS")
 	var (
 		payload map[string]any
 		err     error

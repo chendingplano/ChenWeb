@@ -375,6 +375,9 @@ func TestInventoryItemsProcessorUsesStructuredContractAndNormalizes(t *testing.T
 	if got := fake.contractNames[0]; got != "chenweb_inventory_items_extraction" {
 		t.Fatalf("contract=%q", got)
 	}
+	if len(fake.promptNames) != 1 || fake.promptNames[0] != "prompt-extract-inventory-items-v1.md" {
+		t.Fatalf("promptNames=%v, want [prompt-extract-inventory-items-v1.md]", fake.promptNames)
+	}
 	if len(result.Items) != 1 {
 		t.Fatalf("items len=%d", len(result.Items))
 	}

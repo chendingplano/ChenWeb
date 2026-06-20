@@ -13,8 +13,8 @@ import (
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 // ---- types ----
@@ -191,7 +191,7 @@ func semClusterEntities(
 	}
 	if len(entities) == 0 {
 		if logger != nil {
-			logger.Info("semantic clustering: no pending entities",
+			logger.Info("semantic clustering empty ",
 				"record_id", recordID,
 				"ms_used", time.Since(start).Milliseconds(),
 			)
@@ -199,14 +199,16 @@ func semClusterEntities(
 		return nil
 	}
 
-	if logger != nil {
-		logger.Info("semantic clustering start ",
-			"record_id", recordID,
-			"pending_entities", len(entities),
-			"model", cfg.ModelName,
-			"prompt", cfg.PromptRef,
-		)
-	}
+	/*
+		if logger != nil {
+			logger.Info("semantic clustering start ",
+				"record_id", recordID,
+				"pending_entities", len(entities),
+				"model", cfg.ModelName,
+				"prompt", cfg.PromptRef,
+			)
+		}
+	*/
 
 	blockStart := time.Now()
 	searchLimit := semClusterGroupSize() * 5
@@ -280,18 +282,20 @@ func semClusterEntities(
 		})
 	}
 
-	if logger != nil {
-		logger.Info("semantic clustering built ",
-			"record_id", recordID,
-			"groups", len(groups),
-			"skipped_no_match", skippedNoMatch,
-			"ms_used", time.Since(blockStart).Milliseconds(),
-		)
-	}
-
 	if len(groups) == 0 {
 		logger.Info("semantic clustering finish - no matched")
 		return markPendingAsClustered(ctx, db, entities)
+	}
+
+	if logger != nil {
+		logger.Info("semantic clustering start ",
+			"record_id", recordID,
+			"groups", len(groups),
+			"skipped_no_match", skippedNoMatch,
+			"model", cfg.ModelName,
+			"prompt", cfg.PromptRef,
+			"ms_used", time.Since(blockStart).Milliseconds(),
+		)
 	}
 
 	// 4. Batch groups, call LLM, apply merges.
@@ -402,12 +406,12 @@ ORDER BY e.id`
 	var out []pendingEntityRow
 	for rows.Next() {
 		var (
-			e                                          pendingEntityRow
-			aliasesRaw, aliasesEnRaw                   []byte
-			keywordsRaw, keywordsEnRaw                  []byte
-			categoriesRaw                              []byte
-			rowID                                      int64
-			embeddingText                              sql.NullString
+			e                          pendingEntityRow
+			aliasesRaw, aliasesEnRaw   []byte
+			keywordsRaw, keywordsEnRaw []byte
+			categoriesRaw              []byte
+			rowID                      int64
+			embeddingText              sql.NullString
 		)
 		if err := rows.Scan(
 			&e.EntityID, &e.Entity, &e.EntityEN,
@@ -448,10 +452,10 @@ WHERE e.entity_id = $1
 LIMIT 1`
 	row := db.QueryRowContext(ctx, q, entityID)
 	var (
-		e                                          pendingEntityRow
-		aliasesRaw, aliasesEnRaw                   []byte
-		keywordsRaw, keywordsEnRaw                  []byte
-		categoriesRaw                              []byte
+		e                          pendingEntityRow
+		aliasesRaw, aliasesEnRaw   []byte
+		keywordsRaw, keywordsEnRaw []byte
+		categoriesRaw              []byte
 	)
 	if err := row.Scan(
 		&e.EntityID, &e.Entity, &e.EntityEN,
@@ -659,12 +663,7 @@ func callAdjudicatorWithModel(
 	}
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 
-	in := llmclients.JSONExtractionInput{
-		PromptName: cfg.PromptRef,
-		PromptText: cfg.PromptText,
-		ModelName:  strings.TrimSpace(modelName),
-		InputText:  inputText,
-	}
+	in := newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, strings.TrimSpace(modelName), inputText, "semantic_cluster_adjudication", "MID-CWB-SEMANTIC-CLUSTERING")
 
 	contract := entityAdjudicationContract()
 

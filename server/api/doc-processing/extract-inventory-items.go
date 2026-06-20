@@ -214,6 +214,7 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	if err != nil {
 		return fmt.Errorf("(MID_26053102) parse event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		return nil
 	}
@@ -513,11 +514,7 @@ func (p *InventoryItemsProcessor) extractInventoryItemsWithFallback(ctx context.
 
 func (p *InventoryItemsProcessor) extractInventoryItemsPayload(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	in := llmclients.JSONExtractionInput{
-		PromptText: p.PromptText,
-		ModelName:  modelName,
-		InputText:  inputText,
-	}
+	in := newLLMJSONInput(ctx, p.PromptRef, p.PromptText, modelName, inputText, "extract_inventory_items", "MID-CWB-EXTRACT-INVENTORY-ITEMS")
 	var (
 		payload map[string]any
 		err     error

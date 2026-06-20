@@ -94,6 +94,7 @@ func (p *ExtractDocMetadataProcessor) HandleEvent(ctx context.Context, payload [
 	if err != nil {
 		return fmt.Errorf("(MID_26042410) failed parsing event payload: %w", err)
 	}
+	ctx = withLLMRecordID(ctx, evt.RecordID)
 	if ShouldSkipLineFileGeneratedEvent(evt) {
 		p.Logger.Info("doc metadata event skipped", "record_id", evt.RecordID, "type", evt.Type, "status", evt.Status)
 		return nil
@@ -367,12 +368,7 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Co
 
 func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Client, cfg)
-	in := llmclients.JSONExtractionInput{
-		PromptName: p.PromptRef,
-		PromptText: p.PromptText,
-		ModelName:  modelName,
-		InputText:  inputText,
-	}
+	in := newLLMJSONInput(ctx, p.PromptRef, p.PromptText, modelName, inputText, "extract_doc_metadata", "MID-CWB-EXTRACT-DOC-METADATA")
 	apiStart := time.Now()
 	if structuredExtractor, ok := p.Client.(LLMStructuredJSONExtractor); ok {
 		result, err := structuredExtractor.ExtractStructuredJSON(ctx, in, docMetadataExtractionContract())
