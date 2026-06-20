@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { listLLMDailyReports, listLLMUsageEvents } from './llm-activities-client.js';
+import {
+	listLLMCurrentBalances,
+	listLLMDailyReports,
+	listLLMUsageEvents,
+	runLLMReconciliationNow
+} from './llm-activities-client.js';
 
 type FetchCall = {
 	input: string | URL | Request;
@@ -94,11 +99,56 @@ test('listLLMUsageEvents applies the limit query parameter', async () => {
 	}
 });
 
+test('listLLMCurrentBalances applies the limit query parameter', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({
+			balances: [
+				{
+					account_id: 'acct-1',
+					account_name: 'deepseek:api.deepseek.com',
+					provider: 'deepseek',
+					workspace_day: '2026-06-20T00:00:00Z',
+					captured_at: '2026-06-20T15:42:19Z',
+					balance_amount: 475.59,
+					currency_code: 'CNY'
+				}
+			]
+		})
+	);
+
+	try {
+		const response = await listLLMCurrentBalances(7);
+
+		assert.equal(mock.calls.length, 1);
+		assert.equal(String(mock.calls[0].input), '/api/v1/llm/balances/current?limit=7');
+		assert.equal(mock.calls[0].init?.credentials, 'same-origin');
+		assert.equal(response.balances[0].balance_amount, 475.59);
+	} finally {
+		mock.restore();
+	}
+});
+
 test('listLLMUsageEvents falls back to http status when the backend returns non-json', async () => {
 	const mock = installFetchMock(async () => new Response('server unavailable', { status: 503 }));
 
 	try {
 		await assert.rejects(() => listLLMUsageEvents(), /HTTP 503/);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('runLLMReconciliationNow posts to the manual reconciliation endpoint', async () => {
+	const mock = installFetchMock(async () => Response.json({ ok: true }));
+
+	try {
+		const response = await runLLMReconciliationNow();
+
+		assert.equal(mock.calls.length, 1);
+		assert.equal(String(mock.calls[0].input), '/api/v1/llm/reconciliation/run');
+		assert.equal(mock.calls[0].init?.method, 'POST');
+		assert.equal(mock.calls[0].init?.credentials, 'same-origin');
+		assert.equal(response.ok, true);
 	} finally {
 		mock.restore();
 	}

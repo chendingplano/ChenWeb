@@ -2,8 +2,11 @@
 	import { onMount } from 'svelte';
 
 	import {
+		listLLMCurrentBalances,
 		listLLMDailyReports,
 		listLLMUsageEvents,
+		runLLMReconciliationNow,
+		type LLMCurrentBalance,
 		type LLMDailyReport,
 		type LLMUsageEvent
 	} from './llm-activities-client';
@@ -15,9 +18,12 @@
 	} = $props();
 
 	let reports = $state<LLMDailyReport[]>([]);
+	let balances = $state<LLMCurrentBalance[]>([]);
 	let usageEvents = $state<LLMUsageEvent[]>([]);
 	let loading = $state(false);
+	let reconciling = $state(false);
 	let error = $state<string | null>(null);
+	let notice = $state<string | null>(null);
 	let reportLimit = $state(30);
 	let eventLimit = $state(50);
 
@@ -25,20 +31,40 @@
 		load();
 	});
 
-	async function load() {
+	async function load(options?: { preserveNotice?: boolean }) {
 		loading = true;
 		error = null;
+		if (!options?.preserveNotice) {
+			notice = null;
+		}
 		try {
-			const [reportsResponse, eventsResponse] = await Promise.all([
+			const [balancesResponse, reportsResponse, eventsResponse] = await Promise.all([
+				listLLMCurrentBalances(),
 				listLLMDailyReports(reportLimit),
 				listLLMUsageEvents(eventLimit)
 			]);
+			balances = balancesResponse.balances;
 			reports = reportsResponse.reports;
 			usageEvents = eventsResponse.usage_events;
 		} catch (err) {
 			error = String((err as Error).message ?? err);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function runReconciliation() {
+		reconciling = true;
+		error = null;
+		notice = null;
+		try {
+			const response = await runLLMReconciliationNow();
+			notice = response.message ?? 'Reconciliation finished. Daily reports have been refreshed.';
+			await load({ preserveNotice: true });
+		} catch (err) {
+			error = String((err as Error).message ?? err);
+		} finally {
+			reconciling = false;
 		}
 	}
 
@@ -98,6 +124,9 @@
 			<button class="primary" onclick={load} disabled={loading}>
 				{loading ? 'Refreshing…' : 'Refresh'}
 			</button>
+			<button class="secondary" onclick={runReconciliation} disabled={loading || reconciling}>
+				{reconciling ? 'Reconciling…' : 'Run Reconciliation'}
+			</button>
 		</div>
 	</header>
 
@@ -123,6 +152,49 @@
 	{#if error}
 		<div class="error" role="alert">{error}</div>
 	{/if}
+
+	{#if notice}
+		<div class="notice" role="status">{notice}</div>
+	{/if}
+
+	<div class="panel">
+		<div class="panel-head">
+			<div>
+				<h3>Current Balances</h3>
+				<p class="muted">Latest provider-side balance snapshot per account.</p>
+			</div>
+		</div>
+		{#if loading && balances.length === 0}
+			<div class="empty">Loading current balances…</div>
+		{:else if balances.length === 0}
+			<div class="empty">No balance snapshots yet. Run reconciliation to capture the latest provider balance.</div>
+		{:else}
+			<div class="table-wrap">
+				<table>
+					<thead>
+						<tr>
+							<th>Account</th>
+							<th>Provider</th>
+							<th>Balance</th>
+							<th>Captured</th>
+							<th>Workspace Day</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each balances as balance (balance.account_id)}
+							<tr>
+								<td>{balance.account_name}</td>
+								<td>{balance.provider}</td>
+								<td>{fmtMoney(balance.balance_amount, balance.currency_code)}</td>
+								<td>{fmtDate(balance.captured_at)}</td>
+								<td>{new Date(balance.workspace_day).toLocaleDateString()}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</div>
 
 	<div class="panel">
 		<div class="panel-head">
@@ -268,6 +340,16 @@
 		cursor: pointer;
 	}
 	.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+	.secondary {
+		background: transparent;
+		color: var(--heading);
+		border: 1px solid var(--border);
+		padding: 8px 14px;
+		border-radius: 8px;
+		font-size: 13px;
+		cursor: pointer;
+	}
+	.secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 	.summary-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -299,6 +381,13 @@
 	.error {
 		background: rgba(248, 113, 113, 0.12);
 		color: #f87171;
+		padding: 10px 12px;
+		border-radius: 8px;
+		font-size: 13px;
+	}
+	.notice {
+		background: rgba(16, 185, 129, 0.12);
+		color: #10b981;
 		padding: 10px 12px;
 		border-radius: 8px;
 		font-size: 13px;

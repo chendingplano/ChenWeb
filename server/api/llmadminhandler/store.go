@@ -123,6 +123,53 @@ RETURNING id, account_name, provider, base_url, status,
 	return account, nil
 }
 
+func (s *Store) UpdateAccount(ctx context.Context, id string, in CreateAccountInput) (Account, error) {
+	const query = `UPDATE llm_account
+SET account_name = $2,
+    provider = $3,
+    base_url = $4,
+    api_key_ref = CASE
+        WHEN $5 = '' THEN api_key_ref
+        ELSE $5
+    END,
+    status = $6,
+    reconciliation_kind = $7,
+    is_reconciliation_enabled = $8,
+    default_model_name = $9,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, account_name, provider, base_url, status,
+          is_reconciliation_enabled, default_model_name, created_at, updated_at`
+
+	var account Account
+	if err := s.db.QueryRowContext(
+		ctx,
+		query,
+		id,
+		in.AccountName,
+		in.Provider,
+		in.BaseURL,
+		in.APIKeyRef,
+		in.Status,
+		in.ReconciliationKind,
+		in.IsReconciliationEnabled,
+		in.DefaultModelName,
+	).Scan(
+		&account.ID,
+		&account.AccountName,
+		&account.Provider,
+		&account.BaseURL,
+		&account.Status,
+		&account.IsReconciliationEnabled,
+		&account.DefaultModelName,
+		&account.CreatedAt,
+		&account.UpdatedAt,
+	); err != nil {
+		return Account{}, err
+	}
+	return account, nil
+}
+
 func (s *Store) ImportParsedModels(ctx context.Context, parsed llmimport.ParsedModels) (ImportResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

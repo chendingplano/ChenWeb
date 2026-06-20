@@ -20,6 +20,10 @@ type stubAdminStore struct {
 	createAccountResult  Account
 	createAccountErr     error
 	lastCreateAccountReq CreateAccountInput
+	updateAccountResult  Account
+	updateAccountErr     error
+	lastUpdateAccountID  string
+	lastUpdateAccountReq CreateAccountInput
 	importResult         ImportResult
 	importErr            error
 	lastImportParsed     int
@@ -32,6 +36,12 @@ func (s *stubAdminStore) ListAccounts(_ context.Context) ([]Account, error) {
 func (s *stubAdminStore) CreateAccount(_ context.Context, in CreateAccountInput) (Account, error) {
 	s.lastCreateAccountReq = in
 	return s.createAccountResult, s.createAccountErr
+}
+
+func (s *stubAdminStore) UpdateAccount(_ context.Context, id string, in CreateAccountInput) (Account, error) {
+	s.lastUpdateAccountID = id
+	s.lastUpdateAccountReq = in
+	return s.updateAccountResult, s.updateAccountErr
 }
 
 func (s *stubAdminStore) ImportParsedModels(_ context.Context, parsed llmimport.ParsedModels) (ImportResult, error) {
@@ -154,6 +164,53 @@ func TestCreateAccountPersistsRequest(t *testing.T) {
 	}
 	if store.lastCreateAccountReq.AccountName != "DeepSeek Prod" || store.lastCreateAccountReq.APIKeyRef != "sk-deepseek" {
 		t.Fatalf("unexpected create request = %+v", store.lastCreateAccountReq)
+	}
+}
+
+func TestUpdateAccountPersistsRequest(t *testing.T) {
+	prev := adminStoreFactory
+	t.Cleanup(func() { adminStoreFactory = prev })
+	store := &stubAdminStore{
+		updateAccountResult: Account{
+			ID:                      "acct_1",
+			AccountName:             "DeepSeek Prod",
+			Provider:                "deepseek",
+			IsReconciliationEnabled: true,
+		},
+	}
+	adminStoreFactory = func() accountAdminStore { return store }
+
+	payload := map[string]any{
+		"account_name":              "DeepSeek Prod",
+		"provider":                  "deepseek",
+		"base_url":                  "https://api.deepseek.com",
+		"api_key":                   "sk-updated",
+		"status":                    "active",
+		"reconciliation_kind":       "provider_balance",
+		"is_reconciliation_enabled": true,
+		"default_model_name":        "deepseek-v4-flash",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/llm/accounts/acct_1", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("acct_1")
+
+	if err := UpdateAccount(c); err != nil {
+		t.Fatalf("UpdateAccount() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if store.lastUpdateAccountID != "acct_1" || store.lastUpdateAccountReq.APIKeyRef != "sk-updated" {
+		t.Fatalf("unexpected update request = id=%q req=%+v", store.lastUpdateAccountID, store.lastUpdateAccountReq)
 	}
 }
 

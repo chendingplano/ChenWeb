@@ -77,3 +77,98 @@ LIMIT $1`)).WithArgs(50).WillReturnRows(rows)
 		t.Fatalf("unexpected usage event = %+v", got[0])
 	}
 }
+
+func TestStoreListCurrentBalances(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{
+		"account_id", "account_name", "provider", "workspace_day", "captured_at", "balance_amount", "currency_code",
+	}).AddRow(
+		"acct_1", "deepseek:api.deepseek.com", "deepseek",
+		time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 20, 15, 42, 19, 0, time.UTC),
+		475.59, "CNY",
+	)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT snap.account_id, acct.account_name, acct.provider, snap.workspace_day,
+snap.captured_at, snap.balance_amount, snap.currency_code
+FROM llm_balance_snapshot snap
+JOIN llm_account acct ON acct.id = snap.account_id
+JOIN (
+    SELECT account_id, MAX(captured_at) AS max_captured_at
+    FROM llm_balance_snapshot
+    GROUP BY account_id
+) latest ON latest.account_id = snap.account_id AND latest.max_captured_at = snap.captured_at
+ORDER BY snap.captured_at DESC, acct.account_name ASC
+LIMIT $1`)).WithArgs(20).WillReturnRows(rows)
+
+	store := NewStore(db)
+	got, err := store.ListCurrentBalances(context.Background(), 20)
+	if err != nil {
+		t.Fatalf("ListCurrentBalances() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(ListCurrentBalances()) = %d, want 1", len(got))
+	}
+	if got[0].BalanceAmount != 475.59 || got[0].CurrencyCode != "CNY" {
+		t.Fatalf("unexpected balance row = %+v", got[0])
+	}
+}
+
+func TestStoreGenerateDailyUsageReport(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	workspaceDay := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_daily_account_report (
+    account_id, workspace_day, timezone_name, opening_balance, closing_balance, spend_amount, currency_code,
+    input_tokens, output_tokens, total_tokens, request_count, reconciliation_status, source_kind
+)
+SELECT
+    account_id,
+    $1,
+    $2,
+    0,
+    0,
+    0,
+    'USD',
+    COALESCE(SUM(input_tokens), 0),
+    COALESCE(SUM(output_tokens), 0),
+    COALESCE(SUM(total_tokens), 0),
+    COUNT(*),
+    'usage_aggregated',
+    'usage_events'
+FROM llm_usage_event
+WHERE workspace_day = $1
+GROUP BY account_id
+ON CONFLICT (account_id, workspace_day) DO UPDATE SET
+    timezone_name = EXCLUDED.timezone_name,
+    input_tokens = EXCLUDED.input_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    total_tokens = EXCLUDED.total_tokens,
+    request_count = EXCLUDED.request_count,
+    reconciliation_status = EXCLUDED.reconciliation_status,
+    source_kind = EXCLUDED.source_kind,
+    updated_at = NOW()`)).
+		WithArgs(workspaceDay, "America/Chicago").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
+	store := NewStore(db)
+	got, err := store.GenerateDailyUsageReport(context.Background(), workspaceDay, "America/Chicago")
+	if err != nil {
+		t.Fatalf("GenerateDailyUsageReport() error = %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("GenerateDailyUsageReport() = %d, want 2", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}

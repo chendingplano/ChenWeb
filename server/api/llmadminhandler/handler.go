@@ -15,6 +15,7 @@ import (
 type accountAdminStore interface {
 	ListAccounts(ctx context.Context) ([]Account, error)
 	CreateAccount(ctx context.Context, in CreateAccountInput) (Account, error)
+	UpdateAccount(ctx context.Context, id string, in CreateAccountInput) (Account, error)
 	ImportParsedModels(ctx context.Context, parsed llmimport.ParsedModels) (ImportResult, error)
 }
 
@@ -177,4 +178,41 @@ func CreateAccount(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusCreated, account)
+}
+
+func UpdateAccount(c echo.Context) error {
+	var req createAccountRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"ok":      false,
+			"message": "invalid json body",
+		})
+	}
+
+	store := adminStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{
+			"ok":      false,
+			"message": "project database is not initialized",
+		})
+	}
+
+	account, err := store.UpdateAccount(c.Request().Context(), c.Param("id"), CreateAccountInput{
+		AccountName:             req.AccountName,
+		Provider:                req.Provider,
+		BaseURL:                 req.BaseURL,
+		APIKeyRef:               req.APIKey,
+		Status:                  req.Status,
+		ReconciliationKind:      req.ReconciliationKind,
+		IsReconciliationEnabled: req.IsReconciliationEnabled,
+		DefaultModelName:        req.DefaultModelName,
+	})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"ok":      false,
+			"message": "failed to update llm account",
+			"error":   err.Error(),
+		})
+	}
+	return c.JSON(http.StatusOK, account)
 }

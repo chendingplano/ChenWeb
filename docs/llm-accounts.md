@@ -64,7 +64,7 @@ Important behavior:
 
 ## Telemetry Coverage
 
-Usage-event persistence exists now, but coverage is partial.
+Usage-event persistence exists now, and DeepSeek has the first provider-side reconciliation slice.
 
 Covered now:
 
@@ -74,10 +74,26 @@ Covered now:
 - when the client supplies `provider + base_url + api_key + profile_name`, ChenWeb can resolve the matching account/profile row before inserting the usage event.
 - embedding clients that are built from `.models.toml` in doc-processing and kbhandler now also preserve the profile name on the client configuration.
 - `deepdoc` now runs LLM usage retention automatically: it deletes `llm_usage_event` rows and whole archived day directories older than `llm.usage_retention_days`.
+- `deepdoc` now auto-generates daily usage-based rows in `llm_daily_account_report` for yesterday and today. These rows use `reconciliation_status = "usage_aggregated"` until a provider-side reconciliation pass overwrites the just-finished day.
+- `deepdoc` now runs a daily DeepSeek reconciliation pass at `llm.reconciliation_run_hour` in the configured workspace timezone. For reconciliation-enabled DeepSeek accounts, it:
+  - calls `GET /user/balance`
+  - writes a `llm_balance_snapshot`
+  - archives the raw payload under the configured archive root
+  - reconciles yesterday's `llm_daily_account_report` row with `reconciliation_status = "provider_verified"`
+- ChenWeb also exposes a manual trigger at `POST /api/v1/llm/reconciliation/run`, and `home3 -> Dashboard -> LLM Activities` now includes a `Run Reconciliation` button for ad hoc testing.
 
 Not fully covered yet:
 
+- provider-side reconciliation for providers other than DeepSeek
 - broader account/profile resolution across every existing caller that still constructs `OpenAIJSONClient` without profile/account metadata
 - the remaining non-JSON helper paths that do not yet emit shared usage captures
 
-So the account registry and import flow are ready, while full telemetry rollout is still in progress.
+## DeepSeek Reconciliation Notes
+
+DeepSeek reconciliation currently uses balance deltas between consecutive daily snapshots:
+
+- opening balance: latest snapshot captured on the report day
+- closing balance: latest snapshot captured on the following day
+- spend amount: `opening_balance - closing_balance`
+
+This means the first reconciled DeepSeek slice is useful for daily spend monitoring, but it does not yet separate usage spend from same-day account top-ups.

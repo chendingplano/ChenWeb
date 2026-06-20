@@ -275,10 +275,13 @@ func RegisterRoutes(e *echo.Echo) error {
 	// LLM accounts/admin endpoints
 	apiGroup.GET("/llm/accounts", llmadminhandler.ListAccounts)
 	apiGroup.POST("/llm/accounts", llmadminhandler.CreateAccount)
+	apiGroup.PUT("/llm/accounts/:id", llmadminhandler.UpdateAccount)
 	apiGroup.POST("/llm/accounts/import-models-toml", llmadminhandler.ImportModelsTOMLPreview)
 	apiGroup.POST("/llm/accounts/import-models-toml/apply", llmadminhandler.ImportModelsTOMLApply)
 	apiGroup.GET("/llm/reports/daily", llmreporthandler.ListDailyReports)
+	apiGroup.GET("/llm/balances/current", llmreporthandler.ListCurrentBalances)
 	apiGroup.GET("/llm/usage-events", llmreporthandler.ListUsageEvents)
+	apiGroup.POST("/llm/reconciliation/run", llmreporthandler.RunReconciliationNow)
 
 	// Chatter (home3 chat page) endpoints
 	apiGroup.GET("/chatter/settings", chatterhandler.GetSettings)

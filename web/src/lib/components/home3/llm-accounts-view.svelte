@@ -6,6 +6,7 @@
 		createLLMAccount,
 		importLLMAccountsPreview,
 		listLLMAccounts,
+		updateLLMAccount,
 		type ApplyLLMAccountsImportResponse,
 		type CreateLLMAccountInput,
 		type ImportLLMAccountsPreviewResponse,
@@ -28,6 +29,7 @@
 	let showCreate = $state(false);
 	let preview = $state<ImportLLMAccountsPreviewResponse | null>(null);
 	let lastImportResult = $state<ApplyLLMAccountsImportResponse | null>(null);
+	let editingAccountID = $state<string | null>(null);
 
 	let draft = $state<CreateLLMAccountInput>({
 		account_name: '',
@@ -38,6 +40,16 @@
 		reconciliation_kind: 'provider_balance',
 		is_reconciliation_enabled: true,
 		default_model_name: 'deepseek-chat'
+	});
+	let editDraft = $state<CreateLLMAccountInput>({
+		account_name: '',
+		provider: '',
+		base_url: '',
+		api_key: '',
+		status: 'active',
+		reconciliation_kind: 'provider_balance',
+		is_reconciliation_enabled: false,
+		default_model_name: ''
 	});
 
 	onMount(() => {
@@ -95,6 +107,12 @@
 	}
 
 	async function loadPreview() {
+		if (preview) {
+			preview = null;
+			lastImportResult = null;
+			info = null;
+			return;
+		}
 		importing = true;
 		error = null;
 		info = null;
@@ -105,6 +123,51 @@
 			error = String((err as Error).message ?? err);
 		} finally {
 			importing = false;
+		}
+	}
+
+	function startEdit(account: LLMAccount) {
+		editingAccountID = account.id;
+		editDraft = {
+			account_name: account.account_name,
+			provider: account.provider,
+			base_url: account.base_url,
+			api_key: '',
+			status: account.status,
+			reconciliation_kind: 'provider_balance',
+			is_reconciliation_enabled: account.is_reconciliation_enabled,
+			default_model_name: account.default_model_name
+		};
+		error = null;
+		info = null;
+	}
+
+	function cancelEdit() {
+		editingAccountID = null;
+	}
+
+	async function saveEdit(accountID: string) {
+		submitting = true;
+		error = null;
+		info = null;
+		try {
+			await updateLLMAccount(accountID, {
+				...editDraft,
+				account_name: editDraft.account_name.trim(),
+				provider: editDraft.provider.trim(),
+				base_url: editDraft.base_url.trim(),
+				api_key: editDraft.api_key.trim(),
+				status: editDraft.status.trim(),
+				reconciliation_kind: editDraft.reconciliation_kind.trim(),
+				default_model_name: editDraft.default_model_name.trim()
+			});
+			editingAccountID = null;
+			info = 'LLM account updated.';
+			await loadAccounts();
+		} catch (err) {
+			error = String((err as Error).message ?? err);
+		} finally {
+			submitting = false;
 		}
 	}
 
@@ -160,7 +223,7 @@
 				{loading ? 'Refreshing…' : 'Refresh'}
 			</button>
 			<button class="ghost" onclick={loadPreview} disabled={importing}>
-				{importing ? 'Inspecting…' : 'Preview .models.toml'}
+				{importing ? 'Inspecting…' : preview ? 'Hide Preview' : 'Preview .models.toml'}
 			</button>
 			<button class="primary" onclick={() => (showCreate = !showCreate)}>
 				{showCreate ? 'Cancel' : '+ New Account'}
@@ -247,7 +310,7 @@
 		<div class="panel-head">
 			<div>
 				<h3>Registered Accounts</h3>
-				<p class="muted">Daily reports roll up by account. Edit/delete will come after the backend endpoints land.</p>
+				<p class="muted">Daily reports roll up by account. You can now edit account settings from the table.</p>
 			</div>
 		</div>
 
@@ -266,6 +329,7 @@
 							<th>Profiles</th>
 							<th>Reconciliation</th>
 							<th>Updated</th>
+							<th>Action</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -280,7 +344,77 @@
 								<td>{account.profile_count}</td>
 								<td>{account.is_reconciliation_enabled ? 'Enabled' : 'Disabled'}</td>
 								<td>{fmtDate(account.updated_at)}</td>
+								<td>
+									{#if editingAccountID === account.id}
+										<div class="row-actions">
+											<button class="ghost compact-btn" onclick={cancelEdit} disabled={submitting}>Cancel</button>
+										</div>
+									{:else}
+										<button class="ghost compact-btn" onclick={() => startEdit(account)}>Edit</button>
+									{/if}
+								</td>
 							</tr>
+							{#if editingAccountID === account.id}
+								<tr>
+									<td colspan="7" class="edit-cell">
+										<form
+											class="edit-form"
+											onsubmit={(e) => {
+												e.preventDefault();
+												saveEdit(account.id);
+											}}
+										>
+											<div class="row two">
+												<label>
+													<span>Account Name</span>
+													<input bind:value={editDraft.account_name} required />
+												</label>
+												<label>
+													<span>Provider</span>
+													<input bind:value={editDraft.provider} required />
+												</label>
+											</div>
+											<div class="row two">
+												<label>
+													<span>Base URL</span>
+													<input bind:value={editDraft.base_url} />
+												</label>
+												<label>
+													<span>Default Model</span>
+													<input bind:value={editDraft.default_model_name} />
+												</label>
+											</div>
+											<div class="row two">
+												<label>
+													<span>Status</span>
+													<input bind:value={editDraft.status} />
+												</label>
+												<label>
+													<span>Reconciliation Kind</span>
+													<input bind:value={editDraft.reconciliation_kind} />
+												</label>
+											</div>
+											<label>
+												<span>API Key</span>
+												<input
+													bind:value={editDraft.api_key}
+													type="password"
+													placeholder="Leave blank to keep current key"
+												/>
+											</label>
+											<label class="toggle-row">
+												<span>Enable provider-side reconciliation</span>
+												<input type="checkbox" bind:checked={editDraft.is_reconciliation_enabled} />
+											</label>
+											<div class="form-foot">
+												<button class="primary" type="submit" disabled={submitting || !editDraft.account_name.trim()}>
+													{submitting ? 'Saving…' : 'Save account'}
+												</button>
+											</div>
+										</form>
+									</td>
+								</tr>
+							{/if}
 						{/each}
 					</tbody>
 				</table>
@@ -295,6 +429,7 @@
 					<h3>Bootstrap Preview</h3>
 					<p class="muted">{preview.path}</p>
 				</div>
+				<button class="ghost compact-btn" onclick={() => (preview = null)}>Close</button>
 			</div>
 			<div class="preview-grid">
 				<div class="preview-card">
@@ -392,6 +527,10 @@
 		color: var(--heading);
 		border: 1px solid var(--border);
 	}
+	.compact-btn {
+		padding: 6px 10px;
+		font-size: 12px;
+	}
 	.primary:disabled, .ghost:disabled { opacity: 0.5; cursor: not-allowed; }
 	.summary-card, .preview-card, .panel, .create-form {
 		background: var(--card);
@@ -420,6 +559,22 @@
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
+	}
+	.row-actions, .inline-toggle {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.edit-cell {
+		padding: 0;
+	}
+	.edit-form {
+		padding: 16px;
+		background: var(--panel-bg);
+		border-top: 1px solid var(--border);
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
 	}
 	.row {
 		display: grid;

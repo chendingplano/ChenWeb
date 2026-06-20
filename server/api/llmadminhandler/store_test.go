@@ -94,6 +94,67 @@ RETURNING id, account_name, provider, base_url, status,
 	}
 }
 
+func TestStoreUpdateAccount(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`UPDATE llm_account
+SET account_name = $2,
+    provider = $3,
+    base_url = $4,
+    api_key_ref = CASE
+        WHEN $5 = '' THEN api_key_ref
+        ELSE $5
+    END,
+    status = $6,
+    reconciliation_kind = $7,
+    is_reconciliation_enabled = $8,
+    default_model_name = $9,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, account_name, provider, base_url, status,
+          is_reconciliation_enabled, default_model_name, created_at, updated_at`)).
+		WithArgs(
+			"acct_1",
+			"DeepSeek Prod",
+			"deepseek",
+			"https://api.deepseek.com",
+			"sk-updated",
+			"active",
+			"provider_balance",
+			true,
+			"deepseek-v4-flash",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "account_name", "provider", "base_url", "status",
+			"is_reconciliation_enabled", "default_model_name", "created_at", "updated_at",
+		}).AddRow(
+			"acct_1", "DeepSeek Prod", "deepseek", "https://api.deepseek.com", "active",
+			true, "deepseek-v4-flash", time.Date(2026, 6, 20, 1, 0, 0, 0, time.UTC), time.Date(2026, 6, 20, 3, 0, 0, 0, time.UTC),
+		))
+
+	store := NewStore(db)
+	got, err := store.UpdateAccount(context.Background(), "acct_1", CreateAccountInput{
+		AccountName:             "DeepSeek Prod",
+		Provider:                "deepseek",
+		BaseURL:                 "https://api.deepseek.com",
+		APIKeyRef:               "sk-updated",
+		Status:                  "active",
+		ReconciliationKind:      "provider_balance",
+		IsReconciliationEnabled: true,
+		DefaultModelName:        "deepseek-v4-flash",
+	})
+	if err != nil {
+		t.Fatalf("UpdateAccount() error = %v", err)
+	}
+	if got.ID != "acct_1" || !got.IsReconciliationEnabled {
+		t.Fatalf("unexpected updated account = %+v", got)
+	}
+}
+
 func TestStoreImportParsedModelsUpsertsAccountsAndProfiles(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

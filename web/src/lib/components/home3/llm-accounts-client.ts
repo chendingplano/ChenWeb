@@ -76,6 +76,14 @@ export function createLLMAccount(input: CreateLLMAccountInput): Promise<LLMAccou
 	});
 }
 
+export function updateLLMAccount(id: string, input: CreateLLMAccountInput): Promise<LLMAccount> {
+	return req<LLMAccount>(`/api/v1/llm/accounts/${id}`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(input)
+	});
+}
+
 export function importLLMAccountsPreview(): Promise<ImportLLMAccountsPreviewResponse> {
 	return req<ImportLLMAccountsPreviewResponse>('/api/v1/llm/accounts/import-models-toml', {
 		method: 'POST'

@@ -12,6 +12,8 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/database"
 	"github.com/chendingplano/deepdoc/server/api/docgenworker"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
+	"github.com/chendingplano/deepdoc/server/api/llmreconcile"
+	"github.com/chendingplano/deepdoc/server/api/llmreporthandler"
 	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
@@ -215,6 +217,28 @@ func main() {
 		},
 		logger,
 		llmLoc,
+		llmCfg.ReconciliationRunHour,
+	)
+	llmreporthandler.StartBackgroundDailyUsageReportGeneration(
+		context.Background(),
+		&llmreporthandler.DailyUsageReportRunner{
+			DB:           ApiTypes.ProjectDBHandle,
+			WorkspaceTZ:  llmLoc,
+			TimezoneName: llmCfg.WorkspaceTimezone,
+			RunHour:      llmCfg.ReconciliationRunHour,
+		},
+		logger,
+	)
+	llmreconcile.StartBackgroundReconciliation(
+		context.Background(),
+		&llmreconcile.Runner{
+			Store:        llmreconcile.NewStore(ApiTypes.ProjectDBHandle),
+			BalanceAPI:   &llmreconcile.DeepSeekBalanceClient{},
+			ArchiveRoot:  llmCfg.ArchiveRoot,
+			WorkspaceTZ:  llmLoc,
+			TimezoneName: llmCfg.WorkspaceTimezone,
+		},
+		logger,
 		llmCfg.ReconciliationRunHour,
 	)
 

@@ -6,6 +6,7 @@ import {
 	applyLLMAccountsImport,
 	importLLMAccountsPreview,
 	listLLMAccounts,
+	updateLLMAccount,
 	type CreateLLMAccountInput
 } from './llm-accounts-client.js';
 
@@ -135,6 +136,52 @@ test('createLLMAccount surfaces backend error messages', async () => {
 				}),
 			/provider is required/
 		);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('updateLLMAccount puts the edited account payload', async () => {
+	const payload: CreateLLMAccountInput = {
+		account_name: 'DeepSeek Prod',
+		provider: 'deepseek',
+		base_url: 'https://api.deepseek.com',
+		api_key: 'sk-updated',
+		status: 'active',
+		reconciliation_kind: 'provider_balance',
+		is_reconciliation_enabled: true,
+		default_model_name: 'deepseek-v4-flash'
+	};
+
+	const mock = installFetchMock(async () =>
+		new Response(
+			JSON.stringify({
+				id: 'acct-1',
+				account_name: 'DeepSeek Prod',
+				provider: 'deepseek',
+				base_url: 'https://api.deepseek.com',
+				status: 'active',
+				is_reconciliation_enabled: true,
+				default_model_name: 'deepseek-v4-flash',
+				created_at: '2026-06-19T00:00:00Z',
+				updated_at: '2026-06-20T00:00:00Z',
+				profile_count: 3
+			}),
+			{
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			}
+		)
+	);
+
+	try {
+		const account = await updateLLMAccount('acct-1', payload);
+
+		assert.equal(mock.calls.length, 1);
+		assert.equal(String(mock.calls[0].input), '/api/v1/llm/accounts/acct-1');
+		assert.equal(mock.calls[0].init?.method, 'PUT');
+		assert.deepEqual(JSON.parse(String(mock.calls[0].init?.body)), payload);
+		assert.equal(account.id, 'acct-1');
 	} finally {
 		mock.restore();
 	}

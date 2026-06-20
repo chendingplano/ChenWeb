@@ -28,6 +28,16 @@ export type LLMUsageEvent = {
 	error_message: string;
 };
 
+export type LLMCurrentBalance = {
+	account_id: string;
+	account_name: string;
+	provider: string;
+	workspace_day: string;
+	captured_at: string;
+	balance_amount: number;
+	currency_code: string;
+};
+
 export type ListLLMDailyReportsResponse = {
 	reports: LLMDailyReport[];
 };
@@ -36,8 +46,22 @@ export type ListLLMUsageEventsResponse = {
 	usage_events: LLMUsageEvent[];
 };
 
-async function req<T>(path: string): Promise<T> {
-	const res = await fetch(path, { credentials: 'same-origin' });
+export type ListLLMCurrentBalancesResponse = {
+	balances: LLMCurrentBalance[];
+};
+
+export type RunLLMReconciliationNowResponse = {
+	ok: boolean;
+	message?: string;
+	usage_days_processed?: number;
+	usage_rows_affected?: number;
+	accounts_considered?: number;
+	snapshots_created?: number;
+	reports_reconciled?: number;
+};
+
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+	const res = await fetch(path, { credentials: 'same-origin', ...init });
 	const text = await res.text();
 	let parsed: unknown = null;
 	if (text) {
@@ -49,8 +73,12 @@ async function req<T>(path: string): Promise<T> {
 	}
 	if (!res.ok) {
 		const msg =
-			parsed && typeof parsed === 'object' && parsed !== null && 'error_msg' in parsed
-				? String((parsed as { error_msg: unknown }).error_msg)
+			parsed && typeof parsed === 'object' && parsed !== null && 'message' in parsed
+				? String((parsed as { message: unknown }).message)
+				: parsed && typeof parsed === 'object' && parsed !== null && 'error' in parsed
+					? String((parsed as { error: unknown }).error)
+					: parsed && typeof parsed === 'object' && parsed !== null && 'error_msg' in parsed
+						? String((parsed as { error_msg: unknown }).error_msg)
 				: `HTTP ${res.status}`;
 		throw new Error(msg);
 	}
@@ -63,4 +91,12 @@ export function listLLMDailyReports(limit = 30): Promise<ListLLMDailyReportsResp
 
 export function listLLMUsageEvents(limit = 50): Promise<ListLLMUsageEventsResponse> {
 	return req<ListLLMUsageEventsResponse>(`/api/v1/llm/usage-events?limit=${limit}`);
+}
+
+export function listLLMCurrentBalances(limit = 20): Promise<ListLLMCurrentBalancesResponse> {
+	return req<ListLLMCurrentBalancesResponse>(`/api/v1/llm/balances/current?limit=${limit}`);
+}
+
+export function runLLMReconciliationNow(): Promise<RunLLMReconciliationNowResponse> {
+	return req<RunLLMReconciliationNowResponse>('/api/v1/llm/reconciliation/run', { method: 'POST' });
 }
