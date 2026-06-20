@@ -2,10 +2,8 @@ package kbhandler
 
 import (
 	"context"
-	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -27,17 +25,12 @@ func newSearchQueryEmbedder() (client *llmclients.OpenAIJSONClient, modelName st
 	if !found || strings.TrimSpace(cfg.ModelName) == "" {
 		return nil, "", false
 	}
-	timeoutSec := cfg.TimeoutSec
-	if timeoutSec <= 0 {
-		timeoutSec = 60
-	}
-	return &llmclients.OpenAIJSONClient{
-		ModelName:           cfg.ModelName,
-		APIKey:              cfg.APIKey,
-		BaseURL:             cfg.BaseURL,
-		EmbeddingDimensions: kbsearch.EmbeddingDimensionsForModel(cfg.ModelName, cfg.BaseURL),
-		HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-	}, cfg.ModelName, true
+	return newKBEmbeddingClient(
+		modelRef,
+		cfg,
+		60,
+		kbsearch.EmbeddingDimensionsForModel(cfg.ModelName, cfg.BaseURL),
+	), cfg.ModelName, true
 }
 
 // computeQueryEmbedding embeds the search query for the semantic half of hybrid

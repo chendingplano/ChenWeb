@@ -117,6 +117,9 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
 	}
+	if len(extractor.promptNames) == 0 || extractor.promptNames[0] != "prompt-test" {
+		t.Fatalf("promptNames=%v, want first prompt-test", extractor.promptNames)
+	}
 	if !strings.Contains(extractor.inputText, `"flag":"n"`) ||
 		!strings.Contains(extractor.inputText, `"line_number":10`) ||
 		!strings.Contains(extractor.inputText, `"page_number":2`) ||
@@ -249,6 +252,28 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	}
 	if _, ok := last["proc_status"]; ok {
 		t.Fatalf("proc_status should not be present (use proc_status only)")
+	}
+}
+
+func TestProvisionsProcessor_ExtractProvisionPayloadFromText_ForwardsPromptName(t *testing.T) {
+	extractor := &fakeJSONExtractor{
+		out: map[string]any{
+			"language":   "en",
+			"provisions": []any{},
+		},
+	}
+	p := &ProvisionsProcessor{
+		Extractor:  extractor,
+		PromptText: "extract provisions",
+		PromptRef:  "prompt-test",
+	}
+
+	_, err := p.extractProvisionPayloadFromText(context.Background(), `{"lines":[]}`, "gpt-test", extractor)
+	if err != nil {
+		t.Fatalf("extractProvisionPayloadFromText: %v", err)
+	}
+	if len(extractor.promptNames) != 1 || extractor.promptNames[0] != "prompt-test" {
+		t.Fatalf("promptNames=%v, want [prompt-test]", extractor.promptNames)
 	}
 }
 

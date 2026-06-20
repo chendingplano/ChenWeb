@@ -729,6 +729,7 @@ func (p *StructuredKnowledgeProcessor) extractKnowledgePayloadWithContract(
 ) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	in := llmclients.JSONExtractionInput{
+		PromptName: firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef),
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,

@@ -740,6 +740,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionPayload(
 	// already applies the enrich config once, and modelName is carried in the
 	// JSONExtractionInput so the correct model is selected per-call.
 	in := llmclients.JSONExtractionInput{
+		PromptName: firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef),
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
@@ -1222,15 +1223,15 @@ func loadPersistedSemanticProjectionArtifactRows(ctx context.Context, db *sql.DB
 	var out []map[string]any
 	for rows.Next() {
 		var (
-			semanticProjID, language               string
-			descriptiveName, descriptiveNameEn     string
-			keywordsRaw, keywordsEnRaw             []byte
-			semanticProjection, semanticProjEn     string
-			categoryPathsRaw, categoryPathsEnRaw   []byte
-			lineSpansRaw                           []byte
-			modelName, promptName, searchDocument  string
-			connectedArtifactsRaw, extInfoRaw      []byte
-			createTime                             string
+			semanticProjID, language              string
+			descriptiveName, descriptiveNameEn    string
+			keywordsRaw, keywordsEnRaw            []byte
+			semanticProjection, semanticProjEn    string
+			categoryPathsRaw, categoryPathsEnRaw  []byte
+			lineSpansRaw                          []byte
+			modelName, promptName, searchDocument string
+			connectedArtifactsRaw, extInfoRaw     []byte
+			createTime                            string
 		)
 		if err := rows.Scan(
 			&semanticProjID, &language,
@@ -1246,23 +1247,23 @@ func loadPersistedSemanticProjectionArtifactRows(ctx context.Context, db *sql.DB
 			return nil, err
 		}
 		out = append(out, map[string]any{
-			"semantic_proj_id":        strings.TrimSpace(semanticProjID),
-			"language":                strings.TrimSpace(language),
-			"descriptive_name":        strings.TrimSpace(descriptiveName),
-			"descriptive_name_en":     strings.TrimSpace(descriptiveNameEn),
-			"keywords":                jsonColumnToValue(keywordsRaw, []any{}),
-			"keywords_en":             jsonColumnToValue(keywordsEnRaw, []any{}),
-			"semantic_projection":     strings.TrimSpace(semanticProjection),
-			"semantic_projection_en":  strings.TrimSpace(semanticProjEn),
-			"category_paths":          jsonColumnToValue(categoryPathsRaw, []any{}),
-			"category_paths_en":       jsonColumnToValue(categoryPathsEnRaw, []any{}),
-			"line_spans":              jsonColumnToValue(lineSpansRaw, []any{}),
-			"model_name":              strings.TrimSpace(modelName),
-			"prompt_name":             strings.TrimSpace(promptName),
-			"search_document":         strings.TrimSpace(searchDocument),
-			"connected_artifacts":     jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
-			"ext_info":                jsonColumnToValue(extInfoRaw, map[string]any{}),
-			"create_time":             strings.TrimSpace(createTime),
+			"semantic_proj_id":       strings.TrimSpace(semanticProjID),
+			"language":               strings.TrimSpace(language),
+			"descriptive_name":       strings.TrimSpace(descriptiveName),
+			"descriptive_name_en":    strings.TrimSpace(descriptiveNameEn),
+			"keywords":               jsonColumnToValue(keywordsRaw, []any{}),
+			"keywords_en":            jsonColumnToValue(keywordsEnRaw, []any{}),
+			"semantic_projection":    strings.TrimSpace(semanticProjection),
+			"semantic_projection_en": strings.TrimSpace(semanticProjEn),
+			"category_paths":         jsonColumnToValue(categoryPathsRaw, []any{}),
+			"category_paths_en":      jsonColumnToValue(categoryPathsEnRaw, []any{}),
+			"line_spans":             jsonColumnToValue(lineSpansRaw, []any{}),
+			"model_name":             strings.TrimSpace(modelName),
+			"prompt_name":            strings.TrimSpace(promptName),
+			"search_document":        strings.TrimSpace(searchDocument),
+			"connected_artifacts":    jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+			"ext_info":               jsonColumnToValue(extInfoRaw, map[string]any{}),
+			"create_time":            strings.TrimSpace(createTime),
 		})
 	}
 	return out, rows.Err()

@@ -388,6 +388,7 @@ func extractTopicsFromLinesWithLLM(
 
 	llmStart := time.Now()
 	parsed, err := extractTopicPayload(ctx, extractor, llmclients.JSONExtractionInput{
+		PromptName: promptRef,
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  rawLinesToJSON(lines),
@@ -450,6 +451,7 @@ func extractTopicsFromMarkedLinesWithLLM(
 
 	llmStart := time.Now()
 	parsed, err := extractTopicPayload(ctx, extractor, llmclients.JSONExtractionInput{
+		PromptName: promptRef,
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,

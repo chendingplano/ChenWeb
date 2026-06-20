@@ -137,7 +137,7 @@ func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, prompt,
 		}
 		sawModel = true
 
-		client, err := defaultNewExtractMetricsClient(cfg, logger)
+		client, err := defaultNewExtractMetricsClient(modelRef, cfg, logger)
 		if err != nil {
 			lastErr = err
 			if logger != nil {
@@ -149,6 +149,7 @@ func runMetricWikiProse(ctx context.Context, logger ApiTypes.JimoLogger, prompt,
 			logger.Info("generating metric wiki prose", "env", a.envKey, "model_name", cfg.ModelName)
 		}
 		payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+			PromptName: "metric_wiki_generation_prompt",
 			PromptText: prompt,
 			ModelName:  cfg.ModelName,
 			InputText:  inputText,
@@ -356,7 +357,6 @@ func ptrStr(s *string) string {
 	}
 	return strings.TrimSpace(*s)
 }
-
 
 func stringSliceVal(m map[string]any, key string) []string {
 	arr := anySlice(m, key)

@@ -686,6 +686,7 @@ func (d *staticTOCDetector) detectTOCLines(ctx context.Context, inputJSON string
 func (d *staticTOCDetector) callLLM(ctx context.Context, modelName string, cfg structureModelConfig, inputJSON string) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(d.Client, cfg)
 	in := llmclients.JSONExtractionInput{
+		PromptName: d.PromptRef,
 		PromptText: d.PromptText,
 		ModelName:  modelName,
 		InputText:  inputJSON,

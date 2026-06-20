@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -208,16 +207,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		if strings.TrimSpace(fallbackCfg.ModelName) == "" {
 			fallbackCfg.ModelName = fallbackModelRef
 		}
-		timeoutSec := fallbackCfg.TimeoutSec
-		if timeoutSec <= 0 {
-			timeoutSec = 60
-		}
-		fallbackExtractor = &llmclients.OpenAIJSONClient{
-			HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-			ModelName:  fallbackCfg.ModelName,
-			APIKey:     fallbackCfg.APIKey,
-			BaseURL:    fallbackCfg.BaseURL,
-		}
+		fallbackExtractor = newOpenAIJSONClientForStructureModel(fallbackCfg, 0)
 		fallbackModelName = fallbackCfg.ModelName
 	}
 	embedder, embeddingModelName := resolveChunkingEmbedder(extractor, "EMBEDDING_MODEL_NAME")
@@ -289,17 +279,10 @@ func resolveChunkingEmbedder(extractor LLMJSONExtractor, modelRefEnvs ...string)
 
 	_, _, embCfg, embErr := loadModelConfigFromEnv(modelRefEnv, "")
 	if embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
-		timeoutSec := embCfg.TimeoutSec
-		if timeoutSec <= 0 {
-			timeoutSec = 60
-		}
-		return &llmclients.OpenAIJSONClient{
-			HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-			ModelName:           embCfg.ModelName,
-			APIKey:              embCfg.APIKey,
-			BaseURL:             embCfg.BaseURL,
-			EmbeddingDimensions: kbsearch.EmbeddingDimensionsForModel(embCfg.ModelName, embCfg.BaseURL),
-		}, embCfg.ModelName
+		return newOpenAIJSONClientForStructureModel(
+			embCfg,
+			kbsearch.EmbeddingDimensionsForModel(embCfg.ModelName, embCfg.BaseURL),
+		), embCfg.ModelName
 	}
 	if e, ok := extractor.(Embedder); ok {
 		return e, modelRefValue
@@ -1236,6 +1219,7 @@ func (s *FixedSizeChunkingService) generateSummary(
 
 	// Call the LLM
 	in := llmclients.JSONExtractionInput{
+		PromptName: s.SummaryPromptRef,
 		PromptText: appendLanguageInstruction(s.SummaryPromptText, inputText),
 		ModelName:  s.SummaryModelName,
 		InputText:  inputText,
@@ -1442,6 +1426,7 @@ func (s *FixedSizeChunkingService) translateSummaryCategoryPaths(ctx context.Con
 		return nil, err
 	}
 	in := llmclients.JSONExtractionInput{
+		PromptName: s.SummaryPromptRef,
 		PromptText: summaryCategoryTranslationPrompt,
 		ModelName:  s.TranslationModelName,
 		InputText:  string(inputPayload),
@@ -1499,6 +1484,7 @@ func (s *FixedSizeChunkingService) translateSummaryText(ctx context.Context, tar
 		return "", err
 	}
 	in := llmclients.JSONExtractionInput{
+		PromptName: s.SummaryPromptRef,
 		PromptText: summaryTextTranslationPrompt,
 		ModelName:  s.TranslationModelName,
 		InputText:  string(inputPayload),
@@ -1543,6 +1529,7 @@ func (s *FixedSizeChunkingService) translateSummaryKeywords(ctx context.Context,
 		return nil, err
 	}
 	in := llmclients.JSONExtractionInput{
+		PromptName: s.SummaryPromptRef,
 		PromptText: summaryKeywordsTranslationPrompt,
 		ModelName:  s.TranslationModelName,
 		InputText:  string(inputPayload),

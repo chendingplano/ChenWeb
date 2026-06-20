@@ -53,11 +53,12 @@ type saveExtractedProvisionsResponse struct {
 	Error    string `json:"error,omitempty"`
 }
 
-func defaultNewExtractProvisionsClient(cfg ApiTypes.LLMModelDef, logger ApiTypes.JimoLogger) (provisionJSONExtractor, error) {
+func defaultNewExtractProvisionsClient(modelRef string, cfg ApiTypes.LLMModelDef, logger ApiTypes.JimoLogger) (provisionJSONExtractor, error) {
 	return llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
 		ModelName:            cfg.ModelName,
 		APIKey:               cfg.APIKey,
 		BaseURL:              cfg.BaseURL,
+		ProfileName:          modelRef,
 		TimeoutSec:           cfg.TimeoutSec,
 		ThinkingType:         cfg.ThinkingType,
 		MaxInflight:          cfg.MaxInflight,
@@ -258,7 +259,7 @@ func ExtractProvisions(c echo.Context) error {
 		})
 	}
 
-	client, err := newExtractProvisionsClientFn(modelCfg, logger)
+	client, err := newExtractProvisionsClientFn(modelRef, modelCfg, logger)
 	if err != nil {
 		logger.Error("create LLM client failed", "err", err, "model_ref", modelRef)
 		return c.JSON(http.StatusInternalServerError, extractProvisionResponse{
@@ -276,6 +277,7 @@ func ExtractProvisions(c echo.Context) error {
 	)
 
 	in := llmclients.JSONExtractionInput{
+		PromptName: promptRef,
 		PromptText: promptText,
 		ModelName:  modelCfg.ModelName,
 		InputText:  composedInput,
@@ -450,41 +452,41 @@ ON CONFLICT (input_record_id, prov_id) DO UPDATE SET
 		}
 
 		_, err := db.Exec(stmt,
-			inputRecordID,                                                           // $1
-			extractID,                                                               // $2
-			"",                                                                      // $3 input_filename
-			provID,                                                                  // $4
-			strings.TrimSpace(anyAsString(p["prov_name"])),                          // $5
-			strings.TrimSpace(anyAsString(p["prov_name_en"])),                       // $6
-			strings.TrimSpace(anyAsString(p["provision_type"])),                     // $7
-			strings.TrimSpace(anyAsString(p["source_text"])),                        // $8
-			string(spansJSON),                                                       // $9
-			provisionValue,                                                          // $10
-			strings.TrimSpace(anyAsString(p["provision_en"])),                       // $11
-			strings.TrimSpace(anyAsString(p["provision_subject"])),                  // $12
-			strings.TrimSpace(anyAsString(p["provision_subject_en"])),               // $13
-			strings.TrimSpace(anyAsString(p["prov_desc"])),                          // $14
-			strings.TrimSpace(anyAsString(p["prov_desc_en"])),                       // $15
-			strings.TrimSpace(anyAsString(p["prov_context"])),                       // $16
-			strings.TrimSpace(anyAsString(p["prov_context_en"])),                    // $17
-			string(keywordsJSON),                                                    // $18
-			string(keywordsEnJSON),                                                  // $19
-			string(categoryPathsJSON),                                               // $20
-			string(categoryPathsEnJSON),                                             // $21
-			strings.TrimSpace(anyAsString(p["location_type"])),                      // $22
-			confidenceVal(p, "confidence"),                                          // $23
-			boolVal(p, "is_explicit"),                                               // $24
-			boolVal(p, "need_verify"),                                               // $25
-			0,                                                                       // $26 num_blocks
-			len(provisions),                                                         // $27 num_provisions
-			float64(0),                                                              // $28 time_per_provision
-			"",                                                                      // $29 model_name
-			"",                                                                      // $30 prompt_name
-			"active",                                                                // $31 status
-			string(publicInfoJSON),                                                  // $32
-			string(privateInfoJSON),                                                 // $33
-			"",                                                                      // $34 notes
-			"",                                                                      // $35 error_msg
+			inputRecordID, // $1
+			extractID,     // $2
+			"",            // $3 input_filename
+			provID,        // $4
+			strings.TrimSpace(anyAsString(p["prov_name"])),      // $5
+			strings.TrimSpace(anyAsString(p["prov_name_en"])),   // $6
+			strings.TrimSpace(anyAsString(p["provision_type"])), // $7
+			strings.TrimSpace(anyAsString(p["source_text"])),    // $8
+			string(spansJSON), // $9
+			provisionValue,    // $10
+			strings.TrimSpace(anyAsString(p["provision_en"])),         // $11
+			strings.TrimSpace(anyAsString(p["provision_subject"])),    // $12
+			strings.TrimSpace(anyAsString(p["provision_subject_en"])), // $13
+			strings.TrimSpace(anyAsString(p["prov_desc"])),            // $14
+			strings.TrimSpace(anyAsString(p["prov_desc_en"])),         // $15
+			strings.TrimSpace(anyAsString(p["prov_context"])),         // $16
+			strings.TrimSpace(anyAsString(p["prov_context_en"])),      // $17
+			string(keywordsJSON),                               // $18
+			string(keywordsEnJSON),                             // $19
+			string(categoryPathsJSON),                          // $20
+			string(categoryPathsEnJSON),                        // $21
+			strings.TrimSpace(anyAsString(p["location_type"])), // $22
+			confidenceVal(p, "confidence"),                     // $23
+			boolVal(p, "is_explicit"),                          // $24
+			boolVal(p, "need_verify"),                          // $25
+			0,                                                  // $26 num_blocks
+			len(provisions),                                    // $27 num_provisions
+			float64(0),                                         // $28 time_per_provision
+			"",                                                 // $29 model_name
+			"",                                                 // $30 prompt_name
+			"active",                                           // $31 status
+			string(publicInfoJSON),                             // $32
+			string(privateInfoJSON),                            // $33
+			"",                                                 // $34 notes
+			"",                                                 // $35 error_msg
 		)
 		if err != nil {
 			return inserted, err
@@ -503,27 +505,27 @@ func normalizeExtractedProvisions(items []any) []map[string]any {
 		}
 		provisionText := firstNonEmptyVal(raw, "provision", "provision_original")
 		out = append(out, map[string]any{
-			"prov_name":            firstNonEmptyVal(raw, "provision_name", "name"),
-			"prov_name_en":         stringVal(raw, "name_en"),
-			"provision_type":       firstNonEmptyVal(raw, "provision_type", "type"),
-			"source_text":          firstNonEmptyVal(raw, "source_text", "provision", "provision_original"),
-			"source_line_spans":    raw["source_line_spans"],
-			"provision":            provisionText,
-			"provision_en":         stringVal(raw, "provision_en"),
-			"provision_subject":    firstNonEmptyVal(raw, "provision_subject", "subject"),
-			"provision_subject_en": firstNonEmptyVal(raw, "provision_subject_en", "subject_en"),
-			"prov_desc":            firstNonEmptyVal(raw, "provision_desc", "prov_desc"),
-			"prov_desc_en":         firstNonEmptyVal(raw, "provision_desc_en", "prov_desc_en"),
-			"prov_context":         firstNonEmptyVal(raw, "context", "prov_context"),
-			"prov_context_en":      firstNonEmptyVal(raw, "context_en", "prov_context_en"),
-			"provision_keywords":   anySlice(raw, "keywords", "provision_keywords"),
+			"prov_name":             firstNonEmptyVal(raw, "provision_name", "name"),
+			"prov_name_en":          stringVal(raw, "name_en"),
+			"provision_type":        firstNonEmptyVal(raw, "provision_type", "type"),
+			"source_text":           firstNonEmptyVal(raw, "source_text", "provision", "provision_original"),
+			"source_line_spans":     raw["source_line_spans"],
+			"provision":             provisionText,
+			"provision_en":          stringVal(raw, "provision_en"),
+			"provision_subject":     firstNonEmptyVal(raw, "provision_subject", "subject"),
+			"provision_subject_en":  firstNonEmptyVal(raw, "provision_subject_en", "subject_en"),
+			"prov_desc":             firstNonEmptyVal(raw, "provision_desc", "prov_desc"),
+			"prov_desc_en":          firstNonEmptyVal(raw, "provision_desc_en", "prov_desc_en"),
+			"prov_context":          firstNonEmptyVal(raw, "context", "prov_context"),
+			"prov_context_en":       firstNonEmptyVal(raw, "context_en", "prov_context_en"),
+			"provision_keywords":    anySlice(raw, "keywords", "provision_keywords"),
 			"provision_keywords_en": anySlice(raw, "keywords_en", "provision_keywords_en"),
-			"category_paths":       raw["category_paths"],
-			"category_paths_en":    provisionFirstAny(raw, "category_path_en", "category_paths_en"),
-			"location_type":        stringVal(raw, "location_type"),
-			"confidence":           confidenceVal(raw, "confidence"),
-			"is_explicit":          boolVal(raw, "is_explicit"),
-			"need_verify":          boolVal(raw, "need_verify"),
+			"category_paths":        raw["category_paths"],
+			"category_paths_en":     provisionFirstAny(raw, "category_path_en", "category_paths_en"),
+			"location_type":         stringVal(raw, "location_type"),
+			"confidence":            confidenceVal(raw, "confidence"),
+			"is_explicit":           boolVal(raw, "is_explicit"),
+			"need_verify":           boolVal(raw, "need_verify"),
 		})
 	}
 	return out

@@ -44,7 +44,7 @@ func translateArtifactWikiMetricArticle(ctx context.Context, logger ApiTypes.Jim
 		return json.RawMessage(data), nil
 	}
 
-	client, err := defaultNewExtractMetricsClient(cfg, logger)
+	client, err := defaultNewExtractMetricsClient(modelRef, cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("create translation client: %w", err)
 	}
@@ -56,6 +56,7 @@ func translateArtifactWikiMetricArticle(ctx context.Context, logger ApiTypes.Jim
 	}
 
 	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptName: "metric_wiki_translation_prompt",
 		PromptText: metricWikiTranslationPrompt,
 		ModelName:  cfg.ModelName,
 		InputText:  string(inputText),

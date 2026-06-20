@@ -28,7 +28,7 @@ Not fully implemented yet:
 - profile management UI beyond imported/listed profile counts
 - scheduled reconciliation jobs
 - retention cleanup jobs
-- full capture coverage for call paths that use `OpenAIJSONClient` directly instead of `shared/go/api/llm.Client`
+- full capture coverage for every call path that uses `OpenAIJSONClient` directly instead of `shared/go/api/llm.Client`
 
 ## Goals
 

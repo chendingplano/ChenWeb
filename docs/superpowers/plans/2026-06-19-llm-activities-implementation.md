@@ -76,13 +76,15 @@ Completed so far:
 - reporting read APIs
 - `home3` views for LLM Activities and LLM Accounts
 - persistence sink for `shared/go/api/llm` call paths in `deepdoc`
+- `OpenAIJSONClient` usage capture for JSON extraction requests, including prompt names and archived request/response bodies
+- sink-side account/profile resolution from imported `.models.toml` metadata for callers that provide `provider + base_url + api_key + profile_name`
 
 Still pending:
 
 - account/profile edit endpoints
 - reconciliation jobs
 - retention jobs
-- broader capture rollout for `OpenAIJSONClient`-based paths
+- broader capture rollout across all remaining `OpenAIJSONClient` construction sites
 
 ## Chunk 1: Schema And Shared Capture Foundation
 

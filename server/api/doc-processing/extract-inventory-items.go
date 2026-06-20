@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -163,16 +162,7 @@ func NewInventoryItemsProcessor(
 	var categoryEmbedder Embedder
 	var categoryEmbedModelName string
 	if _, _, embCfg, embErr := loadModelConfigFromEnv("EMBEDDING_MODEL_NAME", ""); embErr == nil && strings.TrimSpace(embCfg.ModelName) != "" {
-		timeoutSec := embCfg.TimeoutSec
-		if timeoutSec <= 0 {
-			timeoutSec = 60
-		}
-		categoryEmbedder = &llmclients.OpenAIJSONClient{
-			HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-			ModelName:  embCfg.ModelName,
-			APIKey:     embCfg.APIKey,
-			BaseURL:    embCfg.BaseURL,
-		}
+		categoryEmbedder = newOpenAIJSONClientForStructureModel(embCfg, 0)
 		categoryEmbedModelName = embCfg.ModelName
 	} else if e, ok := extractor.(Embedder); ok {
 		categoryEmbedder = e

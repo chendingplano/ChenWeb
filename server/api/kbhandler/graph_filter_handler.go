@@ -136,16 +136,7 @@ func newGraphFilterEmbedder(mode string) graphFilterEmbedderConfig {
 	}
 	cfg, ok := resolveGraphFilterEmbeddingConfig(modelRef)
 	if ok {
-		timeoutSec := cfg.TimeoutSec
-		if timeoutSec <= 0 {
-			timeoutSec = 45
-		}
-		client := &llmclients.OpenAIJSONClient{
-			ModelName:  cfg.ModelName,
-			APIKey:     cfg.APIKey,
-			BaseURL:    cfg.BaseURL,
-			HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-		}
+		client := newKBEmbeddingClient(modelRef, cfg, 45, 0)
 		return graphFilterEmbedderConfig{Embedder: client, ModelName: cfg.ModelName}
 	}
 
@@ -221,6 +212,24 @@ func graphFilterEmbeddingModelEnv(mode string) string {
 		return "EMBEDDING_MODEL_NAME"
 	}
 	return "EMBEDDING_MODEL_NAME"
+}
+
+func newKBEmbeddingClient(modelRef string, cfg ApiTypes.LLMModelDef, defaultTimeoutSec int, embeddingDimensions int) *llmclients.OpenAIJSONClient {
+	timeoutSec := cfg.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = defaultTimeoutSec
+	}
+	if timeoutSec <= 0 {
+		timeoutSec = 60
+	}
+	return &llmclients.OpenAIJSONClient{
+		ModelName:           strings.TrimSpace(cfg.ModelName),
+		APIKey:              strings.TrimSpace(cfg.APIKey),
+		BaseURL:             strings.TrimSpace(cfg.BaseURL),
+		ProfileName:         strings.TrimSpace(modelRef),
+		EmbeddingDimensions: embeddingDimensions,
+		HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+	}
 }
 
 func filterGraphSemanticMatches(ctx context.Context, params graphFilterSemanticParams) ([]graphFilterSemanticMatch, error) {

@@ -368,6 +368,7 @@ func (p *StructureAnalyzerProcessor) analyzeStructureBlock(ctx context.Context, 
 
 func (p *StructureAnalyzerProcessor) extractAndValidateStructureOutput(ctx context.Context, lines []structureLine, inputText string) (structureOutput, error) {
 	in := llmclients.JSONExtractionInput{
+		PromptName: p.PromptRef,
 		PromptText: p.PromptText,
 		ModelName:  p.ModelName,
 		InputText:  inputText,
@@ -414,6 +415,7 @@ func (p *StructureAnalyzerProcessor) validateRequiredEnv() error {
 }
 
 type structureModelConfig struct {
+	ProfileName  string
 	ModelName    string
 	APIKey       string
 	BaseURL      string
@@ -455,6 +457,7 @@ func loadModelConfigFromEnv(modelRefEnv string, modelsFileEnv string) (modelRef 
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	cfg = structureModelConfig{
+		ProfileName:  modelRef,
 		ModelName:    strings.TrimSpace(modelDef.ModelName),
 		APIKey:       strings.TrimSpace(modelDef.APIKey),
 		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
@@ -517,6 +520,7 @@ func applyStructureModelConfigToExtractor(extractor LLMJSONExtractor, cfg struct
 		return
 	}
 	client.ModelName = strings.TrimSpace(cfg.ModelName)
+	client.ProfileName = strings.TrimSpace(cfg.ProfileName)
 	if v := strings.TrimSpace(cfg.APIKey); v != "" {
 		client.APIKey = v
 	}
@@ -532,6 +536,21 @@ func applyStructureModelConfigToExtractor(extractor LLMJSONExtractor, cfg struct
 		return
 	}
 	client.HTTPClient.Timeout = time.Duration(cfg.TimeoutSec) * time.Second
+}
+
+func newOpenAIJSONClientForStructureModel(cfg structureModelConfig, embeddingDimensions int) *llmclients.OpenAIJSONClient {
+	timeoutSec := cfg.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = 60
+	}
+	return &llmclients.OpenAIJSONClient{
+		HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+		ModelName:           strings.TrimSpace(cfg.ModelName),
+		APIKey:              strings.TrimSpace(cfg.APIKey),
+		BaseURL:             strings.TrimSpace(cfg.BaseURL),
+		ProfileName:         strings.TrimSpace(cfg.ProfileName),
+		EmbeddingDimensions: embeddingDimensions,
+	}
 }
 
 func normalizeThinkingType(raw string) string {

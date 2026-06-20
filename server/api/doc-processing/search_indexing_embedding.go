@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -49,13 +48,10 @@ func newSearchEmbedder() (embedder Embedder, modelName string, timeoutSec int, o
 	if timeoutSec <= 0 {
 		timeoutSec = 60
 	}
-	client := &llmclients.OpenAIJSONClient{
-		HTTPClient:          &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-		ModelName:           cfg.ModelName,
-		APIKey:              cfg.APIKey,
-		BaseURL:             cfg.BaseURL,
-		EmbeddingDimensions: kbsearch.EmbeddingDimensionsForModel(cfg.ModelName, cfg.BaseURL),
-	}
+	client := newOpenAIJSONClientForStructureModel(
+		cfg,
+		kbsearch.EmbeddingDimensionsForModel(cfg.ModelName, cfg.BaseURL),
+	)
 	return client, cfg.ModelName, timeoutSec, true
 }
 

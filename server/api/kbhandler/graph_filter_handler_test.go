@@ -152,6 +152,9 @@ timeout_sec = 12
 	if client.APIKey != "test-key" || client.BaseURL != "https://example.test/v1" {
 		t.Fatalf("unexpected client config: api=%q base=%q", client.APIKey, client.BaseURL)
 	}
+	if client.ProfileName != "topic-embedding" {
+		t.Fatalf("ProfileName=%q, want topic-embedding", client.ProfileName)
+	}
 }
 
 func TestNewGraphFilterEmbedderReportsRequiredModeEnv(t *testing.T) {

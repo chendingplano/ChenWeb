@@ -21,6 +21,7 @@ type fakeProvisionExtractor struct {
 	out                   map[string]any
 	err                   error
 	inputText             string
+	promptName            string
 	calledCount           int
 	structuredCalledCount int
 	contractNames         []string
@@ -29,6 +30,7 @@ type fakeProvisionExtractor struct {
 func (f *fakeProvisionExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
 	f.calledCount++
 	f.inputText = in.InputText
+	f.promptName = in.PromptName
 	return f.out, f.err
 }
 
@@ -36,6 +38,7 @@ func (f *fakeProvisionExtractor) ExtractStructuredJSON(_ context.Context, in llm
 	f.structuredCalledCount++
 	f.contractNames = append(f.contractNames, contract.Name)
 	f.inputText = in.InputText
+	f.promptName = in.PromptName
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -106,7 +109,7 @@ func TestExtractProvisionUsesStructuredContractWhenAvailable(t *testing.T) {
 			},
 		},
 	}
-	newExtractProvisionsClientFn = func(ApiTypes.LLMModelDef, ApiTypes.JimoLogger) (provisionJSONExtractor, error) {
+	newExtractProvisionsClientFn = func(_ string, _ ApiTypes.LLMModelDef, _ ApiTypes.JimoLogger) (provisionJSONExtractor, error) {
 		return fakeExtractor, nil
 	}
 
@@ -134,5 +137,7 @@ func TestExtractProvisionUsesStructuredContractWhenAvailable(t *testing.T) {
 	if len(fakeExtractor.contractNames) != 1 || fakeExtractor.contractNames[0] != "chenweb_provision_handler_extraction" {
 		t.Fatalf("contractNames=%v, want [chenweb_provision_handler_extraction]", fakeExtractor.contractNames)
 	}
+	if fakeExtractor.promptName != "prompt-extract-provisions.md" {
+		t.Fatalf("promptName=%q, want prompt-extract-provisions.md", fakeExtractor.promptName)
+	}
 }
-

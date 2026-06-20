@@ -618,6 +618,7 @@ func (p *ProductsProcessor) extractProductPayload(
 	)
 
 	in := llmclients.JSONExtractionInput{
+		PromptName: promptRef,
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
@@ -1661,6 +1662,7 @@ func loadModelConfigFromEnvKeys(modelRefEnvs []string, modelsFileEnv string) (mo
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	cfg = structureModelConfig{
+		ProfileName:  modelRefValue,
 		ModelName:    strings.TrimSpace(modelDef.ModelName),
 		APIKey:       strings.TrimSpace(modelDef.APIKey),
 		BaseURL:      strings.TrimSpace(modelDef.BaseURL),

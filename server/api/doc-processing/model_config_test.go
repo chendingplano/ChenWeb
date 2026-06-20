@@ -34,11 +34,15 @@ thinking_type = "disabled"
 	if cfg.ThinkingType != "disabled" {
 		t.Fatalf("ThinkingType=%q, want disabled", cfg.ThinkingType)
 	}
+	if cfg.ProfileName != "deepseek-v4-flash" {
+		t.Fatalf("ProfileName=%q, want deepseek-v4-flash", cfg.ProfileName)
+	}
 }
 
-func TestApplyStructureModelConfigToExtractor_SetsThinkingType(t *testing.T) {
+func TestApplyStructureModelConfigToExtractor_SetsThinkingTypeAndProfileName(t *testing.T) {
 	client := &llmclients.OpenAIJSONClient{}
 	applyStructureModelConfigToExtractor(client, structureModelConfig{
+		ProfileName:  "deepseek-v4-flash",
 		ModelName:    "deepseek-v4-flash",
 		APIKey:       "sk-test",
 		BaseURL:      "https://api.deepseek.com",
@@ -49,14 +53,19 @@ func TestApplyStructureModelConfigToExtractor_SetsThinkingType(t *testing.T) {
 	if client.ThinkingType != "disabled" {
 		t.Fatalf("ThinkingType=%q, want disabled", client.ThinkingType)
 	}
+	if client.ProfileName != "deepseek-v4-flash" {
+		t.Fatalf("ProfileName=%q, want deepseek-v4-flash", client.ProfileName)
+	}
 }
 
-func TestApplyStructureModelConfigToExtractor_ClearsThinkingTypeWhenUnset(t *testing.T) {
+func TestApplyStructureModelConfigToExtractor_ClearsThinkingTypeAndProfileNameWhenUnset(t *testing.T) {
 	client := &llmclients.OpenAIJSONClient{
 		ThinkingType: "disabled",
+		ProfileName:  "old-profile",
 	}
 
 	applyStructureModelConfigToExtractor(client, structureModelConfig{
+		ProfileName:  "",
 		ModelName:    "deepseek-v4-flash",
 		APIKey:       "sk-test",
 		BaseURL:      "https://api.openai.com",
@@ -66,5 +75,30 @@ func TestApplyStructureModelConfigToExtractor_ClearsThinkingTypeWhenUnset(t *tes
 
 	if client.ThinkingType != "" {
 		t.Fatalf("ThinkingType=%q, want empty", client.ThinkingType)
+	}
+	if client.ProfileName != "" {
+		t.Fatalf("ProfileName=%q, want empty", client.ProfileName)
+	}
+}
+
+func TestNewOpenAIJSONClientForStructureModel_PreservesProfileName(t *testing.T) {
+	client := newOpenAIJSONClientForStructureModel(structureModelConfig{
+		ProfileName: "embedding-test",
+		ModelName:   "text-embedding-3-small",
+		APIKey:      "sk-test",
+		BaseURL:     "https://api.openai.com",
+		TimeoutSec:  55,
+	}, 1536)
+	if client == nil {
+		t.Fatalf("client is nil")
+	}
+	if client.ProfileName != "embedding-test" {
+		t.Fatalf("ProfileName=%q, want embedding-test", client.ProfileName)
+	}
+	if client.EmbeddingDimensions != 1536 {
+		t.Fatalf("EmbeddingDimensions=%d, want 1536", client.EmbeddingDimensions)
+	}
+	if client.HTTPClient == nil || client.HTTPClient.Timeout.Seconds() != 55 {
+		t.Fatalf("timeout=%v, want 55s", client.HTTPClient)
 	}
 }

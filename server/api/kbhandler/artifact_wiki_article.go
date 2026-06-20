@@ -60,7 +60,7 @@ func buildArtifactWikiArticle(ctx context.Context, logger ApiTypes.JimoLogger, p
 	if strings.TrimSpace(modelRef) == "" {
 		return nil, fmt.Errorf("missing env var WIKIPAGE_CREATION_MODEL_NAME")
 	}
-	client, err := defaultNewExtractMetricsClient(cfg, logger)
+	client, err := defaultNewExtractMetricsClient(modelRef, cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("create wiki LLM client: %w", err)
 	}
@@ -76,6 +76,7 @@ func buildArtifactWikiArticle(ctx context.Context, logger ApiTypes.JimoLogger, p
 	}
 
 	out, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptName: "generic_artifact_wiki_prompt",
 		PromptText: genericArtifactWikiPrompt + "\n\n" + metricWikiOutputLanguageInstruction("en"),
 		ModelName:  cfg.ModelName,
 		InputText:  string(inputJSON),
@@ -129,7 +130,7 @@ func translateGenericArtifactWikiArticle(ctx context.Context, logger ApiTypes.Ji
 		return json.RawMessage(data), nil
 	}
 
-	client, err := defaultNewExtractMetricsClient(cfg, logger)
+	client, err := defaultNewExtractMetricsClient(modelRef, cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("create translation client: %w", err)
 	}
@@ -143,6 +144,7 @@ func translateGenericArtifactWikiArticle(ctx context.Context, logger ApiTypes.Ji
 	}
 
 	payload, err := client.ExtractJSON(ctx, llmclients.JSONExtractionInput{
+		PromptName: "metric_wiki_translation_prompt",
 		PromptText: metricWikiTranslationPrompt,
 		ModelName:  cfg.ModelName,
 		InputText:  string(inputText),

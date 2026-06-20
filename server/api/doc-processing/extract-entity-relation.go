@@ -925,6 +925,7 @@ func (p *EntityRelationProcessor) extractStructuredPayload(
 
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	in := llmclients.JSONExtractionInput{
+		PromptName: firstNonEmptyTrimmed(p.PromptRef, p.RelationPromptRef),
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,
@@ -1111,10 +1112,12 @@ func normalizeRelationRows(raw any, chunkSeqNo int) []map[string]any {
 		row := map[string]any{
 			"subject":             subject,
 			"subject_en":          strings.TrimSpace(asString(m["subject_en"])),
+			"subject_desc":        strings.TrimSpace(asString(m["subject_desc"])),
 			"predicate":           predicate,
 			"predicate_en":        normalizePredicate(asString(m["predicate_en"])),
 			"object":              object,
 			"object_en":           strings.TrimSpace(asString(m["object_en"])),
+			"object_desc":         strings.TrimSpace(asString(m["object_desc"])),
 			"desc":                strings.TrimSpace(asString(m["desc"])),
 			"desc_en":             strings.TrimSpace(asString(m["desc_en"])),
 			"keywords":            toStringSlice(m["keywords"]),
@@ -1565,10 +1568,12 @@ CREATE TABLE IF NOT EXISTS kb.relations (
     language TEXT,
     subject TEXT,
     subject_en TEXT,
+    subject_desc TEXT,
     predicate TEXT,
     predicate_en TEXT,
     object TEXT,
     object_en TEXT,
+    object_desc TEXT,
     desc_text TEXT,
     desc_text_en TEXT,
     keywords JSONB,
@@ -1593,6 +1598,8 @@ ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS categories JSONB;
 ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS subject_lines JSONB;
 ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS predicate_lines JSONB;
 ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS object_lines JSONB;
+ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS subject_desc TEXT;
+ALTER TABLE kb.relations ADD COLUMN IF NOT EXISTS object_desc TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_kb_relations_input_record_id ON kb.relations (input_record_id);
 CREATE INDEX IF NOT EXISTS idx_kb_relations_relation_id ON kb.relations (relation_id);
@@ -1791,10 +1798,12 @@ INSERT INTO kb.relations (
     language,
     subject,
     subject_en,
+    subject_desc,
     predicate,
     predicate_en,
     object,
     object_en,
+    object_desc,
     desc_text,
     desc_text_en,
     keywords,
@@ -1811,7 +1820,7 @@ INSERT INTO kb.relations (
     object_lines,
     ext_info
 ) VALUES (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21::jsonb,$23::jsonb,$24::jsonb,$25::jsonb,$22::jsonb
+    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21,$22,$23::jsonb,$25::jsonb,$26::jsonb,$27::jsonb,$24::jsonb
 )`
 
 	isEnglish := isLanguageEnglish(req.Language)
@@ -1864,32 +1873,43 @@ INSERT INTO kb.relations (
 			categoriesArg = string(catsJSON)
 		}
 
+		var subjectDescVal any
+		if v := strings.TrimSpace(asString(r["subject_desc"])); v != "" {
+			subjectDescVal = v
+		}
+		var objectDescVal any
+		if v := strings.TrimSpace(asString(r["object_desc"])); v != "" {
+			objectDescVal = v
+		}
+
 		if _, err := s.DB.ExecContext(ctx, stmt,
-			eventIDVal,
-			req.InputRecordID,
-			strings.TrimSpace(asString(r["relation_id"])),
-			strings.TrimSpace(req.Language),
-			strings.TrimSpace(asString(r["subject"])),
-			subjectEnVal,
-			strings.TrimSpace(asString(r["predicate"])),
-			predicateEnVal,
-			strings.TrimSpace(asString(r["object"])),
-			objectEnVal,
-			strings.TrimSpace(asString(r["desc"])),
-			descEnVal,
-			string(keywordsJSON),
-			keywordsEnVal,
-			string(spansJSON),
-			toFloat(r["confidence"]),
-			strings.TrimSpace(req.ModelName),
-			strings.TrimSpace(req.PromptName),
-			subjectEntityIDArg,
-			objectEntityIDArg,
-			categoriesArg,
-			string(extInfo),
-			string(subjectLinesJSON),
-			string(predicateLinesJSON),
-			string(objectLinesJSON),
+			eventIDVal,              // $1
+			req.InputRecordID,       // $2
+			strings.TrimSpace(asString(r["relation_id"])), // $3
+			strings.TrimSpace(req.Language),               // $4
+			strings.TrimSpace(asString(r["subject"])),     // $5
+			subjectEnVal,            // $6
+			subjectDescVal,          // $7
+			strings.TrimSpace(asString(r["predicate"])),   // $8
+			predicateEnVal,          // $9
+			strings.TrimSpace(asString(r["object"])),      // $10
+			objectEnVal,             // $11
+			objectDescVal,           // $12
+			strings.TrimSpace(asString(r["desc"])),        // $13
+			descEnVal,               // $14
+			string(keywordsJSON),    // $15
+			keywordsEnVal,           // $16
+			string(spansJSON),       // $17
+			toFloat(r["confidence"]),// $18
+			strings.TrimSpace(req.ModelName),  // $19
+			strings.TrimSpace(req.PromptName), // $20
+			subjectEntityIDArg,      // $21
+			objectEntityIDArg,       // $22
+			categoriesArg,           // $23
+			string(extInfo),         // $24
+			string(subjectLinesJSON),   // $25
+			string(predicateLinesJSON), // $26
+			string(objectLinesJSON),    // $27
 		); err != nil {
 			return inserted, err
 		}

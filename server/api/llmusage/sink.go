@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/cmd/config"
@@ -48,6 +50,19 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		newID = s.NewID
 	}
 	eventID := newID()
+
+	if s.DB != nil && (record.AccountID == "" || record.ProfileID == "") {
+		accountID, profileID, err := s.resolveAccountProfileIDs(ctx, record)
+		if err != nil {
+			return err
+		}
+		if record.AccountID == "" {
+			record.AccountID = accountID
+		}
+		if record.ProfileID == "" {
+			record.ProfileID = profileID
+		}
+	}
 
 	paths := sharedllm.BuildUsageArchivePaths(s.ArchiveRoot, workspaceDay, record.AccountID, eventID)
 	inputRef := ""
@@ -114,6 +129,36 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		string(metadataJSON),
 	)
 	return err
+}
+
+func (s *Sink) resolveAccountProfileIDs(ctx context.Context, record sharedllm.UsageCaptureRecord) (accountID string, profileID string, err error) {
+	if s.DB == nil {
+		return "", "", nil
+	}
+	provider := strings.TrimSpace(string(record.Provider))
+	baseURL := strings.TrimSpace(record.BaseURL)
+	apiKey := strings.TrimSpace(record.APIKey)
+	profileName := strings.TrimSpace(record.ProfileName)
+	if provider == "" || baseURL == "" || apiKey == "" || profileName == "" {
+		return "", "", nil
+	}
+
+	const query = `SELECT a.id, p.id
+FROM llm_account a
+JOIN llm_account_model_profile p ON p.account_id = a.id
+WHERE LOWER(a.provider) = LOWER($1)
+  AND a.base_url = $2
+  AND a.api_key_ref = $3
+  AND LOWER(p.profile_name) = LOWER($4)
+LIMIT 1`
+
+	if err := s.DB.QueryRowContext(ctx, query, provider, baseURL, apiKey, profileName).Scan(&accountID, &profileID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	return accountID, profileID, nil
 }
 
 func InstallDefaultSink() error {

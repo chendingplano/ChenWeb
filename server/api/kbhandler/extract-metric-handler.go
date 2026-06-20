@@ -52,11 +52,12 @@ type saveExtractedMetricsResponse struct {
 	Error    string `json:"error,omitempty"`
 }
 
-func defaultNewExtractMetricsClient(cfg ApiTypes.LLMModelDef, logger ApiTypes.JimoLogger) (metricJSONExtractor, error) {
+func defaultNewExtractMetricsClient(modelRef string, cfg ApiTypes.LLMModelDef, logger ApiTypes.JimoLogger) (metricJSONExtractor, error) {
 	return llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
 		ModelName:            cfg.ModelName,
 		APIKey:               cfg.APIKey,
 		BaseURL:              cfg.BaseURL,
+		ProfileName:          modelRef,
 		TimeoutSec:           cfg.TimeoutSec,
 		ThinkingType:         cfg.ThinkingType,
 		MaxInflight:          cfg.MaxInflight,
@@ -228,7 +229,7 @@ func ExtractMetric(c echo.Context) error {
 	}
 
 	// Initialize LLM client and extract metrics
-	client, err := newExtractMetricsClientFn(modelCfg, logger)
+	client, err := newExtractMetricsClientFn(modelRef, modelCfg, logger)
 	if err != nil {
 		logger.Error("create LLM client failed", "err", err, "model_ref", modelRef, "model_name", modelCfg.ModelName)
 		return c.JSON(http.StatusInternalServerError, extractMetricResponse{
@@ -244,6 +245,7 @@ func ExtractMetric(c echo.Context) error {
 		"input", composedInput)
 
 	in := llmclients.JSONExtractionInput{
+		PromptName: promptRef,
 		PromptText: promptText,
 		ModelName:  modelCfg.ModelName,
 		InputText:  composedInput,

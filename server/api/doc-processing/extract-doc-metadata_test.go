@@ -71,6 +71,7 @@ type fakeJSONExtractor struct {
 	inputText             string
 	inputTexts            []string
 	modelNames            []string
+	promptNames           []string
 	calledCount           int
 	structuredCalledCount int
 	contractNames         []string
@@ -81,6 +82,7 @@ func (f *fakeJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExt
 	f.inputText = in.InputText
 	f.inputTexts = append(f.inputTexts, in.InputText)
 	f.modelNames = append(f.modelNames, in.ModelName)
+	f.promptNames = append(f.promptNames, in.PromptName)
 	if len(f.outs) > 0 || len(f.errs) > 0 {
 		var out map[string]any
 		var err error
@@ -103,6 +105,7 @@ func (f *fakeJSONExtractor) ExtractStructuredJSON(_ context.Context, in llmclien
 	f.inputText = in.InputText
 	f.inputTexts = append(f.inputTexts, in.InputText)
 	f.modelNames = append(f.modelNames, in.ModelName)
+	f.promptNames = append(f.promptNames, in.PromptName)
 	if len(f.outs) > 0 || len(f.errs) > 0 {
 		var out map[string]any
 		var err error

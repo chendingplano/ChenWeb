@@ -368,6 +368,7 @@ func (p *ExtractDocMetadataProcessor) extractMetadataWithFallback(ctx context.Co
 func (p *ExtractDocMetadataProcessor) extractMetadataWithModel(ctx context.Context, inputText string, modelName string, cfg structureModelConfig) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Client, cfg)
 	in := llmclients.JSONExtractionInput{
+		PromptName: p.PromptRef,
 		PromptText: p.PromptText,
 		ModelName:  modelName,
 		InputText:  inputText,

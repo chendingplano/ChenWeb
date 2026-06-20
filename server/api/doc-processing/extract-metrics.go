@@ -1875,6 +1875,7 @@ func (p *MetricsProcessor) extractMetricPayload(
 	_ string) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
 	in := llmclients.JSONExtractionInput{
+		PromptName: firstNonEmptyTrimmed(p.MentionPromptRef, p.RelationPromptRef),
 		PromptText: promptText,
 		ModelName:  modelName,
 		InputText:  inputText,

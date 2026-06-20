@@ -21,6 +21,7 @@ type fakeMetricExtractor struct {
 	out                   map[string]any
 	err                   error
 	inputText             string
+	promptName            string
 	calledCount           int
 	structuredCalledCount int
 	contractNames         []string
@@ -29,6 +30,7 @@ type fakeMetricExtractor struct {
 func (f *fakeMetricExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
 	f.calledCount++
 	f.inputText = in.InputText
+	f.promptName = in.PromptName
 	return f.out, f.err
 }
 
@@ -36,6 +38,7 @@ func (f *fakeMetricExtractor) ExtractStructuredJSON(_ context.Context, in llmcli
 	f.structuredCalledCount++
 	f.contractNames = append(f.contractNames, contract.Name)
 	f.inputText = in.InputText
+	f.promptName = in.PromptName
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -195,7 +198,7 @@ func TestExtractMetricReturnsMetricsWithoutSaving(t *testing.T) {
 			},
 		},
 	}
-	newExtractMetricsClientFn = func(ApiTypes.LLMModelDef, ApiTypes.JimoLogger) (metricJSONExtractor, error) {
+	newExtractMetricsClientFn = func(_ string, _ ApiTypes.LLMModelDef, _ ApiTypes.JimoLogger) (metricJSONExtractor, error) {
 		return fakeExtractor, nil
 	}
 
@@ -226,6 +229,9 @@ func TestExtractMetricReturnsMetricsWithoutSaving(t *testing.T) {
 	}
 	if strings.TrimSpace(fakeExtractor.inputText) == "" {
 		t.Fatalf("expected extractor input text to be populated")
+	}
+	if fakeExtractor.promptName != "prompt_extract_metrics_v1.txt" {
+		t.Fatalf("promptName=%q, want prompt_extract_metrics_v1.txt", fakeExtractor.promptName)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -287,7 +293,7 @@ func TestExtractMetricUsesStructuredContractWhenAvailable(t *testing.T) {
 			},
 		},
 	}
-	newExtractMetricsClientFn = func(ApiTypes.LLMModelDef, ApiTypes.JimoLogger) (metricJSONExtractor, error) {
+	newExtractMetricsClientFn = func(_ string, _ ApiTypes.LLMModelDef, _ ApiTypes.JimoLogger) (metricJSONExtractor, error) {
 		return fakeExtractor, nil
 	}
 
@@ -306,6 +312,9 @@ func TestExtractMetricUsesStructuredContractWhenAvailable(t *testing.T) {
 	}
 	if len(fakeExtractor.contractNames) != 1 || fakeExtractor.contractNames[0] != "chenweb_metric_handler_extraction" {
 		t.Fatalf("contractNames=%v, want [chenweb_metric_handler_extraction]", fakeExtractor.contractNames)
+	}
+	if fakeExtractor.promptName != "prompt_extract_metrics_v1.txt" {
+		t.Fatalf("promptName=%q, want prompt_extract_metrics_v1.txt", fakeExtractor.promptName)
 	}
 }
 

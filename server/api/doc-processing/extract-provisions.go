@@ -747,6 +747,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 
 func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Context, inputText string, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
 	in := llmclients.JSONExtractionInput{
+		PromptName: p.PromptRef,
 		PromptText: p.PromptText,
 		ModelName:  modelName,
 		InputText:  inputText,
@@ -1299,28 +1300,28 @@ func (p *ProvisionsProcessor) writeProvisionsArtifact(recordID int64, rec DocMet
 func buildProvisionFileRecord(row map[string]any) map[string]any {
 	publicInfo, _ := row["public_info"].(map[string]any)
 	return map[string]any{
-		"prov_id":           strings.TrimSpace(asString(row["prov_id"])),
-		"prov_name":         strings.TrimSpace(asString(row["prov_name"])),
-		"prov_name_en":      strings.TrimSpace(asString(row["prov_name_en"])),
-		"prov_type":         strings.TrimSpace(asString(publicInfo["provision_type"])),
-		"provision":         strings.TrimSpace(asString(row["provision"])),
-		"provision_en":      strings.TrimSpace(asString(row["provision_en"])),
-		"provision_desc":    strings.TrimSpace(asString(row["prov_desc"])),
-		"provision_desc_en": strings.TrimSpace(asString(row["prov_desc_en"])),
-		"source_line_spans": row["source_line_spans"],
-		"context":           strings.TrimSpace(asString(row["prov_context"])),
-		"context_en":        strings.TrimSpace(asString(row["prov_context_en"])),
-		"subject":           strings.TrimSpace(asString(row["provision_subject"])),
-		"subject_en":        strings.TrimSpace(asString(row["provision_subject_en"])),
-		"location_type":     strings.TrimSpace(asString(row["location_type"])),
-		"keywords":          row["provision_keywords"],
-		"keywords_en":       row["provision_keywords_en"],
-		"confidence":        toFloat(row["confidence"]),
-		"is_explicit":       toBool(row["is_explicit"]),
-		"need_verify":          toBool(row["need_verify"]),
-		"category_paths":       row["category_paths"],
-		"category_paths_en":    row["category_paths_en"],
-		"connected_artifacts":  row["connected_artifacts"],
+		"prov_id":             strings.TrimSpace(asString(row["prov_id"])),
+		"prov_name":           strings.TrimSpace(asString(row["prov_name"])),
+		"prov_name_en":        strings.TrimSpace(asString(row["prov_name_en"])),
+		"prov_type":           strings.TrimSpace(asString(publicInfo["provision_type"])),
+		"provision":           strings.TrimSpace(asString(row["provision"])),
+		"provision_en":        strings.TrimSpace(asString(row["provision_en"])),
+		"provision_desc":      strings.TrimSpace(asString(row["prov_desc"])),
+		"provision_desc_en":   strings.TrimSpace(asString(row["prov_desc_en"])),
+		"source_line_spans":   row["source_line_spans"],
+		"context":             strings.TrimSpace(asString(row["prov_context"])),
+		"context_en":          strings.TrimSpace(asString(row["prov_context_en"])),
+		"subject":             strings.TrimSpace(asString(row["provision_subject"])),
+		"subject_en":          strings.TrimSpace(asString(row["provision_subject_en"])),
+		"location_type":       strings.TrimSpace(asString(row["location_type"])),
+		"keywords":            row["provision_keywords"],
+		"keywords_en":         row["provision_keywords_en"],
+		"confidence":          toFloat(row["confidence"]),
+		"is_explicit":         toBool(row["is_explicit"]),
+		"need_verify":         toBool(row["need_verify"]),
+		"category_paths":      row["category_paths"],
+		"category_paths_en":   row["category_paths_en"],
+		"connected_artifacts": row["connected_artifacts"],
 	}
 }
 
@@ -1657,10 +1658,10 @@ ON CONFLICT (input_record_id, prov_id) DO UPDATE SET
 		privateInfoJSON, _ := json.Marshal(dbRecord["private_info"])
 
 		_, err := s.DB.ExecContext(ctx, stmt,
-			req.InputRecordID,                 // $1
-			req.ExtractID,                     // $2
-			req.InputFilename,                 // $3
-			strings.TrimSpace(asString(dbRecord["prov_id"])), // $4
+			req.InputRecordID, // $1
+			req.ExtractID,     // $2
+			req.InputFilename, // $3
+			strings.TrimSpace(asString(dbRecord["prov_id"])),                                // $4
 			strings.TrimSpace(asString(dbRecord["prov_name"])),                              // $5
 			strings.TrimSpace(asString(dbRecord["prov_name_en"])),                           // $6
 			strings.TrimSpace(asString(dbRecord["provision_type"])),                         // $7
@@ -1742,20 +1743,20 @@ func loadPersistedProvisionArtifactRows(ctx context.Context, db *sql.DB, recordI
 	var out []map[string]any
 	for rows.Next() {
 		var (
-			provID, provName, provNameEn        string
-			provisionType                       string
-			sourceLineSpansRaw                  []byte
-			provision, provisionEn              string
+			provID, provName, provNameEn         string
+			provisionType                        string
+			sourceLineSpansRaw                   []byte
+			provision, provisionEn               string
 			provisionSubject, provisionSubjectEn string
-			provDesc, provDescEn                string
-			provContext, provContextEn          string
-			keywordsRaw, keywordsEnRaw          []byte
+			provDesc, provDescEn                 string
+			provContext, provContextEn           string
+			keywordsRaw, keywordsEnRaw           []byte
 			categoryPathsRaw, categoryPathsEnRaw []byte
-			locationType                        string
-			confidence                          float64
-			isExplicit, needVerify              bool
-			publicInfoRaw                       []byte
-			connectedArtifactsRaw               []byte
+			locationType                         string
+			confidence                           float64
+			isExplicit, needVerify               bool
+			publicInfoRaw                        []byte
+			connectedArtifactsRaw                []byte
 		)
 		if err := rows.Scan(
 			&provID, &provName, &provNameEn,
@@ -1783,28 +1784,28 @@ func loadPersistedProvisionArtifactRows(ctx context.Context, db *sql.DB, recordI
 			publicInfo["provision_type"] = provisionType
 		}
 		out = append(out, map[string]any{
-			"prov_id":              strings.TrimSpace(provID),
-			"prov_name":            strings.TrimSpace(provName),
-			"prov_name_en":         strings.TrimSpace(provNameEn),
-			"source_line_spans":    jsonColumnToValue(sourceLineSpansRaw, []any{}),
-			"provision":            strings.TrimSpace(provision),
-			"provision_en":         strings.TrimSpace(provisionEn),
-			"provision_subject":    strings.TrimSpace(provisionSubject),
-			"provision_subject_en": strings.TrimSpace(provisionSubjectEn),
-			"prov_desc":            strings.TrimSpace(provDesc),
-			"prov_desc_en":         strings.TrimSpace(provDescEn),
-			"prov_context":         strings.TrimSpace(provContext),
-			"prov_context_en":      strings.TrimSpace(provContextEn),
-			"provision_keywords":   jsonColumnToValue(keywordsRaw, []any{}),
+			"prov_id":               strings.TrimSpace(provID),
+			"prov_name":             strings.TrimSpace(provName),
+			"prov_name_en":          strings.TrimSpace(provNameEn),
+			"source_line_spans":     jsonColumnToValue(sourceLineSpansRaw, []any{}),
+			"provision":             strings.TrimSpace(provision),
+			"provision_en":          strings.TrimSpace(provisionEn),
+			"provision_subject":     strings.TrimSpace(provisionSubject),
+			"provision_subject_en":  strings.TrimSpace(provisionSubjectEn),
+			"prov_desc":             strings.TrimSpace(provDesc),
+			"prov_desc_en":          strings.TrimSpace(provDescEn),
+			"prov_context":          strings.TrimSpace(provContext),
+			"prov_context_en":       strings.TrimSpace(provContextEn),
+			"provision_keywords":    jsonColumnToValue(keywordsRaw, []any{}),
 			"provision_keywords_en": jsonColumnToValue(keywordsEnRaw, []any{}),
-			"category_paths":       jsonColumnToValue(categoryPathsRaw, []any{}),
-			"category_paths_en":    jsonColumnToValue(categoryPathsEnRaw, []any{}),
-			"location_type":        strings.TrimSpace(locationType),
-			"confidence":           confidence,
-			"is_explicit":          isExplicit,
-			"need_verify":          needVerify,
-			"public_info":          publicInfo,
-			"connected_artifacts":  jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
+			"category_paths":        jsonColumnToValue(categoryPathsRaw, []any{}),
+			"category_paths_en":     jsonColumnToValue(categoryPathsEnRaw, []any{}),
+			"location_type":         strings.TrimSpace(locationType),
+			"confidence":            confidence,
+			"is_explicit":           isExplicit,
+			"need_verify":           needVerify,
+			"public_info":           publicInfo,
+			"connected_artifacts":   jsonColumnToValue(connectedArtifactsRaw, map[string]any{}),
 		})
 	}
 	return out, rows.Err()
