@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -117,11 +116,13 @@ func semClusterBatchMaxEntities() int {
 
 // semClusterConfig holds the adjudication model and prompt resolved at startup.
 type semClusterConfig struct {
-	ModelName  string
-	ModelCfg   structureModelConfig
-	PromptText string
-	PromptRef  string
-	Enabled    bool
+	ModelName         string
+	ModelCfg          structureModelConfig
+	FallbackModelName string
+	FallbackModelCfg  structureModelConfig
+	PromptText        string
+	PromptRef         string
+	Enabled           bool
 }
 
 // ResolveSemClusterConfig loads the adjudication model and prompt from env vars.
@@ -135,21 +136,27 @@ func ResolveSemClusterConfig() semClusterConfig {
 		"MODEL_DEF_FILE",
 	)
 	if modelErr != nil {
-		return semClusterConfig{Enabled: false}
+		return semClusterConfig{Enabled: false, ModelName: "unavailable"}
 	}
 	promptText, promptRef, _, promptErr := loadProductPromptFromEnvKeys(
 		[]string{"SEMCLUSTER_ADJ_PROMPT"},
 		"prompt-entity-adjudicate-v1.md",
 	)
 	if promptErr != nil {
-		return semClusterConfig{Enabled: false}
+		return semClusterConfig{Enabled: false, ModelName: modelCfg.ModelName}
 	}
+	_, _, fallbackModelCfg, _ := loadOptionalModelConfigFromEnv(
+		"SEMCLUSTER_ADJ_FALLBACK",
+		"MODEL_DEF_FILE",
+	)
 	return semClusterConfig{
-		ModelName:  modelCfg.ModelName,
-		ModelCfg:   modelCfg,
-		PromptText: promptText,
-		PromptRef:  strings.TrimSpace(promptRef),
-		Enabled:    true,
+		ModelName:         modelCfg.ModelName,
+		ModelCfg:          modelCfg,
+		FallbackModelName: fallbackModelCfg.ModelName,
+		FallbackModelCfg:  fallbackModelCfg,
+		PromptText:        promptText,
+		PromptRef:         strings.TrimSpace(promptRef),
+		Enabled:           true,
 	}
 }
 
@@ -168,7 +175,11 @@ func semClusterEntities(
 	cfg := ResolveSemClusterConfig()
 	if !cfg.Enabled {
 		if logger != nil {
-			logger.Info("semantic clustering skipped: disabled", "record_id", recordID)
+			msg := "semantic clustering skipped: disabled"
+			if cfg.ModelName != "" {
+				msg = "semantic clustering skipped: model or prompt unavailable (set SEMCLUSTER_ADJ_MODEL_NAME / SEMCLUSTER_ADJ_PROMPT / MODELS_FILE)"
+			}
+			logger.Info(msg, "record_id", recordID)
 		}
 		return nil
 	}
@@ -189,9 +200,11 @@ func semClusterEntities(
 	}
 
 	if logger != nil {
-		logger.Info("semantic clustering start",
+		logger.Info("semantic clustering start ",
 			"record_id", recordID,
 			"pending_entities", len(entities),
+			"model", cfg.ModelName,
+			"prompt", cfg.PromptRef,
 		)
 	}
 
@@ -268,7 +281,7 @@ func semClusterEntities(
 	}
 
 	if logger != nil {
-		logger.Info("semantic clustering candidates built",
+		logger.Info("semantic clustering built ",
 			"record_id", recordID,
 			"groups", len(groups),
 			"skipped_no_match", skippedNoMatch,
@@ -277,6 +290,7 @@ func semClusterEntities(
 	}
 
 	if len(groups) == 0 {
+		logger.Info("semantic clustering finish - no matched")
 		return markPendingAsClustered(ctx, db, entities)
 	}
 
@@ -306,7 +320,7 @@ func semClusterEntities(
 	}
 
 	if logger != nil {
-		logger.Info("semantic clustering finished",
+		logger.Info("semantic clustering finish",
 			"record_id", recordID,
 			"groups", len(groups),
 			"merged", len(mergedIDs),
@@ -365,7 +379,7 @@ func loadPendingEntitiesForSemCluster(ctx context.Context, db *sql.DB, recordID 
 SELECT e.entity_id, e.entity, COALESCE(e.entity_en, ''),
        COALESCE(e.entity_type, ''), COALESCE(e.entity_type_en, ''),
        COALESCE(e.aliases, '[]'::jsonb), COALESCE(e.aliases_en, '[]'::jsonb),
-       COALESCE(e.desc, ''), COALESCE(e.desc_en, ''),
+       COALESCE(e.desc_text, ''), COALESCE(e.desc_text_en, ''),
        COALESCE(e.keywords, '[]'::jsonb), COALESCE(e.keywords_en, '[]'::jsonb),
        COALESCE(e.categories, '[]'::jsonb),
        e.entity_status, e.id AS row_id, COALESCE(e.search_document, ''),
@@ -425,7 +439,7 @@ func loadEntityForSemCluster(ctx context.Context, db *sql.DB, entityID string) (
 SELECT e.entity_id, e.entity, COALESCE(e.entity_en, ''),
        COALESCE(e.entity_type, ''), COALESCE(e.entity_type_en, ''),
        COALESCE(e.aliases, '[]'::jsonb), COALESCE(e.aliases_en, '[]'::jsonb),
-       COALESCE(e.desc, ''), COALESCE(e.desc_en, ''),
+       COALESCE(e.desc_text, ''), COALESCE(e.desc_text_en, ''),
        COALESCE(e.keywords, '[]'::jsonb), COALESCE(e.keywords_en, '[]'::jsonb),
        COALESCE(e.categories, '[]'::jsonb),
        e.entity_status, e.input_record_id, COALESCE(e.search_document, '')
@@ -596,8 +610,9 @@ func allInSameGroup(batch []semClusterGroup, aID, bID string) bool {
 }
 
 // callAdjudicator sends one batch of groups to the LLM for identity adjudication.
-// It uses a dedicated extractor instance to avoid mutating shared state during
-// concurrent Phase C runs.
+// Tries the primary model first; on failure, retries with the fallback model if
+// configured. Uses a dedicated extractor instance to avoid mutating shared state
+// during concurrent Phase C runs.
 func callAdjudicator(
 	ctx context.Context,
 	groups []semClusterGroup,
@@ -612,38 +627,63 @@ func callAdjudicator(
 		return AdjudicationResult{}, fmt.Errorf("(SEMCL_03) marshal groups: %w", err)
 	}
 
-	extractor := &llmclients.OpenAIJSONClient{
-		HTTPClient: &http.Client{Timeout: time.Duration(cfg.ModelCfg.TimeoutSec) * time.Second},
+	payload, err := callAdjudicatorWithModel(ctx, string(inputJSON), cfg.ModelName, cfg.ModelCfg, cfg)
+	if err == nil {
+		return parseAdjudicationResult(payload, groups), nil
 	}
-	applyStructureModelConfigToExtractor(extractor, cfg.ModelCfg)
+
+	// Primary failed — try fallback.
+	fallbackName := strings.TrimSpace(cfg.FallbackModelName)
+	if fallbackName == "" {
+		return AdjudicationResult{}, err
+	}
+
+	payload, fallbackErr := callAdjudicatorWithModel(ctx, string(inputJSON), fallbackName, cfg.FallbackModelCfg, cfg)
+	if fallbackErr != nil {
+		return AdjudicationResult{}, fmt.Errorf("(SEMCL_04) primary adjudication failed: %w; fallback failed: %v", err, fallbackErr)
+	}
+	return parseAdjudicationResult(payload, groups), nil
+}
+
+// callAdjudicatorWithModel performs a single adjudication LLM call with the given
+// model config. It is the low-level extractor call shared by primary and fallback.
+func callAdjudicatorWithModel(
+	ctx context.Context,
+	inputText string,
+	modelName string,
+	modelCfg structureModelConfig,
+	cfg semClusterConfig,
+) (map[string]any, error) {
+	extractor := &llmclients.OpenAIJSONClient{
+		HTTPClient: &http.Client{Timeout: time.Duration(modelCfg.TimeoutSec) * time.Second},
+	}
+	applyStructureModelConfigToExtractor(extractor, modelCfg)
 
 	in := llmclients.JSONExtractionInput{
 		PromptName: cfg.PromptRef,
 		PromptText: cfg.PromptText,
-		ModelName:  strings.TrimSpace(cfg.ModelName),
-		InputText:  string(inputJSON),
+		ModelName:  strings.TrimSpace(modelName),
+		InputText:  inputText,
 	}
 
 	contract := entityAdjudicationContract()
 
-	var payload map[string]any
 	if structuredExtractor, ok := any(extractor).(LLMStructuredJSONExtractor); ok {
 		structResult, extractErr := structuredExtractor.ExtractStructuredJSON(ctx, in, contract)
 		if extractErr != nil {
-			return AdjudicationResult{}, fmt.Errorf("(SEMCL_04) adjudicate: %w", extractErr)
+			return nil, fmt.Errorf("(SEMCL_05) adjudicate with %q: %w", modelName, extractErr)
 		}
 		if structResult == nil || structResult.Parsed == nil {
-			return AdjudicationResult{}, errors.New("(SEMCL_05) adjudicator returned nil payload")
+			return nil, fmt.Errorf("(SEMCL_06) adjudicator %q returned nil payload", modelName)
 		}
-		payload = structResult.Parsed
-	} else {
-		payload, err = extractor.ExtractJSON(ctx, in)
-		if err != nil {
-			return AdjudicationResult{}, fmt.Errorf("(SEMCL_06) adjudicate: %w", err)
-		}
+		return structResult.Parsed, nil
 	}
 
-	return parseAdjudicationResult(payload, groups), nil
+	payload, extractErr := extractor.ExtractJSON(ctx, in)
+	if extractErr != nil {
+		return nil, fmt.Errorf("(SEMCL_07) adjudicate with %q: %w", modelName, extractErr)
+	}
+	return payload, nil
 }
 
 // parseAdjudicationResult unpacks the LLM's per-group output into AdjudicationResult.

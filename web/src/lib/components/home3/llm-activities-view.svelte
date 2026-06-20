@@ -128,6 +128,7 @@
 		<div>
 			<h2>LLM Activities</h2>
 			<p class="muted">Provider-side daily spend reconciliation plus per-call usage telemetry for debugging and optimization.</p>
+			<p class="muted">`Refresh` reloads stored activity data. `Run Reconciliation` fetches fresh provider balances and updates spend rows.</p>
 		</div>
 		<div class="toolbar-actions">
 			<label>
@@ -178,7 +179,7 @@
 		<div class="panel-head">
 			<div>
 				<h3>Current Balances</h3>
-				<p class="muted">Latest provider-side balance snapshot per account.</p>
+				<p class="muted">Latest stored provider-side balance snapshot per account. Use `Run Reconciliation` to fetch a fresh balance.</p>
 			</div>
 		</div>
 		{#if loading && balances.length === 0}

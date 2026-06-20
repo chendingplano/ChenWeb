@@ -274,6 +274,12 @@ func (p *EntityProcessor) HandleEvent(ctx context.Context, payload []byte) error
 // exist for the record, RelationProcessor owns the single Phase C indexing pass,
 // so this no-ops to avoid a concurrent double-index.
 func (p *EntityProcessor) PostProcessIndex(ctx context.Context, recordID int64) error {
+	// Semantic clustering runs regardless of whether relations exist for this record
+	// — it depends only on entity search registry reindex (which happened before
+	// PostProcessIndex is called).
+	if semClusterErr := semClusterEntities(ctx, ApiTypes.ProjectDBHandle, recordID, p.Logger); semClusterErr != nil {
+		p.Logger.Warn("semantic clustering failed (non-fatal)", "record_id", recordID, "error", semClusterErr)
+	}
 	if rel, err := p.Store.RelationsExist(ctx, recordID); err == nil && rel {
 		return nil
 	}
