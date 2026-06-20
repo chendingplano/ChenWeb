@@ -11,6 +11,25 @@ The system has two distinct responsibilities:
 
 The ChenWeb database becomes the source of truth for LLM accounts and model profiles after an initial one-time import from `ChenWeb/.models.toml`.
 
+## Current Status
+
+Implemented now:
+
+- `home3 -> Dashboard -> LLM Activities`
+- `home3 -> System Admin -> LLM Accounts`
+- preview and apply import actions for `.models.toml`
+- PostgreSQL schema for accounts, profiles, usage events, daily reports, and balance snapshots
+- archive-file persistence for captured prompt/response bodies
+- automatic usage capture persistence for `shared/go/api/llm` call paths in the main `deepdoc` server
+
+Not fully implemented yet:
+
+- edit/delete/disable account actions in the UI
+- profile management UI beyond imported/listed profile counts
+- scheduled reconciliation jobs
+- retention cleanup jobs
+- full capture coverage for call paths that use `OpenAIJSONClient` directly instead of `shared/go/api/llm.Client`
+
 ## Goals
 
 - Make LLM accounts a first-class concept.
@@ -327,12 +346,13 @@ First slice:
   - active/inactive
 - Actions
   - add account
-  - add profile
-  - edit
-  - disable
-  - rotate API key
-  - test connection
-  - one-time import from `.models.toml`
+  - preview `.models.toml`
+  - apply one-time import from `.models.toml`
+
+Current implementation note:
+
+- The shipped UI supports list, create, preview import, and apply import.
+- Edit/profile-management/disable/rotate/test-connection actions remain follow-up work.
 
 Deletion behavior:
 
@@ -348,6 +368,7 @@ Suggested endpoint families:
 - `/api/v1/llm/accounts/:id`
 - `/api/v1/llm/accounts/:id/profiles`
 - `/api/v1/llm/accounts/import-models-toml`
+- `/api/v1/llm/accounts/import-models-toml/apply`
 - `/api/v1/llm/reports/daily`
 - `/api/v1/llm/reports/daily/:account_id`
 - `/api/v1/llm/usage-events`
@@ -363,6 +384,14 @@ The first import should:
    - one `llm_account_model_profile` row
 3. Mark imported rows with `metadata_json.source = "toml_import"`.
 4. Avoid future automatic syncing from the file.
+
+Implemented behavior now:
+
+- `POST /api/v1/llm/accounts/import-models-toml` returns a preview payload.
+- `POST /api/v1/llm/accounts/import-models-toml/apply` performs the import.
+- Accounts are upserted by lowercased `account_name`.
+- Profiles are upserted by `(account_id, lower(profile_name))`.
+- Import account-name generation now avoids collisions for multiple accounts on the same provider host by suffixing repeated names.
 
 The system should not watch `.models.toml` for subsequent changes because the database/UI becomes the source of truth.
 
@@ -388,6 +417,14 @@ Integration checks:
 
 - one DeepSeek account can reconcile a daily report
 - one captured call appears in recent call table
+
+Current testable checks:
+
+- preview `.models.toml` from the LLM Accounts page
+- import `.models.toml` from the LLM Accounts page
+- verify imported accounts appear in the account list
+- verify LLM Activities renders existing `llm_daily_account_report` and `llm_usage_event` rows
+- verify a `shared/go/api/llm` call path persists archived bodies plus a `llm_usage_event` row when account/profile IDs are present
 - one archived body can be retrieved in detail view
 
 ## Risks And Mitigations
@@ -453,4 +490,3 @@ Intentionally left undocumented:
 - Final provider-specific DeepSeek reconciliation wire details
 - Exact SQL schema and migration file names
 - Final API response shapes for the dashboard/admin pages
-

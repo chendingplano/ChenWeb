@@ -15,6 +15,7 @@ import (
 type accountAdminStore interface {
 	ListAccounts(ctx context.Context) ([]Account, error)
 	CreateAccount(ctx context.Context, in CreateAccountInput) (Account, error)
+	ImportParsedModels(ctx context.Context, parsed llmimport.ParsedModels) (ImportResult, error)
 }
 
 var adminStoreFactory = func() accountAdminStore {
@@ -66,6 +67,58 @@ func ImportModelsTOMLPreview(c echo.Context) error {
 		"path":     path,
 		"accounts": parsed.Accounts,
 		"profiles": parsed.Profiles,
+	})
+}
+
+func ImportModelsTOMLApply(c echo.Context) error {
+	store := adminStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{
+			"ok":      false,
+			"message": "project database is not initialized",
+		})
+	}
+
+	path := strings.TrimSpace(os.Getenv("CHENWEB_MODELS_TOML"))
+	if path == "" {
+		path = filepath.Join(".", ".models.toml")
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"ok":      false,
+			"message": "failed to read .models.toml",
+			"path":    path,
+			"error":   err.Error(),
+		})
+	}
+
+	parsed, err := llmimport.ParseModelsTOML(raw)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"ok":      false,
+			"message": "failed to parse .models.toml",
+			"path":    path,
+			"error":   err.Error(),
+		})
+	}
+
+	result, err := store.ImportParsedModels(c.Request().Context(), parsed)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{
+			"ok":      false,
+			"message": "failed to import .models.toml",
+			"path":    path,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"ok":                true,
+		"path":              path,
+		"accounts_imported": result.AccountsImported,
+		"profiles_imported": result.ProfilesImported,
 	})
 }
 

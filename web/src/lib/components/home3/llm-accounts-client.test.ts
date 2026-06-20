@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
 	createLLMAccount,
+	applyLLMAccountsImport,
 	importLLMAccountsPreview,
 	listLLMAccounts,
 	type CreateLLMAccountInput
@@ -157,6 +158,29 @@ test('importLLMAccountsPreview calls the bootstrap preview endpoint', async () =
 		assert.equal(mock.calls[0].init?.method, 'POST');
 		assert.equal(preview.ok, true);
 		assert.equal(preview.accounts.length, 1);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('applyLLMAccountsImport calls the bootstrap apply endpoint', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({
+			ok: true,
+			path: '/tmp/.models.toml',
+			accounts_imported: 2,
+			profiles_imported: 3
+		})
+	);
+
+	try {
+		const result = await applyLLMAccountsImport();
+
+		assert.equal(mock.calls.length, 1);
+		assert.equal(String(mock.calls[0].input), '/api/v1/llm/accounts/import-models-toml/apply');
+		assert.equal(mock.calls[0].init?.method, 'POST');
+		assert.equal(result.accounts_imported, 2);
+		assert.equal(result.profiles_imported, 3);
 	} finally {
 		mock.restore();
 	}

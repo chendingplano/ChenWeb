@@ -34,7 +34,7 @@ session_duration_hours = 24
 [llm]
 workspace_timezone = "America/Chicago"
 usage_retention_days = 30
-archive_root = "Data/llm-logs"
+archive_root = "/Users/cding/Apps/llm-logs"
 reconciliation_run_hour = 2
 
 [migration]

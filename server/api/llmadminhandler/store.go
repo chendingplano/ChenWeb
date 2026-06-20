@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/chendingplano/deepdoc/server/api/llmimport"
 )
 
 type Account struct {
@@ -32,6 +34,11 @@ type CreateAccountInput struct {
 
 type Store struct {
 	db *sql.DB
+}
+
+type ImportResult struct {
+	AccountsImported int `json:"accounts_imported"`
+	ProfilesImported int `json:"profiles_imported"`
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -114,4 +121,111 @@ RETURNING id, account_name, provider, base_url, status,
 		return Account{}, err
 	}
 	return account, nil
+}
+
+func (s *Store) ImportParsedModels(ctx context.Context, parsed llmimport.ParsedModels) (ImportResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	profilesByAccount := map[string][]llmimport.ImportedProfile{}
+	for _, profile := range parsed.Profiles {
+		profilesByAccount[profile.AccountKey] = append(profilesByAccount[profile.AccountKey], profile)
+	}
+
+	accountIDs := map[string]string{}
+	const upsertAccount = `INSERT INTO llm_account (
+    account_name, provider, base_url, api_key_ref, status,
+    reconciliation_kind, is_reconciliation_enabled, default_model_name, metadata_json
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb
+)
+ON CONFLICT ((LOWER(account_name))) DO UPDATE SET
+    provider = EXCLUDED.provider,
+    base_url = EXCLUDED.base_url,
+    api_key_ref = EXCLUDED.api_key_ref,
+    status = EXCLUDED.status,
+    updated_at = NOW()
+RETURNING id`
+
+	for _, account := range parsed.Accounts {
+		defaultModelName := ""
+		if profiles := profilesByAccount[account.AccountKey]; len(profiles) > 0 {
+			defaultModelName = profiles[0].ModelName
+		}
+		var accountID string
+		if scanErr := tx.QueryRowContext(
+			ctx,
+			upsertAccount,
+			account.Name,
+			account.Provider,
+			account.BaseURL,
+			account.APIKey,
+			"active",
+			"",
+			false,
+			defaultModelName,
+			`{}`,
+		).Scan(&accountID); scanErr != nil {
+			err = scanErr
+			return ImportResult{}, err
+		}
+		accountIDs[account.AccountKey] = accountID
+	}
+
+	const upsertProfile = `INSERT INTO llm_account_model_profile (
+    account_id, profile_name, model_name, thinking_type, timeout_sec,
+    max_inflight, max_requests_per_minute, max_tokens_per_minute, token_reserve_per_call,
+    is_active, metadata_json
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9,
+    $10, $11::jsonb
+)
+ON CONFLICT (account_id, LOWER(profile_name)) DO UPDATE SET
+    model_name = EXCLUDED.model_name,
+    thinking_type = EXCLUDED.thinking_type,
+    timeout_sec = EXCLUDED.timeout_sec,
+    max_inflight = EXCLUDED.max_inflight,
+    max_requests_per_minute = EXCLUDED.max_requests_per_minute,
+    max_tokens_per_minute = EXCLUDED.max_tokens_per_minute,
+    token_reserve_per_call = EXCLUDED.token_reserve_per_call,
+    is_active = EXCLUDED.is_active,
+    updated_at = NOW()`
+
+	for _, profile := range parsed.Profiles {
+		accountID := accountIDs[profile.AccountKey]
+		if _, execErr := tx.ExecContext(
+			ctx,
+			upsertProfile,
+			accountID,
+			profile.ProfileName,
+			profile.ModelName,
+			profile.ThinkingType,
+			profile.TimeoutSec,
+			profile.MaxInflight,
+			profile.MaxRequestsPerMinute,
+			profile.MaxTokensPerMinute,
+			profile.TokenReservePerCall,
+			true,
+			`{}`,
+		); execErr != nil {
+			err = execErr
+			return ImportResult{}, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return ImportResult{}, err
+	}
+	return ImportResult{
+		AccountsImported: len(parsed.Accounts),
+		ProfilesImported: len(parsed.Profiles),
+	}, nil
 }

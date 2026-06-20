@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chendingplano/deepdoc/server/api/llmimport"
 	"github.com/labstack/echo/v4"
 )
 
@@ -19,6 +20,9 @@ type stubAdminStore struct {
 	createAccountResult  Account
 	createAccountErr     error
 	lastCreateAccountReq CreateAccountInput
+	importResult         ImportResult
+	importErr            error
+	lastImportParsed     int
 }
 
 func (s *stubAdminStore) ListAccounts(_ context.Context) ([]Account, error) {
@@ -28,6 +32,11 @@ func (s *stubAdminStore) ListAccounts(_ context.Context) ([]Account, error) {
 func (s *stubAdminStore) CreateAccount(_ context.Context, in CreateAccountInput) (Account, error) {
 	s.lastCreateAccountReq = in
 	return s.createAccountResult, s.createAccountErr
+}
+
+func (s *stubAdminStore) ImportParsedModels(_ context.Context, parsed llmimport.ParsedModels) (ImportResult, error) {
+	s.lastImportParsed = len(parsed.Accounts) + len(parsed.Profiles)
+	return s.importResult, s.importErr
 }
 
 func TestImportModelsTOMLPreviewReturnsParsedAccountsAndProfiles(t *testing.T) {
@@ -145,5 +154,50 @@ func TestCreateAccountPersistsRequest(t *testing.T) {
 	}
 	if store.lastCreateAccountReq.AccountName != "DeepSeek Prod" || store.lastCreateAccountReq.APIKeyRef != "sk-deepseek" {
 		t.Fatalf("unexpected create request = %+v", store.lastCreateAccountReq)
+	}
+}
+
+func TestImportModelsTOMLApplyImportsParsedModels(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, ".models.toml")
+	raw := `
+[deepseek-chat]
+host = "cloud"
+model_name = "deepseek-chat"
+api_key = "sk-deepseek"
+base_url = "https://api.deepseek.com"
+timeout_sec = 200
+`
+	if err := os.WriteFile(modelsPath, []byte(raw), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv("CHENWEB_MODELS_TOML", modelsPath)
+
+	prev := adminStoreFactory
+	t.Cleanup(func() { adminStoreFactory = prev })
+	store := &stubAdminStore{
+		importResult: ImportResult{
+			AccountsImported: 1,
+			ProfilesImported: 1,
+		},
+	}
+	adminStoreFactory = func() accountAdminStore { return store }
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/llm/accounts/import-models-toml/apply", strings.NewReader("{}"))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ImportModelsTOMLApply(c); err != nil {
+		t.Fatalf("ImportModelsTOMLApply() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if store.lastImportParsed != 2 {
+		t.Fatalf("expected parsed accounts+profiles to reach store, got %d", store.lastImportParsed)
+	}
+	if !strings.Contains(rec.Body.String(), `"accounts_imported":1`) {
+		t.Fatalf("unexpected body = %s", rec.Body.String())
 	}
 }

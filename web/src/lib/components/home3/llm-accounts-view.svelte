@@ -2,9 +2,11 @@
 	import { onMount } from 'svelte';
 
 	import {
+		applyLLMAccountsImport,
 		createLLMAccount,
 		importLLMAccountsPreview,
 		listLLMAccounts,
+		type ApplyLLMAccountsImportResponse,
 		type CreateLLMAccountInput,
 		type ImportLLMAccountsPreviewResponse,
 		type LLMAccount
@@ -20,10 +22,12 @@
 	let loading = $state(false);
 	let submitting = $state(false);
 	let importing = $state(false);
+	let applyingImport = $state(false);
 	let error = $state<string | null>(null);
 	let info = $state<string | null>(null);
 	let showCreate = $state(false);
 	let preview = $state<ImportLLMAccountsPreviewResponse | null>(null);
+	let lastImportResult = $state<ApplyLLMAccountsImportResponse | null>(null);
 
 	let draft = $state<CreateLLMAccountInput>({
 		account_name: '',
@@ -101,6 +105,21 @@
 			error = String((err as Error).message ?? err);
 		} finally {
 			importing = false;
+		}
+	}
+
+	async function applyImport() {
+		applyingImport = true;
+		error = null;
+		info = null;
+		try {
+			lastImportResult = await applyLLMAccountsImport();
+			info = `Imported ${lastImportResult.accounts_imported} accounts and ${lastImportResult.profiles_imported} profiles from .models.toml.`;
+			await loadAccounts();
+		} catch (err) {
+			error = String((err as Error).message ?? err);
+		} finally {
+			applyingImport = false;
 		}
 	}
 
@@ -287,6 +306,16 @@
 					<div class="summary-value">{preview.profiles.length}</div>
 				</div>
 			</div>
+			<div class="preview-actions">
+				<button class="primary" onclick={applyImport} disabled={applyingImport}>
+					{applyingImport ? 'Importing…' : 'Import Into Accounts'}
+				</button>
+				{#if lastImportResult}
+					<div class="muted inline-status">
+						Last import: {lastImportResult.accounts_imported} accounts, {lastImportResult.profiles_imported} profiles
+					</div>
+				{/if}
+			</div>
 			<div class="preview-columns">
 				<div class="preview-list">
 					<h4>Accounts</h4>
@@ -326,7 +355,7 @@
 		min-height: 100%;
 		padding: 16px 20px 32px;
 	}
-	.toolbar, .panel-head, .form-foot, .toolbar-actions, .toggle-row, .preview-columns, .summary-grid, .preview-grid {
+	.toolbar, .panel-head, .form-foot, .toolbar-actions, .toggle-row, .preview-columns, .summary-grid, .preview-grid, .preview-actions {
 		display: flex;
 	}
 	.toolbar, .panel-head {
@@ -476,6 +505,15 @@
 		align-items: flex-start;
 		margin-top: 14px;
 		flex-wrap: wrap;
+	}
+	.preview-actions {
+		margin-top: 14px;
+		gap: 12px;
+		align-items: center;
+		flex-wrap: wrap;
+	}
+	.inline-status {
+		margin: 0;
 	}
 	.preview-list {
 		flex: 1 1 320px;

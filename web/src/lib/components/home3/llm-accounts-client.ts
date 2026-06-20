@@ -33,6 +33,13 @@ export type ImportLLMAccountsPreviewResponse = {
 	profiles: Array<Record<string, unknown>>;
 };
 
+export type ApplyLLMAccountsImportResponse = {
+	ok: boolean;
+	path: string;
+	accounts_imported: number;
+	profiles_imported: number;
+};
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, {
 		credentials: 'same-origin',
@@ -71,6 +78,12 @@ export function createLLMAccount(input: CreateLLMAccountInput): Promise<LLMAccou
 
 export function importLLMAccountsPreview(): Promise<ImportLLMAccountsPreviewResponse> {
 	return req<ImportLLMAccountsPreviewResponse>('/api/v1/llm/accounts/import-models-toml', {
+		method: 'POST'
+	});
+}
+
+export function applyLLMAccountsImport(): Promise<ApplyLLMAccountsImportResponse> {
+	return req<ApplyLLMAccountsImportResponse>('/api/v1/llm/accounts/import-models-toml/apply', {
 		method: 'POST'
 	});
 }

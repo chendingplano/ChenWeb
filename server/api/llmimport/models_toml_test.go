@@ -79,3 +79,30 @@ timeout_sec = 300
 		t.Fatalf("expected shared account key, got %q and %q", got.Profiles[0].AccountKey, got.Profiles[1].AccountKey)
 	}
 }
+
+func TestParseModelsTOMLMakesAccountNamesUniqueForMultipleAccountsOnSameHost(t *testing.T) {
+	raw := []byte(`
+[deepseek-a]
+host = "cloud"
+model_name = "deepseek-chat"
+api_key = "sk-deepseek-a"
+base_url = "https://api.deepseek.com"
+
+[deepseek-b]
+host = "cloud"
+model_name = "deepseek-reasoner"
+api_key = "sk-deepseek-b"
+base_url = "https://api.deepseek.com"
+`)
+
+	got, err := ParseModelsTOML(raw)
+	if err != nil {
+		t.Fatalf("ParseModelsTOML() error = %v", err)
+	}
+	if len(got.Accounts) != 2 {
+		t.Fatalf("accounts = %d, want 2", len(got.Accounts))
+	}
+	if got.Accounts[0].Name == got.Accounts[1].Name {
+		t.Fatalf("expected distinct account names, got %q and %q", got.Accounts[0].Name, got.Accounts[1].Name)
+	}
+}

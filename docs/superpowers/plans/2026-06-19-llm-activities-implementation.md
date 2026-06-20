@@ -64,6 +64,26 @@
 - Modify: `ChenWeb/docs/superpowers/specs/2026-06-19-llm-activities-design.md`
 - Create: `ChenWeb/docs/llm-accounts.md`
 
+## Current Progress Notes
+
+Completed so far:
+
+- shared capture foundation, including archived bodies and default sink support
+- LLM schema migration
+- LLM config block
+- `.models.toml` parser
+- account admin API for list/create/preview/apply import
+- reporting read APIs
+- `home3` views for LLM Activities and LLM Accounts
+- persistence sink for `shared/go/api/llm` call paths in `deepdoc`
+
+Still pending:
+
+- account/profile edit endpoints
+- reconciliation jobs
+- retention jobs
+- broader capture rollout for `OpenAIJSONClient`-based paths
+
 ## Chunk 1: Schema And Shared Capture Foundation
 
 ### Task 1: Add failing tests for archive layout and retention metadata
@@ -334,6 +354,12 @@ Add endpoints:
 - `POST /api/v1/llm/accounts/:id/profiles`
 - `PUT /api/v1/llm/accounts/:id/profiles/:profile_id`
 - `POST /api/v1/llm/accounts/import-models-toml`
+ - `POST /api/v1/llm/accounts/import-models-toml/apply`
+
+Implementation note:
+
+- This slice currently ships `GET /api/v1/llm/accounts`, `POST /api/v1/llm/accounts`, preview import, and apply import.
+- Update/disable/profile-management endpoints remain follow-up work.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -605,4 +631,3 @@ git -C /Users/cding/Workspace/ChenWeb commit -m "docs: add llm accounts operator
 - Do not auto-sync `.models.toml` after initial import.
 - Preserve backward compatibility for existing `shared/go/api/llm` callers where practical, then migrate ChenWeb callers incrementally.
 - If full workspace `go test ./...` is too noisy, record exact failing packages and continue with targeted verification.
-

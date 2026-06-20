@@ -50,15 +50,17 @@ func ParseModelsTOML(raw []byte) (ParsedModels, error) {
 	sort.Strings(keys)
 
 	accountMap := map[string]ImportedAccount{}
+	usedAccountNames := map[string]int{}
 	profiles := make([]ImportedProfile, 0, len(keys))
 	for _, key := range keys {
 		model := models[key]
 		provider := inferProvider(key, model.BaseURL)
 		accountKey := makeAccountKey(provider, model.BaseURL, model.APIKey)
 		if _, exists := accountMap[accountKey]; !exists {
+			accountName := uniqueAccountName(usedAccountNames, defaultAccountName(provider, model.BaseURL))
 			accountMap[accountKey] = ImportedAccount{
 				AccountKey: accountKey,
-				Name:       defaultAccountName(provider, model.BaseURL),
+				Name:       accountName,
 				Provider:   provider,
 				BaseURL:    model.BaseURL,
 				APIKey:     model.APIKey,
@@ -113,6 +115,18 @@ func defaultAccountName(provider, baseURL string) string {
 		return provider
 	}
 	return fmt.Sprintf("%s:%s", provider, u.Host)
+}
+
+func uniqueAccountName(used map[string]int, base string) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "llm-account"
+	}
+	used[base]++
+	if used[base] == 1 {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, used[base])
 }
 
 func sortedAccountKeys(accounts map[string]ImportedAccount) []string {
