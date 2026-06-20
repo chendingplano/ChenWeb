@@ -19,6 +19,7 @@ type AccountStore interface {
 	ListDeepSeekReconciliationAccounts(ctx context.Context) ([]Account, error)
 	InsertBalanceSnapshot(ctx context.Context, snap BalanceSnapshot) error
 	LatestBalanceSnapshotForDay(ctx context.Context, accountID string, workspaceDay time.Time) (BalanceSnapshot, error)
+	FirstBalanceSnapshotForDay(ctx context.Context, accountID string, workspaceDay time.Time) (BalanceSnapshot, error)
 	UpsertProviderReconciledDailyReport(ctx context.Context, report ReconciledDailyReport) error
 }
 
@@ -95,6 +96,28 @@ func (r *Runner) RunWithResult(ctx context.Context) (RunResult, error) {
 			return RunResult{}, err
 		}
 		result.SnapshotsCreated++
+
+		openingTodaySnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, today)
+		if err != nil {
+			if !isMissingSnapshot(err) {
+				return RunResult{}, err
+			}
+		} else {
+			todayReport := ReconciledDailyReport{
+				AccountID:        account.ID,
+				WorkspaceDay:     today,
+				TimezoneName:     r.timezoneName(),
+				OpeningBalance:   openingTodaySnapshot.BalanceAmount,
+				ClosingBalance:   snapshot.BalanceAmount,
+				SpendAmount:      openingTodaySnapshot.BalanceAmount - snapshot.BalanceAmount,
+				CurrencyCode:     firstNonEmpty(balance.CurrencyCode, openingTodaySnapshot.CurrencyCode, "USD"),
+				SourcePayloadRef: rawPayloadRef,
+			}
+			if err := r.Store.UpsertProviderReconciledDailyReport(ctx, todayReport); err != nil {
+				return RunResult{}, err
+			}
+			result.ReportsReconciled++
+		}
 
 		openingSnapshot, err := r.Store.LatestBalanceSnapshotForDay(ctx, account.ID, yesterday)
 		if err != nil {

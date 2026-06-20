@@ -1,5 +1,6 @@
 export type LLMDailyReport = {
 	account_id: string;
+	account_name: string;
 	workspace_day: string;
 	timezone_name: string;
 	opening_balance: number;
@@ -16,6 +17,7 @@ export type LLMDailyReport = {
 export type LLMUsageEvent = {
 	id: string;
 	account_id: string;
+	account_name: string;
 	profile_id: string;
 	provider: string;
 	model_name: string;

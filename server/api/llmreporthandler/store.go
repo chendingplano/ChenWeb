@@ -8,6 +8,7 @@ import (
 
 type DailyReport struct {
 	AccountID            string    `json:"account_id"`
+	AccountName          string    `json:"account_name"`
 	WorkspaceDay         time.Time `json:"workspace_day"`
 	TimezoneName         string    `json:"timezone_name"`
 	OpeningBalance       float64   `json:"opening_balance"`
@@ -24,6 +25,7 @@ type DailyReport struct {
 type UsageEvent struct {
 	ID               string    `json:"id"`
 	AccountID        string    `json:"account_id"`
+	AccountName      string    `json:"account_name"`
 	ProfileID        string    `json:"profile_id"`
 	Provider         string    `json:"provider"`
 	ModelName        string    `json:"model_name"`
@@ -65,10 +67,11 @@ func NewStore(db *sql.DB) *Store {
 }
 
 func (s *Store) ListDailyReports(ctx context.Context, limit int) ([]DailyReport, error) {
-	const query = `SELECT account_id, workspace_day, timezone_name, opening_balance, closing_balance,
+	const query = `SELECT report.account_id, acct.account_name, report.workspace_day, report.timezone_name, report.opening_balance, report.closing_balance,
 spend_amount, currency_code, input_tokens, output_tokens, total_tokens, request_count, reconciliation_status
-FROM llm_daily_account_report
-ORDER BY workspace_day DESC, account_id ASC
+FROM llm_daily_account_report report
+JOIN llm_account acct ON acct.id = report.account_id
+ORDER BY report.workspace_day DESC, acct.account_name ASC
 LIMIT $1`
 	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
@@ -80,6 +83,7 @@ LIMIT $1`
 		var row DailyReport
 		if err := rows.Scan(
 			&row.AccountID,
+			&row.AccountName,
 			&row.WorkspaceDay,
 			&row.TimezoneName,
 			&row.OpeningBalance,
@@ -100,10 +104,11 @@ LIMIT $1`
 }
 
 func (s *Store) ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error) {
-	const query = `SELECT id, account_id, profile_id, provider, model_name, prompt_name,
+	const query = `SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.provider, evt.model_name, evt.prompt_name,
 request_started_at, input_tokens, output_tokens, total_tokens, latency_ms, error_message
-FROM llm_usage_event
-ORDER BY request_started_at DESC
+FROM llm_usage_event evt
+JOIN llm_account acct ON acct.id = evt.account_id
+ORDER BY evt.request_started_at DESC
 LIMIT $1`
 	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
@@ -116,6 +121,7 @@ LIMIT $1`
 		if err := rows.Scan(
 			&row.ID,
 			&row.AccountID,
+			&row.AccountName,
 			&row.ProfileID,
 			&row.Provider,
 			&row.ModelName,

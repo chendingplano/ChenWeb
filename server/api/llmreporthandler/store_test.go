@@ -17,18 +17,19 @@ func TestStoreListDailyReports(t *testing.T) {
 	defer db.Close()
 
 	rows := sqlmock.NewRows([]string{
-		"account_id", "workspace_day", "timezone_name", "opening_balance", "closing_balance",
+		"account_id", "account_name", "workspace_day", "timezone_name", "opening_balance", "closing_balance",
 		"spend_amount", "currency_code", "input_tokens", "output_tokens", "total_tokens",
 		"request_count", "reconciliation_status",
 	}).AddRow(
-		"acct_1", time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC), "America/Chicago",
+		"acct_1", "deepseek:api.deepseek.com", time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC), "America/Chicago",
 		25.5, 19.25, 6.25, "USD", 1000, 250, 1250, 8, "provider_verified",
 	)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT account_id, workspace_day, timezone_name, opening_balance, closing_balance,
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT report.account_id, acct.account_name, report.workspace_day, report.timezone_name, report.opening_balance, report.closing_balance,
 spend_amount, currency_code, input_tokens, output_tokens, total_tokens, request_count, reconciliation_status
-FROM llm_daily_account_report
-ORDER BY workspace_day DESC, account_id ASC
+FROM llm_daily_account_report report
+JOIN llm_account acct ON acct.id = report.account_id
+ORDER BY report.workspace_day DESC, acct.account_name ASC
 LIMIT $1`)).WithArgs(30).WillReturnRows(rows)
 
 	store := NewStore(db)
@@ -39,7 +40,7 @@ LIMIT $1`)).WithArgs(30).WillReturnRows(rows)
 	if len(got) != 1 {
 		t.Fatalf("len(ListDailyReports()) = %d, want 1", len(got))
 	}
-	if got[0].SpendAmount != 6.25 || got[0].RequestCount != 8 {
+	if got[0].SpendAmount != 6.25 || got[0].RequestCount != 8 || got[0].AccountName != "deepseek:api.deepseek.com" {
 		t.Fatalf("unexpected report = %+v", got[0])
 	}
 }
@@ -52,17 +53,18 @@ func TestStoreListUsageEvents(t *testing.T) {
 	defer db.Close()
 
 	rows := sqlmock.NewRows([]string{
-		"id", "account_id", "profile_id", "provider", "model_name", "prompt_name",
+		"id", "account_id", "account_name", "profile_id", "provider", "model_name", "prompt_name",
 		"request_started_at", "input_tokens", "output_tokens", "total_tokens", "latency_ms", "error_message",
 	}).AddRow(
-		"evt_1", "acct_1", "prof_1", "deepseek", "deepseek-v4-flash", "extract-products-v2",
+		"evt_1", "acct_1", "deepseek:api.deepseek.com", "prof_1", "deepseek", "deepseek-v4-flash", "extract-products-v2",
 		time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC), 100, 25, 125, 3200, "",
 	)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, account_id, profile_id, provider, model_name, prompt_name,
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.provider, evt.model_name, evt.prompt_name,
 request_started_at, input_tokens, output_tokens, total_tokens, latency_ms, error_message
-FROM llm_usage_event
-ORDER BY request_started_at DESC
+FROM llm_usage_event evt
+JOIN llm_account acct ON acct.id = evt.account_id
+ORDER BY evt.request_started_at DESC
 LIMIT $1`)).WithArgs(50).WillReturnRows(rows)
 
 	store := NewStore(db)
@@ -73,7 +75,7 @@ LIMIT $1`)).WithArgs(50).WillReturnRows(rows)
 	if len(got) != 1 {
 		t.Fatalf("len(ListUsageEvents()) = %d, want 1", len(got))
 	}
-	if got[0].ModelName != "deepseek-v4-flash" || got[0].TotalTokens != 125 {
+	if got[0].ModelName != "deepseek-v4-flash" || got[0].TotalTokens != 125 || got[0].AccountName != "deepseek:api.deepseek.com" {
 		t.Fatalf("unexpected usage event = %+v", got[0])
 	}
 }

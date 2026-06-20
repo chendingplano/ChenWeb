@@ -96,6 +96,15 @@
 		return new Date(raw).toLocaleString();
 	}
 
+	function fmtWorkspaceDay(raw: string): string {
+		const trimmed = raw?.trim() ?? '';
+		if (!trimmed) {
+			return '';
+		}
+		const day = trimmed.includes('T') ? trimmed.slice(0, trimmed.indexOf('T')) : trimmed.slice(0, 10);
+		return day || trimmed;
+	}
+
 	const pageBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
 	const card = $derived(darkMode ? '#1F2333' : '#FFFFFF');
 	const border = $derived(darkMode ? '#2D3348' : '#E4E6EB');
@@ -195,7 +204,7 @@
 								<td>{balance.provider}</td>
 								<td>{fmtMoney(balance.balance_amount, balance.currency_code)}</td>
 								<td>{fmtDate(balance.captured_at)}</td>
-								<td>{new Date(balance.workspace_day).toLocaleDateString()}</td>
+								<td>{fmtWorkspaceDay(balance.workspace_day)}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -233,10 +242,10 @@
 						{#each reports as report, index (`${report.account_id}-${report.workspace_day}-${index}`)}
 							<tr>
 								<td>
-									<div class="cell-primary">{new Date(report.workspace_day).toLocaleDateString()}</div>
+									<div class="cell-primary">{fmtWorkspaceDay(report.workspace_day)}</div>
 									<div class="cell-secondary">{report.timezone_name}</div>
 								</td>
-								<td>{report.account_id}</td>
+								<td>{report.account_name || report.account_id}</td>
 								<td>{fmtMoney(report.spend_amount, report.currency_code)}</td>
 								<td>
 									<div>{fmtMoney(report.opening_balance, report.currency_code)} -> {fmtMoney(report.closing_balance, report.currency_code)}</div>
@@ -281,7 +290,7 @@
 							<tr>
 								<td>
 									<div class="cell-primary">{fmtDate(event.request_started_at)}</div>
-									<div class="cell-secondary">{event.account_id}</div>
+									<div class="cell-secondary">{event.account_name || event.account_id}</div>
 								</td>
 								<td>{event.prompt_name || 'Unnamed prompt'}</td>
 								<td>

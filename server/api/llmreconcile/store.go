@@ -115,19 +115,42 @@ LIMIT 1`
 	return row, nil
 }
 
+func (s *Store) FirstBalanceSnapshotForDay(ctx context.Context, accountID string, workspaceDay time.Time) (BalanceSnapshot, error) {
+	const query = `SELECT account_id, captured_at, workspace_day, balance_amount, currency_code, raw_payload_ref
+FROM llm_balance_snapshot
+WHERE account_id = $1
+  AND workspace_day = $2
+ORDER BY captured_at ASC
+LIMIT 1`
+
+	var row BalanceSnapshot
+	err := s.db.QueryRowContext(ctx, query, accountID, workspaceDay).Scan(
+		&row.AccountID,
+		&row.CapturedAt,
+		&row.WorkspaceDay,
+		&row.BalanceAmount,
+		&row.CurrencyCode,
+		&row.RawPayloadRef,
+	)
+	if err != nil {
+		return BalanceSnapshot{}, err
+	}
+	return row, nil
+}
+
 func (s *Store) UpsertProviderReconciledDailyReport(ctx context.Context, report ReconciledDailyReport) error {
 	const stmt = `INSERT INTO llm_daily_account_report (
     account_id, workspace_day, timezone_name, opening_balance, closing_balance, spend_amount, currency_code,
     input_tokens, output_tokens, total_tokens, request_count, reconciliation_status, source_kind, source_payload_ref
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
-    COALESCE((SELECT input_tokens FROM llm_daily_account_report WHERE account_id = $1 AND workspace_day = $2), 0),
-    COALESCE((SELECT output_tokens FROM llm_daily_account_report WHERE account_id = $1 AND workspace_day = $2), 0),
-    COALESCE((SELECT total_tokens FROM llm_daily_account_report WHERE account_id = $1 AND workspace_day = $2), 0),
-    COALESCE((SELECT request_count FROM llm_daily_account_report WHERE account_id = $1 AND workspace_day = $2), 0),
+    $1::text, $2::date, $3::text, $4::double precision, $5::double precision, $6::double precision, $7::text,
+    COALESCE((SELECT input_tokens FROM llm_daily_account_report WHERE account_id = $1::text AND workspace_day = $2::date), 0),
+    COALESCE((SELECT output_tokens FROM llm_daily_account_report WHERE account_id = $1::text AND workspace_day = $2::date), 0),
+    COALESCE((SELECT total_tokens FROM llm_daily_account_report WHERE account_id = $1::text AND workspace_day = $2::date), 0),
+    COALESCE((SELECT request_count FROM llm_daily_account_report WHERE account_id = $1::text AND workspace_day = $2::date), 0),
     'provider_verified',
     'provider_balance',
-    $8
+    $8::text
 )
 ON CONFLICT (account_id, workspace_day) DO UPDATE SET
     timezone_name = EXCLUDED.timezone_name,

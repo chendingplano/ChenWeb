@@ -235,6 +235,9 @@ func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID
 			"ms_used", time.Since(relationReindexStart).Milliseconds(),
 		)
 	}
+	if semClusterErr := semClusterEntities(ctx, ApiTypes.ProjectDBHandle, recordID, p.Logger); semClusterErr != nil {
+		p.Logger.Warn("semantic clustering failed (non-fatal)", "record_id", recordID, "error", semClusterErr)
+	}
 	entityIndexStart := time.Now()
 	IndexEntitiesForRecord(ctx, recordID, chunks, p.Logger)
 	IndexEntityNamesForRecord(ctx, recordID, p.Logger)

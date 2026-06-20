@@ -69,6 +69,7 @@ func TestListDailyReportsReturnsRows(t *testing.T) {
 		return &stubReportStore{
 			daily: []DailyReport{{
 				AccountID:    "acct_1",
+				AccountName:  "deepseek:api.deepseek.com",
 				SpendAmount:  6.25,
 				RequestCount: 8,
 			}},
@@ -86,7 +87,7 @@ func TestListDailyReportsReturnsRows(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `"spend_amount":6.25`) {
+	if !strings.Contains(rec.Body.String(), `"spend_amount":6.25`) || !strings.Contains(rec.Body.String(), `"account_name":"deepseek:api.deepseek.com"`) {
 		t.Fatalf("unexpected body = %s", rec.Body.String())
 	}
 }
@@ -98,6 +99,7 @@ func TestListUsageEventsReturnsRows(t *testing.T) {
 		return &stubReportStore{
 			usage: []UsageEvent{{
 				ID:               "evt_1",
+				AccountName:      "deepseek:api.deepseek.com",
 				ModelName:        "deepseek-v4-flash",
 				PromptName:       "extract-products-v2",
 				RequestStartedAt: time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC),
@@ -116,7 +118,7 @@ func TestListUsageEventsReturnsRows(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `"deepseek-v4-flash"`) {
+	if !strings.Contains(rec.Body.String(), `"deepseek-v4-flash"`) || !strings.Contains(rec.Body.String(), `"account_name":"deepseek:api.deepseek.com"`) {
 		t.Fatalf("unexpected body = %s", rec.Body.String())
 	}
 }

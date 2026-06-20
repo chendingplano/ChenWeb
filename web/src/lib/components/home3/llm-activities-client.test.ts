@@ -38,6 +38,7 @@ test('listLLMDailyReports applies the limit query parameter', async () => {
 			reports: [
 				{
 					account_id: 'acct-1',
+					account_name: 'deepseek:api.deepseek.com',
 					workspace_day: '2026-06-19T00:00:00Z',
 					timezone_name: 'America/Chicago',
 					opening_balance: 50,
@@ -73,6 +74,7 @@ test('listLLMUsageEvents applies the limit query parameter', async () => {
 				{
 					id: 'evt-1',
 					account_id: 'acct-1',
+					account_name: 'deepseek:api.deepseek.com',
 					profile_id: 'prof-1',
 					provider: 'deepseek',
 					model_name: 'deepseek-chat',

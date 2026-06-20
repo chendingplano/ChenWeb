@@ -80,6 +80,7 @@ Covered now:
   - writes a `llm_balance_snapshot`
   - archives the raw payload under the configured archive root
   - reconciles yesterday's `llm_daily_account_report` row with `reconciliation_status = "provider_verified"`
+- the doc-processor worker now installs the same shared LLM usage sink as `deepdoc`, so doc-processor LLM calls can persist `llm_usage_event` rows too
 - ChenWeb also exposes a manual trigger at `POST /api/v1/llm/reconciliation/run`, and `home3 -> Dashboard -> LLM Activities` now includes a `Run Reconciliation` button for ad hoc testing.
 
 Not fully covered yet:
@@ -97,3 +98,21 @@ DeepSeek reconciliation currently uses balance deltas between consecutive daily 
 - spend amount: `opening_balance - closing_balance`
 
 This means the first reconciled DeepSeek slice is useful for daily spend monitoring, but it does not yet separate usage spend from same-day account top-ups.
+
+## Table Names
+
+The current LLM activity tables are:
+
+- `llm_account`
+- `llm_account_model_profile`
+- `llm_usage_event`
+- `llm_daily_account_report`
+- `llm_balance_snapshot`
+
+For daily reports:
+
+- `opening_balance` is the start-of-day balance for that report row
+- `closing_balance` is the latest captured balance used for that row
+- `spend_amount` is `opening_balance - closing_balance`
+
+`account_name` lives in `llm_account`, so report and activity views should usually join that table instead of duplicating the name into every downstream table.
