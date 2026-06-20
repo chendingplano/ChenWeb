@@ -1,0 +1,134 @@
+package llmusage
+
+import (
+	"context"
+	"path/filepath"
+	"regexp"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	sharedllm "github.com/chendingplano/shared/go/api/llm"
+)
+
+func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	startedAt := time.Date(2026, 6, 19, 13, 30, 0, 0, time.UTC)
+	finishedAt := startedAt.Add(1500 * time.Millisecond)
+	tmpDir := t.TempDir()
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
+    id, account_id, profile_id, provider, model_name, prompt_name,
+    request_started_at, request_finished_at, workspace_day,
+    input_tokens, output_tokens, total_tokens, latency_ms, http_status,
+    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9,
+    $10, $11, $12, $13, $14,
+    $15, $16, $17, $18, $19::jsonb
+)`)).
+		WithArgs(
+			"evt-test-1",
+			"acct_1",
+			"prof_1",
+			"openai_compatible",
+			"deepseek-chat",
+			"extract-products-v2",
+			startedAt,
+			finishedAt,
+			time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC),
+			int64(12),
+			int64(34),
+			int64(46),
+			int64(1500),
+			0,
+			"",
+			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_1", "bodies", "evt-test-1-input.json.gz"),
+			filepath.Join("2026", "2026-06", "2026-06-19", "account-acct_1", "bodies", "evt-test-1-output.json.gz"),
+			"req_123",
+			`{"capture_source":"shared_llm"}`,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	sink := &Sink{
+		DB:            db,
+		ArchiveRoot:   tmpDir,
+		WorkspaceTZ:   time.UTC,
+		NewID:         func() string { return "evt-test-1" },
+		Now:           func() time.Time { return finishedAt },
+		DefaultStatus: 0,
+	}
+
+	record := sharedllm.UsageCaptureRecord{
+		AccountID:         "acct_1",
+		ProfileID:         "prof_1",
+		Provider:          sharedllm.ProviderOpenAICompatible,
+		ModelName:         "deepseek-chat",
+		PromptName:        "extract-products-v2",
+		RequestStartedAt:  startedAt,
+		RequestFinishedAt: finishedAt,
+		InputTokens:       12,
+		OutputTokens:      34,
+		TotalTokens:       46,
+		ProviderRequestID: "req_123",
+		InputBody:         []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+		OutputBody:        []byte(`{"content":"hello"}`),
+	}
+
+	if err := sink.Capture(context.Background(), record); err != nil {
+		t.Fatalf("Capture() error = %v", err)
+	}
+
+	inputPath := filepath.Join(tmpDir, "2026", "2026-06", "2026-06-19", "account-acct_1", "bodies", "evt-test-1-input.json.gz")
+	outputPath := filepath.Join(tmpDir, "2026", "2026-06", "2026-06-19", "account-acct_1", "bodies", "evt-test-1-output.json.gz")
+	inputBody, err := sharedllm.ReadGzipFile(inputPath)
+	if err != nil {
+		t.Fatalf("ReadGzipFile(input) error = %v", err)
+	}
+	outputBody, err := sharedllm.ReadGzipFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadGzipFile(output) error = %v", err)
+	}
+	if string(inputBody) != `{"messages":[{"role":"user","content":"hi"}]}` {
+		t.Fatalf("unexpected input archive = %q", string(inputBody))
+	}
+	if string(outputBody) != `{"content":"hello"}` {
+		t.Fatalf("unexpected output archive = %q", string(outputBody))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestSinkCaptureSkipsDatabaseInsertWhenAccountProfileMissing(t *testing.T) {
+	sink := &Sink{
+		ArchiveRoot: t.TempDir(),
+		WorkspaceTZ: time.UTC,
+		NewID:       func() string { return "evt-test-2" },
+		Now:         func() time.Time { return time.Date(2026, 6, 19, 10, 0, 0, 0, time.UTC) },
+	}
+
+	record := sharedllm.UsageCaptureRecord{
+		Provider:         sharedllm.ProviderOpenAI,
+		ModelName:        "gpt-4o-mini",
+		PromptName:       "no-account-yet",
+		RequestStartedAt: time.Date(2026, 6, 19, 9, 59, 0, 0, time.UTC),
+		InputBody:        []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+		OutputBody:       []byte(`{"content":"hello"}`),
+	}
+
+	if err := sink.Capture(context.Background(), record); err != nil {
+		t.Fatalf("Capture() error = %v", err)
+	}
+
+	inputPath := filepath.Join(sink.ArchiveRoot, "2026", "2026-06", "2026-06-19", "account-unknown", "bodies", "evt-test-2-input.json.gz")
+	if _, err := sharedllm.ReadGzipFile(inputPath); err != nil {
+		t.Fatalf("expected archive for unknown account, got error %v", err)
+	}
+}

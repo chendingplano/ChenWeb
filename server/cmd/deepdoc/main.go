@@ -12,6 +12,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/database"
 	"github.com/chendingplano/deepdoc/server/api/docgenworker"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
+	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	shared_api "github.com/chendingplano/shared/go/api"
@@ -191,6 +192,12 @@ func main() {
 	}
 
 	logger.Info("migrations completed successfully")
+
+	if err := llmusage.InstallDefaultSink(); err != nil {
+		logger.Error("failed to install default llm usage sink",
+			"error", err, "loc", "CWB_DDM_202")
+		os.Exit(1)
+	}
 
 	if err := kbhandler.CheckSearchBackend(project_db); err != nil {
 		logger.Error("search backend check failed; system exit", "error", err, "loc", "CWB_DDM_200")
