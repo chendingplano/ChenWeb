@@ -139,20 +139,42 @@ func (s *Sink) resolveAccountProfileIDs(ctx context.Context, record sharedllm.Us
 	baseURL := strings.TrimSpace(record.BaseURL)
 	apiKey := strings.TrimSpace(record.APIKey)
 	profileName := strings.TrimSpace(record.ProfileName)
-	if provider == "" || baseURL == "" || apiKey == "" || profileName == "" {
+	modelName := strings.TrimSpace(record.ModelName)
+	if provider == "" || baseURL == "" || apiKey == "" || (profileName == "" && modelName == "") {
 		return "", "", nil
 	}
 
-	const query = `SELECT a.id, p.id
+	const profileQuery = `SELECT a.id, p.id
 FROM llm_account a
 JOIN llm_account_model_profile p ON p.account_id = a.id
 WHERE LOWER(a.provider) = LOWER($1)
-  AND a.base_url = $2
+  AND LOWER(TRIM(TRAILING '/' FROM a.base_url)) = LOWER(TRIM(TRAILING '/' FROM $2))
   AND a.api_key_ref = $3
   AND LOWER(p.profile_name) = LOWER($4)
 LIMIT 1`
 
-	if err := s.DB.QueryRowContext(ctx, query, provider, baseURL, apiKey, profileName).Scan(&accountID, &profileID); err != nil {
+	if profileName != "" {
+		if err := s.DB.QueryRowContext(ctx, profileQuery, provider, baseURL, apiKey, profileName).Scan(&accountID, &profileID); err == nil {
+			return accountID, profileID, nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return "", "", err
+		}
+	}
+
+	if modelName == "" {
+		return "", "", nil
+	}
+
+	const modelQuery = `SELECT a.id, p.id
+FROM llm_account a
+JOIN llm_account_model_profile p ON p.account_id = a.id
+WHERE LOWER(a.provider) = LOWER($1)
+  AND LOWER(TRIM(TRAILING '/' FROM a.base_url)) = LOWER(TRIM(TRAILING '/' FROM $2))
+  AND a.api_key_ref = $3
+  AND LOWER(p.model_name) = LOWER($4)
+LIMIT 1`
+
+	if err := s.DB.QueryRowContext(ctx, modelQuery, provider, baseURL, apiKey, modelName).Scan(&accountID, &profileID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", "", nil
 		}

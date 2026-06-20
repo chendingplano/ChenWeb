@@ -16,6 +16,7 @@ type reportStore interface {
 	ListDailyReports(ctx context.Context, limit int) ([]DailyReport, error)
 	ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error)
 	ListCurrentBalances(ctx context.Context, limit int) ([]CurrentBalance, error)
+	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
 }
 
 type reconciliationRunner interface {
@@ -107,6 +108,25 @@ func ListCurrentBalances(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list current llm balances", "error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"balances": rows})
+}
+
+func GetTodaySummary(c echo.Context) error {
+	store := reportStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
+	}
+	llmCfg := config.GetLLMConfig()
+	loc, err := time.LoadLocation(llmCfg.WorkspaceTimezone)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load workspace timezone", "error": err.Error()})
+	}
+	now := time.Now().In(loc)
+	workspaceDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	summary, err := store.GetTodaySummary(c.Request().Context(), workspaceDay, llmCfg.WorkspaceTimezone)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to load today's llm summary", "error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"summary": summary})
 }
 
 func RunReconciliationNow(c echo.Context) error {

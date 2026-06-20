@@ -12,6 +12,7 @@ import (
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	fileconverters "github.com/chendingplano/deepdoc/server/api/file-converters"
+	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
@@ -105,6 +106,15 @@ func filterConfiguredProcessors(
 	return filtered
 }
 
+var installDefaultUsageSink = llmusage.InstallDefaultSink
+
+func ensureLLMUsageSink() error {
+	if installDefaultUsageSink == nil {
+		return nil
+	}
+	return installDefaultUsageSink()
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -157,6 +167,10 @@ func main() {
 
 	if err := config.RunMigrations(ctx, logger); err != nil {
 		logger.Error("migrations failed", "error", err)
+		os.Exit(1)
+	}
+	if err := ensureLLMUsageSink(); err != nil {
+		logger.Error("failed to install default llm usage sink", "error", err)
 		os.Exit(1)
 	}
 
@@ -232,8 +246,8 @@ func main() {
 			docprocessing.NewInventoryItemsProcessor(inputStore, docprocessing.InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, inventoryItemsLLMClient, logger),
 			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
 			docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
-		docprocessing.NewSceneBlocksProcessor(inputStore, docprocessing.SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, sceneBlocksLLMClient, logger),
-		// docprocessing.NewProductsProcessor(inputStore, docprocessing.ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, productsLLMClient, logger),
+			docprocessing.NewSceneBlocksProcessor(inputStore, docprocessing.SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, sceneBlocksLLMClient, logger),
+			// docprocessing.NewProductsProcessor(inputStore, docprocessing.ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, productsLLMClient, logger),
 		}, configuredProcessorNames()),
 	}
 

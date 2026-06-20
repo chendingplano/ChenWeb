@@ -46,6 +46,16 @@ type CurrentBalance struct {
 	CurrencyCode  string    `json:"currency_code"`
 }
 
+type TodaySummary struct {
+	WorkspaceDay string  `json:"workspace_day"`
+	TimezoneName string  `json:"timezone_name"`
+	SpendAmount  float64 `json:"spend_amount"`
+	CurrencyCode string  `json:"currency_code"`
+	RequestCount int64   `json:"request_count"`
+	TotalTokens  int64   `json:"total_tokens"`
+	ErrorCount   int64   `json:"error_count"`
+}
+
 type Store struct {
 	db *sql.DB
 }
@@ -160,6 +170,35 @@ LIMIT $1`
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error) {
+	summary := TodaySummary{
+		WorkspaceDay: workspaceDay.Format("2006-01-02"),
+		TimezoneName: timezoneName,
+		CurrencyCode: "USD",
+	}
+
+	const spendQuery = `SELECT
+COALESCE(SUM(spend_amount), 0),
+COALESCE(MAX(NULLIF(currency_code, '')), 'USD')
+FROM llm_daily_account_report
+WHERE workspace_day = $1`
+	if err := s.db.QueryRowContext(ctx, spendQuery, workspaceDay).Scan(&summary.SpendAmount, &summary.CurrencyCode); err != nil {
+		return TodaySummary{}, err
+	}
+
+	const usageQuery = `SELECT
+COALESCE(COUNT(*), 0),
+COALESCE(SUM(total_tokens), 0),
+COALESCE(SUM(CASE WHEN NULLIF(error_message, '') IS NOT NULL THEN 1 ELSE 0 END), 0)
+FROM llm_usage_event
+WHERE workspace_day = $1`
+	if err := s.db.QueryRowContext(ctx, usageQuery, workspaceDay).Scan(&summary.RequestCount, &summary.TotalTokens, &summary.ErrorCount); err != nil {
+		return TodaySummary{}, err
+	}
+
+	return summary, nil
 }
 
 func (s *Store) GenerateDailyUsageReport(ctx context.Context, workspaceDay time.Time, timezoneName string) (int64, error) {

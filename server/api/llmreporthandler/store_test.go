@@ -119,6 +119,48 @@ LIMIT $1`)).WithArgs(20).WillReturnRows(rows)
 	}
 }
 
+func TestStoreGetTodaySummary(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	workspaceDay := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT
+COALESCE(SUM(spend_amount), 0),
+COALESCE(MAX(NULLIF(currency_code, '')), 'USD')
+FROM llm_daily_account_report
+WHERE workspace_day = $1`)).
+		WithArgs(workspaceDay).
+		WillReturnRows(sqlmock.NewRows([]string{"spend_amount", "currency_code"}).AddRow(12.34, "CNY"))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT
+COALESCE(COUNT(*), 0),
+COALESCE(SUM(total_tokens), 0),
+COALESCE(SUM(CASE WHEN NULLIF(error_message, '') IS NOT NULL THEN 1 ELSE 0 END), 0)
+FROM llm_usage_event
+WHERE workspace_day = $1`)).
+		WithArgs(workspaceDay).
+		WillReturnRows(sqlmock.NewRows([]string{"request_count", "total_tokens", "error_count"}).AddRow(7, 4567, 2))
+
+	store := NewStore(db)
+	got, err := store.GetTodaySummary(context.Background(), workspaceDay, "America/Chicago")
+	if err != nil {
+		t.Fatalf("GetTodaySummary() error = %v", err)
+	}
+	if got.SpendAmount != 12.34 || got.CurrencyCode != "CNY" || got.RequestCount != 7 || got.TotalTokens != 4567 || got.ErrorCount != 2 {
+		t.Fatalf("unexpected summary = %+v", got)
+	}
+	if got.WorkspaceDay != "2026-06-20" || got.TimezoneName != "America/Chicago" {
+		t.Fatalf("unexpected summary metadata = %+v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestStoreGenerateDailyUsageReport(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

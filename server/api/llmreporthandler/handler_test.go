@@ -16,6 +16,7 @@ type stubReportStore struct {
 	daily []DailyReport
 	usage []UsageEvent
 	bal   []CurrentBalance
+	sum   TodaySummary
 }
 
 func (s *stubReportStore) ListDailyReports(_ context.Context, limit int) ([]DailyReport, error) {
@@ -28,6 +29,10 @@ func (s *stubReportStore) ListUsageEvents(_ context.Context, limit int) ([]Usage
 
 func (s *stubReportStore) ListCurrentBalances(_ context.Context, limit int) ([]CurrentBalance, error) {
 	return s.bal, nil
+}
+
+func (s *stubReportStore) GetTodaySummary(_ context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error) {
+	return s.sum, nil
 }
 
 type stubReconciliationRunner struct {
@@ -146,6 +151,40 @@ func TestListCurrentBalancesReturnsRows(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"balance_amount":475.59`) {
 		t.Fatalf("unexpected body = %s", rec.Body.String())
+	}
+}
+
+func TestGetTodaySummaryReturnsRow(t *testing.T) {
+	prev := reportStoreFactory
+	t.Cleanup(func() { reportStoreFactory = prev })
+	reportStoreFactory = func() reportStore {
+		return &stubReportStore{
+			sum: TodaySummary{
+				WorkspaceDay: "2026-06-20",
+				TimezoneName: "America/Chicago",
+				SpendAmount:  12.34,
+				CurrencyCode: "CNY",
+				RequestCount: 7,
+				TotalTokens:  4567,
+				ErrorCount:   2,
+			},
+		}
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/summary/today", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := GetTodaySummary(c); err != nil {
+		t.Fatalf("GetTodaySummary() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"spend_amount":12.34`) || !strings.Contains(body, `"request_count":7`) || !strings.Contains(body, `"total_tokens":4567`) {
+		t.Fatalf("unexpected body = %s", body)
 	}
 }
 

@@ -38,6 +38,16 @@ export type LLMCurrentBalance = {
 	currency_code: string;
 };
 
+export type LLMTodaySummary = {
+	workspace_day: string;
+	timezone_name: string;
+	spend_amount: number;
+	currency_code: string;
+	request_count: number;
+	total_tokens: number;
+	error_count: number;
+};
+
 export type ListLLMDailyReportsResponse = {
 	reports: LLMDailyReport[];
 };
@@ -48,6 +58,10 @@ export type ListLLMUsageEventsResponse = {
 
 export type ListLLMCurrentBalancesResponse = {
 	balances: LLMCurrentBalance[];
+};
+
+export type GetLLMTodaySummaryResponse = {
+	summary: LLMTodaySummary;
 };
 
 export type RunLLMReconciliationNowResponse = {
@@ -95,6 +109,10 @@ export function listLLMUsageEvents(limit = 50): Promise<ListLLMUsageEventsRespon
 
 export function listLLMCurrentBalances(limit = 20): Promise<ListLLMCurrentBalancesResponse> {
 	return req<ListLLMCurrentBalancesResponse>(`/api/v1/llm/balances/current?limit=${limit}`);
+}
+
+export function getLLMTodaySummary(): Promise<GetLLMTodaySummaryResponse> {
+	return req<GetLLMTodaySummaryResponse>('/api/v1/llm/summary/today');
 }
 
 export function runLLMReconciliationNow(): Promise<RunLLMReconciliationNowResponse> {

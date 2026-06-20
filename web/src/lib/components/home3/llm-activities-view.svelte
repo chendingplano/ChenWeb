@@ -2,12 +2,14 @@
 	import { onMount } from 'svelte';
 
 	import {
+		getLLMTodaySummary,
 		listLLMCurrentBalances,
 		listLLMDailyReports,
 		listLLMUsageEvents,
 		runLLMReconciliationNow,
 		type LLMCurrentBalance,
 		type LLMDailyReport,
+		type LLMTodaySummary,
 		type LLMUsageEvent
 	} from './llm-activities-client';
 
@@ -20,6 +22,15 @@
 	let reports = $state<LLMDailyReport[]>([]);
 	let balances = $state<LLMCurrentBalance[]>([]);
 	let usageEvents = $state<LLMUsageEvent[]>([]);
+	let todaySummary = $state<LLMTodaySummary>({
+		workspace_day: '',
+		timezone_name: '',
+		spend_amount: 0,
+		currency_code: 'USD',
+		request_count: 0,
+		total_tokens: 0,
+		error_count: 0
+	});
 	let loading = $state(false);
 	let reconciling = $state(false);
 	let error = $state<string | null>(null);
@@ -38,11 +49,13 @@
 			notice = null;
 		}
 		try {
-			const [balancesResponse, reportsResponse, eventsResponse] = await Promise.all([
+			const [summaryResponse, balancesResponse, reportsResponse, eventsResponse] = await Promise.all([
+				getLLMTodaySummary(),
 				listLLMCurrentBalances(),
 				listLLMDailyReports(reportLimit),
 				listLLMUsageEvents(eventLimit)
 			]);
+			todaySummary = summaryResponse.summary;
 			balances = balancesResponse.balances;
 			reports = reportsResponse.reports;
 			usageEvents = eventsResponse.usage_events;
@@ -82,11 +95,6 @@
 	function fmtDate(raw: string): string {
 		return new Date(raw).toLocaleString();
 	}
-
-	const totalSpend = $derived(reports.reduce((sum, row) => sum + row.spend_amount, 0));
-	const totalRequests = $derived(reports.reduce((sum, row) => sum + row.request_count, 0));
-	const totalTokens = $derived(reports.reduce((sum, row) => sum + row.total_tokens, 0));
-	const failureCount = $derived(usageEvents.filter((row) => row.error_message).length);
 
 	const pageBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
 	const card = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -132,20 +140,20 @@
 
 	<div class="summary-grid">
 		<div class="summary-card">
-			<div class="summary-label">Reported Spend</div>
-			<div class="summary-value">{fmtMoney(totalSpend, reports[0]?.currency_code ?? 'USD')}</div>
+			<div class="summary-label">Today's Spend</div>
+			<div class="summary-value">{fmtMoney(todaySummary.spend_amount, todaySummary.currency_code || 'USD')}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Requests</div>
-			<div class="summary-value">{fmtNum(totalRequests)}</div>
+			<div class="summary-label">Today's Requests</div>
+			<div class="summary-value">{fmtNum(todaySummary.request_count)}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Tokens</div>
-			<div class="summary-value">{fmtNum(totalTokens)}</div>
+			<div class="summary-label">Today's Tokens</div>
+			<div class="summary-value">{fmtNum(todaySummary.total_tokens)}</div>
 		</div>
 		<div class="summary-card">
-			<div class="summary-label">Captured Errors</div>
-			<div class="summary-value">{fmtNum(failureCount)}</div>
+			<div class="summary-label">Today's Errors</div>
+			<div class="summary-value">{fmtNum(todaySummary.error_count)}</div>
 		</div>
 	</div>
 

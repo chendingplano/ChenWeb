@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+	getLLMTodaySummary,
 	listLLMCurrentBalances,
 	listLLMDailyReports,
 	listLLMUsageEvents,
@@ -123,6 +124,34 @@ test('listLLMCurrentBalances applies the limit query parameter', async () => {
 		assert.equal(String(mock.calls[0].input), '/api/v1/llm/balances/current?limit=7');
 		assert.equal(mock.calls[0].init?.credentials, 'same-origin');
 		assert.equal(response.balances[0].balance_amount, 475.59);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('getLLMTodaySummary loads the today aggregate endpoint', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({
+			summary: {
+				workspace_day: '2026-06-20',
+				timezone_name: 'America/Chicago',
+				spend_amount: 12.34,
+				currency_code: 'CNY',
+				request_count: 7,
+				total_tokens: 4567,
+				error_count: 2
+			}
+		})
+	);
+
+	try {
+		const response = await getLLMTodaySummary();
+
+		assert.equal(mock.calls.length, 1);
+		assert.equal(String(mock.calls[0].input), '/api/v1/llm/summary/today');
+		assert.equal(mock.calls[0].init?.credentials, 'same-origin');
+		assert.equal(response.summary.request_count, 7);
+		assert.equal(response.summary.total_tokens, 4567);
 	} finally {
 		mock.restore();
 	}
