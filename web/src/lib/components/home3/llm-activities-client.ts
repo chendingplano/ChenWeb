@@ -14,6 +14,18 @@ export type LLMDailyReport = {
 	reconciliation_status: string;
 };
 
+export type LLMModelActivityReport = {
+	provider: string;
+	model_name: string;
+	currency_code: string;
+	workspace_day: string;
+	spend_amount: number;
+	input_tokens: number;
+	output_tokens: number;
+	total_tokens: number;
+	request_count: number;
+};
+
 export type LLMUsageEvent = {
 	id: string;
 	account_id: string;
@@ -55,6 +67,10 @@ export type LLMTodaySummary = {
 
 export type ListLLMDailyReportsResponse = {
 	reports: LLMDailyReport[];
+};
+
+export type ListLLMModelActivityReportsResponse = {
+	reports: LLMModelActivityReport[];
 };
 
 export type ListLLMUsageEventsResponse = {
@@ -106,6 +122,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function listLLMDailyReports(limit = 30): Promise<ListLLMDailyReportsResponse> {
 	return req<ListLLMDailyReportsResponse>(`/api/v1/llm/reports/daily?limit=${limit}`);
+}
+
+export function listLLMModelActivityReports(limit = 30): Promise<ListLLMModelActivityReportsResponse> {
+	return req<ListLLMModelActivityReportsResponse>(`/api/v1/llm/reports/models?limit=${limit}`);
 }
 
 export function listLLMUsageEvents(limit = 50): Promise<ListLLMUsageEventsResponse> {

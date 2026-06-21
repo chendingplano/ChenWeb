@@ -279,6 +279,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/llm/accounts/import-models-toml", llmadminhandler.ImportModelsTOMLPreview)
 	apiGroup.POST("/llm/accounts/import-models-toml/apply", llmadminhandler.ImportModelsTOMLApply)
 	apiGroup.GET("/llm/reports/daily", llmreporthandler.ListDailyReports)
+	apiGroup.GET("/llm/reports/models", llmreporthandler.ListModelActivityReports)
 	apiGroup.GET("/llm/balances/current", llmreporthandler.ListCurrentBalances)
 	apiGroup.GET("/llm/usage-events", llmreporthandler.ListUsageEvents)
 	apiGroup.GET("/llm/summary/today", llmreporthandler.GetTodaySummary)

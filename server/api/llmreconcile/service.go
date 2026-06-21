@@ -119,7 +119,7 @@ func (r *Runner) RunWithResult(ctx context.Context) (RunResult, error) {
 			result.ReportsReconciled++
 		}
 
-		openingSnapshot, err := r.Store.LatestBalanceSnapshotForDay(ctx, account.ID, yesterday)
+		openingSnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, yesterday)
 		if err != nil {
 			if isMissingSnapshot(err) {
 				continue
@@ -127,14 +127,23 @@ func (r *Runner) RunWithResult(ctx context.Context) (RunResult, error) {
 			return RunResult{}, err
 		}
 
+		closingSnapshot, err := r.Store.FirstBalanceSnapshotForDay(ctx, account.ID, today)
+		if err != nil {
+			if isMissingSnapshot(err) {
+				closingSnapshot = snapshot
+			} else {
+				return RunResult{}, err
+			}
+		}
+
 		report := ReconciledDailyReport{
 			AccountID:        account.ID,
 			WorkspaceDay:     yesterday,
 			TimezoneName:     r.timezoneName(),
 			OpeningBalance:   openingSnapshot.BalanceAmount,
-			ClosingBalance:   snapshot.BalanceAmount,
-			SpendAmount:      openingSnapshot.BalanceAmount - snapshot.BalanceAmount,
-			CurrencyCode:     firstNonEmpty(balance.CurrencyCode, openingSnapshot.CurrencyCode, "USD"),
+			ClosingBalance:   closingSnapshot.BalanceAmount,
+			SpendAmount:      openingSnapshot.BalanceAmount - closingSnapshot.BalanceAmount,
+			CurrencyCode:     firstNonEmpty(closingSnapshot.CurrencyCode, openingSnapshot.CurrencyCode, balance.CurrencyCode, "USD"),
 			SourcePayloadRef: rawPayloadRef,
 		}
 		if err := r.Store.UpsertProviderReconciledDailyReport(ctx, report); err != nil {

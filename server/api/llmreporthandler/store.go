@@ -51,6 +51,18 @@ type CurrentBalance struct {
 	CurrencyCode  string    `json:"currency_code"`
 }
 
+type ModelActivityReport struct {
+	Provider     string  `json:"provider"`
+	ModelName    string  `json:"model_name"`
+	CurrencyCode string  `json:"currency_code"`
+	WorkspaceDay string  `json:"workspace_day"`
+	SpendAmount  float64 `json:"spend_amount"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
+	TotalTokens  int64   `json:"total_tokens"`
+	RequestCount int64   `json:"request_count"`
+}
+
 type TodaySummary struct {
 	WorkspaceDay string  `json:"workspace_day"`
 	TimezoneName string  `json:"timezone_name"`
@@ -188,6 +200,84 @@ LIMIT $1`
 	return out, rows.Err()
 }
 
+func (s *Store) ListModelActivityReports(ctx context.Context, limit int) ([]ModelActivityReport, error) {
+	const query = `WITH recent_days AS (
+    SELECT DISTINCT workspace_day
+    FROM llm_daily_account_report
+    ORDER BY workspace_day DESC
+    LIMIT $1
+),
+model_usage AS (
+    SELECT
+        evt.workspace_day,
+        evt.account_id,
+        evt.provider,
+        evt.model_name,
+        COALESCE(SUM(evt.input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(evt.output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(evt.total_tokens), 0) AS total_tokens,
+        COUNT(*) AS request_count
+    FROM llm_usage_event evt
+    JOIN recent_days days ON days.workspace_day = evt.workspace_day
+    GROUP BY evt.workspace_day, evt.account_id, evt.provider, evt.model_name
+),
+account_day_totals AS (
+    SELECT account_id, workspace_day, COALESCE(SUM(total_tokens), 0) AS account_total_tokens
+    FROM model_usage
+    GROUP BY account_id, workspace_day
+)
+SELECT
+    mu.provider,
+    mu.model_name,
+    COALESCE(MAX(NULLIF(report.currency_code, '')), 'USD') AS currency_code,
+    COALESCE(TO_CHAR(mu.workspace_day, 'YYYY-MM-DD'), '') AS workspace_day,
+    COALESCE(SUM(
+        CASE
+            WHEN adt.account_total_tokens > 0 THEN report.spend_amount * mu.total_tokens::double precision / adt.account_total_tokens::double precision
+            ELSE 0
+        END
+    ), 0) AS spend_amount,
+    COALESCE(SUM(mu.input_tokens), 0) AS input_tokens,
+    COALESCE(SUM(mu.output_tokens), 0) AS output_tokens,
+    COALESCE(SUM(mu.total_tokens), 0) AS total_tokens,
+    COALESCE(SUM(mu.request_count), 0) AS request_count
+FROM model_usage mu
+JOIN account_day_totals adt
+  ON adt.account_id = mu.account_id
+ AND adt.workspace_day = mu.workspace_day
+LEFT JOIN llm_daily_account_report report
+  ON report.account_id = mu.account_id
+ AND report.workspace_day = mu.workspace_day
+GROUP BY mu.provider, mu.model_name, mu.workspace_day
+ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ModelActivityReport{}
+	for rows.Next() {
+		var row ModelActivityReport
+		if err := rows.Scan(
+			&row.Provider,
+			&row.ModelName,
+			&row.CurrencyCode,
+			&row.WorkspaceDay,
+			&row.SpendAmount,
+			&row.InputTokens,
+			&row.OutputTokens,
+			&row.TotalTokens,
+			&row.RequestCount,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error) {
 	summary := TodaySummary{
 		WorkspaceDay: workspaceDay.Format("2006-01-02"),
@@ -245,8 +335,16 @@ ON CONFLICT (account_id, workspace_day) DO UPDATE SET
     output_tokens = EXCLUDED.output_tokens,
     total_tokens = EXCLUDED.total_tokens,
     request_count = EXCLUDED.request_count,
-    reconciliation_status = EXCLUDED.reconciliation_status,
-    source_kind = EXCLUDED.source_kind,
+    reconciliation_status = CASE
+        WHEN llm_daily_account_report.reconciliation_status = 'provider_verified'
+            THEN llm_daily_account_report.reconciliation_status
+        ELSE EXCLUDED.reconciliation_status
+    END,
+    source_kind = CASE
+        WHEN llm_daily_account_report.reconciliation_status = 'provider_verified'
+            THEN llm_daily_account_report.source_kind
+        ELSE EXCLUDED.source_kind
+    END,
     updated_at = NOW()`
 	res, err := s.db.ExecContext(ctx, stmt, workspaceDay, timezoneName)
 	if err != nil {

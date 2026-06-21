@@ -11,6 +11,14 @@ ChenWeb now treats LLM provider credentials as first-class accounts. Accounts ar
 
 The database is the source of truth after bootstrap import.
 
+The first drill is now implemented end-to-end for:
+
+- account import and account management UI
+- per-call LLM usage logging through `shared/go/api/llm`
+- archived prompt/response body capture with retention
+- `home3 -> Dashboard -> LLM Activities`
+- DeepSeek provider-side daily spend reconciliation
+
 ## Current UI
 
 `home3 -> System Admin -> LLM Accounts`
@@ -19,12 +27,12 @@ Current actions:
 
 - list accounts
 - create an account manually
+- edit an account manually
 - preview `.models.toml`
 - import `.models.toml` into accounts and profiles
 
 Current non-actions:
 
-- edit account
 - disable account
 - delete account
 - manage profiles directly in the UI
@@ -79,9 +87,15 @@ Covered now:
   - calls `GET /user/balance`
   - writes a `llm_balance_snapshot`
   - archives the raw payload under the configured archive root
+  - reconciles today's in-progress report row
   - reconciles yesterday's `llm_daily_account_report` row with `reconciliation_status = "provider_verified"`
 - the doc-processor worker now installs the same shared LLM usage sink as `deepdoc`, so doc-processor LLM calls can persist `llm_usage_event` rows too
 - ChenWeb also exposes a manual trigger at `POST /api/v1/llm/reconciliation/run`, and `home3 -> Dashboard -> LLM Activities` now includes a `Run Reconciliation` button for ad hoc testing.
+- `home3 -> Dashboard -> LLM Activities` now shows:
+  - today's top-line stats across all models
+  - current provider-side balances per account
+  - grouped daily model charts with workspace day on the horizontal axis
+  - recent usage events including `record_id`, `call_reason`, and `call_loc`
 
 Not fully covered yet:
 
@@ -91,13 +105,25 @@ Not fully covered yet:
 
 ## DeepSeek Reconciliation Notes
 
-DeepSeek reconciliation currently uses balance deltas between consecutive daily snapshots:
+DeepSeek reconciliation currently uses first-of-day provider snapshots:
 
-- opening balance: latest snapshot captured on the report day
-- closing balance: latest snapshot captured on the following day
-- spend amount: `opening_balance - closing_balance`
+- today's report:
+  - opening balance: first snapshot captured on the current workspace day
+  - closing balance: latest snapshot captured so far on the current workspace day
+  - spend amount: `opening_balance - closing_balance`
+- yesterday's report:
+  - opening balance: first snapshot captured on yesterday's workspace day
+  - closing balance: first snapshot captured on today's workspace day
+  - spend amount: `opening_balance - closing_balance`
 
-This means the first reconciled DeepSeek slice is useful for daily spend monitoring, but it does not yet separate usage spend from same-day account top-ups.
+Important behavior:
+
+- a later manual reconciliation run on the same day must not rewrite yesterday's closing balance to a later same-day balance snapshot
+- usage aggregation must not overwrite a `provider_verified` report row and reset `spend_amount` back to zero
+- provider-side spend is authoritative only for providers that currently support reconciliation
+- usage-only providers may still show request and token activity while spend remains non-authoritative
+
+This means the DeepSeek slice is useful for daily spend monitoring, but it still does not separate usage spend from same-day account top-ups or credits returned by the provider.
 
 ## Table Names
 
@@ -112,8 +138,10 @@ The current LLM activity tables are:
 For daily reports:
 
 - `opening_balance` is the start-of-day balance for that report row
-- `closing_balance` is the latest captured balance used for that row
+- `closing_balance` is the provider balance snapshot chosen by the reconciliation policy for that row
 - `spend_amount` is `opening_balance - closing_balance`
+- `reconciliation_status = "provider_verified"` means the spend came from provider-side balance reconciliation
+- `reconciliation_status = "usage_aggregated"` means the row only has locally captured request/token totals and spend should not be treated as authoritative
 
 `account_name` lives in `llm_account`, so report and activity views should usually join that table instead of duplicating the name into every downstream table.
 
@@ -123,3 +151,4 @@ For per-call usage rows in `llm_usage_event`:
 - `record_id` stores the ChenWeb input record when the LLM call belongs to a doc-processing or KB workflow.
 - `call_reason` stores the business reason for the call, such as `extract_metrics`, `enrich_scene_blocks`, or `generate_summary`.
 - `call_loc` stores a stable source marker such as `MID-CWB-...` so we can trace where the call originated in code.
+- embedding/vector calls may legitimately show `output_tokens = 0`; returned vectors are output data, but they are not usually billed or reported as completion/output tokens by the provider APIs we capture today.

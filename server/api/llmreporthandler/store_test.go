@@ -80,6 +80,82 @@ LIMIT $1`)).WithArgs(50).WillReturnRows(rows)
 	}
 }
 
+func TestStoreListModelActivityReports(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{
+		"provider", "model_name", "currency_code", "workspace_day", "spend_amount", "input_tokens", "output_tokens", "total_tokens", "request_count",
+	}).AddRow(
+		"deepseek", "deepseek-v4-flash", "CNY", "2026-06-20", 11.88, int64(2925804), int64(3975685), int64(6901489), int64(1380),
+	)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`WITH recent_days AS (
+    SELECT DISTINCT workspace_day
+    FROM llm_daily_account_report
+    ORDER BY workspace_day DESC
+    LIMIT $1
+),
+model_usage AS (
+    SELECT
+        evt.workspace_day,
+        evt.account_id,
+        evt.provider,
+        evt.model_name,
+        COALESCE(SUM(evt.input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(evt.output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(evt.total_tokens), 0) AS total_tokens,
+        COUNT(*) AS request_count
+    FROM llm_usage_event evt
+    JOIN recent_days days ON days.workspace_day = evt.workspace_day
+    GROUP BY evt.workspace_day, evt.account_id, evt.provider, evt.model_name
+),
+account_day_totals AS (
+    SELECT account_id, workspace_day, COALESCE(SUM(total_tokens), 0) AS account_total_tokens
+    FROM model_usage
+    GROUP BY account_id, workspace_day
+)
+SELECT
+    mu.provider,
+    mu.model_name,
+    COALESCE(MAX(NULLIF(report.currency_code, '')), 'USD') AS currency_code,
+    COALESCE(TO_CHAR(mu.workspace_day, 'YYYY-MM-DD'), '') AS workspace_day,
+    COALESCE(SUM(
+        CASE
+            WHEN adt.account_total_tokens > 0 THEN report.spend_amount * mu.total_tokens::double precision / adt.account_total_tokens::double precision
+            ELSE 0
+        END
+    ), 0) AS spend_amount,
+    COALESCE(SUM(mu.input_tokens), 0) AS input_tokens,
+    COALESCE(SUM(mu.output_tokens), 0) AS output_tokens,
+    COALESCE(SUM(mu.total_tokens), 0) AS total_tokens,
+    COALESCE(SUM(mu.request_count), 0) AS request_count
+FROM model_usage mu
+JOIN account_day_totals adt
+  ON adt.account_id = mu.account_id
+ AND adt.workspace_day = mu.workspace_day
+LEFT JOIN llm_daily_account_report report
+  ON report.account_id = mu.account_id
+ AND report.workspace_day = mu.workspace_day
+GROUP BY mu.provider, mu.model_name, mu.workspace_day
+ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC`)).WithArgs(30).WillReturnRows(rows)
+
+	store := NewStore(db)
+	got, err := store.ListModelActivityReports(context.Background(), 30)
+	if err != nil {
+		t.Fatalf("ListModelActivityReports() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(ListModelActivityReports()) = %d, want 1", len(got))
+	}
+	if got[0].ModelName != "deepseek-v4-flash" || got[0].WorkspaceDay != "2026-06-20" || got[0].SpendAmount != 11.88 || got[0].RequestCount != 1380 {
+		t.Fatalf("unexpected model report = %+v", got[0])
+	}
+}
+
 func TestStoreListCurrentBalances(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -198,8 +274,16 @@ ON CONFLICT (account_id, workspace_day) DO UPDATE SET
     output_tokens = EXCLUDED.output_tokens,
     total_tokens = EXCLUDED.total_tokens,
     request_count = EXCLUDED.request_count,
-    reconciliation_status = EXCLUDED.reconciliation_status,
-    source_kind = EXCLUDED.source_kind,
+    reconciliation_status = CASE
+        WHEN llm_daily_account_report.reconciliation_status = 'provider_verified'
+            THEN llm_daily_account_report.reconciliation_status
+        ELSE EXCLUDED.reconciliation_status
+    END,
+    source_kind = CASE
+        WHEN llm_daily_account_report.reconciliation_status = 'provider_verified'
+            THEN llm_daily_account_report.source_kind
+        ELSE EXCLUDED.source_kind
+    END,
     updated_at = NOW()`)).
 		WithArgs(workspaceDay, "America/Chicago").
 		WillReturnResult(sqlmock.NewResult(0, 2))

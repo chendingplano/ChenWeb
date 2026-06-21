@@ -5,6 +5,7 @@ import {
 	getLLMTodaySummary,
 	listLLMCurrentBalances,
 	listLLMDailyReports,
+	listLLMModelActivityReports,
 	listLLMUsageEvents,
 	runLLMReconciliationNow
 } from './llm-activities-client.js';
@@ -76,9 +77,12 @@ test('listLLMUsageEvents applies the limit query parameter', async () => {
 					account_id: 'acct-1',
 					account_name: 'deepseek:api.deepseek.com',
 					profile_id: 'prof-1',
+					record_id: 88,
 					provider: 'deepseek',
 					model_name: 'deepseek-chat',
 					prompt_name: 'daily-summary',
+					call_reason: 'extract_products',
+					call_loc: 'MID-CWB-TEST',
 					request_started_at: '2026-06-19T03:00:00Z',
 					input_tokens: 100,
 					output_tokens: 50,
@@ -97,6 +101,37 @@ test('listLLMUsageEvents applies the limit query parameter', async () => {
 		assert.equal(String(mock.calls[0].input), '/api/v1/llm/usage-events?limit=25');
 		assert.equal(mock.calls[0].init?.credentials, 'same-origin');
 		assert.equal(response.usage_events[0].prompt_name, 'daily-summary');
+	} finally {
+		mock.restore();
+	}
+});
+
+test('listLLMModelActivityReports applies the limit query parameter', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({
+			reports: [
+				{
+					provider: 'deepseek',
+					model_name: 'deepseek-v4-flash',
+					currency_code: 'CNY',
+					workspace_day: '2026-06-20',
+					spend_amount: 11.88,
+					input_tokens: 2925804,
+					output_tokens: 3975685,
+					total_tokens: 6901489,
+					request_count: 1380
+				}
+			]
+		})
+	);
+
+	try {
+		const response = await listLLMModelActivityReports(12);
+
+		assert.equal(mock.calls.length, 1);
+		assert.equal(String(mock.calls[0].input), '/api/v1/llm/reports/models?limit=12');
+		assert.equal(mock.calls[0].init?.credentials, 'same-origin');
+		assert.equal(response.reports[0].model_name, 'deepseek-v4-flash');
 	} finally {
 		mock.restore();
 	}

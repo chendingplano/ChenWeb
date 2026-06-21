@@ -14,6 +14,7 @@ import (
 
 type stubReportStore struct {
 	daily []DailyReport
+	model []ModelActivityReport
 	usage []UsageEvent
 	bal   []CurrentBalance
 	sum   TodaySummary
@@ -21,6 +22,10 @@ type stubReportStore struct {
 
 func (s *stubReportStore) ListDailyReports(_ context.Context, limit int) ([]DailyReport, error) {
 	return s.daily, nil
+}
+
+func (s *stubReportStore) ListModelActivityReports(_ context.Context, limit int) ([]ModelActivityReport, error) {
+	return s.model, nil
 }
 
 func (s *stubReportStore) ListUsageEvents(_ context.Context, limit int) ([]UsageEvent, error) {
@@ -119,6 +124,38 @@ func TestListUsageEventsReturnsRows(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), `"deepseek-v4-flash"`) || !strings.Contains(rec.Body.String(), `"account_name":"deepseek:api.deepseek.com"`) {
+		t.Fatalf("unexpected body = %s", rec.Body.String())
+	}
+}
+
+func TestListModelActivityReportsReturnsRows(t *testing.T) {
+	prev := reportStoreFactory
+	t.Cleanup(func() { reportStoreFactory = prev })
+	reportStoreFactory = func() reportStore {
+		return &stubReportStore{
+			model: []ModelActivityReport{{
+				Provider:     "deepseek",
+				ModelName:    "deepseek-v4-flash",
+				CurrencyCode: "CNY",
+				WorkspaceDay: "2026-06-20",
+				SpendAmount:  11.88,
+				RequestCount: 1380,
+			}},
+		}
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/llm/reports/models", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ListModelActivityReports(c); err != nil {
+		t.Fatalf("ListModelActivityReports() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"model_name":"deepseek-v4-flash"`) || !strings.Contains(rec.Body.String(), `"workspace_day":"2026-06-20"`) || !strings.Contains(rec.Body.String(), `"spend_amount":11.88`) {
 		t.Fatalf("unexpected body = %s", rec.Body.String())
 	}
 }

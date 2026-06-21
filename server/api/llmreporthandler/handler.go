@@ -14,6 +14,7 @@ import (
 
 type reportStore interface {
 	ListDailyReports(ctx context.Context, limit int) ([]DailyReport, error)
+	ListModelActivityReports(ctx context.Context, limit int) ([]ModelActivityReport, error)
 	ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error)
 	ListCurrentBalances(ctx context.Context, limit int) ([]CurrentBalance, error)
 	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
@@ -95,6 +96,19 @@ func ListUsageEvents(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list llm usage events", "error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"usage_events": rows})
+}
+
+func ListModelActivityReports(c echo.Context) error {
+	store := reportStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
+	}
+	limit := intParamDefault(c.QueryParam("limit"), 30)
+	rows, err := store.ListModelActivityReports(c.Request().Context(), limit)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list llm model activity reports", "error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"reports": rows})
 }
 
 func ListCurrentBalances(c echo.Context) error {

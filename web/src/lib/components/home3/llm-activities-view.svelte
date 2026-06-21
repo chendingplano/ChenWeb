@@ -1,17 +1,25 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Chart } from 'svelte-echarts';
+	import type { EChartsOption } from 'echarts';
+	import { BarChart } from 'echarts/charts';
+	import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+	import { init, use } from 'echarts/core';
+	import { CanvasRenderer } from 'echarts/renderers';
 
 	import {
 		getLLMTodaySummary,
 		listLLMCurrentBalances,
-		listLLMDailyReports,
+		listLLMModelActivityReports,
 		listLLMUsageEvents,
 		runLLMReconciliationNow,
 		type LLMCurrentBalance,
-		type LLMDailyReport,
+		type LLMModelActivityReport,
 		type LLMTodaySummary,
 		type LLMUsageEvent
 	} from './llm-activities-client';
+
+	use([BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 	let {
 		darkMode = true
@@ -19,7 +27,7 @@
 		darkMode?: boolean;
 	} = $props();
 
-	let reports = $state<LLMDailyReport[]>([]);
+	let modelReports = $state<LLMModelActivityReport[]>([]);
 	let balances = $state<LLMCurrentBalance[]>([]);
 	let usageEvents = $state<LLMUsageEvent[]>([]);
 	let todaySummary = $state<LLMTodaySummary>({
@@ -52,12 +60,12 @@
 			const [summaryResponse, balancesResponse, reportsResponse, eventsResponse] = await Promise.all([
 				getLLMTodaySummary(),
 				listLLMCurrentBalances(),
-				listLLMDailyReports(reportLimit),
+				listLLMModelActivityReports(reportLimit),
 				listLLMUsageEvents(eventLimit)
 			]);
 			todaySummary = summaryResponse.summary;
 			balances = balancesResponse.balances;
-			reports = reportsResponse.reports;
+			modelReports = reportsResponse.reports;
 			usageEvents = eventsResponse.usage_events;
 		} catch (err) {
 			error = String((err as Error).message ?? err);
@@ -105,6 +113,22 @@
 		return day || trimmed;
 	}
 
+	function isEmbeddingModel(modelName: string): boolean {
+		const normalized = (modelName || '').trim().toLowerCase();
+		return normalized.includes('embedding') || normalized.includes('embed');
+	}
+
+	function tokenOutputLabel(modelName: string): string {
+		return isEmbeddingModel(modelName) ? 'Completion Tokens' : 'Output Tokens';
+	}
+
+	function tokenSummary(event: LLMUsageEvent): string {
+		if (isEmbeddingModel(event.model_name)) {
+			return `${fmtNum(event.input_tokens)} input / ${fmtNum(event.output_tokens)} completion`;
+		}
+		return `${fmtNum(event.input_tokens)} in / ${fmtNum(event.output_tokens)} out`;
+	}
+
 	const pageBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
 	const card = $derived(darkMode ? '#1F2333' : '#FFFFFF');
 	const border = $derived(darkMode ? '#2D3348' : '#E4E6EB');
@@ -112,6 +136,160 @@
 	const sub = $derived(darkMode ? '#94A3B8' : '#6B7280');
 	const btn = $derived(darkMode ? '#A16207' : '#B45309');
 	const inputBg = $derived(darkMode ? '#0F1320' : '#F7F8FA');
+	const spendBar = $derived(darkMode ? '#F59E0B' : '#D97706');
+	const inputBar = $derived(darkMode ? '#3B82F6' : '#2563EB');
+	const outputBar = $derived(darkMode ? '#22C55E' : '#16A34A');
+	const callsBar = $derived(darkMode ? '#7C83FD' : '#4F46E5');
+
+	type ModelChartGroup = {
+		key: string;
+		provider: string;
+		modelName: string;
+		currencyCode: string;
+		rows: LLMModelActivityReport[];
+	};
+
+	const modelChartGroups = $derived(
+		(() => {
+			const grouped = new Map<string, ModelChartGroup>();
+			for (const row of modelReports) {
+				const key = `${row.provider}:${row.model_name}`;
+				const existing = grouped.get(key);
+				if (existing) {
+					existing.rows.push(row);
+					if (!existing.currencyCode && row.currency_code) {
+						existing.currencyCode = row.currency_code;
+					}
+					continue;
+				}
+				grouped.set(key, {
+					key,
+					provider: row.provider,
+					modelName: row.model_name,
+					currencyCode: row.currency_code || 'USD',
+					rows: [row]
+				});
+			}
+
+			return Array.from(grouped.values())
+				.map((group) => ({
+					...group,
+					rows: [...group.rows].sort((a, b) => a.workspace_day.localeCompare(b.workspace_day))
+				}))
+				.sort((a, b) => a.modelName.localeCompare(b.modelName) || a.provider.localeCompare(b.provider));
+		})()
+	);
+
+	function buildModelChartOptions(group: ModelChartGroup): EChartsOption {
+		const days = group.rows.map((row) => fmtWorkspaceDay(row.workspace_day));
+		const outputLabel = tokenOutputLabel(group.modelName);
+		return {
+			backgroundColor: 'transparent',
+			animationDuration: 250,
+			color: [spendBar, inputBar, outputBar, callsBar],
+			legend: {
+				top: 0,
+				textStyle: {
+					color: sub
+				},
+				itemWidth: 14,
+				itemHeight: 10
+			},
+			tooltip: {
+				trigger: 'axis',
+				axisPointer: {
+					type: 'shadow'
+				},
+				backgroundColor: darkMode ? '#0F1320' : '#FFFFFF',
+				borderColor: border,
+				textStyle: {
+					color: heading
+				}
+			},
+			grid: {
+				top: 44,
+				right: 96,
+				bottom: 56,
+				left: 64
+			},
+			xAxis: {
+				type: 'category',
+				data: days,
+				axisTick: { alignWithLabel: true },
+				axisLine: { lineStyle: { color: border } },
+				axisLabel: {
+					color: sub,
+					rotate: days.length > 8 ? 35 : 0
+				}
+			},
+			yAxis: [
+				{
+					type: 'value',
+					name: 'Tokens',
+					nameTextStyle: { color: sub },
+					axisLabel: {
+						color: sub,
+						formatter: (value: number) => fmtNum(value)
+					},
+					splitLine: { lineStyle: { color: border, opacity: 0.45 } }
+				},
+				{
+					type: 'value',
+					name: 'Calls',
+					position: 'right',
+					offset: 0,
+					nameTextStyle: { color: sub },
+					axisLabel: {
+						color: sub,
+						formatter: (value: number) => fmtNum(value)
+					},
+					splitLine: { show: false }
+				},
+				{
+					type: 'value',
+					name: `Spend (${group.currencyCode || 'USD'})`,
+					position: 'right',
+					offset: 64,
+					nameTextStyle: { color: sub },
+					axisLabel: {
+						color: sub,
+						formatter: (value: number) => Number(value).toFixed(2)
+					},
+					splitLine: { show: false }
+				}
+			],
+			series: [
+				{
+					name: 'Spending',
+					type: 'bar',
+					yAxisIndex: 2,
+					barMaxWidth: 18,
+					data: group.rows.map((row) => row.spend_amount)
+				},
+				{
+					name: 'Input Tokens',
+					type: 'bar',
+					yAxisIndex: 0,
+					barMaxWidth: 18,
+					data: group.rows.map((row) => row.input_tokens)
+				},
+				{
+					name: outputLabel,
+					type: 'bar',
+					yAxisIndex: 0,
+					barMaxWidth: 18,
+					data: group.rows.map((row) => row.output_tokens)
+				},
+				{
+					name: 'Calls',
+					type: 'bar',
+					yAxisIndex: 1,
+					barMaxWidth: 18,
+					data: group.rows.map((row) => row.request_count)
+				}
+			]
+		};
+	}
 </script>
 
 <div
@@ -139,7 +317,7 @@
 				<span>Events</span>
 				<input type="number" min="1" bind:value={eventLimit} />
 			</label>
-			<button class="primary" onclick={load} disabled={loading}>
+			<button class="primary" onclick={() => load()} disabled={loading}>
 				{loading ? 'Refreshing…' : 'Refresh'}
 			</button>
 			<button class="secondary" onclick={runReconciliation} disabled={loading || reconciling}>
@@ -218,46 +396,35 @@
 		<div class="panel-head">
 			<div>
 				<h3>Daily Spend Reports</h3>
-				<p class="muted">Authoritative daily totals grouped by LLM account and workspace timezone.</p>
+				<p class="muted">Per-model activity aggregated across the recent report window. Spending is allocated from each account/day by that model&apos;s token share.</p>
 			</div>
 		</div>
-		{#if loading && reports.length === 0}
-			<div class="empty">Loading daily reports…</div>
-		{:else if reports.length === 0}
-			<div class="empty">No daily LLM reports yet. Reconciliation will populate this after the scheduled run.</div>
+		{#if loading && modelReports.length === 0}
+			<div class="empty">Loading model activity reports…</div>
+		{:else if modelReports.length === 0}
+			<div class="empty">No model activity reports yet. Reconciliation plus captured usage events will populate this section.</div>
 		{:else}
-			<div class="table-wrap">
-				<table>
-					<thead>
-						<tr>
-							<th>Day</th>
-							<th>Account</th>
-							<th>Spend</th>
-							<th>Balance</th>
-							<th>Tokens</th>
-							<th>Requests</th>
-							<th>Status</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each reports as report, index (`${report.account_id}-${report.workspace_day}-${index}`)}
-							<tr>
-								<td>
-									<div class="cell-primary">{fmtWorkspaceDay(report.workspace_day)}</div>
-									<div class="cell-secondary">{report.timezone_name}</div>
-								</td>
-								<td>{report.account_name || report.account_id}</td>
-								<td>{fmtMoney(report.spend_amount, report.currency_code)}</td>
-								<td>
-									<div>{fmtMoney(report.opening_balance, report.currency_code)} -> {fmtMoney(report.closing_balance, report.currency_code)}</div>
-								</td>
-								<td>{fmtNum(report.input_tokens)} in / {fmtNum(report.output_tokens)} out</td>
-								<td>{fmtNum(report.request_count)}</td>
-								<td>{report.reconciliation_status}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+			<div class="model-chart-grid">
+				{#each modelChartGroups as group (group.key)}
+					<div class="model-chart-card">
+						<div class="model-chart-head">
+							<div>
+								<div class="cell-primary">{group.modelName}</div>
+								<div class="cell-secondary">
+									{group.provider} · {fmtNum(group.rows.length)} day(s) · grouped by workspace day
+								</div>
+								{#if isEmbeddingModel(group.modelName)}
+									<div class="cell-secondary">
+										Embedding vectors are returned data and usually do not count as output tokens.
+									</div>
+								{/if}
+							</div>
+						</div>
+						<div class="model-chart">
+							<Chart {init} options={buildModelChartOptions(group)} style="width: 100%; height: 100%;" />
+						</div>
+					</div>
+				{/each}
 			</div>
 		{/if}
 	</div>
@@ -279,11 +446,14 @@
 					<thead>
 						<tr>
 							<th>Time</th>
+							<th>Record ID</th>
+							<th>Call Reason</th>
 							<th>Prompt</th>
 							<th>Model</th>
 							<th>Tokens</th>
 							<th>Latency</th>
 							<th>Status</th>
+							<th>Call Loc</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -291,31 +461,28 @@
 							<tr>
 								<td>
 									<div class="cell-primary">{fmtDate(event.request_started_at)}</div>
-									<div class="cell-secondary">
-										{event.account_name || event.account_id}
-										{#if event.record_id != null}
-											· record {event.record_id}
-										{/if}
-									</div>
+									<div class="cell-secondary">{event.account_name || event.account_id}</div>
 								</td>
+								<td>{event.record_id ?? ''}</td>
+								<td>{event.call_reason || ''}</td>
 								<td>
 									<div class="cell-primary">{event.prompt_name}</div>
-									<div class="cell-secondary">
-										{event.call_reason || 'no reason'}
-										{#if event.call_loc}
-											· {event.call_loc}
-										{/if}
-									</div>
 								</td>
 								<td>
 									<div class="cell-primary">{event.model_name}</div>
 									<div class="cell-secondary">{event.provider}</div>
 								</td>
-								<td>{fmtNum(event.input_tokens)} in / {fmtNum(event.output_tokens)} out</td>
+								<td>
+									<div class="cell-primary">{tokenSummary(event)}</div>
+									{#if isEmbeddingModel(event.model_name)}
+										<div class="cell-secondary">Vectors returned separately; not counted as output tokens.</div>
+									{/if}
+								</td>
 								<td>{fmtNum(event.latency_ms)} ms</td>
 								<td class:error-cell={!!event.error_message}>
 									{event.error_message ? event.error_message : 'OK'}
 								</td>
+								<td>{event.call_loc || ''}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -426,6 +593,29 @@
 	.table-wrap {
 		overflow-x: auto;
 		margin-top: 12px;
+	}
+	.model-chart-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		gap: 14px;
+		margin-top: 12px;
+	}
+	.model-chart-card {
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 14px;
+		background: color-mix(in srgb, var(--card) 92%, transparent);
+	}
+	.model-chart {
+		width: 100%;
+		height: 320px;
+	}
+	.model-chart-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 12px;
+		margin-bottom: 12px;
 	}
 	table {
 		width: 100%;
