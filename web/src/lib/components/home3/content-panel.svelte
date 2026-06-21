@@ -168,7 +168,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<MetricMgmtView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
-			{:else if activeMenu?.childId === 'apps-document-review'}
+		{:else if activeMenu?.childId === 'apps-document-review'}
 				<DocumentReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'prompt-optimizer'}
 			<PromptOptimizerView {darkMode} />
