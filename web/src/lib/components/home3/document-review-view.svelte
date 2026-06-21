@@ -2,12 +2,17 @@
     import { onMount } from 'svelte';
     import { listAspects, listTiers, submitRequest } from '$lib/services/docReviewService';
     import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc } from '$lib/services/docReviewService';
+    import { uploadKbInputs, listKnowledgeStores } from '$lib/services/kbService';
+    import type { KbInputRecord, KnowledgeStoreRecord } from '$lib/services/kbService';
+    import { knowledgeStoreState } from './knowledge-store-state.svelte';
+    import KbInputSearchDialog from './kb-input-search-dialog.svelte';
     import DocReviewResultsView from './doc-review-results-view.svelte';
     import { appAuthStore } from '@chendingplano/shared';
     import SearchIcon from '@lucide/svelte/icons/search';
     import CheckIcon from '@lucide/svelte/icons/check';
     import XIcon from '@lucide/svelte/icons/x';
     import LoaderIcon from '@lucide/svelte/icons/loader';
+    import UploadIcon from '@lucide/svelte/icons/upload';
     import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
     import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
@@ -41,11 +46,60 @@
     let submittedReportId = $state<number | null>(null);
     let submitError = $state('');
     let isSubmitting = $state(false);
-    let searchQuery = $state('');
-    let docSearchResults = $state<Array<{id: number; title: string}>>([]);
-    let isSearching = $state(false);
     let reportTemplate = $state('');
     let docTemplate = $state('');
+
+    // Step 1 input mode: pick an existing document or upload a new one
+    let inputMode = $state<'search' | 'upload'>('search');
+    let searchDialogOpen = $state(false);
+    let uploadFile = $state<File | null>(null);
+    const uploadParserOptions = ['paddleocr', 'opendata', 'mineru', 'docling'] as const;
+    let uploadParser = $state<(typeof uploadParserOptions)[number]>('opendata');
+    let isUploading = $state(false);
+    let uploadError = $state('');
+    let filePicker = $state<HTMLInputElement | null>(null);
+
+    // Knowledge-store picker, shown when the user wants to upload but no store is active.
+    let storeOptions = $state<KnowledgeStoreRecord[]>([]);
+    let loadingStores = $state(false);
+    let storeError = $state('');
+
+    async function loadStoreOptions() {
+        loadingStores = true;
+        storeError = '';
+        try {
+            const res = await listKnowledgeStores();
+            storeOptions = res.results ?? [];
+        } catch (err) {
+            storeError = err instanceof Error ? err.message : 'Failed to load knowledge stores.';
+        } finally {
+            loadingStores = false;
+        }
+    }
+
+    function pickStore(store: KnowledgeStoreRecord) {
+        knowledgeStoreState.setActiveStore(store);
+        uploadError = '';
+    }
+
+    function changeStore() {
+        knowledgeStoreState.setActiveStore(null);
+        if (storeOptions.length === 0) loadStoreOptions();
+    }
+
+    const typeExtensions: Record<string, string[]> = {
+        pdf: ['.pdf'], doc: ['.doc', '.docx'], excel: ['.xls', '.xlsx'],
+        ppt: ['.ppt', '.pptx'], text: ['.txt'], json: ['.json'],
+        xml: ['.xml'], markdown: ['.md', '.markdown'], typst: ['.typ'], zip: ['.zip'],
+    };
+
+    function typeFromExtension(filename: string): string {
+        const lower = filename.toLowerCase();
+        for (const [type, exts] of Object.entries(typeExtensions)) {
+            if (exts.some(e => lower.endsWith(e))) return type;
+        }
+        return '';
+    }
 
     // Derived: aspects grouped by group
     let aspectsByGroup = $derived.by(() => {
@@ -57,11 +111,13 @@
         return map;
     });
 
-    // Derived: which aspects are selected based on tier
+    // Derived: which aspects are selected based on tier (and any per-item edits)
     let effectiveAspects = $derived.by(() => {
         if (selectedTier === 'custom') {
             return [...customAspects];
         }
+        const sel = tierSelections[selectedTier];
+        if (sel) return [...sel];
         const tier = tiers.find(t => t.key === selectedTier);
         return tier?.aspect_names || [];
     });
@@ -73,10 +129,84 @@
         P5: 'Technical & Compliance', P6: 'Meta & Process',
     };
 
+    // Lookup: aspect name -> AspectInfo, for resolving a tier's aspect labels
+    let aspectByName = $derived.by(() => {
+        const map: Record<string, AspectInfo> = {};
+        for (const a of aspects) map[a.name] = a;
+        return map;
+    });
+
+    // Group a tier's aspect names by category for the foldable preview
+    function groupAspectNames(names: string[]): Array<{ group: string; label: string; items: Array<{ name: string; label: string }> }> {
+        const byGroup: Record<string, Array<{ name: string; label: string }>> = {};
+        for (const name of names) {
+            const info = aspectByName[name];
+            const group = info?.group ?? '其他';
+            if (!byGroup[group]) byGroup[group] = [];
+            byGroup[group].push({ name, label: info?.label ?? name });
+        }
+        return Object.entries(byGroup)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([group, items]) => ({ group, label: groupLabels[group] ?? group, items }));
+    }
+
+    // Which tier cards have their aspect list expanded
+    let expandedTiers = $state<Set<string>>(new Set());
+    function toggleTierAspects(key: string) {
+        const next = new Set(expandedTiers);
+        if (next.has(key)) next.delete(key); else next.add(key);
+        expandedTiers = next;
+    }
+
+    // Per-tier mutable selection of aspect items. Initialized from each tier's
+    // configured aspect_names; the user can toggle individual items or all.
+    let tierSelections = $state<Record<string, Set<string>>>({});
+
+    function initTierSelections() {
+        const next: Record<string, Set<string>> = {};
+        for (const t of tiers) next[t.key] = new Set(t.aspect_names);
+        tierSelections = next;
+    }
+
+    function isAspectChecked(tierKey: string, name: string): boolean {
+        return tierSelections[tierKey]?.has(name) ?? false;
+    }
+
+    function tierSelectedCount(tierKey: string): number {
+        return tierSelections[tierKey]?.size ?? 0;
+    }
+
+    function groupSelectedCount(tierKey: string, items: Array<{ name: string }>): number {
+        const sel = tierSelections[tierKey];
+        if (!sel) return 0;
+        return items.reduce((n, it) => n + (sel.has(it.name) ? 1 : 0), 0);
+    }
+
+    // Toggling an item (or select-all) also marks that tier as the chosen one,
+    // so the customized selection is what gets submitted.
+    function toggleAspectInTier(tierKey: string, name: string) {
+        const next = new Set(tierSelections[tierKey] ?? []);
+        if (next.has(name)) next.delete(name); else next.add(name);
+        tierSelections = { ...tierSelections, [tierKey]: next };
+        selectedTier = tierKey;
+    }
+
+    function allAspectsChecked(tier: TierInfo): boolean {
+        const sel = tierSelections[tier.key];
+        return !!sel && tier.aspect_names.length > 0 && sel.size === tier.aspect_names.length;
+    }
+
+    function toggleAllInTier(tier: TierInfo) {
+        const next = allAspectsChecked(tier) ? new Set<string>() : new Set(tier.aspect_names);
+        tierSelections = { ...tierSelections, [tier.key]: next };
+        selectedTier = tier.key;
+    }
+
     onMount(async () => {
         try {
             aspects = await listAspects();
             tiers = await listTiers();
+            initTierSelections();
             // Default: auto-select must_review aspects for custom mode
             const mustTier = tiers.find(t => t.key === 'must_review');
             if (mustTier) mustTier.aspect_names.forEach(a => customAspects.add(a));
@@ -91,32 +221,67 @@
         }
     });
 
-    // Document search (debounced)
-    let searchTimer: ReturnType<typeof setTimeout>;
-    function onSearchInput(e: Event) {
-        const q = (e.target as HTMLInputElement).value;
-        searchQuery = q;
-        clearTimeout(searchTimer);
-        if (q.length < 2) { docSearchResults = []; return; }
-        searchTimer = setTimeout(async () => {
-            isSearching = true;
-            try {
-                const res = await fetch(`/api/v1/kb/inputs?query=${encodeURIComponent(q)}&limit=10`, { credentials: 'same-origin' });
-                const data = await res.json();
-                docSearchResults = (data.inputs || data.records || data.data || []).map((r: any) => ({
-                    id: r.id, title: r.title || r.file_name || `Document ${r.id}`,
-                }));
-            } catch { docSearchResults = []; }
-            isSearching = false;
-        }, 300);
-    }
-
     function selectDoc(doc: {id: number; title: string}) {
         selectedDocId = doc.id;
         selectedDocTitle = doc.title;
-        docSearchResults = [];
-        searchQuery = doc.title;
         currentStep = 2;
+    }
+
+    function onSearchSelect(records: KbInputRecord[]) {
+        const record = records[0];
+        if (!record) return;
+        const title = record.title?.trim() || record.file_name?.trim() || `Document ${record.id}`;
+        selectDoc({ id: record.id, title });
+    }
+
+    function switchMode(mode: 'search' | 'upload') {
+        inputMode = mode;
+        uploadError = '';
+        if (mode === 'upload' && !knowledgeStoreState.activeStore && storeOptions.length === 0) {
+            loadStoreOptions();
+        }
+    }
+
+    function triggerFilePicker() {
+        uploadError = '';
+        filePicker?.click();
+    }
+
+    function onUploadFileSelect(e: Event) {
+        const files = (e.target as HTMLInputElement).files;
+        uploadFile = files && files.length > 0 ? files[0] : null;
+        uploadError = '';
+    }
+
+    async function handleUpload() {
+        if (!uploadFile) { uploadError = 'Pick a file to upload.'; return; }
+        const type = typeFromExtension(uploadFile.name);
+        if (!type) { uploadError = 'Unsupported file type.'; return; }
+        const activeStore = knowledgeStoreState.activeStore;
+        if (!activeStore?.tenant_id?.trim()) {
+            uploadError = 'Select an active knowledge store before uploading.';
+            return;
+        }
+
+        isUploading = true;
+        uploadError = '';
+        try {
+            const result = await uploadKbInputs({
+                type,
+                title: uploadFile.name,
+                parser_name: uploadParser,
+                ks_store_id: activeStore.id,
+                tenant_id: activeStore.tenant_id,
+                files: [uploadFile],
+            });
+            const newId = result.ids?.[0];
+            if (!newId) throw new Error('Upload succeeded but no record id was returned.');
+            selectDoc({ id: newId, title: uploadFile.name });
+        } catch (err) {
+            uploadError = err instanceof Error ? err.message : 'Failed to upload file.';
+        } finally {
+            isUploading = false;
+        }
     }
 
     function toggleAspect(name: string) {
@@ -148,6 +313,7 @@
 
     async function handleSubmit() {
         if (!selectedDocId) { submitError = 'Please select a document'; return; }
+        if (effectiveAspects.length === 0) { submitError = 'Select at least one aspect to review'; currentStep = 2; return; }
         if (!requesterName.trim()) { submitError = 'Please enter your name'; currentStep = 5; return; }
 
         isSubmitting = true;
@@ -201,28 +367,100 @@
         {#if currentStep === 1}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
                 <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 1: Select Document</h2>
-                <div style="position: relative;">
-                    <div style="display: flex; align-items: center; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem;">
-                        <SearchIcon size={16} style="color: {textMuted}; margin-right: 0.5rem;" />
-                        <input type="text" placeholder="Search documents..."
-                            value={searchQuery} oninput={onSearchInput}
-                            style="flex: 1; background: transparent; border: none; outline: none; color: {textPrimary}; font-size: 0.9rem;" />
-                        {#if isSearching}
-                            <LoaderIcon size={14} style="color: {textMuted};" />
+
+                <!-- Mode toggle: search the library or upload a new file -->
+                <div style="display: inline-flex; gap: 0.25rem; padding: 0.25rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; margin-bottom: 1rem;">
+                    {#each [['search', 'Search Library'], ['upload', 'Upload File']] as [mode, label]}
+                        <button onclick={() => switchMode(mode as 'search' | 'upload')}
+                            style="display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+                            background: {inputMode === mode ? accent : 'transparent'}; color: {inputMode === mode ? '#fff' : textSecondary};">
+                            {#if mode === 'search'}<SearchIcon size={14} />{:else}<UploadIcon size={14} />{/if}
+                            {label}
+                        </button>
+                    {/each}
+                </div>
+
+                {#if inputMode === 'search'}
+                    <button onclick={() => searchDialogOpen = true} type="button"
+                        style="display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.65rem 0.85rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; color: {textSecondary}; font-size: 0.9rem; text-align: left;">
+                        <SearchIcon size={16} style="color: {textMuted};" />
+                        Search the document library…
+                    </button>
+                {:else if !knowledgeStoreState.activeStore}
+                    <!-- No active knowledge store: prompt the user to pick one before uploading -->
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <div style="padding: 0.75rem; background: {accentTint}; border: 1px solid {borderColor}; border-radius: 8px; font-size: 0.85rem; color: {textSecondary};">
+                            No active knowledge store selected. Pick one below to upload the document into.
+                        </div>
+                        {#if loadingStores}
+                            <div style="display: flex; align-items: center; gap: 0.5rem; color: {textMuted}; font-size: 0.85rem;">
+                                <LoaderIcon size={14} style="animation: spin 1s linear infinite;" /> Loading knowledge stores…
+                            </div>
+                        {:else if storeOptions.length === 0}
+                            <div style="font-size: 0.85rem; color: {textSecondary};">
+                                No knowledge stores found. Create one under Knowledge → Knowledge Stores first.
+                            </div>
+                        {:else}
+                            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                                {#each storeOptions as store}
+                                    <button onclick={() => pickStore(store)} type="button"
+                                        style="display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; padding: 0.65rem 0.85rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; min-width: 160px; text-align: left;">
+                                        <span style="color: {textPrimary}; font-weight: 600; font-size: 0.9rem;">{store.ks_name}</span>
+                                        <span style="color: {textMuted}; font-size: 0.75rem;">ID {store.id}{store.ks_desc ? ` · ${store.ks_desc}` : ''}</span>
+                                    </button>
+                                {/each}
+                            </div>
+                        {/if}
+                        {#if storeError}
+                            <div style="font-size: 0.85rem; color: #ef4444;">{storeError}</div>
+                        {/if}
+                        <button onclick={loadStoreOptions} type="button"
+                            style="align-self: flex-start; padding: 0.35rem 0.85rem; background: transparent; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; color: {textSecondary}; font-size: 0.8rem;">
+                            Refresh
+                        </button>
+                    </div>
+                {:else}
+                    <!-- Upload a new document to review -->
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <div style="font-size: 0.8rem; color: {textMuted};">
+                            Uploads land in knowledge store: <span style="color: {textSecondary};">{knowledgeStoreState.activeStore.ks_name}</span>
+                            <button onclick={changeStore} type="button"
+                                style="margin-left: 0.5rem; background: none; border: none; color: {accent}; cursor: pointer; font-size: 0.8rem; text-decoration: underline;">change</button>
+                        </div>
+                        <input bind:this={filePicker} type="file" onchange={onUploadFileSelect}
+                            style="display: none;" />
+                        <button onclick={triggerFilePicker} type="button"
+                            style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 1.25rem; background: {inputBg}; border: 1px dashed {borderColor}; border-radius: 8px; cursor: pointer; color: {textSecondary}; font-size: 0.9rem;">
+                            <UploadIcon size={18} />
+                            {uploadFile ? uploadFile.name : 'Browse and pick a file…'}
+                        </button>
+                        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: {textSecondary};">
+                                Parser
+                                <select bind:value={uploadParser}
+                                    style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 6px; padding: 0.35rem 0.5rem; color: {textPrimary}; font-size: 0.85rem;">
+                                    {#each uploadParserOptions as opt}
+                                        <option value={opt}>{opt}</option>
+                                    {/each}
+                                </select>
+                            </label>
+                            <button onclick={handleUpload}
+                                disabled={!uploadFile || isUploading}
+                                style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1.25rem; border: none; border-radius: 8px; cursor: {!uploadFile || isUploading ? 'not-allowed' : 'pointer'}; font-size: 0.9rem; font-weight: 600;
+                                background: {!uploadFile || isUploading ? borderColor : accent}; color: {!uploadFile || isUploading ? textMuted : '#fff'};">
+                                {#if isUploading}
+                                    <LoaderIcon size={14} style="animation: spin 1s linear infinite;" />
+                                    Uploading…
+                                {:else}
+                                    Upload & Select
+                                {/if}
+                            </button>
+                        </div>
+                        {#if uploadError}
+                            <div style="font-size: 0.85rem; color: #ef4444;">{uploadError}</div>
                         {/if}
                     </div>
-                    {#if docSearchResults.length > 0}
-                        <div style="position: absolute; top: 100%; left: 0; right: 0; background: {cardBg}; border: 1px solid {borderColor}; border-radius: 8px; margin-top: 4px; z-index: 10; max-height: 240px; overflow-y: auto;">
-                            {#each docSearchResults as doc}
-                                <button onclick={() => selectDoc(doc)}
-                                    style="display: block; width: 100%; text-align: left; padding: 0.75rem 1rem; background: transparent; border: none; color: {textPrimary}; cursor: pointer; font-size: 0.9rem;
-                                    border-bottom: 1px solid {borderColor};">
-                                    {doc.title}
-                                </button>
-                            {/each}
-                        </div>
-                    {/if}
-                </div>
+                {/if}
                 {#if selectedDocTitle}
                     <div style="margin-top: 1rem; padding: 0.75rem; background: {accentTint}; border-radius: 8px; display: flex; align-items: center; gap: 0.5rem;">
                         <CheckIcon size={16} style="color: {accent};" />
@@ -243,16 +481,65 @@
                 <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 2: Choose Check Level</h2>
                 <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                     {#each tiers as tier}
-                        <label style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem; background: {inputBg}; border: 2px solid {selectedTier === tier.key ? accent : borderColor}; border-radius: 8px; cursor: pointer;">
-                            <input type="radio" name="tier" value={tier.key}
-                                checked={selectedTier === tier.key}
-                                onchange={() => selectedTier = tier.key}
-                                style="margin-top: 0.2rem;" />
-                            <div>
-                                <div style="font-weight: 600; color: {textPrimary};">{tier.label}</div>
-                                <div style="font-size: 0.85rem; color: {textSecondary};">{tier.description} — {tier.aspect_names.length} aspects</div>
-                            </div>
-                        </label>
+                        <div style="background: {inputBg}; border: 2px solid {selectedTier === tier.key ? accent : borderColor}; border-radius: 8px; overflow: hidden;">
+                            <label style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem; cursor: pointer;">
+                                <input type="radio" name="tier" value={tier.key}
+                                    checked={selectedTier === tier.key}
+                                    onchange={() => selectedTier = tier.key}
+                                    style="margin-top: 0.2rem;" />
+                                <div style="flex: 1;">
+                                    <div style="font-weight: 600; color: {textPrimary};">{tier.label}</div>
+                                    <div style="font-size: 0.85rem; color: {textSecondary};">{tier.description} — {tierSelectedCount(tier.key)} of {tier.aspect_names.length} aspects selected</div>
+                                </div>
+                            </label>
+                            {#if tier.aspect_names.length > 0}
+                                <button type="button" onclick={() => toggleTierAspects(tier.key)}
+                                    style="display: flex; align-items: center; gap: 0.4rem; width: 100%; padding: 0.5rem 1rem; background: transparent; border: none; border-top: 1px solid {borderColor}; cursor: pointer; color: {textMuted}; font-size: 0.8rem; text-align: left;">
+                                    {#if expandedTiers.has(tier.key)}
+                                        <ChevronDownIcon size={14} />
+                                    {:else}
+                                        <ChevronRightIcon size={14} />
+                                    {/if}
+                                    {expandedTiers.has(tier.key) ? 'Hide' : 'View'} {tierSelectedCount(tier.key)}/{tier.aspect_names.length} selected aspects
+                                </button>
+                                {#if expandedTiers.has(tier.key)}
+                                    <div style="padding: 0.25rem 1rem 0.85rem 2rem; display: flex; flex-direction: column; gap: 0.6rem;">
+                                        <!-- Select / deselect all toggle -->
+                                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                            <button type="button" onclick={() => toggleAllInTier(tier)}
+                                                style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.7rem; background: {inputBg}; border: 1px solid {accent}; border-radius: 6px; cursor: pointer; color: {accent}; font-size: 0.78rem; font-weight: 600;">
+                                                {allAspectsChecked(tier) ? 'Deselect all' : 'Select all'}
+                                            </button>
+                                            <span style="font-size: 0.75rem; color: {textMuted};">{tierSelectedCount(tier.key)} of {tier.aspect_names.length} selected</span>
+                                        </div>
+                                        {#each groupAspectNames(tier.aspect_names) as cat}
+                                            <div>
+                                                <div style="font-size: 0.75rem; font-weight: 600; color: {textSecondary}; margin-bottom: 0.25rem;">
+                                                    {cat.group} — {cat.label}
+                                                    <span style="color: {textMuted}; font-weight: 400;">({groupSelectedCount(tier.key, cat.items)}/{cat.items.length})</span>
+                                                </div>
+                                                <div style="display: flex; flex-wrap: wrap; gap: 0.35rem;">
+                                                    {#each cat.items as item}
+                                                        {@const checked = isAspectChecked(tier.key, item.name)}
+                                                        <button type="button" onclick={() => toggleAspectInTier(tier.key, item.name)}
+                                                            title={checked ? 'Click to deselect' : 'Click to select'}
+                                                            style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.78rem;
+                                                            background: {checked ? accentTint : 'transparent'}; border: 1px solid {checked ? accent : borderColor}; color: {checked ? textPrimary : textMuted};">
+                                                            {#if checked}
+                                                                <CheckIcon size={12} style="color: {accent};" />
+                                                            {:else}
+                                                                <span style="width: 12px; height: 12px; border: 1px solid {textMuted}; border-radius: 3px; display: inline-block;"></span>
+                                                            {/if}
+                                                            {item.label}
+                                                        </button>
+                                                    {/each}
+                                                </div>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                {/if}
+                            {/if}
+                        </div>
                     {/each}
                 </div>
             </div>
@@ -401,6 +688,8 @@
         {/if}
     </div>
 {/if}
+
+<KbInputSearchDialog bind:open={searchDialogOpen} onSelect={onSearchSelect} />
 
 <style>
     @keyframes spin { to { transform: rotate(360deg); } }

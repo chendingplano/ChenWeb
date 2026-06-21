@@ -147,6 +147,11 @@ type AppConfigDef struct {
 	EntitySearchWeights             EntitySearchWeightsConfig             `mapstructure:"entities_search_weights"`
 	RelationSearchWeights           RelationSearchWeightsConfig           `mapstructure:"relations_search_weights"`
 	LLM                             LLMConfig                             `mapstructure:"llm"`
+	// DocReviews maps a review tier key (e.g. "must-review") to the list of
+	// aspect item names included in that tier. Configured via [doc-reviews]
+	// in config.toml / config.local.toml. When empty, the Document Review
+	// feature falls back to its built-in priority-derived tiers.
+	DocReviews map[string][]string `mapstructure:"doc-reviews"`
 }
 
 type PDFParserConfig struct {
@@ -177,6 +182,19 @@ func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath stri
 			return fmt.Errorf("(MID_26031001) config file not found, file:%s", configPath)
 		}
 		return fmt.Errorf("(MID_26031002) error reading config (%s->CWB_CFG_056): %w", call_flow, err)
+	}
+
+	// Merge optional local overrides from config.local.toml sitting next to the
+	// main config file. Values present in the local file take precedence.
+	localPath := filepath.Join(filepath.Dir(configPath), "config.local.toml")
+	if _, statErr := os.Stat(localPath); statErr == nil {
+		viper.SetConfigFile(localPath)
+		if mergeErr := viper.MergeInConfig(); mergeErr != nil {
+			return fmt.Errorf("(MID_26031006) error merging local config (%s): %w", localPath, mergeErr)
+		}
+		logger.Info("Merged local config overrides", "filePath", localPath)
+		// Restore the primary config file reference for any later viper ops.
+		viper.SetConfigFile(configPath)
 	}
 
 	// Override with environment variables (e.g., DATABASE_URL)
@@ -259,6 +277,13 @@ func GetLLMConfig() LLMConfig {
 
 func GetDocGenConfig() DocGenConfig {
 	return AppConfig.DocGen
+}
+
+// GetDocReviewsConfig returns the configured Document Review tier->aspect-names
+// mapping. Returns nil/empty when no [doc-reviews] section is present, in which
+// case the Document Review feature uses its built-in defaults.
+func GetDocReviewsConfig() map[string][]string {
+	return AppConfig.DocReviews
 }
 
 func GetArtifactSearchConfig() ArtifactSearchConfig {

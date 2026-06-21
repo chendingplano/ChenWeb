@@ -1,5 +1,12 @@
 package docreview
 
+import (
+	"sort"
+	"strings"
+
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
+)
+
 // ListAspects returns all review aspects with their metadata.
 // Source: Document Review Checklist spec (doc-repo/specs/202606/2026061102-spec-document-review-checklist.md)
 func ListAspects() []AspectInfo {
@@ -64,8 +71,111 @@ func ListAspects() []AspectInfo {
 	}
 }
 
-// ListTiers returns the priority tier definitions with their aspect mappings.
+// tierMeta holds the display label and description for a review tier.
+type tierMeta struct {
+	Label string
+	Desc  string
+}
+
+// defaultTierOrder fixes the display order of the built-in tiers. Any extra
+// tiers defined in config are appended after these in alphabetical order.
+var defaultTierOrder = []string{"must_review", "should_review", "review_external", "review_regulated"}
+
+// defaultTierMeta supplies labels/descriptions for the built-in tier keys.
+var defaultTierMeta = map[string]tierMeta{
+	"must_review":      {Label: "Must Review", Desc: "Critical compliance and quality aspects"},
+	"should_review":    {Label: "Should Review", Desc: "Recommended aspects"},
+	"review_external":  {Label: "Review for External/Public", Desc: "For documents intended for external audiences"},
+	"review_regulated": {Label: "Review for Regulated", Desc: "For regulated industry documents"},
+}
+
+// normalizeTierKey lowercases a tier key and converts hyphens to underscores so
+// config keys like "must-review" map to the canonical "must_review".
+func normalizeTierKey(k string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(k)), "-", "_")
+}
+
+// tierLabelFor resolves the label and description for a tier key, deriving a
+// Title Case label from the key when it is not one of the built-in tiers.
+func tierLabelFor(key string) (string, string) {
+	if m, ok := defaultTierMeta[key]; ok {
+		return m.Label, m.Desc
+	}
+	words := strings.FieldsFunc(key, func(r rune) bool { return r == '_' || r == '-' })
+	for i, w := range words {
+		if w != "" {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " "), ""
+}
+
+// validAspectNames returns the set of known aspect names.
+func validAspectNames() map[string]bool {
+	m := make(map[string]bool)
+	for _, a := range ListAspects() {
+		m[a.Name] = true
+	}
+	return m
+}
+
+// ListTiers returns the review tier definitions with their aspect mappings.
+// When [doc-reviews] is configured (config.toml / config.local.toml) the tiers
+// are built from that configuration; otherwise the built-in priority-derived
+// tiers are used.
 func ListTiers() []TierInfo {
+	if cfg := appconfig.GetDocReviewsConfig(); len(cfg) > 0 {
+		return tiersFromConfig(cfg)
+	}
+	return defaultTiers()
+}
+
+// tiersFromConfig builds tier definitions from the configured map of
+// tier-key -> aspect-item-names. Unknown aspect names are dropped.
+func tiersFromConfig(cfg map[string][]string) []TierInfo {
+	valid := validAspectNames()
+
+	norm := make(map[string][]string, len(cfg))
+	for rawKey, items := range cfg {
+		key := normalizeTierKey(rawKey)
+		filtered := make([]string, 0, len(items))
+		for _, it := range items {
+			name := strings.TrimSpace(it)
+			if valid[name] {
+				filtered = append(filtered, name)
+			}
+		}
+		norm[key] = filtered
+	}
+
+	// Order: built-in tiers first (when present), then any extras alphabetically.
+	seen := make(map[string]bool)
+	keys := make([]string, 0, len(norm))
+	for _, k := range defaultTierOrder {
+		if _, ok := norm[k]; ok {
+			keys = append(keys, k)
+			seen[k] = true
+		}
+	}
+	extra := make([]string, 0, len(norm))
+	for k := range norm {
+		if !seen[k] {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(extra)
+	keys = append(keys, extra...)
+
+	tiers := make([]TierInfo, 0, len(keys))
+	for _, k := range keys {
+		label, desc := tierLabelFor(k)
+		tiers = append(tiers, TierInfo{Key: k, Label: label, Description: desc, AspectNames: norm[k]})
+	}
+	return tiers
+}
+
+// defaultTiers derives the built-in tiers from each aspect's Priority field.
+func defaultTiers() []TierInfo {
 	all := ListAspects()
 	var mustReview, shouldReview, externalReview, regulatedReview []string
 	for _, a := range all {
