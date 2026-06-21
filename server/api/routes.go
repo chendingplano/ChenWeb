@@ -34,6 +34,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
+	"github.com/chendingplano/deepdoc/server/api/docreviewhandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -500,8 +501,20 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Redirects root (/) to /login (since / is public but should show login by default).
 	e.GET("/", func(c echo.Context) error {
+
 		return c.Redirect(http.StatusFound, "/login")
 	})
+	apiGroup.GET("/doc-review/aspects", docreviewhandler.ListAspects)
+	apiGroup.GET("/doc-review/tiers", docreviewhandler.ListTiers)
+	apiGroup.POST("/doc-review/requests", docreviewhandler.SubmitRequest)
+	apiGroup.GET("/doc-review/requests/:id", docreviewhandler.GetRequest)
+	apiGroup.GET("/doc-review/reports/:id", docreviewhandler.GetReport)
+	apiGroup.GET("/doc-review/reports/:id/html", docreviewhandler.GetReportHTML)
+	apiGroup.GET("/doc-review/reports/:id/export", docreviewhandler.ExportReport)
+	apiGroup.PATCH("/doc-review/findings/:id", docreviewhandler.UpdateFinding)
+	apiGroup.POST("/doc-review/requests/:id/stop", docreviewhandler.StopRequest)
+
+
 	return nil
 }
 
