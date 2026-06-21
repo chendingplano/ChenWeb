@@ -244,7 +244,11 @@
                     <div style="margin-bottom: 0.75rem;">
                         <button onclick={() => toggleGroup(group)}
                             style="display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; padding: 0.6rem 0.75rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; color: {textPrimary}; font-weight: 600; font-size: 0.9rem;">
-                            {expandedGroups.has(group) ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}
+                            {#if expandedGroups.has(group)}
+                                <ChevronDownIcon size={16} />
+                            {:else}
+                                <ChevronRightIcon size={16} />
+                            {/if}
                             {group} — {groupLabels[group] || group}
                             <span style="margin-left: auto; font-size: 0.8rem; color: {textMuted};">
                                 {groupAspects.filter(a => customAspects.has(a.name)).length}/{groupAspects.length}
