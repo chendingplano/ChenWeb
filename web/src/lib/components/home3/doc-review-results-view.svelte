@@ -1,16 +1,14 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { getRequest, getReport, updateFinding, stopRequest } from '$lib/services/docReviewService';
+    import { getRequest, updateFinding, stopRequest } from '$lib/services/docReviewService';
     import type { RequestStatus, FindingItem } from '$lib/services/docReviewService';
     import LoaderIcon from '@lucide/svelte/icons/loader';
-    import CheckIcon from '@lucide/svelte/icons/check';
     import XIcon from '@lucide/svelte/icons/x';
     import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
-    import FileTextIcon from '@lucide/svelte/icons/file-text';
     import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
     import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
-    let { darkMode = true, requestId = 0 }: { darkMode: boolean; requestId: number } = $props();
+    let { darkMode = true, requestId = 0, reportId = 0 }: { darkMode: boolean; requestId: number; reportId?: number } = $props();
 
     // Design tokens
     let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -22,9 +20,6 @@
     let textMuted = $derived(darkMode ? '#64748B' : '#9CA3AF');
     let inputBg = $derived(darkMode ? '#252A3A' : '#F2F4F7');
     let successBg = $derived(darkMode ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.10)');
-    let highBg = $derived(darkMode ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.10)');
-    let mediumBg = $derived(darkMode ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.10)');
-    let lowBg = $derived(darkMode ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.10)');
 
     // State
     let request = $state<RequestStatus | null>(null);
@@ -54,6 +49,9 @@
     // Derived unique passes
     let passes = $derived([...new Set(findings.map(f => f.pass))].sort());
 
+    // Effective report ID for links (fall back to requestId)
+    let linkReportId = $derived(reportId || requestId);
+
     // Polling
     let pollTimer: ReturnType<typeof setTimeout>;
     let isActive = $state(true);
@@ -67,10 +65,13 @@
 
             if (request.status === 'completed' || request.status === 'failed' || request.status === 'stopped') {
                 isActive = false;
-                if (request.status === 'completed') {
+                if (request.status === 'completed' && reportId) {
                     try {
-                        const res = await fetch(`/api/v1/doc-review/reports?request_id=${requestId}`, { credentials: 'same-origin' });
+                        const res = await fetch(`/api/v1/doc-review/reports/${reportId}`, { credentials: 'same-origin' });
                         const data = await res.json();
+                        if (data.status && data.report) {
+                            reportData = data.report;
+                        }
                     } catch {}
                 }
             }
@@ -282,9 +283,13 @@
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; color: {textPrimary};">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                     <h2 style="font-size: 1.1rem; font-weight: 600;">Full Report</h2>
-                    <a href={`/api/v1/doc-review/reports/${requestId}/export?format=md`} target="_blank"
+                    <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=md`} target="_blank"
                         style="padding: 0.4rem 0.75rem; background: {accent}; color: #fff; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
                         Export Markdown
+                    </a>
+                    <a href={`/api/v1/doc-review/reports/${linkReportId}/html`} target="_blank"
+                        style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
+                        View HTML
                     </a>
                 </div>
                 <p style="color: {textSecondary}; margin-bottom: 1rem;">
@@ -302,7 +307,7 @@
                     </div>
                 {/each}
                 <div style="text-align: center; margin-top: 1rem;">
-                    <a href={`/api/v1/doc-review/reports/${requestId}`} target="_blank"
+                    <a href={`/api/v1/doc-review/reports/${linkReportId}`} target="_blank"
                         style="color: {accent}; font-size: 0.85rem;">View Full Report JSON →</a>
                 </div>
             </div>

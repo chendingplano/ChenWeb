@@ -40,6 +40,7 @@ export type SubmitResult = {
 	request_id: number;
 	status: string;
 	review_run_id?: string;
+	report_id?: number;
 };
 
 export type RequestStatus = {
@@ -103,7 +104,8 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
 	return {
 		request_id: data.request_id,
 		status: data.status,
-		review_run_id: data.review_run_id
+		review_run_id: data.review_run_id,
+		report_id: data.report_id,
 	};
 }
 

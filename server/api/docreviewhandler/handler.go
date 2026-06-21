@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/chendingplano/deepdoc/server/api/docreview"
+	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
 
@@ -36,6 +37,15 @@ func submitRequestHelper(c echo.Context, synchronous bool) error {
 			"status":    false,
 			"error_msg": "Invalid request body: " + err.Error(),
 		})
+	}
+
+	// Extract authenticated user info for requester fields.
+	rc := EchoFactory.NewFromEcho(c, "CWB_DRH_001")
+	userInfo := rc.IsAuthenticated()
+	if userInfo != nil {
+		if input.RequesterName == "" {
+			input.RequesterName = userInfo.UserName
+		}
 	}
 
 	ctx := c.Request().Context()

@@ -1,8 +1,9 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { listAspects, listTiers, submitRequest, getRequest, updateFinding } from '$lib/services/docReviewService';
+    import { listAspects, listTiers, submitRequest } from '$lib/services/docReviewService';
     import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc } from '$lib/services/docReviewService';
     import DocReviewResultsView from './doc-review-results-view.svelte';
+    import { appAuthStore } from '@chendingplano/shared';
     import SearchIcon from '@lucide/svelte/icons/search';
     import CheckIcon from '@lucide/svelte/icons/check';
     import XIcon from '@lucide/svelte/icons/x';
@@ -37,11 +38,14 @@
     let notes = $state('');
     let referenceDocs = $state<ReferenceDoc[]>([]);
     let submittedRequestId = $state<number | null>(null);
+    let submittedReportId = $state<number | null>(null);
     let submitError = $state('');
     let isSubmitting = $state(false);
     let searchQuery = $state('');
     let docSearchResults = $state<Array<{id: number; title: string}>>([]);
     let isSearching = $state(false);
+    let reportTemplate = $state('');
+    let docTemplate = $state('');
 
     // Derived: aspects grouped by group
     let aspectsByGroup = $derived.by(() => {
@@ -78,6 +82,12 @@
             if (mustTier) mustTier.aspect_names.forEach(a => customAspects.add(a));
         } catch (e) {
             submitError = 'Failed to load aspects';
+        }
+
+        // Auto-fill requester name from auth if available
+        const user = appAuthStore.getUser();
+        if (user?.name) {
+            requesterName = user.name;
         }
     });
 
@@ -121,6 +131,21 @@
         expandedGroups = next;
     }
 
+    async function refDocSearch() {
+        const q = (document.getElementById('ref-doc-input') as HTMLInputElement)?.value;
+        if (!q || q.length < 2) return;
+        try {
+            const res = await fetch(`/api/v1/kb/inputs?query=${encodeURIComponent(q)}&limit=5`, { credentials: 'same-origin' });
+            const data = await res.json();
+            const results = (data.inputs || data.records || data.data || []).slice(0, 5);
+            for (const r of results) {
+                if (!referenceDocs.some(d => d.record_id === r.id)) {
+                    referenceDocs = [...referenceDocs, { record_id: r.id, doc_no: r.doc_no || '', title: r.title || r.file_name || `Document ${r.id}` }];
+                }
+            }
+        } catch {}
+    }
+
     async function handleSubmit() {
         if (!selectedDocId) { submitError = 'Please select a document'; return; }
         if (!requesterName.trim()) { submitError = 'Please enter your name'; currentStep = 5; return; }
@@ -136,8 +161,11 @@
                 notes: notes || undefined,
                 requester_name: requesterName,
                 requester_id: 0, // TODO: resolve from auth context
+                report_template: reportTemplate || undefined,
+                doc_template: docTemplate || undefined,
             });
             submittedRequestId = result.request_id;
+            submittedReportId = result.report_id || null;
         } catch (e: any) {
             submitError = e.message || 'Submission failed';
         } finally {
@@ -147,7 +175,7 @@
 </script>
 
 {#if submittedRequestId}
-    <DocReviewResultsView {darkMode} requestId={submittedRequestId} />
+    <DocReviewResultsView {darkMode} requestId={submittedRequestId} reportId={submittedReportId ?? undefined} />
 {:else}
     <div style="padding: 1.5rem; color: {textPrimary};">
         <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">Document Review</h1>
@@ -293,9 +321,9 @@
                     </div>
                 {/each}
                 <div style="display: flex; gap: 0.5rem;">
-                    <input type="text" placeholder="Reference document title or ID"
+                    <input id="ref-doc-input" type="text" placeholder="Reference document title or ID"
                         style="flex: 1; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
-                    <button onclick={() => {/* TODO: add search for reference docs */}}
+                    <button onclick={refDocSearch}
                         style="padding: 0.5rem 1rem; background: {accentTint}; color: {accent}; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Add</button>
                 </div>
             </div>
@@ -324,12 +352,12 @@
                 </div>
                 <div style="margin-bottom: 1rem;">
                     <label style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Report Template (optional)</label>
-                    <input type="text" placeholder="Template name or path"
+                    <input type="text" bind:value={reportTemplate} placeholder="Template name or path"
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                 </div>
                 <div style="margin-bottom: 1rem;">
                     <label style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Doc Template (optional)</label>
-                    <input type="text" placeholder="Template name or path"
+                    <input type="text" bind:value={docTemplate} placeholder="Template name or path"
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                 </div>
             </div>

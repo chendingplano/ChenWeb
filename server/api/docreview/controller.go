@@ -38,17 +38,15 @@ func (c *DocReviewController) AcceptRequest(ctx context.Context, input SubmitReq
 		return nil, &RequestError{Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("Document %d not found", input.InputRecordID)}
 	}
 
-	// Resolve requester.
-	var userExists bool
-	err = c.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM identities WHERE id = $1)`, input.RequesterID).Scan(&userExists)
-	if err != nil {
-		// identities table may not exist; try kratos identities
-		err = c.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM kratos.identities WHERE id = $1::uuid)`, input.RequesterID).Scan(&userExists)
-	}
-	if !userExists {
-		return nil, &RequestError{
-			Status:  http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf("User %d (%s) not found. Please register or re-enter the user name.", input.RequesterID, input.RequesterName),
+	// If requester_id is provided (non-zero), optionally validate it exists.
+	if input.RequesterID > 0 {
+		var userExists bool
+		err = c.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM identities WHERE id = $1)`, input.RequesterID).Scan(&userExists)
+		if err != nil {
+			err = c.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM kratos.identities WHERE id = $1::text)`, fmt.Sprintf("%d", input.RequesterID)).Scan(&userExists)
+		}
+		if !userExists {
+			logger.Warn("requester_id not found in identities table, proceeding anyway", "requester_id", input.RequesterID, "requester_name", input.RequesterName)
 		}
 	}
 
