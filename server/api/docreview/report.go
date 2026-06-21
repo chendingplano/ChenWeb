@@ -103,9 +103,11 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 		FindingsByPass: make(map[string]PassGroup),
 	}
 
-	// Load document metadata.
+	// Load document metadata (nil-safe for testing).
 	var docTitle string
-	g.DB.QueryRowContext(ctx, `SELECT COALESCE(title,'') FROM kb.inputs WHERE id = $1`, req.InputRecordID).Scan(&docTitle)
+	if g.DB != nil {
+		g.DB.QueryRowContext(ctx, `SELECT COALESCE(title,'') FROM kb.inputs WHERE id = $1`, req.InputRecordID).Scan(&docTitle)
+	}
 	report.Meta.DocumentTitle = docTitle
 
 	// Group findings by pass.
