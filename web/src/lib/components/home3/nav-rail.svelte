@@ -123,6 +123,9 @@
 				{ id: 'apps-browse',     label: 'Browse' },
 				{ id: 'apps-configure',  label: 'Configure' },
 				{ id: 'apps-generate-doc', label: 'Generate Doc' }
+
+				{ id: 'apps-generate-doc', label: 'Generate Doc' },
+					{ id: 'apps-document-review', label: 'Document Review' }
 			]
 		},
 		{

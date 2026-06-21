@@ -5,6 +5,7 @@
 	import KbImportView  from '$lib/components/home3/kb-import-view.svelte';
 	import MetricMgmtView from '$lib/components/home3/metric-mgmt-view.svelte';
 	import DocGenView    from '$lib/components/home3/doc-gen-view.svelte';
+import DocumentReviewView from '$lib/components/home3/document-review-view.svelte';
 	import PromptOptimizerView from '$lib/components/home3/prompt-optimizer-view.svelte';
 	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
@@ -167,6 +168,8 @@
 			<MetricMgmtView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
+			{:else if activeMenu?.childId === 'apps-document-review'}
+				<DocumentReviewView {darkMode} />
 		{:else if activeMenu?.childId === 'prompt-optimizer'}
 			<PromptOptimizerView {darkMode} />
 		{:else if activeMenu?.childId === 'openmetadata'}
