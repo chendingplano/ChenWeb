@@ -209,6 +209,10 @@ func (c *DocReviewController) RunReviewAndReport(ctx context.Context, requestID 
 	}
 	if _, perr := gen.Persist(ctx, &req.Request, report); perr != nil {
 		logger.Warn("background report persist failed", "request_id", requestID, "error", perr)
+		return
+	}
+	if typErr := GenerateTypstReport(ctx, requestID, report, &req.Request); typErr != nil {
+		logger.Warn("typst PDF generation failed", "request_id", requestID, "error", typErr)
 	}
 }
 
