@@ -475,9 +475,12 @@
 	});
 
 	$effect(() => {
-		if (!pdfDoc || !pdfStageEl) return;
+		// Always read `page` synchronously so the effect tracks it as a dependency.
+		// pdfDoc is a plain let (not $state), so reading it here would not be tracked;
+		// guard it inside the async callback instead.
 		const currentPage = page;
 		void tick().then(() => {
+			if (!pdfDoc || !pdfCanvasHostEl) return;
 			paintHighlights();
 			if (!scrollToFirstHighlight(clampPage(currentPage), 'auto')) {
 				scrollToPage(clampPage(currentPage), 'auto');
