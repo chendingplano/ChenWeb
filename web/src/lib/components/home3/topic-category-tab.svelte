@@ -33,9 +33,7 @@
 	let viewerZoom = $state(0.5);
 	let viewerNumPages = $state(0);
 
-	type TopicPdfViewport = {
-		convertToViewportRectangle: (rect: number[]) => number[];
-	};
+	type TopicPdfViewport = { width: number; height: number };
 
 	$effect(() => {
 		if (selectedTarget?.page) {
@@ -50,7 +48,7 @@
 		);
 		if (!targets || targets.length === 0) return;
 		for (const target of targets) {
-			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
+			const vx1 = target.coords[0] * viewport.width / 1000, vy1 = target.coords[1] * viewport.height / 1000, vx2 = target.coords[2] * viewport.width / 1000, vy2 = target.coords[3] * viewport.height / 1000;
 			const left = Math.max(0, Math.min(vx1, vx2) - 5);
 			const top = Math.max(0, Math.min(vy1, vy2) - 4);
 			const width = Math.abs(vx2 - vx1) + 10;

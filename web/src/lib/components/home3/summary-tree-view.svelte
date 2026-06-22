@@ -387,7 +387,9 @@
 	);
 	let viewerIsPdf = $derived((currentRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf'));
 
-	type SummaryPdfViewport = { convertToViewportRectangle: (rect: number[]) => number[] };
+	type SummaryPdfViewport = { width: number; height: number };
+
+	const MINERU_COORD_SIZE = 1000;
 
 	function renderSummaryHighlight(pageNo: number, viewport: SummaryPdfViewport, overlay: HTMLDivElement) {
 		const s = selectedSummary;
@@ -396,7 +398,11 @@
 			(t) => t.page === pageNo && Array.isArray(t.coords) && t.coords.length >= 4
 		);
 		for (const target of targets) {
-			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
+			const c = target.coords;
+			const vx1 = c[0] * viewport.width / MINERU_COORD_SIZE;
+			const vy1 = c[1] * viewport.height / MINERU_COORD_SIZE;
+			const vx2 = c[2] * viewport.width / MINERU_COORD_SIZE;
+			const vy2 = c[3] * viewport.height / MINERU_COORD_SIZE;
 			const left = Math.max(0, Math.min(vx1, vx2) - 5);
 			const top = Math.max(0, Math.min(vy1, vy2) - 4);
 			const width = Math.abs(vx2 - vx1) + 10;

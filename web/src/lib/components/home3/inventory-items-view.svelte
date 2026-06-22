@@ -539,7 +539,7 @@
 		const lines = selectedLinesByPage.get(pageNo) ?? [];
 		const rects = lines.flatMap((ln) => {
 			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
-			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
+			const vx1 = ln.coords[0] * viewport.width / 1000, vy1 = ln.coords[1] * viewport.height / 1000, vx2 = ln.coords[2] * viewport.width / 1000, vy2 = ln.coords[3] * viewport.height / 1000;
 			return [
 				{
 					lineNumber: ln.line_number,

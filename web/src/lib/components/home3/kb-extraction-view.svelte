@@ -530,7 +530,7 @@
 		const rects = lines
 			.map((line) => {
 				if (!Array.isArray(line.coords) || line.coords.length < 4) return null;
-				const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+				const vx1 = line.coords[0] * (viewport as { width: number }).width / 1000, vy1 = line.coords[1] * (viewport as { height: number }).height / 1000, vx2 = line.coords[2] * (viewport as { width: number }).width / 1000, vy2 = line.coords[3] * (viewport as { height: number }).height / 1000;
 				return {
 					lineNumber: line.line_number,
 					left: Math.min(vx1, vx2),

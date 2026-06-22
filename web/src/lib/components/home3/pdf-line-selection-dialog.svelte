@@ -112,7 +112,7 @@
 			const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
 			for (const line of pageLines) {
 				if (!Array.isArray(line.coords) || line.coords.length < 4) continue;
-				const [, vy1, , vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+				const vy1 = line.coords[1] * viewport.height / 1000, vy2 = line.coords[3] * viewport.height / 1000;
 				const lineTop = Math.min(vy1, vy2);
 				const lineBottom = Math.max(vy1, vy2);
 				if (Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2)) {
