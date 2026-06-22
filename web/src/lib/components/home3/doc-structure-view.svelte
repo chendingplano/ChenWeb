@@ -1475,7 +1475,9 @@
 	.body {
 		display: grid;
 		grid-template-columns: auto auto 1fr;
+		grid-template-rows: minmax(0, 1fr);
 		min-height: 0;
+		overflow: hidden;
 	}
 	.structure-sidebar {
 		position: relative;

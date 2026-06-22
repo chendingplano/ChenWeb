@@ -237,8 +237,10 @@
 
 	function scrollToPage(pageNo: number, behavior: ScrollBehavior = 'smooth') {
 		const pageEl = document.getElementById(`${viewerId}-page-${pageNo}`);
-		if (!pageEl) return;
-		pageEl.scrollIntoView({ block: 'start', behavior });
+		const host = pdfCanvasHostEl;
+		if (!pageEl || !host) return;
+		const relativeTop = pageEl.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop;
+		host.scrollTo({ top: Math.max(0, relativeTop), behavior });
 	}
 
 	function zoomIn() {
@@ -317,15 +319,24 @@
 	function scrollToFirstHighlight(pageNo: number, behavior: ScrollBehavior = 'auto') {
 		const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
 		const firstHighlight = overlay?.querySelector('.pdf-highlight') as HTMLElement | null;
-		if (!firstHighlight) return false;
+		const host = pdfCanvasHostEl;
+		if (!firstHighlight || !host) return false;
 
-		const rect = firstHighlight.getBoundingClientRect();
-		const vh = window.innerHeight;
+		const hostRect = host.getBoundingClientRect();
+		const highlightRect = firstHighlight.getBoundingClientRect();
 
-		// Highlight already fully visible in the viewport — no scroll needed
-		if (rect.top >= 0 && rect.bottom <= vh) return true;
+		// Position of highlight's top edge relative to host's scroll origin
+		const relativeTop = highlightRect.top - hostRect.top + host.scrollTop;
+		const relativeBottom = relativeTop + highlightRect.height;
 
-		firstHighlight.scrollIntoView({ block: 'center', behavior });
+		// Already fully visible within the host's visible area — no scroll needed
+		const visTop = host.scrollTop;
+		const visBottom = visTop + host.clientHeight;
+		if (relativeTop >= visTop && relativeBottom <= visBottom) return true;
+
+		// Center the highlight within the host's visible area
+		const targetScrollTop = relativeTop - host.clientHeight / 2 + highlightRect.height / 2;
+		host.scrollTo({ top: Math.max(0, targetScrollTop), behavior });
 		return true;
 	}
 
