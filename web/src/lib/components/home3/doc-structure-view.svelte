@@ -1487,7 +1487,7 @@
 		grid-template-rows: auto auto 1fr;
 		min-height: 0;
 		min-width: 280px;
-		max-width: 760px;
+		max-width: 960px;
 	}
 	.field-label {
 		display: block;
@@ -1626,6 +1626,18 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--line-record-gap);
+		scrollbar-width: thin;
+		scrollbar-color: var(--ink-line) transparent;
+	}
+	.line-list::-webkit-scrollbar {
+		width: 6px;
+	}
+	.line-list::-webkit-scrollbar-thumb {
+		background: var(--ink-line);
+		border-radius: 999px;
+	}
+	.line-list::-webkit-scrollbar-track {
+		background: transparent;
 	}
 	.line-list-head {
 		display: grid;
