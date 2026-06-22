@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
@@ -137,6 +138,8 @@ func (r *grammarSpellingReviewer) processWindow(
 		"lines", fmt.Sprintf("%d-%d", w.startLine, w.endLine),
 	)
 
+	startTime := time.Now()
+
 	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_grammar_spelling", "MID-CWB-REVIEW-GRAMMAR"))
 	if err != nil {
 		r.logger.Warn("grammar review window failed; skipping",
@@ -163,10 +166,11 @@ func (r *grammarSpellingReviewer) processWindow(
 		}
 	}
 
-	r.logger.Info("grammar review window complete",
+	r.logger.Info("grammar review window end ",
 		"record_id", recordID,
 		"window", index,
 		"findings", len(findings),
+		"ms_used", time.Since(startTime).Milliseconds(),
 	)
 	return findings
 }

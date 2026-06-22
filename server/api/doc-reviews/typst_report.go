@@ -140,22 +140,38 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 			findingIdx++
 			fid := fmt.Sprintf("F-%02d", findingIdx)
 
-			related := buildRelated(f.Location, f.Evidence)
+			var blockB strings.Builder
+			fmt.Fprintf(&blockB, "      review-finding(\n")
+			fmt.Fprintf(&blockB, "        id: \"%s\",\n", typStr(fid))
 
-			block := fmt.Sprintf(
-				"      review-finding(\n"+
-					"        id: \"%s\",\n"+
-					"        related: [%s],\n"+
-					"        errors: [%s],\n"+
-					"        explanation: [%s],\n"+
-					"        correction: [%s],\n"+
-					"      ),",
-				typStr(fid),
-				typContent(related),
-				typContent(f.Title),
-				typContent(f.Description),
-				typContent(f.Suggestion),
-			)
+			// Emit sources array — one dict per source location group.
+			fmt.Fprintf(&blockB, "        sources: (")
+			if len(f.Sources) > 0 {
+				fmt.Fprintf(&blockB, "\n")
+				for _, sc := range f.Sources {
+					fmt.Fprintf(&blockB, "          (\n")
+					if sc.Before != "" {
+						fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))
+					} else {
+						fmt.Fprintf(&blockB, "            before: none,\n")
+					}
+					fmt.Fprintf(&blockB, "            source: [%s],\n", typLines(sc.Source))
+					if sc.After != "" {
+						fmt.Fprintf(&blockB, "            after: [%s],\n", typLines(sc.After))
+					} else {
+						fmt.Fprintf(&blockB, "            after: none,\n")
+					}
+					fmt.Fprintf(&blockB, "          ),\n")
+				}
+				fmt.Fprintf(&blockB, "        ")
+			}
+			fmt.Fprintf(&blockB, "),\n")
+
+			fmt.Fprintf(&blockB, "        errors: [%s],\n", typContent(f.Title))
+			fmt.Fprintf(&blockB, "        explanation: [%s],\n", typContent(f.Description))
+			fmt.Fprintf(&blockB, "        correction: [%s],\n", typContent(f.Suggestion))
+			fmt.Fprintf(&blockB, "      ),")
+			block := blockB.String()
 			findingBlocks = append(findingBlocks, block)
 
 			if f.Severity == "high" {
@@ -299,15 +315,34 @@ func typStr(s string) string {
 	return s
 }
 
-// typContent escapes s for use inside a Typst content block ([]).
-// Backslash must be escaped first to avoid double-escaping.
-func typContent(s string) string {
+// typContentLine escapes one line of text for use inside a Typst content block.
+// Backslash is escaped first to prevent double-escaping.
+func typContentLine(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `[`, `\[`)
 	s = strings.ReplaceAll(s, `]`, `\]`)
 	s = strings.ReplaceAll(s, `#`, `\#`)
 	s = strings.ReplaceAll(s, `@`, `\@`)
+	s = strings.ReplaceAll(s, `<`, `\<`)
+	s = strings.ReplaceAll(s, `>`, `\>`)
 	return s
+}
+
+// typContent escapes a single-line string for use inside a Typst content block ([]).
+func typContent(s string) string { return typContentLine(s) }
+
+// typLines escapes a multi-line string for use inside a Typst content block.
+// Each line is escaped individually; lines are joined with a Typst forced line
+// break (backslash + newline) so each line renders on its own row.
+func typLines(s string) string {
+	lines := strings.Split(s, "\n")
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if esc := typContentLine(line); esc != "" {
+			parts = append(parts, esc)
+		}
+	}
+	return strings.Join(parts, "\\\n")
 }
 
 // extractDate returns the YYYY-MM-DD prefix of an RFC3339 or similar timestamp.

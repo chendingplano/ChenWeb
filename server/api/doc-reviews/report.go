@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
@@ -58,18 +61,26 @@ type PassGroup struct {
 	Findings []ReportFinding `json:"findings"`
 }
 
+// SourceContext holds one source location with its surrounding context lines.
+type SourceContext struct {
+	Before string `json:"before,omitempty"` // up to five lines before the source
+	Source string `json:"source"`           // the source line(s) from the document
+	After  string `json:"after,omitempty"`  // up to five lines after the source
+}
+
 // ReportFinding is a single finding within a report.
 type ReportFinding struct {
-	Pass        string  `json:"pass"`
-	Aspect      string  `json:"aspect"`
-	Severity    string  `json:"severity"`
-	FindingType string  `json:"finding_type"`
-	Title       string  `json:"title"`
-	Description string  `json:"description"`
-	Evidence    string  `json:"evidence,omitempty"`
-	Location    string  `json:"location,omitempty"`
-	Suggestion  string  `json:"suggestion,omitempty"`
-	Confidence  float64 `json:"confidence"`
+	Pass        string          `json:"pass"`
+	Aspect      string          `json:"aspect"`
+	Severity    string          `json:"severity"`
+	FindingType string          `json:"finding_type"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Evidence    string          `json:"evidence,omitempty"`
+	Location    string          `json:"location,omitempty"`
+	Suggestion  string          `json:"suggestion,omitempty"`
+	Confidence  float64         `json:"confidence"`
+	Sources     []SourceContext `json:"sources,omitempty"` // source blocks with before/after context
 }
 
 // ComplianceSummary captures compliance-related findings.
@@ -124,6 +135,9 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 	// Determine how many distinct reviewers ran based on distinct passes.
 	report.Meta.NumReviewersRan = len(passFindings)
 
+	// Load document lines once for context extraction (non-fatal if unavailable).
+	lineIndex := g.loadDocLines(ctx, req.InputRecordID)
+
 	var totalHigh, totalMedium, totalLow int
 	for pass, items := range passFindings {
 		var rfList []ReportFinding
@@ -134,6 +148,7 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 				Evidence: f.Evidence, Location: f.Location, Suggestion: f.Suggestion,
 				Confidence: f.Confidence,
 			}
+			rf.Sources = g.buildSources(lineIndex, f)
 			rfList = append(rfList, rf)
 			report.Findings = append(report.Findings, rf)
 			switch f.Severity {
@@ -304,6 +319,191 @@ func countBySeverity(findings []ReportFinding, sev string) int {
 }
 
 func timeNow() string { return time.Now().UTC().Format(time.RFC3339) }
+
+// loadDocLines loads the document line file for the given input record and
+// returns a map of line number → line content text. Returns nil (non-fatal)
+// when the DB is unavailable, the record is missing, or the file cannot be read.
+func (g *DocReviewReportGenerator) loadDocLines(ctx context.Context, inputRecordID int64) map[int]string {
+	if g.DB == nil {
+		return nil
+	}
+	rec, err := docprocessing.DocMetadataSQLStore{DB: g.DB}.GetInputRecord(ctx, inputRecordID)
+	if err != nil {
+		typstLogger.Warn("loadDocLines: get input record", "record_id", inputRecordID, "error", err)
+		return nil
+	}
+	lineFilePath, err := docprocessing.ResolveInputFilePath(
+		docprocessing.LineFileGeneratedEvent{RecordID: inputRecordID},
+		rec.ResultFilename, rec.ParserName, rec.StagingFilename,
+	)
+	if err != nil {
+		typstLogger.Warn("loadDocLines: resolve line file", "record_id", inputRecordID, "error", err)
+		return nil
+	}
+	body, err := os.ReadFile(lineFilePath)
+	if err != nil {
+		typstLogger.Warn("loadDocLines: read line file", "path", lineFilePath, "error", err)
+		return nil
+	}
+	lines, err := docprocessing.ParseInputLinesIncludingTOC(body)
+	if err != nil {
+		typstLogger.Warn("loadDocLines: parse line file", "path", lineFilePath, "error", err)
+		return nil
+	}
+	index := make(map[int]string, len(lines))
+	for _, l := range lines {
+		index[l.LineNo] = l.Content
+	}
+	return index
+}
+
+// extractFirstInt returns the first positive integer found in s, or 0.
+func extractFirstInt(s string) int {
+	s = strings.TrimSpace(s)
+	var acc strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			acc.WriteRune(r)
+		} else if acc.Len() > 0 {
+			break
+		}
+	}
+	if acc.Len() == 0 {
+		return 0
+	}
+	n, _ := strconv.Atoi(acc.String())
+	return n
+}
+
+// parseLocationRange extracts line numbers from a location string.
+//   - "162"    → [162]
+//   - "53-56"  → [53, 54, 55, 56]
+//   - "53, 87" → [53, 87]
+func parseLocationRange(location string) []int {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return nil
+	}
+	// Detect "N-M" range: look for a hyphen between two digit runs.
+	if idx := strings.IndexByte(location, '-'); idx > 0 {
+		after := strings.TrimSpace(location[idx+1:])
+		if len(after) > 0 && after[0] >= '0' && after[0] <= '9' {
+			start := extractFirstInt(location[:idx])
+			end := extractFirstInt(after)
+			if start > 0 && end >= start && end-start < 200 {
+				out := make([]int, end-start+1)
+				for i := range out {
+					out[i] = start + i
+				}
+				return out
+			}
+		}
+	}
+	// Comma- or semicolon-separated list of numbers.
+	var result []int
+	seen := map[int]bool{}
+	for _, part := range strings.FieldsFunc(location, func(r rune) bool {
+		return r == ',' || r == ';'
+	}) {
+		if n := extractFirstInt(part); n > 0 && !seen[n] {
+			seen[n] = true
+			result = append(result, n)
+		}
+	}
+	return result
+}
+
+// groupConsecutive partitions a sorted slice of integers into runs of
+// consecutive values, e.g. [53,54,55,56,87] → [[53,54,55,56],[87]].
+func groupConsecutive(nums []int) [][]int {
+	if len(nums) == 0 {
+		return nil
+	}
+	var groups [][]int
+	cur := []int{nums[0]}
+	for _, n := range nums[1:] {
+		if n == cur[len(cur)-1]+1 {
+			cur = append(cur, n)
+		} else {
+			groups = append(groups, cur)
+			cur = []int{n}
+		}
+	}
+	return append(groups, cur)
+}
+
+// contextLines returns up to (end-start+1) lines from the index in [start,end],
+// formatted as "N: content", joined by newlines.
+func contextLines(index map[int]string, start, end int) string {
+	if len(index) == 0 {
+		return ""
+	}
+	var parts []string
+	for n := start; n <= end; n++ {
+		if n > 0 {
+			if content, ok := index[n]; ok {
+				parts = append(parts, fmt.Sprintf("%d: %s", n, content))
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// buildSources constructs the []SourceContext for a finding.
+// Each distinct location group becomes one SourceContext with ±5 context lines.
+func (g *DocReviewReportGenerator) buildSources(lineIndex map[int]string, f FindingItem) []SourceContext {
+	lineNos := parseLocationRange(f.Location)
+
+	if len(lineNos) == 0 {
+		// No parseable line numbers — use location+evidence text as-is.
+		src := f.Location
+		if f.Evidence != "" {
+			if src != "" {
+				src += ": " + f.Evidence
+			} else {
+				src = f.Evidence
+			}
+		}
+		if src == "" {
+			src = "No specific location identified."
+		}
+		return []SourceContext{{Source: src}}
+	}
+
+	var sources []SourceContext
+	for _, group := range groupConsecutive(lineNos) {
+		start, end := group[0], group[len(group)-1]
+
+		// Build source text from the line index.
+		var srcLines []string
+		for n := start; n <= end; n++ {
+			if content, ok := lineIndex[n]; ok {
+				srcLines = append(srcLines, fmt.Sprintf("%d: %s", n, content))
+			}
+		}
+		var sourceStr string
+		if len(srcLines) > 0 {
+			sourceStr = strings.Join(srcLines, "\n")
+		} else {
+			// Index unavailable — fall back to location+evidence.
+			sourceStr = f.Location
+			if f.Evidence != "" {
+				if sourceStr != "" {
+					sourceStr += ": " + f.Evidence
+				} else {
+					sourceStr = f.Evidence
+				}
+			}
+		}
+
+		sources = append(sources, SourceContext{
+			Before: contextLines(lineIndex, start-5, start-1),
+			Source: sourceStr,
+			After:  contextLines(lineIndex, end+1, end+5),
+		})
+	}
+	return sources
+}
 
 // renderMarkdown renders the report as Markdown.
 func renderMarkdown(report *ReportSkeleton) string {

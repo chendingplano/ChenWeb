@@ -4,15 +4,17 @@
 // ============================================================
 
 // ── Colour palette ───────────────────────────────────────────
-#let clr-accent    = rgb("#1a4f8a")
-#let clr-secondary = rgb("#3a7bc8")
-#let clr-muted     = rgb("#6b7280")
-#let clr-divider   = rgb("#d1d5db")
-#let clr-source-bg = rgb("#f3f4f6")
-#let clr-error-bg  = rgb("#fef2f2")
-#let clr-error-fg  = rgb("#b91c1c")
-#let clr-warn-bg   = rgb("#fffbeb")
-#let clr-ok-bg     = rgb("#f0fdf4")
+#let clr-accent      = rgb("#1a4f8a")
+#let clr-secondary   = rgb("#3a7bc8")
+#let clr-muted       = rgb("#6b7280")
+#let clr-divider     = rgb("#d1d5db")
+#let clr-source-bg   = rgb("#f3f4f6")
+#let clr-context-bg  = rgb("#e2e8f4")   // context lines (before/after source)
+#let clr-context-fg  = rgb("#5a6a7e")   // muted text for context lines
+#let clr-error-bg    = rgb("#fef2f2")
+#let clr-error-fg    = rgb("#b91c1c")
+#let clr-warn-bg     = rgb("#fffbeb")
+#let clr-ok-bg       = rgb("#f0fdf4")
 
 // ── Helper: horizontal rule ──────────────────────────────────
 #let hrule = line(length: 100%, stroke: 0.5pt + clr-divider)
@@ -25,14 +27,39 @@
   text(size: 9pt, value),
 )
 
-// ── Helper: source-line block ────────────────────────────────
-#let source-lines(content) = block(
+// ── Helper: merged context + source + context block ──────────
+// Renders before-context, source lines, and after-context as a single
+// visually unified block. Pass `none` for before/after to omit them.
+#let source-with-context(before: none, source: [], after: none) = block(
   width: 100%,
-  fill: clr-source-bg,
   stroke: 0.5pt + clr-divider,
   radius: 4pt,
-  inset: (x: 10pt, y: 8pt),
-  text(font: "Courier New", size: 8pt, content),
+  inset: 0pt,
+  clip: true,
+  {
+    if before != none {
+      block(
+        width: 100%,
+        fill: clr-context-bg,
+        inset: (x: 10pt, y: 6pt),
+        text(font: "Courier New", size: 8pt, fill: clr-context-fg, before),
+      )
+    }
+    block(
+      width: 100%,
+      fill: clr-source-bg,
+      inset: (x: 10pt, y: 8pt),
+      text(font: "Courier New", size: 8pt, source),
+    )
+    if after != none {
+      block(
+        width: 100%,
+        fill: clr-context-bg,
+        inset: (x: 10pt, y: 6pt),
+        text(font: "Courier New", size: 8pt, fill: clr-context-fg, after),
+      )
+    }
+  },
 )
 
 // ── Helper: error block ──────────────────────────────────────
@@ -57,12 +84,22 @@
 
 // ── review-finding: one individual finding ───────────────────
 // Parameters:
-//   id          – finding identifier, e.g. "F-01"
-//   related     – source lines / excerpt from the reviewed document
+//   id      – finding identifier, e.g. "F-01"
+//   sources – array of source-context dicts, each with keys:
+//               before: content or none  (up to five context lines before)
+//               source: content          (the source line(s))
+//               after:  content or none  (up to five context lines after)
+//             When the array has more than one entry, "Source N:" labels appear.
 //   errors      – description of the error(s) found
 //   explanation – detailed explanation of why it is an error
 //   correction  – recommended correction
-#let review-finding(id: "", related: [], errors: [], explanation: [], correction: []) = {
+#let review-finding(
+  id: "",
+  sources: (),
+  errors: [],
+  explanation: [],
+  correction: [],
+) = {
   block(
     width: 100%,
     stroke: 0.5pt + clr-divider,
@@ -78,10 +115,23 @@
         text(weight: "bold", fill: white, size: 9.5pt, "Finding " + id),
       )
       pad(x: 12pt, y: 10pt, {
-        // Related source lines
+        // Source blocks (one per location group)
         text(weight: "semibold", size: 9pt, fill: clr-muted, "Related Source Lines")
         v(3pt)
-        source-lines(related)
+        let src-n = sources.len()
+        for (i, sc) in sources.enumerate() {
+          if src-n > 1 {
+            text(size: 8.5pt, weight: "semibold", fill: clr-muted,
+              "Source " + str(i + 1) + " of " + str(src-n) + ":")
+            v(2pt)
+          }
+          source-with-context(
+            before: sc.at("before", default: none),
+            source: sc.at("source", default: []),
+            after:  sc.at("after",  default: none),
+          )
+          if i < src-n - 1 { v(6pt) }
+        }
         v(8pt)
 
         // Errors
@@ -373,8 +423,18 @@
       title: "Grammar & Style",
       findings: (
         review-finding(
-          id:          "F-01",
-          related:     [Section 2, paragraph 3: "The system will ensures that all users..."],
+          id: "F-01",
+          sources: (
+            (
+              before: [1: All users must authenticate before accessing the system.\
+2: Authentication tokens are valid for 24 hours.\
+3: Upon successful authentication, the system grants access.],
+              source: [4: The system will ensures that all users receive a confirmation email.],
+              after:  [5: Failed attempts are logged for audit purposes.\
+6: Account lockout occurs after five consecutive failures.\
+7: Locked accounts must be unlocked by an administrator.],
+            ),
+          ),
           errors:      [Subject-verb agreement error: "will ensures" should be "will ensure".],
           explanation: [When a modal verb (will, shall, may, etc.) is used, the main verb
                         must remain in its base (infinitive) form without the third-person
@@ -382,8 +442,18 @@
           correction:  [Change to: "The system will ensure that all users..."],
         ),
         review-finding(
-          id:          "F-02",
-          related:     [Section 4, title: "Procedures For Handling Requests"],
+          id: "F-02",
+          sources: (
+            (
+              before: [10: User Roles and Permissions\
+11: Three roles are defined: Admin, Editor, Viewer.\
+12: Role assignment is managed by the system administrator.\
+13: Roles are reviewed annually.],
+              source: [14: Procedures For Handling Requests],
+              after:  [15: Requests are submitted via the online portal.\
+16: A reference number is issued upon submission.],
+            ),
+          ),
           errors:      [Inconsistent capitalisation in heading; sentence case should be used.],
           explanation: [The style guide mandates sentence case for all headings (only first
                         word and proper nouns capitalised).],
@@ -411,16 +481,33 @@
       title: "Logical Consistency",
       findings: (
         review-finding(
-          id:          "F-03",
-          related:     [Section 3 states "access is granted after two approvals";
-                        Section 5 states "one approval is sufficient for read-only access".],
-          errors:      [Contradiction between Section 3 and Section 5 regarding approval
-                        requirements.],
+          id: "F-03",
+          sources: (
+            (
+              before: [28: All access requests must be submitted in writing.\
+29: Requests are reviewed within two business days.\
+30: Access Control Requirements],
+              source: [31: Access is granted after two approvals.\
+32: The approvers must be from different departments.],
+              after:  [33: Read-only access to shared resources.\
+34: Write access always requires the full approval chain.\
+35: Audit and Compliance],
+            ),
+            (
+              before: [68: Data classification governs access tiers.\
+69: Tier 1 data requires no approval.\
+70: Tier 2 data requires manager sign-off.],
+              source: [71: One approval is sufficient for read-only access.],
+              after:  [72: Write access to Tier 3 data requires CISO approval.\
+73: Access logs are retained for 12 months.],
+            ),
+          ),
+          errors:      [Contradiction between line 31 and line 71 regarding approval requirements.],
           explanation: [Readers cannot determine which rule takes precedence. This ambiguity
                         may lead to incorrect access-control decisions.],
-          correction:  [Add a clarifying sentence in Section 3: "For read-only access a
-                        single approval is sufficient; write access requires two approvals."
-                        Remove or align the conflicting statement in Section 5.],
+          correction:  [Add a clarifying note: "For read-only access one approval suffices;
+                        write access requires two approvals from different departments."
+                        Align or remove the conflicting statement at line 71.],
         ),
       ),
       assessment:  [One significant logical contradiction was found. It must be resolved
