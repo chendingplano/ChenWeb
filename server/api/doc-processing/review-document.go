@@ -142,6 +142,11 @@ type ReviewProcessor struct {
 	GrammarPromptText string
 
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
+
+	// ReviewRunID, when set, overrides the self-generated run id so findings are
+	// persisted under a caller-supplied run identity (DR15: the DocReviewController
+	// assigns the run id at request-accept time and passes it in here).
+	ReviewRunID string
 }
 
 // NewReviewProcessor creates a ReviewProcessor.
@@ -217,7 +222,10 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 		return nil
 	}
 
-	reviewRunID := fmt.Sprintf("%d_review_%s", recordID, start.UTC().Format("20060102T150405"))
+	reviewRunID := p.ReviewRunID
+	if reviewRunID == "" {
+		reviewRunID = fmt.Sprintf("%d_review_%s", recordID, start.UTC().Format("20060102T150405"))
+	}
 	p.Logger.Info("document review running",
 		"record_id", recordID,
 		"review_run_id", reviewRunID,

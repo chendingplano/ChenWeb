@@ -89,23 +89,32 @@ func (c *DocReviewController) AcceptRequest(ctx context.Context, input SubmitReq
 		return nil, fmt.Errorf("marshal model overrides: %w", err)
 	}
 
+	// DR15: assign the review_run_id at accept time so the per-aspect status rows
+	// (and, later, the findings) can share the run identity from the start.
+	reviewRunID := fmt.Sprintf("%d_review_%s", input.InputRecordID, time.Now().UTC().Format("20060102T150405.000000"))
+
 	var id int64
 	err = c.DB.QueryRowContext(ctx, `
 		INSERT INTO kb.doc_review_requests
-			(input_record_id, tier, aspects, reference_docs, notes, model_overrides,
+			(input_record_id, review_run_id, tier, aspects, reference_docs, notes, model_overrides,
 			 requester_name, requester_id, report_template, doc_template, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'accepted')
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'accepted')
 		RETURNING id`,
-		input.InputRecordID, input.Tier, aspectsJSON, refDocsJSON, input.Notes, overridesJSON,
+		input.InputRecordID, reviewRunID, input.Tier, aspectsJSON, refDocsJSON, input.Notes, overridesJSON,
 		input.RequesterName, input.RequesterID, input.ReportTemplate, input.DocTemplate,
 	).Scan(&id)
 	if err != nil {
 		return nil, fmt.Errorf("insert review request: %w", err)
 	}
 
-	logger.Info("review request created", "request_id", id, "record_id", input.InputRecordID, "tier", input.Tier)
+	// DR15: seed one kb.doc_review_status row per aspect (status 'pending').
+	if err := c.seedAspectStatuses(ctx, id, input.InputRecordID, reviewRunID, aspects); err != nil {
+		logger.Warn("failed to seed aspect statuses", "request_id", id, "error", err)
+	}
 
-	return &SubmitResult{RequestID: id, Status: "accepted"}, nil
+	logger.Info("review request created", "request_id", id, "record_id", input.InputRecordID, "tier", input.Tier, "review_run_id", reviewRunID)
+
+	return &SubmitResult{RequestID: id, Status: "accepted", ReviewRunID: reviewRunID}, nil
 }
 
 // RunReview transitions the request to "running", delegates to ReviewProcessor, then completes.
@@ -119,9 +128,13 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 		return fmt.Errorf("request %d is in status %q, expected 'accepted'", requestID, req.Status)
 	}
 
-	reviewRunID := fmt.Sprintf("%d_review_%s", req.InputRecordID, time.Now().UTC().Format("20060102T150405"))
+	// review_run_id was assigned at accept time (DR15).
+	reviewRunID := req.ReviewRunID
+	if reviewRunID == "" {
+		reviewRunID = fmt.Sprintf("%d_review_%s", req.InputRecordID, time.Now().UTC().Format("20060102T150405.000000"))
+	}
 
-	// Update status -> running.
+	// Update status -> running, and flip every pending aspect to 'running'.
 	_, err = c.DB.ExecContext(ctx,
 		`UPDATE kb.doc_review_requests SET status = 'running', review_run_id = $1, start_time = NOW() WHERE id = $2`,
 		reviewRunID, requestID,
@@ -129,9 +142,11 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 	if err != nil {
 		return fmt.Errorf("update request %d to running: %w", requestID, err)
 	}
+	c.markAspectsRunning(ctx, reviewRunID)
 	logger.Info("review request started", "request_id", requestID, "review_run_id", reviewRunID)
 
-	// Build and run ReviewProcessor.
+	// Build and run ReviewProcessor. Pass the accept-time run id so findings are
+	// persisted under the same review_run_id the request and status rows use.
 	llmClient := &llmclients.OpenAIJSONClient{
 		HTTPClient: &http.Client{Timeout: 100 * time.Second},
 	}
@@ -140,19 +155,28 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 	findingsStore := docprocessing.ReviewFindingsSQLStore{DB: c.DB}
 
 	processor := docprocessing.NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
+	processor.ReviewRunID = reviewRunID
 	err = processor.PostProcessIndex(ctx, req.InputRecordID)
 	if err != nil {
-		// Update status -> failed.
+		// Update status -> failed, and fail every non-finished aspect.
 		errMsg := err.Error()
 		c.DB.ExecContext(ctx,
 			`UPDATE kb.doc_review_requests SET status = 'failed', end_time = NOW(), error_message = $1 WHERE id = $2`,
 			errMsg, requestID,
 		)
+		c.failOpenAspects(ctx, reviewRunID, errMsg)
 		logger.Info("review request failed", "request_id", requestID, "error", errMsg)
 		return fmt.Errorf("review failed for record %d: %w", req.InputRecordID, err)
 	}
 
-	// Update status -> completed.
+	// If the request was stopped while running, do not override that terminal state.
+	if cur, _ := c.loadRequest(ctx, requestID); cur != nil && cur.Status == "stopped" {
+		logger.Info("review request was stopped; skipping completion", "request_id", requestID)
+		return nil
+	}
+
+	// Mark each aspect 'success' with its finding count, then complete the request.
+	c.finalizeAspectsSuccess(ctx, reviewRunID, req.InputRecordID)
 	_, err = c.DB.ExecContext(ctx,
 		`UPDATE kb.doc_review_requests SET status = 'completed', end_time = NOW() WHERE id = $1`,
 		requestID,
@@ -162,6 +186,30 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 	}
 	logger.Info("review request completed", "request_id", requestID, "review_run_id", reviewRunID)
 	return nil
+}
+
+// RunReviewAndReport runs the review and, on success, builds + persists the report.
+// Intended to be launched in a background goroutine (with a detached context) so
+// the submit HTTP request can return immediately and the live monitor (DR15) can
+// observe the job while it runs.
+func (c *DocReviewController) RunReviewAndReport(ctx context.Context, requestID int64) {
+	if err := c.RunReview(ctx, requestID); err != nil {
+		logger.Warn("background review run failed", "request_id", requestID, "error", err)
+		return
+	}
+	req, err := c.GetRequestWithFindings(ctx, requestID)
+	if err != nil || req == nil || req.Request.Status != "completed" {
+		return
+	}
+	gen := NewDocReviewReportGenerator()
+	report, buildErr := gen.Build(ctx, &req.Request, req.Findings)
+	if buildErr != nil {
+		logger.Warn("background report build failed", "request_id", requestID, "error", buildErr)
+		return
+	}
+	if _, perr := gen.Persist(ctx, &req.Request, report); perr != nil {
+		logger.Warn("background report persist failed", "request_id", requestID, "error", perr)
+	}
 }
 
 // GetRequest returns the request status row.
@@ -181,7 +229,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 	if req.Status == "completed" && req.ReviewRunID != "" {
 		rows, err := c.DB.QueryContext(ctx, `
 			SELECT id, pass, aspect, severity, finding_type, title, description,
-			       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+			       COALESCE(evidence,''), COALESCE(location::text,''), COALESCE(suggestion,''),
 			       COALESCE(confidence,0), COALESCE(review_status,'pending')
 			FROM kb.doc_review_findings
 			WHERE input_record_id = $1 AND review_run_id = $2
@@ -218,6 +266,11 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("request %d is not in 'running' status", requestID)
+	}
+	// DR15: drive every non-finished aspect to a terminal state so the job leaves
+	// the live monitor (finished iff status is 'success' or 'failed').
+	if req, _ := c.loadRequest(ctx, requestID); req != nil && req.ReviewRunID != "" {
+		c.failOpenAspects(ctx, req.ReviewRunID, "stopped")
 	}
 	logger.Info("review request stopped", "request_id", requestID)
 	return nil
@@ -277,6 +330,16 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64) (*Reque
 	req.EndTime = endTime.String
 	req.ErrorMessage = errorMsg.String
 
+	// DR15: surface the latest report id (if any) so the GUI can link to it after
+	// an async run completes (the submit response no longer carries it).
+	var reportID sql.NullInt64
+	_ = c.DB.QueryRowContext(ctx,
+		`SELECT id FROM kb.doc_review_reports WHERE request_id = $1 ORDER BY id DESC LIMIT 1`, id,
+	).Scan(&reportID)
+	if reportID.Valid {
+		req.ReportID = reportID.Int64
+	}
+
 	if aspectsJSON.Valid {
 		json.Unmarshal([]byte(aspectsJSON.String), &req.Aspects)
 	}
@@ -287,6 +350,160 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64) (*Reque
 		json.Unmarshal([]byte(overridesJSON.String), &req.ModelOverrides)
 	}
 	return &req, nil
+}
+
+// ── DR15: per-aspect status tracking & live monitor ──────────────────────────
+
+// aspectPassMap returns aspect name -> pass ("P1".."P6") from the aspect catalog.
+func aspectPassMap() map[string]string {
+	m := make(map[string]string)
+	for _, a := range ListAspects() {
+		m[a.Name] = a.Group
+	}
+	return m
+}
+
+// seedAspectStatuses inserts one kb.doc_review_status row per aspect (status
+// 'pending') for a freshly-accepted request.
+func (c *DocReviewController) seedAspectStatuses(ctx context.Context, requestID, recordID int64, reviewRunID string, aspects []string) error {
+	if len(aspects) == 0 {
+		return nil
+	}
+	passByName := aspectPassMap()
+	for _, aspect := range aspects {
+		_, err := c.DB.ExecContext(ctx, `
+			INSERT INTO kb.doc_review_status (request_id, input_record_id, review_run_id, aspect, pass, status)
+			VALUES ($1, $2, $3, $4, $5, 'pending')
+			ON CONFLICT (review_run_id, aspect) DO NOTHING`,
+			requestID, recordID, reviewRunID, aspect, nullableStr(passByName[aspect]),
+		)
+		if err != nil {
+			return fmt.Errorf("seed aspect %q: %w", aspect, err)
+		}
+	}
+	return nil
+}
+
+// markAspectsRunning flips every pending aspect of a run to 'running'.
+func (c *DocReviewController) markAspectsRunning(ctx context.Context, reviewRunID string) {
+	_, err := c.DB.ExecContext(ctx, `
+		UPDATE kb.doc_review_status
+		SET status = 'running', start_time = NOW(), modify_time = NOW()
+		WHERE review_run_id = $1 AND status = 'pending'`, reviewRunID)
+	if err != nil {
+		logger.Warn("mark aspects running failed", "review_run_id", reviewRunID, "error", err)
+	}
+}
+
+// finalizeAspectsSuccess marks every non-finished aspect of a run 'success',
+// stamping each aspect's finding count from kb.doc_review_findings. Findings are
+// counted per (record_id, aspect): re-runs delete prior findings (DR7), so a
+// record has exactly one current finding set.
+func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, reviewRunID string, recordID int64) {
+	_, err := c.DB.ExecContext(ctx, `
+		UPDATE kb.doc_review_status s
+		SET status = 'success',
+		    end_time = NOW(),
+		    modify_time = NOW(),
+		    finding_count = COALESCE((
+		        SELECT COUNT(*) FROM kb.doc_review_findings f
+		        WHERE f.input_record_id = $2 AND f.aspect = s.aspect
+		    ), 0)
+		WHERE s.review_run_id = $1 AND s.status NOT IN ('success', 'failed')`,
+		reviewRunID, recordID)
+	if err != nil {
+		logger.Warn("finalize aspects success failed", "review_run_id", reviewRunID, "error", err)
+	}
+}
+
+// failOpenAspects drives every non-finished aspect of a run to 'failed' with the
+// given message (used on whole-run failure and on stop).
+func (c *DocReviewController) failOpenAspects(ctx context.Context, reviewRunID, errMsg string) {
+	_, err := c.DB.ExecContext(ctx, `
+		UPDATE kb.doc_review_status
+		SET status = 'failed', error_message = $2, end_time = NOW(), modify_time = NOW()
+		WHERE review_run_id = $1 AND status NOT IN ('success', 'failed')`,
+		reviewRunID, errMsg)
+	if err != nil {
+		logger.Warn("fail open aspects failed", "review_run_id", reviewRunID, "error", err)
+	}
+}
+
+// ListActiveJobs returns every review request that still has at least one
+// unfinished aspect (status NOT IN 'success','failed'), each with its full
+// per-aspect status list. This is the source of truth for the live job monitor:
+// a job disappears the moment its last aspect finishes.
+func (c *DocReviewController) ListActiveJobs(ctx context.Context) ([]ActiveJob, error) {
+	rows, err := c.DB.QueryContext(ctx, `
+		SELECT r.id, r.input_record_id, COALESCE(r.review_run_id,''), r.tier, r.status,
+		       r.requester_name, COALESCE(i.title, i.file_name, ''),
+		       r.create_time::text, COALESCE(r.start_time::text, '')
+		FROM kb.doc_review_requests r
+		LEFT JOIN kb.inputs i ON i.id = r.input_record_id
+		WHERE EXISTS (
+		    SELECT 1 FROM kb.doc_review_status s
+		    WHERE s.request_id = r.id AND s.status NOT IN ('success', 'failed')
+		)
+		ORDER BY r.create_time DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list active jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []ActiveJob
+	for rows.Next() {
+		var j ActiveJob
+		if err := rows.Scan(&j.RequestID, &j.InputRecordID, &j.ReviewRunID, &j.Tier, &j.Status,
+			&j.RequesterName, &j.DocTitle, &j.CreateTime, &j.StartTime); err != nil {
+			return nil, fmt.Errorf("scan active job: %w", err)
+		}
+		jobs = append(jobs, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active jobs: %w", err)
+	}
+
+	// Attach per-aspect status to each job.
+	for i := range jobs {
+		aspects, err := c.loadAspectStatuses(ctx, jobs[i].ReviewRunID)
+		if err != nil {
+			return nil, err
+		}
+		jobs[i].Aspects = aspects
+	}
+	return jobs, nil
+}
+
+// loadAspectStatuses returns the kb.doc_review_status rows for a run, ordered by id.
+func (c *DocReviewController) loadAspectStatuses(ctx context.Context, reviewRunID string) ([]AspectStatus, error) {
+	rows, err := c.DB.QueryContext(ctx, `
+		SELECT aspect, COALESCE(pass,''), status, finding_count, COALESCE(error_message,''),
+		       COALESCE(start_time::text,''), COALESCE(end_time::text,'')
+		FROM kb.doc_review_status
+		WHERE review_run_id = $1
+		ORDER BY id`, reviewRunID)
+	if err != nil {
+		return nil, fmt.Errorf("load aspect statuses: %w", err)
+	}
+	defer rows.Close()
+	var out []AspectStatus
+	for rows.Next() {
+		var a AspectStatus
+		if err := rows.Scan(&a.Aspect, &a.Pass, &a.Status, &a.FindingCount, &a.ErrorMessage,
+			&a.StartTime, &a.EndTime); err != nil {
+			return nil, fmt.Errorf("scan aspect status: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// nullableStr returns a NULL-able string (empty -> NULL) for optional columns.
+func nullableStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // RequestError is an HTTP-level error with status code.

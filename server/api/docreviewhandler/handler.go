@@ -1,9 +1,11 @@
 package docreviewhandler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/chendingplano/deepdoc/server/api/docreview"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -28,7 +30,7 @@ func ListTiers(c echo.Context) error {
 	})
 }
 
-func submitRequestHelper(c echo.Context, synchronous bool) error {
+func submitRequestHelper(c echo.Context) error {
 	ctrl := docreview.NewDocReviewController()
 
 	var input docreview.SubmitRequestInput
@@ -50,7 +52,7 @@ func submitRequestHelper(c echo.Context, synchronous bool) error {
 
 	ctx := c.Request().Context()
 
-	// Accept the request (validates and persists).
+	// Accept the request (validates, persists, seeds per-aspect status rows).
 	result, err := ctrl.AcceptRequest(ctx, input)
 	if err != nil {
 		if re, ok := err.(*docreview.RequestError); ok {
@@ -65,42 +67,39 @@ func submitRequestHelper(c echo.Context, synchronous bool) error {
 		})
 	}
 
-	// Run the review synchronously (the controller handles the lifecycle).
-	if err := ctrl.RunReview(ctx, result.RequestID); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]any{
-			"status":    false,
-			"error_msg": err.Error(),
-		})
-	}
-
-	// Generate report.
-	req, _ := ctrl.GetRequest(ctx, result.RequestID)
-	if req != nil && req.Status == "completed" {
-		wf, _ := ctrl.GetRequestWithFindings(ctx, result.RequestID)
-		gen := docreview.NewDocReviewReportGenerator()
-		report, buildErr := gen.Build(ctx, &wf.Request, wf.Findings)
-		if buildErr == nil {
-			reportID, persistErr := gen.Persist(ctx, &wf.Request, report)
-			if persistErr == nil {
-				result.ReviewRunID = req.ReviewRunID
-				return c.JSON(http.StatusOK, map[string]any{
-					"status":     true,
-					"request_id": result.RequestID,
-					"report_id":  reportID,
-				})
-			}
-		}
-	}
+	// DR15: run the review in the background so the submit request returns
+	// immediately and the live monitor can observe the job while it runs. Use a
+	// detached context — the HTTP request context is cancelled once we respond.
+	requestID := result.RequestID
+	go func() {
+		bgCtrl := docreview.NewDocReviewController()
+		bgCtrl.RunReviewAndReport(context.Background(), requestID)
+	}()
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":     true,
 		"request_id": result.RequestID,
+		"status_str": "accepted",
 	})
 }
 
-// SubmitRequest creates and runs a review request synchronously.
+// SubmitRequest creates a review request and runs it in the background (DR15).
 func SubmitRequest(c echo.Context) error {
-	return submitRequestHelper(c, true)
+	return submitRequestHelper(c)
+}
+
+// ListActiveJobs returns all review jobs with ≥1 unfinished aspect (DR15) —
+// drives the live job monitor.
+func ListActiveJobs(c echo.Context) error {
+	ctrl := docreview.NewDocReviewController()
+	jobs, err := ctrl.ListActiveJobs(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	if jobs == nil {
+		jobs = []docreview.ActiveJob{}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "jobs": jobs})
 }
 
 // parseID extracts an int64 path parameter.
@@ -117,7 +116,11 @@ func GetRequest(c echo.Context) error {
 	ctrl := docreview.NewDocReviewController()
 	result, err := ctrl.GetRequestWithFindings(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": err.Error()})
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "request": result.Request, "findings": result.Findings})
 }

@@ -43,6 +43,7 @@ type RequestStatus struct {
 	StartTime      string              `json:"start_time,omitempty"`
 	EndTime        string              `json:"end_time,omitempty"`
 	ErrorMessage   string              `json:"error_message,omitempty"`
+	ReportID       int64               `json:"report_id,omitempty"` // latest report for this request, if any (DR15)
 }
 
 // RequestWithFindings extends RequestStatus with findings.
@@ -113,4 +114,32 @@ type SubmitResult struct {
 	RequestID   int64  `json:"request_id"`
 	Status      string `json:"status"`
 	ReviewRunID string `json:"review_run_id,omitempty"`
+}
+
+// AspectStatus is one row of kb.doc_review_status (DR15) — the status of a single
+// reviewed aspect within a run. An aspect is "finished" iff Status is
+// "success" or "failed".
+type AspectStatus struct {
+	Aspect       string `json:"aspect"`
+	Pass         string `json:"pass,omitempty"`
+	Status       string `json:"status"` // pending | running | success | failed
+	FindingCount int    `json:"finding_count"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	StartTime    string `json:"start_time,omitempty"`
+	EndTime      string `json:"end_time,omitempty"`
+}
+
+// ActiveJob is one entry in the live monitor (DR15): a review request that still
+// has at least one unfinished aspect, with its full per-aspect status list.
+type ActiveJob struct {
+	RequestID     int64          `json:"request_id"`
+	InputRecordID int64          `json:"input_record_id"`
+	ReviewRunID   string         `json:"review_run_id"`
+	Tier          string         `json:"tier"`
+	Status        string         `json:"status"`
+	RequesterName string         `json:"requester_name"`
+	DocTitle      string         `json:"doc_title,omitempty"`
+	CreateTime    string         `json:"create_time"`
+	StartTime     string         `json:"start_time,omitempty"`
+	Aspects       []AspectStatus `json:"aspects"`
 }

@@ -1,8 +1,5 @@
 <script lang="ts">
-	import { redirect } from '@sveltejs/kit';
-	import { fromTheme } from 'tailwind-merge';
 	import { appAuthStore } from '@chendingplano/shared';
-	import { pass } from 'three/tsl';
 
 	// This page implements three modes: login, signup, forgot password
 	// (or three pages). This is controlled by the "mode" variable.
@@ -14,7 +11,8 @@
 	let password = $state('');
 	let mode = $state('login');
 
-	async function handleEmailLogin() {
+	async function handleEmailLogin(event: SubmitEvent) {
+		event.preventDefault();
 		try {
 			const res = await fetch('/auth/email/login', {
 				method: 'POST',
@@ -46,7 +44,8 @@
 		}
 	}
 
-	async function handleEmailSignup() {
+	async function handleEmailSignup(event: SubmitEvent) {
+		event.preventDefault();
 		/*
     const res = await fetch("/auth/email/signup", {
       method: "POST",
@@ -91,7 +90,8 @@
 		}
 	}
 
-	async function handleForgotPassword() {
+	async function handleForgotPassword(event: SubmitEvent) {
+		event.preventDefault();
 		const res = await fetch('/auth/email/forgot', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },

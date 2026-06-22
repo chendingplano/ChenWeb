@@ -506,6 +506,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	})
 	apiGroup.GET("/doc-review/aspects", docreviewhandler.ListAspects)
 	apiGroup.GET("/doc-review/tiers", docreviewhandler.ListTiers)
+	apiGroup.GET("/doc-review/active", docreviewhandler.ListActiveJobs)
 	apiGroup.POST("/doc-review/requests", docreviewhandler.SubmitRequest)
 	apiGroup.GET("/doc-review/requests/:id", docreviewhandler.GetRequest)
 	apiGroup.GET("/doc-review/reports/:id", docreviewhandler.GetReport)

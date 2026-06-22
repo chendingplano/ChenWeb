@@ -8,7 +8,8 @@
     import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
     import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
-    let { darkMode = true, requestId = 0, reportId = 0 }: { darkMode: boolean; requestId: number; reportId?: number } = $props();
+    let { darkMode = true, requestId = 0, reportId = 0, docTitle = '', onNewReview }:
+        { darkMode: boolean; requestId: number; reportId?: number; docTitle?: string; onNewReview?: () => void } = $props();
 
     // Design tokens
     let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -50,7 +51,10 @@
     let passes = $derived([...new Set(findings.map(f => f.pass))].sort());
 
     // Effective report ID for links (fall back to requestId)
-    let linkReportId = $derived(reportId || requestId);
+    // Report id may arrive via prop (legacy) or via the polled request after an
+    // async run completes (DR15).
+    let resolvedReportId = $derived(reportId || request?.report_id || 0);
+    let linkReportId = $derived(resolvedReportId || requestId);
 
     // Polling
     let pollTimer: ReturnType<typeof setTimeout>;
@@ -65,9 +69,10 @@
 
             if (request.status === 'completed' || request.status === 'failed' || request.status === 'stopped') {
                 isActive = false;
-                if (request.status === 'completed' && reportId) {
+                const rid = reportId || request.report_id;
+                if (request.status === 'completed' && rid) {
                     try {
-                        const res = await fetch(`/api/v1/doc-review/reports/${reportId}`, { credentials: 'same-origin' });
+                        const res = await fetch(`/api/v1/doc-review/reports/${rid}`, { credentials: 'same-origin' });
                         const data = await res.json();
                         if (data.status && data.report) {
                             reportData = data.report;
@@ -126,40 +131,42 @@
         <LoaderIcon size={32} style="animation: spin 1s linear infinite; margin-bottom: 1rem;" />
         <div>Loading review request...</div>
     </div>
-{:else if request.status === 'accepted' || request.status === 'running'}
-    <!-- Running State -->
-    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 2rem;">
-        <LoaderIcon size={48} style="animation: spin 1s linear infinite; color: {accent}; margin-bottom: 1rem;" />
-        <h2 style="color: {textPrimary}; font-size: 1.25rem; margin-bottom: 0.5rem;">Review In Progress</h2>
-        <p style="color: {textSecondary}; margin-bottom: 1rem;">
-            Status: <strong>{request.status}</strong>
-        </p>
-        <button onclick={handleStop} disabled={isStopping}
-            style="padding: 0.5rem 1rem; background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; cursor: pointer;">
-            {isStopping ? 'Stopping...' : 'Stop Review'}
-        </button>
-    </div>
-{:else if request.status === 'failed'}
-    <!-- Failed State -->
-    <div style="padding: 2rem;">
+{:else}
+    <div style="padding: 1.5rem;">
+        <!-- Back / status header -->
+        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem;">
+            <button onclick={() => onNewReview?.()}
+                style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">← Back</button>
+            <span style="color: {textMuted}; font-size: 0.85rem;">{docTitle || `Document #${request.input_record_id}`}</span>
+            <span style="margin-left: auto; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px; background: {accentTint}; color: {accent}; text-transform: capitalize;">{request.status}</span>
+            {#if request.status === 'accepted' || request.status === 'running'}
+                <button onclick={handleStop} disabled={isStopping}
+                    style="padding: 0.4rem 0.9rem; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; cursor: pointer; font-size: 0.85rem;">{isStopping ? 'Stopping…' : 'Stop'}</button>
+            {/if}
+        </div>
+
+    {#if request.status === 'accepted' || request.status === 'running'}
+        <!-- Running: the Active Reviews monitor on the form conveys live progress -->
+        <div style="display: flex; align-items: center; gap: 0.5rem; color: {textSecondary}; font-size: 0.9rem; padding: 1.5rem 0.25rem;">
+            <LoaderIcon size={18} style="animation: spin 1s linear infinite; color: {accent};" />
+            Reviewing the document… findings will appear here as soon as the job completes.
+        </div>
+    {:else if request.status === 'failed'}
+        <!-- Failed State -->
         <div style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 12px; padding: 2rem; text-align: center;">
             <AlertCircleIcon size={48} style="color: #ef4444; margin-bottom: 1rem;" />
             <h2 style="color: {textPrimary}; font-size: 1.25rem; margin-bottom: 0.5rem;">Review Failed</h2>
             <p style="color: {textSecondary}; margin-bottom: 0.5rem;">{request.error_message}</p>
         </div>
-    </div>
-{:else if request.status === 'stopped'}
-    <!-- Stopped State -->
-    <div style="padding: 2rem;">
+    {:else if request.status === 'stopped'}
+        <!-- Stopped State -->
         <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 12px; padding: 2rem; text-align: center;">
             <XIcon size={48} style="color: #f59e0b; margin-bottom: 1rem;" />
             <h2 style="color: {textPrimary}; font-size: 1.25rem; margin-bottom: 0.5rem;">Review Stopped</h2>
             <p style="color: {textSecondary};">The review was cancelled before completion.</p>
         </div>
-    </div>
-{:else}
-    <!-- Completed State -->
-    <div style="padding: 1.5rem;">
+    {:else}
+        <!-- Completed State -->
         <!-- Header -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
             <div>
@@ -312,6 +319,7 @@
                 </div>
             </div>
         {/if}
+    {/if}
     </div>
 {/if}
 

@@ -59,6 +59,7 @@ export type RequestStatus = {
 	start_time?: string;
 	end_time?: string;
 	error_message?: string;
+	report_id?: number;
 };
 
 export type FindingItem = {
@@ -147,4 +148,37 @@ export async function stopRequest(id: number): Promise<void> {
 	});
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to stop request');
+}
+
+// ── DR15: live job monitor ───────────────────────────────────────────────────
+
+export type AspectStatus = {
+	aspect: string;
+	pass?: string;
+	status: 'pending' | 'running' | 'success' | 'failed';
+	finding_count: number;
+	error_message?: string;
+	start_time?: string;
+	end_time?: string;
+};
+
+export type ActiveJob = {
+	request_id: number;
+	input_record_id: number;
+	review_run_id: string;
+	tier: string;
+	status: string;
+	requester_name: string;
+	doc_title?: string;
+	create_time: string;
+	start_time?: string;
+	aspects: AspectStatus[];
+};
+
+// Returns every review job that still has at least one unfinished aspect.
+export async function listActiveJobs(): Promise<ActiveJob[]> {
+	const res = await fetch(`${BASE}/active`, { credentials: 'same-origin' });
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to load active jobs');
+	return data.jobs || [];
 }

@@ -7,6 +7,7 @@
     import { knowledgeStoreState } from './knowledge-store-state.svelte';
     import KbInputSearchDialog from './kb-input-search-dialog.svelte';
     import DocReviewResultsView from './doc-review-results-view.svelte';
+    import DocReviewMonitor from './doc-review-monitor.svelte';
     import { appAuthStore } from '@chendingplano/shared';
     import SearchIcon from '@lucide/svelte/icons/search';
     import CheckIcon from '@lucide/svelte/icons/check';
@@ -36,14 +37,20 @@
     let currentStep = $state(1);
     let selectedDocId = $state<number | null>(null);
     let selectedDocTitle = $state('');
-    let selectedTier = $state('must_review');
-    let customAspects = $state<Set<string>>(new Set());
-    let expandedGroups = $state<Set<string>>(new Set(['P1', 'P3', 'P5']));
+    // Single shared aspect selection (internal mechanism). Every tier On/Off toggle and
+    // every aspect chip edits THIS one set, so the chosen check level and the actually
+    // submitted aspects can never diverge (the old per-tier sets could strand a selection
+    // in a tier you weren't submitting). A tier is "On" iff ≥1 of its aspects is in here.
+    let selectedAspects = $state<Set<string>>(new Set());
+    // Validation dialog: shown at submit when something required is missing; confirming
+    // it jumps the wizard back to the offending step so the user can fix it.
+    let dialogMessage = $state('');
+    let dialogTargetStep = $state<number | null>(null);
     let requesterName = $state('');
     let notes = $state('');
     let referenceDocs = $state<ReferenceDoc[]>([]);
-    let submittedRequestId = $state<number | null>(null);
-    let submittedReportId = $state<number | null>(null);
+    let viewingRequestId = $state<number | null>(null);  // when set, show that job's results
+    let submitBanner = $state('');                        // brief "review started" notice
     let submitError = $state('');
     let isSubmitting = $state(false);
     let reportTemplate = $state('');
@@ -101,25 +108,22 @@
         return '';
     }
 
-    // Derived: aspects grouped by group
-    let aspectsByGroup = $derived.by(() => {
-        const map: Record<string, AspectInfo[]> = {};
-        for (const a of aspects) {
-            if (!map[a.group]) map[a.group] = [];
-            map[a.group].push(a);
-        }
-        return map;
+    // Derived: the aspects to submit are exactly the shared selection.
+    let effectiveAspects = $derived([...selectedAspects]);
+
+    // Check-level label for the summary: if the selection exactly matches one tier's
+    // full aspect set, show that tier; otherwise list the tiers that are On, or "—".
+    let checkLevelLabel = $derived.by(() => {
+        const exact = tiers.find(t => t.aspect_names.length > 0 && t.aspect_names.length === selectedAspects.size && t.aspect_names.every(n => selectedAspects.has(n)));
+        if (exact) return exact.label;
+        const on = tiers.filter(t => t.aspect_names.some(n => selectedAspects.has(n))).map(t => t.label);
+        return on.length ? `Custom (${on.join(', ')})` : '—';
     });
 
-    // Derived: which aspects are selected based on tier (and any per-item edits)
-    let effectiveAspects = $derived.by(() => {
-        if (selectedTier === 'custom') {
-            return [...customAspects];
-        }
-        const sel = tierSelections[selectedTier];
-        if (sel) return [...sel];
-        const tier = tiers.find(t => t.key === selectedTier);
-        return tier?.aspect_names || [];
+    // Tier key persisted with the request (one of the built-in keys, or "custom").
+    let submitTier = $derived.by(() => {
+        const exact = tiers.find(t => t.aspect_names.length > 0 && t.aspect_names.length === selectedAspects.size && t.aspect_names.every(n => selectedAspects.has(n)));
+        return exact ? exact.key : 'custom';
     });
 
     // Derived: group labels
@@ -158,58 +162,69 @@
         expandedTiers = next;
     }
 
-    // Per-tier mutable selection of aspect items. Initialized from each tier's
-    // configured aspect_names; the user can toggle individual items or all.
-    let tierSelections = $state<Record<string, Set<string>>>({});
-
-    function initTierSelections() {
-        const next: Record<string, Set<string>> = {};
-        for (const t of tiers) next[t.key] = new Set(t.aspect_names);
-        tierSelections = next;
+    function aspectChecked(name: string): boolean {
+        return selectedAspects.has(name);
     }
 
-    function isAspectChecked(tierKey: string, name: string): boolean {
-        return tierSelections[tierKey]?.has(name) ?? false;
-    }
-
-    function tierSelectedCount(tierKey: string): number {
-        return tierSelections[tierKey]?.size ?? 0;
-    }
-
-    function groupSelectedCount(tierKey: string, items: Array<{ name: string }>): number {
-        const sel = tierSelections[tierKey];
-        if (!sel) return 0;
-        return items.reduce((n, it) => n + (sel.has(it.name) ? 1 : 0), 0);
-    }
-
-    // Toggling an item (or select-all) also marks that tier as the chosen one,
-    // so the customized selection is what gets submitted.
-    function toggleAspectInTier(tierKey: string, name: string) {
-        const next = new Set(tierSelections[tierKey] ?? []);
+    function toggleAspect(name: string) {
+        const next = new Set(selectedAspects);
         if (next.has(name)) next.delete(name); else next.add(name);
-        tierSelections = { ...tierSelections, [tierKey]: next };
-        selectedTier = tierKey;
+        selectedAspects = next;
+    }
+
+    // How many of a tier's aspects are currently selected.
+    function tierSelectedCount(tier: TierInfo): number {
+        let n = 0;
+        for (const name of tier.aspect_names) if (selectedAspects.has(name)) n++;
+        return n;
+    }
+
+    // A tier is "On" iff at least one of its aspects is selected.
+    function tierIsOn(tier: TierInfo): boolean {
+        return tierSelectedCount(tier) > 0;
     }
 
     function allAspectsChecked(tier: TierInfo): boolean {
-        const sel = tierSelections[tier.key];
-        return !!sel && tier.aspect_names.length > 0 && sel.size === tier.aspect_names.length;
+        return tier.aspect_names.length > 0 && tierSelectedCount(tier) === tier.aspect_names.length;
     }
 
-    function toggleAllInTier(tier: TierInfo) {
-        const next = allAspectsChecked(tier) ? new Set<string>() : new Set(tier.aspect_names);
-        tierSelections = { ...tierSelections, [tier.key]: next };
-        selectedTier = tier.key;
+    // Add or remove every aspect of a tier from the shared selection.
+    function setAllInTier(tier: TierInfo, on: boolean) {
+        const next = new Set(selectedAspects);
+        for (const name of tier.aspect_names) {
+            if (on) next.add(name); else next.delete(name);
+        }
+        selectedAspects = next;
+    }
+
+    // The On/Off toggle: Off→On adds all the tier's aspects, On→Off removes them all.
+    function toggleTier(tier: TierInfo) {
+        setAllInTier(tier, !tierIsOn(tier));
+    }
+
+    function groupSelectedCount(items: Array<{ name: string }>): number {
+        return items.reduce((n, it) => n + (selectedAspects.has(it.name) ? 1 : 0), 0);
+    }
+
+    function showValidationDialog(message: string, targetStep: number) {
+        dialogMessage = message;
+        dialogTargetStep = targetStep;
+    }
+
+    function confirmValidationDialog() {
+        if (dialogTargetStep !== null) currentStep = dialogTargetStep;
+        dialogMessage = '';
+        dialogTargetStep = null;
     }
 
     onMount(async () => {
         try {
             aspects = await listAspects();
             tiers = await listTiers();
-            initTierSelections();
-            // Default: auto-select must_review aspects for custom mode
+            // Default selection: the Must Review aspects — a sensible starting point the
+            // user can build on by toggling tiers/aspects.
             const mustTier = tiers.find(t => t.key === 'must_review');
-            if (mustTier) mustTier.aspect_names.forEach(a => customAspects.add(a));
+            if (mustTier) selectedAspects = new Set(mustTier.aspect_names);
         } catch (e) {
             submitError = 'Failed to load aspects';
         }
@@ -237,6 +252,10 @@
     function switchMode(mode: 'search' | 'upload') {
         inputMode = mode;
         uploadError = '';
+        if (mode === 'search') {
+            // Search Library opens the document library search dialog directly.
+            searchDialogOpen = true;
+        }
         if (mode === 'upload' && !knowledgeStoreState.activeStore && storeOptions.length === 0) {
             loadStoreOptions();
         }
@@ -284,18 +303,6 @@
         }
     }
 
-    function toggleAspect(name: string) {
-        const next = new Set(customAspects);
-        if (next.has(name)) next.delete(name); else next.add(name);
-        customAspects = next;
-    }
-
-    function toggleGroup(group: string) {
-        const next = new Set(expandedGroups);
-        if (next.has(group)) next.delete(group); else next.add(group);
-        expandedGroups = next;
-    }
-
     async function refDocSearch() {
         const q = (document.getElementById('ref-doc-input') as HTMLInputElement)?.value;
         if (!q || q.length < 2) return;
@@ -312,16 +319,18 @@
     }
 
     async function handleSubmit() {
-        if (!selectedDocId) { submitError = 'Please select a document'; return; }
-        if (effectiveAspects.length === 0) { submitError = 'Select at least one aspect to review'; currentStep = 2; return; }
-        if (!requesterName.trim()) { submitError = 'Please enter your name'; currentStep = 5; return; }
+        // Validation failures surface as a confirm dialog; confirming jumps back to the
+        // step that needs fixing (no aspects → Step 2, which also blocks "Next" up front).
+        if (!selectedDocId) { showValidationDialog('Please select a document to review.', 1); return; }
+        if (effectiveAspects.length === 0) { showValidationDialog('Select at least one aspect to review.', 2); return; }
+        if (!requesterName.trim()) { showValidationDialog('Please enter your name.', 4); return; }
 
         isSubmitting = true;
         submitError = '';
         try {
             const result = await submitRequest({
                 input_record_id: selectedDocId,
-                tier: selectedTier,
+                tier: submitTier,
                 aspects: effectiveAspects,
                 reference_docs: referenceDocs.length > 0 ? referenceDocs : undefined,
                 notes: notes || undefined,
@@ -330,28 +339,50 @@
                 report_template: reportTemplate || undefined,
                 doc_template: docTemplate || undefined,
             });
-            submittedRequestId = result.request_id;
-            submittedReportId = result.report_id || null;
+            viewingRequestId = result.request_id;
         } catch (e: any) {
             submitError = e.message || 'Submission failed';
         } finally {
             isSubmitting = false;
         }
     }
+
+    function resetForm() {
+        submitError = '';
+        currentStep = 1;
+        selectedDocId = null;
+        selectedDocTitle = '';
+        uploadFile = null;
+    }
 </script>
 
-{#if submittedRequestId}
-    <DocReviewResultsView {darkMode} requestId={submittedRequestId} reportId={submittedReportId ?? undefined} />
+{#if viewingRequestId}
+    <DocReviewResultsView
+        {darkMode}
+        requestId={viewingRequestId}
+        docTitle={selectedDocTitle}
+        onNewReview={() => { viewingRequestId = null; }}
+    />
 {:else}
     <div style="padding: 1.5rem; color: {textPrimary};">
         <h1 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;">Document Review</h1>
-        <p style="color: {textSecondary}; margin-bottom: 2rem;">
+        <p style="color: {textSecondary}; margin-bottom: 1.25rem;">
             Submit a document for AI-powered review across quality, compliance, and technical aspects.
         </p>
 
+        <!-- DR15: live monitor of all in-flight review jobs -->
+        <DocReviewMonitor {darkMode} onView={(id) => { viewingRequestId = id; }} />
+
+        {#if submitBanner}
+            <div style="margin-bottom: 1.25rem; padding: 0.75rem 1rem; background: {accentTint}; border: 1px solid {borderColor}; border-radius: 8px; color: {accent}; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between;">
+                <span>{submitBanner}</span>
+                <button onclick={() => submitBanner = ''} style="background: none; border: none; color: {accent}; cursor: pointer; font-size: 1rem;">×</button>
+            </div>
+        {/if}
+
         <!-- Step indicators -->
         <div style="display: flex; gap: 0.5rem; margin-bottom: 2rem; font-size: 0.8rem;">
-            {#each ['Select Document', 'Check Level', 'Customize', 'References', 'Submit'] as step, i}
+            {#each ['Select Document', 'Check Level', 'References', 'Submit'] as step, i}
                 <div style="display: flex; align-items: center; gap: 0.25rem;">
                     <div style="width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
                         background: {i + 1 <= currentStep ? accent : borderColor}; color: {i + 1 <= currentStep ? '#fff' : textMuted};
@@ -381,11 +412,7 @@
                 </div>
 
                 {#if inputMode === 'search'}
-                    <button onclick={() => searchDialogOpen = true} type="button"
-                        style="display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.65rem 0.85rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; color: {textSecondary}; font-size: 0.9rem; text-align: left;">
-                        <SearchIcon size={16} style="color: {textMuted};" />
-                        Search the document library…
-                    </button>
+                    <!-- Search Library opens the search dialog directly; no inline search box. -->
                 {:else if !knowledgeStoreState.activeStore}
                     <!-- No active knowledge store: prompt the user to pick one before uploading -->
                     <div style="display: flex; flex-direction: column; gap: 0.75rem;">
@@ -475,23 +502,33 @@
             </button>
         {/if}
 
-        <!-- Step 2: Check Level -->
+        <!-- Step 2: Check Level & Aspects -->
         {#if currentStep === 2}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 2: Choose Check Level</h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.35rem;">Step 2: Choose Check Level</h2>
+                <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
+                    Toggle a level On to review its aspects, then expand it to fine-tune. {effectiveAspects.length} aspect{effectiveAspects.length === 1 ? '' : 's'} selected.
+                </p>
                 <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                     {#each tiers as tier}
-                        <div style="background: {inputBg}; border: 2px solid {selectedTier === tier.key ? accent : borderColor}; border-radius: 8px; overflow: hidden;">
-                            <label style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem; cursor: pointer;">
-                                <input type="radio" name="tier" value={tier.key}
-                                    checked={selectedTier === tier.key}
-                                    onchange={() => selectedTier = tier.key}
-                                    style="margin-top: 0.2rem;" />
+                        {@const on = tierIsOn(tier)}
+                        <div style="background: {inputBg}; border: 2px solid {on ? accent : borderColor}; border-radius: 8px; overflow: hidden;">
+                            <div style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem;">
                                 <div style="flex: 1;">
                                     <div style="font-weight: 600; color: {textPrimary};">{tier.label}</div>
-                                    <div style="font-size: 0.85rem; color: {textSecondary};">{tier.description} — {tierSelectedCount(tier.key)} of {tier.aspect_names.length} aspects selected</div>
+                                    <div style="font-size: 0.85rem; color: {textSecondary};">{tier.description} — {tierSelectedCount(tier)} of {tier.aspect_names.length} aspects selected</div>
                                 </div>
-                            </label>
+                                <!-- On/Off toggle: On iff ≥1 of the tier's aspects is selected -->
+                                <button type="button" role="switch" aria-checked={on} onclick={() => toggleTier(tier)}
+                                    disabled={tier.aspect_names.length === 0}
+                                    title={on ? 'On — click to remove this level’s aspects' : 'Off — click to add this level’s aspects'}
+                                    style="display: inline-flex; align-items: center; gap: 0.45rem; background: none; border: none; cursor: {tier.aspect_names.length === 0 ? 'not-allowed' : 'pointer'}; opacity: {tier.aspect_names.length === 0 ? 0.4 : 1};">
+                                    <span style="font-size: 0.72rem; font-weight: 700; width: 22px; text-align: right; color: {on ? accent : textMuted};">{on ? 'On' : 'Off'}</span>
+                                    <span style="position: relative; width: 38px; height: 20px; border-radius: 10px; background: {on ? accent : borderColor}; transition: background 0.15s;">
+                                        <span style="position: absolute; top: 2px; left: {on ? '20px' : '2px'}; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left 0.15s;"></span>
+                                    </span>
+                                </button>
+                            </div>
                             {#if tier.aspect_names.length > 0}
                                 <button type="button" onclick={() => toggleTierAspects(tier.key)}
                                     style="display: flex; align-items: center; gap: 0.4rem; width: 100%; padding: 0.5rem 1rem; background: transparent; border: none; border-top: 1px solid {borderColor}; cursor: pointer; color: {textMuted}; font-size: 0.8rem; text-align: left;">
@@ -500,28 +537,28 @@
                                     {:else}
                                         <ChevronRightIcon size={14} />
                                     {/if}
-                                    {expandedTiers.has(tier.key) ? 'Hide' : 'View'} {tierSelectedCount(tier.key)}/{tier.aspect_names.length} selected aspects
+                                    {expandedTiers.has(tier.key) ? 'Hide' : 'View'} {tierSelectedCount(tier)}/{tier.aspect_names.length} selected aspects
                                 </button>
                                 {#if expandedTiers.has(tier.key)}
                                     <div style="padding: 0.25rem 1rem 0.85rem 2rem; display: flex; flex-direction: column; gap: 0.6rem;">
                                         <!-- Select / deselect all toggle -->
                                         <div style="display: flex; align-items: center; gap: 0.6rem;">
-                                            <button type="button" onclick={() => toggleAllInTier(tier)}
+                                            <button type="button" onclick={() => setAllInTier(tier, !allAspectsChecked(tier))}
                                                 style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.7rem; background: {inputBg}; border: 1px solid {accent}; border-radius: 6px; cursor: pointer; color: {accent}; font-size: 0.78rem; font-weight: 600;">
                                                 {allAspectsChecked(tier) ? 'Deselect all' : 'Select all'}
                                             </button>
-                                            <span style="font-size: 0.75rem; color: {textMuted};">{tierSelectedCount(tier.key)} of {tier.aspect_names.length} selected</span>
+                                            <span style="font-size: 0.75rem; color: {textMuted};">{tierSelectedCount(tier)} of {tier.aspect_names.length} selected</span>
                                         </div>
                                         {#each groupAspectNames(tier.aspect_names) as cat}
                                             <div>
                                                 <div style="font-size: 0.75rem; font-weight: 600; color: {textSecondary}; margin-bottom: 0.25rem;">
                                                     {cat.group} — {cat.label}
-                                                    <span style="color: {textMuted}; font-weight: 400;">({groupSelectedCount(tier.key, cat.items)}/{cat.items.length})</span>
+                                                    <span style="color: {textMuted}; font-weight: 400;">({groupSelectedCount(cat.items)}/{cat.items.length})</span>
                                                 </div>
                                                 <div style="display: flex; flex-wrap: wrap; gap: 0.35rem;">
                                                     {#each cat.items as item}
-                                                        {@const checked = isAspectChecked(tier.key, item.name)}
-                                                        <button type="button" onclick={() => toggleAspectInTier(tier.key, item.name)}
+                                                        {@const checked = aspectChecked(item.name)}
+                                                        <button type="button" onclick={() => toggleAspect(item.name)}
                                                             title={checked ? 'Click to deselect' : 'Click to select'}
                                                             style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.78rem;
                                                             background: {checked ? accentTint : 'transparent'}; border: 1px solid {checked ? accent : borderColor}; color: {checked ? textPrimary : textMuted};">
@@ -546,55 +583,19 @@
             <div style="display: flex; gap: 0.5rem;">
                 <button onclick={() => currentStep = 1}
                     style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">← Back</button>
-                <button onclick={() => currentStep = selectedTier === 'custom' ? 3 : 4}
-                    style="padding: 0.6rem 1.5rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">Next →</button>
+                <!-- Wrap in a span so the help tooltip shows even while the button is disabled -->
+                <span title={effectiveAspects.length === 0 ? 'Select at least one aspect to review before continuing.' : ''} style="display: inline-flex;">
+                    <button onclick={() => currentStep = 3}
+                        disabled={effectiveAspects.length === 0}
+                        style="padding: 0.6rem 1.5rem; background: {effectiveAspects.length > 0 ? accent : borderColor}; color: {effectiveAspects.length > 0 ? '#fff' : textMuted}; border: none; border-radius: 8px; cursor: {effectiveAspects.length > 0 ? 'pointer' : 'not-allowed'}; font-size: 0.9rem;">Next →</button>
+                </span>
             </div>
         {/if}
 
-        <!-- Step 3: Customize Aspects -->
+        <!-- Step 3: Supporting Documents -->
         {#if currentStep === 3}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 3: Customize Aspects</h2>
-                {#each Object.entries(aspectsByGroup) as [group, groupAspects]}
-                    <div style="margin-bottom: 0.75rem;">
-                        <button onclick={() => toggleGroup(group)}
-                            style="display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; padding: 0.6rem 0.75rem; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; color: {textPrimary}; font-weight: 600; font-size: 0.9rem;">
-                            {#if expandedGroups.has(group)}
-                                <ChevronDownIcon size={16} />
-                            {:else}
-                                <ChevronRightIcon size={16} />
-                            {/if}
-                            {group} — {groupLabels[group] || group}
-                            <span style="margin-left: auto; font-size: 0.8rem; color: {textMuted};">
-                                {groupAspects.filter(a => customAspects.has(a.name)).length}/{groupAspects.length}
-                            </span>
-                        </button>
-                        {#if expandedGroups.has(group)}
-                            <div style="padding: 0.5rem 0 0 1.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
-                                {#each groupAspects as aspect}
-                                    <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; color: {textSecondary};">
-                                        <input type="checkbox" checked={customAspects.has(aspect.name)} onchange={() => toggleAspect(aspect.name)} />
-                                        {aspect.label}
-                                    </label>
-                                {/each}
-                            </div>
-                        {/if}
-                    </div>
-                {/each}
-            </div>
-            <div style="display: flex; gap: 0.5rem;">
-                <button onclick={() => currentStep = 2}
-                    style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">← Back</button>
-                <button onclick={() => currentStep = 4}
-                    disabled={customAspects.size === 0}
-                    style="padding: 0.6rem 1.5rem; background: {customAspects.size > 0 ? accent : borderColor}; color: {customAspects.size > 0 ? '#fff' : textMuted}; border: none; border-radius: 8px; cursor: {customAspects.size > 0 ? 'pointer' : 'not-allowed'}; font-size: 0.9rem;">Next →</button>
-            </div>
-        {/if}
-
-        <!-- Step 4: Supporting Documents -->
-        {#if currentStep === 4}
-            <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 4: Supporting Documents <span style="font-weight: 400; color: {textMuted};">(optional)</span></h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 3: Supporting Documents <span style="font-weight: 400; color: {textMuted};">(optional)</span></h2>
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
                     Add reference standards or supporting documents for compliance checking.
                 </p>
@@ -615,17 +616,17 @@
                 </div>
             </div>
             <div style="display: flex; gap: 0.5rem;">
-                <button onclick={() => currentStep = selectedTier === 'custom' ? 3 : 2}
+                <button onclick={() => currentStep = 2}
                     style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">← Back</button>
-                <button onclick={() => currentStep = 5}
+                <button onclick={() => currentStep = 4}
                     style="padding: 0.6rem 1.5rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">Next →</button>
             </div>
         {/if}
 
-        <!-- Step 5: Notes & Submit -->
-        {#if currentStep === 5}
+        <!-- Step 4: Notes & Submit -->
+        {#if currentStep === 4}
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
-                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 5: Review Details</h2>
+                <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 4: Review Details</h2>
                 <div style="margin-bottom: 1rem;">
                     <label style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Your Name *</label>
                     <input type="text" bind:value={requesterName} placeholder="Enter your name"
@@ -656,7 +657,7 @@
                     <div style="color: {textSecondary};">Document:</div>
                     <div style="color: {textPrimary};">{selectedDocTitle}</div>
                     <div style="color: {textSecondary};">Check Level:</div>
-                    <div style="color: {textPrimary};">{tiers.find(t => t.key === selectedTier)?.label || selectedTier}</div>
+                    <div style="color: {textPrimary};">{checkLevelLabel}</div>
                     <div style="color: {textSecondary};">Aspects:</div>
                     <div style="color: {textPrimary};">{effectiveAspects.length} selected</div>
                     <div style="color: {textSecondary};">Requester:</div>
@@ -671,7 +672,7 @@
             {/if}
 
             <div style="display: flex; gap: 0.5rem;">
-                <button onclick={() => currentStep = 4}
+                <button onclick={() => currentStep = 3}
                     disabled={isSubmitting}
                     style="padding: 0.6rem 1.5rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">← Back</button>
                 <button onclick={handleSubmit}
@@ -690,6 +691,22 @@
 {/if}
 
 <KbInputSearchDialog bind:open={searchDialogOpen} onSelect={onSearchSelect} />
+
+<!-- Validation dialog: blocks submission when something required is missing; confirming
+     jumps the wizard back to the step that needs fixing (dialogTargetStep). -->
+{#if dialogMessage}
+    <div role="dialog" aria-modal="true"
+        style="position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5);">
+        <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; max-width: 380px; width: calc(100% - 2rem); box-shadow: 0 10px 40px rgba(0,0,0,0.35);">
+            <h3 style="font-size: 1.05rem; font-weight: 700; color: {textPrimary}; margin-bottom: 0.5rem;">Cannot start review</h3>
+            <p style="color: {textSecondary}; font-size: 0.9rem; margin-bottom: 1.25rem;">{dialogMessage}</p>
+            <div style="display: flex; justify-content: flex-end;">
+                <button onclick={confirmValidationDialog}
+                    style="padding: 0.55rem 1.4rem; background: {accent}; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600;">OK</button>
+            </div>
+        </div>
+    </div>
+{/if}
 
 <style>
     @keyframes spin { to { transform: rotate(360deg); } }

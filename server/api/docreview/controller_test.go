@@ -75,6 +75,26 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			review_status TEXT DEFAULT 'pending',
 			reviewed_by TEXT DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS kb.doc_review_status (
+			id BIGSERIAL PRIMARY KEY,
+			request_id BIGINT NOT NULL,
+			input_record_id BIGINT NOT NULL,
+			review_run_id TEXT NOT NULL,
+			aspect TEXT NOT NULL,
+			pass TEXT,
+			status TEXT NOT NULL DEFAULT 'pending',
+			finding_count INT NOT NULL DEFAULT 0,
+			error_message TEXT,
+			start_time TIMESTAMPTZ,
+			end_time TIMESTAMPTZ,
+			create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			modify_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (review_run_id, aspect)
+		)`,
+		`CREATE TABLE IF NOT EXISTS kb.doc_review_reports (
+			id BIGSERIAL PRIMARY KEY,
+			request_id BIGINT NOT NULL
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.ExecContext(context.Background(), s); err != nil {
