@@ -133,12 +133,20 @@
 	type PdfPageViewport = {
 		width: number;
 		height: number;
-		convertToViewportRectangle: (rect: number[]) => number[];
 	};
 
-	type PdfPageViewportFull = PdfPageViewport & {
-		convertToPdfPoint: (x: number, y: number) => number[];
-	};
+	// MinerU bboxes are stored in a ~1000×1000 pixel image space (top-left origin, y↓).
+	// Scale directly to viewport — no Y-flip needed.
+	const MINERU_COORD_SIZE = 1000;
+
+	function mineruToViewport(coords: number[], vp: PdfPageViewport): [number, number, number, number] {
+		return [
+			coords[0] * vp.width / MINERU_COORD_SIZE,
+			coords[1] * vp.height / MINERU_COORD_SIZE,
+			coords[2] * vp.width / MINERU_COORD_SIZE,
+			coords[3] * vp.height / MINERU_COORD_SIZE,
+		];
+	}
 
 	let isPdf = $derived((currentInput?.type ?? '').toLowerCase() === 'pdf');
 	let fileUrl = $derived.by(() => {
@@ -223,11 +231,11 @@
 
 		if (editingCoordsMode && editCoordsDraft.length >= 4) {
 			// console.log('[coord-editor] renderStructureHighlights → entering coord-edit mode for page', pageNo);
-			renderCoordEditor(viewport as PdfPageViewportFull, overlay);
+			renderCoordEditor(viewport, overlay);
 			return;
 		}
 
-		const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
+		const [vx1, vy1, vx2, vy2] = mineruToViewport(target.coords, viewport);
 		const left = Math.max(0, Math.min(vx1, vx2) - 5);
 		const top = Math.max(0, Math.min(vy1, vy2) - 4);
 		const width = Math.abs(vx2 - vx1) + 10;
@@ -243,10 +251,10 @@
 		overlay.appendChild(mark);
 	}
 
-	function renderCoordEditor(viewport: PdfPageViewportFull, overlay: HTMLDivElement) {
+	function renderCoordEditor(viewport: PdfPageViewport, overlay: HTMLDivElement) {
 		// console.log('[coord-editor] renderCoordEditor called, draft=', $state.snapshot(editCoordsDraft));
 
-		const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(editCoordsDraft.slice(0, 4));
+		const [vx1, vy1, vx2, vy2] = mineruToViewport(editCoordsDraft, viewport);
 
 		// Raw coordinate boundaries (no visual padding)
 		let vLeft = Math.min(vx1, vx2);
@@ -327,11 +335,15 @@
 			const t = Math.min(vTop, vBottom);
 			const r = Math.max(vLeft, vRight);
 			const b = Math.max(vTop, vBottom);
-			const [x1, y1] = viewport.convertToPdfPoint(l, b);
-			const [x2, y2] = viewport.convertToPdfPoint(r, t);
-			editCoordsDraft = [x1, y1, x2, y2];
+			// Convert viewport pixels back to MinerU coord space (inverse of mineruToViewport)
+			editCoordsDraft = [
+				Math.round(l * MINERU_COORD_SIZE / viewport.width),
+				Math.round(t * MINERU_COORD_SIZE / viewport.height),
+				Math.round(r * MINERU_COORD_SIZE / viewport.width),
+				Math.round(b * MINERU_COORD_SIZE / viewport.height),
+			];
 			highlightSelectionVersion += 1;
-			// console.log('[coord-editor] commitCoords, new PDF coords=', [x1, y1, x2, y2]);
+			// console.log('[coord-editor] commitCoords, new MinerU coords=', editCoordsDraft);
 		}
 
 		function attachDrag(

@@ -15,7 +15,6 @@
 	export type PdfPageViewport = {
 		width: number;
 		height: number;
-		convertToViewportRectangle: (rect: number[]) => number[];
 	};
 
 	type PdfPageProxy = {

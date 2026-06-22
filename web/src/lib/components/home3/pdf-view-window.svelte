@@ -135,7 +135,7 @@
 			const pageLines = builtinRawLines.filter((l) => l.page_number === pageNumber);
 			for (const line of pageLines) {
 				if (!Array.isArray(line.coords) || line.coords.length < 4) continue;
-				const [, vy1, , vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+				const [, vy1, , vy2] = mineruToViewport(line.coords, viewport);
 				const lineTop = Math.min(vy1, vy2);
 				const lineBottom = Math.max(vy1, vy2);
 				if (Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2)) {
@@ -146,6 +146,19 @@
 		builtinDragPreviewLines = previewLines;
 		// SharedPdfViewer calls paintOverlayForPage for each covered page immediately after,
 		// so renderBuiltinHighlights will read the updated builtinDragPreviewLines.
+	}
+
+	// MinerU bboxes are in a ~1000×1000 pixel image space (top-left origin, y↓).
+	// Scale directly to viewport — no Y-flip.
+	const MINERU_COORD_SIZE = 1000;
+
+	function mineruToViewport(coords: number[], vp: PdfPageViewport): [number, number, number, number] {
+		return [
+			coords[0] * vp.width / MINERU_COORD_SIZE,
+			coords[1] * vp.height / MINERU_COORD_SIZE,
+			coords[2] * vp.width / MINERU_COORD_SIZE,
+			coords[3] * vp.height / MINERU_COORD_SIZE,
+		];
 	}
 
 	const HIGHLIGHT_EXPAND_TOP_PX = 10;
@@ -162,7 +175,7 @@
 			if (ln.page_number !== pageNo) continue;
 			if (!builtinDragPreviewLines.includes(ln.line_number)) continue;
 			if (!Array.isArray(ln.coords) || ln.coords.length < 4) continue;
-			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(ln.coords.slice(0, 4));
+			const [vx1, vy1, vx2, vy2] = mineruToViewport(ln.coords, viewport);
 			const left = Math.min(vx1, vx2);
 			const top = Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX);
 			const bottom = Math.max(vy1, vy2);
