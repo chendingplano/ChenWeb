@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { getRequest, updateFinding, stopRequest } from '$lib/services/docReviewService';
-    import type { RequestStatus, FindingItem } from '$lib/services/docReviewService';
+    import type { RequestStatus, FindingItem, AspectStatus } from '$lib/services/docReviewService';
     import LoaderIcon from '@lucide/svelte/icons/loader';
     import XIcon from '@lucide/svelte/icons/x';
     import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
@@ -25,6 +25,7 @@
     // State
     let request = $state<RequestStatus | null>(null);
     let findings = $state<FindingItem[]>([]);
+    let aspectStatuses = $state<AspectStatus[]>([]);
     let reportData = $state<any>(null);
     let error = $state('');
     let filterPass = $state('');
@@ -66,6 +67,7 @@
             const result = await getRequest(requestId);
             request = result.request;
             findings = result.findings || [];
+            aspectStatuses = result.aspect_statuses || [];
 
             if (request.status === 'completed' || request.status === 'failed' || request.status === 'stopped') {
                 isActive = false;
@@ -144,6 +146,31 @@
                     style="padding: 0.4rem 0.9rem; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; cursor: pointer; font-size: 0.85rem;">{isStopping ? 'Stopping…' : 'Stop'}</button>
             {/if}
         </div>
+
+    <!-- Per-aspect status panel (always shown when statuses are available) -->
+    {#if aspectStatuses.length > 0}
+        <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 10px; padding: 1rem; margin-bottom: 1.25rem;">
+            <div style="font-size: 0.8rem; font-weight: 600; color: {textSecondary}; margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em;">Aspects</div>
+            <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                {#each aspectStatuses as s}
+                    {@const statusColor = s.status === 'success' ? '#22c55e' : s.status === 'failed' ? '#ef4444' : s.status === 'running' ? accent : textMuted}
+                    <div style="display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: {statusColor}; flex-shrink: 0;
+                            {s.status === 'running' ? 'animation: pulse 1.2s ease-in-out infinite;' : ''}"></span>
+                        <span style="color: {textPrimary}; font-weight: 500;">{s.aspect.replace(/_/g, ' ')}</span>
+                        {#if s.pass}<span style="color: {textMuted}; font-size: 0.75rem;">({s.pass})</span>{/if}
+                        <span style="color: {statusColor}; font-size: 0.75rem; font-weight: 600; text-transform: capitalize; margin-left: auto;">{s.status}</span>
+                        {#if s.finding_count > 0}
+                            <span style="color: {textMuted}; font-size: 0.75rem;">{s.finding_count} finding{s.finding_count !== 1 ? 's' : ''}</span>
+                        {/if}
+                        {#if s.error_message}
+                            <span style="color: #ef4444; font-size: 0.75rem;" title={s.error_message}>error</span>
+                        {/if}
+                    </div>
+                {/each}
+            </div>
+        </div>
+    {/if}
 
     {#if request.status === 'accepted' || request.status === 'running'}
         <!-- Running: the Active Reviews monitor on the form conveys live progress -->
@@ -325,4 +352,5 @@
 
 <style>
     @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 </style>

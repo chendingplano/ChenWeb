@@ -46,10 +46,11 @@ type RequestStatus struct {
 	ReportID       int64               `json:"report_id,omitempty"` // latest report for this request, if any (DR15)
 }
 
-// RequestWithFindings extends RequestStatus with findings.
+// RequestWithFindings extends RequestStatus with findings and per-aspect statuses.
 type RequestWithFindings struct {
-	Request  RequestStatus   `json:"request"`
-	Findings []FindingItem   `json:"findings,omitempty"`
+	Request        RequestStatus  `json:"request"`
+	Findings       []FindingItem  `json:"findings,omitempty"`
+	AspectStatuses []AspectStatus `json:"aspect_statuses,omitempty"`
 }
 
 // FindingItem is a finding row from kb.doc_review_findings.

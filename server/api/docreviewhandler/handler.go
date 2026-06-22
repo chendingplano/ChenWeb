@@ -122,7 +122,7 @@ func GetRequest(c echo.Context) error {
 		}
 		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "request": result.Request, "findings": result.Findings})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "request": result.Request, "findings": result.Findings, "aspect_statuses": result.AspectStatuses})
 }
 
 // GetReport returns the full report JSON.

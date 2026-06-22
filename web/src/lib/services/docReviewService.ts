@@ -62,6 +62,16 @@ export type RequestStatus = {
 	report_id?: number;
 };
 
+export type AspectStatus = {
+	aspect: string;
+	pass: string;
+	status: string; // pending | running | success | failed
+	finding_count: number;
+	error_message?: string;
+	start_time?: string;
+	end_time?: string;
+};
+
 export type FindingItem = {
 	id: number;
 	pass: string;
@@ -112,11 +122,11 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
 
 export async function getRequest(
 	id: number
-): Promise<{ request: RequestStatus; findings: FindingItem[] }> {
+): Promise<{ request: RequestStatus; findings: FindingItem[]; aspect_statuses: AspectStatus[] }> {
 	const res = await fetch(`${BASE}/requests/${id}`, { credentials: 'same-origin' });
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to load request');
-	return { request: data.request, findings: data.findings || [] };
+	return { request: data.request, findings: data.findings || [], aspect_statuses: data.aspect_statuses || [] };
 }
 
 export async function getReport(id: number): Promise<any> {

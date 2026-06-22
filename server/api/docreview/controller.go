@@ -225,6 +225,29 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 	}
 	result := &RequestWithFindings{Request: *req}
 
+	// Load per-aspect statuses (always available once seeded at accept time).
+	statusRows, err := c.DB.QueryContext(ctx, `
+		SELECT aspect, COALESCE(pass,''), status, COALESCE(finding_count,0),
+		       COALESCE(error_message,''), COALESCE(start_time::text,''), COALESCE(end_time::text,'')
+		FROM kb.doc_review_status
+		WHERE request_id = $1
+		ORDER BY id`, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("load aspect statuses: %w", err)
+	}
+	defer statusRows.Close()
+	for statusRows.Next() {
+		var s AspectStatus
+		if err := statusRows.Scan(&s.Aspect, &s.Pass, &s.Status, &s.FindingCount,
+			&s.ErrorMessage, &s.StartTime, &s.EndTime); err != nil {
+			return nil, fmt.Errorf("scan aspect status: %w", err)
+		}
+		result.AspectStatuses = append(result.AspectStatuses, s)
+	}
+	if err := statusRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate aspect statuses: %w", err)
+	}
+
 	// Only return findings if completed.
 	if req.Status == "completed" && req.ReviewRunID != "" {
 		rows, err := c.DB.QueryContext(ctx, `

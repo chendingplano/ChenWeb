@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -147,6 +149,10 @@ type ReviewProcessor struct {
 	// persisted under a caller-supplied run identity (DR15: the DocReviewController
 	// assigns the run id at request-accept time and passes it in here).
 	ReviewRunID string
+
+	// GrammarClient is a properly-configured LLM client for the grammar reviewer,
+	// built from GrammarModelCfg at construction time.
+	GrammarClient LLMJSONExtractor
 }
 
 // NewReviewProcessor creates a ReviewProcessor.
@@ -178,11 +184,36 @@ func NewReviewProcessor(
 	}
 	_ = grammarModelRef // tracked in logs; config stored in grammarModelCfg
 
+	var grammarClient LLMJSONExtractor
+	if grammarPromptErr == nil && grammarModelErr == nil {
+		timeoutSec := grammarModelCfg.TimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = 100
+		}
+		c, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
+			ModelName:    grammarModelCfg.ModelName,
+			APIKey:       grammarModelCfg.APIKey,
+			BaseURL:      grammarModelCfg.BaseURL,
+			ThinkingType: grammarModelCfg.ThinkingType,
+			TimeoutSec:   timeoutSec,
+		}, nil)
+		if err == nil {
+			c.HTTPClient = &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+		}
+		if err != nil {
+			logger.Warn("failed to create grammar LLM client; grammar_spelling reviewer disabled", "error", err)
+			grammarPromptErr = err
+		} else {
+			grammarClient = c
+		}
+	}
+
 	return &ReviewProcessor{
 		InputStore:        inputStore,
 		EntityStore:       entityStore,
 		FindingsStore:     findingsStore,
 		Client:            extractor,
+		GrammarClient:     grammarClient,
 		Logger:            logger,
 		Now:               time.Now,
 		MaxConcurrent:     envInt("REVIEW_MAX_TASKS", 1, 1),
@@ -320,10 +351,10 @@ type reviewRunner struct {
 func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunner {
 	var runners []reviewRunner
 
-	if p.GrammarPromptText != "" && p.GrammarModelName != "" {
+	if p.GrammarClient != nil && p.GrammarPromptText != "" && p.GrammarModelName != "" {
 		runners = append(runners, reviewRunner{
 			reviewer: &grammarSpellingReviewer{
-				client:     p.Client,
+				client:     p.GrammarClient,
 				logger:     p.Logger,
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
