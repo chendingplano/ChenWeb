@@ -784,7 +784,6 @@
 			subtitle: record.file_name?.trim() || record.name?.trim() || '—',
 			meta: [recordDisplayDocNo(record), record.parser_name?.trim() || '—'],
 			status: record.type?.trim() || '—',
-			description: currentInput?.id === record.id && correctedFile ? correctedFile : 'Select a record to inspect structure lines.',
 			badges: [record.type?.trim() || '—']
 		};
 	}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { tick } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
@@ -87,6 +88,8 @@
 	let accent = $derived(darkMode ? '#22c55e' : '#16a34a');
 
 	let searchOpen = $state(false);
+	let resultListEl: HTMLDivElement | null = null;
+
 	let settingsOpen = $state(false);
 	let recordIdInput = $state('');
 	let pinnedMode = $state(false);
@@ -219,6 +222,23 @@
 		onSelect(record);
 	}
 
+	async function scrollSelectedIntoView() {
+		await tick();
+		const list = resultListEl;
+		if (!list) return;
+		const card = list.querySelector('.record-browser-card.selected, .record-card.selected') as HTMLElement | null;
+		if (!card) return;
+		const listRect = list.getBoundingClientRect();
+		const cardRect = card.getBoundingClientRect();
+		const relativeTop = cardRect.top - listRect.top + list.scrollTop;
+		const relativeBottom = relativeTop + cardRect.height;
+		const visTop = list.scrollTop;
+		const visBottom = visTop + list.clientHeight;
+		if (relativeTop >= visTop && relativeBottom <= visBottom) return;
+		const targetScrollTop = relativeTop - list.clientHeight / 2 + cardRect.height / 2;
+		list.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'smooth' });
+	}
+
 	async function loadRecords(page = listPage, preferredRecordId = selectedRecordIdInternal) {
 		loading = true;
 		loadError = '';
@@ -245,6 +265,7 @@
 			});
 			const nextRecord = results.find((record) => record.id === nextRecordId) ?? null;
 			emitSelectedRecord(nextRecord, nextRecordId !== preferredRecordId);
+			void scrollSelectedIntoView();
 		} catch (error) {
 			results = [];
 			listTotal = 0;
@@ -281,6 +302,7 @@
 			listJumpInput = '1';
 			emitSelectedRecord(response.record, true);
 			onResultsChange({ results, total: 1, page: 1 });
+			void scrollSelectedIntoView();
 		} catch (error) {
 			results = [];
 			listTotal = 0;
@@ -450,7 +472,7 @@
 			</div>
 		</div>
 
-		<div class="result-list">
+		<div class="result-list" bind:this={resultListEl}>
 			{#if loading}
 				<div class="empty-state">Loading records…</div>
 			{:else if results.length === 0}
@@ -622,11 +644,14 @@
 	.browser-shell {
 		position: relative;
 		min-width: 0;
+		height: 100%;
+		display: flex;
+		flex-direction: column;
 	}
 	.panel {
 		display: flex;
 		min-height: 0;
-		height: 100%;
+		flex: 1;
 		flex-direction: column;
 		border-radius: 24px;
 		border: 1px solid var(--border);
@@ -716,6 +741,18 @@
 		overflow: auto;
 		padding: 0 1rem 1rem;
 		gap: 0.8rem;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+	}
+	.result-list::-webkit-scrollbar {
+		width: 6px;
+	}
+	.result-list::-webkit-scrollbar-thumb {
+		background: rgba(148, 163, 184, 0.25);
+		border-radius: 999px;
+	}
+	.result-list::-webkit-scrollbar-track {
+		background: transparent;
 	}
 	.empty-state {
 		display: grid;
@@ -731,6 +768,7 @@
 	.record-card {
 		text-align: left;
 		cursor: pointer;
+		flex-shrink: 0;
 	}
 	.record-browser-card {
 		display: grid;
