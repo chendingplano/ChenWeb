@@ -1,17 +1,18 @@
 /**
  * @typedef {{ coords?: number[]; line_number?: number }} HighlightLine
- * @typedef {{ convertToViewportRectangle: (rect: number[]) => number[] }} HighlightViewport
+ * @typedef {{ width: number; height: number }} HighlightViewport
  */
 
 const HIGHLIGHT_EXPAND_TOP_PX = 10;
 const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
+const MINERU_COORD_SIZE = 1000;
 
 /**
  * @param {HighlightLine[] | null | undefined} lines
  * @param {HighlightViewport | null | undefined} viewport
  */
 export function buildSemanticProjectionHighlightRect(lines, viewport) {
-	if (!Array.isArray(lines) || !viewport || typeof viewport.convertToViewportRectangle !== 'function') {
+	if (!Array.isArray(lines) || !viewport || typeof viewport.width !== 'number') {
 		return null;
 	}
 
@@ -20,7 +21,10 @@ export function buildSemanticProjectionHighlightRect(lines, viewport) {
 
 	for (const line of lines) {
 		if (!Array.isArray(line?.coords) || line.coords.length < 4) continue;
-		const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(line.coords.slice(0, 4));
+		const vx1 = line.coords[0] * viewport.width / MINERU_COORD_SIZE;
+		const vy1 = line.coords[1] * viewport.height / MINERU_COORD_SIZE;
+		const vx2 = line.coords[2] * viewport.width / MINERU_COORD_SIZE;
+		const vy2 = line.coords[3] * viewport.height / MINERU_COORD_SIZE;
 		rects.push({
 			left: Math.min(vx1, vx2),
 			top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),

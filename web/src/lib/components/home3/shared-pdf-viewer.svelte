@@ -704,6 +704,18 @@
 		user-select: none;
 		-webkit-user-select: none;
 		-webkit-tap-highlight-color: transparent;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+	}
+	.pdf-canvas-host::-webkit-scrollbar {
+		width: 6px;
+	}
+	.pdf-canvas-host::-webkit-scrollbar-thumb {
+		background: rgba(148, 163, 184, 0.25);
+		border-radius: 999px;
+	}
+	.pdf-canvas-host::-webkit-scrollbar-track {
+		background: transparent;
 	}
 	.pdf-pages {
 		display: flex;

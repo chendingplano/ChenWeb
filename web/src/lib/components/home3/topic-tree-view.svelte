@@ -107,9 +107,7 @@
 		) ?? []
 	);
 
-	type TopicPdfViewport = {
-		convertToViewportRectangle: (rect: number[]) => number[];
-	};
+	type TopicPdfViewport = { width: number; height: number };
 
 	function renderTopicHighlight(
 		pageNo: number,
@@ -121,34 +119,13 @@
 			(target: TopicRecordTarget) =>
 				target.page === pageNo && Array.isArray(target.coords) && target.coords.length >= 4
 		);
-		/*
-		console.log('[topic-tree] renderTopicHighlight', {
-			selectedTopicId: selectedTopic.id,
-			selectedTopicText: selectedTopic.topicText,
-			requestedPage: pageNo,
-			selectedTopicPage: selectedTopic.page,
-			lineNumbers: selectedTopic.sourceLineSpecs ?? [],
-			allTargets: selectedTopic.targets ?? [],
-			matchedTargets: targets ?? []
-		});
-		*/
 		if (!targets || targets.length === 0) return;
 		for (const target of targets) {
-			const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(target.coords.slice(0, 4));
+			const vx1 = target.coords[0] * viewport.width / 1000, vy1 = target.coords[1] * viewport.height / 1000, vx2 = target.coords[2] * viewport.width / 1000, vy2 = target.coords[3] * viewport.height / 1000;
 			const left = Math.max(0, Math.min(vx1, vx2) - 5);
 			const top = Math.max(0, Math.min(vy1, vy2) - 4);
 			const width = Math.abs(vx2 - vx1) + 10;
 			const height = Math.abs(vy2 - vy1) + 8;
-			/*
-			console.log('[topic-tree] highlight target converted', {
-				selectedTopicId: selectedTopic.id,
-				page: pageNo,
-				lineNumbers: selectedTopic.sourceLineSpecs ?? [],
-				pdfCoords: target.coords,
-				viewportCoords: [vx1, vy1, vx2, vy2],
-				box: { left, top, width, height }
-			});
-			*/
 			if (width < 1 || height < 1) continue;
 			const box = document.createElement('div');
 			box.className = 'pdf-highlight';
@@ -1029,6 +1006,7 @@
 		min-height: 0;
 		flex: 1;
 		grid-template-columns: auto minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr);
 		gap: 1rem;
 	}
 
@@ -1100,6 +1078,10 @@
 	.pdf-card {
 		flex: 1 1 0;
 		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		overflow: hidden;
 	}
 	.resize-handle {
 		flex: 0 0 16px;
@@ -1161,6 +1143,18 @@
 		margin-top: 1rem;
 		overflow: auto;
 		padding-right: 0.25rem;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+	}
+	.topic-snippets::-webkit-scrollbar {
+		width: 6px;
+	}
+	.topic-snippets::-webkit-scrollbar-thumb {
+		background: rgba(148, 163, 184, 0.25);
+		border-radius: 999px;
+	}
+	.topic-snippets::-webkit-scrollbar-track {
+		background: transparent;
 	}
 
 	.snippet {

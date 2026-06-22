@@ -3,23 +3,17 @@ import assert from 'node:assert/strict';
 
 import { buildSemanticProjectionHighlightRect } from './semantic-projection-highlight-rect.js';
 
-/** @param {number[]} rect */
-function identityViewportRect(rect) {
-	return rect;
-}
+// width=1000, height=1000 → MinerU coords map 1:1 to viewport pixels
+const identityViewport = { width: 1000, height: 1000 };
 
 test('buildSemanticProjectionHighlightRect merges many line boxes into one rectangle', () => {
-	const viewport = {
-		convertToViewportRectangle: identityViewportRect
-	};
-
 	const rect = buildSemanticProjectionHighlightRect(
 		[
 			{ line_number: 12, coords: [100, 210, 240, 230] },
 			{ line_number: 13, coords: [110, 240, 300, 260] },
 			{ line_number: 14, coords: [120, 270, 280, 290] }
 		],
-		viewport
+		identityViewport
 	);
 
 	assert.deepEqual(rect, {
@@ -32,9 +26,5 @@ test('buildSemanticProjectionHighlightRect merges many line boxes into one recta
 });
 
 test('buildSemanticProjectionHighlightRect returns null when no usable coordinates exist', () => {
-	const viewport = {
-		convertToViewportRectangle: identityViewportRect
-	};
-
-	assert.equal(buildSemanticProjectionHighlightRect([{ line_number: 12, coords: [] }], viewport), null);
+	assert.equal(buildSemanticProjectionHighlightRect([{ line_number: 12, coords: [] }], identityViewport), null);
 });

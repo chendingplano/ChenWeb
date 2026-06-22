@@ -383,7 +383,7 @@
 	// ---------- PDF viewer derived ----------
 	let viewerInputId = $derived(selectedSummary?.inputId ?? currentRecord?.id ?? null);
 	let viewerFileUrl = $derived(
-		viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file#page=${docPage}&zoom=page-width` : ''
+		viewerInputId ? `/api/v1/kb/inputs/${viewerInputId}/file` : ''
 	);
 	let viewerIsPdf = $derived((currentRecord?.fileName ?? '').trim().toLowerCase().endsWith('.pdf'));
 
@@ -895,6 +895,7 @@
 		height: 100%;
 		display: grid;
 		grid-template-columns: auto 360px minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr);
 		min-height: 0;
 		min-width: 0;
 		overflow: hidden;

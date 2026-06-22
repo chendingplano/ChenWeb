@@ -2366,9 +2366,9 @@
 	/* ---------- BODY ---------- */
 	.body {
 		flex: 1;
-		height: 100%;
 		display: grid;
 		grid-template-columns: auto 360px minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr);
 		min-height: 0;
 		min-width: 0;
 		overflow: hidden;
