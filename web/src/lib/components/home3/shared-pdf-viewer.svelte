@@ -236,22 +236,9 @@
 	}
 
 	function scrollToPage(pageNo: number, behavior: ScrollBehavior = 'smooth') {
-		const host = pdfCanvasHostEl;
-		if (!host) return;
 		const pageEl = document.getElementById(`${viewerId}-page-${pageNo}`);
 		if (!pageEl) return;
-		const pageRect = pageEl.getBoundingClientRect();
-		const hostRect = host.getBoundingClientRect();
-		const targetTop = host.scrollTop + (pageRect.top - hostRect.top);
-		/*
-		console.log('[shared-pdf-viewer] scrollToPage', {
-			pageNo,
-			behavior,
-			targetTop,
-			currentScrollTop: host.scrollTop
-		});
-		*/
-		host.scrollTo({ top: Math.max(0, targetTop), behavior });
+		pageEl.scrollIntoView({ block: 'start', behavior });
 	}
 
 	function zoomIn() {
@@ -328,56 +315,17 @@
 	}
 
 	function scrollToFirstHighlight(pageNo: number, behavior: ScrollBehavior = 'auto') {
-		const host = pdfCanvasHostEl;
-		if (!host) return false;
 		const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
 		const firstHighlight = overlay?.querySelector('.pdf-highlight') as HTMLElement | null;
-		if (!firstHighlight) {
-			/*
-			console.log('[shared-pdf-viewer] scrollToFirstHighlight: no highlight found', {
-				pageNo,
-				behavior
-			});
-			*/
-			return false;
-		}
-		const highlightRect = firstHighlight.getBoundingClientRect();
-		const hostRect = host.getBoundingClientRect();
-		const hostHeight = host.clientHeight;
-		const highlightTop = highlightRect.top - hostRect.top;
-		const highlightBottom = highlightRect.bottom - hostRect.top;
-		/*
-		console.log('[shared-pdf-viewer] scrollToFirstHighlight: found highlight', {
-			pageNo,
-			behavior,
-			highlightTop,
-			highlightBottom,
-			hostHeight,
-			currentScrollTop: host.scrollTop
-		});
-		*/
+		if (!firstHighlight) return false;
 
-		// Rule 1: highlight is entirely visible — no scroll needed
-		if (highlightTop >= 0 && highlightBottom <= hostHeight) return true;
+		const rect = firstHighlight.getBoundingClientRect();
+		const vh = window.innerHeight;
 
-		const highlightHeight = highlightRect.height;
-		let targetTop: number;
-		if (highlightHeight >= hostHeight) {
-			// Rule 2: highlight taller than viewport — pin to top
-			targetTop = host.scrollTop + highlightTop;
-		} else {
-			// Rule 3: leave ~20% of viewport above the highlight
-			const topPadding = hostHeight * 0.2;
-			targetTop = host.scrollTop + highlightTop - topPadding;
-		}
-		/*
-		console.log('[shared-pdf-viewer] scrollToFirstHighlight: scrolling to highlight', {
-			pageNo,
-			behavior,
-			targetTop
-		});
-		*/
-		host.scrollTo({ top: Math.max(0, targetTop), behavior });
+		// Highlight already fully visible in the viewport — no scroll needed
+		if (rect.top >= 0 && rect.bottom <= vh) return true;
+
+		firstHighlight.scrollIntoView({ block: 'center', behavior });
 		return true;
 	}
 
