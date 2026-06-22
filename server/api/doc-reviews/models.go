@@ -1,17 +1,17 @@
-package docreview
+package docreviews
 
 // SubmitRequestInput is the request body for POST /api/v1/doc-review/requests.
 type SubmitRequestInput struct {
-	InputRecordID int64              `json:"input_record_id"`
-	Tier          string             `json:"tier"`          // "must_review", "should_review", "custom"
-	Aspects       []string           `json:"aspects"`       // selected aspect names (all when tier-based)
-	ReferenceDocs []ReferenceDoc     `json:"reference_docs,omitempty"`
-	Notes         string             `json:"notes,omitempty"`
+	InputRecordID  int64                    `json:"input_record_id"`
+	Tier           string                   `json:"tier"`           // "must_review", "should_review", "custom"
+	Aspects        []string                 `json:"aspects"`        // selected aspect names (all when tier-based)
+	ReferenceDocs  []ReferenceDoc           `json:"reference_docs,omitempty"`
+	Notes          string                   `json:"notes,omitempty"`
 	ModelOverrides map[string]ModelOverride `json:"model_overrides,omitempty"`
-	RequesterName string             `json:"requester_name"`
-	RequesterID   int64              `json:"requester_id"`
-	ReportTemplate string            `json:"report_template,omitempty"`
-	DocTemplate   string             `json:"doc_template,omitempty"`
+	RequesterName  string                   `json:"requester_name"`
+	RequesterID    int64                    `json:"requester_id"`
+	ReportTemplate string                   `json:"report_template,omitempty"`
+	DocTemplate    string                   `json:"doc_template,omitempty"`
 }
 
 type ReferenceDoc struct {
@@ -26,24 +26,24 @@ type ModelOverride struct {
 
 // RequestStatus represents a row from kb.doc_review_requests.
 type RequestStatus struct {
-	ID             int64               `json:"id"`
-	InputRecordID  int64               `json:"input_record_id"`
-	ReviewRunID    string              `json:"review_run_id,omitempty"`
-	Tier           string              `json:"tier"`
-	Aspects        []string            `json:"aspects"`
-	ReferenceDocs  []ReferenceDoc      `json:"reference_docs,omitempty"`
-	Notes          string              `json:"notes,omitempty"`
+	ID             int64                    `json:"id"`
+	InputRecordID  int64                    `json:"input_record_id"`
+	ReviewRunID    string                   `json:"review_run_id,omitempty"`
+	Tier           string                   `json:"tier"`
+	Aspects        []string                 `json:"aspects"`
+	ReferenceDocs  []ReferenceDoc           `json:"reference_docs,omitempty"`
+	Notes          string                   `json:"notes,omitempty"`
 	ModelOverrides map[string]ModelOverride `json:"model_overrides,omitempty"`
-	RequesterName  string              `json:"requester_name"`
-	RequesterID    int64               `json:"requester_id"`
-	ReportTemplate string              `json:"report_template,omitempty"`
-	DocTemplate    string              `json:"doc_template,omitempty"`
-	Status         string              `json:"status"`
-	CreateTime     string              `json:"create_time"`
-	StartTime      string              `json:"start_time,omitempty"`
-	EndTime        string              `json:"end_time,omitempty"`
-	ErrorMessage   string              `json:"error_message,omitempty"`
-	ReportID       int64               `json:"report_id,omitempty"` // latest report for this request, if any (DR15)
+	RequesterName  string                   `json:"requester_name"`
+	RequesterID    int64                    `json:"requester_id"`
+	ReportTemplate string                   `json:"report_template,omitempty"`
+	DocTemplate    string                   `json:"doc_template,omitempty"`
+	Status         string                   `json:"status"`
+	CreateTime     string                   `json:"create_time"`
+	StartTime      string                   `json:"start_time,omitempty"`
+	EndTime        string                   `json:"end_time,omitempty"`
+	ErrorMessage   string                   `json:"error_message,omitempty"`
+	ReportID       int64                    `json:"report_id,omitempty"` // latest report for this request, if any (DR15)
 }
 
 // RequestWithFindings extends RequestStatus with findings and per-aspect statuses.
@@ -86,20 +86,20 @@ type ReportRow struct {
 // ReportDetail is the full report with JSON content for detail view.
 type ReportDetail struct {
 	ReportRow
-	ExecutiveSummary string                 `json:"executive_summary"`
-	ReportJSON       map[string]any         `json:"report_json"`
-	ReportMarkdown   string                 `json:"report_markdown"`
+	ExecutiveSummary string         `json:"executive_summary"`
+	ReportJSON       map[string]any `json:"report_json"`
+	ReportMarkdown   string         `json:"report_markdown"`
 }
 
 // AspectInfo describes one review aspect.
 type AspectInfo struct {
-	Name        string `json:"name"`
-	Group       string `json:"group"`       // "P1".."P6"
-	Label       string `json:"label"`       // human-readable, e.g. "Grammar & Spelling"
-	Priority    string `json:"priority"`    // "Must Review", "Should Review", etc.
-	Description string `json:"description"`
+	Name         string `json:"name"`
+	Group        string `json:"group"`        // "P1".."P6"
+	Label        string `json:"label"`        // human-readable, e.g. "Grammar & Spelling"
+	Priority     string `json:"priority"`     // "Must Review", "Should Review", etc.
+	Description  string `json:"description"`
 	DefaultModel string `json:"default_model"`
-	IsToolUse   bool   `json:"is_tool_use"`
+	IsToolUse    bool   `json:"is_tool_use"`
 }
 
 // TierInfo describes one priority tier.

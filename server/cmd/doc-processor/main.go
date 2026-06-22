@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	fileconverters "github.com/chendingplano/deepdoc/server/api/file-converters"
 	"github.com/chendingplano/deepdoc/server/api/llmusage"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
@@ -279,13 +281,59 @@ func main() {
 		"started_at", time.Now().Format(time.RFC3339),
 	)
 
-	err = ns.Subscribe(ctx, subject, durable, func(msgCtx context.Context, payload []byte) error {
-		return control.HandleJetStreamEvent(msgCtx, subject, payload)
-	})
-	if err != nil && ctx.Err() == nil {
-		logger.Error("doc processor exited with error", "error", err)
+	// ── Doc-processing subscription (existing) ────────────────────────────────
+	go func() {
+		if err := ns.Subscribe(ctx, subject, durable, func(msgCtx context.Context, payload []byte) error {
+			return control.HandleJetStreamEvent(msgCtx, subject, payload)
+		}); err != nil && ctx.Err() == nil {
+			logger.Error("doc processor subscription exited with error", "error", err)
+			cancel()
+		}
+	}()
+
+	// ── Doc-review subscription ────────────────────────────────────────────────
+	docReviewSubject := envOrDefault("DOC_REVIEW_EVENT_SUBJECT", docreviews.DefaultDocReviewEventSubject)
+	docReviewStream := envOrDefault("DOC_REVIEW_EVENT_STREAM", "doc-review-events")
+	docReviewDurable := envOrDefault("DOC_REVIEW_EVENT_DURABLE", "doc-processor-docreview")
+
+	drNS, err := fileconverters.NewNATSSubscriber(natsURL)
+	if err != nil {
+		logger.Error("failed creating nats subscriber for doc-review", "error", err, "nats_url", natsURL)
+		os.Exit(1)
+	}
+	defer drNS.Close()
+	if err := drNS.EnsureStream(docReviewStream, docReviewSubject); err != nil {
+		logger.Error("failed to ensure doc-review stream", "error", err, "stream", docReviewStream, "subject", docReviewSubject)
 		os.Exit(1)
 	}
 
+	logger.Info("doc-review subscription starting",
+		"subject", docReviewSubject,
+		"stream", docReviewStream,
+		"durable", docReviewDurable,
+	)
+
+	go func() {
+		if err := drNS.Subscribe(ctx, docReviewSubject, docReviewDurable, func(msgCtx context.Context, payload []byte) error {
+			var evt struct {
+				RequestID int64 `json:"request_id"`
+			}
+			if err := json.Unmarshal(payload, &evt); err != nil {
+				return fmt.Errorf("unmarshal doc-review event: %w", err)
+			}
+			if evt.RequestID <= 0 {
+				return fmt.Errorf("invalid request_id %d in doc-review event", evt.RequestID)
+			}
+			logger.Info("doc-review event received", "request_id", evt.RequestID)
+			ctrl := docreviews.NewDocReviewController()
+			ctrl.RunReviewAndReport(msgCtx, evt.RequestID)
+			return nil
+		}); err != nil && ctx.Err() == nil {
+			logger.Error("doc-review subscription exited with error", "error", err)
+			cancel()
+		}
+	}()
+
+	<-ctx.Done()
 	fmt.Println("doc processor stopped")
 }

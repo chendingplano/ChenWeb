@@ -10,6 +10,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api"
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
 	"github.com/chendingplano/deepdoc/server/api/database"
+	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/deepdoc/server/api/docgenworker"
 	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/deepdoc/server/api/llmreconcile"
@@ -194,6 +195,18 @@ func main() {
 	}
 
 	logger.Info("migrations completed successfully")
+
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = "nats://127.0.0.1:4222"
+	}
+	if err := docreviews.InitPublisher(natsURL); err != nil {
+		logger.Error("failed to init doc-review JetStream publisher; reviews will run inline",
+			"error", err, "loc", "CWB_DDM_210")
+	} else {
+		defer docreviews.ClosePublisher()
+		logger.Info("doc-review JetStream publisher ready", "nats_url", natsURL)
+	}
 
 	if err := llmusage.InstallDefaultSink(); err != nil {
 		logger.Error("failed to install default llm usage sink",

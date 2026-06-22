@@ -1,39 +1,39 @@
-package docreviewhandler
+package docreviews
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/chendingplano/deepdoc/server/api/docreview"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
 
-// ListAspects returns all review aspects.
-func ListAspects(c echo.Context) error {
-	aspects := docreview.ListAspects()
+// HandleListAspects returns all review aspects.
+func HandleListAspects(c echo.Context) error {
+	aspects := ListAspects()
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":  true,
 		"aspects": aspects,
 	})
 }
 
-// ListTiers returns tier definitions with aspect mappings.
-func ListTiers(c echo.Context) error {
-	tiers := docreview.ListTiers()
+// HandleListTiers returns tier definitions with aspect mappings.
+func HandleListTiers(c echo.Context) error {
+	tiers := ListTiers()
 	return c.JSON(http.StatusOK, map[string]any{
 		"status": true,
 		"tiers":  tiers,
 	})
 }
 
-func submitRequestHelper(c echo.Context) error {
-	ctrl := docreview.NewDocReviewController()
+// SubmitRequest accepts a review request and publishes a JetStream event so
+// doc-processor runs the review asynchronously.
+func SubmitRequest(c echo.Context) error {
+	ctrl := NewDocReviewController()
 
-	var input docreview.SubmitRequestInput
+	var input SubmitRequestInput
 	if err := c.Bind(&input); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{
 			"status":    false,
@@ -41,7 +41,6 @@ func submitRequestHelper(c echo.Context) error {
 		})
 	}
 
-	// Extract authenticated user info for requester fields.
 	rc := EchoFactory.NewFromEcho(c, "CWB_DRH_001")
 	userInfo := rc.IsAuthenticated()
 	if userInfo != nil {
@@ -52,10 +51,9 @@ func submitRequestHelper(c echo.Context) error {
 
 	ctx := c.Request().Context()
 
-	// Accept the request (validates, persists, seeds per-aspect status rows).
 	result, err := ctrl.AcceptRequest(ctx, input)
 	if err != nil {
-		if re, ok := err.(*docreview.RequestError); ok {
+		if re, ok := err.(*RequestError); ok {
 			return c.JSON(re.Status, map[string]any{
 				"status":    false,
 				"error_msg": re.Message,
@@ -67,14 +65,18 @@ func submitRequestHelper(c echo.Context) error {
 		})
 	}
 
-	// DR15: run the review in the background so the submit request returns
-	// immediately and the live monitor can observe the job while it runs. Use a
-	// detached context — the HTTP request context is cancelled once we respond.
-	requestID := result.RequestID
-	go func() {
-		bgCtrl := docreview.NewDocReviewController()
-		bgCtrl.RunReviewAndReport(context.Background(), requestID)
-	}()
+	// Publish a JetStream event so doc-processor runs the review. If the
+	// publisher is unavailable, fall back to an inline goroutine so the service
+	// degrades gracefully rather than failing hard.
+	if pubErr := PublishReviewEvent(ctx, result.RequestID); pubErr != nil {
+		logger.Warn("JetStream publish failed; falling back to inline goroutine",
+			"request_id", result.RequestID, "error", pubErr)
+		requestID := result.RequestID
+		go func() {
+			bgCtrl := NewDocReviewController()
+			bgCtrl.RunReviewAndReport(c.Request().Context(), requestID)
+		}()
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":     true,
@@ -83,26 +85,19 @@ func submitRequestHelper(c echo.Context) error {
 	})
 }
 
-// SubmitRequest creates a review request and runs it in the background (DR15).
-func SubmitRequest(c echo.Context) error {
-	return submitRequestHelper(c)
-}
-
-// ListActiveJobs returns all review jobs with ≥1 unfinished aspect (DR15) —
-// drives the live job monitor.
+// ListActiveJobs returns all review jobs with ≥1 unfinished aspect (DR15).
 func ListActiveJobs(c echo.Context) error {
-	ctrl := docreview.NewDocReviewController()
+	ctrl := NewDocReviewController()
 	jobs, err := ctrl.ListActiveJobs(c.Request().Context())
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
 	}
 	if jobs == nil {
-		jobs = []docreview.ActiveJob{}
+		jobs = []ActiveJob{}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "jobs": jobs})
 }
 
-// parseID extracts an int64 path parameter.
 func parseID(c echo.Context, name string) (int64, error) {
 	return strconv.ParseInt(c.Param(name), 10, 64)
 }
@@ -113,7 +108,7 @@ func GetRequest(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
-	ctrl := docreview.NewDocReviewController()
+	ctrl := NewDocReviewController()
 	result, err := ctrl.GetRequestWithFindings(c.Request().Context(), id)
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -122,7 +117,12 @@ func GetRequest(c echo.Context) error {
 		}
 		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "request": result.Request, "findings": result.Findings, "aspect_statuses": result.AspectStatuses})
+	return c.JSON(http.StatusOK, map[string]any{
+		"status":          true,
+		"request":         result.Request,
+		"findings":        result.Findings,
+		"aspect_statuses": result.AspectStatuses,
+	})
 }
 
 // GetReport returns the full report JSON.
@@ -131,7 +131,7 @@ func GetReport(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
-	gen := docreview.NewDocReviewReportGenerator()
+	gen := NewDocReviewReportGenerator()
 	report, err := gen.GetReport(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": err.Error()})
@@ -145,7 +145,7 @@ func GetReportHTML(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
-	gen := docreview.NewDocReviewReportGenerator()
+	gen := NewDocReviewReportGenerator()
 	html, err := gen.GetReportHTML(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": err.Error()})
@@ -159,7 +159,7 @@ func ExportReport(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
-	gen := docreview.NewDocReviewReportGenerator()
+	gen := NewDocReviewReportGenerator()
 	report, err := gen.GetReport(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": err.Error()})
@@ -170,10 +170,8 @@ func ExportReport(c echo.Context) error {
 	case "md", "markdown":
 		return c.Blob(http.StatusOK, "text/markdown; charset=utf-8", []byte(report.ReportMarkdown))
 	case "pdf":
-		// Deferred — return markdown for now.
 		return c.Blob(http.StatusOK, "text/markdown; charset=utf-8", []byte(report.ReportMarkdown))
 	default:
-		// Return JSON.
 		reportJSON, _ := json.Marshal(report.ReportJSON)
 		return c.Blob(http.StatusOK, "application/json", reportJSON)
 	}
@@ -192,7 +190,7 @@ func UpdateFinding(c echo.Context) error {
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid body"})
 	}
-	ctrl := docreview.NewDocReviewController()
+	ctrl := NewDocReviewController()
 	if err := ctrl.UpdateFinding(c.Request().Context(), id, body.ReviewStatus, body.ReviewedBy); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": err.Error()})
 	}
@@ -205,7 +203,7 @@ func StopRequest(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
-	ctrl := docreview.NewDocReviewController()
+	ctrl := NewDocReviewController()
 	if err := ctrl.StopRequest(c.Request().Context(), id); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": err.Error()})
 	}

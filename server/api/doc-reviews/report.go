@@ -1,4 +1,4 @@
-package docreview
+package docreviews
 
 import (
 	"bytes"
@@ -308,7 +308,7 @@ func timeNow() string { return time.Now().UTC().Format(time.RFC3339) }
 // renderMarkdown renders the report as Markdown.
 func renderMarkdown(report *ReportSkeleton) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("# Document Review Report\n\n"))
+	b.WriteString("# Document Review Report\n\n")
 	b.WriteString(fmt.Sprintf("**Document:** %s (ID: %d)\n", report.Meta.DocumentTitle, report.Meta.DocumentRecordID))
 	b.WriteString(fmt.Sprintf("**Generated:** %s\n", report.Meta.GeneratedAt))
 	b.WriteString(fmt.Sprintf("**Total Findings:** %d\n\n", report.Meta.TotalFindings))

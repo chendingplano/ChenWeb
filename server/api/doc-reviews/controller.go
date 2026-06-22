@@ -1,4 +1,4 @@
-package docreview
+package docreviews
 
 import (
 	"context"
@@ -256,7 +256,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 	if req.Status == "completed" && req.ReviewRunID != "" {
 		rows, err := c.DB.QueryContext(ctx, `
 			SELECT id, pass, aspect, severity, finding_type, title, description,
-			       COALESCE(evidence,''), COALESCE(location::text,''), COALESCE(suggestion,''),
+			       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
 			       COALESCE(confidence,0), COALESCE(review_status,'pending')
 			FROM kb.doc_review_findings
 			WHERE input_record_id = $1 AND review_run_id = $2
@@ -281,10 +281,10 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 	return result, nil
 }
 
-// StopRequest transitions a running request to stopped.
+// StopRequest transitions an accepted or running request to stopped.
 func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) error {
 	res, err := c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_requests SET status = 'stopped', end_time = NOW() WHERE id = $1 AND status = 'running'`,
+		`UPDATE kb.doc_review_requests SET status = 'stopped', end_time = NOW() WHERE id = $1 AND status IN ('accepted', 'running')`,
 		requestID,
 	)
 	if err != nil {
@@ -292,7 +292,7 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("request %d is not in 'running' status", requestID)
+		return fmt.Errorf("request %d is not in a stoppable state (accepted or running)", requestID)
 	}
 	// DR15: drive every non-finished aspect to a terminal state so the job leaves
 	// the live monitor (finished iff status is 'success' or 'failed').

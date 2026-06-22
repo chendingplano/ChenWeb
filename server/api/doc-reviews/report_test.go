@@ -1,4 +1,4 @@
-package docreview
+package docreviews
 
 import (
 	"context"

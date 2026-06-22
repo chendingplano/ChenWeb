@@ -34,7 +34,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
-	"github.com/chendingplano/deepdoc/server/api/docreviewhandler"
+	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -504,16 +504,16 @@ func RegisterRoutes(e *echo.Echo) error {
 
 		return c.Redirect(http.StatusFound, "/login")
 	})
-	apiGroup.GET("/doc-review/aspects", docreviewhandler.ListAspects)
-	apiGroup.GET("/doc-review/tiers", docreviewhandler.ListTiers)
-	apiGroup.GET("/doc-review/active", docreviewhandler.ListActiveJobs)
-	apiGroup.POST("/doc-review/requests", docreviewhandler.SubmitRequest)
-	apiGroup.GET("/doc-review/requests/:id", docreviewhandler.GetRequest)
-	apiGroup.GET("/doc-review/reports/:id", docreviewhandler.GetReport)
-	apiGroup.GET("/doc-review/reports/:id/html", docreviewhandler.GetReportHTML)
-	apiGroup.GET("/doc-review/reports/:id/export", docreviewhandler.ExportReport)
-	apiGroup.PATCH("/doc-review/findings/:id", docreviewhandler.UpdateFinding)
-	apiGroup.POST("/doc-review/requests/:id/stop", docreviewhandler.StopRequest)
+	apiGroup.GET("/doc-review/aspects", docreviews.HandleListAspects)
+	apiGroup.GET("/doc-review/tiers", docreviews.HandleListTiers)
+	apiGroup.GET("/doc-review/active", docreviews.ListActiveJobs)
+	apiGroup.POST("/doc-review/requests", docreviews.SubmitRequest)
+	apiGroup.GET("/doc-review/requests/:id", docreviews.GetRequest)
+	apiGroup.GET("/doc-review/reports/:id", docreviews.GetReport)
+	apiGroup.GET("/doc-review/reports/:id/html", docreviews.GetReportHTML)
+	apiGroup.GET("/doc-review/reports/:id/export", docreviews.ExportReport)
+	apiGroup.PATCH("/doc-review/findings/:id", docreviews.UpdateFinding)
+	apiGroup.POST("/doc-review/requests/:id/stop", docreviews.StopRequest)
 
 
 	return nil

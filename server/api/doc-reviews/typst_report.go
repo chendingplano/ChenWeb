@@ -1,4 +1,4 @@
-package docreview
+package docreviews
 
 import (
 	"context"
@@ -34,12 +34,12 @@ func GenerateTypstReport(ctx context.Context, requestID int64, skeleton *ReportS
 		return nil
 	}
 
-	lang := strings.TrimSpace(os.Getenv("DOC_REPORT_LANGUAGE"))
+	lang := strings.TrimSpace(os.Getenv("DOC_REVIEW_REPORT_LANGUAGE"))
 	if lang == "" {
 		lang = "en"
 	}
 
-	templatePath := strings.TrimSpace(os.Getenv("DOC_REVIEW_TEMPLATE"))
+	templatePath := strings.TrimSpace(os.Getenv("DOC_REVIEW_TEMPLATE_FILENAME"))
 	if templatePath == "" {
 		templatePath = "docs/doc-templates/template-document-report.typ"
 	}
