@@ -138,6 +138,88 @@ def _default_parser() -> str:
     return _env("PDF_DEFAULT_PARSER", "opendata")
 
 
+# ---------------------------------------------------------------------------
+# Font-encoding garble detection + OCR fallback
+# ---------------------------------------------------------------------------
+#
+# Some PDFs (notably GB/T standards) embed Latin text in fonts that lack a
+# usable ToUnicode CMap. Text-layer extraction then maps those glyphs into the
+# CJK Unified Ideographs block instead of ASCII, e.g. "intended application"
+# comes out as "犻狀狋犲狀犱犲犱犪狆狆犾犻犮犪狋犻狅狀". The garble is silent: the
+# bytes are valid CJK, not U+FFFD, so nothing downstream flags it. The single
+# reliable signature is a *run* of consecutive code points in this narrow
+# block — real Chinese text never strings several of these rare ideographs
+# together, but every Latin letter maps into it, so garbled words produce long
+# runs. When detected, we re-parse once with pipeline OCR (reads pixels).
+
+_PASSTHROUGH_LO = 0x72AA  # 'a' in the observed font's CJK passthrough
+_PASSTHROUGH_HI = 0x72D6  # 'z' (range covers the full a-z mapping)
+
+
+def _ocr_fallback_enabled() -> bool:
+    return _env("PDF_OCR_FALLBACK", "true").lower() not in {"0", "false", "no", "off"}
+
+
+def _ocr_fallback_lang() -> str:
+    return _env("MINERU_OCR_LANG", "ch")
+
+
+def _ocr_fallback_min_run() -> int:
+    try:
+        return max(2, int(_env("PDF_OCR_FALLBACK_MIN_RUN", "4")))
+    except ValueError:
+        return 4
+
+
+def _iter_strings(obj) -> "list[str]":
+    """Yield every string value found anywhere inside a nested dict/list."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            yield from _iter_strings(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from _iter_strings(value)
+
+
+def _looks_font_garbled(result: dict, min_run: int = 4) -> bool:
+    """True when any extracted string contains a run of >= min_run consecutive
+    code points in the CJK passthrough block — the font-encoding garble
+    signature. Isolated in-block characters (legitimate rare Chinese, e.g.
+    状 U+72B6) do not trip it."""
+    for text in _iter_strings(result.get("pages", [])):
+        run = 0
+        for ch in text:
+            if _PASSTHROUGH_LO <= ord(ch) <= _PASSTHROUGH_HI:
+                run += 1
+                if run >= min_run:
+                    return True
+            else:
+                run = 0
+    return False
+
+
+def _mineru_is_ocr(backend: ParserBackend) -> bool:
+    """True when this mineru backend is already pinned to pipeline OCR, so the
+    guard does not re-run (or recurse) on an OCR result."""
+    return (
+        getattr(backend, "_backend", "") == "pipeline"
+        and "ocr" in getattr(backend, "_extra_args", [])
+    )
+
+
+def _get_ocr_mineru(cache: dict[str, ParserBackend]) -> ParserBackend:
+    key = "mineru::ocr-fallback"
+    backend = cache.get(key)
+    if backend is None:
+        from parser_mineru import make_ocr_parser
+
+        backend = make_ocr_parser(_ocr_fallback_lang())
+        cache[key] = backend
+    return backend
+
+
 def _forced_parser() -> str:
     """Return PDF_PARSER_NAME when set; empty string otherwise."""
     return _env("PDF_PARSER_NAME")
@@ -465,6 +547,44 @@ def _process_record(
 
         log.info("(MID_2026040710) parsing record id=%s parser=%s file=%s", rec_id, parser_name, repo_pdf_path)
         result = backend.parse(repo_pdf_path, record_dir, throttled)
+
+        # Font-encoding garble guard: if a mineru text-layer parse produced the
+        # CJK-passthrough signature (Latin mapped into the CJK block), re-parse
+        # once with pipeline OCR, which reads pixels and recovers the Latin.
+        if (
+            parser_name == "mineru"
+            and _ocr_fallback_enabled()
+            and not _mineru_is_ocr(backend)
+            and _looks_font_garbled(result, _ocr_fallback_min_run())
+        ):
+            log.warning(
+                "(MID_2026062301) record id=%s: font-encoding garble detected "
+                "(CJK passthrough) — re-parsing with pipeline OCR",
+                rec_id,
+            )
+            try:
+                ocr_backend = _get_ocr_mineru(backend_cache)
+                ocr_result = ocr_backend.parse(repo_pdf_path, record_dir, throttled)
+                if _looks_font_garbled(ocr_result, _ocr_fallback_min_run()):
+                    log.warning(
+                        "(MID_2026062303) record id=%s: OCR fallback still garbled "
+                        "— keeping original parse",
+                        rec_id,
+                    )
+                else:
+                    ocr_result["engine"] = "mineru-pipeline-ocr"
+                    result = ocr_result
+                    log.info(
+                        "(MID_2026062302) record id=%s: OCR fallback recovered text",
+                        rec_id,
+                    )
+            except Exception as ocr_exc:
+                log.error(
+                    "(MID_2026062304) record id=%s: OCR fallback failed (%s) "
+                    "— keeping original parse",
+                    rec_id, ocr_exc,
+                )
+
         total_pages = result.get("total_pages", 0)
 
         # Write aggregated result JSON

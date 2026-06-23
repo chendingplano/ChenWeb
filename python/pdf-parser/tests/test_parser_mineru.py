@@ -74,3 +74,36 @@ def test_annotate_equation_image_paths_keeps_existing_img_path():
 
     assert changed == 0
     assert content_list[0]["img_path"] == "images/existing.jpg"
+
+
+def _write_content_list(base, stem, subdir, mtime):
+    import os, json
+    d = os.path.join(base, stem, subdir)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, f"{stem}_content_list.json")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump([{"type": "text", "text": subdir}], f)
+    os.utime(p, (mtime, mtime))
+    return p
+
+
+class TestFindContentList:
+    def test_selects_newest_not_alphabetical_first(self, tmp_path):
+        # Regression: a stale alphabetically-first dir (hybrid_auto) must not win
+        # over the freshly written one (ocr). This was the silent-stale-parse bug.
+        from parser_mineru import _find_content_list
+
+        base = str(tmp_path)
+        stem = "doc1"
+        _write_content_list(base, stem, "hybrid_auto", mtime=1000)  # stale
+        _write_content_list(base, stem, "hybrid_ocr", mtime=2000)
+        fresh = _write_content_list(base, stem, "ocr", mtime=3000)  # newest
+
+        assert _find_content_list(base, stem) == fresh
+
+    def test_raises_when_none_found(self, tmp_path):
+        import pytest
+        from parser_mineru import _find_content_list
+
+        with pytest.raises(FileNotFoundError):
+            _find_content_list(str(tmp_path), "missing")

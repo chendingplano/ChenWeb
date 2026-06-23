@@ -92,6 +92,17 @@ class MineruParser(ParserBackend):
         total_pages_hint = max(pdf_page_count, 1)
         on_progress(0, total_pages_hint)
 
+        # Clear any prior mineru output for this PDF. MinerU nests per-run output
+        # under <output_dir>/<pdf_stem>/<backend>_<method>/; across re-parses (and
+        # the OCR-fallback's second pass) these accumulate, wasting disk and — before
+        # the mtime-based selection below — risking returning a stale run's content.
+        # The source PDF lives at <output_dir>/<pdf_stem>.pdf (a file), not this dir,
+        # so removing the directory never touches the input.
+        pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
+        nested_output = os.path.join(output_dir, pdf_stem)
+        if os.path.isdir(nested_output):
+            shutil.rmtree(nested_output, ignore_errors=True)
+
         cmd: list[str] = [self._cli, "-p", pdf_path, "-o", output_dir]
         if self._backend:
             cmd += ["-b", self._backend]
@@ -172,23 +183,7 @@ class MineruParser(ParserBackend):
                 f"mineru exited {rc}: " + "\n".join(tail[-20:])
             )
 
-        # Locate content_list.json. MinerU nests it under
-        # <output_dir>/<pdf_stem>/<backend>_auto/<pdf_stem>_content_list.json.
-        pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
-        candidates = sorted(glob.glob(
-            os.path.join(output_dir, pdf_stem, "*", f"{pdf_stem}_content_list.json")
-        ))
-        if not candidates:
-            candidates = sorted(glob.glob(
-                os.path.join(output_dir, "**", "*_content_list.json"),
-                recursive=True,
-            ))
-        if not candidates:
-            raise FileNotFoundError(
-                f"mineru: no *_content_list.json found under {output_dir}"
-            )
-
-        content_list_path = candidates[0]
+        content_list_path = _find_content_list(output_dir, pdf_stem)
         with open(content_list_path, "r", encoding="utf-8") as f:
             content_list = json.load(f)
 
@@ -249,6 +244,48 @@ class MineruParser(ParserBackend):
             "images_dir": images_dst_dir if image_count > 0 else "",
             "image_count": image_count,
         }
+
+
+def _find_content_list(output_dir: str, pdf_stem: str) -> str:
+    """Return the content_list.json this run produced.
+
+    MinerU nests output under <output_dir>/<pdf_stem>/<backend>_<method>/, e.g.
+    hybrid_auto/, hybrid_ocr/, ocr/. When several coexist (e.g. the OCR-fallback
+    re-parse, or leftovers from a backend/method change), we must select the one
+    written by the current run — the most recently modified — rather than the
+    alphabetically first, which would silently return a stale, possibly garbled
+    parse. Raises FileNotFoundError if none is found.
+    """
+    candidates = glob.glob(
+        os.path.join(output_dir, pdf_stem, "*", f"{pdf_stem}_content_list.json")
+    )
+    if not candidates:
+        candidates = glob.glob(
+            os.path.join(output_dir, "**", "*_content_list.json"),
+            recursive=True,
+        )
+    if not candidates:
+        raise FileNotFoundError(
+            f"mineru: no *_content_list.json found under {output_dir}"
+        )
+    return max(candidates, key=os.path.getmtime)
+
+
+def make_ocr_parser(lang: str = "ch") -> "MineruParser":
+    """Build a MineruParser pinned to the `pipeline` backend with forced OCR.
+
+    Used as a fallback when the normal (text-layer) extraction yields
+    font-encoding garble — e.g. GB/T standard PDFs whose Latin glyphs live in a
+    font without a usable ToUnicode CMap, so text extraction maps them into the
+    CJK block. The `pipeline` backend OCRs rendered pixels and sidesteps the
+    broken encoding; `hybrid`/`vlm` backends reuse the text layer and would
+    reproduce the garble, so they are deliberately not used here.
+    """
+    parser = MineruParser()
+    parser.init()
+    parser._backend = "pipeline"
+    parser._extra_args = ["-m", "ocr", "-l", lang]
+    return parser
 
 
 def annotate_equation_image_paths(content_list: list[Any], middle_json: Any) -> int:

@@ -365,3 +365,53 @@ class TestRepoFileProcessing:
         assert persisted["file_name"] == "Artifacts/0/87/std_20039.pdf"
         assert persisted["result_filename"] == "Artifacts/0/87/std_20039_opendata.json"
         assert persisted["backup_filename"] == "Backup/std_20039.pdf"
+
+
+# Latin 'a'..'z' as the observed font maps them into the CJK passthrough block,
+# i.e. ASCII offset into U+72AA.. — enough to build garbled words for tests.
+def _cjk_passthrough(ascii_text: str) -> str:
+    return "".join(chr(0x72AA + (ord(c) - ord("a"))) for c in ascii_text)
+
+
+class TestFontGarbleGuard:
+    def test_detects_run_of_passthrough_chars(self):
+        from pdf_parser import _looks_font_garbled
+
+        garble = _cjk_passthrough("intendedapplication")
+        result = {"pages": [{"items": [{"text": f"预期应用 {garble}"}]}]}
+        assert _looks_font_garbled(result, 4) is True
+
+    def test_clean_chinese_english_not_flagged(self):
+        from pdf_parser import _looks_font_garbled
+
+        result = {"pages": [{"items": [{"text": "预期应用 intended application"}]}]}
+        assert _looks_font_garbled(result, 4) is False
+
+    def test_isolated_legit_cjk_in_block_not_flagged(self):
+        from pdf_parser import _looks_font_garbled
+
+        # 状 (U+72B6) is a real character inside the block; isolated, it must not trip.
+        result = {"pages": [{"items": [{"text": "根据传热介质状态是否可变"}]}]}
+        assert _looks_font_garbled(result, 4) is False
+
+    def test_min_run_threshold_respected(self):
+        from pdf_parser import _looks_font_garbled
+
+        # A 3-char run should not trip when min_run=4.
+        three = _cjk_passthrough("abc")
+        result = {"pages": [{"items": [{"text": f"测试{three}尾巴"}]}]}
+        assert _looks_font_garbled(result, 4) is False
+
+    def test_mineru_is_ocr_predicate(self):
+        from pdf_parser import _mineru_is_ocr
+
+        class _B:
+            _backend = "pipeline"
+            _extra_args = ["-m", "ocr", "-l", "ch"]
+
+        class _Hybrid:
+            _backend = ""
+            _extra_args = []
+
+        assert _mineru_is_ocr(_B()) is True
+        assert _mineru_is_ocr(_Hybrid()) is False

@@ -90,6 +90,9 @@ PYTHONPATH=. .venv/bin/python pdf_parser.py
 | `PDF_BATCH_SIZE` | `25` | Records fetched per poll cycle |
 | `PDF_DEFAULT_PARSER` | `opendata` | Parser when `parser_name` is not set |
 | `PDF_PIPELINE_MODE` | `poll` | `poll` (legacy DB polling) or `jetstream` (consume stage events) |
+| `PDF_OCR_FALLBACK` | `true` | Auto-detect font-encoding garble in `mineru` output and re-parse with pipeline OCR. See [Font-encoding garble OCR fallback](#font-encoding-garble-ocr-fallback). |
+| `MINERU_OCR_LANG` | `ch` | OCR language passed (`-l`) to the OCR-fallback re-parse |
+| `PDF_OCR_FALLBACK_MIN_RUN` | `4` | Min run of consecutive CJK-passthrough chars that triggers the fallback |
 
 ### JetStream Pipeline
 
@@ -135,6 +138,31 @@ Device selection is **not** a flag on the MinerU 3.x CLI — it is controlled by
 | `vlm-http-client` | Remote VLM over HTTP | High | Requires a separate `mineru-openai-server` (set `-u` via `MINERU_EXTRA_ARGS`) |
 | `hybrid-http-client` | Remote VLM + small local work | High | Same as above, with local pipeline assist |
 
+#### Font-encoding garble OCR fallback
+
+Some PDFs — notably Chinese GB/T standards — embed Latin text in fonts that lack
+a usable `ToUnicode` CMap. Text-layer extraction then maps those glyphs into the
+CJK Unified Ideographs block instead of ASCII, so e.g. *"intended application"*
+comes out as `犻狀狋犲狀犱犲犱犪狆狆犾犻犮犪狋犻狅狀`. The corruption is **silent**:
+the bytes are valid CJK (not `U+FFFD`), so nothing downstream flags it, and the
+default `hybrid`/`vlm` backends reproduce it because they reuse the text layer.
+
+After every `mineru` parse the service scans the result for this signature — a
+**run** of `PDF_OCR_FALLBACK_MIN_RUN` (default 4) consecutive code points in the
+passthrough block `U+72AA–U+72D6`. A run, not a count: isolated in-block
+characters (legitimate rare ideographs such as `状` U+72B6) do not trip it, but
+garbled Latin words always do. On a hit, the document is re-parsed **once** with
+the `pipeline` backend forced into OCR (`-m ocr -l <MINERU_OCR_LANG>`), which
+reads rendered pixels and recovers the Latin; the OCR result is verified clean
+before it replaces the original (`engine` becomes `mineru-pipeline-ocr`). If OCR
+fails or is still garbled, the original parse is kept and the event logged. Set
+`PDF_OCR_FALLBACK=false` to disable.
+
+> Note: MinerU nests per-run output under `<output_dir>/<pdf_stem>/<backend>_<method>/`
+> (e.g. `hybrid_auto/`, `ocr/`). The wrapper clears this directory before each run
+> and selects the content list by newest mtime, so a stale leftover dir can never
+> be returned in place of the current run's output.
+
 ### Docling-specific
 
 Docling does not currently require service-specific environment variables in this wrapper.
@@ -167,6 +195,7 @@ Docling writes a UTF-8 JSON export to:
    - `poll` mode: poll `kb.inputs` for unprocessed rows
    - `jetstream` mode: consume events from `PDF_STAGE_EVENT_SUBJECT`
 2. **Dispatch** to the appropriate backend based on `parser_name` (or `PDF_DEFAULT_PARSER`)
+   - For `mineru`, after parsing, auto-detect font-encoding garble and re-parse with pipeline OCR if needed (see [Font-encoding garble OCR fallback](#font-encoding-garble-ocr-fallback))
 3. **Track progress** by updating the `"parsing"` status entry (throttled to one DB write per 3 seconds)
 4. **On completion**, replace the `"parsing"` entry with a `"parsed"` entry (success or failure)
 5. **Write results** to `{PDF_REPO_DIR}/pdf_parser/{record_id}/`
