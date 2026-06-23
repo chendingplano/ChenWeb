@@ -110,6 +110,35 @@ type TierInfo struct {
 	AspectNames []string `json:"aspect_names"`
 }
 
+// RequestListFilter holds the optional filters for ListRequests. Empty fields
+// (or "all" for the enum-style fields) are ignored, broadening the search.
+type RequestListFilter struct {
+	RequestID     string // exact id match (parsed; ignored if not a valid int)
+	DocTitle      string // ILIKE on the document's title / file_name
+	RequesterName string // ILIKE on requester_name
+	Tier          string // exact match (empty / "all" = any)
+	Status        string // exact match (empty / "all" = any)
+	CreateStart   string // create_time >= (datetime-local / RFC3339)
+	CreateEnd     string // create_time <= (datetime-local / RFC3339)
+	Limit         int    // capped to 200; defaults to 100
+}
+
+// RequestListItem is one row of the document-review request list.
+type RequestListItem struct {
+	RequestID     int64  `json:"request_id"`
+	InputRecordID int64  `json:"input_record_id"`
+	DocTitle      string `json:"doc_title"`
+	Tier          string `json:"tier"`
+	Status        string `json:"status"`
+	RequesterName string `json:"requester_name"`
+	AspectCount   int    `json:"aspect_count"`
+	TotalFindings int    `json:"total_findings"`
+	ReportID      int64  `json:"report_id,omitempty"`
+	CreateTime    string `json:"create_time"`
+	StartTime     string `json:"start_time,omitempty"`
+	EndTime       string `json:"end_time,omitempty"`
+}
+
 // SubmitResult is the response from POST /api/v1/doc-review/requests.
 type SubmitResult struct {
 	RequestID   int64  `json:"request_id"`

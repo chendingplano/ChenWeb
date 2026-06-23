@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
@@ -499,6 +501,90 @@ func (c *DocReviewController) ListActiveJobs(ctx context.Context) ([]ActiveJob, 
 		jobs[i].Aspects = aspects
 	}
 	return jobs, nil
+}
+
+// ListRequests returns document-review requests matching the given filter,
+// newest first. Each row carries the document title (joined from kb.inputs),
+// the selected aspect count, and the latest report's id + finding count (if any).
+func (c *DocReviewController) ListRequests(ctx context.Context, f RequestListFilter) ([]RequestListItem, error) {
+	var conds []string
+	var args []any
+
+	if f.RequestID != "" {
+		if id, err := strconv.ParseInt(strings.TrimSpace(f.RequestID), 10, 64); err == nil {
+			args = append(args, id)
+			conds = append(conds, fmt.Sprintf("r.id = $%d", len(args)))
+		}
+	}
+	if t := strings.TrimSpace(f.DocTitle); t != "" {
+		args = append(args, "%"+t+"%")
+		conds = append(conds, fmt.Sprintf("(COALESCE(i.title,'') ILIKE $%d OR COALESCE(i.file_name,'') ILIKE $%d)", len(args), len(args)))
+	}
+	if rq := strings.TrimSpace(f.RequesterName); rq != "" {
+		args = append(args, "%"+rq+"%")
+		conds = append(conds, fmt.Sprintf("r.requester_name ILIKE $%d", len(args)))
+	}
+	if f.Tier != "" && f.Tier != "all" {
+		args = append(args, f.Tier)
+		conds = append(conds, fmt.Sprintf("r.tier = $%d", len(args)))
+	}
+	if f.Status != "" && f.Status != "all" {
+		args = append(args, f.Status)
+		conds = append(conds, fmt.Sprintf("r.status = $%d", len(args)))
+	}
+	if f.CreateStart != "" {
+		args = append(args, f.CreateStart)
+		conds = append(conds, fmt.Sprintf("r.create_time >= $%d::timestamptz", len(args)))
+	}
+	if f.CreateEnd != "" {
+		args = append(args, f.CreateEnd)
+		conds = append(conds, fmt.Sprintf("r.create_time <= $%d::timestamptz", len(args)))
+	}
+
+	limit := f.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	args = append(args, limit)
+	limitClause := fmt.Sprintf("LIMIT $%d", len(args))
+
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT r.id, r.input_record_id, COALESCE(i.title, i.file_name, ''), r.tier, r.status,
+		       r.requester_name, COALESCE(jsonb_array_length(r.aspects), 0),
+		       r.create_time::text, COALESCE(r.start_time::text, ''), COALESCE(r.end_time::text, ''),
+		       COALESCE((SELECT rep.id FROM kb.doc_review_reports rep WHERE rep.request_id = r.id ORDER BY rep.id DESC LIMIT 1), 0),
+		       COALESCE((SELECT rep.total_findings FROM kb.doc_review_reports rep WHERE rep.request_id = r.id ORDER BY rep.id DESC LIMIT 1), 0)
+		FROM kb.doc_review_requests r
+		LEFT JOIN kb.inputs i ON i.id = r.input_record_id
+		%s
+		ORDER BY r.create_time DESC
+		%s`, where, limitClause)
+
+	rows, err := c.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list requests: %w", err)
+	}
+	defer rows.Close()
+
+	var items []RequestListItem
+	for rows.Next() {
+		var it RequestListItem
+		if err := rows.Scan(&it.RequestID, &it.InputRecordID, &it.DocTitle, &it.Tier, &it.Status,
+			&it.RequesterName, &it.AspectCount, &it.CreateTime, &it.StartTime, &it.EndTime,
+			&it.ReportID, &it.TotalFindings); err != nil {
+			return nil, fmt.Errorf("scan request list item: %w", err)
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate request list: %w", err)
+	}
+	return items, nil
 }
 
 // loadAspectStatuses returns the kb.doc_review_status rows for a run, ordered by id.

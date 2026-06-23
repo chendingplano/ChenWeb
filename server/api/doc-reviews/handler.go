@@ -98,6 +98,31 @@ func ListActiveJobs(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "jobs": jobs})
 }
 
+// ListRequests returns document-review requests matching the query filters,
+// newest first. Drives the request list (with its Search dialog) in the GUI.
+func ListRequests(c echo.Context) error {
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	filter := RequestListFilter{
+		RequestID:     c.QueryParam("request_id"),
+		DocTitle:      c.QueryParam("title"),
+		RequesterName: c.QueryParam("requester"),
+		Tier:          c.QueryParam("tier"),
+		Status:        c.QueryParam("status"),
+		CreateStart:   c.QueryParam("create_start"),
+		CreateEnd:     c.QueryParam("create_end"),
+		Limit:         limit,
+	}
+	ctrl := NewDocReviewController()
+	items, err := ctrl.ListRequests(c.Request().Context(), filter)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	if items == nil {
+		items = []RequestListItem{}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "requests": items})
+}
+
 func parseID(c echo.Context, name string) (int64, error) {
 	return strconv.ParseInt(c.Param(name), 10, 64)
 }

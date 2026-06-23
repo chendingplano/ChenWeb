@@ -162,16 +162,6 @@ export async function stopRequest(id: number): Promise<void> {
 
 // ── DR15: live job monitor ───────────────────────────────────────────────────
 
-export type AspectStatus = {
-	aspect: string;
-	pass?: string;
-	status: 'pending' | 'running' | 'success' | 'failed';
-	finding_count: number;
-	error_message?: string;
-	start_time?: string;
-	end_time?: string;
-};
-
 export type ActiveJob = {
 	request_id: number;
 	input_record_id: number;
@@ -191,4 +181,50 @@ export async function listActiveJobs(): Promise<ActiveJob[]> {
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to load active jobs');
 	return data.jobs || [];
+}
+
+// ── Request list + search ─────────────────────────────────────────────────────
+
+export type RequestListItem = {
+	request_id: number;
+	input_record_id: number;
+	doc_title: string;
+	tier: string;
+	status: string;
+	requester_name: string;
+	aspect_count: number;
+	total_findings: number;
+	report_id?: number;
+	create_time: string;
+	start_time?: string;
+	end_time?: string;
+};
+
+export type RequestListFilter = {
+	requestId?: string;
+	title?: string;
+	requester?: string;
+	tier?: string;
+	status?: string;
+	createStart?: string;
+	createEnd?: string;
+	limit?: number;
+};
+
+// Lists all document-review requests matching the filter (newest first).
+export async function listRequests(filter: RequestListFilter = {}): Promise<RequestListItem[]> {
+	const params = new URLSearchParams();
+	if (filter.requestId) params.set('request_id', filter.requestId.trim());
+	if (filter.title) params.set('title', filter.title.trim());
+	if (filter.requester) params.set('requester', filter.requester.trim());
+	if (filter.tier && filter.tier !== 'all') params.set('tier', filter.tier);
+	if (filter.status && filter.status !== 'all') params.set('status', filter.status);
+	if (filter.createStart) params.set('create_start', filter.createStart);
+	if (filter.createEnd) params.set('create_end', filter.createEnd);
+	if (filter.limit) params.set('limit', String(filter.limit));
+	const qs = params.toString();
+	const res = await fetch(`${BASE}/requests${qs ? `?${qs}` : ''}`, { credentials: 'same-origin' });
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to load requests');
+	return data.requests || [];
 }

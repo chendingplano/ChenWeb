@@ -25,3 +25,5 @@ web/build
 ChenWeb/server/api/webbuild
 ChenWeb/shared/svelte/dist
 ChenWeb/web/build
+ChenWeb/deepdoc
+ChenWeb/doc-processor

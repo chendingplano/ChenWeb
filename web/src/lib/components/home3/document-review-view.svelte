@@ -1,13 +1,14 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { listAspects, listTiers, submitRequest } from '$lib/services/docReviewService';
-    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc } from '$lib/services/docReviewService';
+    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, RequestListItem } from '$lib/services/docReviewService';
     import { uploadKbInputs, listKnowledgeStores } from '$lib/services/kbService';
     import type { KbInputRecord, KnowledgeStoreRecord } from '$lib/services/kbService';
     import { knowledgeStoreState } from './knowledge-store-state.svelte';
     import KbInputSearchDialog from './kb-input-search-dialog.svelte';
     import DocReviewResultsView from './doc-review-results-view.svelte';
     import DocReviewMonitor from './doc-review-monitor.svelte';
+    import DocReviewRequestsList from './doc-review-requests-list.svelte';
     import { appAuthStore } from '@chendingplano/shared';
     import SearchIcon from '@lucide/svelte/icons/search';
     import CheckIcon from '@lucide/svelte/icons/check';
@@ -55,6 +56,12 @@
     let isSubmitting = $state(false);
     let reportTemplate = $state('');
     let docTemplate = $state('');
+    // Bumped after a successful submit so the requests list reloads when shown.
+    let requestsRefreshKey = $state(0);
+    // Held here (not in the list component) so the displayed list + Search
+    // selection survive while the results "View" window replaces the form.
+    let requestsList = $state<RequestListItem[]>([]);
+    let requestsShowingSelection = $state(false);
 
     // Step 1 input mode: pick an existing document or upload a new one
     let inputMode = $state<'search' | 'upload'>('search');
@@ -340,6 +347,10 @@
                 doc_template: docTemplate || undefined,
             });
             viewingRequestId = result.request_id;
+            // A new submission resets any Search selection so the refreshed full
+            // list (now including this request) is what shows on return.
+            requestsShowingSelection = false;
+            requestsRefreshKey += 1;
         } catch (e: any) {
             submitError = e.message || 'Submission failed';
         } finally {
@@ -687,6 +698,17 @@
                 </button>
             </div>
         {/if}
+
+        <!-- All document review requests, with a Search dialog -->
+        <div style="margin-top: 2rem;">
+            <DocReviewRequestsList
+                {darkMode}
+                refreshKey={requestsRefreshKey}
+                bind:requests={requestsList}
+                bind:showingSelection={requestsShowingSelection}
+                onView={(id) => { viewingRequestId = id; }}
+            />
+        </div>
     </div>
 {/if}
 
