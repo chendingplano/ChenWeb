@@ -316,15 +316,25 @@ func typStr(s string) string {
 }
 
 // typContentLine escapes one line of text for use inside a Typst content block.
-// Backslash is escaped first to prevent double-escaping.
+// Backslash is escaped first to prevent double-escaping. Every Typst markup
+// metacharacter must be escaped, including the paired emphasis/raw delimiters
+// (`*`, `_`, `` ` ``): an odd, unbalanced count of these in finding text (e.g.
+// `0.*` / `1.*` wildcard ranges) otherwise opens a delimiter Typst never closes,
+// failing compilation with "unclosed delimiter".
 func typContentLine(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `$`, `\$`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `[`, `\[`)
 	s = strings.ReplaceAll(s, `]`, `\]`)
 	s = strings.ReplaceAll(s, `#`, `\#`)
 	s = strings.ReplaceAll(s, `@`, `\@`)
 	s = strings.ReplaceAll(s, `<`, `\<`)
 	s = strings.ReplaceAll(s, `>`, `\>`)
+	s = strings.ReplaceAll(s, `*`, `\*`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	s = strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, `~`, `\~`)
 	return s
 }
 

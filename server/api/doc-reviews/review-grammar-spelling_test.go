@@ -1,4 +1,4 @@
-package docprocessing
+package docreviews
 
 import (
 	"context"

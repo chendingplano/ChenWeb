@@ -1,4 +1,4 @@
-package docprocessing
+package docreviews
 
 import (
 	"context"
@@ -6,14 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 )
 
 // ReviewFinding is a single issue or observation from a document review pass.
@@ -47,11 +47,11 @@ const DefaultInputBlockSize = 20
 // pageBlock holds one page-aligned segment of lines for document-level
 // reviewers that split large documents into blocks.
 type pageBlock struct {
-	inputJSON string           // lines JSON wrapped with doc_context
-	pageStart int              // first page in this block
-	pageEnd   int              // last page in this block
-	lineStart int              // first line number in this block
-	lineEnd   int              // last line number in this block
+	inputJSON string // lines JSON wrapped with doc_context
+	pageStart int    // first page in this block
+	pageEnd   int    // last page in this block
+	lineStart int    // first line number in this block
+	lineEnd   int    // last line number in this block
 }
 
 // buildPageBlocks splits lines into page-aligned blocks of up to blockSize
@@ -194,15 +194,21 @@ type ReviewProcessor struct {
 	Now           func() time.Time
 
 	// Reviewer configurations (loaded in constructor).
-	GrammarModelCfg   structureModelConfig
 	GrammarModelName  string
 	GrammarPromptRef  string
 	GrammarPromptText string
 
-	ToneVoiceModelCfg   structureModelConfig
 	ToneVoiceModelName  string
 	ToneVoicePromptRef  string
 	ToneVoicePromptText string
+
+	FormattingModelName  string
+	FormattingPromptRef  string
+	FormattingPromptText string
+
+	ReadabilityModelName  string
+	ReadabilityPromptRef  string
+	ReadabilityPromptText string
 
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
@@ -211,16 +217,77 @@ type ReviewProcessor struct {
 	// assigns the run id at request-accept time and passes it in here).
 	ReviewRunID string
 
-	// GrammarClient is a properly-configured LLM client for the grammar reviewer,
-	// built from GrammarModelCfg at construction time.
+	// GrammarClient is a properly-configured LLM client for the grammar reviewer.
 	GrammarClient LLMJSONExtractor
 
 	// ToneVoiceClient is a properly-configured LLM client for the tone_voice reviewer.
 	ToneVoiceClient LLMJSONExtractor
+
+	// FormattingClient is a properly-configured LLM client for the
+	// formatting_consistency reviewer.
+	FormattingClient LLMJSONExtractor
+
+	// ReadabilityClient is a properly-configured LLM client for the
+	// readability reviewer.
+	ReadabilityClient LLMJSONExtractor
+}
+
+// resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
+// doc-review.local.toml (DR3 per-aspect config). The config file is the sole
+// source of truth; an absent file, missing aspect block, explicitly-disabled
+// aspect, or missing prompt/model leaves the reviewer disabled (ok=false).
+func resolveReviewerRuntime(logger ApiTypes.JimoLogger, aspect, group string) (
+	client LLMJSONExtractor, modelName, promptText, promptRef string, ok bool,
+) {
+	cfg, err := GetDocReviewConfig()
+	switch {
+	case err != nil:
+		logger.Warn("doc-review config load failed; reviewer disabled", "aspect", aspect, "error", err)
+		return nil, "", "", "", false
+	case cfg == nil:
+		logger.Info("doc-review config file not found; reviewer disabled", "aspect", aspect)
+		return nil, "", "", "", false
+	}
+
+	resolved := cfg.ResolveReviewer(aspect, group)
+	switch {
+	case !resolved.Found:
+		logger.Info("reviewer not configured in doc-review config; disabled", "aspect", aspect)
+		return nil, "", "", "", false
+	case !resolved.Enabled:
+		logger.Info("reviewer disabled by doc-review config", "aspect", aspect)
+		return nil, "", "", "", false
+	}
+
+	if resolved.PromptRef == "" {
+		logger.Warn("reviewer prompt not set in doc-review config; disabled", "aspect", aspect)
+		return nil, "", "", "", false
+	}
+	promptText, promptRef, _, err = loadPromptByRef(resolved.PromptRef)
+	if err != nil {
+		logger.Warn("reviewer prompt unavailable; disabled", "aspect", aspect, "error", err)
+		return nil, "", "", "", false
+	}
+
+	if resolved.ModelRef == "" {
+		logger.Warn("reviewer model not set in doc-review config; disabled", "aspect", aspect)
+		return nil, "", "", "", false
+	}
+	client, modelName, err = docprocessing.BuildReviewerLLMClient(resolved.ModelRef)
+	if err != nil {
+		logger.Warn("reviewer model/client unavailable; disabled", "aspect", aspect, "error", err)
+		return nil, "", "", "", false
+	}
+
+	logger.Info("reviewer configured from doc-review config",
+		"aspect", aspect, "model_ref", resolved.ModelRef, "prompt_ref", resolved.PromptRef,
+		"enabled", resolved.Enabled, "max_tool_turns", resolved.MaxToolTurns)
+	return client, modelName, promptText, promptRef, true
 }
 
 // NewReviewProcessor creates a ReviewProcessor.
-// Phase I loads the grammar_spelling and tone_voice reviewer configs.
+// Phase I loads the grammar_spelling, tone_voice, and formatting_consistency
+// reviewer configs.
 func NewReviewProcessor(
 	inputStore DocMetadataStore,
 	entityStore EntityRelationStore,
@@ -230,185 +297,39 @@ func NewReviewProcessor(
 ) *ReviewProcessor {
 	logger := loggerutil.CreateDefaultLogger("MID_26061801")
 
-	// Resolve the grammar reviewer's prompt + model from doc-review.local.toml
-	// (DR3 per-aspect config). The config file is the sole source of truth;
-	// there is no env-var fallback. An absent file, missing aspect block, or
-	// explicitly-disabled aspect leaves the reviewer disabled.
-	var (
-		grammarPromptText string
-		grammarPromptRef  string
-		grammarModelCfg   structureModelConfig
-		grammarPromptErr  error
-		grammarModelErr   error
-	)
-
-	reviewCfg, reviewCfgErr := GetDocReviewConfig()
-	switch {
-	case reviewCfgErr != nil:
-		logger.Warn("doc-review config load failed; grammar_spelling reviewer disabled",
-			"error", reviewCfgErr)
-		grammarPromptErr = reviewCfgErr
-	case reviewCfg == nil:
-		logger.Info("doc-review config file not found; grammar_spelling reviewer disabled")
-		grammarPromptErr = fmt.Errorf("doc-review.local.toml not found")
-	default:
-		resolved := reviewCfg.ResolveReviewer("grammar_spelling", "P1")
-		switch {
-		case !resolved.Found:
-			logger.Info("grammar_spelling not configured in doc-review config; reviewer disabled")
-			grammarPromptErr = fmt.Errorf("grammar_spelling: aspect not found in doc-review config")
-		case !resolved.Enabled:
-			logger.Info("grammar_spelling disabled by doc-review config")
-			grammarPromptErr = fmt.Errorf("grammar_spelling: disabled by config")
-		default:
-			if resolved.PromptRef == "" {
-				grammarPromptErr = fmt.Errorf("grammar_spelling: prompt not set in doc-review config")
-			} else {
-				grammarPromptText, grammarPromptRef, _, grammarPromptErr = loadPromptByRef(resolved.PromptRef)
-			}
-			if resolved.ModelRef == "" {
-				grammarModelErr = fmt.Errorf("grammar_spelling: model not set in doc-review config")
-			} else {
-				_, _, grammarModelCfg, grammarModelErr = loadModelConfigByRef(resolved.ModelRef, "MODEL_DEF_FILE")
-			}
-			if grammarPromptErr == nil && grammarModelErr == nil {
-				logger.Info("grammar_spelling configured from doc-review config",
-					"model_ref", resolved.ModelRef, "prompt_ref", resolved.PromptRef,
-					"enabled", resolved.Enabled, "max_tool_turns", resolved.MaxToolTurns)
-			}
-		}
-	}
-
-	if grammarPromptErr != nil {
-		logger.Warn("grammar review prompt unavailable; grammar_spelling reviewer disabled",
-			"error", grammarPromptErr)
-	}
-	if grammarModelErr != nil {
-		logger.Warn("grammar review model config unavailable; grammar_spelling reviewer disabled",
-			"error", grammarModelErr)
-	}
-
-	var grammarClient LLMJSONExtractor
-	if grammarPromptErr == nil && grammarModelErr == nil {
-		timeoutSec := grammarModelCfg.TimeoutSec
-		if timeoutSec <= 0 {
-			timeoutSec = 100
-		}
-		c, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
-			ModelName:    grammarModelCfg.ModelName,
-			APIKey:       grammarModelCfg.APIKey,
-			BaseURL:      grammarModelCfg.BaseURL,
-			ThinkingType: grammarModelCfg.ThinkingType,
-			TimeoutSec:   timeoutSec,
-		}, nil)
-		if err == nil {
-			c.HTTPClient = &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
-		}
-		if err != nil {
-			logger.Warn("failed to create grammar LLM client; grammar_spelling reviewer disabled", "error", err)
-			grammarPromptErr = err
-		} else {
-			grammarClient = c
-		}
-	}
-
-	// ── Resolve tone_voice reviewer config ──────────────────────────────────────
-	var (
-		toneVoicePromptText string
-		toneVoicePromptRef  string
-		toneVoiceModelCfg   structureModelConfig
-		toneVoicePromptErr  error
-		toneVoiceModelErr   error
-	)
-
-	toneReviewCfg, toneReviewCfgErr := GetDocReviewConfig()
-	switch {
-	case toneReviewCfgErr != nil:
-		logger.Warn("doc-review config load failed; tone_voice reviewer disabled",
-			"error", toneReviewCfgErr)
-		toneVoicePromptErr = toneReviewCfgErr
-	case toneReviewCfg == nil:
-		logger.Info("doc-review config file not found; tone_voice reviewer disabled")
-		toneVoicePromptErr = fmt.Errorf("doc-review.local.toml not found")
-	default:
-		resolved := toneReviewCfg.ResolveReviewer("tone_voice", "P1")
-		switch {
-		case !resolved.Found:
-			logger.Info("tone_voice not configured in doc-review config; reviewer disabled")
-			toneVoicePromptErr = fmt.Errorf("tone_voice: aspect not found in doc-review config")
-		case !resolved.Enabled:
-			logger.Info("tone_voice disabled by doc-review config")
-			toneVoicePromptErr = fmt.Errorf("tone_voice: disabled by config")
-		default:
-			if resolved.PromptRef == "" {
-				toneVoicePromptErr = fmt.Errorf("tone_voice: prompt not set in doc-review config")
-			} else {
-				toneVoicePromptText, toneVoicePromptRef, _, toneVoicePromptErr = loadPromptByRef(resolved.PromptRef)
-			}
-			if resolved.ModelRef == "" {
-				toneVoiceModelErr = fmt.Errorf("tone_voice: model not set in doc-review config")
-			} else {
-				_, _, toneVoiceModelCfg, toneVoiceModelErr = loadModelConfigByRef(resolved.ModelRef, "MODEL_DEF_FILE")
-			}
-			if toneVoicePromptErr == nil && toneVoiceModelErr == nil {
-				logger.Info("tone_voice configured from doc-review config",
-					"model_ref", resolved.ModelRef, "prompt_ref", resolved.PromptRef,
-					"enabled", resolved.Enabled, "max_tool_turns", resolved.MaxToolTurns)
-			}
-		}
-	}
-
-	if toneVoicePromptErr != nil {
-		logger.Warn("tone_voice review prompt unavailable; tone_voice reviewer disabled",
-			"error", toneVoicePromptErr)
-	}
-	if toneVoiceModelErr != nil {
-		logger.Warn("tone_voice review model config unavailable; tone_voice reviewer disabled",
-			"error", toneVoiceModelErr)
-	}
-
-	var toneVoiceClient LLMJSONExtractor
-	if toneVoicePromptErr == nil && toneVoiceModelErr == nil {
-		timeoutSec := toneVoiceModelCfg.TimeoutSec
-		if timeoutSec <= 0 {
-			timeoutSec = 100
-		}
-		c, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
-			ModelName:    toneVoiceModelCfg.ModelName,
-			APIKey:       toneVoiceModelCfg.APIKey,
-			BaseURL:      toneVoiceModelCfg.BaseURL,
-			ThinkingType: toneVoiceModelCfg.ThinkingType,
-			TimeoutSec:   timeoutSec,
-		}, nil)
-		if err == nil {
-			c.HTTPClient = &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
-		}
-		if err != nil {
-			logger.Warn("failed to create tone_voice LLM client; tone_voice reviewer disabled", "error", err)
-			toneVoicePromptErr = err
-		} else {
-			toneVoiceClient = c
-		}
-	}
+	grammarClient, grammarModel, grammarPrompt, grammarRef, _ := resolveReviewerRuntime(logger, "grammar_spelling", "P1")
+	toneClient, toneModel, tonePrompt, toneRef, _ := resolveReviewerRuntime(logger, "tone_voice", "P1")
+	formattingClient, formattingModel, formattingPrompt, formattingRef, _ := resolveReviewerRuntime(logger, "formatting_consistency", "P1")
+	readabilityClient, readabilityModel, readabilityPrompt, readabilityRef, _ := resolveReviewerRuntime(logger, "readability", "P1")
 
 	return &ReviewProcessor{
-		InputStore:         inputStore,
-		EntityStore:        entityStore,
-		FindingsStore:      findingsStore,
-		Client:             extractor,
-		GrammarClient:      grammarClient,
-		ToneVoiceClient:    toneVoiceClient,
-		Logger:             logger,
-		Now:                time.Now,
-		MaxConcurrent:      envInt("REVIEW_MAX_TASKS", 1, 1),
-		GrammarModelCfg:    grammarModelCfg,
-		GrammarModelName:   grammarModelCfg.ModelName,
-		GrammarPromptRef:   grammarPromptRef,
-		GrammarPromptText:  grammarPromptText,
-		ToneVoiceModelCfg:  toneVoiceModelCfg,
-		ToneVoiceModelName: toneVoiceModelCfg.ModelName,
-		ToneVoicePromptRef: toneVoicePromptRef,
-		ToneVoicePromptText: toneVoicePromptText,
+		InputStore:    inputStore,
+		EntityStore:   entityStore,
+		FindingsStore: findingsStore,
+		Client:        extractor,
+		Logger:        logger,
+		Now:           time.Now,
+		MaxConcurrent: envInt("REVIEW_MAX_TASKS", 1, 1),
+
+		GrammarClient:     grammarClient,
+		GrammarModelName:  grammarModel,
+		GrammarPromptRef:  grammarRef,
+		GrammarPromptText: grammarPrompt,
+
+		ToneVoiceClient:     toneClient,
+		ToneVoiceModelName:  toneModel,
+		ToneVoicePromptRef:  toneRef,
+		ToneVoicePromptText: tonePrompt,
+
+		FormattingClient:     formattingClient,
+		FormattingModelName:  formattingModel,
+		FormattingPromptRef:  formattingRef,
+		FormattingPromptText: formattingPrompt,
+
+		ReadabilityClient:     readabilityClient,
+		ReadabilityModelName:  readabilityModel,
+		ReadabilityPromptRef:  readabilityRef,
+		ReadabilityPromptText: readabilityPrompt,
 	}
 }
 
@@ -568,6 +489,40 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.ToneVoiceModelName,
 				PromptText: p.ToneVoicePromptText,
 				PromptRef:  p.ToneVoicePromptRef,
+			},
+		})
+	}
+
+	if p.FormattingClient != nil && p.FormattingPromptText != "" && p.FormattingModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &formattingConsistencyReviewer{
+				client:     p.FormattingClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.FormattingModelName,
+				PromptText: p.FormattingPromptText,
+				PromptRef:  p.FormattingPromptRef,
+			},
+		})
+	}
+
+	if p.ReadabilityClient != nil && p.ReadabilityPromptText != "" && p.ReadabilityModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &readabilityReviewer{
+				client:     p.ReadabilityClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.ReadabilityModelName,
+				PromptText: p.ReadabilityPromptText,
+				PromptRef:  p.ReadabilityPromptRef,
 			},
 		})
 	}

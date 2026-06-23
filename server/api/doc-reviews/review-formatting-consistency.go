@@ -1,4 +1,4 @@
-package docprocessing
+package docreviews
 
 import (
 	"context"
@@ -9,20 +9,22 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
-// toneVoiceReviewer evaluates tone, voice, and register consistency throughout a document.
+// formattingConsistencyReviewer checks that surface formatting conventions
+// (headings, lists, numbering, capitalization, units, code/inline styling,
+// punctuation patterns) are applied consistently across the document.
 // P1, StrategyChunk, one-shot (no tool use). Uses a cheap model.
-type toneVoiceReviewer struct {
+type formattingConsistencyReviewer struct {
 	client     LLMJSONExtractor
 	logger     ApiTypes.JimoLogger
 	chunkStore SQLStore // for loading chunks
 	maxTasks   int
 }
 
-func (r *toneVoiceReviewer) Name() string             { return "tone_voice" }
-func (r *toneVoiceReviewer) Group() string            { return "P1" }
-func (r *toneVoiceReviewer) Strategy() ReviewStrategy { return StrategyChunk }
+func (r *formattingConsistencyReviewer) Name() string             { return "formatting_consistency" }
+func (r *formattingConsistencyReviewer) Group() string            { return "P1" }
+func (r *formattingConsistencyReviewer) Strategy() ReviewStrategy { return StrategyChunk }
 
-func (r *toneVoiceReviewer) ReviewDocument(
+func (r *formattingConsistencyReviewer) ReviewDocument(
 	ctx context.Context,
 	recordID int64,
 	cfg ReviewerConfig,
@@ -30,7 +32,7 @@ func (r *toneVoiceReviewer) ReviewDocument(
 	// Load the record to locate the line file.
 	rec, err := (&DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}).GetInputRecord(ctx, recordID)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26062301) load record %d: %w", recordID, err)
+		return nil, fmt.Errorf("(MID_26062305) load record %d: %w", recordID, err)
 	}
 
 	// Resolve line file path.
@@ -41,21 +43,21 @@ func (r *toneVoiceReviewer) ReviewDocument(
 		rec.StagingFilename,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26062302) resolve line file for record %d: %w", recordID, err)
+		return nil, fmt.Errorf("(MID_26062306) resolve line file for record %d: %w", recordID, err)
 	}
 
 	body, err := os.ReadFile(lineFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26062303) read line file %s: %w", lineFilePath, err)
+		return nil, fmt.Errorf("(MID_26062307) read line file %s: %w", lineFilePath, err)
 	}
 
 	lines, err := ParseInputLinesIncludingTOC(body)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26062304) parse line file for record %d: %w", recordID, err)
+		return nil, fmt.Errorf("(MID_26062308) parse line file for record %d: %w", recordID, err)
 	}
 
 	if len(lines) == 0 {
-		r.logger.Info("tone_voice review skipped: no lines", "record_id", recordID)
+		r.logger.Info("formatting_consistency review skipped: no lines", "record_id", recordID)
 		return nil, nil
 	}
 
@@ -63,10 +65,11 @@ func (r *toneVoiceReviewer) ReviewDocument(
 	docCtx := buildDocContextLine(rec)
 
 	// Split lines into windows for the LLM. Use a window of 200 lines per call —
-	// tone/voice evaluation benefits from a wider context window to detect shifts
-	// across paragraphs, while staying small enough for one-shot processing.
+	// formatting-consistency detection benefits from a wider context window so the
+	// reviewer can compare how the same construct (headings, lists, units, etc.)
+	// is rendered in different places, while staying small enough for one-shot.
 	const windowSize = 200
-	windows := buildToneVoiceWindows(lines, docCtx, windowSize)
+	windows := buildFormattingConsistencyWindows(lines, docCtx, windowSize)
 
 	if len(windows) == 0 {
 		return nil, nil
@@ -94,18 +97,18 @@ func (r *toneVoiceReviewer) ReviewDocument(
 	return allFindings, nil
 }
 
-// toneVoiceWindow holds the lines JSON and page range for one LLM call.
-type toneVoiceWindow struct {
+// formattingConsistencyWindow holds the lines JSON and line range for one LLM call.
+type formattingConsistencyWindow struct {
 	inputJSON string
 	startLine int
 	endLine   int
 }
 
-// buildToneVoiceWindows splits lines into fixed-size windows, wrapping each in
-// the doc_context envelope. A larger window (200 lines) helps the LLM detect
-// tone/voice shifts across paragraph boundaries.
-func buildToneVoiceWindows(lines []Line, docCtx string, size int) []toneVoiceWindow {
-	var windows []toneVoiceWindow
+// buildFormattingConsistencyWindows splits lines into fixed-size windows, wrapping
+// each in the doc_context envelope. A larger window (200 lines) helps the LLM detect
+// formatting inconsistencies across section boundaries.
+func buildFormattingConsistencyWindows(lines []Line, docCtx string, size int) []formattingConsistencyWindow {
+	var windows []formattingConsistencyWindow
 	for i := 0; i < len(lines); i += size {
 		end := i + size
 		if end > len(lines) {
@@ -118,7 +121,7 @@ func buildToneVoiceWindows(lines []Line, docCtx string, size int) []toneVoiceWin
 		startLine := slice[0].LineNo
 		endLine := slice[len(slice)-1].LineNo
 
-		windows = append(windows, toneVoiceWindow{
+		windows = append(windows, formattingConsistencyWindow{
 			inputJSON: jsonText,
 			startLine: startLine,
 			endLine:   endLine,
@@ -127,14 +130,14 @@ func buildToneVoiceWindows(lines []Line, docCtx string, size int) []toneVoiceWin
 	return windows
 }
 
-func (r *toneVoiceReviewer) processWindow(
+func (r *formattingConsistencyReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,
 	index int,
 	cfg ReviewerConfig,
-	w toneVoiceWindow,
+	w formattingConsistencyWindow,
 ) []ReviewFinding {
-	r.logger.Info("tone_voice review window start",
+	r.logger.Info("formatting_consistency review window start",
 		"record_id", recordID,
 		"window", index,
 		"lines", fmt.Sprintf("%d-%d", w.startLine, w.endLine),
@@ -142,9 +145,9 @@ func (r *toneVoiceReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_tone_voice", "MID-CWB-REVIEW-TONE-VOICE"))
+	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_formatting_consistency", "MID-CWB-REVIEW-FORMATTING-CONSISTENCY"))
 	if err != nil {
-		r.logger.Warn("tone_voice review window failed; skipping",
+		r.logger.Warn("formatting_consistency review window failed; skipping",
 			"record_id", recordID,
 			"window", index,
 			"error", err,
@@ -155,9 +158,9 @@ func (r *toneVoiceReviewer) processWindow(
 	findings := normalizeFindingsJSON(payload)
 	for i := range findings {
 		findings[i].Pass = "P1"
-		findings[i].Aspect = "tone_voice"
+		findings[i].Aspect = "formatting_consistency"
 		if findings[i].FindingType == "" {
-			findings[i].FindingType = "tone_shift"
+			findings[i].FindingType = "inconsistency"
 		}
 		if findings[i].Severity == "" {
 			findings[i].Severity = "low"
@@ -168,7 +171,7 @@ func (r *toneVoiceReviewer) processWindow(
 		}
 	}
 
-	r.logger.Info("tone_voice review window end ",
+	r.logger.Info("formatting_consistency review window end ",
 		"record_id", recordID,
 		"window", index,
 		"findings", len(findings),

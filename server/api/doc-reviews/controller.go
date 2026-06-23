@@ -154,9 +154,9 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 	}
 	inputStore := docprocessing.DocMetadataSQLStore{DB: c.DB}
 	entityStore := docprocessing.EntityRelationSQLStore{DB: c.DB}
-	findingsStore := docprocessing.ReviewFindingsSQLStore{DB: c.DB}
+	findingsStore := ReviewFindingsSQLStore{DB: c.DB}
 
-	processor := docprocessing.NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
+	processor := NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
 	processor.ReviewRunID = reviewRunID
 	err = processor.PostProcessIndex(ctx, req.InputRecordID)
 	if err != nil {

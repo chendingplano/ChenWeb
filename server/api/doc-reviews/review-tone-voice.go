@@ -1,4 +1,4 @@
-package docprocessing
+package docreviews
 
 import (
 	"context"
@@ -9,20 +9,20 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
-// grammarSpellingReviewer checks grammar, spelling, and basic language quality.
+// toneVoiceReviewer evaluates tone, voice, and register consistency throughout a document.
 // P1, StrategyChunk, one-shot (no tool use). Uses a cheap model.
-type grammarSpellingReviewer struct {
+type toneVoiceReviewer struct {
 	client     LLMJSONExtractor
 	logger     ApiTypes.JimoLogger
 	chunkStore SQLStore // for loading chunks
 	maxTasks   int
 }
 
-func (r *grammarSpellingReviewer) Name() string             { return "grammar_spelling" }
-func (r *grammarSpellingReviewer) Group() string            { return "P1" }
-func (r *grammarSpellingReviewer) Strategy() ReviewStrategy { return StrategyChunk }
+func (r *toneVoiceReviewer) Name() string             { return "tone_voice" }
+func (r *toneVoiceReviewer) Group() string            { return "P1" }
+func (r *toneVoiceReviewer) Strategy() ReviewStrategy { return StrategyChunk }
 
-func (r *grammarSpellingReviewer) ReviewDocument(
+func (r *toneVoiceReviewer) ReviewDocument(
 	ctx context.Context,
 	recordID int64,
 	cfg ReviewerConfig,
@@ -30,10 +30,10 @@ func (r *grammarSpellingReviewer) ReviewDocument(
 	// Load the record to locate the line file.
 	rec, err := (&DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}).GetInputRecord(ctx, recordID)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26061805) load record %d: %w", recordID, err)
+		return nil, fmt.Errorf("(MID_26062301) load record %d: %w", recordID, err)
 	}
 
-	// Resolve line file path. Use empty event but record fields.
+	// Resolve line file path.
 	lineFilePath, err := ResolveInputFilePath(
 		LineFileGeneratedEvent{RecordID: recordID},
 		rec.ResultFilename,
@@ -41,31 +41,32 @@ func (r *grammarSpellingReviewer) ReviewDocument(
 		rec.StagingFilename,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26061806) resolve line file for record %d: %w", recordID, err)
+		return nil, fmt.Errorf("(MID_26062302) resolve line file for record %d: %w", recordID, err)
 	}
 
 	body, err := os.ReadFile(lineFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26061807) read line file %s: %w", lineFilePath, err)
+		return nil, fmt.Errorf("(MID_26062303) read line file %s: %w", lineFilePath, err)
 	}
 
 	lines, err := ParseInputLinesIncludingTOC(body)
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26061808) parse line file for record %d: %w", recordID, err)
+		return nil, fmt.Errorf("(MID_26062304) parse line file for record %d: %w", recordID, err)
 	}
 
 	if len(lines) == 0 {
-		r.logger.Info("grammar review skipped: no lines", "record_id", recordID)
+		r.logger.Info("tone_voice review skipped: no lines", "record_id", recordID)
 		return nil, nil
 	}
 
 	// Build document context for the envelope.
 	docCtx := buildDocContextLine(rec)
 
-	// Split lines into windows for the LLM. Use a fixed window of 100 lines
-	// per call — grammar checks are local and cheap.
-	const windowSize = 100
-	windows := buildGrammarWindows(lines, docCtx, windowSize)
+	// Split lines into windows for the LLM. Use a window of 200 lines per call —
+	// tone/voice evaluation benefits from a wider context window to detect shifts
+	// across paragraphs, while staying small enough for one-shot processing.
+	const windowSize = 200
+	windows := buildToneVoiceWindows(lines, docCtx, windowSize)
 
 	if len(windows) == 0 {
 		return nil, nil
@@ -93,17 +94,18 @@ func (r *grammarSpellingReviewer) ReviewDocument(
 	return allFindings, nil
 }
 
-// grammarWindow holds the lines JSON and page range for one LLM call.
-type grammarWindow struct {
+// toneVoiceWindow holds the lines JSON and page range for one LLM call.
+type toneVoiceWindow struct {
 	inputJSON string
 	startLine int
 	endLine   int
 }
 
-// buildGrammarWindows splits lines into fixed-size windows, wrapping each in
-// the doc_context envelope.
-func buildGrammarWindows(lines []Line, docCtx string, size int) []grammarWindow {
-	var windows []grammarWindow
+// buildToneVoiceWindows splits lines into fixed-size windows, wrapping each in
+// the doc_context envelope. A larger window (200 lines) helps the LLM detect
+// tone/voice shifts across paragraph boundaries.
+func buildToneVoiceWindows(lines []Line, docCtx string, size int) []toneVoiceWindow {
+	var windows []toneVoiceWindow
 	for i := 0; i < len(lines); i += size {
 		end := i + size
 		if end > len(lines) {
@@ -116,7 +118,7 @@ func buildGrammarWindows(lines []Line, docCtx string, size int) []grammarWindow 
 		startLine := slice[0].LineNo
 		endLine := slice[len(slice)-1].LineNo
 
-		windows = append(windows, grammarWindow{
+		windows = append(windows, toneVoiceWindow{
 			inputJSON: jsonText,
 			startLine: startLine,
 			endLine:   endLine,
@@ -125,14 +127,14 @@ func buildGrammarWindows(lines []Line, docCtx string, size int) []grammarWindow 
 	return windows
 }
 
-func (r *grammarSpellingReviewer) processWindow(
+func (r *toneVoiceReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,
 	index int,
 	cfg ReviewerConfig,
-	w grammarWindow,
+	w toneVoiceWindow,
 ) []ReviewFinding {
-	r.logger.Info("grammar review window start",
+	r.logger.Info("tone_voice review window start",
 		"record_id", recordID,
 		"window", index,
 		"lines", fmt.Sprintf("%d-%d", w.startLine, w.endLine),
@@ -140,9 +142,9 @@ func (r *grammarSpellingReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_grammar_spelling", "MID-CWB-REVIEW-GRAMMAR"))
+	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_tone_voice", "MID-CWB-REVIEW-TONE-VOICE"))
 	if err != nil {
-		r.logger.Warn("grammar review window failed; skipping",
+		r.logger.Warn("tone_voice review window failed; skipping",
 			"record_id", recordID,
 			"window", index,
 			"error", err,
@@ -153,9 +155,9 @@ func (r *grammarSpellingReviewer) processWindow(
 	findings := normalizeFindingsJSON(payload)
 	for i := range findings {
 		findings[i].Pass = "P1"
-		findings[i].Aspect = "grammar_spelling"
+		findings[i].Aspect = "tone_voice"
 		if findings[i].FindingType == "" {
-			findings[i].FindingType = "issue"
+			findings[i].FindingType = "tone_shift"
 		}
 		if findings[i].Severity == "" {
 			findings[i].Severity = "low"
@@ -166,7 +168,7 @@ func (r *grammarSpellingReviewer) processWindow(
 		}
 	}
 
-	r.logger.Info("grammar review window end ",
+	r.logger.Info("tone_voice review window end ",
 		"record_id", recordID,
 		"window", index,
 		"findings", len(findings),
