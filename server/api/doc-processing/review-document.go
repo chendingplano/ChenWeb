@@ -39,6 +39,62 @@ const (
 	StrategyDocument                       // single document-level call
 )
 
+// DefaultInputBlockSize is the default number of pages per block when a
+// StrategyDocument reviewer needs to break up a document that is too large
+// for a single LLM call. Configurable via InputBlockSize in ReviewerConfig.
+const DefaultInputBlockSize = 20
+
+// pageBlock holds one page-aligned segment of lines for document-level
+// reviewers that split large documents into blocks.
+type pageBlock struct {
+	inputJSON string           // lines JSON wrapped with doc_context
+	pageStart int              // first page in this block
+	pageEnd   int              // last page in this block
+	lineStart int              // first line number in this block
+	lineEnd   int              // last line number in this block
+}
+
+// buildPageBlocks splits lines into page-aligned blocks of up to blockSize
+// pages each. Each block is wrapped in the doc_context envelope.
+// Used by StrategyDocument reviewers when the document is too large for a
+// single LLM call (ADR DR2).
+func buildPageBlocks(lines []Line, docCtx string, blockSize int) []pageBlock {
+	if len(lines) == 0 || blockSize <= 0 {
+		return nil
+	}
+	if blockSize == 0 {
+		blockSize = DefaultInputBlockSize
+	}
+
+	// Group lines by page number while preserving order.
+	var blocks []pageBlock
+	i := 0
+	for i < len(lines) {
+		startPage := lines[i].PageNo
+		endPage := startPage + blockSize - 1
+
+		j := i
+		for j < len(lines) && lines[j].PageNo <= endPage {
+			j++
+		}
+
+		slice := lines[i:j]
+		objs := rawLinesToJSON(slice)
+		jsonText := wrapLinesWithDocContext(objs, docCtx)
+
+		blocks = append(blocks, pageBlock{
+			inputJSON: jsonText,
+			pageStart: startPage,
+			pageEnd:   lines[j-1].PageNo,
+			lineStart: slice[0].LineNo,
+			lineEnd:   slice[len(slice)-1].LineNo,
+		})
+
+		i = j
+	}
+	return blocks
+}
+
 // ReviewerConfig configures one reviewer for a review run.
 type ReviewerConfig struct {
 	Enabled      bool     // whether this reviewer runs
