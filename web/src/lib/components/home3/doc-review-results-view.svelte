@@ -321,9 +321,9 @@
                         style="padding: 0.4rem 0.75rem; background: {accent}; color: #fff; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
                         Export Markdown
                     </a>
-                    <a href={`/api/v1/doc-review/reports/${linkReportId}/html`} target="_blank"
+                    <a href={`/home3/doc-review-report/${linkReportId}`} target="_blank"
                         style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
-                        View HTML
+                        Open Report
                     </a>
                 </div>
                 <p style="color: {textSecondary}; margin-bottom: 1rem;">

@@ -1,5 +1,5 @@
 	<script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, untrack, tick } from 'svelte';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
@@ -39,7 +39,10 @@
 	} from './doc-structure-filters.js';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 
-	let { darkMode = true }: { darkMode: boolean } = $props();
+	let {
+		darkMode = true,
+		lockedRecordId = null
+	}: { darkMode?: boolean; lockedRecordId?: number | null } = $props();
 
 	let pageBg = $derived(darkMode ? '#0E1116' : '#F5F1E8');
 	let panelBg = $derived(darkMode ? '#161A22' : '#FBF8F0');
@@ -73,6 +76,11 @@
 		label: string;
 		version: number;
 	} | null>(null);
+	// Extra source lines highlighted when a report finding spans multiple lines
+	// (driven externally via focusSourceLines). Cleared on direct row clicks.
+	let findingHighlightLines = $state<DocStructureLine[]>([]);
+	// Reference to the Line List scroll container, for scroll-to-center.
+	let lineListEl = $state<HTMLDivElement | null>(null);
 	type DocStructureFilterValue =
 		| 'all'
 		| 'headings'
@@ -215,6 +223,12 @@
 		return map;
 	});
 
+	// The kb.inputs record browser is shown only in the standalone Document
+	// Structure page. When it is absent the body grid drops to two columns so the
+	// PDF (right column) fills to the right edge instead of leaving the unused
+	// `1fr` track empty.
+	let showBrowser = $derived(!browserCollapsed && lockedRecordId == null);
+
 	let highlightCount = $derived.by(() => {
 		let n = 0;
 		for (const arr of selectedLinesByPage.values()) n += arr.length;
@@ -227,7 +241,6 @@
 		overlay: HTMLDivElement
 	) {
 		const target = selectedHighlightTarget;
-		if (!target || target.page !== pageNo || target.coords.length < 4) return;
 
 		if (editingCoordsMode && editCoordsDraft.length >= 4) {
 			// console.log('[coord-editor] renderStructureHighlights → entering coord-edit mode for page', pageNo);
@@ -235,20 +248,34 @@
 			return;
 		}
 
-		const [vx1, vy1, vx2, vy2] = mineruToViewport(target.coords, viewport);
-		const left = Math.max(0, Math.min(vx1, vx2) - 5);
-		const top = Math.max(0, Math.min(vy1, vy2) - 4);
-		const width = Math.abs(vx2 - vx1) + 10;
-		const height = Math.abs(vy2 - vy1) + 8;
-		if (width < 1 || height < 1) return;
-		const mark = document.createElement('div');
-		mark.className = 'pdf-highlight';
-		mark.style.left = `${left}px`;
-		mark.style.top = `${top}px`;
-		mark.style.width = `${width}px`;
-		mark.style.height = `${height}px`;
-		mark.title = target.label;
-		overlay.appendChild(mark);
+		const drawMark = (coords: number[], label: string) => {
+			if (!Array.isArray(coords) || coords.length < 4) return;
+			const [vx1, vy1, vx2, vy2] = mineruToViewport(coords, viewport);
+			const left = Math.max(0, Math.min(vx1, vx2) - 5);
+			const top = Math.max(0, Math.min(vy1, vy2) - 4);
+			const width = Math.abs(vx2 - vx1) + 10;
+			const height = Math.abs(vy2 - vy1) + 8;
+			if (width < 1 || height < 1) return;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${left}px`;
+			mark.style.top = `${top}px`;
+			mark.style.width = `${width}px`;
+			mark.style.height = `${height}px`;
+			mark.title = label;
+			overlay.appendChild(mark);
+		};
+
+		if (target && target.page === pageNo) {
+			drawMark(target.coords, target.label);
+		}
+
+		// Additional lines for multi-line report findings (e.g. location "120-121").
+		for (const ln of findingHighlightLines) {
+			if (ln.page_number !== pageNo) continue;
+			if (lineKey(ln) === selectedLineKey) continue; // already drawn as primary target
+			drawMark(ln.coords, `page ${ln.page_number}, line ${ln.line_number}`);
+		}
 	}
 
 	function renderCoordEditor(viewport: PdfPageViewport, overlay: HTMLDivElement) {
@@ -495,6 +522,7 @@
 		selectedLineKey = null;
 		highlightSelectionVersion = 0;
 		selectedHighlightTarget = null;
+		findingHighlightLines = [];
 		docPage = 1;
 		pdfZoom = 0.5;
 		pdfNumPages = 0;
@@ -518,9 +546,12 @@
 		}
 	}
 
-	async function selectLine(line: DocStructureLine) {
+	async function selectLine(line: DocStructureLine, keepFindingHighlight = false) {
 		selectedLineKey = lineKey(line);
 		highlightSelectionVersion += 1;
+		if (!keepFindingHighlight) {
+			findingHighlightLines = [];
+		}
 		selectedHighlightTarget =
 			Array.isArray(line.coords) && line.coords.length >= 4
 				? {
@@ -533,6 +564,34 @@
 		if (line.page_number > 0) {
 			docPage = line.page_number;
 		}
+	}
+
+	/**
+	 * Externally-driven focus used by the Document Review report's left panel.
+	 * Selects the first matching source line (driving the PDF page + highlight),
+	 * highlights every matching line (for multi-line findings), and scrolls the
+	 * Line List so the primary line is centered.
+	 */
+	export async function focusSourceLines(lineNumbers: number[]) {
+		if (!Array.isArray(lineNumbers) || lineNumbers.length === 0) return;
+		const wanted = new Set(lineNumbers);
+		const matched = lines.filter((ln) => wanted.has(ln.line_number));
+		if (matched.length === 0) return;
+		const primary = matched[0];
+
+		// If the primary line is hidden by the active filter, reset to "all".
+		if (!filterDocStructureLines(lines, lineFilter).some((ln) => lineKey(ln) === lineKey(primary))) {
+			lineFilter = 'all';
+		}
+
+		await selectLine(primary, true);
+		findingHighlightLines = matched;
+
+		await tick();
+		const target = lineListEl?.querySelector<HTMLElement>(
+			`[data-line-key="${primary.page_number}-${primary.line_number}"]`
+		);
+		target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 	}
 
 	function adjustLineListWidth(delta: number) {
@@ -795,6 +854,13 @@
 		) as DocStructureSettings;
 		settingsHydrated = true;
 
+		// When locked to a specific document (e.g. embedded in the Document
+		// Review report), hide the record browser and auto-load that record.
+		if (lockedRecordId != null && lockedRecordId > 0) {
+			browserCollapsed = true;
+			void loadStructureForRecord(lockedRecordId);
+		}
+
 		return () => {
 			lineListResizing = false;
 			document.body.style.cursor = '';
@@ -865,8 +931,8 @@
 		</div>
 	</header>
 
-	<div class="body">
-		{#if !browserCollapsed}
+	<div class="body" class:no-browser={!showBrowser}>
+		{#if showBrowser}
 			<KbInputRecordBrowser
 				{darkMode}
 				instanceKey="doc-structure-record-browser"
@@ -885,19 +951,21 @@
 
 		<aside class="structure-sidebar" style={`width:${lineListWidth}px;`}>
 			<div class="left-meta">
-				<button
-					class="browser-collapse-btn"
-					type="button"
-					onclick={() => (browserCollapsed = !browserCollapsed)}
-					title={browserCollapsed ? 'Expand records panel' : 'Collapse records panel'}
-					aria-label={browserCollapsed ? 'Expand records panel' : 'Collapse records panel'}
-				>
-					{#if browserCollapsed}
-						<ChevronRightIcon style="width:13px; height:13px;" />
-					{:else}
-						<ChevronLeftIcon style="width:13px; height:13px;" />
-					{/if}
-				</button>
+				{#if lockedRecordId == null}
+					<button
+						class="browser-collapse-btn"
+						type="button"
+						onclick={() => (browserCollapsed = !browserCollapsed)}
+						title={browserCollapsed ? 'Expand records panel' : 'Collapse records panel'}
+						aria-label={browserCollapsed ? 'Expand records panel' : 'Collapse records panel'}
+					>
+						{#if browserCollapsed}
+							<ChevronRightIcon style="width:13px; height:13px;" />
+						{:else}
+							<ChevronLeftIcon style="width:13px; height:13px;" />
+						{/if}
+					</button>
+				{/if}
 				<div class="left-meta-copy">
 					<div class="left-meta-title">Lines</div>
 					<div class="left-meta-count">
@@ -920,7 +988,7 @@
 				</div>
 			</div>
 
-			<div class="line-list">
+			<div class="line-list" bind:this={lineListEl}>
 				{#if errorMsg}
 					<div class="error">{errorMsg}</div>
 				{:else if !loading && filteredLines.length === 0}
@@ -1010,6 +1078,7 @@
 							<div
 								class="line-card"
 								class:selected={selectedLineKey === lineKey(line)}
+								data-line-key={`${line.page_number}-${line.line_number}`}
 								role="button"
 								tabindex="0"
 								onclick={() => selectLine(line)}
@@ -1075,8 +1144,8 @@
 						highlightVersion={editingCoordsMode && editCoordsDraft.length >= 4
 							? `edit:${editCoordsDraft.join(',')}:${highlightSelectionVersion}`
 							: selectedHighlightTarget
-							? `${selectedHighlightTarget.page}:${selectedHighlightTarget.coords.join(',')}:${selectedHighlightTarget.version}`
-							: `${selectedLineKey ?? ''}:${highlightSelectionVersion}`}
+							? `${selectedHighlightTarget.page}:${selectedHighlightTarget.coords.join(',')}:${selectedHighlightTarget.version}:f${findingHighlightLines.length}`
+							: `${selectedLineKey ?? ''}:${highlightSelectionVersion}:f${findingHighlightLines.length}`}
 						renderHighlights={renderStructureHighlights}
 						{darkMode}
 						sidebarMinWidth={140}
@@ -1085,6 +1154,7 @@
 						sidebarTitle="Selected Line"
 						sidebarSettingsKey="doc-structure-pdf-sidebar"
 						sidebarWidthSettingLabel="Panel Width"
+						showSidebar={lockedRecordId == null}
 					>
 						{#snippet toolbar()}
 							<button
@@ -1477,6 +1547,10 @@
 		grid-template-rows: minmax(0, 1fr);
 		min-height: 0;
 		overflow: hidden;
+	}
+	/* No record browser: line list + PDF only, PDF fills the remaining width. */
+	.body.no-browser {
+		grid-template-columns: auto 1fr;
 	}
 	.structure-sidebar {
 		position: relative;

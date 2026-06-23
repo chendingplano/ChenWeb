@@ -28,6 +28,7 @@
 		sidebarTitle = 'Metadata',
 		sidebarSettingsKey = null,
 		sidebarWidthSettingLabel = 'Metadata Panel Width',
+		showSidebar = true,
 		zoomSettingLabel = 'Zoom',
 		darkMode = true,
 		showingLines = $bindable(false),
@@ -54,6 +55,7 @@
 		sidebarTitle?: string;
 		sidebarSettingsKey?: string | null;
 		sidebarWidthSettingLabel?: string;
+		showSidebar?: boolean;
 		zoomSettingLabel?: string;
 		darkMode?: boolean;
 		showingLines?: boolean;
@@ -357,7 +359,7 @@
 				{/if}
 			{/snippet}
 			{#snippet sidebarContent()}
-				{#if sidebar}
+				{#if sidebar && showSidebar}
 					<div class="pvw-shell" style={`width:${panelWidth}px;`}>
 						<aside class="pvw-sidebar-panel">
 							<div class="pvw-sidebar-head">
