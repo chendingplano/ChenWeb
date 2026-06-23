@@ -1441,6 +1441,18 @@
 		overflow-y: auto;
 		padding: 0.9rem;
 		gap: 0.65rem;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+	}
+	.scene-list::-webkit-scrollbar {
+		width: 6px;
+	}
+	.scene-list::-webkit-scrollbar-thumb {
+		background: rgba(148, 163, 184, 0.25);
+		border-radius: 999px;
+	}
+	.scene-list::-webkit-scrollbar-track {
+		background: transparent;
 	}
 
 	.scene-block {
