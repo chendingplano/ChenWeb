@@ -1583,6 +1583,18 @@ func loadProductPromptFromEnvKeys(envKeys []string, defaultRef string) (promptTe
 		promptRef = defaultRef
 	}
 
+	return loadPromptByRef(promptRef)
+}
+
+// loadPromptByRef resolves a prompt by its ref (file name or absolute path),
+// searching the standard candidate locations. Shared by the env-based loader
+// and by config-driven callers (e.g. the doc-review per-aspect config).
+func loadPromptByRef(promptRef string) (promptText string, promptRefOut string, promptPath string, promptErr error) {
+	promptRef = strings.TrimSpace(promptRef)
+	if promptRef == "" {
+		return "", "", "", fmt.Errorf("(MID_26052064) empty prompt ref")
+	}
+
 	paths := make([]string, 0, 8)
 	addCandidate := func(p string) {
 		p = strings.TrimSpace(p)
@@ -1641,35 +1653,48 @@ func loadModelConfigFromEnvKeys(modelRefEnvs []string, modelsFileEnv string) (mo
 	if modelRefValue == "" {
 		return "", "", structureModelConfig{}, fmt.Errorf("missing one of %s", strings.Join(modelRefEnvs, ", "))
 	}
+	_ = modelRefKey
+	return loadModelConfigByRef(modelRefValue, modelsFileEnv)
+}
+
+// loadModelConfigByRef resolves a model profile by its ref (the key in the
+// models definition file). Shared by the env-based loader and by config-driven
+// callers (e.g. the doc-review per-aspect config, where the ref comes from the
+// `model` field in doc-review.local.toml).
+func loadModelConfigByRef(modelRef, modelsFileEnv string) (modelRefOut string, modelPath string, cfg structureModelConfig, err error) {
+	modelRef = strings.TrimSpace(modelRef)
+	if modelRef == "" {
+		return "", "", structureModelConfig{}, fmt.Errorf("(MID_26042109) empty model ref")
+	}
 	modelPath, err = resolveModelsFilePath(modelsFileEnv)
 	if err != nil {
-		return modelRefValue, "", structureModelConfig{}, err
+		return modelRef, "", structureModelConfig{}, err
 	}
 	raw, err := os.ReadFile(modelPath)
 	if err != nil {
-		return modelRefValue, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042103) read %s failed: %w", modelPath, err)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042103) read %s failed: %w", modelPath, err)
 	}
 	parsed := ApiTypes.LLMModelsFile{}
 	if err := parseTOMLMap(raw, &parsed); err != nil {
-		return modelRefValue, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042104) parse %s failed: %w", modelPath, err)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042104) parse %s failed: %w", modelPath, err)
 	}
-	modelDef, ok := parsed[modelRefValue]
+	modelDef, ok := parsed[modelRef]
 	if !ok {
-		return modelRefValue, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042105) model %q from %s not found in %s", modelRefValue, modelRefKey, modelPath)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042105) model %q not found in %s", modelRef, modelPath)
 	}
 	if strings.TrimSpace(modelDef.ModelName) == "" {
-		return modelRefValue, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042106) model %q in %s missing model_name", modelRefValue, modelPath)
+		return modelRef, modelPath, structureModelConfig{}, fmt.Errorf("(MID_26042106) model %q in %s missing model_name", modelRef, modelPath)
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	cfg = structureModelConfig{
-		ProfileName:  modelRefValue,
+		ProfileName:  modelRef,
 		ModelName:    strings.TrimSpace(modelDef.ModelName),
 		APIKey:       strings.TrimSpace(modelDef.APIKey),
 		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
 		TimeoutSec:   modelDef.TimeoutSec,
 		ThinkingType: normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
 	}
-	return modelRefValue, modelPath, cfg, nil
+	return modelRef, modelPath, cfg, nil
 }
 
 func loadOptionalModelConfigFromEnvKeys(modelRefEnvs []string, modelsFileEnv string) (modelRef string, modelPath string, cfg structureModelConfig, err error) {

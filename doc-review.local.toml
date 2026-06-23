@@ -1,0 +1,394 @@
+# Document Review configuration (global, loaded once at startup).
+#
+# Two sections:
+#   [packages.P1..P6]      — group-level defaults (model, max_tool_turns, enabled)
+#   [reviewers.<aspect>]   — per-aspect overrides (DR3). An aspect inherits its
+#                            group's package defaults; any field set here wins.
+#
+# Notes / current limitations:
+#   * This is a GLOBAL config, not per-review-run (per-run TOML is out of scope).
+#   * reference_docs is out of scope and intentionally omitted.
+#   * Only `grammar_spelling` is wired into execution today (Phase I); the other
+#     reviewer blocks are forward-looking config for when their reviewers land.
+
+# ── Group (package) defaults ─────────────────────────────────────────────────
+
+[packages.P1]
+enabled = true
+name = "Language & Style"
+desc = "Surface-level writing quality"
+strategy = "document-level"
+model = "deepseek-v4-flash"
+max_tool_turns = 0
+
+
+[packages.P2]
+enabled = true
+name = "Structure & Organization"
+desc = "Document architecture"
+strategy = "document"
+model = "deepseek-v4-flash"
+max_tool_turns = 0
+
+[packages.P3]
+enabled = true
+name = "Content Quality"
+desc = "Depth and correctness of content"
+strategy = "per-chunk"
+model = "deepseek-v4-flash"
+max_tool_turns = 0
+
+[packages.P4]
+enabled = true
+name = "Consistency"
+desc = "Cross-document coherence"
+strategy = "document-level"
+model = "deepseek-v4-flash"
+max_tool_turns = 0
+
+[packages.P5]
+enabled = true
+name = "Technical & Compliance Standards"
+desc = "regulations"
+strategy = "per-chunk"
+model = "deepseek-v4-flash"
+max_tool_turns = 12
+
+[packages.P6]
+enabled = true
+name = "Meta & Process"
+desc = "Document housekeeping"
+strategy = "document-level"
+model = "deepseek-v4-flash"
+max_tool_turns = 0
+
+
+# ── Per-aspect reviewers (DR3) ───────────────────────────────────────────────
+
+# P1 — Language & Style
+[reviewers.grammar_spelling]
+enabled = true
+group = "P1"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-grammar-spelling.txt"
+max_tool_turns = 0
+
+[reviewers.tone_voice]
+enabled = true
+group = "P1"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-tone-voice.md"
+max_tool_turns = 0
+
+[reviewers.formatting_consistency]
+enabled = true
+group = "P1"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-formatting-consistency.md"
+max_tool_turns = 0
+
+[reviewers.readability]
+enabled = true
+group = "P1"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-readability.md"
+max_tool_turns = 0
+
+[reviewers.localization]
+enabled = true
+group = "P1"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-localization.md"
+max_tool_turns = 0
+
+# P2 — Structure & Organization
+[reviewers.logical_flow]
+enabled = true
+group = "P2"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-logical-flow.md"
+max_tool_turns = 0
+
+[reviewers.heading_hierarchy]
+enabled = true
+group = "P2"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-heading-hierarchy.md"
+max_tool_turns = 0
+
+[reviewers.toc_accuracy]
+enabled = true
+group = "P2"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-toc-accuracy.md"
+max_tool_turns = 0
+
+[reviewers.navigability]
+enabled = true
+group = "P2"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-navigability.md"
+max_tool_turns = 0
+
+[reviewers.section_balance]
+enabled = true
+group = "P2"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-section-balance.md"
+max_tool_turns = 0
+
+[reviewers.modularity]
+enabled = true
+group = "P2"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-modularity.md"
+max_tool_turns = 0
+
+# P3 — Content Quality
+[reviewers.completeness]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-completeness.md"
+max_tool_turns = 0
+
+[reviewers.correctness]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-correctness.md"
+max_tool_turns = 0
+
+[reviewers.clarity]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-clarity.md"
+max_tool_turns = 0
+
+[reviewers.conciseness]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-conciseness.md"
+max_tool_turns = 0
+
+[reviewers.relevance]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-relevance.md"
+max_tool_turns = 0
+
+[reviewers.currency]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-currency.md"
+max_tool_turns = 0
+
+[reviewers.examples]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-examples.md"
+max_tool_turns = 0
+
+[reviewers.diagrams]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-diagrams.md"
+max_tool_turns = 0
+
+[reviewers.testable_claims]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-testable-claims.md"
+max_tool_turns = 0
+
+[reviewers.evidence_rationale]
+enabled = true
+group = "P3"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-evidence-rationale.md"
+max_tool_turns = 0
+
+# P4 — Consistency
+[reviewers.internal_contradictions]
+enabled = true
+group = "P4"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-internal-contradictions.md"
+max_tool_turns = 0
+
+[reviewers.terminology_consistency]
+enabled = true
+group = "P4"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-terminology-consistency.md"
+max_tool_turns = 0
+
+[reviewers.cross_reference_correctness]
+enabled = true
+group = "P4"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-cross-reference-correctness.md"
+max_tool_turns = 0
+
+[reviewers.requirement_traceability]
+enabled = true
+group = "P4"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-requirement-traceability.md"
+max_tool_turns = 0
+
+# P5 — Technical & Compliance
+[reviewers.technical_accuracy]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-technical-accuracy.md"
+max_tool_turns = 12
+
+[reviewers.assumptions]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-assumptions.md"
+max_tool_turns = 12
+
+[reviewers.prerequisites]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-prerequisites.md"
+max_tool_turns = 12
+
+[reviewers.standards_compliance]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-standards-compliance.md"
+max_tool_turns = 12
+
+[reviewers.legal_compliance]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-legal-compliance.md"
+max_tool_turns = 12
+
+[reviewers.regulatory_compliance]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-regulatory-compliance.md"
+max_tool_turns = 12
+
+[reviewers.internal_policy]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-internal-policy.md"
+max_tool_turns = 12
+
+[reviewers.security]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-security.md"
+max_tool_turns = 12
+
+[reviewers.performance]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-performance.md"
+max_tool_turns = 12
+
+[reviewers.error_handling]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-error-handling.md"
+max_tool_turns = 12
+
+[reviewers.limitations]
+enabled = true
+group = "P5"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-limitations.md"
+max_tool_turns = 12
+
+# P6 — Meta & Process
+[reviewers.version_history]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-version-history.md"
+max_tool_turns = 0
+
+[reviewers.review_status]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-review-status.md"
+max_tool_turns = 0
+
+[reviewers.ownership]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-ownership.md"
+max_tool_turns = 0
+
+[reviewers.references]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-references.md"
+max_tool_turns = 0
+
+[reviewers.related_documents]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-related-documents.md"
+max_tool_turns = 0
+
+[reviewers.confidentiality]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-confidentiality.md"
+max_tool_turns = 0
+
+[reviewers.sensitive_data]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-sensitive-data.md"
+max_tool_turns = 0
+
+[reviewers.pii]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-pii.md"
+max_tool_turns = 0
+
+[reviewers.data_retention]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-data-retention.md"
+max_tool_turns = 0
+
+[reviewers.license_ip]
+enabled = true
+group = "P6"
+model = "deepseek-v4-flash"
+prompt = "prompt-review-license-ip.md"
+max_tool_turns = 0

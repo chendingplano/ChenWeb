@@ -143,6 +143,11 @@ type ReviewProcessor struct {
 	GrammarPromptRef  string
 	GrammarPromptText string
 
+	ToneVoiceModelCfg   structureModelConfig
+	ToneVoiceModelName  string
+	ToneVoicePromptRef  string
+	ToneVoicePromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -153,10 +158,13 @@ type ReviewProcessor struct {
 	// GrammarClient is a properly-configured LLM client for the grammar reviewer,
 	// built from GrammarModelCfg at construction time.
 	GrammarClient LLMJSONExtractor
+
+	// ToneVoiceClient is a properly-configured LLM client for the tone_voice reviewer.
+	ToneVoiceClient LLMJSONExtractor
 }
 
 // NewReviewProcessor creates a ReviewProcessor.
-// Phase I loads only the grammar reviewer config.
+// Phase I loads the grammar_spelling and tone_voice reviewer configs.
 func NewReviewProcessor(
 	inputStore DocMetadataStore,
 	entityStore EntityRelationStore,
@@ -166,14 +174,55 @@ func NewReviewProcessor(
 ) *ReviewProcessor {
 	logger := loggerutil.CreateDefaultLogger("MID_26061801")
 
-	grammarPromptText, grammarPromptRef, _, grammarPromptErr := loadProductPromptFromEnvKeys(
-		[]string{"REVIEW_GRAMMAR_PROMPT"},
-		"",
+	// Resolve the grammar reviewer's prompt + model from doc-review.local.toml
+	// (DR3 per-aspect config). The config file is the sole source of truth;
+	// there is no env-var fallback. An absent file, missing aspect block, or
+	// explicitly-disabled aspect leaves the reviewer disabled.
+	var (
+		grammarPromptText string
+		grammarPromptRef  string
+		grammarModelCfg   structureModelConfig
+		grammarPromptErr  error
+		grammarModelErr   error
 	)
-	grammarModelRef, _, grammarModelCfg, grammarModelErr := loadModelConfigFromEnvKeys(
-		[]string{"REVIEW_GRAMMAR_MODEL_NAME"},
-		"MODEL_DEF_FILE",
-	)
+
+	reviewCfg, reviewCfgErr := GetDocReviewConfig()
+	switch {
+	case reviewCfgErr != nil:
+		logger.Warn("doc-review config load failed; grammar_spelling reviewer disabled",
+			"error", reviewCfgErr)
+		grammarPromptErr = reviewCfgErr
+	case reviewCfg == nil:
+		logger.Info("doc-review config file not found; grammar_spelling reviewer disabled")
+		grammarPromptErr = fmt.Errorf("doc-review.local.toml not found")
+	default:
+		resolved := reviewCfg.ResolveReviewer("grammar_spelling", "P1")
+		switch {
+		case !resolved.Found:
+			logger.Info("grammar_spelling not configured in doc-review config; reviewer disabled")
+			grammarPromptErr = fmt.Errorf("grammar_spelling: aspect not found in doc-review config")
+		case !resolved.Enabled:
+			logger.Info("grammar_spelling disabled by doc-review config")
+			grammarPromptErr = fmt.Errorf("grammar_spelling: disabled by config")
+		default:
+			if resolved.PromptRef == "" {
+				grammarPromptErr = fmt.Errorf("grammar_spelling: prompt not set in doc-review config")
+			} else {
+				grammarPromptText, grammarPromptRef, _, grammarPromptErr = loadPromptByRef(resolved.PromptRef)
+			}
+			if resolved.ModelRef == "" {
+				grammarModelErr = fmt.Errorf("grammar_spelling: model not set in doc-review config")
+			} else {
+				_, _, grammarModelCfg, grammarModelErr = loadModelConfigByRef(resolved.ModelRef, "MODEL_DEF_FILE")
+			}
+			if grammarPromptErr == nil && grammarModelErr == nil {
+				logger.Info("grammar_spelling configured from doc-review config",
+					"model_ref", resolved.ModelRef, "prompt_ref", resolved.PromptRef,
+					"enabled", resolved.Enabled, "max_tool_turns", resolved.MaxToolTurns)
+			}
+		}
+	}
+
 	if grammarPromptErr != nil {
 		logger.Warn("grammar review prompt unavailable; grammar_spelling reviewer disabled",
 			"error", grammarPromptErr)
@@ -182,7 +231,6 @@ func NewReviewProcessor(
 		logger.Warn("grammar review model config unavailable; grammar_spelling reviewer disabled",
 			"error", grammarModelErr)
 	}
-	_ = grammarModelRef // tracked in logs; config stored in grammarModelCfg
 
 	var grammarClient LLMJSONExtractor
 	if grammarPromptErr == nil && grammarModelErr == nil {
@@ -208,19 +256,103 @@ func NewReviewProcessor(
 		}
 	}
 
+	// ── Resolve tone_voice reviewer config ──────────────────────────────────────
+	var (
+		toneVoicePromptText string
+		toneVoicePromptRef  string
+		toneVoiceModelCfg   structureModelConfig
+		toneVoicePromptErr  error
+		toneVoiceModelErr   error
+	)
+
+	toneReviewCfg, toneReviewCfgErr := GetDocReviewConfig()
+	switch {
+	case toneReviewCfgErr != nil:
+		logger.Warn("doc-review config load failed; tone_voice reviewer disabled",
+			"error", toneReviewCfgErr)
+		toneVoicePromptErr = toneReviewCfgErr
+	case toneReviewCfg == nil:
+		logger.Info("doc-review config file not found; tone_voice reviewer disabled")
+		toneVoicePromptErr = fmt.Errorf("doc-review.local.toml not found")
+	default:
+		resolved := toneReviewCfg.ResolveReviewer("tone_voice", "P1")
+		switch {
+		case !resolved.Found:
+			logger.Info("tone_voice not configured in doc-review config; reviewer disabled")
+			toneVoicePromptErr = fmt.Errorf("tone_voice: aspect not found in doc-review config")
+		case !resolved.Enabled:
+			logger.Info("tone_voice disabled by doc-review config")
+			toneVoicePromptErr = fmt.Errorf("tone_voice: disabled by config")
+		default:
+			if resolved.PromptRef == "" {
+				toneVoicePromptErr = fmt.Errorf("tone_voice: prompt not set in doc-review config")
+			} else {
+				toneVoicePromptText, toneVoicePromptRef, _, toneVoicePromptErr = loadPromptByRef(resolved.PromptRef)
+			}
+			if resolved.ModelRef == "" {
+				toneVoiceModelErr = fmt.Errorf("tone_voice: model not set in doc-review config")
+			} else {
+				_, _, toneVoiceModelCfg, toneVoiceModelErr = loadModelConfigByRef(resolved.ModelRef, "MODEL_DEF_FILE")
+			}
+			if toneVoicePromptErr == nil && toneVoiceModelErr == nil {
+				logger.Info("tone_voice configured from doc-review config",
+					"model_ref", resolved.ModelRef, "prompt_ref", resolved.PromptRef,
+					"enabled", resolved.Enabled, "max_tool_turns", resolved.MaxToolTurns)
+			}
+		}
+	}
+
+	if toneVoicePromptErr != nil {
+		logger.Warn("tone_voice review prompt unavailable; tone_voice reviewer disabled",
+			"error", toneVoicePromptErr)
+	}
+	if toneVoiceModelErr != nil {
+		logger.Warn("tone_voice review model config unavailable; tone_voice reviewer disabled",
+			"error", toneVoiceModelErr)
+	}
+
+	var toneVoiceClient LLMJSONExtractor
+	if toneVoicePromptErr == nil && toneVoiceModelErr == nil {
+		timeoutSec := toneVoiceModelCfg.TimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = 100
+		}
+		c, err := llmclients.NewOpenAIJSONClientFromConfig(llmclients.OpenAIJSONClientConfig{
+			ModelName:    toneVoiceModelCfg.ModelName,
+			APIKey:       toneVoiceModelCfg.APIKey,
+			BaseURL:      toneVoiceModelCfg.BaseURL,
+			ThinkingType: toneVoiceModelCfg.ThinkingType,
+			TimeoutSec:   timeoutSec,
+		}, nil)
+		if err == nil {
+			c.HTTPClient = &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+		}
+		if err != nil {
+			logger.Warn("failed to create tone_voice LLM client; tone_voice reviewer disabled", "error", err)
+			toneVoicePromptErr = err
+		} else {
+			toneVoiceClient = c
+		}
+	}
+
 	return &ReviewProcessor{
-		InputStore:        inputStore,
-		EntityStore:       entityStore,
-		FindingsStore:     findingsStore,
-		Client:            extractor,
-		GrammarClient:     grammarClient,
-		Logger:            logger,
-		Now:               time.Now,
-		MaxConcurrent:     envInt("REVIEW_MAX_TASKS", 1, 1),
-		GrammarModelCfg:   grammarModelCfg,
-		GrammarModelName:  grammarModelCfg.ModelName,
-		GrammarPromptRef:  grammarPromptRef,
-		GrammarPromptText: grammarPromptText,
+		InputStore:         inputStore,
+		EntityStore:        entityStore,
+		FindingsStore:      findingsStore,
+		Client:             extractor,
+		GrammarClient:      grammarClient,
+		ToneVoiceClient:    toneVoiceClient,
+		Logger:             logger,
+		Now:                time.Now,
+		MaxConcurrent:      envInt("REVIEW_MAX_TASKS", 1, 1),
+		GrammarModelCfg:    grammarModelCfg,
+		GrammarModelName:   grammarModelCfg.ModelName,
+		GrammarPromptRef:   grammarPromptRef,
+		GrammarPromptText:  grammarPromptText,
+		ToneVoiceModelCfg:  toneVoiceModelCfg,
+		ToneVoiceModelName: toneVoiceModelCfg.ModelName,
+		ToneVoicePromptRef: toneVoicePromptRef,
+		ToneVoicePromptText: toneVoicePromptText,
 	}
 }
 
@@ -347,7 +479,6 @@ type reviewRunner struct {
 }
 
 // buildReviewers returns the enabled reviewers for this run.
-// Phase I: grammar_spelling only.
 func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunner {
 	var runners []reviewRunner
 
@@ -364,6 +495,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.GrammarModelName,
 				PromptText: p.GrammarPromptText,
 				PromptRef:  p.GrammarPromptRef,
+			},
+		})
+	}
+
+	if p.ToneVoiceClient != nil && p.ToneVoicePromptText != "" && p.ToneVoiceModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &toneVoiceReviewer{
+				client:     p.ToneVoiceClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.ToneVoiceModelName,
+				PromptText: p.ToneVoicePromptText,
+				PromptRef:  p.ToneVoicePromptRef,
 			},
 		})
 	}

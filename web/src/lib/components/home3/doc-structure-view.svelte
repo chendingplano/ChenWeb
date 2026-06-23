@@ -6,6 +6,7 @@
 	import CrosshairIcon from '@lucide/svelte/icons/crosshair';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import SearchIcon from '@lucide/svelte/icons/search';
 	import {
 		getKbDocStructure,
 		getKbInput,
@@ -100,6 +101,10 @@
 	let lineListResizing = $state(false);
 	let lineListSettingsOpen = $state(false);
 	let settingsHydrated = $state(false);
+	let lineSearch = $state('');
+	// Find & Replace inside the inline content editor (self-contained per edit session).
+	let editFind = $state('');
+	let editReplace = $state('');
 	let browserCollapsed = $state(false);
 
 	let editingLineKey = $state<string | null>(null);
@@ -206,7 +211,94 @@
 		docStructureSettings = { ...DOC_STRUCTURE_DEFAULT_SETTINGS };
 	}
 
-	let filteredLines = $derived.by(() => filterDocStructureLines(lines, lineFilter));
+	function escapeHtml(s: string): string {
+		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	}
+
+	// Builds a matcher for the current search query.
+	// Supports plain text (case-insensitive substring) and /pattern/flags (regex).
+	function buildSearchMatcher(query: string): (text: string) => { matched: boolean; highlights: [number, number][] } {
+		const q = query.trim();
+		if (!q) return () => ({ matched: true, highlights: [] });
+		const reLiteral = q.match(/^\/(.+?)\/([gimsuy]*)$/);
+		if (reLiteral) {
+			try {
+				const flags = [...new Set([...(reLiteral[2] || ''), 'g'])].join('');
+				const re = new RegExp(reLiteral[1], flags);
+				return (text: string) => {
+					re.lastIndex = 0;
+					const highlights: [number, number][] = [];
+					let m: RegExpExecArray | null;
+					while ((m = re.exec(text)) !== null) {
+						highlights.push([m.index, m.index + m[0].length]);
+						if (m[0].length === 0) re.lastIndex++;
+					}
+					return { matched: highlights.length > 0, highlights };
+				};
+			} catch { /* invalid regex — fall through to substring */ }
+		}
+		const lower = q.toLowerCase();
+		return (text: string) => {
+			const highlights: [number, number][] = [];
+			const textLow = text.toLowerCase();
+			let idx = 0;
+			while (idx < textLow.length) {
+				const pos = textLow.indexOf(lower, idx);
+				if (pos < 0) break;
+				highlights.push([pos, pos + lower.length]);
+				idx = pos + lower.length;
+			}
+			return { matched: highlights.length > 0, highlights };
+		};
+	}
+
+	// Wraps every match of `query` within `text` in a <mark>, escaping the rest.
+	// `markClass` lets the editor backdrop use a zero-width highlight (no padding)
+	// so the overlay stays pixel-aligned with the textarea below it.
+	function renderHighlightHtml(text: string, query: string, markClass = 'search-hl'): string {
+		const q = (query || '').trim();
+		if (!q) return escapeHtml(text);
+		const { highlights } = buildSearchMatcher(q)(text);
+		if (!highlights.length) return escapeHtml(text);
+		let out = '';
+		let last = 0;
+		for (const [s, e] of highlights) {
+			out += escapeHtml(text.slice(last, s));
+			out += `<mark class="${markClass}">${escapeHtml(text.slice(s, e))}</mark>`;
+			last = e;
+		}
+		return out + escapeHtml(text.slice(last));
+	}
+
+	function highlightContent(text: string): string {
+		if (!text) return '—';
+		return renderHighlightHtml(text, lineSearch);
+	}
+
+	// Backdrop HTML for the inline content editor (highlights the Find matches as
+	// you type). A trailing newline needs an extra blank line so the backdrop's
+	// height tracks the textarea exactly.
+	let editContentHtml = $derived.by(() => {
+		const html = renderHighlightHtml(editingContent ?? '', editFind, 'search-hl-overlay');
+		return editingContent.endsWith('\n') ? html + '\n' : html;
+	});
+
+	// Refs for the content editor overlay (transparent textarea + highlight backdrop).
+	let editTextareaEl = $state<HTMLTextAreaElement | null>(null);
+	let editBackdropEl = $state<HTMLDivElement | null>(null);
+	function syncBackdropScroll() {
+		if (!editTextareaEl || !editBackdropEl) return;
+		editBackdropEl.scrollTop = editTextareaEl.scrollTop;
+		editBackdropEl.scrollLeft = editTextareaEl.scrollLeft;
+	}
+
+	let filteredLines = $derived.by(() => {
+		const byType = filterDocStructureLines(lines, lineFilter);
+		const q = lineSearch.trim();
+		if (!q) return byType;
+		const matcher = buildSearchMatcher(q);
+		return byType.filter((ln) => matcher(ln.content || '').matched);
+	});
 
 	let headingCount = $derived.by(() => lines.filter((ln) => isHeadingLine(ln)).length);
 
@@ -583,6 +675,10 @@
 		if (!filterDocStructureLines(lines, lineFilter).some((ln) => lineKey(ln) === lineKey(primary))) {
 			lineFilter = 'all';
 		}
+		// If the primary line is hidden by the active search, clear it.
+		if (lineSearch.trim() && !buildSearchMatcher(lineSearch)(primary.content || '').matched) {
+			lineSearch = '';
+		}
 
 		await selectLine(primary, true);
 		findingHighlightLines = matched;
@@ -659,6 +755,27 @@
 		editingOriginalType = line.line_type || '';
 		editingOriginalContent = line.content || '';
 		editingError = '';
+		// Seed the editor's Find with the active line search, if any.
+		editFind = lineSearch;
+		editReplace = '';
+	}
+
+	// Number of matches of the editor's Find pattern within the content being edited.
+	let editMatchCount = $derived.by(() => {
+		if (!editFind.trim() || !editingContent) return 0;
+		return buildSearchMatcher(editFind)(editingContent).highlights.length;
+	});
+
+	function applyEditReplace() {
+		if (!editFind.trim() || !editingContent) return;
+		const { highlights } = buildSearchMatcher(editFind)(editingContent);
+		if (!highlights.length) return;
+		let result = editingContent;
+		for (let i = highlights.length - 1; i >= 0; i--) {
+			const [s, e] = highlights[i];
+			result = result.slice(0, s) + editReplace + result.slice(e);
+		}
+		editingContent = result;
 	}
 
 	function cancelLineEdit() {
@@ -669,6 +786,8 @@
 		editingOriginalType = '';
 		editingOriginalContent = '';
 		editingError = '';
+		editFind = '';
+		editReplace = '';
 	}
 
 	async function saveLineEdit() {
@@ -988,6 +1107,32 @@
 				</div>
 			</div>
 
+			<div class="search-bar">
+				<div
+					class="search-row"
+					title="Search tips: plain text → case-insensitive substring · /pattern/ → regex · /pattern/i → case-insensitive regex · /pattern/g → global"
+				>
+					<SearchIcon style="width:13px;height:13px;flex-shrink:0;color:var(--text-muted);" />
+					<input
+						class="search-input"
+						type="search"
+						placeholder="Search lines…"
+						bind:value={lineSearch}
+						spellcheck="false"
+						aria-label="Search line content"
+					/>
+					{#if lineSearch}
+						<span class="search-count">{filteredLines.length} of {filterDocStructureLines(lines, lineFilter).length}</span>
+						<button
+							class="search-clear"
+							type="button"
+							onclick={() => (lineSearch = '')}
+							aria-label="Clear search"
+						>&times;</button>
+					{/if}
+				</div>
+			</div>
+
 			<div class="line-list" bind:this={lineListEl}>
 				{#if errorMsg}
 					<div class="error">{errorMsg}</div>
@@ -1047,14 +1192,60 @@
 									</div>
 									<div class="line-edit-field">
 										<span class="line-edit-label">Content</span>
-										<input
-											class="line-edit-input"
-											type="text"
-											bind:value={editingContent}
-											onkeydown={(e) => {
-												if (e.key === 'Escape') cancelLineEdit();
-											}}
-										/>
+										<div class="content-edit-wrap">
+											<div
+												class="content-backdrop line-edit-textarea"
+												bind:this={editBackdropEl}
+												aria-hidden="true"
+											>{@html editContentHtml}</div>
+											<textarea
+												class="line-edit-input line-edit-textarea content-edit-textarea"
+												bind:value={editingContent}
+												bind:this={editTextareaEl}
+												onscroll={syncBackdropScroll}
+												onkeydown={(e) => {
+													if (e.key === 'Escape') cancelLineEdit();
+												}}
+											></textarea>
+										</div>
+									</div>
+									<div class="line-edit-field">
+										<span
+											class="line-edit-label"
+											title="Find supports plain text (case-insensitive) or /regex/flags. Replace fills every match; cleared when you Cancel."
+										>Find &amp; Replace in content</span>
+										<div class="find-replace-row">
+											<input
+												class="line-edit-input"
+												type="text"
+												placeholder="Find — text or /regex/"
+												bind:value={editFind}
+												spellcheck="false"
+												onkeydown={(e) => {
+													if (e.key === 'Escape') cancelLineEdit();
+												}}
+											/>
+											<input
+												class="line-edit-input"
+												type="text"
+												placeholder="Replace with"
+												bind:value={editReplace}
+												spellcheck="false"
+												onkeydown={(e) => {
+													if (e.key === 'Enter') {
+														e.preventDefault();
+														applyEditReplace();
+													} else if (e.key === 'Escape') cancelLineEdit();
+												}}
+											/>
+											<button
+												class="btn btn-ghost line-edit-action-btn find-replace-btn"
+												type="button"
+												disabled={!editFind.trim() || editMatchCount === 0}
+												title={editFind.trim() ? `Replace ${editMatchCount} match(es) of '${editFind}' with '${editReplace}'` : 'Enter a Find pattern to enable replace'}
+												onclick={applyEditReplace}
+											>Replace{editFind.trim() ? ` (${editMatchCount})` : ''}</button>
+										</div>
 									</div>
 									{#if editingError}<div class="line-edit-error">{editingError}</div>{/if}
 									<div class="line-edit-actions">
@@ -1092,7 +1283,13 @@
 							>
 								<span class="line-number-cell">L{line.line_number}</span>
 								<span class="line-type-cell">{displayLineType(line)}</span>
-								<span class="line-content-cell">{line.content || '—'}</span>
+								<span class="line-content-cell">
+									{#if lineSearch.trim()}
+										{@html highlightContent(line.content || '')}
+									{:else}
+										{line.content || '—'}
+									{/if}
+								</span>
 								<div class="line-actions">
 									<button
 										type="button"
@@ -1693,6 +1890,81 @@
 		white-space: nowrap;
 		border: 0;
 	}
+	.search-bar {
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+		padding: 7px 10px;
+		border-bottom: 1px solid var(--ink-line-soft);
+		flex-shrink: 0;
+	}
+	.search-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		background: var(--panel-bg-alt);
+		border: 1px solid var(--ink-line);
+		border-radius: 8px;
+		padding: 0 8px;
+		height: 30px;
+	}
+	.search-row:focus-within {
+		border-color: var(--brass);
+	}
+	.search-input {
+		flex: 1;
+		min-width: 0;
+		border: none;
+		background: transparent;
+		color: var(--text-primary);
+		font-size: 12px;
+		padding: 0;
+		outline: none;
+		font-family: var(--font-sans);
+	}
+	.search-input::placeholder {
+		color: var(--text-muted);
+	}
+	.search-input::-webkit-search-cancel-button {
+		display: none;
+	}
+	.search-count {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+	.search-clear {
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		color: var(--text-muted);
+		font-size: 15px;
+		line-height: 1;
+		padding: 0 1px;
+		flex-shrink: 0;
+	}
+	.search-clear:hover {
+		color: var(--text-primary);
+	}
+	:global(.search-hl) {
+		background: rgba(212, 162, 76, 0.35);
+		color: var(--text-primary);
+		border-radius: 2px;
+		padding: 0 1px;
+	}
+	/* Editor backdrop highlight: bright, high-contrast, and crucially adds NO
+	   horizontal footprint (no padding/border/margin) so the overlaid text stays
+	   pixel-aligned with the editable textarea underneath. */
+	:global(.search-hl-overlay) {
+		background: #f5c542;
+		color: #1a1410;
+		border-radius: 2px;
+		padding: 0;
+		margin: 0;
+		border: 0;
+	}
 	.line-list {
 		overflow: auto;
 		padding: 10px;
@@ -1893,6 +2165,51 @@
 		width: 100%;
 		box-sizing: border-box;
 	}
+	.line-edit-textarea {
+		height: auto;
+		min-height: 62px;
+		padding: 6px 8px;
+		line-height: 1.45;
+		font-family: var(--font-sans);
+		font-size: 12px;
+	}
+	/* Highlight overlay for the content editor: a backdrop renders the text with
+	   <mark> highlights for the current Find pattern, while a transparent-text
+	   textarea on top handles editing. Both share identical metrics so the visible
+	   (backdrop) text lines up with the caret. */
+	.content-edit-wrap {
+		position: relative;
+		display: block;
+	}
+	.content-backdrop {
+		position: absolute;
+		inset: 0;
+		box-sizing: border-box;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: var(--panel-bg-alt);
+		color: var(--text-primary);
+		overflow: hidden;
+		pointer-events: none;
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
+		resize: none;
+		margin: 0;
+	}
+	.content-edit-textarea {
+		position: relative;
+		z-index: 1;
+		width: 100%;
+		background: transparent;
+		color: transparent;
+		caret-color: var(--text-primary);
+		resize: vertical;
+		white-space: pre-wrap;
+		overflow-wrap: break-word;
+	}
+	.content-edit-textarea::selection {
+		background: rgba(212, 162, 76, 0.35);
+	}
 	.line-edit-input:focus {
 		outline: none;
 		border-color: var(--brass);
@@ -1927,6 +2244,21 @@
 		padding: 0 10px;
 		font-size: 12px;
 		flex: 1;
+	}
+	.find-replace-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr auto;
+		gap: 6px;
+		align-items: center;
+	}
+	.find-replace-row .line-edit-input {
+		flex: initial;
+	}
+	.find-replace-btn {
+		flex: 0 0 auto;
+		white-space: nowrap;
+		height: 30px;
+		padding: 0 12px;
 	}
 	.line-number-cell {
 		font-family: var(--font-mono);
