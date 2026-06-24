@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { getFindingLines, editFindingLines, type LineEdit } from '$lib/services/docReviewService';
 
 	let {
@@ -67,10 +67,12 @@
 
 	// Accept the parsed suggestion: replace the (first) offending line with the
 	// proposed content. The reviewer still reviews/edits and clicks Save to persist.
-	function acceptSuggestion() {
+	async function acceptSuggestion() {
 		if (!parsedSuggestion || lines.length === 0) return;
 		lines[0] = { ...lines[0], content: parsedSuggestion.proposed };
 		resetMatch();
+		await tick();
+		if (inputs[0]) fitTextarea(inputs[0]);
 	}
 
 	onMount(async () => {
@@ -85,6 +87,26 @@
 			loading = false;
 		}
 	});
+
+	// Grow a textarea to fit its content (so the whole offending line is visible),
+	// plus a small bottom margin. min-height (CSS) keeps short lines reasonable.
+	function fitTextarea(el: HTMLTextAreaElement) {
+		el.style.height = 'auto';
+		el.style.height = `${el.scrollHeight + 6}px`;
+	}
+
+	// Svelte action: size the offending-line textarea to its content on mount and
+	// keep it fitted as the user types.
+	function autosize(node: HTMLTextAreaElement) {
+		const handler = () => fitTextarea(node);
+		requestAnimationFrame(handler);
+		node.addEventListener('input', handler);
+		return {
+			destroy() {
+				node.removeEventListener('input', handler);
+			}
+		};
+	}
 
 	function resetMatch() {
 		matchLine = null;
@@ -207,8 +229,9 @@
 							bind:this={inputs[i]}
 							bind:value={lines[i].content}
 							oninput={resetMatch}
+							use:autosize
 							spellcheck="false"
-							rows="2"
+							rows="1"
 						></textarea>
 					</div>
 				{/each}

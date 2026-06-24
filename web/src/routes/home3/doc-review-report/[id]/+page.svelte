@@ -24,6 +24,8 @@
 	let textPrimary = $derived(dark ? '#E2E8F0' : '#111827');
 	let textSecondary = $derived(dark ? '#94A3B8' : '#6B7280');
 	let textMuted = $derived(dark ? '#64748B' : '#9CA3AF');
+	// Scrollbar thumb matched to the Document Structure LINES list (--ink-line).
+	let scrollThumb = $derived(dark ? '#2A3140' : '#D7CFB8');
 
 	type ReportFinding = {
 		pass: string;
@@ -55,6 +57,15 @@
 
 	// DR16: live findings (with ids + review_status) drive the action buttons.
 	let findings = $state<FindingItem[]>([]);
+	// Per-package and per-reviewer fold state (all collapsed by default).
+	let expandedPackages = $state<Record<string, boolean>>({});
+	let expandedReviewers = $state<Record<string, boolean>>({});
+	function togglePackage(pass: string) {
+		expandedPackages[pass] = !expandedPackages[pass];
+	}
+	function toggleReviewer(key: string) {
+		expandedReviewers[key] = !expandedReviewers[key];
+	}
 	let busyId = $state<number | null>(null);
 	let editFindingId = $state<number | null>(null);
 	let dirty = $state(false);
@@ -77,24 +88,61 @@
 		toastTimer = setTimeout(() => (toast = null), ms);
 	}
 
-	// Visible findings grouped by pass (deleted ones are hidden).
+	type ReviewerGroup = { aspect: string; items: FindingItem[] };
+	type PackageGroup = { pass: string; label: string; count: number; reviewers: ReviewerGroup[] };
+
+	// Prettify a reviewer/aspect key for display, e.g. "tone_voice" -> "Tone Voice".
+	function reviewerLabel(aspect: string): string {
+		return aspect
+			.split(/[_\s]+/)
+			.filter(Boolean)
+			.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+			.join(' ');
+	}
+
+	function reviewerKey(pass: string, aspect: string): string {
+		return `${pass}::${aspect}`;
+	}
+
+	// Visible findings grouped by pass, then by reviewer/aspect (deleted hidden).
 	let livePassGroups = $derived.by(() => {
 		const order = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
-		const byPass = new Map<string, FindingItem[]>();
+		// pass -> (aspect -> findings), both preserving first-seen order.
+		const byPass = new Map<string, Map<string, FindingItem[]>>();
 		for (const f of findings) {
 			if (f.review_status === 'deleted') continue;
-			const arr = byPass.get(f.pass) ?? [];
+			let byAspect = byPass.get(f.pass);
+			if (!byAspect) {
+				byAspect = new Map();
+				byPass.set(f.pass, byAspect);
+			}
+			const arr = byAspect.get(f.aspect) ?? [];
 			arr.push(f);
-			byPass.set(f.pass, arr);
+			byAspect.set(f.aspect, arr);
 		}
-		const out: { pass: string; label: string; items: FindingItem[] }[] = [];
+		const build = (p: string): PackageGroup | null => {
+			const byAspect = byPass.get(p);
+			if (!byAspect) return null;
+			const reviewers: ReviewerGroup[] = [];
+			let count = 0;
+			for (const [aspect, items] of byAspect) {
+				reviewers.push({ aspect, items });
+				count += items.length;
+			}
+			if (count === 0) return null;
+			return { pass: p, label: passLabels[p] ?? p, count, reviewers };
+		};
+		const out: PackageGroup[] = [];
 		for (const p of order) {
-			const items = byPass.get(p);
-			if (items && items.length) out.push({ pass: p, label: passLabels[p] ?? p, items });
+			const g = build(p);
+			if (g) out.push(g);
 		}
 		// Append any unexpected passes.
-		for (const [p, items] of byPass) {
-			if (!order.includes(p)) out.push({ pass: p, label: passLabels[p] ?? p, items });
+		for (const p of byPass.keys()) {
+			if (!order.includes(p)) {
+				const g = build(p);
+				if (g) out.push(g);
+			}
 		}
 		return out;
 	});
@@ -306,7 +354,7 @@
 <div
 	class="report-page"
 	bind:this={containerEl}
-	style="--page-bg:{pageBg}; --card-bg:{cardBg}; --border:{borderColor}; --accent:{accent}; --accent-tint:{accentTint}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted};"
+	style="--page-bg:{pageBg}; --card-bg:{cardBg}; --border:{borderColor}; --accent:{accent}; --accent-tint:{accentTint}; --text-primary:{textPrimary}; --text-secondary:{textSecondary}; --text-muted:{textMuted}; --scroll-thumb:{scrollThumb};"
 >
 	<!-- LEFT: report -->
 	<section class="left-panel" style="width:{leftPct}%;">
@@ -354,71 +402,108 @@
 			{/if}
 
 			{#each livePassGroups as group (group.pass)}
-				<h2>{group.pass} — {group.label}</h2>
-				{#each group.items as f (f.id)}
-					<div
-						class="finding"
-						class:active={activeKey === String(f.id)}
-						class:resolved={f.review_status === 'fixed' || f.review_status === 'accepted'}
-						style="border-left-color:{sevColor(f.severity)};"
+				<div class="package">
+					<button
+						type="button"
+						class="package-head"
+						aria-expanded={!!expandedPackages[group.pass]}
+						onclick={() => togglePackage(group.pass)}
 					>
-						<button
-							type="button"
-							class="finding-body"
-							onclick={() => onFocusFinding(f)}
-							title={f.location ? `Jump to line ${f.location}` : ''}
-						>
-							<div class="finding-head">
-								<strong>{f.title}</strong>
-								<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
-								<span class="badge">{f.aspect}</span>
-								{#if f.review_status === 'fixed'}
-									<span class="status-chip fixed">Fixed</span>
-								{:else if f.review_status === 'accepted'}
-									<span class="status-chip accepted">Accepted</span>
-								{/if}
-							</div>
-							{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
-							{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
-							{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
-						</button>
+						<span class="chevron" class:open={expandedPackages[group.pass]}>▶</span>
+						<span class="package-title">{group.pass} — {group.label}</span>
+						<span class="package-count">{group.count}</span>
+					</button>
 
-						<div class="finding-actions">
-							<button
-								class="act"
-								disabled={busyId === f.id}
-								onclick={() => onAutoFix(f)}
-								title="Fix the offending line(s) automatically with the configured model"
-							>
-								{busyId === f.id ? '…' : 'LLM Auto Fix'}
-							</button>
-							<button
-								class="act"
-								disabled={busyId === f.id}
-								onclick={() => (editFindingId = f.id)}
-								title="Open the find/replace editor for the offending line(s)"
-							>
-								Edit Tool
-							</button>
-							<button
-								class="act danger"
-								disabled={busyId === f.id}
-								onclick={() => onDelete(f)}
-								title="Remove this finding from the report"
-							>
-								Delete
-							</button>
-							<button
-								class="act"
-								disabled={busyId === f.id}
-								onclick={() => onAccept(f)}
-								title="Keep as is — take no action"
-							>
-								Accept
-							</button>
+					{#if expandedPackages[group.pass]}
+						<div class="package-body">
+							{#each group.reviewers as rv (rv.aspect)}
+								{@const rkey = reviewerKey(group.pass, rv.aspect)}
+								<div class="reviewer">
+									<button
+										type="button"
+										class="reviewer-head"
+										aria-expanded={!!expandedReviewers[rkey]}
+										onclick={() => toggleReviewer(rkey)}
+									>
+										<span class="chevron sub" class:open={expandedReviewers[rkey]}>▶</span>
+										<span class="reviewer-title">{reviewerLabel(rv.aspect)}</span>
+										<span class="reviewer-count">{rv.items.length}</span>
+									</button>
+
+									{#if expandedReviewers[rkey]}
+										<div class="reviewer-body scroll-list">
+											{#each rv.items as f (f.id)}
+												<div
+													class="finding"
+													class:active={activeKey === String(f.id)}
+													class:resolved={f.review_status === 'fixed' ||
+														f.review_status === 'accepted'}
+													style="border-left-color:{sevColor(f.severity)};"
+												>
+													<button
+														type="button"
+														class="finding-body"
+														onclick={() => onFocusFinding(f)}
+														title={f.location ? `Jump to line ${f.location}` : ''}
+													>
+														<div class="finding-head">
+															<strong>{f.title}</strong>
+															<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
+															<span class="badge">{f.aspect}</span>
+															{#if f.review_status === 'fixed'}
+																<span class="status-chip fixed">Fixed</span>
+															{:else if f.review_status === 'accepted'}
+																<span class="status-chip accepted">Accepted</span>
+															{/if}
+														</div>
+														{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
+														{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
+														{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
+													</button>
+
+													<div class="finding-actions">
+														<button
+															class="act"
+															disabled={busyId === f.id}
+															onclick={() => onAutoFix(f)}
+															title="Fix the offending line(s) automatically with the configured model"
+														>
+															{busyId === f.id ? '…' : 'LLM Auto Fix'}
+														</button>
+														<button
+															class="act"
+															disabled={busyId === f.id}
+															onclick={() => (editFindingId = f.id)}
+															title="Open the find/replace editor for the offending line(s)"
+														>
+															Edit Tool
+														</button>
+														<button
+															class="act danger"
+															disabled={busyId === f.id}
+															onclick={() => onDelete(f)}
+															title="Remove this finding from the report"
+														>
+															Delete
+														</button>
+														<button
+															class="act"
+															disabled={busyId === f.id}
+															onclick={() => onAccept(f)}
+															title="Keep as is — take no action"
+														>
+															Accept
+														</button>
+													</div>
+												</div>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/each}
 						</div>
-					</div>
-				{/each}
+					{/if}
+				</div>
 			{/each}
 
 			{#if livePassGroups.length === 0 && findings.length > 0}
@@ -593,6 +678,118 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
+	.package {
+		margin: 0.6rem 0;
+	}
+	.package-head {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		text-align: left;
+		background: var(--card-bg);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 0.6rem 0.85rem;
+		cursor: pointer;
+		color: var(--accent);
+		font: inherit;
+		font-size: 1.05rem;
+		font-weight: 600;
+		transition: border-color 0.15s;
+	}
+	.package-head:hover {
+		border-color: var(--accent);
+	}
+	.chevron {
+		flex: 0 0 auto;
+		font-size: 0.7rem;
+		color: var(--text-secondary);
+		transition: transform 0.15s;
+	}
+	.chevron.open {
+		transform: rotate(90deg);
+	}
+	.package-title {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.package-count {
+		flex: 0 0 auto;
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+		background: var(--accent-tint);
+		border-radius: 999px;
+		padding: 0.1rem 0.55rem;
+	}
+	.package-body {
+		padding: 0.25rem 0 0.25rem 0.75rem;
+		margin-top: 0.35rem;
+	}
+	.reviewer {
+		margin: 0.4rem 0;
+	}
+	.reviewer-head {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		text-align: left;
+		background: transparent;
+		border: 1px solid var(--border);
+		border-radius: 7px;
+		padding: 0.4rem 0.7rem;
+		cursor: pointer;
+		color: var(--text-secondary);
+		font: inherit;
+		font-size: 0.9rem;
+		font-weight: 600;
+		transition: border-color 0.15s, color 0.15s;
+	}
+	.reviewer-head:hover {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	.chevron.sub {
+		font-size: 0.62rem;
+	}
+	.reviewer-title {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.reviewer-count {
+		flex: 0 0 auto;
+		font-size: 0.68rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		background: var(--accent-tint);
+		border-radius: 999px;
+		padding: 0.08rem 0.5rem;
+	}
+	.reviewer-body {
+		max-height: 45vh;
+		overflow-y: auto;
+		padding-left: 0.6rem;
+		padding-right: 0.4rem;
+		border-left: 2px solid var(--border);
+		margin: 0.3rem 0 0.3rem 0.45rem;
+	}
+	/* Scrollbar matched to the Document Structure LINES list. */
+	.scroll-list {
+		scrollbar-width: thin;
+		scrollbar-color: var(--scroll-thumb) transparent;
+	}
+	.scroll-list::-webkit-scrollbar {
+		width: 6px;
+	}
+	.scroll-list::-webkit-scrollbar-thumb {
+		background: var(--scroll-thumb);
+		border-radius: 999px;
+	}
+	.scroll-list::-webkit-scrollbar-track {
+		background: transparent;
+	}
 	.finding {
 		background: var(--card-bg);
 		border: 1px solid var(--border);
@@ -600,6 +797,9 @@
 		border-radius: 8px;
 		margin: 0.6rem 0;
 		transition: border-color 0.15s, box-shadow 0.15s;
+	}
+	.reviewer-body .finding:first-child {
+		margin-top: 0;
 	}
 	.finding:hover {
 		border-color: var(--accent);
