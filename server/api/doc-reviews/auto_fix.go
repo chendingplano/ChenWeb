@@ -121,6 +121,10 @@ func readLineContents(path string, lineNos []int) (map[int]string, error) {
 // (the 7th tab-separated field) of each edited line number. All other fields and
 // every untouched physical line are preserved verbatim. Returns the number of
 // lines actually changed.
+//
+// If a new content string contains '\n', the original line is split: the first
+// part keeps the original metadata; subsequent parts copy the metadata but use
+// -1 as the line number (to avoid duplicate line-number conflicts).
 func applyLineEdits(path string, edits map[int]string) (int, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -133,34 +137,55 @@ func applyLineEdits(path string, edits map[int]string) (int, error) {
 	}
 
 	rawLines := strings.Split(string(body), "\n")
+	out := make([]string, 0, len(rawLines))
 	changed := 0
-	for i, raw := range rawLines {
+	for _, raw := range rawLines {
 		hasCR := strings.HasSuffix(raw, "\r")
 		line := strings.TrimRight(raw, "\r")
 		fields := strings.Split(line, "\t")
 		if len(fields) < 7 {
+			out = append(out, raw)
 			continue
 		}
 		n, err := strconv.Atoi(strings.TrimSpace(fields[0]))
 		if err != nil {
+			out = append(out, raw)
 			continue
 		}
 		newContent, ok := edits[n]
 		if !ok || fields[6] == newContent {
+			out = append(out, raw)
 			continue
 		}
-		fields[6] = newContent
-		line = strings.Join(fields, "\t")
+
+		parts := strings.Split(newContent, "\n")
+		// First part: keep original metadata, update content.
+		firstFields := make([]string, len(fields))
+		copy(firstFields, fields)
+		firstFields[6] = parts[0]
+		first := strings.Join(firstFields, "\t")
 		if hasCR {
-			line += "\r"
+			first += "\r"
 		}
-		rawLines[i] = line
+		out = append(out, first)
+		// Extra parts: copy metadata but set line_no to -1.
+		for _, part := range parts[1:] {
+			extraFields := make([]string, len(fields))
+			copy(extraFields, fields)
+			extraFields[0] = "-1"
+			extraFields[6] = part
+			extra := strings.Join(extraFields, "\t")
+			if hasCR {
+				extra += "\r"
+			}
+			out = append(out, extra)
+		}
 		changed++
 	}
 	if changed == 0 {
 		return 0, nil
 	}
-	if err := os.WriteFile(path, []byte(strings.Join(rawLines, "\n")), mode); err != nil {
+	if err := os.WriteFile(path, []byte(strings.Join(out, "\n")), mode); err != nil {
 		return 0, fmt.Errorf("write line file: %w", err)
 	}
 	return changed, nil
