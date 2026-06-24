@@ -7,6 +7,8 @@
     import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
     import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
     import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+    import JsonTreeViewer from './json-tree-viewer.svelte';
+    import { marked } from 'marked';
 
     let { darkMode = true, requestId = 0, reportId = 0, docTitle = '', onNewReview }:
         { darkMode: boolean; requestId: number; reportId?: number; docTitle?: string; onNewReview?: () => void } = $props();
@@ -33,6 +35,48 @@
     let expandedFindings = $state<Set<number>>(new Set());
     let activeTab = $state<'findings' | 'report'>('findings');
     let isStopping = $state(false);
+
+    // JSON viewer modal state
+    let jsonModalOpen = $state(false);
+    let jsonModalData = $state<unknown>(null);
+    let jsonModalLoading = $state(false);
+
+    // Markdown viewer modal state
+    let mdModalOpen = $state(false);
+    let mdModalHtml = $state('');
+    let mdModalLoading = $state(false);
+
+    async function openJsonModal() {
+        jsonModalOpen = true;
+        if (jsonModalData !== null) return;
+        jsonModalLoading = true;
+        try {
+            const res = await fetch(`/api/v1/doc-review/reports/${linkReportId}`, { credentials: 'same-origin' });
+            const data = await res.json();
+            jsonModalData = data;
+        } catch (e: any) {
+            jsonModalData = { error: e.message };
+        }
+        jsonModalLoading = false;
+    }
+
+    function closeJsonModal() { jsonModalOpen = false; }
+
+    async function openMdModal() {
+        mdModalOpen = true;
+        if (mdModalHtml) return;
+        mdModalLoading = true;
+        try {
+            const res = await fetch(`/api/v1/doc-review/reports/${linkReportId}/export?format=md`, { credentials: 'same-origin' });
+            const text = await res.text();
+            mdModalHtml = await marked.parse(text);
+        } catch (e: any) {
+            mdModalHtml = `<p style="color:#ef4444">Failed to load markdown: ${e.message}</p>`;
+        }
+        mdModalLoading = false;
+    }
+
+    function closeMdModal() { mdModalOpen = false; }
 
     // PDF file list dropdown state
     let pdfMenuOpen = $state(false);
@@ -383,16 +427,26 @@
                             {/if}
                         </div>
                         <!-- 3. View Full Report JSON -->
-                        <a href={`/api/v1/doc-review/reports/${linkReportId}`} target="_blank"
-                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
+                        <button type="button" onclick={openJsonModal}
+                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
                             View Full Report JSON
-                        </a>
-                        <!-- 4. Export Markdown -->
-                        <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=md`} target="_blank"
+                        </button>
+                        <!-- 4. View Full Report Markdown -->
+                        <button type="button" onclick={openMdModal}
+                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
+                            View Full Report Markdown
+                        </button>
+                        <!-- 5. Download Report PDF -->
+                        <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=pdf`} download
                             style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
-                            Export Markdown
+                            Download Report PDF
                         </a>
-                        <!-- 5. Review History (placeholder) -->
+                        <!-- 6. Download Report Markdown -->
+                        <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=md`} download
+                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
+                            Download Report Markdown
+                        </a>
+                        <!-- 7. Review History (placeholder) -->
                         <button type="button"
                             style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
                             Review History
@@ -419,7 +473,108 @@
     </div>
 {/if}
 
+<!-- JSON Viewer Modal -->
+{#if jsonModalOpen}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+        onclick={(e) => { if (e.target === e.currentTarget) closeJsonModal(); }}
+        onkeydown={(e) => { if (e.key === 'Escape') closeJsonModal(); }}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        style="position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);"
+    >
+        <div style="background: {darkMode ? '#161B27' : '#FFFFFF'}; border: 1px solid {borderColor}; border-radius: 14px; width: min(90vw, 880px); max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.5);">
+            <!-- Modal header -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid {borderColor}; flex-shrink: 0;">
+                <div>
+                    <span style="font-weight: 600; font-size: 0.95rem; color: {textPrimary};">Full Report JSON</span>
+                    <span style="margin-left: 0.6rem; font-size: 0.75rem; color: {textMuted}; font-family: monospace;">report #{linkReportId}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <a href={`/api/v1/doc-review/reports/${linkReportId}`} target="_blank"
+                        style="padding: 0.3rem 0.65rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.8rem;">
+                        Raw JSON ↗
+                    </a>
+                    <button type="button" onclick={closeJsonModal}
+                        style="padding: 0.3rem 0.65rem; background: transparent; color: {textMuted}; border: 1px solid {borderColor}; border-radius: 6px; cursor: pointer; font-size: 0.8rem; line-height: 1;">✕</button>
+                </div>
+            </div>
+            <!-- Modal body -->
+            <div style="overflow: auto; padding: 1.25rem; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace; font-size: 0.82rem; line-height: 1.6; flex: 1;">
+                {#if jsonModalLoading}
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: {textSecondary}; padding: 2rem; justify-content: center;">
+                        <LoaderIcon size={20} style="animation: spin 1s linear infinite;" />
+                        Loading…
+                    </div>
+                {:else if jsonModalData !== null}
+                    <JsonTreeViewer value={jsonModalData} depth={0} {darkMode} />
+                {/if}
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- Markdown Viewer Modal -->
+{#if mdModalOpen}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+        onclick={(e) => { if (e.target === e.currentTarget) closeMdModal(); }}
+        onkeydown={(e) => { if (e.key === 'Escape') closeMdModal(); }}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        style="position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);"
+    >
+        <div style="background: {darkMode ? '#161B27' : '#FFFFFF'}; border: 1px solid {borderColor}; border-radius: 14px; width: min(90vw, 900px); max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.5);">
+            <!-- Modal header -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid {borderColor}; flex-shrink: 0;">
+                <div>
+                    <span style="font-weight: 600; font-size: 0.95rem; color: {textPrimary};">Full Report</span>
+                    <span style="margin-left: 0.6rem; font-size: 0.75rem; color: {textMuted}; font-family: monospace;">report #{linkReportId}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=md`} target="_blank"
+                        style="padding: 0.3rem 0.65rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.8rem;">
+                        Raw Markdown ↗
+                    </a>
+                    <button type="button" onclick={closeMdModal}
+                        style="padding: 0.3rem 0.65rem; background: transparent; color: {textMuted}; border: 1px solid {borderColor}; border-radius: 6px; cursor: pointer; font-size: 0.8rem; line-height: 1;">✕</button>
+                </div>
+            </div>
+            <!-- Modal body -->
+            <div class="md-body" style="overflow: auto; padding: 1.5rem 2rem; flex: 1; color: {textPrimary};">
+                {#if mdModalLoading}
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: {textSecondary}; padding: 2rem; justify-content: center;">
+                        <LoaderIcon size={20} style="animation: spin 1s linear infinite;" />
+                        Loading…
+                    </div>
+                {:else}
+                    {@html mdModalHtml}
+                {/if}
+            </div>
+        </div>
+    </div>
+{/if}
+
 <style>
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    .md-body :global(h1) { font-size: 1.6rem; font-weight: 700; margin: 1.2rem 0 0.6rem; }
+    .md-body :global(h2) { font-size: 1.3rem; font-weight: 600; margin: 1rem 0 0.5rem; }
+    .md-body :global(h3) { font-size: 1.1rem; font-weight: 600; margin: 0.9rem 0 0.4rem; }
+    .md-body :global(p)  { line-height: 1.7; margin: 0.5rem 0; font-size: 0.9rem; }
+    .md-body :global(ul), .md-body :global(ol) { padding-left: 1.5rem; margin: 0.5rem 0; font-size: 0.9rem; }
+    .md-body :global(li) { margin: 0.2rem 0; line-height: 1.6; }
+    .md-body :global(strong) { font-weight: 700; }
+    .md-body :global(em) { font-style: italic; }
+    .md-body :global(code) { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; background: rgba(99,102,241,0.12); padding: 0.1em 0.35em; border-radius: 4px; }
+    .md-body :global(pre) { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 0.75rem 0; }
+    .md-body :global(pre code) { background: transparent; padding: 0; font-size: 0.82rem; }
+    .md-body :global(blockquote) { border-left: 3px solid rgba(129,140,248,0.5); padding-left: 1rem; margin: 0.5rem 0; opacity: 0.8; }
+    .md-body :global(hr) { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 1rem 0; }
+    .md-body :global(table) { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.85rem; }
+    .md-body :global(th), .md-body :global(td) { padding: 0.45rem 0.75rem; border: 1px solid rgba(255,255,255,0.12); text-align: left; }
+    .md-body :global(th) { font-weight: 600; background: rgba(99,102,241,0.12); }
 </style>
