@@ -5,13 +5,13 @@
 		getReport,
 		getRequest,
 		updateFinding,
-		autoFixFinding,
 		regenerateReport,
 		generateCorrectionReport,
 		type FindingItem
 	} from '$lib/services/docReviewService';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
+	import LlmAutoFixDialog from '$lib/components/home3/llm-auto-fix-dialog.svelte';
 
 	let dark = $derived(page.url.searchParams.get('dark') !== '0');
 	let reportId = $derived(Number(page.params.id));
@@ -69,7 +69,9 @@
 	}
 	let busyId = $state<number | null>(null);
 	let editFindingId = $state<number | null>(null);
+	let autoFixFinding = $state<FindingItem | null>(null);
 	let dirty = $state(false);
+	let showMode = $state<'active' | 'all'>('active');
 	let regenerating = $state(false);
 	let correcting = $state(false);
 	let toast = $state<{ kind: 'info' | 'warn' | 'error'; text: string } | null>(null);
@@ -113,6 +115,7 @@
 		const byPass = new Map<string, Map<string, FindingItem[]>>();
 		for (const f of findings) {
 			if (f.review_status === 'deleted') continue;
+			if (showMode === 'active' && f.review_status === 'corrected') continue;
 			let byAspect = byPass.get(f.pass);
 			if (!byAspect) {
 				byAspect = new Map();
@@ -267,22 +270,21 @@
 		}
 	}
 
-	async function onAutoFix(f: FindingItem) {
-		busyId = f.id;
+	function onAutoFix(f: FindingItem) {
+		autoFixFinding = f;
+	}
+
+	async function onAutoFixSaved() {
+		const f = autoFixFinding;
+		autoFixFinding = null;
+		if (!f) return;
 		try {
-			const res = await autoFixFinding(f.id);
-			if (res.fixable) {
-				setFindingStatus(f.id, 'fixed');
-				dirty = true;
-				const n = res.corrected?.length ?? 0;
-				showToast('info', `Auto-fixed ${n} line${n === 1 ? '' : 's'}.`);
-			} else {
-				showToast('warn', res.message || 'This finding could not be auto-fixed.', 8000);
-			}
+			await updateFinding(f.id, 'corrected');
+			setFindingStatus(f.id, 'corrected');
+			dirty = true;
+			showToast('info', 'Auto-fix applied and hidden.');
 		} catch (e) {
-			showToast('error', e instanceof Error ? e.message : 'Auto-fix failed', 8000);
-		} finally {
-			busyId = null;
+			showToast('error', e instanceof Error ? e.message : 'Failed to mark as corrected');
 		}
 	}
 
@@ -293,6 +295,20 @@
 			setFindingStatus(id, 'fixed');
 			dirty = true;
 			showToast('info', `Saved ${changed} edited line${changed === 1 ? '' : 's'}.`);
+		}
+	}
+
+	async function onEditSavedAndHide(changed: number) {
+		const id = editFindingId;
+		editFindingId = null;
+		if (id == null) return;
+		try {
+			await updateFinding(id, 'corrected');
+			setFindingStatus(id, 'corrected');
+			if (changed > 0) dirty = true;
+			showToast('info', `Saved and hidden${changed > 0 ? ` (${changed} line${changed === 1 ? '' : 's'} changed)` : ''}.`);
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Failed to mark as corrected');
 		}
 	}
 
@@ -418,6 +434,21 @@
 				{/if}
 			{/if}
 
+			<div class="show-mode-bar">
+				<button
+					type="button"
+					class="show-mode-btn"
+					class:active={showMode === 'active'}
+					onclick={() => (showMode = 'active')}
+				>Show Active</button>
+				<button
+					type="button"
+					class="show-mode-btn"
+					class:active={showMode === 'all'}
+					onclick={() => (showMode = 'all')}
+				>Show All</button>
+			</div>
+
 			{#each livePassGroups as group (group.pass)}
 				<div class="package">
 					<button
@@ -454,7 +485,8 @@
 													class="finding"
 													class:active={activeKey === String(f.id)}
 													class:resolved={f.review_status === 'fixed' ||
-														f.review_status === 'accepted'}
+														f.review_status === 'accepted' ||
+														f.review_status === 'corrected'}
 													style="border-left-color:{sevColor(f.severity)};"
 												>
 													<button
@@ -464,13 +496,16 @@
 														title={f.location ? `Jump to line ${f.location}` : ''}
 													>
 														<div class="finding-head">
+															<span class="finding-id">#{f.id}</span>
 															<strong>{f.title}</strong>
 															<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
 															<span class="badge">{f.aspect}</span>
 															{#if f.review_status === 'fixed'}
-																<span class="status-chip fixed">Fixed</span>
+																<span class="status-chip chip-fixed">Fixed</span>
 															{:else if f.review_status === 'accepted'}
 																<span class="status-chip accepted">Accepted</span>
+															{:else if f.review_status === 'corrected'}
+																<span class="status-chip corrected">Corrected</span>
 															{/if}
 														</div>
 														{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
@@ -485,7 +520,7 @@
 															onclick={() => onAutoFix(f)}
 															title="Fix the offending line(s) automatically with the configured model"
 														>
-															{busyId === f.id ? '…' : 'LLM Auto Fix'}
+															LLM Auto Fix
 														</button>
 														<button
 															class="act"
@@ -558,10 +593,21 @@
 {#if editFindingId != null}
 	<EditToolDialog
 		findingId={editFindingId}
+		reason={findings.find((f) => f.id === editFindingId)?.description ?? ''}
 		suggestion={findings.find((f) => f.id === editFindingId)?.suggestion ?? ''}
 		{dark}
 		onsaved={onEditSaved}
+		onsavedandhide={onEditSavedAndHide}
 		oncancel={() => (editFindingId = null)}
+	/>
+{/if}
+
+{#if autoFixFinding != null}
+	<LlmAutoFixDialog
+		finding={autoFixFinding}
+		{dark}
+		onsaved={onAutoFixSaved}
+		oncancel={() => (autoFixFinding = null)}
 	/>
 {/if}
 
@@ -874,13 +920,43 @@
 		font-size: 0.68rem;
 		font-weight: 600;
 	}
-	.status-chip.fixed {
+	.status-chip.chip-fixed {
 		background: rgba(16, 185, 129, 0.18);
 		color: #10b981;
 	}
 	.status-chip.accepted {
 		background: var(--accent-tint);
 		color: var(--accent);
+	}
+	.status-chip.corrected {
+		background: rgba(15, 118, 110, 0.18);
+		color: #0f766e;
+	}
+	.show-mode-bar {
+		display: flex;
+		gap: 0.4rem;
+		margin: 0.75rem 0 0.5rem;
+	}
+	.show-mode-btn {
+		padding: 0.3rem 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: transparent;
+		color: var(--text-secondary);
+		font: inherit;
+		font-size: 0.78rem;
+		cursor: pointer;
+		transition: background 0.15s, border-color 0.15s, color 0.15s;
+	}
+	.show-mode-btn:hover {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	.show-mode-btn.active {
+		background: var(--accent-tint);
+		border-color: var(--accent);
+		color: var(--accent);
+		font-weight: 600;
 	}
 	.toast {
 		position: fixed;
@@ -909,6 +985,16 @@
 		align-items: center;
 		gap: 0.5rem;
 		flex-wrap: wrap;
+	}
+	.finding-id {
+		flex: 0 0 auto;
+		font-size: 0.68rem;
+		font-family: monospace;
+		color: var(--text-muted);
+		background: var(--accent-tint);
+		border-radius: 4px;
+		padding: 0.1rem 0.4rem;
+		letter-spacing: 0.02em;
 	}
 	.finding-head strong {
 		font-size: 0.92rem;

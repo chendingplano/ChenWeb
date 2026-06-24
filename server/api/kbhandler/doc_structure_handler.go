@@ -673,11 +673,20 @@ func SplitDocStructureLine(c echo.Context) error {
 	original := lines[targetIdx]
 	lineType := strings.TrimSpace(req.LineType)
 
-	// Rebuild slice: lines before + split lines + lines after
+	// Rebuild slice: lines before + split lines + lines after.
+	// The first split piece keeps the original line number so existing finding
+	// references remain valid. Additional pieces use -1 (unassigned) to avoid
+	// shifting every downstream line number. Call RenumberDocStructureLines when
+	// ready to assign sequential numbers to all -1 lines.
 	rebuilt := make([]docStructureLine, 0, len(lines)+len(nonEmpty)-1)
 	rebuilt = append(rebuilt, lines[:targetIdx]...)
-	for _, content := range nonEmpty {
+	for i, content := range nonEmpty {
+		lineNum := -1
+		if i == 0 {
+			lineNum = original.LineNumber
+		}
 		rebuilt = append(rebuilt, docStructureLine{
+			LineNumber: lineNum,
 			PageNumber: original.PageNumber,
 			LineType:   lineType,
 			Font:       original.Font,
@@ -687,11 +696,6 @@ func SplitDocStructureLine(c echo.Context) error {
 		})
 	}
 	rebuilt = append(rebuilt, lines[targetIdx+1:]...)
-
-	// Renumber sequentially
-	for i := range rebuilt {
-		rebuilt[i].LineNumber = i + 1
-	}
 
 	if err := writeTxtLinesFile(txtPath, rebuilt); err != nil {
 		logger.Error("write txt file failed", "path", txtPath, "err", err)
@@ -739,6 +743,137 @@ func SplitDocStructureLine(c echo.Context) error {
 		Lines:         rebuilt,
 		Pages:         maxPage,
 		Total:         len(rebuilt),
+	}
+	if fileName.Valid {
+		resp.FileName = fileName.String
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+type renumberDocStructureRequest struct {
+	InputRecordID int64 `json:"input_record_id"`
+}
+
+// RenumberDocStructureLines handles POST /api/v1/kb/doc-structure/renumber.
+// It assigns sequential line numbers (1…N) to every line in order, resolving
+// all -1 sentinels left by split operations.
+func RenumberDocStructureLines(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_DSR_001")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	var req renumberDocStructureRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid request body (CWB_KB_DSR_010)",
+		})
+	}
+	if req.InputRecordID <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status: false, ErrorMsg: "invalid input_record_id (CWB_KB_DSR_011)",
+		})
+	}
+
+	artifactDir := strings.TrimSpace(os.Getenv("ARTIFACT_DIR"))
+	if artifactDir == "" {
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "missing ARTIFACT_DIR (CWB_KB_DSR_020)",
+		})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	inputTable, err := resolveInputTable(db)
+	if err != nil {
+		logger.Error("resolve kb input table failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to resolve table (CWB_KB_DSR_021)",
+		})
+	}
+
+	stagingExpr, err := resolveStagingOrNameExpr(db, inputTable)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to resolve filename column (CWB_KB_DSR_022)",
+		})
+	}
+	parserExpr, err := resolveParserNameExpr(db, inputTable)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to resolve parser column (CWB_KB_DSR_023)",
+		})
+	}
+
+	query := fmt.Sprintf(`SELECT %s AS staging_filename, %s AS parser_name, i.file_name FROM %s i WHERE i.id = $1`, stagingExpr, parserExpr, inputTable)
+	var stagingFilename, parserName, fileName sql.NullString
+	if err := db.QueryRow(query, req.InputRecordID).Scan(&stagingFilename, &parserName, &fileName); err != nil {
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, errorResponse{
+				Status: false, ErrorMsg: "record not found (CWB_KB_DSR_030)",
+			})
+		}
+		logger.Error("query kb input failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to retrieve record (CWB_KB_DSR_031)",
+		})
+	}
+
+	staging := strings.TrimSpace(stagingFilename.String)
+	parser := strings.TrimSpace(parserName.String)
+	if staging == "" || parser == "" {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status: false, ErrorMsg: "staging filename or parser name is empty (CWB_KB_DSR_032)",
+		})
+	}
+
+	stagingBase := filepath.Base(staging)
+	stagingRoot := strings.TrimSuffix(stagingBase, filepath.Ext(stagingBase))
+	if strings.TrimSpace(stagingRoot) == "" {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status: false, ErrorMsg: "invalid staging filename (CWB_KB_DSR_033)",
+		})
+	}
+
+	artifactBase := filepath.Join(
+		artifactDir,
+		strconv.FormatInt(req.InputRecordID/1000, 10),
+		strconv.FormatInt(req.InputRecordID, 10),
+	)
+	txtPath := filepath.Join(artifactBase, stagingRoot+"_"+parser+".txt")
+
+	lines, _, err := readCorrectedLinesFile(txtPath)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, errorResponse{
+			Status:   false,
+			ErrorMsg: fmt.Sprintf("structure file not found: %s (CWB_KB_DSR_040)", filepath.Base(txtPath)),
+		})
+	}
+
+	for i := range lines {
+		lines[i].LineNumber = i + 1
+	}
+
+	if err := writeTxtLinesFile(txtPath, lines); err != nil {
+		logger.Error("write txt file failed", "path", txtPath, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status: false, ErrorMsg: "failed to write txt file (CWB_KB_DSR_041)",
+		})
+	}
+
+	maxPage := 0
+	for _, ln := range lines {
+		if ln.PageNumber > maxPage {
+			maxPage = ln.PageNumber
+		}
+	}
+
+	logger.Info("renumbered doc structure lines", "input_id", req.InputRecordID, "total", len(lines))
+	resp := docStructureResponse{
+		Status:        true,
+		InputID:       req.InputRecordID,
+		CorrectedFile: txtPath,
+		Lines:         lines,
+		Pages:         maxPage,
+		Total:         len(lines),
 	}
 	if fileName.Valid {
 		resp.FileName = fileName.String
@@ -1057,7 +1192,8 @@ func parseCorrectedLine(s string) (docStructureLine, bool) {
 
 	lineNum, err1 := strconv.Atoi(strings.TrimSpace(fields[0]))
 	pageNum, err2 := strconv.Atoi(strings.TrimSpace(fields[1]))
-	if err1 != nil || err2 != nil || lineNum <= 0 || pageNum <= 0 {
+	// -1 is a valid sentinel for new/unassigned lines created during a split.
+	if err1 != nil || err2 != nil || lineNum == 0 || pageNum <= 0 {
 		return docStructureLine{}, false
 	}
 

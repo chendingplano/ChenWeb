@@ -4,15 +4,19 @@
 
 	let {
 		findingId,
+		reason = '',
 		suggestion = '',
 		dark = true,
 		onsaved,
+		onsavedandhide,
 		oncancel
 	}: {
 		findingId: number;
+		reason?: string;
 		suggestion?: string;
 		dark?: boolean;
 		onsaved: (changed: number) => void;
+		onsavedandhide?: (changed: number) => void;
 		oncancel: () => void;
 	} = $props();
 
@@ -20,6 +24,7 @@
 	let saving = $state(false);
 	let errorMsg = $state('');
 	let lines = $state<LineEdit[]>([]);
+	let originalLines = $state<LineEdit[]>([]);
 
 	let search = $state('');
 	let replaceText = $state('');
@@ -34,6 +39,10 @@
 
 	let hasMatch = $derived(matchLine !== null);
 	let canFind = $derived(search.length > 0 && lines.length > 0);
+	let hasChanges = $derived(
+		lines.length !== originalLines.length ||
+		lines.some((l, i) => l.content !== originalLines[i]?.content)
+	);
 
 	// Many suggestions follow the pattern "<instruction>例如：'<proposed content>'"
 	// (or an English "e.g."/quoted variant). Split off the quoted proposed content so
@@ -78,6 +87,7 @@
 	onMount(async () => {
 		try {
 			lines = await getFindingLines(findingId);
+			originalLines = lines.map((l) => ({ ...l }));
 			if (lines.length === 0) {
 				errorMsg = 'No editable source line is linked to this finding.';
 			}
@@ -178,6 +188,18 @@
 		}
 	}
 
+	async function saveAndHide() {
+		saving = true;
+		errorMsg = '';
+		try {
+			const changed = await editFindingLines(findingId, lines);
+			onsavedandhide?.(changed);
+		} catch (e) {
+			errorMsg = e instanceof Error ? e.message : 'Failed to save';
+			saving = false;
+		}
+	}
+
 	function onBackdrop(e: MouseEvent) {
 		if (e.target === e.currentTarget) oncancel();
 	}
@@ -196,6 +218,11 @@
 			<div class="state">Loading source line(s)…</div>
 		{:else}
 			{#if errorMsg}<div class="state error">{errorMsg}</div>{/if}
+
+			{#if reason}
+				<div class="section-label">Reason</div>
+				<div class="suggestion reason-text">{reason}</div>
+			{/if}
 
 			{#if suggestion}
 				<div class="section-label">Suggestion</div>
@@ -277,9 +304,14 @@
 
 		<div class="actions">
 			<button class="btn ghost" onclick={oncancel} disabled={saving}>Cancel</button>
-			<button class="btn primary" onclick={save} disabled={saving || loading || lines.length === 0}>
+			<button class="btn primary" onclick={save} disabled={saving || loading || lines.length === 0 || !hasChanges}>
 				{saving ? 'Saving…' : 'Save'}
 			</button>
+			{#if onsavedandhide}
+				<button class="btn save-hide" onclick={saveAndHide} disabled={saving || loading || lines.length === 0 || !hasChanges}>
+					{saving ? 'Saving…' : 'Save & Hide'}
+				</button>
+			{/if}
 		</div>
 	</div>
 </div>
@@ -516,6 +548,14 @@
 	}
 	.btn.ghost {
 		background: transparent;
+	}
+	.btn.save-hide {
+		background: #0f766e;
+		border-color: #0f766e;
+		color: #ffffff;
+	}
+	.btn.save-hide:hover:not(:disabled) {
+		background: #0d6460;
 	}
 	.state {
 		padding: 0.75rem 0;

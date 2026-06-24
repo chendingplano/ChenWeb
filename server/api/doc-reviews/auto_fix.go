@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/docactivity"
@@ -21,12 +22,15 @@ type LineEdit struct {
 	Content string `json:"content"`
 }
 
-// AutoFixResult is the outcome of an LLM Auto Fix attempt. When Fixable is false
+// AutoFixResult is the outcome of an LLM Auto Fix preview. When Fixable is false
 // the GUI surfaces Message to the user; otherwise Original/Corrected hold the
-// before/after of the lines that were rewritten in the line-file.
+// before/after diff for display. Changes are NOT written to disk until the caller
+// explicitly invokes ApplyAutoFix.
 type AutoFixResult struct {
 	Fixable   bool       `json:"fixable"`
 	Message   string     `json:"message,omitempty"`
+	ModelName string     `json:"model_name,omitempty"`
+	ElapsedMs int64      `json:"elapsed_ms,omitempty"`
 	Original  []LineEdit `json:"original,omitempty"`
 	Corrected []LineEdit `json:"corrected,omitempty"`
 }
@@ -276,9 +280,9 @@ Respond with a single JSON object of this exact shape:
 }
 Only include a line in "fixes" when its content actually changes. Output JSON only.`
 
-// AutoFixFinding runs the configured LLM to correct the offending line(s) and
-// writes the result back to the line-file. A non-error result with Fixable=false
-// means the GUI should prompt the user (e.g. unfixable or no model configured).
+// AutoFixFinding runs the configured LLM to generate a proposed fix for the
+// offending line(s) and returns it as a preview. Nothing is written to disk;
+// the caller must invoke ApplyAutoFix to commit the changes.
 func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int64, actor string) (*AutoFixResult, error) {
 	f, err := c.loadFindingContext(ctx, findingID)
 	if err != nil {
@@ -339,7 +343,9 @@ func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int6
 	llmCtx := docprocessing.WithLLMRecordID(ctx, f.InputRecordID)
 	in := docprocessing.NewLLMJSONInput(llmCtx, "auto_fix", autoFixPrompt, modelName,
 		string(inputJSON), "doc_review_auto_fix", "MID-CWB-AUTOFIX")
+	t0 := time.Now()
 	resp, err := client.ExtractJSON(llmCtx, in)
+	elapsedMs := time.Since(t0).Milliseconds()
 	if err != nil {
 		return nil, fmt.Errorf("auto-fix LLM call failed: %w", err)
 	}
@@ -350,7 +356,7 @@ func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int6
 		if reason == "" {
 			reason = "The model determined this issue cannot be auto-fixed."
 		}
-		return &AutoFixResult{Fixable: false, Message: reason}, nil
+		return &AutoFixResult{Fixable: false, Message: reason, ModelName: modelName, ElapsedMs: elapsedMs}, nil
 	}
 
 	edits := map[int]string{}
@@ -374,38 +380,65 @@ func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int6
 		if reason != "" {
 			msg = reason
 		}
-		return &AutoFixResult{Fixable: false, Message: msg}, nil
+		return &AutoFixResult{Fixable: false, Message: msg, ModelName: modelName, ElapsedMs: elapsedMs}, nil
 	}
 
-	changed, err := applyLineEdits(path, edits)
-	if err != nil {
-		return nil, err
-	}
-	if changed == 0 {
-		return &AutoFixResult{Fixable: false, Message: "No changes were applied to the document."}, nil
-	}
-
-	if _, err := c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_findings SET review_status = 'fixed' WHERE id = $1`, findingID,
-	); err != nil {
-		logger.Warn("auto-fix: mark finding fixed", "finding_id", findingID, "error", err)
-	}
-	logger.Info("finding auto-fixed", "finding_id", findingID, "lines_changed", changed, "model", modelName)
-
-	original := make([]LineEdit, 0, len(edits))
-	corrected := make([]LineEdit, 0, len(edits))
 	nos := make([]int, 0, len(edits))
 	for n := range edits {
 		nos = append(nos, n)
 	}
 	sort.Ints(nos)
-	beforeMap := make(map[int]string, len(edits))
+	original := make([]LineEdit, 0, len(edits))
+	corrected := make([]LineEdit, 0, len(edits))
 	for _, n := range nos {
 		original = append(original, LineEdit{LineNo: n, Content: current[n]})
 		corrected = append(corrected, LineEdit{LineNo: n, Content: edits[n]})
-		beforeMap[n] = current[n]
 	}
 
+	logger.Info("auto-fix preview ready", "finding_id", findingID, "lines_proposed", len(edits), "model", modelName, "elapsed_ms", elapsedMs)
+	return &AutoFixResult{
+		Fixable:   true,
+		ModelName: modelName,
+		ElapsedMs: elapsedMs,
+		Original:  original,
+		Corrected: corrected,
+	}, nil
+}
+
+// ApplyAutoFix writes the user-confirmed corrected lines to the line-file and
+// marks the finding as fixed. This is the commit step after AutoFixFinding preview.
+func (c *DocReviewController) ApplyAutoFix(ctx context.Context, findingID int64, corrected []LineEdit, modelName string, actor string) (int, error) {
+	f, err := c.loadFindingContext(ctx, findingID)
+	if err != nil {
+		return 0, err
+	}
+	if len(corrected) == 0 {
+		return 0, nil
+	}
+	path, err := resolveLineFilePath(ctx, c.DB, f.InputRecordID)
+	if err != nil {
+		return 0, err
+	}
+	editMap := make(map[int]string, len(corrected))
+	lineNos := make([]int, 0, len(corrected))
+	for _, e := range corrected {
+		editMap[e.LineNo] = e.Content
+		lineNos = append(lineNos, e.LineNo)
+	}
+	before, _ := readLineContents(path, lineNos)
+	changed, err := applyLineEdits(path, editMap)
+	if err != nil {
+		return 0, err
+	}
+	if changed == 0 {
+		return 0, nil
+	}
+	if _, err := c.DB.ExecContext(ctx,
+		`UPDATE kb.doc_review_findings SET review_status = 'fixed' WHERE id = $1`, findingID,
+	); err != nil {
+		logger.Warn("apply auto-fix: mark finding fixed", "finding_id", findingID, "error", err)
+	}
+	logger.Info("auto-fix applied", "finding_id", findingID, "lines_changed", changed, "model", modelName)
 	docactivity.Log(ctx, c.DB, docactivity.Activity{
 		ActivityType:  docactivity.TypeAutoFix,
 		InputRecordID: f.InputRecordID,
@@ -413,8 +446,8 @@ func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int6
 		ReportID:      c.resolveReportID(ctx, f.InputRecordID, f.ReviewRunID),
 		FindingID:     f.ID,
 		Location:      f.Location,
-		OldContent:    formatLineEdits(beforeMap),
-		NewContent:    formatLineEdits(edits),
+		OldContent:    formatLineEdits(before),
+		NewContent:    formatLineEdits(editMap),
 		Actor:         actor,
 		Detail: map[string]any{
 			"title":         f.Title,
@@ -424,8 +457,7 @@ func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int6
 			"model":         modelName,
 		},
 	})
-
-	return &AutoFixResult{Fixable: true, Original: original, Corrected: corrected}, nil
+	return changed, nil
 }
 
 // formatLineEdits renders a line→content map as "N: content" lines sorted by

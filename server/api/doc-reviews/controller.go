@@ -310,10 +310,10 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 func (c *DocReviewController) UpdateFinding(ctx context.Context, findingID int64, reviewStatus string, reviewedBy string) error {
 	allowed := map[string]bool{
 		"pending": true, "accepted": true, "rejected": true, "deferred": true,
-		"deleted": true, "fixed": true,
+		"deleted": true, "fixed": true, "corrected": true,
 	}
 	if !allowed[reviewStatus] {
-		return fmt.Errorf("invalid review_status: %q (must be pending/accepted/rejected/deferred/deleted/fixed)", reviewStatus)
+		return fmt.Errorf("invalid review_status: %q (must be pending/accepted/rejected/deferred/deleted/fixed/corrected)", reviewStatus)
 	}
 	// Capture finding context before the update so a delete can be logged with the
 	// original finding details (non-fatal if it cannot be loaded).

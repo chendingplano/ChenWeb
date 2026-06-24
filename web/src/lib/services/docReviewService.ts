@@ -158,12 +158,14 @@ export type LineEdit = { line_no: number; content: string };
 export type AutoFixResult = {
 	fixable: boolean;
 	message?: string;
+	model_name?: string;
+	elapsed_ms?: number;
 	original?: LineEdit[];
 	corrected?: LineEdit[];
 };
 
-// Runs the LLM auto-fix for a finding. A resolved result with fixable=false means
-// the caller should surface `message` to the user (e.g. unfixable / not configured).
+// Runs the LLM and returns a preview of the proposed fix. Nothing is written
+// to disk until applyAutoFix is called with the confirmed corrected lines.
 export async function autoFixFinding(id: number): Promise<AutoFixResult> {
 	const res = await fetch(`${BASE}/findings/${id}/auto-fix`, {
 		method: 'POST',
@@ -172,6 +174,24 @@ export async function autoFixFinding(id: number): Promise<AutoFixResult> {
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Auto-fix failed');
 	return data.result as AutoFixResult;
+}
+
+// Commits the user-confirmed corrected lines, writing them to disk and marking
+// the finding as fixed. Returns the number of lines actually changed.
+export async function applyAutoFix(
+	id: number,
+	corrected: LineEdit[],
+	modelName: string
+): Promise<number> {
+	const res = await fetch(`${BASE}/findings/${id}/auto-fix/apply`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ corrected, model_name: modelName })
+	});
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Apply auto-fix failed');
+	return data.changed as number;
 }
 
 // Returns the current content of a finding's offending line(s) for the Edit Tool.

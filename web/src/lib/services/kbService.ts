@@ -699,6 +699,26 @@ export async function deleteKbDocStructureLine(
 	return response.json() as Promise<GetDocStructureResponse>;
 }
 
+export async function renumberKbDocStructureLines(
+	inputRecordId: number
+): Promise<GetDocStructureResponse> {
+	const response = await fetch(`${BASE}/doc-structure/renumber`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ input_record_id: inputRecordId })
+	});
+	if (!response.ok) {
+		const parsed = await response.json().catch(() => null);
+		const msg =
+			parsed && typeof parsed.error_msg === 'string'
+				? parsed.error_msg
+				: `Failed to renumber doc structure lines (${response.status})`;
+		throw new Error(msg);
+	}
+	return response.json() as Promise<GetDocStructureResponse>;
+}
+
 // ---------- kb.chunks ----------
 
 export type KbChunkSpan = {

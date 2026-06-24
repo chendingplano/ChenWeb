@@ -256,9 +256,9 @@ func UpdateFinding(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
 
-// AutoFixFinding runs the LLM auto-fix for a finding, editing the line-file.
-// A 200 with fixable=false (not an HTTP error) means the GUI should prompt the
-// user (e.g. unfixable, no location, or no model configured).
+// AutoFixFinding runs the LLM for a finding and returns a preview of the proposed
+// fix. Nothing is written to disk; the caller must POST to /auto-fix/apply to
+// commit. A 200 with fixable=false means the GUI should surface the message.
 func AutoFixFinding(c echo.Context) error {
 	id, err := parseID(c, "id")
 	if err != nil {
@@ -270,6 +270,28 @@ func AutoFixFinding(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "result": res})
+}
+
+// ApplyAutoFixFinding commits the user-confirmed corrected lines returned by
+// AutoFixFinding, writing them to disk and marking the finding as fixed.
+func ApplyAutoFixFinding(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	var body struct {
+		Corrected []LineEdit `json:"corrected"`
+		ModelName string     `json:"model_name"`
+	}
+	if err := c.Bind(&body); err != nil || len(body.Corrected) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "corrected lines required"})
+	}
+	ctrl := NewDocReviewController()
+	changed, err := ctrl.ApplyAutoFix(c.Request().Context(), id, body.Corrected, body.ModelName, actorFromEcho(c))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "changed": changed})
 }
 
 // GetFindingLines returns the current content of the finding's offending line(s)

@@ -13,6 +13,7 @@
 		updateKbDocStructureLine,
 		deleteKbDocStructureLine,
 		splitKbDocStructureLines,
+		renumberKbDocStructureLines,
 		type DocStructureLine,
 		type KbInputRecord
 	} from '$lib/services/kbService';
@@ -829,6 +830,24 @@
 	let deletingLineKey = $state<string | null>(null);
 	let deleteConfirmLine = $state<DocStructureLine | null>(null);
 
+	let renumbering = $state(false);
+	let renumberError = $state('');
+	let hasNewLines = $derived(lines.some((l) => l.line_number < 0));
+
+	async function renumberLines() {
+		if (!currentInput || renumbering) return;
+		renumbering = true;
+		renumberError = '';
+		try {
+			const res = await renumberKbDocStructureLines(currentInput.id);
+			lines = res.lines ?? [];
+		} catch (err) {
+			renumberError = err instanceof Error ? err.message : 'Renumber failed.';
+		} finally {
+			renumbering = false;
+		}
+	}
+
 	function requestDeleteConfirm(line: DocStructureLine, e: MouseEvent) {
 		e.stopPropagation();
 		deleteConfirmLine = line;
@@ -1100,6 +1119,20 @@
 							{/each}
 						</select>
 					</label>
+					{#if hasNewLines}
+						<button
+							class="btn btn-renumber"
+							type="button"
+							disabled={renumbering}
+							title="Assign sequential line numbers to all 'new' lines"
+							onclick={() => void renumberLines()}
+						>
+							{renumbering ? '…' : 'Renumber'}
+						</button>
+					{/if}
+					{#if renumberError}
+						<span class="renumber-error" title={renumberError}>⚠</span>
+					{/if}
 					<button class="btn btn-ghost settings-btn" type="button" onclick={openLineListSettings}>
 						<SettingsIcon style="width:14px; height:14px;" />
 						Settings
@@ -1281,7 +1314,9 @@
 								}}
 								title={`Page ${line.page_number}, line ${line.line_number}`}
 							>
-								<span class="line-number-cell">L{line.line_number}</span>
+								<span class="line-number-cell" class:line-new={line.line_number < 0}>
+									{line.line_number < 0 ? 'new' : `L${line.line_number}`}
+								</span>
 								<span class="line-type-cell">{displayLineType(line)}</span>
 								<span class="line-content-cell">
 									{#if lineSearch.trim()}
@@ -1879,6 +1914,31 @@
 		padding: 0 10px;
 		font-size: 12px;
 	}
+	.btn-renumber {
+		flex: 0 0 auto;
+		height: 34px;
+		padding: 0 10px;
+		font-size: 12px;
+		font-weight: 600;
+		border: 1px solid var(--brass);
+		border-radius: 10px;
+		background: var(--brass-faint);
+		color: var(--brass);
+		cursor: pointer;
+	}
+	.btn-renumber:hover:not(:disabled) {
+		background: var(--brass);
+		color: #1d1508;
+	}
+	.btn-renumber:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.renumber-error {
+		color: #f87171;
+		font-size: 14px;
+		cursor: default;
+	}
 	.sr-only {
 		position: absolute;
 		width: 1px;
@@ -2265,6 +2325,10 @@
 		font-size: 11px;
 		color: var(--text-secondary);
 		white-space: nowrap;
+	}
+	.line-number-cell.line-new {
+		color: var(--brass);
+		font-style: italic;
 	}
 	.line-type-cell {
 		font-family: var(--font-mono);
