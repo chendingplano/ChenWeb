@@ -55,9 +55,9 @@ func GenerateTypstReport(ctx context.Context, requestID int64, skeleton *ReportS
 		return fmt.Errorf("create output dir %q: %w", outputDir, err)
 	}
 
-	// Filename: yyyymmdd-hhmm-{requestID}reports.{ext}
+	// Filename: yyyymmdd-hhmm-{requestID}-reports.{ext}
 	stamp := time.Now().Format("20060102-1504")
-	baseName := fmt.Sprintf("%s-%dreports", stamp, requestID)
+	baseName := fmt.Sprintf("%s-%d-reports", stamp, requestID)
 	typPath := filepath.Join(outputDir, baseName+".typ")
 	pdfPath := filepath.Join(outputDir, baseName+".pdf")
 

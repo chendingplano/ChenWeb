@@ -11,6 +11,7 @@ import (
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/docactivity"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -314,6 +315,13 @@ func (c *DocReviewController) UpdateFinding(ctx context.Context, findingID int64
 	if !allowed[reviewStatus] {
 		return fmt.Errorf("invalid review_status: %q (must be pending/accepted/rejected/deferred/deleted/fixed)", reviewStatus)
 	}
+	// Capture finding context before the update so a delete can be logged with the
+	// original finding details (non-fatal if it cannot be loaded).
+	var fctx *findingContext
+	if reviewStatus == "deleted" {
+		fctx, _ = c.loadFindingContext(ctx, findingID)
+	}
+
 	res, err := c.DB.ExecContext(ctx,
 		`UPDATE kb.doc_review_findings SET review_status = $1, reviewed_by = $2 WHERE id = $3`,
 		reviewStatus, reviewedBy, findingID,
@@ -326,6 +334,26 @@ func (c *DocReviewController) UpdateFinding(ctx context.Context, findingID int64
 		return fmt.Errorf("finding %d not found", findingID)
 	}
 	logger.Info("finding updated", "finding_id", findingID, "review_status", reviewStatus, "reviewed_by", reviewedBy)
+
+	if reviewStatus == "deleted" && fctx != nil {
+		docactivity.Log(ctx, c.DB, docactivity.Activity{
+			ActivityType:  docactivity.TypeFindingDelete,
+			InputRecordID: fctx.InputRecordID,
+			ReviewRunID:   fctx.ReviewRunID,
+			ReportID:      c.resolveReportID(ctx, fctx.InputRecordID, fctx.ReviewRunID),
+			FindingID:     fctx.ID,
+			Location:      fctx.Location,
+			OldContent:    fctx.Title,
+			Actor:         reviewedBy,
+			Detail: map[string]any{
+				"title":       fctx.Title,
+				"aspect":      fctx.Aspect,
+				"severity":    fctx.Severity,
+				"description": fctx.Description,
+				"suggestion":  fctx.Suggestion,
+			},
+		})
+	}
 	return nil
 }
 

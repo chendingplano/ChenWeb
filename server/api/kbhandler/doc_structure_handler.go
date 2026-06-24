@@ -12,10 +12,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/deepdoc/server/api/docactivity"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
+
+// structureActor resolves the authenticated user's name for the activity log,
+// returning "" when the request is unauthenticated.
+func structureActor(rc ApiTypes.RequestContext) string {
+	if userInfo := rc.IsAuthenticated(); userInfo != nil {
+		return userInfo.UserName
+	}
+	return ""
+}
 
 type docStructureLine struct {
 	LineNumber        int       `json:"line_number"`
@@ -494,6 +504,20 @@ func UpdateDocStructureLine(c echo.Context) error {
 	}
 
 	logger.Info("updated doc structure line", "input_id", req.InputRecordID, "page", req.PageNumber, "line", req.LineNumber)
+	docactivity.Log(c.Request().Context(), db, docactivity.Activity{
+		ActivityType:  docactivity.TypeStructureModify,
+		InputRecordID: req.InputRecordID,
+		PageNumber:    req.PageNumber,
+		LineNumber:    req.LineNumber,
+		OldContent:    oldContent,
+		NewContent:    updatedLine.Content,
+		Actor:         structureActor(rc),
+		Detail: map[string]any{
+			"line_type": updatedLine.LineType,
+			"font":      updatedLine.Font,
+			"font_size": updatedLine.FontSize,
+		},
+	})
 	resp := docStructureResponse{
 		Status:        true,
 		InputID:       req.InputRecordID,
@@ -695,6 +719,19 @@ func SplitDocStructureLine(c echo.Context) error {
 	}
 
 	logger.Info("split doc structure line", "input_id", req.InputRecordID, "page", req.PageNumber, "line", req.LineNumber, "into", len(nonEmpty))
+	docactivity.Log(c.Request().Context(), db, docactivity.Activity{
+		ActivityType:  docactivity.TypeStructureSplit,
+		InputRecordID: req.InputRecordID,
+		PageNumber:    req.PageNumber,
+		LineNumber:    req.LineNumber,
+		OldContent:    original.Content,
+		NewContent:    strings.Join(nonEmpty, "\n"),
+		Actor:         structureActor(rc),
+		Detail: map[string]any{
+			"line_type": lineType,
+			"into":      len(nonEmpty),
+		},
+	})
 	resp := docStructureResponse{
 		Status:        true,
 		InputID:       req.InputRecordID,
@@ -855,6 +892,17 @@ func DeleteDocStructureLine(c echo.Context) error {
 	}
 
 	logger.Info("deleted doc structure line", "input_id", req.InputRecordID, "page", req.PageNumber, "line", req.LineNumber)
+	docactivity.Log(c.Request().Context(), db, docactivity.Activity{
+		ActivityType:  docactivity.TypeStructureDelete,
+		InputRecordID: req.InputRecordID,
+		PageNumber:    req.PageNumber,
+		LineNumber:    req.LineNumber,
+		OldContent:    deletedLine.Content,
+		Actor:         structureActor(rc),
+		Detail: map[string]any{
+			"line_type": deletedLine.LineType,
+		},
+	})
 	resp := docStructureResponse{
 		Status:        true,
 		InputID:       req.InputRecordID,

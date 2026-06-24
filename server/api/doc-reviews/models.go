@@ -139,6 +139,15 @@ type RequestListItem struct {
 	EndTime       string `json:"end_time,omitempty"`
 }
 
+// ReportPDFFile describes one review-report PDF file found on disk.
+type ReportPDFFile struct {
+	RequestID  int64  `json:"request_id"`
+	ReportID   int64  `json:"report_id"`
+	FileName   string `json:"file_name"`
+	CreateTime string `json:"create_time"`
+	IsCurrent  bool   `json:"is_current"`
+}
+
 // SubmitResult is the response from POST /api/v1/doc-review/requests.
 type SubmitResult struct {
 	RequestID   int64  `json:"request_id"`

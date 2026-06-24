@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/deepdoc/server/api/docactivity"
 )
 
 // LineEdit is one (line number, content) pair exchanged with the GUI for the
@@ -211,7 +212,7 @@ func (c *DocReviewController) GetFindingLines(ctx context.Context, findingID int
 
 // ApplyFindingEdit writes user-edited line content back to the line-file (the
 // Edit Tool "Save" action) and marks the finding 'fixed' if anything changed.
-func (c *DocReviewController) ApplyFindingEdit(ctx context.Context, findingID int64, edits []LineEdit) (int, error) {
+func (c *DocReviewController) ApplyFindingEdit(ctx context.Context, findingID int64, edits []LineEdit, actor string) (int, error) {
 	f, err := c.loadFindingContext(ctx, findingID)
 	if err != nil {
 		return 0, err
@@ -224,9 +225,13 @@ func (c *DocReviewController) ApplyFindingEdit(ctx context.Context, findingID in
 		return 0, err
 	}
 	editMap := make(map[int]string, len(edits))
+	lineNos := make([]int, 0, len(edits))
 	for _, e := range edits {
 		editMap[e.LineNo] = e.Content
+		lineNos = append(lineNos, e.LineNo)
 	}
+	// Capture the pre-edit content of the targeted lines for the activity log.
+	before, _ := readLineContents(path, lineNos)
 	changed, err := applyLineEdits(path, editMap)
 	if err != nil {
 		return 0, err
@@ -238,6 +243,23 @@ func (c *DocReviewController) ApplyFindingEdit(ctx context.Context, findingID in
 			logger.Warn("apply edit: mark finding fixed", "finding_id", findingID, "error", err)
 		}
 		logger.Info("finding edited via Edit Tool", "finding_id", findingID, "lines_changed", changed)
+		docactivity.Log(ctx, c.DB, docactivity.Activity{
+			ActivityType:  docactivity.TypeEditTool,
+			InputRecordID: f.InputRecordID,
+			ReviewRunID:   f.ReviewRunID,
+			ReportID:      c.resolveReportID(ctx, f.InputRecordID, f.ReviewRunID),
+			FindingID:     f.ID,
+			Location:      f.Location,
+			OldContent:    formatLineEdits(before),
+			NewContent:    formatLineEdits(editMap),
+			Actor:         actor,
+			Detail: map[string]any{
+				"title":         f.Title,
+				"aspect":        f.Aspect,
+				"severity":      f.Severity,
+				"lines_changed": changed,
+			},
+		})
 	}
 	return changed, nil
 }
@@ -257,7 +279,7 @@ Only include a line in "fixes" when its content actually changes. Output JSON on
 // AutoFixFinding runs the configured LLM to correct the offending line(s) and
 // writes the result back to the line-file. A non-error result with Fixable=false
 // means the GUI should prompt the user (e.g. unfixable or no model configured).
-func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int64) (*AutoFixResult, error) {
+func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int64, actor string) (*AutoFixResult, error) {
 	f, err := c.loadFindingContext(ctx, findingID)
 	if err != nil {
 		return nil, err
@@ -377,11 +399,69 @@ func (c *DocReviewController) AutoFixFinding(ctx context.Context, findingID int6
 		nos = append(nos, n)
 	}
 	sort.Ints(nos)
+	beforeMap := make(map[int]string, len(edits))
 	for _, n := range nos {
 		original = append(original, LineEdit{LineNo: n, Content: current[n]})
 		corrected = append(corrected, LineEdit{LineNo: n, Content: edits[n]})
+		beforeMap[n] = current[n]
 	}
+
+	docactivity.Log(ctx, c.DB, docactivity.Activity{
+		ActivityType:  docactivity.TypeAutoFix,
+		InputRecordID: f.InputRecordID,
+		ReviewRunID:   f.ReviewRunID,
+		ReportID:      c.resolveReportID(ctx, f.InputRecordID, f.ReviewRunID),
+		FindingID:     f.ID,
+		Location:      f.Location,
+		OldContent:    formatLineEdits(beforeMap),
+		NewContent:    formatLineEdits(edits),
+		Actor:         actor,
+		Detail: map[string]any{
+			"title":         f.Title,
+			"aspect":        f.Aspect,
+			"severity":      f.Severity,
+			"lines_changed": changed,
+			"model":         modelName,
+		},
+	})
+
 	return &AutoFixResult{Fixable: true, Original: original, Corrected: corrected}, nil
+}
+
+// formatLineEdits renders a line→content map as "N: content" lines sorted by
+// line number, for storage in the activity log's old/new content columns.
+func formatLineEdits(m map[int]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	nos := make([]int, 0, len(m))
+	for n := range m {
+		nos = append(nos, n)
+	}
+	sort.Ints(nos)
+	parts := make([]string, 0, len(nos))
+	for _, n := range nos {
+		parts = append(parts, fmt.Sprintf("%d: %s", n, m[n]))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// resolveReportID returns the latest report id for a (record, run) pair, or 0 if
+// none exists yet. Best-effort: errors yield 0 so logging stays non-fatal.
+func (c *DocReviewController) resolveReportID(ctx context.Context, inputRecordID int64, reviewRunID string) int64 {
+	if c.DB == nil || reviewRunID == "" {
+		return 0
+	}
+	var id int64
+	err := c.DB.QueryRowContext(ctx,
+		`SELECT id FROM kb.doc_review_reports
+		 WHERE input_record_id = $1 AND review_run_id = $2
+		 ORDER BY id DESC LIMIT 1`, inputRecordID, reviewRunID,
+	).Scan(&id)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // toFloat coerces a JSON number (float64) or numeric string to float64.

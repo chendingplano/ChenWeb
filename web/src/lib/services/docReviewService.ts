@@ -205,6 +205,19 @@ export async function regenerateReport(reportId: number): Promise<void> {
 	if (!data.status) throw new Error(data.error_msg || 'Failed to regenerate report');
 }
 
+// Builds the Document Review Correction Report (Typst + PDF) from the recorded
+// correction activities for a report. Returns the generated PDF file name (empty
+// when PDF generation is disabled on the server).
+export async function generateCorrectionReport(reportId: number): Promise<string> {
+	const res = await fetch(`${BASE}/reports/${reportId}/correction-report`, {
+		method: 'POST',
+		credentials: 'same-origin'
+	});
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to generate correction report');
+	return data.pdf_file || '';
+}
+
 export async function stopRequest(id: number): Promise<void> {
 	const res = await fetch(`${BASE}/requests/${id}/stop`, {
 		method: 'POST',

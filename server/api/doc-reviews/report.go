@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"html/template"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -558,6 +560,102 @@ func renderHTML(report *ReportSkeleton) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// ListReportPDFs returns all review-report PDF files on disk for the document
+// associated with reportID. The entry for the current report is marked
+// IsCurrent=true. Returns an empty slice (not an error) when DOC_REVIEW_REPORTS
+// is unset or no PDF files match.
+func (g *DocReviewReportGenerator) ListReportPDFs(ctx context.Context, reportID int64) ([]ReportPDFFile, error) {
+	d, err := g.GetReport(ctx, reportID)
+	if err != nil {
+		return nil, err
+	}
+
+	// All reports for this document, newest first.
+	rows, err := g.DB.QueryContext(ctx, `
+		SELECT id, request_id, create_time::text
+		FROM kb.doc_review_reports
+		WHERE input_record_id = $1
+		ORDER BY id DESC`, d.InputRecordID)
+	if err != nil {
+		return nil, fmt.Errorf("list reports for document %d: %w", d.InputRecordID, err)
+	}
+	defer rows.Close()
+
+	type reportMeta struct {
+		ID         int64
+		RequestID  int64
+		CreateTime string
+	}
+	var metas []reportMeta
+	for rows.Next() {
+		var m reportMeta
+		if err := rows.Scan(&m.ID, &m.RequestID, &m.CreateTime); err != nil {
+			return nil, err
+		}
+		metas = append(metas, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	outputDir := strings.TrimSpace(os.Getenv("DOC_REVIEW_REPORTS"))
+	if outputDir == "" {
+		return []ReportPDFFile{}, nil
+	}
+
+	var files []ReportPDFFile
+	for _, m := range metas {
+		match := findReportPDF(outputDir, m.RequestID)
+		if match == "" {
+			continue
+		}
+		files = append(files, ReportPDFFile{
+			RequestID:  m.RequestID,
+			ReportID:   m.ID,
+			FileName:   filepath.Base(match),
+			CreateTime: m.CreateTime,
+			IsCurrent:  m.ID == reportID,
+		})
+	}
+	return files, nil
+}
+
+// FindReportPDFPath returns the filesystem path of the most recent PDF file for
+// the given report. Returns ("", nil) when DOC_REVIEW_REPORTS is unset or no
+// file matches.
+func (g *DocReviewReportGenerator) FindReportPDFPath(ctx context.Context, reportID int64) (string, error) {
+	d, err := g.GetReport(ctx, reportID)
+	if err != nil {
+		return "", err
+	}
+	outputDir := strings.TrimSpace(os.Getenv("DOC_REVIEW_REPORTS"))
+	if outputDir == "" {
+		return "", nil
+	}
+	return findReportPDF(outputDir, d.RequestID), nil
+}
+
+// findReportPDF scans outputDir for a PDF matching the given requestID under
+// either the current naming convention (<stamp>-<id>-reports.pdf) or the
+// legacy one (<stamp>-<id>reports.pdf, no hyphen before "reports"). Returns
+// the lexicographically last match (newest stamp), or "" when nothing is found.
+func findReportPDF(outputDir string, requestID int64) string {
+	var matches []string
+	for _, pat := range []string{
+		filepath.Join(outputDir, fmt.Sprintf("*-%d-reports.pdf", requestID)),
+		filepath.Join(outputDir, fmt.Sprintf("*-%dreports.pdf", requestID)),
+	} {
+		m, _ := filepath.Glob(pat)
+		matches = append(matches, m...)
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	// Sort ascending so the last element is the newest stamp.
+	sort.Strings(matches)
+	return matches[len(matches)-1]
 }
 
 // reportHTMLTemplate is the HTML template for online report viewing.

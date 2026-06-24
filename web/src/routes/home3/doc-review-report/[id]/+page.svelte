@@ -7,6 +7,7 @@
 		updateFinding,
 		autoFixFinding,
 		regenerateReport,
+		generateCorrectionReport,
 		type FindingItem
 	} from '$lib/services/docReviewService';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
@@ -70,6 +71,7 @@
 	let editFindingId = $state<number | null>(null);
 	let dirty = $state(false);
 	let regenerating = $state(false);
+	let correcting = $state(false);
 	let toast = $state<{ kind: 'info' | 'warn' | 'error'; text: string } | null>(null);
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -308,6 +310,18 @@
 		}
 	}
 
+	async function onCorrectionReport() {
+		correcting = true;
+		try {
+			const file = await generateCorrectionReport(reportId);
+			showToast('info', file ? `Correction report generated: ${file}` : 'Correction report generated.');
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Correction report failed', 8000);
+		} finally {
+			correcting = false;
+		}
+	}
+
 	onMount(() => {
 		void load();
 		// Initial left panel: 45% minus 200px so the PDF gets more room by default.
@@ -370,6 +384,9 @@
 						{regenerating ? 'Regenerating…' : 'Regenerate PDF'}
 					</button>
 				{/if}
+				<button class="regen-btn" disabled={correcting} onclick={onCorrectionReport}>
+					{correcting ? 'Generating…' : 'Correction Report'}
+				</button>
 			</div>
 			<p class="meta">
 				Document: {skeleton.meta?.document_title || '—'} (ID: {inputRecordId ?? '—'})<br />

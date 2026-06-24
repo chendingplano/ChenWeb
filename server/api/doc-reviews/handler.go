@@ -3,6 +3,7 @@ package docreviews
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -127,6 +128,16 @@ func parseID(c echo.Context, name string) (int64, error) {
 	return strconv.ParseInt(c.Param(name), 10, 64)
 }
 
+// actorFromEcho resolves the authenticated user's name for the activity log,
+// returning "" when the request is unauthenticated.
+func actorFromEcho(c echo.Context) string {
+	rc := EchoFactory.NewFromEcho(c, "CWB_DRH_ACTOR")
+	if userInfo := rc.IsAuthenticated(); userInfo != nil {
+		return userInfo.UserName
+	}
+	return ""
+}
+
 // GetRequest returns request status + findings.
 func GetRequest(c echo.Context) error {
 	id, err := parseID(c, "id")
@@ -195,11 +206,34 @@ func ExportReport(c echo.Context) error {
 	case "md", "markdown":
 		return c.Blob(http.StatusOK, "text/markdown; charset=utf-8", []byte(report.ReportMarkdown))
 	case "pdf":
-		return c.Blob(http.StatusOK, "text/markdown; charset=utf-8", []byte(report.ReportMarkdown))
+		pdfPath, err := gen.FindReportPDFPath(c.Request().Context(), id)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
+		}
+		if pdfPath == "" {
+			return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": "PDF not found; regenerate the report to produce one"})
+		}
+		return c.File(pdfPath)
 	default:
 		reportJSON, _ := json.Marshal(report.ReportJSON)
 		return c.Blob(http.StatusOK, "application/json", reportJSON)
 	}
+}
+
+// ListReportPDFs returns all review-report PDF files for the document associated
+// with the given report, newest first. The entry for the current report is marked
+// is_current=true.
+func ListReportPDFs(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	gen := NewDocReviewReportGenerator()
+	files, err := gen.ListReportPDFs(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "files": files})
 }
 
 // UpdateFinding updates a finding's review_status.
@@ -231,7 +265,7 @@ func AutoFixFinding(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
 	ctrl := NewDocReviewController()
-	res, err := ctrl.AutoFixFinding(c.Request().Context(), id)
+	res, err := ctrl.AutoFixFinding(c.Request().Context(), id, actorFromEcho(c))
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
 	}
@@ -269,7 +303,7 @@ func EditFindingLines(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid body"})
 	}
 	ctrl := NewDocReviewController()
-	changed, err := ctrl.ApplyFindingEdit(c.Request().Context(), id, body.Lines)
+	changed, err := ctrl.ApplyFindingEdit(c.Request().Context(), id, body.Lines, actorFromEcho(c))
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
 	}
@@ -291,6 +325,29 @@ func RegenerateReport(c echo.Context) error {
 		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
+}
+
+// GenerateCorrectionReport builds the Document Review Correction Report (Typst +
+// PDF) from the activities recorded against a report's document/run.
+func GenerateCorrectionReport(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	ctrl := NewDocReviewController()
+	pdfPath, err := ctrl.GenerateCorrectionReport(c.Request().Context(), id)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"status":   true,
+		"pdf_path": pdfPath,
+		"pdf_file": filepath.Base(pdfPath),
+	})
 }
 
 // StopRequest stops a running review.
