@@ -210,6 +210,10 @@ type ReviewProcessor struct {
 	ReadabilityPromptRef  string
 	ReadabilityPromptText string
 
+	LocalizationModelName  string
+	LocalizationPromptRef  string
+	LocalizationPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -230,6 +234,10 @@ type ReviewProcessor struct {
 	// ReadabilityClient is a properly-configured LLM client for the
 	// readability reviewer.
 	ReadabilityClient LLMJSONExtractor
+
+	// LocalizationClient is a properly-configured LLM client for the
+	// localization reviewer.
+	LocalizationClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -301,6 +309,7 @@ func NewReviewProcessor(
 	toneClient, toneModel, tonePrompt, toneRef, _ := resolveReviewerRuntime(logger, "tone_voice", "P1")
 	formattingClient, formattingModel, formattingPrompt, formattingRef, _ := resolveReviewerRuntime(logger, "formatting_consistency", "P1")
 	readabilityClient, readabilityModel, readabilityPrompt, readabilityRef, _ := resolveReviewerRuntime(logger, "readability", "P1")
+	localizationClient, localizationModel, localizationPrompt, localizationRef, _ := resolveReviewerRuntime(logger, "localization", "P1")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -330,6 +339,11 @@ func NewReviewProcessor(
 		ReadabilityModelName:  readabilityModel,
 		ReadabilityPromptRef:  readabilityRef,
 		ReadabilityPromptText: readabilityPrompt,
+
+		LocalizationClient:     localizationClient,
+		LocalizationModelName:  localizationModel,
+		LocalizationPromptRef:  localizationRef,
+		LocalizationPromptText: localizationPrompt,
 	}
 }
 
@@ -523,6 +537,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.ReadabilityModelName,
 				PromptText: p.ReadabilityPromptText,
 				PromptRef:  p.ReadabilityPromptRef,
+			},
+		})
+	}
+
+	if p.LocalizationClient != nil && p.LocalizationPromptText != "" && p.LocalizationModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &localizationReviewer{
+				client:     p.LocalizationClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.LocalizationModelName,
+				PromptText: p.LocalizationPromptText,
+				PromptRef:  p.LocalizationPromptRef,
 			},
 		})
 	}

@@ -307,9 +307,12 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 
 // UpdateFinding updates review_status and reviewed_by on a finding.
 func (c *DocReviewController) UpdateFinding(ctx context.Context, findingID int64, reviewStatus string, reviewedBy string) error {
-	allowed := map[string]bool{"pending": true, "accepted": true, "rejected": true, "deferred": true}
+	allowed := map[string]bool{
+		"pending": true, "accepted": true, "rejected": true, "deferred": true,
+		"deleted": true, "fixed": true,
+	}
 	if !allowed[reviewStatus] {
-		return fmt.Errorf("invalid review_status: %q (must be pending/accepted/rejected/deferred)", reviewStatus)
+		return fmt.Errorf("invalid review_status: %q (must be pending/accepted/rejected/deferred/deleted/fixed)", reviewStatus)
 	}
 	res, err := c.DB.ExecContext(ctx,
 		`UPDATE kb.doc_review_findings SET review_status = $1, reviewed_by = $2 WHERE id = $3`,

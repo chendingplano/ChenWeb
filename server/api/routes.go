@@ -514,6 +514,10 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/doc-review/reports/:id/html", docreviews.GetReportHTML)
 	apiGroup.GET("/doc-review/reports/:id/export", docreviews.ExportReport)
 	apiGroup.PATCH("/doc-review/findings/:id", docreviews.UpdateFinding)
+	apiGroup.GET("/doc-review/findings/:id/lines", docreviews.GetFindingLines)
+	apiGroup.POST("/doc-review/findings/:id/auto-fix", docreviews.AutoFixFinding)
+	apiGroup.POST("/doc-review/findings/:id/edit", docreviews.EditFindingLines)
+	apiGroup.POST("/doc-review/reports/:id/regenerate", docreviews.RegenerateReport)
 	apiGroup.POST("/doc-review/requests/:id/stop", docreviews.StopRequest)
 
 

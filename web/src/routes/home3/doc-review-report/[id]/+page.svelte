@@ -1,8 +1,16 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getReport } from '$lib/services/docReviewService';
+	import {
+		getReport,
+		getRequest,
+		updateFinding,
+		autoFixFinding,
+		regenerateReport,
+		type FindingItem
+	} from '$lib/services/docReviewService';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
+	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
 
 	let dark = $derived(page.url.searchParams.get('dark') !== '0');
 	let reportId = $derived(Number(page.params.id));
@@ -40,9 +48,56 @@
 	let loading = $state(true);
 	let errorMsg = $state('');
 	let inputRecordId = $state<number | null>(null);
+	let requestId = $state<number | null>(null);
 	let skeleton = $state<ReportSkeleton | null>(null);
 	let totals = $state({ total: 0, high: 0, medium: 0, low: 0 });
 	let activeKey = $state<string | null>(null);
+
+	// DR16: live findings (with ids + review_status) drive the action buttons.
+	let findings = $state<FindingItem[]>([]);
+	let busyId = $state<number | null>(null);
+	let editFindingId = $state<number | null>(null);
+	let dirty = $state(false);
+	let regenerating = $state(false);
+	let toast = $state<{ kind: 'info' | 'warn' | 'error'; text: string } | null>(null);
+	let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const passLabels: Record<string, string> = {
+		P1: 'Language & Style',
+		P2: 'Structure & Organization',
+		P3: 'Content Quality',
+		P4: 'Consistency',
+		P5: 'Technical & Compliance',
+		P6: 'Meta & Process'
+	};
+
+	function showToast(kind: 'info' | 'warn' | 'error', text: string, ms = 5000) {
+		toast = { kind, text };
+		if (toastTimer) clearTimeout(toastTimer);
+		toastTimer = setTimeout(() => (toast = null), ms);
+	}
+
+	// Visible findings grouped by pass (deleted ones are hidden).
+	let livePassGroups = $derived.by(() => {
+		const order = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
+		const byPass = new Map<string, FindingItem[]>();
+		for (const f of findings) {
+			if (f.review_status === 'deleted') continue;
+			const arr = byPass.get(f.pass) ?? [];
+			arr.push(f);
+			byPass.set(f.pass, arr);
+		}
+		const out: { pass: string; label: string; items: FindingItem[] }[] = [];
+		for (const p of order) {
+			const items = byPass.get(p);
+			if (items && items.length) out.push({ pass: p, label: passLabels[p] ?? p, items });
+		}
+		// Append any unexpected passes.
+		for (const [p, items] of byPass) {
+			if (!order.includes(p)) out.push({ pass: p, label: passLabels[p] ?? p, items });
+		}
+		return out;
+	});
 
 	// Reference to the embedded Document Structure panel for programmatic focus.
 	let structureView = $state<DocStructureView | null>(null);
@@ -83,27 +138,14 @@
 		return out;
 	}
 
-	let passOrder = $derived.by(() => {
-		if (!skeleton) return [];
-		const fbp = skeleton.findings_by_pass ?? {};
-		const ordered = (skeleton.pass_order ?? []).filter((p) => fbp[p]);
-		// Append any passes present in the map but missing from pass_order.
-		for (const p of Object.keys(fbp)) if (!ordered.includes(p)) ordered.push(p);
-		return ordered;
-	});
-
 	function sevColor(sev: string): string {
 		if (sev === 'high') return '#dc2626';
 		if (sev === 'medium') return '#f59e0b';
 		return '#10b981';
 	}
 
-	function findingKey(pass: string, idx: number): string {
-		return `${pass}:${idx}`;
-	}
-
-	function onFindingClick(pass: string, idx: number, f: ReportFinding) {
-		activeKey = findingKey(pass, idx);
+	function onFocusFinding(f: FindingItem) {
+		activeKey = String(f.id);
 		const lineNumbers = parseLocationRange(f.location ?? '');
 		if (lineNumbers.length > 0) {
 			void structureView?.focusSourceLines(lineNumbers);
@@ -116,18 +158,105 @@
 		try {
 			const report = await getReport(reportId);
 			inputRecordId = report?.input_record_id ?? report?.report_json?.meta?.document_record_id ?? null;
+			requestId = report?.request_id ?? null;
 			skeleton = (report?.report_json ?? null) as ReportSkeleton | null;
-			const findings = skeleton?.findings ?? [];
+			const reportFindings = skeleton?.findings ?? [];
 			totals = {
-				total: report?.total_findings ?? findings.length,
-				high: report?.high_count ?? findings.filter((f) => f.severity === 'high').length,
-				medium: report?.medium_count ?? findings.filter((f) => f.severity === 'medium').length,
-				low: report?.low_count ?? findings.filter((f) => f.severity === 'low').length
+				total: report?.total_findings ?? reportFindings.length,
+				high: report?.high_count ?? reportFindings.filter((f) => f.severity === 'high').length,
+				medium: report?.medium_count ?? reportFindings.filter((f) => f.severity === 'medium').length,
+				low: report?.low_count ?? reportFindings.filter((f) => f.severity === 'low').length
 			};
+
+			// Load live findings (with ids + review_status) so the action buttons can
+			// target specific finding rows.
+			findings = [];
+			if (requestId != null) {
+				try {
+					const reqData = await getRequest(requestId);
+					findings = reqData.findings ?? [];
+				} catch (e) {
+					showToast('warn', 'Could not load editable findings: ' + (e instanceof Error ? e.message : String(e)));
+				}
+			}
 		} catch (e) {
 			errorMsg = e instanceof Error ? e.message : 'Failed to load report';
 		} finally {
 			loading = false;
+		}
+	}
+
+	function setFindingStatus(id: number, status: string) {
+		findings = findings.map((f) => (f.id === id ? { ...f, review_status: status } : f));
+	}
+
+	async function onAccept(f: FindingItem) {
+		busyId = f.id;
+		try {
+			await updateFinding(f.id, 'accepted');
+			setFindingStatus(f.id, 'accepted');
+			showToast('info', 'Finding accepted.');
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Accept failed');
+		} finally {
+			busyId = null;
+		}
+	}
+
+	async function onDelete(f: FindingItem) {
+		busyId = f.id;
+		try {
+			await updateFinding(f.id, 'deleted');
+			setFindingStatus(f.id, 'deleted');
+			dirty = true;
+			showToast('info', 'Finding deleted from the report.');
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Delete failed');
+		} finally {
+			busyId = null;
+		}
+	}
+
+	async function onAutoFix(f: FindingItem) {
+		busyId = f.id;
+		try {
+			const res = await autoFixFinding(f.id);
+			if (res.fixable) {
+				setFindingStatus(f.id, 'fixed');
+				dirty = true;
+				const n = res.corrected?.length ?? 0;
+				showToast('info', `Auto-fixed ${n} line${n === 1 ? '' : 's'}.`);
+			} else {
+				showToast('warn', res.message || 'This finding could not be auto-fixed.', 8000);
+			}
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Auto-fix failed', 8000);
+		} finally {
+			busyId = null;
+		}
+	}
+
+	function onEditSaved(changed: number) {
+		const id = editFindingId;
+		editFindingId = null;
+		if (id != null && changed > 0) {
+			setFindingStatus(id, 'fixed');
+			dirty = true;
+			showToast('info', `Saved ${changed} edited line${changed === 1 ? '' : 's'}.`);
+		}
+	}
+
+	async function onRegenerate() {
+		regenerating = true;
+		try {
+			await regenerateReport(reportId);
+			dirty = false;
+			showToast('info', 'Report PDF regenerated.');
+			await load();
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Regenerate failed', 8000);
+		} finally {
+			regenerating = false;
 		}
 	}
 
@@ -186,7 +315,14 @@
 		{:else if errorMsg}
 			<div class="state error">{errorMsg}</div>
 		{:else if skeleton}
-			<h1 class="report-title">Document Review Report</h1>
+			<div class="title-row">
+				<h1 class="report-title">Document Review Report</h1>
+				{#if dirty}
+					<button class="regen-btn" disabled={regenerating} onclick={onRegenerate}>
+						{regenerating ? 'Regenerating…' : 'Regenerate PDF'}
+					</button>
+				{/if}
+			</div>
 			<p class="meta">
 				Document: {skeleton.meta?.document_title || '—'} (ID: {inputRecordId ?? '—'})<br />
 				Generated: {skeleton.meta?.generated_at || '—'}<br />
@@ -217,31 +353,77 @@
 				{/if}
 			{/if}
 
-			{#each passOrder as pass}
-				{@const group = skeleton.findings_by_pass?.[pass]}
-				{#if group}
-					<h2>{pass} — {group.label}</h2>
-					{#each group.findings as f, idx}
+			{#each livePassGroups as group (group.pass)}
+				<h2>{group.pass} — {group.label}</h2>
+				{#each group.items as f (f.id)}
+					<div
+						class="finding"
+						class:active={activeKey === String(f.id)}
+						class:resolved={f.review_status === 'fixed' || f.review_status === 'accepted'}
+						style="border-left-color:{sevColor(f.severity)};"
+					>
 						<button
 							type="button"
-							class="finding"
-							class:active={activeKey === findingKey(pass, idx)}
-							style="border-left-color:{sevColor(f.severity)};"
-							onclick={() => onFindingClick(pass, idx, f)}
+							class="finding-body"
+							onclick={() => onFocusFinding(f)}
 							title={f.location ? `Jump to line ${f.location}` : ''}
 						>
 							<div class="finding-head">
 								<strong>{f.title}</strong>
 								<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
 								<span class="badge">{f.aspect}</span>
+								{#if f.review_status === 'fixed'}
+									<span class="status-chip fixed">Fixed</span>
+								{:else if f.review_status === 'accepted'}
+									<span class="status-chip accepted">Accepted</span>
+								{/if}
 							</div>
 							{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
 							{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
 							{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
 						</button>
-					{/each}
-				{/if}
+
+						<div class="finding-actions">
+							<button
+								class="act"
+								disabled={busyId === f.id}
+								onclick={() => onAutoFix(f)}
+								title="Fix the offending line(s) automatically with the configured model"
+							>
+								{busyId === f.id ? '…' : 'LLM Auto Fix'}
+							</button>
+							<button
+								class="act"
+								disabled={busyId === f.id}
+								onclick={() => (editFindingId = f.id)}
+								title="Open the find/replace editor for the offending line(s)"
+							>
+								Edit Tool
+							</button>
+							<button
+								class="act danger"
+								disabled={busyId === f.id}
+								onclick={() => onDelete(f)}
+								title="Remove this finding from the report"
+							>
+								Delete
+							</button>
+							<button
+								class="act"
+								disabled={busyId === f.id}
+								onclick={() => onAccept(f)}
+								title="Keep as is — take no action"
+							>
+								Accept
+							</button>
+						</div>
+					</div>
+				{/each}
 			{/each}
+
+			{#if livePassGroups.length === 0 && findings.length > 0}
+				<p class="body-text">All findings have been deleted.</p>
+			{/if}
 		{/if}
 	</section>
 
@@ -266,6 +448,20 @@
 		{/if}
 	</section>
 </div>
+
+{#if toast}
+	<div class="toast {toast.kind}">{toast.text}</div>
+{/if}
+
+{#if editFindingId != null}
+	<EditToolDialog
+		findingId={editFindingId}
+		suggestion={findings.find((f) => f.id === editFindingId)?.suggestion ?? ''}
+		{dark}
+		onsaved={onEditSaved}
+		oncancel={() => (editFindingId = null)}
+	/>
+{/if}
 
 <style>
 	.report-page {
@@ -307,11 +503,40 @@
 	.state.error {
 		color: #dc2626;
 	}
-	.report-title {
-		margin: 0 0 0.5rem;
-		font-size: 1.5rem;
+	.title-row {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.75rem;
 		border-bottom: 2px solid var(--accent);
+		margin-bottom: 0.5rem;
 		padding-bottom: 0.5rem;
+	}
+	.report-title {
+		margin: 0;
+		font-size: 1.5rem;
+	}
+	.title-row .report-title {
+		border-bottom: none;
+		padding-bottom: 0;
+	}
+	.regen-btn {
+		flex: 0 0 auto;
+		padding: 0.45rem 0.85rem;
+		border: none;
+		border-radius: 6px;
+		background: var(--accent);
+		color: #fff;
+		font: inherit;
+		font-size: 0.82rem;
+		font-weight: 600;
+		cursor: pointer;
+		white-space: nowrap;
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+	}
+	.regen-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 	.meta {
 		color: var(--text-muted);
@@ -369,19 +594,12 @@
 		letter-spacing: 0.04em;
 	}
 	.finding {
-		display: block;
-		width: 100%;
-		text-align: left;
 		background: var(--card-bg);
 		border: 1px solid var(--border);
 		border-left: 4px solid var(--border);
 		border-radius: 8px;
-		padding: 0.85rem 1rem;
 		margin: 0.6rem 0;
-		cursor: pointer;
-		color: inherit;
-		font: inherit;
-		transition: border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+		transition: border-color 0.15s, box-shadow 0.15s;
 	}
 	.finding:hover {
 		border-color: var(--accent);
@@ -389,8 +607,85 @@
 	.finding.active {
 		box-shadow: 0 0 0 2px var(--accent);
 	}
-	.finding:active {
-		transform: translateY(1px);
+	.finding.resolved {
+		opacity: 0.7;
+	}
+	.finding-body {
+		display: block;
+		width: 100%;
+		text-align: left;
+		background: transparent;
+		border: none;
+		padding: 0.85rem 1rem 0.5rem;
+		cursor: pointer;
+		color: inherit;
+		font: inherit;
+	}
+	.finding-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		padding: 0 1rem 0.75rem;
+	}
+	.act {
+		padding: 0.32rem 0.7rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--card-bg);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 0.76rem;
+		cursor: pointer;
+		transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+	}
+	.act:hover:not(:disabled) {
+		border-color: var(--accent);
+		color: var(--accent);
+	}
+	.act.danger:hover:not(:disabled) {
+		border-color: #dc2626;
+		color: #dc2626;
+	}
+	.act:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.status-chip {
+		display: inline-block;
+		padding: 0.1rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.68rem;
+		font-weight: 600;
+	}
+	.status-chip.fixed {
+		background: rgba(16, 185, 129, 0.18);
+		color: #10b981;
+	}
+	.status-chip.accepted {
+		background: var(--accent-tint);
+		color: var(--accent);
+	}
+	.toast {
+		position: fixed;
+		bottom: 1.25rem;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 1100;
+		padding: 0.6rem 1rem;
+		border-radius: 8px;
+		font-size: 0.85rem;
+		color: #fff;
+		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+		max-width: min(640px, 92vw);
+	}
+	.toast.info {
+		background: #4f46e5;
+	}
+	.toast.warn {
+		background: #b45309;
+	}
+	.toast.error {
+		background: #b91c1c;
 	}
 	.finding-head {
 		display: flex;

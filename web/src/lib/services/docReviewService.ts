@@ -151,6 +151,60 @@ export async function updateFinding(
 	if (!data.status) throw new Error(data.error_msg || 'Failed to update finding');
 }
 
+// ── DR16: finding actions (auto-fix / edit / accept / delete) ─────────────────
+
+export type LineEdit = { line_no: number; content: string };
+
+export type AutoFixResult = {
+	fixable: boolean;
+	message?: string;
+	original?: LineEdit[];
+	corrected?: LineEdit[];
+};
+
+// Runs the LLM auto-fix for a finding. A resolved result with fixable=false means
+// the caller should surface `message` to the user (e.g. unfixable / not configured).
+export async function autoFixFinding(id: number): Promise<AutoFixResult> {
+	const res = await fetch(`${BASE}/findings/${id}/auto-fix`, {
+		method: 'POST',
+		credentials: 'same-origin'
+	});
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Auto-fix failed');
+	return data.result as AutoFixResult;
+}
+
+// Returns the current content of a finding's offending line(s) for the Edit Tool.
+export async function getFindingLines(id: number): Promise<LineEdit[]> {
+	const res = await fetch(`${BASE}/findings/${id}/lines`, { credentials: 'same-origin' });
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to load lines');
+	return (data.lines || []) as LineEdit[];
+}
+
+// Saves user-edited line content back to the line-file. Returns the count changed.
+export async function editFindingLines(id: number, lines: LineEdit[]): Promise<number> {
+	const res = await fetch(`${BASE}/findings/${id}/edit`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ lines })
+	});
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to save edits');
+	return data.changed ?? 0;
+}
+
+// Rebuilds the report JSON/markdown + PDF for a report id from current findings.
+export async function regenerateReport(reportId: number): Promise<void> {
+	const res = await fetch(`${BASE}/reports/${reportId}/regenerate`, {
+		method: 'POST',
+		credentials: 'same-origin'
+	});
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to regenerate report');
+}
+
 export async function stopRequest(id: number): Promise<void> {
 	const res = await fetch(`${BASE}/requests/${id}/stop`, {
 		method: 'POST',

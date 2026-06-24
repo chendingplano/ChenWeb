@@ -222,6 +222,77 @@ func UpdateFinding(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
 
+// AutoFixFinding runs the LLM auto-fix for a finding, editing the line-file.
+// A 200 with fixable=false (not an HTTP error) means the GUI should prompt the
+// user (e.g. unfixable, no location, or no model configured).
+func AutoFixFinding(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	ctrl := NewDocReviewController()
+	res, err := ctrl.AutoFixFinding(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "result": res})
+}
+
+// GetFindingLines returns the current content of the finding's offending line(s)
+// so the Edit Tool dialog can display them.
+func GetFindingLines(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	ctrl := NewDocReviewController()
+	lines, err := ctrl.GetFindingLines(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	if lines == nil {
+		lines = []LineEdit{}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "lines": lines})
+}
+
+// EditFindingLines saves user-edited line content (the Edit Tool "Save" action).
+func EditFindingLines(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	var body struct {
+		Lines []LineEdit `json:"lines"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid body"})
+	}
+	ctrl := NewDocReviewController()
+	changed, err := ctrl.ApplyFindingEdit(c.Request().Context(), id, body.Lines)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "changed": changed})
+}
+
+// RegenerateReport rebuilds a report's JSON/markdown and PDF from current findings.
+func RegenerateReport(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	ctrl := NewDocReviewController()
+	if err := ctrl.RegenerateReport(c.Request().Context(), id); err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true})
+}
+
 // StopRequest stops a running review.
 func StopRequest(c echo.Context) error {
 	id, err := parseID(c, "id")
