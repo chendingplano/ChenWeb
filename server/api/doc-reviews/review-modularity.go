@@ -95,7 +95,7 @@ func (r *modularityReviewer) ReviewDocument(
 		return nil, nil
 	}
 
-	results, runErr := runConcurrent(ctx, r.maxTasks, len(blocks),
+	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(blocks), cfg.OnProgress,
 		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped

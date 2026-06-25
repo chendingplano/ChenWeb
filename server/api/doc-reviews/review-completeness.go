@@ -85,7 +85,7 @@ func (r *completenessReviewer) ReviewDocument(
 		return nil, nil
 	}
 
-	results, runErr := runConcurrent(ctx, r.maxTasks, len(windows),
+	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(windows), cfg.OnProgress,
 		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped

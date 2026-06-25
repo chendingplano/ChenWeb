@@ -65,6 +65,11 @@
         return job.aspects.filter((a) => a.status === 'success' || a.status === 'failed').length;
     }
 
+    function percent(progress?: number): number {
+        const value = Number.isFinite(progress) ? progress ?? 0 : 0;
+        return Math.max(0, Math.min(100, Math.round(value * 100)));
+    }
+
     function fmtClock(s?: string): string {
         if (!s) return '—';
         return s.slice(0, 19).replace('T', ' ');
@@ -159,7 +164,7 @@
                     <div style="display:flex; align-items:flex-start; gap:0; overflow-x:auto; padding-bottom:4px;">
                         {#each job.aspects as a, i}
                             {@const st = a.status as StageStatus}
-                            <div style="position:relative; display:flex; flex-shrink:0; flex-direction:column; align-items:center; min-width:72px;" title={`${labelFor(a.aspect)}${a.error_message ? ' — ' + a.error_message : ''}`}>
+                            <div style="position:relative; display:flex; flex-shrink:0; flex-direction:column; align-items:center; min-width:116px;" title={`${labelFor(a.aspect)}${a.error_message ? ' — ' + a.error_message : ''}`}>
                                 <div style="position:relative; display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:9999px;
                                     background:{statusBg(st)}; border:2px solid {statusColor(st)}{st === 'pending' ? '40' : ''};
                                     {st === 'running' ? 'animation:drm-pulse-ring 1.5s ease-in-out infinite;' : ''}">
@@ -172,11 +177,17 @@
                                     {:else}
                                         <ClockIcon class="h-3 w-3" style="color:{textMuted}; opacity:0.5;" />
                                     {/if}
-                                    {#if st === 'success' && a.finding_count > 0}
+                                    {#if a.finding_count > 0}
                                         <span style="position:absolute; top:-6px; right:-8px; min-width:15px; height:15px; padding:0 3px; display:flex; align-items:center; justify-content:center; border-radius:9999px; background:{colorError}; color:#fff; font-size:9px; font-weight:700;">{a.finding_count}</span>
                                     {/if}
                                 </div>
-                                <div style="font-size:9px; color:{statusColor(st)}{st === 'pending' ? '80' : ''}; margin-top:4px; text-align:center; white-space:nowrap; max-width:72px; overflow:hidden; text-overflow:ellipsis;">{labelFor(a.aspect)}</div>
+                                <div style="font-size:9px; color:{statusColor(st)}{st === 'pending' ? '80' : ''}; margin-top:4px; text-align:center; white-space:nowrap; max-width:112px; overflow:hidden; text-overflow:ellipsis;">{labelFor(a.aspect)}</div>
+                                <div style="width:100%; height:5px; border-radius:9999px; background:{cardBg}; border:1px solid {borderColor}; overflow:hidden; margin-top:6px;">
+                                    <div style="height:100%; width:{percent(a.progress)}%; background:{statusColor(st)}; transition:width 180ms ease;"></div>
+                                </div>
+                                <div style="margin-top:4px; font-size:9px; color:{textMuted}; text-align:center;">
+                                    {percent(a.progress)}%{#if a.finding_count > 0} · {a.finding_count} finding{a.finding_count === 1 ? '' : 's'}{/if}
+                                </div>
                             </div>
                             {#if i < job.aspects.length - 1}
                                 <div style="flex:0 0 16px; height:2px; background:{borderColor}; margin-top:13px;"></div>

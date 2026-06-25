@@ -234,7 +234,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 
 	// Load per-aspect statuses (always available once seeded at accept time).
 	statusRows, err := c.DB.QueryContext(ctx, `
-		SELECT aspect, COALESCE(pass,''), status, COALESCE(finding_count,0),
+		SELECT aspect, COALESCE(pass,''), status, COALESCE(progress,0), COALESCE(finding_count,0),
 		       COALESCE(error_message,''), COALESCE(start_time::text,''), COALESCE(end_time::text,'')
 		FROM kb.doc_review_status
 		WHERE request_id = $1
@@ -245,7 +245,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 	defer statusRows.Close()
 	for statusRows.Next() {
 		var s AspectStatus
-		if err := statusRows.Scan(&s.Aspect, &s.Pass, &s.Status, &s.FindingCount,
+		if err := statusRows.Scan(&s.Aspect, &s.Pass, &s.Status, &s.Progress, &s.FindingCount,
 			&s.ErrorMessage, &s.StartTime, &s.EndTime); err != nil {
 			return nil, fmt.Errorf("scan aspect status: %w", err)
 		}
@@ -448,7 +448,7 @@ func (c *DocReviewController) seedAspectStatuses(ctx context.Context, requestID,
 func (c *DocReviewController) markAspectsRunning(ctx context.Context, reviewRunID string) {
 	_, err := c.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status
-		SET status = 'running', start_time = NOW(), modify_time = NOW()
+		SET status = 'running', start_time = NOW(), progress = 0, modify_time = NOW()
 		WHERE review_run_id = $1 AND status = 'pending'`, reviewRunID)
 	if err != nil {
 		logger.Warn("mark aspects running failed", "review_run_id", reviewRunID, "error", err)
@@ -463,11 +463,12 @@ func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, review
 	_, err := c.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status s
 		SET status = 'success',
+		    progress = 1,
 		    end_time = NOW(),
 		    modify_time = NOW(),
 		    finding_count = COALESCE((
 		        SELECT COUNT(*) FROM kb.doc_review_findings f
-		        WHERE f.input_record_id = $2 AND f.aspect = s.aspect
+		        WHERE f.review_run_id = $1 AND f.aspect = s.aspect
 		    ), 0)
 		WHERE s.review_run_id = $1 AND s.status NOT IN ('success', 'failed')`,
 		reviewRunID, recordID)
@@ -621,7 +622,7 @@ func (c *DocReviewController) ListRequests(ctx context.Context, f RequestListFil
 // loadAspectStatuses returns the kb.doc_review_status rows for a run, ordered by id.
 func (c *DocReviewController) loadAspectStatuses(ctx context.Context, reviewRunID string) ([]AspectStatus, error) {
 	rows, err := c.DB.QueryContext(ctx, `
-		SELECT aspect, COALESCE(pass,''), status, finding_count, COALESCE(error_message,''),
+		SELECT aspect, COALESCE(pass,''), status, COALESCE(progress,0), finding_count, COALESCE(error_message,''),
 		       COALESCE(start_time::text,''), COALESCE(end_time::text,'')
 		FROM kb.doc_review_status
 		WHERE review_run_id = $1
@@ -633,7 +634,7 @@ func (c *DocReviewController) loadAspectStatuses(ctx context.Context, reviewRunI
 	var out []AspectStatus
 	for rows.Next() {
 		var a AspectStatus
-		if err := rows.Scan(&a.Aspect, &a.Pass, &a.Status, &a.FindingCount, &a.ErrorMessage,
+		if err := rows.Scan(&a.Aspect, &a.Pass, &a.Status, &a.Progress, &a.FindingCount, &a.ErrorMessage,
 			&a.StartTime, &a.EndTime); err != nil {
 			return nil, fmt.Errorf("scan aspect status: %w", err)
 		}

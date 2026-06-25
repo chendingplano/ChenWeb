@@ -8,6 +8,7 @@ export type AspectInfo = {
 	description: string;
 	default_model: string;
 	is_tool_use: boolean;
+	checked: boolean; // initial checked state from doc-review.local.toml
 };
 
 export type TierInfo = {
@@ -66,6 +67,7 @@ export type AspectStatus = {
 	aspect: string;
 	pass: string;
 	status: string; // pending | running | success | failed
+	progress: number;
 	finding_count: number;
 	error_message?: string;
 	start_time?: string;

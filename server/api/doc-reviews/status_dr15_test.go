@@ -2,6 +2,7 @@ package docreviews
 
 import (
 	"context"
+	"math"
 	"testing"
 )
 
@@ -55,6 +56,9 @@ func TestDR15_SeedActiveAndFinish(t *testing.T) {
 		if s.Status != "pending" {
 			t.Fatalf("aspect %q: want pending, got %q", s.Aspect, s.Status)
 		}
+		if s.Progress != 0 {
+			t.Fatalf("aspect %q: want progress 0, got %v", s.Aspect, s.Progress)
+		}
 	}
 
 	// The job is listed as active (has unfinished aspects).
@@ -79,6 +83,9 @@ func TestDR15_SeedActiveAndFinish(t *testing.T) {
 	for _, s := range final {
 		if s.Status != "success" {
 			t.Fatalf("aspect %q: want success, got %q", s.Aspect, s.Status)
+		}
+		if s.Progress != 1 {
+			t.Fatalf("aspect %q: want progress 1, got %v", s.Aspect, s.Progress)
 		}
 	}
 }
@@ -117,5 +124,68 @@ func TestDR15_FailOpenAspects(t *testing.T) {
 		if s.Status != "failed" || s.ErrorMessage != "stopped" {
 			t.Fatalf("aspect %q: want failed/stopped, got %q/%q", s.Aspect, s.Status, s.ErrorMessage)
 		}
+	}
+}
+
+func TestDR15_UpdateAspectProgress(t *testing.T) {
+	db := connectTestDB(t)
+	defer db.Close()
+	ensureTables(t, db)
+	ctx := context.Background()
+	ctrl := &DocReviewController{DB: db}
+
+	recID := insertTestInput(t, db, "DR15 progress doc")
+	defer cleanupInputs(t, db, recID)
+
+	res, err := ctrl.AcceptRequest(ctx, SubmitRequestInput{
+		InputRecordID: recID,
+		Tier:          "custom",
+		Aspects:       []string{"grammar_spelling"},
+		RequesterName: "tester",
+	})
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	defer cleanupRequests(t, db, res.RequestID)
+	defer db.ExecContext(ctx, `DELETE FROM kb.doc_review_status WHERE request_id = $1`, res.RequestID)
+
+	ctrl.markAspectsRunning(ctx, res.ReviewRunID)
+
+	store := ReviewStatusSQLStore{DB: db}
+	if err := store.UpdateAspectProgress(ctx, res.ReviewRunID, "grammar_spelling", 0.5, 3); err != nil {
+		t.Fatalf("update progress: %v", err)
+	}
+
+	statuses, err := ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	if err != nil {
+		t.Fatalf("load statuses: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("want 1 status row, got %d", len(statuses))
+	}
+	got := statuses[0]
+	if got.Status != "running" {
+		t.Fatalf("want running status, got %q", got.Status)
+	}
+	if math.Abs(got.Progress-0.5) > 1e-9 {
+		t.Fatalf("want progress 0.5, got %v", got.Progress)
+	}
+	if got.FindingCount != 3 {
+		t.Fatalf("want finding count 3, got %d", got.FindingCount)
+	}
+
+	if err := store.UpdateAspectProgress(ctx, res.ReviewRunID, "grammar_spelling", 0.25, 1); err != nil {
+		t.Fatalf("update progress second time: %v", err)
+	}
+	statuses, err = ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	if err != nil {
+		t.Fatalf("load statuses second time: %v", err)
+	}
+	got = statuses[0]
+	if math.Abs(got.Progress-0.5) > 1e-9 {
+		t.Fatalf("progress regressed: got %v", got.Progress)
+	}
+	if got.FindingCount != 3 {
+		t.Fatalf("finding count regressed: got %d", got.FindingCount)
 	}
 }

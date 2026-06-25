@@ -3,8 +3,8 @@ package docreviews
 // SubmitRequestInput is the request body for POST /api/v1/doc-review/requests.
 type SubmitRequestInput struct {
 	InputRecordID  int64                    `json:"input_record_id"`
-	Tier           string                   `json:"tier"`           // "must_review", "should_review", "custom"
-	Aspects        []string                 `json:"aspects"`        // selected aspect names (all when tier-based)
+	Tier           string                   `json:"tier"`    // "must_review", "should_review", "custom"
+	Aspects        []string                 `json:"aspects"` // selected aspect names (all when tier-based)
 	ReferenceDocs  []ReferenceDoc           `json:"reference_docs,omitempty"`
 	Notes          string                   `json:"notes,omitempty"`
 	ModelOverrides map[string]ModelOverride `json:"model_overrides,omitempty"`
@@ -94,12 +94,13 @@ type ReportDetail struct {
 // AspectInfo describes one review aspect.
 type AspectInfo struct {
 	Name         string `json:"name"`
-	Group        string `json:"group"`        // "P1".."P6"
-	Label        string `json:"label"`        // human-readable, e.g. "Grammar & Spelling"
-	Priority     string `json:"priority"`     // "Must Review", "Should Review", etc.
+	Group        string `json:"group"`    // "P1".."P6"
+	Label        string `json:"label"`    // human-readable, e.g. "Grammar & Spelling"
+	Priority     string `json:"priority"` // "Must Review", "Should Review", etc.
 	Description  string `json:"description"`
 	DefaultModel string `json:"default_model"`
 	IsToolUse    bool   `json:"is_tool_use"`
+	Checked      bool   `json:"checked"` // initial checked state from doc-review.local.toml [reviewers.<aspect>].checked
 }
 
 // TierInfo describes one priority tier.
@@ -159,13 +160,14 @@ type SubmitResult struct {
 // reviewed aspect within a run. An aspect is "finished" iff Status is
 // "success" or "failed".
 type AspectStatus struct {
-	Aspect       string `json:"aspect"`
-	Pass         string `json:"pass,omitempty"`
-	Status       string `json:"status"` // pending | running | success | failed
-	FindingCount int    `json:"finding_count"`
-	ErrorMessage string `json:"error_message,omitempty"`
-	StartTime    string `json:"start_time,omitempty"`
-	EndTime      string `json:"end_time,omitempty"`
+	Aspect       string  `json:"aspect"`
+	Pass         string  `json:"pass,omitempty"`
+	Status       string  `json:"status"` // pending | running | success | failed
+	Progress     float64 `json:"progress"`
+	FindingCount int     `json:"finding_count"`
+	ErrorMessage string  `json:"error_message,omitempty"`
+	StartTime    string  `json:"start_time,omitempty"`
+	EndTime      string  `json:"end_time,omitempty"`
 }
 
 // ActiveJob is one entry in the live monitor (DR15): a review request that still

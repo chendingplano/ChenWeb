@@ -103,7 +103,20 @@ type ReviewerConfig struct {
 	PromptRef    string   // prompt file name (for logging)
 	MaxToolTurns int      // 0 = one-shot, >0 = tool-use conversation loop
 	Tools        []string // tool names available (only when MaxToolTurns > 0)
+	OnProgress   ReviewerProgressFunc
 }
+
+// ReviewerProgress is one live progress snapshot for a reviewer while it works
+// through chunk or page-block units.
+type ReviewerProgress struct {
+	CompletedUnits int
+	TotalUnits     int
+	FindingCount   int
+	Progress       float64
+}
+
+// ReviewerProgressFunc receives progress snapshots after each finished unit.
+type ReviewerProgressFunc func(ReviewerProgress)
 
 // Reviewer executes one review aspect against a document.
 type Reviewer interface {
@@ -189,6 +202,7 @@ type ReviewProcessor struct {
 	InputStore    DocMetadataStore
 	EntityStore   EntityRelationStore // for tool-using reviewers (Phase II+)
 	FindingsStore ReviewFindingsStore
+	StatusStore   ReviewStatusStore
 	Client        LLMJSONExtractor // shared LLM client
 	Logger        ApiTypes.JimoLogger
 	Now           func() time.Time
@@ -389,6 +403,7 @@ func NewReviewProcessor(
 		InputStore:    inputStore,
 		EntityStore:   entityStore,
 		FindingsStore: findingsStore,
+		StatusStore:   ReviewStatusSQLStore{DB: ApiTypes.ProjectDBHandle},
 		Client:        extractor,
 		Logger:        logger,
 		Now:           time.Now,
@@ -516,6 +531,8 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 		wg.Add(1)
 		go func(reviewer Reviewer, cfg ReviewerConfig) {
 			defer wg.Done()
+
+			cfg.OnProgress = p.makeProgressReporter(reviewRunID, reviewer.Name())
 
 			p.Logger.Info("reviewer start",
 				"record_id", recordID,
@@ -856,4 +873,73 @@ func asFloat64(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+func (p *ReviewProcessor) makeProgressReporter(reviewRunID, aspect string) ReviewerProgressFunc {
+	if p.StatusStore == nil || reviewRunID == "" || aspect == "" {
+		return nil
+	}
+	return func(snapshot ReviewerProgress) {
+		if err := p.StatusStore.UpdateAspectProgress(context.Background(), reviewRunID, aspect, snapshot.Progress, snapshot.FindingCount); err != nil {
+			p.Logger.Warn("reviewer progress update failed",
+				"review_run_id", reviewRunID,
+				"aspect", aspect,
+				"error", err,
+			)
+		}
+	}
+}
+
+type reviewerProgressTracker struct {
+	report ReviewerProgressFunc
+	total  int
+
+	mu           sync.Mutex
+	completed    int
+	findingCount int
+}
+
+func newReviewerProgressTracker(total int, report ReviewerProgressFunc) *reviewerProgressTracker {
+	if total <= 0 || report == nil {
+		return nil
+	}
+	return &reviewerProgressTracker{report: report, total: total}
+}
+
+func (t *reviewerProgressTracker) add(findings int) {
+	if t == nil {
+		return
+	}
+	if findings < 0 {
+		findings = 0
+	}
+
+	t.mu.Lock()
+	t.completed++
+	t.findingCount += findings
+	snapshot := ReviewerProgress{
+		CompletedUnits: t.completed,
+		TotalUnits:     t.total,
+		FindingCount:   t.findingCount,
+		Progress:       float64(t.completed) / float64(t.total),
+	}
+	t.mu.Unlock()
+
+	t.report(snapshot)
+}
+
+func runReviewerConcurrent(
+	ctx context.Context,
+	maxTasks, total int,
+	report ReviewerProgressFunc,
+	fn func(ctx context.Context, i int) ([]ReviewFinding, error),
+) ([][]ReviewFinding, error) {
+	tracker := newReviewerProgressTracker(total, report)
+	return runConcurrent(ctx, maxTasks, total, func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
+		findings, err := fn(workerCtx, i)
+		if err == nil {
+			tracker.add(len(findings))
+		}
+		return findings, err
+	})
 }

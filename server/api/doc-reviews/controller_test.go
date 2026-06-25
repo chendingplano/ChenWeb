@@ -83,6 +83,7 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			aspect TEXT NOT NULL,
 			pass TEXT,
 			status TEXT NOT NULL DEFAULT 'pending',
+			progress DOUBLE PRECISION NOT NULL DEFAULT 0,
 			finding_count INT NOT NULL DEFAULT 0,
 			error_message TEXT,
 			start_time TIMESTAMPTZ,

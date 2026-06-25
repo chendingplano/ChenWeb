@@ -194,6 +194,11 @@
         if (next.has(id)) next.delete(id); else next.add(id);
         expandedFindings = next;
     }
+
+    function progressPercent(progress?: number): number {
+        const value = Number.isFinite(progress) ? progress ?? 0 : 0;
+        return Math.max(0, Math.min(100, Math.round(value * 100)));
+    }
 </script>
 
 <!-- Loading State -->
@@ -224,18 +229,24 @@
             <div style="display: flex; flex-direction: column; gap: 0.4rem;">
                 {#each aspectStatuses as s}
                     {@const statusColor = s.status === 'success' ? '#22c55e' : s.status === 'failed' ? '#ef4444' : s.status === 'running' ? accent : textMuted}
-                    <div style="display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem;">
-                        <span style="width: 8px; height: 8px; border-radius: 50%; background: {statusColor}; flex-shrink: 0;
-                            {s.status === 'running' ? 'animation: pulse 1.2s ease-in-out infinite;' : ''}"></span>
-                        <span style="color: {textPrimary}; font-weight: 500;">{s.aspect.replace(/_/g, ' ')}</span>
-                        {#if s.pass}<span style="color: {textMuted}; font-size: 0.75rem;">({s.pass})</span>{/if}
-                        <span style="color: {statusColor}; font-size: 0.75rem; font-weight: 600; text-transform: capitalize; margin-left: auto;">{s.status}</span>
-                        {#if s.finding_count > 0}
-                            <span style="color: {textMuted}; font-size: 0.75rem;">{s.finding_count} finding{s.finding_count !== 1 ? 's' : ''}</span>
-                        {/if}
-                        {#if s.error_message}
-                            <span style="color: #ef4444; font-size: 0.75rem;" title={s.error_message}>error</span>
-                        {/if}
+                    <div style="display:flex; flex-direction:column; gap:0.45rem; padding:0.55rem 0;">
+                        <div style="display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem;">
+                            <span style="width: 8px; height: 8px; border-radius: 50%; background: {statusColor}; flex-shrink: 0;
+                                {s.status === 'running' ? 'animation: pulse 1.2s ease-in-out infinite;' : ''}"></span>
+                            <span style="color: {textPrimary}; font-weight: 500;">{s.aspect.replace(/_/g, ' ')}</span>
+                            {#if s.pass}<span style="color: {textMuted}; font-size: 0.75rem;">({s.pass})</span>{/if}
+                            <span style="margin-left:auto; color:{textMuted}; font-size:0.75rem;">{progressPercent(s.progress)}%</span>
+                            <span style="color: {statusColor}; font-size: 0.75rem; font-weight: 600; text-transform: capitalize;">{s.status}</span>
+                        </div>
+                        <div style="width:100%; height:8px; border-radius:9999px; background:{inputBg}; border:1px solid {borderColor}; overflow:hidden;">
+                            <div style="height:100%; width:{progressPercent(s.progress)}%; background:{statusColor}; transition:width 180ms ease;"></div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:0.6rem; font-size:0.75rem; color:{textMuted};">
+                            <span>{s.finding_count} finding{s.finding_count !== 1 ? 's' : ''} so far</span>
+                            {#if s.error_message}
+                                <span style="color: #ef4444;" title={s.error_message}>error</span>
+                            {/if}
+                        </div>
                     </div>
                 {/each}
             </div>
