@@ -30,27 +30,82 @@ func orderReviewTasksForPromptCache(tasks []reviewTask) []reviewTask {
 	return ordered
 }
 
-func runReviewTasksForPromptCache(ctx context.Context, tasks []reviewTask) ([]ReviewFinding, []error) {
+type reviewTaskResult struct {
+	findings []ReviewFinding
+	err      error
+}
+
+func runReviewTasksForPromptCache(ctx context.Context, maxTasks int, tasks []reviewTask) ([]ReviewFinding, []error) {
 	var (
 		allFindings []ReviewFinding
 		errs        []error
 	)
-	for _, task := range tasks {
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+
+	workers := maxTasks
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(tasks) {
+		workers = len(tasks)
+	}
+
+	results := make([]reviewTaskResult, len(tasks))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				results[i] = runPromptCacheReviewTask(ctx, tasks[i])
+			}
+		}()
+	}
+	for i := range tasks {
 		if isCtxStopped(ctx) {
-			errs = append(errs, ErrPipelineStopped)
+			results[i] = reviewTaskResult{err: ErrPipelineStopped}
 			break
 		}
-		if task.run == nil {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	for _, result := range results {
+		if result.err != nil {
+			errs = append(errs, result.err)
 			continue
 		}
-		findings, err := task.run(ctx)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", task.aspect, err))
+		if len(result.findings) == 0 {
 			continue
 		}
-		allFindings = append(allFindings, findings...)
+		allFindings = append(allFindings, result.findings...)
 	}
 	return allFindings, errs
+}
+
+func runPromptCacheReviewTask(ctx context.Context, task reviewTask) reviewTaskResult {
+	if isCtxStopped(ctx) {
+		return reviewTaskResult{err: ErrPipelineStopped}
+	}
+	if task.run == nil {
+		return reviewTaskResult{}
+	}
+	findings, err := task.run(ctx)
+	if err != nil {
+		return reviewTaskResult{err: fmt.Errorf("%s: %w", task.aspect, err)}
+	}
+	return reviewTaskResult{findings: findings}
+}
+
+func maxDocReviewerTasks(fallback int) int {
+	if fallback <= 0 {
+		fallback = 1
+	}
+	return envInt("MAX_DOC_REVIEWER_TASKS", fallback, 1)
 }
 
 func buildPromptCacheReviewTasks(
@@ -313,13 +368,15 @@ func (p *ReviewProcessor) runReviewersPromptCacheOptimized(
 		},
 	)
 	orderedTasks := orderReviewTasksForPromptCache(tasks)
+	maxTasks := maxDocReviewerTasks(p.MaxConcurrent)
 	p.Logger.Info("document review prompt-cache scheduler",
 		"record_id", recordID,
 		"tasks", len(orderedTasks),
+		"max_tasks", maxTasks,
 		"unsupported_reviewers", len(unsupported),
 	)
 
-	allFindings, errs := runReviewTasksForPromptCache(ctx, orderedTasks)
+	allFindings, errs := runReviewTasksForPromptCache(ctx, maxTasks, orderedTasks)
 	if len(unsupported) > 0 {
 		fallbackFindings, fallbackErrs := p.runReviewersLegacy(ctx, recordID, unsupported, reviewRunID)
 		allFindings = append(allFindings, fallbackFindings...)

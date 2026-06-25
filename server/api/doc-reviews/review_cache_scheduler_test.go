@@ -3,7 +3,9 @@ package docreviews
 import (
 	"context"
 	"reflect"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -160,7 +162,7 @@ func TestRunReviewTasksForPromptCacheExecutesSameInputBeforeNextInput(t *testing
 		}},
 	})
 
-	_, errs := runReviewTasksForPromptCache(context.Background(), tasks)
+	_, errs := runReviewTasksForPromptCache(context.Background(), 1, tasks)
 	if len(errs) != 0 {
 		t.Fatalf("errs=%v, want none", errs)
 	}
@@ -168,5 +170,70 @@ func TestRunReviewTasksForPromptCacheExecutesSameInputBeforeNextInput(t *testing
 	want := []string{"window-0:a", "window-0:b", "window-1:a"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls=%v, want %v", calls, want)
+	}
+}
+
+func TestRunReviewTasksForPromptCacheRunsWithBoundedParallelism(t *testing.T) {
+	var (
+		running    int32
+		maxRunning int32
+	)
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	makeTask := func(aspect string) reviewTask {
+		return reviewTask{
+			aspect:     aspect,
+			inputKey:   "window-0",
+			inputOrder: 0,
+			run: func(context.Context) ([]ReviewFinding, error) {
+				current := atomic.AddInt32(&running, 1)
+				defer atomic.AddInt32(&running, -1)
+				for {
+					previous := atomic.LoadInt32(&maxRunning)
+					if current <= previous || atomic.CompareAndSwapInt32(&maxRunning, previous, current) {
+						break
+					}
+				}
+				started <- aspect
+				<-release
+				return nil, nil
+			},
+		}
+	}
+	tasks := []reviewTask{makeTask("a"), makeTask("b")}
+
+	done := make(chan []error, 1)
+	go func() {
+		_, errs := runReviewTasksForPromptCache(context.Background(), 2, tasks)
+		done <- errs
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("task %d did not start while another task was blocked; maxRunning=%d", i+1, atomic.LoadInt32(&maxRunning))
+		}
+	}
+	close(release)
+
+	select {
+	case errs := <-done:
+		if len(errs) != 0 {
+			t.Fatalf("errs=%v, want none", errs)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not finish after tasks were released")
+	}
+	if got := atomic.LoadInt32(&maxRunning); got != 2 {
+		t.Fatalf("maxRunning=%d, want 2", got)
+	}
+}
+
+func TestMaxDocReviewerTasksUsesEnvOverride(t *testing.T) {
+	t.Setenv("MAX_DOC_REVIEWER_TASKS", "3")
+
+	if got := maxDocReviewerTasks(1); got != 3 {
+		t.Fatalf("maxDocReviewerTasks=%d, want 3", got)
 	}
 }
