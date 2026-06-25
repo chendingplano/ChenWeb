@@ -250,10 +250,10 @@ func TestRunToolUseReviewLogsToolCallsAndResults(t *testing.T) {
 	}
 }
 
-func TestFinalizeFindingsLogsPreviewWhenUnparseable(t *testing.T) {
+func TestFinalizeFindingsLogsInfoWhenNoFindings(t *testing.T) {
 	client := &fakeToolClient{
 		responses: []*llmclients.Response{
-			{Content: `not json at all`},
+			{Content: `{"findings":[]}`},
 		},
 	}
 	logger := &captureLogger{}
@@ -266,16 +266,45 @@ func TestFinalizeFindingsLogsPreviewWhenUnparseable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(findings) != 0 {
+		t.Fatalf("findings=%v, want empty", findings)
+	}
+	infoEntry := findLogEntry(logger.entries, "info", "tool-use returned no findings")
+	if infoEntry == nil {
+		t.Fatal("missing no-findings info log entry")
+	}
+	infoArgs := logArgsToMap(infoEntry.args)
+	if infoArgs["record_id"] != int64(42) || infoArgs["phase"] != "finalize" || infoArgs["turn"] != -1 {
+		t.Fatalf("info args=%v", infoArgs)
+	}
+}
+
+func TestFinalizeFindingsReturnsErrorWhenUnparseable(t *testing.T) {
+	client := &fakeToolClient{
+		responses: []*llmclients.Response{
+			{Content: `not json at all`},
+		},
+	}
+	logger := &captureLogger{}
+
+	findings, _, err := finalizeFindings(
+		context.Background(), client, "test-model", 42,
+		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
+		logger,
+	)
 	if findings != nil {
 		t.Fatalf("findings=%v, want nil", findings)
 	}
-	warnEntry := findLogEntry(logger.entries, "warn", "tool-use finalize produced no parseable findings")
-	if warnEntry == nil {
-		t.Fatal("missing finalize warning log entry")
+	if !errors.Is(err, ErrToolUseFinalizeUnparseable) {
+		t.Fatalf("err=%v, want ErrToolUseFinalizeUnparseable", err)
 	}
-	warnArgs := logArgsToMap(warnEntry.args)
-	if warnArgs["record_id"] != int64(42) || warnArgs["response_preview"] != "not json at all" {
-		t.Fatalf("warn args=%v", warnArgs)
+	errorEntry := findLogEntry(logger.entries, "error", "tool-use finalize returned invalid findings format")
+	if errorEntry == nil {
+		t.Fatal("missing finalize error log entry")
+	}
+	errorArgs := logArgsToMap(errorEntry.args)
+	if errorArgs["record_id"] != int64(42) || errorArgs["response_preview"] != "not json at all" {
+		t.Fatalf("error args=%v", errorArgs)
 	}
 }
 

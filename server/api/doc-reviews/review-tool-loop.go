@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,8 @@ import (
 const defaultP3MaxToolTokens = 60000
 
 const docReviewToolUseSystemPrompt = "You are a document review engine. Return strict JSON findings only unless you need to call an available tool."
+
+var ErrToolUseFinalizeUnparseable = errors.New("tool-use finalize response was not parseable findings JSON")
 
 // runToolUseReview runs the bounded tool-use conversation loop (DR10b) for one
 // review unit (a window for StrategyChunk reviewers). It places the canonical
@@ -117,6 +120,7 @@ func runToolUseReview(
 
 		// No tool calls: the model is producing its final findings.
 		if findings, ok := parseFindingsContent(resp.Content); ok {
+			logToolUseFindingsStatus(logger, "response", recordID, turn, findings)
 			return findings, aggregateUsage, nil
 		}
 
@@ -136,8 +140,9 @@ func runToolUseReview(
 }
 
 // finalizeFindings appends the force-produce instruction and makes one final
-// model call without tools, returning the parsed findings (empty if still
-// unparseable — no error, so the window simply contributes no findings).
+// model call without tools, returning the parsed findings. A parseable
+// `{"findings":[]}` is a normal "no issues found" outcome; an unparseable
+// response is treated as an error because the model failed its output contract.
 func finalizeFindings(
 	ctx context.Context,
 	client LLMChatClient,
@@ -167,13 +172,15 @@ func finalizeFindings(
 	}
 	logLoopUsage(logger, modelName, -1, resp.Usage)
 	if findings, ok := parseFindingsContent(resp.Content); ok {
+		logToolUseFindingsStatus(logger, "finalize", recordID, -1, findings)
 		return findings, resp.Usage, nil
 	}
-	logger.Warn("tool-use finalize produced no parseable findings",
+	logger.Error("tool-use finalize returned invalid findings format",
 		"record_id", recordID,
 		"response_preview", previewToolLogText(resp.Content),
 	)
-	return nil, resp.Usage, nil
+	return nil, resp.Usage, fmt.Errorf("%w: record_id=%d response=%q",
+		ErrToolUseFinalizeUnparseable, recordID, previewToolLogText(resp.Content))
 }
 
 // executeToolCall validates a tool call's arguments against the tool's schema
@@ -225,6 +232,23 @@ func previewToolLogText(s string) string {
 		return s
 	}
 	return s[:maxLen] + "...(truncated)"
+}
+
+func logToolUseFindingsStatus(logger ApiTypes.JimoLogger, phase string, recordID int64, turn int, findings []ReviewFinding) {
+	if len(findings) == 0 {
+		logger.Info("tool-use returned no findings",
+			"record_id", recordID,
+			"phase", phase,
+			"turn", turn,
+		)
+		return
+	}
+	logger.Info("tool-use returned findings",
+		"record_id", recordID,
+		"phase", phase,
+		"turn", turn,
+		"findings", len(findings),
+	)
 }
 
 // missingRequiredArgs returns the schema-required argument names absent from args.
