@@ -203,7 +203,7 @@ func finalizeFindings(
 }
 
 func shouldRepairFindingsJSON(parseReason string) bool {
-	return strings.HasPrefix(parseReason, "json_unmarshal_failed:")
+	return strings.HasPrefix(parseReason, "json_unmarshal_failed:") || parseReason == "tool_calls_in_final_text"
 }
 
 func repairFinalFindingsJSON(
@@ -223,11 +223,8 @@ func repairFinalFindingsJSON(
 	repairMessages = append(repairMessages,
 		LLMMessage{Role: LLMRoleAssistant, Content: badContent},
 		LLMMessage{
-			Role: LLMRoleUser,
-			Content: "The previous response was not valid JSON: " + parseReason + ". " +
-				"Rewrite the same findings as strict JSON only, with the exact shape " +
-				`{"findings":[...]}. Preserve the finding text, escape quotes and newlines inside string values, ` +
-				"and return no markdown fences or prose.",
+			Role:    LLMRoleUser,
+			Content: finalFindingsRepairPrompt(parseReason),
 		},
 	)
 	resp, err := client.Complete(ctx, LLMRequest{
@@ -248,6 +245,19 @@ func repairFinalFindingsJSON(
 	_, _, repairReason := parseFindingsContentDetailed(resp.Content)
 	return nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
 		ErrToolUseFinalizeUnparseable, recordID, repairReason, previewToolLogText(resp.Content))
+}
+
+func finalFindingsRepairPrompt(parseReason string) string {
+	if parseReason == "tool_calls_in_final_text" {
+		return "The previous response attempted to call tools, but tool use is now closed. " +
+			"Do not request or mention tools. Based only on the evidence already available in this conversation, " +
+			"return strict JSON only with the exact shape " + `{"findings":[...]}. ` +
+			`Return {"findings":[]} if the available evidence does not support any finding.`
+	}
+	return "The previous response was not valid JSON: " + parseReason + ". " +
+		"Rewrite the same findings as strict JSON only, with the exact shape " +
+		`{"findings":[...]}. Preserve the finding text, escape quotes and newlines inside string values, ` +
+		"and return no markdown fences or prose."
 }
 
 // executeToolCall validates a tool call's arguments against the tool's schema
@@ -389,6 +399,9 @@ func extractJSONObjectDetailed(s string) (string, string) {
 	if s == "" {
 		return "", "empty_response"
 	}
+	if looksLikeTextToolCalls(s) {
+		return "", "tool_calls_in_final_text"
+	}
 	if strings.HasPrefix(s, "```") {
 		rest := s[3:]
 		rest = strings.TrimPrefix(rest, "json")
@@ -427,6 +440,11 @@ func extractJSONObjectDetailed(s string) (string, string) {
 		}
 	}
 	return "", "unbalanced_json_object"
+}
+
+func looksLikeTextToolCalls(s string) bool {
+	return strings.Contains(s, "tool_calls") &&
+		(strings.Contains(s, "<｜｜DSML｜｜") || strings.Contains(s, "<tool_call") || strings.Contains(s, "<tool_calls"))
 }
 
 // usageTotalTokens returns the total tokens for a call (0 when usage is absent).

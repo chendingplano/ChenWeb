@@ -337,6 +337,37 @@ func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
 	}
 }
 
+func TestFinalizeFindingsRepairsTextToolCalls(t *testing.T) {
+	client := &fakeToolClient{
+		responses: []*llmclients.Response{
+			{Content: "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"search_provisions\">\n<｜｜DSML｜｜parameter name=\"query\" string=\"true\">主次</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>"},
+			{Content: `{"findings":[]}`},
+		},
+	}
+	logger := &captureLogger{}
+
+	findings, _, err := finalizeFindings(
+		context.Background(), client, "test-model", 42,
+		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
+		logger,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("findings len=%d, want 0", len(findings))
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("requests=%d, want finalize + repair", len(client.requests))
+	}
+	if client.requests[1].CallReason != "review_tool_use_finalize_repair" {
+		t.Fatalf("repair call reason=%q", client.requests[1].CallReason)
+	}
+	if !strings.Contains(client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, "tool use is now closed") {
+		t.Fatalf("repair prompt=%q", client.requests[1].Messages[len(client.requests[1].Messages)-1].Content)
+	}
+}
+
 func TestRunToolUseReviewTurnBudgetExhausted(t *testing.T) {
 	client := &fakeToolClient{
 		responses: []*llmclients.Response{
@@ -439,6 +470,18 @@ func TestParseFindingsContentDetailedReportsUnbalancedJSONObject(t *testing.T) {
 	}
 	if reason != "unbalanced_json_object" {
 		t.Fatalf("reason=%q, want unbalanced_json_object", reason)
+	}
+}
+
+func TestParseFindingsContentDetailedReportsTextToolCalls(t *testing.T) {
+	input := "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"search_provisions\"></｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>"
+
+	findings, ok, reason := parseFindingsContentDetailed(input)
+	if ok {
+		t.Fatalf("ok=true findings=%v, want false", findings)
+	}
+	if reason != "tool_calls_in_final_text" {
+		t.Fatalf("reason=%q, want tool_calls_in_final_text", reason)
 	}
 }
 
