@@ -562,52 +562,7 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 		p.Logger.Warn("failed to delete previous review findings", "record_id", recordID, "error", err)
 	}
 
-	var (
-		mu          sync.Mutex
-		allFindings []ReviewFinding
-		wg          sync.WaitGroup
-		errs        []error
-	)
-
-	for _, r := range reviewers {
-		wg.Add(1)
-		go func(reviewer Reviewer, cfg ReviewerConfig) {
-			defer wg.Done()
-
-			cfg.OnProgress = p.makeProgressReporter(reviewRunID, reviewer.Name())
-
-			p.Logger.Info("reviewer start",
-				"record_id", recordID,
-				"reviewer", reviewer.Name(),
-				"group", reviewer.Group(),
-				"model", cfg.ModelName,
-			)
-
-			findings, err := reviewer.ReviewDocument(ctx, recordID, cfg)
-			if err != nil {
-				p.Logger.Error("reviewer failed",
-					"record_id", recordID,
-					"reviewer", reviewer.Name(),
-					"error", err,
-				)
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", reviewer.Name(), err))
-				mu.Unlock()
-				return
-			}
-
-			p.Logger.Info("reviewer complete",
-				"record_id", recordID,
-				"reviewer", reviewer.Name(),
-				"findings", len(findings),
-			)
-
-			mu.Lock()
-			allFindings = append(allFindings, findings...)
-			mu.Unlock()
-		}(r.reviewer, r.cfg)
-	}
-	wg.Wait()
+	allFindings, errs := p.runReviewersPromptCacheOptimized(ctx, recordID, rec, reviewers, reviewRunID)
 
 	if len(allFindings) > 0 {
 		inserted, err := p.FindingsStore.SaveFindings(ctx, recordID, reviewRunID, allFindings)
