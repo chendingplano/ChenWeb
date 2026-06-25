@@ -234,6 +234,10 @@ type ReviewProcessor struct {
 	ModularityPromptRef  string
 	ModularityPromptText string
 
+	CompletenessModelName  string
+	CompletenessPromptRef  string
+	CompletenessPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -278,6 +282,10 @@ type ReviewProcessor struct {
 	// ModularityClient is a properly-configured LLM client for the
 	// modularity reviewer (P2, document-level).
 	ModularityClient LLMJSONExtractor
+
+	// CompletenessClient is a properly-configured LLM client for the
+	// completeness reviewer (P3, content quality, per-chunk).
+	CompletenessClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -357,6 +365,7 @@ func NewReviewProcessor(
 	navigabilityClient, navigabilityModel, navigabilityPrompt, navigabilityRef, _ := resolveReviewerRuntime(logger, "navigability", "P2")
 	sectionBalanceClient, sectionBalanceModel, sectionBalancePrompt, sectionBalanceRef, _ := resolveReviewerRuntime(logger, "section_balance", "P2")
 	modularityClient, modularityModel, modularityPrompt, modularityRef, _ := resolveReviewerRuntime(logger, "modularity", "P2")
+	completenessClient, completenessModel, completenessPrompt, completenessRef, _ := resolveReviewerRuntime(logger, "completeness", "P3")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -416,6 +425,11 @@ func NewReviewProcessor(
 		ModularityModelName:  modularityModel,
 		ModularityPromptRef:  modularityRef,
 		ModularityPromptText: modularityPrompt,
+
+		CompletenessClient:     completenessClient,
+		CompletenessModelName:  completenessModel,
+		CompletenessPromptRef:  completenessRef,
+		CompletenessPromptText: completenessPrompt,
 	}
 }
 
@@ -711,6 +725,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.ModularityModelName,
 				PromptText: p.ModularityPromptText,
 				PromptRef:  p.ModularityPromptRef,
+			},
+		})
+	}
+
+	if p.CompletenessClient != nil && p.CompletenessPromptText != "" && p.CompletenessModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &completenessReviewer{
+				client:     p.CompletenessClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.CompletenessModelName,
+				PromptText: p.CompletenessPromptText,
+				PromptRef:  p.CompletenessPromptRef,
 			},
 		})
 	}
