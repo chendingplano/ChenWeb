@@ -197,8 +197,8 @@ prompt = "prompt-review-relevance.md"
 max_tool_turns = 0
 
 [reviewers.currency]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-currency.md"

@@ -268,6 +268,10 @@ type ReviewProcessor struct {
 	RelevancePromptRef  string
 	RelevancePromptText string
 
+	CurrencyModelName  string
+	CurrencyPromptRef  string
+	CurrencyPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -332,6 +336,10 @@ type ReviewProcessor struct {
 	// RelevanceClient is a properly-configured LLM client for the
 	// relevance reviewer (P3, content quality, per-chunk).
 	RelevanceClient LLMJSONExtractor
+
+	// CurrencyClient is a properly-configured LLM client for the
+	// currency reviewer (P3, content quality, per-chunk).
+	CurrencyClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -416,6 +424,7 @@ func NewReviewProcessor(
 	clarityClient, clarityModel, clarityPrompt, clarityRef, _ := resolveReviewerRuntime(logger, "clarity", "P3")
 	concisenessClient, concisenessModel, concisenessPrompt, concisenessRef, _ := resolveReviewerRuntime(logger, "conciseness", "P3")
 	relevanceClient, relevanceModel, relevancePrompt, relevanceRef, _ := resolveReviewerRuntime(logger, "relevance", "P3")
+	currencyClient, currencyModel, currencyPrompt, currencyRef, _ := resolveReviewerRuntime(logger, "currency", "P3")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -501,6 +510,11 @@ func NewReviewProcessor(
 		RelevanceModelName:  relevanceModel,
 		RelevancePromptRef:  relevanceRef,
 		RelevancePromptText: relevancePrompt,
+
+		CurrencyClient:     currencyClient,
+		CurrencyModelName:  currencyModel,
+		CurrencyPromptRef:  currencyRef,
+		CurrencyPromptText: currencyPrompt,
 	}
 }
 
@@ -883,6 +897,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.RelevanceModelName,
 				PromptText: p.RelevancePromptText,
 				PromptRef:  p.RelevancePromptRef,
+			},
+		})
+	}
+
+	if p.CurrencyClient != nil && p.CurrencyPromptText != "" && p.CurrencyModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &currencyReviewer{
+				client:     p.CurrencyClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.CurrencyModelName,
+				PromptText: p.CurrencyPromptText,
+				PromptRef:  p.CurrencyPromptRef,
 			},
 		})
 	}
