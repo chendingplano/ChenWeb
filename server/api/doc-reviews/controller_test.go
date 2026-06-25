@@ -355,6 +355,64 @@ func TestController_StopRequest(t *testing.T) {
 	}
 }
 
+func TestController_RunReview_SkipsAlreadyHandledRequests(t *testing.T) {
+	db := connectTestDB(t)
+	defer db.Close()
+	ensureTables(t, db)
+
+	c := &DocReviewController{DB: db}
+	ctx := context.Background()
+
+	recordID := insertTestInput(t, db, "Test RunReview Skip Duplicate Doc")
+	defer cleanupInputs(t, db, recordID)
+
+	for _, status := range []string{"running", "completed", "stopped"} {
+		t.Run(status, func(t *testing.T) {
+			result, err := c.AcceptRequest(ctx, SubmitRequestInput{
+				InputRecordID: recordID,
+				Tier:          "must_review",
+				RequesterName: "test-user",
+			})
+			if err != nil {
+				t.Fatalf("AcceptRequest: %v", err)
+			}
+			defer cleanupRequests(t, db, result.RequestID)
+
+			_, err = db.ExecContext(ctx,
+				`UPDATE kb.doc_review_requests SET status = $1 WHERE id = $2`,
+				status, result.RequestID,
+			)
+			if err != nil {
+				t.Fatalf("update request to %s: %v", status, err)
+			}
+
+			if err := c.RunReview(ctx, result.RequestID); err != nil {
+				t.Fatalf("RunReview(%s) should be a no-op, got error: %v", status, err)
+			}
+		})
+	}
+}
+
+func TestIsAlreadyHandledReviewStatus(t *testing.T) {
+	cases := []struct {
+		status string
+		want   bool
+	}{
+		{status: "accepted", want: false},
+		{status: "running", want: true},
+		{status: "completed", want: true},
+		{status: "stopped", want: true},
+		{status: "failed", want: false},
+		{status: "", want: false},
+	}
+
+	for _, tc := range cases {
+		if got := isAlreadyHandledReviewStatus(tc.status); got != tc.want {
+			t.Fatalf("isAlreadyHandledReviewStatus(%q) = %v, want %v", tc.status, got, tc.want)
+		}
+	}
+}
+
 func TestController_UpdateFinding(t *testing.T) {
 	db := connectTestDB(t)
 	defer db.Close()

@@ -19,6 +19,15 @@ import (
 
 var logger = loggerutil.CreateDefaultLogger("DR13")
 
+func isAlreadyHandledReviewStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "completed", "stopped":
+		return true
+	default:
+		return false
+	}
+}
+
 // DocReviewController manages the review request lifecycle.
 type DocReviewController struct {
 	DB *sql.DB
@@ -127,6 +136,13 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 	if err != nil {
 		return fmt.Errorf("load request %d: %w", requestID, err)
 	}
+	if isAlreadyHandledReviewStatus(req.Status) {
+		logger.Info("review request already handled; skipping duplicate run",
+			"request_id", requestID,
+			"status", req.Status,
+		)
+		return nil
+	}
 	if req.Status != "accepted" {
 		return fmt.Errorf("request %d is in status %q, expected 'accepted'", requestID, req.Status)
 	}
@@ -138,12 +154,32 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 	}
 
 	// Update status -> running, and flip every pending aspect to 'running'.
-	_, err = c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_requests SET status = 'running', review_run_id = $1, start_time = NOW() WHERE id = $2`,
+	res, err := c.DB.ExecContext(ctx,
+		`UPDATE kb.doc_review_requests
+		 SET status = 'running', review_run_id = $1, start_time = NOW()
+		 WHERE id = $2 AND status = 'accepted'`,
 		reviewRunID, requestID,
 	)
 	if err != nil {
 		return fmt.Errorf("update request %d to running: %w", requestID, err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check running transition for request %d: %w", requestID, err)
+	}
+	if rowsAffected == 0 {
+		cur, loadErr := c.loadRequest(ctx, requestID)
+		if loadErr != nil {
+			return fmt.Errorf("reload request %d after skipped running transition: %w", requestID, loadErr)
+		}
+		if isAlreadyHandledReviewStatus(cur.Status) {
+			logger.Info("review request was claimed by another worker; skipping duplicate run",
+				"request_id", requestID,
+				"status", cur.Status,
+			)
+			return nil
+		}
+		return fmt.Errorf("request %d is in status %q, expected 'accepted'", requestID, cur.Status)
 	}
 	c.markAspectsRunning(ctx, reviewRunID)
 	logger.Info("review request started", "request_id", requestID, "review_run_id", reviewRunID)
