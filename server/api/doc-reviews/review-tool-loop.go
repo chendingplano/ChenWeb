@@ -171,16 +171,18 @@ func finalizeFindings(
 		return nil, nil, fmt.Errorf("(MID_26062596) tool-use finalize call failed: %w", err)
 	}
 	logLoopUsage(logger, modelName, -1, resp.Usage)
-	if findings, ok := parseFindingsContent(resp.Content); ok {
+	if findings, ok, _ := parseFindingsContentDetailed(resp.Content); ok {
 		logToolUseFindingsStatus(logger, "finalize", recordID, -1, findings)
 		return findings, resp.Usage, nil
 	}
+	_, _, parseReason := parseFindingsContentDetailed(resp.Content)
 	logger.Error("tool-use finalize returned invalid findings format",
 		"record_id", recordID,
+		"parse_failure_reason", parseReason,
 		"response_preview", previewToolLogText(resp.Content),
 	)
-	return nil, resp.Usage, fmt.Errorf("%w: record_id=%d response=%q",
-		ErrToolUseFinalizeUnparseable, recordID, previewToolLogText(resp.Content))
+	return nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
+		ErrToolUseFinalizeUnparseable, recordID, parseReason, previewToolLogText(resp.Content))
 }
 
 // executeToolCall validates a tool call's arguments against the tool's schema
@@ -291,26 +293,36 @@ func toolDefsFor(tools []ReviewTool) []LLMToolDef {
 // tolerating code fences and surrounding prose. The bool is true when a JSON
 // object was successfully parsed (an empty findings array is a valid result).
 func parseFindingsContent(content string) ([]ReviewFinding, bool) {
-	obj := extractJSONObject(content)
+	findings, ok, _ := parseFindingsContentDetailed(content)
+	return findings, ok
+}
+
+func parseFindingsContentDetailed(content string) ([]ReviewFinding, bool, string) {
+	obj, reason := extractJSONObjectDetailed(content)
 	if obj == "" {
-		return nil, false
+		return nil, false, reason
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(obj), &payload); err != nil {
-		return nil, false
+		return nil, false, "json_unmarshal_failed: " + err.Error()
 	}
 	if _, ok := payload["findings"]; !ok {
-		return nil, false
+		return nil, false, "missing_findings_key"
 	}
-	return normalizeFindingsJSON(payload), true
+	return normalizeFindingsJSON(payload), true, ""
 }
 
 // extractJSONObject returns the outermost {...} span in s, stripping ```json
 // fences and leading/trailing prose. Returns "" when no balanced object is found.
 func extractJSONObject(s string) string {
+	obj, _ := extractJSONObjectDetailed(s)
+	return obj
+}
+
+func extractJSONObjectDetailed(s string) (string, string) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return ""
+		return "", "empty_response"
 	}
 	if strings.HasPrefix(s, "```") {
 		rest := s[3:]
@@ -324,7 +336,7 @@ func extractJSONObject(s string) string {
 	s = strings.TrimSpace(strings.TrimSuffix(s, "```"))
 	start := strings.Index(s, "{")
 	if start < 0 {
-		return ""
+		return "", "no_json_object_found"
 	}
 	depth := 0
 	inStr := false
@@ -345,11 +357,11 @@ func extractJSONObject(s string) string {
 		case c == '}':
 			depth--
 			if depth == 0 {
-				return s[start : i+1]
+				return s[start : i+1], ""
 			}
 		}
 	}
-	return ""
+	return "", "unbalanced_json_object"
 }
 
 // usageTotalTokens returns the total tokens for a call (0 when usage is absent).

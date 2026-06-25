@@ -391,6 +391,18 @@ func TestParseFindingsContentWithTrailingClosingFence(t *testing.T) {
 	}
 }
 
+func TestParseFindingsContentDetailedReportsUnbalancedJSONObject(t *testing.T) {
+	input := "```json\n{\n  \"findings\": [\n    {\n      \"title\": \"cut off\"\n    }\n  ]\n"
+
+	findings, ok, reason := parseFindingsContentDetailed(input)
+	if ok {
+		t.Fatalf("ok=true findings=%v, want false", findings)
+	}
+	if reason != "unbalanced_json_object" {
+		t.Fatalf("reason=%q, want unbalanced_json_object", reason)
+	}
+}
+
 func TestMissingRequiredArgs(t *testing.T) {
 	schema := []byte(`{"type":"object","properties":{"q":{"type":"string"}},"required":["q","limit"]}`)
 	missing := missingRequiredArgs(schema, map[string]any{"q": "hello"})
