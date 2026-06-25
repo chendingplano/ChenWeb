@@ -170,19 +170,84 @@ func finalizeFindings(
 	if err != nil {
 		return nil, nil, fmt.Errorf("(MID_26062596) tool-use finalize call failed: %w", err)
 	}
+	totalUsage := &LLMUsage{}
+	addUsage(totalUsage, resp.Usage)
 	logLoopUsage(logger, modelName, -1, resp.Usage)
 	if findings, ok, _ := parseFindingsContentDetailed(resp.Content); ok {
 		logToolUseFindingsStatus(logger, "finalize", recordID, -1, findings)
-		return findings, resp.Usage, nil
+		return findings, totalUsage, nil
 	}
 	_, _, parseReason := parseFindingsContentDetailed(resp.Content)
+	if shouldRepairFindingsJSON(parseReason) {
+		repairFindings, repairUsage, repairErr := repairFinalFindingsJSON(
+			ctx, client, modelName, recordID, messages, resp.Content, parseReason, logger,
+		)
+		addUsage(totalUsage, repairUsage)
+		if repairErr == nil {
+			return repairFindings, totalUsage, nil
+		}
+		logger.Error("tool-use finalize repair failed",
+			"record_id", recordID,
+			"parse_failure_reason", repairErr.Error(),
+			"response_preview", previewToolLogText(resp.Content),
+		)
+		return nil, totalUsage, repairErr
+	}
 	logger.Error("tool-use finalize returned invalid findings format",
 		"record_id", recordID,
 		"parse_failure_reason", parseReason,
 		"response_preview", previewToolLogText(resp.Content),
 	)
-	return nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
+	return nil, totalUsage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
 		ErrToolUseFinalizeUnparseable, recordID, parseReason, previewToolLogText(resp.Content))
+}
+
+func shouldRepairFindingsJSON(parseReason string) bool {
+	return strings.HasPrefix(parseReason, "json_unmarshal_failed:")
+}
+
+func repairFinalFindingsJSON(
+	ctx context.Context,
+	client LLMChatClient,
+	modelName string,
+	recordID int64,
+	messages []LLMMessage,
+	badContent string,
+	parseReason string,
+	logger ApiTypes.JimoLogger,
+) ([]ReviewFinding, *LLMUsage, error) {
+	if isCtxStopped(ctx) {
+		return nil, nil, ErrPipelineStopped
+	}
+	repairMessages := append([]LLMMessage(nil), messages...)
+	repairMessages = append(repairMessages,
+		LLMMessage{Role: LLMRoleAssistant, Content: badContent},
+		LLMMessage{
+			Role: LLMRoleUser,
+			Content: "The previous response was not valid JSON: " + parseReason + ". " +
+				"Rewrite the same findings as strict JSON only, with the exact shape " +
+				`{"findings":[...]}. Preserve the finding text, escape quotes and newlines inside string values, ` +
+				"and return no markdown fences or prose.",
+		},
+	)
+	resp, err := client.Complete(ctx, LLMRequest{
+		Model:      modelName,
+		Messages:   repairMessages,
+		RecordID:   recordID,
+		CallReason: "review_tool_use_finalize_repair",
+		CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP-FINAL-REPAIR",
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("(MID_26062597) tool-use finalize repair call failed: %w", err)
+	}
+	logLoopUsage(logger, modelName, -2, resp.Usage)
+	if findings, ok, _ := parseFindingsContentDetailed(resp.Content); ok {
+		logToolUseFindingsStatus(logger, "finalize_repair", recordID, -2, findings)
+		return findings, resp.Usage, nil
+	}
+	_, _, repairReason := parseFindingsContentDetailed(resp.Content)
+	return nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
+		ErrToolUseFinalizeUnparseable, recordID, repairReason, previewToolLogText(resp.Content))
 }
 
 // executeToolCall validates a tool call's arguments against the tool's schema

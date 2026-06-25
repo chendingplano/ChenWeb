@@ -298,6 +298,45 @@ func TestFinalizeFindingsReturnsErrorWhenUnparseable(t *testing.T) {
 	}
 }
 
+func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
+	client := &fakeToolClient{
+		responses: []*llmclients.Response{
+			{Content: `{"findings":[{"title":"bad","description":"附录A指出"从设备名称字面理解"会误导"}]}`},
+			{Content: `{"findings":[{"title":"bad","description":"附录A指出\"从设备名称字面理解\"会误导"}]}`},
+		},
+	}
+	logger := &captureLogger{}
+
+	findings, _, err := finalizeFindings(
+		context.Background(), client, "test-model", 42,
+		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
+		logger,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings len=%d, want 1", len(findings))
+	}
+	if !strings.Contains(findings[0].Description, `"从设备名称字面理解"`) {
+		t.Fatalf("description=%q", findings[0].Description)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("requests=%d, want finalize + repair", len(client.requests))
+	}
+	if client.requests[1].CallReason != "review_tool_use_finalize_repair" {
+		t.Fatalf("repair call reason=%q", client.requests[1].CallReason)
+	}
+	infoEntry := findLogEntry(logger.entries, "info", "tool-use returned findings")
+	if infoEntry == nil {
+		t.Fatal("missing findings info log entry")
+	}
+	infoArgs := logArgsToMap(infoEntry.args)
+	if infoArgs["phase"] != "finalize_repair" {
+		t.Fatalf("info args=%v", infoArgs)
+	}
+}
+
 func TestRunToolUseReviewTurnBudgetExhausted(t *testing.T) {
 	client := &fakeToolClient{
 		responses: []*llmclients.Response{
