@@ -280,6 +280,10 @@ type ReviewProcessor struct {
 	DiagramsPromptRef  string
 	DiagramsPromptText string
 
+	TestableClaimsModelName  string
+	TestableClaimsPromptRef  string
+	TestableClaimsPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -356,6 +360,10 @@ type ReviewProcessor struct {
 	// DiagramsClient is a properly-configured LLM client for the
 	// diagrams reviewer (P3, content quality, per-chunk).
 	DiagramsClient LLMJSONExtractor
+
+	// TestableClaimsClient is a properly-configured LLM client for the
+	// testable_claims reviewer (P3, content quality, per-chunk).
+	TestableClaimsClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -443,6 +451,7 @@ func NewReviewProcessor(
 	currencyClient, currencyModel, currencyPrompt, currencyRef, _ := resolveReviewerRuntime(logger, "currency", "P3")
 	examplesClient, examplesModel, examplesPrompt, examplesRef, _ := resolveReviewerRuntime(logger, "examples", "P3")
 	diagramsClient, diagramsModel, diagramsPrompt, diagramsRef, _ := resolveReviewerRuntime(logger, "diagrams", "P3")
+	testableClaimsClient, testableClaimsModel, testableClaimsPrompt, testableClaimsRef, _ := resolveReviewerRuntime(logger, "testable_claims", "P3")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -543,6 +552,11 @@ func NewReviewProcessor(
 		DiagramsModelName:  diagramsModel,
 		DiagramsPromptRef:  diagramsRef,
 		DiagramsPromptText: diagramsPrompt,
+
+		TestableClaimsClient:     testableClaimsClient,
+		TestableClaimsModelName:  testableClaimsModel,
+		TestableClaimsPromptRef:  testableClaimsRef,
+		TestableClaimsPromptText: testableClaimsPrompt,
 	}
 }
 
@@ -931,6 +945,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.DiagramsModelName,
 				PromptText: p.DiagramsPromptText,
 				PromptRef:  p.DiagramsPromptRef,
+			},
+		})
+	}
+
+	if p.TestableClaimsClient != nil && p.TestableClaimsPromptText != "" && p.TestableClaimsModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &testableClaimsReviewer{
+				client:     p.TestableClaimsClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.TestableClaimsModelName,
+				PromptText: p.TestableClaimsPromptText,
+				PromptRef:  p.TestableClaimsPromptRef,
 			},
 		})
 	}
