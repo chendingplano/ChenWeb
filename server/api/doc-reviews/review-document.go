@@ -238,6 +238,10 @@ type ReviewProcessor struct {
 	CompletenessPromptRef  string
 	CompletenessPromptText string
 
+	CorrectnessModelName  string
+	CorrectnessPromptRef  string
+	CorrectnessPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -286,6 +290,10 @@ type ReviewProcessor struct {
 	// CompletenessClient is a properly-configured LLM client for the
 	// completeness reviewer (P3, content quality, per-chunk).
 	CompletenessClient LLMJSONExtractor
+
+	// CorrectnessClient is a properly-configured LLM client for the
+	// correctness reviewer (P3, content quality, per-chunk).
+	CorrectnessClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -366,6 +374,7 @@ func NewReviewProcessor(
 	sectionBalanceClient, sectionBalanceModel, sectionBalancePrompt, sectionBalanceRef, _ := resolveReviewerRuntime(logger, "section_balance", "P2")
 	modularityClient, modularityModel, modularityPrompt, modularityRef, _ := resolveReviewerRuntime(logger, "modularity", "P2")
 	completenessClient, completenessModel, completenessPrompt, completenessRef, _ := resolveReviewerRuntime(logger, "completeness", "P3")
+	correctnessClient, correctnessModel, correctnessPrompt, correctnessRef, _ := resolveReviewerRuntime(logger, "correctness", "P3")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -430,6 +439,11 @@ func NewReviewProcessor(
 		CompletenessModelName:  completenessModel,
 		CompletenessPromptRef:  completenessRef,
 		CompletenessPromptText: completenessPrompt,
+
+		CorrectnessClient:     correctnessClient,
+		CorrectnessModelName:  correctnessModel,
+		CorrectnessPromptRef:  correctnessRef,
+		CorrectnessPromptText: correctnessPrompt,
 	}
 }
 
@@ -742,6 +756,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.CompletenessModelName,
 				PromptText: p.CompletenessPromptText,
 				PromptRef:  p.CompletenessPromptRef,
+			},
+		})
+	}
+
+	if p.CorrectnessClient != nil && p.CorrectnessPromptText != "" && p.CorrectnessModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &correctnessReviewer{
+				client:     p.CorrectnessClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.CorrectnessModelName,
+				PromptText: p.CorrectnessPromptText,
+				PromptRef:  p.CorrectnessPromptRef,
 			},
 		})
 	}

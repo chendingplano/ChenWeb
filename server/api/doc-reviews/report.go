@@ -140,8 +140,16 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 	// Load document lines once for context extraction (non-fatal if unavailable).
 	lineIndex := g.loadDocLines(ctx, req.InputRecordID)
 
+	// Fixed pass order ensures report.Findings (and recommendations derived from
+	// it) are always ordered P1→P6, not by nondeterministic map iteration.
+	passOrder := []string{"P1", "P2", "P3", "P4", "P5", "P6"}
+
 	var totalHigh, totalMedium, totalLow int
-	for pass, items := range passFindings {
+	for _, pass := range passOrder {
+		items, ok := passFindings[pass]
+		if !ok {
+			continue
+		}
 		var rfList []ReportFinding
 		for _, f := range items {
 			rf := ReportFinding{
@@ -169,7 +177,6 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 	}
 
 	// Build pass order (only passes with findings).
-	passOrder := []string{"P1", "P2", "P3", "P4", "P5", "P6"}
 	for _, p := range passOrder {
 		if _, ok := report.FindingsByPass[p]; ok {
 			report.PassOrder = append(report.PassOrder, p)
