@@ -214,6 +214,14 @@ type ReviewProcessor struct {
 	LocalizationPromptRef  string
 	LocalizationPromptText string
 
+	LogicalFlowModelName  string
+	LogicalFlowPromptRef  string
+	LogicalFlowPromptText string
+
+	HeadingHierarchyModelName  string
+	HeadingHierarchyPromptRef  string
+	HeadingHierarchyPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -238,6 +246,14 @@ type ReviewProcessor struct {
 	// LocalizationClient is a properly-configured LLM client for the
 	// localization reviewer.
 	LocalizationClient LLMJSONExtractor
+
+	// LogicalFlowClient is a properly-configured LLM client for the
+	// logical_flow reviewer (P2, document-level).
+	LogicalFlowClient LLMJSONExtractor
+
+	// HeadingHierarchyClient is a properly-configured LLM client for the
+	// heading_hierarchy reviewer (P2, document-level).
+	HeadingHierarchyClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -294,8 +310,9 @@ func resolveReviewerRuntime(logger ApiTypes.JimoLogger, aspect, group string) (
 }
 
 // NewReviewProcessor creates a ReviewProcessor.
-// Phase I loads the grammar_spelling, tone_voice, and formatting_consistency
-// reviewer configs.
+// Phase I loads the P1 reviewer configs (grammar_spelling, tone_voice,
+// formatting_consistency, readability, localization) and the first P2
+// document-level reviewer (logical_flow).
 func NewReviewProcessor(
 	inputStore DocMetadataStore,
 	entityStore EntityRelationStore,
@@ -310,6 +327,8 @@ func NewReviewProcessor(
 	formattingClient, formattingModel, formattingPrompt, formattingRef, _ := resolveReviewerRuntime(logger, "formatting_consistency", "P1")
 	readabilityClient, readabilityModel, readabilityPrompt, readabilityRef, _ := resolveReviewerRuntime(logger, "readability", "P1")
 	localizationClient, localizationModel, localizationPrompt, localizationRef, _ := resolveReviewerRuntime(logger, "localization", "P1")
+	logicalFlowClient, logicalFlowModel, logicalFlowPrompt, logicalFlowRef, _ := resolveReviewerRuntime(logger, "logical_flow", "P2")
+	headingHierarchyClient, headingHierarchyModel, headingHierarchyPrompt, headingHierarchyRef, _ := resolveReviewerRuntime(logger, "heading_hierarchy", "P2")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -344,6 +363,16 @@ func NewReviewProcessor(
 		LocalizationModelName:  localizationModel,
 		LocalizationPromptRef:  localizationRef,
 		LocalizationPromptText: localizationPrompt,
+
+		LogicalFlowClient:     logicalFlowClient,
+		LogicalFlowModelName:  logicalFlowModel,
+		LogicalFlowPromptRef:  logicalFlowRef,
+		LogicalFlowPromptText: logicalFlowPrompt,
+
+		HeadingHierarchyClient:     headingHierarchyClient,
+		HeadingHierarchyModelName:  headingHierarchyModel,
+		HeadingHierarchyPromptRef:  headingHierarchyRef,
+		HeadingHierarchyPromptText: headingHierarchyPrompt,
 	}
 }
 
@@ -554,6 +583,40 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.LocalizationModelName,
 				PromptText: p.LocalizationPromptText,
 				PromptRef:  p.LocalizationPromptRef,
+			},
+		})
+	}
+
+	if p.LogicalFlowClient != nil && p.LogicalFlowPromptText != "" && p.LogicalFlowModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &logicalFlowReviewer{
+				client:     p.LogicalFlowClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.LogicalFlowModelName,
+				PromptText: p.LogicalFlowPromptText,
+				PromptRef:  p.LogicalFlowPromptRef,
+			},
+		})
+	}
+
+	if p.HeadingHierarchyClient != nil && p.HeadingHierarchyPromptText != "" && p.HeadingHierarchyModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &headingHierarchyReviewer{
+				client:     p.HeadingHierarchyClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.HeadingHierarchyModelName,
+				PromptText: p.HeadingHierarchyPromptText,
+				PromptRef:  p.HeadingHierarchyPromptRef,
 			},
 		})
 	}
