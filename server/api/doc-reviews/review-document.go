@@ -384,6 +384,52 @@ type ReviewProcessor struct {
 	// for the evidence_rationale reviewer when it runs the tool-use path.
 	// nil when max_tool_turns = 0 or no tool client could be resolved.
 	EvidenceRationaleToolClient LLMChatClient
+
+	// ── P4 — Consistency ───────────────────────────────────────────────────
+
+	InternalContradictionsModelName  string
+	InternalContradictionsPromptRef  string
+	InternalContradictionsPromptText string
+
+	TerminologyConsistencyModelName  string
+	TerminologyConsistencyPromptRef  string
+	TerminologyConsistencyPromptText string
+
+	CrossReferenceCorrectnessModelName  string
+	CrossReferenceCorrectnessPromptRef  string
+	CrossReferenceCorrectnessPromptText string
+
+	RequirementTraceabilityModelName  string
+	RequirementTraceabilityPromptRef  string
+	RequirementTraceabilityPromptText string
+
+	// P4 tool fields — only non-zero/empty when the reviewer uses the tool-use
+	// path (max_tool_turns > 0 in doc-review.local.toml).
+	InternalContradictionsMaxToolTurns  int
+	InternalContradictionsMaxToolTokens int
+	InternalContradictionsTools         []string
+
+	TerminologyConsistencyMaxToolTurns  int
+	TerminologyConsistencyMaxToolTokens int
+	TerminologyConsistencyTools         []string
+
+	CrossReferenceCorrectnessMaxToolTurns  int
+	CrossReferenceCorrectnessMaxToolTokens int
+	CrossReferenceCorrectnessTools         []string
+
+	RequirementTraceabilityMaxToolTurns  int
+	RequirementTraceabilityMaxToolTokens int
+	RequirementTraceabilityTools         []string
+
+	InternalContradictionsClient     LLMJSONExtractor
+	TerminologyConsistencyClient     LLMJSONExtractor
+	CrossReferenceCorrectnessClient  LLMJSONExtractor
+	RequirementTraceabilityClient    LLMJSONExtractor
+
+	InternalContradictionsToolClient     LLMChatClient
+	TerminologyConsistencyToolClient     LLMChatClient
+	CrossReferenceCorrectnessToolClient  LLMChatClient
+	RequirementTraceabilityToolClient    LLMChatClient
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -517,6 +563,20 @@ func NewReviewProcessor(
 	evidenceRationaleMaxTurns, evidenceRationaleMaxTokens, evidenceRationaleToolList := resolveReviewerBudget("evidence_rationale", "P3")
 	evidenceRationaleToolClient := resolveReviewerToolClient(logger, "evidence_rationale", "P3", evidenceRationaleMaxTurns)
 
+	// P4 — Consistency
+	internalContradictionsClient, internalContradictionsModel, internalContradictionsPrompt, internalContradictionsRef, _ := resolveReviewerRuntime(logger, "internal_contradictions", "P4")
+	terminologyConsistencyClient, terminologyConsistencyModel, terminologyConsistencyPrompt, terminologyConsistencyRef, _ := resolveReviewerRuntime(logger, "terminology_consistency", "P4")
+	crossReferenceCorrectnessClient, crossReferenceCorrectnessModel, crossReferenceCorrectnessPrompt, crossReferenceCorrectnessRef, _ := resolveReviewerRuntime(logger, "cross_reference_correctness", "P4")
+	requirementTraceabilityClient, requirementTraceabilityModel, requirementTraceabilityPrompt, requirementTraceabilityRef, _ := resolveReviewerRuntime(logger, "requirement_traceability", "P4")
+	internalContradictionsMaxTurns, internalContradictionsMaxTokens, internalContradictionsToolList := resolveReviewerBudget("internal_contradictions", "P4")
+	terminologyConsistencyMaxTurns, terminologyConsistencyMaxTokens, terminologyConsistencyToolList := resolveReviewerBudget("terminology_consistency", "P4")
+	crossReferenceCorrectnessMaxTurns, crossReferenceCorrectnessMaxTokens, crossReferenceCorrectnessToolList := resolveReviewerBudget("cross_reference_correctness", "P4")
+	requirementTraceabilityMaxTurns, requirementTraceabilityMaxTokens, requirementTraceabilityToolList := resolveReviewerBudget("requirement_traceability", "P4")
+	internalContradictionsToolClient := resolveReviewerToolClient(logger, "internal_contradictions", "P4", internalContradictionsMaxTurns)
+	terminologyConsistencyToolClient := resolveReviewerToolClient(logger, "terminology_consistency", "P4", terminologyConsistencyMaxTurns)
+	crossReferenceCorrectnessToolClient := resolveReviewerToolClient(logger, "cross_reference_correctness", "P4", crossReferenceCorrectnessMaxTurns)
+	requirementTraceabilityToolClient := resolveReviewerToolClient(logger, "requirement_traceability", "P4", requirementTraceabilityMaxTurns)
+
 	return &ReviewProcessor{
 		InputStore:    inputStore,
 		EntityStore:   entityStore,
@@ -632,6 +692,48 @@ func NewReviewProcessor(
 		EvidenceRationaleTools:         evidenceRationaleToolList,
 
 		EvidenceRationaleToolClient: evidenceRationaleToolClient,
+
+		// P4 — Consistency
+		InternalContradictionsClient:     internalContradictionsClient,
+		InternalContradictionsModelName:  internalContradictionsModel,
+		InternalContradictionsPromptRef:  internalContradictionsRef,
+		InternalContradictionsPromptText: internalContradictionsPrompt,
+
+		TerminologyConsistencyClient:     terminologyConsistencyClient,
+		TerminologyConsistencyModelName:  terminologyConsistencyModel,
+		TerminologyConsistencyPromptRef:  terminologyConsistencyRef,
+		TerminologyConsistencyPromptText: terminologyConsistencyPrompt,
+
+		CrossReferenceCorrectnessClient:     crossReferenceCorrectnessClient,
+		CrossReferenceCorrectnessModelName:  crossReferenceCorrectnessModel,
+		CrossReferenceCorrectnessPromptRef:  crossReferenceCorrectnessRef,
+		CrossReferenceCorrectnessPromptText: crossReferenceCorrectnessPrompt,
+
+		RequirementTraceabilityClient:     requirementTraceabilityClient,
+		RequirementTraceabilityModelName:  requirementTraceabilityModel,
+		RequirementTraceabilityPromptRef:  requirementTraceabilityRef,
+		RequirementTraceabilityPromptText: requirementTraceabilityPrompt,
+
+		InternalContradictionsMaxToolTurns:  internalContradictionsMaxTurns,
+		InternalContradictionsMaxToolTokens: internalContradictionsMaxTokens,
+		InternalContradictionsTools:         internalContradictionsToolList,
+
+		TerminologyConsistencyMaxToolTurns:  terminologyConsistencyMaxTurns,
+		TerminologyConsistencyMaxToolTokens: terminologyConsistencyMaxTokens,
+		TerminologyConsistencyTools:         terminologyConsistencyToolList,
+
+		CrossReferenceCorrectnessMaxToolTurns:  crossReferenceCorrectnessMaxTurns,
+		CrossReferenceCorrectnessMaxToolTokens: crossReferenceCorrectnessMaxTokens,
+		CrossReferenceCorrectnessTools:         crossReferenceCorrectnessToolList,
+
+		RequirementTraceabilityMaxToolTurns:  requirementTraceabilityMaxTurns,
+		RequirementTraceabilityMaxToolTokens: requirementTraceabilityMaxTokens,
+		RequirementTraceabilityTools:         requirementTraceabilityToolList,
+
+		InternalContradictionsToolClient:     internalContradictionsToolClient,
+		TerminologyConsistencyToolClient:     terminologyConsistencyToolClient,
+		CrossReferenceCorrectnessToolClient:  crossReferenceCorrectnessToolClient,
+		RequirementTraceabilityToolClient:    requirementTraceabilityToolClient,
 	}
 
 }
@@ -1060,6 +1162,96 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				MaxToolTurns:  p.EvidenceRationaleMaxToolTurns,
 				MaxToolTokens: p.EvidenceRationaleMaxToolTokens,
 				Tools:         p.EvidenceRationaleTools,
+			},
+		})
+	}
+
+	// ── P4 — Consistency ────────────────────────────────────────────
+
+	if p.InternalContradictionsClient != nil && p.InternalContradictionsPromptText != "" && p.InternalContradictionsModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &internalContradictionsReviewer{
+				client:       p.InternalContradictionsClient,
+				toolClient:   p.InternalContradictionsToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.InternalContradictionsModelName,
+				PromptText:    p.InternalContradictionsPromptText,
+				PromptRef:     p.InternalContradictionsPromptRef,
+				MaxToolTurns:  p.InternalContradictionsMaxToolTurns,
+				MaxToolTokens: p.InternalContradictionsMaxToolTokens,
+				Tools:         p.InternalContradictionsTools,
+			},
+		})
+	}
+
+	if p.TerminologyConsistencyClient != nil && p.TerminologyConsistencyPromptText != "" && p.TerminologyConsistencyModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &terminologyConsistencyReviewer{
+				client:       p.TerminologyConsistencyClient,
+				toolClient:   p.TerminologyConsistencyToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.TerminologyConsistencyModelName,
+				PromptText:    p.TerminologyConsistencyPromptText,
+				PromptRef:     p.TerminologyConsistencyPromptRef,
+				MaxToolTurns:  p.TerminologyConsistencyMaxToolTurns,
+				MaxToolTokens: p.TerminologyConsistencyMaxToolTokens,
+				Tools:         p.TerminologyConsistencyTools,
+			},
+		})
+	}
+
+	if p.CrossReferenceCorrectnessClient != nil && p.CrossReferenceCorrectnessPromptText != "" && p.CrossReferenceCorrectnessModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &crossReferenceCorrectnessReviewer{
+				client:       p.CrossReferenceCorrectnessClient,
+				toolClient:   p.CrossReferenceCorrectnessToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.CrossReferenceCorrectnessModelName,
+				PromptText:    p.CrossReferenceCorrectnessPromptText,
+				PromptRef:     p.CrossReferenceCorrectnessPromptRef,
+				MaxToolTurns:  p.CrossReferenceCorrectnessMaxToolTurns,
+				MaxToolTokens: p.CrossReferenceCorrectnessMaxToolTokens,
+				Tools:         p.CrossReferenceCorrectnessTools,
+			},
+		})
+	}
+
+	if p.RequirementTraceabilityClient != nil && p.RequirementTraceabilityPromptText != "" && p.RequirementTraceabilityModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &requirementTraceabilityReviewer{
+				client:       p.RequirementTraceabilityClient,
+				toolClient:   p.RequirementTraceabilityToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.RequirementTraceabilityModelName,
+				PromptText:    p.RequirementTraceabilityPromptText,
+				PromptRef:     p.RequirementTraceabilityPromptRef,
+				MaxToolTurns:  p.RequirementTraceabilityMaxToolTurns,
+				MaxToolTokens: p.RequirementTraceabilityMaxToolTokens,
+				Tools:         p.RequirementTraceabilityTools,
 			},
 		})
 	}

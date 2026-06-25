@@ -99,8 +99,8 @@ prompt = "prompt-review-readability.md"
 max_tool_turns = 0
 
 [reviewers.localization]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P1"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-localization.md"
@@ -124,8 +124,8 @@ prompt = "prompt-review-heading-hierarchy.md"
 max_tool_turns = 0
 
 [reviewers.toc_accuracy]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P2"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-toc-accuracy.md"
@@ -238,32 +238,32 @@ max_tool_turns = 5
 
 # P4 — Consistency
 [reviewers.internal_contradictions]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P4"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-internal-contradictions.md"
 max_tool_turns = 8
 
 [reviewers.terminology_consistency]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P4"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-terminology-consistency.md"
 max_tool_turns = 8
 
 [reviewers.cross_reference_correctness]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P4"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-cross-reference-correctness.md"
 max_tool_turns = 8
 
 [reviewers.requirement_traceability]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P4"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-requirement-traceability.md"

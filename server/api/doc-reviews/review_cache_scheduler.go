@@ -326,6 +326,42 @@ func buildPromptCacheReviewTasks(
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
+		case *internalContradictionsReviewer:
+			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
+			for i, b := range blocks {
+				i, b := i, b
+				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
+				})
+			}
+		case *terminologyConsistencyReviewer:
+			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
+			for i, b := range blocks {
+				i, b := i, b
+				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
+				})
+			}
+		case *crossReferenceCorrectnessReviewer:
+			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
+			for i, b := range blocks {
+				i, b := i, b
+				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
+				})
+			}
+		case *requirementTraceabilityReviewer:
+			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
+			for i, b := range blocks {
+				i, b := i, b
+				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
+				})
+			}
 		default:
 			unsupported = append(unsupported, runner)
 		}
