@@ -276,6 +276,10 @@ type ReviewProcessor struct {
 	ExamplesPromptRef  string
 	ExamplesPromptText string
 
+	DiagramsModelName  string
+	DiagramsPromptRef  string
+	DiagramsPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -348,6 +352,10 @@ type ReviewProcessor struct {
 	// ExamplesClient is a properly-configured LLM client for the
 	// examples reviewer (P3, content quality, per-chunk).
 	ExamplesClient LLMJSONExtractor
+
+	// DiagramsClient is a properly-configured LLM client for the
+	// diagrams reviewer (P3, content quality, per-chunk).
+	DiagramsClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -434,6 +442,7 @@ func NewReviewProcessor(
 	relevanceClient, relevanceModel, relevancePrompt, relevanceRef, _ := resolveReviewerRuntime(logger, "relevance", "P3")
 	currencyClient, currencyModel, currencyPrompt, currencyRef, _ := resolveReviewerRuntime(logger, "currency", "P3")
 	examplesClient, examplesModel, examplesPrompt, examplesRef, _ := resolveReviewerRuntime(logger, "examples", "P3")
+	diagramsClient, diagramsModel, diagramsPrompt, diagramsRef, _ := resolveReviewerRuntime(logger, "diagrams", "P3")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -529,6 +538,11 @@ func NewReviewProcessor(
 		ExamplesModelName:  examplesModel,
 		ExamplesPromptRef:  examplesRef,
 		ExamplesPromptText: examplesPrompt,
+
+		DiagramsClient:     diagramsClient,
+		DiagramsModelName:  diagramsModel,
+		DiagramsPromptRef:  diagramsRef,
+		DiagramsPromptText: diagramsPrompt,
 	}
 }
 
@@ -900,6 +914,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.ExamplesModelName,
 				PromptText: p.ExamplesPromptText,
 				PromptRef:  p.ExamplesPromptRef,
+			},
+		})
+	}
+
+	if p.DiagramsClient != nil && p.DiagramsPromptText != "" && p.DiagramsModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &diagramsReviewer{
+				client:     p.DiagramsClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.DiagramsModelName,
+				PromptText: p.DiagramsPromptText,
+				PromptRef:  p.DiagramsPromptRef,
 			},
 		})
 	}

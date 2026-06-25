@@ -213,8 +213,8 @@ prompt = "prompt-review-examples.md"
 max_tool_turns = 0
 
 [reviewers.diagrams]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-diagrams.md"
