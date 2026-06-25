@@ -284,6 +284,10 @@ type ReviewProcessor struct {
 	TestableClaimsPromptRef  string
 	TestableClaimsPromptText string
 
+	EvidenceRationaleModelName  string
+	EvidenceRationalePromptRef  string
+	EvidenceRationalePromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -364,6 +368,10 @@ type ReviewProcessor struct {
 	// TestableClaimsClient is a properly-configured LLM client for the
 	// testable_claims reviewer (P3, content quality, per-chunk).
 	TestableClaimsClient LLMJSONExtractor
+
+	// EvidenceRationaleClient is a properly-configured LLM client for the
+	// evidence_rationale reviewer (P3, content quality, per-chunk).
+	EvidenceRationaleClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -452,6 +460,7 @@ func NewReviewProcessor(
 	examplesClient, examplesModel, examplesPrompt, examplesRef, _ := resolveReviewerRuntime(logger, "examples", "P3")
 	diagramsClient, diagramsModel, diagramsPrompt, diagramsRef, _ := resolveReviewerRuntime(logger, "diagrams", "P3")
 	testableClaimsClient, testableClaimsModel, testableClaimsPrompt, testableClaimsRef, _ := resolveReviewerRuntime(logger, "testable_claims", "P3")
+	evidenceRationaleClient, evidenceRationaleModel, evidenceRationalePrompt, evidenceRationaleRef, _ := resolveReviewerRuntime(logger, "evidence_rationale", "P3")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -557,6 +566,11 @@ func NewReviewProcessor(
 		TestableClaimsModelName:  testableClaimsModel,
 		TestableClaimsPromptRef:  testableClaimsRef,
 		TestableClaimsPromptText: testableClaimsPrompt,
+
+		EvidenceRationaleClient:     evidenceRationaleClient,
+		EvidenceRationaleModelName:  evidenceRationaleModel,
+		EvidenceRationalePromptRef:  evidenceRationaleRef,
+		EvidenceRationalePromptText: evidenceRationalePrompt,
 	}
 }
 
@@ -962,6 +976,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.TestableClaimsModelName,
 				PromptText: p.TestableClaimsPromptText,
 				PromptRef:  p.TestableClaimsPromptRef,
+			},
+		})
+	}
+
+	if p.EvidenceRationaleClient != nil && p.EvidenceRationalePromptText != "" && p.EvidenceRationaleModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &evidenceRationaleReviewer{
+				client:     p.EvidenceRationaleClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.EvidenceRationaleModelName,
+				PromptText: p.EvidenceRationalePromptText,
+				PromptRef:  p.EvidenceRationalePromptRef,
 			},
 		})
 	}

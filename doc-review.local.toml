@@ -229,7 +229,7 @@ prompt = "prompt-review-testable-claims.md"
 max_tool_turns = 0
 
 [reviewers.evidence_rationale]
-enabled = false
+enabled = true
 checked = false
 group = "P3"
 model = "deepseek-v4-flash"
