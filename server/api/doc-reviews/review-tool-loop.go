@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/llm"
 )
 
 // defaultP3MaxToolTokens is the code-level token budget for a P3 tool-use
@@ -227,7 +228,15 @@ func repairFinalFindingsJSON(
 	if parseReason == "tool_calls_in_final_text" {
 		textCalls := parseTextToolCalls(badContent)
 		if len(textCalls) > 0 {
-			repairMessages = append(repairMessages, LLMMessage{Role: LLMRoleAssistant, Content: badContent})
+			// The model emitted its tool calls as raw DSML text rather than
+			// structured tool_calls, so resp.ToolCalls was empty. Attach the
+			// re-parsed calls to the assistant message as structured ToolCalls so
+			// their IDs correlate with the role:"tool" results appended below.
+			// Without this, the OpenAI-compatible API rejects the repair request
+			// ("Messages with role 'tool' must be a response to a preceding message
+			// with 'tool_calls'", HTTP 400). The raw DSML text is dropped from the
+			// content to avoid the model re-emitting the same pseudo tool call.
+			repairMessages = append(repairMessages, LLMMessage{Role: LLMRoleAssistant, ToolCalls: textCalls})
 			for _, tc := range textCalls {
 				result := executeToolCall(ctx, tc, toolByName, recordID)
 				logger.Info("tool-use final text call executed",
@@ -457,12 +466,37 @@ func parseFindingsContentDetailed(content string) ([]ReviewFinding, bool, string
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(obj), &payload); err != nil {
+		// Common LLM JSON failures — unescaped inner quotes in Chinese text,
+		// trailing commas, code fences — are fixed programmatically so we
+		// avoid the expensive LLM repair round-trip for these trivial issues.
+		if repaired, ok := repairMalformedFindingsJSON(content, obj); ok {
+			if err2 := json.Unmarshal([]byte(repaired), &payload); err2 == nil {
+				goto checkFindingsKey
+			}
+		}
 		return nil, false, "json_unmarshal_failed: " + err.Error()
 	}
+checkFindingsKey:
 	if _, ok := payload["findings"]; !ok {
 		return nil, false, "missing_findings_key"
 	}
 	return normalizeFindingsJSON(payload), true, ""
+}
+
+// repairMalformedFindingsJSON tries the shared library's JSON-repair heuristics
+// (unescaped inner quotes, trailing commas, code fences) on the raw content and
+// the already-extracted object, returning the repaired JSON and true on success.
+func repairMalformedFindingsJSON(rawContent, extractedObj string) (string, bool) {
+	// Try repairing the extracted object first (likely already the right span).
+	if repaired, ok := llm.RepairLLMJSON(extractedObj); ok {
+		return repaired, true
+	}
+	// Fall back to repairing the full raw content (e.g. the extraction may
+	// have been fooled by a nested brace inside a string).
+	if repaired, ok := llm.RepairLLMJSON(rawContent); ok {
+		return repaired, true
+	}
+	return "", false
 }
 
 // extractJSONObject returns the outermost {...} span in s, stripping ```json

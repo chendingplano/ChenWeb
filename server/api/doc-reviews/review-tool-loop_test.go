@@ -69,6 +69,22 @@ func logArgsToMap(args []any) map[string]any {
 
 func (f *fakeToolClient) Complete(_ context.Context, req llmclients.Request) (*llmclients.Response, error) {
 	f.requests = append(f.requests, req)
+	// Mirror the OpenAI-compatible API constraint: every role:"tool" message must
+	// be a response to a preceding assistant message carrying matching tool_calls.
+	// This is what DeepSeek enforces (HTTP 400) and what the finalize-repair path
+	// previously violated by emitting tool results without structured ToolCalls.
+	seen := make(map[string]bool)
+	for _, m := range req.Messages {
+		if m.Role == LLMRoleAssistant {
+			for _, tc := range m.ToolCalls {
+				seen[tc.ID] = true
+			}
+		}
+		if m.Role == LLMRoleTool && !seen[m.ToolCallID] {
+			return nil, fmt.Errorf("messages with role 'tool' must be a response to a "+
+				"preceding message with 'tool_calls' (tool_call_id=%q)", m.ToolCallID)
+		}
+	}
 	i := f.callCount
 	f.callCount++
 	if i < len(f.errs) && f.errs[i] != nil {
@@ -300,11 +316,16 @@ func TestFinalizeFindingsReturnsErrorWhenUnparseable(t *testing.T) {
 	}
 }
 
+// TestFinalizeFindingsRepairsInvalidJSONStringEscapes verifies that unescaped
+// ASCII double quotes inside Chinese text are repaired programmatically and
+// produce correct findings without needing an LLM repair round-trip.
 func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
+	// First response has unescaped ASCII inner quotes: 指出"从设备名称字面理解"会误导
+	// The programmatic JSON repair (RepairLLMJSON → repairUnescapedInnerQuotes)
+	// should fix this without a second LLM call.
 	client := &fakeToolClient{
 		responses: []*llmclients.Response{
 			{Content: `{"findings":[{"title":"bad","description":"附录A指出"从设备名称字面理解"会误导"}]}`},
-			{Content: `{"findings":[{"title":"bad","description":"附录A指出\"从设备名称字面理解\"会误导"}]}`},
 		},
 	}
 	logger := &captureLogger{}
@@ -324,19 +345,17 @@ func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
 	if !strings.Contains(findings[0].Description, `"从设备名称字面理解"`) {
 		t.Fatalf("description=%q", findings[0].Description)
 	}
-	if len(client.requests) != 2 {
-		t.Fatalf("requests=%d, want finalize + repair", len(client.requests))
-	}
-	if client.requests[1].CallReason != "review_tool_use_finalize_repair" {
-		t.Fatalf("repair call reason=%q", client.requests[1].CallReason)
+	// Programmatic repair succeeded — only one LLM call (the finalize), no repair round-trip.
+	if len(client.requests) != 1 {
+		t.Fatalf("requests=%d, want 1 (finalize only, no repair round-trip)", len(client.requests))
 	}
 	infoEntry := findLogEntry(logger.entries, "info", "tool-use returned findings")
 	if infoEntry == nil {
 		t.Fatal("missing findings info log entry")
 	}
 	infoArgs := logArgsToMap(infoEntry.args)
-	if infoArgs["phase"] != "finalize_repair" {
-		t.Fatalf("info args=%v", infoArgs)
+	if infoArgs["phase"] != "finalize" {
+		t.Fatalf("info args=%v, want phase=finalize", infoArgs)
 	}
 }
 
@@ -386,6 +405,55 @@ func TestFinalizeFindingsRepairsTextToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, "tool results above") {
 		t.Fatalf("repair prompt=%q", client.requests[1].Messages[len(client.requests[1].Messages)-1].Content)
+	}
+}
+
+// TestParseFindingsContentRepairsUnescapedInnerQuotes verifies that the
+// programmatic JSON repair (unescaped ASCII double quotes inside string values)
+// succeeds without a costly LLM repair round-trip.  This reproduces the
+// production error "json_unmarshal_failed: invalid character 'é' after object
+// key:value pair" where the model inserts literal ASCII quotes when quoting
+// Chinese terms within JSON string fields.
+func TestParseFindingsContentRepairsUnescapedInnerQuotes(t *testing.T) {
+	// This is a simplified version of the production payload from the log —
+	// ASCII double quotes inside the Chinese title/description/suggestion
+	// fields are unescaped, which makes the raw JSON invalid.
+	input := "```json\n" +
+		"{\n" +
+		"  \"findings\": [\n" +
+		"    {\n" +
+		"      \"severity\": \"high\",\n" +
+		"      \"finding_type\": \"name_collision\",\n" +
+		"      \"title\": \"同一中文名称\"霉菌生长试验箱\"指向两个不同分类的设备\",\n" +
+		"      \"description\": \"编码04-11-70定义为\"霉菌生长试验箱\"\",\n" +
+		"      \"evidence\": \"表B.2中：04-11-70 \"霉菌生长试验箱\"\",\n" +
+		"      \"location\": \"1094\",\n" +
+		"      \"suggestion\": \"建议重命名为\"霉菌培养箱\"\"\n" +
+		"    }\n" +
+		"  ]\n" +
+		"}\n" +
+		"```\n"
+
+	findings, ok := parseFindingsContent(input)
+	if !ok {
+		t.Fatal("parseFindingsContent failed; repair should fix unescaped inner quotes")
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings len=%d, want 1", len(findings))
+	}
+	f := findings[0]
+	if f.Severity != "high" {
+		t.Fatalf("severity=%q, want high", f.Severity)
+	}
+	if f.FindingType != "name_collision" {
+		t.Fatalf("finding_type=%q, want name_collision", f.FindingType)
+	}
+	if f.Location != "1094" {
+		t.Fatalf("location=%q, want 1094", f.Location)
+	}
+	// Verify the escaped quotes were repaired and the Chinese text is intact.
+	if !strings.Contains(f.Title, "霉菌生长试验箱") {
+		t.Fatalf("title missing expected Chinese text: %q", f.Title)
 	}
 }
 
