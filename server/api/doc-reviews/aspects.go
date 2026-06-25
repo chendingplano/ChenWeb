@@ -8,8 +8,23 @@ import (
 )
 
 // ListAspects returns all review aspects with their metadata.
+// The Checked field is populated from [reviewers.<aspect>].checked in doc-review.local.toml.
 // Source: Document Review Checklist spec (doc-repo/specs/202606/2026061102-spec-document-review-checklist.md)
 func ListAspects() []AspectInfo {
+	base := listAspectsBase()
+	cfg, _ := GetDocReviewConfig()
+	if cfg == nil {
+		return base
+	}
+	for i, a := range base {
+		if rev, ok := cfg.Reviewers[a.Name]; ok && rev.Checked != nil {
+			base[i].Checked = *rev.Checked
+		}
+	}
+	return base
+}
+
+func listAspectsBase() []AspectInfo {
 	return []AspectInfo{
 		// P1 — Language & Style
 		{Name: "grammar_spelling", Group: "P1", Label: "Grammar & Spelling", Priority: "Should Review", Description: "Checks grammar, spelling, punctuation, and capitalization.", DefaultModel: "claude-haiku-4-5"},

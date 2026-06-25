@@ -27,6 +27,7 @@ type ReviewPackageConfig struct {
 // value that was explicitly configured.
 type ReviewAspectConfig struct {
 	Enabled      *bool  `toml:"enabled"`
+	Checked      *bool  `toml:"checked"`
 	Group        string `toml:"group"`
 	Model        string `toml:"model"`
 	Prompt       string `toml:"prompt"`

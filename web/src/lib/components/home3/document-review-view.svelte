@@ -228,10 +228,8 @@
         try {
             aspects = await listAspects();
             tiers = await listTiers();
-            // Default selection: the Must Review aspects — a sensible starting point the
-            // user can build on by toggling tiers/aspects.
-            const mustTier = tiers.find(t => t.key === 'must_review');
-            if (mustTier) selectedAspects = new Set(mustTier.aspect_names);
+            // Initial selection driven by [reviewers.<aspect>].checked in doc-review.local.toml.
+            selectedAspects = new Set(aspects.filter(a => a.checked).map(a => a.name));
         } catch (e) {
             submitError = 'Failed to load aspects';
         }

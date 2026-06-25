@@ -68,6 +68,7 @@ max_tool_turns = 0
 # P1 — Language & Style
 [reviewers.grammar_spelling]
 enabled = true
+checked = true
 group = "P1"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-grammar-spelling.txt"
@@ -75,6 +76,7 @@ max_tool_turns = 0
 
 [reviewers.tone_voice]
 enabled = true
+checked = true
 group = "P1"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-tone-voice.md"
@@ -82,6 +84,7 @@ max_tool_turns = 0
 
 [reviewers.formatting_consistency]
 enabled = true
+checked = true
 group = "P1"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-formatting-consistency.md"
@@ -89,13 +92,15 @@ max_tool_turns = 0
 
 [reviewers.readability]
 enabled = true
+checked = true
 group = "P1"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-readability.md"
 max_tool_turns = 0
 
 [reviewers.localization]
-enabled = true
+enabled = false
+checked = false
 group = "P1"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-localization.md"
@@ -104,6 +109,7 @@ max_tool_turns = 0
 # P2 — Structure & Organization
 [reviewers.logical_flow]
 enabled = true
+checked = true
 group = "P2"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-logical-flow.md"
@@ -111,13 +117,15 @@ max_tool_turns = 0
 
 [reviewers.heading_hierarchy]
 enabled = true
+checked = true
 group = "P2"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-heading-hierarchy.md"
 max_tool_turns = 0
 
 [reviewers.toc_accuracy]
-enabled = true
+enabled = false
+checked = false
 group = "P2"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-toc-accuracy.md"
@@ -125,6 +133,7 @@ max_tool_turns = 0
 
 [reviewers.navigability]
 enabled = true
+checked = true
 group = "P2"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-navigability.md"
@@ -132,6 +141,7 @@ max_tool_turns = 0
 
 [reviewers.section_balance]
 enabled = true
+checked = true
 group = "P2"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-section-balance.md"
@@ -139,6 +149,7 @@ max_tool_turns = 0
 
 [reviewers.modularity]
 enabled = true
+checked = true
 group = "P2"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-modularity.md"
@@ -147,6 +158,7 @@ max_tool_turns = 0
 # P3 — Content Quality
 [reviewers.completeness]
 enabled = true
+checked = true
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-completeness.md"
@@ -154,6 +166,7 @@ max_tool_turns = 0
 
 [reviewers.correctness]
 enabled = true
+checked = true
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-correctness.md"
@@ -161,55 +174,63 @@ max_tool_turns = 0
 
 [reviewers.clarity]
 enabled = true
+checked = true
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-clarity.md"
 max_tool_turns = 0
 
 [reviewers.conciseness]
-enabled = true
+enabled = false
+checked = false
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-conciseness.md"
 max_tool_turns = 0
 
 [reviewers.relevance]
-enabled = true
+enabled = false
+checked = false
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-relevance.md"
 max_tool_turns = 0
 
 [reviewers.currency]
-enabled = true
+enabled = false
+checked = false
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-currency.md"
 max_tool_turns = 0
 
 [reviewers.examples]
-enabled = true
+enabled = false
+checked = false
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-examples.md"
 max_tool_turns = 0
 
 [reviewers.diagrams]
-enabled = true
+enabled = false
+checked = false
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-diagrams.md"
 max_tool_turns = 0
 
 [reviewers.testable_claims]
-enabled = true
+enabled = false
+checked = false
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-testable-claims.md"
 max_tool_turns = 0
 
 [reviewers.evidence_rationale]
-enabled = true
+enabled = false
+checked = false
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-evidence-rationale.md"
@@ -217,28 +238,32 @@ max_tool_turns = 0
 
 # P4 — Consistency
 [reviewers.internal_contradictions]
-enabled = true
+enabled = false
+checked = false
 group = "P4"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-internal-contradictions.md"
 max_tool_turns = 0
 
 [reviewers.terminology_consistency]
-enabled = true
+enabled = false
+checked = false
 group = "P4"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-terminology-consistency.md"
 max_tool_turns = 0
 
 [reviewers.cross_reference_correctness]
-enabled = true
+enabled = false
+checked = false
 group = "P4"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-cross-reference-correctness.md"
 max_tool_turns = 0
 
 [reviewers.requirement_traceability]
-enabled = true
+enabled = false
+checked = false
 group = "P4"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-requirement-traceability.md"
@@ -246,77 +271,88 @@ max_tool_turns = 0
 
 # P5 — Technical & Compliance
 [reviewers.technical_accuracy]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-technical-accuracy.md"
 max_tool_turns = 12
 
 [reviewers.assumptions]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-assumptions.md"
 max_tool_turns = 12
 
 [reviewers.prerequisites]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-prerequisites.md"
 max_tool_turns = 12
 
 [reviewers.standards_compliance]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-standards-compliance.md"
 max_tool_turns = 12
 
 [reviewers.legal_compliance]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-legal-compliance.md"
 max_tool_turns = 12
 
 [reviewers.regulatory_compliance]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-regulatory-compliance.md"
 max_tool_turns = 12
 
 [reviewers.internal_policy]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-internal-policy.md"
 max_tool_turns = 12
 
 [reviewers.security]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-security.md"
 max_tool_turns = 12
 
 [reviewers.performance]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-performance.md"
 max_tool_turns = 12
 
 [reviewers.error_handling]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-error-handling.md"
 max_tool_turns = 12
 
 [reviewers.limitations]
-enabled = true
+enabled = false
+checked = false
 group = "P5"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-limitations.md"
@@ -324,70 +360,80 @@ max_tool_turns = 12
 
 # P6 — Meta & Process
 [reviewers.version_history]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-version-history.md"
 max_tool_turns = 0
 
 [reviewers.review_status]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-review-status.md"
 max_tool_turns = 0
 
 [reviewers.ownership]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-ownership.md"
 max_tool_turns = 0
 
 [reviewers.references]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-references.md"
 max_tool_turns = 0
 
 [reviewers.related_documents]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-related-documents.md"
 max_tool_turns = 0
 
 [reviewers.confidentiality]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-confidentiality.md"
 max_tool_turns = 0
 
 [reviewers.sensitive_data]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-sensitive-data.md"
 max_tool_turns = 0
 
 [reviewers.pii]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-pii.md"
 max_tool_turns = 0
 
 [reviewers.data_retention]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-data-retention.md"
 max_tool_turns = 0
 
 [reviewers.license_ip]
-enabled = true
+enabled = false
+checked = false
 group = "P6"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-license-ip.md"
