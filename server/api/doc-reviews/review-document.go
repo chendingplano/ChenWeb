@@ -242,6 +242,10 @@ type ReviewProcessor struct {
 	CorrectnessPromptRef  string
 	CorrectnessPromptText string
 
+	ClarityModelName  string
+	ClarityPromptRef  string
+	ClarityPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -294,6 +298,10 @@ type ReviewProcessor struct {
 	// CorrectnessClient is a properly-configured LLM client for the
 	// correctness reviewer (P3, content quality, per-chunk).
 	CorrectnessClient LLMJSONExtractor
+
+	// ClarityClient is a properly-configured LLM client for the
+	// clarity reviewer (P3, content quality, per-chunk).
+	ClarityClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -375,6 +383,7 @@ func NewReviewProcessor(
 	modularityClient, modularityModel, modularityPrompt, modularityRef, _ := resolveReviewerRuntime(logger, "modularity", "P2")
 	completenessClient, completenessModel, completenessPrompt, completenessRef, _ := resolveReviewerRuntime(logger, "completeness", "P3")
 	correctnessClient, correctnessModel, correctnessPrompt, correctnessRef, _ := resolveReviewerRuntime(logger, "correctness", "P3")
+	clarityClient, clarityModel, clarityPrompt, clarityRef, _ := resolveReviewerRuntime(logger, "clarity", "P3")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -444,6 +453,11 @@ func NewReviewProcessor(
 		CorrectnessModelName:  correctnessModel,
 		CorrectnessPromptRef:  correctnessRef,
 		CorrectnessPromptText: correctnessPrompt,
+
+		ClarityClient:     clarityClient,
+		ClarityModelName:  clarityModel,
+		ClarityPromptRef:  clarityRef,
+		ClarityPromptText: clarityPrompt,
 	}
 }
 
@@ -773,6 +787,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.CorrectnessModelName,
 				PromptText: p.CorrectnessPromptText,
 				PromptRef:  p.CorrectnessPromptRef,
+			},
+		})
+	}
+
+	if p.ClarityClient != nil && p.ClarityPromptText != "" && p.ClarityModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &clarityReviewer{
+				client:     p.ClarityClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.ClarityModelName,
+				PromptText: p.ClarityPromptText,
+				PromptRef:  p.ClarityPromptRef,
 			},
 		})
 	}
