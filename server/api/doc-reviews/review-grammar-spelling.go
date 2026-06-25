@@ -140,7 +140,7 @@ func (r *grammarSpellingReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_grammar_spelling", "MID-CWB-REVIEW-GRAMMAR"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_grammar_spelling", "MID-CWB-REVIEW-GRAMMAR"))
 	if err != nil {
 		r.logger.Warn("grammar review window failed; skipping",
 			"record_id", recordID,

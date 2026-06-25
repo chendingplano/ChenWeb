@@ -127,7 +127,7 @@ func (r *logicalFlowReviewer) processBlock(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_logical_flow", "MID-CWB-REVIEW-LOGICAL-FLOW"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_logical_flow", "MID-CWB-REVIEW-LOGICAL-FLOW"))
 	if err != nil {
 		r.logger.Warn("logical_flow review block failed; skipping",
 			"record_id", recordID,

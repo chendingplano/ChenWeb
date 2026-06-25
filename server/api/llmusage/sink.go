@@ -100,15 +100,15 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	const stmt = `INSERT INTO llm_usage_event (
     id, account_id, profile_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
-    input_tokens, output_tokens, total_tokens, latency_ms, http_status,
+    input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19::jsonb,
-    $20, $21, $22
+    $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21::jsonb,
+    $22, $23, $24
 )`
 
 	var recordID any
@@ -131,6 +131,8 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		int64(record.InputTokens),
 		int64(record.OutputTokens),
 		int64(record.TotalTokens),
+		int64(record.PromptCacheHitTokens),
+		int64(record.PromptCacheMissTokens),
 		latencyMS,
 		s.DefaultStatus,
 		record.ErrorMessage,

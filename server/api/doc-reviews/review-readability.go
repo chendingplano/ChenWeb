@@ -145,7 +145,7 @@ func (r *readabilityReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_readability", "MID-CWB-REVIEW-READABILITY"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_readability", "MID-CWB-REVIEW-READABILITY"))
 	if err != nil {
 		r.logger.Warn("readability review window failed; skipping",
 			"record_id", recordID,

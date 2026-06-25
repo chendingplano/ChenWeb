@@ -145,7 +145,7 @@ func (r *currencyReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_currency", "MID-CWB-REVIEW-CURRENCY"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_currency", "MID-CWB-REVIEW-CURRENCY"))
 	if err != nil {
 		r.logger.Warn("currency review window failed; skipping",
 			"record_id", recordID,

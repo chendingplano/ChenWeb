@@ -23,22 +23,24 @@ type DailyReport struct {
 }
 
 type UsageEvent struct {
-	ID               string    `json:"id"`
-	AccountID        string    `json:"account_id"`
-	AccountName      string    `json:"account_name"`
-	ProfileID        string    `json:"profile_id"`
-	RecordID         *int64    `json:"record_id"`
-	Provider         string    `json:"provider"`
-	ModelName        string    `json:"model_name"`
-	PromptName       string    `json:"prompt_name"`
-	CallReason       string    `json:"call_reason"`
-	CallLoc          string    `json:"call_loc"`
-	RequestStartedAt time.Time `json:"request_started_at"`
-	InputTokens      int64     `json:"input_tokens"`
-	OutputTokens     int64     `json:"output_tokens"`
-	TotalTokens      int64     `json:"total_tokens"`
-	LatencyMS        int64     `json:"latency_ms"`
-	ErrorMessage     string    `json:"error_message"`
+	ID                    string    `json:"id"`
+	AccountID             string    `json:"account_id"`
+	AccountName           string    `json:"account_name"`
+	ProfileID             string    `json:"profile_id"`
+	RecordID              *int64    `json:"record_id"`
+	Provider              string    `json:"provider"`
+	ModelName             string    `json:"model_name"`
+	PromptName            string    `json:"prompt_name"`
+	CallReason            string    `json:"call_reason"`
+	CallLoc               string    `json:"call_loc"`
+	RequestStartedAt      time.Time `json:"request_started_at"`
+	InputTokens           int64     `json:"input_tokens"`
+	OutputTokens          int64     `json:"output_tokens"`
+	TotalTokens           int64     `json:"total_tokens"`
+	PromptCacheHitTokens  int64     `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int64     `json:"prompt_cache_miss_tokens"`
+	LatencyMS             int64     `json:"latency_ms"`
+	ErrorMessage          string    `json:"error_message"`
 }
 
 type CurrentBalance struct {
@@ -120,7 +122,7 @@ LIMIT $1`
 
 func (s *Store) ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error) {
 	const query = `SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id, evt.provider, evt.model_name, evt.prompt_name,
-evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, latency_ms, error_message
+evt.call_reason, evt.call_loc, request_started_at, input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, error_message
 FROM llm_usage_event evt
 JOIN llm_account acct ON acct.id = evt.account_id
 ORDER BY evt.request_started_at DESC
@@ -149,6 +151,8 @@ LIMIT $1`
 			&row.InputTokens,
 			&row.OutputTokens,
 			&row.TotalTokens,
+			&row.PromptCacheHitTokens,
+			&row.PromptCacheMissTokens,
 			&row.LatencyMS,
 			&row.ErrorMessage,
 		); err != nil {

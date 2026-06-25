@@ -145,7 +145,7 @@ func (r *formattingConsistencyReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_formatting_consistency", "MID-CWB-REVIEW-FORMATTING-CONSISTENCY"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_formatting_consistency", "MID-CWB-REVIEW-FORMATTING-CONSISTENCY"))
 	if err != nil {
 		r.logger.Warn("formatting_consistency review window failed; skipping",
 			"record_id", recordID,

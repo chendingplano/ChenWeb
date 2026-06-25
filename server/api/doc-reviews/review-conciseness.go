@@ -144,7 +144,7 @@ func (r *concisenessReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_conciseness", "MID-CWB-REVIEW-CONCISENESS"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_conciseness", "MID-CWB-REVIEW-CONCISENESS"))
 	if err != nil {
 		r.logger.Warn("conciseness review window failed; skipping",
 			"record_id", recordID,

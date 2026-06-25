@@ -155,7 +155,7 @@ func (r *completenessReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_completeness", "MID-CWB-REVIEW-COMPLETENESS"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_completeness", "MID-CWB-REVIEW-COMPLETENESS"))
 	if err != nil {
 		r.logger.Warn("completeness review window failed; skipping",
 			"record_id", recordID,

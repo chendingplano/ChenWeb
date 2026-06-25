@@ -45,8 +45,8 @@ ON CONFLICT (account_id, workspace_day) DO UPDATE SET
     output_tokens = EXCLUDED.output_tokens,
     total_tokens = EXCLUDED.total_tokens,
     request_count = EXCLUDED.request_count,
-    reconciliation_status = EXCLUDED.reconciliation_status,
-    source_kind = EXCLUDED.source_kind,
+    reconciliation_status = CASE WHEN llm_daily_account_report.reconciliation_status = 'provider_verified' THEN llm_daily_account_report.reconciliation_status ELSE EXCLUDED.reconciliation_status END,
+    source_kind = CASE WHEN llm_daily_account_report.reconciliation_status = 'provider_verified' THEN llm_daily_account_report.source_kind ELSE EXCLUDED.source_kind END,
     updated_at = NOW()`)
 	mock.ExpectExec(stmt).
 		WithArgs(time.Date(2026, 6, 19, 0, 0, 0, 0, loc), "UTC").

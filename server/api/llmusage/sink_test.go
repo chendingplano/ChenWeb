@@ -25,15 +25,15 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
     id, account_id, profile_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
-    input_tokens, output_tokens, total_tokens, latency_ms, http_status,
+    input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19::jsonb,
-    $20, $21, $22
+    $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21::jsonb,
+    $22, $23, $24
 )`)).
 		WithArgs(
 			"evt-test-1",
@@ -48,6 +48,8 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 			int64(12),
 			int64(34),
 			int64(46),
+			int64(9),
+			int64(3),
 			int64(1500),
 			0,
 			"",
@@ -71,22 +73,24 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 	}
 
 	record := sharedllm.UsageCaptureRecord{
-		AccountID:         "acct_1",
-		ProfileID:         "prof_1",
-		Provider:          sharedllm.ProviderOpenAICompatible,
-		ModelName:         "deepseek-chat",
-		PromptName:        "extract-products-v2",
-		RequestStartedAt:  startedAt,
-		RequestFinishedAt: finishedAt,
-		InputTokens:       12,
-		OutputTokens:      34,
-		TotalTokens:       46,
-		ProviderRequestID: "req_123",
-		InputBody:         []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
-		OutputBody:        []byte(`{"content":"hello"}`),
-		RecordID:          901,
-		CallReason:        "extract_products",
-		CallLoc:           "MID-CWB-TEST-SINK",
+		AccountID:             "acct_1",
+		ProfileID:             "prof_1",
+		Provider:              sharedllm.ProviderOpenAICompatible,
+		ModelName:             "deepseek-chat",
+		PromptName:            "extract-products-v2",
+		RequestStartedAt:      startedAt,
+		RequestFinishedAt:     finishedAt,
+		InputTokens:           12,
+		OutputTokens:          34,
+		TotalTokens:           46,
+		PromptCacheHitTokens:  9,
+		PromptCacheMissTokens: 3,
+		ProviderRequestID:     "req_123",
+		InputBody:             []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+		OutputBody:            []byte(`{"content":"hello"}`),
+		RecordID:              901,
+		CallReason:            "extract_products",
+		CallLoc:               "MID-CWB-TEST-SINK",
 	}
 
 	if err := sink.Capture(context.Background(), record); err != nil {
@@ -166,15 +170,15 @@ LIMIT 1`)).
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
     id, account_id, profile_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
-    input_tokens, output_tokens, total_tokens, latency_ms, http_status,
+    input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19::jsonb,
-    $20, $21, $22
+    $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21::jsonb,
+    $22, $23, $24
 )`)).
 		WithArgs(
 			"evt-test-3",
@@ -189,6 +193,8 @@ LIMIT 1`)).
 			int64(9),
 			int64(4),
 			int64(13),
+			int64(0),
+			int64(0),
 			int64(2000),
 			0,
 			"",
@@ -262,15 +268,15 @@ LIMIT 1`)).
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
     id, account_id, profile_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
-    input_tokens, output_tokens, total_tokens, latency_ms, http_status,
+    input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19::jsonb,
-    $20, $21, $22
+    $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21::jsonb,
+    $22, $23, $24
 )`)).
 		WithArgs(
 			"evt-test-4",
@@ -285,6 +291,8 @@ LIMIT 1`)).
 			int64(9),
 			int64(4),
 			int64(13),
+			int64(0),
+			int64(0),
 			int64(2000),
 			0,
 			"",
@@ -369,15 +377,15 @@ LIMIT 1`)).
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
     id, account_id, profile_id, provider, model_name, prompt_name,
     request_started_at, request_finished_at, workspace_day,
-    input_tokens, output_tokens, total_tokens, latency_ms, http_status,
+    input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
     error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
     record_id, call_reason, call_loc
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19::jsonb,
-    $20, $21, $22
+    $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21::jsonb,
+    $22, $23, $24
 )`)).
 		WithArgs(
 			"evt-test-5",
@@ -392,6 +400,8 @@ LIMIT 1`)).
 			int64(6),
 			int64(7),
 			int64(13),
+			int64(0),
+			int64(0),
 			int64(2000),
 			0,
 			"",

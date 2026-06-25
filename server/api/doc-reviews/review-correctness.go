@@ -156,7 +156,7 @@ func (r *correctnessReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_correctness", "MID-CWB-REVIEW-CORRECTNESS"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_correctness", "MID-CWB-REVIEW-CORRECTNESS"))
 	if err != nil {
 		r.logger.Warn("correctness review window failed; skipping",
 			"record_id", recordID,

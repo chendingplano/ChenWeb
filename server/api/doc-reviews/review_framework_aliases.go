@@ -4,6 +4,7 @@ import (
 	"context"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 // Local bindings to doc-processing's exported shim surface (review_exports.go).
@@ -51,4 +52,18 @@ func runConcurrent[T any](
 	fn func(ctx context.Context, i int) (T, error),
 ) ([]T, error) {
 	return docprocessing.RunReviewConcurrent(ctx, maxTasks, n, fn)
+}
+
+func newDocReviewLLMJSONInput(
+	ctx context.Context,
+	promptName string,
+	promptText string,
+	modelName string,
+	inputText string,
+	callReason string,
+	callLoc string,
+) llmclients.JSONExtractionInput {
+	in := newLLMJSONInput(ctx, promptName, promptText, modelName, inputText, callReason, callLoc)
+	in.DocumentFirst = true
+	return in
 }

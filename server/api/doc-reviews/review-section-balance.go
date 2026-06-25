@@ -132,7 +132,7 @@ func (r *sectionBalanceReviewer) processBlock(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_section_balance", "MID-CWB-REVIEW-SECTION-BALANCE"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_section_balance", "MID-CWB-REVIEW-SECTION-BALANCE"))
 	if err != nil {
 		r.logger.Warn("section_balance review block failed; skipping",
 			"record_id", recordID,

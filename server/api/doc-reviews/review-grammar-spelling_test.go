@@ -38,4 +38,7 @@ func TestGrammarSpellingReviewerProcessWindowPropagatesPromptName(t *testing.T) 
 	if len(fake.promptNames) != 1 || fake.promptNames[0] != "prompt-review-grammar-spelling-v1.md" {
 		t.Fatalf("promptNames=%v, want [prompt-review-grammar-spelling-v1.md]", fake.promptNames)
 	}
+	if len(fake.documentFirst) != 1 || !fake.documentFirst[0] {
+		t.Fatalf("documentFirst=%v, want [true]", fake.documentFirst)
+	}
 }

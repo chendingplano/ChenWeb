@@ -128,7 +128,7 @@ func (r *headingHierarchyReviewer) processBlock(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_heading_hierarchy", "MID-CWB-REVIEW-HEADING-HIERARCHY"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, b.inputJSON, "review_heading_hierarchy", "MID-CWB-REVIEW-HEADING-HIERARCHY"))
 	if err != nil {
 		r.logger.Warn("heading_hierarchy review block failed; skipping",
 			"record_id", recordID,

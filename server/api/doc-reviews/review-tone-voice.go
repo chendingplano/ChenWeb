@@ -142,7 +142,7 @@ func (r *toneVoiceReviewer) processWindow(
 
 	startTime := time.Now()
 
-	payload, err := r.client.ExtractJSON(ctx, newLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_tone_voice", "MID-CWB-REVIEW-TONE-VOICE"))
+	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_tone_voice", "MID-CWB-REVIEW-TONE-VOICE"))
 	if err != nil {
 		r.logger.Warn("tone_voice review window failed; skipping",
 			"record_id", recordID,
