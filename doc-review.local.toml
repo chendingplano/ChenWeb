@@ -222,7 +222,7 @@ max_tool_turns = 5
 
 [reviewers.testable_claims]
 enabled = true
-checked = false
+checked = true
 group = "P3"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-testable-claims.md"
@@ -230,7 +230,7 @@ max_tool_turns = 5
 
 [reviewers.evidence_rationale]
 enabled = true
-checked = false
+checked = true
 group = "P3"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-evidence-rationale.md"
@@ -271,88 +271,88 @@ max_tool_turns = 8
 
 # P5 — Technical & Compliance
 [reviewers.technical_accuracy]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-technical-accuracy.md"
 max_tool_turns = 12
 
 [reviewers.assumptions]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-assumptions.md"
 max_tool_turns = 12
 
 [reviewers.prerequisites]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-prerequisites.md"
 max_tool_turns = 12
 
 [reviewers.standards_compliance]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-standards-compliance.md"
 max_tool_turns = 12
 
 [reviewers.legal_compliance]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-legal-compliance.md"
 max_tool_turns = 12
 
 [reviewers.regulatory_compliance]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-regulatory-compliance.md"
 max_tool_turns = 12
 
 [reviewers.internal_policy]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-internal-policy.md"
 max_tool_turns = 12
 
 [reviewers.security]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-security.md"
 max_tool_turns = 12
 
 [reviewers.performance]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-performance.md"
 max_tool_turns = 12
 
 [reviewers.error_handling]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-error-handling.md"
 max_tool_turns = 12
 
 [reviewers.limitations]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P5"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-limitations.md"

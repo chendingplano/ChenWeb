@@ -89,21 +89,21 @@ func runToolUseReview(
 				ToolCalls: resp.ToolCalls,
 			})
 			for _, tc := range resp.ToolCalls {
-				logger.Info("tool-use call",
-					"record_id", recordID,
-					"turn", turn,
-					"tool_call_id", tc.ID,
-					"tool_name", tc.Name,
-					"arguments", previewToolLogText(tc.Arguments),
-				)
+				// logger.Info("tool-use call",
+				// 	"record_id", recordID,
+				// 	"turn", turn,
+				// 	"tool_call_id", tc.ID,
+				// 	"tool_name", tc.Name,
+				// 	"arguments", previewToolLogText(tc.Arguments),
+				// )
 				result := executeToolCall(ctx, tc, toolByName, recordID)
-				logger.Info("tool-use result",
-					"record_id", recordID,
-					"turn", turn,
-					"tool_call_id", tc.ID,
-					"tool_name", tc.Name,
-					"result", previewToolLogText(result),
-				)
+				// logger.Info("tool-use result",
+				// 	"record_id", recordID,
+				// 	"turn", turn,
+				// 	"tool_call_id", tc.ID,
+				// 	"tool_name", tc.Name,
+				// 	"result", previewToolLogText(result),
+				// )
 				messages = append(messages, LLMMessage{
 					Role:       LLMRoleTool,
 					ToolCallID: tc.ID,
@@ -312,8 +312,8 @@ func extractJSONObject(s string) string {
 	if s == "" {
 		return ""
 	}
-	if i := strings.Index(s, "```"); i >= 0 {
-		rest := s[i+3:]
+	if strings.HasPrefix(s, "```") {
+		rest := s[3:]
 		rest = strings.TrimPrefix(rest, "json")
 		rest = strings.TrimPrefix(rest, "JSON")
 		if j := strings.Index(rest, "```"); j >= 0 {
@@ -321,6 +321,7 @@ func extractJSONObject(s string) string {
 		}
 		s = strings.TrimSpace(rest)
 	}
+	s = strings.TrimSpace(strings.TrimSuffix(s, "```"))
 	start := strings.Index(s, "{")
 	if start < 0 {
 		return ""

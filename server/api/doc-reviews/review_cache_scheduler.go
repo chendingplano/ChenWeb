@@ -362,6 +362,110 @@ func buildPromptCacheReviewTasks(
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
+
+		// ── P5 — Technical & Compliance (chunk) ──────────────────────────────
+		case *technicalAccuracyReviewer:
+			windows := buildTechnicalAccuracyWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *assumptionsReviewer:
+			windows := buildAssumptionsWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *prerequisitesReviewer:
+			windows := buildPrerequisitesWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *securityReviewer:
+			windows := buildSecurityWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *performanceReviewer:
+			windows := buildPerformanceWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *errorHandlingReviewer:
+			windows := buildErrorHandlingWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *limitationsReviewer:
+			windows := buildLimitationsWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+
+		// ── P5 — Technical & Compliance (document) ───────────────────────────
+		case *standardsComplianceReviewer:
+			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
+			for i, b := range blocks {
+				i, b := i, b
+				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
+				})
+			}
+		case *legalComplianceReviewer:
+			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
+			for i, b := range blocks {
+				i, b := i, b
+				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
+				})
+			}
+		case *regulatoryComplianceReviewer:
+			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
+			for i, b := range blocks {
+				i, b := i, b
+				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
+				})
+			}
+		case *internalPolicyReviewer:
+			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
+			for i, b := range blocks {
+				i, b := i, b
+				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
+				})
+			}
+
 		default:
 			unsupported = append(unsupported, runner)
 		}

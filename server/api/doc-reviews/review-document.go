@@ -430,6 +430,121 @@ type ReviewProcessor struct {
 	TerminologyConsistencyToolClient     LLMChatClient
 	CrossReferenceCorrectnessToolClient  LLMChatClient
 	RequirementTraceabilityToolClient    LLMChatClient
+
+	// ── P5 — Technical & Compliance ───────────────────────────────────────────
+
+	TechnicalAccuracyModelName  string
+	TechnicalAccuracyPromptRef  string
+	TechnicalAccuracyPromptText string
+
+	AssumptionsModelName  string
+	AssumptionsPromptRef  string
+	AssumptionsPromptText string
+
+	PrerequisitesModelName  string
+	PrerequisitesPromptRef  string
+	PrerequisitesPromptText string
+
+	StandardsComplianceModelName  string
+	StandardsCompliancePromptRef  string
+	StandardsCompliancePromptText string
+
+	LegalComplianceModelName  string
+	LegalCompliancePromptRef  string
+	LegalCompliancePromptText string
+
+	RegulatoryComplianceModelName  string
+	RegulatoryCompliancePromptRef  string
+	RegulatoryCompliancePromptText string
+
+	InternalPolicyModelName  string
+	InternalPolicyPromptRef  string
+	InternalPolicyPromptText string
+
+	SecurityModelName  string
+	SecurityPromptRef  string
+	SecurityPromptText string
+
+	PerformanceModelName  string
+	PerformancePromptRef  string
+	PerformancePromptText string
+
+	ErrorHandlingModelName  string
+	ErrorHandlingPromptRef  string
+	ErrorHandlingPromptText string
+
+	LimitationsModelName  string
+	LimitationsPromptRef  string
+	LimitationsPromptText string
+
+	// P5 tool fields
+	TechnicalAccuracyMaxToolTurns  int
+	TechnicalAccuracyMaxToolTokens int
+	TechnicalAccuracyTools         []string
+
+	AssumptionsMaxToolTurns  int
+	AssumptionsMaxToolTokens int
+	AssumptionsTools         []string
+
+	PrerequisitesMaxToolTurns  int
+	PrerequisitesMaxToolTokens int
+	PrerequisitesTools         []string
+
+	StandardsComplianceMaxToolTurns  int
+	StandardsComplianceMaxToolTokens int
+	StandardsComplianceTools         []string
+
+	LegalComplianceMaxToolTurns  int
+	LegalComplianceMaxToolTokens int
+	LegalComplianceTools         []string
+
+	RegulatoryComplianceMaxToolTurns  int
+	RegulatoryComplianceMaxToolTokens int
+	RegulatoryComplianceTools         []string
+
+	InternalPolicyMaxToolTurns  int
+	InternalPolicyMaxToolTokens int
+	InternalPolicyTools         []string
+
+	SecurityMaxToolTurns  int
+	SecurityMaxToolTokens int
+	SecurityTools         []string
+
+	PerformanceMaxToolTurns  int
+	PerformanceMaxToolTokens int
+	PerformanceTools         []string
+
+	ErrorHandlingMaxToolTurns  int
+	ErrorHandlingMaxToolTokens int
+	ErrorHandlingTools         []string
+
+	LimitationsMaxToolTurns  int
+	LimitationsMaxToolTokens int
+	LimitationsTools         []string
+
+	TechnicalAccuracyClient     LLMJSONExtractor
+	AssumptionsClient           LLMJSONExtractor
+	PrerequisitesClient         LLMJSONExtractor
+	StandardsComplianceClient   LLMJSONExtractor
+	LegalComplianceClient       LLMJSONExtractor
+	RegulatoryComplianceClient  LLMJSONExtractor
+	InternalPolicyClient        LLMJSONExtractor
+	SecurityClient              LLMJSONExtractor
+	PerformanceClient           LLMJSONExtractor
+	ErrorHandlingClient         LLMJSONExtractor
+	LimitationsClient           LLMJSONExtractor
+
+	TechnicalAccuracyToolClient     LLMChatClient
+	AssumptionsToolClient           LLMChatClient
+	PrerequisitesToolClient         LLMChatClient
+	StandardsComplianceToolClient   LLMChatClient
+	LegalComplianceToolClient       LLMChatClient
+	RegulatoryComplianceToolClient  LLMChatClient
+	InternalPolicyToolClient        LLMChatClient
+	SecurityToolClient              LLMChatClient
+	PerformanceToolClient           LLMChatClient
+	ErrorHandlingToolClient         LLMChatClient
+	LimitationsToolClient           LLMChatClient
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -576,6 +691,43 @@ func NewReviewProcessor(
 	terminologyConsistencyToolClient := resolveReviewerToolClient(logger, "terminology_consistency", "P4", terminologyConsistencyMaxTurns)
 	crossReferenceCorrectnessToolClient := resolveReviewerToolClient(logger, "cross_reference_correctness", "P4", crossReferenceCorrectnessMaxTurns)
 	requirementTraceabilityToolClient := resolveReviewerToolClient(logger, "requirement_traceability", "P4", requirementTraceabilityMaxTurns)
+
+	// P5 — Technical & Compliance
+	technicalAccuracyClient, technicalAccuracyModel, technicalAccuracyPrompt, technicalAccuracyRef, _ := resolveReviewerRuntime(logger, "technical_accuracy", "P5")
+	assumptionsClient, assumptionsModel, assumptionsPrompt, assumptionsRef, _ := resolveReviewerRuntime(logger, "assumptions", "P5")
+	prerequisitesClient, prerequisitesModel, prerequisitesPrompt, prerequisitesRef, _ := resolveReviewerRuntime(logger, "prerequisites", "P5")
+	standardsComplianceClient, standardsComplianceModel, standardsCompliancePrompt, standardsComplianceRef, _ := resolveReviewerRuntime(logger, "standards_compliance", "P5")
+	legalComplianceClient, legalComplianceModel, legalCompliancePrompt, legalComplianceRef, _ := resolveReviewerRuntime(logger, "legal_compliance", "P5")
+	regulatoryComplianceClient, regulatoryComplianceModel, regulatoryCompliancePrompt, regulatoryComplianceRef, _ := resolveReviewerRuntime(logger, "regulatory_compliance", "P5")
+	internalPolicyClient, internalPolicyModel, internalPolicyPrompt, internalPolicyRef, _ := resolveReviewerRuntime(logger, "internal_policy", "P5")
+	securityClient, securityModel, securityPrompt, securityRef, _ := resolveReviewerRuntime(logger, "security", "P5")
+	performanceClient, performanceModel, performancePrompt, performanceRef, _ := resolveReviewerRuntime(logger, "performance", "P5")
+	errorHandlingClient, errorHandlingModel, errorHandlingPrompt, errorHandlingRef, _ := resolveReviewerRuntime(logger, "error_handling", "P5")
+	limitationsClient, limitationsModel, limitationsPrompt, limitationsRef, _ := resolveReviewerRuntime(logger, "limitations", "P5")
+
+	technicalAccuracyMaxTurns, technicalAccuracyMaxTokens, technicalAccuracyToolList := resolveReviewerBudget("technical_accuracy", "P5")
+	assumptionsMaxTurns, assumptionsMaxTokens, assumptionsToolList := resolveReviewerBudget("assumptions", "P5")
+	prerequisitesMaxTurns, prerequisitesMaxTokens, prerequisitesToolList := resolveReviewerBudget("prerequisites", "P5")
+	standardsComplianceMaxTurns, standardsComplianceMaxTokens, standardsComplianceToolList := resolveReviewerBudget("standards_compliance", "P5")
+	legalComplianceMaxTurns, legalComplianceMaxTokens, legalComplianceToolList := resolveReviewerBudget("legal_compliance", "P5")
+	regulatoryComplianceMaxTurns, regulatoryComplianceMaxTokens, regulatoryComplianceToolList := resolveReviewerBudget("regulatory_compliance", "P5")
+	internalPolicyMaxTurns, internalPolicyMaxTokens, internalPolicyToolList := resolveReviewerBudget("internal_policy", "P5")
+	securityMaxTurns, securityMaxTokens, securityToolList := resolveReviewerBudget("security", "P5")
+	performanceMaxTurns, performanceMaxTokens, performanceToolList := resolveReviewerBudget("performance", "P5")
+	errorHandlingMaxTurns, errorHandlingMaxTokens, errorHandlingToolList := resolveReviewerBudget("error_handling", "P5")
+	limitationsMaxTurns, limitationsMaxTokens, limitationsToolList := resolveReviewerBudget("limitations", "P5")
+
+	technicalAccuracyToolClient := resolveReviewerToolClient(logger, "technical_accuracy", "P5", technicalAccuracyMaxTurns)
+	assumptionsToolClient := resolveReviewerToolClient(logger, "assumptions", "P5", assumptionsMaxTurns)
+	prerequisitesToolClient := resolveReviewerToolClient(logger, "prerequisites", "P5", prerequisitesMaxTurns)
+	standardsComplianceToolClient := resolveReviewerToolClient(logger, "standards_compliance", "P5", standardsComplianceMaxTurns)
+	legalComplianceToolClient := resolveReviewerToolClient(logger, "legal_compliance", "P5", legalComplianceMaxTurns)
+	regulatoryComplianceToolClient := resolveReviewerToolClient(logger, "regulatory_compliance", "P5", regulatoryComplianceMaxTurns)
+	internalPolicyToolClient := resolveReviewerToolClient(logger, "internal_policy", "P5", internalPolicyMaxTurns)
+	securityToolClient := resolveReviewerToolClient(logger, "security", "P5", securityMaxTurns)
+	performanceToolClient := resolveReviewerToolClient(logger, "performance", "P5", performanceMaxTurns)
+	errorHandlingToolClient := resolveReviewerToolClient(logger, "error_handling", "P5", errorHandlingMaxTurns)
+	limitationsToolClient := resolveReviewerToolClient(logger, "limitations", "P5", limitationsMaxTurns)
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -734,6 +886,118 @@ func NewReviewProcessor(
 		TerminologyConsistencyToolClient:     terminologyConsistencyToolClient,
 		CrossReferenceCorrectnessToolClient:  crossReferenceCorrectnessToolClient,
 		RequirementTraceabilityToolClient:    requirementTraceabilityToolClient,
+
+		// P5 — Technical & Compliance
+		TechnicalAccuracyClient:     technicalAccuracyClient,
+		TechnicalAccuracyModelName:  technicalAccuracyModel,
+		TechnicalAccuracyPromptRef:  technicalAccuracyRef,
+		TechnicalAccuracyPromptText: technicalAccuracyPrompt,
+
+		AssumptionsClient:     assumptionsClient,
+		AssumptionsModelName:  assumptionsModel,
+		AssumptionsPromptRef:  assumptionsRef,
+		AssumptionsPromptText: assumptionsPrompt,
+
+		PrerequisitesClient:     prerequisitesClient,
+		PrerequisitesModelName:  prerequisitesModel,
+		PrerequisitesPromptRef:  prerequisitesRef,
+		PrerequisitesPromptText: prerequisitesPrompt,
+
+		StandardsComplianceClient:     standardsComplianceClient,
+		StandardsComplianceModelName:  standardsComplianceModel,
+		StandardsCompliancePromptRef:  standardsComplianceRef,
+		StandardsCompliancePromptText: standardsCompliancePrompt,
+
+		LegalComplianceClient:     legalComplianceClient,
+		LegalComplianceModelName:  legalComplianceModel,
+		LegalCompliancePromptRef:  legalComplianceRef,
+		LegalCompliancePromptText: legalCompliancePrompt,
+
+		RegulatoryComplianceClient:     regulatoryComplianceClient,
+		RegulatoryComplianceModelName:  regulatoryComplianceModel,
+		RegulatoryCompliancePromptRef:  regulatoryComplianceRef,
+		RegulatoryCompliancePromptText: regulatoryCompliancePrompt,
+
+		InternalPolicyClient:     internalPolicyClient,
+		InternalPolicyModelName:  internalPolicyModel,
+		InternalPolicyPromptRef:  internalPolicyRef,
+		InternalPolicyPromptText: internalPolicyPrompt,
+
+		SecurityClient:     securityClient,
+		SecurityModelName:  securityModel,
+		SecurityPromptRef:  securityRef,
+		SecurityPromptText: securityPrompt,
+
+		PerformanceClient:     performanceClient,
+		PerformanceModelName:  performanceModel,
+		PerformancePromptRef:  performanceRef,
+		PerformancePromptText: performancePrompt,
+
+		ErrorHandlingClient:     errorHandlingClient,
+		ErrorHandlingModelName:  errorHandlingModel,
+		ErrorHandlingPromptRef:  errorHandlingRef,
+		ErrorHandlingPromptText: errorHandlingPrompt,
+
+		LimitationsClient:     limitationsClient,
+		LimitationsModelName:  limitationsModel,
+		LimitationsPromptRef:  limitationsRef,
+		LimitationsPromptText: limitationsPrompt,
+
+		TechnicalAccuracyMaxToolTurns:  technicalAccuracyMaxTurns,
+		TechnicalAccuracyMaxToolTokens: technicalAccuracyMaxTokens,
+		TechnicalAccuracyTools:         technicalAccuracyToolList,
+
+		AssumptionsMaxToolTurns:  assumptionsMaxTurns,
+		AssumptionsMaxToolTokens: assumptionsMaxTokens,
+		AssumptionsTools:         assumptionsToolList,
+
+		PrerequisitesMaxToolTurns:  prerequisitesMaxTurns,
+		PrerequisitesMaxToolTokens: prerequisitesMaxTokens,
+		PrerequisitesTools:         prerequisitesToolList,
+
+		StandardsComplianceMaxToolTurns:  standardsComplianceMaxTurns,
+		StandardsComplianceMaxToolTokens: standardsComplianceMaxTokens,
+		StandardsComplianceTools:         standardsComplianceToolList,
+
+		LegalComplianceMaxToolTurns:  legalComplianceMaxTurns,
+		LegalComplianceMaxToolTokens: legalComplianceMaxTokens,
+		LegalComplianceTools:         legalComplianceToolList,
+
+		RegulatoryComplianceMaxToolTurns:  regulatoryComplianceMaxTurns,
+		RegulatoryComplianceMaxToolTokens: regulatoryComplianceMaxTokens,
+		RegulatoryComplianceTools:         regulatoryComplianceToolList,
+
+		InternalPolicyMaxToolTurns:  internalPolicyMaxTurns,
+		InternalPolicyMaxToolTokens: internalPolicyMaxTokens,
+		InternalPolicyTools:         internalPolicyToolList,
+
+		SecurityMaxToolTurns:  securityMaxTurns,
+		SecurityMaxToolTokens: securityMaxTokens,
+		SecurityTools:         securityToolList,
+
+		PerformanceMaxToolTurns:  performanceMaxTurns,
+		PerformanceMaxToolTokens: performanceMaxTokens,
+		PerformanceTools:         performanceToolList,
+
+		ErrorHandlingMaxToolTurns:  errorHandlingMaxTurns,
+		ErrorHandlingMaxToolTokens: errorHandlingMaxTokens,
+		ErrorHandlingTools:         errorHandlingToolList,
+
+		LimitationsMaxToolTurns:  limitationsMaxTurns,
+		LimitationsMaxToolTokens: limitationsMaxTokens,
+		LimitationsTools:         limitationsToolList,
+
+		TechnicalAccuracyToolClient:     technicalAccuracyToolClient,
+		AssumptionsToolClient:           assumptionsToolClient,
+		PrerequisitesToolClient:         prerequisitesToolClient,
+		StandardsComplianceToolClient:   standardsComplianceToolClient,
+		LegalComplianceToolClient:       legalComplianceToolClient,
+		RegulatoryComplianceToolClient:  regulatoryComplianceToolClient,
+		InternalPolicyToolClient:        internalPolicyToolClient,
+		SecurityToolClient:              securityToolClient,
+		PerformanceToolClient:           performanceToolClient,
+		ErrorHandlingToolClient:         errorHandlingToolClient,
+		LimitationsToolClient:           limitationsToolClient,
 	}
 
 }
@@ -1252,6 +1516,250 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				MaxToolTurns:  p.RequirementTraceabilityMaxToolTurns,
 				MaxToolTokens: p.RequirementTraceabilityMaxToolTokens,
 				Tools:         p.RequirementTraceabilityTools,
+			},
+		})
+	}
+
+	// ── P5 — Technical & Compliance ─────────────────────────────────────────
+
+	if p.TechnicalAccuracyClient != nil && p.TechnicalAccuracyPromptText != "" && p.TechnicalAccuracyModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &technicalAccuracyReviewer{
+				client:       p.TechnicalAccuracyClient,
+				toolClient:   p.TechnicalAccuracyToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.TechnicalAccuracyModelName,
+				PromptText:    p.TechnicalAccuracyPromptText,
+				PromptRef:     p.TechnicalAccuracyPromptRef,
+				MaxToolTurns:  p.TechnicalAccuracyMaxToolTurns,
+				MaxToolTokens: p.TechnicalAccuracyMaxToolTokens,
+				Tools:         p.TechnicalAccuracyTools,
+			},
+		})
+	}
+
+	if p.AssumptionsClient != nil && p.AssumptionsPromptText != "" && p.AssumptionsModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &assumptionsReviewer{
+				client:       p.AssumptionsClient,
+				toolClient:   p.AssumptionsToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.AssumptionsModelName,
+				PromptText:    p.AssumptionsPromptText,
+				PromptRef:     p.AssumptionsPromptRef,
+				MaxToolTurns:  p.AssumptionsMaxToolTurns,
+				MaxToolTokens: p.AssumptionsMaxToolTokens,
+				Tools:         p.AssumptionsTools,
+			},
+		})
+	}
+
+	if p.PrerequisitesClient != nil && p.PrerequisitesPromptText != "" && p.PrerequisitesModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &prerequisitesReviewer{
+				client:       p.PrerequisitesClient,
+				toolClient:   p.PrerequisitesToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.PrerequisitesModelName,
+				PromptText:    p.PrerequisitesPromptText,
+				PromptRef:     p.PrerequisitesPromptRef,
+				MaxToolTurns:  p.PrerequisitesMaxToolTurns,
+				MaxToolTokens: p.PrerequisitesMaxToolTokens,
+				Tools:         p.PrerequisitesTools,
+			},
+		})
+	}
+
+	if p.StandardsComplianceClient != nil && p.StandardsCompliancePromptText != "" && p.StandardsComplianceModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &standardsComplianceReviewer{
+				client:       p.StandardsComplianceClient,
+				toolClient:   p.StandardsComplianceToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.StandardsComplianceModelName,
+				PromptText:    p.StandardsCompliancePromptText,
+				PromptRef:     p.StandardsCompliancePromptRef,
+				MaxToolTurns:  p.StandardsComplianceMaxToolTurns,
+				MaxToolTokens: p.StandardsComplianceMaxToolTokens,
+				Tools:         p.StandardsComplianceTools,
+			},
+		})
+	}
+
+	if p.LegalComplianceClient != nil && p.LegalCompliancePromptText != "" && p.LegalComplianceModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &legalComplianceReviewer{
+				client:       p.LegalComplianceClient,
+				toolClient:   p.LegalComplianceToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.LegalComplianceModelName,
+				PromptText:    p.LegalCompliancePromptText,
+				PromptRef:     p.LegalCompliancePromptRef,
+				MaxToolTurns:  p.LegalComplianceMaxToolTurns,
+				MaxToolTokens: p.LegalComplianceMaxToolTokens,
+				Tools:         p.LegalComplianceTools,
+			},
+		})
+	}
+
+	if p.RegulatoryComplianceClient != nil && p.RegulatoryCompliancePromptText != "" && p.RegulatoryComplianceModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &regulatoryComplianceReviewer{
+				client:       p.RegulatoryComplianceClient,
+				toolClient:   p.RegulatoryComplianceToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.RegulatoryComplianceModelName,
+				PromptText:    p.RegulatoryCompliancePromptText,
+				PromptRef:     p.RegulatoryCompliancePromptRef,
+				MaxToolTurns:  p.RegulatoryComplianceMaxToolTurns,
+				MaxToolTokens: p.RegulatoryComplianceMaxToolTokens,
+				Tools:         p.RegulatoryComplianceTools,
+			},
+		})
+	}
+
+	if p.InternalPolicyClient != nil && p.InternalPolicyPromptText != "" && p.InternalPolicyModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &internalPolicyReviewer{
+				client:       p.InternalPolicyClient,
+				toolClient:   p.InternalPolicyToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.InternalPolicyModelName,
+				PromptText:    p.InternalPolicyPromptText,
+				PromptRef:     p.InternalPolicyPromptRef,
+				MaxToolTurns:  p.InternalPolicyMaxToolTurns,
+				MaxToolTokens: p.InternalPolicyMaxToolTokens,
+				Tools:         p.InternalPolicyTools,
+			},
+		})
+	}
+
+	if p.SecurityClient != nil && p.SecurityPromptText != "" && p.SecurityModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &securityReviewer{
+				client:       p.SecurityClient,
+				toolClient:   p.SecurityToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.SecurityModelName,
+				PromptText:    p.SecurityPromptText,
+				PromptRef:     p.SecurityPromptRef,
+				MaxToolTurns:  p.SecurityMaxToolTurns,
+				MaxToolTokens: p.SecurityMaxToolTokens,
+				Tools:         p.SecurityTools,
+			},
+		})
+	}
+
+	if p.PerformanceClient != nil && p.PerformancePromptText != "" && p.PerformanceModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &performanceReviewer{
+				client:       p.PerformanceClient,
+				toolClient:   p.PerformanceToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.PerformanceModelName,
+				PromptText:    p.PerformancePromptText,
+				PromptRef:     p.PerformancePromptRef,
+				MaxToolTurns:  p.PerformanceMaxToolTurns,
+				MaxToolTokens: p.PerformanceMaxToolTokens,
+				Tools:         p.PerformanceTools,
+			},
+		})
+	}
+
+	if p.ErrorHandlingClient != nil && p.ErrorHandlingPromptText != "" && p.ErrorHandlingModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &errorHandlingReviewer{
+				client:       p.ErrorHandlingClient,
+				toolClient:   p.ErrorHandlingToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.ErrorHandlingModelName,
+				PromptText:    p.ErrorHandlingPromptText,
+				PromptRef:     p.ErrorHandlingPromptRef,
+				MaxToolTurns:  p.ErrorHandlingMaxToolTurns,
+				MaxToolTokens: p.ErrorHandlingMaxToolTokens,
+				Tools:         p.ErrorHandlingTools,
+			},
+		})
+	}
+
+	if p.LimitationsClient != nil && p.LimitationsPromptText != "" && p.LimitationsModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &limitationsReviewer{
+				client:       p.LimitationsClient,
+				toolClient:   p.LimitationsToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				ModelName:     p.LimitationsModelName,
+				PromptText:    p.LimitationsPromptText,
+				PromptRef:     p.LimitationsPromptRef,
+				MaxToolTurns:  p.LimitationsMaxToolTurns,
+				MaxToolTokens: p.LimitationsMaxToolTokens,
+				Tools:         p.LimitationsTools,
 			},
 		})
 	}

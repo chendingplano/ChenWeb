@@ -206,7 +206,7 @@ func TestRunToolUseReviewAggregatesPromptCacheTokens(t *testing.T) {
 	}
 }
 
-func TestRunToolUseReviewLogsToolCallsAndResults(t *testing.T) {
+func TestRunToolUseReviewToolCallPathExecutesTool(t *testing.T) {
 	tc := &countingTool{name: "search_entities", calls: new(int)}
 	client := &fakeToolClient{
 		responses: []*llmclients.Response{
@@ -229,24 +229,14 @@ func TestRunToolUseReviewLogsToolCallsAndResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	callEntry := findLogEntry(logger.entries, "info", "tool-use call")
-	if callEntry == nil {
-		t.Fatal("missing tool-use call log entry")
+	if *tc.calls != 1 {
+		t.Fatalf("tool calls=%d, want 1", *tc.calls)
 	}
-	callArgs := logArgsToMap(callEntry.args)
-	if callArgs["tool_name"] != "search_entities" || callArgs["arguments"] != `{"q":"sterilizer"}` {
-		t.Fatalf("call args=%v", callArgs)
+	if len(tc.args) != 1 || tc.args[0]["q"] != "sterilizer" {
+		t.Fatalf("tool args=%v", tc.args)
 	}
-	resultEntry := findLogEntry(logger.entries, "info", "tool-use result")
-	if resultEntry == nil {
-		t.Fatal("missing tool-use result log entry")
-	}
-	resultArgs := logArgsToMap(resultEntry.args)
-	if resultArgs["tool_name"] != "search_entities" {
-		t.Fatalf("result args=%v", resultArgs)
-	}
-	if resultText, ok := resultArgs["result"].(string); !ok || !strings.Contains(resultText, `"ok":true`) {
-		t.Fatalf("result preview=%v", resultArgs["result"])
+	if len(client.requests) != 2 {
+		t.Fatalf("requests=%d, want 2", len(client.requests))
 	}
 }
 
@@ -369,6 +359,35 @@ func TestExtractJSONObjectStripsFences(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("extractJSONObject(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestParseFindingsContentWithTrailingClosingFence(t *testing.T) {
+	input := "{\n" +
+		"  \"findings\": [\n" +
+		"    {\n" +
+		"      \"severity\": \"medium\",\n" +
+		"      \"finding_type\": \"outdated_regulatory_citation\",\n" +
+		"      \"title\": \"引用已废止的GB/T 1.1—2009标准起草规则\",\n" +
+		"      \"description\": \"本标准于2021-04-30发布，但第37行声明按照GB/T1.1—2009的规则起草。GB/T 1.1—2009已被GB/T 1.1—2020替代，新发布的国家标准应采用现行有效的起草规则，避免合规风险。\",\n" +
+		"      \"evidence\": \"第37行：“本标准按照GB/T1.1—2009给出的规则起草。”\",\n" +
+		"      \"location\": \"37\",\n" +
+		"      \"suggestion\": \"将起草规则更新为GB/T 1.1—2020，并根据新规则调整标准的结构 与编写格式。\",\n" +
+		"      \"confidence\": 0.85\n" +
+		"    }\n" +
+		"  ]\n" +
+		"}\n" +
+		"```"
+
+	findings, ok := parseFindingsContent(input)
+	if !ok {
+		t.Fatal("parseFindingsContent returned ok=false, want true")
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings len=%d, want 1", len(findings))
+	}
+	if findings[0].FindingType != "outdated_regulatory_citation" {
+		t.Fatalf("finding_type=%q", findings[0].FindingType)
 	}
 }
 
