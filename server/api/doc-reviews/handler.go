@@ -372,6 +372,39 @@ func GenerateCorrectionReport(c echo.Context) error {
 	})
 }
 
+// RestartRequest re-runs a review that was left unfinished (e.g. the backend was
+// killed mid-run). It resets the request state and re-triggers the review via
+// JetStream, falling back to an inline goroutine — mirroring SubmitRequest.
+func RestartRequest(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	ctrl := NewDocReviewController()
+	if err := ctrl.RestartRequest(c.Request().Context(), id); err != nil {
+		if re, ok := err.(*RequestError); ok {
+			return c.JSON(re.Status, map[string]any{"status": false, "error_msg": re.Message})
+		}
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+
+	ctx := c.Request().Context()
+	if pubErr := PublishReviewEvent(ctx, id); pubErr != nil {
+		logger.Warn("JetStream publish failed on restart; falling back to inline goroutine",
+			"request_id", id, "error", pubErr)
+		go func() {
+			bgCtrl := NewDocReviewController()
+			bgCtrl.RunReviewAndReport(c.Request().Context(), id)
+		}()
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "request_id": id, "status_str": "accepted"})
+}
+
 // StopRequest stops a running review.
 func StopRequest(c echo.Context) error {
 	id, err := parseID(c, "id")

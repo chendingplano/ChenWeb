@@ -342,6 +342,99 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 	return nil
 }
 
+// RestartRequest re-arms a review that was left unfinished — typically because
+// the backend process was killed mid-run, leaving the request stuck in
+// 'accepted' or 'running' with aspects still pending/running and no worker
+// driving them. It resets the request to 'accepted' and every non-succeeded
+// aspect back to 'pending' so a fresh run (re-triggered by the caller) picks the
+// job up. The review re-runs the whole document (prior findings are deleted on
+// re-run, DR7), so already-succeeded aspects are reset too and recomputed.
+func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int64) error {
+	req, err := c.loadRequest(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if req.Status == "completed" {
+		return &RequestError{
+			Status:  http.StatusConflict,
+			Message: fmt.Sprintf("request %d is already completed; nothing to restart", requestID),
+		}
+	}
+
+	// Reset the request to 'accepted' and clear the prior run's terminal stamps.
+	if _, err := c.DB.ExecContext(ctx,
+		`UPDATE kb.doc_review_requests
+		 SET status = 'accepted', start_time = NULL, end_time = NULL, error_message = NULL
+		 WHERE id = $1`,
+		requestID,
+	); err != nil {
+		return fmt.Errorf("reset request %d to accepted: %w", requestID, err)
+	}
+
+	// Reset every aspect of the run back to 'pending' so the fresh run re-claims
+	// them. The processor deletes prior findings and re-runs the whole document,
+	// so succeeded aspects are recomputed too.
+	if req.ReviewRunID != "" {
+		if _, err := c.DB.ExecContext(ctx,
+			`UPDATE kb.doc_review_status
+			 SET status = 'pending', progress = 0, finding_count = 0, error_message = NULL,
+			     start_time = NULL, end_time = NULL, modify_time = NOW()
+			 WHERE review_run_id = $1`,
+			req.ReviewRunID,
+		); err != nil {
+			return fmt.Errorf("reset aspect statuses for request %d: %w", requestID, err)
+		}
+	}
+
+	logger.Info("review request restarted", "request_id", requestID, "review_run_id", req.ReviewRunID)
+	return nil
+}
+
+// RecoverStalledReviews finds review requests left unfinished by a previous
+// process — status 'accepted' or 'running' — and re-arms each for a fresh run.
+//
+// After a backend crash/restart no worker is driving these requests: findings
+// persist only once a whole run completes (see PostProcessIndex's single
+// SaveFindings at the end), so a request stuck in 'running' has saved nothing
+// and its aspects are mid-flight. Re-arming via RestartRequest resets the
+// request to 'accepted' and every aspect back to 'pending', so the fresh run
+// re-runs all sub-tasks from scratch — exactly as if they had never run.
+//
+// It returns the ids it re-armed so the caller can re-trigger their runs.
+// Intended to be called once at process start.
+func (c *DocReviewController) RecoverStalledReviews(ctx context.Context) ([]int64, error) {
+	rows, err := c.DB.QueryContext(ctx,
+		`SELECT id FROM kb.doc_review_requests WHERE status IN ('accepted','running') ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list stalled reviews: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan stalled review id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate stalled reviews: %w", err)
+	}
+
+	var recovered []int64
+	for _, id := range ids {
+		if err := c.RestartRequest(ctx, id); err != nil {
+			logger.Warn("failed to re-arm stalled review", "request_id", id, "error", err)
+			continue
+		}
+		recovered = append(recovered, id)
+	}
+	if len(recovered) > 0 {
+		logger.Info("recovered stalled doc-review requests", "count", len(recovered), "request_ids", recovered)
+	}
+	return recovered, nil
+}
+
 // UpdateFinding updates review_status and reviewed_by on a finding.
 func (c *DocReviewController) UpdateFinding(ctx context.Context, findingID int64, reviewStatus string, reviewedBy string) error {
 	allowed := map[string]bool{

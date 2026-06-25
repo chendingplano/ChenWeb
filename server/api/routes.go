@@ -523,6 +523,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/doc-review/reports/:id/regenerate", docreviews.RegenerateReport)
 	apiGroup.POST("/doc-review/reports/:id/correction-report", docreviews.GenerateCorrectionReport)
 	apiGroup.POST("/doc-review/requests/:id/stop", docreviews.StopRequest)
+	apiGroup.POST("/doc-review/requests/:id/restart", docreviews.RestartRequest)
 
 
 	return nil

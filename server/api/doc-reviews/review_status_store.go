@@ -33,11 +33,28 @@ func (s ReviewStatusSQLStore) UpdateAspectProgress(ctx context.Context, reviewRu
 		findingCount = 0
 	}
 
+	// Status transitions on progress: pending/running -> success once the
+	// reviewer has finished every unit (progress reaches 1.0); 'success' and
+	// 'failed' are terminal and never reverted. An aspect at 100% must read
+	// 'success', not linger on 'running' until the whole run is finalized.
+	// finding_count is monotonic and, at completion, equals the count of this
+	// aspect's persisted findings (findings save 1:1), so finalizeAspectsSuccess
+	// safely skips an aspect this marks done. end_time is stamped on the
+	// running -> success transition only.
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status
-		SET status = CASE WHEN status = 'pending' THEN 'running' ELSE status END,
+		SET status = CASE
+		        WHEN status IN ('success', 'failed') THEN status
+		        WHEN GREATEST(progress, $3) >= 1 THEN 'success'
+		        ELSE 'running'
+		    END,
 		    progress = GREATEST(progress, $3),
 		    finding_count = GREATEST(finding_count, $4),
+		    end_time = CASE
+		        WHEN status NOT IN ('success', 'failed') AND GREATEST(progress, $3) >= 1
+		            THEN NOW()
+		        ELSE end_time
+		    END,
 		    modify_time = NOW()
 		WHERE review_run_id = $1 AND aspect = $2`,
 		reviewRunID, aspect, progress, findingCount)

@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { listActiveJobs, listAspects, stopRequest } from '$lib/services/docReviewService';
+    import { listActiveJobs, listAspects, stopRequest, restartRequest } from '$lib/services/docReviewService';
     import type { ActiveJob, AspectStatus, AspectInfo } from '$lib/services/docReviewService';
     import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
     import XCircleIcon from '@lucide/svelte/icons/x-circle';
@@ -8,6 +8,7 @@
     import SquareIcon from '@lucide/svelte/icons/square';
     import EyeIcon from '@lucide/svelte/icons/eye';
     import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+    import RotateCwIcon from '@lucide/svelte/icons/rotate-cw';
 
     let {
         darkMode = true,
@@ -38,6 +39,7 @@
     let jobs = $state<ActiveJob[]>([]);
     let loadError = $state('');
     let stoppingIds = $state<Set<number>>(new Set());
+    let restartingIds = $state<Set<number>>(new Set());
     let aspectLabels = $state<Record<string, string>>({});
     let now = $state(Date.now());
 
@@ -107,6 +109,18 @@
         }
     }
 
+    async function handleRestart(requestId: number) {
+        const next = new Set(restartingIds); next.add(requestId); restartingIds = next;
+        try {
+            await restartRequest(requestId);
+            await poll();
+        } catch (e: any) {
+            loadError = e?.message || 'Failed to restart review';
+        } finally {
+            const n = new Set(restartingIds); n.delete(requestId); restartingIds = n;
+        }
+    }
+
     let pollTimer: ReturnType<typeof setInterval>;
     let clock: ReturnType<typeof setInterval>;
     onMount(async () => {
@@ -147,6 +161,12 @@
                             <span style="flex-shrink:0; font-size:11px; color:{textMuted};">{finishedCount(job)}/{job.aspects.length} done</span>
                         </div>
                         <div style="display:flex; align-items:center; gap:6px;">
+                            <button onclick={() => handleRestart(job.request_id)} disabled={restartingIds.has(job.request_id)}
+                                title="Restart this review from the beginning (use when a run stalled because the backend was restarted)"
+                                style="display:flex; align-items:center; gap:4px; padding:5px 10px; background:{cardBg}; border:1px solid {borderColor}; border-radius:8px; color:{accent}; font-size:12px; cursor:{restartingIds.has(job.request_id) ? 'not-allowed' : 'pointer'}; opacity:{restartingIds.has(job.request_id) ? 0.5 : 1};">
+                                <RotateCwIcon class="h-3 w-3" />
+                                {restartingIds.has(job.request_id) ? 'Restarting…' : 'Restart'}
+                            </button>
                             <button onclick={() => handleStop(job.request_id)} disabled={stoppingIds.has(job.request_id)}
                                 style="display:flex; align-items:center; gap:4px; padding:5px 10px; background:{cardBg}; border:1px solid {borderColor}; border-radius:8px; color:{textMuted}; font-size:12px; cursor:{stoppingIds.has(job.request_id) ? 'not-allowed' : 'pointer'}; opacity:{stoppingIds.has(job.request_id) ? 0.5 : 1};">
                                 <SquareIcon class="h-3 w-3" />

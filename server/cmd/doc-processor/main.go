@@ -334,6 +334,26 @@ func main() {
 		}
 	}()
 
+	// ── Recover stalled doc-review runs left by a previous process ────────────
+	// A killed/restarted backend leaves requests in 'accepted'/'running' with no
+	// worker driving them (findings persist only when a whole run completes, so
+	// nothing partial is lost). Re-arm and re-run each from scratch. Disable with
+	// DOC_REVIEW_RECOVER_ON_START=false (e.g. when running multiple instances).
+	if envOrDefault("DOC_REVIEW_RECOVER_ON_START", "true") != "false" {
+		go func() {
+			ctrl := docreviews.NewDocReviewController()
+			ids, err := ctrl.RecoverStalledReviews(ctx)
+			if err != nil {
+				logger.Error("doc-review recovery sweep failed", "error", err)
+				return
+			}
+			for _, id := range ids {
+				logger.Info("re-running recovered doc-review", "request_id", id)
+				go ctrl.RunReviewAndReport(ctx, id)
+			}
+		}()
+	}
+
 	<-ctx.Done()
 	fmt.Println("doc processor stopped")
 }

@@ -188,4 +188,37 @@ func TestDR15_UpdateAspectProgress(t *testing.T) {
 	if got.FindingCount != 3 {
 		t.Fatalf("finding count regressed: got %d", got.FindingCount)
 	}
+
+	// Reaching 100% flips the aspect to 'success' immediately, rather than
+	// lingering on 'running' until the whole run is finalized.
+	if err := store.UpdateAspectProgress(ctx, res.ReviewRunID, "grammar_spelling", 1.0, 5); err != nil {
+		t.Fatalf("update progress to 100%%: %v", err)
+	}
+	statuses, err = ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	if err != nil {
+		t.Fatalf("load statuses after completion: %v", err)
+	}
+	got = statuses[0]
+	if got.Status != "success" {
+		t.Fatalf("want success status at 100%%, got %q", got.Status)
+	}
+	if math.Abs(got.Progress-1.0) > 1e-9 {
+		t.Fatalf("want progress 1, got %v", got.Progress)
+	}
+	if got.FindingCount != 5 {
+		t.Fatalf("want finding count 5, got %d", got.FindingCount)
+	}
+
+	// 'success' is terminal: a stray later progress report must not revert it.
+	if err := store.UpdateAspectProgress(ctx, res.ReviewRunID, "grammar_spelling", 0.5, 1); err != nil {
+		t.Fatalf("update progress after success: %v", err)
+	}
+	statuses, err = ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	if err != nil {
+		t.Fatalf("load statuses after stray update: %v", err)
+	}
+	got = statuses[0]
+	if got.Status != "success" {
+		t.Fatalf("success regressed to %q", got.Status)
+	}
 }
