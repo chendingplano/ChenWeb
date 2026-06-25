@@ -39,7 +39,7 @@ func TestRunToolUseReviewUsesDocumentFirstPromptLayout(t *testing.T) {
 	}
 	logger := loggerutil.CreateDefaultLogger("TEST_LOOP_PROMPT_CACHE")
 
-	_, err := runToolUseReview(
+	_, _, err := runToolUseReview(
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 1},
 		"Check rationale and evidence.", "<DOCUMENT_INPUT>\nshared document\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\nCheck rationale and evidence.\n</REVIEW_TASK>",
@@ -106,7 +106,7 @@ func TestRunToolUseReviewToolCallThenFindings(t *testing.T) {
 	}
 	logger := loggerutil.CreateDefaultLogger("TEST_LOOP")
 
-	findings, err := runToolUseReview(
+	findings, usage, err := runToolUseReview(
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 5},
 		"You are a doc reviewer.", "<doc_input></doc_input><task>Check rationale</task>",
@@ -121,6 +121,40 @@ func TestRunToolUseReviewToolCallThenFindings(t *testing.T) {
 	if *tc.calls != 1 {
 		t.Fatalf("tool calls=%d, want 1", *tc.calls)
 	}
+	if usage == nil || usage.PromptCacheHitTokens != 0 || usage.PromptCacheMissTokens != 0 {
+		t.Fatalf("usage=%+v, want zero cache tokens from test responses", usage)
+	}
+}
+
+func TestRunToolUseReviewAggregatesPromptCacheTokens(t *testing.T) {
+	client := &fakeToolClient{
+		responses: []*llmclients.Response{
+			{Content: `{"findings":[]}`, Usage: &llmclients.Usage{
+				InputTokens:           100,
+				OutputTokens:          10,
+				TotalTokens:           110,
+				PromptCacheHitTokens:  80,
+				PromptCacheMissTokens: 20,
+			}},
+		},
+	}
+	logger := loggerutil.CreateDefaultLogger("TEST_LOOP_USAGE")
+
+	_, usage, err := runToolUseReview(
+		context.Background(), client, "test-model",
+		ReviewerConfig{MaxToolTurns: 1},
+		"You are a doc reviewer.", "<doc_input></doc_input><task>Check</task>",
+		[]ReviewTool{}, 42, logger,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage == nil {
+		t.Fatal("usage=nil, want aggregate usage")
+	}
+	if usage.PromptCacheHitTokens != 80 || usage.PromptCacheMissTokens != 20 {
+		t.Fatalf("cache hit/miss=%d/%d, want 80/20", usage.PromptCacheHitTokens, usage.PromptCacheMissTokens)
+	}
 }
 
 func TestRunToolUseReviewTurnBudgetExhausted(t *testing.T) {
@@ -131,7 +165,7 @@ func TestRunToolUseReviewTurnBudgetExhausted(t *testing.T) {
 	}
 	logger := loggerutil.CreateDefaultLogger("TEST_LOOP_BUDGET")
 	// maxTurns=0 — loop should run once (clamped to 1) and then finalize.
-	findings, err := runToolUseReview(
+	findings, _, err := runToolUseReview(
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 0},
 		"You are a doc reviewer.", "<doc_input></doc_input><task>Check</task>",
@@ -158,7 +192,7 @@ func TestRunToolUseReviewStopMidLoop(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(ErrPipelineStopped)
 
-	_, err := runToolUseReview(
+	_, _, err := runToolUseReview(
 		ctx, client, "test-model",
 		ReviewerConfig{MaxToolTurns: 5},
 		"You are a doc reviewer.", "<doc_input/>", []ReviewTool{}, 42, logger,

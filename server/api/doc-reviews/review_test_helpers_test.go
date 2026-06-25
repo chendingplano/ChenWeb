@@ -16,6 +16,7 @@ type fakeJSONExtractor struct {
 	modelNames    []string
 	inputTexts    []string
 	documentFirst []bool
+	lastUsage     *llmclients.Usage
 	calledCount   int
 }
 
@@ -26,4 +27,12 @@ func (f *fakeJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExt
 	f.inputTexts = append(f.inputTexts, in.InputText)
 	f.documentFirst = append(f.documentFirst, in.DocumentFirst)
 	return f.out, f.err
+}
+
+func (f *fakeJSONExtractor) LastJSONUsage() *llmclients.Usage {
+	if f.lastUsage == nil {
+		return nil
+	}
+	usage := *f.lastUsage
+	return &usage
 }

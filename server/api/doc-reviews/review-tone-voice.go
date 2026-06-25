@@ -173,6 +173,8 @@ func (r *toneVoiceReviewer) processWindow(
 		"window", index,
 		"findings", len(findings),
 		"ms_used", time.Since(startTime).Milliseconds(),
+		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
+		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
 	)
 	return findings
 }

@@ -33,7 +33,7 @@ func runToolUseReview(
 	tools []ReviewTool,
 	recordID int64,
 	logger ApiTypes.JimoLogger,
-) ([]ReviewFinding, error) {
+) ([]ReviewFinding, *LLMUsage, error) {
 	toolByName := make(map[string]ReviewTool, len(tools))
 	for _, t := range tools {
 		toolByName[t.Name] = t
@@ -55,9 +55,10 @@ func runToolUseReview(
 	}
 
 	tokensUsed := 0
+	aggregateUsage := &LLMUsage{}
 	for turn := 0; turn < maxTurns; turn++ {
 		if isCtxStopped(ctx) {
-			return nil, ErrPipelineStopped
+			return nil, aggregateUsage, ErrPipelineStopped
 		}
 
 		resp, err := client.Complete(ctx, LLMRequest{
@@ -70,9 +71,10 @@ func runToolUseReview(
 			CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP",
 		})
 		if err != nil {
-			return nil, fmt.Errorf("(MID_26062595) tool-use LLM call failed: %w", err)
+			return nil, aggregateUsage, fmt.Errorf("(MID_26062595) tool-use LLM call failed: %w", err)
 		}
 		logLoopUsage(logger, modelName, turn, resp.Usage)
+		addUsage(aggregateUsage, resp.Usage)
 		tokensUsed += usageTotalTokens(resp.Usage)
 
 		// Tool calls take precedence: a response that requests tools is never
@@ -101,18 +103,22 @@ func runToolUseReview(
 
 		// No tool calls: the model is producing its final findings.
 		if findings, ok := parseFindingsContent(resp.Content); ok {
-			return findings, nil
+			return findings, aggregateUsage, nil
 		}
 
 		// Degenerate response (neither tool calls nor parseable findings):
 		// one repair attempt asking for strict JSON, then give up for this unit.
 		messages = append(messages, LLMMessage{Role: LLMRoleAssistant, Content: resp.Content})
-		return finalizeFindings(ctx, client, modelName, recordID, messages, logger)
+		findings, usage, err := finalizeFindings(ctx, client, modelName, recordID, messages, logger)
+		addUsage(aggregateUsage, usage)
+		return findings, aggregateUsage, err
 	}
 
 	// Budget exhausted (turns or tokens): force the model to produce findings
 	// from the evidence collected so far, without tools (DR10b force-produce).
-	return finalizeFindings(ctx, client, modelName, recordID, messages, logger)
+	findings, usage, err := finalizeFindings(ctx, client, modelName, recordID, messages, logger)
+	addUsage(aggregateUsage, usage)
+	return findings, aggregateUsage, err
 }
 
 // finalizeFindings appends the force-produce instruction and makes one final
@@ -125,9 +131,9 @@ func finalizeFindings(
 	recordID int64,
 	messages []LLMMessage,
 	logger ApiTypes.JimoLogger,
-) ([]ReviewFinding, error) {
+) ([]ReviewFinding, *LLMUsage, error) {
 	if isCtxStopped(ctx) {
-		return nil, ErrPipelineStopped
+		return nil, nil, ErrPipelineStopped
 	}
 	messages = append(messages, LLMMessage{
 		Role: LLMRoleUser,
@@ -143,14 +149,14 @@ func finalizeFindings(
 		CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP-FINAL",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("(MID_26062596) tool-use finalize call failed: %w", err)
+		return nil, nil, fmt.Errorf("(MID_26062596) tool-use finalize call failed: %w", err)
 	}
 	logLoopUsage(logger, modelName, -1, resp.Usage)
 	if findings, ok := parseFindingsContent(resp.Content); ok {
-		return findings, nil
+		return findings, resp.Usage, nil
 	}
 	logger.Warn("tool-use finalize produced no parseable findings", "record_id", recordID)
-	return nil, nil
+	return nil, resp.Usage, nil
 }
 
 // executeToolCall validates a tool call's arguments against the tool's schema
@@ -301,6 +307,17 @@ func usageTotalTokens(u *LLMUsage) int {
 		return u.TotalTokens
 	}
 	return u.InputTokens + u.OutputTokens
+}
+
+func addUsage(total *LLMUsage, u *LLMUsage) {
+	if total == nil || u == nil {
+		return
+	}
+	total.InputTokens += u.InputTokens
+	total.OutputTokens += u.OutputTokens
+	total.TotalTokens += usageTotalTokens(u)
+	total.PromptCacheHitTokens += u.PromptCacheHitTokens
+	total.PromptCacheMissTokens += u.PromptCacheMissTokens
 }
 
 // logLoopUsage records per-call token usage including DeepSeek prompt-cache

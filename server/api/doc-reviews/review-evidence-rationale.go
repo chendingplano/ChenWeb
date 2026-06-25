@@ -24,7 +24,7 @@ import (
 // what is visible within a 200-line window. One-shot path unchanged.
 type evidenceRationaleReviewer struct {
 	client       LLMJSONExtractor
-	toolClient   LLMChatClient  // non-nil when tool-use path is active
+	toolClient   LLMChatClient // non-nil when tool-use path is active
 	toolRegistry map[string]ReviewTool
 	logger       ApiTypes.JimoLogger
 	chunkStore   SQLStore
@@ -150,6 +150,8 @@ func (r *evidenceRationaleReviewer) processWindow(
 
 	startTime := time.Now()
 	var findings []ReviewFinding
+	var cacheHitTokens int
+	var cacheMissTokens int
 
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		// Tool-use path (Phase II, DR10b). The reviewer can investigate
@@ -163,10 +165,14 @@ func (r *evidenceRationaleReviewer) processWindow(
 		)
 		// DR8a layout: canonical doc input before reviewer task.
 		userCtx := fmt.Sprintf("<DOCUMENT_INPUT>\n%s\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\n%s\n</REVIEW_TASK>", w.inputJSON, cfg.PromptText)
-		loopFindings, loopErr := runToolUseReview(
+		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
 			userCtx, tools, recordID, r.logger,
 		)
+		if loopUsage != nil {
+			cacheHitTokens = loopUsage.PromptCacheHitTokens
+			cacheMissTokens = loopUsage.PromptCacheMissTokens
+		}
 		if loopErr != nil {
 			r.logger.Warn("evidence_rationale tool-use loop failed; no findings for window",
 				"record_id", recordID,
@@ -187,6 +193,8 @@ func (r *evidenceRationaleReviewer) processWindow(
 			return nil
 		}
 		findings = normalizeFindingsJSON(payload)
+		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
+		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
 
 	// Both paths funnel through the same finding-defaulting.
@@ -209,6 +217,8 @@ func (r *evidenceRationaleReviewer) processWindow(
 		"window", index,
 		"findings", len(findings),
 		"ms_used", time.Since(startTime).Milliseconds(),
+		"cache_hit_tokens", cacheHitTokens,
+		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
 }
