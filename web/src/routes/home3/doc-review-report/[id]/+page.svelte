@@ -395,14 +395,6 @@
 		{:else if skeleton}
 			<div class="title-row">
 				<h1 class="report-title">Document Review Report</h1>
-				{#if dirty}
-					<button class="regen-btn" disabled={regenerating} onclick={onRegenerate}>
-						{regenerating ? 'Regenerating…' : 'Regenerate PDF'}
-					</button>
-				{/if}
-				<button class="regen-btn" disabled={correcting} onclick={onCorrectionReport}>
-					{correcting ? 'Generating…' : 'Correction Report'}
-				</button>
 			</div>
 			<p class="meta">
 				Document: {skeleton.meta?.document_title || '—'} (ID: {inputRecordId ?? '—'})<br />
@@ -447,6 +439,19 @@
 					class:active={showMode === 'all'}
 					onclick={() => (showMode = 'all')}
 				>Show All</button>
+				<div class="show-mode-sep"></div>
+				<button
+					type="button"
+					class="show-mode-btn action-btn"
+					disabled={correcting}
+					onclick={onCorrectionReport}
+				>{correcting ? 'Generating…' : 'Generate Change Report'}</button>
+				<button
+					type="button"
+					class="show-mode-btn action-btn"
+					disabled={regenerating}
+					onclick={onRegenerate}
+				>{regenerating ? 'Regenerating…' : 'Re-Generate Review Report'}</button>
 			</div>
 
 			{#each livePassGroups as group (group.pass)}
@@ -667,24 +672,6 @@
 	.title-row .report-title {
 		border-bottom: none;
 		padding-bottom: 0;
-	}
-	.regen-btn {
-		flex: 0 0 auto;
-		padding: 0.45rem 0.85rem;
-		border: none;
-		border-radius: 6px;
-		background: var(--accent);
-		color: #fff;
-		font: inherit;
-		font-size: 0.82rem;
-		font-weight: 600;
-		cursor: pointer;
-		white-space: nowrap;
-		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-	}
-	.regen-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 	.meta {
 		color: var(--text-muted);
@@ -934,8 +921,17 @@
 	}
 	.show-mode-bar {
 		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
 		gap: 0.4rem;
 		margin: 0.75rem 0 0.5rem;
+	}
+	.show-mode-sep {
+		width: 1px;
+		height: 1.25rem;
+		background: var(--border);
+		margin: 0 0.15rem;
+		flex: 0 0 auto;
 	}
 	.show-mode-btn {
 		padding: 0.3rem 0.75rem;
@@ -947,8 +943,9 @@
 		font-size: 0.78rem;
 		cursor: pointer;
 		transition: background 0.15s, border-color 0.15s, color 0.15s;
+		white-space: nowrap;
 	}
-	.show-mode-btn:hover {
+	.show-mode-btn:hover:not(:disabled) {
 		border-color: var(--accent);
 		color: var(--accent);
 	}
@@ -957,6 +954,20 @@
 		border-color: var(--accent);
 		color: var(--accent);
 		font-weight: 600;
+	}
+	.show-mode-btn.action-btn {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: #fff;
+		font-weight: 600;
+	}
+	.show-mode-btn.action-btn:hover:not(:disabled) {
+		opacity: 0.88;
+		color: #fff;
+	}
+	.show-mode-btn:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
 	}
 	.toast {
 		position: fixed;

@@ -222,6 +222,10 @@ type ReviewProcessor struct {
 	HeadingHierarchyPromptRef  string
 	HeadingHierarchyPromptText string
 
+	NavigabilityModelName  string
+	NavigabilityPromptRef  string
+	NavigabilityPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -254,6 +258,10 @@ type ReviewProcessor struct {
 	// HeadingHierarchyClient is a properly-configured LLM client for the
 	// heading_hierarchy reviewer (P2, document-level).
 	HeadingHierarchyClient LLMJSONExtractor
+
+	// NavigabilityClient is a properly-configured LLM client for the
+	// navigability reviewer (P2, document-level).
+	NavigabilityClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -329,6 +337,7 @@ func NewReviewProcessor(
 	localizationClient, localizationModel, localizationPrompt, localizationRef, _ := resolveReviewerRuntime(logger, "localization", "P1")
 	logicalFlowClient, logicalFlowModel, logicalFlowPrompt, logicalFlowRef, _ := resolveReviewerRuntime(logger, "logical_flow", "P2")
 	headingHierarchyClient, headingHierarchyModel, headingHierarchyPrompt, headingHierarchyRef, _ := resolveReviewerRuntime(logger, "heading_hierarchy", "P2")
+	navigabilityClient, navigabilityModel, navigabilityPrompt, navigabilityRef, _ := resolveReviewerRuntime(logger, "navigability", "P2")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -373,6 +382,11 @@ func NewReviewProcessor(
 		HeadingHierarchyModelName:  headingHierarchyModel,
 		HeadingHierarchyPromptRef:  headingHierarchyRef,
 		HeadingHierarchyPromptText: headingHierarchyPrompt,
+
+		NavigabilityClient:     navigabilityClient,
+		NavigabilityModelName:  navigabilityModel,
+		NavigabilityPromptRef:  navigabilityRef,
+		NavigabilityPromptText: navigabilityPrompt,
 	}
 }
 
@@ -617,6 +631,23 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.HeadingHierarchyModelName,
 				PromptText: p.HeadingHierarchyPromptText,
 				PromptRef:  p.HeadingHierarchyPromptRef,
+			},
+		})
+	}
+
+	if p.NavigabilityClient != nil && p.NavigabilityPromptText != "" && p.NavigabilityModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &navigabilityReviewer{
+				client:     p.NavigabilityClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.NavigabilityModelName,
+				PromptText: p.NavigabilityPromptText,
+				PromptRef:  p.NavigabilityPromptRef,
 			},
 		})
 	}
