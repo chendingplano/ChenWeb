@@ -14,6 +14,8 @@ import (
 // max_tool_tokens unset (DR10c).
 const defaultP3MaxToolTokens = 60000
 
+const docReviewToolUseSystemPrompt = "You are a document review engine. Return strict JSON findings only unless you need to call an available tool."
+
 // runToolUseReview runs the bounded tool-use conversation loop (DR10b) for one
 // review unit (a window for StrategyChunk reviewers). It places the canonical
 // document input first (DR8a prefix-cache layout), calls the tool-capable model
@@ -26,7 +28,7 @@ func runToolUseReview(
 	client LLMChatClient,
 	modelName string,
 	cfg ReviewerConfig,
-	systemPrompt string,
+	_ string,
 	userContext string,
 	tools []ReviewTool,
 	recordID int64,
@@ -48,7 +50,7 @@ func runToolUseReview(
 	}
 
 	messages := []LLMMessage{
-		{Role: LLMRoleSystem, Content: systemPrompt},
+		{Role: LLMRoleSystem, Content: docReviewToolUseSystemPrompt},
 		{Role: LLMRoleUser, Content: userContext},
 	}
 

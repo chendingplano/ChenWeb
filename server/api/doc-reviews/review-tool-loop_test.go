@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	llmclients "github.com/chendingplano/shared/go/api/llm"
@@ -13,10 +14,12 @@ import (
 type fakeToolClient struct {
 	responses []*llmclients.Response
 	errs      []error
+	requests  []llmclients.Request
 	callCount int
 }
 
-func (f *fakeToolClient) Complete(_ context.Context, _ llmclients.Request) (*llmclients.Response, error) {
+func (f *fakeToolClient) Complete(_ context.Context, req llmclients.Request) (*llmclients.Response, error) {
+	f.requests = append(f.requests, req)
 	i := f.callCount
 	f.callCount++
 	if i < len(f.errs) && f.errs[i] != nil {
@@ -28,12 +31,47 @@ func (f *fakeToolClient) Complete(_ context.Context, _ llmclients.Request) (*llm
 	return &llmclients.Response{Content: `{"findings":[]}`}, nil
 }
 
+func TestRunToolUseReviewUsesDocumentFirstPromptLayout(t *testing.T) {
+	client := &fakeToolClient{
+		responses: []*llmclients.Response{
+			{Content: `{"findings":[]}`},
+		},
+	}
+	logger := loggerutil.CreateDefaultLogger("TEST_LOOP_PROMPT_CACHE")
+
+	_, err := runToolUseReview(
+		context.Background(), client, "test-model",
+		ReviewerConfig{MaxToolTurns: 1},
+		"Check rationale and evidence.", "<DOCUMENT_INPUT>\nshared document\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\nCheck rationale and evidence.\n</REVIEW_TASK>",
+		[]ReviewTool{}, 42, logger,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("requests=%d, want 1", len(client.requests))
+	}
+	messages := client.requests[0].Messages
+	if len(messages) < 2 {
+		t.Fatalf("messages=%d, want at least 2", len(messages))
+	}
+	if strings.Contains(messages[0].Content, "Check rationale") {
+		t.Fatalf("system prompt contains reviewer-specific task before document: %q", messages[0].Content)
+	}
+	user := messages[1].Content
+	docIdx := strings.Index(user, "<DOCUMENT_INPUT>")
+	taskIdx := strings.Index(user, "<REVIEW_TASK>")
+	if docIdx < 0 || taskIdx < 0 || docIdx > taskIdx {
+		t.Fatalf("user prompt is not document-first: %q", user)
+	}
+}
+
 func (f *fakeToolClient) Stream(_ context.Context, _ llmclients.Request, _ llmclients.StreamHandler) error {
 	return errors.New("stream not supported in tests")
 }
 
 type countingTool struct {
-	name string
+	name  string
 	calls *int
 	args  []map[string]any
 }

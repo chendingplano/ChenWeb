@@ -190,6 +190,42 @@ func buildPromptCacheReviewTasks(
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
+		case *examplesReviewer:
+			windows := buildExamplesWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *diagramsReviewer:
+			windows := buildDiagramsWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *testableClaimsReviewer:
+			windows := buildTestableClaimsWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
+		case *evidenceRationaleReviewer:
+			windows := buildEvidenceRationaleWindows(lines, docCtx, 200)
+			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
+			for i, w := range windows {
+				i, w := i, w
+				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
+				})
+			}
 		case *logicalFlowReviewer:
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
