@@ -260,6 +260,14 @@ type ReviewProcessor struct {
 	ClarityPromptRef  string
 	ClarityPromptText string
 
+	ConcisenessModelName  string
+	ConcisenessPromptRef  string
+	ConcisenessPromptText string
+
+	RelevanceModelName  string
+	RelevancePromptRef  string
+	RelevancePromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -316,6 +324,14 @@ type ReviewProcessor struct {
 	// ClarityClient is a properly-configured LLM client for the
 	// clarity reviewer (P3, content quality, per-chunk).
 	ClarityClient LLMJSONExtractor
+
+	// ConcisenessClient is a properly-configured LLM client for the
+	// conciseness reviewer (P3, content quality, per-chunk).
+	ConcisenessClient LLMJSONExtractor
+
+	// RelevanceClient is a properly-configured LLM client for the
+	// relevance reviewer (P3, content quality, per-chunk).
+	RelevanceClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -398,6 +414,8 @@ func NewReviewProcessor(
 	completenessClient, completenessModel, completenessPrompt, completenessRef, _ := resolveReviewerRuntime(logger, "completeness", "P3")
 	correctnessClient, correctnessModel, correctnessPrompt, correctnessRef, _ := resolveReviewerRuntime(logger, "correctness", "P3")
 	clarityClient, clarityModel, clarityPrompt, clarityRef, _ := resolveReviewerRuntime(logger, "clarity", "P3")
+	concisenessClient, concisenessModel, concisenessPrompt, concisenessRef, _ := resolveReviewerRuntime(logger, "conciseness", "P3")
+	relevanceClient, relevanceModel, relevancePrompt, relevanceRef, _ := resolveReviewerRuntime(logger, "relevance", "P3")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -473,6 +491,16 @@ func NewReviewProcessor(
 		ClarityModelName:  clarityModel,
 		ClarityPromptRef:  clarityRef,
 		ClarityPromptText: clarityPrompt,
+
+		ConcisenessClient:     concisenessClient,
+		ConcisenessModelName:  concisenessModel,
+		ConcisenessPromptRef:  concisenessRef,
+		ConcisenessPromptText: concisenessPrompt,
+
+		RelevanceClient:     relevanceClient,
+		RelevanceModelName:  relevanceModel,
+		RelevancePromptRef:  relevanceRef,
+		RelevancePromptText: relevancePrompt,
 	}
 }
 
@@ -821,6 +849,40 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.ClarityModelName,
 				PromptText: p.ClarityPromptText,
 				PromptRef:  p.ClarityPromptRef,
+			},
+		})
+	}
+
+	if p.ConcisenessClient != nil && p.ConcisenessPromptText != "" && p.ConcisenessModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &concisenessReviewer{
+				client:     p.ConcisenessClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.ConcisenessModelName,
+				PromptText: p.ConcisenessPromptText,
+				PromptRef:  p.ConcisenessPromptRef,
+			},
+		})
+	}
+
+	if p.RelevanceClient != nil && p.RelevancePromptText != "" && p.RelevanceModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &relevanceReviewer{
+				client:     p.RelevanceClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.RelevanceModelName,
+				PromptText: p.RelevancePromptText,
+				PromptRef:  p.RelevancePromptRef,
 			},
 		})
 	}

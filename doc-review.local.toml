@@ -181,16 +181,16 @@ prompt = "prompt-review-clarity.md"
 max_tool_turns = 0
 
 [reviewers.conciseness]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-conciseness.md"
 max_tool_turns = 0
 
 [reviewers.relevance]
-enabled = false
-checked = false
+enabled = true
+checked = true
 group = "P3"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-relevance.md"
