@@ -226,6 +226,14 @@ type ReviewProcessor struct {
 	NavigabilityPromptRef  string
 	NavigabilityPromptText string
 
+	SectionBalanceModelName  string
+	SectionBalancePromptRef  string
+	SectionBalancePromptText string
+
+	ModularityModelName  string
+	ModularityPromptRef  string
+	ModularityPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -262,6 +270,14 @@ type ReviewProcessor struct {
 	// NavigabilityClient is a properly-configured LLM client for the
 	// navigability reviewer (P2, document-level).
 	NavigabilityClient LLMJSONExtractor
+
+	// SectionBalanceClient is a properly-configured LLM client for the
+	// section_balance reviewer (P2, document-level).
+	SectionBalanceClient LLMJSONExtractor
+
+	// ModularityClient is a properly-configured LLM client for the
+	// modularity reviewer (P2, document-level).
+	ModularityClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -319,8 +335,9 @@ func resolveReviewerRuntime(logger ApiTypes.JimoLogger, aspect, group string) (
 
 // NewReviewProcessor creates a ReviewProcessor.
 // Phase I loads the P1 reviewer configs (grammar_spelling, tone_voice,
-// formatting_consistency, readability, localization) and the first P2
-// document-level reviewer (logical_flow).
+// formatting_consistency, readability, localization) and the P2
+// document-level reviewers (logical_flow, heading_hierarchy, navigability,
+// section_balance, modularity).
 func NewReviewProcessor(
 	inputStore DocMetadataStore,
 	entityStore EntityRelationStore,
@@ -338,6 +355,8 @@ func NewReviewProcessor(
 	logicalFlowClient, logicalFlowModel, logicalFlowPrompt, logicalFlowRef, _ := resolveReviewerRuntime(logger, "logical_flow", "P2")
 	headingHierarchyClient, headingHierarchyModel, headingHierarchyPrompt, headingHierarchyRef, _ := resolveReviewerRuntime(logger, "heading_hierarchy", "P2")
 	navigabilityClient, navigabilityModel, navigabilityPrompt, navigabilityRef, _ := resolveReviewerRuntime(logger, "navigability", "P2")
+	sectionBalanceClient, sectionBalanceModel, sectionBalancePrompt, sectionBalanceRef, _ := resolveReviewerRuntime(logger, "section_balance", "P2")
+	modularityClient, modularityModel, modularityPrompt, modularityRef, _ := resolveReviewerRuntime(logger, "modularity", "P2")
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -387,6 +406,16 @@ func NewReviewProcessor(
 		NavigabilityModelName:  navigabilityModel,
 		NavigabilityPromptRef:  navigabilityRef,
 		NavigabilityPromptText: navigabilityPrompt,
+
+		SectionBalanceClient:     sectionBalanceClient,
+		SectionBalanceModelName:  sectionBalanceModel,
+		SectionBalancePromptRef:  sectionBalanceRef,
+		SectionBalancePromptText: sectionBalancePrompt,
+
+		ModularityClient:     modularityClient,
+		ModularityModelName:  modularityModel,
+		ModularityPromptRef:  modularityRef,
+		ModularityPromptText: modularityPrompt,
 	}
 }
 
@@ -648,6 +677,40 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.NavigabilityModelName,
 				PromptText: p.NavigabilityPromptText,
 				PromptRef:  p.NavigabilityPromptRef,
+			},
+		})
+	}
+
+	if p.SectionBalanceClient != nil && p.SectionBalancePromptText != "" && p.SectionBalanceModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &sectionBalanceReviewer{
+				client:     p.SectionBalanceClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.SectionBalanceModelName,
+				PromptText: p.SectionBalancePromptText,
+				PromptRef:  p.SectionBalancePromptRef,
+			},
+		})
+	}
+
+	if p.ModularityClient != nil && p.ModularityPromptText != "" && p.ModularityModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &modularityReviewer{
+				client:     p.ModularityClient,
+				logger:     p.Logger,
+				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:   p.MaxConcurrent,
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				ModelName:  p.ModularityModelName,
+				PromptText: p.ModularityPromptText,
+				PromptRef:  p.ModularityPromptRef,
 			},
 		})
 	}
