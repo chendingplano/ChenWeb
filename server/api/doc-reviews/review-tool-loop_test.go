@@ -251,6 +251,7 @@ func TestFinalizeFindingsLogsInfoWhenNoFindings(t *testing.T) {
 	findings, _, err := finalizeFindings(
 		context.Background(), client, "test-model", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
+		nil,
 		logger,
 	)
 	if err != nil {
@@ -280,6 +281,7 @@ func TestFinalizeFindingsReturnsErrorWhenUnparseable(t *testing.T) {
 	findings, _, err := finalizeFindings(
 		context.Background(), client, "test-model", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
+		nil,
 		logger,
 	)
 	if findings != nil {
@@ -310,6 +312,7 @@ func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
 	findings, _, err := finalizeFindings(
 		context.Background(), client, "test-model", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
+		nil,
 		logger,
 	)
 	if err != nil {
@@ -338,9 +341,20 @@ func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
 }
 
 func TestFinalizeFindingsRepairsTextToolCalls(t *testing.T) {
+	var toolCalls int
+	var toolArgs []map[string]any
+	lineTool := ReviewTool{
+		Name:       "get_chunk_lines",
+		Parameters: []byte(`{"type":"object","properties":{"start_line":{"type":"integer"},"end_line":{"type":"integer"}},"required":["start_line","end_line"]}`),
+		Execute: func(_ context.Context, _ int64, args map[string]any) (any, error) {
+			toolCalls++
+			toolArgs = append(toolArgs, args)
+			return map[string]any{"lines": []map[string]any{{"line_number": 615, "content": "sample"}}}, nil
+		},
+	}
 	client := &fakeToolClient{
 		responses: []*llmclients.Response{
-			{Content: "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"search_provisions\">\n<｜｜DSML｜｜parameter name=\"query\" string=\"true\">主次</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>"},
+			{Content: "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"get_chunk_lines\">\n<｜｜DSML｜｜parameter name=\"start_line\" string=\"false\">615</｜｜DSML｜｜parameter>\n<｜｜DSML｜｜parameter name=\"end_line\" string=\"false\">625</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>"},
 			{Content: `{"findings":[]}`},
 		},
 	}
@@ -349,6 +363,7 @@ func TestFinalizeFindingsRepairsTextToolCalls(t *testing.T) {
 	findings, _, err := finalizeFindings(
 		context.Background(), client, "test-model", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
+		map[string]ReviewTool{"get_chunk_lines": lineTool},
 		logger,
 	)
 	if err != nil {
@@ -360,10 +375,16 @@ func TestFinalizeFindingsRepairsTextToolCalls(t *testing.T) {
 	if len(client.requests) != 2 {
 		t.Fatalf("requests=%d, want finalize + repair", len(client.requests))
 	}
+	if toolCalls != 1 {
+		t.Fatalf("tool calls=%d, want 1", toolCalls)
+	}
+	if len(toolArgs) != 1 || toolArgs[0]["start_line"] != float64(615) || toolArgs[0]["end_line"] != float64(625) {
+		t.Fatalf("tool args=%v", toolArgs)
+	}
 	if client.requests[1].CallReason != "review_tool_use_finalize_repair" {
 		t.Fatalf("repair call reason=%q", client.requests[1].CallReason)
 	}
-	if !strings.Contains(client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, "tool use is now closed") {
+	if !strings.Contains(client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, "tool results above") {
 		t.Fatalf("repair prompt=%q", client.requests[1].Messages[len(client.requests[1].Messages)-1].Content)
 	}
 }
@@ -482,6 +503,26 @@ func TestParseFindingsContentDetailedReportsTextToolCalls(t *testing.T) {
 	}
 	if reason != "tool_calls_in_final_text" {
 		t.Fatalf("reason=%q, want tool_calls_in_final_text", reason)
+	}
+}
+
+func TestParseTextToolCallsFromDSML(t *testing.T) {
+	input := "<｜｜DSML｜｜tool_calls>\n" +
+		"<｜｜DSML｜｜invoke name=\"get_chunk_lines\">\n" +
+		"<｜｜DSML｜｜parameter name=\"start_line\" string=\"false\">615</｜｜DSML｜｜parameter>\n" +
+		"<｜｜DSML｜｜parameter name=\"end_line\" string=\"false\">625</｜｜DSML｜｜parameter>\n" +
+		"</｜｜DSML｜｜invoke>\n" +
+		"</｜｜DSML｜｜tool_calls>"
+
+	calls := parseTextToolCalls(input)
+	if len(calls) != 1 {
+		t.Fatalf("calls len=%d, want 1", len(calls))
+	}
+	if calls[0].Name != "get_chunk_lines" {
+		t.Fatalf("name=%q", calls[0].Name)
+	}
+	if calls[0].Arguments != `{"end_line":625,"start_line":615}` {
+		t.Fatalf("arguments=%q", calls[0].Arguments)
 	}
 }
 

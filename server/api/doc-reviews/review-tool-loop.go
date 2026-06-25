@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -127,14 +129,14 @@ func runToolUseReview(
 		// Degenerate response (neither tool calls nor parseable findings):
 		// one repair attempt asking for strict JSON, then give up for this unit.
 		messages = append(messages, LLMMessage{Role: LLMRoleAssistant, Content: resp.Content})
-		findings, usage, err := finalizeFindings(ctx, client, modelName, recordID, messages, logger)
+		findings, usage, err := finalizeFindings(ctx, client, modelName, recordID, messages, toolByName, logger)
 		addUsage(aggregateUsage, usage)
 		return findings, aggregateUsage, err
 	}
 
 	// Budget exhausted (turns or tokens): force the model to produce findings
 	// from the evidence collected so far, without tools (DR10b force-produce).
-	findings, usage, err := finalizeFindings(ctx, client, modelName, recordID, messages, logger)
+	findings, usage, err := finalizeFindings(ctx, client, modelName, recordID, messages, toolByName, logger)
 	addUsage(aggregateUsage, usage)
 	return findings, aggregateUsage, err
 }
@@ -149,6 +151,7 @@ func finalizeFindings(
 	modelName string,
 	recordID int64,
 	messages []LLMMessage,
+	toolByName map[string]ReviewTool,
 	logger ApiTypes.JimoLogger,
 ) ([]ReviewFinding, *LLMUsage, error) {
 	if isCtxStopped(ctx) {
@@ -180,7 +183,7 @@ func finalizeFindings(
 	_, _, parseReason := parseFindingsContentDetailed(resp.Content)
 	if shouldRepairFindingsJSON(parseReason) {
 		repairFindings, repairUsage, repairErr := repairFinalFindingsJSON(
-			ctx, client, modelName, recordID, messages, resp.Content, parseReason, logger,
+			ctx, client, modelName, recordID, messages, toolByName, resp.Content, parseReason, logger,
 		)
 		addUsage(totalUsage, repairUsage)
 		if repairErr == nil {
@@ -212,6 +215,7 @@ func repairFinalFindingsJSON(
 	modelName string,
 	recordID int64,
 	messages []LLMMessage,
+	toolByName map[string]ReviewTool,
 	badContent string,
 	parseReason string,
 	logger ApiTypes.JimoLogger,
@@ -220,6 +224,34 @@ func repairFinalFindingsJSON(
 		return nil, nil, ErrPipelineStopped
 	}
 	repairMessages := append([]LLMMessage(nil), messages...)
+	if parseReason == "tool_calls_in_final_text" {
+		textCalls := parseTextToolCalls(badContent)
+		if len(textCalls) > 0 {
+			repairMessages = append(repairMessages, LLMMessage{Role: LLMRoleAssistant, Content: badContent})
+			for _, tc := range textCalls {
+				result := executeToolCall(ctx, tc, toolByName, recordID)
+				logger.Info("tool-use final text call executed",
+					"record_id", recordID,
+					"tool_call_id", tc.ID,
+					"tool_name", tc.Name,
+					"arguments", previewToolLogText(tc.Arguments),
+					"result", previewToolLogText(result),
+				)
+				repairMessages = append(repairMessages, LLMMessage{
+					Role:       LLMRoleTool,
+					ToolCallID: tc.ID,
+					Content:    result,
+				})
+			}
+			repairMessages = append(repairMessages, LLMMessage{
+				Role: LLMRoleUser,
+				Content: "Use the tool results above as the final additional evidence. " +
+					"Do not call tools again. Return strict JSON only with the exact shape " +
+					`{"findings":[...]}. Return {"findings":[]} if the evidence does not support any finding.`,
+			})
+			return callFinalFindingsRepair(ctx, client, modelName, recordID, repairMessages, logger)
+		}
+	}
 	repairMessages = append(repairMessages,
 		LLMMessage{Role: LLMRoleAssistant, Content: badContent},
 		LLMMessage{
@@ -227,6 +259,17 @@ func repairFinalFindingsJSON(
 			Content: finalFindingsRepairPrompt(parseReason),
 		},
 	)
+	return callFinalFindingsRepair(ctx, client, modelName, recordID, repairMessages, logger)
+}
+
+func callFinalFindingsRepair(
+	ctx context.Context,
+	client LLMChatClient,
+	modelName string,
+	recordID int64,
+	repairMessages []LLMMessage,
+	logger ApiTypes.JimoLogger,
+) ([]ReviewFinding, *LLMUsage, error) {
 	resp, err := client.Complete(ctx, LLMRequest{
 		Model:      modelName,
 		Messages:   repairMessages,
@@ -245,6 +288,41 @@ func repairFinalFindingsJSON(
 	_, _, repairReason := parseFindingsContentDetailed(resp.Content)
 	return nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
 		ErrToolUseFinalizeUnparseable, recordID, repairReason, previewToolLogText(resp.Content))
+}
+
+func parseTextToolCalls(content string) []LLMToolCall {
+	invokeRe := regexp.MustCompile(`(?s)<｜｜DSML｜｜invoke[[:space:]]+name="([^"]+)">(.*?)</｜｜DSML｜｜invoke>`)
+	paramRe := regexp.MustCompile(`(?s)<｜｜DSML｜｜parameter[[:space:]]+name="([^"]+)"[[:space:]]+string="([^"]+)">(.*?)</｜｜DSML｜｜parameter>`)
+	matches := invokeRe.FindAllStringSubmatch(content, -1)
+	calls := make([]LLMToolCall, 0, len(matches))
+	for i, m := range matches {
+		args := make(map[string]any)
+		for _, pm := range paramRe.FindAllStringSubmatch(m[2], -1) {
+			name := strings.TrimSpace(pm[1])
+			isString := strings.EqualFold(strings.TrimSpace(pm[2]), "true")
+			value := strings.TrimSpace(pm[3])
+			if isString {
+				args[name] = value
+				continue
+			}
+			if n, err := strconv.Atoi(value); err == nil {
+				args[name] = n
+				continue
+			}
+			if f, err := strconv.ParseFloat(value, 64); err == nil {
+				args[name] = f
+				continue
+			}
+			args[name] = value
+		}
+		b, _ := json.Marshal(args)
+		calls = append(calls, LLMToolCall{
+			ID:        fmt.Sprintf("final_text_tool_%d", i+1),
+			Name:      strings.TrimSpace(m[1]),
+			Arguments: string(b),
+		})
+	}
+	return calls
 }
 
 func finalFindingsRepairPrompt(parseReason string) string {
