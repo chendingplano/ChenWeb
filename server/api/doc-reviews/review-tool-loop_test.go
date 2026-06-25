@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -16,6 +17,54 @@ type fakeToolClient struct {
 	errs      []error
 	requests  []llmclients.Request
 	callCount int
+}
+
+type logEntry struct {
+	level   string
+	message string
+	args    []any
+}
+
+type captureLogger struct {
+	entries []logEntry
+}
+
+func (l *captureLogger) Debug(message string, args ...any) {
+	l.entries = append(l.entries, logEntry{level: "debug", message: message, args: args})
+}
+func (l *captureLogger) Line(message string, args ...any) {
+	l.entries = append(l.entries, logEntry{level: "line", message: message, args: args})
+}
+func (l *captureLogger) Info(message string, args ...any) {
+	l.entries = append(l.entries, logEntry{level: "info", message: message, args: args})
+}
+func (l *captureLogger) Warn(message string, args ...any) {
+	l.entries = append(l.entries, logEntry{level: "warn", message: message, args: args})
+}
+func (l *captureLogger) Error(message string, args ...any) {
+	l.entries = append(l.entries, logEntry{level: "error", message: message, args: args})
+}
+func (l *captureLogger) Trace(message string) {
+	l.entries = append(l.entries, logEntry{level: "trace", message: message})
+}
+func (l *captureLogger) Close() {}
+
+func findLogEntry(entries []logEntry, level, message string) *logEntry {
+	for i := range entries {
+		if entries[i].level == level && entries[i].message == message {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
+func logArgsToMap(args []any) map[string]any {
+	out := make(map[string]any, len(args)/2)
+	for i := 0; i+1 < len(args); i += 2 {
+		key := fmt.Sprint(args[i])
+		out[key] = args[i+1]
+	}
+	return out
 }
 
 func (f *fakeToolClient) Complete(_ context.Context, req llmclients.Request) (*llmclients.Response, error) {
@@ -154,6 +203,79 @@ func TestRunToolUseReviewAggregatesPromptCacheTokens(t *testing.T) {
 	}
 	if usage.PromptCacheHitTokens != 80 || usage.PromptCacheMissTokens != 20 {
 		t.Fatalf("cache hit/miss=%d/%d, want 80/20", usage.PromptCacheHitTokens, usage.PromptCacheMissTokens)
+	}
+}
+
+func TestRunToolUseReviewLogsToolCallsAndResults(t *testing.T) {
+	tc := &countingTool{name: "search_entities", calls: new(int)}
+	client := &fakeToolClient{
+		responses: []*llmclients.Response{
+			{
+				ToolCalls: []llmclients.ToolCall{
+					{ID: "tc1", Name: "search_entities", Arguments: `{"q":"sterilizer"}`},
+				},
+			},
+			{Content: `{"findings":[]}`},
+		},
+	}
+	logger := &captureLogger{}
+
+	_, _, err := runToolUseReview(
+		context.Background(), client, "test-model",
+		ReviewerConfig{MaxToolTurns: 5},
+		"You are a doc reviewer.", "<doc_input></doc_input><task>Check rationale</task>",
+		[]ReviewTool{tc.toReviewTool()}, 42, logger,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	callEntry := findLogEntry(logger.entries, "info", "tool-use call")
+	if callEntry == nil {
+		t.Fatal("missing tool-use call log entry")
+	}
+	callArgs := logArgsToMap(callEntry.args)
+	if callArgs["tool_name"] != "search_entities" || callArgs["arguments"] != `{"q":"sterilizer"}` {
+		t.Fatalf("call args=%v", callArgs)
+	}
+	resultEntry := findLogEntry(logger.entries, "info", "tool-use result")
+	if resultEntry == nil {
+		t.Fatal("missing tool-use result log entry")
+	}
+	resultArgs := logArgsToMap(resultEntry.args)
+	if resultArgs["tool_name"] != "search_entities" {
+		t.Fatalf("result args=%v", resultArgs)
+	}
+	if resultText, ok := resultArgs["result"].(string); !ok || !strings.Contains(resultText, `"ok":true`) {
+		t.Fatalf("result preview=%v", resultArgs["result"])
+	}
+}
+
+func TestFinalizeFindingsLogsPreviewWhenUnparseable(t *testing.T) {
+	client := &fakeToolClient{
+		responses: []*llmclients.Response{
+			{Content: `not json at all`},
+		},
+	}
+	logger := &captureLogger{}
+
+	findings, _, err := finalizeFindings(
+		context.Background(), client, "test-model", 42,
+		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
+		logger,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findings != nil {
+		t.Fatalf("findings=%v, want nil", findings)
+	}
+	warnEntry := findLogEntry(logger.entries, "warn", "tool-use finalize produced no parseable findings")
+	if warnEntry == nil {
+		t.Fatal("missing finalize warning log entry")
+	}
+	warnArgs := logArgsToMap(warnEntry.args)
+	if warnArgs["record_id"] != int64(42) || warnArgs["response_preview"] != "not json at all" {
+		t.Fatalf("warn args=%v", warnArgs)
 	}
 }
 

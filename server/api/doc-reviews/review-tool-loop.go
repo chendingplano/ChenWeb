@@ -86,7 +86,21 @@ func runToolUseReview(
 				ToolCalls: resp.ToolCalls,
 			})
 			for _, tc := range resp.ToolCalls {
+				logger.Info("tool-use call",
+					"record_id", recordID,
+					"turn", turn,
+					"tool_call_id", tc.ID,
+					"tool_name", tc.Name,
+					"arguments", previewToolLogText(tc.Arguments),
+				)
 				result := executeToolCall(ctx, tc, toolByName, recordID)
+				logger.Info("tool-use result",
+					"record_id", recordID,
+					"turn", turn,
+					"tool_call_id", tc.ID,
+					"tool_name", tc.Name,
+					"result", previewToolLogText(result),
+				)
 				messages = append(messages, LLMMessage{
 					Role:       LLMRoleTool,
 					ToolCallID: tc.ID,
@@ -155,7 +169,10 @@ func finalizeFindings(
 	if findings, ok := parseFindingsContent(resp.Content); ok {
 		return findings, resp.Usage, nil
 	}
-	logger.Warn("tool-use finalize produced no parseable findings", "record_id", recordID)
+	logger.Warn("tool-use finalize produced no parseable findings",
+		"record_id", recordID,
+		"response_preview", previewToolLogText(resp.Content),
+	)
 	return nil, resp.Usage, nil
 }
 
@@ -196,6 +213,18 @@ func executeToolCall(
 func toolErrorResult(msg string) string {
 	b, _ := json.Marshal(map[string]any{"error": msg})
 	return string(b)
+}
+
+func previewToolLogText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	const maxLen = 1000
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "...(truncated)"
 }
 
 // missingRequiredArgs returns the schema-required argument names absent from args.
