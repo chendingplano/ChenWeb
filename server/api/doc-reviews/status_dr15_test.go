@@ -4,6 +4,8 @@ import (
 	"context"
 	"math"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func containsJob(jobs []ActiveJob, requestID int64) bool {
@@ -87,6 +89,25 @@ func TestDR15_SeedActiveAndFinish(t *testing.T) {
 		if s.Progress != 1 {
 			t.Fatalf("aspect %q: want progress 1, got %v", s.Aspect, s.Progress)
 		}
+	}
+}
+
+func TestDR15_FinalizeAspectsSuccessBindsRunAndRecord(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(`(?s)UPDATE kb\.doc_review_status s.*WHERE f\.review_run_id = \$1 AND f\.input_record_id = \$2 AND f\.aspect = s\.aspect.*WHERE s\.review_run_id = \$1`).
+		WithArgs("run-1", int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
+	ctrl := &DocReviewController{DB: db}
+	ctrl.finalizeAspectsSuccess(context.Background(), "run-1", 42)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
 	}
 }
 

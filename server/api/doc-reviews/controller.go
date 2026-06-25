@@ -597,7 +597,7 @@ func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, review
 		    modify_time = NOW(),
 		    finding_count = COALESCE((
 		        SELECT COUNT(*) FROM kb.doc_review_findings f
-		        WHERE f.review_run_id = $1 AND f.aspect = s.aspect
+		        WHERE f.review_run_id = $1 AND f.input_record_id = $2 AND f.aspect = s.aspect
 		    ), 0)
 		WHERE s.review_run_id = $1 AND s.status NOT IN ('success', 'failed')`,
 		reviewRunID, recordID)
