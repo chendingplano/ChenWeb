@@ -22,6 +22,23 @@ type (
 	DocMetadataSQLStore    = docprocessing.DocMetadataSQLStore
 	SQLStore               = docprocessing.SQLStore
 	LineFileGeneratedEvent = docprocessing.LineFileGeneratedEvent
+
+	// Shared llm chat types for the tool-use loop (DR10b).
+	LLMChatClient = llmclients.Client
+	LLMRequest    = llmclients.Request
+	LLMResponse   = llmclients.Response
+	LLMMessage    = llmclients.Message
+	LLMToolDef    = llmclients.ToolDef
+	LLMToolCall   = llmclients.ToolCall
+	LLMUsage      = llmclients.Usage
+)
+
+// Shared llm role constants for building chat messages.
+const (
+	LLMRoleSystem    = llmclients.RoleSystem
+	LLMRoleUser      = llmclients.RoleUser
+	LLMRoleAssistant = llmclients.RoleAssistant
+	LLMRoleTool      = llmclients.RoleTool
 )
 
 // ── Function / value aliases ─────────────────────────────────────────────────
@@ -39,6 +56,10 @@ var (
 
 	ResolveInputFilePath        = docprocessing.ResolveInputFilePath
 	ParseInputLinesIncludingTOC = docprocessing.ParseInputLinesIncludingTOC
+
+	// BuildReviewerToolClient builds a tool-capable chat client for tool-use
+	// reviewers (DR10b). Distinct from BuildReviewerLLMClient (JSON-only).
+	BuildReviewerToolClient = docprocessing.BuildReviewerToolClient
 
 	// ErrPipelineStopped re-exports the doc-processing stop sentinel.
 	ErrPipelineStopped = docprocessing.ErrReviewStopped

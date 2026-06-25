@@ -97,3 +97,30 @@ func BuildReviewerLLMClient(modelRef string) (client LLMJSONExtractor, modelName
 	c.HTTPClient = &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
 	return c, cfg.ModelName, nil
 }
+
+// BuildReviewerToolClient resolves a model reference and constructs a
+// tool-capable chat client (shared llm.Client) for tool-use reviewers (DR10b).
+// Unlike BuildReviewerLLMClient — which returns the JSON-only ExtractJSON
+// interface with no function-calling support — this returns the full
+// Complete(ctx, Request{Tools,...}) path. DeepSeek and other OpenAI-compatible
+// models support function calling through this client.
+func BuildReviewerToolClient(modelRef string) (client llmclients.Client, modelName string, err error) {
+	_, _, cfg, err := loadModelConfigByRef(modelRef, "MODEL_DEF_FILE")
+	if err != nil {
+		return nil, "", err
+	}
+	timeoutSec := cfg.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = 100
+	}
+	c, err := llmclients.NewClient(llmclients.ProviderConfig{
+		ID:         llmclients.ProviderOpenAICompatible,
+		BaseURL:    cfg.BaseURL,
+		APIKey:     cfg.APIKey,
+		HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return c, cfg.ModelName, nil
+}

@@ -160,81 +160,81 @@ max_tool_turns = 0
 enabled = true
 checked = true
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-completeness.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.correctness]
 enabled = true
 checked = true
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-correctness.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.clarity]
 enabled = true
 checked = true
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-clarity.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.conciseness]
 enabled = true
 checked = true
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-conciseness.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.relevance]
 enabled = true
 checked = true
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-relevance.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.currency]
 enabled = true
 checked = true
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-currency.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.examples]
 enabled = true
 checked = true
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-examples.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.diagrams]
 enabled = true
 checked = true
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-diagrams.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.testable_claims]
 enabled = true
 checked = false
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-testable-claims.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 [reviewers.evidence_rationale]
 enabled = true
 checked = false
 group = "P3"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 prompt = "prompt-review-evidence-rationale.md"
-max_tool_turns = 0
+max_tool_turns = 5
 
 # P4 — Consistency
 [reviewers.internal_contradictions]

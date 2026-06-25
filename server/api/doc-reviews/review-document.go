@@ -102,6 +102,7 @@ type ReviewerConfig struct {
 	PromptText   string   // prompt body
 	PromptRef    string   // prompt file name (for logging)
 	MaxToolTurns int      // 0 = one-shot, >0 = tool-use conversation loop
+	MaxToolTokens int     // cumulative token budget for the tool-use loop (DR10c); 0 = code default
 	Tools        []string // tool names available (only when MaxToolTurns > 0)
 	OnProgress   ReviewerProgressFunc
 }
@@ -288,6 +289,12 @@ type ReviewProcessor struct {
 	EvidenceRationalePromptRef  string
 	EvidenceRationalePromptText string
 
+	// EvidenceRationaleTool fields — only non-zero/empty when the reviewer
+	// uses the tool-use path (max_tool_turns > 0 in doc-review.local.toml).
+	EvidenceRationaleMaxToolTurns  int
+	EvidenceRationaleMaxToolTokens int
+	EvidenceRationaleTools         []string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// ReviewRunID, when set, overrides the self-generated run id so findings are
@@ -372,6 +379,11 @@ type ReviewProcessor struct {
 	// EvidenceRationaleClient is a properly-configured LLM client for the
 	// evidence_rationale reviewer (P3, content quality, per-chunk).
 	EvidenceRationaleClient LLMJSONExtractor
+
+	// EvidenceRationaleToolClient is a tool-capable LLM client (shared llm.Client)
+	// for the evidence_rationale reviewer when it runs the tool-use path.
+	// nil when max_tool_turns = 0 or no tool client could be resolved.
+	EvidenceRationaleToolClient LLMChatClient
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -427,6 +439,47 @@ func resolveReviewerRuntime(logger ApiTypes.JimoLogger, aspect, group string) (
 	return client, modelName, promptText, promptRef, true
 }
 
+// resolveReviewerBudget resolves MaxToolTurns, MaxToolTokens, and Tools for a
+// reviewer from doc-review.local.toml, matching the resolution path of
+// resolveReviewerRuntime. Returns zero values when no config is present.
+func resolveReviewerBudget(aspect, group string) (maxToolTurns, maxToolTokens int, tools []string) {
+	cfg, err := GetDocReviewConfig()
+	if err != nil || cfg == nil {
+		return 0, 0, nil
+	}
+	resolved := cfg.ResolveReviewer(aspect, group)
+	if !resolved.Found {
+		return 0, 0, nil
+	}
+	return resolved.MaxToolTurns, resolved.MaxToolTokens, resolved.Tools
+}
+
+// resolveReviewerToolClient builds a tool-capable chat client when the
+// reviewer's resolved MaxToolTurns > 0. Returns nil when the reviewer is
+// configured for one-shot or no model ref resolves.
+func resolveReviewerToolClient(logger ApiTypes.JimoLogger, aspect, group string, maxToolTurns int) LLMChatClient {
+	if maxToolTurns <= 0 {
+		return nil
+	}
+	cfg, err := GetDocReviewConfig()
+	if err != nil || cfg == nil {
+		return nil
+	}
+	resolved := cfg.ResolveReviewer(aspect, group)
+	if !resolved.Found || resolved.ModelRef == "" {
+		return nil
+	}
+	client, _, err := BuildReviewerToolClient(resolved.ModelRef)
+	if err != nil {
+		logger.Warn("tool client resolution failed; reviewer stays one-shot",
+			"aspect", aspect, "model_ref", resolved.ModelRef, "error", err)
+		return nil
+	}
+	return client
+}
+
+
+
 // NewReviewProcessor creates a ReviewProcessor.
 // Phase I loads the P1 reviewer configs (grammar_spelling, tone_voice,
 // formatting_consistency, readability, localization) and the P2
@@ -461,6 +514,8 @@ func NewReviewProcessor(
 	diagramsClient, diagramsModel, diagramsPrompt, diagramsRef, _ := resolveReviewerRuntime(logger, "diagrams", "P3")
 	testableClaimsClient, testableClaimsModel, testableClaimsPrompt, testableClaimsRef, _ := resolveReviewerRuntime(logger, "testable_claims", "P3")
 	evidenceRationaleClient, evidenceRationaleModel, evidenceRationalePrompt, evidenceRationaleRef, _ := resolveReviewerRuntime(logger, "evidence_rationale", "P3")
+	evidenceRationaleMaxTurns, evidenceRationaleMaxTokens, evidenceRationaleToolList := resolveReviewerBudget("evidence_rationale", "P3")
+	evidenceRationaleToolClient := resolveReviewerToolClient(logger, "evidence_rationale", "P3", evidenceRationaleMaxTurns)
 
 	return &ReviewProcessor{
 		InputStore:    inputStore,
@@ -571,7 +626,14 @@ func NewReviewProcessor(
 		EvidenceRationaleModelName:  evidenceRationaleModel,
 		EvidenceRationalePromptRef:  evidenceRationaleRef,
 		EvidenceRationalePromptText: evidenceRationalePrompt,
+
+		EvidenceRationaleMaxToolTurns:  evidenceRationaleMaxTurns,
+		EvidenceRationaleMaxToolTokens: evidenceRationaleMaxTokens,
+		EvidenceRationaleTools:         evidenceRationaleToolList,
+
+		EvidenceRationaleToolClient: evidenceRationaleToolClient,
 	}
+
 }
 
 func (p *ReviewProcessor) Name() string { return "review_document" }
@@ -983,16 +1045,21 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 	if p.EvidenceRationaleClient != nil && p.EvidenceRationalePromptText != "" && p.EvidenceRationaleModelName != "" {
 		runners = append(runners, reviewRunner{
 			reviewer: &evidenceRationaleReviewer{
-				client:     p.EvidenceRationaleClient,
-				logger:     p.Logger,
-				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
-				maxTasks:   p.MaxConcurrent,
+				client:       p.EvidenceRationaleClient,
+				toolClient:   p.EvidenceRationaleToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
+				maxTasks:     p.MaxConcurrent,
 			},
 			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.EvidenceRationaleModelName,
-				PromptText: p.EvidenceRationalePromptText,
-				PromptRef:  p.EvidenceRationalePromptRef,
+				Enabled:       true,
+				ModelName:     p.EvidenceRationaleModelName,
+				PromptText:    p.EvidenceRationalePromptText,
+				PromptRef:     p.EvidenceRationalePromptRef,
+				MaxToolTurns:  p.EvidenceRationaleMaxToolTurns,
+				MaxToolTokens: p.EvidenceRationaleMaxToolTokens,
+				Tools:         p.EvidenceRationaleTools,
 			},
 		})
 	}

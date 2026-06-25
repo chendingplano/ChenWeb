@@ -13,20 +13,22 @@ import (
 // rationale for design decisions, claims, and recommendations — benchmarks,
 // experiments, references, risk assessments, or reasoned justifications that
 // allow a reviewer to evaluate *why* a decision was made, not only *what* was
-// decided. P3 (Content Quality), StrategyChunk, one-shot (no tool use).
+// decided. P3 (Content Quality), StrategyChunk, one-shot by default;
+// when max_tool_turns > 0 in doc-review.local.toml and a tool client resolves,
+// runs the Phase II tool-use conversation loop (DR10b) with the document-
+// intrinsic core tools.
 //
-// Scope: Phase I — one-shot per window. Adequacy is judged relative to the
-// document type and audience inferred from doc_context. This reviewer is
-// complementary to the P3 correctness reviewer (whether decisions are
-// technically right), the P3 completeness reviewer (whether required sections
-// are present), and the P3 testable_claims reviewer (whether claims are
-// measurable): evidence_rationale flags decisions and recommendations that are
-// present but lack supporting evidence or reasoned justification.
+// Scope: Phase II — tool-use path lets the reviewer chase down design
+// decisions by querying the document's entities, metrics, provisions, and
+// chunk summaries before producing findings, rather than relying solely on
+// what is visible within a 200-line window. One-shot path unchanged.
 type evidenceRationaleReviewer struct {
-	client     LLMJSONExtractor
-	logger     ApiTypes.JimoLogger
-	chunkStore SQLStore
-	maxTasks   int
+	client       LLMJSONExtractor
+	toolClient   LLMChatClient  // non-nil when tool-use path is active
+	toolRegistry map[string]ReviewTool
+	logger       ApiTypes.JimoLogger
+	chunkStore   SQLStore
+	maxTasks     int
 }
 
 func (r *evidenceRationaleReviewer) Name() string             { return "evidence_rationale" }
@@ -143,21 +145,51 @@ func (r *evidenceRationaleReviewer) processWindow(
 		"record_id", recordID,
 		"window", index,
 		"lines", fmt.Sprintf("%d-%d", w.startLine, w.endLine),
+		"max_tool_turns", cfg.MaxToolTurns,
 	)
 
 	startTime := time.Now()
+	var findings []ReviewFinding
 
-	payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_evidence_rationale", "MID-CWB-REVIEW-EVIDENCE-RATIONALE"))
-	if err != nil {
-		r.logger.Warn("evidence_rationale review window failed; skipping",
+	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
+		// Tool-use path (Phase II, DR10b). The reviewer can investigate
+		// by querying the document's entities, metrics, provisions, and
+		// chunk summaries before producing findings.
+		tools := selectTools(r.toolRegistry, cfg.Tools)
+		r.logger.Info("evidence_rationale tool-use path active",
 			"record_id", recordID,
 			"window", index,
-			"error", err,
+			"tools", len(tools),
 		)
-		return nil
+		// DR8a layout: canonical doc input before reviewer task.
+		userCtx := fmt.Sprintf("<DOCUMENT_INPUT>\n%s\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\n%s\n</REVIEW_TASK>", w.inputJSON, cfg.PromptText)
+		loopFindings, loopErr := runToolUseReview(
+			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
+			userCtx, tools, recordID, r.logger,
+		)
+		if loopErr != nil {
+			r.logger.Warn("evidence_rationale tool-use loop failed; no findings for window",
+				"record_id", recordID,
+				"window", index,
+				"error", loopErr,
+			)
+		}
+		findings = loopFindings
+	} else {
+		// One-shot path (unchanged Phase I behavior).
+		payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, w.inputJSON, "review_evidence_rationale", "MID-CWB-REVIEW-EVIDENCE-RATIONALE"))
+		if err != nil {
+			r.logger.Warn("evidence_rationale review window failed; skipping",
+				"record_id", recordID,
+				"window", index,
+				"error", err,
+			)
+			return nil
+		}
+		findings = normalizeFindingsJSON(payload)
 	}
 
-	findings := normalizeFindingsJSON(payload)
+	// Both paths funnel through the same finding-defaulting.
 	for i := range findings {
 		findings[i].Pass = "P3"
 		findings[i].Aspect = "evidence_rationale"

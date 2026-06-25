@@ -14,24 +14,27 @@ const docReviewConfigFileName = "doc-review.local.toml"
 
 // ReviewPackageConfig is a group-level ([packages.P1..P6]) default block.
 type ReviewPackageConfig struct {
-	Enabled      bool   `toml:"enabled"`
-	Name         string `toml:"name"`
-	Desc         string `toml:"desc"`
-	Strategy     string `toml:"strategy"`
-	Model        string `toml:"model"`
-	MaxToolTurns int    `toml:"max_tool_turns"`
+	Enabled       bool   `toml:"enabled"`
+	Name          string `toml:"name"`
+	Desc          string `toml:"desc"`
+	Strategy      string `toml:"strategy"`
+	Model         string `toml:"model"`
+	MaxToolTurns  int    `toml:"max_tool_turns"`
+	MaxToolTokens int    `toml:"max_tool_tokens"`
 }
 
 // ReviewAspectConfig is a per-aspect ([reviewers.<aspect>]) override block (DR3).
 // Pointer fields distinguish "unset" (inherit the group default) from a zero
 // value that was explicitly configured.
 type ReviewAspectConfig struct {
-	Enabled      *bool  `toml:"enabled"`
-	Checked      *bool  `toml:"checked"`
-	Group        string `toml:"group"`
-	Model        string `toml:"model"`
-	Prompt       string `toml:"prompt"`
-	MaxToolTurns *int   `toml:"max_tool_turns"`
+	Enabled       *bool    `toml:"enabled"`
+	Checked       *bool    `toml:"checked"`
+	Group         string   `toml:"group"`
+	Model         string   `toml:"model"`
+	Prompt        string   `toml:"prompt"`
+	MaxToolTurns  *int     `toml:"max_tool_turns"`
+	MaxToolTokens *int     `toml:"max_tool_tokens"`
+	Tools         []string `toml:"tools"`
 }
 
 // DocReviewConfig is the parsed doc-review.local.toml.
@@ -43,13 +46,15 @@ type DocReviewConfig struct {
 // ResolvedReviewerConfig is the effective configuration for one aspect after
 // merging its group (package) defaults with its per-aspect overrides.
 type ResolvedReviewerConfig struct {
-	Aspect       string
-	Group        string
-	Enabled      bool
-	ModelRef     string
-	PromptRef    string
-	MaxToolTurns int
-	Found        bool // true if the aspect had a [reviewers.<aspect>] block
+	Aspect        string
+	Group         string
+	Enabled       bool
+	ModelRef      string
+	PromptRef     string
+	MaxToolTurns  int
+	MaxToolTokens int
+	Tools         []string
+	Found         bool // true if the aspect had a [reviewers.<aspect>] block
 }
 
 var (
@@ -134,6 +139,7 @@ func (c *DocReviewConfig) ResolveReviewer(aspect, group string) ResolvedReviewer
 		out.Enabled = pkg.Enabled
 		out.ModelRef = pkg.Model
 		out.MaxToolTurns = pkg.MaxToolTurns
+		out.MaxToolTokens = pkg.MaxToolTokens
 		out.Found = true
 	}
 
@@ -151,6 +157,12 @@ func (c *DocReviewConfig) ResolveReviewer(aspect, group string) ResolvedReviewer
 		}
 		if rev.MaxToolTurns != nil {
 			out.MaxToolTurns = *rev.MaxToolTurns
+		}
+		if rev.MaxToolTokens != nil {
+			out.MaxToolTokens = *rev.MaxToolTokens
+		}
+		if len(rev.Tools) > 0 {
+			out.Tools = append([]string(nil), rev.Tools...)
 		}
 	}
 	return out
