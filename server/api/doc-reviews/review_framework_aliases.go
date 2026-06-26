@@ -60,6 +60,7 @@ var (
 	// BuildReviewerToolClient builds a tool-capable chat client for tool-use
 	// reviewers (DR10b). Distinct from BuildReviewerLLMClient (JSON-only).
 	BuildReviewerToolClient = docprocessing.BuildReviewerToolClient
+	docprocessingBuildReviewerLLMClient = docprocessing.BuildReviewerLLMClient
 
 	// ErrPipelineStopped re-exports the doc-processing stop sentinel.
 	ErrPipelineStopped = docprocessing.ErrReviewStopped

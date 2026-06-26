@@ -23,6 +23,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
+	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
 	"github.com/chendingplano/deepdoc/server/api/dspyhandler"
 	"github.com/chendingplano/deepdoc/server/api/flowhandler"
@@ -34,7 +35,6 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
-	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -507,6 +507,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	})
 	apiGroup.GET("/doc-review/aspects", docreviews.HandleListAspects)
 	apiGroup.GET("/doc-review/tiers", docreviews.HandleListTiers)
+	apiGroup.GET("/doc-review/languages", docreviews.HandleListLanguages)
 	apiGroup.GET("/doc-review/active", docreviews.ListActiveJobs)
 	apiGroup.POST("/doc-review/requests", docreviews.SubmitRequest)
 	apiGroup.GET("/doc-review/requests", docreviews.ListRequests)
@@ -524,7 +525,6 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/doc-review/reports/:id/correction-report", docreviews.GenerateCorrectionReport)
 	apiGroup.POST("/doc-review/requests/:id/stop", docreviews.StopRequest)
 	apiGroup.POST("/doc-review/requests/:id/restart", docreviews.RestartRequest)
-
 
 	return nil
 }

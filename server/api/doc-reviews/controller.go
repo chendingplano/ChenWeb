@@ -30,7 +30,8 @@ func isAlreadyHandledReviewStatus(status string) bool {
 
 // DocReviewController manages the review request lifecycle.
 type DocReviewController struct {
-	DB *sql.DB
+	DB         *sql.DB
+	Translator FindingTranslator
 }
 
 // NewDocReviewController creates a DocReviewController.
@@ -261,12 +262,16 @@ func (c *DocReviewController) GetRequest(ctx context.Context, requestID int64) (
 }
 
 // GetRequestWithFindings returns the request with its findings.
-func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, requestID int64) (*RequestWithFindings, error) {
+func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, requestID int64, language ...string) (*RequestWithFindings, error) {
 	req, err := c.loadRequest(ctx, requestID)
 	if err != nil {
 		return nil, err
 	}
-	result := &RequestWithFindings{Request: *req}
+	result := &RequestWithFindings{Request: *req, Packages: configuredPackageOrder()}
+	languageCode := ""
+	if len(language) > 0 {
+		languageCode = supportedLanguageCode(language[0])
+	}
 
 	// Load per-aspect statuses (always available once seeded at accept time).
 	statusRows, err := c.DB.QueryContext(ctx, `
@@ -296,7 +301,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 		rows, err := c.DB.QueryContext(ctx, `
 			SELECT id, pass, aspect, severity, finding_type, title, description,
 			       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-			       COALESCE(confidence,0), COALESCE(review_status,'pending')
+			       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
 			FROM kb.doc_review_findings
 			WHERE input_record_id = $1 AND review_run_id = $2
 			ORDER BY id`, req.InputRecordID, req.ReviewRunID)
@@ -306,10 +311,14 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 		defer rows.Close()
 		for rows.Next() {
 			var f FindingItem
+			var metadata string
 			if err := rows.Scan(&f.ID, &f.Pass, &f.Aspect, &f.Severity, &f.FindingType,
 				&f.Title, &f.Description, &f.Evidence, &f.Location, &f.Suggestion,
-				&f.Confidence, &f.ReviewStatus); err != nil {
+				&f.Confidence, &f.ReviewStatus, &metadata); err != nil {
 				return nil, fmt.Errorf("scan finding: %w", err)
+			}
+			if languageCode != "" {
+				f = c.localizeFinding(ctx, languageCode, f, []byte(metadata))
 			}
 			result.Findings = append(result.Findings, f)
 		}

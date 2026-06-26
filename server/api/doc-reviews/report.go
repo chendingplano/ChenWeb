@@ -20,7 +20,8 @@ import (
 
 // DocReviewReportGenerator builds structured reports from findings.
 type DocReviewReportGenerator struct {
-	DB *sql.DB
+	DB           *sql.DB
+	PackageOrder []ReviewPackageInfo
 }
 
 // NewDocReviewReportGenerator creates a report generator.
@@ -30,24 +31,24 @@ func NewDocReviewReportGenerator() *DocReviewReportGenerator {
 
 // ReportSkeleton is the full report structure stored in report_json.
 type ReportSkeleton struct {
-	Meta               ReportMeta                `json:"meta"`
-	ExecutiveSummary   ExecutiveSummary          `json:"executive_summary"`
-	FindingsByPass     map[string]PassGroup      `json:"findings_by_pass"`
-	ComplianceSummary  ComplianceSummary         `json:"compliance_summary,omitempty"`
-	Findings           []ReportFinding           `json:"findings"`
-	Recommendations    []Recommendation          `json:"recommendations"`
-	PassOrder          []string                  `json:"pass_order,omitempty"`
+	Meta              ReportMeta           `json:"meta"`
+	ExecutiveSummary  ExecutiveSummary     `json:"executive_summary"`
+	FindingsByPass    map[string]PassGroup `json:"findings_by_pass"`
+	ComplianceSummary ComplianceSummary    `json:"compliance_summary,omitempty"`
+	Findings          []ReportFinding      `json:"findings"`
+	Recommendations   []Recommendation     `json:"recommendations"`
+	PassOrder         []string             `json:"pass_order,omitempty"`
 }
 
 // ReportMeta contains metadata about the report.
 type ReportMeta struct {
-	ReportID        string `json:"report_id"`
-	DocumentTitle   string `json:"document_title"`
+	ReportID         string `json:"report_id"`
+	DocumentTitle    string `json:"document_title"`
 	DocumentRecordID int64  `json:"document_record_id"`
-	GeneratedAt     string `json:"generated_at"`
-	ReviewRunID     string `json:"review_run_id"`
-	NumReviewersRan int    `json:"num_reviewers_ran"`
-	TotalFindings   int    `json:"total_findings"`
+	GeneratedAt      string `json:"generated_at"`
+	ReviewRunID      string `json:"review_run_id"`
+	NumReviewersRan  int    `json:"num_reviewers_ran"`
+	TotalFindings    int    `json:"total_findings"`
 }
 
 // ExecutiveSummary provides a high-level overview of the review results.
@@ -87,12 +88,12 @@ type ReportFinding struct {
 
 // ComplianceSummary captures compliance-related findings.
 type ComplianceSummary struct {
-	ReferenceStandardsChecked     []string `json:"reference_standards_checked"`
-	ProvisionsSatisfied           int      `json:"provisions_satisfied"`
-	ProvisionsPartiallySatisfied  int      `json:"provisions_partially_satisfied"`
-	ProvisionsNotAddressed        int      `json:"provisions_not_addressed"`
-	ProvisionsNotApplicable       int      `json:"provisions_not_applicable"`
-	MissingRequirements           []string `json:"missing_requirements"`
+	ReferenceStandardsChecked    []string `json:"reference_standards_checked"`
+	ProvisionsSatisfied          int      `json:"provisions_satisfied"`
+	ProvisionsPartiallySatisfied int      `json:"provisions_partially_satisfied"`
+	ProvisionsNotAddressed       int      `json:"provisions_not_addressed"`
+	ProvisionsNotApplicable      int      `json:"provisions_not_applicable"`
+	MissingRequirements          []string `json:"missing_requirements"`
 }
 
 // Recommendation suggests an action based on finding severity.
@@ -107,11 +108,11 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 	// Build meta.
 	report := &ReportSkeleton{
 		Meta: ReportMeta{
-			ReportID:          fmt.Sprintf("rpt_%d_%s", req.InputRecordID, strings.ReplaceAll(req.CreateTime, " ", "T")),
-			DocumentRecordID:  req.InputRecordID,
-			GeneratedAt:       timeNow(),
-			ReviewRunID:       req.ReviewRunID,
-			TotalFindings:     len(findings),
+			ReportID:         fmt.Sprintf("rpt_%d_%s", req.InputRecordID, strings.ReplaceAll(req.CreateTime, " ", "T")),
+			DocumentRecordID: req.InputRecordID,
+			GeneratedAt:      timeNow(),
+			ReviewRunID:      req.ReviewRunID,
+			TotalFindings:    len(findings),
 		},
 		FindingsByPass: make(map[string]PassGroup),
 	}
@@ -124,10 +125,13 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 	report.Meta.DocumentTitle = docTitle
 
 	// Group findings by pass.
-	passLabels := map[string]string{
-		"P1": "Language & Style", "P2": "Structure & Organization",
-		"P3": "Content Quality", "P4": "Consistency",
-		"P5": "Technical & Compliance", "P6": "Meta & Process",
+	packageOrder := g.PackageOrder
+	if len(packageOrder) == 0 {
+		packageOrder = configuredPackageOrder()
+	}
+	passLabels := make(map[string]string, len(packageOrder))
+	for _, pkg := range packageOrder {
+		passLabels[pkg.Key] = pkg.Label
 	}
 	passFindings := make(map[string][]FindingItem)
 	for _, f := range findings {
@@ -140,9 +144,22 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 	// Load document lines once for context extraction (non-fatal if unavailable).
 	lineIndex := g.loadDocLines(ctx, req.InputRecordID)
 
-	// Fixed pass order ensures report.Findings (and recommendations derived from
-	// it) are always ordered P1→P6, not by nondeterministic map iteration.
-	passOrder := []string{"P1", "P2", "P3", "P4", "P5", "P6"}
+	passOrder := make([]string, 0, len(packageOrder)+len(passFindings))
+	seenPass := map[string]bool{}
+	for _, pkg := range packageOrder {
+		if !seenPass[pkg.Key] {
+			seenPass[pkg.Key] = true
+			passOrder = append(passOrder, pkg.Key)
+		}
+	}
+	var unexpected []string
+	for pass := range passFindings {
+		if !seenPass[pass] {
+			unexpected = append(unexpected, pass)
+		}
+	}
+	sort.Strings(unexpected)
+	passOrder = append(passOrder, unexpected...)
 
 	var totalHigh, totalMedium, totalLow int
 	for _, pass := range passOrder {
@@ -171,7 +188,7 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 			}
 		}
 		report.FindingsByPass[pass] = PassGroup{
-			Label:    passLabels[pass],
+			Label:    firstNonEmpty(passLabels[pass], pass),
 			Findings: rfList,
 		}
 	}
@@ -328,6 +345,15 @@ func countBySeverity(findings []ReportFinding, sev string) int {
 }
 
 func timeNow() string { return time.Now().UTC().Format(time.RFC3339) }
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // loadDocLines loads the document line file for the given input record and
 // returns a map of line number → line content text. Returns nil (non-fatal)

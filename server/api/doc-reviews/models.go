@@ -48,9 +48,10 @@ type RequestStatus struct {
 
 // RequestWithFindings extends RequestStatus with findings and per-aspect statuses.
 type RequestWithFindings struct {
-	Request        RequestStatus  `json:"request"`
-	Findings       []FindingItem  `json:"findings,omitempty"`
-	AspectStatuses []AspectStatus `json:"aspect_statuses,omitempty"`
+	Request        RequestStatus       `json:"request"`
+	Findings       []FindingItem       `json:"findings,omitempty"`
+	AspectStatuses []AspectStatus      `json:"aspect_statuses,omitempty"`
+	Packages       []ReviewPackageInfo `json:"packages,omitempty"`
 }
 
 // FindingItem is a finding row from kb.doc_review_findings.
@@ -67,6 +68,21 @@ type FindingItem struct {
 	Suggestion   string  `json:"suggestion,omitempty"`
 	Confidence   float64 `json:"confidence"`
 	ReviewStatus string  `json:"review_status"`
+}
+
+// FindingTranslation is the localized subset stored under
+// kb.doc_review_findings.metadata[language_code].
+type FindingTranslation struct {
+	FindingType string `json:"finding_type"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Suggestion  string `json:"suggestion"`
+}
+
+// ReviewPackageInfo describes a configured package group in display order.
+type ReviewPackageInfo struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
 }
 
 // ReportRow represents a row from kb.doc_review_reports (partial, for listing).

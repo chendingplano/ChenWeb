@@ -72,6 +72,7 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			location TEXT DEFAULT '',
 			suggestion TEXT DEFAULT '',
 			confidence DOUBLE PRECISION DEFAULT 0,
+			metadata JSONB DEFAULT '{}',
 			review_status TEXT DEFAULT 'pending',
 			reviewed_by TEXT DEFAULT ''
 		)`,

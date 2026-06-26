@@ -24,15 +24,21 @@ func makeFinding(id int64, pass, aspect, severity, findingType, title string) Fi
 	}
 }
 
-func TestReportBuild_EmptyFindings(t *testing.T) {
+func newTestReportGenerator() *DocReviewReportGenerator {
 	gen := NewDocReviewReportGenerator()
-	gen.DB = nil // ensure we exercise the nil-DB path
+	gen.DB = nil
+	gen.PackageOrder = defaultReviewPackageOrder()
+	return gen
+}
+
+func TestReportBuild_EmptyFindings(t *testing.T) {
+	gen := newTestReportGenerator()
 
 	req := &RequestStatus{
 		ID: 1, InputRecordID: 416, Tier: "must_review",
-		Aspects:   []string{"completeness", "grammar_spelling"},
-		Status:    "completed",
-		CreateTime: "2026-06-21T12:00:00Z",
+		Aspects:     []string{"completeness", "grammar_spelling"},
+		Status:      "completed",
+		CreateTime:  "2026-06-21T12:00:00Z",
 		ReviewRunID: "416_review_20260621T120000",
 	}
 
@@ -63,14 +69,13 @@ func TestReportBuild_EmptyFindings(t *testing.T) {
 }
 
 func TestReportBuild_MixedSeverities(t *testing.T) {
-	gen := NewDocReviewReportGenerator()
-	gen.DB = nil
+	gen := newTestReportGenerator()
 
 	req := &RequestStatus{
 		ID: 2, InputRecordID: 512, Tier: "must_review",
-		Aspects:   []string{"completeness", "grammar_spelling", "technical_accuracy"},
-		Status:    "completed",
-		CreateTime: "2026-06-21T14:00:00Z",
+		Aspects:     []string{"completeness", "grammar_spelling", "technical_accuracy"},
+		Status:      "completed",
+		CreateTime:  "2026-06-21T14:00:00Z",
 		ReviewRunID: "512_review_20260621T140000",
 	}
 
@@ -148,15 +153,78 @@ func TestReportBuild_MixedSeverities(t *testing.T) {
 	}
 }
 
-func TestReportBuild_ComplianceSummary(t *testing.T) {
+func TestPackageOrderFromTOMLPreservesDeclarationOrder(t *testing.T) {
+	raw := []byte(`
+[packages.P5]
+name = "Technical & Compliance Standards"
+
+[packages.P4]
+name = "Consistency"
+
+[packages.P1]
+name = "Language & Style"
+`)
+	packages := map[string]ReviewPackageConfig{
+		"P1": {Name: "Language & Style"},
+		"P4": {Name: "Consistency"},
+		"P5": {Name: "Technical & Compliance Standards"},
+	}
+
+	got := packageOrderFromTOML(raw, packages)
+	want := []ReviewPackageInfo{
+		{Key: "P5", Label: "Technical & Compliance Standards"},
+		{Key: "P4", Label: "Consistency"},
+		{Key: "P1", Label: "Language & Style"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("order len=%d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order[%d]=%#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestReportBuild_UsesConfiguredPackageOrderAndLabels(t *testing.T) {
 	gen := NewDocReviewReportGenerator()
 	gen.DB = nil
+	gen.PackageOrder = []ReviewPackageInfo{
+		{Key: "P5", Label: "Technical & Compliance Standards"},
+		{Key: "P1", Label: "Language & Style"},
+	}
+	req := &RequestStatus{
+		ID: 5, InputRecordID: 777, Tier: "must_review",
+		Status: "completed", CreateTime: "2026-06-21T20:00:00Z", ReviewRunID: "777_review",
+	}
+	findings := []FindingItem{
+		makeFinding(1, "P1", "grammar_spelling", "low", "typo", "Typo"),
+		makeFinding(2, "P5", "technical_accuracy", "high", "technical_error", "Wrong range"),
+	}
+
+	report, err := gen.Build(context.Background(), req, findings)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+	if got := strings.Join(report.PassOrder, ","); got != "P5,P1" {
+		t.Fatalf("PassOrder=%q, want P5,P1", got)
+	}
+	if report.FindingsByPass["P5"].Label != "Technical & Compliance Standards" {
+		t.Fatalf("P5 label=%q", report.FindingsByPass["P5"].Label)
+	}
+	if report.Findings[0].Pass != "P5" {
+		t.Fatalf("first flat finding pass=%q, want P5", report.Findings[0].Pass)
+	}
+}
+
+func TestReportBuild_ComplianceSummary(t *testing.T) {
+	gen := newTestReportGenerator()
 
 	req := &RequestStatus{
 		ID: 3, InputRecordID: 720, Tier: "must_review",
-		Aspects:   []string{"standards_compliance"},
-		Status:    "completed",
-		CreateTime: "2026-06-21T16:00:00Z",
+		Aspects:     []string{"standards_compliance"},
+		Status:      "completed",
+		CreateTime:  "2026-06-21T16:00:00Z",
 		ReviewRunID: "720_review_20260621T160000",
 		ReferenceDocs: []ReferenceDoc{
 			{RecordID: 100, DocNo: "ISO-9001:2023", Title: "Quality Management Systems"},
@@ -199,14 +267,13 @@ func TestReportBuild_ComplianceSummary(t *testing.T) {
 }
 
 func TestReportBuild_Recommendations(t *testing.T) {
-	gen := NewDocReviewReportGenerator()
-	gen.DB = nil
+	gen := newTestReportGenerator()
 
 	req := &RequestStatus{
 		ID: 4, InputRecordID: 999, Tier: "must_review",
-		Aspects:   []string{"completeness", "technical_accuracy", "security"},
-		Status:    "completed",
-		CreateTime: "2026-06-21T18:00:00Z",
+		Aspects:     []string{"completeness", "technical_accuracy", "security"},
+		Status:      "completed",
+		CreateTime:  "2026-06-21T18:00:00Z",
 		ReviewRunID: "999_review_20260621T180000",
 	}
 
@@ -257,14 +324,13 @@ func TestReportBuild_Recommendations(t *testing.T) {
 }
 
 func TestReportBuild_MetaFields(t *testing.T) {
-	gen := NewDocReviewReportGenerator()
-	gen.DB = nil
+	gen := newTestReportGenerator()
 
 	req := &RequestStatus{
 		ID: 5, InputRecordID: 123, Tier: "must_review",
-		Aspects:   []string{"grammar_spelling"},
-		Status:    "completed",
-		CreateTime: "2026-06-21T20:00:00Z",
+		Aspects:     []string{"grammar_spelling"},
+		Status:      "completed",
+		CreateTime:  "2026-06-21T20:00:00Z",
 		ReviewRunID: "123_review_20260621T200000",
 	}
 

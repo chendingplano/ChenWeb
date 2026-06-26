@@ -74,6 +74,11 @@ export type AspectStatus = {
 	end_time?: string;
 };
 
+export type ReviewPackageInfo = {
+	key: string;
+	label: string;
+};
+
 export type FindingItem = {
 	id: number;
 	pass: string;
@@ -103,6 +108,13 @@ export async function listTiers(): Promise<TierInfo[]> {
 	return data.tiers;
 }
 
+export async function listLanguages(): Promise<string[]> {
+	const res = await fetch(`${BASE}/languages`, { credentials: 'same-origin' });
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to load languages');
+	return data.languages || ['en'];
+}
+
 export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
 	const res = await fetch(`${BASE}/requests`, {
 		method: 'POST',
@@ -123,12 +135,16 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
 }
 
 export async function getRequest(
-	id: number
-): Promise<{ request: RequestStatus; findings: FindingItem[]; aspect_statuses: AspectStatus[] }> {
-	const res = await fetch(`${BASE}/requests/${id}`, { credentials: 'same-origin' });
+	id: number,
+	language = 'en'
+): Promise<{ request: RequestStatus; findings: FindingItem[]; aspect_statuses: AspectStatus[]; packages: ReviewPackageInfo[] }> {
+	const params = new URLSearchParams();
+	if (language && language !== 'en') params.set('language', language);
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	const res = await fetch(`${BASE}/requests/${id}${suffix}`, { credentials: 'same-origin' });
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to load request');
-	return { request: data.request, findings: data.findings || [], aspect_statuses: data.aspect_statuses || [] };
+	return { request: data.request, findings: data.findings || [], aspect_statuses: data.aspect_statuses || [], packages: data.packages || [] };
 }
 
 export async function getReport(id: number): Promise<any> {

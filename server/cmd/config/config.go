@@ -124,6 +124,10 @@ type LLMConfig struct {
 	ReconciliationRunHour int    `mapstructure:"reconciliation_run_hour"`
 }
 
+type LanguagesConfig struct {
+	Languages []string `mapstructure:"languages"`
+}
+
 type AppConfigDef struct {
 	AppTableNames struct {
 		TableName_ProcessStatus   string `mapstructure:"table_name_process_status"`
@@ -147,6 +151,7 @@ type AppConfigDef struct {
 	EntitySearchWeights             EntitySearchWeightsConfig             `mapstructure:"entities_search_weights"`
 	RelationSearchWeights           RelationSearchWeightsConfig           `mapstructure:"relations_search_weights"`
 	LLM                             LLMConfig                             `mapstructure:"llm"`
+	Languages                       LanguagesConfig                       `mapstructure:"languages"`
 	// DocReviews maps a review tier key (e.g. "must-review") to the list of
 	// aspect item names included in that tier. Configured via [doc-reviews]
 	// in config.toml / config.local.toml. When empty, the Document Review

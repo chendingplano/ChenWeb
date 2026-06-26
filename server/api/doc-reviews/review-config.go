@@ -39,8 +39,9 @@ type ReviewAspectConfig struct {
 
 // DocReviewConfig is the parsed doc-review.local.toml.
 type DocReviewConfig struct {
-	Packages  map[string]ReviewPackageConfig `toml:"packages"`
-	Reviewers map[string]ReviewAspectConfig  `toml:"reviewers"`
+	Packages     map[string]ReviewPackageConfig `toml:"packages"`
+	Reviewers    map[string]ReviewAspectConfig  `toml:"reviewers"`
+	PackageOrder []ReviewPackageInfo            `toml:"-"`
 }
 
 // ResolvedReviewerConfig is the effective configuration for one aspect after
@@ -87,7 +88,54 @@ func loadDocReviewConfig() (*DocReviewConfig, error) {
 	if err := parseTOMLMap(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("(MID_26061811) parse %s failed: %w", path, err)
 	}
+	cfg.PackageOrder = packageOrderFromTOML(raw, cfg.Packages)
 	return &cfg, nil
+}
+
+func packageOrderFromTOML(raw []byte, packages map[string]ReviewPackageConfig) []ReviewPackageInfo {
+	seen := map[string]bool{}
+	var out []ReviewPackageInfo
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "[packages.") || !strings.HasSuffix(trimmed, "]") {
+			continue
+		}
+		key := strings.TrimSuffix(strings.TrimPrefix(trimmed, "[packages."), "]")
+		key = strings.Trim(key, `"' `)
+		if key == "" || seen[key] {
+			continue
+		}
+		pkg, ok := packages[key]
+		if !ok {
+			continue
+		}
+		seen[key] = true
+		label := strings.TrimSpace(pkg.Name)
+		if label == "" {
+			label = key
+		}
+		out = append(out, ReviewPackageInfo{Key: key, Label: label})
+	}
+	return out
+}
+
+func configuredPackageOrder() []ReviewPackageInfo {
+	cfg, err := GetDocReviewConfig()
+	if err != nil || cfg == nil || len(cfg.PackageOrder) == 0 {
+		return defaultReviewPackageOrder()
+	}
+	return append([]ReviewPackageInfo(nil), cfg.PackageOrder...)
+}
+
+func defaultReviewPackageOrder() []ReviewPackageInfo {
+	return []ReviewPackageInfo{
+		{Key: "P1", Label: "Language & Style"},
+		{Key: "P2", Label: "Structure & Organization"},
+		{Key: "P3", Label: "Content Quality"},
+		{Key: "P4", Label: "Consistency"},
+		{Key: "P5", Label: "Technical & Compliance"},
+		{Key: "P6", Label: "Meta & Process"},
+	}
 }
 
 // resolveDocReviewConfigPath honors DOC_REVIEW_CONFIG_FILE, otherwise walks up

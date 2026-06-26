@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
@@ -27,6 +28,24 @@ func HandleListTiers(c echo.Context) error {
 		"status": true,
 		"tiers":  tiers,
 	})
+}
+
+// HandleListLanguages returns the configured report display languages.
+func HandleListLanguages(c echo.Context) error {
+	var out []string
+	seen := map[string]bool{}
+	for _, lang := range appconfig.AppConfig.Languages.Languages {
+		lang = strings.ToLower(strings.TrimSpace(lang))
+		if lang == "" || seen[lang] {
+			continue
+		}
+		seen[lang] = true
+		out = append(out, lang)
+	}
+	if len(out) == 0 {
+		out = []string{"en"}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "languages": out})
 }
 
 // SubmitRequest accepts a review request and publishes a JetStream event so
@@ -145,7 +164,7 @@ func GetRequest(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
 	ctrl := NewDocReviewController()
-	result, err := ctrl.GetRequestWithFindings(c.Request().Context(), id)
+	result, err := ctrl.GetRequestWithFindings(c.Request().Context(), id, c.QueryParam("language"))
 	if err != nil {
 		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "not found") {
@@ -158,6 +177,7 @@ func GetRequest(c echo.Context) error {
 		"request":         result.Request,
 		"findings":        result.Findings,
 		"aspect_statuses": result.AspectStatuses,
+		"packages":        result.Packages,
 	})
 }
 
