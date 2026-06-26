@@ -309,6 +309,8 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 			return nil, fmt.Errorf("load findings: %w", err)
 		}
 		defer rows.Close()
+		var localized []FindingItem
+		metadataByFindingID := map[int64][]byte{}
 		for rows.Next() {
 			var f FindingItem
 			var metadata string
@@ -317,14 +319,19 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 				&f.Confidence, &f.ReviewStatus, &metadata); err != nil {
 				return nil, fmt.Errorf("scan finding: %w", err)
 			}
-			if languageCode != "" {
-				f = c.localizeFinding(ctx, languageCode, f, []byte(metadata))
-			}
-			result.Findings = append(result.Findings, f)
+			metadataByFindingID[f.ID] = []byte(metadata)
+			localized = append(localized, f)
 		}
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate findings: %w", err)
 		}
+		if languageCode != "" {
+			localized, err = c.localizeFindings(ctx, languageCode, localized, metadataByFindingID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		result.Findings = localized
 	}
 	return result, nil
 }

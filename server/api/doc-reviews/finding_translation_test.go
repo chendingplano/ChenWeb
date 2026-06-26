@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"testing"
 
@@ -12,11 +13,12 @@ import (
 type fakeFindingTranslator struct {
 	calls int
 	out   FindingTranslation
+	err   error
 }
 
 func (f *fakeFindingTranslator) TranslateFinding(ctx context.Context, language string, finding FindingItem) (FindingTranslation, error) {
 	f.calls++
-	return f.out, nil
+	return f.out, f.err
 }
 
 func TestTranslationFromMetadata(t *testing.T) {
@@ -52,7 +54,10 @@ func TestLocalizeFindingTranslatesAndSavesMissingMetadata(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	f := FindingItem{ID: 42, FindingType: "technical_accuracy", Title: "Bad range", Description: "English", Suggestion: "Fix it"}
-	got := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{}`))
+	got, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("localizeFinding: %v", err)
+	}
 
 	if translator.calls != 1 {
 		t.Fatalf("translator calls=%d, want 1", translator.calls)
@@ -73,12 +78,30 @@ func TestLocalizeFindingUsesCachedMetadata(t *testing.T) {
 	})
 
 	f := FindingItem{ID: 7, Title: "Original", Description: "Original desc"}
-	got := ctrl.localizeFinding(context.Background(), "zh", f, body)
+	got, err := ctrl.localizeFinding(context.Background(), "zh", f, body)
+	if err != nil {
+		t.Fatalf("localizeFinding: %v", err)
+	}
 
 	if translator.calls != 0 {
 		t.Fatalf("translator calls=%d, want 0", translator.calls)
 	}
 	if got.Title != "缓存标题" || got.Description != "缓存描述" {
 		t.Fatalf("localized finding=%#v", got)
+	}
+}
+
+func TestLocalizeFindingsErrorsWhenTranslationModelMissing(t *testing.T) {
+	t.Setenv("TRANSLATION_MODEL_NAME", "")
+
+	ctrl := &DocReviewController{}
+	findings := []FindingItem{{ID: 42, Title: "Bad range", Description: "English"}}
+
+	_, err := ctrl.localizeFindings(context.Background(), "zh", findings, map[int64][]byte{42: []byte(`{}`)})
+	if err == nil {
+		t.Fatal("localizeFindings error=nil, want error")
+	}
+	if !errors.Is(err, errFindingTranslationUnavailable) {
+		t.Fatalf("errors.Is(err, errFindingTranslationUnavailable)=false; err=%v", err)
 	}
 }

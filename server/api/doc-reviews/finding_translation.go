@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -19,14 +20,16 @@ type llmFindingTranslator struct {
 	modelName string
 }
 
+var errFindingTranslationUnavailable = errors.New("finding translation unavailable")
+
 func newLLMFindingTranslator() (FindingTranslator, error) {
 	modelRef := strings.TrimSpace(os.Getenv("TRANSLATION_MODEL_NAME"))
 	if modelRef == "" {
-		return nil, fmt.Errorf("TRANSLATION_MODEL_NAME is not configured")
+		return nil, fmt.Errorf("%w: TRANSLATION_MODEL_NAME is not configured", errFindingTranslationUnavailable)
 	}
 	client, modelName, err := docprocessingBuildReviewerLLMClient(modelRef)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errFindingTranslationUnavailable, err)
 	}
 	return &llmFindingTranslator{client: client, modelName: modelName}, nil
 }
@@ -123,30 +126,52 @@ func saveFindingTranslation(ctx context.Context, db *sql.DB, findingID int64, la
 	return nil
 }
 
-func (c *DocReviewController) localizeFinding(ctx context.Context, language string, f FindingItem, metadata []byte) FindingItem {
+func (c *DocReviewController) localizeFinding(ctx context.Context, language string, f FindingItem, metadata []byte) (FindingItem, error) {
 	language = supportedLanguageCode(language)
 	if language == "" {
-		return f
+		return f, nil
 	}
 	if tr, ok := translationFromMetadata(metadata, language); ok {
-		return applyFindingTranslation(f, tr)
+		return applyFindingTranslation(f, tr), nil
 	}
 	translator := c.Translator
 	if translator == nil {
 		var err error
 		translator, err = newLLMFindingTranslator()
 		if err != nil {
-			logger.Warn("finding translation unavailable; returning source text", "finding_id", f.ID, "language", language, "error", err)
-			return f
+			return f, err
 		}
 	}
 	tr, err := translator.TranslateFinding(ctx, language, f)
 	if err != nil {
-		logger.Warn("finding translation failed; returning source text", "finding_id", f.ID, "language", language, "error", err)
-		return f
+		return f, fmt.Errorf("translate finding %d to %s: %w", f.ID, language, err)
 	}
 	if err := saveFindingTranslation(ctx, c.DB, f.ID, language, tr); err != nil {
 		logger.Warn("finding translation save failed", "finding_id", f.ID, "language", language, "error", err)
 	}
-	return applyFindingTranslation(f, tr)
+	return applyFindingTranslation(f, tr), nil
+}
+
+func (c *DocReviewController) localizeFindings(ctx context.Context, language string, findings []FindingItem, metadataByFindingID map[int64][]byte) ([]FindingItem, error) {
+	language = supportedLanguageCode(language)
+	if language == "" {
+		return findings, nil
+	}
+	if c.Translator == nil {
+		translator, err := newLLMFindingTranslator()
+		if err != nil {
+			return nil, err
+		}
+		c.Translator = translator
+	}
+
+	out := make([]FindingItem, 0, len(findings))
+	for _, f := range findings {
+		localized, err := c.localizeFinding(ctx, language, f, metadataByFindingID[f.ID])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, localized)
+	}
+	return out, nil
 }
