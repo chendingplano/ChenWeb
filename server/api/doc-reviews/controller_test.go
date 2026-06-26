@@ -585,7 +585,7 @@ func TestController_GetRequestWithFindings(t *testing.T) {
 	defer cleanupFindings(t, db, findingID)
 
 	// Get request with findings.
-	rwf, err := c.GetRequestWithFindings(ctx, result.RequestID)
+	rwf, err := c.GetRequestWithFindings(ctx, result.RequestID, RequestFindingsOptions{})
 	if err != nil {
 		t.Fatalf("GetRequestWithFindings: %v", err)
 	}

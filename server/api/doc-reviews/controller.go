@@ -237,7 +237,7 @@ func (c *DocReviewController) RunReviewAndReport(ctx context.Context, requestID 
 		logger.Warn("background review run failed", "request_id", requestID, "error", err)
 		return
 	}
-	req, err := c.GetRequestWithFindings(ctx, requestID)
+	req, err := c.GetRequestWithFindings(ctx, requestID, RequestFindingsOptions{})
 	if err != nil || req == nil || req.Request.Status != "completed" {
 		return
 	}
@@ -262,16 +262,15 @@ func (c *DocReviewController) GetRequest(ctx context.Context, requestID int64) (
 }
 
 // GetRequestWithFindings returns the request with its findings.
-func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, requestID int64, language ...string) (*RequestWithFindings, error) {
+func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, requestID int64, opts RequestFindingsOptions) (*RequestWithFindings, error) {
 	req, err := c.loadRequest(ctx, requestID)
 	if err != nil {
 		return nil, err
 	}
 	result := &RequestWithFindings{Request: *req, Packages: configuredPackageOrder()}
-	languageCode := ""
-	if len(language) > 0 {
-		languageCode = supportedLanguageCode(language[0])
-	}
+	languageCode := supportedLanguageCode(opts.Language)
+	passFilter := strings.TrimSpace(opts.Pass)
+	aspectFilter := strings.TrimSpace(opts.Aspect)
 
 	// Load per-aspect statuses (always available once seeded at accept time).
 	statusRows, err := c.DB.QueryContext(ctx, `
@@ -304,7 +303,9 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 			       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
 			FROM kb.doc_review_findings
 			WHERE input_record_id = $1 AND review_run_id = $2
-			ORDER BY id`, req.InputRecordID, req.ReviewRunID)
+			  AND ($3 = '' OR pass = $3)
+			  AND ($4 = '' OR aspect = $4)
+			ORDER BY id`, req.InputRecordID, req.ReviewRunID, passFilter, aspectFilter)
 		if err != nil {
 			return nil, fmt.Errorf("load findings: %w", err)
 		}
@@ -325,7 +326,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate findings: %w", err)
 		}
-		if languageCode != "" {
+		if languageCode != "" && (passFilter != "" || aspectFilter != "") {
 			localized, err = c.localizeFindings(ctx, languageCode, localized, metadataByFindingID)
 			if err != nil {
 				return nil, err

@@ -51,7 +51,7 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 	if err != nil {
 		return FindingTranslation{}, err
 	}
-	prompt := "Translate the document review finding fields into the requested language. Translate all natural-language prose into the requested language; do not leave English unchanged except for standards identifiers, formulas, product names, code-like identifiers, and terms that are normally kept verbatim. If language is zh, use Simplified Chinese. Return JSON with exactly these string keys: finding_type, title, description, suggestion."
+	prompt := "Translate the document review finding fields into the requested language. Translate all natural-language prose into the requested language. Translate finding_type too; it is user-visible and must be translated even if it looks like snake_case or a code-like label. Preserve standards identifiers, formulas, product names, and explicit literal identifiers that appear inside the prose. If language is zh, use Simplified Chinese. Return JSON with exactly these string keys: finding_type, title, description, suggestion."
 	if strings.TrimSpace(retryInstruction) != "" {
 		prompt += " " + strings.TrimSpace(retryInstruction)
 	}

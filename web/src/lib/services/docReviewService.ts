@@ -134,12 +134,20 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
 	};
 }
 
+export type RequestFindingsQuery = {
+	language?: string;
+	pass?: string;
+	aspect?: string;
+};
+
 export async function getRequest(
 	id: number,
-	language = 'en'
+	query: RequestFindingsQuery = {}
 ): Promise<{ request: RequestStatus; findings: FindingItem[]; aspect_statuses: AspectStatus[]; packages: ReviewPackageInfo[] }> {
 	const params = new URLSearchParams();
-	if (language && language !== 'en') params.set('language', language);
+	if (query.language && query.language !== 'en') params.set('language', query.language);
+	if (query.pass) params.set('pass', query.pass);
+	if (query.aspect) params.set('aspect', query.aspect);
 	const suffix = params.toString() ? `?${params.toString()}` : '';
 	const res = await fetch(`${BASE}/requests/${id}${suffix}`, { credentials: 'same-origin' });
 	const data = await res.json();

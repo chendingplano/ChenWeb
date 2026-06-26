@@ -59,19 +59,68 @@
 	let activeKey = $state<string | null>(null);
 
 	// DR16: live findings (with ids + review_status) drive the action buttons.
+	let baseFindings = $state<FindingItem[]>([]);
 	let findings = $state<FindingItem[]>([]);
 	let packages = $state<ReviewPackageInfo[]>([]);
 	let languages = $state<string[]>(['en']);
 	let selectedLanguage = $state('en');
 	let languageLoading = $state(false);
+	let localizedReviewerCache = $state<Record<string, FindingItem[]>>({});
 	// Per-package and per-reviewer fold state (all collapsed by default).
 	let expandedPackages = $state<Record<string, boolean>>({});
 	let expandedReviewers = $state<Record<string, boolean>>({});
 	function togglePackage(pass: string) {
 		expandedPackages[pass] = !expandedPackages[pass];
 	}
-	function toggleReviewer(key: string) {
-		expandedReviewers[key] = !expandedReviewers[key];
+	function cloneFindings(items: FindingItem[]): FindingItem[] {
+		return items.map((item) => ({ ...item }));
+	}
+	function mergeLocalizedFindings(localized: FindingItem[]) {
+		if (localized.length === 0) return;
+		const byId = new Map(localized.map((item) => [item.id, item]));
+		findings = findings.map((item) => {
+			const translated = byId.get(item.id);
+			return translated ? { ...item, ...translated } : item;
+		});
+	}
+	async function ensureReviewerLocalized(pass: string, aspect: string) {
+		if (requestId == null || selectedLanguage === 'en') return;
+		const cacheKey = `${selectedLanguage}::${pass}::${aspect}`;
+		const cached = localizedReviewerCache[cacheKey];
+		if (cached) {
+			mergeLocalizedFindings(cached);
+			return;
+		}
+		console.info('[doc-review-report] lazily translating reviewer findings', {
+			reportId,
+			requestId,
+			selectedLanguage,
+			pass,
+			aspect
+		});
+		const reqData = await getRequest(requestId, { language: selectedLanguage, pass, aspect });
+		const localized = reqData.findings ?? [];
+		localizedReviewerCache[cacheKey] = localized;
+		mergeLocalizedFindings(localized);
+	}
+	async function toggleReviewer(pass: string, aspect: string) {
+		const key = reviewerKey(pass, aspect);
+		const next = !expandedReviewers[key];
+		expandedReviewers[key] = next;
+		if (!next) return;
+		try {
+			await ensureReviewerLocalized(pass, aspect);
+		} catch (e) {
+			console.error('[doc-review-report] failed to lazily translate reviewer findings', {
+				reportId,
+				requestId,
+				selectedLanguage,
+				pass,
+				aspect,
+				error: e
+			});
+			showToast('error', e instanceof Error ? e.message : 'Lazy translation failed', 8000);
+		}
 	}
 	let busyId = $state<number | null>(null);
 	let editFindingId = $state<number | null>(null);
@@ -244,8 +293,9 @@
 			findings = [];
 			if (requestId != null) {
 				try {
-					const reqData = await getRequest(requestId, selectedLanguage);
-					findings = reqData.findings ?? [];
+					const reqData = await getRequest(requestId);
+					baseFindings = reqData.findings ?? [];
+					findings = cloneFindings(baseFindings);
 					packages = reqData.packages ?? [];
 				} catch (e) {
 					showToast('warn', 'Could not load editable findings: ' + (e instanceof Error ? e.message : String(e)));
@@ -259,7 +309,6 @@
 	}
 
 	async function reloadFindingsForLanguage() {
-		if (requestId == null) return;
 		languageLoading = true;
 		console.info('[doc-review-report] reloading findings for language', {
 			reportId,
@@ -267,15 +316,21 @@
 			selectedLanguage
 		});
 		try {
-			const reqData = await getRequest(requestId, selectedLanguage);
-			findings = reqData.findings ?? [];
-			packages = reqData.packages ?? packages;
-			console.info('[doc-review-report] loaded translated findings', {
+			findings = cloneFindings(baseFindings);
+			if (selectedLanguage !== 'en') {
+				for (const key of Object.keys(expandedReviewers)) {
+					if (!expandedReviewers[key]) continue;
+					const [pass, aspect] = key.split('::');
+					if (pass && aspect) {
+						await ensureReviewerLocalized(pass, aspect);
+					}
+				}
+			}
+			console.info('[doc-review-report] language state refreshed', {
 				reportId,
 				requestId,
 				selectedLanguage,
-				findingCount: findings.length,
-				firstFindingTitle: findings[0]?.title ?? null
+				findingCount: findings.length
 			});
 		} catch (e) {
 			console.error('[doc-review-report] failed to reload findings for language', {
@@ -292,6 +347,7 @@
 
 	function setFindingStatus(id: number, status: string) {
 		findings = findings.map((f) => (f.id === id ? { ...f, review_status: status } : f));
+		baseFindings = baseFindings.map((f) => (f.id === id ? { ...f, review_status: status } : f));
 	}
 
 	async function onAccept(f: FindingItem) {
@@ -535,7 +591,7 @@
 										type="button"
 										class="reviewer-head"
 										aria-expanded={!!expandedReviewers[rkey]}
-										onclick={() => toggleReviewer(rkey)}
+										onclick={() => toggleReviewer(group.pass, rv.aspect)}
 									>
 										<span class="chevron sub" class:open={expandedReviewers[rkey]}>▶</span>
 										<span class="reviewer-title">{reviewerLabel(rv.aspect)}</span>

@@ -54,6 +54,12 @@ type RequestWithFindings struct {
 	Packages       []ReviewPackageInfo `json:"packages,omitempty"`
 }
 
+type RequestFindingsOptions struct {
+	Language string
+	Pass     string
+	Aspect   string
+}
+
 // FindingItem is a finding row from kb.doc_review_findings.
 type FindingItem struct {
 	ID           int64   `json:"id"`
