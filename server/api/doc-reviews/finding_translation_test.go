@@ -91,6 +91,65 @@ func TestLocalizeFindingUsesCachedMetadata(t *testing.T) {
 	}
 }
 
+func TestLocalizeFindingRetranslatesCachedUntranslatedMetadata(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	translator := &fakeFindingTranslator{out: FindingTranslation{
+		Title:       "中文标题",
+		Description: "中文描述",
+		Suggestion:  "中文建议",
+	}}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
+		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
+		WHERE id = $1`)).
+		WithArgs(int64(9), "zh", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	f := FindingItem{ID: 9, Title: "English title", Description: "English desc", Suggestion: "English suggestion"}
+	body, _ := json.Marshal(map[string]FindingTranslation{
+		"zh": {
+			Title:       "English title",
+			Description: "English desc",
+			Suggestion:  "English suggestion",
+		},
+	})
+
+	got, err := ctrl.localizeFinding(context.Background(), "zh", f, body)
+	if err != nil {
+		t.Fatalf("localizeFinding: %v", err)
+	}
+	if translator.calls != 1 {
+		t.Fatalf("translator calls=%d, want 1", translator.calls)
+	}
+	if got.Title != "中文标题" || got.Description != "中文描述" || got.Suggestion != "中文建议" {
+		t.Fatalf("localized finding=%#v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestLocalizeFindingErrorsWhenTranslatorReturnsUntranslatedContent(t *testing.T) {
+	translator := &fakeFindingTranslator{out: FindingTranslation{
+		Title:       "English title",
+		Description: "English desc",
+		Suggestion:  "English suggestion",
+	}}
+	ctrl := &DocReviewController{Translator: translator}
+	f := FindingItem{ID: 10, Title: "English title", Description: "English desc", Suggestion: "English suggestion"}
+
+	_, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{}`))
+	if err == nil {
+		t.Fatal("localizeFinding error=nil, want error")
+	}
+}
+
 func TestLocalizeFindingsErrorsWhenTranslationModelMissing(t *testing.T) {
 	t.Setenv("TRANSLATION_MODEL_NAME", "")
 

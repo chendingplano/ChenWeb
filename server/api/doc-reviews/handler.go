@@ -150,15 +150,19 @@ func GetRequest(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
+	language := c.QueryParam("language")
+	logger.Info("doc review request fetch", "request_id", id, "language", language)
 	ctrl := NewDocReviewController()
-	result, err := ctrl.GetRequestWithFindings(c.Request().Context(), id, c.QueryParam("language"))
+	result, err := ctrl.GetRequestWithFindings(c.Request().Context(), id, language)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
 		}
+		logger.Warn("doc review request fetch failed", "request_id", id, "language", language, "error", err)
 		return c.JSON(status, map[string]any{"status": false, "error_msg": err.Error()})
 	}
+	logger.Info("doc review request fetch completed", "request_id", id, "language", language, "finding_count", len(result.Findings))
 	return c.JSON(http.StatusOK, map[string]any{
 		"status":          true,
 		"request":         result.Request,

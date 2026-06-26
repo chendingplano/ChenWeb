@@ -45,7 +45,7 @@ func (t *llmFindingTranslator) TranslateFinding(ctx context.Context, language st
 	if err != nil {
 		return FindingTranslation{}, err
 	}
-	prompt := "Translate the document review finding fields into the requested language. Return JSON with exactly these string keys: finding_type, title, description, suggestion. Preserve technical terms, line numbers, formulas, and identifiers."
+	prompt := "Translate the document review finding fields into the requested language. Translate all natural-language prose into the requested language; do not leave English unchanged except for standards identifiers, formulas, product names, code-like identifiers, and terms that are normally kept verbatim. If language is zh, use Simplified Chinese. Return JSON with exactly these string keys: finding_type, title, description, suggestion."
 	payload, err := t.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, "doc-review-finding-translation", prompt, t.modelName, string(input), "translate_doc_review_finding", "MID-CWB-DR-TRANSLATE"))
 	if err != nil {
 		return FindingTranslation{}, err
@@ -106,6 +106,28 @@ func applyFindingTranslation(f FindingItem, tr FindingTranslation) FindingItem {
 	return f
 }
 
+func equivalentLocalizedContent(src FindingItem, localized FindingItem) bool {
+	return strings.TrimSpace(localized.FindingType) == strings.TrimSpace(src.FindingType) &&
+		strings.TrimSpace(localized.Title) == strings.TrimSpace(src.Title) &&
+		strings.TrimSpace(localized.Description) == strings.TrimSpace(src.Description) &&
+		strings.TrimSpace(localized.Suggestion) == strings.TrimSpace(src.Suggestion)
+}
+
+func likelyUntranslatedForLanguage(src FindingItem, tr FindingTranslation, language string) bool {
+	language = supportedLanguageCode(language)
+	if language == "" {
+		return false
+	}
+	localized := applyFindingTranslation(src, tr)
+	if !equivalentLocalizedContent(src, localized) {
+		return false
+	}
+	// For now we only offer non-English UI languages configured by operators.
+	// If all user-visible fields are byte-for-byte identical to the English
+	// source, treat the cache/generation as stale and force an explicit retry.
+	return true
+}
+
 func saveFindingTranslation(ctx context.Context, db *sql.DB, findingID int64, language string, tr FindingTranslation) error {
 	if db == nil {
 		return nil
@@ -132,7 +154,15 @@ func (c *DocReviewController) localizeFinding(ctx context.Context, language stri
 		return f, nil
 	}
 	if tr, ok := translationFromMetadata(metadata, language); ok {
-		return applyFindingTranslation(f, tr), nil
+		if likelyUntranslatedForLanguage(f, tr, language) {
+			logger.Warn("cached finding translation appears untranslated; retrying",
+				"finding_id", f.ID,
+				"language", language,
+				"title", f.Title,
+			)
+		} else {
+			return applyFindingTranslation(f, tr), nil
+		}
 	}
 	translator := c.Translator
 	if translator == nil {
@@ -146,6 +176,9 @@ func (c *DocReviewController) localizeFinding(ctx context.Context, language stri
 	if err != nil {
 		return f, fmt.Errorf("translate finding %d to %s: %w", f.ID, language, err)
 	}
+	if likelyUntranslatedForLanguage(f, tr, language) {
+		return f, fmt.Errorf("translate finding %d to %s: model returned untranslated content", f.ID, language)
+	}
 	if err := saveFindingTranslation(ctx, c.DB, f.ID, language, tr); err != nil {
 		logger.Warn("finding translation save failed", "finding_id", f.ID, "language", language, "error", err)
 	}
@@ -157,6 +190,7 @@ func (c *DocReviewController) localizeFindings(ctx context.Context, language str
 	if language == "" {
 		return findings, nil
 	}
+	logger.Info("localizing doc review findings", "language", language, "finding_count", len(findings))
 	if c.Translator == nil {
 		translator, err := newLLMFindingTranslator()
 		if err != nil {
@@ -166,12 +200,22 @@ func (c *DocReviewController) localizeFindings(ctx context.Context, language str
 	}
 
 	out := make([]FindingItem, 0, len(findings))
+	translatedCount := 0
 	for _, f := range findings {
 		localized, err := c.localizeFinding(ctx, language, f, metadataByFindingID[f.ID])
 		if err != nil {
+			logger.Warn("doc review finding localization failed",
+				"finding_id", f.ID,
+				"language", language,
+				"error", err,
+			)
 			return nil, err
+		}
+		if !equivalentLocalizedContent(f, localized) {
+			translatedCount++
 		}
 		out = append(out, localized)
 	}
+	logger.Info("localized doc review findings", "language", language, "finding_count", len(findings), "translated_count", translatedCount)
 	return out, nil
 }

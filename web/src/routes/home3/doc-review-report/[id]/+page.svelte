@@ -261,11 +261,29 @@
 	async function reloadFindingsForLanguage() {
 		if (requestId == null) return;
 		languageLoading = true;
+		console.info('[doc-review-report] reloading findings for language', {
+			reportId,
+			requestId,
+			selectedLanguage
+		});
 		try {
 			const reqData = await getRequest(requestId, selectedLanguage);
 			findings = reqData.findings ?? [];
 			packages = reqData.packages ?? packages;
+			console.info('[doc-review-report] loaded translated findings', {
+				reportId,
+				requestId,
+				selectedLanguage,
+				findingCount: findings.length,
+				firstFindingTitle: findings[0]?.title ?? null
+			});
 		} catch (e) {
+			console.error('[doc-review-report] failed to reload findings for language', {
+				reportId,
+				requestId,
+				selectedLanguage,
+				error: e
+			});
 			showToast('error', e instanceof Error ? e.message : 'Language change failed', 8000);
 		} finally {
 			languageLoading = false;
