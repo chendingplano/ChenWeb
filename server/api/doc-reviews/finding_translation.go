@@ -22,6 +22,8 @@ type llmFindingTranslator struct {
 
 var errFindingTranslationUnavailable = errors.New("finding translation unavailable")
 
+const findingTranslationPromptName = "doc-review-finding-translation"
+
 func newLLMFindingTranslator() (FindingTranslator, error) {
 	modelRef := strings.TrimSpace(os.Getenv("TRANSLATION_MODEL_NAME"))
 	if modelRef == "" {
@@ -53,11 +55,19 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 	if strings.TrimSpace(retryInstruction) != "" {
 		prompt += " " + strings.TrimSpace(retryInstruction)
 	}
-	payload, err := t.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, "doc-review-finding-translation", prompt, t.modelName, string(input), "translate_doc_review_finding", "MID-CWB-DR-TRANSLATE"))
+	payload, err := t.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, findingTranslationPromptName, prompt, t.modelName, string(input), "translate_doc_review_finding", "MID-CWB-DR-TRANSLATE"))
 	if err != nil {
 		return FindingTranslation{}, err
 	}
 	return findingTranslationFromMap(payload), nil
+}
+
+func translationDebugFields(translator FindingTranslator) []any {
+	fields := []any{"prompt_name", findingTranslationPromptName}
+	if llmTranslator, ok := translator.(*llmFindingTranslator); ok {
+		fields = append(fields, "model_name", llmTranslator.modelName)
+	}
+	return fields
 }
 
 func supportedLanguageCode(language string) string {
@@ -162,10 +172,13 @@ func (c *DocReviewController) localizeFinding(ctx context.Context, language stri
 	}
 	if tr, ok := translationFromMetadata(metadata, language); ok {
 		if likelyUntranslatedForLanguage(f, tr, language) {
-			logger.Warn("cached finding translation appears untranslated; retrying",
+			fields := []any{
 				"finding_id", f.ID,
 				"language", language,
 				"title", f.Title,
+			}
+			logger.Warn("cached finding translation appears untranslated; retrying",
+				append(fields, translationDebugFields(c.Translator)...)...,
 			)
 		} else {
 			return applyFindingTranslation(f, tr), nil
@@ -181,25 +194,28 @@ func (c *DocReviewController) localizeFinding(ctx context.Context, language stri
 	}
 	tr, err := translator.TranslateFinding(ctx, language, f)
 	if err != nil {
-		return f, fmt.Errorf("translate finding %d to %s: %w", f.ID, language, err)
+		return f, fmt.Errorf("translate finding %d to %s (model=%s prompt=%s): %w", f.ID, language, llmTranslatorModelName(translator), findingTranslationPromptName, err)
 	}
 	if likelyUntranslatedForLanguage(f, tr, language) {
-		logger.Warn("finding translation attempt returned untranslated content; retrying with stricter prompt",
+		fields := []any{
 			"finding_id", f.ID,
 			"language", language,
 			"title", f.Title,
+		}
+		logger.Warn("finding translation attempt returned untranslated content; retrying with stricter prompt",
+			append(fields, translationDebugFields(translator)...)...,
 		)
 		if llmTranslator, ok := translator.(*llmFindingTranslator); ok {
 			retryInstruction := "Your previous output was invalid because the translated prose remained in English. Re-translate now. For zh, title, description, and suggestion must be written in Simplified Chinese whenever they contain natural-language prose. Do not echo the source English sentence."
 			tr, err = llmTranslator.translateFindingAttempt(ctx, language, f, retryInstruction)
 			if err != nil {
-				return f, fmt.Errorf("translate finding %d to %s retry: %w", f.ID, language, err)
+				return f, fmt.Errorf("translate finding %d to %s retry (model=%s prompt=%s): %w", f.ID, language, llmTranslatorModelName(translator), findingTranslationPromptName, err)
 			}
 			if likelyUntranslatedForLanguage(f, tr, language) {
-				return f, fmt.Errorf("translate finding %d to %s: model returned untranslated content after retry", f.ID, language)
+				return f, fmt.Errorf("translate finding %d to %s: model returned untranslated content after retry (model=%s prompt=%s)", f.ID, language, llmTranslatorModelName(translator), findingTranslationPromptName)
 			}
 		} else {
-			return f, fmt.Errorf("translate finding %d to %s: model returned untranslated content", f.ID, language)
+			return f, fmt.Errorf("translate finding %d to %s: model returned untranslated content (model=%s prompt=%s)", f.ID, language, llmTranslatorModelName(translator), findingTranslationPromptName)
 		}
 	}
 	if err := saveFindingTranslation(ctx, c.DB, f.ID, language, tr); err != nil {
@@ -231,6 +247,8 @@ func (c *DocReviewController) localizeFindings(ctx context.Context, language str
 				"finding_id", f.ID,
 				"language", language,
 				"error", err,
+				"prompt_name", findingTranslationPromptName,
+				"model_name", llmTranslatorModelName(c.Translator),
 			)
 			return nil, err
 		}
@@ -241,4 +259,11 @@ func (c *DocReviewController) localizeFindings(ctx context.Context, language str
 	}
 	logger.Info("localized doc review findings", "language", language, "finding_count", len(findings), "translated_count", translatedCount)
 	return out, nil
+}
+
+func llmTranslatorModelName(translator FindingTranslator) string {
+	if llmTranslator, ok := translator.(*llmFindingTranslator); ok {
+		return llmTranslator.modelName
+	}
+	return ""
 }
