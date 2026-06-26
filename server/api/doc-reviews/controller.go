@@ -305,7 +305,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 			WHERE input_record_id = $1 AND review_run_id = $2
 			  AND ($3 = '' OR pass = $3)
 			  AND ($4 = '' OR aspect = $4)
-			ORDER BY severity DESC, confidence DESC, location ASC`, req.InputRecordID, req.ReviewRunID, passFilter, aspectFilter)
+			ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`, req.InputRecordID, req.ReviewRunID, passFilter, aspectFilter)
 		if err != nil {
 			return nil, fmt.Errorf("load findings: %w", err)
 		}

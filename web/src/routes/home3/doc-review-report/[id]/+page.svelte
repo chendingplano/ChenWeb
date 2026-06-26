@@ -66,12 +66,20 @@
 	let selectedLanguage = $state('en');
 	let languageLoading = $state(false);
 	let localizedReviewerCache = $state<Record<string, FindingItem[]>>({});
-	// Per-package and per-reviewer fold state (all collapsed by default).
+	// View mode: 'packages' (by P1-P6) or 'severity' (by High/Medium/Low).
+	let viewMode = $state<'packages' | 'severity'>('packages');
+	// Per-package and per-reviewer fold state (packages view, all collapsed by default).
 	let expandedPackages = $state<Record<string, boolean>>({});
 	let expandedReviewers = $state<Record<string, boolean>>({});
+	// Severity view fold state (all collapsed by default).
+	let expandedSeverities = $state<Record<string, boolean>>({});
 	function togglePackage(pass: string) {
 		expandedPackages[pass] = !expandedPackages[pass];
 	}
+	function toggleSeverity(sev: string) {
+		expandedSeverities[sev] = !expandedSeverities[sev];
+	}
+
 	function cloneFindings(items: FindingItem[]): FindingItem[] {
 		return items.map((item) => ({ ...item }));
 	}
@@ -205,6 +213,33 @@
 				const g = build(p);
 				if (g) out.push(g);
 			}
+		}
+		return out;
+	});
+	// Severity-level grouping: severity -> flat list ordered by aspect then id.
+	type SeverityGroup = { severity: string; label: string; findings: FindingItem[] };
+	let severityGroups = $derived.by(() => {
+		const bySev = new Map<string, FindingItem[]>();
+		for (const f of findings) {
+			if (f.review_status === 'deleted') continue;
+			if (showMode === 'active' && f.review_status === 'corrected') continue;
+			const arr = bySev.get(f.severity) ?? [];
+			arr.push(f);
+			bySev.set(f.severity, arr);
+		}
+		// Sort each severity group by aspect, then by id.
+		for (const arr of bySev.values()) {
+			arr.sort((a, b) => {
+				const aspectCmp = a.aspect.localeCompare(b.aspect);
+				return aspectCmp !== 0 ? aspectCmp : a.id - b.id;
+			});
+		}
+		const sevOrder = ['high', 'medium', 'low'];
+		const out: SeverityGroup[] = [];
+		for (const sev of sevOrder) {
+			const arr = bySev.get(sev);
+			if (!arr || arr.length === 0) continue;
+			out.push({ severity: sev, label: sev.charAt(0).toUpperCase() + sev.slice(1), findings: arr });
 		}
 		return out;
 	});
@@ -557,6 +592,19 @@
 				<div class="show-mode-sep"></div>
 				<button
 					type="button"
+					class="show-mode-btn"
+					class:active={viewMode === 'packages'}
+					onclick={() => (viewMode = 'packages')}
+				>By Packages</button>
+				<button
+					type="button"
+					class="show-mode-btn"
+					class:active={viewMode === 'severity'}
+					onclick={() => (viewMode = 'severity')}
+				>By Severity</button>
+				<div class="show-mode-sep"></div>
+				<button
+					type="button"
 					class="show-mode-btn action-btn"
 					disabled={correcting}
 					onclick={onCorrectionReport}
@@ -569,117 +617,211 @@
 				>{regenerating ? 'Regenerating…' : 'Re-Generate Review Report'}</button>
 			</div>
 
-			{#each livePassGroups as group (group.pass)}
-				<div class="package">
-					<button
-						type="button"
-						class="package-head"
-						aria-expanded={!!expandedPackages[group.pass]}
-						onclick={() => togglePackage(group.pass)}
-					>
-						<span class="chevron" class:open={expandedPackages[group.pass]}>▶</span>
-						<span class="package-title">{group.label}</span>
-						<span class="package-count">{group.count}</span>
-					</button>
+			{#if viewMode === 'packages'}
+				{#each livePassGroups as group (group.pass)}
+					<div class="package">
+						<button
+							type="button"
+							class="package-head"
+							aria-expanded={!!expandedPackages[group.pass]}
+							onclick={() => togglePackage(group.pass)}
+						>
+							<span class="chevron" class:open={expandedPackages[group.pass]}>▶</span>
+							<span class="package-title">{group.label}</span>
+							<span class="package-count">{group.count}</span>
+						</button>
 
-					{#if expandedPackages[group.pass]}
-						<div class="package-body scroll-list">
-							{#each group.reviewers as rv (rv.aspect)}
-								{@const rkey = reviewerKey(group.pass, rv.aspect)}
-								<div class="reviewer">
-									<button
-										type="button"
-										class="reviewer-head"
-										aria-expanded={!!expandedReviewers[rkey]}
-										onclick={() => toggleReviewer(group.pass, rv.aspect)}
-									>
-										<span class="chevron sub" class:open={expandedReviewers[rkey]}>▶</span>
-										<span class="reviewer-title">{reviewerLabel(rv.aspect)}</span>
-										<span class="reviewer-count">{rv.items.length}</span>
-									</button>
+						{#if expandedPackages[group.pass]}
+							<div class="package-body scroll-list">
+								{#each group.reviewers as rv (rv.aspect)}
+									{@const rkey = reviewerKey(group.pass, rv.aspect)}
+									<div class="reviewer">
+										<button
+											type="button"
+											class="reviewer-head"
+											aria-expanded={!!expandedReviewers[rkey]}
+											onclick={() => toggleReviewer(group.pass, rv.aspect)}
+										>
+											<span class="chevron sub" class:open={expandedReviewers[rkey]}>▶</span>
+											<span class="reviewer-title">{reviewerLabel(rv.aspect)}</span>
+											<span class="reviewer-count">{rv.items.length}</span>
+										</button>
 
-									{#if expandedReviewers[rkey]}
-										<div class="reviewer-body scroll-list">
-											{#each rv.items as f (f.id)}
-												<div
-													class="finding"
-													class:active={activeKey === String(f.id)}
-													class:resolved={f.review_status === 'fixed' ||
-														f.review_status === 'accepted' ||
-														f.review_status === 'corrected'}
-													style="border-left-color:{sevColor(f.severity)};"
-												>
-													<button
-														type="button"
-														class="finding-body"
-														onclick={() => onFocusFinding(f)}
-														title={f.location ? `Jump to line ${f.location}` : ''}
+										{#if expandedReviewers[rkey]}
+											<div class="reviewer-body scroll-list">
+												{#each rv.items as f (f.id)}
+													<div
+														class="finding"
+														class:active={activeKey === String(f.id)}
+														class:resolved={f.review_status === 'fixed' ||
+															f.review_status === 'accepted' ||
+															f.review_status === 'corrected'}
+														style="border-left-color:{sevColor(f.severity)};"
 													>
-														<div class="finding-head">
-															<span class="finding-id">#{f.id}</span>
-															<strong>{f.title}</strong>
-															<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
-															<span class="badge">{f.aspect}</span>
-															{#if f.review_status === 'fixed'}
-																<span class="status-chip chip-fixed">Fixed</span>
-															{:else if f.review_status === 'accepted'}
-																<span class="status-chip accepted">Accepted</span>
-															{:else if f.review_status === 'corrected'}
-																<span class="status-chip corrected">Corrected</span>
-															{/if}
+														<button
+															type="button"
+															class="finding-body"
+															onclick={() => onFocusFinding(f)}
+															title={f.location ? `Jump to line ${f.location}` : ''}
+														>
+															<div class="finding-head">
+																<span class="finding-id">#{f.id}</span>
+																<strong>{f.title}</strong>
+																<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
+																<span class="badge">{f.aspect}</span>
+																{#if f.review_status === 'fixed'}
+																	<span class="status-chip chip-fixed">Fixed</span>
+																{:else if f.review_status === 'accepted'}
+																	<span class="status-chip accepted">Accepted</span>
+																{:else if f.review_status === 'corrected'}
+																	<span class="status-chip corrected">Corrected</span>
+																{/if}
+															</div>
+															{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
+															{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
+															<p class="finding-loc">Confidence: {Math.round(f.confidence * 100)}%</p>
+															{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
+														</button>
+
+														<div class="finding-actions">
+															<button
+																class="act"
+																disabled={busyId === f.id}
+																onclick={() => onAutoFix(f)}
+																title="Fix the offending line(s) automatically with the configured model"
+															>
+																LLM Auto Fix
+															</button>
+															<button
+																class="act"
+																disabled={busyId === f.id}
+																onclick={() => (editFindingId = f.id)}
+																title="Open the find/replace editor for the offending line(s)"
+															>
+																Edit Tool
+															</button>
+															<button
+																class="act danger"
+																disabled={busyId === f.id}
+																onclick={() => onDelete(f)}
+																title="Remove this finding from the report"
+															>
+																Delete
+															</button>
+															<button
+																class="act"
+																disabled={busyId === f.id}
+																onclick={() => onAccept(f)}
+																title="Keep as is — take no action"
+															>
+																Accept
+															</button>
 														</div>
-														{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
-														{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
-														<p class="finding-loc">Confidence: {Math.round(f.confidence * 100)}%</p>
-														{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
-													</button>
-
-													<div class="finding-actions">
-														<button
-															class="act"
-															disabled={busyId === f.id}
-															onclick={() => onAutoFix(f)}
-															title="Fix the offending line(s) automatically with the configured model"
-														>
-															LLM Auto Fix
-														</button>
-														<button
-															class="act"
-															disabled={busyId === f.id}
-															onclick={() => (editFindingId = f.id)}
-															title="Open the find/replace editor for the offending line(s)"
-														>
-															Edit Tool
-														</button>
-														<button
-															class="act danger"
-															disabled={busyId === f.id}
-															onclick={() => onDelete(f)}
-															title="Remove this finding from the report"
-														>
-															Delete
-														</button>
-														<button
-															class="act"
-															disabled={busyId === f.id}
-															onclick={() => onAccept(f)}
-															title="Keep as is — take no action"
-														>
-															Accept
-														</button>
 													</div>
-												</div>
-											{/each}
-										</div>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{/each}
+												{/each}
+											</div>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/each}
 
-			{#if livePassGroups.length === 0 && findings.length > 0}
+			{:else}
+				{#each severityGroups as sevGroup (sevGroup.severity)}
+					<div class="package">
+						<button
+							type="button"
+							class="package-head"
+							aria-expanded={!!expandedSeverities[sevGroup.severity]}
+							onclick={() => toggleSeverity(sevGroup.severity)}
+						>
+							<span class="chevron" class:open={expandedSeverities[sevGroup.severity]}>▶</span>
+							<span class="sev-dot" style="color:{sevColor(sevGroup.severity)};">●</span>
+							<span class="package-title">{sevGroup.label}</span>
+							<span class="package-count">{sevGroup.findings.length}</span>
+						</button>
+
+						{#if expandedSeverities[sevGroup.severity]}
+							<div class="package-body scroll-list">
+								{#each sevGroup.findings as f (f.id)}
+									<div
+										class="finding"
+										class:active={activeKey === String(f.id)}
+										class:resolved={f.review_status === 'fixed' ||
+											f.review_status === 'accepted' ||
+											f.review_status === 'corrected'}
+										style="border-left-color:{sevColor(f.severity)};"
+									>
+										<button
+											type="button"
+											class="finding-body"
+											onclick={() => onFocusFinding(f)}
+											title={f.location ? `Jump to line ${f.location}` : ''}
+										>
+											<div class="finding-head">
+												<span class="finding-id">#{f.id}</span>
+												<strong>{f.title}</strong>
+												<span class="sev" style="color:{sevColor(f.severity)};">[{f.severity}]</span>
+												<span class="badge">{f.aspect}</span>
+												{#if f.review_status === 'fixed'}
+													<span class="status-chip chip-fixed">Fixed</span>
+												{:else if f.review_status === 'accepted'}
+													<span class="status-chip accepted">Accepted</span>
+												{:else if f.review_status === 'corrected'}
+													<span class="status-chip corrected">Corrected</span>
+												{/if}
+											</div>
+											{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
+											{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
+											<p class="finding-loc">Confidence: {Math.round(f.confidence * 100)}%</p>
+											{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
+										</button>
+
+										<div class="finding-actions">
+											<button
+												class="act"
+												disabled={busyId === f.id}
+												onclick={() => onAutoFix(f)}
+												title="Fix the offending line(s) automatically with the configured model"
+											>
+												LLM Auto Fix
+											</button>
+											<button
+												class="act"
+												disabled={busyId === f.id}
+												onclick={() => (editFindingId = f.id)}
+												title="Open the find/replace editor for the offending line(s)"
+											>
+												Edit Tool
+											</button>
+											<button
+												class="act danger"
+												disabled={busyId === f.id}
+												onclick={() => onDelete(f)}
+												title="Remove this finding from the report"
+											>
+												Delete
+											</button>
+											<button
+												class="act"
+												disabled={busyId === f.id}
+												onclick={() => onAccept(f)}
+												title="Keep as is — take no action"
+											>
+												Accept
+											</button>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/each}
+			{/if}
+
+			{#if (viewMode === 'packages' && livePassGroups.length === 0 || viewMode === 'severity' && severityGroups.length === 0) && findings.length > 0}
 				<p class="body-text">All findings have been deleted.</p>
 			{/if}
 		{/if}
