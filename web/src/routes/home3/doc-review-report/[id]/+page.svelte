@@ -4,10 +4,12 @@
 	import {
 		getReport,
 		getRequest,
+		listLanguages,
 		updateFinding,
 		regenerateReport,
 		generateCorrectionReport,
-		type FindingItem
+		type FindingItem,
+		type ReviewPackageInfo
 	} from '$lib/services/docReviewService';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
@@ -58,6 +60,10 @@
 
 	// DR16: live findings (with ids + review_status) drive the action buttons.
 	let findings = $state<FindingItem[]>([]);
+	let packages = $state<ReviewPackageInfo[]>([]);
+	let languages = $state<string[]>(['en']);
+	let selectedLanguage = $state('en');
+	let languageLoading = $state(false);
 	// Per-package and per-reviewer fold state (all collapsed by default).
 	let expandedPackages = $state<Record<string, boolean>>({});
 	let expandedReviewers = $state<Record<string, boolean>>({});
@@ -77,14 +83,14 @@
 	let toast = $state<{ kind: 'info' | 'warn' | 'error'; text: string } | null>(null);
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-	const passLabels: Record<string, string> = {
-		P1: 'Language & Style',
-		P2: 'Structure & Organization',
-		P3: 'Content Quality',
-		P4: 'Consistency',
-		P5: 'Technical & Compliance',
-		P6: 'Meta & Process'
-	};
+	const fallbackPackages: ReviewPackageInfo[] = [
+		{ key: 'P1', label: 'Language & Style' },
+		{ key: 'P2', label: 'Structure & Organization' },
+		{ key: 'P3', label: 'Content Quality' },
+		{ key: 'P4', label: 'Consistency' },
+		{ key: 'P5', label: 'Technical & Compliance' },
+		{ key: 'P6', label: 'Meta & Process' }
+	];
 
 	function showToast(kind: 'info' | 'warn' | 'error', text: string, ms = 5000) {
 		toast = { kind, text };
@@ -110,7 +116,9 @@
 
 	// Visible findings grouped by pass, then by reviewer/aspect (deleted hidden).
 	let livePassGroups = $derived.by(() => {
-		const order = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
+		const displayPackages = packages.length > 0 ? packages : fallbackPackages;
+		const order = displayPackages.map((pkg) => pkg.key);
+		const passLabels = new Map(displayPackages.map((pkg) => [pkg.key, pkg.label]));
 		// pass -> (aspect -> findings), both preserving first-seen order.
 		const byPass = new Map<string, Map<string, FindingItem[]>>();
 		for (const f of findings) {
@@ -135,7 +143,7 @@
 				count += items.length;
 			}
 			if (count === 0) return null;
-			return { pass: p, label: passLabels[p] ?? p, count, reviewers };
+			return { pass: p, label: passLabels.get(p) ?? p, count, reviewers };
 		};
 		const out: PackageGroup[] = [];
 		for (const p of order) {
@@ -209,6 +217,16 @@
 		loading = true;
 		errorMsg = '';
 		try {
+			try {
+				const configuredLanguages = await listLanguages();
+				languages = configuredLanguages.length > 0 ? configuredLanguages : ['en'];
+				if (!languages.includes(selectedLanguage)) {
+					selectedLanguage = languages[0] ?? 'en';
+				}
+			} catch {
+				languages = ['en'];
+				selectedLanguage = 'en';
+			}
 			const report = await getReport(reportId);
 			inputRecordId = report?.input_record_id ?? report?.report_json?.meta?.document_record_id ?? null;
 			requestId = report?.request_id ?? null;
@@ -226,8 +244,9 @@
 			findings = [];
 			if (requestId != null) {
 				try {
-					const reqData = await getRequest(requestId);
+					const reqData = await getRequest(requestId, selectedLanguage);
 					findings = reqData.findings ?? [];
+					packages = reqData.packages ?? [];
 				} catch (e) {
 					showToast('warn', 'Could not load editable findings: ' + (e instanceof Error ? e.message : String(e)));
 				}
@@ -236,6 +255,20 @@
 			errorMsg = e instanceof Error ? e.message : 'Failed to load report';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function reloadFindingsForLanguage() {
+		if (requestId == null) return;
+		languageLoading = true;
+		try {
+			const reqData = await getRequest(requestId, selectedLanguage);
+			findings = reqData.findings ?? [];
+			packages = reqData.packages ?? packages;
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Language change failed', 8000);
+		} finally {
+			languageLoading = false;
 		}
 	}
 
@@ -395,6 +428,14 @@
 		{:else if skeleton}
 			<div class="title-row">
 				<h1 class="report-title">Document Review Report</h1>
+				<label class="language-picker">
+					<span>Language</span>
+					<select bind:value={selectedLanguage} onchange={reloadFindingsForLanguage} disabled={languageLoading}>
+						{#each languages as lang (lang)}
+							<option value={lang}>{lang}</option>
+						{/each}
+					</select>
+				</label>
 			</div>
 			<p class="meta">
 				Document: {skeleton.meta?.document_title || '—'} (ID: {inputRecordId ?? '—'})<br />
@@ -463,7 +504,7 @@
 						onclick={() => togglePackage(group.pass)}
 					>
 						<span class="chevron" class:open={expandedPackages[group.pass]}>▶</span>
-						<span class="package-title">{group.pass} — {group.label}</span>
+						<span class="package-title">{group.label}</span>
 						<span class="package-count">{group.count}</span>
 					</button>
 
@@ -672,6 +713,26 @@
 	.title-row .report-title {
 		border-bottom: none;
 		padding-bottom: 0;
+	}
+	.language-picker {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		color: var(--text-secondary);
+		font-size: 0.82rem;
+		white-space: nowrap;
+	}
+	.language-picker select {
+		min-width: 4.5rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--card-bg);
+		color: var(--text-primary);
+		padding: 0.28rem 0.5rem;
+		font: inherit;
+	}
+	.language-picker select:disabled {
+		opacity: 0.6;
 	}
 	.meta {
 		color: var(--text-muted);
