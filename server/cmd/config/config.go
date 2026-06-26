@@ -291,6 +291,27 @@ func GetDocReviewsConfig() map[string][]string {
 	return AppConfig.DocReviews
 }
 
+func GetLanguages() []string {
+	raw := viper.GetStringSlice("languages.languages")
+	if len(raw) == 0 {
+		raw = AppConfig.Languages.Languages
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(raw))
+	for _, lang := range raw {
+		lang = strings.ToLower(strings.TrimSpace(lang))
+		if lang == "" || seen[lang] {
+			continue
+		}
+		seen[lang] = true
+		out = append(out, lang)
+	}
+	if len(out) == 0 {
+		return []string{"en"}
+	}
+	return out
+}
+
 func GetArtifactSearchConfig() ArtifactSearchConfig {
 	cfg := toArtifactSearchConfig(AppConfig.ArtifactSearch)
 	if isArtifactSearchConfigZero(cfg) {

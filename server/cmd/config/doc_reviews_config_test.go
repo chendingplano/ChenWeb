@@ -45,3 +45,32 @@ quick-pass = ["clarity", "security"]
 		t.Fatalf("quick-pass=%v", got)
 	}
 }
+
+func TestGetLanguagesReadsNestedLanguagesSection(t *testing.T) {
+	oldConfig := AppConfig
+	t.Cleanup(func() {
+		AppConfig = oldConfig
+		viper.Reset()
+	})
+	viper.Reset()
+	viper.SetConfigType("toml")
+
+	const sample = `
+[languages]
+languages = ["en", "zh"]
+`
+	if err := viper.ReadConfig(strings.NewReader(sample)); err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if err := viper.Unmarshal(&AppConfig); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	got := GetLanguages()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 languages, got %d (%v)", len(got), got)
+	}
+	if got[0] != "en" || got[1] != "zh" {
+		t.Fatalf("languages=%v", got)
+	}
+}

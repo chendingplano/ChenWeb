@@ -32,20 +32,7 @@ func HandleListTiers(c echo.Context) error {
 
 // HandleListLanguages returns the configured report display languages.
 func HandleListLanguages(c echo.Context) error {
-	var out []string
-	seen := map[string]bool{}
-	for _, lang := range appconfig.AppConfig.Languages.Languages {
-		lang = strings.ToLower(strings.TrimSpace(lang))
-		if lang == "" || seen[lang] {
-			continue
-		}
-		seen[lang] = true
-		out = append(out, lang)
-	}
-	if len(out) == 0 {
-		out = []string{"en"}
-	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "languages": out})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "languages": appconfig.GetLanguages()})
 }
 
 // SubmitRequest accepts a review request and publishes a JetStream event so
