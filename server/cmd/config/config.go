@@ -3,6 +3,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -174,16 +175,19 @@ type PDFParserConfig struct {
 }
 
 var AppConfig AppConfigDef
+var appConfigViper = viper.New()
 
 func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath string) error {
 	call_flow := ctx.Value(ApiTypes.CallFlowKey).(string)
 	logger.Info("Loading config", "filePath", configPath)
-	viper.SetConfigFile(configPath)
-	viper.SetConfigType("toml")
+	appVp := viper.New()
+	appVp.SetConfigFile(configPath)
+	appVp.SetConfigType("toml")
 
 	// Read config file
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+	if err := appVp.ReadInConfig(); err != nil {
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+		if errors.As(err, &configFileNotFoundError) {
 			return fmt.Errorf("(MID_26031001) config file not found, file:%s", configPath)
 		}
 		return fmt.Errorf("(MID_26031002) error reading config (%s->CWB_CFG_056): %w", call_flow, err)
@@ -193,26 +197,25 @@ func LoadConfig(ctx context.Context, logger ApiTypes.JimoLogger, configPath stri
 	// main config file. Values present in the local file take precedence.
 	localPath := filepath.Join(filepath.Dir(configPath), "config.local.toml")
 	if _, statErr := os.Stat(localPath); statErr == nil {
-		viper.SetConfigFile(localPath)
-		if mergeErr := viper.MergeInConfig(); mergeErr != nil {
+		appVp.SetConfigFile(localPath)
+		if mergeErr := appVp.MergeInConfig(); mergeErr != nil {
 			return fmt.Errorf("(MID_26031006) error merging local config (%s): %w", localPath, mergeErr)
 		}
 		logger.Info("Merged local config overrides", "filePath", localPath)
-		// Restore the primary config file reference for any later viper ops.
-		viper.SetConfigFile(configPath)
 	}
 
 	// Override with environment variables (e.g., DATABASE_URL)
-	viper.AutomaticEnv()
+	appVp.AutomaticEnv()
+
+	// Unmarshal into struct
+	if err := appVp.Unmarshal(&AppConfig); err != nil {
+		return fmt.Errorf("(MID_26031003) unable to decode app config, error:%w", err)
+	}
+	appConfigViper = appVp
 
 	err := ApiUtils.LoadConfig(ctx, logger, configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load commonConfig, error:%w", err)
-	}
-
-	// Unmarshal into struct
-	if err := viper.Unmarshal(&AppConfig); err != nil {
-		return fmt.Errorf("(MID_26031003) unable to decode app config, error:%w", err)
 	}
 
 	if err := ApiUtils.SetConfig(ApiTypes.CommonConfig); err != nil {
@@ -292,7 +295,7 @@ func GetDocReviewsConfig() map[string][]string {
 }
 
 func GetLanguages() []string {
-	raw := viper.GetStringSlice("languages.languages")
+	raw := appConfigViper.GetStringSlice("languages.languages")
 	if len(raw) == 0 {
 		raw = AppConfig.Languages.Languages
 	}
@@ -329,7 +332,7 @@ func GetArtifactSearchConfig() ArtifactSearchConfig {
 	if cfg.PreviewMaxWords <= 0 {
 		cfg.PreviewMaxWords = 18
 	}
-	if !viper.IsSet("artifact_search.phrase_friendly") && !viper.IsSet("metric_search.phrase_friendly") {
+	if !appConfigViper.IsSet("artifact_search.phrase_friendly") && !appConfigViper.IsSet("metric_search.phrase_friendly") {
 		cfg.PhraseFriendly = true
 	}
 	return cfg

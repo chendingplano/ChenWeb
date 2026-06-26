@@ -8,11 +8,14 @@ import (
 
 func TestGetArtifactSearchConfigPrefersArtifactSearchSection(t *testing.T) {
 	oldConfig := AppConfig
+	oldViper := appConfigViper
 	t.Cleanup(func() {
 		AppConfig = oldConfig
+		appConfigViper = oldViper
 		viper.Reset()
 	})
 	viper.Reset()
+	appConfigViper = viper.GetViper()
 
 	AppConfig = AppConfigDef{
 		ArtifactSearch: legacyArtifactSearchConfig{
@@ -48,11 +51,14 @@ func TestGetArtifactSearchConfigPrefersArtifactSearchSection(t *testing.T) {
 
 func TestGetArtifactSearchConfigFallsBackToLegacyMetricSearchSection(t *testing.T) {
 	oldConfig := AppConfig
+	oldViper := appConfigViper
 	t.Cleanup(func() {
 		AppConfig = oldConfig
+		appConfigViper = oldViper
 		viper.Reset()
 	})
 	viper.Reset()
+	appConfigViper = viper.GetViper()
 
 	AppConfig = AppConfigDef{
 		MetricSearch: legacyArtifactSearchConfig{

@@ -11,11 +11,14 @@ import (
 // into the DocReviews map and is returned by GetDocReviewsConfig.
 func TestGetDocReviewsConfigUnmarshalsHyphenatedKeys(t *testing.T) {
 	oldConfig := AppConfig
+	oldViper := appConfigViper
 	t.Cleanup(func() {
 		AppConfig = oldConfig
+		appConfigViper = oldViper
 		viper.Reset()
 	})
 	viper.Reset()
+	appConfigViper = viper.New()
 	viper.SetConfigType("toml")
 
 	const sample = `
@@ -30,6 +33,7 @@ quick-pass = ["clarity", "security"]
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
+	appConfigViper = viper.GetViper()
 
 	cfg := GetDocReviewsConfig()
 	if len(cfg) != 3 {
@@ -48,11 +52,14 @@ quick-pass = ["clarity", "security"]
 
 func TestGetLanguagesReadsNestedLanguagesSection(t *testing.T) {
 	oldConfig := AppConfig
+	oldViper := appConfigViper
 	t.Cleanup(func() {
 		AppConfig = oldConfig
+		appConfigViper = oldViper
 		viper.Reset()
 	})
 	viper.Reset()
+	appConfigViper = viper.New()
 	viper.SetConfigType("toml")
 
 	const sample = `
@@ -65,6 +72,7 @@ languages = ["en", "zh"]
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
+	appConfigViper = viper.GetViper()
 
 	got := GetLanguages()
 	if len(got) != 2 {
