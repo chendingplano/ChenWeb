@@ -48,3 +48,4 @@ doc-service
 service-pdf-parser
 parser-result-converter
 deepdoc
+config.local.toml

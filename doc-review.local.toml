@@ -13,20 +13,19 @@
 
 # ── Group (package) defaults ─────────────────────────────────────────────────
 
-[packages.P1]
+[packages.P5]
 enabled = true
-name = "Language & Style"
-desc = "Surface-level writing quality"
-strategy = "document-level"
+name = "Technical & Compliance Standards"
+desc = "regulations"
+strategy = "per-chunk"
 model = "deepseek-v4-flash"
-max_tool_turns = 0
+max_tool_turns = 12
 
-
-[packages.P2]
+[packages.P4]
 enabled = true
-name = "Structure & Organization"
-desc = "Document architecture"
-strategy = "document"
+name = "Consistency"
+desc = "Cross-document coherence"
+strategy = "document-level"
 model = "deepseek-v4-flash"
 max_tool_turns = 0
 
@@ -38,21 +37,21 @@ strategy = "per-chunk"
 model = "deepseek-v4-flash"
 max_tool_turns = 0
 
-[packages.P4]
+[packages.P2]
 enabled = true
-name = "Consistency"
-desc = "Cross-document coherence"
-strategy = "document-level"
+name = "Structure & Organization"
+desc = "Document architecture"
+strategy = "document"
 model = "deepseek-v4-flash"
 max_tool_turns = 0
 
-[packages.P5]
+[packages.P1]
 enabled = true
-name = "Technical & Compliance Standards"
-desc = "regulations"
-strategy = "per-chunk"
+name = "Language & Style"
+desc = "Surface-level writing quality"
+strategy = "document-level"
 model = "deepseek-v4-flash"
-max_tool_turns = 12
+max_tool_turns = 0
 
 [packages.P6]
 enabled = true
