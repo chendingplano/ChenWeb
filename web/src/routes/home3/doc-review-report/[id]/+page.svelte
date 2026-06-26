@@ -514,7 +514,7 @@
 			<p class="meta">
 				Document: {skeleton.meta?.document_title || '—'} (ID: {inputRecordId ?? '—'})<br />
 				Generated: {skeleton.meta?.generated_at || '—'}<br />
-				Review Run: {skeleton.meta?.review_run_id || '—'}
+				Review Request ID: {requestId ?? '—'}
 			</p>
 
 			<div class="summary-cards">
@@ -630,6 +630,7 @@
 														</div>
 														{#if f.description}<p class="finding-desc">{f.description}</p>{/if}
 														{#if f.suggestion}<p class="finding-sug"><em>Suggestion:</em> {f.suggestion}</p>{/if}
+														<p class="finding-loc">Confidence: {Math.round(f.confidence * 100)}%</p>
 														{#if f.location}<p class="finding-loc">Location: {f.location}</p>{/if}
 													</button>
 

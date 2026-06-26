@@ -608,7 +608,7 @@ func (c *DocReviewController) loadActiveFindings(ctx context.Context, recordID i
 		       COALESCE(confidence,0), COALESCE(review_status,'pending')
 		FROM kb.doc_review_findings
 		WHERE input_record_id = $1 AND review_run_id = $2 AND COALESCE(review_status,'') <> 'deleted'
-		ORDER BY id`, recordID, reviewRunID)
+		ORDER BY severity DESC, confidence DESC, location ASC`, recordID, reviewRunID)
 	if err != nil {
 		return nil, fmt.Errorf("load active findings: %w", err)
 	}

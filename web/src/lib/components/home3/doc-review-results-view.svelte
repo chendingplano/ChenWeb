@@ -377,10 +377,10 @@
                                 {#if finding.suggestion}
                                     <p style="margin-top: 0.5rem; color: {accent}; font-size: 0.85rem;"><strong>Suggestion:</strong> {finding.suggestion}</p>
                                 {/if}
+                                <p style="margin-top: 0.25rem; color: {textMuted}; font-size: 0.75rem;">Confidence: {Math.round(finding.confidence * 100)}%</p>
                                 {#if finding.location}
                                     <p style="margin-top: 0.25rem; color: {textMuted}; font-size: 0.8rem;">Location: {finding.location}</p>
                                 {/if}
-                                <p style="margin-top: 0.25rem; color: {textMuted}; font-size: 0.75rem;">Confidence: {Math.round(finding.confidence * 100)}%</p>
                             </div>
                         {/if}
                     </div>
