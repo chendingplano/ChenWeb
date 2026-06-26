@@ -357,7 +357,7 @@ func TestTranslationInTargetLanguage_zh(t *testing.T) {
 	}{
 		{"all Chinese fields", FindingTranslation{Title: "中文", Description: "中文描述", Suggestion: "中文建议"}, "zh", true},
 		{"all English fields", FindingTranslation{Title: "English", Description: "English desc", Suggestion: "English suggestion"}, "zh", false},
-		{"some Chinese fields", FindingTranslation{Title: "English", Description: "包含中文的描述", Suggestion: "English suggestion"}, "zh", true},
+		{"some Chinese fields but missing in title and suggestion", FindingTranslation{Title: "English", Description: "包含中文的描述", Suggestion: "English suggestion"}, "zh", false},
 		{"empty fields", FindingTranslation{}, "zh", false},
 		{"Chinese with en language", FindingTranslation{Title: "中文", Description: "中文"}, "en", false},
 	}
