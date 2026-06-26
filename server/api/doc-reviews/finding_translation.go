@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"unicode"
 )
 
 // FindingTranslator translates the fields displayed in the review report.
@@ -51,11 +53,11 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 	if err != nil {
 		return FindingTranslation{}, err
 	}
-	prompt := "Translate the document review finding fields into the requested language. Translate all natural-language prose into the requested language. Translate finding_type too; it is user-visible and must be translated even if it looks like snake_case or a code-like label. Preserve standards identifiers, formulas, product names, and explicit literal identifiers that appear inside the prose. If language is zh, use Simplified Chinese. Return JSON with exactly these string keys: finding_type, title, description, suggestion."
+	prompt := "Translate the document review finding fields INTO the target language specified by the \"language\" field in the JSON input below. The \"language\" field IS the target language for translation — do NOT treat it as the source language. Translate all natural-language prose into the target language. Translate finding_type too; it is user-visible and must be translated even if it looks like snake_case or a code-like label. Preserve standards identifiers, formulas, product names, and explicit literal identifiers that appear inside the prose. If the target language is zh, use Simplified Chinese. If any field's content is already in the target language, output it unchanged — do not translate it away from the target language. Return JSON with exactly these string keys: finding_type, title, description, suggestion."
 	if strings.TrimSpace(retryInstruction) != "" {
 		prompt += " " + strings.TrimSpace(retryInstruction)
 	}
-	logger.Info("calling finding translation llm",
+	logger.Info("finding translation start",
 		"model_name", t.modelName,
 		"prompt_name", findingTranslationPromptName,
 		"language", language,
@@ -67,10 +69,7 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 	if err != nil {
 		return FindingTranslation{}, err
 	}
-	logger.Info("finding translation llm response",
-		"model_name", t.modelName,
-		"prompt_name", findingTranslationPromptName,
-		"language", language,
+	logger.Info("finding translation end  ",
 		"finding_id", finding.ID,
 		"is_retry", strings.TrimSpace(retryInstruction) != "",
 		"response", payload,
@@ -146,6 +145,51 @@ func equivalentLocalizedContent(src FindingItem, localized FindingItem) bool {
 		strings.TrimSpace(localized.Suggestion) == strings.TrimSpace(src.Suggestion)
 }
 
+// containsChineseChars reports whether s contains any CJK Unified Ideograph (Han character).
+func containsChineseChars(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// findingInTargetLanguage reports whether the natural-language prose fields of
+// the finding (title, description, suggestion) are already written in the target
+// language. finding_type is metadata (often English snake_case) and is excluded
+// from this check. When this returns true the LLM call can be skipped entirely;
+// the finding is used as its own translation.
+func findingInTargetLanguage(f FindingItem, language string) bool {
+	language = supportedLanguageCode(language)
+	if language == "" {
+		return false
+	}
+	switch language {
+	case "zh":
+		return containsChineseChars(f.Title) &&
+			containsChineseChars(f.Description) &&
+			containsChineseChars(f.Suggestion)
+	default:
+		return false
+	}
+}
+
+// translationInTargetLanguage reports whether the translated prose fields
+// contain characters from the target language. A translation whose output
+// still lacks target-language characters is likely stale English from a
+// model failure, even if its text differs from the source.
+func translationInTargetLanguage(tr FindingTranslation, language string) bool {
+	switch supportedLanguageCode(language) {
+	case "zh":
+		return containsChineseChars(tr.Title) ||
+			containsChineseChars(tr.Description) ||
+			containsChineseChars(tr.Suggestion)
+	default:
+		return false
+	}
+}
+
 func likelyUntranslatedForLanguage(src FindingItem, tr FindingTranslation, language string) bool {
 	language = supportedLanguageCode(language)
 	if language == "" {
@@ -153,6 +197,19 @@ func likelyUntranslatedForLanguage(src FindingItem, tr FindingTranslation, langu
 	}
 	localized := applyFindingTranslation(src, tr)
 	if !equivalentLocalizedContent(src, localized) {
+		// The cached/generated content differs from the source. Normally this
+		// means the text was translated successfully. But if the result still
+		// doesn't contain target-language characters, it is likely stale
+		// English output from a model failure — treat it as untranslated so
+		// the system retries.
+		if !translationInTargetLanguage(tr, language) {
+			return true
+		}
+		return false
+	}
+	// If the source content is already in the target language, identical
+	// content means it was correctly left as-is, not that translation failed.
+	if findingInTargetLanguage(src, language) {
 		return false
 	}
 	// For now we only offer non-English UI languages configured by operators.
@@ -200,6 +257,23 @@ func (c *DocReviewController) localizeFinding(ctx context.Context, language stri
 			return applyFindingTranslation(f, tr), nil
 		}
 	}
+	// If the finding's prose fields are already in the target language, skip
+	// the LLM call entirely. Save the source content as the cached translation
+	// so subsequent requests for this language hit the cache.
+	if findingInTargetLanguage(f, language) {
+		tr := FindingTranslation{
+			FindingType: f.FindingType,
+			Title:       f.Title,
+			Description: f.Description,
+			Suggestion:  f.Suggestion,
+		}
+		if err := saveFindingTranslation(ctx, c.DB, f.ID, language, tr); err != nil {
+			logger.Warn("failed to save self-translation for already-localized finding",
+				"finding_id", f.ID, "language", language, "error", err)
+		}
+		return f, nil
+	}
+
 	translator := c.Translator
 	if translator == nil {
 		var err error
@@ -254,24 +328,57 @@ func (c *DocReviewController) localizeFindings(ctx context.Context, language str
 		c.Translator = translator
 	}
 
-	out := make([]FindingItem, 0, len(findings))
-	translatedCount := 0
-	for _, f := range findings {
-		localized, err := c.localizeFinding(ctx, language, f, metadataByFindingID[f.ID])
-		if err != nil {
-			logger.Warn("doc review finding localization failed",
-				"finding_id", f.ID,
-				"language", language,
-				"error", err,
-				"prompt_name", findingTranslationPromptName,
-				"model_name", llmTranslatorModelName(c.Translator),
-			)
-			return nil, err
+	// Translate findings concurrently. On first error, cancel remaining in-flight
+	// translations and return the error.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		idx     int
+		finding FindingItem
+		err     error
+	}
+
+	out := make([]FindingItem, len(findings))
+	ch := make(chan result, len(findings))
+	var wg sync.WaitGroup
+
+	for i, f := range findings {
+		wg.Add(1)
+		go func(idx int, finding FindingItem) {
+			defer wg.Done()
+			localized, err := c.localizeFinding(ctx, language, finding, metadataByFindingID[finding.ID])
+			if err != nil {
+				cancel()
+				ch <- result{idx: idx, err: err}
+				return
+			}
+			ch <- result{idx: idx, finding: localized}
+		}(i, f)
+	}
+
+	wg.Wait()
+	close(ch)
+
+	var firstErr error
+	for r := range ch {
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
 		}
-		if !equivalentLocalizedContent(f, localized) {
+		if r.err == nil {
+			out[r.idx] = r.finding
+		}
+	}
+
+	if firstErr != nil {
+		return nil, fmt.Errorf("translate findings to %s: %w", language, firstErr)
+	}
+
+	translatedCount := 0
+	for i := range out {
+		if !equivalentLocalizedContent(findings[i], out[i]) {
 			translatedCount++
 		}
-		out = append(out, localized)
 	}
 	logger.Info("localized doc review findings", "language", language, "finding_count", len(findings), "translated_count", translatedCount)
 	return out, nil
