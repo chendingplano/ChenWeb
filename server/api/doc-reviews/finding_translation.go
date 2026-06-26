@@ -55,10 +55,26 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 	if strings.TrimSpace(retryInstruction) != "" {
 		prompt += " " + strings.TrimSpace(retryInstruction)
 	}
+	logger.Info("calling finding translation llm",
+		"model_name", t.modelName,
+		"prompt_name", findingTranslationPromptName,
+		"language", language,
+		"finding_id", finding.ID,
+		"is_retry", strings.TrimSpace(retryInstruction) != "",
+		"content", string(input),
+	)
 	payload, err := t.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, findingTranslationPromptName, prompt, t.modelName, string(input), "translate_doc_review_finding", "MID-CWB-DR-TRANSLATE"))
 	if err != nil {
 		return FindingTranslation{}, err
 	}
+	logger.Info("finding translation llm response",
+		"model_name", t.modelName,
+		"prompt_name", findingTranslationPromptName,
+		"language", language,
+		"finding_id", finding.ID,
+		"is_retry", strings.TrimSpace(retryInstruction) != "",
+		"response", payload,
+	)
 	return findingTranslationFromMap(payload), nil
 }
 
