@@ -11,6 +11,7 @@ import (
 // response.
 type fakeJSONExtractor struct {
 	out           map[string]any
+	seq           []map[string]any
 	err           error
 	promptNames   []string
 	modelNames    []string
@@ -26,6 +27,11 @@ func (f *fakeJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExt
 	f.modelNames = append(f.modelNames, in.ModelName)
 	f.inputTexts = append(f.inputTexts, in.InputText)
 	f.documentFirst = append(f.documentFirst, in.DocumentFirst)
+	if len(f.seq) > 0 {
+		next := f.seq[0]
+		f.seq = f.seq[1:]
+		return next, f.err
+	}
 	return f.out, f.err
 }
 
