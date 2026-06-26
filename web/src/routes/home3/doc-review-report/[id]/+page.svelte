@@ -583,7 +583,7 @@
 					</button>
 
 					{#if expandedPackages[group.pass]}
-						<div class="package-body">
+						<div class="package-body scroll-list">
 							{#each group.reviewers as rv (rv.aspect)}
 								{@const rkey = reviewerKey(group.pass, rv.aspect)}
 								<div class="reviewer">
@@ -743,7 +743,7 @@
 	}
 	.left-panel {
 		height: 100%;
-		overflow-y: auto;
+		overflow: hidden;
 		padding: 1.5rem 1.75rem;
 		box-sizing: border-box;
 		flex: 0 0 auto;
@@ -909,7 +909,10 @@
 		padding: 0.1rem 0.55rem;
 	}
 	.package-body {
+		max-height: min(52vh, calc(100vh - 28rem));
+		overflow-y: auto;
 		padding: 0.25rem 0 0.25rem 0.75rem;
+		padding-right: 0.45rem;
 		margin-top: 0.35rem;
 	}
 	.reviewer {
