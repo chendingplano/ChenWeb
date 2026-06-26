@@ -39,6 +39,10 @@
 		filterDocStructureLines,
 		getDocStructureFilterLabel
 	} from './doc-structure-filters.js';
+	import {
+		buildDocStructureLineViews,
+		docStructureLineKey
+	} from './doc-structure-line-keys.js';
 	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
 
 	let {
@@ -169,7 +173,7 @@
 	});
 
 	function lineKey(line: DocStructureLine): string {
-		return `${line.page_number}:${line.line_number}`;
+		return docStructureLineKey(line);
 	}
 
 	function isHeadingLine(line: DocStructureLine): boolean {
@@ -300,6 +304,7 @@
 		const matcher = buildSearchMatcher(q);
 		return byType.filter((ln) => matcher(ln.content || '').matched);
 	});
+	let filteredLineViews = $derived(buildDocStructureLineViews(filteredLines));
 
 	let headingCount = $derived.by(() => lines.filter((ln) => isHeadingLine(ln)).length);
 
@@ -1185,11 +1190,11 @@
 						<span>Line Type</span>
 						<span>Content</span>
 					</div>
-					{#each filteredLines as line (`${line.page_number}-${line.line_number}`)}
-						{#if editingLineKey === lineKey(line)}
+					{#each filteredLineViews as { line, lineKey: viewLineKey, uiKey } (uiKey)}
+						{#if editingLineKey === viewLineKey}
 							<div
 								class="line-card line-card-editing"
-								class:selected={selectedLineKey === lineKey(line)}
+								class:selected={selectedLineKey === viewLineKey}
 							>
 								<form
 									class="line-edit-form"
