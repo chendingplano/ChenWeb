@@ -416,11 +416,14 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 			return inventoryChunkOutcome{failed: true, fallback: wasFallback}, nil
 		}
 
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("extract inventory items end  ",
 			"record_id", recordID,
 			"chunk_idx", chunk_id+1,
 			"extracted", len(chunkItems),
 			"ms_used", time.Since(localStart).Milliseconds(),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
 		)
 
 		return inventoryChunkOutcome{

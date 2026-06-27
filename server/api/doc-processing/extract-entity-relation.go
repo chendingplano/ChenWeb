@@ -585,12 +585,15 @@ func (p *EntityRelationProcessor) processChunk(
 		chunkRelations = normalizeRelationRows(payload["relations"], chunk.SeqNo)
 		chunkEntityCount = len(chunkEntities)
 		chunkRelationCount = len(chunkRelations)
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("extract entities end  ",
 			"record_id", recordID,
 			"chunk_idx", idx,
 			"seq_no", chunk.SeqNo,
 			"entities", fmt.Sprintf("entities:%d", chunkEntityCount),
 			"ms_used", time.Since(callStart).Milliseconds(),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
 		)
 	}
 

@@ -504,10 +504,14 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 			p.Logger.Error("failed extracting from chunk", "error", err)
 			return chunkResult{}, fmt.Errorf("(MID_26053106) extract provisions from chunk via llm: %w", err)
 		}
+		usedFallback := strings.TrimSpace(p.FallbackModelName) != "" && strings.TrimSpace(modelName) == strings.TrimSpace(p.FallbackModelName)
+		cacheHit, cacheMiss := cacheTokenCounts(p.callExtractor(usedFallback))
 		p.Logger.Info("extract provisions end  ",
 			"record_id", recordID,
 			"extracted provisions", numInChunk,
-			"ms_used", time.Since(callStart).Milliseconds())
+			"ms_used", time.Since(callStart).Milliseconds(),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss)
 		return chunkResult{
 			payload:    payload,
 			modelName:  modelName,

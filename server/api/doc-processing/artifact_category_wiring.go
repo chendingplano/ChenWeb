@@ -136,7 +136,7 @@ func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, cate
 		"promptName", promptName,
 	)
 	start := time.Now()
-	payload, err := c.extractor.ExtractJSON(ctx, newLLMJSONInput(
+	catIn := newLLMJSONInput(
 		ctx,
 		promptName,
 		c.promptText,
@@ -144,7 +144,13 @@ func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, cate
 		inputText,
 		"create_artifact_category",
 		"MID-CWB-CREATE-ARTIFACT-CATEGORY",
-	))
+	)
+	// Category creation is task-first, not document-first: the large repeated content here is
+	// the prompt template (identical every call), while the per-call input (category key +
+	// context) is small and varies. Keeping the template as the system prefix lets DeepSeek
+	// reuse it across the many category calls in a run. See ADR 2026062701.
+	catIn.DocumentFirst = false
+	payload, err := c.extractor.ExtractJSON(ctx, catIn)
 
 	c.logger.Info("Create Category end  ",
 		"categoryType", categoryType,

@@ -377,6 +377,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			return semanticProjectionWorkerResult{},
 				fmt.Errorf("(MID_26052120) extract semantic projection candidate for chunk seq=%d: %w", chunk.SeqNo, err)
 		}
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("semantic proj end         ",
 			"record_id", recordID,
 			"chunk_idx", i,
@@ -384,6 +385,8 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			"semantic_projection_len", len(strings.TrimSpace(asString(payload["semantic_projection"]))),
 			"keywords_count", len(toStringSlice(payload["keywords"])),
 			"ms_used", time.Since(callStart).Milliseconds(),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
 		)
 
 		usedCandidateModel := strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.CandidateModelName))
@@ -440,12 +443,15 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		}
 
 		lang := ApiUtils.NormalizeLang(strings.TrimSpace(asString(payload2["language"])))
+		cacheHit2, cacheMiss2 := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("semantic proj end         ",
 			"record_id", recordID,
 			"seq_no", cand.SeqNo,
 			"language", lang,
 			"descriptive_name", asString(payload2["descriptive_name"]),
 			"ms_used", time.Since(callStart2).Milliseconds(),
+			"cache_hit", cacheHit2,
+			"cache_miss", cacheMiss2,
 		)
 		normalized := normalizeSemanticProjection(payload2)
 		return semanticProjectionWorkerResult{

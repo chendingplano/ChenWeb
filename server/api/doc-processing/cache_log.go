@@ -33,3 +33,18 @@ func extractorCacheTokens(extractor any) (hit, miss *int64) {
 	m := int64(usage.PromptCacheMissTokens)
 	return &h, &m
 }
+
+// cacheTokenCounts is the plain-int variant of extractorCacheTokens for structured-logger
+// output (per-goroutine "end" log lines). Returns 0/0 when the extractor reports no usage.
+// Call it in the same goroutine immediately after the LLM call whose tokens you are logging.
+func cacheTokenCounts(extractor any) (hit, miss int64) {
+	reporter, ok := extractor.(llmJSONUsageReporter)
+	if !ok {
+		return 0, 0
+	}
+	usage := reporter.LastJSONUsage()
+	if usage == nil {
+		return 0, 0
+	}
+	return int64(usage.PromptCacheHitTokens), int64(usage.PromptCacheMissTokens)
+}

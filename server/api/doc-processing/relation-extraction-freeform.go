@@ -120,10 +120,13 @@ func (p *EntityRelationProcessor) processFreeformRelationChunk(
 	if err == nil && payload != nil {
 		detectedLanguage = strings.TrimSpace(asString(payload["language"]))
 		relations = normalizeRelationRows(payload["relations"], 0)
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("extract relation end  ",
 			"record_id", recordID, "chunk_idx", idx,
 			"relations", len(relations),
 			"ms_used", time.Since(callStart).Milliseconds(),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
 		)
 	}
 

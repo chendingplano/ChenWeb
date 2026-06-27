@@ -742,11 +742,14 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 				)
 			}
 		}
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("extract metric end  ",
 			"record_id", record_id,
 			"extracted", len(result.mentions),
 			"language", lang,
 			"ms_used", time.Since(chunkStart).Milliseconds(),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
 		)
 
 		return result, nil
@@ -860,11 +863,14 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 				)
 			}
 		}
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("enrich metric end  ",
 			"record_id", record_id,
 			"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
 			"metrics_in_batch", len(result.metrics),
 			"ms_used", time.Since(batchStart).Milliseconds(),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
 		)
 		return result, nil
 	})
