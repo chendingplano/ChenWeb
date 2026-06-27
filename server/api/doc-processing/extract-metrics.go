@@ -340,7 +340,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	}
 
 	p.persistMetricsInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(inputChunks)))
-	result, err := p.extractMetricsFromChunksWithLLM(ctx, evt.RecordID, inputChunks)
+	result, err := p.extractMetricsFromChunksWithLLM(ctx, evt.RecordID, chunks, buildDocContextLine(rec))
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) || isCtxStopped(ctx) {
 			p.stopAndPersistMetrics(context.Background(), rec, start)
@@ -664,7 +664,12 @@ func (p *MetricsProcessor) extractMetricsFromLinesWithLLM(ctx context.Context, l
 func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	ctx context.Context,
 	record_id int64,
-	chunks []Block) (metricExtractionResult, error) {
+	chunks []Chunk,
+	docCtx string) (metricExtractionResult, error) {
+
+	// Convert to blocks for internal output mapping; chunksToBlocks is 1:1 so
+	// chunks[i] and blocks[i] correspond to the same logical unit.
+	blocks := chunksToBlocks(chunks)
 
 	maxTasks := p.MaxTasks
 	if maxTasks <= 0 {
@@ -688,22 +693,26 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		"prompt", p.MentionPromptRef,
 	)
 	pass1Results, pass1Err := runConcurrent(ctx, maxTasks, len(chunks), func(concCtx context.Context, i int) (pass1Result, error) {
-		chunk := chunks[i]
+		origChunk := chunks[i]
+		block := blocks[i]
 		if isCtxStopped(concCtx) {
 			return pass1Result{}, ErrPipelineStopped
 		}
-		userPrompt := buildMetricCandidateUserPrompt(chunk.Lines)
+		// Canonical chunk InputText (shared, cacheable prefix); schema in the prompt.
+		// See ADR 2026062701 §Phase 2.3.
+		inputText := canonicalChunkInputText(origChunk.Lines, docCtx)
+		taskPrompt := metricCandidateTask(p.MentionPromptText)
 		chunkStart := time.Now()
 		p.Logger.Info("extract metric start",
 			"record_id", record_id,
-			"num_lines", len(chunk.Lines),
+			"num_lines", len(origChunk.Lines),
 			"chunk", i,
 		)
 		callStart := p.Now()
-		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), chunk.Index)
-		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(concCtx, userPrompt)
+		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), block.Index)
+		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(concCtx, inputText, taskPrompt)
 		progress := tracker.advance()
-		p.logExtractMetricsChunk(ctx, record_id, callID, chunk.Index, len(chunks),
+		p.logExtractMetricsChunk(ctx, record_id, callID, block.Index, len(chunks),
 			[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef,
 			payload, err, callStart, p.Now(), progress)
 		if err != nil {
@@ -720,7 +729,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		didFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName)
 		raw, _ := payload["candidates"].([]any)
 		result := pass1Result{
-			mentions:    normalizeMetricCandidateMentions(raw, chunk),
+			mentions:    normalizeMetricCandidateMentions(raw, block),
 			language:    lang,
 			modelName:   usedModel,
 			didFallback: didFallback,
@@ -729,14 +738,14 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 			if len(mention.SourceLineSpans) == 0 {
 				p.Logger.Error("pass1: candidate has empty source_line_spans",
 					"record_id", record_id,
-					"chunk_index", chunk.Index,
+					"chunk_index", block.Index,
 					"metric_name_hint", mention.MetricNameHint,
 					"evidence_quote", mention.EvidenceQuote,
 				)
 			} else {
 				p.Logger.Info("pass1: candidate source_line_spans",
 					"record_id", record_id,
-					"chunk_index", chunk.Index,
+					"chunk_index", block.Index,
 					"metric_name_hint", mention.MetricNameHint,
 					"source_line_spans", mention.SourceLineSpans,
 				)
@@ -825,7 +834,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		enrichStart := p.Now()
 		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), i+1)
 		payload, err := p.extractMetricPayload(concCtx, buildMetricRelationBatchPrompt(batch.candidates),
-			p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "MID-26052903")
+			p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "enrich_metrics", "MID-26052903")
 		progress := tracker.advance()
 		p.logEnrichMetricsChunk(ctx, record_id, enrichCallID, batch.chunkIdx, len(batches),
 			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
@@ -979,7 +988,11 @@ func parseMetricInputLines(lines []string) ([]metricParsedLine, error) {
 }
 */
 
-func buildMetricCandidateUserPrompt(lines []BlockLine) string {
+// metricCandidateTask is the pass-1 task prompt (base prompt + output schema).
+// The chunk lines are NOT included — they are the canonical InputText (document section)
+// under document-first layout, so this chunk's prefix matches the other chunk processors.
+// See ADR 2026062701 §Phase 2.3.
+func metricCandidateTask(base string) string {
 	schema := map[string]any{
 		"language": "string",
 		"candidates": []map[string]any{{
@@ -994,8 +1007,11 @@ func buildMetricCandidateUserPrompt(lines []BlockLine) string {
 		}},
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nInput lines (JSON array):\n" + blockLinesToJSON(lines)
+	task := "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON)
+	if strings.TrimSpace(base) == "" {
+		return task
+	}
+	return strings.TrimSpace(base) + "\n\n" + task
 }
 
 /*
@@ -1885,12 +1901,9 @@ func (p *MetricsProcessor) extractMetricPayload(
 	promptText string,
 	modelName string,
 	cfg structureModelConfig,
+	callReason string,
 	loc string) (map[string]any, error) {
 	applyStructureModelConfigToExtractor(p.Extractor, cfg)
-	callReason := "extract_metric_candidates"
-	if strings.TrimSpace(promptText) == strings.TrimSpace(p.RelationPromptText) {
-		callReason = "enrich_metrics"
-	}
 	callLoc := strings.TrimSpace(loc)
 	if callLoc == "" {
 		callLoc = "MID-CWB-EXTRACT-METRICS"
@@ -1946,8 +1959,8 @@ func firstPromptLine(promptText string) string {
 }
 */
 
-func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
-	payload, err := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, p.MentionModelName, p.MentionModelCfg, "MID-26052901")
+func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context.Context, inputText, taskPrompt string) (map[string]any, string, error) {
+	payload, err := p.extractMetricPayload(ctx, inputText, taskPrompt, p.MentionModelName, p.MentionModelCfg, "extract_metric_candidates", "MID-26052901")
 	if err == nil {
 		return payload, strings.TrimSpace(p.MentionModelName), nil
 	}
@@ -1976,7 +1989,7 @@ func (p *MetricsProcessor) extractMetricCandidatePayloadWithFallback(ctx context
 		)
 	}
 
-	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, p.MentionPromptText, fallbackModelName, p.FallbackMentionModelCfg, "MID-26052902")
+	payload, fallbackErr := p.extractMetricPayload(ctx, inputText, taskPrompt, fallbackModelName, p.FallbackMentionModelCfg, "extract_metric_candidates", "MID-26052902")
 	if fallbackErr != nil {
 		if isEmptyMetricExtractionError(fallbackErr) {
 			p.Logger.Info("fallback metric candidate extraction returned empty JSON; treating as empty result",

@@ -33,7 +33,7 @@ func TestMetricsProcessor_ExtractMetricPayloadUsesStructuredContractWhenAvailabl
 	p := NewMetricsProcessor(nil, nil, extractor, nil)
 	p.PromptRef = "prompt-extract-metrics-v1.md"
 
-	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{}, "MID-26052908")
+	payload, err := p.extractMetricPayload(context.Background(), "input text", "prompt text", "metrics-model", structureModelConfig{}, "extract_metric_candidates", "MID-26052908")
 	if err != nil {
 		t.Fatalf("extractMetricPayload: %v", err)
 	}
@@ -779,6 +779,21 @@ func makeMetricsBlock(idx, lineNum int) Block {
 	}
 }
 
+func metricsBlocksToChunks(blocks []Block) []Chunk {
+	chunks := make([]Chunk, len(blocks))
+	for i, b := range blocks {
+		lines := make([]MarkedLine, len(b.Lines))
+		for j, bl := range b.Lines {
+			lines[j] = MarkedLine{
+				Mark: bl.Flag,
+				Line: Line{LineNo: bl.LineNumber, PageNo: bl.PageNumber, LineType: bl.LineType, Content: bl.Content},
+			}
+		}
+		chunks[i] = Chunk{SeqNo: b.Index, Lines: lines}
+	}
+	return chunks
+}
+
 // pass1NoCandidates is the extractor output for a Pass 1 chunk with no candidates.
 var pass1NoCandidates = map[string]any{
 	"language":   "en",
@@ -1046,7 +1061,7 @@ func TestMetricsProcessor_Pass1ConcurrencyBound(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+		_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, metricsBlocksToChunks(blocks), "")
 		done <- err
 	}()
 
@@ -1103,7 +1118,7 @@ func TestMetricsProcessor_Pass2ConcurrencyBound(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+		_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, metricsBlocksToChunks(blocks), "")
 		done <- err
 	}()
 
@@ -1169,7 +1184,7 @@ func TestMetricsProcessor_Pass1DeterministicOrder(t *testing.T) {
 	}
 
 	p := makeTestMetricsProcessor(ext, 1) // sequential — deterministic call order
-	result, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+	result, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, metricsBlocksToChunks(blocks), "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1194,7 +1209,7 @@ func TestMetricsProcessor_Pass1FailFast(t *testing.T) {
 	}
 
 	p := makeTestMetricsProcessor(ext, 1) // sequential so the error always fires
-	_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+	_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, metricsBlocksToChunks(blocks), "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1224,7 +1239,7 @@ func TestMetricsProcessor_Pass2FailFast(t *testing.T) {
 	}
 
 	p := makeTestMetricsProcessor(ext, 1) // sequential so the error always fires
-	_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, blocks)
+	_, err := p.extractMetricsFromChunksWithLLM(context.Background(), 1, metricsBlocksToChunks(blocks), "")
 	if err == nil {
 		t.Fatal("expected error from Pass 2, got nil")
 	}
