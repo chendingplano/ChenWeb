@@ -1419,20 +1419,23 @@ func (p *InventoryItemsProcessor) logInventoryItemsLLMCall(ctx context.Context, 
 	})
 	extraStr := string(extraJSON)
 	pass := 1
+	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
-		CallReason:    "extract inventory items",
-		DocProcName:   p.Name(),
-		ModelNames:    modelNames,
-		PromptName:    p.PromptRef,
-		RecordID:      &recordID,
-		ProcProgress:  &progress,
-		Pass:          &pass,
-		LLMCallID:     &callID,
-		ActivityName:  stringPtr("extract_inventory_items"),
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            "extract inventory items",
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            p.PromptRef,
+		RecordID:              &recordID,
+		ProcProgress:          &progress,
+		Pass:                  &pass,
+		LLMCallID:             &callID,
+		ActivityName:          stringPtr("extract_inventory_items"),
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if err := p.ProcLogger.LogExtractInventoryItems(ctx, rec, "MID-26053141"); err != nil {
 		p.Logger.Warn("failed to write inventory items llm log", "call_id", callID, "error", err)

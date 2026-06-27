@@ -531,20 +531,23 @@ func (p *StructuredKnowledgeProcessor) logLLMCall(
 	if pass == 2 {
 		callReason = "enrich structured knowledge"
 	}
+	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
-		CallReason:    callReason,
-		DocProcName:   p.Name(),
-		ModelNames:    modelNames,
-		PromptName:    promptName,
-		RecordID:      &recordID,
-		ProcProgress:  &progress,
-		Pass:          &pass,
-		LLMCallID:     &callID,
-		ActivityName:  &activity,
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            callReason,
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		RecordID:              &recordID,
+		ProcProgress:          &progress,
+		Pass:                  &pass,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	logFn := p.ProcLogger.LogExtractStructuredKnowledge
 	if pass == 2 {

@@ -58,6 +58,11 @@ type DocProcLogRecord struct {
 	ExtraInfoJSON *string // serialized JSON, nil → NULL
 	MSUsed        *int64
 	LogLoc        *string // "<filename>_<line>" of the Log* call site
+	// Provider prompt-cache counters for the LLM call this entry records.
+	// nil → NULL (non-LLM entries). Populated from llmclients.Usage via
+	// extractorCacheTokens at the call site. See ADR 2026062501 / doc-processor cache ADR.
+	PromptCacheHitTokens  *int64
+	PromptCacheMissTokens *int64
 }
 
 // DocProcLogFilter specifies optional server-side filters for ListDocProcLogs.
@@ -91,6 +96,9 @@ type DocProcLogRow struct {
 	MSUsed        *int64
 	LogLoc        *string
 	CreateTime    string
+
+	PromptCacheHitTokens  *int64
+	PromptCacheMissTokens *int64
 }
 
 // DocProcLogger wraps a db connection and exposes logging helpers for processors.
@@ -334,11 +342,13 @@ INSERT INTO kb.doc_proc_logs (
     extra_info,
     ms_used,
     log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, $15, NOW()
+    $14, $15, $16, $17, NOW()
 )`
 	_, err := db.ExecContext(ctx, stmt,
 		nullableString(rec.CallReason),
@@ -356,6 +366,8 @@ INSERT INTO kb.doc_proc_logs (
 		rec.ExtraInfoJSON,
 		rec.MSUsed,
 		loc,
+		rec.PromptCacheHitTokens,
+		rec.PromptCacheMissTokens,
 	)
 	if err != nil {
 		return err
@@ -458,7 +470,8 @@ SELECT id, COALESCE(call_reason,''), doc_proc_name,
        COALESCE(prompt_name,''), record_id, proc_progress, entry_type,
        pass, llm_call_id, activity_name,
        artifact::text, errors, extra_info::text,
-       ms_used, log_loc, COALESCE(to_char(create_time, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), '')
+       ms_used, log_loc, COALESCE(to_char(create_time, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), ''),
+       prompt_cache_hit_tokens, prompt_cache_miss_tokens
 FROM kb.doc_proc_logs
 ` + whereClause + `
 ORDER BY ` + orderBy + ` ` + orderDir + `
@@ -475,7 +488,7 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 		var r DocProcLogRow
 		var modelArr []string
 		var artifact, extraInfo sql.NullString
-		var msUsed sql.NullInt64
+		var msUsed, cacheHit, cacheMiss sql.NullInt64
 		if err := rows.Scan(
 			&r.ID,
 			&r.CallReason,
@@ -494,6 +507,8 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 			&msUsed,
 			&r.LogLoc,
 			&r.CreateTime,
+			&cacheHit,
+			&cacheMiss,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -506,6 +521,12 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 		}
 		if msUsed.Valid {
 			r.MSUsed = &msUsed.Int64
+		}
+		if cacheHit.Valid {
+			r.PromptCacheHitTokens = &cacheHit.Int64
+		}
+		if cacheMiss.Valid {
+			r.PromptCacheMissTokens = &cacheMiss.Int64
 		}
 		results = append(results, r)
 	}

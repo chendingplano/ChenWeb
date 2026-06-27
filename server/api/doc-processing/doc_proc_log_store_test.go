@@ -34,11 +34,13 @@ INSERT INTO kb.doc_proc_logs (
     extra_info,
     ms_used,
     log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, $15, NOW()
+    $14, $15, $16, $17, NOW()
 )`)
 	mock.ExpectExec(insertQuery).
 		WithArgs(
@@ -57,6 +59,8 @@ INSERT INTO kb.doc_proc_logs (
 			&extra,
 			&msUsed,
 			"MID-26052803",
+			nil,
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -101,11 +105,13 @@ INSERT INTO kb.doc_proc_logs (
     extra_info,
     ms_used,
     log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, $15, NOW()
+    $14, $15, $16, $17, NOW()
 )`)
 	mock.ExpectExec(insertQuery).
 		WithArgs(
@@ -124,6 +130,8 @@ INSERT INTO kb.doc_proc_logs (
 			&extra,
 			nil,
 			"MID-26052811",
+			nil,
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -175,13 +183,14 @@ func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "record_id", "proc_progress", "entry_type",
 		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
-		"ms_used", "log_loc", "coalesce",
+		"ms_used", "log_loc", "coalesce", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
 	}).AddRow(
 		int64(9), "summary call", "generate_topics", `{topic-model}`, "topic-prompt", int64(81), "66% (2/3)", "test_entry_type",
 		nil, nil, nil, nil, nil, `{"topics_generated":7}`, int64(2400), "generate_phase_processors_test.go_123", "2026-05-27T12:00:00+00:00",
+		nil, nil,
 	)
 
-	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+WHERE entry_type = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens\s+FROM kb\.doc_proc_logs\s+WHERE entry_type = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
 	mock.ExpectQuery(listQuery).
 		WithArgs("test_entry_type", 50, 0).
 		WillReturnRows(rows)
@@ -228,13 +237,14 @@ func TestSQLStoreListDocProcLogs_OrdersByAllowedField(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "record_id", "proc_progress", "entry_type",
 		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
-		"ms_used", "log_loc", "coalesce",
+		"ms_used", "log_loc", "coalesce", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
 	}).AddRow(
 		int64(10), "llm call", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", int64(55), nil, "test_entry_type",
 		2, "call-1", "enrich_metrics", nil, nil, `{"source":"test"}`, int64(9300), "doc_proc_log_store_test.go_234", "2026-05-27T12:00:00+00:00",
+		nil, nil,
 	)
 
-	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+ORDER BY ms_used ASC\s+LIMIT \$1 OFFSET \$2`
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens\s+FROM kb\.doc_proc_logs\s+ORDER BY ms_used ASC\s+LIMIT \$1 OFFSET \$2`
 	mock.ExpectQuery(listQuery).
 		WithArgs(50, 0).
 		WillReturnRows(rows)

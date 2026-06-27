@@ -822,6 +822,16 @@ func (s *FixedSizeChunkingService) handleGenerateTopicsLines(ctx context.Context
 	return nil
 }
 
+// callExtractor returns the extractor that made the most recent LLM call for a chunk:
+// the fallback extractor when the fallback model was used, otherwise the primary. Used to
+// read the correct provider prompt-cache counters for logging.
+func (s *FixedSizeChunkingService) callExtractor(usedFallback bool) LLMJSONExtractor {
+	if usedFallback && s.FallbackExtractor != nil {
+		return s.FallbackExtractor
+	}
+	return s.Extractor
+}
+
 func (s *FixedSizeChunkingService) logExtractTopicsChunk(
 	ctx context.Context,
 	recordID int64,
@@ -855,18 +865,21 @@ func (s *FixedSizeChunkingService) logExtractTopicsChunk(
 		modelNames = dedupeNonEmpty([]string{s.FallbackModelName})
 	}
 	artifactJSON := docProcJSONOrNil(topics)
+	cacheHit, cacheMiss := extractorCacheTokens(s.callExtractor(usedFallback))
 	if err := s.ProcLogger.LogExtractTopics(ctx, DocProcLogRecord{
-		CallReason:    "extract topics",
-		DocProcName:   "generate_topics",
-		ModelNames:    modelNames,
-		PromptName:    strings.TrimSpace(s.PromptRef),
-		RecordID:      &recordID,
-		ProcProgress:  nullableStringPtr(chunkProgress),
-		LLMCallID:     &callID,
-		ActivityName:  &activityName,
-		ArtifactJSON:  artifactJSON,
-		ExtraInfoJSON: extraJSON,
-		MSUsed:        int64Ptr(msUsed),
+		CallReason:            "extract topics",
+		DocProcName:           "generate_topics",
+		ModelNames:            modelNames,
+		PromptName:            strings.TrimSpace(s.PromptRef),
+		RecordID:              &recordID,
+		ProcProgress:          nullableStringPtr(chunkProgress),
+		LLMCallID:             &callID,
+		ActivityName:          &activityName,
+		ArtifactJSON:          artifactJSON,
+		ExtraInfoJSON:         extraJSON,
+		MSUsed:                int64Ptr(msUsed),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}, "MID-26052807"); err != nil {
 		s.Logger.Warn("(MID_26052808) failed to write extract_topics log",
 			"record_id", recordID, "chunk_seqno", chunk.SeqNo, "error", err)
@@ -1170,18 +1183,21 @@ func (s *FixedSizeChunkingService) generateSummary(
 			errStr = &msg
 		}
 		activityName := "generate_summary"
+		cacheHit, cacheMiss := extractorCacheTokens(s.Extractor)
 		if err := s.ProcLogger.LogGenerateSummary(logCtx, DocProcLogRecord{
-			CallReason:    "generate summary",
-			DocProcName:   "generate_summary",
-			ModelNames:    dedupeNonEmpty([]string{s.SummaryModelName}),
-			PromptName:    s.SummaryPromptRef,
-			RecordID:      &recordID,
-			ProcProgress:  nullableStringPtr(procProgress),
-			LLMCallID:     &callID,
-			ActivityName:  &activityName,
-			ExtraInfoJSON: extraJSON,
-			Errors:        errStr,
-			MSUsed:        int64Ptr(time.Since(startTime).Milliseconds()),
+			CallReason:            "generate summary",
+			DocProcName:           "generate_summary",
+			ModelNames:            dedupeNonEmpty([]string{s.SummaryModelName}),
+			PromptName:            s.SummaryPromptRef,
+			RecordID:              &recordID,
+			ProcProgress:          nullableStringPtr(procProgress),
+			LLMCallID:             &callID,
+			ActivityName:          &activityName,
+			ExtraInfoJSON:         extraJSON,
+			Errors:                errStr,
+			MSUsed:                int64Ptr(time.Since(startTime).Milliseconds()),
+			PromptCacheHitTokens:  cacheHit,
+			PromptCacheMissTokens: cacheMiss,
 		}, "MID-26052850"); err != nil {
 			s.Logger.Warn("failed to write generate_summary log", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
 		}

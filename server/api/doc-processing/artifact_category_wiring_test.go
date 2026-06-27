@@ -72,11 +72,13 @@ INSERT INTO kb.doc_proc_logs (
     extra_info,
     ms_used,
     log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, $15, NOW()
+    $14, $15, $16, $17, NOW()
 )`)
 	mock.ExpectExec(insertQuery).
 		WithArgs(
@@ -95,6 +97,8 @@ INSERT INTO kb.doc_proc_logs (
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			"MID-26060501",
+			nil,
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -168,11 +172,13 @@ INSERT INTO kb.doc_proc_logs (
     extra_info,
     ms_used,
     log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, $15, NOW()
+    $14, $15, $16, $17, NOW()
 )`)
 	mock.ExpectExec(insertQuery).
 		WithArgs(
@@ -191,6 +197,8 @@ INSERT INTO kb.doc_proc_logs (
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			"MID-26060501",
+			nil,
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(insertQuery).
@@ -210,6 +218,8 @@ INSERT INTO kb.doc_proc_logs (
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			"MID-26060501",
+			nil,
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

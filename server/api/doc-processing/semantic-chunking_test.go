@@ -216,6 +216,8 @@ func TestSemanticChunkingService_HandleInput_WritesExtractTopicLogs(t *testing.T
 			jsonWithFieldMatcher{field: "topics_so_far", want: float64(2)},
 			int64PtrValue(0),
 			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

@@ -761,20 +761,23 @@ func (p *EntityRelationProcessor) logLLMCall(
 	}
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
+	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
-		CallReason:    "extract entities",
-		DocProcName:   p.Name(),
-		ModelNames:    modelNames,
-		PromptName:    promptName,
-		RecordID:      &recordID,
-		ProcProgress:  &progress,
-		Pass:          &pass,
-		LLMCallID:     &callID,
-		ActivityName:  &activity,
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            "extract entities",
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		RecordID:              &recordID,
+		ProcProgress:          &progress,
+		Pass:                  &pass,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if activity == "extract_relations" {
 		if err := p.ProcLogger.LogExtractRelations(ctx, rec, "MID-26061301"); err != nil {

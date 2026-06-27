@@ -280,6 +280,15 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 	return nil
 }
 
+// callExtractor returns the extractor whose most recent LLM call should be read for
+// provider prompt-cache counters: the fallback when the fallback model was used.
+func (p *ProvisionsProcessor) callExtractor(usedFallback bool) LLMJSONExtractor {
+	if usedFallback && p.FallbackExtractor != nil {
+		return p.FallbackExtractor
+	}
+	return p.Extractor
+}
+
 func (p *ProvisionsProcessor) logLLMCall(
 	ctx context.Context,
 	callID, activity string,
@@ -321,19 +330,31 @@ func (p *ProvisionsProcessor) logLLMCall(
 	extraJSON, _ := json.Marshal(extraInfo)
 	extraStr := string(extraJSON)
 	callReason := p.Name()
+	usedFallback := false
+	if fb := strings.TrimSpace(p.FallbackModelName); fb != "" {
+		for _, m := range modelNames {
+			if strings.TrimSpace(m) == fb {
+				usedFallback = true
+				break
+			}
+		}
+	}
+	cacheHit, cacheMiss := extractorCacheTokens(p.callExtractor(usedFallback))
 	rec := DocProcLogRecord{
-		CallReason:    callReason,
-		DocProcName:   p.Name(),
-		ModelNames:    modelNames,
-		PromptName:    promptName,
-		RecordID:      &recordID,
-		ProcProgress:  &progress,
-		LLMCallID:     &callID,
-		ActivityName:  &activity,
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            callReason,
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		RecordID:              &recordID,
+		ProcProgress:          &progress,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if err := p.ProcLogger.LogExtractProvisions(ctx, rec, "MID-26052831"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)

@@ -44,5 +44,9 @@ func newLLMJSONInput(
 		RecordID:   llmRecordIDFromContext(ctx),
 		CallReason: callReason,
 		CallLoc:    callLoc,
+		// Document-first layout puts the repeated chunk/block input ahead of the
+		// per-call task instructions so it forms a stable, cacheable prefix for
+		// DeepSeek prompt caching. See ADR 2026062501 (DeepSeek prompt cache).
+		DocumentFirst: true,
 	}
 }

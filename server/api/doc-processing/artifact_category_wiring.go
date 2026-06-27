@@ -191,17 +191,20 @@ func (c *llmCategoryCreator) logCategoryLLMCall(
 	}
 	extraBytes, _ := json.Marshal(extraInfo)
 	extraStr := string(extraBytes)
+	cacheHit, cacheMiss := extractorCacheTokens(c.extractor)
 	rec := DocProcLogRecord{
-		CallReason:    "create_artifact_category",
-		DocProcName:   "create_artifact_category",
-		ModelNames:    []string{modelName},
-		PromptName:    "CREATE_ARTIFACT_CATEGORY_PROMPT",
-		LLMCallID:     nullableStringPtr(callID),
-		ActivityName:  nullableStringPtr(fmt.Sprintf("category_%s", categoryType)),
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            "create_artifact_category",
+		DocProcName:           "create_artifact_category",
+		ModelNames:            []string{modelName},
+		PromptName:            "CREATE_ARTIFACT_CATEGORY_PROMPT",
+		LLMCallID:             nullableStringPtr(callID),
+		ActivityName:          nullableStringPtr(fmt.Sprintf("category_%s", categoryType)),
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	logErr := c.procLogger.LogLLMCall(ctx, rec, "MID-26060501")
 	if logErr != nil {

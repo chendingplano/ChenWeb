@@ -261,16 +261,19 @@ func (p *ExtractDocMetadataProcessor) logLLMCall(
 		s := callErr.Error()
 		errStr = &s
 	}
+	cacheHit, cacheMiss := extractorCacheTokens(p.Client)
 	rec := DocProcLogRecord{
-		DocProcName:  p.Name(),
-		ModelNames:   modelNames,
-		PromptName:   promptName,
-		Pass:         &pass,
-		LLMCallID:    &callID,
-		ActivityName: &activity,
-		ArtifactJSON: artifactStr,
-		Errors:       errStr,
-		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		Pass:                  &pass,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if err := p.ProcLogger.LogExtractDocMetadata(ctx, rec, "MID-26052805"); err != nil {
 		p.Logger.Warn("failed to write extract_doc_metadata log", "call_id", callID, "error", err)

@@ -1090,16 +1090,19 @@ func (p *ProductsProcessor) logLLMCall(
 		s := callErr.Error()
 		errStr = &s
 	}
+	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
-		DocProcName:  p.Name(),
-		ModelNames:   modelNames,
-		PromptName:   promptName,
-		Pass:         &pass,
-		LLMCallID:    &callID,
-		ActivityName: &activity,
-		ArtifactJSON: artifactStr,
-		Errors:       errStr,
-		MSUsed:       int64Ptr(end.Sub(start).Milliseconds()),
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		Pass:                  &pass,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if err := p.ProcLogger.LogLLMCall(ctx, rec, "MID-26052810"); err != nil {
 		p.Logger.Warn("failed to write llm_call log", "call_id", callID, "error", err)

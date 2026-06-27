@@ -1729,19 +1729,22 @@ func (p *MetricsProcessor) logExtractMetricsChunk(
 		errStr = &s
 	}
 	activity := "extract_metric_candidates"
+	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
-		CallReason:    p.Name(),
-		DocProcName:   p.Name(),
-		ModelNames:    modelNames,
-		PromptName:    promptName,
-		RecordID:      int64Ptr(recordID),
-		ProcProgress:  &procProgress,
-		LLMCallID:     &callID,
-		ActivityName:  &activity,
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            p.Name(),
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		RecordID:              int64Ptr(recordID),
+		ProcProgress:          &procProgress,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if err := p.ProcLogger.LogExtractMetrics(ctx, rec, "MID-26052811"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -1788,19 +1791,22 @@ func (p *MetricsProcessor) logEnrichMetricsChunk(
 		errStr = &s
 	}
 	activity := "enrich_metrics"
+	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
-		CallReason:    p.Name(),
-		DocProcName:   p.Name(),
-		ModelNames:    modelNames,
-		PromptName:    promptName,
-		RecordID:      int64Ptr(recordID),
-		ProcProgress:  &procProgress,
-		LLMCallID:     &callID,
-		ActivityName:  &activity,
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            p.Name(),
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		RecordID:              int64Ptr(recordID),
+		ProcProgress:          &procProgress,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if err := p.ProcLogger.LogEnrichMetrics(ctx, rec, "MID-26052812"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

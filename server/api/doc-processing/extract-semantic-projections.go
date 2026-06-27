@@ -549,20 +549,23 @@ func (p *SemanticProjectionsProcessor) logExtractProjectionsChunk(
 	}
 	pass := 1
 	activity := "extract_projection"
+	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
-		CallReason:    "extract semantic projections",
-		DocProcName:   p.Name(),
-		ModelNames:    modelNames,
-		PromptName:    promptName,
-		RecordID:      &recordID,
-		ProcProgress:  &progressStr,
-		Pass:          &pass,
-		LLMCallID:     &callID,
-		ActivityName:  &activity,
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            "extract semantic projections",
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		RecordID:              &recordID,
+		ProcProgress:          &progressStr,
+		Pass:                  &pass,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if err := p.ProcLogger.LogExtractProjections(ctx, rec, "MID-26052813"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -613,20 +616,23 @@ func (p *SemanticProjectionsProcessor) logEnrichProjectionsChunk(
 	}
 	pass := 2
 	activity := "enrich_projection"
+	cacheHit, cacheMiss := extractorCacheTokens(p.Extractor)
 	rec := DocProcLogRecord{
-		CallReason:    "enrich semantic projections",
-		DocProcName:   p.Name(),
-		ModelNames:    modelNames,
-		PromptName:    promptName,
-		RecordID:      &recordID,
-		ProcProgress:  &progressStr,
-		Pass:          &pass,
-		LLMCallID:     &callID,
-		ActivityName:  &activity,
-		ArtifactJSON:  artifactStr,
-		Errors:        errStr,
-		ExtraInfoJSON: &extraStr,
-		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+		CallReason:            "enrich semantic projections",
+		DocProcName:           p.Name(),
+		ModelNames:            modelNames,
+		PromptName:            promptName,
+		RecordID:              &recordID,
+		ProcProgress:          &progressStr,
+		Pass:                  &pass,
+		LLMCallID:             &callID,
+		ActivityName:          &activity,
+		ArtifactJSON:          artifactStr,
+		Errors:                errStr,
+		ExtraInfoJSON:         &extraStr,
+		MSUsed:                int64Ptr(end.Sub(start).Milliseconds()),
+		PromptCacheHitTokens:  cacheHit,
+		PromptCacheMissTokens: cacheMiss,
 	}
 	if err := p.ProcLogger.LogEnrichProjections(ctx, rec, "MID-26052852"); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
