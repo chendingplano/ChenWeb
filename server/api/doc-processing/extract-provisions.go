@@ -48,6 +48,15 @@ type ProvisionsProcessor struct {
 	ArtifactWebDir            string
 	ExtractProvisionsMaxTasks int
 	ExtractProvisionsInput    string // "chunks" (default) or "blocks"
+
+	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
+	batchChunks   []Chunk
+	batchDocCtx   string
+	batchRecordID int64
+	batchRec      DocMetadataInputRecord
+	batchStart    time.Time
+	batchResult   provisionExtractionResult
+	batchResults  []provisionChunkResult // per-chunk results for final accumulation
 }
 
 type ProvisionsStore interface {
@@ -75,6 +84,14 @@ type provisionExtractionResult struct {
 	ModelName     string
 	LLMCallCount  int
 	FallbackCount int
+}
+
+// provisionChunkResult holds the output of one concurrent chunk worker for provisions.
+type provisionChunkResult struct {
+	payload    map[string]any
+	modelName  string
+	isFallback bool
+	numInChunk int
 }
 
 func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, extractor LLMJSONExtractor, _ ApiTypes.JimoLogger) *ProvisionsProcessor {
@@ -467,22 +484,15 @@ func (p *ProvisionsProcessor) resolveChunks(ctx context.Context, evt LineFileGen
 func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Context, chunks []Chunk, recordID int64, docCtx string) (provisionExtractionResult, error) {
 	extractID := p.Now().Format("20060102-150405")
 
-	type chunkResult struct {
-		payload    map[string]any
-		modelName  string
-		isFallback bool
-		numInChunk int
-	}
-
-	results, runErr := runConcurrent(ctx, p.ExtractProvisionsMaxTasks, len(chunks), func(jobCtx context.Context, idx int) (chunkResult, error) {
+	results, runErr := runConcurrent(ctx, p.ExtractProvisionsMaxTasks, len(chunks), func(jobCtx context.Context, idx int) (provisionChunkResult, error) {
 		if isCtxStopped(jobCtx) {
-			return chunkResult{}, ErrPipelineStopped
+			return provisionChunkResult{}, ErrPipelineStopped
 		}
 		chunk := chunks[idx]
 		callStart := p.Now()
 		p.Logger.Info("extract provisions start",
 			"record_id", recordID,
-			"idx", idx,
+			"chunk", idx,
 			"total", len(chunks),
 			"model name", p.ModelName,
 			"prompt name", p.PromptRef,
@@ -505,17 +515,19 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 			recordID, idx, len(chunks), 0, numInChunk)
 		if err != nil {
 			p.Logger.Error("failed extracting from chunk", "error", err)
-			return chunkResult{}, fmt.Errorf("(MID_26053106) extract provisions from chunk via llm: %w", err)
+			return provisionChunkResult{}, fmt.Errorf("(MID_26053106) extract provisions from chunk via llm: %w", err)
 		}
 		usedFallback := strings.TrimSpace(p.FallbackModelName) != "" && strings.TrimSpace(modelName) == strings.TrimSpace(p.FallbackModelName)
 		cacheHit, cacheMiss := cacheTokenCounts(p.callExtractor(usedFallback))
 		p.Logger.Info("extract provisions end  ",
 			"record_id", recordID,
 			"extracted provisions", numInChunk,
-			"ms_used", time.Since(callStart).Milliseconds(),
+			"chunk", idx,
 			"cache_hit", cacheHit,
-			"cache_miss", cacheMiss)
-		return chunkResult{
+			"cache_miss", cacheMiss,
+			"ms_used", time.Since(callStart).Milliseconds(),
+			)
+		return provisionChunkResult{
 			payload:    payload,
 			modelName:  modelName,
 			isFallback: isFallback,
@@ -1853,4 +1865,216 @@ func refreshProvisionArtifactFile(ctx context.Context, db *sql.DB, artifactDir s
 		fileRecords = append(fileRecords, buildProvisionFileRecord(row))
 	}
 	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, fileRecords, ".provisions", "MID_26060704")
+}
+
+// ---- ChunkBatchProcessor implementation ----
+
+// InitChunkBatch initialises the provisions processor for per-chunk batching.
+// It validates the model configuration and stores the shared chunk data.
+func (p *ProvisionsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if p.PromptErr != nil {
+		return fmt.Errorf("(MID_26062710) %s prompt error: %w", p.Name(), p.PromptErr)
+	}
+	if p.ModelErr != nil {
+		p.Logger.Warn("%s skipped: model config error", p.Name(),
+			"record_id", recordID, "model_ref", p.ModelRef, "error", p.ModelErr)
+		return nil // skip silently, not an error
+	}
+	if p.ExtractProvisionsInput == "blocks" {
+		return fmt.Errorf("(MID_26062711) %s does not support batch mode for blocks input", p.Name())
+	}
+	if p.InputStore == nil {
+		return errors.New("(MID_26062712) input store is nil")
+	}
+	if p.Store == nil {
+		return errors.New("(MID_26062713) provisions store is nil")
+	}
+
+	p.batchStart = p.Now()
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchResults = make([]provisionChunkResult, 0, len(chunks))
+	p.batchResult = provisionExtractionResult{
+		ExtractID: p.Now().Format("20060102-150405"),
+	}
+
+	// Load the full record for finalization (need ResultFilename, StagingFilename, etc.)
+	// We use the first input record we can find for this recordID.
+	p.batchRec = DocMetadataInputRecord{ID: recordID} // minimal; fields filled on finalize
+	// The coordinator has already loaded the record; we store what we need here.
+	return nil
+}
+
+// ProcessChunk processes one chunk for the provisions processor: builds the
+// LLM input, calls the LLM, and accumulates the result. Called sequentially
+// by the per-chunk batching coordinator.
+func (p *ProvisionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
+		return fmt.Errorf("(MID_26062714) %s chunk index %d out of range (len=%d)",
+			p.Name(), chunkIdx, len(p.batchChunks))
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+
+	chunk := p.batchChunks[chunkIdx]
+	callStart := p.Now()
+	recordID := p.batchRecordID
+
+	p.Logger.Info("extract provisions start (batch)",
+		"record_id", recordID,
+		"chunk", chunkIdx,
+		"total", len(p.batchChunks),
+		"model name", p.ModelName,
+		"prompt name", p.PromptRef,
+	)
+
+	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
+	payload, modelName, err := p.extractProvisionPayloadWithFallback(ctx, inputText, provisionChunkTask(p.PromptText, chunk))
+
+	isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
+	numInChunk := 0
+	if err == nil && payload != nil {
+		if raw, ok := payload["provisions"].([]any); ok {
+			numInChunk = len(raw)
+		}
+	}
+
+	// Log the LLM call.
+	callID := fmt.Sprintf("%d_batch_c%d", recordID, chunkIdx)
+	p.logLLMCall(ctx, callID, "extract_provisions",
+		[]string{strings.TrimSpace(modelName)}, p.PromptRef,
+		payload, err, callStart, p.Now(),
+		recordID, chunkIdx, len(p.batchChunks), 0, numInChunk)
+
+	if err != nil {
+		p.Logger.Error("provisions batch: failed extracting from chunk",
+			"record_id", recordID, "chunk", chunkIdx, "error", err)
+		return fmt.Errorf("(MID_26062715) %s chunk %d: %w", p.Name(), chunkIdx, err)
+	}
+
+	usedFallback := strings.TrimSpace(p.FallbackModelName) != "" && strings.TrimSpace(modelName) == strings.TrimSpace(p.FallbackModelName)
+	cacheHit, cacheMiss := cacheTokenCounts(p.callExtractor(usedFallback))
+	p.Logger.Info("extract provisions end  (batch)",
+		"record_id", recordID,
+		"extracted provisions", numInChunk,
+		"chunk", chunkIdx,
+		"cache_hit", cacheHit,
+		"cache_miss", cacheMiss,
+		"ms_used", time.Since(callStart).Milliseconds(),
+	)
+
+	p.batchResults = append(p.batchResults, provisionChunkResult{
+		payload:    payload,
+		modelName:  modelName,
+		isFallback: isFallback,
+		numInChunk: numInChunk,
+	})
+	return nil
+}
+
+// FinalizeChunkBatch saves all accumulated provisions from batch processing
+// to the database, writes artifacts, and indexes the results.
+func (p *ProvisionsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if len(p.batchResults) == 0 {
+		p.Logger.Info("provisions batch: no results to finalize", "record_id", p.batchRecordID)
+		return nil
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+
+	// Accumulate results (same logic as extractProvisionsFromChunksWithLLM post-runConcurrent).
+	language := ""
+	provisions := make([]map[string]any, 0, len(p.batchResults))
+	usedModelName := strings.TrimSpace(p.ModelName)
+	var llmCallCount, fallbackCount int
+
+	for i, res := range p.batchResults {
+		llmCallCount++
+		if res.isFallback {
+			fallbackCount++
+		}
+		if strings.TrimSpace(res.modelName) != "" {
+			usedModelName = strings.TrimSpace(res.modelName)
+		}
+		if language == "" {
+			language = strings.TrimSpace(asString(res.payload["language"]))
+		}
+		raw := res.payload["provisions"].([]any)
+		provisions = append(provisions, normalizeProvisionList(raw, chunkLineToPage(p.batchChunks[i]), chunkLineText(p.batchChunks[i]))...)
+	}
+
+	if language == "" {
+		language = "unknown"
+	}
+
+	// Fill extraction result.
+	p.batchResult = provisionExtractionResult{
+		ExtractID:     p.batchResult.ExtractID,
+		Language:      language,
+		Provisions:    provisions,
+		ModelName:     firstNonEmptyTrimmed(usedModelName, p.ModelName),
+		LLMCallCount:  llmCallCount,
+		FallbackCount: fallbackCount,
+	}
+
+	// Determine input filename (needed for DB save).
+	rec, err := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			p.Logger.Error("provisions batch: record not found", "record_id", p.batchRecordID)
+			return nil
+		}
+		return fmt.Errorf("(MID_26062716) %s load record for finalize: %w", p.Name(), err)
+	}
+	p.batchRec = rec
+
+	inputFilename := filepath.Base(strings.TrimSpace(rec.ResultFilename))
+	if inputFilename == "" {
+		inputFilename = fmt.Sprintf("record_%d", p.batchRecordID)
+	}
+
+	outputRows := p.buildProvisionOutputRows(p.batchRecordID, p.batchResult.Provisions, p.batchStart,
+		len(p.batchChunks), time.Since(p.batchStart).Milliseconds(), p.batchResult.ModelName)
+
+	inserted, err := p.Store.SaveProvisions(ctx, SaveProvisionsRequest{
+		InputRecordID: p.batchRecordID,
+		InputFilename: inputFilename,
+		ExtractID:     p.batchResult.ExtractID,
+		Language:      p.batchResult.Language,
+		Provisions:    outputRows,
+	})
+	if err != nil {
+		return fmt.Errorf("(MID_26062717) %s save provisions: %w", p.Name(), err)
+	}
+
+	if err := p.indexProvisionsInTree(p.batchRecordID, outputRows); err != nil {
+		p.Logger.Error("provisions batch: index tree error", "record_id", p.batchRecordID, "error", err)
+		// non-fatal
+	}
+	if err := p.writeProvisionsArtifact(p.batchRecordID, rec, outputRows); err != nil {
+		p.Logger.Error("provisions batch: write artifact error", "record_id", p.batchRecordID, "error", err)
+		// non-fatal
+	}
+	if reindexErr := ReindexProvisionSearchForRecord(ctx, p.batchRecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("provisions batch: reindex search failed", "record_id", p.batchRecordID, "error", reindexErr)
+	}
+	// Derive chunk -> provision "has-provision" line_overlap edges.
+	chunkBlocks := chunksToBlocks(p.batchChunks)
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, p.batchRecordID, searchArtifactProvision, RelationHasProvision, chunkBlocks); connErr != nil {
+		p.Logger.Warn("provisions batch: write connections failed", "record_id", p.batchRecordID, "error", connErr)
+	}
+
+	p.Logger.Info("provisions batch: extraction complete",
+		"record_id", p.batchRecordID,
+		"inserted_rows", inserted,
+		"provisions_count", len(outputRows),
+		"units", len(p.batchChunks),
+	)
+	p.persistProvisionsStatus(ctx, rec, p.batchStart, nil)
+	p.logProvisionsSummary(ctx, p.batchStart, p.Now(), p.batchResult, inserted, len(p.batchChunks), p.batchRecordID)
+
+	return nil
 }

@@ -58,6 +58,15 @@ type EntityRelationProcessor struct {
 	// Empty defaults to "extract_entity_relation" (the legacy combined processor).
 	// The split processors (ADR 2026061702) set "extract_entity" / "extract_relation".
 	StatusOperation string
+
+	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
+	batchRecordID int64
+	batchChunks   []Chunk
+	batchDocCtx   string
+	batchLines    []Line // input lines for Phase 2 relation windows
+	batchResults  []entityRelationChunkResult
+	batchStart    time.Time
+	batchRec      DocMetadataInputRecord
 }
 
 // statusOp returns the doc_proc operation name for status entries.
@@ -2166,4 +2175,231 @@ func refreshRelationArtifactFile(ctx context.Context, db *sql.DB, artifactDir st
 		return err
 	}
 	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, rows, ".relations", "MID_26060702")
+}
+
+// ---- ChunkBatchProcessor implementation ----
+
+// InitChunkBatch initialises the entity-relation processor for per-chunk
+// batching of the Phase 1 (entity extraction) pass.
+func (p *EntityRelationProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if p.PromptErr != nil {
+		return fmt.Errorf("(MID_26062720) %s prompt error: %w", p.Name(), p.PromptErr)
+	}
+	if p.ModelErr != nil {
+		p.Logger.Warn("%s skipped: model config error", p.Name(),
+			"record_id", recordID, "model_ref", p.ModelRef, "error", p.ModelErr)
+		return nil
+	}
+
+	p.batchStart = p.Now()
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchResults = make([]entityRelationChunkResult, 0, len(chunks))
+	return nil
+}
+
+// ProcessChunk processes one chunk for Phase 1 entity extraction: calls the
+// LLM and accumulates entity/relation results. Called sequentially by the
+// per-chunk batching coordinator.
+func (p *EntityRelationProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
+		return fmt.Errorf("(MID_26062721) %s chunk index %d out of range (len=%d)",
+			p.Name(), chunkIdx, len(p.batchChunks))
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+
+	// Reuse processChunk which handles the LLM call and produces entityRelationChunkResult.
+	// It already reads cacheTokenCounts and logs.
+	result := p.processChunk(ctx, p.batchRecordID, chunkIdx, len(p.batchChunks),
+		p.batchChunks[chunkIdx], p.batchDocCtx)
+	if result.Failed {
+		p.Logger.Warn("%s chunk %d failed (result.Failed=true), skipping",
+			p.Name(), chunkIdx, "record_id", p.batchRecordID)
+	}
+	p.batchResults = append(p.batchResults, result)
+	return nil
+}
+
+// FinalizeChunkBatch runs after all chunks have been processed. It:
+//  1. Accumulates and consolidates entities (Phase 1.5)
+//  2. Extracts relations from windows (Phase 2, if relation prompt available)
+//  3. Resolves and links relations to entities
+//  4. Saves entities and relations to the database
+//  5. Writes artifact files and reindexes search
+func (p *EntityRelationProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if len(p.batchResults) == 0 {
+		p.Logger.Info("%s batch: no results", p.Name(), "record_id", p.batchRecordID)
+		return nil
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+
+	// --- Accumulate chunk results (same as extractEntitiesFromChunks post-runConcurrent) ---
+	entities := make([]map[string]any, 0)
+	relations := make([]map[string]any, 0)
+	detectedLanguage := "unknown"
+	usedModel := strings.TrimSpace(p.ModelName)
+	var llmCallCount, fallbackCount, failedChunks int
+
+	for _, r := range p.batchResults {
+		llmCallCount += r.LLMCallCount
+		fallbackCount += r.FallbackCount
+		if r.Failed {
+			failedChunks++
+			continue
+		}
+		if r.Language != "" && detectedLanguage == "unknown" {
+			detectedLanguage = r.Language
+		}
+		if strings.TrimSpace(r.ModelName) != "" {
+			usedModel = strings.TrimSpace(r.ModelName)
+		}
+		entities = append(entities, r.Entities...)
+		relations = append(relations, r.Relations...)
+	}
+
+	if detectedLanguage == "" {
+		detectedLanguage = "unknown"
+	}
+
+	// Load the record for finalization.
+	rec, err := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26062722) %s load record: %w", p.Name(), err)
+	}
+	p.batchRec = rec
+
+	// Load input lines for Phase 2 relation windows.
+	lineFilePath, lineFileErr := ResolveInputFilePath(
+		parseLineFileGeneratedEventFromRecord(rec), // minimal event from record
+		rec.ResultFilename, rec.ParserName, rec.StagingFilename)
+	if lineFileErr != nil {
+		lineFilePath = "" // Phase 2 skipped below
+		p.Logger.Warn("%s: cannot resolve input file for relation windows, skipping Phase 2",
+			p.Name(), "record_id", p.batchRecordID, "error", lineFileErr)
+	}
+
+	createTime := p.Now().UTC().Format(time.RFC3339)
+
+	// Phase 1.5: consolidate duplicate entities.
+	entities = consolidateEntities(entities)
+	for i := range entities {
+		entities[i]["entity_id"] = fmt.Sprintf("%d_ent_%d", p.batchRecordID, i+1)
+		entities[i]["create_time"] = createTime
+	}
+
+	p.Logger.Info("consolidate entities (batch)",
+		"record_id", p.batchRecordID,
+		"entities", len(entities),
+	)
+
+	// Phase 2: extract relations from windows (if relation prompt available and lines loaded).
+	if lineFilePath != "" && strings.TrimSpace(p.RelationPromptText) != "" && p.RelationPromptErr == nil {
+		body, readErr := os.ReadFile(lineFilePath)
+		if readErr == nil {
+			lines, parseErr := ParseInputLinesIncludingTOC(body)
+			if parseErr == nil {
+				windows := buildRelationWindows(entities, lines, p.RelationWindowSize, p.RelationWindowOverlap)
+				windowRelations, relErr := p.extractRelationsFromWindows(ctx, p.batchRecordID, windows)
+				if relErr != nil {
+					if errors.Is(relErr, ErrPipelineStopped) {
+						return ErrPipelineStopped
+					}
+					p.Logger.Warn("Phase 2 relation extraction failed (non-fatal)",
+						"record_id", p.batchRecordID, "error", relErr)
+				} else {
+					p.Logger.Info("Phase 2 relation extraction (batch)",
+						"record_id", p.batchRecordID,
+						"windows", len(windows),
+						"window_relations", len(windowRelations),
+					)
+					relations = windowRelations
+				}
+			} else {
+				p.Logger.Warn("Phase 2 skipped: parse lines failed",
+					"record_id", p.batchRecordID, "error", parseErr)
+			}
+		} else {
+			p.Logger.Warn("Phase 2 skipped: read input failed",
+				"record_id", p.batchRecordID, "error", readErr)
+		}
+	} else {
+		p.Logger.Info("Phase 2: relation prompt not configured, using Phase 1 relations only",
+			"record_id", p.batchRecordID)
+	}
+
+	// Resolve and link relations to entity IDs.
+	resolutionIndex := buildEntityResolutionIndex(entities)
+	relations, entities = resolveAndLinkRelations(
+		relations, entities, resolutionIndex,
+		p.batchRecordID, len(entities)+1, createTime,
+	)
+	for i := range relations {
+		relations[i]["relation_id"] = fmt.Sprintf("%d_rel_%d", p.batchRecordID, i+1)
+		relations[i]["create_time"] = createTime
+	}
+
+	// ---- Save to DB ----
+	eventID := fmt.Sprintf("batch_%d", p.batchRecordID)
+	insertedEntities, saveErr := p.Store.SaveEntities(ctx, SaveEntitiesRequest{
+		InputRecordID: p.batchRecordID,
+		EventID:       eventID,
+		Language:      detectedLanguage,
+		ModelName:     firstNonEmptyTrimmed(usedModel, p.ModelName),
+		PromptName:    p.PromptRef,
+		DocName:       strings.TrimSpace(rec.Title),
+		Entities:      entities,
+	})
+	if saveErr != nil {
+		return fmt.Errorf("(MID_26062723) %s save entities: %w", p.Name(), saveErr)
+	}
+	insertedRelations, saveErr := p.Store.SaveRelations(ctx, SaveRelationsRequest{
+		InputRecordID: p.batchRecordID,
+		EventID:       eventID,
+		Language:      detectedLanguage,
+		ModelName:     firstNonEmptyTrimmed(usedModel, p.ModelName),
+		PromptName:    p.PromptRef,
+		Relations:     relations,
+	})
+	if saveErr != nil {
+		return fmt.Errorf("(MID_26062724) %s save relations: %w", p.Name(), saveErr)
+	}
+
+	// ---- Write artifact files ----
+	if fileErr := p.saveEntitiesToFile(p.batchRecordID, rec, entities); fileErr != nil {
+		p.Logger.Warn("save entities to file failed", "record_id", p.batchRecordID, "error", fileErr)
+	}
+	if fileErr := p.saveRelationsToFile(p.batchRecordID, rec, relations); fileErr != nil {
+		p.Logger.Warn("save relations to file failed", "record_id", p.batchRecordID, "error", fileErr)
+	}
+
+	// ---- Reindex search ----
+	if reindexErr := ReindexEntitySearchForRecord(ctx, p.batchRecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex entity search registry failed", "record_id", p.batchRecordID, "error", reindexErr)
+	}
+	if reindexErr := ReindexRelationSearchForRecord(ctx, p.batchRecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex relation search registry failed", "record_id", p.batchRecordID, "error", reindexErr)
+	}
+
+	p.Logger.Info("entity-relation batch complete",
+		"record_id", p.batchRecordID,
+		"inserted_entities", insertedEntities,
+		"inserted_relations", insertedRelations,
+		"num_chunks", len(p.batchChunks),
+		"language", detectedLanguage,
+	)
+	return nil
+}
+
+// parseLineFileGeneratedEventFromRecord creates a minimal LineFileGeneratedEvent
+// from a DocMetadataInputRecord for input path resolution.
+func parseLineFileGeneratedEventFromRecord(rec DocMetadataInputRecord) LineFileGeneratedEvent {
+	return LineFileGeneratedEvent{
+		RecordID: rec.ID,
+		Status:   "completed",
+	}
 }

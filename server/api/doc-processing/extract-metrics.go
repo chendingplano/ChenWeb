@@ -62,6 +62,16 @@ type MetricsProcessor struct {
 	ChunkDir                    string
 	MetricEnrichGroupSize       int
 	MaxTasks                    int
+
+	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
+	batchRecordID int64
+	batchChunks   []Chunk
+	batchDocCtx   string
+	batchStart    time.Time
+	// Accumulates Phase 1 results per chunk.
+	batchPass1Payloads []map[string]any
+	batchPass1Models   []string
+	batchPass1Failed   []bool
 }
 
 type metricsProgressTracker struct {
@@ -756,9 +766,10 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 			"record_id", record_id,
 			"extracted", len(result.mentions),
 			"language", lang,
-			"ms_used", time.Since(chunkStart).Milliseconds(),
 			"cache_hit", cacheHit,
 			"cache_miss", cacheMiss,
+			"chunk", i,
+			"ms_used", time.Since(chunkStart).Milliseconds(),
 		)
 
 		return result, nil

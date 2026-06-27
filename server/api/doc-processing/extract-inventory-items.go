@@ -57,6 +57,13 @@ type InventoryItemsProcessor struct {
 	CategoryRegistry              InventoryCategoryRegistry
 	CategoryCurator               InventoryCategoryCurator
 	categorySeedDone              bool
+
+	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
+	batchRecordID int64
+	batchChunks   []Chunk
+	batchDocCtx   string
+	batchResults  []inventoryChunkOutcome
+	batchStart    time.Time
 }
 
 type InventoryItemsStore interface {
@@ -1962,4 +1969,132 @@ func jsonArrayOrEmptyBytes(raw []byte) []byte {
 		return []byte("[]")
 	}
 	return []byte(trimmed)
+}
+
+// ---- ChunkBatchProcessor implementation ----
+
+func (p *InventoryItemsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if p.PromptErr != nil {
+		return fmt.Errorf("(MID_26062730) %s prompt error: %w", p.Name(), p.PromptErr)
+	}
+	if p.ModelErr != nil {
+		p.Logger.Warn("%s skipped: model config error", p.Name(), "record_id", recordID, "error", p.ModelErr)
+		return nil
+	}
+	p.batchStart = p.Now()
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchResults = make([]inventoryChunkOutcome, 0, len(chunks))
+	return nil
+}
+
+func (p *InventoryItemsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
+		return fmt.Errorf("(MID_26062731) %s chunk index %d out of range", p.Name(), chunkIdx)
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+
+	chunk := p.batchChunks[chunkIdx]
+	localStart := p.Now()
+	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
+	callID := fmt.Sprintf("%d_batch_c%d", p.batchRecordID, chunkIdx)
+	payload, modelName, err := p.extractInventoryItemsWithFallback(ctx, inputText)
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+	wasFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
+	var chunkItems []map[string]any
+	var chunkLang string
+	if err == nil && payload != nil {
+		if lang := strings.TrimSpace(asString(payload["language"])); lang != "" {
+			chunkLang = lang
+		}
+		chunkItems = normalizeInventoryItemRows(payload["items"], chunk.SeqNo, p.Dictionary)
+	}
+	p.logInventoryItemsLLMCall(ctx, callID, []string{strings.TrimSpace(modelName)}, payload, err, localStart, p.Now(), p.batchRecordID, chunkIdx, len(p.batchChunks), len(chunkItems), 0)
+	if err != nil {
+		p.Logger.Warn("inventory item batch: chunk failed", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+		p.batchResults = append(p.batchResults, inventoryChunkOutcome{failed: true, fallback: wasFallback})
+		return nil
+	}
+
+	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+	p.Logger.Info("extract inventory items end (batch)",
+		"record_id", p.batchRecordID,
+		"chunk", chunkIdx,
+		"extracted", len(chunkItems),
+		"ms_used", time.Since(localStart).Milliseconds(),
+		"cache_hit", cacheHit,
+		"cache_miss", cacheMiss,
+	)
+	p.batchResults = append(p.batchResults, inventoryChunkOutcome{
+		items:     chunkItems,
+		modelName: modelName,
+		language:  chunkLang,
+		fallback:  wasFallback,
+	})
+	return nil
+}
+
+func (p *InventoryItemsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if len(p.batchResults) == 0 {
+		p.Logger.Info("inventory items batch: no results", "record_id", p.batchRecordID)
+		return nil
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+
+	items := make([]map[string]any, 0)
+	detectedLanguage := "unknown"
+	usedModel := strings.TrimSpace(p.ModelName)
+	var llmCallCount, fallbackCount, failedChunks int
+	for _, outcome := range p.batchResults {
+		llmCallCount++
+		if outcome.fallback {
+			fallbackCount++
+		}
+		if outcome.failed {
+			failedChunks++
+			continue
+		}
+		if outcome.language != "" && detectedLanguage == "unknown" {
+			detectedLanguage = outcome.language
+		}
+		if strings.TrimSpace(outcome.modelName) != "" {
+			usedModel = strings.TrimSpace(outcome.modelName)
+		}
+		items = append(items, outcome.items...)
+	}
+
+	if detectedLanguage == "" {
+		detectedLanguage = "unknown"
+	}
+
+	eventID := fmt.Sprintf("batch_%d", p.batchRecordID)
+	inserted, saveErr := p.Store.SaveInventoryItems(ctx, SaveInventoryItemsRequest{
+		InputRecordID: p.batchRecordID,
+		EventID:       eventID,
+		Language:      detectedLanguage,
+		ModelName:     firstNonEmptyTrimmed(usedModel, p.ModelName),
+		PromptName:    p.PromptRef,
+		Items:         items,
+	})
+	if saveErr != nil {
+		return fmt.Errorf("(MID_26062733) %s save items: %w", p.Name(), saveErr)
+	}
+
+	if reindexErr := ReindexInventoryItemSearchForRecord(ctx, p.batchRecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex inventory search failed", "record_id", p.batchRecordID, "error", reindexErr)
+	}
+
+	p.Logger.Info("inventory items batch complete",
+		"record_id", p.batchRecordID,
+		"inserted", inserted,
+		"num_chunks", len(p.batchChunks),
+	)
+	return nil
 }

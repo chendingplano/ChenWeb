@@ -159,7 +159,16 @@ func (s *ControlService) HandleStartDocProcessingEvent(ctx context.Context, payl
 	if err != nil {
 		return err
 	}
-	var firstErr error
+	var (
+		firstErr error
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+	)
+
+	// Use a detached context so goroutines waiting for a pipeline slot
+	// don't time out when the parent context has a short deadline.
+	slotCtx := context.WithoutCancel(ctx)
+
 	for _, rec := range records {
 		ops := append([]string(nil), cmd.DocProcessors...)
 		if len(ops) == 0 && cmd.FailedProcOnly {
@@ -178,15 +187,41 @@ func (s *ControlService) HandleStartDocProcessingEvent(ctx context.Context, payl
 		}
 		eventPayload, err := buildLineFileGeneratedPayload(rec.ID, cmd.Filename, ops)
 		if err != nil {
+			mu.Lock()
 			if firstErr == nil {
 				firstErr = err
 			}
+			mu.Unlock()
 			continue
 		}
-		if err := s.handleEvent(ctx, eventPayload); err != nil && firstErr == nil {
-			firstErr = err
-		}
+
+		// Launch each document's pipeline in its own goroutine, limited by
+		// MaxDocProcessPipelines via the semaphore returned by acquirePipelineSlot.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			releaseSlot, slotErr := s.acquirePipelineSlot(slotCtx)
+			if slotErr != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = slotErr
+				}
+				mu.Unlock()
+				return
+			}
+			defer releaseSlot()
+
+			if err := s.handleEvent(ctx, eventPayload); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+			}
+		}()
 	}
+	wg.Wait()
 	return firstErr
 }
 
@@ -560,7 +595,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	}
 
 	if RunDocProcessorConcurrentFromEnv() {
-		s.runProcessorsTwoPhase(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr, &allProcResults)
+		s.runPhaseBProcessors(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr, &allProcResults)
 	} else {
 		s.runProcessorsSequential(ctx, payload, processors, evt.RecordID, &requestFailed, &requestStopped, &firstErr, &allProcResults)
 	}
