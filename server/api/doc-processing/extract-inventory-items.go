@@ -290,7 +290,7 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	}
 
 	p.persistInventoryItemsInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(chunks)))
-	result, err := p.extractInventoryItemsFromChunks(ctx, evt.RecordID, chunks)
+	result, err := p.extractInventoryItemsFromChunks(ctx, evt.RecordID, chunks, buildDocContextLine(rec))
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			p.stopAndPersistInventoryItems(context.Background(), rec, start)
@@ -375,7 +375,7 @@ type inventoryChunkOutcome struct {
 	fallback  bool
 }
 
-func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Context, recordID int64, chunks []Chunk) (inventoryItemsExtractionResult, error) {
+func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) (inventoryItemsExtractionResult, error) {
 	eventID := eventIDFromContext(ctx)
 
 	startTime := time.Now()
@@ -389,7 +389,9 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 	outcomes, runErr := runConcurrent(ctx, p.ExtractInventoryItemsMaxTasks, len(chunks), func(runCtx context.Context, chunk_id int) (inventoryChunkOutcome, error) {
 		localStart := time.Now()
 		chunk := chunks[chunk_id]
-		inputText := p.buildInventoryItemsUserInput(chunk)
+		// Canonical chunk serialization shared across chunk processors (no task/label text
+		// here; task instructions live in the prompt). See ADR 2026062701 §Phase 2.3.
+		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
 		callStart := p.now()
 		callID := fmt.Sprintf("%s_p1_c%d", eventID, chunk_id+1)
 		p.Logger.Info("extract inventory items start",
@@ -478,18 +480,6 @@ func (p *InventoryItemsProcessor) extractInventoryItemsFromChunks(ctx context.Co
 		FallbackCount: fallbackCount,
 		FailedChunks:  failedChunks,
 	}, nil
-}
-
-func (p *InventoryItemsProcessor) buildInventoryItemsUserInput(chunk Chunk) string {
-	// contextJSON, _ := json.Marshal(map[string]any{
-	// 	"schema_version":     inventoryItemsSchemaVersion,
-	// 	"dictionary_version": p.Dictionary.Version,
-	// 	"categories":         p.Dictionary.Categories,
-	// })
-	// return "Dictionary context:\n" + string(contextJSON) +
-	// 	"\n\nChunk sequence: " + strconv.Itoa(chunk.SeqNo) +
-	// 	"\n\nInput chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
-	return "Input chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
 }
 
 func (p *InventoryItemsProcessor) extractInventoryItemsWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {

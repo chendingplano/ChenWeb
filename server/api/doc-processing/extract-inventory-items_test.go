@@ -365,7 +365,7 @@ func TestInventoryItemsProcessorUsesStructuredContractAndNormalizes(t *testing.T
 			Mark: "r",
 			Line: Line{LineNo: 5, PageNo: 1, LineType: "text", Content: "Pump, Bosch, 1500w"},
 		}},
-	}})
+	}}, "")
 	if err != nil {
 		t.Fatalf("extractInventoryItemsFromChunks: %v", err)
 	}

@@ -300,7 +300,7 @@ func TestExtractSemanticProjections_SequentialCorrectness(t *testing.T) {
 	p := newTestSemProjProcessor(ext, 1)
 	chunks := makeTestSemProjChunks(3)
 
-	result, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks)
+	result, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestExtractSemanticProjections_DeterministicOrder(t *testing.T) {
 	p := newTestSemProjProcessor(ext, 3)
 	chunks := makeTestSemProjChunks(3)
 
-	result, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks)
+	result, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestExtractSemanticProjections_ConcurrentBounded(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks)
+		_, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks, "")
 		done <- err
 	}()
 
@@ -386,7 +386,7 @@ func TestExtractSemanticProjections_FailFast(t *testing.T) {
 	p := newTestSemProjProcessor(ext, 2)
 	chunks := makeTestSemProjChunks(3)
 
-	_, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks)
+	_, err := p.extractSemanticProjectionsFromChunks(context.Background(), 99, chunks, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

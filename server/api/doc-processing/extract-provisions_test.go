@@ -268,7 +268,7 @@ func TestProvisionsProcessor_ExtractProvisionPayloadFromText_ForwardsPromptName(
 		PromptRef:  "prompt-test",
 	}
 
-	_, err := p.extractProvisionPayloadFromText(context.Background(), `{"lines":[]}`, "gpt-test", extractor)
+	_, err := p.extractProvisionPayloadFromText(context.Background(), `{"lines":[]}`, "", "gpt-test", extractor)
 	if err != nil {
 		t.Fatalf("extractProvisionPayloadFromText: %v", err)
 	}
@@ -741,7 +741,7 @@ func TestExtractProvisionPayloadWithFallback_EmptyPrimaryResponseRetriesFallback
 		Lines: []BlockLine{
 			{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The device shall log all alarms."},
 		},
-	}))
+	}), "")
 	if err != nil {
 		t.Fatalf("extractProvisionPayloadWithFallback: %v", err)
 	}
@@ -782,7 +782,7 @@ func TestProvisionsProcessor_ExtractProvisionPayloadUsesStructuredContractWhenAv
 		Lines: []BlockLine{
 			{Flag: "n", LineNumber: 10, PageNumber: 1, LineType: "paragraph", Content: "The device shall log all alarms."},
 		},
-	}), "gpt-test", extractor)
+	}), "", "gpt-test", extractor)
 	if err != nil {
 		t.Fatalf("extractProvisionPayloadFromText: %v", err)
 	}

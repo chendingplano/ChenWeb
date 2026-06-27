@@ -252,7 +252,7 @@ func (p *SemanticProjectionsProcessor) HandleEvent(ctx context.Context, payload 
 	}
 
 	p.persistSemanticProjectionsInProgressStatus(ctx, rec, start, fmt.Sprintf("0%% (0/%d)", len(chunks)))
-	result, err := p.extractSemanticProjectionsFromChunks(ctx, evt.RecordID, chunks)
+	result, err := p.extractSemanticProjectionsFromChunks(ctx, evt.RecordID, chunks, buildDocContextLine(rec))
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			p.stopAndPersistSemanticProjections(context.Background(), rec, start)
@@ -324,6 +324,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	ctx context.Context,
 	recordID int64,
 	chunks []Chunk,
+	docCtx string,
 ) (semanticProjectionExtractionResult, error) {
 	var completedP1, completedP2 atomic.Int32
 
@@ -341,8 +342,10 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 
 		lineSpans := chunkLineSpans(chunk.Lines)
 
-		// Pass 1: extract semantic projection candidate
-		chunkText := buildMarkedChunkInputText(chunk.Lines)
+		// Pass 1: extract semantic projection candidate.
+		// Canonical chunk serialization as InputText (shared, cacheable prefix); the candidate
+		// schema/task lives in the prompt. See ADR 2026062701 §Phase 2.3.
+		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
 		callStart := p.Now()
 		p.Logger.Info("semantic proj start       ",
 			"record_id", recordID,
@@ -351,8 +354,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			"num_lines", len(chunk.Lines),
 		)
 		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), i)
-		userPrompt := buildSemanticProjectionCandidateUserPrompt(chunkText)
-		payload, modelName, err := p.extractCandidatePayloadWithFallback(jobCtx, userPrompt)
+		payload, modelName, err := p.extractCandidatePayloadWithFallback(jobCtx, inputText)
 		llmCallCount := 1
 		fallbackCount := 0
 		if strings.TrimSpace(modelName) != strings.TrimSpace(p.CandidateModelName) && strings.TrimSpace(modelName) != "" {
@@ -420,8 +422,10 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 			"seq_no", cand.SeqNo,
 		)
 		callID2 := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), i)
-		userPrompt2 := buildSemanticProjectionEnrichUserPrompt(cand)
-		payload2, err := p.extractEnrichPayload(jobCtx, userPrompt2)
+		// Same chunk as pass 1 → identical canonical InputText prefix, so pass 2 reuses pass 1's
+		// cached prefix. The candidate + enrich schema move into the prompt (task section).
+		inputText2 := canonicalChunkInputText(cand.ChunkLines, docCtx)
+		payload2, err := p.extractEnrichPayload(jobCtx, inputText2, cand)
 		llmCallCount++
 		var completedP2ForLog int
 		if err == nil {
@@ -700,7 +704,8 @@ func (p *SemanticProjectionsProcessor) logSemanticProjectionsSummary(
 }
 
 func (p *SemanticProjectionsProcessor) extractCandidatePayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
-	payload, err := p.extractSemanticProjectionPayload(ctx, inputText, p.CandidatePromptText, p.CandidateModelName, p.CandidateModelCfg)
+	taskPrompt := semanticProjectionCandidateTask(p.CandidatePromptText)
+	payload, err := p.extractSemanticProjectionPayload(ctx, inputText, taskPrompt, "extract_semantic_projection_candidates", p.CandidateModelName, p.CandidateModelCfg)
 	if err == nil {
 		return payload, strings.TrimSpace(p.CandidateModelName), nil
 	}
@@ -721,7 +726,7 @@ func (p *SemanticProjectionsProcessor) extractCandidatePayloadWithFallback(ctx c
 		"prompt_name", p.CandidatePromptRef,
 	)
 
-	fallbackPayload, fallbackErr := p.extractSemanticProjectionPayload(ctx, inputText, p.CandidatePromptText, fallbackModelName, p.FallbackModelCfg)
+	fallbackPayload, fallbackErr := p.extractSemanticProjectionPayload(ctx, inputText, semanticProjectionCandidateTask(p.CandidatePromptText), "extract_semantic_projection_candidates", fallbackModelName, p.FallbackModelCfg)
 	if fallbackErr != nil {
 		if isEmptySemanticProjectionError(fallbackErr) {
 			p.Logger.Info("fallback candidate extraction returned empty JSON; treating as empty result",
@@ -733,8 +738,9 @@ func (p *SemanticProjectionsProcessor) extractCandidatePayloadWithFallback(ctx c
 	return fallbackPayload, fallbackModelName, nil
 }
 
-func (p *SemanticProjectionsProcessor) extractEnrichPayload(ctx context.Context, inputText string) (map[string]any, error) {
-	payload, err := p.extractSemanticProjectionPayload(ctx, inputText, p.EnrichPromptText, p.EnrichModelName, p.EnrichModelCfg)
+func (p *SemanticProjectionsProcessor) extractEnrichPayload(ctx context.Context, inputText string, cand semanticProjectionCandidate) (map[string]any, error) {
+	taskPrompt := semanticProjectionEnrichTask(p.EnrichPromptText, cand)
+	payload, err := p.extractSemanticProjectionPayload(ctx, inputText, taskPrompt, "enrich_semantic_projections", p.EnrichModelName, p.EnrichModelCfg)
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26052133) enrich semantic projection: %w", err)
 	}
@@ -745,6 +751,7 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionPayload(
 	ctx context.Context,
 	inputText string,
 	promptText string,
+	callReason string,
 	modelName string,
 	_ structureModelConfig,
 ) (map[string]any, error) {
@@ -752,10 +759,6 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionPayload(
 	// extractor inside concurrent goroutines causes a data race. The constructor
 	// already applies the enrich config once, and modelName is carried in the
 	// JSONExtractionInput so the correct model is selected per-call.
-	callReason := "extract_semantic_projection_candidates"
-	if strings.TrimSpace(promptText) == strings.TrimSpace(p.EnrichPromptText) {
-		callReason = "enrich_semantic_projections"
-	}
 	in := newLLMJSONInput(ctx, firstNonEmptyTrimmed(p.CandidatePromptRef, p.EnrichPromptRef), promptText, modelName, inputText, callReason, "MID-CWB-SEMANTIC-PROJECTIONS")
 	var (
 		payload map[string]any
@@ -788,18 +791,26 @@ func isEmptySemanticProjectionError(err error) bool {
 		strings.Contains(msg, "(MID_26052134)")
 }
 
-func buildSemanticProjectionCandidateUserPrompt(chunkText string) string {
+// semanticProjectionCandidateTask is the pass-1 task prompt (base prompt + output schema).
+// The chunk text is NOT included here — it is the canonical InputText (document section)
+// under document-first layout, so it forms a cacheable prefix. See ADR 2026062701 §Phase 2.3.
+func semanticProjectionCandidateTask(base string) string {
 	schema := map[string]any{
 		"semantic_projection": "string — compact semantically rich summary of this chunk",
 		"keywords":            []string{"string"},
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nInput chunk lines:\n" + chunkText
+	task := "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON)
+	if strings.TrimSpace(base) == "" {
+		return task
+	}
+	return strings.TrimSpace(base) + "\n\n" + task
 }
 
-func buildSemanticProjectionEnrichUserPrompt(cand semanticProjectionCandidate) string {
-	chunkText := buildMarkedChunkInputText(cand.ChunkLines)
+// semanticProjectionEnrichTask is the pass-2 task prompt (base prompt + schema + the pass-1
+// candidate). The source chunk text is NOT included here; it is the canonical InputText, which
+// matches pass 1's prefix so pass 2 reuses the cached chunk prefix.
+func semanticProjectionEnrichTask(base string, cand semanticProjectionCandidate) string {
 	candidateJSON, _ := json.Marshal(map[string]any{
 		"seq_no":              cand.SeqNo,
 		"semantic_projection": cand.SemanticProjection,
@@ -833,9 +844,12 @@ func buildSemanticProjectionEnrichUserPrompt(cand semanticProjectionCandidate) s
 		}},
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nSemantic projection candidate:\n" + string(candidateJSON) +
-		"\n\nSource chunk lines:\n" + chunkText
+	task := "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nSemantic projection candidate:\n" + string(candidateJSON)
+	if strings.TrimSpace(base) == "" {
+		return task
+	}
+	return strings.TrimSpace(base) + "\n\n" + task
 }
 
 func chunkLineSpans(lines []MarkedLine) []string {

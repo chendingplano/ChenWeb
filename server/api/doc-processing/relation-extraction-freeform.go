@@ -103,7 +103,10 @@ func (p *EntityRelationProcessor) processFreeformRelationChunk(
 	chunk Chunk,
 	docCtx string,
 ) relationWindowResult {
-	inputText := wrapLinesWithDocContext(buildChunkRelationInputJSON(chunk.Lines), docCtx)
+	// Canonical chunk serialization (markedLinesToJSON + doc-context envelope) so this chunk's
+	// InputText is byte-identical to the entities pass (and other chunk processors), enabling
+	// DeepSeek cross-processor cache reuse. See ADR 2026062701 §Phase 2.3.
+	inputText := canonicalChunkInputText(chunk.Lines, docCtx)
 	callStart := p.Now()
 	p.Logger.Info("extract relation start",
 		"record_id", recordID, "chunk_idx", idx, "seq_no", chunk.SeqNo,

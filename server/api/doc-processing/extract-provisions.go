@@ -228,7 +228,7 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		}
 		numUnits = len(chunks)
 		chunkBlocks = chunksToBlocks(chunks)
-		result, extractErr = p.extractProvisionsFromChunksWithLLM(ctx, chunks, evt.RecordID)
+		result, extractErr = p.extractProvisionsFromChunksWithLLM(ctx, chunks, evt.RecordID, buildDocContextLine(rec))
 	}
 	if extractErr != nil {
 		if errors.Is(extractErr, ErrPipelineStopped) {
@@ -464,7 +464,7 @@ func (p *ProvisionsProcessor) resolveChunks(ctx context.Context, evt LineFileGen
 	return chunks, nil
 }
 
-func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Context, chunks []Chunk, recordID int64) (provisionExtractionResult, error) {
+func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Context, chunks []Chunk, recordID int64, docCtx string) (provisionExtractionResult, error) {
 	extractID := p.Now().Format("20060102-150405")
 
 	type chunkResult struct {
@@ -488,7 +488,10 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 			"prompt name", p.PromptRef,
 		)
 		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), idx)
-		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, buildProvisionUserPromptFromChunk(chunk))
+		// Canonical chunk InputText (shared, cacheable prefix); schema/task in the prompt.
+		// See ADR 2026062701 §Phase 2.3.
+		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
+		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, inputText, provisionChunkTask(p.PromptText, chunk))
 		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
 		numInChunk := 0
 		if err == nil && payload != nil {
@@ -560,7 +563,11 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 	}, nil
 }
 
-func buildProvisionUserPromptFromChunk(chunk Chunk) string {
+// provisionChunkTask is the chunk-mode task prompt (base prompt + output schema + chunk index).
+// The chunk lines are NOT included here — they are the canonical InputText (document section)
+// under document-first layout, shared byte-for-byte with the other chunk processors so DeepSeek
+// can reuse the prefix. See ADR 2026062701 §Phase 2.3.
+func provisionChunkTask(base string, chunk Chunk) string {
 	schema := map[string]any{
 		"language": "string",
 		"provisions": []map[string]any{{
@@ -587,9 +594,12 @@ func buildProvisionUserPromptFromChunk(chunk Chunk) string {
 		}},
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	return "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
-		"\n\nChunk index: " + strconv.Itoa(chunk.SeqNo) +
-		"\n\nInput chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
+	task := "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nChunk index: " + strconv.Itoa(chunk.SeqNo)
+	if strings.TrimSpace(base) == "" {
+		return task
+	}
+	return strings.TrimSpace(base) + "\n\n" + task
 }
 
 func chunkLineToPage(chunk Chunk) map[int]int {
@@ -647,7 +657,8 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 			"prompt name", p.PromptRef,
 		)
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), idx)
-		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, buildProvisionUserPrompt(block))
+		// Block mode keeps its self-contained prompt (blocks are not shared across processors).
+		payload, modelName, err := p.extractProvisionPayloadWithFallback(jobCtx, buildProvisionUserPrompt(block), p.PromptText)
 		isFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.ModelName) && strings.TrimSpace(modelName) != ""
 		numInBlock := 0
 		if err == nil && payload != nil {
@@ -715,8 +726,8 @@ func (p *ProvisionsProcessor) extractProvisionsFromBlocksWithLLM(
 	}, nil
 }
 
-func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
-	payload, err := p.extractProvisionPayloadFromText(ctx, inputText, p.ModelName, p.Extractor)
+func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Context, inputText, promptText string) (map[string]any, string, error) {
+	payload, err := p.extractProvisionPayloadFromText(ctx, inputText, promptText, p.ModelName, p.Extractor)
 	if err == nil {
 		return payload, strings.TrimSpace(p.ModelName), nil
 	}
@@ -753,7 +764,7 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 	if fallbackExt == nil {
 		fallbackExt = p.Extractor
 	}
-	payload, fallbackErr := p.extractProvisionPayloadFromText(ctx, inputText, fallbackModelName, fallbackExt)
+	payload, fallbackErr := p.extractProvisionPayloadFromText(ctx, inputText, promptText, fallbackModelName, fallbackExt)
 	if fallbackErr != nil {
 		if ApiUtils.IsEmptyJSONResponse(fallbackErr) {
 			p.Logger.Warn("fallback provisions extraction returned empty JSON; treating as empty result",
@@ -771,8 +782,8 @@ func (p *ProvisionsProcessor) extractProvisionPayloadWithFallback(ctx context.Co
 	return payload, fallbackModelName, nil
 }
 
-func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Context, inputText string, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
-	in := newLLMJSONInput(ctx, p.PromptRef, p.PromptText, modelName, inputText, "extract_provisions", "MID-CWB-EXTRACT-PROVISIONS")
+func (p *ProvisionsProcessor) extractProvisionPayloadFromText(ctx context.Context, inputText, promptText string, modelName string, extractor LLMJSONExtractor) (map[string]any, error) {
+	in := newLLMJSONInput(ctx, p.PromptRef, promptText, modelName, inputText, "extract_provisions", "MID-CWB-EXTRACT-PROVISIONS")
 	var (
 		payload map[string]any
 		err     error

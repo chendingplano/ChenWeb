@@ -556,7 +556,7 @@ func (p *EntityRelationProcessor) processChunk(
 	chunk Chunk,
 	docCtx string,
 ) entityRelationChunkResult {
-	chunkText := wrapLinesWithDocContext(buildMarkedChunkInputText(chunk.Lines), docCtx)
+	chunkText := canonicalChunkInputText(chunk.Lines, docCtx)
 	callStart := p.Now()
 	p.Logger.Info("extract entities start",
 		"record_id", recordID,

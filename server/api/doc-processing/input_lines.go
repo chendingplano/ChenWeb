@@ -47,6 +47,18 @@ func markedLinesToJSON(lines []MarkedLine) string {
 	return string(bs)
 }
 
+// canonicalChunkInputText is the single, canonical serialization of a chunk for LLM input,
+// shared by all chunk-based doc processors so the same chunk produces a byte-identical
+// prefix across processors (enabling DeepSeek cross-processor prompt-cache reuse).
+//
+// It is the document/window text only — no per-processor schema or task text. Processors put
+// their schema/task instructions in the prompt (the <TASK> section under document-first
+// layout), never prepended here. docCtx is buildDocContextLine(rec); pass it consistently so
+// every processor's envelope matches. See ADR 2026062701 §Phase 2.3 and +CAPSULE §6.2.
+func canonicalChunkInputText(lines []MarkedLine, docCtx string) string {
+	return wrapLinesWithDocContext(markedLinesToJSON(lines), docCtx)
+}
+
 // rawLinesToJSON serialises []Line as a JSON array for LLM input, using flag "n".
 // Image lines are skipped.
 func rawLinesToJSON(lines []Line) string {
