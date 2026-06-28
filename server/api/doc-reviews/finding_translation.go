@@ -99,10 +99,22 @@ func (t *llmFindingTranslator) normalizeFindingAttempt(ctx context.Context, cano
 	if err != nil {
 		return FindingNormalization{}, err
 	}
+	logger.Info("doc-review finding normalization start",
+		"model_name", t.modelName,
+		"prompt_name", promptName,
+		"canonical_language", canonicalLanguage,
+		"input_json", string(input),
+	)
 	payload, err := t.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, promptName, promptText, t.modelName, string(input), "normalize_doc_review_finding", "MID-CWB-DR-NORMALIZE"))
 	if err != nil {
 		return FindingNormalization{}, err
 	}
+	logger.Info("doc-review finding normalization response",
+		"model_name", t.modelName,
+		"prompt_name", promptName,
+		"canonical_language", canonicalLanguage,
+		"response_json", compactJSONForLog(payload),
+	)
 	result := findingNormalizationFromMap(payload)
 	if !normalizationInCanonicalLanguage(result, canonicalLanguage) && promptName == findingNormalizationPromptName {
 		return t.normalizeFindingAttempt(ctx, canonicalLanguage, finding, findingNormalizationRetryPromptName, t.normalizeRetryPromptText)
@@ -141,10 +153,22 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 	if err != nil {
 		return FindingLocalizedContent{}, err
 	}
+	logger.Info("doc-review finding localization start",
+		"model_name", t.modelName,
+		"prompt_name", promptName,
+		"target_language", language,
+		"input_json", string(input),
+	)
 	payload, err := t.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, promptName, promptText, t.modelName, string(input), "localize_doc_review_finding", "MID-CWB-DR-LOCALIZE"))
 	if err != nil {
 		return FindingLocalizedContent{}, err
 	}
+	logger.Info("doc-review finding localization response",
+		"model_name", t.modelName,
+		"prompt_name", promptName,
+		"target_language", language,
+		"response_json", compactJSONForLog(payload),
+	)
 	tr := findingLocalizedContentFromMap(payload)
 	if !translationInTargetLanguage(tr, language) && promptName == findingTranslationPromptName {
 		return t.translateFindingAttempt(ctx, language, finding, findingTranslationRetryPromptName, t.translationRetryPromptText)
@@ -247,6 +271,14 @@ func compactDiagnosticText(s string) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func compactJSONForLog(v any) string {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("<marshal_error:%v>", err)
+	}
+	return compactDiagnosticText(string(body))
 }
 
 func normalizeConfiguredLanguages(languages []string) []string {
