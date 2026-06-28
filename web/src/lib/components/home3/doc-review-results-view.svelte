@@ -329,36 +329,6 @@
             {/if}
         </div>
 
-    <!-- Per-aspect status panel (always shown when statuses are available) -->
-    {#if aspectStatuses.length > 0}
-        <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 10px; padding: 1rem; margin-bottom: 1.25rem;">
-            <div style="font-size: 0.8rem; font-weight: 600; color: {textSecondary}; margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em;">Aspects</div>
-            <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-                {#each aspectStatuses as s}
-                    {@const statusColor = s.status === 'success' ? '#22c55e' : s.status === 'failed' ? '#ef4444' : s.status === 'running' ? accent : textMuted}
-                    <div style="display:flex; flex-direction:column; gap:0.45rem; padding:0.55rem 0;">
-                        <div style="display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem;">
-                            <span style="width: 8px; height: 8px; border-radius: 50%; background: {statusColor}; flex-shrink: 0;
-                                {s.status === 'running' ? 'animation: pulse 1.2s ease-in-out infinite;' : ''}"></span>
-                            <span style="color: {textPrimary}; font-weight: 500;">{s.aspect.replace(/_/g, ' ')}</span>
-                            {#if s.pass}<span style="color: {textMuted}; font-size: 0.75rem;">({s.pass})</span>{/if}
-                            <span style="margin-left:auto; color:{textMuted}; font-size:0.75rem;">{progressPercent(s.progress)}%</span>
-                            <span style="color: {statusColor}; font-size: 0.75rem; font-weight: 600; text-transform: capitalize;">{s.status}</span>
-                        </div>
-                        <div style="width:100%; height:8px; border-radius:9999px; background:{inputBg}; border:1px solid {borderColor}; overflow:hidden;">
-                            <div style="height:100%; width:{progressPercent(s.progress)}%; background:{statusColor}; transition:width 180ms ease;"></div>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:0.6rem; font-size:0.75rem; color:{textMuted};">
-                            <span>{s.finding_count} finding{s.finding_count !== 1 ? 's' : ''} so far</span>
-                            {#if s.error_message}
-                                <span style="color: #ef4444;" title={s.error_message}>error</span>
-                            {/if}
-                        </div>
-                    </div>
-                {/each}
-            </div>
-        </div>
-    {/if}
 
     {#if request.status === 'accepted' || request.status === 'running'}
         <!-- Running: the Active Reviews monitor on the form conveys live progress -->
@@ -383,17 +353,9 @@
     {:else}
         <!-- Completed State -->
         <!-- Header -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-            <div>
-                <h1 style="font-size: 1.5rem; font-weight: 700; color: {textPrimary};">Review Results</h1>
-                <p style="color: {textSecondary}; font-size: 0.85rem;">{findings.length} findings · {request.tier}</p>
-            </div>
-            <div style="display: flex; gap: 0.5rem;">
-                <button onclick={() => activeTab = 'findings'}
-                    style="padding: 0.4rem 1rem; background: {activeTab === 'findings' ? accentTint : 'transparent'}; color: {activeTab === 'findings' ? accent : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Findings</button>
-                <button onclick={() => activeTab = 'report'}
-                    style="padding: 0.4rem 1rem; background: {activeTab === 'report' ? accentTint : 'transparent'}; color: {activeTab === 'report' ? accent : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Report</button>
-            </div>
+        <div style="margin-bottom: 1.5rem;">
+            <h1 style="font-size: 1.5rem; font-weight: 700; color: {textPrimary};">Review Results</h1>
+            <p style="color: {textSecondary}; font-size: 0.85rem;">{findings.length} findings · {request.tier}</p>
         </div>
 
         <!-- Summary Charts -->
@@ -546,6 +508,14 @@
                 </div>
             </div>
 
+        </div>
+
+        <!-- Tab switcher -->
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+            <button onclick={() => activeTab = 'findings'}
+                style="padding: 0.4rem 1rem; background: {activeTab === 'findings' ? accentTint : 'transparent'}; color: {activeTab === 'findings' ? accent : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Findings</button>
+            <button onclick={() => activeTab = 'report'}
+                style="padding: 0.4rem 1rem; background: {activeTab === 'report' ? accentTint : 'transparent'}; color: {activeTab === 'report' ? accent : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Report</button>
         </div>
 
         <!-- Findings Tab -->
