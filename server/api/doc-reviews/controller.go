@@ -12,6 +12,7 @@ import (
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/docactivity"
+	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -204,7 +205,7 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 	}
 	inputStore := docprocessing.DocMetadataSQLStore{DB: c.DB}
 	entityStore := docprocessing.EntityRelationSQLStore{DB: c.DB}
-	findingsStore := ReviewFindingsSQLStore{DB: c.DB}
+	findingsStore := ReviewFindingsSQLStore{DB: c.DB, Languages: appconfig.GetLanguages()}
 	statusStore := ReviewStatusSQLStore{DB: c.DB}
 
 	processor := NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
@@ -337,7 +338,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate findings: %w", err)
 		}
-		if languageCode != "" && (passFilter != "" || aspectFilter != "") {
+		if languageCode != "" {
 			localized, err = c.localizeFindings(ctx, languageCode, localized, metadataByFindingID)
 			if err != nil {
 				return nil, err

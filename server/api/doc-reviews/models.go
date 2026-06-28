@@ -40,10 +40,10 @@ type RequestStatus struct {
 	DocTemplate    string                   `json:"doc_template,omitempty"`
 	Status         string                   `json:"status"`
 	CreateTime     string                   `json:"create_time"`
-	StartTime      string                   `json:"start_time,omitempty"`  // from latest run
-	EndTime        string                   `json:"end_time,omitempty"`    // from latest run
+	StartTime      string                   `json:"start_time,omitempty"`    // from latest run
+	EndTime        string                   `json:"end_time,omitempty"`      // from latest run
 	ErrorMessage   string                   `json:"error_message,omitempty"` // from latest run
-	ReportID       int64                    `json:"report_id,omitempty"`   // latest report for this request, if any
+	ReportID       int64                    `json:"report_id,omitempty"`     // latest report for this request, if any
 }
 
 // RequestWithFindings extends RequestStatus with findings and per-aspect statuses.
@@ -76,13 +76,43 @@ type FindingItem struct {
 	ReviewStatus string  `json:"review_status"`
 }
 
-// FindingTranslation is the localized subset stored under
-// kb.doc_review_findings.metadata[language_code].
-type FindingTranslation struct {
-	FindingType string `json:"finding_type"`
+// FindingLocalizedContent stores localized prose for one language.
+type FindingLocalizedContent struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Suggestion  string `json:"suggestion"`
+	Provenance  string `json:"provenance,omitempty"`
+}
+
+// FindingTranslation is the localized subset applied to a FindingItem when a
+// caller requests a specific language. It mirrors FindingLocalizedContent.
+type FindingTranslation = FindingLocalizedContent
+
+// FindingI18NMetadata stores the canonical/source language bookkeeping and all
+// precomputed translations for a finding.
+type FindingI18NMetadata struct {
+	SchemaVersion            int                                `json:"schema_version"`
+	SourceLanguage           string                             `json:"source_language,omitempty"`
+	SourceLanguageConfidence float64                            `json:"source_language_confidence,omitempty"`
+	CanonicalLanguage        string                             `json:"canonical_language,omitempty"`
+	CanonicalOrigin          string                             `json:"canonical_origin,omitempty"`
+	Translations             map[string]FindingLocalizedContent `json:"translations,omitempty"`
+}
+
+// FindingMetadataEnvelope is stored in kb.doc_review_findings.metadata.
+type FindingMetadataEnvelope struct {
+	I18N FindingI18NMetadata `json:"i18n"`
+}
+
+// FindingNormalization is the result of converting reviewer output into a
+// canonical storage form.
+type FindingNormalization struct {
+	SourceLanguage           string                  `json:"source_language"`
+	SourceLanguageConfidence float64                 `json:"source_language_confidence"`
+	CanonicalLanguage        string                  `json:"canonical_language"`
+	CanonicalOrigin          string                  `json:"canonical_origin"`
+	Canonical                FindingLocalizedContent `json:"canonical"`
+	SourceTranslation        FindingLocalizedContent `json:"source_translation"`
 }
 
 // ReviewPackageInfo describes a configured package group in display order.

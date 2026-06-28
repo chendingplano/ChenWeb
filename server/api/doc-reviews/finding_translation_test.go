@@ -3,7 +3,6 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"regexp"
 	"testing"
 
@@ -11,443 +10,267 @@ import (
 )
 
 type fakeFindingTranslator struct {
-	calls int
-	out   FindingTranslation
-	seq   []FindingTranslation
-	err   error
+	normalizeCalls int
+	normalizeOut   FindingNormalization
+	normalizeErr   error
+
+	translateCalls []string
+	translateOut   map[string]FindingLocalizedContent
+	translateErr   error
 }
 
-func (f *fakeFindingTranslator) TranslateFinding(ctx context.Context, language string, finding FindingItem) (FindingTranslation, error) {
-	f.calls++
-	if len(f.seq) > 0 {
-		next := f.seq[0]
-		f.seq = f.seq[1:]
-		return next, f.err
+func (f *fakeFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLanguage string, finding FindingItem) (FindingNormalization, error) {
+	f.normalizeCalls++
+	return f.normalizeOut, f.normalizeErr
+}
+
+func (f *fakeFindingTranslator) TranslateFinding(ctx context.Context, language string, finding FindingItem) (FindingLocalizedContent, error) {
+	f.translateCalls = append(f.translateCalls, language)
+	if out, ok := f.translateOut[language]; ok {
+		return out, f.translateErr
 	}
-	return f.out, f.err
+	return FindingLocalizedContent{}, f.translateErr
 }
 
-func TestTranslationFromMetadata(t *testing.T) {
-	raw := []byte(`{"zh":{"finding_type":"类型","title":"标题","description":"描述","suggestion":"建议"}}`)
+func TestTranslationFromMetadataReadsI18NEnvelope(t *testing.T) {
+	raw := []byte(`{"i18n":{"schema_version":1,"translations":{"zh":{"title":"标题","description":"描述","suggestion":"建议","provenance":"original_extraction"}}}}`)
 	tr, ok := translationFromMetadata(raw, "zh")
 	if !ok {
 		t.Fatal("translationFromMetadata ok=false, want true")
 	}
-	if tr.Title != "标题" || tr.Suggestion != "建议" {
+	if tr.Title != "标题" || tr.Description != "描述" || tr.Suggestion != "建议" {
 		t.Fatalf("translation=%#v", tr)
 	}
 }
 
-func TestLocalizeFindingTranslatesAndSavesMissingMetadata(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
+func TestTranslationFromMetadataReadsLegacyShape(t *testing.T) {
+	raw := []byte(`{"zh":{"title":"标题","description":"描述","suggestion":"建议"}}`)
+	tr, ok := translationFromMetadata(raw, "zh")
+	if !ok {
+		t.Fatal("translationFromMetadata ok=false, want true")
 	}
-	defer db.Close()
-
-	translator := &fakeFindingTranslator{out: FindingTranslation{
-		FindingType: "技术准确性",
-		Title:       "范围符号错误",
-		Description: "描述中文",
-		Suggestion:  "建议中文",
-	}}
-	ctrl := &DocReviewController{DB: db, Translator: translator}
-
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
-		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
-		WHERE id = $1`)).
-		WithArgs(int64(42), "zh", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	f := FindingItem{ID: 42, FindingType: "technical_accuracy", Title: "Bad range", Description: "English", Suggestion: "Fix it"}
-	got, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{}`))
-	if err != nil {
-		t.Fatalf("localizeFinding: %v", err)
-	}
-
-	if translator.calls != 1 {
-		t.Fatalf("translator calls=%d, want 1", translator.calls)
-	}
-	if got.Title != "范围符号错误" || got.Description != "描述中文" {
-		t.Fatalf("localized finding=%#v", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
+	if tr.Title != "标题" || tr.Description != "描述" || tr.Suggestion != "建议" {
+		t.Fatalf("translation=%#v", tr)
 	}
 }
 
-func TestLocalizeFindingUsesCachedMetadata(t *testing.T) {
-	translator := &fakeFindingTranslator{}
-	ctrl := &DocReviewController{Translator: translator}
-	body, _ := json.Marshal(map[string]FindingTranslation{
-		"zh": {Title: "缓存标题", Description: "缓存描述"},
-	})
-
-	f := FindingItem{ID: 7, Title: "Original", Description: "Original desc"}
-	got, err := ctrl.localizeFinding(context.Background(), "zh", f, body)
-	if err != nil {
-		t.Fatalf("localizeFinding: %v", err)
-	}
-
-	if translator.calls != 0 {
-		t.Fatalf("translator calls=%d, want 0", translator.calls)
-	}
-	if got.Title != "缓存标题" || got.Description != "缓存描述" {
-		t.Fatalf("localized finding=%#v", got)
-	}
-}
-
-func TestLocalizeFindingRetranslatesCachedUntranslatedMetadata(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	translator := &fakeFindingTranslator{out: FindingTranslation{
-		Title:       "中文标题",
-		Description: "中文描述",
-		Suggestion:  "中文建议",
-	}}
-	ctrl := &DocReviewController{DB: db, Translator: translator}
-
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
-		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
-		WHERE id = $1`)).
-		WithArgs(int64(9), "zh", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	f := FindingItem{ID: 9, Title: "English title", Description: "English desc", Suggestion: "English suggestion"}
-	body, _ := json.Marshal(map[string]FindingTranslation{
-		"zh": {
-			Title:       "English title",
-			Description: "English desc",
-			Suggestion:  "English suggestion",
+func TestPrepareFindingForStorageCanonicalizesEnglishAndPreservesChineseSource(t *testing.T) {
+	translator := &fakeFindingTranslator{
+		normalizeOut: FindingNormalization{
+			SourceLanguage:           "zh",
+			SourceLanguageConfidence: 0.99,
+			CanonicalLanguage:        "en",
+			CanonicalOrigin:          "translated",
+			Canonical: FindingLocalizedContent{
+				Title:       "Undefined acceptance criteria",
+				Description: "The requirement states a condition but does not define acceptance criteria.",
+				Suggestion:  "Add measurable acceptance criteria.",
+			},
+			SourceTranslation: FindingLocalizedContent{
+				Title:       "未定义验收标准",
+				Description: "该要求陈述了条件，但没有定义验收标准。",
+				Suggestion:  "补充可衡量的验收标准。",
+				Provenance:  "original_extraction",
+			},
 		},
+	}
+
+	finding := ReviewFinding{
+		Pass:        "P1",
+		Aspect:      "grammar_spelling",
+		Severity:    "medium",
+		FindingType: "grammar",
+		Title:       "未定义验收标准",
+		Description: "该要求陈述了条件，但没有定义验收标准。",
+		Evidence:    "验收应充分。",
+		Location:    "42",
+		Suggestion:  "补充可衡量的验收标准。",
+		Confidence:  0.97,
+	}
+
+	prepared, err := prepareFindingForStorage(context.Background(), translator, []string{"en", "zh"}, finding)
+	if err != nil {
+		t.Fatalf("prepareFindingForStorage: %v", err)
+	}
+	if translator.normalizeCalls != 1 {
+		t.Fatalf("normalizeCalls=%d, want 1", translator.normalizeCalls)
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls=%v, want none because source zh should be reused", translator.translateCalls)
+	}
+	if prepared.Canonical.Title != "Undefined acceptance criteria" {
+		t.Fatalf("canonical title=%q", prepared.Canonical.Title)
+	}
+	if prepared.Canonical.Evidence != "验收应充分。" {
+		t.Fatalf("evidence=%q, want original evidence unchanged", prepared.Canonical.Evidence)
+	}
+	if prepared.Metadata.I18N.SourceLanguage != "zh" {
+		t.Fatalf("source_language=%q", prepared.Metadata.I18N.SourceLanguage)
+	}
+	if got := prepared.Metadata.I18N.Translations["zh"].Title; got != "未定义验收标准" {
+		t.Fatalf("zh title=%q", got)
+	}
+	if got := prepared.Metadata.I18N.Translations["en"].Title; got != "Undefined acceptance criteria" {
+		t.Fatalf("en title=%q", got)
+	}
+}
+
+func TestPrepareFindingForStorageAutoTranslatesConfiguredDisplayLanguages(t *testing.T) {
+	translator := &fakeFindingTranslator{
+		normalizeOut: FindingNormalization{
+			SourceLanguage:           "en",
+			SourceLanguageConfidence: 0.95,
+			CanonicalLanguage:        "en",
+			CanonicalOrigin:          "original",
+			Canonical: FindingLocalizedContent{
+				Title:       "Subject-verb disagreement",
+				Description: "The singular subject uses a plural verb.",
+				Suggestion:  "Change 'are' to 'is'.",
+			},
+		},
+		translateOut: map[string]FindingLocalizedContent{
+			"zh": {
+				Title:       "主谓不一致",
+				Description: "单数主语使用了复数谓语。",
+				Suggestion:  "将“are”改为“is”。",
+				Provenance:  "llm_translation",
+			},
+		},
+	}
+
+	prepared, err := prepareFindingForStorage(context.Background(), translator, []string{"en", "zh"}, ReviewFinding{
+		FindingType: "grammar",
+		Title:       "Subject-verb disagreement",
+		Description: "The singular subject uses a plural verb.",
+		Suggestion:  "Change 'are' to 'is'.",
+		Evidence:    "The system are ready.",
 	})
-
-	got, err := ctrl.localizeFinding(context.Background(), "zh", f, body)
 	if err != nil {
-		t.Fatalf("localizeFinding: %v", err)
+		t.Fatalf("prepareFindingForStorage: %v", err)
 	}
-	if translator.calls != 1 {
-		t.Fatalf("translator calls=%d, want 1", translator.calls)
+	if len(translator.translateCalls) != 1 || translator.translateCalls[0] != "zh" {
+		t.Fatalf("translateCalls=%v, want [zh]", translator.translateCalls)
 	}
-	if got.Title != "中文标题" || got.Description != "中文描述" || got.Suggestion != "中文建议" {
-		t.Fatalf("localized finding=%#v", got)
+	if got := prepared.Metadata.I18N.Translations["zh"].Title; got != "主谓不一致" {
+		t.Fatalf("zh title=%q", got)
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
+	if prepared.Canonical.Evidence != "The system are ready." {
+		t.Fatalf("evidence=%q, want original evidence unchanged", prepared.Canonical.Evidence)
 	}
 }
 
-func TestLocalizeFindingErrorsWhenTranslatorReturnsUntranslatedContent(t *testing.T) {
-	translator := &fakeFindingTranslator{out: FindingTranslation{
-		Title:       "English title",
-		Description: "English desc",
-		Suggestion:  "English suggestion",
-	}}
-	ctrl := &DocReviewController{Translator: translator}
-	f := FindingItem{ID: 10, Title: "English title", Description: "English desc", Suggestion: "English suggestion"}
-
-	_, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{}`))
-	if err == nil {
-		t.Fatal("localizeFinding error=nil, want error")
-	}
-}
-
-func TestLocalizeFindingRetriesWhenFirstTranslationIsUntranslated(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	llmTranslator := &llmFindingTranslator{
-		client: &fakeJSONExtractor{seq: []map[string]any{
-			{
-				"title":       "English title",
-				"description": "English desc",
-				"suggestion":  "English suggestion",
-			},
-			{
-				"title":       "中文标题",
-				"description": "中文描述",
-				"suggestion":  "中文建议",
-			},
-		}},
-		modelName: "test-model",
-	}
-	ctrl := &DocReviewController{DB: db, Translator: llmTranslator}
-
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
-		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
-		WHERE id = $1`)).
-		WithArgs(int64(11), "zh", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	f := FindingItem{ID: 11, Title: "English title", Description: "English desc", Suggestion: "English suggestion"}
-	got, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{}`))
-	if err != nil {
-		t.Fatalf("localizeFinding: %v", err)
-	}
-	if got.Title != "中文标题" || got.Description != "中文描述" || got.Suggestion != "中文建议" {
-		t.Fatalf("localized finding=%#v", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
-	}
-}
-
-func TestLocalizeFindingsErrorsWhenTranslationModelMissing(t *testing.T) {
-	t.Setenv("TRANSLATION_MODEL_NAME", "")
-
+func TestLocalizeFindingUsesStoredTranslationWithoutLLM(t *testing.T) {
 	ctrl := &DocReviewController{}
-	findings := []FindingItem{{ID: 42, Title: "Bad range", Description: "English"}}
+	body := []byte(`{"i18n":{"schema_version":1,"translations":{"zh":{"title":"缓存标题","description":"缓存描述","suggestion":"缓存建议","provenance":"llm_translation"}}}}`)
 
-	_, err := ctrl.localizeFindings(context.Background(), "zh", findings, map[int64][]byte{42: []byte(`{}`)})
-	if err == nil {
-		t.Fatal("localizeFindings error=nil, want error")
+	f := FindingItem{ID: 7, Title: "Original", Description: "Original desc", Suggestion: "Original suggestion"}
+	got, err := ctrl.localizeFinding(context.Background(), "zh", f, body)
+	if err != nil {
+		t.Fatalf("localizeFinding: %v", err)
 	}
-	if !errors.Is(err, errFindingTranslationUnavailable) {
-		t.Fatalf("errors.Is(err, errFindingTranslationUnavailable)=false; err=%v", err)
+	if got.Title != "缓存标题" || got.Description != "缓存描述" || got.Suggestion != "缓存建议" {
+		t.Fatalf("localized finding=%#v", got)
 	}
 }
 
-func TestContainsChineseChars(t *testing.T) {
-	cases := []struct {
-		input string
-		want  bool
-	}{
-		{"你好世界", true},
-		{"hello world", false},
-		{"mixed 中文 text", true},
-		{"", false},
-		{"12345", false},
-		{"abc123", false},
-		{"。？！", false}, // CJK punctuation, not Han
+func TestLocalizeFindingFallsBackToCanonicalEnglishWhenTranslationMissing(t *testing.T) {
+	ctrl := &DocReviewController{}
+	f := FindingItem{ID: 8, Title: "Canonical title", Description: "Canonical desc", Suggestion: "Canonical suggestion"}
+	got, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{"i18n":{"schema_version":1,"translations":{"en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical suggestion","provenance":"canonical"}}}}`))
+	if err != nil {
+		t.Fatalf("localizeFinding: %v", err)
 	}
-	for _, tc := range cases {
-		got := containsChineseChars(tc.input)
-		if got != tc.want {
-			t.Errorf("containsChineseChars(%q)=%v, want %v", tc.input, got, tc.want)
-		}
+	if got.Title != "Canonical title" || got.Description != "Canonical desc" || got.Suggestion != "Canonical suggestion" {
+		t.Fatalf("localized finding=%#v", got)
 	}
 }
 
-func TestFindingInTargetLanguage_zh(t *testing.T) {
-	cases := []struct {
-		name    string
-		finding FindingItem
-		lang    string
-		want    bool
-	}{
-		{
-			name:    "all Chinese prose fields",
-			finding: FindingItem{Title: "中文标题", Description: "中文描述", Suggestion: "中文建议"},
-			lang:    "zh",
-			want:    true,
-		},
-		{
-			name:    "English prose fields",
-			finding: FindingItem{Title: "English title", Description: "English desc", Suggestion: "English suggestion"},
-			lang:    "zh",
-			want:    false,
-		},
-		{
-			name:    "mixed — Chinese title only, description English",
-			finding: FindingItem{Title: "中文", Description: "English desc", Suggestion: "English suggestion"},
-			lang:    "zh",
-			want:    false, // not ALL three prose fields
-		},
-		{
-			name:    "empty fields",
-			finding: FindingItem{},
-			lang:    "zh",
-			want:    false,
-		},
-		{
-			name:    "English with en language (no-op)",
-			finding: FindingItem{Title: "Hello", Description: "World"},
-			lang:    "en",
-			want:    false,
-		},
-		{
-			name:    "finding_type alone in Chinese is not enough",
-			finding: FindingItem{FindingType: "中文类型", Title: "English", Description: "English", Suggestion: "English"},
-			lang:    "zh",
-			want:    false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := findingInTargetLanguage(tc.finding, tc.lang)
-			if got != tc.want {
-				t.Errorf("findingInTargetLanguage=%v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestLocalizeFindingSkipsWhenAlreadyInTargetLanguage(t *testing.T) {
+func TestSaveFindingsStoresCanonicalEnglishAndI18NMetadata(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	defer db.Close()
 
-	translator := &fakeFindingTranslator{}
-	ctrl := &DocReviewController{DB: db, Translator: translator}
-
-	// Expect one DB save of the self-translation.
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
-		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
-		WHERE id = $1`)).
-		WithArgs(int64(1), "zh", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	f := FindingItem{
-		ID: 1, FindingType: "technical_error",
-		Title: "中文标题", Description: "中文描述", Suggestion: "中文建议",
+	translator := &fakeFindingTranslator{
+		normalizeOut: FindingNormalization{
+			SourceLanguage:           "zh",
+			SourceLanguageConfidence: 0.98,
+			CanonicalLanguage:        "en",
+			CanonicalOrigin:          "translated",
+			Canonical: FindingLocalizedContent{
+				Title:       "Undefined scope term",
+				Description: "The term is used before it is defined.",
+				Suggestion:  "Define the term when it first appears.",
+			},
+			SourceTranslation: FindingLocalizedContent{
+				Title:       "范围术语未定义",
+				Description: "该术语在定义前已被使用。",
+				Suggestion:  "首次出现时定义该术语。",
+				Provenance:  "original_extraction",
+			},
+		},
 	}
-	got, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{}`))
+	store := ReviewFindingsSQLStore{
+		DB:         db,
+		Translator: translator,
+		Languages:  []string{"en", "zh"},
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
+    (input_record_id, run_id, pass, aspect, severity, finding_type,
+     title, description, evidence, location, suggestion, confidence, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
+		WithArgs(
+			int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
+			"Undefined scope term", "The term is used before it is defined.", "范围见下文", "44", "Define the term when it first appears.", 0.88, sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	_, err = store.SaveFindings(context.Background(), 100, 200, []ReviewFinding{{
+		Pass:        "P1",
+		Aspect:      "grammar_spelling",
+		Severity:    "medium",
+		FindingType: "grammar",
+		Title:       "范围术语未定义",
+		Description: "该术语在定义前已被使用。",
+		Evidence:    "范围见下文",
+		Location:    "44",
+		Suggestion:  "首次出现时定义该术语。",
+		Confidence:  0.88,
+	}})
 	if err != nil {
-		t.Fatalf("localizeFinding: %v", err)
-	}
-	if translator.calls != 0 {
-		t.Fatalf("translator.calls=%d, want 0 (LLM should not be called)", translator.calls)
-	}
-	if got.Title != "中文标题" || got.Description != "中文描述" {
-		t.Fatalf("localized finding=%#v, want original Chinese fields", got)
+		t.Fatalf("SaveFindings: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
 
-func TestCachedChineseTranslationIsNotFlaggedAsUntranslated(t *testing.T) {
-	translator := &fakeFindingTranslator{}
-	ctrl := &DocReviewController{Translator: translator}
-
-	// Chinese finding with a cached self-translation (identical to source).
-	body := `{"zh":{"finding_type":"technical_error","title":"中文标题","description":"中文描述","suggestion":"中文建议"}}`
-	f := FindingItem{
-		ID: 2, FindingType: "technical_error",
-		Title: "中文标题", Description: "中文描述", Suggestion: "中文建议",
+func TestFindingMetadataJSONRoundTrip(t *testing.T) {
+	meta := FindingMetadataEnvelope{
+		I18N: FindingI18NMetadata{
+			SchemaVersion:            1,
+			SourceLanguage:           "zh",
+			SourceLanguageConfidence: 0.99,
+			CanonicalLanguage:        "en",
+			CanonicalOrigin:          "translated",
+			Translations: map[string]FindingLocalizedContent{
+				"en": {Title: "English title", Description: "English desc", Suggestion: "English suggestion", Provenance: "canonical"},
+				"zh": {Title: "中文标题", Description: "中文描述", Suggestion: "中文建议", Provenance: "original_extraction"},
+			},
+		},
 	}
 
-	got, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(body))
+	body, err := json.Marshal(meta)
 	if err != nil {
-		t.Fatalf("localizeFinding: %v", err)
+		t.Fatalf("json.Marshal: %v", err)
 	}
-	if translator.calls != 0 {
-		t.Fatalf("translator calls=%d, want 0 (cache hit)", translator.calls)
+	var roundTrip FindingMetadataEnvelope
+	if err := json.Unmarshal(body, &roundTrip); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
 	}
-	if got.Title != "中文标题" {
-		t.Fatalf("got.Title=%q, want 中文标题", got.Title)
-	}
-}
-
-func TestTranslationInTargetLanguage_zh(t *testing.T) {
-	cases := []struct {
-		name string
-		tr   FindingTranslation
-		lang string
-		want bool
-	}{
-		{"all Chinese fields", FindingTranslation{Title: "中文", Description: "中文描述", Suggestion: "中文建议"}, "zh", true},
-		{"all English fields", FindingTranslation{Title: "English", Description: "English desc", Suggestion: "English suggestion"}, "zh", false},
-		{"some Chinese fields but missing in title and suggestion", FindingTranslation{Title: "English", Description: "包含中文的描述", Suggestion: "English suggestion"}, "zh", false},
-		{"empty fields", FindingTranslation{}, "zh", false},
-		{"Chinese with en language", FindingTranslation{Title: "中文", Description: "中文"}, "en", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := translationInTargetLanguage(tc.tr, tc.lang)
-			if got != tc.want {
-				t.Errorf("translationInTargetLanguage=%v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestLikelyUntranslatedForLanguage_DetectsStaleEnglishCache(t *testing.T) {
-	// Source has mixed English+Chinese phrases. Cached "zh" entry is in
-	// English and differs from source — should be flagged as untranslated.
-	src := FindingItem{
-		Title:       "Assumes boundaries are self-evident",
-		Description: "The system relies on '预期应用' but does not define a method.",
-		Suggestion:  "Add criteria for boundary cases.",
-	}
-	cached := FindingTranslation{
-		Title:       "Assumes boundaries not self-evident",
-		Description: "The classification system relies on expected application.",
-		Suggestion:  "Define boundary criteria.",
-	}
-	if !likelyUntranslatedForLanguage(src, cached, "zh") {
-		t.Error("likelyUntranslatedForLanguage=false, want true (stale English cache not detected)")
-	}
-}
-
-func TestLikelyUntranslatedForLanguage_ValidChineseCacheNotFlagged(t *testing.T) {
-	src := FindingItem{
-		Title:       "English title",
-		Description: "English description",
-		Suggestion:  "English suggestion",
-	}
-	cached := FindingTranslation{
-		Title:       "中文标题",
-		Description: "中文描述",
-		Suggestion:  "中文建议",
-	}
-	if likelyUntranslatedForLanguage(src, cached, "zh") {
-		t.Error("likelyUntranslatedForLanguage=true, want false (valid Chinese cache should not be flagged)")
-	}
-}
-
-func TestLocalizeFindingRetranslatesStaleEnglishCacheOnMixedFinding(t *testing.T) {
-	// Simulates finding 1624: English title + Chinese phrases in description,
-	// with a cached zh entry that is in English (from a failed LLM attempt).
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	translator := &fakeFindingTranslator{out: FindingTranslation{
-		Title:       "假设边界是自明的",
-		Description: "分类系统依赖'预期应用'但未定义方法。",
-		Suggestion:  "为边界情况添加判定标准。",
-	}}
-	ctrl := &DocReviewController{DB: db, Translator: translator}
-
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
-		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), ARRAY[$2], $3::jsonb, true)
-		WHERE id = $1`)).
-		WithArgs(int64(1624), "zh", sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	// Cached "zh" entry with English content that differs from source.
-	cachedBody := `{"zh":{"finding_type":"undocumented_assumption","title":"Assumes boundaries not self-evident","description":"The classification system relies on expected application.","suggestion":"Define boundary criteria."}}`
-
-	f := FindingItem{
-		ID: 1624, FindingType: "undocumented_assumption",
-		Title:       "Assumes boundaries are self-evident",
-		Description: "The system relies on '预期应用' but does not define a method.",
-		Suggestion:  "Add criteria for boundary cases.",
-	}
-
-	got, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(cachedBody))
-	if err != nil {
-		t.Fatalf("localizeFinding: %v", err)
-	}
-	if translator.calls != 1 {
-		t.Fatalf("translator calls=%d, want 1 (should retranslate stale English cache)", translator.calls)
-	}
-	if got.Title != "假设边界是自明的" {
-		t.Fatalf("got.Title=%q, want 假设边界是自明的", got.Title)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
+	if roundTrip.I18N.Translations["zh"].Title != "中文标题" {
+		t.Fatalf("roundTrip zh title=%q", roundTrip.I18N.Translations["zh"].Title)
 	}
 }

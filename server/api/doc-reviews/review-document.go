@@ -97,14 +97,14 @@ func buildPageBlocks(lines []Line, docCtx string, blockSize int) []pageBlock {
 
 // ReviewerConfig configures one reviewer for a review run.
 type ReviewerConfig struct {
-	Enabled      bool     // whether this reviewer runs
-	ModelName    string   // resolved model name
-	PromptText   string   // prompt body
-	PromptRef    string   // prompt file name (for logging)
-	MaxToolTurns int      // 0 = one-shot, >0 = tool-use conversation loop
-	MaxToolTokens int     // cumulative token budget for the tool-use loop (DR10c); 0 = code default
-	Tools        []string // tool names available (only when MaxToolTurns > 0)
-	OnProgress   ReviewerProgressFunc
+	Enabled       bool     // whether this reviewer runs
+	ModelName     string   // resolved model name
+	PromptText    string   // prompt body
+	PromptRef     string   // prompt file name (for logging)
+	MaxToolTurns  int      // 0 = one-shot, >0 = tool-use conversation loop
+	MaxToolTokens int      // cumulative token budget for the tool-use loop (DR10c); 0 = code default
+	Tools         []string // tool names available (only when MaxToolTurns > 0)
+	OnProgress    ReviewerProgressFunc
 }
 
 // ReviewerProgress is one live progress snapshot for a reviewer while it works
@@ -139,7 +139,9 @@ type ReviewFindingsStore interface {
 
 // ReviewFindingsSQLStore implements ReviewFindingsStore.
 type ReviewFindingsSQLStore struct {
-	DB *sql.DB
+	DB         *sql.DB
+	Translator FindingTranslator
+	Languages  []string
 }
 
 func (s ReviewFindingsSQLStore) SaveFindings(ctx context.Context, recordID int64, runID int64, findings []ReviewFinding) (int64, error) {
@@ -153,29 +155,37 @@ func (s ReviewFindingsSQLStore) SaveFindings(ctx context.Context, recordID int64
 	const stmt = `
 INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+     title, description, evidence, location, suggestion, confidence, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 
 	var inserted int64
 	for _, f := range findings {
+		prepared, err := prepareFindingForStorage(ctx, s.Translator, s.Languages, f)
+		if err != nil {
+			return inserted, fmt.Errorf("prepare review finding for storage: %w", err)
+		}
 		var evidence, location, suggestion any
-		if f.Evidence != "" {
-			evidence = f.Evidence
+		if prepared.Canonical.Evidence != "" {
+			evidence = prepared.Canonical.Evidence
 		}
-		if f.Location != "" {
-			location = f.Location
+		if prepared.Canonical.Location != "" {
+			location = prepared.Canonical.Location
 		}
-		if f.Suggestion != "" {
-			suggestion = f.Suggestion
+		if prepared.Canonical.Suggestion != "" {
+			suggestion = prepared.Canonical.Suggestion
 		}
-		confidence := f.Confidence
+		confidence := prepared.Canonical.Confidence
 		if confidence <= 0 {
 			confidence = 0.5
 		}
+		metadata, err := json.Marshal(prepared.Metadata)
+		if err != nil {
+			return inserted, fmt.Errorf("marshal finding metadata: %w", err)
+		}
 
-		_, err := s.DB.ExecContext(ctx, stmt,
-			recordID, runID, f.Pass, f.Aspect, f.Severity, f.FindingType,
-			f.Title, f.Description, evidence, location, suggestion, confidence,
+		_, err = s.DB.ExecContext(ctx, stmt,
+			recordID, runID, prepared.Canonical.Pass, prepared.Canonical.Aspect, prepared.Canonical.Severity, prepared.Canonical.FindingType,
+			prepared.Canonical.Title, prepared.Canonical.Description, evidence, location, suggestion, confidence, metadata,
 		)
 		if err != nil {
 			return inserted, fmt.Errorf("insert review finding: %w", err)
@@ -420,15 +430,15 @@ type ReviewProcessor struct {
 	RequirementTraceabilityMaxToolTokens int
 	RequirementTraceabilityTools         []string
 
-	InternalContradictionsClient     LLMJSONExtractor
-	TerminologyConsistencyClient     LLMJSONExtractor
-	CrossReferenceCorrectnessClient  LLMJSONExtractor
-	RequirementTraceabilityClient    LLMJSONExtractor
+	InternalContradictionsClient    LLMJSONExtractor
+	TerminologyConsistencyClient    LLMJSONExtractor
+	CrossReferenceCorrectnessClient LLMJSONExtractor
+	RequirementTraceabilityClient   LLMJSONExtractor
 
-	InternalContradictionsToolClient     LLMChatClient
-	TerminologyConsistencyToolClient     LLMChatClient
-	CrossReferenceCorrectnessToolClient  LLMChatClient
-	RequirementTraceabilityToolClient    LLMChatClient
+	InternalContradictionsToolClient    LLMChatClient
+	TerminologyConsistencyToolClient    LLMChatClient
+	CrossReferenceCorrectnessToolClient LLMChatClient
+	RequirementTraceabilityToolClient   LLMChatClient
 
 	// ── P5 — Technical & Compliance ───────────────────────────────────────────
 
@@ -521,29 +531,29 @@ type ReviewProcessor struct {
 	LimitationsMaxToolTokens int
 	LimitationsTools         []string
 
-	TechnicalAccuracyClient     LLMJSONExtractor
-	AssumptionsClient           LLMJSONExtractor
-	PrerequisitesClient         LLMJSONExtractor
-	StandardsComplianceClient   LLMJSONExtractor
-	LegalComplianceClient       LLMJSONExtractor
-	RegulatoryComplianceClient  LLMJSONExtractor
-	InternalPolicyClient        LLMJSONExtractor
-	SecurityClient              LLMJSONExtractor
-	PerformanceClient           LLMJSONExtractor
-	ErrorHandlingClient         LLMJSONExtractor
-	LimitationsClient           LLMJSONExtractor
+	TechnicalAccuracyClient    LLMJSONExtractor
+	AssumptionsClient          LLMJSONExtractor
+	PrerequisitesClient        LLMJSONExtractor
+	StandardsComplianceClient  LLMJSONExtractor
+	LegalComplianceClient      LLMJSONExtractor
+	RegulatoryComplianceClient LLMJSONExtractor
+	InternalPolicyClient       LLMJSONExtractor
+	SecurityClient             LLMJSONExtractor
+	PerformanceClient          LLMJSONExtractor
+	ErrorHandlingClient        LLMJSONExtractor
+	LimitationsClient          LLMJSONExtractor
 
-	TechnicalAccuracyToolClient     LLMChatClient
-	AssumptionsToolClient           LLMChatClient
-	PrerequisitesToolClient         LLMChatClient
-	StandardsComplianceToolClient   LLMChatClient
-	LegalComplianceToolClient       LLMChatClient
-	RegulatoryComplianceToolClient  LLMChatClient
-	InternalPolicyToolClient        LLMChatClient
-	SecurityToolClient              LLMChatClient
-	PerformanceToolClient           LLMChatClient
-	ErrorHandlingToolClient         LLMChatClient
-	LimitationsToolClient           LLMChatClient
+	TechnicalAccuracyToolClient    LLMChatClient
+	AssumptionsToolClient          LLMChatClient
+	PrerequisitesToolClient        LLMChatClient
+	StandardsComplianceToolClient  LLMChatClient
+	LegalComplianceToolClient      LLMChatClient
+	RegulatoryComplianceToolClient LLMChatClient
+	InternalPolicyToolClient       LLMChatClient
+	SecurityToolClient             LLMChatClient
+	PerformanceToolClient          LLMChatClient
+	ErrorHandlingToolClient        LLMChatClient
+	LimitationsToolClient          LLMChatClient
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -637,8 +647,6 @@ func resolveReviewerToolClient(logger ApiTypes.JimoLogger, aspect, group string,
 	}
 	return client
 }
-
-
 
 // NewReviewProcessor creates a ReviewProcessor.
 // Phase I loads the P1 reviewer configs (grammar_spelling, tone_voice,
@@ -881,10 +889,10 @@ func NewReviewProcessor(
 		RequirementTraceabilityMaxToolTokens: requirementTraceabilityMaxTokens,
 		RequirementTraceabilityTools:         requirementTraceabilityToolList,
 
-		InternalContradictionsToolClient:     internalContradictionsToolClient,
-		TerminologyConsistencyToolClient:     terminologyConsistencyToolClient,
-		CrossReferenceCorrectnessToolClient:  crossReferenceCorrectnessToolClient,
-		RequirementTraceabilityToolClient:    requirementTraceabilityToolClient,
+		InternalContradictionsToolClient:    internalContradictionsToolClient,
+		TerminologyConsistencyToolClient:    terminologyConsistencyToolClient,
+		CrossReferenceCorrectnessToolClient: crossReferenceCorrectnessToolClient,
+		RequirementTraceabilityToolClient:   requirementTraceabilityToolClient,
 
 		// P5 — Technical & Compliance
 		TechnicalAccuracyClient:     technicalAccuracyClient,
@@ -986,17 +994,17 @@ func NewReviewProcessor(
 		LimitationsMaxToolTokens: limitationsMaxTokens,
 		LimitationsTools:         limitationsToolList,
 
-		TechnicalAccuracyToolClient:     technicalAccuracyToolClient,
-		AssumptionsToolClient:           assumptionsToolClient,
-		PrerequisitesToolClient:         prerequisitesToolClient,
-		StandardsComplianceToolClient:   standardsComplianceToolClient,
-		LegalComplianceToolClient:       legalComplianceToolClient,
-		RegulatoryComplianceToolClient:  regulatoryComplianceToolClient,
-		InternalPolicyToolClient:        internalPolicyToolClient,
-		SecurityToolClient:              securityToolClient,
-		PerformanceToolClient:           performanceToolClient,
-		ErrorHandlingToolClient:         errorHandlingToolClient,
-		LimitationsToolClient:           limitationsToolClient,
+		TechnicalAccuracyToolClient:    technicalAccuracyToolClient,
+		AssumptionsToolClient:          assumptionsToolClient,
+		PrerequisitesToolClient:        prerequisitesToolClient,
+		StandardsComplianceToolClient:  standardsComplianceToolClient,
+		LegalComplianceToolClient:      legalComplianceToolClient,
+		RegulatoryComplianceToolClient: regulatoryComplianceToolClient,
+		InternalPolicyToolClient:       internalPolicyToolClient,
+		SecurityToolClient:             securityToolClient,
+		PerformanceToolClient:          performanceToolClient,
+		ErrorHandlingToolClient:        errorHandlingToolClient,
+		LimitationsToolClient:          limitationsToolClient,
 	}
 
 }
