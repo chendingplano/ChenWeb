@@ -24,6 +24,53 @@ func TestTypContentLineEscapesMarkupDelimiters(t *testing.T) {
 	}
 }
 
+// TestHTMLTableToTypst verifies that HTML tables are converted to Typst #table() calls
+// and that surrounding text is escaped normally.
+func TestHTMLTableToTypst(t *testing.T) {
+	t.Run("basic table", func(t *testing.T) {
+		in := `<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>`
+		got := htmlTableToTypst(in)
+		if !strings.Contains(got, "#table(") {
+			t.Fatalf("expected #table( in output, got: %s", got)
+		}
+		if !strings.Contains(got, "columns: 2") {
+			t.Fatalf("expected columns: 2, got: %s", got)
+		}
+		for _, cell := range []string{"[A]", "[B]", "[C]", "[D]"} {
+			if !strings.Contains(got, cell) {
+				t.Fatalf("expected cell %s in output, got: %s", cell, got)
+			}
+		}
+	})
+
+	t.Run("table embedded in text", func(t *testing.T) {
+		in := `before <table><tr><td>X</td></tr></table> after`
+		got := typContent(in)
+		if !strings.Contains(got, "#table(") {
+			t.Fatalf("expected #table( in output, got: %s", got)
+		}
+		if !strings.Contains(got, "before") || !strings.Contains(got, "after") {
+			t.Fatalf("surrounding text missing in: %s", got)
+		}
+	})
+
+	t.Run("html entities decoded", func(t *testing.T) {
+		in := `<table><tr><td>A &amp; B</td><td>&lt;C&gt;</td></tr></table>`
+		got := htmlTableToTypst(in)
+		if strings.Contains(got, "&amp;") || strings.Contains(got, "&lt;") {
+			t.Fatalf("HTML entities not decoded in: %s", got)
+		}
+	})
+
+	t.Run("no table passes through", func(t *testing.T) {
+		in := `plain text with no table`
+		got := typContent(in)
+		if strings.Contains(got, "#table") {
+			t.Fatalf("unexpected #table in: %s", got)
+		}
+	})
+}
+
 // TestTypstReportCompilesWithDelimiterHeavyContent compiles a content block
 // built the same way report findings are (typLines) from the exact text that
 // triggered the "unclosed delimiter" failure (request 21). Skipped when the

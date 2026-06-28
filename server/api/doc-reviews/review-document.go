@@ -133,8 +133,8 @@ type Reviewer interface {
 
 // ReviewFindingsStore persists review findings.
 type ReviewFindingsStore interface {
-	SaveFindings(ctx context.Context, recordID int64, reviewRunID string, findings []ReviewFinding) (int64, error)
-	DeleteFindings(ctx context.Context, recordID int64) (int64, error)
+	SaveFindings(ctx context.Context, recordID int64, runID int64, findings []ReviewFinding) (int64, error)
+	DeleteFindings(ctx context.Context, runID int64) (int64, error)
 }
 
 // ReviewFindingsSQLStore implements ReviewFindingsStore.
@@ -142,7 +142,7 @@ type ReviewFindingsSQLStore struct {
 	DB *sql.DB
 }
 
-func (s ReviewFindingsSQLStore) SaveFindings(ctx context.Context, recordID int64, reviewRunID string, findings []ReviewFinding) (int64, error) {
+func (s ReviewFindingsSQLStore) SaveFindings(ctx context.Context, recordID int64, runID int64, findings []ReviewFinding) (int64, error) {
 	if s.DB == nil {
 		return 0, fmt.Errorf("db is nil")
 	}
@@ -152,7 +152,7 @@ func (s ReviewFindingsSQLStore) SaveFindings(ctx context.Context, recordID int64
 
 	const stmt = `
 INSERT INTO kb.doc_review_findings
-    (input_record_id, review_run_id, pass, aspect, severity, finding_type,
+    (input_record_id, run_id, pass, aspect, severity, finding_type,
      title, description, evidence, location, suggestion, confidence)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 
@@ -174,7 +174,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 		}
 
 		_, err := s.DB.ExecContext(ctx, stmt,
-			recordID, reviewRunID, f.Pass, f.Aspect, f.Severity, f.FindingType,
+			recordID, runID, f.Pass, f.Aspect, f.Severity, f.FindingType,
 			f.Title, f.Description, evidence, location, suggestion, confidence,
 		)
 		if err != nil {
@@ -185,13 +185,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 	return inserted, nil
 }
 
-func (s ReviewFindingsSQLStore) DeleteFindings(ctx context.Context, recordID int64) (int64, error) {
+func (s ReviewFindingsSQLStore) DeleteFindings(ctx context.Context, runID int64) (int64, error) {
 	if s.DB == nil {
 		return 0, fmt.Errorf("db is nil")
 	}
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM kb.doc_review_findings WHERE input_record_id = $1`, recordID)
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM kb.doc_review_findings WHERE run_id = $1`, runID)
 	if err != nil {
-		return 0, fmt.Errorf("delete review findings for record %d: %w", recordID, err)
+		return 0, fmt.Errorf("delete review findings for run %d: %w", runID, err)
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
@@ -297,10 +297,9 @@ type ReviewProcessor struct {
 
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
-	// ReviewRunID, when set, overrides the self-generated run id so findings are
-	// persisted under a caller-supplied run identity (DR15: the DocReviewController
-	// assigns the run id at request-accept time and passes it in here).
-	ReviewRunID string
+	// RunID must be set by the caller (DocReviewController) before PostProcessIndex
+	// is invoked. Findings and progress updates are scoped to this run.
+	RunID int64
 
 	// GrammarClient is a properly-configured LLM client for the grammar reviewer.
 	GrammarClient LLMJSONExtractor
@@ -1031,25 +1030,21 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 		return nil
 	}
 
-	reviewRunID := p.ReviewRunID
-	if reviewRunID == "" {
-		reviewRunID = fmt.Sprintf("%d_review_%s", recordID, start.UTC().Format("20060102T150405"))
-	}
 	p.Logger.Info("document review running",
 		"record_id", recordID,
-		"review_run_id", reviewRunID,
+		"run_id", p.RunID,
 		"num_reviewers", len(reviewers),
 	)
 
-	// Delete previous findings for idempotent re-run (DR7).
-	if _, err := p.FindingsStore.DeleteFindings(ctx, recordID); err != nil {
-		p.Logger.Warn("failed to delete previous review findings", "record_id", recordID, "error", err)
+	// Delete previous findings for this run (supports restart of a crashed run).
+	if _, err := p.FindingsStore.DeleteFindings(ctx, p.RunID); err != nil {
+		p.Logger.Warn("failed to delete previous review findings", "run_id", p.RunID, "error", err)
 	}
 
-	allFindings, errs := p.runReviewersPromptCacheOptimized(ctx, recordID, rec, reviewers, reviewRunID)
+	allFindings, errs := p.runReviewersPromptCacheOptimized(ctx, recordID, rec, reviewers, p.RunID)
 
 	if len(allFindings) > 0 {
-		inserted, err := p.FindingsStore.SaveFindings(ctx, recordID, reviewRunID, allFindings)
+		inserted, err := p.FindingsStore.SaveFindings(ctx, recordID, p.RunID, allFindings)
 		if err != nil {
 			return fmt.Errorf("(MID_26061803) save review findings for record %d: %w", recordID, err)
 		}
@@ -1814,14 +1809,14 @@ func asFloat64(v any) float64 {
 	}
 }
 
-func (p *ReviewProcessor) makeProgressReporter(reviewRunID, aspect string) ReviewerProgressFunc {
-	if p.StatusStore == nil || reviewRunID == "" || aspect == "" {
+func (p *ReviewProcessor) makeProgressReporter(runID int64, aspect string) ReviewerProgressFunc {
+	if p.StatusStore == nil || runID <= 0 || aspect == "" {
 		return nil
 	}
 	return func(snapshot ReviewerProgress) {
-		if err := p.StatusStore.UpdateAspectProgress(context.Background(), reviewRunID, aspect, snapshot.Progress, snapshot.FindingCount); err != nil {
+		if err := p.StatusStore.UpdateAspectProgress(context.Background(), runID, aspect, snapshot.Progress, snapshot.FindingCount); err != nil {
 			p.Logger.Warn("reviewer progress update failed",
-				"review_run_id", reviewRunID,
+				"run_id", runID,
 				"aspect", aspect,
 				"error", err,
 			)

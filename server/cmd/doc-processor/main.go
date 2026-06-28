@@ -317,16 +317,17 @@ func main() {
 		if err := drNS.Subscribe(ctx, docReviewSubject, docReviewDurable, func(msgCtx context.Context, payload []byte) error {
 			var evt struct {
 				RequestID int64 `json:"request_id"`
+				RunID     int64 `json:"run_id"`
 			}
 			if err := json.Unmarshal(payload, &evt); err != nil {
 				return fmt.Errorf("unmarshal doc-review event: %w", err)
 			}
-			if evt.RequestID <= 0 {
-				return fmt.Errorf("invalid request_id %d in doc-review event", evt.RequestID)
+			if evt.RequestID <= 0 || evt.RunID <= 0 {
+				return fmt.Errorf("invalid doc-review event: request_id=%d run_id=%d", evt.RequestID, evt.RunID)
 			}
-			logger.Info("doc-review event received", "request_id", evt.RequestID)
+			logger.Info("doc-review event received", "request_id", evt.RequestID, "run_id", evt.RunID)
 			ctrl := docreviews.NewDocReviewController()
-			ctrl.RunReviewAndReport(msgCtx, evt.RequestID)
+			ctrl.RunReviewAndReport(msgCtx, evt.RequestID, evt.RunID)
 			return nil
 		}); err != nil && ctx.Err() == nil {
 			logger.Error("doc-review subscription exited with error", "error", err)
@@ -342,14 +343,14 @@ func main() {
 	if envOrDefault("DOC_REVIEW_RECOVER_ON_START", "true") != "false" {
 		go func() {
 			ctrl := docreviews.NewDocReviewController()
-			ids, err := ctrl.RecoverStalledReviews(ctx)
+			stalled, err := ctrl.RecoverStalledReviews(ctx)
 			if err != nil {
 				logger.Error("doc-review recovery sweep failed", "error", err)
 				return
 			}
-			for _, id := range ids {
-				logger.Info("re-running recovered doc-review", "request_id", id)
-				go ctrl.RunReviewAndReport(ctx, id)
+			for _, ref := range stalled {
+				logger.Info("re-running recovered doc-review", "request_id", ref.RequestID, "run_id", ref.RunID)
+				go ctrl.RunReviewAndReport(ctx, ref.RequestID, ref.RunID)
 			}
 		}()
 	}

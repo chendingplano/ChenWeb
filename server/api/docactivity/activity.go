@@ -35,7 +35,7 @@ type Activity struct {
 	ID            int64          `json:"id"`
 	ActivityType  string         `json:"activity_type"`
 	InputRecordID int64          `json:"input_record_id"`
-	ReviewRunID   string         `json:"review_run_id"`
+	RunID         int64          `json:"run_id"`
 	ReportID      int64          `json:"report_id"`
 	FindingID     int64          `json:"finding_id"`
 	PageNumber    int            `json:"page_number"`
@@ -66,10 +66,10 @@ func Log(ctx context.Context, db *sql.DB, a Activity) {
 	}
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO kb.doc_review_activities
-			(activity_type, input_record_id, review_run_id, report_id, finding_id,
+			(activity_type, input_record_id, run_id, report_id, finding_id,
 			 page_number, line_number, location, old_content, new_content, detail, actor)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		a.ActivityType, a.InputRecordID, nullStr(a.ReviewRunID), nullInt(a.ReportID),
+		a.ActivityType, a.InputRecordID, nullInt(a.RunID), nullInt(a.ReportID),
 		nullInt(a.FindingID), nullIntI(a.PageNumber), nullIntI(a.LineNumber),
 		nullStr(a.Location), a.OldContent, a.NewContent, detailJSON, nullStr(a.Actor),
 	)
@@ -79,20 +79,20 @@ func Log(ctx context.Context, db *sql.DB, a Activity) {
 		return
 	}
 	logger.Info("doc review activity logged", "activity_type", a.ActivityType,
-		"input_record_id", a.InputRecordID, "review_run_id", a.ReviewRunID,
+		"input_record_id", a.InputRecordID, "run_id", a.RunID,
 		"report_id", a.ReportID, "finding_id", a.FindingID)
 }
 
 // List returns the activities for a document record, newest first. When
-// reviewRunID is non-empty, results are restricted to that run plus any
-// run-agnostic activities (Document Structure edits carry no run id). This is
-// the source for the Document Review Correction Report.
-func List(ctx context.Context, db *sql.DB, inputRecordID int64, reviewRunID string) ([]Activity, error) {
+// runID is non-zero, results are restricted to that run plus any run-agnostic
+// activities (Document Structure edits carry no run id). This is the source
+// for the Document Review Correction Report.
+func List(ctx context.Context, db *sql.DB, inputRecordID int64, runID int64) ([]Activity, error) {
 	if db == nil {
 		return nil, fmt.Errorf("no database handle")
 	}
 	query := `
-		SELECT id, activity_type, input_record_id, COALESCE(review_run_id,''),
+		SELECT id, activity_type, input_record_id, COALESCE(run_id,0),
 		       COALESCE(report_id,0), COALESCE(finding_id,0),
 		       COALESCE(page_number,0), COALESCE(line_number,0),
 		       COALESCE(location,''), COALESCE(old_content,''), COALESCE(new_content,''),
@@ -100,9 +100,9 @@ func List(ctx context.Context, db *sql.DB, inputRecordID int64, reviewRunID stri
 		FROM kb.doc_review_activities
 		WHERE input_record_id = $1`
 	args := []any{inputRecordID}
-	if reviewRunID != "" {
-		query += ` AND (review_run_id = $2 OR review_run_id IS NULL OR review_run_id = '')`
-		args = append(args, reviewRunID)
+	if runID > 0 {
+		query += ` AND (run_id = $2 OR run_id IS NULL)`
+		args = append(args, runID)
 	}
 	query += ` ORDER BY create_time, id`
 
@@ -116,7 +116,7 @@ func List(ctx context.Context, db *sql.DB, inputRecordID int64, reviewRunID stri
 	for rows.Next() {
 		var a Activity
 		var detailRaw string
-		if err := rows.Scan(&a.ID, &a.ActivityType, &a.InputRecordID, &a.ReviewRunID,
+		if err := rows.Scan(&a.ID, &a.ActivityType, &a.InputRecordID, &a.RunID,
 			&a.ReportID, &a.FindingID, &a.PageNumber, &a.LineNumber,
 			&a.Location, &a.OldContent, &a.NewContent, &detailRaw, &a.Actor, &a.CreateTime); err != nil {
 			return nil, fmt.Errorf("scan activity: %w", err)

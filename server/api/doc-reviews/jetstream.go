@@ -19,6 +19,7 @@ var jsLogger = loggerutil.CreateDefaultLogger("DR16")
 // docReviewEvent is the JetStream payload published when a review is accepted.
 type docReviewEvent struct {
 	RequestID int64 `json:"request_id"`
+	RunID     int64 `json:"run_id"`
 }
 
 // ReviewPublisher publishes doc-review start events to JetStream.
@@ -93,21 +94,21 @@ func ClosePublisher() {
 	globalPublisher = nil
 }
 
-// PublishReviewEvent publishes a doc-review start event for the given request ID.
+// PublishReviewEvent publishes a doc-review start event for the given request and run IDs.
 // If the publisher is not initialised the call is a no-op (review falls back to
 // being run inline by the caller).
-func PublishReviewEvent(ctx context.Context, requestID int64) error {
+func PublishReviewEvent(ctx context.Context, requestID, runID int64) error {
 	if globalPublisher == nil {
 		return fmt.Errorf("(DR16_04) doc-review publisher not initialised")
 	}
-	payload, err := json.Marshal(docReviewEvent{RequestID: requestID})
+	payload, err := json.Marshal(docReviewEvent{RequestID: requestID, RunID: runID})
 	if err != nil {
 		return fmt.Errorf("(DR16_05) marshal event: %w", err)
 	}
 	if _, err := globalPublisher.js.Publish(globalPublisher.subject, payload); err != nil {
-		return fmt.Errorf("(DR16_06) publish event request_id=%d: %w", requestID, err)
+		return fmt.Errorf("(DR16_06) publish event request_id=%d run_id=%d: %w", requestID, runID, err)
 	}
-	jsLogger.Info("doc-review event published", "request_id", requestID, "subject", globalPublisher.subject)
+	jsLogger.Info("doc-review event published", "request_id", requestID, "run_id", runID, "subject", globalPublisher.subject)
 	return nil
 }
 

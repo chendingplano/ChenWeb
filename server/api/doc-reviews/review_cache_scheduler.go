@@ -492,7 +492,7 @@ func (p *ReviewProcessor) runReviewersPromptCacheOptimized(
 	recordID int64,
 	rec DocMetadataInputRecord,
 	reviewers []reviewRunner,
-	reviewRunID string,
+	runID int64,
 ) ([]ReviewFinding, []error) {
 	lines, err := loadPromptCacheReviewLines(recordID, rec)
 	if err != nil {
@@ -504,7 +504,7 @@ func (p *ReviewProcessor) runReviewersPromptCacheOptimized(
 
 	tasks, unsupported := buildPromptCacheReviewTasks(recordID, rec, lines, reviewers,
 		func(aspect string, _ int) ReviewerProgressFunc {
-			return p.makeProgressReporter(reviewRunID, aspect)
+			return p.makeProgressReporter(runID, aspect)
 		},
 	)
 	orderedTasks := orderReviewTasksForPromptCache(tasks)
@@ -518,7 +518,7 @@ func (p *ReviewProcessor) runReviewersPromptCacheOptimized(
 
 	allFindings, errs := runReviewTasksForPromptCache(ctx, maxTasks, orderedTasks)
 	if len(unsupported) > 0 {
-		fallbackFindings, fallbackErrs := p.runReviewersLegacy(ctx, recordID, unsupported, reviewRunID)
+		fallbackFindings, fallbackErrs := p.runReviewersLegacy(ctx, recordID, unsupported, runID)
 		allFindings = append(allFindings, fallbackFindings...)
 		errs = append(errs, fallbackErrs...)
 	}
@@ -550,7 +550,7 @@ func (p *ReviewProcessor) runReviewersLegacy(
 	ctx context.Context,
 	recordID int64,
 	reviewers []reviewRunner,
-	reviewRunID string,
+	runID int64,
 ) ([]ReviewFinding, []error) {
 	var (
 		mu          sync.Mutex
@@ -564,7 +564,7 @@ func (p *ReviewProcessor) runReviewersLegacy(
 		go func(reviewer Reviewer, cfg ReviewerConfig) {
 			defer wg.Done()
 
-			cfg.OnProgress = p.makeProgressReporter(reviewRunID, reviewer.Name())
+			cfg.OnProgress = p.makeProgressReporter(runID, reviewer.Name())
 
 			p.Logger.Info("reviewer start",
 				"record_id", recordID,

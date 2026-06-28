@@ -42,12 +42,12 @@ func TestDR15_SeedActiveAndFinish(t *testing.T) {
 	defer cleanupRequests(t, db, res.RequestID)
 	defer db.ExecContext(ctx, `DELETE FROM kb.doc_review_status WHERE request_id = $1`, res.RequestID)
 
-	if res.ReviewRunID == "" {
-		t.Fatal("expected review_run_id assigned at accept")
+	if res.RunID <= 0 {
+		t.Fatal("expected run_id assigned at accept")
 	}
 
 	// Status rows seeded as pending.
-	statuses, err := ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	statuses, err := ctrl.loadAspectStatuses(ctx, res.RunID)
 	if err != nil {
 		t.Fatalf("load statuses: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestDR15_SeedActiveAndFinish(t *testing.T) {
 	}
 
 	// Finishing all aspects removes the job from the active list.
-	ctrl.finalizeAspectsSuccess(ctx, res.ReviewRunID, recID)
+	ctrl.finalizeAspectsSuccess(ctx, res.RunID, recID)
 	jobs2, err := ctrl.ListActiveJobs(ctx)
 	if err != nil {
 		t.Fatalf("list active (2): %v", err)
@@ -81,7 +81,7 @@ func TestDR15_SeedActiveAndFinish(t *testing.T) {
 	if containsJob(jobs2, res.RequestID) {
 		t.Fatalf("request %d should be absent from active jobs after finishing", res.RequestID)
 	}
-	final, _ := ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	final, _ := ctrl.loadAspectStatuses(ctx, res.RunID)
 	for _, s := range final {
 		if s.Status != "success" {
 			t.Fatalf("aspect %q: want success, got %q", s.Aspect, s.Status)
@@ -99,12 +99,12 @@ func TestDR15_FinalizeAspectsSuccessBindsRunAndRecord(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectExec(`(?s)UPDATE kb\.doc_review_status s.*WHERE f\.review_run_id = \$1 AND f\.input_record_id = \$2 AND f\.aspect = s\.aspect.*WHERE s\.review_run_id = \$1`).
-		WithArgs("run-1", int64(42)).
+	mock.ExpectExec(`(?s)UPDATE kb\.doc_review_status s.*WHERE f\.run_id = \$1 AND f\.input_record_id = \$2 AND f\.aspect = s\.aspect.*WHERE s\.run_id = \$1`).
+		WithArgs(int64(1), int64(42)).
 		WillReturnResult(sqlmock.NewResult(0, 2))
 
 	ctrl := &DocReviewController{DB: db}
-	ctrl.finalizeAspectsSuccess(context.Background(), "run-1", 42)
+	ctrl.finalizeAspectsSuccess(context.Background(), 1, 42)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
@@ -135,12 +135,12 @@ func TestDR15_FailOpenAspects(t *testing.T) {
 	defer cleanupRequests(t, db, res.RequestID)
 	defer db.ExecContext(ctx, `DELETE FROM kb.doc_review_status WHERE request_id = $1`, res.RequestID)
 
-	ctrl.failOpenAspects(ctx, res.ReviewRunID, "stopped")
+	ctrl.failOpenAspects(ctx, res.RunID, "stopped")
 
 	if jobs, _ := ctrl.ListActiveJobs(ctx); containsJob(jobs, res.RequestID) {
 		t.Fatalf("stopped request %d should be absent from active jobs", res.RequestID)
 	}
-	final, _ := ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	final, _ := ctrl.loadAspectStatuses(ctx, res.RunID)
 	for _, s := range final {
 		if s.Status != "failed" || s.ErrorMessage != "stopped" {
 			t.Fatalf("aspect %q: want failed/stopped, got %q/%q", s.Aspect, s.Status, s.ErrorMessage)
@@ -170,14 +170,14 @@ func TestDR15_UpdateAspectProgress(t *testing.T) {
 	defer cleanupRequests(t, db, res.RequestID)
 	defer db.ExecContext(ctx, `DELETE FROM kb.doc_review_status WHERE request_id = $1`, res.RequestID)
 
-	ctrl.markAspectsRunning(ctx, res.ReviewRunID)
+	ctrl.markAspectsRunning(ctx, res.RunID)
 
 	store := ReviewStatusSQLStore{DB: db}
-	if err := store.UpdateAspectProgress(ctx, res.ReviewRunID, "grammar_spelling", 0.5, 3); err != nil {
+	if err := store.UpdateAspectProgress(ctx, res.RunID, "grammar_spelling", 0.5, 3); err != nil {
 		t.Fatalf("update progress: %v", err)
 	}
 
-	statuses, err := ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	statuses, err := ctrl.loadAspectStatuses(ctx, res.RunID)
 	if err != nil {
 		t.Fatalf("load statuses: %v", err)
 	}
@@ -195,10 +195,10 @@ func TestDR15_UpdateAspectProgress(t *testing.T) {
 		t.Fatalf("want finding count 3, got %d", got.FindingCount)
 	}
 
-	if err := store.UpdateAspectProgress(ctx, res.ReviewRunID, "grammar_spelling", 0.25, 1); err != nil {
+	if err := store.UpdateAspectProgress(ctx, res.RunID, "grammar_spelling", 0.25, 1); err != nil {
 		t.Fatalf("update progress second time: %v", err)
 	}
-	statuses, err = ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	statuses, err = ctrl.loadAspectStatuses(ctx, res.RunID)
 	if err != nil {
 		t.Fatalf("load statuses second time: %v", err)
 	}
@@ -212,10 +212,10 @@ func TestDR15_UpdateAspectProgress(t *testing.T) {
 
 	// Reaching 100% flips the aspect to 'success' immediately, rather than
 	// lingering on 'running' until the whole run is finalized.
-	if err := store.UpdateAspectProgress(ctx, res.ReviewRunID, "grammar_spelling", 1.0, 5); err != nil {
+	if err := store.UpdateAspectProgress(ctx, res.RunID, "grammar_spelling", 1.0, 5); err != nil {
 		t.Fatalf("update progress to 100%%: %v", err)
 	}
-	statuses, err = ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	statuses, err = ctrl.loadAspectStatuses(ctx, res.RunID)
 	if err != nil {
 		t.Fatalf("load statuses after completion: %v", err)
 	}
@@ -231,10 +231,10 @@ func TestDR15_UpdateAspectProgress(t *testing.T) {
 	}
 
 	// 'success' is terminal: a stray later progress report must not revert it.
-	if err := store.UpdateAspectProgress(ctx, res.ReviewRunID, "grammar_spelling", 0.5, 1); err != nil {
+	if err := store.UpdateAspectProgress(ctx, res.RunID, "grammar_spelling", 0.5, 1); err != nil {
 		t.Fatalf("update progress after success: %v", err)
 	}
-	statuses, err = ctrl.loadAspectStatuses(ctx, res.ReviewRunID)
+	statuses, err = ctrl.loadAspectStatuses(ctx, res.RunID)
 	if err != nil {
 		t.Fatalf("load statuses after stray update: %v", err)
 	}

@@ -39,7 +39,8 @@ func NewDocReviewController() *DocReviewController {
 	return &DocReviewController{DB: ApiTypes.ProjectDBHandle}
 }
 
-// AcceptRequest validates input, resolves requester, stores the request as "accepted".
+// AcceptRequest validates input, resolves requester, stores the request as "accepted"
+// and creates the first run row, returning both IDs.
 func (c *DocReviewController) AcceptRequest(ctx context.Context, input SubmitRequestInput) (*SubmitResult, error) {
 	// Validate document exists.
 	var exists bool
@@ -102,36 +103,61 @@ func (c *DocReviewController) AcceptRequest(ctx context.Context, input SubmitReq
 		return nil, fmt.Errorf("marshal model overrides: %w", err)
 	}
 
-	// DR15: assign the review_run_id at accept time so the per-aspect status rows
-	// (and, later, the findings) can share the run identity from the start.
-	reviewRunID := fmt.Sprintf("%d_review_%s", input.InputRecordID, time.Now().UTC().Format("20060102T150405.000000"))
-
-	var id int64
+	var requestID int64
 	err = c.DB.QueryRowContext(ctx, `
 		INSERT INTO kb.doc_review_requests
-			(input_record_id, review_run_id, tier, aspects, reference_docs, notes, model_overrides,
+			(input_record_id, tier, aspects, reference_docs, notes, model_overrides,
 			 requester_name, requester_id, report_template, doc_template, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'accepted')
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'accepted')
 		RETURNING id`,
-		input.InputRecordID, reviewRunID, input.Tier, aspectsJSON, refDocsJSON, input.Notes, overridesJSON,
+		input.InputRecordID, input.Tier, aspectsJSON, refDocsJSON, input.Notes, overridesJSON,
 		input.RequesterName, input.RequesterID, input.ReportTemplate, input.DocTemplate,
-	).Scan(&id)
+	).Scan(&requestID)
 	if err != nil {
 		return nil, fmt.Errorf("insert review request: %w", err)
 	}
 
-	// DR15: seed one kb.doc_review_status row per aspect (status 'pending').
-	if err := c.seedAspectStatuses(ctx, id, input.InputRecordID, reviewRunID, aspects); err != nil {
-		logger.Warn("failed to seed aspect statuses", "request_id", id, "error", err)
+	runID, err := c.createRun(ctx, requestID, input.InputRecordID, aspects, input.ModelOverrides, input.Notes, input.RequesterName)
+	if err != nil {
+		return nil, fmt.Errorf("create run for request %d: %w", requestID, err)
 	}
 
-	logger.Info("review request created", "request_id", id, "record_id", input.InputRecordID, "tier", input.Tier, "review_run_id", reviewRunID)
+	if err := c.seedAspectStatuses(ctx, requestID, input.InputRecordID, runID, aspects); err != nil {
+		logger.Warn("failed to seed aspect statuses", "request_id", requestID, "run_id", runID, "error", err)
+	}
 
-	return &SubmitResult{RequestID: id, Status: "accepted", ReviewRunID: reviewRunID}, nil
+	logger.Info("review request created", "request_id", requestID, "run_id", runID, "record_id", input.InputRecordID, "tier", input.Tier)
+
+	return &SubmitResult{RequestID: requestID, RunID: runID, Status: "accepted"}, nil
 }
 
-// RunReview transitions the request to "running", delegates to ReviewProcessor, then completes.
-func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) error {
+// createRun inserts a new kb.doc_review_runs row and returns its id.
+func (c *DocReviewController) createRun(ctx context.Context, requestID, recordID int64, aspects []string, modelOverrides map[string]ModelOverride, notes, createdBy string) (int64, error) {
+	var runCount int
+	_ = c.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM kb.doc_review_runs WHERE request_id = $1`, requestID).Scan(&runCount)
+
+	aspectsJSON, err := json.Marshal(aspects)
+	if err != nil {
+		return 0, fmt.Errorf("marshal aspects: %w", err)
+	}
+	overridesJSON, err := json.Marshal(modelOverrides)
+	if err != nil {
+		return 0, fmt.Errorf("marshal model overrides: %w", err)
+	}
+
+	var runID int64
+	err = c.DB.QueryRowContext(ctx, `
+		INSERT INTO kb.doc_review_runs
+			(request_id, input_record_id, run_number, aspects, model_overrides, notes, status, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+		RETURNING id`,
+		requestID, recordID, runCount+1, aspectsJSON, overridesJSON, notes, nullableStr(createdBy),
+	).Scan(&runID)
+	return runID, err
+}
+
+// RunReview transitions the run to "running", delegates to ReviewProcessor, then completes.
+func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID int64) error {
 	// Load request.
 	req, err := c.loadRequest(ctx, requestID)
 	if err != nil {
@@ -148,64 +174,52 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 		return fmt.Errorf("request %d is in status %q, expected 'accepted'", requestID, req.Status)
 	}
 
-	// review_run_id was assigned at accept time (DR15).
-	reviewRunID := req.ReviewRunID
-	if reviewRunID == "" {
-		reviewRunID = fmt.Sprintf("%d_review_%s", req.InputRecordID, time.Now().UTC().Format("20060102T150405.000000"))
-	}
-
-	// Update status -> running, and flip every pending aspect to 'running'.
+	// Transition run -> running (atomic: only one worker wins).
 	res, err := c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_requests
-		 SET status = 'running', review_run_id = $1, start_time = NOW()
-		 WHERE id = $2 AND status = 'accepted'`,
-		reviewRunID, requestID,
+		`UPDATE kb.doc_review_runs SET status = 'running', start_time = NOW()
+		 WHERE id = $1 AND status IN ('pending', 'accepted')`,
+		runID,
 	)
 	if err != nil {
-		return fmt.Errorf("update request %d to running: %w", requestID, err)
+		return fmt.Errorf("update run %d to running: %w", runID, err)
 	}
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("check running transition for request %d: %w", requestID, err)
+		return fmt.Errorf("check running transition for run %d: %w", runID, err)
 	}
 	if rowsAffected == 0 {
-		cur, loadErr := c.loadRequest(ctx, requestID)
-		if loadErr != nil {
-			return fmt.Errorf("reload request %d after skipped running transition: %w", requestID, loadErr)
-		}
-		if isAlreadyHandledReviewStatus(cur.Status) {
-			logger.Info("review request was claimed by another worker; skipping duplicate run",
-				"request_id", requestID,
-				"status", cur.Status,
-			)
-			return nil
-		}
-		return fmt.Errorf("request %d is in status %q, expected 'accepted'", requestID, cur.Status)
+		// Another worker claimed this run.
+		logger.Info("run already claimed by another worker; skipping", "run_id", runID, "request_id", requestID)
+		return nil
 	}
-	c.markAspectsRunning(ctx, reviewRunID)
-	logger.Info("review request started", "request_id", requestID, "review_run_id", reviewRunID)
 
-	// Build and run ReviewProcessor. Pass the accept-time run id so findings are
-	// persisted under the same review_run_id the request and status rows use.
+	// Mirror on the request row.
+	c.DB.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = 'running' WHERE id = $1`, requestID)
+
+	c.markAspectsRunning(ctx, runID)
+	logger.Info("review run started", "request_id", requestID, "run_id", runID)
+
 	llmClient := &llmclients.OpenAIJSONClient{
 		HTTPClient: &http.Client{Timeout: 100 * time.Second},
 	}
 	inputStore := docprocessing.DocMetadataSQLStore{DB: c.DB}
 	entityStore := docprocessing.EntityRelationSQLStore{DB: c.DB}
 	findingsStore := ReviewFindingsSQLStore{DB: c.DB}
+	statusStore := ReviewStatusSQLStore{DB: c.DB}
 
 	processor := NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
-	processor.ReviewRunID = reviewRunID
+	processor.RunID = runID
+	processor.StatusStore = statusStore
 	err = processor.PostProcessIndex(ctx, req.InputRecordID)
 	if err != nil {
-		// Update status -> failed, and fail every non-finished aspect.
 		errMsg := err.Error()
 		c.DB.ExecContext(ctx,
-			`UPDATE kb.doc_review_requests SET status = 'failed', end_time = NOW(), error_message = $1 WHERE id = $2`,
-			errMsg, requestID,
+			`UPDATE kb.doc_review_runs SET status = 'failed', end_time = NOW(), error_message = $1 WHERE id = $2`,
+			errMsg, runID,
 		)
-		c.failOpenAspects(ctx, reviewRunID, errMsg)
-		logger.Info("review request failed", "request_id", requestID, "error", errMsg)
+		c.DB.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = 'failed' WHERE id = $1`, requestID)
+		c.failOpenAspects(ctx, runID, errMsg)
+		logger.Info("review run failed", "request_id", requestID, "run_id", runID, "error", errMsg)
 		return fmt.Errorf("review failed for record %d: %w", req.InputRecordID, err)
 	}
 
@@ -215,16 +229,10 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 		return nil
 	}
 
-	// Mark each aspect 'success' with its finding count, then complete the request.
-	c.finalizeAspectsSuccess(ctx, reviewRunID, req.InputRecordID)
-	_, err = c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_requests SET status = 'completed', end_time = NOW() WHERE id = $1`,
-		requestID,
-	)
-	if err != nil {
-		return fmt.Errorf("update request %d to completed: %w", requestID, err)
-	}
-	logger.Info("review request completed", "request_id", requestID, "review_run_id", reviewRunID)
+	c.finalizeAspectsSuccess(ctx, runID, req.InputRecordID)
+	c.DB.ExecContext(ctx, `UPDATE kb.doc_review_runs SET status = 'completed', end_time = NOW() WHERE id = $1`, runID)
+	c.DB.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = 'completed' WHERE id = $1`, requestID)
+	logger.Info("review run completed", "request_id", requestID, "run_id", runID)
 	return nil
 }
 
@@ -232,9 +240,9 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID int64) er
 // Intended to be launched in a background goroutine (with a detached context) so
 // the submit HTTP request can return immediately and the live monitor (DR15) can
 // observe the job while it runs.
-func (c *DocReviewController) RunReviewAndReport(ctx context.Context, requestID int64) {
-	if err := c.RunReview(ctx, requestID); err != nil {
-		logger.Warn("background review run failed", "request_id", requestID, "error", err)
+func (c *DocReviewController) RunReviewAndReport(ctx context.Context, requestID, runID int64) {
+	if err := c.RunReview(ctx, requestID, runID); err != nil {
+		logger.Warn("background review run failed", "request_id", requestID, "run_id", runID, "error", err)
 		return
 	}
 	req, err := c.GetRequestWithFindings(ctx, requestID, RequestFindingsOptions{})
@@ -272,40 +280,43 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 	passFilter := strings.TrimSpace(opts.Pass)
 	aspectFilter := strings.TrimSpace(opts.Aspect)
 
-	// Load per-aspect statuses (always available once seeded at accept time).
-	statusRows, err := c.DB.QueryContext(ctx, `
-		SELECT aspect, COALESCE(pass,''), status, COALESCE(progress,0), COALESCE(finding_count,0),
-		       COALESCE(error_message,''), COALESCE(start_time::text,''), COALESCE(end_time::text,'')
-		FROM kb.doc_review_status
-		WHERE request_id = $1
-		ORDER BY id`, requestID)
-	if err != nil {
-		return nil, fmt.Errorf("load aspect statuses: %w", err)
-	}
-	defer statusRows.Close()
-	for statusRows.Next() {
-		var s AspectStatus
-		if err := statusRows.Scan(&s.Aspect, &s.Pass, &s.Status, &s.Progress, &s.FindingCount,
-			&s.ErrorMessage, &s.StartTime, &s.EndTime); err != nil {
-			return nil, fmt.Errorf("scan aspect status: %w", err)
+	// Load per-aspect statuses for the latest run.
+	if req.LatestRunID > 0 {
+		statusRows, err := c.DB.QueryContext(ctx, `
+			SELECT aspect, COALESCE(pass,''), status, COALESCE(progress,0), COALESCE(finding_count,0),
+			       COALESCE(error_message,''), COALESCE(start_time::text,''), COALESCE(end_time::text,'')
+			FROM kb.doc_review_status
+			WHERE run_id = $1
+			ORDER BY id`, req.LatestRunID)
+		if err != nil {
+			return nil, fmt.Errorf("load aspect statuses: %w", err)
 		}
-		result.AspectStatuses = append(result.AspectStatuses, s)
-	}
-	if err := statusRows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate aspect statuses: %w", err)
+		defer statusRows.Close()
+		for statusRows.Next() {
+			var s AspectStatus
+			if err := statusRows.Scan(&s.Aspect, &s.Pass, &s.Status, &s.Progress, &s.FindingCount,
+				&s.ErrorMessage, &s.StartTime, &s.EndTime); err != nil {
+				return nil, fmt.Errorf("scan aspect status: %w", err)
+			}
+			result.AspectStatuses = append(result.AspectStatuses, s)
+		}
+		if err := statusRows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate aspect statuses: %w", err)
+		}
 	}
 
 	// Only return findings if completed.
-	if req.Status == "completed" && req.ReviewRunID != "" {
+	if req.Status == "completed" && req.LatestRunID > 0 {
 		rows, err := c.DB.QueryContext(ctx, `
 			SELECT id, pass, aspect, severity, finding_type, title, description,
 			       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
 			       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
 			FROM kb.doc_review_findings
-			WHERE input_record_id = $1 AND review_run_id = $2
+			WHERE input_record_id = $1 AND run_id = $2
 			  AND ($3 = '' OR pass = $3)
 			  AND ($4 = '' OR aspect = $4)
-			ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`, req.InputRecordID, req.ReviewRunID, passFilter, aspectFilter)
+			ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`,
+			req.InputRecordID, req.LatestRunID, passFilter, aspectFilter)
 		if err != nil {
 			return nil, fmt.Errorf("load findings: %w", err)
 		}
@@ -340,7 +351,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 // StopRequest transitions an accepted or running request to stopped.
 func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) error {
 	res, err := c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_requests SET status = 'stopped', end_time = NOW() WHERE id = $1 AND status IN ('accepted', 'running')`,
+		`UPDATE kb.doc_review_requests SET status = 'stopped' WHERE id = $1 AND status IN ('accepted', 'running')`,
 		requestID,
 	)
 	if err != nil {
@@ -350,104 +361,113 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 	if n == 0 {
 		return fmt.Errorf("request %d is not in a stoppable state (accepted or running)", requestID)
 	}
-	// DR15: drive every non-finished aspect to a terminal state so the job leaves
-	// the live monitor (finished iff status is 'success' or 'failed').
-	if req, _ := c.loadRequest(ctx, requestID); req != nil && req.ReviewRunID != "" {
-		c.failOpenAspects(ctx, req.ReviewRunID, "stopped")
+	// Drive the active run and its aspects to a terminal state.
+	var runID int64
+	_ = c.DB.QueryRowContext(ctx,
+		`SELECT id FROM kb.doc_review_runs WHERE request_id = $1 AND status IN ('pending','running') ORDER BY id DESC LIMIT 1`,
+		requestID,
+	).Scan(&runID)
+	if runID > 0 {
+		c.DB.ExecContext(ctx, `UPDATE kb.doc_review_runs SET status = 'stopped', end_time = NOW() WHERE id = $1`, runID)
+		c.failOpenAspects(ctx, runID, "stopped")
 	}
-	logger.Info("review request stopped", "request_id", requestID)
+	logger.Info("review request stopped", "request_id", requestID, "run_id", runID)
 	return nil
 }
 
-// RestartRequest re-arms a review that was left unfinished — typically because
-// the backend process was killed mid-run, leaving the request stuck in
-// 'accepted' or 'running' with aspects still pending/running and no worker
-// driving them. It resets the request to 'accepted' and every non-succeeded
-// aspect back to 'pending' so a fresh run (re-triggered by the caller) picks the
-// job up. The review re-runs the whole document (prior findings are deleted on
-// re-run, DR7), so already-succeeded aspects are reset too and recomputed.
-func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int64) error {
+// RestartRequest re-arms an unfinished review. It resets the latest non-completed
+// run and every aspect back to pending so a fresh trigger re-runs from scratch.
+// Returns the run_id so the caller can re-publish the JetStream event.
+func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int64) (int64, error) {
 	req, err := c.loadRequest(ctx, requestID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if req.Status == "completed" {
-		return &RequestError{
+		return 0, &RequestError{
 			Status:  http.StatusConflict,
 			Message: fmt.Sprintf("request %d is already completed; nothing to restart", requestID),
 		}
 	}
 
-	// Reset the request to 'accepted' and clear the prior run's terminal stamps.
-	if _, err := c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_requests
-		 SET status = 'accepted', start_time = NULL, end_time = NULL, error_message = NULL
-		 WHERE id = $1`,
+	// Find the latest run for this request.
+	var runID int64
+	var runStatus string
+	err = c.DB.QueryRowContext(ctx,
+		`SELECT id, status FROM kb.doc_review_runs WHERE request_id = $1 ORDER BY id DESC LIMIT 1`,
 		requestID,
-	); err != nil {
-		return fmt.Errorf("reset request %d to accepted: %w", requestID, err)
-	}
-
-	// Reset every aspect of the run back to 'pending' so the fresh run re-claims
-	// them. The processor deletes prior findings and re-runs the whole document,
-	// so succeeded aspects are recomputed too.
-	if req.ReviewRunID != "" {
-		if _, err := c.DB.ExecContext(ctx,
-			`UPDATE kb.doc_review_status
-			 SET status = 'pending', progress = 0, finding_count = 0, error_message = NULL,
-			     start_time = NULL, end_time = NULL, modify_time = NOW()
-			 WHERE review_run_id = $1`,
-			req.ReviewRunID,
-		); err != nil {
-			return fmt.Errorf("reset aspect statuses for request %d: %w", requestID, err)
+	).Scan(&runID, &runStatus)
+	if err == sql.ErrNoRows || runStatus == "completed" {
+		return 0, &RequestError{
+			Status:  http.StatusConflict,
+			Message: fmt.Sprintf("request %d has no restartable run", requestID),
 		}
 	}
+	if err != nil {
+		return 0, fmt.Errorf("find latest run for request %d: %w", requestID, err)
+	}
 
-	logger.Info("review request restarted", "request_id", requestID, "review_run_id", req.ReviewRunID)
-	return nil
+	// Reset the run and request to 'pending'/'accepted'.
+	if _, err := c.DB.ExecContext(ctx,
+		`UPDATE kb.doc_review_runs SET status = 'pending', start_time = NULL, end_time = NULL, error_message = NULL WHERE id = $1`,
+		runID,
+	); err != nil {
+		return 0, fmt.Errorf("reset run %d: %w", runID, err)
+	}
+	if _, err := c.DB.ExecContext(ctx,
+		`UPDATE kb.doc_review_requests SET status = 'accepted' WHERE id = $1`,
+		requestID,
+	); err != nil {
+		return 0, fmt.Errorf("reset request %d to accepted: %w", requestID, err)
+	}
+	// Reset every aspect of the run back to 'pending'.
+	if _, err := c.DB.ExecContext(ctx,
+		`UPDATE kb.doc_review_status
+		 SET status = 'pending', progress = 0, finding_count = 0, error_message = NULL,
+		     start_time = NULL, end_time = NULL, modify_time = NOW()
+		 WHERE run_id = $1`,
+		runID,
+	); err != nil {
+		return 0, fmt.Errorf("reset aspect statuses for run %d: %w", runID, err)
+	}
+
+	logger.Info("review request restarted", "request_id", requestID, "run_id", runID)
+	return runID, nil
 }
 
-// RecoverStalledReviews finds review requests left unfinished by a previous
-// process — status 'accepted' or 'running' — and re-arms each for a fresh run.
-//
-// After a backend crash/restart no worker is driving these requests: findings
-// persist only once a whole run completes (see PostProcessIndex's single
-// SaveFindings at the end), so a request stuck in 'running' has saved nothing
-// and its aspects are mid-flight. Re-arming via RestartRequest resets the
-// request to 'accepted' and every aspect back to 'pending', so the fresh run
-// re-runs all sub-tasks from scratch — exactly as if they had never run.
-//
-// It returns the ids it re-armed so the caller can re-trigger their runs.
-// Intended to be called once at process start.
-func (c *DocReviewController) RecoverStalledReviews(ctx context.Context) ([]int64, error) {
+// RecoverStalledReviews finds review requests left unfinished by a previous process
+// and re-arms each for a fresh run. Returns the (requestID, runID) pairs that were
+// recovered so the caller can re-trigger them.
+func (c *DocReviewController) RecoverStalledReviews(ctx context.Context) ([]StalledRun, error) {
 	rows, err := c.DB.QueryContext(ctx,
 		`SELECT id FROM kb.doc_review_requests WHERE status IN ('accepted','running') ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list stalled reviews: %w", err)
 	}
 	defer rows.Close()
-	var ids []int64
+	var requestIDs []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan stalled review id: %w", err)
 		}
-		ids = append(ids, id)
+		requestIDs = append(requestIDs, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate stalled reviews: %w", err)
 	}
 
-	var recovered []int64
-	for _, id := range ids {
-		if err := c.RestartRequest(ctx, id); err != nil {
+	var recovered []StalledRun
+	for _, id := range requestIDs {
+		runID, err := c.RestartRequest(ctx, id)
+		if err != nil {
 			logger.Warn("failed to re-arm stalled review", "request_id", id, "error", err)
 			continue
 		}
-		recovered = append(recovered, id)
+		recovered = append(recovered, StalledRun{RequestID: id, RunID: runID})
 	}
 	if len(recovered) > 0 {
-		logger.Info("recovered stalled doc-review requests", "count", len(recovered), "request_ids", recovered)
+		logger.Info("recovered stalled doc-review requests", "count", len(recovered))
 	}
 	return recovered, nil
 }
@@ -485,8 +505,8 @@ func (c *DocReviewController) UpdateFinding(ctx context.Context, findingID int64
 		docactivity.Log(ctx, c.DB, docactivity.Activity{
 			ActivityType:  docactivity.TypeFindingDelete,
 			InputRecordID: fctx.InputRecordID,
-			ReviewRunID:   fctx.ReviewRunID,
-			ReportID:      c.resolveReportID(ctx, fctx.InputRecordID, fctx.ReviewRunID),
+			RunID:         fctx.RunID,
+			ReportID:      c.resolveReportID(ctx, fctx.RunID),
 			FindingID:     fctx.ID,
 			Location:      fctx.Location,
 			OldContent:    fctx.Title,
@@ -503,24 +523,34 @@ func (c *DocReviewController) UpdateFinding(ctx context.Context, findingID int64
 	return nil
 }
 
-// loadRequest fetches one request row.
+// loadRequest fetches one request row, joining to the latest run for timing fields.
 func (c *DocReviewController) loadRequest(ctx context.Context, id int64) (*RequestStatus, error) {
 	var req RequestStatus
 	var aspectsJSON, refDocsJSON, overridesJSON sql.NullString
-	var reviewRunID, notes, errorMsg, startTime, endTime sql.NullString
-	var reportTmpl, docTmpl sql.NullString
+	var notes, reportTmpl, docTmpl sql.NullString
+	var latestRunID sql.NullInt64
+	var startTime, endTime, errorMsg sql.NullString
 
 	err := c.DB.QueryRowContext(ctx, `
-		SELECT id, input_record_id, COALESCE(review_run_id,''), tier, aspects::text,
-		       COALESCE(reference_docs::text,''), COALESCE(notes,''), COALESCE(model_overrides::text,''),
-		       requester_name, requester_id, COALESCE(report_template,''), COALESCE(doc_template,''),
-		       status, create_time::text, COALESCE(start_time::text,''), COALESCE(end_time::text,''),
-		       COALESCE(error_message,'')
-		FROM kb.doc_review_requests WHERE id = $1`, id,
-	).Scan(&req.ID, &req.InputRecordID, &reviewRunID, &req.Tier, &aspectsJSON,
+		SELECT r.id, r.input_record_id, r.tier, r.aspects::text,
+		       COALESCE(r.reference_docs::text,''), COALESCE(r.notes,''), COALESCE(r.model_overrides::text,''),
+		       r.requester_name, r.requester_id, COALESCE(r.report_template,''), COALESCE(r.doc_template,''),
+		       r.status, r.create_time::text,
+		       lr.id, COALESCE(lr.start_time::text,''), COALESCE(lr.end_time::text,''), COALESCE(lr.error_message,'')
+		FROM kb.doc_review_requests r
+		LEFT JOIN LATERAL (
+		    SELECT id, start_time, end_time, error_message
+		    FROM kb.doc_review_runs
+		    WHERE request_id = r.id
+		    ORDER BY id DESC
+		    LIMIT 1
+		) lr ON true
+		WHERE r.id = $1`, id,
+	).Scan(&req.ID, &req.InputRecordID, &req.Tier, &aspectsJSON,
 		&refDocsJSON, &notes, &overridesJSON,
 		&req.RequesterName, &req.RequesterID, &reportTmpl, &docTmpl,
-		&req.Status, &req.CreateTime, &startTime, &endTime, &errorMsg)
+		&req.Status, &req.CreateTime,
+		&latestRunID, &startTime, &endTime, &errorMsg)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("request %d not found", id)
@@ -528,7 +558,9 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64) (*Reque
 		return nil, fmt.Errorf("load request %d: %w", id, err)
 	}
 
-	req.ReviewRunID = reviewRunID.String
+	if latestRunID.Valid {
+		req.LatestRunID = latestRunID.Int64
+	}
 	req.Notes = notes.String
 	req.ReportTemplate = reportTmpl.String
 	req.DocTemplate = docTmpl.String
@@ -536,8 +568,8 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64) (*Reque
 	req.EndTime = endTime.String
 	req.ErrorMessage = errorMsg.String
 
-	// DR15: surface the latest report id (if any) so the GUI can link to it after
-	// an async run completes (the submit response no longer carries it).
+	// Surface the latest report id (if any) so the GUI can link to it after
+	// an async run completes.
 	var reportID sql.NullInt64
 	_ = c.DB.QueryRowContext(ctx,
 		`SELECT id FROM kb.doc_review_reports WHERE request_id = $1 ORDER BY id DESC LIMIT 1`, id,
@@ -570,18 +602,18 @@ func aspectPassMap() map[string]string {
 }
 
 // seedAspectStatuses inserts one kb.doc_review_status row per aspect (status
-// 'pending') for a freshly-accepted request.
-func (c *DocReviewController) seedAspectStatuses(ctx context.Context, requestID, recordID int64, reviewRunID string, aspects []string) error {
+// 'pending') for a freshly-created run.
+func (c *DocReviewController) seedAspectStatuses(ctx context.Context, requestID, recordID int64, runID int64, aspects []string) error {
 	if len(aspects) == 0 {
 		return nil
 	}
 	passByName := aspectPassMap()
 	for _, aspect := range aspects {
 		_, err := c.DB.ExecContext(ctx, `
-			INSERT INTO kb.doc_review_status (request_id, input_record_id, review_run_id, aspect, pass, status)
+			INSERT INTO kb.doc_review_status (request_id, input_record_id, run_id, aspect, pass, status)
 			VALUES ($1, $2, $3, $4, $5, 'pending')
-			ON CONFLICT (review_run_id, aspect) DO NOTHING`,
-			requestID, recordID, reviewRunID, aspect, nullableStr(passByName[aspect]),
+			ON CONFLICT (run_id, aspect) DO NOTHING`,
+			requestID, recordID, runID, aspect, nullableStr(passByName[aspect]),
 		)
 		if err != nil {
 			return fmt.Errorf("seed aspect %q: %w", aspect, err)
@@ -591,21 +623,19 @@ func (c *DocReviewController) seedAspectStatuses(ctx context.Context, requestID,
 }
 
 // markAspectsRunning flips every pending aspect of a run to 'running'.
-func (c *DocReviewController) markAspectsRunning(ctx context.Context, reviewRunID string) {
+func (c *DocReviewController) markAspectsRunning(ctx context.Context, runID int64) {
 	_, err := c.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status
 		SET status = 'running', start_time = NOW(), progress = 0, modify_time = NOW()
-		WHERE review_run_id = $1 AND status = 'pending'`, reviewRunID)
+		WHERE run_id = $1 AND status = 'pending'`, runID)
 	if err != nil {
-		logger.Warn("mark aspects running failed", "review_run_id", reviewRunID, "error", err)
+		logger.Warn("mark aspects running failed", "run_id", runID, "error", err)
 	}
 }
 
 // finalizeAspectsSuccess marks every non-finished aspect of a run 'success',
-// stamping each aspect's finding count from kb.doc_review_findings. Findings are
-// counted per (record_id, aspect): re-runs delete prior findings (DR7), so a
-// record has exactly one current finding set.
-func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, reviewRunID string, recordID int64) {
+// stamping each aspect's finding count from kb.doc_review_findings.
+func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, runID int64, recordID int64) {
 	_, err := c.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status s
 		SET status = 'success',
@@ -614,38 +644,44 @@ func (c *DocReviewController) finalizeAspectsSuccess(ctx context.Context, review
 		    modify_time = NOW(),
 		    finding_count = COALESCE((
 		        SELECT COUNT(*) FROM kb.doc_review_findings f
-		        WHERE f.review_run_id = $1 AND f.input_record_id = $2 AND f.aspect = s.aspect
+		        WHERE f.run_id = $1 AND f.input_record_id = $2 AND f.aspect = s.aspect
 		    ), 0)
-		WHERE s.review_run_id = $1 AND s.status NOT IN ('success', 'failed')`,
-		reviewRunID, recordID)
+		WHERE s.run_id = $1 AND s.status NOT IN ('success', 'failed')`,
+		runID, recordID)
 	if err != nil {
-		logger.Warn("finalize aspects success failed", "review_run_id", reviewRunID, "error", err)
+		logger.Warn("finalize aspects success failed", "run_id", runID, "error", err)
 	}
 }
 
 // failOpenAspects drives every non-finished aspect of a run to 'failed' with the
 // given message (used on whole-run failure and on stop).
-func (c *DocReviewController) failOpenAspects(ctx context.Context, reviewRunID, errMsg string) {
+func (c *DocReviewController) failOpenAspects(ctx context.Context, runID int64, errMsg string) {
 	_, err := c.DB.ExecContext(ctx, `
 		UPDATE kb.doc_review_status
 		SET status = 'failed', error_message = $2, end_time = NOW(), modify_time = NOW()
-		WHERE review_run_id = $1 AND status NOT IN ('success', 'failed')`,
-		reviewRunID, errMsg)
+		WHERE run_id = $1 AND status NOT IN ('success', 'failed')`,
+		runID, errMsg)
 	if err != nil {
-		logger.Warn("fail open aspects failed", "review_run_id", reviewRunID, "error", err)
+		logger.Warn("fail open aspects failed", "run_id", runID, "error", err)
 	}
 }
 
 // ListActiveJobs returns every review request that still has at least one
 // unfinished aspect (status NOT IN 'success','failed'), each with its full
-// per-aspect status list. This is the source of truth for the live job monitor:
-// a job disappears the moment its last aspect finishes.
+// per-aspect status list.
 func (c *DocReviewController) ListActiveJobs(ctx context.Context) ([]ActiveJob, error) {
 	rows, err := c.DB.QueryContext(ctx, `
-		SELECT r.id, r.input_record_id, COALESCE(r.review_run_id,''), r.tier, r.status,
+		SELECT r.id, r.input_record_id, COALESCE(lr.id, 0), r.tier, r.status,
 		       r.requester_name, COALESCE(i.title, i.file_name, ''),
-		       r.create_time::text, COALESCE(r.start_time::text, '')
+		       r.create_time::text, COALESCE(lr.start_time::text, '')
 		FROM kb.doc_review_requests r
+		LEFT JOIN LATERAL (
+		    SELECT id, start_time
+		    FROM kb.doc_review_runs
+		    WHERE request_id = r.id
+		    ORDER BY id DESC
+		    LIMIT 1
+		) lr ON true
 		LEFT JOIN kb.inputs i ON i.id = r.input_record_id
 		WHERE EXISTS (
 		    SELECT 1 FROM kb.doc_review_status s
@@ -660,7 +696,7 @@ func (c *DocReviewController) ListActiveJobs(ctx context.Context) ([]ActiveJob, 
 	var jobs []ActiveJob
 	for rows.Next() {
 		var j ActiveJob
-		if err := rows.Scan(&j.RequestID, &j.InputRecordID, &j.ReviewRunID, &j.Tier, &j.Status,
+		if err := rows.Scan(&j.RequestID, &j.InputRecordID, &j.RunID, &j.Tier, &j.Status,
 			&j.RequesterName, &j.DocTitle, &j.CreateTime, &j.StartTime); err != nil {
 			return nil, fmt.Errorf("scan active job: %w", err)
 		}
@@ -672,18 +708,19 @@ func (c *DocReviewController) ListActiveJobs(ctx context.Context) ([]ActiveJob, 
 
 	// Attach per-aspect status to each job.
 	for i := range jobs {
-		aspects, err := c.loadAspectStatuses(ctx, jobs[i].ReviewRunID)
-		if err != nil {
-			return nil, err
+		if jobs[i].RunID > 0 {
+			aspects, err := c.loadAspectStatuses(ctx, jobs[i].RunID)
+			if err != nil {
+				return nil, err
+			}
+			jobs[i].Aspects = aspects
 		}
-		jobs[i].Aspects = aspects
 	}
 	return jobs, nil
 }
 
 // ListRequests returns document-review requests matching the given filter,
-// newest first. Each row carries the document title (joined from kb.inputs),
-// the selected aspect count, and the latest report's id + finding count (if any).
+// newest first.
 func (c *DocReviewController) ListRequests(ctx context.Context, f RequestListFilter) ([]RequestListItem, error) {
 	var conds []string
 	var args []any
@@ -734,7 +771,9 @@ func (c *DocReviewController) ListRequests(ctx context.Context, f RequestListFil
 	query := fmt.Sprintf(`
 		SELECT r.id, r.input_record_id, COALESCE(i.title, i.file_name, ''), r.tier, r.status,
 		       r.requester_name, COALESCE(jsonb_array_length(r.aspects), 0),
-		       r.create_time::text, COALESCE(r.start_time::text, ''), COALESCE(r.end_time::text, ''),
+		       r.create_time::text,
+		       COALESCE((SELECT rn.start_time::text FROM kb.doc_review_runs rn WHERE rn.request_id = r.id ORDER BY rn.id DESC LIMIT 1), ''),
+		       COALESCE((SELECT rn.end_time::text FROM kb.doc_review_runs rn WHERE rn.request_id = r.id ORDER BY rn.id DESC LIMIT 1), ''),
 		       COALESCE((SELECT rep.id FROM kb.doc_review_reports rep WHERE rep.request_id = r.id ORDER BY rep.id DESC LIMIT 1), 0),
 		       COALESCE((SELECT rep.total_findings FROM kb.doc_review_reports rep WHERE rep.request_id = r.id ORDER BY rep.id DESC LIMIT 1), 0)
 		FROM kb.doc_review_requests r
@@ -766,13 +805,13 @@ func (c *DocReviewController) ListRequests(ctx context.Context, f RequestListFil
 }
 
 // loadAspectStatuses returns the kb.doc_review_status rows for a run, ordered by id.
-func (c *DocReviewController) loadAspectStatuses(ctx context.Context, reviewRunID string) ([]AspectStatus, error) {
+func (c *DocReviewController) loadAspectStatuses(ctx context.Context, runID int64) ([]AspectStatus, error) {
 	rows, err := c.DB.QueryContext(ctx, `
 		SELECT aspect, COALESCE(pass,''), status, COALESCE(progress,0), finding_count, COALESCE(error_message,''),
 		       COALESCE(start_time::text,''), COALESCE(end_time::text,'')
 		FROM kb.doc_review_status
-		WHERE review_run_id = $1
-		ORDER BY id`, reviewRunID)
+		WHERE run_id = $1
+		ORDER BY id`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("load aspect statuses: %w", err)
 	}

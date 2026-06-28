@@ -41,13 +41,10 @@ var kindOrder = []string{
 // var is unset the function is a no-op. It returns the generated PDF path (empty
 // when skipped).
 func (c *DocReviewController) GenerateCorrectionReport(ctx context.Context, reportID int64) (string, error) {
-	var inputRecordID int64
-	var reviewRunID string
-	var requestID int64
+	var inputRecordID, runID, requestID int64
 	err := c.DB.QueryRowContext(ctx,
-		`SELECT request_id, input_record_id, COALESCE(review_run_id,'')
-		 FROM kb.doc_review_reports WHERE id = $1`, reportID,
-	).Scan(&requestID, &inputRecordID, &reviewRunID)
+		`SELECT request_id, input_record_id, run_id FROM kb.doc_review_reports WHERE id = $1`, reportID,
+	).Scan(&requestID, &inputRecordID, &runID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", fmt.Errorf("report %d not found", reportID)
@@ -60,7 +57,7 @@ func (c *DocReviewController) GenerateCorrectionReport(ctx context.Context, repo
 		return "", err
 	}
 
-	activities, err := docactivity.List(ctx, c.DB, inputRecordID, reviewRunID)
+	activities, err := docactivity.List(ctx, c.DB, inputRecordID, runID)
 	if err != nil {
 		return "", fmt.Errorf("load activities: %w", err)
 	}

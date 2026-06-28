@@ -8,7 +8,7 @@ import (
 
 // ReviewStatusStore persists live per-reviewer progress into kb.doc_review_status.
 type ReviewStatusStore interface {
-	UpdateAspectProgress(ctx context.Context, reviewRunID, aspect string, progress float64, findingCount int) error
+	UpdateAspectProgress(ctx context.Context, runID int64, aspect string, progress float64, findingCount int) error
 }
 
 // ReviewStatusSQLStore updates kb.doc_review_status rows in PostgreSQL.
@@ -16,11 +16,11 @@ type ReviewStatusSQLStore struct {
 	DB *sql.DB
 }
 
-func (s ReviewStatusSQLStore) UpdateAspectProgress(ctx context.Context, reviewRunID, aspect string, progress float64, findingCount int) error {
+func (s ReviewStatusSQLStore) UpdateAspectProgress(ctx context.Context, runID int64, aspect string, progress float64, findingCount int) error {
 	if s.DB == nil {
 		return fmt.Errorf("db is nil")
 	}
-	if reviewRunID == "" || aspect == "" {
+	if runID <= 0 || aspect == "" {
 		return nil
 	}
 	if progress < 0 {
@@ -56,10 +56,10 @@ func (s ReviewStatusSQLStore) UpdateAspectProgress(ctx context.Context, reviewRu
 		        ELSE end_time
 		    END,
 		    modify_time = NOW()
-		WHERE review_run_id = $1 AND aspect = $2`,
-		reviewRunID, aspect, progress, findingCount)
+		WHERE run_id = $1 AND aspect = $2`,
+		runID, aspect, progress, findingCount)
 	if err != nil {
-		return fmt.Errorf("update aspect progress for %s/%s: %w", reviewRunID, aspect, err)
+		return fmt.Errorf("update aspect progress for run %d/%s: %w", runID, aspect, err)
 	}
 	return nil
 }

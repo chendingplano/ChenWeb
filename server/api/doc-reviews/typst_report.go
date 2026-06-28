@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -339,12 +340,35 @@ func typContentLine(s string) string {
 }
 
 // typContent escapes a single-line string for use inside a Typst content block ([]).
-func typContent(s string) string { return typContentLine(s) }
+// HTML <table> elements are converted to Typst #table() calls instead of being escaped.
+func typContent(s string) string { return typContentWithHTML(s) }
 
 // typLines escapes a multi-line string for use inside a Typst content block.
 // Each line is escaped individually; lines are joined with a Typst forced line
 // break (backslash + newline) so each line renders on its own row.
+// HTML <table> elements are converted to Typst #table() calls instead of being escaped.
 func typLines(s string) string {
+	re := htmlTableRe()
+	var result strings.Builder
+	lastEnd := 0
+	for _, loc := range re.FindAllStringIndex(s, -1) {
+		segment := s[lastEnd:loc[0]]
+		if segment != "" {
+			result.WriteString(escapedLines(segment))
+			result.WriteString("\\\n")
+		}
+		result.WriteString(htmlTableToTypst(s[loc[0]:loc[1]]))
+		lastEnd = loc[1]
+	}
+	if remaining := s[lastEnd:]; remaining != "" {
+		result.WriteString(escapedLines(remaining))
+	}
+	return result.String()
+}
+
+// escapedLines is the original typLines logic: escape each non-empty line and
+// join with Typst forced line breaks.
+func escapedLines(s string) string {
 	lines := strings.Split(s, "\n")
 	parts := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -353,6 +377,76 @@ func typLines(s string) string {
 		}
 	}
 	return strings.Join(parts, "\\\n")
+}
+
+// typContentWithHTML escapes s for a Typst content block, converting any
+// embedded HTML <table> elements to Typst #table() calls.
+func typContentWithHTML(s string) string {
+	re := htmlTableRe()
+	var result strings.Builder
+	lastEnd := 0
+	for _, loc := range re.FindAllStringIndex(s, -1) {
+		result.WriteString(typContentLine(s[lastEnd:loc[0]]))
+		result.WriteString(htmlTableToTypst(s[loc[0]:loc[1]]))
+		lastEnd = loc[1]
+	}
+	result.WriteString(typContentLine(s[lastEnd:]))
+	return result.String()
+}
+
+var (
+	reHTMLTable = regexp.MustCompile(`(?is)<table[^>]*>.*?</table>`)
+	reTableRow  = regexp.MustCompile(`(?is)<tr[^>]*>(.*?)</tr>`)
+	reTableCell = regexp.MustCompile(`(?is)<t[dh][^>]*>(.*?)</t[dh]>`)
+	reAnyTag    = regexp.MustCompile(`<[^>]+>`)
+)
+
+func htmlTableRe() *regexp.Regexp { return reHTMLTable }
+
+// htmlTableToTypst converts one HTML <table>...</table> string to a Typst
+// #table() call. Cell content has inner tags stripped and HTML entities decoded
+// before being escaped for Typst.
+func htmlTableToTypst(tableHTML string) string {
+	var allRows [][]string
+	maxCols := 0
+	for _, rowMatch := range reTableRow.FindAllStringSubmatch(tableHTML, -1) {
+		var row []string
+		for _, cellMatch := range reTableCell.FindAllStringSubmatch(rowMatch[1], -1) {
+			cell := reAnyTag.ReplaceAllString(cellMatch[1], "")
+			cell = decodeHTMLEntities(strings.TrimSpace(cell))
+			row = append(row, cell)
+		}
+		if len(row) > 0 {
+			allRows = append(allRows, row)
+			if len(row) > maxCols {
+				maxCols = len(row)
+			}
+		}
+	}
+	if maxCols == 0 {
+		return typContentLine(reAnyTag.ReplaceAllString(tableHTML, ""))
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "#table(\n  columns: %d,\n", maxCols)
+	for _, row := range allRows {
+		for _, cell := range row {
+			fmt.Fprintf(&b, "  [%s],", typContentLine(cell))
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// decodeHTMLEntities replaces common HTML entities with their text equivalents.
+func decodeHTMLEntities(s string) string {
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	s = strings.ReplaceAll(s, "&quot;", `"`)
+	s = strings.ReplaceAll(s, "&#39;", "'")
+	return s
 }
 
 // extractDate returns the YYYY-MM-DD prefix of an RFC3339 or similar timestamp.

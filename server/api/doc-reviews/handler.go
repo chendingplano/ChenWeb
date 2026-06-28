@@ -75,13 +75,13 @@ func SubmitRequest(c echo.Context) error {
 	// Publish a JetStream event so doc-processor runs the review. If the
 	// publisher is unavailable, fall back to an inline goroutine so the service
 	// degrades gracefully rather than failing hard.
-	if pubErr := PublishReviewEvent(ctx, result.RequestID); pubErr != nil {
+	if pubErr := PublishReviewEvent(ctx, result.RequestID, result.RunID); pubErr != nil {
 		logger.Warn("JetStream publish failed; falling back to inline goroutine",
-			"request_id", result.RequestID, "error", pubErr)
-		requestID := result.RequestID
+			"request_id", result.RequestID, "run_id", result.RunID, "error", pubErr)
+		requestID, runID := result.RequestID, result.RunID
 		go func() {
 			bgCtrl := NewDocReviewController()
-			bgCtrl.RunReviewAndReport(c.Request().Context(), requestID)
+			bgCtrl.RunReviewAndReport(c.Request().Context(), requestID, runID)
 		}()
 	}
 
@@ -398,7 +398,8 @@ func RestartRequest(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
 	}
 	ctrl := NewDocReviewController()
-	if err := ctrl.RestartRequest(c.Request().Context(), id); err != nil {
+	runID, err := ctrl.RestartRequest(c.Request().Context(), id)
+	if err != nil {
 		if re, ok := err.(*RequestError); ok {
 			return c.JSON(re.Status, map[string]any{"status": false, "error_msg": re.Message})
 		}
@@ -410,12 +411,12 @@ func RestartRequest(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	if pubErr := PublishReviewEvent(ctx, id); pubErr != nil {
+	if pubErr := PublishReviewEvent(ctx, id, runID); pubErr != nil {
 		logger.Warn("JetStream publish failed on restart; falling back to inline goroutine",
-			"request_id", id, "error", pubErr)
+			"request_id", id, "run_id", runID, "error", pubErr)
 		go func() {
 			bgCtrl := NewDocReviewController()
-			bgCtrl.RunReviewAndReport(c.Request().Context(), id)
+			bgCtrl.RunReviewAndReport(c.Request().Context(), id, runID)
 		}()
 	}
 

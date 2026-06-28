@@ -46,7 +46,7 @@ type ReportMeta struct {
 	DocumentTitle    string `json:"document_title"`
 	DocumentRecordID int64  `json:"document_record_id"`
 	GeneratedAt      string `json:"generated_at"`
-	ReviewRunID      string `json:"review_run_id"`
+	RunID            int64  `json:"run_id"`
 	NumReviewersRan  int    `json:"num_reviewers_ran"`
 	TotalFindings    int    `json:"total_findings"`
 }
@@ -111,7 +111,7 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 			ReportID:         fmt.Sprintf("rpt_%d_%s", req.InputRecordID, strings.ReplaceAll(req.CreateTime, " ", "T")),
 			DocumentRecordID: req.InputRecordID,
 			GeneratedAt:      timeNow(),
-			ReviewRunID:      req.ReviewRunID,
+			RunID:            req.LatestRunID,
 			TotalFindings:    len(findings),
 		},
 		FindingsByPass: make(map[string]PassGroup),
@@ -274,12 +274,12 @@ func (g *DocReviewReportGenerator) Persist(ctx context.Context, req *RequestStat
 	var id int64
 	err = g.DB.QueryRowContext(ctx, `
 		INSERT INTO kb.doc_review_reports
-			(request_id, input_record_id, review_run_id, report_json, report_markdown,
+			(request_id, input_record_id, run_id, report_json, report_markdown,
 			 executive_summary, total_findings, high_count, medium_count, low_count,
 			 overall_assessment)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		RETURNING id`,
-		req.ID, req.InputRecordID, req.ReviewRunID, reportJSON, markdown,
+		req.ID, req.InputRecordID, req.LatestRunID, reportJSON, markdown,
 		report.ExecutiveSummary.Text, report.Meta.TotalFindings,
 		countBySeverity(report.Findings, "high"),
 		countBySeverity(report.Findings, "medium"),
@@ -299,12 +299,12 @@ func (g *DocReviewReportGenerator) GetReport(ctx context.Context, reportID int64
 	var reportJSONBytes []byte
 
 	err := g.DB.QueryRowContext(ctx, `
-		SELECT id, request_id, input_record_id, review_run_id,
+		SELECT id, request_id, input_record_id, run_id,
 		       total_findings, high_count, medium_count, low_count,
 		       overall_assessment, create_time::text,
 		       executive_summary, report_json::text, report_markdown
 		FROM kb.doc_review_reports WHERE id = $1`, reportID,
-	).Scan(&d.ID, &d.RequestID, &d.InputRecordID, &d.ReviewRunID,
+	).Scan(&d.ID, &d.RequestID, &d.InputRecordID, &d.RunID,
 		&d.TotalFindings, &d.HighCount, &d.MediumCount, &d.LowCount,
 		&d.OverallAssessment, &d.CreateTime,
 		&execSummary, &reportJSONBytes, &markdown)
@@ -595,41 +595,13 @@ func renderHTML(report *ReportSkeleton) (string, error) {
 	return buf.String(), nil
 }
 
-// ListReportPDFs returns all review-report PDF files on disk for the document
-// associated with reportID. The entry for the current report is marked
-// IsCurrent=true. Returns an empty slice (not an error) when DOC_REVIEW_REPORTS
-// is unset or no PDF files match.
+// ListReportPDFs returns all review-report PDF files on disk for the request
+// associated with reportID, sorted by file name descending (newest first). The
+// most recent file is marked IsCurrent=true. Returns an empty slice (not an
+// error) when DOC_REVIEW_REPORTS is unset or no PDF files match.
 func (g *DocReviewReportGenerator) ListReportPDFs(ctx context.Context, reportID int64) ([]ReportPDFFile, error) {
 	d, err := g.GetReport(ctx, reportID)
 	if err != nil {
-		return nil, err
-	}
-
-	// All reports for this document, newest first.
-	rows, err := g.DB.QueryContext(ctx, `
-		SELECT id, request_id, create_time::text
-		FROM kb.doc_review_reports
-		WHERE input_record_id = $1
-		ORDER BY id DESC`, d.InputRecordID)
-	if err != nil {
-		return nil, fmt.Errorf("list reports for document %d: %w", d.InputRecordID, err)
-	}
-	defer rows.Close()
-
-	type reportMeta struct {
-		ID         int64
-		RequestID  int64
-		CreateTime string
-	}
-	var metas []reportMeta
-	for rows.Next() {
-		var m reportMeta
-		if err := rows.Scan(&m.ID, &m.RequestID, &m.CreateTime); err != nil {
-			return nil, err
-		}
-		metas = append(metas, m)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
@@ -638,18 +610,19 @@ func (g *DocReviewReportGenerator) ListReportPDFs(ctx context.Context, reportID 
 		return []ReportPDFFile{}, nil
 	}
 
+	matches := findAllReportPDFs(outputDir, d.RequestID)
 	var files []ReportPDFFile
-	for _, m := range metas {
-		match := findReportPDF(outputDir, m.RequestID)
-		if match == "" {
-			continue
+	for i, match := range matches {
+		createTime := d.CreateTime
+		if info, statErr := os.Stat(match); statErr == nil {
+			createTime = info.ModTime().UTC().Format("2006-01-02T15:04:05Z")
 		}
 		files = append(files, ReportPDFFile{
-			RequestID:  m.RequestID,
-			ReportID:   m.ID,
+			RequestID:  d.RequestID,
+			ReportID:   d.ID,
 			FileName:   filepath.Base(match),
-			CreateTime: m.CreateTime,
-			IsCurrent:  m.ID == reportID,
+			CreateTime: createTime,
+			IsCurrent:  i == 0,
 		})
 	}
 	return files, nil
@@ -675,6 +648,16 @@ func (g *DocReviewReportGenerator) FindReportPDFPath(ctx context.Context, report
 // legacy one (<stamp>-<id>reports.pdf, no hyphen before "reports"). Returns
 // the lexicographically last match (newest stamp), or "" when nothing is found.
 func findReportPDF(outputDir string, requestID int64) string {
+	matches := findAllReportPDFs(outputDir, requestID)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[0]
+}
+
+// findAllReportPDFs returns all PDF files in outputDir matching requestID,
+// sorted descending by filename (newest stamp first).
+func findAllReportPDFs(outputDir string, requestID int64) []string {
 	var matches []string
 	for _, pat := range []string{
 		filepath.Join(outputDir, fmt.Sprintf("*-%d-reports.pdf", requestID)),
@@ -684,11 +667,10 @@ func findReportPDF(outputDir string, requestID int64) string {
 		matches = append(matches, m...)
 	}
 	if len(matches) == 0 {
-		return ""
+		return nil
 	}
-	// Sort ascending so the last element is the newest stamp.
-	sort.Strings(matches)
-	return matches[len(matches)-1]
+	sort.Sort(sort.Reverse(sort.StringSlice(matches)))
+	return matches
 }
 
 // reportHTMLTemplate is the HTML template for online report viewing.

@@ -39,7 +39,7 @@ type AutoFixResult struct {
 type findingContext struct {
 	ID            int64
 	InputRecordID int64
-	ReviewRunID   string
+	RunID         int64
 	Location      string
 	Title         string
 	Description   string
@@ -53,11 +53,11 @@ type findingContext struct {
 func (c *DocReviewController) loadFindingContext(ctx context.Context, id int64) (*findingContext, error) {
 	var f findingContext
 	err := c.DB.QueryRowContext(ctx, `
-		SELECT id, input_record_id, COALESCE(review_run_id,''), COALESCE(location,''),
+		SELECT id, input_record_id, COALESCE(run_id,0), COALESCE(location,''),
 		       title, COALESCE(description,''), COALESCE(suggestion,''),
 		       aspect, severity, COALESCE(evidence,'')
 		FROM kb.doc_review_findings WHERE id = $1`, id,
-	).Scan(&f.ID, &f.InputRecordID, &f.ReviewRunID, &f.Location,
+	).Scan(&f.ID, &f.InputRecordID, &f.RunID, &f.Location,
 		&f.Title, &f.Description, &f.Suggestion, &f.Aspect, &f.Severity, &f.Evidence)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -275,8 +275,8 @@ func (c *DocReviewController) ApplyFindingEdit(ctx context.Context, findingID in
 		docactivity.Log(ctx, c.DB, docactivity.Activity{
 			ActivityType:  docactivity.TypeEditTool,
 			InputRecordID: f.InputRecordID,
-			ReviewRunID:   f.ReviewRunID,
-			ReportID:      c.resolveReportID(ctx, f.InputRecordID, f.ReviewRunID),
+			RunID:         f.RunID,
+			ReportID:      c.resolveReportID(ctx, f.RunID),
 			FindingID:     f.ID,
 			Location:      f.Location,
 			OldContent:    formatLineEdits(before),
@@ -467,8 +467,8 @@ func (c *DocReviewController) ApplyAutoFix(ctx context.Context, findingID int64,
 	docactivity.Log(ctx, c.DB, docactivity.Activity{
 		ActivityType:  docactivity.TypeAutoFix,
 		InputRecordID: f.InputRecordID,
-		ReviewRunID:   f.ReviewRunID,
-		ReportID:      c.resolveReportID(ctx, f.InputRecordID, f.ReviewRunID),
+		RunID:         f.RunID,
+		ReportID:      c.resolveReportID(ctx, f.RunID),
 		FindingID:     f.ID,
 		Location:      f.Location,
 		OldContent:    formatLineEdits(before),
@@ -503,21 +503,16 @@ func formatLineEdits(m map[int]string) string {
 	return strings.Join(parts, "\n")
 }
 
-// resolveReportID returns the latest report id for a (record, run) pair, or 0 if
-// none exists yet. Best-effort: errors yield 0 so logging stays non-fatal.
-func (c *DocReviewController) resolveReportID(ctx context.Context, inputRecordID int64, reviewRunID string) int64 {
-	if c.DB == nil || reviewRunID == "" {
+// resolveReportID returns the latest report id for a run, or 0 if none exists yet.
+// Best-effort: errors yield 0 so logging stays non-fatal.
+func (c *DocReviewController) resolveReportID(ctx context.Context, runID int64) int64 {
+	if c.DB == nil || runID <= 0 {
 		return 0
 	}
 	var id int64
-	err := c.DB.QueryRowContext(ctx,
-		`SELECT id FROM kb.doc_review_reports
-		 WHERE input_record_id = $1 AND review_run_id = $2
-		 ORDER BY id DESC LIMIT 1`, inputRecordID, reviewRunID,
+	_ = c.DB.QueryRowContext(ctx,
+		`SELECT id FROM kb.doc_review_reports WHERE run_id = $1 ORDER BY id DESC LIMIT 1`, runID,
 	).Scan(&id)
-	if err != nil {
-		return 0
-	}
 	return id
 }
 
@@ -541,12 +536,10 @@ func toFloat(v any) float64 {
 // an existing report id from the current (non-deleted) findings, updating the
 // same report row in place so the report id / URL stays stable.
 func (c *DocReviewController) RegenerateReport(ctx context.Context, reportID int64) error {
-	var requestID, inputRecordID int64
-	var reviewRunID string
+	var requestID, inputRecordID, runID int64
 	err := c.DB.QueryRowContext(ctx,
-		`SELECT request_id, input_record_id, COALESCE(review_run_id,'')
-		 FROM kb.doc_review_reports WHERE id = $1`, reportID,
-	).Scan(&requestID, &inputRecordID, &reviewRunID)
+		`SELECT request_id, input_record_id, run_id FROM kb.doc_review_reports WHERE id = $1`, reportID,
+	).Scan(&requestID, &inputRecordID, &runID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("report %d not found", reportID)
@@ -559,7 +552,7 @@ func (c *DocReviewController) RegenerateReport(ctx context.Context, reportID int
 		return err
 	}
 
-	findings, err := c.loadActiveFindings(ctx, inputRecordID, reviewRunID)
+	findings, err := c.loadActiveFindings(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -601,14 +594,14 @@ func (c *DocReviewController) RegenerateReport(ctx context.Context, reportID int
 
 // loadActiveFindings loads the findings for a run, excluding any soft-deleted
 // ('deleted') by the reviewer, ordered by id.
-func (c *DocReviewController) loadActiveFindings(ctx context.Context, recordID int64, reviewRunID string) ([]FindingItem, error) {
+func (c *DocReviewController) loadActiveFindings(ctx context.Context, runID int64) ([]FindingItem, error) {
 	rows, err := c.DB.QueryContext(ctx, `
 		SELECT id, pass, aspect, severity, finding_type, title, description,
 		       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
 		       COALESCE(confidence,0), COALESCE(review_status,'pending')
 		FROM kb.doc_review_findings
-		WHERE input_record_id = $1 AND review_run_id = $2 AND COALESCE(review_status,'') <> 'deleted'
-		ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`, recordID, reviewRunID)
+		WHERE run_id = $1 AND COALESCE(review_status,'') <> 'deleted'
+		ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("load active findings: %w", err)
 	}

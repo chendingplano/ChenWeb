@@ -39,7 +39,7 @@ func TestReportBuild_EmptyFindings(t *testing.T) {
 		Aspects:     []string{"completeness", "grammar_spelling"},
 		Status:      "completed",
 		CreateTime:  "2026-06-21T12:00:00Z",
-		ReviewRunID: "416_review_20260621T120000",
+		LatestRunID: 416,
 	}
 
 	report, err := gen.Build(context.Background(), req, []FindingItem{})
@@ -76,7 +76,7 @@ func TestReportBuild_MixedSeverities(t *testing.T) {
 		Aspects:     []string{"completeness", "grammar_spelling", "technical_accuracy"},
 		Status:      "completed",
 		CreateTime:  "2026-06-21T14:00:00Z",
-		ReviewRunID: "512_review_20260621T140000",
+		LatestRunID: 512,
 	}
 
 	findings := []FindingItem{
@@ -195,7 +195,7 @@ func TestReportBuild_UsesConfiguredPackageOrderAndLabels(t *testing.T) {
 	}
 	req := &RequestStatus{
 		ID: 5, InputRecordID: 777, Tier: "must_review",
-		Status: "completed", CreateTime: "2026-06-21T20:00:00Z", ReviewRunID: "777_review",
+		Status: "completed", CreateTime: "2026-06-21T20:00:00Z", LatestRunID: 777,
 	}
 	findings := []FindingItem{
 		makeFinding(1, "P1", "grammar_spelling", "low", "typo", "Typo"),
@@ -225,7 +225,7 @@ func TestReportBuild_ComplianceSummary(t *testing.T) {
 		Aspects:     []string{"standards_compliance"},
 		Status:      "completed",
 		CreateTime:  "2026-06-21T16:00:00Z",
-		ReviewRunID: "720_review_20260621T160000",
+		LatestRunID: 720,
 		ReferenceDocs: []ReferenceDoc{
 			{RecordID: 100, DocNo: "ISO-9001:2023", Title: "Quality Management Systems"},
 			{RecordID: 101, DocNo: "IEC-62304", Title: "Medical Device Software"},
@@ -274,7 +274,7 @@ func TestReportBuild_Recommendations(t *testing.T) {
 		Aspects:     []string{"completeness", "technical_accuracy", "security"},
 		Status:      "completed",
 		CreateTime:  "2026-06-21T18:00:00Z",
-		ReviewRunID: "999_review_20260621T180000",
+		LatestRunID: 999,
 	}
 
 	findings := []FindingItem{
@@ -331,7 +331,7 @@ func TestReportBuild_MetaFields(t *testing.T) {
 		Aspects:     []string{"grammar_spelling"},
 		Status:      "completed",
 		CreateTime:  "2026-06-21T20:00:00Z",
-		ReviewRunID: "123_review_20260621T200000",
+		LatestRunID: 123,
 	}
 
 	findings := []FindingItem{
@@ -354,8 +354,8 @@ func TestReportBuild_MetaFields(t *testing.T) {
 		t.Errorf("DocumentRecordID = %d, want 123", report.Meta.DocumentRecordID)
 	}
 
-	if report.Meta.ReviewRunID != "123_review_20260621T200000" {
-		t.Errorf("ReviewRunID = %q, want %q", report.Meta.ReviewRunID, "123_review_20260621T200000")
+	if report.Meta.RunID != 123 {
+		t.Errorf("RunID = %d, want 123", report.Meta.RunID)
 	}
 
 	if report.Meta.GeneratedAt == "" {

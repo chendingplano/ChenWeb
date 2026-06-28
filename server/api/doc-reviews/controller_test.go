@@ -51,17 +51,28 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			requester_id BIGINT DEFAULT 0,
 			report_template TEXT DEFAULT '',
 			doc_template TEXT DEFAULT '',
-			review_run_id TEXT DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'accepted',
+			create_time TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS kb.doc_review_runs (
+			id BIGSERIAL PRIMARY KEY,
+			request_id BIGINT NOT NULL,
+			input_record_id BIGINT NOT NULL,
+			run_number INT NOT NULL DEFAULT 1,
+			aspects JSONB NOT NULL DEFAULT '[]',
+			model_overrides JSONB,
+			notes TEXT,
 			status TEXT NOT NULL DEFAULT 'pending',
-			create_time TIMESTAMPTZ DEFAULT NOW(),
+			created_by TEXT,
+			create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			start_time TIMESTAMPTZ,
 			end_time TIMESTAMPTZ,
-			error_message TEXT DEFAULT ''
+			error_message TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS kb.doc_review_findings (
 			id BIGSERIAL PRIMARY KEY,
 			input_record_id BIGINT NOT NULL DEFAULT 0,
-			review_run_id TEXT NOT NULL DEFAULT '',
+			run_id BIGINT NOT NULL DEFAULT 0,
 			pass TEXT NOT NULL DEFAULT '',
 			aspect TEXT NOT NULL DEFAULT '',
 			severity TEXT NOT NULL DEFAULT 'medium',
@@ -80,7 +91,7 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			id BIGSERIAL PRIMARY KEY,
 			request_id BIGINT NOT NULL,
 			input_record_id BIGINT NOT NULL,
-			review_run_id TEXT NOT NULL,
+			run_id BIGINT NOT NULL,
 			aspect TEXT NOT NULL,
 			pass TEXT,
 			status TEXT NOT NULL DEFAULT 'pending',
@@ -91,7 +102,7 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			end_time TIMESTAMPTZ,
 			create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			modify_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			UNIQUE (review_run_id, aspect)
+			UNIQUE (run_id, aspect)
 		)`,
 		`CREATE TABLE IF NOT EXISTS kb.doc_review_reports (
 			id BIGSERIAL PRIMARY KEY,
@@ -143,16 +154,16 @@ func insertTestInput(t *testing.T, db *sql.DB, title string) int64 {
 }
 
 // insertTestFinding inserts a finding row directly and returns its ID.
-func insertTestFinding(t *testing.T, db *sql.DB, inputRecordID int64, reviewRunID string, finding FindingItem) int64 {
+func insertTestFinding(t *testing.T, db *sql.DB, inputRecordID int64, runID int64, finding FindingItem) int64 {
 	t.Helper()
 	var id int64
 	err := db.QueryRowContext(context.Background(), `
 		INSERT INTO kb.doc_review_findings
-			(input_record_id, review_run_id, pass, aspect, severity, finding_type,
+			(input_record_id, run_id, pass, aspect, severity, finding_type,
 			 title, description, evidence, location, suggestion, confidence, review_status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		RETURNING id`,
-		inputRecordID, reviewRunID, finding.Pass, finding.Aspect,
+		inputRecordID, runID, finding.Pass, finding.Aspect,
 		finding.Severity, finding.FindingType, finding.Title,
 		finding.Description, finding.Evidence, finding.Location,
 		finding.Suggestion, finding.Confidence, finding.ReviewStatus,
@@ -189,6 +200,9 @@ func TestController_AcceptRequest(t *testing.T) {
 	if result.RequestID == 0 {
 		t.Error("RequestID is 0")
 	}
+	if result.RunID == 0 {
+		t.Error("RunID is 0")
+	}
 
 	// Verify in DB.
 	var status string
@@ -198,6 +212,16 @@ func TestController_AcceptRequest(t *testing.T) {
 	}
 	if status != "accepted" {
 		t.Errorf("DB status = %q, want %q", status, "accepted")
+	}
+
+	// Verify run was created.
+	var runStatus string
+	err = db.QueryRowContext(ctx, `SELECT status FROM kb.doc_review_runs WHERE id = $1`, result.RunID).Scan(&runStatus)
+	if err != nil {
+		t.Fatalf("query run: %v", err)
+	}
+	if runStatus != "pending" {
+		t.Errorf("run status = %q, want %q", runStatus, "pending")
 	}
 
 	// Cleanup.
@@ -318,13 +342,20 @@ func TestController_StopRequest(t *testing.T) {
 	}
 	defer cleanupRequests(t, db, result.RequestID)
 
-	// Manually set it to 'running' so StopRequest will work (StopRequest only stops 'running' requests).
+	// Manually set it to 'running' so StopRequest will work.
 	_, err = db.ExecContext(ctx,
 		`UPDATE kb.doc_review_requests SET status = 'running' WHERE id = $1`,
 		result.RequestID,
 	)
 	if err != nil {
 		t.Fatalf("update to running: %v", err)
+	}
+	_, err = db.ExecContext(ctx,
+		`UPDATE kb.doc_review_runs SET status = 'running' WHERE id = $1`,
+		result.RunID,
+	)
+	if err != nil {
+		t.Fatalf("update run to running: %v", err)
 	}
 
 	// Now stop it.
@@ -333,20 +364,16 @@ func TestController_StopRequest(t *testing.T) {
 		t.Fatalf("StopRequest: %v", err)
 	}
 
-	// Verify status in DB.
+	// Verify request status in DB.
 	var status string
-	var endTime interface{}
 	err = db.QueryRowContext(ctx,
-		`SELECT status, end_time FROM kb.doc_review_requests WHERE id = $1`, result.RequestID,
-	).Scan(&status, &endTime)
+		`SELECT status FROM kb.doc_review_requests WHERE id = $1`, result.RequestID,
+	).Scan(&status)
 	if err != nil {
 		t.Fatalf("query request: %v", err)
 	}
 	if status != "stopped" {
 		t.Errorf("DB status = %q, want %q", status, "stopped")
-	}
-	if endTime == nil {
-		t.Error("end_time should be set after stop, got nil")
 	}
 
 	// Stopping again should error.
@@ -387,7 +414,7 @@ func TestController_RunReview_SkipsAlreadyHandledRequests(t *testing.T) {
 				t.Fatalf("update request to %s: %v", status, err)
 			}
 
-			if err := c.RunReview(ctx, result.RequestID); err != nil {
+			if err := c.RunReview(ctx, result.RequestID, result.RunID); err != nil {
 				t.Fatalf("RunReview(%s) should be a no-op, got error: %v", status, err)
 			}
 		})
@@ -425,8 +452,8 @@ func TestController_UpdateFinding(t *testing.T) {
 	recordID := insertTestInput(t, db, "Test UpdateFinding Doc")
 	defer cleanupInputs(t, db, recordID)
 
-	// Insert a finding directly via DB.
-	findingID := insertTestFinding(t, db, recordID, "test_run_1", FindingItem{
+	// Insert a finding directly via DB using run_id 1 (no real run needed for this test).
+	findingID := insertTestFinding(t, db, recordID, 1, FindingItem{
 		Pass:         "P1",
 		Aspect:       "grammar_spelling",
 		Severity:     "medium",
@@ -528,6 +555,9 @@ func TestController_GetRequest(t *testing.T) {
 	if req.CreateTime == "" {
 		t.Error("req.CreateTime is empty")
 	}
+	if req.LatestRunID != result.RunID {
+		t.Errorf("req.LatestRunID = %d, want %d", req.LatestRunID, result.RunID)
+	}
 
 	// Non-existent request.
 	_, err = c.GetRequest(ctx, 999999999)
@@ -558,18 +588,24 @@ func TestController_GetRequestWithFindings(t *testing.T) {
 	}
 	defer cleanupRequests(t, db, result.RequestID)
 
-	// Manually set to completed with a review_run_id so findings get loaded.
-	reviewRunID := fmt.Sprintf("%d_test_run", recordID)
+	// Manually set request and run to completed so findings get loaded.
 	_, err = db.ExecContext(ctx,
-		`UPDATE kb.doc_review_requests SET status = 'completed', review_run_id = $1 WHERE id = $2`,
-		reviewRunID, result.RequestID,
+		`UPDATE kb.doc_review_requests SET status = 'completed' WHERE id = $1`,
+		result.RequestID,
 	)
 	if err != nil {
-		t.Fatalf("update to completed: %v", err)
+		t.Fatalf("update request to completed: %v", err)
+	}
+	_, err = db.ExecContext(ctx,
+		`UPDATE kb.doc_review_runs SET status = 'completed', end_time = NOW() WHERE id = $1`,
+		result.RunID,
+	)
+	if err != nil {
+		t.Fatalf("update run to completed: %v", err)
 	}
 
-	// Insert a finding.
-	findingID := insertTestFinding(t, db, recordID, reviewRunID, FindingItem{
+	// Insert a finding scoped to the run.
+	findingID := insertTestFinding(t, db, recordID, result.RunID, FindingItem{
 		Pass:         "P1",
 		Aspect:       "grammar_spelling",
 		Severity:     "low",

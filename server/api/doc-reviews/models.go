@@ -24,11 +24,11 @@ type ModelOverride struct {
 	ModelRef string `json:"model_ref"`
 }
 
-// RequestStatus represents a row from kb.doc_review_requests.
+// RequestStatus represents a row from kb.doc_review_requests plus the latest run's timing.
 type RequestStatus struct {
 	ID             int64                    `json:"id"`
 	InputRecordID  int64                    `json:"input_record_id"`
-	ReviewRunID    string                   `json:"review_run_id,omitempty"`
+	LatestRunID    int64                    `json:"latest_run_id,omitempty"`
 	Tier           string                   `json:"tier"`
 	Aspects        []string                 `json:"aspects"`
 	ReferenceDocs  []ReferenceDoc           `json:"reference_docs,omitempty"`
@@ -40,10 +40,10 @@ type RequestStatus struct {
 	DocTemplate    string                   `json:"doc_template,omitempty"`
 	Status         string                   `json:"status"`
 	CreateTime     string                   `json:"create_time"`
-	StartTime      string                   `json:"start_time,omitempty"`
-	EndTime        string                   `json:"end_time,omitempty"`
-	ErrorMessage   string                   `json:"error_message,omitempty"`
-	ReportID       int64                    `json:"report_id,omitempty"` // latest report for this request, if any (DR15)
+	StartTime      string                   `json:"start_time,omitempty"`  // from latest run
+	EndTime        string                   `json:"end_time,omitempty"`    // from latest run
+	ErrorMessage   string                   `json:"error_message,omitempty"` // from latest run
+	ReportID       int64                    `json:"report_id,omitempty"`   // latest report for this request, if any
 }
 
 // RequestWithFindings extends RequestStatus with findings and per-aspect statuses.
@@ -96,7 +96,7 @@ type ReportRow struct {
 	ID                int64  `json:"id"`
 	RequestID         int64  `json:"request_id"`
 	InputRecordID     int64  `json:"input_record_id"`
-	ReviewRunID       string `json:"review_run_id"`
+	RunID             int64  `json:"run_id"`
 	TotalFindings     int    `json:"total_findings"`
 	HighCount         int    `json:"high_count"`
 	MediumCount       int    `json:"medium_count"`
@@ -173,9 +173,15 @@ type ReportPDFFile struct {
 
 // SubmitResult is the response from POST /api/v1/doc-review/requests.
 type SubmitResult struct {
-	RequestID   int64  `json:"request_id"`
-	Status      string `json:"status"`
-	ReviewRunID string `json:"review_run_id,omitempty"`
+	RequestID int64  `json:"request_id"`
+	RunID     int64  `json:"run_id"`
+	Status    string `json:"status"`
+}
+
+// StalledRun identifies a review run that needs to be re-triggered after recovery.
+type StalledRun struct {
+	RequestID int64
+	RunID     int64
 }
 
 // AspectStatus is one row of kb.doc_review_status (DR15) — the status of a single
@@ -197,7 +203,7 @@ type AspectStatus struct {
 type ActiveJob struct {
 	RequestID     int64          `json:"request_id"`
 	InputRecordID int64          `json:"input_record_id"`
-	ReviewRunID   string         `json:"review_run_id"`
+	RunID         int64          `json:"run_id"`
 	Tier          string         `json:"tier"`
 	Status        string         `json:"status"`
 	RequesterName string         `json:"requester_name"`
