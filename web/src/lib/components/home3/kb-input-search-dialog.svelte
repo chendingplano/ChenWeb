@@ -26,7 +26,9 @@
 		{ value: 'parse_failed', label: 'Parse Failed' },
 		{ value: 'parsed_not_started', label: 'Parsed Not Started' },
 		{ value: 'all_processors_success', label: 'All Processors Success' },
-		{ value: 'failed_processors', label: 'Failed Processors' }
+		{ value: 'failed_processors', label: 'Failed Processors' },
+		{ value: 'with_not_started_procs', label: 'With Not Started Processors' },
+		{ value: 'with_unfinished_procs', label: 'With Unfinished Processors' }
 	];
 
 	let searchLoading = $state(false);

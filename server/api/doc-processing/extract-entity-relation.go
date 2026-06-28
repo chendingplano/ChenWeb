@@ -1491,7 +1491,7 @@ func appendEntityRelationStatus(raw string, p entityRelationStatusParams) (strin
 	out := make([]map[string]any, 0, len(entries)+1)
 	for _, e := range entries {
 		op := strings.ToLower(strings.TrimSpace(asString(e["operation"])))
-		if op != "extract_entity_relation" {
+		if op != operation {
 			out = append(out, e)
 			continue
 		}

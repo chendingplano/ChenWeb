@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
@@ -596,6 +597,43 @@ SELECT EXISTS (
 	return exists, nil
 }
 
+// mandatoryProcessorAliases maps each mandatory processor stage ID to all known
+// operation names a status entry can carry. Mirrors the PIPELINE_STAGES mapping
+// in the frontend state module. The first entry is always the canonical stage ID.
+var mandatoryProcessorAliases = map[string][]string{
+	"static_analyzer":      {"static_analyzer", "static_analzyer", "structure_analyzer"},
+	"chunking":             {"chunking", "chunked"},
+	"extract_doc_metadata": {"extract_doc_metadata", "extract_metadata"},
+}
+
+var (
+	allProcessorAliasList [][]string
+	loadProcessorsOnce    sync.Once
+)
+
+// getAllProcessorAliases returns one slice of aliases per expected processor
+// (mandatory + configured). Each slice starts with the canonical stage ID and
+// includes every known operation-name variant that might appear in
+// kb.input_proc_status.processor. The result is cached after the first call.
+func getAllProcessorAliases() [][]string {
+	loadProcessorsOnce.Do(func() {
+		cfg, err := loadKbFrontendConfig()
+		allProcs := mandatoryProcessorIDs
+		if err == nil && len(cfg.RequiredProcessors) > 0 {
+			allProcs = append(allProcs, cfg.RequiredProcessors...)
+		}
+		allProcessorAliasList = make([][]string, 0, len(allProcs))
+		for _, id := range allProcs {
+			if aliases, ok := mandatoryProcessorAliases[id]; ok {
+				allProcessorAliasList = append(allProcessorAliasList, aliases)
+			} else {
+				allProcessorAliasList = append(allProcessorAliasList, []string{id})
+			}
+		}
+	})
+	return allProcessorAliasList
+}
+
 func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (string, []any, error) {
 	whereParts := make([]string, 0)
 	args := make([]any, 0)
@@ -710,6 +748,56 @@ func buildWhereClause(filters listInputsFilters, nameColumnExprs ...string) (str
 		whereParts = append(whereParts, "i.pipeline_state = 'success'")
 	case "failed_processors":
 		whereParts = append(whereParts, "i.pipeline_state = 'failed'")
+	case "with_not_started_procs":
+		aliasList := getAllProcessorAliases()
+		if len(aliasList) == 0 {
+			whereParts = append(whereParts, "1=0")
+			break
+		}
+		valueClauses := make([]string, len(aliasList))
+		for i, aliases := range aliasList {
+			aliasExprs := make([]string, len(aliases))
+			for j, alias := range aliases {
+				aliasExprs[j] = nextArg(alias)
+			}
+			valueClauses[i] = fmt.Sprintf("(ARRAY[%s]::text[])", strings.Join(aliasExprs, ", "))
+		}
+		valuesList := strings.Join(valueClauses, ", ")
+		whereParts = append(whereParts, fmt.Sprintf(
+			`i.parse_state = 'parsed_success' AND EXISTS (
+				SELECT 1 FROM (VALUES %s) AS t(aliases)
+				WHERE NOT EXISTS (
+					SELECT 1 FROM kb.input_proc_status ps
+					WHERE ps.record_id = i.id AND ps.processor = ANY(t.aliases)
+				)
+			)`,
+			valuesList,
+		))
+	case "with_unfinished_procs":
+		aliasList := getAllProcessorAliases()
+		if len(aliasList) == 0 {
+			whereParts = append(whereParts, "1=0")
+			break
+		}
+		valueClauses := make([]string, len(aliasList))
+		for i, aliases := range aliasList {
+			aliasExprs := make([]string, len(aliases))
+			for j, alias := range aliases {
+				aliasExprs[j] = nextArg(alias)
+			}
+			valueClauses[i] = fmt.Sprintf("(ARRAY[%s]::text[])", strings.Join(aliasExprs, ", "))
+		}
+		valuesList := strings.Join(valueClauses, ", ")
+		whereParts = append(whereParts, fmt.Sprintf(
+			`i.parse_state = 'parsed_success' AND EXISTS (
+				SELECT 1 FROM (VALUES %s) AS t(aliases)
+				WHERE NOT EXISTS (
+					SELECT 1 FROM kb.input_proc_status ps
+					WHERE ps.record_id = i.id AND ps.processor = ANY(t.aliases) AND ps.proc_status = 'success'
+				)
+			)`,
+			valuesList,
+		))
 	}
 
 	if filters.CreateTimeStart != nil {

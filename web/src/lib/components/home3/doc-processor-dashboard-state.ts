@@ -168,8 +168,8 @@ export function computeStages(record: PipelineRecord): StageInfo[] {
 				}
 				continue;
 			}
-			if (expectedNames.has(operationName) && !matchedStageEntry) {
-				matchedStageEntry = entry;
+			if (expectedNames.has(operationName)) {
+				matchedStageEntry = entry; // always update → takes last match, consistent with kb.input_proc_status trigger
 			}
 		}
 

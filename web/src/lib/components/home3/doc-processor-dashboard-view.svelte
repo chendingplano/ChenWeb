@@ -239,6 +239,20 @@
 	let launching = $state(false);
 	let launchError = $state('');
 	let launchToast = $state<{ kind: 'success' | 'error'; msg: string } | null>(null);
+	type RunMode = 'unfinished' | 'failed' | 'unfinished_failed' | 'force';
+	let runMode = $state<RunMode>('failed');
+	let maxRecords = $state<number>(5);
+	let noEligibleDialog = $state<{ recordCount: number; modeLabel: string; fromSearch?: boolean } | null>(null);
+	let searchingRecords = $state(false);
+
+	$effect(() => {
+		const len = selectedRecords.length;
+		if (len > 0) {
+			maxRecords = len;
+		} else if (runMode === 'force') {
+			runMode = 'failed';
+		}
+	});
 
 	// ── Stop state ─────────────────────────────────────────────────────────
 
@@ -451,9 +465,93 @@
 		// re-run unnecessarily.
 		chosen = enforceEntityBeforeRelation(chosen, entityExtractionSucceeded(record));
 		const allChosen = chosen.length === selectableProcessorIds.length;
-		const payload: Record<string, unknown> = { record_id: String(record.id), force: true };
+		const payload: Record<string, unknown> = { record_id: String(record.id), force: runMode === 'force' };
 		if (!allChosen) payload.operation = chosen;
 		await publishEvent('kb.line-file-generated', payload);
+	}
+
+	function filterByRunMode(records: KbInputRecord[], mode: RunMode, selectedStageIds: Set<string>): KbInputRecord[] {
+		if (mode === 'force') return records;
+		return records.filter((rec) => {
+			const relevantStages = computeStages(rec).filter((s) => selectedStageIds.has(s.id));
+			return relevantStages.some((s) => {
+				if (mode === 'unfinished') return s.status === 'pending' || s.status === 'in-progress';
+				if (mode === 'failed') return s.status === 'failed';
+				return s.status === 'pending' || s.status === 'in-progress' || s.status === 'failed';
+			});
+		});
+	}
+
+	async function searchAndLaunch() {
+		searchingRecords = true;
+		launchError = '';
+		try {
+			const base = {
+				docType: 'all',
+				parseState: 'all' as ParseState,
+				fileName: '',
+				startTime: '',
+				endTime: '',
+				page: 1
+			};
+			const fetchSize = Math.max(maxRecords * 3, 30);
+			let fetchedRecords: KbInputRecord[] = [];
+
+			if (runMode === 'failed') {
+				const res = await listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'failed' });
+				fetchedRecords = (res.results ?? []).filter(r => !r.file_name?.toLowerCase().endsWith('.zip'));
+			} else if (runMode === 'unfinished') {
+				const res = await listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'running' });
+				fetchedRecords = (res.results ?? []).filter(r => !r.file_name?.toLowerCase().endsWith('.zip'));
+			} else {
+				const [failedRes, runningRes] = await Promise.all([
+					listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'failed' }),
+					listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'running' })
+				]);
+				const seen = new Set<number>();
+				fetchedRecords = [
+					...(failedRes.results ?? []),
+					...(runningRes.results ?? [])
+				].filter(r => {
+					if (r.file_name?.toLowerCase().endsWith('.zip')) return false;
+					if (seen.has(r.id)) return false;
+					seen.add(r.id);
+					return true;
+				});
+			}
+
+			const selectedStageIds = new Set<string>([
+				...(parseFileChecked ? ['parsing'] : []),
+				...(convertChecked ? ['converting'] : []),
+				...selectableProcessorIds.filter(p => processors[p])
+			]);
+
+			const eligible = filterByRunMode(fetchedRecords, runMode, selectedStageIds).slice(0, maxRecords);
+
+			if (eligible.length === 0) {
+				const modeLabel = runMode === 'unfinished' ? 'unfinished'
+					: runMode === 'failed' ? 'failed'
+					: 'unfinished or failed';
+				noEligibleDialog = { recordCount: fetchedRecords.length, modeLabel, fromSearch: true };
+				return;
+			}
+
+			selectedRecords = eligible;
+			showConfirm = true;
+		} catch (err) {
+			launchError = err instanceof Error ? err.message : 'Search failed';
+		} finally {
+			searchingRecords = false;
+		}
+	}
+
+	async function handleLaunchClick() {
+		if (selectedRecords.length === 0) {
+			await searchAndLaunch();
+		} else {
+			launchError = '';
+			showConfirm = true;
+		}
 	}
 
 	async function confirmLaunch() {
@@ -461,18 +559,31 @@
 		launching = true;
 		launchError = '';
 		try {
+			const selectedStageIds = new Set<string>([
+				...(parseFileChecked ? ['parsing'] : []),
+				...(convertChecked ? ['converting'] : []),
+				...selectableProcessorIds.filter((p) => processors[p])
+			]);
+			const eligible = filterByRunMode(selectedRecords, runMode, selectedStageIds).slice(0, maxRecords);
+			showConfirm = false;
+			if (eligible.length === 0) {
+				const modeLabel = runMode === 'unfinished' ? 'unfinished'
+					: runMode === 'failed' ? 'failed'
+					: 'unfinished or failed';
+				noEligibleDialog = { recordCount: selectedRecords.length, modeLabel };
+				return;
+			}
 			const results = await Promise.allSettled(
-				selectedRecords.map((rec) => doLaunch(rec, processors, parseFileChecked, convertChecked))
+				eligible.map((rec) => doLaunch(rec, processors, parseFileChecked, convertChecked))
 			);
 			const failures = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
-			showConfirm = false;
 			if (failures.length === 0) {
-				const n = selectedRecords.length;
+				const n = eligible.length;
 				if (!autoSync) startAutoSync();
 				launchToast = { kind: 'success', msg: `Launched ${n} record${n !== 1 ? 's' : ''}` };
 			} else {
 				const firstMsg = failures[0].reason instanceof Error ? failures[0].reason.message : 'unknown error';
-				launchToast = { kind: 'error', msg: `${failures.length}/${selectedRecords.length} failed: ${firstMsg}` };
+				launchToast = { kind: 'error', msg: `${failures.length}/${eligible.length} failed: ${firstMsg}` };
 			}
 			setTimeout(() => { launchToast = null; }, 4000);
 		} catch (err) {
@@ -1223,21 +1334,77 @@
 	══════════════════════════════════════════════════════════ -->
 	<section class="p-6">
 
-		<div class="mb-4 flex items-start justify-between">
-			<div>
+		<div class="mb-4 flex items-start justify-between gap-4">
+			<div class="flex-shrink-0">
 				<h2 style="font-size:15px; font-weight:600; color:{textPrimary}; margin:0 0 3px;">Manual Launch</h2>
-				<p style="font-size:12px; color:{textMuted}; margin:0;">Search kb.inputs records and launch selected processors</p>
+				<p style="font-size:12px; color:{textMuted}; margin:0;">Select run mode and click Launch, or Search to pick specific records</p>
 			</div>
-			<button
-				onclick={() => { searchDialogOpen = true; }}
-				class="flex items-center gap-1.5 rounded-lg px-4 py-2"
-				style="background:{accent}; color:white; font-size:13px; font-weight:600; cursor:pointer; border:none; flex-shrink:0;"
-				onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
-				onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-			>
-				<SearchIcon class="h-4 w-4" />
-				Search
-			</button>
+			<div class="flex flex-col items-end gap-2">
+				<!-- Run mode radio group + max records -->
+				<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+					{#each ([
+						{ value: 'unfinished', label: 'Run Unfinished Only' },
+						{ value: 'failed', label: 'Run Failed Only' },
+						{ value: 'unfinished_failed', label: 'Run Unfinished & Failed' },
+						{ value: 'force', label: 'Force Run' }
+					] as const) as opt (opt.value)}
+						{@const isForceDisabled = opt.value === 'force' && selectedRecords.length === 0}
+						<label
+							class="flex items-center gap-1.5"
+							style="cursor:{isForceDisabled ? 'not-allowed' : 'pointer'}; font-size:12px; color:{runMode === opt.value ? accent : textSecondary}; user-select:none; opacity:{isForceDisabled ? 0.4 : 1};"
+						>
+							<input
+								type="radio"
+								name="runMode"
+								value={opt.value}
+								checked={runMode === opt.value}
+								disabled={isForceDisabled}
+								onchange={() => { runMode = opt.value; }}
+								style="accent-color:{accent}; cursor:{isForceDisabled ? 'not-allowed' : 'pointer'};"
+							/>
+							{opt.label}
+						</label>
+					{/each}
+					<div class="flex items-center gap-1.5" style="margin-left:8px;">
+						<span style="font-size:12px; color:{textSecondary}; white-space:nowrap;">Max</span>
+						<input
+							type="number"
+							min="1"
+							bind:value={maxRecords}
+							readonly={selectedRecords.length > 0}
+							class="rounded-md px-2 py-1"
+							style="width:52px; font-size:12px; background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; text-align:center;{selectedRecords.length > 0 ? ' opacity:0.7; cursor:default;' : ''}"
+						/>
+					</div>
+				</div>
+				<!-- Action buttons -->
+				<div class="flex items-center gap-2">
+					<button
+						onclick={handleLaunchClick}
+						disabled={!someProcessorsSelected() || maxRecords < 1 || isNaN(maxRecords) || searchingRecords}
+						class="flex items-center gap-2 rounded-lg px-4 py-2"
+						style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:{someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords ? 'pointer' : 'not-allowed'}; opacity:{someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords ? '1' : '0.5'}; flex-shrink:0;"
+						onmouseenter={(e) => { if (someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords) (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = someProcessorsSelected() && maxRecords >= 1 && !isNaN(maxRecords) && !searchingRecords ? '1' : '0.5'; }}
+					>
+						<PlayIcon class="h-4 w-4" />
+						{searchingRecords ? 'Searching…' : 'Launch'}
+					</button>
+					<button
+						onclick={() => { searchDialogOpen = true; }}
+						class="flex items-center gap-1.5 rounded-lg px-4 py-2"
+						style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:13px; font-weight:600; cursor:pointer; flex-shrink:0;"
+						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; (e.currentTarget as HTMLElement).style.borderColor = accent + '60'; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; (e.currentTarget as HTMLElement).style.borderColor = borderColor; }}
+					>
+						<SearchIcon class="h-4 w-4" />
+						Search
+					</button>
+				</div>
+				{#if launchError}
+					<div style="font-size:12px; color:{colorError}; text-align:right;">{launchError}</div>
+				{/if}
+			</div>
 		</div>
 
 		<!-- Selected records chip list -->
@@ -1359,52 +1526,34 @@
 					{/each}
 				</div>
 
-				<!-- Toggle all + launch -->
-				<div class="flex items-center justify-between">
-					<div class="flex items-center gap-2">
-						<button
-							onclick={toggleAll}
-							class="rounded-lg px-3 py-1.5"
-							style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
-							onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
-							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
-						>
-							{allProcessorsSelected() ? 'Deselect all' : 'Select all'}
-						</button>
-						<button
-							onclick={selectFailedProcessors}
-							class="rounded-lg px-3 py-1.5"
-							style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:12px; cursor:pointer;"
-							onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '60'; }}
-							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '30'; }}
-						>
-							Select Failed
-						</button>
-						<button
-							onclick={selectIncompletedProcessors}
-							class="rounded-lg px-3 py-1.5"
-							style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; cursor:pointer;"
-							onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '60'; }}
-							onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '30'; }}
-						>
-							Select Incompleted
-						</button>
-					</div>
-
+				<!-- Toggle all + action buttons -->
+				<div class="flex items-center gap-2">
 					<button
-						onclick={() => { launchError = ''; showConfirm = true; }}
-						disabled={!someProcessorsSelected()}
-						class="flex items-center gap-2 rounded-lg px-4 py-2"
-						style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:{someProcessorsSelected() ? 'pointer' : 'not-allowed'}; opacity:{someProcessorsSelected() ? '1' : '0.5'};"
-						onmouseenter={(e) => {
-							if (someProcessorsSelected()) (e.currentTarget as HTMLElement).style.opacity = '0.88';
-						}}
-						onmouseleave={(e) => {
-							(e.currentTarget as HTMLElement).style.opacity = someProcessorsSelected() ? '1' : '0.5';
-						}}
+						onclick={toggleAll}
+						class="rounded-lg px-3 py-1.5"
+						style="background:{surface2}; border:1px solid {borderColor}; color:{textSecondary}; font-size:12px; cursor:pointer;"
+						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = textPrimary; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = textSecondary; }}
 					>
-						<PlayIcon class="h-4 w-4" />
-						Launch
+						{allProcessorsSelected() ? 'Deselect all' : 'Select all'}
+					</button>
+					<button
+						onclick={selectFailedProcessors}
+						class="rounded-lg px-3 py-1.5"
+						style="background:{colorErrorTint}; border:1px solid {colorError}30; color:{colorError}; font-size:12px; cursor:pointer;"
+						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '60'; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = colorError + '30'; }}
+					>
+						Select Failed
+					</button>
+					<button
+						onclick={selectIncompletedProcessors}
+						class="rounded-lg px-3 py-1.5"
+						style="background:{accentTint}; border:1px solid {accent}30; color:{accent}; font-size:12px; cursor:pointer;"
+						onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '60'; }}
+						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent + '30'; }}
+					>
+						Select Incompleted
 					</button>
 				</div>
 			</div>
@@ -1667,6 +1816,49 @@
 					<PlayIcon class="h-4 w-4" />
 					{launching ? 'Launching…' : 'Confirm Launch'}
 				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- ════════════════════════════════════════════════════════════
+     No Eligible Records Dialog
+══════════════════════════════════════════════════════════════ -->
+{#if noEligibleDialog}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-40 flex items-center justify-center"
+		style="background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);"
+		onmousedown={(e) => { if (e.target === e.currentTarget) noEligibleDialog = null; }}
+	>
+		<div
+			class="mx-4 w-full max-w-sm rounded-2xl p-6"
+			style="background:{cardBg}; border:1px solid {borderColor}; box-shadow:0 24px 64px rgba(0,0,0,0.4);"
+		>
+			<div class="mb-3 flex items-center gap-2">
+				<XCircleIcon class="h-5 w-5 flex-shrink-0" style="color:{colorError};" />
+				<h3 style="font-size:16px; font-weight:600; color:{textPrimary}; margin:0;">Nothing to launch</h3>
+			</div>
+			<p style="font-size:13px; color:{textSecondary}; margin:0 0 20px; line-height:1.6;">
+				{#if noEligibleDialog.fromSearch}
+					No <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong> records found to launch.
+					Try a different run mode or use Search to pick records manually.
+				{:else}
+					{noEligibleDialog.recordCount === 1
+						? 'The selected record has'
+						: `All ${noEligibleDialog.recordCount} selected records have`}
+					no <strong style="color:{textPrimary};">{noEligibleDialog.modeLabel}</strong> processors.
+					Switch to <em>Force Run</em> to re-run regardless of status, or select a different run mode.
+				{/if}
+			</p>
+			<div class="flex justify-end">
+				<button
+					onclick={() => { noEligibleDialog = null; }}
+					class="rounded-lg px-5 py-2"
+					style="background:{accent}; color:white; font-size:13px; font-weight:600; border:none; cursor:pointer;"
+					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '0.88'; }}
+					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+				>OK</button>
 			</div>
 		</div>
 	</div>
