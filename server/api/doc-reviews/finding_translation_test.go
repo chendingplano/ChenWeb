@@ -357,3 +357,33 @@ func TestNormalizeFindingErrorIncludesOffendingFieldContent(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizationInCanonicalLanguage_AllowsEnglishWithQuotedChineseExample(t *testing.T) {
+	n := FindingNormalization{
+		SourceLanguage:    "en",
+		CanonicalLanguage: "en",
+		Canonical: FindingLocalizedContent{
+			Title:       "Missing line breaks and spaces between standard references",
+			Description: "Multiple GB/T standard references are concatenated without proper spacing or line breaks, making it difficult to read and identify individual standards.",
+			Suggestion:  "Split into separate lines with proper spacing, e.g., 'GB/T2423.24 环境试验 第2部分：试验方法 试验Sa：模拟地面上的太阳辐射及其试验导则\\nGB/T2423.25 人造气氛腐蚀试验 盐雾试验'.",
+		},
+	}
+	if !normalizationInCanonicalLanguage(n, "en") {
+		t.Fatal("normalizationInCanonicalLanguage=false, want true for English prose with quoted Chinese example content")
+	}
+}
+
+func TestNormalizationInCanonicalLanguage_RejectsChineseWithOnlyShortLatinTokens(t *testing.T) {
+	n := FindingNormalization{
+		SourceLanguage:    "zh",
+		CanonicalLanguage: "en",
+		Canonical: FindingLocalizedContent{
+			Title:       "GB/T 标准未分行",
+			Description: "多个 GB/T 标准连在一起。",
+			Suggestion:  "按 GB/T2423.24 和 GB/T2423.25 分行。",
+		},
+	}
+	if normalizationInCanonicalLanguage(n, "en") {
+		t.Fatal("normalizationInCanonicalLanguage=true, want false for non-English prose with only short Latin tokens")
+	}
+}

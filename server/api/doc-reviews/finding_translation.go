@@ -301,6 +301,21 @@ func containsLatinLetters(s string) bool {
 	return false
 }
 
+func containsEnglishWord(s string, minLen int) bool {
+	runLen := 0
+	for _, r := range s {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+			runLen++
+			if runLen >= minLen {
+				return true
+			}
+			continue
+		}
+		runLen = 0
+	}
+	return false
+}
+
 func translationInTargetLanguage(tr FindingLocalizedContent, language string) bool {
 	switch supportedLanguageCode(language) {
 	case "zh":
@@ -316,13 +331,13 @@ func translationInTargetLanguage(tr FindingLocalizedContent, language string) bo
 		return tr.Title != "" || tr.Description != "" || tr.Suggestion != ""
 	default:
 		if language == "" || strings.EqualFold(language, "en") || strings.EqualFold(language, "en-us") {
-			if tr.Title != "" && (!containsLatinLetters(tr.Title) || containsChineseChars(tr.Title)) {
+			if tr.Title != "" && !containsEnglishWord(tr.Title, 3) {
 				return false
 			}
-			if tr.Description != "" && (!containsLatinLetters(tr.Description) || containsChineseChars(tr.Description)) {
+			if tr.Description != "" && !containsEnglishWord(tr.Description, 3) {
 				return false
 			}
-			if tr.Suggestion != "" && (!containsLatinLetters(tr.Suggestion) || containsChineseChars(tr.Suggestion)) {
+			if tr.Suggestion != "" && !containsEnglishWord(tr.Suggestion, 3) {
 				return false
 			}
 			return tr.Title != "" || tr.Description != "" || tr.Suggestion != ""
