@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -34,10 +33,6 @@ const findingNormalizationRetryPromptName = "doc-review-finding-normalize-retry"
 const findingTranslationPromptName = "doc-review-finding-localize"
 const findingTranslationRetryPromptName = "doc-review-finding-localize-retry"
 
-func promptFilePath(ref string) string {
-	return filepath.Join("prompts", ref)
-}
-
 func newLLMFindingTranslator() (FindingTranslator, error) {
 	modelRef := strings.TrimSpace(os.Getenv("TRANSLATION_MODEL_NAME"))
 	if modelRef == "" {
@@ -49,11 +44,11 @@ func newLLMFindingTranslator() (FindingTranslator, error) {
 	}
 
 	loadPrompt := func(name string) (string, error) {
-		body, err := os.ReadFile(promptFilePath(name))
+		body, _, _, err := loadPromptByRef(name)
 		if err != nil {
 			return "", err
 		}
-		return strings.TrimSpace(string(body)), nil
+		return strings.TrimSpace(body), nil
 	}
 
 	normalizePromptText, err := loadPrompt("prompt-doc-review-finding-normalize-v1.md")

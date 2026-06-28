@@ -3,6 +3,8 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -272,5 +274,38 @@ func TestFindingMetadataJSONRoundTrip(t *testing.T) {
 	}
 	if roundTrip.I18N.Translations["zh"].Title != "中文标题" {
 		t.Fatalf("roundTrip zh title=%q", roundTrip.I18N.Translations["zh"].Title)
+	}
+}
+
+func TestNewLLMFindingTranslatorLoadsPromptsFromPromptDir(t *testing.T) {
+	t.Setenv("TRANSLATION_MODEL_NAME", "test-model")
+
+	oldBuilder := docprocessingBuildReviewerLLMClient
+	docprocessingBuildReviewerLLMClient = func(modelRef string) (LLMJSONExtractor, string, error) {
+		return &fakeJSONExtractor{}, "test-model", nil
+	}
+	defer func() {
+		docprocessingBuildReviewerLLMClient = oldBuilder
+	}()
+
+	promptDir := t.TempDir()
+	t.Setenv("PROMPT_DIR", promptDir)
+	for _, name := range []string{
+		"prompt-doc-review-finding-normalize-v1.md",
+		"prompt-doc-review-finding-normalize-retry-v1.md",
+		"prompt-doc-review-finding-localize-v1.md",
+		"prompt-doc-review-finding-localize-retry-v1.md",
+	} {
+		if err := os.WriteFile(filepath.Join(promptDir, name), []byte("test prompt"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", name, err)
+		}
+	}
+
+	got, err := newLLMFindingTranslator()
+	if err != nil {
+		t.Fatalf("newLLMFindingTranslator: %v", err)
+	}
+	if got == nil {
+		t.Fatal("newLLMFindingTranslator returned nil translator")
 	}
 }
