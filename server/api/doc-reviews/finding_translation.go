@@ -185,9 +185,13 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 func findingNormalizationFromMap(m map[string]any) FindingNormalization {
 	sourceMap := mapFromAny(m["source_translation"])
 	canonicalMap := mapFromAny(m["canonical"])
+	findingMap := mapFromAny(m["finding"])
 	canonicalTitle := strings.TrimSpace(asString(m["canonical_title"]))
 	if canonicalTitle == "" {
 		canonicalTitle = strings.TrimSpace(asString(canonicalMap["title"]))
+	}
+	if canonicalTitle == "" {
+		canonicalTitle = strings.TrimSpace(asString(findingMap["title"]))
 	}
 	if canonicalTitle == "" {
 		canonicalTitle = strings.TrimSpace(asString(m["title"]))
@@ -197,11 +201,17 @@ func findingNormalizationFromMap(m map[string]any) FindingNormalization {
 		canonicalDescription = strings.TrimSpace(asString(canonicalMap["description"]))
 	}
 	if canonicalDescription == "" {
+		canonicalDescription = strings.TrimSpace(asString(findingMap["description"]))
+	}
+	if canonicalDescription == "" {
 		canonicalDescription = strings.TrimSpace(asString(m["description"]))
 	}
 	canonicalSuggestion := strings.TrimSpace(asString(m["canonical_suggestion"]))
 	if canonicalSuggestion == "" {
 		canonicalSuggestion = strings.TrimSpace(asString(canonicalMap["suggestion"]))
+	}
+	if canonicalSuggestion == "" {
+		canonicalSuggestion = strings.TrimSpace(asString(findingMap["suggestion"]))
 	}
 	if canonicalSuggestion == "" {
 		canonicalSuggestion = strings.TrimSpace(asString(m["suggestion"]))
@@ -400,12 +410,28 @@ func translationInTargetLanguage(tr FindingLocalizedContent, language string) bo
 	}
 }
 
+func englishCanonicalFieldOK(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	return containsEnglishWord(s, 3)
+}
+
 func normalizationInCanonicalLanguage(n FindingNormalization, canonicalLanguage string) bool {
 	if strings.TrimSpace(n.CanonicalLanguage) == "" {
 		n.CanonicalLanguage = canonicalLanguage
 	}
-	return strings.EqualFold(n.CanonicalLanguage, canonicalLanguage) &&
-		translationInTargetLanguage(n.Canonical, canonicalLanguage)
+	if !strings.EqualFold(n.CanonicalLanguage, canonicalLanguage) {
+		return false
+	}
+	if strings.EqualFold(canonicalLanguage, "en") || strings.EqualFold(canonicalLanguage, "en-us") {
+		// Title/description carry the explanatory prose and should be canonical English.
+		// Suggestion may legitimately be a literal replacement string in the source language.
+		return englishCanonicalFieldOK(n.Canonical.Title) &&
+			englishCanonicalFieldOK(n.Canonical.Description)
+	}
+	return translationInTargetLanguage(n.Canonical, canonicalLanguage)
 }
 
 type preparedFindingForStorage struct {

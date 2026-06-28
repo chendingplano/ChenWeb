@@ -94,6 +94,25 @@ func TestFindingNormalizationFromMapFallsBackToTopLevelProseFields(t *testing.T)
 	}
 }
 
+func TestFindingNormalizationFromMapAcceptsNestedFindingObject(t *testing.T) {
+	got := findingNormalizationFromMap(map[string]any{
+		"source_language":    "zh",
+		"canonical_language": "en",
+		"canonical_origin":   "translated",
+		"finding": map[string]any{
+			"title":       "Non-standard term '冰冻'",
+			"description": "The term 'frozen' is used for laboratory equipment where 'freezing' is the standard and more precise term.",
+			"suggestion":  "冷冻干燥机, 冷冻切片机",
+		},
+	})
+	if got.Canonical.Title != "Non-standard term '冰冻'" {
+		t.Fatalf("canonical title=%q", got.Canonical.Title)
+	}
+	if got.Canonical.Description == "" || got.Canonical.Suggestion != "冷冻干燥机, 冷冻切片机" {
+		t.Fatalf("canonical=%#v", got.Canonical)
+	}
+}
+
 func TestPrepareFindingForStorageCanonicalizesEnglishAndPreservesChineseSource(t *testing.T) {
 	translator := &fakeFindingTranslator{
 		normalizeOut: FindingNormalization{
@@ -406,6 +425,21 @@ func TestNormalizationInCanonicalLanguage_AllowsEnglishWithQuotedChineseExample(
 	}
 	if !normalizationInCanonicalLanguage(n, "en") {
 		t.Fatal("normalizationInCanonicalLanguage=false, want true for English prose with quoted Chinese example content")
+	}
+}
+
+func TestNormalizationInCanonicalLanguage_AllowsChineseLiteralSuggestionWhenTitleAndDescriptionAreEnglish(t *testing.T) {
+	n := FindingNormalization{
+		SourceLanguage:    "zh",
+		CanonicalLanguage: "en",
+		Canonical: FindingLocalizedContent{
+			Title:       "Non-standard term '冰冻'",
+			Description: "The term 'frozen' is used for laboratory equipment where 'freezing' is the standard and more precise term.",
+			Suggestion:  "冷冻干燥机, 冷冻切片机",
+		},
+	}
+	if !normalizationInCanonicalLanguage(n, "en") {
+		t.Fatal("normalizationInCanonicalLanguage=false, want true when English explanation accompanies a source-language literal fix suggestion")
 	}
 }
 
