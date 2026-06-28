@@ -25,7 +25,8 @@ Input JSON:
 }
 
 Rules:
-- Detect language from title, description, and suggestion only.
+- Detect language primarily from title and description.
+- suggestion may be a literal corrected replacement string in the document's original language; do not let that alone force source_language away from English when title and description are clearly English.
 - finding_type is a stable machine code, not user-facing prose.
 - If the source language is already English, keep the prose as-is.
 - If the source language is not English, translate title, description, and suggestion into natural, precise English.
@@ -33,6 +34,7 @@ Rules:
 - Preserve meaning exactly. Do not add, delete, soften, or expand the finding.
 - If the source language is mixed, pick the dominant language. If truly unclear, use "und".
 - source_translation should be empty when source_language is English.
+- When title and description are already English but suggestion is a source-language literal replacement text, keep the English title/description and preserve the literal replacement meaning.
 
 Output JSON:
 {

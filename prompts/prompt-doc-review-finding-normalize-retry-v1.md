@@ -12,5 +12,6 @@ Requirements:
 - Do not translate or modify finding_type.
 - If the source language is non-English, copy the exact original prose into source_translation.
 - Do not echo non-English prose into canonical_* fields.
+- If title and description are already English but suggestion is a literal source-language replacement string, keep title and description in English and preserve the replacement meaning faithfully.
 
 Use the same JSON schema as the base normalization prompt.
