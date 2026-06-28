@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { getRequest, updateFinding, stopRequest } from '$lib/services/docReviewService';
-    import type { RequestStatus, FindingItem, AspectStatus } from '$lib/services/docReviewService';
+    import type { RequestStatus, FindingItem, AspectStatus, ReviewPackageInfo } from '$lib/services/docReviewService';
     import LoaderIcon from '@lucide/svelte/icons/loader';
     import XIcon from '@lucide/svelte/icons/x';
     import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
@@ -35,6 +35,7 @@
     let expandedFindings = $state<Set<number>>(new Set());
     let activeTab = $state<'findings' | 'report'>('findings');
     let isStopping = $state(false);
+    let packages = $state<ReviewPackageInfo[]>([]);
 
     // JSON viewer modal state
     let jsonModalOpen = $state(false);
@@ -120,6 +121,111 @@
     // Derived unique passes
     let passes = $derived([...new Set(findings.map(f => f.pass))].sort());
 
+    // Chart helpers
+    const CHART_COLORS = ['#818CF8','#34D399','#F59E0B','#EF4444','#60A5FA','#A78BFA','#FB7185','#FBBF24','#4ADE80','#38BDF8'];
+
+    function buildDonutSlices(items: { count: number; color: string; label: string }[], r: number) {
+        const total = items.reduce((s, i) => s + i.count, 0);
+        if (total === 0) return [];
+        const C = 2 * Math.PI * r;
+        let cumAngle = -90;
+        return items.filter(i => i.count > 0).map(item => {
+            const fraction = item.count / total;
+            const dashLen = fraction * C;
+            const startAngle = cumAngle;
+            cumAngle += fraction * 360;
+            return { color: item.color, label: item.label, count: item.count, strokeDasharray: `${dashLen} ${C}`, transform: `rotate(${startAngle}, 50, 50)` };
+        });
+    }
+
+    function splitLabel(label: string, maxLen = 18): string[] {
+        if (label.length <= maxLen) return [label];
+        const mid = label.lastIndexOf(' ', maxLen);
+        if (mid > maxLen / 3) {
+            const rest = label.slice(mid + 1);
+            return [label.slice(0, mid), rest.length > maxLen ? rest.slice(0, maxLen - 1) + '…' : rest];
+        }
+        const rest = label.slice(maxLen);
+        return [label.slice(0, maxLen), rest.length > maxLen ? rest.slice(0, maxLen - 1) + '…' : rest];
+    }
+
+    // Selection & hover state
+    let deselectedSeverities = $state(new Set<string>());
+    let deselectedPackages = $state(new Set<string>());
+    let deselectedReviewers = $state(new Set<string>());
+    let hoverSev = $state<{ label: string; count: number; color: string } | null>(null);
+    let hoverPkg = $state<{ label: string; count: number; color: string } | null>(null);
+    let hoverRev = $state<{ label: string; count: number; color: string } | null>(null);
+
+    function toggleSeverity(label: string) {
+        const next = new Set(deselectedSeverities);
+        if (next.has(label)) next.delete(label); else next.add(label);
+        deselectedSeverities = next;
+    }
+    function togglePackage(key: string) {
+        const next = new Set(deselectedPackages);
+        if (next.has(key)) next.delete(key); else next.add(key);
+        deselectedPackages = next;
+    }
+    function toggleReviewer(aspect: string) {
+        const next = new Set(deselectedReviewers);
+        if (next.has(aspect)) next.delete(aspect); else next.add(aspect);
+        deselectedReviewers = next;
+    }
+
+    // Severity chart
+    let severityItems = $derived(
+        [
+            { label: 'High', count: highCount, color: '#ef4444' },
+            { label: 'Medium', count: mediumCount, color: '#f59e0b' },
+            { label: 'Low', count: lowCount, color: '#22c55e' },
+        ].sort((a, b) => b.count - a.count)
+    );
+    let severitySlices = $derived(
+        buildDonutSlices(severityItems.filter(i => !deselectedSeverities.has(i.label)), 35)
+    );
+
+    // Package chart
+    let packageChartData = $derived.by(() => {
+        const countByPass = new Map<string, number>();
+        for (const f of findings) countByPass.set(f.pass, (countByPass.get(f.pass) ?? 0) + 1);
+        const sortedKeys = [...countByPass.keys()].sort();
+        const nonEmpty = [...countByPass.entries()]
+            .map(([key, count]) => ({
+                key, label: packages.find(p => p.key === key)?.label ?? key, count,
+                color: CHART_COLORS[sortedKeys.indexOf(key) % CHART_COLORS.length],
+            }))
+            .sort((a, b) => b.count - a.count);
+        const emptyLabels = packages.filter(p => !countByPass.has(p.key)).map(p => p.label || p.key);
+        const activeItems = nonEmpty.filter(p => !deselectedPackages.has(p.key));
+        return { slices: buildDonutSlices(activeItems.map(p => ({ count: p.count, color: p.color, label: p.label })), 35), nonEmpty, emptyLabels };
+    });
+
+    // Reviewer chart
+    let reviewerChartData = $derived.by(() => {
+        const countByAspect = new Map<string, number>();
+        for (const f of findings) countByAspect.set(f.aspect, (countByAspect.get(f.aspect) ?? 0) + 1);
+        const sortedAspects = [...countByAspect.keys()].sort();
+        const nonEmpty = [...countByAspect.entries()]
+            .map(([aspect, count]) => ({
+                aspect, label: aspect.replace(/_/g, ' '), count,
+                color: CHART_COLORS[sortedAspects.indexOf(aspect) % CHART_COLORS.length],
+            }))
+            .sort((a, b) => b.count - a.count);
+        const emptyLabels = aspectStatuses.filter(s => s.finding_count === 0).map(s => s.aspect.replace(/_/g, ' '));
+        const activeItems = nonEmpty.filter(r => !deselectedReviewers.has(r.aspect));
+        return { slices: buildDonutSlices(activeItems.map(r => ({ count: r.count, color: r.color, label: r.label })), 35), nonEmpty, emptyLabels };
+    });
+
+    // Elapsed time
+    let elapsedSeconds = $derived.by(() => {
+        if (!request?.start_time || !request?.end_time) return null;
+        return Math.round((new Date(request.end_time).getTime() - new Date(request.start_time).getTime()) / 1000);
+    });
+
+    let nonEmptyPackageCount = $derived(packageChartData.nonEmpty.length);
+    let nonEmptyReviewerCount = $derived(reviewerChartData.nonEmpty.length);
+
     // Effective report ID for links (fall back to requestId)
     // Report id may arrive via prop (legacy) or via the polled request after an
     // async run completes (DR15).
@@ -137,6 +243,7 @@
             request = result.request;
             findings = result.findings || [];
             aspectStatuses = result.aspect_statuses || [];
+            packages = result.packages || [];
 
             if (request.status === 'completed' || request.status === 'failed' || request.status === 'stopped') {
                 isActive = false;
@@ -289,24 +396,156 @@
             </div>
         </div>
 
-        <!-- Summary Cards -->
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
-            <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1rem; text-align: center;">
-                <div style="font-size: 2rem; font-weight: 700; color: {textPrimary};">{findings.length}</div>
-                <div style="font-size: 0.8rem; color: {textMuted};">Total Findings</div>
+        <!-- Summary Charts -->
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+
+            <!-- Severity Distribution -->
+            <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1rem;">
+                <div style="font-size: 0.72rem; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;">Severity Distribution</div>
+                <div style="display: flex; align-items: center; gap: 1.25rem;">
+                    <svg viewBox="0 0 100 100" width="304" height="304" style="flex-shrink: 0;">
+                        <circle cx="50" cy="50" r="35" fill="none" stroke="{borderColor}" stroke-width="16" style="pointer-events: none;"/>
+                        {#each severitySlices as s}
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <circle cx="50" cy="50" r="35" fill="none" stroke="{s.color}" stroke-width="16"
+                                stroke-dasharray="{s.strokeDasharray}" transform="{s.transform}" style="cursor: pointer;"
+                                onmouseenter={() => hoverSev = { label: s.label, count: s.count, color: s.color }}
+                                onmouseleave={() => hoverSev = null}/>
+                        {/each}
+                        {#if hoverSev}
+                            <text x="50" y="44" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="800" fill="{hoverSev.color}" style="pointer-events: none;">{hoverSev.count}</text>
+                            <text x="50" y="57" text-anchor="middle" dominant-baseline="central" font-size="4.5" fill="{textSecondary}" style="pointer-events: none;">{hoverSev.label}</text>
+                        {/if}
+                    </svg>
+                    <div style="display: flex; flex-direction: column; gap: 0.55rem; flex: 1; min-width: 0;">
+                        {#each severityItems as item}
+                            {@const isOff = deselectedSeverities.has(item.label)}
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <div onclick={() => toggleSeverity(item.label)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSeverity(item.label); }}
+                                role="button" tabindex="0"
+                                style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; user-select: none; opacity: {isOff ? 0.35 : 1}; transition: opacity 0.15s;">
+                                <span style="width: 12px; height: 12px; border-radius: 2px; background: {isOff ? textMuted : item.color}; flex-shrink: 0; transition: background 0.15s;"></span>
+                                <span style="color: {textSecondary}; flex: 1; text-decoration: {isOff ? 'line-through' : 'none'};">{item.label}</span>
+                                <span style="font-weight: 700; color: {isOff ? textMuted : item.color};">{item.count}</span>
+                            </div>
+                        {/each}
+                    </div>
+                </div>
             </div>
-            <div style="background: {cardBg}; border: 1px solid rgba(239,68,68,0.3); border-radius: 12px; padding: 1rem; text-align: center;">
-                <div style="font-size: 2rem; font-weight: 700; color: #ef4444;">{highCount}</div>
-                <div style="font-size: 0.8rem; color: #ef4444;">High Severity</div>
+
+            <!-- By Package -->
+            <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1rem;">
+                <div style="font-size: 0.72rem; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;">By Package</div>
+                <div style="display: flex; align-items: center; gap: 1.25rem;">
+                    <svg viewBox="0 0 100 100" width="304" height="304" style="flex-shrink: 0;">
+                        <circle cx="50" cy="50" r="35" fill="none" stroke="{borderColor}" stroke-width="16" style="pointer-events: none;"/>
+                        {#each packageChartData.slices as s}
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <circle cx="50" cy="50" r="35" fill="none" stroke="{s.color}" stroke-width="16"
+                                stroke-dasharray="{s.strokeDasharray}" transform="{s.transform}" style="cursor: pointer;"
+                                onmouseenter={() => hoverPkg = { label: s.label, count: s.count, color: s.color }}
+                                onmouseleave={() => hoverPkg = null}/>
+                        {/each}
+                        {#if hoverPkg}
+                            {@const pkgParts = splitLabel(hoverPkg.label)}
+                            <text x="50" y="{pkgParts.length > 1 ? '40' : '44'}" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="800" fill="{hoverPkg.color}" style="pointer-events: none;">{hoverPkg.count}</text>
+                            <text x="50" y="{pkgParts.length > 1 ? '51' : '57'}" text-anchor="middle" dominant-baseline="central" font-size="4.5" fill="{textSecondary}" style="pointer-events: none;">{pkgParts[0]}</text>
+                            {#if pkgParts.length > 1}
+                                <text x="50" y="58" text-anchor="middle" dominant-baseline="central" font-size="4.5" fill="{textSecondary}" style="pointer-events: none;">{pkgParts[1]}</text>
+                            {/if}
+                        {/if}
+                    </svg>
+                    <div style="flex: 1; min-width: 0; overflow-y: auto; max-height: 280px;">
+                        {#each packageChartData.nonEmpty as item}
+                            {@const isOff = deselectedPackages.has(item.key)}
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <div onclick={() => togglePackage(item.key)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') togglePackage(item.key); }}
+                                role="button" tabindex="0"
+                                style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; margin-bottom: 0.35rem; cursor: pointer; user-select: none; opacity: {isOff ? 0.35 : 1}; transition: opacity 0.15s;">
+                                <span style="width: 9px; height: 9px; border-radius: 2px; background: {isOff ? textMuted : item.color}; flex-shrink: 0; transition: background 0.15s;"></span>
+                                <span style="color: {textSecondary}; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: {isOff ? 'line-through' : 'none'};">{item.label}</span>
+                                <span style="font-weight: 600; color: {isOff ? textMuted : textPrimary};">{item.count}</span>
+                            </div>
+                        {/each}
+                        {#if packageChartData.emptyLabels.length > 0}
+                            <div style="margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid {borderColor}; font-size: 0.72rem; color: {textMuted}; line-height: 1.5;">
+                                No findings: {packageChartData.emptyLabels.join(', ')}
+                            </div>
+                        {/if}
+                    </div>
+                </div>
             </div>
-            <div style="background: {cardBg}; border: 1px solid rgba(245,158,11,0.3); border-radius: 12px; padding: 1rem; text-align: center;">
-                <div style="font-size: 2rem; font-weight: 700; color: #f59e0b;">{mediumCount}</div>
-                <div style="font-size: 0.8rem; color: #f59e0b;">Medium Severity</div>
+
+            <!-- By Reviewer -->
+            <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1rem;">
+                <div style="font-size: 0.72rem; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;">By Reviewer</div>
+                <div style="display: flex; align-items: center; gap: 1.25rem;">
+                    <svg viewBox="0 0 100 100" width="304" height="304" style="flex-shrink: 0;">
+                        <circle cx="50" cy="50" r="35" fill="none" stroke="{borderColor}" stroke-width="16" style="pointer-events: none;"/>
+                        {#each reviewerChartData.slices as s}
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <circle cx="50" cy="50" r="35" fill="none" stroke="{s.color}" stroke-width="16"
+                                stroke-dasharray="{s.strokeDasharray}" transform="{s.transform}" style="cursor: pointer;"
+                                onmouseenter={() => hoverRev = { label: s.label, count: s.count, color: s.color }}
+                                onmouseleave={() => hoverRev = null}/>
+                        {/each}
+                        {#if hoverRev}
+                            {@const revParts = splitLabel(hoverRev.label)}
+                            <text x="50" y="{revParts.length > 1 ? '40' : '44'}" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="800" fill="{hoverRev.color}" style="pointer-events: none;">{hoverRev.count}</text>
+                            <text x="50" y="{revParts.length > 1 ? '51' : '57'}" text-anchor="middle" dominant-baseline="central" font-size="4.5" fill="{textSecondary}" style="pointer-events: none;">{revParts[0]}</text>
+                            {#if revParts.length > 1}
+                                <text x="50" y="58" text-anchor="middle" dominant-baseline="central" font-size="4.5" fill="{textSecondary}" style="pointer-events: none;">{revParts[1]}</text>
+                            {/if}
+                        {/if}
+                    </svg>
+                    <div style="flex: 1; min-width: 0; overflow-y: auto; max-height: 280px;">
+                        {#each reviewerChartData.nonEmpty as item}
+                            {@const isOff = deselectedReviewers.has(item.aspect)}
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <div onclick={() => toggleReviewer(item.aspect)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleReviewer(item.aspect); }}
+                                role="button" tabindex="0"
+                                style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; margin-bottom: 0.35rem; cursor: pointer; user-select: none; opacity: {isOff ? 0.35 : 1}; transition: opacity 0.15s;">
+                                <span style="width: 9px; height: 9px; border-radius: 2px; background: {isOff ? textMuted : item.color}; flex-shrink: 0; transition: background 0.15s;"></span>
+                                <span style="color: {textSecondary}; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: {isOff ? 'line-through' : 'none'};">{item.label}</span>
+                                <span style="font-weight: 600; color: {isOff ? textMuted : textPrimary};">{item.count}</span>
+                            </div>
+                        {/each}
+                        {#if reviewerChartData.emptyLabels.length > 0}
+                            <div style="margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid {borderColor}; font-size: 0.72rem; color: {textMuted}; line-height: 1.5;">
+                                No findings: {reviewerChartData.emptyLabels.join(', ')}
+                            </div>
+                        {/if}
+                    </div>
+                </div>
             </div>
-            <div style="background: {cardBg}; border: 1px solid rgba(34,197,94,0.3); border-radius: 12px; padding: 1rem; text-align: center;">
-                <div style="font-size: 2rem; font-weight: 700; color: #22c55e;">{lowCount}</div>
-                <div style="font-size: 0.8rem; color: #22c55e;">Low Severity</div>
+
+            <!-- Review Metadata -->
+            <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1rem;">
+                <div style="font-size: 0.72rem; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;">Review Metadata</div>
+                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;">
+                        <span style="color: {textSecondary};">Start Time</span>
+                        <span style="color: {textPrimary}; font-weight: 500; font-family: monospace; font-size: 0.78rem;">{request.start_time ? new Date(request.start_time).toLocaleString() : '—'}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;">
+                        <span style="color: {textSecondary};">Time Used</span>
+                        <span style="color: {textPrimary}; font-weight: 600; font-family: monospace;">{elapsedSeconds !== null ? `${elapsedSeconds}s` : '—'}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;">
+                        <span style="color: {textSecondary};">Total Findings</span>
+                        <span style="color: {textPrimary}; font-weight: 600; font-family: monospace;">{findings.length}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;">
+                        <span style="color: {textSecondary};">Non-Empty Packages</span>
+                        <span style="color: {textPrimary}; font-weight: 600; font-family: monospace;">{nonEmptyPackageCount}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 0.82rem; gap: 0.5rem;">
+                        <span style="color: {textSecondary};">Non-Empty Reviewers</span>
+                        <span style="color: {textPrimary}; font-weight: 600; font-family: monospace;">{nonEmptyReviewerCount}</span>
+                    </div>
+                </div>
             </div>
+
         </div>
 
         <!-- Findings Tab -->
