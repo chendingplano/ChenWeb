@@ -500,24 +500,14 @@
 			if (runMode === 'failed') {
 				const res = await listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'failed' });
 				fetchedRecords = (res.results ?? []).filter(r => !r.file_name?.toLowerCase().endsWith('.zip'));
-			} else if (runMode === 'unfinished') {
-				const res = await listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'running' });
-				fetchedRecords = (res.results ?? []).filter(r => !r.file_name?.toLowerCase().endsWith('.zip'));
 			} else {
-				const [failedRes, runningRes] = await Promise.all([
-					listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'failed' }),
-					listKbInputs({ ...base, pageSize: fetchSize, procStatus: 'running' })
-				]);
-				const seen = new Set<number>();
-				fetchedRecords = [
-					...(failedRes.results ?? []),
-					...(runningRes.results ?? [])
-				].filter(r => {
-					if (r.file_name?.toLowerCase().endsWith('.zip')) return false;
-					if (seen.has(r.id)) return false;
-					seen.add(r.id);
-					return true;
-				});
+				// 'unfinished' and 'unfinished_failed': use with_unfinished_procs which
+				// finds all records where any processor lacks a success entry (pending,
+				// in-progress, or failed). filterByRunMode then narrows to the exact
+				// statuses the mode requires. procStatus:'running' was wrong — it missed
+				// records that are parsed+converted but never had doc processors run.
+				const res = await listKbInputs({ ...base, pageSize: fetchSize, pipelineFilter: 'with_unfinished_procs' });
+				fetchedRecords = (res.results ?? []).filter(r => !r.file_name?.toLowerCase().endsWith('.zip'));
 			}
 
 			const selectedStageIds = new Set<string>([

@@ -69,6 +69,7 @@
 	let shelfWidth = $state(SHELF_WIDTH_DEFAULT); // context shelf width
 	let shelfOpen = $state(true); // context shelf visibility
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: 'Dashboard' });
+	let docReviewKey = $state(0);
 	let settingsHydrated = $state(false);
 
 	onMount(() => {
@@ -156,6 +157,9 @@
 		if (selection.itemId === '__logout__') {
 			handleLogout();
 			return;
+		}
+		if (selection.childId === 'apps-document-review') {
+			docReviewKey++;
 		}
 		activeMenu = selection;
 	}
@@ -267,6 +271,7 @@
 			{activeMenu}
 			{shelfOpen}
 			{autoShrinkExpand}
+			{docReviewKey}
 			railOffset={currentRailOffset}
 			onToggleShelf={() => {
 				shelfOpen = !shelfOpen;

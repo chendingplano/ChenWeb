@@ -51,6 +51,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		activeMenu     = null,
 		shelfOpen      = true,
 		autoShrinkExpand = false,
+		docReviewKey   = 0,
 		railOffset     = 56,
 		onToggleShelf,
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
@@ -59,6 +60,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		activeMenu:      ActiveSelection | null;
 		shelfOpen:       boolean;
 		autoShrinkExpand?: boolean;
+		docReviewKey?:   number;
 		railOffset?:     number;
 		onToggleShelf:   () => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
@@ -171,7 +173,9 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-document-review'}
+			{#key docReviewKey}
 				<DocumentReviewView {darkMode} />
+			{/key}
 		{:else if activeMenu?.childId === 'prompt-optimizer'}
 			<PromptOptimizerView {darkMode} />
 		{:else if activeMenu?.childId === 'openmetadata'}
