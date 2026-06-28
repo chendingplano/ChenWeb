@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -34,6 +36,38 @@ func (f *fakeFindingTranslator) TranslateFinding(ctx context.Context, language s
 		return out, f.translateErr
 	}
 	return FindingLocalizedContent{}, f.translateErr
+}
+
+type concurrencyFindingTranslator struct {
+	normalizeOut FindingNormalization
+	translateOut map[string]FindingLocalizedContent
+	delay        time.Duration
+
+	current int32
+	maxSeen int32
+}
+
+func (f *concurrencyFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLanguage string, finding FindingItem) (FindingNormalization, error) {
+	return f.normalizeOut, nil
+}
+
+func (f *concurrencyFindingTranslator) TranslateFinding(ctx context.Context, language string, finding FindingItem) (FindingLocalizedContent, error) {
+	cur := atomic.AddInt32(&f.current, 1)
+	defer atomic.AddInt32(&f.current, -1)
+	for {
+		max := atomic.LoadInt32(&f.maxSeen)
+		if cur <= max {
+			break
+		}
+		if atomic.CompareAndSwapInt32(&f.maxSeen, max, cur) {
+			break
+		}
+	}
+	time.Sleep(f.delay)
+	if out, ok := f.translateOut[language]; ok {
+		return out, nil
+	}
+	return FindingLocalizedContent{}, nil
 }
 
 func TestTranslationFromMetadataReadsI18NEnvelope(t *testing.T) {
@@ -215,6 +249,48 @@ func TestPrepareFindingForStorageAutoTranslatesConfiguredDisplayLanguages(t *tes
 	}
 	if prepared.Canonical.Evidence != "The system are ready." {
 		t.Fatalf("evidence=%q, want original evidence unchanged", prepared.Canonical.Evidence)
+	}
+}
+
+func TestPrepareFindingForStorageTranslatesConfiguredLanguagesInParallel(t *testing.T) {
+	t.Setenv("MAX_DOC_REVIEWER_TASKS", "2")
+	translator := &concurrencyFindingTranslator{
+		normalizeOut: FindingNormalization{
+			SourceLanguage:           "en",
+			SourceLanguageConfidence: 0.95,
+			CanonicalLanguage:        "en",
+			CanonicalOrigin:          "original",
+			Canonical: FindingLocalizedContent{
+				Title:       "Subject-verb disagreement",
+				Description: "The singular subject uses a plural verb.",
+				Suggestion:  "Change 'are' to 'is'.",
+			},
+		},
+		translateOut: map[string]FindingLocalizedContent{
+			"zh": {Title: "主谓不一致", Description: "单数主语使用了复数谓语。", Suggestion: "将“are”改为“is”。"},
+			"ja": {Title: "主語と動詞が一致していません", Description: "単数主語に複数形の動詞が使われています。", Suggestion: "「are」を「is」に変更します。"},
+			"fr": {Title: "Desaccord sujet-verbe", Description: "Le sujet singulier utilise un verbe pluriel.", Suggestion: "Remplacez « are » par « is »."},
+		},
+		delay: 40 * time.Millisecond,
+	}
+
+	prepared, err := prepareFindingForStorage(context.Background(), translator, []string{"en", "zh", "ja", "fr"}, ReviewFinding{
+		FindingType: "grammar",
+		Title:       "Subject-verb disagreement",
+		Description: "The singular subject uses a plural verb.",
+		Suggestion:  "Change 'are' to 'is'.",
+	})
+	if err != nil {
+		t.Fatalf("prepareFindingForStorage: %v", err)
+	}
+	if prepared.Metadata.I18N.Translations["zh"].Title == "" || prepared.Metadata.I18N.Translations["ja"].Title == "" || prepared.Metadata.I18N.Translations["fr"].Title == "" {
+		t.Fatalf("translations=%#v", prepared.Metadata.I18N.Translations)
+	}
+	if got := atomic.LoadInt32(&translator.maxSeen); got < 2 {
+		t.Fatalf("max concurrent translations=%d, want at least 2", got)
+	}
+	if got := atomic.LoadInt32(&translator.maxSeen); got > 2 {
+		t.Fatalf("max concurrent translations=%d, want at most 2", got)
 	}
 }
 

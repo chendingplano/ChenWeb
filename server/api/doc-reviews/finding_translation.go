@@ -506,6 +506,7 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 		Suggestion:  normalized.Canonical.Suggestion,
 		Confidence:  finding.Confidence,
 	}
+	var pendingLanguages []string
 	for _, language := range normalizeConfiguredLanguages(languages) {
 		if language == "en" {
 			continue
@@ -513,14 +514,31 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 		if _, ok := translations[language]; ok {
 			continue
 		}
-		localized, err := translator.TranslateFinding(ctx, language, canonicalFinding)
+		pendingLanguages = append(pendingLanguages, language)
+	}
+	if len(pendingLanguages) > 0 {
+		type translationResult struct {
+			language  string
+			localized FindingLocalizedContent
+		}
+		maxTasks := maxDocReviewerTasks(len(pendingLanguages))
+		results, err := runConcurrent(ctx, maxTasks, len(pendingLanguages), func(workerCtx context.Context, i int) (translationResult, error) {
+			language := pendingLanguages[i]
+			localized, err := translator.TranslateFinding(workerCtx, language, canonicalFinding)
+			if err != nil {
+				return translationResult{}, fmt.Errorf("translate finding to %s: %w", language, err)
+			}
+			if localized.Provenance == "" {
+				localized.Provenance = "llm_translation"
+			}
+			return translationResult{language: language, localized: localized}, nil
+		})
 		if err != nil {
-			return preparedFindingForStorage{}, fmt.Errorf("translate finding to %s: %w", language, err)
+			return preparedFindingForStorage{}, err
 		}
-		if localized.Provenance == "" {
-			localized.Provenance = "llm_translation"
+		for _, result := range results {
+			translations[result.language] = result.localized
 		}
-		translations[language] = localized
 	}
 
 	return preparedFindingForStorage{
