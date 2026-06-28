@@ -188,6 +188,13 @@
 					children: [
 						{ id: 'sysadmin-llm-accounts', label: 'LLM Accounts' }
 					]
+				},
+				{
+					id: 'sysadmin-db', label: 'Database Maintenance',
+					children: [
+						{ id: 'sysadmin-db-consistency', label: 'Consistency Check' },
+						{ id: 'sysadmin-db-maint-log', label: 'Maintenance Log' }
+					]
 				}
 			]
 		},

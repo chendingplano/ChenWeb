@@ -16,6 +16,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import ResearchTopicsView from '$lib/components/home3/research-topics-view.svelte';
 	import LLMActivitiesView from '$lib/components/home3/llm-activities-view.svelte';
 	import LLMAccountsView from '$lib/components/home3/llm-accounts-view.svelte';
+	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
+	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
@@ -184,6 +186,10 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<DocProcLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-accounts'}
 			<LLMAccountsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}
+			<DbConsistencyView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-db-maint-log'}
+			<DbMaintLogView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}
 			<DiaryView {darkMode} />
 		{:else if activeMenu?.childId === 'ke-research-topics'}

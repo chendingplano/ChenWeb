@@ -17,6 +17,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/Dashboard01"
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
+	"github.com/chendingplano/deepdoc/server/api/dbmainthandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
@@ -471,6 +472,11 @@ func RegisterRoutes(e *echo.Echo) error {
 	// Knowledge Engineering endpoints — reads/writes RTB files under ARTIFACT_DIR/Topics/.
 	apiGroup.GET("/ke/research-topics", kehandler.List)
 	apiGroup.POST("/ke/research-topics", kehandler.Create)
+
+	// Database Maintenance endpoints — admin-only consistency checks and repairs.
+	apiGroup.GET("/admin/db/kb-inputs-status/check", dbmainthandler.CheckKbInputsStatus)
+	apiGroup.POST("/admin/db/kb-inputs-status/fix", dbmainthandler.FixKbInputsStatus)
+	apiGroup.GET("/admin/db/maintenance-logs", dbmainthandler.ListMaintenanceLogs)
 
 	// Diary (My Workspace) endpoints — reads/writes JSON files under DIARY_HOME_DIR.
 	apiGroup.GET("/diary", diaryhandler.List)
