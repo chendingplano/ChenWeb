@@ -160,15 +160,37 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 
 func findingNormalizationFromMap(m map[string]any) FindingNormalization {
 	sourceMap := mapFromAny(m["source_translation"])
+	canonicalMap := mapFromAny(m["canonical"])
+	canonicalTitle := strings.TrimSpace(asString(m["canonical_title"]))
+	if canonicalTitle == "" {
+		canonicalTitle = strings.TrimSpace(asString(canonicalMap["title"]))
+	}
+	if canonicalTitle == "" {
+		canonicalTitle = strings.TrimSpace(asString(m["title"]))
+	}
+	canonicalDescription := strings.TrimSpace(asString(m["canonical_description"]))
+	if canonicalDescription == "" {
+		canonicalDescription = strings.TrimSpace(asString(canonicalMap["description"]))
+	}
+	if canonicalDescription == "" {
+		canonicalDescription = strings.TrimSpace(asString(m["description"]))
+	}
+	canonicalSuggestion := strings.TrimSpace(asString(m["canonical_suggestion"]))
+	if canonicalSuggestion == "" {
+		canonicalSuggestion = strings.TrimSpace(asString(canonicalMap["suggestion"]))
+	}
+	if canonicalSuggestion == "" {
+		canonicalSuggestion = strings.TrimSpace(asString(m["suggestion"]))
+	}
 	return FindingNormalization{
 		SourceLanguage:           strings.TrimSpace(asString(m["source_language"])),
 		SourceLanguageConfidence: asFloat64Generic(m["source_language_confidence"]),
 		CanonicalLanguage:        strings.TrimSpace(asString(m["canonical_language"])),
 		CanonicalOrigin:          strings.TrimSpace(asString(m["canonical_origin"])),
 		Canonical: FindingLocalizedContent{
-			Title:       strings.TrimSpace(asString(m["canonical_title"])),
-			Description: strings.TrimSpace(asString(m["canonical_description"])),
-			Suggestion:  strings.TrimSpace(asString(m["canonical_suggestion"])),
+			Title:       canonicalTitle,
+			Description: canonicalDescription,
+			Suggestion:  canonicalSuggestion,
 			Provenance:  "canonical",
 		},
 		SourceTranslation: FindingLocalizedContent{

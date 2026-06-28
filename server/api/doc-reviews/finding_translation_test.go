@@ -58,6 +58,42 @@ func TestTranslationFromMetadataReadsLegacyShape(t *testing.T) {
 	}
 }
 
+func TestFindingNormalizationFromMapAcceptsNestedCanonicalObject(t *testing.T) {
+	got := findingNormalizationFromMap(map[string]any{
+		"source_language":    "en",
+		"canonical_language": "en",
+		"canonical_origin":   "original",
+		"canonical": map[string]any{
+			"title":       "Missing spaces in standard references",
+			"description": "In line 64, there are missing spaces between consecutive standard numbers and text.",
+			"suggestion":  "Insert spaces between consecutive standard references.",
+		},
+	})
+	if got.Canonical.Title != "Missing spaces in standard references" {
+		t.Fatalf("canonical title=%q", got.Canonical.Title)
+	}
+	if got.Canonical.Description == "" || got.Canonical.Suggestion == "" {
+		t.Fatalf("canonical=%#v", got.Canonical)
+	}
+}
+
+func TestFindingNormalizationFromMapFallsBackToTopLevelProseFields(t *testing.T) {
+	got := findingNormalizationFromMap(map[string]any{
+		"source_language":    "en",
+		"canonical_language": "en",
+		"canonical_origin":   "original",
+		"title":              "Missing spaces in standard references",
+		"description":        "In line 64, there are missing spaces between consecutive standard numbers and text.",
+		"suggestion":         "Insert spaces between consecutive standard references.",
+	})
+	if got.Canonical.Title != "Missing spaces in standard references" {
+		t.Fatalf("canonical title=%q", got.Canonical.Title)
+	}
+	if got.Canonical.Description == "" || got.Canonical.Suggestion == "" {
+		t.Fatalf("canonical=%#v", got.Canonical)
+	}
+}
+
 func TestPrepareFindingForStorageCanonicalizesEnglishAndPreservesChineseSource(t *testing.T) {
 	translator := &fakeFindingTranslator{
 		normalizeOut: FindingNormalization{
