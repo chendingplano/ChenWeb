@@ -3,9 +3,11 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -307,5 +309,51 @@ func TestNewLLMFindingTranslatorLoadsPromptsFromPromptDir(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("newLLMFindingTranslator returned nil translator")
+	}
+}
+
+func TestNormalizeFindingErrorIncludesOffendingFieldContent(t *testing.T) {
+	translator := &llmFindingTranslator{
+		client: &fakeJSONExtractor{out: map[string]any{
+			"source_language":       "zh",
+			"canonical_language":    "en",
+			"canonical_origin":      "translated",
+			"canonical_title":       "中文标题",
+			"canonical_description": "仍然是中文描述",
+			"canonical_suggestion":  "仍然是中文建议",
+			"source_translation": map[string]any{
+				"title":       "原始中文标题",
+				"description": "原始中文描述",
+				"suggestion":  "原始中文建议",
+				"provenance":  "original_extraction",
+			},
+		}},
+		modelName:                "test-model",
+		normalizePromptText:      "test prompt",
+		normalizeRetryPromptText: "retry prompt",
+	}
+
+	_, err := translator.NormalizeFinding(context.Background(), "en", FindingItem{
+		Title:       "原始标题",
+		Description: "原始描述",
+		Suggestion:  "原始建议",
+	})
+	if err == nil {
+		t.Fatal("NormalizeFinding error=nil, want error")
+	}
+	if errors.Is(err, errFindingTranslationUnavailable) {
+		t.Fatalf("unexpected availability error: %v", err)
+	}
+	for _, want := range []string{
+		`source_title="原始标题"`,
+		`source_description="原始描述"`,
+		`source_suggestion="原始建议"`,
+		`canonical_title="中文标题"`,
+		`canonical_description="仍然是中文描述"`,
+		`canonical_suggestion="仍然是中文建议"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("NormalizeFinding error %q does not contain %q", err.Error(), want)
+		}
 	}
 }

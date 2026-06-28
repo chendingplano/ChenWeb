@@ -108,7 +108,18 @@ func (t *llmFindingTranslator) normalizeFindingAttempt(ctx context.Context, cano
 		return t.normalizeFindingAttempt(ctx, canonicalLanguage, finding, findingNormalizationRetryPromptName, t.normalizeRetryPromptText)
 	}
 	if !normalizationInCanonicalLanguage(result, canonicalLanguage) {
-		return FindingNormalization{}, fmt.Errorf("normalization output not in canonical language %q", canonicalLanguage)
+		return FindingNormalization{}, fmt.Errorf(
+			"normalization output not in canonical language %q; source_title=%q source_description=%q source_suggestion=%q canonical_title=%q canonical_description=%q canonical_suggestion=%q detected_source_language=%q canonical_language=%q",
+			canonicalLanguage,
+			compactDiagnosticText(finding.Title),
+			compactDiagnosticText(finding.Description),
+			compactDiagnosticText(finding.Suggestion),
+			compactDiagnosticText(result.Canonical.Title),
+			compactDiagnosticText(result.Canonical.Description),
+			compactDiagnosticText(result.Canonical.Suggestion),
+			strings.TrimSpace(result.SourceLanguage),
+			strings.TrimSpace(result.CanonicalLanguage),
+		)
 	}
 	return result, nil
 }
@@ -205,6 +216,15 @@ func supportedLanguageCode(language string) string {
 		}
 	}
 	return language
+}
+
+func compactDiagnosticText(s string) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	const maxLen = 180
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func normalizeConfiguredLanguages(languages []string) []string {
