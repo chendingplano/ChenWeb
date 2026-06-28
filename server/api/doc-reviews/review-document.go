@@ -311,6 +311,10 @@ type ReviewProcessor struct {
 	// is invoked. Findings and progress updates are scoped to this run.
 	RunID int64
 
+	// RequestedAspects limits a run to the accepted request's selected aspects.
+	// When empty, all configured reviewers remain eligible.
+	RequestedAspects []string
+
 	// GrammarClient is a properly-configured LLM client for the grammar reviewer.
 	GrammarClient LLMJSONExtractor
 
@@ -1767,7 +1771,36 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 		})
 	}
 
-	return runners
+	if len(p.RequestedAspects) == 0 {
+		return runners
+	}
+
+	allowed := make(map[string]struct{}, len(p.RequestedAspects))
+	for _, aspect := range p.RequestedAspects {
+		aspect = strings.TrimSpace(aspect)
+		if aspect == "" {
+			continue
+		}
+		allowed[aspect] = struct{}{}
+	}
+
+	filtered := make([]reviewRunner, 0, len(runners))
+	for _, runner := range runners {
+		if _, ok := allowed[runner.reviewer.Name()]; ok {
+			filtered = append(filtered, runner)
+		}
+	}
+
+	if p.Logger != nil && len(filtered) != len(runners) {
+		p.Logger.Info("document review filtered reviewers by request aspects",
+			"run_id", p.RunID,
+			"requested_aspects", len(allowed),
+			"selected_reviewers", len(filtered),
+			"configured_reviewers", len(runners),
+		)
+	}
+
+	return filtered
 }
 
 // normalizeFindingsJSON extracts a []ReviewFinding from a raw JSON payload

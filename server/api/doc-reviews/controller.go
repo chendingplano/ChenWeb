@@ -210,6 +210,7 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 
 	processor := NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
 	processor.RunID = runID
+	processor.RequestedAspects = append([]string(nil), req.Aspects...)
 	processor.StatusStore = statusStore
 	err = processor.PostProcessIndex(ctx, req.InputRecordID)
 	if err != nil {
