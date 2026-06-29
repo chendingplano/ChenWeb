@@ -13,6 +13,10 @@ Task:
    - keep or produce canonical English `description`
    - translate `suggestion` to canonical English
    - also return a precomputed `translations.zh` entry whose `title` and `description` are Chinese and whose `suggestion` is the original Chinese replacement text
+7. Handle English-source correction text correctly. If `suggestion` is already English because the corrected document text itself should remain English (for example, an English heading, title, or bilingual-standard English title), do NOT translate `suggestion` into Chinese for `translations.zh`. In that case:
+   - keep canonical English `suggestion` unchanged
+   - return `translations.zh.title` and `translations.zh.description` in Chinese
+   - preserve `translations.zh.suggestion` in English unchanged
 
 Input JSON:
 {
@@ -37,12 +41,14 @@ Rules:
 - If the source language is already English, keep the prose as-is.
 - If `title`, `description`, and `suggestion` are all non-English, translate all three into natural, precise English for canonical output.
 - If `title` and `description` are already English but `suggestion` is Chinese, translate only `suggestion` into English for canonical output.
+- If `suggestion` is already English and it is the correct literal replacement text for the document, keep it in English for canonical output.
 - When the source language is not English, preserve the original source prose in source_translation.
 - Preserve meaning exactly. Do not add, delete, soften, or expand the finding.
 - If the source language is mixed, pick the dominant language. If truly unclear, use "und".
 - source_translation should be empty when source_language is English.
 - When `title` and `description` are already English but `suggestion` is a source-language literal replacement text, keep the English `title`/`description`, translate `suggestion` to canonical English, and preserve the original Chinese `suggestion` in `translations.zh.suggestion`.
 - In that mixed case, also return `translations.zh.title` and `translations.zh.description` in natural Chinese, even if the input `title` and `description` were English.
+- When `suggestion` is already English because the corrected source text must remain English, keep `translations.zh.suggestion` in English unchanged rather than translating it into Chinese.
 
 Output JSON:
 {

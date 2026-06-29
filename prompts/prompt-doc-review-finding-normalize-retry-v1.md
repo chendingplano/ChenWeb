@@ -18,6 +18,10 @@ Requirements:
   - translate `canonical_suggestion` to English
   - return `translations.zh.title` and `translations.zh.description` in Chinese
   - keep the original Chinese literal replacement in `translations.zh.suggestion`
+- If `suggestion` is already English because the corrected document text itself should remain English:
+  - keep `canonical_suggestion` in English unchanged
+  - return `translations.zh.title` and `translations.zh.description` in Chinese
+  - keep `translations.zh.suggestion` in English unchanged
 - Do not leave `canonical_suggestion` in Chinese when canonical_language is `en`.
 
 Use the same JSON schema as the base normalization prompt.
