@@ -8,6 +8,9 @@ Task:
 3. Preserve the original source-language prose when the source language is not English.
 4. Never translate or modify evidence.
 5. Never translate or modify finding_type.
+6. When `title` and `description` are already English but `suggestion` is a literal Chinese replacement text, produce both:
+   - canonical English `suggestion`
+   - a precomputed `translations.zh` entry whose `title` and `description` are Chinese and whose `suggestion` is the original Chinese replacement text
 
 Input JSON:
 {
@@ -50,5 +53,13 @@ Output JSON:
     "description": "original source description",
     "suggestion": "original source suggestion",
     "provenance": "original_extraction"
+  },
+  "translations": {
+    "zh": {
+      "title": "Chinese localized title",
+      "description": "Chinese localized description",
+      "suggestion": "Chinese localized suggestion",
+      "provenance": "mixed_direction_translation"
+    }
   }
 }

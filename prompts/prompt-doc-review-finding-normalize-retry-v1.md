@@ -13,5 +13,6 @@ Requirements:
 - If the source language is non-English, copy the exact original prose into source_translation.
 - Do not echo non-English prose into canonical_* fields.
 - If title and description are already English but suggestion is a literal source-language replacement string, keep title and description in English and preserve the replacement meaning faithfully.
+- In that mixed case, also return `translations.zh` with Chinese `title` and `description`, while keeping the Chinese literal replacement in `translations.zh.suggestion`, so the pipeline does not need a second zh localization call.
 
 Use the same JSON schema as the base normalization prompt.

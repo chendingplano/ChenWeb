@@ -216,6 +216,20 @@ func findingNormalizationFromMap(m map[string]any) FindingNormalization {
 	if canonicalSuggestion == "" {
 		canonicalSuggestion = strings.TrimSpace(asString(m["suggestion"]))
 	}
+	translations := map[string]FindingLocalizedContent{}
+	if rawTranslations, ok := m["translations"].(map[string]any); ok {
+		for lang, raw := range rawTranslations {
+			lang = strings.ToLower(strings.TrimSpace(lang))
+			if lang == "" {
+				continue
+			}
+			content := findingLocalizedContentFromMap(mapFromAny(raw))
+			if content.Title == "" && content.Description == "" && content.Suggestion == "" {
+				continue
+			}
+			translations[lang] = content
+		}
+	}
 	return FindingNormalization{
 		SourceLanguage:           strings.TrimSpace(asString(m["source_language"])),
 		SourceLanguageConfidence: asFloat64Generic(m["source_language_confidence"]),
@@ -233,6 +247,7 @@ func findingNormalizationFromMap(m map[string]any) FindingNormalization {
 			Suggestion:  strings.TrimSpace(asString(sourceMap["suggestion"])),
 			Provenance:  strings.TrimSpace(asString(sourceMap["provenance"])),
 		},
+		Translations: translations,
 	}
 }
 
@@ -484,6 +499,19 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 			Suggestion:  normalized.Canonical.Suggestion,
 			Provenance:  "canonical",
 		},
+	}
+	for language, localized := range normalized.Translations {
+		language = strings.ToLower(strings.TrimSpace(language))
+		if language == "" || language == "en" {
+			continue
+		}
+		if localized.Provenance == "" {
+			localized.Provenance = "llm_translation"
+		}
+		if localized.Title == "" && localized.Description == "" && localized.Suggestion == "" {
+			continue
+		}
+		translations[language] = localized
 	}
 	sourceLanguage := strings.ToLower(strings.TrimSpace(normalized.SourceLanguage))
 	if sourceLanguage != "" && sourceLanguage != "en" &&

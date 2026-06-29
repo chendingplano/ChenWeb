@@ -70,7 +70,7 @@ enabled = true
 checked = true
 group = "P1"
 model = "deepseek-v4-flash"
-prompt = "prompt-review-grammar-spelling.txt"
+prompt = "prompt-review-grammar-spelling.md"
 max_tool_turns = 0
 
 [reviewers.tone_voice]

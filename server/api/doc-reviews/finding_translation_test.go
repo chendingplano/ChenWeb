@@ -147,6 +147,28 @@ func TestFindingNormalizationFromMapAcceptsNestedFindingObject(t *testing.T) {
 	}
 }
 
+func TestFindingNormalizationFromMapReadsPrecomputedTranslations(t *testing.T) {
+	got := findingNormalizationFromMap(map[string]any{
+		"source_language":       "en",
+		"canonical_language":    "en",
+		"canonical_origin":      "translated",
+		"canonical_title":       "Incorrect Chinese pronoun for objects",
+		"canonical_description": "The pronoun '他们' (used for people) is used to refer to devices; it should be '它们' for objects.",
+		"canonical_suggestion":  "They are not heating and cooling equipment.",
+		"translations": map[string]any{
+			"zh": map[string]any{
+				"title":       "用于物体的中文代词错误",
+				"description": "代词'他们'（用于人）被用来指代设备；应改为用于物体的'它们'。",
+				"suggestion":  "它们不属于加热与制冷设备",
+				"provenance":  "mixed_direction_translation",
+			},
+		},
+	})
+	if got.Translations["zh"].Suggestion != "它们不属于加热与制冷设备" {
+		t.Fatalf("zh translation=%#v", got.Translations["zh"])
+	}
+}
+
 func TestPrepareFindingForStorageCanonicalizesEnglishAndPreservesChineseSource(t *testing.T) {
 	translator := &fakeFindingTranslator{
 		normalizeOut: FindingNormalization{
@@ -249,6 +271,50 @@ func TestPrepareFindingForStorageAutoTranslatesConfiguredDisplayLanguages(t *tes
 	}
 	if prepared.Canonical.Evidence != "The system are ready." {
 		t.Fatalf("evidence=%q, want original evidence unchanged", prepared.Canonical.Evidence)
+	}
+}
+
+func TestPrepareFindingForStorageUsesPrecomputedZhTranslationAndSkipsSecondCall(t *testing.T) {
+	translator := &fakeFindingTranslator{
+		normalizeOut: FindingNormalization{
+			SourceLanguage:           "en",
+			SourceLanguageConfidence: 0.95,
+			CanonicalLanguage:        "en",
+			CanonicalOrigin:          "translated",
+			Canonical: FindingLocalizedContent{
+				Title:       "Incorrect Chinese pronoun for objects",
+				Description: "The pronoun '他们' (used for people) is used to refer to devices; it should be '它们' for objects.",
+				Suggestion:  "They are not heating and cooling equipment.",
+			},
+			Translations: map[string]FindingLocalizedContent{
+				"zh": {
+					Title:       "用于物体的中文代词错误",
+					Description: "代词'他们'（用于人）被用来指代设备；应改为用于物体的'它们'。",
+					Suggestion:  "它们不属于加热与制冷设备",
+					Provenance:  "mixed_direction_translation",
+				},
+			},
+		},
+	}
+
+	prepared, err := prepareFindingForStorage(context.Background(), translator, []string{"en", "zh"}, ReviewFinding{
+		FindingType: "grammar",
+		Title:       "Incorrect Chinese pronoun for objects",
+		Description: "The pronoun '他们' (used for people) is used to refer to devices; it should be '它们' for objects.",
+		Suggestion:  "它们不属于加热与制冷设备",
+		Evidence:    "他们不属于加热与制冷设备",
+	})
+	if err != nil {
+		t.Fatalf("prepareFindingForStorage: %v", err)
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls=%v, want no second zh localization call", translator.translateCalls)
+	}
+	if got := prepared.Metadata.I18N.Translations["zh"].Suggestion; got != "它们不属于加热与制冷设备" {
+		t.Fatalf("zh suggestion=%q", got)
+	}
+	if got := prepared.Canonical.Suggestion; got != "They are not heating and cooling equipment." {
+		t.Fatalf("canonical suggestion=%q", got)
 	}
 }
 

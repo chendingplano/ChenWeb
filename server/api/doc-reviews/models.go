@@ -107,12 +107,13 @@ type FindingMetadataEnvelope struct {
 // FindingNormalization is the result of converting reviewer output into a
 // canonical storage form.
 type FindingNormalization struct {
-	SourceLanguage           string                  `json:"source_language"`
-	SourceLanguageConfidence float64                 `json:"source_language_confidence"`
-	CanonicalLanguage        string                  `json:"canonical_language"`
-	CanonicalOrigin          string                  `json:"canonical_origin"`
-	Canonical                FindingLocalizedContent `json:"canonical"`
-	SourceTranslation        FindingLocalizedContent `json:"source_translation"`
+	SourceLanguage           string                             `json:"source_language"`
+	SourceLanguageConfidence float64                            `json:"source_language_confidence"`
+	CanonicalLanguage        string                             `json:"canonical_language"`
+	CanonicalOrigin          string                             `json:"canonical_origin"`
+	Canonical                FindingLocalizedContent            `json:"canonical"`
+	SourceTranslation        FindingLocalizedContent            `json:"source_translation"`
+	Translations             map[string]FindingLocalizedContent `json:"translations,omitempty"`
 }
 
 // ReviewPackageInfo describes a configured package group in display order.
