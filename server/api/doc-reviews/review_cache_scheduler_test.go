@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,12 +13,12 @@ import (
 
 func TestOrderReviewTasksForPromptCacheGroupsSameInputTogether(t *testing.T) {
 	tasks := []reviewTask{
-		{aspect: "grammar_spelling", inputKey: "window-0", inputOrder: 0},
-		{aspect: "grammar_spelling", inputKey: "window-1", inputOrder: 1},
-		{aspect: "clarity", inputKey: "window-0", inputOrder: 0},
-		{aspect: "clarity", inputKey: "window-1", inputOrder: 1},
-		{aspect: "logical_flow", inputKey: "block-0", inputOrder: 2},
-		{aspect: "heading_hierarchy", inputKey: "block-0", inputOrder: 2},
+		{aspect: "grammar_spelling", inputKey: "window-0", batchID: 0, inputOrder: 0},
+		{aspect: "grammar_spelling", inputKey: "window-1", batchID: 0, inputOrder: 1},
+		{aspect: "clarity", inputKey: "window-0", batchID: 0, inputOrder: 0},
+		{aspect: "clarity", inputKey: "window-1", batchID: 0, inputOrder: 1},
+		{aspect: "logical_flow", inputKey: "block-0", batchID: 1, inputOrder: 2},
+		{aspect: "heading_hierarchy", inputKey: "block-0", batchID: 1, inputOrder: 2},
 	}
 
 	ordered := orderReviewTasksForPromptCache(tasks)
@@ -145,52 +146,81 @@ func TestBuildPromptCacheReviewTasksSupportsAllCurrentReviewers(t *testing.T) {
 	}
 }
 
-func TestRunReviewTasksForPromptCacheExecutesSameInputBeforeNextInput(t *testing.T) {
-	var calls []string
+// TestRunReviewTasksForPromptCacheAllSeedsBeforeAnyRemaining verifies the
+// batch two-phase ordering: all seeds (first task per group) in a batch
+// complete before any remaining task in that batch starts.
+//
+// Seeds run concurrently in Phase 1 (no ordering between seeds is guaranteed).
+// Phase 3 (remaining tasks) only launches after seedWg.Wait() + stagger, so
+// max(seed call order) must be < min(remaining call order).
+func TestRunReviewTasksForPromptCacheAllSeedsBeforeAnyRemaining(t *testing.T) {
+	t.Setenv("LLM_CALL_STAGGER", "0")
+
+	var callOrder int32
+	orderOf := make(map[string]int32)
+	var mu sync.Mutex
+
+	record := func(key string) func(context.Context) ([]ReviewFinding, error) {
+		return func(context.Context) ([]ReviewFinding, error) {
+			n := atomic.AddInt32(&callOrder, 1)
+			mu.Lock()
+			orderOf[key] = n
+			mu.Unlock()
+			return nil, nil
+		}
+	}
+
+	// Two chunks: reviewerIndex 0 = seed reviewer, reviewerIndex 1 = remaining reviewer.
 	tasks := orderReviewTasksForPromptCache([]reviewTask{
-		{aspect: "a", inputKey: "window-0", inputOrder: 0, run: func(context.Context) ([]ReviewFinding, error) {
-			calls = append(calls, "window-0:a")
-			return nil, nil
-		}},
-		{aspect: "a", inputKey: "window-1", inputOrder: 1, run: func(context.Context) ([]ReviewFinding, error) {
-			calls = append(calls, "window-1:a")
-			return nil, nil
-		}},
-		{aspect: "b", inputKey: "window-0", inputOrder: 0, run: func(context.Context) ([]ReviewFinding, error) {
-			calls = append(calls, "window-0:b")
-			return nil, nil
-		}},
+		{aspect: "seed", inputKey: "window-0", batchID: 0, reviewerIndex: 0, inputOrder: 0, taskOrder: 0, run: record("seed-0")},
+		{aspect: "remaining", inputKey: "window-0", batchID: 0, reviewerIndex: 1, inputOrder: 0, taskOrder: 1, run: record("remaining-0")},
+		{aspect: "seed", inputKey: "window-1", batchID: 0, reviewerIndex: 0, inputOrder: 1, taskOrder: 0, run: record("seed-1")},
+		{aspect: "remaining", inputKey: "window-1", batchID: 0, reviewerIndex: 1, inputOrder: 1, taskOrder: 1, run: record("remaining-1")},
 	})
 
-	_, errs := runReviewTasksForPromptCache(context.Background(), 1, tasks)
+	_, errs := runReviewTasksForPromptCache(context.Background(), 2, tasks)
 	if len(errs) != 0 {
 		t.Fatalf("errs=%v, want none", errs)
 	}
 
-	want := []string{"window-0:a", "window-0:b", "window-1:a"}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("calls=%v, want %v", calls, want)
+	// Phase 1 (seeds) runs and seedWg.Wait() completes before Phase 3 (remaining)
+	// launches, so every seed call-order must be less than every remaining call-order.
+	maxSeed := max(orderOf["seed-0"], orderOf["seed-1"])
+	minRemaining := min(orderOf["remaining-0"], orderOf["remaining-1"])
+	if maxSeed >= minRemaining {
+		t.Fatalf("seeds finished at orders %v but remaining started at orders %v: "+
+			"all seeds must complete before any remaining task starts",
+			[]int32{orderOf["seed-0"], orderOf["seed-1"]},
+			[]int32{orderOf["remaining-0"], orderOf["remaining-1"]})
 	}
 }
 
-func TestRunReviewTasksForPromptCacheRunsWithBoundedParallelism(t *testing.T) {
+// TestRunReviewTasksForPromptCacheRemainingReviewersRunConcurrently verifies
+// that the remaining reviewers for a single chunk (non-seeds) are launched
+// concurrently and run at the same time when maxTasks allows it.
+func TestRunReviewTasksForPromptCacheRemainingReviewersRunConcurrently(t *testing.T) {
+	t.Setenv("LLM_CALL_STAGGER", "0")
+
 	var (
 		running    int32
 		maxRunning int32
 	)
-	started := make(chan string, 2)
 	release := make(chan struct{})
-	makeTask := func(aspect string) reviewTask {
+	started := make(chan string, 2)
+
+	makeRemaining := func(aspect string, taskOrder, reviewerIdx int) reviewTask {
 		return reviewTask{
-			aspect:     aspect,
-			inputKey:   "window-0",
-			inputOrder: 0,
+			aspect:        aspect,
+			inputKey:      "window-0",
+			reviewerIndex: reviewerIdx,
+			inputOrder:    0,
+			taskOrder:     taskOrder,
 			run: func(context.Context) ([]ReviewFinding, error) {
 				current := atomic.AddInt32(&running, 1)
 				defer atomic.AddInt32(&running, -1)
 				for {
-					previous := atomic.LoadInt32(&maxRunning)
-					if current <= previous || atomic.CompareAndSwapInt32(&maxRunning, previous, current) {
+					prev := atomic.LoadInt32(&maxRunning)
+					if current <= prev || atomic.CompareAndSwapInt32(&maxRunning, prev, current) {
 						break
 					}
 				}
@@ -200,7 +230,14 @@ func TestRunReviewTasksForPromptCacheRunsWithBoundedParallelism(t *testing.T) {
 			},
 		}
 	}
-	tasks := []reviewTask{makeTask("a"), makeTask("b")}
+
+	tasks := orderReviewTasksForPromptCache([]reviewTask{
+		// reviewerIndex 0 → seed (runs synchronously, returns immediately)
+		{aspect: "seed", inputKey: "window-0", reviewerIndex: 0, inputOrder: 0, taskOrder: 0,
+			run: func(context.Context) ([]ReviewFinding, error) { return nil, nil }},
+		makeRemaining("b", 1, 1),
+		makeRemaining("c", 2, 2),
+	})
 
 	done := make(chan []error, 1)
 	go func() {
@@ -208,11 +245,12 @@ func TestRunReviewTasksForPromptCacheRunsWithBoundedParallelism(t *testing.T) {
 		done <- errs
 	}()
 
-	for i := 0; i < 2; i++ {
+	// Both remaining reviewers should start before either is released.
+	for i := range 2 {
 		select {
 		case <-started:
 		case <-time.After(2 * time.Second):
-			t.Fatalf("task %d did not start while another task was blocked; maxRunning=%d", i+1, atomic.LoadInt32(&maxRunning))
+			t.Fatalf("remaining reviewer %d did not start in time", i+1)
 		}
 	}
 	close(release)
@@ -226,7 +264,7 @@ func TestRunReviewTasksForPromptCacheRunsWithBoundedParallelism(t *testing.T) {
 		t.Fatal("runner did not finish after tasks were released")
 	}
 	if got := atomic.LoadInt32(&maxRunning); got != 2 {
-		t.Fatalf("maxRunning=%d, want 2", got)
+		t.Fatalf("maxRunning=%d, want 2 (both remaining reviewers should run concurrently)", got)
 	}
 }
 

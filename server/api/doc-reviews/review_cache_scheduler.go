@@ -5,20 +5,28 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 type reviewTask struct {
-	aspect     string
-	inputKey   string
-	inputOrder int
-	taskOrder  int
-	run        func(context.Context) ([]ReviewFinding, error)
+	aspect        string
+	inputKey      string
+	batchID       int // 0 = per-chunk (window), 1 = per-block
+	reviewerIndex int // position in the runners slice; 0 = seed reviewer for this batch
+	inputOrder    int
+	taskOrder     int
+	run           func(context.Context) ([]ReviewFinding, error)
 }
 
 func orderReviewTasksForPromptCache(tasks []reviewTask) []reviewTask {
 	ordered := append([]reviewTask(nil), tasks...)
 	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].batchID != ordered[j].batchID {
+			return ordered[i].batchID < ordered[j].batchID
+		}
 		if ordered[i].inputOrder != ordered[j].inputOrder {
 			return ordered[i].inputOrder < ordered[j].inputOrder
 		}
@@ -35,56 +43,137 @@ type reviewTaskResult struct {
 	err      error
 }
 
+// runReviewTasksForPromptCache executes ordered review tasks using a two-phase
+// batch algorithm that maximises DeepSeek prompt-cache hit rate.
+//
+// Tasks must already be sorted by orderReviewTasksForPromptCache. Within each
+// batch (batchID 0 = per-chunk, batchID 1 = per-block) the split is determined
+// by reviewerIndex: the reviewer with the lowest reviewerIndex in the batch is
+// the seed reviewer; all others are remaining. The two phases:
+//
+//  1. All seed reviewer tasks for the batch fire concurrently, planting every
+//     input's prefix into DeepSeek's cache.
+//  2. Wait LLM_CALL_STAGGER seconds for DeepSeek to persist the prefixes.
+//  3. All remaining reviewer tasks for the batch fire concurrently (bounded by
+//     maxTasks), hitting the now-warm cache.
+//
+// The per-block batch starts only after the per-chunk batch completes.
 func runReviewTasksForPromptCache(ctx context.Context, maxTasks int, tasks []reviewTask) ([]ReviewFinding, []error) {
-	var (
-		allFindings []ReviewFinding
-		errs        []error
-	)
 	if len(tasks) == 0 {
 		return nil, nil
 	}
 
-	workers := maxTasks
-	if workers < 1 {
-		workers = 1
-	}
-	if workers > len(tasks) {
-		workers = len(tasks)
-	}
-
+	stagger := reviewCallStagger()
 	results := make([]reviewTaskResult, len(tasks))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				results[i] = runPromptCacheReviewTask(ctx, tasks[i])
-			}
-		}()
-	}
-	for i := range tasks {
-		if isCtxStopped(ctx) {
-			results[i] = reviewTaskResult{err: ErrPipelineStopped}
-			break
-		}
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
+	concurrency := max(maxTasks, 1)
+	sem := make(chan struct{}, concurrency)
 
+	for _, targetBatchID := range []int{0, 1} {
+		// Collect task indices for this batch.
+		var batchIdxs []int
+		for i, t := range tasks {
+			if t.batchID == targetBatchID {
+				batchIdxs = append(batchIdxs, i)
+			}
+		}
+		if len(batchIdxs) == 0 {
+			continue
+		}
+
+		// The reviewer with the lowest reviewerIndex in this batch is the seed.
+		minReviewerIdx := tasks[batchIdxs[0]].reviewerIndex
+		for _, i := range batchIdxs {
+			if tasks[i].reviewerIndex < minReviewerIdx {
+				minReviewerIdx = tasks[i].reviewerIndex
+			}
+		}
+		var seedIdxs, remainIdxs []int
+		for _, i := range batchIdxs {
+			if tasks[i].reviewerIndex == minReviewerIdx {
+				seedIdxs = append(seedIdxs, i)
+			} else {
+				remainIdxs = append(remainIdxs, i)
+			}
+		}
+
+		// Phase 1: all seed reviewer tasks for this batch fire concurrently.
+		var seedWg sync.WaitGroup
+		for _, i := range seedIdxs {
+			seedWg.Go(func() {
+				results[i] = runPromptCacheReviewTask(ctx, tasks[i])
+			})
+		}
+		seedWg.Wait()
+
+		if len(remainIdxs) == 0 {
+			continue
+		}
+
+		if isCtxStopped(ctx) {
+			for _, i := range remainIdxs {
+				results[i] = reviewTaskResult{err: ErrPipelineStopped}
+			}
+			continue
+		}
+
+		// Phase 2: wait for DeepSeek to persist the cached prefixes.
+		if stagger > 0 {
+			select {
+			case <-time.After(stagger):
+			case <-ctx.Done():
+				for _, i := range remainIdxs {
+					results[i] = reviewTaskResult{err: ErrPipelineStopped}
+				}
+				continue
+			}
+		}
+
+		// Phase 3: all remaining reviewer tasks for this batch fire concurrently.
+		var remainWg sync.WaitGroup
+		for _, i := range remainIdxs {
+			if isCtxStopped(ctx) {
+				results[i] = reviewTaskResult{err: ErrPipelineStopped}
+				continue
+			}
+			remainWg.Go(func() {
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					results[i] = reviewTaskResult{err: ErrPipelineStopped}
+					return
+				}
+				defer func() { <-sem }()
+				results[i] = runPromptCacheReviewTask(ctx, tasks[i])
+			})
+		}
+		remainWg.Wait()
+	}
+
+	var allFindings []ReviewFinding
+	var errs []error
 	for _, result := range results {
 		if result.err != nil {
 			errs = append(errs, result.err)
 			continue
 		}
-		if len(result.findings) == 0 {
-			continue
-		}
 		allFindings = append(allFindings, result.findings...)
 	}
 	return allFindings, errs
+}
+
+// reviewCallStagger returns the duration to wait between a chunk's seed call
+// and its remaining concurrent reviewers. Controlled by LLM_CALL_STAGGER
+// (seconds); default 1s.
+func reviewCallStagger() time.Duration {
+	v := strings.TrimSpace(os.Getenv("LLM_CALL_STAGGER"))
+	if v == "" {
+		return time.Second
+	}
+	sec, err := strconv.Atoi(v)
+	if err != nil || sec < 0 {
+		return time.Second
+	}
+	return time.Duration(sec) * time.Second
 }
 
 func runPromptCacheReviewTask(ctx context.Context, task reviewTask) reviewTaskResult {
@@ -125,14 +214,16 @@ func buildPromptCacheReviewTasks(
 		taskOrder   int
 	)
 
-	addTask := func(aspect, inputKey string, inputOrder int, tracker *reviewerProgressTracker, run func(context.Context) []ReviewFinding) {
+	addTask := func(aspect, inputKey string, batchID, reviewerIndex, inputOrder int, tracker *reviewerProgressTracker, run func(context.Context) []ReviewFinding) {
 		currentOrder := taskOrder
 		taskOrder++
 		tasks = append(tasks, reviewTask{
-			aspect:     aspect,
-			inputKey:   inputKey,
-			inputOrder: inputOrder,
-			taskOrder:  currentOrder,
+			aspect:        aspect,
+			inputKey:      inputKey,
+			batchID:       batchID,
+			reviewerIndex: reviewerIndex,
+			inputOrder:    inputOrder,
+			taskOrder:     currentOrder,
 			run: func(taskCtx context.Context) ([]ReviewFinding, error) {
 				if isCtxStopped(taskCtx) {
 					return nil, ErrPipelineStopped
@@ -144,14 +235,13 @@ func buildPromptCacheReviewTasks(
 		})
 	}
 
-	for _, runner := range runners {
+	for runnerIdx, runner := range runners {
 		switch reviewer := runner.reviewer.(type) {
 		case *grammarSpellingReviewer:
 			windows := buildGrammarWindows(lines, docCtx, 100)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -159,8 +249,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildToneVoiceWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -168,8 +257,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildFormattingConsistencyWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -177,8 +265,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildReadabilityWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -186,8 +273,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildLocalizationWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -195,8 +281,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildCompletenessWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -204,8 +289,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildCorrectnessWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -213,8 +297,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildClarityWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -222,8 +305,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildConcisenessWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -231,8 +313,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildRelevanceWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -240,8 +321,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildCurrencyWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -249,8 +329,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildExamplesWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -258,8 +337,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildDiagramsWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -267,8 +345,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildTestableClaimsWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -276,8 +353,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildEvidenceRationaleWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -285,8 +361,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -294,8 +369,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -303,8 +377,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -312,8 +385,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -321,8 +393,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -330,8 +401,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -339,8 +409,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -348,8 +417,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -357,8 +425,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -368,8 +435,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildTechnicalAccuracyWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -377,8 +443,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildAssumptionsWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -386,8 +451,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildPrerequisitesWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -395,8 +459,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildSecurityWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -404,8 +467,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildPerformanceWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -413,8 +475,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildErrorHandlingWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -422,8 +483,7 @@ func buildPromptCacheReviewTasks(
 			windows := buildLimitationsWindows(lines, docCtx, 200)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(windows))
 			for i, w := range windows {
-				i, w := i, w
-				addTask(reviewer.Name(), w.inputJSON, i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), w.inputJSON, 0, runnerIdx, i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processWindow(taskCtx, recordID, i, runner.cfg, w)
 				})
 			}
@@ -433,8 +493,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -442,8 +501,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -451,8 +509,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
@@ -460,8 +517,7 @@ func buildPromptCacheReviewTasks(
 			blocks := buildBlocksForPromptCache(reviewer.blockSize, lines, docCtx)
 			tracker := newPromptCacheReviewTracker(progressFor, reviewer.Name(), len(blocks))
 			for i, b := range blocks {
-				i, b := i, b
-				addTask(reviewer.Name(), b.inputJSON, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
+				addTask(reviewer.Name(), b.inputJSON, 1, runnerIdx, len(lines)+i, tracker, func(taskCtx context.Context) []ReviewFinding {
 					return reviewer.processBlock(taskCtx, recordID, i, len(blocks), runner.cfg, b)
 				})
 			}
