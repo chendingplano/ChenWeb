@@ -261,6 +261,7 @@ func writeTypstArray(b *strings.Builder, name string, lines []string) {
 	fmt.Fprintf(b, "  ),\n")
 }
 
+/*
 // buildRelated constructs the "related source lines" snippet from a finding.
 func buildRelated(location, evidence string) string {
 	switch {
@@ -274,6 +275,7 @@ func buildRelated(location, evidence string) string {
 		return "No specific location identified."
 	}
 }
+*/
 
 // buildAssessment produces the overall-assessment sentence for a pass section.
 func buildAssessment(total, high int) string {
@@ -319,7 +321,7 @@ func typStr(s string) string {
 // typContentLine escapes one line of text for use inside a Typst content block.
 // Backslash is escaped first to prevent double-escaping. Every Typst markup
 // metacharacter must be escaped, including the paired emphasis/raw delimiters
-// (`*`, `_`, `` ` ``): an odd, unbalanced count of these in finding text (e.g.
+// (`*`, `_`, “ ` “): an odd, unbalanced count of these in finding text (e.g.
 // `0.*` / `1.*` wildcard ranges) otherwise opens a delimiter Typst never closes,
 // failing compilation with "unclosed delimiter".
 func typContentLine(s string) string {

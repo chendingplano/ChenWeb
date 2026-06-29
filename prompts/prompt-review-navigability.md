@@ -74,6 +74,15 @@ Fields:
 - `suggestion`: a concrete fix — "point the reference to the existing §3.4", "replace 'see above' with 'see Section 2.1'", "add a table of contents", "rename 'Notes' to 'Calibration Caveats'"
 - `confidence`: 0.0–1.0. 0.90+ for clear breaks, 0.70–0.89 for likely issues, below 0.70 omit
 
+Output language rules:
+- Always write `title` in English.
+- Always write `description` in English.
+- Keep `evidence` exactly as it appears in the document. Do not translate or normalize it.
+- For `suggestion`:
+  - If the fix is best expressed as a literal corrected replacement text, keep that replacement in the document's original language.
+  - If the fix is better expressed as an instruction rather than a literal replacement, write the instruction in English.
+- Do not let Chinese quoted examples or literal replacement text cause `title` or `description` to switch away from English.
+
 ---
 
 # 4. Rules

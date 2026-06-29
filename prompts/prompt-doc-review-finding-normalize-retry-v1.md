@@ -8,20 +8,12 @@ Requirements:
 - Treat `title`, `description`, and `suggestion` as potentially mixed-language fields. Do not assume one source language for the entire finding.
 - source_language must identify the dominant language context of the finding, but you must still normalize each field by role.
 - canonical_language must be "en".
-- canonical_title, canonical_description, and canonical_suggestion must be in natural English.
+- canonical_title and canonical_description must be in natural English.
 - Do not translate or modify evidence.
 - Do not translate or modify finding_type.
 - If the source language is non-English, copy the exact original prose into source_translation.
-- Do not echo non-English prose into canonical_* fields.
-- If `title` and `description` are already English but `suggestion` is a literal Chinese replacement string:
-  - keep `canonical_title` and `canonical_description` in English
-  - translate `canonical_suggestion` to English
-  - return `translations.zh.title` and `translations.zh.description` in Chinese
-  - keep the original Chinese literal replacement in `translations.zh.suggestion`
-- If `suggestion` is already English because the corrected document text itself should remain English:
-  - keep `canonical_suggestion` in English unchanged
-  - return `translations.zh.title` and `translations.zh.description` in Chinese
-  - keep `translations.zh.suggestion` in English unchanged
-- Do not leave `canonical_suggestion` in Chinese when canonical_language is `en`.
+- For canonical_suggestion: preserve non-English document content verbatim. Do NOT translate replacement text or alternatives written in the source document's language to English — that text is what the user must insert into their document. Only translate the reviewer's instruction language (e.g., "Delete the clause; rephrase as") if needed, but leave the non-English content as-is.
+- For each language L in `target_languages`, ALWAYS produce translations.<L>.suggestion as a complete sentence in L: translate any English instruction fragments ("Delete the clause", "finish the sentence after", "or rephrase as") to L, and keep embedded document content unchanged if it is already in L; if the embedded content is in a different language, translate it to L.
+- EXCEPTION: if `suggestion` must remain in its original language because the correction itself is a term, standard name, or heading that should stay as-is, keep translations.<L>.suggestion in that original form as well.
 
-Use the same JSON schema as the base normalization prompt.
+Use the same JSON schema as the base normalization prompt. Produce one entry in "translations" for every language listed in `target_languages`.
