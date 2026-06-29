@@ -158,12 +158,19 @@ INSERT INTO kb.doc_review_findings
      title, description, evidence, location, suggestion, confidence, metadata)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 
-	var inserted int64
-	for _, f := range findings {
-		prepared, err := prepareFindingForStorage(ctx, s.Translator, s.Languages, f)
+	preparedFindings, err := runConcurrent(ctx, maxDocReviewerTasks(len(findings)), len(findings), func(workerCtx context.Context, i int) (preparedFindingForStorage, error) {
+		prepared, err := prepareFindingForStorage(workerCtx, s.Translator, s.Languages, findings[i])
 		if err != nil {
-			return inserted, fmt.Errorf("prepare review finding for storage: %w", err)
+			return preparedFindingForStorage{}, fmt.Errorf("prepare review finding for storage: %w", err)
 		}
+		return prepared, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	var inserted int64
+	for _, prepared := range preparedFindings {
 		var evidence, location, suggestion any
 		if prepared.Canonical.Evidence != "" {
 			evidence = prepared.Canonical.Evidence

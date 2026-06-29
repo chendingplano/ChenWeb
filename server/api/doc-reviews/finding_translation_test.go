@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 type fakeFindingTranslator struct {
@@ -68,6 +69,44 @@ func (f *concurrencyFindingTranslator) TranslateFinding(ctx context.Context, lan
 		return out, nil
 	}
 	return FindingLocalizedContent{}, nil
+}
+
+type blockingJSONExtractor struct {
+	delay   time.Duration
+	current int32
+	maxSeen int32
+}
+
+func (f *blockingJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
+	cur := atomic.AddInt32(&f.current, 1)
+	defer atomic.AddInt32(&f.current, -1)
+	for {
+		max := atomic.LoadInt32(&f.maxSeen)
+		if cur <= max {
+			break
+		}
+		if atomic.CompareAndSwapInt32(&f.maxSeen, max, cur) {
+			break
+		}
+	}
+	time.Sleep(f.delay)
+	if in.CallReason == "normalize_doc_review_finding" {
+		return map[string]any{
+			"source_language":       "en",
+			"canonical_language":    "en",
+			"canonical_origin":      "original",
+			"canonical_title":       "Canonical title",
+			"canonical_description": "Canonical description.",
+			"canonical_suggestion":  "Canonical suggestion.",
+			"source_translation":    map[string]any{},
+		}, nil
+	}
+	return map[string]any{
+		"title":       "Localized title",
+		"description": "Localized description.",
+		"suggestion":  "Localized suggestion.",
+		"provenance":  "llm_translation",
+	}, nil
 }
 
 func TestTranslationFromMetadataReadsI18NEnvelope(t *testing.T) {
@@ -448,6 +487,141 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
 	}
 }
 
+func TestSaveFindingsPreparesTranslationsConcurrently(t *testing.T) {
+	t.Setenv("MAX_DOC_REVIEWER_TASKS", "2")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	translator := &concurrencyFindingTranslator{
+		normalizeOut: FindingNormalization{
+			SourceLanguage:           "en",
+			SourceLanguageConfidence: 0.95,
+			CanonicalLanguage:        "en",
+			CanonicalOrigin:          "original",
+			Canonical: FindingLocalizedContent{
+				Title:       "Canonical title",
+				Description: "Canonical description.",
+				Suggestion:  "Canonical suggestion.",
+			},
+		},
+		translateOut: map[string]FindingLocalizedContent{
+			"zh": {
+				Title:       "中文标题",
+				Description: "中文描述。",
+				Suggestion:  "中文建议。",
+			},
+		},
+		delay: 40 * time.Millisecond,
+	}
+	store := ReviewFindingsSQLStore{
+		DB:         db,
+		Translator: translator,
+		Languages:  []string{"en", "zh"},
+	}
+
+	for i := 0; i < 3; i++ {
+		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
+    (input_record_id, run_id, pass, aspect, severity, finding_type,
+     title, description, evidence, location, suggestion, confidence, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
+			WithArgs(
+				int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
+				"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(),
+			).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+
+	_, err = store.SaveFindings(context.Background(), 100, 200, []ReviewFinding{
+		{Pass: "P1", Aspect: "grammar_spelling", Severity: "medium", FindingType: "grammar", Title: "A", Description: "A desc", Evidence: "E1", Location: "L1", Suggestion: "S1", Confidence: 0.9},
+		{Pass: "P1", Aspect: "grammar_spelling", Severity: "medium", FindingType: "grammar", Title: "B", Description: "B desc", Evidence: "E2", Location: "L2", Suggestion: "S2", Confidence: 0.9},
+		{Pass: "P1", Aspect: "grammar_spelling", Severity: "medium", FindingType: "grammar", Title: "C", Description: "C desc", Evidence: "E3", Location: "L3", Suggestion: "S3", Confidence: 0.9},
+	})
+	if err != nil {
+		t.Fatalf("SaveFindings: %v", err)
+	}
+	if got := atomic.LoadInt32(&translator.maxSeen); got < 2 {
+		t.Fatalf("max concurrent translations=%d, want at least 2", got)
+	}
+	if got := atomic.LoadInt32(&translator.maxSeen); got > 2 {
+		t.Fatalf("max concurrent translations=%d, want at most 2", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestSaveFindingsNormalizesConcurrentlyWithDefaultTranslator(t *testing.T) {
+	t.Setenv("MAX_DOC_REVIEWER_TASKS", "2")
+	t.Setenv("TRANSLATION_MODEL_NAME", "test-model")
+	t.Setenv("REVIEW_FINDING_NORMALIZE_PROMPT", "prompt-doc-review-finding-normalize-v2.md")
+	t.Setenv("REVIEW_FINDING_NORMALIZE_RETRY_PROMPT", "prompt-doc-review-finding-normalize-retry-v1.md")
+
+	promptDir := t.TempDir()
+	t.Setenv("PROMPT_DIR", promptDir)
+	for _, name := range []string{
+		"prompt-doc-review-finding-normalize-v2.md",
+		"prompt-doc-review-finding-normalize-retry-v1.md",
+	} {
+		if err := os.WriteFile(filepath.Join(promptDir, name), []byte("test prompt"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", name, err)
+		}
+	}
+
+	extractor := &blockingJSONExtractor{delay: 40 * time.Millisecond}
+	oldBuilder := docprocessingBuildReviewerLLMClient
+	docprocessingBuildReviewerLLMClient = func(modelRef string) (LLMJSONExtractor, string, error) {
+		return extractor, "test-model", nil
+	}
+	defer func() {
+		docprocessingBuildReviewerLLMClient = oldBuilder
+	}()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	store := ReviewFindingsSQLStore{
+		DB:        db,
+		Languages: []string{"en"},
+	}
+
+	for i := 0; i < 3; i++ {
+		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
+    (input_record_id, run_id, pass, aspect, severity, finding_type,
+     title, description, evidence, location, suggestion, confidence, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
+			WithArgs(
+				int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
+				"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(),
+			).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+
+	_, err = store.SaveFindings(context.Background(), 100, 200, []ReviewFinding{
+		{Pass: "P1", Aspect: "grammar_spelling", Severity: "medium", FindingType: "grammar", Title: "A", Description: "A desc", Evidence: "E1", Location: "L1", Suggestion: "S1", Confidence: 0.9},
+		{Pass: "P1", Aspect: "grammar_spelling", Severity: "medium", FindingType: "grammar", Title: "B", Description: "B desc", Evidence: "E2", Location: "L2", Suggestion: "S2", Confidence: 0.9},
+		{Pass: "P1", Aspect: "grammar_spelling", Severity: "medium", FindingType: "grammar", Title: "C", Description: "C desc", Evidence: "E3", Location: "L3", Suggestion: "S3", Confidence: 0.9},
+	})
+	if err != nil {
+		t.Fatalf("SaveFindings: %v", err)
+	}
+	if got := atomic.LoadInt32(&extractor.maxSeen); got < 2 {
+		t.Fatalf("max concurrent normalizations=%d, want at least 2", got)
+	}
+	if got := atomic.LoadInt32(&extractor.maxSeen); got > 2 {
+		t.Fatalf("max concurrent normalizations=%d, want at most 2", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestFindingMetadataJSONRoundTrip(t *testing.T) {
 	meta := FindingMetadataEnvelope{
 		I18N: FindingI18NMetadata{
@@ -489,11 +663,11 @@ func TestNewLLMFindingTranslatorLoadsPromptsFromPromptDir(t *testing.T) {
 
 	promptDir := t.TempDir()
 	t.Setenv("PROMPT_DIR", promptDir)
+	t.Setenv("REVIEW_FINDING_NORMALIZE_PROMPT", "prompt-doc-review-finding-normalize-v2.md")
+	t.Setenv("REVIEW_FINDING_NORMALIZE_RETRY_PROMPT", "prompt-doc-review-finding-normalize-retry-v1.md")
 	for _, name := range []string{
-		"prompt-doc-review-finding-normalize-v1.md",
+		"prompt-doc-review-finding-normalize-v2.md",
 		"prompt-doc-review-finding-normalize-retry-v1.md",
-		"prompt-doc-review-finding-localize-v1.md",
-		"prompt-doc-review-finding-localize-retry-v1.md",
 	} {
 		if err := os.WriteFile(filepath.Join(promptDir, name), []byte("test prompt"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%s): %v", name, err)
@@ -525,9 +699,9 @@ func TestNormalizeFindingErrorIncludesOffendingFieldContent(t *testing.T) {
 				"provenance":  "original_extraction",
 			},
 		}},
-		modelName:                "test-model",
-		normalizePromptText:      "test prompt",
-		normalizeRetryPromptText: "retry prompt",
+		modelName:       "test-model",
+		promptText:      "test prompt",
+		retryPromptText: "retry prompt",
 	}
 
 	_, err := translator.NormalizeFinding(context.Background(), "en", FindingItem{

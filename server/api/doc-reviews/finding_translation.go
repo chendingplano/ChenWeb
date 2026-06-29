@@ -18,12 +18,10 @@ type FindingTranslator interface {
 }
 
 type llmFindingTranslator struct {
-	client                     LLMJSONExtractor
-	modelName                  string
-	normalizePromptText        string
-	normalizeRetryPromptText   string
-	translationPromptText      string
-	translationRetryPromptText string
+	client          LLMJSONExtractor
+	modelName       string
+	promptText      string
+	retryPromptText string
 }
 
 var errFindingTranslationUnavailable = errors.New("finding translation unavailable")
@@ -38,6 +36,7 @@ func newLLMFindingTranslator() (FindingTranslator, error) {
 	if modelRef == "" {
 		return nil, fmt.Errorf("%w: TRANSLATION_MODEL_NAME is not configured", errFindingTranslationUnavailable)
 	}
+
 	client, modelName, err := docprocessingBuildReviewerLLMClient(modelRef)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errFindingTranslationUnavailable, err)
@@ -51,35 +50,35 @@ func newLLMFindingTranslator() (FindingTranslator, error) {
 		return strings.TrimSpace(body), nil
 	}
 
-	normalizePromptText, err := loadPrompt("prompt-doc-review-finding-normalize-v1.md")
+	normalizePromptRef := strings.TrimSpace(os.Getenv("REVIEW_FINDING_NORMALIZE_PROMPT"))
+	if normalizePromptRef == "" {
+		return nil, fmt.Errorf("%w: REVIEW_FINDING_NORMALIZE_PROMPT is not configured", errFindingTranslationUnavailable)
+	}
+
+	normalizeRetryPromptRef := strings.TrimSpace(os.Getenv("REVIEW_FINDING_NORMALIZE_RETRY_PROMPT"))
+	if normalizeRetryPromptRef == "" {
+		return nil, fmt.Errorf("%w: REVIEW_FINDING_NORMALIZE_RETRY_PROMPT is not configured", errFindingTranslationUnavailable)
+	}
+
+	promptText, err := loadPrompt(normalizePromptRef)
 	if err != nil {
 		return nil, fmt.Errorf("%w: load normalization prompt: %v", errFindingTranslationUnavailable, err)
 	}
-	normalizeRetryPromptText, err := loadPrompt("prompt-doc-review-finding-normalize-retry-v1.md")
+	retryPromptText, err := loadPrompt(normalizeRetryPromptRef)
 	if err != nil {
 		return nil, fmt.Errorf("%w: load normalization retry prompt: %v", errFindingTranslationUnavailable, err)
 	}
-	translationPromptText, err := loadPrompt("prompt-doc-review-finding-localize-v1.md")
-	if err != nil {
-		return nil, fmt.Errorf("%w: load localization prompt: %v", errFindingTranslationUnavailable, err)
-	}
-	translationRetryPromptText, err := loadPrompt("prompt-doc-review-finding-localize-retry-v1.md")
-	if err != nil {
-		return nil, fmt.Errorf("%w: load localization retry prompt: %v", errFindingTranslationUnavailable, err)
-	}
 
 	return &llmFindingTranslator{
-		client:                     client,
-		modelName:                  modelName,
-		normalizePromptText:        normalizePromptText,
-		normalizeRetryPromptText:   normalizeRetryPromptText,
-		translationPromptText:      translationPromptText,
-		translationRetryPromptText: translationRetryPromptText,
+		client:          client,
+		modelName:       modelName,
+		promptText:      promptText,
+		retryPromptText: retryPromptText,
 	}, nil
 }
 
 func (t *llmFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLanguage string, finding FindingItem) (FindingNormalization, error) {
-	return t.normalizeFindingAttempt(ctx, canonicalLanguage, finding, findingNormalizationPromptName, t.normalizePromptText)
+	return t.normalizeFindingAttempt(ctx, canonicalLanguage, finding, findingNormalizationPromptName, t.promptText)
 }
 
 func (t *llmFindingTranslator) normalizeFindingAttempt(ctx context.Context, canonicalLanguage string, finding FindingItem, promptName string, promptText string) (FindingNormalization, error) {
@@ -117,7 +116,7 @@ func (t *llmFindingTranslator) normalizeFindingAttempt(ctx context.Context, cano
 	)
 	result := findingNormalizationFromMap(payload)
 	if !normalizationInCanonicalLanguage(result, canonicalLanguage) && promptName == findingNormalizationPromptName {
-		return t.normalizeFindingAttempt(ctx, canonicalLanguage, finding, findingNormalizationRetryPromptName, t.normalizeRetryPromptText)
+		return t.normalizeFindingAttempt(ctx, canonicalLanguage, finding, findingNormalizationRetryPromptName, t.retryPromptText)
 	}
 	if !normalizationInCanonicalLanguage(result, canonicalLanguage) {
 		return FindingNormalization{}, fmt.Errorf(
@@ -137,7 +136,7 @@ func (t *llmFindingTranslator) normalizeFindingAttempt(ctx context.Context, cano
 }
 
 func (t *llmFindingTranslator) TranslateFinding(ctx context.Context, language string, finding FindingItem) (FindingLocalizedContent, error) {
-	return t.translateFindingAttempt(ctx, language, finding, findingTranslationPromptName, t.translationPromptText)
+	return t.translateFindingAttempt(ctx, language, finding, findingTranslationPromptName, t.promptText)
 }
 
 func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, language string, finding FindingItem, promptName string, promptText string) (FindingLocalizedContent, error) {
@@ -171,7 +170,7 @@ func (t *llmFindingTranslator) translateFindingAttempt(ctx context.Context, lang
 	)
 	tr := findingLocalizedContentFromMap(payload)
 	if !translationInTargetLanguage(tr, language) && promptName == findingTranslationPromptName {
-		return t.translateFindingAttempt(ctx, language, finding, findingTranslationRetryPromptName, t.translationRetryPromptText)
+		return t.translateFindingAttempt(ctx, language, finding, findingTranslationRetryPromptName, t.retryPromptText)
 	}
 	if !translationInTargetLanguage(tr, language) {
 		return FindingLocalizedContent{}, fmt.Errorf("localized output not in target language %q", language)
