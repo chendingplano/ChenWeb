@@ -291,7 +291,7 @@ func supportedLanguageCode(language string) string {
 
 func compactDiagnosticText(s string) string {
 	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
-	const maxLen = 180
+	const maxLen = 500
 	if len(s) <= maxLen {
 		return s
 	}

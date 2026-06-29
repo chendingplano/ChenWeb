@@ -607,9 +607,9 @@ func resolveReviewerRuntime(logger ApiTypes.JimoLogger, aspect, group string) (
 		return nil, "", "", "", false
 	}
 
-	logger.Info("reviewer configured from doc-review config",
-		"aspect", aspect, "model_ref", resolved.ModelRef, "prompt_ref", resolved.PromptRef,
-		"enabled", resolved.Enabled, "max_tool_turns", resolved.MaxToolTurns)
+	// logger.Info("reviewer configured from doc-review config",
+	// 	"aspect", aspect, "model_ref", resolved.ModelRef, "prompt_ref", resolved.PromptRef,
+	// 	"enabled", resolved.Enabled, "max_tool_turns", resolved.MaxToolTurns)
 	return client, modelName, promptText, promptRef, true
 }
 
