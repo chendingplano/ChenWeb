@@ -134,6 +134,10 @@ func buildEvidenceRationaleWindows(lines []Line, docCtx string, size int) []evid
 	return windows
 }
 
+func (r *evidenceRationaleReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, evidenceRationaleWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *evidenceRationaleReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

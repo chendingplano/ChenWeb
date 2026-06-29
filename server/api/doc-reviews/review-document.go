@@ -44,6 +44,53 @@ const (
 // for a single LLM call. Configurable via InputBlockSize in ReviewerConfig.
 const DefaultInputBlockSize = 20
 
+// DefaultChunkInputSize is the number of lines per chunk for per-chunk reviewers
+// in the prompt-cache scheduler.
+const DefaultChunkInputSize = 200
+
+// chunkInput holds the lines JSON and line range for one per-chunk LLM call.
+// All per-chunk reviewers share this type so the prompt-cache scheduler can
+// build chunk inputs once and dispatch them across reviewers.
+type chunkInput struct {
+	inputJSON string
+	startLine int
+	endLine   int
+}
+
+// buildChunkInputs splits lines into fixed-size chunks, wrapping each in the
+// doc_context envelope. Used by the prompt-cache scheduler for all per-chunk
+// reviewers; size is typically DefaultChunkInputSize (200 lines).
+func buildChunkInputs(lines []Line, docCtx string, size int) []chunkInput {
+	if size <= 0 {
+		size = DefaultChunkInputSize
+	}
+	var chunks []chunkInput
+	for i := 0; i < len(lines); i += size {
+		end := min(i+size, len(lines))
+		slice := lines[i:end]
+		objs := rawLinesToJSON(slice)
+		jsonText := wrapLinesWithDocContext(objs, docCtx)
+		chunks = append(chunks, chunkInput{
+			inputJSON: jsonText,
+			startLine: slice[0].LineNo,
+			endLine:   slice[len(slice)-1].LineNo,
+		})
+	}
+	return chunks
+}
+
+// chunkReviewer is implemented by reviewers whose config input = "per-chunk".
+// The prompt-cache scheduler calls processChunk once per chunk input.
+type chunkReviewer interface {
+	processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding
+}
+
+// blockReviewer is implemented by reviewers whose config input = "per-block".
+// The prompt-cache scheduler calls processBlock once per page-aligned block.
+type blockReviewer interface {
+	processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) []ReviewFinding
+}
+
 // pageBlock holds one page-aligned segment of lines for document-level
 // reviewers that split large documents into blocks.
 type pageBlock struct {
@@ -98,6 +145,7 @@ func buildPageBlocks(lines []Line, docCtx string, blockSize int) []pageBlock {
 // ReviewerConfig configures one reviewer for a review run.
 type ReviewerConfig struct {
 	Enabled       bool     // whether this reviewer runs
+	Input         string   // "per-chunk" or "per-block"; drives prompt-cache scheduler dispatch
 	ModelName     string   // resolved model name
 	PromptText    string   // prompt body
 	PromptRef     string   // prompt file name (for logging)

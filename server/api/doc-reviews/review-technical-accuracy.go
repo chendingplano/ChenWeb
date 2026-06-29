@@ -116,6 +116,10 @@ func buildTechnicalAccuracyWindows(lines []Line, docCtx string, size int) []tech
 	return windows
 }
 
+func (r *technicalAccuracyReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, technicalAccuracyWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *technicalAccuracyReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

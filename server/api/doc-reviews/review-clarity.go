@@ -129,6 +129,10 @@ func buildClarityWindows(lines []Line, docCtx string, size int) []clarityWindow 
 	return windows
 }
 
+func (r *clarityReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, clarityWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *clarityReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

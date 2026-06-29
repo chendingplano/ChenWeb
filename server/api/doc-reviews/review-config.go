@@ -30,6 +30,7 @@ type ReviewAspectConfig struct {
 	Enabled       *bool    `toml:"enabled"`
 	Checked       *bool    `toml:"checked"`
 	Group         string   `toml:"group"`
+	Input         string   `toml:"input"` // "per-chunk" or "per-block"
 	Model         string   `toml:"model"`
 	Prompt        string   `toml:"prompt"`
 	MaxToolTurns  *int     `toml:"max_tool_turns"`

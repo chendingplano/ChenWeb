@@ -116,6 +116,10 @@ func buildPerformanceWindows(lines []Line, docCtx string, size int) []performanc
 	return windows
 }
 
+func (r *performanceReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, performanceWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *performanceReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

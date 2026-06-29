@@ -115,6 +115,10 @@ func buildErrorHandlingWindows(lines []Line, docCtx string, size int) []errorHan
 	return windows
 }
 
+func (r *errorHandlingReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, errorHandlingWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *errorHandlingReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

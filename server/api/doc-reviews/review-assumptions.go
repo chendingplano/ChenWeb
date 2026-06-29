@@ -114,6 +114,10 @@ func buildAssumptionsWindows(lines []Line, docCtx string, size int) []assumption
 	return windows
 }
 
+func (r *assumptionsReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, assumptionsWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *assumptionsReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

@@ -56,6 +56,7 @@ func TestBuildPromptCacheReviewTasksSharesInputKeysForSameWindow(t *testing.T) {
 		{
 			reviewer: &clarityReviewer{client: fake, logger: logger},
 			cfg: ReviewerConfig{
+				Input:      "per-chunk",
 				ModelName:  "deepseek-v4-flash",
 				PromptText: "clarity prompt",
 				PromptRef:  "prompt-review-clarity.md",
@@ -64,6 +65,7 @@ func TestBuildPromptCacheReviewTasksSharesInputKeysForSameWindow(t *testing.T) {
 		{
 			reviewer: &concisenessReviewer{client: fake, logger: logger},
 			cfg: ReviewerConfig{
+				Input:      "per-chunk",
 				ModelName:  "deepseek-v4-flash",
 				PromptText: "conciseness prompt",
 				PromptRef:  "prompt-review-conciseness.md",
@@ -110,27 +112,29 @@ func TestBuildPromptCacheReviewTasksSupportsAllCurrentReviewers(t *testing.T) {
 	rec := DocMetadataInputRecord{ID: 77, Title: "Cache Test"}
 	logger := loggerutil.CreateDefaultLogger("MID_CWB_REVIEW_CACHE_ALL_TEST")
 	fake := &fakeJSONExtractor{}
+	chunk := "per-chunk"
+	block := "per-block"
 	runners := []reviewRunner{
-		{reviewer: &grammarSpellingReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "grammar", PromptRef: "grammar.md"}},
-		{reviewer: &toneVoiceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "tone", PromptRef: "tone.md"}},
-		{reviewer: &formattingConsistencyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "format", PromptRef: "format.md"}},
-		{reviewer: &readabilityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "readability", PromptRef: "readability.md"}},
-		{reviewer: &localizationReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "localization", PromptRef: "localization.md"}},
-		{reviewer: &logicalFlowReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "logical", PromptRef: "logical.md"}},
-		{reviewer: &headingHierarchyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "heading", PromptRef: "heading.md"}},
-		{reviewer: &navigabilityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "nav", PromptRef: "nav.md"}},
-		{reviewer: &sectionBalanceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "balance", PromptRef: "balance.md"}},
-		{reviewer: &modularityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "modularity", PromptRef: "modularity.md"}},
-		{reviewer: &completenessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "completeness", PromptRef: "completeness.md"}},
-		{reviewer: &correctnessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "correctness", PromptRef: "correctness.md"}},
-		{reviewer: &clarityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "clarity", PromptRef: "clarity.md"}},
-		{reviewer: &concisenessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "conciseness", PromptRef: "conciseness.md"}},
-		{reviewer: &relevanceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "relevance", PromptRef: "relevance.md"}},
-		{reviewer: &currencyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "currency", PromptRef: "currency.md"}},
-		{reviewer: &examplesReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "examples", PromptRef: "examples.md"}},
-		{reviewer: &diagramsReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "diagrams", PromptRef: "diagrams.md"}},
-		{reviewer: &testableClaimsReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "claims", PromptRef: "claims.md"}},
-		{reviewer: &evidenceRationaleReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "evidence", PromptRef: "evidence.md"}},
+		{reviewer: &grammarSpellingReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "grammar", PromptRef: "grammar.md"}},
+		{reviewer: &toneVoiceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "tone", PromptRef: "tone.md"}},
+		{reviewer: &formattingConsistencyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "format", PromptRef: "format.md"}},
+		{reviewer: &readabilityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "readability", PromptRef: "readability.md"}},
+		{reviewer: &localizationReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "localization", PromptRef: "localization.md"}},
+		{reviewer: &logicalFlowReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "logical", PromptRef: "logical.md"}},
+		{reviewer: &headingHierarchyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "heading", PromptRef: "heading.md"}},
+		{reviewer: &navigabilityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "nav", PromptRef: "nav.md"}},
+		{reviewer: &sectionBalanceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "balance", PromptRef: "balance.md"}},
+		{reviewer: &modularityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "modularity", PromptRef: "modularity.md"}},
+		{reviewer: &completenessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "completeness", PromptRef: "completeness.md"}},
+		{reviewer: &correctnessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "correctness", PromptRef: "correctness.md"}},
+		{reviewer: &clarityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "clarity", PromptRef: "clarity.md"}},
+		{reviewer: &concisenessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "conciseness", PromptRef: "conciseness.md"}},
+		{reviewer: &relevanceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "relevance", PromptRef: "relevance.md"}},
+		{reviewer: &currencyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "currency", PromptRef: "currency.md"}},
+		{reviewer: &examplesReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "examples", PromptRef: "examples.md"}},
+		{reviewer: &diagramsReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "diagrams", PromptRef: "diagrams.md"}},
+		{reviewer: &testableClaimsReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "claims", PromptRef: "claims.md"}},
+		{reviewer: &evidenceRationaleReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "evidence", PromptRef: "evidence.md"}},
 	}
 
 	tasks, unsupported := buildPromptCacheReviewTasks(77, rec, lines, runners, nil)

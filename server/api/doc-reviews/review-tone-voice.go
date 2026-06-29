@@ -127,6 +127,10 @@ func buildToneVoiceWindows(lines []Line, docCtx string, size int) []toneVoiceWin
 	return windows
 }
 
+func (r *toneVoiceReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, toneVoiceWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *toneVoiceReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,
