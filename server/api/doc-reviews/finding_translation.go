@@ -98,22 +98,22 @@ func (t *llmFindingTranslator) normalizeFindingAttempt(ctx context.Context, cano
 	if err != nil {
 		return FindingNormalization{}, err
 	}
-	logger.Info("doc-review finding normalization start",
-		"model_name", t.modelName,
-		"prompt_name", promptName,
-		"canonical_language", canonicalLanguage,
-		"input_json", string(input),
-	)
+	// logger.Info("doc-review finding normalization start",
+	// 	"model_name", t.modelName,
+	// 	"prompt_name", promptName,
+	// 	"canonical_language", canonicalLanguage,
+	// 	"input_json", string(input),
+	// )
 	payload, err := t.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, promptName, promptText, t.modelName, string(input), "normalize_doc_review_finding", "MID-CWB-DR-NORMALIZE"))
 	if err != nil {
 		return FindingNormalization{}, err
 	}
-	logger.Info("doc-review finding normalization response",
-		"model_name", t.modelName,
-		"prompt_name", promptName,
-		"canonical_language", canonicalLanguage,
-		"response_json", compactJSONForLog(payload),
-	)
+	// logger.Info("doc-review finding normalization response",
+	// 	"model_name", t.modelName,
+	// 	"prompt_name", promptName,
+	// 	"canonical_language", canonicalLanguage,
+	// 	"response_json", compactJSONForLog(payload),
+	// )
 	result := findingNormalizationFromMap(payload)
 	if !normalizationInCanonicalLanguage(result, canonicalLanguage) && promptName == findingNormalizationPromptName {
 		return t.normalizeFindingAttempt(ctx, canonicalLanguage, finding, findingNormalizationRetryPromptName, t.retryPromptText)

@@ -99,7 +99,7 @@ max_tool_turns = 0
 
 [reviewers.localization]
 enabled = true
-checked = true
+checked = false
 group = "P1"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-localization.md"
@@ -124,7 +124,7 @@ max_tool_turns = 0
 
 [reviewers.toc_accuracy]
 enabled = true
-checked = true
+checked = false
 group = "P2"
 model = "deepseek-v4-flash"
 prompt = "prompt-review-toc-accuracy.md"
@@ -197,7 +197,7 @@ max_tool_turns = 5
 
 [reviewers.currency]
 enabled = true
-checked = true
+checked = false
 group = "P3"
 model = "deepseek-v4-pro"
 prompt = "prompt-review-currency.md"

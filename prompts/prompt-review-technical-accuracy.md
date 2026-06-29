@@ -73,6 +73,15 @@ Fields:
 - `suggestion`: concrete — give the correction if determinable, otherwise name what must be verified
 - `confidence`: 0.90+ for errors verifiable from the passage itself (broken arithmetic, wrong syntax, invalid API usage). 0.70–0.89 for likely errors requiring domain knowledge. Below 0.70 omit.
 
+Output language rules:
+- Always write `title` in English.
+- Always write `description` in English.
+- Keep `evidence` exactly as it appears in the document. Do not translate or normalize it.
+- For `suggestion`:
+  - If the fix is best expressed as a literal corrected replacement text, keep that replacement in the document's original language.
+  - If the fix is better expressed as an instruction rather than a literal replacement, write the instruction in English.
+- Do not let Chinese quoted examples or literal replacement text cause `title` or `description` to switch away from English.
+
 ---
 
 # 4. Rules

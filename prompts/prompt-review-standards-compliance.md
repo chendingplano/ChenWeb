@@ -72,6 +72,15 @@ Fields:
 - `suggestion`: concrete — e.g. "Add a calibration record reference per ISO 13485 §7.6.1"
 - `confidence`: 0.90+ for clear gaps provable from the document text and the standard's stated requirements. 0.70–0.89 for likely gaps that may be addressed elsewhere. Below 0.70 omit.
 
+Output language rules:
+- Always write `title` in English.
+- Always write `description` in English.
+- Keep `evidence` exactly as it appears in the document. Do not translate or normalize it.
+- For `suggestion`:
+  - If the fix is best expressed as a literal corrected replacement text, keep that replacement in the document's original language.
+  - If the fix is better expressed as an instruction rather than a literal replacement, write the instruction in English.
+- Do not let Chinese quoted examples or literal replacement text cause `title` or `description` to switch away from English.
+
 ---
 
 # 4. Rules

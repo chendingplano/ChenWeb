@@ -73,6 +73,15 @@ Fields:
 - `suggestion`: a concrete rebalancing — "expand §4 to cover the validation procedure", "split the 'Background' section and move detail to an appendix", "give each procedure step comparable coverage"
 - `confidence`: 0.0–1.0. 0.90+ for clear stubs/bloat, 0.70–0.89 for likely imbalance, below 0.70 omit
 
+Output language rules:
+- Always write `title` in English.
+- Always write `description` in English.
+- Keep `evidence` exactly as it appears in the document. Do not translate or normalize it.
+- For `suggestion`:
+  - If the fix is best expressed as a literal corrected replacement text, keep that replacement in the document's original language.
+  - If the fix is better expressed as an instruction rather than a literal replacement, write the instruction in English.
+- Do not let Chinese quoted examples or literal replacement text cause `title` or `description` to switch away from English.
+
 ---
 
 # 4. Rules

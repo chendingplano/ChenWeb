@@ -72,6 +72,15 @@ Fields:
 - `suggestion`: concrete and measurable — e.g. "Add: 'The system shall process ≥ 1000 messages/second at p99 latency ≤ 50 ms under nominal load.'"
 - `confidence`: 0.85+ for clearly missing or clearly wrong performance requirements. 0.70–0.84 for probable issues that depend on domain context. Below 0.70 omit.
 
+Output language rules:
+- Always write `title` in English.
+- Always write `description` in English.
+- Keep `evidence` exactly as it appears in the document. Do not translate or normalize it.
+- For `suggestion`:
+  - If the fix is best expressed as a literal corrected replacement text, keep that replacement in the document's original language.
+  - If the fix is better expressed as an instruction rather than a literal replacement, write the instruction in English.
+- Do not let Chinese quoted examples or literal replacement text cause `title` or `description` to switch away from English.
+
 ---
 
 # 4. Rules

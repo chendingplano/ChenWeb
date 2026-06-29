@@ -73,6 +73,15 @@ Fields:
 - `suggestion`: concrete — e.g. "Replace with an environment variable reference: `API_KEY = os.environ['API_KEY']`", "Set `verify=True` (the default) and provide the CA bundle"
 - `confidence`: 0.90+ for clear, verifiable security issues (hard-coded secrets, disabled TLS, known-weak algorithms). 0.70–0.89 for probable issues requiring context. Below 0.70 omit.
 
+Output language rules:
+- Always write `title` in English.
+- Always write `description` in English.
+- Keep `evidence` exactly as it appears in the document. Do not translate or normalize it.
+- For `suggestion`:
+  - If the fix is best expressed as a literal corrected replacement text, keep that replacement in the document's original language.
+  - If the fix is better expressed as an instruction rather than a literal replacement, write the instruction in English.
+- Do not let Chinese quoted examples or literal replacement text cause `title` or `description` to switch away from English.
+
 ---
 
 # 4. Rules

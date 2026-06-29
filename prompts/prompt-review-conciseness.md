@@ -75,6 +75,15 @@ Fields:
 - `suggestion`: the concise replacement — e.g. "Replace 'in order to verify that' with 'to verify'", "Delete the opening clause; begin with 'The device must…'"
 - `confidence`: 0.0–1.0. 0.85+ for clear cases (textbook redundant phrases, classic tautologies, obvious padding openers). 0.70–0.84 for cases that depend on context (some hedging may be intentional). Below 0.70 omit
 
+Output language rules:
+- Always write `title` in English.
+- Always write `description` in English.
+- Keep `evidence` exactly as it appears in the document. Do not translate or normalize it.
+- For `suggestion`:
+  - If the fix is best expressed as a literal corrected replacement text, keep that replacement in the document's original language.
+  - If the fix is better expressed as an instruction rather than a literal replacement, write the instruction in English.
+- Do not let Chinese quoted examples or literal replacement text cause `title` or `description` to switch away from English.
+
 ---
 
 # 4. Rules
