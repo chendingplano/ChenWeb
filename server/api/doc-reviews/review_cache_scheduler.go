@@ -51,10 +51,11 @@ type reviewTaskResult struct {
 // per-chunk batchID=0 and per-block batchID=1). The three phases:
 //
 //  1. All seed reviewer tasks (from both batches) fire concurrently, planting
-//     every input's prefix into DeepSeek's cache.
-//  2. Wait LLM_CALL_STAGGER seconds (single stagger) for DeepSeek to persist.
+//     every input's prefix into DeepSeek's cache. Seeds keep running.
+//  2. Wait LLM_CALL_STAGGER seconds for DeepSeek to persist the prefixes.
+//     Seeds continue running concurrently during this wait.
 //  3. All remaining reviewer tasks (both batches) fire concurrently (bounded
-//     by maxTasks), hitting the now-warm cache.
+//     by maxTasks), hitting the now-warm cache. Seeds may still be running.
 func runReviewTasksForPromptCache(ctx context.Context, maxTasks int, tasks []reviewTask) ([]ReviewFinding, []error) {
 	if len(tasks) == 0 {
 		return nil, nil
@@ -83,27 +84,25 @@ func runReviewTasksForPromptCache(ctx context.Context, maxTasks int, tasks []rev
 		}
 	}
 
-	// Phase 1: all seeds (chunk + block) fire concurrently.
-	var seedWg sync.WaitGroup
+	var allWg sync.WaitGroup
+
+	// Phase 1: fire all seeds concurrently; do NOT wait for completion.
+	// Seeds keep running while the stagger timer counts down.
 	for _, i := range seedIdxs {
-		seedWg.Go(func() {
-			results[i] = runPromptCacheReviewTask(ctx, tasks[i])
-		})
+		allWg.Add(1)
+		go func(idx int) {
+			defer allWg.Done()
+			results[idx] = runPromptCacheReviewTask(ctx, tasks[idx])
+		}(i)
 	}
-	seedWg.Wait()
 
 	if len(remainIdxs) == 0 {
+		allWg.Wait()
 		return collectPromptCacheResults(results)
 	}
 
-	if isCtxStopped(ctx) {
-		for _, i := range remainIdxs {
-			results[i] = reviewTaskResult{err: ErrPipelineStopped}
-		}
-		return collectPromptCacheResults(results)
-	}
-
-	// Phase 2: single stagger for DeepSeek to persist the cached prefixes.
+	// Phase 2: wait LLM_CALL_STAGGER for DeepSeek to persist the cached prefixes.
+	// Seeds continue running concurrently during this sleep.
 	if stagger > 0 {
 		select {
 		case <-time.After(stagger):
@@ -111,30 +110,41 @@ func runReviewTasksForPromptCache(ctx context.Context, maxTasks int, tasks []rev
 			for _, i := range remainIdxs {
 				results[i] = reviewTaskResult{err: ErrPipelineStopped}
 			}
+			allWg.Wait()
 			return collectPromptCacheResults(results)
 		}
 	}
 
-	// Phase 3: all remaining (chunk + block) fire concurrently.
-	var remainWg sync.WaitGroup
+	if isCtxStopped(ctx) {
+		for _, i := range remainIdxs {
+			results[i] = reviewTaskResult{err: ErrPipelineStopped}
+		}
+		allWg.Wait()
+		return collectPromptCacheResults(results)
+	}
+
+	// Phase 3: fire all remaining (chunk + block) concurrently.
+	// Seeds may still be running; all goroutines complete before we return.
 	for _, i := range remainIdxs {
 		if isCtxStopped(ctx) {
 			results[i] = reviewTaskResult{err: ErrPipelineStopped}
 			continue
 		}
-		remainWg.Go(func() {
+		allWg.Add(1)
+		go func(idx int) {
+			defer allWg.Done()
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
-				results[i] = reviewTaskResult{err: ErrPipelineStopped}
+				results[idx] = reviewTaskResult{err: ErrPipelineStopped}
 				return
 			}
 			defer func() { <-sem }()
-			results[i] = runPromptCacheReviewTask(ctx, tasks[i])
-		})
+			results[idx] = runPromptCacheReviewTask(ctx, tasks[idx])
+		}(i)
 	}
-	remainWg.Wait()
 
+	allWg.Wait()
 	return collectPromptCacheResults(results)
 }
 
