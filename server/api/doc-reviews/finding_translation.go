@@ -368,17 +368,10 @@ func translationFromMetadata(raw []byte, language string) (FindingTranslation, b
 		return FindingTranslation{}, false
 	}
 	var env FindingMetadataEnvelope
-	if err := json.Unmarshal(raw, &env); err == nil {
-		if tr, ok := env.I18N.Translations[language]; ok && (tr.Title != "" || tr.Description != "" || tr.Suggestion != "") {
-			return tr, true
-		}
-	}
-
-	var legacy map[string]FindingTranslation
-	if err := json.Unmarshal(raw, &legacy); err != nil {
+	if err := json.Unmarshal(raw, &env); err != nil {
 		return FindingTranslation{}, false
 	}
-	tr, ok := legacy[language]
+	tr, ok := env.I18N.Translations[language]
 	if !ok || (tr.Title == "" && tr.Description == "" && tr.Suggestion == "") {
 		return FindingTranslation{}, false
 	}

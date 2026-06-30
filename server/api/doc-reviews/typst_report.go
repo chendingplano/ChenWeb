@@ -122,7 +122,7 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 		statLines = append(statLines, fmt.Sprintf("    (aspect: \"%s\", count: %d),", typStr(label), len(pg.Findings)))
 	}
 
-	// ── aspects (one section per pass) ───────────────────────────
+	// ── Package-level sections (hierarchical: L1 package → L2 aspects) ──
 	var aspectLines []string
 	findingIdx := 0
 	for _, p := range skeleton.PassOrder {
@@ -132,82 +132,95 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 			label = p
 		}
 
-		var findingBlocks []string
-		var highCount int
+		// ── Package heading (Level 1) ──
+		aspectLines = append(aspectLines, fmt.Sprintf(`  heading(level: 1, "%s"),`, typStr(label)))
+
+		// ── Group findings by aspect within this package ──
+		aspectFindingMap := map[string][]ReportFinding{}
+		var aspectSlugs []string
 		aspectSeen := map[string]bool{}
-		var distinctAspects []string
-
 		for _, f := range pg.Findings {
-			findingIdx++
-			fid := fmt.Sprintf("F-%02d", findingIdx)
-
-			var blockB strings.Builder
-			fmt.Fprintf(&blockB, "      review-finding(\n")
-			fmt.Fprintf(&blockB, "        id: \"%s\",\n", typStr(fid))
-
-			// Emit sources array — one dict per source location group.
-			fmt.Fprintf(&blockB, "        sources: (")
-			if len(f.Sources) > 0 {
-				fmt.Fprintf(&blockB, "\n")
-				for _, sc := range f.Sources {
-					fmt.Fprintf(&blockB, "          (\n")
-					if sc.Before != "" {
-						fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))
-					} else {
-						fmt.Fprintf(&blockB, "            before: none,\n")
-					}
-					fmt.Fprintf(&blockB, "            source: [%s],\n", typLines(sc.Source))
-					if sc.After != "" {
-						fmt.Fprintf(&blockB, "            after: [%s],\n", typLines(sc.After))
-					} else {
-						fmt.Fprintf(&blockB, "            after: none,\n")
-					}
-					fmt.Fprintf(&blockB, "          ),\n")
-				}
-				fmt.Fprintf(&blockB, "        ")
-			}
-			fmt.Fprintf(&blockB, "),\n")
-
-			fmt.Fprintf(&blockB, "        errors: [%s],\n", typContent(f.Title))
-			fmt.Fprintf(&blockB, "        explanation: [%s],\n", typContent(f.Description))
-			fmt.Fprintf(&blockB, "        correction: [%s],\n", typContent(f.Suggestion))
-			fmt.Fprintf(&blockB, "      ),")
-			block := blockB.String()
-			findingBlocks = append(findingBlocks, block)
-
-			if f.Severity == "high" {
-				highCount++
-			}
 			if !aspectSeen[f.Aspect] {
 				aspectSeen[f.Aspect] = true
-				distinctAspects = append(distinctAspects, f.Aspect)
+				aspectSlugs = append(aspectSlugs, f.Aspect)
 			}
+			aspectFindingMap[f.Aspect] = append(aspectFindingMap[f.Aspect], f)
 		}
 
-		assessment := buildAssessment(len(pg.Findings), highCount)
-		problems := buildProblems(distinctAspects)
-		guidelines := buildGuidelines(pg.Findings)
+		// ── One aspect-section per aspect (Level 2) ──
+		for _, aspect := range aspectSlugs {
+			af := aspectFindingMap[aspect]
+			var findingBlocks []string
+			var aspectHighCount int
 
-		var findingsArg string
-		if len(findingBlocks) > 0 {
-			findingsArg = "\n" + strings.Join(findingBlocks, "\n") + "\n    "
+			for _, f := range af {
+				findingIdx++
+				fid := fmt.Sprintf("F-%02d", findingIdx)
+
+				var blockB strings.Builder
+				fmt.Fprintf(&blockB, "      review-finding(\n")
+				fmt.Fprintf(&blockB, "        id: \"%s\",\n", typStr(fid))
+
+				// Emit sources array — one dict per source location group.
+				fmt.Fprintf(&blockB, "        sources: (")
+				if len(f.Sources) > 0 {
+					fmt.Fprintf(&blockB, "\n")
+					for _, sc := range f.Sources {
+						fmt.Fprintf(&blockB, "          (\n")
+						if sc.Before != "" {
+							fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))
+						} else {
+							fmt.Fprintf(&blockB, "            before: none,\n")
+						}
+						fmt.Fprintf(&blockB, "            source: [%s],\n", typLines(sc.Source))
+						if sc.After != "" {
+							fmt.Fprintf(&blockB, "            after: [%s],\n", typLines(sc.After))
+						} else {
+							fmt.Fprintf(&blockB, "            after: none,\n")
+						}
+						fmt.Fprintf(&blockB, "          ),\n")
+					}
+					fmt.Fprintf(&blockB, "        ")
+				}
+				fmt.Fprintf(&blockB, "),\n")
+
+				fmt.Fprintf(&blockB, "        errors: [%s],\n", typContent(f.Title))
+				fmt.Fprintf(&blockB, "        explanation: [%s],\n", typContent(f.Description))
+				fmt.Fprintf(&blockB, "        correction: [%s],\n", typContent(f.Suggestion))
+				fmt.Fprintf(&blockB, "      ),")
+				block := blockB.String()
+				findingBlocks = append(findingBlocks, block)
+
+				if f.Severity == "high" {
+					aspectHighCount++
+				}
+			}
+
+			assessment := buildAssessment(len(af), aspectHighCount)
+			problems := buildProblems([]string{aspect})
+			guidelines := buildGuidelines(af)
+
+			var findingsArg string
+			if len(findingBlocks) > 0 {
+				findingsArg = "\n" + strings.Join(findingBlocks, "\n") + "\n    "
+			}
+
+			section := fmt.Sprintf(
+				"    aspect-section(\n"+
+					"      title: \"%s\",\n"+
+					"      findings: (%s),\n"+
+					"      assessment: [%s],\n"+
+					"      problems: [%s],\n"+
+					"      guidelines: [%s],\n"+
+					"    ),",
+				typStr(aspect),
+				findingsArg,
+				typContent(assessment),
+				typContent(problems),
+				typContent(guidelines),
+			)
+			aspectLines = append(aspectLines, section)
 		}
-
-		section := fmt.Sprintf(
-			"    aspect-section(\n"+
-				"      title: \"%s\",\n"+
-				"      findings: (%s),\n"+
-				"      assessment: [%s],\n"+
-				"      problems: [%s],\n"+
-				"      guidelines: [%s],\n"+
-				"    ),",
-			typStr(label),
-			findingsArg,
-			typContent(assessment),
-			typContent(problems),
-			typContent(guidelines),
-		)
-		aspectLines = append(aspectLines, section)
 	}
 
 	// ── grounding refs (from reference documents) ─────────────────

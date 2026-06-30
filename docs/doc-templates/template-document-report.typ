@@ -169,7 +169,7 @@
   problems: [],
   guidelines: [],
 ) = {
-  heading(level: 3, title)
+  heading(level: 2, title)
 
   if findings.len() > 0 {
     for f in findings {
@@ -324,6 +324,10 @@
     v(1cm)
   })
 
+  // ── Table of Contents ───────────────────────────────────────
+  heading(level: 1, "Table of Contents")
+  outline()
+
   // ── Chapter 1 – Basic Information ───────────────────────────
   heading(level: 1, "Basic Information")
 
@@ -374,8 +378,9 @@
     )
   }
 
-  // 2.3 One section per aspect
-  heading(level: 2, "Findings by Aspect")
+  // ── Package and aspect sections ─────────────────────────────
+  // Each content block in `aspects` contains a Level 1 heading for the
+  // package name followed by Level 2 headings for its individual aspects.
   if aspects.len() > 0 {
     for a in aspects { a }
   } else {

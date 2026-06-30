@@ -1,5 +1,7 @@
 package docreviews
 
+import "encoding/json"
+
 // SubmitRequestInput is the request body for POST /api/v1/doc-review/requests.
 type SubmitRequestInput struct {
 	InputRecordID  int64                    `json:"input_record_id"`
@@ -99,9 +101,86 @@ type FindingI18NMetadata struct {
 	Translations             map[string]FindingLocalizedContent `json:"translations,omitempty"`
 }
 
+// findingMetadataReservedKeys are the top-level scalar keys in the flat metadata format.
+// Any key not in this set is treated as a language code whose value is a FindingLocalizedContent.
+var findingMetadataReservedKeys = map[string]bool{
+	"schema_version":             true,
+	"source_language":            true,
+	"source_language_confidence": true,
+	"canonical_language":         true,
+	"canonical_origin":           true,
+}
+
 // FindingMetadataEnvelope is stored in kb.doc_review_findings.metadata.
+// JSON format: flat — metadata fields and language codes at the top level (see ADR 2026063001).
+// Legacy format: {"i18n": {...}} — still readable but never written.
 type FindingMetadataEnvelope struct {
-	I18N FindingI18NMetadata `json:"i18n"`
+	I18N FindingI18NMetadata
+}
+
+func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
+	m := make(map[string]any, len(e.I18N.Translations)+5)
+	m["schema_version"] = e.I18N.SchemaVersion
+	if e.I18N.SourceLanguage != "" {
+		m["source_language"] = e.I18N.SourceLanguage
+	}
+	if e.I18N.SourceLanguageConfidence != 0 {
+		m["source_language_confidence"] = e.I18N.SourceLanguageConfidence
+	}
+	if e.I18N.CanonicalLanguage != "" {
+		m["canonical_language"] = e.I18N.CanonicalLanguage
+	}
+	if e.I18N.CanonicalOrigin != "" {
+		m["canonical_origin"] = e.I18N.CanonicalOrigin
+	}
+	for lang, content := range e.I18N.Translations {
+		m[lang] = content
+	}
+	return json.Marshal(m)
+}
+
+func (e *FindingMetadataEnvelope) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	// Legacy format: {"i18n": {"translations": {...}, ...}}
+	if i18nRaw, ok := raw["i18n"]; ok {
+		return json.Unmarshal(i18nRaw, &e.I18N)
+	}
+	// Flat format: metadata fields + language codes at top level.
+	if sv, ok := raw["schema_version"]; ok {
+		_ = json.Unmarshal(sv, &e.I18N.SchemaVersion)
+	}
+	if sl, ok := raw["source_language"]; ok {
+		_ = json.Unmarshal(sl, &e.I18N.SourceLanguage)
+	}
+	if slc, ok := raw["source_language_confidence"]; ok {
+		_ = json.Unmarshal(slc, &e.I18N.SourceLanguageConfidence)
+	}
+	if cl, ok := raw["canonical_language"]; ok {
+		_ = json.Unmarshal(cl, &e.I18N.CanonicalLanguage)
+	}
+	if co, ok := raw["canonical_origin"]; ok {
+		_ = json.Unmarshal(co, &e.I18N.CanonicalOrigin)
+	}
+	for key, val := range raw {
+		if findingMetadataReservedKeys[key] {
+			continue
+		}
+		var content FindingLocalizedContent
+		if err := json.Unmarshal(val, &content); err != nil {
+			continue
+		}
+		if content.Title == "" && content.Description == "" && content.Suggestion == "" {
+			continue
+		}
+		if e.I18N.Translations == nil {
+			e.I18N.Translations = make(map[string]FindingLocalizedContent)
+		}
+		e.I18N.Translations[key] = content
+	}
+	return nil
 }
 
 // FindingNormalization is the result of converting reviewer output into a

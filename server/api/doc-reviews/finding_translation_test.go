@@ -645,12 +645,50 @@ func TestFindingMetadataJSONRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
+	// Verify flat format: no "i18n" wrapper, schema_version at top, language codes at top.
+	var flat map[string]json.RawMessage
+	if err := json.Unmarshal(body, &flat); err != nil {
+		t.Fatalf("unmarshal flat check: %v", err)
+	}
+	if _, hasI18N := flat["i18n"]; hasI18N {
+		t.Fatal("marshaled output has unexpected 'i18n' wrapper key")
+	}
+	if _, ok := flat["schema_version"]; !ok {
+		t.Fatal("marshaled output missing 'schema_version'")
+	}
+	if _, ok := flat["zh"]; !ok {
+		t.Fatal("marshaled output missing top-level 'zh' language key")
+	}
+	if _, ok := flat["source_language"]; !ok {
+		t.Fatal("marshaled output missing 'source_language'")
+	}
+	// Round-trip: unmarshal back and check values.
 	var roundTrip FindingMetadataEnvelope
 	if err := json.Unmarshal(body, &roundTrip); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if roundTrip.I18N.Translations["zh"].Title != "中文标题" {
 		t.Fatalf("roundTrip zh title=%q", roundTrip.I18N.Translations["zh"].Title)
+	}
+	if roundTrip.I18N.SourceLanguage != "zh" {
+		t.Fatalf("roundTrip source_language=%q", roundTrip.I18N.SourceLanguage)
+	}
+	if roundTrip.I18N.CanonicalOrigin != "translated" {
+		t.Fatalf("roundTrip canonical_origin=%q", roundTrip.I18N.CanonicalOrigin)
+	}
+}
+
+func TestTranslationFromMetadataReadsFlatSchemaV1Format(t *testing.T) {
+	raw := []byte(`{"schema_version":1,"source_language":"en","source_language_confidence":1,"canonical_language":"en","canonical_origin":"original","en":{"title":"Laboratory","description":"Missing initial L.","suggestion":"Correct the spelling.","provenance":"canonical"},"zh":{"title":"标题","description":"描述","suggestion":"建议","provenance":"llm_translation"}}`)
+	tr, ok := translationFromMetadata(raw, "zh")
+	if !ok {
+		t.Fatal("translationFromMetadata ok=false, want true")
+	}
+	if tr.Title != "标题" || tr.Description != "描述" || tr.Suggestion != "建议" {
+		t.Fatalf("translation=%#v", tr)
+	}
+	if tr.Provenance != "llm_translation" {
+		t.Fatalf("provenance=%q", tr.Provenance)
 	}
 }
 

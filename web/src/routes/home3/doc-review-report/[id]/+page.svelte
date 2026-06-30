@@ -297,6 +297,8 @@
 		}
 	}
 
+	const LANG_STORAGE_KEY = 'doc-review-language';
+
 	async function load() {
 		loading = true;
 		errorMsg = '';
@@ -306,10 +308,12 @@
 				languages = configuredLanguages.length > 0 ? configuredLanguages : ['en'];
 				if (!languages.includes(selectedLanguage)) {
 					selectedLanguage = languages[0] ?? 'en';
+					localStorage.setItem(LANG_STORAGE_KEY, selectedLanguage);
 				}
 			} catch {
 				languages = ['en'];
 				selectedLanguage = 'en';
+				localStorage.setItem(LANG_STORAGE_KEY, 'en');
 			}
 			const report = await getReport(reportId);
 			inputRecordId = report?.input_record_id ?? report?.report_json?.meta?.document_record_id ?? null;
@@ -344,6 +348,7 @@
 	}
 
 	async function reloadFindingsForLanguage() {
+		localStorage.setItem(LANG_STORAGE_KEY, selectedLanguage);
 		languageLoading = true;
 		console.info('[doc-review-report] reloading findings for language', {
 			reportId,
@@ -481,6 +486,8 @@
 	}
 
 	onMount(() => {
+		const stored = localStorage.getItem(LANG_STORAGE_KEY);
+		if (stored) selectedLanguage = stored;
 		void load();
 		// Initial left panel: 45% minus 200px so the PDF gets more room by default.
 		if (containerEl) {
