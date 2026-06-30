@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode"
+
+	"github.com/chendingplano/shared/go/api/ApiUtils"
 )
 
 // FindingTranslator normalizes findings into canonical English and localizes
@@ -90,7 +93,13 @@ func (t *llmFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLa
 	return t.normalizeFindingAttempt(ctx, canonicalLanguage, targetLanguages, finding, t.normalizePromptName, t.normalizePromptText)
 }
 
-func (t *llmFindingTranslator) normalizeFindingAttempt(ctx context.Context, canonicalLanguage string, targetLanguages []string, finding FindingItem, promptName string, promptText string) (FindingNormalization, error) {
+func (t *llmFindingTranslator) normalizeFindingAttempt(
+	ctx context.Context, 
+	canonicalLanguage string, 
+	targetLanguages []string, 
+	finding FindingItem, 
+	promptName string, 
+	promptText string) (FindingNormalization, error) {
 	input, err := json.Marshal(map[string]any{
 		"canonical_language": canonicalLanguage,
 		"target_languages":   targetLanguages,
@@ -108,21 +117,27 @@ func (t *llmFindingTranslator) normalizeFindingAttempt(ctx context.Context, cano
 	if err != nil {
 		return FindingNormalization{}, err
 	}
-	logger.Info("doc-review finding normalization start",
+	call_id := ApiUtils.GenerateSecureToken(5)
+	startTime := time.Now()
+
+	logger.Info("doc-review translation start",
 		"model_name", t.modelName,
 		"prompt_name", promptName,
 		"canonical_language", canonicalLanguage,
+		"call_id", call_id,
 		"input_json", string(input),
 	)
 	payload, err := t.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, promptName, promptText, t.modelName, string(input), "normalize_doc_review_finding", "MID-CWB-DR-NORMALIZE"))
 	if err != nil {
 		return FindingNormalization{}, err
 	}
-	logger.Info("doc-review finding normalization response",
+	logger.Info("doc-review translation end  ",
 		"model_name", t.modelName,
 		"prompt_name", promptName,
 		"canonical_language", canonicalLanguage,
+		"call_id", call_id,
 		"response_json", compactJSONForLog(payload),
+		"ms_used", time.Since(startTime).Milliseconds(),
 	)
 	result := findingNormalizationFromMap(payload)
 	if !normalizationInCanonicalLanguage(result, canonicalLanguage) && promptName == t.normalizePromptName {
@@ -300,7 +315,7 @@ func supportedLanguageCode(language string) string {
 
 func compactDiagnosticText(s string) string {
 	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
-	const maxLen = 500
+	const maxLen = 5000
 	if len(s) <= maxLen {
 		return s
 	}
