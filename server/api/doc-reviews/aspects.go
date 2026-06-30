@@ -71,6 +71,9 @@ func listAspectsBase() []AspectInfo {
 		{Name: "performance", Group: "P5", Label: "Performance", Priority: "Should Review", Description: "Evaluates performance implications.", DefaultModel: "claude-sonnet-4-6", IsToolUse: true},
 		{Name: "error_handling", Group: "P5", Label: "Error Handling", Priority: "Should Review", Description: "Checks if error scenarios are addressed.", DefaultModel: "claude-sonnet-4-6", IsToolUse: true},
 		{Name: "limitations", Group: "P5", Label: "Limitations", Priority: "Should Review", Description: "Identifies undocumented limitations.", DefaultModel: "claude-sonnet-4-6", IsToolUse: true},
+		{Name: "metrics", Group: "P5", Label: "Metric Consistency", Priority: "Review for Regulated", Description: "Cross-document check: flags conflicting metric values, units, or thresholds against related metrics in other documents.", DefaultModel: "deepseek-v4-pro"},
+		{Name: "provisions", Group: "P5", Label: "Provision Consistency", Priority: "Review for Regulated", Description: "Cross-document check: flags contradictory or conflicting provisions (requirements, prohibitions) against related provisions in other documents.", DefaultModel: "deepseek-v4-pro"},
+		{Name: "entities", Group: "P5", Label: "Entity Consistency", Priority: "Review for Regulated", Description: "Cross-document check: flags conflicting entity types, definitions, or attributes for the same real-world entity against related entities in other documents.", DefaultModel: "deepseek-v4-pro"},
 
 		// P6 — Meta & Process
 		{Name: "version_history", Group: "P6", Label: "Version History", Priority: "Should Review", Description: "Checks if version history is complete.", DefaultModel: "claude-sonnet-4-6"},

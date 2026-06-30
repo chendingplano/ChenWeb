@@ -294,6 +294,46 @@ prompt = "prompt-review-requirement-traceability.md"
 max_tool_turns = 8
 
 # P5 — Technical & Compliance
+# metrics is an artifact-based, cross-document reviewer (ADR 2026063002): it compares
+# the document's extracted metrics against semantically-related metrics in OTHER
+# documents, rather than reading the document text. input="artifact" routes it to the
+# direct ReviewDocument path (not the per-chunk/per-block scheduler); it is not tool-using.
+[reviewers.metrics]
+enabled = true
+checked = true
+group = "P5"
+input = "artifact"
+model = "deepseek-v4-pro"
+prompt = "prompt-review-metrics-v1.md"
+max_tool_turns = 0
+
+[reviewers.provisions]
+enabled = true
+checked = true
+group = "P5"
+input = "artifact"
+model = "deepseek-v4-pro"
+prompt = "prompt-review-provisions-v1.md"
+max_tool_turns = 0
+
+[reviewers.entities]
+enabled = true
+checked = true
+group = "P5"
+input = "artifact"
+model = "deepseek-v4-pro"
+prompt = "prompt-review-entities-v1.md"
+max_tool_turns = 0
+
+[reviewers.inventory_items]
+enabled = true
+checked = true
+group = "P5"
+input = "artifact"
+model = "deepseek-v4-pro"
+prompt = "prompt-review-inventory-items-v1.md"
+max_tool_turns = 0
+
 [reviewers.technical_accuracy]
 enabled = true
 checked = true

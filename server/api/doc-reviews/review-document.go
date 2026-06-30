@@ -360,6 +360,21 @@ type ReviewProcessor struct {
 	EvidenceRationaleMaxToolTokens int
 	EvidenceRationaleTools         []string
 
+	// Metrics is the cross-document metric consistency reviewer (P5, ADR 2026063002).
+	MetricsModelName  string
+	MetricsPromptRef  string
+	MetricsPromptText string
+
+	// Provisions is the cross-document provision consistency reviewer (P5, ADR 2026063003).
+	ProvisionsModelName  string
+	ProvisionsPromptRef  string
+	ProvisionsPromptText string
+
+	// Entities is the cross-document entity consistency reviewer (P5, ADR 2026063004).
+	EntitiesModelName  string
+	EntitiesPromptRef  string
+	EntitiesPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// RunID must be set by the caller (DocReviewController) before PostProcessIndex
@@ -613,6 +628,15 @@ type ReviewProcessor struct {
 	PerformanceToolClient          LLMChatClient
 	ErrorHandlingToolClient        LLMChatClient
 	LimitationsToolClient          LLMChatClient
+
+	// MetricsClient is the LLM client for the cross-document metrics reviewer.
+	MetricsClient LLMJSONExtractor
+
+	// ProvisionsClient is the LLM client for the cross-document provisions reviewer.
+	ProvisionsClient LLMJSONExtractor
+
+	// EntitiesClient is the LLM client for the cross-document entities reviewer.
+	EntitiesClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -770,6 +794,9 @@ func NewReviewProcessor(
 	performanceClient, performanceModel, performancePrompt, performanceRef, _ := resolveReviewerRuntime(logger, "performance", "P5")
 	errorHandlingClient, errorHandlingModel, errorHandlingPrompt, errorHandlingRef, _ := resolveReviewerRuntime(logger, "error_handling", "P5")
 	limitationsClient, limitationsModel, limitationsPrompt, limitationsRef, _ := resolveReviewerRuntime(logger, "limitations", "P5")
+	metricsClient, metricsModel, metricsPrompt, metricsRef, _ := resolveReviewerRuntime(logger, "metrics", "P5")
+	provisionsClient, provisionsModel, provisionsPrompt, provisionsRef, _ := resolveReviewerRuntime(logger, "provisions", "P5")
+	entitiesClient, entitiesModel, entitiesPrompt, entitiesRef, _ := resolveReviewerRuntime(logger, "entities", "P5")
 
 	technicalAccuracyMaxTurns, technicalAccuracyMaxTokens, technicalAccuracyToolList := resolveReviewerBudget("technical_accuracy", "P5")
 	assumptionsMaxTurns, assumptionsMaxTokens, assumptionsToolList := resolveReviewerBudget("assumptions", "P5")
@@ -1064,6 +1091,21 @@ func NewReviewProcessor(
 		PerformanceToolClient:          performanceToolClient,
 		ErrorHandlingToolClient:        errorHandlingToolClient,
 		LimitationsToolClient:          limitationsToolClient,
+
+		MetricsClient:     metricsClient,
+		MetricsModelName:  metricsModel,
+		MetricsPromptRef:  metricsRef,
+		MetricsPromptText: metricsPrompt,
+
+		ProvisionsClient:     provisionsClient,
+		ProvisionsModelName:  provisionsModel,
+		ProvisionsPromptRef:  provisionsRef,
+		ProvisionsPromptText: provisionsPrompt,
+
+		EntitiesClient:     entitiesClient,
+		EntitiesModelName:  entitiesModel,
+		EntitiesPromptRef:  entitiesRef,
+		EntitiesPromptText: entitiesPrompt,
 	}
 
 }
@@ -1822,6 +1864,72 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				MaxToolTurns:  p.LimitationsMaxToolTurns,
 				MaxToolTokens: p.LimitationsMaxToolTokens,
 				Tools:         p.LimitationsTools,
+			},
+		})
+	}
+
+	// metrics — cross-document metric consistency (ADR 2026063002). Input="artifact"
+	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler).
+	if p.MetricsClient != nil && p.MetricsPromptText != "" && p.MetricsModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &metricsReviewer{
+				client:     p.MetricsClient,
+				logger:     p.Logger,
+				db:         ApiTypes.ProjectDBHandle,
+				maxTasks:   p.MaxConcurrent,
+				maxMatches: envInt("METRIC_REVIEW_MAX_MATCHES", 20, 1),
+				maxMetrics: envInt("METRIC_REVIEW_MAX_METRICS", 0, 0),
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				Input:      "artifact",
+				ModelName:  p.MetricsModelName,
+				PromptText: p.MetricsPromptText,
+				PromptRef:  p.MetricsPromptRef,
+			},
+		})
+	}
+
+	// provisions — cross-document provision consistency (ADR 2026063003). Input="artifact"
+	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler).
+	if p.ProvisionsClient != nil && p.ProvisionsPromptText != "" && p.ProvisionsModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &provisionsReviewer{
+				client:       p.ProvisionsClient,
+				logger:       p.Logger,
+				db:           ApiTypes.ProjectDBHandle,
+				maxTasks:     p.MaxConcurrent,
+				maxMatches:   envInt("PROVISION_REVIEW_MAX_MATCHES", 20, 1),
+				maxProvision: envInt("PROVISION_REVIEW_MAX_PROVISIONS", 0, 0),
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				Input:      "artifact",
+				ModelName:  p.ProvisionsModelName,
+				PromptText: p.ProvisionsPromptText,
+				PromptRef:  p.ProvisionsPromptRef,
+			},
+		})
+	}
+
+	// entities — cross-document entity consistency (ADR 2026063004). Input="artifact"
+	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler).
+	if p.EntitiesClient != nil && p.EntitiesPromptText != "" && p.EntitiesModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &entitiesReviewer{
+				client:     p.EntitiesClient,
+				logger:     p.Logger,
+				db:         ApiTypes.ProjectDBHandle,
+				maxTasks:   p.MaxConcurrent,
+				maxMatches: envInt("ENTITY_REVIEW_MAX_MATCHES", 20, 1),
+				maxEntity:  envInt("ENTITY_REVIEW_MAX_ENTITIES", 0, 0),
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				Input:      "artifact",
+				ModelName:  p.EntitiesModelName,
+				PromptText: p.EntitiesPromptText,
+				PromptRef:  p.EntitiesPromptRef,
 			},
 		})
 	}

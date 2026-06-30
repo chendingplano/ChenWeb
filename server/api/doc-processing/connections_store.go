@@ -462,6 +462,71 @@ func WriteConnections(ctx context.Context, recordID int64, relationMethod, relat
 	return store.ReplaceConnections(ctx, recordID, relationMethod, []string{relationName}, conns)
 }
 
+// LoadConnectionsBySource returns the artifact-graph edges originating from one
+// document's artifacts of a given source type. relationMethod and targetType are
+// optional filters: pass "" to match any value. Used by readers (e.g. the metric
+// document reviewer) that traverse precomputed edges such as the hybrid_search /
+// semantically_related links written at index time.
+func (s *ConnectionSQLStore) LoadConnectionsBySource(
+	ctx context.Context,
+	sourceRecordID int64,
+	sourceType string,
+	relationMethod string,
+	targetType string,
+) ([]Connection, error) {
+	if s == nil || s.DB == nil {
+		return nil, fmt.Errorf("(CWB_CONN_031) nil connection store db handle")
+	}
+	if strings.TrimSpace(sourceType) == "" {
+		return nil, fmt.Errorf("(CWB_CONN_032) sourceType must be non-empty")
+	}
+
+	conditions := []string{"source_type = $1", "source_record_id = $2"}
+	args := []any{sourceType, sourceRecordID}
+	next := 3
+	if strings.TrimSpace(relationMethod) != "" {
+		conditions = append(conditions, fmt.Sprintf("relation_method = $%d", next))
+		args = append(args, relationMethod)
+		next++
+	}
+	if strings.TrimSpace(targetType) != "" {
+		conditions = append(conditions, fmt.Sprintf("target_type = $%d", next))
+		args = append(args, targetType)
+		next++
+	}
+
+	query := `
+SELECT source_record_id, target_record_id, source_type, source_id, target_type, target_id,
+       relation_name, relation_method, COALESCE(confidence, 0),
+       COALESCE(source_desc, ''), COALESCE(target_desc, '')
+FROM kb.artifact_connections
+WHERE ` + strings.Join(conditions, " AND ") + `
+ORDER BY source_id, confidence DESC NULLS LAST, target_id`
+
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("(CWB_CONN_033) query connections by source: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Connection
+	for rows.Next() {
+		var c Connection
+		if err := rows.Scan(
+			&c.SourceRecordID, &c.TargetRecordID, &c.SourceType, &c.SourceID,
+			&c.TargetType, &c.TargetID, &c.RelationName, &c.RelationMethod,
+			&c.Confidence, &c.SourceDesc, &c.TargetDesc,
+		); err != nil {
+			return nil, fmt.Errorf("(CWB_CONN_034) scan connection row: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("(CWB_CONN_035) iterate connection rows: %w", err)
+	}
+	return out, nil
+}
+
 // encodeJSONB marshals a value for a JSONB column, returning nil (SQL NULL) for
 // nil, typed-nil pointers, and empty maps so absent data stays NULL.
 func encodeJSONB(v any) (any, error) {

@@ -1,0 +1,401 @@
+package docreviews
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/lib/pq"
+)
+
+// provisionsReviewer is the cross-document provision consistency reviewer (P5, aspect
+// "provisions"; ADR 2026063003). Like the metric reviewer it does not read the document
+// body: it loads the document's extracted provisions and compares each against
+// semantically-related provisions in OTHER documents, discovered through precomputed
+// kb.artifact_connections edges (Branch A: provision hybrid_search edges; Branch B:
+// entity->provision edges attached by shared category).
+//
+// ReviewStrategy StrategyDocument + Input="artifact" routes it to runReviewersLegacy,
+// which calls ReviewDocument directly.
+type provisionsReviewer struct {
+	client       LLMJSONExtractor
+	logger       ApiTypes.JimoLogger
+	db           *sql.DB
+	maxTasks     int
+	maxMatches   int // cap on matching provisions per doc provision (PROVISION_REVIEW_MAX_MATCHES)
+	maxProvision int // cap on doc provisions reviewed; 0 = no cap (PROVISION_REVIEW_MAX_PROVISIONS)
+}
+
+func (r *provisionsReviewer) Name() string             { return "provisions" }
+func (r *provisionsReviewer) Group() string            { return "P5" }
+func (r *provisionsReviewer) Strategy() ReviewStrategy { return StrategyDocument }
+
+// provisionView is the JSON-serializable subset of a provision sent to the LLM.
+type provisionView struct {
+	ProvID     string   `json:"prov_id,omitempty"`
+	ProvName   string   `json:"prov_name,omitempty"`
+	Type       string   `json:"provision_type,omitempty"`
+	Provision  string   `json:"provision,omitempty"`
+	Subject    string   `json:"provision_subject,omitempty"`
+	Categories []string `json:"category_paths,omitempty"`
+}
+
+// docProvision is one provision extracted from the document under review.
+type docProvision struct {
+	view  provisionView
+	spans []string
+}
+
+// matchedProvision is a candidate match from another document, with provenance.
+type matchedProvision struct {
+	view       provisionView
+	recordID   int64
+	filename   string
+	via        string // "hybrid_search" | "entity"
+	confidence float64
+}
+
+func (r *provisionsReviewer) ReviewDocument(
+	ctx context.Context,
+	recordID int64,
+	cfg ReviewerConfig,
+) ([]ReviewFinding, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("(MID_26063020) provisions reviewer: nil db handle")
+	}
+
+	docProvs, err := r.loadRecordProvisions(ctx, recordID)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26063021) load provisions for record %d: %w", recordID, err)
+	}
+	if len(docProvs) == 0 {
+		r.logger.Info("provisions review skipped: no provisions", "record_id", recordID)
+		return nil, nil
+	}
+	if r.maxProvision > 0 && len(docProvs) > r.maxProvision {
+		docProvs = docProvs[:r.maxProvision]
+	}
+
+	matches, err := r.buildMatches(ctx, recordID, docProvs)
+	if err != nil {
+		return nil, fmt.Errorf("(MID_26063022) build provision matches for record %d: %w", recordID, err)
+	}
+
+	type reviewUnit struct {
+		dp      docProvision
+		matches []matchedProvision
+	}
+	var units []reviewUnit
+	for i, dp := range docProvs {
+		if ms := matches[i]; len(ms) > 0 {
+			units = append(units, reviewUnit{dp: dp, matches: ms})
+		}
+	}
+	if len(units) == 0 {
+		r.logger.Info("provisions review: no cross-document matches", "record_id", recordID, "provisions", len(docProvs))
+		return nil, nil
+	}
+
+	r.logger.Info("provisions review running",
+		"record_id", recordID,
+		"provisions", len(docProvs),
+		"reviewed_provisions", len(units),
+	)
+
+	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(units), cfg.OnProgress,
+		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
+			if isCtxStopped(workerCtx) {
+				return nil, ErrPipelineStopped
+			}
+			return r.reviewProvision(workerCtx, recordID, i, cfg, units[i].dp, units[i].matches), nil
+		},
+	)
+	if runErr != nil {
+		if isCtxStopped(ctx) {
+			return nil, ErrPipelineStopped
+		}
+		return nil, runErr
+	}
+
+	var all []ReviewFinding
+	for _, wf := range results {
+		all = append(all, wf...)
+	}
+	return all, nil
+}
+
+// reviewProvision runs one LLM comparison for a single doc provision and its matches.
+func (r *provisionsReviewer) reviewProvision(
+	ctx context.Context,
+	recordID int64,
+	index int,
+	cfg ReviewerConfig,
+	dp docProvision,
+	ms []matchedProvision,
+) []ReviewFinding {
+	start := time.Now()
+
+	payloadObj := map[string]any{
+		"provision_under_review": dp.view,
+		"matching_provisions":    matchedProvisionsPayload(ms),
+	}
+	inputJSON, err := json.Marshal(payloadObj)
+	if err != nil {
+		r.logger.Warn("provisions review: marshal payload failed", "record_id", recordID, "provision_index", index, "error", err)
+		return nil
+	}
+
+	out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
+		ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, string(inputJSON),
+		"review_provisions", "MID-CWB-REVIEW-PROVISIONS"))
+	if err != nil {
+		r.logger.Warn("provisions review provision failed; skipping",
+			"record_id", recordID, "provision_index", index, "error", err)
+		return nil
+	}
+
+	findings := normalizeFindingsJSON(out)
+	loc := strings.Join(dp.spans, ",")
+	for i := range findings {
+		findings[i].Pass = "P5"
+		findings[i].Aspect = "provisions"
+		if findings[i].FindingType == "" {
+			findings[i].FindingType = "issue"
+		}
+		if findings[i].Severity == "" {
+			findings[i].Severity = "low"
+		}
+		if findings[i].Location == "" {
+			findings[i].Location = loc
+		}
+	}
+
+	r.logger.Info("provisions review provision done",
+		"record_id", recordID,
+		"provision_index", index,
+		"prov_id", dp.view.ProvID,
+		"matches", len(ms),
+		"findings", len(findings),
+		"ms_used", time.Since(start).Milliseconds(),
+		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
+		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
+	)
+	return findings
+}
+
+func matchedProvisionsPayload(ms []matchedProvision) []map[string]any {
+	out := make([]map[string]any, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, map[string]any{
+			"provision":        m.view,
+			"source_record_id": m.recordID,
+			"source_filename":  m.filename,
+			"match_via":        m.via,
+			"confidence":       m.confidence,
+		})
+	}
+	return out
+}
+
+// buildMatches loads the artifact-graph inputs and assembles, per doc-provision index,
+// the deduped & capped list of matching provisions across the two branches (ADR DR1).
+func (r *provisionsReviewer) buildMatches(
+	ctx context.Context,
+	recordID int64,
+	docProvs []docProvision,
+) (map[int][]matchedProvision, error) {
+	store := &docprocessing.ConnectionSQLStore{DB: r.db}
+
+	// Branch A: provision -> semantically related provisions (precomputed hybrid_search edges).
+	hsEdges, err := store.LoadConnectionsBySource(ctx, recordID, "provision", docprocessing.RelationMethodHybridSearch, "provision")
+	if err != nil {
+		return nil, err
+	}
+	// Branch B: entity -> provision edges (any relation method).
+	entEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", "", "provision")
+	if err != nil {
+		return nil, err
+	}
+
+	idSet := make(map[string]struct{})
+	for _, e := range hsEdges {
+		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
+			idSet[e.TargetID] = struct{}{}
+		}
+	}
+	for _, e := range entEdges {
+		if e.TargetID != "" {
+			idSet[e.TargetID] = struct{}{}
+		}
+	}
+	resolved, err := r.loadProvisionsByProvID(ctx, idSet)
+	if err != nil {
+		return nil, err
+	}
+
+	return assembleProvisionMatches(recordID, docProvs, hsEdges, entEdges, resolved, r.maxMatches), nil
+}
+
+// assembleProvisionMatches is the pure (DB-free) match-assembly used by buildMatches.
+func assembleProvisionMatches(
+	recordID int64,
+	docProvs []docProvision,
+	hsEdges []docprocessing.Connection,
+	entEdges []docprocessing.Connection,
+	resolved map[string]resolvedProvision,
+	maxMatches int,
+) map[int][]matchedProvision {
+	byProvID := make(map[string]int, len(docProvs))
+	for i, dp := range docProvs {
+		if dp.view.ProvID != "" {
+			byProvID[dp.view.ProvID] = i
+		}
+	}
+
+	matches := make(map[int][]matchedProvision)
+	dedup := make(map[int]map[string]struct{})
+	add := func(docIdx int, m matchedProvision) {
+		if m.view.ProvID == "" || m.recordID == recordID {
+			return // strictly cross-document
+		}
+		if dedup[docIdx] == nil {
+			dedup[docIdx] = make(map[string]struct{})
+		}
+		if _, seen := dedup[docIdx][m.view.ProvID]; seen {
+			return
+		}
+		dedup[docIdx][m.view.ProvID] = struct{}{}
+		matches[docIdx] = append(matches[docIdx], m)
+	}
+
+	// Branch A application.
+	for _, e := range hsEdges {
+		if e.RelationName != docprocessing.RelationSemanticallyRelated {
+			continue
+		}
+		docIdx, ok := byProvID[e.SourceID]
+		if !ok {
+			continue
+		}
+		tp, ok := resolved[e.TargetID]
+		if !ok {
+			continue
+		}
+		add(docIdx, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, via: "hybrid_search", confidence: e.Confidence})
+	}
+
+	// Branch B: entity-connected provisions, attached to doc provisions that share a category.
+	for _, e := range entEdges {
+		tp, ok := resolved[e.TargetID]
+		if !ok {
+			continue
+		}
+		tpCats := make(map[string]struct{}, len(tp.view.Categories))
+		for _, c := range tp.view.Categories {
+			tpCats[strings.TrimSpace(c)] = struct{}{}
+		}
+		for i, dp := range docProvs {
+			shared := false
+			for _, c := range dp.view.Categories {
+				if _, ok := tpCats[strings.TrimSpace(c)]; ok {
+					shared = true
+					break
+				}
+			}
+			if shared {
+				add(i, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, via: "entity", confidence: e.Confidence})
+			}
+		}
+	}
+
+	// Cap each list to maxMatches, highest-confidence first.
+	for idx, list := range matches {
+		sort.SliceStable(list, func(a, b int) bool { return list[a].confidence > list[b].confidence })
+		if maxMatches > 0 && len(list) > maxMatches {
+			list = list[:maxMatches]
+		}
+		matches[idx] = list
+	}
+	return matches
+}
+
+func (r *provisionsReviewer) loadRecordProvisions(ctx context.Context, recordID int64) ([]docProvision, error) {
+	const q = `
+SELECT COALESCE(prov_id, ''), COALESCE(prov_name, ''), COALESCE(provision_type, ''),
+       COALESCE(provision, ''), COALESCE(provision_subject, ''),
+       COALESCE(category_paths, '[]'::jsonb), COALESCE(source_line_spans, '[]'::jsonb)
+FROM kb.provisions
+WHERE input_record_id = $1
+ORDER BY id`
+	rows, err := r.db.QueryContext(ctx, q, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []docProvision
+	for rows.Next() {
+		var (
+			dp        docProvision
+			catsJSON  []byte
+			spansJSON []byte
+		)
+		if err := rows.Scan(&dp.view.ProvID, &dp.view.ProvName, &dp.view.Type,
+			&dp.view.Provision, &dp.view.Subject, &catsJSON, &spansJSON); err != nil {
+			return nil, err
+		}
+		dp.view.Categories = parseJSONStringArray(catsJSON)
+		dp.spans = parseJSONStringArray(spansJSON)
+		out = append(out, dp)
+	}
+	return out, rows.Err()
+}
+
+// resolvedProvision is a provision loaded for match resolution.
+type resolvedProvision struct {
+	view     provisionView
+	recordID int64
+	filename string
+}
+
+func (r *provisionsReviewer) loadProvisionsByProvID(ctx context.Context, idSet map[string]struct{}) (map[string]resolvedProvision, error) {
+	out := make(map[string]resolvedProvision)
+	if len(idSet) == 0 {
+		return out, nil
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	const q = `
+SELECT COALESCE(p.prov_id, ''), p.input_record_id, COALESCE(p.prov_name, ''),
+       COALESCE(p.provision_type, ''), COALESCE(p.provision, ''), COALESCE(p.provision_subject, ''),
+       COALESCE(p.category_paths, '[]'::jsonb), COALESCE(i.staging_filename, '')
+FROM kb.provisions p
+LEFT JOIN kb.inputs i ON i.id = p.input_record_id
+WHERE p.prov_id = ANY($1)`
+	rows, err := r.db.QueryContext(ctx, q, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			rp       resolvedProvision
+			catsJSON []byte
+		)
+		if err := rows.Scan(&rp.view.ProvID, &rp.recordID, &rp.view.ProvName, &rp.view.Type,
+			&rp.view.Provision, &rp.view.Subject, &catsJSON, &rp.filename); err != nil {
+			return nil, err
+		}
+		rp.view.Categories = parseJSONStringArray(catsJSON)
+		out[rp.view.ProvID] = rp
+	}
+	return out, rows.Err()
+}
