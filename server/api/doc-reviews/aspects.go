@@ -74,6 +74,7 @@ func listAspectsBase() []AspectInfo {
 		{Name: "metrics", Group: "P5", Label: "Metric Consistency", Priority: "Review for Regulated", Description: "Cross-document check: flags conflicting metric values, units, or thresholds against related metrics in other documents.", DefaultModel: "deepseek-v4-pro"},
 		{Name: "provisions", Group: "P5", Label: "Provision Consistency", Priority: "Review for Regulated", Description: "Cross-document check: flags contradictory or conflicting provisions (requirements, prohibitions) against related provisions in other documents.", DefaultModel: "deepseek-v4-pro"},
 		{Name: "entities", Group: "P5", Label: "Entity Consistency", Priority: "Review for Regulated", Description: "Cross-document check: flags conflicting entity types, definitions, or attributes for the same real-world entity against related entities in other documents.", DefaultModel: "deepseek-v4-pro"},
+		{Name: "inventory_items", Group: "P5", Label: "Inventory Item Consistency", Priority: "Review for Regulated", Description: "Cross-document check: flags conflicting manufacturer, brand, model/part numbers, specifications, or standards for the same catalog item against related inventory items in other documents.", DefaultModel: "deepseek-v4-pro"},
 
 		// P6 — Meta & Process
 		{Name: "version_history", Group: "P6", Label: "Version History", Priority: "Should Review", Description: "Checks if version history is complete.", DefaultModel: "claude-sonnet-4-6"},

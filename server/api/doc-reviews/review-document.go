@@ -375,6 +375,11 @@ type ReviewProcessor struct {
 	EntitiesPromptRef  string
 	EntitiesPromptText string
 
+	// InventoryItems is the cross-document inventory-item consistency reviewer (P5, ADR 2026063005).
+	InventoryItemsModelName  string
+	InventoryItemsPromptRef  string
+	InventoryItemsPromptText string
+
 	MaxConcurrent int // max concurrent chunk workers per chunk-based reviewer
 
 	// RunID must be set by the caller (DocReviewController) before PostProcessIndex
@@ -637,6 +642,9 @@ type ReviewProcessor struct {
 
 	// EntitiesClient is the LLM client for the cross-document entities reviewer.
 	EntitiesClient LLMJSONExtractor
+
+	// InventoryItemsClient is the LLM client for the cross-document inventory-items reviewer.
+	InventoryItemsClient LLMJSONExtractor
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -797,6 +805,7 @@ func NewReviewProcessor(
 	metricsClient, metricsModel, metricsPrompt, metricsRef, _ := resolveReviewerRuntime(logger, "metrics", "P5")
 	provisionsClient, provisionsModel, provisionsPrompt, provisionsRef, _ := resolveReviewerRuntime(logger, "provisions", "P5")
 	entitiesClient, entitiesModel, entitiesPrompt, entitiesRef, _ := resolveReviewerRuntime(logger, "entities", "P5")
+	inventoryItemsClient, inventoryItemsModel, inventoryItemsPrompt, inventoryItemsRef, _ := resolveReviewerRuntime(logger, "inventory_items", "P5")
 
 	technicalAccuracyMaxTurns, technicalAccuracyMaxTokens, technicalAccuracyToolList := resolveReviewerBudget("technical_accuracy", "P5")
 	assumptionsMaxTurns, assumptionsMaxTokens, assumptionsToolList := resolveReviewerBudget("assumptions", "P5")
@@ -1106,6 +1115,11 @@ func NewReviewProcessor(
 		EntitiesModelName:  entitiesModel,
 		EntitiesPromptRef:  entitiesRef,
 		EntitiesPromptText: entitiesPrompt,
+
+		InventoryItemsClient:     inventoryItemsClient,
+		InventoryItemsModelName:  inventoryItemsModel,
+		InventoryItemsPromptRef:  inventoryItemsRef,
+		InventoryItemsPromptText: inventoryItemsPrompt,
 	}
 
 }
@@ -1930,6 +1944,28 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				ModelName:  p.EntitiesModelName,
 				PromptText: p.EntitiesPromptText,
 				PromptRef:  p.EntitiesPromptRef,
+			},
+		})
+	}
+
+	// inventory_items — cross-document inventory-item consistency (ADR 2026063005).
+	// Input="artifact" routes it through runReviewersLegacy -> ReviewDocument.
+	if p.InventoryItemsClient != nil && p.InventoryItemsPromptText != "" && p.InventoryItemsModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &inventoryItemsReviewer{
+				client:     p.InventoryItemsClient,
+				logger:     p.Logger,
+				db:         ApiTypes.ProjectDBHandle,
+				maxTasks:   p.MaxConcurrent,
+				maxMatches: envInt("INVENTORY_REVIEW_MAX_MATCHES", 20, 1),
+				maxItems:   envInt("INVENTORY_REVIEW_MAX_ITEMS", 0, 0),
+			},
+			cfg: ReviewerConfig{
+				Enabled:    true,
+				Input:      "artifact",
+				ModelName:  p.InventoryItemsModelName,
+				PromptText: p.InventoryItemsPromptText,
+				PromptRef:  p.InventoryItemsPromptRef,
 			},
 		})
 	}
