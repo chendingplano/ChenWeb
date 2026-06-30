@@ -45,7 +45,7 @@ func TestAssembleInventoryMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// No cap first: verify branch coverage + dedup + exclusion.
-	got := assembleInventoryMatches(recordID, docItems, hsEdges, entEdges, resolved, siblings, 0)
+	got := assembleInventoryMatches(recordID, docItems, hsEdges, nil, entEdges, resolved, siblings, 0)
 
 	// I1 (index 0): 2_inv_9 (A) and 3_inv_7 (A+C deduped) = 2 matches; 1_inv_5 excluded.
 	if len(got[0]) != 2 {
@@ -68,9 +68,48 @@ func TestAssembleInventoryMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: I1 keeps only the highest-confidence match (2_inv_9 @0.9).
-	capped := assembleInventoryMatches(recordID, docItems, hsEdges, entEdges, resolved, siblings, 1)
+	capped := assembleInventoryMatches(recordID, docItems, hsEdges, nil, entEdges, resolved, siblings, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.ItemID != "2_inv_9" {
 		t.Fatalf("capped I1 = %v, want [2_inv_9]", capped[0])
+	}
+}
+
+func TestAssembleInventoryMatches_BranchA_InboundAndDedup(t *testing.T) {
+	const recordID = int64(1)
+	docItems := []docInventoryItem{di("1_inv_1")} // index 0
+
+	// Outbound: I1 -> 2_inv_9.
+	hsOut := []docprocessing.Connection{
+		{SourceID: "1_inv_1", TargetID: "2_inv_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.7},
+	}
+	// Inbound: 5_inv_3 -> I1 (later-indexed doc); 2_inv_9 -> I1 duplicates outbound;
+	// 1_inv_8 -> I1 same-document (excluded); wrong-relation ignored.
+	hsIn := []docprocessing.Connection{
+		{SourceID: "5_inv_3", TargetID: "1_inv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
+		{SourceID: "2_inv_9", TargetID: "1_inv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.4},
+		{SourceID: "1_inv_8", TargetID: "1_inv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.6},
+		{SourceID: "9_inv_9", TargetID: "1_inv_1", RelationName: "other", Confidence: 1.0},
+	}
+	resolved := map[string]resolvedInventoryItem{
+		"2_inv_9": {view: inventoryItemView{ItemID: "2_inv_9"}, recordID: 2},
+		"5_inv_3": {view: inventoryItemView{ItemID: "5_inv_3"}, recordID: 5},
+		"1_inv_8": {view: inventoryItemView{ItemID: "1_inv_8"}, recordID: recordID},
+	}
+
+	got := assembleInventoryMatches(recordID, docItems, hsOut, hsIn, nil, resolved, nil, 0)
+
+	if len(got[0]) != 2 {
+		t.Fatalf("I1 matches = %d, want 2 (%v)", len(got[0]), got[0])
+	}
+	ids := map[string]bool{}
+	for _, m := range got[0] {
+		ids[m.view.ItemID] = true
+		if m.recordID == recordID {
+			t.Errorf("I1 match %s is same-document, should be excluded", m.view.ItemID)
+		}
+	}
+	if !ids["2_inv_9"] || !ids["5_inv_3"] {
+		t.Errorf("I1 matches missing expected inbound/outbound ids: %v", ids)
 	}
 }
 

@@ -212,8 +212,16 @@ func (r *provisionsReviewer) buildMatches(
 ) (map[int][]matchedProvision, error) {
 	store := &docprocessing.ConnectionSQLStore{DB: r.db}
 
-	// Branch A: provision -> semantically related provisions (precomputed hybrid_search edges).
-	hsEdges, err := store.LoadConnectionsBySource(ctx, recordID, "provision", docprocessing.RelationMethodHybridSearch, "provision")
+	// Branch A is bidirectional because hybrid_search edges are written only from the
+	// indexed document outward (ADR 2026063003): a provision in a document indexed AFTER
+	// this one links to ours as an INBOUND edge only.
+	// A1 -- outbound: our provision is the edge source, the match is the target.
+	hsOutEdges, err := store.LoadConnectionsBySource(ctx, recordID, "provision", docprocessing.RelationMethodHybridSearch, "provision")
+	if err != nil {
+		return nil, err
+	}
+	// A2 -- inbound: our provision is the edge target, the match is the source.
+	hsInEdges, err := store.LoadConnectionsByTarget(ctx, recordID, "provision", docprocessing.RelationMethodHybridSearch, "provision")
 	if err != nil {
 		return nil, err
 	}
@@ -224,9 +232,14 @@ func (r *provisionsReviewer) buildMatches(
 	}
 
 	idSet := make(map[string]struct{})
-	for _, e := range hsEdges {
+	for _, e := range hsOutEdges {
 		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
 			idSet[e.TargetID] = struct{}{}
+		}
+	}
+	for _, e := range hsInEdges {
+		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.SourceID != "" {
+			idSet[e.SourceID] = struct{}{}
 		}
 	}
 	for _, e := range entEdges {
@@ -239,14 +252,15 @@ func (r *provisionsReviewer) buildMatches(
 		return nil, err
 	}
 
-	return assembleProvisionMatches(recordID, docProvs, hsEdges, entEdges, resolved, r.maxMatches), nil
+	return assembleProvisionMatches(recordID, docProvs, hsOutEdges, hsInEdges, entEdges, resolved, r.maxMatches), nil
 }
 
 // assembleProvisionMatches is the pure (DB-free) match-assembly used by buildMatches.
 func assembleProvisionMatches(
 	recordID int64,
 	docProvs []docProvision,
-	hsEdges []docprocessing.Connection,
+	hsOutEdges []docprocessing.Connection,
+	hsInEdges []docprocessing.Connection,
 	entEdges []docprocessing.Connection,
 	resolved map[string]resolvedProvision,
 	maxMatches int,
@@ -274,8 +288,8 @@ func assembleProvisionMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A application.
-	for _, e := range hsEdges {
+	// Branch A1 (outbound): our provision is the edge source, the match is the target.
+	for _, e := range hsOutEdges {
 		if e.RelationName != docprocessing.RelationSemanticallyRelated {
 			continue
 		}
@@ -288,6 +302,23 @@ func assembleProvisionMatches(
 			continue
 		}
 		add(docIdx, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, via: "hybrid_search", confidence: e.Confidence})
+	}
+
+	// Branch A2 (inbound): our provision is the edge target, the match is the source.
+	// These edges were written when the other document was indexed (after ours).
+	for _, e := range hsInEdges {
+		if e.RelationName != docprocessing.RelationSemanticallyRelated {
+			continue
+		}
+		docIdx, ok := byProvID[e.TargetID]
+		if !ok {
+			continue
+		}
+		sp, ok := resolved[e.SourceID]
+		if !ok {
+			continue
+		}
+		add(docIdx, matchedProvision{view: sp.view, recordID: sp.recordID, filename: sp.filename, via: "hybrid_search", confidence: e.Confidence})
 	}
 
 	// Branch B: entity-connected provisions, attached to doc provisions that share a category.

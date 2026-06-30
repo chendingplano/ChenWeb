@@ -225,8 +225,16 @@ func (r *metricsReviewer) buildMatches(
 
 	store := &docprocessing.ConnectionSQLStore{DB: r.db}
 
-	// Branch A: metric -> semantically related metrics (precomputed hybrid_search edges).
-	hsEdges, err := store.LoadConnectionsBySource(ctx, recordID, "metric", docprocessing.RelationMethodHybridSearch, "metric")
+	// Branch A is bidirectional because hybrid_search edges are written only from the
+	// indexed document outward (ADR 2026063002): a metric in a document indexed AFTER
+	// this one links to our metric as an INBOUND edge only.
+	// A1 -- outbound: our metric is the edge source, the match is the target.
+	hsOutEdges, err := store.LoadConnectionsBySource(ctx, recordID, "metric", docprocessing.RelationMethodHybridSearch, "metric")
+	if err != nil {
+		return nil, err
+	}
+	// A2 -- inbound: our metric is the edge target, the match is the source.
+	hsInEdges, err := store.LoadConnectionsByTarget(ctx, recordID, "metric", docprocessing.RelationMethodHybridSearch, "metric")
 	if err != nil {
 		return nil, err
 	}
@@ -236,11 +244,17 @@ func (r *metricsReviewer) buildMatches(
 		return nil, err
 	}
 
-	// Collect all target metric_ids needing resolution from kb.metrics.
+	// Collect every match-side metric_id needing resolution from kb.metrics: targets for
+	// outbound edges, sources for inbound edges.
 	idSet := make(map[string]struct{})
-	for _, e := range hsEdges {
+	for _, e := range hsOutEdges {
 		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
 			idSet[e.TargetID] = struct{}{}
+		}
+	}
+	for _, e := range hsInEdges {
+		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.SourceID != "" {
+			idSet[e.SourceID] = struct{}{}
 		}
 	}
 	for _, e := range entEdges {
@@ -264,7 +278,7 @@ func (r *metricsReviewer) buildMatches(
 		}
 	}
 
-	return assembleMatches(recordID, docMetrics, hsEdges, entEdges, resolved, siblings, r.maxMatches), nil
+	return assembleMatches(recordID, docMetrics, hsOutEdges, hsInEdges, entEdges, resolved, siblings, r.maxMatches), nil
 }
 
 // assembleMatches is the pure (DB-free) match-assembly used by buildMatches. It maps
@@ -272,7 +286,8 @@ func (r *metricsReviewer) buildMatches(
 func assembleMatches(
 	recordID int64,
 	docMetrics []docMetric,
-	hsEdges []docprocessing.Connection,
+	hsOutEdges []docprocessing.Connection,
+	hsInEdges []docprocessing.Connection,
 	entEdges []docprocessing.Connection,
 	resolved map[string]resolvedMetric,
 	siblings []resolvedMetric,
@@ -301,8 +316,8 @@ func assembleMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A application.
-	for _, e := range hsEdges {
+	// Branch A1 (outbound): our metric is the edge source, the match is the target.
+	for _, e := range hsOutEdges {
 		if e.RelationName != docprocessing.RelationSemanticallyRelated {
 			continue
 		}
@@ -315,6 +330,23 @@ func assembleMatches(
 			continue
 		}
 		add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "hybrid_search", confidence: e.Confidence})
+	}
+
+	// Branch A2 (inbound): our metric is the edge target, the match is the source.
+	// These edges were written when the other document was indexed (after ours).
+	for _, e := range hsInEdges {
+		if e.RelationName != docprocessing.RelationSemanticallyRelated {
+			continue
+		}
+		docIdx, ok := byMetricID[e.TargetID]
+		if !ok {
+			continue
+		}
+		sm, ok := resolved[e.SourceID]
+		if !ok {
+			continue
+		}
+		add(docIdx, matchedMetric{view: sm.view, recordID: sm.recordID, filename: sm.filename, via: "hybrid_search", confidence: e.Confidence})
 	}
 
 	// Branch B: metrics sharing a category key (corpus-wide).

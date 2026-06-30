@@ -43,7 +43,7 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 		"1_prv_5": {view: provisionView{ProvID: "1_prv_5"}, recordID: recordID}, // same doc
 	}
 
-	got := assembleProvisionMatches(recordID, docProvs, hsEdges, entEdges, resolved, 0)
+	got := assembleProvisionMatches(recordID, docProvs, hsEdges, nil, entEdges, resolved, 0)
 
 	// P1: 2_prv_9 (A) and 3_prv_7 (A+B deduped) = 2; 1_prv_5 excluded.
 	if len(got[0]) != 2 {
@@ -60,9 +60,48 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: P1 keeps only highest-confidence match (2_prv_9 @0.9).
-	capped := assembleProvisionMatches(recordID, docProvs, hsEdges, entEdges, resolved, 1)
+	capped := assembleProvisionMatches(recordID, docProvs, hsEdges, nil, entEdges, resolved, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.ProvID != "2_prv_9" {
 		t.Fatalf("capped P1 = %v, want [2_prv_9]", capped[0])
+	}
+}
+
+func TestAssembleProvisionMatches_BranchA_InboundAndDedup(t *testing.T) {
+	const recordID = int64(1)
+	docProvs := []docProvision{dp("1_prv_1")} // index 0
+
+	// Outbound: P1 -> 2_prv_9.
+	hsOut := []docprocessing.Connection{
+		{SourceID: "1_prv_1", TargetID: "2_prv_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.7},
+	}
+	// Inbound: 5_prv_3 -> P1 (later-indexed doc); 2_prv_9 -> P1 duplicates outbound;
+	// 1_prv_8 -> P1 is same-document (excluded); wrong-relation ignored.
+	hsIn := []docprocessing.Connection{
+		{SourceID: "5_prv_3", TargetID: "1_prv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
+		{SourceID: "2_prv_9", TargetID: "1_prv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.4},
+		{SourceID: "1_prv_8", TargetID: "1_prv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.6},
+		{SourceID: "9_prv_9", TargetID: "1_prv_1", RelationName: "other", Confidence: 1.0},
+	}
+	resolved := map[string]resolvedProvision{
+		"2_prv_9": {view: provisionView{ProvID: "2_prv_9"}, recordID: 2},
+		"5_prv_3": {view: provisionView{ProvID: "5_prv_3"}, recordID: 5},
+		"1_prv_8": {view: provisionView{ProvID: "1_prv_8"}, recordID: recordID},
+	}
+
+	got := assembleProvisionMatches(recordID, docProvs, hsOut, hsIn, nil, resolved, 0)
+
+	if len(got[0]) != 2 {
+		t.Fatalf("P1 matches = %d, want 2 (%v)", len(got[0]), got[0])
+	}
+	ids := map[string]bool{}
+	for _, m := range got[0] {
+		ids[m.view.ProvID] = true
+		if m.recordID == recordID {
+			t.Errorf("P1 match %s is same-document, should be excluded", m.view.ProvID)
+		}
+	}
+	if !ids["2_prv_9"] || !ids["5_prv_3"] {
+		t.Errorf("P1 matches missing expected inbound/outbound ids: %v", ids)
 	}
 }
 

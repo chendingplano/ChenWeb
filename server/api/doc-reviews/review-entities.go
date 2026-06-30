@@ -234,16 +234,29 @@ func (r *entitiesReviewer) buildMatches(
 ) (map[int][]matchedEntity, error) {
 	store := &docprocessing.ConnectionSQLStore{DB: r.db}
 
-	// Branch A: entity -> semantically related entities (precomputed hybrid_search edges).
-	hsEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", docprocessing.RelationMethodHybridSearch, "entity")
+	// Branch A is bidirectional because hybrid_search edges are written only from the
+	// indexed document outward (ADR 2026063004): an entity in a document indexed AFTER
+	// this one links to ours as an INBOUND edge only.
+	// A1 -- outbound: our entity is the edge source, the match is the target.
+	hsOutEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", docprocessing.RelationMethodHybridSearch, "entity")
+	if err != nil {
+		return nil, err
+	}
+	// A2 -- inbound: our entity is the edge target, the match is the source.
+	hsInEdges, err := store.LoadConnectionsByTarget(ctx, recordID, "entity", docprocessing.RelationMethodHybridSearch, "entity")
 	if err != nil {
 		return nil, err
 	}
 
 	idSet := make(map[string]struct{})
-	for _, e := range hsEdges {
+	for _, e := range hsOutEdges {
 		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
 			idSet[e.TargetID] = struct{}{}
+		}
+	}
+	for _, e := range hsInEdges {
+		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.SourceID != "" {
+			idSet[e.SourceID] = struct{}{}
 		}
 	}
 	resolved, err := r.loadEntitiesByEntityID(ctx, idSet)
@@ -269,7 +282,7 @@ func (r *entitiesReviewer) buildMatches(
 		}
 	}
 
-	return assembleEntityMatches(recordID, docEntities, hsEdges, resolved, siblings, r.maxMatches), nil
+	return assembleEntityMatches(recordID, docEntities, hsOutEdges, hsInEdges, resolved, siblings, r.maxMatches), nil
 }
 
 // assembleEntityMatches is the pure (DB-free) match-assembly used by buildMatches. It maps
@@ -277,7 +290,8 @@ func (r *entitiesReviewer) buildMatches(
 func assembleEntityMatches(
 	recordID int64,
 	docEntities []docEntity,
-	hsEdges []docprocessing.Connection,
+	hsOutEdges []docprocessing.Connection,
+	hsInEdges []docprocessing.Connection,
 	resolved map[string]resolvedEntity,
 	siblings []resolvedEntity,
 	maxMatches int,
@@ -305,8 +319,8 @@ func assembleEntityMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A application.
-	for _, e := range hsEdges {
+	// Branch A1 (outbound): our entity is the edge source, the match is the target.
+	for _, e := range hsOutEdges {
 		if e.RelationName != docprocessing.RelationSemanticallyRelated {
 			continue
 		}
@@ -319,6 +333,23 @@ func assembleEntityMatches(
 			continue
 		}
 		add(docIdx, matchedEntity{view: te.view, recordID: te.recordID, filename: te.filename, via: "hybrid_search", confidence: e.Confidence})
+	}
+
+	// Branch A2 (inbound): our entity is the edge target, the match is the source.
+	// These edges were written when the other document was indexed (after ours).
+	for _, e := range hsInEdges {
+		if e.RelationName != docprocessing.RelationSemanticallyRelated {
+			continue
+		}
+		docIdx, ok := byEntityID[e.TargetID]
+		if !ok {
+			continue
+		}
+		se, ok := resolved[e.SourceID]
+		if !ok {
+			continue
+		}
+		add(docIdx, matchedEntity{view: se.view, recordID: se.recordID, filename: se.filename, via: "hybrid_search", confidence: e.Confidence})
 	}
 
 	// Branch B: name siblings, attached to every doc entity sharing a name key.

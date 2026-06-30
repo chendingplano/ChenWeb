@@ -85,3 +85,48 @@ func TestLoadConnectionsBySource_RejectsEmptySourceType(t *testing.T) {
 		t.Fatal("expected error for nil db / empty source type")
 	}
 }
+
+func TestLoadConnectionsByTarget(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	cols := []string{
+		"source_record_id", "target_record_id", "source_type", "source_id",
+		"target_type", "target_id", "relation_name", "relation_method",
+		"confidence", "source_desc", "target_desc",
+	}
+	// Inbound edge: a later-indexed doc (record 5) links its metric to our metric 1_m_1.
+	rows := sqlmock.NewRows(cols).
+		AddRow(int64(5), int64(1), "metric", "5_m_3", "metric", "1_m_1",
+			RelationSemanticallyRelated, RelationMethodHybridSearch, 0.9, "", "metric:1_m_1")
+
+	mock.ExpectQuery("FROM kb.artifact_connections").
+		WithArgs("metric", int64(1), RelationMethodHybridSearch, "metric").
+		WillReturnRows(rows)
+
+	store := &ConnectionSQLStore{DB: db}
+	got, err := store.LoadConnectionsByTarget(context.Background(), 1, "metric", RelationMethodHybridSearch, "metric")
+	if err != nil {
+		t.Fatalf("LoadConnectionsByTarget: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d connections, want 1", len(got))
+	}
+	c := got[0]
+	if c.SourceID != "5_m_3" || c.TargetID != "1_m_1" || c.SourceRecordID != 5 {
+		t.Errorf("unexpected endpoints: %+v", c)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestLoadConnectionsByTarget_RejectsEmptyTargetType(t *testing.T) {
+	store := &ConnectionSQLStore{DB: nil}
+	if _, err := store.LoadConnectionsByTarget(context.Background(), 1, "", "", ""); err == nil {
+		t.Fatal("expected error for nil db / empty target type")
+	}
+}

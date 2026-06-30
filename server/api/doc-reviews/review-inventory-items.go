@@ -229,8 +229,16 @@ func (r *inventoryItemsReviewer) buildMatches(
 
 	store := &docprocessing.ConnectionSQLStore{DB: r.db}
 
-	// Branch A: item -> semantically related items (precomputed hybrid_search edges).
-	hsEdges, err := store.LoadConnectionsBySource(ctx, recordID, "inventory_item", docprocessing.RelationMethodHybridSearch, "inventory_item")
+	// Branch A is bidirectional because hybrid_search edges are written only from the
+	// indexed document outward (ADR 2026063005): an item in a document indexed AFTER this
+	// one links to ours as an INBOUND edge only.
+	// A1 -- outbound: our item is the edge source, the match is the target.
+	hsOutEdges, err := store.LoadConnectionsBySource(ctx, recordID, "inventory_item", docprocessing.RelationMethodHybridSearch, "inventory_item")
+	if err != nil {
+		return nil, err
+	}
+	// A2 -- inbound: our item is the edge target, the match is the source.
+	hsInEdges, err := store.LoadConnectionsByTarget(ctx, recordID, "inventory_item", docprocessing.RelationMethodHybridSearch, "inventory_item")
 	if err != nil {
 		return nil, err
 	}
@@ -240,11 +248,17 @@ func (r *inventoryItemsReviewer) buildMatches(
 		return nil, err
 	}
 
-	// Collect all target item ids needing resolution from kb.inventory_items.
+	// Collect every match-side item id needing resolution: targets for outbound edges,
+	// sources for inbound edges.
 	idSet := make(map[string]struct{})
-	for _, e := range hsEdges {
+	for _, e := range hsOutEdges {
 		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
 			idSet[e.TargetID] = struct{}{}
+		}
+	}
+	for _, e := range hsInEdges {
+		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.SourceID != "" {
+			idSet[e.SourceID] = struct{}{}
 		}
 	}
 	for _, e := range entEdges {
@@ -268,7 +282,7 @@ func (r *inventoryItemsReviewer) buildMatches(
 		}
 	}
 
-	return assembleInventoryMatches(recordID, docItems, hsEdges, entEdges, resolved, siblings, r.maxMatches), nil
+	return assembleInventoryMatches(recordID, docItems, hsOutEdges, hsInEdges, entEdges, resolved, siblings, r.maxMatches), nil
 }
 
 // assembleInventoryMatches is the pure (DB-free) match-assembly used by buildMatches. It
@@ -276,7 +290,8 @@ func (r *inventoryItemsReviewer) buildMatches(
 func assembleInventoryMatches(
 	recordID int64,
 	docItems []docInventoryItem,
-	hsEdges []docprocessing.Connection,
+	hsOutEdges []docprocessing.Connection,
+	hsInEdges []docprocessing.Connection,
 	entEdges []docprocessing.Connection,
 	resolved map[string]resolvedInventoryItem,
 	siblings []resolvedInventoryItem,
@@ -305,8 +320,8 @@ func assembleInventoryMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A application.
-	for _, e := range hsEdges {
+	// Branch A1 (outbound): our item is the edge source, the match is the target.
+	for _, e := range hsOutEdges {
 		if e.RelationName != docprocessing.RelationSemanticallyRelated {
 			continue
 		}
@@ -319,6 +334,23 @@ func assembleInventoryMatches(
 			continue
 		}
 		add(docIdx, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "hybrid_search", confidence: e.Confidence})
+	}
+
+	// Branch A2 (inbound): our item is the edge target, the match is the source.
+	// These edges were written when the other document was indexed (after ours).
+	for _, e := range hsInEdges {
+		if e.RelationName != docprocessing.RelationSemanticallyRelated {
+			continue
+		}
+		docIdx, ok := byItemID[e.TargetID]
+		if !ok {
+			continue
+		}
+		sm, ok := resolved[e.SourceID]
+		if !ok {
+			continue
+		}
+		add(docIdx, matchedInventoryItem{view: sm.view, recordID: sm.recordID, filename: sm.filename, via: "hybrid_search", confidence: e.Confidence})
 	}
 
 	// Branch B: items sharing a category key (corpus-wide).
