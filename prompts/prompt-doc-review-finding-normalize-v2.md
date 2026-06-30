@@ -24,7 +24,6 @@ Input JSON:
 }
 
 Rules:
-- If the source language is already English, keep the prose as-is.
 - Preserve meaning exactly. Do not add, delete, soften, or expand the finding.
 - source_translation should be empty when source_language is English.
 

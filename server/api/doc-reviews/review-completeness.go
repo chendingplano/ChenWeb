@@ -140,6 +140,10 @@ func buildCompletenessWindows(lines []Line, docCtx string, size int) []completen
 	return windows
 }
 
+func (r *completenessReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, completenessWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *completenessReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

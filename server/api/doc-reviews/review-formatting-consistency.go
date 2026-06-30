@@ -130,6 +130,10 @@ func buildFormattingConsistencyWindows(lines []Line, docCtx string, size int) []
 	return windows
 }
 
+func (r *formattingConsistencyReviewer) processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, formattingConsistencyWindow{inputJSON: b.inputJSON, startLine: b.lineStart, endLine: b.lineEnd})
+}
+
 func (r *formattingConsistencyReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

@@ -2,8 +2,8 @@ package docreviews
 
 import (
 	"context"
+	"fmt"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,6 +56,7 @@ func TestBuildPromptCacheReviewTasksSharesInputKeysForSameWindow(t *testing.T) {
 		{
 			reviewer: &clarityReviewer{client: fake, logger: logger},
 			cfg: ReviewerConfig{
+				Input:      "per-chunk",
 				ModelName:  "deepseek-v4-flash",
 				PromptText: "clarity prompt",
 				PromptRef:  "prompt-review-clarity.md",
@@ -64,6 +65,7 @@ func TestBuildPromptCacheReviewTasksSharesInputKeysForSameWindow(t *testing.T) {
 		{
 			reviewer: &concisenessReviewer{client: fake, logger: logger},
 			cfg: ReviewerConfig{
+				Input:      "per-chunk",
 				ModelName:  "deepseek-v4-flash",
 				PromptText: "conciseness prompt",
 				PromptRef:  "prompt-review-conciseness.md",
@@ -110,27 +112,29 @@ func TestBuildPromptCacheReviewTasksSupportsAllCurrentReviewers(t *testing.T) {
 	rec := DocMetadataInputRecord{ID: 77, Title: "Cache Test"}
 	logger := loggerutil.CreateDefaultLogger("MID_CWB_REVIEW_CACHE_ALL_TEST")
 	fake := &fakeJSONExtractor{}
+	chunk := "per-chunk"
+	block := "per-block"
 	runners := []reviewRunner{
-		{reviewer: &grammarSpellingReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "grammar", PromptRef: "grammar.md"}},
-		{reviewer: &toneVoiceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "tone", PromptRef: "tone.md"}},
-		{reviewer: &formattingConsistencyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "format", PromptRef: "format.md"}},
-		{reviewer: &readabilityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "readability", PromptRef: "readability.md"}},
-		{reviewer: &localizationReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "localization", PromptRef: "localization.md"}},
-		{reviewer: &logicalFlowReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "logical", PromptRef: "logical.md"}},
-		{reviewer: &headingHierarchyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "heading", PromptRef: "heading.md"}},
-		{reviewer: &navigabilityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "nav", PromptRef: "nav.md"}},
-		{reviewer: &sectionBalanceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "balance", PromptRef: "balance.md"}},
-		{reviewer: &modularityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "modularity", PromptRef: "modularity.md"}},
-		{reviewer: &completenessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "completeness", PromptRef: "completeness.md"}},
-		{reviewer: &correctnessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "correctness", PromptRef: "correctness.md"}},
-		{reviewer: &clarityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "clarity", PromptRef: "clarity.md"}},
-		{reviewer: &concisenessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "conciseness", PromptRef: "conciseness.md"}},
-		{reviewer: &relevanceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "relevance", PromptRef: "relevance.md"}},
-		{reviewer: &currencyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "currency", PromptRef: "currency.md"}},
-		{reviewer: &examplesReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "examples", PromptRef: "examples.md"}},
-		{reviewer: &diagramsReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "diagrams", PromptRef: "diagrams.md"}},
-		{reviewer: &testableClaimsReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "claims", PromptRef: "claims.md"}},
-		{reviewer: &evidenceRationaleReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{ModelName: "deepseek-v4-flash", PromptText: "evidence", PromptRef: "evidence.md"}},
+		{reviewer: &grammarSpellingReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "grammar", PromptRef: "grammar.md"}},
+		{reviewer: &toneVoiceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "tone", PromptRef: "tone.md"}},
+		{reviewer: &formattingConsistencyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "format", PromptRef: "format.md"}},
+		{reviewer: &readabilityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "readability", PromptRef: "readability.md"}},
+		{reviewer: &localizationReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "localization", PromptRef: "localization.md"}},
+		{reviewer: &logicalFlowReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "logical", PromptRef: "logical.md"}},
+		{reviewer: &headingHierarchyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "heading", PromptRef: "heading.md"}},
+		{reviewer: &navigabilityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "nav", PromptRef: "nav.md"}},
+		{reviewer: &sectionBalanceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "balance", PromptRef: "balance.md"}},
+		{reviewer: &modularityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "modularity", PromptRef: "modularity.md"}},
+		{reviewer: &completenessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "completeness", PromptRef: "completeness.md"}},
+		{reviewer: &correctnessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "correctness", PromptRef: "correctness.md"}},
+		{reviewer: &clarityReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "clarity", PromptRef: "clarity.md"}},
+		{reviewer: &concisenessReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "conciseness", PromptRef: "conciseness.md"}},
+		{reviewer: &relevanceReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "relevance", PromptRef: "relevance.md"}},
+		{reviewer: &currencyReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: block, ModelName: "deepseek-v4-flash", PromptText: "currency", PromptRef: "currency.md"}},
+		{reviewer: &examplesReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "examples", PromptRef: "examples.md"}},
+		{reviewer: &diagramsReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "diagrams", PromptRef: "diagrams.md"}},
+		{reviewer: &testableClaimsReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "claims", PromptRef: "claims.md"}},
+		{reviewer: &evidenceRationaleReviewer{client: fake, logger: logger}, cfg: ReviewerConfig{Input: chunk, ModelName: "deepseek-v4-flash", PromptText: "evidence", PromptRef: "evidence.md"}},
 	}
 
 	tasks, unsupported := buildPromptCacheReviewTasks(77, rec, lines, runners, nil)
@@ -146,52 +150,72 @@ func TestBuildPromptCacheReviewTasksSupportsAllCurrentReviewers(t *testing.T) {
 	}
 }
 
-// TestRunReviewTasksForPromptCacheAllSeedsBeforeAnyRemaining verifies the
-// batch two-phase ordering: all seeds (first task per group) in a batch
-// complete before any remaining task in that batch starts.
-//
-// Seeds run concurrently in Phase 1 (no ordering between seeds is guaranteed).
-// Phase 3 (remaining tasks) only launches after seedWg.Wait() + stagger, so
-// max(seed call order) must be < min(remaining call order).
-func TestRunReviewTasksForPromptCacheAllSeedsBeforeAnyRemaining(t *testing.T) {
+// TestRunReviewTasksForPromptCacheRemainingStartsDuringSeeds verifies that
+// remaining reviewers start after LLM_CALL_STAGGER seconds even when seed
+// tasks are still running. Seeds do NOT need to complete before remaining begin.
+func TestRunReviewTasksForPromptCacheRemainingStartsDuringSeeds(t *testing.T) {
 	t.Setenv("LLM_CALL_STAGGER", "0")
 
-	var callOrder int32
-	orderOf := make(map[string]int32)
-	var mu sync.Mutex
+	seedsRelease := make(chan struct{})
+	remainingStarted := make(chan struct{}, 2)
 
-	record := func(key string) func(context.Context) ([]ReviewFinding, error) {
-		return func(context.Context) ([]ReviewFinding, error) {
-			n := atomic.AddInt32(&callOrder, 1)
-			mu.Lock()
-			orderOf[key] = n
-			mu.Unlock()
-			return nil, nil
+	makeSeed := func(inputOrder int) reviewTask {
+		key := fmt.Sprintf("window-%d", inputOrder)
+		return reviewTask{
+			aspect:        "seed",
+			inputKey:      key,
+			reviewerIndex: 0,
+			inputOrder:    inputOrder,
+			run: func(context.Context) ([]ReviewFinding, error) {
+				<-seedsRelease
+				return nil, nil
+			},
+		}
+	}
+	makeRemaining := func(inputOrder int) reviewTask {
+		key := fmt.Sprintf("window-%d", inputOrder)
+		return reviewTask{
+			aspect:        "remaining",
+			inputKey:      key,
+			reviewerIndex: 1,
+			inputOrder:    inputOrder,
+			run: func(context.Context) ([]ReviewFinding, error) {
+				remainingStarted <- struct{}{}
+				return nil, nil
+			},
 		}
 	}
 
-	// Two chunks: reviewerIndex 0 = seed reviewer, reviewerIndex 1 = remaining reviewer.
 	tasks := orderReviewTasksForPromptCache([]reviewTask{
-		{aspect: "seed", inputKey: "window-0", batchID: 0, reviewerIndex: 0, inputOrder: 0, taskOrder: 0, run: record("seed-0")},
-		{aspect: "remaining", inputKey: "window-0", batchID: 0, reviewerIndex: 1, inputOrder: 0, taskOrder: 1, run: record("remaining-0")},
-		{aspect: "seed", inputKey: "window-1", batchID: 0, reviewerIndex: 0, inputOrder: 1, taskOrder: 0, run: record("seed-1")},
-		{aspect: "remaining", inputKey: "window-1", batchID: 0, reviewerIndex: 1, inputOrder: 1, taskOrder: 1, run: record("remaining-1")},
+		makeSeed(0), makeSeed(1),
+		makeRemaining(0), makeRemaining(1),
 	})
 
-	_, errs := runReviewTasksForPromptCache(context.Background(), 2, tasks)
-	if len(errs) != 0 {
-		t.Fatalf("errs=%v, want none", errs)
+	done := make(chan []error, 1)
+	go func() {
+		_, errs := runReviewTasksForPromptCache(context.Background(), 4, tasks)
+		done <- errs
+	}()
+
+	// Both remaining tasks must start while seeds are still blocking.
+	for i := range 2 {
+		select {
+		case <-remainingStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("remaining reviewer %d did not start while seeds were running", i+1)
+		}
 	}
 
-	// Phase 1 (seeds) runs and seedWg.Wait() completes before Phase 3 (remaining)
-	// launches, so every seed call-order must be less than every remaining call-order.
-	maxSeed := max(orderOf["seed-0"], orderOf["seed-1"])
-	minRemaining := min(orderOf["remaining-0"], orderOf["remaining-1"])
-	if maxSeed >= minRemaining {
-		t.Fatalf("seeds finished at orders %v but remaining started at orders %v: "+
-			"all seeds must complete before any remaining task starts",
-			[]int32{orderOf["seed-0"], orderOf["seed-1"]},
-			[]int32{orderOf["remaining-0"], orderOf["remaining-1"]})
+	// Unblock seeds so everything can finish.
+	close(seedsRelease)
+
+	select {
+	case errs := <-done:
+		if len(errs) != 0 {
+			t.Fatalf("errs=%v, want none", errs)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not finish after seeds were released")
 	}
 }
 

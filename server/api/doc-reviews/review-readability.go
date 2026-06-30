@@ -130,6 +130,10 @@ func buildReadabilityWindows(lines []Line, docCtx string, size int) []readabilit
 	return windows
 }
 
+func (r *readabilityReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, readabilityWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *readabilityReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

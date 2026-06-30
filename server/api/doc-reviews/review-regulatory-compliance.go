@@ -99,6 +99,71 @@ func (r *regulatoryComplianceReviewer) ReviewDocument(
 	return allFindings, nil
 }
 
+func (r *regulatoryComplianceReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	r.logger.Info("regulatory_compliance review chunk start",
+		"record_id", recordID,
+		"chunk", index,
+		"lines", fmt.Sprintf("%d-%d", input.startLine, input.endLine),
+		"max_tool_turns", cfg.MaxToolTurns,
+	)
+
+	startTime := time.Now()
+	var findings []ReviewFinding
+	var cacheHitTokens, cacheMissTokens int
+
+	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
+		tools := selectTools(r.toolRegistry, cfg.Tools)
+		userCtx := fmt.Sprintf("<DOCUMENT_INPUT>\n%s\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\n%s\n</REVIEW_TASK>", input.inputJSON, cfg.PromptText)
+		loopFindings, loopUsage, loopErr := runToolUseReview(
+			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
+			userCtx, tools, recordID, r.logger,
+		)
+		if loopUsage != nil {
+			cacheHitTokens = loopUsage.PromptCacheHitTokens
+			cacheMissTokens = loopUsage.PromptCacheMissTokens
+		}
+		if loopErr != nil {
+			r.logger.Warn("regulatory_compliance tool-use loop failed; no findings for chunk",
+				"record_id", recordID, "chunk", index, "error", loopErr)
+		}
+		findings = loopFindings
+	} else {
+		payload, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, input.inputJSON, "review_regulatory_compliance", "MID-CWB-REVIEW-REGULATORY-COMPLIANCE"))
+		if err != nil {
+			r.logger.Warn("regulatory_compliance review chunk failed; skipping",
+				"record_id", recordID, "chunk", index, "error", err)
+			return nil
+		}
+		findings = normalizeFindingsJSON(payload)
+		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
+		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
+	}
+
+	for i := range findings {
+		findings[i].Pass = "P5"
+		findings[i].Aspect = "regulatory_compliance"
+		if findings[i].FindingType == "" {
+			findings[i].FindingType = "regulatory_violation"
+		}
+		if findings[i].Severity == "" {
+			findings[i].Severity = "high"
+		}
+		if findings[i].Location == "" {
+			findings[i].Location = fmt.Sprintf("%d-%d", input.startLine, input.endLine)
+		}
+	}
+
+	r.logger.Info("regulatory_compliance review chunk end",
+		"record_id", recordID,
+		"chunk", index,
+		"findings", len(findings),
+		"ms_used", time.Since(startTime).Milliseconds(),
+		"cache_hit_tokens", cacheHitTokens,
+		"cache_miss_tokens", cacheMissTokens,
+	)
+	return findings
+}
+
 func (r *regulatoryComplianceReviewer) processBlock(
 	ctx context.Context,
 	recordID int64,

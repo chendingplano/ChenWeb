@@ -1,6 +1,6 @@
 [tools]
 bun = "latest"
-caddy = "latest"
+caddy = "2.11.4"
 go = "1.25.7"
 node = "latest"
 

@@ -62,9 +62,7 @@ func (r *grammarSpellingReviewer) ReviewDocument(
 	// Build document context for the envelope.
 	docCtx := buildDocContextLine(rec)
 
-	// Split lines into windows for the LLM. Use a fixed window of 100 lines
-	// per call — grammar checks are local and cheap.
-	const windowSize = 100
+	const windowSize = DefaultChunkInputSize
 	windows := buildGrammarWindows(lines, docCtx, windowSize)
 
 	if len(windows) == 0 {
@@ -123,6 +121,10 @@ func buildGrammarWindows(lines []Line, docCtx string, size int) []grammarWindow 
 		})
 	}
 	return windows
+}
+
+func (r *grammarSpellingReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, grammarWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
 }
 
 func (r *grammarSpellingReviewer) processWindow(

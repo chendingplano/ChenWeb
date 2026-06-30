@@ -130,6 +130,10 @@ func buildTestableClaimsWindows(lines []Line, docCtx string, size int) []testabl
 	return windows
 }
 
+func (r *testableClaimsReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, testableClaimsWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *testableClaimsReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

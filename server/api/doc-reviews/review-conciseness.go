@@ -129,6 +129,10 @@ func buildConcisenessWindows(lines []Line, docCtx string, size int) []concisenes
 	return windows
 }
 
+func (r *concisenessReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, concisenessWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *concisenessReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

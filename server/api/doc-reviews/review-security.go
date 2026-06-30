@@ -115,6 +115,10 @@ func buildSecurityWindows(lines []Line, docCtx string, size int) []securityWindo
 	return windows
 }
 
+func (r *securityReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, securityWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *securityReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

@@ -26,7 +26,7 @@ type fakeFindingTranslator struct {
 	translateErr   error
 }
 
-func (f *fakeFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLanguage string, finding FindingItem) (FindingNormalization, error) {
+func (f *fakeFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLanguage string, targetLanguages []string, finding FindingItem) (FindingNormalization, error) {
 	f.normalizeCalls++
 	return f.normalizeOut, f.normalizeErr
 }
@@ -48,7 +48,7 @@ type concurrencyFindingTranslator struct {
 	maxSeen int32
 }
 
-func (f *concurrencyFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLanguage string, finding FindingItem) (FindingNormalization, error) {
+func (f *concurrencyFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLanguage string, targetLanguages []string, finding FindingItem) (FindingNormalization, error) {
 	return f.normalizeOut, nil
 }
 
@@ -557,14 +557,18 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
 func TestSaveFindingsNormalizesConcurrentlyWithDefaultTranslator(t *testing.T) {
 	t.Setenv("MAX_DOC_REVIEWER_TASKS", "2")
 	t.Setenv("TRANSLATION_MODEL_NAME", "test-model")
-	t.Setenv("REVIEW_FINDING_NORMALIZE_PROMPT", "prompt-doc-review-finding-normalize-v2.md")
+	t.Setenv("REVIEW_FINDING_NORMALIZE_PROMPT", "prompt-doc-review-finding-normalize-v3.md")
 	t.Setenv("REVIEW_FINDING_NORMALIZE_RETRY_PROMPT", "prompt-doc-review-finding-normalize-retry-v1.md")
+	t.Setenv("REVIEW_FINDING_LOCALIZE_PROMPT", "prompt-doc-review-finding-localize-v1.md")
+	t.Setenv("REVIEW_FINDING_LOCALIZE_RETRY_PROMPT", "prompt-doc-review-finding-localize-retry-v1.md")
 
 	promptDir := t.TempDir()
 	t.Setenv("PROMPT_DIR", promptDir)
 	for _, name := range []string{
-		"prompt-doc-review-finding-normalize-v2.md",
+		"prompt-doc-review-finding-normalize-v3.md",
 		"prompt-doc-review-finding-normalize-retry-v1.md",
+		"prompt-doc-review-finding-localize-v1.md",
+		"prompt-doc-review-finding-localize-retry-v1.md",
 	} {
 		if err := os.WriteFile(filepath.Join(promptDir, name), []byte("test prompt"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%s): %v", name, err)
@@ -663,11 +667,15 @@ func TestNewLLMFindingTranslatorLoadsPromptsFromPromptDir(t *testing.T) {
 
 	promptDir := t.TempDir()
 	t.Setenv("PROMPT_DIR", promptDir)
-	t.Setenv("REVIEW_FINDING_NORMALIZE_PROMPT", "prompt-doc-review-finding-normalize-v2.md")
+	t.Setenv("REVIEW_FINDING_NORMALIZE_PROMPT", "prompt-doc-review-finding-normalize-v3.md")
 	t.Setenv("REVIEW_FINDING_NORMALIZE_RETRY_PROMPT", "prompt-doc-review-finding-normalize-retry-v1.md")
+	t.Setenv("REVIEW_FINDING_LOCALIZE_PROMPT", "prompt-doc-review-finding-localize-v1.md")
+	t.Setenv("REVIEW_FINDING_LOCALIZE_RETRY_PROMPT", "prompt-doc-review-finding-localize-retry-v1.md")
 	for _, name := range []string{
-		"prompt-doc-review-finding-normalize-v2.md",
+		"prompt-doc-review-finding-normalize-v3.md",
 		"prompt-doc-review-finding-normalize-retry-v1.md",
+		"prompt-doc-review-finding-localize-v1.md",
+		"prompt-doc-review-finding-localize-retry-v1.md",
 	} {
 		if err := os.WriteFile(filepath.Join(promptDir, name), []byte("test prompt"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%s): %v", name, err)
@@ -699,12 +707,14 @@ func TestNormalizeFindingErrorIncludesOffendingFieldContent(t *testing.T) {
 				"provenance":  "original_extraction",
 			},
 		}},
-		modelName:       "test-model",
-		promptText:      "test prompt",
-		retryPromptText: "retry prompt",
+		modelName:                "test-model",
+		normalizePromptName:      "test-normalize-prompt",
+		normalizePromptText:      "test prompt",
+		normalizeRetryPromptName: "test-normalize-retry-prompt",
+		normalizeRetryPromptText: "retry prompt",
 	}
 
-	_, err := translator.NormalizeFinding(context.Background(), "en", FindingItem{
+	_, err := translator.NormalizeFinding(context.Background(), "en", []string{"zh"}, FindingItem{
 		Title:       "原始标题",
 		Description: "原始描述",
 		Suggestion:  "原始建议",
@@ -740,7 +750,7 @@ func TestNormalizationInCanonicalLanguage_AllowsEnglishWithQuotedChineseExample(
 		},
 	}
 	if !normalizationInCanonicalLanguage(n, "en") {
-		t.Fatal("normalizationInCanonicalLanguage=false, want true for English prose with quoted Chinese example content")
+		t.Fatal("normalizationInCanonicalLanguage=false, want true — suggestion may contain Chinese document content verbatim")
 	}
 }
 
@@ -755,7 +765,7 @@ func TestNormalizationInCanonicalLanguage_AllowsChineseLiteralSuggestionWhenTitl
 		},
 	}
 	if !normalizationInCanonicalLanguage(n, "en") {
-		t.Fatal("normalizationInCanonicalLanguage=false, want true when English explanation accompanies a source-language literal fix suggestion")
+		t.Fatal("normalizationInCanonicalLanguage=false, want true — suggestion is a Chinese literal replacement string that should be preserved verbatim")
 	}
 }
 

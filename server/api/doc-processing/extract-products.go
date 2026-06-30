@@ -158,7 +158,7 @@ func NewProductsProcessor(inputStore DocMetadataStore, store ProductsStore, extr
 		"prompt-categorize-products-v1.md",
 	)
 	translateModelRef, _, translateModelCfg, translateModelErr := loadOptionalModelConfigFromEnvKeys(
-		[]string{"TRANSLATE_PRODUCTS_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
+		[]string{"TRANSLATION_MODEL_NAME", "ENRICH_PRODUCT_RELATIONS_MODEL_NAME", "EXTRACT_PRODUCT_MODEL_NAME"},
 		"MODEL_DEF_FILE",
 	)
 	categorizeModelRef, _, categorizeModelCfg, categorizeModelErr := loadOptionalModelConfigFromEnvKeys(

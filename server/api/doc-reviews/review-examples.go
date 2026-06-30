@@ -130,6 +130,10 @@ func buildExamplesWindows(lines []Line, docCtx string, size int) []examplesWindo
 	return windows
 }
 
+func (r *examplesReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, examplesWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *examplesReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

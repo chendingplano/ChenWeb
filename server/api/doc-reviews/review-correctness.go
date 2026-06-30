@@ -141,6 +141,10 @@ func buildCorrectnessWindows(lines []Line, docCtx string, size int) []correctnes
 	return windows
 }
 
+func (r *correctnessReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, correctnessWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *correctnessReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

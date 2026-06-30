@@ -4774,16 +4774,19 @@ So the short version is: HyperDX is healthy, but capture is not active yet. Star
 * PDF Python: cd ChenWeb/python/pdf-parser; sh start.sh
 * JetStream: cd shared/go/cmd/nets-server; sh start.sh 
 * Converter: cd ChenWeb/server/cmd/parser-result-converter; sh start.sh  
+* Start Clickhose: cd ChenWeb; mise obs-up
+* Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
+
+About 'mitmproxy':
+Do not run 'mitmproxy' now since it causes probelsm.
 * mitmproxy: 
   * mitmweb --listen-host 127.0.0.1 --listen-port 8081      # Web version
   * mitmproxy --listen-host 127.0.0.1 --listen-port 8081    # Interactive UI
   * mitmdump --listen-host 127.0.0.1 --listen-port 8081     # headless, non-interactive
 * cc switch: cd ThirdParty/cc-switch; sh start.sh 
 * Start docker: cd ChenWeb; mise docker-start
-* Start Clickhose: cd ChenWeb; mise obs-up
-* Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
 
-*Resolve Certificate Issue*
+**Resolve Certificate Issue**
 
 If mitmproxy reports certificate error, do the following:
 Run: 

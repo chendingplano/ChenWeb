@@ -132,6 +132,10 @@ func buildLocalizationWindows(lines []Line, docCtx string, size int) []localizat
 	return windows
 }
 
+func (r *localizationReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, localizationWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
+}
+
 func (r *localizationReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,

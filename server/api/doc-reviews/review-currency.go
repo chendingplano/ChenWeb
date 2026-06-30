@@ -130,6 +130,10 @@ func buildCurrencyWindows(lines []Line, docCtx string, size int) []currencyWindo
 	return windows
 }
 
+func (r *currencyReviewer) processBlock(ctx context.Context, recordID int64, index, total int, cfg ReviewerConfig, b pageBlock) []ReviewFinding {
+	return r.processWindow(ctx, recordID, index, cfg, currencyWindow{inputJSON: b.inputJSON, startLine: b.lineStart, endLine: b.lineEnd})
+}
+
 func (r *currencyReviewer) processWindow(
 	ctx context.Context,
 	recordID int64,
