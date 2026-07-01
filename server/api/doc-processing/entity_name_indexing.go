@@ -150,8 +150,9 @@ func buildEntityCategoryConnections(recordID int64, rows []entityNameGraphRow, c
 			continue
 		}
 		artifacts = append(artifacts, indexedArtifact{
-			ID:         entityID,
-			Categories: r.Categories,
+			ID:          entityID,
+			Description: firstNonEmptyTrimmed(r.Entity, r.EntityEN),
+			Categories:  r.Categories,
 		})
 	}
 	return buildArtifactCategoryConnections(recordID, artifacts, entityIndexConfig, categories)

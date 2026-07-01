@@ -9,17 +9,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chendingplano/shared/go/api/ApiTypes"
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/lib/pq"
 )
 
 // metricsReviewer is the cross-document metric consistency reviewer (P5, aspect
 // "metrics"; ADR 2026063002). Unlike text reviewers it does not read the document
 // body: it loads the document's extracted metrics and compares each against
-// semantically-related metrics in OTHER documents, discovered through the precomputed
-// kb.artifact_connections edges (hybrid_search/semantically_related), shared metric
-// categories, and entity->metric edges.
+// semantically-related metrics in OTHER documents. Semantic similarity is discovered
+// LIVE at review time via docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather
+// than from precomputed hybrid_search/semantically_related edges — on-the-fly search is
+// always fresh and needs no inbound/outbound edge bookkeeping. Branch B adds metrics
+// sharing a category key; Branch C adds entity->metric edges.
 //
 // It uses ReviewStrategy StrategyDocument and Input="artifact", so the prompt-cache
 // scheduler routes it to runReviewersLegacy, which calls ReviewDocument directly.
@@ -225,36 +227,36 @@ func (r *metricsReviewer) buildMatches(
 
 	store := &docprocessing.ConnectionSQLStore{DB: r.db}
 
-	// Branch A is bidirectional because hybrid_search edges are written only from the
-	// indexed document outward (ADR 2026063002): a metric in a document indexed AFTER
-	// this one links to our metric as an INBOUND edge only.
-	// A1 -- outbound: our metric is the edge source, the match is the target.
-	hsOutEdges, err := store.LoadConnectionsBySource(ctx, recordID, "metric", docprocessing.RelationMethodHybridSearch, "metric")
-	if err != nil {
-		return nil, err
+	// Branch A: semantically-similar metrics discovered LIVE (no materialized edges). A
+	// single hybrid search per doc metric finds close metrics regardless of when the other
+	// document was indexed, so no inbound/outbound edge bookkeeping is needed.
+	hybridMatches := make(map[int][]docprocessing.OnTheFlySemanticMatch, len(docMetrics))
+	for i, dm := range docMetrics {
+		if dm.view.MetricID == "" {
+			continue
+		}
+		hits, err := docprocessing.FindSimilarArtifactsOnTheFly(ctx, r.db, "metric", dm.view.MetricID, "metric", r.maxMatches)
+		if err != nil {
+			return nil, err
+		}
+		if len(hits) > 0 {
+			hybridMatches[i] = hits
+		}
 	}
-	// A2 -- inbound: our metric is the edge target, the match is the source.
-	hsInEdges, err := store.LoadConnectionsByTarget(ctx, recordID, "metric", docprocessing.RelationMethodHybridSearch, "metric")
-	if err != nil {
-		return nil, err
-	}
+
 	// Branch C: entity -> metric edges (any relation method).
 	entEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", "", "metric")
 	if err != nil {
 		return nil, err
 	}
 
-	// Collect every match-side metric_id needing resolution from kb.metrics: targets for
-	// outbound edges, sources for inbound edges.
+	// Collect every match-side metric_id needing resolution from kb.metrics.
 	idSet := make(map[string]struct{})
-	for _, e := range hsOutEdges {
-		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
-			idSet[e.TargetID] = struct{}{}
-		}
-	}
-	for _, e := range hsInEdges {
-		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.SourceID != "" {
-			idSet[e.SourceID] = struct{}{}
+	for _, hits := range hybridMatches {
+		for _, h := range hits {
+			if h.ArtifactID != "" {
+				idSet[h.ArtifactID] = struct{}{}
+			}
 		}
 	}
 	for _, e := range entEdges {
@@ -278,7 +280,7 @@ func (r *metricsReviewer) buildMatches(
 		}
 	}
 
-	return assembleMatches(recordID, docMetrics, hsOutEdges, hsInEdges, entEdges, resolved, siblings, r.maxMatches), nil
+	return assembleMatches(recordID, docMetrics, hybridMatches, entEdges, resolved, siblings, r.maxMatches), nil
 }
 
 // assembleMatches is the pure (DB-free) match-assembly used by buildMatches. It maps
@@ -286,20 +288,12 @@ func (r *metricsReviewer) buildMatches(
 func assembleMatches(
 	recordID int64,
 	docMetrics []docMetric,
-	hsOutEdges []docprocessing.Connection,
-	hsInEdges []docprocessing.Connection,
+	hybridMatches map[int][]docprocessing.OnTheFlySemanticMatch,
 	entEdges []docprocessing.Connection,
 	resolved map[string]resolvedMetric,
 	siblings []resolvedMetric,
 	maxMatches int,
 ) map[int][]matchedMetric {
-	byMetricID := make(map[string]int, len(docMetrics))
-	for i, dm := range docMetrics {
-		if dm.view.MetricID != "" {
-			byMetricID[dm.view.MetricID] = i
-		}
-	}
-
 	matches := make(map[int][]matchedMetric)
 	dedup := make(map[int]map[string]struct{}) // docIdx -> set of matched metric_ids
 	add := func(docIdx int, m matchedMetric) {
@@ -316,37 +310,16 @@ func assembleMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A1 (outbound): our metric is the edge source, the match is the target.
-	for _, e := range hsOutEdges {
-		if e.RelationName != docprocessing.RelationSemanticallyRelated {
-			continue
+	// Branch A: semantically-similar metrics from the live hybrid search, keyed by doc
+	// metric index. The add() filter drops same-document and duplicate hits.
+	for docIdx, hits := range hybridMatches {
+		for _, h := range hits {
+			tm, ok := resolved[h.ArtifactID]
+			if !ok {
+				continue
+			}
+			add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "hybrid_search", confidence: h.RRFScore})
 		}
-		docIdx, ok := byMetricID[e.SourceID]
-		if !ok {
-			continue
-		}
-		tm, ok := resolved[e.TargetID]
-		if !ok {
-			continue
-		}
-		add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "hybrid_search", confidence: e.Confidence})
-	}
-
-	// Branch A2 (inbound): our metric is the edge target, the match is the source.
-	// These edges were written when the other document was indexed (after ours).
-	for _, e := range hsInEdges {
-		if e.RelationName != docprocessing.RelationSemanticallyRelated {
-			continue
-		}
-		docIdx, ok := byMetricID[e.TargetID]
-		if !ok {
-			continue
-		}
-		sm, ok := resolved[e.SourceID]
-		if !ok {
-			continue
-		}
-		add(docIdx, matchedMetric{view: sm.view, recordID: sm.recordID, filename: sm.filename, via: "hybrid_search", confidence: e.Confidence})
 	}
 
 	// Branch B: metrics sharing a category key (corpus-wide).

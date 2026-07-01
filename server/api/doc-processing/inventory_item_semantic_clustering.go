@@ -159,7 +159,7 @@ func semClusterInventoryItems(
 
 		candidates, qErr := queryArtifactHybridCandidates(
 			ctx, db, dict, strings.TrimSpace(item.SearchDocument), vec, useSem,
-			searchArtifactInventoryItem, item.ArtifactID, searchLimit,
+			searchArtifactInventoryItem, item.ArtifactID, "", searchLimit,
 		)
 		if qErr != nil {
 			if logger != nil {

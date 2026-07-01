@@ -31,6 +31,7 @@ type indexedArtifact struct {
 	Categories     []string
 	SearchDocument string
 	Embedding      []float64
+	Description    string // human-readable label for source_desc on category_name edges
 }
 
 // artifactIndexConfig parameterizes the shared indexing helpers for one artifact family.
@@ -345,6 +346,7 @@ func buildArtifactCategoryConnections(recordID int64, artifacts []indexedArtifac
 				TargetID:       targetID,
 				RelationName:   RelationBelongTo,
 				RelationMethod: RelationMethodCategoryName,
+				SourceDesc:     connectionEndpointDesc(cfg.SelfType, firstNonEmptyTrimmed(a.Description, artifactID)),
 				ExtraInfo: map[string]any{
 					"source":       cfg.InstanceSource,
 					"category_id":  cat.ID,
@@ -569,7 +571,7 @@ func connectArtifactsBySearch(ctx context.Context, db *sql.DB, recordID int64, a
 			useSem = true
 		}
 
-		candidates, err := queryArtifactHybridCandidates(ctx, db, dict, query, vec, useSem, cfg.SelfType, a.ID, maxLinks*5)
+		candidates, err := queryArtifactHybridCandidates(ctx, db, dict, query, vec, useSem, cfg.SelfType, a.ID, "", maxLinks*5)
 		if err != nil {
 			if logger != nil {
 				logger.Warn(cfg.LogPrefix+": hybrid candidate query failed", "record_id", recordID, "artifact_id", a.ID, "error", err.Error())
@@ -729,7 +731,12 @@ func fillMissingArtifactEmbeddings(
 // kb.search_artifacts and returns the fused candidates with their component scores.
 // Params: $1 = query text, $2 = self artifact_id (excluded), $3 = query embedding vector
 // (hybrid path only). selfType is the source artifact_type excluded from results.
-func queryArtifactHybridCandidates(ctx context.Context, db *sql.DB, dict, query string, vec []float64, useSem bool, selfType, selfID string, limit int) ([]hybridCandidate, error) {
+// queryArtifactHybridCandidates runs the lexical+semantic RRF search over
+// kb.search_artifacts. candidateType optionally restricts results to a single
+// artifact_type (pass "" to search all types, e.g. index-time cross-type linking);
+// same-type read-time discovery (the metrics reviewer's on-the-fly branch) passes the
+// caller's own type.
+func queryArtifactHybridCandidates(ctx context.Context, db *sql.DB, dict, query string, vec []float64, useSem bool, selfType, selfID, candidateType string, limit int) ([]hybridCandidate, error) {
 	if limit <= 0 {
 		limit = defaultMetricConnectMaxLinks
 	}
@@ -738,6 +745,9 @@ func queryArtifactHybridCandidates(ctx context.Context, db *sql.DB, dict, query 
 	ftsClause := fmt.Sprintf("%s @@ %s", lexVector, tsQuery)
 	lexScore := fmt.Sprintf("ts_rank_cd(%s, %s)", lexVector, tsQuery)
 	selfExclude := fmt.Sprintf("NOT (sa.artifact_type = '%s' AND sa.artifact_id = $2)", sanitizeArtifactType(selfType))
+	if t := sanitizeArtifactType(candidateType); t != "" {
+		selfExclude += fmt.Sprintf(" AND sa.artifact_type = '%s'", t)
+	}
 
 	var sqlText string
 	var args []any
@@ -818,6 +828,81 @@ LIMIT %d`,
 	return out, rows.Err()
 }
 
+// OnTheFlySemanticMatch is one accepted candidate from a read-time hybrid search.
+type OnTheFlySemanticMatch struct {
+	ArtifactType string
+	ArtifactID   string
+	RecordID     int64
+	RRFScore     float64
+}
+
+// FindSimilarArtifactsOnTheFly runs the same hybrid (lexical + pgvector) search and
+// acceptance policy as connectArtifactsBySearch, but computes matches live and returns
+// them instead of persisting edges. It is the read-time replacement for materialized
+// hybrid_search / semantically_related edges (the metrics document reviewer, Branch A):
+// discovering similar artifacts at query time is always fresh and needs no directional
+// inbound/outbound edge bookkeeping. selfType/selfID identify and exclude the query
+// artifact; candidateType restricts results to that artifact_type ("" = any). The query
+// text and embedding are derived from the artifact's kb.search_artifacts row.
+func FindSimilarArtifactsOnTheFly(ctx context.Context, db *sql.DB, selfType, selfID, candidateType string, maxLinks int) ([]OnTheFlySemanticMatch, error) {
+	if db == nil {
+		return nil, fmt.Errorf("(CWB_OTF_001) nil db handle")
+	}
+	if strings.TrimSpace(selfType) == "" || strings.TrimSpace(selfID) == "" {
+		return nil, fmt.Errorf("(CWB_OTF_002) selfType and selfID must be non-empty")
+	}
+
+	var query string
+	err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(search_document, '') FROM kb.search_artifacts
+		 WHERE artifact_type = $1 AND artifact_id = $2 LIMIT 1`,
+		selfType, selfID).Scan(&query)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("(CWB_OTF_003) load query artifact %s/%s: %w", selfType, selfID, err)
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+
+	scfg := appconfig.GetArtifactSearchConfig()
+	dict := sanitizeTSDictionary(scfg.Dictionary)
+	minRank := scfg.MinRank
+	minCosine := metricConnectMinCosine()
+	if maxLinks <= 0 {
+		maxLinks = metricConnectMaxLinks()
+	}
+
+	vec, useSem := embedQueryText(ctx, query)
+
+	candidates, err := queryArtifactHybridCandidates(ctx, db, dict, query, vec, useSem, selfType, selfID, candidateType, maxLinks*5)
+	if err != nil {
+		return nil, fmt.Errorf("(CWB_OTF_004) hybrid candidate query for %s/%s: %w", selfType, selfID, err)
+	}
+
+	out := make([]OnTheFlySemanticMatch, 0, maxLinks)
+	for _, c := range candidates {
+		okSem := c.cosineSim.Valid && c.cosineSim.Float64 >= minCosine
+		okLex := c.lexScore.Valid && c.lexScore.Float64 >= minRank
+		if !okSem && !okLex {
+			continue
+		}
+		out = append(out, OnTheFlySemanticMatch{
+			ArtifactType: c.artifactType,
+			ArtifactID:   c.artifactID,
+			RecordID:     c.recordID,
+			RRFScore:     c.rrfScore,
+		})
+		if len(out) >= maxLinks {
+			break
+		}
+	}
+	return out, nil
+}
+
 // sanitizeArtifactType guards an artifact_type identifier (interpolated into SQL) against
 // injection by allowing only letters/underscore; anything else falls back to a value that
 // matches nothing meaningful.
@@ -837,6 +922,7 @@ func metricsToIndexedArtifacts(metrics []indexedMetric) []indexedArtifact {
 	for _, m := range metrics {
 		out = append(out, indexedArtifact{
 			ID:             m.MetricID,
+			Description:    m.MetricName,
 			SourceSpans:    m.SourceSpans,
 			Categories:     m.Categories,
 			SearchDocument: m.SearchDocument,

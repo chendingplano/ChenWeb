@@ -129,6 +129,35 @@ func embedRegistryRows(
 	}
 }
 
+// embedQueryText embeds a single query string with the configured search embedder,
+// returning (vec, true) only when semantic search is enabled, a model is configured, and
+// the vector matches the configured dimension. Read-time callers (the metrics reviewer's
+// on-the-fly hybrid search) use it because, unlike indexing, they have no pre-stored
+// embedding to reuse; a false result means "proceed lexical-only".
+func embedQueryText(ctx context.Context, text string) ([]float64, bool) {
+	if !kbsearch.SemanticSearchEnabled() {
+		return nil, false
+	}
+	embedder, modelName, timeoutSec, ok := newSearchEmbedder()
+	if !ok {
+		return nil, false
+	}
+	text = truncateRunes(strings.TrimSpace(text), maxEmbeddingRunes)
+	if text == "" {
+		return nil, false
+	}
+	if timeoutSec > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+		defer cancel()
+	}
+	vec, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: modelName, InputText: text})
+	if err != nil || len(vec) != kbsearch.ConfiguredEmbeddingDim() {
+		return nil, false
+	}
+	return vec, true
+}
+
 func truncateRunes(s string, max int) string {
 	if max <= 0 {
 		return s

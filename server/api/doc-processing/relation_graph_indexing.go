@@ -159,8 +159,9 @@ func buildRelationCategoryConnections(recordID int64, rows []relationGraphRow, c
 			continue
 		}
 		artifacts = append(artifacts, indexedArtifact{
-			ID:         relationID,
-			Categories: r.Categories,
+			ID:          relationID,
+			Description: firstNonEmptyTrimmed(r.Predicate, r.PredicateEN),
+			Categories:  r.Categories,
 		})
 	}
 	return buildArtifactCategoryConnections(recordID, artifacts, relationIndexConfig, categories)

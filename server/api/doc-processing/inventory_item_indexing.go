@@ -84,6 +84,7 @@ func IndexInventoryItemsForRecord(
 func loadIndexedInventoryItemsForRecord(ctx context.Context, db *sql.DB, recordID int64) ([]indexedArtifact, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT inventory_item_id,
+		        COALESCE(item_name, ''),
 		        COALESCE(source_line_spans, '[]'::jsonb),
 		        COALESCE(item_categories, '[]'::jsonb),
 		        COALESCE(search_document, '')
@@ -99,11 +100,12 @@ func loadIndexedInventoryItemsForRecord(ctx context.Context, db *sql.DB, recordI
 	for rows.Next() {
 		var (
 			itemID    string
+			itemName  string
 			spansRaw  []byte
 			catsRaw   []byte
 			searchDoc string
 		)
-		if err := rows.Scan(&itemID, &spansRaw, &catsRaw, &searchDoc); err != nil {
+		if err := rows.Scan(&itemID, &itemName, &spansRaw, &catsRaw, &searchDoc); err != nil {
 			return nil, err
 		}
 		var spansAny any
@@ -112,6 +114,7 @@ func loadIndexedInventoryItemsForRecord(ctx context.Context, db *sql.DB, recordI
 		}
 		out = append(out, indexedArtifact{
 			ID:             strings.TrimSpace(itemID),
+			Description:    strings.TrimSpace(itemName),
 			SourceSpans:    normalizeSourceLineSpans(spansAny),
 			Categories:     parseJSONStringArray(catsRaw),
 			SearchDocument: strings.TrimSpace(searchDoc),

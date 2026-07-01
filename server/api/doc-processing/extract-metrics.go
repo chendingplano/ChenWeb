@@ -752,13 +752,6 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 					"metric_name_hint", mention.MetricNameHint,
 					"evidence_quote", mention.EvidenceQuote,
 				)
-			} else {
-				p.Logger.Info("pass1: candidate source_line_spans",
-					"record_id", record_id,
-					"chunk_index", block.Index,
-					"metric_name_hint", mention.MetricNameHint,
-					"source_line_spans", mention.SourceLineSpans,
-				)
 			}
 		}
 		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
@@ -817,7 +810,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	}
 
 	batches := groupCandidatesByChunk(candidates, p.MetricEnrichGroupSize)
-	p.Logger.Info("extract metrics",
+	p.Logger.Info("extract metrics (grouped)",
 		"model_name", p.RelationModelName,
 		"prompt_name", p.RelationPromptRef,
 		"total batches", len(batches),
@@ -872,14 +865,6 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 					"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
 					"metric_index", j,
 					"metric_name", m["metric_name"],
-				)
-			} else {
-				p.Logger.Info("pass2: metric source_line_spans",
-					"record_id", record_id,
-					"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
-					"metric_index", j,
-					"metric_name", m["metric_name"],
-					"source_line_spans", spans,
 				)
 			}
 		}

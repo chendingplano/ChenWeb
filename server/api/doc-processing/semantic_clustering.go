@@ -229,7 +229,7 @@ func semClusterEntities(
 
 		candidates, qErr := queryArtifactHybridCandidates(
 			ctx, db, dict, strings.TrimSpace(e.SearchDocument), vec, useSem,
-			searchArtifactEntity, e.ArtifactID, searchLimit,
+			searchArtifactEntity, e.ArtifactID, "", searchLimit,
 		)
 		if qErr != nil {
 			if logger != nil {

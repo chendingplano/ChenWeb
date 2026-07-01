@@ -40,15 +40,15 @@ func TestAssembleMatches_Branches_DedupExclusionCap(t *testing.T) {
 		dm(12, "1_m_2", "temp"),     // index 1
 	}
 
-	hsEdges := []docprocessing.Connection{
-		// Branch A: M1 -> cross-doc metric 2_m_9 (semantically_related).
-		{SourceID: "1_m_1", TargetID: "2_m_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
-		// Branch A duplicate target reached again via entity branch below (dedup).
-		{SourceID: "1_m_1", TargetID: "3_m_7", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.2},
-		// Wrong relation_name -> ignored.
-		{SourceID: "1_m_1", TargetID: "9_m_9", RelationName: "other", Confidence: 1.0},
-		// Same-document target -> excluded.
-		{SourceID: "1_m_1", TargetID: "1_m_5", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.5},
+	// Branch A: live hybrid-search hits for M1 (index 0), keyed by doc metric index.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_m_9", RecordID: 2, RRFScore: 0.9},
+			// Also reached via the entity branch below -> must dedup.
+			{ArtifactID: "3_m_7", RecordID: 3, RRFScore: 0.2},
+			// Same-document hit -> excluded by add().
+			{ArtifactID: "1_m_5", RecordID: recordID, RRFScore: 0.5},
+		},
 	}
 	entEdges := []docprocessing.Connection{
 		// Branch C: entity -> metric 3_m_7 (shares "pressure" with M1).
@@ -65,7 +65,7 @@ func TestAssembleMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// No cap first: verify branch coverage + dedup + exclusion.
-	got := assembleMatches(recordID, docMetrics, hsEdges, nil, entEdges, resolved, siblings, 0)
+	got := assembleMatches(recordID, docMetrics, hybridMatches, entEdges, resolved, siblings, 0)
 
 	// M1 (index 0): 2_m_9 (A) and 3_m_7 (A+C deduped) = 2 matches; 1_m_5 excluded.
 	if len(got[0]) != 2 {
@@ -88,29 +88,27 @@ func TestAssembleMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: M1 keeps only the highest-confidence match (2_m_9 @0.9).
-	capped := assembleMatches(recordID, docMetrics, hsEdges, nil, entEdges, resolved, siblings, 1)
+	capped := assembleMatches(recordID, docMetrics, hybridMatches, entEdges, resolved, siblings, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.MetricID != "2_m_9" {
 		t.Fatalf("capped M1 = %v, want [2_m_9]", capped[0])
 	}
 }
 
-func TestAssembleMatches_BranchA_InboundAndDedup(t *testing.T) {
+func TestAssembleMatches_BranchA_DedupAndExclusion(t *testing.T) {
 	const recordID = int64(1)
 	docMetrics := []docMetric{
 		dm(11, "1_m_1"), // index 0
 	}
 
-	// Outbound: M1 -> 2_m_9 (match discovered when our doc was indexed).
-	hsOut := []docprocessing.Connection{
-		{SourceID: "1_m_1", TargetID: "2_m_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.7},
-	}
-	// Inbound: 5_m_3 -> M1 (a later-indexed doc linked to us); 2_m_9 -> M1 duplicates
-	// the outbound match and must collapse; same-document inbound source excluded.
-	hsIn := []docprocessing.Connection{
-		{SourceID: "5_m_3", TargetID: "1_m_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
-		{SourceID: "2_m_9", TargetID: "1_m_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.4},
-		{SourceID: "1_m_8", TargetID: "1_m_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.6},
-		{SourceID: "9_m_9", TargetID: "1_m_1", RelationName: "other", Confidence: 1.0}, // wrong relation
+	// A single live hybrid search per doc metric returns a flat, direction-free hit list.
+	// Duplicate ids collapse (first-seen wins) and same-document hits are excluded.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_m_9", RecordID: 2, RRFScore: 0.7},
+			{ArtifactID: "5_m_3", RecordID: 5, RRFScore: 0.9},
+			{ArtifactID: "2_m_9", RecordID: 2, RRFScore: 0.4},        // duplicate -> collapse
+			{ArtifactID: "1_m_8", RecordID: recordID, RRFScore: 0.6}, // same doc -> excluded
+		},
 	}
 	resolved := map[string]resolvedMetric{
 		"2_m_9": {view: metricView{MetricID: "2_m_9"}, recordID: 2},
@@ -118,9 +116,9 @@ func TestAssembleMatches_BranchA_InboundAndDedup(t *testing.T) {
 		"1_m_8": {view: metricView{MetricID: "1_m_8"}, recordID: recordID}, // same doc
 	}
 
-	got := assembleMatches(recordID, docMetrics, hsOut, hsIn, nil, resolved, nil, 0)
+	got := assembleMatches(recordID, docMetrics, hybridMatches, nil, resolved, nil, 0)
 
-	// Expect 2_m_9 (out+in deduped) and 5_m_3 (inbound only); 1_m_8 excluded, wrong relation ignored.
+	// Expect 2_m_9 (deduped) and 5_m_3; 1_m_8 excluded as same-document.
 	if len(got[0]) != 2 {
 		t.Fatalf("M1 matches = %d, want 2 (%v)", len(got[0]), got[0])
 	}
@@ -132,7 +130,7 @@ func TestAssembleMatches_BranchA_InboundAndDedup(t *testing.T) {
 		}
 	}
 	if !ids["2_m_9"] || !ids["5_m_3"] {
-		t.Errorf("M1 matches missing expected inbound/outbound ids: %v", ids)
+		t.Errorf("M1 matches missing expected ids: %v", ids)
 	}
 }
 

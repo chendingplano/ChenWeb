@@ -67,6 +67,7 @@ var metricIndexConfig = artifactIndexConfig{
 // steps. It is loaded from kb.metrics so indexing works off the stored source of truth.
 type indexedMetric struct {
 	MetricID       string
+	MetricName     string
 	SourceSpans    []string
 	Categories     []string
 	SearchDocument string
@@ -130,14 +131,17 @@ func IndexMetricsForRecord(
 	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, model_name, prompt_ref,
 		artifacts, metricIndexConfig, resolver, logger)
 	categoryPathMetrics := indexArtifactsByCategoryPaths(ctx, db, recordID, artifacts, metricIndexConfig, logger)
-	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, artifacts, metricIndexConfig, logger)
+	// Semantic metric<->metric similarity is no longer materialized as
+	// hybrid_search/semantically_related edges: the metrics reviewer discovers it live via
+	// FindSimilarArtifactsOnTheFly (always fresh, no directional edge bookkeeping). The
+	// hydration above still runs so kb.search_artifacts carries the embeddings the
+	// read-time hybrid search (and the /kb/metrics/search path) rely on.
 
 	if logger != nil {
 		logger.Info("metrics indexing result",
 			"record_id", recordID,
 			"category_connections", categoryConnections,
 			"category_path_metrics", categoryPathMetrics,
-			"semantic_links", semanticLinks,
 		)
 	}
 }
@@ -145,6 +149,7 @@ func IndexMetricsForRecord(
 func loadIndexedMetricsForRecord(ctx context.Context, db *sql.DB, recordID int64) ([]indexedMetric, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT metric_id,
+		        COALESCE(metric_name, ''),
 		        COALESCE(source_line_spans, '[]'::jsonb),
 		        COALESCE(metric_categories, ''),
 		        COALESCE(search_document, '')
@@ -159,12 +164,13 @@ func loadIndexedMetricsForRecord(ctx context.Context, db *sql.DB, recordID int64
 	var out []indexedMetric
 	for rows.Next() {
 		var (
-			metricID  string
-			spansRaw  []byte
-			catsText  string
-			searchDoc string
+			metricID   string
+			metricName string
+			spansRaw   []byte
+			catsText   string
+			searchDoc  string
 		)
-		if err := rows.Scan(&metricID, &spansRaw, &catsText, &searchDoc); err != nil {
+		if err := rows.Scan(&metricID, &metricName, &spansRaw, &catsText, &searchDoc); err != nil {
 			return nil, err
 		}
 		var spansAny any
@@ -173,6 +179,7 @@ func loadIndexedMetricsForRecord(ctx context.Context, db *sql.DB, recordID int64
 		}
 		out = append(out, indexedMetric{
 			MetricID:       strings.TrimSpace(metricID),
+			MetricName:     strings.TrimSpace(metricName),
 			SourceSpans:    normalizeSourceLineSpans(spansAny),
 			Categories:     parseMetricCategoriesText(catsText),
 			SearchDocument: strings.TrimSpace(searchDoc),
