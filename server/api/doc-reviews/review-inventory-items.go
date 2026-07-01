@@ -17,11 +17,12 @@ import (
 // inventoryItemsReviewer is the cross-document inventory-item consistency reviewer (P5,
 // aspect "inventory_items"; ADR 2026063005). Like the metric reviewer (ADR 2026063002)
 // it does not read the document body: it loads the document's extracted inventory items
-// and compares each against semantically-related items in OTHER documents, discovered
-// through the precomputed kb.artifact_connections edges (Branch A:
-// hybrid_search/semantically_related item edges; Branch B: items sharing an
-// item_category corpus-wide; Branch C: entity->inventory_item edges attached by shared
-// category).
+// and compares each against semantically-related items in OTHER documents. Semantic
+// similarity is discovered LIVE at review time via
+// docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather than from precomputed
+// hybrid_search/semantically_related edges — on-the-fly search is always fresh and needs
+// no inbound/outbound edge bookkeeping. Branch B adds items sharing an item_category
+// corpus-wide; Branch C adds entity->inventory_item edges attached by shared category.
 //
 // It uses ReviewStrategy StrategyDocument and Input="artifact", so the prompt-cache
 // scheduler routes it to runReviewersLegacy, which calls ReviewDocument directly.
@@ -229,36 +230,36 @@ func (r *inventoryItemsReviewer) buildMatches(
 
 	store := &docprocessing.ConnectionSQLStore{DB: r.db}
 
-	// Branch A is bidirectional because hybrid_search edges are written only from the
-	// indexed document outward (ADR 2026063005): an item in a document indexed AFTER this
-	// one links to ours as an INBOUND edge only.
-	// A1 -- outbound: our item is the edge source, the match is the target.
-	hsOutEdges, err := store.LoadConnectionsBySource(ctx, recordID, "inventory_item", docprocessing.RelationMethodHybridSearch, "inventory_item")
-	if err != nil {
-		return nil, err
+	// Branch A: semantically-similar items discovered LIVE (no materialized edges). A single
+	// hybrid search per doc item finds close items regardless of when the other document was
+	// indexed, so no inbound/outbound edge bookkeeping is needed.
+	hybridMatches := make(map[int][]docprocessing.OnTheFlySemanticMatch, len(docItems))
+	for i, di := range docItems {
+		if di.view.ItemID == "" {
+			continue
+		}
+		hits, err := docprocessing.FindSimilarArtifactsOnTheFly(ctx, r.db, "inventory_item", di.view.ItemID, "inventory_item", r.maxMatches)
+		if err != nil {
+			return nil, err
+		}
+		if len(hits) > 0 {
+			hybridMatches[i] = hits
+		}
 	}
-	// A2 -- inbound: our item is the edge target, the match is the source.
-	hsInEdges, err := store.LoadConnectionsByTarget(ctx, recordID, "inventory_item", docprocessing.RelationMethodHybridSearch, "inventory_item")
-	if err != nil {
-		return nil, err
-	}
+
 	// Branch C: entity -> inventory_item edges (any relation method).
 	entEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", "", "inventory_item")
 	if err != nil {
 		return nil, err
 	}
 
-	// Collect every match-side item id needing resolution: targets for outbound edges,
-	// sources for inbound edges.
+	// Collect every match-side item id needing resolution.
 	idSet := make(map[string]struct{})
-	for _, e := range hsOutEdges {
-		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
-			idSet[e.TargetID] = struct{}{}
-		}
-	}
-	for _, e := range hsInEdges {
-		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.SourceID != "" {
-			idSet[e.SourceID] = struct{}{}
+	for _, hits := range hybridMatches {
+		for _, h := range hits {
+			if h.ArtifactID != "" {
+				idSet[h.ArtifactID] = struct{}{}
+			}
 		}
 	}
 	for _, e := range entEdges {
@@ -282,7 +283,7 @@ func (r *inventoryItemsReviewer) buildMatches(
 		}
 	}
 
-	return assembleInventoryMatches(recordID, docItems, hsOutEdges, hsInEdges, entEdges, resolved, siblings, r.maxMatches), nil
+	return assembleInventoryMatches(recordID, docItems, hybridMatches, entEdges, resolved, siblings, r.maxMatches), nil
 }
 
 // assembleInventoryMatches is the pure (DB-free) match-assembly used by buildMatches. It
@@ -290,20 +291,12 @@ func (r *inventoryItemsReviewer) buildMatches(
 func assembleInventoryMatches(
 	recordID int64,
 	docItems []docInventoryItem,
-	hsOutEdges []docprocessing.Connection,
-	hsInEdges []docprocessing.Connection,
+	hybridMatches map[int][]docprocessing.OnTheFlySemanticMatch,
 	entEdges []docprocessing.Connection,
 	resolved map[string]resolvedInventoryItem,
 	siblings []resolvedInventoryItem,
 	maxMatches int,
 ) map[int][]matchedInventoryItem {
-	byItemID := make(map[string]int, len(docItems))
-	for i, di := range docItems {
-		if di.view.ItemID != "" {
-			byItemID[di.view.ItemID] = i
-		}
-	}
-
 	matches := make(map[int][]matchedInventoryItem)
 	dedup := make(map[int]map[string]struct{}) // docIdx -> set of matched item ids
 	add := func(docIdx int, m matchedInventoryItem) {
@@ -320,37 +313,16 @@ func assembleInventoryMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A1 (outbound): our item is the edge source, the match is the target.
-	for _, e := range hsOutEdges {
-		if e.RelationName != docprocessing.RelationSemanticallyRelated {
-			continue
+	// Branch A: semantically-similar items from the live hybrid search, keyed by doc item
+	// index. The add() filter drops same-document and duplicate hits.
+	for docIdx, hits := range hybridMatches {
+		for _, h := range hits {
+			tm, ok := resolved[h.ArtifactID]
+			if !ok {
+				continue
+			}
+			add(docIdx, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "hybrid_search", confidence: h.RRFScore})
 		}
-		docIdx, ok := byItemID[e.SourceID]
-		if !ok {
-			continue
-		}
-		tm, ok := resolved[e.TargetID]
-		if !ok {
-			continue
-		}
-		add(docIdx, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "hybrid_search", confidence: e.Confidence})
-	}
-
-	// Branch A2 (inbound): our item is the edge target, the match is the source.
-	// These edges were written when the other document was indexed (after ours).
-	for _, e := range hsInEdges {
-		if e.RelationName != docprocessing.RelationSemanticallyRelated {
-			continue
-		}
-		docIdx, ok := byItemID[e.TargetID]
-		if !ok {
-			continue
-		}
-		sm, ok := resolved[e.SourceID]
-		if !ok {
-			continue
-		}
-		add(docIdx, matchedInventoryItem{view: sm.view, recordID: sm.recordID, filename: sm.filename, via: "hybrid_search", confidence: e.Confidence})
 	}
 
 	// Branch B: items sharing a category key (corpus-wide).

@@ -20,15 +20,15 @@ func TestAssembleInventoryMatches_Branches_DedupExclusionCap(t *testing.T) {
 		di("1_inv_2", "pump"),  // index 1
 	}
 
-	hsEdges := []docprocessing.Connection{
-		// Branch A: I1 -> cross-doc item 2_inv_9 (semantically_related).
-		{SourceID: "1_inv_1", TargetID: "2_inv_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
-		// Branch A duplicate target reached again via entity branch below (dedup).
-		{SourceID: "1_inv_1", TargetID: "3_inv_7", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.2},
-		// Wrong relation_name -> ignored.
-		{SourceID: "1_inv_1", TargetID: "9_inv_9", RelationName: "other", Confidence: 1.0},
-		// Same-document target -> excluded.
-		{SourceID: "1_inv_1", TargetID: "1_inv_5", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.5},
+	// Branch A: live hybrid-search hits for I1 (index 0), keyed by doc item index.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_inv_9", RecordID: 2, RRFScore: 0.9},
+			// Also reached via the entity branch below -> must dedup.
+			{ArtifactID: "3_inv_7", RecordID: 3, RRFScore: 0.2},
+			// Same-document hit -> excluded by add().
+			{ArtifactID: "1_inv_5", RecordID: recordID, RRFScore: 0.5},
+		},
 	}
 	entEdges := []docprocessing.Connection{
 		// Branch C: entity -> item 3_inv_7 (shares "valve" with I1).
@@ -45,7 +45,7 @@ func TestAssembleInventoryMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// No cap first: verify branch coverage + dedup + exclusion.
-	got := assembleInventoryMatches(recordID, docItems, hsEdges, nil, entEdges, resolved, siblings, 0)
+	got := assembleInventoryMatches(recordID, docItems, hybridMatches, entEdges, resolved, siblings, 0)
 
 	// I1 (index 0): 2_inv_9 (A) and 3_inv_7 (A+C deduped) = 2 matches; 1_inv_5 excluded.
 	if len(got[0]) != 2 {
@@ -68,27 +68,25 @@ func TestAssembleInventoryMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: I1 keeps only the highest-confidence match (2_inv_9 @0.9).
-	capped := assembleInventoryMatches(recordID, docItems, hsEdges, nil, entEdges, resolved, siblings, 1)
+	capped := assembleInventoryMatches(recordID, docItems, hybridMatches, entEdges, resolved, siblings, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.ItemID != "2_inv_9" {
 		t.Fatalf("capped I1 = %v, want [2_inv_9]", capped[0])
 	}
 }
 
-func TestAssembleInventoryMatches_BranchA_InboundAndDedup(t *testing.T) {
+func TestAssembleInventoryMatches_BranchA_DedupAndExclusion(t *testing.T) {
 	const recordID = int64(1)
 	docItems := []docInventoryItem{di("1_inv_1")} // index 0
 
-	// Outbound: I1 -> 2_inv_9.
-	hsOut := []docprocessing.Connection{
-		{SourceID: "1_inv_1", TargetID: "2_inv_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.7},
-	}
-	// Inbound: 5_inv_3 -> I1 (later-indexed doc); 2_inv_9 -> I1 duplicates outbound;
-	// 1_inv_8 -> I1 same-document (excluded); wrong-relation ignored.
-	hsIn := []docprocessing.Connection{
-		{SourceID: "5_inv_3", TargetID: "1_inv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
-		{SourceID: "2_inv_9", TargetID: "1_inv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.4},
-		{SourceID: "1_inv_8", TargetID: "1_inv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.6},
-		{SourceID: "9_inv_9", TargetID: "1_inv_1", RelationName: "other", Confidence: 1.0},
+	// A single live hybrid search per doc item returns a flat, direction-free hit list.
+	// Duplicate ids collapse (first-seen wins) and same-document hits are excluded.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_inv_9", RecordID: 2, RRFScore: 0.7},
+			{ArtifactID: "5_inv_3", RecordID: 5, RRFScore: 0.9},
+			{ArtifactID: "2_inv_9", RecordID: 2, RRFScore: 0.4},        // duplicate -> collapse
+			{ArtifactID: "1_inv_8", RecordID: recordID, RRFScore: 0.6}, // same doc -> excluded
+		},
 	}
 	resolved := map[string]resolvedInventoryItem{
 		"2_inv_9": {view: inventoryItemView{ItemID: "2_inv_9"}, recordID: 2},
@@ -96,7 +94,7 @@ func TestAssembleInventoryMatches_BranchA_InboundAndDedup(t *testing.T) {
 		"1_inv_8": {view: inventoryItemView{ItemID: "1_inv_8"}, recordID: recordID},
 	}
 
-	got := assembleInventoryMatches(recordID, docItems, hsOut, hsIn, nil, resolved, nil, 0)
+	got := assembleInventoryMatches(recordID, docItems, hybridMatches, nil, resolved, nil, 0)
 
 	if len(got[0]) != 2 {
 		t.Fatalf("I1 matches = %d, want 2 (%v)", len(got[0]), got[0])
@@ -109,7 +107,7 @@ func TestAssembleInventoryMatches_BranchA_InboundAndDedup(t *testing.T) {
 		}
 	}
 	if !ids["2_inv_9"] || !ids["5_inv_3"] {
-		t.Errorf("I1 matches missing expected inbound/outbound ids: %v", ids)
+		t.Errorf("I1 matches missing expected ids: %v", ids)
 	}
 }
 

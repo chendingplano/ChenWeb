@@ -65,14 +65,17 @@ func IndexInventoryItemsForRecord(
 	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID,
 		model_name, prompt_ref, items, inventoryItemIndexConfig, resolver, logger)
 	categoryPathItems := indexArtifactsByCategoryPaths(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
-	semanticLinks := connectArtifactsBySearch(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
+	// Semantic item<->item similarity is no longer materialized as
+	// hybrid_search/semantically_related edges: the inventory reviewer discovers it live via
+	// FindSimilarArtifactsOnTheFly (always fresh, no directional edge bookkeeping). The
+	// hydration above still runs so kb.search_artifacts carries the embeddings the read-time
+	// hybrid search (and the inventory-item search path) rely on.
 
 	if logger != nil {
 		logger.Info("inventory items indexing result",
 			"record_id", recordID,
 			"category_connections", categoryConnections,
 			"category_path_items", categoryPathItems,
-			"semantic_links", semanticLinks,
 		)
 	}
 }
