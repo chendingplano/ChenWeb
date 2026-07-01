@@ -17,9 +17,11 @@ import (
 // provisionsReviewer is the cross-document provision consistency reviewer (P5, aspect
 // "provisions"; ADR 2026063003). Like the metric reviewer it does not read the document
 // body: it loads the document's extracted provisions and compares each against
-// semantically-related provisions in OTHER documents, discovered through precomputed
-// kb.artifact_connections edges (Branch A: provision hybrid_search edges; Branch B:
-// entity->provision edges attached by shared category).
+// semantically-related provisions in OTHER documents. Semantic similarity is discovered
+// LIVE at review time via docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather
+// than from precomputed hybrid_search/semantically_related edges — on-the-fly search is
+// always fresh and needs no inbound/outbound edge bookkeeping. Branch B adds
+// entity->provision edges attached by shared category.
 //
 // ReviewStrategy StrategyDocument + Input="artifact" routes it to runReviewersLegacy,
 // which calls ReviewDocument directly.
@@ -212,19 +214,23 @@ func (r *provisionsReviewer) buildMatches(
 ) (map[int][]matchedProvision, error) {
 	store := &docprocessing.ConnectionSQLStore{DB: r.db}
 
-	// Branch A is bidirectional because hybrid_search edges are written only from the
-	// indexed document outward (ADR 2026063003): a provision in a document indexed AFTER
-	// this one links to ours as an INBOUND edge only.
-	// A1 -- outbound: our provision is the edge source, the match is the target.
-	hsOutEdges, err := store.LoadConnectionsBySource(ctx, recordID, "provision", docprocessing.RelationMethodHybridSearch, "provision")
-	if err != nil {
-		return nil, err
+	// Branch A: semantically-similar provisions discovered LIVE (no materialized edges). A
+	// single hybrid search per doc provision finds close provisions regardless of when the
+	// other document was indexed, so no inbound/outbound edge bookkeeping is needed.
+	hybridMatches := make(map[int][]docprocessing.OnTheFlySemanticMatch, len(docProvs))
+	for i, dp := range docProvs {
+		if dp.view.ProvID == "" {
+			continue
+		}
+		hits, err := docprocessing.FindSimilarArtifactsOnTheFly(ctx, r.db, "provision", dp.view.ProvID, "provision", r.maxMatches)
+		if err != nil {
+			return nil, err
+		}
+		if len(hits) > 0 {
+			hybridMatches[i] = hits
+		}
 	}
-	// A2 -- inbound: our provision is the edge target, the match is the source.
-	hsInEdges, err := store.LoadConnectionsByTarget(ctx, recordID, "provision", docprocessing.RelationMethodHybridSearch, "provision")
-	if err != nil {
-		return nil, err
-	}
+
 	// Branch B: entity -> provision edges (any relation method).
 	entEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", "", "provision")
 	if err != nil {
@@ -232,14 +238,11 @@ func (r *provisionsReviewer) buildMatches(
 	}
 
 	idSet := make(map[string]struct{})
-	for _, e := range hsOutEdges {
-		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
-			idSet[e.TargetID] = struct{}{}
-		}
-	}
-	for _, e := range hsInEdges {
-		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.SourceID != "" {
-			idSet[e.SourceID] = struct{}{}
+	for _, hits := range hybridMatches {
+		for _, h := range hits {
+			if h.ArtifactID != "" {
+				idSet[h.ArtifactID] = struct{}{}
+			}
 		}
 	}
 	for _, e := range entEdges {
@@ -252,26 +255,18 @@ func (r *provisionsReviewer) buildMatches(
 		return nil, err
 	}
 
-	return assembleProvisionMatches(recordID, docProvs, hsOutEdges, hsInEdges, entEdges, resolved, r.maxMatches), nil
+	return assembleProvisionMatches(recordID, docProvs, hybridMatches, entEdges, resolved, r.maxMatches), nil
 }
 
 // assembleProvisionMatches is the pure (DB-free) match-assembly used by buildMatches.
 func assembleProvisionMatches(
 	recordID int64,
 	docProvs []docProvision,
-	hsOutEdges []docprocessing.Connection,
-	hsInEdges []docprocessing.Connection,
+	hybridMatches map[int][]docprocessing.OnTheFlySemanticMatch,
 	entEdges []docprocessing.Connection,
 	resolved map[string]resolvedProvision,
 	maxMatches int,
 ) map[int][]matchedProvision {
-	byProvID := make(map[string]int, len(docProvs))
-	for i, dp := range docProvs {
-		if dp.view.ProvID != "" {
-			byProvID[dp.view.ProvID] = i
-		}
-	}
-
 	matches := make(map[int][]matchedProvision)
 	dedup := make(map[int]map[string]struct{})
 	add := func(docIdx int, m matchedProvision) {
@@ -288,37 +283,16 @@ func assembleProvisionMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A1 (outbound): our provision is the edge source, the match is the target.
-	for _, e := range hsOutEdges {
-		if e.RelationName != docprocessing.RelationSemanticallyRelated {
-			continue
+	// Branch A: semantically-similar provisions from the live hybrid search, keyed by doc
+	// provision index. The add() filter drops same-document and duplicate hits.
+	for docIdx, hits := range hybridMatches {
+		for _, h := range hits {
+			tp, ok := resolved[h.ArtifactID]
+			if !ok {
+				continue
+			}
+			add(docIdx, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, via: "hybrid_search", confidence: h.RRFScore})
 		}
-		docIdx, ok := byProvID[e.SourceID]
-		if !ok {
-			continue
-		}
-		tp, ok := resolved[e.TargetID]
-		if !ok {
-			continue
-		}
-		add(docIdx, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, via: "hybrid_search", confidence: e.Confidence})
-	}
-
-	// Branch A2 (inbound): our provision is the edge target, the match is the source.
-	// These edges were written when the other document was indexed (after ours).
-	for _, e := range hsInEdges {
-		if e.RelationName != docprocessing.RelationSemanticallyRelated {
-			continue
-		}
-		docIdx, ok := byProvID[e.TargetID]
-		if !ok {
-			continue
-		}
-		sp, ok := resolved[e.SourceID]
-		if !ok {
-			continue
-		}
-		add(docIdx, matchedProvision{view: sp.view, recordID: sp.recordID, filename: sp.filename, via: "hybrid_search", confidence: e.Confidence})
 	}
 
 	// Branch B: entity-connected provisions, attached to doc provisions that share a category.

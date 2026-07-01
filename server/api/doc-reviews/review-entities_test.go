@@ -20,15 +20,15 @@ func TestAssembleEntityMatches_BranchesDedupExclusionCap(t *testing.T) {
 		de("1_e_2", "PetroNew"), // index 1
 	}
 
-	hsEdges := []docprocessing.Connection{
-		// Branch A: E1 -> cross-doc entity 2_e_9 (semantically_related).
-		{SourceID: "1_e_1", TargetID: "2_e_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
-		// Duplicate target also reached via name branch -> dedup.
-		{SourceID: "1_e_1", TargetID: "3_e_7", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.2},
-		// Wrong relation_name -> ignored.
-		{SourceID: "1_e_1", TargetID: "9_e_9", RelationName: "other", Confidence: 1.0},
-		// Same-document target -> excluded.
-		{SourceID: "1_e_1", TargetID: "1_e_5", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.5},
+	// Branch A: live hybrid-search hits for E1 (index 0), keyed by doc entity index.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_e_9", RecordID: 2, RRFScore: 0.9},
+			// Also reached via the name branch below -> must dedup.
+			{ArtifactID: "3_e_7", RecordID: 3, RRFScore: 0.2},
+			// Same-document hit -> excluded by add().
+			{ArtifactID: "1_e_5", RecordID: recordID, RRFScore: 0.5},
+		},
 	}
 	resolved := map[string]resolvedEntity{
 		"2_e_9": {view: entityView{EntityID: "2_e_9", Name: "Sinopec"}, recordID: 2},
@@ -45,7 +45,7 @@ func TestAssembleEntityMatches_BranchesDedupExclusionCap(t *testing.T) {
 		{view: entityView{EntityID: "1_e_8", Name: "Sinopec"}, recordID: recordID},
 	}
 
-	got := assembleEntityMatches(recordID, docEntities, hsEdges, nil, resolved, siblings, 0)
+	got := assembleEntityMatches(recordID, docEntities, hybridMatches, resolved, siblings, 0)
 
 	// E1: 2_e_9 (A) and 3_e_7 (A+B deduped) = 2; 1_e_5 / 1_e_8 excluded (same doc).
 	if len(got[0]) != 2 {
@@ -62,27 +62,25 @@ func TestAssembleEntityMatches_BranchesDedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: E1 keeps only highest-confidence match (2_e_9 @0.9).
-	capped := assembleEntityMatches(recordID, docEntities, hsEdges, nil, resolved, siblings, 1)
+	capped := assembleEntityMatches(recordID, docEntities, hybridMatches, resolved, siblings, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.EntityID != "2_e_9" {
 		t.Fatalf("capped E1 = %v, want [2_e_9]", capped[0])
 	}
 }
 
-func TestAssembleEntityMatches_BranchA_InboundAndDedup(t *testing.T) {
+func TestAssembleEntityMatches_BranchA_DedupAndExclusion(t *testing.T) {
 	const recordID = int64(1)
 	docEntities := []docEntity{de("1_e_1", "Sinopec")} // index 0
 
-	// Outbound: E1 -> 2_e_9.
-	hsOut := []docprocessing.Connection{
-		{SourceID: "1_e_1", TargetID: "2_e_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.7},
-	}
-	// Inbound: 5_e_3 -> E1 (later-indexed doc); 2_e_9 -> E1 duplicates outbound;
-	// 1_e_8 -> E1 same-document (excluded); wrong-relation ignored.
-	hsIn := []docprocessing.Connection{
-		{SourceID: "5_e_3", TargetID: "1_e_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
-		{SourceID: "2_e_9", TargetID: "1_e_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.4},
-		{SourceID: "1_e_8", TargetID: "1_e_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.6},
-		{SourceID: "9_e_9", TargetID: "1_e_1", RelationName: "other", Confidence: 1.0},
+	// A single live hybrid search per doc entity returns a flat, direction-free hit list.
+	// Duplicate ids collapse (first-seen wins) and same-document hits are excluded.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_e_9", RecordID: 2, RRFScore: 0.7},
+			{ArtifactID: "5_e_3", RecordID: 5, RRFScore: 0.9},
+			{ArtifactID: "2_e_9", RecordID: 2, RRFScore: 0.4},        // duplicate -> collapse
+			{ArtifactID: "1_e_8", RecordID: recordID, RRFScore: 0.6}, // same doc -> excluded
+		},
 	}
 	resolved := map[string]resolvedEntity{
 		"2_e_9": {view: entityView{EntityID: "2_e_9", Name: "Sinopec"}, recordID: 2},
@@ -90,7 +88,7 @@ func TestAssembleEntityMatches_BranchA_InboundAndDedup(t *testing.T) {
 		"1_e_8": {view: entityView{EntityID: "1_e_8", Name: "Sinopec"}, recordID: recordID},
 	}
 
-	got := assembleEntityMatches(recordID, docEntities, hsOut, hsIn, resolved, nil, 0)
+	got := assembleEntityMatches(recordID, docEntities, hybridMatches, resolved, nil, 0)
 
 	if len(got[0]) != 2 {
 		t.Fatalf("E1 matches = %d, want 2 (%v)", len(got[0]), got[0])
@@ -103,7 +101,7 @@ func TestAssembleEntityMatches_BranchA_InboundAndDedup(t *testing.T) {
 		}
 	}
 	if !ids["2_e_9"] || !ids["5_e_3"] {
-		t.Errorf("E1 matches missing expected inbound/outbound ids: %v", ids)
+		t.Errorf("E1 matches missing expected ids: %v", ids)
 	}
 }
 

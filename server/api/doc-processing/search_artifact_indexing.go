@@ -233,7 +233,7 @@ func loadIndexedProvisionsForRecord(ctx context.Context, db *sql.DB, recordID in
 }
 
 func loadIndexedEntitiesForRecord(ctx context.Context, db *sql.DB, recordID int64) ([]indexedArtifact, error) {
-	rows, err := db.QueryContext(ctx, `SELECT entity_id, id, COALESCE(line_spans, '[]'::jsonb), COALESCE(search_document, '') FROM kb.entities WHERE input_record_id = $1 ORDER BY id`, recordID)
+	rows, err := db.QueryContext(ctx, `SELECT entity_id, id, COALESCE(line_spans, '[]'::jsonb), COALESCE(search_document, ''), COALESCE(categories, '[]'::jsonb) FROM kb.entities WHERE input_record_id = $1 ORDER BY id`, recordID)
 	if err != nil {
 		return nil, err
 	}
@@ -245,8 +245,9 @@ func loadIndexedEntitiesForRecord(ctx context.Context, db *sql.DB, recordID int6
 			rowID     int64
 			spansRaw  []byte
 			searchDoc string
+			catsRaw   []byte
 		)
-		if err := rows.Scan(&entityID, &rowID, &spansRaw, &searchDoc); err != nil {
+		if err := rows.Scan(&entityID, &rowID, &spansRaw, &searchDoc, &catsRaw); err != nil {
 			return nil, err
 		}
 		seq := lastDelimitedToken(entityID)
@@ -262,9 +263,33 @@ func loadIndexedEntitiesForRecord(ctx context.Context, db *sql.DB, recordID int6
 			UpdateKey:      strings.TrimSpace(entityID),
 			SourceSpans:    normalizeSourceLineSpans(spansAny),
 			SearchDocument: strings.TrimSpace(searchDoc),
+			Categories:     parseJSONStringArray(catsRaw),
 		})
 	}
 	return out, rows.Err()
+}
+
+// indexEntityCategoryMembership resolves each entity's `categories` keys via
+// kb.artifact_categories and writes belong_to / category_name membership edges, mirroring the
+// metric/inventory path. Entities carry category keys, but the shared
+// indexArtifactsByOverlapAndConnect path only writes category *paths* (not membership), so
+// this runs as a separate Phase-C step. Returns the number of edges written; best-effort.
+func indexEntityCategoryMembership(ctx context.Context, db *sql.DB, recordID int64, modelName, promptRef string, logger ApiTypes.JimoLogger) int {
+	if db == nil {
+		return 0
+	}
+	entities, err := loadIndexedEntitiesForRecord(ctx, db, recordID)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("entity category membership: load entities failed", "record_id", recordID, "error", err.Error())
+		}
+		return 0
+	}
+	if len(entities) == 0 {
+		return 0
+	}
+	resolver := newMetricCategoryResolver(db, logger) // category resolver is category-type-agnostic
+	return upsertArtifactCategoryConnections(ctx, db, recordID, modelName, promptRef, entities, entityIndexConfig, resolver, logger)
 }
 
 func loadIndexedRelationsForRecord(ctx context.Context, db *sql.DB, recordID int64) ([]indexedArtifact, error) {

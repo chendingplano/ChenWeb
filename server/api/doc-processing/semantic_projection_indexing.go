@@ -41,6 +41,15 @@ func (p *SemanticProjectionsProcessor) PostProcessIndex(ctx context.Context, rec
 		p.Logger.Warn("reindex semantic projection search registry failed", "record_id", recordID, "error", reindexErr)
 	}
 	IndexSemanticProjectionsForRecord(ctx, recordID, chunks, p.Logger)
+	// Line-overlap artifact edges: semantic_projection <- {entity, metric, provision,
+	// inventory_item, topic} that share source lines. Reviewers traverse these; anchor rows
+	// are already registered from Phase B.
+	sharedEdges := writeSharedArtifactEdges(ctx, ApiTypes.ProjectDBHandle, recordID, searchArtifactSemanticProjection,
+		[]string{searchArtifactEntity, searchArtifactMetric, searchArtifactProvision, searchArtifactInventoryItem, searchArtifactTopic},
+		"extract_semantic_projections", p.Logger)
+	if p.Logger != nil {
+		p.Logger.Info("semantic projections indexing: shared-artifact edges written", "record_id", recordID, "edges", sharedEdges)
+	}
 	if refreshErr := refreshSemanticProjectionArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ArtifactDir, recordID, rec); refreshErr != nil {
 		p.Logger.Warn("refresh semantic projection artifact failed", "record_id", recordID, "error", refreshErr)
 	}

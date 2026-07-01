@@ -100,6 +100,15 @@ func (p *GenerateTopicsProcessor) PostProcessIndex(ctx context.Context, recordID
 		p.Logger.Warn("reindex topic search registry failed", "record_id", recordID, "error", reindexErr)
 	}
 	IndexTopicsForRecord(ctx, recordID, chunks, p.Logger)
+	// Line-overlap artifact edges: topic <- {entity, metric, provision, inventory_item,
+	// semantic_projection} that share source lines. Reviewers traverse these; anchor rows are
+	// already registered from Phase B.
+	sharedEdges := writeSharedArtifactEdges(ctx, ApiTypes.ProjectDBHandle, recordID, searchArtifactTopic,
+		[]string{searchArtifactEntity, searchArtifactMetric, searchArtifactProvision, searchArtifactInventoryItem, searchArtifactSemanticProjection},
+		topicIndexConfig.InstanceSource, p.Logger)
+	if p.Logger != nil {
+		p.Logger.Info("topic indexing: shared-artifact edges written", "record_id", recordID, "edges", sharedEdges)
+	}
 	return nil
 }
 
@@ -151,6 +160,15 @@ func (p *ProvisionsProcessor) PostProcessIndex(ctx context.Context, recordID int
 		p.Logger.Warn("reindex provision search registry failed", "record_id", recordID, "error", reindexErr)
 	}
 	IndexProvisionsForRecord(ctx, recordID, chunks, p.Logger)
+	// Line-overlap artifact edges: provision <- {entity, metric, inventory_item, topic,
+	// semantic_projection} that share source lines (spec 3.1.1). The document reviewers
+	// traverse these; anchor rows are already registered from Phase B.
+	sharedEdges := writeSharedArtifactEdges(ctx, ApiTypes.ProjectDBHandle, recordID, searchArtifactProvision,
+		[]string{searchArtifactEntity, searchArtifactMetric, searchArtifactInventoryItem, searchArtifactTopic, searchArtifactSemanticProjection},
+		provisionIndexConfig.InstanceSource, p.Logger)
+	if p.Logger != nil {
+		p.Logger.Info("provision indexing: shared-artifact edges written", "record_id", recordID, "edges", sharedEdges)
+	}
 	if refreshErr := refreshProvisionArtifactFile(ctx, ApiTypes.ProjectDBHandle, p.ArtifactDir, recordID, rec); refreshErr != nil {
 		p.Logger.Warn("refresh provision artifact failed", "record_id", recordID, "error", refreshErr)
 	}
@@ -241,9 +259,20 @@ func (p *EntityRelationProcessor) PostProcessIndex(ctx context.Context, recordID
 	entityIndexStart := time.Now()
 	IndexEntitiesForRecord(ctx, recordID, chunks, p.Logger)
 	IndexEntityNamesForRecord(ctx, recordID, p.Logger)
+	// Category membership edges: entities carry `categories` keys (like metrics/inventory),
+	// so resolve them via kb.artifact_categories and write belong_to / category_name edges.
+	entityCategoryConns := indexEntityCategoryMembership(ctx, ApiTypes.ProjectDBHandle, recordID, p.ModelName, p.PromptRef, p.Logger)
+	// Line-overlap artifact edges: entity <- {metric, provision, inventory_item, topic,
+	// semantic_projection} that share source lines. Reviewers traverse these; anchor rows are
+	// already registered from Phase B.
+	entitySharedEdges := writeSharedArtifactEdges(ctx, ApiTypes.ProjectDBHandle, recordID, searchArtifactEntity,
+		[]string{searchArtifactMetric, searchArtifactProvision, searchArtifactInventoryItem, searchArtifactTopic, searchArtifactSemanticProjection},
+		entityIndexConfig.InstanceSource, p.Logger)
 	if p.Logger != nil {
 		p.Logger.Info("entity-relation post-process entity indexing finished",
 			"record_id", recordID,
+			"category_connections", entityCategoryConns,
+			"shared_artifact_edges", entitySharedEdges,
 			"ms_used", time.Since(entityIndexStart).Milliseconds(),
 		)
 	}

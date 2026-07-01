@@ -47,7 +47,16 @@ const (
 	RelationMethodLineOverlap = "line_overlap"
 	RelationMethodStructural  = "structural"
 	RelationMethodManual      = "manual"
+	// RelationMethodLineOverlapArtifact tags intra-document artifact<->artifact edges built
+	// from line-span overlap (as opposed to RelationMethodLineOverlap, which tags
+	// chunk->artifact has-* edges). Paired with RelationSharedArtifact.
+	RelationMethodLineOverlapArtifact = "line-overlapped-artifact"
 )
+
+// RelationSharedArtifact is the relation_name for #shared_artifact edges: two artifacts in
+// the same document whose source line spans overlap. Symmetric in meaning; stored once per
+// (anchor source, self target) family run (see writeSharedArtifactEdges).
+const RelationSharedArtifact = "#shared_artifact"
 
 // artifactTypeChunk is the source_type used for chunk endpoints.
 const artifactTypeChunk = "chunk"

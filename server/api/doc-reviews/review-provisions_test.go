@@ -20,15 +20,15 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 		dp("1_prv_2", "process/temp"),    // index 1
 	}
 
-	hsEdges := []docprocessing.Connection{
-		// Branch A: P1 -> cross-doc provision 2_prv_9 (semantically_related).
-		{SourceID: "1_prv_1", TargetID: "2_prv_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
-		// Duplicate target also reached via entity branch -> dedup.
-		{SourceID: "1_prv_1", TargetID: "3_prv_7", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.2},
-		// Wrong relation_name -> ignored.
-		{SourceID: "1_prv_1", TargetID: "9_prv_9", RelationName: "other", Confidence: 1.0},
-		// Same-document target -> excluded.
-		{SourceID: "1_prv_1", TargetID: "1_prv_5", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.5},
+	// Branch A: live hybrid-search hits for P1 (index 0), keyed by doc provision index.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_prv_9", RecordID: 2, RRFScore: 0.9},
+			// Also reached via the entity branch below -> must dedup.
+			{ArtifactID: "3_prv_7", RecordID: 3, RRFScore: 0.2},
+			// Same-document hit -> excluded by add().
+			{ArtifactID: "1_prv_5", RecordID: recordID, RRFScore: 0.5},
+		},
 	}
 	entEdges := []docprocessing.Connection{
 		// Branch B: entity -> provision 3_prv_7 (shares "safety/pressure" with P1).
@@ -43,7 +43,7 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 		"1_prv_5": {view: provisionView{ProvID: "1_prv_5"}, recordID: recordID}, // same doc
 	}
 
-	got := assembleProvisionMatches(recordID, docProvs, hsEdges, nil, entEdges, resolved, 0)
+	got := assembleProvisionMatches(recordID, docProvs, hybridMatches, entEdges, resolved, 0)
 
 	// P1: 2_prv_9 (A) and 3_prv_7 (A+B deduped) = 2; 1_prv_5 excluded.
 	if len(got[0]) != 2 {
@@ -60,27 +60,25 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: P1 keeps only highest-confidence match (2_prv_9 @0.9).
-	capped := assembleProvisionMatches(recordID, docProvs, hsEdges, nil, entEdges, resolved, 1)
+	capped := assembleProvisionMatches(recordID, docProvs, hybridMatches, entEdges, resolved, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.ProvID != "2_prv_9" {
 		t.Fatalf("capped P1 = %v, want [2_prv_9]", capped[0])
 	}
 }
 
-func TestAssembleProvisionMatches_BranchA_InboundAndDedup(t *testing.T) {
+func TestAssembleProvisionMatches_BranchA_DedupAndExclusion(t *testing.T) {
 	const recordID = int64(1)
 	docProvs := []docProvision{dp("1_prv_1")} // index 0
 
-	// Outbound: P1 -> 2_prv_9.
-	hsOut := []docprocessing.Connection{
-		{SourceID: "1_prv_1", TargetID: "2_prv_9", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.7},
-	}
-	// Inbound: 5_prv_3 -> P1 (later-indexed doc); 2_prv_9 -> P1 duplicates outbound;
-	// 1_prv_8 -> P1 is same-document (excluded); wrong-relation ignored.
-	hsIn := []docprocessing.Connection{
-		{SourceID: "5_prv_3", TargetID: "1_prv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.9},
-		{SourceID: "2_prv_9", TargetID: "1_prv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.4},
-		{SourceID: "1_prv_8", TargetID: "1_prv_1", RelationName: docprocessing.RelationSemanticallyRelated, Confidence: 0.6},
-		{SourceID: "9_prv_9", TargetID: "1_prv_1", RelationName: "other", Confidence: 1.0},
+	// A single live hybrid search per doc provision returns a flat, direction-free hit list.
+	// Duplicate ids collapse (first-seen wins) and same-document hits are excluded.
+	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
+		0: {
+			{ArtifactID: "2_prv_9", RecordID: 2, RRFScore: 0.7},
+			{ArtifactID: "5_prv_3", RecordID: 5, RRFScore: 0.9},
+			{ArtifactID: "2_prv_9", RecordID: 2, RRFScore: 0.4},        // duplicate -> collapse
+			{ArtifactID: "1_prv_8", RecordID: recordID, RRFScore: 0.6}, // same doc -> excluded
+		},
 	}
 	resolved := map[string]resolvedProvision{
 		"2_prv_9": {view: provisionView{ProvID: "2_prv_9"}, recordID: 2},
@@ -88,7 +86,7 @@ func TestAssembleProvisionMatches_BranchA_InboundAndDedup(t *testing.T) {
 		"1_prv_8": {view: provisionView{ProvID: "1_prv_8"}, recordID: recordID},
 	}
 
-	got := assembleProvisionMatches(recordID, docProvs, hsOut, hsIn, nil, resolved, 0)
+	got := assembleProvisionMatches(recordID, docProvs, hybridMatches, nil, resolved, 0)
 
 	if len(got[0]) != 2 {
 		t.Fatalf("P1 matches = %d, want 2 (%v)", len(got[0]), got[0])
@@ -101,7 +99,7 @@ func TestAssembleProvisionMatches_BranchA_InboundAndDedup(t *testing.T) {
 		}
 	}
 	if !ids["2_prv_9"] || !ids["5_prv_3"] {
-		t.Errorf("P1 matches missing expected inbound/outbound ids: %v", ids)
+		t.Errorf("P1 matches missing expected ids: %v", ids)
 	}
 }
 

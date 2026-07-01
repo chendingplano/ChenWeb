@@ -65,6 +65,12 @@ func IndexInventoryItemsForRecord(
 	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID,
 		model_name, prompt_ref, items, inventoryItemIndexConfig, resolver, logger)
 	categoryPathItems := indexArtifactsByCategoryPaths(ctx, db, recordID, items, inventoryItemIndexConfig, logger)
+	// Line-overlap artifact edges: inventory_item <- {entity, metric, provision, topic,
+	// semantic_projection} that share source lines (spec 1.12.1). Reviewers traverse these;
+	// anchor rows are already registered from Phase B.
+	sharedEdges := writeSharedArtifactEdges(ctx, db, recordID, searchArtifactInventoryItem,
+		[]string{searchArtifactEntity, searchArtifactMetric, searchArtifactProvision, searchArtifactTopic, searchArtifactSemanticProjection},
+		inventoryItemIndexConfig.InstanceSource, logger)
 	// Semantic item<->item similarity is no longer materialized as
 	// hybrid_search/semantically_related edges: the inventory reviewer discovers it live via
 	// FindSimilarArtifactsOnTheFly (always fresh, no directional edge bookkeeping). The
@@ -76,6 +82,7 @@ func IndexInventoryItemsForRecord(
 			"record_id", recordID,
 			"category_connections", categoryConnections,
 			"category_path_items", categoryPathItems,
+			"shared_artifact_edges", sharedEdges,
 		)
 	}
 }

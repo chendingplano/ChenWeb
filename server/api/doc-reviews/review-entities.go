@@ -17,9 +17,11 @@ import (
 // entitiesReviewer is the cross-document entity consistency reviewer (P5, aspect
 // "entities"; ADR 2026063004). Like the metric and provisions reviewers it does not read
 // the document body: it loads the document's extracted entities and compares each against
-// related entities in OTHER documents, discovered through precomputed
-// kb.artifact_connections edges (Branch A: entity hybrid_search edges) and a corpus-wide
-// name scan (Branch B: same-named entities in other documents).
+// related entities in OTHER documents. Semantic similarity is discovered LIVE at review
+// time via docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather than from
+// precomputed hybrid_search/semantically_related edges — on-the-fly search is always fresh
+// and needs no inbound/outbound edge bookkeeping. Branch B is a corpus-wide name scan
+// (same-named entities in other documents).
 //
 // ReviewStrategy StrategyDocument + Input="artifact" routes it to runReviewersLegacy,
 // which calls ReviewDocument directly.
@@ -232,31 +234,29 @@ func (r *entitiesReviewer) buildMatches(
 	recordID int64,
 	docEntities []docEntity,
 ) (map[int][]matchedEntity, error) {
-	store := &docprocessing.ConnectionSQLStore{DB: r.db}
-
-	// Branch A is bidirectional because hybrid_search edges are written only from the
-	// indexed document outward (ADR 2026063004): an entity in a document indexed AFTER
-	// this one links to ours as an INBOUND edge only.
-	// A1 -- outbound: our entity is the edge source, the match is the target.
-	hsOutEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", docprocessing.RelationMethodHybridSearch, "entity")
-	if err != nil {
-		return nil, err
-	}
-	// A2 -- inbound: our entity is the edge target, the match is the source.
-	hsInEdges, err := store.LoadConnectionsByTarget(ctx, recordID, "entity", docprocessing.RelationMethodHybridSearch, "entity")
-	if err != nil {
-		return nil, err
+	// Branch A: semantically-similar entities discovered LIVE (no materialized edges). A
+	// single hybrid search per doc entity finds close entities regardless of when the other
+	// document was indexed, so no inbound/outbound edge bookkeeping is needed.
+	hybridMatches := make(map[int][]docprocessing.OnTheFlySemanticMatch, len(docEntities))
+	for i, de := range docEntities {
+		if de.view.EntityID == "" {
+			continue
+		}
+		hits, err := docprocessing.FindSimilarArtifactsOnTheFly(ctx, r.db, "entity", de.view.EntityID, "entity", r.maxMatches)
+		if err != nil {
+			return nil, err
+		}
+		if len(hits) > 0 {
+			hybridMatches[i] = hits
+		}
 	}
 
 	idSet := make(map[string]struct{})
-	for _, e := range hsOutEdges {
-		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.TargetID != "" {
-			idSet[e.TargetID] = struct{}{}
-		}
-	}
-	for _, e := range hsInEdges {
-		if e.RelationName == docprocessing.RelationSemanticallyRelated && e.SourceID != "" {
-			idSet[e.SourceID] = struct{}{}
+	for _, hits := range hybridMatches {
+		for _, h := range hits {
+			if h.ArtifactID != "" {
+				idSet[h.ArtifactID] = struct{}{}
+			}
 		}
 	}
 	resolved, err := r.loadEntitiesByEntityID(ctx, idSet)
@@ -282,7 +282,7 @@ func (r *entitiesReviewer) buildMatches(
 		}
 	}
 
-	return assembleEntityMatches(recordID, docEntities, hsOutEdges, hsInEdges, resolved, siblings, r.maxMatches), nil
+	return assembleEntityMatches(recordID, docEntities, hybridMatches, resolved, siblings, r.maxMatches), nil
 }
 
 // assembleEntityMatches is the pure (DB-free) match-assembly used by buildMatches. It maps
@@ -290,19 +290,11 @@ func (r *entitiesReviewer) buildMatches(
 func assembleEntityMatches(
 	recordID int64,
 	docEntities []docEntity,
-	hsOutEdges []docprocessing.Connection,
-	hsInEdges []docprocessing.Connection,
+	hybridMatches map[int][]docprocessing.OnTheFlySemanticMatch,
 	resolved map[string]resolvedEntity,
 	siblings []resolvedEntity,
 	maxMatches int,
 ) map[int][]matchedEntity {
-	byEntityID := make(map[string]int, len(docEntities))
-	for i, de := range docEntities {
-		if de.view.EntityID != "" {
-			byEntityID[de.view.EntityID] = i
-		}
-	}
-
 	matches := make(map[int][]matchedEntity)
 	dedup := make(map[int]map[string]struct{}) // docIdx -> set of matched entity_ids
 	add := func(docIdx int, m matchedEntity) {
@@ -319,37 +311,16 @@ func assembleEntityMatches(
 		matches[docIdx] = append(matches[docIdx], m)
 	}
 
-	// Branch A1 (outbound): our entity is the edge source, the match is the target.
-	for _, e := range hsOutEdges {
-		if e.RelationName != docprocessing.RelationSemanticallyRelated {
-			continue
+	// Branch A: semantically-similar entities from the live hybrid search, keyed by doc
+	// entity index. The add() filter drops same-document and duplicate hits.
+	for docIdx, hits := range hybridMatches {
+		for _, h := range hits {
+			te, ok := resolved[h.ArtifactID]
+			if !ok {
+				continue
+			}
+			add(docIdx, matchedEntity{view: te.view, recordID: te.recordID, filename: te.filename, via: "hybrid_search", confidence: h.RRFScore})
 		}
-		docIdx, ok := byEntityID[e.SourceID]
-		if !ok {
-			continue
-		}
-		te, ok := resolved[e.TargetID]
-		if !ok {
-			continue
-		}
-		add(docIdx, matchedEntity{view: te.view, recordID: te.recordID, filename: te.filename, via: "hybrid_search", confidence: e.Confidence})
-	}
-
-	// Branch A2 (inbound): our entity is the edge target, the match is the source.
-	// These edges were written when the other document was indexed (after ours).
-	for _, e := range hsInEdges {
-		if e.RelationName != docprocessing.RelationSemanticallyRelated {
-			continue
-		}
-		docIdx, ok := byEntityID[e.TargetID]
-		if !ok {
-			continue
-		}
-		se, ok := resolved[e.SourceID]
-		if !ok {
-			continue
-		}
-		add(docIdx, matchedEntity{view: se.view, recordID: se.recordID, filename: se.filename, via: "hybrid_search", confidence: e.Confidence})
 	}
 
 	// Branch B: name siblings, attached to every doc entity sharing a name key.

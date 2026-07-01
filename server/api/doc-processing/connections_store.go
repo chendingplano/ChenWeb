@@ -222,6 +222,94 @@ func (s *ConnectionSQLStore) ReplaceConnectionsBySource(ctx context.Context, sou
 	return nil
 }
 
+// ReplaceSharedArtifactEdges idempotently replaces the #shared_artifact /
+// line-overlapped-artifact edges whose TARGET is one artifact family in one document, then
+// inserts conns. The delete is scoped by target_type so each family's indexing is
+// independent: a provisions run replaces only provision-target edges and never clobbers a
+// concurrently-running metrics run's metric-target edges (Phase C runs families in parallel).
+// All these edges are intra-document (source_record_id = target_record_id = recordID).
+func (s *ConnectionSQLStore) ReplaceSharedArtifactEdges(ctx context.Context, recordID int64, targetType string, conns []Connection) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("(CWB_CONN_041) nil connection store db handle")
+	}
+	if strings.TrimSpace(targetType) == "" {
+		return fmt.Errorf("(CWB_CONN_042) targetType must be non-empty for shared-artifact replace")
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("(CWB_CONN_043) begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM kb.artifact_connections
+		 WHERE target_type = $1 AND target_record_id = $2
+		   AND relation_method = $3 AND relation_name = $4`,
+		targetType, recordID, RelationMethodLineOverlapArtifact, RelationSharedArtifact,
+	); err != nil {
+		return fmt.Errorf("(CWB_CONN_044) delete existing shared-artifact edges: %w", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, connectionInsertSQL)
+	if err != nil {
+		return fmt.Errorf("(CWB_CONN_045) prepare insert: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, c := range conns {
+		overlap, err := encodeJSONB(c.Overlap)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_046) encode overlap: %w", err)
+		}
+		provenance, err := encodeJSONB(c.Provenance)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_047) encode provenance: %w", err)
+		}
+		extraInfo, err := encodeJSONB(c.ExtraInfo)
+		if err != nil {
+			return fmt.Errorf("(CWB_CONN_048) encode extra_info: %w", err)
+		}
+		var confidence any
+		if c.Confidence != 0 {
+			confidence = c.Confidence
+		}
+		var signature any
+		if c.SemanticSignature != "" {
+			signature = c.SemanticSignature
+		}
+		srcRecordID := c.SourceRecordID
+		if srcRecordID <= 0 {
+			srcRecordID = recordID
+		}
+		targetRecordID := c.TargetRecordID
+		if targetRecordID <= 0 {
+			targetRecordID = recordID
+		}
+		sourceDesc := c.SourceDesc
+		if sourceDesc == "" {
+			sourceDesc = connectionEndpointDesc(c.SourceType, c.SourceID)
+		}
+		targetDesc := c.TargetDesc
+		if targetDesc == "" {
+			targetDesc = connectionEndpointDesc(c.TargetType, c.TargetID)
+		}
+		if _, err := stmt.ExecContext(ctx,
+			srcRecordID, targetRecordID, c.SourceType, c.SourceID, c.TargetType, c.TargetID,
+			c.RelationName, RelationMethodLineOverlapArtifact, confidence, overlap, provenance,
+			signature, sourceDesc, targetDesc, extraInfo,
+		); err != nil {
+			return fmt.Errorf("(CWB_CONN_049) insert shared-artifact edge %s->%s: %w",
+				c.SourceID, c.TargetID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("(CWB_CONN_050) commit: %w", err)
+	}
+	return nil
+}
+
 // ReplaceRecordConnectionsByMethod idempotently replaces every intra-document edge a
 // processor produced under one relation_method, regardless of relation_name. Unlike
 // ReplaceConnections (which scope-deletes by an explicit relation_name set), this deletes

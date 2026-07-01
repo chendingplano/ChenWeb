@@ -131,6 +131,12 @@ func IndexMetricsForRecord(
 	categoryConnections := upsertArtifactCategoryConnections(ctx, db, recordID, model_name, prompt_ref,
 		artifacts, metricIndexConfig, resolver, logger)
 	categoryPathMetrics := indexArtifactsByCategoryPaths(ctx, db, recordID, artifacts, metricIndexConfig, logger)
+	// Line-overlap artifact edges: metric <- {entity, provision, inventory_item, topic,
+	// semantic_projection} that share source lines (spec 3.4.1). Reviewers traverse these;
+	// anchor rows are already registered from Phase B.
+	sharedEdges := writeSharedArtifactEdges(ctx, db, recordID, searchArtifactMetric,
+		[]string{searchArtifactEntity, searchArtifactProvision, searchArtifactInventoryItem, searchArtifactTopic, searchArtifactSemanticProjection},
+		metricIndexConfig.InstanceSource, logger)
 	// Semantic metric<->metric similarity is no longer materialized as
 	// hybrid_search/semantically_related edges: the metrics reviewer discovers it live via
 	// FindSimilarArtifactsOnTheFly (always fresh, no directional edge bookkeeping). The
@@ -142,6 +148,7 @@ func IndexMetricsForRecord(
 			"record_id", recordID,
 			"category_connections", categoryConnections,
 			"category_path_metrics", categoryPathMetrics,
+			"shared_artifact_edges", sharedEdges,
 		)
 	}
 }
