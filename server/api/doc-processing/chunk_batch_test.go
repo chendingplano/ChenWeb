@@ -10,6 +10,7 @@ import (
 type fakeBatchProc struct{ name string }
 
 func (f *fakeBatchProc) Name() string                                                 { return f.name }
+func (f *fakeBatchProc) HandleEvent(context.Context, []byte) error                    { return nil }
 func (f *fakeBatchProc) InitChunkBatch(context.Context, int64, []Chunk, string) error { return nil }
 func (f *fakeBatchProc) ProcessChunk(context.Context, int) error                      { return nil }
 func (f *fakeBatchProc) FinalizeChunkBatch(context.Context) error                     { return nil }

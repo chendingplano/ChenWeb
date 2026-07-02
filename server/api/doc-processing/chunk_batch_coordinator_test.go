@@ -8,6 +8,30 @@ import (
 	"time"
 )
 
+// nonBatchProc implements Processor but NOT ChunkBatchProcessor.
+type nonBatchProc struct {
+	name string
+	ran  int32
+}
+
+func (n *nonBatchProc) Name() string { return n.name }
+func (n *nonBatchProc) HandleEvent(context.Context, []byte) error {
+	atomic.AddInt32(&n.ran, 1)
+	return nil
+}
+
+func TestPartitionBatchProcessors(t *testing.T) {
+	batch := &fakeBatchProc{name: "extract_inventory_items"}
+	legacy := &nonBatchProc{name: "generate_topics"}
+	got := partitionBatchProcessors([]Processor{batch, legacy})
+	if len(got.batch) != 1 || got.batch[0].Name() != "extract_inventory_items" {
+		t.Fatalf("batch partition wrong: %+v", got.batch)
+	}
+	if len(got.unsupported) != 1 || got.unsupported[0].Name() != "generate_topics" {
+		t.Fatalf("unsupported partition wrong: %+v", got.unsupported)
+	}
+}
+
 // recordingProc records the wall-clock start of each ProcessChunk call and how
 // many run concurrently, so tests can assert seed concurrency and staggering.
 type recordingProc struct {

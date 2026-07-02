@@ -14,9 +14,27 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// errChunkBatchUnsupported is returned when a processor does not implement
-// ChunkBatchProcessor and the coordinator falls through to the legacy path.
-var errChunkBatchUnsupported = errors.New("processor does not support per-chunk batching")
+type phaseBPartition struct {
+	batch       []ChunkBatchProcessor
+	unsupported []Processor
+}
+
+// partitionBatchProcessors splits Phase B processors (Phase A excluded) into
+// those implementing ChunkBatchProcessor and those that don't.
+func partitionBatchProcessors(processors []Processor) phaseBPartition {
+	var part phaseBPartition
+	for _, p := range processors {
+		if p == nil || isPhaseAProcessor(p.Name()) {
+			continue
+		}
+		if bp, ok := p.(ChunkBatchProcessor); ok {
+			part.batch = append(part.batch, bp)
+		} else {
+			part.unsupported = append(part.unsupported, p)
+		}
+	}
+	return part
+}
 
 // runProcessorsChunkBatched runs Phase B processors using the per-chunk
 // batching coordinator. It replaces runProcessorsTwoPhase when all Phase B
@@ -39,36 +57,13 @@ func (s *ControlService) runProcessorsChunkBatched(
 	firstErr *error,
 	summaries *[]procResult,
 ) {
-	phaseB := make([]Processor, 0, len(processors))
-	for _, p := range processors {
-		if p != nil && !isPhaseAProcessor(p.Name()) {
-			phaseB = append(phaseB, p)
-		}
-	}
-	if len(phaseB) == 0 {
+	part := partitionBatchProcessors(processors)
+	batchProcessors := part.batch
+	if len(batchProcessors) == 0 {
 		return
 	}
 
-	// Verify all Phase B processors support batch mode.
-	batchProcessors := make([]ChunkBatchProcessor, 0, len(phaseB))
-	for _, p := range phaseB {
-		bp, ok := p.(ChunkBatchProcessor)
-		if !ok {
-			// Fall back to legacy concurrent mode when any processor doesn't support batching.
-			if s.Logger != nil {
-				s.Logger.Info("chunk batch: processor does not support batching, falling back to legacy mode",
-					"processor", p.Name(),
-					"record_id", recordID,
-				)
-			}
-			s.runProcessorsTwoPhase(ctx, payload, processors, recordID,
-				requestFailed, requestStopped, firstErr, summaries)
-			return
-		}
-		batchProcessors = append(batchProcessors, bp)
-	}
-
-	_, phaseBSpan := startPhaseSpan(ctx, "B", recordID, phaseB)
+	_, phaseBSpan := startPhaseSpan(ctx, "B", recordID, processors)
 	defer phaseBSpan.End()
 
 	// --- shared chunk loading ---
@@ -329,33 +324,97 @@ func (s *ControlService) runPhaseBProcessors(
 	firstErr *error,
 	summaries *[]procResult,
 ) {
-	// Check if ALL Phase B processors implement ChunkBatchProcessor.
-	allBatch := true
-	for _, p := range processors {
-		if p == nil || isPhaseAProcessor(p.Name()) {
-			continue
-		}
-		if _, ok := p.(ChunkBatchProcessor); !ok {
-			allBatch = false
-			break
-		}
-	}
+	part := partitionBatchProcessors(processors)
 
-	if allBatch && len(processors) > 1 {
-		if s.Logger != nil {
-			s.Logger.Info("using per-chunk batch coordinator",
-				"record_id", recordID,
-			)
-		}
-		s.runProcessorsChunkBatched(ctx, payload, processors, recordID,
-			requestFailed, requestStopped, firstErr, summaries)
-	} else {
-		if s.Logger != nil && allBatch {
-			s.Logger.Info("only one processor, skipping per-chunk batching",
-				"record_id", recordID)
-		}
+	// Only one (or zero) batch-capable processor: batching yields no
+	// cross-processor cache benefit, so run everything legacy.
+	if len(part.batch) <= 1 {
 		s.runProcessorsTwoPhase(ctx, payload, processors, recordID,
 			requestFailed, requestStopped, firstErr, summaries)
+		return
+	}
+
+	if s.Logger != nil {
+		s.Logger.Info("using per-chunk batch coordinator",
+			"record_id", recordID,
+		)
+	}
+
+	var (
+		wg              sync.WaitGroup
+		legacyFailed    bool
+		legacyStopped   bool
+		legacyErr       error
+		legacySummaries []procResult
+	)
+
+	// Unsupported processors run legacy-concurrent alongside the batch path.
+	if len(part.unsupported) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.runProcessorsPhaseBOnly(ctx, payload, part.unsupported, recordID,
+				&legacyFailed, &legacyStopped, &legacyErr, &legacySummaries)
+		}()
+	}
+
+	s.runProcessorsChunkBatched(ctx, payload, processors, recordID,
+		requestFailed, requestStopped, firstErr, summaries)
+
+	wg.Wait()
+
+	if legacyFailed {
+		*requestFailed = true
+		if *firstErr == nil {
+			*firstErr = legacyErr
+		}
+	}
+	if legacyStopped {
+		*requestStopped = true
+	}
+	if summaries != nil {
+		*summaries = append(*summaries, legacySummaries...)
+	}
+}
+
+// runProcessorsPhaseBOnly fans out the given processors concurrently (no Phase A),
+// used to run batch-unsupported processors alongside the chunk-batch coordinator.
+func (s *ControlService) runProcessorsPhaseBOnly(
+	ctx context.Context, payload []byte, phaseB []Processor,
+	recordID int64, requestFailed, requestStopped *bool, firstErr *error,
+	summaries *[]procResult,
+) {
+	if len(phaseB) == 0 {
+		return
+	}
+	results := make([]procResult, len(phaseB))
+	var wg sync.WaitGroup
+	for i, p := range phaseB {
+		wg.Add(1)
+		go func(i int, p Processor) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					results[i] = procResult{failed: true, err: fmt.Errorf("(MID_26062740) processor %q panicked: %v", p.Name(), r)}
+				}
+			}()
+			results[i] = s.runSingleProcessorCollect(ctx, payload, p, recordID)
+		}(i, p)
+	}
+	wg.Wait()
+	if summaries != nil {
+		*summaries = append(*summaries, results...)
+	}
+	for _, r := range results {
+		if r.failed {
+			*requestFailed = true
+			if *firstErr == nil {
+				*firstErr = r.err
+			}
+		}
+		if r.stopped {
+			*requestStopped = true
+		}
 	}
 }
 
