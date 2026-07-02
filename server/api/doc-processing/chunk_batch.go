@@ -64,3 +64,55 @@ func llmCallStagger() time.Duration {
 	}
 	return time.Duration(sec) * time.Second
 }
+
+// multiPassProcessors are batch processors that make more than one LLM call
+// per chunk. They must not be chosen as the cache seed (Task: seed selection);
+// the seed should plant each chunk's prefix with a single clean call.
+var multiPassProcessors = map[string]struct{}{
+	"extract_metrics":               {},
+	"extract_semantic_projections":  {},
+}
+
+// maxDocProcessorTasks returns the Phase-3 concurrency cap. Controlled by
+// MAX_DOC_PROCESSOR_TASKS (int >= 1); falls back to fallback (min 1). Mirrors
+// the reviewers' MAX_DOC_REVIEWER_TASKS.
+func maxDocProcessorTasks(fallback int) int {
+	if fallback < 1 {
+		fallback = 1
+	}
+	v := strings.TrimSpace(os.Getenv("MAX_DOC_PROCESSOR_TASKS"))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return fallback
+	}
+	return n
+}
+
+// orderBatchProcessorsSeedFirst returns a copy of bp with a single-pass
+// processor first so it can seed the DeepSeek cache with one call per chunk.
+// Stable for all other positions. If every processor is multi-pass, the input
+// order is returned unchanged.
+func orderBatchProcessorsSeedFirst(bp []ChunkBatchProcessor) []ChunkBatchProcessor {
+	out := make([]ChunkBatchProcessor, 0, len(bp))
+	seedIdx := -1
+	for i, p := range bp {
+		if _, multi := multiPassProcessors[p.Name()]; !multi {
+			seedIdx = i
+			break
+		}
+	}
+	if seedIdx <= 0 {
+		return append(out, bp...) // already seed-first, or all multi-pass
+	}
+	out = append(out, bp[seedIdx])
+	for i, p := range bp {
+		if i == seedIdx {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
