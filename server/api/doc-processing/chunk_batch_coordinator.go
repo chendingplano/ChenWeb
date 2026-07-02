@@ -151,7 +151,6 @@ func (s *ControlService) runProcessorsChunkBatched(
 	}
 
 	// --- Init each processor ---
-	stagger := llmCallStagger()
 	var batchFirstErr error
 
 	for _, bp := range batchProcessors {
@@ -175,123 +174,22 @@ func (s *ControlService) runProcessorsChunkBatched(
 		}
 	}
 
-	// --- Per-chunk batching loop (two-phase) ---
-	// Phase 1: Run the first processor for all chunks sequentially to seed
-	// the DeepSeek cache with each chunk's prefix.
 	if s.Logger != nil {
-		s.Logger.Info("chunk batch: phase 1 — seeding cache with first processor",
+		s.Logger.Info("chunk batch: scheduling three-phase cache-optimized run",
 			"record_id", recordID,
-			"processor", batchProcessors[0].Name(),
+			"num_processors", len(batchProcessors),
 			"num_chunks", len(chunks),
 		)
 	}
-
-	for chunkIdx := 0; chunkIdx < len(chunks); chunkIdx++ {
-		if isCtxStopped(ctx) {
+	if schedErr := s.scheduleChunkBatch(ctx, batchProcessors, chunks, recordID); schedErr != nil {
+		if errors.Is(schedErr, ErrPipelineStopped) {
 			*requestStopped = true
 			phaseBSpan.SetStatus(codes.Error, "stopped")
 			return
 		}
-
-		bp := batchProcessors[0]
-
-		if s.Logger != nil {
-			s.Logger.Info("chunk batch: processing chunk",
-				"record_id", recordID,
-				"processor", bp.Name(),
-				"chunk", chunkIdx,
-			)
+		if batchFirstErr == nil {
+			batchFirstErr = schedErr
 		}
-
-		recCtx := withLLMRecordID(ctx, recordID)
-		if err := bp.ProcessChunk(recCtx, chunkIdx); err != nil {
-			if errors.Is(err, ErrPipelineStopped) {
-				*requestStopped = true
-				return
-			}
-			if s.Logger != nil {
-				s.Logger.Error("chunk batch: process chunk failed",
-					"record_id", recordID,
-					"processor", bp.Name(),
-					"chunk", chunkIdx,
-					"error", err,
-				)
-			}
-			if batchFirstErr == nil {
-				batchFirstErr = fmt.Errorf("(MID_26062708) %s chunk %d: %w", bp.Name(), chunkIdx, err)
-			}
-			// Continue with next chunk so results accumulate.
-		}
-		// No stagger between chunks: each chunk has a different input prefix,
-		// so there is no cache-sharing benefit across chunk boundaries.
-	}
-
-	// Phase 2: Wait for DeepSeek to persist the cached prefix so remaining
-	// processors benefit from cache hits rather than misses.
-	if len(batchProcessors) > 1 {
-		select {
-		case <-time.After(stagger):
-			if s.Logger != nil {
-				s.Logger.Info("chunk batch: phase 2 — stagger complete, launching remaining processors",
-					"record_id", recordID,
-					"remaining_processors", len(batchProcessors)-1,
-				)
-			}
-		case <-ctx.Done():
-			*requestStopped = true
-			phaseBSpan.SetStatus(codes.Error, "stopped")
-			return
-		}
-	}
-
-	// Phase 3: Run all remaining processors for all chunks concurrently.
-	// Every call benefits from the cache seeded in Phase 1 by the first
-	// processor, because the chunk prefix is identical across processors
-	// (thanks to canonicalChunkInputText and the document-first prompt layout).
-	if len(batchProcessors) > 1 {
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-
-	outer:
-		for pi := 1; pi < len(batchProcessors); pi++ {
-			for chunkIdx := 0; chunkIdx < len(chunks); chunkIdx++ {
-				if isCtxStopped(ctx) {
-					break outer
-				}
-
-				bp := batchProcessors[pi]
-				wg.Add(1)
-
-				go func(pi, chunkIdx int, bp ChunkBatchProcessor) {
-					defer wg.Done()
-
-					if isCtxStopped(ctx) {
-						return
-					}
-
-					if s.Logger != nil {
-						s.Logger.Info("chunk batch: processing chunk",
-							"record_id", recordID,
-							"processor", bp.Name(),
-							"chunk", chunkIdx,
-						)
-					}
-
-					recCtx := withLLMRecordID(ctx, recordID)
-					if err := bp.ProcessChunk(recCtx, chunkIdx); err != nil {
-						if errors.Is(err, ErrPipelineStopped) {
-							return
-						}
-						mu.Lock()
-						if batchFirstErr == nil {
-							batchFirstErr = fmt.Errorf("(MID_26062708) %s chunk %d: %w", bp.Name(), chunkIdx, err)
-						}
-						mu.Unlock()
-					}
-				}(pi, chunkIdx, bp)
-			}
-		}
-		wg.Wait()
 	}
 
 	// --- Finalize each processor ---
@@ -327,6 +225,97 @@ func (s *ControlService) runProcessorsChunkBatched(
 	} else {
 		phaseBSpan.SetStatus(codes.Ok, "")
 	}
+}
+
+// scheduleChunkBatch runs the three-phase DeepSeek cache schedule over already
+// initialised batch processors: (1) fire the seed processor's chunks
+// concurrently, (2) wait LLM_CALL_STAGGER for the prefixes to persist, (3) fire
+// all remaining (processor x chunk) calls concurrently, bounded by
+// MAX_DOC_PROCESSOR_TASKS. Mirrors the doc-reviewers' runReviewTasksForPromptCache.
+// Returns the first ProcessChunk error, or ErrPipelineStopped on cancel.
+func (s *ControlService) scheduleChunkBatch(
+	ctx context.Context,
+	batchProcessors []ChunkBatchProcessor,
+	chunks []Chunk,
+	recordID int64,
+) error {
+	if len(batchProcessors) == 0 || len(chunks) == 0 {
+		return nil
+	}
+	ordered := orderBatchProcessorsSeedFirst(batchProcessors)
+	seed := ordered[0]
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	record := func(err error) {
+		if err == nil {
+			return
+		}
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		mu.Unlock()
+	}
+	runOne := func(bp ChunkBatchProcessor, chunkIdx int) {
+		if isCtxStopped(ctx) {
+			record(ErrPipelineStopped)
+			return
+		}
+		recCtx := withLLMRecordID(ctx, recordID)
+		if err := bp.ProcessChunk(recCtx, chunkIdx); err != nil {
+			if errors.Is(err, ErrPipelineStopped) {
+				record(ErrPipelineStopped)
+				return
+			}
+			record(fmt.Errorf("(MID_26062708) %s chunk %d: %w", bp.Name(), chunkIdx, err))
+		}
+	}
+
+	// Phase 1: seed chunks concurrently; do NOT wait.
+	for chunkIdx := 0; chunkIdx < len(chunks); chunkIdx++ {
+		wg.Add(1)
+		go func(idx int) { defer wg.Done(); runOne(seed, idx) }(chunkIdx)
+	}
+
+	// Phase 2: stagger while the seed keeps running.
+	if len(ordered) > 1 {
+		if stagger := llmCallStagger(); stagger > 0 {
+			select {
+			case <-time.After(stagger):
+			case <-ctx.Done():
+				wg.Wait()
+				return ErrPipelineStopped
+			}
+		}
+	}
+
+	// Phase 3: remaining (processor x chunk) concurrently, bounded.
+	if len(ordered) > 1 {
+		sem := make(chan struct{}, maxDocProcessorTasks(10))
+		for pi := 1; pi < len(ordered); pi++ {
+			for chunkIdx := 0; chunkIdx < len(chunks); chunkIdx++ {
+				wg.Add(1)
+				go func(bp ChunkBatchProcessor, idx int) {
+					defer wg.Done()
+					select {
+					case sem <- struct{}{}:
+					case <-ctx.Done():
+						record(ErrPipelineStopped)
+						return
+					}
+					defer func() { <-sem }()
+					runOne(bp, idx)
+				}(ordered[pi], chunkIdx)
+			}
+		}
+	}
+
+	wg.Wait()
+	return firstErr
 }
 
 // runPhaseBProcessors selects the Phase B execution strategy:

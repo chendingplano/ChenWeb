@@ -49,3 +49,6 @@ service-pdf-parser
 parser-result-converter
 deepdoc
 config.local.toml
+
+# SDD scratch (briefs, reports, review packages, ledger)
+.superpowers/
