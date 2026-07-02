@@ -322,3 +322,95 @@ func (p *RelationProcessor) PostProcessIndex(ctx context.Context, recordID int64
 	}
 	return p.EntityRelationProcessor.PostProcessIndex(ctx, recordID)
 }
+
+// ---- ChunkBatchProcessor implementation for EntityProcessor (entity-only) ----
+
+func (p *EntityProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	return p.EntityRelationProcessor.initEntityBatch(ctx, recordID, chunks, docCtx)
+}
+
+func (p *EntityProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	return p.EntityRelationProcessor.processEntityChunk(ctx, chunkIdx)
+}
+
+func (p *EntityProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	return p.EntityRelationProcessor.finalizeEntityBatch(ctx)
+}
+
+// ---- ChunkBatchProcessor implementation for RelationProcessor (relation-only) ----
+
+func (p *RelationProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if strings.TrimSpace(p.RelationPromptText) == "" || p.RelationPromptErr != nil {
+		p.Logger.Warn("relation prompt unavailable; relation batch skipped", "record_id", recordID)
+	}
+	p.batchStart = p.Now()
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchRelations = nil
+	p.batchRelLang = "unknown"
+	return nil
+}
+
+func (p *RelationProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
+		return fmt.Errorf("(MID_26062741) %s chunk index %d out of range (len=%d)",
+			p.Name(), chunkIdx, len(p.batchChunks))
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+	if strings.TrimSpace(p.RelationPromptText) == "" || p.RelationPromptErr != nil {
+		return nil // relation extraction disabled; nothing to do
+	}
+	// Free-form relations for a single chunk.
+	rels, lang, err := p.extractFreeformRelations(ctx, p.batchRecordID,
+		p.batchChunks[chunkIdx:chunkIdx+1], p.batchDocCtx)
+	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			return ErrPipelineStopped
+		}
+		p.Logger.Warn("relation chunk failed", "processor", p.Name(), "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+		return nil
+	}
+	if lang != "" && p.batchRelLang == "unknown" {
+		p.batchRelLang = lang
+	}
+	p.batchRelations = append(p.batchRelations, rels...)
+	return nil
+}
+
+func (p *RelationProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if len(p.batchRelations) == 0 {
+		return nil
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+	rec, err := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26062742) %s load record: %w", p.Name(), err)
+	}
+	createTime := p.Now().UTC().Format(time.RFC3339)
+	for i := range p.batchRelations {
+		p.batchRelations[i]["relation_id"] = fmt.Sprintf("%d_rel_%d", p.batchRecordID, i+1)
+		p.batchRelations[i]["create_time"] = createTime
+	}
+	if _, err := p.Store.SaveRelations(ctx, SaveRelationsRequest{
+		InputRecordID: p.batchRecordID,
+		EventID:       eventIDFromContext(ctx),
+		Language:      firstNonEmptyTrimmed(p.batchRelLang, "unknown"),
+		ModelName:     p.ModelName,
+		PromptName:    p.RelationPromptRef,
+		Relations:     p.batchRelations,
+	}); err != nil {
+		return fmt.Errorf("(MID_26062743) %s save relations: %w", p.Name(), err)
+	}
+	if fileErr := p.saveRelationsToFile(p.batchRecordID, rec, p.batchRelations); fileErr != nil {
+		p.Logger.Warn("save relations to file failed", "record_id", p.batchRecordID, "error", fileErr)
+	}
+	if reErr := ReindexRelationSearchForRecord(ctx, p.batchRecordID, p.Logger); reErr != nil {
+		p.Logger.Warn("reindex relation search failed", "record_id", p.batchRecordID, "error", reErr)
+	}
+	return nil
+}
