@@ -804,7 +804,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	)
 
 	// ── Pass 2: concurrent enrichment batches (delegated to enrichMetricCandidates) ──
-	metrics, enrichErr := p.enrichMetricCandidates(ctx, record_id, candidates, docCtx)
+	metrics, uncertainMetrics, enrichErr := p.enrichMetricCandidates(ctx, record_id, candidates, docCtx)
 	if enrichErr != nil {
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
@@ -820,11 +820,12 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	)
 
 	return metricExtractionResult{
-		Language:      detectedLanguage,
-		Metrics:       metrics,
-		ModelName:     firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
-		FallbackCount: fallbackCount,
-		LLMCallCount:  llmCallCount,
+		Language:         detectedLanguage,
+		Metrics:          metrics,
+		UncertainMetrics: uncertainMetrics,
+		ModelName:        firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
+		FallbackCount:    fallbackCount,
+		LLMCallCount:     llmCallCount,
 	}, nil
 }
 
@@ -2369,9 +2370,10 @@ func refreshMetricArtifactFile(ctx context.Context, db *sql.DB, artifactDir stri
 // ---- ChunkBatchProcessor implementation ----
 
 // enrichMetricCandidates runs Pass 2 (concurrent enrichment) on the given
-// candidates and returns the deduplicated enriched metric rows. It is called
-// from both extractMetricsFromChunksWithLLM (DRY) and FinalizeChunkBatch.
-func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID int64, candidates []metricCandidate, _ string) ([]map[string]any, error) {
+// candidates and returns the deduplicated enriched metric rows plus any
+// uncertain metrics identified by the LLM. It is called from both
+// extractMetricsFromChunksWithLLM (DRY) and FinalizeChunkBatch.
+func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID int64, candidates []metricCandidate, _ string) ([]map[string]any, []map[string]any, error) {
 	type pass2Result struct {
 		metrics   []map[string]any
 		uncertain []map[string]any
@@ -2448,9 +2450,9 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 
 	if pass2Err != nil {
 		if isCtxStopped(ctx) {
-			return nil, ErrPipelineStopped
+			return nil, nil, ErrPipelineStopped
 		}
-		return nil, pass2Err
+		return nil, nil, pass2Err
 	}
 
 	metrics := make([]map[string]any, 0, len(candidates))
@@ -2464,7 +2466,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 		}
 	}
 	metrics = dedupeFinalMetricRows(metrics)
-	return metrics, nil
+	return metrics, uncertain, nil
 }
 
 func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
@@ -2532,7 +2534,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	if isCtxStopped(ctx) {
 		return ErrPipelineStopped
 	}
-	metrics, err := p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchDocCtx)
+	metrics, _, err := p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchDocCtx)
 	if err != nil {
 		if errors.Is(err, ErrPipelineStopped) {
 			return ErrPipelineStopped
@@ -2552,7 +2554,7 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		EventID:       eventIDFromContext(ctx),
 		Language:      firstNonEmptyTrimmed(p.batchLang, "unknown"),
 		ModelName:     firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName),
-		PromptName:    p.MentionPromptRef,
+		PromptName:    p.RelationPromptRef,
 		Metrics:       metrics,
 	}); err != nil {
 		return fmt.Errorf("(MID_26062754) %s save metrics: %w", p.Name(), err)
