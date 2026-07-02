@@ -69,8 +69,8 @@ func llmCallStagger() time.Duration {
 // per chunk. They must not be chosen as the cache seed (Task: seed selection);
 // the seed should plant each chunk's prefix with a single clean call.
 var multiPassProcessors = map[string]struct{}{
-	"extract_metrics":               {},
-	"extract_semantic_projections":  {},
+	"extract_metrics":              {},
+	"extract_semantic_projections": {},
 }
 
 // maxDocProcessorTasks returns the Phase-3 concurrency cap. Controlled by
