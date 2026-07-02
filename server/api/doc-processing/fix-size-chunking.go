@@ -1313,12 +1313,15 @@ func (s *FixedSizeChunkingService) generateSummary(
 		nodes = categoryPathItems[0].Nodes
 	}
 
+	summaryEndCacheHit, summaryEndCacheMiss := cacheTokenCounts(s.Extractor)
 	s.Logger.Info("summary end  ",
 		"record_id", recordID,
 		"level", level,
 		"seq", seqNo,
 		"call_id", callID[:8],
-		"ms_used", time.Since(startTime).Milliseconds())
+		"ms_used", time.Since(startTime).Milliseconds(),
+		"cache_hits", summaryEndCacheHit,
+		"cache_misses", summaryEndCacheMiss)
 
 	result := summaryGenerateResult{
 		Summary:             summary,
@@ -1455,7 +1458,8 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 	if len(categoryPathItems) > 0 {
 		nodes = categoryPathItems[0].Nodes
 	}
-	s.Logger.Info("summary end (batch)", "record_id", recordID, "level", level, "seq", seqNo, "ms_used", time.Since(startTime).Milliseconds())
+	cacheHit, cacheMiss := cacheTokenCounts(s.Extractor)
+	s.Logger.Info("summary end (batch)", "record_id", recordID, "level", level, "seq", seqNo, "ms_used", time.Since(startTime).Milliseconds(), "cache_hits", cacheHit, "cache_misses", cacheMiss)
 	result := summaryGenerateResult{
 		Summary:             summary,
 		SummaryEn:           summaryEn,
@@ -1475,6 +1479,7 @@ func (s *FixedSizeChunkingService) generateSummaryWithInputText(
 func (s *FixedSizeChunkingService) ExtractTopicsForChunk(ctx context.Context, recordID int64, chunk Chunk, totalChunks int, inputText string) ([]TopicItem, error) {
 	callStart := s.Now()
 	in := newLLMJSONInput(withLLMRecordID(ctx, recordID), s.PromptRef, s.PromptText, s.ModelName, inputText, "extract_topics", "MID-CWB-EXTRACT-TOPICS-BATCH")
+	s.Logger.Info("topics start (batch)", "record_id", recordID, "model", s.ModelName, "prompt", s.PromptRef, "seq", chunk.SeqNo)
 	parsed, primaryErr := extractTopicPayload(ctx, s.Extractor, in)
 	usedFallback := false
 	var topics []TopicItem
@@ -1497,6 +1502,8 @@ func (s *FixedSizeChunkingService) ExtractTopicsForChunk(ctx context.Context, re
 		}
 	}
 	msUsed := s.Now().Sub(callStart).Milliseconds()
+	topicsCacheHit, topicsCacheMiss := cacheTokenCounts(s.callExtractor(usedFallback))
+	s.Logger.Info("topics end (batch)", "record_id", recordID, "seq", chunk.SeqNo, "ms_used", msUsed, "cache_hits", topicsCacheHit, "cache_misses", topicsCacheMiss)
 	chunkProgress := extractTopicsProgressFull(chunk.SeqNo, totalChunks)
 	s.logExtractTopicsChunk(ctx, recordID, chunk, totalChunks, topics, 0, msUsed, chunkProgress, usedFallback)
 	if primaryErr != nil {

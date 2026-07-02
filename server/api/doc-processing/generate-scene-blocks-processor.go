@@ -463,9 +463,12 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		}
 		raw, _ := payload["candidates"].([]any)
 		mentions := normalizeSceneCandidateMentions(raw, chunk)
+		sceneExtrCacheHit, sceneExtrCacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("extract scene end  ",
 			"extracted", len(raw),
 			"ms_used", time.Since(callStart).Milliseconds(),
+			"cache_hits", sceneExtrCacheHit,
+			"cache_misses", sceneExtrCacheMiss,
 		)
 		return pass1ChunkResult{
 			mentions:   mentions,
@@ -535,12 +538,15 @@ func (p *SceneBlocksProcessor) extractSceneBlocksFromChunksWithLLM(
 		}
 		raw, _ := payload["scene_blocks"].([]any)
 		normalized := normalizeSceneBlockListForGroup(raw, group.Candidates)
+		sceneEnrCacheHit, sceneEnrCacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("enrich scene end   ",
 			"record_id", record_id,
 			"group_idx", groupIdx,
 			"chunk_index", group.ChunkIndex,
 			"blocks_for_group", len(normalized),
 			"ms_used", time.Since(callStart).Milliseconds(),
+			"cache_hits", sceneEnrCacheHit,
+			"cache_misses", sceneEnrCacheMiss,
 		)
 		return pass2GroupResult{
 			blocks:     normalized,
@@ -1652,7 +1658,10 @@ func (p *SceneBlocksProcessor) ProcessChunk(ctx context.Context, chunkIdx int) e
 	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
 	taskText := buildSceneCandidateBatchTask(p.MentionPromptText, chunk.SeqNo)
 	callStart := p.Now()
+	p.Logger.Info("extract scene start (batch)", "record_id", p.batchRecordID, "model", p.MentionModelName, "prompt", p.MentionPromptRef, "chunk_idx", chunkIdx)
 	payload, modelName, err := p.extractScenePayloadWithFallback(ctx, inputText, taskText, p.MentionPromptRef, p.MentionModelName, p.MentionModelCfg)
+	sceneExtrCacheHit, sceneExtrCacheMiss := cacheTokenCounts(p.Extractor)
+	p.Logger.Info("extract scene end (batch)", "record_id", p.batchRecordID, "chunk_idx", chunkIdx, "ms_used", p.Now().Sub(callStart).Milliseconds(), "cache_hits", sceneExtrCacheHit, "cache_misses", sceneExtrCacheMiss)
 	p.logLLMCall(ctx, fmt.Sprintf("%d_btp1_c%d", p.batchRecordID, chunkIdx), "extract_scene_block_candidates", 1,
 		[]string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef),
 		payload, err, callStart, p.Now(), p.batchRecordID, chunkIdx, len(p.batchChunks), 0)
@@ -1688,7 +1697,10 @@ func (p *SceneBlocksProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		}
 		group := chunkGroups[groupIdx]
 		callStart := p.Now()
+		p.Logger.Info("enrich scene start (batch)", "record_id", recordID, "model", p.RelationModelName, "prompt", p.RelationPromptRef, "group_idx", groupIdx)
 		payload, modelName, err := p.extractScenePayloadWithFallback(jobCtx, buildSceneRelationUserPromptForGroup(group.Candidates), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
+		sceneEnrCacheHit, sceneEnrCacheMiss := cacheTokenCounts(p.Extractor)
+		p.Logger.Info("enrich scene end (batch)", "record_id", recordID, "group_idx", groupIdx, "ms_used", p.Now().Sub(callStart).Milliseconds(), "cache_hits", sceneEnrCacheHit, "cache_misses", sceneEnrCacheMiss)
 		p.logLLMCall(ctx, fmt.Sprintf("%d_btp2_g%d", recordID, groupIdx), "enrich_scene_blocks", 2,
 			[]string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef),
 			payload, err, callStart, p.Now(), recordID, groupIdx, len(chunkGroups), 0)
