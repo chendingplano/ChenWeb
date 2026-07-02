@@ -1926,95 +1926,102 @@ func (s *FixedSizeChunkingService) fixSummarySourceLanguage(ctx context.Context,
 		}
 	*/
 	langName := summaryLanguageName(normalizedLang)
-	for i, item := range summaries {
-		originalSummary := item.Summary
-		originalSummaryEn := item.SummaryEn
-		originalKeywords := append([]string(nil), item.Keywords...)
-		originalKeywordsEn := append([]string(nil), item.KeywordsEn...)
-		changed := false
-		summary := strings.TrimSpace(item.Summary)
-		summaryEn := strings.TrimSpace(item.SummaryEn)
-		if summaryEn == "" && summary != "" && detectContentLanguage(summary) == normalizedLang {
-			translated, err := s.translateSummaryText(ctx, summaryLanguageName("en"), summary)
-			if err != nil {
-				s.Logger.Warn("(MID_26052906) failed to translate summary to English; keeping missing summary_en",
-					"summary_id", item.SummaryID,
-					"source_lang", normalizedLang,
-					"error", err,
-				)
-			} else {
-				summaryEn = translated
-				summaries[i].SummaryEn = translated
-				changed = true
-				s.Logger.Info("translated summary to english",
-					"summary_id", item.SummaryID,
-					"source_lang", normalizedLang,
-				)
+	var wg sync.WaitGroup
+	for i := range summaries {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			item := summaries[idx]
+			originalSummary := item.Summary
+			originalSummaryEn := item.SummaryEn
+			originalKeywords := append([]string(nil), item.Keywords...)
+			originalKeywordsEn := append([]string(nil), item.KeywordsEn...)
+			changed := false
+			summary := strings.TrimSpace(item.Summary)
+			summaryEn := strings.TrimSpace(item.SummaryEn)
+			if summaryEn == "" && summary != "" && detectContentLanguage(summary) == normalizedLang {
+				translated, err := s.translateSummaryText(ctx, summaryLanguageName("en"), summary)
+				if err != nil {
+					s.Logger.Warn("(MID_26052906) failed to translate summary to English; keeping missing summary_en",
+						"summary_id", item.SummaryID,
+						"source_lang", normalizedLang,
+						"error", err,
+					)
+				} else {
+					summaryEn = translated
+					summaries[idx].SummaryEn = translated
+					changed = true
+					s.Logger.Info("translated summary to english",
+						"summary_id", item.SummaryID,
+						"source_lang", normalizedLang,
+					)
+				}
 			}
-		}
-		if summaryEn == "" && summary != "" && detectContentLanguage(summary) == "en" {
-			summaryEn = summary
-			summaries[i].SummaryEn = summary
-			changed = true
-		}
-		if summaryEn != "" && summary == summaryEn {
-			translated, err := s.translateSummaryText(ctx, langName, summaryEn)
-			if err != nil {
-				s.Logger.Warn("(MID_26052904) failed to translate summary to source language; keeping English",
-					"summary_id", item.SummaryID,
-					"target_lang", normalizedLang,
-					"error", err,
-				)
-			} else {
-				summaries[i].Summary = translated
+			if summaryEn == "" && summary != "" && detectContentLanguage(summary) == "en" {
+				summaryEn = summary
+				summaries[idx].SummaryEn = summary
 				changed = true
-				s.Logger.Info("translated summary to source language",
-					"summary_id", item.SummaryID,
-					"target_lang", normalizedLang,
-				)
 			}
-		}
-		keywordsEn := trimStringSlice(item.KeywordsEn)
-		if len(keywordsEn) == 0 && normalizedLang != "" && normalizedLang != "en" && allSummaryKeywordsLanguage(item.Keywords, "en") {
-			keywordsEn = trimStringSlice(item.Keywords)
-			summaries[i].KeywordsEn = append([]string(nil), keywordsEn...)
-			changed = true
-			s.Logger.Info("backfilled english summary keywords",
-				"summary_id", item.SummaryID,
-				"target_lang", normalizedLang,
-			)
-		}
-		if len(keywordsEn) > 0 && equalTrimmedStringSlices(item.Keywords, keywordsEn) {
-			translatedKeywords, err := s.translateSummaryKeywords(ctx, langName, keywordsEn)
-			if err != nil {
-				s.Logger.Warn("(MID_26053004) failed to translate summary keywords to source language; keeping English",
-					"summary_id", item.SummaryID,
-					"target_lang", normalizedLang,
-					"error", err,
-				)
-			} else {
-				summaries[i].Keywords = translatedKeywords
+			if summaryEn != "" && summary == summaryEn {
+				translated, err := s.translateSummaryText(ctx, langName, summaryEn)
+				if err != nil {
+					s.Logger.Warn("(MID_26052904) failed to translate summary to source language; keeping English",
+						"summary_id", item.SummaryID,
+						"target_lang", normalizedLang,
+						"error", err,
+					)
+				} else {
+					summaries[idx].Summary = translated
+					changed = true
+					s.Logger.Info("translated summary to source language",
+						"summary_id", item.SummaryID,
+						"target_lang", normalizedLang,
+					)
+				}
+			}
+			keywordsEn := trimStringSlice(item.KeywordsEn)
+			if len(keywordsEn) == 0 && normalizedLang != "" && normalizedLang != "en" && allSummaryKeywordsLanguage(item.Keywords, "en") {
+				keywordsEn = trimStringSlice(item.Keywords)
+				summaries[idx].KeywordsEn = append([]string(nil), keywordsEn...)
 				changed = true
-				s.Logger.Info("translated summary keywords to source language",
+				s.Logger.Info("backfilled english summary keywords",
 					"summary_id", item.SummaryID,
 					"target_lang", normalizedLang,
 				)
 			}
-		}
-		if !changed {
-			continue
-		}
-		if _, err := writeSummaryFile(s.ChunkDir, item.RecordID, summaries[i]); err != nil {
-			s.Logger.Warn("(MID_26052905) failed to re-write summary file after translation; keeping original",
-				"summary_id", item.SummaryID,
-				"error", err,
-			)
-			summaries[i].Summary = originalSummary
-			summaries[i].SummaryEn = originalSummaryEn
-			summaries[i].Keywords = originalKeywords
-			summaries[i].KeywordsEn = originalKeywordsEn
-		}
+			if len(keywordsEn) > 0 && equalTrimmedStringSlices(item.Keywords, keywordsEn) {
+				translatedKeywords, err := s.translateSummaryKeywords(ctx, langName, keywordsEn)
+				if err != nil {
+					s.Logger.Warn("(MID_26053004) failed to translate summary keywords to source language; keeping English",
+						"summary_id", item.SummaryID,
+						"target_lang", normalizedLang,
+						"error", err,
+					)
+				} else {
+					summaries[idx].Keywords = translatedKeywords
+					changed = true
+					s.Logger.Info("translated summary keywords to source language",
+						"summary_id", item.SummaryID,
+						"target_lang", normalizedLang,
+					)
+				}
+			}
+			if !changed {
+				return
+			}
+			if _, err := writeSummaryFile(s.ChunkDir, item.RecordID, summaries[idx]); err != nil {
+				s.Logger.Warn("(MID_26052905) failed to re-write summary file after translation; keeping original",
+					"summary_id", item.SummaryID,
+					"error", err,
+				)
+				summaries[idx].Summary = originalSummary
+				summaries[idx].SummaryEn = originalSummaryEn
+				summaries[idx].Keywords = originalKeywords
+				summaries[idx].KeywordsEn = originalKeywordsEn
+			}
+		}(i)
 	}
+	wg.Wait()
 	return summaries, nil
 }
 
