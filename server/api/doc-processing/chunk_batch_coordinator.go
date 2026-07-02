@@ -293,10 +293,15 @@ func (s *ControlService) scheduleChunkBatch(
 	}
 
 	// Phase 3: remaining (processor x chunk) concurrently, bounded.
+	// Chunk-major spawn order (chunks outer, processors inner) ensures
+	// goroutines from different processors interleave. A processor-major
+	// order would let the first processor's goroutines consume all
+	// semaphore slots, serializing the effective execution per-processor
+	// and evicting cached chunk prefixes before later processors use them.
 	if len(ordered) > 1 {
 		sem := make(chan struct{}, maxDocProcessorTasks(10))
-		for pi := 1; pi < len(ordered); pi++ {
-			for chunkIdx := 0; chunkIdx < len(chunks); chunkIdx++ {
+		for chunkIdx := 0; chunkIdx < len(chunks); chunkIdx++ {
+			for pi := 1; pi < len(ordered); pi++ {
 				wg.Add(1)
 				go func(bp ChunkBatchProcessor, idx int) {
 					defer wg.Done()
