@@ -53,6 +53,18 @@ type SemanticProjectionsProcessor struct {
 	ArtifactDir           string
 	ArtifactWebDir        string
 	MaxTasks              int
+
+	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
+	batchRecordID      int64
+	batchChunks        []Chunk
+	batchDocCtx        string
+	batchProjections   []map[string]any // accumulated enriched projection rows
+	batchSeqNos        []int            // chunk.SeqNo per accumulated row
+	batchLineSpans     [][]string       // chunkLineSpans per accumulated row
+	batchLang          string
+	batchStart         time.Time
+	batchCompletedP1   int // progress counter for logExtractProjectionsChunk
+	batchCompletedP2   int // progress counter for logEnrichProjectionsChunk
 }
 
 type SemanticProjectionsStore interface {
@@ -320,6 +332,146 @@ type semanticProjectionWorkerResult struct {
 	fallbackCount  int
 }
 
+// projectChunk runs Pass 1 (candidate extraction) then Pass 2 (enrichment) for a
+// single chunk, sharing the canonical cached prefix between both calls, and returns
+// the enriched projection row, chunkLineSpans, the detected language, and candidate
+// model name used (for fallback tracking). Returns a nil projection when the chunk
+// yields an empty semantic_projection in Pass 1 (chunk is skipped). The chunkNo and
+// totalChunks parameters are used only for progress logging and may be any positive
+// values; they do not affect the result.
+//
+// All per-chunk logging (P1 extract, P2 enrich), cache-token stamping
+// (cacheTokenCounts/extractorCacheTokens), and fallback detection that were
+// previously inline in extractSemanticProjectionsFromChunks are preserved here.
+func (p *SemanticProjectionsProcessor) projectChunk(
+	ctx context.Context,
+	recordID int64,
+	chunkIdx int,
+	totalChunks int,
+	completedP1Fn func(ok bool) int,
+	completedP2Fn func(ok bool) int,
+	chunk Chunk,
+	docCtx string,
+) (semanticProjectionWorkerResult, error) {
+	lineSpans := chunkLineSpans(chunk.Lines)
+
+	// Pass 1: extract semantic projection candidate.
+	// Canonical chunk serialization as InputText (shared, cacheable prefix); the candidate
+	// schema/task lives in the prompt. See ADR 2026062701 §Phase 2.3.
+	inputText := canonicalChunkInputText(chunk.Lines, docCtx)
+	callStart := p.Now()
+	p.Logger.Info("semantic proj start       ",
+		"record_id", recordID,
+		"chunk_idx", chunkIdx,
+		"seq_no", chunk.SeqNo,
+		"num_lines", len(chunk.Lines),
+	)
+	callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), chunkIdx)
+	payload, modelName, err := p.extractCandidatePayloadWithFallback(ctx, inputText)
+	llmCallCount := 1
+	fallbackCount := 0
+	if strings.TrimSpace(modelName) != strings.TrimSpace(p.CandidateModelName) && strings.TrimSpace(modelName) != "" {
+		fallbackCount++
+	}
+	completedChunksForLog := completedP1Fn(err == nil)
+	p.logExtractProjectionsChunk(ctx, recordID, callID, chunkIdx+1, totalChunks, completedChunksForLog,
+		[]string{strings.TrimSpace(modelName)}, p.CandidatePromptRef,
+		payload, err, callStart, p.Now())
+	if err != nil {
+		p.Logger.Error("raw candidate LLM payload/error",
+			"record_id", recordID,
+			"chunk_idx", chunkIdx,
+			"seq_no", chunk.SeqNo,
+			"error", err,
+		)
+		return semanticProjectionWorkerResult{},
+			fmt.Errorf("(MID_26052120) extract semantic projection candidate for chunk seq=%d: %w", chunk.SeqNo, err)
+	}
+	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+	p.Logger.Info("semantic proj end         ",
+		"record_id", recordID,
+		"chunk_idx", chunkIdx,
+		"seq_no", chunk.SeqNo,
+		"semantic_projection_len", len(strings.TrimSpace(asString(payload["semantic_projection"]))),
+		"keywords_count", len(toStringSlice(payload["keywords"])),
+		"ms_used", time.Since(callStart).Milliseconds(),
+		"cache_hit", cacheHit,
+		"cache_miss", cacheMiss,
+	)
+
+	usedCandidateModel := strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.CandidateModelName))
+	spText := strings.TrimSpace(asString(payload["semantic_projection"]))
+	if spText == "" {
+		p.Logger.Warn("empty semantic projection in candidate pass; skipping chunk",
+			"record_id", recordID, "seq_no", chunk.SeqNo)
+		return semanticProjectionWorkerResult{
+			seqNo:          chunk.SeqNo,
+			lineSpans:      lineSpans,
+			candidateModel: usedCandidateModel,
+			llmCallCount:   llmCallCount,
+			fallbackCount:  fallbackCount,
+		}, nil
+	}
+
+	cand := semanticProjectionCandidate{
+		SeqNo:              chunk.SeqNo,
+		SemanticProjection: spText,
+		Keywords:           toStringSlice(payload["keywords"]),
+		ChunkLines:         append([]MarkedLine(nil), chunk.Lines...),
+	}
+
+	// Pass 2: enrich the candidate.
+	if isCtxStopped(ctx) {
+		return semanticProjectionWorkerResult{}, ErrPipelineStopped
+	}
+	callStart2 := p.Now()
+	p.Logger.Info("semantic proj enrich start",
+		"record_id", recordID,
+		"seq_no", cand.SeqNo,
+	)
+	callID2 := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), chunkIdx)
+	// Same chunk as Pass 1 → identical canonical InputText prefix, so Pass 2 reuses Pass 1's
+	// cached prefix. The candidate + enrich schema move into the prompt (task section).
+	inputText2 := canonicalChunkInputText(cand.ChunkLines, docCtx)
+	payload2, err := p.extractEnrichPayload(ctx, inputText2, cand)
+	llmCallCount++
+	completedP2ForLog := completedP2Fn(err == nil)
+	p.logEnrichProjectionsChunk(ctx, recordID, callID2, chunkIdx+1, totalChunks, completedP2ForLog,
+		[]string{strings.TrimSpace(p.EnrichModelName)}, p.EnrichPromptRef,
+		payload2, err, callStart2, p.Now())
+	if err != nil {
+		p.Logger.Error("enrichment payload error",
+			"record_id", recordID,
+			"seq_no", cand.SeqNo,
+			"error", err,
+		)
+		return semanticProjectionWorkerResult{},
+			fmt.Errorf("(MID_26052121) enrich semantic projection seq=%d: %w", cand.SeqNo, err)
+	}
+
+	lang := ApiUtils.NormalizeLang(strings.TrimSpace(asString(payload2["language"])))
+	cacheHit2, cacheMiss2 := cacheTokenCounts(p.Extractor)
+	p.Logger.Info("semantic proj end         ",
+		"record_id", recordID,
+		"seq_no", cand.SeqNo,
+		"language", lang,
+		"descriptive_name", asString(payload2["descriptive_name"]),
+		"ms_used", time.Since(callStart2).Milliseconds(),
+		"cache_hit", cacheHit2,
+		"cache_miss", cacheMiss2,
+	)
+	normalized := normalizeSemanticProjection(payload2)
+	return semanticProjectionWorkerResult{
+		seqNo:          chunk.SeqNo,
+		projection:     normalized,
+		lineSpans:      lineSpans,
+		language:       lang,
+		candidateModel: usedCandidateModel,
+		llmCallCount:   llmCallCount,
+		fallbackCount:  fallbackCount,
+	}, nil
+}
+
 func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 	ctx context.Context,
 	recordID int64,
@@ -339,134 +491,19 @@ func (p *SemanticProjectionsProcessor) extractSemanticProjectionsFromChunks(
 		if isCtxStopped(jobCtx) {
 			return semanticProjectionWorkerResult{}, ErrPipelineStopped
 		}
-
-		lineSpans := chunkLineSpans(chunk.Lines)
-
-		// Pass 1: extract semantic projection candidate.
-		// Canonical chunk serialization as InputText (shared, cacheable prefix); the candidate
-		// schema/task lives in the prompt. See ADR 2026062701 §Phase 2.3.
-		inputText := canonicalChunkInputText(chunk.Lines, docCtx)
-		callStart := p.Now()
-		p.Logger.Info("semantic proj start       ",
-			"record_id", recordID,
-			"chunk_idx", i,
-			"seq_no", chunk.SeqNo,
-			"num_lines", len(chunk.Lines),
-		)
-		callID := fmt.Sprintf("%s_p1_c%d", eventIDFromContext(ctx), i)
-		payload, modelName, err := p.extractCandidatePayloadWithFallback(jobCtx, inputText)
-		llmCallCount := 1
-		fallbackCount := 0
-		if strings.TrimSpace(modelName) != strings.TrimSpace(p.CandidateModelName) && strings.TrimSpace(modelName) != "" {
-			fallbackCount++
+		p1Fn := func(ok bool) int {
+			if ok {
+				return int(completedP1.Add(1))
+			}
+			return int(completedP1.Load())
 		}
-		var completedChunksForLog int
-		if err == nil {
-			completedChunksForLog = int(completedP1.Add(1))
-		} else {
-			completedChunksForLog = int(completedP1.Load())
+		p2Fn := func(ok bool) int {
+			if ok {
+				return int(completedP2.Add(1))
+			}
+			return int(completedP2.Load())
 		}
-		p.logExtractProjectionsChunk(jobCtx, recordID, callID, i+1, len(chunks), completedChunksForLog,
-			[]string{strings.TrimSpace(modelName)}, p.CandidatePromptRef,
-			payload, err, callStart, p.Now())
-		if err != nil {
-			p.Logger.Error("raw candidate LLM payload/error",
-				"record_id", recordID,
-				"chunk_idx", i,
-				"seq_no", chunk.SeqNo,
-				"error", err,
-			)
-			return semanticProjectionWorkerResult{},
-				fmt.Errorf("(MID_26052120) extract semantic projection candidate for chunk seq=%d: %w", chunk.SeqNo, err)
-		}
-		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
-		p.Logger.Info("semantic proj end         ",
-			"record_id", recordID,
-			"chunk_idx", i,
-			"seq_no", chunk.SeqNo,
-			"semantic_projection_len", len(strings.TrimSpace(asString(payload["semantic_projection"]))),
-			"keywords_count", len(toStringSlice(payload["keywords"])),
-			"ms_used", time.Since(callStart).Milliseconds(),
-			"cache_hit", cacheHit,
-			"cache_miss", cacheMiss,
-		)
-
-		usedCandidateModel := strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.CandidateModelName))
-		spText := strings.TrimSpace(asString(payload["semantic_projection"]))
-		if spText == "" {
-			p.Logger.Warn("empty semantic projection in candidate pass; skipping chunk",
-				"record_id", recordID, "seq_no", chunk.SeqNo)
-			return semanticProjectionWorkerResult{
-				seqNo:          chunk.SeqNo,
-				lineSpans:      lineSpans,
-				candidateModel: usedCandidateModel,
-				llmCallCount:   llmCallCount,
-				fallbackCount:  fallbackCount,
-			}, nil
-		}
-
-		cand := semanticProjectionCandidate{
-			SeqNo:              chunk.SeqNo,
-			SemanticProjection: spText,
-			Keywords:           toStringSlice(payload["keywords"]),
-			ChunkLines:         append([]MarkedLine(nil), chunk.Lines...),
-		}
-
-		// Pass 2: enrich the candidate
-		if isCtxStopped(jobCtx) {
-			return semanticProjectionWorkerResult{}, ErrPipelineStopped
-		}
-		callStart2 := p.Now()
-		p.Logger.Info("semantic proj enrich start",
-			"record_id", recordID,
-			"seq_no", cand.SeqNo,
-		)
-		callID2 := fmt.Sprintf("%s_p2_c%d", eventIDFromContext(ctx), i)
-		// Same chunk as pass 1 → identical canonical InputText prefix, so pass 2 reuses pass 1's
-		// cached prefix. The candidate + enrich schema move into the prompt (task section).
-		inputText2 := canonicalChunkInputText(cand.ChunkLines, docCtx)
-		payload2, err := p.extractEnrichPayload(jobCtx, inputText2, cand)
-		llmCallCount++
-		var completedP2ForLog int
-		if err == nil {
-			completedP2ForLog = int(completedP2.Add(1))
-		} else {
-			completedP2ForLog = int(completedP2.Load())
-		}
-		p.logEnrichProjectionsChunk(jobCtx, recordID, callID2, i+1, len(chunks), completedP2ForLog,
-			[]string{strings.TrimSpace(p.EnrichModelName)}, p.EnrichPromptRef,
-			payload2, err, callStart2, p.Now())
-		if err != nil {
-			p.Logger.Error("enrichment payload error",
-				"record_id", recordID,
-				"seq_no", cand.SeqNo,
-				"error", err,
-			)
-			return semanticProjectionWorkerResult{},
-				fmt.Errorf("(MID_26052121) enrich semantic projection seq=%d: %w", cand.SeqNo, err)
-		}
-
-		lang := ApiUtils.NormalizeLang(strings.TrimSpace(asString(payload2["language"])))
-		cacheHit2, cacheMiss2 := cacheTokenCounts(p.Extractor)
-		p.Logger.Info("semantic proj end         ",
-			"record_id", recordID,
-			"seq_no", cand.SeqNo,
-			"language", lang,
-			"descriptive_name", asString(payload2["descriptive_name"]),
-			"ms_used", time.Since(callStart2).Milliseconds(),
-			"cache_hit", cacheHit2,
-			"cache_miss", cacheMiss2,
-		)
-		normalized := normalizeSemanticProjection(payload2)
-		return semanticProjectionWorkerResult{
-			seqNo:          chunk.SeqNo,
-			projection:     normalized,
-			lineSpans:      lineSpans,
-			language:       lang,
-			candidateModel: usedCandidateModel,
-			llmCallCount:   llmCallCount,
-			fallbackCount:  fallbackCount,
-		}, nil
+		return p.projectChunk(jobCtx, recordID, i, len(chunks), p1Fn, p2Fn, chunk, docCtx)
 	})
 
 	if runErr != nil {
@@ -701,6 +738,124 @@ func (p *SemanticProjectionsProcessor) logSemanticProjectionsSummary(
 			p.Logger.Warn("failed to write extract_projections summary log", "error", err)
 		}
 	}
+}
+
+// ---- ChunkBatchProcessor implementation ----
+
+func (p *SemanticProjectionsProcessor) InitChunkBatch(_ context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if p.CandidatePromptErr != nil {
+		return fmt.Errorf("(MID_26062760) %s candidate prompt error: %w", p.Name(), p.CandidatePromptErr)
+	}
+	if p.EnrichPromptErr != nil {
+		return fmt.Errorf("(MID_26062761) %s enrich prompt error: %w", p.Name(), p.EnrichPromptErr)
+	}
+	p.batchStart = p.Now()
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchProjections = nil
+	p.batchSeqNos = nil
+	p.batchLineSpans = nil
+	p.batchLang = "unknown"
+	p.batchCompletedP1 = 0
+	p.batchCompletedP2 = 0
+	return nil
+}
+
+func (p *SemanticProjectionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
+		return fmt.Errorf("(MID_26062762) %s chunk index %d out of range (len=%d)", p.Name(), chunkIdx, len(p.batchChunks))
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+	total := len(p.batchChunks)
+	p1Fn := func(ok bool) int {
+		if ok {
+			p.batchCompletedP1++
+		}
+		return p.batchCompletedP1
+	}
+	p2Fn := func(ok bool) int {
+		if ok {
+			p.batchCompletedP2++
+		}
+		return p.batchCompletedP2
+	}
+	r, err := p.projectChunk(ctx, p.batchRecordID, chunkIdx, total, p1Fn, p2Fn, p.batchChunks[chunkIdx], p.batchDocCtx)
+	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			return ErrPipelineStopped
+		}
+		p.Logger.Warn("%s chunk failed", p.Name(), "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+		return nil
+	}
+	if r.language != "" && p.batchLang == "unknown" {
+		p.batchLang = r.language
+	}
+	if r.projection != nil {
+		p.batchProjections = append(p.batchProjections, r.projection)
+		p.batchSeqNos = append(p.batchSeqNos, r.seqNo)
+		p.batchLineSpans = append(p.batchLineSpans, r.lineSpans)
+	}
+	return nil
+}
+
+func (p *SemanticProjectionsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if len(p.batchProjections) == 0 {
+		p.Logger.Info("%s batch: no projections accumulated", p.Name(), "record_id", p.batchRecordID)
+		return nil
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+
+	// Stamp semantic_proj_id, line_spans, and create_time (mirrors HandleEvent).
+	createTime := p.Now().Format(defaultDocMetaStatusTime)
+	for i, proj := range p.batchProjections {
+		proj["semantic_proj_id"] = fmt.Sprintf("%d_smp_%d", p.batchRecordID, p.batchSeqNos[i])
+		proj["line_spans"] = p.batchLineSpans[i]
+		proj["create_time"] = createTime
+		p.batchProjections[i] = proj
+	}
+
+	detectedLanguage := firstNonEmptyTrimmed(p.batchLang, "unknown")
+
+	if _, err := p.Store.SaveSemanticProjections(ctx, SaveSemanticProjectionsRequest{
+		InputRecordID: p.batchRecordID,
+		EventID:       eventIDFromContext(ctx),
+		Language:      detectedLanguage,
+		ModelName:     p.EnrichModelName,
+		PromptName:    p.EnrichPromptRef,
+		Projections:   p.batchProjections,
+	}); err != nil {
+		return fmt.Errorf("(MID_26062763) %s save projections: %w", p.Name(), err)
+	}
+
+	// Load record for file artifact — same pattern as HandleEvent.
+	rec, recErr := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
+	if recErr != nil {
+		p.Logger.Warn("%s batch: load record for artifact failed", p.Name(), "record_id", p.batchRecordID, "error", recErr)
+	} else {
+		if fileErr := p.saveSemanticProjectionsToFile(p.batchRecordID, rec, p.batchProjections); fileErr != nil {
+			p.Logger.Warn("save semantic projections to file failed", "record_id", p.batchRecordID, "error", fileErr)
+		}
+	}
+
+	if indexErr := p.indexSemanticProjections(p.batchRecordID, p.batchProjections); indexErr != nil {
+		p.Logger.Warn("index semantic projections failed", "record_id", p.batchRecordID, "error", indexErr)
+	}
+
+	if reindexErr := ReindexSemanticProjectionSearchForRecord(ctx, p.batchRecordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("reindex semantic projection search registry failed", "record_id", p.batchRecordID, "error", reindexErr)
+	}
+
+	p.Logger.Info("semantic projections batch finalized",
+		"record_id", p.batchRecordID,
+		"projections_count", len(p.batchProjections),
+		"num_chunks", len(p.batchChunks),
+	)
+	return nil
 }
 
 func (p *SemanticProjectionsProcessor) extractCandidatePayloadWithFallback(ctx context.Context, inputText string) (map[string]any, string, error) {
