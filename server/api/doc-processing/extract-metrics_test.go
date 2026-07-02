@@ -88,6 +88,22 @@ func (f *fakeMetricsStore) SaveMetrics(_ context.Context, req SaveMetricsRequest
 	return int64(len(req.Metrics)), nil
 }
 
+type fakeArtifactObjectsStore struct {
+	called       int
+	recordID     int64
+	artifactType string
+	objects      []ArtifactObject
+	err          error
+}
+
+func (f *fakeArtifactObjectsStore) ReplaceObjectsForRecord(_ context.Context, recordID int64, artifactType string, objects []ArtifactObject) error {
+	f.called++
+	f.recordID = recordID
+	f.artifactType = artifactType
+	f.objects = append([]ArtifactObject(nil), objects...)
+	return f.err
+}
+
 // TestMetricsProcessor_ExtractsFromChunksArtifact verifies that HandleEvent loads
 // chunks from the persisted .chunks file and passes block-format lines to the LLM,
 // preserving overlap flags.
@@ -111,6 +127,7 @@ func TestMetricsProcessor_ExtractsFromChunksArtifact(t *testing.T) {
 		StatusRaw:       "[]",
 	}}
 	metricsStore := &fakeMetricsStore{}
+	objectStore := &fakeArtifactObjectsStore{}
 	extractor := &fakeJSONExtractor{outs: []map[string]any{
 		{
 			"language": "en",
@@ -139,6 +156,11 @@ func TestMetricsProcessor_ExtractsFromChunksArtifact(t *testing.T) {
 					"location_type":       "sentence",
 					"unit":                "ms",
 					"threshold_or_target": "<=200",
+					"objects": []any{map[string]any{
+						"object_name":       "service gateway",
+						"object_role":       "measured_object",
+						"source_line_spans": []any{float64(2)},
+					}},
 				},
 			},
 			"uncertain_metrics": []any{},
@@ -161,6 +183,8 @@ func TestMetricsProcessor_ExtractsFromChunksArtifact(t *testing.T) {
 	p.PromptErr = nil
 	p.ModelErr = nil
 	p.ModelName = "gpt-test"
+	p.ObjectStore = objectStore
+	p.ObjectReconciler = ObjectReconciler{Store: &memoryObjectNodeStore{}}
 
 	if err := p.HandleEvent(context.Background(), []byte(`{"record_id":"2005","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -173,6 +197,15 @@ func TestMetricsProcessor_ExtractsFromChunksArtifact(t *testing.T) {
 	}
 	if extractor.calledCount != 0 {
 		t.Fatalf("calledCount=%d, want 0", extractor.calledCount)
+	}
+	if objectStore.called != 1 {
+		t.Fatalf("object store called=%d, want 1", objectStore.called)
+	}
+	if objectStore.recordID != 2005 || objectStore.artifactType != searchArtifactMetric {
+		t.Fatalf("unexpected object store target: record=%d type=%q", objectStore.recordID, objectStore.artifactType)
+	}
+	if len(objectStore.objects) != 1 || objectStore.objects[0].ArtifactID != "2005_1" || objectStore.objects[0].ObjectName != "service gateway" {
+		t.Fatalf("unexpected persisted objects: %+v", objectStore.objects)
 	}
 	if !strings.Contains(extractor.inputTexts[0], "Intro") {
 		t.Fatalf("overlap line content missing from LLM input; input=%q", extractor.inputTexts[0])
@@ -863,6 +896,32 @@ func TestNormalizeMetricListPreservesMetricCategoriesAndCategoryPaths(t *testing
 	}
 }
 
+func TestNormalizeMetricListPreservesObjects(t *testing.T) {
+	got := normalizeMetricList([]any{
+		map[string]any{
+			"metric_name":       "maximum pressure",
+			"subject":           "tank",
+			"source_line_spans": []any{"10"},
+			"objects": []any{map[string]any{
+				"object_name":       "液化气储罐",
+				"object_name_en":    "LPG storage tank",
+				"object_role":       "measured_object",
+				"source_line_spans": []any{"10"},
+			}},
+		},
+	})
+	if len(got) != 1 {
+		t.Fatalf("normalizeMetricList len=%d", len(got))
+	}
+	objects := objectItemsFromValue(got[0]["objects"])
+	if len(objects) != 1 {
+		t.Fatalf("objects=%#v, want one object", got[0]["objects"])
+	}
+	if objects[0]["object_name"] != "液化气储罐" || objects[0]["object_name_en"] != "LPG storage tank" {
+		t.Fatalf("unexpected objects: %#v", objects)
+	}
+}
+
 func TestBuildMetricRelationBatchPromptIncludesMetricCategorySchema(t *testing.T) {
 	prompt := buildMetricRelationBatchPrompt([]metricCandidate{
 		{
@@ -878,6 +937,18 @@ func TestBuildMetricRelationBatchPromptIncludesMetricCategorySchema(t *testing.T
 	}
 	if !strings.Contains(prompt, `"metric_categories_en"`) {
 		t.Fatalf("metric_categories_en missing from relation batch schema: %s", prompt)
+	}
+	if !strings.Contains(prompt, `"objects"`) || !strings.Contains(prompt, `"object_name"`) {
+		t.Fatalf("objects schema missing from relation batch schema: %s", prompt)
+	}
+}
+
+func TestMetricCandidateTaskIncludesObjectHints(t *testing.T) {
+	prompt := metricCandidateTask("candidate prompt")
+	for _, want := range []string{`"object_hint"`, `"object_type_hint"`, `"object_role_hint"`} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("%s missing from candidate task schema: %s", want, prompt)
+		}
 	}
 }
 

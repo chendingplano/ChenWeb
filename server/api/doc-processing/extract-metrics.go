@@ -24,6 +24,8 @@ import (
 type MetricsProcessor struct {
 	InputStore                  DocMetadataStore
 	Store                       MetricsStore
+	ObjectStore                 ArtifactObjectsStore
+	ObjectReconciler            ObjectReconciler
 	Extractor                   LLMJSONExtractor
 	Logger                      ApiTypes.JimoLogger
 	ProcLogger                  DocProcLogger
@@ -99,6 +101,10 @@ type MetricsStore interface {
 	SaveMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error)
 }
 
+type ArtifactObjectsStore interface {
+	ReplaceObjectsForRecord(ctx context.Context, recordID int64, artifactType string, objects []ArtifactObject) error
+}
+
 type MetricsSQLStore struct {
 	DB *sql.DB
 }
@@ -124,6 +130,9 @@ type metricExtractionResult struct {
 type metricCandidateMention struct {
 	MetricNameHint    string
 	SubjectHint       string
+	ObjectHint        string
+	ObjectTypeHint    string
+	ObjectRoleHint    string
 	EvidenceQuote     string
 	SourceLineSpans   []string
 	UnitHint          string
@@ -140,6 +149,9 @@ type metricCandidate struct {
 	ChunkIndex         int
 	MetricNameHint     string
 	SubjectHint        string
+	ObjectHint         string
+	ObjectTypeHint     string
+	ObjectRoleHint     string
 	UnitHint           string
 	ValueHint          string
 	SupportingMentions []map[string]any
@@ -183,11 +195,11 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 	// }
 	mentionPromptText, mentionPromptRef, mentionPromptPath, mentionPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_PROMPT"},
-		"prompt-extract-metric-candidates-v1.md",
+		"prompt-extract-metric-candidates-v5.md",
 	)
 	relationPromptText, relationPromptRef, relationPromptPath, relationPromptErr := loadProductPromptFromEnvKeys(
 		[]string{"ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "PROMPT_FILE_NAME"},
-		"prompt-enrich-metrics-v1.md",
+		"prompt-enrich-metrics-v3.md",
 	)
 	mentionModelRef, mentionModelCfgPath, mentionModelCfg, mentionModelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
@@ -248,6 +260,13 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		ChunkDir:                    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		MetricEnrichGroupSize:       enrichGroupSize,
 		MaxTasks:                    maxTasks,
+	}
+	if ApiTypes.ProjectDBHandle != nil {
+		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
+		p.ObjectReconciler = ObjectReconciler{
+			Store:   ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle},
+			Options: objectReconcileOptionsFromEnv(),
+		}
 	}
 	p.forceDisableThinking()
 	applyStructureModelConfigToExtractor(extractor, p.RelationModelCfg)
@@ -374,7 +393,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		detectedLanguage = "unknown"
 	}
 	for i, m := range allMetrics {
-		m["metric_id"] = fmt.Sprintf("%d_mtc_%d", evt.RecordID, i+1)
+		m["metric_id"] = fmt.Sprintf("%d_%d", evt.RecordID, i+1)
 		allMetrics[i] = m
 	}
 
@@ -389,6 +408,11 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 	if err != nil {
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26050703) insert records failed, error:%w", err)
+	}
+
+	if err := p.persistMetricObjects(ctx, evt.RecordID, allMetrics); err != nil {
+		p.persistMetricsStatus(ctx, rec, start, err)
+		return fmt.Errorf("(MID_26050704) persist metric objects failed, error:%w", err)
 	}
 
 	if fileErr := p.saveMetricsToFile(evt.RecordID, rec, allMetrics); fileErr != nil {
@@ -457,6 +481,28 @@ func (p *MetricsProcessor) PostProcessIndex(ctx context.Context, recordID int64)
 		p.Logger.Warn("refresh metric artifact failed", "record_id", recordID, "error", refreshErr)
 	}
 	return nil
+}
+
+func (p *MetricsProcessor) persistMetricObjects(ctx context.Context, recordID int64, metrics []map[string]any) error {
+	if p.ObjectStore == nil {
+		return nil
+	}
+	objects := make([]ArtifactObject, 0)
+	for _, metric := range metrics {
+		metricID := strings.TrimSpace(asString(metric["metric_id"]))
+		if metricID == "" {
+			continue
+		}
+		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactMetric, metricID, metric)...)
+	}
+	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
+		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler)
+		if err != nil {
+			return err
+		}
+		objects = reconciled
+	}
+	return p.ObjectStore.ReplaceObjectsForRecord(ctx, recordID, searchArtifactMetric, objects)
 }
 
 // loadRecordChunks resolves and loads the record's persisted chunk blocks from the
@@ -900,6 +946,9 @@ func metricCandidateTask(base string) string {
 		"candidates": []map[string]any{{
 			"metric_name_hint":  "string",
 			"subject_hint":      "string",
+			"object_hint":       "string",
+			"object_type_hint":  "string",
+			"object_role_hint":  "string",
 			"evidence_quote":    "string",
 			"source_line_spans": []string{"5", "12:14"},
 			"unit_hint":         "string",
@@ -1034,6 +1083,9 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 			"candidate_id":        c.CandidateID,
 			"metric_name_hint":    c.MetricNameHint,
 			"subject_hint":        c.SubjectHint,
+			"object_hint":         c.ObjectHint,
+			"object_type_hint":    c.ObjectTypeHint,
+			"object_role_hint":    c.ObjectRoleHint,
 			"unit_hint":           c.UnitHint,
 			"value_hint":          c.ValueHint,
 			"supporting_mentions": c.SupportingMentions,
@@ -1071,6 +1123,20 @@ func buildMetricRelationBatchPrompt(candidates []metricCandidate) string {
 			"reasoning_tags":        []string{"string"},
 			"metric_categories":     []string{"category_key"},
 			"metric_categories_en":  []string{"category_key_en"},
+			"objects": []map[string]any{{
+				"object_name":       "string",
+				"object_name_en":    "string",
+				"object_name_zh":    "string",
+				"language":          "string",
+				"object_type":       "equipment|material|system|process|organization|person|place|document|concept|other",
+				"object_role":       "measured_object|regulated_object|requirement_target|inventory_item|component|parent_system|self|other",
+				"aliases":           []string{"string"},
+				"acronyms":          []string{"string"},
+				"description":       "string",
+				"evidence_quote":    "string",
+				"source_line_spans": []string{"5", "12:14"},
+				"confidence":        0.0,
+			}},
 		}},
 		"uncertain_metrics": []any{},
 	}
@@ -1138,6 +1204,9 @@ func normalizeMetricList(items []any) []map[string]any {
 			"category_paths":        raw["category_paths"],
 			"category_paths_en":     raw["category_paths_en"],
 		}
+		if objects := objectItemsFromValue(raw["objects"]); len(objects) > 0 {
+			normalized["objects"] = objects
+		}
 		normalized["source_line_spans"] = normalizeSourceLineSpans(raw["source_line_spans"])
 		out = append(out, normalized)
 	}
@@ -1156,6 +1225,9 @@ func normalizeMetricCandidateMentions(items []any, block Block) []metricCandidat
 		out = append(out, metricCandidateMention{
 			MetricNameHint:    strings.TrimSpace(asString(raw["metric_name_hint"])),
 			SubjectHint:       strings.TrimSpace(asString(raw["subject_hint"])),
+			ObjectHint:        strings.TrimSpace(asString(raw["object_hint"])),
+			ObjectTypeHint:    strings.TrimSpace(asString(raw["object_type_hint"])),
+			ObjectRoleHint:    strings.TrimSpace(asString(raw["object_role_hint"])),
 			EvidenceQuote:     quote,
 			SourceLineSpans:   spans,
 			UnitHint:          strings.TrimSpace(asString(raw["unit_hint"])),
@@ -1234,6 +1306,9 @@ func mentionsAsCandidates(mentions []metricCandidateMention) []metricCandidate {
 			ChunkIndex:     mention.ChunkIndex,
 			MetricNameHint: mention.MetricNameHint,
 			SubjectHint:    mention.SubjectHint,
+			ObjectHint:     mention.ObjectHint,
+			ObjectTypeHint: mention.ObjectTypeHint,
+			ObjectRoleHint: mention.ObjectRoleHint,
 			UnitHint:       mention.UnitHint,
 			ValueHint:      mention.ValueHint,
 			SupportingMentions: []map[string]any{{
@@ -1949,7 +2024,7 @@ func loadMetricsPromptFromEnv() (promptText string, promptRef string, promptPath
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-enrich-metrics-v1.md"
+		promptRef = "prompt-enrich-metrics-v3.md"
 	}
 
 	paths := make([]string, 0, 8)

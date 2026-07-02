@@ -35,3 +35,22 @@ func TestBuildMetricSearchDocument_DedupesRepeatedSegments(t *testing.T) {
 		t.Fatalf("unit dedupe failed")
 	}
 }
+
+func TestBuildMetricSearchDocument_IncludesObjectNames(t *testing.T) {
+	got := buildMetricSearchDocument(map[string]any{
+		"metric_name": "maximum pressure",
+		"subject":     "storage tank",
+		"objects": []map[string]any{{
+			"object_name":    "液化气储罐",
+			"object_name_en": "LPG storage tank",
+			"description":    "pressurized storage vessel",
+			"aliases":        []string{"LPG tank"},
+		}},
+	}, true)
+
+	for _, want := range []string{"液化气储罐", "LPG storage tank", "pressurized storage vessel", "LPG tank"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("search document %q does not contain object text %q", got, want)
+		}
+	}
+}

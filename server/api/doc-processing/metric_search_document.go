@@ -23,6 +23,7 @@ func buildMetricSearchDocument(metric map[string]any, includeEnglish bool) strin
 		"",
 		strings.TrimSpace(asString(metric["table_name_or_section"])),
 		searchDocumentArrayText(metric["category_paths"]),
+		searchDocumentObjectsText(metric["objects"]),
 		"",
 	}
 	if includeEnglish {
@@ -33,7 +34,28 @@ func buildMetricSearchDocument(metric map[string]any, includeEnglish bool) strin
 		parts[9] = strings.TrimSpace(asString(metric["context_en"]))
 		parts[11] = strings.TrimSpace(asString(metric["value_class_en"]))
 		parts[13] = strings.TrimSpace(asString(metric["unit_en"]))
-		parts[16] = searchDocumentArrayText(metric["category_paths_en"])
+		parts[15] = searchDocumentArrayText(metric["category_paths_en"])
+	}
+	return joinUniqueSearchParts(parts...)
+}
+
+func searchDocumentObjectsText(raw any) string {
+	objects := objectItemsFromValue(raw)
+	if len(objects) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(objects)*8)
+	for _, obj := range objects {
+		parts = append(parts,
+			strings.TrimSpace(asString(obj["object_name"])),
+			strings.TrimSpace(asString(obj["object_name_en"])),
+			strings.TrimSpace(asString(obj["object_name_zh"])),
+			strings.TrimSpace(asString(obj["object_type"])),
+			strings.TrimSpace(asString(obj["object_role"])),
+			strings.TrimSpace(asString(obj["description"])),
+			searchDocumentArrayText(obj["aliases"]),
+			searchDocumentArrayText(obj["acronyms"]),
+		)
 	}
 	return joinUniqueSearchParts(parts...)
 }
