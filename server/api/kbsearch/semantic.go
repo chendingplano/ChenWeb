@@ -29,6 +29,20 @@ func SemanticSearchEnabled() bool {
 	}
 }
 
+// EmbedEntityRelationEnabled reports whether entity and relation rows should
+// receive embeddings during indexing. ON by default so existing deployments
+// see no behaviour change; set EMBED_ENTITY_RELATION=false (or 0, no, off)
+// to skip embedding for entity and relation artifact types while keeping
+// semantic search enabled for all other types.
+func EmbedEntityRelationEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("EMBED_ENTITY_RELATION"))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
 // ConfiguredEmbeddingDim returns the requested embedding dimensionality from
 // EMBEDDING_DIMENSIONS, falling back to the historical default when unset or
 // invalid.

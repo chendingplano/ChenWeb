@@ -204,8 +204,8 @@ func TestSearchArtifactIndexersWriteCategoryTreeFiles(t *testing.T) {
 			artifactID:    "100_ent_1",
 			updateKey:     "100_ent_1",
 			sourceSpans:   `["15"]`,
-			rowQuery:      "SELECT entity_id, id, COALESCE\\(line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\)",
-			rowValues:     []any{"100_ent_1", int64(1), []byte(`["15"]`), "Entity search document"},
+			rowQuery:      "SELECT entity_id, id, COALESCE\\(line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\), COALESCE\\(categories, '\\[\\]'::jsonb\\)",
+			rowValues:     []any{"100_ent_1", int64(1), []byte(`["15"]`), "Entity search document", []byte(`["agency"]`)},
 			leafFile:      filepath.Join("public_health", "entities.txt"),
 		},
 		{
@@ -311,6 +311,38 @@ func TestIndexRelationsForRecordDoesNotWarnWhenSemanticProjectionCoverageIsMissi
 	}
 	if got, _ := logValue(finished.args, "missing_category_paths"); got != 1 {
 		t.Fatalf("missing_category_paths=%v, want 1", got)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestLoadIndexedEntityCategoryArtifactsForRecordSkipsProvisional(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("SELECT entity_id, id, COALESCE\\(line_spans, '\\[\\]'::jsonb\\), COALESCE\\(search_document, ''\\), COALESCE\\(categories, '\\[\\]'::jsonb\\), COALESCE\\(entity_status, 'extracted'\\) FROM kb.entities WHERE input_record_id = \\$1 ORDER BY id").
+		WithArgs(int64(100)).
+		WillReturnRows(sqlmock.NewRows([]string{"entity_id", "id", "line_spans", "search_document", "categories", "entity_status"}).
+			AddRow("100_ent_1", int64(1), []byte(`["15"]`), "Extracted entity", []byte(`["agency"]`), entityStatusExtracted).
+			AddRow("100_ent_2", int64(2), []byte(`["20"]`), "Relation provisional", []byte(`[]`), entityStatusProvisional))
+
+	artifacts, err := loadIndexedEntityCategoryArtifactsForRecord(context.Background(), db, 100)
+	if err != nil {
+		t.Fatalf("loadIndexedEntityCategoryArtifactsForRecord: %v", err)
+	}
+	if len(artifacts) != 1 {
+		t.Fatalf("got %d artifacts, want 1", len(artifacts))
+	}
+	if artifacts[0].ID != "100_ent_1" {
+		t.Fatalf("artifact ID = %q, want %q", artifacts[0].ID, "100_ent_1")
+	}
+	if !reflect.DeepEqual(artifacts[0].Categories, []string{"agency"}) {
+		t.Fatalf("categories = %v, want [agency]", artifacts[0].Categories)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -467,6 +499,10 @@ func TestArtifactConnectionsHybridSearchPartitionMigrationExists(t *testing.T) {
 
 func TestArtifactConnectionsCategoryNamePartitionMigrationExists(t *testing.T) {
 	assertArtifactConnectionsPartitionMigrationExists(t, "artifact_connections_category_name", "category_name")
+}
+
+func TestArtifactConnectionsLineOverlappedArtifactPartitionMigrationExists(t *testing.T) {
+	assertArtifactConnectionsPartitionMigrationExists(t, "artifact_connections_line_overlapped_artifact", "line-overlapped-artifact")
 }
 
 func assertArtifactConnectionsPartitionMigrationExists(t *testing.T, partitionName, relationMethod string) {

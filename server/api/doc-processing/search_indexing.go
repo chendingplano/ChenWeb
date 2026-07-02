@@ -180,7 +180,13 @@ func replaceRegistryRows(ctx context.Context, db *sql.DB, artifactType string, r
 	// on (which requires the pgvector migration applied); otherwise rows stay
 	// lexical-only and InsertSearchRegistryRows uses the embedding-free statement.
 	if kbsearch.SemanticSearchEnabled() {
-		embedRegistryRows(ctx, rows, logger)
+		// Entity and relation embedding can be gated independently via
+		// EMBED_ENTITY_RELATION. All other artifact types always embed when
+		// semantic search is on.
+		if (artifactType != searchArtifactEntity && artifactType != searchArtifactRelation) ||
+			kbsearch.EmbedEntityRelationEnabled() {
+			embedRegistryRows(ctx, rows, logger)
+		}
 	}
 	deleted, err := kbsearch.DeleteSearchRegistryRowsForRecord(ctx, db, artifactType, recordID)
 	if err != nil {

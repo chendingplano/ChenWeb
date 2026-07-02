@@ -278,7 +278,7 @@ func indexEntityCategoryMembership(ctx context.Context, db *sql.DB, recordID int
 	if db == nil {
 		return 0
 	}
-	entities, err := loadIndexedEntitiesForRecord(ctx, db, recordID)
+	entities, err := loadIndexedEntityCategoryArtifactsForRecord(ctx, db, recordID)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("entity category membership: load entities failed", "record_id", recordID, "error", err.Error())
@@ -290,6 +290,56 @@ func indexEntityCategoryMembership(ctx context.Context, db *sql.DB, recordID int
 	}
 	resolver := newMetricCategoryResolver(db, logger) // category resolver is category-type-agnostic
 	return upsertArtifactCategoryConnections(ctx, db, recordID, modelName, promptRef, entities, entityIndexConfig, resolver, logger)
+}
+
+func loadIndexedEntityCategoryArtifactsForRecord(ctx context.Context, db *sql.DB, recordID int64) ([]indexedArtifact, error) {
+	rows, err := db.QueryContext(ctx, `SELECT entity_id,
+	       id,
+	       COALESCE(line_spans, '[]'::jsonb),
+	       COALESCE(search_document, ''),
+	       COALESCE(categories, '[]'::jsonb),
+	       COALESCE(entity_status, 'extracted')
+	FROM kb.entities
+	WHERE input_record_id = $1
+	ORDER BY id`, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []indexedArtifact
+	for rows.Next() {
+		var (
+			entityID     string
+			rowID        int64
+			spansRaw     []byte
+			searchDoc    string
+			catsRaw      []byte
+			entityStatus string
+		)
+		if err := rows.Scan(&entityID, &rowID, &spansRaw, &searchDoc, &catsRaw, &entityStatus); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(entityStatus) != entityStatusExtracted {
+			continue
+		}
+		seq := lastDelimitedToken(entityID)
+		if seq == "" {
+			seq = strconv.FormatInt(rowID, 10)
+		}
+		var spansAny any
+		if len(spansRaw) > 0 {
+			_ = json.Unmarshal(spansRaw, &spansAny)
+		}
+		out = append(out, indexedArtifact{
+			ID:             kbsearch.BuildArtifactID(recordID, searchArtifactEntity, seq),
+			UpdateKey:      strings.TrimSpace(entityID),
+			SourceSpans:    normalizeSourceLineSpans(spansAny),
+			SearchDocument: strings.TrimSpace(searchDoc),
+			Categories:     parseJSONStringArray(catsRaw),
+		})
+	}
+	return out, rows.Err()
 }
 
 func loadIndexedRelationsForRecord(ctx context.Context, db *sql.DB, recordID int64) ([]indexedArtifact, error) {
