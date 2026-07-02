@@ -373,10 +373,12 @@ func (p *RelationProcessor) ProcessChunk(ctx context.Context, chunkIdx int) erro
 		p.Logger.Warn("relation chunk failed", "processor", p.Name(), "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
 		return nil
 	}
+	p.batchMu.Lock()
 	if lang != "" && p.batchRelLang == "unknown" {
 		p.batchRelLang = lang
 	}
 	p.batchRelations = append(p.batchRelations, rels...)
+	p.batchMu.Unlock()
 	return nil
 }
 

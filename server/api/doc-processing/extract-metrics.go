@@ -69,6 +69,7 @@ type MetricsProcessor struct {
 	batchDocCtx    string
 	batchStart     time.Time
 	batchMentions  []metricCandidateMention // Pass 1 accumulator (converted to candidates in Finalize)
+	batchMu        sync.Mutex               // protects batchMentions/batchLang/batchModelName under concurrent Phase 3
 	batchLang      string
 	batchModelName string
 }
@@ -2514,14 +2515,16 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 	if lang == "chinese" || lang == "中文" || lang == "zh-cn" {
 		lang = "zh"
 	}
+	raw, _ := payload["candidates"].([]any)
+	p.batchMu.Lock()
 	if lang != "" && p.batchLang == "unknown" {
 		p.batchLang = lang
 	}
 	if m := strings.TrimSpace(modelName); m != "" {
 		p.batchModelName = m
 	}
-	raw, _ := payload["candidates"].([]any)
 	p.batchMentions = append(p.batchMentions, normalizeMetricCandidateMentions(raw, block)...)
+	p.batchMu.Unlock()
 	return nil
 }
 

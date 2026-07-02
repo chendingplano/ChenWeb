@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -65,6 +66,7 @@ type EntityRelationProcessor struct {
 	batchDocCtx    string
 	batchLines     []Line // input lines for Phase 2 relation windows
 	batchResults   []entityRelationChunkResult
+	batchMu        sync.Mutex // protects batchResults/batchRelations append under concurrent Phase 3
 	batchStart     time.Time
 	batchRec       DocMetadataInputRecord
 	batchRelations []map[string]any // accumulated by RelationProcessor.ProcessChunk
@@ -2221,7 +2223,9 @@ func (p *EntityRelationProcessor) processEntityChunk(ctx context.Context, chunkI
 		p.Logger.Warn("%s chunk %d failed (result.Failed=true), skipping",
 			p.Name(), chunkIdx, "record_id", p.batchRecordID)
 	}
+	p.batchMu.Lock()
 	p.batchResults = append(p.batchResults, result)
+	p.batchMu.Unlock()
 	return nil
 }
 

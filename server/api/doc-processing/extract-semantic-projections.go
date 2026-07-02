@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -66,6 +67,7 @@ type SemanticProjectionsProcessor struct {
 	batchCompletedP1         int    // progress counter for logExtractProjectionsChunk
 	batchCompletedP2         int    // progress counter for logEnrichProjectionsChunk
 	batchUsedCandidateModel  string // tracks the candidate model actually used in batch
+	batchMu                  sync.Mutex // protects projections/seqnos/linespans/lang append under concurrent Phase 3
 }
 
 type SemanticProjectionsStore interface {
@@ -792,6 +794,7 @@ func (p *SemanticProjectionsProcessor) ProcessChunk(ctx context.Context, chunkId
 		p.Logger.Warn("%s chunk failed", p.Name(), "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
 		return nil
 	}
+	p.batchMu.Lock()
 	if r.language != "" && p.batchLang == "unknown" {
 		p.batchLang = r.language
 	}
@@ -803,6 +806,7 @@ func (p *SemanticProjectionsProcessor) ProcessChunk(ctx context.Context, chunkId
 		p.batchSeqNos = append(p.batchSeqNos, r.seqNo)
 		p.batchLineSpans = append(p.batchLineSpans, r.lineSpans)
 	}
+	p.batchMu.Unlock()
 	return nil
 }
 

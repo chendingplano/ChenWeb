@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -63,6 +64,7 @@ type InventoryItemsProcessor struct {
 	batchChunks   []Chunk
 	batchDocCtx   string
 	batchResults  []inventoryChunkOutcome
+	batchMu       sync.Mutex // protects batchResults append under concurrent Phase 3
 	batchStart    time.Time
 }
 
@@ -2017,7 +2019,9 @@ func (p *InventoryItemsProcessor) ProcessChunk(ctx context.Context, chunkIdx int
 	p.logInventoryItemsLLMCall(ctx, callID, []string{strings.TrimSpace(modelName)}, payload, err, localStart, p.Now(), p.batchRecordID, chunkIdx, len(p.batchChunks), len(chunkItems), 0)
 	if err != nil {
 		p.Logger.Warn("inventory item batch: chunk failed", "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+		p.batchMu.Lock()
 		p.batchResults = append(p.batchResults, inventoryChunkOutcome{failed: true, fallback: wasFallback})
+		p.batchMu.Unlock()
 		return nil
 	}
 
@@ -2030,12 +2034,14 @@ func (p *InventoryItemsProcessor) ProcessChunk(ctx context.Context, chunkIdx int
 		"cache_hit", cacheHit,
 		"cache_miss", cacheMiss,
 	)
+	p.batchMu.Lock()
 	p.batchResults = append(p.batchResults, inventoryChunkOutcome{
 		items:     chunkItems,
 		modelName: modelName,
 		language:  chunkLang,
 		fallback:  wasFallback,
 	})
+	p.batchMu.Unlock()
 	return nil
 }
 

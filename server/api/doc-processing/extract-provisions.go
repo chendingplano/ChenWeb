@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -57,6 +58,7 @@ type ProvisionsProcessor struct {
 	batchStart    time.Time
 	batchResult   provisionExtractionResult
 	batchResults  []provisionChunkResult // per-chunk results for final accumulation
+	batchMu       sync.Mutex             // protects batchResults append under concurrent Phase 3
 }
 
 type ProvisionsStore interface {
@@ -1965,12 +1967,14 @@ func (p *ProvisionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) er
 		"ms_used", time.Since(callStart).Milliseconds(),
 	)
 
+	p.batchMu.Lock()
 	p.batchResults = append(p.batchResults, provisionChunkResult{
 		payload:    payload,
 		modelName:  modelName,
 		isFallback: isFallback,
 		numInChunk: numInChunk,
 	})
+	p.batchMu.Unlock()
 	return nil
 }
 
