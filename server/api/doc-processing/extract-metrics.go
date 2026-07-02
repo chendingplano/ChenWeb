@@ -64,14 +64,13 @@ type MetricsProcessor struct {
 	MaxTasks                    int
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
-	batchRecordID int64
-	batchChunks   []Chunk
-	batchDocCtx   string
-	batchStart    time.Time
-	// Accumulates Phase 1 results per chunk.
-	batchPass1Payloads []map[string]any
-	batchPass1Models   []string
-	batchPass1Failed   []bool
+	batchRecordID  int64
+	batchChunks    []Chunk
+	batchDocCtx    string
+	batchStart     time.Time
+	batchMentions  []metricCandidateMention // Pass 1 accumulator (converted to candidates in Finalize)
+	batchLang      string
+	batchModelName string
 }
 
 type metricsProgressTracker struct {
@@ -149,6 +148,15 @@ type metricCandidate struct {
 type candidateBatch struct {
 	chunkIdx   int
 	candidates []metricCandidate
+}
+
+// metricsPass1Result is the per-chunk candidate-extraction output, promoted from
+// the local type in extractMetricsFromChunksWithLLM so batch methods can share it.
+type metricsPass1Result struct {
+	mentions    []metricCandidateMention
+	language    string
+	modelName   string
+	didFallback bool
 }
 
 func groupCandidatesByChunk(candidates []metricCandidate, maxGroupSize int) []candidateBatch {
@@ -687,13 +695,6 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 	}
 
 	// ── Pass 1: concurrent candidate extraction ──────────────────────────────
-	type pass1Result struct {
-		mentions    []metricCandidateMention
-		language    string
-		modelName   string
-		didFallback bool
-	}
-
 	tracker := &metricsProgressTracker{Total: len(chunks)}
 
 	p.Logger.Info("extract metric",
@@ -702,11 +703,11 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		"model name", p.MentionModelName,
 		"prompt", p.MentionPromptRef,
 	)
-	pass1Results, pass1Err := runConcurrent(ctx, maxTasks, len(chunks), func(concCtx context.Context, i int) (pass1Result, error) {
+	pass1Results, pass1Err := runConcurrent(ctx, maxTasks, len(chunks), func(concCtx context.Context, i int) (metricsPass1Result, error) {
 		origChunk := chunks[i]
 		block := blocks[i]
 		if isCtxStopped(concCtx) {
-			return pass1Result{}, ErrPipelineStopped
+			return metricsPass1Result{}, ErrPipelineStopped
 		}
 		// Canonical chunk InputText (shared, cacheable prefix); schema in the prompt.
 		// See ADR 2026062701 §Phase 2.3.
@@ -727,9 +728,9 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 			payload, err, callStart, p.Now(), progress)
 		if err != nil {
 			if isCtxStopped(concCtx) {
-				return pass1Result{}, ErrPipelineStopped
+				return metricsPass1Result{}, ErrPipelineStopped
 			}
-			return pass1Result{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
+			return metricsPass1Result{}, fmt.Errorf("(MID_26042451) extract metric candidates via llm: %w", err)
 		}
 		lang := ApiUtils.NormalizeLang(asString(payload["language"]))
 		if lang == "chinese" || lang == "中文" || lang == "zh-cn" {
@@ -738,7 +739,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		usedModel := strings.TrimSpace(firstNonEmptyTrimmed(modelName, p.MentionModelName))
 		didFallback := strings.TrimSpace(modelName) != strings.TrimSpace(p.MentionModelName)
 		raw, _ := payload["candidates"].([]any)
-		result := pass1Result{
+		result := metricsPass1Result{
 			mentions:    normalizeMetricCandidateMentions(raw, block),
 			language:    lang,
 			modelName:   usedModel,
@@ -802,125 +803,28 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		"record_stage", "post_merge",
 	)
 
-	// ── Pass 2: concurrent enrichment batches ────────────────────────────────
-	type pass2Result struct {
-		metrics   []map[string]any
-		uncertain []map[string]any
-		language  string
-	}
-
-	batches := groupCandidatesByChunk(candidates, p.MetricEnrichGroupSize)
-	p.Logger.Info("extract metrics (grouped)",
-		"model_name", p.RelationModelName,
-		"prompt_name", p.RelationPromptRef,
-		"total batches", len(batches),
-	)
-
-	tracker.mu.Lock()
-	tracker.Total += len(batches)
-	tracker.mu.Unlock()
-
-	pass2Results, pass2Err := runConcurrent(ctx, maxTasks, len(batches), func(concCtx context.Context, i int) (pass2Result, error) {
-		batch := batches[i]
-		if isCtxStopped(concCtx) {
-			return pass2Result{}, ErrPipelineStopped
-		}
-		candidateIDs := make([]string, 0, len(batch.candidates))
-		for _, c := range batch.candidates {
-			candidateIDs = append(candidateIDs, c.CandidateID)
-		}
-		batchStart := time.Now()
-		p.Logger.Info("enrich metric start",
-			"record_id", record_id,
-			"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
-			"total_batches", len(batches),
-		)
-		enrichStart := p.Now()
-		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), i+1)
-		payload, err := p.extractMetricPayload(concCtx, buildMetricRelationBatchPrompt(batch.candidates),
-			p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "enrich_metrics", "MID-26052903")
-		progress := tracker.advance()
-		p.logEnrichMetricsChunk(ctx, record_id, enrichCallID, batch.chunkIdx, len(batches),
-			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
-			payload, err, enrichStart, p.Now(), progress)
-		if err != nil {
-			if isCtxStopped(concCtx) {
-				return pass2Result{}, ErrPipelineStopped
-			}
-			return pass2Result{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w", err)
-		}
-		lang := strings.TrimSpace(asString(payload["language"]))
-		metricsRaw, _ := payload["metrics"].([]any)
-		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
-		result := pass2Result{
-			metrics:   normalizeMetricList(metricsRaw),
-			uncertain: normalizeMetricList(uncertainRaw),
-			language:  lang,
-		}
-		for j, m := range result.metrics {
-			spans, _ := m["source_line_spans"].([]string)
-			if len(spans) == 0 {
-				p.Logger.Error("pass2: enriched metric has empty source_line_spans",
-					"record_id", record_id,
-					"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
-					"metric_index", j,
-					"metric_name", m["metric_name"],
-				)
-			}
-		}
-		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
-		p.Logger.Info("enrich metric end  ",
-			"record_id", record_id,
-			"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
-			"metrics_in_batch", len(result.metrics),
-			"ms_used", time.Since(batchStart).Milliseconds(),
-			"cache_hit", cacheHit,
-			"cache_miss", cacheMiss,
-		)
-		return result, nil
-	})
-
-	if pass2Err != nil {
+	// ── Pass 2: concurrent enrichment batches (delegated to enrichMetricCandidates) ──
+	metrics, enrichErr := p.enrichMetricCandidates(ctx, record_id, candidates, docCtx)
+	if enrichErr != nil {
 		if isCtxStopped(ctx) {
 			return metricExtractionResult{}, ErrPipelineStopped
 		}
-		return metricExtractionResult{}, pass2Err
+		return metricExtractionResult{}, enrichErr
 	}
 
-	// Merge pass2 results in batch-index order (deterministic)
-	metrics := make([]map[string]any, 0, len(candidates))
-	uncertain := make([]map[string]any, 0)
 	usedRelationModel := strings.TrimSpace(p.RelationModelName)
-	llmCallCount += len(batches)
-
-	for _, r := range pass2Results {
-		metrics = append(metrics, r.metrics...)
-		uncertain = append(uncertain, r.uncertain...)
-		if r.language != "" && detectedLanguage == "unknown" {
-			detectedLanguage = r.language
-		}
-	}
-
-	preDedupeMetrics := len(metrics)
-	preDedupeUncertain := len(uncertain)
-	metrics = dedupeFinalMetricRows(metrics)
-	uncertain = dedupeFinalMetricRows(uncertain)
 	p.Logger.Info("Final metric rows",
 		"record_id", record_id,
-		"metrics_before_dedup", preDedupeMetrics,
 		"metrics_after_dedup", len(metrics),
-		"uncertain_before_dedup", preDedupeUncertain,
-		"uncertain_after_dedup", len(uncertain),
 		"record_stage", "post_metric_dedup",
 	)
 
 	return metricExtractionResult{
-		Language:         detectedLanguage,
-		Metrics:          metrics,
-		UncertainMetrics: uncertain,
-		ModelName:        firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
-		FallbackCount:    fallbackCount,
-		LLMCallCount:     llmCallCount,
+		Language:      detectedLanguage,
+		Metrics:       metrics,
+		ModelName:     firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
+		FallbackCount: fallbackCount,
+		LLMCallCount:  llmCallCount,
 	}, nil
 }
 
@@ -2460,4 +2364,202 @@ func refreshMetricArtifactFile(ctx context.Context, db *sql.DB, artifactDir stri
 		return err
 	}
 	return writeEntityRelationArtifactFile(artifactDir, recordID, rec, rows, ".metrics", "MID_26060703")
+}
+
+// ---- ChunkBatchProcessor implementation ----
+
+// enrichMetricCandidates runs Pass 2 (concurrent enrichment) on the given
+// candidates and returns the deduplicated enriched metric rows. It is called
+// from both extractMetricsFromChunksWithLLM (DRY) and FinalizeChunkBatch.
+func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID int64, candidates []metricCandidate, _ string) ([]map[string]any, error) {
+	type pass2Result struct {
+		metrics   []map[string]any
+		uncertain []map[string]any
+		language  string
+	}
+
+	maxTasks := p.MaxTasks
+	if maxTasks <= 0 {
+		maxTasks = 1
+	}
+
+	batches := groupCandidatesByChunk(candidates, p.MetricEnrichGroupSize)
+	p.Logger.Info("enrich metric candidates (grouped)",
+		"record_id", recordID,
+		"model_name", p.RelationModelName,
+		"prompt_name", p.RelationPromptRef,
+		"total_batches", len(batches),
+	)
+
+	pass2Results, pass2Err := runConcurrent(ctx, maxTasks, len(batches), func(concCtx context.Context, i int) (pass2Result, error) {
+		batch := batches[i]
+		if isCtxStopped(concCtx) {
+			return pass2Result{}, ErrPipelineStopped
+		}
+		batchStart := time.Now()
+		p.Logger.Info("enrich metric start",
+			"record_id", recordID,
+			"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
+			"total_batches", len(batches),
+		)
+		enrichStart := p.Now()
+		enrichCallID := fmt.Sprintf("%s_p2_b%d", eventIDFromContext(ctx), i+1)
+		payload, err := p.extractMetricPayload(concCtx, buildMetricRelationBatchPrompt(batch.candidates),
+			p.RelationPromptText, p.RelationModelName, p.RelationModelCfg, "enrich_metrics", "MID-26052903")
+		p.logEnrichMetricsChunk(ctx, recordID, enrichCallID, batch.chunkIdx, len(batches),
+			[]string{strings.TrimSpace(p.RelationModelName)}, p.RelationPromptRef,
+			payload, err, enrichStart, p.Now(), "")
+		if err != nil {
+			if isCtxStopped(concCtx) {
+				return pass2Result{}, ErrPipelineStopped
+			}
+			return pass2Result{}, fmt.Errorf("(MID_26042452) enrich metrics via llm: %w", err)
+		}
+		lang := strings.TrimSpace(asString(payload["language"]))
+		metricsRaw, _ := payload["metrics"].([]any)
+		uncertainRaw, _ := payload["uncertain_metrics"].([]any)
+		result := pass2Result{
+			metrics:   normalizeMetricList(metricsRaw),
+			uncertain: normalizeMetricList(uncertainRaw),
+			language:  lang,
+		}
+		for j, m := range result.metrics {
+			spans, _ := m["source_line_spans"].([]string)
+			if len(spans) == 0 {
+				p.Logger.Error("pass2: enriched metric has empty source_line_spans",
+					"record_id", recordID,
+					"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
+					"metric_index", j,
+					"metric_name", m["metric_name"],
+				)
+			}
+		}
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+		p.Logger.Info("enrich metric end  ",
+			"record_id", recordID,
+			"batch", fmt.Sprintf("batch:%d/%d", i+1, len(batches)),
+			"metrics_in_batch", len(result.metrics),
+			"ms_used", time.Since(batchStart).Milliseconds(),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
+		)
+		return result, nil
+	})
+
+	if pass2Err != nil {
+		if isCtxStopped(ctx) {
+			return nil, ErrPipelineStopped
+		}
+		return nil, pass2Err
+	}
+
+	metrics := make([]map[string]any, 0, len(candidates))
+	uncertain := make([]map[string]any, 0)
+	detectedLanguage := "unknown"
+	for _, r := range pass2Results {
+		metrics = append(metrics, r.metrics...)
+		uncertain = append(uncertain, r.uncertain...)
+		if r.language != "" && detectedLanguage == "unknown" {
+			detectedLanguage = r.language
+		}
+	}
+	metrics = dedupeFinalMetricRows(metrics)
+	return metrics, nil
+}
+
+func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if p.MentionPromptErr != nil {
+		return fmt.Errorf("(MID_26062750) %s candidate prompt error: %w", p.Name(), p.MentionPromptErr)
+	}
+	if p.ModelErr != nil {
+		p.Logger.Warn("%s skipped: model config error", p.Name(), "record_id", recordID, "error", p.ModelErr)
+		return nil
+	}
+	p.batchStart = p.Now()
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchMentions = nil
+	p.batchLang = "unknown"
+	p.batchModelName = strings.TrimSpace(p.MentionModelName)
+	return nil
+}
+
+func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
+		return fmt.Errorf("(MID_26062751) %s chunk index %d out of range (len=%d)", p.Name(), chunkIdx, len(p.batchChunks))
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+	chunk := p.batchChunks[chunkIdx]
+	block := chunksToBlocks([]Chunk{chunk})[0]
+	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
+	taskPrompt := metricCandidateTask(p.MentionPromptText)
+	callStart := p.Now()
+	callID := fmt.Sprintf("%d_p1_c%d", p.batchRecordID, chunkIdx)
+	payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, inputText, taskPrompt)
+	p.logExtractMetricsChunk(ctx, p.batchRecordID, callID, block.Index, len(p.batchChunks),
+		[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef, payload, err, callStart, p.Now(), "")
+	if err != nil {
+		if isCtxStopped(ctx) {
+			return ErrPipelineStopped
+		}
+		p.Logger.Warn("%s chunk failed", p.Name(), "record_id", p.batchRecordID, "chunk", chunkIdx, "error", err)
+		return nil
+	}
+	lang := ApiUtils.NormalizeLang(asString(payload["language"]))
+	if lang == "chinese" || lang == "中文" || lang == "zh-cn" {
+		lang = "zh"
+	}
+	if lang != "" && p.batchLang == "unknown" {
+		p.batchLang = lang
+	}
+	if m := strings.TrimSpace(modelName); m != "" {
+		p.batchModelName = m
+	}
+	raw, _ := payload["candidates"].([]any)
+	p.batchMentions = append(p.batchMentions, normalizeMetricCandidateMentions(raw, block)...)
+	return nil
+}
+
+func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	candidates := mentionsAsCandidates(p.batchMentions)
+	if len(candidates) == 0 {
+		p.Logger.Info("%s batch: no candidates", p.Name(), "record_id", p.batchRecordID)
+		return nil
+	}
+	if isCtxStopped(ctx) {
+		return ErrPipelineStopped
+	}
+	metrics, err := p.enrichMetricCandidates(ctx, p.batchRecordID, candidates, p.batchDocCtx)
+	if err != nil {
+		if errors.Is(err, ErrPipelineStopped) {
+			return ErrPipelineStopped
+		}
+		return fmt.Errorf("(MID_26062752) %s enrich metrics: %w", p.Name(), err)
+	}
+	rec, err := p.InputStore.GetInputRecord(ctx, p.batchRecordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26062753) %s load record: %w", p.Name(), err)
+	}
+	for i, m := range metrics {
+		m["metric_id"] = fmt.Sprintf("%d_mtc_%d", p.batchRecordID, i+1)
+		metrics[i] = m
+	}
+	if _, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
+		InputRecordID: p.batchRecordID,
+		EventID:       eventIDFromContext(ctx),
+		Language:      firstNonEmptyTrimmed(p.batchLang, "unknown"),
+		ModelName:     firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName),
+		PromptName:    p.MentionPromptRef,
+		Metrics:       metrics,
+	}); err != nil {
+		return fmt.Errorf("(MID_26062754) %s save metrics: %w", p.Name(), err)
+	}
+	if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, metrics); fileErr != nil {
+		p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
+	}
+	// Indexing runs in Phase C via PostProcessIndex (unchanged).
+	return nil
 }
