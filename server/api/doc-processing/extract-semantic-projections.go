@@ -55,16 +55,17 @@ type SemanticProjectionsProcessor struct {
 	MaxTasks              int
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
-	batchRecordID      int64
-	batchChunks        []Chunk
-	batchDocCtx        string
-	batchProjections   []map[string]any // accumulated enriched projection rows
-	batchSeqNos        []int            // chunk.SeqNo per accumulated row
-	batchLineSpans     [][]string       // chunkLineSpans per accumulated row
-	batchLang          string
-	batchStart         time.Time
-	batchCompletedP1   int // progress counter for logExtractProjectionsChunk
-	batchCompletedP2   int // progress counter for logEnrichProjectionsChunk
+	batchRecordID            int64
+	batchChunks              []Chunk
+	batchDocCtx              string
+	batchProjections         []map[string]any // accumulated enriched projection rows
+	batchSeqNos              []int            // chunk.SeqNo per accumulated row
+	batchLineSpans           [][]string       // chunkLineSpans per accumulated row
+	batchLang                string
+	batchStart               time.Time
+	batchCompletedP1         int    // progress counter for logExtractProjectionsChunk
+	batchCompletedP2         int    // progress counter for logEnrichProjectionsChunk
+	batchUsedCandidateModel  string // tracks the candidate model actually used in batch
 }
 
 type SemanticProjectionsStore interface {
@@ -759,6 +760,7 @@ func (p *SemanticProjectionsProcessor) InitChunkBatch(_ context.Context, recordI
 	p.batchLang = "unknown"
 	p.batchCompletedP1 = 0
 	p.batchCompletedP2 = 0
+	p.batchUsedCandidateModel = strings.TrimSpace(p.CandidateModelName)
 	return nil
 }
 
@@ -793,6 +795,9 @@ func (p *SemanticProjectionsProcessor) ProcessChunk(ctx context.Context, chunkId
 	if r.language != "" && p.batchLang == "unknown" {
 		p.batchLang = r.language
 	}
+	if r.candidateModel != "" {
+		p.batchUsedCandidateModel = r.candidateModel
+	}
 	if r.projection != nil {
 		p.batchProjections = append(p.batchProjections, r.projection)
 		p.batchSeqNos = append(p.batchSeqNos, r.seqNo)
@@ -825,7 +830,7 @@ func (p *SemanticProjectionsProcessor) FinalizeChunkBatch(ctx context.Context) e
 		InputRecordID: p.batchRecordID,
 		EventID:       eventIDFromContext(ctx),
 		Language:      detectedLanguage,
-		ModelName:     p.EnrichModelName,
+		ModelName:     firstNonEmptyTrimmed(p.EnrichModelName, p.batchUsedCandidateModel),
 		PromptName:    p.EnrichPromptRef,
 		Projections:   p.batchProjections,
 	}); err != nil {
