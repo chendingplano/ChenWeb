@@ -63,7 +63,11 @@ func (s *ControlService) runProcessorsChunkBatched(
 		return
 	}
 
-	_, phaseBSpan := startPhaseSpan(ctx, "B", recordID, processors)
+	batchAsProcs := make([]Processor, len(batchProcessors))
+	for i, bp := range batchProcessors {
+		batchAsProcs[i] = bp.(Processor)
+	}
+	_, phaseBSpan := startPhaseSpan(ctx, "B", recordID, batchAsProcs)
 	defer phaseBSpan.End()
 
 	// --- shared chunk loading ---
