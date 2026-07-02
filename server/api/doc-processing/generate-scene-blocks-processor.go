@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -61,6 +62,14 @@ type SceneBlocksProcessor struct {
 	ArtifactDir                 string
 	ArtifactWebDir              string
 	GenerateSceneBlocksMaxTasks int
+
+	batchRecordID int64
+	batchChunks   []Chunk
+	batchDocCtx   string
+	batchRec      DocMetadataInputRecord
+	batchMentions []sceneCandidateMention
+	batchStart    time.Time
+	batchMu       sync.Mutex
 }
 
 type sceneExtractionResult struct {
@@ -887,6 +896,31 @@ func buildSceneCandidateUserPrompt(chunk Chunk) string {
 		"\n\nInput chunk lines (JSON array):\n" + markedLinesToJSON(chunk.Lines)
 }
 
+// buildSceneCandidateBatchTask builds the TASK-section prompt for batch mode.
+// Chunk lines go in the DOCUMENT_INPUT section (canonical cache-shared text);
+// this function produces only the schema + chunk index for the TASK section.
+func buildSceneCandidateBatchTask(base string, seqNo int) string {
+	schema := map[string]any{
+		"candidates": []map[string]any{{
+			"scene_key":         "stable_snake_case_identifier",
+			"scene_type_hint":   "workflow|operation|failure|decision|monitoring|compliance|state_transition|interaction|other",
+			"title":             "human readable title",
+			"summary_hint":      "one sentence description of the scene",
+			"evidence_quote":    "short supporting quote",
+			"line_spans":        []string{"12", "13-15"},
+			"confidence":        0.0,
+			"confidence_reason": "brief reason",
+		}},
+	}
+	schemaJSON, _ := json.Marshal(schema)
+	task := "Return JSON only. Use exactly this top-level schema:\n" + string(schemaJSON) +
+		"\n\nChunk index: " + strconv.Itoa(seqNo)
+	if base := strings.TrimSpace(base); base != "" {
+		return base + "\n\n" + task
+	}
+	return task
+}
+
 func buildSceneRelationUserPromptForGroup(candidates []sceneCandidate) string {
 	candidateList := make([]map[string]any, 0, len(candidates))
 	lineMap := map[string]MarkedLine{}
@@ -1581,6 +1615,148 @@ func removeSceneBlockTreeRecord(treeRootDir string, recordID int64) error {
 		sort.Strings(rows)
 		return os.WriteFile(path, []byte(strings.Join(rows, "\n")), 0o644)
 	})
+}
+
+// --- ChunkBatchProcessor implementation ---
+
+func (p *SceneBlocksProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if p.MentionPromptErr != nil {
+		return fmt.Errorf("(MID_26070201) load scene candidates prompt %q: %w", p.MentionPromptRef, p.MentionPromptErr)
+	}
+	if p.RelationPromptErr != nil {
+		return fmt.Errorf("(MID_26070202) load scene blocks prompt %q: %w", p.RelationPromptRef, p.RelationPromptErr)
+	}
+	if p.MentionModelErr != nil {
+		return fmt.Errorf("(MID_26070203) mention model config error %q: %w", p.MentionModelRef, p.MentionModelErr)
+	}
+	if p.RelationModelErr != nil {
+		return fmt.Errorf("(MID_26070204) relation model config error %q: %w", p.RelationModelRef, p.RelationModelErr)
+	}
+	rec, err := p.InputStore.GetInputRecord(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26070205) load record %d: %w", recordID, err)
+	}
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchRec = rec
+	p.batchMentions = nil
+	p.batchStart = p.Now()
+	return nil
+}
+
+// ProcessChunk runs Pass 1: extract scene candidate mentions for one chunk.
+// Called concurrently by the batch coordinator for different chunk indices.
+func (p *SceneBlocksProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	chunk := p.batchChunks[chunkIdx]
+	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
+	taskText := buildSceneCandidateBatchTask(p.MentionPromptText, chunk.SeqNo)
+	callStart := p.Now()
+	payload, modelName, err := p.extractScenePayloadWithFallback(ctx, inputText, taskText, p.MentionPromptRef, p.MentionModelName, p.MentionModelCfg)
+	p.logLLMCall(ctx, fmt.Sprintf("%d_btp1_c%d", p.batchRecordID, chunkIdx), "extract_scene_block_candidates", 1,
+		[]string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.MentionPromptRef),
+		payload, err, callStart, p.Now(), p.batchRecordID, chunkIdx, len(p.batchChunks), 0)
+	if err != nil {
+		p.Logger.Error("batch scene blocks: chunk extraction failed", "record_id", p.batchRecordID, "chunk_idx", chunkIdx, "error", err)
+		return fmt.Errorf("(MID_26070206) extract scene candidates batch chunk %d: %w", chunk.SeqNo, err)
+	}
+	raw, _ := payload["candidates"].([]any)
+	mentions := normalizeSceneCandidateMentions(raw, chunk)
+	p.batchMu.Lock()
+	p.batchMentions = append(p.batchMentions, mentions...)
+	p.batchMu.Unlock()
+	return nil
+}
+
+// FinalizeChunkBatch runs Pass 2 (enrich candidates) then saves and indexes scene blocks.
+func (p *SceneBlocksProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	recordID := p.batchRecordID
+	rec := p.batchRec
+	chunks := p.batchChunks
+
+	candidates := mergeSceneCandidateMentions(p.batchMentions)
+	chunkGroups := groupSceneCandidatesByChunk(candidates)
+	usedRelationModel := strings.TrimSpace(p.RelationModelName)
+
+	type pass2GroupResult struct {
+		blocks    []map[string]any
+		modelName string
+	}
+	pass2Results, pass2Err := runConcurrent(ctx, p.GenerateSceneBlocksMaxTasks, len(chunkGroups), func(jobCtx context.Context, groupIdx int) (pass2GroupResult, error) {
+		if isCtxStopped(jobCtx) {
+			return pass2GroupResult{}, ErrPipelineStopped
+		}
+		group := chunkGroups[groupIdx]
+		callStart := p.Now()
+		payload, modelName, err := p.extractScenePayloadWithFallback(jobCtx, buildSceneRelationUserPromptForGroup(group.Candidates), p.RelationPromptText, p.RelationPromptRef, p.RelationModelName, p.RelationModelCfg)
+		p.logLLMCall(ctx, fmt.Sprintf("%d_btp2_g%d", recordID, groupIdx), "enrich_scene_blocks", 2,
+			[]string{strings.TrimSpace(modelName)}, strings.TrimSpace(p.RelationPromptRef),
+			payload, err, callStart, p.Now(), recordID, groupIdx, len(chunkGroups), 0)
+		if err != nil {
+			return pass2GroupResult{}, fmt.Errorf("(MID_26070207) enrich scene blocks batch for chunk group %d: %w", group.ChunkIndex, err)
+		}
+		raw, _ := payload["scene_blocks"].([]any)
+		return pass2GroupResult{blocks: normalizeSceneBlockListForGroup(raw, group.Candidates), modelName: modelName}, nil
+	})
+	if pass2Err != nil {
+		if isCtxStopped(ctx) {
+			return ErrPipelineStopped
+		}
+		return fmt.Errorf("(MID_26070208) batch scene blocks pass 2: %w", pass2Err)
+	}
+
+	sceneBlocks := make([]map[string]any, 0, len(chunkGroups))
+	for _, r := range pass2Results {
+		if strings.TrimSpace(r.modelName) != "" {
+			usedRelationModel = strings.TrimSpace(r.modelName)
+		}
+		sceneBlocks = append(sceneBlocks, r.blocks...)
+	}
+	sceneBlocks = dedupeFinalSceneBlocks(sceneBlocks)
+
+	eventID := eventIDFromContext(ctx)
+	for idx := range sceneBlocks {
+		block := sceneBlocks[idx]
+		objectID := fmt.Sprintf("%d_sbk_%d", recordID, idx+1)
+		if strings.TrimSpace(asString(block["scene_id"])) == "" {
+			block["scene_id"] = objectID
+		}
+		req := UpsertSceneObjectRequest{
+			InputRecordID: recordID,
+			ObjectID:      objectID,
+			EventID:       eventID,
+			SceneBlock:    block,
+			ModelName:     strings.TrimSpace(usedRelationModel),
+			PromptName:    strings.TrimSpace(p.RelationPromptRef),
+			LineSpans:     buildSceneBlockLineSpans(block),
+			ExtInfo:       buildSceneBlockExtInfo(block),
+		}
+		if err := p.Store.UpsertSceneObject(ctx, req); err != nil {
+			return fmt.Errorf("(MID_26070209) batch upsert scene object %s: %w", objectID, err)
+		}
+		block["object_id"] = objectID
+	}
+	if err := p.writeSceneBlocksArtifact(recordID, rec, sceneBlocks); err != nil {
+		return fmt.Errorf("(MID_26070210) batch write scene blocks artifact: %w", err)
+	}
+	if indexErr := p.indexSceneBlocks(recordID, sceneBlocks); indexErr != nil {
+		p.Logger.Warn("batch index scene blocks failed", "record_id", recordID, "error", indexErr)
+	}
+	if reindexErr := ReindexSceneBlockSearchForRecord(ctx, recordID, p.Logger); reindexErr != nil {
+		p.Logger.Warn("batch reindex scene block search registry failed", "record_id", recordID, "error", reindexErr)
+	}
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, recordID, searchArtifactSceneBlock, RelationHasScene, chunksToBlocks(chunks)); connErr != nil {
+		p.Logger.Warn("batch write has-scene connections failed", "record_id", recordID, "error", connErr)
+	}
+	result := sceneExtractionResult{
+		SceneBlocks:   sceneBlocks,
+		ModelName:     firstNonEmptyTrimmed(usedRelationModel, p.RelationModelName, p.ModelName),
+		LLMCallCount:  len(chunks) + len(chunkGroups),
+		MentionsCount: len(p.batchMentions),
+	}
+	p.persistSceneBlocksStatus(ctx, rec, p.batchStart, nil)
+	p.logSceneBlocksSummary(ctx, p.batchStart, p.Now(), result, len(chunks), recordID)
+	return nil
 }
 
 func loadSceneBlocksPromptFromEnv() (promptText string, promptRef string, promptErr error) {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -21,6 +23,14 @@ type GenerateSummariesProcessor struct {
 	ProcLogger  DocProcLogger
 	Now         func() time.Time
 	ArtifactDir string
+
+	batchRecordID      int64
+	batchChunks        []Chunk
+	batchDocCtx        string
+	batchInputFilename string
+	batchStart         time.Time
+	batchLeaves        []SummaryItem
+	batchMu            sync.Mutex
 }
 
 func NewGenerateSummariesProcessor(
@@ -115,6 +125,46 @@ func (p *GenerateSummariesProcessor) logSummary(ctx context.Context, recordID *i
 	}, "MID-26052855"); err != nil {
 		p.Logger.Warn("failed to write doc_proc_summary log", "error", err)
 	}
+}
+
+// --- ChunkBatchProcessor implementation ---
+
+func (p *GenerateSummariesProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if _, ok := p.Service.(summaryChunkBatcher); !ok {
+		return fmt.Errorf("(MID_26070601) generate_summaries service does not implement summaryChunkBatcher")
+	}
+	rec, err := p.InputStore.GetInputRecord(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26070602) generate_summaries batch: load record %d: %w", recordID, err)
+	}
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchInputFilename = resolveChunkingInputFilename(rec, "")
+	p.batchStart = p.Now()
+	p.batchLeaves = nil
+	return nil
+}
+
+func (p *GenerateSummariesProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	chunk := p.batchChunks[chunkIdx]
+	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
+	leaf, err := p.Service.(summaryChunkBatcher).GenerateLeafSummaryForChunk(ctx, p.batchRecordID, chunk, inputText)
+	if err != nil {
+		p.Logger.Error("generate_summaries batch: chunk failed", "record_id", p.batchRecordID, "chunk_idx", chunkIdx, "error", err)
+		return fmt.Errorf("(MID_26070603) %w", err)
+	}
+	p.batchMu.Lock()
+	p.batchLeaves = append(p.batchLeaves, leaf)
+	p.batchMu.Unlock()
+	return nil
+}
+
+func (p *GenerateSummariesProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if err := p.Service.(summaryChunkBatcher).FinalizeSummaries(ctx, p.batchRecordID, p.batchInputFilename, p.batchStart, p.batchLeaves, p.batchChunks); err != nil {
+		return fmt.Errorf("(MID_26070604) generate_summaries batch finalize: %w", err)
+	}
+	return nil
 }
 
 func generateSummaryFinishExtraInfoJSON(service any, totalTimeMs int64) string {

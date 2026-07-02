@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -21,6 +23,14 @@ type GenerateTopicsProcessor struct {
 	ProcLogger  DocProcLogger
 	Now         func() time.Time
 	ArtifactDir string
+
+	batchRecordID      int64
+	batchChunks        []Chunk
+	batchDocCtx        string
+	batchInputFilename string
+	batchStart         time.Time
+	batchTopics        []TopicItem
+	batchMu            sync.Mutex
 }
 
 func NewGenerateTopicsProcessor(
@@ -111,6 +121,46 @@ func (p *GenerateTopicsProcessor) logSummary(ctx context.Context, recordID *int6
 	}, "MID-26052857"); err != nil {
 		p.Logger.Warn("failed to write generate_topics log", "entry_type", EntryTypeGenerateTopics, "error", err)
 	}
+}
+
+// --- ChunkBatchProcessor implementation ---
+
+func (p *GenerateTopicsProcessor) InitChunkBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+	if _, ok := p.Service.(topicsChunkBatcher); !ok {
+		return fmt.Errorf("(MID_26070501) generate_topics service does not implement topicsChunkBatcher")
+	}
+	rec, err := p.InputStore.GetInputRecord(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26070502) generate_topics batch: load record %d: %w", recordID, err)
+	}
+	p.batchRecordID = recordID
+	p.batchChunks = chunks
+	p.batchDocCtx = docCtx
+	p.batchInputFilename = resolveChunkingInputFilename(rec, "")
+	p.batchStart = p.Now()
+	p.batchTopics = nil
+	return nil
+}
+
+func (p *GenerateTopicsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	chunk := p.batchChunks[chunkIdx]
+	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
+	topics, err := p.Service.(topicsChunkBatcher).ExtractTopicsForChunk(ctx, p.batchRecordID, chunk, len(p.batchChunks), inputText)
+	if err != nil {
+		p.Logger.Error("generate_topics batch: chunk extraction failed", "record_id", p.batchRecordID, "chunk_idx", chunkIdx, "error", err)
+		return fmt.Errorf("(MID_26070503) %w", err)
+	}
+	p.batchMu.Lock()
+	p.batchTopics = append(p.batchTopics, topics...)
+	p.batchMu.Unlock()
+	return nil
+}
+
+func (p *GenerateTopicsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if err := p.Service.(topicsChunkBatcher).FinalizeTopics(ctx, p.batchRecordID, p.batchInputFilename, p.batchStart, p.batchTopics, p.batchChunks); err != nil {
+		return fmt.Errorf("(MID_26070504) generate_topics batch finalize: %w", err)
+	}
+	return nil
 }
 
 func generateTopicsFinishExtraInfoJSON(service any, totalTimeMs int64) string {

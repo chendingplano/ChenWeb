@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 const (
@@ -39,6 +40,26 @@ type summaryGeneratingHandler interface {
 
 type summaryGeneratingBlockHandler interface {
 	HandleGenerateSummariesBlockInput(ctx context.Context, recordID int64, inputFilename string, buf *BlockBuffer) error
+}
+
+// topicsChunkBatcher allows per-chunk topic extraction by the batch coordinator.
+// Implemented by FixedSizeChunkingService.
+type topicsChunkBatcher interface {
+	// ExtractTopicsForChunk extracts topics for one chunk. inputText must be
+	// canonicalChunkInputText(chunk.Lines, docCtx) for cross-processor cache sharing.
+	ExtractTopicsForChunk(ctx context.Context, recordID int64, chunk Chunk, totalChunks int, inputText string) ([]TopicItem, error)
+	// FinalizeTopics dedupes, writes the artifact, indexes, embeds, and persists status.
+	FinalizeTopics(ctx context.Context, recordID int64, inputFilename string, start time.Time, topics []TopicItem, chunks []Chunk) error
+}
+
+// summaryChunkBatcher allows per-chunk leaf-summary generation by the batch coordinator.
+// Implemented by FixedSizeChunkingService.
+type summaryChunkBatcher interface {
+	// GenerateLeafSummaryForChunk generates one leaf-level summary. inputText must be
+	// canonicalChunkInputText(chunk.Lines, docCtx) for cross-processor cache sharing.
+	GenerateLeafSummaryForChunk(ctx context.Context, recordID int64, chunk Chunk, inputText string) (SummaryItem, error)
+	// FinalizeSummaries builds the summary tree, writes artifacts, indexes, and persists status.
+	FinalizeSummaries(ctx context.Context, recordID int64, inputFilename string, start time.Time, leafSummaries []SummaryItem, chunks []Chunk) error
 }
 
 type docProcModelNamesProvider interface {

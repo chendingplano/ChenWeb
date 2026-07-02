@@ -1334,6 +1334,350 @@ func (s *FixedSizeChunkingService) generateSummary(
 	return result, nil
 }
 
+// generateSummaryWithInputText makes the same LLM call as generateSummary but uses
+// a pre-built inputText instead of building it from lines/children. Used by batch
+// mode (GenerateLeafSummaryForChunk) to supply canonicalChunkInputText for cache sharing.
+func (s *FixedSizeChunkingService) generateSummaryWithInputText(
+	ctx context.Context,
+	recordID int64,
+	level, seqNo int,
+	inputText string,
+) (summaryGenerateResult, error) {
+	startTime := time.Now()
+	callID := uuid.NewString()
+	logSummaryCall := func(procErr error) {
+		procProgress := s.currentSummaryProgress()
+		if procErr == nil && s.summaryProgressTracker != nil {
+			procProgress = s.summaryProgressTracker.advance()
+			if s.summaryProgressTracker.Persist != nil && procProgress != "" {
+				if err := s.summaryProgressTracker.Persist(procProgress); err != nil {
+					s.Logger.Warn("failed to persist batch generate_summaries progress", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
+				}
+			}
+		}
+		if resolveDocProcLogDB(s.ProcLogger.DB) == nil {
+			return
+		}
+		logCtx := ctx
+		if logCtx.Err() != nil {
+			logCtx = context.Background()
+		}
+		extraJSON := docProcJSONOrNil(map[string]any{"level": level, "seqno": seqNo, "batch": true})
+		var errStr *string
+		if procErr != nil {
+			msg := procErr.Error()
+			errStr = &msg
+		}
+		activityName := "generate_summary"
+		cacheHit, cacheMiss := extractorCacheTokens(s.Extractor)
+		if err := s.ProcLogger.LogGenerateSummary(logCtx, DocProcLogRecord{
+			CallReason:            "generate summary",
+			DocProcName:           "generate_summary",
+			ModelNames:            dedupeNonEmpty([]string{s.SummaryModelName}),
+			PromptName:            s.SummaryPromptRef,
+			RecordID:              &recordID,
+			ProcProgress:          nullableStringPtr(procProgress),
+			LLMCallID:             &callID,
+			ActivityName:          &activityName,
+			ExtraInfoJSON:         extraJSON,
+			Errors:                errStr,
+			MSUsed:                int64Ptr(time.Since(startTime).Milliseconds()),
+			PromptCacheHitTokens:  cacheHit,
+			PromptCacheMissTokens: cacheMiss,
+		}, "MID-CWB-GENERATE-SUMMARY-BATCH"); err != nil {
+			s.Logger.Warn("failed to write generate_summary log (batch)", "record_id", recordID, "level", level, "seq", seqNo, "error", err)
+		}
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logSummaryCall(fmt.Errorf("panic: %v", r))
+			panic(r)
+		}
+	}()
+	if s.Extractor == nil {
+		err := errors.New("(MID_26070401) summary extractor is nil (batch)")
+		logSummaryCall(err)
+		return summaryGenerateResult{}, err
+	}
+	s.Logger.Info("summary start (batch)", "record_id", recordID, "model", s.SummaryModelName, "prompt", s.SummaryPromptRef, "level", level, "seq", seqNo)
+	in := newLLMJSONInput(ctx, s.SummaryPromptRef, appendLanguageInstruction(s.SummaryPromptText, inputText), s.SummaryModelName, inputText, "generate_summary", "MID-CWB-GENERATE-SUMMARY-BATCH")
+	var (
+		parsed      map[string]any
+		rawResponse string
+		err         error
+	)
+	if structuredExtractor, ok := s.Extractor.(LLMStructuredJSONExtractor); ok {
+		var result *llmclients.StructuredOutputResult
+		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, summaryExtractionContract())
+		if result != nil {
+			parsed = result.Parsed
+			rawResponse = strings.TrimSpace(result.Raw)
+		}
+	} else {
+		parsed, err = s.Extractor.ExtractJSON(ctx, in)
+	}
+	if err != nil {
+		err = fmt.Errorf("(MID_26070402) generate summary batch for level %d seq %d: %w", level, seqNo, err)
+		logSummaryCall(err)
+		return summaryGenerateResult{}, err
+	}
+	summary := sanitizeTopicText(asString(parsed["summary"]))
+	if summary == "" {
+		summary = sanitizeTopicText(asString(parsed["text"]))
+		s.Logger.Error("failed retrieving batch summary", "model_name", s.SummaryModelName, "prompt_ref", s.SummaryPromptRef, "level", level, "seq", seqNo, "reason", "missing summary and text fields", "raw_response", rawResponse)
+	}
+	if summary == "" {
+		summary = fallbackSummaryText(inputText)
+	}
+	summaryEn := sanitizeTopicText(asString(parsed["summary_en"]))
+	keywords := compactTopicArray(parsed["keywords"])
+	keywordsEn := compactTopicArray(parsed["keywords_en"])
+	rawPath := extractCategoryPathFromLLM(parsed)
+	path, reason := normalizeAndValidateTopicCategoryPath(rawPath, defaultSummaryTreeFallbackTopicType)
+	if reason != "" {
+		if reason != "missing-category" {
+			s.Logger.Warn("(MID_26070403) invalid category path in batch summary; using empty path", "level", level, "seq", seqNo, "reason", reason)
+		}
+		path = nil
+	}
+	categoryPathItems := extractCategoryPathDetailFromLLM(parsed)
+	categoryPathItemsEn := extractCategoryPathDetailEnFromLLM(parsed)
+	if len(categoryPathItemsEn) == 0 && len(categoryPathItems) > 0 && !summaryCategoryPathsLookEnglish(categoryPathItems) {
+		var translateErr error
+		categoryPathItemsEn, translateErr = s.translateSummaryCategoryPaths(ctx, categoryPathItems)
+		if translateErr != nil {
+			err := fmt.Errorf("(MID_26070404) translate batch summary category paths for level %d seq %d: %w", level, seqNo, translateErr)
+			logSummaryCall(err)
+			return summaryGenerateResult{}, err
+		}
+	}
+	var nodes []CategoryPathNode
+	if len(categoryPathItems) > 0 {
+		nodes = categoryPathItems[0].Nodes
+	}
+	s.Logger.Info("summary end (batch)", "record_id", recordID, "level", level, "seq", seqNo, "ms_used", time.Since(startTime).Milliseconds())
+	result := summaryGenerateResult{
+		Summary:             summary,
+		SummaryEn:           summaryEn,
+		Keywords:            keywords,
+		KeywordsEn:          keywordsEn,
+		CategoryPaths:       path,
+		CategoryNodes:       nodes,
+		CategoryPathItems:   categoryPathItems,
+		CategoryPathItemsEn: categoryPathItemsEn,
+	}
+	logSummaryCall(nil)
+	return result, nil
+}
+
+// ExtractTopicsForChunk extracts topics for one chunk using canonical inputText
+// for cross-processor prompt-cache sharing. Implements topicsChunkBatcher.
+func (s *FixedSizeChunkingService) ExtractTopicsForChunk(ctx context.Context, recordID int64, chunk Chunk, totalChunks int, inputText string) ([]TopicItem, error) {
+	callStart := s.Now()
+	in := newLLMJSONInput(withLLMRecordID(ctx, recordID), s.PromptRef, s.PromptText, s.ModelName, inputText, "extract_topics", "MID-CWB-EXTRACT-TOPICS-BATCH")
+	parsed, primaryErr := extractTopicPayload(ctx, s.Extractor, in)
+	usedFallback := false
+	var topics []TopicItem
+	if primaryErr == nil {
+		rawTopics, _ := parsed["topics"].([]any)
+		topics = normalizeExtractedTopics(rawTopics, 1, s.Logger, "chunk_seqno", chunk.SeqNo, recordID)
+	}
+	if (primaryErr != nil || len(topics) == 0) && s.FallbackExtractor != nil {
+		fbIn := newLLMJSONInput(withLLMRecordID(ctx, recordID), s.PromptRef, s.PromptText, s.FallbackModelName, inputText, "extract_topics", "MID-CWB-EXTRACT-TOPICS-BATCH")
+		fbParsed, fbErr := extractTopicPayload(ctx, s.FallbackExtractor, fbIn)
+		if fbErr != nil {
+			s.Logger.Warn("batch topics: primary and fallback both failed", "record_id", recordID, "chunk", chunk.SeqNo, "primary_error", primaryErr, "fallback_error", fbErr)
+			primaryErr = nil
+			topics = nil
+		} else {
+			rawTopics, _ := fbParsed["topics"].([]any)
+			topics = normalizeExtractedTopics(rawTopics, 1, s.Logger, "chunk_seqno", chunk.SeqNo, recordID)
+			primaryErr = nil
+			usedFallback = true
+		}
+	}
+	msUsed := s.Now().Sub(callStart).Milliseconds()
+	chunkProgress := extractTopicsProgressFull(chunk.SeqNo, totalChunks)
+	s.logExtractTopicsChunk(ctx, recordID, chunk, totalChunks, topics, 0, msUsed, chunkProgress, usedFallback)
+	if primaryErr != nil {
+		return nil, fmt.Errorf("(MID_26070301) extract topics batch chunk %d record %d: %w", chunk.SeqNo, recordID, primaryErr)
+	}
+	return topics, nil
+}
+
+// FinalizeTopics dedupes, writes the artifact, indexes, embeds, and persists status.
+// Implements topicsChunkBatcher.
+func (s *FixedSizeChunkingService) FinalizeTopics(ctx context.Context, recordID int64, inputFilename string, start time.Time, topics []TopicItem, chunks []Chunk) error {
+	rec, err := s.Store.GetInputRecord(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26070310) batch finalize topics: load record %d: %w", recordID, err)
+	}
+	artifactBase := buildFixedSizeArtifactBase(rec, inputFilename)
+	topics = dedupeTopicItems(topics)
+	outputFilename, err := writeTopicsFile(s.ChunkDir, rec.ID, artifactBase+".topics", topics)
+	if err != nil {
+		return fmt.Errorf("(MID_26070311) batch write topics file: %w", err)
+	}
+	if err := indexTopicsInTreeDir(s.Logger, s.ArtifactWebDir, rec.ID, topics); err != nil {
+		return fmt.Errorf("(MID_26070312) batch index topics in tree dir: %w", err)
+	}
+	if err := s.embedAndWriteTopics(ctx, rec.ID, artifactBase, topics); err != nil {
+		return fmt.Errorf("(MID_26070313) batch embed and write topics: %w", err)
+	}
+	if err := ReplaceTopicArtifactsForRecord(ctx, rec.ID, topics, s.Logger); err != nil {
+		return fmt.Errorf("(MID_26070314) batch replace topic artifacts: %w", err)
+	}
+	if err := ReindexTopicSearchForRecord(ctx, rec.ID, s.Logger); err != nil {
+		s.Logger.Warn("batch reindex topic search registry failed", "record_id", rec.ID, "error", err)
+	}
+	if connErr := WriteLineOverlapConnectionsFromRegistry(ctx, rec.ID, searchArtifactTopic, RelationHasTopic, chunksToBlocks(chunks)); connErr != nil {
+		s.Logger.Warn("batch write has-topic connections failed", "record_id", rec.ID, "error", connErr)
+	}
+	if err := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+		return appendTopicStatus(current, topicStatusParams{
+			RecordID:       rec.ID,
+			FileType:       detectChunkStatusFileType(rec, inputFilename),
+			InputFilename:  inputFilename,
+			OutputFilename: outputFilename,
+			NumTopics:      len(topics),
+			Start:          start,
+			DurationMs:     time.Since(start).Milliseconds(),
+			ProcErr:        nil,
+			Progress:       extractTopicsProgressFull(len(chunks), len(chunks)),
+		})
+	}); err != nil {
+		return fmt.Errorf("(MID_26070315) batch persist topic status: %w", err)
+	}
+	s.Logger.Info("batch topic finalize completed", "record_id", rec.ID, "num_chunks", len(chunks), "num_topics", len(topics))
+	s.setDocProcSummaryExtraInfo(map[string]any{"total_chunks": len(chunks), "topics_generated": len(topics)})
+	return nil
+}
+
+// GenerateLeafSummaryForChunk generates one leaf-level summary using canonical inputText
+// for cross-processor prompt-cache sharing. Implements summaryChunkBatcher.
+func (s *FixedSizeChunkingService) GenerateLeafSummaryForChunk(ctx context.Context, recordID int64, chunk Chunk, inputText string) (SummaryItem, error) {
+	res, err := s.generateSummaryWithInputText(ctx, recordID, 0, chunk.SeqNo, inputText)
+	if err != nil {
+		return SummaryItem{}, fmt.Errorf("(MID_26070410) generate leaf summary batch chunk %d record %d: %w", chunk.SeqNo, recordID, err)
+	}
+	return SummaryItem{
+		SummaryID:           buildSummaryID(recordID, 0, chunk.SeqNo),
+		RecordID:            recordID,
+		Level:               0,
+		SeqNo:               chunk.SeqNo,
+		Lines:               summaryInputLineRanges(chunk.Lines),
+		Keywords:            res.Keywords,
+		KeywordsEn:          res.KeywordsEn,
+		CategoryPaths:       res.CategoryPaths,
+		CategoryNodes:       res.CategoryNodes,
+		CategoryPathItems:   res.CategoryPathItems,
+		CategoryPathItemsEn: res.CategoryPathItemsEn,
+		Summary:             sanitizeTopicText(res.Summary),
+		SummaryEn:           sanitizeTopicText(res.SummaryEn),
+	}, nil
+}
+
+// FinalizeSummaries builds the summary tree, writes artifacts, indexes, and persists status.
+// Implements summaryChunkBatcher.
+func (s *FixedSizeChunkingService) FinalizeSummaries(ctx context.Context, recordID int64, inputFilename string, start time.Time, leafSummaries []SummaryItem, chunks []Chunk) error {
+	rec, err := s.Store.GetInputRecord(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("(MID_26070420) batch finalize summaries: load record %d: %w", recordID, err)
+	}
+	if err := deleteSummaryFiles(s.ChunkDir, rec.ID); err != nil {
+		return fmt.Errorf("(MID_26070421) batch delete old summary files: %w", err)
+	}
+	for i := range leafSummaries {
+		leafSummaries[i].Language = rec.SourceLanguage
+	}
+	for _, item := range leafSummaries {
+		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
+			return fmt.Errorf("(MID_26070422) batch write leaf summary file: %w", err)
+		}
+	}
+	allSummaries, _, err := buildSummaryTree(rec.ID, leafSummaries, s.SummaryGroupSize, s.GenerateSummaryMaxTasks, func(level int, seqNo int, children []SummaryItem) (summaryGenerateResult, error) {
+		if isCtxStopped(ctx) {
+			return summaryGenerateResult{}, ErrPipelineStopped
+		}
+		return s.generateSummary(ctx, rec.ID, level, seqNo, nil, children)
+	})
+	if err != nil {
+		if isCtxStopped(ctx) {
+			return ErrPipelineStopped
+		}
+		return fmt.Errorf("(MID_26070423) batch build summary tree for record %d: %w", recordID, err)
+	}
+	for i := range allSummaries {
+		allSummaries[i].Language = rec.SourceLanguage
+	}
+	for _, item := range allSummaries {
+		if item.Level == 0 {
+			continue
+		}
+		if _, err := writeSummaryFile(s.ChunkDir, rec.ID, item); err != nil {
+			return fmt.Errorf("(MID_26070424) batch write non-leaf summary file: %w", err)
+		}
+	}
+	if err := os.MkdirAll(s.ArtifactWebDir, 0o755); err != nil {
+		return fmt.Errorf("(MID_26070425) batch create artifact web dir: %w", err)
+	}
+	if err := removeSummaryTreeRecord(s.ArtifactWebDir, rec.ID); err != nil {
+		return fmt.Errorf("(MID_26070426) batch remove old summary tree entries: %w", err)
+	}
+	for _, item := range allSummaries {
+		if err := writeSummaryTreeEntriesForItem(s.Logger, s.ArtifactWebDir, item); err != nil {
+			return fmt.Errorf("(MID_26070427) batch write summary tree entry: %w", err)
+		}
+	}
+	var fixErr error
+	allSummaries, fixErr = s.fixSummarySourceLanguage(ctx, rec.SourceLanguage, allSummaries)
+	if fixErr != nil {
+		return fmt.Errorf("(MID_26070428) batch fix summary source language: %w", fixErr)
+	}
+	if err := validateSummaryArtifacts(rec.ID, rec.SourceLanguage, allSummaries, s.ChunkDir, s.ArtifactWebDir); err != nil {
+		return fmt.Errorf("(MID_26070429) batch summary sanity check failed: %w", err)
+	}
+	if err := s.embedAndWriteSummaries(ctx, rec.ID, allSummaries); err != nil {
+		return fmt.Errorf("(MID_26070430) batch embed and write summaries: %w", err)
+	}
+	if err := ReplaceSummaryArtifactsForRecord(ctx, rec.ID, allSummaries, s.Logger); err != nil {
+		return fmt.Errorf("(MID_26070431) batch replace summary artifacts: %w", err)
+	}
+	if err := ReindexSummarySearchForRecord(ctx, rec.ID, s.Logger); err != nil {
+		s.Logger.Warn("batch reindex summary search registry failed", "record_id", rec.ID, "error", err)
+	}
+	level0SummaryRefs := make([]ArtifactRef, 0, len(allSummaries))
+	for _, item := range allSummaries {
+		if item.Level != 0 {
+			continue
+		}
+		level0SummaryRefs = append(level0SummaryRefs, ArtifactRef{
+			Type:  searchArtifactSummary,
+			ID:    kbsearch.BuildArtifactID(rec.ID, searchArtifactSummary, strconv.Itoa(item.SeqNo)),
+			Spans: item.Lines,
+		})
+	}
+	if connErr := WriteLineOverlapConnectionsForRefs(ctx, rec.ID, searchArtifactSummary, RelationHasSummary, chunksToBlocks(chunks), level0SummaryRefs); connErr != nil {
+		s.Logger.Warn("batch write has-summary connections failed", "record_id", rec.ID, "error", connErr)
+	}
+	if err := s.updateInputStatusLocked(ctx, rec.ID, nil, func(current string) (string, error) {
+		return appendSummariesStatus(current, summaryStatusParams{
+			RecordID:      rec.ID,
+			FileType:      detectChunkStatusFileType(rec, inputFilename),
+			InputFilename: inputFilename,
+			Start:         start,
+			DurationMs:    time.Since(start).Milliseconds(),
+			ProcStatus:    "success",
+			ProcErr:       nil,
+		})
+	}); err != nil {
+		return fmt.Errorf("(MID_26070432) batch persist summary status: %w", err)
+	}
+	s.Logger.Info("batch summary finalize completed", "record_id", rec.ID, "num_chunks", len(chunks), "num_summaries", len(allSummaries))
+	s.setDocProcSummaryExtraInfo(map[string]any{"total_chunks": len(chunks), "num_summaries": len(allSummaries), "summaries_generated": len(allSummaries)})
+	return nil
+}
+
 func summaryLogLineSpans(lines []MarkedLine, children []SummaryItem) []string {
 	if len(lines) > 0 {
 		return summaryInputLineRanges(lines)
