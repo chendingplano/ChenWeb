@@ -2320,12 +2320,3 @@ func (p *EntityRelationProcessor) finalizeEntityBatch(ctx context.Context) error
 	)
 	return nil
 }
-
-// parseLineFileGeneratedEventFromRecord creates a minimal LineFileGeneratedEvent
-// from a DocMetadataInputRecord for input path resolution.
-func parseLineFileGeneratedEventFromRecord(rec DocMetadataInputRecord) LineFileGeneratedEvent {
-	return LineFileGeneratedEvent{
-		RecordID: rec.ID,
-		Status:   "completed",
-	}
-}
