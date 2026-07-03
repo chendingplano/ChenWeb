@@ -760,13 +760,14 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		// See ADR 2026062701 §Phase 2.3.
 		inputText := canonicalChunkInputText(origChunk.Lines, docCtx)
 		taskPrompt := metricCandidateTask(p.MentionPromptText)
-		chunkStart := time.Now()
-		p.Logger.Info("extract metric start",
-			"record_id", record_id,
-			"num_lines", len(origChunk.Lines),
-			"chunk", i,
-		)
 		callStart := p.Now()
+		p.Logger.Info("extract metrics start",
+			"record_id", record_id,
+			"chunk", i,
+			"total", len(chunks),
+			"model name", p.MentionModelName,
+			"prompt name", p.MentionPromptRef,
+		)
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), block.Index)
 		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(concCtx, inputText, taskPrompt)
 		progress := tracker.advance()
@@ -803,14 +804,13 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 			}
 		}
 		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
-		p.Logger.Info("extract metric end  ",
+		p.Logger.Info("extract metrics end  ",
 			"record_id", record_id,
-			"extracted", len(result.mentions),
-			"language", lang,
+			"extracted metrics", len(result.mentions),
+			"chunk", i,
 			"cache_hit", cacheHit,
 			"cache_miss", cacheMiss,
-			"chunk", i,
-			"ms_used", time.Since(chunkStart).Milliseconds(),
+			"ms_used", time.Since(callStart).Milliseconds(),
 		)
 
 		return result, nil

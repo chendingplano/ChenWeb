@@ -2065,6 +2065,12 @@ func (p *InventoryItemsProcessor) ProcessChunk(ctx context.Context, chunkIdx int
 
 	chunk := p.batchChunks[chunkIdx]
 	localStart := p.Now()
+
+	p.Logger.Info("extract inventory items start",
+		"record_id", p.batchRecordID,
+		"chunk", chunkIdx,
+	)
+
 	inputText := canonicalChunkInputText(chunk.Lines, p.batchDocCtx)
 	callID := fmt.Sprintf("%d_batch_c%d", p.batchRecordID, chunkIdx)
 	payload, modelName, err := p.extractInventoryItemsWithFallback(ctx, inputText)
@@ -2090,7 +2096,7 @@ func (p *InventoryItemsProcessor) ProcessChunk(ctx context.Context, chunkIdx int
 	}
 
 	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
-	p.Logger.Info("extract inventory items end (batch)",
+	p.Logger.Info("extract inventory items end  ",
 		"record_id", p.batchRecordID,
 		"chunk", chunkIdx,
 		"extracted", len(chunkItems),
