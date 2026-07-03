@@ -140,6 +140,22 @@ func TestControlService_UsesOperationOrder(t *testing.T) {
 	}
 }
 
+func TestExpandProcessorDependenciesAddsChunkingForChunkConsumers(t *testing.T) {
+	got := expandProcessorDependencies([]string{"extract_metrics", "extract_provisions"})
+	want := []string{"static_analyzer", "chunking", "extract_metrics", "extract_provisions"}
+	if !equalStrings(got, want) {
+		t.Fatalf("expanded=%v, want %v", got, want)
+	}
+}
+
+func TestExpandProcessorDependenciesPreservesExplicitChunkingOrder(t *testing.T) {
+	got := expandProcessorDependencies([]string{"extract_metrics", "chunking"})
+	want := []string{"extract_metrics", "static_analyzer", "chunking"}
+	if !equalStrings(got, want) {
+		t.Fatalf("expanded=%v, want %v", got, want)
+	}
+}
+
 func TestControlService_DefaultsToConfiguredOrder(t *testing.T) {
 	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	got := make([]string, 0, 3)

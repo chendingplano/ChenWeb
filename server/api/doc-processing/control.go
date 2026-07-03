@@ -1364,16 +1364,44 @@ func expandProcessorDependencies(ops []string) []string {
 		expanded = append(expanded, key)
 	}
 
+	hasRequestedChunking := false
+	for _, raw := range ops {
+		if canonicalOperationName(raw) == "chunking" {
+			hasRequestedChunking = true
+			break
+		}
+	}
 	for _, raw := range ops {
 		op := canonicalOperationName(raw)
 		switch op {
 		case "chunking":
 			appendOnce("static_analyzer")
-		case "generate_summaries", "generate_topics":
-			appendOnce("static_analyzer")
-			appendOnce("chunking")
+		default:
+			if !hasRequestedChunking && requiresChunkingDependency(op) {
+				appendOnce("static_analyzer")
+				appendOnce("chunking")
+			}
 		}
 		appendOnce(op)
 	}
 	return expanded
+}
+
+func requiresChunkingDependency(op string) bool {
+	switch canonicalOperationName(op) {
+	case "generate_summaries",
+		"generate_topics",
+		"generate_scene_blocks",
+		"extract_entity",
+		"extract_relation",
+		"extract_entity_relation",
+		"extract_inventory_items",
+		"extract_metrics",
+		"extract_provisions",
+		"extract_semantic_projections",
+		"extract_structured_knowledge":
+		return true
+	default:
+		return false
+	}
 }

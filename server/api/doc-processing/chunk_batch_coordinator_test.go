@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,6 +21,23 @@ func (n *nonBatchProc) HandleEvent(context.Context, []byte) error {
 	return nil
 }
 
+type chunkBufferingPhaseAProc struct {
+	name   string
+	calls  *[]string
+	chunks []Chunk
+}
+
+func (p *chunkBufferingPhaseAProc) Name() string { return p.name }
+func (p *chunkBufferingPhaseAProc) HandleEvent(ctx context.Context, _ []byte) error {
+	if p.calls != nil {
+		*p.calls = append(*p.calls, p.name)
+	}
+	if canonicalOperationName(p.name) == "chunking" {
+		storeChunksInContext(ctx, p.chunks)
+	}
+	return nil
+}
+
 func TestPartitionBatchProcessors(t *testing.T) {
 	batch := &fakeBatchProc{name: "extract_inventory_items"}
 	legacy := &nonBatchProc{name: "generate_topics"}
@@ -29,6 +47,39 @@ func TestPartitionBatchProcessors(t *testing.T) {
 	}
 	if len(got.unsupported) != 1 || got.unsupported[0].Name() != "generate_topics" {
 		t.Fatalf("unsupported partition wrong: %+v", got.unsupported)
+	}
+}
+
+func TestRunPhaseBProcessorsRunsPhaseABeforeChunkBatch(t *testing.T) {
+	t.Setenv("LLM_CALL_STAGGER", "0")
+	dir := t.TempDir()
+	lineFile := filepath.Join(dir, "source_opendata.txt")
+	writeLineFile(t, lineFile)
+
+	calls := make([]string, 0, 2)
+	chunks := []Chunk{{SeqNo: 1}}
+	svc := &ControlService{
+		InputStore: &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+			ID:              244,
+			ParserName:      "opendata",
+			ResultFilename:  filepath.Join(dir, "result.json"),
+			StagingFilename: filepath.Join(dir, "source.pdf"),
+			StatusRaw:       "[]",
+		}},
+		Processors: []Processor{
+			&chunkBufferingPhaseAProc{name: "static_analyzer", calls: &calls},
+			&chunkBufferingPhaseAProc{name: "chunking", calls: &calls, chunks: chunks},
+			&fakeBatchProc{name: "extract_inventory_items"},
+			&fakeBatchProc{name: "extract_provisions"},
+		},
+	}
+
+	err := svc.handleEvent(context.Background(), []byte(`{"record_id":"244"}`))
+	if err != nil {
+		t.Fatalf("handleEvent returned error: %v", err)
+	}
+	if !equalStrings(calls, []string{"static_analyzer", "chunking"}) {
+		t.Fatalf("phase A calls=%v, want [static_analyzer chunking]", calls)
 	}
 }
 
@@ -43,7 +94,7 @@ type recordingProc struct {
 	maxConc    int32
 }
 
-func (r *recordingProc) Name() string { return r.name }
+func (r *recordingProc) Name() string                                                 { return r.name }
 func (r *recordingProc) InitChunkBatch(context.Context, int64, []Chunk, string) error { return nil }
 func (r *recordingProc) FinalizeChunkBatch(context.Context) error                     { return nil }
 func (r *recordingProc) ProcessChunk(ctx context.Context, idx int) error {
