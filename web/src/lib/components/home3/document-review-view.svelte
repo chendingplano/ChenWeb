@@ -380,7 +380,7 @@
         </p>
 
         <!-- DR15: live monitor of all in-flight review jobs -->
-        <DocReviewMonitor {darkMode} onView={(id) => { viewingRequestId = id; }} />
+        <DocReviewMonitor {darkMode} onView={(id) => { viewingRequestId = id; }} onStop={() => { requestsRefreshKey += 1; }} />
 
         {#if submitBanner}
             <div style="margin-bottom: 1.25rem; padding: 0.75rem 1rem; background: {accentTint}; border: 1px solid {borderColor}; border-radius: 8px; color: {accent}; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between;">

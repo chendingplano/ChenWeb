@@ -685,7 +685,8 @@ func (c *DocReviewController) ListActiveJobs(ctx context.Context) ([]ActiveJob, 
 		    LIMIT 1
 		) lr ON true
 		LEFT JOIN kb.inputs i ON i.id = r.input_record_id
-		WHERE EXISTS (
+		WHERE r.status NOT IN ('stopped', 'completed', 'failed')
+		AND EXISTS (
 		    SELECT 1 FROM kb.doc_review_status s
 		    WHERE s.request_id = r.id AND s.status NOT IN ('success', 'failed')
 		)

@@ -14,10 +14,12 @@
         darkMode = true,
         pollMs = 3000,
         onView,
+        onStop,
     }: {
         darkMode?: boolean;
         pollMs?: number;
         onView?: (requestId: number) => void;
+        onStop?: () => void;
     } = $props();
 
     // Design tokens (match doc-processor dashboard)
@@ -102,6 +104,7 @@
         try {
             await stopRequest(requestId);
             await poll();
+            onStop?.();
         } catch (e: any) {
             loadError = e?.message || 'Failed to stop review';
         } finally {
