@@ -126,16 +126,31 @@ INSERT INTO kb.object_nodes (
 )
 ON CONFLICT (object_id) DO UPDATE SET
 	normalized_names = (
-		SELECT jsonb_agg(DISTINCT value)
-		FROM jsonb_array_elements_text(kb.object_nodes.normalized_names || EXCLUDED.normalized_names) AS t(value)
+		COALESCE(
+			(
+				SELECT jsonb_agg(DISTINCT value)
+				FROM jsonb_array_elements_text(kb.object_nodes.normalized_names || EXCLUDED.normalized_names) AS t(value)
+			),
+			'[]'::jsonb
+		)
 	),
 	aliases = (
-		SELECT jsonb_agg(DISTINCT value)
-		FROM jsonb_array_elements_text(kb.object_nodes.aliases || EXCLUDED.aliases) AS t(value)
+		COALESCE(
+			(
+				SELECT jsonb_agg(DISTINCT value)
+				FROM jsonb_array_elements_text(kb.object_nodes.aliases || EXCLUDED.aliases) AS t(value)
+			),
+			'[]'::jsonb
+		)
 	),
 	acronyms = (
-		SELECT jsonb_agg(DISTINCT value)
-		FROM jsonb_array_elements_text(kb.object_nodes.acronyms || EXCLUDED.acronyms) AS t(value)
+		COALESCE(
+			(
+				SELECT jsonb_agg(DISTINCT value)
+				FROM jsonb_array_elements_text(kb.object_nodes.acronyms || EXCLUDED.acronyms) AS t(value)
+			),
+			'[]'::jsonb
+		)
 	),
 	search_document = EXCLUDED.search_document
 RETURNING object_id`,
