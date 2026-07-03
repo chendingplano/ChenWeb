@@ -401,10 +401,10 @@ INSERT INTO kb.artifact_objects (
 	$15,$16,$17::jsonb,$18,$19,$20,$21::jsonb
 )`
 	for _, obj := range objects {
-		aliases, _ := json.Marshal(obj.Aliases)
-		acronyms, _ := json.Marshal(obj.Acronyms)
-		normalized, _ := json.Marshal(obj.NormalizedNames)
-		spans, _ := json.Marshal(obj.SourceLineSpans)
+		aliases, _ := json.Marshal(orEmptySlice(obj.Aliases))
+		acronyms, _ := json.Marshal(orEmptySlice(obj.Acronyms))
+		normalized, _ := json.Marshal(orEmptySlice(obj.NormalizedNames))
+		spans, _ := json.Marshal(orEmptySlice(obj.SourceLineSpans))
 		ext, _ := json.Marshal(obj.ExtInfo)
 		sourceRecordID := obj.SourceRecordID
 		if sourceRecordID <= 0 {

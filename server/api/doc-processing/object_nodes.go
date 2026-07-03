@@ -112,9 +112,9 @@ func (s ObjectNodeSQLStore) CreateNode(ctx context.Context, obj ArtifactObject) 
 		ExtInfo:           map[string]any{"source": "object_reconciliation"},
 		CanonicalObjectID: "",
 	}
-	aliases, _ := json.Marshal(node.Aliases)
-	acronyms, _ := json.Marshal(node.Acronyms)
-	names, _ := json.Marshal(node.NormalizedNames)
+	aliases, _ := json.Marshal(orEmptySlice(node.Aliases))
+	acronyms, _ := json.Marshal(orEmptySlice(node.Acronyms))
+	names, _ := json.Marshal(orEmptySlice(node.NormalizedNames))
 	ext, _ := json.Marshal(node.ExtInfo)
 	err := s.DB.QueryRowContext(ctx, `
 INSERT INTO kb.object_nodes (

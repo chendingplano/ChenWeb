@@ -4,6 +4,8 @@ import (
 	"context"
 	"reflect"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestNormalizeArtifactObjectsSynthesizesMetricSubject(t *testing.T) {
@@ -33,6 +35,62 @@ func TestNormalizeArtifactObjectsSynthesizesMetricSubject(t *testing.T) {
 	}
 	if !containsString(obj.NormalizedNames, "lpg storage tank") {
 		t.Fatalf("normalized names = %v, want lpg storage tank", obj.NormalizedNames)
+	}
+}
+
+func TestArtifactObjectStoreStoresEmptyArraysForNilSlices(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	store := ArtifactObjectSQLStore{DB: db}
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM kb.artifact_objects").
+		WithArgs(int64(1), "inventory_item").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO kb.artifact_objects").
+		WithArgs(
+			int64(1),
+			int64(1),
+			"inventory_item",
+			"inv_1",
+			nil,
+			"pump",
+			nil,
+			nil,
+			nil,
+			"equipment",
+			"self",
+			"[]",
+			"[]",
+			"[]",
+			nil,
+			nil,
+			"[]",
+			float64(0),
+			ObjectReconcilePending,
+			float64(0),
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	err = store.ReplaceObjectsForRecord(context.Background(), 1, "inventory_item", []ArtifactObject{{
+		InputRecordID: 1,
+		ArtifactType:  "inventory_item",
+		ArtifactID:    "inv_1",
+		ObjectName:    "pump",
+		ObjectType:    "equipment",
+		ObjectRole:    "self",
+		ExtInfo:       map[string]any{},
+	}})
+	if err != nil {
+		t.Fatalf("ReplaceObjectsForRecord: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
 	}
 }
 
