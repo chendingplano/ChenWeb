@@ -17,7 +17,9 @@ import (
 )
 
 // ReviewFinding is a single issue or observation from a document review pass.
-// Mirrors kb.doc_review_findings columns.
+// Mirrors kb.doc_review_findings columns; the related-artifact cross-reference
+// (ADR 2026070201 AR5 §6) is persisted in the metadata JSONB so the report
+// generator and GUI can link cross-document findings without parsing prose.
 type ReviewFinding struct {
 	Pass        string  `json:"pass"`
 	Aspect      string  `json:"aspect"`
@@ -29,6 +31,12 @@ type ReviewFinding struct {
 	Location    string  `json:"location,omitempty"`
 	Suggestion  string  `json:"suggestion,omitempty"`
 	Confidence  float64 `json:"confidence"`
+
+	// RelatedArtifactID / RelatedRecordID identify the matched cross-document
+	// artifact a finding is about (metric_id / prov_id / inventory_item_id and
+	// its kb.inputs record). Zero values mean "no cross-reference".
+	RelatedArtifactID string `json:"related_artifact_id,omitempty"`
+	RelatedRecordID   int64  `json:"related_record_id,omitempty"`
 }
 
 // ReviewStrategy selects how a reviewer processes a document.
@@ -645,6 +653,23 @@ type ReviewProcessor struct {
 
 	// InventoryItemsClient is the LLM client for the cross-document inventory-items reviewer.
 	InventoryItemsClient LLMJSONExtractor
+
+	// Tool-use budgets and chat clients for the artifact reviewers
+	// (ADR 2026070201 AR4). The entities reviewer stays one-shot (out of scope).
+	MetricsMaxToolTurns  int
+	MetricsMaxToolTokens int
+	MetricsTools         []string
+	MetricsToolClient    LLMChatClient
+
+	ProvisionsMaxToolTurns  int
+	ProvisionsMaxToolTokens int
+	ProvisionsTools         []string
+	ProvisionsToolClient    LLMChatClient
+
+	InventoryItemsMaxToolTurns  int
+	InventoryItemsMaxToolTokens int
+	InventoryItemsTools         []string
+	InventoryItemsToolClient    LLMChatClient
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -806,6 +831,15 @@ func NewReviewProcessor(
 	provisionsClient, provisionsModel, provisionsPrompt, provisionsRef, _ := resolveReviewerRuntime(logger, "provisions", "P5")
 	entitiesClient, entitiesModel, entitiesPrompt, entitiesRef, _ := resolveReviewerRuntime(logger, "entities", "P5")
 	inventoryItemsClient, inventoryItemsModel, inventoryItemsPrompt, inventoryItemsRef, _ := resolveReviewerRuntime(logger, "inventory_items", "P5")
+
+	// Artifact reviewers gain tool-use (ADR 2026070201 AR4): max_tool_turns > 0
+	// in doc-review.local.toml enables the DR10b loop with the listed tools.
+	metricsMaxTurns, metricsMaxTokens, metricsToolList := resolveReviewerBudget("metrics", "P5")
+	provisionsMaxTurns, provisionsMaxTokens, provisionsToolList := resolveReviewerBudget("provisions", "P5")
+	inventoryItemsMaxTurns, inventoryItemsMaxTokens, inventoryItemsToolList := resolveReviewerBudget("inventory_items", "P5")
+	metricsToolClient := resolveReviewerToolClient(logger, "metrics", "P5", metricsMaxTurns)
+	provisionsToolClient := resolveReviewerToolClient(logger, "provisions", "P5", provisionsMaxTurns)
+	inventoryItemsToolClient := resolveReviewerToolClient(logger, "inventory_items", "P5", inventoryItemsMaxTurns)
 
 	technicalAccuracyMaxTurns, technicalAccuracyMaxTokens, technicalAccuracyToolList := resolveReviewerBudget("technical_accuracy", "P5")
 	assumptionsMaxTurns, assumptionsMaxTokens, assumptionsToolList := resolveReviewerBudget("assumptions", "P5")
@@ -1101,25 +1135,37 @@ func NewReviewProcessor(
 		ErrorHandlingToolClient:        errorHandlingToolClient,
 		LimitationsToolClient:          limitationsToolClient,
 
-		MetricsClient:     metricsClient,
-		MetricsModelName:  metricsModel,
-		MetricsPromptRef:  metricsRef,
-		MetricsPromptText: metricsPrompt,
+		MetricsClient:        metricsClient,
+		MetricsModelName:     metricsModel,
+		MetricsPromptRef:     metricsRef,
+		MetricsPromptText:    metricsPrompt,
+		MetricsMaxToolTurns:  metricsMaxTurns,
+		MetricsMaxToolTokens: metricsMaxTokens,
+		MetricsTools:         metricsToolList,
+		MetricsToolClient:    metricsToolClient,
 
-		ProvisionsClient:     provisionsClient,
-		ProvisionsModelName:  provisionsModel,
-		ProvisionsPromptRef:  provisionsRef,
-		ProvisionsPromptText: provisionsPrompt,
+		ProvisionsClient:        provisionsClient,
+		ProvisionsModelName:     provisionsModel,
+		ProvisionsPromptRef:     provisionsRef,
+		ProvisionsPromptText:    provisionsPrompt,
+		ProvisionsMaxToolTurns:  provisionsMaxTurns,
+		ProvisionsMaxToolTokens: provisionsMaxTokens,
+		ProvisionsTools:         provisionsToolList,
+		ProvisionsToolClient:    provisionsToolClient,
 
 		EntitiesClient:     entitiesClient,
 		EntitiesModelName:  entitiesModel,
 		EntitiesPromptRef:  entitiesRef,
 		EntitiesPromptText: entitiesPrompt,
 
-		InventoryItemsClient:     inventoryItemsClient,
-		InventoryItemsModelName:  inventoryItemsModel,
-		InventoryItemsPromptRef:  inventoryItemsRef,
-		InventoryItemsPromptText: inventoryItemsPrompt,
+		InventoryItemsClient:        inventoryItemsClient,
+		InventoryItemsModelName:     inventoryItemsModel,
+		InventoryItemsPromptRef:     inventoryItemsRef,
+		InventoryItemsPromptText:    inventoryItemsPrompt,
+		InventoryItemsMaxToolTurns:  inventoryItemsMaxTurns,
+		InventoryItemsMaxToolTokens: inventoryItemsMaxTokens,
+		InventoryItemsTools:         inventoryItemsToolList,
+		InventoryItemsToolClient:    inventoryItemsToolClient,
 	}
 
 }
@@ -1884,32 +1930,44 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 
 	// metrics — cross-document metric consistency (ADR 2026063002). Input="artifact"
 	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler).
+	//
+	// NOTE (ADR 2026070201 AR1): a non-empty ReviewerConfig.Input set here takes
+	// precedence over the `input` field in doc-review.local.toml — the scheduler
+	// only consults the TOML when cfg.Input is empty. Keep the two in agreement.
 	if p.MetricsClient != nil && p.MetricsPromptText != "" && p.MetricsModelName != "" {
 		runners = append(runners, reviewRunner{
 			reviewer: &metricsReviewer{
-				client:     p.MetricsClient,
-				logger:     p.Logger,
-				db:         ApiTypes.ProjectDBHandle,
-				maxTasks:   p.MaxConcurrent,
-				maxMatches: envInt("METRIC_REVIEW_MAX_MATCHES", 20, 1),
-				maxMetrics: envInt("METRIC_REVIEW_MAX_METRICS", 0, 0),
+				client:       p.MetricsClient,
+				toolClient:   p.MetricsToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				db:           ApiTypes.ProjectDBHandle,
+				maxTasks:     p.MaxConcurrent,
+				maxMatches:   envInt("METRIC_REVIEW_MAX_MATCHES", 20, 1),
+				maxMetrics:   envInt("METRIC_REVIEW_MAX_METRICS", 0, 0),
 			},
 			cfg: ReviewerConfig{
-				Enabled:    true,
-				Input:      "artifact",
-				ModelName:  p.MetricsModelName,
-				PromptText: p.MetricsPromptText,
-				PromptRef:  p.MetricsPromptRef,
+				Enabled:       true,
+				Input:         "artifact",
+				ModelName:     p.MetricsModelName,
+				PromptText:    p.MetricsPromptText,
+				PromptRef:     p.MetricsPromptRef,
+				MaxToolTurns:  p.MetricsMaxToolTurns,
+				MaxToolTokens: p.MetricsMaxToolTokens,
+				Tools:         p.MetricsTools,
 			},
 		})
 	}
 
 	// provisions — cross-document provision consistency (ADR 2026063003). Input="artifact"
-	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler).
+	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler);
+	// see the AR1 precedence note on the metrics reviewer above.
 	if p.ProvisionsClient != nil && p.ProvisionsPromptText != "" && p.ProvisionsModelName != "" {
 		runners = append(runners, reviewRunner{
 			reviewer: &provisionsReviewer{
 				client:       p.ProvisionsClient,
+				toolClient:   p.ProvisionsToolClient,
+				toolRegistry: defaultToolRegistry(),
 				logger:       p.Logger,
 				db:           ApiTypes.ProjectDBHandle,
 				maxTasks:     p.MaxConcurrent,
@@ -1917,11 +1975,14 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				maxProvision: envInt("PROVISION_REVIEW_MAX_PROVISIONS", 0, 0),
 			},
 			cfg: ReviewerConfig{
-				Enabled:    true,
-				Input:      "artifact",
-				ModelName:  p.ProvisionsModelName,
-				PromptText: p.ProvisionsPromptText,
-				PromptRef:  p.ProvisionsPromptRef,
+				Enabled:       true,
+				Input:         "artifact",
+				ModelName:     p.ProvisionsModelName,
+				PromptText:    p.ProvisionsPromptText,
+				PromptRef:     p.ProvisionsPromptRef,
+				MaxToolTurns:  p.ProvisionsMaxToolTurns,
+				MaxToolTokens: p.ProvisionsMaxToolTokens,
+				Tools:         p.ProvisionsTools,
 			},
 		})
 	}
@@ -1949,23 +2010,29 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 	}
 
 	// inventory_items — cross-document inventory-item consistency (ADR 2026063005).
-	// Input="artifact" routes it through runReviewersLegacy -> ReviewDocument.
+	// Input="artifact" routes it through runReviewersLegacy -> ReviewDocument;
+	// see the AR1 precedence note on the metrics reviewer above.
 	if p.InventoryItemsClient != nil && p.InventoryItemsPromptText != "" && p.InventoryItemsModelName != "" {
 		runners = append(runners, reviewRunner{
 			reviewer: &inventoryItemsReviewer{
-				client:     p.InventoryItemsClient,
-				logger:     p.Logger,
-				db:         ApiTypes.ProjectDBHandle,
-				maxTasks:   p.MaxConcurrent,
-				maxMatches: envInt("INVENTORY_REVIEW_MAX_MATCHES", 20, 1),
-				maxItems:   envInt("INVENTORY_REVIEW_MAX_ITEMS", 0, 0),
+				client:       p.InventoryItemsClient,
+				toolClient:   p.InventoryItemsToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				db:           ApiTypes.ProjectDBHandle,
+				maxTasks:     p.MaxConcurrent,
+				maxMatches:   envInt("INVENTORY_REVIEW_MAX_MATCHES", 20, 1),
+				maxItems:     envInt("INVENTORY_REVIEW_MAX_ITEMS", 0, 0),
 			},
 			cfg: ReviewerConfig{
-				Enabled:    true,
-				Input:      "artifact",
-				ModelName:  p.InventoryItemsModelName,
-				PromptText: p.InventoryItemsPromptText,
-				PromptRef:  p.InventoryItemsPromptRef,
+				Enabled:       true,
+				Input:         "artifact",
+				ModelName:     p.InventoryItemsModelName,
+				PromptText:    p.InventoryItemsPromptText,
+				PromptRef:     p.InventoryItemsPromptRef,
+				MaxToolTurns:  p.InventoryItemsMaxToolTurns,
+				MaxToolTokens: p.InventoryItemsMaxToolTokens,
+				Tools:         p.InventoryItemsTools,
 			},
 		})
 	}
@@ -2023,15 +2090,17 @@ func normalizeFindingsJSON(payload map[string]any) []ReviewFinding {
 			continue
 		}
 		out = append(out, ReviewFinding{
-			Aspect:      strings.TrimSpace(asString(m["aspect"])),
-			Severity:    strings.TrimSpace(asString(m["severity"])),
-			FindingType: strings.TrimSpace(asString(m["finding_type"])),
-			Title:       strings.TrimSpace(asString(m["title"])),
-			Description: strings.TrimSpace(asString(m["description"])),
-			Evidence:    strings.TrimSpace(asString(m["evidence"])),
-			Location:    strings.TrimSpace(asString(m["location"])),
-			Suggestion:  strings.TrimSpace(asString(m["suggestion"])),
-			Confidence:  asFloat64(m["confidence"]),
+			Aspect:            strings.TrimSpace(asString(m["aspect"])),
+			Severity:          strings.TrimSpace(asString(m["severity"])),
+			FindingType:       strings.TrimSpace(asString(m["finding_type"])),
+			Title:             strings.TrimSpace(asString(m["title"])),
+			Description:       strings.TrimSpace(asString(m["description"])),
+			Evidence:          strings.TrimSpace(asString(m["evidence"])),
+			Location:          strings.TrimSpace(asString(m["location"])),
+			Suggestion:        strings.TrimSpace(asString(m["suggestion"])),
+			Confidence:        asFloat64(m["confidence"]),
+			RelatedArtifactID: strings.TrimSpace(asString(m["related_artifact_id"])),
+			RelatedRecordID:   int64(asFloat64(m["related_record_id"])),
 		})
 	}
 	return out

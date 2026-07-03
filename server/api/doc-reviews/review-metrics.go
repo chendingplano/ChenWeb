@@ -25,13 +25,21 @@ import (
 //
 // It uses ReviewStrategy StrategyDocument and Input="artifact", so the prompt-cache
 // scheduler routes it to runReviewersLegacy, which calls ReviewDocument directly.
+//
+// Per ADR 2026070201 AR2/AR3 each per-metric call carries the canonical
+// scheduler window containing the metric's span start as a cacheable prefix,
+// and units are executed window-grouped (seed → stagger → remainder). With
+// max_tool_turns > 0 the call runs the DR10b tool loop (AR4) instead of the
+// one-shot JSON extraction.
 type metricsReviewer struct {
-	client     LLMJSONExtractor
-	logger     ApiTypes.JimoLogger
-	db         *sql.DB
-	maxTasks   int
-	maxMatches int // cap on matching metrics per doc metric (METRIC_REVIEW_MAX_MATCHES)
-	maxMetrics int // cap on doc metrics reviewed; 0 = no cap (METRIC_REVIEW_MAX_METRICS)
+	client       LLMJSONExtractor
+	toolClient   LLMChatClient
+	toolRegistry map[string]ReviewTool
+	logger       ApiTypes.JimoLogger
+	db           *sql.DB
+	maxTasks     int
+	maxMatches   int // cap on matching metrics per doc metric (METRIC_REVIEW_MAX_MATCHES)
+	maxMetrics   int // cap on doc metrics reviewed; 0 = no cap (METRIC_REVIEW_MAX_METRICS)
 }
 
 func (r *metricsReviewer) Name() string             { return "metrics" }
@@ -61,6 +69,8 @@ type matchedMetric struct {
 	view       metricView
 	recordID   int64
 	filename   string
+	title      string // source document title (authority classification, AR5 §3)
+	docNo      string // source document number from kb.inputs.doc_metadata
 	via        string // "hybrid_search" | "metric_category" | "entity"
 	confidence float64
 }
@@ -107,35 +117,47 @@ func (r *metricsReviewer) ReviewDocument(
 		return nil, nil
 	}
 
+	// AR2: load the canonical scheduler windows so each call carries the
+	// metric's extraction context as a cacheable prefix. A load failure only
+	// disables the window layout (units fall back to the payload-only input).
+	windows, err := loadArtifactReviewWindows(ctx, recordID)
+	if err != nil {
+		r.logger.Warn("metrics review: windows unavailable; reviewing without source context",
+			"record_id", recordID, "error", err)
+	}
+
 	r.logger.Info("metrics review running",
 		"record_id", recordID,
 		"metrics", len(docMetrics),
 		"reviewed_metrics", len(units),
+		"windows", len(windows),
 	)
 
-	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(units), cfg.OnProgress,
-		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
-			if isCtxStopped(workerCtx) {
-				return nil, ErrPipelineStopped
-			}
-			return r.reviewMetric(workerCtx, recordID, i, cfg, units[i].dm, units[i].matches), nil
-		},
-	)
-	if runErr != nil {
-		if isCtxStopped(ctx) {
-			return nil, ErrPipelineStopped
+	// AR3: group units by source window and run seed → stagger → remainder.
+	execUnits := make([]artifactReviewUnit, len(units))
+	for i := range units {
+		i := i
+		u := units[i]
+		wIdx := windowIndexForSpans(u.dm.spans, windows)
+		windowJSON := ""
+		truncated := false
+		if wIdx >= 0 {
+			windowJSON = windows[wIdx].inputJSON
+			truncated = spansTruncatedByWindow(u.dm.spans, windows[wIdx])
 		}
-		return nil, runErr
+		execUnits[i] = artifactReviewUnit{
+			windowIdx: wIdx,
+			run: func(workerCtx context.Context) []ReviewFinding {
+				return r.reviewMetric(workerCtx, recordID, i, cfg, u.dm, u.matches, windowJSON, truncated)
+			},
+		}
 	}
-
-	var all []ReviewFinding
-	for _, wf := range results {
-		all = append(all, wf...)
-	}
-	return all, nil
+	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg.OnProgress)
 }
 
 // reviewMetric runs one LLM comparison for a single doc metric and its matches.
+// windowJSON is the canonical scheduler window containing the metric's span
+// start (AR2); empty when no window was resolvable.
 func (r *metricsReviewer) reviewMetric(
 	ctx context.Context,
 	recordID int64,
@@ -143,29 +165,65 @@ func (r *metricsReviewer) reviewMetric(
 	cfg ReviewerConfig,
 	dm docMetric,
 	ms []matchedMetric,
+	windowJSON string,
+	truncated bool,
 ) []ReviewFinding {
 	start := time.Now()
 
 	payloadObj := map[string]any{
 		"metric_under_review": dm.view,
+		"artifact_line_spans": dm.spans,
 		"matching_metrics":    matchedMetricsPayload(ms),
 	}
-	inputJSON, err := json.Marshal(payloadObj)
-	if err != nil {
-		r.logger.Warn("metrics review: marshal payload failed", "record_id", recordID, "metric_index", index, "error", err)
+	if truncated {
+		// AR2: the metric's spans extend past the included window; tell the
+		// model so it does not misread the cut-off as an extraction error.
+		payloadObj["context_truncated"] = true
+	}
+	payloadJSON := marshalArtifactPayload(payloadObj)
+	if payloadJSON == "" {
+		r.logger.Warn("metrics review: marshal payload failed", "record_id", recordID, "metric_index", index)
 		return nil
 	}
 
-	out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
-		ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, string(inputJSON),
-		"review_metrics", "MID-CWB-REVIEW-METRICS"))
-	if err != nil {
-		r.logger.Warn("metrics review metric failed; skipping",
-			"record_id", recordID, "metric_index", index, "error", err)
-		return nil
+	var findings []ReviewFinding
+	var cacheHitTokens, cacheMissTokens int
+	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
+		tools := selectTools(r.toolRegistry, cfg.Tools)
+		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		loopFindings, loopUsage, loopErr := runToolUseReview(
+			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
+			userCtx, tools, recordID, r.logger,
+		)
+		if loopUsage != nil {
+			cacheHitTokens = loopUsage.PromptCacheHitTokens
+			cacheMissTokens = loopUsage.PromptCacheMissTokens
+		}
+		if loopErr != nil {
+			r.logger.Warn("metrics review tool-use loop failed; no findings for metric",
+				"record_id", recordID, "metric_index", index, "error", loopErr)
+		}
+		findings = loopFindings
+	} else {
+		// AR2 window-first layout: the window is the document input; the rubric
+		// plus the per-metric payload form the task tail. Without a window the
+		// payload itself is the document input (pre-AR2 layout).
+		promptText, inputText := cfg.PromptText, payloadJSON
+		if windowJSON != "" {
+			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), windowJSON
+		}
+		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
+			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
+			"review_metrics", "MID-CWB-REVIEW-METRICS"))
+		if err != nil {
+			r.logger.Warn("metrics review metric failed; skipping",
+				"record_id", recordID, "metric_index", index, "error", err)
+			return nil
+		}
+		findings = normalizeFindingsJSON(out)
+		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
+		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
-
-	findings := normalizeFindingsJSON(out)
 	loc := strings.Join(dm.spans, ",")
 	for i := range findings {
 		findings[i].Pass = "P5"
@@ -188,21 +246,26 @@ func (r *metricsReviewer) reviewMetric(
 		"matches", len(ms),
 		"findings", len(findings),
 		"ms_used", time.Since(start).Milliseconds(),
-		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
-		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
+		"cache_hit_tokens", cacheHitTokens,
+		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
 }
 
+// matchedMetricsPayload serializes the matched candidates. Raw RRF scores are
+// replaced by 1-based rank (AR5 §4: tiny hybrid-search scores read as
+// "unrelated"), and each match carries its source document's authority class
+// (AR5 §3) so severity can weight conflicts with governing standards.
 func matchedMetricsPayload(ms []matchedMetric) []map[string]any {
 	out := make([]map[string]any, 0, len(ms))
-	for _, m := range ms {
+	for i, m := range ms {
 		out = append(out, map[string]any{
-			"metric":           m.view,
-			"source_record_id": m.recordID,
-			"source_filename":  m.filename,
-			"match_via":        m.via,
-			"confidence":       m.confidence,
+			"metric":               m.view,
+			"source_record_id":     m.recordID,
+			"source_filename":      m.filename,
+			"source_doc_authority": docAuthorityClass(m.docNo, m.title, m.filename),
+			"match_via":            m.via,
+			"match_rank":           i + 1,
 		})
 	}
 	return out
@@ -318,7 +381,7 @@ func assembleMatches(
 			if !ok {
 				continue
 			}
-			add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "hybrid_search", confidence: h.RRFScore})
+			add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "hybrid_search", confidence: h.RRFScore})
 		}
 	}
 
@@ -337,7 +400,7 @@ func assembleMatches(
 				}
 			}
 			if shared {
-				add(i, matchedMetric{view: sib.view, recordID: sib.recordID, filename: sib.filename, via: "metric_category"})
+				add(i, matchedMetric{view: sib.view, recordID: sib.recordID, filename: sib.filename, title: sib.title, docNo: sib.docNo, via: "metric_category"})
 			}
 		}
 	}
@@ -361,7 +424,7 @@ func assembleMatches(
 				}
 			}
 			if shared {
-				add(i, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "entity", confidence: e.Confidence})
+				add(i, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "entity", confidence: e.Confidence})
 			}
 		}
 	}
@@ -414,6 +477,8 @@ type resolvedMetric struct {
 	view     metricView
 	recordID int64
 	filename string
+	title    string
+	docNo    string
 }
 
 func (r *metricsReviewer) loadMetricsByMetricID(ctx context.Context, idSet map[string]struct{}) (map[string]resolvedMetric, error) {
@@ -428,7 +493,8 @@ func (r *metricsReviewer) loadMetricsByMetricID(ctx context.Context, idSet map[s
 	const q = `
 SELECT COALESCE(m.metric_id, ''), m.input_record_id, COALESCE(m.metric_name, ''),
        COALESCE(m.metric_subject, ''), COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''),
-       COALESCE(m.value_class, ''), COALESCE(m.metric_categories, ''), COALESCE(i.staging_filename, '')
+       COALESCE(m.value_class, ''), COALESCE(m.metric_categories, ''), COALESCE(i.staging_filename, ''),
+       COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.metric_id = ANY($1)`
@@ -443,7 +509,8 @@ WHERE m.metric_id = ANY($1)`
 			catsText string
 		)
 		if err := rows.Scan(&rm.view.MetricID, &rm.recordID, &rm.view.MetricName, &rm.view.Subject,
-			&rm.view.Value, &rm.view.Unit, &rm.view.ValueClass, &catsText, &rm.filename); err != nil {
+			&rm.view.Value, &rm.view.Unit, &rm.view.ValueClass, &catsText, &rm.filename,
+			&rm.title, &rm.docNo); err != nil {
 			return nil, err
 		}
 		rm.view.Categories = parseJSONStringArray([]byte(catsText))
@@ -459,7 +526,8 @@ func (r *metricsReviewer) loadCategorySiblings(ctx context.Context, recordID int
 	const q = `
 SELECT COALESCE(m.metric_id, ''), m.input_record_id, COALESCE(m.metric_name, ''),
        COALESCE(m.metric_subject, ''), COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''),
-       COALESCE(m.value_class, ''), COALESCE(m.metric_categories, ''), COALESCE(i.staging_filename, '')
+       COALESCE(m.value_class, ''), COALESCE(m.metric_categories, ''), COALESCE(i.staging_filename, ''),
+       COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id <> $1
@@ -478,7 +546,8 @@ LIMIT $3`
 			catsText string
 		)
 		if err := rows.Scan(&rm.view.MetricID, &rm.recordID, &rm.view.MetricName, &rm.view.Subject,
-			&rm.view.Value, &rm.view.Unit, &rm.view.ValueClass, &catsText, &rm.filename); err != nil {
+			&rm.view.Value, &rm.view.Unit, &rm.view.ValueClass, &catsText, &rm.filename,
+			&rm.title, &rm.docNo); err != nil {
 			return nil, err
 		}
 		rm.view.Categories = parseJSONStringArray([]byte(catsText))

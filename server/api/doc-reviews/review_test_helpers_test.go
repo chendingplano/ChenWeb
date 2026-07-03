@@ -14,6 +14,7 @@ type fakeJSONExtractor struct {
 	seq           []map[string]any
 	err           error
 	promptNames   []string
+	promptTexts   []string
 	modelNames    []string
 	inputTexts    []string
 	documentFirst []bool
@@ -24,6 +25,7 @@ type fakeJSONExtractor struct {
 func (f *fakeJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExtractionInput) (map[string]any, error) {
 	f.calledCount++
 	f.promptNames = append(f.promptNames, in.PromptName)
+	f.promptTexts = append(f.promptTexts, in.PromptText)
 	f.modelNames = append(f.modelNames, in.ModelName)
 	f.inputTexts = append(f.inputTexts, in.InputText)
 	f.documentFirst = append(f.documentFirst, in.DocumentFirst)

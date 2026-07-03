@@ -3,7 +3,6 @@ package docreviews
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -25,8 +24,15 @@ import (
 //
 // ReviewStrategy StrategyDocument + Input="artifact" routes it to runReviewersLegacy,
 // which calls ReviewDocument directly.
+//
+// Per ADR 2026070201 AR2/AR3 each per-provision call carries the canonical
+// scheduler window containing the provision's span start as a cacheable
+// prefix, and units are executed window-grouped (seed → stagger → remainder).
+// With max_tool_turns > 0 the call runs the DR10b tool loop (AR4).
 type provisionsReviewer struct {
 	client       LLMJSONExtractor
+	toolClient   LLMChatClient
+	toolRegistry map[string]ReviewTool
 	logger       ApiTypes.JimoLogger
 	db           *sql.DB
 	maxTasks     int
@@ -59,6 +65,8 @@ type matchedProvision struct {
 	view       provisionView
 	recordID   int64
 	filename   string
+	title      string // source document title (authority classification, AR5 §3)
+	docNo      string // source document number from kb.inputs.doc_metadata
 	via        string // "hybrid_search" | "entity"
 	confidence float64
 }
@@ -104,35 +112,47 @@ func (r *provisionsReviewer) ReviewDocument(
 		return nil, nil
 	}
 
+	// AR2: load the canonical scheduler windows so each call carries the
+	// provision's extraction context as a cacheable prefix. A load failure only
+	// disables the window layout (units fall back to the payload-only input).
+	windows, err := loadArtifactReviewWindows(ctx, recordID)
+	if err != nil {
+		r.logger.Warn("provisions review: windows unavailable; reviewing without source context",
+			"record_id", recordID, "error", err)
+	}
+
 	r.logger.Info("provisions review running",
 		"record_id", recordID,
 		"provisions", len(docProvs),
 		"reviewed_provisions", len(units),
+		"windows", len(windows),
 	)
 
-	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(units), cfg.OnProgress,
-		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
-			if isCtxStopped(workerCtx) {
-				return nil, ErrPipelineStopped
-			}
-			return r.reviewProvision(workerCtx, recordID, i, cfg, units[i].dp, units[i].matches), nil
-		},
-	)
-	if runErr != nil {
-		if isCtxStopped(ctx) {
-			return nil, ErrPipelineStopped
+	// AR3: group units by source window and run seed → stagger → remainder.
+	execUnits := make([]artifactReviewUnit, len(units))
+	for i := range units {
+		i := i
+		u := units[i]
+		wIdx := windowIndexForSpans(u.dp.spans, windows)
+		windowJSON := ""
+		truncated := false
+		if wIdx >= 0 {
+			windowJSON = windows[wIdx].inputJSON
+			truncated = spansTruncatedByWindow(u.dp.spans, windows[wIdx])
 		}
-		return nil, runErr
+		execUnits[i] = artifactReviewUnit{
+			windowIdx: wIdx,
+			run: func(workerCtx context.Context) []ReviewFinding {
+				return r.reviewProvision(workerCtx, recordID, i, cfg, u.dp, u.matches, windowJSON, truncated)
+			},
+		}
 	}
-
-	var all []ReviewFinding
-	for _, wf := range results {
-		all = append(all, wf...)
-	}
-	return all, nil
+	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg.OnProgress)
 }
 
-// reviewProvision runs one LLM comparison for a single doc provision and its matches.
+// reviewProvision runs one LLM comparison for a single doc provision and its
+// matches. windowJSON is the canonical scheduler window containing the
+// provision's span start (AR2); empty when no window was resolvable.
 func (r *provisionsReviewer) reviewProvision(
 	ctx context.Context,
 	recordID int64,
@@ -140,29 +160,65 @@ func (r *provisionsReviewer) reviewProvision(
 	cfg ReviewerConfig,
 	dp docProvision,
 	ms []matchedProvision,
+	windowJSON string,
+	truncated bool,
 ) []ReviewFinding {
 	start := time.Now()
 
 	payloadObj := map[string]any{
 		"provision_under_review": dp.view,
+		"artifact_line_spans":    dp.spans,
 		"matching_provisions":    matchedProvisionsPayload(ms),
 	}
-	inputJSON, err := json.Marshal(payloadObj)
-	if err != nil {
-		r.logger.Warn("provisions review: marshal payload failed", "record_id", recordID, "provision_index", index, "error", err)
+	if truncated {
+		// AR2: the provision's spans extend past the included window; tell the
+		// model so it does not misread the cut-off as an extraction error.
+		payloadObj["context_truncated"] = true
+	}
+	payloadJSON := marshalArtifactPayload(payloadObj)
+	if payloadJSON == "" {
+		r.logger.Warn("provisions review: marshal payload failed", "record_id", recordID, "provision_index", index)
 		return nil
 	}
 
-	out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
-		ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, string(inputJSON),
-		"review_provisions", "MID-CWB-REVIEW-PROVISIONS"))
-	if err != nil {
-		r.logger.Warn("provisions review provision failed; skipping",
-			"record_id", recordID, "provision_index", index, "error", err)
-		return nil
+	var findings []ReviewFinding
+	var cacheHitTokens, cacheMissTokens int
+	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
+		tools := selectTools(r.toolRegistry, cfg.Tools)
+		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		loopFindings, loopUsage, loopErr := runToolUseReview(
+			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
+			userCtx, tools, recordID, r.logger,
+		)
+		if loopUsage != nil {
+			cacheHitTokens = loopUsage.PromptCacheHitTokens
+			cacheMissTokens = loopUsage.PromptCacheMissTokens
+		}
+		if loopErr != nil {
+			r.logger.Warn("provisions review tool-use loop failed; no findings for provision",
+				"record_id", recordID, "provision_index", index, "error", loopErr)
+		}
+		findings = loopFindings
+	} else {
+		// AR2 window-first layout: the window is the document input; the rubric
+		// plus the per-provision payload form the task tail. Without a window
+		// the payload itself is the document input (pre-AR2 layout).
+		promptText, inputText := cfg.PromptText, payloadJSON
+		if windowJSON != "" {
+			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), windowJSON
+		}
+		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
+			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
+			"review_provisions", "MID-CWB-REVIEW-PROVISIONS"))
+		if err != nil {
+			r.logger.Warn("provisions review provision failed; skipping",
+				"record_id", recordID, "provision_index", index, "error", err)
+			return nil
+		}
+		findings = normalizeFindingsJSON(out)
+		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
+		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
-
-	findings := normalizeFindingsJSON(out)
 	loc := strings.Join(dp.spans, ",")
 	for i := range findings {
 		findings[i].Pass = "P5"
@@ -185,21 +241,25 @@ func (r *provisionsReviewer) reviewProvision(
 		"matches", len(ms),
 		"findings", len(findings),
 		"ms_used", time.Since(start).Milliseconds(),
-		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
-		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
+		"cache_hit_tokens", cacheHitTokens,
+		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
 }
 
+// matchedProvisionsPayload serializes the matched candidates. Raw RRF scores
+// are replaced by 1-based rank (AR5 §4), and each match carries its source
+// document's authority class (AR5 §3).
 func matchedProvisionsPayload(ms []matchedProvision) []map[string]any {
 	out := make([]map[string]any, 0, len(ms))
-	for _, m := range ms {
+	for i, m := range ms {
 		out = append(out, map[string]any{
-			"provision":        m.view,
-			"source_record_id": m.recordID,
-			"source_filename":  m.filename,
-			"match_via":        m.via,
-			"confidence":       m.confidence,
+			"provision":            m.view,
+			"source_record_id":     m.recordID,
+			"source_filename":      m.filename,
+			"source_doc_authority": docAuthorityClass(m.docNo, m.title, m.filename),
+			"match_via":            m.via,
+			"match_rank":           i + 1,
 		})
 	}
 	return out
@@ -291,7 +351,7 @@ func assembleProvisionMatches(
 			if !ok {
 				continue
 			}
-			add(docIdx, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, via: "hybrid_search", confidence: h.RRFScore})
+			add(docIdx, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, title: tp.title, docNo: tp.docNo, via: "hybrid_search", confidence: h.RRFScore})
 		}
 	}
 
@@ -314,7 +374,7 @@ func assembleProvisionMatches(
 				}
 			}
 			if shared {
-				add(i, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, via: "entity", confidence: e.Confidence})
+				add(i, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, title: tp.title, docNo: tp.docNo, via: "entity", confidence: e.Confidence})
 			}
 		}
 	}
@@ -367,6 +427,8 @@ type resolvedProvision struct {
 	view     provisionView
 	recordID int64
 	filename string
+	title    string
+	docNo    string
 }
 
 func (r *provisionsReviewer) loadProvisionsByProvID(ctx context.Context, idSet map[string]struct{}) (map[string]resolvedProvision, error) {
@@ -381,7 +443,8 @@ func (r *provisionsReviewer) loadProvisionsByProvID(ctx context.Context, idSet m
 	const q = `
 SELECT COALESCE(p.prov_id, ''), p.input_record_id, COALESCE(p.prov_name, ''),
        COALESCE(p.provision_type, ''), COALESCE(p.provision, ''), COALESCE(p.provision_subject, ''),
-       COALESCE(p.category_paths, '[]'::jsonb), COALESCE(i.staging_filename, '')
+       COALESCE(p.category_paths, '[]'::jsonb), COALESCE(i.staging_filename, ''),
+       COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.provisions p
 LEFT JOIN kb.inputs i ON i.id = p.input_record_id
 WHERE p.prov_id = ANY($1)`
@@ -396,7 +459,8 @@ WHERE p.prov_id = ANY($1)`
 			catsJSON []byte
 		)
 		if err := rows.Scan(&rp.view.ProvID, &rp.recordID, &rp.view.ProvName, &rp.view.Type,
-			&rp.view.Provision, &rp.view.Subject, &catsJSON, &rp.filename); err != nil {
+			&rp.view.Provision, &rp.view.Subject, &catsJSON, &rp.filename,
+			&rp.title, &rp.docNo); err != nil {
 			return nil, err
 		}
 		rp.view.Categories = parseJSONStringArray(catsJSON)

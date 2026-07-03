@@ -109,17 +109,23 @@ var findingMetadataReservedKeys = map[string]bool{
 	"source_language_confidence": true,
 	"canonical_language":         true,
 	"canonical_origin":           true,
+	"related_artifact_id":        true,
+	"related_record_id":          true,
 }
 
 // FindingMetadataEnvelope is stored in kb.doc_review_findings.metadata.
 // JSON format: flat — metadata fields and language codes at the top level (see ADR 2026063001).
 // Legacy format: {"i18n": {...}} — still readable but never written.
+// RelatedArtifactID/RelatedRecordID are the structured cross-document
+// reference of ADR 2026070201 AR5 §6 (zero values are omitted).
 type FindingMetadataEnvelope struct {
-	I18N FindingI18NMetadata
+	I18N              FindingI18NMetadata
+	RelatedArtifactID string
+	RelatedRecordID   int64
 }
 
 func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
-	m := make(map[string]any, len(e.I18N.Translations)+5)
+	m := make(map[string]any, len(e.I18N.Translations)+7)
 	m["schema_version"] = e.I18N.SchemaVersion
 	if e.I18N.SourceLanguage != "" {
 		m["source_language"] = e.I18N.SourceLanguage
@@ -132,6 +138,12 @@ func (e FindingMetadataEnvelope) MarshalJSON() ([]byte, error) {
 	}
 	if e.I18N.CanonicalOrigin != "" {
 		m["canonical_origin"] = e.I18N.CanonicalOrigin
+	}
+	if e.RelatedArtifactID != "" {
+		m["related_artifact_id"] = e.RelatedArtifactID
+	}
+	if e.RelatedRecordID != 0 {
+		m["related_record_id"] = e.RelatedRecordID
 	}
 	for lang, content := range e.I18N.Translations {
 		m[lang] = content
@@ -163,6 +175,12 @@ func (e *FindingMetadataEnvelope) UnmarshalJSON(data []byte) error {
 	}
 	if co, ok := raw["canonical_origin"]; ok {
 		_ = json.Unmarshal(co, &e.I18N.CanonicalOrigin)
+	}
+	if ra, ok := raw["related_artifact_id"]; ok {
+		_ = json.Unmarshal(ra, &e.RelatedArtifactID)
+	}
+	if rr, ok := raw["related_record_id"]; ok {
+		_ = json.Unmarshal(rr, &e.RelatedRecordID)
 	}
 	for key, val := range raw {
 		if findingMetadataReservedKeys[key] {

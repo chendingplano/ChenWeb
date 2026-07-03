@@ -159,7 +159,7 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		ModelName:  "metric-model",
 		PromptText: "compare metrics",
 		PromptRef:  "prompt-review-metrics-v1.md",
-	}, doc, ms)
+	}, doc, ms, "", false)
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))

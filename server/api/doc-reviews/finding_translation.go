@@ -614,16 +614,18 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 
 	return preparedFindingForStorage{
 		Canonical: ReviewFinding{
-			Pass:        canonicalFinding.Pass,
-			Aspect:      canonicalFinding.Aspect,
-			Severity:    canonicalFinding.Severity,
-			FindingType: canonicalFinding.FindingType,
-			Title:       canonicalFinding.Title,
-			Description: canonicalFinding.Description,
-			Evidence:    canonicalFinding.Evidence,
-			Location:    canonicalFinding.Location,
-			Suggestion:  canonicalFinding.Suggestion,
-			Confidence:  canonicalFinding.Confidence,
+			Pass:              canonicalFinding.Pass,
+			Aspect:            canonicalFinding.Aspect,
+			Severity:          canonicalFinding.Severity,
+			FindingType:       canonicalFinding.FindingType,
+			Title:             canonicalFinding.Title,
+			Description:       canonicalFinding.Description,
+			Evidence:          canonicalFinding.Evidence,
+			Location:          canonicalFinding.Location,
+			Suggestion:        canonicalFinding.Suggestion,
+			Confidence:        canonicalFinding.Confidence,
+			RelatedArtifactID: finding.RelatedArtifactID,
+			RelatedRecordID:   finding.RelatedRecordID,
 		},
 		Metadata: FindingMetadataEnvelope{
 			I18N: FindingI18NMetadata{
@@ -634,6 +636,8 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 				CanonicalOrigin:          normalized.CanonicalOrigin,
 				Translations:             translations,
 			},
+			RelatedArtifactID: finding.RelatedArtifactID,
+			RelatedRecordID:   finding.RelatedRecordID,
 		},
 	}, nil
 }

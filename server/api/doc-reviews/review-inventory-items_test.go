@@ -135,7 +135,7 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 		ModelName:  "inventory-model",
 		PromptText: "compare items",
 		PromptRef:  "prompt-review-inventory-items-v1.md",
-	}, doc, ms)
+	}, doc, ms, "", false)
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))

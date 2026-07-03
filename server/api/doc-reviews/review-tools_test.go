@@ -10,7 +10,8 @@ import (
 )
 
 // Every core tool must expose valid JSON-Schema parameters and the registry must
-// contain exactly the nine document-intrinsic tools.
+// contain exactly the nine document-intrinsic tools plus the cross-record
+// get_artifact_context (ADR 2026070201 AR4), which is not a core tool.
 func TestBuildToolRegistryShapeAndSchemas(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
@@ -19,8 +20,16 @@ func TestBuildToolRegistryShapeAndSchemas(t *testing.T) {
 	defer db.Close()
 
 	reg := buildToolRegistry(db)
-	if len(reg) != len(coreToolNames) {
-		t.Fatalf("registry size=%d, want %d", len(reg), len(coreToolNames))
+	if len(reg) != len(coreToolNames)+1 {
+		t.Fatalf("registry size=%d, want %d", len(reg), len(coreToolNames)+1)
+	}
+	if _, ok := reg["get_artifact_context"]; !ok {
+		t.Fatal("registry missing get_artifact_context")
+	}
+	for _, name := range coreToolNames {
+		if name == "get_artifact_context" {
+			t.Fatal("get_artifact_context must not be in coreToolNames (selectTools(nil) must stay record-scoped)")
+		}
 	}
 	for _, name := range coreToolNames {
 		tool, ok := reg[name]

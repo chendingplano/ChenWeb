@@ -294,18 +294,32 @@ prompt = "prompt-review-requirement-traceability.md"
 max_tool_turns = 8
 
 # P5 — Technical & Compliance
-# metrics is an artifact-based, cross-document reviewer (ADR 2026063002): it compares
-# the document's extracted metrics against semantically-related metrics in OTHER
-# documents, rather than reading the document text. input="artifact" routes it to the
-# direct ReviewDocument path (not the per-chunk/per-block scheduler); it is not tool-using.
+# metrics/provisions/entities/inventory_items are artifact-based, cross-document
+# reviewers (ADRs 2026063002/03/04/05): they compare the document's extracted
+# artifacts against semantically-related artifacts in OTHER documents, rather
+# than reading the document text linearly.
+#
+# NOTE (ADR 2026070201 AR1): buildReviewers hardcodes Input="artifact" for these
+# four aspects, and a non-empty ReviewerConfig.Input takes precedence over the
+# `input` field here — the scheduler only consults this file when the code
+# leaves Input empty. The values below are kept truthful so readers are not
+# misled, but changing them alone does NOT change the execution path.
+#
+# Per ADR 2026070201 AR2-AR4, metrics/provisions/inventory_items send the
+# canonical source window as a cacheable prefix, use prompt v2, and run a small
+# tool-use budget for verifying screened candidates via get_artifact_context
+# (a cross-record, read-only tool that must be listed explicitly in `tools`).
+# entities is out of scope for that ADR and stays one-shot on prompt v1.
 [reviewers.metrics]
 enabled = true
 checked = true
 group = "P5"
 input = "artifact"
 model = "deepseek-v4-pro"
-prompt = "prompt-review-metrics-v1.md"
-max_tool_turns = 0
+prompt = "prompt-review-metrics-v2.md"
+max_tool_turns = 4
+max_tool_tokens = 24000
+tools = ["get_artifact_context"]
 
 [reviewers.provisions]
 enabled = true
@@ -313,8 +327,10 @@ checked = true
 group = "P5"
 input = "artifact"
 model = "deepseek-v4-pro"
-prompt = "prompt-review-provisions-v1.md"
-max_tool_turns = 0
+prompt = "prompt-review-provisions-v2.md"
+max_tool_turns = 4
+max_tool_tokens = 24000
+tools = ["get_artifact_context"]
 
 [reviewers.entities]
 enabled = true
@@ -331,8 +347,10 @@ checked = true
 group = "P5"
 input = "artifact"
 model = "deepseek-v4-pro"
-prompt = "prompt-review-inventory-items-v1.md"
-max_tool_turns = 0
+prompt = "prompt-review-inventory-items-v2.md"
+max_tool_turns = 4
+max_tool_tokens = 24000
+tools = ["get_artifact_context"]
 
 [reviewers.technical_accuracy]
 enabled = true

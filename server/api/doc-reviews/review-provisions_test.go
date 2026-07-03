@@ -127,7 +127,7 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		ModelName:  "prov-model",
 		PromptText: "compare provisions",
 		PromptRef:  "prompt-review-provisions-v1.md",
-	}, doc, ms)
+	}, doc, ms, "", false)
 
 	if len(findings) != 1 {
 		t.Fatalf("findings = %d, want 1", len(findings))

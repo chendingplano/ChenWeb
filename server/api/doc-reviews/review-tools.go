@@ -31,9 +31,12 @@ type toolDB struct {
 
 const defaultToolSearchLimit = 10
 
-// buildToolRegistry constructs the nine document-intrinsic core tools (DR10a)
-// bound to a single record's database handle. The returned map is keyed by tool
-// name. No cross-document / reference-standard (P5) tool is included.
+// buildToolRegistry constructs the document-intrinsic core tools (DR10a) bound
+// to a single record's database handle, plus the one cross-record tool
+// `get_artifact_context` (ADR 2026070201 AR4). The returned map is keyed by
+// tool name. The cross-record tool is NOT part of coreToolNames: reviewers get
+// it only by listing it explicitly in their TOML `tools`, and it is scoped to
+// read-only line access.
 func buildToolRegistry(db *sql.DB) map[string]ReviewTool {
 	t := toolDB{db: db}
 	tools := []ReviewTool{
@@ -46,6 +49,7 @@ func buildToolRegistry(db *sql.DB) map[string]ReviewTool {
 		t.getProvisionTool(),
 		t.getChunkSummaryTool(),
 		t.getChunkLinesTool(),
+		t.getArtifactContextTool(),
 	}
 	reg := make(map[string]ReviewTool, len(tools))
 	for _, tool := range tools {
@@ -504,6 +508,112 @@ func (t toolDB) getChunkLinesTool() ReviewTool {
 			return map[string]any{"start_line": start, "end_line": end, "lines": out}, nil
 		},
 	}
+}
+
+// ── Cross-record artifact context tool (ADR 2026070201 AR4) ─────────────────
+
+// artifactContextRadius is the number of lines returned on each side of an
+// artifact's line spans by get_artifact_context.
+const artifactContextRadius = 15
+
+// artifactContextMaxLines caps the total lines one call may return.
+const artifactContextMaxLines = 120
+
+// getArtifactContextTool returns the source passage around a matched
+// artifact's line spans in its OWN document. Unlike the record-scoped core
+// tools it is cross-record (the screen-then-verify pattern: structured views
+// screen candidates, source context verifies the survivors). It is strictly
+// read-only line access; it may also be called on the artifact under review
+// itself, e.g. to retrieve context truncated at a window boundary (AR2).
+func (t toolDB) getArtifactContextTool() ReviewTool {
+	return ReviewTool{
+		Name: "get_artifact_context",
+		Description: "Fetch the source lines around an artifact's line spans in its source document. " +
+			"Cross-record: pass the source_record_id and artifact id (metric_id, prov_id, inventory_item_id, or entity_id) " +
+			"of a matched artifact to see the passage it was extracted from.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{` +
+			`"record_id":{"type":"integer","description":"the artifact's source_record_id"},` +
+			`"artifact_id":{"type":"string","description":"the artifact id (metric_id, prov_id, inventory_item_id, or entity_id)"}},` +
+			`"required":["record_id","artifact_id"]}`),
+		Execute: func(ctx context.Context, _ int64, args map[string]any) (any, error) {
+			targetRecord := int64(intArg(args, "record_id"))
+			artifactID := argString(args, "artifact_id")
+			if targetRecord <= 0 {
+				return nil, fmt.Errorf("get_artifact_context: record_id is required")
+			}
+			if artifactID == "" {
+				return nil, fmt.Errorf("get_artifact_context: artifact_id is required")
+			}
+			spans, artifactType, err := t.lookupArtifactSpans(ctx, targetRecord, artifactID)
+			if err != nil {
+				return nil, err
+			}
+			if artifactType == "" {
+				return map[string]any{"found": false, "record_id": targetRecord, "artifact_id": artifactID}, nil
+			}
+			lines, err := loadRecordLines(ctx, targetRecord)
+			if err != nil {
+				return nil, fmt.Errorf("get_artifact_context: %w", err)
+			}
+			include := make(map[int]bool)
+			for _, s := range spans {
+				start, end := parseArtifactSpan(s)
+				if start == 0 {
+					continue
+				}
+				for n := start - artifactContextRadius; n <= end+artifactContextRadius; n++ {
+					include[n] = true
+				}
+			}
+			var out []map[string]any
+			for _, ln := range lines {
+				if include[ln.LineNo] {
+					out = append(out, map[string]any{
+						"line_number": ln.LineNo,
+						"content":     ln.Content,
+					})
+					if len(out) >= artifactContextMaxLines {
+						break
+					}
+				}
+			}
+			return map[string]any{
+				"found":         true,
+				"record_id":     targetRecord,
+				"artifact_id":   artifactID,
+				"artifact_type": artifactType,
+				"line_spans":    spans,
+				"lines":         out,
+			}, nil
+		},
+	}
+}
+
+// lookupArtifactSpans finds an artifact's line spans across the four artifact
+// tables. Returns ("", nil) with no error when the id is unknown.
+func (t toolDB) lookupArtifactSpans(ctx context.Context, recordID int64, artifactID string) ([]string, string, error) {
+	const q = `
+SELECT 'metric', COALESCE(source_line_spans, '[]'::jsonb)::text
+FROM kb.metrics WHERE input_record_id = $1 AND metric_id = $2
+UNION ALL
+SELECT 'provision', COALESCE(source_line_spans, '[]'::jsonb)::text
+FROM kb.provisions WHERE input_record_id = $1 AND prov_id = $2
+UNION ALL
+SELECT 'inventory_item', COALESCE(source_line_spans, '[]'::jsonb)::text
+FROM kb.inventory_items WHERE input_record_id = $1 AND inventory_item_id = $2
+UNION ALL
+SELECT 'entity', COALESCE(line_spans, '[]'::jsonb)::text
+FROM kb.entities WHERE input_record_id = $1 AND entity_id = $2
+LIMIT 1`
+	var artifactType, spansJSON string
+	err := t.db.QueryRowContext(ctx, q, recordID, artifactID).Scan(&artifactType, &spansJSON)
+	if err == sql.ErrNoRows {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("get_artifact_context lookup: %w", err)
+	}
+	return parseJSONStringArray([]byte(spansJSON)), artifactType, nil
 }
 
 func intArg(args map[string]any, key string) int {

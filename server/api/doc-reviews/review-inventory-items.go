@@ -26,13 +26,20 @@ import (
 //
 // It uses ReviewStrategy StrategyDocument and Input="artifact", so the prompt-cache
 // scheduler routes it to runReviewersLegacy, which calls ReviewDocument directly.
+//
+// Per ADR 2026070201 AR2/AR3 each per-item call carries the canonical scheduler
+// window containing the item's span start as a cacheable prefix, and units are
+// executed window-grouped (seed → stagger → remainder). With max_tool_turns > 0
+// the call runs the DR10b tool loop (AR4).
 type inventoryItemsReviewer struct {
-	client     LLMJSONExtractor
-	logger     ApiTypes.JimoLogger
-	db         *sql.DB
-	maxTasks   int
-	maxMatches int // cap on matching items per doc item (INVENTORY_REVIEW_MAX_MATCHES)
-	maxItems   int // cap on doc items reviewed; 0 = no cap (INVENTORY_REVIEW_MAX_ITEMS)
+	client       LLMJSONExtractor
+	toolClient   LLMChatClient
+	toolRegistry map[string]ReviewTool
+	logger       ApiTypes.JimoLogger
+	db           *sql.DB
+	maxTasks     int
+	maxMatches   int // cap on matching items per doc item (INVENTORY_REVIEW_MAX_MATCHES)
+	maxItems     int // cap on doc items reviewed; 0 = no cap (INVENTORY_REVIEW_MAX_ITEMS)
 }
 
 func (r *inventoryItemsReviewer) Name() string             { return "inventory_items" }
@@ -64,6 +71,8 @@ type matchedInventoryItem struct {
 	view       inventoryItemView
 	recordID   int64
 	filename   string
+	title      string // source document title (authority classification, AR5 §3)
+	docNo      string // source document number from kb.inputs.doc_metadata
 	via        string // "hybrid_search" | "item_category" | "entity"
 	confidence float64
 }
@@ -110,35 +119,47 @@ func (r *inventoryItemsReviewer) ReviewDocument(
 		return nil, nil
 	}
 
+	// AR2: load the canonical scheduler windows so each call carries the
+	// item's extraction context as a cacheable prefix. A load failure only
+	// disables the window layout (units fall back to the payload-only input).
+	windows, err := loadArtifactReviewWindows(ctx, recordID)
+	if err != nil {
+		r.logger.Warn("inventory items review: windows unavailable; reviewing without source context",
+			"record_id", recordID, "error", err)
+	}
+
 	r.logger.Info("inventory items review running",
 		"record_id", recordID,
 		"items", len(docItems),
 		"reviewed_items", len(units),
+		"windows", len(windows),
 	)
 
-	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(units), cfg.OnProgress,
-		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
-			if isCtxStopped(workerCtx) {
-				return nil, ErrPipelineStopped
-			}
-			return r.reviewItem(workerCtx, recordID, i, cfg, units[i].di, units[i].matches), nil
-		},
-	)
-	if runErr != nil {
-		if isCtxStopped(ctx) {
-			return nil, ErrPipelineStopped
+	// AR3: group units by source window and run seed → stagger → remainder.
+	execUnits := make([]artifactReviewUnit, len(units))
+	for i := range units {
+		i := i
+		u := units[i]
+		wIdx := windowIndexForSpans(u.di.spans, windows)
+		windowJSON := ""
+		truncated := false
+		if wIdx >= 0 {
+			windowJSON = windows[wIdx].inputJSON
+			truncated = spansTruncatedByWindow(u.di.spans, windows[wIdx])
 		}
-		return nil, runErr
+		execUnits[i] = artifactReviewUnit{
+			windowIdx: wIdx,
+			run: func(workerCtx context.Context) []ReviewFinding {
+				return r.reviewItem(workerCtx, recordID, i, cfg, u.di, u.matches, windowJSON, truncated)
+			},
+		}
 	}
-
-	var all []ReviewFinding
-	for _, wf := range results {
-		all = append(all, wf...)
-	}
-	return all, nil
+	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg.OnProgress)
 }
 
-// reviewItem runs one LLM comparison for a single doc inventory item and its matches.
+// reviewItem runs one LLM comparison for a single doc inventory item and its
+// matches. windowJSON is the canonical scheduler window containing the item's
+// span start (AR2); empty when no window was resolvable.
 func (r *inventoryItemsReviewer) reviewItem(
 	ctx context.Context,
 	recordID int64,
@@ -146,29 +167,65 @@ func (r *inventoryItemsReviewer) reviewItem(
 	cfg ReviewerConfig,
 	di docInventoryItem,
 	ms []matchedInventoryItem,
+	windowJSON string,
+	truncated bool,
 ) []ReviewFinding {
 	start := time.Now()
 
 	payloadObj := map[string]any{
 		"inventory_item_under_review": di.view,
+		"artifact_line_spans":         di.spans,
 		"matching_items":              matchedInventoryItemsPayload(ms),
 	}
-	inputJSON, err := json.Marshal(payloadObj)
-	if err != nil {
-		r.logger.Warn("inventory items review: marshal payload failed", "record_id", recordID, "item_index", index, "error", err)
+	if truncated {
+		// AR2: the item's spans extend past the included window; tell the
+		// model so it does not misread the cut-off as an extraction error.
+		payloadObj["context_truncated"] = true
+	}
+	payloadJSON := marshalArtifactPayload(payloadObj)
+	if payloadJSON == "" {
+		r.logger.Warn("inventory items review: marshal payload failed", "record_id", recordID, "item_index", index)
 		return nil
 	}
 
-	out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
-		ctx, cfg.PromptRef, cfg.PromptText, cfg.ModelName, string(inputJSON),
-		"review_inventory_items", "MID-CWB-REVIEW-INVENTORY-ITEMS"))
-	if err != nil {
-		r.logger.Warn("inventory items review item failed; skipping",
-			"record_id", recordID, "item_index", index, "error", err)
-		return nil
+	var findings []ReviewFinding
+	var cacheHitTokens, cacheMissTokens int
+	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
+		tools := selectTools(r.toolRegistry, cfg.Tools)
+		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		loopFindings, loopUsage, loopErr := runToolUseReview(
+			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
+			userCtx, tools, recordID, r.logger,
+		)
+		if loopUsage != nil {
+			cacheHitTokens = loopUsage.PromptCacheHitTokens
+			cacheMissTokens = loopUsage.PromptCacheMissTokens
+		}
+		if loopErr != nil {
+			r.logger.Warn("inventory items review tool-use loop failed; no findings for item",
+				"record_id", recordID, "item_index", index, "error", loopErr)
+		}
+		findings = loopFindings
+	} else {
+		// AR2 window-first layout: the window is the document input; the rubric
+		// plus the per-item payload form the task tail. Without a window the
+		// payload itself is the document input (pre-AR2 layout).
+		promptText, inputText := cfg.PromptText, payloadJSON
+		if windowJSON != "" {
+			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), windowJSON
+		}
+		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
+			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
+			"review_inventory_items", "MID-CWB-REVIEW-INVENTORY-ITEMS"))
+		if err != nil {
+			r.logger.Warn("inventory items review item failed; skipping",
+				"record_id", recordID, "item_index", index, "error", err)
+			return nil
+		}
+		findings = normalizeFindingsJSON(out)
+		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
+		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
-
-	findings := normalizeFindingsJSON(out)
 	loc := strings.Join(di.spans, ",")
 	for i := range findings {
 		findings[i].Pass = "P5"
@@ -191,21 +248,25 @@ func (r *inventoryItemsReviewer) reviewItem(
 		"matches", len(ms),
 		"findings", len(findings),
 		"ms_used", time.Since(start).Milliseconds(),
-		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),
-		"cache_miss_tokens", reviewLLMCacheMissTokens(r.client),
+		"cache_hit_tokens", cacheHitTokens,
+		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
 }
 
+// matchedInventoryItemsPayload serializes the matched candidates. Raw RRF
+// scores are replaced by 1-based rank (AR5 §4), and each match carries its
+// source document's authority class (AR5 §3).
 func matchedInventoryItemsPayload(ms []matchedInventoryItem) []map[string]any {
 	out := make([]map[string]any, 0, len(ms))
-	for _, m := range ms {
+	for i, m := range ms {
 		out = append(out, map[string]any{
-			"item":             m.view,
-			"source_record_id": m.recordID,
-			"source_filename":  m.filename,
-			"match_via":        m.via,
-			"confidence":       m.confidence,
+			"item":                 m.view,
+			"source_record_id":     m.recordID,
+			"source_filename":      m.filename,
+			"source_doc_authority": docAuthorityClass(m.docNo, m.title, m.filename),
+			"match_via":            m.via,
+			"match_rank":           i + 1,
 		})
 	}
 	return out
@@ -321,7 +382,7 @@ func assembleInventoryMatches(
 			if !ok {
 				continue
 			}
-			add(docIdx, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "hybrid_search", confidence: h.RRFScore})
+			add(docIdx, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "hybrid_search", confidence: h.RRFScore})
 		}
 	}
 
@@ -340,7 +401,7 @@ func assembleInventoryMatches(
 				}
 			}
 			if shared {
-				add(i, matchedInventoryItem{view: sib.view, recordID: sib.recordID, filename: sib.filename, via: "item_category"})
+				add(i, matchedInventoryItem{view: sib.view, recordID: sib.recordID, filename: sib.filename, title: sib.title, docNo: sib.docNo, via: "item_category"})
 			}
 		}
 	}
@@ -364,7 +425,7 @@ func assembleInventoryMatches(
 				}
 			}
 			if shared {
-				add(i, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, via: "entity", confidence: e.Confidence})
+				add(i, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "entity", confidence: e.Confidence})
 			}
 		}
 	}
@@ -387,29 +448,23 @@ const inventoryItemColumns = `COALESCE(inventory_item_id, ''), COALESCE(item_nam
        COALESCE(part_number, ''), COALESCE(item_categories, '[]'::jsonb),
        COALESCE(standards, '[]'::jsonb), COALESCE(normalized_specs, '[]'::jsonb)`
 
-// scanInventoryItemRow scans one row of inventoryItemColumns into a view + record id.
-// recordID is scanned from a trailing column when present (resolver/sibling queries);
-// the per-record loader passes a nil recordID target.
-func scanInventoryItemRow(rows *sql.Rows, view *inventoryItemView, recordID *int64, filename *string) error {
+// scanInventoryItemRow scans one row of inventoryItemColumns into a resolved
+// item (view + record id + source-document fields from the trailing columns).
+func scanInventoryItemRow(rows *sql.Rows, ri *resolvedInventoryItem) error {
 	var catsJSON, specsJSON []byte
 	var standards []byte
 	dst := []any{
-		&view.ItemID, &view.ItemName, &view.CanonicalName,
-		&view.Manufacturer, &view.Brand, &view.ModelNumber,
-		&view.PartNumber, &catsJSON, &standards, &specsJSON,
-	}
-	if recordID != nil {
-		dst = append(dst, recordID)
-	}
-	if filename != nil {
-		dst = append(dst, filename)
+		&ri.view.ItemID, &ri.view.ItemName, &ri.view.CanonicalName,
+		&ri.view.Manufacturer, &ri.view.Brand, &ri.view.ModelNumber,
+		&ri.view.PartNumber, &catsJSON, &standards, &specsJSON,
+		&ri.recordID, &ri.filename, &ri.title, &ri.docNo,
 	}
 	if err := rows.Scan(dst...); err != nil {
 		return err
 	}
-	view.Categories = parseJSONStringArray(catsJSON)
-	view.Standards = parseJSONStringArray(standards)
-	view.NormalizedSpecs = rawJSONArrayOrNil(specsJSON)
+	ri.view.Categories = parseJSONStringArray(catsJSON)
+	ri.view.Standards = parseJSONStringArray(standards)
+	ri.view.NormalizedSpecs = rawJSONArrayOrNil(specsJSON)
 	return nil
 }
 
@@ -453,6 +508,8 @@ type resolvedInventoryItem struct {
 	view     inventoryItemView
 	recordID int64
 	filename string
+	title    string
+	docNo    string
 }
 
 func (r *inventoryItemsReviewer) loadItemsByItemID(ctx context.Context, idSet map[string]struct{}) (map[string]resolvedInventoryItem, error) {
@@ -465,7 +522,8 @@ func (r *inventoryItemsReviewer) loadItemsByItemID(ctx context.Context, idSet ma
 		ids = append(ids, id)
 	}
 	q := `
-SELECT ` + inventoryItemColumns + `, m.input_record_id, COALESCE(i.staging_filename, '')
+SELECT ` + inventoryItemColumns + `, m.input_record_id, COALESCE(i.staging_filename, ''),
+       COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.inventory_items m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.inventory_item_id = ANY($1)`
@@ -476,7 +534,7 @@ WHERE m.inventory_item_id = ANY($1)`
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var ri resolvedInventoryItem
-		if err := scanInventoryItemRow(rows, &ri.view, &ri.recordID, &ri.filename); err != nil {
+		if err := scanInventoryItemRow(rows, &ri); err != nil {
 			return nil, err
 		}
 		out[ri.view.ItemID] = ri
@@ -489,7 +547,8 @@ const inventoryCategorySiblingLimit = 500
 
 func (r *inventoryItemsReviewer) loadCategorySiblings(ctx context.Context, recordID int64, cats []string) ([]resolvedInventoryItem, error) {
 	q := `
-SELECT ` + inventoryItemColumns + `, m.input_record_id, COALESCE(i.staging_filename, '')
+SELECT ` + inventoryItemColumns + `, m.input_record_id, COALESCE(i.staging_filename, ''),
+       COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.inventory_items m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
 WHERE m.input_record_id <> $1
@@ -504,7 +563,7 @@ LIMIT $3`
 	var out []resolvedInventoryItem
 	for rows.Next() {
 		var ri resolvedInventoryItem
-		if err := scanInventoryItemRow(rows, &ri.view, &ri.recordID, &ri.filename); err != nil {
+		if err := scanInventoryItemRow(rows, &ri); err != nil {
 			return nil, err
 		}
 		out = append(out, ri)
