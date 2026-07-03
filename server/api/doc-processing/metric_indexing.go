@@ -137,6 +137,7 @@ func IndexMetricsForRecord(
 	sharedEdges := writeSharedArtifactEdges(ctx, db, recordID, searchArtifactMetric,
 		[]string{searchArtifactEntity, searchArtifactProvision, searchArtifactInventoryItem, searchArtifactTopic, searchArtifactSemanticProjection},
 		metricIndexConfig.InstanceSource, logger)
+	objectEdges := indexMetricObjectConnections(ctx, db, recordID, logger)
 	// Semantic metric<->metric similarity is no longer materialized as
 	// hybrid_search/semantically_related edges: the metrics reviewer discovers it live via
 	// FindSimilarArtifactsOnTheFly (always fresh, no directional edge bookkeeping). The
@@ -149,6 +150,7 @@ func IndexMetricsForRecord(
 			"category_connections", categoryConnections,
 			"category_path_metrics", categoryPathMetrics,
 			"shared_artifact_edges", sharedEdges,
+			"object_edges", objectEdges,
 		)
 	}
 }
@@ -193,6 +195,93 @@ func loadIndexedMetricsForRecord(ctx context.Context, db *sql.DB, recordID int64
 		})
 	}
 	return out, rows.Err()
+}
+
+func indexMetricObjectConnections(ctx context.Context, db *sql.DB, recordID int64, logger ApiTypes.JimoLogger) int64 {
+	if db == nil {
+		return 0
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("metrics indexing: begin object connections tx failed", "record_id", recordID, "error", err.Error())
+		}
+		return 0
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM kb.artifact_connections
+WHERE source_record_id = $1
+  AND source_type = 'artifact_object'
+  AND target_type = 'object_node'
+  AND relation_method = $2
+  AND relation_name = $3
+  AND COALESCE(extra_info->>'artifact_type', $4) = $4`,
+		recordID, RelationMethodObjectID, RelationBelongTo, searchArtifactMetric,
+	); err != nil {
+		if logger != nil {
+			logger.Warn("metrics indexing: delete object connections failed", "record_id", recordID, "error", err.Error())
+		}
+		return 0
+	}
+
+	res, err := tx.ExecContext(ctx, `
+INSERT INTO kb.artifact_connections (
+	source_record_id, target_record_id, source_type, source_id, target_type, target_id,
+	relation_name, relation_method, confidence, source_desc, target_desc, extra_info
+)
+SELECT
+	ao.source_record_id,
+	ao.source_record_id,
+	'artifact_object',
+	ao.object_id,
+	'object_node',
+	onode.object_id,
+	$2,
+	$3,
+	MAX(NULLIF(ao.reconcile_confidence, 0)),
+	'artifact_object:' || ao.object_id,
+	'object_node:' || onode.object_id,
+	jsonb_build_object('artifact_type', $4, 'artifact_ids', jsonb_agg(DISTINCT ao.artifact_id ORDER BY ao.artifact_id))
+FROM kb.metrics m
+JOIN kb.artifact_objects ao
+  ON ao.source_record_id = m.input_record_id
+ AND ao.artifact_type = $4
+ AND ao.artifact_id = m.metric_id
+JOIN kb.object_nodes onode
+  ON onode.object_id = ao.object_id
+WHERE m.input_record_id = $1
+  AND COALESCE(ao.object_id, '') <> ''
+GROUP BY ao.source_record_id, ao.object_id, onode.object_id
+ON CONFLICT (relation_method, source_type, source_id, target_type, target_id, relation_name)
+DO UPDATE SET
+	source_record_id = EXCLUDED.source_record_id,
+	target_record_id = EXCLUDED.target_record_id,
+	confidence       = EXCLUDED.confidence,
+	source_desc      = EXCLUDED.source_desc,
+	target_desc      = EXCLUDED.target_desc,
+	extra_info       = EXCLUDED.extra_info,
+	create_time      = NOW()`,
+		recordID, RelationBelongTo, RelationMethodObjectID, searchArtifactMetric,
+	)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("metrics indexing: insert object connections failed", "record_id", recordID, "error", err.Error())
+		}
+		return 0
+	}
+	if err := tx.Commit(); err != nil {
+		if logger != nil {
+			logger.Warn("metrics indexing: commit object connections failed", "record_id", recordID, "error", err.Error())
+		}
+		return 0
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0
+	}
+	return count
 }
 
 // parseMetricCategoriesText parses the kb.metrics.metric_categories TEXT column. It is

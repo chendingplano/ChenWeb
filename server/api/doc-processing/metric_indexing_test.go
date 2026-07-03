@@ -134,6 +134,31 @@ func TestBuildArtifactCategoryConnectionsUsesCategoryNameShape(t *testing.T) {
 	}
 }
 
+func TestIndexMetricObjectConnectionsWritesObjectIDEdges(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM kb\\.artifact_connections").
+		WithArgs(int64(100), RelationMethodObjectID, RelationBelongTo, searchArtifactMetric).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO kb\\.artifact_connections").
+		WithArgs(int64(100), RelationBelongTo, RelationMethodObjectID, searchArtifactMetric).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectCommit()
+
+	got := indexMetricObjectConnections(context.Background(), db, 100, nil)
+	if got != 2 {
+		t.Fatalf("indexMetricObjectConnections rows=%d, want 2", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestSearchArtifactIndexersWriteCategoryTreeFiles(t *testing.T) {
 	type testCase struct {
 		name          string

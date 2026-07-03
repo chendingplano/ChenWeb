@@ -87,6 +87,7 @@ const (
 	RelationMethodEntityRelation = "entity_relation"
 	RelationMethodEntityName     = "entity_name"
 	RelationMethodCategoryName   = "category_name"
+	RelationMethodObjectID       = "object_id"
 
 	// artifactTypeCategory / artifactTypeRelationPredicate are the artifact_type
 	// discriminators for the dictionary endpoints promoted to artifacts in D2.
