@@ -131,7 +131,9 @@ func (r ObjectReconciler) ReconcileOne(ctx context.Context, obj ArtifactObject) 
 
 func normalizeArtifactObjectsForArtifact(recordID int64, artifactType, artifactID string, artifact map[string]any) []ArtifactObject {
 	rawObjects := objectItemsFromValue(artifact["objects"])
-	if len(rawObjects) == 0 {
+	if artifactType == searchArtifactInventoryItem {
+		rawObjects = append(synthesizedObjectItems(artifactType, artifact), rawObjects...)
+	} else if len(rawObjects) == 0 {
 		rawObjects = synthesizedObjectItems(artifactType, artifact)
 	}
 	var out []ArtifactObject
@@ -427,4 +429,143 @@ func nullEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+func artifactObjectSearchTextByArtifactID(ctx context.Context, db *sql.DB, recordID int64, artifactType string) (map[string]string, error) {
+	if db == nil {
+		return nil, fmt.Errorf("db is nil")
+	}
+	rows, err := db.QueryContext(ctx, `
+SELECT artifact_id,
+       COALESCE(object_name, ''),
+       COALESCE(object_name_en, ''),
+       COALESCE(object_name_zh, ''),
+       COALESCE(object_type, ''),
+       COALESCE(object_role, ''),
+       COALESCE(description, ''),
+       COALESCE(aliases, '[]'::jsonb),
+       COALESCE(acronyms, '[]'::jsonb)
+FROM kb.artifact_objects
+WHERE source_record_id = $1 AND artifact_type = $2
+ORDER BY artifact_id, id`, recordID, strings.TrimSpace(artifactType))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	partsByID := map[string][]string{}
+	for rows.Next() {
+		var (
+			artifactID               string
+			objectName, objectNameEn string
+			objectNameZh, objectType string
+			objectRole, description  string
+			aliasesRaw, acronymsRaw  []byte
+		)
+		if err := rows.Scan(&artifactID, &objectName, &objectNameEn, &objectNameZh, &objectType, &objectRole, &description, &aliasesRaw, &acronymsRaw); err != nil {
+			return nil, err
+		}
+		artifactID = strings.TrimSpace(artifactID)
+		if artifactID == "" {
+			continue
+		}
+		partsByID[artifactID] = append(partsByID[artifactID],
+			objectName,
+			objectNameEn,
+			objectNameZh,
+			objectType,
+			objectRole,
+			description,
+			searchDocumentArrayText(jsonStringArray(aliasesRaw)),
+			searchDocumentArrayText(jsonStringArray(acronymsRaw)),
+		)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(partsByID))
+	for artifactID, parts := range partsByID {
+		out[artifactID] = joinUniqueSearchParts(parts...)
+	}
+	return out, nil
+}
+
+func artifactObjectSearchTextExcluding(ctx context.Context, db *sql.DB, recordID int64, artifactType string, exclude map[string][]string) (map[string]string, error) {
+	textByID, err := artifactObjectSearchTextByArtifactID(ctx, db, recordID, artifactType)
+	if err != nil || len(textByID) == 0 || len(exclude) == 0 {
+		return textByID, err
+	}
+	// The coarse map above is good enough for provisions. Inventory needs to avoid
+	// re-adding the item itself, so reload object rows and filter per artifact.
+	rows, err := db.QueryContext(ctx, `
+SELECT artifact_id,
+       COALESCE(object_name, ''),
+       COALESCE(object_name_en, ''),
+       COALESCE(object_name_zh, ''),
+       COALESCE(object_type, ''),
+       COALESCE(object_role, ''),
+       COALESCE(description, ''),
+       COALESCE(aliases, '[]'::jsonb),
+       COALESCE(acronyms, '[]'::jsonb)
+FROM kb.artifact_objects
+WHERE source_record_id = $1 AND artifact_type = $2
+ORDER BY artifact_id, id`, recordID, strings.TrimSpace(artifactType))
+	if err != nil {
+		return textByID, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	partsByID := map[string][]string{}
+	for rows.Next() {
+		var (
+			artifactID               string
+			objectName, objectNameEn string
+			objectNameZh, objectType string
+			objectRole, description  string
+			aliasesRaw, acronymsRaw  []byte
+		)
+		if err := rows.Scan(&artifactID, &objectName, &objectNameEn, &objectNameZh, &objectType, &objectRole, &description, &aliasesRaw, &acronymsRaw); err != nil {
+			return textByID, err
+		}
+		artifactID = strings.TrimSpace(artifactID)
+		if artifactID == "" || objectNameMatchesAny([]string{objectName, objectNameEn, objectNameZh}, exclude[artifactID]) {
+			continue
+		}
+		partsByID[artifactID] = append(partsByID[artifactID],
+			objectName,
+			objectNameEn,
+			objectNameZh,
+			objectType,
+			objectRole,
+			description,
+			searchDocumentArrayText(jsonStringArray(aliasesRaw)),
+			searchDocumentArrayText(jsonStringArray(acronymsRaw)),
+		)
+	}
+	if err := rows.Err(); err != nil {
+		return textByID, err
+	}
+	out := make(map[string]string, len(partsByID))
+	for artifactID, parts := range partsByID {
+		out[artifactID] = joinUniqueSearchParts(parts...)
+	}
+	return out, nil
+}
+
+func objectNameMatchesAny(names []string, excluded []string) bool {
+	if len(excluded) == 0 {
+		return false
+	}
+	seen := map[string]struct{}{}
+	for _, name := range excluded {
+		if n := normalizeObjectName(name); n != "" {
+			seen[n] = struct{}{}
+		}
+	}
+	for _, name := range names {
+		if _, ok := seen[normalizeObjectName(name)]; ok {
+			return true
+		}
+	}
+	return false
 }

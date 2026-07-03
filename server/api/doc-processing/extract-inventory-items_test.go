@@ -136,6 +136,33 @@ func TestNormalizeInventoryItemRowsMarksMissingRequiredAttrs(t *testing.T) {
 	}
 }
 
+func TestNormalizeInventoryItemRowsPreservesObjects(t *testing.T) {
+	dict := inventoryDictionary{Version: "dict-v1", Categories: map[string]inventoryCategorySchema{"pump": {}}}
+	rows := normalizeInventoryItemRows([]any{
+		map[string]any{
+			"item_name":       "Feed pump",
+			"canonical_name":  "Feed pump",
+			"item_categories": []any{"pump"},
+			"lines":           []any{"42"},
+			"confidence":      0.91,
+			"objects": []any{map[string]any{
+				"object_name":       "Boiler feed system",
+				"object_role":       "parent_system",
+				"object_type":       "system",
+				"source_line_spans": []any{"42"},
+				"confidence":        0.8,
+			}},
+		},
+	}, 7, dict)
+	if len(rows) != 1 {
+		t.Fatalf("rows len=%d, want 1", len(rows))
+	}
+	objects := objectItemsFromValue(rows[0]["objects"])
+	if len(objects) != 1 || objects[0]["object_name"] != "Boiler feed system" {
+		t.Fatalf("objects=%#v", rows[0]["objects"])
+	}
+}
+
 func TestDedupeKeepsDistinctSpeclessItemsInSameCategory(t *testing.T) {
 	dict := inventoryDictionary{Version: "dict-v1", Categories: map[string]inventoryCategorySchema{"material": {}}}
 	rows := normalizeInventoryItemRows([]any{

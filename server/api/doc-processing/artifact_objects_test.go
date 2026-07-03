@@ -75,6 +75,32 @@ func TestNormalizeArtifactObjectsUsesExplicitObjectsAndDedupes(t *testing.T) {
 	}
 }
 
+func TestNormalizeArtifactObjectsInventoryIncludesSelfWithRelatedObjects(t *testing.T) {
+	item := map[string]any{
+		"item_name":         "Feed pump",
+		"item_categories":   []string{"pump"},
+		"source_line_spans": []string{"8"},
+		"objects": []any{
+			map[string]any{
+				"object_name": "Boiler feed system",
+				"object_type": "system",
+				"object_role": "related_object",
+			},
+		},
+	}
+
+	got := normalizeArtifactObjectsForArtifact(88, searchArtifactInventoryItem, "88_inv_1", item)
+	if len(got) != 2 {
+		t.Fatalf("got %d objects, want self plus related: %+v", len(got), got)
+	}
+	if got[0].ObjectName != "Feed pump" || got[0].ObjectRole != "self" {
+		t.Fatalf("first object = %+v, want Feed pump self", got[0])
+	}
+	if got[1].ObjectName != "Boiler feed system" || got[1].ObjectRole != "related_object" {
+		t.Fatalf("second object = %+v, want Boiler feed system related_object", got[1])
+	}
+}
+
 func TestReconcileArtifactObjectExactAliasMatch(t *testing.T) {
 	store := &memoryObjectNodeStore{
 		nodes: []ObjectNode{{

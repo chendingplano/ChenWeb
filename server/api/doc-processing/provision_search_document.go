@@ -20,6 +20,7 @@ func buildProvisionSearchDocument(provision map[string]any, includeEnglish bool)
 		"",
 		searchDocumentArrayText(provision["category_paths"]),
 		"",
+		searchDocumentObjectsText(provision["objects"]),
 	}
 	if includeEnglish {
 		parts[1] = strings.TrimSpace(asString(provision["prov_name_en"]))

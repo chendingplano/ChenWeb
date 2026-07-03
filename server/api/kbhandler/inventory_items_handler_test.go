@@ -82,12 +82,12 @@ func TestSearchInventoryItemsAppliesInventoryFilters(t *testing.T) {
 		WithArgs("pump", "inventory_item", "pump", "Bosch", "Bosch", "1500", 20, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"artifact_type", "artifact_id", "input_record_id", "primary_label", "secondary_label",
-			"source_title", "source_filename", "source_line_spans", "semantic_payload", "score", "snippet",
+			"source_title", "source_filename", "source_line_spans", "semantic_payload", "keywords", "score", "snippet",
 		}).AddRow(
 			"inventory_item", "12_inv_1", int64(12), "Bosch Pump", "pump",
 			"manual.pdf", "manual.pdf", `["5"]`,
 			`{"item_categories":["pump"],"manufacturer":"Bosch","brand":"Bosch","model_number":"1500"}`,
-			0.8, "Bosch Pump",
+			`{pump}`, 0.8, "Bosch Pump",
 		))
 
 	e := echo.New()

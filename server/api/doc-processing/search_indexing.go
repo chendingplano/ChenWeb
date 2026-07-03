@@ -487,6 +487,10 @@ ORDER BY id`
 	defer rows.Close()
 
 	weights := appconfig.GetProvisionSearchWeightsConfig()
+	objectTextByID, objectTextErr := artifactObjectSearchTextByArtifactID(ctx, db, recordID, searchArtifactProvision)
+	if objectTextErr != nil {
+		objectTextByID = nil
+	}
 	out := make([]kbsearch.RegistryRow, 0, 16)
 	for rows.Next() {
 		var (
@@ -516,6 +520,7 @@ ORDER BY id`
 			Keywords:      kw,
 			CategoryPaths: flattenSearchCategoryPaths(categoryPaths),
 		})
+		objectText := objectTextByID[strings.TrimSpace(provID)]
 		artifactID := provID
 		if strings.TrimSpace(artifactID) == "" {
 			artifactID = strconv.FormatInt(id, 10)
@@ -528,7 +533,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(provName, provID),
 			SecondaryLabel:  provisionType,
-			SearchDocument:  firstNonEmpty(searchDocWeighted, searchDoc, strings.Join([]string{provName, provDesc, provisionType}, " ")),
+			SearchDocument:  joinUniqueSearchParts(firstNonEmpty(searchDocWeighted, searchDoc, strings.Join([]string{provName, provDesc, provisionType}, " ")), objectText),
 			SnippetBasis:    firstNonEmpty(provDesc, provName),
 			SourceTitle:     inputFilename,
 			SourceFilename:  inputFilename,

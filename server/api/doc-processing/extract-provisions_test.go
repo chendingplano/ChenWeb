@@ -59,6 +59,7 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 		StatusRaw:       "[]",
 	}}
 	provisionsStore := &fakeProvisionsStore{}
+	objectStore := &fakeArtifactObjectsStore{}
 	extractor := &fakeJSONExtractor{out: map[string]any{
 		"language": "en",
 		"provisions": []any{
@@ -75,6 +76,13 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 				"confidence":        0.91,
 				"is_explicit":       true,
 				"need_verify":       false,
+				"objects": []any{map[string]any{
+					"object_name":       "pressure relief valves",
+					"object_type":       "equipment",
+					"object_role":       "regulated_object",
+					"source_line_spans": []any{"10"},
+					"confidence":        0.93,
+				}},
 				"category_paths": []any{
 					map[string]any{
 						"category_path": []any{
@@ -107,6 +115,8 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	p.ModelErr = nil
 	p.ModelName = "gpt-test"
 	p.ExtractProvisionsInput = "blocks"
+	p.ObjectStore = objectStore
+	p.ObjectReconciler = ObjectReconciler{Store: &memoryObjectNodeStore{}}
 
 	if err := p.HandleEvent(ctx, []byte(`{"record_id":"4001","force":true}`)); err != nil {
 		t.Fatalf("HandleEvent: %v", err)
@@ -132,8 +142,14 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if provisionsStore.lastSave.ExtractID == "" {
 		t.Fatalf("ExtractID should be set")
 	}
-	if got := int(toFloat(provisionsStore.lastSave.Provisions[0]["prov_id"])); got != 1 {
-		t.Fatalf("prov_id=%v, want 1", got)
+	if objectStore.called != 1 || objectStore.artifactType != searchArtifactProvision {
+		t.Fatalf("object store target: called=%d type=%q", objectStore.called, objectStore.artifactType)
+	}
+	if len(objectStore.objects) != 1 || objectStore.objects[0].ArtifactID != "4001_prv_1" || objectStore.objects[0].ObjectName != "pressure relief valves" {
+		t.Fatalf("unexpected persisted objects: %+v", objectStore.objects)
+	}
+	if got := strings.TrimSpace(asString(provisionsStore.lastSave.Provisions[0]["prov_id"])); got != "4001_prv_1" {
+		t.Fatalf("prov_id=%v, want 4001_prv_1", got)
 	}
 	if got := provisionsStore.lastSave.Provisions[0]["prov_name"]; got != "inspection_requirement" {
 		t.Fatalf("prov_name=%v", got)
@@ -198,8 +214,8 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if err != nil {
 		t.Fatalf("read provisions.txt: %v", err)
 	}
-	if got := strings.TrimSpace(string(body)); got != "4001_1" {
-		t.Fatalf("provisions.txt=%q, want 4001_1", got)
+	if got := strings.TrimSpace(string(body)); got != "4001_prv_1" {
+		t.Fatalf("provisions.txt=%q, want 4001_prv_1", got)
 	}
 
 	artifactPath := filepath.Join(tmp, "4", "4001", "std-4001_opendata.provisions")
@@ -214,8 +230,8 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if len(artifactRecords) != 1 {
 		t.Fatalf(".provisions record count=%d, want 1", len(artifactRecords))
 	}
-	if got := int(toFloat(artifactRecords[0]["prov_id"])); got != 1 {
-		t.Fatalf(".provisions prov_id=%v, want 1", got)
+	if got := strings.TrimSpace(asString(artifactRecords[0]["prov_id"])); got != "4001_prv_1" {
+		t.Fatalf(".provisions prov_id=%v, want 4001_prv_1", got)
 	}
 	if got := strings.TrimSpace(asString(artifactRecords[0]["prov_type"])); got != "mandatory" {
 		t.Fatalf(".provisions prov_type=%v, want mandatory", got)
@@ -250,8 +266,8 @@ func TestProvisionsProcessor_ExtractsFromBlockBufferAndWritesStatus(t *testing.T
 	if _, ok := last["ms-used"]; ok {
 		t.Fatalf("ms-used should not be present (renamed to ms_used)")
 	}
-	if _, ok := last["proc_status"]; ok {
-		t.Fatalf("proc_status should not be present (use proc_status only)")
+	if _, ok := last["status"]; ok {
+		t.Fatalf("status should not be present (use proc_status only)")
 	}
 }
 

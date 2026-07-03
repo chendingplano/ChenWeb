@@ -58,6 +58,8 @@ type InventoryItemsProcessor struct {
 	CategoryRegistry              InventoryCategoryRegistry
 	CategoryCurator               InventoryCategoryCurator
 	categorySeedDone              bool
+	ObjectStore                   ArtifactObjectsStore
+	ObjectReconciler              ObjectReconciler
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchRecordID int64
@@ -149,7 +151,7 @@ func NewInventoryItemsProcessor(
 	logger := loggerutil.CreateDefaultLogger("MID_26053101")
 	promptText, promptRef, promptPath, promptErr := loadProductPromptFromEnvKeys(
 		[]string{"EXTRACT_INVENTORY_ITEMS_PROMPT"},
-		"prompt-extract-inventory-items-v1.md",
+		"prompt-extract-inventory-items-v3.md",
 	)
 	modelRef, modelCfgPath, modelCfg, modelErr := loadModelConfigFromEnvKeys(
 		[]string{"EXTRACT_INVENTORY_ITEMS_MODEL_NAME"},
@@ -184,7 +186,7 @@ func NewInventoryItemsProcessor(
 		FuzzyThreshold: envFloat("INVENTORY_CATEGORY_FUZZY_THRESHOLD", defaultInventoryCategoryFuzzyThreshold, 0),
 		Logger:         logger,
 	}
-	return &InventoryItemsProcessor{
+	p := &InventoryItemsProcessor{
 		InputStore:                    inputStore,
 		Store:                         store,
 		Extractor:                     extractor,
@@ -213,6 +215,11 @@ func NewInventoryItemsProcessor(
 		CategoryRegistry:              registry,
 		CategoryCurator:               curator,
 	}
+	if ApiTypes.ProjectDBHandle != nil {
+		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
+		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: objectReconcileOptionsFromEnv()}
+	}
+	return p
 }
 
 func (p *InventoryItemsProcessor) Name() string { return "extract_inventory_items" }
@@ -337,6 +344,10 @@ func (p *InventoryItemsProcessor) HandleEvent(ctx context.Context, payload []byt
 	if err != nil {
 		p.persistInventoryItemsStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26053114) save inventory items: %w", err)
+	}
+	if err := p.persistInventoryItemObjects(ctx, evt.RecordID, result.Items); err != nil {
+		p.persistInventoryItemsStatus(ctx, rec, start, err)
+		return fmt.Errorf("(MID_26053121) persist inventory item objects: %w", err)
 	}
 	// Persist the discarded duplicates to the audit table. Best-effort: the
 	// survivors are already saved, so a failure here must not fail the document.
@@ -608,6 +619,9 @@ func normalizeInventoryItemRows(raw any, chunkSeqNo int, dict inventoryDictionar
 			"confidence":             confidence,
 			"confidence_reason":      strings.TrimSpace(asString(m["confidence_reason"])),
 			"chunk_seq_no":           chunkSeqNo,
+		}
+		if objects := objectItemsFromValue(m["objects"]); len(objects) > 0 {
+			row["objects"] = objects
 		}
 		if strings.TrimSpace(asString(row["canonical_name"])) == "" {
 			row["canonical_name"] = itemName
@@ -956,12 +970,36 @@ func dedupeInventoryItemRows(items []map[string]any) (survivors, duplicates []ma
 			survivor["source_line_spans"] = unionStringList(survivor["source_line_spans"], m["source_line_spans"])
 			survivor["aliases"] = unionStringList(survivor["aliases"], m["aliases"])
 			survivor["standards"] = unionStringList(survivor["standards"], m["standards"])
+			survivor["objects"] = unionObjectItems(survivor["objects"], m["objects"])
 			duplicates = append(duplicates, m)
 		}
 		survivor["mention_count"] = len(members)
 		survivors = append(survivors, survivor)
 	}
 	return survivors, duplicates
+}
+
+func unionObjectItems(a, b any) []map[string]any {
+	items := append(objectItemsFromValue(a), objectItemsFromValue(b)...)
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		name := firstNonEmptyTrimmed(asString(item["object_name"]), asString(item["object_name_en"]), asString(item["object_name_zh"]))
+		role := normalizeObjectToken(asString(item["object_role"]))
+		key := normalizeObjectName(name) + "|" + role
+		if strings.TrimSpace(key) == "|" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 func dedupeGroupKey(item map[string]any) string {
@@ -1844,6 +1882,13 @@ ORDER BY id`
 	defer rows.Close()
 	weights := appconfig.GetInventoryItemSearchWeightsConfig()
 	out := make([]kbsearch.RegistryRow, 0, 16)
+	excludeNamesByArtifactID := map[string][]string{}
+	type pendingInventoryRegistryRow struct {
+		row             kbsearch.RegistryRow
+		inventoryItemID string
+		baseSearchDoc   string
+	}
+	pendingRows := make([]pendingInventoryRegistryRow, 0, 16)
 	for rows.Next() {
 		var (
 			id                   int64
@@ -1914,23 +1959,42 @@ ORDER BY id`
 		if seq == "" {
 			seq = strconv.FormatInt(id, 10)
 		}
-		out = append(out, kbsearch.RegistryRow{
-			ArtifactType:    searchArtifactInventoryItem,
-			ArtifactID:      kbsearch.BuildArtifactID(recordID, searchArtifactInventoryItem, seq),
-			InputRecordID:   recordID,
-			SourceRowID:     &id,
-			PrimaryLabel:    firstNonEmpty(itemName, canonicalName, inventoryItemID),
-			SecondaryLabel:  firstNonEmpty(primaryCategory, manufacturer),
-			SearchDocument:  firstNonEmpty(weightedSearchDoc, searchDoc, strings.TrimSpace(strings.Join(append([]string{itemName, canonicalName}, append(categoryList, manufacturer, brand, modelNumber, partNumber, dedupeKey)...), " "))),
-			SnippetBasis:    firstNonEmpty(confidenceReason, itemName),
-			SourceTitle:     sourceTitle,
-			SourceFilename:  sourceTitle,
-			CategoryPaths:   json.RawMessage("[]"),
-			SourceLineSpans: json.RawMessage(jsonArrayOrEmptyBytes(sourceLineSpans)),
-			SemanticPayload: payload,
+		artifactID := kbsearch.BuildArtifactID(recordID, searchArtifactInventoryItem, seq)
+		excludeNamesByArtifactID[strings.TrimSpace(inventoryItemID)] = []string{itemName, canonicalName}
+		baseSearchDoc := firstNonEmpty(weightedSearchDoc, searchDoc, strings.TrimSpace(strings.Join(append([]string{itemName, canonicalName}, append(categoryList, manufacturer, brand, modelNumber, partNumber, dedupeKey)...), " ")))
+		pendingRows = append(pendingRows, pendingInventoryRegistryRow{
+			inventoryItemID: strings.TrimSpace(inventoryItemID),
+			baseSearchDoc:   baseSearchDoc,
+			row: kbsearch.RegistryRow{
+				ArtifactType:    searchArtifactInventoryItem,
+				ArtifactID:      artifactID,
+				InputRecordID:   recordID,
+				SourceRowID:     &id,
+				PrimaryLabel:    firstNonEmpty(itemName, canonicalName, inventoryItemID),
+				SecondaryLabel:  firstNonEmpty(primaryCategory, manufacturer),
+				SearchDocument:  baseSearchDoc,
+				SnippetBasis:    firstNonEmpty(confidenceReason, itemName),
+				SourceTitle:     sourceTitle,
+				SourceFilename:  sourceTitle,
+				CategoryPaths:   json.RawMessage("[]"),
+				SourceLineSpans: json.RawMessage(jsonArrayOrEmptyBytes(sourceLineSpans)),
+				SemanticPayload: payload,
+			},
 		})
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	objectTextByID, objectTextErr := artifactObjectSearchTextExcluding(ctx, db, recordID, searchArtifactInventoryItem, excludeNamesByArtifactID)
+	if objectTextErr != nil {
+		objectTextByID = nil
+	}
+	for _, pending := range pendingRows {
+		row := pending.row
+		row.SearchDocument = joinUniqueSearchParts(pending.baseSearchDoc, objectTextByID[pending.inventoryItemID])
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 type inventoryItemSearchFields struct {
@@ -2079,6 +2143,11 @@ func (p *InventoryItemsProcessor) FinalizeChunkBatch(ctx context.Context) error 
 	if detectedLanguage == "" {
 		detectedLanguage = "unknown"
 	}
+	for i := range items {
+		if strings.TrimSpace(asString(items[i]["inventory_item_id"])) == "" {
+			items[i]["inventory_item_id"] = fmt.Sprintf("%d_inv_%d", p.batchRecordID, i+1)
+		}
+	}
 
 	eventID := fmt.Sprintf("batch_%d", p.batchRecordID)
 	inserted, saveErr := p.Store.SaveInventoryItems(ctx, SaveInventoryItemsRequest{
@@ -2092,6 +2161,9 @@ func (p *InventoryItemsProcessor) FinalizeChunkBatch(ctx context.Context) error 
 	if saveErr != nil {
 		return fmt.Errorf("(MID_26062733) %s save items: %w", p.Name(), saveErr)
 	}
+	if err := p.persistInventoryItemObjects(ctx, p.batchRecordID, items); err != nil {
+		return fmt.Errorf("(MID_26062734) %s persist inventory item objects: %w", p.Name(), err)
+	}
 
 	if reindexErr := ReindexInventoryItemSearchForRecord(ctx, p.batchRecordID, p.Logger); reindexErr != nil {
 		p.Logger.Warn("reindex inventory search failed", "record_id", p.batchRecordID, "error", reindexErr)
@@ -2103,4 +2175,26 @@ func (p *InventoryItemsProcessor) FinalizeChunkBatch(ctx context.Context) error 
 		"num_chunks", len(p.batchChunks),
 	)
 	return nil
+}
+
+func (p *InventoryItemsProcessor) persistInventoryItemObjects(ctx context.Context, recordID int64, items []map[string]any) error {
+	if p.ObjectStore == nil {
+		return nil
+	}
+	objects := make([]ArtifactObject, 0)
+	for _, item := range items {
+		itemID := strings.TrimSpace(asString(item["inventory_item_id"]))
+		if itemID == "" {
+			continue
+		}
+		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactInventoryItem, itemID, item)...)
+	}
+	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
+		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler)
+		if err != nil {
+			return err
+		}
+		objects = reconciled
+	}
+	return p.ObjectStore.ReplaceObjectsForRecord(ctx, recordID, searchArtifactInventoryItem, objects)
 }

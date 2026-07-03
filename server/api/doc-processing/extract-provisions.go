@@ -49,6 +49,8 @@ type ProvisionsProcessor struct {
 	ArtifactWebDir            string
 	ExtractProvisionsMaxTasks int
 	ExtractProvisionsInput    string // "chunks" (default) or "blocks"
+	ObjectStore               ArtifactObjectsStore
+	ObjectReconciler          ObjectReconciler
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchChunks   []Chunk
@@ -111,7 +113,7 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		fallbackExtractor = fe
 	}
 	prevOverlap, nextOverlap, removeTOC := blockingConfigFromViper()
-	return &ProvisionsProcessor{
+	p := &ProvisionsProcessor{
 		InputStore:                inputStore,
 		Store:                     store,
 		Extractor:                 extractor,
@@ -140,6 +142,11 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		ExtractProvisionsMaxTasks: envInt("EXTRACT_PROVISIONS_MAX_TASKS", 1, 1),
 		ExtractProvisionsInput:    extractProvisionsInputFromEnv(),
 	}
+	if ApiTypes.ProjectDBHandle != nil {
+		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
+		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: objectReconcileOptionsFromEnv()}
+	}
+	return p
 }
 
 func extractProvisionsInputFromEnv() string {
@@ -270,6 +277,10 @@ func (p *ProvisionsProcessor) HandleEvent(ctx context.Context, payload []byte) e
 		p.persistProvisionsStatus(ctx, rec, start, err)
 		p.Logger.Error("save provision error", "error", err, "record_id", evt.RecordID)
 		return nil
+	}
+	if err := p.persistProvisionObjects(ctx, evt.RecordID, outputRows); err != nil {
+		p.persistProvisionsStatus(ctx, rec, start, err)
+		return fmt.Errorf("(MID_26050754) persist provision objects failed: %w", err)
 	}
 	if err := p.indexProvisionsInTree(evt.RecordID, outputRows); err != nil {
 		p.Logger.Error("index provision tree error", "error", err, "record_id", evt.RecordID)
@@ -528,7 +539,7 @@ func (p *ProvisionsProcessor) extractProvisionsFromChunksWithLLM(ctx context.Con
 			"cache_hit", cacheHit,
 			"cache_miss", cacheMiss,
 			"ms_used", time.Since(callStart).Milliseconds(),
-			)
+		)
 		return provisionChunkResult{
 			payload:    payload,
 			modelName:  modelName,
@@ -603,8 +614,21 @@ func provisionChunkTask(base string, chunk Chunk) string {
 			"confidence":        0.0,
 			"is_explicit":       true,
 			"need_verify":       false,
-			"category_paths":    []any{},
-			"category_path_en":  []any{},
+			"objects": []map[string]any{{
+				"object_name":       "string",
+				"object_name_en":    "string",
+				"object_name_zh":    "string",
+				"object_type":       "equipment|material|system|process|organization|person|place|document|concept|other",
+				"object_role":       "regulated_object|requirement_target|component|parent_system|other",
+				"aliases":           []string{"string"},
+				"acronyms":          []string{"string"},
+				"description":       "string",
+				"evidence_quote":    "string",
+				"source_line_spans": []string{"12", "16-19"},
+				"confidence":        0.0,
+			}},
+			"category_paths":   []any{},
+			"category_path_en": []any{},
 		}},
 	}
 	schemaJSON, _ := json.Marshal(schema)
@@ -903,8 +927,21 @@ func buildProvisionUserPrompt(block Block) string {
 			"confidence":        0.0,
 			"is_explicit":       true,
 			"need_verify":       false,
-			"category_paths":    []any{},
-			"category_path_en":  []any{},
+			"objects": []map[string]any{{
+				"object_name":       "string",
+				"object_name_en":    "string",
+				"object_name_zh":    "string",
+				"object_type":       "equipment|material|system|process|organization|person|place|document|concept|other",
+				"object_role":       "regulated_object|requirement_target|component|parent_system|other",
+				"aliases":           []string{"string"},
+				"acronyms":          []string{"string"},
+				"description":       "string",
+				"evidence_quote":    "string",
+				"source_line_spans": []string{"12", "16-19"},
+				"confidence":        0.0,
+			}},
+			"category_paths":   []any{},
+			"category_path_en": []any{},
 		}},
 	}
 	schemaJSON, _ := json.Marshal(schema)
@@ -968,6 +1005,9 @@ func normalizeProvisionList(items []any, lineToPage map[int]int, lineText map[st
 			"need_verify":       toBool(raw["need_verify"]),
 			"category_paths":    categoryPaths,
 			"category_paths_en": raw["category_path_en"],
+		}
+		if objects := objectItemsFromValue(raw["objects"]); len(objects) > 0 {
+			normalized["objects"] = objects
 		}
 		sourceSpans := normalizeProvisionSourceLineSpans(raw["source_line_spans"], lineToPage)
 		normalized["source_line_spans"] = sourceSpans
@@ -1124,9 +1164,32 @@ func (p *ProvisionsProcessor) buildProvisionOutputRows(recordID int64, provision
 			"notes":                 "",
 			"error_msg":             "",
 			"source_line_spans":     provision["source_line_spans"],
+			"objects":               provision["objects"],
 		})
 	}
 	return out
+}
+
+func (p *ProvisionsProcessor) persistProvisionObjects(ctx context.Context, recordID int64, provisions []map[string]any) error {
+	if p.ObjectStore == nil {
+		return nil
+	}
+	objects := make([]ArtifactObject, 0)
+	for _, provision := range provisions {
+		provID := strings.TrimSpace(asString(provision["prov_id"]))
+		if provID == "" {
+			continue
+		}
+		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactProvision, provID, provision)...)
+	}
+	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
+		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler)
+		if err != nil {
+			return err
+		}
+		objects = reconciled
+	}
+	return p.ObjectStore.ReplaceObjectsForRecord(ctx, recordID, searchArtifactProvision, objects)
 }
 
 func loadOptionalModelConfigFromEnv(modelRefEnv string, modelsFileEnv string) (modelRef string, modelPath string, cfg structureModelConfig, err error) {
@@ -1170,6 +1233,7 @@ func buildProvisionDBRecord(provision map[string]any, language string) map[strin
 		"provision_keywords_en": provision["provision_keywords_en"],
 		"category_paths":        provision["category_paths"],
 		"category_paths_en":     provision["category_paths_en"],
+		"objects":               provision["objects"],
 		"location_type":         strings.TrimSpace(asString(provision["location_type"])),
 		"confidence":            toFloat(provision["confidence"]),
 		"is_explicit":           toBool(provision["is_explicit"]),
@@ -1367,6 +1431,7 @@ func buildProvisionFileRecord(row map[string]any) map[string]any {
 		"need_verify":         toBool(row["need_verify"]),
 		"category_paths":      row["category_paths"],
 		"category_paths_en":   row["category_paths_en"],
+		"objects":             row["objects"],
 		"connected_artifacts": row["connected_artifacts"],
 	}
 }
@@ -1511,7 +1576,7 @@ func loadProvisionsPromptFromEnv() (promptText string, promptRef string, promptP
 		}
 	}
 	if promptRef == "" {
-		promptRef = "prompt-extract-provisions.md"
+		promptRef = "prompt-extract-provisions-v3.md"
 	}
 
 	paths := make([]string, 0, 8)
@@ -2052,6 +2117,9 @@ func (p *ProvisionsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	})
 	if err != nil {
 		return fmt.Errorf("(MID_26062717) %s save provisions: %w", p.Name(), err)
+	}
+	if err := p.persistProvisionObjects(ctx, p.batchRecordID, outputRows); err != nil {
+		return fmt.Errorf("(MID_26062718) %s persist provision objects: %w", p.Name(), err)
 	}
 
 	if err := p.indexProvisionsInTree(p.batchRecordID, outputRows); err != nil {
