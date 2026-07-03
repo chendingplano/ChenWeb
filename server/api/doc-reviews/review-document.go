@@ -670,6 +670,17 @@ type ReviewProcessor struct {
 	InventoryItemsMaxToolTokens int
 	InventoryItemsTools         []string
 	InventoryItemsToolClient    LLMChatClient
+
+	// MetricsCompleteness* fields for the object-anchored missing-metric pass
+	// (ADR 2026070201 AR6, Stage 5).
+	MetricsCompletenessClient      LLMJSONExtractor
+	MetricsCompletenessModelName   string
+	MetricsCompletenessPromptRef   string
+	MetricsCompletenessPromptText  string
+	MetricsCompletenessMaxToolTurns  int
+	MetricsCompletenessMaxToolTokens int
+	MetricsCompletenessTools         []string
+	MetricsCompletenessToolClient    LLMChatClient
 }
 
 // resolveReviewerRuntime resolves one P1 reviewer's prompt + model + client from
@@ -840,6 +851,11 @@ func NewReviewProcessor(
 	metricsToolClient := resolveReviewerToolClient(logger, "metrics", "P5", metricsMaxTurns)
 	provisionsToolClient := resolveReviewerToolClient(logger, "provisions", "P5", provisionsMaxTurns)
 	inventoryItemsToolClient := resolveReviewerToolClient(logger, "inventory_items", "P5", inventoryItemsMaxTurns)
+
+	// metrics_completeness — object-anchored missing-metric pass (ADR 2026070201 AR6).
+	metricsCompletenessClient, metricsCompletenessModel, metricsCompletenessPrompt, metricsCompletenessRef, _ := resolveReviewerRuntime(logger, "metrics_completeness", "P5")
+	metricsCompletenessMaxTurns, metricsCompletenessMaxTokens, metricsCompletenessToolList := resolveReviewerBudget("metrics_completeness", "P5")
+	metricsCompletenessToolClient := resolveReviewerToolClient(logger, "metrics_completeness", "P5", metricsCompletenessMaxTurns)
 
 	technicalAccuracyMaxTurns, technicalAccuracyMaxTokens, technicalAccuracyToolList := resolveReviewerBudget("technical_accuracy", "P5")
 	assumptionsMaxTurns, assumptionsMaxTokens, assumptionsToolList := resolveReviewerBudget("assumptions", "P5")
@@ -1166,6 +1182,15 @@ func NewReviewProcessor(
 		InventoryItemsMaxToolTokens: inventoryItemsMaxTokens,
 		InventoryItemsTools:         inventoryItemsToolList,
 		InventoryItemsToolClient:    inventoryItemsToolClient,
+
+		MetricsCompletenessClient:        metricsCompletenessClient,
+		MetricsCompletenessModelName:     metricsCompletenessModel,
+		MetricsCompletenessPromptRef:     metricsCompletenessRef,
+		MetricsCompletenessPromptText:    metricsCompletenessPrompt,
+		MetricsCompletenessMaxToolTurns:  metricsCompletenessMaxTurns,
+		MetricsCompletenessMaxToolTokens: metricsCompletenessMaxTokens,
+		MetricsCompletenessTools:         metricsCompletenessToolList,
+		MetricsCompletenessToolClient:    metricsCompletenessToolClient,
 	}
 
 }
@@ -2033,6 +2058,36 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				MaxToolTurns:  p.InventoryItemsMaxToolTurns,
 				MaxToolTokens: p.InventoryItemsMaxToolTokens,
 				Tools:         p.InventoryItemsTools,
+			},
+		})
+	}
+
+	// metrics_completeness — object-anchored missing-metric detection
+	// (ADR 2026070201 AR6). This is a separate pass from the metrics
+	// conflict reviewer; it compares the doc's object→metric set against
+	// what peer documents attach to the same canonical objects. Runs as a
+	// sibling aspect in the same group (P5); tool-use is enabled for the
+	// mandatory search_metrics absence-verification step (AR6 §4).
+	if p.MetricsCompletenessClient != nil && p.MetricsCompletenessPromptText != "" && p.MetricsCompletenessModelName != "" {
+		runners = append(runners, reviewRunner{
+			reviewer: &metricsCompletenessReviewer{
+				client:       p.MetricsCompletenessClient,
+				toolClient:   p.MetricsCompletenessToolClient,
+				toolRegistry: defaultToolRegistry(),
+				logger:       p.Logger,
+				db:           ApiTypes.ProjectDBHandle,
+				maxTasks:     p.MaxConcurrent,
+				maxObjects:   envInt("METRIC_COMPLETENESS_REVIEW_MAX_OBJECTS", 0, 0),
+			},
+			cfg: ReviewerConfig{
+				Enabled:       true,
+				Input:         "artifact",
+				ModelName:     p.MetricsCompletenessModelName,
+				PromptText:    p.MetricsCompletenessPromptText,
+				PromptRef:     p.MetricsCompletenessPromptRef,
+				MaxToolTurns:  p.MetricsCompletenessMaxToolTurns,
+				MaxToolTokens: p.MetricsCompletenessMaxToolTokens,
+				Tools:         p.MetricsCompletenessTools,
 			},
 		})
 	}
