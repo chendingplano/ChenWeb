@@ -134,28 +134,72 @@ func TestBuildArtifactCategoryConnectionsUsesCategoryNameShape(t *testing.T) {
 	}
 }
 
-func TestIndexMetricObjectConnectionsWritesObjectIDEdges(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
+func TestIndexArtifactObjectConnectionsWritesObjectIDEdges(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       artifactObjectConnectionConfig
+		wantTable string
+	}{
+		{
+			name: "metrics",
+			cfg: artifactObjectConnectionConfig{
+				ArtifactType:     searchArtifactMetric,
+				ArtifactTable:    "kb.metrics",
+				ArtifactIDColumn: "metric_id",
+				SourceType:       searchArtifactMetric,
+				LogPrefix:        "metrics indexing",
+			},
+			wantTable: "kb\\.metrics",
+		},
+		{
+			name: "provisions",
+			cfg: artifactObjectConnectionConfig{
+				ArtifactType:     searchArtifactProvision,
+				ArtifactTable:    "kb.provisions",
+				ArtifactIDColumn: "prov_id",
+				SourceType:       searchArtifactProvision,
+				LogPrefix:        "provision indexing",
+			},
+			wantTable: "kb\\.provisions",
+		},
+		{
+			name: "inventory items",
+			cfg: artifactObjectConnectionConfig{
+				ArtifactType:     searchArtifactInventoryItem,
+				ArtifactTable:    "kb.inventory_items",
+				ArtifactIDColumn: "inventory_item_id",
+				SourceType:       searchArtifactInventoryItem,
+				LogPrefix:        "inventory items indexing",
+			},
+			wantTable: "kb\\.inventory_items",
+		},
 	}
-	defer db.Close()
 
-	mock.ExpectBegin()
-	mock.ExpectExec("DELETE FROM kb\\.artifact_connections").
-		WithArgs(int64(100), RelationMethodObjectID, RelationBelongTo, searchArtifactMetric).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("INSERT INTO kb\\.artifact_connections").
-		WithArgs(int64(100), RelationBelongTo, RelationMethodObjectID, searchArtifactMetric).
-		WillReturnResult(sqlmock.NewResult(0, 2))
-	mock.ExpectCommit()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			defer db.Close()
 
-	got := indexMetricObjectConnections(context.Background(), db, 100, nil)
-	if got != 2 {
-		t.Fatalf("indexMetricObjectConnections rows=%d, want 2", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
+			mock.ExpectBegin()
+			mock.ExpectExec("DELETE FROM kb\\.artifact_connections").
+				WithArgs(int64(100), RelationMethodObjectID, RelationBelongTo, tt.cfg.SourceType).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec("FROM "+tt.wantTable).
+				WithArgs(int64(100), RelationBelongTo, RelationMethodObjectID, tt.cfg.ArtifactType, tt.cfg.SourceType).
+				WillReturnResult(sqlmock.NewResult(0, 2))
+			mock.ExpectCommit()
+
+			got := indexArtifactObjectConnections(context.Background(), db, 100, tt.cfg, nil)
+			if got != 2 {
+				t.Fatalf("indexArtifactObjectConnections rows=%d, want 2", got)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
 	}
 }
 

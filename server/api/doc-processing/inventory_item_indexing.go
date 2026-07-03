@@ -26,6 +26,14 @@ var inventoryItemIndexConfig = artifactIndexConfig{
 	WarnOnMissingCategoryPaths: true,
 }
 
+var inventoryItemObjectConnectionConfig = artifactObjectConnectionConfig{
+	ArtifactType:     searchArtifactInventoryItem,
+	ArtifactTable:    "kb.inventory_items",
+	ArtifactIDColumn: "inventory_item_id",
+	SourceType:       searchArtifactInventoryItem,
+	LogPrefix:        "inventory items indexing",
+}
+
 // IndexInventoryItemsForRecord runs the post-save inventory-item indexing workflow
 // (spec 3.3.2-3.3.5): connected_artifacts JSON, category_name edges, category-path
 // inventory_items.txt entries, and hybrid_search semantic links. Step 3.3.1
@@ -71,6 +79,7 @@ func IndexInventoryItemsForRecord(
 	sharedEdges := writeSharedArtifactEdges(ctx, db, recordID, searchArtifactInventoryItem,
 		[]string{searchArtifactEntity, searchArtifactMetric, searchArtifactProvision, searchArtifactTopic, searchArtifactSemanticProjection},
 		inventoryItemIndexConfig.InstanceSource, logger)
+	objectEdges := indexArtifactObjectConnections(ctx, db, recordID, inventoryItemObjectConnectionConfig, logger)
 	// Semantic item<->item similarity is no longer materialized as
 	// hybrid_search/semantically_related edges: the inventory reviewer discovers it live via
 	// FindSimilarArtifactsOnTheFly (always fresh, no directional edge bookkeeping). The
@@ -83,6 +92,7 @@ func IndexInventoryItemsForRecord(
 			"category_connections", categoryConnections,
 			"category_path_items", categoryPathItems,
 			"shared_artifact_edges", sharedEdges,
+			"object_edges", objectEdges,
 		)
 	}
 }

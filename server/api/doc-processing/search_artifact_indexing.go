@@ -45,6 +45,14 @@ var provisionIndexConfig = artifactIndexConfig{
 	WarnOnMissingCategoryPaths: true,
 }
 
+var provisionObjectConnectionConfig = artifactObjectConnectionConfig{
+	ArtifactType:     searchArtifactProvision,
+	ArtifactTable:    "kb.provisions",
+	ArtifactIDColumn: "prov_id",
+	SourceType:       searchArtifactProvision,
+	LogPrefix:        "provision indexing",
+}
+
 var entityIndexConfig = artifactIndexConfig{
 	SelfType:             searchArtifactEntity,
 	CategoryType:         "entity",
@@ -75,6 +83,7 @@ func IndexTopicsForRecord(ctx context.Context, recordID int64, inputChunks []Blo
 
 func IndexProvisionsForRecord(ctx context.Context, recordID int64, inputChunks []Block, logger ApiTypes.JimoLogger) {
 	indexArtifactsByOverlapAndConnect(ctx, recordID, inputChunks, logger, provisionIndexConfig, loadIndexedProvisionsForRecord)
+	indexArtifactObjectConnections(ctx, ApiTypes.ProjectDBHandle, recordID, provisionObjectConnectionConfig, logger)
 }
 
 func IndexEntitiesForRecord(ctx context.Context, recordID int64, inputChunks []Block, logger ApiTypes.JimoLogger) {
