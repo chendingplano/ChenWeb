@@ -204,7 +204,7 @@ func TestMetricsProcessor_ExtractsFromChunksArtifact(t *testing.T) {
 	if objectStore.recordID != 2005 || objectStore.artifactType != searchArtifactMetric {
 		t.Fatalf("unexpected object store target: record=%d type=%q", objectStore.recordID, objectStore.artifactType)
 	}
-	if len(objectStore.objects) != 1 || objectStore.objects[0].ArtifactID != "2005_1" || objectStore.objects[0].ObjectName != "service gateway" {
+	if len(objectStore.objects) != 1 || objectStore.objects[0].ArtifactID != "2005_mtc_1" || objectStore.objects[0].ObjectName != "service gateway" {
 		t.Fatalf("unexpected persisted objects: %+v", objectStore.objects)
 	}
 	if !strings.Contains(extractor.inputTexts[0], "Intro") {
@@ -452,8 +452,8 @@ func TestMetricsProcessor_UsesMultiPassAndMergesDuplicateCandidates(t *testing.T
 	if len(metricsStore.lastSave.Metrics) != 1 {
 		t.Fatalf("saved metrics=%d, want 1", len(metricsStore.lastSave.Metrics))
 	}
-	if got := strings.TrimSpace(asString(metricsStore.lastSave.Metrics[0]["metric_id"])); got != "3101_1" {
-		t.Fatalf("metric_id=%q, want 3101_1", got)
+	if got := strings.TrimSpace(asString(metricsStore.lastSave.Metrics[0]["metric_id"])); got != "3101_mtc_1" {
+		t.Fatalf("metric_id=%q, want 3101_mtc_1", got)
 	}
 }
 

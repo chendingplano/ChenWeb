@@ -19,7 +19,7 @@ func TestNormalizeArtifactObjectsSynthesizesMetricSubject(t *testing.T) {
 		t.Fatalf("got %d objects, want 1: %+v", len(got), got)
 	}
 	obj := got[0]
-	if obj.InputRecordID != 42 || obj.ArtifactType != searchArtifactMetric || obj.ArtifactID != "42_mtc_1" {
+	if obj.SourceRecordID != 42 || obj.InputRecordID != 42 || obj.ArtifactType != searchArtifactMetric || obj.ArtifactID != "42_mtc_1" {
 		t.Fatalf("unexpected artifact link: %+v", obj)
 	}
 	if obj.ObjectName != "LPG storage tank" || obj.ObjectNameEn != "LPG storage tank" {
@@ -110,15 +110,15 @@ func TestReconcileArtifactObjectCreatesNodeWhenNoMatch(t *testing.T) {
 	reconciler := ObjectReconciler{Store: store}
 
 	obj := ArtifactObject{
-		InputRecordID:    9,
-		ObjectName:       "pressure regulator",
-		ObjectType:       "equipment",
-		ObjectRole:       "measured_object",
-		NormalizedNames:  []string{"pressure regulator"},
-		SourceLineSpans:  []string{"8"},
-		ArtifactType:     searchArtifactMetric,
-		ArtifactID:       "9_mtc_1",
-		ReconcileStatus:  ObjectReconcilePending,
+		InputRecordID:       9,
+		ObjectName:          "pressure regulator",
+		ObjectType:          "equipment",
+		ObjectRole:          "measured_object",
+		NormalizedNames:     []string{"pressure regulator"},
+		SourceLineSpans:     []string{"8"},
+		ArtifactType:        searchArtifactMetric,
+		ArtifactID:          "9_mtc_1",
+		ReconcileStatus:     ObjectReconcilePending,
 		ReconcileConfidence: 0,
 	}
 	got, err := reconciler.ReconcileOne(context.Background(), obj)

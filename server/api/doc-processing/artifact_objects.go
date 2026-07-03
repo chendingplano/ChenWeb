@@ -22,6 +22,7 @@ const (
 
 type ArtifactObject struct {
 	ID                  int64
+	SourceRecordID      int64
 	InputRecordID       int64
 	ArtifactType        string
 	ArtifactID          string
@@ -213,6 +214,7 @@ func synthesizedObjectItems(artifactType string, artifact map[string]any) []map[
 
 func normalizeArtifactObject(recordID int64, artifactType, artifactID string, raw map[string]any, artifact map[string]any) ArtifactObject {
 	obj := ArtifactObject{
+		SourceRecordID:      recordID,
 		InputRecordID:       recordID,
 		ArtifactType:        strings.TrimSpace(artifactType),
 		ArtifactID:          strings.TrimSpace(artifactID),
@@ -382,19 +384,19 @@ func (s ArtifactObjectSQLStore) ReplaceObjectsForRecord(ctx context.Context, rec
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM kb.artifact_objects WHERE input_record_id = $1 AND artifact_type = $2`, recordID, strings.TrimSpace(artifactType)); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM kb.artifact_objects WHERE source_record_id = $1 AND artifact_type = $2`, recordID, strings.TrimSpace(artifactType)); err != nil {
 		return err
 	}
 	const stmt = `
 INSERT INTO kb.artifact_objects (
-	input_record_id, artifact_type, artifact_id, object_id,
+	source_record_id, input_record_id, artifact_type, artifact_id, object_id,
 	object_name, object_name_en, object_name_zh, language,
 	object_type, object_role, aliases, acronyms, normalized_names,
 	description, evidence_quote, source_line_spans, confidence,
 	reconcile_status, reconcile_confidence, ext_info
 ) VALUES (
-	$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,
-	$14,$15,$16::jsonb,$17,$18,$19,$20::jsonb
+	$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,
+	$15,$16,$17::jsonb,$18,$19,$20,$21::jsonb
 )`
 	for _, obj := range objects {
 		aliases, _ := json.Marshal(obj.Aliases)
@@ -402,8 +404,12 @@ INSERT INTO kb.artifact_objects (
 		normalized, _ := json.Marshal(obj.NormalizedNames)
 		spans, _ := json.Marshal(obj.SourceLineSpans)
 		ext, _ := json.Marshal(obj.ExtInfo)
+		sourceRecordID := obj.SourceRecordID
+		if sourceRecordID <= 0 {
+			sourceRecordID = recordID
+		}
 		if _, err := tx.ExecContext(ctx, stmt,
-			obj.InputRecordID, obj.ArtifactType, obj.ArtifactID, nullEmpty(obj.ObjectID),
+			sourceRecordID, obj.InputRecordID, obj.ArtifactType, obj.ArtifactID, nullEmpty(obj.ObjectID),
 			obj.ObjectName, nullEmpty(obj.ObjectNameEn), nullEmpty(obj.ObjectNameZh), nullEmpty(obj.Language),
 			obj.ObjectType, obj.ObjectRole, string(aliases), string(acronyms), string(normalized),
 			nullEmpty(obj.Description), nullEmpty(obj.EvidenceQuote), string(spans), obj.Confidence,

@@ -226,11 +226,13 @@ func (s *ControlService) runProcessorsChunkBatched(
 	}
 }
 
-// scheduleChunkBatch runs the three-phase DeepSeek cache schedule over already
-// initialised batch processors: (1) fire the seed processor's chunks
-// concurrently, (2) wait LLM_CALL_STAGGER for the prefixes to persist, (3) fire
-// all remaining (processor x chunk) calls concurrently, bounded by
-// MAX_DOC_PROCESSOR_TASKS. Mirrors the doc-reviewers' runReviewTasksForPromptCache.
+// scheduleChunkBatch runs the four-phase DeepSeek cache schedule over already
+// initialised batch processors: (1a) fire the seed processor's first chunk to
+// prime the prompt-level cache, (1b) wait LLM_CALL_STAGGER, (1c) fire the
+// seed's remaining chunks concurrently (prompt prefix now cached), (2) wait
+// LLM_CALL_STAGGER for chunk+prompt prefixes to persist, (3) fire all remaining
+// (processor x chunk) calls concurrently, bounded by MAX_DOC_PROCESSOR_TASKS.
+// Mirrors the doc-reviewers' runReviewTasksForPromptCache.
 // Returns the first ProcessChunk error, or ErrPipelineStopped on cancel.
 func (s *ControlService) scheduleChunkBatch(
 	ctx context.Context,
@@ -274,8 +276,25 @@ func (s *ControlService) scheduleChunkBatch(
 		}
 	}
 
-	// Phase 1: seed chunks concurrently; do NOT wait.
-	for chunkIdx := 0; chunkIdx < len(chunks); chunkIdx++ {
+	// Phase 1a: seed the first chunk only to prime the prompt-level cache.
+	wg.Add(1)
+	go func() { defer wg.Done(); runOne(seed, 0) }()
+
+	// Phase 1b: wait for the prompt prefix to be cached. Skipped when there
+	// are no subsequent LLM calls (single chunk, single processor).
+	if len(chunks) > 1 || len(ordered) > 1 {
+		if stagger := llmCallStagger(); stagger > 0 {
+			select {
+			case <-time.After(stagger):
+			case <-ctx.Done():
+				wg.Wait()
+				return ErrPipelineStopped
+			}
+		}
+	}
+
+	// Phase 1c: seed remaining chunks concurrently; prompt prefix is now cached.
+	for chunkIdx := 1; chunkIdx < len(chunks); chunkIdx++ {
 		wg.Add(1)
 		go func(idx int) { defer wg.Done(); runOne(seed, idx) }(chunkIdx)
 	}

@@ -393,7 +393,7 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		detectedLanguage = "unknown"
 	}
 	for i, m := range allMetrics {
-		m["metric_id"] = fmt.Sprintf("%d_%d", evt.RecordID, i+1)
+		m["metric_id"] = fmt.Sprintf("%d_mtc_%d", evt.RecordID, i+1)
 		allMetrics[i] = m
 	}
 
@@ -1893,7 +1893,6 @@ func (p *MetricsProcessor) extractMetricPayload(
 
 	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
-		p.Logger.Info("to call LLM", "input", in)
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, metricsExtractionContract())
 		if err != nil {
 			return nil, fmt.Errorf("(MID-26061701) failed extracting metrics, error:%v", err)
@@ -1904,7 +1903,6 @@ func (p *MetricsProcessor) extractMetricPayload(
 		}
 		payload = result.Parsed
 	} else {
-		p.Logger.Info("to call LLM", "input", in)
 		payload, err = p.Extractor.ExtractJSON(ctx, in)
 		if err != nil {
 			return nil, fmt.Errorf("(MID-26061703) failed extracting metrics, error:%v", err)

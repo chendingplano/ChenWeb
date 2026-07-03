@@ -19,10 +19,12 @@ import (
 //
 // The execution order for a document is:
 //
-//	InitChunkBatch(ctx, recordID, chunks, docCtx)  — once per processor
-//	Phase 1: for each chunk index 0..N-1:
-//	    processor[0].ProcessChunk(ctx, chunkIdx)     — seeds DeepSeek cache
-//	Phase 2: wait LLM_CALL_STAGGER                   — time for cache to persist
+//	InitChunkBatch(ctx, recordID, chunks, docCtx)   — once per processor
+//	Phase 1a: processor[0].ProcessChunk(ctx, 0)      — seeds prompt-level cache
+//	Phase 1b: wait LLM_CALL_STAGGER                  — let prompt prefix persist
+//	Phase 1c: for each chunk index 1..N-1:
+//	    go processor[0].ProcessChunk(ctx, chunkIdx)  — concurrent, prompt cache warm
+//	Phase 2: wait LLM_CALL_STAGGER                   — let chunk+prompt prefixes persist
 //	Phase 3: for each chunk, for each processor[1..M]:
 //	    go P.ProcessChunk(ctx, chunkIdx)              — concurrent, benefit from cache
 //	for each processor P:
