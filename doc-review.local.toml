@@ -321,6 +321,23 @@ max_tool_turns = 4
 max_tool_tokens = 24000
 tools = ["get_artifact_context"]
 
+# metrics_completeness — object-anchored missing-metric detection
+# (ADR 2026070201 AR6, Stage 5). Runs as a separate pass on the metrics
+# reviewer's P5 group, comparing the doc's object→metric set against what
+# peer documents attach to the same canonical objects. Tool-use is mandatory
+# (search_metrics for the absence-verification step, get_artifact_context
+# for context on screened candidates).
+[reviewers.metrics_completeness]
+enabled = true
+checked = true
+group = "P5"
+input = "artifact"
+model = "deepseek-v4-pro"
+prompt = "prompt-review-metrics-missing-v1.md"
+max_tool_turns = 4
+max_tool_tokens = 32000
+tools = ["search_metrics", "get_artifact_context"]
+
 [reviewers.provisions]
 enabled = true
 checked = true
@@ -351,23 +368,6 @@ prompt = "prompt-review-inventory-items-v2.md"
 max_tool_turns = 4
 max_tool_tokens = 24000
 tools = ["get_artifact_context"]
-
-# metrics_completeness — object-anchored missing-metric detection
-# (ADR 2026070201 AR6, Stage 5). Runs as a separate pass on the metrics
-# reviewer's P5 group, comparing the doc's object→metric set against what
-# peer documents attach to the same canonical objects. Tool-use is mandatory
-# (search_metrics for the absence-verification step, get_artifact_context
-# for context on screened candidates).
-[reviewers.metrics_completeness]
-enabled = true
-checked = true
-group = "P5"
-input = "artifact"
-model = "deepseek-v4-pro"
-prompt = "prompt-review-metrics-missing-v1.md"
-max_tool_turns = 4
-max_tool_tokens = 32000
-tools = ["search_metrics", "get_artifact_context"]
 
 [reviewers.technical_accuracy]
 enabled = true

@@ -156,6 +156,44 @@ func TestExpandProcessorDependenciesPreservesExplicitChunkingOrder(t *testing.T)
 	}
 }
 
+func TestControlService_SkipsSatisfiedAutoDependenciesOnRerun(t *testing.T) {
+	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.pdf")
+	writeLineFile(t, filepath.Join(dir, "source_opendata.txt"))
+	if err := os.WriteFile(inputPath, []byte("pdf placeholder"), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	got := make([]string, 0, 3)
+	store := &fakeDocMetadataStore{rec: DocMetadataInputRecord{
+		ID:              1,
+		ParserName:      "opendata",
+		ResultFilename:  filepath.Join(dir, "result.json"),
+		StagingFilename: inputPath,
+		StatusRaw: `[
+			{"operation":"static_analyzer","proc_status":"success"},
+			{"operation":"chunking","proc_status":"success"},
+			{"operation":"extract_metrics","proc_status":"failed"}
+		]`,
+	}}
+	svc := &ControlService{
+		InputStore: store,
+		Processors: []Processor{
+			fakeProcessor{name: "static_analyzer", calls: &got},
+			fakeProcessor{name: "chunking", calls: &got},
+			fakeProcessor{name: "extract_metrics", calls: &got},
+		},
+	}
+
+	svc.HandleEvent(context.Background(), []byte(`{"record_id":"1","operation":["extract_metrics"]}`))
+
+	want := []string{"extract_metrics"}
+	if !equalStrings(got, want) {
+		t.Fatalf("calls=%v, want %v", got, want)
+	}
+}
+
 func TestControlService_DefaultsToConfiguredOrder(t *testing.T) {
 	t.Setenv("RUN_DOC_PROCESSOR_CONCURRENT", "false")
 	got := make([]string, 0, 3)

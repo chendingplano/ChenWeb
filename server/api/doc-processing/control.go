@@ -527,6 +527,7 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	}
 	if len(evt.Operations) > 0 {
 		processors = s.selectProcessors(evt.Operations)
+		processors = s.skipSatisfiedAutoDependencies(ctx, evt, processors)
 		if len(processors) == 0 {
 			if s.Logger != nil {
 				allowed := make([]string, 0, len(s.Processors))
@@ -622,6 +623,35 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 	}
 	s.logPipelineFinish(context.Background(), evt.RecordID, pipelineMSUsed, allProcResults)
 	return firstErr
+}
+
+func (s *ControlService) skipSatisfiedAutoDependencies(ctx context.Context, evt LineFileGeneratedEvent, processors []Processor) []Processor {
+	if len(processors) == 0 || !requestedOperationsNeedAutoChunking(evt.Operations) || s.InputStore == nil {
+		return processors
+	}
+	rec, err := s.InputStore.GetInputRecord(ctx, evt.RecordID)
+	if err != nil || !docProcessorSucceeded(rec.StatusRaw, "chunking") {
+		return processors
+	}
+	explicit := make(map[string]struct{}, len(evt.Operations))
+	for _, op := range evt.Operations {
+		if key := canonicalOperationName(op); key != "" {
+			explicit[key] = struct{}{}
+		}
+	}
+	pruned := make([]Processor, 0, len(processors))
+	for _, p := range processors {
+		name := canonicalOperationName(p.Name())
+		if _, ok := explicit[name]; ok {
+			pruned = append(pruned, p)
+			continue
+		}
+		if name == "static_analyzer" || name == "chunking" {
+			continue
+		}
+		pruned = append(pruned, p)
+	}
+	return pruned
 }
 
 // PostProcessIndexer is implemented by processors that index their artifacts in
@@ -1344,6 +1374,39 @@ func (s *ControlService) selectProcessors(ops []string) []Processor {
 		selected = append(selected, p)
 	}
 	return selected
+}
+
+func requestedOperationsNeedAutoChunking(ops []string) bool {
+	if len(ops) == 0 {
+		return false
+	}
+	for _, raw := range ops {
+		if canonicalOperationName(raw) == "chunking" {
+			return false
+		}
+	}
+	for _, raw := range ops {
+		if requiresChunkingDependency(raw) {
+			return true
+		}
+	}
+	return false
+}
+
+func docProcessorSucceeded(statusRaw string, op string) bool {
+	want := canonicalOperationName(op)
+	if want == "" {
+		return false
+	}
+	for _, entry := range decodeDocMetaStatus(statusRaw) {
+		if canonicalOperationName(asString(entry["operation"])) != want {
+			continue
+		}
+		if statusValue(entry) == "success" {
+			return true
+		}
+	}
+	return false
 }
 
 func expandProcessorDependencies(ops []string) []string {
