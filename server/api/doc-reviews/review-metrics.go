@@ -37,6 +37,8 @@ type metricsReviewer struct {
 	toolRegistry map[string]ReviewTool
 	logger       ApiTypes.JimoLogger
 	db           *sql.DB
+	runID        int64
+	logStore     ReviewLogsStore
 	maxTasks     int
 	maxMatches   int // cap on matching metrics per doc metric (METRIC_REVIEW_MAX_MATCHES)
 	maxMetrics   int // cap on doc metrics reviewed; 0 = no cap (METRIC_REVIEW_MAX_METRICS)
@@ -169,6 +171,22 @@ func (r *metricsReviewer) reviewMetric(
 	truncated bool,
 ) []ReviewFinding {
 	start := time.Now()
+	logEntry := ReviewLogEntry{
+		InputRecordID: recordID,
+		RunID:         r.runID,
+		Pass:          "P5",
+		Aspect:        "metrics",
+		UnitType:      "metric",
+		UnitKey:       metricLogUnitKey(dm),
+		UnitLocation:  map[string]any{"line_spans": append([]string(nil), dm.spans...)},
+		MatchedUnits:  matchedMetricsPayload(ms),
+		Detail: map[string]any{
+			"metric_index": index,
+			"match_count":  len(ms),
+			"model_name":   cfg.ModelName,
+			"prompt_ref":   cfg.PromptRef,
+		},
+	}
 
 	payloadObj := map[string]any{
 		"metric_under_review": dm.view,
@@ -183,6 +201,9 @@ func (r *metricsReviewer) reviewMetric(
 	payloadJSON := marshalArtifactPayload(payloadObj)
 	if payloadJSON == "" {
 		r.logger.Warn("metrics review: marshal payload failed", "record_id", recordID, "metric_index", index)
+		logEntry.Outcome = "error"
+		logEntry.Detail["error"] = "marshal payload failed"
+		r.saveReviewLog(ctx, logEntry)
 		return nil
 	}
 
@@ -190,6 +211,7 @@ func (r *metricsReviewer) reviewMetric(
 	var cacheHitTokens, cacheMissTokens int
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
+		r.logger.Info("prompt", "promptName", cfg.PromptRef)
 		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
@@ -202,6 +224,7 @@ func (r *metricsReviewer) reviewMetric(
 		if loopErr != nil {
 			r.logger.Warn("metrics review tool-use loop failed; no findings for metric",
 				"record_id", recordID, "metric_index", index, "error", loopErr)
+			logEntry.Detail["error"] = loopErr.Error()
 		}
 		findings = loopFindings
 	} else {
@@ -218,6 +241,9 @@ func (r *metricsReviewer) reviewMetric(
 		if err != nil {
 			r.logger.Warn("metrics review metric failed; skipping",
 				"record_id", recordID, "metric_index", index, "error", err)
+			logEntry.Outcome = "error"
+			logEntry.Detail["error"] = err.Error()
+			r.saveReviewLog(ctx, logEntry)
 			return nil
 		}
 		findings = normalizeFindingsJSON(out)
@@ -238,6 +264,19 @@ func (r *metricsReviewer) reviewMetric(
 			findings[i].Location = loc
 		}
 	}
+	logEntry.Findings = append([]ReviewFinding(nil), findings...)
+	logEntry.Detail["cache_hit_tokens"] = cacheHitTokens
+	logEntry.Detail["cache_miss_tokens"] = cacheMissTokens
+	logEntry.Detail["ms_used"] = time.Since(start).Milliseconds()
+	if truncated {
+		logEntry.Detail["context_truncated"] = true
+	}
+	if len(findings) > 0 {
+		logEntry.Outcome = "findings_emitted"
+	} else if logEntry.Outcome == "" {
+		logEntry.Outcome = "no_issue"
+	}
+	r.saveReviewLog(ctx, logEntry)
 
 	r.logger.Info("metrics review metric done",
 		"record_id", recordID,
@@ -250,6 +289,26 @@ func (r *metricsReviewer) reviewMetric(
 		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
+}
+
+func (r *metricsReviewer) saveReviewLog(ctx context.Context, entry ReviewLogEntry) {
+	if r.logStore == nil || r.runID == 0 {
+		return
+	}
+	if _, err := r.logStore.SaveLogs(ctx, []ReviewLogEntry{entry}); err != nil && r.logger != nil {
+		r.logger.Warn("metrics review: save review log failed",
+			"run_id", r.runID,
+			"unit_key", entry.UnitKey,
+			"error", err,
+		)
+	}
+}
+
+func metricLogUnitKey(dm docMetric) string {
+	if id := strings.TrimSpace(dm.view.MetricID); id != "" {
+		return id
+	}
+	return fmt.Sprintf("%d", dm.id)
 }
 
 // matchedMetricsPayload serializes the matched candidates. Raw RRF scores are

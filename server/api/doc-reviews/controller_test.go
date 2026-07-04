@@ -108,6 +108,22 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			id BIGSERIAL PRIMARY KEY,
 			request_id BIGINT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS kb.doc_review_logs (
+			id BIGSERIAL PRIMARY KEY,
+			input_record_id BIGINT NOT NULL,
+			run_id BIGINT NOT NULL,
+			pass TEXT NOT NULL DEFAULT '',
+			aspect TEXT NOT NULL DEFAULT '',
+			unit_type TEXT NOT NULL DEFAULT '',
+			unit_key TEXT NOT NULL DEFAULT '',
+			unit_location JSONB DEFAULT '{}'::jsonb,
+			matched_units JSONB DEFAULT '[]'::jsonb,
+			findings JSONB DEFAULT '[]'::jsonb,
+			outcome TEXT NOT NULL DEFAULT '',
+			detail JSONB DEFAULT '{}'::jsonb,
+			create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (run_id, aspect, unit_type, unit_key)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.ExecContext(context.Background(), s); err != nil {

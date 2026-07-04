@@ -9,6 +9,19 @@ import (
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
+type fakeReviewLogsStore struct {
+	logs []ReviewLogEntry
+}
+
+func (f *fakeReviewLogsStore) SaveLogs(_ context.Context, logs []ReviewLogEntry) (int64, error) {
+	f.logs = append(f.logs, logs...)
+	return int64(len(logs)), nil
+}
+
+func (f *fakeReviewLogsStore) DeleteLogs(_ context.Context, _ int64) (int64, error) {
+	return 0, nil
+}
+
 func TestParseJSONStringArray(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -142,9 +155,12 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 			},
 		},
 	}
+	logStore := &fakeReviewLogsStore{}
 	r := &metricsReviewer{
-		client: fake,
-		logger: loggerutil.CreateDefaultLogger("TEST_METRICS"),
+		client:   fake,
+		logger:   loggerutil.CreateDefaultLogger("TEST_METRICS"),
+		runID:    28,
+		logStore: logStore,
 	}
 	doc := docMetric{
 		id:    7,
@@ -185,5 +201,63 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
 		}
+	}
+	if len(logStore.logs) != 1 {
+		t.Fatalf("review logs = %d, want 1", len(logStore.logs))
+	}
+	logEntry := logStore.logs[0]
+	if logEntry.RunID != 28 || logEntry.InputRecordID != 1 {
+		t.Fatalf("log run/record = %d/%d, want 28/1", logEntry.RunID, logEntry.InputRecordID)
+	}
+	if logEntry.Aspect != "metrics" || logEntry.UnitType != "metric" || logEntry.UnitKey != "1_m_1" {
+		t.Fatalf("log aspect/unit = %q/%q/%q", logEntry.Aspect, logEntry.UnitType, logEntry.UnitKey)
+	}
+	if logEntry.Outcome != "findings_emitted" {
+		t.Fatalf("log outcome = %q, want findings_emitted", logEntry.Outcome)
+	}
+	if len(logEntry.Findings) != 1 || logEntry.Findings[0].Title != "Conflict" {
+		t.Fatalf("log findings = %+v", logEntry.Findings)
+	}
+	if len(logEntry.MatchedUnits) != 1 {
+		t.Fatalf("log matched_units = %d, want 1", len(logEntry.MatchedUnits))
+	}
+}
+
+func TestReviewMetric_LogsNoIssue(t *testing.T) {
+	fake := &fakeJSONExtractor{
+		out: map[string]any{
+			"findings": []any{},
+		},
+	}
+	logStore := &fakeReviewLogsStore{}
+	r := &metricsReviewer{
+		client:   fake,
+		logger:   loggerutil.CreateDefaultLogger("TEST_METRICS"),
+		runID:    29,
+		logStore: logStore,
+	}
+	doc := docMetric{
+		id:    8,
+		view:  metricView{MetricID: "1_m_2", MetricName: "温度"},
+		spans: []string{"20:21"},
+	}
+	ms := []matchedMetric{
+		{view: metricView{MetricID: "2_m_4", Value: "90", Unit: "C"}, recordID: 2, filename: "other.pdf", via: "metric_category"},
+	}
+
+	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
+		ModelName:  "metric-model",
+		PromptText: "compare metrics",
+		PromptRef:  "prompt-review-metrics-v1.md",
+	}, doc, ms, "", false)
+
+	if len(findings) != 0 {
+		t.Fatalf("findings = %d, want 0", len(findings))
+	}
+	if len(logStore.logs) != 1 {
+		t.Fatalf("review logs = %d, want 1", len(logStore.logs))
+	}
+	if logStore.logs[0].Outcome != "no_issue" {
+		t.Fatalf("log outcome = %q, want no_issue", logStore.logs[0].Outcome)
 	}
 }

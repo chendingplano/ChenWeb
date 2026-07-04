@@ -206,11 +206,13 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 	inputStore := docprocessing.DocMetadataSQLStore{DB: c.DB}
 	entityStore := docprocessing.EntityRelationSQLStore{DB: c.DB}
 	findingsStore := ReviewFindingsSQLStore{DB: c.DB, Languages: appconfig.GetLanguages()}
+	reviewLogsStore := ReviewLogsSQLStore{DB: c.DB}
 	statusStore := ReviewStatusSQLStore{DB: c.DB}
 
 	processor := NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
 	processor.RunID = runID
 	processor.RequestedAspects = append([]string(nil), req.Aspects...)
+	processor.ReviewLogsStore = reviewLogsStore
 	processor.StatusStore = statusStore
 	err = processor.PostProcessIndex(ctx, req.InputRecordID)
 	if err != nil {

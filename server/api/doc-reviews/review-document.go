@@ -273,13 +273,14 @@ func (s ReviewFindingsSQLStore) DeleteFindings(ctx context.Context, runID int64)
 // ReviewProcessor orchestrates document review in Phase C (post-processing).
 // It owns a set of Reviewers; each runs as a goroutine and reports findings.
 type ReviewProcessor struct {
-	InputStore    DocMetadataStore
-	EntityStore   EntityRelationStore // for tool-using reviewers (Phase II+)
-	FindingsStore ReviewFindingsStore
-	StatusStore   ReviewStatusStore
-	Client        LLMJSONExtractor // shared LLM client
-	Logger        ApiTypes.JimoLogger
-	Now           func() time.Time
+	InputStore      DocMetadataStore
+	EntityStore     EntityRelationStore // for tool-using reviewers (Phase II+)
+	FindingsStore   ReviewFindingsStore
+	ReviewLogsStore ReviewLogsStore
+	StatusStore     ReviewStatusStore
+	Client          LLMJSONExtractor // shared LLM client
+	Logger          ApiTypes.JimoLogger
+	Now             func() time.Time
 
 	// Reviewer configurations (loaded in constructor).
 	GrammarModelName  string
@@ -673,10 +674,10 @@ type ReviewProcessor struct {
 
 	// MetricsCompleteness* fields for the object-anchored missing-metric pass
 	// (ADR 2026070201 AR6, Stage 5).
-	MetricsCompletenessClient      LLMJSONExtractor
-	MetricsCompletenessModelName   string
-	MetricsCompletenessPromptRef   string
-	MetricsCompletenessPromptText  string
+	MetricsCompletenessClient        LLMJSONExtractor
+	MetricsCompletenessModelName     string
+	MetricsCompletenessPromptRef     string
+	MetricsCompletenessPromptText    string
 	MetricsCompletenessMaxToolTurns  int
 	MetricsCompletenessMaxToolTokens int
 	MetricsCompletenessTools         []string
@@ -1233,6 +1234,11 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 	// Delete previous findings for this run (supports restart of a crashed run).
 	if _, err := p.FindingsStore.DeleteFindings(ctx, p.RunID); err != nil {
 		p.Logger.Warn("failed to delete previous review findings", "run_id", p.RunID, "error", err)
+	}
+	if p.ReviewLogsStore != nil {
+		if _, err := p.ReviewLogsStore.DeleteLogs(ctx, p.RunID); err != nil {
+			p.Logger.Warn("failed to delete previous review logs", "run_id", p.RunID, "error", err)
+		}
 	}
 
 	allFindings, errs := p.runReviewersPromptCacheOptimized(ctx, recordID, rec, reviewers, p.RunID)
@@ -1967,6 +1973,8 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				toolRegistry: defaultToolRegistry(),
 				logger:       p.Logger,
 				db:           ApiTypes.ProjectDBHandle,
+				runID:        p.RunID,
+				logStore:     p.ReviewLogsStore,
 				maxTasks:     p.MaxConcurrent,
 				maxMatches:   envInt("METRIC_REVIEW_MAX_MATCHES", 20, 1),
 				maxMetrics:   envInt("METRIC_REVIEW_MAX_METRICS", 0, 0),
