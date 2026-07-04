@@ -514,7 +514,7 @@ func (t toolDB) getChunkLinesTool() ReviewTool {
 
 // artifactContextRadius is the number of lines returned on each side of an
 // artifact's line spans by get_artifact_context.
-const artifactContextRadius = 15
+const artifactContextRadius = 10
 
 // artifactContextMaxLines caps the total lines one call may return.
 const artifactContextMaxLines = 120

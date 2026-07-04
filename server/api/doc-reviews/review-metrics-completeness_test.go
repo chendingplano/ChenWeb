@@ -19,8 +19,7 @@ func TestMetricsCompletenessBuildRostersEmptyMetrics(t *testing.T) {
 	// No metrics for this record.
 	mock.ExpectQuery("SELECT id, COALESCE").
 		WithArgs(int64(1)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "metric_id", "metric_name", "metric_subject",
-			"metric_value", "metric_unit", "value_class", "metric_categories", "source_line_spans"}))
+		WillReturnRows(sqlmock.NewRows(metricRecordColumns()))
 
 	r := &metricsCompletenessReviewer{db: db, logger: loggerutil.CreateDefaultLogger("TEST_COMPLETENESS")}
 	rosters, err := r.buildRosters(context.Background(), 1)
@@ -43,9 +42,8 @@ func TestMetricsCompletenessBuildRostersNoObjectLinks(t *testing.T) {
 	defer db.Close()
 
 	// One doc metric.
-	docRows := sqlmock.NewRows([]string{"id", "metric_id", "metric_name", "metric_subject",
-		"metric_value", "metric_unit", "value_class", "metric_categories", "source_line_spans"}).
-		AddRow(10, "1_m_1", "压力", "管道", "1.6", "MPa", "maximum", `["pressure"]`, `["12"]`)
+	docRows := sqlmock.NewRows(metricRecordColumns()).
+		AddRow(10, "1_m_1", "压力", "管道", "", "", "", "", "", "", "1.6", "MPa", "", "", "", "maximum", "", "", "", "", "", "", `["pressure"]`, `["12"]`)
 	mock.ExpectQuery("SELECT id, COALESCE").
 		WithArgs(int64(1)).
 		WillReturnRows(docRows)
@@ -65,6 +63,18 @@ func TestMetricsCompletenessBuildRostersNoObjectLinks(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock: %v", err)
+	}
+}
+
+func metricRecordColumns() []string {
+	return []string{
+		"id", "metric_id", "metric_name", "metric_subject",
+		"metric_name_en", "metric_subject_en", "metric_desc", "metric_desc_en",
+		"metric_context", "metric_context_en", "metric_value", "metric_unit",
+		"metric_unit_en", "value_data_type", "value_range_type", "value_class",
+		"value_class_en", "formula_or_definition", "threshold_or_target",
+		"measurement_frequency", "location_type", "table_name_or_section",
+		"metric_categories", "source_line_spans",
 	}
 }
 

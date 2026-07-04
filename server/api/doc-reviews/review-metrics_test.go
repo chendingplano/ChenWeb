@@ -168,7 +168,17 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		spans: []string{"12:14"},
 	}
 	ms := []matchedMetric{
-		{view: metricView{MetricID: "2_m_9", Value: "2.5", Unit: "MPa"}, recordID: 2, filename: "other.pdf", via: "hybrid_search", confidence: 0.9},
+		{
+			view:     metricView{MetricID: "2_m_9", Value: "2.5", Unit: "MPa", SourceLineSpans: []string{"30:32"}},
+			recordID: 2,
+			filename: "other.pdf",
+			via:      "hybrid_search",
+			context: []map[string]any{
+				{"line_number": 20, "content": "context before"},
+				{"line_number": 30, "content": "matched metric line"},
+			},
+			confidence: 0.9,
+		},
 	}
 
 	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
@@ -197,7 +207,7 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		t.Errorf("promptNames = %v", fake.promptNames)
 	}
 	in := fake.inputTexts[0]
-	for _, want := range []string{"metric_under_review", "matching_metrics", "2_m_9", "hybrid_search"} {
+	for _, want := range []string{"metric_under_review", "matching_metrics", "2_m_9", "hybrid_search", "source_line_spans", "source_context", "matched metric line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
 		}
@@ -297,5 +307,32 @@ func TestMetricLogUnitKey_IncludesRowID(t *testing.T) {
 	got = metricLogUnitKey(docMetric{id: 99})
 	if got != "99" {
 		t.Fatalf("metricLogUnitKey fallback = %q, want %q", got, "99")
+	}
+}
+
+func TestMetricSourceContextLines(t *testing.T) {
+	var lines []Line
+	for i := 1; i <= 50; i++ {
+		lines = append(lines, Line{LineNo: i, Content: "line"})
+	}
+
+	got := metricSourceContextLines(lines, []string{"20:22", "40"})
+	if len(got) != 22 {
+		t.Fatalf("context lines = %d, want 22", len(got))
+	}
+	if got[0]["line_number"] != 10 {
+		t.Fatalf("first line = %v, want 10", got[0]["line_number"])
+	}
+	if got[len(got)-1]["line_number"] != 40 {
+		t.Fatalf("last line = %v, want actual second span line 40", got[len(got)-1]["line_number"])
+	}
+	seen22 := false
+	for _, row := range got {
+		if row["line_number"] == 22 {
+			seen22 = true
+		}
+	}
+	if !seen22 {
+		t.Fatalf("context did not include actual range line 22: %v", got)
 	}
 }

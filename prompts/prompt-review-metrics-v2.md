@@ -38,13 +38,20 @@ Your input has two parts.
         "metric_value": "2.5",
         "metric_unit": "MPa",
         "value_class": "maximum",
-        "metric_categories": ["pressure", "pipe-spec"]
+        "threshold_or_target": "",
+        "formula_or_definition": "",
+        "metric_categories": ["pressure", "pipe-spec"],
+        "source_line_spans": ["88-90"]
       },
       "source_record_id": 2002,
       "source_filename": "GB_50316_pipe_design.pdf",
       "source_doc_authority": "standard",
       "match_via": "hybrid_search",
-      "match_rank": 1
+      "match_rank": 1,
+      "source_context": [
+        {"line_number": 78, "content": "..."},
+        {"line_number": 88, "content": "the matched metric source line"}
+      ]
     }
   ]
 }
@@ -54,6 +61,8 @@ Your input has two parts.
 - `artifact_line_spans` are the metric's line numbers inside the document; they locate it within the source window.
 - `context_truncated: true` means the metric's lines extend past the end of the included window — the passage is cut off by design, NOT an extraction problem. Do not report truncation as an error; if you have tools, `get_artifact_context` can retrieve the remainder.
 - `matching_metrics` are candidate related metrics from other documents, surfaced by semantic similarity (`hybrid_search`), shared category (`metric_category`), or a shared entity (`entity`). They are candidates only — some may be unrelated.
+- Each matching metric is a resolved `kb.metrics` row, expressed as name-value fields and including its `source_line_spans`.
+- `source_context` contains source lines from the matched metric's document: 10 lines before the first source span, the actual metric source span lines, and 10 lines after the first source span.
 - `match_rank` is the candidate's 1-based rank in the retrieval ordering (1 = strongest signal). It is a retrieval hint, not proof of relatedness; a rank-1 candidate can still be unrelated and a rank-15 candidate can be the real peer.
 - `source_doc_authority` classifies the matched document: `"standard"` (governing national/international standard such as GB/ISO/IEC), `"regulation"` (law or regulation), or `"peer_document"` (peer specification or internal document).
 

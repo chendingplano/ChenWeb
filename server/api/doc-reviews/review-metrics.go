@@ -50,13 +50,29 @@ func (r *metricsReviewer) Strategy() ReviewStrategy { return StrategyDocument }
 
 // metricView is the JSON-serializable subset of a metric sent to the LLM.
 type metricView struct {
-	MetricID   string   `json:"metric_id,omitempty"`
-	MetricName string   `json:"metric_name,omitempty"`
-	Subject    string   `json:"metric_subject,omitempty"`
-	Value      string   `json:"metric_value,omitempty"`
-	Unit       string   `json:"metric_unit,omitempty"`
-	ValueClass string   `json:"value_class,omitempty"`
-	Categories []string `json:"metric_categories,omitempty"`
+	MetricID          string   `json:"metric_id,omitempty"`
+	MetricName        string   `json:"metric_name,omitempty"`
+	MetricNameEn      string   `json:"metric_name_en,omitempty"`
+	Subject           string   `json:"metric_subject,omitempty"`
+	SubjectEn         string   `json:"metric_subject_en,omitempty"`
+	Description       string   `json:"metric_desc,omitempty"`
+	DescriptionEn     string   `json:"metric_desc_en,omitempty"`
+	Context           string   `json:"metric_context,omitempty"`
+	ContextEn         string   `json:"metric_context_en,omitempty"`
+	Value             string   `json:"metric_value,omitempty"`
+	Unit              string   `json:"metric_unit,omitempty"`
+	UnitEn            string   `json:"metric_unit_en,omitempty"`
+	ValueDataType     string   `json:"value_data_type,omitempty"`
+	ValueRangeType    string   `json:"value_range_type,omitempty"`
+	ValueClass        string   `json:"value_class,omitempty"`
+	ValueClassEn      string   `json:"value_class_en,omitempty"`
+	FormulaDefinition string   `json:"formula_or_definition,omitempty"`
+	ThresholdTarget   string   `json:"threshold_or_target,omitempty"`
+	Frequency         string   `json:"measurement_frequency,omitempty"`
+	LocationType      string   `json:"location_type,omitempty"`
+	TableSection      string   `json:"table_name_or_section,omitempty"`
+	Categories        []string `json:"metric_categories,omitempty"`
+	SourceLineSpans   []string `json:"source_line_spans,omitempty"`
 }
 
 // docMetric is one metric extracted from the document under review.
@@ -75,6 +91,7 @@ type matchedMetric struct {
 	docNo      string // source document number from kb.inputs.doc_metadata
 	via        string // "hybrid_search" | "metric_category" | "entity"
 	confidence float64
+	context    []map[string]any
 }
 
 func (r *metricsReviewer) ReviewDocument(
@@ -102,6 +119,7 @@ func (r *metricsReviewer) ReviewDocument(
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26063004) build metric matches for record %d: %w", recordID, err)
 	}
+	r.hydrateMatchedMetricContexts(ctx, matches)
 
 	// Only review metrics that have at least one cross-document match.
 	type reviewUnit struct {
@@ -328,6 +346,7 @@ func matchedMetricsPayload(ms []matchedMetric) []map[string]any {
 			"source_doc_authority": docAuthorityClass(m.docNo, m.title, m.filename),
 			"match_via":            m.via,
 			"match_rank":           i + 1,
+			"source_context":       m.context,
 		})
 	}
 	return out
@@ -505,7 +524,12 @@ func assembleMatches(
 func (r *metricsReviewer) loadRecordMetrics(ctx context.Context, recordID int64) ([]docMetric, error) {
 	const q = `
 SELECT id, COALESCE(metric_id, ''), COALESCE(metric_name, ''), COALESCE(metric_subject, ''),
-       COALESCE(metric_value, ''), COALESCE(metric_unit, ''), COALESCE(value_class, ''),
+       COALESCE(metric_name_en, ''), COALESCE(metric_subject_en, ''), COALESCE(metric_desc, ''),
+       COALESCE(metric_desc_en, ''), COALESCE(metric_context, ''), COALESCE(metric_context_en, ''),
+       COALESCE(metric_value, ''), COALESCE(metric_unit, ''), COALESCE(metric_unit_en, ''),
+       COALESCE(value_data_type, ''), COALESCE(value_range_type, ''), COALESCE(value_class, ''),
+       COALESCE(value_class_en, ''), COALESCE(formula_or_definition, ''), COALESCE(threshold_or_target, ''),
+       COALESCE(measurement_frequency, ''), COALESCE(location_type, ''), COALESCE(table_name_or_section, ''),
        COALESCE(metric_categories, ''), COALESCE(source_line_spans, '[]'::jsonb)
 FROM kb.metrics
 WHERE input_record_id = $1
@@ -524,11 +548,16 @@ ORDER BY id`
 			spansJSON []byte
 		)
 		if err := rows.Scan(&dm.id, &dm.view.MetricID, &dm.view.MetricName, &dm.view.Subject,
-			&dm.view.Value, &dm.view.Unit, &dm.view.ValueClass, &catsText, &spansJSON); err != nil {
+			&dm.view.MetricNameEn, &dm.view.SubjectEn, &dm.view.Description, &dm.view.DescriptionEn,
+			&dm.view.Context, &dm.view.ContextEn, &dm.view.Value, &dm.view.Unit, &dm.view.UnitEn,
+			&dm.view.ValueDataType, &dm.view.ValueRangeType, &dm.view.ValueClass, &dm.view.ValueClassEn,
+			&dm.view.FormulaDefinition, &dm.view.ThresholdTarget, &dm.view.Frequency, &dm.view.LocationType,
+			&dm.view.TableSection, &catsText, &spansJSON); err != nil {
 			return nil, err
 		}
 		dm.view.Categories = parseJSONStringArray([]byte(catsText))
 		dm.spans = parseJSONStringArray(spansJSON)
+		dm.view.SourceLineSpans = append([]string(nil), dm.spans...)
 		out = append(out, dm)
 	}
 	return out, rows.Err()
@@ -554,8 +583,14 @@ func (r *metricsReviewer) loadMetricsByMetricID(ctx context.Context, idSet map[s
 	}
 	const q = `
 SELECT COALESCE(m.metric_id, ''), m.input_record_id, COALESCE(m.metric_name, ''),
-       COALESCE(m.metric_subject, ''), COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''),
-       COALESCE(m.value_class, ''), COALESCE(m.metric_categories, ''), COALESCE(i.staging_filename, ''),
+       COALESCE(m.metric_subject, ''), COALESCE(m.metric_name_en, ''), COALESCE(m.metric_subject_en, ''),
+       COALESCE(m.metric_desc, ''), COALESCE(m.metric_desc_en, ''), COALESCE(m.metric_context, ''),
+       COALESCE(m.metric_context_en, ''), COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''),
+       COALESCE(m.metric_unit_en, ''), COALESCE(m.value_data_type, ''), COALESCE(m.value_range_type, ''),
+       COALESCE(m.value_class, ''), COALESCE(m.value_class_en, ''), COALESCE(m.formula_or_definition, ''),
+       COALESCE(m.threshold_or_target, ''), COALESCE(m.measurement_frequency, ''), COALESCE(m.location_type, ''),
+       COALESCE(m.table_name_or_section, ''), COALESCE(m.metric_categories, ''), COALESCE(m.source_line_spans, '[]'::jsonb),
+       COALESCE(i.staging_filename, ''),
        COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
@@ -567,15 +602,20 @@ WHERE m.metric_id = ANY($1)`
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
-			rm       resolvedMetric
-			catsText string
+			rm        resolvedMetric
+			catsText  string
+			spansJSON []byte
 		)
 		if err := rows.Scan(&rm.view.MetricID, &rm.recordID, &rm.view.MetricName, &rm.view.Subject,
-			&rm.view.Value, &rm.view.Unit, &rm.view.ValueClass, &catsText, &rm.filename,
-			&rm.title, &rm.docNo); err != nil {
+			&rm.view.MetricNameEn, &rm.view.SubjectEn, &rm.view.Description, &rm.view.DescriptionEn,
+			&rm.view.Context, &rm.view.ContextEn, &rm.view.Value, &rm.view.Unit, &rm.view.UnitEn,
+			&rm.view.ValueDataType, &rm.view.ValueRangeType, &rm.view.ValueClass, &rm.view.ValueClassEn,
+			&rm.view.FormulaDefinition, &rm.view.ThresholdTarget, &rm.view.Frequency, &rm.view.LocationType,
+			&rm.view.TableSection, &catsText, &spansJSON, &rm.filename, &rm.title, &rm.docNo); err != nil {
 			return nil, err
 		}
 		rm.view.Categories = parseJSONStringArray([]byte(catsText))
+		rm.view.SourceLineSpans = parseJSONStringArray(spansJSON)
 		out[rm.view.MetricID] = rm
 	}
 	return out, rows.Err()
@@ -587,8 +627,14 @@ const metricCategorySiblingLimit = 500
 func (r *metricsReviewer) loadCategorySiblings(ctx context.Context, recordID int64, cats []string) ([]resolvedMetric, error) {
 	const q = `
 SELECT COALESCE(m.metric_id, ''), m.input_record_id, COALESCE(m.metric_name, ''),
-       COALESCE(m.metric_subject, ''), COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''),
-       COALESCE(m.value_class, ''), COALESCE(m.metric_categories, ''), COALESCE(i.staging_filename, ''),
+       COALESCE(m.metric_subject, ''), COALESCE(m.metric_name_en, ''), COALESCE(m.metric_subject_en, ''),
+       COALESCE(m.metric_desc, ''), COALESCE(m.metric_desc_en, ''), COALESCE(m.metric_context, ''),
+       COALESCE(m.metric_context_en, ''), COALESCE(m.metric_value, ''), COALESCE(m.metric_unit, ''),
+       COALESCE(m.metric_unit_en, ''), COALESCE(m.value_data_type, ''), COALESCE(m.value_range_type, ''),
+       COALESCE(m.value_class, ''), COALESCE(m.value_class_en, ''), COALESCE(m.formula_or_definition, ''),
+       COALESCE(m.threshold_or_target, ''), COALESCE(m.measurement_frequency, ''), COALESCE(m.location_type, ''),
+       COALESCE(m.table_name_or_section, ''), COALESCE(m.metric_categories, ''), COALESCE(m.source_line_spans, '[]'::jsonb),
+       COALESCE(i.staging_filename, ''),
        COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.metrics m
 LEFT JOIN kb.inputs i ON i.id = m.input_record_id
@@ -604,18 +650,108 @@ LIMIT $3`
 	var out []resolvedMetric
 	for rows.Next() {
 		var (
-			rm       resolvedMetric
-			catsText string
+			rm        resolvedMetric
+			catsText  string
+			spansJSON []byte
 		)
 		if err := rows.Scan(&rm.view.MetricID, &rm.recordID, &rm.view.MetricName, &rm.view.Subject,
-			&rm.view.Value, &rm.view.Unit, &rm.view.ValueClass, &catsText, &rm.filename,
-			&rm.title, &rm.docNo); err != nil {
+			&rm.view.MetricNameEn, &rm.view.SubjectEn, &rm.view.Description, &rm.view.DescriptionEn,
+			&rm.view.Context, &rm.view.ContextEn, &rm.view.Value, &rm.view.Unit, &rm.view.UnitEn,
+			&rm.view.ValueDataType, &rm.view.ValueRangeType, &rm.view.ValueClass, &rm.view.ValueClassEn,
+			&rm.view.FormulaDefinition, &rm.view.ThresholdTarget, &rm.view.Frequency, &rm.view.LocationType,
+			&rm.view.TableSection, &catsText, &spansJSON, &rm.filename, &rm.title, &rm.docNo); err != nil {
 			return nil, err
 		}
 		rm.view.Categories = parseJSONStringArray([]byte(catsText))
+		rm.view.SourceLineSpans = parseJSONStringArray(spansJSON)
 		out = append(out, rm)
 	}
 	return out, rows.Err()
+}
+
+// matchedMetricContextRadius is the prompt payload context requested for each
+// matched metric: 10 lines before source_line_spans[0], the metric's actual
+// span lines, and 10 lines after source_line_spans[0].
+const matchedMetricContextRadius = 10
+
+func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matches map[int][]matchedMetric) {
+	if len(matches) == 0 {
+		return
+	}
+	linesByRecord := make(map[int64][]Line)
+	failedRecords := make(map[int64]bool)
+	for idx, list := range matches {
+		for i := range list {
+			spans := list[i].view.SourceLineSpans
+			if len(spans) == 0 || list[i].recordID <= 0 {
+				continue
+			}
+			lines, ok := linesByRecord[list[i].recordID]
+			if !ok {
+				if failedRecords[list[i].recordID] {
+					continue
+				}
+				var err error
+				lines, err = loadRecordLines(ctx, list[i].recordID)
+				if err != nil {
+					failedRecords[list[i].recordID] = true
+					if r.logger != nil {
+						r.logger.Warn("metrics review: matched metric context unavailable",
+							"source_record_id", list[i].recordID,
+							"metric_id", list[i].view.MetricID,
+							"error", err,
+						)
+					}
+					continue
+				}
+				linesByRecord[list[i].recordID] = lines
+			}
+			list[i].context = metricSourceContextLines(lines, spans)
+		}
+		matches[idx] = list
+	}
+}
+
+func metricSourceContextLines(lines []Line, spans []string) []map[string]any {
+	if len(lines) == 0 || len(spans) == 0 {
+		return nil
+	}
+	anchorStart := 0
+	for _, s := range spans {
+		start, _ := parseArtifactSpan(s)
+		if start > 0 {
+			anchorStart = start
+			break
+		}
+	}
+	if anchorStart == 0 {
+		return nil
+	}
+	include := make(map[int]bool)
+	for n := anchorStart - matchedMetricContextRadius; n <= anchorStart+matchedMetricContextRadius; n++ {
+		if n > 0 {
+			include[n] = true
+		}
+	}
+	for _, s := range spans {
+		start, end := parseArtifactSpan(s)
+		if start == 0 {
+			continue
+		}
+		for n := start; n <= end; n++ {
+			include[n] = true
+		}
+	}
+	out := make([]map[string]any, 0, len(include))
+	for _, ln := range lines {
+		if include[ln.LineNo] {
+			out = append(out, map[string]any{
+				"line_number": ln.LineNo,
+				"content":     ln.Content,
+			})
+		}
+	}
+	return out
 }
 
 // parseJSONStringArray parses a JSON array of strings; returns nil for empty/invalid.
