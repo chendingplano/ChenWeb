@@ -639,11 +639,14 @@ func FindSimilarArtifactsOnTheFly(ctx context.Context, db *sql.DB, selfType, sel
 		return nil, fmt.Errorf("(CWB_OTF_002) selfType and selfID must be non-empty")
 	}
 
-	var query string
+	var (
+		query        string
+		rawEmbedding sql.NullString
+	)
 	err := db.QueryRowContext(ctx,
-		`SELECT COALESCE(search_document, '') FROM kb.search_artifacts
+		`SELECT COALESCE(search_document, ''), embedding::text FROM kb.search_artifacts
 		 WHERE artifact_type = $1 AND artifact_id = $2 LIMIT 1`,
-		selfType, selfID).Scan(&query)
+		selfType, selfID).Scan(&query, &rawEmbedding)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -663,7 +666,20 @@ func FindSimilarArtifactsOnTheFly(ctx context.Context, db *sql.DB, selfType, sel
 		maxLinks = metricConnectMaxLinks()
 	}
 
-	vec, useSem := embedQueryText(ctx, query)
+	var (
+		vec    []float64
+		useSem bool
+	)
+	if rawEmbedding.Valid && strings.TrimSpace(rawEmbedding.String) != "" {
+		parsedVec, parseErr := parseVectorLiteral(rawEmbedding.String)
+		if parseErr == nil && len(parsedVec) == kbsearch.ConfiguredEmbeddingDim() {
+			vec = parsedVec
+			useSem = true
+		}
+	}
+	if !useSem {
+		vec, useSem = embedQueryText(ctx, query)
+	}
 
 	candidates, err := queryArtifactHybridCandidates(ctx, db, dict, query, vec, useSem, selfType, selfID, candidateType, maxLinks*5)
 	if err != nil {
