@@ -19,6 +19,7 @@ import (
 // per ResolveBatch call (env CATEGORY_RESOLVE_MAX_CONCURRENCY). Set to 1 for fully
 // serial behavior (debugging or rate-limited model endpoints).
 const defaultCategoryResolveMaxConcurrency = 8
+const defaultCreateCategoryMode = "not-use-llm"
 
 func categoryResolveMaxConcurrency() int {
 	if v := strings.TrimSpace(os.Getenv("CATEGORY_RESOLVE_MAX_CONCURRENCY")); v != "" {
@@ -29,21 +30,80 @@ func categoryResolveMaxConcurrency() int {
 	return defaultCategoryResolveMaxConcurrency
 }
 
+func createCategoryMode() string {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("CREATE_CATEGORY_MODE")), "use-llm") {
+		return "use-llm"
+	}
+	return defaultCreateCategoryMode
+}
+
 // newMetricCategoryResolver builds the category resolver used by metric indexing,
 // wiring the real LLM creator from environment configuration.
 func newMetricCategoryResolver(db *sql.DB, logger ApiTypes.JimoLogger) *categoryResolver {
-	// creator stays a nil interface (not a typed-nil pointer) when unavailable, so
-	// the resolver's nil-creator guard fires instead of panicking on a miss.
-	var creator categoryCreator
-	if c, err := newLLMCategoryCreator(db, logger); err != nil {
-		if logger != nil {
-			logger.Warn("category resolver: LLM creator unavailable; new categories cannot be created",
-				"env", "CREATE_ARTIFACT_CATEGORY_PROMPT/CREATE_ARTIFACT_CATEGORY_MODEL_NAME", "error", err.Error())
+	mode := createCategoryMode()
+	var creator categoryCreator = &deterministicCategoryCreator{logger: logger}
+	if mode == "use-llm" {
+		// creator stays a nil interface (not a typed-nil pointer) when unavailable, so
+		// the resolver's nil-creator guard fires instead of panicking on a miss.
+		creator = nil
+		if c, err := newLLMCategoryCreator(db, logger); err != nil {
+			if logger != nil {
+				logger.Warn("category resolver: LLM creator unavailable; new categories cannot be created",
+					"env", "CREATE_ARTIFACT_CATEGORY_PROMPT/CREATE_ARTIFACT_CATEGORY_MODEL_NAME",
+					"mode", mode,
+					"error", err.Error())
+			}
+		} else {
+			creator = c
 		}
-	} else {
-		creator = c
 	}
 	return newCategoryResolver(artifactCategoryRegistry{DB: db}, creator)
+}
+
+type deterministicCategoryCreator struct {
+	logger ApiTypes.JimoLogger
+}
+
+func (c *deterministicCategoryCreator) CreateCategory(_ context.Context, rawKey, categoryType string, _ map[string]any) (createdCategory, error) {
+	start := time.Now()
+	normKey := normalizeCategoryKey(rawKey)
+	if normKey == "" {
+		return createdCategory{}, fmt.Errorf("(MID_26070301) empty category key")
+	}
+	displayName := strings.TrimSpace(rawKey)
+	c.logCreateStart(categoryType, rawKey, defaultCreateCategoryMode, "")
+	cat := createdCategory{CategoryKey: normKey}
+	if displayName != "" {
+		cat.DisplayNames = uniqueStrings([]string{displayName})
+	}
+	c.logCreateEnd(categoryType, rawKey, start)
+	return cat, nil
+}
+
+func (c *deterministicCategoryCreator) logCreateStart(categoryType, rawKey, mode, modelName string) {
+	if c.logger == nil {
+		return
+	}
+	args := []any{
+		"categoryType", categoryType,
+		"rawKey", rawKey,
+		"mode", mode,
+	}
+	if strings.TrimSpace(modelName) != "" {
+		args = append(args, "modelName", modelName)
+	}
+	c.logger.Info("Create Category start", args...)
+}
+
+func (c *deterministicCategoryCreator) logCreateEnd(categoryType, rawKey string, start time.Time) {
+	if c.logger == nil {
+		return
+	}
+	c.logger.Info("Create Category end  ",
+		"categoryType", categoryType,
+		"rawKey", rawKey,
+		"ms_used", time.Since(start).Milliseconds(),
+	)
 }
 
 // llmCategoryCreator calls the CREATE_ARTIFACT_CATEGORY LLM to mint a new category
@@ -129,12 +189,8 @@ func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, cate
 	if c.newLLMCallID != nil {
 		callID = strings.TrimSpace(c.newLLMCallID())
 	}
-	c.logger.Info("Create Category start",
-		"categoryType", categoryType,
-		"rawKey", rawKey,
-		"modelName", modelName,
-		"promptName", promptName,
-	)
+	deterministicLogger := deterministicCategoryCreator{logger: c.logger}
+	deterministicLogger.logCreateStart(categoryType, rawKey, "use-llm", modelName)
 	start := time.Now()
 	catIn := newLLMJSONInput(
 		ctx,
@@ -152,11 +208,7 @@ func (c *llmCategoryCreator) invoke(ctx context.Context, inputText, rawKey, cate
 	catIn.DocumentFirst = false
 	payload, err := c.extractor.ExtractJSON(ctx, catIn)
 
-	c.logger.Info("Create Category end  ",
-		"categoryType", categoryType,
-		"rawKey", rawKey,
-		"ms_used", time.Since(start).Milliseconds(),
-	)
+	deterministicLogger.logCreateEnd(categoryType, rawKey, start)
 
 	c.logCategoryLLMCall(ctx, callID, rawKey, categoryType, modelName, inputText, payload, err, start, time.Now())
 	return payload, err

@@ -148,6 +148,25 @@ INSERT INTO kb.doc_proc_logs (
 	}
 }
 
+func TestDeterministicCategoryCreatorLogsAndNormalizes(t *testing.T) {
+	logger := &stubCategoryLogger{}
+	creator := &deterministicCategoryCreator{logger: logger}
+
+	got, err := creator.CreateCategory(context.Background(), "  Response_Time  ", "metric", map[string]any{"artifact_kind": "metric"})
+	if err != nil {
+		t.Fatalf("CreateCategory error: %v", err)
+	}
+	if got.CategoryKey != "response time" {
+		t.Fatalf("CategoryKey = %q, want response time", got.CategoryKey)
+	}
+	if len(got.DisplayNames) != 1 || got.DisplayNames[0] != "Response_Time" {
+		t.Fatalf("DisplayNames = %#v, want [Response_Time]", got.DisplayNames)
+	}
+	if len(logger.infoMessages) != 2 || logger.infoMessages[0] != "Create Category start" || logger.infoMessages[1] != "Create Category end  " {
+		t.Fatalf("infoMessages = %#v, want start/end logs", logger.infoMessages)
+	}
+}
+
 func TestLLMCategoryCreatorCreateCategoryLogsPrimaryAndFallbackCalls(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

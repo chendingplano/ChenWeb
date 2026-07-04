@@ -89,6 +89,36 @@ func TestResolverCreatesOnMiss(t *testing.T) {
 	}
 }
 
+func TestNewMetricCategoryResolverDefaultsToNonLLMCreateOnMiss(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	t.Setenv("CREATE_CATEGORY_MODE", "")
+
+	mock.ExpectQuery("SELECT .* FROM kb\\.artifact_categories").
+		WithArgs("metric").
+		WillReturnRows(sqlmock.NewRows([]string{"category_id", "category_key", "status", "canonical_of", "match_keys", "seen_count"}))
+	mock.ExpectQuery("INSERT INTO kb\\.artifact_categories").
+		WillReturnRows(sqlmock.NewRows([]string{"category_id"}).AddRow(int64(42)))
+	mock.ExpectExec("UPDATE kb\\.artifact_categories").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	cr := newMetricCategoryResolver(db, &stubCategoryLogger{})
+	id, err := cr.Resolve(context.Background(), "Throughput", "metric", nil)
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	if id != 42 {
+		t.Fatalf("Resolve id = %d, want 42", id)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestResolverErrorsWhenNoCreatorOnMiss(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
