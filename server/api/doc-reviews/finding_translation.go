@@ -94,11 +94,11 @@ func (t *llmFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLa
 }
 
 func (t *llmFindingTranslator) normalizeFindingAttempt(
-	ctx context.Context, 
-	canonicalLanguage string, 
-	targetLanguages []string, 
-	finding FindingItem, 
-	promptName string, 
+	ctx context.Context,
+	canonicalLanguage string,
+	targetLanguages []string,
+	finding FindingItem,
+	promptName string,
 	promptText string) (FindingNormalization, error) {
 	input, err := json.Marshal(map[string]any{
 		"canonical_language": canonicalLanguage,
@@ -110,7 +110,7 @@ func (t *llmFindingTranslator) normalizeFindingAttempt(
 			"description":  finding.Description,
 			"evidence":     finding.Evidence,
 			// "location":     finding.Location,
-			"suggestion":   finding.Suggestion,
+			"suggestion": finding.Suggestion,
 			// "confidence":   finding.Confidence,
 		},
 	})
@@ -354,6 +354,18 @@ func normalizeConfiguredLanguages(languages []string) []string {
 	return out
 }
 
+func docReviewTranslationMode() string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("DOC_REVIEW_TRANSLATION")))
+	switch mode {
+	case "", "auto":
+		return "auto"
+	case "on-demand":
+		return "on-demand"
+	default:
+		return "auto"
+	}
+}
+
 func findingLocalizedContentFromMap(m map[string]any) FindingLocalizedContent {
 	return FindingLocalizedContent{
 		Title:       strings.TrimSpace(asString(m["title"])),
@@ -512,11 +524,15 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 		Suggestion:  finding.Suggestion,
 		Confidence:  finding.Confidence,
 	}
-	targetLanguages := make([]string, 0, len(languages))
-	for _, l := range normalizeConfiguredLanguages(languages) {
+	configuredLanguages := normalizeConfiguredLanguages(languages)
+	targetLanguages := make([]string, 0, len(configuredLanguages))
+	for _, l := range configuredLanguages {
 		if l != "en" {
 			targetLanguages = append(targetLanguages, l)
 		}
+	}
+	if docReviewTranslationMode() == "on-demand" {
+		targetLanguages = nil
 	}
 	normalized, err := translator.NormalizeFinding(ctx, "en", targetLanguages, base)
 	if err != nil {
@@ -578,7 +594,7 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 		Confidence:  finding.Confidence,
 	}
 	var pendingLanguages []string
-	for _, language := range normalizeConfiguredLanguages(languages) {
+	for _, language := range append([]string{"en"}, targetLanguages...) {
 		if language == "en" {
 			continue
 		}

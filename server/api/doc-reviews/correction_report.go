@@ -68,10 +68,7 @@ func (c *DocReviewController) GenerateCorrectionReport(ctx context.Context, repo
 		return "", nil
 	}
 
-	lang := strings.TrimSpace(os.Getenv("DOC_REVIEW_REPORT_LANGUAGE"))
-	if lang == "" {
-		lang = "en"
-	}
+	lang := docReviewReportLanguagesFromEnv()[0]
 
 	templatePath := strings.TrimSpace(os.Getenv("DOC_REVIEW_CORRECTION_TEMPLATE_FILENAME"))
 	if templatePath == "" {

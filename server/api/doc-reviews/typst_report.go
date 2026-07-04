@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -93,18 +94,66 @@ func buildTypstVariants(ctx context.Context, req *RequestStatus, base *ReportSke
 	if err != nil {
 		return nil, fmt.Errorf("load localized findings: %w", err)
 	}
-	return []typstVariant{
-		{
-			language: "en",
-			suffix:   "report-en",
-			skeleton: buildLocalizedTypstSkeleton(ctx, req, base, findings, metadataByFindingID, "en"),
-		},
-		{
-			language: "zh",
-			suffix:   "report-cn",
-			skeleton: buildLocalizedTypstSkeleton(ctx, req, base, findings, metadataByFindingID, "zh"),
-		},
-	}, nil
+	languages := docReviewReportLanguagesFromEnv()
+	var variants []typstVariant
+	for _, language := range languages {
+		variants = append(variants, typstVariant{
+			language: language,
+			suffix:   reportLanguageSuffix(language),
+			skeleton: buildLocalizedTypstSkeleton(ctx, req, base, findings, metadataByFindingID, language),
+		})
+	}
+	return variants, nil
+}
+
+func docReviewReportLanguagesFromEnv() []string {
+	raw := strings.TrimSpace(os.Getenv("DOC_REVIEW_REPORT_LANGUAGE"))
+	if raw == "" {
+		return []string{"en"}
+	}
+
+	var parsed []string
+	if strings.HasPrefix(raw, "[") {
+		var items []string
+		if err := json.Unmarshal([]byte(raw), &items); err == nil {
+			parsed = items
+		}
+	} else {
+		var single string
+		if err := json.Unmarshal([]byte(raw), &single); err == nil {
+			parsed = []string{single}
+		} else {
+			parsed = []string{raw}
+		}
+	}
+
+	seen := map[string]bool{}
+	var out []string
+	for _, language := range parsed {
+		language = strings.ToLower(strings.TrimSpace(language))
+		switch language {
+		case "", "en", "en-us":
+			language = "en"
+		}
+		if language == "" || seen[language] {
+			continue
+		}
+		seen[language] = true
+		out = append(out, language)
+	}
+	if len(out) == 0 {
+		return []string{"en"}
+	}
+	return out
+}
+
+func reportLanguageSuffix(language string) string {
+	switch language {
+	case "zh", "zh-cn", "zh-hans":
+		return "report-cn"
+	default:
+		return "report-" + language
+	}
 }
 
 func loadReportFindingsWithMetadata(ctx context.Context, db *sql.DB, req *RequestStatus) ([]FindingItem, map[int64][]byte, error) {

@@ -270,6 +270,7 @@ func TestPrepareFindingForStorageCanonicalizesEnglishAndPreservesChineseSource(t
 }
 
 func TestPrepareFindingForStorageAutoTranslatesConfiguredDisplayLanguages(t *testing.T) {
+	t.Setenv("DOC_REVIEW_TRANSLATION", "auto")
 	translator := &fakeFindingTranslator{
 		normalizeOut: FindingNormalization{
 			SourceLanguage:           "en",
@@ -310,6 +311,52 @@ func TestPrepareFindingForStorageAutoTranslatesConfiguredDisplayLanguages(t *tes
 	}
 	if prepared.Canonical.Evidence != "The system are ready." {
 		t.Fatalf("evidence=%q, want original evidence unchanged", prepared.Canonical.Evidence)
+	}
+}
+
+func TestPrepareFindingForStorageOnDemandSkipsConfiguredDisplayTranslations(t *testing.T) {
+	t.Setenv("DOC_REVIEW_TRANSLATION", "on-demand")
+
+	translator := &fakeFindingTranslator{
+		normalizeOut: FindingNormalization{
+			SourceLanguage:           "en",
+			SourceLanguageConfidence: 0.95,
+			CanonicalLanguage:        "en",
+			CanonicalOrigin:          "original",
+			Canonical: FindingLocalizedContent{
+				Title:       "Subject-verb disagreement",
+				Description: "The singular subject uses a plural verb.",
+				Suggestion:  "Change 'are' to 'is'.",
+			},
+		},
+		translateOut: map[string]FindingLocalizedContent{
+			"zh": {
+				Title:       "主谓不一致",
+				Description: "单数主语使用了复数谓语。",
+				Suggestion:  "将“are”改为“is”。",
+				Provenance:  "llm_translation",
+			},
+		},
+	}
+
+	prepared, err := prepareFindingForStorage(context.Background(), translator, []string{"en", "zh"}, ReviewFinding{
+		FindingType: "grammar",
+		Title:       "Subject-verb disagreement",
+		Description: "The singular subject uses a plural verb.",
+		Suggestion:  "Change 'are' to 'is'.",
+		Evidence:    "The system are ready.",
+	})
+	if err != nil {
+		t.Fatalf("prepareFindingForStorage: %v", err)
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls=%v, want none in on-demand mode", translator.translateCalls)
+	}
+	if _, ok := prepared.Metadata.I18N.Translations["zh"]; ok {
+		t.Fatalf("zh translation unexpectedly precomputed: %#v", prepared.Metadata.I18N.Translations["zh"])
+	}
+	if got := prepared.Metadata.I18N.Translations["en"].Title; got != "Subject-verb disagreement" {
+		t.Fatalf("en title=%q", got)
 	}
 }
 

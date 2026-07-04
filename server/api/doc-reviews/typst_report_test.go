@@ -15,7 +15,7 @@ import (
 
 // TestTypContentLineEscapesMarkupDelimiters guards the fix for the "unclosed
 // delimiter" compile failure: finding text containing an unbalanced count of
-// Typst emphasis/raw delimiters (`*`, `_`, `` ` ``) or `~` must be escaped so it
+// Typst emphasis/raw delimiters (`*`, `_`, “ ` “) or `~` must be escaped so it
 // renders as literal text instead of opening markup Typst never closes.
 func TestTypContentLineEscapesMarkupDelimiters(t *testing.T) {
 	// Mirrors the real failure: wildcard ranges like "0.*", "1.*" produced an
@@ -108,6 +108,7 @@ func TestTypstReportCompilesWithDelimiterHeavyContent(t *testing.T) {
 }
 
 func TestBuildTypstVariantsUsesLocalizedMetadata(t *testing.T) {
+	t.Setenv("DOC_REVIEW_REPORT_LANGUAGE", `["en","zh"]`)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -201,6 +202,64 @@ func TestBuildTypstVariantsUsesLocalizedMetadata(t *testing.T) {
 	}
 	if got := variants[1].skeleton.Findings[0].Sources[0].Source; got != "12: source line" {
 		t.Fatalf("sources lost during localization: %q", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestBuildTypstVariantsUsesSingleConfiguredLanguage(t *testing.T) {
+	t.Setenv("DOC_REVIEW_REPORT_LANGUAGE", "zh")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	findingsQuery := regexp.QuoteMeta(`
+		SELECT id, pass, aspect, severity, finding_type, title, description,
+		       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+		       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
+		FROM kb.doc_review_findings
+		WHERE input_record_id = $1 AND run_id = $2
+		ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`)
+	mock.ExpectQuery(findingsQuery).
+		WithArgs(int64(88), int64(99)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "pass", "aspect", "severity", "finding_type", "title", "description",
+			"evidence", "location", "suggestion", "confidence", "review_status", "metadata",
+		}).AddRow(
+			int64(7), "P1", "grammar_spelling", "high", "typo",
+			"Canonical title", "Canonical description", "Evidence", "12-13", "Canonical suggestion", 0.9, "pending",
+			`{"zh":{"title":"中文标题","description":"中文描述","suggestion":"中文建议"}}`,
+		))
+
+	req := &RequestStatus{ID: 42, InputRecordID: 88, LatestRunID: 99, CreateTime: "2026-07-04T12:00:00Z"}
+	base := &ReportSkeleton{
+		Meta:            ReportMeta{ReportID: "rpt_88_2026-07-04T12:00:00Z", DocumentTitle: "Document title", DocumentRecordID: 88, GeneratedAt: "2026-07-04T12:05:00Z", RunID: 99, TotalFindings: 1},
+		FindingsByPass:  map[string]PassGroup{"P1": {Label: "Language & Style", Findings: []ReportFinding{{Pass: "P1", Aspect: "grammar_spelling", Severity: "high", FindingType: "typo", Title: "Canonical title", Description: "Canonical description", Suggestion: "Canonical suggestion", Sources: []SourceContext{{Source: "12: source line"}}}}}},
+		Findings:        []ReportFinding{{Pass: "P1", Aspect: "grammar_spelling", Severity: "high", FindingType: "typo", Title: "Canonical title", Description: "Canonical description", Suggestion: "Canonical suggestion", Sources: []SourceContext{{Source: "12: source line"}}}},
+		Recommendations: []Recommendation{{Priority: 1, Action: "Canonical suggestion", RelatedFindingIDs: []int{1}}},
+		PassOrder:       []string{"P1"},
+	}
+
+	variants, err := buildTypstVariants(context.Background(), req, base)
+	if err != nil {
+		t.Fatalf("buildTypstVariants: %v", err)
+	}
+	if len(variants) != 1 {
+		t.Fatalf("variants len=%d, want 1", len(variants))
+	}
+	if variants[0].language != "zh" || variants[0].suffix != "report-cn" {
+		t.Fatalf("variant=%+v, want zh/report-cn", variants[0])
+	}
+	if got := variants[0].skeleton.Findings[0].Title; got != "中文标题" {
+		t.Fatalf("zh title=%q", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
