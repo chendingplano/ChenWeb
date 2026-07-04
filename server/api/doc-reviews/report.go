@@ -644,9 +644,9 @@ func (g *DocReviewReportGenerator) FindReportPDFPath(ctx context.Context, report
 }
 
 // findReportPDF scans outputDir for a PDF matching the given requestID under
-// either the current naming convention (<stamp>-<id>-reports.pdf) or the
-// legacy one (<stamp>-<id>reports.pdf, no hyphen before "reports"). Returns
-// the lexicographically last match (newest stamp), or "" when nothing is found.
+// the bilingual naming convention (<stamp>-<id>-report-en.pdf / -report-cn.pdf)
+// or the older single-report conventions. Returns the lexicographically last
+// match (newest stamp), or "" when nothing is found.
 func findReportPDF(outputDir string, requestID int64) string {
 	matches := findAllReportPDFs(outputDir, requestID)
 	if len(matches) == 0 {
@@ -660,6 +660,8 @@ func findReportPDF(outputDir string, requestID int64) string {
 func findAllReportPDFs(outputDir string, requestID int64) []string {
 	var matches []string
 	for _, pat := range []string{
+		filepath.Join(outputDir, fmt.Sprintf("*-%d-report-en.pdf", requestID)),
+		filepath.Join(outputDir, fmt.Sprintf("*-%d-report-cn.pdf", requestID)),
 		filepath.Join(outputDir, fmt.Sprintf("*-%d-reports.pdf", requestID)),
 		filepath.Join(outputDir, fmt.Sprintf("*-%dreports.pdf", requestID)),
 	} {

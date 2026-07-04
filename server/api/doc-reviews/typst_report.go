@@ -2,6 +2,7 @@ package docreviews
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
@@ -35,11 +37,6 @@ func GenerateTypstReport(ctx context.Context, requestID int64, skeleton *ReportS
 		return nil
 	}
 
-	lang := strings.TrimSpace(os.Getenv("DOC_REVIEW_REPORT_LANGUAGE"))
-	if lang == "" {
-		lang = "en"
-	}
-
 	templatePath := strings.TrimSpace(os.Getenv("DOC_REVIEW_TEMPLATE_FILENAME"))
 	if templatePath == "" {
 		templatePath = "docs/doc-templates/template-document-report.typ"
@@ -56,28 +53,146 @@ func GenerateTypstReport(ctx context.Context, requestID int64, skeleton *ReportS
 		return fmt.Errorf("create output dir %q: %w", outputDir, err)
 	}
 
-	// Filename: yyyymmdd-hhmm-{requestID}-reports.{ext}
 	stamp := time.Now().Format("20060102-1504")
-	baseName := fmt.Sprintf("%s-%d-reports", stamp, requestID)
-	typPath := filepath.Join(outputDir, baseName+".typ")
-	pdfPath := filepath.Join(outputDir, baseName+".pdf")
-
-	src := buildTypstSource(skeleton, req, lang, absTemplatePath)
-	if err := os.WriteFile(typPath, []byte(src), 0o644); err != nil {
-		return fmt.Errorf("write typst file %q: %w", typPath, err)
-	}
-	typstLogger.Info("typst source written", "request_id", requestID, "path", typPath)
-
-	// Compile: --root / lets the #import use an absolute filesystem path.
-	cmd := exec.CommandContext(ctx, "typst", "compile", "--root", "/", typPath, pdfPath)
-	out, err := cmd.CombinedOutput()
+	variants, err := buildTypstVariants(ctx, req, skeleton)
 	if err != nil {
-		typstLogger.Warn("typst compile failed",
-			"request_id", requestID, "error", err, "output", string(out))
-		return fmt.Errorf("typst compile: %w\n%s", err, string(out))
+		return err
 	}
-	typstLogger.Info("PDF generated", "request_id", requestID, "path", pdfPath)
+	for _, variant := range variants {
+		baseName := fmt.Sprintf("%s-%d-%s", stamp, requestID, variant.suffix)
+		typPath := filepath.Join(outputDir, baseName+".typ")
+		pdfPath := filepath.Join(outputDir, baseName+".pdf")
+
+		src := buildTypstSource(variant.skeleton, req, variant.language, absTemplatePath)
+		if err := os.WriteFile(typPath, []byte(src), 0o644); err != nil {
+			return fmt.Errorf("write typst file %q: %w", typPath, err)
+		}
+		typstLogger.Info("typst source written", "request_id", requestID, "language", variant.language, "path", typPath)
+
+		// Compile: --root / lets the #import use an absolute filesystem path.
+		cmd := exec.CommandContext(ctx, "typst", "compile", "--root", "/", typPath, pdfPath)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			typstLogger.Warn("typst compile failed",
+				"request_id", requestID, "language", variant.language, "error", err, "output", string(out))
+			return fmt.Errorf("typst compile (%s): %w\n%s", variant.language, err, string(out))
+		}
+		typstLogger.Info("PDF generated", "request_id", requestID, "language", variant.language, "path", pdfPath)
+	}
 	return nil
+}
+
+type typstVariant struct {
+	language string
+	suffix   string
+	skeleton *ReportSkeleton
+}
+
+func buildTypstVariants(ctx context.Context, req *RequestStatus, base *ReportSkeleton) ([]typstVariant, error) {
+	findings, metadataByFindingID, err := loadReportFindingsWithMetadata(ctx, ApiTypes.ProjectDBHandle, req)
+	if err != nil {
+		return nil, fmt.Errorf("load localized findings: %w", err)
+	}
+	return []typstVariant{
+		{
+			language: "en",
+			suffix:   "report-en",
+			skeleton: buildLocalizedTypstSkeleton(ctx, req, base, findings, metadataByFindingID, "en"),
+		},
+		{
+			language: "zh",
+			suffix:   "report-cn",
+			skeleton: buildLocalizedTypstSkeleton(ctx, req, base, findings, metadataByFindingID, "zh"),
+		},
+	}, nil
+}
+
+func loadReportFindingsWithMetadata(ctx context.Context, db *sql.DB, req *RequestStatus) ([]FindingItem, map[int64][]byte, error) {
+	if db == nil || req == nil || req.InputRecordID == 0 || req.LatestRunID == 0 {
+		return nil, nil, nil
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, pass, aspect, severity, finding_type, title, description,
+		       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+		       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
+		FROM kb.doc_review_findings
+		WHERE input_record_id = $1 AND run_id = $2
+		ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`,
+		req.InputRecordID, req.LatestRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	var findings []FindingItem
+	metadataByFindingID := map[int64][]byte{}
+	for rows.Next() {
+		var finding FindingItem
+		var metadata string
+		if err := rows.Scan(&finding.ID, &finding.Pass, &finding.Aspect, &finding.Severity, &finding.FindingType,
+			&finding.Title, &finding.Description, &finding.Evidence, &finding.Location, &finding.Suggestion,
+			&finding.Confidence, &finding.ReviewStatus, &metadata); err != nil {
+			return nil, nil, err
+		}
+		findings = append(findings, finding)
+		metadataByFindingID[finding.ID] = []byte(metadata)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return findings, metadataByFindingID, nil
+}
+
+func buildLocalizedTypstSkeleton(ctx context.Context, req *RequestStatus, base *ReportSkeleton, findings []FindingItem, metadataByFindingID map[int64][]byte, language string) *ReportSkeleton {
+	if base == nil {
+		return nil
+	}
+	if len(findings) == 0 {
+		return base
+	}
+
+	localizedFindings := make([]FindingItem, 0, len(findings))
+	for _, finding := range findings {
+		if tr, ok := translationFromMetadata(metadataByFindingID[finding.ID], language); ok {
+			finding = applyFindingTranslation(finding, tr)
+		}
+		localizedFindings = append(localizedFindings, finding)
+	}
+
+	gen := NewDocReviewReportGenerator()
+	gen.DB = nil
+	gen.PackageOrder = configuredPackageOrder()
+	localized, err := gen.Build(ctx, req, localizedFindings)
+	if err != nil {
+		typstLogger.Warn("buildLocalizedTypstSkeleton: fallback to base skeleton", "language", language, "error", err)
+		return base
+	}
+	localized.Meta = base.Meta
+	copyLocalizedSources(localized, base)
+	return localized
+}
+
+func copyLocalizedSources(dst, src *ReportSkeleton) {
+	if dst == nil || src == nil {
+		return
+	}
+	for i := range dst.Findings {
+		if i < len(src.Findings) {
+			dst.Findings[i].Sources = src.Findings[i].Sources
+		}
+	}
+	for pass, dstGroup := range dst.FindingsByPass {
+		srcGroup, ok := src.FindingsByPass[pass]
+		if !ok {
+			continue
+		}
+		for i := range dstGroup.Findings {
+			if i < len(srcGroup.Findings) {
+				dstGroup.Findings[i].Sources = srcGroup.Findings[i].Sources
+			}
+		}
+		dst.FindingsByPass[pass] = dstGroup
+	}
 }
 
 // buildTypstSource returns the full .typ source for the review report.
