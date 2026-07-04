@@ -2576,6 +2576,13 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 	taskPrompt := metricCandidateTask(p.MentionPromptText)
 	callStart := p.Now()
 	callID := fmt.Sprintf("%d_p1_c%d", p.batchRecordID, chunkIdx)
+	p.Logger.Info("extract metrics start (batch)",
+		"record_id", p.batchRecordID,
+		"chunk", chunkIdx,
+		"total", len(p.batchChunks),
+		"model name", p.MentionModelName,
+		"prompt name", p.MentionPromptRef,
+	)
 	payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, inputText, taskPrompt)
 	p.logExtractMetricsChunk(ctx, p.batchRecordID, callID, block.Index, len(p.batchChunks),
 		[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef, payload, err, callStart, p.Now(), "")
@@ -2591,6 +2598,15 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 		lang = "zh"
 	}
 	raw, _ := payload["candidates"].([]any)
+	cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
+	p.Logger.Info("extract metrics end  (batch)",
+		"record_id", p.batchRecordID,
+		"extracted metrics", len(raw),
+		"chunk", chunkIdx,
+		"cache_hit", cacheHit,
+		"cache_miss", cacheMiss,
+		"ms_used", time.Since(callStart).Milliseconds(),
+	)
 	p.batchMu.Lock()
 	if lang != "" && p.batchLang == "unknown" {
 		p.batchLang = lang
