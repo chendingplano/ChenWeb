@@ -55,7 +55,7 @@ func (s *ControlService) runProcessorsChunkBatched(
 	recordID int64,
 	requestFailed, requestStopped *bool,
 	firstErr *error,
-	summaries *[]procResult,
+	_ *[]procResult,
 ) {
 	part := partitionBatchProcessors(processors)
 	batchProcessors := part.batch

@@ -1891,7 +1891,12 @@ func (p *MetricsProcessor) extractMetricPayload(
 		err     error
 	)
 
-	p.Logger.Info("inputText", "inputText", in)
+	// p.Logger.Info("llm_input_preview",
+	// 	"prompt_name", in.PromptName,
+	// 	"model_name", in.ModelName,
+	// 	"document_first", in.DocumentFirst,
+	// 	"messages", llmclients.PreviewMessages(in),
+	// )
 	if structuredExtractor, ok := p.Extractor.(LLMStructuredJSONExtractor); ok {
 		var result *llmclients.StructuredOutputResult
 		result, err = structuredExtractor.ExtractStructuredJSON(ctx, in, metricsExtractionContract())
@@ -2583,7 +2588,6 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 		"total", len(p.batchChunks),
 		"model name", p.MentionModelName,
 		"prompt name", p.MentionPromptRef,
-		"inputText", inputText,
 	)
 	payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, inputText, taskPrompt)
 	p.logExtractMetricsChunk(ctx, p.batchRecordID, callID, block.Index, len(p.batchChunks),

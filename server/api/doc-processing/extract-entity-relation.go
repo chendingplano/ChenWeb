@@ -2185,7 +2185,7 @@ func refreshRelationArtifactFile(ctx context.Context, db *sql.DB, artifactDir st
 
 // initEntityBatch initialises the entity-relation processor for per-chunk
 // batching of the Phase 1 (entity extraction) pass.
-func (p *EntityRelationProcessor) initEntityBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+func (p *EntityRelationProcessor) initEntityBatch(_ context.Context, recordID int64, chunks []Chunk, docCtx string) error {
 	if p.PromptErr != nil {
 		return fmt.Errorf("(MID_26062720) %s prompt error: %w", p.Name(), p.PromptErr)
 	}
