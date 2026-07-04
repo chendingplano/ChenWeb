@@ -306,6 +306,9 @@ func (r *metricsReviewer) saveReviewLog(ctx context.Context, entry ReviewLogEntr
 
 func metricLogUnitKey(dm docMetric) string {
 	if id := strings.TrimSpace(dm.view.MetricID); id != "" {
+		if dm.id > 0 {
+			return fmt.Sprintf("%s#%d", id, dm.id)
+		}
 		return id
 	}
 	return fmt.Sprintf("%d", dm.id)

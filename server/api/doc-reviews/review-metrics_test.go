@@ -209,7 +209,7 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 	if logEntry.RunID != 28 || logEntry.InputRecordID != 1 {
 		t.Fatalf("log run/record = %d/%d, want 28/1", logEntry.RunID, logEntry.InputRecordID)
 	}
-	if logEntry.Aspect != "metrics" || logEntry.UnitType != "metric" || logEntry.UnitKey != "1_m_1" {
+	if logEntry.Aspect != "metrics" || logEntry.UnitType != "metric" || logEntry.UnitKey != "1_m_1#7" {
 		t.Fatalf("log aspect/unit = %q/%q/%q", logEntry.Aspect, logEntry.UnitType, logEntry.UnitKey)
 	}
 	if logEntry.Outcome != "findings_emitted" {
@@ -283,4 +283,19 @@ func TestBuildReviewers_MetricsUsesDocReviewerMaxTasks(t *testing.T) {
 		}
 	}
 	t.Fatal("metrics reviewer not found")
+}
+
+func TestMetricLogUnitKey_IncludesRowID(t *testing.T) {
+	got := metricLogUnitKey(docMetric{
+		id:   42,
+		view: metricView{MetricID: "416_mtc_20"},
+	})
+	if got != "416_mtc_20#42" {
+		t.Fatalf("metricLogUnitKey = %q, want %q", got, "416_mtc_20#42")
+	}
+
+	got = metricLogUnitKey(docMetric{id: 99})
+	if got != "99" {
+		t.Fatalf("metricLogUnitKey fallback = %q, want %q", got, "99")
+	}
 }
