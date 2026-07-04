@@ -136,6 +136,15 @@ export function enforceEntityBeforeRelation(chosen: string[], entityAlreadySucce
 	return [...chosen, ENTITY_PROCESSOR_ID];
 }
 
+export function buildManualLaunchOperations(
+	selectableProcessorIds: string[],
+	processors: Record<string, boolean>,
+	entityAlreadySucceeded: boolean
+): string[] {
+	const chosen = selectableProcessorIds.filter((p) => processors[p]);
+	return enforceEntityBeforeRelation(chosen, entityAlreadySucceeded);
+}
+
 const FINAL_STATUSES = new Set(['success', 'fail', 'failed', 'stopped']);
 
 function normalizeOperationName(value?: string): string {

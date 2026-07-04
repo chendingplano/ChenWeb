@@ -22,8 +22,8 @@
 		MANDATORY_DISPLAY_STAGES,
 		MANDATORY_PROCESSOR_IDS,
 		PIPELINE_STAGES,
+		buildManualLaunchOperations,
 		computeStages,
-		enforceEntityBeforeRelation,
 		entityExtractionSucceeded,
 		isActiveRecord,
 		visibleStages,
@@ -458,15 +458,13 @@
 			await publishEvent('kb.pdf.parsed', { record_id: String(record.id), type: 'pdf', status: 'success', force: true });
 			return;
 		}
-		let chosen = selectableProcessorIds.filter((p) => procs[p]);
 		// extract_relation links its endpoints against extract_entity's entities. If
 		// entities don't already exist for this record, force extract_entity to run too
 		// (ADR 2026061702). Done per record so a record that already has entities is not
 		// re-run unnecessarily.
-		chosen = enforceEntityBeforeRelation(chosen, entityExtractionSucceeded(record));
-		const allChosen = chosen.length === selectableProcessorIds.length;
+		const chosen = buildManualLaunchOperations(selectableProcessorIds, procs, entityExtractionSucceeded(record));
 		const payload: Record<string, unknown> = { record_id: String(record.id), force: runMode === 'force' };
-		if (!allChosen) payload.operation = chosen;
+		payload.operation = chosen;
 		await publishEvent('kb.line-file-generated', payload);
 	}
 
@@ -1778,8 +1776,6 @@
 					<div style="margin-top:6px; font-size:11px; color:{textMuted};">Triggers parse → convert → all doc processors (auto chain).</div>
 				{:else if convertChecked}
 					<div style="margin-top:6px; font-size:11px; color:{textMuted};">Triggers convert → all doc processors (auto chain).</div>
-				{:else if selectableProcessorIds.every(p => processors[p])}
-					<div style="margin-top:6px; font-size:11px; color:{textMuted};">All processors selected — omitting operation filter.</div>
 				{/if}
 			</div>
 

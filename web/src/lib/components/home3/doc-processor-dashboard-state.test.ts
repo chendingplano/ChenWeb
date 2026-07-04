@@ -7,6 +7,7 @@ import {
 	ALL_PROCESSOR_IDS,
 	MANDATORY_PROCESSOR_IDS,
 	MANDATORY_DISPLAY_STAGES,
+	buildManualLaunchOperations,
 	visibleStages,
 	enforceEntityBeforeRelation,
 	entityExtractionSucceeded,
@@ -22,6 +23,27 @@ test('only blocking is locked in the processor selection UI', () => {
 	for (const processorID of ['static_analyzer', 'chunking', 'extract_doc_metadata']) {
 		assert.equal(ALL_PROCESSOR_IDS.includes(processorID), true);
 	}
+});
+
+test('manual launch operations preserve explicit selection when scene blocks is unchecked', () => {
+	const selectable = [
+		...MANDATORY_PROCESSOR_IDS,
+		'extract_metrics',
+		'extract_provisions',
+		'extract_semantic_projections',
+		'extract_entity',
+		'extract_relation',
+		'generate_topics',
+		'generate_summaries',
+		'generate_scene_blocks',
+		'extract_inventory_items'
+	];
+	const checked = Object.fromEntries(selectable.map((id) => [id, id !== 'generate_scene_blocks']));
+
+	const operations = buildManualLaunchOperations(selectable, checked, true);
+
+	assert.equal(operations.includes('generate_scene_blocks'), false);
+	assert.deepEqual(operations, selectable.filter((id) => id !== 'generate_scene_blocks'));
 });
 
 test('scene blocks stage treats extract_scene_blocks success as finished', () => {
