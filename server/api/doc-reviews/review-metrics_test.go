@@ -261,3 +261,26 @@ func TestReviewMetric_LogsNoIssue(t *testing.T) {
 		t.Fatalf("log outcome = %q, want no_issue", logStore.logs[0].Outcome)
 	}
 }
+
+func TestBuildReviewers_MetricsUsesDocReviewerMaxTasks(t *testing.T) {
+	t.Setenv("MAX_DOC_REVIEWER_TASKS", "4")
+
+	p := &ReviewProcessor{
+		MetricsClient:     &fakeJSONExtractor{},
+		MetricsModelName:  "metric-model",
+		MetricsPromptRef:  "prompt-review-metrics-v2.md",
+		MetricsPromptText: "compare metrics",
+		MaxConcurrent:     1,
+	}
+
+	runners := p.buildReviewers(DocMetadataInputRecord{})
+	for _, runner := range runners {
+		if reviewer, ok := runner.reviewer.(*metricsReviewer); ok {
+			if reviewer.maxTasks != 4 {
+				t.Fatalf("metrics reviewer maxTasks = %d, want 4", reviewer.maxTasks)
+			}
+			return
+		}
+	}
+	t.Fatal("metrics reviewer not found")
+}

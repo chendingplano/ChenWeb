@@ -1975,7 +1975,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				db:           ApiTypes.ProjectDBHandle,
 				runID:        p.RunID,
 				logStore:     p.ReviewLogsStore,
-				maxTasks:     p.MaxConcurrent,
+				maxTasks:     maxDocReviewerTasks(p.MaxConcurrent),
 				maxMatches:   envInt("METRIC_REVIEW_MAX_MATCHES", 20, 1),
 				maxMetrics:   envInt("METRIC_REVIEW_MAX_METRICS", 0, 0),
 			},
