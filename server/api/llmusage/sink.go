@@ -13,7 +13,10 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	sharedllm "github.com/chendingplano/shared/go/api/llm"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
+
+var sinkLogger = loggerutil.CreateDefaultLogger("LMU_07050001")
 
 type Sink struct {
 	DB            *sql.DB
@@ -64,6 +67,21 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 		}
 	}
 
+	if record.AccountID == "" || record.ProfileID == "" {
+		sinkLogger.Warn("llm usage event account/profile not resolved; event will be logged without account linkage",
+			"provider", string(record.Provider),
+			"base_url", record.BaseURL,
+			"model", record.ModelName,
+			"profile_name", record.ProfileName,
+			"prompt_name", record.PromptName,
+			"call_loc", record.CallLoc,
+		)
+	}
+
+	if s.DB == nil {
+		return nil
+	}
+
 	paths := sharedllm.BuildUsageArchivePaths(s.ArchiveRoot, workspaceDay, record.AccountID, eventID)
 	inputRef := ""
 	outputRef := ""
@@ -79,10 +97,6 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 			return err
 		}
 		outputRef = archiveRef(s.ArchiveRoot, paths.OutputBodyPath)
-	}
-
-	if s.DB == nil || record.AccountID == "" || record.ProfileID == "" {
-		return nil
 	}
 
 	latencyMS := finishedAt.Sub(startedAt).Milliseconds()
@@ -115,13 +129,21 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	if record.RecordID > 0 {
 		recordID = record.RecordID
 	}
+	var accountID any
+	if record.AccountID != "" {
+		accountID = record.AccountID
+	}
+	var profileID any
+	if record.ProfileID != "" {
+		profileID = record.ProfileID
+	}
 
 	_, err = s.DB.ExecContext(
 		ctx,
 		stmt,
 		eventID,
-		record.AccountID,
-		record.ProfileID,
+		accountID,
+		profileID,
 		string(record.Provider),
 		record.ModelName,
 		record.PromptName,

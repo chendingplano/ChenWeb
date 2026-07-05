@@ -180,13 +180,16 @@
 				{
 					id: 'sysadmin-logs', label: 'Logs',
 					children: [
-						{ id: 'sysadmin-doc-proc-logs', label: 'Doc Processor Logs' }
+						{ id: 'sysadmin-doc-proc-logs', label: 'Doc Processor Logs' },
+						{ id: 'sysadmin-llm-usage-logs', label: 'LLM Usage Logs' }
 					]
 				},
 				{
 					id: 'sysadmin-llm', label: 'LLM',
 					children: [
-						{ id: 'sysadmin-llm-accounts', label: 'LLM Accounts' }
+						{ id: 'sysadmin-llm-accounts', label: 'LLM Accounts' },
+						{ id: 'sysadmin-llm-model-profiles', label: 'Model Profiles' },
+						{ id: 'sysadmin-llm-models', label: 'LLM Models' }
 					]
 				},
 				{

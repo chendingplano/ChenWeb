@@ -17,6 +17,10 @@ type accountAdminStore interface {
 	CreateAccount(ctx context.Context, in CreateAccountInput) (Account, error)
 	UpdateAccount(ctx context.Context, id string, in CreateAccountInput) (Account, error)
 	ImportParsedModels(ctx context.Context, parsed llmimport.ParsedModels) (ImportResult, error)
+	ListProfiles(ctx context.Context) ([]ModelProfile, error)
+	CreateProfile(ctx context.Context, in CreateProfileInput) (ModelProfile, error)
+	UpdateProfile(ctx context.Context, id string, in CreateProfileInput) (ModelProfile, error)
+	UpsertAccountAndProfile(ctx context.Context, accountIn CreateAccountInput, profileIn CreateProfileInput) (ModelProfile, error)
 }
 
 var adminStoreFactory = func() accountAdminStore {

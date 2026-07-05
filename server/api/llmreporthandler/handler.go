@@ -2,13 +2,17 @@ package llmreporthandler
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/chendingplano/deepdoc/server/api/llmreconcile"
 	"github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	sharedllm "github.com/chendingplano/shared/go/api/llm"
 	"github.com/labstack/echo/v4"
 )
 
@@ -18,6 +22,8 @@ type reportStore interface {
 	ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error)
 	ListCurrentBalances(ctx context.Context, limit int) ([]CurrentBalance, error)
 	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
+	ListUsageEventsAdmin(ctx context.Context, page, pageSize int) ([]UsageEventAdmin, int64, error)
+	GetUsageEventBodyRefs(ctx context.Context, id string) (inputRef, outputRef string, err error)
 }
 
 type reconciliationRunner interface {
@@ -174,6 +180,53 @@ func RunReconciliationNow(c echo.Context) error {
 		"snapshots_created":    reconcileResult.SnapshotsCreated,
 		"reports_reconciled":   reconcileResult.ReportsReconciled,
 	})
+}
+
+func ListUsageEventsAdmin(c echo.Context) error {
+	store := reportStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
+	}
+	page := intParamDefault(c.QueryParam("page"), 1)
+	pageSize := intParamDefault(c.QueryParam("page_size"), 50)
+	rows, total, err := store.ListUsageEventsAdmin(c.Request().Context(), page, pageSize)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list llm usage events", "error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"events": rows, "total": total, "page": page, "page_size": pageSize})
+}
+
+func GetUsageEventBody(c echo.Context) error {
+	store := reportStoreFactory()
+	if store == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "project database is not initialized"})
+	}
+	id := c.Param("id")
+	bodyType := c.QueryParam("type")
+	if bodyType != "input" && bodyType != "output" {
+		return c.JSON(http.StatusBadRequest, map[string]any{"ok": false, "message": "type must be 'input' or 'output'"})
+	}
+	inputRef, outputRef, err := store.GetUsageEventBodyRefs(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return c.JSON(http.StatusNotFound, map[string]any{"ok": false, "message": "event not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to fetch event", "error": err.Error()})
+	}
+	ref := inputRef
+	if bodyType == "output" {
+		ref = outputRef
+	}
+	if ref == "" {
+		return c.JSON(http.StatusNotFound, map[string]any{"ok": false, "message": "body not archived for this event"})
+	}
+	archiveRoot := config.GetLLMConfig().ArchiveRoot
+	fullPath := filepath.Join(archiveRoot, ref)
+	data, err := sharedllm.ReadGzipFile(fullPath)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to read archive file", "error": err.Error()})
+	}
+	return c.JSONBlob(http.StatusOK, data)
 }
 
 func intParamDefault(raw string, fallback int) int {

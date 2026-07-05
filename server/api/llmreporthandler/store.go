@@ -282,6 +282,86 @@ ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC`
 	return out, rows.Err()
 }
 
+type UsageEventAdmin struct {
+	ID                    string    `json:"id"`
+	AccountID             *string   `json:"account_id"`
+	AccountName           *string   `json:"account_name"`
+	ProfileID             *string   `json:"profile_id"`
+	RecordID              *int64    `json:"record_id"`
+	Provider              string    `json:"provider"`
+	ModelName             string    `json:"model_name"`
+	PromptName            string    `json:"prompt_name"`
+	CallReason            string    `json:"call_reason"`
+	CallLoc               string    `json:"call_loc"`
+	RequestStartedAt      time.Time `json:"request_started_at"`
+	InputTokens           int64     `json:"input_tokens"`
+	OutputTokens          int64     `json:"output_tokens"`
+	TotalTokens           int64     `json:"total_tokens"`
+	PromptCacheHitTokens  int64     `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int64     `json:"prompt_cache_miss_tokens"`
+	LatencyMS             int64     `json:"latency_ms"`
+	ErrorMessage          string    `json:"error_message"`
+	InputBodyRef          string    `json:"input_body_ref"`
+	OutputBodyRef         string    `json:"output_body_ref"`
+}
+
+func (s *Store) ListUsageEventsAdmin(ctx context.Context, page, pageSize int) ([]UsageEventAdmin, int64, error) {
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM llm_usage_event`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * pageSize
+	const query = `SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id,
+evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
+evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
+evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, '')
+FROM llm_usage_event evt
+LEFT JOIN llm_account acct ON acct.id = evt.account_id
+ORDER BY evt.request_started_at DESC
+LIMIT $1 OFFSET $2`
+	rows, err := s.db.QueryContext(ctx, query, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := []UsageEventAdmin{}
+	for rows.Next() {
+		var row UsageEventAdmin
+		var accountID, accountName, profileID sql.NullString
+		var recordID sql.NullInt64
+		if err := rows.Scan(
+			&row.ID, &accountID, &accountName, &profileID, &recordID,
+			&row.Provider, &row.ModelName, &row.PromptName, &row.CallReason, &row.CallLoc,
+			&row.RequestStartedAt, &row.InputTokens, &row.OutputTokens, &row.TotalTokens,
+			&row.PromptCacheHitTokens, &row.PromptCacheMissTokens, &row.LatencyMS, &row.ErrorMessage,
+			&row.InputBodyRef, &row.OutputBodyRef,
+		); err != nil {
+			return nil, 0, err
+		}
+		if accountID.Valid {
+			row.AccountID = &accountID.String
+		}
+		if accountName.Valid {
+			row.AccountName = &accountName.String
+		}
+		if profileID.Valid {
+			row.ProfileID = &profileID.String
+		}
+		if recordID.Valid {
+			row.RecordID = &recordID.Int64
+		}
+		out = append(out, row)
+	}
+	return out, total, rows.Err()
+}
+
+func (s *Store) GetUsageEventBodyRefs(ctx context.Context, id string) (inputRef, outputRef string, err error) {
+	const query = `SELECT COALESCE(input_body_ref, ''), COALESCE(output_body_ref, '') FROM llm_usage_event WHERE id = $1`
+	err = s.db.QueryRowContext(ctx, query, id).Scan(&inputRef, &outputRef)
+	return
+}
+
 func (s *Store) GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error) {
 	summary := TodaySummary{
 		WorkspaceDay: workspaceDay.Format("2006-01-02"),
@@ -332,6 +412,7 @@ SELECT
     'usage_events'
 FROM llm_usage_event
 WHERE workspace_day = $1
+  AND account_id IS NOT NULL
 GROUP BY account_id
 ON CONFLICT (account_id, workspace_day) DO UPDATE SET
     timezone_name = EXCLUDED.timezone_name,

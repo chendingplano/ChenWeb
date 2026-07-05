@@ -40,6 +40,14 @@ func (s *stubReportStore) GetTodaySummary(_ context.Context, workspaceDay time.T
 	return s.sum, nil
 }
 
+func (s *stubReportStore) ListUsageEventsAdmin(_ context.Context, page, pageSize int) ([]UsageEventAdmin, int64, error) {
+	return nil, 0, nil
+}
+
+func (s *stubReportStore) GetUsageEventBodyRefs(_ context.Context, id string) (string, string, error) {
+	return "", "", nil
+}
+
 type stubReconciliationRunner struct {
 	runCount int
 	result   llmreconcile.RunResult

@@ -49,6 +49,22 @@ func (s *stubAdminStore) ImportParsedModels(_ context.Context, parsed llmimport.
 	return s.importResult, s.importErr
 }
 
+func (s *stubAdminStore) ListProfiles(_ context.Context) ([]ModelProfile, error) {
+	return nil, nil
+}
+
+func (s *stubAdminStore) CreateProfile(_ context.Context, _ CreateProfileInput) (ModelProfile, error) {
+	return ModelProfile{}, nil
+}
+
+func (s *stubAdminStore) UpdateProfile(_ context.Context, _ string, _ CreateProfileInput) (ModelProfile, error) {
+	return ModelProfile{}, nil
+}
+
+func (s *stubAdminStore) UpsertAccountAndProfile(_ context.Context, _ CreateAccountInput, _ CreateProfileInput) (ModelProfile, error) {
+	return ModelProfile{}, nil
+}
+
 func TestImportModelsTOMLPreviewReturnsParsedAccountsAndProfiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	modelsPath := filepath.Join(tmpDir, ".models.toml")

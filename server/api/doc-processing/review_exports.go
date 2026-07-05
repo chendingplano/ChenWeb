@@ -88,6 +88,7 @@ func BuildReviewerLLMClient(modelRef string) (client LLMJSONExtractor, modelName
 		ModelName:    cfg.ModelName,
 		APIKey:       cfg.APIKey,
 		BaseURL:      cfg.BaseURL,
+		ProfileName:  cfg.ProfileName,
 		ThinkingType: cfg.ThinkingType,
 		TimeoutSec:   timeoutSec,
 	}, nil)
@@ -114,10 +115,11 @@ func BuildReviewerToolClient(modelRef string) (client llmclients.Client, modelNa
 		timeoutSec = 100
 	}
 	c, err := llmclients.NewClient(llmclients.ProviderConfig{
-		ID:         llmclients.ProviderOpenAICompatible,
-		BaseURL:    cfg.BaseURL,
-		APIKey:     cfg.APIKey,
-		HTTPClient: &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
+		ID:          llmclients.ProviderOpenAICompatible,
+		BaseURL:     cfg.BaseURL,
+		APIKey:      cfg.APIKey,
+		ProfileName: modelRef,
+		HTTPClient:  &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
 	})
 	if err != nil {
 		return nil, "", err

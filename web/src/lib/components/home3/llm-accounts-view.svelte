@@ -12,6 +12,7 @@
 		type ImportLLMAccountsPreviewResponse,
 		type LLMAccount
 	} from './llm-accounts-client';
+	import { addModel } from './llm-models-client';
 
 	let {
 		darkMode = true
@@ -50,6 +51,39 @@
 		reconciliation_kind: 'provider_balance',
 		is_reconciliation_enabled: false,
 		default_model_name: ''
+	});
+
+	type AddModelDraft = {
+		profile_name: string;
+		model_name: string;
+		provider: string;
+		base_url: string;
+		api_key: string;
+		account_name: string;
+		host: string;
+		thinking_type: string;
+		timeout_sec: number;
+		max_inflight: number;
+		max_requests_per_minute: number;
+		max_tokens_per_minute: number;
+		token_reserve_per_call: number;
+	};
+	let showAddModel = $state(false);
+	let addingModel = $state(false);
+	let addModelDraft = $state<AddModelDraft>({
+		profile_name: '',
+		model_name: '',
+		provider: 'deepseek',
+		base_url: 'https://api.deepseek.com',
+		api_key: '',
+		account_name: '',
+		host: 'cloud',
+		thinking_type: '',
+		timeout_sec: 120,
+		max_inflight: 16,
+		max_requests_per_minute: 500,
+		max_tokens_per_minute: 200000,
+		token_reserve_per_call: 256
 	});
 
 	onMount(() => {
@@ -186,6 +220,44 @@
 		}
 	}
 
+	async function submitAddModel() {
+		error = null;
+		info = null;
+		if (!addModelDraft.profile_name.trim()) {
+			error = 'Profile name is required';
+			return;
+		}
+		addingModel = true;
+		try {
+			const profileName = addModelDraft.profile_name.trim();
+			await addModel({
+				profile_name: profileName,
+				model_name: addModelDraft.model_name.trim(),
+				provider: addModelDraft.provider.trim(),
+				base_url: addModelDraft.base_url.trim(),
+				api_key: addModelDraft.api_key.trim(),
+				account_name: addModelDraft.account_name.trim(),
+				host: addModelDraft.host.trim(),
+				thinking_type: addModelDraft.thinking_type.trim(),
+				timeout_sec: addModelDraft.timeout_sec,
+				max_inflight: addModelDraft.max_inflight,
+				max_requests_per_minute: addModelDraft.max_requests_per_minute,
+				max_tokens_per_minute: addModelDraft.max_tokens_per_minute,
+				token_reserve_per_call: addModelDraft.token_reserve_per_call
+			});
+			addModelDraft.profile_name = '';
+			addModelDraft.model_name = '';
+			addModelDraft.api_key = '';
+			showAddModel = false;
+			info = `Model "${profileName}" added to .models.toml and registered in the database.`;
+			await loadAccounts();
+		} catch (err) {
+			error = String((err as Error).message ?? err);
+		} finally {
+			addingModel = false;
+		}
+	}
+
 	function fmtDate(raw: string): string {
 		return new Date(raw).toLocaleString();
 	}
@@ -225,7 +297,10 @@
 			<button class="ghost" onclick={loadPreview} disabled={importing}>
 				{importing ? 'Inspecting…' : preview ? 'Hide Preview' : 'Preview .models.toml'}
 			</button>
-			<button class="primary" onclick={() => (showCreate = !showCreate)}>
+			<button class="alt-btn" onclick={() => { showAddModel = !showAddModel; showCreate = false; }}>
+				{showAddModel ? 'Cancel' : '+ Add a Model'}
+			</button>
+			<button class="primary" onclick={() => { showCreate = !showCreate; showAddModel = false; }}>
 				{showCreate ? 'Cancel' : '+ New Account'}
 			</button>
 		</div>
@@ -295,6 +370,87 @@
 			<div class="form-foot">
 				<button class="primary" type="submit" disabled={submitting || !draft.account_name.trim()}>
 					{submitting ? 'Creating…' : 'Create account'}
+				</button>
+			</div>
+		</form>
+	{/if}
+
+	{#if showAddModel}
+		<form
+			class="create-form"
+			onsubmit={(e) => {
+				e.preventDefault();
+				submitAddModel();
+			}}
+		>
+			<div class="add-model-notice">
+				Adds the model to <strong>.models.toml</strong> and registers it in the database (creates or reuses an account, then creates a profile). See ADR 2026070501 §"Adding a new model".
+			</div>
+			<div class="row two">
+				<label>
+					<span>Profile Name <span class="req">*</span></span>
+					<input bind:value={addModelDraft.profile_name} required placeholder="my-new-model" />
+				</label>
+				<label>
+					<span>Model Name</span>
+					<input bind:value={addModelDraft.model_name} placeholder="deepseek-chat" />
+				</label>
+			</div>
+			<div class="row two">
+				<label>
+					<span>Provider</span>
+					<input bind:value={addModelDraft.provider} placeholder="deepseek" />
+				</label>
+				<label>
+					<span>Base URL</span>
+					<input bind:value={addModelDraft.base_url} placeholder="https://api.deepseek.com" />
+				</label>
+			</div>
+			<div class="row two">
+				<label>
+					<span>Account Name (DB label)</span>
+					<input bind:value={addModelDraft.account_name} placeholder="Auto-generated if blank" />
+				</label>
+				<label>
+					<span>Host</span>
+					<input bind:value={addModelDraft.host} placeholder="cloud" />
+				</label>
+			</div>
+			<label>
+				<span>API Key</span>
+				<input type="password" bind:value={addModelDraft.api_key} placeholder="sk-…" />
+			</label>
+			<div class="row two">
+				<label>
+					<span>Thinking Type</span>
+					<input bind:value={addModelDraft.thinking_type} placeholder="disabled" />
+				</label>
+				<label>
+					<span>Timeout (sec)</span>
+					<input type="number" bind:value={addModelDraft.timeout_sec} min="0" />
+				</label>
+			</div>
+			<div class="row three">
+				<label>
+					<span>Max Inflight</span>
+					<input type="number" bind:value={addModelDraft.max_inflight} min="0" />
+				</label>
+				<label>
+					<span>Max Req/Min</span>
+					<input type="number" bind:value={addModelDraft.max_requests_per_minute} min="0" />
+				</label>
+				<label>
+					<span>Max Tokens/Min</span>
+					<input type="number" bind:value={addModelDraft.max_tokens_per_minute} min="0" />
+				</label>
+			</div>
+			<label>
+				<span>Token Reserve/Call</span>
+				<input type="number" bind:value={addModelDraft.token_reserve_per_call} min="0" style="max-width:200px;" />
+			</label>
+			<div class="form-foot">
+				<button class="alt-btn" type="submit" disabled={addingModel || !addModelDraft.profile_name.trim()}>
+					{addingModel ? 'Adding…' : 'Add Model'}
 				</button>
 			</div>
 		</form>
@@ -511,7 +667,7 @@
 	h3 { font-size: 16px; }
 	h4 { font-size: 14px; }
 	.muted { color: var(--sub); font-size: 12px; margin: 4px 0 0; }
-	.primary, .ghost {
+	.primary, .ghost, .alt-btn {
 		border-radius: 8px;
 		padding: 8px 14px;
 		font-size: 13px;
@@ -527,11 +683,28 @@
 		color: var(--heading);
 		border: 1px solid var(--border);
 	}
+	.alt-btn {
+		background: var(--alt-btn);
+		color: white;
+		border: none;
+	}
 	.compact-btn {
 		padding: 6px 10px;
 		font-size: 12px;
 	}
-	.primary:disabled, .ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+	.primary:disabled, .ghost:disabled, .alt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.row.three { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+	.add-model-notice {
+		font-size: 12px;
+		color: var(--sub);
+		background: var(--panel-bg);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 10px 12px;
+		line-height: 1.5;
+	}
+	.add-model-notice strong { color: var(--heading); }
+	.req { color: #f87171; }
 	.summary-card, .preview-card, .panel, .create-form {
 		background: var(--card);
 		border: 1px solid var(--border);

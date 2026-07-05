@@ -10,12 +10,15 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import OpenMetadataWorkspace from '$lib/components/home3/openmetadata-workspace.svelte';
 	import JetStreamLogsView from '$lib/components/home3/jetstream-logs-view.svelte';
 	import DocProcLogsView from '$lib/components/home3/doc-proc-logs-view.svelte';
+	import LLMUsageLogsView from '$lib/components/home3/llm-usage-logs-view.svelte';
 	import JetStreamEventsView from '$lib/components/home3/jetstream-events-view.svelte';
 	import JetStreamSubjectsView from '$lib/components/home3/jetstream-subjects-view.svelte';
 	import DiaryView from '$lib/components/home3/diary-view.svelte';
 	import ResearchTopicsView from '$lib/components/home3/research-topics-view.svelte';
 	import LLMActivitiesView from '$lib/components/home3/llm-activities-view.svelte';
 	import LLMAccountsView from '$lib/components/home3/llm-accounts-view.svelte';
+	import LLMModelProfilesView from '$lib/components/home3/llm-model-profiles-view.svelte';
+	import LLMModelsView from '$lib/components/home3/llm-models-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
@@ -188,8 +191,14 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<JetStreamSubjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-doc-proc-logs'}
 			<DocProcLogsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-usage-logs'}
+			<LLMUsageLogsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-llm-accounts'}
 			<LLMAccountsView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-model-profiles'}
+			<LLMModelProfilesView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-llm-models'}
+			<LLMModelsView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-consistency'}
 			<DbConsistencyView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-maint-log'}
