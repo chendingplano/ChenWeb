@@ -128,7 +128,17 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 		spans: []string{"12:14"},
 	}
 	ms := []matchedInventoryItem{
-		{view: inventoryItemView{ItemID: "2_inv_9", ModelNumber: "BV-2200", Manufacturer: "Beta Industrial"}, recordID: 2, filename: "other.pdf", via: "hybrid_search", confidence: 0.9},
+		{
+			view:     inventoryItemView{ItemID: "2_inv_9", ModelNumber: "BV-2200", Manufacturer: "Beta Industrial", SourceLineSpans: []string{"30:32"}},
+			recordID: 2,
+			filename: "other.pdf",
+			via:      "hybrid_search",
+			context: []map[string]any{
+				{"line_number": 20, "content": "context before"},
+				{"line_number": 30, "content": "matched inventory line"},
+			},
+			confidence: 0.9,
+		},
 	}
 
 	findings := r.reviewItem(context.Background(), 1, 0, ReviewerConfig{
@@ -157,7 +167,7 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 		t.Errorf("promptNames = %v", fake.promptNames)
 	}
 	in := fake.inputTexts[0]
-	for _, want := range []string{"inventory_item_under_review", "matching_items", "2_inv_9", "hybrid_search"} {
+	for _, want := range []string{"inventory_item_under_review", "matching_items", "2_inv_9", "hybrid_search", "source_line_spans", "source_context", "matched inventory line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
 		}

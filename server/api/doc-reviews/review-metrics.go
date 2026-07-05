@@ -669,10 +669,10 @@ LIMIT $3`
 	return out, rows.Err()
 }
 
-// matchedMetricContextRadius is the prompt payload context requested for each
-// matched metric: 10 lines before source_line_spans[0], the metric's actual
+// artifactSourceContextRadius is the prompt payload context requested for each
+// matched artifact: 10 lines before source_line_spans[0], the artifact's actual
 // span lines, and 10 lines after source_line_spans[0].
-const matchedMetricContextRadius = 10
+const artifactSourceContextRadius = 10
 
 func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matches map[int][]matchedMetric) {
 	if len(matches) == 0 {
@@ -706,13 +706,13 @@ func (r *metricsReviewer) hydrateMatchedMetricContexts(ctx context.Context, matc
 				}
 				linesByRecord[list[i].recordID] = lines
 			}
-			list[i].context = metricSourceContextLines(lines, spans)
+			list[i].context = artifactSourceContextLines(lines, spans)
 		}
 		matches[idx] = list
 	}
 }
 
-func metricSourceContextLines(lines []Line, spans []string) []map[string]any {
+func artifactSourceContextLines(lines []Line, spans []string) []map[string]any {
 	if len(lines) == 0 || len(spans) == 0 {
 		return nil
 	}
@@ -728,7 +728,7 @@ func metricSourceContextLines(lines []Line, spans []string) []map[string]any {
 		return nil
 	}
 	include := make(map[int]bool)
-	for n := anchorStart - matchedMetricContextRadius; n <= anchorStart+matchedMetricContextRadius; n++ {
+	for n := anchorStart - artifactSourceContextRadius; n <= anchorStart+artifactSourceContextRadius; n++ {
 		if n > 0 {
 			include[n] = true
 		}

@@ -44,13 +44,18 @@ Your input has two parts.
         "part_number": "PN-50-316",
         "item_categories": ["valve"],
         "standards": ["GB/T 12237"],
-        "normalized_specs": [{"name": "nominal_diameter", "value": "65", "unit": "mm"}]
+        "normalized_specs": [{"name": "nominal_diameter", "value": "65", "unit": "mm"}],
+        "source_line_spans": ["330-332"]
       },
       "source_record_id": 2002,
       "source_filename": "GB_12237_valves.pdf",
       "source_doc_authority": "standard",
       "match_via": "hybrid_search",
-      "match_rank": 1
+      "match_rank": 1,
+      "source_context": [
+        {"line_number": 320, "content": "..."},
+        {"line_number": 330, "content": "the matched item source line"}
+      ]
     }
   ]
 }
@@ -60,6 +65,8 @@ Your input has two parts.
 - `artifact_line_spans` are the item's line numbers inside the document; they locate it within the source window.
 - `context_truncated: true` means the item's lines extend past the end of the included window — the passage is cut off by design, NOT an extraction problem. Do not report truncation as an error; if you have tools, `get_artifact_context` can retrieve the remainder.
 - `matching_items` are candidate related items from other documents, surfaced by semantic similarity (`hybrid_search`), shared category (`item_category`), or a shared entity (`entity`). They are candidates only — some may be unrelated.
+- Each matching item is a resolved `kb.inventory_items` row, expressed as name-value fields and including its `source_line_spans`.
+- `source_context` contains source lines from the matched item's document: 10 lines before the first source span, the actual item source span lines, and 10 lines after the first source span.
 - `match_rank` is the candidate's 1-based rank in the retrieval ordering (1 = strongest signal). It is a retrieval hint, not proof of relatedness.
 - `source_doc_authority` classifies the matched document: `"standard"` (governing national/international standard such as GB/ISO/IEC), `"regulation"` (law or regulation), or `"peer_document"` (peer specification or internal document).
 
@@ -67,7 +74,7 @@ Your input has two parts.
 
 You may be given the tool `get_artifact_context(record_id, artifact_id)`, which returns the source lines around any artifact in its own document. Work screen-then-verify:
 1. **Screen** all candidates from the structured fields alone; most are noise and need no tool call.
-2. **Verify** only the few candidates that plausibly describe the same product and appear to conflict — fetch their source context to check variants and configurations before reporting.
+2. **Verify** only the few candidates that plausibly describe the same product and appear to conflict — use `source_context` first; call the tool only when the included context is missing or insufficient to check variants and configurations before reporting.
 Your tool budget is small; do not fetch context for candidates you can already dismiss.
 
 # 3. What to check

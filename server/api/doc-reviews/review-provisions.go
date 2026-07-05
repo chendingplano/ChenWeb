@@ -46,12 +46,13 @@ func (r *provisionsReviewer) Strategy() ReviewStrategy { return StrategyDocument
 
 // provisionView is the JSON-serializable subset of a provision sent to the LLM.
 type provisionView struct {
-	ProvID     string   `json:"prov_id,omitempty"`
-	ProvName   string   `json:"prov_name,omitempty"`
-	Type       string   `json:"provision_type,omitempty"`
-	Provision  string   `json:"provision,omitempty"`
-	Subject    string   `json:"provision_subject,omitempty"`
-	Categories []string `json:"category_paths,omitempty"`
+	ProvID          string   `json:"prov_id,omitempty"`
+	ProvName        string   `json:"prov_name,omitempty"`
+	Type            string   `json:"provision_type,omitempty"`
+	Provision       string   `json:"provision,omitempty"`
+	Subject         string   `json:"provision_subject,omitempty"`
+	Categories      []string `json:"category_paths,omitempty"`
+	SourceLineSpans []string `json:"source_line_spans,omitempty"`
 }
 
 // docProvision is one provision extracted from the document under review.
@@ -69,6 +70,7 @@ type matchedProvision struct {
 	docNo      string // source document number from kb.inputs.doc_metadata
 	via        string // "hybrid_search" | "entity"
 	confidence float64
+	context    []map[string]any
 }
 
 func (r *provisionsReviewer) ReviewDocument(
@@ -96,6 +98,7 @@ func (r *provisionsReviewer) ReviewDocument(
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26063022) build provision matches for record %d: %w", recordID, err)
 	}
+	r.hydrateMatchedProvisionContexts(ctx, matches)
 
 	type reviewUnit struct {
 		dp      docProvision
@@ -260,6 +263,7 @@ func matchedProvisionsPayload(ms []matchedProvision) []map[string]any {
 			"source_doc_authority": docAuthorityClass(m.docNo, m.title, m.filename),
 			"match_via":            m.via,
 			"match_rank":           i + 1,
+			"source_context":       m.context,
 		})
 	}
 	return out
@@ -417,6 +421,7 @@ ORDER BY id`
 		}
 		dp.view.Categories = parseJSONStringArray(catsJSON)
 		dp.spans = parseJSONStringArray(spansJSON)
+		dp.view.SourceLineSpans = append([]string(nil), dp.spans...)
 		out = append(out, dp)
 	}
 	return out, rows.Err()
@@ -443,7 +448,8 @@ func (r *provisionsReviewer) loadProvisionsByProvID(ctx context.Context, idSet m
 	const q = `
 SELECT COALESCE(p.prov_id, ''), p.input_record_id, COALESCE(p.prov_name, ''),
        COALESCE(p.provision_type, ''), COALESCE(p.provision, ''), COALESCE(p.provision_subject, ''),
-       COALESCE(p.category_paths, '[]'::jsonb), COALESCE(i.staging_filename, ''),
+       COALESCE(p.category_paths, '[]'::jsonb), COALESCE(p.source_line_spans, '[]'::jsonb),
+       COALESCE(i.staging_filename, ''),
        COALESCE(i.title, ''), COALESCE(i.doc_metadata->>'doc_no', '')
 FROM kb.provisions p
 LEFT JOIN kb.inputs i ON i.id = p.input_record_id
@@ -455,16 +461,56 @@ WHERE p.prov_id = ANY($1)`
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
-			rp       resolvedProvision
-			catsJSON []byte
+			rp        resolvedProvision
+			catsJSON  []byte
+			spansJSON []byte
 		)
 		if err := rows.Scan(&rp.view.ProvID, &rp.recordID, &rp.view.ProvName, &rp.view.Type,
-			&rp.view.Provision, &rp.view.Subject, &catsJSON, &rp.filename,
+			&rp.view.Provision, &rp.view.Subject, &catsJSON, &spansJSON, &rp.filename,
 			&rp.title, &rp.docNo); err != nil {
 			return nil, err
 		}
 		rp.view.Categories = parseJSONStringArray(catsJSON)
+		rp.view.SourceLineSpans = parseJSONStringArray(spansJSON)
 		out[rp.view.ProvID] = rp
 	}
 	return out, rows.Err()
+}
+
+func (r *provisionsReviewer) hydrateMatchedProvisionContexts(ctx context.Context, matches map[int][]matchedProvision) {
+	if len(matches) == 0 {
+		return
+	}
+	linesByRecord := make(map[int64][]Line)
+	failedRecords := make(map[int64]bool)
+	for idx, list := range matches {
+		for i := range list {
+			spans := list[i].view.SourceLineSpans
+			if len(spans) == 0 || list[i].recordID <= 0 {
+				continue
+			}
+			lines, ok := linesByRecord[list[i].recordID]
+			if !ok {
+				if failedRecords[list[i].recordID] {
+					continue
+				}
+				var err error
+				lines, err = loadRecordLines(ctx, list[i].recordID)
+				if err != nil {
+					failedRecords[list[i].recordID] = true
+					if r.logger != nil {
+						r.logger.Warn("provisions review: matched provision context unavailable",
+							"source_record_id", list[i].recordID,
+							"prov_id", list[i].view.ProvID,
+							"error", err,
+						)
+					}
+					continue
+				}
+				linesByRecord[list[i].recordID] = lines
+			}
+			list[i].context = artifactSourceContextLines(lines, spans)
+		}
+		matches[idx] = list
+	}
 }

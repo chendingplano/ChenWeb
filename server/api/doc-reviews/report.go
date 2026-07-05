@@ -580,7 +580,7 @@ func (g *DocReviewReportGenerator) buildRelatedSources(ctx context.Context, f Fi
 	if len(spans) == 0 {
 		return nil
 	}
-	return sourceContextsFromSpans(g.loadDocLines(ctx, f.RelatedRecordID), spans, matchedMetricContextRadius)
+	return sourceContextsFromSpans(g.loadDocLines(ctx, f.RelatedRecordID), spans, artifactSourceContextRadius)
 }
 
 func (g *DocReviewReportGenerator) loadRelatedMetricSpans(ctx context.Context, recordID int64, metricID string) ([]string, error) {

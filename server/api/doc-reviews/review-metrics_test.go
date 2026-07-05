@@ -310,13 +310,13 @@ func TestMetricLogUnitKey_IncludesRowID(t *testing.T) {
 	}
 }
 
-func TestMetricSourceContextLines(t *testing.T) {
+func TestArtifactSourceContextLines(t *testing.T) {
 	var lines []Line
 	for i := 1; i <= 50; i++ {
 		lines = append(lines, Line{LineNo: i, Content: "line"})
 	}
 
-	got := metricSourceContextLines(lines, []string{"20:22", "40"})
+	got := artifactSourceContextLines(lines, []string{"20:22", "40"})
 	if len(got) != 22 {
 		t.Fatalf("context lines = %d, want 22", len(got))
 	}

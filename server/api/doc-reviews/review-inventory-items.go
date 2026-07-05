@@ -58,6 +58,7 @@ type inventoryItemView struct {
 	Categories      []string        `json:"item_categories,omitempty"`
 	Standards       []string        `json:"standards,omitempty"`
 	NormalizedSpecs json.RawMessage `json:"normalized_specs,omitempty"`
+	SourceLineSpans []string        `json:"source_line_spans,omitempty"`
 }
 
 // docInventoryItem is one inventory item extracted from the document under review.
@@ -75,6 +76,7 @@ type matchedInventoryItem struct {
 	docNo      string // source document number from kb.inputs.doc_metadata
 	via        string // "hybrid_search" | "item_category" | "entity"
 	confidence float64
+	context    []map[string]any
 }
 
 func (r *inventoryItemsReviewer) ReviewDocument(
@@ -102,6 +104,7 @@ func (r *inventoryItemsReviewer) ReviewDocument(
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26063062) build inventory item matches for record %d: %w", recordID, err)
 	}
+	r.hydrateMatchedInventoryItemContexts(ctx, matches)
 
 	// Only review items that have at least one cross-document match.
 	type reviewUnit struct {
@@ -267,6 +270,7 @@ func matchedInventoryItemsPayload(ms []matchedInventoryItem) []map[string]any {
 			"source_doc_authority": docAuthorityClass(m.docNo, m.title, m.filename),
 			"match_via":            m.via,
 			"match_rank":           i + 1,
+			"source_context":       m.context,
 		})
 	}
 	return out
@@ -446,17 +450,20 @@ func assembleInventoryMatches(
 const inventoryItemColumns = `COALESCE(inventory_item_id, ''), COALESCE(item_name, ''), COALESCE(canonical_name, ''),
        COALESCE(manufacturer, ''), COALESCE(brand, ''), COALESCE(model_number, ''),
        COALESCE(part_number, ''), COALESCE(item_categories, '[]'::jsonb),
-       COALESCE(standards, '[]'::jsonb), COALESCE(normalized_specs, '[]'::jsonb)`
+       COALESCE(standards, '[]'::jsonb), COALESCE(normalized_specs, '[]'::jsonb),
+       COALESCE(source_line_spans, '[]'::jsonb)`
 
 // scanInventoryItemRow scans one row of inventoryItemColumns into a resolved
 // item (view + record id + source-document fields from the trailing columns).
 func scanInventoryItemRow(rows *sql.Rows, ri *resolvedInventoryItem) error {
 	var catsJSON, specsJSON []byte
 	var standards []byte
+	var spansJSON []byte
 	dst := []any{
 		&ri.view.ItemID, &ri.view.ItemName, &ri.view.CanonicalName,
 		&ri.view.Manufacturer, &ri.view.Brand, &ri.view.ModelNumber,
 		&ri.view.PartNumber, &catsJSON, &standards, &specsJSON,
+		&spansJSON,
 		&ri.recordID, &ri.filename, &ri.title, &ri.docNo,
 	}
 	if err := rows.Scan(dst...); err != nil {
@@ -465,12 +472,13 @@ func scanInventoryItemRow(rows *sql.Rows, ri *resolvedInventoryItem) error {
 	ri.view.Categories = parseJSONStringArray(catsJSON)
 	ri.view.Standards = parseJSONStringArray(standards)
 	ri.view.NormalizedSpecs = rawJSONArrayOrNil(specsJSON)
+	ri.view.SourceLineSpans = parseJSONStringArray(spansJSON)
 	return nil
 }
 
 func (r *inventoryItemsReviewer) loadRecordItems(ctx context.Context, recordID int64) ([]docInventoryItem, error) {
 	q := `
-SELECT ` + inventoryItemColumns + `, COALESCE(source_line_spans, '[]'::jsonb)
+SELECT ` + inventoryItemColumns + `
 FROM kb.inventory_items
 WHERE input_record_id = $1
 ORDER BY id`
@@ -498,6 +506,7 @@ ORDER BY id`
 		di.view.Standards = parseJSONStringArray(standards)
 		di.view.NormalizedSpecs = rawJSONArrayOrNil(specsJSON)
 		di.spans = parseJSONStringArray(spansJSON)
+		di.view.SourceLineSpans = append([]string(nil), di.spans...)
 		out = append(out, di)
 	}
 	return out, rows.Err()
@@ -582,4 +591,42 @@ func rawJSONArrayOrNil(raw []byte) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(append([]byte(nil), s...))
+}
+
+func (r *inventoryItemsReviewer) hydrateMatchedInventoryItemContexts(ctx context.Context, matches map[int][]matchedInventoryItem) {
+	if len(matches) == 0 {
+		return
+	}
+	linesByRecord := make(map[int64][]Line)
+	failedRecords := make(map[int64]bool)
+	for idx, list := range matches {
+		for i := range list {
+			spans := list[i].view.SourceLineSpans
+			if len(spans) == 0 || list[i].recordID <= 0 {
+				continue
+			}
+			lines, ok := linesByRecord[list[i].recordID]
+			if !ok {
+				if failedRecords[list[i].recordID] {
+					continue
+				}
+				var err error
+				lines, err = loadRecordLines(ctx, list[i].recordID)
+				if err != nil {
+					failedRecords[list[i].recordID] = true
+					if r.logger != nil {
+						r.logger.Warn("inventory items review: matched item context unavailable",
+							"source_record_id", list[i].recordID,
+							"inventory_item_id", list[i].view.ItemID,
+							"error", err,
+						)
+					}
+					continue
+				}
+				linesByRecord[list[i].recordID] = lines
+			}
+			list[i].context = artifactSourceContextLines(lines, spans)
+		}
+		matches[idx] = list
+	}
 }

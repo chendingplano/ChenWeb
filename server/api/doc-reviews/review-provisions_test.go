@@ -120,7 +120,17 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		spans: []string{"20:24"},
 	}
 	ms := []matchedProvision{
-		{view: provisionView{ProvID: "2_prv_9", Provision: "shall be 2.5 MPa"}, recordID: 2, filename: "other.pdf", via: "hybrid_search", confidence: 0.9},
+		{
+			view:     provisionView{ProvID: "2_prv_9", Provision: "shall be 2.5 MPa", SourceLineSpans: []string{"30:32"}},
+			recordID: 2,
+			filename: "other.pdf",
+			via:      "hybrid_search",
+			context: []map[string]any{
+				{"line_number": 20, "content": "context before"},
+				{"line_number": 30, "content": "matched provision line"},
+			},
+			confidence: 0.9,
+		},
 	}
 
 	findings := r.reviewProvision(context.Background(), 1, 0, ReviewerConfig{
@@ -146,7 +156,7 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		t.Errorf("documentFirst = %v, want [true]", fake.documentFirst)
 	}
 	in := fake.inputTexts[0]
-	for _, want := range []string{"provision_under_review", "matching_provisions", "2_prv_9", "hybrid_search"} {
+	for _, want := range []string{"provision_under_review", "matching_provisions", "2_prv_9", "hybrid_search", "source_line_spans", "source_context", "matched provision line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
 		}
