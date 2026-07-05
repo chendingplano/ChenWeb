@@ -104,12 +104,12 @@ func ListActiveJobs(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true, "jobs": jobs})
 }
 
-// ListRequests returns document-review requests matching the query filters,
-// newest first. Drives the request list (with its Search dialog) in the GUI.
-func ListRequests(c echo.Context) error {
+// ListRuns returns document-review runs matching the query filters, newest
+// first. Drives the run list (with its Search dialog) in the GUI.
+func ListRuns(c echo.Context) error {
 	limit, _ := strconv.Atoi(c.QueryParam("limit"))
-	filter := RequestListFilter{
-		RequestID:     c.QueryParam("request_id"),
+	filter := ReviewRunListFilter{
+		RunID:         c.QueryParam("run_id"),
 		DocTitle:      c.QueryParam("title"),
 		RequesterName: c.QueryParam("requester"),
 		Tier:          c.QueryParam("tier"),
@@ -119,14 +119,14 @@ func ListRequests(c echo.Context) error {
 		Limit:         limit,
 	}
 	ctrl := NewDocReviewController()
-	items, err := ctrl.ListRequests(c.Request().Context(), filter)
+	items, err := ctrl.ListRuns(c.Request().Context(), filter)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"status": false, "error_msg": err.Error()})
 	}
 	if items == nil {
-		items = []RequestListItem{}
+		items = []ReviewRunListItem{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "requests": items})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "runs": items})
 }
 
 func parseID(c echo.Context, name string) (int64, error) {
@@ -152,12 +152,14 @@ func GetRequest(c echo.Context) error {
 	language := c.QueryParam("language")
 	passFilter := c.QueryParam("pass")
 	aspectFilter := c.QueryParam("aspect")
-	logger.Info("doc review request fetch", "request_id", id, "language", language, "pass", passFilter, "aspect", aspectFilter)
+	runID, _ := strconv.ParseInt(c.QueryParam("run_id"), 10, 64)
+	logger.Info("doc review request fetch", "request_id", id, "run_id", runID, "language", language, "pass", passFilter, "aspect", aspectFilter)
 	ctrl := NewDocReviewController()
 	result, err := ctrl.GetRequestWithFindings(c.Request().Context(), id, RequestFindingsOptions{
 		Language: language,
 		Pass:     passFilter,
 		Aspect:   aspectFilter,
+		RunID:    runID,
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -419,7 +421,7 @@ func RestartRequest(c echo.Context) error {
 		}()
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "request_id": id, "status_str": "accepted"})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "request_id": id, "run_id": runID, "status_str": "accepted"})
 }
 
 // StopRequest stops a running review.

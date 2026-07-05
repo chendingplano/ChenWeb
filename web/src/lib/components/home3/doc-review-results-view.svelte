@@ -10,8 +10,8 @@
     import JsonTreeViewer from './json-tree-viewer.svelte';
     import { marked } from 'marked';
 
-    let { darkMode = true, requestId = 0, reportId = 0, docTitle = '', onNewReview }:
-        { darkMode: boolean; requestId: number; reportId?: number; docTitle?: string; onNewReview?: () => void } = $props();
+    let { darkMode = true, requestId = 0, runId = 0, reportId = 0, docTitle = '', onNewReview }:
+        { darkMode: boolean; requestId: number; runId?: number; reportId?: number; docTitle?: string; onNewReview?: () => void } = $props();
 
     // Design tokens
     let cardBg = $derived(darkMode ? '#1F2333' : '#FFFFFF');
@@ -50,6 +50,8 @@
     // Rerun dialog state
     let rerunDialogOpen = $state(false);
     let isRerunning = $state(false);
+    let currentRunId = $state(runId);
+    let currentReportId = $state(reportId);
 
     async function openJsonModal() {
         jsonModalOpen = true;
@@ -233,7 +235,7 @@
     // Effective report ID for links (fall back to requestId)
     // Report id may arrive via prop (legacy) or via the polled request after an
     // async run completes (DR15).
-    let resolvedReportId = $derived(reportId || request?.report_id || 0);
+    let resolvedReportId = $derived(currentReportId || request?.report_id || 0);
     let linkReportId = $derived(resolvedReportId || requestId);
 
     // Polling
@@ -243,16 +245,19 @@
     async function pollStatus() {
         if (!isActive) return;
         try {
-            const result = await getRequest(requestId);
+            const query = currentRunId ? { runId: currentRunId } : {};
+            const result = await getRequest(requestId, query);
             request = result.request;
             findings = result.findings || [];
             aspectStatuses = result.aspect_statuses || [];
             packages = result.packages || [];
+            if (request?.latest_run_id) currentRunId = request.latest_run_id;
+            if (request?.report_id) currentReportId = request.report_id;
 
             if (request.status === 'completed' || request.status === 'failed' || request.status === 'stopped') {
                 isActive = false;
                 stopPolling();
-                const rid = reportId || request.report_id;
+                const rid = currentReportId || request.report_id;
                 if (request.status === 'completed' && rid) {
                     try {
                         const res = await fetch(`/api/v1/doc-review/reports/${rid}`, { credentials: 'same-origin' });
@@ -327,14 +332,18 @@
         isRerunning = true;
         error = '';
         try {
-            await restartRequest(requestId);
+            const restarted = await restartRequest(requestId);
             rerunDialogOpen = false;
             stopPolling();
             isActive = true;
             activeTab = 'findings';
+            currentRunId = restarted.runId;
+            currentReportId = 0;
             request = {
                 ...request,
                 status: 'accepted',
+                latest_run_id: restarted.runId,
+                report_id: 0,
                 start_time: undefined,
                 end_time: undefined,
                 error_message: undefined,

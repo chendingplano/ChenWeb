@@ -159,7 +159,7 @@ func (c *DocReviewController) createRun(ctx context.Context, requestID, recordID
 // RunReview transitions the run to "running", delegates to ReviewProcessor, then completes.
 func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID int64) error {
 	// Load request.
-	req, err := c.loadRequest(ctx, requestID)
+	req, err := c.loadRequest(ctx, requestID, 0)
 	if err != nil {
 		return fmt.Errorf("load request %d: %w", requestID, err)
 	}
@@ -227,7 +227,7 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 	}
 
 	// If the request was stopped while running, do not override that terminal state.
-	if cur, _ := c.loadRequest(ctx, requestID); cur != nil && cur.Status == "stopped" {
+	if cur, _ := c.loadRequest(ctx, requestID, 0); cur != nil && cur.Status == "stopped" {
 		logger.Info("review request was stopped; skipping completion", "request_id", requestID)
 		return nil
 	}
@@ -269,12 +269,12 @@ func (c *DocReviewController) RunReviewAndReport(ctx context.Context, requestID,
 
 // GetRequest returns the request status row.
 func (c *DocReviewController) GetRequest(ctx context.Context, requestID int64) (*RequestStatus, error) {
-	return c.loadRequest(ctx, requestID)
+	return c.loadRequest(ctx, requestID, 0)
 }
 
 // GetRequestWithFindings returns the request with its findings.
 func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, requestID int64, opts RequestFindingsOptions) (*RequestWithFindings, error) {
-	req, err := c.loadRequest(ctx, requestID)
+	req, err := c.loadRequest(ctx, requestID, opts.RunID)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +385,7 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 // request can be run again from scratch.
 // Returns the run_id so the caller can re-publish the JetStream event.
 func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int64) (int64, error) {
-	req, err := c.loadRequest(ctx, requestID)
+	req, err := c.loadRequest(ctx, requestID, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -536,34 +536,50 @@ func (c *DocReviewController) UpdateFinding(ctx context.Context, findingID int64
 	return nil
 }
 
-// loadRequest fetches one request row, joining to the latest run for timing fields.
-func (c *DocReviewController) loadRequest(ctx context.Context, id int64) (*RequestStatus, error) {
+// loadRequest fetches one request row, joining to either the requested run or
+// the latest run for timing/report fields.
+func (c *DocReviewController) loadRequest(ctx context.Context, id int64, selectedRunID int64) (*RequestStatus, error) {
 	var req RequestStatus
 	var aspectsJSON, refDocsJSON, overridesJSON sql.NullString
 	var notes, reportTmpl, docTmpl sql.NullString
 	var latestRunID sql.NullInt64
-	var startTime, endTime, errorMsg sql.NullString
+	var startTime, endTime, errorMsg, runStatus sql.NullString
 
-	err := c.DB.QueryRowContext(ctx, `
-		SELECT r.id, r.input_record_id, r.tier, r.aspects::text,
-		       COALESCE(r.reference_docs::text,''), COALESCE(r.notes,''), COALESCE(r.model_overrides::text,''),
-		       r.requester_name, r.requester_id, COALESCE(r.report_template,''), COALESCE(r.doc_template,''),
-		       r.status, r.create_time::text,
-		       lr.id, COALESCE(lr.start_time::text,''), COALESCE(lr.end_time::text,''), COALESCE(lr.error_message,'')
-		FROM kb.doc_review_requests r
+	runJoin := `
 		LEFT JOIN LATERAL (
-		    SELECT id, start_time, end_time, error_message
+		    SELECT id, status, start_time, end_time, error_message
 		    FROM kb.doc_review_runs
 		    WHERE request_id = r.id
 		    ORDER BY id DESC
 		    LIMIT 1
-		) lr ON true
-		WHERE r.id = $1`, id,
-	).Scan(&req.ID, &req.InputRecordID, &req.Tier, &aspectsJSON,
+		) lr ON true`
+	args := []any{id}
+	if selectedRunID > 0 {
+		args = append(args, selectedRunID)
+		runJoin = `
+		LEFT JOIN LATERAL (
+		    SELECT id, status, start_time, end_time, error_message
+		    FROM kb.doc_review_runs
+		    WHERE request_id = r.id AND id = $2
+		    LIMIT 1
+		) lr ON true`
+	}
+
+	query := fmt.Sprintf(`
+		SELECT r.id, r.input_record_id, r.tier, r.aspects::text,
+		       COALESCE(r.reference_docs::text,''), COALESCE(r.notes,''), COALESCE(r.model_overrides::text,''),
+		       r.requester_name, r.requester_id, COALESCE(r.report_template,''), COALESCE(r.doc_template,''),
+		       r.status, r.create_time::text,
+		       lr.id, COALESCE(lr.status,''), COALESCE(lr.start_time::text,''), COALESCE(lr.end_time::text,''), COALESCE(lr.error_message,'')
+		FROM kb.doc_review_requests r
+		%s
+		WHERE r.id = $1`, runJoin)
+
+	err := c.DB.QueryRowContext(ctx, query, args...).Scan(&req.ID, &req.InputRecordID, &req.Tier, &aspectsJSON,
 		&refDocsJSON, &notes, &overridesJSON,
 		&req.RequesterName, &req.RequesterID, &reportTmpl, &docTmpl,
 		&req.Status, &req.CreateTime,
-		&latestRunID, &startTime, &endTime, &errorMsg)
+		&latestRunID, &runStatus, &startTime, &endTime, &errorMsg)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("request %d not found", id)
@@ -574,6 +590,9 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64) (*Reque
 	if latestRunID.Valid {
 		req.LatestRunID = latestRunID.Int64
 	}
+	if runStatus.Valid && runStatus.String != "" {
+		req.Status = runStatus.String
+	}
 	req.Notes = notes.String
 	req.ReportTemplate = reportTmpl.String
 	req.DocTemplate = docTmpl.String
@@ -581,12 +600,14 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64) (*Reque
 	req.EndTime = endTime.String
 	req.ErrorMessage = errorMsg.String
 
-	// Surface the latest report id (if any) so the GUI can link to it after
-	// an async run completes.
+	// Surface the selected/latest run's report id (if any) so the GUI can link
+	// to the exact run being viewed.
 	var reportID sql.NullInt64
-	_ = c.DB.QueryRowContext(ctx,
-		`SELECT id FROM kb.doc_review_reports WHERE request_id = $1 ORDER BY id DESC LIMIT 1`, id,
-	).Scan(&reportID)
+	if req.LatestRunID > 0 {
+		_ = c.DB.QueryRowContext(ctx,
+			`SELECT id FROM kb.doc_review_reports WHERE run_id = $1 ORDER BY id DESC LIMIT 1`, req.LatestRunID,
+		).Scan(&reportID)
+	}
 	if reportID.Valid {
 		req.ReportID = reportID.Int64
 	}
@@ -733,16 +754,15 @@ func (c *DocReviewController) ListActiveJobs(ctx context.Context) ([]ActiveJob, 
 	return jobs, nil
 }
 
-// ListRequests returns document-review requests matching the given filter,
-// newest first.
-func (c *DocReviewController) ListRequests(ctx context.Context, f RequestListFilter) ([]RequestListItem, error) {
+// ListRuns returns document-review runs matching the given filter, newest first.
+func (c *DocReviewController) ListRuns(ctx context.Context, f ReviewRunListFilter) ([]ReviewRunListItem, error) {
 	var conds []string
 	var args []any
 
-	if f.RequestID != "" {
-		if id, err := strconv.ParseInt(strings.TrimSpace(f.RequestID), 10, 64); err == nil {
+	if f.RunID != "" {
+		if id, err := strconv.ParseInt(strings.TrimSpace(f.RunID), 10, 64); err == nil {
 			args = append(args, id)
-			conds = append(conds, fmt.Sprintf("r.id = $%d", len(args)))
+			conds = append(conds, fmt.Sprintf("rn.id = $%d", len(args)))
 		}
 	}
 	if t := strings.TrimSpace(f.DocTitle); t != "" {
@@ -759,15 +779,15 @@ func (c *DocReviewController) ListRequests(ctx context.Context, f RequestListFil
 	}
 	if f.Status != "" && f.Status != "all" {
 		args = append(args, f.Status)
-		conds = append(conds, fmt.Sprintf("r.status = $%d", len(args)))
+		conds = append(conds, fmt.Sprintf("rn.status = $%d", len(args)))
 	}
 	if f.CreateStart != "" {
 		args = append(args, f.CreateStart)
-		conds = append(conds, fmt.Sprintf("r.create_time >= $%d::timestamptz", len(args)))
+		conds = append(conds, fmt.Sprintf("rn.create_time >= $%d::timestamptz", len(args)))
 	}
 	if f.CreateEnd != "" {
 		args = append(args, f.CreateEnd)
-		conds = append(conds, fmt.Sprintf("r.create_time <= $%d::timestamptz", len(args)))
+		conds = append(conds, fmt.Sprintf("rn.create_time <= $%d::timestamptz", len(args)))
 	}
 
 	limit := f.Limit
@@ -783,37 +803,36 @@ func (c *DocReviewController) ListRequests(ctx context.Context, f RequestListFil
 	}
 
 	query := fmt.Sprintf(`
-		SELECT r.id, r.input_record_id, COALESCE(i.title, i.file_name, ''), r.tier, r.status,
-		       r.requester_name, COALESCE(jsonb_array_length(r.aspects), 0),
-		       r.create_time::text,
-		       COALESCE((SELECT rn.start_time::text FROM kb.doc_review_runs rn WHERE rn.request_id = r.id ORDER BY rn.id DESC LIMIT 1), ''),
-		       COALESCE((SELECT rn.end_time::text FROM kb.doc_review_runs rn WHERE rn.request_id = r.id ORDER BY rn.id DESC LIMIT 1), ''),
-		       COALESCE((SELECT rep.id FROM kb.doc_review_reports rep WHERE rep.request_id = r.id ORDER BY rep.id DESC LIMIT 1), 0),
-		       COALESCE((SELECT rep.total_findings FROM kb.doc_review_reports rep WHERE rep.request_id = r.id ORDER BY rep.id DESC LIMIT 1), 0)
-		FROM kb.doc_review_requests r
+		SELECT rn.id, rn.request_id, rn.input_record_id, COALESCE(i.title, i.file_name, ''),
+		       r.tier, rn.status, r.requester_name, COALESCE(jsonb_array_length(rn.aspects), 0),
+		       rn.create_time::text, COALESCE(rn.start_time::text, ''), COALESCE(rn.end_time::text, ''),
+		       COALESCE((SELECT rep.id FROM kb.doc_review_reports rep WHERE rep.run_id = rn.id ORDER BY rep.id DESC LIMIT 1), 0),
+		       COALESCE((SELECT COUNT(*) FROM kb.doc_review_findings f WHERE f.run_id = rn.id), 0)
+		FROM kb.doc_review_runs rn
+		JOIN kb.doc_review_requests r ON r.id = rn.request_id
 		LEFT JOIN kb.inputs i ON i.id = r.input_record_id
 		%s
-		ORDER BY r.create_time DESC
+		ORDER BY rn.create_time DESC, rn.id DESC
 		%s`, where, limitClause)
 
 	rows, err := c.DB.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list requests: %w", err)
+		return nil, fmt.Errorf("list runs: %w", err)
 	}
 	defer rows.Close()
 
-	var items []RequestListItem
+	var items []ReviewRunListItem
 	for rows.Next() {
-		var it RequestListItem
-		if err := rows.Scan(&it.RequestID, &it.InputRecordID, &it.DocTitle, &it.Tier, &it.Status,
+		var it ReviewRunListItem
+		if err := rows.Scan(&it.RunID, &it.RequestID, &it.InputRecordID, &it.DocTitle, &it.Tier, &it.Status,
 			&it.RequesterName, &it.AspectCount, &it.CreateTime, &it.StartTime, &it.EndTime,
 			&it.ReportID, &it.TotalFindings); err != nil {
-			return nil, fmt.Errorf("scan request list item: %w", err)
+			return nil, fmt.Errorf("scan run list item: %w", err)
 		}
 		items = append(items, it)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate request list: %w", err)
+		return nil, fmt.Errorf("iterate run list: %w", err)
 	}
 	return items, nil
 }

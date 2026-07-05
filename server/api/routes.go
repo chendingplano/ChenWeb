@@ -17,12 +17,12 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/Dashboard01"
 	EchartData "github.com/chendingplano/deepdoc/server/api/EchartDemo"
 	"github.com/chendingplano/deepdoc/server/api/agentplatformhandler"
-	"github.com/chendingplano/deepdoc/server/api/dbmainthandler"
 	"github.com/chendingplano/deepdoc/server/api/aiassistanthandler"
 	"github.com/chendingplano/deepdoc/server/api/buttonhandler"
 	"github.com/chendingplano/deepdoc/server/api/chatterhandler"
 	"github.com/chendingplano/deepdoc/server/api/confighandler"
 	"github.com/chendingplano/deepdoc/server/api/custreqloghandler"
+	"github.com/chendingplano/deepdoc/server/api/dbmainthandler"
 	"github.com/chendingplano/deepdoc/server/api/diaryhandler"
 	docreviews "github.com/chendingplano/deepdoc/server/api/doc-reviews"
 	"github.com/chendingplano/deepdoc/server/api/docgenhandler"
@@ -516,7 +516,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/doc-review/languages", docreviews.HandleListLanguages)
 	apiGroup.GET("/doc-review/active", docreviews.ListActiveJobs)
 	apiGroup.POST("/doc-review/requests", docreviews.SubmitRequest)
-	apiGroup.GET("/doc-review/requests", docreviews.ListRequests)
+	apiGroup.GET("/doc-review/runs", docreviews.ListRuns)
 	apiGroup.GET("/doc-review/requests/:id", docreviews.GetRequest)
 	apiGroup.GET("/doc-review/reports/:id", docreviews.GetReport)
 	apiGroup.GET("/doc-review/reports/:id/html", docreviews.GetReportHTML)

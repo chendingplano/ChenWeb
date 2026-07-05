@@ -39,6 +39,7 @@ export type SubmitInput = {
 
 export type SubmitResult = {
 	request_id: number;
+	run_id: number;
 	status: string;
 	review_run_id?: string;
 	report_id?: number;
@@ -47,6 +48,7 @@ export type SubmitResult = {
 export type RequestStatus = {
 	id: number;
 	input_record_id: number;
+	latest_run_id?: number;
 	review_run_id?: string;
 	tier: string;
 	aspects: string[];
@@ -128,6 +130,7 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
 	}
 	return {
 		request_id: data.request_id,
+		run_id: data.run_id,
 		status: data.status,
 		review_run_id: data.review_run_id,
 		report_id: data.report_id,
@@ -138,6 +141,7 @@ export type RequestFindingsQuery = {
 	language?: string;
 	pass?: string;
 	aspect?: string;
+	runId?: number;
 };
 
 export async function getRequest(
@@ -148,6 +152,7 @@ export async function getRequest(
 	if (query.language && query.language !== 'en') params.set('language', query.language);
 	if (query.pass) params.set('pass', query.pass);
 	if (query.aspect) params.set('aspect', query.aspect);
+	if (query.runId) params.set('run_id', String(query.runId));
 	const suffix = params.toString() ? `?${params.toString()}` : '';
 	const res = await fetch(`${BASE}/requests/${id}${suffix}`, { credentials: 'same-origin' });
 	const data = await res.json();
@@ -273,15 +278,18 @@ export async function stopRequest(id: number): Promise<void> {
 	if (!data.status) throw new Error(data.error_msg || 'Failed to stop request');
 }
 
-// Re-runs an existing review request from scratch. Resets the latest run back
-// to an accepted/pending state and re-triggers processing.
-export async function restartRequest(id: number): Promise<void> {
+// Re-runs an existing review request from scratch and returns the new run id.
+export async function restartRequest(id: number): Promise<{ requestId: number; runId: number }> {
 	const res = await fetch(`${BASE}/requests/${id}/restart`, {
 		method: 'POST',
 		credentials: 'same-origin'
 	});
 	const data = await res.json();
 	if (!data.status) throw new Error(data.error_msg || 'Failed to restart request');
+	return {
+		requestId: data.request_id,
+		runId: data.run_id
+	};
 }
 
 // ── DR15: live job monitor ───────────────────────────────────────────────────
@@ -309,7 +317,8 @@ export async function listActiveJobs(): Promise<ActiveJob[]> {
 
 // ── Request list + search ─────────────────────────────────────────────────────
 
-export type RequestListItem = {
+export type ReviewRunListItem = {
+	run_id: number;
 	request_id: number;
 	input_record_id: number;
 	doc_title: string;
@@ -324,8 +333,8 @@ export type RequestListItem = {
 	end_time?: string;
 };
 
-export type RequestListFilter = {
-	requestId?: string;
+export type ReviewRunListFilter = {
+	runId?: string;
 	title?: string;
 	requester?: string;
 	tier?: string;
@@ -335,10 +344,10 @@ export type RequestListFilter = {
 	limit?: number;
 };
 
-// Lists all document-review requests matching the filter (newest first).
-export async function listRequests(filter: RequestListFilter = {}): Promise<RequestListItem[]> {
+// Lists all document-review runs matching the filter (newest first).
+export async function listReviewRuns(filter: ReviewRunListFilter = {}): Promise<ReviewRunListItem[]> {
 	const params = new URLSearchParams();
-	if (filter.requestId) params.set('request_id', filter.requestId.trim());
+	if (filter.runId) params.set('run_id', filter.runId.trim());
 	if (filter.title) params.set('title', filter.title.trim());
 	if (filter.requester) params.set('requester', filter.requester.trim());
 	if (filter.tier && filter.tier !== 'all') params.set('tier', filter.tier);
@@ -347,8 +356,8 @@ export async function listRequests(filter: RequestListFilter = {}): Promise<Requ
 	if (filter.createEnd) params.set('create_end', filter.createEnd);
 	if (filter.limit) params.set('limit', String(filter.limit));
 	const qs = params.toString();
-	const res = await fetch(`${BASE}/requests${qs ? `?${qs}` : ''}`, { credentials: 'same-origin' });
+	const res = await fetch(`${BASE}/runs${qs ? `?${qs}` : ''}`, { credentials: 'same-origin' });
 	const data = await res.json();
-	if (!data.status) throw new Error(data.error_msg || 'Failed to load requests');
-	return data.requests || [];
+	if (!data.status) throw new Error(data.error_msg || 'Failed to load review runs');
+	return data.runs || [];
 }

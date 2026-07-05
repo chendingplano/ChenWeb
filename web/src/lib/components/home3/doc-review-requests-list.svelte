@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { listRequests, listTiers } from '$lib/services/docReviewService';
-	import type { RequestListItem, TierInfo } from '$lib/services/docReviewService';
+	import { listReviewRuns, listTiers } from '$lib/services/docReviewService';
+	import type { ReviewRunListItem, TierInfo } from '$lib/services/docReviewService';
 	import DocReviewSearchDialog from './doc-review-search-dialog.svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -19,10 +19,10 @@
 		showingSelection = $bindable(false)
 	}: {
 		darkMode?: boolean;
-		onView?: (requestId: number) => void;
+		onView?: (run: ReviewRunListItem) => void;
 		// Bump this from the parent (e.g. after a submit) to force a reload.
 		refreshKey?: number;
-		requests?: RequestListItem[];
+		requests?: ReviewRunListItem[];
 		showingSelection?: boolean;
 	} = $props();
 
@@ -52,17 +52,17 @@
 		loading = true;
 		loadError = '';
 		try {
-			requests = await listRequests();
+			requests = await listReviewRuns();
 			showingSelection = false;
 		} catch (e: any) {
-			loadError = e?.message || 'Failed to load requests';
+			loadError = e?.message || 'Failed to load review runs';
 		} finally {
 			loading = false;
 		}
 	}
 
 	// The Search dialog returns the requests the user checked + confirmed.
-	function applySelection(records: RequestListItem[]) {
+	function applySelection(records: ReviewRunListItem[]) {
 		requests = records;
 		showingSelection = true;
 	}
@@ -108,7 +108,7 @@
 <div style="background:{cardBg}; border:1px solid {borderColor}; border-radius:12px; padding:16px 18px;">
 	<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
 		<div style="font-size:15px; font-weight:600; color:{textPrimary};">
-			Review Requests
+			Review Runs
 			<span style="color:{textMuted}; font-weight:400; font-size:13px;">({requests.length})</span>
 		</div>
 		<div style="display:flex; align-items:center; gap:8px;">
@@ -146,7 +146,7 @@
 
 	{#if requests.length === 0 && !loading}
 		<div style="padding:40px 16px; text-align:center; color:{textMuted}; font-size:13px;">
-			{showingSelection ? 'No requests selected.' : 'No review requests yet.'}
+			{showingSelection ? 'No runs selected.' : 'No review runs yet.'}
 		</div>
 	{:else}
 		<div style="overflow-x:auto;">
@@ -154,6 +154,7 @@
 				<thead>
 					<tr style="text-align:left; color:{textMuted}; font-size:11px; text-transform:uppercase; letter-spacing:0.06em;">
 						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">ID</th>
+						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Request</th>
 						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Document</th>
 						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Tier</th>
 						<th style="padding:8px 10px; border-bottom:1px solid {borderColor};">Status</th>
@@ -165,9 +166,10 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each requests as req (req.request_id)}
+					{#each requests as req (req.run_id)}
 						<tr style="border-bottom:1px solid {borderColor};">
-							<td style="padding:9px 10px; font-family:monospace; color:{textSecondary};">#{req.request_id}</td>
+							<td style="padding:9px 10px; font-family:monospace; color:{textSecondary};">#{req.run_id}</td>
+							<td style="padding:9px 10px; font-family:monospace; color:{textMuted};">#{req.request_id}</td>
 							<td style="padding:9px 10px; color:{textPrimary}; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
 								{req.doc_title || `Document #${req.input_record_id}`}
 							</td>
@@ -185,7 +187,7 @@
 							<td style="padding:9px 10px; font-family:monospace; font-size:11px; color:{textMuted};">{fmtClock(req.create_time)}</td>
 							<td style="padding:9px 10px; text-align:right;">
 								<button
-									onclick={() => onView?.(req.request_id)}
+									onclick={() => onView?.(req)}
 									style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; background:{accentTint}; border:1px solid {accent}30; border-radius:8px; color:{accent}; font-size:12px; font-weight:500; cursor:pointer;"
 								>
 									<EyeIcon class="h-3 w-3" />

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { listAspects, listTiers, submitRequest } from '$lib/services/docReviewService';
-    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, RequestListItem } from '$lib/services/docReviewService';
+    import type { AspectInfo, TierInfo, FindingItem, ReferenceDoc, ReviewRunListItem } from '$lib/services/docReviewService';
     import { uploadKbInputs, listKnowledgeStores } from '$lib/services/kbService';
     import type { KbInputRecord, KnowledgeStoreRecord } from '$lib/services/kbService';
     import { knowledgeStoreState } from './knowledge-store-state.svelte';
@@ -50,7 +50,7 @@
     let requesterName = $state('');
     let notes = $state('');
     let referenceDocs = $state<ReferenceDoc[]>([]);
-    let viewingRequestId = $state<number | null>(null);  // when set, show that job's results
+    let viewingRun = $state<{ requestId: number; runId?: number; reportId?: number } | null>(null);  // when set, show that job's results
     let submitBanner = $state('');                        // brief "review started" notice
     let submitError = $state('');
     let isSubmitting = $state(false);
@@ -60,7 +60,7 @@
     let requestsRefreshKey = $state(0);
     // Held here (not in the list component) so the displayed list + Search
     // selection survive while the results "View" window replaces the form.
-    let requestsList = $state<RequestListItem[]>([]);
+    let requestsList = $state<ReviewRunListItem[]>([]);
     let requestsShowingSelection = $state(false);
 
     // Step 1 input mode: pick an existing document or upload a new one
@@ -344,7 +344,7 @@
                 report_template: reportTemplate || undefined,
                 doc_template: docTemplate || undefined,
             });
-            viewingRequestId = result.request_id;
+            viewingRun = { requestId: result.request_id, runId: result.run_id, reportId: result.report_id };
             // A new submission resets any Search selection so the refreshed full
             // list (now including this request) is what shows on return.
             requestsShowingSelection = false;
@@ -365,12 +365,14 @@
     }
 </script>
 
-{#if viewingRequestId}
+{#if viewingRun}
     <DocReviewResultsView
         {darkMode}
-        requestId={viewingRequestId}
+        requestId={viewingRun.requestId}
+        runId={viewingRun.runId ?? 0}
+        reportId={viewingRun.reportId ?? 0}
         docTitle={selectedDocTitle}
-        onNewReview={() => { viewingRequestId = null; }}
+        onNewReview={() => { viewingRun = null; }}
     />
 {:else}
     <div style="padding: 1.5rem; color: {textPrimary};">
@@ -380,7 +382,7 @@
         </p>
 
         <!-- DR15: live monitor of all in-flight review jobs -->
-        <DocReviewMonitor {darkMode} onView={(id) => { viewingRequestId = id; }} onStop={() => { requestsRefreshKey += 1; }} />
+        <DocReviewMonitor {darkMode} onView={(id) => { viewingRun = { requestId: id }; }} onStop={() => { requestsRefreshKey += 1; }} />
 
         {#if submitBanner}
             <div style="margin-bottom: 1.25rem; padding: 0.75rem 1rem; background: {accentTint}; border: 1px solid {borderColor}; border-radius: 8px; color: {accent}; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between;">
@@ -704,7 +706,7 @@
                 refreshKey={requestsRefreshKey}
                 bind:requests={requestsList}
                 bind:showingSelection={requestsShowingSelection}
-                onView={(id) => { viewingRequestId = id; }}
+                onView={(run) => { viewingRun = { requestId: run.request_id, runId: run.run_id, reportId: run.report_id }; }}
             />
         </div>
     </div>

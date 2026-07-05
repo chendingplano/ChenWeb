@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { listRequests } from '$lib/services/docReviewService';
-	import type { RequestListFilter, RequestListItem, TierInfo } from '$lib/services/docReviewService';
+	import { listReviewRuns } from '$lib/services/docReviewService';
+	import type { ReviewRunListFilter, ReviewRunListItem, TierInfo } from '$lib/services/docReviewService';
 
 	let {
 		open = $bindable(false),
@@ -9,8 +9,8 @@
 	}: {
 		open?: boolean;
 		tiers?: TierInfo[];
-		// Called with the requests the user checked and confirmed via "Select".
-		onSelect?: (records: RequestListItem[]) => void;
+		// Called with the runs the user checked and confirmed via "Select".
+		onSelect?: (records: ReviewRunListItem[]) => void;
 	} = $props();
 
 	const statusOptions = [
@@ -22,7 +22,7 @@
 		{ value: 'stopped', label: 'Stopped' }
 	];
 
-	let requestId = $state('');
+	let runId = $state('');
 	let title = $state('');
 	let requester = $state('');
 	let tier = $state('all');
@@ -31,7 +31,7 @@
 	let createEnd = $state('');
 
 	let searchLoading = $state(false);
-	let searchResults = $state<RequestListItem[]>([]);
+	let searchResults = $state<ReviewRunListItem[]>([]);
 	let searchTotal = $state<number | null>(null);
 	let searchSelected = $state<Set<number>>(new Set());
 	let searchError = $state('');
@@ -49,8 +49,8 @@
 		lastOpenState = open;
 	});
 
-	function currentFilter(): RequestListFilter {
-		return { requestId, title, requester, tier, status, createStart, createEnd };
+	function currentFilter(): ReviewRunListFilter {
+		return { runId, title, requester, tier, status, createStart, createEnd };
 	}
 
 	async function runSearch() {
@@ -59,7 +59,7 @@
 		searchTotal = null;
 		searchSelected = new Set();
 		try {
-			searchResults = await listRequests(currentFilter());
+			searchResults = await listReviewRuns(currentFilter());
 			searchTotal = searchResults.length;
 		} catch (err) {
 			searchError = err instanceof Error ? err.message : 'Search failed';
@@ -69,7 +69,7 @@
 	}
 
 	function resetSearch() {
-		requestId = '';
+		runId = '';
 		title = '';
 		requester = '';
 		tier = 'all';
@@ -97,17 +97,17 @@
 		if (searchSelected.size === searchResults.length && searchResults.length > 0) {
 			searchSelected = new Set();
 		} else {
-			searchSelected = new Set(searchResults.map((r) => r.request_id));
+			searchSelected = new Set(searchResults.map((r) => r.run_id));
 		}
 	}
 
-	function pickResult(record: RequestListItem) {
+	function pickResult(record: ReviewRunListItem) {
 		open = false;
 		onSelect([record]);
 	}
 
 	function confirmSelection() {
-		const selected = searchResults.filter((r) => searchSelected.has(r.request_id));
+		const selected = searchResults.filter((r) => searchSelected.has(r.run_id));
 		if (selected.length > 0) {
 			open = false;
 			onSelect(selected);
@@ -148,10 +148,10 @@
 			tabindex="0"
 		>
 			<div class="dialog-head">
-				<div class="dialog-eyebrow">kb.doc_review_requests</div>
-				<h2 class="dialog-title">Search review requests</h2>
+				<div class="dialog-eyebrow">kb.doc_review_runs</div>
+				<h2 class="dialog-title">Search review runs</h2>
 				<p class="dialog-subtitle">
-					Filter by request, document, requester, tier, status, and create window.
+					Filter by run, document, requester, tier, status, and create window.
 				</p>
 			</div>
 
@@ -160,12 +160,12 @@
 					<div class="dialog-section">
 						<div class="dialog-section-head">
 							<div class="dialog-section-title">Identity</div>
-							<div class="dialog-section-copy">Match the request, its document, and who submitted it.</div>
+							<div class="dialog-section-copy">Match the run, its document, and who submitted it.</div>
 						</div>
 						<div class="dialog-grid dialog-grid-primary">
 							<label class="field dialog-field">
-								<span class="field-label">Request ID</span>
-								<input type="text" bind:value={requestId} placeholder="42" onkeydown={onKeydown} />
+								<span class="field-label">Run ID</span>
+								<input type="text" bind:value={runId} placeholder="42" onkeydown={onKeydown} />
 							</label>
 							<label class="field dialog-field dialog-field-wide">
 								<span class="field-label">Document title contains</span>
@@ -229,7 +229,7 @@
 						<div class="dialog-toolbar-copy">
 							<div class="dialog-toolbar-title">Search Scope</div>
 							<div class="dialog-toolbar-text">
-								Leave fields empty to broaden the search. Results are capped to the newest 100 requests.
+								Leave fields empty to broaden the search. Results are capped to the newest 100 runs.
 							</div>
 						</div>
 						<div class="dialog-toolbar-actions">
@@ -253,9 +253,9 @@
 				{#if searchTotal !== null && !searchLoading}
 					<div class="results-count">
 						{#if searchTotal === 0}
-							No requests matched.
+							No runs matched.
 						{:else}
-							<strong>{searchTotal}</strong> {searchTotal === 1 ? 'request' : 'requests'} matched
+							<strong>{searchTotal}</strong> {searchTotal === 1 ? 'run' : 'runs'} matched
 						{/if}
 					</div>
 				{/if}
@@ -264,7 +264,7 @@
 					{#if searchResults.length === 0 && !searchLoading}
 						<div class="dialog-empty">
 							<div class="empty-glyph">⌕</div>
-							<div class="dialog-empty-title">Run a search to see requests.</div>
+							<div class="dialog-empty-title">Run a search to see review runs.</div>
 							<div class="dialog-empty-copy">
 								Use any combination of identity, classification, and time filters to narrow the list.
 							</div>
@@ -284,6 +284,7 @@
 										/>
 									</th>
 									<th>ID</th>
+									<th>Request</th>
 									<th>Document</th>
 									<th>Tier</th>
 									<th>Status</th>
@@ -292,22 +293,23 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each searchResults as record (record.request_id)}
+								{#each searchResults as record (record.run_id)}
 									<tr
-										class:selected={searchSelected.has(record.request_id)}
-										onclick={() => toggleSelection(record.request_id)}
+										class:selected={searchSelected.has(record.run_id)}
+										onclick={() => toggleSelection(record.run_id)}
 										ondblclick={() => pickResult(record)}
 									>
 										<td class="col-check">
 											<input
 												type="checkbox"
 												class="row-check"
-												checked={searchSelected.has(record.request_id)}
+												checked={searchSelected.has(record.run_id)}
 												onclick={(e) => e.stopPropagation()}
-												onchange={() => toggleSelection(record.request_id)}
+												onchange={() => toggleSelection(record.run_id)}
 											/>
 										</td>
-										<td class="mono">#{record.request_id}</td>
+										<td class="mono">#{record.run_id}</td>
+										<td class="mono muted">#{record.request_id}</td>
 										<td class="ellipsis">{record.doc_title || `Document #${record.input_record_id}`}</td>
 										<td>{tierLabel(record.tier)}</td>
 										<td><span class="status-pill">{record.status}</span></td>

@@ -60,6 +60,7 @@ type RequestFindingsOptions struct {
 	Language string
 	Pass     string
 	Aspect   string
+	RunID    int64
 }
 
 // FindingItem is a finding row from kb.doc_review_findings.
@@ -277,10 +278,10 @@ type TierInfo struct {
 	AspectNames []string `json:"aspect_names"`
 }
 
-// RequestListFilter holds the optional filters for ListRequests. Empty fields
+// ReviewRunListFilter holds the optional filters for ListRuns. Empty fields
 // (or "all" for the enum-style fields) are ignored, broadening the search.
-type RequestListFilter struct {
-	RequestID     string // exact id match (parsed; ignored if not a valid int)
+type ReviewRunListFilter struct {
+	RunID         string // exact run-id match (parsed; ignored if not a valid int)
 	DocTitle      string // ILIKE on the document's title / file_name
 	RequesterName string // ILIKE on requester_name
 	Tier          string // exact match (empty / "all" = any)
@@ -290,8 +291,9 @@ type RequestListFilter struct {
 	Limit         int    // capped to 200; defaults to 100
 }
 
-// RequestListItem is one row of the document-review request list.
-type RequestListItem struct {
+// ReviewRunListItem is one row of the document-review run list.
+type ReviewRunListItem struct {
+	RunID         int64  `json:"run_id"`
 	RequestID     int64  `json:"request_id"`
 	InputRecordID int64  `json:"input_record_id"`
 	DocTitle      string `json:"doc_title"`
