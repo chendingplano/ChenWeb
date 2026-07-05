@@ -309,9 +309,9 @@ func TestBuildTypstVariantsUsesSingleConfiguredLanguage(t *testing.T) {
 func TestFindAllReportPDFsIncludesLanguageSpecificFiles(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{
-		"20260704-1200-88-report-en.pdf",
-		"20260704-1200-88-report-cn.pdf",
-		"20260703-2359-88-reports.pdf",
+		"20260704-1200-40-report-en.pdf",
+		"20260704-1200-40-report-cn.pdf",
+		"20260703-2359-38-reports.pdf",
 		"20260704-1200-77-report-en.pdf",
 	} {
 		path := filepath.Join(dir, name)
@@ -320,12 +320,20 @@ func TestFindAllReportPDFsIncludesLanguageSpecificFiles(t *testing.T) {
 		}
 	}
 
-	got := findAllReportPDFs(dir, 88)
-	if len(got) != 3 {
-		t.Fatalf("matches len=%d, want 3 (%v)", len(got), got)
+	got := findAllReportPDFs(dir, 40)
+	if len(got) != 2 {
+		t.Fatalf("matches len=%d, want 2 (%v)", len(got), got)
 	}
 	first := filepath.Base(got[0])
-	if first != "20260704-1200-88-report-en.pdf" && first != "20260704-1200-88-report-cn.pdf" {
+	if first != "20260704-1200-40-report-en.pdf" && first != "20260704-1200-40-report-cn.pdf" {
 		t.Fatalf("newest match=%q, want language-specific report", first)
+	}
+}
+
+func TestReviewReportArtifactBaseNameUsesRunID(t *testing.T) {
+	got := reviewReportArtifactBaseName("20260705-1347", 40, "report-cn")
+	want := "20260705-1347-40-report-cn"
+	if got != want {
+		t.Fatalf("base name=%q, want %q", got, want)
 	}
 }

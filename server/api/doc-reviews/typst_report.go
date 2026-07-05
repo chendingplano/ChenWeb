@@ -60,7 +60,7 @@ func GenerateTypstReport(ctx context.Context, requestID int64, skeleton *ReportS
 		return err
 	}
 	for _, variant := range variants {
-		baseName := fmt.Sprintf("%s-%d-%s", stamp, requestID, variant.suffix)
+		baseName := reviewReportArtifactBaseName(stamp, req.LatestRunID, variant.suffix)
 		typPath := filepath.Join(outputDir, baseName+".typ")
 		pdfPath := filepath.Join(outputDir, baseName+".pdf")
 
@@ -81,6 +81,10 @@ func GenerateTypstReport(ctx context.Context, requestID int64, skeleton *ReportS
 		typstLogger.Info("PDF generated", "request_id", requestID, "language", variant.language, "path", pdfPath)
 	}
 	return nil
+}
+
+func reviewReportArtifactBaseName(stamp string, runID int64, suffix string) string {
+	return fmt.Sprintf("%s-%d-%s", stamp, runID, suffix)
 }
 
 type typstVariant struct {

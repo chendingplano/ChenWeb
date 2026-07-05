@@ -753,7 +753,7 @@ func renderHTML(report *ReportSkeleton) (string, error) {
 	return buf.String(), nil
 }
 
-// ListReportPDFs returns all review-report PDF files on disk for the request
+// ListReportPDFs returns all review-report PDF files on disk for the run
 // associated with reportID, sorted by file name descending (newest first). The
 // most recent file is marked IsCurrent=true. Returns an empty slice (not an
 // error) when DOC_REVIEW_REPORTS is unset or no PDF files match.
@@ -768,7 +768,7 @@ func (g *DocReviewReportGenerator) ListReportPDFs(ctx context.Context, reportID 
 		return []ReportPDFFile{}, nil
 	}
 
-	matches := findAllReportPDFs(outputDir, d.RequestID)
+	matches := findAllReportPDFs(outputDir, d.RunID)
 	var files []ReportPDFFile
 	for i, match := range matches {
 		createTime := d.CreateTime
@@ -798,30 +798,30 @@ func (g *DocReviewReportGenerator) FindReportPDFPath(ctx context.Context, report
 	if outputDir == "" {
 		return "", nil
 	}
-	return findReportPDF(outputDir, d.RequestID), nil
+	return findReportPDF(outputDir, d.RunID), nil
 }
 
-// findReportPDF scans outputDir for a PDF matching the given requestID under
+// findReportPDF scans outputDir for a PDF matching the given runID under
 // the bilingual naming convention (<stamp>-<id>-report-en.pdf / -report-cn.pdf)
 // or the older single-report conventions. Returns the lexicographically last
 // match (newest stamp), or "" when nothing is found.
-func findReportPDF(outputDir string, requestID int64) string {
-	matches := findAllReportPDFs(outputDir, requestID)
+func findReportPDF(outputDir string, runID int64) string {
+	matches := findAllReportPDFs(outputDir, runID)
 	if len(matches) == 0 {
 		return ""
 	}
 	return matches[0]
 }
 
-// findAllReportPDFs returns all PDF files in outputDir matching requestID,
+// findAllReportPDFs returns all PDF files in outputDir matching runID,
 // sorted descending by filename (newest stamp first).
-func findAllReportPDFs(outputDir string, requestID int64) []string {
+func findAllReportPDFs(outputDir string, runID int64) []string {
 	var matches []string
 	for _, pat := range []string{
-		filepath.Join(outputDir, fmt.Sprintf("*-%d-report-en.pdf", requestID)),
-		filepath.Join(outputDir, fmt.Sprintf("*-%d-report-cn.pdf", requestID)),
-		filepath.Join(outputDir, fmt.Sprintf("*-%d-reports.pdf", requestID)),
-		filepath.Join(outputDir, fmt.Sprintf("*-%dreports.pdf", requestID)),
+		filepath.Join(outputDir, fmt.Sprintf("*-%d-report-en.pdf", runID)),
+		filepath.Join(outputDir, fmt.Sprintf("*-%d-report-cn.pdf", runID)),
+		filepath.Join(outputDir, fmt.Sprintf("*-%d-reports.pdf", runID)),
+		filepath.Join(outputDir, fmt.Sprintf("*-%dreports.pdf", runID)),
 	} {
 		m, _ := filepath.Glob(pat)
 		matches = append(matches, m...)
