@@ -24,17 +24,11 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
 		0: {
 			{ArtifactID: "2_prv_9", RecordID: 2, RRFScore: 0.9},
-			// Also reached via the entity branch below -> must dedup.
+			// Also reached via the object-anchor branch below -> must dedup.
 			{ArtifactID: "3_prv_7", RecordID: 3, RRFScore: 0.2},
 			// Same-document hit -> excluded by add().
 			{ArtifactID: "1_prv_5", RecordID: recordID, RRFScore: 0.5},
 		},
-	}
-	entEdges := []docprocessing.Connection{
-		// Branch B: entity -> provision 3_prv_7 (shares "safety/pressure" with P1).
-		{TargetID: "3_prv_7", Confidence: 0.3},
-		// entity -> provision 4_prv_2 (shares "process/temp" with P2).
-		{TargetID: "4_prv_2", Confidence: 0.4},
 	}
 	resolved := map[string]resolvedProvision{
 		"2_prv_9": {view: provisionView{ProvID: "2_prv_9", Categories: []string{"safety/pressure"}}, recordID: 2},
@@ -42,8 +36,18 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 		"4_prv_2": {view: provisionView{ProvID: "4_prv_2", Categories: []string{"process/temp"}}, recordID: 4},
 		"1_prv_5": {view: provisionView{ProvID: "1_prv_5"}, recordID: recordID}, // same doc
 	}
+	objectMatches := map[int][]resolvedProvision{
+		0: {
+			// Branch B: object-anchor -> provision 3_prv_7 for P1.
+			{view: provisionView{ProvID: "3_prv_7", Categories: []string{"safety/pressure"}}, recordID: 3},
+		},
+		1: {
+			// Branch B: object-anchor -> provision 4_prv_2 for P2.
+			{view: provisionView{ProvID: "4_prv_2", Categories: []string{"process/temp"}}, recordID: 4},
+		},
+	}
 
-	got := assembleProvisionMatches(recordID, docProvs, hybridMatches, entEdges, resolved, 0)
+	got := assembleProvisionMatches(recordID, docProvs, hybridMatches, objectMatches, resolved, 0)
 
 	// P1: 2_prv_9 (A) and 3_prv_7 (A+B deduped) = 2; 1_prv_5 excluded.
 	if len(got[0]) != 2 {
@@ -54,13 +58,13 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 			t.Errorf("P1 match %s is same-document, should be excluded", m.view.ProvID)
 		}
 	}
-	// P2: 4_prv_2 via entity branch (shared category process/temp).
-	if len(got[1]) != 1 || got[1][0].view.ProvID != "4_prv_2" || got[1][0].via != "entity" {
-		t.Fatalf("P2 matches = %v, want [4_prv_2 via entity]", got[1])
+	// P2: 4_prv_2 via object-anchor branch.
+	if len(got[1]) != 1 || got[1][0].view.ProvID != "4_prv_2" || got[1][0].via != "object_anchor" {
+		t.Fatalf("P2 matches = %v, want [4_prv_2 via object_anchor]", got[1])
 	}
 
 	// Cap = 1: P1 keeps only highest-confidence match (2_prv_9 @0.9).
-	capped := assembleProvisionMatches(recordID, docProvs, hybridMatches, entEdges, resolved, 1)
+	capped := assembleProvisionMatches(recordID, docProvs, hybridMatches, objectMatches, resolved, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.ProvID != "2_prv_9" {
 		t.Fatalf("capped P1 = %v, want [2_prv_9]", capped[0])
 	}

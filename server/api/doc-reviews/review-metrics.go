@@ -21,7 +21,8 @@ import (
 // LIVE at review time via docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather
 // than from precomputed hybrid_search/semantically_related edges — on-the-fly search is
 // always fresh and needs no inbound/outbound edge bookkeeping. Branch B adds metrics
-// sharing a category key; Branch C adds entity->metric edges.
+// sharing a category key; Branch C adds object-anchored metrics retrieved before the
+// LLM/tool loop.
 //
 // It uses ReviewStrategy StrategyDocument and Input="artifact", so the prompt-cache
 // scheduler routes it to runReviewersLegacy, which calls ReviewDocument directly.
@@ -89,7 +90,7 @@ type matchedMetric struct {
 	filename   string
 	title      string // source document title (authority classification, AR5 §3)
 	docNo      string // source document number from kb.inputs.doc_metadata
-	via        string // "hybrid_search" | "metric_category" | "entity"
+	via        string // "hybrid_search" | "metric_category" | "object_anchor"
 	confidence float64
 	context    []map[string]any
 }
@@ -369,8 +370,6 @@ func (r *metricsReviewer) buildMatches(
 		}
 	}
 
-	store := &docprocessing.ConnectionSQLStore{DB: r.db}
-
 	// Branch A: semantically-similar metrics discovered LIVE (no materialized edges). A
 	// single hybrid search per doc metric finds close metrics regardless of when the other
 	// document was indexed, so no inbound/outbound edge bookkeeping is needed.
@@ -388,8 +387,11 @@ func (r *metricsReviewer) buildMatches(
 		}
 	}
 
-	// Branch C: entity -> metric edges (any relation method).
-	entEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", "", "metric")
+	artifactIDs := make([]string, len(docMetrics))
+	for i, dm := range docMetrics {
+		artifactIDs[i] = dm.view.MetricID
+	}
+	objectPeerIDs, err := loadObjectAnchoredPeerIDs(ctx, r.db, recordID, "metric", artifactIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -403,9 +405,11 @@ func (r *metricsReviewer) buildMatches(
 			}
 		}
 	}
-	for _, e := range entEdges {
-		if e.TargetID != "" {
-			idSet[e.TargetID] = struct{}{}
+	for _, ids := range objectPeerIDs {
+		for _, id := range ids {
+			if id != "" {
+				idSet[id] = struct{}{}
+			}
 		}
 	}
 	resolved, err := r.loadMetricsByMetricID(ctx, idSet)
@@ -424,7 +428,16 @@ func (r *metricsReviewer) buildMatches(
 		}
 	}
 
-	return assembleMatches(recordID, docMetrics, hybridMatches, entEdges, resolved, siblings, r.maxMatches), nil
+	objectMatches := make(map[int][]resolvedMetric, len(objectPeerIDs))
+	for docIdx, ids := range objectPeerIDs {
+		for _, id := range ids {
+			if rm, ok := resolved[id]; ok {
+				objectMatches[docIdx] = append(objectMatches[docIdx], rm)
+			}
+		}
+	}
+
+	return assembleMatches(recordID, docMetrics, hybridMatches, objectMatches, resolved, siblings, r.maxMatches), nil
 }
 
 // assembleMatches is the pure (DB-free) match-assembly used by buildMatches. It maps
@@ -433,7 +446,7 @@ func assembleMatches(
 	recordID int64,
 	docMetrics []docMetric,
 	hybridMatches map[int][]docprocessing.OnTheFlySemanticMatch,
-	entEdges []docprocessing.Connection,
+	objectMatches map[int][]resolvedMetric,
 	resolved map[string]resolvedMetric,
 	siblings []resolvedMetric,
 	maxMatches int,
@@ -486,27 +499,10 @@ func assembleMatches(
 		}
 	}
 
-	// Branch C: entity-connected metrics, attached to doc metrics that share a category.
-	for _, e := range entEdges {
-		tm, ok := resolved[e.TargetID]
-		if !ok {
-			continue
-		}
-		tmCats := make(map[string]struct{}, len(tm.view.Categories))
-		for _, c := range tm.view.Categories {
-			tmCats[strings.TrimSpace(c)] = struct{}{}
-		}
-		for i, dm := range docMetrics {
-			shared := false
-			for _, c := range dm.view.Categories {
-				if _, ok := tmCats[strings.TrimSpace(c)]; ok {
-					shared = true
-					break
-				}
-			}
-			if shared {
-				add(i, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "entity", confidence: e.Confidence})
-			}
+	// Branch C: object-anchored metrics, keyed directly by the metric-under-review index.
+	for docIdx, peers := range objectMatches {
+		for _, tm := range peers {
+			add(docIdx, matchedMetric{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "object_anchor"})
 		}
 	}
 

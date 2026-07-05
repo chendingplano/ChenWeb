@@ -20,7 +20,7 @@ import (
 // LIVE at review time via docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather
 // than from precomputed hybrid_search/semantically_related edges — on-the-fly search is
 // always fresh and needs no inbound/outbound edge bookkeeping. Branch B adds
-// entity->provision edges attached by shared category.
+// object-anchored provisions retrieved before the LLM/tool loop.
 //
 // ReviewStrategy StrategyDocument + Input="artifact" routes it to runReviewersLegacy,
 // which calls ReviewDocument directly.
@@ -68,7 +68,7 @@ type matchedProvision struct {
 	filename   string
 	title      string // source document title (authority classification, AR5 §3)
 	docNo      string // source document number from kb.inputs.doc_metadata
-	via        string // "hybrid_search" | "entity"
+	via        string // "hybrid_search" | "object_anchor"
 	confidence float64
 	context    []map[string]any
 }
@@ -280,8 +280,6 @@ func (r *provisionsReviewer) buildMatches(
 	recordID int64,
 	docProvs []docProvision,
 ) (map[int][]matchedProvision, error) {
-	store := &docprocessing.ConnectionSQLStore{DB: r.db}
-
 	// Branch A: semantically-similar provisions discovered LIVE (no materialized edges). A
 	// single hybrid search per doc provision finds close provisions regardless of when the
 	// other document was indexed, so no inbound/outbound edge bookkeeping is needed.
@@ -299,8 +297,11 @@ func (r *provisionsReviewer) buildMatches(
 		}
 	}
 
-	// Branch B: entity -> provision edges (any relation method).
-	entEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", "", "provision")
+	artifactIDs := make([]string, len(docProvs))
+	for i, dp := range docProvs {
+		artifactIDs[i] = dp.view.ProvID
+	}
+	objectPeerIDs, err := loadObjectAnchoredPeerIDs(ctx, r.db, recordID, "provision", artifactIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -313,9 +314,11 @@ func (r *provisionsReviewer) buildMatches(
 			}
 		}
 	}
-	for _, e := range entEdges {
-		if e.TargetID != "" {
-			idSet[e.TargetID] = struct{}{}
+	for _, ids := range objectPeerIDs {
+		for _, id := range ids {
+			if id != "" {
+				idSet[id] = struct{}{}
+			}
 		}
 	}
 	resolved, err := r.loadProvisionsByProvID(ctx, idSet)
@@ -323,7 +326,16 @@ func (r *provisionsReviewer) buildMatches(
 		return nil, err
 	}
 
-	return assembleProvisionMatches(recordID, docProvs, hybridMatches, entEdges, resolved, r.maxMatches), nil
+	objectMatches := make(map[int][]resolvedProvision, len(objectPeerIDs))
+	for docIdx, ids := range objectPeerIDs {
+		for _, id := range ids {
+			if rp, ok := resolved[id]; ok {
+				objectMatches[docIdx] = append(objectMatches[docIdx], rp)
+			}
+		}
+	}
+
+	return assembleProvisionMatches(recordID, docProvs, hybridMatches, objectMatches, resolved, r.maxMatches), nil
 }
 
 // assembleProvisionMatches is the pure (DB-free) match-assembly used by buildMatches.
@@ -331,7 +343,7 @@ func assembleProvisionMatches(
 	recordID int64,
 	docProvs []docProvision,
 	hybridMatches map[int][]docprocessing.OnTheFlySemanticMatch,
-	entEdges []docprocessing.Connection,
+	objectMatches map[int][]resolvedProvision,
 	resolved map[string]resolvedProvision,
 	maxMatches int,
 ) map[int][]matchedProvision {
@@ -363,27 +375,10 @@ func assembleProvisionMatches(
 		}
 	}
 
-	// Branch B: entity-connected provisions, attached to doc provisions that share a category.
-	for _, e := range entEdges {
-		tp, ok := resolved[e.TargetID]
-		if !ok {
-			continue
-		}
-		tpCats := make(map[string]struct{}, len(tp.view.Categories))
-		for _, c := range tp.view.Categories {
-			tpCats[strings.TrimSpace(c)] = struct{}{}
-		}
-		for i, dp := range docProvs {
-			shared := false
-			for _, c := range dp.view.Categories {
-				if _, ok := tpCats[strings.TrimSpace(c)]; ok {
-					shared = true
-					break
-				}
-			}
-			if shared {
-				add(i, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, title: tp.title, docNo: tp.docNo, via: "entity", confidence: e.Confidence})
-			}
+	// Branch B: object-anchored provisions, keyed directly by the provision-under-review index.
+	for docIdx, peers := range objectMatches {
+		for _, tp := range peers {
+			add(docIdx, matchedProvision{view: tp.view, recordID: tp.recordID, filename: tp.filename, title: tp.title, docNo: tp.docNo, via: "object_anchor"})
 		}
 	}
 

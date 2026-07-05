@@ -24,20 +24,24 @@ func TestAssembleInventoryMatches_Branches_DedupExclusionCap(t *testing.T) {
 	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
 		0: {
 			{ArtifactID: "2_inv_9", RecordID: 2, RRFScore: 0.9},
-			// Also reached via the entity branch below -> must dedup.
+			// Also reached via the object-anchor branch below -> must dedup.
 			{ArtifactID: "3_inv_7", RecordID: 3, RRFScore: 0.2},
 			// Same-document hit -> excluded by add().
 			{ArtifactID: "1_inv_5", RecordID: recordID, RRFScore: 0.5},
 		},
 	}
-	entEdges := []docprocessing.Connection{
-		// Branch C: entity -> item 3_inv_7 (shares "valve" with I1).
-		{TargetID: "3_inv_7", Confidence: 0.3},
-	}
 	resolved := map[string]resolvedInventoryItem{
 		"2_inv_9": {view: inventoryItemView{ItemID: "2_inv_9", Categories: []string{"valve"}}, recordID: 2},
 		"3_inv_7": {view: inventoryItemView{ItemID: "3_inv_7", Categories: []string{"valve"}}, recordID: 3},
 		"1_inv_5": {view: inventoryItemView{ItemID: "1_inv_5"}, recordID: recordID}, // same doc
+	}
+	objectMatches := map[int][]resolvedInventoryItem{
+		0: {
+			// Branch C: object-anchor -> item 3_inv_7 for I1.
+			{view: inventoryItemView{ItemID: "3_inv_7", Categories: []string{"valve"}}, recordID: 3},
+			// Same-document object peer -> excluded by add().
+			{view: inventoryItemView{ItemID: "1_inv_5"}, recordID: recordID},
+		},
 	}
 	siblings := []resolvedInventoryItem{
 		// Branch B: cross-doc item sharing "pump" with I2.
@@ -45,7 +49,7 @@ func TestAssembleInventoryMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// No cap first: verify branch coverage + dedup + exclusion.
-	got := assembleInventoryMatches(recordID, docItems, hybridMatches, entEdges, resolved, siblings, 0)
+	got := assembleInventoryMatches(recordID, docItems, hybridMatches, objectMatches, resolved, siblings, 0)
 
 	// I1 (index 0): 2_inv_9 (A) and 3_inv_7 (A+C deduped) = 2 matches; 1_inv_5 excluded.
 	if len(got[0]) != 2 {
@@ -68,7 +72,7 @@ func TestAssembleInventoryMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: I1 keeps only the highest-confidence match (2_inv_9 @0.9).
-	capped := assembleInventoryMatches(recordID, docItems, hybridMatches, entEdges, resolved, siblings, 1)
+	capped := assembleInventoryMatches(recordID, docItems, hybridMatches, objectMatches, resolved, siblings, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.ItemID != "2_inv_9" {
 		t.Fatalf("capped I1 = %v, want [2_inv_9]", capped[0])
 	}

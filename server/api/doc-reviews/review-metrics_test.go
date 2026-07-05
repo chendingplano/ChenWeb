@@ -57,20 +57,24 @@ func TestAssembleMatches_Branches_DedupExclusionCap(t *testing.T) {
 	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
 		0: {
 			{ArtifactID: "2_m_9", RecordID: 2, RRFScore: 0.9},
-			// Also reached via the entity branch below -> must dedup.
+			// Also reached via the object-anchor branch below -> must dedup.
 			{ArtifactID: "3_m_7", RecordID: 3, RRFScore: 0.2},
 			// Same-document hit -> excluded by add().
 			{ArtifactID: "1_m_5", RecordID: recordID, RRFScore: 0.5},
 		},
 	}
-	entEdges := []docprocessing.Connection{
-		// Branch C: entity -> metric 3_m_7 (shares "pressure" with M1).
-		{TargetID: "3_m_7", Confidence: 0.3},
-	}
 	resolved := map[string]resolvedMetric{
 		"2_m_9": {view: metricView{MetricID: "2_m_9", Categories: []string{"pressure"}}, recordID: 2},
 		"3_m_7": {view: metricView{MetricID: "3_m_7", Categories: []string{"pressure"}}, recordID: 3},
 		"1_m_5": {view: metricView{MetricID: "1_m_5"}, recordID: recordID}, // same doc
+	}
+	objectMatches := map[int][]resolvedMetric{
+		0: {
+			// Branch C: object-anchor -> metric 3_m_7 for M1.
+			{view: metricView{MetricID: "3_m_7", Categories: []string{"pressure"}}, recordID: 3},
+			// Same-document object peer -> excluded by add().
+			{view: metricView{MetricID: "1_m_5"}, recordID: recordID},
+		},
 	}
 	siblings := []resolvedMetric{
 		// Branch B: cross-doc metric sharing "temp" with M2.
@@ -78,7 +82,7 @@ func TestAssembleMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// No cap first: verify branch coverage + dedup + exclusion.
-	got := assembleMatches(recordID, docMetrics, hybridMatches, entEdges, resolved, siblings, 0)
+	got := assembleMatches(recordID, docMetrics, hybridMatches, objectMatches, resolved, siblings, 0)
 
 	// M1 (index 0): 2_m_9 (A) and 3_m_7 (A+C deduped) = 2 matches; 1_m_5 excluded.
 	if len(got[0]) != 2 {
@@ -101,7 +105,7 @@ func TestAssembleMatches_Branches_DedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: M1 keeps only the highest-confidence match (2_m_9 @0.9).
-	capped := assembleMatches(recordID, docMetrics, hybridMatches, entEdges, resolved, siblings, 1)
+	capped := assembleMatches(recordID, docMetrics, hybridMatches, objectMatches, resolved, siblings, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.MetricID != "2_m_9" {
 		t.Fatalf("capped M1 = %v, want [2_m_9]", capped[0])
 	}

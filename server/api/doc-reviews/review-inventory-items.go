@@ -22,7 +22,7 @@ import (
 // docprocessing.FindSimilarArtifactsOnTheFly (Branch A) rather than from precomputed
 // hybrid_search/semantically_related edges — on-the-fly search is always fresh and needs
 // no inbound/outbound edge bookkeeping. Branch B adds items sharing an item_category
-// corpus-wide; Branch C adds entity->inventory_item edges attached by shared category.
+// corpus-wide; Branch C adds object-anchored items retrieved before the LLM/tool loop.
 //
 // It uses ReviewStrategy StrategyDocument and Input="artifact", so the prompt-cache
 // scheduler routes it to runReviewersLegacy, which calls ReviewDocument directly.
@@ -74,7 +74,7 @@ type matchedInventoryItem struct {
 	filename   string
 	title      string // source document title (authority classification, AR5 §3)
 	docNo      string // source document number from kb.inputs.doc_metadata
-	via        string // "hybrid_search" | "item_category" | "entity"
+	via        string // "hybrid_search" | "item_category" | "object_anchor"
 	confidence float64
 	context    []map[string]any
 }
@@ -293,8 +293,6 @@ func (r *inventoryItemsReviewer) buildMatches(
 		}
 	}
 
-	store := &docprocessing.ConnectionSQLStore{DB: r.db}
-
 	// Branch A: semantically-similar items discovered LIVE (no materialized edges). A single
 	// hybrid search per doc item finds close items regardless of when the other document was
 	// indexed, so no inbound/outbound edge bookkeeping is needed.
@@ -312,8 +310,11 @@ func (r *inventoryItemsReviewer) buildMatches(
 		}
 	}
 
-	// Branch C: entity -> inventory_item edges (any relation method).
-	entEdges, err := store.LoadConnectionsBySource(ctx, recordID, "entity", "", "inventory_item")
+	artifactIDs := make([]string, len(docItems))
+	for i, di := range docItems {
+		artifactIDs[i] = di.view.ItemID
+	}
+	objectPeerIDs, err := loadObjectAnchoredPeerIDs(ctx, r.db, recordID, "inventory_item", artifactIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -327,9 +328,11 @@ func (r *inventoryItemsReviewer) buildMatches(
 			}
 		}
 	}
-	for _, e := range entEdges {
-		if e.TargetID != "" {
-			idSet[e.TargetID] = struct{}{}
+	for _, ids := range objectPeerIDs {
+		for _, id := range ids {
+			if id != "" {
+				idSet[id] = struct{}{}
+			}
 		}
 	}
 	resolved, err := r.loadItemsByItemID(ctx, idSet)
@@ -348,7 +351,16 @@ func (r *inventoryItemsReviewer) buildMatches(
 		}
 	}
 
-	return assembleInventoryMatches(recordID, docItems, hybridMatches, entEdges, resolved, siblings, r.maxMatches), nil
+	objectMatches := make(map[int][]resolvedInventoryItem, len(objectPeerIDs))
+	for docIdx, ids := range objectPeerIDs {
+		for _, id := range ids {
+			if ri, ok := resolved[id]; ok {
+				objectMatches[docIdx] = append(objectMatches[docIdx], ri)
+			}
+		}
+	}
+
+	return assembleInventoryMatches(recordID, docItems, hybridMatches, objectMatches, resolved, siblings, r.maxMatches), nil
 }
 
 // assembleInventoryMatches is the pure (DB-free) match-assembly used by buildMatches. It
@@ -357,7 +369,7 @@ func assembleInventoryMatches(
 	recordID int64,
 	docItems []docInventoryItem,
 	hybridMatches map[int][]docprocessing.OnTheFlySemanticMatch,
-	entEdges []docprocessing.Connection,
+	objectMatches map[int][]resolvedInventoryItem,
 	resolved map[string]resolvedInventoryItem,
 	siblings []resolvedInventoryItem,
 	maxMatches int,
@@ -410,27 +422,10 @@ func assembleInventoryMatches(
 		}
 	}
 
-	// Branch C: entity-connected items, attached to doc items that share a category.
-	for _, e := range entEdges {
-		tm, ok := resolved[e.TargetID]
-		if !ok {
-			continue
-		}
-		tmCats := make(map[string]struct{}, len(tm.view.Categories))
-		for _, c := range tm.view.Categories {
-			tmCats[strings.TrimSpace(c)] = struct{}{}
-		}
-		for i, di := range docItems {
-			shared := false
-			for _, c := range di.view.Categories {
-				if _, ok := tmCats[strings.TrimSpace(c)]; ok {
-					shared = true
-					break
-				}
-			}
-			if shared {
-				add(i, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "entity", confidence: e.Confidence})
-			}
+	// Branch C: object-anchored items, keyed directly by the inventory-item-under-review index.
+	for docIdx, peers := range objectMatches {
+		for _, tm := range peers {
+			add(docIdx, matchedInventoryItem{view: tm.view, recordID: tm.recordID, filename: tm.filename, title: tm.title, docNo: tm.docNo, via: "object_anchor"})
 		}
 	}
 
