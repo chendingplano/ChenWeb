@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 // Helper to build a finding with defaults.
@@ -206,6 +208,31 @@ func TestSourceContextsFromSpansUsesSourceStyleContext(t *testing.T) {
 	}
 	if got[0].After != "87: line text\n88: line text" {
 		t.Fatalf("after=%q", got[0].After)
+	}
+}
+
+func TestLoadRelatedArtifactSpansUsesProvisionTable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("FROM kb.provisions").
+		WithArgs(int64(415), "415_prv_35").
+		WillReturnRows(sqlmock.NewRows([]string{"source_line_spans"}).
+			AddRow([]byte(`["120:124"]`)))
+
+	gen := &DocReviewReportGenerator{DB: db}
+	got, err := gen.loadRelatedArtifactSpans(context.Background(), 415, "415_prv_35")
+	if err != nil {
+		t.Fatalf("loadRelatedArtifactSpans err = %v", err)
+	}
+	if strings.Join(got, ",") != "120:124" {
+		t.Fatalf("spans = %v, want [120:124]", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock: %v", err)
 	}
 }
 

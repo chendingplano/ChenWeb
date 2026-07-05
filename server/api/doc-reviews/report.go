@@ -570,9 +570,9 @@ func (g *DocReviewReportGenerator) buildRelatedSources(ctx context.Context, f Fi
 	if g.DB == nil || f.RelatedRecordID == 0 || strings.TrimSpace(f.RelatedArtifactID) == "" {
 		return nil
 	}
-	spans, err := g.loadRelatedMetricSpans(ctx, f.RelatedRecordID, f.RelatedArtifactID)
+	spans, err := g.loadRelatedArtifactSpans(ctx, f.RelatedRecordID, f.RelatedArtifactID)
 	if err != nil {
-		typstLogger.Warn("buildRelatedSources: load related metric spans",
+		typstLogger.Warn("buildRelatedSources: load related artifact spans",
 			"finding_id", f.ID, "related_record_id", f.RelatedRecordID,
 			"related_artifact_id", f.RelatedArtifactID, "error", err)
 		return nil
@@ -583,6 +583,33 @@ func (g *DocReviewReportGenerator) buildRelatedSources(ctx context.Context, f Fi
 	return sourceContextsFromSpans(g.loadDocLines(ctx, f.RelatedRecordID), spans, artifactSourceContextRadius)
 }
 
+func (g *DocReviewReportGenerator) loadRelatedArtifactSpans(ctx context.Context, recordID int64, artifactID string) ([]string, error) {
+	switch relatedArtifactFamily(artifactID) {
+	case "metric":
+		return g.loadRelatedMetricSpans(ctx, recordID, artifactID)
+	case "provision":
+		return g.loadRelatedProvisionSpans(ctx, recordID, artifactID)
+	case "inventory_item":
+		return g.loadRelatedInventoryItemSpans(ctx, recordID, artifactID)
+	default:
+		return g.loadRelatedSearchArtifactSpans(ctx, recordID, artifactID)
+	}
+}
+
+func relatedArtifactFamily(artifactID string) string {
+	id := strings.TrimSpace(artifactID)
+	switch {
+	case strings.Contains(id, "_prv_"):
+		return "provision"
+	case strings.Contains(id, "_inv_"):
+		return "inventory_item"
+	case strings.Contains(id, "_m_"), strings.Contains(id, "_mtc_"):
+		return "metric"
+	default:
+		return ""
+	}
+}
+
 func (g *DocReviewReportGenerator) loadRelatedMetricSpans(ctx context.Context, recordID int64, metricID string) ([]string, error) {
 	var raw []byte
 	err := g.DB.QueryRowContext(ctx, `
@@ -590,6 +617,45 @@ func (g *DocReviewReportGenerator) loadRelatedMetricSpans(ctx context.Context, r
 		FROM kb.metrics
 		WHERE input_record_id = $1 AND metric_id = $2
 		LIMIT 1`, recordID, metricID).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return parseJSONStringArray(raw), nil
+}
+
+func (g *DocReviewReportGenerator) loadRelatedProvisionSpans(ctx context.Context, recordID int64, provID string) ([]string, error) {
+	var raw []byte
+	err := g.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(source_line_spans, '[]'::jsonb)
+		FROM kb.provisions
+		WHERE input_record_id = $1 AND prov_id = $2
+		LIMIT 1`, recordID, provID).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return parseJSONStringArray(raw), nil
+}
+
+func (g *DocReviewReportGenerator) loadRelatedInventoryItemSpans(ctx context.Context, recordID int64, itemID string) ([]string, error) {
+	var raw []byte
+	err := g.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(source_line_spans, '[]'::jsonb)
+		FROM kb.inventory_items
+		WHERE input_record_id = $1 AND inventory_item_id = $2
+		LIMIT 1`, recordID, itemID).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return parseJSONStringArray(raw), nil
+}
+
+func (g *DocReviewReportGenerator) loadRelatedSearchArtifactSpans(ctx context.Context, recordID int64, artifactID string) ([]string, error) {
+	var raw []byte
+	err := g.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(source_line_spans, '[]'::jsonb)
+		FROM kb.search_artifacts
+		WHERE input_record_id = $1 AND artifact_id = $2
+		LIMIT 1`, recordID, artifactID).Scan(&raw)
 	if err != nil {
 		return nil, err
 	}
