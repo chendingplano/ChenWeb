@@ -750,6 +750,9 @@ func TestController_GetRequest(t *testing.T) {
 	if req.Status != "accepted" {
 		t.Errorf("req.Status = %q, want %q", req.Status, "accepted")
 	}
+	if req.RunStatus != "pending" {
+		t.Errorf("req.RunStatus = %q, want %q", req.RunStatus, "pending")
+	}
 	if req.InputRecordID != recordID {
 		t.Errorf("req.InputRecordID = %d, want %d", req.InputRecordID, recordID)
 	}
@@ -834,5 +837,66 @@ func TestController_GetRequestWithFindings(t *testing.T) {
 	}
 	if rwf.Findings[0].ReviewStatus != "pending" {
 		t.Errorf("Finding review_status = %q, want %q", rwf.Findings[0].ReviewStatus, "pending")
+	}
+}
+
+func TestController_GetRequestWithFindings_UsesRunStatusForHistoricalRun(t *testing.T) {
+	db := connectTestDB(t)
+	defer db.Close()
+	ensureTables(t, db)
+
+	c := &DocReviewController{DB: db}
+	ctx := context.Background()
+
+	recordID := insertTestInput(t, db, "Test Historical Run Findings Doc")
+	defer cleanupInputs(t, db, recordID)
+
+	result, err := c.AcceptRequest(ctx, SubmitRequestInput{
+		InputRecordID: recordID,
+		Tier:          "must_review",
+		RequesterName: "test-user",
+	})
+	if err != nil {
+		t.Fatalf("AcceptRequest: %v", err)
+	}
+	defer cleanupRequests(t, db, result.RequestID)
+
+	if _, err := db.ExecContext(ctx,
+		`UPDATE kb.doc_review_requests SET status = 'accepted' WHERE id = $1`,
+		result.RequestID,
+	); err != nil {
+		t.Fatalf("reset request to accepted: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE kb.doc_review_runs SET status = 'completed', end_time = NOW() WHERE id = $1`,
+		result.RunID,
+	); err != nil {
+		t.Fatalf("update run to completed: %v", err)
+	}
+
+	findingID := insertTestFinding(t, db, recordID, result.RunID, FindingItem{
+		Pass:         "P1",
+		Aspect:       "grammar_spelling",
+		Severity:     "low",
+		FindingType:  "typo",
+		Title:        "Historical typo",
+		Description:  "Found in historical run",
+		Confidence:   0.95,
+		ReviewStatus: "pending",
+	})
+	defer cleanupFindings(t, db, findingID)
+
+	rwf, err := c.GetRequestWithFindings(ctx, result.RequestID, RequestFindingsOptions{RunID: result.RunID})
+	if err != nil {
+		t.Fatalf("GetRequestWithFindings: %v", err)
+	}
+	if rwf.Request.Status != "accepted" {
+		t.Fatalf("request status = %q, want accepted", rwf.Request.Status)
+	}
+	if rwf.Request.RunStatus != "completed" {
+		t.Fatalf("run status = %q, want completed", rwf.Request.RunStatus)
+	}
+	if len(rwf.Findings) != 1 {
+		t.Fatalf("Findings has %d entries, want 1", len(rwf.Findings))
 	}
 }

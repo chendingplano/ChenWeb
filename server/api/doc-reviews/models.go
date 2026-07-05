@@ -41,6 +41,7 @@ type RequestStatus struct {
 	ReportTemplate string                   `json:"report_template,omitempty"`
 	DocTemplate    string                   `json:"doc_template,omitempty"`
 	Status         string                   `json:"status"`
+	RunStatus      string                   `json:"run_status,omitempty"`
 	CreateTime     string                   `json:"create_time"`
 	StartTime      string                   `json:"start_time,omitempty"`    // from latest run
 	EndTime        string                   `json:"end_time,omitempty"`      // from latest run

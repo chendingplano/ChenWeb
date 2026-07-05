@@ -237,6 +237,7 @@
     // async run completes (DR15).
     let resolvedReportId = $derived(currentReportId || request?.report_id || 0);
     let linkReportId = $derived(resolvedReportId || requestId);
+    let viewStatus = $derived(request?.run_status || request?.status || '');
 
     // Polling
     let pollTimer: ReturnType<typeof setTimeout>;
@@ -254,11 +255,11 @@
             if (request?.latest_run_id) currentRunId = request.latest_run_id;
             if (request?.report_id) currentReportId = request.report_id;
 
-            if (request.status === 'completed' || request.status === 'failed' || request.status === 'stopped') {
+            if (viewStatus === 'completed' || viewStatus === 'failed' || viewStatus === 'stopped') {
                 isActive = false;
                 stopPolling();
                 const rid = currentReportId || request.report_id;
-                if (request.status === 'completed' && rid) {
+                if (viewStatus === 'completed' && rid) {
                     try {
                         const res = await fetch(`/api/v1/doc-review/reports/${rid}`, { credentials: 'same-origin' });
                         const data = await res.json();
@@ -342,6 +343,7 @@
             request = {
                 ...request,
                 status: 'accepted',
+                run_status: 'pending',
                 latest_run_id: restarted.runId,
                 report_id: 0,
                 start_time: undefined,
@@ -391,8 +393,8 @@
                 style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">← Back</button>
             <span style="color: {textMuted}; font-size: 0.85rem;">{docTitle || `Document #${request.input_record_id}`}</span>
             <span style="color: {textMuted}; font-size: 0.8rem; padding: 0.15rem 0.5rem; border: 1px solid {borderColor}; border-radius: 5px; font-family: monospace;">Request #{requestId}</span>
-            <span style="margin-left: auto; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px; background: {accentTint}; color: {accent}; text-transform: capitalize;">{request.status}</span>
-            {#if request.status === 'accepted' || request.status === 'running'}
+            <span style="margin-left: auto; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px; background: {accentTint}; color: {accent}; text-transform: capitalize;">{viewStatus}</span>
+            {#if viewStatus === 'accepted' || viewStatus === 'pending' || viewStatus === 'running'}
                 <button onclick={handleStop} disabled={isStopping}
                     style="padding: 0.4rem 0.9rem; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; cursor: pointer; font-size: 0.85rem;">{isStopping ? 'Stopping…' : 'Stop'}</button>
             {/if}
@@ -405,20 +407,20 @@
         {/if}
 
 
-    {#if request.status === 'accepted' || request.status === 'running'}
+    {#if viewStatus === 'accepted' || viewStatus === 'pending' || viewStatus === 'running'}
         <!-- Running: the Active Reviews monitor on the form conveys live progress -->
         <div style="display: flex; align-items: center; gap: 0.5rem; color: {textSecondary}; font-size: 0.9rem; padding: 1.5rem 0.25rem;">
             <LoaderIcon size={18} style="animation: spin 1s linear infinite; color: {accent};" />
             Reviewing the document… findings will appear here as soon as the job completes.
         </div>
-    {:else if request.status === 'failed'}
+    {:else if viewStatus === 'failed'}
         <!-- Failed State -->
         <div style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 12px; padding: 2rem; text-align: center;">
             <AlertCircleIcon size={48} style="color: #ef4444; margin-bottom: 1rem;" />
             <h2 style="color: {textPrimary}; font-size: 1.25rem; margin-bottom: 0.5rem;">Review Failed</h2>
             <p style="color: {textSecondary}; margin-bottom: 0.5rem;">{request.error_message}</p>
         </div>
-    {:else if request.status === 'stopped'}
+    {:else if viewStatus === 'stopped'}
         <!-- Stopped State -->
         <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 12px; padding: 2rem; text-align: center;">
             <XIcon size={48} style="color: #f59e0b; margin-bottom: 1rem;" />

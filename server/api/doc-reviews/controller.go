@@ -309,7 +309,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 	}
 
 	// Only return findings if completed.
-	if req.Status == "completed" && req.LatestRunID > 0 {
+	if effectiveRequestRunStatus(req) == "completed" && req.LatestRunID > 0 {
 		rows, err := c.DB.QueryContext(ctx, `
 			SELECT id, pass, aspect, severity, finding_type, title, description,
 			       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
@@ -350,6 +350,16 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 		result.Findings = localized
 	}
 	return result, nil
+}
+
+func effectiveRequestRunStatus(req *RequestStatus) string {
+	if req == nil {
+		return ""
+	}
+	if strings.TrimSpace(req.RunStatus) != "" {
+		return req.RunStatus
+	}
+	return req.Status
 }
 
 // StopRequest transitions an accepted or running request to stopped.
@@ -591,7 +601,7 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64, selecte
 		req.LatestRunID = latestRunID.Int64
 	}
 	if runStatus.Valid && runStatus.String != "" {
-		req.Status = runStatus.String
+		req.RunStatus = runStatus.String
 	}
 	req.Notes = notes.String
 	req.ReportTemplate = reportTmpl.String

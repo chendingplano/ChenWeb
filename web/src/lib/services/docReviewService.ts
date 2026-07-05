@@ -58,6 +58,7 @@ export type RequestStatus = {
 	requester_name: string;
 	requester_id: number;
 	status: string;
+	run_status?: string;
 	create_time: string;
 	start_time?: string;
 	end_time?: string;
