@@ -12,7 +12,6 @@ import (
 
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/deepdoc/server/api/docactivity"
-	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
@@ -205,7 +204,7 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 	}
 	inputStore := docprocessing.DocMetadataSQLStore{DB: c.DB}
 	entityStore := docprocessing.EntityRelationSQLStore{DB: c.DB}
-	findingsStore := ReviewFindingsSQLStore{DB: c.DB, Languages: appconfig.GetLanguages()}
+	findingsStore := ReviewFindingsSQLStore{DB: c.DB, Languages: docReviewReportLanguagesFromEnv()}
 	reviewLogsStore := ReviewLogsSQLStore{DB: c.DB}
 	statusStore := ReviewStatusSQLStore{DB: c.DB}
 

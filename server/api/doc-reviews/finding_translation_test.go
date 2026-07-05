@@ -17,9 +17,10 @@ import (
 )
 
 type fakeFindingTranslator struct {
-	normalizeCalls int
-	normalizeOut   FindingNormalization
-	normalizeErr   error
+	normalizeCalls           int
+	normalizeOut             FindingNormalization
+	normalizeErr             error
+	normalizeTargetLanguages []string
 
 	translateCalls []string
 	translateOut   map[string]FindingLocalizedContent
@@ -28,6 +29,7 @@ type fakeFindingTranslator struct {
 
 func (f *fakeFindingTranslator) NormalizeFinding(ctx context.Context, canonicalLanguage string, targetLanguages []string, finding FindingItem) (FindingNormalization, error) {
 	f.normalizeCalls++
+	f.normalizeTargetLanguages = append([]string(nil), targetLanguages...)
 	return f.normalizeOut, f.normalizeErr
 }
 
@@ -583,6 +585,71 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestSaveFindingsUsesReportLanguageEnvWhenLanguagesUnset(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  string
+	}{
+		{name: "json string", env: `"zh"`},
+		{name: "json array", env: `["en","zh"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DOC_REVIEW_TRANSLATION", "auto")
+			t.Setenv("DOC_REVIEW_REPORT_LANGUAGE", tc.env)
+
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New: %v", err)
+			}
+			defer db.Close()
+
+			translator := &fakeFindingTranslator{
+				normalizeOut: FindingNormalization{
+					SourceLanguage:    "en",
+					CanonicalLanguage: "en",
+					CanonicalOrigin:   "original",
+					Canonical: FindingLocalizedContent{
+						Title:       "Canonical title",
+						Description: "Canonical description.",
+						Suggestion:  "Canonical suggestion.",
+					},
+				},
+				translateOut: map[string]FindingLocalizedContent{
+					"zh": {Title: "中文标题", Description: "中文描述。", Suggestion: "中文建议。"},
+				},
+			}
+			store := ReviewFindingsSQLStore{DB: db, Translator: translator}
+
+			mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
+    (input_record_id, run_id, pass, aspect, severity, finding_type,
+     title, description, evidence, location, suggestion, confidence, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
+				WithArgs(
+					int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
+					"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(),
+				).
+				WillReturnResult(sqlmock.NewResult(1, 1))
+
+			_, err = store.SaveFindings(context.Background(), 100, 200, []ReviewFinding{{
+				Pass: "P1", Aspect: "grammar_spelling", Severity: "medium", FindingType: "grammar",
+				Title: "Original title", Description: "Original description.", Suggestion: "Original suggestion.", Confidence: 0.9,
+			}})
+			if err != nil {
+				t.Fatalf("SaveFindings: %v", err)
+			}
+			if len(translator.normalizeTargetLanguages) != 1 || translator.normalizeTargetLanguages[0] != "zh" {
+				t.Fatalf("normalize target languages=%v, want [zh]", translator.normalizeTargetLanguages)
+			}
+			if len(translator.translateCalls) != 1 || translator.translateCalls[0] != "zh" {
+				t.Fatalf("translateCalls=%v, want [zh]", translator.translateCalls)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("sql expectations: %v", err)
+			}
+		})
 	}
 }
 

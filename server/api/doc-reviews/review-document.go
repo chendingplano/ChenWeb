@@ -215,8 +215,12 @@ INSERT INTO kb.doc_review_findings
      title, description, evidence, location, suggestion, confidence, metadata)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 
+	languages := s.Languages
+	if len(languages) == 0 {
+		languages = docReviewReportLanguagesFromEnv()
+	}
 	preparedFindings, err := runConcurrent(ctx, maxDocReviewerTasks(len(findings)), len(findings), func(workerCtx context.Context, i int) (preparedFindingForStorage, error) {
-		prepared, err := prepareFindingForStorage(workerCtx, s.Translator, s.Languages, findings[i])
+		prepared, err := prepareFindingForStorage(workerCtx, s.Translator, languages, findings[i])
 		if err != nil {
 			return preparedFindingForStorage{}, fmt.Errorf("prepare review finding for storage: %w", err)
 		}

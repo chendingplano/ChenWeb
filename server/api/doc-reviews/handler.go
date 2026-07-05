@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
 	"github.com/labstack/echo/v4"
 )
@@ -32,7 +31,7 @@ func HandleListTiers(c echo.Context) error {
 
 // HandleListLanguages returns the configured report display languages.
 func HandleListLanguages(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]any{"status": true, "languages": appconfig.GetLanguages()})
+	return c.JSON(http.StatusOK, map[string]any{"status": true, "languages": docReviewReportLanguagesFromEnv()})
 }
 
 // SubmitRequest accepts a review request and publishes a JetStream event so
