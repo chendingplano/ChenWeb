@@ -388,9 +388,9 @@ func GenerateCorrectionReport(c echo.Context) error {
 	})
 }
 
-// RestartRequest re-runs a review that was left unfinished (e.g. the backend was
-// killed mid-run). It resets the request state and re-triggers the review via
-// JetStream, falling back to an inline goroutine — mirroring SubmitRequest.
+// RestartRequest re-runs an existing review request from scratch. It resets the
+// latest run state and re-triggers the review via JetStream, falling back to an
+// inline goroutine — mirroring SubmitRequest.
 func RestartRequest(c echo.Context) error {
 	id, err := parseID(c, "id")
 	if err != nil {

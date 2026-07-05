@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { getRequest, updateFinding, stopRequest } from '$lib/services/docReviewService';
+    import { getRequest, restartRequest, updateFinding, stopRequest } from '$lib/services/docReviewService';
     import type { RequestStatus, FindingItem, AspectStatus, ReviewPackageInfo } from '$lib/services/docReviewService';
     import LoaderIcon from '@lucide/svelte/icons/loader';
     import XIcon from '@lucide/svelte/icons/x';
@@ -46,6 +46,10 @@
     let mdModalOpen = $state(false);
     let mdModalHtml = $state('');
     let mdModalLoading = $state(false);
+
+    // Rerun dialog state
+    let rerunDialogOpen = $state(false);
+    let isRerunning = $state(false);
 
     async function openJsonModal() {
         jsonModalOpen = true;
@@ -247,6 +251,7 @@
 
             if (request.status === 'completed' || request.status === 'failed' || request.status === 'stopped') {
                 isActive = false;
+                stopPolling();
                 const rid = reportId || request.report_id;
                 if (request.status === 'completed' && rid) {
                     try {
@@ -261,19 +266,31 @@
         } catch (e: any) {
             error = e.message;
             isActive = false;
+            stopPolling();
         }
     }
 
-    let intervalId: ReturnType<typeof setInterval>;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    function startPolling() {
+        clearInterval(intervalId);
+        intervalId = setInterval(pollStatus, 3000);
+    }
+
+    function stopPolling() {
+        clearInterval(intervalId);
+        intervalId = undefined;
+    }
+
     onMount(async () => {
         await pollStatus();
         if (isActive) {
-            intervalId = setInterval(pollStatus, 3000);
+            startPolling();
         }
     });
 
     onDestroy(() => {
-        clearInterval(intervalId);
+        stopPolling();
     });
 
     async function handleAcceptReject(findingId: number, status: string) {
@@ -294,6 +311,49 @@
             error = e.message;
         }
         isStopping = false;
+    }
+
+    function openRerunDialog() {
+        rerunDialogOpen = true;
+    }
+
+    function closeRerunDialog() {
+        if (isRerunning) return;
+        rerunDialogOpen = false;
+    }
+
+    async function confirmRerun() {
+        if (!request || isRerunning) return;
+        isRerunning = true;
+        error = '';
+        try {
+            await restartRequest(requestId);
+            rerunDialogOpen = false;
+            stopPolling();
+            isActive = true;
+            activeTab = 'findings';
+            request = {
+                ...request,
+                status: 'accepted',
+                start_time: undefined,
+                end_time: undefined,
+                error_message: undefined,
+            };
+            findings = [];
+            aspectStatuses = [];
+            packages = [];
+            reportData = null;
+            pdfMenuOpen = false;
+            jsonModalOpen = false;
+            mdModalOpen = false;
+            await pollStatus();
+            if (isActive) {
+                startPolling();
+            }
+        } catch (e: any) {
+            error = e.message;
+        }
+        isRerunning = false;
     }
 
     function toggleFinding(id: number) {
@@ -328,6 +388,12 @@
                     style="padding: 0.4rem 0.9rem; background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; cursor: pointer; font-size: 0.85rem;">{isStopping ? 'Stopping…' : 'Stop'}</button>
             {/if}
         </div>
+
+        {#if error}
+            <div style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); border-radius: 10px; color: #fca5a5; font-size: 0.9rem;">
+                {error}
+            </div>
+        {/if}
 
 
     {#if request.status === 'accepted' || request.status === 'running'}
@@ -516,6 +582,8 @@
                 style="padding: 0.4rem 1rem; background: {activeTab === 'findings' ? accentTint : 'transparent'}; color: {activeTab === 'findings' ? accent : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Findings</button>
             <button onclick={() => activeTab = 'report'}
                 style="padding: 0.4rem 1rem; background: {activeTab === 'report' ? accentTint : 'transparent'}; color: {activeTab === 'report' ? accent : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Report</button>
+            <button onclick={openRerunDialog} disabled={isRerunning}
+                style="padding: 0.4rem 1rem; background: transparent; color: {isRerunning ? textMuted : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: {isRerunning ? 'default' : 'pointer'}; font-size: 0.85rem;">{isRerunning ? 'Rerunning…' : 'Rerun'}</button>
         </div>
 
         <!-- Findings Tab -->
@@ -690,6 +758,50 @@
             </div>
         {/if}
     {/if}
+    </div>
+{/if}
+
+{#if rerunDialogOpen && request}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+        onclick={(e) => { if (e.target === e.currentTarget) closeRerunDialog(); }}
+        onkeydown={(e) => { if (e.key === 'Escape') closeRerunDialog(); }}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        style="position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); padding: 1rem;"
+    >
+        <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 14px; width: min(100%, 720px); box-shadow: 0 24px 64px rgba(0,0,0,0.45); overflow: hidden;">
+            <div style="padding: 1.25rem 1.5rem 0.75rem;">
+                <h2 style="font-size: 1.15rem; font-weight: 700; color: {textPrimary}; margin: 0 0 0.35rem;">Review Summary</h2>
+                <p style="color: {textSecondary}; font-size: 0.9rem; margin: 0;">This will re-run the saved request with the same review setup.</p>
+            </div>
+            <div style="padding: 0.5rem 1.5rem 1.25rem;">
+                <div style="display: grid; grid-template-columns: minmax(140px, 180px) 1fr; gap: 0.65rem 1.25rem; padding: 1rem 1.1rem; background: {darkMode ? 'rgba(15,23,42,0.35)' : '#F8FAFC'}; border: 1px solid {borderColor}; border-radius: 12px;">
+                    <span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;">Document:</span>
+                    <span style="color: {textPrimary}; font-size: 0.95rem;">{docTitle || `Document #${request.input_record_id}`}</span>
+                    <span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;">Check Level:</span>
+                    <span style="color: {textPrimary}; font-size: 0.95rem;">{request.tier}</span>
+                    <span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;">Aspects:</span>
+                    <span style="color: {textPrimary}; font-size: 0.95rem;">{request.aspects.length} selected</span>
+                    <span style="color: {textSecondary}; font-size: 0.9rem; font-weight: 600;">Requester:</span>
+                    <span style="color: {textPrimary}; font-size: 0.95rem;">{request.requester_name || 'Unknown requester'}</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 0.75rem; padding: 0 1.5rem 1.5rem;">
+                <button type="button" onclick={closeRerunDialog} disabled={isRerunning}
+                    style="padding: 0.75rem 1.1rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 10px; cursor: {isRerunning ? 'default' : 'pointer'}; font-size: 0.95rem; min-width: 110px;">← Back</button>
+                <button type="button" onclick={confirmRerun} disabled={isRerunning}
+                    style="flex: 1; padding: 0.85rem 1.25rem; background: {accent}; color: #fff; border: none; border-radius: 10px; cursor: {isRerunning ? 'default' : 'pointer'}; font-size: 1rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                    {#if isRerunning}
+                        <LoaderIcon size={16} style="animation: spin 1s linear infinite;" />
+                        Rerunning...
+                    {:else}
+                        Rerun Review
+                    {/if}
+                </button>
+            </div>
+        </div>
     </div>
 {/if}
 

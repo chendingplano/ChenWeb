@@ -273,8 +273,8 @@ export async function stopRequest(id: number): Promise<void> {
 	if (!data.status) throw new Error(data.error_msg || 'Failed to stop request');
 }
 
-// Re-runs a review that was left unfinished (e.g. the backend was killed
-// mid-run). Resets the request to 'accepted' and re-triggers processing.
+// Re-runs an existing review request from scratch. Resets the latest run back
+// to an accepted/pending state and re-triggers processing.
 export async function restartRequest(id: number): Promise<void> {
 	const res = await fetch(`${BASE}/requests/${id}/restart`, {
 		method: 'POST',

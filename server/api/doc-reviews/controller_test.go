@@ -399,6 +399,150 @@ func TestController_StopRequest(t *testing.T) {
 	}
 }
 
+func TestController_RestartRequest_AllowsCompletedRequestAndClearsRunState(t *testing.T) {
+	db := connectTestDB(t)
+	defer db.Close()
+	ensureTables(t, db)
+
+	c := &DocReviewController{DB: db}
+	ctx := context.Background()
+
+	recordID := insertTestInput(t, db, "Test Restart Completed Request Doc")
+	defer cleanupInputs(t, db, recordID)
+
+	result, err := c.AcceptRequest(ctx, SubmitRequestInput{
+		InputRecordID: recordID,
+		Tier:          "must_review",
+		RequesterName: "test-user",
+	})
+	if err != nil {
+		t.Fatalf("AcceptRequest: %v", err)
+	}
+	defer cleanupRequests(t, db, result.RequestID)
+
+	findingID := insertTestFinding(t, db, recordID, result.RunID, FindingItem{
+		Pass:         "P5",
+		Aspect:       "provisions",
+		Severity:     "medium",
+		FindingType:  "issue",
+		Title:        "Stale finding",
+		Description:  "Should be cleared before rerun",
+		Confidence:   0.9,
+		ReviewStatus: "pending",
+	})
+	defer cleanupFindings(t, db, findingID)
+
+	if _, err := db.ExecContext(ctx,
+		`UPDATE kb.doc_review_requests SET status = 'completed' WHERE id = $1`,
+		result.RequestID,
+	); err != nil {
+		t.Fatalf("update request to completed: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE kb.doc_review_runs
+		 SET status = 'completed', start_time = NOW() - interval '1 minute', end_time = NOW(), error_message = 'old error'
+		 WHERE id = $1`,
+		result.RunID,
+	); err != nil {
+		t.Fatalf("update run to completed: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE kb.doc_review_status
+		 SET status = 'success', progress = 1, finding_count = 1, error_message = 'old error',
+		     start_time = NOW() - interval '1 minute', end_time = NOW()
+		 WHERE run_id = $1`,
+		result.RunID,
+	); err != nil {
+		t.Fatalf("update aspect statuses to success: %v", err)
+	}
+
+	runID, err := c.RestartRequest(ctx, result.RequestID)
+	if err != nil {
+		t.Fatalf("RestartRequest: %v", err)
+	}
+	if runID != result.RunID {
+		t.Fatalf("RestartRequest runID = %d, want %d", runID, result.RunID)
+	}
+
+	var requestStatus string
+	if err := db.QueryRowContext(ctx,
+		`SELECT status FROM kb.doc_review_requests WHERE id = $1`,
+		result.RequestID,
+	).Scan(&requestStatus); err != nil {
+		t.Fatalf("select request status: %v", err)
+	}
+	if requestStatus != "accepted" {
+		t.Errorf("request status = %q, want accepted", requestStatus)
+	}
+
+	var runStatus string
+	var runStart, runEnd sql.NullTime
+	var runError sql.NullString
+	if err := db.QueryRowContext(ctx,
+		`SELECT status, start_time, end_time, error_message FROM kb.doc_review_runs WHERE id = $1`,
+		result.RunID,
+	).Scan(&runStatus, &runStart, &runEnd, &runError); err != nil {
+		t.Fatalf("select run status: %v", err)
+	}
+	if runStatus != "pending" {
+		t.Errorf("run status = %q, want pending", runStatus)
+	}
+	if runStart.Valid {
+		t.Error("run start_time should be cleared")
+	}
+	if runEnd.Valid {
+		t.Error("run end_time should be cleared")
+	}
+	if runError.Valid && runError.String != "" {
+		t.Errorf("run error_message = %q, want empty", runError.String)
+	}
+
+	var aspectStatus string
+	var aspectProgress float64
+	var aspectFindingCount int
+	var aspectStart, aspectEnd sql.NullTime
+	var aspectError sql.NullString
+	if err := db.QueryRowContext(ctx,
+		`SELECT status, progress, finding_count, start_time, end_time, error_message
+		 FROM kb.doc_review_status
+		 WHERE run_id = $1
+		 ORDER BY id
+		 LIMIT 1`,
+		result.RunID,
+	).Scan(&aspectStatus, &aspectProgress, &aspectFindingCount, &aspectStart, &aspectEnd, &aspectError); err != nil {
+		t.Fatalf("select aspect status: %v", err)
+	}
+	if aspectStatus != "pending" {
+		t.Errorf("aspect status = %q, want pending", aspectStatus)
+	}
+	if aspectProgress != 0 {
+		t.Errorf("aspect progress = %v, want 0", aspectProgress)
+	}
+	if aspectFindingCount != 0 {
+		t.Errorf("aspect finding_count = %d, want 0", aspectFindingCount)
+	}
+	if aspectStart.Valid {
+		t.Error("aspect start_time should be cleared")
+	}
+	if aspectEnd.Valid {
+		t.Error("aspect end_time should be cleared")
+	}
+	if aspectError.Valid && aspectError.String != "" {
+		t.Errorf("aspect error_message = %q, want empty", aspectError.String)
+	}
+
+	var findingCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM kb.doc_review_findings WHERE run_id = $1`,
+		result.RunID,
+	).Scan(&findingCount); err != nil {
+		t.Fatalf("count findings: %v", err)
+	}
+	if findingCount != 0 {
+		t.Errorf("finding count = %d, want 0", findingCount)
+	}
+}
+
 func TestController_RunReview_SkipsAlreadyHandledRequests(t *testing.T) {
 	db := connectTestDB(t)
 	defer db.Close()

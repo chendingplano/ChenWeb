@@ -379,19 +379,14 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 	return nil
 }
 
-// RestartRequest re-arms an unfinished review. It resets the latest non-completed
-// run and every aspect back to pending so a fresh trigger re-runs from scratch.
+// RestartRequest re-arms an existing review request for a fresh run. It resets
+// the latest run, clears its transient execution artifacts, and moves the
+// request back to accepted so the same request can be run again from scratch.
 // Returns the run_id so the caller can re-publish the JetStream event.
 func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int64) (int64, error) {
-	req, err := c.loadRequest(ctx, requestID)
+	_, err := c.loadRequest(ctx, requestID)
 	if err != nil {
 		return 0, err
-	}
-	if req.Status == "completed" {
-		return 0, &RequestError{
-			Status:  http.StatusConflict,
-			Message: fmt.Sprintf("request %d is already completed; nothing to restart", requestID),
-		}
 	}
 
 	// Find the latest run for this request.
@@ -401,10 +396,10 @@ func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int6
 		`SELECT id, status FROM kb.doc_review_runs WHERE request_id = $1 ORDER BY id DESC LIMIT 1`,
 		requestID,
 	).Scan(&runID, &runStatus)
-	if err == sql.ErrNoRows || runStatus == "completed" {
+	if err == sql.ErrNoRows {
 		return 0, &RequestError{
 			Status:  http.StatusConflict,
-			Message: fmt.Sprintf("request %d has no restartable run", requestID),
+			Message: fmt.Sprintf("request %d has no rerunnable run", requestID),
 		}
 	}
 	if err != nil {
@@ -423,6 +418,18 @@ func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int6
 		requestID,
 	); err != nil {
 		return 0, fmt.Errorf("reset request %d to accepted: %w", requestID, err)
+	}
+	if _, err := c.DB.ExecContext(ctx,
+		`DELETE FROM kb.doc_review_findings WHERE run_id = $1`,
+		runID,
+	); err != nil {
+		return 0, fmt.Errorf("clear findings for run %d: %w", runID, err)
+	}
+	if _, err := c.DB.ExecContext(ctx,
+		`DELETE FROM kb.doc_review_logs WHERE run_id = $1`,
+		runID,
+	); err != nil {
+		return 0, fmt.Errorf("clear logs for run %d: %w", runID, err)
 	}
 	// Reset every aspect of the run back to 'pending'.
 	if _, err := c.DB.ExecContext(ctx,
