@@ -229,7 +229,7 @@ func (r *metricsReviewer) reviewMetric(
 	var cacheHitTokens, cacheMissTokens int
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
-		r.logger.Info("prompt", "promptName", cfg.PromptRef)
+		// r.logger.Info("prompt", "promptName", cfg.PromptRef)
 		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
