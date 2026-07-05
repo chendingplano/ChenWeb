@@ -76,6 +76,10 @@ type FindingItem struct {
 	Suggestion   string  `json:"suggestion,omitempty"`
 	Confidence   float64 `json:"confidence"`
 	ReviewStatus string  `json:"review_status"`
+	// RelatedArtifactID/RelatedRecordID identify a cross-document artifact
+	// referenced by this finding, when present in finding metadata.
+	RelatedArtifactID string `json:"related_artifact_id,omitempty"`
+	RelatedRecordID   int64  `json:"related_record_id,omitempty"`
 }
 
 // FindingLocalizedContent stores localized prose for one language.
@@ -199,6 +203,18 @@ func (e *FindingMetadataEnvelope) UnmarshalJSON(data []byte) error {
 		e.I18N.Translations[key] = content
 	}
 	return nil
+}
+
+func applyFindingMetadata(f *FindingItem, data []byte) {
+	if f == nil || len(data) == 0 {
+		return
+	}
+	var metadata FindingMetadataEnvelope
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return
+	}
+	f.RelatedArtifactID = metadata.RelatedArtifactID
+	f.RelatedRecordID = metadata.RelatedRecordID
 }
 
 // FindingNormalization is the result of converting reviewer output into a

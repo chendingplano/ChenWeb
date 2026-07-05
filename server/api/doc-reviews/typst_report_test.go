@@ -128,6 +128,7 @@ func TestBuildTypstSourceUsesDatabaseFindingID(t *testing.T) {
 					Description: "Description",
 					Suggestion:  "Suggestion",
 					Sources:     []SourceContext{{Source: "115: source line"}},
+					Related:     []SourceContext{{Before: "85: before", Source: "87: matched metric", After: "88: after"}},
 				}},
 			},
 		},
@@ -140,6 +141,9 @@ func TestBuildTypstSourceUsesDatabaseFindingID(t *testing.T) {
 	}
 	if strings.Contains(src, `id: "F-01"`) {
 		t.Fatalf("typst source used ordinal finding id instead of DB id: %s", src)
+	}
+	if !strings.Contains(src, "related-sources: (") || !strings.Contains(src, "87: matched metric") {
+		t.Fatalf("typst source missing related source block: %s", src)
 	}
 }
 

@@ -336,6 +336,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 				return nil, fmt.Errorf("scan finding: %w", err)
 			}
 			metadataByFindingID[f.ID] = []byte(metadata)
+			applyFindingMetadata(&f, []byte(metadata))
 			localized = append(localized, f)
 		}
 		if err := rows.Err(); err != nil {

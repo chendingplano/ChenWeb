@@ -96,6 +96,7 @@
 #let review-finding(
   id: "",
   sources: (),
+  related-sources: (),
   errors: [],
   explanation: [],
   correction: [],
@@ -146,6 +147,26 @@
         v(3pt)
         block(width: 100%, text(size: 9pt, explanation))
         v(8pt)
+
+        if related-sources.len() > 0 {
+          text(weight: "semibold", size: 9pt, fill: clr-muted, "Referenced Matching Metric Lines")
+          v(3pt)
+          let rel-n = related-sources.len()
+          for (i, sc) in related-sources.enumerate() {
+            if rel-n > 1 {
+              text(size: 8.5pt, weight: "semibold", fill: clr-muted,
+                "Matched Source " + str(i + 1) + " of " + str(rel-n) + ":")
+              v(2pt)
+            }
+            source-with-context(
+              before: sc.at("before", default: none),
+              source: sc.at("source", default: []),
+              after:  sc.at("after",  default: none),
+            )
+            if i < rel-n - 1 { v(6pt) }
+          }
+          v(8pt)
+        }
 
         // Recommended correction
         text(weight: "semibold", size: 9pt, fill: rgb("#15803d"), "Recommended Correction")

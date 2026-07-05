@@ -189,6 +189,37 @@ name = "Language & Style"
 	}
 }
 
+func TestSourceContextsFromSpansUsesSourceStyleContext(t *testing.T) {
+	lines := map[int]string{}
+	for i := 80; i <= 90; i++ {
+		lines[i] = "line text"
+	}
+	got := sourceContextsFromSpans(lines, []string{"85:86"}, 2)
+	if len(got) != 1 {
+		t.Fatalf("sourceContextsFromSpans len=%d, want 1", len(got))
+	}
+	if got[0].Before != "83: line text\n84: line text" {
+		t.Fatalf("before=%q", got[0].Before)
+	}
+	if got[0].Source != "85: line text\n86: line text" {
+		t.Fatalf("source=%q", got[0].Source)
+	}
+	if got[0].After != "87: line text\n88: line text" {
+		t.Fatalf("after=%q", got[0].After)
+	}
+}
+
+func TestCleanReportDescriptionRemovesInlineMatchedMetricContext(t *testing.T) {
+	in := "Main explanation. 引用的匹配指标上下文: source_line_spans: [\"87\"]; source_context: line 85..."
+	got := cleanReportDescription(in, true)
+	if got != "Main explanation." {
+		t.Fatalf("cleanReportDescription=%q", got)
+	}
+	if got := cleanReportDescription(in, false); got != in {
+		t.Fatalf("cleanReportDescription without related sources=%q", got)
+	}
+}
+
 func TestReportBuild_UsesConfiguredPackageOrderAndLabels(t *testing.T) {
 	gen := NewDocReviewReportGenerator()
 	gen.DB = nil

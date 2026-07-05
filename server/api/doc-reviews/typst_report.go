@@ -183,6 +183,7 @@ func loadReportFindingsWithMetadata(ctx context.Context, db *sql.DB, req *Reques
 			&finding.Confidence, &finding.ReviewStatus, &metadata); err != nil {
 			return nil, nil, err
 		}
+		applyFindingMetadata(&finding, []byte(metadata))
 		findings = append(findings, finding)
 		metadataByFindingID[finding.ID] = []byte(metadata)
 	}
@@ -228,6 +229,7 @@ func copyLocalizedSources(dst, src *ReportSkeleton) {
 	for i := range dst.Findings {
 		if i < len(src.Findings) {
 			dst.Findings[i].Sources = src.Findings[i].Sources
+			dst.Findings[i].Related = src.Findings[i].Related
 		}
 	}
 	for pass, dstGroup := range dst.FindingsByPass {
@@ -238,6 +240,7 @@ func copyLocalizedSources(dst, src *ReportSkeleton) {
 		for i := range dstGroup.Findings {
 			if i < len(srcGroup.Findings) {
 				dstGroup.Findings[i].Sources = srcGroup.Findings[i].Sources
+				dstGroup.Findings[i].Related = srcGroup.Findings[i].Related
 			}
 		}
 		dst.FindingsByPass[pass] = dstGroup
@@ -333,6 +336,28 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 				if len(f.Sources) > 0 {
 					fmt.Fprintf(&blockB, "\n")
 					for _, sc := range f.Sources {
+						fmt.Fprintf(&blockB, "          (\n")
+						if sc.Before != "" {
+							fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))
+						} else {
+							fmt.Fprintf(&blockB, "            before: none,\n")
+						}
+						fmt.Fprintf(&blockB, "            source: [%s],\n", typLines(sc.Source))
+						if sc.After != "" {
+							fmt.Fprintf(&blockB, "            after: [%s],\n", typLines(sc.After))
+						} else {
+							fmt.Fprintf(&blockB, "            after: none,\n")
+						}
+						fmt.Fprintf(&blockB, "          ),\n")
+					}
+					fmt.Fprintf(&blockB, "        ")
+				}
+				fmt.Fprintf(&blockB, "),\n")
+
+				fmt.Fprintf(&blockB, "        related-sources: (")
+				if len(f.Related) > 0 {
+					fmt.Fprintf(&blockB, "\n")
+					for _, sc := range f.Related {
 						fmt.Fprintf(&blockB, "          (\n")
 						if sc.Before != "" {
 							fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))

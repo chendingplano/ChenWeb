@@ -85,6 +85,7 @@ type ReportFinding struct {
 	Suggestion  string          `json:"suggestion,omitempty"`
 	Confidence  float64         `json:"confidence"`
 	Sources     []SourceContext `json:"sources,omitempty"` // source blocks with before/after context
+	Related     []SourceContext `json:"related_sources,omitempty"`
 }
 
 // ComplianceSummary captures compliance-related findings.
@@ -170,12 +171,14 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 		}
 		var rfList []ReportFinding
 		for _, f := range items {
+			related := g.buildRelatedSources(ctx, f)
 			rf := ReportFinding{
 				ID:   f.ID,
 				Pass: f.Pass, Aspect: f.Aspect, Severity: f.Severity,
-				FindingType: f.FindingType, Title: f.Title, Description: f.Description,
+				FindingType: f.FindingType, Title: f.Title, Description: cleanReportDescription(f.Description, len(related) > 0),
 				Evidence: f.Evidence, Location: f.Location, Suggestion: f.Suggestion,
 				Confidence: f.Confidence,
+				Related:    related,
 			}
 			rf.Sources = g.buildSources(lineIndex, f)
 			rfList = append(rfList, rf)
@@ -486,6 +489,27 @@ func contextLines(index map[int]string, start, end int) string {
 	return strings.Join(parts, "\n")
 }
 
+func cleanReportDescription(description string, hasRelatedSources bool) string {
+	if !hasRelatedSources {
+		return description
+	}
+	markers := []string{
+		"Referenced matching metric context",
+		"Referenced matched metric context",
+		"引用的匹配指标上下文",
+		"引用的匹配度量上下文",
+		"匹配指标上下文",
+		"source_line_spans:",
+	}
+	cut := len(description)
+	for _, marker := range markers {
+		if idx := strings.Index(description, marker); idx >= 0 && idx < cut {
+			cut = idx
+		}
+	}
+	return strings.TrimSpace(description[:cut])
+}
+
 // buildSources constructs the []SourceContext for a finding.
 // Each distinct location group becomes one SourceContext with ±5 context lines.
 func (g *DocReviewReportGenerator) buildSources(lineIndex map[int]string, f FindingItem) []SourceContext {
@@ -540,6 +564,72 @@ func (g *DocReviewReportGenerator) buildSources(lineIndex map[int]string, f Find
 		})
 	}
 	return sources
+}
+
+func (g *DocReviewReportGenerator) buildRelatedSources(ctx context.Context, f FindingItem) []SourceContext {
+	if g.DB == nil || f.RelatedRecordID == 0 || strings.TrimSpace(f.RelatedArtifactID) == "" {
+		return nil
+	}
+	spans, err := g.loadRelatedMetricSpans(ctx, f.RelatedRecordID, f.RelatedArtifactID)
+	if err != nil {
+		typstLogger.Warn("buildRelatedSources: load related metric spans",
+			"finding_id", f.ID, "related_record_id", f.RelatedRecordID,
+			"related_artifact_id", f.RelatedArtifactID, "error", err)
+		return nil
+	}
+	if len(spans) == 0 {
+		return nil
+	}
+	return sourceContextsFromSpans(g.loadDocLines(ctx, f.RelatedRecordID), spans, matchedMetricContextRadius)
+}
+
+func (g *DocReviewReportGenerator) loadRelatedMetricSpans(ctx context.Context, recordID int64, metricID string) ([]string, error) {
+	var raw []byte
+	err := g.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(source_line_spans, '[]'::jsonb)
+		FROM kb.metrics
+		WHERE input_record_id = $1 AND metric_id = $2
+		LIMIT 1`, recordID, metricID).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return parseJSONStringArray(raw), nil
+}
+
+func sourceContextsFromSpans(lineIndex map[int]string, spans []string, radius int) []SourceContext {
+	if len(lineIndex) == 0 || len(spans) == 0 {
+		return nil
+	}
+	var parsed [][2]int
+	for _, span := range spans {
+		start, end := parseArtifactSpan(span)
+		if start > 0 && end >= start {
+			parsed = append(parsed, [2]int{start, end})
+		}
+	}
+	if len(parsed) == 0 {
+		return nil
+	}
+	sort.Slice(parsed, func(i, j int) bool { return parsed[i][0] < parsed[j][0] })
+
+	var out []SourceContext
+	for _, span := range parsed {
+		var srcLines []string
+		for n := span[0]; n <= span[1]; n++ {
+			if content, ok := lineIndex[n]; ok {
+				srcLines = append(srcLines, fmt.Sprintf("%d: %s", n, content))
+			}
+		}
+		if len(srcLines) == 0 {
+			continue
+		}
+		out = append(out, SourceContext{
+			Before: contextLines(lineIndex, span[0]-radius, span[0]-1),
+			Source: strings.Join(srcLines, "\n"),
+			After:  contextLines(lineIndex, span[1]+1, span[1]+radius),
+		})
+	}
+	return out
 }
 
 // renderMarkdown renders the report as Markdown.
