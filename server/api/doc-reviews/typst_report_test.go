@@ -107,6 +107,42 @@ func TestTypstReportCompilesWithDelimiterHeavyContent(t *testing.T) {
 	}
 }
 
+func TestBuildTypstSourceUsesDatabaseFindingID(t *testing.T) {
+	req := &RequestStatus{RequesterName: "Reviewer"}
+	skeleton := &ReportSkeleton{
+		Meta: ReportMeta{
+			ReportID:      "rpt_88",
+			DocumentTitle: "Document title",
+			GeneratedAt:   "2026-07-04T12:05:00Z",
+		},
+		FindingsByPass: map[string]PassGroup{
+			"P5": {
+				Label: "Technical & Compliance",
+				Findings: []ReportFinding{{
+					ID:          42,
+					Pass:        "P5",
+					Aspect:      "metrics",
+					Severity:    "high",
+					FindingType: "issue",
+					Title:       "Conflict",
+					Description: "Description",
+					Suggestion:  "Suggestion",
+					Sources:     []SourceContext{{Source: "115: source line"}},
+				}},
+			},
+		},
+		PassOrder: []string{"P5"},
+	}
+
+	src := buildTypstSource(skeleton, req, "en", "/tmp/template.typ")
+	if !strings.Contains(src, `id: "42"`) {
+		t.Fatalf("typst source missing DB finding id: %s", src)
+	}
+	if strings.Contains(src, `id: "F-01"`) {
+		t.Fatalf("typst source used ordinal finding id instead of DB id: %s", src)
+	}
+}
+
 func TestBuildTypstVariantsUsesLocalizedMetadata(t *testing.T) {
 	t.Setenv("DOC_REVIEW_REPORT_LANGUAGE", `["en","zh"]`)
 	db, mock, err := sqlmock.New()

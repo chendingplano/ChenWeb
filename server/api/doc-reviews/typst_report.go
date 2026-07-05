@@ -319,7 +319,10 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 
 			for _, f := range af {
 				findingIdx++
-				fid := fmt.Sprintf("F-%02d", findingIdx)
+				fid := fmt.Sprintf("%d", f.ID)
+				if f.ID == 0 {
+					fid = fmt.Sprintf("F-%02d", findingIdx)
+				}
 
 				var blockB strings.Builder
 				fmt.Fprintf(&blockB, "      review-finding(\n")

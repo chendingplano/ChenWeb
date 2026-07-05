@@ -73,6 +73,7 @@ type SourceContext struct {
 
 // ReportFinding is a single finding within a report.
 type ReportFinding struct {
+	ID          int64           `json:"id,omitempty"`
 	Pass        string          `json:"pass"`
 	Aspect      string          `json:"aspect"`
 	Severity    string          `json:"severity"`
@@ -170,6 +171,7 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 		var rfList []ReportFinding
 		for _, f := range items {
 			rf := ReportFinding{
+				ID:   f.ID,
 				Pass: f.Pass, Aspect: f.Aspect, Severity: f.Severity,
 				FindingType: f.FindingType, Title: f.Title, Description: f.Description,
 				Evidence: f.Evidence, Location: f.Location, Suggestion: f.Suggestion,

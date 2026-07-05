@@ -112,7 +112,8 @@
         width: 100%,
         fill: clr-secondary,
         inset: (x: 10pt, y: 6pt),
-        text(weight: "bold", fill: white, size: 9.5pt, "Finding " + id),
+        text(weight: "bold", fill: white, size: 9.5pt,
+          if id.starts-with("F-") { "Finding " + id } else { "Finding-" + id }),
       )
       pad(x: 12pt, y: 10pt, {
         // Source blocks (one per location group)

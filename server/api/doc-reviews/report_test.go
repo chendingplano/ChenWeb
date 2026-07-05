@@ -151,6 +151,9 @@ func TestReportBuild_MixedSeverities(t *testing.T) {
 	if len(report.Findings) != 3 {
 		t.Errorf("Flat findings has %d entries, want 3", len(report.Findings))
 	}
+	if report.Findings[0].ID != 1 || report.FindingsByPass["P1"].Findings[1].ID != 2 {
+		t.Errorf("finding IDs not preserved: flat[0]=%d P1[1]=%d", report.Findings[0].ID, report.FindingsByPass["P1"].Findings[1].ID)
+	}
 }
 
 func TestPackageOrderFromTOMLPreservesDeclarationOrder(t *testing.T) {

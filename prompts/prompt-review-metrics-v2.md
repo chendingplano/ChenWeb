@@ -129,6 +129,8 @@ Fields:
 - `finding_type`: "issue" for a confirmed conflict or extraction error; "observation" for outliers, currency signals, patterns, and unverified discrepancies.
 - `title` and `description`: always in English. Name both values/units and the conflicting `source_filename` (or `metric_id`).
 - `evidence`: identify the metric under review and the specific matching metric it conflicts with. Keep any quoted metric names/values exactly as they appear (do not translate).
+- When a finding references a matching metric, identify that metric in prose by its `metric_id`: e.g. `diaryMac.docx (refer to 415-mtc-2) specifies 48小时 ...`. Do this in both `description` and `evidence`; do not rely on the filename alone.
+- End `description` with a compact "Referenced matching metric context" paragraph containing the matched metric's `source_line_spans` and the supplied `source_context` lines. Include the referenced source span line(s) and the +/- 10 surrounding lines exactly as supplied, formatted as `line_number: content` within the JSON string.
 - `location`: leave empty (`""`); the system fills it from the metric's source line spans.
 - `confidence`: 0.0–1.0. 0.90+ only when the metrics clearly describe the same quantity and clearly conflict; below 0.5 for every `observation` that is unverified.
 - `related_artifact_id` / `related_record_id`: the `metric_id` and `source_record_id` of the matched metric the finding is about, so the report can link it. Omit both only when the finding references no specific match (e.g. an extraction error against the source window).
