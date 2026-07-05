@@ -399,7 +399,7 @@ func TestController_StopRequest(t *testing.T) {
 	}
 }
 
-func TestController_RestartRequest_AllowsCompletedRequestAndClearsRunState(t *testing.T) {
+func TestController_RestartRequest_CreatesNewRunForCompletedRequest(t *testing.T) {
 	db := connectTestDB(t)
 	defer db.Close()
 	ensureTables(t, db)
@@ -460,8 +460,8 @@ func TestController_RestartRequest_AllowsCompletedRequestAndClearsRunState(t *te
 	if err != nil {
 		t.Fatalf("RestartRequest: %v", err)
 	}
-	if runID != result.RunID {
-		t.Fatalf("RestartRequest runID = %d, want %d", runID, result.RunID)
+	if runID == result.RunID {
+		t.Fatalf("RestartRequest runID = %d, want a new run id", runID)
 	}
 
 	var requestStatus string
@@ -484,17 +484,47 @@ func TestController_RestartRequest_AllowsCompletedRequestAndClearsRunState(t *te
 	).Scan(&runStatus, &runStart, &runEnd, &runError); err != nil {
 		t.Fatalf("select run status: %v", err)
 	}
-	if runStatus != "pending" {
-		t.Errorf("run status = %q, want pending", runStatus)
+	if runStatus != "completed" {
+		t.Errorf("old run status = %q, want completed", runStatus)
 	}
-	if runStart.Valid {
-		t.Error("run start_time should be cleared")
+	if !runStart.Valid {
+		t.Error("old run start_time should remain set")
 	}
-	if runEnd.Valid {
-		t.Error("run end_time should be cleared")
+	if !runEnd.Valid {
+		t.Error("old run end_time should remain set")
 	}
-	if runError.Valid && runError.String != "" {
-		t.Errorf("run error_message = %q, want empty", runError.String)
+	if !runError.Valid || runError.String != "old error" {
+		t.Errorf("old run error_message = %q, want %q", runError.String, "old error")
+	}
+
+	var newRunNumber int
+	var newRunStatus string
+	var newRunRecordID int64
+	if err := db.QueryRowContext(ctx,
+		`SELECT run_number, status, input_record_id FROM kb.doc_review_runs WHERE id = $1`,
+		runID,
+	).Scan(&newRunNumber, &newRunStatus, &newRunRecordID); err != nil {
+		t.Fatalf("select new run row: %v", err)
+	}
+	if newRunNumber != 2 {
+		t.Errorf("new run_number = %d, want 2", newRunNumber)
+	}
+	if newRunStatus != "pending" {
+		t.Errorf("new run status = %q, want pending", newRunStatus)
+	}
+	if newRunRecordID != recordID {
+		t.Errorf("new run input_record_id = %d, want %d", newRunRecordID, recordID)
+	}
+
+	var latestRunID int64
+	if err := db.QueryRowContext(ctx,
+		`SELECT id FROM kb.doc_review_runs WHERE request_id = $1 ORDER BY id DESC LIMIT 1`,
+		result.RequestID,
+	).Scan(&latestRunID); err != nil {
+		t.Fatalf("select latest run id: %v", err)
+	}
+	if latestRunID != runID {
+		t.Errorf("latest run id = %d, want %d", latestRunID, runID)
 	}
 
 	var aspectStatus string
@@ -508,7 +538,7 @@ func TestController_RestartRequest_AllowsCompletedRequestAndClearsRunState(t *te
 		 WHERE run_id = $1
 		 ORDER BY id
 		 LIMIT 1`,
-		result.RunID,
+		runID,
 	).Scan(&aspectStatus, &aspectProgress, &aspectFindingCount, &aspectStart, &aspectEnd, &aspectError); err != nil {
 		t.Fatalf("select aspect status: %v", err)
 	}
@@ -531,15 +561,26 @@ func TestController_RestartRequest_AllowsCompletedRequestAndClearsRunState(t *te
 		t.Errorf("aspect error_message = %q, want empty", aspectError.String)
 	}
 
-	var findingCount int
+	var oldFindingCount int
 	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM kb.doc_review_findings WHERE run_id = $1`,
 		result.RunID,
-	).Scan(&findingCount); err != nil {
-		t.Fatalf("count findings: %v", err)
+	).Scan(&oldFindingCount); err != nil {
+		t.Fatalf("count old findings: %v", err)
 	}
-	if findingCount != 0 {
-		t.Errorf("finding count = %d, want 0", findingCount)
+	if oldFindingCount != 1 {
+		t.Errorf("old finding count = %d, want 1", oldFindingCount)
+	}
+
+	var newFindingCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM kb.doc_review_findings WHERE run_id = $1`,
+		runID,
+	).Scan(&newFindingCount); err != nil {
+		t.Fatalf("count new findings: %v", err)
+	}
+	if newFindingCount != 0 {
+		t.Errorf("new finding count = %d, want 0", newFindingCount)
 	}
 }
 

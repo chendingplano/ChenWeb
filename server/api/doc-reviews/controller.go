@@ -379,23 +379,30 @@ func (c *DocReviewController) StopRequest(ctx context.Context, requestID int64) 
 	return nil
 }
 
-// RestartRequest re-arms an existing review request for a fresh run. It resets
-// the latest run, clears its transient execution artifacts, and moves the
-// request back to accepted so the same request can be run again from scratch.
+// RestartRequest re-arms an existing review request for a fresh run. It keeps
+// prior runs intact for history, creates a brand-new run row with the saved
+// request configuration, and moves the request back to accepted so the same
+// request can be run again from scratch.
 // Returns the run_id so the caller can re-publish the JetStream event.
 func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int64) (int64, error) {
-	_, err := c.loadRequest(ctx, requestID)
+	req, err := c.loadRequest(ctx, requestID)
 	if err != nil {
 		return 0, err
 	}
+	if len(req.Aspects) == 0 {
+		return 0, &RequestError{
+			Status:  http.StatusConflict,
+			Message: fmt.Sprintf("request %d has no configured aspects to rerun", requestID),
+		}
+	}
 
 	// Find the latest run for this request.
-	var runID int64
+	var previousRunID int64
 	var runStatus string
 	err = c.DB.QueryRowContext(ctx,
 		`SELECT id, status FROM kb.doc_review_runs WHERE request_id = $1 ORDER BY id DESC LIMIT 1`,
 		requestID,
-	).Scan(&runID, &runStatus)
+	).Scan(&previousRunID, &runStatus)
 	if err == sql.ErrNoRows {
 		return 0, &RequestError{
 			Status:  http.StatusConflict,
@@ -406,12 +413,26 @@ func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int6
 		return 0, fmt.Errorf("find latest run for request %d: %w", requestID, err)
 	}
 
-	// Reset the run and request to 'pending'/'accepted'.
-	if _, err := c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_runs SET status = 'pending', start_time = NULL, end_time = NULL, error_message = NULL WHERE id = $1`,
-		runID,
-	); err != nil {
-		return 0, fmt.Errorf("reset run %d: %w", runID, err)
+	// Preserve completed/failed/stopped history. When re-arming a stale active
+	// run, close it out so the new run becomes the canonical in-flight attempt.
+	switch runStatus {
+	case "pending", "running", "accepted":
+		if _, err := c.DB.ExecContext(ctx,
+			`UPDATE kb.doc_review_runs
+			 SET status = 'stopped',
+			     end_time = COALESCE(end_time, NOW()),
+			     error_message = COALESCE(NULLIF(error_message, ''), 'superseded by rerun')
+			 WHERE id = $1`,
+			previousRunID,
+		); err != nil {
+			return 0, fmt.Errorf("close superseded run %d: %w", previousRunID, err)
+		}
+		c.failOpenAspects(ctx, previousRunID, "stopped")
+	}
+
+	runID, err := c.createRun(ctx, requestID, req.InputRecordID, req.Aspects, req.ModelOverrides, req.Notes, req.RequesterName)
+	if err != nil {
+		return 0, fmt.Errorf("create rerun for request %d: %w", requestID, err)
 	}
 	if _, err := c.DB.ExecContext(ctx,
 		`UPDATE kb.doc_review_requests SET status = 'accepted' WHERE id = $1`,
@@ -419,30 +440,11 @@ func (c *DocReviewController) RestartRequest(ctx context.Context, requestID int6
 	); err != nil {
 		return 0, fmt.Errorf("reset request %d to accepted: %w", requestID, err)
 	}
-	if _, err := c.DB.ExecContext(ctx,
-		`DELETE FROM kb.doc_review_findings WHERE run_id = $1`,
-		runID,
-	); err != nil {
-		return 0, fmt.Errorf("clear findings for run %d: %w", runID, err)
-	}
-	if _, err := c.DB.ExecContext(ctx,
-		`DELETE FROM kb.doc_review_logs WHERE run_id = $1`,
-		runID,
-	); err != nil {
-		return 0, fmt.Errorf("clear logs for run %d: %w", runID, err)
-	}
-	// Reset every aspect of the run back to 'pending'.
-	if _, err := c.DB.ExecContext(ctx,
-		`UPDATE kb.doc_review_status
-		 SET status = 'pending', progress = 0, finding_count = 0, error_message = NULL,
-		     start_time = NULL, end_time = NULL, modify_time = NOW()
-		 WHERE run_id = $1`,
-		runID,
-	); err != nil {
-		return 0, fmt.Errorf("reset aspect statuses for run %d: %w", runID, err)
+	if err := c.seedAspectStatuses(ctx, requestID, req.InputRecordID, runID, req.Aspects); err != nil {
+		return 0, fmt.Errorf("seed rerun aspect statuses for run %d: %w", runID, err)
 	}
 
-	logger.Info("review request restarted", "request_id", requestID, "run_id", runID)
+	logger.Info("review request restarted", "request_id", requestID, "previous_run_id", previousRunID, "run_id", runID)
 	return runID, nil
 }
 
