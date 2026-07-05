@@ -100,18 +100,9 @@ func (r *provisionsReviewer) ReviewDocument(
 	}
 	r.hydrateMatchedProvisionContexts(ctx, matches)
 
-	type reviewUnit struct {
-		dp      docProvision
-		matches []matchedProvision
-	}
-	var units []reviewUnit
-	for i, dp := range docProvs {
-		if ms := matches[i]; len(ms) > 0 {
-			units = append(units, reviewUnit{dp: dp, matches: ms})
-		}
-	}
+	units := buildProvisionReviewUnits(docProvs, matches)
 	if len(units) == 0 {
-		r.logger.Info("provisions review: no cross-document matches", "record_id", recordID, "provisions", len(docProvs))
+		r.logger.Info("provisions review skipped: no review units", "record_id", recordID, "provisions", len(docProvs))
 		return nil, nil
 	}
 
@@ -151,6 +142,19 @@ func (r *provisionsReviewer) ReviewDocument(
 		}
 	}
 	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg.OnProgress)
+}
+
+type provisionReviewUnit struct {
+	dp      docProvision
+	matches []matchedProvision
+}
+
+func buildProvisionReviewUnits(docProvs []docProvision, matches map[int][]matchedProvision) []provisionReviewUnit {
+	units := make([]provisionReviewUnit, 0, len(docProvs))
+	for i, dp := range docProvs {
+		units = append(units, provisionReviewUnit{dp: dp, matches: matches[i]})
+	}
+	return units
 }
 
 // reviewProvision runs one LLM comparison for a single doc provision and its

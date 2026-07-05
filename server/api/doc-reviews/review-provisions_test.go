@@ -162,3 +162,26 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildProvisionReviewUnitsIncludesUnmatchedProvisions(t *testing.T) {
+	docProvs := []docProvision{
+		dp("1_prv_1", "safety/pressure"),
+		dp("1_prv_2", "process/temp"),
+	}
+	matches := map[int][]matchedProvision{
+		1: {
+			{view: provisionView{ProvID: "2_prv_9"}, recordID: 2, via: "hybrid_search"},
+		},
+	}
+
+	units := buildProvisionReviewUnits(docProvs, matches)
+	if len(units) != 2 {
+		t.Fatalf("review units = %d, want one per provision", len(units))
+	}
+	if len(units[0].matches) != 0 {
+		t.Fatalf("first provision matches = %d, want 0", len(units[0].matches))
+	}
+	if len(units[1].matches) != 1 || units[1].matches[0].view.ProvID != "2_prv_9" {
+		t.Fatalf("second provision matches = %+v, want 2_prv_9", units[1].matches)
+	}
+}
