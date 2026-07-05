@@ -299,6 +299,77 @@ func TestBuildReviewers_MetricsUsesDocReviewerMaxTasks(t *testing.T) {
 	t.Fatal("metrics reviewer not found")
 }
 
+func TestBuildReviewers_ArtifactReviewersUseDocReviewerMaxTasks(t *testing.T) {
+	t.Setenv("MAX_DOC_REVIEWER_TASKS", "5")
+
+	p := &ReviewProcessor{
+		MetricsClient:                 &fakeJSONExtractor{},
+		MetricsModelName:              "metric-model",
+		MetricsPromptRef:              "prompt-review-metrics-v2.md",
+		MetricsPromptText:             "compare metrics",
+		ProvisionsClient:              &fakeJSONExtractor{},
+		ProvisionsModelName:           "provision-model",
+		ProvisionsPromptRef:           "prompt-review-provisions-v2.md",
+		ProvisionsPromptText:          "compare provisions",
+		EntitiesClient:                &fakeJSONExtractor{},
+		EntitiesModelName:             "entity-model",
+		EntitiesPromptRef:             "prompt-review-entities-v1.md",
+		EntitiesPromptText:            "compare entities",
+		InventoryItemsClient:          &fakeJSONExtractor{},
+		InventoryItemsModelName:       "inventory-model",
+		InventoryItemsPromptRef:       "prompt-review-inventory-items-v2.md",
+		InventoryItemsPromptText:      "compare items",
+		MetricsCompletenessClient:     &fakeJSONExtractor{},
+		MetricsCompletenessModelName:  "metric-completeness-model",
+		MetricsCompletenessPromptRef:  "prompt-review-metrics-missing-v1.md",
+		MetricsCompletenessPromptText: "check missing metrics",
+		MaxConcurrent:                 1,
+	}
+
+	want := map[string]bool{
+		"metrics":              false,
+		"provisions":           false,
+		"entities":             false,
+		"inventory_items":      false,
+		"metrics_completeness": false,
+	}
+	runners := p.buildReviewers(DocMetadataInputRecord{})
+	for _, runner := range runners {
+		switch reviewer := runner.reviewer.(type) {
+		case *metricsReviewer:
+			if reviewer.maxTasks != 5 {
+				t.Fatalf("metrics maxTasks = %d, want 5", reviewer.maxTasks)
+			}
+			want["metrics"] = true
+		case *provisionsReviewer:
+			if reviewer.maxTasks != 5 {
+				t.Fatalf("provisions maxTasks = %d, want 5", reviewer.maxTasks)
+			}
+			want["provisions"] = true
+		case *entitiesReviewer:
+			if reviewer.maxTasks != 5 {
+				t.Fatalf("entities maxTasks = %d, want 5", reviewer.maxTasks)
+			}
+			want["entities"] = true
+		case *inventoryItemsReviewer:
+			if reviewer.maxTasks != 5 {
+				t.Fatalf("inventory_items maxTasks = %d, want 5", reviewer.maxTasks)
+			}
+			want["inventory_items"] = true
+		case *metricsCompletenessReviewer:
+			if reviewer.maxTasks != 5 {
+				t.Fatalf("metrics_completeness maxTasks = %d, want 5", reviewer.maxTasks)
+			}
+			want["metrics_completeness"] = true
+		}
+	}
+	for aspect, seen := range want {
+		if !seen {
+			t.Fatalf("%s reviewer not found", aspect)
+		}
+	}
+}
+
 func TestMetricLogUnitKey_IncludesRowID(t *testing.T) {
 	got := metricLogUnitKey(docMetric{
 		id:   42,
