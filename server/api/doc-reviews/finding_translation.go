@@ -504,14 +504,6 @@ type preparedFindingForStorage struct {
 }
 
 func prepareFindingForStorage(ctx context.Context, translator FindingTranslator, languages []string, finding ReviewFinding) (preparedFindingForStorage, error) {
-	if translator == nil {
-		var err error
-		translator, err = newLLMFindingTranslator()
-		if err != nil {
-			return preparedFindingForStorage{}, err
-		}
-	}
-
 	base := FindingItem{
 		Pass:        finding.Pass,
 		Aspect:      finding.Aspect,
@@ -524,15 +516,23 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 		Suggestion:  finding.Suggestion,
 		Confidence:  finding.Confidence,
 	}
+	if docReviewTranslationMode() == "on-demand" {
+		return prepareFindingForStorageWithoutTranslation(finding), nil
+	}
+	if translator == nil {
+		var err error
+		translator, err = newLLMFindingTranslator()
+		if err != nil {
+			return preparedFindingForStorage{}, err
+		}
+	}
+
 	configuredLanguages := normalizeConfiguredLanguages(languages)
 	targetLanguages := make([]string, 0, len(configuredLanguages))
 	for _, l := range configuredLanguages {
 		if l != "en" {
 			targetLanguages = append(targetLanguages, l)
 		}
-	}
-	if docReviewTranslationMode() == "on-demand" {
-		targetLanguages = nil
 	}
 	normalized, err := translator.NormalizeFinding(ctx, "en", targetLanguages, base)
 	if err != nil {
@@ -667,6 +667,53 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 			RelatedRecordID:   finding.RelatedRecordID,
 		},
 	}, nil
+}
+
+func prepareFindingForStorageWithoutTranslation(finding ReviewFinding) preparedFindingForStorage {
+	sourceLanguage := normalizeReviewFindingLanguage(finding.Language)
+	source := FindingLocalizedContent{
+		Title:       strings.TrimSpace(finding.Title),
+		Description: strings.TrimSpace(finding.Description),
+		Suggestion:  strings.TrimSpace(finding.Suggestion),
+		Provenance:  "canonical",
+	}
+	translations := map[string]FindingLocalizedContent{}
+	if source.Title != "" || source.Description != "" || source.Suggestion != "" {
+		translations[sourceLanguage] = source
+	}
+	sourceLanguageConfidence := 0.0
+	if strings.TrimSpace(finding.Language) != "" {
+		sourceLanguageConfidence = 1.0
+	}
+	return preparedFindingForStorage{
+		Canonical: ReviewFinding{
+			Pass:              finding.Pass,
+			Aspect:            finding.Aspect,
+			Severity:          finding.Severity,
+			FindingType:       finding.FindingType,
+			Language:          sourceLanguage,
+			Title:             strings.TrimSpace(finding.Title),
+			Description:       strings.TrimSpace(finding.Description),
+			Evidence:          finding.Evidence,
+			Location:          finding.Location,
+			Suggestion:        strings.TrimSpace(finding.Suggestion),
+			Confidence:        finding.Confidence,
+			RelatedArtifactID: finding.RelatedArtifactID,
+			RelatedRecordID:   finding.RelatedRecordID,
+		},
+		Metadata: FindingMetadataEnvelope{
+			I18N: FindingI18NMetadata{
+				SchemaVersion:            1,
+				SourceLanguage:           sourceLanguage,
+				SourceLanguageConfidence: sourceLanguageConfidence,
+				CanonicalLanguage:        sourceLanguage,
+				CanonicalOrigin:          "original",
+				Translations:             translations,
+			},
+			RelatedArtifactID: finding.RelatedArtifactID,
+			RelatedRecordID:   finding.RelatedRecordID,
+		},
+	}
 }
 
 func normalizeReviewFindingLanguage(language string) string {

@@ -414,6 +414,51 @@ func TestPrepareFindingForStorageOnDemandSkipsConfiguredDisplayTranslations(t *t
 	}
 }
 
+func TestPrepareFindingForStorageOnDemandSkipsNormalizationForDeclaredSourceLanguage(t *testing.T) {
+	t.Setenv("DOC_REVIEW_TRANSLATION", "on-demand")
+
+	translator := &fakeFindingTranslator{
+		normalizeErr: errors.New("normalizer should not be called"),
+		translateOut: map[string]FindingLocalizedContent{
+			"en": {Title: "English title", Description: "English description.", Suggestion: "English suggestion."},
+		},
+	}
+
+	prepared, err := prepareFindingForStorage(context.Background(), translator, []string{"en"}, ReviewFinding{
+		FindingType: "issue",
+		Language:    "zh",
+		Title:       "未定义验收标准",
+		Description: "该要求陈述了条件，但没有定义验收标准。",
+		Suggestion:  "补充可衡量的验收标准。",
+		Evidence:    "验收应充分。",
+		Confidence:  0.97,
+	})
+	if err != nil {
+		t.Fatalf("prepareFindingForStorage: %v", err)
+	}
+	if translator.normalizeCalls != 0 {
+		t.Fatalf("normalizeCalls=%d, want 0", translator.normalizeCalls)
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls=%v, want none", translator.translateCalls)
+	}
+	if got := prepared.Canonical.Title; got != "未定义验收标准" {
+		t.Fatalf("stored title=%q", got)
+	}
+	if got := prepared.Metadata.I18N.SourceLanguage; got != "zh" {
+		t.Fatalf("source_language=%q, want zh", got)
+	}
+	if got := prepared.Metadata.I18N.CanonicalLanguage; got != "zh" {
+		t.Fatalf("canonical_language=%q, want zh", got)
+	}
+	if _, ok := prepared.Metadata.I18N.Translations["en"]; ok {
+		t.Fatalf("en translation unexpectedly present: %#v", prepared.Metadata.I18N.Translations["en"])
+	}
+	if got := prepared.Metadata.I18N.Translations["zh"].Title; got != "未定义验收标准" {
+		t.Fatalf("zh title=%q", got)
+	}
+}
+
 func TestPrepareFindingForStorageUsesPrecomputedZhTranslationAndSkipsSecondCall(t *testing.T) {
 	translator := &fakeFindingTranslator{
 		normalizeOut: FindingNormalization{
