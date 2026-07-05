@@ -544,7 +544,9 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 	if normalized.CanonicalLanguage == "" {
 		normalized.CanonicalLanguage = "en"
 	}
-	if normalized.SourceLanguage == "" {
+	if finding.Language != "" {
+		normalized.SourceLanguage = normalizeReviewFindingLanguage(finding.Language)
+	} else if normalized.SourceLanguage == "" {
 		normalized.SourceLanguage = "und"
 	}
 	if normalized.Canonical.Provenance == "" {
@@ -573,12 +575,21 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 		translations[language] = localized
 	}
 	sourceLanguage := strings.ToLower(strings.TrimSpace(normalized.SourceLanguage))
-	if sourceLanguage != "" && sourceLanguage != "en" &&
-		(normalized.SourceTranslation.Title != "" || normalized.SourceTranslation.Description != "" || normalized.SourceTranslation.Suggestion != "") {
-		if normalized.SourceTranslation.Provenance == "" {
-			normalized.SourceTranslation.Provenance = "original_extraction"
+	if sourceLanguage != "" && sourceLanguage != "en" {
+		sourceTranslation := normalized.SourceTranslation
+		if sourceTranslation.Title == "" && sourceTranslation.Description == "" && sourceTranslation.Suggestion == "" {
+			sourceTranslation = FindingLocalizedContent{
+				Title:       strings.TrimSpace(finding.Title),
+				Description: strings.TrimSpace(finding.Description),
+				Suggestion:  strings.TrimSpace(finding.Suggestion),
+			}
 		}
-		translations[sourceLanguage] = normalized.SourceTranslation
+		if sourceTranslation.Title != "" || sourceTranslation.Description != "" || sourceTranslation.Suggestion != "" {
+			if sourceTranslation.Provenance == "" {
+				sourceTranslation.Provenance = "original_extraction"
+			}
+			translations[sourceLanguage] = sourceTranslation
+		}
 	}
 
 	canonicalFinding := FindingItem{
@@ -656,6 +667,19 @@ func prepareFindingForStorage(ctx context.Context, translator FindingTranslator,
 			RelatedRecordID:   finding.RelatedRecordID,
 		},
 	}, nil
+}
+
+func normalizeReviewFindingLanguage(language string) string {
+	language = strings.ToLower(strings.TrimSpace(language))
+	if language == "" {
+		return "en"
+	}
+	for _, r := range language {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+			return "en"
+		}
+	}
+	return language
 }
 
 func (c *DocReviewController) localizeFinding(_ context.Context, language string, f FindingItem, metadata []byte) (FindingItem, error) {

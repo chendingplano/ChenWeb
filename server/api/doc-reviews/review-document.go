@@ -25,6 +25,7 @@ type ReviewFinding struct {
 	Aspect      string  `json:"aspect"`
 	Severity    string  `json:"severity"`
 	FindingType string  `json:"finding_type"`
+	Language    string  `json:"language,omitempty"`
 	Title       string  `json:"title"`
 	Description string  `json:"description"`
 	Evidence    string  `json:"evidence,omitempty"`
@@ -2156,6 +2157,7 @@ func normalizeFindingsJSON(payload map[string]any) []ReviewFinding {
 			Aspect:            strings.TrimSpace(asString(m["aspect"])),
 			Severity:          strings.TrimSpace(asString(m["severity"])),
 			FindingType:       strings.TrimSpace(asString(m["finding_type"])),
+			Language:          normalizeReviewFindingLanguage(asString(m["language"])),
 			Title:             strings.TrimSpace(asString(m["title"])),
 			Description:       strings.TrimSpace(asString(m["description"])),
 			Evidence:          strings.TrimSpace(asString(m["evidence"])),

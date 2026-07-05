@@ -269,6 +269,58 @@ func TestPrepareFindingForStorageCanonicalizesEnglishAndPreservesChineseSource(t
 	}
 }
 
+func TestPrepareFindingForStorageStoresRawFindingUnderDeclaredLanguage(t *testing.T) {
+	translator := &fakeFindingTranslator{
+		normalizeOut: FindingNormalization{
+			CanonicalLanguage: "en",
+			CanonicalOrigin:   "translated",
+			Canonical: FindingLocalizedContent{
+				Title:       "Undefined acceptance criteria",
+				Description: "The requirement states a condition but does not define acceptance criteria.",
+				Suggestion:  "Add measurable acceptance criteria.",
+			},
+		},
+	}
+
+	prepared, err := prepareFindingForStorage(context.Background(), translator, []string{"en"}, ReviewFinding{
+		FindingType: "issue",
+		Language:    "zh",
+		Title:       "未定义验收标准",
+		Description: "该要求陈述了条件，但没有定义验收标准。",
+		Suggestion:  "补充可衡量的验收标准。",
+	})
+	if err != nil {
+		t.Fatalf("prepareFindingForStorage: %v", err)
+	}
+	if got := prepared.Metadata.I18N.SourceLanguage; got != "zh" {
+		t.Fatalf("source_language=%q, want zh", got)
+	}
+	if got := prepared.Metadata.I18N.Translations["zh"].Title; got != "未定义验收标准" {
+		t.Fatalf("zh title=%q", got)
+	}
+	if got := prepared.Metadata.I18N.Translations["en"].Title; got != "Undefined acceptance criteria" {
+		t.Fatalf("en title=%q", got)
+	}
+}
+
+func TestNormalizeFindingsJSONDefaultsLanguageToEnglish(t *testing.T) {
+	findings := normalizeFindingsJSON(map[string]any{
+		"findings": []any{
+			map[string]any{
+				"title":       "Title",
+				"description": "Description",
+				"suggestion":  "Suggestion",
+			},
+		},
+	})
+	if len(findings) != 1 {
+		t.Fatalf("findings len=%d, want 1", len(findings))
+	}
+	if findings[0].Language != "en" {
+		t.Fatalf("language=%q, want en", findings[0].Language)
+	}
+}
+
 func TestPrepareFindingForStorageAutoTranslatesConfiguredDisplayLanguages(t *testing.T) {
 	t.Setenv("DOC_REVIEW_TRANSLATION", "auto")
 	translator := &fakeFindingTranslator{
