@@ -135,7 +135,7 @@ func TestBuildTypstSourceUsesDatabaseFindingID(t *testing.T) {
 		PassOrder: []string{"P5"},
 	}
 
-	src := buildTypstSource(skeleton, req, "en", "/tmp/template.typ")
+	src := buildTypstSource(skeleton, req, "en", "/tmp/template.typ", nil)
 	if !strings.Contains(src, `id: "42"`) {
 		t.Fatalf("typst source missing DB finding id: %s", src)
 	}
@@ -144,6 +144,67 @@ func TestBuildTypstSourceUsesDatabaseFindingID(t *testing.T) {
 	}
 	if !strings.Contains(src, "related-sources: (") || !strings.Contains(src, "87: matched metric") {
 		t.Fatalf("typst source missing related source block: %s", src)
+	}
+}
+
+func TestBuildTypstSourceGroupsMetricsFindingsByArtifactID(t *testing.T) {
+	req := &RequestStatus{RequesterName: "Reviewer"}
+	skeleton := &ReportSkeleton{
+		Meta: ReportMeta{ReportID: "rpt_88", DocumentTitle: "Document title", GeneratedAt: "2026-07-06T12:00:00Z"},
+		FindingsByPass: map[string]PassGroup{
+			"P5": {
+				Label: "Technical & Compliance",
+				Findings: []ReportFinding{
+					{ID: 1, Pass: "P5", Aspect: "metrics", Severity: "high", Title: "Conflict A", ArtifactID: "1001_m_7"},
+					{ID: 2, Pass: "P5", Aspect: "metrics", Severity: "low", Title: "Conflict B", ArtifactID: "1001_m_7"},
+					{ID: 3, Pass: "P5", Aspect: "metrics", Severity: "medium", Title: "Conflict C", ArtifactID: "1001_m_9"},
+				},
+			},
+		},
+		PassOrder: []string{"P5"},
+	}
+
+	src := buildTypstSource(skeleton, req, "en", "/tmp/template.typ", nil)
+
+	if !strings.Contains(src, `artifact-group(`) {
+		t.Fatalf("typst source missing artifact-group(...) calls: %s", src)
+	}
+	if !strings.Contains(src, `title: "1001_m_7"`) || !strings.Contains(src, `title: "1001_m_9"`) {
+		t.Fatalf("typst source missing per-artifact titles: %s", src)
+	}
+	// Both findings for 1001_m_7 must land inside the SAME artifact-group call.
+	groupStart := strings.Index(src, `title: "1001_m_7"`)
+	nextGroup := strings.Index(src[groupStart+1:], "artifact-group(")
+	segment := src[groupStart:]
+	if nextGroup >= 0 {
+		segment = src[groupStart : groupStart+1+nextGroup]
+	}
+	if !strings.Contains(segment, "Conflict A") || !strings.Contains(segment, "Conflict B") {
+		t.Fatalf("findings for the same artifact were not grouped together: %s", segment)
+	}
+}
+
+func TestBuildTypstSourceLeavesNonArtifactAspectsFlat(t *testing.T) {
+	req := &RequestStatus{RequesterName: "Reviewer"}
+	skeleton := &ReportSkeleton{
+		Meta: ReportMeta{ReportID: "rpt_88", DocumentTitle: "Document title", GeneratedAt: "2026-07-06T12:00:00Z"},
+		FindingsByPass: map[string]PassGroup{
+			"P1": {
+				Label: "Language & Style",
+				Findings: []ReportFinding{
+					{ID: 1, Pass: "P1", Aspect: "grammar_spelling", Severity: "high", Title: "Typo"},
+				},
+			},
+		},
+		PassOrder: []string{"P1"},
+	}
+
+	src := buildTypstSource(skeleton, req, "en", "/tmp/template.typ", nil)
+	if strings.Contains(src, "artifact-group(") {
+		t.Fatalf("non-artifact-anchored aspect should not use artifact-group: %s", src)
+	}
+	if !strings.Contains(src, `findings: (`) {
+		t.Fatalf("expected flat findings list: %s", src)
 	}
 }
 

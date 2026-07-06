@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,7 +65,7 @@ func GenerateTypstReport(ctx context.Context, requestID int64, skeleton *ReportS
 		typPath := filepath.Join(outputDir, baseName+".typ")
 		pdfPath := filepath.Join(outputDir, baseName+".pdf")
 
-		src := buildTypstSource(variant.skeleton, req, variant.language, absTemplatePath)
+		src := buildTypstSource(variant.skeleton, req, variant.language, absTemplatePath, nil)
 		if err := os.WriteFile(typPath, []byte(src), 0o644); err != nil {
 			return fmt.Errorf("write typst file %q: %w", typPath, err)
 		}
@@ -321,8 +322,96 @@ func findingDisplayID(id int64, ordinal int) string {
 	return fmt.Sprintf("%d", id)
 }
 
+// isArtifactAnchoredAspect reports whether aspect belongs to one of the
+// per-artifact reviewers (ADR 2026070603), whose findings should be grouped
+// by ArtifactID rather than rendered as a flat list.
+func isArtifactAnchoredAspect(aspect string) bool {
+	switch aspect {
+	case "metrics", "provisions", "inventory_items":
+		return true
+	default:
+		return false
+	}
+}
+
+// buildArtifactGroupsArg renders the Typst artifact-group(...) array for one
+// aspect-section: af is grouped by ArtifactID in first-seen order. For the
+// "provisions" aspect, artifact IDs that have analyses (provisionAnalyses)
+// but no finding are unioned in (sorted, appended after the finding-derived
+// IDs) so "no conflict" comparisons are still visible (ADR 2026070602 / ADR
+// 2026062203 §1.2). findingIdx is the shared ordinal counter also used by the
+// flat-findings path, threaded by pointer so numbering stays continuous.
+func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]ProvisionAnalysis, aspect string, findingIdx *int) string {
+	artifactFindingMap := map[string][]ReportFinding{}
+	var artifactIDs []string
+	seen := map[string]bool{}
+	for _, f := range af {
+		if !seen[f.ArtifactID] {
+			seen[f.ArtifactID] = true
+			artifactIDs = append(artifactIDs, f.ArtifactID)
+		}
+		artifactFindingMap[f.ArtifactID] = append(artifactFindingMap[f.ArtifactID], f)
+	}
+
+	if aspect == "provisions" && len(provisionAnalyses) > 0 {
+		analysisIDs := make([]string, 0, len(provisionAnalyses))
+		for id := range provisionAnalyses {
+			analysisIDs = append(analysisIDs, id)
+		}
+		sort.Strings(analysisIDs)
+		for _, id := range analysisIDs {
+			if !seen[id] {
+				seen[id] = true
+				artifactIDs = append(artifactIDs, id)
+			}
+		}
+	}
+
+	var groups []string
+	for _, artifactID := range artifactIDs {
+		var findingBlocks []string
+		for _, f := range artifactFindingMap[artifactID] {
+			*findingIdx++
+			findingBlocks = append(findingBlocks, buildFindingBlock(f, findingDisplayID(f.ID, *findingIdx)))
+		}
+		var findingsArg string
+		if len(findingBlocks) > 0 {
+			findingsArg = "\n" + strings.Join(findingBlocks, "\n") + "\n      "
+		}
+
+		var analysesArg string
+		if entries := provisionAnalyses[artifactID]; aspect == "provisions" && len(entries) > 0 {
+			var analysisBlocks []string
+			for _, a := range entries {
+				analysisBlocks = append(analysisBlocks, fmt.Sprintf(
+					"        (related: \"%s\", relationship: \"%s\", summary: [%s]),",
+					typStr(a.RelatedArtifactID), typStr(a.Relationship), typContent(a.Summary),
+				))
+			}
+			analysesArg = "\n" + strings.Join(analysisBlocks, "\n") + "\n      "
+		}
+
+		title := artifactID
+		if title == "" {
+			title = "(unidentified artifact)"
+		}
+		groups = append(groups, fmt.Sprintf(
+			"      artifact-group(\n"+
+				"        title: \"%s\",\n"+
+				"        analyses: (%s),\n"+
+				"        findings: (%s),\n"+
+				"      ),",
+			typStr(title), analysesArg, findingsArg,
+		))
+	}
+	if len(groups) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(groups, "\n") + "\n    "
+}
+
 // buildTypstSource returns the full .typ source for the review report.
-func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTemplatePath string) string {
+func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTemplatePath string, provisionAnalyses map[string][]ProvisionAnalysis) string {
 	var b strings.Builder
 
 	// Import template functions.  Module content output is discarded; only
@@ -393,23 +482,28 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 			af := aspectFindingMap[aspect]
 			var findingBlocks []string
 			var aspectHighCount int
+			artifactAnchored := isArtifactAnchoredAspect(aspect)
 
 			for _, f := range af {
-				findingIdx++
-				fid := findingDisplayID(f.ID, findingIdx)
-				findingBlocks = append(findingBlocks, buildFindingBlock(f, fid))
-
 				if f.Severity == "high" {
 					aspectHighCount++
 				}
+				if artifactAnchored {
+					continue
+				}
+				findingIdx++
+				fid := findingDisplayID(f.ID, findingIdx)
+				findingBlocks = append(findingBlocks, buildFindingBlock(f, fid))
 			}
 
 			assessment := buildAssessment(len(af), aspectHighCount)
 			problems := buildProblems([]string{aspect})
 			guidelines := buildGuidelines(af)
 
-			var findingsArg string
-			if len(findingBlocks) > 0 {
+			var findingsArg, artifactGroupsArg string
+			if artifactAnchored {
+				artifactGroupsArg = buildArtifactGroupsArg(af, provisionAnalyses, aspect, &findingIdx)
+			} else if len(findingBlocks) > 0 {
 				findingsArg = "\n" + strings.Join(findingBlocks, "\n") + "\n    "
 			}
 
@@ -417,12 +511,14 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 				"    aspect-section(\n"+
 					"      title: \"%s\",\n"+
 					"      findings: (%s),\n"+
+					"      artifact-groups: (%s),\n"+
 					"      assessment: [%s],\n"+
 					"      problems: [%s],\n"+
 					"      guidelines: [%s],\n"+
 					"    ),",
 				typStr(aspect),
 				findingsArg,
+				artifactGroupsArg,
 				typContent(assessment),
 				typContent(problems),
 				typContent(guidelines),
