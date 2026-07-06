@@ -208,6 +208,32 @@ func TestBuildTypstSourceLeavesNonArtifactAspectsFlat(t *testing.T) {
 	}
 }
 
+func TestBuildTypstSourceRendersProvisionsAnalysesWithNoFindings(t *testing.T) {
+	req := &RequestStatus{RequesterName: "Reviewer"}
+	// Zero findings anywhere — simulates a rerun of only the provisions
+	// reviewer where every provision compared clean (no conflicts).
+	skeleton := &ReportSkeleton{
+		Meta:           ReportMeta{ReportID: "rpt_88", DocumentTitle: "Document title", GeneratedAt: "2026-07-06T12:00:00Z"},
+		FindingsByPass: map[string]PassGroup{},
+		PassOrder:      nil,
+	}
+	provisionAnalyses := map[string][]ProvisionAnalysis{
+		"1001_prv_3": {{RelatedArtifactID: "2002_prv_9", Relationship: "same_subject", Summary: "Identical, no conflict."}},
+	}
+
+	src := buildTypstSource(skeleton, req, "en", "/tmp/template.typ", provisionAnalyses)
+
+	if !strings.Contains(src, `title: "provisions"`) {
+		t.Fatalf("expected a provisions aspect-section even with zero findings: %s", src)
+	}
+	if !strings.Contains(src, `title: "1001_prv_3"`) {
+		t.Fatalf("expected an artifact-group for the analysis-only provision: %s", src)
+	}
+	if !strings.Contains(src, "Identical, no conflict.") {
+		t.Fatalf("expected the analysis summary to render: %s", src)
+	}
+}
+
 func TestBuildFindingBlockRendersSourcesAndCorrection(t *testing.T) {
 	f := ReportFinding{
 		ID:          42,

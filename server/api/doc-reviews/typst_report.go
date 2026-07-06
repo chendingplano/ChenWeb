@@ -28,6 +28,12 @@ var passLabelMap = map[string]string{
 	"P6": "Meta & Process",
 }
 
+// provisionsPass is the pass the provisions reviewer is configured under
+// (doc-review.local.toml [reviewers.provisions]; ADR 2026063003). Used to
+// force the provisions aspect-section to render when it has analyses but
+// zero findings this run (ADR 2026070602 / ADR 2026062203 §1.2).
+const provisionsPass = "P5"
+
 // GenerateTypstReport generates a Typst source file from the review report and
 // compiles it to PDF. Output is written under $DOC_REVIEW_REPORTS. If that env
 // var is unset the function is a no-op. Errors are non-fatal: callers should
@@ -328,6 +334,15 @@ func findingDisplayID(id int64, ordinal int) string {
 	return fmt.Sprintf("%d", id)
 }
 
+func passOrderContains(passOrder []string, target string) bool {
+	for _, p := range passOrder {
+		if p == target {
+			return true
+		}
+	}
+	return false
+}
+
 // isArtifactAnchoredAspect reports whether aspect belongs to one of the
 // per-artifact reviewers (ADR 2026070603), whose findings should be grouped
 // by ArtifactID rather than rendered as a flat list.
@@ -459,9 +474,14 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 	}
 
 	// ── Package-level sections (hierarchical: L1 package → L2 aspects) ──
+	passOrder := skeleton.PassOrder
+	if len(provisionAnalyses) > 0 && !passOrderContains(passOrder, provisionsPass) {
+		passOrder = append(append([]string{}, passOrder...), provisionsPass)
+	}
+
 	var aspectLines []string
 	findingIdx := 0
-	for _, p := range skeleton.PassOrder {
+	for _, p := range passOrder {
 		pg := skeleton.FindingsByPass[p]
 		label, ok := passLabelMap[p]
 		if !ok {
@@ -481,6 +501,10 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 				aspectSlugs = append(aspectSlugs, f.Aspect)
 			}
 			aspectFindingMap[f.Aspect] = append(aspectFindingMap[f.Aspect], f)
+		}
+		if p == provisionsPass && len(provisionAnalyses) > 0 && !aspectSeen["provisions"] {
+			aspectSeen["provisions"] = true
+			aspectSlugs = append(aspectSlugs, "provisions")
 		}
 
 		// ── One aspect-section per aspect (Level 2) ──
