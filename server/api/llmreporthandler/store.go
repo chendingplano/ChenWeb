@@ -3,6 +3,9 @@ package llmreporthandler
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -283,44 +286,125 @@ ORDER BY mu.workspace_day DESC, mu.provider ASC, mu.model_name ASC`
 }
 
 type UsageEventAdmin struct {
-	ID                    string    `json:"id"`
-	AccountID             *string   `json:"account_id"`
-	AccountName           *string   `json:"account_name"`
-	ProfileID             *string   `json:"profile_id"`
-	RecordID              *int64    `json:"record_id"`
-	Provider              string    `json:"provider"`
-	ModelName             string    `json:"model_name"`
-	PromptName            string    `json:"prompt_name"`
-	CallReason            string    `json:"call_reason"`
-	CallLoc               string    `json:"call_loc"`
-	RequestStartedAt      time.Time `json:"request_started_at"`
-	InputTokens           int64     `json:"input_tokens"`
-	OutputTokens          int64     `json:"output_tokens"`
-	TotalTokens           int64     `json:"total_tokens"`
-	PromptCacheHitTokens  int64     `json:"prompt_cache_hit_tokens"`
-	PromptCacheMissTokens int64     `json:"prompt_cache_miss_tokens"`
-	LatencyMS             int64     `json:"latency_ms"`
-	ErrorMessage          string    `json:"error_message"`
-	InputBodyRef          string    `json:"input_body_ref"`
-	OutputBodyRef         string    `json:"output_body_ref"`
+	ID                    string          `json:"id"`
+	AccountID             *string         `json:"account_id"`
+	AccountName           *string         `json:"account_name"`
+	ProfileID             *string         `json:"profile_id"`
+	RecordID              *int64          `json:"record_id"`
+	Provider              string          `json:"provider"`
+	ModelName             string          `json:"model_name"`
+	PromptName            string          `json:"prompt_name"`
+	CallReason            string          `json:"call_reason"`
+	CallLoc               string          `json:"call_loc"`
+	RequestStartedAt      time.Time       `json:"request_started_at"`
+	InputTokens           int64           `json:"input_tokens"`
+	OutputTokens          int64           `json:"output_tokens"`
+	TotalTokens           int64           `json:"total_tokens"`
+	PromptCacheHitTokens  int64           `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int64           `json:"prompt_cache_miss_tokens"`
+	LatencyMS             int64           `json:"latency_ms"`
+	ErrorMessage          string          `json:"error_message"`
+	InputBodyRef          string          `json:"input_body_ref"`
+	OutputBodyRef         string          `json:"output_body_ref"`
+	MetadataJSON          json.RawMessage `json:"metadata_json"`
 }
 
-func (s *Store) ListUsageEventsAdmin(ctx context.Context, page, pageSize int) ([]UsageEventAdmin, int64, error) {
+// UsageEventAdminFilters holds optional server-side filters for ListUsageEventsAdmin.
+// Zero values mean "no filter" for that field.
+type UsageEventAdminFilters struct {
+	Model       string
+	Prompt      string
+	CallReason  string
+	CallLoc     string
+	StartedFrom *time.Time
+	StartedTo   *time.Time
+	InTokMin    *int64
+	InTokMax    *int64
+	OutTokMin   *int64
+	OutTokMax   *int64
+	MetaKey     string
+	MetaValue   string
+}
+
+// buildUsageEventAdminWhere translates non-empty filters into a SQL WHERE clause
+// (without the "WHERE" keyword) and its positional args, starting at $1.
+func buildUsageEventAdminWhere(f UsageEventAdminFilters) (string, []any) {
+	var clauses []string
+	var args []any
+
+	add := func(clause string, arg any) {
+		args = append(args, arg)
+		clauses = append(clauses, fmt.Sprintf(clause, len(args)))
+	}
+
+	if f.Model != "" {
+		add("evt.model_name ILIKE '%%' || $%d || '%%'", f.Model)
+	}
+	if f.Prompt != "" {
+		add("evt.prompt_name ILIKE '%%' || $%d || '%%'", f.Prompt)
+	}
+	if f.CallReason != "" {
+		add("evt.call_reason ILIKE '%%' || $%d || '%%'", f.CallReason)
+	}
+	if f.CallLoc != "" {
+		add("evt.call_loc ILIKE '%%' || $%d || '%%'", f.CallLoc)
+	}
+	if f.StartedFrom != nil {
+		add("evt.request_started_at >= $%d", *f.StartedFrom)
+	}
+	if f.StartedTo != nil {
+		add("evt.request_started_at <= $%d", *f.StartedTo)
+	}
+	if f.InTokMin != nil {
+		add("evt.input_tokens >= $%d", *f.InTokMin)
+	}
+	if f.InTokMax != nil {
+		add("evt.input_tokens <= $%d", *f.InTokMax)
+	}
+	if f.OutTokMin != nil {
+		add("evt.output_tokens >= $%d", *f.OutTokMin)
+	}
+	if f.OutTokMax != nil {
+		add("evt.output_tokens <= $%d", *f.OutTokMax)
+	}
+	if f.MetaKey != "" && f.MetaValue != "" {
+		args = append(args, f.MetaKey)
+		keyArg := len(args)
+		args = append(args, f.MetaValue)
+		valueArg := len(args)
+		clauses = append(clauses, fmt.Sprintf("evt.metadata_json ->> $%d ILIKE '%%' || $%d || '%%'", keyArg, valueArg))
+	}
+
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func (s *Store) ListUsageEventsAdmin(ctx context.Context, page, pageSize int, filters UsageEventAdminFilters) ([]UsageEventAdmin, int64, error) {
+	where, whereArgs := buildUsageEventAdminWhere(filters)
+
 	var total int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM llm_usage_event`).Scan(&total); err != nil {
+	countQuery := "SELECT COUNT(*) FROM llm_usage_event evt" + where
+	if err := s.db.QueryRowContext(ctx, countQuery, whereArgs...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
+
 	offset := (page - 1) * pageSize
-	const query = `SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id,
+	limitArg := len(whereArgs) + 1
+	offsetArg := len(whereArgs) + 2
+	query := fmt.Sprintf(`SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id,
 evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
 evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
 evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
-COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, '')
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
 FROM llm_usage_event evt
-LEFT JOIN llm_account acct ON acct.id = evt.account_id
+LEFT JOIN llm_account acct ON acct.id = evt.account_id%s
 ORDER BY evt.request_started_at DESC
-LIMIT $1 OFFSET $2`
-	rows, err := s.db.QueryContext(ctx, query, pageSize, offset)
+LIMIT $%d OFFSET $%d`, where, limitArg, offsetArg)
+
+	args := append(append([]any{}, whereArgs...), pageSize, offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -330,12 +414,13 @@ LIMIT $1 OFFSET $2`
 		var row UsageEventAdmin
 		var accountID, accountName, profileID sql.NullString
 		var recordID sql.NullInt64
+		var metadataJSON []byte
 		if err := rows.Scan(
 			&row.ID, &accountID, &accountName, &profileID, &recordID,
 			&row.Provider, &row.ModelName, &row.PromptName, &row.CallReason, &row.CallLoc,
 			&row.RequestStartedAt, &row.InputTokens, &row.OutputTokens, &row.TotalTokens,
 			&row.PromptCacheHitTokens, &row.PromptCacheMissTokens, &row.LatencyMS, &row.ErrorMessage,
-			&row.InputBodyRef, &row.OutputBodyRef,
+			&row.InputBodyRef, &row.OutputBodyRef, &metadataJSON,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -351,6 +436,7 @@ LIMIT $1 OFFSET $2`
 		if recordID.Valid {
 			row.RecordID = &recordID.Int64
 		}
+		row.MetadataJSON = json.RawMessage(metadataJSON)
 		out = append(out, row)
 	}
 	return out, total, rows.Err()

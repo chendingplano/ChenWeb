@@ -41,7 +41,44 @@
 		error_message: string;
 		input_body_ref: string;
 		output_body_ref: string;
+		metadata_json: Record<string, unknown> | null;
 	};
+
+	// --- Filter state ---
+	let filterModel      = $state('');
+	let filterPrompt     = $state('');
+	let filterCallReason = $state('');
+	let filterCallLoc    = $state('');
+	let filterStartedFrom = $state('');
+	let filterStartedTo   = $state('');
+	let filterInTokMin   = $state('');
+	let filterInTokMax   = $state('');
+	let filterOutTokMin  = $state('');
+	let filterOutTokMax  = $state('');
+	let filterMetaKey    = $state('');
+	let filterMetaValue  = $state('');
+
+	function applyFilters() {
+		page = 1;
+		load();
+	}
+
+	function clearFilters() {
+		filterModel = '';
+		filterPrompt = '';
+		filterCallReason = '';
+		filterCallLoc = '';
+		filterStartedFrom = '';
+		filterStartedTo = '';
+		filterInTokMin = '';
+		filterInTokMax = '';
+		filterOutTokMin = '';
+		filterOutTokMax = '';
+		filterMetaKey = '';
+		filterMetaValue = '';
+		page = 1;
+		load();
+	}
 
 	// --- State ---
 	let rows      = $state<UsageEventRow[]>([]);
@@ -61,11 +98,29 @@
 	let totalPages = $derived(Math.ceil(total / pageSize) || 1);
 
 	// --- Data loading ---
+	function toRFC3339(localDateTime: string): string {
+		return new Date(localDateTime).toISOString();
+	}
+
 	async function load() {
 		loading = true;
 		error = '';
 		try {
 			const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+			if (filterModel) params.set('model', filterModel);
+			if (filterPrompt) params.set('prompt', filterPrompt);
+			if (filterCallReason) params.set('call_reason', filterCallReason);
+			if (filterCallLoc) params.set('call_loc', filterCallLoc);
+			if (filterStartedFrom) params.set('started_from', toRFC3339(filterStartedFrom));
+			if (filterStartedTo) params.set('started_to', toRFC3339(filterStartedTo));
+			if (filterInTokMin) params.set('in_tok_min', filterInTokMin);
+			if (filterInTokMax) params.set('in_tok_max', filterInTokMax);
+			if (filterOutTokMin) params.set('out_tok_min', filterOutTokMin);
+			if (filterOutTokMax) params.set('out_tok_max', filterOutTokMax);
+			if (filterMetaKey && filterMetaValue) {
+				params.set('meta_key', filterMetaKey);
+				params.set('meta_value', filterMetaValue);
+			}
 			const res = await fetch(`/api/v1/llm/usage-events-admin?${params}`, { credentials: 'same-origin' });
 			const data = await res.json();
 			if (!res.ok) throw new Error(data.message ?? 'Failed to load');
@@ -117,6 +172,27 @@
 		} finally {
 			modalLoading = false;
 		}
+	}
+
+	function metadataText(row: UsageEventRow): string {
+		try { return JSON.stringify(row.metadata_json ?? {}, null, 2); }
+		catch { return '{}'; }
+	}
+
+	function openMetadata(row: UsageEventRow) {
+		modalVisible = true;
+		modalLoading = false;
+		modalError   = '';
+		modalTitle   = `Metadata — ${row.id.slice(0, 12)}…`;
+		modalContent = metadataText(row);
+	}
+
+	function openDetails(row: UsageEventRow) {
+		modalVisible = true;
+		modalLoading = false;
+		modalError   = '';
+		modalTitle   = `Details — ${row.id.slice(0, 12)}…`;
+		modalContent = JSON.stringify(row, null, 2);
 	}
 
 	let hasSelection     = $state(false);
@@ -259,6 +335,86 @@
 		</div>
 	</div>
 
+	<!-- Filter section -->
+	<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+		<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));">
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Model</span>
+				<input type="text" bind:value={filterModel} placeholder="Contains…"
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Prompt</span>
+				<input type="text" bind:value={filterPrompt} placeholder="Contains…"
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Call Reason</span>
+				<input type="text" bind:value={filterCallReason} placeholder="Contains…"
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Call LOC</span>
+				<input type="text" bind:value={filterCallLoc} placeholder="Contains…"
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Started From</span>
+				<input type="datetime-local" bind:value={filterStartedFrom}
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Started To</span>
+				<input type="datetime-local" bind:value={filterStartedTo}
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">In Tok Min</span>
+				<input type="number" bind:value={filterInTokMin}
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">In Tok Max</span>
+				<input type="number" bind:value={filterInTokMax}
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Out Tok Min</span>
+				<input type="number" bind:value={filterOutTokMin}
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Out Tok Max</span>
+				<input type="number" bind:value={filterOutTokMax}
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Metadata Key</span>
+				<input type="text" bind:value={filterMetaKey} placeholder="e.g. capture_source"
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+			<label class="flex flex-col gap-1">
+				<span style="font-size:11px; color:{textMuted};">Metadata Value</span>
+				<input type="text" bind:value={filterMetaValue} placeholder="Contains…"
+					class="rounded px-2 py-1.5 text-sm" style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};" />
+			</label>
+		</div>
+		<div class="flex items-center gap-2 mt-4">
+			<button
+				onclick={applyFilters}
+				disabled={loading}
+				class="rounded-lg px-3 py-2 text-sm cursor-pointer"
+				style="background:{accent}; color:white;"
+			>Apply Filters</button>
+			<button
+				onclick={clearFilters}
+				disabled={loading}
+				class="rounded-lg px-3 py-2 text-sm cursor-pointer"
+				style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
+			>Clear</button>
+		</div>
+	</div>
+
 	<!-- Error banner -->
 	{#if error}
 		<div class="rounded-xl p-4 flex items-start gap-2"
@@ -274,7 +430,7 @@
 		<div class="px-5 py-3 flex items-center justify-between"
 			style="border-bottom:1px solid {borderColor};">
 			<span style="font-size:13px; color:{textMuted};">
-				{total} events
+				Total: {total} events
 				{#if total > 0} &middot; page {page} of {totalPages}{/if}
 			</span>
 			<div class="flex items-center gap-2">
@@ -302,10 +458,13 @@
 				<table class="w-full text-sm border-collapse">
 					<thead>
 						<tr style="border-bottom:1px solid {borderColor}; background:{surface2};">
+							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Details</th>
 							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Started At</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Provider</th>
 							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Model</th>
 							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Prompt</th>
+							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Metadata</th>
+							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Call Reason</th>
+							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Call LOC</th>
 							<th class="text-right px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">In Tok</th>
 							<th class="text-right px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Out Tok</th>
 							<th class="text-right px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Latency</th>
@@ -317,14 +476,31 @@
 					<tbody>
 						{#each rows as row (row.id)}
 							<tr class="transition-colors hover:bg-white/5" style="border-bottom:1px solid {borderColor};">
-								<td class="px-4 py-2.5" style="color:{textMuted}; white-space:nowrap; font-size:12px;">{formatTime(row.request_started_at)}</td>
-								<td class="px-4 py-2.5" style="white-space:nowrap;">
-									<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
-										style="background:{accent}22; color:{accent};">{row.provider}</span>
+								<td class="px-4 py-2.5">
+									<button
+										onclick={() => openDetails(row)}
+										class="rounded px-2 py-1 text-xs cursor-pointer"
+										style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
+									>Details</button>
 								</td>
+								<td class="px-4 py-2.5" style="color:{textMuted}; white-space:nowrap; font-size:12px;">{formatTime(row.request_started_at)}</td>
 								<td class="px-4 py-2.5" style="color:{textSecondary}; white-space:nowrap; font-size:13px;">{row.model_name || '—'}</td>
 								<td class="px-4 py-2.5" style="color:{textSecondary}; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;"
 									title={row.prompt_name}>{row.prompt_name || '—'}</td>
+
+								<!-- Metadata -->
+								<td class="px-4 py-2.5">
+									<button
+										onclick={() => openMetadata(row)}
+										class="text-left rounded px-2 py-1 cursor-pointer"
+										style="background:{surface2}; color:{accent}; border:1px solid {borderColor}; font-size:11px; font-family:monospace;"
+										title={metadataText(row)}
+									>{'{ }'}</button>
+								</td>
+
+								<td class="px-4 py-2.5" style="color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_reason || '—'}</td>
+								<td class="px-4 py-2.5" style="color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_loc || '—'}</td>
+
 								<td class="px-4 py-2.5 text-right" style="color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.input_tokens.toLocaleString()}</td>
 								<td class="px-4 py-2.5 text-right" style="color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.output_tokens.toLocaleString()}</td>
 								<td class="px-4 py-2.5 text-right" style="color:{textMuted}; font-size:12px; white-space:nowrap;">{formatLatency(row.latency_ms)}</td>

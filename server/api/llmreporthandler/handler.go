@@ -22,7 +22,7 @@ type reportStore interface {
 	ListUsageEvents(ctx context.Context, limit int) ([]UsageEvent, error)
 	ListCurrentBalances(ctx context.Context, limit int) ([]CurrentBalance, error)
 	GetTodaySummary(ctx context.Context, workspaceDay time.Time, timezoneName string) (TodaySummary, error)
-	ListUsageEventsAdmin(ctx context.Context, page, pageSize int) ([]UsageEventAdmin, int64, error)
+	ListUsageEventsAdmin(ctx context.Context, page, pageSize int, filters UsageEventAdminFilters) ([]UsageEventAdmin, int64, error)
 	GetUsageEventBodyRefs(ctx context.Context, id string) (inputRef, outputRef string, err error)
 }
 
@@ -189,7 +189,33 @@ func ListUsageEventsAdmin(c echo.Context) error {
 	}
 	page := intParamDefault(c.QueryParam("page"), 1)
 	pageSize := intParamDefault(c.QueryParam("page_size"), 50)
-	rows, total, err := store.ListUsageEventsAdmin(c.Request().Context(), page, pageSize)
+	filters := UsageEventAdminFilters{
+		Model:      c.QueryParam("model"),
+		Prompt:     c.QueryParam("prompt"),
+		CallReason: c.QueryParam("call_reason"),
+		CallLoc:    c.QueryParam("call_loc"),
+		MetaKey:    c.QueryParam("meta_key"),
+		MetaValue:  c.QueryParam("meta_value"),
+	}
+	if v, ok := timeParam(c.QueryParam("started_from")); ok {
+		filters.StartedFrom = &v
+	}
+	if v, ok := timeParam(c.QueryParam("started_to")); ok {
+		filters.StartedTo = &v
+	}
+	if v, ok := int64Param(c.QueryParam("in_tok_min")); ok {
+		filters.InTokMin = &v
+	}
+	if v, ok := int64Param(c.QueryParam("in_tok_max")); ok {
+		filters.InTokMax = &v
+	}
+	if v, ok := int64Param(c.QueryParam("out_tok_min")); ok {
+		filters.OutTokMin = &v
+	}
+	if v, ok := int64Param(c.QueryParam("out_tok_max")); ok {
+		filters.OutTokMax = &v
+	}
+	rows, total, err := store.ListUsageEventsAdmin(c.Request().Context(), page, pageSize, filters)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to list llm usage events", "error": err.Error()})
 	}
@@ -238,4 +264,28 @@ func intParamDefault(raw string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// timeParam parses an RFC3339 timestamp query param. ok is false if raw is empty or invalid.
+func timeParam(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// int64Param parses an integer query param. ok is false if raw is empty or invalid.
+func int64Param(raw string) (int64, bool) {
+	if raw == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }

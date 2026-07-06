@@ -80,6 +80,97 @@ LIMIT $1`)).WithArgs(50).WillReturnRows(rows)
 	}
 }
 
+func TestStoreListUsageEventsAdminNoFilters(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM llm_usage_event evt`)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	rows := sqlmock.NewRows([]string{
+		"id", "account_id", "account_name", "profile_id", "record_id", "provider", "model_name", "prompt_name", "call_reason", "call_loc",
+		"request_started_at", "input_tokens", "output_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "latency_ms", "error_message",
+		"input_body_ref", "output_body_ref", "metadata_json",
+	}).AddRow(
+		"evt_1", "acct_1", "deepseek:api.deepseek.com", "prof_1", 88, "deepseek", "deepseek-v4-flash", "extract-products-v2", "extract_products", "MID-CWB-TEST",
+		time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC), 100, 25, 125, 80, 20, 3200, "",
+		"llm-abc-input.json.gz", "llm-abc-output.json.gz", []byte(`{"capture_source":"shared_llm"}`),
+	)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id,
+evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
+evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
+evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
+FROM llm_usage_event evt
+LEFT JOIN llm_account acct ON acct.id = evt.account_id
+ORDER BY evt.request_started_at DESC
+LIMIT $1 OFFSET $2`)).WithArgs(50, 0).WillReturnRows(rows)
+
+	store := NewStore(db)
+	got, total, err := store.ListUsageEventsAdmin(context.Background(), 1, 50, UsageEventAdminFilters{})
+	if err != nil {
+		t.Fatalf("ListUsageEventsAdmin() error = %v", err)
+	}
+	if total != 1 || len(got) != 1 {
+		t.Fatalf("ListUsageEventsAdmin() total=%d len=%d, want 1/1", total, len(got))
+	}
+	if got[0].ModelName != "deepseek-v4-flash" || string(got[0].MetadataJSON) != `{"capture_source":"shared_llm"}` {
+		t.Fatalf("unexpected admin usage event = %+v", got[0])
+	}
+}
+
+func TestStoreListUsageEventsAdminWithFilters(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	inTokMin := int64(10)
+	filters := UsageEventAdminFilters{
+		Model:      "deepseek",
+		CallReason: "extract_products",
+		InTokMin:   &inTokMin,
+		MetaKey:    "capture_source",
+		MetaValue:  "shared_llm",
+	}
+
+	whereClause := ` WHERE evt.model_name ILIKE '%' || $1 || '%' AND evt.call_reason ILIKE '%' || $2 || '%' AND evt.input_tokens >= $3 AND evt.metadata_json ->> $4 ILIKE '%' || $5 || '%'`
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM llm_usage_event evt` + whereClause)).
+		WithArgs("deepseek", "extract_products", inTokMin, "capture_source", "shared_llm").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT evt.id, evt.account_id, acct.account_name, evt.profile_id, evt.record_id,
+evt.provider, evt.model_name, evt.prompt_name, evt.call_reason, evt.call_loc,
+evt.request_started_at, evt.input_tokens, evt.output_tokens, evt.total_tokens,
+evt.prompt_cache_hit_tokens, evt.prompt_cache_miss_tokens, evt.latency_ms, evt.error_message,
+COALESCE(evt.input_body_ref, ''), COALESCE(evt.output_body_ref, ''), COALESCE(evt.metadata_json, '{}'::jsonb)
+FROM llm_usage_event evt
+LEFT JOIN llm_account acct ON acct.id = evt.account_id` + whereClause + `
+ORDER BY evt.request_started_at DESC
+LIMIT $6 OFFSET $7`)).
+		WithArgs("deepseek", "extract_products", inTokMin, "capture_source", "shared_llm", 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "account_id", "account_name", "profile_id", "record_id", "provider", "model_name", "prompt_name", "call_reason", "call_loc",
+			"request_started_at", "input_tokens", "output_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "latency_ms", "error_message",
+			"input_body_ref", "output_body_ref", "metadata_json",
+		}))
+
+	store := NewStore(db)
+	got, total, err := store.ListUsageEventsAdmin(context.Background(), 1, 50, filters)
+	if err != nil {
+		t.Fatalf("ListUsageEventsAdmin() error = %v", err)
+	}
+	if total != 0 || len(got) != 0 {
+		t.Fatalf("ListUsageEventsAdmin() total=%d len=%d, want 0/0", total, len(got))
+	}
+}
+
 func TestStoreListModelActivityReports(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

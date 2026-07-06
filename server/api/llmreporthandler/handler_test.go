@@ -40,7 +40,7 @@ func (s *stubReportStore) GetTodaySummary(_ context.Context, workspaceDay time.T
 	return s.sum, nil
 }
 
-func (s *stubReportStore) ListUsageEventsAdmin(_ context.Context, page, pageSize int) ([]UsageEventAdmin, int64, error) {
+func (s *stubReportStore) ListUsageEventsAdmin(_ context.Context, page, pageSize int, filters UsageEventAdminFilters) ([]UsageEventAdmin, int64, error) {
 	return nil, 0, nil
 }
 
