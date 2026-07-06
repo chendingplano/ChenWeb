@@ -15,10 +15,10 @@ func dp(provID string, cats ...string) docProvision {
 
 func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 	const recordID = int64(1)
-	docProvs := []docProvision{
-		dp("1_prv_1", "safety/pressure"), // index 0
-		dp("1_prv_2", "process/temp"),    // index 1
-	}
+	// docProvs := []docProvision{
+	// 	dp("1_prv_1", "safety/pressure"), // index 0
+	// 	dp("1_prv_2", "process/temp"),    // index 1
+	// }
 
 	// Branch A: live hybrid-search hits for P1 (index 0), keyed by doc provision index.
 	hybridMatches := map[int][]docprocessing.OnTheFlySemanticMatch{
@@ -47,7 +47,7 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 		},
 	}
 
-	got := assembleProvisionMatches(recordID, docProvs, hybridMatches, objectMatches, resolved, 0)
+	got := assembleProvisionMatches(recordID, hybridMatches, objectMatches, resolved, 0)
 
 	// P1: 2_prv_9 (A) and 3_prv_7 (A+B deduped) = 2; 1_prv_5 excluded.
 	if len(got[0]) != 2 {
@@ -64,7 +64,7 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 	}
 
 	// Cap = 1: P1 keeps only highest-confidence match (2_prv_9 @0.9).
-	capped := assembleProvisionMatches(recordID, docProvs, hybridMatches, objectMatches, resolved, 1)
+	capped := assembleProvisionMatches(recordID, hybridMatches, objectMatches, resolved, 1)
 	if len(capped[0]) != 1 || capped[0][0].view.ProvID != "2_prv_9" {
 		t.Fatalf("capped P1 = %v, want [2_prv_9]", capped[0])
 	}
@@ -72,7 +72,7 @@ func TestAssembleProvisionMatches_BranchesDedupExclusionCap(t *testing.T) {
 
 func TestAssembleProvisionMatches_BranchA_DedupAndExclusion(t *testing.T) {
 	const recordID = int64(1)
-	docProvs := []docProvision{dp("1_prv_1")} // index 0
+	// docProvs := []docProvision{dp("1_prv_1")} // index 0
 
 	// A single live hybrid search per doc provision returns a flat, direction-free hit list.
 	// Duplicate ids collapse (first-seen wins) and same-document hits are excluded.
@@ -90,7 +90,7 @@ func TestAssembleProvisionMatches_BranchA_DedupAndExclusion(t *testing.T) {
 		"1_prv_8": {view: provisionView{ProvID: "1_prv_8"}, recordID: recordID},
 	}
 
-	got := assembleProvisionMatches(recordID, docProvs, hybridMatches, nil, resolved, 0)
+	got := assembleProvisionMatches(recordID, hybridMatches, nil, resolved, 0)
 
 	if len(got[0]) != 2 {
 		t.Fatalf("P1 matches = %d, want 2 (%v)", len(got[0]), got[0])

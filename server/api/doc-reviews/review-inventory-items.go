@@ -196,9 +196,10 @@ func (r *inventoryItemsReviewer) reviewItem(
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		callInfo := docReviewCallInfo(ctx, map[string]any{"inv_item_id": di.view.ItemID})
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
-			userCtx, tools, recordID, r.logger,
+			userCtx, tools, recordID, r.logger, "review_inventory_items", callInfo, "MID-20260706-007",
 		)
 		if loopUsage != nil {
 			cacheHitTokens = loopUsage.PromptCacheHitTokens

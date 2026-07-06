@@ -232,9 +232,10 @@ func (r *metricsReviewer) reviewMetric(
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		// r.logger.Info("prompt", "promptName", cfg.PromptRef)
 		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		callInfo := docReviewCallInfo(ctx, map[string]any{"metric_id": dm.view.MetricID})
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
-			userCtx, tools, recordID, r.logger,
+			userCtx, tools, recordID, r.logger, "review_metrics", callInfo, "MID-20260706-011",
 		)
 		if loopUsage != nil {
 			cacheHitTokens = loopUsage.PromptCacheHitTokens

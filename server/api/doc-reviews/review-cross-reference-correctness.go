@@ -137,9 +137,14 @@ func (r *crossReferenceCorrectnessReviewer) processBlock(
 			"tools", len(tools),
 		)
 		userCtx := fmt.Sprintf("<DOCUMENT_INPUT>\n%s\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\n%s\n</REVIEW_TASK>", b.inputJSON, cfg.PromptText)
+		callInfo := docReviewCallInfo(ctx, map[string]any{
+			"block": fmt.Sprintf("%d/%d", index+1, total),
+			"pages": fmt.Sprintf("%d-%d", b.pageStart, b.pageEnd),
+			"lines": fmt.Sprintf("%d-%d", b.lineStart, b.lineEnd),
+		})
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
-			userCtx, tools, recordID, r.logger,
+			userCtx, tools, recordID, r.logger, "review_cross_reference_correctness", callInfo, "MID-20260706-002",
 		)
 		if loopUsage != nil {
 			cacheHitTokens = loopUsage.PromptCacheHitTokens

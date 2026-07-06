@@ -169,9 +169,13 @@ func (r *evidenceRationaleReviewer) processWindow(
 		)
 		// DR8a layout: canonical doc input before reviewer task.
 		userCtx := fmt.Sprintf("<DOCUMENT_INPUT>\n%s\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\n%s\n</REVIEW_TASK>", w.inputJSON, cfg.PromptText)
+		callInfo := docReviewCallInfo(ctx, map[string]any{
+			"window": index,
+			"lines":  fmt.Sprintf("%d-%d", w.startLine, w.endLine),
+		})
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
-			userCtx, tools, recordID, r.logger,
+			userCtx, tools, recordID, r.logger, "review_evidence_rationale", callInfo, "MID-20260706-004",
 		)
 		if loopUsage != nil {
 			cacheHitTokens = loopUsage.PromptCacheHitTokens

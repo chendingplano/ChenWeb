@@ -108,7 +108,7 @@ func TestRunToolUseReviewUsesDocumentFirstPromptLayout(t *testing.T) {
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 1},
 		"Check rationale and evidence.", "<DOCUMENT_INPUT>\nshared document\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\nCheck rationale and evidence.\n</REVIEW_TASK>",
-		[]ReviewTool{}, 42, logger,
+		[]ReviewTool{}, 42, logger, "review_tool_loop", "", "MID-20260706-023",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -175,7 +175,7 @@ func TestRunToolUseReviewToolCallThenFindings(t *testing.T) {
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 5},
 		"You are a doc reviewer.", "<doc_input></doc_input><task>Check rationale</task>",
-		[]ReviewTool{tc.toReviewTool()}, 42, logger,
+		[]ReviewTool{tc.toReviewTool()}, 42, logger, "review_tool_loop_test", "", "MID-20260706-024",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -209,7 +209,7 @@ func TestRunToolUseReviewAggregatesPromptCacheTokens(t *testing.T) {
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 1},
 		"You are a doc reviewer.", "<doc_input></doc_input><task>Check</task>",
-		[]ReviewTool{}, 42, logger,
+		[]ReviewTool{}, 42, logger, "review_tool_loop_test", "", "MID-20260706-025",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -240,7 +240,7 @@ func TestRunToolUseReviewToolCallPathExecutesTool(t *testing.T) {
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 5},
 		"You are a doc reviewer.", "<doc_input></doc_input><task>Check rationale</task>",
-		[]ReviewTool{tc.toReviewTool()}, 42, logger,
+		[]ReviewTool{tc.toReviewTool()}, 42, logger, "review_tool_loop_test", "", "MID-20260706-026",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -469,7 +469,7 @@ func TestRunToolUseReviewTurnBudgetExhausted(t *testing.T) {
 		context.Background(), client, "test-model",
 		ReviewerConfig{MaxToolTurns: 0},
 		"You are a doc reviewer.", "<doc_input></doc_input><task>Check</task>",
-		[]ReviewTool{}, 42, logger,
+		[]ReviewTool{}, 42, logger, "review_tool_loop_test", "", "MID-20260706-027",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -495,7 +495,7 @@ func TestRunToolUseReviewStopMidLoop(t *testing.T) {
 	_, _, err := runToolUseReview(
 		ctx, client, "test-model",
 		ReviewerConfig{MaxToolTurns: 5},
-		"You are a doc reviewer.", "<doc_input/>", []ReviewTool{}, 42, logger,
+		"You are a doc reviewer.", "<doc_input/>", []ReviewTool{}, 42, logger, "review_tool_loop_test", "", "MID-20260706-028",
 	)
 	if !errors.Is(err, ErrPipelineStopped) {
 		t.Fatalf("expected ErrPipelineStopped, got %v", err)

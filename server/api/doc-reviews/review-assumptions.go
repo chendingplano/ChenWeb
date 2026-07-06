@@ -114,7 +114,12 @@ func buildAssumptionsWindows(lines []Line, docCtx string, size int) []assumption
 	return windows
 }
 
-func (r *assumptionsReviewer) processChunk(ctx context.Context, recordID int64, index int, cfg ReviewerConfig, input chunkInput) []ReviewFinding {
+func (r *assumptionsReviewer) processChunk(
+	ctx context.Context,
+	recordID int64,
+	index int,
+	cfg ReviewerConfig,
+	input chunkInput) []ReviewFinding {
 	return r.processWindow(ctx, recordID, index, cfg, assumptionsWindow{inputJSON: input.inputJSON, startLine: input.startLine, endLine: input.endLine})
 }
 
@@ -139,9 +144,13 @@ func (r *assumptionsReviewer) processWindow(
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		userCtx := fmt.Sprintf("<DOCUMENT_INPUT>\n%s\n</DOCUMENT_INPUT>\n\n<REVIEW_TASK>\n%s\n</REVIEW_TASK>", w.inputJSON, cfg.PromptText)
+		callInfo := docReviewCallInfo(ctx, map[string]any{
+			"window": index,
+			"lines":  fmt.Sprintf("%d-%d", w.startLine, w.endLine),
+		})
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
-			userCtx, tools, recordID, r.logger,
+			userCtx, tools, recordID, r.logger, "review_assumptions", callInfo, "MID-20260706-001",
 		)
 		if loopUsage != nil {
 			cacheHitTokens = loopUsage.PromptCacheHitTokens

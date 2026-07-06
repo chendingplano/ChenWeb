@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +22,26 @@ const defaultP3MaxToolTokens = 60000
 const docReviewToolUseSystemPrompt = "You are a document review engine. Return strict JSON findings only unless you need to call an available tool."
 
 var ErrToolUseFinalizeUnparseable = errors.New("tool-use finalize response was not parseable findings JSON")
+
+// docReviewCallInfo builds the call_info JSON string passed into runToolUseReview.
+// It merges the run_id from ctx (when present) with reviewer-supplied identifying
+// fields (e.g. which window/block/artifact was under review) so that a row in
+// llm_usage_event.metadata_json is enough to diagnose what a given call was for
+// (ADR 2026070501).
+func docReviewCallInfo(ctx context.Context, fields map[string]any) string {
+	info := make(map[string]any, len(fields)+1)
+	for k, v := range fields {
+		info[k] = v
+	}
+	if runID := llmRunIDFromContext(ctx); runID > 0 {
+		info["run_id"] = runID
+	}
+	b, err := json.Marshal(info)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
 
 // runToolUseReview runs the bounded tool-use conversation loop (DR10b) for one
 // review unit (a window for StrategyChunk reviewers). It places the canonical
@@ -39,12 +60,24 @@ func runToolUseReview(
 	tools []ReviewTool,
 	recordID int64,
 	logger ApiTypes.JimoLogger,
+	call_reason string,
+	call_info string,
+	call_loc string,
 ) ([]ReviewFinding, *LLMUsage, error) {
 	toolByName := make(map[string]ReviewTool, len(tools))
 	for _, t := range tools {
 		toolByName[t.Name] = t
 	}
 	toolDefs := toolDefsFor(tools)
+
+	var callMetadata map[string]any
+	if strings.TrimSpace(call_info) != "" {
+		if err := json.Unmarshal([]byte(call_info), &callMetadata); err != nil {
+			logger.Error("call_info is not valid JSON; omitting from metadata_json",
+				"call_info", call_info, "error", err)
+			callMetadata = nil
+		}
+	}
 
 	maxTurns := cfg.MaxToolTurns
 	if maxTurns <= 0 {
@@ -67,14 +100,21 @@ func runToolUseReview(
 			return nil, aggregateUsage, ErrPipelineStopped
 		}
 
+		turnMetadata := maps.Clone(callMetadata)
+		if turnMetadata == nil {
+			turnMetadata = map[string]any{}
+		}
+		turnMetadata["turn_count"] = turn + 1
+
 		resp, err := client.Complete(ctx, LLMRequest{
 			Model:      modelName,
 			Messages:   messages,
 			Tools:      toolDefs,
 			ToolChoice: "auto",
 			RecordID:   recordID,
-			CallReason: "review_tool_use",
-			CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP",
+			CallReason: call_reason,
+			CallLoc:    call_loc,
+			Metadata:   turnMetadata,
 		})
 		if err != nil {
 			return nil, aggregateUsage, fmt.Errorf("(MID_26062595) tool-use LLM call failed: %w", err)

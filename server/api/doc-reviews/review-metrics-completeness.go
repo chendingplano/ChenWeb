@@ -43,7 +43,7 @@ type peerDocMetrics struct {
 	filename  string
 	title     string
 	docNo     string
-	authority string      // docAuthorityClass
+	authority string       // docAuthorityClass
 	metrics   []metricView // metrics this peer attaches to the object
 }
 
@@ -146,10 +146,10 @@ func (r *metricsCompletenessReviewer) reviewObject(
 			"object_type": ro.objectType,
 			"description": ro.description,
 		},
-		"doc_metrics":        ro.docMetrics,
-		"peer_docs":          ro.peerDocsForPayload(),
-		"total_peer_docs":    ro.totalPeerDocs,
-		"total_peer_metrics": ro.totalPeerMetrics,
+		"doc_metrics":         ro.docMetrics,
+		"peer_docs":           ro.peerDocsForPayload(),
+		"total_peer_docs":     ro.totalPeerDocs,
+		"total_peer_metrics":  ro.totalPeerMetrics,
 		"artifact_line_spans": ro.docSpan,
 	}
 	if ro.truncated {
@@ -166,9 +166,10 @@ func (r *metricsCompletenessReviewer) reviewObject(
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		userCtx := artifactReviewToolUserContext(ro.windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		callInfo := docReviewCallInfo(ctx, map[string]any{"object_id": ro.objectID})
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
-			userCtx, tools, recordID, r.logger,
+			userCtx, tools, recordID, r.logger, "review_metrics_completeness", callInfo, "MID-20260706-010",
 		)
 		if loopUsage != nil {
 			cacheHitTokens = loopUsage.PromptCacheHitTokens
@@ -549,9 +550,9 @@ ORDER BY target_id, source_record_id`
 	// to objects that resolved to different canonical nodes but are clearly
 	// the same real-world object.
 	type objTypeName struct {
-		id       string
-		objType  string
-		names    []string
+		id      string
+		objType string
+		names   []string
 	}
 	primaries := make(map[string]objTypeName)
 	for _, objID := range objectIDs {

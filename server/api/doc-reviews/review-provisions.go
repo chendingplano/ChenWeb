@@ -193,9 +193,10 @@ func (r *provisionsReviewer) reviewProvision(
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
+		callInfo := provisionToolReviewCallInfo(ctx, dp.view.ProvID)
 		loopFindings, loopUsage, loopErr := runToolUseReview(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
-			userCtx, tools, recordID, r.logger,
+			userCtx, tools, recordID, r.logger, "review_provisions", callInfo, "MID-20260706-014",
 		)
 		if loopUsage != nil {
 			cacheHitTokens = loopUsage.PromptCacheHitTokens
@@ -262,6 +263,13 @@ func provisionReviewCallMetadata(ctx context.Context, provID string) map[string]
 		meta["run_id"] = runID
 	}
 	return meta
+}
+
+// provisionToolReviewCallInfo builds the call_info JSON string passed into
+// runToolUseReview for the tool-use provision-review path; runToolUseReview
+// merges in the per-turn turn_count before each LLM call.
+func provisionToolReviewCallInfo(ctx context.Context, provID string) string {
+	return docReviewCallInfo(ctx, map[string]any{"prv_id": provID})
 }
 
 // matchedProvisionsPayload serializes the matched candidates. Raw RRF scores
@@ -345,13 +353,12 @@ func (r *provisionsReviewer) buildMatches(
 		}
 	}
 
-	return assembleProvisionMatches(recordID, docProvs, hybridMatches, objectMatches, resolved, r.maxMatches), nil
+	return assembleProvisionMatches(recordID, hybridMatches, objectMatches, resolved, r.maxMatches), nil
 }
 
 // assembleProvisionMatches is the pure (DB-free) match-assembly used by buildMatches.
 func assembleProvisionMatches(
 	recordID int64,
-	docProvs []docProvision,
 	hybridMatches map[int][]docprocessing.OnTheFlySemanticMatch,
 	objectMatches map[int][]resolvedProvision,
 	resolved map[string]resolvedProvision,
