@@ -78,6 +78,9 @@ type FindingItem struct {
 	Suggestion   string  `json:"suggestion,omitempty"`
 	Confidence   float64 `json:"confidence"`
 	ReviewStatus string  `json:"review_status"`
+	// ArtifactID identifies the artifact-under-review (metric_id / prov_id /
+	// inventory_item_id) this finding is about, for the per-artifact reviewers.
+	ArtifactID string `json:"artifact_id,omitempty"`
 	// RelatedArtifactID/RelatedRecordID identify a cross-document artifact
 	// referenced by this finding, when present in finding metadata.
 	RelatedArtifactID string `json:"related_artifact_id,omitempty"`

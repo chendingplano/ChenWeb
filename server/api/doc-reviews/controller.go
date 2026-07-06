@@ -313,7 +313,8 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 		rows, err := c.DB.QueryContext(ctx, `
 			SELECT id, pass, aspect, severity, finding_type, title, description,
 			       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-			       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
+			       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+			       COALESCE(artifact_id,'')
 			FROM kb.doc_review_findings
 			WHERE input_record_id = $1 AND run_id = $2
 			  AND ($3 = '' OR pass = $3)
@@ -331,7 +332,7 @@ func (c *DocReviewController) GetRequestWithFindings(ctx context.Context, reques
 			var metadata string
 			if err := rows.Scan(&f.ID, &f.Pass, &f.Aspect, &f.Severity, &f.FindingType,
 				&f.Title, &f.Description, &f.Evidence, &f.Location, &f.Suggestion,
-				&f.Confidence, &f.ReviewStatus, &metadata); err != nil {
+				&f.Confidence, &f.ReviewStatus, &metadata, &f.ArtifactID); err != nil {
 				return nil, fmt.Errorf("scan finding: %w", err)
 			}
 			metadataByFindingID[f.ID] = []byte(metadata)

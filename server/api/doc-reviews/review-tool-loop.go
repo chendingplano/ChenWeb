@@ -50,7 +50,34 @@ func docReviewCallInfo(ctx context.Context, fields map[string]any) string {
 // record-scoped registry, and repeats until the model returns findings or the
 // turn/token budget is exhausted (then force-finalizes). A single model response
 // is treated as either findings or tool calls, never both.
+// runToolUseReview runs the bounded tool-use conversation loop and returns
+// only findings, matching the signature every existing P3/P5 reviewer calls.
 func runToolUseReview(
+	ctx context.Context,
+	client LLMChatClient,
+	modelName string,
+	cfg ReviewerConfig,
+	promptText string,
+	userContext string,
+	tools []ReviewTool,
+	recordID int64,
+	logger ApiTypes.JimoLogger,
+	call_reason string,
+	call_info string,
+	call_loc string,
+) ([]ReviewFinding, *LLMUsage, error) {
+	findings, _, usage, err := runToolUseReviewWithPayload(
+		ctx, client, modelName, cfg, promptText, userContext, tools, recordID, logger, call_reason, call_info, call_loc,
+	)
+	return findings, usage, err
+}
+
+// runToolUseReviewWithPayload is the same conversation loop as
+// runToolUseReview but also returns the raw JSON payload of whichever model
+// response ultimately produced the findings, so callers whose prompt asks
+// for sibling top-level keys (e.g. the provisions reviewer's mandatory
+// per-match `analyses`) can recover them without a second LLM call.
+func runToolUseReviewWithPayload(
 	ctx context.Context,
 	client LLMChatClient,
 	modelName string,
@@ -63,7 +90,7 @@ func runToolUseReview(
 	call_reason string,
 	call_info string,
 	call_loc string,
-) ([]ReviewFinding, *LLMUsage, error) {
+) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	toolByName := make(map[string]ReviewTool, len(tools))
 	for _, t := range tools {
 		toolByName[t.Name] = t
@@ -97,7 +124,7 @@ func runToolUseReview(
 	aggregateUsage := &LLMUsage{}
 	for turn := 0; turn < maxTurns; turn++ {
 		if isCtxStopped(ctx) {
-			return nil, aggregateUsage, ErrPipelineStopped
+			return nil, nil, aggregateUsage, ErrPipelineStopped
 		}
 
 		turnMetadata := maps.Clone(callMetadata)
@@ -117,7 +144,7 @@ func runToolUseReview(
 			Metadata:   turnMetadata,
 		})
 		if err != nil {
-			return nil, aggregateUsage, fmt.Errorf("(MID_26062595) tool-use LLM call failed: %w", err)
+			return nil, nil, aggregateUsage, fmt.Errorf("(MID_26062595) tool-use LLM call failed: %w", err)
 		}
 		logLoopUsage(logger, modelName, turn, resp.Usage)
 		addUsage(aggregateUsage, resp.Usage)
@@ -162,24 +189,24 @@ func runToolUseReview(
 		}
 
 		// No tool calls: the model is producing its final findings.
-		if findings, ok := parseFindingsContent(resp.Content); ok {
+		if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content); ok {
 			logToolUseFindingsStatus(logger, "response", recordID, turn, findings)
-			return findings, aggregateUsage, nil
+			return findings, payload, aggregateUsage, nil
 		}
 
 		// Degenerate response (neither tool calls nor parseable findings):
 		// one repair attempt asking for strict JSON, then give up for this unit.
 		messages = append(messages, LLMMessage{Role: LLMRoleAssistant, Content: resp.Content})
-		findings, usage, err := finalizeFindings(ctx, client, modelName, recordID, messages, toolByName, logger)
+		findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, logger)
 		addUsage(aggregateUsage, usage)
-		return findings, aggregateUsage, err
+		return findings, payload, aggregateUsage, err
 	}
 
 	// Budget exhausted (turns or tokens): force the model to produce findings
 	// from the evidence collected so far, without tools (DR10b force-produce).
-	findings, usage, err := finalizeFindings(ctx, client, modelName, recordID, messages, toolByName, logger)
+	findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, logger)
 	addUsage(aggregateUsage, usage)
-	return findings, aggregateUsage, err
+	return findings, payload, aggregateUsage, err
 }
 
 // finalizeFindings appends the force-produce instruction and makes one final
@@ -195,8 +222,24 @@ func finalizeFindings(
 	toolByName map[string]ReviewTool,
 	logger ApiTypes.JimoLogger,
 ) ([]ReviewFinding, *LLMUsage, error) {
+	findings, _, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, logger)
+	return findings, usage, err
+}
+
+// finalizeFindingsWithPayload is finalizeFindings but also returns the raw
+// JSON payload of the response that produced the findings, for callers whose
+// prompt requires sibling top-level keys alongside `findings`.
+func finalizeFindingsWithPayload(
+	ctx context.Context,
+	client LLMChatClient,
+	modelName string,
+	recordID int64,
+	messages []LLMMessage,
+	toolByName map[string]ReviewTool,
+	logger ApiTypes.JimoLogger,
+) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	if isCtxStopped(ctx) {
-		return nil, nil, ErrPipelineStopped
+		return nil, nil, nil, ErrPipelineStopped
 	}
 	messages = append(messages, LLMMessage{
 		Role: LLMRoleUser,
@@ -212,37 +255,37 @@ func finalizeFindings(
 		CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP-FINAL",
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("(MID_26062596) tool-use finalize call failed: %w", err)
+		return nil, nil, nil, fmt.Errorf("(MID_26062596) tool-use finalize call failed: %w", err)
 	}
 	totalUsage := &LLMUsage{}
 	addUsage(totalUsage, resp.Usage)
 	logLoopUsage(logger, modelName, -1, resp.Usage)
-	if findings, ok, _ := parseFindingsContentDetailed(resp.Content); ok {
+	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content); ok {
 		logToolUseFindingsStatus(logger, "finalize", recordID, -1, findings)
-		return findings, totalUsage, nil
+		return findings, payload, totalUsage, nil
 	}
-	_, _, parseReason := parseFindingsContentDetailed(resp.Content)
+	_, _, _, parseReason := parseFindingsContentDetailedWithPayload(resp.Content)
 	if shouldRepairFindingsJSON(parseReason) {
-		repairFindings, repairUsage, repairErr := repairFinalFindingsJSON(
+		repairFindings, repairPayload, repairUsage, repairErr := repairFinalFindingsJSONWithPayload(
 			ctx, client, modelName, recordID, messages, toolByName, resp.Content, parseReason, logger,
 		)
 		addUsage(totalUsage, repairUsage)
 		if repairErr == nil {
-			return repairFindings, totalUsage, nil
+			return repairFindings, repairPayload, totalUsage, nil
 		}
 		logger.Error("tool-use finalize repair failed",
 			"record_id", recordID,
 			"parse_failure_reason", repairErr.Error(),
 			"response_preview", previewToolLogText(resp.Content),
 		)
-		return nil, totalUsage, repairErr
+		return nil, nil, totalUsage, repairErr
 	}
 	logger.Error("tool-use finalize returned invalid findings format",
 		"record_id", recordID,
 		"parse_failure_reason", parseReason,
 		"response_preview", previewToolLogText(resp.Content),
 	)
-	return nil, totalUsage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
+	return nil, nil, totalUsage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
 		ErrToolUseFinalizeUnparseable, recordID, parseReason, previewToolLogText(resp.Content))
 }
 
@@ -250,7 +293,7 @@ func shouldRepairFindingsJSON(parseReason string) bool {
 	return strings.HasPrefix(parseReason, "json_unmarshal_failed:") || parseReason == "tool_calls_in_final_text"
 }
 
-func repairFinalFindingsJSON(
+func repairFinalFindingsJSONWithPayload(
 	ctx context.Context,
 	client LLMChatClient,
 	modelName string,
@@ -260,9 +303,9 @@ func repairFinalFindingsJSON(
 	badContent string,
 	parseReason string,
 	logger ApiTypes.JimoLogger,
-) ([]ReviewFinding, *LLMUsage, error) {
+) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	if isCtxStopped(ctx) {
-		return nil, nil, ErrPipelineStopped
+		return nil, nil, nil, ErrPipelineStopped
 	}
 	repairMessages := append([]LLMMessage(nil), messages...)
 	if parseReason == "tool_calls_in_final_text" {
@@ -298,7 +341,7 @@ func repairFinalFindingsJSON(
 					"Do not call tools again. Return strict JSON only with the exact shape " +
 					`{"findings":[...]}. Return {"findings":[]} if the evidence does not support any finding.`,
 			})
-			return callFinalFindingsRepair(ctx, client, modelName, recordID, repairMessages, logger)
+			return callFinalFindingsRepairWithPayload(ctx, client, modelName, recordID, repairMessages, logger)
 		}
 	}
 	repairMessages = append(repairMessages,
@@ -308,17 +351,17 @@ func repairFinalFindingsJSON(
 			Content: finalFindingsRepairPrompt(parseReason),
 		},
 	)
-	return callFinalFindingsRepair(ctx, client, modelName, recordID, repairMessages, logger)
+	return callFinalFindingsRepairWithPayload(ctx, client, modelName, recordID, repairMessages, logger)
 }
 
-func callFinalFindingsRepair(
+func callFinalFindingsRepairWithPayload(
 	ctx context.Context,
 	client LLMChatClient,
 	modelName string,
 	recordID int64,
 	repairMessages []LLMMessage,
 	logger ApiTypes.JimoLogger,
-) ([]ReviewFinding, *LLMUsage, error) {
+) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	resp, err := client.Complete(ctx, LLMRequest{
 		Model:      modelName,
 		Messages:   repairMessages,
@@ -327,15 +370,15 @@ func callFinalFindingsRepair(
 		CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP-FINAL-REPAIR",
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("(MID_26062597) tool-use finalize repair call failed: %w", err)
+		return nil, nil, nil, fmt.Errorf("(MID_26062597) tool-use finalize repair call failed: %w", err)
 	}
 	logLoopUsage(logger, modelName, -2, resp.Usage)
-	if findings, ok, _ := parseFindingsContentDetailed(resp.Content); ok {
+	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content); ok {
 		logToolUseFindingsStatus(logger, "finalize_repair", recordID, -2, findings)
-		return findings, resp.Usage, nil
+		return findings, payload, resp.Usage, nil
 	}
-	_, _, repairReason := parseFindingsContentDetailed(resp.Content)
-	return nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
+	_, _, _, repairReason := parseFindingsContentDetailedWithPayload(resp.Content)
+	return nil, nil, resp.Usage, fmt.Errorf("%w: record_id=%d reason=%s response=%q",
 		ErrToolUseFinalizeUnparseable, recordID, repairReason, previewToolLogText(resp.Content))
 }
 
@@ -500,9 +543,18 @@ func parseFindingsContent(content string) ([]ReviewFinding, bool) {
 }
 
 func parseFindingsContentDetailed(content string) ([]ReviewFinding, bool, string) {
+	findings, _, ok, reason := parseFindingsContentDetailedWithPayload(content)
+	return findings, ok, reason
+}
+
+// parseFindingsContentDetailedWithPayload is parseFindingsContentDetailed but
+// also returns the unmarshaled payload map, so callers whose prompt requires
+// sibling top-level keys alongside `findings` (e.g. the provisions reviewer's
+// mandatory per-match `analyses`) can recover them.
+func parseFindingsContentDetailedWithPayload(content string) ([]ReviewFinding, map[string]any, bool, string) {
 	obj, reason := extractJSONObjectDetailed(content)
 	if obj == "" {
-		return nil, false, reason
+		return nil, nil, false, reason
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(obj), &payload); err != nil {
@@ -514,13 +566,13 @@ func parseFindingsContentDetailed(content string) ([]ReviewFinding, bool, string
 				goto checkFindingsKey
 			}
 		}
-		return nil, false, "json_unmarshal_failed: " + err.Error()
+		return nil, nil, false, "json_unmarshal_failed: " + err.Error()
 	}
 checkFindingsKey:
 	if _, ok := payload["findings"]; !ok {
-		return nil, false, "missing_findings_key"
+		return nil, nil, false, "missing_findings_key"
 	}
-	return normalizeFindingsJSON(payload), true, ""
+	return normalizeFindingsJSON(payload), payload, true, ""
 }
 
 // repairMalformedFindingsJSON tries the shared library's JSON-repair heuristics

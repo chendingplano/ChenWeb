@@ -158,6 +158,9 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 	if f.Pass != "P5" || f.Aspect != "inventory_items" {
 		t.Errorf("pass/aspect = %q/%q, want P5/inventory_items", f.Pass, f.Aspect)
 	}
+	if f.ArtifactID != "1_inv_1" {
+		t.Errorf("artifact_id = %q, want 1_inv_1", f.ArtifactID)
+	}
 	if f.FindingType != "issue" || f.Severity != "low" {
 		t.Errorf("defaults: finding_type=%q severity=%q, want issue/low", f.FindingType, f.Severity)
 	}

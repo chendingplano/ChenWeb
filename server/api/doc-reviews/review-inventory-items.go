@@ -234,6 +234,7 @@ func (r *inventoryItemsReviewer) reviewItem(
 	for i := range findings {
 		findings[i].Pass = "P5"
 		findings[i].Aspect = "inventory_items"
+		findings[i].ArtifactID = di.view.ItemID
 		if findings[i].FindingType == "" {
 			findings[i].FindingType = "issue"
 		}

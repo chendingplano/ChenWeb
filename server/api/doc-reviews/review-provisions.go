@@ -189,12 +189,13 @@ func (r *provisionsReviewer) reviewProvision(
 	}
 
 	var findings []ReviewFinding
+	var payload map[string]any
 	var cacheHitTokens, cacheMissTokens int
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		callInfo := provisionToolReviewCallInfo(ctx, dp.view.ProvID)
-		loopFindings, loopUsage, loopErr := runToolUseReview(
+		loopFindings, loopPayload, loopUsage, loopErr := runToolUseReviewWithPayload(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
 			userCtx, tools, recordID, r.logger, "review_provisions", callInfo, "MID-20260706-014",
 		)
@@ -207,6 +208,7 @@ func (r *provisionsReviewer) reviewProvision(
 				"record_id", recordID, "provision_index", index, "error", loopErr)
 		}
 		findings = loopFindings
+		payload = loopPayload
 	} else {
 		// AR2 window-first layout: the window is the document input; the rubric
 		// plus the per-provision payload form the task tail. Without a window
@@ -224,13 +226,23 @@ func (r *provisionsReviewer) reviewProvision(
 			return nil
 		}
 		findings = normalizeFindingsJSON(out)
+		payload = out
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
+
+	if analyses := parseProvisionAnalysesJSON(payload); len(analyses) > 0 {
+		if err := r.saveProvisionAnalyses(ctx, recordID, dp.view.ProvID, analyses); err != nil {
+			r.logger.Warn("provisions review: save analyses failed",
+				"record_id", recordID, "provision_index", index, "prov_id", dp.view.ProvID, "error", err)
+		}
+	}
+
 	loc := strings.Join(dp.spans, ",")
 	for i := range findings {
 		findings[i].Pass = "P5"
 		findings[i].Aspect = "provisions"
+		findings[i].ArtifactID = dp.view.ProvID
 		if findings[i].FindingType == "" {
 			findings[i].FindingType = "issue"
 		}
@@ -253,6 +265,85 @@ func (r *provisionsReviewer) reviewProvision(
 		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
+}
+
+// ProvisionAnalysis is one entry of the provisions reviewer's mandatory
+// per-match comparison record (prompt-review-provisions-v4 `analyses`),
+// persisted independently of `findings` so the comparison behind a "no
+// conflict" conclusion is not discarded.
+type ProvisionAnalysis struct {
+	RelatedArtifactID string
+	RelatedRecordID   int64
+	Relationship      string
+	Summary           string
+}
+
+// parseProvisionAnalysesJSON extracts []ProvisionAnalysis from the raw JSON
+// payload returned by the LLM. Expected shape: {"analyses": [...]}.
+func parseProvisionAnalysesJSON(payload map[string]any) []ProvisionAnalysis {
+	if payload == nil {
+		return nil
+	}
+	raw, ok := payload["analyses"]
+	if !ok {
+		return nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]ProvisionAnalysis, 0, len(arr))
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		summary := strings.TrimSpace(asString(m["summary"]))
+		if summary == "" {
+			continue
+		}
+		out = append(out, ProvisionAnalysis{
+			RelatedArtifactID: strings.TrimSpace(asString(m["related_artifact_id"])),
+			RelatedRecordID:   int64(asFloat64(m["related_record_id"])),
+			Relationship:      strings.TrimSpace(asString(m["relationship"])),
+			Summary:           summary,
+		})
+	}
+	return out
+}
+
+// saveProvisionAnalyses persists the comparison analyses for one reviewed
+// provision. run_id comes from the LLM call context (ADR 2026070501); a call
+// with no run_id in context (e.g. some tests) is skipped rather than inserted
+// with a bogus value, since run_id is NOT NULL.
+func (r *provisionsReviewer) saveProvisionAnalyses(ctx context.Context, recordID int64, provID string, analyses []ProvisionAnalysis) error {
+	if r.db == nil {
+		return nil
+	}
+	runID := llmRunIDFromContext(ctx)
+	if runID <= 0 {
+		return nil
+	}
+	const stmt = `
+INSERT INTO kb.doc_review_provision_analyses
+    (input_record_id, run_id, prov_id, related_artifact_id, related_record_id, relationship, summary)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	for _, a := range analyses {
+		var relatedArtifactID any
+		if a.RelatedArtifactID != "" {
+			relatedArtifactID = a.RelatedArtifactID
+		}
+		var relatedRecordID any
+		if a.RelatedRecordID > 0 {
+			relatedRecordID = a.RelatedRecordID
+		}
+		if _, err := r.db.ExecContext(ctx, stmt,
+			recordID, runID, provID, relatedArtifactID, relatedRecordID, a.Relationship, a.Summary,
+		); err != nil {
+			return fmt.Errorf("insert provision analysis: %w", err)
+		}
+	}
+	return nil
 }
 
 // provisionReviewCallMetadata builds the llm_usage_event.metadata_json payload

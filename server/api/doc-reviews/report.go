@@ -84,8 +84,12 @@ type ReportFinding struct {
 	Location    string          `json:"location,omitempty"`
 	Suggestion  string          `json:"suggestion,omitempty"`
 	Confidence  float64         `json:"confidence"`
-	Sources     []SourceContext `json:"sources,omitempty"` // source blocks with before/after context
-	Related     []SourceContext `json:"related_sources,omitempty"`
+	// ArtifactID identifies the artifact-under-review (metric_id / prov_id /
+	// inventory_item_id) this finding is about, for the per-artifact
+	// reviewers (ADR 2026070603). Empty for entities/text-chunk findings.
+	ArtifactID string          `json:"artifact_id,omitempty"`
+	Sources    []SourceContext `json:"sources,omitempty"` // source blocks with before/after context
+	Related    []SourceContext `json:"related_sources,omitempty"`
 }
 
 // ComplianceSummary captures compliance-related findings.
@@ -178,6 +182,7 @@ func (g *DocReviewReportGenerator) Build(ctx context.Context, req *RequestStatus
 				FindingType: f.FindingType, Title: f.Title, Description: cleanReportDescription(f.Description, len(related) > 0),
 				Evidence: f.Evidence, Location: f.Location, Suggestion: f.Suggestion,
 				Confidence: f.Confidence,
+				ArtifactID: f.ArtifactID,
 				Related:    related,
 			}
 			rf.Sources = g.buildSources(lineIndex, f)

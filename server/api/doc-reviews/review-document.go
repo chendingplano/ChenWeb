@@ -33,6 +33,12 @@ type ReviewFinding struct {
 	Suggestion  string  `json:"suggestion,omitempty"`
 	Confidence  float64 `json:"confidence"`
 
+	// ArtifactID identifies the artifact-under-review (metric_id / prov_id /
+	// inventory_item_id) this finding is about, for the per-artifact
+	// reviewers (metrics, provisions, inventory_items). Empty for reviewers
+	// that aren't artifact-anchored.
+	ArtifactID string `json:"artifact_id,omitempty"`
+
 	// RelatedArtifactID / RelatedRecordID identify the matched cross-document
 	// artifact a finding is about (metric_id / prov_id / inventory_item_id and
 	// its kb.inputs record). Zero values mean "no cross-reference".
@@ -212,8 +218,8 @@ func (s ReviewFindingsSQLStore) SaveFindings(ctx context.Context, recordID int64
 	const stmt = `
 INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 
 	languages := s.Languages
 	if len(languages) == 0 {
@@ -250,10 +256,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 		if err != nil {
 			return inserted, fmt.Errorf("marshal finding metadata: %w", err)
 		}
+		var artifactID any
+		if prepared.Canonical.ArtifactID != "" {
+			artifactID = prepared.Canonical.ArtifactID
+		}
 
 		_, err = s.DB.ExecContext(ctx, stmt,
 			recordID, runID, prepared.Canonical.Pass, prepared.Canonical.Aspect, prepared.Canonical.Severity, prepared.Canonical.FindingType,
-			prepared.Canonical.Title, prepared.Canonical.Description, evidence, location, suggestion, confidence, metadata,
+			prepared.Canonical.Title, prepared.Canonical.Description, evidence, location, suggestion, confidence, metadata, artifactID,
 		)
 		if err != nil {
 			return inserted, fmt.Errorf("insert review finding: %w", err)

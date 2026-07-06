@@ -198,6 +198,9 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 	if f.Pass != "P5" || f.Aspect != "metrics" {
 		t.Errorf("pass/aspect = %q/%q, want P5/metrics", f.Pass, f.Aspect)
 	}
+	if f.ArtifactID != "1_m_1" {
+		t.Errorf("artifact_id = %q, want 1_m_1", f.ArtifactID)
+	}
 	if f.FindingType != "issue" || f.Severity != "low" {
 		t.Errorf("defaults: finding_type=%q severity=%q, want issue/low", f.FindingType, f.Severity)
 	}

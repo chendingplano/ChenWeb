@@ -162,7 +162,8 @@ func TestBuildTypstVariantsUsesLocalizedMetadata(t *testing.T) {
 	findingsQuery := regexp.QuoteMeta(`
 		SELECT id, pass, aspect, severity, finding_type, title, description,
 		       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-		       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
+		       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+		       COALESCE(artifact_id,'')
 		FROM kb.doc_review_findings
 		WHERE input_record_id = $1 AND run_id = $2
 		ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`)
@@ -170,11 +171,12 @@ func TestBuildTypstVariantsUsesLocalizedMetadata(t *testing.T) {
 		WithArgs(int64(88), int64(99)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "pass", "aspect", "severity", "finding_type", "title", "description",
-			"evidence", "location", "suggestion", "confidence", "review_status", "metadata",
+			"evidence", "location", "suggestion", "confidence", "review_status", "metadata", "artifact_id",
 		}).AddRow(
 			int64(7), "P1", "grammar_spelling", "high", "typo",
 			"Canonical title", "Canonical description", "Evidence", "12-13", "Canonical suggestion", 0.9, "pending",
 			`{"en":{"title":"English title","description":"English description","suggestion":"English suggestion"},"zh":{"title":"中文标题","description":"中文描述","suggestion":"中文建议"}}`,
+			"",
 		))
 
 	req := &RequestStatus{
@@ -264,7 +266,8 @@ func TestBuildTypstVariantsUsesSingleConfiguredLanguage(t *testing.T) {
 	findingsQuery := regexp.QuoteMeta(`
 		SELECT id, pass, aspect, severity, finding_type, title, description,
 		       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-		       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
+		       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+		       COALESCE(artifact_id,'')
 		FROM kb.doc_review_findings
 		WHERE input_record_id = $1 AND run_id = $2
 		ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`)
@@ -272,11 +275,12 @@ func TestBuildTypstVariantsUsesSingleConfiguredLanguage(t *testing.T) {
 		WithArgs(int64(88), int64(99)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "pass", "aspect", "severity", "finding_type", "title", "description",
-			"evidence", "location", "suggestion", "confidence", "review_status", "metadata",
+			"evidence", "location", "suggestion", "confidence", "review_status", "metadata", "artifact_id",
 		}).AddRow(
 			int64(7), "P1", "grammar_spelling", "high", "typo",
 			"Canonical title", "Canonical description", "Evidence", "12-13", "Canonical suggestion", 0.9, "pending",
 			`{"zh":{"title":"中文标题","description":"中文描述","suggestion":"中文建议"}}`,
+			"",
 		))
 
 	req := &RequestStatus{ID: 42, InputRecordID: 88, LatestRunID: 99, CreateTime: "2026-07-04T12:00:00Z"}

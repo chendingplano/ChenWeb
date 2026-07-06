@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
@@ -150,6 +151,9 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 	if f.Pass != "P5" || f.Aspect != "provisions" {
 		t.Errorf("pass/aspect = %q/%q, want P5/provisions", f.Pass, f.Aspect)
 	}
+	if f.ArtifactID != "1_prv_1" {
+		t.Errorf("artifact_id = %q, want 1_prv_1", f.ArtifactID)
+	}
 	if f.FindingType != "issue" || f.Severity != "low" {
 		t.Errorf("defaults: finding_type=%q severity=%q, want issue/low", f.FindingType, f.Severity)
 	}
@@ -225,5 +229,81 @@ func TestBuildProvisionReviewUnitsIncludesUnmatchedProvisions(t *testing.T) {
 	}
 	if len(units[1].matches) != 1 || units[1].matches[0].view.ProvID != "2_prv_9" {
 		t.Fatalf("second provision matches = %+v, want 2_prv_9", units[1].matches)
+	}
+}
+
+func TestParseProvisionAnalysesJSON(t *testing.T) {
+	payload := map[string]any{
+		"findings": []any{},
+		"analyses": []any{
+			map[string]any{
+				"related_artifact_id": "2_prv_9",
+				"related_record_id":   float64(2),
+				"relationship":        "same_subject",
+				"summary":             "Identical text, no conflict.",
+			},
+			map[string]any{
+				"relationship": "unrelated",
+				"summary":      "",
+			},
+		},
+	}
+
+	got := parseProvisionAnalysesJSON(payload)
+	if len(got) != 1 {
+		t.Fatalf("analyses = %d, want 1 (empty summary should be skipped): %+v", len(got), got)
+	}
+	a := got[0]
+	if a.RelatedArtifactID != "2_prv_9" || a.RelatedRecordID != 2 || a.Relationship != "same_subject" {
+		t.Errorf("analysis = %+v, want related_artifact_id=2_prv_9 related_record_id=2 relationship=same_subject", a)
+	}
+}
+
+func TestParseProvisionAnalysesJSON_NoAnalysesKey(t *testing.T) {
+	if got := parseProvisionAnalysesJSON(map[string]any{"findings": []any{}}); got != nil {
+		t.Errorf("analyses = %+v, want nil when key absent", got)
+	}
+}
+
+func TestReviewProvision_SavesAnalyses(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("INSERT INTO kb.doc_review_provision_analyses").
+		WithArgs(int64(1), int64(123), "1_prv_1", "2_prv_9", int64(2), "same_subject", "Identical text, no conflict.").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	fake := &fakeJSONExtractor{
+		out: map[string]any{
+			"findings": []any{},
+			"analyses": []any{
+				map[string]any{
+					"related_artifact_id": "2_prv_9",
+					"related_record_id":   float64(2),
+					"relationship":        "same_subject",
+					"summary":             "Identical text, no conflict.",
+				},
+			},
+		},
+	}
+	r := &provisionsReviewer{
+		client: fake,
+		db:     db,
+		logger: loggerutil.CreateDefaultLogger("TEST_PROVISIONS"),
+	}
+	doc := docProvision{view: provisionView{ProvID: "1_prv_1"}, spans: []string{"20:24"}}
+
+	ctx := withLLMRunID(context.Background(), 123)
+	r.reviewProvision(ctx, 1, 0, ReviewerConfig{
+		ModelName:  "prov-model",
+		PromptText: "compare provisions",
+		PromptRef:  "prompt-review-provisions-v4.md",
+	}, doc, nil, "", false)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("mock: %v", err)
 	}
 }

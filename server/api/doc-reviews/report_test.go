@@ -427,3 +427,40 @@ func TestReportBuild_MetaFields(t *testing.T) {
 		t.Errorf("TotalFindings = %d, want 1", report.Meta.TotalFindings)
 	}
 }
+
+func TestReportBuild_PropagatesArtifactID(t *testing.T) {
+	gen := newTestReportGenerator()
+
+	req := &RequestStatus{
+		ID: 1, InputRecordID: 416, Tier: "must_review",
+		Status:      "completed",
+		CreateTime:  "2026-06-21T12:00:00Z",
+		LatestRunID: 416,
+	}
+
+	findings := []FindingItem{{
+		ID:          1,
+		Pass:        "P5",
+		Aspect:      "provisions",
+		Severity:    "medium",
+		FindingType: "conflict",
+		Title:       "Conflict",
+		Description: "Description",
+		ArtifactID:  "1001_prv_3",
+	}}
+
+	report, err := gen.Build(context.Background(), req, findings)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+	if len(report.Findings) != 1 {
+		t.Fatalf("Findings len=%d, want 1", len(report.Findings))
+	}
+	if got := report.Findings[0].ArtifactID; got != "1001_prv_3" {
+		t.Errorf("Findings[0].ArtifactID = %q, want %q", got, "1001_prv_3")
+	}
+	pg := report.FindingsByPass["P5"]
+	if len(pg.Findings) != 1 || pg.Findings[0].ArtifactID != "1001_prv_3" {
+		t.Errorf("FindingsByPass[P5].Findings[0].ArtifactID = %+v, want ArtifactID=1001_prv_3", pg.Findings)
+	}
+}

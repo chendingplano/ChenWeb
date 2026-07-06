@@ -274,6 +274,7 @@ func (r *metricsReviewer) reviewMetric(
 	for i := range findings {
 		findings[i].Pass = "P5"
 		findings[i].Aspect = "metrics"
+		findings[i].ArtifactID = dm.view.MetricID
 		if findings[i].FindingType == "" {
 			findings[i].FindingType = "issue"
 		}

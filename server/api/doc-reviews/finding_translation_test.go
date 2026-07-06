@@ -605,11 +605,11 @@ func TestSaveFindingsStoresCanonicalEnglishAndI18NMetadata(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
 		WithArgs(
 			int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
-			"Undefined scope term", "The term is used before it is defined.", "范围见下文", "44", "Define the term when it first appears.", 0.88, sqlmock.AnyArg(),
+			"Undefined scope term", "The term is used before it is defined.", "范围见下文", "44", "Define the term when it first appears.", 0.88, sqlmock.AnyArg(), "1_m_1",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -624,6 +624,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
 		Location:    "44",
 		Suggestion:  "首次出现时定义该术语。",
 		Confidence:  0.88,
+		ArtifactID:  "1_m_1",
 	}})
 	if err != nil {
 		t.Fatalf("SaveFindings: %v", err)
@@ -670,11 +671,11 @@ func TestSaveFindingsUsesReportLanguageEnvWhenLanguagesUnset(t *testing.T) {
 
 			mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
 				WithArgs(
 					int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
-					"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(),
+					"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(), sqlmock.AnyArg(),
 				).
 				WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -737,11 +738,11 @@ func TestSaveFindingsPreparesTranslationsConcurrently(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
 			WithArgs(
 				int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
-				"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(),
+				"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(), sqlmock.AnyArg(),
 			).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
@@ -809,11 +810,11 @@ func TestSaveFindingsNormalizesConcurrentlyWithDefaultTranslator(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
     (input_record_id, run_id, pass, aspect, severity, finding_type,
-     title, description, evidence, location, suggestion, confidence, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)).
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
 			WithArgs(
 				int64(100), int64(200), "P1", "grammar_spelling", "medium", "grammar",
-				"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(),
+				"Canonical title", "Canonical description.", sqlmock.AnyArg(), sqlmock.AnyArg(), "Canonical suggestion.", 0.9, sqlmock.AnyArg(), sqlmock.AnyArg(),
 			).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}

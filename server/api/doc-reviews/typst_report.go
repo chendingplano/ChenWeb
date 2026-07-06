@@ -167,7 +167,8 @@ func loadReportFindingsWithMetadata(ctx context.Context, db *sql.DB, req *Reques
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, pass, aspect, severity, finding_type, title, description,
 		       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
-		       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text
+		       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+		       COALESCE(artifact_id,'')
 		FROM kb.doc_review_findings
 		WHERE input_record_id = $1 AND run_id = $2
 		ORDER BY CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id ASC`,
@@ -184,7 +185,7 @@ func loadReportFindingsWithMetadata(ctx context.Context, db *sql.DB, req *Reques
 		var metadata string
 		if err := rows.Scan(&finding.ID, &finding.Pass, &finding.Aspect, &finding.Severity, &finding.FindingType,
 			&finding.Title, &finding.Description, &finding.Evidence, &finding.Location, &finding.Suggestion,
-			&finding.Confidence, &finding.ReviewStatus, &metadata); err != nil {
+			&finding.Confidence, &finding.ReviewStatus, &metadata, &finding.ArtifactID); err != nil {
 			return nil, nil, err
 		}
 		applyFindingMetadata(&finding, []byte(metadata))
