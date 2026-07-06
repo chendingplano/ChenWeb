@@ -73,17 +73,17 @@ type SourceContext struct {
 
 // ReportFinding is a single finding within a report.
 type ReportFinding struct {
-	ID          int64           `json:"id,omitempty"`
-	Pass        string          `json:"pass"`
-	Aspect      string          `json:"aspect"`
-	Severity    string          `json:"severity"`
-	FindingType string          `json:"finding_type"`
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Evidence    string          `json:"evidence,omitempty"`
-	Location    string          `json:"location,omitempty"`
-	Suggestion  string          `json:"suggestion,omitempty"`
-	Confidence  float64         `json:"confidence"`
+	ID          int64   `json:"id,omitempty"`
+	Pass        string  `json:"pass"`
+	Aspect      string  `json:"aspect"`
+	Severity    string  `json:"severity"`
+	FindingType string  `json:"finding_type"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Evidence    string  `json:"evidence,omitempty"`
+	Location    string  `json:"location,omitempty"`
+	Suggestion  string  `json:"suggestion,omitempty"`
+	Confidence  float64 `json:"confidence"`
 	// ArtifactID identifies the artifact-under-review (metric_id / prov_id /
 	// inventory_item_id) this finding is about, for the per-artifact
 	// reviewers (ADR 2026070603). Empty for entities/text-chunk findings.
