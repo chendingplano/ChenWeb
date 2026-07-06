@@ -65,7 +65,7 @@ func GenerateTypstReport(ctx context.Context, requestID int64, skeleton *ReportS
 		typPath := filepath.Join(outputDir, baseName+".typ")
 		pdfPath := filepath.Join(outputDir, baseName+".pdf")
 
-		src := buildTypstSource(variant.skeleton, req, variant.language, absTemplatePath, nil)
+		src := buildTypstSource(variant.skeleton, req, variant.language, absTemplatePath, variant.provisionAnalyses)
 		if err := os.WriteFile(typPath, []byte(src), 0o644); err != nil {
 			return fmt.Errorf("write typst file %q: %w", typPath, err)
 		}
@@ -89,9 +89,10 @@ func reviewReportArtifactBaseName(stamp string, runID int64, suffix string) stri
 }
 
 type typstVariant struct {
-	language string
-	suffix   string
-	skeleton *ReportSkeleton
+	language          string
+	suffix            string
+	skeleton          *ReportSkeleton
+	provisionAnalyses map[string][]ProvisionAnalysis
 }
 
 func buildTypstVariants(ctx context.Context, req *RequestStatus, base *ReportSkeleton) ([]typstVariant, error) {
@@ -99,13 +100,18 @@ func buildTypstVariants(ctx context.Context, req *RequestStatus, base *ReportSke
 	if err != nil {
 		return nil, fmt.Errorf("load localized findings: %w", err)
 	}
+	provisionAnalyses, err := loadProvisionAnalysesByRun(ctx, ApiTypes.ProjectDBHandle, req)
+	if err != nil {
+		return nil, fmt.Errorf("load provision analyses: %w", err)
+	}
 	languages := docReviewReportLanguagesFromEnv()
 	var variants []typstVariant
 	for _, language := range languages {
 		variants = append(variants, typstVariant{
-			language: language,
-			suffix:   reportLanguageSuffix(language),
-			skeleton: buildLocalizedTypstSkeleton(ctx, req, base, findings, metadataByFindingID, language),
+			language:          language,
+			suffix:            reportLanguageSuffix(language),
+			skeleton:          buildLocalizedTypstSkeleton(ctx, req, base, findings, metadataByFindingID, language),
+			provisionAnalyses: provisionAnalyses,
 		})
 	}
 	return variants, nil

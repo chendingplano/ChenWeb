@@ -261,6 +261,17 @@ func TestBuildTypstVariantsUsesLocalizedMetadata(t *testing.T) {
 			"",
 		))
 
+	analysesQuery := regexp.QuoteMeta(`
+		SELECT prov_id, COALESCE(related_artifact_id,''), COALESCE(related_record_id,0), relationship, summary
+		FROM kb.doc_review_provision_analyses
+		WHERE input_record_id = $1 AND run_id = $2
+		ORDER BY id ASC`)
+	mock.ExpectQuery(analysesQuery).
+		WithArgs(int64(88), int64(99)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"prov_id", "related_artifact_id", "related_record_id", "relationship", "summary",
+		}))
+
 	req := &RequestStatus{
 		ID:            42,
 		InputRecordID: 88,
@@ -327,6 +338,9 @@ func TestBuildTypstVariantsUsesLocalizedMetadata(t *testing.T) {
 	if got := variants[1].skeleton.Findings[0].Sources[0].Source; got != "12: source line" {
 		t.Fatalf("sources lost during localization: %q", got)
 	}
+	if len(variants[0].provisionAnalyses) != 0 {
+		t.Fatalf("provisionAnalyses = %+v, want empty", variants[0].provisionAnalyses)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}
@@ -365,6 +379,17 @@ func TestBuildTypstVariantsUsesSingleConfiguredLanguage(t *testing.T) {
 			"",
 		))
 
+	analysesQuery := regexp.QuoteMeta(`
+		SELECT prov_id, COALESCE(related_artifact_id,''), COALESCE(related_record_id,0), relationship, summary
+		FROM kb.doc_review_provision_analyses
+		WHERE input_record_id = $1 AND run_id = $2
+		ORDER BY id ASC`)
+	mock.ExpectQuery(analysesQuery).
+		WithArgs(int64(88), int64(99)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"prov_id", "related_artifact_id", "related_record_id", "relationship", "summary",
+		}))
+
 	req := &RequestStatus{ID: 42, InputRecordID: 88, LatestRunID: 99, CreateTime: "2026-07-04T12:00:00Z"}
 	base := &ReportSkeleton{
 		Meta:            ReportMeta{ReportID: "rpt_88_2026-07-04T12:00:00Z", DocumentTitle: "Document title", DocumentRecordID: 88, GeneratedAt: "2026-07-04T12:05:00Z", RunID: 99, TotalFindings: 1},
@@ -386,6 +411,9 @@ func TestBuildTypstVariantsUsesSingleConfiguredLanguage(t *testing.T) {
 	}
 	if got := variants[0].skeleton.Findings[0].Title; got != "中文标题" {
 		t.Fatalf("zh title=%q", got)
+	}
+	if len(variants[0].provisionAnalyses) != 0 {
+		t.Fatalf("provisionAnalyses = %+v, want empty", variants[0].provisionAnalyses)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
