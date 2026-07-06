@@ -147,6 +147,27 @@ func TestBuildTypstSourceUsesDatabaseFindingID(t *testing.T) {
 	}
 }
 
+func TestBuildFindingBlockRendersSourcesAndCorrection(t *testing.T) {
+	f := ReportFinding{
+		ID:          42,
+		Title:       "Conflict",
+		Description: "Description",
+		Suggestion:  "Suggestion",
+		Sources:     []SourceContext{{Source: "115: source line"}},
+		Related:     []SourceContext{{Before: "85: before", Source: "87: matched metric", After: "88: after"}},
+	}
+	block := buildFindingBlock(f, "42")
+	if !strings.Contains(block, `id: "42"`) {
+		t.Fatalf("block missing id: %s", block)
+	}
+	if !strings.Contains(block, "errors: [Conflict]") {
+		t.Fatalf("block missing errors content: %s", block)
+	}
+	if !strings.Contains(block, "related-sources: (") || !strings.Contains(block, "87: matched metric") {
+		t.Fatalf("block missing related-sources: %s", block)
+	}
+}
+
 func TestBuildTypstVariantsUsesLocalizedMetadata(t *testing.T) {
 	t.Setenv("DOC_REVIEW_REPORT_LANGUAGE", `["en","zh"]`)
 	db, mock, err := sqlmock.New()

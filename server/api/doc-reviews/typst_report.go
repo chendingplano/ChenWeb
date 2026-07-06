@@ -252,6 +252,75 @@ func copyLocalizedSources(dst, src *ReportSkeleton) {
 	}
 }
 
+// buildFindingBlock renders one review-finding(...) Typst call for f, using
+// fid as its displayed id (either the DB finding id or an "F-NN" ordinal
+// fallback — see findingDisplayID).
+func buildFindingBlock(f ReportFinding, fid string) string {
+	var blockB strings.Builder
+	fmt.Fprintf(&blockB, "      review-finding(\n")
+	fmt.Fprintf(&blockB, "        id: \"%s\",\n", typStr(fid))
+
+	// Emit sources array — one dict per source location group.
+	fmt.Fprintf(&blockB, "        sources: (")
+	if len(f.Sources) > 0 {
+		fmt.Fprintf(&blockB, "\n")
+		for _, sc := range f.Sources {
+			fmt.Fprintf(&blockB, "          (\n")
+			if sc.Before != "" {
+				fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))
+			} else {
+				fmt.Fprintf(&blockB, "            before: none,\n")
+			}
+			fmt.Fprintf(&blockB, "            source: [%s],\n", typLines(sc.Source))
+			if sc.After != "" {
+				fmt.Fprintf(&blockB, "            after: [%s],\n", typLines(sc.After))
+			} else {
+				fmt.Fprintf(&blockB, "            after: none,\n")
+			}
+			fmt.Fprintf(&blockB, "          ),\n")
+		}
+		fmt.Fprintf(&blockB, "        ")
+	}
+	fmt.Fprintf(&blockB, "),\n")
+
+	fmt.Fprintf(&blockB, "        related-sources: (")
+	if len(f.Related) > 0 {
+		fmt.Fprintf(&blockB, "\n")
+		for _, sc := range f.Related {
+			fmt.Fprintf(&blockB, "          (\n")
+			if sc.Before != "" {
+				fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))
+			} else {
+				fmt.Fprintf(&blockB, "            before: none,\n")
+			}
+			fmt.Fprintf(&blockB, "            source: [%s],\n", typLines(sc.Source))
+			if sc.After != "" {
+				fmt.Fprintf(&blockB, "            after: [%s],\n", typLines(sc.After))
+			} else {
+				fmt.Fprintf(&blockB, "            after: none,\n")
+			}
+			fmt.Fprintf(&blockB, "          ),\n")
+		}
+		fmt.Fprintf(&blockB, "        ")
+	}
+	fmt.Fprintf(&blockB, "),\n")
+
+	fmt.Fprintf(&blockB, "        errors: [%s],\n", typContent(f.Title))
+	fmt.Fprintf(&blockB, "        explanation: [%s],\n", typContent(f.Description))
+	fmt.Fprintf(&blockB, "        correction: [%s],\n", typContent(f.Suggestion))
+	fmt.Fprintf(&blockB, "      ),")
+	return blockB.String()
+}
+
+// findingDisplayID returns the DB finding id as a string, or an "F-NN"
+// ordinal fallback when id is 0 (legacy report JSON with no finding row id).
+func findingDisplayID(id int64, ordinal int) string {
+	if id == 0 {
+		return fmt.Sprintf("F-%02d", ordinal)
+	}
+	return fmt.Sprintf("%d", id)
+}
+
 // buildTypstSource returns the full .typ source for the review report.
 func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTemplatePath string) string {
 	var b strings.Builder
@@ -327,66 +396,8 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 
 			for _, f := range af {
 				findingIdx++
-				fid := fmt.Sprintf("%d", f.ID)
-				if f.ID == 0 {
-					fid = fmt.Sprintf("F-%02d", findingIdx)
-				}
-
-				var blockB strings.Builder
-				fmt.Fprintf(&blockB, "      review-finding(\n")
-				fmt.Fprintf(&blockB, "        id: \"%s\",\n", typStr(fid))
-
-				// Emit sources array — one dict per source location group.
-				fmt.Fprintf(&blockB, "        sources: (")
-				if len(f.Sources) > 0 {
-					fmt.Fprintf(&blockB, "\n")
-					for _, sc := range f.Sources {
-						fmt.Fprintf(&blockB, "          (\n")
-						if sc.Before != "" {
-							fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))
-						} else {
-							fmt.Fprintf(&blockB, "            before: none,\n")
-						}
-						fmt.Fprintf(&blockB, "            source: [%s],\n", typLines(sc.Source))
-						if sc.After != "" {
-							fmt.Fprintf(&blockB, "            after: [%s],\n", typLines(sc.After))
-						} else {
-							fmt.Fprintf(&blockB, "            after: none,\n")
-						}
-						fmt.Fprintf(&blockB, "          ),\n")
-					}
-					fmt.Fprintf(&blockB, "        ")
-				}
-				fmt.Fprintf(&blockB, "),\n")
-
-				fmt.Fprintf(&blockB, "        related-sources: (")
-				if len(f.Related) > 0 {
-					fmt.Fprintf(&blockB, "\n")
-					for _, sc := range f.Related {
-						fmt.Fprintf(&blockB, "          (\n")
-						if sc.Before != "" {
-							fmt.Fprintf(&blockB, "            before: [%s],\n", typLines(sc.Before))
-						} else {
-							fmt.Fprintf(&blockB, "            before: none,\n")
-						}
-						fmt.Fprintf(&blockB, "            source: [%s],\n", typLines(sc.Source))
-						if sc.After != "" {
-							fmt.Fprintf(&blockB, "            after: [%s],\n", typLines(sc.After))
-						} else {
-							fmt.Fprintf(&blockB, "            after: none,\n")
-						}
-						fmt.Fprintf(&blockB, "          ),\n")
-					}
-					fmt.Fprintf(&blockB, "        ")
-				}
-				fmt.Fprintf(&blockB, "),\n")
-
-				fmt.Fprintf(&blockB, "        errors: [%s],\n", typContent(f.Title))
-				fmt.Fprintf(&blockB, "        explanation: [%s],\n", typContent(f.Description))
-				fmt.Fprintf(&blockB, "        correction: [%s],\n", typContent(f.Suggestion))
-				fmt.Fprintf(&blockB, "      ),")
-				block := blockB.String()
-				findingBlocks = append(findingBlocks, block)
+				fid := findingDisplayID(f.ID, findingIdx)
+				findingBlocks = append(findingBlocks, buildFindingBlock(f, fid))
 
 				if f.Severity == "high" {
 					aspectHighCount++
