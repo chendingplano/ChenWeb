@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"maps"
 	"path/filepath"
 	"strings"
 	"time"
@@ -106,6 +107,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	if strings.TrimSpace(record.PromptName) == "" {
 		metadata["prompt_name_missing"] = true
 	}
+	maps.Copy(metadata, record.Metadata)
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return err

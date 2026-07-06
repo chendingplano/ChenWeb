@@ -24,6 +24,23 @@ func llmRecordIDFromContext(ctx context.Context) int64 {
 	return recordID
 }
 
+type llmRunIDKey struct{}
+
+func withLLMRunID(ctx context.Context, runID int64) context.Context {
+	if runID <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, llmRunIDKey{}, runID)
+}
+
+func llmRunIDFromContext(ctx context.Context) int64 {
+	if ctx == nil {
+		return 0
+	}
+	runID, _ := ctx.Value(llmRunIDKey{}).(int64)
+	return runID
+}
+
 func newLLMJSONInput(
 	ctx context.Context,
 	promptName string,

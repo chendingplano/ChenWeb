@@ -118,6 +118,89 @@ func TestSinkCaptureWritesArchivesAndPersistsUsageEvent(t *testing.T) {
 	}
 }
 
+func TestSinkCaptureMergesCallerSuppliedMetadataIntoMetadataJSON(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	startedAt := time.Date(2026, 7, 6, 13, 30, 0, 0, time.UTC)
+	finishedAt := startedAt.Add(1500 * time.Millisecond)
+	tmpDir := t.TempDir()
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO llm_usage_event (
+    id, account_id, profile_id, provider, model_name, prompt_name,
+    request_started_at, request_finished_at, workspace_day,
+    input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, latency_ms, http_status,
+    error_message, input_body_ref, output_body_ref, provider_request_id, metadata_json,
+    record_id, call_reason, call_loc
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9,
+    $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21::jsonb,
+    $22, $23, $24
+)`)).
+		WithArgs(
+			"evt-test-meta",
+			"acct_1",
+			"prof_1",
+			"openai_compatible",
+			"deepseek-chat",
+			"review-provision",
+			startedAt,
+			finishedAt,
+			time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC),
+			int64(0),
+			int64(0),
+			int64(0),
+			int64(0),
+			int64(0),
+			int64(1500),
+			0,
+			"",
+			"",
+			"",
+			"",
+			`{"capture_source":"shared_llm","provision_id":"244-prv-2","run_id":123}`,
+			int64(901),
+			"review-provision",
+			"MID-20260706-0001",
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	sink := &Sink{
+		DB:            db,
+		ArchiveRoot:   tmpDir,
+		WorkspaceTZ:   time.UTC,
+		NewID:         func() string { return "evt-test-meta" },
+		Now:           func() time.Time { return finishedAt },
+		DefaultStatus: 0,
+	}
+
+	record := sharedllm.UsageCaptureRecord{
+		AccountID:         "acct_1",
+		ProfileID:         "prof_1",
+		Provider:          sharedllm.ProviderOpenAICompatible,
+		ModelName:         "deepseek-chat",
+		PromptName:        "review-provision",
+		RequestStartedAt:  startedAt,
+		RequestFinishedAt: finishedAt,
+		RecordID:          901,
+		CallReason:        "review-provision",
+		CallLoc:           "MID-20260706-0001",
+		Metadata:          map[string]any{"run_id": int64(123), "provision_id": "244-prv-2"},
+	}
+
+	if err := sink.Capture(context.Background(), record); err != nil {
+		t.Fatalf("Capture() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestSinkCaptureSkipsDatabaseInsertWhenAccountProfileMissing(t *testing.T) {
 	sink := &Sink{
 		ArchiveRoot: t.TempDir(),

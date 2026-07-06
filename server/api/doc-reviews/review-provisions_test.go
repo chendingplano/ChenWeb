@@ -167,6 +167,44 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 	}
 }
 
+func TestReviewProvision_SetsCallLocCallReasonAndMetadata(t *testing.T) {
+	fake := &fakeJSONExtractor{
+		out: map[string]any{"findings": []any{}},
+	}
+	r := &provisionsReviewer{
+		client: fake,
+		logger: loggerutil.CreateDefaultLogger("TEST_PROVISIONS"),
+	}
+	doc := docProvision{
+		view:  provisionView{ProvID: "1_prv_1"},
+		spans: []string{"20:24"},
+	}
+
+	ctx := withLLMRunID(context.Background(), 123)
+	r.reviewProvision(ctx, 1, 0, ReviewerConfig{
+		ModelName:  "prov-model",
+		PromptText: "compare provisions",
+		PromptRef:  "prompt-review-provisions-v1.md",
+	}, doc, nil, "", false)
+
+	if len(fake.callReasons) != 1 || fake.callReasons[0] != "review-provision" {
+		t.Fatalf("callReasons = %v, want [review-provision]", fake.callReasons)
+	}
+	if len(fake.callLocs) != 1 || fake.callLocs[0] != "MID-20260706-0001" {
+		t.Fatalf("callLocs = %v, want [MID-20260706-0001]", fake.callLocs)
+	}
+	if len(fake.metadatas) != 1 {
+		t.Fatalf("metadatas = %v, want 1 entry", fake.metadatas)
+	}
+	meta := fake.metadatas[0]
+	if meta["provision_id"] != "1_prv_1" {
+		t.Errorf("metadata provision_id = %v, want 1_prv_1", meta["provision_id"])
+	}
+	if meta["run_id"] != int64(123) {
+		t.Errorf("metadata run_id = %v, want 123", meta["run_id"])
+	}
+}
+
 func TestBuildProvisionReviewUnitsIncludesUnmatchedProvisions(t *testing.T) {
 	docProvs := []docProvision{
 		dp("1_prv_1", "safety/pressure"),

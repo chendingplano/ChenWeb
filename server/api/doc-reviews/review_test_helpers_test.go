@@ -18,6 +18,9 @@ type fakeJSONExtractor struct {
 	modelNames    []string
 	inputTexts    []string
 	documentFirst []bool
+	callReasons   []string
+	callLocs      []string
+	metadatas     []map[string]any
 	lastUsage     *llmclients.Usage
 	calledCount   int
 }
@@ -29,6 +32,9 @@ func (f *fakeJSONExtractor) ExtractJSON(_ context.Context, in llmclients.JSONExt
 	f.modelNames = append(f.modelNames, in.ModelName)
 	f.inputTexts = append(f.inputTexts, in.InputText)
 	f.documentFirst = append(f.documentFirst, in.DocumentFirst)
+	f.callReasons = append(f.callReasons, in.CallReason)
+	f.callLocs = append(f.callLocs, in.CallLoc)
+	f.metadatas = append(f.metadatas, in.Metadata)
 	if len(f.seq) > 0 {
 		next := f.seq[0]
 		f.seq = f.seq[1:]

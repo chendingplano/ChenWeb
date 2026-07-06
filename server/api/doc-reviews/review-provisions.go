@@ -214,9 +214,9 @@ func (r *provisionsReviewer) reviewProvision(
 		if windowJSON != "" {
 			promptText, inputText = artifactReviewTaskText(cfg.PromptText, payloadJSON), windowJSON
 		}
-		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInput(
+		out, err := r.client.ExtractJSON(ctx, newDocReviewLLMJSONInputWithMetadata(
 			ctx, cfg.PromptRef, promptText, cfg.ModelName, inputText,
-			"review_provisions", "MID-CWB-REVIEW-PROVISIONS"))
+			"review-provision", "MID-20260706-0001", provisionReviewCallMetadata(ctx, dp.view.ProvID)))
 		if err != nil {
 			r.logger.Warn("provisions review provision failed; skipping",
 				"record_id", recordID, "provision_index", index, "error", err)
@@ -252,6 +252,16 @@ func (r *provisionsReviewer) reviewProvision(
 		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
+}
+
+// provisionReviewCallMetadata builds the llm_usage_event.metadata_json payload
+// for one provision-review LLM call (ADR 2026070501).
+func provisionReviewCallMetadata(ctx context.Context, provID string) map[string]any {
+	meta := map[string]any{"provision_id": provID}
+	if runID := llmRunIDFromContext(ctx); runID > 0 {
+		meta["run_id"] = runID
+	}
+	return meta
 }
 
 // matchedProvisionsPayload serializes the matched candidates. Raw RRF scores

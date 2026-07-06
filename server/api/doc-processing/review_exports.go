@@ -29,6 +29,16 @@ func WithLLMRecordID(ctx context.Context, recordID int64) context.Context {
 	return withLLMRecordID(ctx, recordID)
 }
 
+// WithLLMRunID tags the context with the review run ID for LLM capture metadata.
+func WithLLMRunID(ctx context.Context, runID int64) context.Context {
+	return withLLMRunID(ctx, runID)
+}
+
+// LLMRunIDFromContext returns the review run ID tagged via WithLLMRunID, or 0 if unset.
+func LLMRunIDFromContext(ctx context.Context) int64 {
+	return llmRunIDFromContext(ctx)
+}
+
 // BuildDocContextLine renders the doc_context envelope string for a record.
 func BuildDocContextLine(rec DocMetadataInputRecord) string { return buildDocContextLine(rec) }
 

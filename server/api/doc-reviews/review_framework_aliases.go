@@ -45,6 +45,8 @@ const (
 var (
 	isCtxStopped            = docprocessing.IsCtxStopped
 	withLLMRecordID         = docprocessing.WithLLMRecordID
+	withLLMRunID            = docprocessing.WithLLMRunID
+	llmRunIDFromContext     = docprocessing.LLMRunIDFromContext
 	buildDocContextLine     = docprocessing.BuildDocContextLine
 	rawLinesToJSON          = docprocessing.RawLinesToJSON
 	wrapLinesWithDocContext = docprocessing.WrapLinesWithDocContext
@@ -87,5 +89,23 @@ func newDocReviewLLMJSONInput(
 ) llmclients.JSONExtractionInput {
 	in := newLLMJSONInput(ctx, promptName, promptText, modelName, inputText, callReason, callLoc)
 	in.DocumentFirst = true
+	return in
+}
+
+// newDocReviewLLMJSONInputWithMetadata is newDocReviewLLMJSONInput plus a
+// caller-supplied metadata map that flows through to llm_usage_event.metadata_json
+// (ADR 2026070501, mandatory call_reason/call_loc + metadata_json).
+func newDocReviewLLMJSONInputWithMetadata(
+	ctx context.Context,
+	promptName string,
+	promptText string,
+	modelName string,
+	inputText string,
+	callReason string,
+	callLoc string,
+	metadata map[string]any,
+) llmclients.JSONExtractionInput {
+	in := newDocReviewLLMJSONInput(ctx, promptName, promptText, modelName, inputText, callReason, callLoc)
+	in.Metadata = metadata
 	return in
 }
