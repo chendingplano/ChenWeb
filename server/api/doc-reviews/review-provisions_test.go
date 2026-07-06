@@ -2,6 +2,7 @@ package docreviews
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -305,5 +306,48 @@ func TestReviewProvision_SavesAnalyses(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("mock: %v", err)
+	}
+}
+
+func TestLoadProvisionAnalysesByRun(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	query := regexp.QuoteMeta(`
+		SELECT prov_id, COALESCE(related_artifact_id,''), COALESCE(related_record_id,0), relationship, summary
+		FROM kb.doc_review_provision_analyses
+		WHERE input_record_id = $1 AND run_id = $2
+		ORDER BY id ASC`)
+	mock.ExpectQuery(query).
+		WithArgs(int64(88), int64(99)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"prov_id", "related_artifact_id", "related_record_id", "relationship", "summary",
+		}).AddRow("1001_prv_3", "2002_prv_9", int64(2002), "same_subject", "Identical text, no conflict.").
+			AddRow("1001_prv_3", "3003_prv_1", int64(3003), "unrelated", "Different subject entirely."))
+
+	req := &RequestStatus{InputRecordID: 88, LatestRunID: 99}
+	got, err := loadProvisionAnalysesByRun(context.Background(), db, req)
+	if err != nil {
+		t.Fatalf("loadProvisionAnalysesByRun: %v", err)
+	}
+	entries := got["1001_prv_3"]
+	if len(entries) != 2 {
+		t.Fatalf("entries len=%d, want 2 (%+v)", len(entries), got)
+	}
+	if entries[0].RelatedArtifactID != "2002_prv_9" || entries[0].Relationship != "same_subject" {
+		t.Errorf("entries[0]=%+v, want related=2002_prv_9 relationship=same_subject", entries[0])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestLoadProvisionAnalysesByRun_NilDB(t *testing.T) {
+	got, err := loadProvisionAnalysesByRun(context.Background(), nil, &RequestStatus{InputRecordID: 88, LatestRunID: 99})
+	if err != nil || got != nil {
+		t.Fatalf("got=%+v err=%v, want (nil, nil) for nil db", got, err)
 	}
 }

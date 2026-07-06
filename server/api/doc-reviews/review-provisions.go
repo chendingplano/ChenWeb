@@ -346,6 +346,39 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	return nil
 }
 
+// loadProvisionAnalysesByRun returns this run's comparison analyses grouped by
+// prov_id, for the report's per-artifact sections (ADR 2026062203 §1.2).
+// Returns (nil, nil) when db or req is unavailable, mirroring
+// loadReportFindingsWithMetadata's guard in typst_report.go.
+func loadProvisionAnalysesByRun(ctx context.Context, db *sql.DB, req *RequestStatus) (map[string][]ProvisionAnalysis, error) {
+	if db == nil || req == nil || req.InputRecordID == 0 || req.LatestRunID == 0 {
+		return nil, nil
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT prov_id, COALESCE(related_artifact_id,''), COALESCE(related_record_id,0), relationship, summary
+		FROM kb.doc_review_provision_analyses
+		WHERE input_record_id = $1 AND run_id = $2
+		ORDER BY id ASC`, req.InputRecordID, req.LatestRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string][]ProvisionAnalysis{}
+	for rows.Next() {
+		var provID string
+		var a ProvisionAnalysis
+		if err := rows.Scan(&provID, &a.RelatedArtifactID, &a.RelatedRecordID, &a.Relationship, &a.Summary); err != nil {
+			return nil, err
+		}
+		out[provID] = append(out[provID], a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // provisionReviewCallMetadata builds the llm_usage_event.metadata_json payload
 // for one provision-review LLM call (ADR 2026070501).
 func provisionReviewCallMetadata(ctx context.Context, provID string) map[string]any {
