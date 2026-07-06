@@ -107,6 +107,48 @@ func TestTypstReportCompilesWithDelimiterHeavyContent(t *testing.T) {
 	}
 }
 
+func TestTypstTemplateCompilesArtifactGroupSection(t *testing.T) {
+	if _, err := exec.LookPath("typst"); err != nil {
+		t.Skip("typst binary not available; skipping compile check")
+	}
+
+	templatePath, err := filepath.Abs("../../../docs/doc-templates/template-document-report.typ")
+	if err != nil {
+		t.Fatalf("resolve template path: %v", err)
+	}
+
+	req := &RequestStatus{RequesterName: "Reviewer"}
+	skeleton := &ReportSkeleton{
+		Meta: ReportMeta{ReportID: "rpt_88", DocumentTitle: "Document title", GeneratedAt: "2026-07-06T12:00:00Z"},
+		FindingsByPass: map[string]PassGroup{
+			"P5": {
+				Label: "Technical & Compliance",
+				Findings: []ReportFinding{
+					{ID: 1, Pass: "P5", Aspect: "provisions", Severity: "medium", Title: "Conflict",
+						Description: "Description", Suggestion: "Suggestion", ArtifactID: "1001_prv_3",
+						Sources: []SourceContext{{Source: "20: source line"}}},
+				},
+			},
+		},
+		PassOrder: []string{"P5"},
+	}
+	provisionAnalyses := map[string][]ProvisionAnalysis{
+		"1001_prv_3": {{RelatedArtifactID: "2002_prv_9", Relationship: "same_subject", Summary: "Also checked this candidate."}},
+	}
+
+	src := buildTypstSource(skeleton, req, "en", templatePath, provisionAnalyses)
+
+	dir := t.TempDir()
+	typPath := filepath.Join(dir, "check.typ")
+	if err := os.WriteFile(typPath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write typ: %v", err)
+	}
+	out, err := exec.Command("typst", "compile", "--root", "/", typPath, filepath.Join(dir, "check.pdf")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("typst compile failed: %v\n%s\n--- source ---\n%s", err, out, src)
+	}
+}
+
 func TestBuildTypstSourceUsesDatabaseFindingID(t *testing.T) {
 	req := &RequestStatus{RequesterName: "Reviewer"}
 	skeleton := &ReportSkeleton{

@@ -177,6 +177,53 @@
   )
 }
 
+// ── artifact-group: findings + comparison analyses for one artifact ─
+// Parameters:
+//   title    – artifact identifier (metric_id / prov_id / inventory_item_id)
+//   analyses – array of dicts: (related: string, relationship: string, summary: content).
+//              Comparison records for this artifact, retained independent of
+//              whether a finding was raised (ADR 2026070602). Empty when the
+//              reviewer has no analyses table yet (metrics, inventory_items).
+//   findings – array of content blocks produced by review-finding(...)
+#let artifact-group(
+  title: "",
+  analyses: (),
+  findings: (),
+) = {
+  heading(level: 3, title)
+
+  if analyses.len() > 0 {
+    text(weight: "semibold", size: 9pt, fill: clr-muted, "Comparison Analyses")
+    v(3pt)
+    for a in analyses {
+      block(
+        width: 100%,
+        fill: clr-source-bg,
+        radius: 4pt,
+        inset: (x: 10pt, y: 8pt),
+        {
+          text(weight: "semibold", size: 8.5pt, fill: clr-muted,
+            "vs. " + a.related + "  ·  " + a.relationship)
+          v(3pt)
+          text(size: 9pt, a.summary)
+        },
+      )
+      v(6pt)
+    }
+    v(4pt)
+  }
+
+  if findings.len() > 0 {
+    for f in findings {
+      v(8pt)
+      f
+    }
+  } else {
+    v(4pt)
+    text(style: "italic", fill: clr-muted, size: 9pt, "No findings for this artifact.")
+  }
+}
+
 // ── aspect-section: one reviewed aspect ──────────────────────
 // Parameters:
 //   title      – aspect name, e.g. "Grammar & Style"
@@ -187,13 +234,19 @@
 #let aspect-section(
   title: "",
   findings: (),
+  artifact-groups: (),
   assessment: [],
   problems: [],
   guidelines: [],
 ) = {
   heading(level: 2, title)
 
-  if findings.len() > 0 {
+  if artifact-groups.len() > 0 {
+    for g in artifact-groups {
+      v(8pt)
+      g
+    }
+  } else if findings.len() > 0 {
     for f in findings {
       v(8pt)
       f
