@@ -50,7 +50,7 @@ func ResolveAmbiguousArtifactObjects(ctx context.Context, store AmbiguousObjectS
 	res.Scanned = len(rows)
 
 	for _, row := range rows {
-		candidates, err := reconciler.Store.FindCandidates(ctx, row.Object, reconciler.Options)
+		candidates, err := fetchSortedCandidates(ctx, reconciler, row.Object)
 		if err != nil {
 			res.Failed++
 			if logger != nil {
@@ -59,7 +59,6 @@ func ResolveAmbiguousArtifactObjects(ctx context.Context, store AmbiguousObjectS
 			}
 			continue
 		}
-		sort.Slice(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
 
 		var (
 			objectID   string
@@ -104,6 +103,18 @@ func ResolveAmbiguousArtifactObjects(ctx context.Context, store AmbiguousObjectS
 		}
 	}
 	return res, nil
+}
+
+// fetchSortedCandidates fetches FindCandidates for obj and returns them
+// sorted by score descending. Shared by RankAmbiguousCandidates and
+// ResolveAmbiguousArtifactObjects so their candidate ranking can't drift.
+func fetchSortedCandidates(ctx context.Context, reconciler ObjectReconciler, obj ArtifactObject) ([]ObjectNodeCandidate, error) {
+	candidates, err := reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
+	return candidates, nil
 }
 
 // pickTieBreakCandidate deterministically resolves a tie between object node
@@ -295,15 +306,11 @@ WHERE id = $1`, id)
 // results sorted by score descending, along with the object_id of the
 // deterministic tie-break pick (pickTieBreakCandidate) so callers can mark a
 // "recommended" entry. Used by the admin resolution page's detail endpoint.
-// Deliberately separate from ResolveAmbiguousArtifactObjects's identical
-// sort+pick sequence rather than extracted into it, to avoid touching that
-// already-tested automated path for an unrelated feature.
 func RankAmbiguousCandidates(ctx context.Context, reconciler ObjectReconciler, obj ArtifactObject) ([]ObjectNodeCandidate, string, error) {
-	candidates, err := reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
+	candidates, err := fetchSortedCandidates(ctx, reconciler, obj)
 	if err != nil {
 		return nil, "", err
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
 	recommended := ""
 	if len(candidates) > 0 {
 		recommended = pickTieBreakCandidate(obj, candidates).Node.ObjectID
