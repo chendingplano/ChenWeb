@@ -43,6 +43,14 @@ func TestUpdateArtifactObjectSuccessStampsExtInfoWhenObjectIDSet(t *testing.T) {
 		WithArgs("obj_b", "Pressure Regulator", "ambiguous_resolved", `{"reconcile_method":"manual_admin"}`, int64(42)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
+	auditQuery := regexp.QuoteMeta(
+		"INSERT INTO kb.object_audit_log (table_name, row_key, action, changes, actor) VALUES ($1,$2,$3,$4,$5)",
+	)
+	mock.ExpectExec(auditQuery).
+		WithArgs("kb.artifact_objects", "42", "resolve_object_id",
+			`{"object_id":"obj_b","object_name":"Pressure Regulator","reconcile_status":"ambiguous_resolved"}`, nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
 	c, rec := newUpdateArtifactObjectContext(t, "42", `{
 		"object_id":"obj_b",
 		"object_name":"Pressure Regulator",
@@ -127,6 +135,41 @@ func TestUpdateArtifactObjectNotFound(t *testing.T) {
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestUpdateArtifactObjectAuditLogsEditFieldsWhenNoObjectIDChange(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	updateQuery := regexp.QuoteMeta("UPDATE kb.artifact_objects SET description = $1 WHERE id = $2")
+	mock.ExpectExec(updateQuery).
+		WithArgs("fixed typo", int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	auditQuery := regexp.QuoteMeta(
+		"INSERT INTO kb.object_audit_log (table_name, row_key, action, changes, actor) VALUES ($1,$2,$3,$4,$5)",
+	)
+	mock.ExpectExec(auditQuery).
+		WithArgs("kb.artifact_objects", "42", "edit_fields", `{"description":"fixed typo"}`, nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	c, rec := newUpdateArtifactObjectContext(t, "42", `{"description":"fixed typo"}`)
+	if err := UpdateArtifactObject(c); err != nil {
+		t.Fatalf("UpdateArtifactObject returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet db expectations: %v", err)

@@ -338,6 +338,12 @@ func UpdateArtifactObject(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "artifact object not found (CWB_KB_AAO_220)"})
 	}
 
+	action := objectAuditActionEditFields
+	if settingObjectID {
+		action = objectAuditActionResolveObjectID
+	}
+	logObjectAudit(c.Request().Context(), db, logger, "kb.artifact_objects", idStr, action, structureActor(rc), payload)
+
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
 
