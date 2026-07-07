@@ -340,3 +340,102 @@ func UpdateArtifactObject(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
+
+// UpdateObjectNode handles PATCH /api/v1/kb/object-nodes/:object_id —
+// partial update of one kb.object_nodes candidate row from the admin
+// resolution page.
+func UpdateObjectNode(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_AAO_300")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	objectID := strings.TrimSpace(c.Param("object_id"))
+	if objectID == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid object_id (CWB_KB_AAO_301)"})
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_AAO_302)"})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "db not initialized (CWB_KB_AAO_310)"})
+	}
+
+	sets := make([]string, 0, len(payload))
+	args := make([]any, 0, len(payload)+1)
+	addSet := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+
+	fields := make([]string, 0, len(payload))
+	for field := range payload {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	for _, field := range fields {
+		raw := payload[field]
+		switch field {
+		case "canonical_name", "object_type":
+			value, err := decodeStringValue(raw, true)
+			if err != nil || value == nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status: false, ErrorMsg: fmt.Sprintf("%s cannot be null (CWB_KB_AAO_311)", field),
+				})
+			}
+			addSet(field, *value)
+
+		case "canonical_name_en", "canonical_name_zh", "primary_language", "description":
+			value, err := decodeStringValue(raw, true)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status: false, ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_AAO_312)", field, err),
+				})
+			}
+			if value == nil || *value == "" {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "aliases", "acronyms":
+			if strings.TrimSpace(string(raw)) == "null" {
+				addSet(field, "[]")
+				break
+			}
+			compact, err := compactJSONRaw(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status: false, ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_AAO_313)", field, err),
+				})
+			}
+			addSet(field, compact)
+		}
+	}
+
+	if len(sets) == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "no editable fields in request (CWB_KB_AAO_314)"})
+	}
+
+	query := fmt.Sprintf("UPDATE kb.object_nodes SET %s WHERE object_id = $%d", strings.Join(sets, ", "), len(args)+1)
+	args = append(args, objectID)
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		logger.Error("update object node failed", "object_id", objectID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to update object node (CWB_KB_AAO_315)"})
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		logger.Error("rows affected object node failed", "object_id", objectID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to verify object node update (CWB_KB_AAO_316)"})
+	}
+	if affected == 0 {
+		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "object node not found (CWB_KB_AAO_317)"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"status": true})
+}
