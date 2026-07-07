@@ -288,7 +288,7 @@
 				type="button"
 				onclick={goPrev}
 				disabled={prevId === null || saving}
-				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{prevId === null || saving ? 0.5 : 1};"
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{prevId === null || saving ? 0.5 : 1}; margin-left:auto;"
 			>
 				Prev
 			</button>
@@ -319,7 +319,7 @@
 			<button
 				type="button"
 				onclick={() => (helpOpen = true)}
-				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textSecondary}; margin-left:auto;"
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textSecondary};"
 			>
 				Help
 			</button>
