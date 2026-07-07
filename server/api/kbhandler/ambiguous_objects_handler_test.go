@@ -205,6 +205,14 @@ func TestUpdateObjectNodeSuccess(t *testing.T) {
 		WithArgs(`["reg","regulator"]`, "Pressure Regulator", "obj_a").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
+	auditQuery := regexp.QuoteMeta(
+		"INSERT INTO kb.object_audit_log (table_name, row_key, action, changes, actor) VALUES ($1,$2,$3,$4,$5)",
+	)
+	mock.ExpectExec(auditQuery).
+		WithArgs("kb.object_nodes", "obj_a", "edit_fields",
+			`{"aliases":["reg","regulator"],"canonical_name":"Pressure Regulator"}`, nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
 	c, rec := newUpdateObjectNodeContext(t, "obj_a", `{
 		"aliases":["reg","regulator"],
 		"canonical_name":"Pressure Regulator"

@@ -443,5 +443,7 @@ func UpdateObjectNode(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "object node not found (CWB_KB_AAO_317)"})
 	}
 
+	logObjectAudit(c.Request().Context(), db, logger, "kb.object_nodes", objectID, objectAuditActionEditFields, structureActor(rc), payload)
+
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
