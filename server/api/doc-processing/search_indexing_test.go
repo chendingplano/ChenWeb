@@ -377,6 +377,44 @@ func TestBuildProvisionRegistryRowsAppliesConfiguredWeightsToSearchDocument(t *t
 	}
 }
 
+func TestBuildProvisionRegistryRowsPreservesStoredSearchDocument(t *testing.T) {
+	oldConfig := appconfig.AppConfig
+	t.Cleanup(func() { appconfig.AppConfig = oldConfig })
+	appconfig.AppConfig.ProvisionSearchWeights = appconfig.ProvisionSearchWeightsConfig{ProvisionName: 1.0, ProvisionType: 1.0, ProvisionDesc: 1.0, Keywords: 1.0, CategoryPaths: 1.0}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"id", "prov_id", "prov_name", "provision_type", "prov_desc", "provision_keywords", "category_paths", "source_line_spans", "input_filename", "search_document"}).
+		AddRow(
+			int64(1),
+			"p1",
+			"报告核签要求",
+			"mandatory",
+			"规定动态血压报告需由执业医师核签",
+			[]byte(`["动态血压","核签"]`),
+			[]byte(`["检查/报告"]`),
+			[]byte(`["8:9"]`),
+			"doc.pdf",
+			"要求动态血压报告必须由主治医师及以上职称的医师审核签字",
+		)
+	mock.ExpectQuery("FROM kb.provisions").WithArgs(int64(42)).WillReturnRows(rows)
+
+	got, err := buildProvisionRegistryRows(context.Background(), db, 42)
+	if err != nil {
+		t.Fatalf("buildProvisionRegistryRows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows len=%d", len(got))
+	}
+	if !strings.Contains(got[0].SearchDocument, "审核签字") {
+		t.Fatalf("search_document=%q, want stored search text preserved", got[0].SearchDocument)
+	}
+}
+
 func TestBuildEntityRegistryRowsAppliesConfiguredWeightsToSearchDocument(t *testing.T) {
 	oldConfig := appconfig.AppConfig
 	t.Cleanup(func() { appconfig.AppConfig = oldConfig })

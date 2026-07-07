@@ -533,7 +533,7 @@ ORDER BY id`
 			SourceRowID:     &id,
 			PrimaryLabel:    firstNonEmpty(provName, provID),
 			SecondaryLabel:  provisionType,
-			SearchDocument:  joinUniqueSearchParts(firstNonEmpty(searchDocWeighted, searchDoc, strings.Join([]string{provName, provDesc, provisionType}, " ")), objectText),
+			SearchDocument:  joinUniqueSearchParts(firstNonEmpty(searchDocWeighted, strings.Join([]string{provName, provDesc, provisionType}, " ")), searchDoc, objectText),
 			SnippetBasis:    firstNonEmpty(provDesc, provName),
 			SourceTitle:     inputFilename,
 			SourceFilename:  inputFilename,
