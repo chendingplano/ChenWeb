@@ -822,7 +822,6 @@ func convertProvisionSourceSpans(spans []string) []string {
 	return out
 }
 
-
 func appendIfMissing(values []string, value string) []string {
 	for _, existing := range values {
 		if existing == value {
@@ -962,34 +961,43 @@ func CreateProvision(c echo.Context) error {
 // SaveExtractedProvisions, so the frontend can render every attribute group
 // (Metadata / Statement / Context / Provenance / Grounding) without remapping.
 type provisionRecordJSON struct {
-	ID                  int64           `json:"id"`
-	InputRecordID       int64           `json:"input_record_id"`
-	ProvID              string          `json:"prov_id"`
-	InputFilename       string          `json:"input_filename"`
-	ProvName            *string         `json:"prov_name,omitempty"`
-	ProvNameEn          *string         `json:"prov_name_en,omitempty"`
-	ProvisionType       *string         `json:"provision_type,omitempty"`
-	SourceText          *string         `json:"source_text,omitempty"`
-	SourceLineSpans     json.RawMessage `json:"source_line_spans,omitempty"`
-	Provision           *string         `json:"provision,omitempty"`
-	ProvisionEn         *string         `json:"provision_en,omitempty"`
-	ProvisionSubject    *string         `json:"provision_subject,omitempty"`
-	ProvisionSubjectEn  *string         `json:"provision_subject_en,omitempty"`
-	ProvDesc            *string         `json:"prov_desc,omitempty"`
-	ProvDescEn          *string         `json:"prov_desc_en,omitempty"`
-	ProvContext         *string         `json:"prov_context,omitempty"`
-	ProvContextEn       *string         `json:"prov_context_en,omitempty"`
-	ProvisionKeywords   json.RawMessage `json:"provision_keywords,omitempty"`
-	ProvisionKeywordsEn json.RawMessage `json:"provision_keywords_en,omitempty"`
-	CategoryPaths       json.RawMessage `json:"category_paths,omitempty"`
-	CategoryPathsEn     json.RawMessage `json:"category_paths_en,omitempty"`
-	LocationType        *string         `json:"location_type,omitempty"`
-	Confidence          *float64        `json:"confidence,omitempty"`
-	IsExplicit          *bool           `json:"is_explicit,omitempty"`
-	NeedVerify          *bool           `json:"need_verify,omitempty"`
-	ModelName           *string         `json:"model_name,omitempty"`
-	PromptName          *string         `json:"prompt_name,omitempty"`
-	CreatedAt           string          `json:"created_at,omitempty"`
+	ID                  int64                 `json:"id"`
+	InputRecordID       int64                 `json:"input_record_id"`
+	ProvID              string                `json:"prov_id"`
+	InputFilename       string                `json:"input_filename"`
+	ProvName            *string               `json:"prov_name,omitempty"`
+	ProvNameEn          *string               `json:"prov_name_en,omitempty"`
+	ProvisionType       *string               `json:"provision_type,omitempty"`
+	SourceText          *string               `json:"source_text,omitempty"`
+	SourceLineSpans     json.RawMessage       `json:"source_line_spans,omitempty"`
+	Provision           *string               `json:"provision,omitempty"`
+	ProvisionEn         *string               `json:"provision_en,omitempty"`
+	ProvisionSubject    *string               `json:"provision_subject,omitempty"`
+	ProvisionSubjectEn  *string               `json:"provision_subject_en,omitempty"`
+	ProvDesc            *string               `json:"prov_desc,omitempty"`
+	ProvDescEn          *string               `json:"prov_desc_en,omitempty"`
+	ProvContext         *string               `json:"prov_context,omitempty"`
+	ProvContextEn       *string               `json:"prov_context_en,omitempty"`
+	ProvisionKeywords   json.RawMessage       `json:"provision_keywords,omitempty"`
+	ProvisionKeywordsEn json.RawMessage       `json:"provision_keywords_en,omitempty"`
+	CategoryPaths       json.RawMessage       `json:"category_paths,omitempty"`
+	CategoryPathsEn     json.RawMessage       `json:"category_paths_en,omitempty"`
+	LocationType        *string               `json:"location_type,omitempty"`
+	Confidence          *float64              `json:"confidence,omitempty"`
+	IsExplicit          *bool                 `json:"is_explicit,omitempty"`
+	NeedVerify          *bool                 `json:"need_verify,omitempty"`
+	ModelName           *string               `json:"model_name,omitempty"`
+	PromptName          *string               `json:"prompt_name,omitempty"`
+	CreatedAt           string                `json:"created_at,omitempty"`
+	Objects             []provisionObjectJSON `json:"objects,omitempty"`
+}
+
+// provisionObjectJSON is one kb.artifact_objects row extracted for a
+// provision, paired with the canonical name of the kb.object_nodes it has
+// been reconciled to (empty until reconciliation matches or creates a node).
+type provisionObjectJSON struct {
+	ArtifactObject string `json:"artifact_object"`
+	ObjectNode     string `json:"object_node,omitempty"`
 }
 
 type listProvisionsResponse struct {
@@ -999,7 +1007,8 @@ type listProvisionsResponse struct {
 }
 
 // ListProvisions handles GET /api/v1/kb/provisions?input_record_id=N.
-// It returns every provision row for one input record, ordered by prov_id,
+// It returns every provision row for one input record, ordered by the
+// numeric seqno suffix of prov_id (e.g. "..._PRV_2" before "..._PRV_18"),
 // mirroring ListMetrics so the Provision Window can render the same
 // record-browser → list → focus-mode flow used by the Metric Window.
 func ListProvisions(c echo.Context) error {
@@ -1034,7 +1043,7 @@ SELECT
     COALESCE(to_char(p.create_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') AS created_at
 FROM kb.provisions p
 WHERE p.input_record_id = $1
-ORDER BY p.prov_id ASC
+ORDER BY (substring(p.prov_id from '\d+$'))::int ASC
 `
 	rows, err := db.Query(query, inputID)
 	if err != nil {
@@ -1111,9 +1120,59 @@ ORDER BY p.prov_id ASC
 		})
 	}
 
+	objectLinks, err := loadProvisionObjectLinks(db, inputID)
+	if err != nil {
+		logger.Error("query kb.artifact_objects for provisions failed", "input_record_id", inputID, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to retrieve provision objects (CWB_KB_LPROV_023)",
+		})
+	}
+	for i := range out {
+		out[i].Objects = objectLinks[out[i].ProvID]
+	}
+
 	return c.JSON(http.StatusOK, listProvisionsResponse{
 		Status:  true,
 		Results: out,
 		Total:   len(out),
 	})
+}
+
+// loadProvisionObjectLinks fetches every kb.artifact_objects row extracted
+// for this record's provisions, left-joined to its reconciled kb.object_nodes
+// canonical name, and groups the pairs by prov_id (artifact_id). Both joins
+// are scoped to a single input record and hit indexed columns
+// (idx_kb_artifact_objects_source_artifact, the object_nodes.object_id
+// unique index), so the two-hop lookup stays cheap at this record-scoped
+// call size; if this ever needs to run unscoped across many records,
+// materializing canonical_name onto kb.artifact_objects would avoid the
+// second join.
+func loadProvisionObjectLinks(db *sql.DB, inputID int64) (map[string][]provisionObjectJSON, error) {
+	const query = `
+SELECT ao.artifact_id, ao.object_name, COALESCE(onode.canonical_name, '')
+FROM kb.artifact_objects ao
+LEFT JOIN kb.object_nodes onode ON onode.object_id = ao.object_id
+WHERE ao.source_record_id = $1
+  AND ao.artifact_type = 'provision'
+ORDER BY ao.artifact_id, ao.id
+`
+	rows, err := db.Query(query, inputID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string][]provisionObjectJSON)
+	for rows.Next() {
+		var provID, objectName, canonicalName string
+		if err := rows.Scan(&provID, &objectName, &canonicalName); err != nil {
+			return nil, err
+		}
+		out[provID] = append(out[provID], provisionObjectJSON{
+			ArtifactObject: objectName,
+			ObjectNode:     canonicalName,
+		})
+	}
+	return out, rows.Err()
 }

@@ -15,6 +15,45 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
 
+func TestIndexProvisionsForRecordLogsObjectEdgeCount(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery("SELECT prov_id, id, COALESCE\\(source_line_spans").
+		WithArgs(int64(100)).
+		WillReturnRows(sqlmock.NewRows([]string{"prov_id", "id", "source_line_spans", "search_document"}))
+
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM kb\\.artifact_connections").
+		WithArgs(int64(100), RelationMethodObjectID, RelationBelongTo, searchArtifactProvision).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("FROM kb\\.provisions").
+		WithArgs(int64(100), RelationBelongTo, RelationMethodObjectID, searchArtifactProvision, searchArtifactProvision).
+		WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectCommit()
+
+	logger := &fakeLogger{}
+	IndexProvisionsForRecord(context.Background(), 100, nil, logger)
+
+	entry, ok := findInfoLog(logger.infos, "provision indexing object edges")
+	if !ok {
+		t.Fatalf("infos = %+v, want a 'provision indexing object edges' log", logger.infos)
+	}
+	if v, ok := logValue(entry.args, "object_edges"); !ok || v != int64(3) {
+		t.Fatalf("object_edges = %v, want 3", v)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestBuildSummaryRegistryRowsReadsSummaryArtifacts(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("ARTIFACT_DIR", tmp)

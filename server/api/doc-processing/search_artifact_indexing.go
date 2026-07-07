@@ -83,7 +83,10 @@ func IndexTopicsForRecord(ctx context.Context, recordID int64, inputChunks []Blo
 
 func IndexProvisionsForRecord(ctx context.Context, recordID int64, inputChunks []Block, logger ApiTypes.JimoLogger) {
 	indexArtifactsByOverlapAndConnect(ctx, recordID, inputChunks, logger, provisionIndexConfig, loadIndexedProvisionsForRecord)
-	indexArtifactObjectConnections(ctx, ApiTypes.ProjectDBHandle, recordID, provisionObjectConnectionConfig, logger)
+	objectEdges := indexArtifactObjectConnections(ctx, ApiTypes.ProjectDBHandle, recordID, provisionObjectConnectionConfig, logger)
+	if logger != nil {
+		logger.Info("provision indexing object edges", "record_id", recordID, "object_edges", objectEdges)
+	}
 }
 
 func IndexEntitiesForRecord(ctx context.Context, recordID int64, inputChunks []Block, logger ApiTypes.JimoLogger) {

@@ -328,6 +328,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/artifacts/wiki", kbhandler.GetArtifactWiki)
 	apiGroup.GET("/kb/search", kbhandler.SearchAllArtifacts)
 	apiGroup.POST("/kb/search/backfill-embeddings", kbhandler.BackfillSearchEmbeddings)
+	apiGroup.POST("/kb/objects/resolve-ambiguous", kbhandler.ResolveAmbiguousObjects)
 	apiGroup.GET("/kb/summaries/search", kbhandler.SearchSummaries)
 	apiGroup.GET("/kb/topics/search", kbhandler.SearchTopics)
 	apiGroup.GET("/kb/scene-blocks/search", kbhandler.SearchSceneBlocks)

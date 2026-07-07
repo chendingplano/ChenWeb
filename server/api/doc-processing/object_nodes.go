@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/lib/pq"
 )
 
@@ -174,12 +175,29 @@ RETURNING object_id`,
 	return node, nil
 }
 
-func reconcileArtifactObjects(ctx context.Context, objects []ArtifactObject, reconciler ObjectReconciler) ([]ArtifactObject, error) {
+func reconcileArtifactObjects(ctx context.Context, objects []ArtifactObject, reconciler ObjectReconciler, logger ApiTypes.JimoLogger) ([]ArtifactObject, error) {
 	out := make([]ArtifactObject, 0, len(objects))
 	for _, obj := range objects {
 		result, err := reconciler.ReconcileOne(ctx, obj)
 		if err != nil {
 			return nil, err
+		}
+		if result.Status == ObjectReconcileAmbiguous && logger != nil {
+			candidates, candErr := reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
+			var names []string
+			if candErr == nil {
+				for _, c := range candidates {
+					names = append(names, c.Node.ObjectID+":"+c.Node.CanonicalName)
+				}
+			}
+			logger.Warn("object reconciliation ambiguous",
+				"input_record_id", obj.InputRecordID,
+				"artifact_type", obj.ArtifactType,
+				"artifact_id", obj.ArtifactID,
+				"object_name", obj.ObjectName,
+				"top_score", result.Confidence,
+				"candidates", names,
+			)
 		}
 		obj.ObjectID = result.ObjectID
 		obj.ReconcileStatus = result.Status
@@ -213,7 +231,7 @@ func jsonStringArray(raw []byte) []string {
 	return uniqueStrings(out)
 }
 
-func objectReconcileOptionsFromEnv() ObjectReconcileOptions {
+func ObjectReconcileOptionsFromEnv() ObjectReconcileOptions {
 	return ObjectReconcileOptions{
 		EmbeddingEnabled: strings.EqualFold(strings.TrimSpace(envString("OBJECT_RECONCILE_EMBEDDING_ENABLED", "false")), "true"),
 		MaxCandidates:    envInt("OBJECT_RECONCILE_MAX_CANDIDATES", 10, 1),

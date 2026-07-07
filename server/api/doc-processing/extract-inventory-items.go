@@ -217,7 +217,7 @@ func NewInventoryItemsProcessor(
 	}
 	if ApiTypes.ProjectDBHandle != nil {
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
-		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: objectReconcileOptionsFromEnv()}
+		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: ObjectReconcileOptionsFromEnv()}
 	}
 	return p
 }
@@ -2196,7 +2196,7 @@ func (p *InventoryItemsProcessor) persistInventoryItemObjects(ctx context.Contex
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactInventoryItem, itemID, item)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler)
+		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler, p.Logger)
 		if err != nil {
 			return err
 		}

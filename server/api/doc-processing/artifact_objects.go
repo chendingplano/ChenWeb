@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	ObjectReconcilePending   = "pending"
-	ObjectReconcileMatched   = "matched"
-	ObjectReconcileNew       = "new"
-	ObjectReconcileAmbiguous = "ambiguous"
-	ObjectReconcileRejected  = "rejected"
+	ObjectReconcilePending           = "pending"
+	ObjectReconcileMatched           = "matched"
+	ObjectReconcileNew               = "new"
+	ObjectReconcileAmbiguous         = "ambiguous"
+	ObjectReconcileAmbiguousResolved = "ambiguous_resolved"
+	ObjectReconcileRejected          = "rejected"
 )
 
 type ArtifactObject struct {

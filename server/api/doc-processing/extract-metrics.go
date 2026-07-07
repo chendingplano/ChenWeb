@@ -265,7 +265,7 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
 		p.ObjectReconciler = ObjectReconciler{
 			Store:   ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle},
-			Options: objectReconcileOptionsFromEnv(),
+			Options: ObjectReconcileOptionsFromEnv(),
 		}
 	}
 	p.forceDisableThinking()
@@ -496,7 +496,7 @@ func (p *MetricsProcessor) persistMetricObjects(ctx context.Context, recordID in
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactMetric, metricID, metric)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler)
+		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler, p.Logger)
 		if err != nil {
 			return err
 		}

@@ -144,7 +144,7 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 	}
 	if ApiTypes.ProjectDBHandle != nil {
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
-		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: objectReconcileOptionsFromEnv()}
+		p.ObjectReconciler = ObjectReconciler{Store: ObjectNodeSQLStore{DB: ApiTypes.ProjectDBHandle}, Options: ObjectReconcileOptionsFromEnv()}
 	}
 	return p
 }
@@ -1183,7 +1183,7 @@ func (p *ProvisionsProcessor) persistProvisionObjects(ctx context.Context, recor
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactProvision, provID, provision)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler)
+		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler, p.Logger)
 		if err != nil {
 			return err
 		}

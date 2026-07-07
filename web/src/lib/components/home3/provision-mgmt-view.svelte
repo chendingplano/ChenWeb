@@ -31,6 +31,7 @@
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import HashIcon from '@lucide/svelte/icons/hash';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
+	import BoxIcon from '@lucide/svelte/icons/box';
 
 	let {
 		darkMode = true,
@@ -490,6 +491,7 @@
 		metadata: AttrDef[];
 		statement: AttrDef[];
 		context: AttrDef[];
+		objects: AttrDef[];
 		provenance: AttrDef[];
 		grounding: AttrDef[];
 	} {
@@ -588,6 +590,27 @@
 			chipsAttr('categories', 'Categories', MapPinIcon, categoryItems, categoryItems.join(', '))
 		];
 
+		// kb.artifact_objects rows extracted for this provision (joined on
+		// prov_id = artifact_id), paired with their reconciled
+		// kb.object_nodes canonical name where one exists yet.
+		const objectLinks = m.objects ?? [];
+		const artifactObjectItems = objectLinks
+			.map((o) => o.artifact_object)
+			.filter((v) => typeof v === 'string' && v.trim() !== '');
+		const objectNodeItems = objectLinks
+			.map((o) => o.object_node)
+			.filter((v): v is string => typeof v === 'string' && v.trim() !== '');
+		const objects: AttrDef[] = [
+			chipsAttr(
+				'artifact_object',
+				'Artifact Object',
+				BoxIcon,
+				artifactObjectItems,
+				artifactObjectItems.join(', ')
+			),
+			chipsAttr('object_nodes', 'Object Nodes', BoxIcon, objectNodeItems, objectNodeItems.join(', '))
+		];
+
 		const provenance: AttrDef[] = [
 			textAttr('model', 'Model', HashIcon, fmt(m.model_name), has(m.model_name)),
 			textAttr('prompt', 'Prompt', FileTextIcon, fmt(m.prompt_name), has(m.prompt_name)),
@@ -611,7 +634,7 @@
 			linesAttr('source_line_spans', 'Lines', FileTextIcon, groundingEntries)
 		];
 
-		return { metadata, statement, context, provenance, grounding };
+		return { metadata, statement, context, objects, provenance, grounding };
 	}
 
 	let metricsMap = $derived.by((): MetricsCanvas | null => {
@@ -654,7 +677,7 @@
 			attrs: AttrDef[];
 		};
 
-		// 5 groups evenly spaced around the metric center (every 72°), starting
+		// 6 groups evenly spaced around the metric center (every 60°), starting
 		// at the top so the layout reads like the Scene Blocks chart.
 		const groupSpecs: GroupSpec[] = [
 			{
@@ -668,28 +691,35 @@
 				key: 'g_statement',
 				label: 'Statement',
 				icon: FileTextIcon,
-				angleDeg: -18,
+				angleDeg: -30,
 				attrs: attrsByGroup.statement
 			},
 			{
 				key: 'g_context',
 				label: 'Context',
 				icon: TagIcon,
-				angleDeg: 54,
+				angleDeg: 30,
 				attrs: attrsByGroup.context
+			},
+			{
+				key: 'g_objects',
+				label: 'Objects',
+				icon: BoxIcon,
+				angleDeg: 90,
+				attrs: attrsByGroup.objects
 			},
 			{
 				key: 'g_grounding',
 				label: 'Grounding',
 				icon: MapPinIcon,
-				angleDeg: 126,
+				angleDeg: 150,
 				attrs: attrsByGroup.grounding
 			},
 			{
 				key: 'g_provenance',
 				label: 'Provenance',
 				icon: HashIcon,
-				angleDeg: 198,
+				angleDeg: 210,
 				attrs: attrsByGroup.provenance
 			}
 		];
@@ -770,6 +800,13 @@
 		return { filled, total };
 	});
 
+	// prov_id is "<record_id>_PRV_<seqno>" (text); extract the trailing seqno
+	// so the list sorts numerically instead of lexicographically (2, 18, 19...).
+	function provIdSeqno(provId: string): number {
+		const m = /(\d+)$/.exec(provId ?? '');
+		return m ? parseInt(m[1], 10) : 0;
+	}
+
 	let filteredMetrics = $derived.by(() => {
 		let result = metrics;
 		const kw = keywordFilter.trim().toLowerCase();
@@ -796,7 +833,7 @@
 				}
 			}
 		}
-		return [...result].sort((a, b) => a.prov_id - b.prov_id);
+		return [...result].sort((a, b) => provIdSeqno(a.prov_id) - provIdSeqno(b.prov_id));
 	});
 
 	let selectedMetricInFilteredIndex = $derived(

@@ -1522,10 +1522,15 @@ export async function filterGraphNodes(
 
 // ---------- kb.provisions ----------
 
+export type KbProvisionObjectLink = {
+	artifact_object: string;
+	object_node?: string;
+};
+
 export type KbProvisionRecord = {
 	id: number;
 	input_record_id: number;
-	prov_id: number;
+	prov_id: string;
 	input_filename?: string;
 	prov_name?: string;
 	prov_name_en?: string;
@@ -1551,6 +1556,7 @@ export type KbProvisionRecord = {
 	model_name?: string;
 	prompt_name?: string;
 	created_at?: string;
+	objects?: KbProvisionObjectLink[];
 };
 
 export type ListKbProvisionsResponse = {
@@ -1574,7 +1580,7 @@ export type CreateKbProvisionPayload = {
 
 export type CreateKbProvisionResponse = {
 	status: boolean;
-	prov_id: number;
+	prov_id: string;
 	provision_name: string;
 	span_count: number;
 	message?: string;
