@@ -1,7 +1,10 @@
 package kbhandler
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -188,4 +191,152 @@ func GetAmbiguousObjectDetail(c echo.Context) error {
 		"artifact_object": toArtifactObjectDTO(obj),
 		"candidates":      candidateDTOs,
 	})
+}
+
+var artifactObjectReconcileStatuses = map[string]struct{}{
+	docprocessing.ObjectReconcilePending:           {},
+	docprocessing.ObjectReconcileMatched:           {},
+	docprocessing.ObjectReconcileNew:               {},
+	docprocessing.ObjectReconcileAmbiguous:         {},
+	docprocessing.ObjectReconcileAmbiguousResolved: {},
+	docprocessing.ObjectReconcileRejected:          {},
+}
+
+// UpdateArtifactObject handles PATCH /api/v1/kb/objects/artifact-objects/:id
+// — partial update of one kb.artifact_objects row from the admin resolution
+// page. Setting a non-empty object_id also stamps ext_info.reconcile_method
+// = "manual_admin" (merged into existing ext_info, not overwritten) so
+// provenance distinguishes manual resolutions from the automated backfill's
+// tie_break_deterministic / exact_name / lexical_name / new_node methods.
+func UpdateArtifactObject(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_AAO_200")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	idStr := strings.TrimSpace(c.Param("id"))
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid id (CWB_KB_AAO_201)"})
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_AAO_202)"})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "db not initialized (CWB_KB_AAO_210)"})
+	}
+
+	sets := make([]string, 0, len(payload)+1)
+	args := make([]any, 0, len(payload)+2)
+	addSet := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+
+	fields := make([]string, 0, len(payload))
+	for field := range payload {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	var settingObjectID bool
+	for _, field := range fields {
+		raw := payload[field]
+		switch field {
+		case "object_name", "object_type", "object_role", "reconcile_status":
+			value, err := decodeStringValue(raw, true)
+			if err != nil || value == nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status: false, ErrorMsg: fmt.Sprintf("%s cannot be null (CWB_KB_AAO_211)", field),
+				})
+			}
+			if field == "reconcile_status" {
+				if _, ok := artifactObjectReconcileStatuses[*value]; !ok {
+					return c.JSON(http.StatusBadRequest, errorResponse{
+						Status: false, ErrorMsg: fmt.Sprintf("invalid reconcile_status %q (CWB_KB_AAO_212)", *value),
+					})
+				}
+			}
+			addSet(field, *value)
+
+		case "object_name_en", "object_name_zh", "language", "description", "evidence_quote":
+			value, err := decodeStringValue(raw, true)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status: false, ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_AAO_213)", field, err),
+				})
+			}
+			if value == nil || *value == "" {
+				addSet(field, nil)
+			} else {
+				addSet(field, *value)
+			}
+
+		case "object_id":
+			value, err := decodeStringValue(raw, true)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status: false, ErrorMsg: fmt.Sprintf("invalid object_id: %v (CWB_KB_AAO_214)", err),
+				})
+			}
+			if value == nil || *value == "" {
+				addSet("object_id", nil)
+			} else {
+				addSet("object_id", *value)
+				settingObjectID = true
+			}
+
+		case "aliases", "acronyms":
+			if strings.TrimSpace(string(raw)) == "null" {
+				addSet(field, "[]")
+				break
+			}
+			compact, err := compactJSONRaw(raw)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status: false, ErrorMsg: fmt.Sprintf("invalid %s: %v (CWB_KB_AAO_215)", field, err),
+				})
+			}
+			addSet(field, compact)
+
+		case "reconcile_confidence":
+			value, err := decodeFloat64Value(raw)
+			if err != nil || value == nil {
+				return c.JSON(http.StatusBadRequest, errorResponse{
+					Status: false, ErrorMsg: fmt.Sprintf("invalid reconcile_confidence: %v (CWB_KB_AAO_216)", err),
+				})
+			}
+			addSet(field, *value)
+		}
+	}
+
+	if settingObjectID {
+		args = append(args, `{"reconcile_method":"manual_admin"}`)
+		sets = append(sets, fmt.Sprintf("ext_info = COALESCE(ext_info, '{}'::jsonb) || $%d::jsonb", len(args)))
+	}
+
+	if len(sets) == 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "no editable fields in request (CWB_KB_AAO_217)"})
+	}
+
+	query := fmt.Sprintf("UPDATE kb.artifact_objects SET %s WHERE id = $%d", strings.Join(sets, ", "), len(args)+1)
+	args = append(args, id)
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		logger.Error("update artifact object failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to update artifact object (CWB_KB_AAO_218)"})
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		logger.Error("rows affected artifact object failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to verify artifact object update (CWB_KB_AAO_219)"})
+	}
+	if affected == 0 {
+		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "artifact object not found (CWB_KB_AAO_220)"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
