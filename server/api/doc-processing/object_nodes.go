@@ -53,7 +53,62 @@ LIMIT $4`, pq.Array(names), obj.ObjectName, obj.ObjectType, maxCandidates)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []ObjectNodeCandidate
+	nodes, err := scanObjectNodes(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]ObjectNodeCandidate, 0, len(nodes))
+	for _, node := range nodes {
+		score := 0.85
+		method := "lexical_name"
+		if objectTypesCompatible(obj.ObjectType, node.ObjectType) && objectNameBundlesOverlap(obj.NormalizedNames, node.NormalizedNames) {
+			score = 1
+			method = "exact_name"
+		}
+		out = append(out, ObjectNodeCandidate{Node: node, Score: score, Method: method})
+	}
+	return out, nil
+}
+
+// FindByCanonicalName returns every kb.object_nodes row whose canonical_name
+// exactly matches name. Used by the "Create New" action on the Resolve
+// Ambiguous Objects admin page to avoid creating a duplicate node for a name
+// that already exists.
+func (s ObjectNodeSQLStore) FindByCanonicalName(ctx context.Context, name string) ([]ObjectNode, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("db is nil")
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT object_id,
+       COALESCE(canonical_object_id, ''),
+       COALESCE(canonical_name, ''),
+       COALESCE(canonical_name_en, ''),
+       COALESCE(canonical_name_zh, ''),
+       COALESCE(primary_language, ''),
+       COALESCE(object_type, ''),
+       COALESCE(aliases, '[]'::jsonb),
+       COALESCE(acronyms, '[]'::jsonb),
+       COALESCE(normalized_names, '[]'::jsonb),
+       COALESCE(description, ''),
+       COALESCE(search_document, ''),
+       COALESCE(reconcile_status, ''),
+       COALESCE(ext_info, '{}'::jsonb)
+FROM kb.object_nodes
+WHERE canonical_name = $1
+ORDER BY object_id`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanObjectNodes(rows)
+}
+
+// scanObjectNodes scans the shared column set used by FindCandidates and
+// FindByCanonicalName into ObjectNode rows.
+func scanObjectNodes(rows *sql.Rows) ([]ObjectNode, error) {
+	var out []ObjectNode
 	for rows.Next() {
 		var (
 			node                    ObjectNode
@@ -82,13 +137,7 @@ LIMIT $4`, pq.Array(names), obj.ObjectName, obj.ObjectType, maxCandidates)
 		node.Acronyms = jsonStringArray(acronymsRaw)
 		node.NormalizedNames = jsonStringArray(namesRaw)
 		_ = json.Unmarshal(extRaw, &node.ExtInfo)
-		score := 0.85
-		method := "lexical_name"
-		if objectTypesCompatible(obj.ObjectType, node.ObjectType) && objectNameBundlesOverlap(obj.NormalizedNames, node.NormalizedNames) {
-			score = 1
-			method = "exact_name"
-		}
-		out = append(out, ObjectNodeCandidate{Node: node, Score: score, Method: method})
+		out = append(out, node)
 	}
 	return out, rows.Err()
 }

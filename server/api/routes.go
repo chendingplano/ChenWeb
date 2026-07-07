@@ -331,6 +331,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.POST("/kb/objects/resolve-ambiguous", kbhandler.ResolveAmbiguousObjects)
 	apiGroup.GET("/kb/objects/ambiguous", kbhandler.ListAmbiguousObjects)
 	apiGroup.GET("/kb/objects/ambiguous/:id", kbhandler.GetAmbiguousObjectDetail)
+	apiGroup.POST("/kb/objects/ambiguous/:id/create-node", kbhandler.CreateObjectNodeFromArtifactObject)
 	apiGroup.PATCH("/kb/objects/artifact-objects/:id", kbhandler.UpdateArtifactObject)
 	apiGroup.PATCH("/kb/object-nodes/:object_id", kbhandler.UpdateObjectNode)
 	apiGroup.GET("/kb/summaries/search", kbhandler.SearchSummaries)

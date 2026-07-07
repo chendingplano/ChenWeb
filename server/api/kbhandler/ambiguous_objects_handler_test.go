@@ -176,6 +176,156 @@ func TestUpdateArtifactObjectAuditLogsEditFieldsWhenNoObjectIDChange(t *testing.
 	}
 }
 
+func newCreateObjectNodeContext(t *testing.T, id string, body string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/kb/objects/ambiguous/"+id+"/create-node", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/kb/objects/ambiguous/:id/create-node")
+	c.SetParamNames("id")
+	c.SetParamValues(id)
+	return c, rec
+}
+
+func loadByIDRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id", "source_record_id", "input_record_id", "artifact_type", "artifact_id",
+		"object_name", "object_name_en", "object_name_zh",
+		"language", "object_type", "object_role",
+		"aliases", "acronyms", "normalized_names",
+		"description", "evidence_quote", "source_line_spans", "confidence",
+		"object_id", "reconcile_status", "reconcile_confidence",
+	}).AddRow(
+		int64(42), int64(9), int64(9), "provision", "9_prv_1",
+		"pressure regulator", "", "",
+		"", "equipment", "regulated_object",
+		[]byte(`[]`), []byte(`[]`), []byte(`["pressure regulator"]`),
+		"", "", []byte(`[]`), 0.85,
+		"", "ambiguous", 0.0,
+	)
+}
+
+func TestCreateObjectNodeFromArtifactObjectReturnsExistingMatchesWithoutCreating(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery("FROM kb.artifact_objects").
+		WithArgs(int64(42)).
+		WillReturnRows(loadByIDRows())
+
+	mock.ExpectQuery("FROM kb.object_nodes").
+		WithArgs("血压").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"object_id", "canonical_object_id", "canonical_name", "canonical_name_en", "canonical_name_zh",
+			"primary_language", "object_type", "aliases", "acronyms", "normalized_names",
+			"description", "search_document", "reconcile_status", "ext_info",
+		}).AddRow(
+			"obj_existing", "", "血压", "Blood Pressure", "血压",
+			"zh", "concept", []byte(`[]`), []byte(`[]`), []byte(`["血压"]`),
+			"desc", "doc", "active", []byte(`{}`),
+		))
+
+	c, rec := newCreateObjectNodeContext(t, "42", `{"object_name":"血压"}`)
+	if err := CreateObjectNodeFromArtifactObject(c); err != nil {
+		t.Fatalf("CreateObjectNodeFromArtifactObject returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"created":false`) {
+		t.Fatalf("expected created:false in body, got %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"object_id":"obj_existing"`) {
+		t.Fatalf("expected existing node in body, got %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCreateObjectNodeFromArtifactObjectCreatesNodeWhenNoMatch(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery("FROM kb.artifact_objects").
+		WithArgs(int64(42)).
+		WillReturnRows(loadByIDRows())
+
+	mock.ExpectQuery("FROM kb.object_nodes").
+		WithArgs("舒张压").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"object_id", "canonical_object_id", "canonical_name", "canonical_name_en", "canonical_name_zh",
+			"primary_language", "object_type", "aliases", "acronyms", "normalized_names",
+			"description", "search_document", "reconcile_status", "ext_info",
+		}))
+
+	mock.ExpectQuery("INSERT INTO kb.object_nodes").
+		WillReturnRows(sqlmock.NewRows([]string{"object_id"}).AddRow("obj_new"))
+
+	auditQuery := regexp.QuoteMeta(
+		"INSERT INTO kb.object_audit_log (table_name, row_key, action, changes, actor) VALUES ($1,$2,$3,$4,$5)",
+	)
+	mock.ExpectExec(auditQuery).
+		WithArgs("kb.object_nodes", "obj_new", "create_node", "null", nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	c, rec := newCreateObjectNodeContext(t, "42", `{"object_name":"舒张压","object_type":"concept"}`)
+	if err := CreateObjectNodeFromArtifactObject(c); err != nil {
+		t.Fatalf("CreateObjectNodeFromArtifactObject returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"created":true`) {
+		t.Fatalf("expected created:true in body, got %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"object_id":"obj_new"`) {
+		t.Fatalf("expected new node object_id in body, got %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
+func TestCreateObjectNodeFromArtifactObjectRejectsEmptyObjectName(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	c, rec := newCreateObjectNodeContext(t, "42", `{"object_name":"   "}`)
+	if err := CreateObjectNodeFromArtifactObject(c); err != nil {
+		t.Fatalf("CreateObjectNodeFromArtifactObject returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}
+
 func newUpdateObjectNodeContext(t *testing.T, objectID string, body string) (echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	e := echo.New()

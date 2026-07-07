@@ -135,6 +135,38 @@ export function updateObjectNode(
 	});
 }
 
+export type CreateObjectNodeFields = {
+	object_name: string;
+	object_name_en: string;
+	object_name_zh: string;
+	language: string;
+	object_type: string;
+	aliases: string[];
+	acronyms: string[];
+	description: string;
+};
+
+export type CreateObjectNodeResult =
+	| { status: boolean; created: true; node: ObjectNodeCandidate }
+	| { status: boolean; created: false; nodes: ObjectNodeCandidate[] };
+
+/**
+ * Calls the "Create New" action for an ambiguous artifact object: if a
+ * kb.object_nodes row already has this canonical_name, it comes back as
+ * `nodes` instead of being duplicated; otherwise a new node is created and
+ * returned as `node`.
+ */
+export function createObjectNode(
+	id: number,
+	fields: CreateObjectNodeFields
+): Promise<CreateObjectNodeResult> {
+	return req(`/api/v1/kb/objects/ambiguous/${id}/create-node`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(fields)
+	});
+}
+
 function diffFields<T extends Record<string, unknown>>(
 	original: T,
 	edited: T,
@@ -176,6 +208,19 @@ export function neighborAmbiguousId(ids: number[], currentId: number, direction:
 	const nextIndex = index + direction;
 	if (nextIndex < 0 || nextIndex >= ids.length) return null;
 	return ids[nextIndex];
+}
+
+/**
+ * Index to select, in the id list with `resolvedId` already removed, right
+ * after resolving it: the row that took its place (the one that used to
+ * follow it), or the new last row if `resolvedId` was last. Returns null
+ * when no rows remain.
+ */
+export function nextIndexAfterResolve(idsBeforeResolve: number[], resolvedId: number): number | null {
+	const resolvedIndex = idsBeforeResolve.indexOf(resolvedId);
+	const remaining = idsBeforeResolve.length - 1;
+	if (resolvedIndex === -1 || remaining <= 0) return null;
+	return Math.min(resolvedIndex, remaining - 1);
 }
 
 /**

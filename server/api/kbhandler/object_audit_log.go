@@ -11,6 +11,7 @@ import (
 const (
 	objectAuditActionResolveObjectID = "resolve_object_id"
 	objectAuditActionEditFields      = "edit_fields"
+	objectAuditActionCreateNode      = "create_node"
 )
 
 // logObjectAudit is a best-effort insert into kb.object_audit_log recording

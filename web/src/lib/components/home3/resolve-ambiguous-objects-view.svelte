@@ -5,9 +5,11 @@
 		getAmbiguousObjectDetail,
 		updateArtifactObject,
 		updateObjectNode,
+		createObjectNode,
 		buildArtifactObjectPatch,
 		buildObjectNodePatch,
 		neighborAmbiguousId,
+		nextIndexAfterResolve,
 		fieldDirty,
 		RECONCILE_STATUS_OPTIONS,
 		type AmbiguousObjectSummary,
@@ -44,6 +46,10 @@
 	let saving      = $state(false);
 	let saveError   = $state('');
 	let helpOpen    = $state(false);
+
+	let creatingNode    = $state(false);
+	let createNodeError = $state('');
+	let existsNotice    = $state('');
 
 	let navConfirm      = $state<{ kind: 'prev' | 'next' | 'switch' } | null>(null);
 	let pendingSelectId = $state<number | null>(null);
@@ -158,9 +164,10 @@
 			snapshotNodes = currentNodes.map((c) => ({ ...c }));
 			if (resolved) {
 				const resolvedId = selectedId;
+				const nextIndex = nextIndexAfterResolve(rows.map((r) => r.id), resolvedId);
 				rows = rows.filter((r) => r.id !== resolvedId);
-				if (rows.length > 0) {
-					await selectRow(rows[0].id);
+				if (nextIndex !== null) {
+					await selectRow(rows[nextIndex].id);
 				} else {
 					selectedId = null;
 					currentObject = null;
@@ -175,6 +182,50 @@
 			return false;
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function createNew() {
+		if (!currentObject || selectedId === null || saving || creatingNode) return;
+		const objectName = currentObject.object_name.trim();
+		if (!objectName) {
+			createNodeError = 'Object Name is required to create a new object node.';
+			return;
+		}
+		creatingNode = true;
+		createNodeError = '';
+		try {
+			const result = await createObjectNode(selectedId, {
+				object_name: currentObject.object_name,
+				object_name_en: currentObject.object_name_en,
+				object_name_zh: currentObject.object_name_zh,
+				language: currentObject.language,
+				object_type: currentObject.object_type,
+				aliases: currentObject.aliases,
+				acronyms: currentObject.acronyms,
+				description: currentObject.description
+			});
+			if (result.created) {
+				if (!currentObject) return;
+				currentObject.object_id = result.node.object_id;
+				currentObject.reconcile_status = 'new';
+				await doSave();
+			} else {
+				let addedAny = false;
+				for (const node of result.nodes) {
+					if (currentNodes.some((n) => n.object_id === node.object_id)) continue;
+					currentNodes = [...currentNodes, node];
+					snapshotNodes = [...snapshotNodes, { ...node }];
+					addedAny = true;
+				}
+				existsNotice = addedAny
+					? 'An object node with this name already exists. It has been added to the candidates list.'
+					: 'An object node with this name already exists in the candidates list.';
+			}
+		} catch (e) {
+			createNodeError = e instanceof Error ? e.message : String(e);
+		} finally {
+			creatingNode = false;
 		}
 	}
 
@@ -327,6 +378,9 @@
 		{#if saveError}
 			<div class="mb-4" style="font-size:12px; color:#F87171;">Save failed: {saveError}</div>
 		{/if}
+		{#if createNodeError}
+			<div class="mb-4" style="font-size:12px; color:#F87171;">Create New failed: {createNodeError}</div>
+		{/if}
 		{#if detailLoading}
 			<div style="color:{textMuted}; font-size:13px;">Loading…</div>
 		{:else if detailError}
@@ -408,6 +462,16 @@
 							<span style="font-size:11px; color:{textMuted};">Reconcile Confidence</span>
 							<input type="number" min="0" max="1" step="0.01" bind:value={currentObject.reconcile_confidence} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('reconcile_confidence'))}" />
 						</label>
+						<div class="flex items-end justify-end">
+							<button
+								type="button"
+								onclick={createNew}
+								disabled={saving || creatingNode}
+								style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{saving || creatingNode ? 0.5 : 1};"
+							>
+								{creatingNode ? 'Creating…' : 'Create New'}
+							</button>
+						</div>
 					</div>
 				</div>
 
@@ -560,6 +624,23 @@
 				<div class="flex justify-end gap-2">
 					<button type="button" onclick={dismissCancel} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Keep Editing</button>
 					<button type="button" onclick={confirmCancel} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:#DC2626; color:white;">Discard</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if existsNotice}
+		<div
+			class="overlay"
+			role="presentation"
+			tabindex="-1"
+			onclick={() => (existsNotice = '')}
+			onkeydown={(e) => { if (e.key === 'Escape') existsNotice = ''; }}
+		>
+			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">{existsNotice}</p>
+				<div class="flex justify-end">
+					<button type="button" onclick={() => (existsNotice = '')} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">OK</button>
 				</div>
 			</div>
 		</div>

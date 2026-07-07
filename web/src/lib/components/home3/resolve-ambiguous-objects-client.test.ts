@@ -4,10 +4,12 @@ import assert from 'node:assert/strict';
 import {
 	buildArtifactObjectPatch,
 	buildObjectNodePatch,
+	createObjectNode,
 	fieldDirty,
 	getAmbiguousObjectDetail,
 	listAmbiguousObjects,
 	neighborAmbiguousId,
+	nextIndexAfterResolve,
 	updateArtifactObject,
 	updateObjectNode,
 	type ArtifactObjectDetail,
@@ -134,6 +136,54 @@ test('updateObjectNode PATCHes the object-nodes endpoint keyed by object_id', as
 	}
 });
 
+test('createObjectNode POSTs the create-node endpoint and returns a created node', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({ status: true, created: true, node: { ...baseCandidate, object_id: 'obj_new' } })
+	);
+	try {
+		const fields = {
+			object_name: '舒张压',
+			object_name_en: 'diastolic blood pressure',
+			object_name_zh: '舒张压',
+			language: 'zh',
+			object_type: 'concept',
+			aliases: [],
+			acronyms: ['DBP'],
+			description: '80~88 mmHg'
+		};
+		const result = await createObjectNode(101, fields);
+		assert.equal(String(mock.calls[0].input), '/api/v1/kb/objects/ambiguous/101/create-node');
+		assert.equal(mock.calls[0].init?.method, 'POST');
+		assert.equal(mock.calls[0].init?.body, JSON.stringify(fields));
+		assert.equal(result.created, true);
+		if (result.created) assert.equal(result.node.object_id, 'obj_new');
+	} finally {
+		mock.restore();
+	}
+});
+
+test('createObjectNode returns existing matches without created when the name already exists', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({ status: true, created: false, nodes: [baseCandidate] })
+	);
+	try {
+		const result = await createObjectNode(101, {
+			object_name: 'Pressure Regulator',
+			object_name_en: '',
+			object_name_zh: '',
+			language: '',
+			object_type: 'equipment',
+			aliases: [],
+			acronyms: [],
+			description: ''
+		});
+		assert.equal(result.created, false);
+		if (!result.created) assert.equal(result.nodes[0].object_id, 'obj_a');
+	} finally {
+		mock.restore();
+	}
+});
+
 test('buildArtifactObjectPatch only includes changed editable fields', () => {
 	const edited = { ...baseArtifactObject, object_name: 'Pressure Regulator', aliases: ['reg', 'regulator'] };
 	const patch = buildArtifactObjectPatch(baseArtifactObject, edited);
@@ -157,6 +207,19 @@ test('neighborAmbiguousId moves within the id list and returns null past the end
 	assert.equal(neighborAmbiguousId(ids, 103, 1), null);
 	assert.equal(neighborAmbiguousId(ids, 101, -1), null);
 	assert.equal(neighborAmbiguousId(ids, 102, -1), 101);
+});
+
+test('nextIndexAfterResolve selects the row that took the resolved row\'s place', () => {
+	assert.equal(nextIndexAfterResolve([101, 102, 103], 101), 0); // 102 shifts into index 0
+	assert.equal(nextIndexAfterResolve([101, 102, 103], 102), 1); // 103 shifts into index 1
+});
+
+test('nextIndexAfterResolve selects the previous row when the resolved row was last', () => {
+	assert.equal(nextIndexAfterResolve([101, 102, 103], 103), 1); // 102 is now the last row, at index 1
+});
+
+test('nextIndexAfterResolve returns null when no rows remain', () => {
+	assert.equal(nextIndexAfterResolve([101], 101), null);
 });
 
 test('fieldDirty is false for equal primitives and true for different primitives', () => {

@@ -92,6 +92,23 @@ func toArtifactObjectDTO(obj docprocessing.ArtifactObject) artifactObjectDTO {
 	}
 }
 
+func toObjectNodeCandidateDTOFromNode(n docprocessing.ObjectNode) objectNodeCandidateDTO {
+	return objectNodeCandidateDTO{
+		ObjectID:        n.ObjectID,
+		CanonicalName:   n.CanonicalName,
+		CanonicalNameEn: n.CanonicalNameEn,
+		CanonicalNameZh: n.CanonicalNameZh,
+		PrimaryLanguage: n.PrimaryLanguage,
+		ObjectType:      n.ObjectType,
+		Aliases:         nonNilStrings(n.Aliases),
+		Acronyms:        nonNilStrings(n.Acronyms),
+		Description:     n.Description,
+		Score:           1,
+		Method:          "canonical_name_match",
+		Recommended:     false,
+	}
+}
+
 func toObjectNodeCandidateDTO(c docprocessing.ObjectNodeCandidate, recommendedID string) objectNodeCandidateDTO {
 	return objectNodeCandidateDTO{
 		ObjectID:        c.Node.ObjectID,
@@ -446,4 +463,100 @@ func UpdateObjectNode(c echo.Context) error {
 	logObjectAudit(c.Request().Context(), db, logger, "kb.object_nodes", objectID, objectAuditActionEditFields, structureActor(rc), payload)
 
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
+}
+
+// createObjectNodeRequest is the wire shape for the "Create New" action's
+// request body — the current (possibly unsaved) form fields of the artifact
+// object being resolved, from which a new kb.object_nodes row is built.
+type createObjectNodeRequest struct {
+	ObjectName   string   `json:"object_name"`
+	ObjectNameEn string   `json:"object_name_en"`
+	ObjectNameZh string   `json:"object_name_zh"`
+	Language     string   `json:"language"`
+	ObjectType   string   `json:"object_type"`
+	Aliases      []string `json:"aliases"`
+	Acronyms     []string `json:"acronyms"`
+	Description  string   `json:"description"`
+}
+
+// CreateObjectNodeFromArtifactObject handles
+// POST /api/v1/kb/objects/ambiguous/:id/create-node — the "Create New" action
+// on the Resolve Ambiguous Objects admin page. It first checks kb.object_nodes
+// for rows whose canonical_name already equals the submitted object_name; if
+// any exist, no node is created and they are returned as candidates instead
+// so the admin page can offer them and tell the user the object already
+// exists. Otherwise a new kb.object_nodes row is inserted from the submitted
+// fields and returned so the client can set the artifact object's object_id
+// and reconcile_status = "new" and save.
+func CreateObjectNodeFromArtifactObject(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_KB_AAO_400")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	idStr := strings.TrimSpace(c.Param("id"))
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid id (CWB_KB_AAO_401)"})
+	}
+
+	var payload createObjectNodeRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid request body (CWB_KB_AAO_402)"})
+	}
+	objectName := strings.TrimSpace(payload.ObjectName)
+	if objectName == "" {
+		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "object_name is required (CWB_KB_AAO_403)"})
+	}
+
+	db := ApiTypes.ProjectDBHandle
+	if db == nil {
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "db not initialized (CWB_KB_AAO_410)"})
+	}
+
+	store := docprocessing.ArtifactObjectSQLStore{DB: db}
+	obj, found, err := store.LoadByID(c.Request().Context(), id)
+	if err != nil {
+		logger.Error("load artifact object failed", "id", id, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to load artifact object (CWB_KB_AAO_411)"})
+	}
+	if !found {
+		return c.JSON(http.StatusNotFound, errorResponse{Status: false, ErrorMsg: "artifact object not found (CWB_KB_AAO_412)"})
+	}
+
+	nodeStore := docprocessing.ObjectNodeSQLStore{DB: db}
+	existing, err := nodeStore.FindByCanonicalName(c.Request().Context(), objectName)
+	if err != nil {
+		logger.Error("find object nodes by canonical name failed", "object_name", objectName, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to check existing object nodes (CWB_KB_AAO_413)"})
+	}
+	if len(existing) > 0 {
+		nodes := make([]objectNodeCandidateDTO, 0, len(existing))
+		for _, n := range existing {
+			nodes = append(nodes, toObjectNodeCandidateDTOFromNode(n))
+		}
+		return c.JSON(http.StatusOK, map[string]any{"status": true, "created": false, "nodes": nodes})
+	}
+
+	obj.ObjectName = objectName
+	obj.ObjectNameEn = strings.TrimSpace(payload.ObjectNameEn)
+	obj.ObjectNameZh = strings.TrimSpace(payload.ObjectNameZh)
+	obj.Language = strings.TrimSpace(payload.Language)
+	obj.ObjectType = strings.TrimSpace(payload.ObjectType)
+	obj.Aliases = payload.Aliases
+	obj.Acronyms = payload.Acronyms
+	obj.Description = payload.Description
+
+	node, err := nodeStore.CreateNode(c.Request().Context(), obj)
+	if err != nil {
+		logger.Error("create object node failed", "artifact_object_id", id, "object_name", objectName, "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{Status: false, ErrorMsg: "failed to create object node (CWB_KB_AAO_414)"})
+	}
+
+	logObjectAudit(c.Request().Context(), db, logger, "kb.object_nodes", node.ObjectID, objectAuditActionCreateNode, structureActor(rc), nil)
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"status":  true,
+		"created": true,
+		"node":    toObjectNodeCandidateDTOFromNode(node),
+	})
 }
