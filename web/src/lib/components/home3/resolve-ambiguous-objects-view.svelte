@@ -8,6 +8,7 @@
 		buildArtifactObjectPatch,
 		buildObjectNodePatch,
 		neighborAmbiguousId,
+		fieldDirty,
 		RECONCILE_STATUS_OPTIONS,
 		type AmbiguousObjectSummary,
 		type ArtifactObjectDetail,
@@ -53,6 +54,20 @@
 		if (JSON.stringify(snapshotObject) !== JSON.stringify(currentObject)) return true;
 		return JSON.stringify(snapshotNodes) !== JSON.stringify(currentNodes);
 	});
+
+	function objDirty(field: keyof ArtifactObjectDetail): boolean {
+		if (!currentObject || !snapshotObject) return false;
+		return fieldDirty(currentObject[field], snapshotObject[field]);
+	}
+
+	function nodeDirty(index: number, field: keyof ObjectNodeCandidate): boolean {
+		if (!currentNodes[index] || !snapshotNodes[index]) return false;
+		return fieldDirty(currentNodes[index][field], snapshotNodes[index][field]);
+	}
+
+	function dirtyStyle(dirty: boolean): string {
+		return dirty ? 'border-color:#F87171; color:#F87171;' : '';
+	}
 
 	// Derived (not inlined in the template) so `selectedId`'s `number | null`
 	// type is narrowed once here, rather than needing a `number` at every
@@ -202,6 +217,7 @@
 	function useCandidate(objectId: string) {
 		if (!currentObject) return;
 		currentObject.object_id = objectId;
+		currentObject.reconcile_status = 'matched';
 	}
 
 	function aliasesText(values: string[]): string {
@@ -318,154 +334,190 @@
 		{:else if !currentObject}
 			<div style="color:{textMuted}; font-size:13px;">Select a record on the left to resolve it.</div>
 		{:else}
-			<!-- Artifact Object block -->
-			<div class="rounded-xl p-5 mb-5" style="background:{cardBg}; border:1px solid {borderColor};">
-				<div class="flex items-center justify-between mb-4">
-					<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">Artifact Object</h2>
-					<span style="font-size:11px; color:{textMuted};">
-						id {currentObject.id} · {currentObject.artifact_type} · {currentObject.artifact_id}
-					</span>
-				</div>
-				<div class="grid grid-cols-2 gap-3">
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Object Name</span>
-						<input bind:value={currentObject.object_name} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-					</label>
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Object Name (EN)</span>
-						<input bind:value={currentObject.object_name_en} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-					</label>
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Object Name (ZH)</span>
-						<input bind:value={currentObject.object_name_zh} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-					</label>
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Language</span>
-						<input bind:value={currentObject.language} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-					</label>
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Object Type</span>
-						<input bind:value={currentObject.object_type} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-					</label>
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Object Role</span>
-						<input bind:value={currentObject.object_role} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-					</label>
-					<label class="flex flex-col gap-1 col-span-2">
-						<span style="font-size:11px; color:{textMuted};">Aliases (comma-separated)</span>
-						<input
-							value={aliasesText(currentObject.aliases)}
-							oninput={(e) => { if (currentObject) currentObject.aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
-							style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"
-						/>
-					</label>
-					<label class="flex flex-col gap-1 col-span-2">
-						<span style="font-size:11px; color:{textMuted};">Acronyms (comma-separated)</span>
-						<input
-							value={aliasesText(currentObject.acronyms)}
-							oninput={(e) => { if (currentObject) currentObject.acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
-							style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"
-						/>
-					</label>
-					<label class="flex flex-col gap-1 col-span-2">
-						<span style="font-size:11px; color:{textMuted};">Description</span>
-						<textarea bind:value={currentObject.description} rows="2" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"></textarea>
-					</label>
-					<label class="flex flex-col gap-1 col-span-2">
-						<span style="font-size:11px; color:{textMuted};">Evidence Quote</span>
-						<textarea bind:value={currentObject.evidence_quote} rows="2" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"></textarea>
-					</label>
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Object ID</span>
-						<input bind:value={currentObject.object_id} placeholder="(unresolved)" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-					</label>
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Reconcile Status</span>
-						<select bind:value={currentObject.reconcile_status} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;">
-							{#each RECONCILE_STATUS_OPTIONS as opt}
-								<option value={opt}>{opt}</option>
-							{/each}
-						</select>
-					</label>
-					<label class="flex flex-col gap-1">
-						<span style="font-size:11px; color:{textMuted};">Reconcile Confidence</span>
-						<input type="number" min="0" max="1" step="0.01" bind:value={currentObject.reconcile_confidence} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-					</label>
-				</div>
-			</div>
-
-			<!-- Related Object Nodes block -->
-			<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
-				<h2 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:12px;">
-					Related Object Nodes
-				</h2>
-				{#if currentNodes.length === 0}
-					<div style="font-size:13px; color:{textMuted};">No candidate object nodes found for this artifact object.</div>
-				{/if}
-				{#each currentNodes as node, i (node.object_id)}
-					<div class="rounded-lg p-4 mb-3" style="border:1px solid {borderColor}; background:{pageBg};">
-						<div class="flex items-center justify-between mb-3">
-							<div class="flex items-center gap-2">
-								<span style="font-size:12px; font-family:monospace; color:{textSecondary};">{node.object_id}</span>
-								{#if node.recommended}
-									<span style="font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>
-								{/if}
-							</div>
-							<div class="flex items-center gap-3">
-								<span style="font-size:11px; color:{textMuted};">score {node.score.toFixed(2)} · {node.method}</span>
-								<button
-									type="button"
-									onclick={() => useCandidate(node.object_id)}
-									style="font-size:11px; font-weight:500; padding:4px 10px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;"
-								>
-									Use this
-								</button>
-							</div>
-						</div>
-						<div class="grid grid-cols-2 gap-3">
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Canonical Name</span>
-								<input bind:value={currentNodes[i].canonical_name} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Object Type</span>
-								<input bind:value={currentNodes[i].object_type} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Canonical Name (EN)</span>
-								<input bind:value={currentNodes[i].canonical_name_en} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Canonical Name (ZH)</span>
-								<input bind:value={currentNodes[i].canonical_name_zh} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Primary Language</span>
-								<input bind:value={currentNodes[i].primary_language} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Aliases (comma-separated)</span>
-								<input
-									value={aliasesText(node.aliases)}
-									oninput={(e) => { currentNodes[i].aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
-									style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"
-								/>
-							</label>
-							<label class="flex flex-col gap-1">
-								<span style="font-size:11px; color:{textMuted};">Acronyms (comma-separated)</span>
-								<input
-									value={aliasesText(node.acronyms)}
-									oninput={(e) => { currentNodes[i].acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
-									style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"
-								/>
-							</label>
-							<label class="flex flex-col gap-1 col-span-2">
-								<span style="font-size:11px; color:{textMuted};">Description</span>
-								<textarea bind:value={currentNodes[i].description} rows="2" style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"></textarea>
-							</label>
-						</div>
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-5" style="align-items:start;">
+				<!-- Left column: Artifact Object -->
+				<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+					<div class="flex items-center justify-between mb-4">
+						<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">Artifact Object</h2>
+						<span style="font-size:11px; color:{textMuted};">
+							id {currentObject.id} · {currentObject.artifact_type} · {currentObject.artifact_id}
+						</span>
 					</div>
-				{/each}
+					<div class="grid grid-cols-2 gap-3">
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Object Name</span>
+							<input bind:value={currentObject.object_name} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_name'))}" />
+						</label>
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Object Name (EN)</span>
+							<input bind:value={currentObject.object_name_en} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_name_en'))}" />
+						</label>
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Object Name (ZH)</span>
+							<input bind:value={currentObject.object_name_zh} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_name_zh'))}" />
+						</label>
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Language</span>
+							<input bind:value={currentObject.language} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('language'))}" />
+						</label>
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Object Type</span>
+							<input bind:value={currentObject.object_type} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_type'))}" />
+						</label>
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Object Role</span>
+							<input bind:value={currentObject.object_role} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_role'))}" />
+						</label>
+						<label class="flex flex-col gap-1 col-span-2">
+							<span style="font-size:11px; color:{textMuted};">Aliases (comma-separated)</span>
+							<input
+								value={aliasesText(currentObject.aliases)}
+								oninput={(e) => { if (currentObject) currentObject.aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
+								style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('aliases'))}"
+							/>
+						</label>
+						<label class="flex flex-col gap-1 col-span-2">
+							<span style="font-size:11px; color:{textMuted};">Acronyms (comma-separated)</span>
+							<input
+								value={aliasesText(currentObject.acronyms)}
+								oninput={(e) => { if (currentObject) currentObject.acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
+								style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('acronyms'))}"
+							/>
+						</label>
+						<label class="flex flex-col gap-1 col-span-2">
+							<span style="font-size:11px; color:{textMuted};">Description</span>
+							<textarea bind:value={currentObject.description} rows="2" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('description'))}"></textarea>
+						</label>
+						<label class="flex flex-col gap-1 col-span-2">
+							<span style="font-size:11px; color:{textMuted};">Evidence Quote</span>
+							<textarea bind:value={currentObject.evidence_quote} rows="2" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('evidence_quote'))}"></textarea>
+						</label>
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Object ID</span>
+							<input bind:value={currentObject.object_id} placeholder="(unresolved)" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('object_id'))}" />
+						</label>
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Reconcile Status</span>
+							<select bind:value={currentObject.reconcile_status} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('reconcile_status'))}">
+								{#each RECONCILE_STATUS_OPTIONS as opt}
+									<option value={opt}>{opt}</option>
+								{/each}
+							</select>
+						</label>
+						<label class="flex flex-col gap-1">
+							<span style="font-size:11px; color:{textMuted};">Reconcile Confidence</span>
+							<input type="number" min="0" max="1" step="0.01" bind:value={currentObject.reconcile_confidence} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(objDirty('reconcile_confidence'))}" />
+						</label>
+					</div>
+				</div>
+
+				<!-- Right column: Top Region (quick reference) + Bottom Region (editable candidates) -->
+				<div class="flex flex-col gap-5">
+					<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+						<h2 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:12px;">Candidates</h2>
+						{#if currentNodes.length === 0}
+							<div style="font-size:13px; color:{textMuted};">No candidate object nodes found for this artifact object.</div>
+						{:else}
+							<table style="width:100%; border-collapse:collapse; font-size:12px;">
+								<thead>
+									<tr>
+										<th style="text-align:left; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">Canonical Name</th>
+										<th style="text-align:left; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">Description</th>
+										<th style="text-align:right; padding:6px 8px; color:{textMuted}; font-weight:500; border-bottom:1px solid {borderColor};">Action</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each currentNodes as node (node.object_id)}
+										<tr>
+											<td style="padding:6px 8px; color:{textPrimary}; border-bottom:1px solid {borderColor}; vertical-align:top;">
+												{node.canonical_name}
+												{#if node.recommended}
+													<span style="display:inline-block; margin-left:6px; font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>
+												{/if}
+											</td>
+											<td style="padding:6px 8px; color:{textSecondary}; border-bottom:1px solid {borderColor}; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:top;">
+												{node.description}
+											</td>
+											<td style="padding:6px 8px; border-bottom:1px solid {borderColor}; text-align:right; vertical-align:top;">
+												<button
+													type="button"
+													onclick={() => useCandidate(node.object_id)}
+													style="font-size:11px; font-weight:500; padding:4px 10px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;"
+												>
+													Use this
+												</button>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						{/if}
+					</div>
+
+					<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+						<h2 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:12px;">
+							Related Object Nodes
+						</h2>
+						{#if currentNodes.length === 0}
+							<div style="font-size:13px; color:{textMuted};">No candidate object nodes found for this artifact object.</div>
+						{/if}
+						{#each currentNodes as node, i (node.object_id)}
+							<div class="rounded-lg p-4 mb-3" style="border:1px solid {borderColor}; background:{pageBg};">
+								<div class="flex items-center justify-between mb-3">
+									<div class="flex items-center gap-2">
+										<span style="font-size:12px; font-family:monospace; color:{textSecondary};">{node.object_id}</span>
+										{#if node.recommended}
+											<span style="font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>
+										{/if}
+									</div>
+									<span style="font-size:11px; color:{textMuted};">score {node.score.toFixed(2)} · {node.method}</span>
+								</div>
+								<div class="grid grid-cols-2 gap-3">
+									<label class="flex flex-col gap-1">
+										<span style="font-size:11px; color:{textMuted};">Canonical Name</span>
+										<input bind:value={currentNodes[i].canonical_name} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'canonical_name'))}" />
+									</label>
+									<label class="flex flex-col gap-1">
+										<span style="font-size:11px; color:{textMuted};">Object Type</span>
+										<input bind:value={currentNodes[i].object_type} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'object_type'))}" />
+									</label>
+									<label class="flex flex-col gap-1">
+										<span style="font-size:11px; color:{textMuted};">Canonical Name (EN)</span>
+										<input bind:value={currentNodes[i].canonical_name_en} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'canonical_name_en'))}" />
+									</label>
+									<label class="flex flex-col gap-1">
+										<span style="font-size:11px; color:{textMuted};">Canonical Name (ZH)</span>
+										<input bind:value={currentNodes[i].canonical_name_zh} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'canonical_name_zh'))}" />
+									</label>
+									<label class="flex flex-col gap-1">
+										<span style="font-size:11px; color:{textMuted};">Primary Language</span>
+										<input bind:value={currentNodes[i].primary_language} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'primary_language'))}" />
+									</label>
+									<label class="flex flex-col gap-1">
+										<span style="font-size:11px; color:{textMuted};">Aliases (comma-separated)</span>
+										<input
+											value={aliasesText(node.aliases)}
+											oninput={(e) => { currentNodes[i].aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
+											style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'aliases'))}"
+										/>
+									</label>
+									<label class="flex flex-col gap-1">
+										<span style="font-size:11px; color:{textMuted};">Acronyms (comma-separated)</span>
+										<input
+											value={aliasesText(node.acronyms)}
+											oninput={(e) => { currentNodes[i].acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
+											style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'acronyms'))}"
+										/>
+									</label>
+									<label class="flex flex-col gap-1 col-span-2">
+										<span style="font-size:11px; color:{textMuted};">Description</span>
+										<textarea bind:value={currentNodes[i].description} rows="2" style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'description'))}"></textarea>
+									</label>
+								</div>
+							</div>
+						{/each}
+					</div>
+				</div>
 			</div>
 		{/if}
 	</div>
