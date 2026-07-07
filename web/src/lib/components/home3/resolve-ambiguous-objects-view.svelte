@@ -3,6 +3,11 @@
 	import {
 		listAmbiguousObjects,
 		getAmbiguousObjectDetail,
+		updateArtifactObject,
+		updateObjectNode,
+		buildArtifactObjectPatch,
+		buildObjectNodePatch,
+		neighborAmbiguousId,
 		RECONCILE_STATUS_OPTIONS,
 		type AmbiguousObjectSummary,
 		type ArtifactObjectDetail,
@@ -35,6 +40,125 @@
 	let snapshotNodes  = $state<ObjectNodeCandidate[]>([]);
 	let currentNodes   = $state<ObjectNodeCandidate[]>([]);
 
+	let saving      = $state(false);
+	let saveError   = $state('');
+	let helpOpen    = $state(false);
+
+	let navConfirm      = $state<{ kind: 'prev' | 'next' | 'switch' } | null>(null);
+	let pendingSelectId = $state<number | null>(null);
+	let cancelConfirm   = $state(false);
+
+	let isDirty = $derived.by(() => {
+		if (!snapshotObject || !currentObject) return false;
+		if (JSON.stringify(snapshotObject) !== JSON.stringify(currentObject)) return true;
+		return JSON.stringify(snapshotNodes) !== JSON.stringify(currentNodes);
+	});
+
+	// Derived (not inlined in the template) so `selectedId`'s `number | null`
+	// type is narrowed once here, rather than needing a `number` at every
+	// neighborAmbiguousId call site in the markup.
+	let prevId = $derived.by(() =>
+		selectedId === null ? null : neighborAmbiguousId(rows.map((r) => r.id), selectedId, -1)
+	);
+	let nextId = $derived.by(() =>
+		selectedId === null ? null : neighborAmbiguousId(rows.map((r) => r.id), selectedId, 1)
+	);
+
+	function requestNav(kind: 'prev' | 'next' | 'switch', id: number) {
+		if (isDirty) {
+			navConfirm = { kind };
+			pendingSelectId = id;
+			return;
+		}
+		selectRow(id);
+	}
+
+	function goPrev() {
+		if (prevId !== null) requestNav('prev', prevId);
+	}
+
+	function goNext() {
+		if (nextId !== null) requestNav('next', nextId);
+	}
+
+	function clickCard(id: number) {
+		if (id === selectedId) return;
+		requestNav('switch', id);
+	}
+
+	async function confirmNavSave() {
+		const target = pendingSelectId;
+		navConfirm = null;
+		pendingSelectId = null;
+		await doSave();
+		if (target !== null) await selectRow(target);
+	}
+
+	function confirmNavDiscard() {
+		const target = pendingSelectId;
+		navConfirm = null;
+		pendingSelectId = null;
+		if (target !== null) selectRow(target);
+	}
+
+	function stayOnNav() {
+		navConfirm = null;
+		pendingSelectId = null;
+	}
+
+	function requestCancel() {
+		if (!isDirty) return;
+		cancelConfirm = true;
+	}
+
+	function confirmCancel() {
+		if (snapshotObject) currentObject = { ...snapshotObject };
+		currentNodes = snapshotNodes.map((c) => ({ ...c }));
+		cancelConfirm = false;
+	}
+
+	function dismissCancel() {
+		cancelConfirm = false;
+	}
+
+	async function doSave() {
+		if (!currentObject || !snapshotObject || selectedId === null) return;
+		saving = true;
+		saveError = '';
+		try {
+			const objectPatch = buildArtifactObjectPatch(snapshotObject, currentObject);
+			if (Object.keys(objectPatch).length > 0) {
+				await updateArtifactObject(selectedId, objectPatch);
+			}
+			for (let i = 0; i < currentNodes.length; i++) {
+				const nodePatch = buildObjectNodePatch(snapshotNodes[i], currentNodes[i]);
+				if (Object.keys(nodePatch).length > 0) {
+					await updateObjectNode(currentNodes[i].object_id, nodePatch);
+				}
+			}
+			const resolved = currentObject.reconcile_status !== 'ambiguous';
+			snapshotObject = { ...currentObject };
+			snapshotNodes = currentNodes.map((c) => ({ ...c }));
+			if (resolved) {
+				const resolvedId = selectedId;
+				rows = rows.filter((r) => r.id !== resolvedId);
+				if (rows.length > 0) {
+					await selectRow(rows[0].id);
+				} else {
+					selectedId = null;
+					currentObject = null;
+					snapshotObject = null;
+					currentNodes = [];
+					snapshotNodes = [];
+				}
+			}
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : String(e);
+		} finally {
+			saving = false;
+		}
+	}
+
 	async function loadList() {
 		listLoading = true;
 		listError = '';
@@ -55,6 +179,7 @@
 		selectedId = id;
 		detailLoading = true;
 		detailError = '';
+		saveError = '';
 		try {
 			const detail = await getAmbiguousObjectDetail(id);
 			if (selectedId !== id) return; // a newer selectRow call superseded this one
@@ -118,7 +243,7 @@
 			{#each rows as row (row.id)}
 				<button
 					type="button"
-					onclick={() => selectRow(row.id)}
+					onclick={() => clickCard(row.id)}
 					class="w-full text-left p-3 cursor-pointer"
 					style="
 						border-bottom:1px solid {borderColor};
@@ -138,6 +263,50 @@
 
 	<!-- Right panel -->
 	<div class="flex-1 overflow-y-auto p-6">
+		<div class="flex items-center gap-2 mb-4">
+			<button
+				type="button"
+				onclick={goPrev}
+				disabled={prevId === null}
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{prevId === null ? 0.5 : 1};"
+			>
+				Prev
+			</button>
+			<button
+				type="button"
+				onclick={goNext}
+				disabled={nextId === null}
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{nextId === null ? 0.5 : 1};"
+			>
+				Next
+			</button>
+			<button
+				type="button"
+				onclick={requestCancel}
+				disabled={!isDirty}
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{isDirty ? 1 : 0.5};"
+			>
+				Cancel
+			</button>
+			<button
+				type="button"
+				onclick={doSave}
+				disabled={!isDirty || saving}
+				style="font-size:12px; font-weight:600; padding:6px 14px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white; opacity:{!isDirty || saving ? 0.5 : 1};"
+			>
+				{saving ? 'Saving…' : 'Save'}
+			</button>
+			<button
+				type="button"
+				onclick={() => (helpOpen = true)}
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textSecondary}; margin-left:auto;"
+			>
+				Help
+			</button>
+		</div>
+		{#if saveError}
+			<div class="mb-4" style="font-size:12px; color:#F87171;">Save failed: {saveError}</div>
+		{/if}
 		{#if detailLoading}
 			<div style="color:{textMuted}; font-size:13px;">Loading…</div>
 		{:else if detailError}
@@ -296,4 +465,110 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if navConfirm}
+		<div
+			class="overlay"
+			role="presentation"
+			tabindex="-1"
+			onclick={stayOnNav}
+			onkeydown={(e) => { if (e.key === 'Escape') stayOnNav(); }}
+		>
+			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">
+					{navConfirm.kind === 'prev'
+						? 'Save changes before moving to the previous record?'
+						: navConfirm.kind === 'next'
+							? 'Save changes before moving to the next record?'
+							: 'Save changes before switching records?'}
+				</p>
+				<div class="flex justify-end gap-2">
+					<button type="button" onclick={stayOnNav} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Stay</button>
+					<button type="button" onclick={confirmNavDiscard} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Discard &amp; Continue</button>
+					<button type="button" onclick={confirmNavSave} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">Save &amp; Continue</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if cancelConfirm}
+		<div
+			class="overlay"
+			role="presentation"
+			tabindex="-1"
+			onclick={dismissCancel}
+			onkeydown={(e) => { if (e.key === 'Escape') dismissCancel(); }}
+		>
+			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">Discard your edits to this record?</p>
+				<div class="flex justify-end gap-2">
+					<button type="button" onclick={dismissCancel} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Keep Editing</button>
+					<button type="button" onclick={confirmCancel} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:#DC2626; color:white;">Discard</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if helpOpen}
+		<div
+			class="overlay"
+			role="presentation"
+			tabindex="-1"
+			onclick={() => (helpOpen = false)}
+			onkeydown={(e) => { if (e.key === 'Escape') helpOpen = false; }}
+		>
+			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} style="width:min(560px, 100%);">
+				<h3 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:10px;">About This Page</h3>
+				<div style="font-size:12px; color:{textSecondary}; line-height:1.7;">
+					<p style="margin-bottom:10px;">
+						A row is <strong>ambiguous</strong> when reconciliation found two or more equally-scored
+						candidate object nodes and could not pick one automatically. This page lets you review
+						the artifact object and its candidates side by side and resolve the tie by hand.
+					</p>
+					<p style="margin-bottom:10px;">
+						The <strong>Recommended</strong> badge marks the same deterministic tie-break pick used by
+						the automated backfill (most shared normalized names, falling back to the
+						lexicographically smallest object_id). Click <strong>Use this</strong> on any candidate to
+						copy its object_id into the Object ID field above.
+					</p>
+					<p style="margin-bottom:10px;">
+						<strong>reconcile_status</strong> values: <code>pending</code> (not yet attempted),
+						<code>ambiguous</code> (still tied), <code>ambiguous_resolved</code> (tie broken by a
+						human or the automated tie-break), <code>matched</code> (confident automatic match),
+						<code>new</code> (a new object node was created), <code>rejected</code> (no valid object
+						— leave object_id empty).
+					</p>
+					<p>
+						<strong>Save</strong> writes your edits to both the artifact object and any edited
+						candidate nodes. Once you set an object_id and a non-<code>ambiguous</code> status, the
+						row leaves this queue.
+					</p>
+				</div>
+				<div class="flex justify-end mt-4">
+					<button type="button" onclick={() => (helpOpen = false)} style="font-size:12px; font-weight:600; padding:6px 14px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">Close</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
+
+<style>
+	.overlay {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1.5rem;
+		background: rgba(2, 6, 23, 0.62);
+		z-index: 30;
+	}
+
+	.modal {
+		width: min(420px, 100%);
+		border-radius: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		background: #1f2333;
+		padding: 1.25rem;
+	}
+</style>
