@@ -177,3 +177,15 @@ export function neighborAmbiguousId(ids: number[], currentId: number, direction:
 	if (nextIndex < 0 || nextIndex >= ids.length) return null;
 	return ids[nextIndex];
 }
+
+/**
+ * True when `current` differs from `snapshot`. Array-aware and order-sensitive
+ * (same comparison semantics as diffFields above), used to highlight
+ * unsaved-edit state per field in the admin view.
+ */
+export function fieldDirty(current: unknown, snapshot: unknown): boolean {
+	if (Array.isArray(current) && Array.isArray(snapshot)) {
+		return JSON.stringify(current) !== JSON.stringify(snapshot);
+	}
+	return current !== snapshot;
+}

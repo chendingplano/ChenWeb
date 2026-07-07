@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
 	buildArtifactObjectPatch,
 	buildObjectNodePatch,
+	fieldDirty,
 	getAmbiguousObjectDetail,
 	listAmbiguousObjects,
 	neighborAmbiguousId,
@@ -156,4 +157,22 @@ test('neighborAmbiguousId moves within the id list and returns null past the end
 	assert.equal(neighborAmbiguousId(ids, 103, 1), null);
 	assert.equal(neighborAmbiguousId(ids, 101, -1), null);
 	assert.equal(neighborAmbiguousId(ids, 102, -1), 101);
+});
+
+test('fieldDirty is false for equal primitives and true for different primitives', () => {
+	assert.equal(fieldDirty('a', 'a'), false);
+	assert.equal(fieldDirty('a', 'b'), true);
+	assert.equal(fieldDirty(0.85, 0.85), false);
+	assert.equal(fieldDirty(0.85, 0.9), true);
+});
+
+test('fieldDirty compares arrays by content and order, not reference', () => {
+	assert.equal(fieldDirty(['reg', 'regulator'], ['reg', 'regulator']), false);
+	assert.equal(fieldDirty(['reg', 'regulator'], ['reg']), true);
+	assert.equal(fieldDirty(['reg', 'regulator'], ['regulator', 'reg']), true);
+});
+
+test('fieldDirty treats a missing snapshot as dirty only when current differs from it', () => {
+	assert.equal(fieldDirty('Pressure Regulator', undefined), true);
+	assert.equal(fieldDirty(undefined, undefined), false);
 });
