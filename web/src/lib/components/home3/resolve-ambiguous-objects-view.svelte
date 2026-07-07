@@ -56,14 +56,16 @@
 		detailError = '';
 		try {
 			const detail = await getAmbiguousObjectDetail(id);
+			if (selectedId !== id) return; // a newer selectRow call superseded this one
 			snapshotObject = detail.artifact_object;
 			currentObject = { ...detail.artifact_object };
 			snapshotNodes = detail.candidates;
 			currentNodes = detail.candidates.map((c) => ({ ...c }));
 		} catch (e) {
+			if (selectedId !== id) return;
 			detailError = e instanceof Error ? e.message : String(e);
 		} finally {
-			detailLoading = false;
+			if (selectedId === id) detailLoading = false;
 		}
 	}
 
