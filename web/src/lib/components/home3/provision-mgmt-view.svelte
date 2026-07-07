@@ -233,6 +233,64 @@
 			if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
 		}
 	}
+
+	// ---------- Provisions list width (draggable) ----------
+	const PROV_LIST_WIDTH_KEY = 'metrics:provisions-list-width';
+	const PROV_LIST_WIDTH_MIN = 260;
+	const PROV_LIST_WIDTH_MAX = 640;
+	const PROV_LIST_WIDTH_DEFAULT = 360;
+	let provListWidth = $state(PROV_LIST_WIDTH_DEFAULT);
+	let provListResizing = $state(false);
+
+	function clampProvListWidth(value: number) {
+		return Math.max(PROV_LIST_WIDTH_MIN, Math.min(PROV_LIST_WIDTH_MAX, Math.round(value)));
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		const saved = Number(localStorage.getItem(PROV_LIST_WIDTH_KEY));
+		if (Number.isFinite(saved) && saved >= PROV_LIST_WIDTH_MIN && saved <= PROV_LIST_WIDTH_MAX) {
+			provListWidth = saved;
+		}
+	});
+
+	function startProvListResize(event: PointerEvent) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = provListWidth;
+		provListResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		const move = (e: PointerEvent) => {
+			const next = clampProvListWidth(startWidth + (e.clientX - startX));
+			provListWidth = next;
+			if (browser) localStorage.setItem(PROV_LIST_WIDTH_KEY, String(next));
+		};
+		const up = () => {
+			provListResizing = false;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up, { once: true });
+		window.addEventListener('pointercancel', up, { once: true });
+	}
+
+	function onProvListResizerKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			provListWidth = clampProvListWidth(provListWidth - 16);
+			if (browser) localStorage.setItem(PROV_LIST_WIDTH_KEY, String(provListWidth));
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			provListWidth = clampProvListWidth(provListWidth + 16);
+			if (browser) localStorage.setItem(PROV_LIST_WIDTH_KEY, String(provListWidth));
+		}
+	}
+
 	type NormalizedSpan = { page_number: number; line_number: number };
 
 	function toPositiveInt(v: unknown): number | null {
@@ -738,7 +796,7 @@
 				}
 			}
 		}
-		return result;
+		return [...result].sort((a, b) => a.prov_id - b.prov_id);
 	});
 
 	let selectedMetricInFilteredIndex = $derived(
@@ -1263,7 +1321,12 @@
 		</div>
 	</header>
 
-	<div class="body" style={recordBrowserFolded ? 'grid-template-columns: minmax(0, 1fr)' : ''}>
+	<div
+		class="body"
+		style={recordBrowserFolded
+			? 'grid-template-columns: minmax(0, 1fr)'
+			: `grid-template-columns: auto ${provListWidth}px minmax(0, 1fr)`}
+	>
 		{#if !recordBrowserFolded}
 			<KbInputRecordBrowser
 				{darkMode}
@@ -1323,7 +1386,10 @@
 								<div class="card-rule" aria-hidden="true"></div>
 								<div class="card-body">
 									<div class="card-row-top">
-										<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
+										<div class="card-index">
+											№ {String(idx + 1).padStart(3, '0')}
+											<span class="card-prov-id" title="Provision ID">ID {m.prov_id}</span>
+										</div>
 										<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
 									</div>
 									<div class="card-name">{metricNameOf(m)}</div>
@@ -1343,6 +1409,17 @@
 						{/each}
 					{/if}
 				</div>
+
+				<button
+					type="button"
+					class="prov-list-resizer"
+					class:active={provListResizing}
+					aria-label="Resize provisions list"
+					onpointerdown={startProvListResize}
+					onkeydown={onProvListResizerKeydown}
+				>
+					<span class="prov-list-resizer-grip" aria-hidden="true"></span>
+				</button>
 			</aside>
 		{/if}
 
@@ -2137,13 +2214,56 @@
 
 	/* ---------- METRIC SIDEBAR ---------- */
 	.metric-sidebar {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		border-right: 1px solid var(--ink-line);
 		background: var(--panel-bg);
 		min-width: 0;
 		min-height: 0;
-		overflow: hidden;
+		overflow: visible;
+	}
+	.prov-list-resizer {
+		position: absolute;
+		top: 0;
+		right: -8px;
+		bottom: 0;
+		width: 16px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		outline: none;
+		z-index: 5;
+	}
+	.prov-list-resizer::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 7px;
+		width: 1px;
+		background: var(--ink-line);
+		opacity: 0.8;
+	}
+	.prov-list-resizer-grip {
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		width: 8px;
+		height: 52px;
+		transform: translate(-50%, -50%);
+		border-radius: 999px;
+		background:
+			radial-gradient(circle, var(--text-muted) 22%, transparent 24%) center 6px / 6px 12px repeat-y,
+			var(--panel-bg);
+		border: 1px solid var(--ink-line-soft);
+		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
+	}
+	.prov-list-resizer.active .prov-list-resizer-grip,
+	.prov-list-resizer:hover .prov-list-resizer-grip,
+	.prov-list-resizer:focus-visible .prov-list-resizer-grip {
+		border-color: #22c55e;
 	}
 
 	.error {
@@ -2271,6 +2391,13 @@
 		letter-spacing: 0.1em;
 		color: var(--text-muted);
 		text-transform: uppercase;
+	}
+	.card-prov-id {
+		margin-left: 8px;
+		padding-left: 8px;
+		border-left: 1px solid var(--ink-line);
+		color: var(--text-muted);
+		opacity: 0.75;
 	}
 	.card-conf {
 		font-family: var(--font-mono);

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
@@ -147,9 +147,16 @@
 		}
 	});
 
+	// Initial load only — must not depend on selectedRecordIdInternal.
+	// loadRecords() itself can reset selectedRecordIdInternal (e.g. when a
+	// record isn't found on the reloaded page), which would otherwise
+	// retrigger this effect and, combined with the prop-sync effect above,
+	// flood the backend with repeated page-1 requests forever. Every other
+	// place that needs a reload (pagination, search dialog, reset filters)
+	// already calls loadRecords explicitly.
 	$effect(() => {
 		if (settingsHydrated) {
-			void loadRecords(1, selectedRecordIdInternal);
+			untrack(() => void loadRecords(1, selectedRecordIdInternal));
 		}
 	});
 
