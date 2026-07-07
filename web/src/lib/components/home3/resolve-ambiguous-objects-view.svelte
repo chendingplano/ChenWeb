@@ -3,6 +3,7 @@
 	import {
 		listAmbiguousObjects,
 		getAmbiguousObjectDetail,
+		RECONCILE_STATUS_OPTIONS,
 		type AmbiguousObjectSummary,
 		type ArtifactObjectDetail,
 		type ObjectNodeCandidate
@@ -69,6 +70,22 @@
 		}
 	}
 
+	function useCandidate(objectId: string) {
+		if (!currentObject) return;
+		currentObject.object_id = objectId;
+	}
+
+	function aliasesText(values: string[]): string {
+		return values.join(', ');
+	}
+
+	function parseAliasesText(text: string): string[] {
+		return text
+			.split(',')
+			.map((s) => s.trim())
+			.filter(Boolean);
+	}
+
 	onMount(() => {
 		loadList();
 	});
@@ -128,8 +145,154 @@
 		{:else if !currentObject}
 			<div style="color:{textMuted}; font-size:13px;">Select a record on the left to resolve it.</div>
 		{:else}
-			<div style="color:{textPrimary}; font-size:13px;">
-				Loaded: {currentObject.object_name} ({currentObject.id})
+			<!-- Artifact Object block -->
+			<div class="rounded-xl p-5 mb-5" style="background:{cardBg}; border:1px solid {borderColor};">
+				<div class="flex items-center justify-between mb-4">
+					<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">Artifact Object</h2>
+					<span style="font-size:11px; color:{textMuted};">
+						id {currentObject.id} · {currentObject.artifact_type} · {currentObject.artifact_id}
+					</span>
+				</div>
+				<div class="grid grid-cols-2 gap-3">
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Object Name</span>
+						<input bind:value={currentObject.object_name} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+					</label>
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Object Name (EN)</span>
+						<input bind:value={currentObject.object_name_en} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+					</label>
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Object Name (ZH)</span>
+						<input bind:value={currentObject.object_name_zh} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+					</label>
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Language</span>
+						<input bind:value={currentObject.language} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+					</label>
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Object Type</span>
+						<input bind:value={currentObject.object_type} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+					</label>
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Object Role</span>
+						<input bind:value={currentObject.object_role} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+					</label>
+					<label class="flex flex-col gap-1 col-span-2">
+						<span style="font-size:11px; color:{textMuted};">Aliases (comma-separated)</span>
+						<input
+							value={aliasesText(currentObject.aliases)}
+							oninput={(e) => { if (currentObject) currentObject.aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
+							style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"
+						/>
+					</label>
+					<label class="flex flex-col gap-1 col-span-2">
+						<span style="font-size:11px; color:{textMuted};">Acronyms (comma-separated)</span>
+						<input
+							value={aliasesText(currentObject.acronyms)}
+							oninput={(e) => { if (currentObject) currentObject.acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
+							style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"
+						/>
+					</label>
+					<label class="flex flex-col gap-1 col-span-2">
+						<span style="font-size:11px; color:{textMuted};">Description</span>
+						<textarea bind:value={currentObject.description} rows="2" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"></textarea>
+					</label>
+					<label class="flex flex-col gap-1 col-span-2">
+						<span style="font-size:11px; color:{textMuted};">Evidence Quote</span>
+						<textarea bind:value={currentObject.evidence_quote} rows="2" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"></textarea>
+					</label>
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Object ID</span>
+						<input bind:value={currentObject.object_id} placeholder="(unresolved)" style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+					</label>
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Reconcile Status</span>
+						<select bind:value={currentObject.reconcile_status} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;">
+							{#each RECONCILE_STATUS_OPTIONS as opt}
+								<option value={opt}>{opt}</option>
+							{/each}
+						</select>
+					</label>
+					<label class="flex flex-col gap-1">
+						<span style="font-size:11px; color:{textMuted};">Reconcile Confidence</span>
+						<input type="number" min="0" max="1" step="0.01" bind:value={currentObject.reconcile_confidence} style="background:{pageBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+					</label>
+				</div>
+			</div>
+
+			<!-- Related Object Nodes block -->
+			<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+				<h2 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:12px;">
+					Related Object Nodes
+				</h2>
+				{#if currentNodes.length === 0}
+					<div style="font-size:13px; color:{textMuted};">No candidate object nodes found for this artifact object.</div>
+				{/if}
+				{#each currentNodes as node, i (node.object_id)}
+					<div class="rounded-lg p-4 mb-3" style="border:1px solid {borderColor}; background:{pageBg};">
+						<div class="flex items-center justify-between mb-3">
+							<div class="flex items-center gap-2">
+								<span style="font-size:12px; font-family:monospace; color:{textSecondary};">{node.object_id}</span>
+								{#if node.recommended}
+									<span style="font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>
+								{/if}
+							</div>
+							<div class="flex items-center gap-3">
+								<span style="font-size:11px; color:{textMuted};">score {node.score.toFixed(2)} · {node.method}</span>
+								<button
+									type="button"
+									onclick={() => useCandidate(node.object_id)}
+									style="font-size:11px; font-weight:500; padding:4px 10px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;"
+								>
+									Use this
+								</button>
+							</div>
+						</div>
+						<div class="grid grid-cols-2 gap-3">
+							<label class="flex flex-col gap-1">
+								<span style="font-size:11px; color:{textMuted};">Canonical Name</span>
+								<input bind:value={currentNodes[i].canonical_name} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+							</label>
+							<label class="flex flex-col gap-1">
+								<span style="font-size:11px; color:{textMuted};">Object Type</span>
+								<input bind:value={currentNodes[i].object_type} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+							</label>
+							<label class="flex flex-col gap-1">
+								<span style="font-size:11px; color:{textMuted};">Canonical Name (EN)</span>
+								<input bind:value={currentNodes[i].canonical_name_en} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+							</label>
+							<label class="flex flex-col gap-1">
+								<span style="font-size:11px; color:{textMuted};">Canonical Name (ZH)</span>
+								<input bind:value={currentNodes[i].canonical_name_zh} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+							</label>
+							<label class="flex flex-col gap-1">
+								<span style="font-size:11px; color:{textMuted};">Primary Language</span>
+								<input bind:value={currentNodes[i].primary_language} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;" />
+							</label>
+							<label class="flex flex-col gap-1">
+								<span style="font-size:11px; color:{textMuted};">Aliases (comma-separated)</span>
+								<input
+									value={aliasesText(node.aliases)}
+									oninput={(e) => { currentNodes[i].aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
+									style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"
+								/>
+							</label>
+							<label class="flex flex-col gap-1">
+								<span style="font-size:11px; color:{textMuted};">Acronyms (comma-separated)</span>
+								<input
+									value={aliasesText(node.acronyms)}
+									oninput={(e) => { currentNodes[i].acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
+									style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"
+								/>
+							</label>
+							<label class="flex flex-col gap-1 col-span-2">
+								<span style="font-size:11px; color:{textMuted};">Description</span>
+								<textarea bind:value={currentNodes[i].description} rows="2" style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px;"></textarea>
+							</label>
+						</div>
+					</div>
+				{/each}
 			</div>
 		{/if}
 	</div>
