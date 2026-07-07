@@ -217,7 +217,7 @@
 	function useCandidate(objectId: string) {
 		if (!currentObject) return;
 		currentObject.object_id = objectId;
-		currentObject.reconcile_status = 'matched';
+		currentObject.reconcile_status = 'ambiguous_resolved';
 	}
 
 	function aliasesText(values: string[]): string {
@@ -585,7 +585,7 @@
 						The <strong>Recommended</strong> badge marks the same deterministic tie-break pick used by
 						the automated backfill (most shared normalized names, falling back to the
 						lexicographically smallest object_id). Click <strong>Use this</strong> on any candidate to
-						copy its object_id into the Object ID field above.
+						copy its object_id into the Object ID field above and set the reconcile status to <code>ambiguous_resolved</code>.
 					</p>
 					<p style="margin-bottom:10px;">
 						<strong>reconcile_status</strong> values: <code>pending</code> (not yet attempted),
