@@ -15,7 +15,7 @@
 - Two independent PATCH calls on Save (artifact_object, then each edited node) — no combined transactional endpoint.
 - `source_line_spans` and `ext_info` are NOT shown or editable in the UI.
 - Candidates shown are exactly whatever `ObjectNodeSQLStore.FindCandidates` returns (no new/broader query) — this doc-processing method is unit-tested already and untouched by this plan.
-- Do not refactor `ResolveAmbiguousArtifactObjects` (the existing automated backfill) to reuse the new `RankAmbiguousCandidates` helper — keep it as-is; only add the new function alongside it (surgical changes, per `ChenWeb/CLAUDE.md` §1.3).
+- Task 1 adds `RankAmbiguousCandidates` alongside `ResolveAmbiguousArtifactObjects` rather than refactoring the latter to share it, to avoid touching an already-tested path for an unrelated feature (surgical changes, per `ChenWeb/CLAUDE.md` §1.3). Resolved during pre-flight review: if the task or final reviewer flags the resulting sort+pick duplication as a defect, the reviewer's finding governs — extract a shared helper both functions call (touching `ResolveAmbiguousArtifactObjects`) rather than dismissing the finding.
 - Go module: `github.com/chendingplano/deepdoc`. doc-processing package import path: `docprocessing "github.com/chendingplano/deepdoc/server/api/doc-processing"`.
 - Go tests use `github.com/DATA-DOG/go-sqlmock`; run with `go test ./server/api/doc-processing/... ./server/api/kbhandler/...`.
 - Frontend tests use `node:test` + `node:assert/strict`, run with `bun test <path>` (NOT `node --test` — this repo has no compiled-JS step, and `bun test` is the only runner that resolves the `.js`-suffixed imports back to sibling `.ts` files).

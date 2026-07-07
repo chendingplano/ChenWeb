@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -204,4 +205,108 @@ UPDATE kb.artifact_objects
 SET object_id = $1, reconcile_status = $2, reconcile_confidence = $3, ext_info = $4::jsonb
 WHERE id = $5`, nullEmpty(objectID), status, confidence, string(ext), rowID)
 	return err
+}
+
+// AmbiguousObjectSummary is the lightweight row shape used by the admin
+// resolution page's left-panel list.
+type AmbiguousObjectSummary struct {
+	ID           int64
+	ArtifactType string
+	ArtifactID   string
+	ObjectName   string
+	ObjectNameEn string
+	Confidence   float64
+}
+
+// ListAmbiguousSummaries returns every kb.artifact_objects row still at
+// reconcile_status='ambiguous', for the admin resolution page. Unlike
+// LoadAmbiguous (used by the automated backfill), this has no limit — the
+// ADR-documented backlog is small (~40 rows).
+func (s ArtifactObjectSQLStore) ListAmbiguousSummaries(ctx context.Context) ([]AmbiguousObjectSummary, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("db is nil")
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT id, artifact_type, artifact_id, object_name, COALESCE(object_name_en, ''), confidence
+FROM kb.artifact_objects
+WHERE reconcile_status = $1
+ORDER BY id`, ObjectReconcileAmbiguous)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []AmbiguousObjectSummary
+	for rows.Next() {
+		var row AmbiguousObjectSummary
+		if err := rows.Scan(&row.ID, &row.ArtifactType, &row.ArtifactID, &row.ObjectName, &row.ObjectNameEn, &row.Confidence); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// LoadByID loads one kb.artifact_objects row by primary key, regardless of
+// reconcile_status, for the admin resolution page's detail view. The second
+// return value is false if no row matches.
+func (s ArtifactObjectSQLStore) LoadByID(ctx context.Context, id int64) (ArtifactObject, bool, error) {
+	if s.DB == nil {
+		return ArtifactObject{}, false, fmt.Errorf("db is nil")
+	}
+	row := s.DB.QueryRowContext(ctx, `
+SELECT id, source_record_id, input_record_id, artifact_type, artifact_id,
+       object_name, COALESCE(object_name_en, ''), COALESCE(object_name_zh, ''),
+       COALESCE(language, ''), object_type, object_role,
+       COALESCE(aliases, '[]'::jsonb), COALESCE(acronyms, '[]'::jsonb), COALESCE(normalized_names, '[]'::jsonb),
+       COALESCE(description, ''), COALESCE(evidence_quote, ''), COALESCE(source_line_spans, '[]'::jsonb), confidence,
+       COALESCE(object_id, ''), reconcile_status, reconcile_confidence
+FROM kb.artifact_objects
+WHERE id = $1`, id)
+
+	var (
+		obj                                    ArtifactObject
+		aliasesRaw, acronymsRaw, normalizedRaw []byte
+		spansRaw                               []byte
+	)
+	err := row.Scan(
+		&obj.ID, &obj.SourceRecordID, &obj.InputRecordID,
+		&obj.ArtifactType, &obj.ArtifactID,
+		&obj.ObjectName, &obj.ObjectNameEn, &obj.ObjectNameZh,
+		&obj.Language, &obj.ObjectType, &obj.ObjectRole,
+		&aliasesRaw, &acronymsRaw, &normalizedRaw,
+		&obj.Description, &obj.EvidenceQuote, &spansRaw, &obj.Confidence,
+		&obj.ObjectID, &obj.ReconcileStatus, &obj.ReconcileConfidence,
+	)
+	if err == sql.ErrNoRows {
+		return ArtifactObject{}, false, nil
+	}
+	if err != nil {
+		return ArtifactObject{}, false, err
+	}
+	obj.Aliases = jsonStringArray(aliasesRaw)
+	obj.Acronyms = jsonStringArray(acronymsRaw)
+	obj.NormalizedNames = jsonStringArray(normalizedRaw)
+	_ = json.Unmarshal(spansRaw, &obj.SourceLineSpans)
+	return obj, true, nil
+}
+
+// RankAmbiguousCandidates re-runs FindCandidates for obj and returns the
+// results sorted by score descending, along with the object_id of the
+// deterministic tie-break pick (pickTieBreakCandidate) so callers can mark a
+// "recommended" entry. Used by the admin resolution page's detail endpoint.
+// Deliberately separate from ResolveAmbiguousArtifactObjects's identical
+// sort+pick sequence rather than extracted into it, to avoid touching that
+// already-tested automated path for an unrelated feature.
+func RankAmbiguousCandidates(ctx context.Context, reconciler ObjectReconciler, obj ArtifactObject) ([]ObjectNodeCandidate, string, error) {
+	candidates, err := reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
+	if err != nil {
+		return nil, "", err
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
+	recommended := ""
+	if len(candidates) > 0 {
+		recommended = pickTieBreakCandidate(obj, candidates).Node.ObjectID
+	}
+	return candidates, recommended, nil
 }

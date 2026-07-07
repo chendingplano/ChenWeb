@@ -213,3 +213,133 @@ func TestArtifactObjectSQLStoreUpdateResolutionWritesRow(t *testing.T) {
 		t.Fatalf("expectations: %v", err)
 	}
 }
+
+func TestArtifactObjectSQLStoreListAmbiguousSummariesReadsRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("FROM kb.artifact_objects").
+		WithArgs(ObjectReconcileAmbiguous).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "artifact_type", "artifact_id", "object_name", "object_name_en", "confidence",
+		}).AddRow(
+			int64(7), searchArtifactProvision, "9_prv_1", "pressure regulator", "", 0.85,
+		))
+
+	store := ArtifactObjectSQLStore{DB: db}
+	rows, err := store.ListAmbiguousSummaries(context.Background())
+	if err != nil {
+		t.Fatalf("ListAmbiguousSummaries: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != 7 || rows[0].ObjectName != "pressure regulator" {
+		t.Fatalf("rows = %+v, unexpected", rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestArtifactObjectSQLStoreLoadByIDReadsRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("FROM kb.artifact_objects").
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "source_record_id", "input_record_id", "artifact_type", "artifact_id",
+			"object_name", "object_name_en", "object_name_zh",
+			"language", "object_type", "object_role",
+			"aliases", "acronyms", "normalized_names",
+			"description", "evidence_quote", "source_line_spans", "confidence",
+			"object_id", "reconcile_status", "reconcile_confidence",
+		}).AddRow(
+			int64(7), int64(9), int64(9), searchArtifactProvision, "9_prv_1",
+			"pressure regulator", "", "",
+			"", "equipment", "regulated_object",
+			[]byte(`["reg"]`), []byte(`[]`), []byte(`["pressure regulator"]`),
+			"", "", []byte(`["8"]`), 0.85,
+			"", ObjectReconcileAmbiguous, 0.0,
+		))
+
+	store := ArtifactObjectSQLStore{DB: db}
+	obj, found, err := store.LoadByID(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("LoadByID: %v", err)
+	}
+	if !found {
+		t.Fatalf("found = false, want true")
+	}
+	if obj.ID != 7 || obj.ObjectName != "pressure regulator" || obj.ReconcileStatus != ObjectReconcileAmbiguous {
+		t.Fatalf("obj = %+v, unexpected", obj)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestArtifactObjectSQLStoreLoadByIDReturnsNotFoundForMissingRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("FROM kb.artifact_objects").
+		WithArgs(int64(999)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "source_record_id", "input_record_id", "artifact_type", "artifact_id",
+			"object_name", "object_name_en", "object_name_zh",
+			"language", "object_type", "object_role",
+			"aliases", "acronyms", "normalized_names",
+			"description", "evidence_quote", "source_line_spans", "confidence",
+			"object_id", "reconcile_status", "reconcile_confidence",
+		}))
+
+	store := ArtifactObjectSQLStore{DB: db}
+	_, found, err := store.LoadByID(context.Background(), 999)
+	if err != nil {
+		t.Fatalf("LoadByID: %v", err)
+	}
+	if found {
+		t.Fatalf("found = true, want false")
+	}
+}
+
+func TestRankAmbiguousCandidatesMarksRecommended(t *testing.T) {
+	obj := ArtifactObject{NormalizedNames: []string{"pressure regulator", "reg"}}
+	nodes := &stubObjectNodeStore{candidates: []ObjectNodeCandidate{
+		{Node: ObjectNode{ObjectID: "obj_a", NormalizedNames: []string{"pressure regulator"}}, Score: 0.85, Method: "lexical_name"},
+		{Node: ObjectNode{ObjectID: "obj_b", NormalizedNames: []string{"pressure regulator", "reg"}}, Score: 0.85, Method: "lexical_name"},
+	}}
+	reconciler := ObjectReconciler{Store: nodes}
+
+	candidates, recommended, err := RankAmbiguousCandidates(context.Background(), reconciler, obj)
+	if err != nil {
+		t.Fatalf("RankAmbiguousCandidates: %v", err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %+v, want 2", candidates)
+	}
+	if recommended != "obj_b" {
+		t.Fatalf("recommended = %q, want obj_b (more normalized-name overlap)", recommended)
+	}
+}
+
+func TestRankAmbiguousCandidatesReturnsEmptyRecommendedWhenNoCandidates(t *testing.T) {
+	nodes := &stubObjectNodeStore{}
+	reconciler := ObjectReconciler{Store: nodes}
+
+	candidates, recommended, err := RankAmbiguousCandidates(context.Background(), reconciler, ArtifactObject{})
+	if err != nil {
+		t.Fatalf("RankAmbiguousCandidates: %v", err)
+	}
+	if len(candidates) != 0 || recommended != "" {
+		t.Fatalf("candidates = %+v, recommended = %q, want empty", candidates, recommended)
+	}
+}
