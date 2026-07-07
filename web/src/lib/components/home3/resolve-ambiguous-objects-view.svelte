@@ -65,6 +65,7 @@
 	);
 
 	function requestNav(kind: 'prev' | 'next' | 'switch', id: number) {
+		if (saving) return;
 		if (isDirty) {
 			navConfirm = { kind };
 			pendingSelectId = id;
@@ -90,8 +91,8 @@
 		const target = pendingSelectId;
 		navConfirm = null;
 		pendingSelectId = null;
-		await doSave();
-		if (target !== null) await selectRow(target);
+		const success = await doSave();
+		if (success && target !== null) await selectRow(target);
 	}
 
 	function confirmNavDiscard() {
@@ -107,7 +108,7 @@
 	}
 
 	function requestCancel() {
-		if (!isDirty) return;
+		if (saving || !isDirty) return;
 		cancelConfirm = true;
 	}
 
@@ -121,8 +122,9 @@
 		cancelConfirm = false;
 	}
 
-	async function doSave() {
-		if (!currentObject || !snapshotObject || selectedId === null) return;
+	async function doSave(): Promise<boolean> {
+		if (!currentObject || !snapshotObject || selectedId === null) return false;
+		if (saving) return false;
 		saving = true;
 		saveError = '';
 		try {
@@ -152,8 +154,10 @@
 					snapshotNodes = [];
 				}
 			}
+			return true;
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : String(e);
+			return false;
 		} finally {
 			saving = false;
 		}
@@ -267,24 +271,24 @@
 			<button
 				type="button"
 				onclick={goPrev}
-				disabled={prevId === null}
-				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{prevId === null ? 0.5 : 1};"
+				disabled={prevId === null || saving}
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{prevId === null || saving ? 0.5 : 1};"
 			>
 				Prev
 			</button>
 			<button
 				type="button"
 				onclick={goNext}
-				disabled={nextId === null}
-				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{nextId === null ? 0.5 : 1};"
+				disabled={nextId === null || saving}
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{nextId === null || saving ? 0.5 : 1};"
 			>
 				Next
 			</button>
 			<button
 				type="button"
 				onclick={requestCancel}
-				disabled={!isDirty}
-				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{isDirty ? 1 : 0.5};"
+				disabled={!isDirty || saving}
+				style="font-size:12px; font-weight:500; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary}; opacity:{isDirty && !saving ? 1 : 0.5};"
 			>
 				Cancel
 			</button>
