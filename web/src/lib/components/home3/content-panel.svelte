@@ -21,6 +21,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	import LLMModelsView from '$lib/components/home3/llm-models-view.svelte';
 	import DbConsistencyView from '$lib/components/home3/db-consistency-view.svelte';
 	import DbMaintLogView from '$lib/components/home3/db-maint-log-view.svelte';
+	import ResolveAmbiguousObjectsView from '$lib/components/home3/resolve-ambiguous-objects-view.svelte';
 	import KanbanBoardView from '$lib/components/home3/kanban-board-view.svelte';
 	import AgentsView from '$lib/components/home3/agents-view.svelte';
 	import ProjectsView from '$lib/components/home3/projects-view.svelte';
@@ -203,6 +204,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 			<DbConsistencyView {darkMode} />
 		{:else if activeMenu?.childId === 'sysadmin-db-maint-log'}
 			<DbMaintLogView {darkMode} />
+		{:else if activeMenu?.childId === 'sysadmin-db-resolve-ambiguous'}
+			<ResolveAmbiguousObjectsView {darkMode} />
 		{:else if activeMenu?.childId === 'diary'}
 			<DiaryView {darkMode} />
 		{:else if activeMenu?.childId === 'ke-research-topics'}
