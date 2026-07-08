@@ -300,6 +300,13 @@
 		try {
 			const res = await listAmbiguousObjects();
 			rows = res.rows;
+			if (selectedId !== null && !rows.some((row) => row.id === selectedId)) {
+				selectedId = null;
+				currentObject = null;
+				snapshotObject = null;
+				currentNodes = [];
+				snapshotNodes = [];
+			}
 			if (rows.length > 0 && selectedId === null) {
 				await selectRow(rows[0].id);
 			}
@@ -360,12 +367,24 @@
 		style="width:320px; border-right:1px solid {borderColor};"
 	>
 		<div class="p-4 flex-shrink-0" style="border-bottom:1px solid {borderColor};">
-			<h1 style="font-size:16px; font-weight:600; color:{textPrimary}; margin-bottom:2px;">
-				Resolve Ambiguous Objects
-			</h1>
-			<p style="font-size:12px; color:{textSecondary};">
-				{rows.length} row{rows.length === 1 ? '' : 's'} at reconcile_status = ambiguous
-			</p>
+			<div class="flex items-start justify-between gap-3">
+				<div>
+					<h1 style="font-size:16px; font-weight:600; color:{textPrimary}; margin-bottom:2px;">
+						Resolve Ambiguous Objects
+					</h1>
+					<p style="font-size:12px; color:{textSecondary};">
+						{rows.length} row{rows.length === 1 ? '' : 's'} at reconcile_status = ambiguous
+					</p>
+				</div>
+				<button
+					type="button"
+					onclick={loadList}
+					disabled={listLoading}
+					style="font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{listLoading ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{listLoading ? 0.5 : 1};"
+				>
+					{listLoading ? 'Refreshing…' : 'Refresh'}
+				</button>
+			</div>
 		</div>
 
 		<div class="flex-1 overflow-y-auto" style="min-height:0;">
