@@ -69,6 +69,7 @@ func embedRegistryRows(
 		logger.Error("missing callReason/callLoc")
 	}
 
+	logger.Info("check-call-reason", "callerReason", callReason, "callLoc", callLoc)
 	if len(rows) == 0 {
 		return
 	}
@@ -118,6 +119,7 @@ func embedRegistryRows(
 				if !ok {
 					return
 				}
+				logger.Info("check-call-reason", "callerReason", callReason, "callLoc", callLoc)
 				embedRowBatch(ctx, embedder, modelName, timeoutSec, rows, indices, logger, callReason, callLoc)
 			}
 		}()
@@ -268,6 +270,7 @@ func embedRowBatch(
 			totalRunes = nextRunes
 			end++
 		}
+		logger.Info("check-call-reason", "callerReason", callReason, "callLoc", callLoc)
 		embedPreparedRegistryRows(ctx, embedder, modelName, timeoutSec, rows, prepared[start:end], logger, callReason, callLoc)
 		start = end
 	}
@@ -291,6 +294,7 @@ func embedPreparedRegistryRows(
 		rowIndices = append(rowIndices, item.rowIndex)
 	}
 
+	logger.Info("check-call-reason", "callerReason", callReason, "callLoc", callLoc)
 	vecs, err := embedBatchWithRetry(ctx, embedder, modelName, texts, timeoutSec, rows, rowIndices, logger, callReason, callLoc)
 	if err != nil {
 		for _, i := range rowIndices {
@@ -379,7 +383,9 @@ func embedBatchWithRetry(
 	callReason string,
 	callLoc string,
 ) ([][]float64, error) {
+	logger.Info("check-call-reason", "callerReason", callReason, "callLoc", callLoc)
 	if len(texts) == 1 {
+		logger.Info("check-call-reason", "callerReason", callReason, "callLoc", callLoc)
 		vec, err := embedWithRetry(ctx, embedder, modelName, texts[0], timeoutSec, rows[rowIndices[0]], logger)
 		if err != nil {
 			return nil, err
@@ -390,6 +396,7 @@ func embedBatchWithRetry(
 	if !ok {
 		out := make([][]float64, 0, len(texts))
 		for pos, text := range texts {
+			logger.Info("check-call-reason", "callerReason", callReason, "callLoc", callLoc)
 			vec, err := embedWithRetry(ctx, embedder, modelName, text, timeoutSec, rows[rowIndices[pos]], logger)
 			if err != nil {
 				return nil, err
@@ -399,6 +406,7 @@ func embedBatchWithRetry(
 		return out, nil
 	}
 
+	logger.Info("check-call-reason", "callerReason", callReason, "callLoc", callLoc)
 	var lastErr error
 	for attempt := 1; attempt <= embeddingMaxAttempts; attempt++ {
 		vecs, err := batcher.EmbedBatch(ctx, llmclients.EmbedBatchInput{

@@ -121,6 +121,11 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 
 	let sectionId = $derived(activeMenu?.itemId ?? 'dashboard');
 	let isDashboard = $derived(sectionId === 'dashboard' || !activeMenu);
+
+	// Flow pages scroll naturally and show the footer at the bottom.
+	// App-shell pages (chat, resolve-ambiguous) fill the viewport, manage their
+	// own internal scroll (need min-h-0 on the content wrapper), and hide the footer.
+	let showFooter = $derived(sectionId !== 'chat' && activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous');
 </script>
 
 <main
@@ -157,7 +162,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	{/if}
 
 	<!-- Main content area -->
-	<div class="flex-1 min-h-0">
+	<div class="flex-1 {showFooter ? '' : 'min-h-0'}">
 		{#if activeMenu?.childId === 'doc-processor-dashboard'}
 			<DocProcessorDashboardView {darkMode} />
 		{:else if activeMenu?.childId === 'llm-activities'}
@@ -366,7 +371,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		{/if}
 	</div>
 
-	{#if sectionId !== 'chat' && activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous'}
+	{#if showFooter}
 		<!-- AppFooter at the bottom of the scroll area -->
 		<div style="margin-top:48px;">
 			<AppFooter {darkMode} />
