@@ -44,7 +44,7 @@ SELECT object_id,
        COALESCE(reconcile_status, ''),
        COALESCE(ext_info, '{}'::jsonb)
 FROM kb.object_nodes
-WHERE reconcile_status <> 'rejected'
+WHERE reconcile_status NOT IN ('rejected', 'merged')
   AND (normalized_names ?| $1 OR canonical_name = $2 OR canonical_name_en = $2 OR canonical_name_zh = $2)
 ORDER BY CASE WHEN object_type = $3 THEN 0 ELSE 1 END, id
 LIMIT $4`, pq.Array(names), obj.ObjectName, obj.ObjectType, maxCandidates)

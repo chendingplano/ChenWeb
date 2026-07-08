@@ -6,6 +6,7 @@
 		updateArtifactObject,
 		updateObjectNode,
 		createObjectNode,
+		mergeObjectNodes,
 		buildArtifactObjectPatch,
 		buildObjectNodePatch,
 		neighborAmbiguousId,
@@ -50,6 +51,70 @@
 	let creatingNode    = $state(false);
 	let createNodeError = $state('');
 	let existsNotice    = $state('');
+
+	// --- Merge (Related Object Nodes) state ---
+	let masterNodeId    = $state<string | null>(null);
+	let selectedNodeIds = $state<Set<string>>(new Set());
+	let merging         = $state(false);
+	let mergeError      = $state('');
+	let mergeConfirm    = $state(false);
+
+	// Merge is allowed only with exactly one master and at least one other node
+	// picked to merge into it. The master is never in selectedNodeIds (see
+	// setMaster), so size >= 1 already guarantees "at least one other".
+	let canMerge = $derived(masterNodeId !== null && selectedNodeIds.size >= 1 && !merging && !saving);
+
+	function setMaster(objectId: string, checked: boolean) {
+		if (checked) {
+			masterNodeId = objectId;
+			if (selectedNodeIds.has(objectId)) {
+				const next = new Set(selectedNodeIds);
+				next.delete(objectId);
+				selectedNodeIds = next;
+			}
+		} else if (masterNodeId === objectId) {
+			masterNodeId = null;
+		}
+	}
+
+	function setSelected(objectId: string, checked: boolean) {
+		const next = new Set(selectedNodeIds);
+		if (checked) next.add(objectId);
+		else next.delete(objectId);
+		selectedNodeIds = next;
+	}
+
+	function resetMergeSelection() {
+		masterNodeId = null;
+		selectedNodeIds = new Set();
+		mergeError = '';
+		mergeConfirm = false;
+	}
+
+	function requestMerge() {
+		if (!canMerge) return;
+		mergeConfirm = true;
+	}
+
+	async function confirmMerge() {
+		if (masterNodeId === null || selectedNodeIds.size === 0) return;
+		mergeConfirm = false;
+		merging = true;
+		mergeError = '';
+		const survivor = masterNodeId;
+		const losers = [...selectedNodeIds];
+		try {
+			for (const loser of losers) {
+				await mergeObjectNodes(survivor, loser);
+			}
+			resetMergeSelection();
+			if (selectedId !== null) await selectRow(selectedId);
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : String(e);
+		} finally {
+			merging = false;
+		}
+	}
 
 	let navConfirm      = $state<{ kind: 'prev' | 'next' | 'switch' } | null>(null);
 	let pendingSelectId = $state<number | null>(null);
@@ -250,6 +315,7 @@
 		detailLoading = true;
 		detailError = '';
 		saveError = '';
+		resetMergeSelection();
 		try {
 			const detail = await getAmbiguousObjectDetail(id);
 			if (selectedId !== id) return; // a newer selectRow call superseded this one
@@ -287,13 +353,13 @@
 	});
 </script>
 
-<div class="flex" style="height:100%; min-height:100%; background:{pageBg};">
+<div class="flex" style="height:100%; overflow:hidden; background:{pageBg};">
 	<!-- Left panel -->
 	<div
-		class="flex-shrink-0 overflow-y-auto"
+		class="flex-shrink-0 flex flex-col"
 		style="width:320px; border-right:1px solid {borderColor};"
 	>
-		<div class="p-4" style="border-bottom:1px solid {borderColor};">
+		<div class="p-4 flex-shrink-0" style="border-bottom:1px solid {borderColor};">
 			<h1 style="font-size:16px; font-weight:600; color:{textPrimary}; margin-bottom:2px;">
 				Resolve Ambiguous Objects
 			</h1>
@@ -302,6 +368,7 @@
 			</p>
 		</div>
 
+		<div class="flex-1 overflow-y-auto" style="min-height:0;">
 		{#if listLoading}
 			<div class="p-4" style="color:{textMuted}; font-size:13px;">Loading…</div>
 		{:else if listError}
@@ -330,11 +397,12 @@
 				</button>
 			{/each}
 		{/if}
+		</div>
 	</div>
 
 	<!-- Right panel -->
-	<div class="flex-1 overflow-y-auto p-6">
-		<div class="flex items-center gap-2 mb-4">
+	<div class="flex-1 min-w-0 p-6 flex flex-col overflow-hidden">
+		<div class="flex items-center gap-2 mb-4 flex-shrink-0">
 			<button
 				type="button"
 				onclick={goPrev}
@@ -388,9 +456,9 @@
 		{:else if !currentObject}
 			<div style="color:{textMuted}; font-size:13px;">Select a record on the left to resolve it.</div>
 		{:else}
-			<div class="grid grid-cols-1 lg:grid-cols-2 gap-5" style="align-items:start;">
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-5 flex-1" style="align-items:stretch; min-height:0; grid-auto-rows:minmax(0, 1fr);">
 				<!-- Left column: Artifact Object -->
-				<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+				<div class="rounded-xl p-5 min-h-0 overflow-y-auto" style="background:{cardBg}; border:1px solid {borderColor};">
 					<div class="flex items-center justify-between mb-4">
 						<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">Artifact Object</h2>
 						<span style="font-size:11px; color:{textMuted};">
@@ -476,8 +544,8 @@
 				</div>
 
 				<!-- Right column: Top Region (quick reference) + Bottom Region (editable candidates) -->
-				<div class="flex flex-col gap-5">
-					<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+				<div class="flex flex-col gap-5 min-h-0">
+					<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 						<h2 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:12px;">Candidates</h2>
 						{#if currentNodes.length === 0}
 							<div style="font-size:13px; color:{textMuted};">No candidate object nodes found for this artifact object.</div>
@@ -518,13 +586,28 @@
 						{/if}
 					</div>
 
-					<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
-						<h2 style="font-size:14px; font-weight:600; color:{textPrimary}; margin-bottom:12px;">
-							Related Object Nodes
-						</h2>
+					<div class="rounded-xl p-5 flex flex-col flex-1 min-h-0" style="background:{cardBg}; border:1px solid {borderColor};">
+						<div class="flex items-center justify-between flex-shrink-0" style="margin-bottom:12px;">
+							<h2 style="font-size:14px; font-weight:600; color:{textPrimary};">
+								Related Object Nodes
+							</h2>
+							<button
+								type="button"
+								onclick={requestMerge}
+								disabled={!canMerge}
+								title="Merge the selected nodes into the master node"
+								style="font-size:12px; font-weight:600; padding:6px 14px; border-radius:6px; border:none; cursor:{canMerge ? 'pointer' : 'not-allowed'}; background:{accent}; color:white; opacity:{canMerge ? 1 : 0.5};"
+							>
+								{merging ? 'Merging…' : 'Merge'}
+							</button>
+						</div>
+						{#if mergeError}
+							<div class="mb-3" style="font-size:12px; color:#F87171;">Merge failed: {mergeError}</div>
+						{/if}
 						{#if currentNodes.length === 0}
 							<div style="font-size:13px; color:{textMuted};">No candidate object nodes found for this artifact object.</div>
-						{/if}
+						{:else}
+						<div class="related-nodes-scroll" style="flex:1 1 0; min-height:0; overflow-y:auto; padding-right:4px;">
 						{#each currentNodes as node, i (node.object_id)}
 							<div class="rounded-lg p-4 mb-3" style="border:1px solid {borderColor}; background:{pageBg};">
 								<div class="flex items-center justify-between mb-3">
@@ -534,7 +617,26 @@
 											<span style="font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>
 										{/if}
 									</div>
-									<span style="font-size:11px; color:{textMuted};">score {node.score.toFixed(2)} · {node.method}</span>
+									<div class="flex items-center gap-3">
+										<label class="flex items-center gap-1" style="font-size:11px; color:{textSecondary}; cursor:pointer;">
+											<input
+												type="checkbox"
+												checked={masterNodeId === node.object_id}
+												onchange={(e) => setMaster(node.object_id, (e.currentTarget as HTMLInputElement).checked)}
+											/>
+											Master
+										</label>
+										<label class="flex items-center gap-1" style="font-size:11px; color:{masterNodeId === node.object_id ? textMuted : textSecondary}; cursor:{masterNodeId === node.object_id ? 'not-allowed' : 'pointer'};">
+											<input
+												type="checkbox"
+												checked={selectedNodeIds.has(node.object_id)}
+												disabled={masterNodeId === node.object_id}
+												onchange={(e) => setSelected(node.object_id, (e.currentTarget as HTMLInputElement).checked)}
+											/>
+											Select
+										</label>
+										<span style="font-size:11px; color:{textMuted};">score {node.score.toFixed(2)} · {node.method}</span>
+									</div>
 								</div>
 								<div class="grid grid-cols-2 gap-3">
 									<label class="flex flex-col gap-1">
@@ -580,6 +682,8 @@
 								</div>
 							</div>
 						{/each}
+						</div>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -624,6 +728,31 @@
 				<div class="flex justify-end gap-2">
 					<button type="button" onclick={dismissCancel} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Keep Editing</button>
 					<button type="button" onclick={confirmCancel} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:#DC2626; color:white;">Discard</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if mergeConfirm}
+		<div
+			class="overlay"
+			role="presentation"
+			tabindex="-1"
+			onclick={() => (mergeConfirm = false)}
+			onkeydown={(e) => { if (e.key === 'Escape') mergeConfirm = false; }}
+		>
+			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+				<p style="font-size:13px; color:{textPrimary}; margin-bottom:8px;">
+					Merge {selectedNodeIds.size} selected object node{selectedNodeIds.size === 1 ? '' : 's'} into the master node?
+				</p>
+				<p style="font-size:12px; color:{textSecondary}; margin-bottom:16px;">
+					Their artifact-object mentions will be repointed to
+					<span style="font-family:monospace;">{masterNodeId}</span>, and the merged nodes will
+					no longer be considered when resolving artifact objects.
+				</p>
+				<div class="flex justify-end gap-2">
+					<button type="button" onclick={() => (mergeConfirm = false)} style="font-size:12px; padding:6px 12px; border-radius:6px; border:1px solid {borderColor}; cursor:pointer; background:{cardBg}; color:{textPrimary};">Cancel</button>
+					<button type="button" onclick={confirmMerge} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">Merge</button>
 				</div>
 			</div>
 		</div>

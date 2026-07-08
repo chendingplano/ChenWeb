@@ -157,7 +157,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	{/if}
 
 	<!-- Main content area -->
-	<div class="flex-1">
+	<div class="flex-1 min-h-0">
 		{#if activeMenu?.childId === 'doc-processor-dashboard'}
 			<DocProcessorDashboardView {darkMode} />
 		{:else if activeMenu?.childId === 'llm-activities'}
@@ -366,7 +366,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		{/if}
 	</div>
 
-	{#if sectionId !== 'chat'}
+	{#if sectionId !== 'chat' && activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous'}
 		<!-- AppFooter at the bottom of the scroll area -->
 		<div style="margin-top:48px;">
 			<AppFooter {darkMode} />

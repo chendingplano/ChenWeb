@@ -48,6 +48,41 @@ func TestObjectNodeCreateNodeStoresEmptyArraysForNilSlices(t *testing.T) {
 	}
 }
 
+func TestFindCandidatesExcludesRejectedAndMergedNodes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	store := ObjectNodeSQLStore{DB: db}
+	cols := []string{
+		"object_id", "canonical_object_id", "canonical_name", "canonical_name_en",
+		"canonical_name_zh", "primary_language", "object_type", "aliases", "acronyms",
+		"normalized_names", "description", "search_document", "reconcile_status", "ext_info",
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("reconcile_status NOT IN ('rejected', 'merged')")).
+		WillReturnRows(sqlmock.NewRows(cols).AddRow(
+			"obj_1", "", "pump", "", "", "", "equipment",
+			[]byte("[]"), []byte("[]"), []byte(`["pump"]`), "", "", "active", []byte("{}"),
+		))
+
+	candidates, err := store.FindCandidates(context.Background(), ArtifactObject{
+		ObjectName:      "pump",
+		ObjectType:      "equipment",
+		NormalizedNames: []string{"pump"},
+	}, ObjectReconcileOptions{})
+	if err != nil {
+		t.Fatalf("FindCandidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Node.ObjectID != "obj_1" {
+		t.Fatalf("candidates = %+v, want one candidate obj_1", candidates)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestReconcileArtifactObjectsLogsWarnOnAmbiguousTie(t *testing.T) {
 	store := &tiedCandidateStore{
 		nodes: []ObjectNode{

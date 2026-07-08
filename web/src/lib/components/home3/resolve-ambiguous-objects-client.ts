@@ -167,6 +167,24 @@ export function createObjectNode(
 	});
 }
 
+/**
+ * Merges one object node into another via POST /api/v1/kb/objects/merge: the
+ * loser node's kb.artifact_objects mentions are repointed to the survivor and
+ * the loser is marked reconcile_status='merged' (so it is no longer considered
+ * when resolving artifact objects). Each call writes one merge_nodes audit row
+ * to kb.object_audit_log.
+ */
+export function mergeObjectNodes(
+	survivorObjectId: string,
+	loserObjectId: string
+): Promise<{ status: boolean; survivor_object_id: string; repointed_mentions: number }> {
+	return req('/api/v1/kb/objects/merge', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ survivor_object_id: survivorObjectId, loser_object_id: loserObjectId })
+	});
+}
+
 function diffFields<T extends Record<string, unknown>>(
 	original: T,
 	edited: T,
