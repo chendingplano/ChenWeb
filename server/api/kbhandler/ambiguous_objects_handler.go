@@ -39,6 +39,7 @@ type artifactObjectDTO struct {
 // objectNodeCandidateDTO is the wire shape for one candidate kb.object_nodes
 // row shown alongside an ambiguous artifact_object.
 type objectNodeCandidateDTO struct {
+	ID              int64    `json:"id"`
 	ObjectID        string   `json:"object_id"`
 	CanonicalName   string   `json:"canonical_name"`
 	CanonicalNameEn string   `json:"canonical_name_en"`
@@ -95,6 +96,7 @@ func toArtifactObjectDTO(obj docprocessing.ArtifactObject) artifactObjectDTO {
 
 func toObjectNodeCandidateDTOFromNode(n docprocessing.ObjectNode) objectNodeCandidateDTO {
 	return objectNodeCandidateDTO{
+		ID:              n.ID,
 		ObjectID:        n.ObjectID,
 		CanonicalName:   n.CanonicalName,
 		CanonicalNameEn: n.CanonicalNameEn,
@@ -113,6 +115,7 @@ func toObjectNodeCandidateDTOFromNode(n docprocessing.ObjectNode) objectNodeCand
 
 func toObjectNodeCandidateDTO(c docprocessing.ObjectNodeCandidate, recommendedID string) objectNodeCandidateDTO {
 	return objectNodeCandidateDTO{
+		ID:              c.Node.ID,
 		ObjectID:        c.Node.ObjectID,
 		CanonicalName:   c.Node.CanonicalName,
 		CanonicalNameEn: c.Node.CanonicalNameEn,

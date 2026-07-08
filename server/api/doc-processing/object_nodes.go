@@ -29,7 +29,8 @@ func (s ObjectNodeSQLStore) FindCandidates(ctx context.Context, obj ArtifactObje
 		maxCandidates = 10
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-SELECT object_id,
+SELECT id,
+       object_id,
        COALESCE(canonical_object_id, ''),
        COALESCE(canonical_name, ''),
        COALESCE(canonical_name_en, ''),
@@ -80,7 +81,8 @@ func (s ObjectNodeSQLStore) FindByCanonicalName(ctx context.Context, name string
 		return nil, fmt.Errorf("db is nil")
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-SELECT object_id,
+SELECT id,
+       object_id,
        COALESCE(canonical_object_id, ''),
        COALESCE(canonical_name, ''),
        COALESCE(canonical_name_en, ''),
@@ -116,6 +118,7 @@ func scanObjectNodes(rows *sql.Rows) ([]ObjectNode, error) {
 			namesRaw, extRaw        []byte
 		)
 		if err := rows.Scan(
+			&node.ID,
 			&node.ObjectID,
 			&node.CanonicalObjectID,
 			&node.CanonicalName,

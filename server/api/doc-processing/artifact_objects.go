@@ -47,6 +47,7 @@ type ArtifactObject struct {
 }
 
 type ObjectNode struct {
+	ID                int64
 	ObjectID          string
 	CanonicalObjectID string
 	CanonicalName     string

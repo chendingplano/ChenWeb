@@ -670,6 +670,7 @@
 							<div class="rounded-lg p-4 mb-3" style="border:1px solid {borderColor}; background:{pageBg};">
 								<div class="flex items-center justify-between mb-3">
 									<div class="flex items-center gap-2">
+										<span style="font-size:12px; color:{textMuted};">id: {node.id}</span>
 										<span style="font-size:12px; font-family:monospace; color:{textSecondary};">{node.object_id}</span>
 										{#if node.recommended}
 											<span style="font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>

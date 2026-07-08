@@ -55,6 +55,7 @@ const baseArtifactObject: ArtifactObjectDetail = {
 };
 
 const baseCandidate: ObjectNodeCandidate = {
+	id: 7,
 	object_id: 'obj_a',
 	canonical_name: 'Pressure Regulator',
 	canonical_name_en: '',

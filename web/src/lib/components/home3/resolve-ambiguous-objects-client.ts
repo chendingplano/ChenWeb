@@ -28,6 +28,7 @@ export type ArtifactObjectDetail = {
 };
 
 export type ObjectNodeCandidate = {
+	id: number;
 	object_id: string;
 	canonical_name: string;
 	canonical_name_en: string;
