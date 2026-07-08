@@ -288,6 +288,45 @@
 		}
 	}
 
+	async function removeResolvedRow(resolvedId: number): Promise<void> {
+		const nextIndex = nextIndexAfterResolve(rows.map((r) => r.id), resolvedId);
+		rows = rows.filter((r) => r.id !== resolvedId);
+		if (nextIndex !== null) {
+			await selectRow(rows[nextIndex].id);
+			return;
+		}
+		selectedId = null;
+		detailLoading = false;
+		currentObject = null;
+		snapshotObject = null;
+		currentNodes = [];
+		snapshotNodes = [];
+	}
+
+	async function autoResolveSingleCandidate(
+		id: number,
+		detail: { artifact_object: ArtifactObjectDetail; candidates: ObjectNodeCandidate[] }
+	): Promise<boolean> {
+		if (detail.artifact_object.reconcile_status !== 'ambiguous' || detail.candidates.length !== 1) {
+			return false;
+		}
+		const candidate = detail.candidates[0];
+		try {
+			await updateArtifactObject(id, {
+				object_id: candidate.object_id,
+				reconcile_status: 'matched',
+				reconcile_confidence: candidate.score
+			});
+			if (selectedId === id) {
+				await removeResolvedRow(id);
+			}
+			return true;
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : String(e);
+			return false;
+		}
+	}
+
 	async function createNew() {
 		if (!currentObject || selectedId === null || saving || creatingNode) return;
 		const objectName = currentObject.object_name.trim();
@@ -364,6 +403,7 @@
 		try {
 			const detail = await getAmbiguousObjectDetail(id);
 			if (selectedId !== id) return; // a newer selectRow call superseded this one
+			if (await autoResolveSingleCandidate(id, detail)) return;
 			snapshotObject = detail.artifact_object;
 			currentObject = { ...detail.artifact_object };
 			snapshotNodes = detail.candidates;
