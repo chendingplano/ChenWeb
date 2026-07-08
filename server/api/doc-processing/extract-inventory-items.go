@@ -60,6 +60,8 @@ type InventoryItemsProcessor struct {
 	categorySeedDone              bool
 	ObjectStore                   ArtifactObjectsStore
 	ObjectReconciler              ObjectReconciler
+	AmbiguousObjectLLMResolver    AmbiguousObjectLLMResolver
+	ResolveAmbiguousMinConfidence float64
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchRecordID int64
@@ -214,6 +216,12 @@ func NewInventoryItemsProcessor(
 		ExtractInventoryItemsMaxTasks: envInt("EXTRACT_INTENTORY_ITEMS_MAX_TASKS", 1, 1),
 		CategoryRegistry:              registry,
 		CategoryCurator:               curator,
+	}
+	if resolver, minConfidence, err := NewAmbiguousObjectLLMResolverFromEnv(); err == nil {
+		p.AmbiguousObjectLLMResolver = resolver
+		p.ResolveAmbiguousMinConfidence = minConfidence
+	} else if logger != nil {
+		logger.Warn("configure ambiguous object LLM resolver failed", "err", err)
 	}
 	if ApiTypes.ProjectDBHandle != nil {
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
@@ -2197,7 +2205,7 @@ func (p *InventoryItemsProcessor) persistInventoryItemObjects(ctx context.Contex
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactInventoryItem, itemID, item)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler, p.Logger)
+		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence)
 		if err != nil {
 			return err
 		}

@@ -57,13 +57,13 @@ func TestFindCandidatesExcludesRejectedAndMergedNodes(t *testing.T) {
 
 	store := ObjectNodeSQLStore{DB: db}
 	cols := []string{
-		"object_id", "canonical_object_id", "canonical_name", "canonical_name_en",
+		"id", "object_id", "canonical_object_id", "canonical_name", "canonical_name_en",
 		"canonical_name_zh", "primary_language", "object_type", "aliases", "acronyms",
 		"normalized_names", "description", "search_document", "reconcile_status", "ext_info",
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("reconcile_status NOT IN ('rejected', 'merged')")).
 		WillReturnRows(sqlmock.NewRows(cols).AddRow(
-			"obj_1", "", "pump", "", "", "", "equipment",
+			int64(1), "obj_1", "", "pump", "", "", "", "equipment",
 			[]byte("[]"), []byte("[]"), []byte(`["pump"]`), "", "", "active", []byte("{}"),
 		))
 
@@ -122,6 +122,53 @@ func TestReconcileArtifactObjectsLogsWarnOnAmbiguousTie(t *testing.T) {
 	} else if names, ok := v.([]string); !ok || len(names) != 2 {
 		t.Fatalf("candidates arg = %v, want 2 candidate names", names)
 	}
+}
+
+func TestReconcileArtifactObjectsUsesLLMForAmbiguousTie(t *testing.T) {
+	objects := []ArtifactObject{{
+		ArtifactType:    searchArtifactProvision,
+		ArtifactID:      "9_prv_1",
+		ObjectName:      "SBP",
+		NormalizedNames: []string{"sbp"},
+		ExtInfo:         map[string]any{"source": "provision"},
+	}}
+	nodes := &stubObjectNodeStore{candidates: []ObjectNodeCandidate{
+		{Node: ObjectNode{ObjectID: "obj_sbp", CanonicalName: "收缩压"}, Score: 0.85, Method: "lexical_name"},
+		{Node: ObjectNode{ObjectID: "obj_htn", CanonicalName: "高血压"}, Score: 0.85, Method: "lexical_name"},
+	}}
+	resolver := fakeAmbiguousObjectLLMResolver{decision: AmbiguousObjectLLMDecision{
+		ModelName:            "test-model",
+		ResolutionObjectID:   "obj_sbp",
+		ResolutionConfidence: 0.92,
+		ArtifactUpdates:      AmbiguousArtifactObjectLLMUpdate{ObjectNameEn: "systolic blood pressure"},
+	}}
+
+	got, err := reconcileArtifactObjectsWithLLM(context.Background(), objects, ObjectReconciler{Store: nodes}, nil, resolver, 0.85)
+	if err != nil {
+		t.Fatalf("reconcileArtifactObjectsWithLLM: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("objects = %+v, want 1", got)
+	}
+	obj := got[0]
+	if obj.ObjectID != "obj_sbp" || obj.ReconcileStatus != ObjectReconcileAmbiguousResolved || obj.ReconcileConfidence != 0.92 {
+		t.Fatalf("object = %+v, want LLM ambiguous_resolved obj_sbp", obj)
+	}
+	if obj.ObjectNameEn != "systolic blood pressure" {
+		t.Fatalf("object_name_en = %q, want LLM completion", obj.ObjectNameEn)
+	}
+	if obj.ExtInfo["reconcile_method"] != ObjectReconcileMethodLLMAmbiguous {
+		t.Fatalf("ext_info = %+v, want LLM reconcile method", obj.ExtInfo)
+	}
+}
+
+type fakeAmbiguousObjectLLMResolver struct {
+	decision AmbiguousObjectLLMDecision
+	err      error
+}
+
+func (r fakeAmbiguousObjectLLMResolver) ResolveAmbiguousObject(_ context.Context, _ ArtifactObject, _ []ObjectNodeCandidate) (AmbiguousObjectLLMDecision, error) {
+	return r.decision, r.err
 }
 
 type tiedCandidateStore struct {

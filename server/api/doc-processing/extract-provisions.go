@@ -22,35 +22,37 @@ import (
 )
 
 type ProvisionsProcessor struct {
-	InputStore                DocMetadataStore
-	Store                     ProvisionsStore
-	Extractor                 LLMJSONExtractor
-	Logger                    ApiTypes.JimoLogger
-	ProcLogger                DocProcLogger
-	Now                       func() time.Time
-	PromptText                string
-	PromptRef                 string
-	PromptPath                string
-	PromptErr                 error
-	ModelRef                  string
-	ModelCfgPath              string
-	ModelErr                  error
-	ModelName                 string
-	FallbackModelRef          string
-	FallbackModelCfgPath      string
-	FallbackModelErr          error
-	FallbackModelName         string
-	FallbackExtractor         LLMJSONExtractor
-	BlockSize                 int
-	PrevOverlap               int
-	NextOverlap               int
-	RemoveTOC                 bool
-	ArtifactDir               string
-	ArtifactWebDir            string
-	ExtractProvisionsMaxTasks int
-	ExtractProvisionsInput    string // "chunks" (default) or "blocks"
-	ObjectStore               ArtifactObjectsStore
-	ObjectReconciler          ObjectReconciler
+	InputStore                    DocMetadataStore
+	Store                         ProvisionsStore
+	Extractor                     LLMJSONExtractor
+	Logger                        ApiTypes.JimoLogger
+	ProcLogger                    DocProcLogger
+	Now                           func() time.Time
+	PromptText                    string
+	PromptRef                     string
+	PromptPath                    string
+	PromptErr                     error
+	ModelRef                      string
+	ModelCfgPath                  string
+	ModelErr                      error
+	ModelName                     string
+	FallbackModelRef              string
+	FallbackModelCfgPath          string
+	FallbackModelErr              error
+	FallbackModelName             string
+	FallbackExtractor             LLMJSONExtractor
+	BlockSize                     int
+	PrevOverlap                   int
+	NextOverlap                   int
+	RemoveTOC                     bool
+	ArtifactDir                   string
+	ArtifactWebDir                string
+	ExtractProvisionsMaxTasks     int
+	ExtractProvisionsInput        string // "chunks" (default) or "blocks"
+	ObjectStore                   ArtifactObjectsStore
+	ObjectReconciler              ObjectReconciler
+	AmbiguousObjectLLMResolver    AmbiguousObjectLLMResolver
+	ResolveAmbiguousMinConfidence float64
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchChunks   []Chunk
@@ -141,6 +143,12 @@ func NewProvisionsProcessor(inputStore DocMetadataStore, store ProvisionsStore, 
 		ArtifactWebDir:            strings.TrimSpace(os.Getenv("ARTIFACT_WEB_DIR")),
 		ExtractProvisionsMaxTasks: envInt("EXTRACT_PROVISIONS_MAX_TASKS", 1, 1),
 		ExtractProvisionsInput:    extractProvisionsInputFromEnv(),
+	}
+	if resolver, minConfidence, err := NewAmbiguousObjectLLMResolverFromEnv(); err == nil {
+		p.AmbiguousObjectLLMResolver = resolver
+		p.ResolveAmbiguousMinConfidence = minConfidence
+	} else if logger != nil {
+		logger.Warn("configure ambiguous object LLM resolver failed", "err", err)
 	}
 	if ApiTypes.ProjectDBHandle != nil {
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
@@ -1183,7 +1191,7 @@ func (p *ProvisionsProcessor) persistProvisionObjects(ctx context.Context, recor
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactProvision, provID, provision)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler, p.Logger)
+		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence)
 		if err != nil {
 			return err
 		}

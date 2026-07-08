@@ -225,11 +225,11 @@ func TestCreateObjectNodeFromArtifactObjectReturnsExistingMatchesWithoutCreating
 	mock.ExpectQuery("FROM kb.object_nodes").
 		WithArgs("血压").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"object_id", "canonical_object_id", "canonical_name", "canonical_name_en", "canonical_name_zh",
+			"id", "object_id", "canonical_object_id", "canonical_name", "canonical_name_en", "canonical_name_zh",
 			"primary_language", "object_type", "aliases", "acronyms", "normalized_names",
 			"description", "search_document", "reconcile_status", "ext_info",
 		}).AddRow(
-			"obj_existing", "", "血压", "Blood Pressure", "血压",
+			int64(1), "obj_existing", "", "血压", "Blood Pressure", "血压",
 			"zh", "concept", []byte(`[]`), []byte(`[]`), []byte(`["血压"]`),
 			"desc", "doc", "active", []byte(`{}`),
 		))
@@ -270,7 +270,7 @@ func TestCreateObjectNodeFromArtifactObjectCreatesNodeWhenNoMatch(t *testing.T) 
 	mock.ExpectQuery("FROM kb.object_nodes").
 		WithArgs("舒张压").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"object_id", "canonical_object_id", "canonical_name", "canonical_name_en", "canonical_name_zh",
+			"id", "object_id", "canonical_object_id", "canonical_name", "canonical_name_en", "canonical_name_zh",
 			"primary_language", "object_type", "aliases", "acronyms", "normalized_names",
 			"description", "search_document", "reconcile_status", "ext_info",
 		}))

@@ -227,22 +227,32 @@ RETURNING object_id`,
 	return node, nil
 }
 
+type AmbiguousObjectLLMResolver interface {
+	ResolveAmbiguousObject(ctx context.Context, obj ArtifactObject, candidates []ObjectNodeCandidate) (AmbiguousObjectLLMDecision, error)
+}
+
 func reconcileArtifactObjects(ctx context.Context, objects []ArtifactObject, reconciler ObjectReconciler, logger ApiTypes.JimoLogger) ([]ArtifactObject, error) {
+	return reconcileArtifactObjectsWithLLM(ctx, objects, reconciler, logger, nil, defaultResolveAmbiguousMinConf)
+}
+
+func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObject, reconciler ObjectReconciler, logger ApiTypes.JimoLogger, llmResolver AmbiguousObjectLLMResolver, minConfidence float64) ([]ArtifactObject, error) {
 	out := make([]ArtifactObject, 0, len(objects))
 	for _, obj := range objects {
 		result, err := reconciler.ReconcileOne(ctx, obj)
 		if err != nil {
 			return nil, err
 		}
+		var candidates []ObjectNodeCandidate
 		if result.Status == ObjectReconcileAmbiguous && logger != nil {
-			candidates, candErr := reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
+			var candErr error
+			candidates, candErr = reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
 			var names []string
 			if candErr == nil {
 				for _, c := range candidates {
 					names = append(names, c.Node.ObjectID+":"+c.Node.CanonicalName)
 				}
 			}
-			logger.Info("***** object reconciliation ambiguous",
+			logger.Warn("object reconciliation ambiguous",
 				"input_record_id", obj.InputRecordID,
 				"artifact_type", obj.ArtifactType,
 				"artifact_id", obj.ArtifactID,
@@ -250,6 +260,34 @@ func reconcileArtifactObjects(ctx context.Context, objects []ArtifactObject, rec
 				"top_score", result.Confidence,
 				"candidates", names,
 			)
+		}
+		if result.Status == ObjectReconcileAmbiguous && llmResolver != nil {
+			if candidates == nil {
+				candidates, err = reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
+				if err != nil {
+					return nil, err
+				}
+			}
+			decision, resolveErr := llmResolver.ResolveAmbiguousObject(ctx, obj, candidates)
+			if resolveErr != nil {
+				if logger != nil {
+					logger.Warn("LLM ambiguous object resolution failed", "artifact_id", obj.ArtifactID, "err", resolveErr)
+				}
+			} else {
+				var applyStore AmbiguousObjectLLMApplyStore
+				if s, ok := reconciler.Store.(AmbiguousObjectLLMApplyStore); ok {
+					applyStore = s
+				}
+				resolvedObj, applied, applyErr := ApplyAmbiguousObjectLLMDecision(ctx, obj, candidates, decision, applyStore, minConfidence)
+				if applyErr != nil {
+					if logger != nil {
+						logger.Warn("apply LLM ambiguous object resolution failed", "artifact_id", obj.ArtifactID, "err", applyErr)
+					}
+				} else if applied {
+					out = append(out, resolvedObj)
+					continue
+				}
+			}
 		}
 		obj.ObjectID = result.ObjectID
 		obj.ReconcileStatus = result.Status

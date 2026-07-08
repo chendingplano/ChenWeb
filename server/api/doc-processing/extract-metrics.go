@@ -22,48 +22,50 @@ import (
 )
 
 type MetricsProcessor struct {
-	InputStore                  DocMetadataStore
-	Store                       MetricsStore
-	ObjectStore                 ArtifactObjectsStore
-	ObjectReconciler            ObjectReconciler
-	Extractor                   LLMJSONExtractor
-	Logger                      ApiTypes.JimoLogger
-	ProcLogger                  DocProcLogger
-	Now                         func() time.Time
-	MentionPromptText           string
-	MentionPromptRef            string
-	MentionPromptPath           string
-	MentionPromptErr            error
-	MentionModelRef             string
-	MentionModelCfgPath         string
-	MentionModelErr             error
-	MentionModelName            string
-	MentionModelCfg             structureModelConfig
-	FallbackMentionModelRef     string
-	FallbackMentionModelCfgPath string
-	FallbackMentionModelErr     error
-	FallbackMentionModelName    string
-	FallbackMentionModelCfg     structureModelConfig
-	RelationPromptText          string
-	RelationPromptRef           string
-	RelationPromptPath          string
-	RelationPromptErr           error
-	RelationModelRef            string
-	RelationModelCfgPath        string
-	RelationModelErr            error
-	RelationModelName           string
-	RelationModelCfg            structureModelConfig
-	PromptText                  string
-	PromptRef                   string
-	PromptPath                  string
-	PromptErr                   error
-	ModelRef                    string
-	ModelCfgPath                string
-	ModelErr                    error
-	ModelName                   string
-	ChunkDir                    string
-	MetricEnrichGroupSize       int
-	MaxTasks                    int
+	InputStore                    DocMetadataStore
+	Store                         MetricsStore
+	ObjectStore                   ArtifactObjectsStore
+	ObjectReconciler              ObjectReconciler
+	AmbiguousObjectLLMResolver    AmbiguousObjectLLMResolver
+	ResolveAmbiguousMinConfidence float64
+	Extractor                     LLMJSONExtractor
+	Logger                        ApiTypes.JimoLogger
+	ProcLogger                    DocProcLogger
+	Now                           func() time.Time
+	MentionPromptText             string
+	MentionPromptRef              string
+	MentionPromptPath             string
+	MentionPromptErr              error
+	MentionModelRef               string
+	MentionModelCfgPath           string
+	MentionModelErr               error
+	MentionModelName              string
+	MentionModelCfg               structureModelConfig
+	FallbackMentionModelRef       string
+	FallbackMentionModelCfgPath   string
+	FallbackMentionModelErr       error
+	FallbackMentionModelName      string
+	FallbackMentionModelCfg       structureModelConfig
+	RelationPromptText            string
+	RelationPromptRef             string
+	RelationPromptPath            string
+	RelationPromptErr             error
+	RelationModelRef              string
+	RelationModelCfgPath          string
+	RelationModelErr              error
+	RelationModelName             string
+	RelationModelCfg              structureModelConfig
+	PromptText                    string
+	PromptRef                     string
+	PromptPath                    string
+	PromptErr                     error
+	ModelRef                      string
+	ModelCfgPath                  string
+	ModelErr                      error
+	ModelName                     string
+	ChunkDir                      string
+	MetricEnrichGroupSize         int
+	MaxTasks                      int
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchRecordID  int64
@@ -260,6 +262,12 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		ChunkDir:                    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
 		MetricEnrichGroupSize:       enrichGroupSize,
 		MaxTasks:                    maxTasks,
+	}
+	if resolver, minConfidence, err := NewAmbiguousObjectLLMResolverFromEnv(); err == nil {
+		p.AmbiguousObjectLLMResolver = resolver
+		p.ResolveAmbiguousMinConfidence = minConfidence
+	} else if logger != nil {
+		logger.Warn("configure ambiguous object LLM resolver failed", "err", err)
 	}
 	if ApiTypes.ProjectDBHandle != nil {
 		p.ObjectStore = ArtifactObjectSQLStore{DB: ApiTypes.ProjectDBHandle}
@@ -496,7 +504,7 @@ func (p *MetricsProcessor) persistMetricObjects(ctx context.Context, recordID in
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactMetric, metricID, metric)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjects(ctx, objects, p.ObjectReconciler, p.Logger)
+		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence)
 		if err != nil {
 			return err
 		}

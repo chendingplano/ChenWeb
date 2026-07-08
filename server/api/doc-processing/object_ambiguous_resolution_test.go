@@ -2,6 +2,7 @@ package docprocessing
 
 import (
 	"context"
+	"regexp"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -18,6 +19,179 @@ func TestPickTieBreakCandidatePrefersMoreNormalizedNameOverlap(t *testing.T) {
 	if got.Node.ObjectID != "obj_b" {
 		t.Fatalf("picked %q, want obj_b (more normalized-name overlap)", got.Node.ObjectID)
 	}
+}
+
+func TestApplyAmbiguousObjectLLMDecisionResolvesHighConfidenceSelection(t *testing.T) {
+	obj := ArtifactObject{
+		ArtifactID:      "9_prv_1",
+		ObjectName:      "收缩压",
+		NormalizedNames: []string{"收缩压", "sbp"},
+		ExtInfo:         map[string]any{"source": "provision"},
+	}
+	candidates := []ObjectNodeCandidate{
+		{Node: ObjectNode{ObjectID: "obj_sbp", CanonicalName: "收缩压"}},
+		{Node: ObjectNode{ObjectID: "obj_htn", CanonicalName: "高血压"}},
+	}
+	decision := AmbiguousObjectLLMDecision{
+		ModelName:            "test-model",
+		ResolutionObjectID:   "obj_sbp",
+		ResolutionConfidence: 0.91,
+		ArtifactUpdates: AmbiguousArtifactObjectLLMUpdate{
+			ObjectNameEn: "systolic blood pressure",
+			ObjectType:   "vital_sign",
+			Description:  "Pressure during cardiac contraction.",
+		},
+	}
+
+	got, applied, err := ApplyAmbiguousObjectLLMDecision(context.Background(), obj, candidates, decision, nil, 0.85)
+	if err != nil {
+		t.Fatalf("ApplyAmbiguousObjectLLMDecision: %v", err)
+	}
+	if !applied {
+		t.Fatalf("applied = false, want true")
+	}
+	if got.ObjectID != "obj_sbp" || got.ReconcileStatus != ObjectReconcileAmbiguousResolved || got.ReconcileConfidence != 0.91 {
+		t.Fatalf("resolved object = %+v, want obj_sbp ambiguous_resolved confidence 0.91", got)
+	}
+	if got.ObjectNameEn != "systolic blood pressure" || got.ObjectType != "vital_sign" || got.Description == "" {
+		t.Fatalf("field updates not applied: %+v", got)
+	}
+	if got.ExtInfo["reconcile_method"] != "llm_ambiguous_resolution" || got.ExtInfo["reconcile_model"] != "test-model" {
+		t.Fatalf("ext_info = %+v, want LLM provenance", got.ExtInfo)
+	}
+	if !containsString(got.NormalizedNames, "systolic blood pressure") {
+		t.Fatalf("normalized names = %v, want refreshed English name", got.NormalizedNames)
+	}
+}
+
+func TestApplyAmbiguousObjectLLMDecisionLeavesLowConfidenceAmbiguous(t *testing.T) {
+	obj := ArtifactObject{ArtifactID: "9_prv_1", ObjectName: "收缩压"}
+	candidates := []ObjectNodeCandidate{{Node: ObjectNode{ObjectID: "obj_sbp"}}}
+	decision := AmbiguousObjectLLMDecision{
+		ModelName:            "test-model",
+		ResolutionObjectID:   "obj_sbp",
+		ResolutionConfidence: 0.7,
+	}
+
+	got, applied, err := ApplyAmbiguousObjectLLMDecision(context.Background(), obj, candidates, decision, nil, 0.85)
+	if err != nil {
+		t.Fatalf("ApplyAmbiguousObjectLLMDecision: %v", err)
+	}
+	if applied {
+		t.Fatalf("applied = true, want false below threshold")
+	}
+	if got.ObjectID != "" || got.ReconcileStatus != ObjectReconcileAmbiguous {
+		t.Fatalf("object = %+v, want unresolved ambiguous", got)
+	}
+}
+
+func TestApplyAmbiguousObjectLLMDecisionRejectsUnknownSelectedObjectID(t *testing.T) {
+	obj := ArtifactObject{ArtifactID: "9_prv_1", ObjectName: "收缩压"}
+	candidates := []ObjectNodeCandidate{{Node: ObjectNode{ObjectID: "obj_sbp"}}}
+	decision := AmbiguousObjectLLMDecision{
+		ModelName:            "test-model",
+		ResolutionObjectID:   "obj_missing",
+		ResolutionConfidence: 0.95,
+	}
+
+	_, _, err := ApplyAmbiguousObjectLLMDecision(context.Background(), obj, candidates, decision, nil, 0.85)
+	if err == nil {
+		t.Fatalf("ApplyAmbiguousObjectLLMDecision error = nil, want invalid selected object id")
+	}
+}
+
+func TestApplyAmbiguousObjectLLMDecisionAppliesNodeUpdatesAndMerges(t *testing.T) {
+	obj := ArtifactObject{ArtifactID: "9_prv_1", ObjectName: "SBP"}
+	candidates := []ObjectNodeCandidate{
+		{Node: ObjectNode{ObjectID: "obj_sbp", CanonicalName: "收缩压"}},
+		{Node: ObjectNode{ObjectID: "obj_sbp_dup", CanonicalName: "Systolic BP"}},
+	}
+	store := &fakeAmbiguousObjectLLMApplyStore{}
+	decision := AmbiguousObjectLLMDecision{
+		ModelName:            "test-model",
+		ResolutionObjectID:   "obj_sbp_dup",
+		ResolutionConfidence: 0.93,
+		NodeUpdates: []AmbiguousObjectNodeLLMUpdate{{
+			ObjectID:        "obj_sbp",
+			CanonicalNameEn: "systolic blood pressure",
+			ObjectType:      "vital_sign",
+			Description:     "Pressure during cardiac contraction.",
+		}},
+		Merges: []AmbiguousObjectNodeLLMMerge{{SurvivorObjectID: "obj_sbp", LoserObjectIDs: []string{"obj_sbp_dup"}, Confidence: 0.94}},
+	}
+
+	got, applied, err := ApplyAmbiguousObjectLLMDecision(context.Background(), obj, candidates, decision, store, 0.85)
+	if err != nil {
+		t.Fatalf("ApplyAmbiguousObjectLLMDecision: %v", err)
+	}
+	if !applied || got.ObjectID != "obj_sbp" {
+		t.Fatalf("resolved object = %+v applied=%v, want survivor obj_sbp", got, applied)
+	}
+	if len(store.nodeUpdates) != 1 || store.nodeUpdates[0].ObjectID != "obj_sbp" {
+		t.Fatalf("node updates = %+v, want obj_sbp update", store.nodeUpdates)
+	}
+	if len(store.merges) != 1 || store.merges[0].SurvivorObjectID != "obj_sbp" || store.merges[0].LoserObjectIDs[0] != "obj_sbp_dup" {
+		t.Fatalf("merges = %+v, want obj_sbp_dup -> obj_sbp", store.merges)
+	}
+}
+
+func TestParseAmbiguousObjectLLMDecisionReadsExpectedShape(t *testing.T) {
+	payload := map[string]any{
+		"artifact_object": map[string]any{
+			"object_name_en": "systolic blood pressure",
+			"acronyms":       []any{"SBP"},
+			"object_type":    "vital sign",
+			"description":    "Pressure during cardiac contraction.",
+		},
+		"object_nodes": []any{
+			map[string]any{
+				"object_id":         "obj_sbp",
+				"canonical_name_en": "systolic blood pressure",
+				"object_type":       "vital sign",
+				"description":       "Pressure during cardiac contraction.",
+			},
+		},
+		"same_object_groups": []any{
+			map[string]any{
+				"survivor_object_id": "obj_sbp",
+				"loser_object_ids":   []any{"obj_sbp_dup"},
+				"confidence":         0.94,
+			},
+		},
+		"resolution": map[string]any{
+			"object_id":  "obj_sbp",
+			"confidence": 0.93,
+		},
+		"rationale": "The artifact and node both refer to systolic blood pressure.",
+	}
+
+	got, err := parseAmbiguousObjectLLMDecision(payload, "test-model")
+	if err != nil {
+		t.Fatalf("parseAmbiguousObjectLLMDecision: %v", err)
+	}
+	if got.ModelName != "test-model" || got.ResolutionObjectID != "obj_sbp" || got.ResolutionConfidence != 0.93 {
+		t.Fatalf("decision = %+v, unexpected resolution", got)
+	}
+	if got.ArtifactUpdates.ObjectNameEn != "systolic blood pressure" || got.ArtifactUpdates.ObjectType != "vital_sign" {
+		t.Fatalf("artifact updates = %+v, unexpected", got.ArtifactUpdates)
+	}
+	if len(got.NodeUpdates) != 1 || got.NodeUpdates[0].ObjectID != "obj_sbp" || got.NodeUpdates[0].ObjectType != "vital_sign" {
+		t.Fatalf("node updates = %+v, unexpected", got.NodeUpdates)
+	}
+	if len(got.Merges) != 1 || got.Merges[0].SurvivorObjectID != "obj_sbp" || got.Merges[0].LoserObjectIDs[0] != "obj_sbp_dup" {
+		t.Fatalf("merges = %+v, unexpected", got.Merges)
+	}
+}
+
+type fakeAmbiguousObjectLLMApplyStore struct {
+	nodeUpdates []AmbiguousObjectNodeLLMUpdate
+	merges      []AmbiguousObjectNodeLLMMerge
+}
+
+func (s *fakeAmbiguousObjectLLMApplyStore) ApplyAmbiguousObjectLLMNodeChanges(_ context.Context, _ ArtifactObject, updates []AmbiguousObjectNodeLLMUpdate, merges []AmbiguousObjectNodeLLMMerge, _ AmbiguousObjectLLMAudit) error {
+	s.nodeUpdates = append(s.nodeUpdates, updates...)
+	s.merges = append(s.merges, merges...)
+	return nil
 }
 
 func TestPickTieBreakCandidateFallsBackToLexicographicObjectID(t *testing.T) {
@@ -341,5 +515,63 @@ func TestRankAmbiguousCandidatesReturnsEmptyRecommendedWhenNoCandidates(t *testi
 	}
 	if len(candidates) != 0 || recommended != "" {
 		t.Fatalf("candidates = %+v, recommended = %q, want empty", candidates, recommended)
+	}
+}
+
+func TestObjectNodeSQLStoreApplyAmbiguousObjectLLMNodeChangesUpdatesAndMerges(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE kb.object_nodes SET")).
+		WithArgs(
+			"systolic blood pressure",
+			"",
+			"vital_sign",
+			"Pressure during cardiac contraction.",
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			"obj_sbp",
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO kb.object_audit_log").
+		WithArgs("kb.object_nodes", "obj_sbp", "edit_fields", sqlmock.AnyArg(), "llm").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE kb.artifact_objects SET object_id").
+		WithArgs("obj_sbp", "obj_sbp_dup").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec("UPDATE kb.object_nodes SET canonical_object_id").
+		WithArgs("obj_sbp", sqlmock.AnyArg(), "obj_sbp_dup").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO kb.object_audit_log").
+		WithArgs("kb.object_nodes", "obj_sbp_dup", "merge_nodes", sqlmock.AnyArg(), "llm").
+		WillReturnResult(sqlmock.NewResult(2, 1))
+	mock.ExpectCommit()
+
+	store := ObjectNodeSQLStore{DB: db}
+	err = store.ApplyAmbiguousObjectLLMNodeChanges(
+		context.Background(),
+		ArtifactObject{ArtifactID: "9_prv_1", ObjectName: "SBP"},
+		[]AmbiguousObjectNodeLLMUpdate{{
+			ObjectID:        "obj_sbp",
+			CanonicalNameEn: "systolic blood pressure",
+			ObjectType:      "vital_sign",
+			Description:     "Pressure during cardiac contraction.",
+		}},
+		[]AmbiguousObjectNodeLLMMerge{{
+			SurvivorObjectID: "obj_sbp",
+			LoserObjectIDs:   []string{"obj_sbp_dup"},
+			Confidence:       0.94,
+		}},
+		AmbiguousObjectLLMAudit{ModelName: "test-model", Rationale: "same object"},
+	)
+	if err != nil {
+		t.Fatalf("ApplyAmbiguousObjectLLMNodeChanges: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
 	}
 }
