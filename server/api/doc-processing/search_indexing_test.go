@@ -13,6 +13,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/kbsearch"
 	appconfig "github.com/chendingplano/deepdoc/server/cmd/config"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 func TestIndexProvisionsForRecordLogsObjectEdgeCount(t *testing.T) {
@@ -477,6 +478,7 @@ func TestReplaceRegistryRowsDeletesThenInserts(t *testing.T) {
 	}
 	defer db.Close()
 
+	logger := loggerutil.CreateDefaultLogger("MID-20260708-06")
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM kb.search_artifacts WHERE artifact_type = $1 AND input_record_id = $2`)).
 		WithArgs("summary", int64(42)).
 		WillReturnResult(sqlmock.NewResult(0, 2))
@@ -511,7 +513,7 @@ func TestReplaceRegistryRowsDeletesThenInserts(t *testing.T) {
 		SemanticPayload: json.RawMessage(payload),
 	}}
 
-	if err := replaceRegistryRows(context.Background(), db, "summary", 42, rows, nil); err != nil {
+	if err := replaceRegistryRows(context.Background(), db, "summary", 42, rows, "test", "MID-20260708-15", logger); err != nil {
 		t.Fatalf("replaceRegistryRows: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

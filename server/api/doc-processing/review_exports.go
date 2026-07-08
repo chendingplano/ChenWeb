@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
@@ -115,7 +116,7 @@ func BuildReviewerLLMClient(modelRef string) (client LLMJSONExtractor, modelName
 // interface with no function-calling support — this returns the full
 // Complete(ctx, Request{Tools,...}) path. DeepSeek and other OpenAI-compatible
 // models support function calling through this client.
-func BuildReviewerToolClient(modelRef string) (client llmclients.Client, modelName string, err error) {
+func BuildReviewerToolClient(modelRef string, logger ApiTypes.JimoLogger) (client llmclients.Client, modelName string, err error) {
 	_, _, cfg, err := loadModelConfigByRef(modelRef, "MODEL_DEF_FILE")
 	if err != nil {
 		return nil, "", err
@@ -130,7 +131,7 @@ func BuildReviewerToolClient(modelRef string) (client llmclients.Client, modelNa
 		APIKey:      cfg.APIKey,
 		ProfileName: modelRef,
 		HTTPClient:  &http.Client{Timeout: time.Duration(timeoutSec) * time.Second},
-	})
+	}, logger)
 	if err != nil {
 		return nil, "", err
 	}

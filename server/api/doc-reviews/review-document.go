@@ -782,7 +782,7 @@ func resolveReviewerToolClient(logger ApiTypes.JimoLogger, aspect, group string,
 	if !resolved.Found || resolved.ModelRef == "" {
 		return nil
 	}
-	client, _, err := BuildReviewerToolClient(resolved.ModelRef)
+	client, _, err := BuildReviewerToolClient(resolved.ModelRef, logger)
 	if err != nil {
 		logger.Warn("tool client resolution failed; reviewer stays one-shot",
 			"aspect", aspect, "model_ref", resolved.ModelRef, "error", err)

@@ -1856,7 +1856,8 @@ func ReindexInventoryItemSearchForRecord(ctx context.Context, recordID int64, lo
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactInventoryItem, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactInventoryItem, recordID, rows,
+		"embed_inventory_items", "MID-20260708-12", logger)
 }
 
 func buildInventoryItemRegistryRows(ctx context.Context, db *sql.DB, recordID int64, sourceTitle string) ([]kbsearch.RegistryRow, error) {

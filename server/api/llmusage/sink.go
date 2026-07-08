@@ -69,7 +69,7 @@ func (s *Sink) Capture(ctx context.Context, record sharedllm.UsageCaptureRecord)
 	}
 
 	if record.AccountID == "" || record.ProfileID == "" {
-		sinkLogger.Warn("llm usage event account/profile not resolved; event will be logged without account linkage",
+		sinkLogger.Warn("(MID-20260708-01) llm usage event account/profile not resolved; event will be logged without account linkage",
 			"provider", string(record.Provider),
 			"base_url", record.BaseURL,
 			"model", record.ModelName,

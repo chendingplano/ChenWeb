@@ -34,6 +34,7 @@
 	import ProductsView from '$lib/components/home3/products-view.svelte';
 	import CategoryReviewView from '$lib/components/home3/category-review-view.svelte';
 	import InventoryItemsView from '$lib/components/home3/inventory-items-view.svelte';
+	import ObjectManagerView from '$lib/components/home3/object-manager-view.svelte';
 	import SemanticProjectionsView from '$lib/components/home3/semantic-projections-view.svelte';
 	import { knowledgeStoreState } from '$lib/components/home3/knowledge-store-state.svelte';
 	import { getProvisionCategory, listProvisionGraph } from '$lib/services/kbService';
@@ -67,6 +68,7 @@
 		| 'kb-provision-graph'
 		| 'kb-provision-tree'
 		| 'kb-inventory-items'
+		| 'kb-object-manager'
 		| 'kb-semantic-projections'
 		| 'kb-doc-wiki'
 		| 'kb-llm-wiki'
@@ -177,6 +179,11 @@
 					id: 'kb-inventory-items',
 					label: 'Inventory Items',
 					description: 'Document-centric inventory item browser'
+				},
+				{
+					id: 'kb-object-manager',
+					label: 'Object Manager',
+					description: 'Search, inspect, relate, and reconcile artifact objects'
 				},
 				...KNOWLEDGE_UNDER_CONSTRUCTION_SECTIONS.map((section) => ({
 					id: section.id as KbSectionId,
@@ -696,6 +703,8 @@
 				<ProvisionMgmtView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
 			{:else if activeSection === 'kb-inventory-items'}
 				<InventoryItemsView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
+			{:else if activeSection === 'kb-object-manager'}
+				<ObjectManagerView {darkMode} />
 			{:else if activeSection === 'kb-semantic-projections'}
 				<SemanticProjectionsView {darkMode} onFocusModeChange={handleExtractionFocusMode} />
 			{:else if isUnderConstructionKnowledgeSection(activeSection)}

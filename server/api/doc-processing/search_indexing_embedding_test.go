@@ -49,7 +49,7 @@ timeout_sec = 1
 	}}
 	logger := &fakeLogger{}
 
-	embedRegistryRows(context.Background(), rows, logger)
+	embedRegistryRows(context.Background(), rows, logger, "test_reason", "test_location")
 
 	if len(logger.warns) != 1 {
 		t.Fatalf("warns len=%d, want 1", len(logger.warns))
@@ -120,7 +120,7 @@ timeout_sec = 5
 		}
 	}
 
-	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+	embedRegistryRows(context.Background(), rows, &fakeLogger{}, "test_reason", "test_location")
 
 	if got := atomic.LoadInt32(&maxSeen); got != 2 {
 		t.Fatalf("max concurrent requests=%d, want 2", got)
@@ -188,7 +188,7 @@ timeout_sec = 5
 		}
 	}
 
-	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+	embedRegistryRows(context.Background(), rows, &fakeLogger{}, "test_reason", "MID-20260708-05")
 
 	if got := atomic.LoadInt32(&requests); got != 2 {
 		t.Fatalf("requests=%d, want 2", got)
@@ -245,7 +245,7 @@ timeout_sec = 1
 		SearchDocument: "entity text",
 	}}
 
-	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+	embedRegistryRows(context.Background(), rows, &fakeLogger{}, "test_reason", "MID-20260708-06")
 
 	if got := atomic.LoadInt32(&attempts); got != 3 {
 		t.Fatalf("attempts=%d, want 3", got)
@@ -290,7 +290,7 @@ timeout_sec = 5
 		SearchDocument: "entity text",
 	}}
 
-	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+	embedRegistryRows(context.Background(), rows, &fakeLogger{}, "test_reason", "MID-20260708-07")
 
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("attempts=%d, want 1", got)
@@ -345,7 +345,7 @@ timeout_sec = 5
 		SearchDocument: "entity text",
 	}}
 
-	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+	embedRegistryRows(context.Background(), rows, &fakeLogger{}, "test_reason", "MID-20260708-08")
 
 	if got := atomic.LoadInt32(&attempts); got != 3 {
 		t.Fatalf("attempts=%d, want 3", got)
@@ -421,7 +421,7 @@ timeout_sec = 5
 		}
 	}
 
-	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+	embedRegistryRows(context.Background(), rows, &fakeLogger{}, "test_reason", "MID-20260708-09")
 
 	if got := atomic.LoadInt32(&requests); got != 2 {
 		t.Fatalf("requests=%d, want 2", got)
@@ -513,7 +513,7 @@ timeout_sec = 5
 		}
 	}
 
-	embedRegistryRows(context.Background(), rows, &fakeLogger{})
+	embedRegistryRows(context.Background(), rows, &fakeLogger{}, "test_reason", "MID-20260708-10")
 
 	if got := atomic.LoadInt32(&requests); got != 2 {
 		t.Fatalf("requests=%d, want 2", got)

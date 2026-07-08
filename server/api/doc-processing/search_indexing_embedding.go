@@ -61,7 +61,14 @@ func newSearchEmbedder() (embedder Embedder, modelName string, timeoutSec int, o
 func embedRegistryRows(
 	ctx context.Context,
 	rows []kbsearch.RegistryRow,
-	logger ApiTypes.JimoLogger) {
+	logger ApiTypes.JimoLogger,
+	callReason string,
+	callLoc string,
+) {
+	if callReason == "" || callLoc == "" {
+		logger.Error("missing callReason/callLoc")
+	}
+
 	if len(rows) == 0 {
 		return
 	}
@@ -111,7 +118,7 @@ func embedRegistryRows(
 				if !ok {
 					return
 				}
-				embedRowBatch(ctx, embedder, modelName, timeoutSec, rows, indices, logger)
+				embedRowBatch(ctx, embedder, modelName, timeoutSec, rows, indices, logger, callReason, callLoc)
 			}
 		}()
 	}
@@ -222,6 +229,8 @@ func embedRowBatch(
 	rows []kbsearch.RegistryRow,
 	indices []int,
 	logger ApiTypes.JimoLogger,
+	callReason string,
+	callLoc string,
 ) {
 	prepared := make([]preparedEmbedding, 0, len(indices))
 	for _, i := range indices {
@@ -259,7 +268,7 @@ func embedRowBatch(
 			totalRunes = nextRunes
 			end++
 		}
-		embedPreparedRegistryRows(ctx, embedder, modelName, timeoutSec, rows, prepared[start:end], logger)
+		embedPreparedRegistryRows(ctx, embedder, modelName, timeoutSec, rows, prepared[start:end], logger, callReason, callLoc)
 		start = end
 	}
 }
@@ -272,6 +281,8 @@ func embedPreparedRegistryRows(
 	rows []kbsearch.RegistryRow,
 	prepared []preparedEmbedding,
 	logger ApiTypes.JimoLogger,
+	callReason string,
+	callLoc string,
 ) {
 	texts := make([]string, 0, len(prepared))
 	rowIndices := make([]int, 0, len(prepared))
@@ -280,7 +291,7 @@ func embedPreparedRegistryRows(
 		rowIndices = append(rowIndices, item.rowIndex)
 	}
 
-	vecs, err := embedBatchWithRetry(ctx, embedder, modelName, texts, timeoutSec, rows, rowIndices, logger)
+	vecs, err := embedBatchWithRetry(ctx, embedder, modelName, texts, timeoutSec, rows, rowIndices, logger, callReason, callLoc)
 	if err != nil {
 		for _, i := range rowIndices {
 			if logger != nil {
@@ -365,6 +376,8 @@ func embedBatchWithRetry(
 	rows []kbsearch.RegistryRow,
 	rowIndices []int,
 	logger ApiTypes.JimoLogger,
+	callReason string,
+	callLoc string,
 ) ([][]float64, error) {
 	if len(texts) == 1 {
 		vec, err := embedWithRetry(ctx, embedder, modelName, texts[0], timeoutSec, rows[rowIndices[0]], logger)
@@ -391,6 +404,8 @@ func embedBatchWithRetry(
 		vecs, err := batcher.EmbedBatch(ctx, llmclients.EmbedBatchInput{
 			ModelName:  modelName,
 			InputTexts: texts,
+			CallReason: callReason,
+			CallLoc:    callLoc,
 		})
 		if err == nil {
 			return vecs, nil

@@ -3,13 +3,17 @@ package docprocessing
 import (
 	"strings"
 	"testing"
+
+	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
 // BuildReviewerToolClient must error cleanly (no panic, nil client) when the
 // model ref cannot be resolved. The success path requires a real MODEL_DEF_FILE
 // and is exercised by the doc-review smoke test, not here.
 func TestBuildReviewerToolClientEmptyRefErrors(t *testing.T) {
-	client, modelName, err := BuildReviewerToolClient("")
+	logger := loggerutil.CreateDefaultLogger("MID-20260708-03")
+
+	client, modelName, err := BuildReviewerToolClient("", logger)
 	if err == nil {
 		t.Fatalf("expected error for empty model ref, got nil")
 	}
@@ -22,7 +26,8 @@ func TestBuildReviewerToolClientEmptyRefErrors(t *testing.T) {
 }
 
 func TestBuildReviewerToolClientUnknownRefErrors(t *testing.T) {
-	_, _, err := BuildReviewerToolClient("no-such-model-ref-xyz")
+	logger := loggerutil.CreateDefaultLogger("MID-20260708-03")
+	_, _, err := BuildReviewerToolClient("no-such-model-ref-xyz", logger)
 	if err == nil {
 		t.Fatalf("expected error for unknown model ref, got nil")
 	}

@@ -31,7 +31,10 @@ const (
 	searchArtifactRelation           = "relation"
 )
 
-func ReindexSummarySearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
+func ReindexSummarySearchForRecord(
+	ctx context.Context,
+	recordID int64,
+	logger ApiTypes.JimoLogger) error {
 	db := ApiTypes.ProjectDBHandle
 	if db == nil {
 		return fmt.Errorf("project db handle is nil")
@@ -52,7 +55,8 @@ func ReindexSummarySearchForRecord(ctx context.Context, recordID int64, logger A
 			}
 		}
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactSummary, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactSummary, recordID, rows,
+		"embed_summary", "MID-20260708-16", logger)
 }
 
 func ReindexTopicSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -76,7 +80,8 @@ func ReindexTopicSearchForRecord(ctx context.Context, recordID int64, logger Api
 			}
 		}
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactTopic, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactTopic, recordID, rows,
+		"embed_topic", "MID-20260708-17", logger)
 }
 
 func ReindexSceneBlockSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -88,7 +93,8 @@ func ReindexSceneBlockSearchForRecord(ctx context.Context, recordID int64, logge
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactSceneBlock, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactSceneBlock, recordID, rows,
+		"embed_scene_block", "MID-20260708-18", logger)
 }
 
 func ReindexMetricSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -100,7 +106,8 @@ func ReindexMetricSearchForRecord(ctx context.Context, recordID int64, logger Ap
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactMetric, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactMetric, recordID, rows,
+		"embed_metric", "MID-20260708-19", logger)
 }
 
 func ReindexProvisionSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -112,7 +119,8 @@ func ReindexProvisionSearchForRecord(ctx context.Context, recordID int64, logger
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactProvision, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactProvision, recordID, rows,
+		"embed_provision", "MID-20260708-20", logger)
 }
 
 func ReindexSemanticProjectionSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -124,7 +132,8 @@ func ReindexSemanticProjectionSearchForRecord(ctx context.Context, recordID int6
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactSemanticProjection, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactSemanticProjection, recordID, rows,
+		"embed_semantic_projection", "MID-20260708-21", logger)
 }
 
 func ReindexKnowledgeSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -136,7 +145,8 @@ func ReindexKnowledgeSearchForRecord(ctx context.Context, recordID int64, logger
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactKnowledge, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactKnowledge, recordID, rows,
+		"embed_knowledge", "MID-20260708-22", logger)
 }
 
 func ReindexEntitySearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -148,7 +158,8 @@ func ReindexEntitySearchForRecord(ctx context.Context, recordID int64, logger Ap
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactEntity, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactEntity, recordID, rows,
+		"embed_entity", "MID-20260708-23", logger)
 }
 
 func ReindexRelationSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -160,7 +171,8 @@ func ReindexRelationSearchForRecord(ctx context.Context, recordID int64, logger 
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactRelation, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactRelation, recordID, rows,
+		"embed_relation", "MID-20260708-24", logger)
 }
 
 func ReindexProductSearchForRecord(ctx context.Context, recordID int64, logger ApiTypes.JimoLogger) error {
@@ -172,10 +184,19 @@ func ReindexProductSearchForRecord(ctx context.Context, recordID int64, logger A
 	if err != nil {
 		return err
 	}
-	return replaceRegistryRows(ctx, db, searchArtifactProduct, recordID, rows, logger)
+	return replaceRegistryRows(ctx, db, searchArtifactProduct, recordID, rows,
+		"embed_product", "MID-20260708-25", logger)
 }
 
-func replaceRegistryRows(ctx context.Context, db *sql.DB, artifactType string, recordID int64, rows []kbsearch.RegistryRow, logger ApiTypes.JimoLogger) error {
+func replaceRegistryRows(
+	ctx context.Context,
+	db *sql.DB,
+	artifactType string,
+	recordID int64,
+	rows []kbsearch.RegistryRow,
+	callReason string,
+	callLoc string,
+	logger ApiTypes.JimoLogger) error {
 	// Best-effort semantic enrichment. Only when the hybrid-search feature flag is
 	// on (which requires the pgvector migration applied); otherwise rows stay
 	// lexical-only and InsertSearchRegistryRows uses the embedding-free statement.
@@ -185,7 +206,7 @@ func replaceRegistryRows(ctx context.Context, db *sql.DB, artifactType string, r
 		// semantic search is on.
 		if (artifactType != searchArtifactEntity && artifactType != searchArtifactRelation) ||
 			kbsearch.EmbedEntityRelationEnabled() {
-			embedRegistryRows(ctx, rows, logger)
+			embedRegistryRows(ctx, rows, logger, callReason, callLoc)
 		}
 	}
 	deleted, err := kbsearch.DeleteSearchRegistryRowsForRecord(ctx, db, artifactType, recordID)

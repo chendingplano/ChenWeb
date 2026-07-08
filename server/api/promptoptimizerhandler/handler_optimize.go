@@ -178,7 +178,7 @@ func OptimizePrompt(c echo.Context) error {
 		ID:      llm.ProviderID(model.Provider),
 		BaseURL: model.BaseURL,
 		APIKey:  plaintextKey,
-	})
+	}, logger)
 	if err != nil {
 		logger.Error("build llm client failed", "provider", model.Provider, "err", err)
 		return jsonError(c, http.StatusInternalServerError, "failed to initialize provider (CWB_POH_616)")

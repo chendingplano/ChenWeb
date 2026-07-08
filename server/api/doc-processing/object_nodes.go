@@ -239,7 +239,7 @@ func reconcileArtifactObjects(ctx context.Context, objects []ArtifactObject, rec
 					names = append(names, c.Node.ObjectID+":"+c.Node.CanonicalName)
 				}
 			}
-			logger.Warn("object reconciliation ambiguous",
+			logger.Info("***** object reconciliation ambiguous",
 				"input_record_id", obj.InputRecordID,
 				"artifact_type", obj.ArtifactType,
 				"artifact_id", obj.ArtifactID,
