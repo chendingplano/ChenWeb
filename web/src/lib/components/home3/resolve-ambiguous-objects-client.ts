@@ -52,6 +52,8 @@ export type CandidateFieldMatchKey =
 export type CandidateMatchDetails = {
 	matchedFields: Partial<Record<CandidateFieldMatchKey, string[]>>;
 	matchedTerms: string[];
+	hasLexicalMatch: boolean;
+	hasMatch: boolean;
 	objectTypeMatched: boolean;
 };
 
@@ -330,9 +332,13 @@ export function describeCandidateMatches(
 		if (matched.length > 0) matchedFields[field] = matched;
 	}
 	const matchedTerms = [...new Set(Object.values(matchedFields).flat())];
+	const hasLexicalMatch = matchedTerms.length > 0;
+	const objectTypeMatched = objectTypesCompatible(artifact.object_type, candidate.object_type);
 	return {
 		matchedFields,
 		matchedTerms,
-		objectTypeMatched: objectTypesCompatible(artifact.object_type, candidate.object_type)
+		hasLexicalMatch,
+		hasMatch: hasLexicalMatch,
+		objectTypeMatched
 	};
 }

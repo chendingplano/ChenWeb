@@ -144,7 +144,7 @@
 	}
 
 	function emptyMatchDetails(): CandidateMatchDetails {
-		return { matchedFields: {}, matchedTerms: [], objectTypeMatched: false };
+		return { matchedFields: {}, matchedTerms: [], hasLexicalMatch: false, hasMatch: false, objectTypeMatched: false };
 	}
 
 	function nodeMatchDetails(node: ObjectNodeCandidate): CandidateMatchDetails {
@@ -160,7 +160,7 @@
 		if (dirty) return dirtyStyle(true);
 		const hasMatch =
 			field === 'object_type'
-				? matches.objectTypeMatched
+				? matches.hasLexicalMatch && matches.objectTypeMatched
 				: (matches.matchedFields[field]?.length ?? 0) > 0;
 		return hasMatch
 			? 'border-color:#34D399; background:rgba(52,211,153,0.08); color:#A7F3D0;'
@@ -172,7 +172,7 @@
 		if (matches.matchedTerms.length > 0) {
 			parts.push(`terms: ${matches.matchedTerms.join(', ')}`);
 		}
-		if (matches.objectTypeMatched) {
+		if (matches.hasLexicalMatch && matches.objectTypeMatched) {
 			parts.push('type');
 		}
 		return parts.join(' · ');
@@ -696,11 +696,11 @@
 										<span style="font-size:11px; color:{textMuted};">score {node.score.toFixed(2)} · {node.method}</span>
 									</div>
 								</div>
-								<div class="mb-3" style="font-size:11px; color:{matches.matchedTerms.length > 0 || matches.objectTypeMatched ? '#34D399' : textMuted};">
-									{#if matches.matchedTerms.length > 0 || matches.objectTypeMatched}
+								<div class="mb-3" style="font-size:11px; color:{matches.hasMatch ? '#34D399' : textMuted};">
+									{#if matches.hasMatch}
 										Matches: {matchesSummaryText(matches)}
 									{:else}
-										Matches: none visible in the editable fields
+										Matches: none
 									{/if}
 								</div>
 								<div class="grid grid-cols-2 gap-3">
