@@ -12,10 +12,13 @@
 		neighborAmbiguousId,
 		nextIndexAfterResolve,
 		fieldDirty,
+		describeCandidateMatches,
 		RECONCILE_STATUS_OPTIONS,
 		type AmbiguousObjectSummary,
 		type ArtifactObjectDetail,
-		type ObjectNodeCandidate
+		type ObjectNodeCandidate,
+		type CandidateFieldMatchKey,
+		type CandidateMatchDetails
 	} from './resolve-ambiguous-objects-client.js';
 
 	let { darkMode = true }: { darkMode?: boolean } = $props();
@@ -138,6 +141,41 @@
 
 	function dirtyStyle(dirty: boolean): string {
 		return dirty ? 'border-color:#F87171; color:#F87171;' : '';
+	}
+
+	function emptyMatchDetails(): CandidateMatchDetails {
+		return { matchedFields: {}, matchedTerms: [], objectTypeMatched: false };
+	}
+
+	function nodeMatchDetails(node: ObjectNodeCandidate): CandidateMatchDetails {
+		if (!currentObject) return emptyMatchDetails();
+		return describeCandidateMatches(currentObject, node);
+	}
+
+	function matchedFieldStyle(
+		dirty: boolean,
+		matches: CandidateMatchDetails,
+		field: CandidateFieldMatchKey | 'object_type'
+	): string {
+		if (dirty) return dirtyStyle(true);
+		const hasMatch =
+			field === 'object_type'
+				? matches.objectTypeMatched
+				: (matches.matchedFields[field]?.length ?? 0) > 0;
+		return hasMatch
+			? 'border-color:#34D399; background:rgba(52,211,153,0.08); color:#A7F3D0;'
+			: '';
+	}
+
+	function matchesSummaryText(matches: CandidateMatchDetails): string {
+		const parts: string[] = [];
+		if (matches.matchedTerms.length > 0) {
+			parts.push(`terms: ${matches.matchedTerms.join(', ')}`);
+		}
+		if (matches.objectTypeMatched) {
+			parts.push('type');
+		}
+		return parts.join(' · ');
 	}
 
 	// Derived (not inlined in the template) so `selectedId`'s `number | null`
@@ -628,6 +666,7 @@
 						{:else}
 						<div class="related-nodes-scroll" style="flex:1 1 0; min-height:0; overflow-y:auto; padding-right:4px;">
 						{#each currentNodes as node, i (node.object_id)}
+							{@const matches = nodeMatchDetails(node)}
 							<div class="rounded-lg p-4 mb-3" style="border:1px solid {borderColor}; background:{pageBg};">
 								<div class="flex items-center justify-between mb-3">
 									<div class="flex items-center gap-2">
@@ -657,22 +696,29 @@
 										<span style="font-size:11px; color:{textMuted};">score {node.score.toFixed(2)} · {node.method}</span>
 									</div>
 								</div>
+								<div class="mb-3" style="font-size:11px; color:{matches.matchedTerms.length > 0 || matches.objectTypeMatched ? '#34D399' : textMuted};">
+									{#if matches.matchedTerms.length > 0 || matches.objectTypeMatched}
+										Matches: {matchesSummaryText(matches)}
+									{:else}
+										Matches: none visible in the editable fields
+									{/if}
+								</div>
 								<div class="grid grid-cols-2 gap-3">
 									<label class="flex flex-col gap-1">
 										<span style="font-size:11px; color:{textMuted};">Canonical Name</span>
-										<input bind:value={currentNodes[i].canonical_name} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'canonical_name'))}" />
+										<input bind:value={currentNodes[i].canonical_name} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'canonical_name'), matches, 'canonical_name')}" />
 									</label>
 									<label class="flex flex-col gap-1">
 										<span style="font-size:11px; color:{textMuted};">Object Type</span>
-										<input bind:value={currentNodes[i].object_type} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'object_type'))}" />
+										<input bind:value={currentNodes[i].object_type} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'object_type'), matches, 'object_type')}" />
 									</label>
 									<label class="flex flex-col gap-1">
 										<span style="font-size:11px; color:{textMuted};">Canonical Name (EN)</span>
-										<input bind:value={currentNodes[i].canonical_name_en} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'canonical_name_en'))}" />
+										<input bind:value={currentNodes[i].canonical_name_en} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'canonical_name_en'), matches, 'canonical_name_en')}" />
 									</label>
 									<label class="flex flex-col gap-1">
 										<span style="font-size:11px; color:{textMuted};">Canonical Name (ZH)</span>
-										<input bind:value={currentNodes[i].canonical_name_zh} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'canonical_name_zh'))}" />
+										<input bind:value={currentNodes[i].canonical_name_zh} style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'canonical_name_zh'), matches, 'canonical_name_zh')}" />
 									</label>
 									<label class="flex flex-col gap-1">
 										<span style="font-size:11px; color:{textMuted};">Primary Language</span>
@@ -683,7 +729,7 @@
 										<input
 											value={aliasesText(node.aliases)}
 											oninput={(e) => { currentNodes[i].aliases = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
-											style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'aliases'))}"
+											style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'aliases'), matches, 'aliases')}"
 										/>
 									</label>
 									<label class="flex flex-col gap-1">
@@ -691,7 +737,7 @@
 										<input
 											value={aliasesText(node.acronyms)}
 											oninput={(e) => { currentNodes[i].acronyms = parseAliasesText((e.currentTarget as HTMLInputElement).value); }}
-											style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'acronyms'))}"
+											style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'acronyms'), matches, 'acronyms')}"
 										/>
 									</label>
 									<label class="flex flex-col gap-1 col-span-2">

@@ -42,6 +42,19 @@ export type ObjectNodeCandidate = {
 	recommended: boolean;
 };
 
+export type CandidateFieldMatchKey =
+	| 'canonical_name'
+	| 'canonical_name_en'
+	| 'canonical_name_zh'
+	| 'aliases'
+	| 'acronyms';
+
+export type CandidateMatchDetails = {
+	matchedFields: Partial<Record<CandidateFieldMatchKey, string[]>>;
+	matchedTerms: string[];
+	objectTypeMatched: boolean;
+};
+
 export type AmbiguousObjectDetailResponse = {
 	status: boolean;
 	artifact_object: ArtifactObjectDetail;
@@ -251,4 +264,75 @@ export function fieldDirty(current: unknown, snapshot: unknown): boolean {
 		return JSON.stringify(current) !== JSON.stringify(snapshot);
 	}
 	return current !== snapshot;
+}
+
+function normalizeObjectName(raw: string): string {
+	const trimmed = raw.trim();
+	if (!trimmed) return '';
+	return trimmed
+		.toLowerCase()
+		.replace(/[._\-\/]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function normalizeObjectToken(raw: string): string {
+	return normalizeObjectName(raw).replaceAll(' ', '_');
+}
+
+function appendNormalizedTerms(target: string[], values: string | string[]): void {
+	const items = Array.isArray(values) ? values : [values];
+	for (const value of items) {
+		const normalized = normalizeObjectName(value);
+		if (normalized && !target.includes(normalized)) target.push(normalized);
+	}
+}
+
+function artifactNormalizedTerms(obj: ArtifactObjectDetail): string[] {
+	const out: string[] = [];
+	appendNormalizedTerms(out, obj.object_name);
+	appendNormalizedTerms(out, obj.object_name_en);
+	appendNormalizedTerms(out, obj.object_name_zh);
+	appendNormalizedTerms(out, obj.aliases);
+	appendNormalizedTerms(out, obj.acronyms);
+	return out;
+}
+
+function matchedTermsForField(
+	artifactTerms: Set<string>,
+	values: string | string[]
+): string[] {
+	const fieldTerms: string[] = [];
+	appendNormalizedTerms(fieldTerms, values);
+	return fieldTerms.filter((term) => artifactTerms.has(term));
+}
+
+function objectTypesCompatible(a: string, b: string): boolean {
+	const left = normalizeObjectToken(a);
+	const right = normalizeObjectToken(b);
+	return !left || !right || left === 'other' || right === 'other' || left === right;
+}
+
+export function describeCandidateMatches(
+	artifact: ArtifactObjectDetail,
+	candidate: ObjectNodeCandidate
+): CandidateMatchDetails {
+	const artifactTerms = new Set(artifactNormalizedTerms(artifact));
+	const matchedFields: Partial<Record<CandidateFieldMatchKey, string[]>> = {};
+	for (const [field, values] of [
+		['canonical_name', candidate.canonical_name],
+		['canonical_name_en', candidate.canonical_name_en],
+		['canonical_name_zh', candidate.canonical_name_zh],
+		['aliases', candidate.aliases],
+		['acronyms', candidate.acronyms]
+	] as const) {
+		const matched = matchedTermsForField(artifactTerms, values);
+		if (matched.length > 0) matchedFields[field] = matched;
+	}
+	const matchedTerms = [...new Set(Object.values(matchedFields).flat())];
+	return {
+		matchedFields,
+		matchedTerms,
+		objectTypeMatched: objectTypesCompatible(artifact.object_type, candidate.object_type)
+	};
 }
