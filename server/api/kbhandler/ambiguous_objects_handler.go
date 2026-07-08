@@ -47,6 +47,7 @@ type objectNodeCandidateDTO struct {
 	ObjectType      string   `json:"object_type"`
 	Aliases         []string `json:"aliases"`
 	Acronyms        []string `json:"acronyms"`
+	NormalizedNames []string `json:"normalized_names"`
 	Description     string   `json:"description"`
 	Score           float64  `json:"score"`
 	Method          string   `json:"method"`
@@ -102,6 +103,7 @@ func toObjectNodeCandidateDTOFromNode(n docprocessing.ObjectNode) objectNodeCand
 		ObjectType:      n.ObjectType,
 		Aliases:         nonNilStrings(n.Aliases),
 		Acronyms:        nonNilStrings(n.Acronyms),
+		NormalizedNames: nonNilStrings(n.NormalizedNames),
 		Description:     n.Description,
 		Score:           1,
 		Method:          "canonical_name_match",
@@ -119,6 +121,7 @@ func toObjectNodeCandidateDTO(c docprocessing.ObjectNodeCandidate, recommendedID
 		ObjectType:      c.Node.ObjectType,
 		Aliases:         nonNilStrings(c.Node.Aliases),
 		Acronyms:        nonNilStrings(c.Node.Acronyms),
+		NormalizedNames: nonNilStrings(c.Node.NormalizedNames),
 		Description:     c.Node.Description,
 		Score:           c.Score,
 		Method:          c.Method,

@@ -741,6 +741,14 @@
 										/>
 									</label>
 									<label class="flex flex-col gap-1 col-span-2">
+										<span style="font-size:11px; color:{textMuted};">Normalized Names (derived)</span>
+										<input
+											value={aliasesText(node.normalized_names)}
+											readonly
+											style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; opacity:0.9; {matchedFieldStyle(false, matches, 'normalized_names')}"
+										/>
+									</label>
+									<label class="flex flex-col gap-1 col-span-2">
 										<span style="font-size:11px; color:{textMuted};">Description</span>
 										<textarea bind:value={currentNodes[i].description} rows="2" style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {dirtyStyle(nodeDirty(i, 'description'))}"></textarea>
 									</label>

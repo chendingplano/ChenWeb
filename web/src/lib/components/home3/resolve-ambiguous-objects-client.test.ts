@@ -63,6 +63,7 @@ const baseCandidate: ObjectNodeCandidate = {
 	object_type: 'equipment',
 	aliases: [],
 	acronyms: [],
+	normalized_names: ['pressure regulator'],
 	description: '',
 	score: 0.85,
 	method: 'lexical_name',

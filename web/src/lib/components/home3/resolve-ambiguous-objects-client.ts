@@ -36,6 +36,7 @@ export type ObjectNodeCandidate = {
 	object_type: string;
 	aliases: string[];
 	acronyms: string[];
+	normalized_names: string[];
 	description: string;
 	score: number;
 	method: string;
@@ -47,7 +48,8 @@ export type CandidateFieldMatchKey =
 	| 'canonical_name_en'
 	| 'canonical_name_zh'
 	| 'aliases'
-	| 'acronyms';
+	| 'acronyms'
+	| 'normalized_names';
 
 export type CandidateMatchDetails = {
 	matchedFields: Partial<Record<CandidateFieldMatchKey, string[]>>;
@@ -326,7 +328,8 @@ export function describeCandidateMatches(
 		['canonical_name_en', candidate.canonical_name_en],
 		['canonical_name_zh', candidate.canonical_name_zh],
 		['aliases', candidate.aliases],
-		['acronyms', candidate.acronyms]
+		['acronyms', candidate.acronyms],
+		['normalized_names', candidate.normalized_names]
 	] as const) {
 		const matched = matchedTermsForField(artifactTerms, values);
 		if (matched.length > 0) matchedFields[field] = matched;
