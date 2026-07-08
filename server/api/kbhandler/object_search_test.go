@@ -117,6 +117,39 @@ func TestSearchObjectsFetchesArtifactObjectByRecordID(t *testing.T) {
 	}
 }
 
+func TestSearchObjectsFindsArtifactObjectsByObjectID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	mock.ExpectQuery("FROM kb.artifact_objects").
+		WithArgs("obj_master", 200, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "artifact_type", "artifact_id", "object_name", "object_name_en", "object_id", "reconcile_status"}).
+			AddRow(int64(42), "metric", "M1", "Pressure", "Pressure", "obj_master", "matched"))
+
+	c, rec := newSearchPostContext(`{"table":"artifact_objects","object_id":"obj_master","page_size":200}`)
+	if err := SearchObjects(c); err != nil {
+		t.Fatalf("SearchObjects: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"table":"artifact_objects"`, `"object_id":"obj_master"`, `"artifact_id":"M1"`} {
+		if !regexp.MustCompile(regexp.QuoteMeta(want)).MatchString(body) {
+			t.Errorf("body missing %s: %s", want, body)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
 func TestSearchObjectsRejectsInvalidTable(t *testing.T) {
 	c, rec := newSearchPostContext(`{"table":"provisions"}`)
 	if err := SearchObjects(c); err != nil {

@@ -18,6 +18,7 @@ const objectSearchMaxPageSize = 200
 type objectSearchRequest struct {
 	Table    string `json:"table"`
 	Query    string `json:"query"`
+	ObjectID string `json:"object_id"`
 	RecordID int64  `json:"record_id"`
 	Page     int    `json:"page"`
 	PageSize int    `json:"page_size"`
@@ -108,6 +109,9 @@ func searchArtifactObjects(ctx context.Context, db *sql.DB, req objectSearchRequ
 	case req.RecordID > 0:
 		query = base + ` WHERE id = $1 ORDER BY id`
 		args = []any{req.RecordID}
+	case req.ObjectID != "":
+		query = base + ` WHERE object_id = $1 ORDER BY id LIMIT $2 OFFSET $3`
+		args = []any{req.ObjectID, pageSize, offset}
 	case req.Query != "":
 		query = base + ` WHERE (object_name ILIKE $1 OR COALESCE(object_name_en, '') ILIKE $1 OR artifact_id ILIKE $1) ORDER BY id LIMIT $2 OFFSET $3`
 		args = []any{"%" + req.Query + "%", pageSize, offset}
@@ -148,6 +152,7 @@ func SearchObjects(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse{Status: false, ErrorMsg: "invalid table (CWB_KB_OSR_003)"})
 	}
 	req.Query = strings.TrimSpace(req.Query)
+	req.ObjectID = strings.TrimSpace(req.ObjectID)
 	pageSize := clampObjectSearchPageSize(req.PageSize)
 	page := req.Page
 	if page < 1 {

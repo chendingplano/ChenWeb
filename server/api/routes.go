@@ -339,6 +339,7 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/kb/objects/stats/object-nodes", kbhandler.GetObjectNodeStats)
 	apiGroup.GET("/kb/objects/connectivity", kbhandler.GetObjectConnectivity)
 	apiGroup.POST("/kb/objects/merge", kbhandler.MergeObjectNodes)
+	apiGroup.POST("/kb/objects/rebind", kbhandler.RebindArtifactObjectsToMaster)
 	apiGroup.GET("/kb/objects/pdf-locator", kbhandler.GetObjectPDFLocator)
 	apiGroup.POST("/kb/objects/search", kbhandler.SearchObjects)
 	apiGroup.GET("/kb/summaries/search", kbhandler.SearchSummaries)

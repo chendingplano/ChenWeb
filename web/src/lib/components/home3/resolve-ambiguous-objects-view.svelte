@@ -6,16 +6,19 @@
 		updateArtifactObject,
 		updateObjectNode,
 		createObjectNode,
+		findArtifactObjectsByObjectNode,
 		mergeObjectNodes,
 		buildArtifactObjectPatch,
 		buildObjectNodePatch,
 		neighborAmbiguousId,
 		nextIndexAfterResolve,
+		rebindArtifactObjectsToMaster,
 		fieldDirty,
 		describeCandidateMatches,
 		RECONCILE_STATUS_OPTIONS,
 		type AmbiguousObjectSummary,
 		type ArtifactObjectDetail,
+		type LinkedArtifactObjectSummary,
 		type ObjectNodeCandidate,
 		type CandidateFieldMatchKey,
 		type CandidateMatchDetails
@@ -54,6 +57,7 @@
 	let creatingNode    = $state(false);
 	let createNodeError = $state('');
 	let existsNotice    = $state('');
+	let rebindNotice    = $state('');
 
 	// --- Merge (Related Object Nodes) state ---
 	let masterNodeId    = $state<string | null>(null);
@@ -61,6 +65,18 @@
 	let merging         = $state(false);
 	let mergeError      = $state('');
 	let mergeConfirm    = $state(false);
+	let rebinding       = $state(false);
+
+	type FindContext = {
+		sourceObjectID: string;
+		sourceLabel: string;
+		masterObjectID: string | null;
+	};
+
+	let findContext = $state<FindContext | null>(null);
+	let findRows = $state<LinkedArtifactObjectSummary[]>([]);
+	let findLoading = $state(false);
+	let findError = $state('');
 
 	// Merge is allowed only with exactly one master and at least one other node
 	// picked to merge into it. The master is never in selectedNodeIds (see
@@ -92,6 +108,13 @@
 		selectedNodeIds = new Set();
 		mergeError = '';
 		mergeConfirm = false;
+	}
+
+	function clearFindMode() {
+		findContext = null;
+		findRows = [];
+		findLoading = false;
+		findError = '';
 	}
 
 	function requestMerge() {
@@ -182,11 +205,15 @@
 	// type is narrowed once here, rather than needing a `number` at every
 	// neighborAmbiguousId call site in the markup.
 	let prevId = $derived.by(() =>
-		selectedId === null ? null : neighborAmbiguousId(rows.map((r) => r.id), selectedId, -1)
+		selectedId === null ? null : neighborAmbiguousId(currentVisibleRowIds(), selectedId, -1)
 	);
 	let nextId = $derived.by(() =>
-		selectedId === null ? null : neighborAmbiguousId(rows.map((r) => r.id), selectedId, 1)
+		selectedId === null ? null : neighborAmbiguousId(currentVisibleRowIds(), selectedId, 1)
 	);
+
+	function currentVisibleRowIds(): number[] {
+		return (findContext ? findRows : rows).map((row) => row.id);
+	}
 
 	function requestNav(kind: 'prev' | 'next' | 'switch', id: number) {
 		if (saving) return;
@@ -265,7 +292,7 @@
 			const resolved = currentObject.reconcile_status !== 'ambiguous';
 			snapshotObject = { ...currentObject };
 			snapshotNodes = currentNodes.map((c) => ({ ...c }));
-			if (resolved) {
+			if (resolved && !findContext) {
 				const resolvedId = selectedId;
 				const nextIndex = nextIndexAfterResolve(rows.map((r) => r.id), resolvedId);
 				rows = rows.filter((r) => r.id !== resolvedId);
@@ -394,6 +421,60 @@
 		}
 	}
 
+	async function refreshLeftPanel() {
+		clearFindMode();
+		await loadList();
+	}
+
+	async function findLinkedArtifactObjects(node: ObjectNodeCandidate) {
+		findLoading = true;
+		findError = '';
+		try {
+			const res = await findArtifactObjectsByObjectNode(node.object_id);
+			findContext = {
+				sourceObjectID: node.object_id,
+				sourceLabel: node.canonical_name || node.object_id,
+				masterObjectID: masterNodeId
+			};
+			findRows = res.rows;
+			if (findRows.length > 0 && !findRows.some((row) => row.id === selectedId)) {
+				await selectRow(findRows[0].id);
+			}
+		} catch (e) {
+			findError = e instanceof Error ? e.message : String(e);
+		} finally {
+			findLoading = false;
+		}
+	}
+
+	async function rebindFoundArtifactObjects() {
+		if (!findContext || rebinding || findRows.length === 0) return;
+		const survivorObjectID = masterNodeId ?? findContext.masterObjectID;
+		if (!survivorObjectID) {
+			rebindNotice = 'Please select one Related Object Node as Master before rebinding.';
+			return;
+		}
+		if (survivorObjectID === findContext.sourceObjectID) {
+			rebindNotice = 'The selected Master is already the same object node as these linked artifact objects.';
+			return;
+		}
+		rebinding = true;
+		saveError = '';
+		try {
+			await rebindArtifactObjectsToMaster(
+				findRows.map((row) => row.id),
+				survivorObjectID
+			);
+			rebindNotice = `Rebound ${findRows.length} artifact object${findRows.length === 1 ? '' : 's'} to ${survivorObjectID}.`;
+			clearFindMode();
+			await loadList();
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : String(e);
+		} finally {
+			rebinding = false;
+		}
+	}
+
 	async function selectRow(id: number) {
 		selectedId = id;
 		detailLoading = true;
@@ -426,6 +507,13 @@
 		return values.join(', ');
 	}
 
+	function leftRowMeta(row: AmbiguousObjectSummary | LinkedArtifactObjectSummary): string {
+		if ('confidence' in row) {
+			return `${row.artifact_type} · confidence ${row.confidence.toFixed(2)}`;
+		}
+		return `${row.artifact_type} · ${row.reconcile_status}${row.object_id ? ` · ${row.object_id}` : ''}`;
+	}
+
 	function parseAliasesText(text: string): string[] {
 		return text
 			.split(',')
@@ -448,34 +536,74 @@
 			<div class="flex items-start justify-between gap-3">
 				<div>
 					<h1 style="font-size:16px; font-weight:600; color:{textPrimary}; margin-bottom:2px;">
-						Resolve Ambiguous Objects
+						{findContext ? 'Linked Artifact Objects' : 'Resolve Ambiguous Objects'}
 					</h1>
 					<p style="font-size:12px; color:{textSecondary};">
-						{rows.length} row{rows.length === 1 ? '' : 's'} at reconcile_status = ambiguous
+						{#if findContext}
+							{findRows.length} row{findRows.length === 1 ? '' : 's'} linked to {findContext.sourceLabel}
+						{:else}
+							{rows.length} row{rows.length === 1 ? '' : 's'} at reconcile_status = ambiguous
+						{/if}
 					</p>
 				</div>
-				<button
-					type="button"
-					onclick={loadList}
-					disabled={listLoading}
-					style="font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{listLoading ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{listLoading ? 0.5 : 1};"
-				>
-					{listLoading ? 'Refreshing…' : 'Refresh'}
-				</button>
+				<div class="flex items-center gap-2">
+					{#if findContext}
+						<button
+							type="button"
+							onclick={goPrev}
+							disabled={prevId === null || detailLoading}
+							style="font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{prevId === null || detailLoading ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{prevId === null || detailLoading ? 0.5 : 1};"
+						>
+							Prev
+						</button>
+						<button
+							type="button"
+							onclick={goNext}
+							disabled={nextId === null || detailLoading}
+							style="font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{nextId === null || detailLoading ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{nextId === null || detailLoading ? 0.5 : 1};"
+						>
+							Next
+						</button>
+						<button
+							type="button"
+							onclick={rebindFoundArtifactObjects}
+							disabled={rebinding || findLoading || findRows.length === 0}
+							style="font-size:12px; font-weight:600; padding:6px 10px; border-radius:6px; border:none; cursor:{rebinding || findLoading || findRows.length === 0 ? 'not-allowed' : 'pointer'}; background:{accent}; color:white; opacity:{rebinding || findLoading || findRows.length === 0 ? 0.5 : 1};"
+						>
+							{rebinding ? 'Rebinding…' : 'Rebind'}
+						</button>
+					{/if}
+					<button
+						type="button"
+						onclick={refreshLeftPanel}
+						disabled={listLoading}
+						style="font-size:12px; font-weight:500; padding:6px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{listLoading ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{listLoading ? 0.5 : 1};"
+					>
+						{findContext ? 'Back' : listLoading ? 'Refreshing…' : 'Refresh'}
+					</button>
+				</div>
 			</div>
 		</div>
 
 		<div class="flex-1 overflow-y-auto" style="min-height:0;">
 		{#if listLoading}
 			<div class="p-4" style="color:{textMuted}; font-size:13px;">Loading…</div>
+		{:else if findLoading}
+			<div class="p-4" style="color:{textMuted}; font-size:13px;">Finding linked artifact objects…</div>
 		{:else if listError}
 			<div class="p-4" style="color:#F87171; font-size:13px;">Error: {listError}</div>
-		{:else if rows.length === 0}
+		{:else if findError}
+			<div class="p-4" style="color:#F87171; font-size:13px;">Error: {findError}</div>
+		{:else if findContext && findRows.length === 0}
+			<div class="p-4" style="color:{textMuted}; font-size:13px;">
+				No artifact objects are currently linked to this object node.
+			</div>
+		{:else if !findContext && rows.length === 0}
 			<div class="p-4" style="color:{textMuted}; font-size:13px;">
 				No ambiguous objects — the queue is empty.
 			</div>
 		{:else}
-			{#each rows as row (row.id)}
+			{#each (findContext ? findRows : rows) as row (row.id)}
 				<button
 					type="button"
 					onclick={() => clickCard(row.id)}
@@ -489,7 +617,7 @@
 						{row.object_name}{row.object_name_en ? ` (${row.object_name_en})` : ''}
 					</div>
 					<div style="font-size:11px; color:{textMuted}; margin-top:2px;">
-						{row.artifact_type} · confidence {row.confidence.toFixed(2)}
+						{leftRowMeta(row)}
 					</div>
 				</button>
 			{/each}
@@ -716,7 +844,15 @@
 											<span style="font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; background:{accentTint}; color:{accent};">Recommended</span>
 										{/if}
 									</div>
-									<div class="flex items-center gap-3">
+								<div class="flex items-center gap-3">
+									<button
+										type="button"
+										onclick={() => findLinkedArtifactObjects(node)}
+										disabled={findLoading || rebinding}
+										style="font-size:12px; font-weight:600; padding:4px 10px; border-radius:6px; border:1px solid {borderColor}; cursor:{findLoading || rebinding ? 'not-allowed' : 'pointer'}; background:{cardBg}; color:{textPrimary}; opacity:{findLoading || rebinding ? 0.5 : 1};"
+									>
+										Find
+									</button>
 										<label class="flex items-center gap-1" style="font-size:11px; color:{textSecondary}; cursor:pointer;">
 											<input
 												type="checkbox"
@@ -781,7 +917,7 @@
 											style="background:{cardBg}; border:1px solid {borderColor}; color:{textPrimary}; border-radius:6px; padding:6px 8px; font-size:13px; {matchedFieldStyle(nodeDirty(i, 'acronyms'), matches, 'acronyms')}"
 										/>
 									</label>
-									<label class="flex flex-col gap-1 col-span-2">
+									<label class="flex flex-col gap-1">
 										<span style="font-size:11px; color:{textMuted};">Normalized Names (derived)</span>
 										<input
 											value={aliasesText(node.normalized_names)}
@@ -884,6 +1020,23 @@
 				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">{existsNotice}</p>
 				<div class="flex justify-end">
 					<button type="button" onclick={() => (existsNotice = '')} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">OK</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if rebindNotice}
+		<div
+			class="overlay"
+			role="presentation"
+			tabindex="-1"
+			onclick={() => (rebindNotice = '')}
+			onkeydown={(e) => { if (e.key === 'Escape') rebindNotice = ''; }}
+		>
+			<div class="modal" role="dialog" aria-modal="true" tabindex="0" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+				<p style="font-size:13px; color:{textPrimary}; margin-bottom:16px;">{rebindNotice}</p>
+				<div class="flex justify-end">
+					<button type="button" onclick={() => (rebindNotice = '')} style="font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;">OK</button>
 				</div>
 			</div>
 		</div>

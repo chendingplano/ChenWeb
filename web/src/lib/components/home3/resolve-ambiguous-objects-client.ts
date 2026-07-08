@@ -7,6 +7,16 @@ export type AmbiguousObjectSummary = {
 	confidence: number;
 };
 
+export type LinkedArtifactObjectSummary = {
+	id: number;
+	artifact_type: string;
+	artifact_id: string;
+	object_name: string;
+	object_name_en: string;
+	object_id: string;
+	reconcile_status: string;
+};
+
 export type ArtifactObjectDetail = {
 	id: number;
 	source_record_id: number;
@@ -200,6 +210,27 @@ export function mergeObjectNodes(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ survivor_object_id: survivorObjectId, loser_object_id: loserObjectId })
+	});
+}
+
+export function findArtifactObjectsByObjectNode(
+	objectId: string
+): Promise<{ status: boolean; table: 'artifact_objects'; rows: LinkedArtifactObjectSummary[] }> {
+	return req('/api/v1/kb/objects/search', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ table: 'artifact_objects', object_id: objectId, page_size: 200 })
+	});
+}
+
+export function rebindArtifactObjectsToMaster(
+	artifactObjectIds: number[],
+	survivorObjectId: string
+): Promise<{ status: boolean; artifact_object_ids: number[]; survivor_object_id: string; updated: number }> {
+	return req('/api/v1/kb/objects/rebind', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ artifact_object_ids: artifactObjectIds, survivor_object_id: survivorObjectId })
 	});
 }
 

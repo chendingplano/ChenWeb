@@ -6,10 +6,12 @@ import {
 	buildObjectNodePatch,
 	createObjectNode,
 	fieldDirty,
+	findArtifactObjectsByObjectNode,
 	getAmbiguousObjectDetail,
 	listAmbiguousObjects,
 	neighborAmbiguousId,
 	nextIndexAfterResolve,
+	rebindArtifactObjectsToMaster,
 	updateArtifactObject,
 	updateObjectNode,
 	type ArtifactObjectDetail,
@@ -181,6 +183,55 @@ test('createObjectNode returns existing matches without created when the name al
 		});
 		assert.equal(result.created, false);
 		if (!result.created) assert.equal(result.nodes[0].object_id, 'obj_a');
+	} finally {
+		mock.restore();
+	}
+});
+
+test('findArtifactObjectsByObjectNode searches artifact objects by exact object_id', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({
+			status: true,
+			table: 'artifact_objects',
+			rows: [
+				{
+					id: 201,
+					artifact_type: 'provision',
+					artifact_id: '9_prv_2',
+					object_name: 'patient diary',
+					object_name_en: 'patient diary',
+					object_id: 'obj_a',
+					reconcile_status: 'matched'
+				}
+			]
+		})
+	);
+	try {
+		const result = await findArtifactObjectsByObjectNode('obj_a');
+		assert.equal(String(mock.calls[0].input), '/api/v1/kb/objects/search');
+		assert.equal(mock.calls[0].init?.method, 'POST');
+		assert.equal(
+			mock.calls[0].init?.body,
+			JSON.stringify({ table: 'artifact_objects', object_id: 'obj_a', page_size: 200 })
+		);
+		assert.equal(result.rows[0].id, 201);
+	} finally {
+		mock.restore();
+	}
+});
+
+test('rebindArtifactObjectsToMaster posts the artifact ids and survivor object id', async () => {
+	const mock = installFetchMock(async () =>
+		Response.json({ status: true, artifact_object_ids: [201, 202], survivor_object_id: 'obj_master', updated: 2 })
+	);
+	try {
+		await rebindArtifactObjectsToMaster([201, 202], 'obj_master');
+		assert.equal(String(mock.calls[0].input), '/api/v1/kb/objects/rebind');
+		assert.equal(mock.calls[0].init?.method, 'POST');
+		assert.equal(
+			mock.calls[0].init?.body,
+			JSON.stringify({ artifact_object_ids: [201, 202], survivor_object_id: 'obj_master' })
+		);
 	} finally {
 		mock.restore();
 	}
