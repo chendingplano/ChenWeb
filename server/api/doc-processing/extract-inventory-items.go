@@ -2205,7 +2205,7 @@ func (p *InventoryItemsProcessor) persistInventoryItemObjects(ctx context.Contex
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactInventoryItem, itemID, item)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence)
+		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence, objectReconcileLogSink{ProcLogger: p.ProcLogger, DocProcName: p.Name(), CallReason: p.Name()})
 		if err != nil {
 			return err
 		}

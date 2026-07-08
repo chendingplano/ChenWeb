@@ -40,6 +40,7 @@ const EntryTypeExtractInventoryItemsFinish = "extract_inventory_items_finish"
 const EntryTypeExtractDocMetadata = "extract_doc_metadata"
 const EntryTypeChunking = "chunking"
 const EntryTypeGenerateTopics = "generate_topics"
+const EntryTypeReconcileObject = "reconcile_object"
 
 // DocProcLogRecord is a single log entry inserted into kb.doc_proc_logs.
 type DocProcLogRecord struct {
@@ -280,6 +281,14 @@ func (l DocProcLogger) LogPipelineFinish(ctx context.Context, rec DocProcLogReco
 	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
 }
 
+// LogReconcileObject inserts one per-object LLM object-reconciliation entry
+// (resolved, unresolved, or failed). See reconcileArtifactObjectsWithLLM.
+func (l DocProcLogger) LogReconcileObject(ctx context.Context, rec DocProcLogRecord, loc string) error {
+	rec.EntryType = EntryTypeReconcileObject
+	rec.LogLoc = callerLoc(2)
+	return insertDocProcLog(ctx, resolveDocProcLogDB(l.DB), rec, loc)
+}
+
 func allowedDocProcLogEntryType(entryType string) bool {
 	switch entryType {
 	case EntryTypePipelineFinish,
@@ -301,6 +310,7 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractSceneBlocksFinish,
 		EntryTypeChunking,
 		EntryTypeGenerateTopics,
+		EntryTypeReconcileObject,
 		EntryTypeExtractDocMetadata:
 		return true
 	default:

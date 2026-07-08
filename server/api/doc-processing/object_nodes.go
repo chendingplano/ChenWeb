@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/lib/pq"
@@ -232,49 +233,158 @@ type AmbiguousObjectLLMResolver interface {
 }
 
 func reconcileArtifactObjects(ctx context.Context, objects []ArtifactObject, reconciler ObjectReconciler, logger ApiTypes.JimoLogger) ([]ArtifactObject, error) {
-	return reconcileArtifactObjectsWithLLM(ctx, objects, reconciler, logger, nil, defaultResolveAmbiguousMinConf)
+	return reconcileArtifactObjectsWithLLM(ctx, objects, reconciler, logger, nil, defaultResolveAmbiguousMinConf, objectReconcileLogSink{})
 }
 
-func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObject, reconciler ObjectReconciler, logger ApiTypes.JimoLogger, llmResolver AmbiguousObjectLLMResolver, minConfidence float64) ([]ArtifactObject, error) {
-	out := make([]ArtifactObject, 0, len(objects))
-	for _, obj := range objects {
+// resolveAmbiguousObjectConcurrency bounds the number of parallel LLM
+// adjudication calls made during object reconciliation.
+func resolveAmbiguousObjectConcurrency() int {
+	// return envInt("RESOLVE_AMBIGUOUS_OBJECT_CONCURRENCY", 5, 1)
+	return envInt("MAX_DOC_PROCESSOR_TASKS", 5, 1)
+}
+
+// reconcileObjectItem carries per-object reconcile state across the three phases.
+type reconcileObjectItem struct {
+	obj        ArtifactObject
+	result     ObjectReconcileResult
+	candidates []ObjectNodeCandidate
+	ambiguous  bool // needs LLM adjudication (ambiguous AND a resolver is configured)
+}
+
+// ambiguousResolveResult is one ambiguous object's LLM adjudication outcome.
+type ambiguousResolveResult struct {
+	decision AmbiguousObjectLLMDecision
+	err      error
+	ms       int64
+}
+
+// reconcileArtifactObjectsWithLLM reconciles artifact objects against
+// kb.object_nodes in three phases:
+//
+//  1. Sequential reconcile — ReconcileOne creates nodes on the no-match path, so
+//     it must stay ordered (parallel runs would race same-named objects into
+//     duplicate nodes).
+//  2. Parallel LLM adjudication — ResolveAmbiguousObject is a pure, network-bound
+//     call with no DB writes; this is the latency-dominant step, so it runs with
+//     bounded concurrency.
+//  3. Sequential apply + logging — decision application performs DB merges/updates
+//     (kept ordered), emits per-object warnings, and records every LLM outcome
+//     (resolved, unresolved, failed) to kb.doc_proc_logs via logSink.
+func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObject, reconciler ObjectReconciler, logger ApiTypes.JimoLogger, llmResolver AmbiguousObjectLLMResolver, minConfidence float64, logSink objectReconcileLogSink) ([]ArtifactObject, error) {
+	out := make([]ArtifactObject, len(objects))
+	items := make([]reconcileObjectItem, len(objects))
+
+	// Phase 1 (sequential): reconcile every object and collect the ambiguous ones.
+	var ambiguousIdx []int
+	for i, obj := range objects {
 		result, err := reconciler.ReconcileOne(ctx, obj)
 		if err != nil {
 			return nil, err
 		}
-		var candidates []ObjectNodeCandidate
+		it := reconcileObjectItem{obj: obj, result: result}
 		if result.Status == ObjectReconcileAmbiguous {
-			var candErr error
-			candidates, candErr = reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
+			candidates, candErr := reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
 			if candErr != nil {
 				return nil, candErr
 			}
+			it.candidates = candidates
+			if llmResolver != nil {
+				it.ambiguous = true
+				ambiguousIdx = append(ambiguousIdx, i)
+			}
 		}
-		if result.Status == ObjectReconcileAmbiguous && llmResolver != nil {
-			decision, resolveErr := llmResolver.ResolveAmbiguousObject(ctx, obj, candidates)
-			if resolveErr != nil {
+		items[i] = it
+	}
+
+	// Phase 2 (parallel): adjudicate the ambiguous objects via the LLM.
+	resolved := make([]ambiguousResolveResult, len(ambiguousIdx))
+	if len(ambiguousIdx) > 0 {
+		concurrency := resolveAmbiguousObjectConcurrency()
+		if logger != nil {
+			logger.Info("object reconciliation: resolving ambiguous objects",
+				"count", len(ambiguousIdx), "concurrency", concurrency)
+		}
+		res, err := runConcurrent(ctx, concurrency, len(ambiguousIdx),
+			func(ctx context.Context, k int) (ambiguousResolveResult, error) {
+				it := items[ambiguousIdx[k]]
+				start := time.Now()
+				decision, resolveErr := llmResolver.ResolveAmbiguousObject(ctx, it.obj, it.candidates)
+				ms := time.Since(start).Milliseconds()
 				if logger != nil {
-					logger.Warn("LLM ambiguous object resolution failed", "artifact_id", obj.ArtifactID, "err", resolveErr)
+					if resolveErr != nil {
+						logger.Warn("object reconciliation: LLM call failed",
+							"artifact_id", it.obj.ArtifactID, "ms_used", ms, "err", resolveErr)
+					} else {
+						logger.Info("object reconciliation: LLM call done",
+							"artifact_id", it.obj.ArtifactID, "ms_used", ms,
+							"confidence", decision.ResolutionConfidence)
+					}
 				}
+				return ambiguousResolveResult{decision: decision, err: resolveErr, ms: ms}, nil
+			})
+		if err != nil {
+			return nil, err
+		}
+		resolved = res
+	}
+	resolvedByIdx := make(map[int]ambiguousResolveResult, len(ambiguousIdx))
+	for k, idx := range ambiguousIdx {
+		resolvedByIdx[idx] = resolved[k]
+	}
+
+	// Phase 3 (sequential): apply decisions, warn, and log every LLM outcome.
+	for i := range items {
+		it := items[i]
+		obj := it.obj
+
+		if it.ambiguous {
+			rr := resolvedByIdx[i]
+			if rr.err != nil {
+				if logger != nil {
+					logger.Warn("LLM ambiguous object resolution failed",
+						"artifact_id", obj.ArtifactID,
+						"err", rr.err,
+						"llm_response", structuredOutputRawResponse(rr.err),
+					)
+				}
+				logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
+					Status: reconcileOutcomeLLMFailed, Object: obj, Candidates: it.candidates,
+					Err: rr.err, MSUsed: rr.ms,
+				})
 			} else {
 				var applyStore AmbiguousObjectLLMApplyStore
 				if s, ok := reconciler.Store.(AmbiguousObjectLLMApplyStore); ok {
 					applyStore = s
 				}
-				resolvedObj, applied, applyErr := ApplyAmbiguousObjectLLMDecision(ctx, obj, candidates, decision, applyStore, minConfidence)
+				resolvedObj, applied, applyErr := ApplyAmbiguousObjectLLMDecision(ctx, obj, it.candidates, rr.decision, applyStore, minConfidence)
 				if applyErr != nil {
 					if logger != nil {
 						logger.Warn("apply LLM ambiguous object resolution failed", "artifact_id", obj.ArtifactID, "err", applyErr)
 					}
+					logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
+						Status: reconcileOutcomeApplyFailed, Object: obj, Candidates: it.candidates,
+						Decision: rr.decision, Err: applyErr, MSUsed: rr.ms,
+					})
 				} else if applied {
-					out = append(out, resolvedObj)
+					logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
+						Status: reconcileOutcomeResolved, Object: resolvedObj, Candidates: it.candidates,
+						Decision: rr.decision, ResolvedID: resolvedObj.ObjectID, MSUsed: rr.ms,
+					})
+					out[i] = resolvedObj
 					continue
+				} else {
+					// LLM answered but confidence below threshold → left ambiguous.
+					logSink.logReconcileOutcome(ctx, logger, objectReconcileOutcome{
+						Status: reconcileOutcomeUnresolved, Object: obj, Candidates: it.candidates,
+						Decision: rr.decision, MSUsed: rr.ms,
+					})
 				}
 			}
 		}
-		if result.Status == ObjectReconcileAmbiguous && logger != nil {
+
+		if it.result.Status == ObjectReconcileAmbiguous && logger != nil {
 			var names []string
-			for _, c := range candidates {
+			for _, c := range it.candidates {
 				names = append(names, c.Node.ObjectID+":"+c.Node.CanonicalName)
 			}
 			logger.Warn("object reconciliation ambiguous",
@@ -282,18 +392,18 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 				"artifact_type", obj.ArtifactType,
 				"artifact_id", obj.ArtifactID,
 				"object_name", obj.ObjectName,
-				"top_score", result.Confidence,
+				"top_score", it.result.Confidence,
 				"candidates", names,
 			)
 		}
-		obj.ObjectID = result.ObjectID
-		obj.ReconcileStatus = result.Status
-		obj.ReconcileConfidence = result.Confidence
+		obj.ObjectID = it.result.ObjectID
+		obj.ReconcileStatus = it.result.Status
+		obj.ReconcileConfidence = it.result.Confidence
 		if obj.ExtInfo == nil {
 			obj.ExtInfo = map[string]any{}
 		}
-		obj.ExtInfo["reconcile_method"] = result.Method
-		out = append(out, obj)
+		obj.ExtInfo["reconcile_method"] = it.result.Method
+		out[i] = obj
 	}
 	return out, nil
 }

@@ -144,7 +144,7 @@ func TestReconcileArtifactObjectsUsesLLMForAmbiguousTie(t *testing.T) {
 	}}
 	logger := &fakeLogger{}
 
-	got, err := reconcileArtifactObjectsWithLLM(context.Background(), objects, ObjectReconciler{Store: nodes}, logger, resolver, 0.85)
+	got, err := reconcileArtifactObjectsWithLLM(context.Background(), objects, ObjectReconciler{Store: nodes}, logger, resolver, 0.85, objectReconcileLogSink{})
 	if err != nil {
 		t.Fatalf("reconcileArtifactObjectsWithLLM: %v", err)
 	}

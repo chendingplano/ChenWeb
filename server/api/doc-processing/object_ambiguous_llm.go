@@ -3,16 +3,19 @@ package docprocessing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
 
 const (
 	ObjectReconcileMethodLLMAmbiguous = "llm_ambiguous_resolution"
 	defaultResolveAmbiguousMinConf    = 0.85
+	defaultResolveAmbiguousPromptRef  = "prompt-resolve-ambiguous-object-v1.md"
 )
 
 // AmbiguousArtifactObjectLLMUpdate is the allowlisted set of
@@ -93,9 +96,13 @@ func (r ambiguousObjectLLMJSONResolver) ResolveAmbiguousObject(ctx context.Conte
 	if err != nil {
 		return AmbiguousObjectLLMDecision{}, err
 	}
+	prompt, err := ambiguousObjectLLMPrompt()
+	if err != nil {
+		return AmbiguousObjectLLMDecision{}, err
+	}
 	in := newLLMJSONInput(ctx,
 		"resolve_ambiguous_object",
-		ambiguousObjectLLMPrompt(),
+		prompt,
 		r.modelName,
 		string(input),
 		"resolve_ambiguous_object",
@@ -300,10 +307,10 @@ func parseAmbiguousObjectLLMDecision(payload map[string]any, modelName string) (
 	}
 	if resolution, ok := payload["resolution"].(map[string]any); ok {
 		decision.ResolutionObjectID = strings.TrimSpace(asString(resolution["object_id"]))
-		decision.ResolutionConfidence = toFloat(resolution["confidence"])
+		decision.ResolutionConfidence = parseConfidence(resolution["confidence"])
 	} else {
 		decision.ResolutionObjectID = strings.TrimSpace(asString(payload["selected_resolution_object_id"]))
-		decision.ResolutionConfidence = toFloat(payload["confidence"])
+		decision.ResolutionConfidence = parseConfidence(payload["confidence"])
 	}
 	if decision.ResolutionObjectID == "" {
 		return AmbiguousObjectLLMDecision{}, fmt.Errorf("LLM ambiguous object payload missing resolution object_id")
@@ -340,6 +347,30 @@ func parseAmbiguousObjectLLMNodeUpdates(raw any) ([]AmbiguousObjectNodeLLMUpdate
 	return out, nil
 }
 
+// parseConfidence coerces an LLM confidence value to a 0..1 float. It accepts
+// numbers and numeric strings ("0.90"), and maps the qualitative labels some
+// models emit ("high"/"medium"/"low") to representative scores so a non-numeric
+// confidence never silently collapses to zero (which would fail the "missing
+// confidence" guard). The prompt asks for numeric confidence; this is defense
+// against models that ignore that instruction.
+func parseConfidence(v any) float64 {
+	if s, ok := v.(string); ok {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "very high", "certain":
+			return 0.99
+		case "high":
+			return 0.9
+		case "medium", "moderate":
+			return 0.6
+		case "low":
+			return 0.3
+		case "very low":
+			return 0.1
+		}
+	}
+	return toFloat(v)
+}
+
 func parseAmbiguousObjectLLMMerges(raw any) ([]AmbiguousObjectNodeLLMMerge, error) {
 	items, ok := raw.([]any)
 	if !ok {
@@ -356,7 +387,7 @@ func parseAmbiguousObjectLLMMerges(raw any) ([]AmbiguousObjectNodeLLMMerge, erro
 		out = append(out, AmbiguousObjectNodeLLMMerge{
 			SurvivorObjectID: survivor,
 			LoserObjectIDs:   losers,
-			Confidence:       toFloat(m["confidence"]),
+			Confidence:       parseConfidence(m["confidence"]),
 		})
 	}
 	return out, nil
@@ -399,12 +430,108 @@ func ambiguousObjectNodeCandidateLLMInput(candidates []ObjectNodeCandidate) []ma
 	return out
 }
 
-func ambiguousObjectLLMPrompt() string {
-	return `Resolve one ambiguous artifact object against candidate kb.object_nodes.
-Only complete/correct the allowlisted fields. Do not invent object ids.
-If candidate nodes represent the same object, return same_object_groups with
-one survivor_object_id and loser_object_ids. Return a selected resolution object
-id with confidence. Use high confidence only when the semantic identity is clear.`
+// ambiguousObjectLLMPrompt loads the DR7 adjudicator prompt from the prompts
+// directory. The ref is overridable via RESOLVE_AMBIGUOUS_OBJECT_PROMPT so the
+// prompt is never hard-coded in the binary.
+func ambiguousObjectLLMPrompt() (string, error) {
+	promptRef := strings.TrimSpace(os.Getenv("RESOLVE_AMBIGUOUS_OBJECT_PROMPT"))
+	if promptRef == "" {
+		promptRef = defaultResolveAmbiguousPromptRef
+	}
+	text, _, _, err := loadPromptByRef(promptRef)
+	if err != nil {
+		return "", err
+	}
+	return text, nil
+}
+
+// structuredOutputRawResponse returns the raw LLM response captured by a
+// structured-output failure, or "" when the error carries no raw payload.
+func structuredOutputRawResponse(err error) string {
+	var soErr *llmclients.StructuredOutputError
+	if errors.As(err, &soErr) {
+		return soErr.Raw
+	}
+	return ""
+}
+
+// Reconcile outcome statuses recorded in kb.doc_proc_logs (extra_info.outcome).
+const (
+	reconcileOutcomeResolved    = "resolved"     // LLM adjudicated and the decision was applied
+	reconcileOutcomeUnresolved  = "unresolved"   // LLM answered but confidence < threshold; left ambiguous
+	reconcileOutcomeLLMFailed   = "llm_failed"   // ResolveAmbiguousObject returned an error
+	reconcileOutcomeApplyFailed = "apply_failed" // decision could not be applied
+)
+
+// objectReconcileLogSink persists per-object LLM object-reconciliation outcomes
+// to kb.doc_proc_logs. A zero value (nil ProcLogger.DB) disables persistence so
+// callers/tests without a database run unchanged.
+type objectReconcileLogSink struct {
+	ProcLogger  DocProcLogger
+	DocProcName string
+	CallReason  string
+}
+
+func (s objectReconcileLogSink) enabled() bool { return s.ProcLogger.DB != nil }
+
+// objectReconcileOutcome captures the result of adjudicating one ambiguous
+// artifact object so success and failure alike can be logged uniformly.
+type objectReconcileOutcome struct {
+	Status     string
+	Object     ArtifactObject
+	Candidates []ObjectNodeCandidate
+	Decision   AmbiguousObjectLLMDecision
+	ResolvedID string
+	Err        error
+	MSUsed     int64
+}
+
+// logReconcileOutcome writes one reconcile_object row. It is best-effort: a
+// logging failure is reported via logger but never aborts reconciliation.
+func (s objectReconcileLogSink) logReconcileOutcome(ctx context.Context, logger ApiTypes.JimoLogger, o objectReconcileOutcome) {
+	if !s.enabled() {
+		return
+	}
+	candidateIDs := make([]string, 0, len(o.Candidates))
+	for _, c := range o.Candidates {
+		candidateIDs = append(candidateIDs, c.Node.ObjectID)
+	}
+	extra := map[string]any{
+		"outcome":               o.Status,
+		"artifact_id":           o.Object.ArtifactID,
+		"artifact_type":         o.Object.ArtifactType,
+		"object_name":           o.Object.ObjectName,
+		"candidate_object_ids":  candidateIDs,
+		"resolved_object_id":    o.ResolvedID,
+		"resolution_confidence": o.Decision.ResolutionConfidence,
+	}
+	extraStr := "{}"
+	if bs, err := json.Marshal(extra); err == nil {
+		extraStr = string(bs)
+	}
+	var errStr *string
+	if o.Err != nil {
+		errStr = nullableStringPtr(o.Err.Error())
+	}
+	var modelNames []string
+	if m := strings.TrimSpace(o.Decision.ModelName); m != "" {
+		modelNames = []string{m}
+	}
+	recordID := o.Object.InputRecordID
+	activity := "resolve_ambiguous_object"
+	rec := DocProcLogRecord{
+		CallReason:    s.CallReason,
+		DocProcName:   s.DocProcName,
+		ModelNames:    modelNames,
+		RecordID:      &recordID,
+		ActivityName:  &activity,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(o.MSUsed),
+	}
+	if err := s.ProcLogger.LogReconcileObject(ctx, rec, "MID-CWB-RECONCILE-OBJECT"); err != nil && logger != nil {
+		logger.Warn("failed to write reconcile_object log", "artifact_id", o.Object.ArtifactID, "err", err)
+	}
 }
 
 func ambiguousObjectResolutionContract() llmclients.StructuredOutputContract {

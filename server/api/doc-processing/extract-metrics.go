@@ -504,7 +504,7 @@ func (p *MetricsProcessor) persistMetricObjects(ctx context.Context, recordID in
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactMetric, metricID, metric)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence)
+		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence, objectReconcileLogSink{ProcLogger: p.ProcLogger, DocProcName: p.Name(), CallReason: p.Name()})
 		if err != nil {
 			return err
 		}

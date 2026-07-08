@@ -1191,7 +1191,7 @@ func (p *ProvisionsProcessor) persistProvisionObjects(ctx context.Context, recor
 		objects = append(objects, normalizeArtifactObjectsForArtifact(recordID, searchArtifactProvision, provID, provision)...)
 	}
 	if p.ObjectReconciler.Store != nil && len(objects) > 0 {
-		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence)
+		reconciled, err := reconcileArtifactObjectsWithLLM(ctx, objects, p.ObjectReconciler, p.Logger, p.AmbiguousObjectLLMResolver, p.ResolveAmbiguousMinConfidence, objectReconcileLogSink{ProcLogger: p.ProcLogger, DocProcName: p.Name(), CallReason: p.Name()})
 		if err != nil {
 			return err
 		}
