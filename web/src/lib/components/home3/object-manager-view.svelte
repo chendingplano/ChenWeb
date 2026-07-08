@@ -30,6 +30,16 @@
 		type ConnectivityRow,
 		type PdfLocator
 	} from '$lib/services/objectManagerService';
+	import { getRawLines, type RawLine } from '$lib/services/kbService';
+	import PdfViewWindow from '$lib/components/home3/pdf-view-window.svelte';
+	import type { PdfPageViewport } from '$lib/components/home3/shared-pdf-viewer.svelte';
+	import {
+		getAmbiguousObjectDetail,
+		updateArtifactObject,
+		createObjectNode,
+		type ObjectNodeCandidate,
+		type ArtifactObjectDetail
+	} from '$lib/components/home3/resolve-ambiguous-objects-client';
 
 	use([
 		GraphChart,
@@ -425,13 +435,87 @@
 		};
 	});
 
-	// ---------- PDF locator (Right panel) ----------
+	// ---------- PDF locator + viewer (Right panel) ----------
 	let locator = $state<PdfLocator | null>(null);
 	let locatorError = $state('');
+
+	// PDF viewer state, mirroring the Provisions PDF window.
+	let pdfRawLines = $state<RawLine[]>([]);
+	let pdfLoadedInputId = $state(0);
+	let pdfDocPage = $state(1);
+	let pdfZoom = $state(0.5);
+	let pdfNumPages = $state(0);
+
+	const isPdfDoc = $derived((locator?.document ?? '').toLowerCase().endsWith('.pdf'));
 	const pdfFileUrl = $derived(
 		locator && locator.input_record_id > 0
-			? `/api/v1/kb/inputs/${locator.input_record_id}/file#zoom=page-width`
+			? `/api/v1/kb/inputs/${locator.input_record_id}/file#page=${pdfDocPage}&zoom=page-width`
 			: ''
+	);
+
+	type NormalizedSpan = { page_number: number; line_number: number };
+
+	const pdfLineNumToPage = $derived.by(() => {
+		const map = new Map<number, number>();
+		for (const ln of pdfRawLines) {
+			if (!map.has(ln.line_number)) map.set(ln.line_number, ln.page_number);
+		}
+		return map;
+	});
+
+	// Parse the locator's canonical line spans ("12", "12-15", legacy "page:line")
+	// into {page_number, line_number} pairs, resolving pages via the raw lines.
+	function normalizeLocatorSpans(spans: string[]): NormalizedSpan[] {
+		const out: NormalizedSpan[] = [];
+		const pushLine = (lineNo: number, pageNo?: number | null) => {
+			const page = pageNo && pageNo > 0 ? pageNo : pdfLineNumToPage.get(lineNo);
+			if (page && lineNo > 0) out.push({ page_number: page, line_number: lineNo });
+		};
+		for (const raw of spans) {
+			const s = String(raw).trim().replace(/^\[|\]$/g, '');
+			const pageLine = s.match(/^(\d+)\s*:\s*(\d+)$/);
+			if (pageLine) {
+				pushLine(parseInt(pageLine[2], 10), parseInt(pageLine[1], 10));
+				continue;
+			}
+			const range = s.match(/^(\d+)\s*-\s*(\d+)$/);
+			if (range) {
+				const start = parseInt(range[1], 10);
+				const end = parseInt(range[2], 10);
+				for (let ln = start; ln <= end && ln <= start + 200; ln += 1) pushLine(ln);
+			} else {
+				const n = parseInt(s, 10);
+				if (n > 0) pushLine(n);
+			}
+		}
+		return out;
+	}
+
+	const pdfSelectedSpans = $derived.by(() =>
+		locator ? normalizeLocatorSpans(locator.source_line_spans) : []
+	);
+
+	const pdfRawLineByKey = $derived.by(() => {
+		const map = new Map<string, RawLine>();
+		for (const ln of pdfRawLines) map.set(`${ln.page_number}:${ln.line_number}`, ln);
+		return map;
+	});
+
+	const pdfSelectedLinesByPage = $derived.by(() => {
+		const map = new Map<number, RawLine[]>();
+		for (const span of pdfSelectedSpans) {
+			const ln = pdfRawLineByKey.get(`${span.page_number}:${span.line_number}`);
+			if (ln && Array.isArray(ln.coords) && ln.coords.length >= 4) {
+				const arr = map.get(span.page_number) ?? [];
+				arr.push(ln);
+				map.set(span.page_number, arr);
+			}
+		}
+		return map;
+	});
+
+	const pdfHighlightVersion = $derived(
+		`${locator?.artifact_object_id ?? 0}:${pdfSelectedSpans.length}:${pdfRawLines.length}`
 	);
 
 	async function loadLocator(params: { artifactObjectId?: number; objectId?: string }) {
@@ -442,6 +526,69 @@
 		} catch (err) {
 			locatorError = err instanceof Error ? err.message : String(err);
 			locator = null;
+		}
+	}
+
+	// Load raw lines for the located document and jump to the first span's page.
+	$effect(() => {
+		const id = locator?.input_record_id ?? 0;
+		if (id <= 0) {
+			pdfRawLines = [];
+			pdfLoadedInputId = 0;
+			return;
+		}
+		if (id === pdfLoadedInputId) return;
+		pdfLoadedInputId = id;
+		const spans = locator?.source_line_spans ?? [];
+		getRawLines(id)
+			.then((res) => {
+				pdfRawLines = res.lines ?? [];
+				pdfNumPages = res.pages ?? 0;
+				const l2p = new Map<number, number>();
+				for (const ln of pdfRawLines) if (!l2p.has(ln.line_number)) l2p.set(ln.line_number, ln.page_number);
+				const firstLine = normalizeLocatorSpans(spans)[0]?.line_number;
+				pdfDocPage = firstLine ? (l2p.get(firstLine) ?? 1) : 1;
+			})
+			.catch(() => {
+				pdfRawLines = [];
+			});
+	});
+
+	// Draw highlight boxes for the located line spans on each rendered page.
+	function renderLocatorHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
+		const HIGHLIGHT_EXPAND_TOP_PX = 10;
+		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
+		const lines = pdfSelectedLinesByPage.get(pageNo) ?? [];
+		const rects = lines.flatMap((ln) => {
+			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
+			const vx1 = (ln.coords[0] * viewport.width) / 1000;
+			const vy1 = (ln.coords[1] * viewport.height) / 1000;
+			const vx2 = (ln.coords[2] * viewport.width) / 1000;
+			const vy2 = (ln.coords[3] * viewport.height) / 1000;
+			return [
+				{
+					lineNumber: ln.line_number,
+					left: Math.min(vx1, vx2),
+					top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX),
+					rawBottom: Math.max(vy1, vy2),
+					width: Math.abs(vx2 - vx1) + HIGHLIGHT_EXPAND_RIGHT_PX
+				}
+			];
+		});
+		for (let i = 0; i < rects.length; i += 1) {
+			const rect = rects[i];
+			const nextRect = rects[i + 1];
+			const bottom = nextRect ? nextRect.top : rect.rawBottom;
+			const height = Math.max(0, bottom - rect.top);
+			if (rect.width < 1 || height < 1) continue;
+			const mark = document.createElement('div');
+			mark.className = 'pdf-highlight';
+			mark.style.left = `${rect.left}px`;
+			mark.style.top = `${rect.top}px`;
+			mark.style.width = `${rect.width}px`;
+			mark.style.height = `${height}px`;
+			mark.title = `line ${rect.lineNumber}`;
+			overlay.appendChild(mark);
 		}
 	}
 
@@ -460,11 +607,135 @@
 		}
 	}
 
+	// ---------- Object Resolution (link / create / reject) ----------
+	let resolutionDetail = $state<ArtifactObjectDetail | null>(null);
+	let resolutionCandidates = $state<ObjectNodeCandidate[]>([]);
+	let resolutionLoading = $state(false);
+	let resolutionBusy = $state(false);
+	let resolutionError = $state('');
+	let resolutionMessage = $state('');
+	let resolutionLoadedId = $state(0);
+
+	async function loadResolution(aoId: number) {
+		resolutionError = '';
+		resolutionMessage = '';
+		resolutionLoading = true;
+		try {
+			const resp = await getAmbiguousObjectDetail(aoId);
+			resolutionDetail = resp.artifact_object;
+			resolutionCandidates = resp.candidates ?? [];
+		} catch (err) {
+			resolutionError = err instanceof Error ? err.message : String(err);
+			resolutionDetail = null;
+			resolutionCandidates = [];
+		} finally {
+			resolutionLoading = false;
+		}
+	}
+
+	// Load candidates whenever the selected mention changes.
+	$effect(() => {
+		const id = selectedArtifact?.id ?? 0;
+		if (id <= 0) {
+			resolutionDetail = null;
+			resolutionCandidates = [];
+			resolutionLoadedId = 0;
+			return;
+		}
+		if (id === resolutionLoadedId) return;
+		resolutionLoadedId = id;
+		void loadResolution(id);
+	});
+
+	async function afterResolutionChange(objectId: string, status: string) {
+		if (selectedArtifact) {
+			selectedArtifact = { ...selectedArtifact, object_id: objectId, reconcile_status: status };
+		}
+		if (objectId) {
+			selectedObjectId = objectId;
+			await loadGraph({ object_id: objectId });
+			void loadLocator({ objectId });
+		}
+		if (resolutionLoadedId > 0) await loadResolution(resolutionLoadedId);
+	}
+
+	async function linkCandidate(c: ObjectNodeCandidate) {
+		if (!selectedArtifact) return;
+		resolutionBusy = true;
+		resolutionError = '';
+		try {
+			await updateArtifactObject(selectedArtifact.id, {
+				object_id: c.object_id,
+				reconcile_status: 'ambiguous_resolved',
+				reconcile_confidence: c.score
+			});
+			resolutionMessage = `Linked to ${c.canonical_name || c.object_id}.`;
+			await afterResolutionChange(c.object_id, 'ambiguous_resolved');
+		} catch (err) {
+			resolutionError = err instanceof Error ? err.message : String(err);
+		} finally {
+			resolutionBusy = false;
+		}
+	}
+
+	async function createNewNode() {
+		if (!selectedArtifact) return;
+		const d = resolutionDetail;
+		resolutionBusy = true;
+		resolutionError = '';
+		try {
+			const res = await createObjectNode(selectedArtifact.id, {
+				object_name: d?.object_name ?? selectedArtifact.object_name,
+				object_name_en: d?.object_name_en ?? '',
+				object_name_zh: d?.object_name_zh ?? '',
+				language: d?.language ?? '',
+				object_type: d?.object_type ?? '',
+				aliases: d?.aliases ?? [],
+				acronyms: d?.acronyms ?? [],
+				description: d?.description ?? ''
+			});
+			if (res.created) {
+				await updateArtifactObject(selectedArtifact.id, {
+					object_id: res.node.object_id,
+					reconcile_status: 'new',
+					reconcile_confidence: 1
+				});
+				resolutionMessage = `Created ${res.node.canonical_name || res.node.object_id} and linked.`;
+				await afterResolutionChange(res.node.object_id, 'new');
+			} else {
+				// A node with this name already exists — offer them to link instead.
+				resolutionCandidates = res.nodes;
+				resolutionMessage = 'A node with this name already exists — pick one to link.';
+			}
+		} catch (err) {
+			resolutionError = err instanceof Error ? err.message : String(err);
+		} finally {
+			resolutionBusy = false;
+		}
+	}
+
+	async function rejectMention() {
+		if (!selectedArtifact) return;
+		resolutionBusy = true;
+		resolutionError = '';
+		try {
+			await updateArtifactObject(selectedArtifact.id, { reconcile_status: 'rejected' });
+			resolutionMessage = 'Marked rejected.';
+			selectedArtifact = { ...selectedArtifact, reconcile_status: 'rejected' };
+			if (resolutionLoadedId > 0) await loadResolution(resolutionLoadedId);
+		} catch (err) {
+			resolutionError = err instanceof Error ? err.message : String(err);
+		} finally {
+			resolutionBusy = false;
+		}
+	}
+
 	// ---------- Middle panel: draggable / resizable grid ----------
 	type WidgetId =
 		| 'relation-chart'
 		| 'node-info'
 		| 'artifact-info'
+		| 'resolution'
 		| 'stats-artifact'
 		| 'stats-nodes'
 		| 'connectivity'
@@ -480,6 +751,7 @@
 		'relation-chart': 'Object Relation Chart',
 		'node-info': 'Object Node Info',
 		'artifact-info': 'Artifact Object Info',
+		resolution: 'Object Resolution',
 		'stats-artifact': 'Artifact Object Statistics',
 		'stats-nodes': 'Object Nodes Statistics',
 		connectivity: 'Object Node Connectivity',
@@ -490,6 +762,7 @@
 		{ id: 'relation-chart', colSpan: 4, height: 360 },
 		{ id: 'node-info', colSpan: 2, height: 220 },
 		{ id: 'artifact-info', colSpan: 2, height: 220 },
+		{ id: 'resolution', colSpan: 4, height: 260 },
 		{ id: 'stats-artifact', colSpan: 2, height: 240 },
 		{ id: 'stats-nodes', colSpan: 2, height: 240 },
 		{ id: 'connectivity', colSpan: 4, height: 300 },
@@ -731,6 +1004,50 @@
 							{:else}
 								<p class="muted">No artifact object selected.</p>
 							{/if}
+						{:else if w.id === 'resolution'}
+							{#if !selectedArtifact}
+								<p class="muted">Select an artifact object (mention) to resolve.</p>
+							{:else}
+								<div class="res-status">
+									status:
+									<strong>{resolutionDetail?.reconcile_status ?? selectedArtifact.reconcile_status}</strong>
+									· object_id:
+									<strong>{resolutionDetail?.object_id || '(unresolved)'}</strong>
+								</div>
+								<div class="res-actions">
+									<button type="button" onclick={createNewNode} disabled={resolutionBusy}>
+										Create New
+									</button>
+									<button type="button" onclick={rejectMention} disabled={resolutionBusy}>
+										Reject
+									</button>
+								</div>
+								{#if resolutionError}<p class="error">{resolutionError}</p>{/if}
+								{#if resolutionMessage}<p class="muted small">{resolutionMessage}</p>{/if}
+								<div class="res-cands">
+									{#if resolutionLoading}
+										<p class="muted small">Loading candidates…</p>
+									{:else if resolutionCandidates.length === 0}
+										<p class="muted small">No candidate nodes.</p>
+									{:else}
+										{#each resolutionCandidates as c (c.object_id)}
+											<div class="res-cand" class:recommended={c.recommended}>
+												<span class="res-cand-main">
+													<span class="record-title">{c.canonical_name || c.object_id}</span>
+													<span class="record-sub">
+														{c.object_type} · score {c.score.toFixed(2)} · {c.method}{c.recommended
+															? ' · recommended'
+															: ''}
+													</span>
+												</span>
+												<button type="button" onclick={() => linkCandidate(c)} disabled={resolutionBusy}>
+													Link
+												</button>
+											</div>
+										{/each}
+									{/if}
+								</div>
+							{/if}
 						{:else if w.id === 'stats-artifact'}
 							{#if statsError}<p class="error">{statsError}</p>{/if}
 							{#if artifactStats}
@@ -786,7 +1103,24 @@
 		{#if locatorError}<p class="error">{locatorError}</p>{/if}
 		{#if locator && pdfFileUrl}
 			<p class="muted small">Spans: {locator.source_line_spans.join(', ') || '—'}</p>
-			<iframe class="pdf-frame" src={pdfFileUrl} title={locator.document}></iframe>
+			{#if isPdfDoc}
+				<div class="pdf-host">
+					<PdfViewWindow
+						inputId={locator.input_record_id}
+						fileUrl={pdfFileUrl}
+						bind:page={pdfDocPage}
+						bind:zoom={pdfZoom}
+						bind:numPages={pdfNumPages}
+						highlightVersion={pdfHighlightVersion}
+						renderHighlights={renderLocatorHighlights}
+						showSidebar={false}
+						enableSelectionDialog={false}
+						{darkMode}
+					/>
+				</div>
+			{:else}
+				<iframe class="pdf-frame" src={pdfFileUrl} title={locator.document}></iframe>
+			{/if}
 		{:else}
 			<p class="muted">Click a chart node or record to open its source PDF.</p>
 		{/if}
@@ -1114,6 +1448,39 @@
 	.merge-row input {
 		flex: 1;
 	}
+	.res-status {
+		font-size: 12px;
+		color: var(--muted);
+		margin-bottom: 8px;
+	}
+	.res-actions {
+		display: flex;
+		gap: 6px;
+		margin-bottom: 8px;
+	}
+	.res-cands {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.res-cand {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		padding: 6px 8px;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+	}
+	.res-cand.recommended {
+		border-color: #5eead4;
+	}
+	.res-cand-main {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
 	.conn-controls {
 		margin-bottom: 6px;
 		font-size: 12px;
@@ -1131,6 +1498,21 @@
 		border: 1px solid var(--border);
 		border-radius: 6px;
 		min-height: 0;
+	}
+	.pdf-host {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		overflow: hidden;
+	}
+	:global(.pdf-highlight) {
+		position: absolute;
+		background: rgba(200, 85, 61, 0.18);
+		border: 1px solid rgba(200, 85, 61, 0.9);
+		box-shadow: inset 0 0 0 1px rgba(255, 210, 179, 0.22);
 	}
 	.muted {
 		color: var(--muted);
