@@ -243,31 +243,14 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 			return nil, err
 		}
 		var candidates []ObjectNodeCandidate
-		if result.Status == ObjectReconcileAmbiguous && logger != nil {
+		if result.Status == ObjectReconcileAmbiguous {
 			var candErr error
 			candidates, candErr = reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
-			var names []string
-			if candErr == nil {
-				for _, c := range candidates {
-					names = append(names, c.Node.ObjectID+":"+c.Node.CanonicalName)
-				}
+			if candErr != nil {
+				return nil, candErr
 			}
-			logger.Warn("object reconciliation ambiguous",
-				"input_record_id", obj.InputRecordID,
-				"artifact_type", obj.ArtifactType,
-				"artifact_id", obj.ArtifactID,
-				"object_name", obj.ObjectName,
-				"top_score", result.Confidence,
-				"candidates", names,
-			)
 		}
 		if result.Status == ObjectReconcileAmbiguous && llmResolver != nil {
-			if candidates == nil {
-				candidates, err = reconciler.Store.FindCandidates(ctx, obj, reconciler.Options)
-				if err != nil {
-					return nil, err
-				}
-			}
 			decision, resolveErr := llmResolver.ResolveAmbiguousObject(ctx, obj, candidates)
 			if resolveErr != nil {
 				if logger != nil {
@@ -288,6 +271,20 @@ func reconcileArtifactObjectsWithLLM(ctx context.Context, objects []ArtifactObje
 					continue
 				}
 			}
+		}
+		if result.Status == ObjectReconcileAmbiguous && logger != nil {
+			var names []string
+			for _, c := range candidates {
+				names = append(names, c.Node.ObjectID+":"+c.Node.CanonicalName)
+			}
+			logger.Warn("object reconciliation ambiguous",
+				"input_record_id", obj.InputRecordID,
+				"artifact_type", obj.ArtifactType,
+				"artifact_id", obj.ArtifactID,
+				"object_name", obj.ObjectName,
+				"top_score", result.Confidence,
+				"candidates", names,
+			)
 		}
 		obj.ObjectID = result.ObjectID
 		obj.ReconcileStatus = result.Status

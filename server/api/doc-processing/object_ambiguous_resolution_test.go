@@ -183,6 +183,31 @@ func TestParseAmbiguousObjectLLMDecisionReadsExpectedShape(t *testing.T) {
 	}
 }
 
+func TestParseAmbiguousObjectLLMDecisionAcceptsTopLevelResolutionShape(t *testing.T) {
+	payload := map[string]any{
+		"same_object_groups": []any{
+			map[string]any{
+				"survivor_object_id": "obj_244_3092b9548ab7",
+				"loser_object_ids":   []any{"obj_244_af72f9a123dc"},
+				"confidence":         0.95,
+			},
+		},
+		"selected_resolution_object_id": "obj_244_3092b9548ab7",
+		"confidence":                    0.95,
+	}
+
+	got, err := parseAmbiguousObjectLLMDecision(payload, "test-model")
+	if err != nil {
+		t.Fatalf("parseAmbiguousObjectLLMDecision: %v", err)
+	}
+	if got.ResolutionObjectID != "obj_244_3092b9548ab7" || got.ResolutionConfidence != 0.95 {
+		t.Fatalf("decision = %+v, want top-level selected resolution", got)
+	}
+	if len(got.Merges) != 1 || got.Merges[0].SurvivorObjectID != "obj_244_3092b9548ab7" || got.Merges[0].LoserObjectIDs[0] != "obj_244_af72f9a123dc" {
+		t.Fatalf("merges = %+v, unexpected", got.Merges)
+	}
+}
+
 type fakeAmbiguousObjectLLMApplyStore struct {
 	nodeUpdates []AmbiguousObjectNodeLLMUpdate
 	merges      []AmbiguousObjectNodeLLMMerge

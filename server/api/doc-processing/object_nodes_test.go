@@ -142,8 +142,9 @@ func TestReconcileArtifactObjectsUsesLLMForAmbiguousTie(t *testing.T) {
 		ResolutionConfidence: 0.92,
 		ArtifactUpdates:      AmbiguousArtifactObjectLLMUpdate{ObjectNameEn: "systolic blood pressure"},
 	}}
+	logger := &fakeLogger{}
 
-	got, err := reconcileArtifactObjectsWithLLM(context.Background(), objects, ObjectReconciler{Store: nodes}, nil, resolver, 0.85)
+	got, err := reconcileArtifactObjectsWithLLM(context.Background(), objects, ObjectReconciler{Store: nodes}, logger, resolver, 0.85)
 	if err != nil {
 		t.Fatalf("reconcileArtifactObjectsWithLLM: %v", err)
 	}
@@ -159,6 +160,9 @@ func TestReconcileArtifactObjectsUsesLLMForAmbiguousTie(t *testing.T) {
 	}
 	if obj.ExtInfo["reconcile_method"] != ObjectReconcileMethodLLMAmbiguous {
 		t.Fatalf("ext_info = %+v, want LLM reconcile method", obj.ExtInfo)
+	}
+	if len(logger.warns) != 0 {
+		t.Fatalf("warns = %+v, want no ambiguous warning after LLM resolution", logger.warns)
 	}
 }
 

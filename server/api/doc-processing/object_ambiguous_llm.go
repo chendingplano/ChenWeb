@@ -291,24 +291,25 @@ func parseAmbiguousObjectLLMDecision(payload map[string]any, modelName string) (
 	if err != nil {
 		return AmbiguousObjectLLMDecision{}, err
 	}
-	resolution, ok := payload["resolution"].(map[string]any)
-	if !ok {
-		return AmbiguousObjectLLMDecision{}, fmt.Errorf("LLM ambiguous object payload missing resolution")
-	}
 	decision := AmbiguousObjectLLMDecision{
-		ModelName:            strings.TrimSpace(modelName),
-		ResolutionObjectID:   strings.TrimSpace(asString(resolution["object_id"])),
-		ResolutionConfidence: toFloat(resolution["confidence"]),
-		ArtifactUpdates:      artifactUpdates,
-		NodeUpdates:          nodeUpdates,
-		Merges:               merges,
-		Rationale:            strings.TrimSpace(asString(payload["rationale"])),
+		ModelName:       strings.TrimSpace(modelName),
+		ArtifactUpdates: artifactUpdates,
+		NodeUpdates:     nodeUpdates,
+		Merges:          merges,
+		Rationale:       strings.TrimSpace(asString(payload["rationale"])),
+	}
+	if resolution, ok := payload["resolution"].(map[string]any); ok {
+		decision.ResolutionObjectID = strings.TrimSpace(asString(resolution["object_id"]))
+		decision.ResolutionConfidence = toFloat(resolution["confidence"])
+	} else {
+		decision.ResolutionObjectID = strings.TrimSpace(asString(payload["selected_resolution_object_id"]))
+		decision.ResolutionConfidence = toFloat(payload["confidence"])
 	}
 	if decision.ResolutionObjectID == "" {
-		return AmbiguousObjectLLMDecision{}, fmt.Errorf("LLM ambiguous object payload missing resolution.object_id")
+		return AmbiguousObjectLLMDecision{}, fmt.Errorf("LLM ambiguous object payload missing resolution object_id")
 	}
 	if decision.ResolutionConfidence == 0 {
-		return AmbiguousObjectLLMDecision{}, fmt.Errorf("LLM ambiguous object payload missing resolution.confidence")
+		return AmbiguousObjectLLMDecision{}, fmt.Errorf("LLM ambiguous object payload missing resolution confidence")
 	}
 	return decision, nil
 }
