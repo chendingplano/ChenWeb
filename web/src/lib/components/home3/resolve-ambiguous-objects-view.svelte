@@ -497,9 +497,13 @@
 		}
 	}
 
-	function useCandidate(objectId: string) {
+	function useCandidate(node: ObjectNodeCandidate) {
 		if (!currentObject) return;
-		currentObject.object_id = objectId;
+		currentObject.object_id = node.object_id;
+		currentObject.object_name = node.canonical_name;
+		currentObject.object_name_en = node.canonical_name_en;
+		currentObject.object_name_zh = node.canonical_name_zh;
+		currentObject.acronyms = [...node.acronyms];
 		currentObject.reconcile_status = 'ambiguous_resolved';
 	}
 
@@ -798,7 +802,7 @@
 											<td style="padding:6px 8px; border-bottom:1px solid {borderColor}; text-align:right; vertical-align:top;">
 												<button
 													type="button"
-													onclick={() => useCandidate(node.object_id)}
+													onclick={() => useCandidate(node)}
 													style="font-size:11px; font-weight:500; padding:4px 10px; border-radius:6px; border:none; cursor:pointer; background:{accent}; color:white;"
 												>
 													Use this
