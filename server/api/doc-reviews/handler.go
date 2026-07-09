@@ -274,6 +274,33 @@ func UpdateFinding(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": true})
 }
 
+// TranslateFinding returns a finding localized into the requested language,
+// translating on demand via the LLM when needed. See DocReviewController.TranslateFinding.
+func TranslateFinding(c echo.Context) error {
+	id, err := parseID(c, "id")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid ID"})
+	}
+	var body struct {
+		Language string `json:"language"`
+		Confirm  bool   `json:"confirm"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": "Invalid body"})
+	}
+	ctrl := NewDocReviewController()
+	result, err := ctrl.TranslateFinding(c.Request().Context(), id, body.Language, body.Confirm)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"status":              true,
+		"finding":             result.Finding,
+		"translated":          result.Translated,
+		"needs_confirmation":  result.NeedsConfirmation,
+	})
+}
+
 // AutoFixFinding runs the LLM for a finding and returns a preview of the proposed
 // fix. Nothing is written to disk; the caller must POST to /auto-fix/apply to
 // commit. A 200 with fixable=false means the GUI should surface the message.
