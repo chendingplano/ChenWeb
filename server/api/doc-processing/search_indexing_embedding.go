@@ -342,10 +342,17 @@ func embedWithRetry(
 	timeoutSec int,
 	row kbsearch.RegistryRow,
 	logger ApiTypes.JimoLogger,
+	callReason string,
+	callLoc string,
 ) ([]float64, error) {
 	var lastErr error
 	for attempt := 1; attempt <= embeddingMaxAttempts; attempt++ {
-		vec, err := embedder.Embed(ctx, llmclients.EmbedInput{ModelName: modelName, InputText: text})
+		vec, err := embedder.Embed(ctx, llmclients.EmbedInput{
+			ModelName:  modelName,
+			InputText:  text,
+			CallReason: callReason,
+			CallLoc:    callLoc,
+		})
 		if err == nil {
 			return vec, nil
 		}
@@ -380,7 +387,7 @@ func embedBatchWithRetry(
 	callLoc string,
 ) ([][]float64, error) {
 	if len(texts) == 1 {
-		vec, err := embedWithRetry(ctx, embedder, modelName, texts[0], timeoutSec, rows[rowIndices[0]], logger)
+		vec, err := embedWithRetry(ctx, embedder, modelName, texts[0], timeoutSec, rows[rowIndices[0]], logger, callReason, callLoc)
 		if err != nil {
 			return nil, err
 		}
@@ -390,7 +397,7 @@ func embedBatchWithRetry(
 	if !ok {
 		out := make([][]float64, 0, len(texts))
 		for pos, text := range texts {
-			vec, err := embedWithRetry(ctx, embedder, modelName, text, timeoutSec, rows[rowIndices[pos]], logger)
+			vec, err := embedWithRetry(ctx, embedder, modelName, text, timeoutSec, rows[rowIndices[pos]], logger, callReason, callLoc)
 			if err != nil {
 				return nil, err
 			}
