@@ -617,7 +617,7 @@ var (
 // kb.input_proc_status.processor. The result is cached after the first call.
 func getAllProcessorAliases() [][]string {
 	loadProcessorsOnce.Do(func() {
-		cfg, err := loadKbFrontendConfig()
+		cfg, err := LoadKbFrontendConfig()
 		allProcs := mandatoryProcessorIDs
 		if err == nil && len(cfg.RequiredProcessors) > 0 {
 			allProcs = append(allProcs, cfg.RequiredProcessors...)

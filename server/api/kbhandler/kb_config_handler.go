@@ -16,6 +16,7 @@ import (
 type kbFrontendConfig struct {
 	TopicTypes             []string `json:"topic_types"`
 	SupportedLanguages     []string `json:"supported_languages"`
+	DefaultLanguage        []string `json:"default_language"`
 	MandatoryProcessors    []string `json:"mandatory_processors"`
 	RequiredProcessors     []string `json:"required_processors"`
 	MaxDocProcessPipelines int      `json:"max_doc_process_pipelines"`
@@ -37,7 +38,7 @@ func GetKbFrontendConfig(c echo.Context) error {
 	rc := EchoFactory.NewFromEcho(c, "CWB_KB_CFG_001")
 	defer rc.Close()
 
-	cfg, err := loadKbFrontendConfig()
+	cfg, err := LoadKbFrontendConfig()
 	if err != nil {
 		rc.GetLogger().Warn("load kb frontend config failed", "err", err)
 		return c.JSON(http.StatusOK, kbFrontendConfigResponse{
@@ -45,6 +46,7 @@ func GetKbFrontendConfig(c echo.Context) error {
 			Config: kbFrontendConfig{
 				TopicTypes:             []string{},
 				SupportedLanguages:     defaultSupportedLanguages(),
+				DefaultLanguage:        defaultLanguageList(),
 				MandatoryProcessors:    mandatoryProcessorIDs,
 				RequiredProcessors:     []string{},
 				MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
@@ -59,13 +61,17 @@ type rawKbFrontendSection struct {
 	Frontend struct {
 		TopicTypes         []string `toml:"topic_types"`
 		SupportedLanguages []string `toml:"supported_languages"`
+		DefaultLanguage    []string `toml:"default_language"`
 	} `toml:"frontend"`
 	DocProcessing struct {
 		RequiredProcessors []string `toml:"required_processors"`
 	} `toml:"doc-processing"`
 }
 
-func loadKbFrontendConfig() (kbFrontendConfig, error) {
+// LoadKbFrontendConfig reads the [frontend] and [doc-processing] sections from
+// config.toml. Exported so other packages (e.g. doc-reviews, for on-demand
+// finding translation) can reuse the same config source.
+func LoadKbFrontendConfig() (kbFrontendConfig, error) {
 	path := resolveKbConfigFilePath()
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -83,6 +89,10 @@ func loadKbFrontendConfig() (kbFrontendConfig, error) {
 	if len(supportedLanguages) == 0 {
 		supportedLanguages = defaultSupportedLanguages()
 	}
+	defaultLanguage := raw.Frontend.DefaultLanguage
+	if len(defaultLanguage) == 0 {
+		defaultLanguage = defaultLanguageList()
+	}
 	reqProcs := raw.DocProcessing.RequiredProcessors
 	if reqProcs == nil {
 		reqProcs = []string{}
@@ -90,6 +100,7 @@ func loadKbFrontendConfig() (kbFrontendConfig, error) {
 	return kbFrontendConfig{
 		TopicTypes:             types,
 		SupportedLanguages:     supportedLanguages,
+		DefaultLanguage:        defaultLanguage,
 		MandatoryProcessors:    mandatoryProcessorIDs,
 		RequiredProcessors:     reqProcs,
 		MaxDocProcessPipelines: maxDocProcessPipelinesFromEnv(),
@@ -98,6 +109,10 @@ func loadKbFrontendConfig() (kbFrontendConfig, error) {
 
 func defaultSupportedLanguages() []string {
 	return []string{"en", "zh-cn"}
+}
+
+func defaultLanguageList() []string {
+	return []string{"en"}
 }
 
 func maxDocProcessPipelinesFromEnv() int {
