@@ -2,6 +2,7 @@ package docreviews
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/chendingplano/deepdoc/server/api/kbhandler"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 )
 
@@ -756,4 +758,124 @@ func (c *DocReviewController) localizeFindings(ctx context.Context, language str
 		out = append(out, localized)
 	}
 	return out, nil
+}
+
+// TranslateFindingResult is returned by TranslateFinding.
+type TranslateFindingResult struct {
+	Finding           FindingItem `json:"finding"`
+	Translated        bool        `json:"translated"`
+	NeedsConfirmation bool        `json:"needs_confirmation"`
+}
+
+// TranslateFinding returns a finding localized into language, translating on
+// demand via the LLM when no stored translation exists yet. This reuses the
+// existing llmFindingTranslator / FindingMetadataEnvelope machinery end to
+// end - it is only a new on-demand entry point into it, not new translation
+// logic.
+//
+// If a translation for language is already stored in metadata, it is applied
+// directly with no LLM call (Translated=false, NeedsConfirmation=false).
+// If missing: when AUTO_TRANSLATE_FINDINGS=true or confirm=true, the LLM is
+// called and the result persisted (Translated=true). Otherwise, the original
+// finding is returned unchanged with NeedsConfirmation=true and no LLM call,
+// letting the caller prompt the user before retrying with confirm=true.
+func (c *DocReviewController) TranslateFinding(ctx context.Context, findingID int64, language string, confirm bool) (TranslateFindingResult, error) {
+	language = strings.ToLower(strings.TrimSpace(language))
+	if language == "" {
+		return TranslateFindingResult{}, fmt.Errorf("language is required")
+	}
+	if !containsLanguage(configuredSupportedLanguages(), language) {
+		return TranslateFindingResult{}, fmt.Errorf("unsupported language: %q", language)
+	}
+
+	finding, metadata, err := c.loadFindingWithMetadata(ctx, findingID)
+	if err != nil {
+		return TranslateFindingResult{}, err
+	}
+
+	if tr, ok := translationFromMetadata(metadata, language); ok {
+		return TranslateFindingResult{Finding: applyFindingTranslation(finding, tr)}, nil
+	}
+
+	autoTranslate := strings.EqualFold(strings.TrimSpace(os.Getenv("AUTO_TRANSLATE_FINDINGS")), "true")
+	if !autoTranslate && !confirm {
+		return TranslateFindingResult{Finding: finding, NeedsConfirmation: true}, nil
+	}
+
+	translator := c.Translator
+	if translator == nil {
+		translator, err = newLLMFindingTranslator()
+		if err != nil {
+			return TranslateFindingResult{}, err
+		}
+	}
+	content, err := translator.TranslateFinding(ctx, language, finding)
+	if err != nil {
+		return TranslateFindingResult{}, fmt.Errorf("translate finding %d to %s: %w", findingID, language, err)
+	}
+	if content.Provenance == "" {
+		content.Provenance = "llm_translation"
+	}
+
+	contentJSON, err := json.Marshal(content)
+	if err != nil {
+		return TranslateFindingResult{}, fmt.Errorf("marshal translation for finding %d: %w", findingID, err)
+	}
+	res, err := c.DB.ExecContext(ctx, `UPDATE kb.doc_review_findings
+	SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
+	WHERE id = $3`,
+		language, string(contentJSON), findingID,
+	)
+	if err != nil {
+		return TranslateFindingResult{}, fmt.Errorf("persist translation for finding %d: %w", findingID, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return TranslateFindingResult{}, fmt.Errorf("finding %d not found", findingID)
+	}
+	logger.Info("finding translated on demand", "finding_id", findingID, "language", language)
+
+	return TranslateFindingResult{Finding: applyFindingTranslation(finding, content), Translated: true}, nil
+}
+
+// loadFindingWithMetadata loads one finding row (the same columns
+// GetRequestWithFindings selects) plus its raw metadata JSON.
+func (c *DocReviewController) loadFindingWithMetadata(ctx context.Context, id int64) (FindingItem, []byte, error) {
+	var f FindingItem
+	var metadata string
+	err := c.DB.QueryRowContext(ctx, `SELECT id, pass, aspect, severity, finding_type, title, description,
+	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+	       COALESCE(artifact_id,'')
+	FROM kb.doc_review_findings WHERE id = $1`, id,
+	).Scan(&f.ID, &f.Pass, &f.Aspect, &f.Severity, &f.FindingType,
+		&f.Title, &f.Description, &f.Evidence, &f.Location, &f.Suggestion,
+		&f.Confidence, &f.ReviewStatus, &metadata, &f.ArtifactID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return FindingItem{}, nil, fmt.Errorf("finding %d not found", id)
+		}
+		return FindingItem{}, nil, fmt.Errorf("load finding %d: %w", id, err)
+	}
+	applyFindingMetadata(&f, []byte(metadata))
+	return f, []byte(metadata), nil
+}
+
+// configuredSupportedLanguages reads config.toml's [frontend].supported_languages
+// via kbhandler, falling back to a small default set if the config cannot be
+// loaded (keeps this endpoint working even if config.toml is unreadable).
+func configuredSupportedLanguages() []string {
+	cfg, err := kbhandler.LoadKbFrontendConfig()
+	if err != nil || len(cfg.SupportedLanguages) == 0 {
+		return []string{"en", "zh-cn"}
+	}
+	return cfg.SupportedLanguages
+}
+
+func containsLanguage(list []string, language string) bool {
+	for _, l := range list {
+		if strings.EqualFold(strings.TrimSpace(l), language) {
+			return true
+		}
+	}
+	return false
 }

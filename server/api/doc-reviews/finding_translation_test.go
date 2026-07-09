@@ -1033,3 +1033,235 @@ func TestNormalizationInCanonicalLanguage_RejectsChineseWithOnlyShortLatinTokens
 		t.Fatal("normalizationInCanonicalLanguage=true, want false for non-English prose with only short Latin tokens")
 	}
 }
+
+func writeSupportedLanguagesConfig(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := `
+[frontend]
+supported_languages = ["en", "zh-cn", "ja"]
+default_language = ["zh-cn"]
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	t.Setenv("KB_CONFIG_FILE", path)
+}
+
+func findingRowColumns() []string {
+	return []string{
+		"id", "pass", "aspect", "severity", "finding_type", "title", "description",
+		"evidence", "location", "suggestion", "confidence", "review_status", "metadata", "artifact_id",
+	}
+}
+
+func TestTranslateFindingReturnsCachedTranslationWithoutLLMCall(t *testing.T) {
+	writeSupportedLanguagesConfig(t)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	metadata := `{"schema_version":1,"canonical_language":"en","en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical sug","provenance":"canonical"},"zh-cn":{"title":"中文标题","description":"中文描述","suggestion":"中文建议","provenance":"llm_translation"}}`
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
+	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+	       COALESCE(artifact_id,'')
+	FROM kb.doc_review_findings WHERE id = $1`)).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
+			AddRow(int64(42), "P5", "provisions", "medium", "issue", "Canonical title", "Canonical desc",
+				"", "115", "Canonical sug", 0.95, "pending", metadata, ""))
+
+	translator := &fakeFindingTranslator{}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
+	result, err := ctrl.TranslateFinding(context.Background(), 42, "zh-cn", false)
+	if err != nil {
+		t.Fatalf("TranslateFinding: %v", err)
+	}
+	if result.Translated {
+		t.Fatalf("Translated = true, want false (cached path)")
+	}
+	if result.NeedsConfirmation {
+		t.Fatalf("NeedsConfirmation = true, want false")
+	}
+	if result.Finding.Title != "中文标题" {
+		t.Fatalf("Finding.Title = %q, want 中文标题", result.Finding.Title)
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls = %v, want none (no LLM call expected)", translator.translateCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestTranslateFindingAutoTranslatesWhenEnvVarSet(t *testing.T) {
+	writeSupportedLanguagesConfig(t)
+	t.Setenv("AUTO_TRANSLATE_FINDINGS", "true")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	metadata := `{"schema_version":1,"canonical_language":"en","en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical sug","provenance":"canonical"}}`
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
+	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+	       COALESCE(artifact_id,'')
+	FROM kb.doc_review_findings WHERE id = $1`)).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
+			AddRow(int64(42), "P5", "provisions", "medium", "issue", "Canonical title", "Canonical desc",
+				"", "115", "Canonical sug", 0.95, "pending", metadata, ""))
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
+	SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
+	WHERE id = $3`)).
+		WithArgs("zh-cn", sqlmock.AnyArg(), int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	translator := &fakeFindingTranslator{
+		translateOut: map[string]FindingLocalizedContent{
+			"zh-cn": {Title: "中文标题", Description: "中文描述", Suggestion: "中文建议"},
+		},
+	}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
+	result, err := ctrl.TranslateFinding(context.Background(), 42, "zh-cn", false)
+	if err != nil {
+		t.Fatalf("TranslateFinding: %v", err)
+	}
+	if !result.Translated {
+		t.Fatalf("Translated = false, want true")
+	}
+	if result.NeedsConfirmation {
+		t.Fatalf("NeedsConfirmation = true, want false")
+	}
+	if result.Finding.Title != "中文标题" {
+		t.Fatalf("Finding.Title = %q, want 中文标题", result.Finding.Title)
+	}
+	if len(translator.translateCalls) != 1 || translator.translateCalls[0] != "zh-cn" {
+		t.Fatalf("translateCalls = %v, want [zh-cn]", translator.translateCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestTranslateFindingNeedsConfirmationWhenAutoOffAndNotConfirmed(t *testing.T) {
+	writeSupportedLanguagesConfig(t)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	metadata := `{"schema_version":1,"canonical_language":"en","en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical sug","provenance":"canonical"}}`
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
+	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+	       COALESCE(artifact_id,'')
+	FROM kb.doc_review_findings WHERE id = $1`)).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
+			AddRow(int64(42), "P5", "provisions", "medium", "issue", "Canonical title", "Canonical desc",
+				"", "115", "Canonical sug", 0.95, "pending", metadata, ""))
+
+	translator := &fakeFindingTranslator{}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
+	result, err := ctrl.TranslateFinding(context.Background(), 42, "zh-cn", false)
+	if err != nil {
+		t.Fatalf("TranslateFinding: %v", err)
+	}
+	if result.Translated {
+		t.Fatalf("Translated = true, want false")
+	}
+	if !result.NeedsConfirmation {
+		t.Fatalf("NeedsConfirmation = false, want true")
+	}
+	if result.Finding.Title != "Canonical title" {
+		t.Fatalf("Finding.Title = %q, want unchanged Canonical title", result.Finding.Title)
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls = %v, want none (no LLM call expected)", translator.translateCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v (an UPDATE would violate this - none was expected)", err)
+	}
+}
+
+func TestTranslateFindingTranslatesWhenConfirmed(t *testing.T) {
+	writeSupportedLanguagesConfig(t)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	metadata := `{"schema_version":1,"canonical_language":"en","en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical sug","provenance":"canonical"}}`
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, pass, aspect, severity, finding_type, title, description,
+	       COALESCE(evidence,''), COALESCE(location,''), COALESCE(suggestion,''),
+	       COALESCE(confidence,0), COALESCE(review_status,'pending'), COALESCE(metadata, '{}'::jsonb)::text,
+	       COALESCE(artifact_id,'')
+	FROM kb.doc_review_findings WHERE id = $1`)).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows(findingRowColumns()).
+			AddRow(int64(42), "P5", "provisions", "medium", "issue", "Canonical title", "Canonical desc",
+				"", "115", "Canonical sug", 0.95, "pending", metadata, ""))
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
+	SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
+	WHERE id = $3`)).
+		WithArgs("zh-cn", sqlmock.AnyArg(), int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	translator := &fakeFindingTranslator{
+		translateOut: map[string]FindingLocalizedContent{
+			"zh-cn": {Title: "中文标题", Description: "中文描述", Suggestion: "中文建议"},
+		},
+	}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
+	result, err := ctrl.TranslateFinding(context.Background(), 42, "zh-cn", true)
+	if err != nil {
+		t.Fatalf("TranslateFinding: %v", err)
+	}
+	if !result.Translated {
+		t.Fatalf("Translated = false, want true")
+	}
+	if len(translator.translateCalls) != 1 || translator.translateCalls[0] != "zh-cn" {
+		t.Fatalf("translateCalls = %v, want [zh-cn]", translator.translateCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestTranslateFindingRejectsUnsupportedLanguage(t *testing.T) {
+	writeSupportedLanguagesConfig(t)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	translator := &fakeFindingTranslator{}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
+	_, err = ctrl.TranslateFinding(context.Background(), 42, "fr", false)
+	if err == nil {
+		t.Fatalf("TranslateFinding: expected error for unsupported language, got nil")
+	}
+	if len(translator.translateCalls) != 0 {
+		t.Fatalf("translateCalls = %v, want none", translator.translateCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v (no DB query expected before language validation)", err)
+	}
+}
