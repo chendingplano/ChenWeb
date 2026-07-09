@@ -726,11 +726,72 @@
         </div>
 
         <!-- Tab switcher -->
-        <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
             <button onclick={() => activeTab = 'findings'}
                 style="padding: 0.4rem 1rem; background: {activeTab === 'findings' ? accentTint : 'transparent'}; color: {activeTab === 'findings' ? accent : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Findings</button>
-            <button onclick={() => activeTab = 'report'}
-                style="padding: 0.4rem 1rem; background: {activeTab === 'report' ? accentTint : 'transparent'}; color: {activeTab === 'report' ? accent : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Report</button>
+            <!-- 1. Open Report (highlighted) -->
+            <a href={`/home3/doc-review-report/${linkReportId}`} target="_blank"
+                style="padding: 0.4rem 0.85rem; background: {accent}; color: #fff; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; box-shadow: 0 0 0 2px {accentTint}, 0 2px 8px rgba(0,0,0,0.35);">
+                Open Report
+            </a>
+            <!-- 2. View Full Report PDF (dropdown listing all PDFs for this document) -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div style="position: relative;" onmouseleave={closePDFMenu}>
+                <button type="button" onclick={togglePDFMenu}
+                    style="padding: 0.4rem 0.75rem; background: {pdfMenuOpen ? accent : accentTint}; color: {pdfMenuOpen ? '#fff' : accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
+                    View Full Report PDF
+                    <span style="font-size: 0.7rem; opacity: 0.8;">{pdfMenuOpen ? '▲' : '▼'}</span>
+                </button>
+                {#if pdfMenuOpen}
+                    <div style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; min-width: 320px; background: {cardBg}; border: 1px solid {borderColor}; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); overflow: hidden;">
+                        {#if pdfLoading}
+                            <div style="padding: 0.75rem 1rem; color: {textMuted}; font-size: 0.85rem;">Loading…</div>
+                        {:else if pdfFiles.length === 0}
+                            <div style="padding: 0.75rem 1rem; color: {textMuted}; font-size: 0.85rem;">No PDF files found. Regenerate the report to produce one.</div>
+                        {:else}
+                            <div style="padding: 0.4rem 1rem; font-size: 0.75rem; color: {textMuted}; border-bottom: 1px solid {borderColor}; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;">
+                                {pdfFiles.length} Report PDF{pdfFiles.length !== 1 ? 's' : ''}
+                            </div>
+                            {#each pdfFiles as f (f.report_id)}
+                                <a href={`/api/v1/doc-review/reports/${f.report_id}/export?format=pdf`} target="_blank"
+                                    onclick={closePDFMenu}
+                                    style="display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 1rem; color: {f.is_current ? accent : textPrimary}; text-decoration: none; font-size: 0.85rem; background: {f.is_current ? accentTint : 'transparent'}; border-bottom: 1px solid {borderColor};">
+                                    <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={f.file_name}>{f.file_name}</span>
+                                    {#if f.is_current}
+                                        <span style="font-size: 0.7rem; font-weight: 700; color: {accent}; flex-shrink: 0;">current</span>
+                                    {/if}
+                                    <span style="font-size: 0.72rem; color: {textMuted}; flex-shrink: 0;">{f.create_time.slice(0, 10)}</span>
+                                </a>
+                            {/each}
+                        {/if}
+                    </div>
+                {/if}
+            </div>
+            <!-- 3. View Full Report JSON -->
+            <button type="button" onclick={openJsonModal}
+                style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
+                View Full Report JSON
+            </button>
+            <!-- 4. View Full Report Markdown -->
+            <button type="button" onclick={openMdModal}
+                style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
+                View Full Report Markdown
+            </button>
+            <!-- 5. Download Report PDF -->
+            <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=pdf`} download
+                style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
+                Download Report PDF
+            </a>
+            <!-- 6. Download Report Markdown -->
+            <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=md`} download
+                style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
+                Download Report Markdown
+            </a>
+            <!-- 7. Review History (placeholder) -->
+            <button type="button"
+                style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
+                Review History
+            </button>
             <button onclick={openRerunDialog} disabled={isRerunning}
                 style="padding: 0.4rem 1rem; background: transparent; color: {isRerunning ? textMuted : textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: {isRerunning ? 'default' : 'pointer'}; font-size: 0.85rem;">{isRerunning ? 'Rerunning…' : 'Rerun'}</button>
         </div>
@@ -834,93 +895,6 @@
             </div>
         {/if}
 
-        <!-- Report Tab -->
-        {#if activeTab === 'report'}
-            <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; color: {textPrimary};">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 1rem;">
-                    <h2 style="font-size: 1.1rem; font-weight: 600;">Full Report</h2>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end;">
-                        <!-- 1. Open Report (highlighted) -->
-                        <a href={`/home3/doc-review-report/${linkReportId}`} target="_blank"
-                            style="padding: 0.4rem 0.85rem; background: {accent}; color: #fff; border-radius: 6px; text-decoration: none; font-size: 0.85rem; font-weight: 600; box-shadow: 0 0 0 2px {accentTint}, 0 2px 8px rgba(0,0,0,0.35);">
-                            Open Report
-                        </a>
-                        <!-- 2. View Full Report PDF (dropdown listing all PDFs for this document) -->
-                        <!-- svelte-ignore a11y_no_static_element_interactions -->
-                        <div style="position: relative;" onmouseleave={closePDFMenu}>
-                            <button type="button" onclick={togglePDFMenu}
-                                style="padding: 0.4rem 0.75rem; background: {pdfMenuOpen ? accent : accentTint}; color: {pdfMenuOpen ? '#fff' : accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
-                                View Full Report PDF
-                                <span style="font-size: 0.7rem; opacity: 0.8;">{pdfMenuOpen ? '▲' : '▼'}</span>
-                            </button>
-                            {#if pdfMenuOpen}
-                                <div style="position: absolute; top: calc(100% + 4px); right: 0; z-index: 50; min-width: 320px; background: {cardBg}; border: 1px solid {borderColor}; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); overflow: hidden;">
-                                    {#if pdfLoading}
-                                        <div style="padding: 0.75rem 1rem; color: {textMuted}; font-size: 0.85rem;">Loading…</div>
-                                    {:else if pdfFiles.length === 0}
-                                        <div style="padding: 0.75rem 1rem; color: {textMuted}; font-size: 0.85rem;">No PDF files found. Regenerate the report to produce one.</div>
-                                    {:else}
-                                        <div style="padding: 0.4rem 1rem; font-size: 0.75rem; color: {textMuted}; border-bottom: 1px solid {borderColor}; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;">
-                                            {pdfFiles.length} Report PDF{pdfFiles.length !== 1 ? 's' : ''}
-                                        </div>
-                                        {#each pdfFiles as f (f.report_id)}
-                                            <a href={`/api/v1/doc-review/reports/${f.report_id}/export?format=pdf`} target="_blank"
-                                                onclick={closePDFMenu}
-                                                style="display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 1rem; color: {f.is_current ? accent : textPrimary}; text-decoration: none; font-size: 0.85rem; background: {f.is_current ? accentTint : 'transparent'}; border-bottom: 1px solid {borderColor};">
-                                                <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={f.file_name}>{f.file_name}</span>
-                                                {#if f.is_current}
-                                                    <span style="font-size: 0.7rem; font-weight: 700; color: {accent}; flex-shrink: 0;">current</span>
-                                                {/if}
-                                                <span style="font-size: 0.72rem; color: {textMuted}; flex-shrink: 0;">{f.create_time.slice(0, 10)}</span>
-                                            </a>
-                                        {/each}
-                                    {/if}
-                                </div>
-                            {/if}
-                        </div>
-                        <!-- 3. View Full Report JSON -->
-                        <button type="button" onclick={openJsonModal}
-                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
-                            View Full Report JSON
-                        </button>
-                        <!-- 4. View Full Report Markdown -->
-                        <button type="button" onclick={openMdModal}
-                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
-                            View Full Report Markdown
-                        </button>
-                        <!-- 5. Download Report PDF -->
-                        <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=pdf`} download
-                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
-                            Download Report PDF
-                        </a>
-                        <!-- 6. Download Report Markdown -->
-                        <a href={`/api/v1/doc-review/reports/${linkReportId}/export?format=md`} download
-                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border-radius: 6px; text-decoration: none; font-size: 0.85rem;">
-                            Download Report Markdown
-                        </a>
-                        <!-- 7. Review History (placeholder) -->
-                        <button type="button"
-                            style="padding: 0.4rem 0.75rem; background: {accentTint}; color: {accent}; border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">
-                            Review History
-                        </button>
-                    </div>
-                </div>
-                <p style="color: {textSecondary}; margin-bottom: 1rem;">
-                    Total: {findings.length} findings · {highCount} high · {mediumCount} medium · {lowCount} low
-                </p>
-                {#each passes as pass}
-                    <div style="margin-bottom: 1rem;">
-                        <h3 style="font-weight: 600; color: {accent}; margin-bottom: 0.5rem; font-size: 0.95rem;">{pass}</h3>
-                        {#each findings.filter(f => f.pass === pass).slice(0, 5) as finding}
-                            <div style="padding: 0.5rem 0.75rem; border-left: 2px solid {borderColor}; margin-bottom: 0.25rem; font-size: 0.85rem;">
-                                <span style="color: {finding.severity === 'high' ? '#ef4444' : finding.severity === 'medium' ? '#f59e0b' : '#22c55e'}; font-weight: 600;">{finding.severity.toUpperCase()}</span>
-                                {' '}{finding.title}
-                            </div>
-                        {/each}
-                    </div>
-                {/each}
-            </div>
-        {/if}
     {/if}
     </div>
 {/if}

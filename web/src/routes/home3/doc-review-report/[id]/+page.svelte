@@ -75,16 +75,25 @@
 	let localizedReviewerCache = $state<Record<string, FindingItem[]>>({});
 	// View mode: 'packages' (by P1-P6) or 'severity' (by High/Medium/Low).
 	let viewMode = $state<'packages' | 'severity'>('packages');
-	// Per-package and per-reviewer fold state (packages view, all collapsed by default).
+	// Per-package and per-reviewer fold state (packages view, all expanded by default).
 	let expandedPackages = $state<Record<string, boolean>>({});
 	let expandedReviewers = $state<Record<string, boolean>>({});
-	// Severity view fold state (all collapsed by default).
+	// Severity view fold state (all expanded by default).
 	let expandedSeverities = $state<Record<string, boolean>>({});
+	function isPackageExpanded(pass: string): boolean {
+		return expandedPackages[pass] !== false;
+	}
+	function isReviewerExpanded(key: string): boolean {
+		return expandedReviewers[key] !== false;
+	}
+	function isSeverityExpanded(sev: string): boolean {
+		return expandedSeverities[sev] !== false;
+	}
 	function togglePackage(pass: string) {
-		expandedPackages[pass] = !expandedPackages[pass];
+		expandedPackages[pass] = !isPackageExpanded(pass);
 	}
 	function toggleSeverity(sev: string) {
-		expandedSeverities[sev] = !expandedSeverities[sev];
+		expandedSeverities[sev] = !isSeverityExpanded(sev);
 	}
 
 	function cloneFindings(items: FindingItem[]): FindingItem[] {
@@ -120,7 +129,7 @@
 	}
 	async function toggleReviewer(pass: string, aspect: string) {
 		const key = reviewerKey(pass, aspect);
-		const next = !expandedReviewers[key];
+		const next = !isReviewerExpanded(key);
 		expandedReviewers[key] = next;
 		if (!next) return;
 		try {
@@ -141,7 +150,7 @@
 	let editFindingId = $state<number | null>(null);
 	let autoFixFinding = $state<FindingItem | null>(null);
 	let dirty = $state(false);
-	let showMode = $state<'active' | 'all'>('active');
+	let showMode = $state<'active' | 'all'>('all');
 	let regenerating = $state(false);
 	let correcting = $state(false);
 	let toast = $state<{ kind: 'info' | 'warn' | 'error'; text: string } | null>(null);
@@ -377,11 +386,10 @@
 		try {
 			findings = cloneFindings(baseFindings);
 			if (selectedLanguage !== 'en') {
-				for (const key of Object.keys(expandedReviewers)) {
-					if (!expandedReviewers[key]) continue;
-					const [pass, aspect] = key.split('::');
-					if (pass && aspect) {
-						await ensureReviewerLocalized(pass, aspect);
+				for (const group of livePassGroups) {
+					for (const rv of group.reviewers) {
+						if (!isReviewerExpanded(reviewerKey(group.pass, rv.aspect))) continue;
+						await ensureReviewerLocalized(group.pass, rv.aspect);
 					}
 				}
 			}
@@ -607,6 +615,7 @@
 		{:else if errorMsg}
 			<div class="state error">{errorMsg}</div>
 		{:else if skeleton}
+			<div class="left-header">
 			<div class="title-row">
 				<h1 class="report-title">Document Review Report</h1>
 				<label class="language-picker">
@@ -688,39 +697,41 @@
 					onclick={onRegenerate}
 				>{regenerating ? 'Regenerating…' : 'Re-Generate Review Report'}</button>
 			</div>
+			</div>
 
+			<div class="left-body scroll-list">
 			{#if viewMode === 'packages'}
 				{#each livePassGroups as group (group.pass)}
 					<div class="package">
 						<button
 							type="button"
 							class="package-head"
-							aria-expanded={!!expandedPackages[group.pass]}
+							aria-expanded={isPackageExpanded(group.pass)}
 							onclick={() => togglePackage(group.pass)}
 						>
-							<span class="chevron" class:open={expandedPackages[group.pass]}>▶</span>
+							<span class="chevron" class:open={isPackageExpanded(group.pass)}>▶</span>
 							<span class="package-title">{group.label}</span>
 							<span class="package-count">{group.count}</span>
 						</button>
 
-						{#if expandedPackages[group.pass]}
-							<div class="package-body scroll-list">
+						{#if isPackageExpanded(group.pass)}
+							<div class="package-body">
 								{#each group.reviewers as rv (rv.aspect)}
 									{@const rkey = reviewerKey(group.pass, rv.aspect)}
 									<div class="reviewer">
 										<button
 											type="button"
 											class="reviewer-head"
-											aria-expanded={!!expandedReviewers[rkey]}
+											aria-expanded={isReviewerExpanded(rkey)}
 											onclick={() => toggleReviewer(group.pass, rv.aspect)}
 										>
-											<span class="chevron sub" class:open={expandedReviewers[rkey]}>▶</span>
+											<span class="chevron sub" class:open={isReviewerExpanded(rkey)}>▶</span>
 											<span class="reviewer-title">{reviewerLabel(rv.aspect)}</span>
 											<span class="reviewer-count">{rv.items.length}</span>
 										</button>
 
-										{#if expandedReviewers[rkey]}
-											<div class="reviewer-body scroll-list">
+										{#if isReviewerExpanded(rkey)}
+											<div class="reviewer-body">
 												{#each rv.items as f (f.id)}
 													<div
 														class="finding"
@@ -823,17 +834,17 @@
 						<button
 							type="button"
 							class="package-head"
-							aria-expanded={!!expandedSeverities[sevGroup.severity]}
+							aria-expanded={isSeverityExpanded(sevGroup.severity)}
 							onclick={() => toggleSeverity(sevGroup.severity)}
 						>
-							<span class="chevron" class:open={expandedSeverities[sevGroup.severity]}>▶</span>
+							<span class="chevron" class:open={isSeverityExpanded(sevGroup.severity)}>▶</span>
 							<span class="sev-dot" style="color:{sevColor(sevGroup.severity)};">●</span>
 							<span class="package-title">{sevGroup.label}</span>
 							<span class="package-count">{sevGroup.findings.length}</span>
 						</button>
 
-						{#if expandedSeverities[sevGroup.severity]}
-							<div class="package-body scroll-list">
+						{#if isSeverityExpanded(sevGroup.severity)}
+							<div class="package-body">
 								{#each sevGroup.findings as f (f.id)}
 									<div
 										class="finding"
@@ -930,6 +941,7 @@
 			{#if (viewMode === 'packages' && livePassGroups.length === 0 || viewMode === 'severity' && severityGroups.length === 0) && findings.length > 0}
 				<p class="body-text">All findings have been deleted.</p>
 			{/if}
+			</div>
 		{/if}
 	</section>
 
@@ -993,10 +1005,21 @@
 	.left-panel {
 		height: 100%;
 		overflow: hidden;
-		padding: 1.5rem 1.75rem;
 		box-sizing: border-box;
 		flex: 0 0 auto;
 		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	.left-header {
+		flex: 0 0 auto;
+		padding: 1.5rem 1.75rem 0;
+	}
+	.left-body {
+		flex: 1 1 auto;
+		overflow-y: auto;
+		overflow-x: hidden;
+		padding: 0 1.75rem 1.5rem;
 	}
 	.right-panel {
 		flex: 1 1 0;
@@ -1158,8 +1181,6 @@
 		padding: 0.1rem 0.55rem;
 	}
 	.package-body {
-		max-height: min(52vh, calc(100vh - 28rem));
-		overflow-y: auto;
 		padding: 0.25rem 0 0.25rem 0.75rem;
 		padding-right: 0.45rem;
 		margin-top: 0.35rem;
@@ -1205,8 +1226,6 @@
 		padding: 0.08rem 0.5rem;
 	}
 	.reviewer-body {
-		max-height: 45vh;
-		overflow-y: auto;
 		padding-left: 0.6rem;
 		padding-right: 0.4rem;
 		border-left: 2px solid var(--border);
