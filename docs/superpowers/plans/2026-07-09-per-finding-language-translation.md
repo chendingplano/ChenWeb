@@ -1168,3 +1168,191 @@ jj commit -m "Add per-finding Language pulldown to doc-review-report page (packa
 ## Recovery Note (2026-07-09)
 
 This plan file was briefly lost from disk when a `jj restore config.toml docs/` command (run outside this session, while Task 1's implementer subagent was working in this same non-isolated working copy) reverted the `docs/` directory to its pre-plan state. Rewritten verbatim from conversation context after Task 1 completed and committed successfully (commit `unxw 7f8f`, unaffected since it wasn't under `docs/`). Task 1's checkboxes above are marked done to reflect this.
+
+---
+
+## Task 7: Post-verification fixes to `doc-review-results-view.svelte`
+
+**Origin:** live manual verification (by the user, on their own running dev instance) of Tasks 5/6 surfaced three real gaps, all confined to `doc-review-results-view.svelte`:
+1. The per-row pulldown cosmetically shows `defaultLanguage` (e.g. `zh-cn`) as selected, but nothing ever checks/applies that language against the loaded (canonical/English) content — so the dropdown and the displayed text disagree.
+2. When a translate call fails (e.g. this environment has no `TRANSLATION_MODEL_NAME`/prompt env vars configured, so any real LLM call errors), the failure is only shown in a global top-of-panel `{#if error}` banner shared with unrelated actions (Stop, Accept/Reject) — easy to miss when scrolled down a long findings list, reads as "the button does nothing."
+3. This panel has no page-level Language selector at all (only `+page.svelte` does) — the user wants one here too, that seeds the default for all rows while still letting any individual row be overridden via its own pulldown.
+
+**Files:**
+- Modify: `ChenWeb/web/src/lib/components/home3/doc-review-results-view.svelte`
+
+**Interfaces:**
+- Consumes: existing `handleLanguageChange`, `confirmTranslate`, `applyTranslatedFinding`, `defaultLanguage`, `supportedLanguages`, `findingLanguage`, `pendingConfirm`, `translating` state (all from Task 5). No backend or service-layer changes.
+
+- [ ] **Step 1: Add a per-row translate-error state, and switch translate failures from the global banner to it**
+
+Add new state next to the existing Task 5 state (near `let pendingConfirm = $state<{ id: number; language: string } | null>(null);`):
+
+```svelte
+    let translateError = $state<Record<number, string>>({});
+```
+
+In `handleLanguageChange`, replace the `catch` block:
+
+```svelte
+        } catch (e: any) {
+            error = e.message;
+            findingLanguage = { ...findingLanguage, [finding.id]: previous };
+        } finally {
+```
+
+with:
+
+```svelte
+        } catch (e: any) {
+            translateError = { ...translateError, [finding.id]: e.message };
+            findingLanguage = { ...findingLanguage, [finding.id]: previous };
+        } finally {
+```
+
+In `confirmTranslate`, replace the `catch` block:
+
+```svelte
+        } catch (e: any) {
+            error = e.message;
+        } finally {
+```
+
+with:
+
+```svelte
+        } catch (e: any) {
+            translateError = { ...translateError, [finding.id]: e.message };
+        } finally {
+```
+
+In `applyTranslatedFinding`, clear any prior error for that row on success — add as the first line of the function:
+
+```svelte
+    function applyTranslatedFinding(id: number, translated: FindingItem, language: string) {
+        translateError = { ...translateError, [id]: '' };
+        findings = findings.map(f =>
+```
+
+(An empty string is falsy in the `{#if translateError[finding.id]}` check below, so this correctly hides the message once a translation succeeds — no need to delete the key.)
+
+The global `error` variable and its existing top-of-panel banner (`{#if error}` block) are untouched — they still cover Stop/Accept/Reject failures as before; translate failures no longer write to `error`.
+
+- [ ] **Step 2: Render the per-row error inline in the expanded body**
+
+Find the expanded-body block (currently):
+
+```svelte
+                        {#if expandedFindings.has(finding.id)}
+                            <div style="padding: 0 1rem 0.75rem; border-top: 1px solid {borderColor};">
+                                <p style="color: {textSecondary}; font-size: 0.85rem; margin-top: 0.5rem;">{finding.description}</p>
+```
+
+Insert an error line right after the opening `<div>`, before the description paragraph:
+
+```svelte
+                        {#if expandedFindings.has(finding.id)}
+                            <div style="padding: 0 1rem 0.75rem; border-top: 1px solid {borderColor};">
+                                {#if translateError[finding.id]}
+                                    <p style="margin-top: 0.5rem; color: #ef4444; font-size: 0.8rem;">Translation failed: {translateError[finding.id]}</p>
+                                {/if}
+                                <p style="color: {textSecondary}; font-size: 0.85rem; margin-top: 0.5rem;">{finding.description}</p>
+```
+
+- [ ] **Step 3: Auto-check the default language on first expand**
+
+Replace `toggleFinding`:
+
+```svelte
+    function toggleFinding(id: number) {
+        const next = new Set(expandedFindings);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        expandedFindings = next;
+    }
+```
+
+with:
+
+```svelte
+    function toggleFinding(id: number) {
+        const next = new Set(expandedFindings);
+        if (next.has(id)) {
+            next.delete(id);
+        } else {
+            next.add(id);
+            if (findingLanguage[id] === undefined) {
+                const finding = findings.find(f => f.id === id);
+                if (finding) handleLanguageChange(finding, defaultLanguage);
+            }
+        }
+        expandedFindings = next;
+    }
+```
+
+This mirrors exactly what selecting `defaultLanguage` in the row's own pulldown would do (cache hit → instant apply; missing + `AUTO_TRANSLATE_FINDINGS=true` → auto-translate; missing + not auto → inline "Translate to X?" prompt) — it just fires it automatically the first time a row is expanded, instead of requiring the user to also touch the per-row pulldown. `findingLanguage[id] === undefined` guards it to run at most once per row per page load (once set — to any language, including via this auto-check — it won't re-fire on subsequent collapse/expand).
+
+- [ ] **Step 4: Add a page-level Language selector that seeds the per-row default**
+
+Add a handler, near the other translate handlers (after `cancelTranslate`):
+
+```svelte
+    function handlePageLanguageChange(newLanguage: string) {
+        defaultLanguage = newLanguage;
+        findingLanguage = {};
+        pendingConfirm = null;
+        translateError = {};
+        for (const id of expandedFindings) {
+            const finding = findings.find(f => f.id === id);
+            if (finding) handleLanguageChange(finding, newLanguage);
+        }
+    }
+```
+
+(Mirrors `+page.svelte`'s `reloadFindingsForLanguage`: switching the page-level language clears every row's per-row override — collapsed rows lazily pick up the new default via Step 3 when the user later expands them; already-expanded rows are re-checked immediately since they're visible right now.)
+
+In the header block, insert the selector between the Request badge and the status span:
+
+```svelte
+            <span style="color: {textMuted}; font-size: 0.8rem; padding: 0.15rem 0.5rem; border: 1px solid {borderColor}; border-radius: 5px; font-family: monospace;">Request #{requestId}</span>
+            <span style="margin-left: auto; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px; background: {accentTint}; color: {accent}; text-transform: capitalize;">{viewStatus}</span>
+```
+
+becomes:
+
+```svelte
+            <span style="color: {textMuted}; font-size: 0.8rem; padding: 0.15rem 0.5rem; border: 1px solid {borderColor}; border-radius: 5px; font-family: monospace;">Request #{requestId}</span>
+            <label style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: {textMuted};">
+                <span>Language</span>
+                <select
+                    value={defaultLanguage}
+                    onchange={(e) => handlePageLanguageChange((e.target as HTMLSelectElement).value)}
+                    style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 6px; padding: 0.25rem 0.5rem; color: {textPrimary}; font-size: 0.8rem;">
+                    {#each supportedLanguages as lang (lang)}
+                        <option value={lang}>{lang}</option>
+                    {/each}
+                </select>
+            </label>
+            <span style="margin-left: auto; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px; background: {accentTint}; color: {accent}; text-transform: capitalize;">{viewStatus}</span>
+```
+
+(`margin-left: auto` stays on the `viewStatus` span, so it and the Stop button remain pushed to the right; the new selector sits inline right after the Request badge, on the left.)
+
+- [ ] **Step 5: Type-check**
+
+Run: `cd /Users/cding/Workspace/ChenWeb/web && bun run check 2>&1 | tail -40`
+Expected: no new errors in this file (pre-existing errors/warnings elsewhere are not this task's concern).
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /Users/cding/Workspace/ChenWeb
+jj commit -m "Fix live-verification findings: auto-check default language on expand, page-level selector, inline translate errors"
+```
+
+- [ ] **Step 7: Manual verification (by the controller/user, not the implementer)**
+
+Reload the Document Review panel and confirm:
+1. Expanding a finding row (that has no stored translation for the current default language, with a working LLM/translation config) triggers a visible "Translate to X?" prompt automatically, without touching the pulldown.
+2. If the translate call fails, a red "Translation failed: ..." message appears inside the expanded row itself, not just (or instead of) the top banner.
+3. The new page-level Language selector changes the default for rows not yet individually overridden, and re-checks any currently-expanded row immediately.
+4. Individual rows can still be set to a different language than the page-level default via their own pulldown, without that being clobbered until the next page-level change.
