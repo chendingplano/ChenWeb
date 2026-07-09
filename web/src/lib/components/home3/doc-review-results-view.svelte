@@ -43,6 +43,7 @@
     let translating = $state<Record<number, boolean>>({});
     let pendingConfirm = $state<{ id: number; language: string } | null>(null);
     let translateError = $state<Record<number, string>>({});
+    let autoChecked = $state<Set<number>>(new Set());
 
     // JSON viewer modal state
     let jsonModalOpen = $state(false);
@@ -375,6 +376,7 @@
         findingLanguage = {};
         pendingConfirm = null;
         translateError = {};
+        autoChecked = new Set(expandedFindings);
         for (const id of expandedFindings) {
             const finding = findings.find(f => f.id === id);
             if (finding) handleLanguageChange(finding, newLanguage);
@@ -446,7 +448,8 @@
             next.delete(id);
         } else {
             next.add(id);
-            if (findingLanguage[id] === undefined) {
+            if (!autoChecked.has(id)) {
+                autoChecked = new Set(autoChecked).add(id);
                 const finding = findings.find(f => f.id === id);
                 if (finding) handleLanguageChange(finding, defaultLanguage);
             }
