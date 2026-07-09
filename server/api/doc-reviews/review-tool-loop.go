@@ -343,7 +343,7 @@ func repairFinalFindingsJSONWithPayload(
 					"Do not call tools again. Return strict JSON only with the exact shape " +
 					`{"findings":[...]}. Return {"findings":[]} if the evidence does not support any finding.`,
 			})
-			return callFinalFindingsRepairWithPayload(ctx, client, modelName, recordID, repairMessages, logger)
+			return callFinalFindingsRepairWithPayload(ctx, client, modelName, recordID, repairMessages, "review_tool_use_finalize_repair", logger)
 		}
 	}
 	repairMessages = append(repairMessages,
@@ -353,7 +353,7 @@ func repairFinalFindingsJSONWithPayload(
 			Content: finalFindingsRepairPrompt(parseReason),
 		},
 	)
-	return callFinalFindingsRepairWithPayload(ctx, client, modelName, recordID, repairMessages, logger)
+	return callFinalFindingsRepairWithPayload(ctx, client, modelName, recordID, repairMessages, "repair-final-findings", logger)
 }
 
 func callFinalFindingsRepairWithPayload(
@@ -362,6 +362,7 @@ func callFinalFindingsRepairWithPayload(
 	modelName string,
 	recordID int64,
 	repairMessages []LLMMessage,
+	callReason string,
 	logger ApiTypes.JimoLogger,
 ) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	resp, err := client.Complete(ctx, LLMRequest{
@@ -679,9 +680,9 @@ func addUsage(total *LLMUsage, u *LLMUsage) {
 // hit/miss counts (DR8a measurement). turn == -1 denotes the finalize call.
 func logLoopUsage(
 	callReason string,
-	logger ApiTypes.JimoLogger, 
-	modelName string, 
-	turn int, 
+	logger ApiTypes.JimoLogger,
+	modelName string,
+	turn int,
 	u *LLMUsage) {
 	if u == nil {
 		return
@@ -692,6 +693,7 @@ func logLoopUsage(
 		"input_tokens", u.InputTokens,
 		"output_tokens", u.OutputTokens,
 		"total_tokens", u.TotalTokens,
+		"callReason", callReason,
 		"prompt_cache_hit_tokens", u.PromptCacheHitTokens,
 		"prompt_cache_miss_tokens", u.PromptCacheMissTokens,
 	)
