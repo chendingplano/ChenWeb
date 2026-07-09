@@ -183,6 +183,32 @@ export async function updateFinding(
 	if (!data.status) throw new Error(data.error_msg || 'Failed to update finding');
 }
 
+export type TranslateFindingResult = {
+	finding: FindingItem;
+	translated: boolean;
+	needs_confirmation: boolean;
+};
+
+export async function translateFinding(
+	id: number,
+	language: string,
+	confirm = false
+): Promise<TranslateFindingResult> {
+	const res = await fetch(`${BASE}/findings/${id}/translate`, {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ language, confirm })
+	});
+	const data = await res.json();
+	if (!data.status) throw new Error(data.error_msg || 'Failed to translate finding');
+	return {
+		finding: data.finding,
+		translated: !!data.translated,
+		needs_confirmation: !!data.needs_confirmation
+	};
+}
+
 // ── DR16: finding actions (auto-fix / edit / accept / delete) ─────────────────
 
 export type LineEdit = { line_no: number; content: string };
