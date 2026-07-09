@@ -319,7 +319,7 @@ model = "deepseek-flash-chen"
 prompt = "prompt-review-metrics-v2.md"
 max_tool_turns = 4
 max_tool_tokens = 24000
-tools = ["get_artifact_context"]
+tools = ["get_artifact_context", "get_document_metadata"]
 
 # metrics_completeness — object-anchored missing-metric detection
 # (ADR 2026070201 AR6, Stage 5). Runs as a separate pass on the metrics
@@ -347,7 +347,7 @@ model = "deepseek-flash-chen"
 prompt = "prompt-review-provisions-v4.md"
 max_tool_turns = 4
 max_tool_tokens = 24000
-tools = ["get_artifact_context"]
+tools = ["get_artifact_context", "get_document_metadata"]
 
 [reviewers.entities]
 enabled = true
@@ -367,7 +367,7 @@ model = "deepseek-flash-chen"
 prompt = "prompt-review-inventory-items-v2.md"
 max_tool_turns = 4
 max_tool_tokens = 24000
-tools = ["get_artifact_context"]
+tools = ["get_artifact_context", "get_document_metadata"]
 
 [reviewers.technical_accuracy]
 enabled = true

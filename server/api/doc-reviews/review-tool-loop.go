@@ -72,7 +72,7 @@ func runToolUseReview(
 	return findings, usage, err
 }
 
-// runToolUseReviewWithPayload is the same conversation loop as
+// runToolUseReviewWithPayload is the 'Harness Loop', the same conversation loop as
 // runToolUseReview but also returns the raw JSON payload of whichever model
 // response ultimately produced the findings, so callers whose prompt asks
 // for sibling top-level keys (e.g. the provisions reviewer's mandatory
