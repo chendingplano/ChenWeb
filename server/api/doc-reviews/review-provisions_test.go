@@ -172,6 +172,59 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 	}
 }
 
+func TestReviewProvision_ReturnsAnalysesAsFindings(t *testing.T) {
+	fake := &fakeJSONExtractor{
+		out: map[string]any{
+			"findings": []any{},
+			"analyses": []any{
+				map[string]any{
+					"related_artifact_id": "2_prv_9",
+					"related_record_id":   float64(2),
+					"relationship":        "same_subject",
+					"summary":             "Same subject and equivalent requirement, no conflict.",
+				},
+			},
+		},
+	}
+	r := &provisionsReviewer{
+		client: fake,
+		logger: loggerutil.CreateDefaultLogger("TEST_PROVISIONS"),
+	}
+	doc := docProvision{
+		view:  provisionView{ProvID: "1_prv_1"},
+		spans: []string{"20:24"},
+	}
+
+	findings := r.reviewProvision(context.Background(), 1, 0, ReviewerConfig{
+		ModelName:  "prov-model",
+		PromptText: "compare provisions",
+		PromptRef:  "prompt-review-provisions-v4.md",
+	}, doc, nil, "", false)
+
+	if len(findings) != 1 {
+		t.Fatalf("findings = %d, want 1 analysis finding: %+v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Pass != "P5" || f.Aspect != "provisions" || f.ArtifactID != "1_prv_1" {
+		t.Fatalf("analysis identity = pass:%q aspect:%q artifact:%q, want P5/provisions/1_prv_1", f.Pass, f.Aspect, f.ArtifactID)
+	}
+	if f.FindingType != "analysis" || f.Severity != "info" {
+		t.Fatalf("analysis type/severity = %q/%q, want analysis/info", f.FindingType, f.Severity)
+	}
+	if f.RelatedArtifactID != "2_prv_9" || f.RelatedRecordID != 2 {
+		t.Fatalf("analysis related = %q/%d, want 2_prv_9/2", f.RelatedArtifactID, f.RelatedRecordID)
+	}
+	if f.Location != "20:24" {
+		t.Fatalf("analysis location = %q, want 20:24", f.Location)
+	}
+	if !strings.Contains(f.Title, "1_prv_1") || !strings.Contains(f.Title, "2_prv_9") {
+		t.Fatalf("analysis title = %q, want both provision ids", f.Title)
+	}
+	if f.Description != "Same subject and equivalent requirement, no conflict." {
+		t.Fatalf("analysis description = %q", f.Description)
+	}
+}
+
 func TestReviewProvision_SetsCallLocCallReasonAndMetadata(t *testing.T) {
 	fake := &fakeJSONExtractor{
 		out: map[string]any{"findings": []any{}},

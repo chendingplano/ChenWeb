@@ -236,6 +236,7 @@ func (r *provisionsReviewer) reviewProvision(
 			r.logger.Warn("provisions review: save analyses failed",
 				"record_id", recordID, "provision_index", index, "prov_id", dp.view.ProvID, "error", err)
 		}
+		findings = append(findings, provisionAnalysesAsFindings(dp, analyses)...)
 	}
 
 	loc := strings.Join(dp.spans, ",")
@@ -267,10 +268,58 @@ func (r *provisionsReviewer) reviewProvision(
 	return findings
 }
 
+func provisionAnalysesAsFindings(dp docProvision, analyses []ProvisionAnalysis) []ReviewFinding {
+	if len(analyses) == 0 {
+		return nil
+	}
+	loc := strings.Join(dp.spans, ",")
+	out := make([]ReviewFinding, 0, len(analyses))
+	for _, a := range analyses {
+		summary := strings.TrimSpace(a.Summary)
+		if summary == "" {
+			continue
+		}
+		relatedID := strings.TrimSpace(a.RelatedArtifactID)
+		titleRelated := relatedID
+		if titleRelated == "" {
+			titleRelated = "unlinked match"
+		}
+		relationship := strings.TrimSpace(a.Relationship)
+		evidenceParts := []string{"provision_under_review=" + dp.view.ProvID}
+		if relatedID != "" {
+			evidenceParts = append(evidenceParts, "related_artifact_id="+relatedID)
+		}
+		if a.RelatedRecordID > 0 {
+			evidenceParts = append(evidenceParts, fmt.Sprintf("related_record_id=%d", a.RelatedRecordID))
+		}
+		if relationship != "" {
+			evidenceParts = append(evidenceParts, "relationship="+relationship)
+		}
+		out = append(out, ReviewFinding{
+			Pass:                 "P5",
+			Aspect:               "provisions",
+			Severity:             "info",
+			FindingType:          "analysis",
+			Title:                fmt.Sprintf("Provision comparison: %s vs %s", dp.view.ProvID, titleRelated),
+			Description:          summary,
+			Evidence:             strings.Join(evidenceParts, "; "),
+			Location:             loc,
+			Confidence:           1.0,
+			ArtifactID:           dp.view.ProvID,
+			RelatedArtifactID:    relatedID,
+			RelatedRecordID:      a.RelatedRecordID,
+			ResultKind:           "provision_analysis",
+			AnalysisRelationship: relationship,
+		})
+	}
+	return out
+}
+
 // ProvisionAnalysis is one entry of the provisions reviewer's mandatory
 // per-match comparison record (prompt-review-provisions-v4 `analyses`),
-// persisted independently of `findings` so the comparison behind a "no
-// conflict" conclusion is not discarded.
+// converted into first-class analysis rows in kb.doc_review_findings. The
+// legacy side-table write is retained as a compatibility read model while
+// report/API readers migrate.
 type ProvisionAnalysis struct {
 	RelatedArtifactID string
 	RelatedRecordID   int64

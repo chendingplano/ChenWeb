@@ -44,6 +44,12 @@ type ReviewFinding struct {
 	// its kb.inputs record). Zero values mean "no cross-reference".
 	RelatedArtifactID string `json:"related_artifact_id,omitempty"`
 	RelatedRecordID   int64  `json:"related_record_id,omitempty"`
+
+	// ResultKind and AnalysisRelationship are optional metadata for non-issue
+	// review result rows, currently used by provision comparison analyses stored
+	// alongside findings in kb.doc_review_findings.
+	ResultKind           string `json:"result_kind,omitempty"`
+	AnalysisRelationship string `json:"analysis_relationship,omitempty"`
 }
 
 // ReviewStrategy selects how a reviewer processes a document.

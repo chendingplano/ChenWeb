@@ -66,10 +66,16 @@ Your input has two parts.
 
 # 2. Tools (when available)
 
-You may be given the tool `get_artifact_context(record_id, artifact_id)`, which returns the source lines around any artifact in its own document. Work screen-then-verify:
+You may be given these tools:
+
+- `get_artifact_context(record_id, artifact_id)`: returns the source lines around any artifact in its own document.
+- `get_document_metadata(record_id)`: returns title, document number, authority class, publication/implementation dates, language, and extracted `doc_metadata` for a source document.
+
+Work screen-then-verify:
 1. **Screen** all candidates from the structured fields alone; most are noise and need no tool call.
 2. **Verify** only the few candidates that plausibly govern the same subject and appear to conflict — use `source_context` first; call the tool only when the included context is missing or insufficient to check scope and conditions before reporting.
-Your tool budget is small; do not fetch context for candidates you can already dismiss.
+3. Use `get_document_metadata` only when document authority, edition/currency, publication date, implementation date, jurisdiction, or language affects the comparison.
+Your tool budget is small; do not fetch context or metadata for candidates you can already dismiss.
 
 # 3. Comparison analysis (required for every matching provision)
 

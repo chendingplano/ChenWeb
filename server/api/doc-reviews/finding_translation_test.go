@@ -2,6 +2,7 @@ package docreviews
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"os"
@@ -15,6 +16,31 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	llmclients "github.com/chendingplano/shared/go/api/llm"
 )
+
+type metadataContains struct {
+	want map[string]any
+}
+
+func (m metadataContains) Match(v driver.Value) bool {
+	s, ok := v.(string)
+	if !ok {
+		b, ok := v.([]byte)
+		if !ok {
+			return false
+		}
+		s = string(b)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(s), &got); err != nil {
+		return false
+	}
+	for key, want := range m.want {
+		if got[key] != want {
+			return false
+		}
+	}
+	return true
+}
 
 type fakeFindingTranslator struct {
 	normalizeCalls           int
@@ -625,6 +651,57 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
 		Suggestion:  "首次出现时定义该术语。",
 		Confidence:  0.88,
 		ArtifactID:  "1_m_1",
+	}})
+	if err != nil {
+		t.Fatalf("SaveFindings: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestSaveFindingsStoresAnalysisMetadata(t *testing.T) {
+	t.Setenv("DOC_REVIEW_TRANSLATION", "on-demand")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	store := ReviewFindingsSQLStore{DB: db, Languages: []string{"en"}}
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO kb.doc_review_findings
+    (input_record_id, run_id, pass, aspect, severity, finding_type,
+     title, description, evidence, location, suggestion, confidence, metadata, artifact_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)).
+		WithArgs(
+			int64(100), int64(200), "P5", "provisions", "info", "analysis",
+			"Provision comparison: 1_prv_1 vs 2_prv_9", "Equivalent requirement.", "relationship=same_subject", "20:24", nil, 1.0,
+			metadataContains{want: map[string]any{
+				"result_kind":           "provision_analysis",
+				"analysis_relationship": "same_subject",
+				"related_artifact_id":   "2_prv_9",
+				"related_record_id":     float64(2),
+			}},
+			"1_prv_1",
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	_, err = store.SaveFindings(context.Background(), 100, 200, []ReviewFinding{{
+		Pass:                 "P5",
+		Aspect:               "provisions",
+		Severity:             "info",
+		FindingType:          "analysis",
+		Title:                "Provision comparison: 1_prv_1 vs 2_prv_9",
+		Description:          "Equivalent requirement.",
+		Evidence:             "relationship=same_subject",
+		Location:             "20:24",
+		Confidence:           1.0,
+		ArtifactID:           "1_prv_1",
+		RelatedArtifactID:    "2_prv_9",
+		RelatedRecordID:      2,
+		ResultKind:           "provision_analysis",
+		AnalysisRelationship: "same_subject",
 	}})
 	if err != nil {
 		t.Fatalf("SaveFindings: %v", err)

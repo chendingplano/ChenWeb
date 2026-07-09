@@ -50,6 +50,7 @@ func buildToolRegistry(db *sql.DB) map[string]ReviewTool {
 		t.getChunkSummaryTool(),
 		t.getChunkLinesTool(),
 		t.getArtifactContextTool(),
+		t.getDocumentMetadataTool(),
 	}
 	reg := make(map[string]ReviewTool, len(tools))
 	for _, tool := range tools {
@@ -585,6 +586,82 @@ func (t toolDB) getArtifactContextTool() ReviewTool {
 				"line_spans":    spans,
 				"lines":         out,
 			}, nil
+		},
+	}
+}
+
+func (t toolDB) getDocumentMetadataTool() ReviewTool {
+	return ReviewTool{
+		Name: "get_document_metadata",
+		Description: "Fetch compact document metadata for a knowledge-base record. " +
+			"Use this to verify authority, edition/currency, publication or implementation dates, jurisdiction, title, and document number.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{` +
+			`"record_id":{"type":"integer","description":"the kb.inputs record id"}},` +
+			`"required":["record_id"]}`),
+		Execute: func(ctx context.Context, _ int64, args map[string]any) (any, error) {
+			targetRecord := int64(intArg(args, "record_id"))
+			if targetRecord <= 0 {
+				return nil, fmt.Errorf("get_document_metadata: record_id is required")
+			}
+			const q = `
+SELECT id, COALESCE(title, ''), COALESCE(doc_no, ''), COALESCE(staging_filename, ''),
+       COALESCE(file_name, ''), COALESCE(doc_metadata, '{}'::jsonb)::text
+FROM kb.inputs
+WHERE id = $1
+LIMIT 1`
+			var (
+				id             int64
+				title          string
+				docNo          string
+				stagingName    string
+				fileName       string
+				docMetadataRaw string
+			)
+			err := t.db.QueryRowContext(ctx, q, targetRecord).Scan(&id, &title, &docNo, &stagingName, &fileName, &docMetadataRaw)
+			if err == sql.ErrNoRows {
+				return map[string]any{"found": false, "record_id": targetRecord}, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("get_document_metadata query: %w", err)
+			}
+			metadata := map[string]any{}
+			if strings.TrimSpace(docMetadataRaw) != "" {
+				if err := json.Unmarshal([]byte(docMetadataRaw), &metadata); err != nil {
+					return nil, fmt.Errorf("get_document_metadata decode doc_metadata: %w", err)
+				}
+			}
+			if docNo == "" {
+				docNo = strings.TrimSpace(asString(metadata["doc_no"]))
+			}
+			if title == "" {
+				title = strings.TrimSpace(asString(metadata["title"]))
+			}
+			filename := strings.TrimSpace(fileName)
+			if filename == "" {
+				filename = strings.TrimSpace(stagingName)
+			}
+			out := map[string]any{
+				"found":            true,
+				"record_id":        id,
+				"title":            title,
+				"doc_no":           docNo,
+				"filename":         filename,
+				"staging_filename": stagingName,
+				"file_name":        fileName,
+				"authority_class":  docAuthorityClass(docNo, title, filename),
+				"doc_metadata":     metadata,
+			}
+			for _, key := range []string{"publish_date", "implementation_date", "language"} {
+				if value := strings.TrimSpace(asString(metadata[key])); value != "" {
+					out[key] = value
+				}
+			}
+			for _, key := range []string{"authors", "main_drafting_persons", "drafting_persons"} {
+				if value, ok := metadata[key]; ok {
+					out[key] = value
+				}
+			}
+			return out, nil
 		},
 	}
 }
