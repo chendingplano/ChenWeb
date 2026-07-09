@@ -734,30 +734,25 @@
                                 </div>
                             </div>
                             <div onclick={(e) => e.stopPropagation()} style="display: flex; gap: 0.25rem; align-items: center;">
-                                {#if pendingConfirm?.id === finding.id}
-                                    <span style="font-size: 0.75rem; color: {textMuted};">Translate to {pendingConfirm.language}?</span>
-                                    <button onclick={() => confirmTranslate(finding)}
-                                        style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Translate</button>
-                                    <button onclick={cancelTranslate}
-                                        style="padding: 0.25rem 0.5rem; background: {inputBg}; color: {textMuted}; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Cancel</button>
+                                <select
+                                    value={findingLanguage[finding.id] ?? defaultLanguage}
+                                    disabled={translating[finding.id]}
+                                    onchange={(e) => handleLanguageChange(finding, (e.target as HTMLSelectElement).value)}
+                                    style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 4px; padding: 0.2rem 0.4rem; color: {textPrimary}; font-size: 0.75rem;">
+                                    {#each supportedLanguages as lang (lang)}
+                                        <option value={lang}>{lang}</option>
+                                    {/each}
+                                </select>
+                                {#if translating[finding.id]}
+                                    <LoaderIcon size={14} style="animation: spin 1s linear infinite; color: {accent};" />
+                                {/if}
+                                {#if finding.review_status === 'pending'}
+                                    <button onclick={() => handleAcceptReject(finding.id, 'accepted')}
+                                        style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Accept</button>
+                                    <button onclick={() => handleAcceptReject(finding.id, 'rejected')}
+                                        style="padding: 0.25rem 0.5rem; background: rgba(239,68,68,0.1); color: #ef4444; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Reject</button>
                                 {:else}
-                                    <select
-                                        value={findingLanguage[finding.id] ?? defaultLanguage}
-                                        disabled={translating[finding.id]}
-                                        onchange={(e) => handleLanguageChange(finding, (e.target as HTMLSelectElement).value)}
-                                        style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 4px; padding: 0.2rem 0.4rem; color: {textPrimary}; font-size: 0.75rem;">
-                                        {#each supportedLanguages as lang (lang)}
-                                            <option value={lang}>{lang}</option>
-                                        {/each}
-                                    </select>
-                                    {#if finding.review_status === 'pending'}
-                                        <button onclick={() => handleAcceptReject(finding.id, 'accepted')}
-                                            style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Accept</button>
-                                        <button onclick={() => handleAcceptReject(finding.id, 'rejected')}
-                                            style="padding: 0.25rem 0.5rem; background: rgba(239,68,68,0.1); color: #ef4444; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Reject</button>
-                                    {:else}
-                                        <span style="font-size: 0.75rem; color: {textMuted}; text-transform: capitalize;">{finding.review_status}</span>
-                                    {/if}
+                                    <span style="font-size: 0.75rem; color: {textMuted}; text-transform: capitalize;">{finding.review_status}</span>
                                 {/if}
                             </div>
                             {#if expandedFindings.has(finding.id)}
@@ -1011,6 +1006,44 @@
                     {@html mdModalHtml}
                 {/if}
             </div>
+        </div>
+    </div>
+{/if}
+
+<!-- Translate Confirm Modal -->
+{#if pendingConfirm}
+    {@const confirmId = pendingConfirm.id}
+    {@const pendingFinding = findings.find(f => f.id === confirmId)}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+        onclick={(e) => { if (e.target === e.currentTarget && !translating[confirmId]) cancelTranslate(); }}
+        onkeydown={(e) => { if (e.key === 'Escape' && !translating[confirmId]) cancelTranslate(); }}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        style="position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);"
+    >
+        <div style="background: {darkMode ? '#161B27' : '#FFFFFF'}; border: 1px solid {borderColor}; border-radius: 14px; width: min(90vw, 420px); box-shadow: 0 24px 64px rgba(0,0,0,0.5); padding: 1.5rem;">
+            <div style="font-weight: 600; font-size: 1rem; color: {textPrimary}; margin-bottom: 0.5rem;">Translate finding</div>
+            {#if pendingFinding}
+                <div style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{pendingFinding.title}</div>
+            {/if}
+            {#if translating[pendingConfirm.id]}
+                <div style="display: flex; align-items: center; gap: 0.6rem; color: {textSecondary}; font-size: 0.9rem; padding: 0.5rem 0;">
+                    <LoaderIcon size={18} style="animation: spin 1s linear infinite; color: {accent};" />
+                    Translating to {pendingConfirm.language}…
+                </div>
+            {:else}
+                <div style="font-size: 0.9rem; color: {textPrimary}; margin-bottom: 1.25rem;">
+                    No {pendingConfirm.language} translation exists yet. Translate this finding now?
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                    <button onclick={cancelTranslate}
+                        style="padding: 0.4rem 0.9rem; background: transparent; color: {textMuted}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Cancel</button>
+                    <button onclick={() => pendingFinding && confirmTranslate(pendingFinding)}
+                        style="padding: 0.4rem 0.9rem; background: {successBg}; color: #22c55e; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Translate</button>
+                </div>
+            {/if}
         </div>
     </div>
 {/if}
