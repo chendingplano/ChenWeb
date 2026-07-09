@@ -19,25 +19,26 @@ Supported languages are the list configured in `ChenWeb/config.toml::[frontend].
 - `finding_translation.go:734-759` already has `(c *DocReviewController) localizeFinding` / `localizeFindings`, which look up a language in stored `metadata` and apply it (`translationFromMetadata`, `applyFindingTranslation`) — but never call the LLM; missing languages just fall back to unlocalized text.
 - `llmFindingTranslator.TranslateFinding(ctx, language, finding FindingItem) (FindingLocalizedContent, error)` (`finding_translation.go:175`) is fully implemented and is exactly the call a new on-demand endpoint needs — it's just never invoked outside the bulk save path.
 - Accept/Reject wiring for reference (same pattern the new pulldown follows): `PATCH /api/v1/doc-review/findings/:id` → `handler.go:258` → `controller.go:500 UpdateFinding` → `web/src/lib/services/docReviewService.ts:171 updateFinding`.
-- `config.toml` already has `[frontend].supported_languages = ["en", "zh-cn", "ja", "ko"]` but no `default_language`. It's read by `kbhandler.loadKbFrontendConfig` (`kb_config_handler.go:68`, unexported) and served via `GET /api/v1/kb/config`, consumed today only by the unrelated KB-search language filter (`kb-search-results-view.svelte`).
+- `config.toml` already has `[frontend].supported_languages = ["en", "zh-cn", "ja", "ko"]` and now also `default_language = ["zh-cn"]` (added directly in config.toml as a list, not a scalar — the design below follows that shape rather than demanding a rewrite). It's read by `kbhandler.loadKbFrontendConfig` (`kb_config_handler.go:68`, unexported) and served via `GET /api/v1/kb/config`, consumed today only by the unrelated KB-search language filter (`kb-search-results-view.svelte`).
 - `doc-review-report/[id]/+page.svelte` already has a page-level language `<select>` (`selectedLanguage`, lines 65-66, 545-554) whose options come from `listLanguages()` → `GET /doc-review/languages` (env-var `DOC_REVIEW_REPORT_LANGUAGE`-driven — a separate, unrelated mechanism kept as-is). Its default currently hardcodes `'en'`.
 - `doc-review-results-view.svelte` has no page-level language state today.
 
 ## Backend changes
 
 ### Config
-`ChenWeb/config.toml`:
+`ChenWeb/config.toml` (already updated on disk):
 ```toml
 [frontend]
 topic_types = [...]
 supported_languages = ["en", "zh-cn", "ja", "ko"]
-default_language = "en"
+default_language = ["zh-cn"]
 ```
+`default_language` is a **list**, not a scalar — kept that shape as committed rather than forcing a rewrite. Only its first element is treated as "the" default; a list with more than one entry has no defined meaning beyond that (out of scope to design further here).
 
 `server/api/kbhandler/kb_config_handler.go`:
-- `kbFrontendConfig` gets `DefaultLanguage string \`json:"default_language"\``.
-- `rawKbFrontendSection.Frontend` gets `DefaultLanguage string \`toml:"default_language"\``.
-- `loadKbFrontendConfig` sets `DefaultLanguage` from the parsed value, falling back to `"en"` if empty — same pattern as the existing `supported_languages` fallback.
+- `kbFrontendConfig` gets `DefaultLanguage []string \`json:"default_language"\``.
+- `rawKbFrontendSection.Frontend` gets `DefaultLanguage []string \`toml:"default_language"\``.
+- `loadKbFrontendConfig` sets `DefaultLanguage` from the parsed value, falling back to `[]string{"en"}` if empty — same pattern as the existing `supported_languages` fallback.
 - Export the loader as `LoadKbFrontendConfig` (rename, update the one call site in `GetKbFrontendConfig`) so `doc-reviews` can call it too. No import cycle: `kbhandler` currently imports nothing under `server/api`.
 
 ### New endpoint
@@ -85,12 +86,13 @@ Add:
 export async function getKbFrontendConfig(): Promise<{
 	topic_types: string[];
 	supported_languages: string[];
-	default_language: string;
+	default_language: string[];
 	mandatory_processors: string[];
 	required_processors: string[];
 	max_doc_process_pipelines: number;
 }> { ... }
 ```
+Callers use `config.default_language[0] ?? 'en'` for the actual default value.
 wrapping `GET /api/v1/kb/config` (same envelope shape already handled inline in `kb-search-results-view.svelte`). `kb-search-results-view.svelte` is not touched — only the new call sites below use this helper.
 
 ### `docReviewService.ts`
@@ -110,8 +112,8 @@ Placement: inside the same actions container as Accept/Reject, immediately befor
 Options: `supported_languages` from `getKbFrontendConfig()`, fetched once on mount in each component.
 
 Initial per-row value:
-- `doc-review-results-view.svelte`: `default_language` from `getKbFrontendConfig()` (fallback `'en'`), since this view has no existing page-level language state.
-- `+page.svelte`: the page's existing `selectedLanguage`, whose own fallback (currently hardcoded `'en'` in the `onMount` catch block and the "language not in list" branch, lines ~309-315) changes to `default_language` from `getKbFrontendConfig()`.
+- `doc-review-results-view.svelte`: `default_language[0]` from `getKbFrontendConfig()` (fallback `'en'`), since this view has no existing page-level language state.
+- `+page.svelte`: the page's existing `selectedLanguage`, whose own fallback (currently hardcoded `'en'` in the `onMount` catch block and the "language not in list" branch, lines ~309-315) changes to `default_language[0]` from `getKbFrontendConfig()`.
 
 State added to each component:
 - `findingLanguage: Record<number, string>` — currently-displayed language per finding id.
