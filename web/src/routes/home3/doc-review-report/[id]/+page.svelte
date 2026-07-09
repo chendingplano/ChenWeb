@@ -345,6 +345,8 @@
 			// Load live findings (with ids + review_status) so the action buttons can
 			// target specific finding rows.
 			findings = [];
+			findingLanguage = {};
+			pendingConfirm = null;
 			if (requestId != null) {
 				try {
 					const reqData = await getRequest(requestId);
@@ -363,6 +365,8 @@
 	}
 
 	async function reloadFindingsForLanguage() {
+		findingLanguage = {};
+		pendingConfirm = null;
 		localStorage.setItem(LANG_STORAGE_KEY, selectedLanguage);
 		languageLoading = true;
 		console.info('[doc-review-report] reloading findings for language', {
