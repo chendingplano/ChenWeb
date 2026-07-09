@@ -268,6 +268,7 @@ func TestFinalizeFindingsLogsInfoWhenNoFindings(t *testing.T) {
 		context.Background(), client, "test-model", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
 		nil,
+		"tester",
 		logger,
 	)
 	if err != nil {
@@ -298,6 +299,7 @@ func TestFinalizeFindingsReturnsErrorWhenUnparseable(t *testing.T) {
 		context.Background(), client, "test-model", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
 		nil,
+		"tester",
 		logger,
 	)
 	if findings != nil {
@@ -334,6 +336,7 @@ func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
 		context.Background(), client, "test-model", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
 		nil,
+		"tester",
 		logger,
 	)
 	if err != nil {
@@ -383,6 +386,7 @@ func TestFinalizeFindingsRepairsTextToolCalls(t *testing.T) {
 		context.Background(), client, "test-model", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
 		map[string]ReviewTool{"get_chunk_lines": lineTool},
+		"tester",
 		logger,
 	)
 	if err != nil {

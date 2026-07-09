@@ -23,7 +23,7 @@ const docReviewToolUseSystemPrompt = "You are a document review engine. Return s
 
 var ErrToolUseFinalizeUnparseable = errors.New("tool-use finalize response was not parseable findings JSON")
 
-// docReviewCallInfo builds the call_info JSON string passed into runToolUseReview.
+// docReviewCallInfo builds the callInfo JSON string passed into runToolUseReview.
 // It merges the run_id from ctx (when present) with reviewer-supplied identifying
 // fields (e.g. which window/block/artifact was under review) so that a row in
 // llm_usage_event.metadata_json is enough to diagnose what a given call was for
@@ -62,12 +62,12 @@ func runToolUseReview(
 	tools []ReviewTool,
 	recordID int64,
 	logger ApiTypes.JimoLogger,
-	call_reason string,
-	call_info string,
-	call_loc string,
+	callReason string,
+	callInfo string,
+	callLoc string,
 ) ([]ReviewFinding, *LLMUsage, error) {
 	findings, _, usage, err := runToolUseReviewWithPayload(
-		ctx, client, modelName, cfg, promptText, userContext, tools, recordID, logger, call_reason, call_info, call_loc,
+		ctx, client, modelName, cfg, promptText, userContext, tools, recordID, logger, callReason, callInfo, callLoc,
 	)
 	return findings, usage, err
 }
@@ -87,9 +87,9 @@ func runToolUseReviewWithPayload(
 	tools []ReviewTool,
 	recordID int64,
 	logger ApiTypes.JimoLogger,
-	call_reason string,
-	call_info string,
-	call_loc string,
+	callReason string,
+	callInfo string,
+	callLoc string,
 ) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	toolByName := make(map[string]ReviewTool, len(tools))
 	for _, t := range tools {
@@ -98,10 +98,10 @@ func runToolUseReviewWithPayload(
 	toolDefs := toolDefsFor(tools)
 
 	var callMetadata map[string]any
-	if strings.TrimSpace(call_info) != "" {
-		if err := json.Unmarshal([]byte(call_info), &callMetadata); err != nil {
-			logger.Error("call_info is not valid JSON; omitting from metadata_json",
-				"call_info", call_info, "error", err)
+	if strings.TrimSpace(callInfo) != "" {
+		if err := json.Unmarshal([]byte(callInfo), &callMetadata); err != nil {
+			logger.Error("callInfo is not valid JSON; omitting from metadata_json",
+				"callInfo", callInfo, "error", err)
 			callMetadata = nil
 		}
 	}
@@ -139,14 +139,14 @@ func runToolUseReviewWithPayload(
 			Tools:      toolDefs,
 			ToolChoice: "auto",
 			RecordID:   recordID,
-			CallReason: call_reason,
-			CallLoc:    call_loc,
+			CallReason: callReason,
+			CallLoc:    callLoc,
 			Metadata:   turnMetadata,
 		})
 		if err != nil {
 			return nil, nil, aggregateUsage, fmt.Errorf("(MID_26062595) tool-use LLM call failed: %w", err)
 		}
-		logLoopUsage(logger, modelName, turn, resp.Usage)
+		logLoopUsage(callReason, logger, modelName, turn, resp.Usage)
 		addUsage(aggregateUsage, resp.Usage)
 		tokensUsed += usageTotalTokens(resp.Usage)
 
@@ -197,14 +197,14 @@ func runToolUseReviewWithPayload(
 		// Degenerate response (neither tool calls nor parseable findings):
 		// one repair attempt asking for strict JSON, then give up for this unit.
 		messages = append(messages, LLMMessage{Role: LLMRoleAssistant, Content: resp.Content})
-		findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, logger)
+		findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, callReason, logger)
 		addUsage(aggregateUsage, usage)
 		return findings, payload, aggregateUsage, err
 	}
 
 	// Budget exhausted (turns or tokens): force the model to produce findings
 	// from the evidence collected so far, without tools (DR10b force-produce).
-	findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, logger)
+	findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, callReason, logger)
 	addUsage(aggregateUsage, usage)
 	return findings, payload, aggregateUsage, err
 }
@@ -220,9 +220,10 @@ func finalizeFindings(
 	recordID int64,
 	messages []LLMMessage,
 	toolByName map[string]ReviewTool,
+	callReason string,
 	logger ApiTypes.JimoLogger,
 ) ([]ReviewFinding, *LLMUsage, error) {
-	findings, _, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, logger)
+	findings, _, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, callReason, logger)
 	return findings, usage, err
 }
 
@@ -236,6 +237,7 @@ func finalizeFindingsWithPayload(
 	recordID int64,
 	messages []LLMMessage,
 	toolByName map[string]ReviewTool,
+	callReason string,
 	logger ApiTypes.JimoLogger,
 ) ([]ReviewFinding, map[string]any, *LLMUsage, error) {
 	if isCtxStopped(ctx) {
@@ -259,7 +261,7 @@ func finalizeFindingsWithPayload(
 	}
 	totalUsage := &LLMUsage{}
 	addUsage(totalUsage, resp.Usage)
-	logLoopUsage(logger, modelName, -1, resp.Usage)
+	logLoopUsage(callReason, logger, modelName, -1, resp.Usage)
 	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content); ok {
 		logToolUseFindingsStatus(logger, "finalize", recordID, -1, findings)
 		return findings, payload, totalUsage, nil
@@ -372,7 +374,7 @@ func callFinalFindingsRepairWithPayload(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("(MID_26062597) tool-use finalize repair call failed: %w", err)
 	}
-	logLoopUsage(logger, modelName, -2, resp.Usage)
+	logLoopUsage(callReason, logger, modelName, -2, resp.Usage)
 	if findings, payload, ok, _ := parseFindingsContentDetailedWithPayload(resp.Content); ok {
 		logToolUseFindingsStatus(logger, "finalize_repair", recordID, -2, findings)
 		return findings, payload, resp.Usage, nil
@@ -675,7 +677,12 @@ func addUsage(total *LLMUsage, u *LLMUsage) {
 
 // logLoopUsage records per-call token usage including DeepSeek prompt-cache
 // hit/miss counts (DR8a measurement). turn == -1 denotes the finalize call.
-func logLoopUsage(logger ApiTypes.JimoLogger, modelName string, turn int, u *LLMUsage) {
+func logLoopUsage(
+	callReason string,
+	logger ApiTypes.JimoLogger, 
+	modelName string, 
+	turn int, 
+	u *LLMUsage) {
 	if u == nil {
 		return
 	}
