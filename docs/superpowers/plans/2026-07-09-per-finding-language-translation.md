@@ -1501,3 +1501,139 @@ Reload the Document Review panel and confirm:
 2. Clicking **Translate** in the modal shows a spinner + "Translating to X…" while the request is in flight, and the modal closes automatically when it completes (success or failure).
 3. Clicking **Cancel**, or clicking the backdrop, closes the modal without translating (only while not actively translating).
 4. On failure, the modal still closes and the existing inline "Translation failed: ..." message (Task 7) appears in the row's expanded body.
+
+---
+
+## Task 9: Localize the translate-confirm dialog's own UI copy
+
+**Origin:** third round of live user verification. The Task 8 modal's chrome (title, question, button labels, in-progress text) is hardcoded English regardless of `pendingConfirm.language` — user feedback: since the dialog is asking about translating *to* zh-cn, the dialog itself should be shown in zh-cn (or whichever language is being requested), not English.
+
+**Scope note:** this only localizes the dialog's own fixed UI strings ("Translate finding", "Cancel", etc.) — it has nothing to do with the backend `TranslateFinding` endpoint or the finding content translation itself, both unchanged.
+
+**Files:**
+- Modify: `ChenWeb/web/src/lib/components/home3/doc-review-results-view.svelte`
+
+**Interfaces:**
+- Consumes: existing `pendingConfirm.language` (already the target language code, e.g. `"zh-cn"`), `supportedLanguages` (the configured list — `en`, `zh-cn`, `ja`, `ko` per `config.toml`, though this task hardcodes copy only for these four and falls back to English for anything else, since translating fixed UI copy isn't in scope for the backend LLM translator).
+
+- [ ] **Step 1: Add a small dialog-copy dictionary**
+
+Add near the top of the `<script>` block, after the existing type/prop declarations and before the component's `$state` declarations (or any single clearly-separated spot — this is a plain constant, not reactive state):
+
+```svelte
+    type DialogCopy = {
+        title: string;
+        noTranslation: (lang: string) => string;
+        cancel: string;
+        translate: string;
+        translating: (lang: string) => string;
+    };
+
+    const DIALOG_COPY: Record<string, DialogCopy> = {
+        en: {
+            title: 'Translate finding',
+            noTranslation: (lang) => `No ${lang} translation exists yet. Translate this finding now?`,
+            cancel: 'Cancel',
+            translate: 'Translate',
+            translating: (lang) => `Translating to ${lang}…`
+        },
+        'zh-cn': {
+            title: '翻译发现项',
+            noTranslation: (lang) => `尚无 ${lang} 翻译版本。是否现在翻译？`,
+            cancel: '取消',
+            translate: '翻译',
+            translating: (lang) => `正在翻译为 ${lang}…`
+        },
+        ja: {
+            title: '所見を翻訳',
+            noTranslation: (lang) => `${lang} の翻訳はまだありません。今すぐ翻訳しますか？`,
+            cancel: 'キャンセル',
+            translate: '翻訳',
+            translating: (lang) => `${lang} に翻訳中…`
+        },
+        ko: {
+            title: '결과 번역',
+            noTranslation: (lang) => `아직 ${lang} 번역이 없습니다. 지금 번역하시겠습니까?`,
+            cancel: '취소',
+            translate: '번역',
+            translating: (lang) => `${lang}(으)로 번역 중…`
+        }
+    };
+
+    function dialogCopyFor(lang: string): DialogCopy {
+        return DIALOG_COPY[lang] ?? DIALOG_COPY.en;
+    }
+```
+
+- [ ] **Step 2: Use the localized copy in the modal**
+
+In the Task 8 modal block, replace the hardcoded English strings with calls to `dialogCopyFor(pendingConfirm.language)`. Find:
+
+```svelte
+            <div style="font-weight: 600; font-size: 1rem; color: {textPrimary}; margin-bottom: 0.5rem;">Translate finding</div>
+            {#if pendingFinding}
+                <div style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{pendingFinding.title}</div>
+            {/if}
+            {#if translating[pendingConfirm.id]}
+                <div style="display: flex; align-items: center; gap: 0.6rem; color: {textSecondary}; font-size: 0.9rem; padding: 0.5rem 0;">
+                    <LoaderIcon size={18} style="animation: spin 1s linear infinite; color: {accent};" />
+                    Translating to {pendingConfirm.language}…
+                </div>
+            {:else}
+                <div style="font-size: 0.9rem; color: {textPrimary}; margin-bottom: 1.25rem;">
+                    No {pendingConfirm.language} translation exists yet. Translate this finding now?
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                    <button onclick={cancelTranslate}
+                        style="padding: 0.4rem 0.9rem; background: transparent; color: {textMuted}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Cancel</button>
+                    <button onclick={() => pendingFinding && confirmTranslate(pendingFinding)}
+                        style="padding: 0.4rem 0.9rem; background: {successBg}; color: #22c55e; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Translate</button>
+                </div>
+            {/if}
+```
+
+Replace with (add one `{@const}` line for the copy object, then swap each literal string for the corresponding `copy.*` field/call):
+
+```svelte
+            {@const copy = dialogCopyFor(pendingConfirm.language)}
+            <div style="font-weight: 600; font-size: 1rem; color: {textPrimary}; margin-bottom: 0.5rem;">{copy.title}</div>
+            {#if pendingFinding}
+                <div style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{pendingFinding.title}</div>
+            {/if}
+            {#if translating[pendingConfirm.id]}
+                <div style="display: flex; align-items: center; gap: 0.6rem; color: {textSecondary}; font-size: 0.9rem; padding: 0.5rem 0;">
+                    <LoaderIcon size={18} style="animation: spin 1s linear infinite; color: {accent};" />
+                    {copy.translating(pendingConfirm.language)}
+                </div>
+            {:else}
+                <div style="font-size: 0.9rem; color: {textPrimary}; margin-bottom: 1.25rem;">
+                    {copy.noTranslation(pendingConfirm.language)}
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                    <button onclick={cancelTranslate}
+                        style="padding: 0.4rem 0.9rem; background: transparent; color: {textMuted}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">{copy.cancel}</button>
+                    <button onclick={() => pendingFinding && confirmTranslate(pendingFinding)}
+                        style="padding: 0.4rem 0.9rem; background: {successBg}; color: #22c55e; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">{copy.translate}</button>
+                </div>
+            {/if}
+```
+
+(This second `{@const}` sits in the same block as Task 8's `{@const confirmId = ...}` / `{@const pendingFinding = ...}` — Svelte allows multiple consecutive `{@const}` tags as the first children of a block.)
+
+- [ ] **Step 3: Type-check**
+
+Run: `cd /Users/cding/Workspace/ChenWeb/web && bun run check 2>&1 | tail -40`
+Expected: no new errors in this file.
+
+- [ ] **Step 4: Commit**
+
+Scope the commit to only this file:
+
+```bash
+cd /Users/cding/Workspace/ChenWeb
+jj commit web/src/lib/components/home3/doc-review-results-view.svelte -m "Localize translate-confirm dialog copy into the target language"
+```
+
+- [ ] **Step 5: Manual verification (by the controller/user, not the implementer)**
+
+Reload the Document Review panel, trigger a translate-confirmation with the target language set to `zh-cn`, and confirm the dialog itself (title, question, button labels) renders in Chinese. Repeat for `ja`/`ko` if convenient. Confirm `en` still renders in English (unchanged), and that selecting some future/unconfigured language code would fall back to English rather than erroring (not expected to be reachable today since the pulldown only ever offers `supportedLanguages` from config, but the fallback exists defensively).
