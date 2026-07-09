@@ -19,17 +19,18 @@ type mineruPage struct {
 }
 
 type mineruItem struct {
-	Type          string          `json:"type"`
-	Text          string          `json:"text"`
-	TextLevel     *int            `json:"text_level"`
-	ListItems     []string        `json:"list_items"`
-	TableCaption  []string        `json:"table_caption"`
-	TableFootnote []string        `json:"table_footnote"`
-	TableBody     string          `json:"table_body"`
-	ImgPath       string          `json:"img_path"`
-	ImageCaption  []string        `json:"image_caption"`
-	ImageFootnote []string        `json:"image_footnote"`
-	BBox          json.RawMessage `json:"bbox"`
+	Type           string            `json:"type"`
+	Text           string            `json:"text"`
+	TextLevel      *int              `json:"text_level"`
+	ListItems      []string          `json:"list_items"`
+	ListItemBBoxes []json.RawMessage `json:"list_item_bboxes"`
+	TableCaption   []string          `json:"table_caption"`
+	TableFootnote  []string          `json:"table_footnote"`
+	TableBody      string            `json:"table_body"`
+	ImgPath        string            `json:"img_path"`
+	ImageCaption   []string          `json:"image_caption"`
+	ImageFootnote  []string          `json:"image_footnote"`
+	BBox           json.RawMessage   `json:"bbox"`
 }
 
 func ConvertMineruFile(inputPath string) (string, error) {
@@ -105,15 +106,25 @@ func extractMineruLineItems(pages []mineruPage) []extractedOpenDataLine {
 
 			case "list":
 				bbox := mineruBBoxStr(item.BBox)
-				for _, s := range item.ListItems {
-					if content := strings.TrimSpace(s); content != "" {
-						items = append(items, extractedOpenDataLine{
-							Page:    pageStr,
-							Type:    "list-item",
-							BBox:    bbox,
-							Content: content,
-						})
+				perItemBBoxes := item.ListItemBBoxes
+				hasPerItemBBoxes := len(perItemBBoxes) == len(item.ListItems)
+				for i, s := range item.ListItems {
+					content := strings.TrimSpace(s)
+					if content == "" {
+						continue
 					}
+					itemBBox := bbox
+					if hasPerItemBBoxes {
+						if b := mineruBBoxStr(perItemBBoxes[i]); b != "" {
+							itemBBox = b
+						}
+					}
+					items = append(items, extractedOpenDataLine{
+						Page:    pageStr,
+						Type:    "list-item",
+						BBox:    itemBBox,
+						Content: content,
+					})
 				}
 
 			case "equation":

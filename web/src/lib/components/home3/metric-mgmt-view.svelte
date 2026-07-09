@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import { browser } from '$app/environment';
 	import {
 		listKbMetrics,
@@ -89,6 +89,7 @@
 	let currentInput = $state<KbInputRecord | null>(null);
 	let metrics = $state<KbMetricRecord[]>([]);
 	let selectedMetricId = $state<number | null>(null);
+	let metricFocusNotified = $state(false);
 	let highlightSelectionVersion = $state(0);
 	let loading = $state(false);
 	let errorMsg = $state('');
@@ -119,6 +120,10 @@
 	let newLineType = $state('text');
 	let docPage = $state<number>(1);
 	let addMetricBusy = $derived(addMetricBusyAction !== null);
+
+	onDestroy(() => {
+		setMetricFocusNotified(false);
+	});
 
 	let fileUrl = $derived.by(() => {
 		if (!currentInput) return '';
@@ -200,8 +205,9 @@
 	}
 	// ---------- Group info panel width (draggable) ----------
 	const GIP_WIDTH_KEY = 'metrics:info-panel-width';
-	const GIP_WIDTH_MIN = 220;
-	const GIP_WIDTH_MAX = 620;
+	const GIP_WIDTH_MIN = 320;
+	const GIP_WIDTH_MAX = 920;
+	const GIP_WIDTH_DEFAULT = 460;
 	let gipWidth = $state<number | null>(null);
 	let gipResizing = $state(false);
 
@@ -213,20 +219,28 @@
 		}
 	});
 
-	function startGipResize(event: PointerEvent) {
+	function setMetricFocusNotified(focused: boolean) {
+		if (metricFocusNotified === focused) return;
+		metricFocusNotified = focused;
+		onFocusModeChange?.(focused);
+	}
+
+	function persistGipWidth(next: number) {
+		const clamped = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, Math.round(next)));
+		gipWidth = clamped;
+		if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(clamped));
+	}
+
+	function startGipResize(event: PointerEvent, edge: 'left' | 'right') {
 		event.preventDefault();
 		const startX = event.clientX;
-		const startWidth = gipWidth ?? 340;
+		const startWidth = gipWidth ?? GIP_WIDTH_DEFAULT;
 		gipResizing = true;
 		document.body.style.cursor = 'col-resize';
 		document.body.style.userSelect = 'none';
 		const move = (e: PointerEvent) => {
-			const next = Math.max(
-				GIP_WIDTH_MIN,
-				Math.min(GIP_WIDTH_MAX, Math.round(startWidth + (e.clientX - startX)))
-			);
-			gipWidth = next;
-			if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
+			const delta = e.clientX - startX;
+			persistGipWidth(edge === 'left' ? startWidth - delta : startWidth + delta);
 		};
 		const up = () => {
 			gipResizing = false;
@@ -244,14 +258,10 @@
 	function onGipResizerKeydown(event: KeyboardEvent) {
 		if (event.key === 'ArrowLeft') {
 			event.preventDefault();
-			const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, (gipWidth ?? 340) - 16));
-			gipWidth = next;
-			if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
+			persistGipWidth((gipWidth ?? GIP_WIDTH_DEFAULT) - 16);
 		} else if (event.key === 'ArrowRight') {
 			event.preventDefault();
-			const next = Math.max(GIP_WIDTH_MIN, Math.min(GIP_WIDTH_MAX, (gipWidth ?? 340) + 16));
-			gipWidth = next;
-			if (browser) localStorage.setItem(GIP_WIDTH_KEY, String(next));
+			persistGipWidth((gipWidth ?? GIP_WIDTH_DEFAULT) + 16);
 		}
 	}
 	type NormalizedSpan = { page_number: number; line_number: number };
@@ -469,6 +479,7 @@
 
 		const metadata: AttrDef[] = [
 			textAttr('metric_id', 'ID', HashIcon, String(m.id), true),
+			textAttr('input_record_id', 'Document ID', HashIcon, String(m.input_record_id), true),
 			textAttr('name', 'Name', TypeIcon, fmt(m.metric_name), has(m.metric_name)),
 			textAttr(
 				'confidence',
@@ -799,7 +810,7 @@
 		viewport: PdfPageViewport,
 		overlay: HTMLDivElement
 	) {
-		const HIGHLIGHT_EXPAND_TOP_PX = 10;
+		const HIGHLIGHT_EXPAND_TOP_PX = 2;
 		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
 		const lines = selectedLinesByPage.get(pageNo) ?? [];
 		const rects = lines.flatMap((ln) => {
@@ -818,7 +829,8 @@
 		for (let i = 0; i < rects.length; i += 1) {
 			const rect = rects[i];
 			const nextRect = rects[i + 1];
-			const bottom = nextRect ? nextRect.top : rect.rawBottom;
+			const isContiguous = nextRect && nextRect.lineNumber === rect.lineNumber + 1;
+			const bottom = isContiguous ? nextRect.top : rect.rawBottom;
 			const height = Math.max(0, bottom - rect.top);
 			if (rect.width < 1 || height < 1) continue;
 			const mark = document.createElement('div');
@@ -936,16 +948,12 @@
 	}
 
 	function enterFocusMode() {
-		if (recordBrowserFolded) return;
-		recordBrowserFolded = true;
-		onFocusModeChange?.(true);
+		setMetricFocusNotified(true);
 	}
 
 	function goBack() {
-		if (!recordBrowserFolded) return;
-		recordBrowserFolded = false;
 		selectedMetricId = null;
-		onFocusModeChange?.(false);
+		setMetricFocusNotified(false);
 	}
 
 	function goToPrevMetric() {
@@ -978,6 +986,7 @@
 		loading = true;
 		metrics = [];
 		selectedMetricId = null;
+		setMetricFocusNotified(false);
 		highlightSelectionVersion = 0;
 		rawLines = [];
 		rawError = '';
@@ -1327,7 +1336,7 @@
 
 <svelte:window
 	onkeydown={(e) => {
-		if (e.key === 'Escape' && recordBrowserFolded) goBack();
+		if (e.key === 'Escape' && selectedMetricId != null) goBack();
 	}}
 />
 
@@ -1582,13 +1591,26 @@
 		{/if}
 
 		<!-- ============ RIGHT PANEL ============ -->
-		<section class="right" class:focus-split={recordBrowserFolded}>
-			{#if recordBrowserFolded}
-				<div class="metric-canvas-wrap">
+		<section class="right" class:info-split={selectedMetricId != null}>
+			{#if selectedMetricId != null}
+				<button
+					type="button"
+					class="gip-resize-handle gip-resize-left"
+					class:active={gipResizing}
+					aria-label="Resize the metric info panel from the left edge"
+					onpointerdown={(event) => startGipResize(event, 'left')}
+					onkeydown={onGipResizerKeydown}
+				>
+					<span class="gip-resize-grip" aria-hidden="true"></span>
+				</button>
+				<div
+					class="metric-canvas-wrap metric-info-panel"
+					style:flex-basis={`${gipWidth ?? GIP_WIDTH_DEFAULT}px`}
+				>
 					<div class="canvas-toolbar">
-						<button type="button" class="toolbar-back" onclick={goBack} title="Back to record list">
+						<button type="button" class="toolbar-back" onclick={goBack} title="Close metric info">
 							<ArrowLeftIcon class="toolbar-icon" />
-							<span>Back</span>
+							<span>Close</span>
 						</button>
 						<div class="toolbar-filters">
 							<select
@@ -1747,19 +1769,16 @@
 				</div>
 				<button
 					type="button"
-					class="focus-resize-handle"
-					class:active={focusResizing}
-					aria-label="Resize the source document panel"
-					onpointerdown={startFocusResize}
-					onkeydown={onFocusResizerKeydown}
+					class="gip-resize-handle gip-resize-right"
+					class:active={gipResizing}
+					aria-label="Resize the metric info panel from the right edge"
+					onpointerdown={(event) => startGipResize(event, 'right')}
+					onkeydown={onGipResizerKeydown}
 				>
-					<span class="focus-resize-grip" aria-hidden="true"></span>
+					<span class="gip-resize-grip" aria-hidden="true"></span>
 				</button>
 			{/if}
-			<div
-				class="doc-frame-wrap"
-				style:flex-basis={recordBrowserFolded ? `${focusPdfWidth}px` : null}
-			>
+			<div class="doc-frame-wrap">
 				{#if !currentInput}
 					<div class="doc-empty">
 						<div class="doc-empty-mark">⌬</div>
@@ -3616,7 +3635,7 @@
 	}
 
 	/* ---- CANVAS (metric attribute map) ---- */
-	.right.focus-split {
+	.right.info-split {
 		flex-direction: row;
 	}
 	.metric-canvas-wrap {
@@ -3627,6 +3646,15 @@
 		flex-direction: column;
 		border-right: 1px solid var(--ink-line);
 		overflow: hidden;
+	}
+	.metric-info-panel {
+		flex: 0 0 460px;
+		max-width: min(920px, 70vw);
+		background: var(--page-bg);
+		border-left: 1px solid var(--ink-line);
+		box-shadow:
+			inset 1px 0 0 rgba(212, 162, 76, 0.08),
+			inset -1px 0 0 rgba(212, 162, 76, 0.08);
 	}
 	.canvas-toolbar {
 		display: flex;
@@ -3779,11 +3807,7 @@
 	.metric-canvas::-webkit-scrollbar-thumb {
 		background: var(--ink-line);
 	}
-	.right.focus-split .doc-frame-wrap {
-		flex: 0 0 480px;
-		overflow: hidden;
-	}
-	.focus-resize-handle {
+	.gip-resize-handle {
 		flex: 0 0 14px;
 		position: relative;
 		padding: 0;
@@ -3793,8 +3817,9 @@
 		outline: none;
 		align-self: stretch;
 		touch-action: none;
+		z-index: 2;
 	}
-	.focus-resize-handle::before {
+	.gip-resize-handle::before {
 		content: '';
 		position: absolute;
 		top: 0;
@@ -3807,13 +3832,13 @@
 			background 140ms,
 			opacity 140ms;
 	}
-	.focus-resize-handle:hover::before,
-	.focus-resize-handle.active::before,
-	.focus-resize-handle:focus-visible::before {
+	.gip-resize-handle:hover::before,
+	.gip-resize-handle.active::before,
+	.gip-resize-handle:focus-visible::before {
 		background: var(--brass);
 		opacity: 1;
 	}
-	.focus-resize-grip {
+	.gip-resize-grip {
 		position: absolute;
 		top: 50%;
 		left: 50%;
@@ -3827,9 +3852,9 @@
 		border: 1px solid var(--ink-line);
 		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.14);
 	}
-	.focus-resize-handle.active .focus-resize-grip,
-	.focus-resize-handle:hover .focus-resize-grip,
-	.focus-resize-handle:focus-visible .focus-resize-grip {
+	.gip-resize-handle.active .gip-resize-grip,
+	.gip-resize-handle:hover .gip-resize-grip,
+	.gip-resize-handle:focus-visible .gip-resize-grip {
 		border-color: var(--brass);
 	}
 	.gip-row {

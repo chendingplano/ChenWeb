@@ -129,7 +129,7 @@
 		viewport: PdfPageViewport,
 		overlay: HTMLDivElement
 	) {
-		const HIGHLIGHT_EXPAND_TOP_PX = 10;
+		const HIGHLIGHT_EXPAND_TOP_PX = 2;
 		const HIGHLIGHT_EXPAND_LEFT_PX = 5;
 		const HIGHLIGHT_EXPAND_RIGHT_PX = 5;
 		const lines = selectedLinesByPage.get(pageNo) ?? [];

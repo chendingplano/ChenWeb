@@ -189,13 +189,23 @@ class MineruParser(ParserBackend):
 
         middle_json_path = content_list_path.replace("_content_list.json", "_middle.json")
         equation_image_count = 0
+        list_item_bbox_count = 0
         if os.path.isfile(middle_json_path) and isinstance(content_list, list):
             try:
                 with open(middle_json_path, "r", encoding="utf-8") as f:
                     middle_json = json.load(f)
-                equation_image_count = annotate_equation_image_paths(content_list, middle_json)
             except Exception as exc:
-                log.warning("mineru: failed to annotate equation image paths: %s", exc)
+                log.warning("mineru: failed to load middle.json: %s", exc)
+                middle_json = None
+            if middle_json is not None:
+                try:
+                    equation_image_count = annotate_equation_image_paths(content_list, middle_json)
+                except Exception as exc:
+                    log.warning("mineru: failed to annotate equation image paths: %s", exc)
+                try:
+                    list_item_bbox_count = annotate_list_item_bboxes(content_list, middle_json)
+                except Exception as exc:
+                    log.warning("mineru: failed to annotate list item bboxes: %s", exc)
 
         # Copy images from MinerU's nested output dir to output_dir/images/ so
         # that img_path values ("images/foo.png") in the content list resolve
@@ -232,8 +242,8 @@ class MineruParser(ParserBackend):
 
         on_progress(max(total_pages, 1), max(total_pages, 1))
         log.info(
-            "mineru finished: pages=%d images=%d equation_images=%d content_list=%s",
-            total_pages, image_count, equation_image_count, content_list_path,
+            "mineru finished: pages=%d images=%d equation_images=%d list_items_bboxed=%d content_list=%s",
+            total_pages, image_count, equation_image_count, list_item_bbox_count, content_list_path,
         )
 
         return {
@@ -354,3 +364,155 @@ def _normalize_mineru_image_path(image_path: str) -> str:
     if image_path.startswith("images/"):
         return image_path
     return "images/" + image_path
+
+
+def annotate_list_item_bboxes(content_list: list[Any], middle_json: Any) -> int:
+    """Attach a per-item bbox array to each "list" entry in content_list.
+
+    MinerU's content_list.json collapses an entire list block into one shared
+    bbox plus a `list_items` string array, so every exploded list-item line
+    ends up with the same (too-large) bounding box downstream. middle_json
+    keeps the original per-physical-line span bboxes that content_list was
+    derived from. This pairs each content_list "list" item with the
+    corresponding middle_json "list" para_block on the same page, in
+    document order, and — only when the pairing is verified by both item
+    count and leading text — attaches `list_item_bboxes`: one bbox per
+    `list_items` entry, computed as the union of that item's line bboxes
+    (list items that wrap multiple physical lines get one combined box).
+
+    Returns the number of list items annotated.
+    """
+    pages = middle_json.get("pdf_info") if isinstance(middle_json, dict) else None
+    if not isinstance(pages, list):
+        return 0
+
+    cl_lists_by_page: dict[int, list[dict[str, Any]]] = {}
+    for item in content_list:
+        if not isinstance(item, dict) or item.get("type") != "list":
+            continue
+        page_idx = item.get("page_idx")
+        if not isinstance(page_idx, int):
+            continue
+        cl_lists_by_page.setdefault(page_idx, []).append(item)
+
+    annotated = 0
+    for page_idx, cl_lists in cl_lists_by_page.items():
+        if page_idx < 0 or page_idx >= len(pages):
+            continue
+        page = pages[page_idx]
+        para_blocks = page.get("para_blocks") if isinstance(page, dict) else None
+        if not isinstance(para_blocks, list):
+            continue
+        mj_lists = [b for b in para_blocks if isinstance(b, dict) and b.get("type") == "list"]
+
+        for cl_item, mj_block in zip(cl_lists, mj_lists):
+            list_items = cl_item.get("list_items")
+            sub_blocks = mj_block.get("blocks")
+            if not isinstance(list_items, list) or not isinstance(sub_blocks, list):
+                continue
+            if not list_items or len(list_items) != len(sub_blocks):
+                continue
+            if not _list_item_text_matches(list_items[0], sub_blocks[0]):
+                continue
+
+            # content_list.json and middle_json use different coordinate
+            # scales for the same page (middle_json is raw layout-detection
+            # pixel space; content_list is MinerU's own normalized space).
+            # Both give a bbox for this same list block, so derive the
+            # per-axis affine map between the two spaces from that pair and
+            # apply it to every sub-block bbox — otherwise the "correct"
+            # per-item boxes land in the wrong coordinate system entirely.
+            transform = _affine_params(cl_item.get("bbox"), mj_block.get("bbox"))
+            if transform is None:
+                continue
+
+            bboxes: list[list[float]] = []
+            for sub_block in sub_blocks:
+                bbox = _union_bbox_from_lines(sub_block)
+                if bbox is None:
+                    bboxes = []
+                    break
+                bboxes.append(_apply_affine(bbox, transform))
+            if not bboxes:
+                continue
+
+            cl_item["list_item_bboxes"] = bboxes
+            annotated += len(bboxes)
+
+    return annotated
+
+
+def _affine_params(content_bbox: Any, middle_bbox: Any) -> tuple[float, float, float, float] | None:
+    """Derive the per-axis (scale, offset) mapping middle_json's coordinate
+    space onto content_list's, from two bboxes known to describe the same
+    region in both spaces. Returns (scale_x, offset_x, scale_y, offset_y)."""
+    if not (isinstance(content_bbox, list) and len(content_bbox) == 4):
+        return None
+    if not (isinstance(middle_bbox, list) and len(middle_bbox) == 4):
+        return None
+    try:
+        cx1, cy1, cx2, cy2 = (float(v) for v in content_bbox)
+        mx1, my1, mx2, my2 = (float(v) for v in middle_bbox)
+    except (TypeError, ValueError):
+        return None
+    dx = mx2 - mx1
+    dy = my2 - my1
+    if dx <= 0 or dy <= 0:
+        return None
+    scale_x = (cx2 - cx1) / dx
+    scale_y = (cy2 - cy1) / dy
+    offset_x = cx1 - scale_x * mx1
+    offset_y = cy1 - scale_y * my1
+    return (scale_x, offset_x, scale_y, offset_y)
+
+
+def _apply_affine(bbox: list[float], params: tuple[float, float, float, float]) -> list[float]:
+    scale_x, offset_x, scale_y, offset_y = params
+    x1, y1, x2, y2 = bbox
+    return [
+        x1 * scale_x + offset_x,
+        y1 * scale_y + offset_y,
+        x2 * scale_x + offset_x,
+        y2 * scale_y + offset_y,
+    ]
+
+
+def _list_item_text_matches(list_item_text: Any, sub_block: dict[str, Any]) -> bool:
+    lines = sub_block.get("lines")
+    if not isinstance(lines, list):
+        return False
+    parts: list[str] = []
+    for line in lines:
+        spans = line.get("spans") if isinstance(line, dict) else None
+        if not isinstance(spans, list):
+            continue
+        for span in spans:
+            if isinstance(span, dict):
+                parts.append(str(span.get("content", "")))
+    sub_text = "".join(parts)
+    a = re.sub(r"\s+", "", str(list_item_text))[:20]
+    b = re.sub(r"\s+", "", sub_text)[:20]
+    return bool(a) and a == b
+
+
+def _union_bbox_from_lines(sub_block: dict[str, Any]) -> list[float] | None:
+    lines = sub_block.get("lines")
+    if not isinstance(lines, list) or not lines:
+        return None
+    x1s: list[float] = []
+    y1s: list[float] = []
+    x2s: list[float] = []
+    y2s: list[float] = []
+    for line in lines:
+        bbox = line.get("bbox") if isinstance(line, dict) else None
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            return None
+        try:
+            x1, y1, x2, y2 = (float(v) for v in bbox)
+        except (TypeError, ValueError):
+            return None
+        x1s.append(x1)
+        y1s.append(y1)
+        x2s.append(x2)
+        y2s.append(y2)
+    return [min(x1s), min(y1s), max(x2s), max(y2s)]

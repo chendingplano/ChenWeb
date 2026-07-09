@@ -547,7 +547,7 @@ func (c *DocReviewController) RegenerateReport(ctx context.Context, reportID int
 		return fmt.Errorf("load report %d: %w", reportID, err)
 	}
 
-	req, err := c.loadRequest(ctx, requestID, 0)
+	req, err := c.loadRequest(ctx, requestID, runID)
 	if err != nil {
 		return err
 	}

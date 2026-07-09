@@ -630,7 +630,8 @@
 			<p class="meta">
 				Document: {skeleton.meta?.document_title || '—'} (ID: {inputRecordId ?? '—'})<br />
 				Generated: {skeleton.meta?.generated_at || '—'}<br />
-				Review Request ID: {requestId ?? '—'}
+				Review Request ID: {requestId ?? '—'}<br />
+				Run ID: {reportRunId ?? '—'}
 			</p>
 
 			<div class="summary-cards">

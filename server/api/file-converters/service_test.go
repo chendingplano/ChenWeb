@@ -1173,6 +1173,93 @@ func TestConvertMineruFile_BasicTypes(t *testing.T) {
 	}
 }
 
+func TestConvertMineruFile_ListUsesPerItemBBoxesWhenPresent(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "result_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 6,
+      "items": [
+        {
+          "type": "list",
+          "list_items": ["6.2.1.1 first", "6.2.1.2 second"],
+          "list_item_bboxes": [[112, 741, 905, 754], [112, 755, 905, 767]],
+          "bbox": [112, 741, 905, 854]
+        }
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d:\n%s", len(lines), string(got))
+	}
+	if !strings.Contains(lines[0], "[112, 741, 905, 754]\t6.2.1.1 first") {
+		t.Fatalf("expected item 1 to use its own bbox, got: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "[112, 755, 905, 767]\t6.2.1.2 second") {
+		t.Fatalf("expected item 2 to use its own bbox, got: %s", lines[1])
+	}
+	// The two items must not share a bbox anymore.
+	if lines[0] == lines[1] {
+		t.Fatalf("list items unexpectedly share a bbox")
+	}
+}
+
+func TestConvertMineruFile_ListFallsBackToSharedBBoxWhenCountMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	in := filepath.Join(tmp, "result_mineru.json")
+	content := `{
+  "pages": [
+    {
+      "page_number": 1,
+      "items": [
+        {
+          "type": "list",
+          "list_items": ["a", "b", "c"],
+          "list_item_bboxes": [[1, 2, 3, 4], [5, 6, 7, 8]],
+          "bbox": [10, 70, 30, 90]
+        }
+      ]
+    }
+  ]
+}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	out, err := ConvertMineruFile(in)
+	if err != nil {
+		t.Fatalf("ConvertMineruFile: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d:\n%s", len(lines), string(got))
+	}
+	for i, line := range lines {
+		if !strings.Contains(line, "[10, 70, 30, 90]") {
+			t.Fatalf("expected item %d to fall back to shared bbox, got: %s", i, line)
+		}
+	}
+}
+
 func TestConvertMineruFile_ImageWithCaptionAndFootnote(t *testing.T) {
 	tmp := t.TempDir()
 	in := filepath.Join(tmp, "doc_mineru.json")

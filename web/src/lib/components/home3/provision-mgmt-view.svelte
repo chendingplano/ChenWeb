@@ -871,7 +871,7 @@
 		viewport: PdfPageViewport,
 		overlay: HTMLDivElement
 	) {
-		const HIGHLIGHT_EXPAND_TOP_PX = 10;
+		const HIGHLIGHT_EXPAND_TOP_PX = 2;
 		const HIGHLIGHT_EXPAND_RIGHT_PX = 20;
 		const lines = selectedLinesByPage.get(pageNo) ?? [];
 		const rects = lines.flatMap((ln) => {
@@ -890,7 +890,8 @@
 		for (let i = 0; i < rects.length; i += 1) {
 			const rect = rects[i];
 			const nextRect = rects[i + 1];
-			const bottom = nextRect ? nextRect.top : rect.rawBottom;
+			const isContiguous = nextRect && nextRect.lineNumber === rect.lineNumber + 1;
+			const bottom = isContiguous ? nextRect.top : rect.rawBottom;
 			const height = Math.max(0, bottom - rect.top);
 			if (rect.width < 1 || height < 1) continue;
 			const mark = document.createElement('div');

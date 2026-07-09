@@ -59,6 +59,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		railOffset     = 56,
 		onToggleShelf,
 		onAutoShrinkExpandChange = (_enabled: boolean) => {},
+		onFocusModeChange = (_focused: boolean) => {},
 	}: {
 		darkMode:        boolean;
 		activeMenu:      ActiveSelection | null;
@@ -68,6 +69,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		railOffset?:     number;
 		onToggleShelf:   () => void;
 		onAutoShrinkExpandChange?: (enabled: boolean) => void;
+		onFocusModeChange?: (focused: boolean) => void;
 	} = $props();
 
 	// --- Layout constants ---
@@ -178,7 +180,7 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 		{:else if activeMenu?.childId === 'kb-import'}
 			<KbImportView {darkMode} />
 		{:else if activeMenu?.childId === 'kb-metrics'}
-			<MetricMgmtView {darkMode} />
+			<MetricMgmtView {darkMode} {onFocusModeChange} />
 		{:else if activeMenu?.childId === 'apps-generate-doc'}
 			<DocGenView {darkMode} />
 		{:else if activeMenu?.childId === 'apps-document-review'}

@@ -297,7 +297,7 @@
 	});
 
 	// renderHighlights callback passed to PdfViewWindow
-	const HIGHLIGHT_EXPAND_TOP = 10;
+	const HIGHLIGHT_EXPAND_TOP = 2;
 	const HIGHLIGHT_EXPAND_RIGHT = 20;
 
 	function renderArtifactHighlights(pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) {
@@ -306,6 +306,7 @@
 			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
 			const vx1 = ln.coords[0] * viewport.width / 1000, vy1 = ln.coords[1] * viewport.height / 1000, vx2 = ln.coords[2] * viewport.width / 1000, vy2 = ln.coords[3] * viewport.height / 1000;
 			return [{
+				lineNumber: ln.line_number,
 				left: Math.min(vx1, vx2),
 				top: Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP),
 				rawBottom: Math.max(vy1, vy2),
@@ -314,7 +315,9 @@
 		});
 		for (let i = 0; i < rects.length; i++) {
 			const rect = rects[i];
-			const bottom = rects[i + 1] ? rects[i + 1].top : rect.rawBottom;
+			const nextRect = rects[i + 1];
+			const isContiguous = nextRect && nextRect.lineNumber === rect.lineNumber + 1;
+			const bottom = isContiguous ? nextRect.top : rect.rawBottom;
 			const height = Math.max(0, bottom - rect.top);
 			if (rect.width < 1 || height < 1) continue;
 			const mark = document.createElement('div');

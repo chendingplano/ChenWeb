@@ -4770,11 +4770,14 @@ Two important gotchas:
 So the short version is: HyperDX is healthy, but capture is not active yet. Start mitmproxy, relaunch VS Code through it, generate one Codex/Claude request, and then search span.name:"agent_proxy.http_exchange".
 
 # How to Restart Tmux
+* Start PostgreSQL: cd ~/bin; sh pg_start
 * Kratos: cd kratos; sh start.sh
-* PDF Python: cd ChenWeb/python/pdf-parser; sh start.sh
 * JetStream: cd shared/go/cmd/nets-server; sh start.sh 
+* PDF Python: cd ChenWeb/python/pdf-parser; sh start.sh
 * Converter: cd ChenWeb/server/cmd/parser-result-converter; sh start.sh  
+* Start Docker: cd ChenWeb; mise run docker-start
 * Start Clickhose: cd ChenWeb; mise obs-up
+* Start cc-switch: cd ThirdParty/cc-switch; 
 * Start Doc Processor: cd ChenWeb/server/cmd/doc-processor; sh start.sh
 
 About 'mitmproxy':

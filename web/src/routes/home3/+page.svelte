@@ -71,6 +71,8 @@
 	let activeMenu = $state<ActiveSelection | null>({ itemId: 'dashboard', itemTitle: 'Dashboard' });
 	let docReviewKey = $state(0);
 	let settingsHydrated = $state(false);
+	let railExpandedBeforeFocus = false;
+	let contentFocusActive = false;
 
 	onMount(() => {
 		const persistedValue = browser ? localStorage.getItem(AUTO_SHRINK_EXPAND_STORAGE_KEY) : null;
@@ -204,6 +206,17 @@
 		}
 	}
 
+	function handleContentFocusMode(focused: boolean) {
+		if (contentFocusActive === focused) return;
+		contentFocusActive = focused;
+		if (focused) {
+			railExpandedBeforeFocus = railExpanded;
+			railExpanded = false;
+		} else {
+			railExpanded = railExpandedBeforeFocus;
+		}
+	}
+
 	// Derived colours for the root layout dividers
 	let borderColor = $derived(darkMode ? '#2D3348' : '#E4E6EB'); // border / divider lines
 	let accent = $derived(darkMode ? '#818CF8' : '#6366F1'); // primary accent (indigo)
@@ -277,6 +290,7 @@
 				shelfOpen = !shelfOpen;
 			}}
 			onAutoShrinkExpandChange={handleAutoShrinkExpandChange}
+			onFocusModeChange={handleContentFocusMode}
 		/>
 
 		<!-- Shelf resize divider (only when open) -->
