@@ -6,11 +6,13 @@
 		getRequest,
 		listLanguages,
 		updateFinding,
+		translateFinding,
 		regenerateReport,
 		generateCorrectionReport,
 		type FindingItem,
 		type ReviewPackageInfo
 	} from '$lib/services/docReviewService';
+	import { getKbFrontendConfig } from '$lib/services/kbService';
 	import DocStructureView from '$lib/components/home3/doc-structure-view.svelte';
 	import EditToolDialog from '$lib/components/home3/edit-tool-dialog.svelte';
 	import LlmAutoFixDialog from '$lib/components/home3/llm-auto-fix-dialog.svelte';
@@ -64,6 +66,11 @@
 	let packages = $state<ReviewPackageInfo[]>([]);
 	let languages = $state<string[]>(['en']);
 	let selectedLanguage = $state('en');
+	let supportedLanguages = $state<string[]>(['en']);
+	let defaultLanguage = $state('en');
+	let findingLanguage = $state<Record<number, string>>({});
+	let translatingId = $state<number | null>(null);
+	let pendingConfirm = $state<{ id: number; language: string } | null>(null);
 	let languageLoading = $state(false);
 	let localizedReviewerCache = $state<Record<string, FindingItem[]>>({});
 	// View mode: 'packages' (by P1-P6) or 'severity' (by High/Medium/Low).
@@ -304,16 +311,24 @@
 		errorMsg = '';
 		try {
 			try {
+				const config = await getKbFrontendConfig();
+				supportedLanguages = config.supported_languages?.length ? config.supported_languages : ['en'];
+				defaultLanguage = config.default_language?.[0] ?? 'en';
+			} catch {
+				supportedLanguages = ['en'];
+				defaultLanguage = 'en';
+			}
+			try {
 				const configuredLanguages = await listLanguages();
 				languages = configuredLanguages.length > 0 ? configuredLanguages : ['en'];
 				if (!languages.includes(selectedLanguage)) {
-					selectedLanguage = languages[0] ?? 'en';
+					selectedLanguage = languages.includes(defaultLanguage) ? defaultLanguage : (languages[0] ?? defaultLanguage);
 					localStorage.setItem(LANG_STORAGE_KEY, selectedLanguage);
 				}
 			} catch {
 				languages = ['en'];
-				selectedLanguage = 'en';
-				localStorage.setItem(LANG_STORAGE_KEY, 'en');
+				selectedLanguage = defaultLanguage;
+				localStorage.setItem(LANG_STORAGE_KEY, defaultLanguage);
 			}
 			const report = await getReport(reportId);
 			inputRecordId = report?.input_record_id ?? report?.report_json?.meta?.document_record_id ?? null;
@@ -388,6 +403,52 @@
 	function setFindingStatus(id: number, status: string) {
 		findings = findings.map((f) => (f.id === id ? { ...f, review_status: status } : f));
 		baseFindings = baseFindings.map((f) => (f.id === id ? { ...f, review_status: status } : f));
+	}
+
+	function applyTranslatedFinding(id: number, translated: FindingItem, language: string) {
+		findings = findings.map((f) =>
+			f.id === id
+				? { ...f, title: translated.title, description: translated.description, suggestion: translated.suggestion }
+				: f
+		);
+		findingLanguage = { ...findingLanguage, [id]: language };
+	}
+
+	async function handleFindingLanguageChange(f: FindingItem, newLanguage: string) {
+		const previous = findingLanguage[f.id] ?? defaultLanguage;
+		translatingId = f.id;
+		try {
+			const resp = await translateFinding(f.id, newLanguage, false);
+			if (resp.needs_confirmation) {
+				pendingConfirm = { id: f.id, language: newLanguage };
+				return;
+			}
+			applyTranslatedFinding(f.id, resp.finding, newLanguage);
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Translation failed');
+			findingLanguage = { ...findingLanguage, [f.id]: previous };
+		} finally {
+			translatingId = null;
+		}
+	}
+
+	async function confirmFindingTranslate(f: FindingItem) {
+		if (!pendingConfirm || pendingConfirm.id !== f.id) return;
+		const language = pendingConfirm.language;
+		translatingId = f.id;
+		try {
+			const resp = await translateFinding(f.id, language, true);
+			applyTranslatedFinding(f.id, resp.finding, language);
+		} catch (e) {
+			showToast('error', e instanceof Error ? e.message : 'Translation failed');
+		} finally {
+			translatingId = null;
+			pendingConfirm = null;
+		}
+	}
+
+	function cancelFindingTranslate() {
+		pendingConfirm = null;
 	}
 
 	async function onAccept(f: FindingItem) {
@@ -715,6 +776,23 @@
 															>
 																Delete
 															</button>
+															{#if pendingConfirm?.id === f.id}
+																<span class="finding-loc">Translate to {pendingConfirm.language}?</span>
+																<button class="act" onclick={() => confirmFindingTranslate(f)}>Translate</button>
+																<button class="act" onclick={cancelFindingTranslate}>Cancel</button>
+															{:else}
+																<label class="language-picker">
+																	<select
+																		value={findingLanguage[f.id] ?? defaultLanguage}
+																		disabled={translatingId === f.id}
+																		onchange={(e) => handleFindingLanguageChange(f, (e.target as HTMLSelectElement).value)}
+																	>
+																		{#each supportedLanguages as lang (lang)}
+																			<option value={lang}>{lang}</option>
+																		{/each}
+																	</select>
+																</label>
+															{/if}
 															<button
 																class="act"
 																disabled={busyId === f.id}
@@ -811,6 +889,23 @@
 											>
 												Delete
 											</button>
+											{#if pendingConfirm?.id === f.id}
+												<span class="finding-loc">Translate to {pendingConfirm.language}?</span>
+												<button class="act" onclick={() => confirmFindingTranslate(f)}>Translate</button>
+												<button class="act" onclick={cancelFindingTranslate}>Cancel</button>
+											{:else}
+												<label class="language-picker">
+													<select
+														value={findingLanguage[f.id] ?? defaultLanguage}
+														disabled={translatingId === f.id}
+														onchange={(e) => handleFindingLanguageChange(f, (e.target as HTMLSelectElement).value)}
+													>
+														{#each supportedLanguages as lang (lang)}
+															<option value={lang}>{lang}</option>
+														{/each}
+													</select>
+												</label>
+											{/if}
 											<button
 												class="act"
 												disabled={busyId === f.id}
