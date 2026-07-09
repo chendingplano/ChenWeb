@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { getRequest, restartRequest, updateFinding, stopRequest } from '$lib/services/docReviewService';
+    import { getRequest, restartRequest, updateFinding, stopRequest, translateFinding } from '$lib/services/docReviewService';
     import type { RequestStatus, FindingItem, AspectStatus, ReviewPackageInfo } from '$lib/services/docReviewService';
+    import { getKbFrontendConfig } from '$lib/services/kbService';
     import LoaderIcon from '@lucide/svelte/icons/loader';
     import XIcon from '@lucide/svelte/icons/x';
     import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
@@ -36,6 +37,11 @@
     let activeTab = $state<'findings' | 'report'>('findings');
     let isStopping = $state(false);
     let packages = $state<ReviewPackageInfo[]>([]);
+    let supportedLanguages = $state<string[]>(['en']);
+    let defaultLanguage = $state('en');
+    let findingLanguage = $state<Record<number, string>>({});
+    let translating = $state<Record<number, boolean>>({});
+    let pendingConfirm = $state<{ id: number; language: string } | null>(null);
 
     // JSON viewer modal state
     let jsonModalOpen = $state(false);
@@ -293,6 +299,14 @@
         if (isActive) {
             startPolling();
         }
+        try {
+            const config = await getKbFrontendConfig();
+            supportedLanguages = config.supported_languages?.length ? config.supported_languages : ['en'];
+            defaultLanguage = config.default_language?.[0] ?? 'en';
+        } catch {
+            supportedLanguages = ['en'];
+            defaultLanguage = 'en';
+        }
     });
 
     onDestroy(() => {
@@ -306,6 +320,52 @@
         } catch (e: any) {
             error = e.message;
         }
+    }
+
+    function applyTranslatedFinding(id: number, translated: FindingItem, language: string) {
+        findings = findings.map(f =>
+            f.id === id
+                ? { ...f, title: translated.title, description: translated.description, suggestion: translated.suggestion }
+                : f
+        );
+        findingLanguage = { ...findingLanguage, [id]: language };
+    }
+
+    async function handleLanguageChange(finding: FindingItem, newLanguage: string) {
+        const previous = findingLanguage[finding.id] ?? defaultLanguage;
+        translating = { ...translating, [finding.id]: true };
+        try {
+            const resp = await translateFinding(finding.id, newLanguage, false);
+            if (resp.needs_confirmation) {
+                pendingConfirm = { id: finding.id, language: newLanguage };
+                return;
+            }
+            applyTranslatedFinding(finding.id, resp.finding, newLanguage);
+        } catch (e: any) {
+            error = e.message;
+            findingLanguage = { ...findingLanguage, [finding.id]: previous };
+        } finally {
+            translating = { ...translating, [finding.id]: false };
+        }
+    }
+
+    async function confirmTranslate(finding: FindingItem) {
+        if (!pendingConfirm || pendingConfirm.id !== finding.id) return;
+        const language = pendingConfirm.language;
+        translating = { ...translating, [finding.id]: true };
+        try {
+            const resp = await translateFinding(finding.id, language, true);
+            applyTranslatedFinding(finding.id, resp.finding, language);
+        } catch (e: any) {
+            error = e.message;
+        } finally {
+            translating = { ...translating, [finding.id]: false };
+            pendingConfirm = null;
+        }
+    }
+
+    function cancelTranslate() {
+        pendingConfirm = null;
     }
 
     async function handleStop() {
@@ -638,14 +698,31 @@
                                     <span style="text-transform: capitalize;">{finding.finding_type.replace(/_/g, ' ')}</span>
                                 </div>
                             </div>
-                            <div style="display: flex; gap: 0.25rem; align-items: center;">
-                                {#if finding.review_status === 'pending'}
-                                    <button onclick={(e) => { e.stopPropagation(); handleAcceptReject(finding.id, 'accepted'); }}
-                                        style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Accept</button>
-                                    <button onclick={(e) => { e.stopPropagation(); handleAcceptReject(finding.id, 'rejected'); }}
-                                        style="padding: 0.25rem 0.5rem; background: rgba(239,68,68,0.1); color: #ef4444; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Reject</button>
+                            <div onclick={(e) => e.stopPropagation()} style="display: flex; gap: 0.25rem; align-items: center;">
+                                {#if pendingConfirm?.id === finding.id}
+                                    <span style="font-size: 0.75rem; color: {textMuted};">Translate to {pendingConfirm.language}?</span>
+                                    <button onclick={() => confirmTranslate(finding)}
+                                        style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Translate</button>
+                                    <button onclick={cancelTranslate}
+                                        style="padding: 0.25rem 0.5rem; background: {inputBg}; color: {textMuted}; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Cancel</button>
                                 {:else}
-                                    <span style="font-size: 0.75rem; color: {textMuted}; text-transform: capitalize;">{finding.review_status}</span>
+                                    <select
+                                        value={findingLanguage[finding.id] ?? defaultLanguage}
+                                        disabled={translating[finding.id]}
+                                        onchange={(e) => handleLanguageChange(finding, (e.target as HTMLSelectElement).value)}
+                                        style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 4px; padding: 0.2rem 0.4rem; color: {textPrimary}; font-size: 0.75rem;">
+                                        {#each supportedLanguages as lang (lang)}
+                                            <option value={lang}>{lang}</option>
+                                        {/each}
+                                    </select>
+                                    {#if finding.review_status === 'pending'}
+                                        <button onclick={() => handleAcceptReject(finding.id, 'accepted')}
+                                            style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Accept</button>
+                                        <button onclick={() => handleAcceptReject(finding.id, 'rejected')}
+                                            style="padding: 0.25rem 0.5rem; background: rgba(239,68,68,0.1); color: #ef4444; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Reject</button>
+                                    {:else}
+                                        <span style="font-size: 0.75rem; color: {textMuted}; text-transform: capitalize;">{finding.review_status}</span>
+                                    {/if}
                                 {/if}
                             </div>
                             {#if expandedFindings.has(finding.id)}
