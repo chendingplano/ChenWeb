@@ -1356,3 +1356,148 @@ Reload the Document Review panel and confirm:
 2. If the translate call fails, a red "Translation failed: ..." message appears inside the expanded row itself, not just (or instead of) the top banner.
 3. The new page-level Language selector changes the default for rows not yet individually overridden, and re-checks any currently-expanded row immediately.
 4. Individual rows can still be set to a different language than the page-level default via their own pulldown, without that being clobbered until the next page-level change.
+
+---
+
+## Task 8: Replace inline confirm prompt with a modal dialog + visible in-progress indicator
+
+**Origin:** second round of live user verification (Task 7's changes tested live). The inline "Translate to X? Translate/Cancel" text embedded in the row header (added in Task 5, kept by Task 7's auto-check) is too easy to miss, especially once auto-triggered by expanding a row — user feedback: "Most users often overlook the message. Change to a dialog to prompt the user to translate instead." Also requested: a visible in-progress indicator during translation, since an LLM call may take a while.
+
+**Files:**
+- Modify: `ChenWeb/web/src/lib/components/home3/doc-review-results-view.svelte`
+
+**Interfaces:**
+- Consumes: existing `pendingConfirm`, `translating`, `findings`, `cancelTranslate`, `confirmTranslate`, `handleLanguageChange` state/functions (from Tasks 5 and 7), and the existing inline-modal convention already used twice in this same file for the JSON-viewer and Markdown-viewer modals (`{#if jsonModalOpen}...{/if}` / `{#if mdModalOpen}...{/if}` near the end of the file, before `<style>`) — reuse that exact backdrop/dialog visual pattern (`position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);` backdrop, centered card) rather than inventing a new one or a separate component file.
+
+- [ ] **Step 1: Simplify the row's actions area — remove the inline confirm branch, add a visible spinner while translating**
+
+Replace the actions `<div>` (the block added/modified across Tasks 5 and 7):
+
+```svelte
+                            <div onclick={(e) => e.stopPropagation()} style="display: flex; gap: 0.25rem; align-items: center;">
+                                {#if pendingConfirm?.id === finding.id}
+                                    <span style="font-size: 0.75rem; color: {textMuted};">Translate to {pendingConfirm.language}?</span>
+                                    <button onclick={() => confirmTranslate(finding)}
+                                        style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Translate</button>
+                                    <button onclick={cancelTranslate}
+                                        style="padding: 0.25rem 0.5rem; background: {inputBg}; color: {textMuted}; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Cancel</button>
+                                {:else}
+                                    <select
+                                        value={findingLanguage[finding.id] ?? defaultLanguage}
+                                        disabled={translating[finding.id]}
+                                        onchange={(e) => handleLanguageChange(finding, (e.target as HTMLSelectElement).value)}
+                                        style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 4px; padding: 0.2rem 0.4rem; color: {textPrimary}; font-size: 0.75rem;">
+                                        {#each supportedLanguages as lang (lang)}
+                                            <option value={lang}>{lang}</option>
+                                        {/each}
+                                    </select>
+                                    {#if finding.review_status === 'pending'}
+                                        <button onclick={() => handleAcceptReject(finding.id, 'accepted')}
+                                            style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Accept</button>
+                                        <button onclick={() => handleAcceptReject(finding.id, 'rejected')}
+                                            style="padding: 0.25rem 0.5rem; background: rgba(239,68,68,0.1); color: #ef4444; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Reject</button>
+                                    {:else}
+                                        <span style="font-size: 0.75rem; color: {textMuted}; text-transform: capitalize;">{finding.review_status}</span>
+                                    {/if}
+                                {/if}
+                            </div>
+```
+
+with:
+
+```svelte
+                            <div onclick={(e) => e.stopPropagation()} style="display: flex; gap: 0.25rem; align-items: center;">
+                                <select
+                                    value={findingLanguage[finding.id] ?? defaultLanguage}
+                                    disabled={translating[finding.id]}
+                                    onchange={(e) => handleLanguageChange(finding, (e.target as HTMLSelectElement).value)}
+                                    style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 4px; padding: 0.2rem 0.4rem; color: {textPrimary}; font-size: 0.75rem;">
+                                    {#each supportedLanguages as lang (lang)}
+                                        <option value={lang}>{lang}</option>
+                                    {/each}
+                                </select>
+                                {#if translating[finding.id]}
+                                    <LoaderIcon size={14} style="animation: spin 1s linear infinite; color: {accent};" />
+                                {/if}
+                                {#if finding.review_status === 'pending'}
+                                    <button onclick={() => handleAcceptReject(finding.id, 'accepted')}
+                                        style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Accept</button>
+                                    <button onclick={() => handleAcceptReject(finding.id, 'rejected')}
+                                        style="padding: 0.25rem 0.5rem; background: rgba(239,68,68,0.1); color: #ef4444; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Reject</button>
+                                {:else}
+                                    <span style="font-size: 0.75rem; color: {textMuted}; text-transform: capitalize;">{finding.review_status}</span>
+                                {/if}
+                            </div>
+```
+
+(`LoaderIcon` is already imported at the top of this file — reused from the existing JSON/Markdown modal loading states and the panel's own "Loading review request" state. No new import needed.)
+
+- [ ] **Step 2: Add the translate-confirm modal**
+
+Insert a new modal block, following the exact same structural pattern as the existing `{#if mdModalOpen}...{/if}` block in this file (backdrop + centered card), immediately before the file's closing `<style>` block:
+
+```svelte
+<!-- Translate Confirm Modal -->
+{#if pendingConfirm}
+    {@const pendingFinding = findings.find(f => f.id === pendingConfirm.id)}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+        onclick={(e) => { if (e.target === e.currentTarget && !translating[pendingConfirm.id]) cancelTranslate(); }}
+        onkeydown={(e) => { if (e.key === 'Escape' && !translating[pendingConfirm.id]) cancelTranslate(); }}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        style="position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);"
+    >
+        <div style="background: {darkMode ? '#161B27' : '#FFFFFF'}; border: 1px solid {borderColor}; border-radius: 14px; width: min(90vw, 420px); box-shadow: 0 24px 64px rgba(0,0,0,0.5); padding: 1.5rem;">
+            <div style="font-weight: 600; font-size: 1rem; color: {textPrimary}; margin-bottom: 0.5rem;">Translate finding</div>
+            {#if pendingFinding}
+                <div style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{pendingFinding.title}</div>
+            {/if}
+            {#if translating[pendingConfirm.id]}
+                <div style="display: flex; align-items: center; gap: 0.6rem; color: {textSecondary}; font-size: 0.9rem; padding: 0.5rem 0;">
+                    <LoaderIcon size={18} style="animation: spin 1s linear infinite; color: {accent};" />
+                    Translating to {pendingConfirm.language}…
+                </div>
+            {:else}
+                <div style="font-size: 0.9rem; color: {textPrimary}; margin-bottom: 1.25rem;">
+                    No {pendingConfirm.language} translation exists yet. Translate this finding now?
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                    <button onclick={cancelTranslate}
+                        style="padding: 0.4rem 0.9rem; background: transparent; color: {textMuted}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Cancel</button>
+                    <button onclick={() => pendingFinding && confirmTranslate(pendingFinding)}
+                        style="padding: 0.4rem 0.9rem; background: {successBg}; color: #22c55e; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Translate</button>
+                </div>
+            {/if}
+        </div>
+    </div>
+{/if}
+```
+
+Notes on behavior (no code changes needed beyond the above — these fall out of existing Task 5/7 logic):
+- The modal appears automatically for *any* path that sets `pendingConfirm` — the per-row pulldown, the page-level selector, and the Task 7 auto-check-on-expand all already funnel through `handleLanguageChange`, which is what sets `pendingConfirm`. No new triggering logic is needed.
+- While `translating[pendingConfirm.id]` is true (set by `confirmTranslate` before its `await`, cleared in its `finally`), the modal shows the spinner state and the backdrop/Escape dismiss is disabled (`!translating[pendingConfirm.id]` guard) so the in-flight request can't be silently abandoned mid-flight by an accidental outside click.
+- On completion (success or error), `confirmTranslate`'s `finally` block already sets `pendingConfirm = null`, which closes the modal automatically — no new close logic needed. On error, `translateError[id]` is already set (Task 7) and renders inline in the row's expanded body as before.
+
+- [ ] **Step 3: Type-check**
+
+Run: `cd /Users/cding/Workspace/ChenWeb/web && bun run check 2>&1 | tail -40`
+Expected: no new errors in this file.
+
+- [ ] **Step 4: Commit**
+
+Scope the commit to only this file (there may be other unrelated dirty files in the shared working copy):
+
+```bash
+cd /Users/cding/Workspace/ChenWeb
+jj commit web/src/lib/components/home3/doc-review-results-view.svelte -m "Replace inline translate-confirm prompt with a modal dialog and add an in-progress spinner"
+```
+
+- [ ] **Step 5: Manual verification (by the controller/user, not the implementer)**
+
+Reload the Document Review panel and confirm:
+1. Triggering a translate-confirmation (via expanding an untranslated row, or via the pulldown/page-level selector) now shows a modal dialog centered on screen with a dimmed backdrop, not inline text in the row.
+2. Clicking **Translate** in the modal shows a spinner + "Translating to X…" while the request is in flight, and the modal closes automatically when it completes (success or failure).
+3. Clicking **Cancel**, or clicking the backdrop, closes the modal without translating (only while not actively translating).
+4. On failure, the modal still closes and the existing inline "Translation failed: ..." message (Task 7) appears in the row's expanded body.
