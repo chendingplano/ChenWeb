@@ -42,6 +42,7 @@
     let findingLanguage = $state<Record<number, string>>({});
     let translating = $state<Record<number, boolean>>({});
     let pendingConfirm = $state<{ id: number; language: string } | null>(null);
+    let translateError = $state<Record<number, string>>({});
 
     // JSON viewer modal state
     let jsonModalOpen = $state(false);
@@ -323,6 +324,7 @@
     }
 
     function applyTranslatedFinding(id: number, translated: FindingItem, language: string) {
+        translateError = { ...translateError, [id]: '' };
         findings = findings.map(f =>
             f.id === id
                 ? { ...f, title: translated.title, description: translated.description, suggestion: translated.suggestion }
@@ -342,7 +344,7 @@
             }
             applyTranslatedFinding(finding.id, resp.finding, newLanguage);
         } catch (e: any) {
-            error = e.message;
+            translateError = { ...translateError, [finding.id]: e.message };
             findingLanguage = { ...findingLanguage, [finding.id]: previous };
         } finally {
             translating = { ...translating, [finding.id]: false };
@@ -357,7 +359,7 @@
             const resp = await translateFinding(finding.id, language, true);
             applyTranslatedFinding(finding.id, resp.finding, language);
         } catch (e: any) {
-            error = e.message;
+            translateError = { ...translateError, [finding.id]: e.message };
         } finally {
             translating = { ...translating, [finding.id]: false };
             pendingConfirm = null;
@@ -366,6 +368,17 @@
 
     function cancelTranslate() {
         pendingConfirm = null;
+    }
+
+    function handlePageLanguageChange(newLanguage: string) {
+        defaultLanguage = newLanguage;
+        findingLanguage = {};
+        pendingConfirm = null;
+        translateError = {};
+        for (const id of expandedFindings) {
+            const finding = findings.find(f => f.id === id);
+            if (finding) handleLanguageChange(finding, newLanguage);
+        }
     }
 
     async function handleStop() {
@@ -429,7 +442,15 @@
 
     function toggleFinding(id: number) {
         const next = new Set(expandedFindings);
-        if (next.has(id)) next.delete(id); else next.add(id);
+        if (next.has(id)) {
+            next.delete(id);
+        } else {
+            next.add(id);
+            if (findingLanguage[id] === undefined) {
+                const finding = findings.find(f => f.id === id);
+                if (finding) handleLanguageChange(finding, defaultLanguage);
+            }
+        }
         expandedFindings = next;
     }
 
@@ -453,6 +474,17 @@
                 style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.9rem; background: transparent; color: {textSecondary}; border: 1px solid {borderColor}; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">← Back</button>
             <span style="color: {textMuted}; font-size: 0.85rem;">{docTitle || `Document #${request.input_record_id}`}</span>
             <span style="color: {textMuted}; font-size: 0.8rem; padding: 0.15rem 0.5rem; border: 1px solid {borderColor}; border-radius: 5px; font-family: monospace;">Request #{requestId}</span>
+            <label style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: {textMuted};">
+                <span>Language</span>
+                <select
+                    value={defaultLanguage}
+                    onchange={(e) => handlePageLanguageChange((e.target as HTMLSelectElement).value)}
+                    style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 6px; padding: 0.25rem 0.5rem; color: {textPrimary}; font-size: 0.8rem;">
+                    {#each supportedLanguages as lang (lang)}
+                        <option value={lang}>{lang}</option>
+                    {/each}
+                </select>
+            </label>
             <span style="margin-left: auto; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px; background: {accentTint}; color: {accent}; text-transform: capitalize;">{viewStatus}</span>
             {#if viewStatus === 'accepted' || viewStatus === 'pending' || viewStatus === 'running'}
                 <button onclick={handleStop} disabled={isStopping}
@@ -733,6 +765,9 @@
                         </div>
                         {#if expandedFindings.has(finding.id)}
                             <div style="padding: 0 1rem 0.75rem; border-top: 1px solid {borderColor};">
+                                {#if translateError[finding.id]}
+                                    <p style="margin-top: 0.5rem; color: #ef4444; font-size: 0.8rem;">Translation failed: {translateError[finding.id]}</p>
+                                {/if}
                                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-top: 0.5rem;">{finding.description}</p>
                                 {#if finding.evidence}
                                     <div style="margin-top: 0.5rem; padding: 0.5rem; background: {inputBg}; border-radius: 6px; font-size: 0.8rem; color: {textMuted}; font-family: monospace;">
