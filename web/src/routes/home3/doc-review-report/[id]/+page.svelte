@@ -55,6 +55,10 @@
 	let errorMsg = $state('');
 	let inputRecordId = $state<number | null>(null);
 	let requestId = $state<number | null>(null);
+	// The run this report belongs to. Findings must be scoped to this run, not
+	// the request's latest run, so an older report never renders another run's
+	// findings.
+	let reportRunId = $state<number | null>(null);
 	let skeleton = $state<ReportSkeleton | null>(null);
 	let totals = $state({ total: 0, high: 0, medium: 0, low: 0 });
 	let activeKey = $state<string | null>(null);
@@ -120,7 +124,12 @@
 			pass,
 			aspect
 		});
-		const reqData = await getRequest(requestId, { language: selectedLanguage, pass, aspect });
+		const reqData = await getRequest(requestId, {
+			language: selectedLanguage,
+			pass,
+			aspect,
+			runId: reportRunId ?? undefined
+		});
 		const localized = reqData.findings ?? [];
 		localizedReviewerCache[cacheKey] = localized;
 		mergeLocalizedFindings(localized);
@@ -332,6 +341,7 @@
 			const report = await getReport(reportId);
 			inputRecordId = report?.input_record_id ?? report?.report_json?.meta?.document_record_id ?? null;
 			requestId = report?.request_id ?? null;
+			reportRunId = report?.run_id ?? null;
 			skeleton = (report?.report_json ?? null) as ReportSkeleton | null;
 			const reportFindings = skeleton?.findings ?? [];
 			totals = {
@@ -348,7 +358,7 @@
 			pendingConfirm = null;
 			if (requestId != null) {
 				try {
-					const reqData = await getRequest(requestId);
+					const reqData = await getRequest(requestId, { runId: reportRunId ?? undefined });
 					baseFindings = reqData.findings ?? [];
 					findings = cloneFindings(baseFindings);
 					packages = reqData.packages ?? [];
