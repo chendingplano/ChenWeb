@@ -294,10 +294,10 @@ func TranslateFinding(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"status": false, "error_msg": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{
-		"status":              true,
-		"finding":             result.Finding,
-		"translated":          result.Translated,
-		"needs_confirmation":  result.NeedsConfirmation,
+		"status":             true,
+		"finding":            result.Finding,
+		"translated":         result.Translated,
+		"needs_confirmation": result.NeedsConfirmation,
 	})
 }
 
