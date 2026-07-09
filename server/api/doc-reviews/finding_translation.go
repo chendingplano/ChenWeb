@@ -741,7 +741,13 @@ func normalizeReviewFindingLanguage(language string) string {
 	return language
 }
 
-func (c *DocReviewController) localizeFinding(_ context.Context, language string, f FindingItem, metadata []byte) (FindingItem, error) {
+// localizeFinding returns f localized into language. A stored translation in
+// metadata is applied with no LLM call; otherwise it is translated on demand
+// and persisted via translateFindingContent, same as TranslateFinding's
+// cache-miss path — this is what lets the page-level Language dropdown (which
+// calls this in bulk through localizeFindings) actually translate findings
+// instead of only ever showing whichever language was translated earlier.
+func (c *DocReviewController) localizeFinding(ctx context.Context, language string, f FindingItem, metadata []byte) (FindingItem, error) {
 	language = supportedLanguageCode(language)
 	if language == "" {
 		return f, nil
@@ -749,23 +755,24 @@ func (c *DocReviewController) localizeFinding(_ context.Context, language string
 	if tr, ok := translationFromMetadata(metadata, language); ok {
 		return applyFindingTranslation(f, tr), nil
 	}
-	return f, nil
+	return c.translateFindingContent(ctx, language, f)
 }
 
+// localizeFindings localizes findings into language, running the on-demand
+// translations (localizeFinding's cache-miss path) concurrently with the same
+// worker-pool helper and MAX_DOC_REVIEWER_TASKS cap used by the bulk
+// prepareFindingForStorage path — otherwise a page-level language switch
+// serializes one LLM round trip per untranslated finding.
 func (c *DocReviewController) localizeFindings(ctx context.Context, language string, findings []FindingItem, metadataByFindingID map[int64][]byte) ([]FindingItem, error) {
 	language = supportedLanguageCode(language)
 	if language == "" {
 		return findings, nil
 	}
-	out := make([]FindingItem, 0, len(findings))
-	for _, finding := range findings {
-		localized, err := c.localizeFinding(ctx, language, finding, metadataByFindingID[finding.ID])
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, localized)
-	}
-	return out, nil
+	maxTasks := maxDocReviewerTasks(len(findings))
+	return runConcurrent(ctx, maxTasks, len(findings), func(workerCtx context.Context, i int) (FindingItem, error) {
+		finding := findings[i]
+		return c.localizeFinding(workerCtx, language, finding, metadataByFindingID[finding.ID])
+	})
 }
 
 // TranslateFindingResult is returned by TranslateFinding.
@@ -810,16 +817,33 @@ func (c *DocReviewController) TranslateFinding(ctx context.Context, findingID in
 		return TranslateFindingResult{Finding: finding, NeedsConfirmation: true}, nil
 	}
 
+	translated, err := c.translateFindingContent(ctx, language, finding)
+	if err != nil {
+		return TranslateFindingResult{}, err
+	}
+	logger.Info("finding translated on demand", "finding_id", findingID, "language", language)
+
+	return TranslateFindingResult{Finding: translated, Translated: true}, nil
+}
+
+// translateFindingContent calls the LLM translator for language and persists
+// the result into f's metadata under that language key, returning f with the
+// translation applied. Shared by TranslateFinding's cache-miss path (per-row
+// pulldown, gated by confirm/AUTO_TRANSLATE_FINDINGS) and localizeFinding's
+// cache-miss path (page-level pulldown, always translates since the user's
+// language selection is itself the confirmation).
+func (c *DocReviewController) translateFindingContent(ctx context.Context, language string, f FindingItem) (FindingItem, error) {
 	translator := c.Translator
 	if translator == nil {
+		var err error
 		translator, err = newLLMFindingTranslator()
 		if err != nil {
-			return TranslateFindingResult{}, err
+			return FindingItem{}, err
 		}
 	}
-	content, err := translator.TranslateFinding(ctx, language, finding)
+	content, err := translator.TranslateFinding(ctx, language, f)
 	if err != nil {
-		return TranslateFindingResult{}, fmt.Errorf("translate finding %d to %s: %w", findingID, language, err)
+		return FindingItem{}, fmt.Errorf("translate finding %d to %s: %w", f.ID, language, err)
 	}
 	if content.Provenance == "" {
 		content.Provenance = "llm_translation"
@@ -827,22 +851,20 @@ func (c *DocReviewController) TranslateFinding(ctx context.Context, findingID in
 
 	contentJSON, err := json.Marshal(content)
 	if err != nil {
-		return TranslateFindingResult{}, fmt.Errorf("marshal translation for finding %d: %w", findingID, err)
+		return FindingItem{}, fmt.Errorf("marshal translation for finding %d: %w", f.ID, err)
 	}
 	res, err := c.DB.ExecContext(ctx, `UPDATE kb.doc_review_findings
 	SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
 	WHERE id = $3`,
-		language, string(contentJSON), findingID,
+		language, string(contentJSON), f.ID,
 	)
 	if err != nil {
-		return TranslateFindingResult{}, fmt.Errorf("persist translation for finding %d: %w", findingID, err)
+		return FindingItem{}, fmt.Errorf("persist translation for finding %d: %w", f.ID, err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return TranslateFindingResult{}, fmt.Errorf("finding %d not found", findingID)
+		return FindingItem{}, fmt.Errorf("finding %d not found", f.ID)
 	}
-	logger.Info("finding translated on demand", "finding_id", findingID, "language", language)
-
-	return TranslateFindingResult{Finding: applyFindingTranslation(finding, content), Translated: true}, nil
+	return applyFindingTranslation(f, content), nil
 }
 
 // loadFindingWithMetadata loads one finding row (the same columns

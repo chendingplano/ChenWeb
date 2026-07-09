@@ -19,6 +19,12 @@
 // ── Helper: horizontal rule ──────────────────────────────────
 #let hrule = line(length: 100%, stroke: 0.5pt + clr-divider)
 
+// ── Helper: rendered section number for a heading, e.g. "4.1.3." ─────
+// Returns none when the heading has no numbering assigned.
+#let heading-number(it) = if it.numbering != none {
+  context numbering(it.numbering, ..counter(heading).at(it.location()))
+} else { none }
+
 // ── Helper: labelled metadata row ────────────────────────────
 #let meta-row(label, value) = grid(
   columns: (120pt, 1fr),
@@ -360,25 +366,41 @@
       fill: clr-accent,
       inset: (x: 12pt, y: 8pt),
       radius: 4pt,
-      text(fill: white, weight: "bold", size: 12pt, it.body),
+      text(fill: white, weight: "bold", size: 12pt, {
+        heading-number(it)
+        if it.numbering != none { h(6pt) }
+        it.body
+      }),
     )
     v(6pt)
   }
   show heading.where(level: 2): it => {
     v(12pt)
-    text(fill: clr-accent, weight: "bold", size: 11pt, it.body)
+    text(fill: clr-accent, weight: "bold", size: 11pt, {
+      heading-number(it)
+      if it.numbering != none { h(6pt) }
+      it.body
+    })
     v(2pt)
     hrule
     v(4pt)
   }
   show heading.where(level: 3): it => {
     v(10pt)
-    text(fill: clr-secondary, weight: "semibold", size: 10.5pt, it.body)
+    text(fill: clr-secondary, weight: "semibold", size: 10.5pt, {
+      heading-number(it)
+      if it.numbering != none { h(6pt) }
+      it.body
+    })
     v(3pt)
   }
   show heading.where(level: 4): it => {
     v(6pt)
-    text(fill: clr-muted, weight: "semibold", size: 9.5pt, it.body)
+    text(fill: clr-muted, weight: "semibold", size: 9.5pt, {
+      heading-number(it)
+      if it.numbering != none { h(6pt) }
+      it.body
+    })
     v(2pt)
   }
 
@@ -401,7 +423,8 @@
 
   // ── Table of Contents ───────────────────────────────────────
   heading(level: 1, "Table of Contents")
-  outline()
+  outline(title: none)
+  pagebreak()
 
   // ── Chapter 1 – Basic Information ───────────────────────────
   heading(level: 1, "Basic Information")

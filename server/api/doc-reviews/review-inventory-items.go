@@ -192,12 +192,13 @@ func (r *inventoryItemsReviewer) reviewItem(
 	}
 
 	var findings []ReviewFinding
+	var payload map[string]any
 	var cacheHitTokens, cacheMissTokens int
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		callInfo := docReviewCallInfo(ctx, map[string]any{"inv_item_id": di.view.ItemID})
-		loopFindings, loopUsage, loopErr := runToolUseReview(
+		loopFindings, loopPayload, loopUsage, loopErr := runToolUseReviewWithPayload(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
 			userCtx, tools, recordID, r.logger, "review_inventory_items", callInfo, "MID-20260706-007",
 		)
@@ -210,6 +211,7 @@ func (r *inventoryItemsReviewer) reviewItem(
 				"record_id", recordID, "item_index", index, "error", loopErr)
 		}
 		findings = loopFindings
+		payload = loopPayload
 	} else {
 		// AR2 window-first layout: the window is the document input; the rubric
 		// plus the per-item payload form the task tail. Without a window the
@@ -227,9 +229,15 @@ func (r *inventoryItemsReviewer) reviewItem(
 			return nil
 		}
 		findings = normalizeFindingsJSON(out)
+		payload = out
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
+
+	if analyses := parseInventoryItemAnalysesJSON(payload); len(analyses) > 0 {
+		findings = append(findings, inventoryItemAnalysesAsFindings(di, analyses)...)
+	}
+
 	loc := strings.Join(di.spans, ",")
 	for i := range findings {
 		findings[i].Pass = "P5"
@@ -257,6 +265,98 @@ func (r *inventoryItemsReviewer) reviewItem(
 		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
+}
+
+// InventoryItemAnalysis is one entry of the inventory-items reviewer's
+// mandatory per-match comparison record (prompt-review-inventory-items-v3
+// `analyses`), converted into first-class analysis rows in
+// kb.doc_review_findings.
+type InventoryItemAnalysis struct {
+	RelatedArtifactID string
+	RelatedRecordID   int64
+	Relationship      string
+	Summary           string
+}
+
+// parseInventoryItemAnalysesJSON extracts []InventoryItemAnalysis from the raw
+// JSON payload returned by the LLM. Expected shape: {"analyses": [...]}.
+func parseInventoryItemAnalysesJSON(payload map[string]any) []InventoryItemAnalysis {
+	if payload == nil {
+		return nil
+	}
+	raw, ok := payload["analyses"]
+	if !ok {
+		return nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]InventoryItemAnalysis, 0, len(arr))
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		summary := strings.TrimSpace(asString(m["summary"]))
+		if summary == "" {
+			continue
+		}
+		out = append(out, InventoryItemAnalysis{
+			RelatedArtifactID: strings.TrimSpace(asString(m["related_artifact_id"])),
+			RelatedRecordID:   int64(asFloat64(m["related_record_id"])),
+			Relationship:      strings.TrimSpace(asString(m["relationship"])),
+			Summary:           summary,
+		})
+	}
+	return out
+}
+
+func inventoryItemAnalysesAsFindings(di docInventoryItem, analyses []InventoryItemAnalysis) []ReviewFinding {
+	if len(analyses) == 0 {
+		return nil
+	}
+	loc := strings.Join(di.spans, ",")
+	out := make([]ReviewFinding, 0, len(analyses))
+	for _, a := range analyses {
+		summary := strings.TrimSpace(a.Summary)
+		if summary == "" {
+			continue
+		}
+		relatedID := strings.TrimSpace(a.RelatedArtifactID)
+		titleRelated := relatedID
+		if titleRelated == "" {
+			titleRelated = "unlinked match"
+		}
+		relationship := strings.TrimSpace(a.Relationship)
+		evidenceParts := []string{"inventory_item_under_review=" + di.view.ItemID}
+		if relatedID != "" {
+			evidenceParts = append(evidenceParts, "related_artifact_id="+relatedID)
+		}
+		if a.RelatedRecordID > 0 {
+			evidenceParts = append(evidenceParts, fmt.Sprintf("related_record_id=%d", a.RelatedRecordID))
+		}
+		if relationship != "" {
+			evidenceParts = append(evidenceParts, "relationship="+relationship)
+		}
+		out = append(out, ReviewFinding{
+			Pass:                 "P5",
+			Aspect:               "inventory_items",
+			Severity:             "info",
+			FindingType:          "analysis",
+			Title:                fmt.Sprintf("Inventory item comparison: %s vs %s", di.view.ItemID, titleRelated),
+			Description:          summary,
+			Evidence:             strings.Join(evidenceParts, "; "),
+			Location:             loc,
+			Confidence:           1.0,
+			ArtifactID:           di.view.ItemID,
+			RelatedArtifactID:    relatedID,
+			RelatedRecordID:      a.RelatedRecordID,
+			ResultKind:           "inventory_item_analysis",
+			AnalysisRelationship: relationship,
+		})
+	}
+	return out
 }
 
 // matchedInventoryItemsPayload serializes the matched candidates. Raw RRF

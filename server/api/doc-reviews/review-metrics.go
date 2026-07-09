@@ -227,13 +227,14 @@ func (r *metricsReviewer) reviewMetric(
 	}
 
 	var findings []ReviewFinding
+	var payload map[string]any
 	var cacheHitTokens, cacheMissTokens int
 	if cfg.MaxToolTurns > 0 && r.toolClient != nil {
 		tools := selectTools(r.toolRegistry, cfg.Tools)
 		// r.logger.Info("prompt", "promptName", cfg.PromptRef)
 		userCtx := artifactReviewToolUserContext(windowJSON, artifactReviewTaskText(cfg.PromptText, payloadJSON))
 		callInfo := docReviewCallInfo(ctx, map[string]any{"metric_id": dm.view.MetricID})
-		loopFindings, loopUsage, loopErr := runToolUseReview(
+		loopFindings, loopPayload, loopUsage, loopErr := runToolUseReviewWithPayload(
 			ctx, r.toolClient, cfg.ModelName, cfg, cfg.PromptText,
 			userCtx, tools, recordID, r.logger, "review_metrics", callInfo, "MID-20260706-011",
 		)
@@ -247,6 +248,7 @@ func (r *metricsReviewer) reviewMetric(
 			logEntry.Detail["error"] = loopErr.Error()
 		}
 		findings = loopFindings
+		payload = loopPayload
 	} else {
 		// AR2 window-first layout: the window is the document input; the rubric
 		// plus the per-metric payload form the task tail. Without a window the
@@ -267,9 +269,15 @@ func (r *metricsReviewer) reviewMetric(
 			return nil
 		}
 		findings = normalizeFindingsJSON(out)
+		payload = out
 		cacheHitTokens = reviewLLMCacheHitTokens(r.client)
 		cacheMissTokens = reviewLLMCacheMissTokens(r.client)
 	}
+
+	if analyses := parseMetricAnalysesJSON(payload); len(analyses) > 0 {
+		findings = append(findings, metricAnalysesAsFindings(dm, analyses)...)
+	}
+
 	loc := strings.Join(dm.spans, ",")
 	for i := range findings {
 		findings[i].Pass = "P5"
@@ -310,6 +318,97 @@ func (r *metricsReviewer) reviewMetric(
 		"cache_miss_tokens", cacheMissTokens,
 	)
 	return findings
+}
+
+// MetricAnalysis is one entry of the metrics reviewer's mandatory per-match
+// comparison record (prompt-review-metrics-v3 `analyses`), converted into
+// first-class analysis rows in kb.doc_review_findings.
+type MetricAnalysis struct {
+	RelatedArtifactID string
+	RelatedRecordID   int64
+	Relationship      string
+	Summary           string
+}
+
+// parseMetricAnalysesJSON extracts []MetricAnalysis from the raw JSON payload
+// returned by the LLM. Expected shape: {"analyses": [...]}.
+func parseMetricAnalysesJSON(payload map[string]any) []MetricAnalysis {
+	if payload == nil {
+		return nil
+	}
+	raw, ok := payload["analyses"]
+	if !ok {
+		return nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]MetricAnalysis, 0, len(arr))
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		summary := strings.TrimSpace(asString(m["summary"]))
+		if summary == "" {
+			continue
+		}
+		out = append(out, MetricAnalysis{
+			RelatedArtifactID: strings.TrimSpace(asString(m["related_artifact_id"])),
+			RelatedRecordID:   int64(asFloat64(m["related_record_id"])),
+			Relationship:      strings.TrimSpace(asString(m["relationship"])),
+			Summary:           summary,
+		})
+	}
+	return out
+}
+
+func metricAnalysesAsFindings(dm docMetric, analyses []MetricAnalysis) []ReviewFinding {
+	if len(analyses) == 0 {
+		return nil
+	}
+	loc := strings.Join(dm.spans, ",")
+	out := make([]ReviewFinding, 0, len(analyses))
+	for _, a := range analyses {
+		summary := strings.TrimSpace(a.Summary)
+		if summary == "" {
+			continue
+		}
+		relatedID := strings.TrimSpace(a.RelatedArtifactID)
+		titleRelated := relatedID
+		if titleRelated == "" {
+			titleRelated = "unlinked match"
+		}
+		relationship := strings.TrimSpace(a.Relationship)
+		evidenceParts := []string{"metric_under_review=" + dm.view.MetricID}
+		if relatedID != "" {
+			evidenceParts = append(evidenceParts, "related_artifact_id="+relatedID)
+		}
+		if a.RelatedRecordID > 0 {
+			evidenceParts = append(evidenceParts, fmt.Sprintf("related_record_id=%d", a.RelatedRecordID))
+		}
+		if relationship != "" {
+			evidenceParts = append(evidenceParts, "relationship="+relationship)
+		}
+		out = append(out, ReviewFinding{
+			Pass:                 "P5",
+			Aspect:               "metrics",
+			Severity:             "info",
+			FindingType:          "analysis",
+			Title:                fmt.Sprintf("Metric comparison: %s vs %s", dm.view.MetricID, titleRelated),
+			Description:          summary,
+			Evidence:             strings.Join(evidenceParts, "; "),
+			Location:             loc,
+			Confidence:           1.0,
+			ArtifactID:           dm.view.MetricID,
+			RelatedArtifactID:    relatedID,
+			RelatedRecordID:      a.RelatedRecordID,
+			ResultKind:           "metric_analysis",
+			AnalysisRelationship: relationship,
+		})
+	}
+	return out
 }
 
 func (r *metricsReviewer) saveReviewLog(ctx context.Context, entry ReviewLogEntry) {

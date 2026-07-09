@@ -356,23 +356,36 @@ func isArtifactAnchoredAspect(aspect string) bool {
 }
 
 // buildArtifactGroupsArg renders the Typst artifact-group(...) array for one
-// aspect-section: af is grouped by ArtifactID in first-seen order. For the
-// "provisions" aspect, artifact IDs that have analyses (provisionAnalyses)
+// aspect-section: af is grouped by ArtifactID, ordered by each artifact's
+// earliest kb.doc_review_findings.id (not by first appearance in the
+// severity-sorted af slice). For the "provisions" aspect, artifact IDs that
+// have analyses (provisionAnalyses)
 // but no finding are unioned in (sorted, appended after the finding-derived
 // IDs) so "no conflict" comparisons are still visible (ADR 2026070602 / ADR
 // 2026062203 §1.2). findingIdx is the shared ordinal counter also used by the
 // flat-findings path, threaded by pointer so numbering stays continuous.
 func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]ProvisionAnalysis, aspect string, findingIdx *int) string {
 	artifactFindingMap := map[string][]ReportFinding{}
+	minFindingID := map[string]int64{}
 	var artifactIDs []string
 	seen := map[string]bool{}
 	for _, f := range af {
 		if !seen[f.ArtifactID] {
 			seen[f.ArtifactID] = true
 			artifactIDs = append(artifactIDs, f.ArtifactID)
+			minFindingID[f.ArtifactID] = f.ID
+		} else if f.ID < minFindingID[f.ArtifactID] {
+			minFindingID[f.ArtifactID] = f.ID
 		}
 		artifactFindingMap[f.ArtifactID] = append(artifactFindingMap[f.ArtifactID], f)
 	}
+	// af arrives severity-first (see loadReportFindingsWithMetadata's ORDER BY),
+	// which scrambles cross-artifact order. Re-order groups by each artifact's
+	// earliest kb.doc_review_findings.id instead, so artifacts appear in the
+	// order they were reviewed/created rather than by finding severity.
+	sort.Slice(artifactIDs, func(i, j int) bool {
+		return minFindingID[artifactIDs[i]] < minFindingID[artifactIDs[j]]
+	})
 
 	if aspect == "provisions" && len(provisionAnalyses) > 0 {
 		analysisIDs := make([]string, 0, len(provisionAnalyses))

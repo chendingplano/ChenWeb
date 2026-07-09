@@ -4,7 +4,6 @@
 	import {
 		getReport,
 		getRequest,
-		listLanguages,
 		updateFinding,
 		translateFinding,
 		regenerateReport,
@@ -64,7 +63,6 @@
 	let baseFindings = $state<FindingItem[]>([]);
 	let findings = $state<FindingItem[]>([]);
 	let packages = $state<ReviewPackageInfo[]>([]);
-	let languages = $state<string[]>(['en']);
 	let selectedLanguage = $state('en');
 	let supportedLanguages = $state<string[]>(['en']);
 	let defaultLanguage = $state('en');
@@ -327,17 +325,9 @@
 				supportedLanguages = ['en'];
 				defaultLanguage = 'en';
 			}
-			try {
-				const configuredLanguages = await listLanguages();
-				languages = configuredLanguages.length > 0 ? configuredLanguages : ['en'];
-				if (!languages.includes(selectedLanguage)) {
-					selectedLanguage = languages.includes(defaultLanguage) ? defaultLanguage : (languages[0] ?? defaultLanguage);
-					localStorage.setItem(LANG_STORAGE_KEY, selectedLanguage);
-				}
-			} catch {
-				languages = ['en'];
-				selectedLanguage = defaultLanguage;
-				localStorage.setItem(LANG_STORAGE_KEY, defaultLanguage);
+			if (!supportedLanguages.includes(selectedLanguage)) {
+				selectedLanguage = supportedLanguages.includes(defaultLanguage) ? defaultLanguage : (supportedLanguages[0] ?? defaultLanguage);
+				localStorage.setItem(LANG_STORAGE_KEY, selectedLanguage);
 			}
 			const report = await getReport(reportId);
 			inputRecordId = report?.input_record_id ?? report?.report_json?.meta?.document_record_id ?? null;
@@ -621,7 +611,7 @@
 				<label class="language-picker">
 					<span>Language</span>
 					<select bind:value={selectedLanguage} onchange={reloadFindingsForLanguage} disabled={languageLoading}>
-						{#each languages as lang (lang)}
+						{#each supportedLanguages as lang (lang)}
 							<option value={lang}>{lang}</option>
 						{/each}
 					</select>

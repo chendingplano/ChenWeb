@@ -181,6 +181,95 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 	}
 }
 
+func TestReviewItem_ReturnsAnalysesAsFindings(t *testing.T) {
+	fake := &fakeJSONExtractor{
+		out: map[string]any{
+			"findings": []any{},
+			"analyses": []any{
+				map[string]any{
+					"related_artifact_id": "2_inv_9",
+					"related_record_id":   float64(2),
+					"relationship":        "same_subject",
+					"summary":             "Same product, identical specs, no conflict.",
+				},
+			},
+		},
+	}
+	r := &inventoryItemsReviewer{
+		client: fake,
+		logger: loggerutil.CreateDefaultLogger("TEST_INVENTORY"),
+	}
+	doc := docInventoryItem{
+		view:  inventoryItemView{ItemID: "1_inv_1"},
+		spans: []string{"20:24"},
+	}
+
+	findings := r.reviewItem(context.Background(), 1, 0, ReviewerConfig{
+		ModelName:  "inventory-model",
+		PromptText: "compare items",
+		PromptRef:  "prompt-review-inventory-items-v3.md",
+	}, doc, nil, "", false)
+
+	if len(findings) != 1 {
+		t.Fatalf("findings = %d, want 1 analysis finding: %+v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Pass != "P5" || f.Aspect != "inventory_items" || f.ArtifactID != "1_inv_1" {
+		t.Fatalf("analysis identity = pass:%q aspect:%q artifact:%q, want P5/inventory_items/1_inv_1", f.Pass, f.Aspect, f.ArtifactID)
+	}
+	if f.FindingType != "analysis" || f.Severity != "info" {
+		t.Fatalf("analysis type/severity = %q/%q, want analysis/info", f.FindingType, f.Severity)
+	}
+	if f.RelatedArtifactID != "2_inv_9" || f.RelatedRecordID != 2 {
+		t.Fatalf("analysis related = %q/%d, want 2_inv_9/2", f.RelatedArtifactID, f.RelatedRecordID)
+	}
+	if f.Location != "20:24" {
+		t.Fatalf("analysis location = %q, want 20:24", f.Location)
+	}
+	if !strings.Contains(f.Title, "1_inv_1") || !strings.Contains(f.Title, "2_inv_9") {
+		t.Fatalf("analysis title = %q, want both item ids", f.Title)
+	}
+	if f.Description != "Same product, identical specs, no conflict." {
+		t.Fatalf("analysis description = %q", f.Description)
+	}
+	if f.ResultKind != "inventory_item_analysis" || f.AnalysisRelationship != "same_subject" {
+		t.Fatalf("analysis metadata = result_kind:%q relationship:%q, want inventory_item_analysis/same_subject", f.ResultKind, f.AnalysisRelationship)
+	}
+}
+
+func TestParseInventoryItemAnalysesJSON(t *testing.T) {
+	payload := map[string]any{
+		"findings": []any{},
+		"analyses": []any{
+			map[string]any{
+				"related_artifact_id": "2_inv_9",
+				"related_record_id":   float64(2),
+				"relationship":        "same_subject",
+				"summary":             "Identical specs, no conflict.",
+			},
+			map[string]any{
+				"relationship": "unrelated",
+				"summary":      "",
+			},
+		},
+	}
+
+	got := parseInventoryItemAnalysesJSON(payload)
+	if len(got) != 1 {
+		t.Fatalf("analyses = %d, want 1 (empty summary should be skipped): %+v", len(got), got)
+	}
+	a := got[0]
+	if a.RelatedArtifactID != "2_inv_9" || a.RelatedRecordID != 2 || a.Relationship != "same_subject" {
+		t.Errorf("analysis = %+v, want related_artifact_id=2_inv_9 related_record_id=2 relationship=same_subject", a)
+	}
+}
+
+func TestParseInventoryItemAnalysesJSON_NoAnalysesKey(t *testing.T) {
+	if got := parseInventoryItemAnalysesJSON(map[string]any{"findings": []any{}}); got != nil {
+		t.Errorf("analyses = %+v, want nil when key absent", got)
+	}
+}
+
 func TestRawJSONArrayOrNil(t *testing.T) {
 	cases := []struct {
 		in   string

@@ -279,6 +279,96 @@ func TestReviewMetric_LogsNoIssue(t *testing.T) {
 	}
 }
 
+func TestReviewMetric_ReturnsAnalysesAsFindings(t *testing.T) {
+	fake := &fakeJSONExtractor{
+		out: map[string]any{
+			"findings": []any{},
+			"analyses": []any{
+				map[string]any{
+					"related_artifact_id": "2_m_9",
+					"related_record_id":   float64(2),
+					"relationship":        "same_subject",
+					"summary":             "Same quantity, unit-equivalent values, no conflict.",
+				},
+			},
+		},
+	}
+	r := &metricsReviewer{
+		client: fake,
+		logger: loggerutil.CreateDefaultLogger("TEST_METRICS"),
+	}
+	doc := docMetric{
+		id:    7,
+		view:  metricView{MetricID: "1_m_1"},
+		spans: []string{"20:24"},
+	}
+
+	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
+		ModelName:  "metric-model",
+		PromptText: "compare metrics",
+		PromptRef:  "prompt-review-metrics-v3.md",
+	}, doc, nil, "", false)
+
+	if len(findings) != 1 {
+		t.Fatalf("findings = %d, want 1 analysis finding: %+v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Pass != "P5" || f.Aspect != "metrics" || f.ArtifactID != "1_m_1" {
+		t.Fatalf("analysis identity = pass:%q aspect:%q artifact:%q, want P5/metrics/1_m_1", f.Pass, f.Aspect, f.ArtifactID)
+	}
+	if f.FindingType != "analysis" || f.Severity != "info" {
+		t.Fatalf("analysis type/severity = %q/%q, want analysis/info", f.FindingType, f.Severity)
+	}
+	if f.RelatedArtifactID != "2_m_9" || f.RelatedRecordID != 2 {
+		t.Fatalf("analysis related = %q/%d, want 2_m_9/2", f.RelatedArtifactID, f.RelatedRecordID)
+	}
+	if f.Location != "20:24" {
+		t.Fatalf("analysis location = %q, want 20:24", f.Location)
+	}
+	if !strings.Contains(f.Title, "1_m_1") || !strings.Contains(f.Title, "2_m_9") {
+		t.Fatalf("analysis title = %q, want both metric ids", f.Title)
+	}
+	if f.Description != "Same quantity, unit-equivalent values, no conflict." {
+		t.Fatalf("analysis description = %q", f.Description)
+	}
+	if f.ResultKind != "metric_analysis" || f.AnalysisRelationship != "same_subject" {
+		t.Fatalf("analysis metadata = result_kind:%q relationship:%q, want metric_analysis/same_subject", f.ResultKind, f.AnalysisRelationship)
+	}
+}
+
+func TestParseMetricAnalysesJSON(t *testing.T) {
+	payload := map[string]any{
+		"findings": []any{},
+		"analyses": []any{
+			map[string]any{
+				"related_artifact_id": "2_m_9",
+				"related_record_id":   float64(2),
+				"relationship":        "same_subject",
+				"summary":             "Identical value, no conflict.",
+			},
+			map[string]any{
+				"relationship": "unrelated",
+				"summary":      "",
+			},
+		},
+	}
+
+	got := parseMetricAnalysesJSON(payload)
+	if len(got) != 1 {
+		t.Fatalf("analyses = %d, want 1 (empty summary should be skipped): %+v", len(got), got)
+	}
+	a := got[0]
+	if a.RelatedArtifactID != "2_m_9" || a.RelatedRecordID != 2 || a.Relationship != "same_subject" {
+		t.Errorf("analysis = %+v, want related_artifact_id=2_m_9 related_record_id=2 relationship=same_subject", a)
+	}
+}
+
+func TestParseMetricAnalysesJSON_NoAnalysesKey(t *testing.T) {
+	if got := parseMetricAnalysesJSON(map[string]any{"findings": []any{}}); got != nil {
+		t.Errorf("analyses = %+v, want nil when key absent", got)
+	}
+}
+
 func TestBuildReviewers_MetricsUsesDocReviewerMaxTasks(t *testing.T) {
 	t.Setenv("MAX_DOC_REVIEWER_TASKS", "4")
 

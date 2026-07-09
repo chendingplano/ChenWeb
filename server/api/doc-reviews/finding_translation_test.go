@@ -585,15 +585,102 @@ func TestLocalizeFindingUsesStoredTranslationWithoutLLM(t *testing.T) {
 	}
 }
 
-func TestLocalizeFindingFallsBackToCanonicalEnglishWhenTranslationMissing(t *testing.T) {
-	ctrl := &DocReviewController{}
+func TestLocalizeFindingTranslatesOnDemandWhenTranslationMissing(t *testing.T) {
+	// Page-level (GetRequestWithFindings ?language=) localization always
+	// translates and persists on a cache miss - unlike the per-finding
+	// TranslateFinding endpoint, it has no confirm/AUTO_TRANSLATE_FINDINGS
+	// gate, since the page-level language selection is itself the user's
+	// confirmation.
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
+	SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
+	WHERE id = $3`)).
+		WithArgs("zh", sqlmock.AnyArg(), int64(8)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	translator := &fakeFindingTranslator{
+		translateOut: map[string]FindingLocalizedContent{
+			"zh": {Title: "翻译标题", Description: "翻译描述", Suggestion: "翻译建议"},
+		},
+	}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
 	f := FindingItem{ID: 8, Title: "Canonical title", Description: "Canonical desc", Suggestion: "Canonical suggestion"}
 	got, err := ctrl.localizeFinding(context.Background(), "zh", f, []byte(`{"i18n":{"schema_version":1,"translations":{"en":{"title":"Canonical title","description":"Canonical desc","suggestion":"Canonical suggestion","provenance":"canonical"}}}}`))
 	if err != nil {
 		t.Fatalf("localizeFinding: %v", err)
 	}
-	if got.Title != "Canonical title" || got.Description != "Canonical desc" || got.Suggestion != "Canonical suggestion" {
+	if got.Title != "翻译标题" || got.Description != "翻译描述" || got.Suggestion != "翻译建议" {
 		t.Fatalf("localized finding=%#v", got)
+	}
+	if len(translator.translateCalls) != 1 || translator.translateCalls[0] != "zh" {
+		t.Fatalf("translateCalls = %v, want [zh]", translator.translateCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestLocalizeFindingsTranslatesConcurrently(t *testing.T) {
+	// The page-level Language dropdown calls localizeFindings for every
+	// finding on the page at once; without a worker pool this serializes one
+	// LLM round trip per untranslated finding, which is what made switching
+	// languages slow. Assert it actually fans out under MAX_DOC_REVIEWER_TASKS.
+	t.Setenv("MAX_DOC_REVIEWER_TASKS", "2")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	mock.MatchExpectationsInOrder(false)
+
+	const n = 4
+	for i := int64(1); i <= n; i++ {
+		mock.ExpectExec(regexp.QuoteMeta(`UPDATE kb.doc_review_findings
+	SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb)
+	WHERE id = $3`)).
+			WithArgs("zh", sqlmock.AnyArg(), i).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+
+	translator := &concurrencyFindingTranslator{
+		translateOut: map[string]FindingLocalizedContent{
+			"zh": {Title: "翻译标题", Description: "翻译描述", Suggestion: "翻译建议"},
+		},
+		delay: 40 * time.Millisecond,
+	}
+	ctrl := &DocReviewController{DB: db, Translator: translator}
+
+	findings := make([]FindingItem, n)
+	for i := range findings {
+		findings[i] = FindingItem{ID: int64(i + 1), Title: "Canonical"}
+	}
+
+	out, err := ctrl.localizeFindings(context.Background(), "zh", findings, map[int64][]byte{})
+	if err != nil {
+		t.Fatalf("localizeFindings: %v", err)
+	}
+	if len(out) != n {
+		t.Fatalf("len(out)=%d, want %d", len(out), n)
+	}
+	for _, f := range out {
+		if f.Title != "翻译标题" {
+			t.Fatalf("finding %d not translated: %#v", f.ID, f)
+		}
+	}
+	if got := atomic.LoadInt32(&translator.maxSeen); got < 2 {
+		t.Fatalf("max concurrent translations=%d, want at least 2", got)
+	}
+	if got := atomic.LoadInt32(&translator.maxSeen); got > 2 {
+		t.Fatalf("max concurrent translations=%d, want at most 2", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
 	}
 }
 
