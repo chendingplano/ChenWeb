@@ -36,6 +36,35 @@ max_findings = [1,2,3]
 	}
 }
 
+func TestResolveOutputLimitsRootPartialOverrideInheritsBuiltIn(t *testing.T) {
+	cfg, err := parseDocReviewConfig([]byte(`max_findings = [10,20,30]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotFindings, gotAnalyses := cfg.ResolveOutputLimits("grammar_spelling", 3)
+	if gotFindings != 30 || gotAnalyses != 300 {
+		t.Fatalf("limits = %d/%d, want 30/300", gotFindings, gotAnalyses)
+	}
+}
+
+func TestResolveOutputLimitsReviewerAnalysesOverrideInheritsRootFindings(t *testing.T) {
+	cfg, err := parseDocReviewConfig([]byte(`
+max_findings = [10,20,30]
+max_analyses = [11,21,31]
+[reviewers.grammar_spelling]
+max_analyses = [1,2,3]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotFindings, gotAnalyses := cfg.ResolveOutputLimits("grammar_spelling", 2)
+	if gotFindings != 20 || gotAnalyses != 2 {
+		t.Fatalf("limits = %d/%d, want 20/2", gotFindings, gotAnalyses)
+	}
+}
+
 func TestValidateOutputLimitsRejectsMalformedArrays(t *testing.T) {
 	cases := []string{
 		`max_findings=[1,2]`,
