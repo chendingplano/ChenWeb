@@ -1,6 +1,11 @@
 package docreviews
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+)
 
 func TestBuildReviewers_FiltersToRequestedAspects(t *testing.T) {
 	p := &ReviewProcessor{
@@ -84,5 +89,49 @@ func TestBuildReviewers_PreservesArtifactRetrievalMatchLimitsAboveTen(t *testing
 	}
 	if seen != 4 {
 		t.Fatalf("artifact reviewers found = %d, want 4", seen)
+	}
+}
+
+func TestBuildReviewers_PropagatesDepthSpecificOutputLimits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc-review.local.toml")
+	if err := os.WriteFile(path, []byte(`
+max_findings = [10,20,30]
+max_analyses = [11,21,31]
+[reviewers.grammar_spelling]
+enabled = true
+checked = true
+group = "P1"
+model = "test-model"
+prompt = "grammar-spelling.txt"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOC_REVIEW_CONFIG_FILE", path)
+
+	oldOnce, oldCfg, oldErr := docReviewCfgOnce, docReviewCfg, docReviewCfgErr
+	docReviewCfgOnce = sync.Once{}
+	docReviewCfg = nil
+	docReviewCfgErr = nil
+	t.Cleanup(func() {
+		docReviewCfgOnce = oldOnce
+		docReviewCfg = oldCfg
+		docReviewCfgErr = oldErr
+	})
+
+	p := &ReviewProcessor{
+		ReviewDepth:       2,
+		GrammarClient:     &fakeJSONExtractor{},
+		GrammarModelName:  "test-model",
+		GrammarPromptText: "prompt",
+	}
+
+	runners := p.buildReviewers(DocMetadataInputRecord{})
+	if len(runners) != 1 {
+		t.Fatalf("buildReviewers returned %d runners, want 1", len(runners))
+	}
+
+	cfg := runners[0].cfg
+	if cfg.MaxFindings != 20 || cfg.MaxAnalyses != 21 || cfg.ReviewDepth != 2 {
+		t.Fatalf("reviewer cfg limits/depth = %d/%d depth=%d, want 20/21 depth=2", cfg.MaxFindings, cfg.MaxAnalyses, cfg.ReviewDepth)
 	}
 }

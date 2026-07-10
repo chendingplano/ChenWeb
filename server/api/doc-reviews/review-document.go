@@ -170,6 +170,9 @@ type ReviewerConfig struct {
 	ModelName     string   // resolved model name
 	PromptText    string   // prompt body
 	PromptRef     string   // prompt file name (for logging)
+	MaxFindings   int      // resolved max findings limit for this reviewer/depth
+	MaxAnalyses   int      // resolved max analyses limit for this reviewer/depth
+	ReviewDepth   int      // request review depth used to resolve output limits
 	MaxToolTurns  int      // 0 = one-shot, >0 = tool-use conversation loop
 	MaxToolTokens int      // cumulative token budget for the tool-use loop (DR10c); 0 = code default
 	Tools         []string // tool names available (only when MaxToolTurns > 0)
@@ -776,6 +779,18 @@ func resolveReviewerBudget(aspect, group string) (maxToolTurns, maxToolTokens in
 	return resolved.MaxToolTurns, resolved.MaxToolTokens, resolved.Tools
 }
 
+func (p *ReviewProcessor) resolveReviewerOutputLimits(aspect string) (maxFindings, maxAnalyses int) {
+	cfg, err := GetDocReviewConfig()
+	if err != nil {
+		if p.Logger != nil {
+			p.Logger.Warn("doc-review config load failed; using built-in output limits",
+				"aspect", aspect, "review_depth", p.ReviewDepth, "error", err)
+		}
+		return (&DocReviewConfig{}).ResolveOutputLimits(aspect, p.ReviewDepth)
+	}
+	return cfg.ResolveOutputLimits(aspect, p.ReviewDepth)
+}
+
 // resolveReviewerToolClient builds a tool-capable chat client when the
 // reviewer's resolved MaxToolTurns > 0. Returns nil when the reviewer is
 // configured for one-shot or no model ref resolves.
@@ -1301,6 +1316,19 @@ type reviewRunner struct {
 	cfg      ReviewerConfig
 }
 
+func (p *ReviewProcessor) reviewerConfig(aspect, modelName, promptText, promptRef string) ReviewerConfig {
+	maxFindings, maxAnalyses := p.resolveReviewerOutputLimits(aspect)
+	return ReviewerConfig{
+		Enabled:     true,
+		ModelName:   modelName,
+		PromptText:  promptText,
+		PromptRef:   promptRef,
+		MaxFindings: maxFindings,
+		MaxAnalyses: maxAnalyses,
+		ReviewDepth: p.ReviewDepth,
+	}
+}
+
 // buildReviewers returns the enabled reviewers for this run.
 func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunner {
 	var runners []reviewRunner
@@ -1313,12 +1341,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.GrammarModelName,
-				PromptText: p.GrammarPromptText,
-				PromptRef:  p.GrammarPromptRef,
-			},
+			cfg: p.reviewerConfig("grammar_spelling", p.GrammarModelName, p.GrammarPromptText, p.GrammarPromptRef),
 		})
 	}
 
@@ -1330,12 +1353,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.ToneVoiceModelName,
-				PromptText: p.ToneVoicePromptText,
-				PromptRef:  p.ToneVoicePromptRef,
-			},
+			cfg: p.reviewerConfig("tone_voice", p.ToneVoiceModelName, p.ToneVoicePromptText, p.ToneVoicePromptRef),
 		})
 	}
 
@@ -1347,12 +1365,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.FormattingModelName,
-				PromptText: p.FormattingPromptText,
-				PromptRef:  p.FormattingPromptRef,
-			},
+			cfg: p.reviewerConfig("formatting_consistency", p.FormattingModelName, p.FormattingPromptText, p.FormattingPromptRef),
 		})
 	}
 
@@ -1364,12 +1377,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.ReadabilityModelName,
-				PromptText: p.ReadabilityPromptText,
-				PromptRef:  p.ReadabilityPromptRef,
-			},
+			cfg: p.reviewerConfig("readability", p.ReadabilityModelName, p.ReadabilityPromptText, p.ReadabilityPromptRef),
 		})
 	}
 
@@ -1381,12 +1389,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.LocalizationModelName,
-				PromptText: p.LocalizationPromptText,
-				PromptRef:  p.LocalizationPromptRef,
-			},
+			cfg: p.reviewerConfig("localization", p.LocalizationModelName, p.LocalizationPromptText, p.LocalizationPromptRef),
 		})
 	}
 
@@ -1398,12 +1401,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.LogicalFlowModelName,
-				PromptText: p.LogicalFlowPromptText,
-				PromptRef:  p.LogicalFlowPromptRef,
-			},
+			cfg: p.reviewerConfig("logical_flow", p.LogicalFlowModelName, p.LogicalFlowPromptText, p.LogicalFlowPromptRef),
 		})
 	}
 
@@ -1415,12 +1413,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.HeadingHierarchyModelName,
-				PromptText: p.HeadingHierarchyPromptText,
-				PromptRef:  p.HeadingHierarchyPromptRef,
-			},
+			cfg: p.reviewerConfig("heading_hierarchy", p.HeadingHierarchyModelName, p.HeadingHierarchyPromptText, p.HeadingHierarchyPromptRef),
 		})
 	}
 
@@ -1432,12 +1425,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.NavigabilityModelName,
-				PromptText: p.NavigabilityPromptText,
-				PromptRef:  p.NavigabilityPromptRef,
-			},
+			cfg: p.reviewerConfig("navigability", p.NavigabilityModelName, p.NavigabilityPromptText, p.NavigabilityPromptRef),
 		})
 	}
 
@@ -1449,12 +1437,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.SectionBalanceModelName,
-				PromptText: p.SectionBalancePromptText,
-				PromptRef:  p.SectionBalancePromptRef,
-			},
+			cfg: p.reviewerConfig("section_balance", p.SectionBalanceModelName, p.SectionBalancePromptText, p.SectionBalancePromptRef),
 		})
 	}
 
@@ -1466,12 +1449,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.ModularityModelName,
-				PromptText: p.ModularityPromptText,
-				PromptRef:  p.ModularityPromptRef,
-			},
+			cfg: p.reviewerConfig("modularity", p.ModularityModelName, p.ModularityPromptText, p.ModularityPromptRef),
 		})
 	}
 
@@ -1483,12 +1461,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.CompletenessModelName,
-				PromptText: p.CompletenessPromptText,
-				PromptRef:  p.CompletenessPromptRef,
-			},
+			cfg: p.reviewerConfig("completeness", p.CompletenessModelName, p.CompletenessPromptText, p.CompletenessPromptRef),
 		})
 	}
 
@@ -1500,12 +1473,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.CorrectnessModelName,
-				PromptText: p.CorrectnessPromptText,
-				PromptRef:  p.CorrectnessPromptRef,
-			},
+			cfg: p.reviewerConfig("correctness", p.CorrectnessModelName, p.CorrectnessPromptText, p.CorrectnessPromptRef),
 		})
 	}
 
@@ -1517,12 +1485,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.ClarityModelName,
-				PromptText: p.ClarityPromptText,
-				PromptRef:  p.ClarityPromptRef,
-			},
+			cfg: p.reviewerConfig("clarity", p.ClarityModelName, p.ClarityPromptText, p.ClarityPromptRef),
 		})
 	}
 
@@ -1534,12 +1497,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.ConcisenessModelName,
-				PromptText: p.ConcisenessPromptText,
-				PromptRef:  p.ConcisenessPromptRef,
-			},
+			cfg: p.reviewerConfig("conciseness", p.ConcisenessModelName, p.ConcisenessPromptText, p.ConcisenessPromptRef),
 		})
 	}
 
@@ -1551,12 +1509,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.RelevanceModelName,
-				PromptText: p.RelevancePromptText,
-				PromptRef:  p.RelevancePromptRef,
-			},
+			cfg: p.reviewerConfig("relevance", p.RelevanceModelName, p.RelevancePromptText, p.RelevancePromptRef),
 		})
 	}
 
@@ -1568,12 +1521,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.CurrencyModelName,
-				PromptText: p.CurrencyPromptText,
-				PromptRef:  p.CurrencyPromptRef,
-			},
+			cfg: p.reviewerConfig("currency", p.CurrencyModelName, p.CurrencyPromptText, p.CurrencyPromptRef),
 		})
 	}
 
@@ -1585,12 +1533,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.ExamplesModelName,
-				PromptText: p.ExamplesPromptText,
-				PromptRef:  p.ExamplesPromptRef,
-			},
+			cfg: p.reviewerConfig("examples", p.ExamplesModelName, p.ExamplesPromptText, p.ExamplesPromptRef),
 		})
 	}
 
@@ -1602,12 +1545,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.DiagramsModelName,
-				PromptText: p.DiagramsPromptText,
-				PromptRef:  p.DiagramsPromptRef,
-			},
+			cfg: p.reviewerConfig("diagrams", p.DiagramsModelName, p.DiagramsPromptText, p.DiagramsPromptRef),
 		})
 	}
 
@@ -1619,12 +1557,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore: SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:   p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				ModelName:  p.TestableClaimsModelName,
-				PromptText: p.TestableClaimsPromptText,
-				PromptRef:  p.TestableClaimsPromptRef,
-			},
+			cfg: p.reviewerConfig("testable_claims", p.TestableClaimsModelName, p.TestableClaimsPromptText, p.TestableClaimsPromptRef),
 		})
 	}
 
