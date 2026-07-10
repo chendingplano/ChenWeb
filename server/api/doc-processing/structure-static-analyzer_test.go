@@ -873,6 +873,38 @@ func TestStaticAnalyzer_MergesEnglishStyleParagraphLines(t *testing.T) {
 	}
 }
 
+func TestStaticAnalyzer_DoesNotMergeTwoCompleteChineseSentences(t *testing.T) {
+	// Regression for a real bug: record 244 page 8 had two independent,
+	// complete instructions merged into one line because the first one's
+	// text happened to run close to the page's right margin (matching the
+	// "near line end" geometry heuristic) even though it already ends with
+	// a sentence-terminal "。". Geometry alone can't distinguish "this line
+	// wraps into the next" from "this line is just wide and coincidentally
+	// finished a sentence".
+	body := strings.Join([]string{
+		"10\t1\tparagraph\tunknown-font\t12\t[112,203,905,234]\t将袖带连接到 Y 连接器的适当端头，环绕在一个适当大小的罐子或瓶子上。将 Y 连接器的第三根支脚连接到高质量的已知压力标准。",
+		"11\t1\tparagraph\tunknown-font\t12\t[112,235,905,284]\t将血压计加压至250 mmHg，与压力标准做比较，以不高于每秒10 mmHg的速率释放压力，停下来检查在250 mmHg、200 mmHg、150 mmHg、100 mmHg和50 mmHg下的血压。如不符合规定的校准值，须请厂方维修。",
+	}, "\n")
+
+	out, err := analyzeStaticStructure([]byte(body), nil)
+	if err != nil {
+		t.Fatalf("analyzeStaticStructure: %v", err)
+	}
+	if got := len(out.Lines); got != 2 {
+		t.Fatalf("len(Lines)=%d, want 2 (lines must stay separate)", got)
+	}
+	gotContent := map[int]string{}
+	for _, line := range out.Lines {
+		gotContent[line.LineNo] = line.Content
+	}
+	if got := gotContent[10]; got != "将袖带连接到 Y 连接器的适当端头，环绕在一个适当大小的罐子或瓶子上。将 Y 连接器的第三根支脚连接到高质量的已知压力标准。" {
+		t.Fatalf("line10 content=%q, should be unchanged", got)
+	}
+	if got := gotContent[11]; got != "将血压计加压至250 mmHg，与压力标准做比较，以不高于每秒10 mmHg的速率释放压力，停下来检查在250 mmHg、200 mmHg、150 mmHg、100 mmHg和50 mmHg下的血压。如不符合规定的校准值，须请厂方维修。" {
+		t.Fatalf("line11 content=%q, should be unchanged", got)
+	}
+}
+
 func TestStaticAnalyzer_HandleEvent_WritesMergeOnlyOverrideOutput(t *testing.T) {
 	tmp := t.TempDir()
 	recordID := int64(9012)

@@ -1136,6 +1136,17 @@ func mergeStaticParagraphLines(lines []staticInputLine, corrected map[int]string
 			continue
 		}
 
+		// A line that already ends with sentence-terminal punctuation is a
+		// complete paragraph on its own. It can still look like an
+		// unfinished wrap purely by geometry (its text happens to run
+		// close to the page's line-end margin), so the geometry checks
+		// alone are not enough to rule out merging an unrelated following
+		// paragraph into it.
+		if isStaticSentenceEnd(cur.Content) {
+			merged = append(merged, cur)
+			continue
+		}
+
 		parts := []string{strings.TrimSpace(cur.Content)}
 		bbox := curGeom
 		tailGeom := curGeom
@@ -1156,6 +1167,11 @@ func mergeStaticParagraphLines(lines []staticInputLine, corrected map[int]string
 			bbox = unionStaticLineGeometry(bbox, nextGeom)
 			tailGeom = nextGeom
 			lastIdx = j
+			if isStaticSentenceEnd(next.Content) {
+				// The merged text now ends a complete sentence; stop
+				// before pulling in what would be a new paragraph.
+				break
+			}
 		}
 
 		if lastIdx == i {
@@ -1265,6 +1281,23 @@ func parseStaticLineGeometry(raw string) (staticLineGeometry, bool) {
 
 func isStaticParagraphStart(geom staticLineGeometry, layout staticPageLayout) bool {
 	return isStaticNearLineStart(geom, layout) || geom.X1 > layout.LineStart+layout.StartTol
+}
+
+// isStaticSentenceEnd reports whether content already ends with
+// sentence-terminal punctuation (Chinese or ASCII). A line ending this way
+// is a complete sentence/paragraph on its own, regardless of how close its
+// text runs to the page's line-end margin.
+func isStaticSentenceEnd(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	r := []rune(trimmed)
+	switch r[len(r)-1] {
+	case '。', '！', '？', '!', '?', '.':
+		return true
+	}
+	return false
 }
 
 func isStaticNearLineStart(geom staticLineGeometry, layout staticPageLayout) bool {
