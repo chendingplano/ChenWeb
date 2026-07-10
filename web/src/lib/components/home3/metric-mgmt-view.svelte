@@ -27,6 +27,8 @@
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
+	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
 	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
 	import TagIcon from '@lucide/svelte/icons/tag';
@@ -815,7 +817,10 @@
 		const lines = selectedLinesByPage.get(pageNo) ?? [];
 		const rects = lines.flatMap((ln) => {
 			if (!Array.isArray(ln.coords) || ln.coords.length < 4) return [];
-			const vx1 = ln.coords[0] * viewport.width / 1000, vy1 = ln.coords[1] * viewport.height / 1000, vx2 = ln.coords[2] * viewport.width / 1000, vy2 = ln.coords[3] * viewport.height / 1000;
+			const vx1 = (ln.coords[0] * viewport.width) / 1000,
+				vy1 = (ln.coords[1] * viewport.height) / 1000,
+				vx2 = (ln.coords[2] * viewport.width) / 1000,
+				vy2 = (ln.coords[3] * viewport.height) / 1000;
 			return [
 				{
 					lineNumber: ln.line_number,
@@ -848,7 +853,10 @@
 				if (ln.page_number !== pageNo) continue;
 				if (!pdfDragPreviewLines.includes(ln.line_number)) continue;
 				if (!Array.isArray(ln.coords) || ln.coords.length < 4) continue;
-				const vx1 = ln.coords[0] * viewport.width / 1000, vy1 = ln.coords[1] * viewport.height / 1000, vx2 = ln.coords[2] * viewport.width / 1000, vy2 = ln.coords[3] * viewport.height / 1000;
+				const vx1 = (ln.coords[0] * viewport.width) / 1000,
+					vy1 = (ln.coords[1] * viewport.height) / 1000,
+					vx2 = (ln.coords[2] * viewport.width) / 1000,
+					vy2 = (ln.coords[3] * viewport.height) / 1000;
 				const left = Math.min(vx1, vx2);
 				const top = Math.max(0, Math.min(vy1, vy2) - HIGHLIGHT_EXPAND_TOP_PX);
 				const bottom = Math.max(vy1, vy2);
@@ -881,7 +889,8 @@
 			const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
 			for (const line of pageLines) {
 				if (!Array.isArray(line.coords) || line.coords.length < 4) continue;
-				const vy1 = line.coords[1] * viewport.height / 1000, vy2 = line.coords[3] * viewport.height / 1000;
+				const vy1 = (line.coords[1] * viewport.height) / 1000,
+					vy2 = (line.coords[3] * viewport.height) / 1000;
 				const lineTop = Math.min(vy1, vy2);
 				const lineBottom = Math.max(vy1, vy2);
 				if (Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2)) {
@@ -910,7 +919,8 @@
 			const pageLines = rawLines.filter((l) => l.page_number === pageNumber);
 			for (const line of pageLines) {
 				if (!Array.isArray(line.coords) || line.coords.length < 4) continue;
-				const vy1 = line.coords[1] * viewport.height / 1000, vy2 = line.coords[3] * viewport.height / 1000;
+				const vy1 = (line.coords[1] * viewport.height) / 1000,
+					vy2 = (line.coords[3] * viewport.height) / 1000;
 				const lineTop = Math.min(vy1, vy2);
 				const lineBottom = Math.max(vy1, vy2);
 				if (Math.max(lineTop, viewportY1) <= Math.min(lineBottom, viewportY2)) {
@@ -1378,217 +1388,306 @@
 		</div>
 	</header>
 
-	<div class="body" style={recordBrowserFolded ? 'grid-template-columns: minmax(0, 1fr)' : ''}>
+	<div
+		class="body"
+		style={recordBrowserFolded ? 'grid-template-columns: 42px 360px minmax(0, 1fr)' : ''}
+	>
 		{#if !recordBrowserFolded}
-			<KbInputRecordBrowser
-				{darkMode}
-				instanceKey="metrics-record-browser"
-				title="kb.inputs"
-				subtitle="Search, filter, and select input records before inspecting extracted metrics."
-				emptyTitle="No records yet"
-				emptySubtitle="Use Search or Retrieve to browse kb.inputs."
-				autoSelectFirstRecord={false}
-				selectedRecordId={currentInput?.id ?? null}
-				mapRecord={mapBrowserRecord}
-				onSelect={handleUserRecordSelect}
-				onError={(error) => {
-					errorMsg = error.message;
-				}}
-			/>
-
-			<aside class="metric-sidebar">
-				<div class="left-meta">
-					<div class="left-meta-title">Metrics</div>
-					<div class="left-meta-count">
-						{#if metricSearchActive && searchHasRun}
-							{searchTotal} global hit{searchTotal === 1 ? '' : 's'}
-						{:else}
-							{metrics.length} found
-						{/if}
-					</div>
-				</div>
-				<div class="debug-badge" aria-live="polite">
-					Debug: last selected metric = {lastSelectedMetricDebug}
-				</div>
-
-				<div class="search-panel">
-					<div class="search-panel-head">
-						<div class="search-panel-title">Global Metric Search</div>
-						<div class="search-panel-sub">
-							Search the whole `kb.metrics` corpus with agent-friendly filters.
-						</div>
-					</div>
-					<div class="search-grid">
-						<input
-							class="search-input search-query"
-							type="text"
-							placeholder="Search metrics, thresholds, units, keywords…"
-							bind:value={searchQuery}
-							onkeydown={(event) => {
-								if (event.key === 'Enter') void runMetricSearch();
-							}}
-						/>
-						<input
-							class="search-input"
-							type="text"
-							placeholder="Record ID"
-							bind:value={searchFilters.inputRecordId}
-						/>
-						<select class="search-input" bind:value={searchFilters.isExplicitMetric}>
-							<option value="">Explicit metric?</option>
-							<option value="true">Explicit only</option>
-							<option value="false">Implicit only</option>
-						</select>
-						<input
-							class="search-input"
-							type="text"
-							placeholder="Value class"
-							bind:value={searchFilters.valueClass}
-						/>
-						<input
-							class="search-input"
-							type="text"
-							placeholder="Value type"
-							bind:value={searchFilters.valueDataType}
-						/>
-						<input
-							class="search-input"
-							type="text"
-							placeholder="Metric unit"
-							bind:value={searchFilters.metricUnit}
-						/>
-					</div>
-					<div class="search-actions">
-						<button
-							type="button"
-							class="search-btn primary"
-							disabled={searchLoading}
-							onclick={runMetricSearch}
-						>
-							{searchLoading ? 'Searching…' : 'Search'}
-						</button>
-						<button type="button" class="search-btn" onclick={clearMetricSearch}>Clear</button>
-						<button
-							type="button"
-							class="search-btn"
-							disabled={!currentInput}
-							onclick={() => {
-								searchFilters = {
-									...searchFilters,
-									inputRecordId: currentInput ? String(currentInput.id) : ''
-								};
-							}}>Use Current</button
-						>
-					</div>
-					{#if searchError}
-						<div class="search-status">{searchError}</div>
-					{:else if metricSearchActive && searchHasRun}
-						<div class="search-status">
-							{searchTotal} result{searchTotal === 1 ? '' : 's'} for "{searchQuery.trim()}"
-						</div>
-					{/if}
-				</div>
-
-				<div class="metrics-list">
-					{#if errorMsg}
-						<div class="error">{errorMsg}</div>
-					{:else if searchLoading}
-						<div class="empty">
-							<div class="empty-glyph">⌕</div>
-							<div class="empty-title">Searching metrics</div>
-							<div class="empty-sub">Ranking results across the full metrics corpus…</div>
-						</div>
-					{:else if metricSearchActive && searchHasRun && searchResults.length === 0}
-						<div class="empty">
-							<div class="empty-glyph">⌕</div>
-							<div class="empty-title">No global matches</div>
-							<div class="empty-sub">
-								Try broader keywords or relax one of the semantic filters.
-							</div>
-						</div>
-					{:else if !loading && metrics.length === 0}
-						<div class="empty">
-							<div class="empty-glyph">§</div>
-							<div class="empty-title">No metrics yet</div>
-							<div class="empty-sub">
-								Select a record from kb.inputs to populate the metrics index.
-							</div>
-						</div>
-					{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
-						<div class="empty">
-							<div class="empty-glyph">§</div>
-							<div class="empty-title">No matches</div>
-							<div class="empty-sub">
-								{#if keywordFilter && confidenceFilter}
-									No metrics match keyword "{keywordFilter}" and confidence {confidenceFilter}.
-								{:else if keywordFilter}
-									No metrics match the keyword "{keywordFilter}".
-								{:else}
-									No metrics match confidence {confidenceFilter}.
-								{/if}
-							</div>
-						</div>
-					{:else if metricSearchActive && searchHasRun}
-						{#each searchResults as result, idx (result.id)}
-							<button
-								type="button"
-								class="metric-card"
-								class:selected={selectedMetricId === result.id}
-								onclick={() => handleMetricSearchResultClick(result)}
-							>
-								<div class="card-rule" aria-hidden="true"></div>
-								<div class="card-body">
-									<div class="card-row-top">
-										<div class="card-index">⌕ {String(idx + 1).padStart(3, '0')}</div>
-										<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
-									</div>
-									<div class="card-name">{result.primary_label}</div>
-									<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
-									<div class="card-foot">
-										<span class="chip">
-											<span class="chip-dot"></span>
-											record {result.input_record_id}
-										</span>
-										{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
-											<span class="chip chip-quiet">{chip}</span>
-										{/each}
-									</div>
-								</div>
-							</button>
-						{/each}
-					{:else}
-						{#each filteredMetrics as m, idx (m.id)}
-							<button
-								type="button"
-								class="metric-card"
-								class:selected={selectedMetricId === m.id}
-								onclick={(event) => onMetricCardClick(event, m)}
-							>
-								<div class="card-rule" aria-hidden="true"></div>
-								<div class="card-body">
-									<div class="card-row-top">
-										<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
-										<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
-									</div>
-									<div class="card-name">{metricNameOf(m)}</div>
-									{#if m.metric_desc}
-										<div class="card-desc">{m.metric_desc}</div>
-									{/if}
-									<div class="card-foot">
-										<span class="chip">
-											<span class="chip-dot"></span>
-											{spanCount(m)} span{spanCount(m) === 1 ? '' : 's'}
-										</span>
-										{#if m.metric_unit}<span class="chip chip-mono">{m.metric_unit}</span>{/if}
-										{#if m.location_type}<span class="chip chip-quiet">{m.location_type}</span>{/if}
-									</div>
-								</div>
-							</button>
-						{/each}
-					{/if}
-				</div>
-			</aside>
+			<div class="record-browser-slot">
+				<button
+					type="button"
+					class="record-fold-toggle"
+					onclick={() => (recordBrowserFolded = true)}
+					title="Fold record list"
+					aria-label="Fold record list"
+				>
+					<PanelLeftCloseIcon class="toolbar-icon" />
+				</button>
+				<KbInputRecordBrowser
+					{darkMode}
+					instanceKey="metrics-record-browser"
+					title="kb.inputs"
+					subtitle="Search, filter, and select input records before inspecting extracted metrics."
+					emptyTitle="No records yet"
+					emptySubtitle="Use Search or Retrieve to browse kb.inputs."
+					autoSelectFirstRecord={false}
+					selectedRecordId={currentInput?.id ?? null}
+					mapRecord={mapBrowserRecord}
+					onSelect={handleUserRecordSelect}
+					onError={(error) => {
+						errorMsg = error.message;
+					}}
+				/>
+			</div>
+		{:else}
+			<div class="record-browser-rail">
+				<button
+					type="button"
+					class="record-fold-toggle rail-toggle"
+					onclick={() => (recordBrowserFolded = false)}
+					title="Unfold record list"
+					aria-label="Unfold record list"
+				>
+					<PanelLeftOpenIcon class="toolbar-icon" />
+				</button>
+				<span>Record</span>
+			</div>
 		{/if}
+
+		<aside class="metric-sidebar">
+			<div class="left-meta">
+				<div class="left-meta-title">Metrics</div>
+				<div class="left-meta-count">
+					{#if metricSearchActive && searchHasRun}
+						{searchTotal} global hit{searchTotal === 1 ? '' : 's'}
+					{:else}
+						{metrics.length} found
+					{/if}
+				</div>
+			</div>
+			<div class="debug-badge" aria-live="polite">
+				Debug: last selected metric = {lastSelectedMetricDebug}
+			</div>
+
+			<div class="metric-local-filters">
+				<select
+					class="toolbar-select"
+					value={metricNameDropdownValue}
+					onchange={handleMetricNameDropdown}
+					title="Jump to metric by name"
+				>
+					<option value="">— Metric by name —</option>
+					{#each metrics as m (m.id)}
+						<option value={m.id}>{metricNameOf(m)}</option>
+					{/each}
+				</select>
+				<div class="toolbar-kw-wrap">
+					<input
+						class="toolbar-kw-input"
+						type="text"
+						list="metric-keywords-datalist-focus"
+						placeholder="Filter by keyword…"
+						bind:value={keywordFilter}
+					/>
+					<datalist id="metric-keywords-datalist-focus">
+						{#each allKeywords as kw (kw)}
+							<option value={kw}></option>
+						{/each}
+					</datalist>
+					{#if keywordFilter}
+						<button
+							type="button"
+							class="toolbar-kw-clear"
+							onclick={() => (keywordFilter = '')}
+							title="Clear keyword filter"
+							aria-label="Clear keyword filter">×</button
+						>
+					{/if}
+				</div>
+				<div class="toolbar-kw-wrap">
+					<input
+						class="toolbar-kw-input"
+						type="text"
+						list="confidence-options"
+						placeholder="Confidence…"
+						title="Filter by confidence threshold. Select or type a value like 0.85, or <0.50 for below-threshold."
+						bind:value={confidenceFilter}
+					/>
+					<datalist id="confidence-options">
+						<option value="0.90"></option>
+						<option value="0.80"></option>
+						<option value="0.70"></option>
+						<option value="0.60"></option>
+						<option value="0.50"></option>
+						<option value="<0.50"></option>
+					</datalist>
+					{#if confidenceFilter}
+						<button
+							type="button"
+							class="toolbar-kw-clear"
+							onclick={() => (confidenceFilter = '')}
+							title="Clear confidence filter"
+							aria-label="Clear confidence filter">×</button
+						>
+					{/if}
+				</div>
+			</div>
+
+			<div class="search-panel">
+				<div class="search-panel-head">
+					<div class="search-panel-title">Global Metric Search</div>
+					<div class="search-panel-sub">
+						Search the whole `kb.metrics` corpus with agent-friendly filters.
+					</div>
+				</div>
+				<div class="search-grid">
+					<input
+						class="search-input search-query"
+						type="text"
+						placeholder="Search metrics, thresholds, units, keywords…"
+						bind:value={searchQuery}
+						onkeydown={(event) => {
+							if (event.key === 'Enter') void runMetricSearch();
+						}}
+					/>
+					<input
+						class="search-input"
+						type="text"
+						placeholder="Record ID"
+						bind:value={searchFilters.inputRecordId}
+					/>
+					<select class="search-input" bind:value={searchFilters.isExplicitMetric}>
+						<option value="">Explicit metric?</option>
+						<option value="true">Explicit only</option>
+						<option value="false">Implicit only</option>
+					</select>
+					<input
+						class="search-input"
+						type="text"
+						placeholder="Value class"
+						bind:value={searchFilters.valueClass}
+					/>
+					<input
+						class="search-input"
+						type="text"
+						placeholder="Value type"
+						bind:value={searchFilters.valueDataType}
+					/>
+					<input
+						class="search-input"
+						type="text"
+						placeholder="Metric unit"
+						bind:value={searchFilters.metricUnit}
+					/>
+				</div>
+				<div class="search-actions">
+					<button
+						type="button"
+						class="search-btn primary"
+						disabled={searchLoading}
+						onclick={runMetricSearch}
+					>
+						{searchLoading ? 'Searching…' : 'Search'}
+					</button>
+					<button type="button" class="search-btn" onclick={clearMetricSearch}>Clear</button>
+					<button
+						type="button"
+						class="search-btn"
+						disabled={!currentInput}
+						onclick={() => {
+							searchFilters = {
+								...searchFilters,
+								inputRecordId: currentInput ? String(currentInput.id) : ''
+							};
+						}}>Use Current</button
+					>
+				</div>
+				{#if searchError}
+					<div class="search-status">{searchError}</div>
+				{:else if metricSearchActive && searchHasRun}
+					<div class="search-status">
+						{searchTotal} result{searchTotal === 1 ? '' : 's'} for "{searchQuery.trim()}"
+					</div>
+				{/if}
+			</div>
+
+			<div class="metrics-list">
+				{#if errorMsg}
+					<div class="error">{errorMsg}</div>
+				{:else if searchLoading}
+					<div class="empty">
+						<div class="empty-glyph">⌕</div>
+						<div class="empty-title">Searching metrics</div>
+						<div class="empty-sub">Ranking results across the full metrics corpus…</div>
+					</div>
+				{:else if metricSearchActive && searchHasRun && searchResults.length === 0}
+					<div class="empty">
+						<div class="empty-glyph">⌕</div>
+						<div class="empty-title">No global matches</div>
+						<div class="empty-sub">Try broader keywords or relax one of the semantic filters.</div>
+					</div>
+				{:else if !loading && metrics.length === 0}
+					<div class="empty">
+						<div class="empty-glyph">§</div>
+						<div class="empty-title">No metrics yet</div>
+						<div class="empty-sub">
+							Select a record from kb.inputs to populate the metrics index.
+						</div>
+					</div>
+				{:else if !loading && filteredMetrics.length === 0 && (keywordFilter || confidenceFilter)}
+					<div class="empty">
+						<div class="empty-glyph">§</div>
+						<div class="empty-title">No matches</div>
+						<div class="empty-sub">
+							{#if keywordFilter && confidenceFilter}
+								No metrics match keyword "{keywordFilter}" and confidence {confidenceFilter}.
+							{:else if keywordFilter}
+								No metrics match the keyword "{keywordFilter}".
+							{:else}
+								No metrics match confidence {confidenceFilter}.
+							{/if}
+						</div>
+					</div>
+				{:else if metricSearchActive && searchHasRun}
+					{#each searchResults as result, idx (result.id)}
+						<button
+							type="button"
+							class="metric-card"
+							class:selected={selectedMetricId === result.id}
+							onclick={() => handleMetricSearchResultClick(result)}
+						>
+							<div class="card-rule" aria-hidden="true"></div>
+							<div class="card-body">
+								<div class="card-row-top">
+									<div class="card-index">⌕ {String(idx + 1).padStart(3, '0')}</div>
+									<div class="card-conf" title="Search score">{result.score.toFixed(3)}</div>
+								</div>
+								<div class="card-name">{result.primary_label}</div>
+								<div class="card-desc">{metricSearchResultSecondaryText(result)}</div>
+								<div class="card-foot">
+									<span class="chip">
+										<span class="chip-dot"></span>
+										record {result.input_record_id}
+									</span>
+									{#each metricSearchResultChips(result) as chip (`${result.id}-${chip}`)}
+										<span class="chip chip-quiet">{chip}</span>
+									{/each}
+								</div>
+							</div>
+						</button>
+					{/each}
+				{:else}
+					{#each filteredMetrics as m, idx (m.id)}
+						<button
+							type="button"
+							class="metric-card"
+							class:selected={selectedMetricId === m.id}
+							onclick={(event) => onMetricCardClick(event, m)}
+						>
+							<div class="card-rule" aria-hidden="true"></div>
+							<div class="card-body">
+								<div class="card-row-top">
+									<div class="card-index">№ {String(idx + 1).padStart(3, '0')}</div>
+									<div class="card-conf" title="Confidence">{confidencePct(m.confidence)}</div>
+								</div>
+								<div class="card-name">{metricNameOf(m)}</div>
+								{#if m.metric_desc}
+									<div class="card-desc">{m.metric_desc}</div>
+								{/if}
+								<div class="card-foot">
+									<span class="chip">
+										<span class="chip-dot"></span>
+										{spanCount(m)} span{spanCount(m) === 1 ? '' : 's'}
+									</span>
+									{#if m.metric_unit}<span class="chip chip-mono">{m.metric_unit}</span>{/if}
+									{#if m.location_type}<span class="chip chip-quiet">{m.location_type}</span>{/if}
+								</div>
+							</div>
+						</button>
+					{/each}
+				{/if}
+			</div>
+		</aside>
 
 		<!-- ============ RIGHT PANEL ============ -->
 		<section class="right" class:info-split={selectedMetricId != null}>
@@ -1612,69 +1711,6 @@
 							<ArrowLeftIcon class="toolbar-icon" />
 							<span>Close</span>
 						</button>
-						<div class="toolbar-filters">
-							<select
-								class="toolbar-select"
-								value={metricNameDropdownValue}
-								onchange={handleMetricNameDropdown}
-								title="Jump to metric by name"
-							>
-								<option value="">— Metric by name —</option>
-								{#each metrics as m (m.id)}
-									<option value={m.id}>{metricNameOf(m)}</option>
-								{/each}
-							</select>
-							<div class="toolbar-kw-wrap">
-								<input
-									class="toolbar-kw-input"
-									type="text"
-									list="metric-keywords-datalist-focus"
-									placeholder="Filter by keyword…"
-									bind:value={keywordFilter}
-								/>
-								<datalist id="metric-keywords-datalist-focus">
-									{#each allKeywords as kw (kw)}
-										<option value={kw}></option>
-									{/each}
-								</datalist>
-								{#if keywordFilter}
-									<button
-										type="button"
-										class="toolbar-kw-clear"
-										onclick={() => (keywordFilter = '')}
-										title="Clear keyword filter"
-										aria-label="Clear keyword filter">×</button
-									>
-								{/if}
-							</div>
-							<div class="toolbar-kw-wrap">
-								<input
-									class="toolbar-kw-input"
-									type="text"
-									list="confidence-options"
-									placeholder="Confidence…"
-									title="Filter by confidence threshold. Select or type a value like 0.85, or <0.50 for below-threshold."
-									bind:value={confidenceFilter}
-								/>
-								<datalist id="confidence-options">
-									<option value="0.90"></option>
-									<option value="0.80"></option>
-									<option value="0.70"></option>
-									<option value="0.60"></option>
-									<option value="0.50"></option>
-									<option value="<0.50"></option>
-								</datalist>
-								{#if confidenceFilter}
-									<button
-										type="button"
-										class="toolbar-kw-clear"
-										onclick={() => (confidenceFilter = '')}
-										title="Clear confidence filter"
-										aria-label="Clear confidence filter">×</button
-									>
-								{/if}
-							</div>
-						</div>
 						<div class="toolbar-nav">
 							<button
 								type="button"
@@ -2399,6 +2435,70 @@
 		}
 	}
 
+	.record-browser-slot {
+		position: relative;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	.record-fold-toggle {
+		all: unset;
+		position: absolute;
+		top: 10px;
+		right: 12px;
+		z-index: 6;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		border: 1px solid color-mix(in srgb, var(--crimson) 70%, var(--ink-line));
+		background: var(--panel-bg-alt);
+		color: var(--text-secondary);
+		cursor: pointer;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+		transition:
+			border-color 120ms,
+			color 120ms,
+			background 120ms;
+	}
+
+	.record-fold-toggle:hover,
+	.record-fold-toggle:focus-visible {
+		border-color: var(--brass);
+		color: var(--brass);
+		background: var(--panel-bg);
+	}
+
+	.record-browser-rail {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-right: 1px solid var(--ink-line);
+		background: var(--panel-bg);
+		color: var(--text-muted);
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.record-browser-rail span {
+		position: absolute;
+		bottom: 18px;
+		left: 50%;
+		transform: translateX(-50%) rotate(-90deg);
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.rail-toggle {
+		position: static;
+		box-shadow: none;
+	}
+
 	/* ---------- METRIC SIDEBAR ---------- */
 	.metric-sidebar {
 		display: flex;
@@ -2450,6 +2550,23 @@
 		background: rgba(93, 175, 168, 0.08);
 		border: 1px dashed rgba(93, 175, 168, 0.4);
 		word-break: break-word;
+	}
+
+	.metric-local-filters {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 8px;
+		margin: 0 16px 14px;
+		padding: 12px;
+		border: 1px solid var(--ink-line-soft);
+		background: color-mix(in srgb, var(--panel-bg-alt) 74%, transparent);
+	}
+
+	.metric-local-filters .toolbar-select,
+	.metric-local-filters .toolbar-kw-wrap,
+	.metric-local-filters .toolbar-kw-input {
+		width: 100%;
+		max-width: none;
 	}
 
 	.metrics-list {
@@ -3693,13 +3810,6 @@
 		height: 13px;
 		flex-shrink: 0;
 		pointer-events: none;
-	}
-	.toolbar-filters {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		flex: 1;
-		min-width: 0;
 	}
 	.toolbar-select {
 		background: var(--panel-bg);
