@@ -13,6 +13,8 @@
 
 # ── Group (package) defaults ─────────────────────────────────────────────────
 
+# Built-in defaults are [100, 200, 300]; these lower values are deliberate
+# local testing overrides.
 max_findings = [10, 20, 30]
 max_analyses = [10, 20, 30]
 

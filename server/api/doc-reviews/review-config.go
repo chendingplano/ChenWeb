@@ -12,6 +12,8 @@ import (
 // the working directory. Override with the DOC_REVIEW_CONFIG_FILE env var.
 const docReviewConfigFileName = "doc-review.local.toml"
 
+var defaultReviewOutputLimits = [3]int{100, 200, 300}
+
 // ReviewPackageConfig is a group-level ([packages.P1..P6]) default block.
 type ReviewPackageConfig struct {
 	Enabled       bool   `toml:"enabled"`
@@ -35,11 +37,15 @@ type ReviewAspectConfig struct {
 	Prompt        string   `toml:"prompt"`
 	MaxToolTurns  *int     `toml:"max_tool_turns"`
 	MaxToolTokens *int     `toml:"max_tool_tokens"`
+	MaxFindings   []int    `toml:"max_findings"`
+	MaxAnalyses   []int    `toml:"max_analyses"`
 	Tools         []string `toml:"tools"`
 }
 
 // DocReviewConfig is the parsed doc-review.local.toml.
 type DocReviewConfig struct {
+	MaxFindings  []int                          `toml:"max_findings"`
+	MaxAnalyses  []int                          `toml:"max_analyses"`
 	Packages     map[string]ReviewPackageConfig `toml:"packages"`
 	Reviewers    map[string]ReviewAspectConfig  `toml:"reviewers"`
 	PackageOrder []ReviewPackageInfo            `toml:"-"`
@@ -85,12 +91,50 @@ func loadDocReviewConfig() (*DocReviewConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("(MID_26061810) read %s failed: %w", path, err)
 	}
-	var cfg DocReviewConfig
-	if err := parseTOMLMap(raw, &cfg); err != nil {
+	cfg, err := parseDocReviewConfig(raw)
+	if err != nil {
 		return nil, fmt.Errorf("(MID_26061811) parse %s failed: %w", path, err)
 	}
 	cfg.PackageOrder = packageOrderFromTOML(raw, cfg.Packages)
+	return cfg, nil
+}
+
+func parseDocReviewConfig(raw []byte) (*DocReviewConfig, error) {
+	var cfg DocReviewConfig
+	if err := parseTOMLMap(raw, &cfg); err != nil {
+		return nil, err
+	}
+	if err := validateOutputLimitArray("root", "max_findings", cfg.MaxFindings); err != nil {
+		return nil, err
+	}
+	if err := validateOutputLimitArray("root", "max_analyses", cfg.MaxAnalyses); err != nil {
+		return nil, err
+	}
+	for aspect, reviewer := range cfg.Reviewers {
+		scope := "reviewer " + aspect
+		if err := validateOutputLimitArray(scope, "max_findings", reviewer.MaxFindings); err != nil {
+			return nil, err
+		}
+		if err := validateOutputLimitArray(scope, "max_analyses", reviewer.MaxAnalyses); err != nil {
+			return nil, err
+		}
+	}
 	return &cfg, nil
+}
+
+func validateOutputLimitArray(scope, name string, values []int) error {
+	if len(values) == 0 {
+		return nil
+	}
+	if len(values) != len(defaultReviewOutputLimits) {
+		return fmt.Errorf("%s %s must contain exactly %d positive integers", scope, name, len(defaultReviewOutputLimits))
+	}
+	for _, value := range values {
+		if value <= 0 {
+			return fmt.Errorf("%s %s must contain exactly %d positive integers", scope, name, len(defaultReviewOutputLimits))
+		}
+	}
+	return nil
 }
 
 func packageOrderFromTOML(raw []byte, packages map[string]ReviewPackageConfig) []ReviewPackageInfo {
@@ -137,6 +181,36 @@ func defaultReviewPackageOrder() []ReviewPackageInfo {
 		{Key: "P5", Label: "Technical & Compliance"},
 		{Key: "P6", Label: "Meta & Process"},
 	}
+}
+
+// ResolveOutputLimits returns the findings and analyses limits for an aspect
+// at the requested review depth. Root settings override built-in defaults, and
+// each reviewer can independently override either root setting.
+func (c *DocReviewConfig) ResolveOutputLimits(aspect string, depth int) (int, int) {
+	if depth < 1 || depth > len(defaultReviewOutputLimits) {
+		depth = 1
+	}
+	index := depth - 1
+	maxFindings := defaultReviewOutputLimits[index]
+	maxAnalyses := defaultReviewOutputLimits[index]
+	if c == nil {
+		return maxFindings, maxAnalyses
+	}
+	if len(c.MaxFindings) == len(defaultReviewOutputLimits) {
+		maxFindings = c.MaxFindings[index]
+	}
+	if len(c.MaxAnalyses) == len(defaultReviewOutputLimits) {
+		maxAnalyses = c.MaxAnalyses[index]
+	}
+	if reviewer, ok := c.Reviewers[aspect]; ok {
+		if len(reviewer.MaxFindings) == len(defaultReviewOutputLimits) {
+			maxFindings = reviewer.MaxFindings[index]
+		}
+		if len(reviewer.MaxAnalyses) == len(defaultReviewOutputLimits) {
+			maxAnalyses = reviewer.MaxAnalyses[index]
+		}
+	}
+	return maxFindings, maxAnalyses
 }
 
 // resolveDocReviewConfigPath honors DOC_REVIEW_CONFIG_FILE, otherwise walks up
