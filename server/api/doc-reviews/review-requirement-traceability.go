@@ -84,7 +84,7 @@ func (r *requirementTraceabilityReviewer) ReviewDocument(
 		return nil, nil
 	}
 
-	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(blocks), cfg.OnProgress,
+	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(blocks), cfg, r.Name(), r.logger, recordID, cfg.OnProgress,
 		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped

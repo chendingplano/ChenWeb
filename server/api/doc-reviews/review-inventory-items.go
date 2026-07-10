@@ -157,7 +157,7 @@ func (r *inventoryItemsReviewer) ReviewDocument(
 			},
 		}
 	}
-	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg.OnProgress)
+	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
 }
 
 // reviewItem runs one LLM comparison for a single doc inventory item and its

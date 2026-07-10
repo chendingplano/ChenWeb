@@ -3,6 +3,7 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -137,7 +138,16 @@ func TestRunArtifactUnitsWindowGroupedSeedPerWindow(t *testing.T) {
 	var findings []ReviewFinding
 	var runErr error
 	go func() {
-		findings, runErr = runArtifactUnitsWindowGrouped(context.Background(), 4, units, nil)
+		findings, runErr = runArtifactUnitsWindowGrouped(
+			context.Background(),
+			4,
+			units,
+			ReviewerConfig{MaxFindings: 99, MaxAnalyses: 99, ReviewDepth: 1},
+			"artifact_test",
+			&captureLogger{},
+			0,
+			nil,
+		)
 		close(done)
 	}()
 
@@ -183,7 +193,16 @@ func TestRunArtifactUnitsWindowGroupedProgress(t *testing.T) {
 		{windowIdx: 0, run: func(context.Context) []ReviewFinding { return []ReviewFinding{{Title: "a"}} }},
 		{windowIdx: 0, run: func(context.Context) []ReviewFinding { return nil }},
 	}
-	findings, err := runArtifactUnitsWindowGrouped(context.Background(), 2, units, onProgress)
+	findings, err := runArtifactUnitsWindowGrouped(
+		context.Background(),
+		2,
+		units,
+		ReviewerConfig{MaxFindings: 99, MaxAnalyses: 99, ReviewDepth: 1},
+		"artifact_test",
+		&captureLogger{},
+		0,
+		onProgress,
+	)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -198,6 +217,121 @@ func TestRunArtifactUnitsWindowGroupedProgress(t *testing.T) {
 	last := snapshots[len(snapshots)-1]
 	if last.CompletedUnits != 2 || last.TotalUnits != 2 || last.FindingCount != 1 {
 		t.Fatalf("final snapshot = %+v, want completed=2 total=2 findings=1", last)
+	}
+}
+
+func TestRunArtifactUnitsWindowGroupedLimitSkipsRemainders(t *testing.T) {
+	t.Setenv("LLM_CALL_STAGGER", "1")
+
+	logger := &captureLogger{}
+	started := make(chan int, 4)
+	seed0Done := make(chan struct{})
+	seed2Release := make(chan struct{})
+	var mu sync.Mutex
+	var snapshots []ReviewerProgress
+	errCh := make(chan error, 1)
+	findingsCh := make(chan []ReviewFinding, 1)
+
+	go func() {
+		findings, err := runArtifactUnitsWindowGrouped(
+			context.Background(),
+			2,
+			[]artifactReviewUnit{
+				{
+					windowIdx: 0,
+					run: func(context.Context) []ReviewFinding {
+						started <- 0
+						close(seed0Done)
+						return []ReviewFinding{{Title: "seed0", FindingType: "issue"}}
+					},
+				},
+				{
+					windowIdx: 0,
+					run: func(context.Context) []ReviewFinding {
+						started <- 1
+						return []ReviewFinding{{Title: "remainder1"}}
+					},
+				},
+				{
+					windowIdx: 1,
+					run: func(context.Context) []ReviewFinding {
+						started <- 2
+						<-seed2Release
+						return nil
+					},
+				},
+				{
+					windowIdx: 1,
+					run: func(context.Context) []ReviewFinding {
+						started <- 3
+						return []ReviewFinding{{Title: "remainder3"}}
+					},
+				},
+			},
+			ReviewerConfig{MaxFindings: 1, MaxAnalyses: 10, ReviewDepth: 2},
+			"metrics",
+			logger,
+			42,
+			func(p ReviewerProgress) {
+				mu.Lock()
+				snapshots = append(snapshots, p)
+				mu.Unlock()
+			},
+		)
+		findingsCh <- findings
+		errCh <- err
+	}()
+
+	<-seed0Done
+	select {
+	case extra := <-started:
+		if extra == 1 || extra == 3 {
+			t.Fatalf("remainder unit %d started before seed 2 released", extra)
+		}
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(seed2Release)
+
+	findings := <-findingsCh
+	err := <-errCh
+	if err != nil {
+		t.Fatalf("runArtifactUnitsWindowGrouped err = %v, want nil", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings len = %d, want 1", len(findings))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(snapshots) == 0 {
+		t.Fatal("expected progress snapshots")
+	}
+	last := snapshots[len(snapshots)-1]
+	if last.CompletedUnits != 4 || last.TotalUnits != 4 || last.FindingCount != 1 {
+		t.Fatalf("final progress = %+v, want completed=4 total=4 findings=1", last)
+	}
+
+	entry := findLogEntry(logger.entries, "warn", outputLimitWarningMessage)
+	if entry == nil {
+		t.Fatal("expected output limit warning")
+	}
+	got := logArgsToMap(entry.args)
+	want := map[string]any{
+		"reviewer":      "metrics",
+		"review_depth":  2,
+		"max_findings":  1,
+		"max_analyses":  10,
+		"findings":      1,
+		"analyses":      0,
+		"skipped_units": 2,
+		"record_id":     int64(42),
+	}
+	for k, v := range want {
+		if !reflect.DeepEqual(got[k], v) {
+			t.Fatalf("warning arg %q = %#v, want %#v (all args=%v)", k, got[k], v, got)
+		}
+	}
+	if skipped, ok := got["skipped_unit_indexes"].([]int); !ok || !reflect.DeepEqual(skipped, []int{1, 3}) {
+		t.Fatalf("skipped_unit_indexes = %#v, want [1 3]", got["skipped_unit_indexes"])
 	}
 }
 

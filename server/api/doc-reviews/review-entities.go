@@ -114,7 +114,7 @@ func (r *entitiesReviewer) ReviewDocument(
 		"reviewed_entities", len(units),
 	)
 
-	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(units), cfg.OnProgress,
+	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(units), cfg, r.Name(), r.logger, recordID, cfg.OnProgress,
 		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped

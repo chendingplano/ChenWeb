@@ -125,7 +125,7 @@ func (r *metricsCompletenessReviewer) ReviewDocument(
 			},
 		}
 	}
-	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg.OnProgress)
+	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
 }
 
 // reviewObject runs one LLM call for a single object, comparing what the doc

@@ -184,6 +184,10 @@ func runArtifactUnitsWindowGrouped(
 	ctx context.Context,
 	maxTasks int,
 	units []artifactReviewUnit,
+	cfg ReviewerConfig,
+	reviewer string,
+	logger ApiTypes.JimoLogger,
+	recordID int64,
 	onProgress ReviewerProgressFunc,
 ) ([]ReviewFinding, error) {
 	if len(units) == 0 {
@@ -202,22 +206,55 @@ func runArtifactUnitsWindowGrouped(
 			remainIdxs = append(remainIdxs, i)
 		}
 	}
+	gate := newReviewWorkGate(cfg.MaxFindings, cfg.MaxAnalyses, seedIdxs)
 
 	results := make([][]ReviewFinding, len(units))
-	stopped := make([]bool, len(units))
 	var wg sync.WaitGroup
+	workerCtx, stopWorkers := context.WithCancelCause(ctx)
+	defer stopWorkers(nil)
 
-	runUnit := func(idx int) {
-		if isCtxStopped(ctx) {
-			stopped[idx] = true
+	var (
+		errMu    sync.Mutex
+		firstErr error
+	)
+	recordErr := func(err error) {
+		if err == nil {
 			return
 		}
-		results[idx] = units[idx].run(ctx)
+		errMu.Lock()
+		defer errMu.Unlock()
+		if firstErr != nil {
+			return
+		}
+		firstErr = err
+		stopWorkers(err)
+	}
+
+	runUnit := func(idx int) bool {
+		if isCtxStopped(workerCtx) {
+			return false
+		}
+		results[idx] = units[idx].run(workerCtx)
+		if isCtxStopped(workerCtx) {
+			recordErr(ErrPipelineStopped)
+			return false
+		}
+		gate.complete(results[idx])
 		tracker.add(len(results[idx]))
+		return true
+	}
+
+	claimedSeeds := make([]int, 0, len(seedIdxs))
+	for range seedIdxs {
+		idx, ok := gate.claimNext()
+		if !ok {
+			break
+		}
+		claimedSeeds = append(claimedSeeds, idx)
 	}
 
 	// Phase 1: fire all window seeds concurrently; do NOT wait for completion.
-	for _, i := range seedIdxs {
+	for _, i := range claimedSeeds {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -227,45 +264,54 @@ func runArtifactUnitsWindowGrouped(
 
 	if len(remainIdxs) > 0 {
 		// Phase 2: wait LLM_CALL_STAGGER for the cached prefixes to persist.
-		if stagger := reviewCallStagger(); stagger > 0 && len(seedIdxs) > 0 {
+		if stagger := reviewCallStagger(); stagger > 0 && len(claimedSeeds) > 0 {
 			select {
 			case <-time.After(stagger):
-			case <-ctx.Done():
+			case <-workerCtx.Done():
 			}
 		}
 
-		// Phase 3: fire the remaining units bounded by maxTasks.
-		sem := make(chan struct{}, max(maxTasks, 1))
-		for _, i := range remainIdxs {
-			if isCtxStopped(ctx) {
-				stopped[i] = true
-				continue
-			}
+		// Phase 3: fire the remaining units with at most maxTasks claimers.
+		gate.replaceQueue(remainIdxs)
+		workerCount := min(maxTasks, len(remainIdxs))
+		if workerCount < 1 {
+			workerCount = 1
+		}
+		for range workerCount {
 			wg.Add(1)
-			go func(idx int) {
+			go func() {
 				defer wg.Done()
-				select {
-				case sem <- struct{}{}:
-				case <-ctx.Done():
-					stopped[idx] = true
-					return
+				for {
+					if isCtxStopped(workerCtx) {
+						return
+					}
+					idx, ok := gate.claimNext()
+					if !ok {
+						return
+					}
+					if !runUnit(idx) {
+						return
+					}
 				}
-				defer func() { <-sem }()
-				runUnit(idx)
-			}(i)
+			}()
 		}
 	}
 
 	wg.Wait()
 
+	if firstErr != nil || isCtxStopped(ctx) {
+		return nil, ErrPipelineStopped
+	}
+
+	skipped := gate.unclaimedIndexes(len(units))
+	for range skipped {
+		tracker.add(0)
+	}
+	logOutputLimitWarning(logger, reviewer, cfg, recordID, gate.snapshot(), skipped)
+
 	var all []ReviewFinding
 	for _, fs := range results {
 		all = append(all, fs...)
-	}
-	for _, s := range stopped {
-		if s {
-			return all, ErrPipelineStopped
-		}
 	}
 	return all, nil
 }

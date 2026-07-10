@@ -2053,15 +2053,93 @@ func (t *reviewerProgressTracker) add(findings int) {
 func runReviewerConcurrent(
 	ctx context.Context,
 	maxTasks, total int,
+	cfg ReviewerConfig,
+	reviewer string,
+	logger ApiTypes.JimoLogger,
+	recordID int64,
 	report ReviewerProgressFunc,
 	fn func(ctx context.Context, i int) ([]ReviewFinding, error),
 ) ([][]ReviewFinding, error) {
 	tracker := newReviewerProgressTracker(total, report)
-	return runConcurrent(ctx, maxTasks, total, func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
-		findings, err := fn(workerCtx, i)
+	if total == 0 {
+		return nil, nil
+	}
+
+	queue := make([]int, total)
+	for i := range total {
+		queue[i] = i
+	}
+	gate := newReviewWorkGate(cfg.MaxFindings, cfg.MaxAnalyses, queue)
+	results := make([][]ReviewFinding, total)
+
+	workerCount := min(maxTasks, total)
+	if workerCount < 1 {
+		workerCount = 1
+	}
+
+	workerCtx, stopWorkers := context.WithCancelCause(ctx)
+	defer stopWorkers(nil)
+
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstErr error
+	)
+	recordErr := func(err error) {
 		if err == nil {
-			tracker.add(len(findings))
+			return
 		}
-		return findings, err
-	})
+		errMu.Lock()
+		defer errMu.Unlock()
+		if firstErr != nil {
+			return
+		}
+		firstErr = err
+		stopWorkers(err)
+	}
+
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if isCtxStopped(workerCtx) {
+					return
+				}
+				idx, ok := gate.claimNext()
+				if !ok {
+					return
+				}
+
+				findings, err := fn(workerCtx, idx)
+				if err != nil {
+					recordErr(err)
+					return
+				}
+				results[idx] = findings
+				gate.complete(findings)
+				tracker.add(len(findings))
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		if isCtxStopped(ctx) {
+			return results, ErrPipelineStopped
+		}
+		return results, firstErr
+	}
+	if isCtxStopped(ctx) {
+		return results, ErrPipelineStopped
+	}
+
+	skipped := gate.unclaimedIndexes(total)
+	for range skipped {
+		tracker.add(0)
+	}
+	logOutputLimitWarning(logger, reviewer, cfg, recordID, gate.snapshot(), skipped)
+
+	return results, nil
 }

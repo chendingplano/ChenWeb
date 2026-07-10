@@ -141,7 +141,7 @@ func (r *provisionsReviewer) ReviewDocument(
 			},
 		}
 	}
-	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg.OnProgress)
+	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
 }
 
 type provisionReviewUnit struct {

@@ -70,7 +70,7 @@ func (r *assumptionsReviewer) ReviewDocument(
 		return nil, nil
 	}
 
-	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(windows), cfg.OnProgress,
+	results, runErr := runReviewerConcurrent(ctx, r.maxTasks, len(windows), cfg, r.Name(), r.logger, recordID, cfg.OnProgress,
 		func(workerCtx context.Context, i int) ([]ReviewFinding, error) {
 			if isCtxStopped(workerCtx) {
 				return nil, ErrPipelineStopped

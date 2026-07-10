@@ -4,7 +4,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
+
+const outputLimitWarningMessage = "review output limits reached; skipped remaining units"
 
 type reviewOutputSnapshot struct {
 	Findings int
@@ -14,11 +18,11 @@ type reviewOutputSnapshot struct {
 }
 
 type reviewWorkGate struct {
-	mu                     sync.Mutex
+	mu                       sync.Mutex
 	maxFindings, maxAnalyses int
-	findings, analyses     int
-	queue                  []int
-	claimed                map[int]struct{}
+	findings, analyses       int
+	queue                    []int
+	claimed                  map[int]struct{}
 }
 
 func newReviewWorkGate(maxFindings, maxAnalyses int, queue []int) *reviewWorkGate {
@@ -109,4 +113,28 @@ func (g *reviewWorkGate) snapshot() reviewOutputSnapshot {
 		Queue:    append([]int(nil), g.queue...),
 		Claimed:  claimed,
 	}
+}
+
+func logOutputLimitWarning(
+	logger ApiTypes.JimoLogger,
+	reviewer string,
+	cfg ReviewerConfig,
+	recordID int64,
+	snapshot reviewOutputSnapshot,
+	skipped []int,
+) {
+	if logger == nil || len(skipped) == 0 {
+		return
+	}
+	logger.Warn(outputLimitWarningMessage,
+		"reviewer", reviewer,
+		"review_depth", cfg.ReviewDepth,
+		"max_findings", cfg.MaxFindings,
+		"max_analyses", cfg.MaxAnalyses,
+		"findings", snapshot.Findings,
+		"analyses", snapshot.Analyses,
+		"skipped_units", len(skipped),
+		"skipped_unit_indexes", append([]int(nil), skipped...),
+		"record_id", recordID,
+	)
 }

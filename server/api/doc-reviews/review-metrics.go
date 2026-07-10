@@ -173,7 +173,7 @@ func (r *metricsReviewer) ReviewDocument(
 			},
 		}
 	}
-	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg.OnProgress)
+	return runArtifactUnitsWindowGrouped(ctx, r.maxTasks, execUnits, cfg, r.Name(), r.logger, recordID, cfg.OnProgress)
 }
 
 // reviewMetric runs one LLM comparison for a single doc metric and its matches.
