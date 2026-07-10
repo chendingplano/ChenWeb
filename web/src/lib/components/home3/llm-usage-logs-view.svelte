@@ -243,12 +243,6 @@
 		return `${(ms / 1000).toFixed(1)}s`;
 	}
 
-	function shortRef(ref: string): string {
-		if (!ref) return '—';
-		const parts = ref.split('/');
-		return parts[parts.length - 1];
-	}
-
 	function escHtml(s: string): string {
 		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	}
@@ -466,10 +460,12 @@
 							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Call LOC</th>
 							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">In Tok</th>
 							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Out Tok</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Cache Hit</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Cache Miss</th>
 							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Latency</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Error</th>
 							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Input Body</th>
 							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Output Body</th>
-							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Error</th>
 							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Details</th>
 						</tr>
 					</thead>
@@ -496,17 +492,28 @@
 
 								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.input_tokens.toLocaleString()}</td>
 								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.output_tokens.toLocaleString()}</td>
+								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.prompt_cache_hit_tokens.toLocaleString()}</td>
+								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.prompt_cache_miss_tokens.toLocaleString()}</td>
 								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textMuted}; font-size:12px; white-space:nowrap;">{formatLatency(row.latency_ms)}</td>
+
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; max-width:200px;">
+									{#if row.error_message}
+										<span style="color:{danger}; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
+											title={row.error_message}>{row.error_message}</span>
+									{:else}
+										<span style="color:{success}; font-size:12px;">OK</span>
+									{/if}
+								</td>
 
 								<!-- Input Body -->
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									{#if row.input_body_ref}
 										<button
-											ondblclick={() => openBody(row, 'input')}
-											class="text-left rounded px-2 py-1 cursor-pointer"
-											style="background:{surface2}; color:{accent}; border:1px solid {borderColor}; font-size:11px; font-family:monospace; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
-											title={`Double-click to view: ${row.input_body_ref}`}
-										>{shortRef(row.input_body_ref)}</button>
+											onclick={() => openBody(row, 'input')}
+											class="rounded px-2 py-1 text-xs cursor-pointer"
+											style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
+											title={row.input_body_ref}
+										>View</button>
 									{:else}
 										<span style="color:{textMuted}; font-size:12px;">—</span>
 									{/if}
@@ -516,22 +523,13 @@
 								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									{#if row.output_body_ref}
 										<button
-											ondblclick={() => openBody(row, 'output')}
-											class="text-left rounded px-2 py-1 cursor-pointer"
-											style="background:{surface2}; color:{accent}; border:1px solid {borderColor}; font-size:11px; font-family:monospace; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
-											title={`Double-click to view: ${row.output_body_ref}`}
-										>{shortRef(row.output_body_ref)}</button>
+											onclick={() => openBody(row, 'output')}
+											class="rounded px-2 py-1 text-xs cursor-pointer"
+											style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
+											title={row.output_body_ref}
+										>View</button>
 									{:else}
 										<span style="color:{textMuted}; font-size:12px;">—</span>
-									{/if}
-								</td>
-
-								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; max-width:200px;">
-									{#if row.error_message}
-										<span style="color:{danger}; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
-											title={row.error_message}>{row.error_message}</span>
-									{:else}
-										<span style="color:{success}; font-size:12px;">OK</span>
 									{/if}
 								</td>
 
