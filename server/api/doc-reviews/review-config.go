@@ -123,7 +123,7 @@ func parseDocReviewConfig(raw []byte) (*DocReviewConfig, error) {
 }
 
 func validateOutputLimitArray(scope, name string, values []int) error {
-	if len(values) == 0 {
+	if values == nil {
 		return nil
 	}
 	if len(values) != len(defaultReviewOutputLimits) {

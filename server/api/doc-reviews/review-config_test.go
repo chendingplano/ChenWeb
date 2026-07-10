@@ -66,16 +66,29 @@ max_analyses = [1,2,3]
 }
 
 func TestValidateOutputLimitsRejectsMalformedArrays(t *testing.T) {
-	cases := []string{
-		`max_findings=[1,2]`,
-		`max_analyses=[1,0,3]`,
-		"[reviewers.grammar_spelling]\nmax_findings=[1,-1,3]",
-		"[reviewers.grammar_spelling]\nmax_analyses=[1,2,3,4]",
+	cases := []struct {
+		name    string
+		raw     string
+		scope   string
+		setting string
+	}{
+		{name: "root wrong length", raw: `max_findings=[1,2]`, scope: "root", setting: "max_findings"},
+		{name: "root non-positive", raw: `max_analyses=[1,0,3]`, scope: "root", setting: "max_analyses"},
+		{name: "root empty", raw: `max_findings=[]`, scope: "root", setting: "max_findings"},
+		{name: "reviewer non-positive", raw: "[reviewers.grammar_spelling]\nmax_findings=[1,-1,3]", scope: "reviewer grammar_spelling", setting: "max_findings"},
+		{name: "reviewer wrong length", raw: "[reviewers.grammar_spelling]\nmax_analyses=[1,2,3,4]", scope: "reviewer grammar_spelling", setting: "max_analyses"},
+		{name: "reviewer empty", raw: "[reviewers.grammar_spelling]\nmax_analyses=[]", scope: "reviewer grammar_spelling", setting: "max_analyses"},
 	}
-	for _, raw := range cases {
-		if _, err := parseDocReviewConfig([]byte(raw)); err == nil {
-			t.Errorf("parseDocReviewConfig(%q) succeeded, want error", raw)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseDocReviewConfig([]byte(tc.raw))
+			if err == nil {
+				t.Fatalf("parseDocReviewConfig(%q) succeeded, want error", tc.raw)
+			}
+			if !strings.Contains(err.Error(), tc.scope) || !strings.Contains(err.Error(), tc.setting) {
+				t.Fatalf("parseDocReviewConfig(%q) error = %q, want scope %q and setting %q", tc.raw, err, tc.scope, tc.setting)
+			}
+		})
 	}
 }
 
