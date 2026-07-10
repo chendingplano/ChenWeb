@@ -672,7 +672,7 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 	fmt.Fprintf(&b, "  reviewer: \"%s\",\n", typStr(reviewer))
 	fmt.Fprintf(&b, "  review-date: \"%s\",\n", typStr(reviewDate))
 	fmt.Fprintf(&b, "  review-scope: \"%s\",\n", typStr(reviewScope))
-	fmt.Fprintf(&b, "  summary: [%s],\n", typContent(skeleton.ExecutiveSummary.Text))
+	fmt.Fprintf(&b, "  summary: [%s],\n", typContent(localizedExecutiveSummary(skeleton, lex.language)))
 	writeTypstArray(&b, "  aspect-stats", statLines)
 	writeTypstArray(&b, "  aspects", aspectLines)
 	writeTypstArray(&b, "  grounding-refs", groundingLines)
@@ -746,6 +746,37 @@ func buildAssessment(total, high int, language string) string {
 		s += fmt.Sprintf(" %d high-severity issue(s) require immediate attention.", high)
 	}
 	return s
+}
+
+// localizedExecutiveSummary derives the Chinese PDF-only summary from the
+// already-localized report structure. The persisted report JSON remains the
+// canonical English representation used by existing API and Markdown callers.
+func localizedExecutiveSummary(skeleton *ReportSkeleton, language string) string {
+	if skeleton == nil || language != "zh-cn" {
+		if skeleton == nil {
+			return ""
+		}
+		return skeleton.ExecutiveSummary.Text
+	}
+
+	var high, medium, low int
+	for _, finding := range skeleton.Findings {
+		switch finding.Severity {
+		case "high":
+			high++
+		case "medium":
+			medium++
+		default:
+			low++
+		}
+	}
+	total := len(skeleton.Findings)
+	summary := fmt.Sprintf("已审查 %d 个审查项，覆盖 %d 个审查阶段。发现 %d 项问题（高严重性 %d 项，中等严重性 %d 项，低严重性 %d 项）。",
+		total, len(skeleton.PassOrder), total, high, medium, low)
+	if high > 0 {
+		summary += fmt.Sprintf("%d 项高严重性问题需要立即关注。", high)
+	}
+	return summary
 }
 
 // buildProblems summarises the distinct aspects that have issues.

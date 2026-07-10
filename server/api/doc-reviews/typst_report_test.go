@@ -212,6 +212,7 @@ func TestBuildTypstSourceLocalizesChineseReportChrome(t *testing.T) {
 		`report-title: "文档审查报告"`,
 		`heading(level: 1, "技术与合规")`,
 		`title: "指标一致性"`,
+		`summary: [已审查 1 个审查项，覆盖 1 个审查阶段。发现 1 项问题（高严重性 1 项，中等严重性 0 项，低严重性 0 项）。1 项高严重性问题需要立即关注。]`,
 		`assessment: [本节发现 1 项问题。其中 1 项为高严重性问题，需要立即关注。]`,
 		`reviewer: "自动审查"`,
 	} {
