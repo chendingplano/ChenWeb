@@ -42,6 +42,7 @@ func ensureTables(t *testing.T, db *sql.DB) {
 		`CREATE TABLE IF NOT EXISTS kb.doc_review_requests (
 			id BIGSERIAL PRIMARY KEY,
 			input_record_id BIGINT NOT NULL,
+			review_depth INT NOT NULL DEFAULT 1,
 			tier TEXT NOT NULL DEFAULT '',
 			aspects JSONB DEFAULT '[]',
 			reference_docs JSONB DEFAULT '[]',
@@ -54,6 +55,8 @@ func ensureTables(t *testing.T, db *sql.DB) {
 			status TEXT NOT NULL DEFAULT 'accepted',
 			create_time TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`ALTER TABLE kb.doc_review_requests
+			ADD COLUMN IF NOT EXISTS review_depth INT NOT NULL DEFAULT 1`,
 		`CREATE TABLE IF NOT EXISTS kb.doc_review_runs (
 			id BIGSERIAL PRIMARY KEY,
 			request_id BIGINT NOT NULL,
@@ -244,6 +247,74 @@ func TestController_AcceptRequest(t *testing.T) {
 	cleanupRequests(t, db, result.RequestID)
 }
 
+func TestController_AcceptRequest_PersistsReviewDepth(t *testing.T) {
+	db := connectTestDB(t)
+	defer db.Close()
+	ensureTables(t, db)
+
+	c := &DocReviewController{DB: db}
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name       string
+		inputDepth int
+		wantDepth  int
+	}{
+		{name: "omitted defaults to one", inputDepth: 0, wantDepth: 1},
+		{name: "explicit depth three", inputDepth: 3, wantDepth: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recordID := insertTestInput(t, db, "Review depth "+tc.name)
+			defer cleanupInputs(t, db, recordID)
+
+			result, err := c.AcceptRequest(ctx, SubmitRequestInput{
+				InputRecordID: recordID,
+				ReviewDepth:   tc.inputDepth,
+				Tier:          "must_review",
+				RequesterName: "test-user",
+			})
+			if err != nil {
+				t.Fatalf("AcceptRequest: %v", err)
+			}
+			defer cleanupRequests(t, db, result.RequestID)
+
+			loaded, err := c.loadRequest(ctx, result.RequestID, result.RunID)
+			if err != nil {
+				t.Fatalf("loadRequest: %v", err)
+			}
+			if loaded.ReviewDepth != tc.wantDepth {
+				t.Errorf("ReviewDepth = %d, want %d", loaded.ReviewDepth, tc.wantDepth)
+			}
+		})
+	}
+}
+
+func TestController_AcceptRequest_RejectsInvalidReviewDepth(t *testing.T) {
+	c := &DocReviewController{}
+	ctx := context.Background()
+
+	for _, depth := range []int{-1, 4} {
+		t.Run(fmt.Sprintf("depth_%d", depth), func(t *testing.T) {
+			_, err := c.AcceptRequest(ctx, SubmitRequestInput{
+				InputRecordID: 1,
+				ReviewDepth:   depth,
+				Tier:          "must_review",
+				RequesterName: "test-user",
+			})
+			if err == nil {
+				t.Fatal("AcceptRequest error = nil, want RequestError")
+			}
+			reqErr, ok := err.(*RequestError)
+			if !ok {
+				t.Fatalf("AcceptRequest error type = %T, want *RequestError", err)
+			}
+			if reqErr.Status != 422 {
+				t.Errorf("RequestError status = %d, want 422", reqErr.Status)
+			}
+		})
+	}
+}
+
 func TestController_IdempotencyGuard(t *testing.T) {
 	db := connectTestDB(t)
 	defer db.Close()
@@ -412,6 +483,7 @@ func TestController_RestartRequest_CreatesNewRunForCompletedRequest(t *testing.T
 
 	result, err := c.AcceptRequest(ctx, SubmitRequestInput{
 		InputRecordID: recordID,
+		ReviewDepth:   3,
 		Tier:          "must_review",
 		RequesterName: "test-user",
 	})
@@ -462,6 +534,16 @@ func TestController_RestartRequest_CreatesNewRunForCompletedRequest(t *testing.T
 	}
 	if runID == result.RunID {
 		t.Fatalf("RestartRequest runID = %d, want a new run id", runID)
+	}
+	loaded, err := c.loadRequest(ctx, result.RequestID, runID)
+	if err != nil {
+		t.Fatalf("load restarted request: %v", err)
+	}
+	if loaded.LatestRunID != runID {
+		t.Errorf("selected run id = %d, want %d", loaded.LatestRunID, runID)
+	}
+	if loaded.ReviewDepth != 3 {
+		t.Errorf("restarted request ReviewDepth = %d, want 3", loaded.ReviewDepth)
 	}
 
 	var requestStatus string
@@ -581,6 +663,95 @@ func TestController_RestartRequest_CreatesNewRunForCompletedRequest(t *testing.T
 	}
 	if newFindingCount != 0 {
 		t.Errorf("new finding count = %d, want 0", newFindingCount)
+	}
+}
+
+func TestController_RecoverStalledReviews_PreservesReviewDepth(t *testing.T) {
+	db := connectTestDB(t)
+	defer db.Close()
+	ensureTables(t, db)
+
+	c := &DocReviewController{DB: db}
+	ctx := context.Background()
+	recordID := insertTestInput(t, db, "Recover depth three request")
+	defer cleanupInputs(t, db, recordID)
+
+	result, err := c.AcceptRequest(ctx, SubmitRequestInput{
+		InputRecordID: recordID,
+		ReviewDepth:   3,
+		Tier:          "must_review",
+		RequesterName: "test-user",
+	})
+	if err != nil {
+		t.Fatalf("AcceptRequest: %v", err)
+	}
+	defer cleanupRequests(t, db, result.RequestID)
+	defer db.ExecContext(ctx, `DELETE FROM kb.doc_review_status WHERE request_id = $1`, result.RequestID)
+	defer db.ExecContext(ctx, `DELETE FROM kb.doc_review_runs WHERE request_id = $1`, result.RequestID)
+
+	// RecoverStalledReviews intentionally operates on every active request. Hide
+	// unrelated active fixture rows for this test and restore their exact states.
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, status
+		 FROM kb.doc_review_requests
+		 WHERE id <> $1 AND status IN ('accepted', 'running')`,
+		result.RequestID,
+	)
+	if err != nil {
+		t.Fatalf("isolate unrelated active requests: %v", err)
+	}
+	type isolatedRequest struct {
+		id     int64
+		status string
+	}
+	var isolated []isolatedRequest
+	for rows.Next() {
+		var item isolatedRequest
+		if err := rows.Scan(&item.id, &item.status); err != nil {
+			rows.Close()
+			t.Fatalf("scan isolated request: %v", err)
+		}
+		isolated = append(isolated, item)
+	}
+	rows.Close()
+	defer func() {
+		for _, item := range isolated {
+			_, _ = db.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = $1 WHERE id = $2`, item.status, item.id)
+		}
+	}()
+	for _, item := range isolated {
+		if _, err := db.ExecContext(ctx,
+			`UPDATE kb.doc_review_requests SET status = 'test-isolated' WHERE id = $1 AND status = $2`,
+			item.id, item.status,
+		); err != nil {
+			t.Fatalf("isolate request %d: %v", item.id, err)
+		}
+	}
+
+	recovered, err := c.RecoverStalledReviews(ctx)
+	if err != nil {
+		t.Fatalf("RecoverStalledReviews: %v", err)
+	}
+	var recoveredRunID int64
+	for _, run := range recovered {
+		if run.RequestID == result.RequestID {
+			recoveredRunID = run.RunID
+			break
+		}
+	}
+	if recoveredRunID == 0 {
+		t.Fatalf("recovered runs = %#v, want request %d", recovered, result.RequestID)
+	}
+
+	loaded, err := c.loadRequest(ctx, result.RequestID, recoveredRunID)
+	if err != nil {
+		t.Fatalf("load recovered request: %v", err)
+	}
+	if loaded.LatestRunID != recoveredRunID {
+		t.Errorf("selected recovered run id = %d, want %d", loaded.LatestRunID, recoveredRunID)
+	}
+	if loaded.ReviewDepth != 3 {
+		t.Errorf("recovered request ReviewDepth = %d, want 3", loaded.ReviewDepth)
 	}
 }
 

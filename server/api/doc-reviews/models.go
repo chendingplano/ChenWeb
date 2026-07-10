@@ -5,6 +5,7 @@ import "encoding/json"
 // SubmitRequestInput is the request body for POST /api/v1/doc-review/requests.
 type SubmitRequestInput struct {
 	InputRecordID  int64                    `json:"input_record_id"`
+	ReviewDepth    int                      `json:"review_depth"`
 	Tier           string                   `json:"tier"`    // "must_review", "should_review", "custom"
 	Aspects        []string                 `json:"aspects"` // selected aspect names (all when tier-based)
 	ReferenceDocs  []ReferenceDoc           `json:"reference_docs,omitempty"`
@@ -30,6 +31,7 @@ type ModelOverride struct {
 type RequestStatus struct {
 	ID             int64                    `json:"id"`
 	InputRecordID  int64                    `json:"input_record_id"`
+	ReviewDepth    int                      `json:"review_depth"`
 	LatestRunID    int64                    `json:"latest_run_id,omitempty"`
 	Tier           string                   `json:"tier"`
 	Aspects        []string                 `json:"aspects"`

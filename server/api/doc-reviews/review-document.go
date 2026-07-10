@@ -416,6 +416,9 @@ type ReviewProcessor struct {
 	// is invoked. Findings and progress updates are scoped to this run.
 	RunID int64
 
+	// ReviewDepth selects the request's depth-indexed output limits.
+	ReviewDepth int
+
 	// RequestedAspects limits a run to the accepted request's selected aspects.
 	// When empty, all configured reviewers remain eligible.
 	RequestedAspects []string

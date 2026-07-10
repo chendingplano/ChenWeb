@@ -42,6 +42,13 @@ func NewDocReviewController() *DocReviewController {
 // AcceptRequest validates input, resolves requester, stores the request as "accepted"
 // and creates the first run row, returning both IDs.
 func (c *DocReviewController) AcceptRequest(ctx context.Context, input SubmitRequestInput) (*SubmitResult, error) {
+	if input.ReviewDepth == 0 {
+		input.ReviewDepth = 1
+	}
+	if input.ReviewDepth < 1 || input.ReviewDepth > 3 {
+		return nil, &RequestError{Status: http.StatusUnprocessableEntity, Message: "review_depth must be between 1 and 3"}
+	}
+
 	// Validate document exists.
 	var exists bool
 	err := c.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM kb.inputs WHERE id = $1)`, input.InputRecordID).Scan(&exists)
@@ -106,11 +113,11 @@ func (c *DocReviewController) AcceptRequest(ctx context.Context, input SubmitReq
 	var requestID int64
 	err = c.DB.QueryRowContext(ctx, `
 		INSERT INTO kb.doc_review_requests
-			(input_record_id, tier, aspects, reference_docs, notes, model_overrides,
+			(input_record_id, review_depth, tier, aspects, reference_docs, notes, model_overrides,
 			 requester_name, requester_id, report_template, doc_template, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'accepted')
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'accepted')
 		RETURNING id`,
-		input.InputRecordID, input.Tier, aspectsJSON, refDocsJSON, input.Notes, overridesJSON,
+		input.InputRecordID, input.ReviewDepth, input.Tier, aspectsJSON, refDocsJSON, input.Notes, overridesJSON,
 		input.RequesterName, input.RequesterID, input.ReportTemplate, input.DocTemplate,
 	).Scan(&requestID)
 	if err != nil {
@@ -210,6 +217,7 @@ func (c *DocReviewController) RunReview(ctx context.Context, requestID, runID in
 
 	processor := NewReviewProcessor(inputStore, entityStore, findingsStore, llmClient, nil)
 	processor.RunID = runID
+	processor.ReviewDepth = req.ReviewDepth
 	processor.RequestedAspects = append([]string(nil), req.Aspects...)
 	processor.ReviewLogsStore = reviewLogsStore
 	processor.StatusStore = statusStore
@@ -577,7 +585,7 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64, selecte
 	}
 
 	query := fmt.Sprintf(`
-		SELECT r.id, r.input_record_id, r.tier, r.aspects::text,
+		SELECT r.id, r.input_record_id, r.review_depth, r.tier, r.aspects::text,
 		       COALESCE(r.reference_docs::text,''), COALESCE(r.notes,''), COALESCE(r.model_overrides::text,''),
 		       r.requester_name, r.requester_id, COALESCE(r.report_template,''), COALESCE(r.doc_template,''),
 		       r.status, r.create_time::text,
@@ -586,7 +594,7 @@ func (c *DocReviewController) loadRequest(ctx context.Context, id int64, selecte
 		%s
 		WHERE r.id = $1`, runJoin)
 
-	err := c.DB.QueryRowContext(ctx, query, args...).Scan(&req.ID, &req.InputRecordID, &req.Tier, &aspectsJSON,
+	err := c.DB.QueryRowContext(ctx, query, args...).Scan(&req.ID, &req.InputRecordID, &req.ReviewDepth, &req.Tier, &aspectsJSON,
 		&refDocsJSON, &notes, &overridesJSON,
 		&req.RequesterName, &req.RequesterID, &reportTmpl, &docTmpl,
 		&req.Status, &req.CreateTime,
