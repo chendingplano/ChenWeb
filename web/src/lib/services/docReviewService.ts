@@ -28,6 +28,7 @@ export type SubmitInput = {
 	input_record_id: number;
 	tier: string;
 	aspects: string[];
+	review_depth: 1 | 2 | 3;
 	reference_docs?: ReferenceDoc[];
 	notes?: string;
 	model_overrides?: Record<string, { model_ref: string }>;
@@ -52,6 +53,7 @@ export type RequestStatus = {
 	review_run_id?: string;
 	tier: string;
 	aspects: string[];
+	review_depth: number;
 	reference_docs?: ReferenceDoc[];
 	notes?: string;
 	model_overrides?: Record<string, { model_ref: string }>;

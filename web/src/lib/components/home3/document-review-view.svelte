@@ -49,6 +49,7 @@
     let dialogTargetStep = $state<number | null>(null);
     let requesterName = $state('');
     let notes = $state('');
+    let reviewDepth = $state<1 | 2 | 3>(1);
     let referenceDocs = $state<ReferenceDoc[]>([]);
     let viewingRun = $state<{ requestId: number; runId?: number; reportId?: number } | null>(null);  // when set, show that job's results
     let submitBanner = $state('');                        // brief "review started" notice
@@ -337,6 +338,7 @@
                 input_record_id: selectedDocId,
                 tier: submitTier,
                 aspects: effectiveAspects,
+                review_depth: reviewDepth,
                 reference_docs: referenceDocs.length > 0 ? referenceDocs : undefined,
                 notes: notes || undefined,
                 requester_name: requesterName,
@@ -362,6 +364,7 @@
         selectedDocId = null;
         selectedDocTitle = '';
         uploadFile = null;
+        reviewDepth = 1;
     }
 </script>
 
@@ -520,6 +523,22 @@
                 <p style="color: {textSecondary}; font-size: 0.85rem; margin-bottom: 1rem;">
                     Toggle a level On to review its aspects, then expand it to fine-tune. {effectiveAspects.length} aspect{effectiveAspects.length === 1 ? '' : 's'} selected.
                 </p>
+                <fieldset style="margin: 0 0 1rem 0; padding: 0; border: none;">
+                    <legend style="font-size: 0.85rem; color: {textSecondary}; margin-bottom: 0.5rem;">Review depth</legend>
+                    <div role="radiogroup" aria-label="Review depth" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        {#each [1, 2, 3] as depth}
+                            <button
+                                type="button"
+                                role="radio"
+                                aria-checked={reviewDepth === depth}
+                                onclick={() => (reviewDepth = depth as 1 | 2 | 3)}
+                                style="padding: 0.45rem 0.9rem; border-radius: 8px; border: 1px solid {reviewDepth === depth ? accent : borderColor}; background: {reviewDepth === depth ? accentTint : inputBg}; color: {reviewDepth === depth ? textPrimary : textSecondary}; cursor: pointer; font-size: 0.85rem; font-weight: 600;"
+                            >
+                                Depth {depth}
+                            </button>
+                        {/each}
+                    </div>
+                </fieldset>
                 <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                     {#each tiers as tier}
                         {@const on = tierIsOn(tier)}
@@ -639,24 +658,24 @@
             <div style="background: {cardBg}; border: 1px solid {borderColor}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem;">
                 <h2 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem;">Step 4: Review Details</h2>
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Your Name *</label>
-                    <input type="text" bind:value={requesterName} placeholder="Enter your name"
+                    <label for="review-requester-name" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Your Name *</label>
+                    <input id="review-requester-name" type="text" bind:value={requesterName} placeholder="Enter your name"
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                 </div>
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Notes (optional)</label>
-                    <textarea bind:value={notes} placeholder="e.g., Focus on sterilization validation sections..."
+                    <label for="review-notes" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Notes (optional)</label>
+                    <textarea id="review-notes" bind:value={notes} placeholder="e.g., Focus on sterilization validation sections..."
                         rows={4}
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem; resize: vertical;"></textarea>
                 </div>
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Report Template (optional)</label>
-                    <input type="text" bind:value={reportTemplate} placeholder="Template name or path"
+                    <label for="review-report-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Report Template (optional)</label>
+                    <input id="review-report-template" type="text" bind:value={reportTemplate} placeholder="Template name or path"
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                 </div>
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Doc Template (optional)</label>
-                    <input type="text" bind:value={docTemplate} placeholder="Template name or path"
+                    <label for="review-doc-template" style="display: block; margin-bottom: 0.3rem; color: {textSecondary}; font-size: 0.85rem;">Doc Template (optional)</label>
+                    <input id="review-doc-template" type="text" bind:value={docTemplate} placeholder="Template name or path"
                         style="width: 100%; background: {inputBg}; border: 1px solid {borderColor}; border-radius: 8px; padding: 0.5rem 0.75rem; color: {textPrimary}; font-size: 0.9rem;" />
                 </div>
             </div>
@@ -671,6 +690,8 @@
                     <div style="color: {textPrimary};">{checkLevelLabel}</div>
                     <div style="color: {textSecondary};">Aspects:</div>
                     <div style="color: {textPrimary};">{effectiveAspects.length} selected</div>
+                    <div style="color: {textSecondary};">Review Depth:</div>
+                    <div style="color: {textPrimary};">Depth {reviewDepth}</div>
                     <div style="color: {textSecondary};">Requester:</div>
                     <div style="color: {textPrimary};">{requesterName}</div>
                 </div>
