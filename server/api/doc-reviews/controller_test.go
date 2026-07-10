@@ -5,7 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 // connectTestDB opens a test PostgreSQL connection or skips the test.
@@ -57,6 +61,11 @@ func ensureTables(t *testing.T, db *sql.DB) {
 		)`,
 		`ALTER TABLE kb.doc_review_requests
 			ADD COLUMN IF NOT EXISTS review_depth INT NOT NULL DEFAULT 1`,
+		`ALTER TABLE kb.doc_review_requests
+			DROP CONSTRAINT IF EXISTS chk_doc_review_requests_review_depth`,
+		`ALTER TABLE kb.doc_review_requests
+			ADD CONSTRAINT chk_doc_review_requests_review_depth
+			CHECK (review_depth BETWEEN 1 AND 3)`,
 		`CREATE TABLE IF NOT EXISTS kb.doc_review_runs (
 			id BIGSERIAL PRIMARY KEY,
 			request_id BIGINT NOT NULL,
@@ -139,7 +148,9 @@ func ensureTables(t *testing.T, db *sql.DB) {
 func cleanupInputs(t *testing.T, db *sql.DB, ids ...int64) {
 	t.Helper()
 	for _, id := range ids {
-		db.ExecContext(context.Background(), `DELETE FROM kb.inputs WHERE id = $1`, id)
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM kb.inputs WHERE id = $1`, id); err != nil {
+			t.Errorf("cleanup input %d: %v", id, err)
+		}
 	}
 }
 
@@ -147,7 +158,27 @@ func cleanupInputs(t *testing.T, db *sql.DB, ids ...int64) {
 func cleanupRequests(t *testing.T, db *sql.DB, ids ...int64) {
 	t.Helper()
 	for _, id := range ids {
-		db.ExecContext(context.Background(), `DELETE FROM kb.doc_review_requests WHERE id = $1`, id)
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM kb.doc_review_requests WHERE id = $1`, id); err != nil {
+			t.Errorf("cleanup request %d: %v", id, err)
+		}
+	}
+}
+
+func cleanupReviewRuns(t *testing.T, db *sql.DB, requestIDs ...int64) {
+	t.Helper()
+	for _, id := range requestIDs {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM kb.doc_review_runs WHERE request_id = $1`, id); err != nil {
+			t.Errorf("cleanup runs for request %d: %v", id, err)
+		}
+	}
+}
+
+func cleanupReviewStatuses(t *testing.T, db *sql.DB, requestIDs ...int64) {
+	t.Helper()
+	for _, id := range requestIDs {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM kb.doc_review_status WHERE request_id = $1`, id); err != nil {
+			t.Errorf("cleanup statuses for request %d: %v", id, err)
+		}
 	}
 }
 
@@ -155,7 +186,9 @@ func cleanupRequests(t *testing.T, db *sql.DB, ids ...int64) {
 func cleanupFindings(t *testing.T, db *sql.DB, ids ...int64) {
 	t.Helper()
 	for _, id := range ids {
-		db.ExecContext(context.Background(), `DELETE FROM kb.doc_review_findings WHERE id = $1`, id)
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM kb.doc_review_findings WHERE id = $1`, id); err != nil {
+			t.Errorf("cleanup finding %d: %v", id, err)
+		}
 	}
 }
 
@@ -286,6 +319,106 @@ func TestController_AcceptRequest_PersistsReviewDepth(t *testing.T) {
 				t.Errorf("ReviewDepth = %d, want %d", loaded.ReviewDepth, tc.wantDepth)
 			}
 		})
+	}
+}
+
+func TestController_AcceptRequest_InsertsNormalizedAndExplicitReviewDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		inputDepth int
+		wantDepth  int
+	}{
+		{name: "omitted defaults to one", inputDepth: 0, wantDepth: 1},
+		{name: "explicit depth three", inputDepth: 3, wantDepth: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New: %v", err)
+			}
+			defer db.Close()
+
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS(SELECT 1 FROM kb.inputs WHERE id = $1)`)).
+				WithArgs(int64(42)).
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+			mock.ExpectQuery(`SELECT id FROM kb\.doc_review_requests`).
+				WithArgs(int64(42)).
+				WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			mock.ExpectQuery(`(?s)INSERT INTO kb\.doc_review_requests.*input_record_id, review_depth.*VALUES \(\$1,\$2`).
+				WithArgs(int64(42), tc.wantDepth, "custom", sqlmock.AnyArg(), sqlmock.AnyArg(), "", sqlmock.AnyArg(), "test-user", int64(0), "", "").
+				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(11)))
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM kb.doc_review_runs WHERE request_id = $1`)).
+				WithArgs(int64(11)).
+				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			mock.ExpectQuery(`(?s)INSERT INTO kb\.doc_review_runs.*RETURNING id`).
+				WithArgs(int64(11), int64(42), 1, sqlmock.AnyArg(), sqlmock.AnyArg(), "", "test-user").
+				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(21)))
+			mock.ExpectExec(`(?s)INSERT INTO kb\.doc_review_status`).
+				WithArgs(int64(11), int64(42), int64(21), "grammar_spelling", "P1").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			result, err := (&DocReviewController{DB: db}).AcceptRequest(context.Background(), SubmitRequestInput{
+				InputRecordID: 42,
+				ReviewDepth:   tc.inputDepth,
+				Tier:          "custom",
+				Aspects:       []string{"grammar_spelling"},
+				RequesterName: "test-user",
+			})
+			if err != nil {
+				t.Fatalf("AcceptRequest: %v", err)
+			}
+			if result.RequestID != 11 || result.RunID != 21 {
+				t.Fatalf("AcceptRequest result = %#v, want request 11 run 21", result)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("SQL expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestController_LoadRequest_ScansReviewDepth(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(`(?s)SELECT r\.id, r\.input_record_id, r\.review_depth.*FROM kb\.doc_review_requests`).
+		WithArgs(int64(11)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "input_record_id", "review_depth", "tier", "aspects", "reference_docs", "notes", "model_overrides",
+			"requester_name", "requester_id", "report_template", "doc_template", "status", "create_time",
+			"run_id", "run_status", "start_time", "end_time", "error_message",
+		}).AddRow(
+			int64(11), int64(42), 3, "custom", `["grammar_spelling"]`, `[]`, "", `{}`,
+			"test-user", int64(0), "", "", "accepted", "2026-07-10 12:00:00+00",
+			nil, "", "", "", "",
+		))
+
+	loaded, err := (&DocReviewController{DB: db}).loadRequest(context.Background(), 11, 0)
+	if err != nil {
+		t.Fatalf("loadRequest: %v", err)
+	}
+	if loaded.ReviewDepth != 3 {
+		t.Errorf("ReviewDepth = %d, want 3", loaded.ReviewDepth)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("SQL expectations: %v", err)
+	}
+}
+
+func TestReviewDepthMigrationRequiresRequestTable(t *testing.T) {
+	data, err := os.ReadFile("../../../project_migrations/20260710000001_add_doc_review_request_depth.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	sqlText := string(data)
+	if strings.Contains(sqlText, "ALTER TABLE IF EXISTS kb.doc_review_requests") {
+		t.Error("migration must fail loudly when kb.doc_review_requests is missing")
+	}
+	if !strings.Contains(sqlText, "CHECK (review_depth BETWEEN 1 AND 3)") {
+		t.Error("migration is missing the review depth check constraint")
 	}
 }
 
@@ -686,46 +819,38 @@ func TestController_RecoverStalledReviews_PreservesReviewDepth(t *testing.T) {
 		t.Fatalf("AcceptRequest: %v", err)
 	}
 	defer cleanupRequests(t, db, result.RequestID)
-	defer db.ExecContext(ctx, `DELETE FROM kb.doc_review_status WHERE request_id = $1`, result.RequestID)
-	defer db.ExecContext(ctx, `DELETE FROM kb.doc_review_runs WHERE request_id = $1`, result.RequestID)
+	defer cleanupReviewRuns(t, db, result.RequestID)
+	defer cleanupReviewStatuses(t, db, result.RequestID)
 
-	// RecoverStalledReviews intentionally operates on every active request. Hide
-	// unrelated active fixture rows for this test and restore their exact states.
+	// RecoverStalledReviews intentionally operates on every active request. Do not
+	// mutate unrelated fixtures: skip unless this test owns the only active row.
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, status
+		`SELECT id
 		 FROM kb.doc_review_requests
 		 WHERE id <> $1 AND status IN ('accepted', 'running')`,
 		result.RequestID,
 	)
 	if err != nil {
-		t.Fatalf("isolate unrelated active requests: %v", err)
+		t.Fatalf("query unrelated active requests: %v", err)
 	}
-	type isolatedRequest struct {
-		id     int64
-		status string
-	}
-	var isolated []isolatedRequest
+	var unrelatedIDs []int64
 	for rows.Next() {
-		var item isolatedRequest
-		if err := rows.Scan(&item.id, &item.status); err != nil {
-			rows.Close()
-			t.Fatalf("scan isolated request: %v", err)
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			t.Fatalf("scan unrelated active request: %v", err)
 		}
-		isolated = append(isolated, item)
+		unrelatedIDs = append(unrelatedIDs, id)
 	}
-	rows.Close()
-	defer func() {
-		for _, item := range isolated {
-			_, _ = db.ExecContext(ctx, `UPDATE kb.doc_review_requests SET status = $1 WHERE id = $2`, item.status, item.id)
-		}
-	}()
-	for _, item := range isolated {
-		if _, err := db.ExecContext(ctx,
-			`UPDATE kb.doc_review_requests SET status = 'test-isolated' WHERE id = $1 AND status = $2`,
-			item.id, item.status,
-		); err != nil {
-			t.Fatalf("isolate request %d: %v", item.id, err)
-		}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		t.Fatalf("iterate unrelated active requests: %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close unrelated active request rows: %v", err)
+	}
+	if len(unrelatedIDs) > 0 {
+		t.Skipf("unrelated active review requests present: %v", unrelatedIDs)
 	}
 
 	recovered, err := c.RecoverStalledReviews(ctx)
