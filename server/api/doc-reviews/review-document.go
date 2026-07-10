@@ -1329,6 +1329,20 @@ func (p *ReviewProcessor) reviewerConfig(aspect, modelName, promptText, promptRe
 	}
 }
 
+func (p *ReviewProcessor) toolReviewerConfig(aspect, modelName, promptText, promptRef string, maxToolTurns, maxToolTokens int, tools []string) ReviewerConfig {
+	cfg := p.reviewerConfig(aspect, modelName, promptText, promptRef)
+	cfg.MaxToolTurns = maxToolTurns
+	cfg.MaxToolTokens = maxToolTokens
+	cfg.Tools = tools
+	return cfg
+}
+
+func (p *ReviewProcessor) artifactReviewerConfig(aspect, modelName, promptText, promptRef string, maxToolTurns, maxToolTokens int, tools []string) ReviewerConfig {
+	cfg := p.toolReviewerConfig(aspect, modelName, promptText, promptRef, maxToolTurns, maxToolTokens, tools)
+	cfg.Input = "artifact"
+	return cfg
+}
+
 // buildReviewers returns the enabled reviewers for this run.
 func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunner {
 	var runners []reviewRunner
@@ -1571,15 +1585,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.EvidenceRationaleModelName,
-				PromptText:    p.EvidenceRationalePromptText,
-				PromptRef:     p.EvidenceRationalePromptRef,
-				MaxToolTurns:  p.EvidenceRationaleMaxToolTurns,
-				MaxToolTokens: p.EvidenceRationaleMaxToolTokens,
-				Tools:         p.EvidenceRationaleTools,
-			},
+			cfg: p.toolReviewerConfig("evidence_rationale", p.EvidenceRationaleModelName, p.EvidenceRationalePromptText, p.EvidenceRationalePromptRef, p.EvidenceRationaleMaxToolTurns, p.EvidenceRationaleMaxToolTokens, p.EvidenceRationaleTools),
 		})
 	}
 
@@ -1595,15 +1601,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.InternalContradictionsModelName,
-				PromptText:    p.InternalContradictionsPromptText,
-				PromptRef:     p.InternalContradictionsPromptRef,
-				MaxToolTurns:  p.InternalContradictionsMaxToolTurns,
-				MaxToolTokens: p.InternalContradictionsMaxToolTokens,
-				Tools:         p.InternalContradictionsTools,
-			},
+			cfg: p.toolReviewerConfig("internal_contradictions", p.InternalContradictionsModelName, p.InternalContradictionsPromptText, p.InternalContradictionsPromptRef, p.InternalContradictionsMaxToolTurns, p.InternalContradictionsMaxToolTokens, p.InternalContradictionsTools),
 		})
 	}
 
@@ -1617,15 +1615,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.TerminologyConsistencyModelName,
-				PromptText:    p.TerminologyConsistencyPromptText,
-				PromptRef:     p.TerminologyConsistencyPromptRef,
-				MaxToolTurns:  p.TerminologyConsistencyMaxToolTurns,
-				MaxToolTokens: p.TerminologyConsistencyMaxToolTokens,
-				Tools:         p.TerminologyConsistencyTools,
-			},
+			cfg: p.toolReviewerConfig("terminology_consistency", p.TerminologyConsistencyModelName, p.TerminologyConsistencyPromptText, p.TerminologyConsistencyPromptRef, p.TerminologyConsistencyMaxToolTurns, p.TerminologyConsistencyMaxToolTokens, p.TerminologyConsistencyTools),
 		})
 	}
 
@@ -1639,15 +1629,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.CrossReferenceCorrectnessModelName,
-				PromptText:    p.CrossReferenceCorrectnessPromptText,
-				PromptRef:     p.CrossReferenceCorrectnessPromptRef,
-				MaxToolTurns:  p.CrossReferenceCorrectnessMaxToolTurns,
-				MaxToolTokens: p.CrossReferenceCorrectnessMaxToolTokens,
-				Tools:         p.CrossReferenceCorrectnessTools,
-			},
+			cfg: p.toolReviewerConfig("cross_reference_correctness", p.CrossReferenceCorrectnessModelName, p.CrossReferenceCorrectnessPromptText, p.CrossReferenceCorrectnessPromptRef, p.CrossReferenceCorrectnessMaxToolTurns, p.CrossReferenceCorrectnessMaxToolTokens, p.CrossReferenceCorrectnessTools),
 		})
 	}
 
@@ -1661,15 +1643,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.RequirementTraceabilityModelName,
-				PromptText:    p.RequirementTraceabilityPromptText,
-				PromptRef:     p.RequirementTraceabilityPromptRef,
-				MaxToolTurns:  p.RequirementTraceabilityMaxToolTurns,
-				MaxToolTokens: p.RequirementTraceabilityMaxToolTokens,
-				Tools:         p.RequirementTraceabilityTools,
-			},
+			cfg: p.toolReviewerConfig("requirement_traceability", p.RequirementTraceabilityModelName, p.RequirementTraceabilityPromptText, p.RequirementTraceabilityPromptRef, p.RequirementTraceabilityMaxToolTurns, p.RequirementTraceabilityMaxToolTokens, p.RequirementTraceabilityTools),
 		})
 	}
 
@@ -1685,15 +1659,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.TechnicalAccuracyModelName,
-				PromptText:    p.TechnicalAccuracyPromptText,
-				PromptRef:     p.TechnicalAccuracyPromptRef,
-				MaxToolTurns:  p.TechnicalAccuracyMaxToolTurns,
-				MaxToolTokens: p.TechnicalAccuracyMaxToolTokens,
-				Tools:         p.TechnicalAccuracyTools,
-			},
+			cfg: p.toolReviewerConfig("technical_accuracy", p.TechnicalAccuracyModelName, p.TechnicalAccuracyPromptText, p.TechnicalAccuracyPromptRef, p.TechnicalAccuracyMaxToolTurns, p.TechnicalAccuracyMaxToolTokens, p.TechnicalAccuracyTools),
 		})
 	}
 
@@ -1707,15 +1673,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.AssumptionsModelName,
-				PromptText:    p.AssumptionsPromptText,
-				PromptRef:     p.AssumptionsPromptRef,
-				MaxToolTurns:  p.AssumptionsMaxToolTurns,
-				MaxToolTokens: p.AssumptionsMaxToolTokens,
-				Tools:         p.AssumptionsTools,
-			},
+			cfg: p.toolReviewerConfig("assumptions", p.AssumptionsModelName, p.AssumptionsPromptText, p.AssumptionsPromptRef, p.AssumptionsMaxToolTurns, p.AssumptionsMaxToolTokens, p.AssumptionsTools),
 		})
 	}
 
@@ -1729,15 +1687,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.PrerequisitesModelName,
-				PromptText:    p.PrerequisitesPromptText,
-				PromptRef:     p.PrerequisitesPromptRef,
-				MaxToolTurns:  p.PrerequisitesMaxToolTurns,
-				MaxToolTokens: p.PrerequisitesMaxToolTokens,
-				Tools:         p.PrerequisitesTools,
-			},
+			cfg: p.toolReviewerConfig("prerequisites", p.PrerequisitesModelName, p.PrerequisitesPromptText, p.PrerequisitesPromptRef, p.PrerequisitesMaxToolTurns, p.PrerequisitesMaxToolTokens, p.PrerequisitesTools),
 		})
 	}
 
@@ -1751,15 +1701,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.StandardsComplianceModelName,
-				PromptText:    p.StandardsCompliancePromptText,
-				PromptRef:     p.StandardsCompliancePromptRef,
-				MaxToolTurns:  p.StandardsComplianceMaxToolTurns,
-				MaxToolTokens: p.StandardsComplianceMaxToolTokens,
-				Tools:         p.StandardsComplianceTools,
-			},
+			cfg: p.toolReviewerConfig("standards_compliance", p.StandardsComplianceModelName, p.StandardsCompliancePromptText, p.StandardsCompliancePromptRef, p.StandardsComplianceMaxToolTurns, p.StandardsComplianceMaxToolTokens, p.StandardsComplianceTools),
 		})
 	}
 
@@ -1773,15 +1715,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.LegalComplianceModelName,
-				PromptText:    p.LegalCompliancePromptText,
-				PromptRef:     p.LegalCompliancePromptRef,
-				MaxToolTurns:  p.LegalComplianceMaxToolTurns,
-				MaxToolTokens: p.LegalComplianceMaxToolTokens,
-				Tools:         p.LegalComplianceTools,
-			},
+			cfg: p.toolReviewerConfig("legal_compliance", p.LegalComplianceModelName, p.LegalCompliancePromptText, p.LegalCompliancePromptRef, p.LegalComplianceMaxToolTurns, p.LegalComplianceMaxToolTokens, p.LegalComplianceTools),
 		})
 	}
 
@@ -1795,15 +1729,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.RegulatoryComplianceModelName,
-				PromptText:    p.RegulatoryCompliancePromptText,
-				PromptRef:     p.RegulatoryCompliancePromptRef,
-				MaxToolTurns:  p.RegulatoryComplianceMaxToolTurns,
-				MaxToolTokens: p.RegulatoryComplianceMaxToolTokens,
-				Tools:         p.RegulatoryComplianceTools,
-			},
+			cfg: p.toolReviewerConfig("regulatory_compliance", p.RegulatoryComplianceModelName, p.RegulatoryCompliancePromptText, p.RegulatoryCompliancePromptRef, p.RegulatoryComplianceMaxToolTurns, p.RegulatoryComplianceMaxToolTokens, p.RegulatoryComplianceTools),
 		})
 	}
 
@@ -1817,15 +1743,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.InternalPolicyModelName,
-				PromptText:    p.InternalPolicyPromptText,
-				PromptRef:     p.InternalPolicyPromptRef,
-				MaxToolTurns:  p.InternalPolicyMaxToolTurns,
-				MaxToolTokens: p.InternalPolicyMaxToolTokens,
-				Tools:         p.InternalPolicyTools,
-			},
+			cfg: p.toolReviewerConfig("internal_policy", p.InternalPolicyModelName, p.InternalPolicyPromptText, p.InternalPolicyPromptRef, p.InternalPolicyMaxToolTurns, p.InternalPolicyMaxToolTokens, p.InternalPolicyTools),
 		})
 	}
 
@@ -1839,15 +1757,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.SecurityModelName,
-				PromptText:    p.SecurityPromptText,
-				PromptRef:     p.SecurityPromptRef,
-				MaxToolTurns:  p.SecurityMaxToolTurns,
-				MaxToolTokens: p.SecurityMaxToolTokens,
-				Tools:         p.SecurityTools,
-			},
+			cfg: p.toolReviewerConfig("security", p.SecurityModelName, p.SecurityPromptText, p.SecurityPromptRef, p.SecurityMaxToolTurns, p.SecurityMaxToolTokens, p.SecurityTools),
 		})
 	}
 
@@ -1861,15 +1771,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.PerformanceModelName,
-				PromptText:    p.PerformancePromptText,
-				PromptRef:     p.PerformancePromptRef,
-				MaxToolTurns:  p.PerformanceMaxToolTurns,
-				MaxToolTokens: p.PerformanceMaxToolTokens,
-				Tools:         p.PerformanceTools,
-			},
+			cfg: p.toolReviewerConfig("performance", p.PerformanceModelName, p.PerformancePromptText, p.PerformancePromptRef, p.PerformanceMaxToolTurns, p.PerformanceMaxToolTokens, p.PerformanceTools),
 		})
 	}
 
@@ -1883,15 +1785,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.ErrorHandlingModelName,
-				PromptText:    p.ErrorHandlingPromptText,
-				PromptRef:     p.ErrorHandlingPromptRef,
-				MaxToolTurns:  p.ErrorHandlingMaxToolTurns,
-				MaxToolTokens: p.ErrorHandlingMaxToolTokens,
-				Tools:         p.ErrorHandlingTools,
-			},
+			cfg: p.toolReviewerConfig("error_handling", p.ErrorHandlingModelName, p.ErrorHandlingPromptText, p.ErrorHandlingPromptRef, p.ErrorHandlingMaxToolTurns, p.ErrorHandlingMaxToolTokens, p.ErrorHandlingTools),
 		})
 	}
 
@@ -1905,15 +1799,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				chunkStore:   SQLStore{DB: ApiTypes.ProjectDBHandle},
 				maxTasks:     p.MaxConcurrent,
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				ModelName:     p.LimitationsModelName,
-				PromptText:    p.LimitationsPromptText,
-				PromptRef:     p.LimitationsPromptRef,
-				MaxToolTurns:  p.LimitationsMaxToolTurns,
-				MaxToolTokens: p.LimitationsMaxToolTokens,
-				Tools:         p.LimitationsTools,
-			},
+			cfg: p.toolReviewerConfig("limitations", p.LimitationsModelName, p.LimitationsPromptText, p.LimitationsPromptRef, p.LimitationsMaxToolTurns, p.LimitationsMaxToolTokens, p.LimitationsTools),
 		})
 	}
 
@@ -1938,16 +1824,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				maxMatches:   max_matches,
 				maxMetrics:   envInt("METRIC_REVIEW_MAX_METRICS", 0, 0),
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				Input:         "artifact",
-				ModelName:     p.MetricsModelName,
-				PromptText:    p.MetricsPromptText,
-				PromptRef:     p.MetricsPromptRef,
-				MaxToolTurns:  p.MetricsMaxToolTurns,
-				MaxToolTokens: p.MetricsMaxToolTokens,
-				Tools:         p.MetricsTools,
-			},
+			cfg: p.artifactReviewerConfig("metrics", p.MetricsModelName, p.MetricsPromptText, p.MetricsPromptRef, p.MetricsMaxToolTurns, p.MetricsMaxToolTokens, p.MetricsTools),
 		})
 	}
 
@@ -1967,16 +1844,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				maxMatches:   max_matches,
 				maxProvision: envInt("PROVISION_REVIEW_MAX_PROVISIONS", 0, 0),
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				Input:         "artifact",
-				ModelName:     p.ProvisionsModelName,
-				PromptText:    p.ProvisionsPromptText,
-				PromptRef:     p.ProvisionsPromptRef,
-				MaxToolTurns:  p.ProvisionsMaxToolTurns,
-				MaxToolTokens: p.ProvisionsMaxToolTokens,
-				Tools:         p.ProvisionsTools,
-			},
+			cfg: p.artifactReviewerConfig("provisions", p.ProvisionsModelName, p.ProvisionsPromptText, p.ProvisionsPromptRef, p.ProvisionsMaxToolTurns, p.ProvisionsMaxToolTokens, p.ProvisionsTools),
 		})
 	}
 
@@ -1993,13 +1861,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				maxMatches: max_matches,
 				maxEntity:  envInt("ENTITY_REVIEW_MAX_ENTITIES", 0, 0),
 			},
-			cfg: ReviewerConfig{
-				Enabled:    true,
-				Input:      "artifact",
-				ModelName:  p.EntitiesModelName,
-				PromptText: p.EntitiesPromptText,
-				PromptRef:  p.EntitiesPromptRef,
-			},
+			cfg: p.artifactReviewerConfig("entities", p.EntitiesModelName, p.EntitiesPromptText, p.EntitiesPromptRef, 0, 0, nil),
 		})
 	}
 
@@ -2019,16 +1881,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				maxMatches:   max_matches,
 				maxItems:     envInt("INVENTORY_REVIEW_MAX_ITEMS", 0, 0),
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				Input:         "artifact",
-				ModelName:     p.InventoryItemsModelName,
-				PromptText:    p.InventoryItemsPromptText,
-				PromptRef:     p.InventoryItemsPromptRef,
-				MaxToolTurns:  p.InventoryItemsMaxToolTurns,
-				MaxToolTokens: p.InventoryItemsMaxToolTokens,
-				Tools:         p.InventoryItemsTools,
-			},
+			cfg: p.artifactReviewerConfig("inventory_items", p.InventoryItemsModelName, p.InventoryItemsPromptText, p.InventoryItemsPromptRef, p.InventoryItemsMaxToolTurns, p.InventoryItemsMaxToolTokens, p.InventoryItemsTools),
 		})
 	}
 
@@ -2049,16 +1902,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				maxTasks:     maxDocReviewerTasks(p.MaxConcurrent),
 				maxObjects:   envInt("METRIC_COMPLETENESS_REVIEW_MAX_OBJECTS", 0, 0),
 			},
-			cfg: ReviewerConfig{
-				Enabled:       true,
-				Input:         "artifact",
-				ModelName:     p.MetricsCompletenessModelName,
-				PromptText:    p.MetricsCompletenessPromptText,
-				PromptRef:     p.MetricsCompletenessPromptRef,
-				MaxToolTurns:  p.MetricsCompletenessMaxToolTurns,
-				MaxToolTokens: p.MetricsCompletenessMaxToolTokens,
-				Tools:         p.MetricsCompletenessTools,
-			},
+			cfg: p.artifactReviewerConfig("metrics_completeness", p.MetricsCompletenessModelName, p.MetricsCompletenessPromptText, p.MetricsCompletenessPromptRef, p.MetricsCompletenessMaxToolTurns, p.MetricsCompletenessMaxToolTokens, p.MetricsCompletenessTools),
 		})
 	}
 
