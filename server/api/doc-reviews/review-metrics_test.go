@@ -380,7 +380,8 @@ func TestBuildReviewers_MetricsUsesDocReviewerMaxTasks(t *testing.T) {
 		MaxConcurrent:     1,
 	}
 
-	runners := p.buildReviewers(DocMetadataInputRecord{})
+	logger := loggerutil.CreateDefaultLogger("MID-20260710-01")
+	runners := p.buildReviewers(DocMetadataInputRecord{}, logger)
 	for _, runner := range runners {
 		if reviewer, ok := runner.reviewer.(*metricsReviewer); ok {
 			if reviewer.maxTasks != 4 {
@@ -426,7 +427,8 @@ func TestBuildReviewers_ArtifactReviewersUseDocReviewerMaxTasks(t *testing.T) {
 		"inventory_items":      false,
 		"metrics_completeness": false,
 	}
-	runners := p.buildReviewers(DocMetadataInputRecord{})
+	logger := loggerutil.CreateDefaultLogger("MID-20260710-01")
+	runners := p.buildReviewers(DocMetadataInputRecord{}, logger)
 	for _, runner := range runners {
 		switch reviewer := runner.reviewer.(type) {
 		case *metricsReviewer:

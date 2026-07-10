@@ -13,6 +13,9 @@
 
 # ── Group (package) defaults ─────────────────────────────────────────────────
 
+max_findings = [10, 20, 30]
+max_analyses = [10, 20, 30]
+
 [packages.P5]
 enabled = true
 name = "Technical & Compliance Standards"

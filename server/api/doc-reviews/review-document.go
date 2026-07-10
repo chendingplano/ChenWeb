@@ -1241,7 +1241,7 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 		return fmt.Errorf("(MID_26061802) load kb.inputs record %d: %w", recordID, err)
 	}
 
-	reviewers := p.buildReviewers(rec)
+	reviewers := p.buildReviewers(rec, p.Logger)
 	if len(reviewers) == 0 {
 		p.Logger.Info("document review skipped: no reviewers enabled", "record_id", recordID)
 		return nil
@@ -1299,7 +1299,7 @@ type reviewRunner struct {
 }
 
 // buildReviewers returns the enabled reviewers for this run.
-func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunner {
+func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord, logger ApiTypes.JimoLogger) []reviewRunner {
 	var runners []reviewRunner
 
 	if p.GrammarClient != nil && p.GrammarPromptText != "" && p.GrammarModelName != "" {
@@ -1988,6 +1988,12 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 	// precedence over the `input` field in doc-review.local.toml — the scheduler
 	// only consults the TOML when cfg.Input is empty. Keep the two in agreement.
 	if p.MetricsClient != nil && p.MetricsPromptText != "" && p.MetricsModelName != "" {
+		max_matches := envInt("METRIC_REVIEW_MAX_MATCHES", 20, 1)
+		if max_matches > 10 {
+			logger.Error("METRIC_REVIEW_MAX_MATCHES exceeds 10; this may cause excessive LLM token usage",
+				"METRIC_REVIEW_MAX_MATCHES", max_matches)
+			max_matches = 10
+		}
 		runners = append(runners, reviewRunner{
 			reviewer: &metricsReviewer{
 				client:       p.MetricsClient,
@@ -1998,7 +2004,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				runID:        p.RunID,
 				logStore:     p.ReviewLogsStore,
 				maxTasks:     maxDocReviewerTasks(p.MaxConcurrent),
-				maxMatches:   envInt("METRIC_REVIEW_MAX_MATCHES", 20, 1),
+				maxMatches:   max_matches,
 				maxMetrics:   envInt("METRIC_REVIEW_MAX_METRICS", 0, 0),
 			},
 			cfg: ReviewerConfig{
@@ -2018,6 +2024,12 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler);
 	// see the AR1 precedence note on the metrics reviewer above.
 	if p.ProvisionsClient != nil && p.ProvisionsPromptText != "" && p.ProvisionsModelName != "" {
+		max_matches := envInt("PROVISION_REVIEW_MAX_MATCHES", 20, 1)
+		if max_matches > 10 {
+			logger.Error("PROVISION_REVIEW_MAX_MATCHES exceeds 10; this may cause excessive LLM token usage",
+				"PROVISION_REVIEW_MAX_MATCHES", max_matches)
+			max_matches = 10
+		}
 		runners = append(runners, reviewRunner{
 			reviewer: &provisionsReviewer{
 				client:       p.ProvisionsClient,
@@ -2026,7 +2038,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				logger:       p.Logger,
 				db:           ApiTypes.ProjectDBHandle,
 				maxTasks:     maxDocReviewerTasks(p.MaxConcurrent),
-				maxMatches:   envInt("PROVISION_REVIEW_MAX_MATCHES", 20, 1),
+				maxMatches:   max_matches,
 				maxProvision: envInt("PROVISION_REVIEW_MAX_PROVISIONS", 0, 0),
 			},
 			cfg: ReviewerConfig{
@@ -2045,13 +2057,19 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 	// entities — cross-document entity consistency (ADR 2026063004). Input="artifact"
 	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler).
 	if p.EntitiesClient != nil && p.EntitiesPromptText != "" && p.EntitiesModelName != "" {
+		max_matches := envInt("ENTITY_REVIEW_MAX_MATCHES", 20, 1)
+		if max_matches > 10 {
+			logger.Error("ENTITY_REVIEW_MAX_MATCHES exceeds 10; this may cause excessive LLM token usage",
+				"ENTITY_REVIEW_MAX_MATCHES", max_matches)
+			max_matches = 10
+		}
 		runners = append(runners, reviewRunner{
 			reviewer: &entitiesReviewer{
 				client:     p.EntitiesClient,
 				logger:     p.Logger,
 				db:         ApiTypes.ProjectDBHandle,
 				maxTasks:   maxDocReviewerTasks(p.MaxConcurrent),
-				maxMatches: envInt("ENTITY_REVIEW_MAX_MATCHES", 20, 1),
+				maxMatches: max_matches,
 				maxEntity:  envInt("ENTITY_REVIEW_MAX_ENTITIES", 0, 0),
 			},
 			cfg: ReviewerConfig{
@@ -2068,6 +2086,12 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 	// Input="artifact" routes it through runReviewersLegacy -> ReviewDocument;
 	// see the AR1 precedence note on the metrics reviewer above.
 	if p.InventoryItemsClient != nil && p.InventoryItemsPromptText != "" && p.InventoryItemsModelName != "" {
+		max_matches := envInt("INVENTORY_REVIEW_MAX_MATCHES", 20, 1)
+		if max_matches > 10 {
+			logger.Error("INVENTORY_REVIEW_MAX_MATCHES exceeds 10; this may cause excessive LLM token usage",
+				"INVENTORY_REVIEW_MAX_MATCHES", max_matches)
+			max_matches = 10
+		}
 		runners = append(runners, reviewRunner{
 			reviewer: &inventoryItemsReviewer{
 				client:       p.InventoryItemsClient,
@@ -2076,7 +2100,7 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunne
 				logger:       p.Logger,
 				db:           ApiTypes.ProjectDBHandle,
 				maxTasks:     maxDocReviewerTasks(p.MaxConcurrent),
-				maxMatches:   envInt("INVENTORY_REVIEW_MAX_MATCHES", 20, 1),
+				maxMatches:   max_matches,
 				maxItems:     envInt("INVENTORY_REVIEW_MAX_ITEMS", 0, 0),
 			},
 			cfg: ReviewerConfig{

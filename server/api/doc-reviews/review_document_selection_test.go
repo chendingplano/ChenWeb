@@ -1,6 +1,10 @@
 package docreviews
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/chendingplano/shared/go/api/loggerutil"
+)
 
 func TestBuildReviewers_FiltersToRequestedAspects(t *testing.T) {
 	p := &ReviewProcessor{
@@ -14,7 +18,8 @@ func TestBuildReviewers_FiltersToRequestedAspects(t *testing.T) {
 		MaxConcurrent:       1,
 	}
 
-	runners := p.buildReviewers(DocMetadataInputRecord{})
+	logger := loggerutil.CreateDefaultLogger("MID-20260710-01")
+	runners := p.buildReviewers(DocMetadataInputRecord{}, logger)
 	if len(runners) != 1 {
 		t.Fatalf("buildReviewers returned %d runners, want 1", len(runners))
 	}
@@ -34,7 +39,8 @@ func TestBuildReviewers_WithoutRequestedAspectsIncludesConfiguredReviewers(t *te
 		MaxConcurrent:       1,
 	}
 
-	runners := p.buildReviewers(DocMetadataInputRecord{})
+	logger := loggerutil.CreateDefaultLogger("MID-20260710-01")
+	runners := p.buildReviewers(DocMetadataInputRecord{}, logger)
 	if len(runners) != 2 {
 		t.Fatalf("buildReviewers returned %d runners, want 2", len(runners))
 	}
