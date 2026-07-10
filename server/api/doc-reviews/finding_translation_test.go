@@ -1068,6 +1068,18 @@ func TestTranslationFromMetadataReadsFlatSchemaV1Format(t *testing.T) {
 	}
 }
 
+func TestTranslationFromMetadataUsesZhCNForZhReportLanguage(t *testing.T) {
+	raw := []byte(`{"zh-cn":{"title":"中文标题","description":"中文描述","suggestion":"中文建议","provenance":"llm_translation"}}`)
+
+	tr, ok := translationFromMetadata(raw, "zh")
+	if !ok {
+		t.Fatal("translationFromMetadata ok=false, want true")
+	}
+	if tr.Title != "中文标题" || tr.Description != "中文描述" || tr.Suggestion != "中文建议" {
+		t.Fatalf("translation=%#v", tr)
+	}
+}
+
 func TestNewLLMFindingTranslatorLoadsPromptsFromPromptDir(t *testing.T) {
 	t.Setenv("TRANSLATION_MODEL_NAME", "test-model")
 

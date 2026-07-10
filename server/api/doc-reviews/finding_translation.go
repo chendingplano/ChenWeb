@@ -385,11 +385,31 @@ func translationFromMetadata(raw []byte, language string) (FindingTranslation, b
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return FindingTranslation{}, false
 	}
-	tr, ok := env.I18N.Translations[language]
-	if !ok || (tr.Title == "" && tr.Description == "" && tr.Suggestion == "") {
-		return FindingTranslation{}, false
+	for _, key := range translationMetadataKeys(language) {
+		tr, ok := env.I18N.Translations[key]
+		if ok && (tr.Title != "" || tr.Description != "" || tr.Suggestion != "") {
+			return tr, true
+		}
 	}
-	return tr, true
+	return FindingTranslation{}, false
+}
+
+// translationMetadataKeys keeps the report language aliases used by existing
+// configuration compatible with the BCP-47 keys persisted in finding metadata.
+// The requested key is always preferred when more than one Chinese variant is
+// available.
+func translationMetadataKeys(language string) []string {
+	language = strings.ToLower(strings.TrimSpace(language))
+	switch language {
+	case "zh":
+		return []string{"zh", "zh-cn", "zh-hans"}
+	case "zh-cn":
+		return []string{"zh-cn", "zh", "zh-hans"}
+	case "zh-hans":
+		return []string{"zh-hans", "zh-cn", "zh"}
+	default:
+		return []string{language}
+	}
 }
 
 func applyFindingTranslation(f FindingItem, tr FindingTranslation) FindingItem {
