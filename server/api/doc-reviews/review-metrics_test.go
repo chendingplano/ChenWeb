@@ -3,7 +3,6 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -175,10 +174,11 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		view:  metricView{MetricID: "1_m_1", MetricName: "压力", Value: "1.6", Unit: "MPa"},
 		spans: []string{"12:14"},
 	}
-	ms := make([]matchedMetric, 5)
-	for i := range ms {
+	matchIDs := []string{"m1", "m2", "m3", "m4", "m5"}
+	ms := make([]matchedMetric, len(matchIDs))
+	for i, matchID := range matchIDs {
 		ms[i] = matchedMetric{
-			view:     metricView{MetricID: fmt.Sprintf("2_m_%d", i+9), Value: "2.5", Unit: "MPa", SourceLineSpans: []string{"30:32"}},
+			view:     metricView{MetricID: matchID, Value: "2.5", Unit: "MPa", SourceLineSpans: []string{"30:32"}},
 			recordID: 2,
 			filename: "other.pdf",
 			via:      "hybrid_search",
@@ -233,11 +233,11 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		t.Fatalf("matching_metrics = %d, want 3: %s", len(payload.Matches), in)
 	}
 	for i, match := range payload.Matches {
-		if want := fmt.Sprintf("2_m_%d", i+9); match.Metric.MetricID != want {
+		if want := matchIDs[i]; match.Metric.MetricID != want {
 			t.Errorf("matching_metrics[%d].metric.metric_id = %q, want %q", i, match.Metric.MetricID, want)
 		}
 	}
-	for _, want := range []string{"metric_under_review", "matching_metrics", "2_m_9", "hybrid_search", "source_line_spans", "source_context", "matched metric line"} {
+	for _, want := range []string{"metric_under_review", "matching_metrics", "m1", "hybrid_search", "source_line_spans", "source_context", "matched metric line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
 		}

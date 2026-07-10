@@ -3,7 +3,6 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -129,10 +128,11 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		view:  provisionView{ProvID: "1_prv_1", ProvName: "Relief valve", Provision: "shall be 1.6 MPa"},
 		spans: []string{"20:24"},
 	}
-	ms := make([]matchedProvision, 5)
-	for i := range ms {
+	matchIDs := []string{"m1", "m2", "m3", "m4", "m5"}
+	ms := make([]matchedProvision, len(matchIDs))
+	for i, matchID := range matchIDs {
 		ms[i] = matchedProvision{
-			view:     provisionView{ProvID: fmt.Sprintf("2_prv_%d", i+9), Provision: "shall be 2.5 MPa", SourceLineSpans: []string{"30:32"}},
+			view:     provisionView{ProvID: matchID, Provision: "shall be 2.5 MPa", SourceLineSpans: []string{"30:32"}},
 			recordID: 2,
 			filename: "other.pdf",
 			via:      "hybrid_search",
@@ -184,11 +184,11 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		t.Fatalf("matching_provisions = %d, want 3: %s", len(payload.Matches), in)
 	}
 	for i, match := range payload.Matches {
-		if want := fmt.Sprintf("2_prv_%d", i+9); match.Provision.ProvID != want {
+		if want := matchIDs[i]; match.Provision.ProvID != want {
 			t.Errorf("matching_provisions[%d].provision.prov_id = %q, want %q", i, match.Provision.ProvID, want)
 		}
 	}
-	for _, want := range []string{"provision_under_review", "matching_provisions", "2_prv_9", "hybrid_search", "source_line_spans", "source_context", "matched provision line"} {
+	for _, want := range []string{"provision_under_review", "matching_provisions", "m1", "hybrid_search", "source_line_spans", "source_context", "matched provision line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
 		}

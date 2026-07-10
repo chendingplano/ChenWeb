@@ -3,7 +3,6 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -135,10 +134,11 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 		view:  inventoryItemView{ItemID: "1_inv_1", ItemName: "球阀", ModelNumber: "BV-2200", Manufacturer: "Acme Valve Co."},
 		spans: []string{"12:14"},
 	}
-	ms := make([]matchedInventoryItem, 5)
-	for i := range ms {
+	matchIDs := []string{"m1", "m2", "m3", "m4", "m5"}
+	ms := make([]matchedInventoryItem, len(matchIDs))
+	for i, matchID := range matchIDs {
 		ms[i] = matchedInventoryItem{
-			view:     inventoryItemView{ItemID: fmt.Sprintf("2_inv_%d", i+9), ModelNumber: "BV-2200", Manufacturer: "Beta Industrial", SourceLineSpans: []string{"30:32"}},
+			view:     inventoryItemView{ItemID: matchID, ModelNumber: "BV-2200", Manufacturer: "Beta Industrial", SourceLineSpans: []string{"30:32"}},
 			recordID: 2,
 			filename: "other.pdf",
 			via:      "hybrid_search",
@@ -193,11 +193,11 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 		t.Fatalf("matching_items = %d, want 3: %s", len(payload.Matches), in)
 	}
 	for i, match := range payload.Matches {
-		if want := fmt.Sprintf("2_inv_%d", i+9); match.Item.ItemID != want {
+		if want := matchIDs[i]; match.Item.ItemID != want {
 			t.Errorf("matching_items[%d].item.inventory_item_id = %q, want %q", i, match.Item.ItemID, want)
 		}
 	}
-	for _, want := range []string{"inventory_item_under_review", "matching_items", "2_inv_9", "hybrid_search", "source_line_spans", "source_context", "matched inventory line"} {
+	for _, want := range []string{"inventory_item_under_review", "matching_items", "m1", "hybrid_search", "source_line_spans", "source_context", "matched inventory line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
 		}

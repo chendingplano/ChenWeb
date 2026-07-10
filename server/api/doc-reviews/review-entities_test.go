@@ -3,7 +3,6 @@ package docreviews
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -137,9 +136,10 @@ func TestReviewEntity_PayloadAndFindingTagging(t *testing.T) {
 		view:  entityView{EntityID: "1_e_1", Name: "Sinopec", Type: "organization"},
 		spans: []string{"20:24"},
 	}
-	ms := make([]matchedEntity, 5)
-	for i := range ms {
-		ms[i] = matchedEntity{view: entityView{EntityID: fmt.Sprintf("2_e_%d", i+9), Name: "Sinopec", Type: "standards body"}, recordID: 2, filename: "other.pdf", via: "name", confidence: 0.9 - float64(i)/10}
+	matchIDs := []string{"m1", "m2", "m3", "m4", "m5"}
+	ms := make([]matchedEntity, len(matchIDs))
+	for i, matchID := range matchIDs {
+		ms[i] = matchedEntity{view: entityView{EntityID: matchID, Name: "Sinopec", Type: "standards body"}, recordID: 2, filename: "other.pdf", via: "name", confidence: 0.9 - float64(i)/10}
 	}
 
 	findings := r.reviewEntity(context.Background(), 1, 0, ReviewerConfig{
@@ -179,11 +179,11 @@ func TestReviewEntity_PayloadAndFindingTagging(t *testing.T) {
 		t.Fatalf("matching_entities = %d, want 3: %s", len(payload.Matches), in)
 	}
 	for i, match := range payload.Matches {
-		if want := fmt.Sprintf("2_e_%d", i+9); match.Entity.EntityID != want {
+		if want := matchIDs[i]; match.Entity.EntityID != want {
 			t.Errorf("matching_entities[%d].entity.entity_id = %q, want %q", i, match.Entity.EntityID, want)
 		}
 	}
-	for _, want := range []string{"entity_under_review", "matching_entities", "2_e_9", "name"} {
+	for _, want := range []string{"entity_under_review", "matching_entities", "m1", "name"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
 		}
