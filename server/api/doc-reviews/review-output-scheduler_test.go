@@ -50,6 +50,13 @@ func TestRunReviewerConcurrentLimitSkipsUnclaimedUnits(t *testing.T) {
 	first := <-started
 	second := <-started
 	close(releases[first])
+
+	select {
+	case extra := <-started:
+		t.Fatalf("unexpected extra started unit %d after first completion", extra)
+	case <-time.After(200 * time.Millisecond):
+	}
+
 	close(releases[second])
 
 	select {
