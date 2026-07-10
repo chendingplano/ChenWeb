@@ -312,10 +312,10 @@
 	});
 </script>
 
-<div class="p-6 space-y-4" style="background:{pageBg}; min-height:100%;">
+<div class="p-6 space-y-4 h-full flex flex-col overflow-hidden" style="background:{pageBg};">
 
 	<!-- Header card -->
-	<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
 				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">LLM Usage Logs</h2>
@@ -336,7 +336,7 @@
 	</div>
 
 	<!-- Filter section -->
-	<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<div class="grid gap-3" style="grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));">
 			<label class="flex flex-col gap-1">
 				<span style="font-size:11px; color:{textMuted};">Model</span>
@@ -417,7 +417,7 @@
 
 	<!-- Error banner -->
 	{#if error}
-		<div class="rounded-xl p-4 flex items-start gap-2"
+		<div class="rounded-xl p-4 flex items-start gap-2 flex-shrink-0"
 			style="background:{danger}20; border:1px solid {danger}70; color:{danger};">
 			<CircleAlertIcon class="w-4 h-4 mt-0.5 flex-shrink-0" />
 			<span style="font-size:13px;">{error}</span>
@@ -425,9 +425,9 @@
 	{/if}
 
 	<!-- Table card -->
-	<div class="rounded-xl overflow-hidden" style="background:{cardBg}; border:1px solid {borderColor};">
+	<div class="rounded-xl flex flex-col flex-1 min-h-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<!-- Pagination bar -->
-		<div class="px-5 py-3 flex items-center justify-between"
+		<div class="px-5 py-3 flex items-center justify-between flex-shrink-0"
 			style="border-bottom:1px solid {borderColor};">
 			<span style="font-size:13px; color:{textMuted};">
 				Total: {total} events
@@ -454,42 +454,35 @@
 		{:else if rows.length === 0}
 			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">No events found.</div>
 		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm border-collapse">
+			<div class="flex-1 min-h-0 overflow-auto" style="user-select:text;">
+				<table class="w-full text-sm" style="border-collapse:separate; border-spacing:0;">
 					<thead>
-						<tr style="border-bottom:1px solid {borderColor}; background:{surface2};">
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Details</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Started At</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Model</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Prompt</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Metadata</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Call Reason</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Call LOC</th>
-							<th class="text-right px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">In Tok</th>
-							<th class="text-right px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Out Tok</th>
-							<th class="text-right px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Latency</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Input Body</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Output Body</th>
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px;">Error</th>
+						<tr style="background:{surface2};">
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Started At</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Model</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Prompt</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Metadata</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Call Reason</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Call LOC</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">In Tok</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Out Tok</th>
+							<th class="text-right px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Latency</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Input Body</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Output Body</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Error</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; font-size:12px; background:{surface2}; border-bottom:1px solid {borderColor};">Details</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each rows as row (row.id)}
-							<tr class="transition-colors hover:bg-white/5" style="border-bottom:1px solid {borderColor};">
-								<td class="px-4 py-2.5">
-									<button
-										onclick={() => openDetails(row)}
-										class="rounded px-2 py-1 text-xs cursor-pointer"
-										style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
-									>Details</button>
-								</td>
-								<td class="px-4 py-2.5" style="color:{textMuted}; white-space:nowrap; font-size:12px;">{formatTime(row.request_started_at)}</td>
-								<td class="px-4 py-2.5" style="color:{textSecondary}; white-space:nowrap; font-size:13px;">{row.model_name || '—'}</td>
-								<td class="px-4 py-2.5" style="color:{textSecondary}; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;"
+							<tr class="transition-colors hover:bg-white/5">
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textMuted}; white-space:nowrap; font-size:12px;">{formatTime(row.request_started_at)}</td>
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:13px;">{row.model_name || '—'}</td>
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;"
 									title={row.prompt_name}>{row.prompt_name || '—'}</td>
 
 								<!-- Metadata -->
-								<td class="px-4 py-2.5">
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									<button
 										onclick={() => openMetadata(row)}
 										class="text-left rounded px-2 py-1 cursor-pointer"
@@ -498,15 +491,15 @@
 									>{'{ }'}</button>
 								</td>
 
-								<td class="px-4 py-2.5" style="color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_reason || '—'}</td>
-								<td class="px-4 py-2.5" style="color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_loc || '—'}</td>
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_reason || '—'}</td>
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; white-space:nowrap; font-size:12px;">{row.call_loc || '—'}</td>
 
-								<td class="px-4 py-2.5 text-right" style="color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.input_tokens.toLocaleString()}</td>
-								<td class="px-4 py-2.5 text-right" style="color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.output_tokens.toLocaleString()}</td>
-								<td class="px-4 py-2.5 text-right" style="color:{textMuted}; font-size:12px; white-space:nowrap;">{formatLatency(row.latency_ms)}</td>
+								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.input_tokens.toLocaleString()}</td>
+								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textSecondary}; font-size:12px; font-variant-numeric:tabular-nums;">{row.output_tokens.toLocaleString()}</td>
+								<td class="px-4 py-2.5 text-right" style="border-bottom:1px solid {borderColor}; color:{textMuted}; font-size:12px; white-space:nowrap;">{formatLatency(row.latency_ms)}</td>
 
 								<!-- Input Body -->
-								<td class="px-4 py-2.5">
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									{#if row.input_body_ref}
 										<button
 											ondblclick={() => openBody(row, 'input')}
@@ -520,7 +513,7 @@
 								</td>
 
 								<!-- Output Body -->
-								<td class="px-4 py-2.5">
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
 									{#if row.output_body_ref}
 										<button
 											ondblclick={() => openBody(row, 'output')}
@@ -533,13 +526,22 @@
 									{/if}
 								</td>
 
-								<td class="px-4 py-2.5" style="max-width:200px;">
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor}; max-width:200px;">
 									{#if row.error_message}
 										<span style="color:{danger}; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;"
 											title={row.error_message}>{row.error_message}</span>
 									{:else}
 										<span style="color:{success}; font-size:12px;">OK</span>
 									{/if}
+								</td>
+
+								<!-- Details -->
+								<td class="px-4 py-2.5" style="border-bottom:1px solid {borderColor};">
+									<button
+										onclick={() => openDetails(row)}
+										class="rounded px-2 py-1 text-xs cursor-pointer"
+										style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
+									>Details</button>
 								</td>
 							</tr>
 						{/each}

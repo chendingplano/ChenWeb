@@ -125,9 +125,13 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	let isDashboard = $derived(sectionId === 'dashboard' || !activeMenu);
 
 	// Flow pages scroll naturally and show the footer at the bottom.
-	// App-shell pages (chat, resolve-ambiguous) fill the viewport, manage their
+	// App-shell pages (chat, resolve-ambiguous, llm-usage-logs) fill the viewport, manage their
 	// own internal scroll (need min-h-0 on the content wrapper), and hide the footer.
-	let showFooter = $derived(sectionId !== 'chat' && activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous');
+	let showFooter = $derived(
+		sectionId !== 'chat' &&
+		activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
+		activeMenu?.childId !== 'sysadmin-llm-usage-logs'
+	);
 </script>
 
 <main
