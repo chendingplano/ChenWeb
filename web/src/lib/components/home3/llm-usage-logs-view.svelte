@@ -243,6 +243,10 @@
 		return `${(ms / 1000).toFixed(1)}s`;
 	}
 
+	function isEmbeddingCall(row: UsageEventRow): boolean {
+		return row.prompt_name === 'embedding_no_prompt';
+	}
+
 	function escHtml(s: string): string {
 		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	}
@@ -524,9 +528,10 @@
 									{#if row.output_body_ref}
 										<button
 											onclick={() => openBody(row, 'output')}
-											class="rounded px-2 py-1 text-xs cursor-pointer"
+											disabled={isEmbeddingCall(row)}
+											class="rounded px-2 py-1 text-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
 											style="background:{surface2}; color:{accent}; border:1px solid {borderColor};"
-											title={row.output_body_ref}
+											title={isEmbeddingCall(row) ? 'Not applicable for embedding calls' : row.output_body_ref}
 										>View</button>
 									{:else}
 										<span style="color:{textMuted}; font-size:12px;">—</span>
