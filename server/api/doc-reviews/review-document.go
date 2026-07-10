@@ -780,15 +780,16 @@ func resolveReviewerBudget(aspect, group string) (maxToolTurns, maxToolTokens in
 }
 
 func (p *ReviewProcessor) resolveReviewerOutputLimits(aspect string) (maxFindings, maxAnalyses int) {
+	reviewDepth := normalizeReviewDepth(p.ReviewDepth)
 	cfg, err := GetDocReviewConfig()
 	if err != nil {
 		if p.Logger != nil {
 			p.Logger.Warn("doc-review config load failed; using built-in output limits",
-				"aspect", aspect, "review_depth", p.ReviewDepth, "error", err)
+				"aspect", aspect, "review_depth", reviewDepth, "error", err)
 		}
-		return (&DocReviewConfig{}).ResolveOutputLimits(aspect, p.ReviewDepth)
+		return (&DocReviewConfig{}).ResolveOutputLimits(aspect, reviewDepth)
 	}
-	return cfg.ResolveOutputLimits(aspect, p.ReviewDepth)
+	return cfg.ResolveOutputLimits(aspect, reviewDepth)
 }
 
 // resolveReviewerToolClient builds a tool-capable chat client when the
@@ -1316,8 +1317,16 @@ type reviewRunner struct {
 	cfg      ReviewerConfig
 }
 
+func normalizeReviewDepth(depth int) int {
+	if depth < 1 || depth > 3 {
+		return 1
+	}
+	return depth
+}
+
 func (p *ReviewProcessor) reviewerConfig(aspect, modelName, promptText, promptRef string) ReviewerConfig {
 	maxFindings, maxAnalyses := p.resolveReviewerOutputLimits(aspect)
+	reviewDepth := normalizeReviewDepth(p.ReviewDepth)
 	return ReviewerConfig{
 		Enabled:     true,
 		ModelName:   modelName,
@@ -1325,7 +1334,7 @@ func (p *ReviewProcessor) reviewerConfig(aspect, modelName, promptText, promptRe
 		PromptRef:   promptRef,
 		MaxFindings: maxFindings,
 		MaxAnalyses: maxAnalyses,
-		ReviewDepth: p.ReviewDepth,
+		ReviewDepth: reviewDepth,
 	}
 }
 
