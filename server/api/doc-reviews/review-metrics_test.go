@@ -2,6 +2,8 @@ package docreviews
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -152,6 +154,8 @@ func TestAssembleMatches_BranchA_DedupAndExclusion(t *testing.T) {
 }
 
 func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
+	t.Setenv("MAX_MATCHES_TO_LLM", "3")
+
 	fake := &fakeJSONExtractor{
 		out: map[string]any{
 			"findings": []any{
@@ -171,9 +175,10 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		view:  metricView{MetricID: "1_m_1", MetricName: "压力", Value: "1.6", Unit: "MPa"},
 		spans: []string{"12:14"},
 	}
-	ms := []matchedMetric{
-		{
-			view:     metricView{MetricID: "2_m_9", Value: "2.5", Unit: "MPa", SourceLineSpans: []string{"30:32"}},
+	ms := make([]matchedMetric, 5)
+	for i := range ms {
+		ms[i] = matchedMetric{
+			view:     metricView{MetricID: fmt.Sprintf("2_m_%d", i+9), Value: "2.5", Unit: "MPa", SourceLineSpans: []string{"30:32"}},
 			recordID: 2,
 			filename: "other.pdf",
 			via:      "hybrid_search",
@@ -181,8 +186,8 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 				{"line_number": 20, "content": "context before"},
 				{"line_number": 30, "content": "matched metric line"},
 			},
-			confidence: 0.9,
-		},
+			confidence: 0.9 - float64(i)/10,
+		}
 	}
 
 	findings := r.reviewMetric(context.Background(), 1, 0, ReviewerConfig{
@@ -214,6 +219,24 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 		t.Errorf("promptNames = %v", fake.promptNames)
 	}
 	in := fake.inputTexts[0]
+	var payload struct {
+		Matches []struct {
+			Metric struct {
+				MetricID string `json:"metric_id"`
+			} `json:"metric"`
+		} `json:"matching_metrics"`
+	}
+	if err := json.Unmarshal([]byte(in), &payload); err != nil {
+		t.Fatalf("decode input JSON: %v", err)
+	}
+	if len(payload.Matches) != 3 {
+		t.Fatalf("matching_metrics = %d, want 3: %s", len(payload.Matches), in)
+	}
+	for i, match := range payload.Matches {
+		if want := fmt.Sprintf("2_m_%d", i+9); match.Metric.MetricID != want {
+			t.Errorf("matching_metrics[%d].metric.metric_id = %q, want %q", i, match.Metric.MetricID, want)
+		}
+	}
 	for _, want := range []string{"metric_under_review", "matching_metrics", "2_m_9", "hybrid_search", "source_line_spans", "source_context", "matched metric line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)
@@ -235,8 +258,8 @@ func TestReviewMetric_PayloadAndFindingTagging(t *testing.T) {
 	if len(logEntry.Findings) != 1 || logEntry.Findings[0].Title != "Conflict" {
 		t.Fatalf("log findings = %+v", logEntry.Findings)
 	}
-	if len(logEntry.MatchedUnits) != 1 {
-		t.Fatalf("log matched_units = %d, want 1", len(logEntry.MatchedUnits))
+	if len(logEntry.MatchedUnits) != 5 {
+		t.Fatalf("log matched_units = %d, want all 5 retrieved matches", len(logEntry.MatchedUnits))
 	}
 }
 
@@ -380,8 +403,7 @@ func TestBuildReviewers_MetricsUsesDocReviewerMaxTasks(t *testing.T) {
 		MaxConcurrent:     1,
 	}
 
-	logger := loggerutil.CreateDefaultLogger("MID-20260710-01")
-	runners := p.buildReviewers(DocMetadataInputRecord{}, logger)
+	runners := p.buildReviewers(DocMetadataInputRecord{})
 	for _, runner := range runners {
 		if reviewer, ok := runner.reviewer.(*metricsReviewer); ok {
 			if reviewer.maxTasks != 4 {
@@ -427,8 +449,7 @@ func TestBuildReviewers_ArtifactReviewersUseDocReviewerMaxTasks(t *testing.T) {
 		"inventory_items":      false,
 		"metrics_completeness": false,
 	}
-	logger := loggerutil.CreateDefaultLogger("MID-20260710-01")
-	runners := p.buildReviewers(DocMetadataInputRecord{}, logger)
+	runners := p.buildReviewers(DocMetadataInputRecord{})
 	for _, runner := range runners {
 		switch reviewer := runner.reviewer.(type) {
 		case *metricsReviewer:

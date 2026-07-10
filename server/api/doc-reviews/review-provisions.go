@@ -172,10 +172,11 @@ func (r *provisionsReviewer) reviewProvision(
 ) []ReviewFinding {
 	start := time.Now()
 
+	matchesSentToLLM := limitMatchesToLLM(ms)
 	payloadObj := map[string]any{
 		"provision_under_review": dp.view,
 		"artifact_line_spans":    dp.spans,
-		"matching_provisions":    matchedProvisionsPayload(ms),
+		"matching_provisions":    matchedProvisionsPayload(matchesSentToLLM),
 	}
 	if truncated {
 		// AR2: the provision's spans extend past the included window; tell the
@@ -260,6 +261,7 @@ func (r *provisionsReviewer) reviewProvision(
 		"provision_index", index,
 		"prov_id", dp.view.ProvID,
 		"matches", len(ms),
+		"matches_sent_to_llm", len(matchesSentToLLM),
 		"findings", len(findings),
 		"ms_used", time.Since(start).Milliseconds(),
 		"cache_hit_tokens", cacheHitTokens,

@@ -147,9 +147,10 @@ func (r *entitiesReviewer) reviewEntity(
 ) []ReviewFinding {
 	start := time.Now()
 
+	matchesSentToLLM := limitMatchesToLLM(ms)
 	payloadObj := map[string]any{
 		"entity_under_review": de.view,
-		"matching_entities":   matchedEntitiesPayload(ms),
+		"matching_entities":   matchedEntitiesPayload(matchesSentToLLM),
 	}
 	inputJSON, err := json.Marshal(payloadObj)
 	if err != nil {
@@ -187,6 +188,7 @@ func (r *entitiesReviewer) reviewEntity(
 		"entity_index", index,
 		"entity_id", de.view.EntityID,
 		"matches", len(ms),
+		"matches_sent_to_llm", len(matchesSentToLLM),
 		"findings", len(findings),
 		"ms_used", time.Since(start).Milliseconds(),
 		"cache_hit_tokens", reviewLLMCacheHitTokens(r.client),

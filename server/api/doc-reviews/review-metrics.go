@@ -207,10 +207,11 @@ func (r *metricsReviewer) reviewMetric(
 		},
 	}
 
+	matchesSentToLLM := limitMatchesToLLM(ms)
 	payloadObj := map[string]any{
 		"metric_under_review": dm.view,
 		"artifact_line_spans": dm.spans,
-		"matching_metrics":    matchedMetricsPayload(ms),
+		"matching_metrics":    matchedMetricsPayload(matchesSentToLLM),
 	}
 	if truncated {
 		// AR2: the metric's spans extend past the included window; tell the
@@ -312,6 +313,7 @@ func (r *metricsReviewer) reviewMetric(
 		"metric_index", index,
 		"metric_id", dm.view.MetricID,
 		"matches", len(ms),
+		"matches_sent_to_llm", len(matchesSentToLLM),
 		"findings", len(findings),
 		"ms_used", time.Since(start).Milliseconds(),
 		"cache_hit_tokens", cacheHitTokens,

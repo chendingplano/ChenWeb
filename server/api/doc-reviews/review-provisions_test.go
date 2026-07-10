@@ -2,6 +2,8 @@ package docreviews
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -110,6 +112,8 @@ func TestAssembleProvisionMatches_BranchA_DedupAndExclusion(t *testing.T) {
 }
 
 func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
+	t.Setenv("MAX_MATCHES_TO_LLM", "3")
+
 	fake := &fakeJSONExtractor{
 		out: map[string]any{
 			"findings": []any{
@@ -125,9 +129,10 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		view:  provisionView{ProvID: "1_prv_1", ProvName: "Relief valve", Provision: "shall be 1.6 MPa"},
 		spans: []string{"20:24"},
 	}
-	ms := []matchedProvision{
-		{
-			view:     provisionView{ProvID: "2_prv_9", Provision: "shall be 2.5 MPa", SourceLineSpans: []string{"30:32"}},
+	ms := make([]matchedProvision, 5)
+	for i := range ms {
+		ms[i] = matchedProvision{
+			view:     provisionView{ProvID: fmt.Sprintf("2_prv_%d", i+9), Provision: "shall be 2.5 MPa", SourceLineSpans: []string{"30:32"}},
 			recordID: 2,
 			filename: "other.pdf",
 			via:      "hybrid_search",
@@ -135,8 +140,8 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 				{"line_number": 20, "content": "context before"},
 				{"line_number": 30, "content": "matched provision line"},
 			},
-			confidence: 0.9,
-		},
+			confidence: 0.9 - float64(i)/10,
+		}
 	}
 
 	findings := r.reviewProvision(context.Background(), 1, 0, ReviewerConfig{
@@ -165,6 +170,24 @@ func TestReviewProvision_PayloadAndFindingTagging(t *testing.T) {
 		t.Errorf("documentFirst = %v, want [true]", fake.documentFirst)
 	}
 	in := fake.inputTexts[0]
+	var payload struct {
+		Matches []struct {
+			Provision struct {
+				ProvID string `json:"prov_id"`
+			} `json:"provision"`
+		} `json:"matching_provisions"`
+	}
+	if err := json.Unmarshal([]byte(in), &payload); err != nil {
+		t.Fatalf("decode input JSON: %v", err)
+	}
+	if len(payload.Matches) != 3 {
+		t.Fatalf("matching_provisions = %d, want 3: %s", len(payload.Matches), in)
+	}
+	for i, match := range payload.Matches {
+		if want := fmt.Sprintf("2_prv_%d", i+9); match.Provision.ProvID != want {
+			t.Errorf("matching_provisions[%d].provision.prov_id = %q, want %q", i, match.Provision.ProvID, want)
+		}
+	}
 	for _, want := range []string{"provision_under_review", "matching_provisions", "2_prv_9", "hybrid_search", "source_line_spans", "source_context", "matched provision line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)

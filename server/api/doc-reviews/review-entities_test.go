@@ -2,6 +2,8 @@ package docreviews
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -118,6 +120,8 @@ func TestEntityNameKeys_AliasAndCaseNormalization(t *testing.T) {
 }
 
 func TestReviewEntity_PayloadAndFindingTagging(t *testing.T) {
+	t.Setenv("MAX_MATCHES_TO_LLM", "3")
+
 	fake := &fakeJSONExtractor{
 		out: map[string]any{
 			"findings": []any{
@@ -133,8 +137,9 @@ func TestReviewEntity_PayloadAndFindingTagging(t *testing.T) {
 		view:  entityView{EntityID: "1_e_1", Name: "Sinopec", Type: "organization"},
 		spans: []string{"20:24"},
 	}
-	ms := []matchedEntity{
-		{view: entityView{EntityID: "2_e_9", Name: "Sinopec", Type: "standards body"}, recordID: 2, filename: "other.pdf", via: "name", confidence: 0.9},
+	ms := make([]matchedEntity, 5)
+	for i := range ms {
+		ms[i] = matchedEntity{view: entityView{EntityID: fmt.Sprintf("2_e_%d", i+9), Name: "Sinopec", Type: "standards body"}, recordID: 2, filename: "other.pdf", via: "name", confidence: 0.9 - float64(i)/10}
 	}
 
 	findings := r.reviewEntity(context.Background(), 1, 0, ReviewerConfig{
@@ -160,6 +165,24 @@ func TestReviewEntity_PayloadAndFindingTagging(t *testing.T) {
 		t.Errorf("documentFirst = %v, want [true]", fake.documentFirst)
 	}
 	in := fake.inputTexts[0]
+	var payload struct {
+		Matches []struct {
+			Entity struct {
+				EntityID string `json:"entity_id"`
+			} `json:"entity"`
+		} `json:"matching_entities"`
+	}
+	if err := json.Unmarshal([]byte(in), &payload); err != nil {
+		t.Fatalf("decode input JSON: %v", err)
+	}
+	if len(payload.Matches) != 3 {
+		t.Fatalf("matching_entities = %d, want 3: %s", len(payload.Matches), in)
+	}
+	for i, match := range payload.Matches {
+		if want := fmt.Sprintf("2_e_%d", i+9); match.Entity.EntityID != want {
+			t.Errorf("matching_entities[%d].entity.entity_id = %q, want %q", i, match.Entity.EntityID, want)
+		}
+	}
 	for _, want := range []string{"entity_under_review", "matching_entities", "2_e_9", "name"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)

@@ -175,10 +175,11 @@ func (r *inventoryItemsReviewer) reviewItem(
 ) []ReviewFinding {
 	start := time.Now()
 
+	matchesSentToLLM := limitMatchesToLLM(ms)
 	payloadObj := map[string]any{
 		"inventory_item_under_review": di.view,
 		"artifact_line_spans":         di.spans,
-		"matching_items":              matchedInventoryItemsPayload(ms),
+		"matching_items":              matchedInventoryItemsPayload(matchesSentToLLM),
 	}
 	if truncated {
 		// AR2: the item's spans extend past the included window; tell the
@@ -259,6 +260,7 @@ func (r *inventoryItemsReviewer) reviewItem(
 		"item_index", index,
 		"inventory_item_id", di.view.ItemID,
 		"matches", len(ms),
+		"matches_sent_to_llm", len(matchesSentToLLM),
 		"findings", len(findings),
 		"ms_used", time.Since(start).Milliseconds(),
 		"cache_hit_tokens", cacheHitTokens,

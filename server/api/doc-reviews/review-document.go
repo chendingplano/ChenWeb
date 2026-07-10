@@ -1244,7 +1244,7 @@ func (p *ReviewProcessor) PostProcessIndex(ctx context.Context, recordID int64) 
 		return fmt.Errorf("(MID_26061802) load kb.inputs record %d: %w", recordID, err)
 	}
 
-	reviewers := p.buildReviewers(rec, p.Logger)
+	reviewers := p.buildReviewers(rec)
 	if len(reviewers) == 0 {
 		p.Logger.Info("document review skipped: no reviewers enabled", "record_id", recordID)
 		return nil
@@ -1302,7 +1302,7 @@ type reviewRunner struct {
 }
 
 // buildReviewers returns the enabled reviewers for this run.
-func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord, logger ApiTypes.JimoLogger) []reviewRunner {
+func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord) []reviewRunner {
 	var runners []reviewRunner
 
 	if p.GrammarClient != nil && p.GrammarPromptText != "" && p.GrammarModelName != "" {
@@ -1992,11 +1992,6 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord, logger ApiTyp
 	// only consults the TOML when cfg.Input is empty. Keep the two in agreement.
 	if p.MetricsClient != nil && p.MetricsPromptText != "" && p.MetricsModelName != "" {
 		max_matches := envInt("METRIC_REVIEW_MAX_MATCHES", 20, 1)
-		if max_matches > 10 {
-			logger.Error("METRIC_REVIEW_MAX_MATCHES exceeds 10; this may cause excessive LLM token usage",
-				"METRIC_REVIEW_MAX_MATCHES", max_matches)
-			max_matches = 10
-		}
 		runners = append(runners, reviewRunner{
 			reviewer: &metricsReviewer{
 				client:       p.MetricsClient,
@@ -2028,11 +2023,6 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord, logger ApiTyp
 	// see the AR1 precedence note on the metrics reviewer above.
 	if p.ProvisionsClient != nil && p.ProvisionsPromptText != "" && p.ProvisionsModelName != "" {
 		max_matches := envInt("PROVISION_REVIEW_MAX_MATCHES", 20, 1)
-		if max_matches > 10 {
-			logger.Error("PROVISION_REVIEW_MAX_MATCHES exceeds 10; this may cause excessive LLM token usage",
-				"PROVISION_REVIEW_MAX_MATCHES", max_matches)
-			max_matches = 10
-		}
 		runners = append(runners, reviewRunner{
 			reviewer: &provisionsReviewer{
 				client:       p.ProvisionsClient,
@@ -2061,11 +2051,6 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord, logger ApiTyp
 	// routes it through runReviewersLegacy -> ReviewDocument (not the chunk scheduler).
 	if p.EntitiesClient != nil && p.EntitiesPromptText != "" && p.EntitiesModelName != "" {
 		max_matches := envInt("ENTITY_REVIEW_MAX_MATCHES", 20, 1)
-		if max_matches > 10 {
-			logger.Error("ENTITY_REVIEW_MAX_MATCHES exceeds 10; this may cause excessive LLM token usage",
-				"ENTITY_REVIEW_MAX_MATCHES", max_matches)
-			max_matches = 10
-		}
 		runners = append(runners, reviewRunner{
 			reviewer: &entitiesReviewer{
 				client:     p.EntitiesClient,
@@ -2090,11 +2075,6 @@ func (p *ReviewProcessor) buildReviewers(_ DocMetadataInputRecord, logger ApiTyp
 	// see the AR1 precedence note on the metrics reviewer above.
 	if p.InventoryItemsClient != nil && p.InventoryItemsPromptText != "" && p.InventoryItemsModelName != "" {
 		max_matches := envInt("INVENTORY_REVIEW_MAX_MATCHES", 20, 1)
-		if max_matches > 10 {
-			logger.Error("INVENTORY_REVIEW_MAX_MATCHES exceeds 10; this may cause excessive LLM token usage",
-				"INVENTORY_REVIEW_MAX_MATCHES", max_matches)
-			max_matches = 10
-		}
 		runners = append(runners, reviewRunner{
 			reviewer: &inventoryItemsReviewer{
 				client:       p.InventoryItemsClient,

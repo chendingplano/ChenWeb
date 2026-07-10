@@ -2,6 +2,8 @@ package docreviews
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -116,6 +118,8 @@ func TestAssembleInventoryMatches_BranchA_DedupAndExclusion(t *testing.T) {
 }
 
 func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
+	t.Setenv("MAX_MATCHES_TO_LLM", "3")
+
 	fake := &fakeJSONExtractor{
 		out: map[string]any{
 			"findings": []any{
@@ -131,9 +135,10 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 		view:  inventoryItemView{ItemID: "1_inv_1", ItemName: "球阀", ModelNumber: "BV-2200", Manufacturer: "Acme Valve Co."},
 		spans: []string{"12:14"},
 	}
-	ms := []matchedInventoryItem{
-		{
-			view:     inventoryItemView{ItemID: "2_inv_9", ModelNumber: "BV-2200", Manufacturer: "Beta Industrial", SourceLineSpans: []string{"30:32"}},
+	ms := make([]matchedInventoryItem, 5)
+	for i := range ms {
+		ms[i] = matchedInventoryItem{
+			view:     inventoryItemView{ItemID: fmt.Sprintf("2_inv_%d", i+9), ModelNumber: "BV-2200", Manufacturer: "Beta Industrial", SourceLineSpans: []string{"30:32"}},
 			recordID: 2,
 			filename: "other.pdf",
 			via:      "hybrid_search",
@@ -141,8 +146,8 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 				{"line_number": 20, "content": "context before"},
 				{"line_number": 30, "content": "matched inventory line"},
 			},
-			confidence: 0.9,
-		},
+			confidence: 0.9 - float64(i)/10,
+		}
 	}
 
 	findings := r.reviewItem(context.Background(), 1, 0, ReviewerConfig{
@@ -174,6 +179,24 @@ func TestReviewItem_PayloadAndFindingTagging(t *testing.T) {
 		t.Errorf("promptNames = %v", fake.promptNames)
 	}
 	in := fake.inputTexts[0]
+	var payload struct {
+		Matches []struct {
+			Item struct {
+				ItemID string `json:"inventory_item_id"`
+			} `json:"item"`
+		} `json:"matching_items"`
+	}
+	if err := json.Unmarshal([]byte(in), &payload); err != nil {
+		t.Fatalf("decode input JSON: %v", err)
+	}
+	if len(payload.Matches) != 3 {
+		t.Fatalf("matching_items = %d, want 3: %s", len(payload.Matches), in)
+	}
+	for i, match := range payload.Matches {
+		if want := fmt.Sprintf("2_inv_%d", i+9); match.Item.ItemID != want {
+			t.Errorf("matching_items[%d].item.inventory_item_id = %q, want %q", i, match.Item.ItemID, want)
+		}
+	}
 	for _, want := range []string{"inventory_item_under_review", "matching_items", "2_inv_9", "hybrid_search", "source_line_spans", "source_context", "matched inventory line"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("input JSON missing %q: %s", want, in)

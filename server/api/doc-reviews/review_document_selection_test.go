@@ -1,10 +1,6 @@
 package docreviews
 
-import (
-	"testing"
-
-	"github.com/chendingplano/shared/go/api/loggerutil"
-)
+import "testing"
 
 func TestBuildReviewers_FiltersToRequestedAspects(t *testing.T) {
 	p := &ReviewProcessor{
@@ -18,8 +14,7 @@ func TestBuildReviewers_FiltersToRequestedAspects(t *testing.T) {
 		MaxConcurrent:       1,
 	}
 
-	logger := loggerutil.CreateDefaultLogger("MID-20260710-01")
-	runners := p.buildReviewers(DocMetadataInputRecord{}, logger)
+	runners := p.buildReviewers(DocMetadataInputRecord{})
 	if len(runners) != 1 {
 		t.Fatalf("buildReviewers returned %d runners, want 1", len(runners))
 	}
@@ -39,9 +34,55 @@ func TestBuildReviewers_WithoutRequestedAspectsIncludesConfiguredReviewers(t *te
 		MaxConcurrent:       1,
 	}
 
-	logger := loggerutil.CreateDefaultLogger("MID-20260710-01")
-	runners := p.buildReviewers(DocMetadataInputRecord{}, logger)
+	runners := p.buildReviewers(DocMetadataInputRecord{})
 	if len(runners) != 2 {
 		t.Fatalf("buildReviewers returned %d runners, want 2", len(runners))
+	}
+}
+
+func TestBuildReviewers_PreservesArtifactRetrievalMatchLimitsAboveTen(t *testing.T) {
+	t.Setenv("METRIC_REVIEW_MAX_MATCHES", "25")
+	t.Setenv("PROVISION_REVIEW_MAX_MATCHES", "25")
+	t.Setenv("ENTITY_REVIEW_MAX_MATCHES", "25")
+	t.Setenv("INVENTORY_REVIEW_MAX_MATCHES", "25")
+
+	p := &ReviewProcessor{
+		MetricsClient:            &fakeJSONExtractor{},
+		MetricsModelName:         "model",
+		MetricsPromptText:        "prompt",
+		ProvisionsClient:         &fakeJSONExtractor{},
+		ProvisionsModelName:      "model",
+		ProvisionsPromptText:     "prompt",
+		EntitiesClient:           &fakeJSONExtractor{},
+		EntitiesModelName:        "model",
+		EntitiesPromptText:       "prompt",
+		InventoryItemsClient:     &fakeJSONExtractor{},
+		InventoryItemsModelName:  "model",
+		InventoryItemsPromptText: "prompt",
+	}
+
+	runners := p.buildReviewers(DocMetadataInputRecord{})
+	seen := 0
+	for _, runner := range runners {
+		var got int
+		switch reviewer := runner.reviewer.(type) {
+		case *metricsReviewer:
+			got = reviewer.maxMatches
+		case *provisionsReviewer:
+			got = reviewer.maxMatches
+		case *entitiesReviewer:
+			got = reviewer.maxMatches
+		case *inventoryItemsReviewer:
+			got = reviewer.maxMatches
+		default:
+			continue
+		}
+		seen++
+		if got != 25 {
+			t.Errorf("%s maxMatches = %d, want 25", runner.reviewer.Name(), got)
+		}
+	}
+	if seen != 4 {
+		t.Fatalf("artifact reviewers found = %d, want 4", seen)
 	}
 }
