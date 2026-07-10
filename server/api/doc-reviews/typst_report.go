@@ -28,6 +28,63 @@ var passLabelMap = map[string]string{
 	"P6": "Meta & Process",
 }
 
+type reportLexicon struct {
+	language string
+	font     string
+	labels   map[string]string
+	passes   map[string]string
+	aspects  map[string]string
+}
+
+func reportLexiconForLanguage(language string) reportLexicon {
+	lex := reportLexicon{
+		language: "en",
+		font:     "Linux Libertine",
+		labels: map[string]string{
+			"report-title": "Document Review Report", "page": "Page", "finding": "Finding", "related-source-lines": "Related Source Lines",
+			"source": "Source", "of": "of", "errors": "Errors", "explanation": "Explanation", "referenced-matching-metric-lines": "Referenced Matching Metric Lines",
+			"matched-source": "Matched Source", "recommended-correction": "Recommended Correction", "comparison-analyses": "Comparison Analyses", "versus": "vs.",
+			"no-findings-artifact": "No findings for this artifact.", "no-findings-aspect": "No findings for this aspect.", "overall-assessment": "Overall Assessment", "main-problem-analysis": "Main Problem Analysis",
+			"guidelines-recommendations": "Guidelines and Recommendations", "no-references": "No references listed.", "table-of-contents": "Table of Contents",
+			"basic-information": "Basic Information", "document-title": "Document Title", "document-id": "Document ID", "document-date": "Document Date",
+			"reviewer": "Reviewer(s)", "review-date": "Review Date", "review-scope": "Review Scope", "review-results": "Review Results",
+			"summary": "Summary", "statistics": "Statistics", "aspect": "Aspect", "findings": "Findings", "no-aspects": "No aspects defined.",
+			"grounding-references": "Grounding References", "supporting-references": "Supporting References",
+		},
+		passes:  passLabelMap,
+		aspects: map[string]string{},
+	}
+	for _, aspect := range ListAspects() {
+		lex.aspects[aspect.Name] = aspect.Label
+	}
+	if language != "zh" && language != "zh-cn" && language != "zh-hans" {
+		return lex
+	}
+	lex.language = "zh-cn"
+	lex.font = "PingFang SC"
+	lex.labels = map[string]string{
+		"report-title": "文档审查报告", "page": "第", "finding": "发现", "related-source-lines": "相关源行",
+		"source": "源", "of": "/", "errors": "错误", "explanation": "说明", "referenced-matching-metric-lines": "引用的匹配指标源行",
+		"matched-source": "匹配源", "recommended-correction": "建议的修正", "comparison-analyses": "比较分析", "versus": "对比",
+		"no-findings-artifact": "此对象没有发现问题。", "no-findings-aspect": "此审查项没有发现问题。", "overall-assessment": "总体评估", "main-problem-analysis": "主要问题分析",
+		"guidelines-recommendations": "指南与建议", "no-references": "没有列出参考资料。", "table-of-contents": "目录",
+		"basic-information": "基本信息", "document-title": "文档标题", "document-id": "文档 ID", "document-date": "文档日期",
+		"reviewer": "审查人", "review-date": "审查日期", "review-scope": "审查范围", "review-results": "审查结果",
+		"summary": "摘要", "statistics": "统计", "aspect": "审查项", "findings": "发现", "no-aspects": "未定义审查项。",
+		"grounding-references": "依据参考资料", "supporting-references": "支持性参考资料",
+	}
+	lex.passes = map[string]string{"P1": "语言与风格", "P2": "结构与组织", "P3": "内容质量", "P4": "一致性", "P5": "技术与合规", "P6": "元数据与流程"}
+	lex.aspects = map[string]string{
+		"grammar_spelling": "语法与拼写", "tone_voice": "语气与文风", "formatting_consistency": "格式一致性", "readability": "可读性", "localization": "本地化",
+		"logical_flow": "逻辑流程", "heading_hierarchy": "标题层级", "toc_accuracy": "目录准确性", "navigability": "可导航性", "section_balance": "章节平衡性", "modularity": "模块化",
+		"completeness": "完整性", "correctness": "正确性", "clarity": "清晰度", "conciseness": "简洁性", "relevance": "相关性", "currency": "时效性", "examples": "示例", "diagrams": "图表", "testable_claims": "可验证声明", "evidence_rationale": "证据与依据",
+		"internal_contradictions": "内部矛盾", "terminology_consistency": "术语一致性", "cross_reference_correctness": "交叉引用正确性", "requirement_traceability": "需求可追溯性",
+		"technical_accuracy": "技术准确性", "assumptions": "假设", "prerequisites": "前提条件", "standards_compliance": "标准符合性", "legal_compliance": "法律合规性", "regulatory_compliance": "监管合规性", "internal_policy": "内部政策", "security": "安全性", "performance": "性能", "error_handling": "错误处理", "limitations": "局限性", "metrics": "指标一致性", "provisions": "条款一致性", "entities": "实体一致性", "inventory_items": "库存项目一致性",
+		"version_history": "版本历史", "review_status": "审查状态", "ownership": "归属", "references": "参考资料", "related_documents": "相关文档", "confidentiality": "保密性", "sensitive_data": "敏感数据", "pii": "个人身份信息", "data_retention": "数据保留", "license_ip": "许可与知识产权",
+	}
+	return lex
+}
+
 // provisionsPass is the pass the provisions reviewer is configured under
 // (doc-review.local.toml [reviewers.provisions]; ADR 2026063003). Used to
 // force the provisions aspect-section to render when it has analyses but
@@ -268,9 +325,10 @@ func copyLocalizedSources(dst, src *ReportSkeleton) {
 // buildFindingBlock renders one review-finding(...) Typst call for f, using
 // fid as its displayed id (either the DB finding id or an "F-NN" ordinal
 // fallback — see findingDisplayID).
-func buildFindingBlock(f ReportFinding, fid string) string {
+func buildFindingBlock(f ReportFinding, fid, labelsArg string) string {
 	var blockB strings.Builder
 	fmt.Fprintf(&blockB, "      review-finding(\n")
+	fmt.Fprintf(&blockB, "        labels: %s,\n", labelsArg)
 	fmt.Fprintf(&blockB, "        id: \"%s\",\n", typStr(fid))
 
 	// Emit sources array — one dict per source location group.
@@ -364,7 +422,7 @@ func isArtifactAnchoredAspect(aspect string) bool {
 // IDs) so "no conflict" comparisons are still visible (ADR 2026070602 / ADR
 // 2026062203 §1.2). findingIdx is the shared ordinal counter also used by the
 // flat-findings path, threaded by pointer so numbering stays continuous.
-func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]ProvisionAnalysis, aspect string, findingIdx *int) string {
+func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]ProvisionAnalysis, aspect string, findingIdx *int, labelsArg string) string {
 	artifactFindingMap := map[string][]ReportFinding{}
 	minFindingID := map[string]int64{}
 	var artifactIDs []string
@@ -406,7 +464,7 @@ func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]P
 		var findingBlocks []string
 		for _, f := range artifactFindingMap[artifactID] {
 			*findingIdx++
-			findingBlocks = append(findingBlocks, buildFindingBlock(f, findingDisplayID(f.ID, *findingIdx)))
+			findingBlocks = append(findingBlocks, buildFindingBlock(f, findingDisplayID(f.ID, *findingIdx), labelsArg))
 		}
 		var findingsArg string
 		if len(findingBlocks) > 0 {
@@ -431,11 +489,12 @@ func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]P
 		}
 		groups = append(groups, fmt.Sprintf(
 			"      artifact-group(\n"+
+				"        labels: %s,\n"+
 				"        title: \"%s\",\n"+
 				"        analyses: (%s),\n"+
 				"        findings: (%s),\n"+
 				"      ),",
-			typStr(title), analysesArg, findingsArg,
+			labelsArg, typStr(title), analysesArg, findingsArg,
 		))
 	}
 	if len(groups) == 0 {
@@ -447,6 +506,12 @@ func buildArtifactGroupsArg(af []ReportFinding, provisionAnalyses map[string][]P
 // buildTypstSource returns the full .typ source for the review report.
 func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTemplatePath string, provisionAnalyses map[string][]ProvisionAnalysis) string {
 	var b strings.Builder
+	lex := reportLexiconForLanguage(lang)
+	labelsArg := typstLabelsArg(lex.labels)
+	typstLanguage := lex.language
+	if typstLanguage == "zh-cn" {
+		typstLanguage = "zh"
+	}
 
 	// Import template functions.  Module content output is discarded; only
 	// the #let bindings become available in this document.
@@ -456,8 +521,8 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 	// own set-text(lang:"en") is scoped inside the function body and will
 	// override this for content the function generates; this line covers any
 	// surrounding markup we might add in the future.
-	if lang != "en" {
-		fmt.Fprintf(&b, "#set text(lang: %q)\n\n", lang)
+	if lex.language != "en" {
+		fmt.Fprintf(&b, "#set text(lang: %q)\n\n", typstLanguage)
 	}
 
 	// ── Metadata ────────────────────────────────────────────────
@@ -466,13 +531,17 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 	reviewDate := extractDate(skeleton.Meta.GeneratedAt)
 	reviewer := req.RequesterName
 	if reviewer == "" {
-		reviewer = "Automated Review"
+		if lex.language == "zh-cn" {
+			reviewer = "自动审查"
+		} else {
+			reviewer = "Automated Review"
+		}
 	}
 
 	// Review scope: human-readable list of pass labels.
 	var scopeParts []string
 	for _, p := range skeleton.PassOrder {
-		if label, ok := passLabelMap[p]; ok {
+		if label, ok := lex.passes[p]; ok {
 			scopeParts = append(scopeParts, label)
 		}
 	}
@@ -482,7 +551,7 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 	var statLines []string
 	for _, p := range skeleton.PassOrder {
 		pg := skeleton.FindingsByPass[p]
-		label := passLabelMap[p]
+		label := lex.passes[p]
 		statLines = append(statLines, fmt.Sprintf("    (aspect: \"%s\", count: %d),", typStr(label), len(pg.Findings)))
 	}
 
@@ -496,7 +565,7 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 	findingIdx := 0
 	for _, p := range passOrder {
 		pg := skeleton.FindingsByPass[p]
-		label, ok := passLabelMap[p]
+		label, ok := lex.passes[p]
 		if !ok {
 			label = p
 		}
@@ -536,22 +605,23 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 				}
 				findingIdx++
 				fid := findingDisplayID(f.ID, findingIdx)
-				findingBlocks = append(findingBlocks, buildFindingBlock(f, fid))
+				findingBlocks = append(findingBlocks, buildFindingBlock(f, fid, labelsArg))
 			}
 
-			assessment := buildAssessment(len(af), aspectHighCount)
-			problems := buildProblems([]string{aspect})
-			guidelines := buildGuidelines(af)
+			assessment := buildAssessment(len(af), aspectHighCount, lex.language)
+			problems := buildProblems([]string{aspect}, lex)
+			guidelines := buildGuidelines(af, lex.language)
 
 			var findingsArg, artifactGroupsArg string
 			if artifactAnchored {
-				artifactGroupsArg = buildArtifactGroupsArg(af, provisionAnalyses, aspect, &findingIdx)
+				artifactGroupsArg = buildArtifactGroupsArg(af, provisionAnalyses, aspect, &findingIdx, labelsArg)
 			} else if len(findingBlocks) > 0 {
 				findingsArg = "\n" + strings.Join(findingBlocks, "\n") + "\n    "
 			}
 
 			section := fmt.Sprintf(
 				"    aspect-section(\n"+
+					"      labels: %s,\n"+
 					"      title: \"%s\",\n"+
 					"      findings: (%s),\n"+
 					"      artifact-groups: (%s),\n"+
@@ -559,7 +629,8 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 					"      problems: [%s],\n"+
 					"      guidelines: [%s],\n"+
 					"    ),",
-				typStr(aspect),
+				labelsArg,
+				typStr(firstNonEmpty(lex.aspects[aspect], aspect)),
 				findingsArg,
 				artifactGroupsArg,
 				typContent(assessment),
@@ -592,6 +663,9 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 
 	// ── Main template call ─────────────────────────────────────────
 	fmt.Fprintf(&b, "#document-review-report(\n")
+	fmt.Fprintf(&b, "  lang: %q,\n", typstLanguage)
+	fmt.Fprintf(&b, "  font: %q,\n", lex.font)
+	fmt.Fprintf(&b, "  labels: %s,\n", labelsArg)
 	fmt.Fprintf(&b, "  doc-title: \"%s\",\n", typStr(docTitle))
 	fmt.Fprintf(&b, "  doc-id: \"%s\",\n", typStr(docID))
 	fmt.Fprintf(&b, "  doc-date: \"%s\",\n", typStr(reviewDate))
@@ -605,6 +679,21 @@ func buildTypstSource(skeleton *ReportSkeleton, req *RequestStatus, lang, absTem
 	writeTypstArray(&b, "  supporting-refs", supportingLines)
 	fmt.Fprintf(&b, ")\n")
 
+	return b.String()
+}
+
+func typstLabelsArg(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("(\n")
+	for _, key := range keys {
+		fmt.Fprintf(&b, "  %s: %q,\n", key, typStr(labels[key]))
+	}
+	b.WriteString(")")
 	return b.String()
 }
 
@@ -638,7 +727,17 @@ func buildRelated(location, evidence string) string {
 */
 
 // buildAssessment produces the overall-assessment sentence for a pass section.
-func buildAssessment(total, high int) string {
+func buildAssessment(total, high int, language string) string {
+	if language == "zh-cn" {
+		if total == 0 {
+			return "本节未发现问题。"
+		}
+		s := fmt.Sprintf("本节发现 %d 项问题。", total)
+		if high > 0 {
+			s += fmt.Sprintf("其中 %d 项为高严重性问题，需要立即关注。", high)
+		}
+		return s
+	}
 	if total == 0 {
 		return "No issues found in this section."
 	}
@@ -650,15 +749,25 @@ func buildAssessment(total, high int) string {
 }
 
 // buildProblems summarises the distinct aspects that have issues.
-func buildProblems(aspects []string) string {
+func buildProblems(aspects []string, lex reportLexicon) string {
+	localized := make([]string, 0, len(aspects))
+	for _, aspect := range aspects {
+		localized = append(localized, firstNonEmpty(lex.aspects[aspect], aspect))
+	}
+	if lex.language == "zh-cn" {
+		if len(localized) == 0 {
+			return "未发现主要问题。"
+		}
+		return "发现的问题：" + strings.Join(localized, "、") + "。"
+	}
 	if len(aspects) == 0 {
 		return "No major issues identified."
 	}
-	return "Issues found in: " + strings.Join(aspects, ", ") + "."
+	return "Issues found in: " + strings.Join(localized, ", ") + "."
 }
 
 // buildGuidelines returns bullet-point guidelines from high-severity suggestions.
-func buildGuidelines(findings []ReportFinding) string {
+func buildGuidelines(findings []ReportFinding, language string) string {
 	var lines []string
 	for _, f := range findings {
 		if f.Severity == "high" && strings.TrimSpace(f.Suggestion) != "" {
@@ -666,6 +775,9 @@ func buildGuidelines(findings []ReportFinding) string {
 		}
 	}
 	if len(lines) == 0 {
+		if language == "zh-cn" {
+			return "请持续关注此审查项。"
+		}
 		return "Continue monitoring this area."
 	}
 	return strings.Join(lines, "\n")

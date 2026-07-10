@@ -100,6 +100,7 @@
 //   explanation – detailed explanation of why it is an error
 //   correction  – recommended correction
 #let review-finding(
+  labels: (:),
   id: "",
   sources: (),
   related-sources: (),
@@ -107,6 +108,7 @@
   explanation: [],
   correction: [],
 ) = {
+  let label(key) = labels.at(key, default: key)
   block(
     width: 100%,
     stroke: 0.5pt + clr-divider,
@@ -120,17 +122,17 @@
         fill: clr-secondary,
         inset: (x: 10pt, y: 6pt),
         text(weight: "bold", fill: white, size: 9.5pt,
-          if id.starts-with("F-") { "Finding " + id } else { "Finding-" + id }),
+          if id.starts-with("F-") { label("finding") + " " + id } else { label("finding") + "-" + id }),
       )
       pad(x: 12pt, y: 10pt, {
         // Source blocks (one per location group)
-        text(weight: "semibold", size: 9pt, fill: clr-muted, "Related Source Lines")
+        text(weight: "semibold", size: 9pt, fill: clr-muted, label("related-source-lines"))
         v(3pt)
         let src-n = sources.len()
         for (i, sc) in sources.enumerate() {
           if src-n > 1 {
             text(size: 8.5pt, weight: "semibold", fill: clr-muted,
-              "Source " + str(i + 1) + " of " + str(src-n) + ":")
+              label("source") + " " + str(i + 1) + " " + label("of") + " " + str(src-n) + ":")
             v(2pt)
           }
           source-with-context(
@@ -143,25 +145,25 @@
         v(8pt)
 
         // Errors
-        text(weight: "semibold", size: 9pt, fill: clr-error-fg, "Errors")
+        text(weight: "semibold", size: 9pt, fill: clr-error-fg, label("errors"))
         v(3pt)
         error-block(errors)
         v(8pt)
 
         // Explanation
-        text(weight: "semibold", size: 9pt, fill: clr-muted, "Explanation")
+        text(weight: "semibold", size: 9pt, fill: clr-muted, label("explanation"))
         v(3pt)
         block(width: 100%, text(size: 9pt, explanation))
         v(8pt)
 
         if related-sources.len() > 0 {
-          text(weight: "semibold", size: 9pt, fill: clr-muted, "Referenced Matching Metric Lines")
+          text(weight: "semibold", size: 9pt, fill: clr-muted, label("referenced-matching-metric-lines"))
           v(3pt)
           let rel-n = related-sources.len()
           for (i, sc) in related-sources.enumerate() {
             if rel-n > 1 {
               text(size: 8.5pt, weight: "semibold", fill: clr-muted,
-                "Matched Source " + str(i + 1) + " of " + str(rel-n) + ":")
+              label("matched-source") + " " + str(i + 1) + " " + label("of") + " " + str(rel-n) + ":")
               v(2pt)
             }
             source-with-context(
@@ -175,7 +177,7 @@
         }
 
         // Recommended correction
-        text(weight: "semibold", size: 9pt, fill: rgb("#15803d"), "Recommended Correction")
+        text(weight: "semibold", size: 9pt, fill: rgb("#15803d"), label("recommended-correction"))
         v(3pt)
         recommendation-block(correction)
       })
@@ -192,14 +194,16 @@
 //              reviewer has no analyses table yet (metrics, inventory_items).
 //   findings – array of content blocks produced by review-finding(...)
 #let artifact-group(
+  labels: (:),
   title: "",
   analyses: (),
   findings: (),
 ) = {
+  let label(key) = labels.at(key, default: key)
   heading(level: 3, title)
 
   if analyses.len() > 0 {
-    text(weight: "semibold", size: 9pt, fill: clr-muted, "Comparison Analyses")
+    text(weight: "semibold", size: 9pt, fill: clr-muted, label("comparison-analyses"))
     v(3pt)
     for a in analyses {
       block(
@@ -209,7 +213,7 @@
         inset: (x: 10pt, y: 8pt),
         {
           text(weight: "semibold", size: 8.5pt, fill: clr-muted,
-            "vs. " + a.related + "  ·  " + a.relationship)
+            label("versus") + " " + a.related + "  ·  " + a.relationship)
           v(3pt)
           text(size: 9pt, a.summary)
         },
@@ -226,7 +230,7 @@
     }
   } else {
     v(4pt)
-    text(style: "italic", fill: clr-muted, size: 9pt, "No findings for this artifact.")
+    text(style: "italic", fill: clr-muted, size: 9pt, label("no-findings-artifact"))
   }
 }
 
@@ -238,6 +242,7 @@
 //   problems   – main problem analysis
 //   guidelines – guidelines / recommendations for the future
 #let aspect-section(
+  labels: (:),
   title: "",
   findings: (),
   artifact-groups: (),
@@ -245,6 +250,7 @@
   problems: [],
   guidelines: [],
 ) = {
+  let label(key) = labels.at(key, default: key)
   heading(level: 2, title)
 
   if artifact-groups.len() > 0 {
@@ -259,27 +265,28 @@
     }
   } else {
     v(4pt)
-    text(style: "italic", fill: clr-muted, size: 9pt, "No findings for this aspect.")
+    text(style: "italic", fill: clr-muted, size: 9pt, label("no-findings-aspect"))
   }
 
   v(12pt)
-  heading(level: 4, "Overall Assessment")
+  heading(level: 4, label("overall-assessment"))
   assessment
   v(8pt)
 
-  heading(level: 4, "Main Problem Analysis")
+  heading(level: 4, label("main-problem-analysis"))
   problems
   v(8pt)
 
-  heading(level: 4, "Guidelines and Recommendations")
+  heading(level: 4, label("guidelines-recommendations"))
   guidelines
 }
 
 // ── reference-list: grounding / supporting references ────────
 // Each entry is a dictionary: (id, title, description)
-#let reference-list(entries) = {
+#let reference-list(entries, labels: (:)) = {
+  let label(key) = labels.at(key, default: key)
   if entries.len() == 0 {
-    text(style: "italic", fill: clr-muted, size: 9pt, "No references listed.")
+    text(style: "italic", fill: clr-muted, size: 9pt, label("no-references"))
     return
   }
   for e in entries {
@@ -316,6 +323,9 @@
 //   supporting-refs  – array of reference entries (id, title, description)
 //   body             – optional additional content appended at the end
 #let document-review-report(
+  lang: "en",
+  font: "Linux Libertine",
+  labels: (:),
   doc-title: "Untitled Document",
   doc-id: "",
   doc-date: "",
@@ -329,6 +339,7 @@
   supporting-refs: (),
   body: [],
 ) = {
+  let label(key) = labels.at(key, default: key)
   // ── Page setup ──────────────────────────────────────────────
   set page(
     paper: "a4",
@@ -337,8 +348,8 @@
       if counter(page).get().first() > 1 {
         grid(
           columns: (1fr, auto),
-          text(size: 8pt, fill: clr-muted, "Document Review Report"),
-          text(size: 8pt, fill: clr-muted, "Page " + str(counter(page).get().first())),
+          text(size: 8pt, fill: clr-muted, label("report-title")),
+          text(size: 8pt, fill: clr-muted, label("page") + " " + str(counter(page).get().first())),
         )
         v(-4pt)
         hrule
@@ -355,7 +366,7 @@
     },
   )
 
-  set text(font: "Linux Libertine", size: 10pt, lang: "en")
+  set text(font: font, size: 10pt, lang: lang)
   set par(justify: true, leading: 0.65em)
 
   set heading(numbering: "1.1.")
@@ -413,7 +424,7 @@
       radius: 8pt,
       inset: (x: 24pt, y: 20pt),
       {
-        text(fill: white, weight: "bold", size: 20pt, "Document Review Report")
+        text(fill: white, weight: "bold", size: 20pt, label("report-title"))
         v(6pt)
         text(fill: rgb("#93c5fd"), size: 11pt, doc-title)
       },
@@ -422,12 +433,12 @@
   })
 
   // ── Table of Contents ───────────────────────────────────────
-  heading(level: 1, "Table of Contents")
+  heading(level: 1, label("table-of-contents"))
   outline(title: none)
   pagebreak()
 
   // ── Chapter 1 – Basic Information ───────────────────────────
-  heading(level: 1, "Basic Information")
+  heading(level: 1, label("basic-information"))
 
   block(
     width: 100%,
@@ -435,39 +446,39 @@
     radius: 6pt,
     inset: (x: 14pt, y: 12pt),
     {
-      meta-row("Document Title",   doc-title)
+      meta-row(label("document-title"), doc-title)
       v(5pt)
-      meta-row("Document ID",      doc-id)
+      meta-row(label("document-id"), doc-id)
       v(5pt)
-      meta-row("Document Date",    doc-date)
+      meta-row(label("document-date"), doc-date)
       v(5pt)
-      meta-row("Reviewer(s)",      reviewer)
+      meta-row(label("reviewer"), reviewer)
       v(5pt)
-      meta-row("Review Date",      review-date)
+      meta-row(label("review-date"), review-date)
       v(5pt)
-      meta-row("Review Scope",     review-scope)
+      meta-row(label("review-scope"), review-scope)
     },
   )
 
   // ── Chapter 2 – Review Results ──────────────────────────────
-  heading(level: 1, "Review Results")
+  heading(level: 1, label("review-results"))
 
   // 2.1 Summary
-  heading(level: 2, "Summary")
+  heading(level: 2, label("summary"))
   summary
   v(10pt)
 
   // 2.2 Statistics table
   if aspect-stats.len() > 0 {
-    heading(level: 2, "Statistics")
+    heading(level: 2, label("statistics"))
     table(
       columns: (1fr, auto),
       stroke: 0.5pt + clr-divider,
       fill: (_, row) => if row == 0 { clr-accent } else if calc.even(row) { clr-source-bg } else { white },
       inset: (x: 10pt, y: 6pt),
       table.header(
-        text(fill: white, weight: "bold", size: 9pt, "Aspect"),
-        text(fill: white, weight: "bold", size: 9pt, "Findings"),
+        text(fill: white, weight: "bold", size: 9pt, label("aspect")),
+        text(fill: white, weight: "bold", size: 9pt, label("findings")),
       ),
       ..aspect-stats.map(s => (
         text(size: 9pt, s.aspect),
@@ -482,16 +493,16 @@
   if aspects.len() > 0 {
     for a in aspects { a }
   } else {
-    text(style: "italic", fill: clr-muted, "No aspects defined.")
+    text(style: "italic", fill: clr-muted, label("no-aspects"))
   }
 
   // ── Chapter 3 – Grounding References ────────────────────────
-  heading(level: 1, "Grounding References")
-  reference-list(grounding-refs)
+  heading(level: 1, label("grounding-references"))
+  reference-list(grounding-refs, labels: labels)
 
   // ── Chapter 4 – Supporting References ───────────────────────
-  heading(level: 1, "Supporting References")
-  reference-list(supporting-refs)
+  heading(level: 1, label("supporting-references"))
+  reference-list(supporting-refs, labels: labels)
 
   // ── Optional extra body ─────────────────────────────────────
   body

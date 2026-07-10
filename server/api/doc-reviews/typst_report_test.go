@@ -136,7 +136,7 @@ func TestTypstTemplateCompilesArtifactGroupSection(t *testing.T) {
 		"1001_prv_3": {{RelatedArtifactID: "2002_prv_9", Relationship: "same_subject", Summary: "Also checked this candidate."}},
 	}
 
-	src := buildTypstSource(skeleton, req, "en", templatePath, provisionAnalyses)
+	src := buildTypstSource(skeleton, req, "zh-cn", templatePath, provisionAnalyses)
 
 	dir := t.TempDir()
 	typPath := filepath.Join(dir, "check.typ")
@@ -186,6 +186,38 @@ func TestBuildTypstSourceUsesDatabaseFindingID(t *testing.T) {
 	}
 	if !strings.Contains(src, "related-sources: (") || !strings.Contains(src, "87: matched metric") {
 		t.Fatalf("typst source missing related source block: %s", src)
+	}
+}
+
+func TestBuildTypstSourceLocalizesChineseReportChrome(t *testing.T) {
+	req := &RequestStatus{RequesterName: ""}
+	skeleton := &ReportSkeleton{
+		Meta: ReportMeta{ReportID: "rpt_88", DocumentTitle: "动态血压技术规范", GeneratedAt: "2026-07-10T12:00:00Z"},
+		FindingsByPass: map[string]PassGroup{
+			"P5": {
+				Findings: []ReportFinding{{
+					ID: 42, Pass: "P5", Aspect: "metrics", Severity: "high",
+					Title: "指标冲突", Description: "说明", Suggestion: "修正建议", ArtifactID: "244_mtc_27",
+				}},
+			},
+		},
+		Findings:  []ReportFinding{{ID: 42, Pass: "P5", Aspect: "metrics", Severity: "high", Title: "指标冲突", Description: "说明", Suggestion: "修正建议", ArtifactID: "244_mtc_27"}},
+		PassOrder: []string{"P5"},
+	}
+
+	src := buildTypstSource(skeleton, req, "zh-cn", "/tmp/template.typ", nil)
+	for _, want := range []string{
+		`lang: "zh"`,
+		`font: "PingFang SC"`,
+		`report-title: "文档审查报告"`,
+		`heading(level: 1, "技术与合规")`,
+		`title: "指标一致性"`,
+		`assessment: [本节发现 1 项问题。其中 1 项为高严重性问题，需要立即关注。]`,
+		`reviewer: "自动审查"`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("Chinese Typst source missing %q:\n%s", want, src)
+		}
 	}
 }
 
@@ -265,7 +297,7 @@ func TestBuildTypstSourceRendersProvisionsAnalysesWithNoFindings(t *testing.T) {
 
 	src := buildTypstSource(skeleton, req, "en", "/tmp/template.typ", provisionAnalyses)
 
-	if !strings.Contains(src, `title: "provisions"`) {
+	if !strings.Contains(src, `title: "Provision Consistency"`) {
 		t.Fatalf("expected a provisions aspect-section even with zero findings: %s", src)
 	}
 	if !strings.Contains(src, `title: "1001_prv_3"`) {
@@ -285,7 +317,7 @@ func TestBuildFindingBlockRendersSourcesAndCorrection(t *testing.T) {
 		Sources:     []SourceContext{{Source: "115: source line"}},
 		Related:     []SourceContext{{Before: "85: before", Source: "87: matched metric", After: "88: after"}},
 	}
-	block := buildFindingBlock(f, "42")
+	block := buildFindingBlock(f, "42", typstLabelsArg(reportLexiconForLanguage("en").labels))
 	if !strings.Contains(block, `id: "42"`) {
 		t.Fatalf("block missing id: %s", block)
 	}
