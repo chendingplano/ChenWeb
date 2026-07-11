@@ -1458,3 +1458,72 @@ func TestMetricsProcessor_Pass2FailFast(t *testing.T) {
 		t.Errorf("error does not contain expected message: %v", err)
 	}
 }
+
+func TestMetricsProcessor_InitChunkBatch_SkipsWhenExistsAndNotForced(t *testing.T) {
+	metricsStore := &fakeMetricsStore{exists: true}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{}, metricsStore, &fakeJSONExtractor{}, nil)
+	p.MentionPromptErr = nil
+	p.ModelErr = nil
+	ctx := withDocProcessorFlags(context.Background(), false, false)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if !p.batchSkip {
+		t.Fatalf("expected batchSkip=true when force=false and metrics already exist")
+	}
+	if metricsStore.metricsExistCalls != 1 {
+		t.Fatalf("metricsExistCalls=%d, want 1", metricsStore.metricsExistCalls)
+	}
+}
+
+func TestMetricsProcessor_InitChunkBatch_ForceClearLoadsNoExisting(t *testing.T) {
+	metricsStore := &fakeMetricsStore{existingMetrics: []map[string]any{{"metric_id": "173_mtc_1"}}}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{}, metricsStore, &fakeJSONExtractor{}, nil)
+	p.MentionPromptErr = nil
+	p.ModelErr = nil
+	ctx := withDocProcessorFlags(context.Background(), true, true) // force=true, force_clear=true -> wipe
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if p.batchSkip {
+		t.Fatalf("expected no skip on wipe mode")
+	}
+	if !p.batchForceClear {
+		t.Fatalf("expected batchForceClear=true")
+	}
+	if len(p.batchExistingMetrics) != 0 {
+		t.Fatalf("wipe mode must not load existing metrics into the merge path, got %d", len(p.batchExistingMetrics))
+	}
+}
+
+func TestMetricsProcessor_InitChunkBatch_MergeModeLoadsExisting(t *testing.T) {
+	metricsStore := &fakeMetricsStore{existingMetrics: []map[string]any{{"metric_id": "173_mtc_1"}}}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{}, metricsStore, &fakeJSONExtractor{}, nil)
+	p.MentionPromptErr = nil
+	p.ModelErr = nil
+	ctx := withDocProcessorFlags(context.Background(), true, false) // force=true, force_clear=false -> merge
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if len(p.batchExistingMetrics) != 1 {
+		t.Fatalf("expected existing metrics loaded for merge mode, got %d", len(p.batchExistingMetrics))
+	}
+}
+
+func TestMetricsProcessor_ProcessChunk_NoOpWhenSkipping(t *testing.T) {
+	extractor := &fakeJSONExtractor{}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{}, &fakeMetricsStore{exists: true}, extractor, nil)
+	p.MentionPromptErr = nil
+	p.ModelErr = nil
+	ctx := withDocProcessorFlags(context.Background(), false, false)
+	if err := p.InitChunkBatch(ctx, 173, []Chunk{{SeqNo: 0}}, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if err := p.ProcessChunk(ctx, 0); err != nil {
+		t.Fatalf("ProcessChunk: %v", err)
+	}
+	if extractor.structuredCalledCount != 0 || extractor.calledCount != 0 {
+		t.Fatalf("expected zero LLM calls when skipping, got structured=%d plain=%d",
+			extractor.structuredCalledCount, extractor.calledCount)
+	}
+}

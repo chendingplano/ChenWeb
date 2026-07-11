@@ -90,6 +90,10 @@ type MetricsProcessor struct {
 	batchMu        sync.Mutex               // protects batchMentions/batchLang/batchModelName under concurrent Phase 3
 	batchLang      string
 	batchModelName string
+
+	batchSkip            bool
+	batchForceClear      bool
+	batchExistingMetrics []map[string]any
 }
 
 type metricsProgressTracker struct {
@@ -2799,6 +2803,32 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 		p.Logger.Warn("%s skipped: model config error", p.Name(), "record_id", recordID, "error", p.ModelErr)
 		return nil
 	}
+
+	force, forceClear := docProcessorFlagsFromContext(ctx)
+	p.batchForceClear = forceClear
+	p.batchSkip = false
+	p.batchExistingMetrics = nil
+
+	if !force {
+		exists, err := p.Store.MetricsExist(ctx, recordID)
+		if err != nil {
+			return fmt.Errorf("(MID_26071110) %s check metrics exist: %w", p.Name(), err)
+		}
+		if exists {
+			p.Logger.Info("metrics extraction skipped", "record_id", recordID, "reason", "metrics already exist and force=false")
+			p.batchSkip = true
+			return nil
+		}
+	}
+
+	if !forceClear {
+		existing, err := p.Store.GetMetricsByInputRecordID(ctx, recordID)
+		if err != nil {
+			return fmt.Errorf("(MID_26071111) %s load existing metrics: %w", p.Name(), err)
+		}
+		p.batchExistingMetrics = existing
+	}
+
 	p.batchStart = p.Now()
 	p.batchRecordID = recordID
 	p.batchChunks = chunks
@@ -2810,6 +2840,9 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 }
 
 func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if p.batchSkip {
+		return nil
+	}
 	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
 		return fmt.Errorf("(MID_26062751) %s chunk index %d out of range (len=%d)", p.Name(), chunkIdx, len(p.batchChunks))
 	}
