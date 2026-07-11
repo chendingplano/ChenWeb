@@ -6,7 +6,15 @@
 	type PdfWorker = { destroy: () => void };
 	type PdfJsLib = {
 		getDocument: (
-			src: string | { url: string; withCredentials?: boolean; cMapUrl?: string; cMapPacked?: boolean; worker?: PdfWorker }
+			src:
+				| string
+				| {
+						url: string;
+						withCredentials?: boolean;
+						cMapUrl?: string;
+						cMapPacked?: boolean;
+						worker?: PdfWorker;
+				  }
 		) => { promise: Promise<unknown> };
 		GlobalWorkerOptions?: { workerSrc: string };
 		PDFWorker: new (params?: { name?: string }) => PdfWorker;
@@ -59,18 +67,22 @@
 		renderHighlights?: (pageNo: number, viewport: PdfPageViewport, overlay: HTMLDivElement) => void;
 		loadingLabel?: string;
 		respectPageRotation?: boolean;
-		onselect?: (ranges: Array<{
-			pageNumber: number;
-			viewportY1: number;
-			viewportY2: number;
-			viewport: PdfPageViewport;
-		}>) => void;
-		ondragmove?: (ranges: Array<{
-			pageNumber: number;
-			viewportY1: number;
-			viewportY2: number;
-			viewport: PdfPageViewport;
-		}>) => void;
+		onselect?: (
+			ranges: Array<{
+				pageNumber: number;
+				viewportY1: number;
+				viewportY2: number;
+				viewport: PdfPageViewport;
+			}>
+		) => void;
+		ondragmove?: (
+			ranges: Array<{
+				pageNumber: number;
+				viewportY1: number;
+				viewportY2: number;
+				viewport: PdfPageViewport;
+			}>
+		) => void;
 		pageBarTool?: Snippet;
 		sidebarContent?: Snippet;
 		sidebarResizer?: Snippet;
@@ -106,7 +118,7 @@
 	let indWidth = $state(0);
 
 	// ---------- Drag-select auto-scroll ----------
-	const DRAG_SCROLL_ZONE = 60;   // px from edge that triggers auto-scroll
+	const DRAG_SCROLL_ZONE = 60; // px from edge that triggers auto-scroll
 	const DRAG_SCROLL_MAX_SPD = 14; // max px scrolled per animation frame
 	let dragScrollRaf = 0;
 	let dragScrollSpeed = 0;
@@ -164,7 +176,9 @@
 			viewport: PdfPageViewport;
 		}> = [];
 		for (const [pageNo, viewport] of pdfViewportByPage.entries()) {
-			const canvasEl = document.getElementById(`${viewerId}-canvas-${pageNo}`) as HTMLCanvasElement | null;
+			const canvasEl = document.getElementById(
+				`${viewerId}-canvas-${pageNo}`
+			) as HTMLCanvasElement | null;
 			if (!canvasEl) continue;
 			const rect = canvasEl.getBoundingClientRect();
 			if (clientY2 < rect.top || clientY1 > rect.bottom) continue;
@@ -239,7 +253,8 @@
 		const pageEl = document.getElementById(`${viewerId}-page-${pageNo}`);
 		const host = pdfCanvasHostEl;
 		if (!pageEl || !host) return;
-		const relativeTop = pageEl.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop;
+		const relativeTop =
+			pageEl.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop;
 		host.scrollTo({ top: Math.max(0, relativeTop), behavior });
 	}
 
@@ -309,7 +324,9 @@
 	}
 
 	function paintOverlayForPage(pageNo: number) {
-		const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
+		const overlay = document.getElementById(
+			`${viewerId}-overlay-${pageNo}`
+		) as HTMLDivElement | null;
 		const viewport = pdfViewportByPage.get(pageNo);
 		if (!overlay || !viewport) return;
 		overlay.innerHTML = '';
@@ -317,7 +334,9 @@
 	}
 
 	function scrollToFirstHighlight(pageNo: number, behavior: ScrollBehavior = 'auto') {
-		const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
+		const overlay = document.getElementById(
+			`${viewerId}-overlay-${pageNo}`
+		) as HTMLDivElement | null;
 		const firstHighlight = overlay?.querySelector('.pdf-highlight') as HTMLElement | null;
 		const host = pdfCanvasHostEl;
 		if (!firstHighlight || !host) return false;
@@ -360,8 +379,12 @@
 
 			for (const pageNo of pdfRenderedPages) {
 				if (seq !== pdfRenderSeq) return;
-				const canvas = document.getElementById(`${viewerId}-canvas-${pageNo}`) as HTMLCanvasElement | null;
-				const overlay = document.getElementById(`${viewerId}-overlay-${pageNo}`) as HTMLDivElement | null;
+				const canvas = document.getElementById(
+					`${viewerId}-canvas-${pageNo}`
+				) as HTMLCanvasElement | null;
+				const overlay = document.getElementById(
+					`${viewerId}-overlay-${pageNo}`
+				) as HTMLDivElement | null;
 				if (!canvas || !overlay) continue;
 
 				const pageProxy = await pdfDoc.getPage(pageNo);
@@ -451,7 +474,12 @@
 		const version = highlightVersion;
 		const seq = ++pdfHighlightPaintSeq;
 		void tick().then(() => {
-			if (seq !== pdfHighlightPaintSeq || highlightVersion !== version || pdfViewportByPage.size === 0) return;
+			if (
+				seq !== pdfHighlightPaintSeq ||
+				highlightVersion !== version ||
+				pdfViewportByPage.size === 0
+			)
+				return;
 			paintHighlights();
 			if (!scrollToFirstHighlight(clampPage(page), 'auto')) {
 				scrollToPage(clampPage(page), 'auto');
@@ -464,7 +492,8 @@
 		const version = repaintVersion;
 		const seq = ++pdfRepaintSeq;
 		void tick().then(() => {
-			if (seq !== pdfRepaintSeq || repaintVersion !== version || pdfViewportByPage.size === 0) return;
+			if (seq !== pdfRepaintSeq || repaintVersion !== version || pdfViewportByPage.size === 0)
+				return;
 			paintHighlights();
 		});
 	});
@@ -528,34 +557,43 @@
 	<div class="page-bar-sidebar-spacer" style={`width:${pdfSidebarWidth}px;`}></div>
 	<div class="page-controls-wrap">
 		<div class="page-controls">
-		<button
-			class="page-btn"
-			onclick={() => goToPage(page - 1)}
-			disabled={page <= 1}
-			aria-label="Previous page">‹</button
-		>
-		<div class="page-bar-label">
-			<span class="page-bar-folio">page</span>
-			<input
-				type="number"
-				min="1"
-				max={Math.max(1, numPages)}
-				class="page-input"
-				bind:value={page}
-				onchange={() => goToPage(page)}
-			/>
-			<span class="page-total">/ {Math.max(1, numPages)}</span>
-		</div>
-		<button
-			class="page-btn"
-			onclick={() => goToPage(page + 1)}
-			disabled={page >= Math.max(1, numPages)}
-			aria-label="Next page">›</button
-		>
-		<button class="page-btn small" onclick={zoomOut} title="Zoom out" aria-label="Zoom out">−</button>
-		<span class="zoom-label">{zoomLabel()}</span>
-		<button class="page-btn small" onclick={zoomIn} title="Zoom in" aria-label="Zoom in">+</button>
-		<button class="page-btn small" type="button" onclick={openPdfInNewTab} title="Open in new tab" aria-label="Open in new tab">↗</button>
+			<button
+				class="page-btn"
+				onclick={() => goToPage(page - 1)}
+				disabled={page <= 1}
+				aria-label="Previous page">‹</button
+			>
+			<div class="page-bar-label">
+				<span class="page-bar-folio">page</span>
+				<input
+					type="number"
+					min="1"
+					max={Math.max(1, numPages)}
+					class="page-input"
+					bind:value={page}
+					onchange={() => goToPage(page)}
+				/>
+				<span class="page-total">/ {Math.max(1, numPages)}</span>
+			</div>
+			<button
+				class="page-btn"
+				onclick={() => goToPage(page + 1)}
+				disabled={page >= Math.max(1, numPages)}
+				aria-label="Next page">›</button
+			>
+			<button class="page-btn small" onclick={zoomOut} title="Zoom out" aria-label="Zoom out"
+				>−</button
+			>
+			<span class="zoom-label">{zoomLabel()}</span>
+			<button class="page-btn small" onclick={zoomIn} title="Zoom in" aria-label="Zoom in">+</button
+			>
+			<button
+				class="page-btn small"
+				type="button"
+				onclick={openPdfInNewTab}
+				title="Open in new tab"
+				aria-label="Open in new tab">↗</button
+			>
 		</div>
 	</div>
 	{@render pageBarTool?.()}
@@ -567,7 +605,9 @@
 			{@render sidebarContent?.()}
 			{@render sidebarResizer?.()}
 		</div>
-		<div class="pdf-canvas-host" bind:this={pdfCanvasHostEl}
+		<div
+			class="pdf-canvas-host"
+			bind:this={pdfCanvasHostEl}
 			onpointerdown={onDragPointerDown}
 			onpointermove={onDragPointerMove}
 			onpointerup={onDragPointerUp}
@@ -603,7 +643,9 @@
 			<div class="doc-error-title">⚠ Cannot render this PDF</div>
 			<div class="doc-error-msg">
 				{pdfError}<br />
-				<button class="doc-error-link" type="button" onclick={openPdfInNewTab}>Open in a new tab</button>
+				<button class="doc-error-link" type="button" onclick={openPdfInNewTab}
+					>Open in a new tab</button
+				>
 			</div>
 		</div>
 	{/if}
@@ -669,9 +711,6 @@
 		background: var(--panel-bg-alt);
 		color: var(--text-primary);
 		border-radius: 8px;
-	}
-	.page-bar-spacer {
-		flex: 1;
 	}
 	.pdf-stage {
 		position: relative;

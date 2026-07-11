@@ -837,10 +837,11 @@
                                     <span style="text-transform: capitalize;">{finding.finding_type.replace(/_/g, ' ')}</span>
                                 </div>
                             </div>
-                            <div onclick={(e) => e.stopPropagation()} style="display: flex; gap: 0.25rem; align-items: center;">
+                            <div style="display: flex; gap: 0.25rem; align-items: center;">
                                 <select
                                     value={findingLanguage[finding.id] ?? defaultLanguage}
                                     disabled={translating[finding.id]}
+                                    onclick={(e) => e.stopPropagation()}
                                     onchange={(e) => handleLanguageChange(finding, (e.target as HTMLSelectElement).value)}
                                     style="background: {inputBg}; border: 1px solid {borderColor}; border-radius: 4px; padding: 0.2rem 0.4rem; color: {textPrimary}; font-size: 0.75rem;">
                                     {#each supportedLanguages as lang (lang)}
@@ -851,9 +852,9 @@
                                     <LoaderIcon size={14} style="animation: spin 1s linear infinite; color: {accent};" />
                                 {/if}
                                 {#if finding.review_status === 'pending'}
-                                    <button onclick={() => handleAcceptReject(finding.id, 'accepted')}
+                                    <button onclick={(e) => { e.stopPropagation(); handleAcceptReject(finding.id, 'accepted'); }}
                                         style="padding: 0.25rem 0.5rem; background: {successBg}; color: #22c55e; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Accept</button>
-                                    <button onclick={() => handleAcceptReject(finding.id, 'rejected')}
+                                    <button onclick={(e) => { e.stopPropagation(); handleAcceptReject(finding.id, 'rejected'); }}
                                         style="padding: 0.25rem 0.5rem; background: rgba(239,68,68,0.1); color: #ef4444; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">Reject</button>
                                 {:else}
                                     <span style="font-size: 0.75rem; color: {textMuted}; text-transform: capitalize;">{finding.review_status}</span>
