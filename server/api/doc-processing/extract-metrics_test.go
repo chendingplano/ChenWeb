@@ -1217,6 +1217,14 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 	if row["metric_name"] != "Latency" {
 		t.Fatalf("metric_name=%#v", row["metric_name"])
 	}
+	kwEn, ok := row["metric_keywords_en"].([]any)
+	if !ok || len(kwEn) != 1 || kwEn[0] != "latency" {
+		t.Fatalf("metric_keywords_en=%#v, want [\"latency\"]", row["metric_keywords_en"])
+	}
+	catsEn, ok := row["metric_categories_en"].([]any)
+	if !ok || len(catsEn) != 1 || catsEn[0] != "performance" {
+		t.Fatalf("metric_categories_en=%#v, want [\"performance\"]", row["metric_categories_en"])
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
 	}

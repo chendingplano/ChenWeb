@@ -2230,10 +2230,20 @@ WHERE input_record_id = $1`
 			_ = json.Unmarshal([]byte(keywordsJSON.String), &kw)
 			m["metric_keywords"] = kw
 		}
+		if keywordsEnJSON.Valid {
+			var kwEn any
+			_ = json.Unmarshal([]byte(keywordsEnJSON.String), &kwEn)
+			m["metric_keywords_en"] = kwEn
+		}
 		if categories.Valid {
 			var cats any
 			_ = json.Unmarshal([]byte(categories.String), &cats)
 			m["metric_categories"] = cats
+		}
+		if categoriesEn.Valid {
+			var catsEn any
+			_ = json.Unmarshal([]byte(categoriesEn.String), &catsEn)
+			m["metric_categories_en"] = catsEn
 		}
 		if extInfoJSON.Valid {
 			var ext map[string]any
