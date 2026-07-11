@@ -1708,6 +1708,34 @@ jj commit -m "feat(metrics): wire DR1 skip/wipe/merge branch into InitChunkBatch
 **Interfaces:**
 - Consumes: `mergeMetrics`, `newMetricSeqnoCounter`, `(*MetricsProcessor).resolveMergeAmbiguities`, `MetricsStore.UpsertMetrics`, `MetricsStore.DeleteMetricsByInputRecordID`, `MetricsStore.SaveMetrics` (wipe path, unchanged).
 
+**Plan gap discovered during Task 9's review, fixed here:** ADR 2026071002 DR2 requires the Merge Resolution LLM call to run with `ThinkingType = "disabled"` for determinism, the same as the existing extraction passes. The existing extraction passes achieve this via `(p *MetricsProcessor) forceDisableThinking()` (`extract-metrics.go:589-593`), which is called unconditionally at the end of `NewMetricsProcessor` (not just from the legacy `HandleEvent` path) and currently force-disables `MentionModelCfg`, `FallbackMentionModelCfg`, and `RelationModelCfg` only. Task 9 added `MergeResolveModelCfg`/`FallbackMergeResolveModelCfg` but did not add them to this method (correctly out of Task 9's scope — this method wasn't mentioned in that task's brief). This task must extend it:
+
+- [ ] **Step 0: Extend `forceDisableThinking` to cover the merge-resolve model configs**
+
+In `extract-metrics.go`, change:
+
+```go
+func (p *MetricsProcessor) forceDisableThinking() {
+	p.MentionModelCfg = forceDisableThinking(p.MentionModelCfg)
+	p.FallbackMentionModelCfg = forceDisableThinking(p.FallbackMentionModelCfg)
+	p.RelationModelCfg = forceDisableThinking(p.RelationModelCfg)
+}
+```
+
+to:
+
+```go
+func (p *MetricsProcessor) forceDisableThinking() {
+	p.MentionModelCfg = forceDisableThinking(p.MentionModelCfg)
+	p.FallbackMentionModelCfg = forceDisableThinking(p.FallbackMentionModelCfg)
+	p.RelationModelCfg = forceDisableThinking(p.RelationModelCfg)
+	p.MergeResolveModelCfg = forceDisableThinking(p.MergeResolveModelCfg)
+	p.FallbackMergeResolveModelCfg = forceDisableThinking(p.FallbackMergeResolveModelCfg)
+}
+```
+
+Add a test (e.g. `TestMetricsProcessor_ForceDisablesThinkingForMergeResolveModels`) following the pattern of the existing `TestMetricsProcessor_ForceDisablesThinkingForAllPasses` test already in `extract-metrics_test.go` (construct a `MetricsProcessor` with `MergeResolveModelCfg`/`FallbackMergeResolveModelCfg` set to a `structureModelConfig{ThinkingType: "enabled"}`, call `NewMetricsProcessor` or `forceDisableThinking()` directly, assert both configs come back with `ThinkingType == "disabled"`). Run it, confirm RED before the fix, GREEN after.
+
 - [ ] **Step 1: Write the failing tests**
 
 Add to `extract-metrics_test.go`:
