@@ -130,3 +130,101 @@ func (c *metricSeqnoCounter) Assign(recordID int64) string {
 	c.next++
 	return id
 }
+
+type mergeMetricsResult struct {
+	Added         []map[string]any
+	PendingGroups [][]map[string]any
+}
+
+// mergeMetrics implements ADR 2026071002 DR2 Rule-2/3/4. existing is read
+// from kb.metrics (unmodified maps); newCandidates are this run's enriched
+// Pass-2 output (no metric_id yet). seqno must be initialized from existing
+// (DR3) before calling.
+func mergeMetrics(existing, newCandidates []map[string]any, seqno *metricSeqnoCounter, recordID int64) mergeMetricsResult {
+	var result mergeMetricsResult
+	remainingNew := make([]map[string]any, 0, len(newCandidates))
+
+	// Rule-2: discard any new candidate that's an exact duplicate of an existing metric.
+	for _, cand := range newCandidates {
+		duplicate := false
+		for _, ex := range existing {
+			if metricsIdentical(cand, ex) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			remainingNew = append(remainingNew, cand)
+		}
+	}
+
+	// Rule-3: any remaining candidate with zero line overlap against existing
+	// metrics is unambiguously new.
+	stillPending := make([]map[string]any, 0, len(remainingNew))
+	for _, cand := range remainingNew {
+		overlapsAny := false
+		for _, ex := range existing {
+			if metricLineSpansOverlap(cand, ex) {
+				overlapsAny = true
+				break
+			}
+		}
+		if !overlapsAny {
+			added := cloneMetricMap(cand)
+			added["metric_id"] = seqno.Assign(recordID)
+			result.Added = append(result.Added, added)
+		} else {
+			stillPending = append(stillPending, cand)
+		}
+	}
+
+	// Rule-4: everything left overlaps at least one existing metric. Assign a
+	// metric_id to each (DR4 — every pending-list entry needs one before the
+	// Merge Resolution LLM call, per DR2's updated call contract), tag its
+	// source, then group by Metric Groups transitive closure over the union
+	// of existing + pending candidates.
+	tagged := make([]map[string]any, 0, len(existing)+len(stillPending))
+	for _, ex := range existing {
+		e := cloneMetricMap(ex)
+		e["_merge_source"] = "existing"
+		tagged = append(tagged, e)
+	}
+	for _, cand := range stillPending {
+		c := cloneMetricMap(cand)
+		c["_merge_source"] = "new"
+		c["metric_id"] = seqno.Assign(recordID)
+		tagged = append(tagged, c)
+	}
+
+	if len(stillPending) == 0 {
+		return result
+	}
+
+	groups := computeMetricGroups(tagged)
+	for _, idxs := range groups {
+		hasPendingNew := false
+		for _, idx := range idxs {
+			if tagged[idx]["_merge_source"] == "new" {
+				hasPendingNew = true
+				break
+			}
+		}
+		if !hasPendingNew {
+			continue // an existing-only group with no new candidate touching it: untouched.
+		}
+		group := make([]map[string]any, 0, len(idxs))
+		for _, idx := range idxs {
+			group = append(group, tagged[idx])
+		}
+		result.PendingGroups = append(result.PendingGroups, group)
+	}
+	return result
+}
+
+func cloneMetricMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}

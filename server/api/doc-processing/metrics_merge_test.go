@@ -99,3 +99,77 @@ func TestMetricSeqnoCounter_EmptyExistingStartsAtOne(t *testing.T) {
 		t.Fatalf("assign = %q, want 9_mtc_1", got)
 	}
 }
+
+func TestMergeMetrics_Rule2_ExactDuplicateDiscarded(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
+			"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "Latency", "metric_subject": "gw",
+			"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)}},
+	}
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 173)
+	if len(res.Added) != 0 {
+		t.Fatalf("Added=%d, want 0 (exact duplicate should be discarded)", len(res.Added))
+	}
+	if len(res.PendingGroups) != 0 {
+		t.Fatalf("PendingGroups=%d, want 0", len(res.PendingGroups))
+	}
+}
+
+func TestMergeMetrics_Rule3_NoOverlapAdded(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "173_mtc_1", "metric_name": "Latency", "source_line_spans": []any{float64(2)}},
+	}
+	newCandidates := []map[string]any{
+		{"metric_name": "Throughput", "source_line_spans": []any{float64(50)}},
+	}
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 173)
+	if len(res.Added) != 1 {
+		t.Fatalf("Added=%d, want 1", len(res.Added))
+	}
+	if res.Added[0]["metric_id"] != "173_mtc_2" {
+		t.Fatalf("new metric_id=%v, want 173_mtc_2", res.Added[0]["metric_id"])
+	}
+	if len(res.PendingGroups) != 0 {
+		t.Fatalf("PendingGroups=%d, want 0", len(res.PendingGroups))
+	}
+}
+
+func TestMergeMetrics_Rule4_OverlapNotIdenticalGoesToPending(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
+			"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)}},
+	}
+	newCandidates := []map[string]any{
+		// Same line, different value -> not Rule-1 identical, but overlaps -> Rule-4.
+		{"metric_name": "Latency", "metric_subject": "gw",
+			"metric_unit": "ms", "metric_value": "250", "source_line_spans": []any{float64(2)}},
+	}
+	res := mergeMetrics(existing, newCandidates, newMetricSeqnoCounter(existing), 173)
+	if len(res.Added) != 0 {
+		t.Fatalf("Added=%d, want 0", len(res.Added))
+	}
+	if len(res.PendingGroups) != 1 || len(res.PendingGroups[0]) != 2 {
+		t.Fatalf("PendingGroups=%+v, want 1 group of 2", res.PendingGroups)
+	}
+	var sawExisting, sawNew bool
+	for _, m := range res.PendingGroups[0] {
+		switch m["_merge_source"] {
+		case "existing":
+			sawExisting = true
+			if m["metric_id"] != "173_mtc_1" {
+				t.Fatalf("existing metric_id=%v, want 173_mtc_1", m["metric_id"])
+			}
+		case "new":
+			sawNew = true
+			if m["metric_id"] == nil || m["metric_id"] == "" {
+				t.Fatalf("new candidate must have a pre-assigned metric_id (DR4)")
+			}
+		}
+	}
+	if !sawExisting || !sawNew {
+		t.Fatalf("expected both existing and new tagged candidates in pending group")
+	}
+}
