@@ -811,6 +811,46 @@ func TestMergeAndCollectDirtyMetrics_MergedWinnerPreservesUntouchedFields(t *tes
 	}
 }
 
+func TestMergeAndCollectDirtyMetrics_WinnerPreservesKeywords(t *testing.T) {
+	existingRow := map[string]any{
+		"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
+		"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)},
+		"metric_desc": "max end-to-end latency", "metric_context": "SLA section 4",
+		"metric_keywords":    []any{"latency", "api"},
+		"metric_keywords_en": []any{"latency"},
+	}
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{"winning_metrics": []any{map[string]any{
+			"metric_id": "173_mtc_1", "absorbed_metric_ids": []any{"173_mtc_2"},
+			"metric_name": "Latency", "metric_subject": "gw", "metric_unit": "ms",
+			"metric_value": "250", "source_line_spans": []any{"2"},
+		}}},
+	}}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 173}}, &fakeMetricsStore{}, extractor, nil)
+	p.batchRecordID = 173
+	p.batchExistingMetrics = []map[string]any{existingRow}
+	p.MergeResolvePromptText = "resolve"
+	p.MergeResolveModelName = "test-merge-model"
+
+	dirty, err := p.mergeAndCollectDirtyMetrics(context.Background(), []map[string]any{
+		{"metric_name": "Latency", "subject": "gw", "unit": "ms", "metric_value": "250", "source_line_spans": []any{float64(2)}},
+	})
+	if err != nil {
+		t.Fatalf("mergeAndCollectDirtyMetrics: %v", err)
+	}
+	if len(dirty) != 1 {
+		t.Fatalf("dirty=%d, want 1", len(dirty))
+	}
+	kw, ok := dirty[0]["keywords"].([]any)
+	if !ok || len(kw) != 2 || kw[0] != "latency" || kw[1] != "api" {
+		t.Fatalf("keywords lost in merged winner: %+v", dirty[0]["keywords"])
+	}
+	kwEn, ok := dirty[0]["keywords_en"].([]any)
+	if !ok || len(kwEn) != 1 || kwEn[0] != "latency" {
+		t.Fatalf("keywords_en lost in merged winner: %+v", dirty[0]["keywords_en"])
+	}
+}
+
 func TestLoadMetricsPromptFromEnv_UsesPromptDir(t *testing.T) {
 	tmp := t.TempDir()
 	promptPath := filepath.Join(tmp, "prompt_extract_metrics_v1.txt")
@@ -1358,7 +1398,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		"metric_keywords", "metric_keywords_en", "metric_unit", "metric_unit_en", "metric_value",
 		"value_data_type", "value_range_type", "value_class", "value_class_en",
 		"formula_or_definition", "threshold_or_target", "measurement_frequency",
-		"metric_categories", "metric_categories_en", "ext_info",
+		"metric_categories", "metric_categories_en", "category_paths", "category_paths_en", "ext_info",
 	}
 	rows := sqlmock.NewRows(cols).AddRow(
 		int64(99), "173_mtc_1", "Latency", "Latency", `[2]`, "API",
@@ -1366,7 +1406,7 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 		`["latency"]`, `["latency"]`, "ms", "ms", "200",
 		"number", "maximum", "performance", "performance",
 		"", "<=200", "daily",
-		`["performance"]`, `["performance"]`, `{"language":"zh","schema_version":"2"}`,
+		`["performance"]`, `["performance"]`, `[{"category_path":[{"name":"System Safety"},{"name":"Alarm Thresholds"}]}]`, `[{"category_path":[{"name":"System Safety"}]}]`, `{"language":"zh","schema_version":"2"}`,
 	)
 	mock.ExpectQuery(`SELECT .* FROM kb\.metrics WHERE input_record_id = \$1`).
 		WithArgs(int64(173)).
@@ -1396,6 +1436,22 @@ func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
 	catsEn, ok := row["metric_categories_en"].([]any)
 	if !ok || len(catsEn) != 1 || catsEn[0] != "performance" {
 		t.Fatalf("metric_categories_en=%#v, want [\"performance\"]", row["metric_categories_en"])
+	}
+	catPaths, ok := row["category_paths"].([]any)
+	if !ok || len(catPaths) != 1 {
+		t.Fatalf("category_paths=%#v, want non-empty []any", row["category_paths"])
+	}
+	catPath0, ok := catPaths[0].(map[string]any)
+	if !ok {
+		t.Fatalf("category_paths[0]=%#v, want map[string]any", catPaths[0])
+	}
+	cpArr, ok := catPath0["category_path"].([]any)
+	if !ok || len(cpArr) != 2 || cpArr[0].(map[string]any)["name"] != "System Safety" {
+		t.Fatalf("category_paths[0].category_path=%#v", catPath0["category_path"])
+	}
+	catPathsEn, ok := row["category_paths_en"].([]any)
+	if !ok || len(catPathsEn) != 1 {
+		t.Fatalf("category_paths_en=%#v, want non-empty []any", row["category_paths_en"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)

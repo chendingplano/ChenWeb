@@ -107,7 +107,7 @@ func (t *metricsProgressTracker) advance() string {
 	defer t.mu.Unlock()
 	if t.Completed < t.Total {
 		t.Completed++
-	}
+}
 	pct := 0
 	if t.Total > 0 {
 		pct = t.Completed * 100 / t.Total
@@ -2232,7 +2232,8 @@ SELECT id, metric_id, metric_name, metric_name_en, source_line_spans, metric_sub
        metric_keywords, metric_keywords_en, metric_unit, metric_unit_en, metric_value,
        value_data_type, value_range_type, value_class, value_class_en,
        formula_or_definition, threshold_or_target, measurement_frequency,
-       metric_categories, metric_categories_en, ext_info
+       metric_categories, metric_categories_en, category_paths, category_paths_en,
+       ext_info
 FROM kb.metrics
 WHERE input_record_id = $1`
 	rows, err := s.DB.QueryContext(ctx, q, inputRecordID)
@@ -2247,13 +2248,13 @@ WHERE input_record_id = $1`
 			id                                                                           int64
 			metricID, name, nameEn, subject, subjectEn, desc, descEn, ctx1, ctxEn        sql.NullString
 			unit, unitEn, value, valueDataType, valueRangeType, valueClass, valueClassEn sql.NullString
-			formula, threshold, freq, categories, categoriesEn                           sql.NullString
+			formula, threshold, freq, categories, categoriesEn, catPaths, catPathsEn sql.NullString
 			spansJSON, keywordsJSON, keywordsEnJSON, extInfoJSON                         sql.NullString
 		)
 		if err := rows.Scan(&id, &metricID, &name, &nameEn, &spansJSON, &subject, &subjectEn,
 			&desc, &descEn, &ctx1, &ctxEn, &keywordsJSON, &keywordsEnJSON, &unit, &unitEn, &value,
 			&valueDataType, &valueRangeType, &valueClass, &valueClassEn, &formula, &threshold, &freq,
-			&categories, &categoriesEn, &extInfoJSON); err != nil {
+			&categories, &categoriesEn, &catPaths, &catPathsEn, &extInfoJSON); err != nil {
 			return nil, err
 		}
 		m := map[string]any{
@@ -2292,6 +2293,16 @@ WHERE input_record_id = $1`
 			var catsEn any
 			_ = json.Unmarshal([]byte(categoriesEn.String), &catsEn)
 			m["metric_categories_en"] = catsEn
+		}
+		if catPaths.Valid {
+			var cp any
+			_ = json.Unmarshal([]byte(catPaths.String), &cp)
+			m["category_paths"] = cp
+		}
+		if catPathsEn.Valid {
+			var cpEn any
+			_ = json.Unmarshal([]byte(catPathsEn.String), &cpEn)
+			m["category_paths_en"] = cpEn
 		}
 		if extInfoJSON.Valid {
 			var ext map[string]any
@@ -3002,15 +3013,17 @@ var metricFieldAliasPairs = [][2]string{
 	{"desc_en", "metric_desc_en"},
 	{"context", "metric_context"},
 	{"context_en", "metric_context_en"},
+	{"keywords", "metric_keywords"},
+	{"keywords_en", "metric_keywords_en"},
 }
 
 // canonicalizeMetricFieldAliases returns a copy of m with both the raw and
-// canonical spellings of subject/unit/desc/context populated from whichever
+// canonical spellings of subject/unit/desc/context/keywords populated from whichever
 // one is present. Without this bridge, Rule-2's exact-duplicate check would
 // never fire for freshly-enriched candidates (their "metric_subject" key is
 // always empty, so they'd never match an existing row's real subject), and
 // any previously-existing row that must be re-written by UpsertMetrics after
-// a merge would have its subject/desc/context/unit silently blanked out
+// a merge would have its subject/desc/context/unit/keywords silently blanked out
 // (UpsertMetrics reads the raw names only).
 func canonicalizeMetricFieldAliases(m map[string]any) map[string]any {
 	out := cloneMetricMap(m)
