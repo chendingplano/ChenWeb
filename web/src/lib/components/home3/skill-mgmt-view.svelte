@@ -370,7 +370,9 @@
 				</div>
 			{:else if skills.length === 0}
 				<div class="table-state">
-					<ZapIcon class="w-8 h-8 state-icon" />
+					<span class="state-icon">
+						<ZapIcon class="w-8 h-8" />
+					</span>
 					<div class="state-title">No skills found</div>
 					<div class="state-copy">No skills in this workspace yet</div>
 				</div>
@@ -606,6 +608,7 @@
 								type="button"
 								role="switch"
 								aria-checked={draftSettings.showDelete}
+								aria-label="Toggle delete column visibility"
 								onclick={() => (draftSettings.showDelete = !draftSettings.showDelete)}
 								class="toggle-switch"
 								style="background:{draftSettings.showDelete ? accent : border};"
@@ -622,6 +625,7 @@
 								type="button"
 								role="switch"
 								aria-checked={draftSettings.showEdit}
+								aria-label="Toggle edit column visibility"
 								onclick={() => (draftSettings.showEdit = !draftSettings.showEdit)}
 								class="toggle-switch"
 								style="background:{draftSettings.showEdit ? accent : border};"
@@ -944,10 +948,6 @@
 		background: var(--hover);
 	}
 
-	.tr-edit .td {
-		padding: 0;
-	}
-
 	.skill-name {
 		font-weight: 500;
 	}
@@ -960,6 +960,7 @@
 
 	.desc-cell {
 		overflow: hidden;
+		line-clamp: 2;
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		-webkit-box-orient: vertical;
