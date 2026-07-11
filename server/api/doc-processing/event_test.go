@@ -76,3 +76,23 @@ func TestSkipReasonLineFileGeneratedEvent(t *testing.T) {
 		t.Fatalf("success skip reason=%q, want empty", got)
 	}
 }
+
+func TestParseLineFileGeneratedEvent_ForceClearDefaultsFalse(t *testing.T) {
+	evt, err := ParseLineFileGeneratedEvent([]byte(`{"record_id":"42","force":true}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if evt.ForceClear != false {
+		t.Fatalf("ForceClear = %v, want false when omitted", evt.ForceClear)
+	}
+}
+
+func TestParseLineFileGeneratedEvent_ForceClearTrue(t *testing.T) {
+	evt, err := ParseLineFileGeneratedEvent([]byte(`{"record_id":"42","force":true,"force_clear":true}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if evt.ForceClear != true {
+		t.Fatalf("ForceClear = %v, want true", evt.ForceClear)
+	}
+}

@@ -18,6 +18,7 @@ type LineFileGeneratedEvent struct {
 	RecordID   int64
 	Filename   string
 	Force      bool
+	ForceClear bool
 	Type       string
 	Status     string
 	Operations []string
@@ -43,10 +44,20 @@ func ParseLineFileGeneratedEvent(payload []byte) (LineFileGeneratedEvent, error)
 		force = b
 	}
 
+	forceClear := false
+	if v, ok := raw["force_clear"]; ok {
+		b, bErr := asBool(v, false)
+		if bErr != nil {
+			return LineFileGeneratedEvent{}, fmt.Errorf("invalid force_clear: %w", bErr)
+		}
+		forceClear = b
+	}
+
 	return LineFileGeneratedEvent{
 		RecordID:   rid,
 		Filename:   firstNonEmptyTrimmed(asString(raw["filename"]), asString(raw["line_file_filename"])),
 		Force:      force,
+		ForceClear: forceClear,
 		Type:       strings.ToLower(strings.TrimSpace(asString(raw["type"]))),
 		Status:     strings.ToLower(strings.TrimSpace(asString(raw["status"]))),
 		Operations: parseOperations(raw["operation"]),
