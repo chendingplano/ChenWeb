@@ -2010,7 +2010,165 @@ jj commit -m "feat(metrics): wire DR2/DR3/DR4 merge and dirty-check persistence 
 
 ---
 
-### Task 12: Restore wipe-guard parity for provisions, inventory_items, entity/relation
+### Task 12: Reconstruct Rule-4 merged-winner rows from full source data (data-loss fix)
+
+**Files:**
+- Modify: `server/api/doc-processing/extract-metrics.go` (`mergeAndCollectDirtyMetrics`, ~line 3025)
+- Test: `server/api/doc-processing/extract-metrics_test.go`
+
+**Interfaces:**
+- Consumes: `group []map[string]any` (the pending-group parameter already passed to `resolveMergeAmbiguities` inside `mergeAndCollectDirtyMetrics`'s loop — each entry already carries a `metric_id` and the FULL enriched/persisted field set, per Tasks 7 and 10).
+- Produces: `mergeResolveDecidedFields []string` (package-level var).
+
+**Why this task exists:** Task 11's review (Task 11 is already merged) found a real, live-path data-loss bug that predates Task 11 itself — it originates in the Merge Resolution LLM's schema (Task 9) and this ADR's own design. The `winning_metrics` response only carries ~10 fields (`metric_name`, `metric_subject`, `metric_unit`, `metric_value`, `value_data_type`, `value_range_type`, `value_class`, `threshold_or_target`, `metric_categories`, `source_line_spans`). `mergeAndCollectDirtyMetrics` currently writes a Rule-4 "merged" winner to the DB using that sparse map directly. Since `UpsertMetrics` does `ON CONFLICT DO UPDATE SET` on every column, any Rule-4 merged row silently blanks `metric_desc`, `metric_context`, `metric_keywords`, `location_type`, `formula_or_definition`, `measurement_frequency`, `category_paths`, and all `*_en` variants — real, silent partial data loss for exactly the metrics that go through LLM-adjudicated merging (Rule-2 exact-duplicates and Rule-3 additions are unaffected, since those come from the full enriched map, not the LLM's sparse output).
+
+**Fix:** before writing a winner, reconstruct its full row by cloning the FULL source map for that `metric_id` (already sitting in `group`, the pending-group slice `mergeAndCollectDirtyMetrics` already has in scope — no new data fetch needed) and overlay only the fields the Merge Resolution LLM actually decided on. Fields the LLM didn't touch (`desc`, `context`, `keywords`, etc.) survive from the source row.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `extract-metrics_test.go`:
+
+```go
+func TestMergeAndCollectDirtyMetrics_MergedWinnerPreservesUntouchedFields(t *testing.T) {
+	existingRow := map[string]any{
+		"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
+		"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)},
+		"metric_desc": "max end-to-end latency", "metric_context": "SLA section 4",
+	}
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		// Pass-2 enrichment output for the new candidate.
+		{"metrics": []any{map[string]any{
+			"metric_name": "Latency", "subject": "gw", "unit": "ms", "metric_value": "250",
+			"source_line_spans": []any{float64(2)},
+		}}, "uncertain_metrics": []any{}},
+		// Merge Resolution LLM output: sparse, no desc/context.
+		{"winning_metrics": []any{map[string]any{
+			"metric_id": "173_mtc_1", "absorbed_metric_ids": []any{"173_mtc_2"},
+			"metric_name": "Latency", "metric_subject": "gw", "metric_unit": "ms",
+			"metric_value": "250", "source_line_spans": []any{"2"},
+		}}},
+	}}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 173}}, &fakeMetricsStore{}, extractor, nil)
+	p.batchRecordID = 173
+	p.batchExistingMetrics = []map[string]any{existingRow}
+	p.MergeResolvePromptText = "resolve"
+	p.MergeResolveModelName = "test-merge-model"
+
+	dirty, err := p.mergeAndCollectDirtyMetrics(context.Background(), []map[string]any{
+		{"metric_name": "Latency", "subject": "gw", "unit": "ms", "metric_value": "250", "source_line_spans": []any{float64(2)}},
+	})
+	if err != nil {
+		t.Fatalf("mergeAndCollectDirtyMetrics: %v", err)
+	}
+	if len(dirty) != 1 {
+		t.Fatalf("dirty=%d, want 1", len(dirty))
+	}
+	if dirty[0]["metric_desc"] != "max end-to-end latency" {
+		t.Fatalf("metric_desc lost in merged winner: %+v", dirty[0])
+	}
+	if dirty[0]["metric_context"] != "SLA section 4" {
+		t.Fatalf("metric_context lost in merged winner: %+v", dirty[0])
+	}
+	if dirty[0]["metric_value"] != "250" {
+		t.Fatalf("expected LLM-decided field metric_value=250 to win, got %v", dirty[0]["metric_value"])
+	}
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./server/api/doc-processing/ -run TestMergeAndCollectDirtyMetrics_MergedWinnerPreservesUntouchedFields -v`
+Expected: FAIL — `metric_desc lost in merged winner` (the current code writes the sparse LLM winner map directly, which has no `metric_desc` key)
+
+- [ ] **Step 3: Implement the reconstruction**
+
+In `extract-metrics.go`, add a package-level var near `metricFieldAliasPairs`:
+
+```go
+// mergeResolveDecidedFields lists the fields the Merge Resolution LLM call's
+// winning_metrics response actually returns (prompt-merge-resolve-metrics-v1.md).
+// Everything else on a Rule-4 winner must come from the full source row, not
+// this sparse LLM output, or those columns get silently blanked on write.
+var mergeResolveDecidedFields = []string{
+	"metric_name", "metric_subject", "metric_unit", "metric_value",
+	"value_data_type", "value_range_type", "value_class",
+	"threshold_or_target", "metric_categories", "source_line_spans",
+}
+```
+
+In `mergeAndCollectDirtyMetrics`, inside the `for _, group := range merged.PendingGroups` loop, right after `winners, err := p.resolveMergeAmbiguities(...)`:
+
+```go
+	for _, group := range merged.PendingGroups {
+		winners, err := p.resolveMergeAmbiguities(ctx, p.batchRecordID, group)
+		if err != nil {
+			return nil, err
+		}
+		groupByID := map[string]map[string]any{}
+		for _, g := range group {
+			groupByID[asString(g["metric_id"])] = g
+		}
+		for _, w := range winners {
+			w = canonicalizeMetricFieldAliases(w)
+			absorbed, _ := w["absorbed_metric_ids"].([]any)
+			id := asString(w["metric_id"])
+			existingRow, wasExisting := existingByID[id]
+			if len(absorbed) == 0 && wasExisting && metricContentEqual(existingRow, w) {
+				continue // DR4 dirty-check: unchanged existing row, skip entirely.
+			}
+			if full, ok := groupByID[id]; ok {
+				reconstructed := cloneMetricMap(full)
+				for _, f := range mergeResolveDecidedFields {
+					if v, ok := w[f]; ok {
+						reconstructed[f] = v
+					}
+				}
+				reconstructed["metric_id"] = id
+				w = reconstructed
+			}
+			action := "added"
+			if wasExisting {
+				action = "merged"
+			}
+			absorbedIDs := make([]string, 0, len(absorbed))
+			for _, a := range absorbed {
+				absorbedIDs = append(absorbedIDs, asString(a))
+			}
+			logEntry := map[string]any{"run_time": now.Format(time.RFC3339), "action": action}
+			if len(absorbedIDs) > 0 {
+				logEntry["absorbed_metric_ids"] = absorbedIDs
+			}
+			w["ext_info"] = map[string]any{"merge_log": []map[string]any{logEntry}}
+			dirty = append(dirty, w)
+		}
+	}
+```
+
+Note: `groupByID` is keyed by every `metric_id` in the pending group — both `_merge_source: "existing"` and `_merge_source: "new"` entries carry one (per Task 7/10), so this uniformly covers a winner that was an existing row, a winner that was a brand-new candidate, or a winner that absorbed others — in every case the reconstruction starts from that winning identity's own full field set, which is the correct "whichever candidate won" semantics already implied by the ADR's merge-resolution design.
+
+If `groupByID[id]` is somehow missing (should not happen given `validateMergeResolveWinners` already guarantees every output `metric_id` came from the input group), fall back to using `w` as-is rather than panicking — this preserves today's (sparse-but-functional) behavior for that unexpected case instead of crashing the run.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `go test ./server/api/doc-processing/ -run TestMergeAndCollectDirtyMetrics_MergedWinnerPreservesUntouchedFields -v`
+Expected: PASS
+
+- [ ] **Step 5: Run the full `FinalizeChunkBatch`/merge test suite to confirm no regressions**
+
+Run: `go build ./server/api/doc-processing/... && go test ./server/api/doc-processing/ -run 'TestFinalizeChunkBatch|TestMergeMetrics|TestResolveMergeAmbiguities|TestMergeAndCollectDirtyMetrics' -v`
+Expected: all PASS, no regressions in the existing Task 11 tests (in particular, re-confirm `TestFinalizeChunkBatch_MergeMode_UnchangedExistingNotWritten` still passes — the dirty-check decision itself, made before reconstruction, must be unaffected by this change).
+
+Then run the full package suite once: `go test ./server/api/doc-processing/...` — same ~20 pre-existing unrelated failures as baseline, no new ones.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git commit -m "fix(metrics): reconstruct Rule-4 merged-winner rows from full source data to prevent field blanking"
+```
+
+---
+
+### Task 13: Restore wipe-guard parity for provisions, inventory_items, entity/relation
 
 **Files:**
 - Modify: `server/api/doc-processing/extract-provisions.go:1949-1982` (`InitChunkBatch`), `:2056` (`FinalizeChunkBatch`)
@@ -2133,7 +2291,7 @@ jj commit -m "fix(doc-processing): restore force-gated wipe guard on the chunk-b
 
 ---
 
-### Task 13: Frontend `force_clear` control
+### Task 14: Frontend `force_clear` control
 
 **Files:**
 - Modify: `web/src/lib/components/home3/doc-processor-dashboard-view.svelte`
@@ -2211,7 +2369,7 @@ jj commit -m "feat(frontend): add independent force_clear control to doc-process
 
 ---
 
-### Task 14: Sync the ADR document with implementation-time findings
+### Task 15: Sync the ADR document with implementation-time findings
 
 **Files:**
 - Modify: `KnowledgeStore/doc-repo/adrs/202607/2026071002-adr-doc-processor-incremental.md`
@@ -2224,6 +2382,10 @@ Replace the "None required" section with a note that Task 3's unique-constraint 
 
 Add a short note (e.g. under DR1 or as a new "Implementation Note") recording the Critical Finding: the force/force_clear/merge logic was implemented in `InitChunkBatch`/`ProcessChunk`/`FinalizeChunkBatch`, not `HandleEvent`, because `HandleEvent` is dead code on the live `chunk_batch_coordinator.go` path for any processor implementing `ChunkBatchProcessor` (which all four processors this ADR covers do).
 
+- [ ] **Step 2b: Document the Rule-4 field-reconstruction fix under DR2's "Merge Resolution LLM Call" section**
+
+Add a note that the Merge Resolution LLM's `winning_metrics` response only carries the ~10 fields listed in its schema, and that `mergeAndCollectDirtyMetrics` (Task 12) reconstructs the full row by overlaying only those decided fields onto the winning candidate's full source row (from the pending group) before writing — otherwise fields the LLM doesn't return (`desc`, `context`, `keywords`, `location_type`, `formula_or_definition`, `measurement_frequency`, `category_paths`, `*_en` variants) would be silently blanked on every Rule-4 merge. Note this was found during Task 11's review and fixed in Task 12.
+
 - [ ] **Step 3: Add a Change Log entry**
 
 ```markdown
@@ -2231,8 +2393,11 @@ Add a short note (e.g. under DR1 or as a new "Implementation Note") recording th
   (dedupe + (input_record_id, metric_id) index) after discovering HandleEvent's
   force/skip logic is dead code on the live chunk-batch-coordinator path;
   DR1-DR4 implemented in InitChunkBatch/ProcessChunk/FinalizeChunkBatch instead;
-  also restored the same force-gated wipe guard for extract_provisions,
-  extract_inventory_items, and extract_entity_relation on that same live path.
+  fixed a Rule-4 merged-winner field-blanking bug (reconstruct full row from
+  source + overlay only LLM-decided fields, rather than writing the LLM's
+  sparse output directly); also restored the same force-gated wipe guard for
+  extract_provisions, extract_inventory_items, and extract_entity_relation on
+  that same live path.
 ```
 
 - [ ] **Step 4: Commit**
