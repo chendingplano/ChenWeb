@@ -82,6 +82,7 @@ func (s *ControlService) runProcessorsChunkBatched(
 		recordError(phaseBSpan, err)
 		return
 	}
+	ctx = withDocProcessorFlags(ctx, evt.Force, evt.ForceClear)
 	rec, err := s.InputStore.GetInputRecord(ctx, evt.RecordID)
 	if err != nil {
 		if s.Logger != nil {
