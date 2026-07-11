@@ -14,6 +14,38 @@ import (
 	"github.com/chendingplano/shared/go/api/loggerutil"
 )
 
+type fakeInventoryItemsStore struct {
+	exists       bool
+	existsErr    error
+	deleteCalled int
+	existCalled  int
+}
+
+func (f *fakeInventoryItemsStore) InventoryItemsExist(_ context.Context, _ int64) (bool, error) {
+	f.existCalled++
+	if f.existsErr != nil {
+		return false, f.existsErr
+	}
+	return f.exists, nil
+}
+
+func (f *fakeInventoryItemsStore) DeleteInventoryItemsByInputRecordID(_ context.Context, _ int64) (int64, error) {
+	f.deleteCalled++
+	return 0, nil
+}
+
+func (f *fakeInventoryItemsStore) DeleteInventoryItemDuplicatesByInputRecordID(_ context.Context, _ int64) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeInventoryItemsStore) SaveInventoryItems(_ context.Context, _ SaveInventoryItemsRequest) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeInventoryItemsStore) SaveInventoryItemDuplicates(_ context.Context, _ SaveInventoryItemDuplicatesRequest) (int64, error) {
+	return 0, nil
+}
+
 func TestLoadInventoryDictionaryDirAndValidateItem(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "category_schemas.json"), []byte(`{
@@ -549,5 +581,44 @@ func TestInventoryItemDuplicatesSQLStoreSaveAndDelete(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestInventoryItemsProcessor_InitChunkBatch_DeletesExistingWhenForced(t *testing.T) {
+	store := &fakeInventoryItemsStore{}
+	p := &InventoryItemsProcessor{
+		Store:      store,
+		Logger:     loggerutil.CreateDefaultLogger("TEST_INV"),
+		PromptText: "test prompt",
+		PromptRef:  "test-prompt.md",
+		Now:        time.Now,
+	}
+	ctx := withDocProcessorFlags(context.Background(), true, true)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if store.deleteCalled != 1 {
+		t.Fatalf("deleteCalled=%d, want 1", store.deleteCalled)
+	}
+}
+
+func TestInventoryItemsProcessor_InitChunkBatch_SkipsWhenExistsAndNotForced(t *testing.T) {
+	store := &fakeInventoryItemsStore{exists: true}
+	p := &InventoryItemsProcessor{
+		Store:      store,
+		Logger:     loggerutil.CreateDefaultLogger("TEST_INV"),
+		PromptText: "test prompt",
+		PromptRef:  "test-prompt.md",
+		Now:        time.Now,
+	}
+	ctx := withDocProcessorFlags(context.Background(), false, false)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if !p.batchSkip {
+		t.Fatalf("expected batchSkip=true")
+	}
+	if store.existCalled != 1 {
+		t.Fatalf("existCalled=%d, want 1", store.existCalled)
 	}
 }

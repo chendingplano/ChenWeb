@@ -822,3 +822,132 @@ func TestBuildEntityContextForEntities_NoSpans(t *testing.T) {
 		t.Errorf("expected no entity_context key for empty spans, got %v", entities[0]["entity_context"])
 	}
 }
+
+// fakeERBatchStore implements EntityRelationStore for batch init/skip tests.
+type fakeERBatchStore struct {
+	entitiesExist        bool
+	entitiesExistErr     error
+	relationsExist       bool
+	relationsExistErr    error
+	deleteEntitiesCalls  int
+	deleteRelationsCalls int
+}
+
+func (f *fakeERBatchStore) EntitiesExist(_ context.Context, _ int64) (bool, error) {
+	return f.entitiesExist, f.entitiesExistErr
+}
+
+func (f *fakeERBatchStore) DeleteEntitiesByInputRecordID(_ context.Context, _ int64) (int64, error) {
+	f.deleteEntitiesCalls++
+	return 0, nil
+}
+
+func (f *fakeERBatchStore) SaveEntities(_ context.Context, _ SaveEntitiesRequest) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeERBatchStore) RelationsExist(_ context.Context, _ int64) (bool, error) {
+	return f.relationsExist, f.relationsExistErr
+}
+
+func (f *fakeERBatchStore) DeleteRelationsByInputRecordID(_ context.Context, _ int64) (int64, error) {
+	f.deleteRelationsCalls++
+	return 0, nil
+}
+
+func (f *fakeERBatchStore) SaveRelations(_ context.Context, _ SaveRelationsRequest) (int64, error) {
+	return 0, nil
+}
+
+func TestEntityProcessor_InitChunkBatch_DeletesExistingWhenForced(t *testing.T) {
+	store := &fakeERBatchStore{}
+	p := &EntityProcessor{
+		EntityRelationProcessor: &EntityRelationProcessor{
+			Store:  store,
+			Logger: loggerutil.CreateDefaultLogger("TEST_ENT"),
+			Now:    time.Now,
+		},
+	}
+	ctx := withDocProcessorFlags(context.Background(), true, true)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if store.deleteEntitiesCalls != 1 {
+		t.Fatalf("deleteEntitiesCalls=%d, want 1", store.deleteEntitiesCalls)
+	}
+	if store.deleteRelationsCalls != 1 {
+		t.Fatalf("deleteRelationsCalls=%d, want 1", store.deleteRelationsCalls)
+	}
+}
+
+func TestEntityProcessor_InitChunkBatch_SkipsWhenExistsAndNotForced(t *testing.T) {
+	store := &fakeERBatchStore{entitiesExist: true}
+	p := &EntityProcessor{
+		EntityRelationProcessor: &EntityRelationProcessor{
+			Store:  store,
+			Logger: loggerutil.CreateDefaultLogger("TEST_ENT"),
+			Now:    time.Now,
+		},
+	}
+	ctx := withDocProcessorFlags(context.Background(), false, false)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if !p.batchSkip {
+		t.Fatalf("expected batchSkip=true")
+	}
+}
+
+func TestEntityProcessor_InitChunkBatch_SkipsWhenRelationsExistAndNotForced(t *testing.T) {
+	store := &fakeERBatchStore{relationsExist: true}
+	p := &EntityProcessor{
+		EntityRelationProcessor: &EntityRelationProcessor{
+			Store:  store,
+			Logger: loggerutil.CreateDefaultLogger("TEST_ENT"),
+			Now:    time.Now,
+		},
+	}
+	ctx := withDocProcessorFlags(context.Background(), false, false)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if !p.batchSkip {
+		t.Fatalf("expected batchSkip=true when relations exist and force=false")
+	}
+}
+
+func TestRelationProcessor_InitChunkBatch_DeletesExistingWhenForced(t *testing.T) {
+	store := &fakeERBatchStore{}
+	p := &RelationProcessor{
+		EntityRelationProcessor: &EntityRelationProcessor{
+			Store:  store,
+			Logger: loggerutil.CreateDefaultLogger("TEST_REL"),
+			Now:    time.Now,
+		},
+	}
+	ctx := withDocProcessorFlags(context.Background(), true, true)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if store.deleteRelationsCalls != 1 {
+		t.Fatalf("deleteRelationsCalls=%d, want 1", store.deleteRelationsCalls)
+	}
+}
+
+func TestRelationProcessor_InitChunkBatch_SkipsWhenExistsAndNotForced(t *testing.T) {
+	store := &fakeERBatchStore{relationsExist: true}
+	p := &RelationProcessor{
+		EntityRelationProcessor: &EntityRelationProcessor{
+			Store:  store,
+			Logger: loggerutil.CreateDefaultLogger("TEST_REL"),
+			Now:    time.Now,
+		},
+	}
+	ctx := withDocProcessorFlags(context.Background(), false, false)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if !p.batchSkip {
+		t.Fatalf("expected batchSkip=true")
+	}
+}

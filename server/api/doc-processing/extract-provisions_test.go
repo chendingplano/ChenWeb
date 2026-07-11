@@ -896,3 +896,34 @@ func TestLoadProvisionsPromptFromEnv_UsesPromptDir(t *testing.T) {
 		t.Fatalf("promptPath=%q, want %q", gotPath, promptPath)
 	}
 }
+
+func TestProvisionsProcessor_InitChunkBatch_DeletesExistingWhenForced(t *testing.T) {
+	store := &fakeProvisionsStore{}
+	p := NewProvisionsProcessor(&fakeDocMetadataStore{}, store, &fakeJSONExtractor{}, nil)
+	p.PromptErr = nil
+	p.ModelErr = nil
+	ctx := withDocProcessorFlags(context.Background(), true, true)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if store.deleteCalled != 1 {
+		t.Fatalf("deleteCalled=%d, want 1", store.deleteCalled)
+	}
+}
+
+func TestProvisionsProcessor_InitChunkBatch_SkipsWhenExistsAndNotForced(t *testing.T) {
+	store := &fakeProvisionsStore{exists: true}
+	p := NewProvisionsProcessor(&fakeDocMetadataStore{}, store, &fakeJSONExtractor{}, nil)
+	p.PromptErr = nil
+	p.ModelErr = nil
+	ctx := withDocProcessorFlags(context.Background(), false, false)
+	if err := p.InitChunkBatch(ctx, 173, nil, ""); err != nil {
+		t.Fatalf("InitChunkBatch: %v", err)
+	}
+	if !p.batchSkip {
+		t.Fatalf("expected batchSkip=true")
+	}
+	if store.existCalled != 1 {
+		t.Fatalf("existCalled=%d, want 1", store.existCalled)
+	}
+}

@@ -70,6 +70,7 @@ type InventoryItemsProcessor struct {
 	batchResults  []inventoryChunkOutcome
 	batchMu       sync.Mutex // protects batchResults append under concurrent Phase 3
 	batchStart    time.Time
+	batchSkip     bool       // set true by InitChunkBatch when data exists and !force
 }
 
 type InventoryItemsStore interface {
@@ -2056,6 +2057,25 @@ func (p *InventoryItemsProcessor) InitChunkBatch(ctx context.Context, recordID i
 		p.Logger.Warn("%s skipped: model config error", p.Name(), "record_id", recordID, "error", p.ModelErr)
 		return nil
 	}
+
+	force, _ := docProcessorFlagsFromContext(ctx)
+	p.batchSkip = false
+	if force {
+		_, _ = p.Store.DeleteInventoryItemsByInputRecordID(ctx, recordID)
+		_, _ = p.Store.DeleteInventoryItemDuplicatesByInputRecordID(ctx, recordID)
+	} else {
+		exists, err := p.Store.InventoryItemsExist(ctx, recordID)
+		if err != nil {
+			return fmt.Errorf("(MID_26071121) %s check inventory items exist: %w", p.Name(), err)
+		}
+		if exists {
+			p.Logger.Info("inventory items extraction skipped", "record_id", recordID, "reason", "inventory items already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactInventoryItem, recordID, p.Logger, ReindexInventoryItemSearchForRecord)
+			p.batchSkip = true
+			return nil
+		}
+	}
+
 	p.batchStart = p.Now()
 	p.batchRecordID = recordID
 	p.batchChunks = chunks
@@ -2065,6 +2085,10 @@ func (p *InventoryItemsProcessor) InitChunkBatch(ctx context.Context, recordID i
 }
 
 func (p *InventoryItemsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if p.batchSkip {
+		return nil
+	}
+
 	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
 		return fmt.Errorf("(MID_26062731) %s chunk index %d out of range", p.Name(), chunkIdx)
 	}
@@ -2125,6 +2149,10 @@ func (p *InventoryItemsProcessor) ProcessChunk(ctx context.Context, chunkIdx int
 }
 
 func (p *InventoryItemsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if p.batchSkip {
+		return nil
+	}
+
 	if len(p.batchResults) == 0 {
 		p.Logger.Info("inventory items batch: no results", "record_id", p.batchRecordID)
 		return nil

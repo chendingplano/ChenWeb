@@ -71,6 +71,7 @@ type EntityRelationProcessor struct {
 	batchRec       DocMetadataInputRecord
 	batchRelations []map[string]any // accumulated by RelationProcessor.ProcessChunk
 	batchRelLang   string           // detected language for relation batch
+	batchSkip      bool             // set true by InitChunkBatch when data exists and !force
 }
 
 // statusOp returns the doc_proc operation name for status entries.
@@ -2185,7 +2186,7 @@ func refreshRelationArtifactFile(ctx context.Context, db *sql.DB, artifactDir st
 
 // initEntityBatch initialises the entity-relation processor for per-chunk
 // batching of the Phase 1 (entity extraction) pass.
-func (p *EntityRelationProcessor) initEntityBatch(_ context.Context, recordID int64, chunks []Chunk, docCtx string) error {
+func (p *EntityRelationProcessor) initEntityBatch(ctx context.Context, recordID int64, chunks []Chunk, docCtx string) error {
 	if p.PromptErr != nil {
 		return fmt.Errorf("(MID_26062720) %s prompt error: %w", p.Name(), p.PromptErr)
 	}
@@ -2193,6 +2194,29 @@ func (p *EntityRelationProcessor) initEntityBatch(_ context.Context, recordID in
 		p.Logger.Warn("%s skipped: model config error", p.Name(),
 			"record_id", recordID, "model_ref", p.ModelRef, "error", p.ModelErr)
 		return nil
+	}
+
+	force, _ := docProcessorFlagsFromContext(ctx)
+	p.batchSkip = false
+	if force {
+		_, _ = p.Store.DeleteEntitiesByInputRecordID(ctx, recordID)
+		_, _ = p.Store.DeleteRelationsByInputRecordID(ctx, recordID)
+	} else {
+		entitiesExist, eeErr := p.Store.EntitiesExist(ctx, recordID)
+		if eeErr != nil {
+			return fmt.Errorf("(MID_26071122) %s check entities exist: %w", p.Name(), eeErr)
+		}
+		relationsExist, reErr := p.Store.RelationsExist(ctx, recordID)
+		if reErr != nil {
+			return fmt.Errorf("(MID_26071123) %s check relations exist: %w", p.Name(), reErr)
+		}
+		if entitiesExist || relationsExist {
+			p.Logger.Info("entity extraction skipped (batch)", "record_id", recordID, "reason", "entities or relations already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactEntity, recordID, p.Logger, ReindexEntitySearchForRecord)
+			reindexExistingSearchOnSkip(ctx, searchArtifactRelation, recordID, p.Logger, ReindexRelationSearchForRecord)
+			p.batchSkip = true
+			return nil
+		}
 	}
 
 	p.batchStart = p.Now()
@@ -2207,6 +2231,10 @@ func (p *EntityRelationProcessor) initEntityBatch(_ context.Context, recordID in
 // LLM and accumulates entity/relation results. Called sequentially by the
 // per-chunk batching coordinator via EntityProcessor.ProcessChunk.
 func (p *EntityRelationProcessor) processEntityChunk(ctx context.Context, chunkIdx int) error {
+	if p.batchSkip {
+		return nil
+	}
+
 	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
 		return fmt.Errorf("(MID_26062721) %s chunk index %d out of range (len=%d)",
 			p.Name(), chunkIdx, len(p.batchChunks))
@@ -2237,6 +2265,10 @@ func (p *EntityRelationProcessor) processEntityChunk(ctx context.Context, chunkI
 // Phase 2 (window-based relation extraction) is intentionally omitted here;
 // relations are handled exclusively by RelationProcessor.FinalizeChunkBatch.
 func (p *EntityRelationProcessor) finalizeEntityBatch(ctx context.Context) error {
+	if p.batchSkip {
+		return nil
+	}
+
 	if len(p.batchResults) == 0 {
 		p.Logger.Info("%s batch: no results", p.Name(), "record_id", p.batchRecordID)
 		return nil

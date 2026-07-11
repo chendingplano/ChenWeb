@@ -343,6 +343,24 @@ func (p *RelationProcessor) InitChunkBatch(ctx context.Context, recordID int64, 
 	if strings.TrimSpace(p.RelationPromptText) == "" || p.RelationPromptErr != nil {
 		p.Logger.Warn("relation prompt unavailable; relation batch skipped", "record_id", recordID)
 	}
+
+	force, _ := docProcessorFlagsFromContext(ctx)
+	p.batchSkip = false
+	if force {
+		_, _ = p.Store.DeleteRelationsByInputRecordID(ctx, recordID)
+	} else {
+		exists, err := p.Store.RelationsExist(ctx, recordID)
+		if err != nil {
+			return fmt.Errorf("(MID_26071124) %s check relations exist: %w", p.Name(), err)
+		}
+		if exists {
+			p.Logger.Info("relation extraction skipped (batch)", "record_id", recordID, "reason", "relations already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactRelation, recordID, p.Logger, ReindexRelationSearchForRecord)
+			p.batchSkip = true
+			return nil
+		}
+	}
+
 	p.batchStart = p.Now()
 	p.batchRecordID = recordID
 	p.batchChunks = chunks
@@ -353,6 +371,10 @@ func (p *RelationProcessor) InitChunkBatch(ctx context.Context, recordID int64, 
 }
 
 func (p *RelationProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if p.batchSkip {
+		return nil
+	}
+
 	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
 		return fmt.Errorf("(MID_26062741) %s chunk index %d out of range (len=%d)",
 			p.Name(), chunkIdx, len(p.batchChunks))
@@ -383,6 +405,10 @@ func (p *RelationProcessor) ProcessChunk(ctx context.Context, chunkIdx int) erro
 }
 
 func (p *RelationProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if p.batchSkip {
+		return nil
+	}
+
 	if len(p.batchRelations) == 0 {
 		return nil
 	}

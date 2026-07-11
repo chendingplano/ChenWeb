@@ -63,6 +63,7 @@ type ProvisionsProcessor struct {
 	batchResult   provisionExtractionResult
 	batchResults  []provisionChunkResult // per-chunk results for final accumulation
 	batchMu       sync.Mutex             // protects batchResults append under concurrent Phase 3
+	batchSkip     bool                   // set true by InitChunkBatch when data exists and !force
 }
 
 type ProvisionsStore interface {
@@ -1965,6 +1966,23 @@ func (p *ProvisionsProcessor) InitChunkBatch(ctx context.Context, recordID int64
 		return errors.New("(MID_26062713) provisions store is nil")
 	}
 
+	force, _ := docProcessorFlagsFromContext(ctx)
+	p.batchSkip = false
+	if force {
+		_, _ = p.Store.DeleteProvisionsByInputRecordID(ctx, recordID)
+	} else {
+		exists, err := p.Store.ProvisionsExist(ctx, recordID, "")
+		if err != nil {
+			return fmt.Errorf("(MID_26071120) %s check provisions exist: %w", p.Name(), err)
+		}
+		if exists {
+			p.Logger.Info("provisions extraction skipped", "record_id", recordID, "reason", "provisions already exist and force=false")
+			reindexExistingSearchOnSkip(ctx, searchArtifactProvision, recordID, p.Logger, ReindexProvisionSearchForRecord)
+			p.batchSkip = true
+			return nil
+		}
+	}
+
 	p.batchStart = p.Now()
 	p.batchRecordID = recordID
 	p.batchChunks = chunks
@@ -1985,6 +2003,10 @@ func (p *ProvisionsProcessor) InitChunkBatch(ctx context.Context, recordID int64
 // LLM input, calls the LLM, and accumulates the result. Called sequentially
 // by the per-chunk batching coordinator.
 func (p *ProvisionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error {
+	if p.batchSkip {
+		return nil
+	}
+
 	if chunkIdx < 0 || chunkIdx >= len(p.batchChunks) {
 		return fmt.Errorf("(MID_26062714) %s chunk index %d out of range (len=%d)",
 			p.Name(), chunkIdx, len(p.batchChunks))
@@ -2054,6 +2076,10 @@ func (p *ProvisionsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) er
 // FinalizeChunkBatch saves all accumulated provisions from batch processing
 // to the database, writes artifacts, and indexes the results.
 func (p *ProvisionsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if p.batchSkip {
+		return nil
+	}
+
 	if len(p.batchResults) == 0 {
 		p.Logger.Info("provisions batch: no results to finalize", "record_id", p.batchRecordID)
 		return nil
