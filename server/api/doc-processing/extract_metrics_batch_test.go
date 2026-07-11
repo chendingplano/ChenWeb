@@ -123,15 +123,23 @@ func TestMetricsProcessor_BatchProcessChunkAccumulatesAndSaves(t *testing.T) {
 		t.Fatalf("FinalizeChunkBatch: %v", err)
 	}
 
-	// Store must have been called exactly once.
-	if store.saveCalled != 1 {
-		t.Fatalf("saveCalled=%d, want 1", store.saveCalled)
+	// ctx is context.Background(), which docProcessorFlagsFromContext resolves
+	// to force=true, forceClear=false — i.e. DR1's "merge" branch (reprocess
+	// incrementally against existing metrics, ADR 2026071002), not the wipe
+	// branch. With no existing metrics loaded, DR2 Rule-3 (no line overlap)
+	// marks both candidates unambiguously new, so they go through
+	// UpsertMetrics rather than the legacy always-SaveMetrics path.
+	if store.upsertCalled != 1 {
+		t.Fatalf("upsertCalled=%d, want 1", store.upsertCalled)
+	}
+	if store.saveCalled != 0 {
+		t.Fatalf("saveCalled=%d, want 0 (merge mode must not use SaveMetrics)", store.saveCalled)
 	}
 
 	// Both enriched metrics must be present.
-	got := store.lastSave.Metrics
+	got := store.lastUpsert.Metrics
 	if len(got) != 2 {
-		t.Fatalf("saved %d metrics, want 2; metrics=%v", len(got), got)
+		t.Fatalf("upserted %d metrics, want 2; metrics=%v", len(got), got)
 	}
 
 	// metric_id must follow the "{recordID}_mtc_{1-based}" pattern.
@@ -143,7 +151,7 @@ func TestMetricsProcessor_BatchProcessChunkAccumulatesAndSaves(t *testing.T) {
 	}
 
 	// PromptName must use RelationPromptRef (Fix 3).
-	if store.lastSave.PromptName != p.RelationPromptRef {
-		t.Errorf("PromptName=%q, want %q", store.lastSave.PromptName, p.RelationPromptRef)
+	if store.lastUpsert.PromptName != p.RelationPromptRef {
+		t.Errorf("PromptName=%q, want %q", store.lastUpsert.PromptName, p.RelationPromptRef)
 	}
 }

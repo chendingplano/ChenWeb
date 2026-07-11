@@ -594,6 +594,8 @@ func (p *MetricsProcessor) forceDisableThinking() {
 	p.MentionModelCfg = forceDisableThinking(p.MentionModelCfg)
 	p.FallbackMentionModelCfg = forceDisableThinking(p.FallbackMentionModelCfg)
 	p.RelationModelCfg = forceDisableThinking(p.RelationModelCfg)
+	p.MergeResolveModelCfg = forceDisableThinking(p.MergeResolveModelCfg)
+	p.FallbackMergeResolveModelCfg = forceDisableThinking(p.FallbackMergeResolveModelCfg)
 }
 
 func (p *MetricsProcessor) saveMetricsToFile(recordID int64, rec DocMetadataInputRecord, metrics []map[string]any) error {
@@ -2899,6 +2901,9 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 }
 
 func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
+	if p.batchSkip {
+		return nil
+	}
 	candidates := mentionsAsCandidates(p.batchMentions)
 	if len(candidates) == 0 {
 		p.Logger.Info("%s batch: no candidates", p.Name(), "record_id", p.batchRecordID)
@@ -2918,23 +2923,182 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("(MID_26062753) %s load record: %w", p.Name(), err)
 	}
-	for i, m := range metrics {
-		m["metric_id"] = fmt.Sprintf("%d_mtc_%d", p.batchRecordID, i+1)
-		metrics[i] = m
+
+	if p.batchForceClear {
+		for i, m := range metrics {
+			m["metric_id"] = fmt.Sprintf("%d_mtc_%d", p.batchRecordID, i+1)
+			metrics[i] = m
+		}
+		_, _ = p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
+		if _, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
+			InputRecordID: p.batchRecordID,
+			EventID:       eventIDFromContext(ctx),
+			Language:      firstNonEmptyTrimmed(p.batchLang, "unknown"),
+			ModelName:     firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName),
+			PromptName:    p.RelationPromptRef,
+			Metrics:       metrics,
+		}); err != nil {
+			return fmt.Errorf("(MID_26062754) %s save metrics: %w", p.Name(), err)
+		}
+		if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, metrics); fileErr != nil {
+			p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
+		}
+		return nil
 	}
-	if _, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
-		InputRecordID: p.batchRecordID,
-		EventID:       eventIDFromContext(ctx),
-		Language:      firstNonEmptyTrimmed(p.batchLang, "unknown"),
-		ModelName:     firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName),
-		PromptName:    p.RelationPromptRef,
-		Metrics:       metrics,
-	}); err != nil {
-		return fmt.Errorf("(MID_26062754) %s save metrics: %w", p.Name(), err)
+
+	dirty, err := p.mergeAndCollectDirtyMetrics(ctx, metrics)
+	if err != nil {
+		return fmt.Errorf("(MID_26071112) %s merge metrics: %w", p.Name(), err)
 	}
-	if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, metrics); fileErr != nil {
+	if len(dirty) > 0 {
+		if _, err := p.Store.UpsertMetrics(ctx, SaveMetricsRequest{
+			InputRecordID: p.batchRecordID,
+			EventID:       eventIDFromContext(ctx),
+			Language:      firstNonEmptyTrimmed(p.batchLang, "unknown"),
+			ModelName:     firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName),
+			PromptName:    p.RelationPromptRef,
+			Metrics:       dirty,
+		}); err != nil {
+			return fmt.Errorf("(MID_26071113) %s upsert metrics: %w", p.Name(), err)
+		}
+	}
+	if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, dirty); fileErr != nil {
 		p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
 	}
-	// Indexing runs in Phase C via PostProcessIndex (unchanged).
 	return nil
+}
+
+// metricFieldAliasPairs lists the (raw, canonical) field-name pairs that
+// differ between the two shapes a metric map can arrive in:
+//   - "raw" names (subject/unit/desc/context, ...) as produced by
+//     enrichMetricCandidates (pass-2 LLM output, normalizeMetricList) and
+//     required by SaveMetrics/UpsertMetrics when writing a row.
+//   - "canonical" DB-column-style names (metric_subject/metric_unit/
+//     metric_desc/metric_context, ...) as produced by
+//     MetricsStore.GetMetricsByInputRecordID and required by mergeMetrics/
+//     metricsIdentical/metricContentEqual/resolveMergeAmbiguities for
+//     comparison and for the Merge Resolution LLM call's candidate payload.
+//
+// Every other field mergeMetrics/metricContentEqual compares (metric_name,
+// metric_value, value_data_type, value_range_type, value_class,
+// threshold_or_target, source_line_spans) already uses the same key name in
+// both shapes.
+var metricFieldAliasPairs = [][2]string{
+	{"subject", "metric_subject"},
+	{"subject_en", "metric_subject_en"},
+	{"unit", "metric_unit"},
+	{"unit_en", "metric_unit_en"},
+	{"desc", "metric_desc"},
+	{"desc_en", "metric_desc_en"},
+	{"context", "metric_context"},
+	{"context_en", "metric_context_en"},
+}
+
+// canonicalizeMetricFieldAliases returns a copy of m with both the raw and
+// canonical spellings of subject/unit/desc/context populated from whichever
+// one is present. Without this bridge, Rule-2's exact-duplicate check would
+// never fire for freshly-enriched candidates (their "metric_subject" key is
+// always empty, so they'd never match an existing row's real subject), and
+// any previously-existing row that must be re-written by UpsertMetrics after
+// a merge would have its subject/desc/context/unit silently blanked out
+// (UpsertMetrics reads the raw names only).
+func canonicalizeMetricFieldAliases(m map[string]any) map[string]any {
+	out := cloneMetricMap(m)
+	for _, pair := range metricFieldAliasPairs {
+		rawKey, canonKey := pair[0], pair[1]
+		rawVal := strings.TrimSpace(asString(out[rawKey]))
+		canonVal := strings.TrimSpace(asString(out[canonKey]))
+		if rawVal == "" && canonVal != "" {
+			out[rawKey] = out[canonKey]
+		} else if canonVal == "" && rawVal != "" {
+			out[canonKey] = out[rawKey]
+		}
+	}
+	return out
+}
+
+// mergeAndCollectDirtyMetrics runs DR2 (Rule-2/3/4) against this run's newly
+// enriched metrics and the existing metrics loaded in InitChunkBatch, resolves
+// any ambiguous groups via the Merge Resolution LLM call (DR4), and returns
+// only the metrics that are new or actually changed content — each already
+// carrying an ext_info.merge_log entry.
+func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newMetrics []map[string]any) ([]map[string]any, error) {
+	existing := make([]map[string]any, 0, len(p.batchExistingMetrics))
+	for _, ex := range p.batchExistingMetrics {
+		existing = append(existing, canonicalizeMetricFieldAliases(ex))
+	}
+	candidates := make([]map[string]any, 0, len(newMetrics))
+	for _, m := range newMetrics {
+		candidates = append(candidates, canonicalizeMetricFieldAliases(m))
+	}
+
+	seqno := newMetricSeqnoCounter(existing)
+	merged := mergeMetrics(existing, candidates, seqno, p.batchRecordID)
+
+	var dirty []map[string]any
+	now := p.Now()
+
+	for _, added := range merged.Added {
+		added["ext_info"] = map[string]any{"merge_log": []map[string]any{
+			{"run_time": now.Format(time.RFC3339), "action": "added"},
+		}}
+		dirty = append(dirty, added)
+	}
+
+	existingByID := map[string]map[string]any{}
+	for _, ex := range existing {
+		existingByID[asString(ex["metric_id"])] = ex
+	}
+
+	for _, group := range merged.PendingGroups {
+		winners, err := p.resolveMergeAmbiguities(ctx, p.batchRecordID, group)
+		if err != nil {
+			return nil, err
+		}
+		for _, w := range winners {
+			w = canonicalizeMetricFieldAliases(w)
+			absorbed, _ := w["absorbed_metric_ids"].([]any)
+			id := asString(w["metric_id"])
+			existingRow, wasExisting := existingByID[id]
+			if len(absorbed) == 0 && wasExisting && metricContentEqual(existingRow, w) {
+				continue // DR4 dirty-check: unchanged existing row, skip entirely.
+			}
+			action := "added"
+			if wasExisting {
+				action = "merged"
+			}
+			absorbedIDs := make([]string, 0, len(absorbed))
+			for _, a := range absorbed {
+				absorbedIDs = append(absorbedIDs, asString(a))
+			}
+			logEntry := map[string]any{"run_time": now.Format(time.RFC3339), "action": action}
+			if len(absorbedIDs) > 0 {
+				logEntry["absorbed_metric_ids"] = absorbedIDs
+			}
+			w["ext_info"] = map[string]any{"merge_log": []map[string]any{logEntry}}
+			dirty = append(dirty, w)
+		}
+	}
+	return dirty, nil
+}
+
+// metricContentEqual compares the fields the merge pipeline actually produces
+// (DR4 dirty-check) — deliberately excludes metric_id, ext_info, and any
+// internal "_merge_source" tag.
+func metricContentEqual(existing, candidate map[string]any) bool {
+	fields := []string{"metric_name", "metric_subject", "metric_unit", "metric_value",
+		"value_data_type", "value_range_type", "value_class", "threshold_or_target"}
+	for _, f := range fields {
+		if strings.TrimSpace(asString(existing[f])) != strings.TrimSpace(asString(candidate[f])) {
+			return false
+		}
+	}
+	existingSpans := strings.Join(normalizeSourceLineSpans(existing["source_line_spans"]), ",")
+	candidateSpans := strings.Join(normalizeSourceLineSpans(candidate["source_line_spans"]), ",")
+	if existingSpans != candidateSpans {
+		return false
+	}
+	existingCats := strings.Join(metricCategoryKeysFromValue(existing["metric_categories"]), ",")
+	candidateCats := strings.Join(metricCategoryKeysFromValue(candidate["metric_categories"]), ",")
+	return existingCats == candidateCats
 }

@@ -639,6 +639,136 @@ func TestMetricsProcessor_ForceDisablesThinkingForAllPasses(t *testing.T) {
 	}
 }
 
+func TestMetricsProcessor_ForceDisablesThinkingForMergeResolveModels(t *testing.T) {
+	p := &MetricsProcessor{
+		MergeResolveModelCfg: structureModelConfig{
+			ModelName:    "deepseek-v4-pro",
+			ThinkingType: "enabled",
+		},
+		FallbackMergeResolveModelCfg: structureModelConfig{
+			ModelName:    "deepseek-v4-flash",
+			ThinkingType: "enabled",
+		},
+	}
+
+	p.forceDisableThinking()
+
+	if got := p.MergeResolveModelCfg.ThinkingType; got != "disabled" {
+		t.Fatalf("MergeResolveModelCfg.ThinkingType=%q, want disabled", got)
+	}
+	if got := p.FallbackMergeResolveModelCfg.ThinkingType; got != "disabled" {
+		t.Fatalf("FallbackMergeResolveModelCfg.ThinkingType=%q, want disabled", got)
+	}
+}
+
+func TestFinalizeChunkBatch_SkipModeIsNoOp(t *testing.T) {
+	metricsStore := &fakeMetricsStore{}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{}, metricsStore, &fakeJSONExtractor{}, nil)
+	p.batchSkip = true
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatalf("FinalizeChunkBatch: %v", err)
+	}
+	if metricsStore.saveCalled != 0 || metricsStore.upsertCalled != 0 || metricsStore.deleteCalled != 0 {
+		t.Fatalf("expected zero store calls in skip mode, got save=%d upsert=%d delete=%d",
+			metricsStore.saveCalled, metricsStore.upsertCalled, metricsStore.deleteCalled)
+	}
+}
+
+func TestFinalizeChunkBatch_WipeModeDeletesThenSaves(t *testing.T) {
+	metricsStore := &fakeMetricsStore{}
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{"metrics": []any{map[string]any{"metric_name": "Latency", "source_line_spans": []any{float64(2)}}}, "uncertain_metrics": []any{}},
+	}}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 173}}, metricsStore, extractor, nil)
+	p.batchRecordID = 173
+	p.batchForceClear = true
+	p.batchMentions = []metricCandidateMention{{
+		MetricNameHint:    "Latency",
+		SourceLineSpans:   []string{"2"},
+		HasNormalEvidence: true,
+	}}
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatalf("FinalizeChunkBatch: %v", err)
+	}
+	if metricsStore.deleteCalled != 1 {
+		t.Fatalf("deleteCalled=%d, want 1 (wipe mode)", metricsStore.deleteCalled)
+	}
+	if metricsStore.saveCalled != 1 {
+		t.Fatalf("saveCalled=%d, want 1", metricsStore.saveCalled)
+	}
+	if metricsStore.upsertCalled != 0 {
+		t.Fatalf("upsertCalled=%d, want 0 (wipe mode uses SaveMetrics, not UpsertMetrics)", metricsStore.upsertCalled)
+	}
+}
+
+func TestFinalizeChunkBatch_MergeMode_UnchangedExistingNotWritten(t *testing.T) {
+	metricsStore := &fakeMetricsStore{
+		existingMetrics: []map[string]any{
+			{"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
+				"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)}},
+		},
+	}
+	// Extractor re-produces the *same* metric (Rule-2 exact duplicate) -> nothing dirty.
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{"metrics": []any{map[string]any{
+			"metric_name": "Latency", "subject": "gw", "unit": "ms", "metric_value": "200",
+			"source_line_spans": []any{float64(2)},
+		}}, "uncertain_metrics": []any{}},
+	}}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 173}}, metricsStore, extractor, nil)
+	p.batchRecordID = 173
+	p.batchForceClear = false
+	p.batchExistingMetrics = metricsStore.existingMetrics
+	p.batchMentions = []metricCandidateMention{{
+		MetricNameHint:    "Latency",
+		SourceLineSpans:   []string{"2"},
+		HasNormalEvidence: true,
+	}}
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatalf("FinalizeChunkBatch: %v", err)
+	}
+	if metricsStore.deleteCalled != 0 {
+		t.Fatalf("deleteCalled=%d, want 0 (merge mode never deletes)", metricsStore.deleteCalled)
+	}
+	if metricsStore.upsertCalled != 0 {
+		t.Fatalf("upsertCalled=%d, want 0 (Rule-2 duplicate: nothing dirty, no write)", metricsStore.upsertCalled)
+	}
+	if metricsStore.saveCalled != 0 {
+		t.Fatalf("saveCalled=%d, want 0 (merge mode must never fall back to SaveMetrics)", metricsStore.saveCalled)
+	}
+}
+
+func TestFinalizeChunkBatch_MergeMode_NewMetricUpserted(t *testing.T) {
+	metricsStore := &fakeMetricsStore{
+		existingMetrics: []map[string]any{
+			{"metric_id": "173_mtc_1", "metric_name": "Latency", "source_line_spans": []any{float64(2)}},
+		},
+	}
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{"metrics": []any{map[string]any{
+			"metric_name": "Throughput", "source_line_spans": []any{float64(50)},
+		}}, "uncertain_metrics": []any{}},
+	}}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 173}}, metricsStore, extractor, nil)
+	p.batchRecordID = 173
+	p.batchForceClear = false
+	p.batchExistingMetrics = metricsStore.existingMetrics
+	p.batchMentions = []metricCandidateMention{{
+		MetricNameHint:    "Throughput",
+		SourceLineSpans:   []string{"50"},
+		HasNormalEvidence: true,
+	}}
+	if err := p.FinalizeChunkBatch(context.Background()); err != nil {
+		t.Fatalf("FinalizeChunkBatch: %v", err)
+	}
+	if metricsStore.upsertCalled != 1 {
+		t.Fatalf("upsertCalled=%d, want 1", metricsStore.upsertCalled)
+	}
+	if len(metricsStore.lastUpsert.Metrics) != 1 || metricsStore.lastUpsert.Metrics[0]["metric_id"] != "173_mtc_2" {
+		t.Fatalf("unexpected upsert payload: %+v", metricsStore.lastUpsert.Metrics)
+	}
+}
+
 func TestLoadMetricsPromptFromEnv_UsesPromptDir(t *testing.T) {
 	tmp := t.TempDir()
 	promptPath := filepath.Join(tmp, "prompt_extract_metrics_v1.txt")
