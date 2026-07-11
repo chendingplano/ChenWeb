@@ -22,50 +22,64 @@ import (
 )
 
 type MetricsProcessor struct {
-	InputStore                    DocMetadataStore
-	Store                         MetricsStore
-	ObjectStore                   ArtifactObjectsStore
-	ObjectReconciler              ObjectReconciler
-	AmbiguousObjectLLMResolver    AmbiguousObjectLLMResolver
-	ResolveAmbiguousMinConfidence float64
-	Extractor                     LLMJSONExtractor
-	Logger                        ApiTypes.JimoLogger
-	ProcLogger                    DocProcLogger
-	Now                           func() time.Time
-	MentionPromptText             string
-	MentionPromptRef              string
-	MentionPromptPath             string
-	MentionPromptErr              error
-	MentionModelRef               string
-	MentionModelCfgPath           string
-	MentionModelErr               error
-	MentionModelName              string
-	MentionModelCfg               structureModelConfig
-	FallbackMentionModelRef       string
-	FallbackMentionModelCfgPath   string
-	FallbackMentionModelErr       error
-	FallbackMentionModelName      string
-	FallbackMentionModelCfg       structureModelConfig
-	RelationPromptText            string
-	RelationPromptRef             string
-	RelationPromptPath            string
-	RelationPromptErr             error
-	RelationModelRef              string
-	RelationModelCfgPath          string
-	RelationModelErr              error
-	RelationModelName             string
-	RelationModelCfg              structureModelConfig
-	PromptText                    string
-	PromptRef                     string
-	PromptPath                    string
-	PromptErr                     error
-	ModelRef                      string
-	ModelCfgPath                  string
-	ModelErr                      error
-	ModelName                     string
-	ChunkDir                      string
-	MetricEnrichGroupSize         int
-	MaxTasks                      int
+	InputStore                       DocMetadataStore
+	Store                            MetricsStore
+	ObjectStore                      ArtifactObjectsStore
+	ObjectReconciler                 ObjectReconciler
+	AmbiguousObjectLLMResolver       AmbiguousObjectLLMResolver
+	ResolveAmbiguousMinConfidence    float64
+	Extractor                        LLMJSONExtractor
+	Logger                           ApiTypes.JimoLogger
+	ProcLogger                       DocProcLogger
+	Now                              func() time.Time
+	MentionPromptText                string
+	MentionPromptRef                 string
+	MentionPromptPath                string
+	MentionPromptErr                 error
+	MentionModelRef                  string
+	MentionModelCfgPath              string
+	MentionModelErr                  error
+	MentionModelName                 string
+	MentionModelCfg                  structureModelConfig
+	FallbackMentionModelRef          string
+	FallbackMentionModelCfgPath      string
+	FallbackMentionModelErr          error
+	FallbackMentionModelName         string
+	FallbackMentionModelCfg          structureModelConfig
+	MergeResolvePromptText           string
+	MergeResolvePromptRef            string
+	MergeResolvePromptPath           string
+	MergeResolvePromptErr            error
+	MergeResolveModelRef             string
+	MergeResolveModelCfgPath         string
+	MergeResolveModelErr             error
+	MergeResolveModelName            string
+	MergeResolveModelCfg             structureModelConfig
+	FallbackMergeResolveModelRef     string
+	FallbackMergeResolveModelCfgPath string
+	FallbackMergeResolveModelErr     error
+	FallbackMergeResolveModelName    string
+	FallbackMergeResolveModelCfg     structureModelConfig
+	RelationPromptText               string
+	RelationPromptRef                string
+	RelationPromptPath               string
+	RelationPromptErr                error
+	RelationModelRef                 string
+	RelationModelCfgPath             string
+	RelationModelErr                 error
+	RelationModelName                string
+	RelationModelCfg                 structureModelConfig
+	PromptText                       string
+	PromptRef                        string
+	PromptPath                       string
+	PromptErr                        error
+	ModelRef                         string
+	ModelCfgPath                     string
+	ModelErr                         error
+	ModelName                        string
+	ChunkDir                         string
+	MetricEnrichGroupSize            int
+	MaxTasks                         int
 
 	// batch state (set by ChunkBatchProcessor.InitChunkBatch)
 	batchRecordID  int64
@@ -217,6 +231,18 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		[]string{"ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME"},
 		"MODEL_DEF_FILE",
 	)
+	mergeResolvePromptText, mergeResolvePromptRef, mergeResolvePromptPath, mergeResolvePromptErr := loadProductPromptFromEnvKeys(
+		[]string{"METRIC_MERGE_RESOLVE_PROMPT"},
+		"prompt-merge-resolve-metrics-v1.md",
+	)
+	mergeResolveModelRef, mergeResolveModelCfgPath, mergeResolveModelCfg, mergeResolveModelErr := loadModelConfigFromEnvKeys(
+		[]string{"METRIC_MERGE_RESOLVE_MODEL_NAME"},
+		"MODEL_DEF_FILE",
+	)
+	fallbackMergeResolveModelRef, fallbackMergeResolveModelCfgPath, fallbackMergeResolveModelCfg, fallbackMergeResolveModelErr := loadOptionalModelConfigFromEnv(
+		"METRIC_MERGE_RESOLVE_MODEL_FALLBACK",
+		"MODEL_DEF_FILE",
+	)
 	enrichGroupSize := 5
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("METRIC_ENRICH_GROUP_SIZE"))); err == nil && v > 0 {
 		enrichGroupSize = v
@@ -244,26 +270,42 @@ func NewMetricsProcessor(inputStore DocMetadataStore, store MetricsStore, extrac
 		FallbackMentionModelErr:     fallbackMentionModelErr,
 		FallbackMentionModelName:    fallbackMentionModelCfg.ModelName,
 		FallbackMentionModelCfg:     fallbackMentionModelCfg,
-		RelationPromptText:          relationPromptText,
-		RelationPromptRef:           relationPromptRef,
-		RelationPromptPath:          relationPromptPath,
-		RelationPromptErr:           relationPromptErr,
-		RelationModelRef:            relationModelRef,
-		RelationModelCfgPath:        relationModelCfgPath,
-		RelationModelErr:            relationModelErr,
-		RelationModelName:           relationModelCfg.ModelName,
-		RelationModelCfg:            relationModelCfg,
-		PromptText:                  relationPromptText,
-		PromptRef:                   relationPromptRef,
-		PromptPath:                  relationPromptPath,
-		PromptErr:                   relationPromptErr,
-		ModelRef:                    relationModelRef,
-		ModelCfgPath:                relationModelCfgPath,
-		ModelErr:                    relationModelErr,
-		ModelName:                   relationModelCfg.ModelName,
-		ChunkDir:                    strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
-		MetricEnrichGroupSize:       enrichGroupSize,
-		MaxTasks:                    maxTasks,
+
+		MergeResolvePromptText:           mergeResolvePromptText,
+		MergeResolvePromptRef:            mergeResolvePromptRef,
+		MergeResolvePromptPath:           mergeResolvePromptPath,
+		MergeResolvePromptErr:            mergeResolvePromptErr,
+		MergeResolveModelRef:             mergeResolveModelRef,
+		MergeResolveModelCfgPath:         mergeResolveModelCfgPath,
+		MergeResolveModelErr:             mergeResolveModelErr,
+		MergeResolveModelName:            mergeResolveModelCfg.ModelName,
+		MergeResolveModelCfg:             mergeResolveModelCfg,
+		FallbackMergeResolveModelRef:     fallbackMergeResolveModelRef,
+		FallbackMergeResolveModelCfgPath: fallbackMergeResolveModelCfgPath,
+		FallbackMergeResolveModelErr:     fallbackMergeResolveModelErr,
+		FallbackMergeResolveModelName:    fallbackMergeResolveModelCfg.ModelName,
+		FallbackMergeResolveModelCfg:     fallbackMergeResolveModelCfg,
+
+		RelationPromptText:    relationPromptText,
+		RelationPromptRef:     relationPromptRef,
+		RelationPromptPath:    relationPromptPath,
+		RelationPromptErr:     relationPromptErr,
+		RelationModelRef:      relationModelRef,
+		RelationModelCfgPath:  relationModelCfgPath,
+		RelationModelErr:      relationModelErr,
+		RelationModelName:     relationModelCfg.ModelName,
+		RelationModelCfg:      relationModelCfg,
+		PromptText:            relationPromptText,
+		PromptRef:             relationPromptRef,
+		PromptPath:            relationPromptPath,
+		PromptErr:             relationPromptErr,
+		ModelRef:              relationModelRef,
+		ModelCfgPath:          relationModelCfgPath,
+		ModelErr:              relationModelErr,
+		ModelName:             relationModelCfg.ModelName,
+		ChunkDir:              strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
+		MetricEnrichGroupSize: enrichGroupSize,
+		MaxTasks:              maxTasks,
 	}
 	if resolver, minConfidence, err := NewAmbiguousObjectLLMResolverFromEnv(); err == nil {
 		p.AmbiguousObjectLLMResolver = resolver
