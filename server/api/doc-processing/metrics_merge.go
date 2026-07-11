@@ -1,6 +1,10 @@
 package docprocessing
 
-import "strings"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 // metricsIdentical implements ADR 2026071002 DR2 Rule-1: two metrics are the
 // same if these five fields match exactly (mirrors normalizedMetricCandidateKey's
@@ -93,4 +97,36 @@ func computeMetricGroups(metrics []map[string]any) [][]int {
 		out = append(out, groupsByRoot[root])
 	}
 	return out
+}
+
+type metricSeqnoCounter struct {
+	next int
+}
+
+// newMetricSeqnoCounter scans existing metric_ids of the form "<id>_mtc_<seqno>"
+// and initializes the counter to one past the current max (DR3).
+func newMetricSeqnoCounter(existing []map[string]any) *metricSeqnoCounter {
+	max := 0
+	for _, m := range existing {
+		id := asString(m["metric_id"])
+		parts := strings.Split(id, "_mtc_")
+		if len(parts) != 2 {
+			continue
+		}
+		n, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return &metricSeqnoCounter{next: max + 1}
+}
+
+// Assign returns the next metric_id for recordID and advances the counter.
+func (c *metricSeqnoCounter) Assign(recordID int64) string {
+	id := fmt.Sprintf("%d_mtc_%d", recordID, c.next)
+	c.next++
+	return id
 }

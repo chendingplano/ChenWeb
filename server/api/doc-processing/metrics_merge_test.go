@@ -77,3 +77,25 @@ func TestComputeMetricGroups_TransitiveChain(t *testing.T) {
 		t.Fatalf("expected group sizes [3,1], got %v", sizes)
 	}
 }
+
+func TestMetricSeqnoCounter_StartsAfterMax(t *testing.T) {
+	existing := []map[string]any{
+		{"metric_id": "173_mtc_2"},
+		{"metric_id": "173_mtc_5"},
+		{"metric_id": "173_mtc_1"},
+	}
+	c := newMetricSeqnoCounter(existing)
+	if got := c.Assign(173); got != "173_mtc_6" {
+		t.Fatalf("first assign = %q, want 173_mtc_6", got)
+	}
+	if got := c.Assign(173); got != "173_mtc_7" {
+		t.Fatalf("second assign = %q, want 173_mtc_7", got)
+	}
+}
+
+func TestMetricSeqnoCounter_EmptyExistingStartsAtOne(t *testing.T) {
+	c := newMetricSeqnoCounter(nil)
+	if got := c.Assign(9); got != "9_mtc_1" {
+		t.Fatalf("assign = %q, want 9_mtc_1", got)
+	}
+}
