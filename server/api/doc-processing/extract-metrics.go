@@ -2968,6 +2968,16 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 	return nil
 }
 
+// mergeResolveDecidedFields lists the fields the Merge Resolution LLM call's
+// winning_metrics response actually returns (prompt-merge-resolve-metrics-v1.md).
+// Everything else on a Rule-4 winner must come from the full source row, not
+// this sparse LLM output, or those columns get silently blanked on write.
+var mergeResolveDecidedFields = []string{
+	"metric_name", "metric_subject", "metric_unit", "metric_value",
+	"value_data_type", "value_range_type", "value_class",
+	"threshold_or_target", "metric_categories", "source_line_spans",
+}
+
 // metricFieldAliasPairs lists the (raw, canonical) field-name pairs that
 // differ between the two shapes a metric map can arrive in:
 //   - "raw" names (subject/unit/desc/context, ...) as produced by
@@ -3055,6 +3065,10 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 		if err != nil {
 			return nil, err
 		}
+		groupByID := map[string]map[string]any{}
+		for _, g := range group {
+			groupByID[asString(g["metric_id"])] = g
+		}
 		for _, w := range winners {
 			w = canonicalizeMetricFieldAliases(w)
 			absorbed, _ := w["absorbed_metric_ids"].([]any)
@@ -3062,6 +3076,16 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 			existingRow, wasExisting := existingByID[id]
 			if len(absorbed) == 0 && wasExisting && metricContentEqual(existingRow, w) {
 				continue // DR4 dirty-check: unchanged existing row, skip entirely.
+			}
+			if full, ok := groupByID[id]; ok {
+				reconstructed := cloneMetricMap(full)
+				for _, f := range mergeResolveDecidedFields {
+					if v, ok := w[f]; ok {
+						reconstructed[f] = v
+					}
+				}
+				reconstructed["metric_id"] = id
+				w = reconstructed
 			}
 			action := "added"
 			if wasExisting {

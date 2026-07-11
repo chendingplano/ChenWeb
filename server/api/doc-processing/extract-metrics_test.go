@@ -769,6 +769,48 @@ func TestFinalizeChunkBatch_MergeMode_NewMetricUpserted(t *testing.T) {
 	}
 }
 
+func TestMergeAndCollectDirtyMetrics_MergedWinnerPreservesUntouchedFields(t *testing.T) {
+	existingRow := map[string]any{
+		"metric_id": "173_mtc_1", "metric_name": "Latency", "metric_subject": "gw",
+		"metric_unit": "ms", "metric_value": "200", "source_line_spans": []any{float64(2)},
+		"metric_desc": "max end-to-end latency", "metric_context": "SLA section 4",
+	}
+	// mergeAndCollectDirtyMetrics is called directly (not via FinalizeChunkBatch),
+	// so it triggers exactly one LLM call: the Merge Resolution call inside
+	// resolveMergeAmbiguities. Its output is sparse, no desc/context.
+	extractor := &fakeJSONExtractor{outs: []map[string]any{
+		{"winning_metrics": []any{map[string]any{
+			"metric_id": "173_mtc_1", "absorbed_metric_ids": []any{"173_mtc_2"},
+			"metric_name": "Latency", "metric_subject": "gw", "metric_unit": "ms",
+			"metric_value": "250", "source_line_spans": []any{"2"},
+		}}},
+	}}
+	p := NewMetricsProcessor(&fakeDocMetadataStore{rec: DocMetadataInputRecord{ID: 173}}, &fakeMetricsStore{}, extractor, nil)
+	p.batchRecordID = 173
+	p.batchExistingMetrics = []map[string]any{existingRow}
+	p.MergeResolvePromptText = "resolve"
+	p.MergeResolveModelName = "test-merge-model"
+
+	dirty, err := p.mergeAndCollectDirtyMetrics(context.Background(), []map[string]any{
+		{"metric_name": "Latency", "subject": "gw", "unit": "ms", "metric_value": "250", "source_line_spans": []any{float64(2)}},
+	})
+	if err != nil {
+		t.Fatalf("mergeAndCollectDirtyMetrics: %v", err)
+	}
+	if len(dirty) != 1 {
+		t.Fatalf("dirty=%d, want 1", len(dirty))
+	}
+	if dirty[0]["metric_desc"] != "max end-to-end latency" {
+		t.Fatalf("metric_desc lost in merged winner: %+v", dirty[0])
+	}
+	if dirty[0]["metric_context"] != "SLA section 4" {
+		t.Fatalf("metric_context lost in merged winner: %+v", dirty[0])
+	}
+	if dirty[0]["metric_value"] != "250" {
+		t.Fatalf("expected LLM-decided field metric_value=250 to win, got %v", dirty[0]["metric_value"])
+	}
+}
+
 func TestLoadMetricsPromptFromEnv_UsesPromptDir(t *testing.T) {
 	tmp := t.TempDir()
 	promptPath := filepath.Join(tmp, "prompt_extract_metrics_v1.txt")
