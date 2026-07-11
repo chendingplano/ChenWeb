@@ -241,6 +241,7 @@
 	let launchToast = $state<{ kind: 'success' | 'error'; msg: string } | null>(null);
 	type RunMode = 'unfinished' | 'failed' | 'unfinished_failed' | 'force';
 	let runMode = $state<RunMode>('failed');
+	let forceClear = $state(false);
 	let maxRecords = $state<number>(5);
 	let noEligibleDialog = $state<{ recordCount: number; modeLabel: string; fromSearch?: boolean } | null>(null);
 	let searchingRecords = $state(false);
@@ -463,7 +464,7 @@
 		// (ADR 2026061702). Done per record so a record that already has entities is not
 		// re-run unnecessarily.
 		const chosen = buildManualLaunchOperations(selectableProcessorIds, procs, entityExtractionSucceeded(record));
-		const payload: Record<string, unknown> = { record_id: String(record.id), force: runMode === 'force' };
+		const payload: Record<string, unknown> = { record_id: String(record.id), force: runMode === 'force', force_clear: forceClear };
 		payload.operation = chosen;
 		await publishEvent('kb.line-file-generated', payload);
 	}
@@ -1353,6 +1354,19 @@
 							{opt.label}
 						</label>
 					{/each}
+						<label
+							class="flex items-center gap-1.5"
+							style="cursor:pointer; font-size:12px; color:{textSecondary}; user-select:none;"
+							title="When re-running extract_metrics, clear and re-extract from scratch instead of merging with existing metrics. Ignored by other processors until their own merge-rule ADR lands."
+						>
+							<input
+								type="checkbox"
+								checked={forceClear}
+								onchange={(e) => { forceClear = (e.target as HTMLInputElement).checked; }}
+								style="accent-color:{accent};"
+							/>
+							Force Clear (metrics only, wipes instead of merging)
+						</label>
 					<div class="flex items-center gap-1.5" style="margin-left:8px;">
 						<span style="font-size:12px; color:{textSecondary}; white-space:nowrap;">Max</span>
 						<input
