@@ -154,6 +154,13 @@
 		if (!submitting) modalOpen = false;
 	}
 
+	function handleModalBackdropKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			closeModal();
+		}
+	}
+
 	function splitTrimmed(raw: string): string[] {
 		return raw.split(',').map(s => s.trim()).filter(Boolean);
 	}
@@ -515,6 +522,10 @@
 		class="fixed inset-0 flex items-center justify-center z-50"
 		style="background:{overlayBg};"
 		onclick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+		onkeydown={handleModalBackdropKeydown}
+		role="button"
+		tabindex="0"
+		aria-label="Close new research topic bean modal"
 	>
 		<div
 			class="flex flex-col rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden"
@@ -540,10 +551,11 @@
 
 				<!-- Research Title -->
 				<div>
-					<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
+					<label for="research-title" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
 						Research Title <span style="color:{accent};">*</span>
 					</label>
 					<input
+						id="research-title"
 						type="text"
 						bind:value={fResearchTitle}
 						placeholder="e.g. Document Chunking Strategy"
@@ -555,10 +567,11 @@
 
 				<!-- Research Subtitle -->
 				<div>
-					<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
+					<label for="research-subtitle" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
 						Research Subtitle <span style="color:{accent};">*</span>
 					</label>
 					<input
+						id="research-subtitle"
 						type="text"
 						bind:value={fResearchSubtitle}
 						placeholder="e.g. Specification for Semantic and Structural Chunking Approaches"
@@ -571,10 +584,11 @@
 				<!-- Bean Name + Bean Type (2-col) -->
 				<div class="grid gap-4" style="grid-template-columns:1fr 1fr;">
 					<div>
-						<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
+						<label for="bean-name" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
 							Bean Name <span style="color:{accent};">*</span>
 						</label>
 						<input
+							id="bean-name"
 							type="text"
 							bind:value={fBeanName}
 							placeholder="e.g. chunking-strategy-spec"
@@ -585,10 +599,11 @@
 						<p style="font-size:11px; color:{textMuted}; margin-top:3px;">Letters, digits, hyphens, underscores only</p>
 					</div>
 					<div>
-						<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
+						<label for="bean-type" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
 							Bean Type <span style="color:{accent};">*</span>
 						</label>
 						<select
+							id="bean-type"
 							bind:value={fBeanType}
 							style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none; cursor:pointer;"
 						>
@@ -602,10 +617,11 @@
 				<!-- File Type + Bean Category (2-col) -->
 				<div class="grid gap-4" style="grid-template-columns:1fr 1fr;">
 					<div>
-						<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
+						<label for="file-type" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
 							File Type <span style="color:{accent};">*</span>
 						</label>
 						<select
+							id="file-type"
 							bind:value={fFileType}
 							style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none; cursor:pointer;"
 						>
@@ -615,10 +631,11 @@
 						</select>
 					</div>
 					<div>
-						<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
+						<label for="bean-category" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
 							Bean Category <span style="color:{accent};">*</span>
 						</label>
 						<input
+							id="bean-category"
 							type="text"
 							bind:value={fBeanCategory}
 							placeholder="e.g. knowledge-engineering/ingestion"
@@ -632,8 +649,9 @@
 
 				<!-- Description -->
 				<div>
-					<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">Description</label>
+					<label for="bean-description" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">Description</label>
 					<textarea
+						id="bean-description"
 						bind:value={fBeanDesc}
 						placeholder="Brief description of this research topic bean…"
 						rows="2"
@@ -650,21 +668,21 @@
 					{ label: 'Related Topics', bind: 'related',  placeholder: 'bean-name-a, bean-name-b' },
 				] as row}
 					<div>
-						<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
+						<label for={`bean-${row.bind}`} style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
 							{row.label} <span style="font-weight:400;">(comma-separated)</span>
 						</label>
 						{#if row.bind === 'keywords'}
-							<input type="text" bind:value={fKeywordsRaw} placeholder={row.placeholder}
+							<input id={`bean-${row.bind}`} type="text" bind:value={fKeywordsRaw} placeholder={row.placeholder}
 								style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none;"
 								onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
 								onblur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = borderColor; }} />
 						{:else if row.bind === 'authors'}
-							<input type="text" bind:value={fAuthorsRaw} placeholder={row.placeholder}
+							<input id={`bean-${row.bind}`} type="text" bind:value={fAuthorsRaw} placeholder={row.placeholder}
 								style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none;"
 								onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
 								onblur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = borderColor; }} />
 						{:else}
-							<input type="text" bind:value={fRelatedRaw} placeholder={row.placeholder}
+							<input id={`bean-${row.bind}`} type="text" bind:value={fRelatedRaw} placeholder={row.placeholder}
 								style="width:100%; background:{inputBg}; border:1px solid {borderColor}; border-radius:8px; padding:8px 12px; font-size:13px; color:{textPrimary}; outline:none;"
 								onfocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = accent; }}
 								onblur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = borderColor; }} />
@@ -674,10 +692,11 @@
 
 				<!-- Content -->
 				<div>
-					<label style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
+					<label for="bean-content" style="display:block; font-size:12px; font-weight:600; color:{textMuted}; margin-bottom:5px;">
 						Content <span style="font-weight:400;">(written to the artifact file)</span>
 					</label>
 					<textarea
+						id="bean-content"
 						bind:value={fContent}
 						placeholder="Paste or write the bean's content here…"
 						rows="5"
