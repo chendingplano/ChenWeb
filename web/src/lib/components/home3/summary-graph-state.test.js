@@ -22,6 +22,7 @@ function makeNode(id, label, childIds = [], extra = {}) {
 		id,
 		label,
 		categoryPath: id,
+		hasSummariesFile: false,
 		metadata: {
 			desc: `${label} description`,
 			category_type: 'topic',

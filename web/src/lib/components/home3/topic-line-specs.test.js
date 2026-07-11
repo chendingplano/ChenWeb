@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { formatTopicLineSpecs } from './topic-line-specs.ts';
+import { formatTopicLineSpecs } from './topic-line-specs';
 
 test('formatTopicLineSpecs joins topic line ranges for sidebar display', () => {
 	assert.equal(formatTopicLineSpecs(['1-3', '8', '12-14']), '1-3, 8, 12-14');

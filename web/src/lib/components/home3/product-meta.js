@@ -1,17 +1,38 @@
+/**
+ * @typedef {{ label: string, kind: 'text', value: string } | { label: string, kind: 'chips', items: string[] }} ProductMetaSection
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeText(value) {
 	return typeof value === 'string' ? value.trim() : '';
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string[]}
+ */
 function normalizeList(value) {
 	return Array.isArray(value)
 		? value.filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
 		: [];
 }
 
+/**
+ * @param {string[]} a
+ * @param {string[]} b
+ * @returns {boolean}
+ */
 function sameList(a, b) {
 	return a.length === b.length && a.every((item, index) => item === b[index]);
 }
 
+/**
+ * @param {Record<string, unknown> | null | undefined} product
+ * @returns {ProductMetaSection[]}
+ */
 export function buildProductMetaSections(product) {
 	const relSummary = normalizeText(product?.relation_summary);
 	const relSummaryEn = normalizeText(product?.relation_summary_en);
@@ -22,6 +43,7 @@ export function buildProductMetaSections(product) {
 	const obligationLevel = normalizeText(product?.obligation_level);
 	const confidenceReason = normalizeText(product?.confidence_reason);
 
+	/** @type {ProductMetaSection[]} */
 	const sections = [];
 
 	if (relSummary) {

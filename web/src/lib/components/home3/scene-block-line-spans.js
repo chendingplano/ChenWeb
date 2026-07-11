@@ -1,3 +1,13 @@
+/**
+ * @typedef {{ line_number?: unknown, line?: unknown, line_no?: unknown, lineNo?: unknown }} SceneBlockLineSpanObject
+ * @typedef {{ line_number: number, page_number: number }} SceneBlockLine
+ * @typedef {{ page_number: number, line_number: number }} SceneBlockLineRef
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
 function toPositiveInt(value) {
 	const n = typeof value === 'string' ? Number(value.trim()) : Number(value);
 	if (!Number.isFinite(n)) return null;
@@ -5,7 +15,12 @@ function toPositiveInt(value) {
 	return i > 0 ? i : null;
 }
 
+/**
+ * @param {string[]} items
+ * @returns {string[]}
+ */
 function uniqueStrings(items) {
+	/** @type {string[]} */
 	const out = [];
 	const seen = new Set();
 	for (const item of items) {
@@ -16,6 +31,10 @@ function uniqueStrings(items) {
 	return out;
 }
 
+/**
+ * @param {string | number | SceneBlockLineSpanObject | null | undefined} item
+ * @returns {number[]}
+ */
 function expandLineSpan(item) {
 	if (typeof item === 'string') {
 		const s = item.trim();
@@ -42,8 +61,13 @@ function expandLineSpan(item) {
 	return [];
 }
 
+/**
+ * @param {unknown} rawSpans
+ * @returns {string[]}
+ */
 export function formatSceneBlockLineSpans(rawSpans) {
 	if (!Array.isArray(rawSpans)) return [];
+	/** @type {string[]} */
 	const labels = [];
 	for (const item of rawSpans) {
 		if (typeof item === 'string') {
@@ -64,14 +88,21 @@ export function formatSceneBlockLineSpans(rawSpans) {
 	return uniqueStrings(labels);
 }
 
+/**
+ * @param {unknown} rawSpans
+ * @param {unknown} rawLines
+ * @returns {SceneBlockLineRef[]}
+ */
 export function normalizeSceneBlockLineRefs(rawSpans, rawLines) {
 	if (!Array.isArray(rawSpans) || !Array.isArray(rawLines)) return [];
+	/** @type {Map<number, number>} */
 	const lineNumToPage = new Map();
 	for (const line of rawLines) {
 		if (!lineNumToPage.has(line.line_number)) {
 			lineNumToPage.set(line.line_number, line.page_number);
 		}
 	}
+	/** @type {SceneBlockLineRef[]} */
 	const refs = [];
 	const seen = new Set();
 	for (const item of rawSpans) {

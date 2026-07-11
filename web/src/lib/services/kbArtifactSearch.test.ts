@@ -7,6 +7,7 @@ import {
 	matchesKbSearchHistorySnapshot,
 	parseKbSearchArtifactType
 } from './kbArtifactSearch.js';
+import type { KbSearchHistorySnapshot } from './kbArtifactSearch.js';
 import { kbSearchArtifactOptions } from '$lib/components/home3/kb-search-lab-state';
 
 test('metric scope uses the hybrid registry endpoint with artifact_types filter', () => {
@@ -119,7 +120,7 @@ test('invalid artifact scopes fall back to all', () => {
 });
 
 test('history snapshot only restores when route state matches', () => {
-	const snapshot = {
+	const snapshot: KbSearchHistorySnapshot = {
 		query: '人工智能',
 		submittedQuery: '人工智能',
 		artifactType: 'metrics',

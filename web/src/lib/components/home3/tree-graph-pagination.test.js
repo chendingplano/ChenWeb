@@ -51,11 +51,25 @@ test('buildPaginatedChildren keeps revealed pages as siblings on the page level'
 			nextVirtualId('biology', 3)
 		]
 	);
-	assert.equal(pageLevel[0].children.length, 30);
-	assert.equal(pageLevel[1].children.length, 30);
-	assert.equal(pageLevel[2].children.length, 0);
-	assert.equal(pageLevel[0].children.at(-1).id, 'child-30');
-	assert.equal(pageLevel[1].children.at(-1).id, 'child-60');
+	const [firstPage, secondPage, nextPage] = pageLevel;
+	assert.ok(firstPage);
+	assert.ok(secondPage);
+	assert.ok(nextPage);
+	if (!firstPage.children || !secondPage.children || !nextPage.children) {
+		throw new Error('expected paginated page nodes to include child collections');
+	}
+	const firstPageChildren = firstPage.children;
+	const secondPageChildren = secondPage.children;
+	const nextPageChildren = nextPage.children;
+	assert.equal(firstPageChildren.length, 30);
+	assert.equal(secondPageChildren.length, 30);
+	assert.equal(nextPageChildren.length, 0);
+	const firstPageLastChild = firstPageChildren.at(-1);
+	const secondPageLastChild = secondPageChildren.at(-1);
+	assert.ok(firstPageLastChild);
+	assert.ok(secondPageLastChild);
+	assert.equal(firstPageLastChild.id, 'child-30');
+	assert.equal(secondPageLastChild.id, 'child-60');
 });
 
 test('buildPaginatedChildren returns direct children when pagination is unnecessary', () => {

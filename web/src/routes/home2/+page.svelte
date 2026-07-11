@@ -5,8 +5,7 @@
 	import ContentPanel from '$lib/components/home2/content-panel.svelte';
 	import RightPanel from '$lib/components/home2/right-panel.svelte';
 
-
-	export type ActiveSelection = {
+	type ActiveSelection = {
 		itemId: string;
 		childId?: string;
 		itemTitle: string;

@@ -248,7 +248,7 @@
 	}
 
 	// Load prompts when switching to library tab
-	function switchTab(tab: 'create' | 'library') {
+	function switchTab(tab: 'create' | 'library' | 'references') {
 		activeTab = tab;
 		if (tab === 'library') fetchPrompts();
 	}

@@ -19,12 +19,23 @@ test('buildSceneBlockMetaSections adds english rows only when values differ', ()
 		sections.map((section) => section.label),
 		['Summary', 'Summary (English)', 'Keywords', 'Keywords (English)', 'STATES', 'STATES (ENGLISH)']
 	);
-	assert.equal(sections[0].kind, 'text');
-	assert.equal(sections[0].value, '标准中规范性引用文件的应用方式。');
-	assert.deepEqual(sections[2].items, ['引用', '标准']);
-	assert.deepEqual(sections[3].items, ['references', 'standard']);
-	assert.deepEqual(sections[4].items, ['有效']);
-	assert.deepEqual(sections[5].items, ['active']);
+	const [summarySection, summaryEnSection, keywordsSection, keywordsEnSection, statesSection, statesEnSection] = sections;
+	assert.ok(summarySection);
+	assert.ok(summaryEnSection);
+	assert.ok(keywordsSection);
+	assert.ok(keywordsEnSection);
+	assert.ok(statesSection);
+	assert.ok(statesEnSection);
+	assert.equal(summarySection.kind, 'text');
+	assert.equal(summarySection.value, '标准中规范性引用文件的应用方式。');
+	assert.equal(keywordsSection.kind, 'chips');
+	assert.equal(keywordsEnSection.kind, 'chips');
+	assert.equal(statesSection.kind, 'lines');
+	assert.equal(statesEnSection.kind, 'lines');
+	assert.deepEqual(keywordsSection.items, ['引用', '标准']);
+	assert.deepEqual(keywordsEnSection.items, ['references', 'standard']);
+	assert.deepEqual(statesSection.items, ['有效']);
+	assert.deepEqual(statesEnSection.items, ['active']);
 });
 
 test('buildSceneBlockMetaSections suppresses duplicated english rows', () => {
