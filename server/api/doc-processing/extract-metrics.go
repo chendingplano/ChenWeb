@@ -101,6 +101,8 @@ type MetricsStore interface {
 	MetricsExist(ctx context.Context, inputRecordID int64) (bool, error)
 	DeleteMetricsByInputRecordID(ctx context.Context, inputRecordID int64) (int64, error)
 	SaveMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error)
+	GetMetricsByInputRecordID(ctx context.Context, inputRecordID int64) ([]map[string]any, error)
+	UpsertMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error)
 }
 
 type ArtifactObjectsStore interface {
@@ -2169,6 +2171,80 @@ func (s MetricsSQLStore) DeleteMetricsByInputRecordID(ctx context.Context, input
 	return res.RowsAffected()
 }
 
+// GetMetricsByInputRecordID reads every persisted metric row for a record into
+// memory so incremental-merge logic (Task 8+) can diff against freshly
+// extracted metrics before deciding what to upsert.
+func (s MetricsSQLStore) GetMetricsByInputRecordID(ctx context.Context, inputRecordID int64) ([]map[string]any, error) {
+	if err := s.ensureMetricsTable(ctx); err != nil {
+		return nil, err
+	}
+	const q = `
+SELECT id, metric_id, metric_name, metric_name_en, source_line_spans, metric_subject,
+       metric_subject_en, metric_desc, metric_desc_en, metric_context, metric_context_en,
+       metric_keywords, metric_keywords_en, metric_unit, metric_unit_en, metric_value,
+       value_data_type, value_range_type, value_class, value_class_en,
+       formula_or_definition, threshold_or_target, measurement_frequency,
+       metric_categories, metric_categories_en, ext_info
+FROM kb.metrics
+WHERE input_record_id = $1`
+	rows, err := s.DB.QueryContext(ctx, q, inputRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []map[string]any
+	for rows.Next() {
+		var (
+			id                                                                           int64
+			metricID, name, nameEn, subject, subjectEn, desc, descEn, ctx1, ctxEn        sql.NullString
+			unit, unitEn, value, valueDataType, valueRangeType, valueClass, valueClassEn sql.NullString
+			formula, threshold, freq, categories, categoriesEn                           sql.NullString
+			spansJSON, keywordsJSON, keywordsEnJSON, extInfoJSON                         sql.NullString
+		)
+		if err := rows.Scan(&id, &metricID, &name, &nameEn, &spansJSON, &subject, &subjectEn,
+			&desc, &descEn, &ctx1, &ctxEn, &keywordsJSON, &keywordsEnJSON, &unit, &unitEn, &value,
+			&valueDataType, &valueRangeType, &valueClass, &valueClassEn, &formula, &threshold, &freq,
+			&categories, &categoriesEn, &extInfoJSON); err != nil {
+			return nil, err
+		}
+		m := map[string]any{
+			"id": id, "metric_id": metricID.String, "metric_name": name.String,
+			"metric_name_en": nameEn.String, "metric_subject": subject.String,
+			"metric_subject_en": subjectEn.String, "metric_desc": desc.String,
+			"metric_desc_en": descEn.String, "metric_context": ctx1.String,
+			"metric_context_en": ctxEn.String, "metric_unit": unit.String,
+			"metric_unit_en": unitEn.String, "metric_value": value.String,
+			"value_data_type": valueDataType.String, "value_range_type": valueRangeType.String,
+			"value_class": valueClass.String, "value_class_en": valueClassEn.String,
+			"formula_or_definition": formula.String, "threshold_or_target": threshold.String,
+			"measurement_frequency": freq.String,
+		}
+		if spansJSON.Valid {
+			var spans any
+			_ = json.Unmarshal([]byte(spansJSON.String), &spans)
+			m["source_line_spans"] = spans
+		}
+		if keywordsJSON.Valid {
+			var kw any
+			_ = json.Unmarshal([]byte(keywordsJSON.String), &kw)
+			m["metric_keywords"] = kw
+		}
+		if categories.Valid {
+			var cats any
+			_ = json.Unmarshal([]byte(categories.String), &cats)
+			m["metric_categories"] = cats
+		}
+		if extInfoJSON.Valid {
+			var ext map[string]any
+			_ = json.Unmarshal([]byte(extInfoJSON.String), &ext)
+			m["ext_info"] = ext
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 func (s MetricsSQLStore) SaveMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error) {
 	if err := s.ensureMetricsTable(ctx); err != nil {
 		return 0, err
@@ -2315,6 +2391,110 @@ VALUES (
 		inserted++
 	}
 	return inserted, nil
+}
+
+// UpsertMetrics inserts-or-updates the given metrics for a record using the
+// partial unique index on (input_record_id, metric_id) added in the Task 3
+// migration. Unlike SaveMetrics, the caller (Task 8's merge logic) is
+// responsible for deciding which metrics are new-or-changed and must supply
+// "ext_info" per metric — this method does not skip or dedupe anything itself.
+func (s MetricsSQLStore) UpsertMetrics(ctx context.Context, req SaveMetricsRequest) (int64, error) {
+	if err := s.ensureMetricsTable(ctx); err != nil {
+		return 0, err
+	}
+	if len(req.Metrics) == 0 {
+		return 0, nil
+	}
+
+	const stmt = `
+INSERT INTO kb.metrics (
+	event_id, input_record_id, metric_id, metric_name, metric_name_en, source_line_spans,
+	metric_subject, metric_subject_en, metric_desc, metric_desc_en, metric_context, metric_context_en,
+	metric_keywords, metric_keywords_en, model_name, prompt_name, location_type, metric_unit, metric_unit_en,
+	metric_value, value_data_type, value_range_type, value_class, value_class_en, formula_or_definition,
+	threshold_or_target, measurement_frequency, confidence, is_explicit_metric, table_name_or_section,
+	reasoning_tags, metric_categories, metric_categories_en, category_paths, category_paths_en,
+	search_document, ext_info
+) VALUES (
+	$1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+	$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33,$34::jsonb,$35::jsonb,$36,$37::jsonb
+)
+ON CONFLICT (input_record_id, metric_id) WHERE metric_id IS NOT NULL DO UPDATE SET
+	metric_name = EXCLUDED.metric_name, metric_name_en = EXCLUDED.metric_name_en,
+	source_line_spans = EXCLUDED.source_line_spans, metric_subject = EXCLUDED.metric_subject,
+	metric_subject_en = EXCLUDED.metric_subject_en, metric_desc = EXCLUDED.metric_desc,
+	metric_desc_en = EXCLUDED.metric_desc_en, metric_context = EXCLUDED.metric_context,
+	metric_context_en = EXCLUDED.metric_context_en, metric_keywords = EXCLUDED.metric_keywords,
+	metric_keywords_en = EXCLUDED.metric_keywords_en, metric_unit = EXCLUDED.metric_unit,
+	metric_unit_en = EXCLUDED.metric_unit_en, metric_value = EXCLUDED.metric_value,
+	value_data_type = EXCLUDED.value_data_type, value_range_type = EXCLUDED.value_range_type,
+	value_class = EXCLUDED.value_class, value_class_en = EXCLUDED.value_class_en,
+	formula_or_definition = EXCLUDED.formula_or_definition, threshold_or_target = EXCLUDED.threshold_or_target,
+	measurement_frequency = EXCLUDED.measurement_frequency, metric_categories = EXCLUDED.metric_categories,
+	metric_categories_en = EXCLUDED.metric_categories_en, category_paths = EXCLUDED.category_paths,
+	category_paths_en = EXCLUDED.category_paths_en, search_document = EXCLUDED.search_document,
+	ext_info = EXCLUDED.ext_info`
+
+	isEnglish := strings.EqualFold(strings.TrimSpace(req.Language), "en") ||
+		strings.EqualFold(strings.TrimSpace(req.Language), "english")
+	var eventIDVal any
+	if id := strings.TrimSpace(req.EventID); id != "" {
+		eventIDVal = id
+	}
+
+	var affected int64
+	for _, metric := range req.Metrics {
+		sourceSpansJSON, _ := json.Marshal(metric["source_line_spans"])
+		keywordsJSON, _ := json.Marshal(metric["keywords"])
+		reasoningTagsJSON, _ := json.Marshal(metric["reasoning_tags"])
+		extInfo, _ := json.Marshal(metric["ext_info"])
+
+		var metricNameEn, subjectEn, descEn, contextEn, keywordsEnVal, unitEn, valueClassEn any
+		if !isEnglish {
+			metricNameEn = strings.TrimSpace(asString(metric["metric_name_en"]))
+			subjectEn = strings.TrimSpace(asString(metric["subject_en"]))
+			descEn = strings.TrimSpace(asString(metric["desc_en"]))
+			contextEn = strings.TrimSpace(asString(metric["context_en"]))
+			kw, _ := json.Marshal(metric["keywords_en"])
+			keywordsEnVal = string(kw)
+			unitEn = strings.TrimSpace(asString(metric["unit_en"]))
+			valueClassEn = strings.TrimSpace(asString(metric["value_class_en"]))
+		}
+
+		searchDocument := buildMetricSearchDocument(metric, !isEnglish)
+		metricCategoriesJSON, _ := json.Marshal(metricCategoryKeysFromMetric(metric))
+		metricCategoriesEnJSON, _ := json.Marshal(metricCategoryKeysFromValue(metric["metric_categories_en"]))
+		categoryPathsJSON, _ := json.Marshal(metric["category_paths"])
+		categoryPathsEnJSON, _ := json.Marshal(metric["category_paths_en"])
+
+		res, err := s.DB.ExecContext(ctx, stmt,
+			eventIDVal, req.InputRecordID, strings.TrimSpace(asString(metric["metric_id"])),
+			strings.TrimSpace(asString(metric["metric_name"])), metricNameEn, string(sourceSpansJSON),
+			strings.TrimSpace(asString(metric["subject"])), subjectEn,
+			strings.TrimSpace(asString(metric["desc"])), descEn,
+			strings.TrimSpace(asString(metric["context"])), contextEn,
+			string(keywordsJSON), keywordsEnVal, strings.TrimSpace(req.ModelName), strings.TrimSpace(req.PromptName),
+			strings.TrimSpace(asString(metric["location_type"])),
+			strings.TrimSpace(asString(metric["unit"])), unitEn,
+			strings.TrimSpace(asString(metric["metric_value"])),
+			strings.TrimSpace(asString(metric["value_data_type"])),
+			strings.TrimSpace(asString(metric["value_range_type"])),
+			strings.TrimSpace(asString(metric["value_class"])), valueClassEn,
+			strings.TrimSpace(asString(metric["formula_or_definition"])),
+			strings.TrimSpace(asString(metric["threshold_or_target"])),
+			strings.TrimSpace(asString(metric["measurement_frequency"])),
+			toFloat(metric["confidence"]), toBool(metric["is_explicit_metric"]),
+			strings.TrimSpace(asString(metric["table_name_or_section"])), string(reasoningTagsJSON),
+			string(metricCategoriesJSON), string(metricCategoriesEnJSON), string(categoryPathsJSON),
+			string(categoryPathsEnJSON), searchDocument, string(extInfo),
+		)
+		if err != nil {
+			return affected, err
+		}
+		n, _ := res.RowsAffected()
+		affected += n
+	}
+	return affected, nil
 }
 
 // ---- Phase C artifact file refresh ----

@@ -61,6 +61,11 @@ type fakeMetricsStore struct {
 	saveCalled        int
 	lastSave          SaveMetricsRequest
 	metricsExistCalls int
+	existingMetrics   []map[string]any
+	getExistingErr    error
+	upsertErr         error
+	upsertCalled      int
+	lastUpsert        SaveMetricsRequest
 }
 
 func (f *fakeMetricsStore) MetricsExist(_ context.Context, _ int64) (bool, error) {
@@ -84,6 +89,22 @@ func (f *fakeMetricsStore) SaveMetrics(_ context.Context, req SaveMetricsRequest
 	f.lastSave = req
 	if f.saveErr != nil {
 		return 0, f.saveErr
+	}
+	return int64(len(req.Metrics)), nil
+}
+
+func (f *fakeMetricsStore) GetMetricsByInputRecordID(_ context.Context, _ int64) ([]map[string]any, error) {
+	if f.getExistingErr != nil {
+		return nil, f.getExistingErr
+	}
+	return f.existingMetrics, nil
+}
+
+func (f *fakeMetricsStore) UpsertMetrics(_ context.Context, req SaveMetricsRequest) (int64, error) {
+	f.upsertCalled++
+	f.lastUpsert = req
+	if f.upsertErr != nil {
+		return 0, f.upsertErr
 	}
 	return int64(len(req.Metrics)), nil
 }
@@ -1087,6 +1108,117 @@ func TestMetricsSQLStoreSaveMetricsPersistsMetricCategoriesEn(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMetricsSQLStore_UpsertMetrics_OnConflictUpdatesOnlyGivenRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := MetricsSQLStore{DB: db}
+	mock.ExpectExec(`CREATE SCHEMA IF NOT EXISTS kb`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`INSERT INTO kb\.metrics`).
+		WithArgs(sqlmock.AnyArg(), int64(173), "173_mtc_1", sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	n, err := store.UpsertMetrics(context.Background(), SaveMetricsRequest{
+		InputRecordID: 173,
+		Metrics: []map[string]any{
+			{"metric_id": "173_mtc_1", "metric_name": "Latency", "source_line_spans": []any{float64(2)}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertMetrics: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("n=%d, want 1", n)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestMetricsSQLStore_UpsertMetrics_NoMetricsIsNoop(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := MetricsSQLStore{DB: db}
+	mock.ExpectExec(`CREATE SCHEMA IF NOT EXISTS kb`).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	n, err := store.UpsertMetrics(context.Background(), SaveMetricsRequest{InputRecordID: 173})
+	if err != nil {
+		t.Fatalf("UpsertMetrics: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("n=%d, want 0", n)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestMetricsSQLStore_GetMetricsByInputRecordID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := MetricsSQLStore{DB: db}
+	mock.ExpectExec(`CREATE SCHEMA IF NOT EXISTS kb`).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	cols := []string{
+		"id", "metric_id", "metric_name", "metric_name_en", "source_line_spans", "metric_subject",
+		"metric_subject_en", "metric_desc", "metric_desc_en", "metric_context", "metric_context_en",
+		"metric_keywords", "metric_keywords_en", "metric_unit", "metric_unit_en", "metric_value",
+		"value_data_type", "value_range_type", "value_class", "value_class_en",
+		"formula_or_definition", "threshold_or_target", "measurement_frequency",
+		"metric_categories", "metric_categories_en", "ext_info",
+	}
+	rows := sqlmock.NewRows(cols).AddRow(
+		int64(99), "173_mtc_1", "Latency", "Latency", `[2]`, "API",
+		"API", "Max latency", "Max latency", "SLA", "SLA",
+		`["latency"]`, `["latency"]`, "ms", "ms", "200",
+		"number", "maximum", "performance", "performance",
+		"", "<=200", "daily",
+		`["performance"]`, `["performance"]`, `{"language":"zh","schema_version":"2"}`,
+	)
+	mock.ExpectQuery(`SELECT .* FROM kb\.metrics WHERE input_record_id = \$1`).
+		WithArgs(int64(173)).
+		WillReturnRows(rows)
+
+	got, err := store.GetMetricsByInputRecordID(context.Background(), 173)
+	if err != nil {
+		t.Fatalf("GetMetricsByInputRecordID: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1", len(got))
+	}
+	row := got[0]
+	if id, ok := row["id"].(int64); !ok || id != 99 {
+		t.Fatalf("id=%#v, want int64(99)", row["id"])
+	}
+	if row["metric_id"] != "173_mtc_1" {
+		t.Fatalf("metric_id=%#v", row["metric_id"])
+	}
+	if row["metric_name"] != "Latency" {
+		t.Fatalf("metric_name=%#v", row["metric_name"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
 	}
 }
 
