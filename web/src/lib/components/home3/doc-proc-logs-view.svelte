@@ -31,6 +31,7 @@
 		doc_proc_name: string;
 		model_names: string[];
 		prompt_name: string;
+		run_id?: number;
 		entry_type: string;
 		proc_progress?: string;
 		pass?: number;
@@ -91,6 +92,7 @@
 		{ field: 'model_names', label: 'Model(s)' },
 		{ field: 'pass', label: 'Pass' },
 		{ field: 'ms_used', label: 'Duration' },
+		{ field: 'run_id', label: 'Run ID' },
 		{ field: 'create_time', label: 'Create Time' },
 		{ field: 'errors', label: 'Errors' }
 	];
@@ -389,6 +391,9 @@
 								<td class="px-4 py-3" style="color:{textSecondary}; white-space:nowrap;">
 									{formatDuration(row.ms_used)}
 								</td>
+								<td class="px-4 py-3" style="color:{textSecondary}; white-space:nowrap; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;">
+									{row.run_id != null ? row.run_id : '—'}
+								</td>
 								<td class="px-4 py-3" style="color:{textMuted}; white-space:nowrap; font-size:12px;">
 									{formatTime(row.create_time)}
 								</td>
@@ -532,6 +537,10 @@
 						<div class="doc-proc-view-row">
 							<span class="doc-proc-view-key">create_time</span>
 							<span class="doc-proc-view-val">{formatTime(detailRow.create_time)}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">run_id</span>
+							<span class="doc-proc-view-val doc-proc-view-val-mono">{detailRow.run_id != null ? detailRow.run_id : '—'}</span>
 						</div>
 						<div class="doc-proc-view-row">
 							<span class="doc-proc-view-key">proc_progress</span>

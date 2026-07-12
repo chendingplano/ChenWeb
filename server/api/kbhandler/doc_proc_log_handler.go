@@ -17,6 +17,7 @@ type docProcLogRow struct {
 	ModelNames    []string `json:"model_names"`
 	PromptName    string   `json:"prompt_name"`
 	RecordID      *int64   `json:"record_id,omitempty"`
+	RunID         *int64   `json:"run_id,omitempty"`
 	ProcProgress  *string  `json:"proc_progress,omitempty"`
 	EntryType     string   `json:"entry_type"`
 	Pass          *int     `json:"pass,omitempty"`
@@ -118,6 +119,7 @@ func ListDocProcLogs(c echo.Context) error {
 			ModelNames:    names,
 			PromptName:    r.PromptName,
 			RecordID:      r.RecordID,
+			RunID:         r.RunID,
 			ProcProgress:  r.ProcProgress,
 			EntryType:     r.EntryType,
 			Pass:          r.Pass,

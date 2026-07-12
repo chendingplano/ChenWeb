@@ -27,15 +27,17 @@ func TestListDocProcLogs_UsesMSUsedResponseShape(t *testing.T) {
 		WithArgs("doc_proc_summary").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 
-	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+WHERE entry_type = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id\s+FROM kb\.doc_proc_logs\s+WHERE entry_type = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
 	mock.ExpectQuery(listQuery).
 		WithArgs("doc_proc_summary", 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "record_id", "proc_progress", "entry_type",
 			"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info", "ms_used", "log_loc", "create_time",
+			"prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "run_id",
 		}).AddRow(
 			int64(17), "summary run", "generate_topics", `{topic-model}`, "topic-prompt", int64(81), "66% (2/3)", "doc_proc_summary",
 			nil, nil, nil, nil, nil, `{"topics_generated":5}`, int64(1800), nil, "2026-05-27T12:30:00+00:00",
+			nil, nil, nil,
 		))
 
 	e := echo.New()
@@ -61,6 +63,9 @@ func TestListDocProcLogs_UsesMSUsedResponseShape(t *testing.T) {
 	row, ok := results[0].(map[string]any)
 	if !ok {
 		t.Fatalf("row=%#v", results[0])
+	}
+	if got := row["run_id"]; got != nil {
+		t.Fatalf("run_id=%v, want omitted when unset", got)
 	}
 	if _, ok := row["ms_used"]; !ok {
 		t.Fatalf("expected ms_used in response row: %#v", row)
@@ -100,15 +105,17 @@ func TestListDocProcLogs_AcceptsOrderParams(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_proc_logs ")).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 
-	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+ORDER BY doc_proc_name ASC\s+LIMIT \$1 OFFSET \$2`
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id\s+FROM kb\.doc_proc_logs\s+ORDER BY doc_proc_name ASC\s+LIMIT \$1 OFFSET \$2`
 	mock.ExpectQuery(listQuery).
 		WithArgs(50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "record_id", "proc_progress", "entry_type",
 			"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info", "ms_used", "log_loc", "create_time",
+			"prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "run_id",
 		}).AddRow(
 			int64(18), "summary run", "blocking", `{}`, "topic-prompt", int64(18), nil, "doc_proc_summary",
 			nil, nil, nil, nil, nil, `{}`, int64(0), nil, "2026-05-27T12:30:00+00:00",
+			nil, nil, nil,
 		))
 
 	e := echo.New()
@@ -143,15 +150,17 @@ func TestListDocProcLogs_FiltersByRecordID(t *testing.T) {
 		WithArgs("extract_entity_relation", int64(170)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 
-	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\)\s+FROM kb\.doc_proc_logs\s+WHERE doc_proc_name = \$1 AND record_id = \$2\s+ORDER BY create_time DESC\s+LIMIT \$3 OFFSET \$4`
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id\s+FROM kb\.doc_proc_logs\s+WHERE doc_proc_name = \$1 AND record_id = \$2\s+ORDER BY create_time DESC\s+LIMIT \$3 OFFSET \$4`
 	mock.ExpectQuery(listQuery).
 		WithArgs("extract_entity_relation", int64(170), 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "record_id", "proc_progress", "entry_type",
 			"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info", "ms_used", "log_loc", "create_time",
+			"prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "run_id",
 		}).AddRow(
 			int64(21), "extract entity relation", "extract_entity_relation", `{entity-model}`, "entity-prompt", int64(170), "67% (8/12)", "doc_proc_summary",
 			nil, nil, nil, nil, nil, `{}`, int64(1200), nil, "2026-05-30T15:43:04+00:00",
+			nil, nil, nil,
 		))
 
 	e := echo.New()

@@ -574,6 +574,8 @@ func docProcLogOrderBy(orderBy string) string {
 		return "pass"
 	case "ms_used":
 		return "ms_used"
+	case "run_id":
+		return "run_id"
 	case "errors":
 		return "errors"
 	default:
