@@ -151,6 +151,7 @@ type metricExtractionResult struct {
 }
 
 type metricCandidateMention struct {
+	CandidateID       string
 	MetricNameHint    string
 	SubjectHint       string
 	ObjectHint        string
@@ -466,6 +467,9 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		p.persistMetricsStatus(ctx, rec, start, err)
 		return fmt.Errorf("(MID_26050703) insert records failed, error:%w", err)
 	}
+	p.logFinalMetricsSaved(ctx, evt.RecordID, detectedLanguage,
+		[]string{firstNonEmptyTrimmed(result.ModelName, p.ModelName)}, p.RelationPromptRef,
+		allMetrics, start, p.Now())
 
 	if err := p.persistMetricObjects(ctx, evt.RecordID, allMetrics); err != nil {
 		p.persistMetricsStatus(ctx, rec, start, err)
@@ -830,6 +834,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 		)
 		callID := fmt.Sprintf("%s_p1_b%d", eventIDFromContext(ctx), block.Index)
 		payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(concCtx, inputText, taskPrompt)
+		annotateMetricCandidatePayload(payload, block.Index)
 		progress := tracker.advance()
 		p.logExtractMetricsChunk(ctx, record_id, callID, block.Index, len(chunks),
 			[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef,
@@ -1031,6 +1036,7 @@ func buildMetricUserPrompt(lines []string, parsedLines []metricParsedLine) strin
 	schema := map[string]any{
 		"language": "string",
 		"metrics": []map[string]any{{
+			"candidate_id":          "string",
 			"metric_name":           "string",
 			"metric_name_en":        "string",
 			"source_line_spans":     []string{"5", "12:14"},
@@ -1235,6 +1241,7 @@ func normalizeMetricList(items []any) []map[string]any {
 			continue
 		}
 		normalized := map[string]any{
+			"candidate_id":          strings.TrimSpace(asString(raw["candidate_id"])),
 			"metric_name":           strings.TrimSpace(asString(raw["metric_name"])),
 			"metric_name_en":        strings.TrimSpace(asString(raw["metric_name_en"])),
 			"subject":               strings.TrimSpace(asString(raw["subject"])),
@@ -1284,6 +1291,7 @@ func normalizeMetricCandidateMentions(items []any, block Block) []metricCandidat
 		spans := normalizeSourceLineSpans(raw["source_line_spans"])
 		quote := strings.TrimSpace(asString(raw["evidence_quote"]))
 		out = append(out, metricCandidateMention{
+			CandidateID:       firstNonEmptyTrimmed(strings.TrimSpace(asString(raw["candidate_id"])), fmt.Sprintf("%d_%d", block.Index, len(out)+1)),
 			MetricNameHint:    strings.TrimSpace(asString(raw["metric_name_hint"])),
 			SubjectHint:       strings.TrimSpace(asString(raw["subject_hint"])),
 			ObjectHint:        strings.TrimSpace(asString(raw["object_hint"])),
@@ -1301,6 +1309,30 @@ func normalizeMetricCandidateMentions(items []any, block Block) []metricCandidat
 		})
 	}
 	return out
+}
+
+func annotateMetricCandidatePayload(payload map[string]any, chunkID int) {
+	if payload == nil {
+		return
+	}
+	rawItems, ok := payload["candidates"].([]any)
+	if !ok {
+		return
+	}
+	annotated := make([]any, 0, len(rawItems))
+	for i, item := range rawItems {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			annotated = append(annotated, item)
+			continue
+		}
+		cloned := cloneMetricMap(raw)
+		if strings.TrimSpace(asString(cloned["candidate_id"])) == "" {
+			cloned["candidate_id"] = fmt.Sprintf("%d_%d", chunkID, i+1)
+		}
+		annotated = append(annotated, cloned)
+	}
+	payload["candidates"] = annotated
 }
 
 func metricCandidateHasNormalEvidence(block Block, spans []string, quote string) bool {
@@ -1363,7 +1395,7 @@ func mentionsAsCandidates(mentions []metricCandidateMention) []metricCandidate {
 			continue
 		}
 		out = append(out, metricCandidate{
-			CandidateID:    fmt.Sprintf("metric_cand_%d", len(out)+1),
+			CandidateID:    firstNonEmptyTrimmed(mention.CandidateID, fmt.Sprintf("%d_%d", mention.ChunkIndex, len(out)+1)),
 			ChunkIndex:     mention.ChunkIndex,
 			MetricNameHint: mention.MetricNameHint,
 			SubjectHint:    mention.SubjectHint,
@@ -1541,6 +1573,98 @@ func dedupeFinalMetricRows(metrics []map[string]any) []map[string]any {
 		out = append(out, grouped[key])
 	}
 	return out
+}
+
+func backfillMetricResultCandidateIDs(metrics []map[string]any, candidates []metricCandidate) {
+	candidateBySpanKey := make(map[string]string, len(candidates))
+	ambiguousSpanKeys := map[string]struct{}{}
+	for _, candidate := range candidates {
+		spanKey := strings.Join(candidateSourceLineSpans(candidate), ",")
+		if spanKey == "" {
+			continue
+		}
+		if existing, ok := candidateBySpanKey[spanKey]; ok && existing != candidate.CandidateID {
+			delete(candidateBySpanKey, spanKey)
+			ambiguousSpanKeys[spanKey] = struct{}{}
+			continue
+		}
+		if _, ambiguous := ambiguousSpanKeys[spanKey]; !ambiguous {
+			candidateBySpanKey[spanKey] = candidate.CandidateID
+		}
+	}
+	for i := range metrics {
+		if strings.TrimSpace(asString(metrics[i]["candidate_id"])) != "" {
+			continue
+		}
+		spanKey := strings.Join(normalizeSourceLineSpans(metrics[i]["source_line_spans"]), ",")
+		if candidateID := strings.TrimSpace(candidateBySpanKey[spanKey]); candidateID != "" {
+			metrics[i]["candidate_id"] = candidateID
+		}
+	}
+	if len(metrics) != len(candidates) {
+		return
+	}
+	for i := range metrics {
+		if strings.TrimSpace(asString(metrics[i]["candidate_id"])) == "" {
+			metrics[i]["candidate_id"] = candidates[i].CandidateID
+		}
+	}
+}
+
+func candidateSourceLineSpans(candidate metricCandidate) []string {
+	var combined []string
+	for _, mention := range candidate.SupportingMentions {
+		combined = append(combined, normalizeSourceLineSpans(mention["source_line_spans"])...)
+	}
+	return normalizeSourceLineSpans(combined)
+}
+
+func cloneMetricRows(metrics []map[string]any) []map[string]any {
+	if len(metrics) == 0 {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(metrics))
+	for _, metric := range metrics {
+		out = append(out, cloneMetricMap(metric))
+	}
+	return out
+}
+
+func compactNonEmptyStrings(items []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func assignMergedMetricCandidateID(metric map[string]any, groupByID map[string]map[string]any, absorbed []any) {
+	if strings.TrimSpace(asString(metric["candidate_id"])) != "" {
+		return
+	}
+	if base := groupByID[asString(metric["metric_id"])]; base != nil {
+		if candidateID := strings.TrimSpace(asString(base["candidate_id"])); candidateID != "" {
+			metric["candidate_id"] = candidateID
+			return
+		}
+	}
+	for _, absorbedID := range absorbed {
+		if base := groupByID[asString(absorbedID)]; base != nil {
+			if candidateID := strings.TrimSpace(asString(base["candidate_id"])); candidateID != "" {
+				metric["candidate_id"] = candidateID
+				return
+			}
+		}
+	}
 }
 
 func normalizeSourceLineSpans(value any) []string {
@@ -1873,6 +1997,49 @@ func (p *MetricsProcessor) logEnrichMetricsChunk(
 			p.Logger.Info("enrich_metrics log skipped: doc processor stopped by user request", "call_id", callID)
 		} else {
 			p.Logger.Warn("failed to write enrich_metrics log", "call_id", callID, "error", err)
+		}
+	}
+}
+
+func (p *MetricsProcessor) logFinalMetricsSaved(
+	ctx context.Context,
+	recordID int64,
+	language string,
+	modelNames []string,
+	promptName string,
+	metrics []map[string]any,
+	start, end time.Time,
+) {
+	payload := map[string]any{
+		"language": firstNonEmptyTrimmed(language, "unknown"),
+		"metrics":  cloneMetricRows(metrics),
+	}
+	artifactBytes, _ := json.Marshal(payload)
+	artifactStr := string(artifactBytes)
+	extraInfo := map[string]any{
+		"num_metrics": len(metrics),
+	}
+	extraBytes, _ := json.Marshal(extraInfo)
+	extraStr := string(extraBytes)
+	progress := "100%"
+	activityName := "extract_metrics_final"
+	rec := DocProcLogRecord{
+		CallReason:    p.Name(),
+		DocProcName:   p.Name(),
+		ModelNames:    compactNonEmptyStrings(modelNames),
+		PromptName:    promptName,
+		RecordID:      int64Ptr(recordID),
+		ProcProgress:  &progress,
+		ActivityName:  &activityName,
+		ArtifactJSON:  &artifactStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogExtractMetrics(ctx, rec, "MID-26071201"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("extract_metrics_final log skipped: doc processor stopped by user request", "record_id", recordID)
+		} else {
+			p.Logger.Warn("failed to write extract_metrics_final log", "record_id", recordID, "error", err)
 		}
 	}
 }
@@ -2769,6 +2936,7 @@ func (p *MetricsProcessor) enrichMetricCandidates(ctx context.Context, recordID 
 			uncertain: normalizeMetricList(uncertainRaw),
 			language:  lang,
 		}
+		backfillMetricResultCandidateIDs(result.metrics, batch.candidates)
 		for j, m := range result.metrics {
 			spans, _ := m["source_line_spans"].([]string)
 			if len(spans) == 0 {
@@ -2886,6 +3054,7 @@ func (p *MetricsProcessor) ProcessChunk(ctx context.Context, chunkIdx int) error
 		"prompt name", p.MentionPromptRef,
 	)
 	payload, modelName, err := p.extractMetricCandidatePayloadWithFallback(ctx, inputText, taskPrompt)
+	annotateMetricCandidatePayload(payload, block.Index)
 	p.logExtractMetricsChunk(ctx, p.batchRecordID, callID, block.Index, len(p.batchChunks),
 		[]string{strings.TrimSpace(modelName)}, p.MentionPromptRef, payload, err, callStart, p.Now(), "")
 	if err != nil {
@@ -2963,6 +3132,9 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		}); err != nil {
 			return fmt.Errorf("(MID_26062754) %s save metrics: %w", p.Name(), err)
 		}
+		p.logFinalMetricsSaved(ctx, p.batchRecordID, firstNonEmptyTrimmed(p.batchLang, "unknown"),
+			[]string{firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName)}, p.RelationPromptRef,
+			metrics, p.batchStart, p.Now())
 		if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, metrics); fileErr != nil {
 			p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
 		}
@@ -2995,6 +3167,9 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		p.Logger.Info("metrics merge: nothing dirty", "record_id", p.batchRecordID,
 			"existing_count", len(p.batchExistingMetrics))
 	}
+	p.logFinalMetricsSaved(ctx, p.batchRecordID, firstNonEmptyTrimmed(p.batchLang, "unknown"),
+		[]string{firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName)}, p.RelationPromptRef,
+		dirty, p.batchStart, p.Now())
 	if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, dirty); fileErr != nil {
 		p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
 	}
@@ -3126,6 +3301,7 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 				reconstructed["metric_id"] = id
 				w = reconstructed
 			}
+			assignMergedMetricCandidateID(w, groupByID, absorbed)
 			action := "added"
 			if wasExisting {
 				action = "merged"

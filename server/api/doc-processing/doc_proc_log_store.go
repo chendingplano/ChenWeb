@@ -108,6 +108,12 @@ type DocProcLogRow struct {
 	RunID                 *int64
 }
 
+type DocProcLogFilterOptions struct {
+	EntryTypes    []string
+	DocProcNames  []string
+	ActivityNames []string
+}
+
 // DocProcLogger wraps a db connection and exposes logging helpers for processors.
 type DocProcLogger struct {
 	DB *sql.DB
@@ -309,8 +315,8 @@ func allowedDocProcLogEntryType(entryType string) bool {
 		EntryTypeExtractProvisions, EntryTypeExtractProvisionsFinish,
 		EntryTypeExtractSceneBlocks, EntryTypeEnrichSceneBlocks,
 		EntryTypeExtractStructuredKnowledge, EntryTypeEnrichStructuredKnowledge,
-		EntryTypeExtractEntities, 
-		EntryTypeExtractRelations, 
+		EntryTypeExtractEntities,
+		EntryTypeExtractRelations,
 		EntryTypeExtractEntityRelationFinish,
 		EntryTypeExtractInventoryItems, EntryTypeExtractInventoryItemsFinish,
 		EntryTypeExtractSceneBlocksFinish,
@@ -579,6 +585,32 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 	return results, total, rows.Err()
 }
 
+func (s SQLStore) ListDocProcLogFilterOptions(ctx context.Context) (DocProcLogFilterOptions, error) {
+	db := resolveDocProcLogDB(s.DB)
+	if db == nil {
+		return DocProcLogFilterOptions{}, errors.New("db is nil")
+	}
+
+	entryTypes, err := listDistinctDocProcLogColumn(ctx, db, "entry_type")
+	if err != nil {
+		return DocProcLogFilterOptions{}, err
+	}
+	docProcNames, err := listDistinctDocProcLogColumn(ctx, db, "doc_proc_name")
+	if err != nil {
+		return DocProcLogFilterOptions{}, err
+	}
+	activityNames, err := listDistinctDocProcLogColumn(ctx, db, "activity_name")
+	if err != nil {
+		return DocProcLogFilterOptions{}, err
+	}
+
+	return DocProcLogFilterOptions{
+		EntryTypes:    entryTypes,
+		DocProcNames:  docProcNames,
+		ActivityNames: activityNames,
+	}, nil
+}
+
 func docProcLogOrderBy(orderBy string) string {
 	switch strings.TrimSpace(orderBy) {
 	case "entry_type":
@@ -607,6 +639,37 @@ func docProcLogOrderDir(orderDir string) string {
 		return "ASC"
 	}
 	return "DESC"
+}
+
+func listDistinctDocProcLogColumn(ctx context.Context, db *sql.DB, column string) ([]string, error) {
+	switch column {
+	case "entry_type", "doc_proc_name", "activity_name":
+	default:
+		return nil, fmt.Errorf("unsupported doc proc log column: %s", column)
+	}
+
+	stmt := `
+SELECT DISTINCT ` + column + `
+FROM kb.doc_proc_logs
+WHERE ` + column + ` IS NOT NULL
+  AND btrim(` + column + `) <> ''
+ORDER BY ` + column + ` ASC`
+
+	rows, err := db.QueryContext(ctx, stmt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var values []string
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
 }
 
 // DeleteOldDocProcLogs removes log entries older than retentionDays days.

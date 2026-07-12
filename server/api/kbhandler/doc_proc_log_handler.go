@@ -38,6 +38,13 @@ type listDocProcLogsResponse struct {
 	Total    int64           `json:"total"`
 }
 
+type listDocProcLogFilterOptionsResponse struct {
+	Status        bool     `json:"status"`
+	EntryTypes    []string `json:"entry_types"`
+	DocProcNames  []string `json:"doc_proc_names"`
+	ActivityNames []string `json:"activity_names"`
+}
+
 type deleteOldLogsResponse struct {
 	Status  bool   `json:"status"`
 	Deleted int64  `json:"deleted"`
@@ -170,6 +177,29 @@ func ListDocProcLogs(c echo.Context) error {
 		Page:     page,
 		PageSize: pageSize,
 		Total:    total,
+	})
+}
+
+func ListDocProcLogFilterOptions(c echo.Context) error {
+	rc := EchoFactory.NewFromEcho(c, "CWB_DPLG_003")
+	defer rc.Close()
+	logger := rc.GetLogger()
+
+	store := docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle}
+	options, err := store.ListDocProcLogFilterOptions(c.Request().Context())
+	if err != nil {
+		logger.Error("list doc proc log filter options failed", "err", err)
+		return c.JSON(http.StatusInternalServerError, errorResponse{
+			Status:   false,
+			ErrorMsg: "failed to list doc proc log filter options (CWB_DPLG_031)",
+		})
+	}
+
+	return c.JSON(http.StatusOK, listDocProcLogFilterOptionsResponse{
+		Status:        true,
+		EntryTypes:    options.EntryTypes,
+		DocProcNames:  options.DocProcNames,
+		ActivityNames: options.ActivityNames,
 	})
 }
 

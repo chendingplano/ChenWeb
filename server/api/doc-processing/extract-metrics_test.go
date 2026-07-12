@@ -1185,6 +1185,49 @@ func TestMetricCandidateTaskIncludesObjectHints(t *testing.T) {
 	}
 }
 
+func TestAnnotateMetricCandidatePayloadAssignsReadableCandidateIDs(t *testing.T) {
+	payload := map[string]any{
+		"language": "zh",
+		"candidates": []any{
+			map[string]any{"metric_name_hint": "一级动态血压分级"},
+			map[string]any{"metric_name_hint": "二级动态血压分级", "candidate_id": "48_9"},
+		},
+	}
+
+	annotateMetricCandidatePayload(payload, 48)
+
+	raw := payload["candidates"].([]any)
+	first := raw[0].(map[string]any)
+	second := raw[1].(map[string]any)
+	if got := asString(first["candidate_id"]); got != "48_1" {
+		t.Fatalf("first candidate_id=%q, want 48_1", got)
+	}
+	if got := asString(second["candidate_id"]); got != "48_9" {
+		t.Fatalf("second candidate_id=%q, want existing id preserved", got)
+	}
+}
+
+func TestBackfillMetricResultCandidateIDsUsesSpanMatch(t *testing.T) {
+	metrics := []map[string]any{
+		{
+			"metric_name":       "Latency",
+			"source_line_spans": []any{"12"},
+		},
+	}
+	candidates := []metricCandidate{{
+		CandidateID: "12_1",
+		SupportingMentions: []map[string]any{{
+			"source_line_spans": []string{"12"},
+		}},
+	}}
+
+	backfillMetricResultCandidateIDs(metrics, candidates)
+
+	if got := asString(metrics[0]["candidate_id"]); got != "12_1" {
+		t.Fatalf("candidate_id=%q, want 12_1", got)
+	}
+}
+
 func TestDedupeFinalMetricRowsMergesMetricCategoriesEn(t *testing.T) {
 	got := dedupeFinalMetricRows([]map[string]any{
 		{
@@ -1219,6 +1262,35 @@ func TestDedupeFinalMetricRowsMergesMetricCategoriesEn(t *testing.T) {
 	}
 	if gotConfidence := toFloat(got[0]["confidence"]); gotConfidence != 0.9 {
 		t.Fatalf("confidence=%v, want 0.9", gotConfidence)
+	}
+}
+
+func TestDedupeFinalMetricRowsKeepsCandidateID(t *testing.T) {
+	got := dedupeFinalMetricRows([]map[string]any{
+		{
+			"candidate_id":      "10_1",
+			"metric_name":       "Latency",
+			"subject":           "API",
+			"unit":              "ms",
+			"metric_value":      "200",
+			"source_line_spans": []any{"10"},
+			"confidence":        0.7,
+		},
+		{
+			"candidate_id":      "10_2",
+			"metric_name":       "Latency",
+			"subject":           "API",
+			"unit":              "ms",
+			"metric_value":      "200",
+			"source_line_spans": []any{"10"},
+			"confidence":        0.9,
+		},
+	})
+	if len(got) != 1 {
+		t.Fatalf("deduped rows=%d, want 1", len(got))
+	}
+	if gotID := asString(got[0]["candidate_id"]); gotID != "10_1" {
+		t.Fatalf("candidate_id=%q, want first candidate preserved", gotID)
 	}
 }
 

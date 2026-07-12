@@ -130,7 +130,8 @@ import DocumentReviewView from '$lib/components/home3/document-review-view.svelt
 	let showFooter = $derived(
 		sectionId !== 'chat' &&
 		activeMenu?.childId !== 'sysadmin-db-resolve-ambiguous' &&
-		activeMenu?.childId !== 'sysadmin-llm-usage-logs'
+		activeMenu?.childId !== 'sysadmin-llm-usage-logs' &&
+		activeMenu?.childId !== 'sysadmin-doc-proc-logs'
 	);
 </script>
 

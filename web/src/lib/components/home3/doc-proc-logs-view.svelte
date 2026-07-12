@@ -71,61 +71,15 @@
 	// Selected row for detail dialog
 	let detailDialogOpen = $state(false);
 	let detailRow = $state<LogRow | null>(null);
-
-	const entryTypeOptions = [
-		{ value: '', label: 'All types' },
-		{ value: 'extract_metrics', label: 'extract_metrics' },
-		{ value: 'extract_provisions', label: 'extract_provisions' },
-		{ value: 'static_analyzer', label: 'static_analyzer' },
-		{ value: 'extract_inventory_items', label: 'extract_inventory_items' },
-		{ value: 'chunking', label: 'chunking' },
-		{ value: 'extract_scene_blocks', label: 'extract_scene_blocks' },
-		{ value: 'generate_scene_blocks', label: 'generate_scene_blocks' },
-		{ value: 'enrich_scene_blocks', label: 'enrich_scene_blocks' },
-		{ value: 'blocking', label: 'blocking' },
-		{ value: 'extract_entity_relation', label: 'extract_entity_relation' },
-		{ value: 'extract_projections', label: 'extract_projections' },
-		{ value: 'generate_summary', label: 'generate_summary' },
-		{ value: 'extract_doc_metadata', label: 'extract_doc_metadata' }
-	];
-
-	const processorOptions = [
-		{ value: '', label: 'All processors' },
-		{ value: 'blocking', label: 'blocking' },
-		{ value: 'chunking', label: 'chunking' },
-		{ value: 'extract_doc_metadata', label: 'extract_doc_metadata' },
-		{ value: 'extract_entity_relation', label: 'extract_entity_relation' },
-		{ value: 'extract_inventory_items', label: 'extract_inventory_items' },
-		{ value: 'extract_metrics', label: 'extract_metrics' },
-		{ value: 'extract_projections', label: 'extract_projections' },
-		{ value: 'extract_provisions', label: 'extract_provisions' },
-		{ value: 'extract_scene_blocks', label: 'extract_scene_blocks' },
-		{ value: 'generate_scene_blocks', label: 'generate_scene_blocks' },
-		{ value: 'generate_summary', label: 'generate_summary' },
-		{ value: 'llm_call', label: 'llm_call' },
-		{ value: 'pipeline', label: 'pipeline' },
-		{ value: 'reconcile_object', label: 'reconcile_object' },
-		{ value: 'static_analyzer', label: 'static_analyzer' }
-	];
-
-	const activityOptions = [
-		{ value: '', label: 'All activities' },
-		{ value: 'extract_doc_metadata', label: 'extract_doc_metadata' },
-		{ value: 'extract_entity_relation', label: 'extract_entity_relation' },
-		{ value: 'extract_entity_relation_finish', label: 'extract_entity_relation_finish' },
-		{ value: 'extract_inventory_items', label: 'extract_inventory_items' },
-		{ value: 'extract_metrics', label: 'extract_metrics' },
-		{ value: 'extract_metrics_finish', label: 'extract_metrics_finish' },
-		{ value: 'extract_projections', label: 'extract_projections' },
-		{ value: 'extract_provisions', label: 'extract_provisions' },
-		{ value: 'extract_scene_blocks', label: 'extract_scene_blocks' },
-		{ value: 'extract_structured_knowledge', label: 'extract_structured_knowledge' },
-		{ value: 'extract_topics', label: 'extract_topics' },
-		{ value: 'generate_summary', label: 'generate_summary' },
-		{ value: 'generate_topic', label: 'generate_topic' },
-		{ value: 'pipeline finish', label: 'pipeline finish' },
-		{ value: 'resolve_ambiguous_object', label: 'resolve_ambiguous_object' }
-	];
+	let entryTypeOptions = $state<Array<{ value: string; label: string }>>([
+		{ value: '', label: 'All types' }
+	]);
+	let processorOptions = $state<Array<{ value: string; label: string }>>([
+		{ value: '', label: 'All processors' }
+	]);
+	let activityOptions = $state<Array<{ value: string; label: string }>>([
+		{ value: '', label: 'All activities' }
+	]);
 
 	const sortableColumns = [
 		{ field: 'entry_type', label: 'Type' },
@@ -142,6 +96,44 @@
 	// --- Data loading ---
 	function toRFC3339(localDateTime: string): string {
 		return new Date(localDateTime).toISOString();
+	}
+
+	function parseTimestamp(value?: string): Date | null {
+		if (!value) return null;
+		const direct = new Date(value);
+		if (!Number.isNaN(direct.getTime())) return direct;
+
+		const normalized = value
+			.trim()
+			.replace(' ', 'T')
+			.replace(/ ([+-]\d{2})(\d{2})$/, '$1:$2');
+		const fallback = new Date(normalized);
+		if (!Number.isNaN(fallback.getTime())) return fallback;
+
+		return null;
+	}
+
+	function buildOptions(values: string[], allLabel: string): Array<{ value: string; label: string }> {
+		return [{ value: '', label: allLabel }, ...values.map((value) => ({ value, label: value }))];
+	}
+
+	async function loadFilterOptions() {
+		try {
+			const res = await fetch('/api/v1/kb/doc-proc-logs/filter-options', {
+				credentials: 'same-origin'
+			});
+			const data = await res.json();
+			if (!res.ok || !data.status) {
+				throw new Error(data.error_msg ?? 'Failed to load filter options');
+			}
+			entryTypeOptions = buildOptions(data.entry_types ?? [], 'All types');
+			processorOptions = buildOptions(data.doc_proc_names ?? [], 'All processors');
+			activityOptions = buildOptions(data.activity_names ?? [], 'All activities');
+		} catch {
+			entryTypeOptions = buildOptions([], 'All types');
+			processorOptions = buildOptions([], 'All processors');
+			activityOptions = buildOptions([], 'All activities');
+		}
 	}
 
 	async function load() {
@@ -226,12 +218,16 @@
 		}
 	}
 
-	onMount(() => { load(); });
+	onMount(() => {
+		loadFilterOptions();
+		load();
+	});
 
 	// --- Helpers ---
 	function formatTime(iso: string): string {
 		if (!iso) return '—';
-		return new Date(iso).toLocaleString();
+		const parsed = parseTimestamp(iso);
+		return parsed ? parsed.toLocaleString() : iso;
 	}
 
 	function formatDuration(ms?: number): string {
@@ -289,10 +285,10 @@
 	let detailExtraInfoEntries = $derived(parseObjectEntries(detailRow?.extra_info));
 </script>
 
-<div class="p-6 space-y-4" style="background:{pageBg}; min-height:100%;">
+<div class="p-6 space-y-4 h-full flex flex-col overflow-hidden" style="background:{pageBg};">
 
 	<!-- Header card -->
-	<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<div class="flex flex-wrap items-start justify-between gap-3">
 			<div>
 				<h2 style="font-size:18px; font-weight:600; color:{textPrimary};">Doc Processor Logs</h2>
@@ -397,7 +393,7 @@
 
 	<!-- Error banner -->
 	{#if error}
-		<div class="rounded-xl p-4 flex items-start gap-2"
+		<div class="rounded-xl p-4 flex items-start gap-2 flex-shrink-0"
 			style="background:{danger}20; border:1px solid {danger}70; color:{danger};">
 			<CircleAlertIcon class="w-4 h-4 mt-0.5 flex-shrink-0" />
 			<span style="font-size:13px;">{error}</span>
@@ -405,9 +401,9 @@
 	{/if}
 
 	<!-- Log table -->
-	<div class="rounded-xl overflow-hidden" style="background:{cardBg}; border:1px solid {borderColor};">
+	<div class="rounded-xl overflow-hidden flex flex-col flex-1 min-h-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<!-- Table meta -->
-		<div class="px-5 py-3 flex items-center justify-between"
+		<div class="px-5 py-3 flex items-center justify-between flex-shrink-0"
 			style="border-bottom:1px solid {borderColor};">
 			<span style="font-size:13px; color:{textMuted};">
 				{total} entries
@@ -438,12 +434,12 @@
 		{:else if logs.length === 0}
 			<div class="px-5 py-8 text-center" style="color:{textMuted}; font-size:14px;">No log entries found.</div>
 		{:else}
-			<div class="overflow-x-auto">
+			<div class="flex-1 min-h-0 overflow-auto">
 				<table class="w-full text-sm border-collapse">
 					<thead>
 						<tr style="border-bottom:1px solid {borderColor}; background:{surface2};">
 							{#each sortableColumns as column}
-								<th class="text-left px-4 py-3" style="white-space:nowrap;">
+								<th class="text-left px-4 py-3 sticky top-0 z-10" style="white-space:nowrap; background:{surface2};">
 									<button
 										onclick={() => setOrder(column.field)}
 										class="inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-xs cursor-pointer"
@@ -467,7 +463,7 @@
 									</button>
 								</th>
 							{/each}
-							<th class="text-left px-4 py-3" style="color:{textMuted}; font-weight:500; white-space:nowrap;">Actions</th>
+							<th class="text-left px-4 py-3 sticky top-0 z-10" style="color:{textMuted}; font-weight:500; white-space:nowrap; background:{surface2};">Actions</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -540,7 +536,7 @@
 	</div>
 
 	<!-- Retention configuration card -->
-	<div class="rounded-xl p-5" style="background:{cardBg}; border:1px solid {borderColor};">
+	<div class="rounded-xl p-5 flex-shrink-0" style="background:{cardBg}; border:1px solid {borderColor};">
 		<h3 style="font-size:15px; font-weight:600; color:{textPrimary}; margin-bottom:4px;">Retention Policy</h3>
 		<p style="font-size:13px; color:{textSecondary}; margin-bottom:16px;">
 			Remove log entries older than the specified number of days. This action is permanent.
