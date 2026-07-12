@@ -8,13 +8,14 @@ import (
 )
 
 // resolveMergeAmbiguities sends one pending Metric Group (DR2 Rule-4) to the
-// Merge Resolution LLM call and returns the winning metrics. Every entry in
-// group must already carry "metric_id" and "_merge_source" ("existing"|"new")
-// (DR4). Retries once with the fallback model on failure or an invalid
-// partition (ADR 2026071002 DR2/DR4).
-func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID int64, group []map[string]any) ([]map[string]any, error) {
+// Merge Resolution LLM call and returns the winning metrics, the candidates
+// payload sent to the LLM (for caller-side logging), and the model name that
+// produced the returned winners. Every entry in group must already carry
+// "metric_id" and "_merge_source" ("existing"|"new") (DR4). Retries once with
+// the fallback model on failure or an invalid partition (ADR 2026071002 DR2/DR4).
+func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID int64, group []map[string]any) (winners []map[string]any, candidates []map[string]any, modelUsed string, err error) {
 	inputIDs := make(map[string]bool, len(group))
-	candidates := make([]map[string]any, 0, len(group))
+	candidates = make([]map[string]any, 0, len(group))
 	for _, m := range group {
 		id := asString(m["metric_id"])
 		inputIDs[id] = true
@@ -34,10 +35,10 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 		})
 	}
 
-	winners, err := p.callMergeResolve(ctx, recordID, candidates, p.MergeResolveModelName, p.MergeResolveModelCfg)
+	winners, err = p.callMergeResolve(ctx, recordID, candidates, p.MergeResolveModelName, p.MergeResolveModelCfg)
 	if err == nil {
 		if valErr := validateMergeResolveWinners(winners, inputIDs); valErr == nil {
-			return winners, nil
+			return winners, candidates, p.MergeResolveModelName, nil
 		} else {
 			err = valErr
 		}
@@ -45,10 +46,10 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 
 	fallbackModelName := strings.TrimSpace(p.FallbackMergeResolveModelName)
 	if fallbackModelName == "" {
-		return nil, fmt.Errorf("(MID_26071101) merge resolve failed and no fallback model configured: %w", err)
+		return nil, candidates, p.MergeResolveModelName, fmt.Errorf("(MID_26071101) merge resolve failed and no fallback model configured: %w", err)
 	}
 	if p.FallbackMergeResolveModelErr != nil {
-		return nil, fmt.Errorf("(MID_26071102) merge resolve failed and fallback model %q unavailable: %w", p.FallbackMergeResolveModelRef, err)
+		return nil, candidates, p.MergeResolveModelName, fmt.Errorf("(MID_26071102) merge resolve failed and fallback model %q unavailable: %w", p.FallbackMergeResolveModelRef, err)
 	}
 	p.Logger.Warn("merge resolve failed on primary model; retrying fallback",
 		"record_id", recordID, "primary_model", p.MergeResolveModelName,
@@ -56,12 +57,12 @@ func (p *MetricsProcessor) resolveMergeAmbiguities(ctx context.Context, recordID
 
 	winners, fbErr := p.callMergeResolve(ctx, recordID, candidates, fallbackModelName, p.FallbackMergeResolveModelCfg)
 	if fbErr != nil {
-		return nil, fmt.Errorf("(MID_26071103) primary merge resolve failed: %w; fallback failed: %v", err, fbErr)
+		return nil, candidates, fallbackModelName, fmt.Errorf("(MID_26071103) primary merge resolve failed: %w; fallback failed: %v", err, fbErr)
 	}
 	if valErr := validateMergeResolveWinners(winners, inputIDs); valErr != nil {
-		return nil, fmt.Errorf("(MID_26071104) fallback merge resolve returned invalid partition: %w", valErr)
+		return nil, candidates, fallbackModelName, fmt.Errorf("(MID_26071104) fallback merge resolve returned invalid partition: %w", valErr)
 	}
-	return winners, nil
+	return winners, candidates, fallbackModelName, nil
 }
 
 func (p *MetricsProcessor) callMergeResolve(ctx context.Context, recordID int64, candidates []map[string]any, modelName string, cfg structureModelConfig) ([]map[string]any, error) {

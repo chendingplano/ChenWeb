@@ -2044,6 +2044,63 @@ func (p *MetricsProcessor) logFinalMetricsSaved(
 	}
 }
 
+// logMergeResolve writes one extract_metrics log entry (activity
+// merge_resolve_metrics) for a single Merge Resolution LLM call (ADR
+// 2026071002 DR2 Rule-4). Fires whether the call succeeded or failed, so a
+// force_clear=false run always has a traceable record of exactly which
+// candidates were sent to the LLM and what it returned.
+func (p *MetricsProcessor) logMergeResolve(
+	ctx context.Context,
+	recordID int64,
+	callID string,
+	groupIdx, totalGroups int,
+	modelName, promptName string,
+	candidates, winners []map[string]any,
+	callErr error,
+	start, end time.Time,
+) {
+	payload := map[string]any{
+		"candidates":      candidates,
+		"winning_metrics": winners,
+	}
+	artifactBytes, _ := json.Marshal(payload)
+	artifactStr := string(artifactBytes)
+	extraInfo := map[string]any{
+		"group_index":      groupIdx,
+		"total_groups":     totalGroups,
+		"candidates_count": len(candidates),
+		"winners_count":    len(winners),
+	}
+	extraBytes, _ := json.Marshal(extraInfo)
+	extraStr := string(extraBytes)
+	var errStr *string
+	if callErr != nil {
+		s := callErr.Error()
+		errStr = &s
+	}
+	activityName := "merge_resolve_metrics"
+	rec := DocProcLogRecord{
+		CallReason:    p.Name(),
+		DocProcName:   p.Name(),
+		ModelNames:    compactNonEmptyStrings([]string{modelName}),
+		PromptName:    promptName,
+		RecordID:      int64Ptr(recordID),
+		LLMCallID:     &callID,
+		ActivityName:  &activityName,
+		ArtifactJSON:  &artifactStr,
+		Errors:        errStr,
+		ExtraInfoJSON: &extraStr,
+		MSUsed:        int64Ptr(end.Sub(start).Milliseconds()),
+	}
+	if err := p.ProcLogger.LogExtractMetrics(ctx, rec, "MID-26071202"); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Logger.Info("merge_resolve_metrics log skipped: doc processor stopped by user request", "record_id", recordID)
+		} else {
+			p.Logger.Warn("failed to write merge_resolve_metrics log", "record_id", recordID, "error", err)
+		}
+	}
+}
+
 // logMetricsSummary writes one extract_metrics log entry after the processor finishes.
 func (p *MetricsProcessor) logMetricsSummary(
 	ctx context.Context,
@@ -3270,19 +3327,38 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 		existingByID[asString(ex["metric_id"])] = ex
 	}
 
-	for _, group := range merged.PendingGroups {
+	maxTasks := p.MaxTasks
+	if maxTasks <= 0 {
+		maxTasks = 1
+	}
+
+	groupResults, err := runConcurrent(ctx, maxTasks, len(merged.PendingGroups), func(concCtx context.Context, groupIdx int) ([]map[string]any, error) {
+		group := merged.PendingGroups[groupIdx]
 		p.Logger.Info("merge resolve: sending pending group to LLM", "record_id", p.batchRecordID,
+			"group", fmt.Sprintf("group:%d/%d", groupIdx+1, len(merged.PendingGroups)),
 			"candidates_in_group", len(group))
-		winners, err := p.resolveMergeAmbiguities(ctx, p.batchRecordID, group)
-		if err != nil {
-			return nil, err
+		callStart := p.Now()
+		callID := fmt.Sprintf("%d_merge_g%d", p.batchRecordID, groupIdx)
+		winners, sentCandidates, modelUsed, callErr := p.resolveMergeAmbiguities(concCtx, p.batchRecordID, group)
+		callEnd := p.Now()
+		p.logMergeResolve(ctx, p.batchRecordID, callID, groupIdx, len(merged.PendingGroups),
+			modelUsed, p.MergeResolvePromptRef, sentCandidates, winners, callErr, callStart, callEnd)
+		if callErr != nil {
+			return nil, callErr
 		}
+		cacheHit, cacheMiss := cacheTokenCounts(p.Extractor)
 		p.Logger.Info("merge resolve: LLM returned winners", "record_id", p.batchRecordID,
-			"winners_count", len(winners))
+			"group", fmt.Sprintf("group:%d/%d", groupIdx+1, len(merged.PendingGroups)),
+			"winners_count", len(winners),
+			"cache_hit", cacheHit,
+			"cache_miss", cacheMiss,
+			"ms_used", callEnd.Sub(callStart).Milliseconds(),
+		)
 		groupByID := map[string]map[string]any{}
 		for _, g := range group {
 			groupByID[asString(g["metric_id"])] = g
 		}
+		groupDirty := make([]map[string]any, 0, len(winners))
 		for _, w := range winners {
 			w = canonicalizeMetricFieldAliases(w)
 			absorbed, _ := w["absorbed_metric_ids"].([]any)
@@ -3315,9 +3391,20 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 				logEntry["absorbed_metric_ids"] = absorbedIDs
 			}
 			w["ext_info"] = map[string]any{"merge_log": []map[string]any{logEntry}}
-			dirty = append(dirty, w)
+			groupDirty = append(groupDirty, w)
 		}
+		return groupDirty, nil
+	})
+	if err != nil {
+		if isCtxStopped(ctx) {
+			return nil, ErrPipelineStopped
+		}
+		return nil, err
 	}
+	for _, gd := range groupResults {
+		dirty = append(dirty, gd...)
+	}
+
 	p.Logger.Info("metrics merge complete", "record_id", p.batchRecordID,
 		"existing_loaded", len(existing), "new_enriched", len(newMetrics),
 		"rule3_added", len(merged.Added), "rule4_pending_groups", len(merged.PendingGroups),

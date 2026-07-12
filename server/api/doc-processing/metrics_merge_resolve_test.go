@@ -25,7 +25,7 @@ func TestResolveMergeAmbiguities_WellFormedResponse(t *testing.T) {
 		{"metric_id": "173_mtc_1", "_merge_source": "existing", "metric_name": "Latency"},
 		{"metric_id": "173_mtc_9", "_merge_source": "new", "metric_name": "Latency"},
 	}
-	winners, err := p.resolveMergeAmbiguities(context.Background(), 173, group)
+	winners, _, _, err := p.resolveMergeAmbiguities(context.Background(), 173, group)
 	if err != nil {
 		t.Fatalf("resolveMergeAmbiguities: %v", err)
 	}
@@ -51,12 +51,15 @@ func TestResolveMergeAmbiguities_MissingMetricIDFailsAndUsesFallback(t *testing.
 		{"metric_id": "173_mtc_1", "_merge_source": "existing", "metric_name": "Latency"},
 		{"metric_id": "173_mtc_9", "_merge_source": "new", "metric_name": "Latency"},
 	}
-	winners, err := p.resolveMergeAmbiguities(context.Background(), 173, group)
+	winners, _, modelUsed, err := p.resolveMergeAmbiguities(context.Background(), 173, group)
 	if err != nil {
 		t.Fatalf("resolveMergeAmbiguities: %v", err)
 	}
 	if len(winners) != 1 {
 		t.Fatalf("winners=%+v, want 1 (from fallback)", winners)
+	}
+	if modelUsed != "fallback-model" {
+		t.Fatalf("modelUsed=%q, want fallback-model", modelUsed)
 	}
 	if extractor.calledCount != 2 {
 		t.Fatalf("calledCount=%d, want 2 (primary + fallback)", extractor.calledCount)
