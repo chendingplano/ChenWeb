@@ -46,6 +46,7 @@ func TestFixedSizeChunkingServiceGenerateSummary_WritesGenerateSummaryLog(t *tes
 			sqlmock.AnyArg(),
 			nil,
 			nil,
+			nil,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

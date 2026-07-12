@@ -107,11 +107,12 @@ INSERT INTO kb.doc_proc_logs (
     log_loc,
     prompt_cache_hit_tokens,
     prompt_cache_miss_tokens,
+    run_id,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, $15, $16, $17, NOW()
+    $14, $15, $16, $17, $18, NOW()
 )`)
 	mock.ExpectExec(insertQuery).
 		WithArgs(
@@ -130,6 +131,7 @@ INSERT INTO kb.doc_proc_logs (
 			&extra,
 			nil,
 			"MID-26052811",
+			nil,
 			nil,
 			nil,
 		).
@@ -169,6 +171,80 @@ WHERE id = $1`)
 	}
 }
 
+func TestDocProcLoggerLogSummary_IncludesRunIDFromContext(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	extra := `{}`
+	msUsed := int64(1500)
+	insertQuery := regexp.QuoteMeta(`
+INSERT INTO kb.doc_proc_logs (
+    call_reason,
+    doc_proc_name,
+    model_names,
+    prompt_name,
+    record_id,
+    proc_progress,
+    entry_type,
+    pass,
+    llm_call_id,
+    activity_name,
+    artifact,
+    errors,
+    extra_info,
+    ms_used,
+    log_loc,
+    prompt_cache_hit_tokens,
+    prompt_cache_miss_tokens,
+    run_id,
+    create_time
+) VALUES (
+    $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
+    $11::jsonb, $12, $13::jsonb,
+    $14, $15, $16, $17, $18, NOW()
+)`)
+	runID := int64(77)
+	mock.ExpectExec(insertQuery).
+		WithArgs(
+			nil,
+			"generate_summaries",
+			"{}",
+			nil,
+			nil,
+			nil,
+			EntryTypeGenerateSummary,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			&extra,
+			&msUsed,
+			"MID-26071201",
+			nil,
+			nil,
+			&runID,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	logger := DocProcLogger{DB: db}
+	ctx := withRunID(context.Background(), runID)
+	if err := logger.LogSummary(ctx, EntryTypeGenerateSummary, DocProcLogRecord{
+		DocProcName:   "generate_summaries",
+		ExtraInfoJSON: &extra,
+		MSUsed:        &msUsed,
+	}, "MID-26071201"); err != nil {
+		t.Fatalf("LogSummary: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -183,14 +259,14 @@ func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "record_id", "proc_progress", "entry_type",
 		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
-		"ms_used", "log_loc", "coalesce", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
+		"ms_used", "log_loc", "coalesce", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "run_id",
 	}).AddRow(
 		int64(9), "summary call", "generate_topics", `{topic-model}`, "topic-prompt", int64(81), "66% (2/3)", "test_entry_type",
 		nil, nil, nil, nil, nil, `{"topics_generated":7}`, int64(2400), "generate_phase_processors_test.go_123", "2026-05-27T12:00:00+00:00",
-		nil, nil,
+		nil, nil, nil,
 	)
 
-	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens\s+FROM kb\.doc_proc_logs\s+WHERE entry_type = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id\s+FROM kb\.doc_proc_logs\s+WHERE entry_type = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
 	mock.ExpectQuery(listQuery).
 		WithArgs("test_entry_type", 50, 0).
 		WillReturnRows(rows)
@@ -224,6 +300,54 @@ func TestSQLStoreListDocProcLogs_ReturnsMSUsed(t *testing.T) {
 	}
 }
 
+func TestSQLStoreListDocProcLogs_FiltersByRunIDAndReturnsRunID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	runID := int64(77)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_proc_logs WHERE run_id = $1")).
+		WithArgs(runID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+
+	rows := sqlmock.NewRows([]string{
+		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "record_id", "proc_progress", "entry_type",
+		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
+		"ms_used", "log_loc", "coalesce", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "run_id",
+	}).AddRow(
+		int64(9), "summary call", "generate_topics", `{topic-model}`, "topic-prompt", int64(81), "66% (2/3)", "test_entry_type",
+		nil, nil, nil, nil, nil, `{"topics_generated":7}`, int64(2400), "generate_phase_processors_test.go_123", "2026-05-27T12:00:00+00:00",
+		nil, nil, runID,
+	)
+
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id\s+FROM kb\.doc_proc_logs\s+WHERE run_id = \$1\s+ORDER BY create_time DESC\s+LIMIT \$2 OFFSET \$3`
+	mock.ExpectQuery(listQuery).
+		WithArgs(runID, 50, 0).
+		WillReturnRows(rows)
+
+	store := SQLStore{DB: db}
+	got, total, err := store.ListDocProcLogs(context.Background(), DocProcLogFilter{RunID: &runID})
+	if err != nil {
+		t.Fatalf("ListDocProcLogs: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("total=%d, want 1", total)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1", len(got))
+	}
+	if got[0].RunID == nil || *got[0].RunID != runID {
+		t.Fatalf("RunID=%v, want %d", got[0].RunID, runID)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestSQLStoreListDocProcLogs_OrdersByAllowedField(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -237,14 +361,14 @@ func TestSQLStoreListDocProcLogs_OrdersByAllowedField(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "record_id", "proc_progress", "entry_type",
 		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
-		"ms_used", "log_loc", "coalesce", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
+		"ms_used", "log_loc", "coalesce", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "run_id",
 	}).AddRow(
 		int64(10), "llm call", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", int64(55), nil, "test_entry_type",
 		2, "call-1", "enrich_metrics", nil, nil, `{"source":"test"}`, int64(9300), "doc_proc_log_store_test.go_234", "2026-05-27T12:00:00+00:00",
-		nil, nil,
+		nil, nil, nil,
 	)
 
-	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens\s+FROM kb\.doc_proc_logs\s+ORDER BY ms_used ASC\s+LIMIT \$1 OFFSET \$2`
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id\s+FROM kb\.doc_proc_logs\s+ORDER BY ms_used ASC\s+LIMIT \$1 OFFSET \$2`
 	mock.ExpectQuery(listQuery).
 		WithArgs(50, 0).
 		WillReturnRows(rows)

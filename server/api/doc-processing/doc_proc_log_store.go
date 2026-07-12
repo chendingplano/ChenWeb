@@ -72,6 +72,7 @@ type DocProcLogFilter struct {
 	DocProcName string // empty = all
 	LLMCallID   string // empty = all
 	RecordID    *int64 // nil = all
+	RunID       *int64 // nil = all; kb.doc_process_runs.id (ADR 2026071201)
 	Page        int    // 1-based; 0 treated as 1
 	PageSize    int    // 0 → 50
 	OrderBy     string // empty → create_time
@@ -100,6 +101,7 @@ type DocProcLogRow struct {
 
 	PromptCacheHitTokens  *int64
 	PromptCacheMissTokens *int64
+	RunID                 *int64
 }
 
 // DocProcLogger wraps a db connection and exposes logging helpers for processors.
@@ -354,12 +356,17 @@ INSERT INTO kb.doc_proc_logs (
     log_loc,
     prompt_cache_hit_tokens,
     prompt_cache_miss_tokens,
+    run_id,
     create_time
 ) VALUES (
     $1, $2, $3::text[], $4, $5, $6, $7, $8, $9, $10,
     $11::jsonb, $12, $13::jsonb,
-    $14, $15, $16, $17, NOW()
+    $14, $15, $16, $17, $18, NOW()
 )`
+	var runIDArg *int64
+	if runID, ok := runIDFromContext(ctx); ok {
+		runIDArg = &runID
+	}
 	_, err := db.ExecContext(ctx, stmt,
 		nullableString(rec.CallReason),
 		rec.DocProcName,
@@ -378,6 +385,7 @@ INSERT INTO kb.doc_proc_logs (
 		loc,
 		rec.PromptCacheHitTokens,
 		rec.PromptCacheMissTokens,
+		runIDArg,
 	)
 	if err != nil {
 		return err
@@ -459,6 +467,11 @@ func (s SQLStore) ListDocProcLogs(ctx context.Context, f DocProcLogFilter) ([]Do
 		args = append(args, *f.RecordID)
 		argIdx++
 	}
+	if f.RunID != nil {
+		where = append(where, "run_id = $"+itoa(argIdx))
+		args = append(args, *f.RunID)
+		argIdx++
+	}
 
 	whereClause := ""
 	if len(where) > 0 {
@@ -481,7 +494,7 @@ SELECT id, COALESCE(call_reason,''), doc_proc_name,
        pass, llm_call_id, activity_name,
        artifact::text, errors, extra_info::text,
        ms_used, log_loc, COALESCE(to_char(create_time, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), ''),
-       prompt_cache_hit_tokens, prompt_cache_miss_tokens
+       prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id
 FROM kb.doc_proc_logs
 ` + whereClause + `
 ORDER BY ` + orderBy + ` ` + orderDir + `
@@ -498,7 +511,7 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 		var r DocProcLogRow
 		var modelArr []string
 		var artifact, extraInfo sql.NullString
-		var msUsed, cacheHit, cacheMiss sql.NullInt64
+		var msUsed, cacheHit, cacheMiss, runID sql.NullInt64
 		if err := rows.Scan(
 			&r.ID,
 			&r.CallReason,
@@ -519,6 +532,7 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 			&r.CreateTime,
 			&cacheHit,
 			&cacheMiss,
+			&runID,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -537,6 +551,9 @@ LIMIT $` + itoa(argIdx) + ` OFFSET $` + itoa(argIdx+1)
 		}
 		if cacheMiss.Valid {
 			r.PromptCacheMissTokens = &cacheMiss.Int64
+		}
+		if runID.Valid {
+			r.RunID = &runID.Int64
 		}
 		results = append(results, r)
 	}

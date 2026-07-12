@@ -107,7 +107,7 @@ func (t *metricsProgressTracker) advance() string {
 	defer t.mu.Unlock()
 	if t.Completed < t.Total {
 		t.Completed++
-}
+	}
 	pct := 0
 	if t.Total > 0 {
 		pct = t.Completed * 100 / t.Total
@@ -142,6 +142,7 @@ type SaveMetricsRequest struct {
 
 type metricExtractionResult struct {
 	Language         string
+	Candidates       int
 	Metrics          []map[string]any
 	UncertainMetrics []map[string]any
 	ModelName        string
@@ -490,7 +491,8 @@ func (p *MetricsProcessor) HandleEvent(ctx context.Context, payload []byte) erro
 		"num_chunks", len(inputChunks),
 	)
 	p.persistMetricsStatus(ctx, rec, start, nil)
-	p.logMetricsSummary(ctx, evt.RecordID, start, p.Now(), result, inserted, len(inputChunks))
+	p.logMetricsSummary(ctx, evt.RecordID, start, p.Now(), result,
+		int64(result.Candidates), inserted, len(inputChunks))
 	return nil
 }
 
@@ -926,6 +928,7 @@ func (p *MetricsProcessor) extractMetricsFromChunksWithLLM(
 
 	return metricExtractionResult{
 		Language:         detectedLanguage,
+		Candidates:       len(candidates),
 		Metrics:          metrics,
 		UncertainMetrics: uncertainMetrics,
 		ModelName:        firstNonEmptyTrimmed(usedRelationModel, usedMentionModel, p.RelationModelName, p.ModelName),
@@ -1880,10 +1883,12 @@ func (p *MetricsProcessor) logMetricsSummary(
 	recordID int64,
 	start, end time.Time,
 	result metricExtractionResult,
+	total_candidates int64,
 	inserted int64,
 	numChunks int,
 ) {
 	extraInfo := map[string]any{
+		"total_candidates":  total_candidates,
 		"total_metrics":     inserted,
 		"uncertain_metrics": len(result.UncertainMetrics),
 		"fallback_count":    result.FallbackCount,
@@ -2248,7 +2253,7 @@ WHERE input_record_id = $1`
 			id                                                                           int64
 			metricID, name, nameEn, subject, subjectEn, desc, descEn, ctx1, ctxEn        sql.NullString
 			unit, unitEn, value, valueDataType, valueRangeType, valueClass, valueClassEn sql.NullString
-			formula, threshold, freq, categories, categoriesEn, catPaths, catPathsEn sql.NullString
+			formula, threshold, freq, categories, categoriesEn, catPaths, catPathsEn     sql.NullString
 			spansJSON, keywordsJSON, keywordsEnJSON, extInfoJSON                         sql.NullString
 		)
 		if err := rows.Scan(&id, &metricID, &name, &nameEn, &spansJSON, &subject, &subjectEn,

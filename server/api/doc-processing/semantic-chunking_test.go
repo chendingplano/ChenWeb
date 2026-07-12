@@ -218,6 +218,7 @@ func TestSemanticChunkingService_HandleInput_WritesExtractTopicLogs(t *testing.T
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

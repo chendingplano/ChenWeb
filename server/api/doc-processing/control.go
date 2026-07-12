@@ -37,6 +37,7 @@ type ControlService struct {
 	InputStore        DocMetadataStore
 	EventStore        EventStore
 	StopStore         StopRequestStore
+	RunStore          DocProcessRunStore
 	Now               func() time.Time
 
 	DocProcessorMode       string
@@ -544,6 +545,47 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 			return nil
 		}
 	}
+	var runID int64
+	var runCreated bool
+	if s.RunStore != nil {
+		mode, modeErr := s.docProcessorMode()
+		if modeErr != nil {
+			mode = DocProcessorModeAuto
+		}
+		processorNames := make([]string, 0, len(processors))
+		for _, p := range processors {
+			if p == nil {
+				continue
+			}
+			processorNames = append(processorNames, p.Name())
+		}
+		parameters := map[string]any{
+			"force":       evt.Force,
+			"force_clear": evt.ForceClear,
+		}
+		if len(evt.Operations) > 0 {
+			parameters["operations"] = evt.Operations
+		}
+		if strings.TrimSpace(evt.Filename) != "" {
+			parameters["filename"] = evt.Filename
+		}
+		id, createErr := s.RunStore.CreateDocProcessRun(ctx, DocProcessRunRecord{
+			RecordID:   evt.RecordID,
+			EventID:    eventIDFromContext(ctx),
+			Mode:       mode,
+			Processors: processorNames,
+			Parameters: parameters,
+		})
+		if createErr != nil {
+			if s.Logger != nil {
+				s.Logger.Warn("failed to create kb.doc_process_runs row", "record_id", evt.RecordID, "error", createErr)
+			}
+		} else {
+			runID = id
+			runCreated = true
+			ctx = withRunID(ctx, runID)
+		}
+	}
 	if len(processors) > 0 {
 		s.resetProcessorStatuses(ctx, evt.RecordID, processors)
 	}
@@ -585,6 +627,16 @@ func (s *ControlService) handleEvent(ctx context.Context, payload []byte) error 
 		s.persistPipelineStatus(context.Background(), evt.RecordID, status, "", firstErr)
 		if requestStopped && s.StopStore != nil {
 			_ = s.StopStore.ClearStopRequested(context.Background(), evt.RecordID)
+		}
+		if runCreated && s.RunStore != nil {
+			var errMsg *string
+			if firstErr != nil {
+				msg := firstErr.Error()
+				errMsg = &msg
+			}
+			if closeErr := s.RunStore.CloseDocProcessRun(context.Background(), runID, status, errMsg); closeErr != nil && s.Logger != nil {
+				s.Logger.Warn("failed to close kb.doc_process_runs row", "run_id", runID, "error", closeErr)
+			}
 		}
 	}()
 
@@ -1250,6 +1302,22 @@ func withEventID(ctx context.Context, id string) context.Context {
 func eventIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(eventIDCtxKey{}).(string)
 	return id
+}
+
+type runIDCtxKey struct{}
+
+// withRunID attaches the kb.doc_process_runs.id of the current pipeline
+// invocation to ctx, mirroring withEventID above. Set once in handleEvent;
+// insertDocProcLog (doc_proc_log_store.go) reads it at its single choke
+// point so every Log* call site stamps run_id without a signature change.
+// See ADR 2026071201.
+func withRunID(ctx context.Context, id int64) context.Context {
+	return context.WithValue(ctx, runIDCtxKey{}, id)
+}
+
+func runIDFromContext(ctx context.Context) (int64, bool) {
+	id, ok := ctx.Value(runIDCtxKey{}).(int64)
+	return id, ok
 }
 
 func newEventID() string {
