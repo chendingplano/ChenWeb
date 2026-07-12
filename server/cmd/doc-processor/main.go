@@ -227,6 +227,7 @@ func main() {
 		Logger:                 logger,
 		InputStore:             inputStore,
 		EventStore:             docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+		RunStore:               docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
 		StopStore:              docprocessing.StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle},
 		Now:                    time.Now,
 		MaxDocProcessPipelines: docprocessing.MaxDocProcessPipelinesFromEnv(),
