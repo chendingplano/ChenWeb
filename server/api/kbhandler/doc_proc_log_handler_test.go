@@ -179,3 +179,49 @@ func TestListDocProcLogs_FiltersByRecordID(t *testing.T) {
 		t.Fatalf("unmet db expectations: %v", err)
 	}
 }
+
+func TestListDocProcLogs_FiltersByRunIDActivityAndCreateTime(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	oldDB := ApiTypes.ProjectDBHandle
+	ApiTypes.ProjectDBHandle = db
+	defer func() { ApiTypes.ProjectDBHandle = oldDB }()
+
+	countQuery := regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_proc_logs WHERE activity_name = $1 AND run_id = $2 AND create_time >= $3 AND create_time <= $4")
+	mock.ExpectQuery(countQuery).
+		WithArgs("extract_metrics_finish", int64(44), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id\s+FROM kb\.doc_proc_logs\s+WHERE activity_name = \$1 AND run_id = \$2 AND create_time >= \$3 AND create_time <= \$4\s+ORDER BY create_time DESC\s+LIMIT \$5 OFFSET \$6`
+	mock.ExpectQuery(listQuery).
+		WithArgs("extract_metrics_finish", int64(44), sqlmock.AnyArg(), sqlmock.AnyArg(), 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "call_reason", "doc_proc_name", "model_names", "prompt_name", "record_id", "proc_progress", "entry_type",
+			"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info", "ms_used", "log_loc", "create_time",
+			"prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "run_id",
+		}).AddRow(
+			int64(22), "extract_metrics", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", int64(7), "100%", "extract_metrics_finish",
+			nil, nil, "extract_metrics_finish", nil, nil, `{"total_metrics":57}`, int64(1200), nil, "2026-07-12T10:30:00+00:00",
+			nil, nil, int64(44),
+		))
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/kb/doc-proc-logs?activity_name=extract_metrics_finish&run_id=44&create_start_time=2026-07-12T00:00&create_end_time=2026-07-12T23:59", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := ListDocProcLogs(c); err != nil {
+		t.Fatalf("ListDocProcLogs returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}

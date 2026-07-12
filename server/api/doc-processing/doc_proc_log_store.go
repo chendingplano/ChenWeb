@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 )
@@ -68,15 +69,18 @@ type DocProcLogRecord struct {
 
 // DocProcLogFilter specifies optional server-side filters for ListDocProcLogs.
 type DocProcLogFilter struct {
-	EntryType   string // empty = all
-	DocProcName string // empty = all
-	LLMCallID   string // empty = all
-	RecordID    *int64 // nil = all
-	RunID       *int64 // nil = all; kb.doc_process_runs.id (ADR 2026071201)
-	Page        int    // 1-based; 0 treated as 1
-	PageSize    int    // 0 → 50
-	OrderBy     string // empty → create_time
-	OrderDir    string // empty → desc
+	EntryType       string     // empty = all
+	DocProcName     string     // empty = all
+	ActivityName    string     // empty = all
+	LLMCallID       string     // empty = all
+	RecordID        *int64     // nil = all
+	RunID           *int64     // nil = all; kb.doc_process_runs.id (ADR 2026071201)
+	CreateTimeStart *time.Time // nil = all; inclusive
+	CreateTimeEnd   *time.Time // nil = all; inclusive
+	Page            int        // 1-based; 0 treated as 1
+	PageSize        int        // 0 → 50
+	OrderBy         string     // empty → create_time
+	OrderDir        string     // empty → desc
 }
 
 // DocProcLogRow is a row returned from ListDocProcLogs.
@@ -457,6 +461,11 @@ func (s SQLStore) ListDocProcLogs(ctx context.Context, f DocProcLogFilter) ([]Do
 		args = append(args, f.DocProcName)
 		argIdx++
 	}
+	if f.ActivityName != "" {
+		where = append(where, "activity_name = $"+itoa(argIdx))
+		args = append(args, f.ActivityName)
+		argIdx++
+	}
 	if f.LLMCallID != "" {
 		where = append(where, "llm_call_id = $"+itoa(argIdx))
 		args = append(args, f.LLMCallID)
@@ -470,6 +479,16 @@ func (s SQLStore) ListDocProcLogs(ctx context.Context, f DocProcLogFilter) ([]Do
 	if f.RunID != nil {
 		where = append(where, "run_id = $"+itoa(argIdx))
 		args = append(args, *f.RunID)
+		argIdx++
+	}
+	if f.CreateTimeStart != nil {
+		where = append(where, "create_time >= $"+itoa(argIdx))
+		args = append(args, *f.CreateTimeStart)
+		argIdx++
+	}
+	if f.CreateTimeEnd != nil {
+		where = append(where, "create_time <= $"+itoa(argIdx))
+		args = append(args, *f.CreateTimeEnd)
 		argIdx++
 	}
 

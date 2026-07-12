@@ -55,8 +55,12 @@
 	let orderDir     = $state<'asc' | 'desc'>('desc');
 
 	// Filters
-	let filterEntryType   = $state('');
+	let filterEntryType = $state('');
 	let filterDocProcName = $state('');
+	let filterActivityName = $state('');
+	let filterRunID = $state('');
+	let filterCreateStart = $state('');
+	let filterCreateEnd = $state('');
 
 	// Retention
 	let retentionDays       = $state(30);
@@ -85,6 +89,44 @@
 		{ value: 'extract_doc_metadata', label: 'extract_doc_metadata' }
 	];
 
+	const processorOptions = [
+		{ value: '', label: 'All processors' },
+		{ value: 'blocking', label: 'blocking' },
+		{ value: 'chunking', label: 'chunking' },
+		{ value: 'extract_doc_metadata', label: 'extract_doc_metadata' },
+		{ value: 'extract_entity_relation', label: 'extract_entity_relation' },
+		{ value: 'extract_inventory_items', label: 'extract_inventory_items' },
+		{ value: 'extract_metrics', label: 'extract_metrics' },
+		{ value: 'extract_projections', label: 'extract_projections' },
+		{ value: 'extract_provisions', label: 'extract_provisions' },
+		{ value: 'extract_scene_blocks', label: 'extract_scene_blocks' },
+		{ value: 'generate_scene_blocks', label: 'generate_scene_blocks' },
+		{ value: 'generate_summary', label: 'generate_summary' },
+		{ value: 'llm_call', label: 'llm_call' },
+		{ value: 'pipeline', label: 'pipeline' },
+		{ value: 'reconcile_object', label: 'reconcile_object' },
+		{ value: 'static_analyzer', label: 'static_analyzer' }
+	];
+
+	const activityOptions = [
+		{ value: '', label: 'All activities' },
+		{ value: 'extract_doc_metadata', label: 'extract_doc_metadata' },
+		{ value: 'extract_entity_relation', label: 'extract_entity_relation' },
+		{ value: 'extract_entity_relation_finish', label: 'extract_entity_relation_finish' },
+		{ value: 'extract_inventory_items', label: 'extract_inventory_items' },
+		{ value: 'extract_metrics', label: 'extract_metrics' },
+		{ value: 'extract_metrics_finish', label: 'extract_metrics_finish' },
+		{ value: 'extract_projections', label: 'extract_projections' },
+		{ value: 'extract_provisions', label: 'extract_provisions' },
+		{ value: 'extract_scene_blocks', label: 'extract_scene_blocks' },
+		{ value: 'extract_structured_knowledge', label: 'extract_structured_knowledge' },
+		{ value: 'extract_topics', label: 'extract_topics' },
+		{ value: 'generate_summary', label: 'generate_summary' },
+		{ value: 'generate_topic', label: 'generate_topic' },
+		{ value: 'pipeline finish', label: 'pipeline finish' },
+		{ value: 'resolve_ambiguous_object', label: 'resolve_ambiguous_object' }
+	];
+
 	const sortableColumns = [
 		{ field: 'entry_type', label: 'Type' },
 		{ field: 'doc_proc_name', label: 'Processor' },
@@ -98,6 +140,10 @@
 	];
 
 	// --- Data loading ---
+	function toRFC3339(localDateTime: string): string {
+		return new Date(localDateTime).toISOString();
+	}
+
 	async function load() {
 		loading = true;
 		error = '';
@@ -110,6 +156,10 @@
 			});
 			if (filterEntryType)   params.set('entry_type',    filterEntryType);
 			if (filterDocProcName) params.set('doc_proc_name', filterDocProcName.trim());
+			if (filterActivityName) params.set('activity_name', filterActivityName);
+			if (filterRunID.trim()) params.set('run_id', filterRunID.trim());
+			if (filterCreateStart) params.set('create_start_time', toRFC3339(filterCreateStart));
+			if (filterCreateEnd) params.set('create_end_time', toRFC3339(filterCreateEnd));
 
 			const res = await fetch(`/api/v1/kb/doc-proc-logs?${params}`, {
 				credentials: 'same-origin'
@@ -221,7 +271,22 @@
 		}
 	}
 
+	function parseObjectEntries(value?: string): Array<{ key: string; value: string }> {
+		if (!value) return [];
+		try {
+			const parsed = JSON.parse(value);
+			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+			return Object.entries(parsed).map(([key, entryValue]) => ({
+				key,
+				value: typeof entryValue === 'string' ? entryValue : JSON.stringify(entryValue)
+			}));
+		} catch {
+			return [];
+		}
+	}
+
 	let totalPages = $derived(Math.ceil(total / pageSize) || 1);
+	let detailExtraInfoEntries = $derived(parseObjectEntries(detailRow?.extra_info));
 </script>
 
 <div class="p-6 space-y-4" style="background:{pageBg}; min-height:100%;">
@@ -262,14 +327,61 @@
 				</select>
 			</div>
 			<div>
-				<label for="doc-proc-log-processor-name" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Processor Name</label>
-				<input
+				<label for="doc-proc-log-processor-name" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Processor</label>
+				<select
 					id="doc-proc-log-processor-name"
-					type="text"
 					bind:value={filterDocProcName}
-					placeholder="e.g. extract_metrics"
 					class="rounded-lg px-3 py-2 text-sm"
 					style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; width:180px;"
+				>
+					{#each processorOptions as opt}
+						<option value={opt.value}>{opt.label}</option>
+					{/each}
+				</select>
+			</div>
+			<div>
+				<label for="doc-proc-log-activity-name" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Activity</label>
+				<select
+					id="doc-proc-log-activity-name"
+					bind:value={filterActivityName}
+					class="rounded-lg px-3 py-2 text-sm"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; width:220px;"
+				>
+					{#each activityOptions as opt}
+						<option value={opt.value}>{opt.label}</option>
+					{/each}
+				</select>
+			</div>
+			<div>
+				<label for="doc-proc-log-run-id" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Run ID</label>
+				<input
+					id="doc-proc-log-run-id"
+					type="number"
+					min="1"
+					bind:value={filterRunID}
+					placeholder="e.g. 42"
+					class="rounded-lg px-3 py-2 text-sm"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; width:140px;"
+				/>
+			</div>
+			<div>
+				<label for="doc-proc-log-create-start" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Start Time From</label>
+				<input
+					id="doc-proc-log-create-start"
+					type="datetime-local"
+					bind:value={filterCreateStart}
+					class="rounded-lg px-3 py-2 text-sm"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; width:210px;"
+				/>
+			</div>
+			<div>
+				<label for="doc-proc-log-create-end" style="font-size:12px; color:{textMuted}; display:block; margin-bottom:4px;">Start Time To</label>
+				<input
+					id="doc-proc-log-create-end"
+					type="datetime-local"
+					bind:value={filterCreateEnd}
+					class="rounded-lg px-3 py-2 text-sm"
+					style="background:{surface2}; border:1px solid {borderColor}; color:{textPrimary}; width:210px;"
 				/>
 			</div>
 			<button
@@ -556,7 +668,18 @@
 				{#if detailRow.extra_info}
 					<div class="doc-proc-view-section">
 						<div class="doc-proc-view-section-label">Extra Info</div>
-						<pre class="doc-proc-view-pre">{prettyJSON(detailRow.extra_info)}</pre>
+						{#if detailExtraInfoEntries.length > 0}
+							<div class="doc-proc-view-rows-box">
+								{#each detailExtraInfoEntries as entry (entry.key)}
+									<div class="doc-proc-view-row">
+										<span class="doc-proc-view-key">{entry.key}</span>
+										<span class="doc-proc-view-val">{entry.value}</span>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<pre class="doc-proc-view-pre">{prettyJSON(detailRow.extra_info)}</pre>
+						{/if}
 					</div>
 				{/if}
 

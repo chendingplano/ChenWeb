@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -341,6 +342,59 @@ func TestSQLStoreListDocProcLogs_FiltersByRunIDAndReturnsRunID(t *testing.T) {
 	}
 	if got[0].RunID == nil || *got[0].RunID != runID {
 		t.Fatalf("RunID=%v, want %d", got[0].RunID, runID)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestSQLStoreListDocProcLogs_FiltersByActivityAndCreateTime(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	start := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 12, 23, 59, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM kb.doc_proc_logs WHERE activity_name = $1 AND create_time >= $2 AND create_time <= $3")).
+		WithArgs("extract_metrics_finish", start, end).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+
+	rows := sqlmock.NewRows([]string{
+		"id", "coalesce", "doc_proc_name", "model_names", "coalesce", "record_id", "proc_progress", "entry_type",
+		"pass", "llm_call_id", "activity_name", "artifact", "errors", "extra_info",
+		"ms_used", "log_loc", "coalesce", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "run_id",
+	}).AddRow(
+		int64(12), "summary call", "extract_metrics", `{deepseek-v4-flash}`, "metric-prompt", int64(55), "100%", "extract_metrics_finish",
+		nil, nil, "extract_metrics_finish", nil, nil, `{"total_metrics":57}`, int64(9300), "doc_proc_log_store_test.go_234", "2026-07-12T12:00:00+00:00",
+		nil, nil, int64(44),
+	)
+
+	listQuery := `SELECT id, COALESCE\(call_reason,''\), doc_proc_name,.*ms_used, log_loc, COALESCE\(to_char\(create_time, .*?\), ''\),\s+prompt_cache_hit_tokens, prompt_cache_miss_tokens, run_id\s+FROM kb\.doc_proc_logs\s+WHERE activity_name = \$1 AND create_time >= \$2 AND create_time <= \$3\s+ORDER BY create_time DESC\s+LIMIT \$4 OFFSET \$5`
+	mock.ExpectQuery(listQuery).
+		WithArgs("extract_metrics_finish", start, end, 50, 0).
+		WillReturnRows(rows)
+
+	store := SQLStore{DB: db}
+	got, total, err := store.ListDocProcLogs(context.Background(), DocProcLogFilter{
+		ActivityName:    "extract_metrics_finish",
+		CreateTimeStart: &start,
+		CreateTimeEnd:   &end,
+	})
+	if err != nil {
+		t.Fatalf("ListDocProcLogs: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("total=%d, want 1", total)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d, want 1", len(got))
+	}
+	if got[0].ActivityName == nil || *got[0].ActivityName != "extract_metrics_finish" {
+		t.Fatalf("ActivityName=%v, want extract_metrics_finish", got[0].ActivityName)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

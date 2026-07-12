@@ -67,13 +67,24 @@ func ListDocProcLogs(c echo.Context) error {
 	}
 
 	f := docprocessing.DocProcLogFilter{
-		EntryType:   c.QueryParam("entry_type"),
-		DocProcName: c.QueryParam("doc_proc_name"),
-		LLMCallID:   c.QueryParam("llm_call_id"),
-		Page:        page,
-		PageSize:    pageSize,
-		OrderBy:     c.QueryParam("order_by"),
-		OrderDir:    c.QueryParam("order_dir"),
+		EntryType:    c.QueryParam("entry_type"),
+		DocProcName:  c.QueryParam("doc_proc_name"),
+		ActivityName: c.QueryParam("activity_name"),
+		LLMCallID:    c.QueryParam("llm_call_id"),
+		Page:         page,
+		PageSize:     pageSize,
+		OrderBy:      c.QueryParam("order_by"),
+		OrderDir:     c.QueryParam("order_dir"),
+	}
+	if runIDRaw := c.QueryParam("run_id"); runIDRaw != "" {
+		runID, err := parseOptionalPositiveInt64(runIDRaw)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResponse{
+				Status:   false,
+				ErrorMsg: "query param 'run_id' must be a positive integer (CWB_DPLG_006)",
+			})
+		}
+		f.RunID = runID
 	}
 	if recordIDRaw := c.QueryParam("record_id"); recordIDRaw != "" {
 		recordID, err := strconv.ParseInt(recordIDRaw, 10, 64)
@@ -85,11 +96,31 @@ func ListDocProcLogs(c echo.Context) error {
 		}
 		f.RecordID = &recordID
 	}
+	createStartTime, err := parseTimeQuery(firstNonEmpty(c.QueryParam("create_start_time"), c.QueryParam("start_time")))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid start_time (CWB_DPLG_007)",
+		})
+	}
+	createEndTime, err := parseTimeQuery(firstNonEmpty(c.QueryParam("create_end_time"), c.QueryParam("end_time")))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse{
+			Status:   false,
+			ErrorMsg: "invalid end_time (CWB_DPLG_008)",
+		})
+	}
+	f.CreateTimeStart = createStartTime
+	f.CreateTimeEnd = createEndTime
 
 	logger.Info("list doc proc logs",
 		"entry_type", f.EntryType,
 		"doc_proc_name", f.DocProcName,
+		"activity_name", f.ActivityName,
 		"record_id", f.RecordID,
+		"run_id", f.RunID,
+		"create_start_time", formatOptionalTime(f.CreateTimeStart),
+		"create_end_time", formatOptionalTime(f.CreateTimeEnd),
 		"page", f.Page,
 		"page_size", f.PageSize,
 		"order_by", f.OrderBy,
