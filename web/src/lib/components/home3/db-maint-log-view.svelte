@@ -115,8 +115,9 @@
 		<div class="flex flex-wrap gap-3 items-end">
 			<!-- Operation filter -->
 			<div class="flex flex-col gap-1">
-				<label style="font-size:12px; font-weight:500; color:{textMuted};">Operation</label>
+				<label for="filter-operation" style="font-size:12px; font-weight:500; color:{textMuted};">Operation</label>
 				<select
+					id="filter-operation"
 					bind:value={filterOperation}
 					style="
 						background:{inputBg}; border:1px solid {borderColor}; color:{textPrimary};
@@ -131,8 +132,9 @@
 
 			<!-- Date from -->
 			<div class="flex flex-col gap-1">
-				<label style="font-size:12px; font-weight:500; color:{textMuted};">From</label>
+				<label for="filter-date-from" style="font-size:12px; font-weight:500; color:{textMuted};">From</label>
 				<input
+					id="filter-date-from"
 					type="date"
 					bind:value={filterDateFrom}
 					style="
@@ -144,8 +146,9 @@
 
 			<!-- Date to -->
 			<div class="flex flex-col gap-1">
-				<label style="font-size:12px; font-weight:500; color:{textMuted};">To</label>
+				<label for="filter-date-to" style="font-size:12px; font-weight:500; color:{textMuted};">To</label>
 				<input
+					id="filter-date-to"
 					type="date"
 					bind:value={filterDateTo}
 					style="
@@ -234,7 +237,15 @@
 						font-size:13px;
 						cursor:pointer;
 					"
+					role="button"
+					tabindex="0"
 					onclick={() => { expandedId = expandedId === row.id ? null : row.id; }}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							expandedId = expandedId === row.id ? null : row.id;
+						}
+					}}
 				>
 					<span style="color:{textMuted}; font-size:12px;">{row.id}</span>
 					<span

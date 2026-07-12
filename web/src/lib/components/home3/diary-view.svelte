@@ -445,10 +445,11 @@
 
 				<!-- Topic -->
 				<div class="flex flex-col gap-1.5">
-					<label style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;">
+					<label for="diary-topic" style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;">
 						Topic
 					</label>
 					<input
+						id="diary-topic"
 						type="text"
 						bind:value={formTopic}
 						placeholder="What is this about?"
@@ -618,10 +619,11 @@
 
 				<!-- Content -->
 				<div class="flex flex-col gap-1.5 flex-1">
-					<label style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;">
+					<label for="diary-content" style="font-size: 12px; font-weight: 600; color: {textMuted}; text-transform: uppercase; letter-spacing: 0.05em;">
 						Notes
 					</label>
 					<textarea
+						id="diary-content"
 						bind:value={formContent}
 						placeholder="Write your notes here…"
 						rows={12}

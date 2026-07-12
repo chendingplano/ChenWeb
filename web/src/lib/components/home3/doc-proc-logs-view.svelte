@@ -473,14 +473,14 @@
 {#if detailDialogOpen && detailRow}
 	<div
 		class="doc-proc-view-dialog-overlay"
-		onmousedown={(e) => { if (e.target === e.currentTarget) closeDetails(); }}
+		onclick={(e) => { if (e.target === e.currentTarget) closeDetails(); }}
 		onkeydown={(e) => { if (e.key === 'Escape') closeDetails(); }}
 		role="button"
 		tabindex="0"
 	>
 		<div
 			class="doc-proc-view-dialog"
-			onmousedown={(e) => e.stopPropagation()}
+			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
@@ -634,6 +634,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
+		user-select: text;
 	}
 
 	.doc-proc-view-section-label {
@@ -673,6 +674,7 @@
 		font-size: 12px;
 		line-height: 1.5;
 		word-break: break-word;
+		user-select: text;
 	}
 
 	.doc-proc-view-val-mono {
@@ -693,6 +695,7 @@
 		white-space: pre-wrap;
 		word-break: break-word;
 		max-height: 320px;
+		user-select: text;
 	}
 
 	.doc-proc-view-error-box,
@@ -709,6 +712,7 @@
 		color: #fca5a5;
 		white-space: pre-wrap;
 		word-break: break-word;
+		user-select: text;
 	}
 
 	.doc-proc-view-empty {

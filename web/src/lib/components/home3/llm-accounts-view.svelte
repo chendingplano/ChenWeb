@@ -288,7 +288,9 @@
 	<header class="toolbar">
 		<div>
 			<h2>LLM Accounts</h2>
-			<p class="muted">Provider-agnostic account registry for reconciliation and runtime usage capture.</p>
+			<p class="muted">
+				Provider-agnostic account registry for reconciliation and runtime usage capture.
+			</p>
 		</div>
 		<div class="toolbar-actions">
 			<button class="ghost" onclick={loadAccounts} disabled={loading}>
@@ -297,10 +299,22 @@
 			<button class="ghost" onclick={loadPreview} disabled={importing}>
 				{importing ? 'Inspecting…' : preview ? 'Hide Preview' : 'Preview .models.toml'}
 			</button>
-			<button class="alt-btn" onclick={() => { showAddModel = !showAddModel; showCreate = false; }}>
+			<button
+				class="alt-btn"
+				onclick={() => {
+					showAddModel = !showAddModel;
+					showCreate = false;
+				}}
+			>
 				{showAddModel ? 'Cancel' : '+ Add a Model'}
 			</button>
-			<button class="primary" onclick={() => { showCreate = !showCreate; showAddModel = false; }}>
+			<button
+				class="primary"
+				onclick={() => {
+					showCreate = !showCreate;
+					showAddModel = false;
+				}}
+			>
 				{showCreate ? 'Cancel' : '+ New Account'}
 			</button>
 		</div>
@@ -313,7 +327,9 @@
 		</div>
 		<div class="summary-card">
 			<div class="summary-label">Reconciliation Enabled</div>
-			<div class="summary-value">{accounts.filter((row) => row.is_reconciliation_enabled).length}</div>
+			<div class="summary-value">
+				{accounts.filter((row) => row.is_reconciliation_enabled).length}
+			</div>
 		</div>
 		<div class="summary-card">
 			<div class="summary-label">Providers</div>
@@ -384,7 +400,8 @@
 			}}
 		>
 			<div class="add-model-notice">
-				Adds the model to <strong>.models.toml</strong> and registers it in the database (creates or reuses an account, then creates a profile). See ADR 2026070501 §"Adding a new model".
+				Adds the model to <strong>.models.toml</strong> and registers it in the database (creates or
+				reuses an account, then creates a profile). See ADR 2026070501 §"Adding a new model".
 			</div>
 			<div class="row two">
 				<label>
@@ -446,10 +463,19 @@
 			</div>
 			<label>
 				<span>Token Reserve/Call</span>
-				<input type="number" bind:value={addModelDraft.token_reserve_per_call} min="0" style="max-width:200px;" />
+				<input
+					type="number"
+					bind:value={addModelDraft.token_reserve_per_call}
+					min="0"
+					style="max-width:200px;"
+				/>
 			</label>
 			<div class="form-foot">
-				<button class="alt-btn" type="submit" disabled={addingModel || !addModelDraft.profile_name.trim()}>
+				<button
+					class="alt-btn"
+					type="submit"
+					disabled={addingModel || !addModelDraft.profile_name.trim()}
+				>
 					{addingModel ? 'Adding…' : 'Add Model'}
 				</button>
 			</div>
@@ -466,14 +492,18 @@
 		<div class="panel-head">
 			<div>
 				<h3>Registered Accounts</h3>
-				<p class="muted">Daily reports roll up by account. You can now edit account settings from the table.</p>
+				<p class="muted">
+					Daily reports roll up by account. You can now edit account settings from the table.
+				</p>
 			</div>
 		</div>
 
 		{#if loading}
 			<div class="empty">Loading accounts…</div>
 		{:else if accounts.length === 0}
-			<div class="empty">No LLM accounts yet. Create one or preview `.models.toml` to prepare the migration.</div>
+			<div class="empty">
+				No LLM accounts yet. Create one or preview `.models.toml` to prepare the migration.
+			</div>
 		{:else}
 			<div class="table-wrap">
 				<table>
@@ -503,10 +533,14 @@
 								<td>
 									{#if editingAccountID === account.id}
 										<div class="row-actions">
-											<button class="ghost compact-btn" onclick={cancelEdit} disabled={submitting}>Cancel</button>
+											<button class="ghost compact-btn" onclick={cancelEdit} disabled={submitting}
+												>Cancel</button
+											>
 										</div>
 									{:else}
-										<button class="ghost compact-btn" onclick={() => startEdit(account)}>Edit</button>
+										<button class="ghost compact-btn" onclick={() => startEdit(account)}
+											>Edit</button
+										>
 									{/if}
 								</td>
 							</tr>
@@ -563,7 +597,11 @@
 												<input type="checkbox" bind:checked={editDraft.is_reconciliation_enabled} />
 											</label>
 											<div class="form-foot">
-												<button class="primary" type="submit" disabled={submitting || !editDraft.account_name.trim()}>
+												<button
+													class="primary"
+													type="submit"
+													disabled={submitting || !editDraft.account_name.trim()}
+												>
 													{submitting ? 'Saving…' : 'Save account'}
 												</button>
 											</div>
@@ -603,7 +641,8 @@
 				</button>
 				{#if lastImportResult}
 					<div class="muted inline-status">
-						Last import: {lastImportResult.accounts_imported} accounts, {lastImportResult.profiles_imported} profiles
+						Last import: {lastImportResult.accounts_imported} accounts, {lastImportResult.profiles_imported}
+						profiles
 					</div>
 				{/if}
 			</div>
@@ -646,28 +685,57 @@
 		min-height: 100%;
 		padding: 16px 20px 32px;
 	}
-	.toolbar, .panel-head, .form-foot, .toolbar-actions, .toggle-row, .preview-columns, .summary-grid, .preview-grid, .preview-actions {
+	.toolbar,
+	.panel-head,
+	.form-foot,
+	.toolbar-actions,
+	.toggle-row,
+	.preview-columns,
+	.summary-grid,
+	.preview-grid,
+	.preview-actions {
 		display: flex;
 	}
-	.toolbar, .panel-head {
+	.toolbar,
+	.panel-head {
 		justify-content: space-between;
 		align-items: flex-end;
 		gap: 12px;
 	}
-	.toolbar-actions, .summary-grid, .preview-grid {
+	.toolbar-actions,
+	.summary-grid,
+	.preview-grid {
 		gap: 10px;
 		flex-wrap: wrap;
 	}
-	.summary-grid, .preview-grid {
+	.summary-grid,
+	.preview-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 	}
-	h2, h3, h4 { margin: 0; color: var(--heading); }
-	h2 { font-size: 20px; }
-	h3 { font-size: 16px; }
-	h4 { font-size: 14px; }
-	.muted { color: var(--sub); font-size: 12px; margin: 4px 0 0; }
-	.primary, .ghost, .alt-btn {
+	h2,
+	h3,
+	h4 {
+		margin: 0;
+		color: var(--heading);
+	}
+	h2 {
+		font-size: 20px;
+	}
+	h3 {
+		font-size: 16px;
+	}
+	h4 {
+		font-size: 14px;
+	}
+	.muted {
+		color: var(--sub);
+		font-size: 12px;
+		margin: 4px 0 0;
+	}
+	.primary,
+	.ghost,
+	.alt-btn {
 		border-radius: 8px;
 		padding: 8px 14px;
 		font-size: 13px;
@@ -692,8 +760,15 @@
 		padding: 6px 10px;
 		font-size: 12px;
 	}
-	.primary:disabled, .ghost:disabled, .alt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-	.row.three { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+	.primary:disabled,
+	.ghost:disabled,
+	.alt-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.row.three {
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	}
 	.add-model-notice {
 		font-size: 12px;
 		color: var(--sub);
@@ -703,14 +778,22 @@
 		padding: 10px 12px;
 		line-height: 1.5;
 	}
-	.add-model-notice strong { color: var(--heading); }
-	.req { color: #f87171; }
-	.summary-card, .preview-card, .panel, .create-form {
+	.add-model-notice strong {
+		color: var(--heading);
+	}
+	.req {
+		color: #f87171;
+	}
+	.summary-card,
+	.preview-card,
+	.panel,
+	.create-form {
 		background: var(--card);
 		border: 1px solid var(--border);
 		border-radius: 10px;
 	}
-	.summary-card, .preview-card {
+	.summary-card,
+	.preview-card {
 		padding: 14px 16px;
 	}
 	.summary-label {
@@ -725,7 +808,8 @@
 		font-weight: 600;
 		color: var(--heading);
 	}
-	.create-form, .panel {
+	.create-form,
+	.panel {
 		padding: 16px;
 	}
 	.create-form {
@@ -733,7 +817,7 @@
 		flex-direction: column;
 		gap: 10px;
 	}
-	.row-actions, .inline-toggle {
+	.row-actions {
 		display: flex;
 		align-items: center;
 		gap: 8px;
@@ -783,7 +867,8 @@
 	.form-foot {
 		justify-content: flex-end;
 	}
-	.error, .info {
+	.error,
+	.info {
 		padding: 10px 12px;
 		border-radius: 8px;
 		font-size: 13px;
@@ -804,7 +889,8 @@
 		width: 100%;
 		border-collapse: collapse;
 	}
-	th, td {
+	th,
+	td {
 		padding: 12px 10px;
 		border-top: 1px solid var(--border);
 		font-size: 13px;
