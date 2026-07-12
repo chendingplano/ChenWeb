@@ -1887,6 +1887,33 @@
 									{/if}
 								</button>
 							{/snippet}
+							{#snippet floatingOverlay()}
+								{#if selectedMetric}
+									{@const metric = selectedMetric}
+									<div class="metric-floating-card">
+										<div class="metric-floating-kicker">
+											<span class="metric-floating-id">#{metric.id}</span>
+											{#if metric.confidence != null}
+												<span class="metric-floating-confidence"
+													>{Math.round(Number(metric.confidence) * 100)}%</span
+												>
+											{/if}
+										</div>
+										<div class="metric-floating-name">
+											{metric.metric_name || metric.metric_subject || `Metric ${metric.id}`}
+										</div>
+										{#if metric.metric_desc}
+											<div class="metric-floating-desc">{metric.metric_desc}</div>
+										{/if}
+										<div class="metric-floating-meta">
+											{#if metric.metric_value}<span>{metric.metric_value}</span>{/if}
+											{#if metric.metric_unit}<span>{metric.metric_unit}</span>{/if}
+											{#if metric.location_type}<span>{metric.location_type}</span>{/if}
+											<span>{spanCount(metric)} span{spanCount(metric) === 1 ? '' : 's'}</span>
+										</div>
+									</div>
+								{/if}
+							{/snippet}
 							{#snippet linesView()}
 								<div class="lines-panel">
 									{#if rawLoading}
@@ -3353,6 +3380,56 @@
 		position: absolute;
 		background: rgba(22, 163, 74, 0.16);
 		border-left: 4px solid rgba(22, 163, 74, 0.85);
+	}
+	.metric-floating-card {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 12px 14px;
+		border-radius: 14px;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		background:
+			linear-gradient(180deg, rgba(20, 27, 39, 0.96), rgba(10, 14, 22, 0.94));
+		box-shadow:
+			0 18px 40px rgba(2, 6, 23, 0.42),
+			inset 0 1px 0 rgba(255, 255, 255, 0.06);
+		color: var(--text-primary);
+		backdrop-filter: blur(10px);
+	}
+	.metric-floating-kicker,
+	.metric-floating-meta {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+	}
+	.metric-floating-id,
+	.metric-floating-confidence,
+	.metric-floating-meta span {
+		padding: 3px 7px;
+		border-radius: 999px;
+		background: rgba(148, 163, 184, 0.12);
+		border: 1px solid rgba(148, 163, 184, 0.18);
+	}
+	.metric-floating-confidence {
+		color: var(--mint);
+	}
+	.metric-floating-name {
+		font-family: var(--font-serif);
+		font-size: 19px;
+		line-height: 1.2;
+		color: var(--paper);
+	}
+	.metric-floating-desc {
+		font-size: 12px;
+		line-height: 1.5;
+		color: var(--text-secondary);
+		max-width: 42ch;
 	}
 	.doc-foot-hint {
 		font-size: 12px;

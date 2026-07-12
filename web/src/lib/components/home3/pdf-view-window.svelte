@@ -38,7 +38,8 @@
 		ondragmove,
 		toolbar,
 		linesView,
-		sidebar
+		sidebar,
+		floatingOverlay
 	}: {
 		inputId: number | null;
 		fileUrl: string;
@@ -76,6 +77,7 @@
 		toolbar?: Snippet;
 		linesView?: Snippet;
 		sidebar?: Snippet;
+		floatingOverlay?: Snippet;
 	} = $props();
 
 	// ---- Built-in selection dialog state (used when enableSelectionDialog=true and no external onselect) ----
@@ -343,6 +345,7 @@
 			highlightVersion={effectiveHighlightVersion}
 			repaintVersion={useBuiltinDialog ? builtinRepaintVersion : undefined}
 			renderHighlights={effectiveRenderHighlights}
+			{floatingOverlay}
 			{loadingLabel}
 			{respectPageRotation}
 			onselect={effectiveOnSelect}
