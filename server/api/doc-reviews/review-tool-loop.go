@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -132,9 +133,17 @@ func runToolUseReviewWithPayload(
 			turnMetadata = map[string]any{}
 		}
 		turnMetadata["turn_count"] = turn + 1
+		if cfg.PromptRef != "" {
+			turnMetadata["prompt_ref"] = cfg.PromptRef
+		}
+		turnMetadata["prompt_dir_env_var"] = "PROMPT_DIR"
+		if promptDir := strings.TrimSpace(os.Getenv("PROMPT_DIR")); promptDir != "" {
+			turnMetadata["prompt_dir"] = promptDir
+		}
 
 		resp, err := client.Complete(ctx, LLMRequest{
 			Model:      modelName,
+			PromptName: cfg.PromptRef,
 			Messages:   messages,
 			Tools:      toolDefs,
 			ToolChoice: "auto",
@@ -197,14 +206,14 @@ func runToolUseReviewWithPayload(
 		// Degenerate response (neither tool calls nor parseable findings):
 		// one repair attempt asking for strict JSON, then give up for this unit.
 		messages = append(messages, LLMMessage{Role: LLMRoleAssistant, Content: resp.Content})
-		findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, callReason, logger)
+		findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, cfg.PromptRef, recordID, messages, toolByName, callReason, logger)
 		addUsage(aggregateUsage, usage)
 		return findings, payload, aggregateUsage, err
 	}
 
 	// Budget exhausted (turns or tokens): force the model to produce findings
 	// from the evidence collected so far, without tools (DR10b force-produce).
-	findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, callReason, logger)
+	findings, payload, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, cfg.PromptRef, recordID, messages, toolByName, callReason, logger)
 	addUsage(aggregateUsage, usage)
 	return findings, payload, aggregateUsage, err
 }
@@ -217,13 +226,14 @@ func finalizeFindings(
 	ctx context.Context,
 	client LLMChatClient,
 	modelName string,
+	promptName string,
 	recordID int64,
 	messages []LLMMessage,
 	toolByName map[string]ReviewTool,
 	callReason string,
 	logger ApiTypes.JimoLogger,
 ) ([]ReviewFinding, *LLMUsage, error) {
-	findings, _, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, recordID, messages, toolByName, callReason, logger)
+	findings, _, usage, err := finalizeFindingsWithPayload(ctx, client, modelName, promptName, recordID, messages, toolByName, callReason, logger)
 	return findings, usage, err
 }
 
@@ -234,6 +244,7 @@ func finalizeFindingsWithPayload(
 	ctx context.Context,
 	client LLMChatClient,
 	modelName string,
+	promptName string,
 	recordID int64,
 	messages []LLMMessage,
 	toolByName map[string]ReviewTool,
@@ -251,10 +262,11 @@ func finalizeFindingsWithPayload(
 	})
 	resp, err := client.Complete(ctx, LLMRequest{
 		Model:      modelName,
+		PromptName: promptName,
 		Messages:   messages,
 		RecordID:   recordID,
 		CallReason: "review_tool_use_finalize",
-		CallLoc:    "MID-CWB-REVIEW-TOOL-LOOP-FINAL",
+		CallLoc:    "MID-20260712-01",
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("(MID_26062596) tool-use finalize call failed: %w", err)

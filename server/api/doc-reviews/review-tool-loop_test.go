@@ -129,6 +129,9 @@ func TestRunToolUseReviewUsesDocumentFirstPromptLayout(t *testing.T) {
 	if docIdx < 0 || taskIdx < 0 || docIdx > taskIdx {
 		t.Fatalf("user prompt is not document-first: %q", user)
 	}
+	if got := client.requests[0].PromptName; got != "" {
+		t.Fatalf("prompt name = %q, want empty when PromptRef is unset", got)
+	}
 }
 
 func (f *fakeToolClient) Stream(_ context.Context, _ llmclients.Request, _ llmclients.StreamHandler) error {
@@ -222,6 +225,43 @@ func TestRunToolUseReviewAggregatesPromptCacheTokens(t *testing.T) {
 	}
 }
 
+func TestRunToolUseReviewPassesPromptRefAndPromptDirMetadata(t *testing.T) {
+	t.Setenv("PROMPT_DIR", "/Users/cding/Workspace/ChenWeb/prompts")
+
+	client := &fakeToolClient{
+		responses: []*llmclients.Response{
+			{Content: `{"findings":[]}`},
+		},
+	}
+	logger := loggerutil.CreateDefaultLogger("TEST_LOOP_PROMPT_REF")
+
+	_, _, err := runToolUseReview(
+		context.Background(), client, "test-model",
+		ReviewerConfig{MaxToolTurns: 1, PromptRef: "prompt-review-metrics-v3.md"},
+		"You are a doc reviewer.", "<doc_input></doc_input><task>Check</task>",
+		[]ReviewTool{}, 42, logger, "review_metrics", "", "MID-20260706-011",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("requests=%d, want 1", len(client.requests))
+	}
+	req := client.requests[0]
+	if req.PromptName != "prompt-review-metrics-v3.md" {
+		t.Fatalf("PromptName=%q, want prompt-review-metrics-v3.md", req.PromptName)
+	}
+	if req.Metadata["prompt_ref"] != "prompt-review-metrics-v3.md" {
+		t.Fatalf("prompt_ref metadata=%v", req.Metadata["prompt_ref"])
+	}
+	if req.Metadata["prompt_dir_env_var"] != "PROMPT_DIR" {
+		t.Fatalf("prompt_dir_env_var metadata=%v", req.Metadata["prompt_dir_env_var"])
+	}
+	if req.Metadata["prompt_dir"] != "/Users/cding/Workspace/ChenWeb/prompts" {
+		t.Fatalf("prompt_dir metadata=%v", req.Metadata["prompt_dir"])
+	}
+}
+
 func TestRunToolUseReviewToolCallPathExecutesTool(t *testing.T) {
 	tc := &countingTool{name: "search_entities", calls: new(int)}
 	client := &fakeToolClient{
@@ -265,7 +305,7 @@ func TestFinalizeFindingsLogsInfoWhenNoFindings(t *testing.T) {
 	logger := &captureLogger{}
 
 	findings, _, err := finalizeFindings(
-		context.Background(), client, "test-model", 42,
+		context.Background(), client, "test-model", "test-prompt", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
 		nil,
 		"tester",
@@ -296,7 +336,7 @@ func TestFinalizeFindingsReturnsErrorWhenUnparseable(t *testing.T) {
 	logger := &captureLogger{}
 
 	findings, _, err := finalizeFindings(
-		context.Background(), client, "test-model", 42,
+		context.Background(), client, "test-model", "test-prompt", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
 		nil,
 		"tester",
@@ -333,7 +373,7 @@ func TestFinalizeFindingsRepairsInvalidJSONStringEscapes(t *testing.T) {
 	logger := &captureLogger{}
 
 	findings, _, err := finalizeFindings(
-		context.Background(), client, "test-model", 42,
+		context.Background(), client, "test-model", "test-prompt", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
 		nil,
 		"tester",
@@ -383,7 +423,7 @@ func TestFinalizeFindingsRepairsTextToolCalls(t *testing.T) {
 	logger := &captureLogger{}
 
 	findings, _, err := finalizeFindings(
-		context.Background(), client, "test-model", 42,
+		context.Background(), client, "test-model", "test-prompt", 42,
 		[]LLMMessage{{Role: LLMRoleUser, Content: "Check"}},
 		map[string]ReviewTool{"get_chunk_lines": lineTool},
 		"tester",
