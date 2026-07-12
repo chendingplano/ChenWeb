@@ -2822,6 +2822,9 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 	p.batchSkip = false
 	p.batchExistingMetrics = nil
 
+	p.Logger.Info("metrics InitChunkBatch", "record_id", recordID,
+		"force", force, "force_clear", forceClear, "record_stage", "init_batch")
+
 	if !force {
 		exists, err := p.Store.MetricsExist(ctx, recordID)
 		if err != nil {
@@ -2839,6 +2842,8 @@ func (p *MetricsProcessor) InitChunkBatch(ctx context.Context, recordID int64, c
 		if err != nil {
 			return fmt.Errorf("(MID_26071111) %s load existing metrics: %w", p.Name(), err)
 		}
+		p.Logger.Info("metrics merge: loaded existing metrics", "record_id", recordID,
+			"existing_count", len(existing), "record_stage", "init_batch")
 		p.batchExistingMetrics = existing
 	}
 
@@ -2940,7 +2945,9 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 			m["metric_id"] = fmt.Sprintf("%d_mtc_%d", p.batchRecordID, i+1)
 			metrics[i] = m
 		}
-		_, _ = p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
+		deleted, _ := p.Store.DeleteMetricsByInputRecordID(ctx, p.batchRecordID)
+		p.Logger.Info("metrics wipe (force_clear=true)", "record_id", p.batchRecordID,
+			"deleted_rows", deleted, "new_count", len(metrics))
 		if _, err := p.Store.SaveMetrics(ctx, SaveMetricsRequest{
 			InputRecordID: p.batchRecordID,
 			EventID:       eventIDFromContext(ctx),
@@ -2957,21 +2964,31 @@ func (p *MetricsProcessor) FinalizeChunkBatch(ctx context.Context) error {
 		return nil
 	}
 
+	p.Logger.Info("metrics merge (force_clear=false)", "record_id", p.batchRecordID,
+		"existing_count", len(p.batchExistingMetrics), "new_enriched_count", len(metrics),
+		"record_stage", "merge_start")
+
 	dirty, err := p.mergeAndCollectDirtyMetrics(ctx, metrics)
 	if err != nil {
 		return fmt.Errorf("(MID_26071112) %s merge metrics: %w", p.Name(), err)
 	}
 	if len(dirty) > 0 {
-		if _, err := p.Store.UpsertMetrics(ctx, SaveMetricsRequest{
+		inserted, err := p.Store.UpsertMetrics(ctx, SaveMetricsRequest{
 			InputRecordID: p.batchRecordID,
 			EventID:       eventIDFromContext(ctx),
 			Language:      firstNonEmptyTrimmed(p.batchLang, "unknown"),
 			ModelName:     firstNonEmptyTrimmed(p.batchModelName, p.MentionModelName),
 			PromptName:    p.RelationPromptRef,
 			Metrics:       dirty,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("(MID_26071113) %s upsert metrics: %w", p.Name(), err)
 		}
+		p.Logger.Info("metrics upserted (merge mode)", "record_id", p.batchRecordID,
+			"dirty_count", len(dirty), "rows_affected", inserted)
+	} else {
+		p.Logger.Info("metrics merge: nothing dirty", "record_id", p.batchRecordID,
+			"existing_count", len(p.batchExistingMetrics))
 	}
 	if fileErr := p.saveMetricsToFile(p.batchRecordID, rec, dirty); fileErr != nil {
 		p.Logger.Warn("save metrics to file failed", "record_id", p.batchRecordID, "error", fileErr)
@@ -3074,10 +3091,14 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 	}
 
 	for _, group := range merged.PendingGroups {
+		p.Logger.Info("merge resolve: sending pending group to LLM", "record_id", p.batchRecordID,
+			"candidates_in_group", len(group))
 		winners, err := p.resolveMergeAmbiguities(ctx, p.batchRecordID, group)
 		if err != nil {
 			return nil, err
 		}
+		p.Logger.Info("merge resolve: LLM returned winners", "record_id", p.batchRecordID,
+			"winners_count", len(winners))
 		groupByID := map[string]map[string]any{}
 		for _, g := range group {
 			groupByID[asString(g["metric_id"])] = g
@@ -3116,6 +3137,10 @@ func (p *MetricsProcessor) mergeAndCollectDirtyMetrics(ctx context.Context, newM
 			dirty = append(dirty, w)
 		}
 	}
+	p.Logger.Info("metrics merge complete", "record_id", p.batchRecordID,
+		"existing_loaded", len(existing), "new_enriched", len(newMetrics),
+		"rule3_added", len(merged.Added), "rule4_pending_groups", len(merged.PendingGroups),
+		"dirty_result", len(dirty), "record_stage", "merge_complete")
 	return dirty, nil
 }
 
