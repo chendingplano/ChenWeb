@@ -63,8 +63,9 @@
 	let retentionError      = $state('');
 	let retentionSuccess    = $state('');
 
-	// Selected row for artifact/extra_info detail
-	let expandedRowId = $state<number | null>(null);
+	// Selected row for detail dialog
+	let detailDialogOpen = $state(false);
+	let detailRow = $state<LogRow | null>(null);
 
 	const entryTypeOptions = [
 		{ value: '', label: 'All types' },
@@ -199,8 +200,14 @@
 		return !!(row.errors && row.errors.trim());
 	}
 
-	function showDetails(id: number) {
-		expandedRowId = expandedRowId === id ? null : id;
+	function showDetails(row: LogRow) {
+		detailRow = row;
+		detailDialogOpen = true;
+	}
+
+	function closeDetails() {
+		detailDialogOpen = false;
+		detailRow = null;
 	}
 
 	function prettyJSON(value?: string): string {
@@ -355,7 +362,7 @@
 								class="transition-colors"
 								style="
 									border-bottom:1px solid {borderColor};
-									background:{expandedRowId === row.id ? accent + '10' : 'transparent'};
+									background:{detailDialogOpen && detailRow?.id === row.id ? accent + '10' : 'transparent'};
 								"
 							>
 								<td class="px-4 py-3">
@@ -397,10 +404,10 @@
 								</td>
 								<td class="px-4 py-3">
 									<button
-										onclick={() => showDetails(row.id)}
+										onclick={() => showDetails(row)}
 										class="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs cursor-pointer"
 										style="background:{surface2}; color:{textPrimary}; border:1px solid {borderColor};"
-										aria-expanded={expandedRowId === row.id}
+										aria-expanded={detailDialogOpen && detailRow?.id === row.id}
 										aria-label={`Show details for log ${row.id}`}
 									>
 										<EyeIcon class="w-3.5 h-3.5" />
@@ -408,69 +415,6 @@
 									</button>
 								</td>
 							</tr>
-
-							{#if expandedRowId === row.id}
-								<tr style="background:{surface2}; border-bottom:1px solid {borderColor};">
-									<td colspan="9" class="px-6 py-4">
-										<div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(280px,1fr));">
-											{#if row.call_reason}
-												<div>
-													<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Reason</div>
-													<div style="font-size:13px; color:{textSecondary};">{row.call_reason}</div>
-												</div>
-											{/if}
-											{#if row.llm_call_id}
-												<div>
-													<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">LLM Call ID</div>
-													<div style="font-size:12px; color:{textSecondary}; font-family:monospace;">{row.llm_call_id}</div>
-												</div>
-											{/if}
-											{#if row.prompt_name}
-												<div>
-													<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Prompt</div>
-													<div style="font-size:13px; color:{textSecondary};">{row.prompt_name}</div>
-												</div>
-											{/if}
-											<div>
-												<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Create Time</div>
-												<div style="font-size:12px; color:{textSecondary};">{formatTime(row.create_time)}</div>
-											</div>
-											{#if row.proc_progress}
-												<div>
-													<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Progress</div>
-													<div style="font-size:13px; color:{textSecondary};">{row.proc_progress}</div>
-												</div>
-											{/if}
-										</div>
-
-										{#if row.extra_info}
-											<div class="mt-3">
-												<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Extra Info</div>
-												<pre class="rounded-lg p-3 overflow-x-auto text-xs"
-													style="background:{cardBg}; border:1px solid {borderColor}; color:{textSecondary}; max-height:200px;">{prettyJSON(row.extra_info)}</pre>
-											</div>
-										{/if}
-
-										{#if row.artifact}
-											<div class="mt-3">
-												<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Artifact</div>
-												<pre class="rounded-lg p-3 overflow-x-auto text-xs"
-													style="background:{cardBg}; border:1px solid {borderColor}; color:{textSecondary}; max-height:200px;">{prettyJSON(row.artifact)}</pre>
-											</div>
-										{/if}
-
-										{#if hasErrors(row)}
-											<div class="mt-3">
-												<div style="font-size:11px; color:{textMuted}; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Error Detail</div>
-												<div class="rounded-lg p-3 text-xs"
-													style="background:{danger}10; border:1px solid {danger}40; color:{danger};">
-													{row.errors}
-												</div>
-											</div>
-										{/if}
-									</td>
-								</tr>
-							{/if}
 						{/each}
 					</tbody>
 				</table>
@@ -525,3 +469,271 @@
 		{/if}
 	</div>
 </div>
+
+{#if detailDialogOpen && detailRow}
+	<div
+		class="doc-proc-view-dialog-overlay"
+		onmousedown={(e) => { if (e.target === e.currentTarget) closeDetails(); }}
+		onkeydown={(e) => { if (e.key === 'Escape') closeDetails(); }}
+		role="button"
+		tabindex="0"
+	>
+		<div
+			class="doc-proc-view-dialog"
+			onmousedown={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Doc processor log details"
+			tabindex="0"
+		>
+			<div class="doc-proc-view-dialog-head">
+				<h3 class="doc-proc-view-dialog-title">
+					Log Entry #{detailRow.id}
+				</h3>
+				<button class="doc-proc-view-close-btn" onclick={closeDetails}>Close</button>
+			</div>
+			<div class="doc-proc-view-dialog-body">
+				<div class="doc-proc-view-section">
+					<div class="doc-proc-view-section-label">Summary</div>
+					<div class="doc-proc-view-rows-box">
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">entry_type</span>
+							<span class="doc-proc-view-val">{detailRow.entry_type || '—'}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">doc_proc_name</span>
+							<span class="doc-proc-view-val">{detailRow.doc_proc_name || '—'}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">activity_name</span>
+							<span class="doc-proc-view-val">{detailRow.activity_name || '—'}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">call_reason</span>
+							<span class="doc-proc-view-val">{detailRow.call_reason || '—'}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">prompt_name</span>
+							<span class="doc-proc-view-val">{detailRow.prompt_name || '—'}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">model_names</span>
+							<span class="doc-proc-view-val">{detailRow.model_names.length ? detailRow.model_names.join(', ') : '—'}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">pass</span>
+							<span class="doc-proc-view-val">{detailRow.pass != null ? detailRow.pass : '—'}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">duration</span>
+							<span class="doc-proc-view-val">{formatDuration(detailRow.ms_used)}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">create_time</span>
+							<span class="doc-proc-view-val">{formatTime(detailRow.create_time)}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">proc_progress</span>
+							<span class="doc-proc-view-val">{detailRow.proc_progress || '—'}</span>
+						</div>
+						<div class="doc-proc-view-row">
+							<span class="doc-proc-view-key">llm_call_id</span>
+							<span class="doc-proc-view-val doc-proc-view-val-mono">{detailRow.llm_call_id || '—'}</span>
+						</div>
+					</div>
+				</div>
+
+				{#if detailRow.extra_info}
+					<div class="doc-proc-view-section">
+						<div class="doc-proc-view-section-label">Extra Info</div>
+						<pre class="doc-proc-view-pre">{prettyJSON(detailRow.extra_info)}</pre>
+					</div>
+				{/if}
+
+				{#if detailRow.artifact}
+					<div class="doc-proc-view-section">
+						<div class="doc-proc-view-section-label">Artifact</div>
+						<pre class="doc-proc-view-pre">{prettyJSON(detailRow.artifact)}</pre>
+					</div>
+				{/if}
+
+				<div class="doc-proc-view-section">
+					<div class="doc-proc-view-section-label">Errors</div>
+					{#if hasErrors(detailRow)}
+						<div class="doc-proc-view-error-box">{detailRow.errors}</div>
+					{:else}
+						<div class="doc-proc-view-empty">No errors recorded for this entry.</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<style>
+	.doc-proc-view-dialog-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.75rem;
+		background: rgba(2, 6, 23, 0.72);
+		backdrop-filter: blur(10px);
+	}
+
+	.doc-proc-view-dialog {
+		display: flex;
+		flex-direction: column;
+		width: min(1046px, calc(100vw - 48px));
+		max-height: calc(100vh - 48px);
+		min-width: 480px;
+		overflow: hidden;
+		border-radius: 20px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		background: #111827;
+		color: #f3eedf;
+	}
+
+	.doc-proc-view-dialog-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 16px 24px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+		flex-shrink: 0;
+	}
+
+	.doc-proc-view-dialog-title {
+		margin: 0;
+		font-size: 15px;
+		font-weight: 600;
+		color: #f3eedf;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	}
+
+	.doc-proc-view-close-btn {
+		height: 30px;
+		padding: 0 12px;
+		border-radius: 8px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		background: rgba(255, 255, 255, 0.04);
+		color: #9ca3af;
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.doc-proc-view-dialog-body {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 16px 24px 24px;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.doc-proc-view-section-label {
+		margin-bottom: 6px;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: #9ca3af;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	}
+
+	.doc-proc-view-rows-box {
+		border: 1px solid rgba(148, 163, 184, 0.12);
+		border-radius: 12px;
+		background: rgba(148, 163, 184, 0.06);
+		padding: 8px 0;
+	}
+
+	.doc-proc-view-row {
+		display: grid;
+		grid-template-columns: 180px minmax(0, 1fr);
+		gap: 12px;
+		padding: 5px 14px;
+		align-items: start;
+	}
+
+	.doc-proc-view-key {
+		color: #94a3b8;
+		font-size: 12px;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		word-break: break-word;
+	}
+
+	.doc-proc-view-val {
+		color: #e5e7eb;
+		font-size: 12px;
+		line-height: 1.5;
+		word-break: break-word;
+	}
+
+	.doc-proc-view-val-mono {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	}
+
+	.doc-proc-view-pre {
+		margin: 0;
+		padding: 12px 14px;
+		border-radius: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.12);
+		background: rgba(148, 163, 184, 0.06);
+		color: #cbd5e1;
+		font-size: 12px;
+		line-height: 1.55;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		overflow: auto;
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 320px;
+	}
+
+	.doc-proc-view-error-box,
+	.doc-proc-view-empty {
+		padding: 12px 14px;
+		border-radius: 12px;
+		font-size: 12px;
+		line-height: 1.55;
+	}
+
+	.doc-proc-view-error-box {
+		border: 1px solid rgba(248, 113, 113, 0.28);
+		background: rgba(248, 113, 113, 0.12);
+		color: #fca5a5;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.doc-proc-view-empty {
+		border: 1px solid rgba(148, 163, 184, 0.12);
+		background: rgba(148, 163, 184, 0.06);
+		color: #94a3b8;
+	}
+
+	@media (max-width: 720px) {
+		.doc-proc-view-dialog {
+			width: min(100vw - 24px, 1046px);
+			min-width: 0;
+		}
+
+		.doc-proc-view-dialog-head {
+			padding: 14px 16px;
+		}
+
+		.doc-proc-view-dialog-body {
+			padding: 14px 16px 18px;
+		}
+
+		.doc-proc-view-row {
+			grid-template-columns: 1fr;
+			gap: 4px;
+		}
+	}
+</style>
