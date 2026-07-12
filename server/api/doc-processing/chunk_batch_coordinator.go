@@ -356,9 +356,8 @@ func (s *ControlService) runPhaseBProcessors(
 	phaseA, phaseB := splitProcessorsByPhase(processors)
 	part := partitionBatchProcessors(phaseB)
 
-	// Only one (or zero) batch-capable processor: batching yields no
-	// cross-processor cache benefit, so run everything legacy.
-	if len(part.batch) <= 1 {
+	// Only zero batch-capable processors: run everything legacy.
+	if len(part.batch) == 0 {
 		s.runProcessorsTwoPhase(ctx, payload, processors, recordID,
 			requestFailed, requestStopped, firstErr, summaries)
 		return
