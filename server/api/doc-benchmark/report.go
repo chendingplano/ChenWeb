@@ -55,7 +55,16 @@ func (r BenchmarkReport) canonical() BenchmarkReport {
 		return out.Aggregates[i].Component < out.Aggregates[j].Component
 	})
 	out.PairedDeltas = append([]PairedDelta(nil), r.PairedDeltas...)
-	sort.Slice(out.PairedDeltas, func(i, j int) bool { return out.PairedDeltas[i].Metric < out.PairedDeltas[j].Metric })
+	sort.Slice(out.PairedDeltas, func(i, j int) bool {
+		a, b := out.PairedDeltas[i], out.PairedDeltas[j]
+		if a.Metric != b.Metric {
+			return a.Metric < b.Metric
+		}
+		if a.Component != b.Component {
+			return a.Component < b.Component
+		}
+		return a.AggregationKind < b.AggregationKind
+	})
 	if r.Warnings != nil {
 		out.Warnings = append([]string(nil), r.Warnings...)
 		sort.Strings(out.Warnings)

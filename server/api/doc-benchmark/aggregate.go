@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 )
 
 // ScoreUnit is one applicable (case,repetition) sampling unit.
@@ -298,6 +299,7 @@ type VariantComparison struct {
 }
 type PairedDelta struct {
 	Metric          string   `json:"metric"`
+	Component       string   `json:"component,omitempty"`
 	Delta           *float64 `json:"delta"`
 	PairedUnits     int      `json:"paired_units"`
 	ApplicableUnits int      `json:"applicable_units"`
@@ -395,7 +397,12 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 		}
 		mean /= float64(len(v))
 		med, sd := distribution(v)
-		out = append(out, PairedDelta{Metric: m, Delta: &mean, Median: med, PopulationSD: sd, AggregationKind: "paired_macro_diagnostic", PairedUnits: len(v), ApplicableUnits: len(v)})
+		parts := strings.SplitN(m, "\x00", 2)
+		metric, component := parts[0], ""
+		if len(parts) == 2 {
+			component = parts[1]
+		}
+		out = append(out, PairedDelta{Metric: metric, Component: component, Delta: &mean, Median: med, PopulationSD: sd, AggregationKind: "paired_macro_diagnostic", PairedUnits: len(v), ApplicableUnits: len(v)})
 	}
 	for key, a := range pooledA {
 		q := pooledB[key]
@@ -403,10 +410,18 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 		vb := microValue(key.metric, q[0], q[1], q[2])
 		if va != nil && vb != nil {
 			d := *vb - *va
-			out = append(out, PairedDelta{Metric: key.metric, Delta: &d, AggregationKind: key.kind, PairedUnits: applicableByMetric[key], ApplicableUnits: applicableByMetric[key]})
+			out = append(out, PairedDelta{Metric: key.metric, Component: key.component, Delta: &d, AggregationKind: key.kind, PairedUnits: applicableByMetric[key], ApplicableUnits: applicableByMetric[key]})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Metric < out[j].Metric })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Metric != out[j].Metric {
+			return out[i].Metric < out[j].Metric
+		}
+		if out[i].Component != out[j].Component {
+			return out[i].Component < out[j].Component
+		}
+		return out[i].AggregationKind < out[j].AggregationKind
+	})
 	return out, warnings, nil
 }
 
