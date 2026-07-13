@@ -19,6 +19,7 @@ import (
 type ProductionRuntime struct {
 	Control    *ControlService
 	Processors []Processor
+	services   map[string]any
 	config     ResolvedConfigSnapshot
 }
 
@@ -59,8 +60,13 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 		NewSceneBlocksProcessor(inputStore, SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 	}
 	control := &ControlService{Logger: logger, InputStore: inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: NewBlockingProcessor(inputStore, logger), Processors: filterProcessors(all, configuredNames())}
-	r := &ProductionRuntime{Control: control, Processors: control.Processors}
-	r.config = makeResolvedConfig(control)
+	r := &ProductionRuntime{Control: control, Processors: control.Processors, services: map[string]any{"chunking": fixed.RuntimeConfig()}}
+	for _, p := range control.Processors {
+		if m, ok := p.(*MetricsProcessor); ok {
+			r.services["extract_metrics"] = m.RuntimeConfig()
+		}
+	}
+	r.config = makeResolvedConfig(control, r.services)
 	return r, nil
 }
 
@@ -98,11 +104,11 @@ func (r *ProductionRuntime) AllowedOverrides() map[string][]string {
 
 func (r *ProductionRuntime) ResolvedConfig() ResolvedConfigSnapshot {
 	if r.config.Hash == "" {
-		r.config = makeResolvedConfig(r.Control)
+		r.config = makeResolvedConfig(r.Control, r.services)
 	}
 	return r.config
 }
-func makeResolvedConfig(c *ControlService) ResolvedConfigSnapshot {
+func makeResolvedConfig(c *ControlService, services map[string]any) ResolvedConfigSnapshot {
 	names := []string{}
 	if c != nil {
 		for _, p := range c.Processors {
@@ -115,6 +121,9 @@ func makeResolvedConfig(c *ControlService) ResolvedConfigSnapshot {
 	v["model_references"] = map[string]any{}
 	v["concurrency"] = map[string]any{"run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv()}
 	v["seed_support"] = false
+	if services != nil {
+		v["services"] = services
+	}
 	if c != nil {
 		v["max_doc_process_pipelines"] = c.MaxDocProcessPipelines
 	}
