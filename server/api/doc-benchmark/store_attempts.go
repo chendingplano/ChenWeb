@@ -46,6 +46,12 @@ func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now
 	if e != nil {
 		return Claim{}, e
 	}
+	if lifecycle != "pending" && lifecycle != "running" {
+		if e = tx.Commit(); e != nil {
+			return Claim{}, e
+		}
+		return Claim{Claimed: false}, nil
+	}
 	now = utc(now)
 	if selected.Valid {
 		if e = tx.Commit(); e != nil {
