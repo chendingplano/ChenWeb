@@ -27,6 +27,7 @@ type OrchestratorConfig struct {
 	Launcher            WorkerLauncher
 	RunID               string
 	AllowDirty          bool
+	Cases               []string
 }
 
 type Orchestrator struct{ Config OrchestratorConfig }
@@ -97,6 +98,38 @@ func (o Orchestrator) runVariant(ctx context.Context, v ExperimentVariant) error
 	case <-ctx.Done():
 		_ = p.Kill()
 		return ctx.Err()
+	}
+	cases := append([]string(nil), o.Config.Cases...)
+	sort.Strings(cases)
+	for _, caseID := range cases {
+		if err := p.Send(WorkerRequest{Version: WorkerProtocolVersion, Type: "case", RunID: o.Config.RunID, CaseID: caseID}); err != nil {
+			return err
+		}
+		for {
+			select {
+			case m, ok := <-p.Messages():
+				if !ok {
+					return errors.New("orchestrator: worker exited before case result")
+				}
+				if m.Type == "heartbeat" {
+					continue
+				}
+				if m.Type != "result" || m.CaseID != caseID {
+					return errors.New("orchestrator: invalid case result")
+				}
+				if m.Error != nil {
+					return fmt.Errorf("case %s: %s", caseID, m.Error.Message)
+				}
+				goto nextCase
+			case <-ctx.Done():
+				_ = p.Kill()
+				return ctx.Err()
+			}
+		}
+	nextCase:
+	}
+	if err := p.Send(WorkerRequest{Version: WorkerProtocolVersion, Type: "shutdown"}); err != nil {
+		return err
 	}
 	return p.Wait()
 }
