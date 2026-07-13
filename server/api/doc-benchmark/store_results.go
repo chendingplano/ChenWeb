@@ -24,6 +24,23 @@ type ArtifactRecord struct {
 	Metadata           json.RawMessage
 }
 
+func (s SQLStore) ReportArtifacts(ctx context.Context, runID string) ([]ArtifactRecord, error) {
+	rows, e := s.DB.QueryContext(txctx(ctx), `SELECT a.id,a.attempt_id,a.run_id,a.kind,a.path,a.sha256,a.size_bytes,a.verified,a.metadata_json FROM kb.benchmark_artifacts a LEFT JOIN kb.benchmark_case_attempts at ON at.id=a.attempt_id LEFT JOIN kb.benchmark_case_runs c ON c.id=at.case_run_id WHERE a.run_id=$1 OR (c.run_id=$1 AND c.selected_attempt_id=a.attempt_id) ORDER BY a.kind,a.path,a.id`, runID)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	var out []ArtifactRecord
+	for rows.Next() {
+		var r ArtifactRecord
+		if e = rows.Scan(&r.ID, &r.AttemptID, &r.RunID, &r.Kind, &r.Path, &r.SHA256, &r.SizeBytes, &r.Verified, &r.Metadata); e != nil {
+			return nil, e
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (s SQLStore) InsertScore(ctx context.Context, r ScoreRecord) (string, error) {
 	if s.DB == nil {
 		return "", fmt.Errorf("nil database")
@@ -50,7 +67,7 @@ func (s SQLStore) MarkWorkspaceCleanup(ctx context.Context, id, state string, er
 	return affected(res)
 }
 func (s SQLStore) ReportScores(ctx context.Context, runID string) ([]ScoreRecord, error) {
-	rows, e := s.DB.QueryContext(txctx(ctx), `SELECT s.id,s.attempt_id,s.run_id,s.processor,s.scorer,s.scorer_version,s.metric,s.slice,s.direction,s.aggregation_kind,s.value,s.additive_component,s.numerator,s.denominator,s.non_null,s.applicable,s.metadata_json FROM kb.benchmark_scores s LEFT JOIN kb.benchmark_case_attempts a ON a.id=s.attempt_id LEFT JOIN kb.benchmark_case_runs c ON c.id=a.case_run_id WHERE s.run_id=$1 OR c.run_id=$1 ORDER BY s.processor,s.metric,s.slice,s.aggregation_kind,s.id`, runID)
+	rows, e := s.DB.QueryContext(txctx(ctx), `SELECT s.id,s.attempt_id,s.run_id,s.processor,s.scorer,s.scorer_version,s.metric,s.slice,s.direction,s.aggregation_kind,s.value,s.additive_component,s.numerator,s.denominator,s.non_null,s.applicable,s.metadata_json FROM kb.benchmark_scores s LEFT JOIN kb.benchmark_case_attempts a ON a.id=s.attempt_id LEFT JOIN kb.benchmark_case_runs c ON c.id=a.case_run_id WHERE s.run_id=$1 OR (c.run_id=$1 AND c.selected_attempt_id=s.attempt_id) ORDER BY s.processor,s.metric,s.slice,s.aggregation_kind,s.id`, runID)
 	if e != nil {
 		return nil, e
 	}
