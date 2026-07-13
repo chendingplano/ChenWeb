@@ -51,6 +51,13 @@ func (s *ControlService) HandleEvent(ctx context.Context, payload []byte) {
 	s.handleEvent(ctx, payload)
 }
 
+// RunEvent processes a payload synchronously through the production event path.
+// It is the embeddable counterpart to HandleEvent for callers that need the
+// resulting error rather than fire-and-forget behavior.
+func (s *ControlService) RunEvent(ctx context.Context, payload []byte) error {
+	return s.handleEvent(ctx, payload)
+}
+
 func (s *ControlService) HandleJetStreamEvent(ctx context.Context, subject string, payload []byte) error {
 	eventID := ""
 	if s.EventStore != nil {

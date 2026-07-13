@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -19,7 +18,6 @@ import (
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/databaseutil"
-	llmclients "github.com/chendingplano/shared/go/api/llm"
 	"github.com/chendingplano/shared/go/api/loggerutil"
 	"github.com/chendingplano/shared/go/api/observability"
 	"github.com/joho/godotenv"
@@ -197,62 +195,64 @@ func main() {
 		os.Exit(1)
 	}
 
-	newLLMClient := func() *llmclients.OpenAIJSONClient {
-		return &llmclients.OpenAIJSONClient{
-			HTTPClient: &http.Client{Timeout: 100 * time.Second},
-		}
+	/* production processor graph is shared with benchmark workers */
+	runtime, err := docprocessing.NewProductionRuntime(logger)
+	if err != nil {
+		logger.Error("failed to build doc processor runtime", "error", err)
+		os.Exit(1)
 	}
-	llmClient := newLLMClient()
-	staticAnalyzerLLMClient := newLLMClient()
-	metricsLLMClient := newLLMClient()
-	provisionsLLMClient := newLLMClient()
-	sceneBlocksLLMClient := newLLMClient()
-	semanticProjectionsLLMClient := newLLMClient()
-	knowledgeLLMClient := newLLMClient()
-	entityRelationLLMClient := newLLMClient()
-	inventoryItemsLLMClient := newLLMClient()
-	// productsLLMClient := newLLMClient()
-	// structureLLMClient := newLLMClient()
-	fixedChunkLLMClient := newLLMClient()
+	control := runtime.Control
+	/*
+		staticAnalyzerLLMClient := newLLMClient()
+		metricsLLMClient := newLLMClient()
+		provisionsLLMClient := newLLMClient()
+		sceneBlocksLLMClient := newLLMClient()
+		semanticProjectionsLLMClient := newLLMClient()
+		knowledgeLLMClient := newLLMClient()
+		entityRelationLLMClient := newLLMClient()
+		inventoryItemsLLMClient := newLLMClient()
+		// productsLLMClient := newLLMClient()
+		// structureLLMClient := newLLMClient()
+		fixedChunkLLMClient := newLLMClient()
 
-	inputStore := docprocessing.DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
-	fixedChunkSvc := docprocessing.NewFixedSizeChunkingService(
-		docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
-		fixedChunkLLMClient,
-		logger,
-	)
-	phaseProcessors := buildChunkPhaseProcessors(inputStore, fixedChunkSvc, logger)
+		inputStore := docprocessing.DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
+		fixedChunkSvc := docprocessing.NewFixedSizeChunkingService(
+			docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+			fixedChunkLLMClient,
+			logger,
+		)
+		phaseProcessors := buildChunkPhaseProcessors(inputStore, fixedChunkSvc, logger)
 
-	control := &docprocessing.ControlService{
-		Logger:                 logger,
-		InputStore:             inputStore,
-		EventStore:             docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
-		RunStore:               docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
-		StopStore:              docprocessing.StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle},
-		Now:                    time.Now,
-		MaxDocProcessPipelines: docprocessing.MaxDocProcessPipelinesFromEnv(),
-		BlockingProcessor:      docprocessing.NewBlockingProcessor(inputStore, logger),
-		Processors: filterConfiguredProcessors([]docprocessing.Processor{
-			// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
-			docprocessing.NewStaticAnalyzerProcessor(inputStore, staticAnalyzerLLMClient, logger),
-			phaseProcessors[0],
-			phaseProcessors[1],
-			phaseProcessors[2],
-			docprocessing.NewExtractDocMetadataProcessor(inputStore, llmClient, logger),
-			docprocessing.NewSemanticProjectionsProcessor(inputStore, docprocessing.SemanticProjectionsSQLStore{DB: ApiTypes.ProjectDBHandle}, semanticProjectionsLLMClient, logger),
-			docprocessing.NewStructuredKnowledgeProcessor(inputStore, docprocessing.StructuredKnowledgeSQLStore{DB: ApiTypes.ProjectDBHandle}, knowledgeLLMClient, logger),
-			// ADR 2026061702: entity and relation extraction are split into two
-			// independent processors that run in parallel (concurrent mode). Endpoint
-			// linking happens once in Phase C, owned by the relation processor.
-			docprocessing.NewEntityProcessor(inputStore, docprocessing.EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, entityRelationLLMClient, logger),
-			docprocessing.NewRelationProcessor(inputStore, docprocessing.EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, entityRelationLLMClient, logger),
-			docprocessing.NewInventoryItemsProcessor(inputStore, docprocessing.InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, inventoryItemsLLMClient, logger),
-			docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
-			docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
-			docprocessing.NewSceneBlocksProcessor(inputStore, docprocessing.SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, sceneBlocksLLMClient, logger),
-			// docprocessing.NewProductsProcessor(inputStore, docprocessing.ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, productsLLMClient, logger),
-		}, configuredProcessorNames()),
-	}
+		control := &docprocessing.ControlService{
+			Logger:                 logger,
+			InputStore:             inputStore,
+			EventStore:             docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+			RunStore:               docprocessing.SQLStore{DB: ApiTypes.ProjectDBHandle},
+			StopStore:              docprocessing.StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle},
+			Now:                    time.Now,
+			MaxDocProcessPipelines: docprocessing.MaxDocProcessPipelinesFromEnv(),
+			BlockingProcessor:      docprocessing.NewBlockingProcessor(inputStore, logger),
+			Processors: filterConfiguredProcessors([]docprocessing.Processor{
+				// docprocessing.NewStructureAnalyzerProcessor(inputStore, structureLLMClient, logger),
+				docprocessing.NewStaticAnalyzerProcessor(inputStore, staticAnalyzerLLMClient, logger),
+				phaseProcessors[0],
+				phaseProcessors[1],
+				phaseProcessors[2],
+				docprocessing.NewExtractDocMetadataProcessor(inputStore, llmClient, logger),
+				docprocessing.NewSemanticProjectionsProcessor(inputStore, docprocessing.SemanticProjectionsSQLStore{DB: ApiTypes.ProjectDBHandle}, semanticProjectionsLLMClient, logger),
+				docprocessing.NewStructuredKnowledgeProcessor(inputStore, docprocessing.StructuredKnowledgeSQLStore{DB: ApiTypes.ProjectDBHandle}, knowledgeLLMClient, logger),
+				// ADR 2026061702: entity and relation extraction are split into two
+				// independent processors that run in parallel (concurrent mode). Endpoint
+				// linking happens once in Phase C, owned by the relation processor.
+				docprocessing.NewEntityProcessor(inputStore, docprocessing.EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, entityRelationLLMClient, logger),
+				docprocessing.NewRelationProcessor(inputStore, docprocessing.EntityRelationSQLStore{DB: ApiTypes.ProjectDBHandle}, entityRelationLLMClient, logger),
+				docprocessing.NewInventoryItemsProcessor(inputStore, docprocessing.InventoryItemsSQLStore{DB: ApiTypes.ProjectDBHandle}, inventoryItemsLLMClient, logger),
+				docprocessing.NewMetricsProcessor(inputStore, docprocessing.MetricsSQLStore{DB: ApiTypes.ProjectDBHandle}, metricsLLMClient, logger),
+				docprocessing.NewProvisionsProcessor(inputStore, docprocessing.ProvisionsSQLStore{DB: ApiTypes.ProjectDBHandle}, provisionsLLMClient, logger),
+				docprocessing.NewSceneBlocksProcessor(inputStore, docprocessing.SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, sceneBlocksLLMClient, logger),
+				// docprocessing.NewProductsProcessor(inputStore, docprocessing.ProductsSQLStore{DB: ApiTypes.ProjectDBHandle}, productsLLMClient, logger),
+			}, configuredProcessorNames()),
+		}*/
 
 	processorNames := []string{"blocking"}
 	for _, p := range control.Processors {

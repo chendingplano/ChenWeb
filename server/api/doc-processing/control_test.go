@@ -140,6 +140,15 @@ func TestControlService_UsesOperationOrder(t *testing.T) {
 	}
 }
 
+func TestControlService_RunEventDelegatesSynchronously(t *testing.T) {
+	wantErr := errors.New("processor failed")
+	svc := &ControlService{Processors: []Processor{fakeProcessor{name: "extract_metrics", retErr: wantErr}}}
+	err := svc.RunEvent(context.Background(), []byte(`{"record_id":"1","operation":["extract_metrics"]}`))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("RunEvent error=%v, want %v", err, wantErr)
+	}
+}
+
 func TestExpandProcessorDependenciesAddsChunkingForChunkConsumers(t *testing.T) {
 	got := expandProcessorDependencies([]string{"extract_metrics", "extract_provisions"})
 	want := []string{"static_analyzer", "chunking", "extract_metrics", "extract_provisions"}
