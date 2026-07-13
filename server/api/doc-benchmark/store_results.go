@@ -8,11 +8,14 @@ import (
 	"fmt"
 )
 
+var ErrConflict = errors.New("benchmark idempotency conflict")
+
 // ConflictError indicates that an idempotency key already exists with a
 // different canonical payload.
 type ConflictError struct{ Resource, Key string }
 
 func (e *ConflictError) Error() string { return fmt.Sprintf("%s conflict for %s", e.Resource, e.Key) }
+func (e *ConflictError) Unwrap() error { return ErrConflict }
 
 func IsConflict(err error) bool { var c *ConflictError; return errors.As(err, &c) }
 
