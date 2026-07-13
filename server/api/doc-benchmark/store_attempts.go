@@ -83,7 +83,7 @@ func (s SQLStore) ClaimAttempt(ctx context.Context, caseRunID, owner string, now
 	var src any
 	var input any
 	var verified bool
-	e = tx.QueryRowContext(txctx(ctx), `SELECT capture_verified,input_record_id_snapshot FROM kb.benchmark_case_attempts WHERE case_run_id=$1 AND kind='execution' AND capture_verified=true AND lifecycle='failed' AND failure_kind IN ('infrastructure_failed','stale_lease') ORDER BY attempt_number DESC LIMIT 1`, caseRunID).Scan(&verified, &input)
+	e = tx.QueryRowContext(txctx(ctx), `SELECT capture_verified,input_record_id_snapshot FROM kb.benchmark_case_attempts WHERE case_run_id=$1 AND kind='execution' AND capture_verified=true AND lifecycle='failed' AND failure_kind IN ('infrastructure_failed','stale_lease','scorer_failed','timed_out') ORDER BY attempt_number DESC LIMIT 1`, caseRunID).Scan(&verified, &input)
 	if e == nil && verified {
 		kind = "rescore"
 		e = tx.QueryRowContext(txctx(ctx), `SELECT id FROM kb.benchmark_case_attempts WHERE case_run_id=$1 AND kind='execution' AND capture_verified=true ORDER BY attempt_number DESC LIMIT 1`, caseRunID).Scan(&src)
