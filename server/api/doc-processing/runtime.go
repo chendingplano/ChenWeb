@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/chendingplano/shared/go/api/ApiTypes"
@@ -79,7 +80,9 @@ func filterProcessors(processors []Processor, required []string) []Processor {
 	}
 	return out
 }
+
 func normalizeRuntimeName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(strings.ReplaceAll(s, "-", "_")))
 	if s == "extract_metadata" {
 		return "extract_doc_metadata"
 	}
@@ -108,6 +111,10 @@ func makeResolvedConfig(c *ControlService) ResolvedConfigSnapshot {
 	}
 	sort.Strings(names)
 	v := map[string]any{"processors": names, "max_doc_process_pipelines": 0, "run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv(), "chunk_size": envInt("CHUNK_SIZE", DefaultChunkSize, 1), "chunk_overlap_percent": envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0)}
+	v["prompt_hashes"] = map[string]string{}
+	v["model_references"] = map[string]any{}
+	v["concurrency"] = map[string]any{"run_doc_processor_concurrent": RunDocProcessorConcurrentFromEnv()}
+	v["seed_support"] = false
 	if c != nil {
 		v["max_doc_process_pipelines"] = c.MaxDocProcessPipelines
 	}
