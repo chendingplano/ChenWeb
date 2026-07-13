@@ -37,6 +37,10 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if n != 7 {
 		t.Fatalf("benchmark tables=%d, want 7", n)
 	}
+	var cols int
+	if err = db.QueryRow(`SELECT count(*) FROM information_schema.columns WHERE table_schema='kb' AND table_name='benchmark_scores' AND column_name IN ('attempt_id','run_id','metric','slice','aggregation_kind')`).Scan(&cols); err != nil || cols != 5 {
+		t.Fatalf("benchmark_scores catalog columns=%d err=%v", cols, err)
+	}
 	// Minimal graph and representative constraints.
 	var exp, run, cr, at string
 	err = db.QueryRow(`INSERT INTO kb.benchmark_experiments(name,dataset_id,dataset_version,dataset_hash,raw_request_toml,raw_request_hash,resolved_experiment_json,resolved_file_hashes_json,resolved_case_set_json) VALUES ('x','d','v','h','x','rh','{}','{}','{}') RETURNING id`).Scan(&exp)
