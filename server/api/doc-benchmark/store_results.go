@@ -4,8 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
+
+// ConflictError indicates that an idempotency key already exists with a
+// different canonical payload.
+type ConflictError struct{ Resource, Key string }
+
+func (e *ConflictError) Error() string { return fmt.Sprintf("%s conflict for %s", e.Resource, e.Key) }
+
+func IsConflict(err error) bool { var c *ConflictError; return errors.As(err, &c) }
 
 type ScoreRecord struct {
 	ID                                                                          string
@@ -53,6 +62,18 @@ func (s SQLStore) InsertScore(ctx context.Context, r ScoreRecord) (string, error
 		return "", err
 	}
 	var id string
+	var old ScoreRecord
+	q := `SELECT id,processor,scorer,scorer_version,direction,value,additive_component,numerator,denominator,non_null,applicable,metadata_json FROM kb.benchmark_scores WHERE ((attempt_id=$1 AND $1 IS NOT NULL) OR (run_id=$2 AND $2 IS NOT NULL)) AND metric=$3 AND slice=$4 AND aggregation_kind=$5`
+	err = s.DB.QueryRowContext(txctx(ctx), q, nullArg(r.AttemptID), nullArg(r.RunID), r.Metric, r.Slice, r.AggregationKind).Scan(&old.ID, &old.Processor, &old.Scorer, &old.ScorerVersion, &old.Direction, &old.Value, &old.AdditiveComponent, &old.Numerator, &old.Denominator, &old.NonNull, &old.Applicable, &old.Metadata)
+	if err == nil {
+		if scoreEqual(r, old, b) {
+			return old.ID, nil
+		}
+		return "", &ConflictError{Resource: "score", Key: r.Metric + "/" + r.Slice + "/" + r.AggregationKind}
+	}
+	if err != sql.ErrNoRows {
+		return "", err
+	}
 	e := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_scores (attempt_id,run_id,processor,scorer,scorer_version,metric,slice,direction,aggregation_kind,value,additive_component,numerator,denominator,non_null,applicable,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, r.AttemptID, r.RunID, r.Processor, r.Scorer, r.ScorerVersion, r.Metric, r.Slice, r.Direction, r.AggregationKind, r.Value, r.AdditiveComponent, r.Numerator, r.Denominator, r.NonNull, r.Applicable, b).Scan(&id)
 	return id, e
 }
@@ -68,8 +89,29 @@ func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string,
 		return "", err
 	}
 	var id string
+	var old ArtifactRecord
+	err = s.DB.QueryRowContext(txctx(ctx), `SELECT id,sha256,size_bytes,verified,metadata_json FROM kb.benchmark_artifacts WHERE ((attempt_id=$1 AND $1 IS NOT NULL) OR (run_id=$2 AND $2 IS NOT NULL)) AND kind=$3 AND path=$4`, nullArg(r.AttemptID), nullArg(r.RunID), r.Kind, r.Path).Scan(&old.ID, &old.SHA256, &old.SizeBytes, &old.Verified, &old.Metadata)
+	if err == nil {
+		if old.SHA256 == r.SHA256 && old.SizeBytes == r.SizeBytes && old.Verified == r.Verified && string(old.Metadata) == string(b) {
+			return old.ID, nil
+		}
+		return "", &ConflictError{Resource: "artifact", Key: r.Kind + "/" + r.Path}
+	}
+	if err != sql.ErrNoRows {
+		return "", err
+	}
 	e := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_artifacts (attempt_id,run_id,kind,path,sha256,size_bytes,verified,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, r.AttemptID, r.RunID, r.Kind, r.Path, r.SHA256, r.SizeBytes, r.Verified, b).Scan(&id)
 	return id, e
+}
+
+func nullArg(v sql.NullString) any {
+	if v.Valid {
+		return v.String
+	}
+	return nil
+}
+func scoreEqual(r ScoreRecord, o ScoreRecord, metadata []byte) bool {
+	return r.Processor == o.Processor && r.Scorer == o.Scorer && r.ScorerVersion == o.ScorerVersion && r.Direction == o.Direction && r.Value == o.Value && r.AdditiveComponent == o.AdditiveComponent && r.Numerator == o.Numerator && r.Denominator == o.Denominator && r.NonNull == o.NonNull && r.Applicable == o.Applicable && string(o.Metadata) == string(metadata)
 }
 func (s SQLStore) MarkWorkspaceCleanup(ctx context.Context, id, state string, errText *string) error {
 	res, e := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces SET cleanup_state=$2,cleanup_error=$3,cleaned_at=CASE WHEN $2='cleaned' THEN now() ELSE cleaned_at END WHERE id=$1`, id, state, errText)
