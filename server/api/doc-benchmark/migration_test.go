@@ -108,6 +108,10 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if _, err = db.Exec(`DELETE FROM kb.benchmark_artifacts WHERE attempt_id=$1`, at); err == nil {
 		t.Fatal("verified artifact delete accepted")
 	}
+	var fk int
+	if err = db.QueryRow(`SELECT count(*) FROM pg_constraint WHERE conrelid='kb.benchmark_workspaces'::regclass AND confrelid='kb.inputs'::regclass AND confdeltype='n'`).Scan(&fk); err != nil || fk != 1 {
+		t.Fatalf("workspace input SET NULL FK missing: %v count=%d", err, fk)
+	}
 	if _, err = db.Exec(`UPDATE kb.benchmark_scores SET value=1 WHERE attempt_id=$1`, at); err == nil {
 		t.Fatal("selected score update accepted")
 	}
@@ -122,5 +126,11 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("tables remain: %d", n)
+	}
+	if err = db.QueryRow(`SELECT count(*) FROM pg_class WHERE relnamespace='kb'::regnamespace AND relname='inputs'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatal("down migration removed production kb.inputs")
 	}
 }
