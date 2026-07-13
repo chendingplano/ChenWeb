@@ -43,8 +43,53 @@ type WorkspaceAllocation struct {
 	Config                             WorkspaceConfig
 	WorkPath, EvidencePath, MarkerPath string
 	Marker                             AllocationMarker
+	workRootFD, evidenceRootFD         *os.Root
+	workDirFD, evidenceDirFD           *os.Root
 	lastArtifact                       string
 }
+
+func relToRoot(root, path string) (string, error) {
+	r, err := filepath.Rel(root, path)
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) || filepath.IsAbs(r) {
+		return "", ErrUnsafePath
+	}
+	return filepath.ToSlash(r), nil
+}
+func mustRel(root, path string) string {
+	r, err := relToRoot(root, path)
+	if err != nil {
+		return ""
+	}
+	return r
+}
+
+func writeMarkerAtomicRoot(root *os.Root, rel string, m AllocationMarker) error {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	tmp := rel + ".tmp"
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync()
+	}
+	if e := f.Close(); err == nil {
+		err = e
+	}
+	if err != nil {
+		_ = root.Remove(tmp)
+		return err
+	}
+	if err = root.Rename(tmp, rel); err != nil {
+		_ = root.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 type Artifact struct {
 	Path, SHA256 string
 	SizeBytes    int64
@@ -258,6 +303,15 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 		nonce = hex.EncodeToString(b)
 	}
 	c.WorkRoot, c.EvidenceRoot, c.Nonce = wr, er, nonce
+	wrFD, err := os.OpenRoot(wr)
+	if err != nil {
+		return nil, err
+	}
+	erFD, err := os.OpenRoot(er)
+	if err != nil {
+		_ = wrFD.Close()
+		return nil, err
+	}
 	wp := filepath.Join(wr, c.RunID, c.CaseID, c.AttemptID)
 	ep := filepath.Join(er, c.RunID, c.CaseID, c.AttemptID)
 	for _, p := range []string{filepath.Join(wr, c.RunID), filepath.Join(wr, c.RunID, c.CaseID), wp, filepath.Join(er, c.RunID), filepath.Join(er, c.RunID, c.CaseID), ep} {
@@ -274,7 +328,8 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 	m := AllocationMarker{AttemptID: c.AttemptID, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, Workspace: wp, EvidencePath: ep, CreatedAt: time.Now().UTC(), WorkIdentity: rootIdentity(wr), EvidenceIdentity: rootIdentity(er)}
 	mp := filepath.Join(wp, ".allocation.json")
 	created := false
-	if b, err := os.ReadFile(mp); err == nil {
+	mpRel, _ := relToRoot(wr, mp)
+	if b, err := wrFD.ReadFile(mpRel); err == nil {
 		if err := json.Unmarshal(b, &m); err != nil {
 			return nil, err
 		}
@@ -288,7 +343,7 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 		}
 		c.Nonce = m.Nonce
 	} else if errors.Is(err, os.ErrNotExist) {
-		f, err := os.OpenFile(mp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		f, err := wrFD.OpenFile(mpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
 			return nil, err
 		}
@@ -304,7 +359,22 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 	} else {
 		return nil, err
 	}
-	o := &WorkspaceAllocation{Config: c, WorkPath: wp, EvidencePath: ep, MarkerPath: mp, Marker: m, lastArtifact: m.ArtifactName}
+	workRel, _ := relToRoot(wr, wp)
+	evidenceRel, _ := relToRoot(er, ep)
+	workFD, err := wrFD.OpenRoot(workRel)
+	if err != nil {
+		_ = wrFD.Close()
+		_ = erFD.Close()
+		return nil, err
+	}
+	evidenceFD, err := erFD.OpenRoot(evidenceRel)
+	if err != nil {
+		_ = workFD.Close()
+		_ = wrFD.Close()
+		_ = erFD.Close()
+		return nil, err
+	}
+	o := &WorkspaceAllocation{Config: c, WorkPath: wp, EvidencePath: ep, MarkerPath: mp, Marker: m, lastArtifact: m.ArtifactName, workRootFD: wrFD, evidenceRootFD: erFD, workDirFD: workFD, evidenceDirFD: evidenceFD}
 	if created {
 		if err := c.Store.SaveOwnership(Ownership{AttemptID: c.AttemptID, Workspace: wp, EvidencePath: ep, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, CleanupState: "active"}); err != nil {
 			return nil, err
@@ -322,20 +392,20 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 	}
 	a.lastArtifact = name
 	a.Marker.ArtifactName = name
-	if err := writeMarkerAtomic(a.MarkerPath, a.Marker); err != nil {
+	if err := writeMarkerAtomicRoot(a.workRootFD, mustRel(a.Config.WorkRoot, a.MarkerPath), a.Marker); err != nil {
 		return Artifact{}, err
 	}
 	if err := a.validate(); err != nil {
 		return Artifact{}, err
 	}
-	partial := filepath.Join(a.EvidencePath, "."+a.Config.AttemptID+"."+name+".partial")
+	partialName := "." + a.Config.AttemptID + "." + name + ".partial"
 	final := filepath.Join(a.EvidencePath, name)
-	if _, e := os.Lstat(final); e == nil {
+	if _, e := a.evidenceDirFD.Lstat(name); e == nil {
 		own, le := a.Config.Store.LoadOwnership(a.Config.AttemptID)
 		if le != nil {
 			return Artifact{}, le
 		}
-		f, oe := os.OpenFile(final, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+		f, oe := a.evidenceDirFD.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 		if oe != nil {
 			return Artifact{}, oe
 		}
@@ -352,13 +422,13 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 		}
 		return Artifact{}, errors.New("capture: existing evidence is unverified; explicit reverify required")
 	}
-	f, err := os.OpenFile(partial, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
+	f, err := a.evidenceDirFD.OpenFile(partialName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return Artifact{}, err
 	}
 	if opt.Failure == FailAfterPartialCreate {
 		f.Close()
-		os.Remove(partial)
+		_ = a.evidenceDirFD.Remove(partialName)
 		return Artifact{}, errors.New("injected capture interruption")
 	}
 	if _, err = io.Copy(f, src); err == nil {
@@ -376,16 +446,16 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 		err = e
 	}
 	if err != nil {
-		os.Remove(partial)
+		_ = a.evidenceDirFD.Remove(partialName)
 		return Artifact{}, err
 	}
-	if err = os.Rename(partial, final); err != nil {
+	if err = a.evidenceDirFD.Rename(partialName, name); err != nil {
 		return Artifact{}, err
 	}
 	if opt.Failure == FailAfterRename {
 		return Artifact{}, errors.New("injected capture interruption")
 	}
-	fi, err := os.OpenFile(final, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	fi, err := a.evidenceDirFD.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -409,7 +479,7 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 		return Artifact{}, errors.New("injected capture interruption")
 	}
 	st := after
-	d, err := os.Open(a.EvidencePath)
+	d, err := a.evidenceDirFD.Open(".")
 	if err == nil {
 		err = d.Sync()
 		d.Close()
@@ -468,7 +538,7 @@ func (a *WorkspaceAllocation) Reverify(name string) (Artifact, error) {
 		}
 		return Artifact{}, err
 	}
-	f, err := os.OpenFile(filepath.Join(a.EvidencePath, name), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := a.evidenceDirFD.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -510,7 +580,12 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 		return fail(errors.New("cleanup requires verified evidence or explicit discard"))
 	}
 	if !own.Verified && o.DiscardUnverified {
-		ents, err := os.ReadDir(a.EvidencePath)
+		dir, err := a.evidenceDirFD.Open(".")
+		var ents []os.FileInfo
+		if err == nil {
+			ents, err = dir.Readdir(-1)
+			_ = dir.Close()
+		}
 		if err != nil {
 			return err
 		}
@@ -518,7 +593,7 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 			// Unverified evidence is disposable only when the filename is
 			// attempt-scoped (partial or final names carrying the attempt id).
 			if (strings.HasSuffix(e.Name(), ".partial") && strings.HasPrefix(e.Name(), "."+a.Config.AttemptID+".")) || e.Name() == a.lastArtifact {
-				if err := os.Remove(filepath.Join(a.EvidencePath, e.Name())); err != nil {
+				if err := a.evidenceDirFD.Remove(e.Name()); err != nil {
 					return fail(err)
 				}
 			}
@@ -541,7 +616,8 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "files_pending", err)
 		return err
 	}
-	if err := os.RemoveAll(a.WorkPath); err != nil {
+	workRel := mustRel(a.Config.WorkRoot, a.WorkPath)
+	if err := a.workRootFD.RemoveAll(workRel); err != nil {
 		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "files_pending", err)
 		return err
 	}
