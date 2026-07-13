@@ -2725,6 +2725,12 @@ func lineRawByteSize(line Line) int {
 	return len([]byte(lineRawForChunking(line)))
 }
 
+// ChunkLineRawByteSize exposes the exact byte accounting used by BuildChunks so
+// benchmark scoring cannot drift from production chunk-size semantics.
+func ChunkLineRawByteSize(line Line) int {
+	return lineRawByteSize(line)
+}
+
 func buildProtectedBlocks(lines []Line, _ int) []*protectedBlock {
 	out := make([]*protectedBlock, len(lines))
 

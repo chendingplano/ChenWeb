@@ -29,6 +29,20 @@ func (f *fakeLogger) Line(string, ...any)  {}
 func (f *fakeLogger) Trace(string)         {}
 func (f *fakeLogger) Close()               {}
 
+func TestChunkLineRawByteSizeDelegatesToProductionAccounting(t *testing.T) {
+	tests := []Line{
+		{LineNo: 1, PageNo: 2, LineType: "paragraph", Content: "ascii"},
+		{LineNo: 2, PageNo: 3, LineType: "paragraph", Content: "tab\tvalue"},
+		{LineNo: 3, PageNo: 4, LineType: "paragraph", Content: "中文α"},
+		{Raw: "raw\tbytes", LineNo: 4, PageNo: 5, LineType: "paragraph", Content: "canonical"},
+	}
+	for _, line := range tests {
+		if got, want := ChunkLineRawByteSize(line), lineRawByteSize(line); got != want {
+			t.Fatalf("line %d: got %d, want production size %d", line.LineNo, got, want)
+		}
+	}
+}
+
 func (f *fakeLogger) Warn(message string, args ...any) {
 	f.warns = append(f.warns, fakeLogEntry{message: message, args: append([]any(nil), args...)})
 }
