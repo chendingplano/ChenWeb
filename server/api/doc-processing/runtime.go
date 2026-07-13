@@ -55,7 +55,7 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if err := applyRuntimeOverrides(fixed, overrides); err != nil {
 		return nil, err
 	}
-	for _, e := range []error{fixed.PromptErr, fixed.ModelErr, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr} {
+	for _, e := range []error{fixed.PromptErr, fixed.ModelErr, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr, fixed.FallbackModelErr} {
 		if e != nil {
 			return nil, e
 		}

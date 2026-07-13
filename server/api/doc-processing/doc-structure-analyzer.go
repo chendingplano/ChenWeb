@@ -411,12 +411,17 @@ func (p *StructureAnalyzerProcessor) validateRequiredEnv() error {
 }
 
 type structureModelConfig struct {
-	ProfileName  string
-	ModelName    string
-	APIKey       string
-	BaseURL      string
-	TimeoutSec   int
-	ThinkingType string
+	ProfileName          string
+	Host                 string
+	ModelName            string
+	APIKey               string
+	BaseURL              string
+	TimeoutSec           int
+	ThinkingType         string
+	MaxInflight          int
+	MaxRequestsPerMinute int
+	MaxTokensPerMinute   int
+	TokenReservePerCall  int
 }
 
 func loadStructureModelFromEnv() (modelRef string, modelPath string, cfg structureModelConfig, err error) {
@@ -453,12 +458,17 @@ func loadModelConfigFromEnv(modelRefEnv string, modelsFileEnv string) (modelRef 
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	cfg = structureModelConfig{
-		ProfileName:  modelRef,
-		ModelName:    strings.TrimSpace(modelDef.ModelName),
-		APIKey:       strings.TrimSpace(modelDef.APIKey),
-		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
-		TimeoutSec:   modelDef.TimeoutSec,
-		ThinkingType: normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
+		ProfileName:          modelRef,
+		Host:                 strings.TrimSpace(modelDef.Host),
+		ModelName:            strings.TrimSpace(modelDef.ModelName),
+		APIKey:               strings.TrimSpace(modelDef.APIKey),
+		BaseURL:              strings.TrimSpace(modelDef.BaseURL),
+		TimeoutSec:           modelDef.TimeoutSec,
+		ThinkingType:         normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
+		MaxInflight:          modelDef.MaxInflight,
+		MaxRequestsPerMinute: modelDef.MaxRequestsPerMinute,
+		MaxTokensPerMinute:   modelDef.MaxTokensPerMinute,
+		TokenReservePerCall:  modelDef.TokenReservePerCall,
 	}
 	return modelRef, modelPath, cfg, nil
 }

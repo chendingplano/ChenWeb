@@ -71,6 +71,10 @@ type FixedSizeChunkingService struct {
 	Extractor                   LLMJSONExtractor
 	FallbackExtractor           LLMJSONExtractor
 	FallbackModelName           string
+	FallbackModelRef            string
+	FallbackModelErr            error
+	FallbackModelCfgPath        string
+	FallbackModelCfg            structureModelConfig
 	Embedder                    Embedder
 	Logger                      ApiTypes.JimoLogger
 	Now                         func() time.Time
@@ -204,13 +208,19 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 	applyStructureModelConfigToExtractor(extractor, modelCfg)
 	var fallbackExtractor LLMJSONExtractor
 	var fallbackModelName string
-	if fallbackModelRef := strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_FALLBACK")); fallbackModelRef != "" {
-		_, _, fallbackCfg, _ := loadOptionalModelConfigFromEnv("EXTRACT_TOPIC_FALLBACK", "CHUNK_EXTRACT_TOPIC_MODELS_FILE")
+	var fallbackModelRef string
+	var fallbackModelErr error
+	var fallbackModelCfgPath string
+	var fallbackCfg structureModelConfig
+	if configuredFallbackRef := strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_FALLBACK")); configuredFallbackRef != "" {
+		fallbackModelRef = configuredFallbackRef
+		_, fallbackModelCfgPath, fallbackCfg, fallbackModelErr = loadOptionalModelConfigFromEnv("EXTRACT_TOPIC_FALLBACK", "CHUNK_EXTRACT_TOPIC_MODELS_FILE")
 		if strings.TrimSpace(fallbackCfg.ModelName) == "" {
 			fallbackCfg.ModelName = fallbackModelRef
 		}
 		fallbackExtractor = newOpenAIJSONClientForStructureModel(fallbackCfg, 0)
 		fallbackModelName = fallbackCfg.ModelName
+		fallbackModelRef = strings.TrimSpace(os.Getenv("EXTRACT_TOPIC_FALLBACK"))
 	}
 	embedder, embeddingModelName := resolveChunkingEmbedder(extractor, "EMBEDDING_MODEL_NAME")
 	summaryEmbeddingModelRef := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME"))
@@ -224,6 +234,10 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		Extractor:                  extractor,
 		FallbackExtractor:          fallbackExtractor,
 		FallbackModelName:          fallbackModelName,
+		FallbackModelRef:           fallbackModelRef,
+		FallbackModelErr:           fallbackModelErr,
+		FallbackModelCfgPath:       fallbackModelCfgPath,
+		FallbackModelCfg:           fallbackCfg,
 		Logger:                     logger,
 		Now:                        time.Now,
 		ChunkDir:                   strings.TrimSpace(os.Getenv("ARTIFACT_DIR")),
@@ -3357,11 +3371,17 @@ func loadFixedSizeTopicModelFromEnv() (modelRef string, modelPath string, cfg st
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	return modelRef, modelPath, structureModelConfig{
-		ModelName:    strings.TrimSpace(modelDef.ModelName),
-		APIKey:       strings.TrimSpace(modelDef.APIKey),
-		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
-		TimeoutSec:   modelDef.TimeoutSec,
-		ThinkingType: normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
+		ProfileName:          modelRef,
+		Host:                 strings.TrimSpace(modelDef.Host),
+		ModelName:            strings.TrimSpace(modelDef.ModelName),
+		APIKey:               strings.TrimSpace(modelDef.APIKey),
+		BaseURL:              strings.TrimSpace(modelDef.BaseURL),
+		TimeoutSec:           modelDef.TimeoutSec,
+		ThinkingType:         normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
+		MaxInflight:          modelDef.MaxInflight,
+		MaxRequestsPerMinute: modelDef.MaxRequestsPerMinute,
+		MaxTokensPerMinute:   modelDef.MaxTokensPerMinute,
+		TokenReservePerCall:  modelDef.TokenReservePerCall,
 	}, nil
 }
 

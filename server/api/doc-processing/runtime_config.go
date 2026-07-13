@@ -27,13 +27,14 @@ func promptConfig(path, ref, text string) map[string]any {
 	return v
 }
 func modelConfig(ref, path, name string, c structureModelConfig) map[string]any {
-	return map[string]any{"ref": ref, "path": path, "name": name, "definition_sha256": hashOrEmpty(path), "profile": c.ProfileName, "provider": c.BaseURL, "model": c.ModelName, "timeout_sec": c.TimeoutSec, "thinking_type": c.ThinkingType}
+	return map[string]any{"ref": ref, "path": path, "name": name, "definition_sha256": hashOrEmpty(path), "profile": c.ProfileName, "host": c.Host, "provider": c.BaseURL, "model": c.ModelName, "timeout_sec": c.TimeoutSec, "thinking_type": c.ThinkingType, "max_inflight": c.MaxInflight, "max_requests_per_minute": c.MaxRequestsPerMinute, "max_tokens_per_minute": c.MaxTokensPerMinute, "token_reserve_per_call": c.TokenReservePerCall}
 }
 
 // RuntimeConfig returns the effective non-secret chunking settings.
 func (s *FixedSizeChunkingService) RuntimeConfig() map[string]any {
 	return map[string]any{"chunk_size": s.ChunkSize, "overlap_percent": s.OverlapPercent,
 		"model":                   modelConfig(s.ModelRef, s.ModelCfgPath, s.ModelName, s.ModelCfg),
+		"fallback_model":          modelConfig(s.FallbackModelRef, s.FallbackModelCfgPath, s.FallbackModelName, s.FallbackModelCfg),
 		"summary_model":           modelConfig(s.SummaryModelRef, s.SummaryModelCfgPath, s.SummaryModelName, s.SummaryModelCfg),
 		"translation_model":       map[string]any{"ref": s.TranslationModelRef, "path": s.TranslationModelCfgPath, "name": s.TranslationModelName, "definition_sha256": hashOrEmpty(s.TranslationModelCfgPath)},
 		"topic_embedding_model":   map[string]any{"name": s.TopicEmbeddingModelName},

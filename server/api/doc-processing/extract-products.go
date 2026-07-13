@@ -1690,12 +1690,17 @@ func loadModelConfigByRef(modelRef, modelsFileEnv string) (modelRefOut string, m
 	}
 	llmclients.RegisterModelBudget(modelDef)
 	cfg = structureModelConfig{
-		ProfileName:  modelRef,
-		ModelName:    strings.TrimSpace(modelDef.ModelName),
-		APIKey:       strings.TrimSpace(modelDef.APIKey),
-		BaseURL:      strings.TrimSpace(modelDef.BaseURL),
-		TimeoutSec:   modelDef.TimeoutSec,
-		ThinkingType: normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
+		ProfileName:          modelRef,
+		Host:                 strings.TrimSpace(modelDef.Host),
+		ModelName:            strings.TrimSpace(modelDef.ModelName),
+		APIKey:               strings.TrimSpace(modelDef.APIKey),
+		BaseURL:              strings.TrimSpace(modelDef.BaseURL),
+		TimeoutSec:           modelDef.TimeoutSec,
+		ThinkingType:         normalizeThinkingType(strings.TrimSpace(modelDef.ThinkingType)),
+		MaxInflight:          modelDef.MaxInflight,
+		MaxRequestsPerMinute: modelDef.MaxRequestsPerMinute,
+		MaxTokensPerMinute:   modelDef.MaxTokensPerMinute,
+		TokenReservePerCall:  modelDef.TokenReservePerCall,
 	}
 	return modelRef, modelPath, cfg, nil
 }
