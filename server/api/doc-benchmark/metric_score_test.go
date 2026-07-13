@@ -3,11 +3,22 @@ package docbenchmark
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+func mustScoreMetrics(t *testing.T, in MetricScoreInput) MetricScore {
+	t.Helper()
+	s, err := ScoreMetricsContext(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
 
 func TestStableJSONCanonicalTreeRejectsCollisionsAndTrailingTokens(t *testing.T) {
 	pairs := [][2]string{{`["a","b"]`, `["a,string:value:b"]`}, {`{"a":"b,c:d"}`, `{"a,b":"c:d"}`}, {`{"x":"}"}`, `{"x}":""}`}}
@@ -60,6 +71,77 @@ func TestScoreMetricsContextLimitsAndCancellation(t *testing.T) {
 		t.Fatalf("dense at-limit match: %v", err)
 	}
 }
+func TestScoreMetricsClassificationPassCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := classifyUnmatchedPredictionsContext(ctx, []MetricRecord{{PredictionInputIndex: 1}}, map[int]bool{}, nil, &MetricDiagnostics{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("classification cancellation = %v", err)
+	}
+}
+
+func TestMetricRecordNormalizationLimits(t *testing.T) {
+	exact := strings.Repeat("a", MaxMetricTextBytes)
+	if _, err := MatchMetricsContext(context.Background(), []MetricRecord{{Name: &exact}}, nil); err != nil {
+		t.Fatalf("exact text boundary: %v", err)
+	}
+	over := exact + "a"
+	assertLimit(t, func() error {
+		_, err := MatchMetricsContext(context.Background(), []MetricRecord{{Name: &over}}, nil)
+		return err
+	}, "text_bytes")
+	lines := make([]int, MaxMetricSourceLines)
+	if _, err := MatchMetricsContext(context.Background(), []MetricRecord{{SourceLines: lines}}, nil); err != nil {
+		t.Fatalf("exact source boundary: %v", err)
+	}
+	assertLimit(t, func() error {
+		_, err := MatchMetricsContext(context.Background(), []MetricRecord{{SourceLines: append(lines, 1)}}, nil)
+		return err
+	}, "source_lines")
+	fields := map[string]json.RawMessage{}
+	for i := 0; i < MaxMetricStableFields; i++ {
+		fields[fmt.Sprint(i)] = json.RawMessage(`null`)
+	}
+	if _, err := MatchMetricsContext(context.Background(), []MetricRecord{{StableFields: fields}}, nil); err != nil {
+		t.Fatalf("exact field boundary: %v", err)
+	}
+	fields["over"] = json.RawMessage(`null`)
+	assertLimit(t, func() error {
+		_, err := MatchMetricsContext(context.Background(), []MetricRecord{{StableFields: fields}}, nil)
+		return err
+	}, "stable_fields")
+	rawExact := json.RawMessage(`"` + strings.Repeat("a", MaxMetricStableJSONBytes-2) + `"`)
+	if _, err := MatchMetricsContext(context.Background(), []MetricRecord{{StableFields: map[string]json.RawMessage{"raw": rawExact}}}, nil); err != nil {
+		t.Fatalf("exact raw boundary: %v", err)
+	}
+	rawOver := json.RawMessage(`"` + strings.Repeat("a", MaxMetricStableJSONBytes) + `"`)
+	assertLimit(t, func() error {
+		_, err := MatchMetricsContext(context.Background(), []MetricRecord{{StableFields: map[string]json.RawMessage{"raw": rawOver}}}, nil)
+		return err
+	}, "stable_json_bytes")
+	exactDepth := strings.Repeat("[", MaxMetricJSONDepth-1) + "null" + strings.Repeat("]", MaxMetricJSONDepth-1)
+	deep := strings.Repeat("[", MaxMetricJSONDepth) + "null" + strings.Repeat("]", MaxMetricJSONDepth)
+	g := metric("g", 0, "n", "s", "1", "ms", 1)
+	p := g
+	g.StableFields = map[string]json.RawMessage{"deep": json.RawMessage(exactDepth)}
+	p.StableFields = g.StableFields
+	if _, err := ScoreMetricsContext(context.Background(), MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}}); err != nil {
+		t.Fatalf("exact depth boundary: %v", err)
+	}
+	g.StableFields = map[string]json.RawMessage{"deep": json.RawMessage(deep)}
+	p.StableFields = g.StableFields
+	assertLimit(t, func() error {
+		_, err := ScoreMetricsContext(context.Background(), MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}})
+		return err
+	}, "json_depth")
+}
+func assertLimit(t *testing.T, fn func() error, resource string) {
+	t.Helper()
+	var limit *MetricResourceLimitError
+	if err := fn(); !errors.As(err, &limit) || limit.Resource != resource {
+		t.Fatalf("limit error = %#v, want %s", err, resource)
+	}
+}
 
 func denseMetrics(g, p int) ([]MetricRecord, []MetricRecord) {
 	gold := make([]MetricRecord, g)
@@ -84,7 +166,7 @@ func TestScoreMetricsDetectionEmptyRules(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := ScoreMetrics(MetricScoreInput{Gold: tc.gold, Predictions: tc.pred})
+			s := mustScoreMetrics(t, MetricScoreInput{Gold: tc.gold, Predictions: tc.pred})
 			if value(s.DetectionPrecision) != tc.p || value(s.DetectionRecall) != tc.r || value(s.DetectionF1) != tc.f {
 				t.Fatalf("detection = %#v %#v %#v", s.DetectionPrecision, s.DetectionRecall, s.DetectionF1)
 			}
@@ -98,7 +180,7 @@ func TestScoreMetricsDetectionEmptyRules(t *testing.T) {
 func TestScoreMetricsDisjointGroundingIsZeroNotNull(t *testing.T) {
 	g := metric("g", 0, "latency", "api", "1", "ms", 1)
 	p := metric("", 0, "latency", "api", "1", "ms", 2)
-	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s := mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if s.GroundingPrecision.Value == nil || s.GroundingRecall.Value == nil || s.GroundingF1.Value == nil || value(s.GroundingPrecision) != 0 || value(s.GroundingRecall) != 0 || value(s.GroundingF1) != 0 {
 		t.Fatalf("disjoint grounding = %#v %#v %#v", s.GroundingPrecision, s.GroundingRecall, s.GroundingF1)
 	}
@@ -112,13 +194,13 @@ func TestScoreMetricsOneSidedGroundingF1IsZero(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := metric("g", 0, "latency", "api", "1", "ms", tc.gold...)
 			p := metric("", 0, "latency", "api", "1", "ms", tc.pred...)
-			s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+			s := mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 			if s.GroundingF1.Value == nil || value(s.GroundingF1) != 0 {
 				t.Fatalf("F1 = %#v", s.GroundingF1)
 			}
 		})
 	}
-	s := ScoreMetrics(MetricScoreInput{UpstreamValid: true})
+	s := mustScoreMetrics(t, MetricScoreInput{UpstreamValid: true})
 	if s.GroundingPrecision.Value != nil || s.GroundingRecall.Value != nil || s.GroundingF1.Value != nil {
 		t.Fatalf("no matches grounding = %#v %#v %#v", s.GroundingPrecision, s.GroundingRecall, s.GroundingF1)
 	}
@@ -135,7 +217,7 @@ func TestScoreMetricsStableFieldsOverrideCoreAndBoolean(t *testing.T) {
 	}
 	g := MetricRecord{GoldID: "g", StableFields: core("latency", "api", "1e2", "msec", true), SourceLines: []int{1}}
 	p := MetricRecord{PredictionInputIndex: 4, StableFields: core("LATENCY", "API", "100", "ms", true), SourceLines: []int{1}}
-	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s := mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if value(s.DetectionF1) != 1 || value(s.ValueAccuracy) != 1 || value(s.UnitAccuracy) != 1 || s.ExplicitAccuracy.Denominator != 1 || value(s.ExplicitAccuracy) != 1 {
 		t.Fatalf("map-only core score = %#v", s)
 	}
@@ -144,12 +226,12 @@ func TestScoreMetricsStableFieldsOverrideCoreAndBoolean(t *testing.T) {
 	p.Name = ptr("wrong-other")
 	g.IsExplicitMetric = ptr(false)
 	p.IsExplicitMetric = ptr(false)
-	s = ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s = mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if value(s.DetectionF1) != 1 || value(s.ExplicitAccuracy) != 1 {
 		t.Fatalf("map did not override legacy: %#v", s)
 	}
 	g.StableFields["is_explicit_metric"] = json.RawMessage(`null`)
-	s = ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s = mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if s.ExplicitAccuracy.Value != nil {
 		t.Fatalf("null boolean label entered classification denominator: %#v", s.ExplicitAccuracy)
 	}
@@ -166,7 +248,7 @@ func TestScoreMetricsGenericStableFieldPresenceAndCanonicalJSON(t *testing.T) {
 	p.StableFields["reasoning_tags"] = json.RawMessage(`["a"]`)
 	p.StableFields["metric_categories"] = json.RawMessage(`{"x":[1.0]}`)
 	p.StableFields["category_paths"] = json.RawMessage(`["root"]`)
-	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s := mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	for _, name := range []string{"metric_unit_en", "metric_keywords", "confidence", "objects", "explicit_null", "reasoning_tags", "metric_categories", "category_paths"} {
 		if value(s.StableFieldAccuracy[name]) != 1 {
 			t.Errorf("%s = %#v", name, s.StableFieldAccuracy[name])
@@ -189,12 +271,12 @@ func TestScoreMetricsDedicatedValueUsesExplicitPresenceNotPointerNil(t *testing.
 	g.StableFields = map[string]json.RawMessage{"metric_value": json.RawMessage(`null`)}
 	p := metric("", 0, "latency", "api", "placeholder", "ms", 1)
 	p.Value = nil
-	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s := mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if s.ValueAccuracy.Denominator != 1 || value(s.ValueAccuracy) != 1 {
 		t.Fatalf("explicit null value presence = %#v", s.ValueAccuracy)
 	}
 	g.StableFields["metric_value"] = json.RawMessage(`""`)
-	s = ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s = mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if s.ValueAccuracy.Denominator != 1 || value(s.ValueAccuracy) != 0 {
 		t.Fatalf("explicit empty value = %#v", s.ValueAccuracy)
 	}
@@ -222,7 +304,7 @@ func TestScoreMetricsMatchedAccuraciesGroundingAndDiagnostics(t *testing.T) {
 	p.NameEn = ptr("present")
 	p.Desc = ptr("response time")
 	p.IsExplicitMetric = ptr(false)
-	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: false, ArtifactHashes: map[string]string{"actual": "b", "gold": "a"}})
+	s := mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: false, ArtifactHashes: map[string]string{"actual": "b", "gold": "a"}})
 	if value(s.DetectionF1) != 1 || value(s.ValueAccuracy) != 1 || value(s.UnitAccuracy) != 1 || value(s.ValueUnitAccuracy) != 1 {
 		t.Fatalf("matched scores = %#v", s)
 	}
@@ -254,7 +336,7 @@ func TestScoreMetricsDuplicateUnsupportedAndMatchedNulls(t *testing.T) {
 	p1 := metric("", 4, "latency", "api", "100", "ms", 1)
 	p2 := metric("", 5, "latency", "api", "100", "ms", 1)
 	p3 := metric("", 6, "hallucination", "moon", "blue", "widgets", 999)
-	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p1, p2, p3}, UpstreamValid: true})
+	s := mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p1, p2, p3}, UpstreamValid: true})
 	if s.DetectionPrecision.TP != 1 || s.DetectionPrecision.FP != 2 || s.DetectionRecall.FN != 0 {
 		t.Fatalf("detection counts = %#v", s.DetectionPrecision)
 	}
@@ -276,7 +358,7 @@ func TestScoreMetricsWrongValuesUnitsAbsentEmptyAndEmptyGrounding(t *testing.T) 
 	empty := ""
 	g := metric("g", 0, "latency", "api", "100", "ms", 1)
 	p := metric("", 1, "latency", "api", "200", "s", 1)
-	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s := mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if value(s.DetectionF1) != 1 || value(s.ValueAccuracy) != 0 || value(s.UnitAccuracy) != 0 || value(s.ValueUnitAccuracy) != 0 {
 		t.Fatalf("wrong matched fields not detected: %#v", s)
 	}
@@ -288,14 +370,14 @@ func TestScoreMetricsWrongValuesUnitsAbsentEmptyAndEmptyGrounding(t *testing.T) 
 	g.Value = &empty
 	p = metric("", 2, "latency", "api", "ignored", "ms", 9)
 	p.Value = nil
-	s = ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s = mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if value(s.ValueAccuracy) != 0 {
 		t.Fatalf("absent and empty scored equal: %#v", s.ValueAccuracy)
 	}
 
 	g = metric("g", 0, "latency", "api", "1", "ms")
 	p = metric("", 3, "latency", "api", "1", "ms")
-	s = ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	s = mustScoreMetrics(t, MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
 	if s.GroundingPrecision.Value != nil || s.GroundingRecall.Value != nil || s.GroundingF1.Value != nil {
 		t.Fatalf("empty grounding should be null: %#v %#v %#v", s.GroundingPrecision, s.GroundingRecall, s.GroundingF1)
 	}
@@ -303,7 +385,7 @@ func TestScoreMetricsWrongValuesUnitsAbsentEmptyAndEmptyGrounding(t *testing.T) 
 
 func TestScoreMetricsIsDeterministic(t *testing.T) {
 	in := MetricScoreInput{Gold: []MetricRecord{metric("z", 0, "n", "s", "1", "ms", 2), metric("a", 0, "x", "y", "2", "s", 3)}, Predictions: []MetricRecord{metric("", 8, "n", "s", "1", "ms", 2)}, UpstreamValid: true, ArtifactHashes: map[string]string{"z": "2", "a": "1"}}
-	if first, second := ScoreMetrics(in), ScoreMetrics(in); !reflect.DeepEqual(first, second) {
+	if first, second := mustScoreMetrics(t, in), mustScoreMetrics(t, in); !reflect.DeepEqual(first, second) {
 		t.Fatalf("nondeterministic score:\n%#v\n%#v", first, second)
 	}
 }

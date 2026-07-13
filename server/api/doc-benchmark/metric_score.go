@@ -16,8 +16,8 @@ import (
 )
 
 const MetricScorerVersion = "metric-scorer-v1"
-const ExpectedMetricScorerHashV1 = "1c343e7162c5c5ad9188d5c55400b3cc35b9748c8d4f583d5ff538e93fd6fe74"
-const ExpectedMetricNormalizationHashV1 = "730b6bc160b2a49fc453cc3bd5fdc034c68c735309c5ceb2b09d6d7a7b3e1c72"
+const ExpectedMetricScorerHashV1 = "8f122ae8a7e75973e72c727a832e6d2c3b3ac7fb7d1144010ebd24e32ff2995a"
+const ExpectedMetricNormalizationHashV1 = "af7d665f7892e2d1d8f7813e9d635c02b08f9b6967bbff1fad27bb97db6957d4"
 
 type MetricScoreInput struct {
 	Gold, Predictions []MetricRecord
@@ -113,7 +113,7 @@ func MetricScorerConfigurationV1() MetricScorerConfiguration {
 	return MetricScorerConfiguration{ScorerVersion: MetricScorerVersion, NormalizationVersion: NormalizationVersion, NormalizationRules: normalizationRulesV1(), UnitAliases: aliases,
 		Weights:     map[string]string{"source": "7/20", "name": "1/5", "subject": "3/20", "value": "1/5", "unit": "1/10"},
 		Eligibility: "source_sets_intersect OR >=2 nonempty_present_exact(name,subject,value,unit)", Threshold: "3/5",
-		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ResourceLimits: map[string]int{"gold": MaxMetricGold, "predictions": MaxMetricPredictions, "edges": MaxMetricEdges}, MatchingComplexity: "O(E*N^3)_exact_rational_with_context_checks", ScoreRows: copyMetricScoreRegistry()}
+		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ResourceLimits: map[string]int{"gold": MaxMetricGold, "predictions": MaxMetricPredictions, "edges": MaxMetricEdges, "text_bytes_per_record": MaxMetricTextBytes, "source_lines_per_record": MaxMetricSourceLines, "stable_fields_per_record": MaxMetricStableFields, "stable_json_bytes_per_field": MaxMetricStableJSONBytes, "stable_json_depth": MaxMetricJSONDepth}, MatchingComplexity: "O(E*N^3)_exact_rational_with_context_checks", ScoreRows: copyMetricScoreRegistry()}
 }
 func copyMetricScoreRegistry() []MetricScoreDefinition {
 	out := make([]MetricScoreDefinition, len(metricScoreRegistryV1))
@@ -124,7 +124,7 @@ func copyMetricScoreRegistry() []MetricScoreDefinition {
 	return out
 }
 func normalizationRulesV1() map[string]string {
-	return map[string]string{"text": "NFKC+Unicode-case-fold+whitespace-collapse+edge-punctuation", "value": "exact-base10-decimal-then-normalized-text", "source_lines": "sorted-deduplicated", "core_presence": "StableFields-map-membership-first-for-name-subject-value-unit-explicit; legacy-typed-only-when-map-absent", "stable_json": "typed-node-deterministic-JSON; reject-trailing-tokens; null=absent; strings=escaped-text-v1; numbers=canonical-exact-decimal; bool=typed; arrays=ordered-recursive; objects=byte-sorted-key-entry-array; metric_value=value-v1; metric_unit=unit-v1"}
+	return map[string]string{"text": "NFKC+Unicode-case-fold+whitespace-collapse+edge-punctuation", "value": "exact-base10-decimal-then-normalized-text", "source_lines": "sorted-deduplicated", "core_presence": "StableFields-map-membership-first-for-name-subject-value-unit-explicit; legacy-typed-only-when-map-absent", "stable_json": "typed-node-deterministic-JSON; reject-trailing-tokens; bounded-depth-with-context; null=absent; strings=escaped-text-v1; numbers=canonical-exact-decimal; bool=typed; arrays=ordered-recursive; objects=byte-sorted-key-entry-array; metric_value=value-v1; metric_unit=unit-v1"}
 }
 func (c MetricScorerConfiguration) Hash() string {
 	raw, _ := json.Marshal(c)
@@ -141,25 +141,20 @@ func normalizationHashV1() string {
 	return hex.EncodeToString(sum[:])
 }
 
-func ScoreMetrics(in MetricScoreInput) MetricScore {
-	// Compatibility wrapper is intentionally fail-loud; production orchestration
-	// should use ScoreMetricsContext and persist its explicit error.
-	s, err := ScoreMetricsContext(context.Background(), in)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
 func ScoreMetricsContext(ctx context.Context, in MetricScoreInput) (MetricScore, error) {
 	if err := ctx.Err(); err != nil {
 		return MetricScore{}, err
 	}
-	if err := checkMetricLimits(in.Gold, in.Predictions); err != nil {
+	if err := checkMetricLimits(ctx, in.Gold, in.Predictions); err != nil {
 		return MetricScore{}, err
 	}
 	cfg := MetricScorerConfigurationV1()
 	s := MetricScore{StableFieldAccuracy: make(map[string]ScoreMetric), ScorerVersion: MetricScorerVersion, ScorerHash: cfg.Hash(), NormalizationVersion: NormalizationVersion, NormalizationHash: normalizationHashV1(), UpstreamInvalid: !in.UpstreamValid, ConditionalAttributionIncluded: in.UpstreamValid}
-	matches, err := MatchMetricsContext(ctx, in.Gold, in.Predictions)
+	edges, err := BuildMetricEdgesContext(ctx, in.Gold, in.Predictions)
+	if err != nil {
+		return MetricScore{}, err
+	}
+	matches, err := optimalMetricMatchesContext(ctx, len(in.Gold), len(in.Predictions), edges)
 	if err != nil {
 		return MetricScore{}, err
 	}
@@ -220,11 +215,11 @@ func ScoreMetricsContext(ctx context.Context, in MetricScoreInput) (MetricScore,
 		sort.Strings(names)
 		for _, name := range names {
 			fieldTotal[name]++
-			ng, err := normalizeStableJSON(name, goldFields[name])
+			ng, err := normalizeStableJSONContext(ctx, name, goldFields[name])
 			if err != nil {
 				return MetricScore{}, fmt.Errorf("gold stable field %s: %w", name, err)
 			}
-			np, err := normalizeStableJSON(name, predFields[name])
+			np, err := normalizeStableJSONContext(ctx, name, predFields[name])
 			if err != nil {
 				return MetricScore{}, fmt.Errorf("prediction stable field %s: %w", name, err)
 			}
@@ -270,35 +265,14 @@ func ScoreMetricsContext(ctx context.Context, in MetricScoreInput) (MetricScore,
 		s.GroundingPrecision, s.GroundingRecall, s.GroundingF1 = nullMetric(), nullMetric(), nullMetric()
 	}
 
-	edges := BuildMetricEdges(in.Gold, in.Predictions)
 	for gi, g := range in.Gold {
 		if !matchedGold[gi] {
 			s.Diagnostics.UnmatchedGoldIDs = append(s.Diagnostics.UnmatchedGoldIDs, g.GoldID)
 		}
 	}
-	duplicates, unsupported := 0, 0
-	for pi, p := range in.Predictions {
-		if err := ctx.Err(); err != nil {
-			return MetricScore{}, err
-		}
-		if matchedPred[pi] {
-			continue
-		}
-		s.Diagnostics.UnmatchedPredictionIndices = append(s.Diagnostics.UnmatchedPredictionIndices, p.PredictionInputIndex)
-		best := new(big.Rat)
-		for _, e := range edges {
-			if e.PredictionIndex == pi && e.Eligible && edgeRat(e).Cmp(best) > 0 {
-				best = new(big.Rat).Set(edgeRat(e))
-			}
-		}
-		if best.Cmp(metricThresholdRat()) >= 0 {
-			duplicates++
-			s.Diagnostics.DuplicatePredictionIndices = append(s.Diagnostics.DuplicatePredictionIndices, p.PredictionInputIndex)
-		} else {
-			unsupported++
-			s.Diagnostics.UnsupportedPredictionIndices = append(s.Diagnostics.UnsupportedPredictionIndices, p.PredictionInputIndex)
-			s.Diagnostics.UnsupportedSourceSpans = append(s.Diagnostics.UnsupportedSourceSpans, UnsupportedSourceSpan{p.PredictionInputIndex, canonicalLines(p.SourceLines)})
-		}
+	duplicates, unsupported, err := classifyUnmatchedPredictionsContext(ctx, in.Predictions, matchedPred, edges, &s.Diagnostics)
+	if err != nil {
+		return MetricScore{}, err
 	}
 	s.DuplicateRate = zeroRatio(duplicates, len(in.Predictions))
 	s.UnsupportedRate = zeroRatio(unsupported, len(in.Predictions))
@@ -310,6 +284,33 @@ func ScoreMetricsContext(ctx context.Context, in MetricScoreInput) (MetricScore,
 	sortMetricDiagnostics(&s.Diagnostics)
 	s.Rows = metricScoreRows(s)
 	return s, nil
+}
+func classifyUnmatchedPredictionsContext(ctx context.Context, predictions []MetricRecord, matchedPred map[int]bool, edges []MetricEdge, diagnostics *MetricDiagnostics) (int, int, error) {
+	duplicates, unsupported := 0, 0
+	for pi, p := range predictions {
+		if err := ctx.Err(); err != nil {
+			return 0, 0, err
+		}
+		if matchedPred[pi] {
+			continue
+		}
+		diagnostics.UnmatchedPredictionIndices = append(diagnostics.UnmatchedPredictionIndices, p.PredictionInputIndex)
+		best := new(big.Rat)
+		for _, e := range edges {
+			if e.PredictionIndex == pi && e.Eligible && edgeRat(e).Cmp(best) > 0 {
+				best = new(big.Rat).Set(edgeRat(e))
+			}
+		}
+		if best.Cmp(metricThresholdRat()) >= 0 {
+			duplicates++
+			diagnostics.DuplicatePredictionIndices = append(diagnostics.DuplicatePredictionIndices, p.PredictionInputIndex)
+		} else {
+			unsupported++
+			diagnostics.UnsupportedPredictionIndices = append(diagnostics.UnsupportedPredictionIndices, p.PredictionInputIndex)
+			diagnostics.UnsupportedSourceSpans = append(diagnostics.UnsupportedSourceSpans, UnsupportedSourceSpan{p.PredictionInputIndex, canonicalLines(p.SourceLines)})
+		}
+	}
+	return duplicates, unsupported, nil
 }
 
 func recordValueField(r MetricRecord, name string, legacy *string, normalize func(*string) NormalizedField) (NormalizedField, bool) {
@@ -400,6 +401,12 @@ type normalizedJSONEntry struct {
 }
 
 func normalizeStableJSON(name string, raw json.RawMessage) (string, error) {
+	return normalizeStableJSONContext(context.Background(), name, raw)
+}
+func normalizeStableJSONContext(ctx context.Context, name string, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if raw == nil {
 		b, _ := json.Marshal(normalizedJSONNode{Type: "absent"})
 		return string(b), nil
@@ -434,14 +441,20 @@ func normalizeStableJSON(name string, raw json.RawMessage) (string, error) {
 		}
 		return "", err
 	}
-	node, err := canonicalStableValue(v)
+	node, err := canonicalStableValue(ctx, v, 1)
 	if err != nil {
 		return "", err
 	}
 	encoded, err := json.Marshal(node)
 	return string(encoded), err
 }
-func canonicalStableValue(v any) (normalizedJSONNode, error) {
+func canonicalStableValue(ctx context.Context, v any, depth int) (normalizedJSONNode, error) {
+	if err := ctx.Err(); err != nil {
+		return normalizedJSONNode{}, err
+	}
+	if depth > MaxMetricJSONDepth {
+		return normalizedJSONNode{}, &MetricResourceLimitError{"json_depth", depth, MaxMetricJSONDepth}
+	}
 	switch x := v.(type) {
 	case nil:
 		return normalizedJSONNode{Type: "absent"}, nil
@@ -460,7 +473,7 @@ func canonicalStableValue(v any) (normalizedJSONNode, error) {
 		parts := make([]normalizedJSONNode, len(x))
 		for i, item := range x {
 			var err error
-			parts[i], err = canonicalStableValue(item)
+			parts[i], err = canonicalStableValue(ctx, item, depth+1)
 			if err != nil {
 				return normalizedJSONNode{}, err
 			}
@@ -474,7 +487,7 @@ func canonicalStableValue(v any) (normalizedJSONNode, error) {
 		sort.Strings(keys)
 		parts := make([]normalizedJSONEntry, 0, len(keys))
 		for _, k := range keys {
-			value, err := canonicalStableValue(x[k])
+			value, err := canonicalStableValue(ctx, x[k], depth+1)
 			if err != nil {
 				return normalizedJSONNode{}, err
 			}

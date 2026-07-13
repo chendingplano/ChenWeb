@@ -11,6 +11,21 @@ import (
 	"testing"
 )
 
+func mustOptimalMetricMatchesForTest(g, p int, edges []MetricEdge) []MetricMatch {
+	m, err := optimalMetricMatchesContext(context.Background(), g, p, edges)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+func mustMetricEdgeForTest(g, p MetricRecord) MetricEdge {
+	e, err := MetricEdgeForContext(context.Background(), g, p)
+	if err != nil {
+		panic(err)
+	}
+	return e
+}
+
 func TestMatchMetricsContextEdgeLimitAndCancellation(t *testing.T) {
 	edges := make([]MetricEdge, MaxMetricEdges+1)
 	if _, err := optimalMetricMatchesContext(context.Background(), 1, 1, edges); err == nil {
@@ -42,7 +57,7 @@ func TestMatchMetricsExactRandomizedAgainstBruteForce(t *testing.T) {
 				edges = append(edges, exactEdge(fmt.Sprintf("g%d", gi), gi, pi, pi, w))
 			}
 		}
-		got := optimalMetricMatches(g, p, edges)
+		got := mustOptimalMetricMatchesForTest(g, p, edges)
 		want := bruteMetricMatches(g, p, edges)
 		if !reflect.DeepEqual(matchPairs(got), matchPairs(want)) {
 			t.Fatalf("iteration %d got %#v want %#v edges %#v", iteration, got, want, edges)
@@ -52,7 +67,7 @@ func TestMatchMetricsExactRandomizedAgainstBruteForce(t *testing.T) {
 
 func TestMatchMetricsLexPrefixChoosesShorterEqualOptimum(t *testing.T) {
 	edges := []MetricEdge{exactEdge("a", 0, 0, 0, "1"), exactEdge("a", 0, 1, 1, "1/2"), exactEdge("b", 1, 0, 0, "1/2")}
-	got := optimalMetricMatches(2, 2, edges)
+	got := mustOptimalMetricMatchesForTest(2, 2, edges)
 	if pairs := matchPairs(got); !reflect.DeepEqual(pairs, [][2]any{{"a", 0}}) {
 		t.Fatalf("prefix tie = %#v", pairs)
 	}
@@ -127,7 +142,7 @@ func metric(id string, index int, name, subject, value, unit string, lines ...in
 func TestMetricEdgesEligibilityWeightsAndThreshold(t *testing.T) {
 	g := metric("g", 0, "request latency", "api", "100", "ms", 1, 2)
 	p := metric("", 4, "request latency", "api", "1e2", "msec", 2, 3)
-	e := MetricEdgeFor(g, p)
+	e := mustMetricEdgeForTest(g, p)
 	if !e.Eligible || !e.Acceptable {
 		t.Fatalf("edge = %#v", e)
 	}
@@ -137,15 +152,15 @@ func TestMetricEdgesEligibilityWeightsAndThreshold(t *testing.T) {
 
 	// Two exact nonempty fields are eligible without a span intersection, but this
 	// deliberately lands below the acceptance threshold.
-	low := MetricEdgeFor(metric("g", 0, "same", "different", "1", "ms"), metric("", 0, "same", "other", "2", "ms"))
+	low := mustMetricEdgeForTest(metric("g", 0, "same", "different", "1", "ms"), metric("", 0, "same", "other", "2", "ms"))
 	if !low.Eligible || low.Acceptable || low.Weight != 300000 {
 		t.Fatalf("low edge = %#v", low)
 	}
-	one := MetricEdgeFor(metric("g", 0, "same", "x", "1", "ms"), metric("", 0, "same", "y", "2", "s"))
+	one := mustMetricEdgeForTest(metric("g", 0, "same", "x", "1", "ms"), metric("", 0, "same", "y", "2", "s"))
 	if one.Eligible {
 		t.Fatalf("one exact field made eligible: %#v", one)
 	}
-	atThreshold := MetricEdgeFor(metric("g", 0, "left", "same", "1", "ms", 8), metric("", 0, "right", "same", "2", "ms", 8))
+	atThreshold := mustMetricEdgeForTest(metric("g", 0, "left", "same", "1", "ms", 8), metric("", 0, "right", "same", "2", "ms", 8))
 	if atThreshold.Weight != MetricAcceptanceWeight || !atThreshold.Acceptable {
 		t.Fatalf("edge at exact threshold = %#v", atThreshold)
 	}
@@ -154,7 +169,7 @@ func TestMetricEdgesEligibilityWeightsAndThreshold(t *testing.T) {
 func TestMetricEdgeAcceptsMathematicallyExactThreshold(t *testing.T) {
 	g := metric("g", 0, "a b", "same", "7", "ms", 1, 2)
 	p := metric("", 0, "a b c", "same", "7", "s", 2, 3)
-	e := MetricEdgeFor(g, p)
+	e := mustMetricEdgeForTest(g, p)
 	if !e.Acceptable || e.ExactWeight != "3/5" {
 		t.Fatalf("exact threshold edge = %#v", e)
 	}
@@ -163,13 +178,13 @@ func TestMetricEdgeAcceptsMathematicallyExactThreshold(t *testing.T) {
 func TestMetricEdgeStableFieldsCorePresenceOverridesLegacy(t *testing.T) {
 	g := metric("g", 0, "legacy", "subject", "1", "ms", 1)
 	p := metric("", 0, "legacy", "subject", "1", "ms", 1)
-	if e := MetricEdgeFor(g, p); e.Components.Name != 200000 {
+	if e := mustMetricEdgeForTest(g, p); e.Components.Name != 200000 {
 		t.Fatalf("omitted map did not use legacy: %#v", e)
 	}
 	for _, raw := range []json.RawMessage{json.RawMessage(`null`), json.RawMessage(`""`)} {
 		g.StableFields = map[string]json.RawMessage{"metric_name": raw}
 		p.StableFields = map[string]json.RawMessage{"metric_name": raw}
-		if e := MetricEdgeFor(g, p); e.Components.Name != 0 {
+		if e := mustMetricEdgeForTest(g, p); e.Components.Name != 0 {
 			t.Fatalf("map core %s did not override legacy: %#v", raw, e)
 		}
 	}
@@ -180,7 +195,7 @@ func TestMatchMetricsExactRationalObjectiveAvoidsFlooringTie(t *testing.T) {
 		exactEdge("a", 0, 0, 0, "6000001/10000000"), exactEdge("a", 0, 1, 1, "3/5"),
 		exactEdge("b", 1, 0, 0, "3/5"), exactEdge("b", 1, 1, 1, "3/5"),
 	}
-	got := optimalMetricMatches(2, 2, edges)
+	got := mustOptimalMetricMatchesForTest(2, 2, edges)
 	if len(got) != 2 || got[0].PredictionInputIndex != 0 || got[1].PredictionInputIndex != 1 {
 		t.Fatalf("exact objective assignment = %#v", got)
 	}
@@ -196,7 +211,7 @@ func TestMatchMetricsFindsGlobalOptimumAndRectangularForbidden(t *testing.T) {
 		{GoldID: "a", GoldIndex: 0, PredictionInputIndex: 1, PredictionIndex: 1, Eligible: true, Acceptable: true, Weight: 700000},
 		{GoldID: "b", GoldIndex: 1, PredictionInputIndex: 0, PredictionIndex: 0, Eligible: true, Acceptable: true, Weight: 700000},
 	}
-	got := optimalMetricMatches(2, 3, edges)
+	got := mustOptimalMetricMatchesForTest(2, 3, edges)
 	want := []MetricMatch{{GoldID: "a", GoldIndex: 0, PredictionInputIndex: 1, PredictionIndex: 1, Weight: 700000, ExactWeight: "7/10"}, {GoldID: "b", GoldIndex: 1, PredictionInputIndex: 0, PredictionIndex: 0, Weight: 700000, ExactWeight: "7/10"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("matches = %#v, want %#v", got, want)
@@ -210,7 +225,7 @@ func TestMatchMetricsEqualOptimumUsesLexicographicallySmallestPairs(t *testing.T
 		{GoldID: "b", GoldIndex: 0, PredictionInputIndex: 9, PredictionIndex: 0, Acceptable: true, Weight: 600000},
 		{GoldID: "b", GoldIndex: 0, PredictionInputIndex: 3, PredictionIndex: 1, Acceptable: true, Weight: 600000},
 	}
-	got := optimalMetricMatches(2, 2, edges)
+	got := mustOptimalMetricMatchesForTest(2, 2, edges)
 	pairs := [][2]any{{got[0].GoldID, got[0].PredictionInputIndex}, {got[1].GoldID, got[1].PredictionInputIndex}}
 	want := [][2]any{{"a", 3}, {"b", 9}}
 	if !reflect.DeepEqual(pairs, want) {
