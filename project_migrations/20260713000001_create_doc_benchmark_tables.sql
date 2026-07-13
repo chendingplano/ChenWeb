@@ -36,6 +36,7 @@ CREATE TRIGGER trg_benchmark_artifacts_guard BEFORE UPDATE OR DELETE ON kb.bench
 CREATE INDEX idx_benchmark_case_runs_selected ON kb.benchmark_case_runs(selected_attempt_id);
 CREATE UNIQUE INDEX uq_benchmark_case_runs_selected_once ON kb.benchmark_case_runs(selected_attempt_id) WHERE selected_attempt_id IS NOT NULL;
 CREATE INDEX idx_benchmark_attempts_lifecycle_lease ON kb.benchmark_case_attempts(lifecycle,lease_expires_at);
+CREATE INDEX idx_benchmark_attempts_case_lifecycle_lease ON kb.benchmark_case_attempts(case_run_id,lifecycle,lease_expires_at);
 CREATE INDEX idx_benchmark_attempts_diagnostics ON kb.benchmark_case_attempts(failure_kind,provider,model);
 CREATE INDEX idx_benchmark_runs_comparisons ON kb.benchmark_runs(experiment_id,lifecycle,variant_name);
 CREATE INDEX idx_benchmark_workspaces_cleanup ON kb.benchmark_workspaces(cleanup_state,cleaned_at);
