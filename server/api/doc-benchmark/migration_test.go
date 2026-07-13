@@ -186,7 +186,7 @@ func TestBenchmarkScoreGuardConcurrency(t *testing.T) {
 	if _, err = db.Exec(`DROP TABLE IF EXISTS kb.benchmark_artifacts, kb.benchmark_scores, kb.benchmark_workspaces, kb.benchmark_case_attempts, kb.benchmark_case_runs, kb.benchmark_runs, kb.benchmark_experiments CASCADE`); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = db.Exec(`DELETE FROM public.goose_db_version WHERE version_id >= 20260713000001`)
+	_, _ = db.Exec(`DELETE FROM public.goose_db_version WHERE version_id >= 20260713000003`)
 	cleaned = true
 }
 
@@ -371,7 +371,7 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if _, err = db.Exec(`DROP TABLE IF EXISTS kb.benchmark_artifacts, kb.benchmark_scores, kb.benchmark_workspaces, kb.benchmark_case_attempts, kb.benchmark_case_runs, kb.benchmark_runs, kb.benchmark_experiments CASCADE`); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = db.Exec(`DELETE FROM public.goose_db_version WHERE version_id >= 20260713000001`)
+	_, _ = db.Exec(`DELETE FROM public.goose_db_version WHERE version_id >= 20260713000003`)
 	cleaned = true
 	if err = db.QueryRow(`SELECT count(*) FROM pg_tables WHERE schemaname='kb' AND tablename LIKE 'benchmark_%'`).Scan(&n); err != nil {
 		t.Fatal(err)
