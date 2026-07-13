@@ -27,7 +27,7 @@ CREATE TRIGGER trg_benchmark_scores_guard BEFORE UPDATE OR DELETE ON kb.benchmar
 CREATE OR REPLACE FUNCTION kb.benchmark_artifact_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.verified THEN RAISE EXCEPTION 'verified artifact immutable'; END IF; RETURN COALESCE(NEW,OLD); END $$;
 CREATE TRIGGER trg_benchmark_artifacts_guard BEFORE UPDATE OR DELETE ON kb.benchmark_artifacts FOR EACH ROW EXECUTE FUNCTION kb.benchmark_artifact_guard();
 CREATE INDEX idx_benchmark_case_runs_selected ON kb.benchmark_case_runs(selected_attempt_id);
-CREATE UNIQUE INDEX uq_benchmark_case_runs_selected_once ON kb.benchmark_case_runs(id, selected_attempt_id) WHERE selected_attempt_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_benchmark_case_runs_selected_once ON kb.benchmark_case_runs(selected_attempt_id) WHERE selected_attempt_id IS NOT NULL;
 CREATE INDEX idx_benchmark_attempts_lifecycle_lease ON kb.benchmark_case_attempts(lifecycle,lease_expires_at);
 CREATE INDEX idx_benchmark_attempts_diagnostics ON kb.benchmark_case_attempts(failure_kind,provider,model);
 CREATE INDEX idx_benchmark_runs_comparisons ON kb.benchmark_runs(experiment_id,lifecycle,variant_name);

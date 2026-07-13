@@ -47,7 +47,7 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.QueryRow(`INSERT INTO kb.benchmark_case_runs(run_id,case_id,repetition,lifecycle) VALUES ($1,'c',1,'queued') RETURNING id`, run).Scan(&cr)
+	err = db.QueryRow(`INSERT INTO kb.benchmark_case_runs(run_id,case_id,repetition,lifecycle) VALUES ($1,'c',1,'pending') RETURNING id`, run).Scan(&cr)
 	if err != nil {
 		t.Fatal(err)
 	}
