@@ -153,6 +153,10 @@ type AppConfigDef struct {
 	RelationSearchWeights           RelationSearchWeightsConfig           `mapstructure:"relations_search_weights"`
 	LLM                             LLMConfig                             `mapstructure:"llm"`
 	Languages                       LanguagesConfig                       `mapstructure:"languages"`
+	// SiteConfig names the tenant-independent site-config file for the
+	// customer-facing frontend (ADR 2026071102). Tenant-dependent config
+	// filenames come from the site_tenants table, never from here.
+	SiteConfig SiteConfigSection `mapstructure:"config"`
 	// DocReviews maps a review tier key (e.g. "must-review") to the list of
 	// aspect item names included in that tier. Configured via [doc-reviews]
 	// in config.toml / config.local.toml. When empty, the Document Review
@@ -172,6 +176,10 @@ type PDFParserConfig struct {
 	UsePaddleOCRVL      bool     `mapstructure:"use_paddleocr_vl"`
 	DeleteFromStaging   bool     `mapstructure:"delete_from_staging"`
 	WorkDir             string   `mapstructure:"work_dir"`
+}
+
+type SiteConfigSection struct {
+	ConfigFilename string `mapstructure:"config_filename"`
 }
 
 var AppConfig AppConfigDef
@@ -313,6 +321,10 @@ func GetLanguages() []string {
 		return []string{"en"}
 	}
 	return out
+}
+
+func GetSiteConfigFilename() string {
+	return AppConfig.SiteConfig.ConfigFilename
 }
 
 func GetArtifactSearchConfig() ArtifactSearchConfig {

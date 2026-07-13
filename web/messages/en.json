@@ -1,4 +1,14 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-	"hello_world": "Hello, {name} from en!"
+	"hello_world": "Hello, {name} from en!",
+	"semos_nav_home": "Home",
+	"semos_nav_workspace": "Workspace",
+	"semos_nav_knowledge_base": "Knowledge Base",
+	"semos_nav_about": "About Us",
+	"semos_signup_login": "Sign Up / Login",
+	"semos_get_started": "Get Started",
+	"semos_workspace_announcements": "Announcements",
+	"semos_workspace_recent": "Recent Activities",
+	"semos_workspace_alarms": "Alarms and Errors",
+	"semos_workspace_apps": "Apps"
 }

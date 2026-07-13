@@ -36,6 +36,7 @@ import (
 	"github.com/chendingplano/deepdoc/server/api/openmetadatahandler"
 	"github.com/chendingplano/deepdoc/server/api/promptoptimizerhandler"
 	"github.com/chendingplano/deepdoc/server/api/proxytracehandler"
+	"github.com/chendingplano/deepdoc/server/api/sitehandler"
 	"github.com/chendingplano/shared/go/api/ApiTypes"
 	"github.com/chendingplano/shared/go/api/ApiUtils"
 	"github.com/chendingplano/shared/go/api/EchoFactory"
@@ -211,6 +212,9 @@ func RegisterRoutes(e *echo.Echo) error {
 
 	// Add the endpoint '/api/config' (public endpoint for frontend to fetch config)
 	e.GET("/api/config", confighandler.GetConfig)
+	// Tenant-independent site config for the SemOS customer-facing frontend
+	// (public: pre-login pages need it). ADR 2026071102.
+	e.GET("/api/site-config", sitehandler.GetSiteConfig)
 	e.POST("/api/internal/mitmproxy/ingest", proxytracehandler.IngestMitmExchange)
 
 	// Create the routing group '/api/v1'
@@ -221,6 +225,10 @@ func RegisterRoutes(e *echo.Echo) error {
 	apiGroup.GET("/health", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]any{"status": "ok"})
 	})
+
+	// Tenant-dependent site config (authenticated; tenant binding is a
+	// placeholder until the follow-up auth ADR). ADR 2026071102.
+	apiGroup.GET("/site-config/tenant/:tenant_id", sitehandler.GetTenantSiteConfig)
 
 	apiGroup.GET("/integrations/openmetadata/session", openmetadatahandler.GetSession)
 

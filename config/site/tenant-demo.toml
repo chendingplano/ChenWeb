@@ -1,0 +1,109 @@
+# Tenant-specific site config for Demo Corp (referenced by site_tenants table).
+# Differs from the shared site-default.toml only in branding/slogan fields.
+
+[branding]
+site_name = "Demo Corp Knowledge Portal"
+logo_text = "Demo Corp"
+powered_by = "Powered by SemOS"
+
+[hero]
+slogan = "Demo Corp: Institutional Knowledge, On Tap"
+subtitle = "SemOS turns documents into searchable, reviewable, actionable knowledge — and lets you build AI applications on top of it."
+image = "/images/angleWalls.jpg"
+cta_primary_label = "Get Started"
+cta_primary_href = "/semos/workspace"
+cta_secondary_label = "Sign Up / Login"
+cta_secondary_href = "/login"
+
+[[highlights]]
+title = "Every document, understood"
+description = "Upload files or collect them from the web. SemOS parses PDF, Word, PPT and more, extracting structure, not just text."
+image = "/images/angleWalls.jpg"
+
+[[highlights]]
+title = "Artifacts, not just pages"
+description = "Metrics, compliance provisions, entities and relations are extracted automatically and become first-class, searchable objects."
+image = "/images/angleWalls.jpg"
+
+[[highlights]]
+title = "Search that actually finds"
+description = "Hybrid search combines BM25 keyword matching with semantic vector similarity, so you find what you meant, not just what you typed."
+image = "/images/angleWalls.jpg"
+
+[[highlights]]
+title = "Reviews with receipts"
+description = "Document reviews cite their source lines. Every finding links back to the exact place in the original document."
+image = "/images/angleWalls.jpg"
+
+[[highlights]]
+title = "Build your own AI apps"
+description = "A development environment for building and offering AI applications on top of your knowledge base."
+image = "/images/angleWalls.jpg"
+
+[[features]]
+key = "knowledge_base"
+title = "Knowledge Base"
+description = "Centralize documents and extracted artifacts in one governed store."
+href = "/home3/knowledge"
+
+[[features]]
+key = "chat"
+title = "Chat with Documents"
+description = "Ask questions in plain language; answers grounded in your documents."
+href = "/home3"
+
+[[features]]
+key = "search"
+title = "Search the Knowledge Base"
+description = "Hybrid BM25 + semantic search across everything you have ingested."
+href = "/home3/knowledge"
+
+[[features]]
+key = "app_dev"
+title = "Agent and App Development"
+description = "Develop, run, and offer your own AI applications and agents."
+href = "/home3"
+
+[footer]
+text = "SemOS — Knowledge Management AI Application System"
+
+[workspace]
+banner_title = "Your Workspace"
+banner_subtitle = "Everything you need to work with your knowledge base, in one place."
+banner_image = "/images/angleWalls.jpg"
+
+[[workspace.apps]]
+name = "Knowledge Base"
+description = "Browse and manage documents and artifacts."
+href = "/home3/knowledge"
+icon = "database"
+
+[[workspace.apps]]
+name = "Chat with Your Knowledge Base"
+description = "Grounded Q&A over your documents."
+href = "/home3"
+icon = "message-circle"
+
+[[workspace.apps]]
+name = "Search Your Knowledge Base"
+description = "Hybrid keyword + semantic search."
+href = "/home3/knowledge"
+icon = "search"
+
+[[workspace.apps]]
+name = "Document Reviews"
+description = "Run and read document reviews with cited findings."
+href = "/home3/inputs"
+icon = "file-check"
+
+[[workspace.apps]]
+name = "Workflows"
+description = "Automate multi-step document processing."
+href = "/home3"
+icon = "workflow"
+
+[[workspace.apps]]
+name = "Agents and Harness"
+description = "Build and run AI agents over your knowledge."
+href = "/home3"
+icon = "bot"
