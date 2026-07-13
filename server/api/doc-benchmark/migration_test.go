@@ -37,6 +37,12 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if n != 7 {
 		t.Fatalf("benchmark tables=%d, want 7", n)
 	}
+	for _, tbl := range []string{"benchmark_experiments", "benchmark_runs", "benchmark_case_runs", "benchmark_case_attempts", "benchmark_workspaces", "benchmark_scores", "benchmark_artifacts"} {
+		var c int
+		if err = db.QueryRow(`SELECT count(*) FROM pg_class WHERE relnamespace='kb'::regnamespace AND relname=$1`, tbl).Scan(&c); err != nil || c != 1 {
+			t.Fatalf("missing catalog table %s", tbl)
+		}
+	}
 	var cols int
 	if err = db.QueryRow(`SELECT count(*) FROM information_schema.columns WHERE table_schema='kb' AND table_name='benchmark_scores' AND column_name IN ('attempt_id','run_id','metric','slice','aggregation_kind')`).Scan(&cols); err != nil || cols != 5 {
 		t.Fatalf("benchmark_scores catalog columns=%d err=%v", cols, err)
@@ -132,5 +138,11 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatal("down migration removed production kb.inputs")
+	}
+	for _, tbl := range []string{"metrics", "logs", "objects"} {
+		var exists sql.NullString
+		if err = db.QueryRow(`SELECT to_regclass('kb.'||$1)`, tbl).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
