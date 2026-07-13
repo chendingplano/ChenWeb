@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/pressly/goose/v3"
@@ -40,6 +41,10 @@ func assertBenchmarkCatalog(t *testing.T, db *sql.DB) {
 				t.Fatal(err)
 			}
 			got[n] = benchmarkColumn{typ, udt, nullable}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatal(err)
 		}
 		rows.Close()
 		if len(got) != len(want) {
@@ -95,6 +100,76 @@ func assertBenchmarkCatalog(t *testing.T, db *sql.DB) {
 	}
 }
 
+func TestBenchmarkScoreGuardConcurrency(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, file, _, _ := runtime.Caller(0)
+	dir := filepath.Join(filepath.Dir(file), "../../../project_migrations")
+	goose.SetDialect("postgres")
+	if err = goose.Up(db, dir); err != nil {
+		t.Fatal(err)
+	}
+	cleaned := false
+	t.Cleanup(func() {
+		if !cleaned {
+			_ = goose.Down(db, dir)
+		}
+	})
+	var exp, run, cr, at string
+	q := `INSERT INTO kb.benchmark_experiments(name,dataset_id,dataset_version,dataset_hash,raw_request_toml,raw_request_hash,resolved_experiment_json,resolved_file_hashes_json,resolved_case_set_json) VALUES ('concurrency','d','v',gen_random_uuid()::text,'x',gen_random_uuid()::text,'{}','{}','{}') RETURNING id`
+	if err = db.QueryRow(q).Scan(&exp); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(`INSERT INTO kb.benchmark_runs(experiment_id,variant_name) VALUES ($1,'concurrency') RETURNING id`, exp).Scan(&run); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(`INSERT INTO kb.benchmark_case_runs(run_id,case_id,repetition) VALUES ($1,'c',1) RETURNING id`, run).Scan(&cr); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.QueryRow(`INSERT INTO kb.benchmark_case_attempts(case_run_id,attempt_number,kind) VALUES ($1,1,'execution') RETURNING id`, cr).Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO kb.benchmark_scores(attempt_id,processor,scorer,scorer_version,metric,direction,aggregation_kind) VALUES ($1,'p','s','1','m','higher','mean')`, at); err != nil {
+		t.Fatal(err)
+	}
+	tx1, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx1.Exec(`UPDATE kb.benchmark_case_attempts SET lifecycle='succeeded' WHERE id=$1`, at); err != nil {
+		t.Fatal(err)
+	}
+	tx2, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, e := tx2.Exec(`UPDATE kb.benchmark_scores SET value=1 WHERE attempt_id=$1`, at); done <- e }()
+	select {
+	case e := <-done:
+		t.Fatalf("score update completed before owner commit: %v", e)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err = tx1.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-done; err == nil {
+		t.Fatal("concurrent score update unexpectedly succeeded")
+	}
+	_ = tx2.Rollback()
+	if err = goose.Down(db, dir); err != nil {
+		t.Fatal(err)
+	}
+	cleaned = true
+}
+
 func expectExecError(t *testing.T, db *sql.DB, stmt string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(stmt, args...); err == nil {
@@ -121,6 +196,12 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if err = goose.Up(db, dir); err != nil {
 		t.Fatal(err)
 	}
+	cleaned := false
+	t.Cleanup(func() {
+		if !cleaned {
+			_ = goose.Down(db, dir)
+		}
+	})
 	var n int
 	if err = db.QueryRow(`SELECT count(*) FROM pg_tables WHERE schemaname='kb' AND tablename LIKE 'benchmark_%'`).Scan(&n); err != nil {
 		t.Fatal(err)
@@ -129,7 +210,7 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 		t.Fatalf("benchmark tables=%d, want 7", n)
 	}
 	assertBenchmarkCatalog(t, db)
-	for _, idx := range []string{"idx_benchmark_case_runs_selected", "idx_benchmark_scores_comparison", "uq_benchmark_scores_owner_metric", "uq_benchmark_case_runs_selected_once"} {
+	for _, idx := range []string{"idx_benchmark_scores_comparison", "uq_benchmark_scores_owner_metric", "uq_benchmark_case_runs_selected_once"} {
 		var c int
 		if err = db.QueryRow(`SELECT count(*) FROM pg_indexes WHERE schemaname='kb' AND indexname=$1`, idx).Scan(&c); err != nil || c != 1 {
 			t.Fatalf("missing index %s", idx)
@@ -254,6 +335,8 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if _, err = db.Exec(`DELETE FROM kb.benchmark_scores WHERE attempt_id=$1`, at); err == nil {
 		t.Fatal("selected score delete accepted")
 	}
+	expectExecError(t, db, `DELETE FROM kb.benchmark_case_attempts WHERE id=$1`, at)
+	expectExecError(t, db, `DELETE FROM kb.benchmark_runs WHERE id=$1`, run)
 	prod := map[string]bool{}
 	for _, tbl := range []string{"inputs", "chunks", "metrics", "doc_proc_logs", "logs", "objects"} {
 		var v sql.NullString
@@ -265,6 +348,7 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if err = goose.Down(db, dir); err != nil {
 		t.Fatal(err)
 	}
+	cleaned = true
 	if err = db.QueryRow(`SELECT count(*) FROM pg_tables WHERE schemaname='kb' AND tablename LIKE 'benchmark_%'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
