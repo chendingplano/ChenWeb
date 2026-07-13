@@ -296,6 +296,9 @@ func setDistribution(a *AggregateRow, vals []float64) bool {
 	if len(vals)%2 == 0 {
 		med = (vals[len(vals)/2-1] + med) / 2
 	}
+	if math.IsInf(med, 0) || math.IsNaN(med) {
+		return false
+	}
 	sd := 0.0
 	for _, v := range vals {
 		sd += (v - mean) * (v - mean)
@@ -401,6 +404,10 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 					if r.Metric != br.Metric || r.Component != br.Component {
 						continue
 					}
+					conditional := r.ConditionalAttribution || br.ConditionalAttribution
+					if c.BaselineUpstreamHash != c.CandidateUpstreamHash && c.AllowUpstreamVariation && conditional {
+						continue
+					}
 					if canonicalAggregationKind(r.AggregationKind) == "count_derived_micro" && canonicalAggregationKind(br.AggregationKind) == "count_derived_micro" {
 						if u.UpstreamInvalid && r.ConditionalAttribution {
 							continue
@@ -420,10 +427,6 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 						q[2] += r.FN
 						pooledB[key] = q
 						applicableByMetric[key]++
-					}
-					conditional := r.ConditionalAttribution || br.ConditionalAttribution
-					if c.BaselineUpstreamHash != c.CandidateUpstreamHash && c.AllowUpstreamVariation && conditional {
-						continue
 					}
 					if r.Value != nil && br.Value != nil && !(u.UpstreamInvalid && r.ConditionalAttribution) && !(x.UpstreamInvalid && br.ConditionalAttribution) {
 						// coverage for macro metrics is tracked independently below
