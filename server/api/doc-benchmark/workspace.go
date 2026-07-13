@@ -41,6 +41,7 @@ type WorkspaceAllocation struct {
 	Config                             WorkspaceConfig
 	WorkPath, EvidencePath, MarkerPath string
 	Marker                             AllocationMarker
+	lastArtifact                       string
 }
 type Artifact struct {
 	Path, SHA256 string
@@ -247,6 +248,7 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 	if !safeComponent(name) {
 		return Artifact{}, fmt.Errorf("%w: artifact name", ErrUnsafePath)
 	}
+	a.lastArtifact = name
 	if err := a.validate(); err != nil {
 		return Artifact{}, err
 	}
@@ -453,7 +455,7 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 		for _, e := range ents {
 			// Unverified evidence is disposable only when the filename is
 			// attempt-scoped (partial or final names carrying the attempt id).
-			if strings.HasSuffix(e.Name(), ".partial") && strings.HasPrefix(e.Name(), "."+a.Config.AttemptID+".") {
+			if (strings.HasSuffix(e.Name(), ".partial") && strings.HasPrefix(e.Name(), "."+a.Config.AttemptID+".")) || e.Name() == a.lastArtifact {
 				if err := os.Remove(filepath.Join(a.EvidencePath, e.Name())); err != nil {
 					return fail(err)
 				}
