@@ -37,10 +37,25 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if n != 7 {
 		t.Fatalf("benchmark tables=%d, want 7", n)
 	}
+	for _, idx := range []string{"idx_benchmark_case_runs_selected", "idx_benchmark_scores_comparison", "uq_benchmark_scores_owner_metric", "uq_benchmark_case_runs_selected_once"} {
+		var c int
+		if err = db.QueryRow(`SELECT count(*) FROM pg_indexes WHERE schemaname='kb' AND indexname=$1`, idx).Scan(&c); err != nil || c != 1 {
+			t.Fatalf("missing index %s", idx)
+		}
+	}
 	for _, tbl := range []string{"benchmark_experiments", "benchmark_runs", "benchmark_case_runs", "benchmark_case_attempts", "benchmark_workspaces", "benchmark_scores", "benchmark_artifacts"} {
 		var c int
 		if err = db.QueryRow(`SELECT count(*) FROM pg_class WHERE relnamespace='kb'::regnamespace AND relname=$1`, tbl).Scan(&c); err != nil || c != 1 {
 			t.Fatalf("missing catalog table %s", tbl)
+		}
+	}
+	required := map[string][]string{"benchmark_experiments": {"id", "name", "raw_request_hash"}, "benchmark_runs": {"id", "experiment_id", "variant_name", "lifecycle"}, "benchmark_case_runs": {"id", "run_id", "case_id", "selected_attempt_id"}, "benchmark_case_attempts": {"id", "case_run_id", "attempt_number", "kind"}, "benchmark_workspaces": {"id", "execution_attempt_id", "canonical_dir"}, "benchmark_scores": {"id", "attempt_id", "run_id", "metric"}, "benchmark_artifacts": {"id", "attempt_id", "run_id", "sha256"}}
+	for tbl, colsReq := range required {
+		for _, col := range colsReq {
+			var c int
+			if err = db.QueryRow(`SELECT count(*) FROM information_schema.columns WHERE table_schema='kb' AND table_name=$1 AND column_name=$2`, tbl, col).Scan(&c); err != nil || c != 1 {
+				t.Fatalf("missing column %s.%s", tbl, col)
+			}
 		}
 	}
 	var cols int
