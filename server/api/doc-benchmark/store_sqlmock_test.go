@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"github.com/DATA-DOG/go-sqlmock"
 	"testing"
 	"time"
@@ -22,6 +23,20 @@ func TestSQLStoreCreateCaseRunCanonicalJSON(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestSQLStoreCreateCaseRunConflict(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	m.ExpectQuery("INSERT INTO kb.benchmark_case_runs").WithArgs("r", "c", 1, "applicable", []byte(`{"x":1}`), (*string)(nil)).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	_, err := (SQLStore{DB: db}).CreateCaseRun(context.Background(), "r", "c", 1, "applicable", map[string]int{"x": 1}, nil)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected conflict, got %v", err)
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLStoreOwnerXOR(t *testing.T) {
 	db, m, _ := sqlmock.New()
 	defer db.Close()

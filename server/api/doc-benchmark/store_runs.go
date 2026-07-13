@@ -51,9 +51,6 @@ func (s SQLStore) CreateExperiment(ctx context.Context, e Experiment) (string, e
 	if err == sql.ErrNoRows {
 		return "", ErrConflict
 	}
-	if err == sql.ErrNoRows {
-		return "", ErrConflict
-	}
 	return id, err
 }
 func (s SQLStore) GetExperimentByRequestHash(ctx context.Context, h string) (ExperimentRecord, error) {
@@ -98,6 +95,9 @@ func (s SQLStore) CreateCaseRun(ctx context.Context, runID, caseID string, repet
 	}
 	var id string
 	err = s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_case_runs (run_id,case_id,repetition,applicability,tags_json,upstream_hash) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (run_id,case_id,repetition) DO UPDATE SET updated_at=kb.benchmark_case_runs.updated_at WHERE kb.benchmark_case_runs.applicability=$4 AND kb.benchmark_case_runs.tags_json=$5 AND kb.benchmark_case_runs.upstream_hash IS NOT DISTINCT FROM $6 RETURNING id`, runID, caseID, repetition, applicability, b, upstreamHash).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", ErrConflict
+	}
 	return id, err
 }
 func (s SQLStore) GetRun(ctx context.Context, id string) (RunRecord, error) {
