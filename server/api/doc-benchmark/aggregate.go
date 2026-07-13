@@ -156,6 +156,14 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		default:
 			setDistribution(&a, vals)
 		}
+		if r.AggregationKind == "binary_rate_macro" || r.AggregationKind == "rate_macro" {
+			a.Denominator = len(vals)
+			for _, v := range vals {
+				if v == 1 {
+					a.Numerator++
+				}
+			}
+		}
 		out = append(out, a)
 	}
 	return out, nil
