@@ -1,13 +1,19 @@
 package docbenchmark
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"math/big"
 	"sort"
+	"strings"
 )
 
 const MetricScorerVersion = "metric-scorer-v1"
+const ExpectedMetricScorerHashV1 = "99eb05b47d956a5c786a67c0158c8f81c332eec18327445b191de28f27285c33"
+const ExpectedMetricNormalizationHashV1 = "2f7db6b1fe1c8c9b57432f68a0a47dd010fd394e7ef6b41eb86337834156c35b"
 
 type MetricScoreInput struct {
 	Gold, Predictions []MetricRecord
@@ -28,7 +34,9 @@ type AcceptedMetricDiagnostic struct {
 	GoldID               string
 	PredictionInputIndex int
 	Weight               int
+	ExactWeight          string
 	Components           MetricEdgeComponents
+	ExactComponents      MetricEdgeExactComponents
 }
 type FieldDifference struct {
 	GoldID, Field, Expected, Actual string
@@ -64,12 +72,31 @@ type MetricScore struct {
 }
 
 type MetricScorerConfiguration struct {
-	NormalizationVersion string            `json:"normalization_version"`
-	UnitAliases          map[string]string `json:"unit_aliases"`
-	Weights              map[string]int    `json:"weights_millionths"`
-	Eligibility          string            `json:"eligibility"`
-	Threshold            int               `json:"threshold_millionths"`
-	TieRule              string            `json:"tie_rule"`
+	ScorerVersion        string                  `json:"scorer_version"`
+	NormalizationVersion string                  `json:"normalization_version"`
+	NormalizationRules   map[string]string       `json:"normalization_rules"`
+	UnitAliases          map[string]string       `json:"unit_aliases"`
+	Weights              map[string]string       `json:"weights_rational"`
+	Eligibility          string                  `json:"eligibility"`
+	Threshold            string                  `json:"threshold_rational"`
+	TieRule              string                  `json:"tie_rule"`
+	ScoreRows            []MetricScoreDefinition `json:"score_rows"`
+}
+
+type MetricScoreDefinition struct {
+	Name, Direction, AggregationKind, NullableSemantics string
+	AdditiveComponents                                  []string `json:",omitempty"`
+}
+
+var metricScoreRegistryV1 = []MetricScoreDefinition{
+	{"detection_precision", "higher", "count_derived_micro", "section_10_3_detection_empty_rules", nil},
+	{"detection_recall", "higher", "count_derived_micro", "section_10_3_detection_empty_rules", nil},
+	{"detection_f1", "higher", "count_derived_micro", "section_10_3_detection_empty_rules", nil},
+	{"value_accuracy", "higher", "matched_field_micro", "null_when_denominator_zero", nil}, {"unit_accuracy", "higher", "matched_field_micro", "null_when_denominator_zero", nil}, {"value_unit_accuracy", "higher", "matched_field_micro", "null_when_denominator_zero", nil},
+	{"grounding_precision", "higher", "count_derived_micro", "null_when_no_accepted_match_or_denominator_zero", nil}, {"grounding_recall", "higher", "count_derived_micro", "null_when_no_accepted_match_or_denominator_zero", nil}, {"grounding_f1", "higher", "count_derived_micro", "zero_for_disjoint_nonempty;null_when_undefined", nil},
+	{"duplicate_prediction_rate", "lower", "binary_rate_macro", "zero_when_no_predictions", nil}, {"unsupported_metric_rate", "lower", "binary_rate_macro", "zero_when_no_predictions", nil}, {"explicit_implicit_accuracy", "higher", "matched_field_micro", "null_when_denominator_zero", nil},
+	{"stable_field_*", "higher", "matched_field_micro", "only_gold_map_membership_or_explicit_legacy_presence;null_when_denominator_zero", nil},
+	{"detection", "additive", "additive_component", "integer_count", []string{"tp", "fp", "fn"}}, {"grounding", "additive", "additive_component", "integer_count", []string{"tp", "fp", "fn"}},
 }
 
 func MetricScorerConfigurationV1() MetricScorerConfiguration {
@@ -77,10 +104,13 @@ func MetricScorerConfigurationV1() MetricScorerConfiguration {
 	for k, v := range unitAliasesV1 {
 		aliases[k] = v
 	}
-	return MetricScorerConfiguration{NormalizationVersion: NormalizationVersion, UnitAliases: aliases,
-		Weights:     map[string]int{"source": 350000, "name": 200000, "subject": 150000, "value": 200000, "unit": 100000},
-		Eligibility: "source_sets_intersect OR >=2 nonempty_present_exact(name,subject,value,unit)", Threshold: MetricAcceptanceWeight,
-		TieRule: "lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs"}
+	return MetricScorerConfiguration{ScorerVersion: MetricScorerVersion, NormalizationVersion: NormalizationVersion, NormalizationRules: normalizationRulesV1(), UnitAliases: aliases,
+		Weights:     map[string]string{"source": "7/20", "name": "1/5", "subject": "3/20", "value": "1/5", "unit": "1/10"},
+		Eligibility: "source_sets_intersect OR >=2 nonempty_present_exact(name,subject,value,unit)", Threshold: "3/5",
+		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ScoreRows: append([]MetricScoreDefinition(nil), metricScoreRegistryV1...)}
+}
+func normalizationRulesV1() map[string]string {
+	return map[string]string{"text": "NFKC+Unicode-case-fold+whitespace-collapse+edge-punctuation", "value": "exact-base10-decimal-then-normalized-text", "source_lines": "sorted-deduplicated", "stable_json": "map-membership-presence; null=absent; strings=text-v1; numbers=exact-rational; bool=exact; arrays=ordered-recursive; objects=sorted-key-recursive; metric_value=value-v1; metric_unit=unit-v1"}
 }
 func (c MetricScorerConfiguration) Hash() string {
 	raw, _ := json.Marshal(c)
@@ -91,8 +121,8 @@ func normalizationHashV1() string {
 	raw, _ := json.Marshal(struct {
 		Version string
 		Aliases map[string]string
-		Text    string
-	}{NormalizationVersion, MetricScorerConfigurationV1().UnitAliases, "NFKC+Unicode-case-fold+whitespace-collapse+edge-punctuation; decimal-base10; sorted-dedup-lines"})
+		Rules   map[string]string
+	}{NormalizationVersion, MetricScorerConfigurationV1().UnitAliases, normalizationRulesV1()})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -105,7 +135,7 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 	for _, m := range matches {
 		matchedGold[m.GoldIndex] = true
 		matchedPred[m.PredictionIndex] = true
-		s.Diagnostics.Accepted = append(s.Diagnostics.Accepted, AcceptedMetricDiagnostic{m.GoldID, m.PredictionInputIndex, m.Weight, m.Components})
+		s.Diagnostics.Accepted = append(s.Diagnostics.Accepted, AcceptedMetricDiagnostic{m.GoldID, m.PredictionInputIndex, m.Weight, m.ExactWeight, m.Components, m.ExactComponents})
 	}
 	tp, fp, fn := len(matches), len(in.Predictions)-len(matches), len(in.Gold)-len(matches)
 	s.DetectionPrecision, s.DetectionRecall, s.DetectionF1 = detectionScores(tp, fp, fn)
@@ -120,10 +150,12 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 	groundTP, groundFP, groundFN := 0, 0, 0
 	for _, m := range matches {
 		g, p := in.Gold[m.GoldIndex], in.Predictions[m.PredictionIndex]
-		gv, pv := NormalizeValue(g.Value), NormalizeValue(p.Value)
-		gu, pu := NormalizeUnit(g.Unit), NormalizeUnit(p.Unit)
+		gv, gValuePresent := recordValueField(g, "metric_value", g.Value, NormalizeValue)
+		pv, _ := recordValueField(p, "metric_value", p.Value, NormalizeValue)
+		gu, gUnitPresent := recordValueField(g, "metric_unit", g.Unit, NormalizeUnit)
+		pu, _ := recordValueField(p, "metric_unit", p.Unit, NormalizeUnit)
 		valueOK, unitOK := normalizedFieldValueEqual(gv, pv), normalizedFieldUnitEqual(gu, pu)
-		if g.Value != nil {
+		if gValuePresent {
 			valueTotal++
 			if valueOK {
 				valueCorrect++
@@ -131,7 +163,7 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 				s.addDiff(g, p, m, "metric_value", fieldDisplay(gv), fieldDisplay(pv))
 			}
 		}
-		if g.Unit != nil {
+		if gUnitPresent {
 			unitTotal++
 			if unitOK {
 				unitCorrect++
@@ -139,23 +171,25 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 				s.addDiff(g, p, m, "metric_unit", fieldDisplay(gu), fieldDisplay(pu))
 			}
 		}
-		if g.Value != nil && g.Unit != nil {
+		if gValuePresent && gUnitPresent {
 			bothTotal++
 			if valueOK && unitOK {
 				bothCorrect++
 			}
 		}
-		for _, f := range stable {
-			gold := f.get(g)
-			if gold == nil {
-				continue
-			}
-			fieldTotal[f.name]++
-			ng, np := NormalizeText(gold), NormalizeText(f.get(p))
-			if fieldsEqual(ng, np) {
-				fieldCorrect[f.name]++
+		goldFields, predFields := stableFieldValues(g), stableFieldValues(p)
+		names := make([]string, 0, len(goldFields))
+		for name := range goldFields {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fieldTotal[name]++
+			ng, np := normalizeStableJSON(name, goldFields[name]), normalizeStableJSON(name, predFields[name])
+			if ng == np {
+				fieldCorrect[name]++
 			} else {
-				s.addDiff(g, p, m, f.name, fieldDisplay(ng), fieldDisplay(np))
+				s.addDiff(g, p, m, name, ng, np)
 			}
 		}
 		if g.IsExplicitMetric != nil {
@@ -176,8 +210,15 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 	s.UnitAccuracy = nullableRatio(unitCorrect, unitTotal)
 	s.ValueUnitAccuracy = nullableRatio(bothCorrect, bothTotal)
 	s.ExplicitAccuracy = nullableRatio(explicitCorrect, explicitTotal)
+	allNames := map[string]bool{}
 	for _, f := range stable {
-		s.StableFieldAccuracy[f.name] = nullableRatio(fieldCorrect[f.name], fieldTotal[f.name])
+		allNames[f.name] = true
+	}
+	for name := range fieldTotal {
+		allNames[name] = true
+	}
+	for name := range allNames {
+		s.StableFieldAccuracy[name] = nullableRatio(fieldCorrect[name], fieldTotal[name])
 	}
 	if len(matches) > 0 {
 		s.GroundingPrecision, s.GroundingRecall, s.GroundingF1 = groundingScores(groundTP, groundFP, groundFN)
@@ -197,13 +238,13 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 			continue
 		}
 		s.Diagnostics.UnmatchedPredictionIndices = append(s.Diagnostics.UnmatchedPredictionIndices, p.PredictionInputIndex)
-		best := 0
+		best := new(big.Rat)
 		for _, e := range edges {
-			if e.PredictionIndex == pi && e.Eligible && e.Weight > best {
-				best = e.Weight
+			if e.PredictionIndex == pi && e.Eligible && edgeRat(e).Cmp(best) > 0 {
+				best = new(big.Rat).Set(edgeRat(e))
 			}
 		}
-		if best >= MetricAcceptanceWeight {
+		if best.Cmp(metricThresholdRat()) >= 0 {
 			duplicates++
 			s.Diagnostics.DuplicatePredictionIndices = append(s.Diagnostics.DuplicatePredictionIndices, p.PredictionInputIndex)
 		} else {
@@ -224,6 +265,20 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 	return s
 }
 
+func recordValueField(r MetricRecord, name string, legacy *string, normalize func(*string) NormalizedField) (NormalizedField, bool) {
+	if raw, ok := r.StableFields[name]; ok {
+		if string(bytes.TrimSpace(raw)) == "null" {
+			return NormalizedField{State: FieldAbsent}, true
+		}
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			return normalize(&text), true
+		}
+		return NormalizedField{State: FieldValue, Text: normalizeCommon(string(raw))}, true
+	}
+	return normalize(legacy), legacy != nil
+}
+
 type fieldAccessor struct {
 	name string
 	get  func(MetricRecord) *string
@@ -232,9 +287,101 @@ type fieldAccessor struct {
 func stableFieldAccessors() []fieldAccessor {
 	return []fieldAccessor{
 		{"metric_name", func(r MetricRecord) *string { return r.Name }}, {"metric_name_en", func(r MetricRecord) *string { return r.NameEn }}, {"metric_subject", func(r MetricRecord) *string { return r.Subject }}, {"metric_subject_en", func(r MetricRecord) *string { return r.SubjectEn }},
+		{"metric_unit_en", func(r MetricRecord) *string { return r.UnitEn }},
 		{"metric_desc", func(r MetricRecord) *string { return r.Desc }}, {"metric_desc_en", func(r MetricRecord) *string { return r.DescEn }}, {"metric_context", func(r MetricRecord) *string { return r.Context }}, {"metric_context_en", func(r MetricRecord) *string { return r.ContextEn }},
 		{"location_type", func(r MetricRecord) *string { return r.LocationType }}, {"value_data_type", func(r MetricRecord) *string { return r.ValueDataType }}, {"value_range_type", func(r MetricRecord) *string { return r.ValueRangeType }}, {"value_class", func(r MetricRecord) *string { return r.ValueClass }}, {"value_class_en", func(r MetricRecord) *string { return r.ValueClassEn }},
 		{"formula_or_definition", func(r MetricRecord) *string { return r.FormulaOrDefinition }}, {"threshold_or_target", func(r MetricRecord) *string { return r.ThresholdOrTarget }}, {"measurement_frequency", func(r MetricRecord) *string { return r.MeasurementFrequency }}, {"table_name_or_section", func(r MetricRecord) *string { return r.TableNameOrSection }},
+	}
+}
+func stableFieldValues(r MetricRecord) map[string]json.RawMessage {
+	out := make(map[string]json.RawMessage)
+	for _, f := range stableFieldAccessors() {
+		if v := f.get(r); v != nil {
+			raw, _ := json.Marshal(*v)
+			out[f.name] = raw
+		}
+	}
+	for name, value := range map[string]*string{"metric_value": r.Value, "metric_unit": r.Unit} {
+		if value != nil {
+			raw, _ := json.Marshal(*value)
+			out[name] = raw
+		}
+	}
+	if r.IsExplicitMetric != nil {
+		raw, _ := json.Marshal(*r.IsExplicitMetric)
+		out["is_explicit_metric"] = raw
+	}
+	for name, raw := range r.StableFields {
+		out[name] = append(json.RawMessage(nil), raw...)
+	}
+	return out
+}
+func normalizeStableJSON(name string, raw json.RawMessage) string {
+	if raw == nil {
+		return "absent"
+	}
+	if string(bytes.TrimSpace(raw)) == "null" {
+		return "absent"
+	}
+	if name == "metric_value" || name == "metric_unit" {
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			var f NormalizedField
+			if name == "metric_value" {
+				f = NormalizeValue(&text)
+			} else {
+				f = NormalizeUnit(&text)
+			}
+			if f.Decimal != nil {
+				return "decimal:" + f.Decimal.String()
+			}
+			return "string:" + string(f.State) + ":" + f.Text
+		}
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	var v any
+	if err := d.Decode(&v); err != nil {
+		return "invalid:" + normalizeCommon(string(raw))
+	}
+	return canonicalStableValue(v)
+}
+func canonicalStableValue(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "absent"
+	case string:
+		f := NormalizeText(&x)
+		return "string:" + string(f.State) + ":" + f.Text
+	case bool:
+		if x {
+			return "bool:true"
+		}
+		return "bool:false"
+	case json.Number:
+		if d, ok := new(big.Rat).SetString(string(x)); ok {
+			return "number:" + canonicalRat(d)
+		}
+		return "number-invalid:" + string(x)
+	case []any:
+		parts := make([]string, len(x))
+		for i, item := range x {
+			parts[i] = canonicalStableValue(item)
+		}
+		return "array:[" + strings.Join(parts, ",") + "]"
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%q:%s", k, canonicalStableValue(x[k])))
+		}
+		return "object:{" + strings.Join(parts, ",") + "}"
+	default:
+		return fmt.Sprintf("unknown:%v", x)
 	}
 }
 func (s *MetricScore) addDiff(g, p MetricRecord, m MetricMatch, field, expected, actual string) {
@@ -326,16 +473,54 @@ func groundingScores(tp, fp, fn int) (ScoreMetric, ScoreMetric, ScoreMetric) {
 	p := nullableRatio(tp, tp+fp)
 	r := nullableRatio(tp, tp+fn)
 	var f ScoreMetric
-	if p.Value == nil || r.Value == nil || *p.Value+*r.Value == 0 {
+	if p.Value == nil || r.Value == nil {
 		f = nullMetric()
 	} else {
-		v := 2 * *p.Value * *r.Value / (*p.Value + *r.Value)
-		f = ScoreMetric{Value: &v, Numerator: 2 * tp, Denominator: 2*tp + fp + fn}
+		f = nullableRatio(2*tp, 2*tp+fp+fn)
 	}
 	setCounts(&p, tp, fp, fn)
 	setCounts(&r, tp, fp, fn)
 	setCounts(&f, tp, fp, fn)
 	return p, r, f
+}
+func ValidateMetricScoreRows(rows []ScoreRow) error {
+	defs := map[string]MetricScoreDefinition{}
+	for _, d := range metricScoreRegistryV1 {
+		defs[d.Name] = d
+	}
+	seen := map[string]map[string]bool{}
+	for _, row := range rows {
+		name := row.Metric
+		if strings.HasPrefix(name, "stable_field_") {
+			name = "stable_field_*"
+		}
+		d, ok := defs[name]
+		if !ok {
+			return fmt.Errorf("unregistered score row %q", row.Metric)
+		}
+		if row.Direction != d.Direction || row.AggregationKind != d.AggregationKind {
+			return fmt.Errorf("score row %q metadata differs from registry", row.Metric)
+		}
+		if seen[name] == nil {
+			seen[name] = map[string]bool{}
+		}
+		seen[name][row.Component] = true
+	}
+	for name, d := range defs {
+		if name == "stable_field_*" {
+			continue
+		}
+		components := seen[name]
+		if len(components) == 0 {
+			return fmt.Errorf("registry score row %q not emitted", name)
+		}
+		for _, component := range d.AdditiveComponents {
+			if !components[component] {
+				return fmt.Errorf("registry score row %q missing component %q", name, component)
+			}
+		}
+	}
+	return nil
 }
 func setCounts(m *ScoreMetric, tp, fp, fn int) { m.TP = tp; m.FP = fp; m.FN = fn }
 func sortMetricDiagnostics(d *MetricDiagnostics) {
@@ -356,28 +541,30 @@ func sortMetricDiagnostics(d *MetricDiagnostics) {
 }
 func metricScoreRows(s MetricScore) []ScoreRow {
 	rows := []ScoreRow{}
-	add := func(name, dir, agg string, m ScoreMetric) {
-		rows = append(rows, ScoreRow{Metric: name, Direction: dir, AggregationKind: agg, Value: m.Value, Numerator: m.Numerator, Denominator: m.Denominator, TP: m.TP, FP: m.FP, FN: m.FN})
+	add := func(name string, m ScoreMetric) {
+		d := metricScoreDefinition(name)
+		rows = append(rows, ScoreRow{Metric: name, Direction: d.Direction, AggregationKind: d.AggregationKind, Value: m.Value, Numerator: m.Numerator, Denominator: m.Denominator, TP: m.TP, FP: m.FP, FN: m.FN})
 	}
-	add("detection_precision", "higher", "count_derived_micro", s.DetectionPrecision)
-	add("detection_recall", "higher", "count_derived_micro", s.DetectionRecall)
-	add("detection_f1", "higher", "count_derived_micro", s.DetectionF1)
-	add("value_accuracy", "higher", "matched_field_micro", s.ValueAccuracy)
-	add("unit_accuracy", "higher", "matched_field_micro", s.UnitAccuracy)
-	add("value_unit_accuracy", "higher", "matched_field_micro", s.ValueUnitAccuracy)
-	add("grounding_precision", "higher", "count_derived_micro", s.GroundingPrecision)
-	add("grounding_recall", "higher", "count_derived_micro", s.GroundingRecall)
-	add("grounding_f1", "higher", "count_derived_micro", s.GroundingF1)
-	add("duplicate_prediction_rate", "lower", "binary_rate_macro", s.DuplicateRate)
-	add("unsupported_metric_rate", "lower", "binary_rate_macro", s.UnsupportedRate)
-	add("explicit_implicit_accuracy", "higher", "matched_field_micro", s.ExplicitAccuracy)
+	add("detection_precision", s.DetectionPrecision)
+	add("detection_recall", s.DetectionRecall)
+	add("detection_f1", s.DetectionF1)
+	add("value_accuracy", s.ValueAccuracy)
+	add("unit_accuracy", s.UnitAccuracy)
+	add("value_unit_accuracy", s.ValueUnitAccuracy)
+	add("grounding_precision", s.GroundingPrecision)
+	add("grounding_recall", s.GroundingRecall)
+	add("grounding_f1", s.GroundingF1)
+	add("duplicate_prediction_rate", s.DuplicateRate)
+	add("unsupported_metric_rate", s.UnsupportedRate)
+	add("explicit_implicit_accuracy", s.ExplicitAccuracy)
 	addComponents := func(metric string, m ScoreMetric) {
+		d := metricScoreDefinition(metric)
 		for _, c := range []struct {
 			name  string
 			value int
 		}{{"fn", m.FN}, {"fp", m.FP}, {"tp", m.TP}} {
 			v := float64(c.value)
-			rows = append(rows, ScoreRow{Metric: metric, Component: c.name, Direction: "additive", AggregationKind: "additive_component", Value: &v, Numerator: c.value, Denominator: 1})
+			rows = append(rows, ScoreRow{Metric: metric, Component: c.name, Direction: d.Direction, AggregationKind: d.AggregationKind, Value: &v, Numerator: c.value, Denominator: 1})
 		}
 	}
 	addComponents("detection", s.DetectionF1)
@@ -388,7 +575,7 @@ func metricScoreRows(s MetricScore) []ScoreRow {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		add("stable_field_"+n, "higher", "matched_field_micro", s.StableFieldAccuracy[n])
+		add("stable_field_"+n, s.StableFieldAccuracy[n])
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Metric != rows[j].Metric {
@@ -397,4 +584,16 @@ func metricScoreRows(s MetricScore) []ScoreRow {
 		return rows[i].Component < rows[j].Component
 	})
 	return rows
+}
+func metricScoreDefinition(name string) MetricScoreDefinition {
+	lookup := name
+	if strings.HasPrefix(name, "stable_field_") {
+		lookup = "stable_field_*"
+	}
+	for _, d := range metricScoreRegistryV1 {
+		if d.Name == lookup {
+			return d
+		}
+	}
+	panic("unregistered metric score row: " + name)
 }

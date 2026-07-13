@@ -1,6 +1,7 @@
 package docbenchmark
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -24,6 +25,72 @@ func TestScoreMetricsDetectionEmptyRules(t *testing.T) {
 				t.Fatalf("classification rates = %#v %#v", s.DuplicateRate, s.UnsupportedRate)
 			}
 		})
+	}
+}
+
+func TestScoreMetricsDisjointGroundingIsZeroNotNull(t *testing.T) {
+	g := metric("g", 0, "latency", "api", "1", "ms", 1)
+	p := metric("", 0, "latency", "api", "1", "ms", 2)
+	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	if s.GroundingPrecision.Value == nil || s.GroundingRecall.Value == nil || s.GroundingF1.Value == nil || value(s.GroundingPrecision) != 0 || value(s.GroundingRecall) != 0 || value(s.GroundingF1) != 0 {
+		t.Fatalf("disjoint grounding = %#v %#v %#v", s.GroundingPrecision, s.GroundingRecall, s.GroundingF1)
+	}
+}
+
+func TestScoreMetricsGenericStableFieldPresenceAndCanonicalJSON(t *testing.T) {
+	g := metric("g", 0, "latency", "api", "1", "ms", 1)
+	g.StableFields = map[string]json.RawMessage{"metric_unit_en": json.RawMessage(`" milliseconds "`), "metric_keywords": json.RawMessage(`["ＦＯＯ", "bar"]`), "confidence": json.RawMessage(`0.90`), "objects": json.RawMessage(`{"b":" B ","a":1}`), "explicit_null": json.RawMessage(`null`), "explicit_empty": json.RawMessage(`""`)}
+	g.StableFields["reasoning_tags"] = json.RawMessage(`["A"]`)
+	g.StableFields["metric_categories"] = json.RawMessage(`{"x":[1]}`)
+	g.StableFields["category_paths"] = json.RawMessage(`[" Root "]`)
+	p := metric("", 0, "latency", "api", "1", "ms", 1)
+	p.StableFields = map[string]json.RawMessage{"metric_unit_en": json.RawMessage(`"MILLISECONDS"`), "metric_keywords": json.RawMessage(`["foo","BAR"]`), "confidence": json.RawMessage(`9e-1`), "objects": json.RawMessage(`{"a":1.0,"b":"b"}`), "explicit_null": json.RawMessage(`null`), "explicit_empty": json.RawMessage(`null`), "prediction_only": json.RawMessage(`true`)}
+	p.StableFields["reasoning_tags"] = json.RawMessage(`["a"]`)
+	p.StableFields["metric_categories"] = json.RawMessage(`{"x":[1.0]}`)
+	p.StableFields["category_paths"] = json.RawMessage(`["root"]`)
+	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	for _, name := range []string{"metric_unit_en", "metric_keywords", "confidence", "objects", "explicit_null", "reasoning_tags", "metric_categories", "category_paths"} {
+		if value(s.StableFieldAccuracy[name]) != 1 {
+			t.Errorf("%s = %#v", name, s.StableFieldAccuracy[name])
+		}
+	}
+	if value(s.StableFieldAccuracy["explicit_empty"]) != 0 {
+		t.Fatalf("empty vs absent = %#v", s.StableFieldAccuracy["explicit_empty"])
+	}
+	if _, ok := s.StableFieldAccuracy["prediction_only"]; ok {
+		t.Fatal("prediction-only field entered denominator")
+	}
+	if s.StableFieldAccuracy["omitted"].Value != nil {
+		t.Fatal("omitted field should not have denominator")
+	}
+}
+
+func TestScoreMetricsDedicatedValueUsesExplicitPresenceNotPointerNil(t *testing.T) {
+	g := metric("g", 0, "latency", "api", "placeholder", "ms", 1)
+	g.Value = nil
+	g.StableFields = map[string]json.RawMessage{"metric_value": json.RawMessage(`null`)}
+	p := metric("", 0, "latency", "api", "placeholder", "ms", 1)
+	p.Value = nil
+	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	if s.ValueAccuracy.Denominator != 1 || value(s.ValueAccuracy) != 1 {
+		t.Fatalf("explicit null value presence = %#v", s.ValueAccuracy)
+	}
+	g.StableFields["metric_value"] = json.RawMessage(`""`)
+	s = ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	if s.ValueAccuracy.Denominator != 1 || value(s.ValueAccuracy) != 0 {
+		t.Fatalf("explicit empty value = %#v", s.ValueAccuracy)
+	}
+}
+
+func TestMetricGoldenVersionHashesAndRegistry(t *testing.T) {
+	if got := MetricScorerConfigurationV1().Hash(); got != ExpectedMetricScorerHashV1 {
+		t.Fatalf("scorer hash = %s, update intentionally from %s", got, ExpectedMetricScorerHashV1)
+	}
+	if got := normalizationHashV1(); got != ExpectedMetricNormalizationHashV1 {
+		t.Fatalf("normalization hash = %s, update intentionally from %s", got, ExpectedMetricNormalizationHashV1)
+	}
+	if err := ValidateMetricScoreRows(metricScoreRows(MetricScore{StableFieldAccuracy: map[string]ScoreMetric{}})); err != nil {
+		t.Fatalf("row registry drift: %v", err)
 	}
 }
 
@@ -127,7 +194,7 @@ func TestMetricVersionsConfigurationHashChangesWithBehavior(t *testing.T) {
 	a := MetricScorerConfigurationV1()
 	original := a.Hash()
 	b := a
-	b.Threshold++
+	b.Threshold = "600001/1000000"
 	if original == b.Hash() {
 		t.Fatal("threshold mutation did not change hash")
 	}
@@ -140,7 +207,7 @@ func TestMetricVersionsConfigurationHashChangesWithBehavior(t *testing.T) {
 		t.Fatal("configuration hash is unstable")
 	}
 	for _, mutate := range []func(*MetricScorerConfiguration){
-		func(c *MetricScorerConfiguration) { c.Weights["name"]++ },
+		func(c *MetricScorerConfiguration) { c.Weights["name"] = "200001/1000000" },
 		func(c *MetricScorerConfiguration) { c.Eligibility += " changed" },
 		func(c *MetricScorerConfiguration) { c.TieRule += " changed" },
 	} {

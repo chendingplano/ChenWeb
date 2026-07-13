@@ -1,9 +1,18 @@
 package docbenchmark
 
 import (
+	"math/big"
 	"reflect"
 	"testing"
 )
+
+func rat(s string) *big.Rat {
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		panic(s)
+	}
+	return r
+}
 
 func metric(id string, index int, name, subject, value, unit string, lines ...int) MetricRecord {
 	return MetricRecord{GoldID: id, PredictionInputIndex: index, Name: ptr(name), Subject: ptr(subject), Value: ptr(value), Unit: ptr(unit), SourceLines: lines}
@@ -36,6 +45,30 @@ func TestMetricEdgesEligibilityWeightsAndThreshold(t *testing.T) {
 	}
 }
 
+func TestMetricEdgeAcceptsMathematicallyExactThreshold(t *testing.T) {
+	g := metric("g", 0, "a b", "same", "7", "ms", 1, 2)
+	p := metric("", 0, "a b c", "same", "7", "s", 2, 3)
+	e := MetricEdgeFor(g, p)
+	if !e.Acceptable || e.ExactWeight != "3/5" {
+		t.Fatalf("exact threshold edge = %#v", e)
+	}
+}
+
+func TestMatchMetricsExactRationalObjectiveAvoidsFlooringTie(t *testing.T) {
+	edges := []MetricEdge{
+		exactEdge("a", 0, 0, 0, "6000001/10000000"), exactEdge("a", 0, 1, 1, "3/5"),
+		exactEdge("b", 1, 0, 0, "3/5"), exactEdge("b", 1, 1, 1, "3/5"),
+	}
+	got := optimalMetricMatches(2, 2, edges)
+	if len(got) != 2 || got[0].PredictionInputIndex != 0 || got[1].PredictionInputIndex != 1 {
+		t.Fatalf("exact objective assignment = %#v", got)
+	}
+}
+
+func exactEdge(id string, gi, pi, input int, weight string) MetricEdge {
+	return MetricEdge{GoldID: id, GoldIndex: gi, PredictionIndex: pi, PredictionInputIndex: input, Eligible: true, Acceptable: true, ExactWeight: weight, exactWeight: rat(weight)}
+}
+
 func TestMatchMetricsFindsGlobalOptimumAndRectangularForbidden(t *testing.T) {
 	edges := []MetricEdge{
 		{GoldID: "a", GoldIndex: 0, PredictionInputIndex: 0, PredictionIndex: 0, Eligible: true, Acceptable: true, Weight: 800000},
@@ -43,7 +76,7 @@ func TestMatchMetricsFindsGlobalOptimumAndRectangularForbidden(t *testing.T) {
 		{GoldID: "b", GoldIndex: 1, PredictionInputIndex: 0, PredictionIndex: 0, Eligible: true, Acceptable: true, Weight: 700000},
 	}
 	got := optimalMetricMatches(2, 3, edges)
-	want := []MetricMatch{{GoldID: "a", GoldIndex: 0, PredictionInputIndex: 1, PredictionIndex: 1, Weight: 700000}, {GoldID: "b", GoldIndex: 1, PredictionInputIndex: 0, PredictionIndex: 0, Weight: 700000}}
+	want := []MetricMatch{{GoldID: "a", GoldIndex: 0, PredictionInputIndex: 1, PredictionIndex: 1, Weight: 700000, ExactWeight: "7/10"}, {GoldID: "b", GoldIndex: 1, PredictionInputIndex: 0, PredictionIndex: 0, Weight: 700000, ExactWeight: "7/10"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("matches = %#v, want %#v", got, want)
 	}

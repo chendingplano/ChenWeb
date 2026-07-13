@@ -1,6 +1,10 @@
 package docbenchmark
 
-import "sort"
+import (
+	"encoding/json"
+	"math/big"
+	"sort"
+)
 
 const MetricWeightScale = 1_000_000
 const MetricAcceptanceWeight = 600_000
@@ -14,23 +18,33 @@ type MetricRecord struct {
 	FormulaOrDefinition, ThresholdOrTarget, MeasurementFrequency, TableNameOrSection *string
 	IsExplicitMetric                                                                 *bool
 	SourceLines                                                                      []int
+	// StableFields is presence-aware canonical JSON. Map membership means the gold
+	// fixture explicitly specifies the field; a JSON null is therefore distinct
+	// from omission, while its normalized value is absent.
+	StableFields map[string]json.RawMessage
 }
 
 type MetricEdgeComponents struct{ Source, Name, Subject, Value, Unit int }
+type MetricEdgeExactComponents struct{ Source, Name, Subject, Value, Unit string }
 
 type MetricEdge struct {
 	GoldID                                           string
 	GoldIndex, PredictionIndex, PredictionInputIndex int
 	Eligible, Acceptable                             bool
 	Weight                                           int
+	ExactWeight                                      string
 	Components                                       MetricEdgeComponents
+	ExactComponents                                  MetricEdgeExactComponents
+	exactWeight                                      *big.Rat
 }
 
 type MetricMatch struct {
 	GoldID                                           string
 	GoldIndex, PredictionIndex, PredictionInputIndex int
 	Weight                                           int
+	ExactWeight                                      string
 	Components                                       MetricEdgeComponents
+	ExactComponents                                  MetricEdgeExactComponents
 }
 
 func MetricEdgeFor(gold, prediction MetricRecord) MetricEdge {
@@ -42,11 +56,14 @@ func MetricEdgeFor(gold, prediction MetricRecord) MetricEdge {
 		Name:    scaledRatio(200000, tokenIntersection(g.Name, p.Name), tokenUnion(g.Name, p.Name)),
 		Subject: scaledRatio(150000, tokenIntersection(g.Subject, p.Subject), tokenUnion(g.Subject, p.Subject)),
 	}
+	exactComponents := []*big.Rat{weightedJaccard(35, 100, sourceCommon, sourceUnion), weightedJaccard(20, 100, tokenIntersection(g.Name, p.Name), tokenUnion(g.Name, p.Name)), weightedJaccard(15, 100, tokenIntersection(g.Subject, p.Subject), tokenUnion(g.Subject, p.Subject)), new(big.Rat), new(big.Rat)}
 	if ValuesAgree(g.Value, p.Value) {
 		c.Value = 200000
+		exactComponents[3].SetFrac64(20, 100)
 	}
 	if UnitsAgree(g.Unit, p.Unit) {
 		c.Unit = 100000
+		exactComponents[4].SetFrac64(10, 100)
 	}
 	exact := 0
 	if exactPresentAgreement(g.Name, p.Name) {
@@ -61,10 +78,15 @@ func MetricEdgeFor(gold, prediction MetricRecord) MetricEdge {
 	if UnitsAgree(g.Unit, p.Unit) {
 		exact++
 	}
-	weight := c.Source + c.Name + c.Subject + c.Value + c.Unit
+	exactWeight := new(big.Rat)
+	for _, component := range exactComponents {
+		exactWeight.Add(exactWeight, component)
+	}
+	weight := ratMillionthsFloor(exactWeight)
+	exactC := MetricEdgeExactComponents{canonicalRat(exactComponents[0]), canonicalRat(exactComponents[1]), canonicalRat(exactComponents[2]), canonicalRat(exactComponents[3]), canonicalRat(exactComponents[4])}
 	eligible := sourceCommon > 0 || exact >= 2
 	return MetricEdge{GoldID: gold.GoldID, PredictionInputIndex: prediction.PredictionInputIndex,
-		Eligible: eligible, Acceptable: eligible && weight >= MetricAcceptanceWeight, Weight: weight, Components: c}
+		Eligible: eligible, Acceptable: eligible && exactWeight.Cmp(metricThresholdRat()) >= 0, Weight: weight, ExactWeight: canonicalRat(exactWeight), exactWeight: exactWeight, Components: c, ExactComponents: exactC}
 }
 
 func BuildMetricEdges(gold, predictions []MetricRecord) []MetricEdge {
@@ -103,14 +125,14 @@ func optimalMetricMatches(goldCount, predictionCount int, edges []MetricEdge) []
 		return candidates[i].PredictionIndex < candidates[j].PredictionIndex
 	})
 	optimum := constrainedMaximumWeight(goldCount, predictionCount, candidates, nil, nil)
-	if optimum <= 0 {
+	if optimum == nil || optimum.Sign() <= 0 {
 		return nil
 	}
 	fixed := make([]MetricEdge, 0, minInt(goldCount, predictionCount))
 	forbidden := make(map[[2]int]bool)
 	last := -1
-	fixedWeight := 0
-	for fixedWeight < optimum {
+	fixedWeight := new(big.Rat)
+	for fixedWeight.Cmp(optimum) < 0 {
 		selected := -1
 		for i := last + 1; i < len(candidates); i++ {
 			e := candidates[i]
@@ -122,7 +144,8 @@ func optimalMetricMatches(goldCount, predictionCount int, edges []MetricEdge) []
 				trialForbidden[edgeKey(candidates[j])] = true
 			}
 			trialFixed := append(append([]MetricEdge(nil), fixed...), e)
-			if constrainedMaximumWeight(goldCount, predictionCount, candidates, trialFixed, trialForbidden) == optimum {
+			trial := constrainedMaximumWeight(goldCount, predictionCount, candidates, trialFixed, trialForbidden)
+			if trial != nil && trial.Cmp(optimum) == 0 {
 				selected = i
 				forbidden = trialForbidden
 				break
@@ -133,27 +156,27 @@ func optimalMetricMatches(goldCount, predictionCount int, edges []MetricEdge) []
 		}
 		e := candidates[selected]
 		fixed = append(fixed, e)
-		fixedWeight += e.Weight
+		fixedWeight.Add(fixedWeight, edgeRat(e))
 		last = selected
 	}
 	out := make([]MetricMatch, len(fixed))
 	for i, e := range fixed {
-		out[i] = MetricMatch{GoldID: e.GoldID, GoldIndex: e.GoldIndex, PredictionIndex: e.PredictionIndex, PredictionInputIndex: e.PredictionInputIndex, Weight: e.Weight, Components: e.Components}
+		out[i] = MetricMatch{GoldID: e.GoldID, GoldIndex: e.GoldIndex, PredictionIndex: e.PredictionIndex, PredictionInputIndex: e.PredictionInputIndex, Weight: e.Weight, ExactWeight: canonicalRat(edgeRat(e)), Components: e.Components, ExactComponents: e.ExactComponents}
 	}
 	sortMatches(out)
 	return out
 }
 
-func constrainedMaximumWeight(goldCount, predictionCount int, edges, fixed []MetricEdge, forbidden map[[2]int]bool) int {
+func constrainedMaximumWeight(goldCount, predictionCount int, edges, fixed []MetricEdge, forbidden map[[2]int]bool) *big.Rat {
 	usedGold, usedPred := make([]bool, goldCount), make([]bool, predictionCount)
-	total := 0
+	total := new(big.Rat)
 	for _, e := range fixed {
 		if e.GoldIndex < 0 || e.GoldIndex >= goldCount || e.PredictionIndex < 0 || e.PredictionIndex >= predictionCount || usedGold[e.GoldIndex] || usedPred[e.PredictionIndex] || forbidden[edgeKey(e)] {
-			return -1
+			return nil
 		}
 		usedGold[e.GoldIndex] = true
 		usedPred[e.PredictionIndex] = true
-		total += e.Weight
+		total.Add(total, edgeRat(e))
 	}
 	golds, preds := []int{}, []int{}
 	for i := 0; i < goldCount; i++ {
@@ -168,16 +191,19 @@ func constrainedMaximumWeight(goldCount, predictionCount int, edges, fixed []Met
 	}
 	n := len(golds) + len(preds)
 	if n == 0 {
-		return total
+		return new(big.Rat).Set(total)
 	}
-	const absent = -1 << 40
-	w := make([][]int64, n)
+	absent := new(big.Rat).Neg(new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(100), nil)))
+	w := make([][]*big.Rat, n)
 	for i := range w {
-		w[i] = make([]int64, n)
+		w[i] = make([]*big.Rat, n)
+		for j := range w[i] {
+			w[i][j] = new(big.Rat)
+		}
 	}
 	for r := 0; r < len(golds); r++ {
 		for c := 0; c < len(preds); c++ {
-			w[r][c] = absent
+			w[r][c] = new(big.Rat).Set(absent)
 		}
 	}
 	goldPos, predPos := map[int]int{}, map[int]int{}
@@ -190,51 +216,57 @@ func constrainedMaximumWeight(goldCount, predictionCount int, edges, fixed []Met
 	for _, e := range edges {
 		r, rok := goldPos[e.GoldIndex]
 		c, cok := predPos[e.PredictionIndex]
-		if rok && cok && !forbidden[edgeKey(e)] && int64(e.Weight) > w[r][c] {
-			w[r][c] = int64(e.Weight)
+		if rok && cok && !forbidden[edgeKey(e)] && edgeRat(e).Cmp(w[r][c]) > 0 {
+			w[r][c] = new(big.Rat).Set(edgeRat(e))
 		}
 	}
-	return total + int(hungarianMaximum(w))
+	return new(big.Rat).Add(total, hungarianMaximum(w))
 }
 
-func hungarianMaximum(weight [][]int64) int64 {
+func hungarianMaximum(weight [][]*big.Rat) *big.Rat {
 	n := len(weight)
-	u, v := make([]int64, n+1), make([]int64, n+1)
+	u, v := make([]*big.Rat, n+1), make([]*big.Rat, n+1)
+	for i := 0; i <= n; i++ {
+		u[i] = new(big.Rat)
+		v[i] = new(big.Rat)
+	}
 	p, way := make([]int, n+1), make([]int, n+1)
-	const inf int64 = 1 << 60
+	inf := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(200), nil))
 	for i := 1; i <= n; i++ {
 		p[0] = i
 		j0 := 0
-		minv := make([]int64, n+1)
-		used := make([]bool, n+1)
-		for j := 1; j <= n; j++ {
-			minv[j] = inf
+		minv := make([]*big.Rat, n+1)
+		for j := range minv {
+			minv[j] = new(big.Rat).Set(inf)
 		}
+		used := make([]bool, n+1)
 		for {
 			used[j0] = true
 			i0 := p[j0]
-			delta := inf
+			delta := new(big.Rat).Set(inf)
 			j1 := 0
 			for j := 1; j <= n; j++ {
 				if used[j] {
 					continue
 				}
-				cur := -weight[i0-1][j-1] - u[i0] - v[j]
-				if cur < minv[j] {
-					minv[j] = cur
+				cur := new(big.Rat).Neg(weight[i0-1][j-1])
+				cur.Sub(cur, u[i0])
+				cur.Sub(cur, v[j])
+				if cur.Cmp(minv[j]) < 0 {
+					minv[j] = new(big.Rat).Set(cur)
 					way[j] = j0
 				}
-				if minv[j] < delta {
-					delta = minv[j]
+				if minv[j].Cmp(delta) < 0 {
+					delta = new(big.Rat).Set(minv[j])
 					j1 = j
 				}
 			}
 			for j := 0; j <= n; j++ {
 				if used[j] {
-					u[p[j]] += delta
-					v[j] -= delta
+					u[p[j]].Add(u[p[j]], delta)
+					v[j].Sub(v[j], delta)
 				} else {
-					minv[j] -= delta
+					minv[j].Sub(minv[j], delta)
 				}
 			}
 			j0 = j1
@@ -251,13 +283,43 @@ func hungarianMaximum(weight [][]int64) int64 {
 			}
 		}
 	}
-	var total int64
+	total := new(big.Rat)
 	for j := 1; j <= n; j++ {
-		if p[j] > 0 && weight[p[j]-1][j-1] > 0 {
-			total += weight[p[j]-1][j-1]
+		if p[j] > 0 && weight[p[j]-1][j-1].Sign() > 0 {
+			total.Add(total, weight[p[j]-1][j-1])
 		}
 	}
 	return total
+}
+
+func weightedJaccard(wn, wd, n, d int) *big.Rat {
+	if n == 0 || d == 0 {
+		return new(big.Rat)
+	}
+	return new(big.Rat).Mul(new(big.Rat).SetFrac64(int64(wn), int64(wd)), new(big.Rat).SetFrac64(int64(n), int64(d)))
+}
+func metricThresholdRat() *big.Rat { return new(big.Rat).SetFrac64(3, 5) }
+func canonicalRat(r *big.Rat) string {
+	if r.IsInt() {
+		return r.Num().String()
+	}
+	return r.RatString()
+}
+func edgeRat(e MetricEdge) *big.Rat {
+	if e.exactWeight != nil {
+		return e.exactWeight
+	}
+	if e.ExactWeight != "" {
+		if r, ok := new(big.Rat).SetString(e.ExactWeight); ok {
+			return r
+		}
+	}
+	return new(big.Rat).SetFrac64(int64(e.Weight), MetricWeightScale)
+}
+func ratMillionthsFloor(r *big.Rat) int {
+	n := new(big.Int).Mul(r.Num(), big.NewInt(MetricWeightScale))
+	n.Quo(n, r.Denom())
+	return int(n.Int64())
 }
 
 func edgeKey(e MetricEdge) [2]int { return [2]int{e.GoldIndex, e.PredictionIndex} }
