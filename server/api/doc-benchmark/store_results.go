@@ -10,6 +10,30 @@ import (
 
 var ErrConflict = errors.New("benchmark idempotency conflict")
 
+type AttemptLifecycleError struct{ AttemptID, Lifecycle string }
+
+func (e *AttemptLifecycleError) Error() string {
+	return fmt.Sprintf("attempt %s is terminal (%s)", e.AttemptID, e.Lifecycle)
+}
+
+type SelectedAttemptError struct{ AttemptID string }
+
+func (e *SelectedAttemptError) Error() string {
+	return fmt.Sprintf("attempt %s is already selected", e.AttemptID)
+}
+
+type RunLifecycleError struct{ RunID, Lifecycle string }
+
+func (e *RunLifecycleError) Error() string {
+	return fmt.Sprintf("run %s is terminal (%s)", e.RunID, e.Lifecycle)
+}
+
+type VerifiedArtifactError struct{ ArtifactID string }
+
+func (e *VerifiedArtifactError) Error() string {
+	return fmt.Sprintf("verified artifact %s cannot be mutated", e.ArtifactID)
+}
+
 // ConflictError indicates that an idempotency key already exists with a
 // different canonical payload.
 type ConflictError struct{ Resource, Key string }
@@ -60,6 +84,13 @@ func (s SQLStore) InsertScore(ctx context.Context, r ScoreRecord) (string, error
 	if r.AttemptID.Valid == r.RunID.Valid {
 		return "", fmt.Errorf("score requires exactly one owner")
 	}
+	if r.AttemptID.Valid {
+		if err := s.guardAttemptOwner(ctx, r.AttemptID.String); err != nil {
+			return "", err
+		}
+	} else if err := s.guardRunOwner(ctx, r.RunID.String); err != nil {
+		return "", err
+	}
 	b, err := canonicalJSON(r.Metadata)
 	if err != nil {
 		return "", err
@@ -87,6 +118,13 @@ func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string,
 	if r.AttemptID.Valid == r.RunID.Valid {
 		return "", fmt.Errorf("artifact requires exactly one owner")
 	}
+	if r.AttemptID.Valid {
+		if err := s.guardAttemptOwner(ctx, r.AttemptID.String); err != nil {
+			return "", err
+		}
+	} else if err := s.guardRunOwner(ctx, r.RunID.String); err != nil {
+		return "", err
+	}
 	b, err := canonicalJSON(r.Metadata)
 	if err != nil {
 		return "", err
@@ -98,6 +136,9 @@ func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string,
 		if old.SHA256 == r.SHA256 && old.SizeBytes == r.SizeBytes && old.Verified == r.Verified && string(old.Metadata) == string(b) {
 			return old.ID, nil
 		}
+		if old.Verified {
+			return "", &VerifiedArtifactError{ArtifactID: old.ID}
+		}
 		return "", &ConflictError{Resource: "artifact", Key: r.Kind + "/" + r.Path}
 	}
 	if err != sql.ErrNoRows {
@@ -105,6 +146,35 @@ func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string,
 	}
 	e := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_artifacts (attempt_id,run_id,kind,path,sha256,size_bytes,verified,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, r.AttemptID, r.RunID, r.Kind, r.Path, r.SHA256, r.SizeBytes, r.Verified, b).Scan(&id)
 	return id, e
+}
+
+func (s SQLStore) guardRunOwner(ctx context.Context, id string) error {
+	var lifecycle string
+	if err := s.DB.QueryRowContext(txctx(ctx), `SELECT lifecycle FROM kb.benchmark_runs WHERE id=$1`, id).Scan(&lifecycle); err != nil {
+		return err
+	}
+	if lifecycle != "queued" && lifecycle != "running" {
+		return &RunLifecycleError{RunID: id, Lifecycle: lifecycle}
+	}
+	return nil
+}
+
+func (s SQLStore) guardAttemptOwner(ctx context.Context, id string) error {
+	var lifecycle, runLifecycle string
+	var selected sql.NullString
+	if err := s.DB.QueryRowContext(txctx(ctx), `SELECT a.lifecycle,c.lifecycle,c.selected_attempt_id FROM kb.benchmark_case_attempts a JOIN kb.benchmark_case_runs c ON c.id=a.case_run_id WHERE a.id=$1`, id).Scan(&lifecycle, &runLifecycle, &selected); err != nil {
+		return err
+	}
+	if runLifecycle != "queued" && runLifecycle != "running" {
+		return &RunLifecycleError{Lifecycle: runLifecycle}
+	}
+	if selected.Valid {
+		return &SelectedAttemptError{AttemptID: id}
+	}
+	if lifecycle != "leased" && lifecycle != "running" {
+		return &AttemptLifecycleError{AttemptID: id, Lifecycle: lifecycle}
+	}
+	return nil
 }
 
 func nullArg(v sql.NullString) any {

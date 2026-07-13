@@ -36,6 +36,7 @@ func TestSQLStoreInsertScoreIdempotent(t *testing.T) {
 	db, m, _ := sqlmock.New()
 	defer db.Close()
 	r := ScoreRecord{AttemptID: sql.NullString{String: "a", Valid: true}, Processor: "p", Scorer: "s", ScorerVersion: "1", Metric: "m", Slice: "all", Direction: "higher", AggregationKind: "mean", Applicable: true, Metadata: json.RawMessage(`{"x":1}`)}
+	m.ExpectQuery("SELECT a.lifecycle,c.lifecycle,c.selected_attempt_id").WithArgs("a").WillReturnRows(sqlmock.NewRows([]string{"lifecycle", "lifecycle", "selected_attempt_id"}).AddRow("running", "running", nil))
 	m.ExpectQuery("SELECT id,processor,scorer").WithArgs("a", nil, "m", "all", "mean").WillReturnRows(sqlmock.NewRows([]string{"id", "processor", "scorer", "scorer_version", "direction", "value", "additive_component", "numerator", "denominator", "non_null", "applicable", "metadata_json"}).AddRow("id", "p", "s", "1", "higher", nil, nil, nil, nil, false, true, []byte(`{"x":1}`)))
 	id, err := (SQLStore{DB: db}).InsertScore(context.Background(), r)
 	if err != nil || id != "id" {
@@ -50,6 +51,7 @@ func TestSQLStoreInsertScoreConflict(t *testing.T) {
 	db, m, _ := sqlmock.New()
 	defer db.Close()
 	r := ScoreRecord{RunID: sql.NullString{String: "r", Valid: true}, Processor: "p", Scorer: "s", ScorerVersion: "1", Metric: "m", Slice: "all", Direction: "higher", AggregationKind: "mean", Metadata: json.RawMessage(`{}`)}
+	m.ExpectQuery("SELECT lifecycle FROM kb.benchmark_runs").WithArgs("r").WillReturnRows(sqlmock.NewRows([]string{"lifecycle"}).AddRow("running"))
 	m.ExpectQuery("SELECT id,processor,scorer").WithArgs(nil, "r", "m", "all", "mean").WillReturnRows(sqlmock.NewRows([]string{"id", "processor", "scorer", "scorer_version", "direction", "value", "additive_component", "numerator", "denominator", "non_null", "applicable", "metadata_json"}).AddRow("id", "other", "s", "1", "higher", nil, nil, nil, nil, false, true, []byte(`{}`)))
 	if _, err := (SQLStore{DB: db}).InsertScore(context.Background(), r); !IsConflict(err) {
 		t.Fatalf("expected conflict, got %v", err)
