@@ -13,6 +13,7 @@ type testOwnershipStore struct {
 	own                                    Ownership
 	lockErr, adapterErr, inputErr, markErr error
 	states                                 []string
+	callbackCalled                         bool
 }
 
 func (s *testOwnershipStore) SaveOwnership(o Ownership) error         { s.own = o; return nil }
@@ -42,6 +43,7 @@ func (s *testOwnershipStore) MarkCleanupState(_ string, state string, cause erro
 	return nil
 }
 func (s *testOwnershipStore) CleanupTransaction(_ context.Context, _ string, fn func() error) error {
+	s.callbackCalled = true
 	if s.adapterErr != nil {
 		return s.adapterErr
 	}
@@ -130,6 +132,18 @@ func TestCleanupPersistsPendingAndRejectsVerifiedDiscard(t *testing.T) {
 	}
 	if err = a2.Cleanup(CleanupOptions{DiscardUnverified: true}); err == nil || len(st2.states) == 0 || st2.states[0] != "db_pending" {
 		t.Fatalf("pending state: err=%v states=%v", err, st2.states)
+	}
+}
+
+func TestCleanupTransactionCallbackErrorDoesNotCommit(t *testing.T) {
+	s := &testOwnershipStore{}
+	called := false
+	err := s.CleanupTransaction(context.Background(), "a", func() error { called = true; return errors.New("adapter failed") })
+	if err == nil || !called {
+		t.Fatalf("expected callback error, called=%v err=%v", called, err)
+	}
+	if s.own.Verified || len(s.states) != 0 {
+		t.Fatalf("transaction state changed: %+v", s)
 	}
 }
 
