@@ -63,9 +63,11 @@
 		alt=""
 		class="absolute inset-0 h-full w-full object-cover"
 	/>
-	<!-- Left-to-right paper wash: strong behind text, fades to reveal image -->
+	<!-- Full-bleed pale veil: keeps the entire image light, mirai-style -->
+	<div class="absolute inset-0 bg-[#faf9f7]/70 dark:bg-[#101216]/70"></div>
+	<!-- Extra wash behind the text column only -->
 	<div
-		class="absolute inset-0 bg-gradient-to-r from-[#faf9f7] from-25% via-[#faf9f7]/75 via-55% to-[#faf9f7]/15 dark:from-[#101216] dark:via-[#101216]/75 dark:to-[#101216]/20"
+		class="absolute inset-0 bg-gradient-to-r from-[#faf9f7] via-[#faf9f7]/50 to-transparent dark:from-[#101216] dark:via-[#101216]/50"
 	></div>
 
 	<div class="relative mx-auto max-w-7xl px-6 py-28 md:py-36 lg:py-44">
@@ -165,7 +167,7 @@
 						<img
 							src={h.image}
 							alt={h.title}
-							class="aspect-[16/10] w-full rounded-lg object-cover"
+							class="aspect-video w-full rounded-lg object-cover"
 						/>
 					</div>
 				</div>
