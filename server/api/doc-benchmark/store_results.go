@@ -87,11 +87,16 @@ func (s SQLStore) InsertScore(ctx context.Context, r ScoreRecord) (string, error
 	if r.AttemptID.Valid == r.RunID.Valid {
 		return "", fmt.Errorf("score requires exactly one owner")
 	}
+	tx, err := s.DB.BeginTx(txctx(ctx), nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
 	if r.AttemptID.Valid {
-		if err := s.guardAttemptOwner(ctx, r.AttemptID.String); err != nil {
+		if err = guardAttemptOwnerTx(txctx(ctx), tx, r.AttemptID.String); err != nil {
 			return "", err
 		}
-	} else if err := s.guardRunOwner(ctx, r.RunID.String); err != nil {
+	} else if err = guardRunOwnerTx(txctx(ctx), tx, r.RunID.String); err != nil {
 		return "", err
 	}
 	b, err := canonicalJSON(r.Metadata)
@@ -101,18 +106,21 @@ func (s SQLStore) InsertScore(ctx context.Context, r ScoreRecord) (string, error
 	var id string
 	var old ScoreRecord
 	q := `SELECT id,processor,scorer,scorer_version,direction,value,additive_component,numerator,denominator,non_null,applicable,metadata_json FROM kb.benchmark_scores WHERE ((attempt_id=$1 AND $1 IS NOT NULL) OR (run_id=$2 AND $2 IS NOT NULL)) AND metric=$3 AND slice=$4 AND aggregation_kind=$5`
-	err = s.DB.QueryRowContext(txctx(ctx), q, nullArg(r.AttemptID), nullArg(r.RunID), r.Metric, r.Slice, r.AggregationKind).Scan(&old.ID, &old.Processor, &old.Scorer, &old.ScorerVersion, &old.Direction, &old.Value, &old.AdditiveComponent, &old.Numerator, &old.Denominator, &old.NonNull, &old.Applicable, &old.Metadata)
+	err = tx.QueryRowContext(txctx(ctx), q, nullArg(r.AttemptID), nullArg(r.RunID), r.Metric, r.Slice, r.AggregationKind).Scan(&old.ID, &old.Processor, &old.Scorer, &old.ScorerVersion, &old.Direction, &old.Value, &old.AdditiveComponent, &old.Numerator, &old.Denominator, &old.NonNull, &old.Applicable, &old.Metadata)
 	if err == nil {
 		if scoreEqual(r, old, b) {
-			return old.ID, nil
+			return old.ID, tx.Commit()
 		}
 		return "", &ConflictError{Resource: "score", Key: r.Metric + "/" + r.Slice + "/" + r.AggregationKind}
 	}
 	if err != sql.ErrNoRows {
 		return "", err
 	}
-	e := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_scores (attempt_id,run_id,processor,scorer,scorer_version,metric,slice,direction,aggregation_kind,value,additive_component,numerator,denominator,non_null,applicable,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, r.AttemptID, r.RunID, r.Processor, r.Scorer, r.ScorerVersion, r.Metric, r.Slice, r.Direction, r.AggregationKind, r.Value, r.AdditiveComponent, r.Numerator, r.Denominator, r.NonNull, r.Applicable, b).Scan(&id)
-	return id, e
+	e := tx.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_scores (attempt_id,run_id,processor,scorer,scorer_version,metric,slice,direction,aggregation_kind,value,additive_component,numerator,denominator,non_null,applicable,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, r.AttemptID, r.RunID, r.Processor, r.Scorer, r.ScorerVersion, r.Metric, r.Slice, r.Direction, r.AggregationKind, r.Value, r.AdditiveComponent, r.Numerator, r.Denominator, r.NonNull, r.Applicable, b).Scan(&id)
+	if e != nil {
+		return "", e
+	}
+	return id, tx.Commit()
 }
 func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string, error) {
 	if s.DB == nil {
@@ -121,11 +129,16 @@ func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string,
 	if r.AttemptID.Valid == r.RunID.Valid {
 		return "", fmt.Errorf("artifact requires exactly one owner")
 	}
+	tx, err := s.DB.BeginTx(txctx(ctx), nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
 	if r.AttemptID.Valid {
-		if err := s.guardAttemptOwner(ctx, r.AttemptID.String); err != nil {
+		if err = guardAttemptOwnerTx(txctx(ctx), tx, r.AttemptID.String); err != nil {
 			return "", err
 		}
-	} else if err := s.guardRunOwner(ctx, r.RunID.String); err != nil {
+	} else if err = guardRunOwnerTx(txctx(ctx), tx, r.RunID.String); err != nil {
 		return "", err
 	}
 	b, err := canonicalJSON(r.Metadata)
@@ -134,10 +147,10 @@ func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string,
 	}
 	var id string
 	var old ArtifactRecord
-	err = s.DB.QueryRowContext(txctx(ctx), `SELECT id,sha256,size_bytes,verified,metadata_json FROM kb.benchmark_artifacts WHERE ((attempt_id=$1 AND $1 IS NOT NULL) OR (run_id=$2 AND $2 IS NOT NULL)) AND kind=$3 AND path=$4`, nullArg(r.AttemptID), nullArg(r.RunID), r.Kind, r.Path).Scan(&old.ID, &old.SHA256, &old.SizeBytes, &old.Verified, &old.Metadata)
+	err = tx.QueryRowContext(txctx(ctx), `SELECT id,sha256,size_bytes,verified,metadata_json FROM kb.benchmark_artifacts WHERE ((attempt_id=$1 AND $1 IS NOT NULL) OR (run_id=$2 AND $2 IS NOT NULL)) AND kind=$3 AND path=$4`, nullArg(r.AttemptID), nullArg(r.RunID), r.Kind, r.Path).Scan(&old.ID, &old.SHA256, &old.SizeBytes, &old.Verified, &old.Metadata)
 	if err == nil {
 		if old.SHA256 == r.SHA256 && old.SizeBytes == r.SizeBytes && old.Verified == r.Verified && string(old.Metadata) == string(b) {
-			return old.ID, nil
+			return old.ID, tx.Commit()
 		}
 		if old.Verified {
 			return "", &VerifiedArtifactError{ArtifactID: old.ID}
@@ -147,8 +160,52 @@ func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string,
 	if err != sql.ErrNoRows {
 		return "", err
 	}
-	e := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_artifacts (attempt_id,run_id,kind,path,sha256,size_bytes,verified,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, r.AttemptID, r.RunID, r.Kind, r.Path, r.SHA256, r.SizeBytes, r.Verified, b).Scan(&id)
-	return id, e
+	e := tx.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_artifacts (attempt_id,run_id,kind,path,sha256,size_bytes,verified,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, r.AttemptID, r.RunID, r.Kind, r.Path, r.SHA256, r.SizeBytes, r.Verified, b).Scan(&id)
+	if e != nil {
+		return "", e
+	}
+	return id, tx.Commit()
+}
+
+func guardRunOwnerTx(ctx context.Context, tx *sql.Tx, id string) error {
+	var lifecycle string
+	if err := tx.QueryRowContext(ctx, `SELECT lifecycle FROM kb.benchmark_runs WHERE id=$1 FOR UPDATE`, id).Scan(&lifecycle); err != nil {
+		return err
+	}
+	if lifecycle != "queued" && lifecycle != "running" {
+		return &RunLifecycleError{RunID: id, Lifecycle: lifecycle}
+	}
+	return nil
+}
+
+func guardAttemptOwnerTx(ctx context.Context, tx *sql.Tx, id string) error {
+	var caseRunID string
+	if err := tx.QueryRowContext(ctx, `SELECT case_run_id FROM kb.benchmark_case_attempts WHERE id=$1`, id).Scan(&caseRunID); err != nil {
+		return err
+	}
+	var caseLifecycle, runID string
+	if err := tx.QueryRowContext(ctx, `SELECT lifecycle,run_id FROM kb.benchmark_case_runs WHERE id=$1 FOR UPDATE`, caseRunID).Scan(&caseLifecycle, &runID); err != nil {
+		return err
+	}
+	var runLifecycle string
+	if err := tx.QueryRowContext(ctx, `SELECT lifecycle FROM kb.benchmark_runs WHERE id=$1 FOR UPDATE`, runID).Scan(&runLifecycle); err != nil {
+		return err
+	}
+	var lifecycle string
+	var selected sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT a.lifecycle,c.selected_attempt_id FROM kb.benchmark_case_attempts a JOIN kb.benchmark_case_runs c ON c.id=a.case_run_id WHERE a.id=$1 FOR UPDATE`, id).Scan(&lifecycle, &selected); err != nil {
+		return err
+	}
+	if runLifecycle != "queued" && runLifecycle != "running" {
+		return &RunLifecycleError{RunID: runID, Lifecycle: runLifecycle}
+	}
+	if selected.Valid {
+		return &SelectedAttemptError{AttemptID: id}
+	}
+	if lifecycle != "leased" && lifecycle != "running" {
+		return &AttemptLifecycleError{AttemptID: id, Lifecycle: lifecycle}
+	}
+	return nil
 }
 
 func (s SQLStore) guardRunOwner(ctx context.Context, id string) error {
