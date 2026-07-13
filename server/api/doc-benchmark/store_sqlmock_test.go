@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"github.com/DATA-DOG/go-sqlmock"
 	"testing"
+	"time"
 )
 
 func TestSQLStoreCreateCaseRunCanonicalJSON(t *testing.T) {
@@ -55,6 +56,61 @@ func TestSQLStoreInsertScoreConflict(t *testing.T) {
 	m.ExpectQuery("SELECT id,processor,scorer").WithArgs(nil, "r", "m", "all", "mean").WillReturnRows(sqlmock.NewRows([]string{"id", "processor", "scorer", "scorer_version", "direction", "value", "additive_component", "numerator", "denominator", "non_null", "applicable", "metadata_json"}).AddRow("id", "other", "s", "1", "higher", nil, nil, nil, nil, false, true, []byte(`{}`)))
 	if _, err := (SQLStore{DB: db}).InsertScore(context.Background(), r); !IsConflict(err) {
 		t.Fatalf("expected conflict, got %v", err)
+	}
+}
+
+func TestFinishAttemptIdempotent(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	m.ExpectExec("UPDATE kb.benchmark_case_attempts SET lifecycle=").WithArgs("a", "owner", sqlmock.AnyArg(), "succeeded", "", int64(3), true).WillReturnResult(sqlmock.NewResult(0, 0))
+	m.ExpectQuery("SELECT lifecycle,COALESCE\\(failure_kind").WithArgs("a").WillReturnRows(sqlmock.NewRows([]string{"lifecycle", "failure_kind"}).AddRow("succeeded", ""))
+	if err := (SQLStore{DB: db}).FinishAttempt(context.Background(), "a", "owner", "succeeded", "", 3, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSelectAttemptIdempotent(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	m.ExpectExec("UPDATE kb.benchmark_case_runs SET selected_attempt_id=").WithArgs("run", "attempt").WillReturnResult(sqlmock.NewResult(0, 0))
+	m.ExpectQuery("SELECT selected_attempt_id FROM kb.benchmark_case_runs").WithArgs("run").WillReturnRows(sqlmock.NewRows([]string{"selected_attempt_id"}).AddRow("attempt"))
+	if err := (SQLStore{DB: db}).SelectAttempt(context.Background(), "run", "attempt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReportScoresSelected(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	m.ExpectQuery("SELECT s.id,s.attempt_id,s.run_id").WithArgs("run").WillReturnRows(sqlmock.NewRows([]string{"id", "attempt_id", "run_id", "processor", "scorer", "scorer_version", "metric", "slice", "direction", "aggregation_kind", "value", "additive_component", "numerator", "denominator", "non_null", "applicable", "metadata_json"}).AddRow("s", "a", nil, "p", "sc", "1", "m", "all", "higher", "mean", nil, nil, nil, nil, false, true, []byte(`{}`)))
+	out, err := (SQLStore{DB: db}).ReportScores(context.Background(), "run")
+	if err != nil || len(out) != 1 {
+		t.Fatalf("%v %#v", err, out)
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaimAttemptLiveReturnsUnclaimed(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	m.ExpectBegin()
+	m.ExpectQuery("SELECT lifecycle,selected_attempt_id").WithArgs("cr").WillReturnRows(sqlmock.NewRows([]string{"lifecycle", "selected_attempt_id", "max"}).AddRow("running", nil, 1))
+	m.ExpectQuery("SELECT count\\(\\*\\)").WithArgs("cr", sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	m.ExpectCommit()
+	c, err := (SQLStore{DB: db}).ClaimAttempt(context.Background(), "cr", "owner", time.Now(), time.Minute, 3)
+	if err != nil || c.Claimed {
+		t.Fatalf("%v %#v", err, c)
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
