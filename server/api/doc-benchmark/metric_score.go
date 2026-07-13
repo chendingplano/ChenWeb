@@ -12,8 +12,8 @@ import (
 )
 
 const MetricScorerVersion = "metric-scorer-v1"
-const ExpectedMetricScorerHashV1 = "99eb05b47d956a5c786a67c0158c8f81c332eec18327445b191de28f27285c33"
-const ExpectedMetricNormalizationHashV1 = "2f7db6b1fe1c8c9b57432f68a0a47dd010fd394e7ef6b41eb86337834156c35b"
+const ExpectedMetricScorerHashV1 = "fab5158ad8530474a90f18736f63c734048fbf5ecce54b76355c9e49ce33acf6"
+const ExpectedMetricNormalizationHashV1 = "99630d893fcb85b39591541b609788e90fa366cd6290e79a0cac129c4f91ca39"
 
 type MetricScoreInput struct {
 	Gold, Predictions []MetricRecord
@@ -107,10 +107,18 @@ func MetricScorerConfigurationV1() MetricScorerConfiguration {
 	return MetricScorerConfiguration{ScorerVersion: MetricScorerVersion, NormalizationVersion: NormalizationVersion, NormalizationRules: normalizationRulesV1(), UnitAliases: aliases,
 		Weights:     map[string]string{"source": "7/20", "name": "1/5", "subject": "3/20", "value": "1/5", "unit": "1/10"},
 		Eligibility: "source_sets_intersect OR >=2 nonempty_present_exact(name,subject,value,unit)", Threshold: "3/5",
-		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ScoreRows: append([]MetricScoreDefinition(nil), metricScoreRegistryV1...)}
+		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ScoreRows: copyMetricScoreRegistry()}
+}
+func copyMetricScoreRegistry() []MetricScoreDefinition {
+	out := make([]MetricScoreDefinition, len(metricScoreRegistryV1))
+	for i, d := range metricScoreRegistryV1 {
+		out[i] = d
+		out[i].AdditiveComponents = append([]string(nil), d.AdditiveComponents...)
+	}
+	return out
 }
 func normalizationRulesV1() map[string]string {
-	return map[string]string{"text": "NFKC+Unicode-case-fold+whitespace-collapse+edge-punctuation", "value": "exact-base10-decimal-then-normalized-text", "source_lines": "sorted-deduplicated", "stable_json": "map-membership-presence; null=absent; strings=text-v1; numbers=exact-rational; bool=exact; arrays=ordered-recursive; objects=sorted-key-recursive; metric_value=value-v1; metric_unit=unit-v1"}
+	return map[string]string{"text": "NFKC+Unicode-case-fold+whitespace-collapse+edge-punctuation", "value": "exact-base10-decimal-then-normalized-text", "source_lines": "sorted-deduplicated", "core_presence": "StableFields-map-membership-first-for-name-subject-value-unit-explicit; legacy-typed-only-when-map-absent", "stable_json": "map-membership-presence; null=absent; strings=text-v1; numbers=exact-rational; bool=exact; arrays=ordered-recursive; objects=sorted-key-recursive; metric_value=value-v1; metric_unit=unit-v1"}
 }
 func (c MetricScorerConfiguration) Hash() string {
 	raw, _ := json.Marshal(c)
@@ -192,12 +200,14 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 				s.addDiff(g, p, m, name, ng, np)
 			}
 		}
-		if g.IsExplicitMetric != nil {
+		gExplicit, gExplicitPresent := recordBoolLabel(g)
+		pExplicit, pExplicitPresent := recordBoolLabel(p)
+		if gExplicitPresent {
 			explicitTotal++
-			if p.IsExplicitMetric != nil && *g.IsExplicitMetric == *p.IsExplicitMetric {
+			if pExplicitPresent && gExplicit == pExplicit {
 				explicitCorrect++
 			} else {
-				s.addDiff(g, p, m, "is_explicit_metric", boolDisplay(g.IsExplicitMetric), boolDisplay(p.IsExplicitMetric))
+				s.addDiff(g, p, m, "is_explicit_metric", fmt.Sprint(gExplicit), boolLabelDisplay(pExplicit, pExplicitPresent))
 			}
 		}
 		gl, pl := canonicalLines(g.SourceLines), canonicalLines(p.SourceLines)
@@ -277,6 +287,28 @@ func recordValueField(r MetricRecord, name string, legacy *string, normalize fun
 		return NormalizedField{State: FieldValue, Text: normalizeCommon(string(raw))}, true
 	}
 	return normalize(legacy), legacy != nil
+}
+func recordBoolLabel(r MetricRecord) (bool, bool) {
+	if raw, ok := r.StableFields["is_explicit_metric"]; ok {
+		if string(bytes.TrimSpace(raw)) == "null" {
+			return false, false
+		}
+		var value bool
+		if json.Unmarshal(raw, &value) == nil {
+			return value, true
+		}
+		return false, false
+	}
+	if r.IsExplicitMetric == nil {
+		return false, false
+	}
+	return *r.IsExplicitMetric, true
+}
+func boolLabelDisplay(value, present bool) string {
+	if !present {
+		return "absent"
+	}
+	return fmt.Sprint(value)
 }
 
 type fieldAccessor struct {
@@ -473,11 +505,7 @@ func groundingScores(tp, fp, fn int) (ScoreMetric, ScoreMetric, ScoreMetric) {
 	p := nullableRatio(tp, tp+fp)
 	r := nullableRatio(tp, tp+fn)
 	var f ScoreMetric
-	if p.Value == nil || r.Value == nil {
-		f = nullMetric()
-	} else {
-		f = nullableRatio(2*tp, 2*tp+fp+fn)
-	}
+	f = nullableRatio(2*tp, 2*tp+fp+fn)
 	setCounts(&p, tp, fp, fn)
 	setCounts(&r, tp, fp, fn)
 	setCounts(&f, tp, fp, fn)

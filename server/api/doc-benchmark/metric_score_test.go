@@ -37,6 +37,57 @@ func TestScoreMetricsDisjointGroundingIsZeroNotNull(t *testing.T) {
 	}
 }
 
+func TestScoreMetricsOneSidedGroundingF1IsZero(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		gold, pred []int
+	}{{"gold-empty", nil, []int{2}}, {"prediction-empty", []int{1}, nil}} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := metric("g", 0, "latency", "api", "1", "ms", tc.gold...)
+			p := metric("", 0, "latency", "api", "1", "ms", tc.pred...)
+			s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+			if s.GroundingF1.Value == nil || value(s.GroundingF1) != 0 {
+				t.Fatalf("F1 = %#v", s.GroundingF1)
+			}
+		})
+	}
+	s := ScoreMetrics(MetricScoreInput{UpstreamValid: true})
+	if s.GroundingPrecision.Value != nil || s.GroundingRecall.Value != nil || s.GroundingF1.Value != nil {
+		t.Fatalf("no matches grounding = %#v %#v %#v", s.GroundingPrecision, s.GroundingRecall, s.GroundingF1)
+	}
+}
+
+func TestScoreMetricsStableFieldsOverrideCoreAndBoolean(t *testing.T) {
+	core := func(name, subject, value, unit string, explicit any) map[string]json.RawMessage {
+		m := map[string]json.RawMessage{"metric_name": json.RawMessage(`"` + name + `"`), "metric_subject": json.RawMessage(`"` + subject + `"`), "metric_value": json.RawMessage(`"` + value + `"`), "metric_unit": json.RawMessage(`"` + unit + `"`)}
+		if explicit != nil {
+			raw, _ := json.Marshal(explicit)
+			m["is_explicit_metric"] = raw
+		}
+		return m
+	}
+	g := MetricRecord{GoldID: "g", StableFields: core("latency", "api", "1e2", "msec", true), SourceLines: []int{1}}
+	p := MetricRecord{PredictionInputIndex: 4, StableFields: core("LATENCY", "API", "100", "ms", true), SourceLines: []int{1}}
+	s := ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	if value(s.DetectionF1) != 1 || value(s.ValueAccuracy) != 1 || value(s.UnitAccuracy) != 1 || s.ExplicitAccuracy.Denominator != 1 || value(s.ExplicitAccuracy) != 1 {
+		t.Fatalf("map-only core score = %#v", s)
+	}
+	// Explicit map values override contradictory legacy pointers, including empty/null.
+	g.Name = ptr("wrong")
+	p.Name = ptr("wrong-other")
+	g.IsExplicitMetric = ptr(false)
+	p.IsExplicitMetric = ptr(false)
+	s = ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	if value(s.DetectionF1) != 1 || value(s.ExplicitAccuracy) != 1 {
+		t.Fatalf("map did not override legacy: %#v", s)
+	}
+	g.StableFields["is_explicit_metric"] = json.RawMessage(`null`)
+	s = ScoreMetrics(MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true})
+	if s.ExplicitAccuracy.Value != nil {
+		t.Fatalf("null boolean label entered classification denominator: %#v", s.ExplicitAccuracy)
+	}
+}
+
 func TestScoreMetricsGenericStableFieldPresenceAndCanonicalJSON(t *testing.T) {
 	g := metric("g", 0, "latency", "api", "1", "ms", 1)
 	g.StableFields = map[string]json.RawMessage{"metric_unit_en": json.RawMessage(`" milliseconds "`), "metric_keywords": json.RawMessage(`["ＦＯＯ", "bar"]`), "confidence": json.RawMessage(`0.90`), "objects": json.RawMessage(`{"b":" B ","a":1}`), "explicit_null": json.RawMessage(`null`), "explicit_empty": json.RawMessage(`""`)}
@@ -216,6 +267,19 @@ func TestMetricVersionsConfigurationHashChangesWithBehavior(t *testing.T) {
 		if changed.Hash() == original {
 			t.Fatal("behavior mutation did not change hash")
 		}
+	}
+}
+
+func TestMetricScorerConfigurationIsDeepCopied(t *testing.T) {
+	original := MetricScorerConfigurationV1().Hash()
+	c := MetricScorerConfigurationV1()
+	c.UnitAliases["ms"] = "mutated"
+	c.Weights["name"] = "mutated"
+	c.NormalizationRules["text"] = "mutated"
+	c.ScoreRows[0].AdditiveComponents = append(c.ScoreRows[0].AdditiveComponents, "mutated")
+	c.ScoreRows[len(c.ScoreRows)-1].AdditiveComponents[0] = "mutated"
+	if got := MetricScorerConfigurationV1().Hash(); got != original || got != ExpectedMetricScorerHashV1 {
+		t.Fatalf("global config mutated: %s want %s", got, original)
 	}
 }
 

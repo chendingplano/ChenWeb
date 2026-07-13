@@ -1,6 +1,7 @@
 package docbenchmark
 
 import (
+	"encoding/json"
 	"math/big"
 	"reflect"
 	"testing"
@@ -51,6 +52,21 @@ func TestMetricEdgeAcceptsMathematicallyExactThreshold(t *testing.T) {
 	e := MetricEdgeFor(g, p)
 	if !e.Acceptable || e.ExactWeight != "3/5" {
 		t.Fatalf("exact threshold edge = %#v", e)
+	}
+}
+
+func TestMetricEdgeStableFieldsCorePresenceOverridesLegacy(t *testing.T) {
+	g := metric("g", 0, "legacy", "subject", "1", "ms", 1)
+	p := metric("", 0, "legacy", "subject", "1", "ms", 1)
+	if e := MetricEdgeFor(g, p); e.Components.Name != 200000 {
+		t.Fatalf("omitted map did not use legacy: %#v", e)
+	}
+	for _, raw := range []json.RawMessage{json.RawMessage(`null`), json.RawMessage(`""`)} {
+		g.StableFields = map[string]json.RawMessage{"metric_name": raw}
+		p.StableFields = map[string]json.RawMessage{"metric_name": raw}
+		if e := MetricEdgeFor(g, p); e.Components.Name != 0 {
+			t.Fatalf("map core %s did not override legacy: %#v", raw, e)
+		}
 	}
 }
 

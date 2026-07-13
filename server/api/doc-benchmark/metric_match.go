@@ -1,6 +1,7 @@
 package docbenchmark
 
 import (
+	"bytes"
 	"encoding/json"
 	"math/big"
 	"sort"
@@ -355,7 +356,21 @@ func sortMatches(m []MetricMatch) {
 }
 
 func normalizeRecord(r MetricRecord) NormalizedMetric {
-	return NormalizeMetric(MetricFields{Name: r.Name, Subject: r.Subject, Value: r.Value, Unit: r.Unit, SourceLines: r.SourceLines})
+	return NormalizeMetric(MetricFields{Name: resolveCoreString(r, "metric_name", r.Name), Subject: resolveCoreString(r, "metric_subject", r.Subject), Value: resolveCoreString(r, "metric_value", r.Value), Unit: resolveCoreString(r, "metric_unit", r.Unit), SourceLines: r.SourceLines})
+}
+func resolveCoreString(r MetricRecord, name string, legacy *string) *string {
+	raw, ok := r.StableFields[name]
+	if !ok {
+		return legacy
+	}
+	if string(bytes.TrimSpace(raw)) == "null" {
+		return nil
+	}
+	var value string
+	if json.Unmarshal(raw, &value) == nil {
+		return &value
+	}
+	return nil
 }
 func scaledRatio(scale, numerator, denominator int) int {
 	if numerator == 0 || denominator == 0 {
