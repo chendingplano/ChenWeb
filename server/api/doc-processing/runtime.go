@@ -84,6 +84,9 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 			if err := applyMetricsRuntimeOverrides(m, overrides); err != nil {
 				return nil, err
 			}
+			if err := processorInitError(m); err != nil {
+				return nil, err
+			}
 		}
 	}
 	r := &ProductionRuntime{Control: control, Processors: control.Processors, services: map[string]any{"chunking": fixed.RuntimeConfig()}}
