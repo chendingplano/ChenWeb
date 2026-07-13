@@ -18,15 +18,13 @@ func (s SQLStore) MarkVerifiedCAS(ctx context.Context, owner, nonce, markerHash,
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces w SET cleanup_state=cleanup_state WHERE execution_attempt_id=$1 AND nonce=$2`, owner, nonce)
+	res, err := tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces SET verified=true,verified_hash=$3,verified_size=$4,verified_marker_hash=$5,verified_marker=$6 WHERE execution_attempt_id=$1 AND nonce=$2 AND (verified_marker_hash IS NULL OR verified_marker_hash=$5)`, owner, nonce, hash, size, markerHash, markerJSON(marker))
 	if err != nil {
 		return err
 	}
 	if err = affected(res); err != nil {
 		return err
 	}
-	// Ownership metadata is represented by the workspace row in SQL deployments;
-	// artifact verification itself is guarded by the owner lock above.
 	if _, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET capture_verified=true WHERE id=$1 AND capture_verified=false`, owner); err != nil {
 		return err
 	}
