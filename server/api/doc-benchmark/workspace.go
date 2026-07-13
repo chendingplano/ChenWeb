@@ -1,6 +1,7 @@
 package docbenchmark
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -75,8 +76,7 @@ type OwnershipStore interface {
 	LockOwnership(attemptID string) (Ownership, error)
 	MarkVerified(attemptID, hash string, size int64, marker AllocationMarker) error
 	MarkCleanupState(attemptID, state string, cause error) error
-	DeleteInput(attemptID string) error
-	CleanupAdapters(attemptID string) error
+	CleanupTransaction(ctx context.Context, attemptID string, fn func() error) error
 }
 
 func firstErr(a, b error) error {
@@ -450,11 +450,7 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 	if err := a.validate(); err != nil {
 		return fail(err)
 	}
-	if err := a.Config.Store.CleanupAdapters(a.Config.AttemptID); err != nil {
-		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "db_pending", err)
-		return err
-	}
-	if err := a.Config.Store.DeleteInput(a.Config.AttemptID); err != nil {
+	if err := a.Config.Store.CleanupTransaction(context.Background(), a.Config.AttemptID, func() error { return nil }); err != nil {
 		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "db_pending", err)
 		return err
 	}

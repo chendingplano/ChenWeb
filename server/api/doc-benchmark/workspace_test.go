@@ -1,6 +1,7 @@
 package docbenchmark
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -40,8 +41,12 @@ func (s *testOwnershipStore) MarkCleanupState(_ string, state string, cause erro
 	s.own.CleanupState = state
 	return nil
 }
-func (s *testOwnershipStore) DeleteInput(string) error     { return s.inputErr }
-func (s *testOwnershipStore) CleanupAdapters(string) error { return s.adapterErr }
+func (s *testOwnershipStore) CleanupTransaction(_ context.Context, _ string, fn func() error) error {
+	if s.adapterErr != nil {
+		return s.adapterErr
+	}
+	return fn()
+}
 func testConfig(d string, st *testOwnershipStore) WorkspaceConfig {
 	return WorkspaceConfig{WorkRoot: filepath.Join(d, "w"), EvidenceRoot: filepath.Join(d, "e"), AttemptID: "a", CaseID: "c", RunID: "r", Store: st}
 }
