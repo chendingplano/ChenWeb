@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,6 +19,13 @@ import (
 const (
 	defaultExperimentTimeout = 20 * time.Minute
 	defaultAttemptLeaseExtra = 5 * time.Minute
+
+	// MaxParallelCases bounds scheduler fan-out and per-run allocation.
+	MaxParallelCases = 256
+	// MaxParallelVariants bounds simultaneously initialized variant workers.
+	MaxParallelVariants = 64
+	// MaxAttempts bounds persisted retry allocation for one logical case run.
+	MaxAttempts = 100
 )
 
 var processorOverrides = map[Processor]map[string]struct{}{
@@ -49,13 +57,29 @@ type DatasetResolver interface {
 type DatasetRootResolver struct{ Root string }
 
 func (r DatasetRootResolver) ResolveDataset(id, version string) (*Dataset, error) {
-	if !restrictedASCII(id, false) {
+	if !safeDatasetComponent(id) {
 		return nil, fmt.Errorf("dataset id %q is invalid", id)
 	}
-	if !semverRE.MatchString(version) {
+	if !safeDatasetComponent(version) || !semverRE.MatchString(version) {
 		return nil, fmt.Errorf("dataset version %q is invalid", version)
 	}
-	dataset, err := LoadDataset(filepath.Join(r.Root, id, version))
+	canonicalRoot, err := filepath.Abs(r.Root)
+	if err != nil {
+		return nil, fmt.Errorf("datasets root: %w", err)
+	}
+	datasetsRoot, err := os.OpenRoot(canonicalRoot)
+	if err != nil {
+		return nil, fmt.Errorf("datasets root: %w", err)
+	}
+	defer datasetsRoot.Close()
+	if err := requireNonSymlinkDirectory(datasetsRoot, id, "dataset ID"); err != nil {
+		return nil, err
+	}
+	prefix := filepath.Join(id, version)
+	if err := requireNonSymlinkDirectory(datasetsRoot, prefix, "dataset version"); err != nil {
+		return nil, err
+	}
+	dataset, err := loadDatasetFromRoot(datasetsRoot, prefix, filepath.Join(canonicalRoot, prefix))
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +90,24 @@ func (r DatasetRootResolver) ResolveDataset(id, version string) (*Dataset, error
 		return nil, fmt.Errorf("manifest dataset_version %q does not match requested %q", dataset.Manifest.DatasetVersion, version)
 	}
 	return dataset, nil
+}
+
+func safeDatasetComponent(value string) bool {
+	return value != "." && value != ".." && restrictedASCII(value, false)
+}
+
+func requireNonSymlinkDirectory(root *os.Root, name, field string) error {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return fmt.Errorf("%s directory %q: %w", field, name, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s directory %q: symlink is forbidden", field, name)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s directory %q: not a directory", field, name)
+	}
+	return nil
 }
 
 // ExperimentVariant is one explicit requested run. Overrides remain requested
@@ -251,15 +293,15 @@ func materializeExperiment(request rawExperiment, datasetID, datasetVersion stri
 	if attemptLease <= timeout {
 		return nil, fmt.Errorf("attempt_lease: must be longer than timeout")
 	}
-	maxParallelCases, err := positiveCount("max_parallel_cases", request.MaxParallelCases, 1)
+	maxParallelCases, err := boundedPositiveCount("max_parallel_cases", request.MaxParallelCases, 1, MaxParallelCases)
 	if err != nil {
 		return nil, err
 	}
-	maxParallelVariants, err := positiveCount("max_parallel_variants", request.MaxParallelVariants, 1)
+	maxParallelVariants, err := boundedPositiveCount("max_parallel_variants", request.MaxParallelVariants, 1, MaxParallelVariants)
 	if err != nil {
 		return nil, err
 	}
-	maxAttempts, err := positiveCount("max_attempts", request.MaxAttempts, 2)
+	maxAttempts, err := boundedPositiveCount("max_attempts", request.MaxAttempts, 2, MaxAttempts)
 	if err != nil {
 		return nil, err
 	}
@@ -397,12 +439,12 @@ func parsePositiveDuration(field string, raw *string, defaultValue time.Duration
 	return value, nil
 }
 
-func positiveCount(field string, raw *int, defaultValue int) (int, error) {
+func boundedPositiveCount(field string, raw *int, defaultValue, maximum int) (int, error) {
 	if raw == nil {
 		return defaultValue, nil
 	}
-	if *raw < 1 {
-		return 0, fmt.Errorf("%s: must be at least 1", field)
+	if *raw < 1 || *raw > maximum {
+		return 0, fmt.Errorf("%s: must be between 1 and %d", field, maximum)
 	}
 	return *raw, nil
 }

@@ -133,6 +133,10 @@ func TestExperimentRejectsInvalidFieldsCountsDurationsAndLease(t *testing.T) {
 		{"zero cases", "max_parallel_cases=0\n", "max_parallel_cases"},
 		{"negative variants", "max_parallel_variants=-1\n", "max_parallel_variants"},
 		{"zero attempts", "max_attempts=0\n", "max_attempts"},
+		{"too many cases", "max_parallel_cases=257\n", "max_parallel_cases"},
+		{"too many variants", "max_parallel_variants=65\n", "max_parallel_variants"},
+		{"too many attempts", "max_attempts=101\n", "max_attempts"},
+		{"integer overflow", "max_attempts=9223372036854775808\n", "experiment TOML"},
 		{"bad timeout", "timeout=\"later\"\n", "timeout"},
 		{"zero timeout", "timeout=\"0s\"\n", "timeout"},
 		{"bad lease", "attempt_lease=\"soon\"\n", "attempt_lease"},
@@ -147,6 +151,14 @@ func TestExperimentRejectsInvalidFieldsCountsDurationsAndLease(t *testing.T) {
 				t.Fatalf("error=%v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestExperimentAcceptsDocumentedCountMaxima(t *testing.T) {
+	raw := minimalExperiment(`["chunking"]`, "base", "repetitions=10000\nmax_parallel_cases=256\nmax_parallel_variants=64\nmax_attempts=100\n")
+	exp := resolveExperimentForTest(t, raw)
+	if exp.Repetitions != MaxRepetitions || exp.MaxParallelCases != MaxParallelCases || exp.MaxParallelVariants != MaxParallelVariants || exp.MaxAttempts != MaxAttempts {
+		t.Fatalf("maximum counts not materialized: %#v", exp)
 	}
 }
 
@@ -283,6 +295,59 @@ func TestExperimentDatasetRootResolverVerifiesManifestIdentity(t *testing.T) {
 	_, err := LoadExperiment([]byte("name=\"x\"\ndataset=\"other@1.0.0\"\nprocessors=[\"chunking\"]\n[[variants]]\nname=\"base\"\n"), root)
 	if err == nil || !strings.Contains(err.Error(), "dataset_id") {
 		t.Fatalf("identity mismatch error=%v", err)
+	}
+}
+
+func TestExperimentDatasetRootResolverRejectsDotAndDotDotComponents(t *testing.T) {
+	resolver := DatasetRootResolver{Root: t.TempDir()}
+	for _, tc := range []struct{ id, version string }{
+		{".", "1.0.0"},
+		{"..", "1.0.0"},
+		{"dataset", "."},
+		{"dataset", ".."},
+		{"dataset/child", "1.0.0"},
+		{"dataset", "1.0.0/child"},
+	} {
+		if _, err := resolver.ResolveDataset(tc.id, tc.version); err == nil {
+			t.Fatalf("unsafe components accepted: id=%q version=%q", tc.id, tc.version)
+		}
+	}
+}
+
+func TestExperimentDatasetRootResolverRejectsSymlinkedIDAndVersionWithoutOutsideRead(t *testing.T) {
+	datasetRoot := loadValidDataset(t).Root
+	for _, symlinkID := range []bool{true, false} {
+		name := "version"
+		if symlinkID {
+			name = "id"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			outside := t.TempDir()
+			idPath := filepath.Join(root, "doc-processors-synthetic-core")
+			if symlinkID {
+				if err := copyDatasetTree(datasetRoot, filepath.Join(outside, "1.0.0")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, idPath); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.MkdirAll(idPath, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := copyDatasetTree(datasetRoot, outside); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, filepath.Join(idPath, "1.0.0")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := LoadExperiment(minimalExperiment(`["chunking"]`, "base", ""), root)
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "symlink") {
+				t.Fatalf("resolver followed symlink outside configured root: %v", err)
+			}
+		})
 	}
 }
 

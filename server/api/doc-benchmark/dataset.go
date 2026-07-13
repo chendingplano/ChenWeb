@@ -42,7 +42,14 @@ func LoadDataset(root string) (*Dataset, error) {
 		return nil, fmt.Errorf("dataset root: %w", err)
 	}
 	defer datasetRoot.Close()
-	manifestBytes, err := readRegularFile(datasetRoot, "manifest.json")
+	return loadDatasetFromRoot(datasetRoot, "", canonicalRoot)
+}
+
+// loadDatasetFromRoot loads a dataset through an already-open descriptor root. prefix
+// is a validated relative directory such as dataset-id/version; every filesystem
+// lookup remains descriptor-rooted and repeats the no-symlink component checks.
+func loadDatasetFromRoot(datasetRoot *os.Root, prefix, canonicalRoot string) (*Dataset, error) {
+	manifestBytes, err := readRegularFile(datasetRoot, prefixedDatasetPath(prefix, "manifest.json"))
 	if err != nil {
 		return nil, fmt.Errorf("manifest.json: %w", err)
 	}
@@ -74,12 +81,12 @@ func LoadDataset(root string) (*Dataset, error) {
 		if !inputOK || !expectedOK {
 			continue
 		}
-		inputBytes, inputErr := readRegularFile(datasetRoot, inputPath)
+		inputBytes, inputErr := readRegularFile(datasetRoot, prefixedDatasetPath(prefix, inputPath))
 		if inputErr != nil {
 			problems = append(problems, fieldError(caseID, fmt.Sprintf("cases[%d].input", i), inputErr.Error()))
 			continue
 		}
-		expectedBytes, expectedErr := readRegularFile(datasetRoot, expectedPath)
+		expectedBytes, expectedErr := readRegularFile(datasetRoot, prefixedDatasetPath(prefix, expectedPath))
 		if expectedErr != nil {
 			problems = append(problems, fieldError(caseID, fmt.Sprintf("cases[%d].expected", i), expectedErr.Error()))
 			continue
@@ -105,6 +112,13 @@ func LoadDataset(root string) (*Dataset, error) {
 		return nil, err
 	}
 	return ds, nil
+}
+
+func prefixedDatasetPath(prefix, rel string) string {
+	if prefix == "" {
+		return filepath.FromSlash(rel)
+	}
+	return filepath.Join(prefix, filepath.FromSlash(rel))
 }
 
 // ValidateDataset reloads and fully validates a dataset root.
