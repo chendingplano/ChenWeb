@@ -25,6 +25,7 @@ type WorkspaceConfig struct {
 	WorkRoot, EvidenceRoot, AttemptID, CaseID, RunID string
 	Nonce                                            string
 	Store                                            OwnershipStore
+	Cleanup                                          func(CleanupTx) error
 }
 type AllocationMarker struct {
 	AttemptID        string    `json:"attempt_id"`
@@ -63,7 +64,13 @@ const (
 )
 
 type CaptureOptions struct{ Failure CaptureFailurePoint }
-type CleanupOptions struct{ DiscardUnverified bool }
+
+// CleanupOptions carries the database-side cleanup operation. It runs inside
+// the ownership transaction and must be non-nil for cleanup to proceed.
+type CleanupOptions struct {
+	DiscardUnverified bool
+	Cleanup           func(CleanupTx) error
+}
 type Ownership struct {
 	AttemptID, Workspace, EvidencePath, Nonce, WorkRoot, EvidenceRoot string
 	Verified                                                          bool
@@ -78,7 +85,16 @@ type OwnershipStore interface {
 	LockOwnership(attemptID string) (Ownership, error)
 	MarkVerified(attemptID, hash string, size int64, marker AllocationMarker) error
 	MarkCleanupState(attemptID, state string, cause error) error
-	CleanupTransaction(ctx context.Context, attemptID string, fn func() error) error
+	CleanupTransaction(ctx context.Context, owner string, fn func(CleanupTx) error) error
+}
+
+// CleanupTx is the transaction-scoped cleanup capability for an attempt.
+// Implementations bind all operations to the owner supplied to
+// CleanupTransaction and roll them back when the callback returns an error.
+type CleanupTx interface {
+	DeleteProductionRows() error
+	DeleteInput() error
+	MarkState(state string, cause error) error
 }
 
 func firstErr(a, b error) error {
@@ -471,8 +487,17 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 	if err := a.validate(); err != nil {
 		return fail(err)
 	}
-	if err := a.Config.Store.CleanupTransaction(context.Background(), a.Config.AttemptID, func() error { return nil }); err != nil {
-		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "db_pending", err)
+	cleanup := o.Cleanup
+	if cleanup == nil {
+		cleanup = a.Config.Cleanup
+	}
+	if cleanup == nil {
+		err := errors.New("cleanup requires a transaction callback")
+		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "files_pending", err)
+		return err
+	}
+	if err := a.Config.Store.CleanupTransaction(context.Background(), a.Config.AttemptID, cleanup); err != nil {
+		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "files_pending", err)
 		return err
 	}
 	if err := os.RemoveAll(a.WorkPath); err != nil {

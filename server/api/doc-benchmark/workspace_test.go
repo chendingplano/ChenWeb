@@ -42,12 +42,22 @@ func (s *testOwnershipStore) MarkCleanupState(_ string, state string, cause erro
 	s.own.CleanupState = state
 	return nil
 }
-func (s *testOwnershipStore) CleanupTransaction(_ context.Context, _ string, fn func() error) error {
+
+type testCleanupTx struct{ store *testOwnershipStore }
+
+func (t testCleanupTx) DeleteProductionRows() error { return nil }
+func (t testCleanupTx) DeleteInput() error          { return nil }
+func (t testCleanupTx) MarkState(state string, _ error) error {
+	t.store.states = append(t.store.states, state)
+	return nil
+}
+
+func (s *testOwnershipStore) CleanupTransaction(_ context.Context, _ string, fn func(CleanupTx) error) error {
 	s.callbackCalled = true
 	if s.adapterErr != nil {
 		return s.adapterErr
 	}
-	return fn()
+	return fn(testCleanupTx{store: s})
 }
 func testConfig(d string, st *testOwnershipStore) WorkspaceConfig {
 	return WorkspaceConfig{WorkRoot: filepath.Join(d, "w"), EvidenceRoot: filepath.Join(d, "e"), AttemptID: "a", CaseID: "c", RunID: "r", Store: st}
@@ -82,7 +92,7 @@ func TestCaptureDurableAndCleanupNeverDeletesVerified(t *testing.T) {
 	if !got.Verified || got.SizeBytes != 5 || got.SHA256 == "" {
 		t.Fatalf("bad artifact: %+v", got)
 	}
-	if err := a.Cleanup(CleanupOptions{}); err != nil {
+	if err := a.Cleanup(CleanupOptions{Cleanup: func(tx CleanupTx) error { return tx.DeleteProductionRows() }}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(got.Path); err != nil {
@@ -122,7 +132,7 @@ func TestCleanupPersistsPendingAndRejectsVerifiedDiscard(t *testing.T) {
 	if _, err = a.Capture(strings.NewReader("ok"), "f"); err != nil {
 		t.Fatal(err)
 	}
-	if err = a.Cleanup(CleanupOptions{DiscardUnverified: true}); !errors.Is(err, ErrVerifiedImmutable) {
+	if err = a.Cleanup(CleanupOptions{DiscardUnverified: true, Cleanup: func(tx CleanupTx) error { return nil }}); !errors.Is(err, ErrVerifiedImmutable) {
 		t.Fatalf("discard verified: %v", err)
 	}
 	st2 := &testOwnershipStore{adapterErr: errors.New("db down")}
@@ -130,7 +140,7 @@ func TestCleanupPersistsPendingAndRejectsVerifiedDiscard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = a2.Cleanup(CleanupOptions{DiscardUnverified: true}); err == nil || len(st2.states) == 0 || st2.states[0] != "db_pending" {
+	if err = a2.Cleanup(CleanupOptions{DiscardUnverified: true, Cleanup: func(tx CleanupTx) error { return nil }}); err == nil || len(st2.states) == 0 || st2.states[0] != "files_pending" {
 		t.Fatalf("pending state: err=%v states=%v", err, st2.states)
 	}
 }
@@ -138,12 +148,43 @@ func TestCleanupPersistsPendingAndRejectsVerifiedDiscard(t *testing.T) {
 func TestCleanupTransactionCallbackErrorDoesNotCommit(t *testing.T) {
 	s := &testOwnershipStore{}
 	called := false
-	err := s.CleanupTransaction(context.Background(), "a", func() error { called = true; return errors.New("adapter failed") })
+	err := s.CleanupTransaction(context.Background(), "a", func(CleanupTx) error { called = true; return errors.New("adapter failed") })
 	if err == nil || !called {
 		t.Fatalf("expected callback error, called=%v err=%v", called, err)
 	}
 	if s.own.Verified || len(s.states) != 0 {
 		t.Fatalf("transaction state changed: %+v", s)
+	}
+}
+
+func TestWorkspaceCleanupInvokesCallbackAndRollsBackFilesystem(t *testing.T) {
+	d := t.TempDir()
+	st := &testOwnershipStore{}
+	a, err := AllocateWorkspace(testConfig(d, st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, err := a.Capture(strings.NewReader("payload"), "result.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	wantErr := errors.New("adapter cleanup failed")
+	err = a.Cleanup(CleanupOptions{Cleanup: func(CleanupTx) error {
+		called = true
+		return wantErr
+	}})
+	if !errors.Is(err, wantErr) || !called {
+		t.Fatalf("callback error: called=%v err=%v", called, err)
+	}
+	if _, err := os.Stat(a.WorkPath); err != nil {
+		t.Fatalf("worktree removed after rollback: %v", err)
+	}
+	if _, err := os.Stat(art.Path); err != nil {
+		t.Fatalf("evidence removed after rollback: %v", err)
+	}
+	if len(st.states) == 0 || st.states[len(st.states)-1] != "files_pending" {
+		t.Fatalf("cleanup state=%v", st.states)
 	}
 }
 
