@@ -51,6 +51,9 @@ func (s SQLStore) CreateExperiment(ctx context.Context, e Experiment) (string, e
 	if err == sql.ErrNoRows {
 		return "", ErrConflict
 	}
+	if err == sql.ErrNoRows {
+		return "", ErrConflict
+	}
 	return id, err
 }
 func (s SQLStore) GetExperimentByRequestHash(ctx context.Context, h string) (ExperimentRecord, error) {
