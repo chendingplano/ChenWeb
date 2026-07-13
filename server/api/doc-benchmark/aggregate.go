@@ -117,6 +117,9 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 					}
 				case "operational":
 					if x.Value != nil {
+						if math.IsNaN(*x.Value) || math.IsInf(*x.Value, 0) {
+							return nil, fmt.Errorf("metric %s has non-finite value", x.Metric)
+						}
 						vals = append(vals, *x.Value)
 						sum += *x.Value
 					}
