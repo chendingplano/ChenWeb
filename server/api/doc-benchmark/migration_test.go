@@ -143,6 +143,7 @@ func TestBenchmarkScoreGuardConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx1.Rollback()
 	if _, err = tx1.Exec(`UPDATE kb.benchmark_case_attempts SET lifecycle='succeeded' WHERE id=$1`, at); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +151,7 @@ func TestBenchmarkScoreGuardConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx2.Rollback()
 	done := make(chan error, 1)
 	go func() { _, e := tx2.Exec(`UPDATE kb.benchmark_scores SET value=1 WHERE attempt_id=$1`, at); done <- e }()
 	select {
@@ -158,12 +160,13 @@ func TestBenchmarkScoreGuardConcurrency(t *testing.T) {
 	case <-time.After(150 * time.Millisecond):
 	}
 	if err = tx1.Commit(); err != nil {
+		_ = tx1.Rollback()
+		<-done
 		t.Fatal(err)
 	}
 	if err = <-done; err == nil {
 		t.Fatal("concurrent score update unexpectedly succeeded")
 	}
-	_ = tx2.Rollback()
 	if err = goose.Down(db, dir); err != nil {
 		t.Fatal(err)
 	}
