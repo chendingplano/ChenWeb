@@ -204,9 +204,13 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 			v := float64(num)
 			a.Value = &v
 		case "operational":
-			setDistribution(&a, vals)
+			if !setDistribution(&a, vals) {
+				return nil, fmt.Errorf("aggregate %s overflow", a.Metric)
+			}
 		default:
-			setDistribution(&a, vals)
+			if !setDistribution(&a, vals) {
+				return nil, fmt.Errorf("aggregate %s overflow", a.Metric)
+			}
 		}
 		if kind == "binary_rate_macro" {
 			a.Denominator = len(vals)
@@ -275,14 +279,17 @@ func microValue(metric string, tp, fp, fn int) *float64 {
 	v := float64(tp) / float64(den)
 	return &v
 }
-func setDistribution(a *AggregateRow, vals []float64) {
+func setDistribution(a *AggregateRow, vals []float64) bool {
 	if len(vals) == 0 {
-		return
+		return true
 	}
 	sort.Float64s(vals)
 	mean := 0.0
 	for _, v := range vals {
 		mean += v
+		if math.IsInf(mean, 0) || math.IsNaN(mean) {
+			return false
+		}
 	}
 	mean /= float64(len(vals))
 	med := vals[len(vals)/2]
@@ -294,11 +301,18 @@ func setDistribution(a *AggregateRow, vals []float64) {
 		sd += (v - mean) * (v - mean)
 	}
 	sd = math.Sqrt(sd / float64(len(vals)))
+	if math.IsInf(sd, 0) || math.IsNaN(sd) || math.IsInf(mean, 0) || math.IsNaN(mean) {
+		return false
+	}
 	a.Mean = &mean
 	a.Median = &med
 	a.PopulationSD = &sd
 	a.Value = &mean
 	a.Sum = mean * float64(len(vals))
+	if math.IsInf(a.Sum, 0) || math.IsNaN(a.Sum) {
+		return false
+	}
+	return true
 }
 
 type VariantComparison struct {
@@ -407,7 +421,7 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 						pooledB[key] = q
 						applicableByMetric[key]++
 					}
-					conditional := r.ConditionalAttribution || br.ConditionalAttribution || strings.Contains(r.Metric, "conditional") || strings.Contains(br.Metric, "conditional")
+					conditional := r.ConditionalAttribution || br.ConditionalAttribution
 					if c.BaselineUpstreamHash != c.CandidateUpstreamHash && c.AllowUpstreamVariation && conditional {
 						continue
 					}
@@ -443,15 +457,7 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 			out = append(out, PairedDelta{Metric: key.metric, Component: key.component, Delta: &d, AggregationKind: key.kind, PairedUnits: applicableByMetric[key], ApplicableUnits: applicableByMetric[key]})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Metric != out[j].Metric {
-			return out[i].Metric < out[j].Metric
-		}
-		if out[i].Component != out[j].Component {
-			return out[i].Component < out[j].Component
-		}
-		return out[i].AggregationKind < out[j].AggregationKind
-	})
+	sort.Slice(out, func(i, j int) bool { return canonicalKey(out[i]) < canonicalKey(out[j]) })
 	return out, warnings, nil
 }
 

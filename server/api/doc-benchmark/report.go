@@ -50,16 +50,7 @@ func (r BenchmarkReport) canonical() BenchmarkReport {
 	out.Aggregates = append([]AggregateRow(nil), r.Aggregates...)
 	sort.Slice(out.Aggregates, func(i, j int) bool { return canonicalKey(out.Aggregates[i]) < canonicalKey(out.Aggregates[j]) })
 	out.PairedDeltas = append([]PairedDelta(nil), r.PairedDeltas...)
-	sort.Slice(out.PairedDeltas, func(i, j int) bool {
-		a, b := out.PairedDeltas[i], out.PairedDeltas[j]
-		if a.Metric != b.Metric {
-			return a.Metric < b.Metric
-		}
-		if a.Component != b.Component {
-			return a.Component < b.Component
-		}
-		return a.AggregationKind < b.AggregationKind
-	})
+	sort.Slice(out.PairedDeltas, func(i, j int) bool { return canonicalKey(out.PairedDeltas[i]) < canonicalKey(out.PairedDeltas[j]) })
 	if r.Warnings != nil {
 		out.Warnings = append([]string(nil), r.Warnings...)
 		sort.Strings(out.Warnings)
