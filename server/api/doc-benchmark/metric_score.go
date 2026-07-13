@@ -2,18 +2,22 @@ package docbenchmark
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"sort"
 	"strings"
+
+	"github.com/shopspring/decimal"
 )
 
 const MetricScorerVersion = "metric-scorer-v1"
-const ExpectedMetricScorerHashV1 = "fab5158ad8530474a90f18736f63c734048fbf5ecce54b76355c9e49ce33acf6"
-const ExpectedMetricNormalizationHashV1 = "99630d893fcb85b39591541b609788e90fa366cd6290e79a0cac129c4f91ca39"
+const ExpectedMetricScorerHashV1 = "1c343e7162c5c5ad9188d5c55400b3cc35b9748c8d4f583d5ff538e93fd6fe74"
+const ExpectedMetricNormalizationHashV1 = "730b6bc160b2a49fc453cc3bd5fdc034c68c735309c5ceb2b09d6d7a7b3e1c72"
 
 type MetricScoreInput struct {
 	Gold, Predictions []MetricRecord
@@ -80,6 +84,8 @@ type MetricScorerConfiguration struct {
 	Eligibility          string                  `json:"eligibility"`
 	Threshold            string                  `json:"threshold_rational"`
 	TieRule              string                  `json:"tie_rule"`
+	ResourceLimits       map[string]int          `json:"resource_limits"`
+	MatchingComplexity   string                  `json:"matching_complexity"`
 	ScoreRows            []MetricScoreDefinition `json:"score_rows"`
 }
 
@@ -107,7 +113,7 @@ func MetricScorerConfigurationV1() MetricScorerConfiguration {
 	return MetricScorerConfiguration{ScorerVersion: MetricScorerVersion, NormalizationVersion: NormalizationVersion, NormalizationRules: normalizationRulesV1(), UnitAliases: aliases,
 		Weights:     map[string]string{"source": "7/20", "name": "1/5", "subject": "3/20", "value": "1/5", "unit": "1/10"},
 		Eligibility: "source_sets_intersect OR >=2 nonempty_present_exact(name,subject,value,unit)", Threshold: "3/5",
-		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ScoreRows: copyMetricScoreRegistry()}
+		TieRule: "maximum_exact_rational_total_then_lexicographically_smallest_ordered_(gold_id,prediction_input_index)_pairs", ResourceLimits: map[string]int{"gold": MaxMetricGold, "predictions": MaxMetricPredictions, "edges": MaxMetricEdges}, MatchingComplexity: "O(E*N^3)_exact_rational_with_context_checks", ScoreRows: copyMetricScoreRegistry()}
 }
 func copyMetricScoreRegistry() []MetricScoreDefinition {
 	out := make([]MetricScoreDefinition, len(metricScoreRegistryV1))
@@ -118,7 +124,7 @@ func copyMetricScoreRegistry() []MetricScoreDefinition {
 	return out
 }
 func normalizationRulesV1() map[string]string {
-	return map[string]string{"text": "NFKC+Unicode-case-fold+whitespace-collapse+edge-punctuation", "value": "exact-base10-decimal-then-normalized-text", "source_lines": "sorted-deduplicated", "core_presence": "StableFields-map-membership-first-for-name-subject-value-unit-explicit; legacy-typed-only-when-map-absent", "stable_json": "map-membership-presence; null=absent; strings=text-v1; numbers=exact-rational; bool=exact; arrays=ordered-recursive; objects=sorted-key-recursive; metric_value=value-v1; metric_unit=unit-v1"}
+	return map[string]string{"text": "NFKC+Unicode-case-fold+whitespace-collapse+edge-punctuation", "value": "exact-base10-decimal-then-normalized-text", "source_lines": "sorted-deduplicated", "core_presence": "StableFields-map-membership-first-for-name-subject-value-unit-explicit; legacy-typed-only-when-map-absent", "stable_json": "typed-node-deterministic-JSON; reject-trailing-tokens; null=absent; strings=escaped-text-v1; numbers=canonical-exact-decimal; bool=typed; arrays=ordered-recursive; objects=byte-sorted-key-entry-array; metric_value=value-v1; metric_unit=unit-v1"}
 }
 func (c MetricScorerConfiguration) Hash() string {
 	raw, _ := json.Marshal(c)
@@ -136,11 +142,32 @@ func normalizationHashV1() string {
 }
 
 func ScoreMetrics(in MetricScoreInput) MetricScore {
+	// Compatibility wrapper is intentionally fail-loud; production orchestration
+	// should use ScoreMetricsContext and persist its explicit error.
+	s, err := ScoreMetricsContext(context.Background(), in)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+func ScoreMetricsContext(ctx context.Context, in MetricScoreInput) (MetricScore, error) {
+	if err := ctx.Err(); err != nil {
+		return MetricScore{}, err
+	}
+	if err := checkMetricLimits(in.Gold, in.Predictions); err != nil {
+		return MetricScore{}, err
+	}
 	cfg := MetricScorerConfigurationV1()
 	s := MetricScore{StableFieldAccuracy: make(map[string]ScoreMetric), ScorerVersion: MetricScorerVersion, ScorerHash: cfg.Hash(), NormalizationVersion: NormalizationVersion, NormalizationHash: normalizationHashV1(), UpstreamInvalid: !in.UpstreamValid, ConditionalAttributionIncluded: in.UpstreamValid}
-	matches := MatchMetrics(in.Gold, in.Predictions)
+	matches, err := MatchMetricsContext(ctx, in.Gold, in.Predictions)
+	if err != nil {
+		return MetricScore{}, err
+	}
 	matchedGold, matchedPred := map[int]bool{}, map[int]bool{}
 	for _, m := range matches {
+		if err := ctx.Err(); err != nil {
+			return MetricScore{}, err
+		}
 		matchedGold[m.GoldIndex] = true
 		matchedPred[m.PredictionIndex] = true
 		s.Diagnostics.Accepted = append(s.Diagnostics.Accepted, AcceptedMetricDiagnostic{m.GoldID, m.PredictionInputIndex, m.Weight, m.ExactWeight, m.Components, m.ExactComponents})
@@ -193,7 +220,14 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 		sort.Strings(names)
 		for _, name := range names {
 			fieldTotal[name]++
-			ng, np := normalizeStableJSON(name, goldFields[name]), normalizeStableJSON(name, predFields[name])
+			ng, err := normalizeStableJSON(name, goldFields[name])
+			if err != nil {
+				return MetricScore{}, fmt.Errorf("gold stable field %s: %w", name, err)
+			}
+			np, err := normalizeStableJSON(name, predFields[name])
+			if err != nil {
+				return MetricScore{}, fmt.Errorf("prediction stable field %s: %w", name, err)
+			}
 			if ng == np {
 				fieldCorrect[name]++
 			} else {
@@ -244,6 +278,9 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 	}
 	duplicates, unsupported := 0, 0
 	for pi, p := range in.Predictions {
+		if err := ctx.Err(); err != nil {
+			return MetricScore{}, err
+		}
 		if matchedPred[pi] {
 			continue
 		}
@@ -272,7 +309,7 @@ func ScoreMetrics(in MetricScoreInput) MetricScore {
 	s.Diagnostics.NormalizationHash = s.NormalizationHash
 	sortMetricDiagnostics(&s.Diagnostics)
 	s.Rows = metricScoreRows(s)
-	return s
+	return s, nil
 }
 
 func recordValueField(r MetricRecord, name string, legacy *string, normalize func(*string) NormalizedField) (NormalizedField, bool) {
@@ -348,12 +385,24 @@ func stableFieldValues(r MetricRecord) map[string]json.RawMessage {
 	}
 	return out
 }
-func normalizeStableJSON(name string, raw json.RawMessage) string {
+
+type normalizedJSONNode struct {
+	Type   string                `json:"type"`
+	State  string                `json:"state,omitempty"`
+	Value  string                `json:"value,omitempty"`
+	Bool   *bool                 `json:"bool,omitempty"`
+	Array  []normalizedJSONNode  `json:"array,omitempty"`
+	Object []normalizedJSONEntry `json:"object,omitempty"`
+}
+type normalizedJSONEntry struct {
+	Key   string             `json:"key"`
+	Value normalizedJSONNode `json:"value"`
+}
+
+func normalizeStableJSON(name string, raw json.RawMessage) (string, error) {
 	if raw == nil {
-		return "absent"
-	}
-	if string(bytes.TrimSpace(raw)) == "null" {
-		return "absent"
+		b, _ := json.Marshal(normalizedJSONNode{Type: "absent"})
+		return string(b), nil
 	}
 	if name == "metric_value" || name == "metric_unit" {
 		var text string
@@ -365,55 +414,75 @@ func normalizeStableJSON(name string, raw json.RawMessage) string {
 				f = NormalizeUnit(&text)
 			}
 			if f.Decimal != nil {
-				return "decimal:" + f.Decimal.String()
+				b, _ := json.Marshal(normalizedJSONNode{Type: "decimal", Value: f.Decimal.String()})
+				return string(b), nil
 			}
-			return "string:" + string(f.State) + ":" + f.Text
+			b, _ := json.Marshal(normalizedJSONNode{Type: "string", State: string(f.State), Value: f.Text})
+			return string(b), nil
 		}
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()
 	var v any
 	if err := d.Decode(&v); err != nil {
-		return "invalid:" + normalizeCommon(string(raw))
+		return "", err
 	}
-	return canonicalStableValue(v)
+	var trailing any
+	if err := d.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return "", fmt.Errorf("multiple JSON values")
+		}
+		return "", err
+	}
+	node, err := canonicalStableValue(v)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(node)
+	return string(encoded), err
 }
-func canonicalStableValue(v any) string {
+func canonicalStableValue(v any) (normalizedJSONNode, error) {
 	switch x := v.(type) {
 	case nil:
-		return "absent"
+		return normalizedJSONNode{Type: "absent"}, nil
 	case string:
 		f := NormalizeText(&x)
-		return "string:" + string(f.State) + ":" + f.Text
+		return normalizedJSONNode{Type: "string", State: string(f.State), Value: f.Text}, nil
 	case bool:
-		if x {
-			return "bool:true"
-		}
-		return "bool:false"
+		v := x
+		return normalizedJSONNode{Type: "bool", Bool: &v}, nil
 	case json.Number:
-		if d, ok := new(big.Rat).SetString(string(x)); ok {
-			return "number:" + canonicalRat(d)
+		if d, err := decimal.NewFromString(string(x)); err == nil {
+			return normalizedJSONNode{Type: "number", Value: d.String()}, nil
 		}
-		return "number-invalid:" + string(x)
+		return normalizedJSONNode{}, fmt.Errorf("invalid JSON number %q", x)
 	case []any:
-		parts := make([]string, len(x))
+		parts := make([]normalizedJSONNode, len(x))
 		for i, item := range x {
-			parts[i] = canonicalStableValue(item)
+			var err error
+			parts[i], err = canonicalStableValue(item)
+			if err != nil {
+				return normalizedJSONNode{}, err
+			}
 		}
-		return "array:[" + strings.Join(parts, ",") + "]"
+		return normalizedJSONNode{Type: "array", Array: parts}, nil
 	case map[string]any:
 		keys := make([]string, 0, len(x))
 		for k := range x {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		parts := make([]string, 0, len(keys))
+		parts := make([]normalizedJSONEntry, 0, len(keys))
 		for _, k := range keys {
-			parts = append(parts, fmt.Sprintf("%q:%s", k, canonicalStableValue(x[k])))
+			value, err := canonicalStableValue(x[k])
+			if err != nil {
+				return normalizedJSONNode{}, err
+			}
+			parts = append(parts, normalizedJSONEntry{Key: k, Value: value})
 		}
-		return "object:{" + strings.Join(parts, ",") + "}"
+		return normalizedJSONNode{Type: "object", Object: parts}, nil
 	default:
-		return fmt.Sprintf("unknown:%v", x)
+		return normalizedJSONNode{}, fmt.Errorf("unsupported JSON type %T", x)
 	}
 }
 func (s *MetricScore) addDiff(g, p MetricRecord, m MetricMatch, field, expected, actual string) {

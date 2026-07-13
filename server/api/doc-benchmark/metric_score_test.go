@@ -1,10 +1,77 @@
 package docbenchmark
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
+
+func TestStableJSONCanonicalTreeRejectsCollisionsAndTrailingTokens(t *testing.T) {
+	pairs := [][2]string{{`["a","b"]`, `["a,string:value:b"]`}, {`{"a":"b,c:d"}`, `{"a,b":"c:d"}`}, {`{"x":"}"}`, `{"x}":""}`}}
+	for _, pair := range pairs {
+		a, err := normalizeStableJSON("future", json.RawMessage(pair[0]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := normalizeStableJSON("future", json.RawMessage(pair[1]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a == b {
+			t.Fatalf("canonical collision %s == %s => %s", pair[0], pair[1], a)
+		}
+	}
+	if _, err := normalizeStableJSON("future", json.RawMessage(`{"a":1} true`)); err == nil {
+		t.Fatal("trailing JSON token accepted")
+	}
+}
+
+func TestScoreMetricsContextRejectsInvalidStableJSON(t *testing.T) {
+	g := metric("g", 0, "n", "s", "1", "ms", 1)
+	p := metric("", 0, "n", "s", "1", "ms", 1)
+	g.StableFields = map[string]json.RawMessage{"future": json.RawMessage(`{"a":1}`)}
+	p.StableFields = map[string]json.RawMessage{"future": json.RawMessage(`{"a":1} false`)}
+	if _, err := ScoreMetricsContext(context.Background(), MetricScoreInput{Gold: []MetricRecord{g}, Predictions: []MetricRecord{p}, UpstreamValid: true}); err == nil {
+		t.Fatal("invalid trailing JSON produced a stable-field score")
+	}
+}
+
+func TestScoreMetricsContextLimitsAndCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ScoreMetricsContext(ctx, MetricScoreInput{}); err == nil {
+		t.Fatal("canceled score succeeded")
+	}
+	tooMany := make([]MetricRecord, MaxMetricGold+1)
+	if _, err := MatchMetricsContext(context.Background(), tooMany, nil); err == nil {
+		t.Fatal("gold limit not enforced")
+	}
+	tooManyPred := make([]MetricRecord, MaxMetricPredictions+1)
+	if _, err := MatchMetricsContext(context.Background(), nil, tooManyPred); err == nil {
+		t.Fatal("prediction limit not enforced")
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	gold, pred := denseMetrics(MaxMetricGold, MaxMetricPredictions)
+	if _, err := MatchMetricsContext(ctx, gold, pred); err != nil {
+		t.Fatalf("dense at-limit match: %v", err)
+	}
+}
+
+func denseMetrics(g, p int) ([]MetricRecord, []MetricRecord) {
+	gold := make([]MetricRecord, g)
+	pred := make([]MetricRecord, p)
+	for i := range gold {
+		gold[i] = metric(fmt.Sprintf("g%02d", i), 0, "same", "same", "1", "ms", 1)
+	}
+	for i := range pred {
+		pred[i] = metric("", i, "same", "same", "1", "ms", 1)
+	}
+	return gold, pred
+}
 
 func TestScoreMetricsDetectionEmptyRules(t *testing.T) {
 	cases := []struct {
@@ -276,6 +343,7 @@ func TestMetricScorerConfigurationIsDeepCopied(t *testing.T) {
 	c.UnitAliases["ms"] = "mutated"
 	c.Weights["name"] = "mutated"
 	c.NormalizationRules["text"] = "mutated"
+	c.ResourceLimits["gold"] = 1
 	c.ScoreRows[0].AdditiveComponents = append(c.ScoreRows[0].AdditiveComponents, "mutated")
 	c.ScoreRows[len(c.ScoreRows)-1].AdditiveComponents[0] = "mutated"
 	if got := MetricScorerConfigurationV1().Hash(); got != original || got != ExpectedMetricScorerHashV1 {

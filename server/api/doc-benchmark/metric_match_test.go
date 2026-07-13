@@ -1,11 +1,116 @@
 package docbenchmark
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math/big"
+	"math/rand"
 	"reflect"
 	"testing"
 )
+
+func TestMatchMetricsContextEdgeLimitAndCancellation(t *testing.T) {
+	edges := make([]MetricEdge, MaxMetricEdges+1)
+	if _, err := optimalMetricMatchesContext(context.Background(), 1, 1, edges); err == nil {
+		t.Fatal("edge limit not enforced")
+	} else {
+		var limit *MetricResourceLimitError
+		if !errors.As(err, &limit) {
+			t.Fatalf("error type = %T", err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := MatchMetricsContext(ctx, nil, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled error = %v", err)
+	}
+}
+
+func TestMatchMetricsExactRandomizedAgainstBruteForce(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	for iteration := 0; iteration < 40; iteration++ {
+		g, p := 1+rng.Intn(4), 1+rng.Intn(4)
+		edges := []MetricEdge{}
+		for gi := 0; gi < g; gi++ {
+			for pi := 0; pi < p; pi++ {
+				if rng.Intn(4) == 0 {
+					continue
+				}
+				w := fmt.Sprintf("%d/10", 6+rng.Intn(5))
+				edges = append(edges, exactEdge(fmt.Sprintf("g%d", gi), gi, pi, pi, w))
+			}
+		}
+		got := optimalMetricMatches(g, p, edges)
+		want := bruteMetricMatches(g, p, edges)
+		if !reflect.DeepEqual(matchPairs(got), matchPairs(want)) {
+			t.Fatalf("iteration %d got %#v want %#v edges %#v", iteration, got, want, edges)
+		}
+	}
+}
+
+func TestMatchMetricsLexPrefixChoosesShorterEqualOptimum(t *testing.T) {
+	edges := []MetricEdge{exactEdge("a", 0, 0, 0, "1"), exactEdge("a", 0, 1, 1, "1/2"), exactEdge("b", 1, 0, 0, "1/2")}
+	got := optimalMetricMatches(2, 2, edges)
+	if pairs := matchPairs(got); !reflect.DeepEqual(pairs, [][2]any{{"a", 0}}) {
+		t.Fatalf("prefix tie = %#v", pairs)
+	}
+}
+
+func bruteMetricMatches(g, p int, edges []MetricEdge) []MetricMatch {
+	by := map[int][]MetricEdge{}
+	for _, e := range edges {
+		by[e.GoldIndex] = append(by[e.GoldIndex], e)
+	}
+	best := new(big.Rat).SetInt64(-1)
+	var answer []MetricMatch
+	used := make([]bool, p)
+	var visit func(int, *big.Rat, []MetricMatch)
+	visit = func(gi int, total *big.Rat, current []MetricMatch) {
+		if gi == g {
+			sortMatches(current)
+			if total.Cmp(best) > 0 || (total.Cmp(best) == 0 && pairsLess(current, answer)) {
+				best.Set(total)
+				answer = append([]MetricMatch(nil), current...)
+			}
+			return
+		}
+		visit(gi+1, new(big.Rat).Set(total), append([]MetricMatch(nil), current...))
+		for _, e := range by[gi] {
+			if used[e.PredictionIndex] {
+				continue
+			}
+			used[e.PredictionIndex] = true
+			m := MetricMatch{GoldID: e.GoldID, GoldIndex: e.GoldIndex, PredictionIndex: e.PredictionIndex, PredictionInputIndex: e.PredictionInputIndex, ExactWeight: canonicalRat(edgeRat(e))}
+			visit(gi+1, new(big.Rat).Add(total, edgeRat(e)), append(current, m))
+			used[e.PredictionIndex] = false
+		}
+	}
+	visit(0, new(big.Rat), nil)
+	return answer
+}
+func matchPairs(m []MetricMatch) [][2]any {
+	out := make([][2]any, len(m))
+	for i, x := range m {
+		out[i] = [2]any{x.GoldID, x.PredictionInputIndex}
+	}
+	return out
+}
+func pairsLess(a, b []MetricMatch) bool {
+	if b == nil {
+		return true
+	}
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i].GoldID != b[i].GoldID {
+			return a[i].GoldID < b[i].GoldID
+		}
+		if a[i].PredictionInputIndex != b[i].PredictionInputIndex {
+			return a[i].PredictionInputIndex < b[i].PredictionInputIndex
+		}
+	}
+	return len(a) < len(b)
+}
 
 func rat(s string) *big.Rat {
 	r, ok := new(big.Rat).SetString(s)

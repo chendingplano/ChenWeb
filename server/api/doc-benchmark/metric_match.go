@@ -2,13 +2,27 @@ package docbenchmark
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"sort"
 )
 
 const MetricWeightScale = 1_000_000
 const MetricAcceptanceWeight = 600_000
+const MaxMetricGold = 32
+const MaxMetricPredictions = 32
+const MaxMetricEdges = 1024
+
+type MetricResourceLimitError struct {
+	Resource      string
+	Actual, Limit int
+}
+
+func (e *MetricResourceLimitError) Error() string {
+	return fmt.Sprintf("metric scorer %s limit exceeded: %d > %d", e.Resource, e.Actual, e.Limit)
+}
 
 type MetricRecord struct {
 	GoldID                                                                           string
@@ -91,22 +105,82 @@ func MetricEdgeFor(gold, prediction MetricRecord) MetricEdge {
 }
 
 func BuildMetricEdges(gold, predictions []MetricRecord) []MetricEdge {
+	edges, err := BuildMetricEdgesContext(context.Background(), gold, predictions)
+	if err != nil {
+		panic(err)
+	}
+	return edges
+}
+func BuildMetricEdgesContext(ctx context.Context, gold, predictions []MetricRecord) ([]MetricEdge, error) {
+	if err := checkMetricLimits(gold, predictions); err != nil {
+		return nil, err
+	}
 	out := make([]MetricEdge, 0, len(gold)*len(predictions))
 	for gi, g := range gold {
 		for pi, p := range predictions {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			e := MetricEdgeFor(g, p)
 			e.GoldIndex, e.PredictionIndex = gi, pi
 			out = append(out, e)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func MatchMetrics(gold, predictions []MetricRecord) []MetricMatch {
-	return optimalMetricMatches(len(gold), len(predictions), BuildMetricEdges(gold, predictions))
+	// Compatibility wrapper is intentionally fail-loud; callers needing cancellation
+	// or recoverable resource-limit handling must use MatchMetricsContext.
+	matches, err := MatchMetricsContext(context.Background(), gold, predictions)
+	if err != nil {
+		panic(err)
+	}
+	return matches
+}
+func MatchMetricsContext(ctx context.Context, gold, predictions []MetricRecord) ([]MetricMatch, error) {
+	if err := checkMetricLimits(gold, predictions); err != nil {
+		return nil, err
+	}
+	edges, err := BuildMetricEdgesContext(ctx, gold, predictions)
+	if err != nil {
+		return nil, err
+	}
+	return optimalMetricMatchesContext(ctx, len(gold), len(predictions), edges)
+}
+func checkMetricLimits(g, p []MetricRecord) error {
+	if len(g) > MaxMetricGold {
+		return &MetricResourceLimitError{"gold", len(g), MaxMetricGold}
+	}
+	if len(p) > MaxMetricPredictions {
+		return &MetricResourceLimitError{"predictions", len(p), MaxMetricPredictions}
+	}
+	if len(g) > 0 && len(p) > MaxMetricEdges/len(g) {
+		return &MetricResourceLimitError{"edges", len(g) * len(p), MaxMetricEdges}
+	}
+	return nil
 }
 
 func optimalMetricMatches(goldCount, predictionCount int, edges []MetricEdge) []MetricMatch {
+	m, err := optimalMetricMatchesContext(context.Background(), goldCount, predictionCount, edges)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
+// Complexity is O(E*N^3) exact-rational operations: each globally sorted edge
+// is considered at most once and triggers at most one bounded Hungarian solve.
+func optimalMetricMatchesContext(ctx context.Context, goldCount, predictionCount int, edges []MetricEdge) ([]MetricMatch, error) {
+	if goldCount > MaxMetricGold {
+		return nil, &MetricResourceLimitError{"gold", goldCount, MaxMetricGold}
+	}
+	if predictionCount > MaxMetricPredictions {
+		return nil, &MetricResourceLimitError{"predictions", predictionCount, MaxMetricPredictions}
+	}
+	if len(edges) > MaxMetricEdges {
+		return nil, &MetricResourceLimitError{"edges", len(edges), MaxMetricEdges}
+	}
 	candidates := make([]MetricEdge, 0, len(edges))
 	for _, e := range edges {
 		if e.Acceptable {
@@ -125,9 +199,12 @@ func optimalMetricMatches(goldCount, predictionCount int, edges []MetricEdge) []
 		}
 		return candidates[i].PredictionIndex < candidates[j].PredictionIndex
 	})
-	optimum := constrainedMaximumWeight(goldCount, predictionCount, candidates, nil, nil)
+	optimum, err := constrainedMaximumWeightContext(ctx, goldCount, predictionCount, candidates, nil, nil)
+	if err != nil {
+		return nil, err
+	}
 	if optimum == nil || optimum.Sign() <= 0 {
-		return nil
+		return nil, nil
 	}
 	fixed := make([]MetricEdge, 0, minInt(goldCount, predictionCount))
 	forbidden := make(map[[2]int]bool)
@@ -136,6 +213,9 @@ func optimalMetricMatches(goldCount, predictionCount int, edges []MetricEdge) []
 	for fixedWeight.Cmp(optimum) < 0 {
 		selected := -1
 		for i := last + 1; i < len(candidates); i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			e := candidates[i]
 			if conflictsFixed(e, fixed) {
 				continue
@@ -145,7 +225,10 @@ func optimalMetricMatches(goldCount, predictionCount int, edges []MetricEdge) []
 				trialForbidden[edgeKey(candidates[j])] = true
 			}
 			trialFixed := append(append([]MetricEdge(nil), fixed...), e)
-			trial := constrainedMaximumWeight(goldCount, predictionCount, candidates, trialFixed, trialForbidden)
+			trial, err := constrainedMaximumWeightContext(ctx, goldCount, predictionCount, candidates, trialFixed, trialForbidden)
+			if err != nil {
+				return nil, err
+			}
 			if trial != nil && trial.Cmp(optimum) == 0 {
 				selected = i
 				forbidden = trialForbidden
@@ -165,15 +248,25 @@ func optimalMetricMatches(goldCount, predictionCount int, edges []MetricEdge) []
 		out[i] = MetricMatch{GoldID: e.GoldID, GoldIndex: e.GoldIndex, PredictionIndex: e.PredictionIndex, PredictionInputIndex: e.PredictionInputIndex, Weight: e.Weight, ExactWeight: canonicalRat(edgeRat(e)), Components: e.Components, ExactComponents: e.ExactComponents}
 	}
 	sortMatches(out)
-	return out
+	return out, nil
 }
 
 func constrainedMaximumWeight(goldCount, predictionCount int, edges, fixed []MetricEdge, forbidden map[[2]int]bool) *big.Rat {
+	r, err := constrainedMaximumWeightContext(context.Background(), goldCount, predictionCount, edges, fixed, forbidden)
+	if err != nil {
+		panic(err)
+	}
+	return r
+}
+func constrainedMaximumWeightContext(ctx context.Context, goldCount, predictionCount int, edges, fixed []MetricEdge, forbidden map[[2]int]bool) (*big.Rat, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	usedGold, usedPred := make([]bool, goldCount), make([]bool, predictionCount)
 	total := new(big.Rat)
 	for _, e := range fixed {
 		if e.GoldIndex < 0 || e.GoldIndex >= goldCount || e.PredictionIndex < 0 || e.PredictionIndex >= predictionCount || usedGold[e.GoldIndex] || usedPred[e.PredictionIndex] || forbidden[edgeKey(e)] {
-			return nil
+			return nil, nil
 		}
 		usedGold[e.GoldIndex] = true
 		usedPred[e.PredictionIndex] = true
@@ -192,7 +285,7 @@ func constrainedMaximumWeight(goldCount, predictionCount int, edges, fixed []Met
 	}
 	n := len(golds) + len(preds)
 	if n == 0 {
-		return new(big.Rat).Set(total)
+		return new(big.Rat).Set(total), nil
 	}
 	absent := new(big.Rat).Neg(new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(100), nil)))
 	w := make([][]*big.Rat, n)
@@ -215,16 +308,30 @@ func constrainedMaximumWeight(goldCount, predictionCount int, edges, fixed []Met
 		predPos[v] = i
 	}
 	for _, e := range edges {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		r, rok := goldPos[e.GoldIndex]
 		c, cok := predPos[e.PredictionIndex]
 		if rok && cok && !forbidden[edgeKey(e)] && edgeRat(e).Cmp(w[r][c]) > 0 {
 			w[r][c] = new(big.Rat).Set(edgeRat(e))
 		}
 	}
-	return new(big.Rat).Add(total, hungarianMaximum(w))
+	h, err := hungarianMaximumContext(ctx, w)
+	if err != nil {
+		return nil, err
+	}
+	return new(big.Rat).Add(total, h), nil
 }
 
 func hungarianMaximum(weight [][]*big.Rat) *big.Rat {
+	r, err := hungarianMaximumContext(context.Background(), weight)
+	if err != nil {
+		panic(err)
+	}
+	return r
+}
+func hungarianMaximumContext(ctx context.Context, weight [][]*big.Rat) (*big.Rat, error) {
 	n := len(weight)
 	u, v := make([]*big.Rat, n+1), make([]*big.Rat, n+1)
 	for i := 0; i <= n; i++ {
@@ -234,6 +341,9 @@ func hungarianMaximum(weight [][]*big.Rat) *big.Rat {
 	p, way := make([]int, n+1), make([]int, n+1)
 	inf := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(200), nil))
 	for i := 1; i <= n; i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		p[0] = i
 		j0 := 0
 		minv := make([]*big.Rat, n+1)
@@ -247,6 +357,9 @@ func hungarianMaximum(weight [][]*big.Rat) *big.Rat {
 			delta := new(big.Rat).Set(inf)
 			j1 := 0
 			for j := 1; j <= n; j++ {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if used[j] {
 					continue
 				}
@@ -290,7 +403,7 @@ func hungarianMaximum(weight [][]*big.Rat) *big.Rat {
 			total.Add(total, weight[p[j]-1][j-1])
 		}
 	}
-	return total
+	return total, nil
 }
 
 func weightedJaccard(wn, wd, n, d int) *big.Rat {
