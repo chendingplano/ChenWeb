@@ -42,3 +42,20 @@ func TestCaptureDurableAndCleanupNeverDeletesVerified(t *testing.T) {
 		t.Fatalf("verified evidence removed: %v", err)
 	}
 }
+
+func TestCaptureFailurePointsLeaveRetryableEvidence(t *testing.T) {
+	points := []CaptureFailurePoint{FailAfterPartialCreate, FailAfterCopy, FailAfterFileSync, FailAfterRename, FailAfterHash, FailAfterDirectorySync, FailBeforeVerifiedCommit}
+	for _, p := range points {
+		t.Run(string(p), func(t *testing.T) {
+			d := t.TempDir()
+			a, e := AllocateWorkspace(WorkspaceConfig{WorkRoot: filepath.Join(d, "w"), EvidenceRoot: filepath.Join(d, "e"), AttemptID: "a", CaseID: "c", RunID: "r"})
+			if e != nil {
+				t.Fatal(e)
+			}
+			_, _ = a.CaptureWithOptions(strings.NewReader("x"), "f", CaptureOptions{Failure: p})
+			if _, e = a.Capture(strings.NewReader("x"), "f"); e != nil {
+				t.Fatal(e)
+			}
+		})
+	}
+}
