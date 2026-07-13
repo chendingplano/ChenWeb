@@ -1,5 +1,5 @@
-# Tenant-independent site config for the SemOS customer-facing frontend.
-# Named by [config].config_filename in config.local.toml (ADR 2026071102).
+# Tenant-specific site config for Demo Corp (referenced by site_tenants table).
+# Differs from the shared site-default.toml only in branding/slogan fields.
 
 [branding]
 site_name = "Demo Corp Knowledge Portal"

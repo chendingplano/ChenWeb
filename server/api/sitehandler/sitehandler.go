@@ -114,7 +114,7 @@ func GetSiteConfig(c echo.Context) error {
 	}
 	cfg, err := LoadSiteConfig(path)
 	if err != nil {
-		log.Printf("***** Alarm: LoadSiteConfig failed: %v (CWB_SITE_004)", err)
+		log.Printf("***** Alarm: LoadSiteConfig failed: %v (CWB_SITE_006)", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	log.Printf("Served site config from %s (CWB_SITE_201)", path)
@@ -141,7 +141,7 @@ func GetTenantSiteConfig(c echo.Context) error {
 	}
 	cfg, err := LoadSiteConfig(filename)
 	if err != nil {
-		log.Printf("***** Alarm: LoadSiteConfig failed for tenant %q: %v (CWB_SITE_004)", tenantID, err)
+		log.Printf("***** Alarm: LoadSiteConfig failed for tenant %q: %v (CWB_SITE_007)", tenantID, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	log.Printf("Served site config for tenant %q from %s (CWB_SITE_202)", tenantID, filename)
