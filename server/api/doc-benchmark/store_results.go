@@ -45,6 +45,9 @@ func (s SQLStore) InsertScore(ctx context.Context, r ScoreRecord) (string, error
 	if s.DB == nil {
 		return "", fmt.Errorf("nil database")
 	}
+	if r.AttemptID.Valid == r.RunID.Valid {
+		return "", fmt.Errorf("score requires exactly one owner")
+	}
 	b, _ := canonicalJSON(r.Metadata)
 	var id string
 	e := s.DB.QueryRowContext(txctx(ctx), `INSERT INTO kb.benchmark_scores (attempt_id,run_id,processor,scorer,scorer_version,metric,slice,direction,aggregation_kind,value,additive_component,numerator,denominator,non_null,applicable,metadata_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, r.AttemptID, r.RunID, r.Processor, r.Scorer, r.ScorerVersion, r.Metric, r.Slice, r.Direction, r.AggregationKind, r.Value, r.AdditiveComponent, r.Numerator, r.Denominator, r.NonNull, r.Applicable, b).Scan(&id)
@@ -53,6 +56,9 @@ func (s SQLStore) InsertScore(ctx context.Context, r ScoreRecord) (string, error
 func (s SQLStore) InsertArtifact(ctx context.Context, r ArtifactRecord) (string, error) {
 	if s.DB == nil {
 		return "", fmt.Errorf("nil database")
+	}
+	if r.AttemptID.Valid == r.RunID.Valid {
+		return "", fmt.Errorf("artifact requires exactly one owner")
 	}
 	b, _ := canonicalJSON(r.Metadata)
 	var id string

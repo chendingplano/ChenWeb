@@ -110,7 +110,14 @@ func (s SQLStore) FinishAttempt(ctx context.Context, id, owner, lifecycle, failu
 	if e != nil {
 		return e
 	}
-	return affected(res)
+	if err := affected(res); err != nil {
+		var l, f string
+		if s.DB.QueryRowContext(txctx(ctx), `SELECT lifecycle,COALESCE(failure_kind,'') FROM kb.benchmark_case_attempts WHERE id=$1`, id).Scan(&l, &f) == nil && l == lifecycle && f == failure {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 func (s SQLStore) SelectAttempt(ctx context.Context, caseRunID, attemptID string) error {
 	res, e := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_runs SET selected_attempt_id=$2,lifecycle=(SELECT CASE WHEN lifecycle='succeeded' THEN 'success' ELSE lifecycle END FROM kb.benchmark_case_attempts WHERE id=$2) WHERE id=$1 AND selected_attempt_id IS NULL`, caseRunID, attemptID)
