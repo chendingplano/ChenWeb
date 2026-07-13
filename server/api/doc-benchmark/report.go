@@ -48,12 +48,7 @@ type ParetoPoint struct {
 func (r BenchmarkReport) canonical() BenchmarkReport {
 	out := r
 	out.Aggregates = append([]AggregateRow(nil), r.Aggregates...)
-	sort.Slice(out.Aggregates, func(i, j int) bool {
-		if out.Aggregates[i].Metric != out.Aggregates[j].Metric {
-			return out.Aggregates[i].Metric < out.Aggregates[j].Metric
-		}
-		return out.Aggregates[i].Component < out.Aggregates[j].Component
-	})
+	sort.Slice(out.Aggregates, func(i, j int) bool { return canonicalKey(out.Aggregates[i]) < canonicalKey(out.Aggregates[j]) })
 	out.PairedDeltas = append([]PairedDelta(nil), r.PairedDeltas...)
 	sort.Slice(out.PairedDeltas, func(i, j int) bool {
 		a, b := out.PairedDeltas[i], out.PairedDeltas[j]
@@ -77,22 +72,17 @@ func (r BenchmarkReport) canonical() BenchmarkReport {
 	}
 	if r.LowestCases != nil {
 		out.LowestCases = append([]ReportCase(nil), r.LowestCases...)
-		sort.Slice(out.LowestCases, func(i, j int) bool { return out.LowestCases[i].CaseID < out.LowestCases[j].CaseID })
+		sort.Slice(out.LowestCases, func(i, j int) bool { return canonicalKey(out.LowestCases[i]) < canonicalKey(out.LowestCases[j]) })
 	}
 	if r.Pareto != nil {
 		out.Pareto = append([]ParetoPoint(nil), r.Pareto...)
-		sort.Slice(out.Pareto, func(i, j int) bool { return out.Pareto[i].Variant < out.Pareto[j].Variant })
+		sort.Slice(out.Pareto, func(i, j int) bool { return canonicalKey(out.Pareto[i]) < canonicalKey(out.Pareto[j]) })
 	}
 	if r.Slices != nil {
 		out.Slices = map[string][]AggregateRow{}
 		for k, v := range r.Slices {
 			x := append([]AggregateRow(nil), v...)
-			sort.Slice(x, func(i, j int) bool {
-				if x[i].Metric != x[j].Metric {
-					return x[i].Metric < x[j].Metric
-				}
-				return x[i].Component < x[j].Component
-			})
+			sort.Slice(x, func(i, j int) bool { return canonicalKey(x[i]) < canonicalKey(x[j]) })
 			out.Slices[k] = x
 		}
 	}
@@ -100,7 +90,7 @@ func (r BenchmarkReport) canonical() BenchmarkReport {
 		out.PrimaryVectors = map[string][]AggregateRow{}
 		for k, v := range r.PrimaryVectors {
 			x := append([]AggregateRow(nil), v...)
-			sort.Slice(x, func(i, j int) bool { return x[i].Metric < x[j].Metric })
+			sort.Slice(x, func(i, j int) bool { return canonicalKey(x[i]) < canonicalKey(x[j]) })
 			out.PrimaryVectors[k] = x
 		}
 	}
@@ -112,6 +102,7 @@ func (r BenchmarkReport) canonical() BenchmarkReport {
 	}
 	return out
 }
+func canonicalKey(v any) string { b, _ := json.Marshal(v); return string(b) }
 func RenderJSON(r BenchmarkReport) ([]byte, error) {
 	b, err := json.MarshalIndent(r.canonical(), "", "  ")
 	if err != nil {

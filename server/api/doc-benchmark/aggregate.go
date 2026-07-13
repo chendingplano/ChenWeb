@@ -407,6 +407,10 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 						pooledB[key] = q
 						applicableByMetric[key]++
 					}
+					conditional := r.ConditionalAttribution || br.ConditionalAttribution || strings.Contains(r.Metric, "conditional") || strings.Contains(br.Metric, "conditional")
+					if c.BaselineUpstreamHash != c.CandidateUpstreamHash && c.AllowUpstreamVariation && conditional {
+						continue
+					}
 					if r.Value != nil && br.Value != nil && !(u.UpstreamInvalid && r.ConditionalAttribution) && !(x.UpstreamInvalid && br.ConditionalAttribution) {
 						// coverage for macro metrics is tracked independently below
 						pairs[r.Metric+"\x00"+r.Component] = append(pairs[r.Metric+"\x00"+r.Component], *r.Value-*br.Value)
