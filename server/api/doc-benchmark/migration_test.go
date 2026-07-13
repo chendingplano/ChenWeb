@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	_ "github.com/lib/pq"
@@ -42,6 +43,10 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 		if err = db.QueryRow(`SELECT count(*) FROM pg_indexes WHERE schemaname='kb' AND indexname=$1`, idx).Scan(&c); err != nil || c != 1 {
 			t.Fatalf("missing index %s", idx)
 		}
+	}
+	var idef string
+	if err = db.QueryRow(`SELECT indexdef FROM pg_indexes WHERE schemaname='kb' AND indexname='uq_benchmark_case_runs_selected_once'`).Scan(&idef); err != nil || !strings.Contains(idef, "WHERE (selected_attempt_id IS NOT NULL)") {
+		t.Fatalf("selected partial index predicate missing: %v", err)
 	}
 	for _, tbl := range []string{"benchmark_experiments", "benchmark_runs", "benchmark_case_runs", "benchmark_case_attempts", "benchmark_workspaces", "benchmark_scores", "benchmark_artifacts"} {
 		var c int
