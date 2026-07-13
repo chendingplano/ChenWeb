@@ -132,7 +132,7 @@ func (s SQLStore) FinishAttempt(ctx context.Context, id, owner, lifecycle, failu
 	return nil
 }
 func (s SQLStore) SelectAttempt(ctx context.Context, caseRunID, attemptID string) error {
-	res, e := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_runs SET selected_attempt_id=$2,lifecycle=(SELECT lifecycle FROM kb.benchmark_case_attempts WHERE id=$2 AND case_run_id=$1 AND lifecycle IN ('success','processor_failed','timed_out','invalid_output','infrastructure_failed','scorer_failed','canceled')) WHERE id=$1 AND selected_attempt_id IS NULL AND EXISTS (SELECT 1 FROM kb.benchmark_case_attempts WHERE id=$2 AND case_run_id=$1 AND lifecycle IN ('success','processor_failed','timed_out','invalid_output','infrastructure_failed','scorer_failed','canceled'))`, caseRunID, attemptID)
+	res, e := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_runs SET selected_attempt_id=$2,lifecycle=(SELECT CASE WHEN lifecycle='succeeded' THEN 'success' WHEN lifecycle='canceled' THEN 'canceled' ELSE CASE failure_kind WHEN 'processor_failed' THEN 'processor_failed' WHEN 'timed_out' THEN 'timed_out' WHEN 'invalid_output' THEN 'invalid_output' WHEN 'infrastructure_failed' THEN 'infrastructure_failed' WHEN 'scorer_failed' THEN 'scorer_failed' WHEN 'canceled' THEN 'canceled' ELSE 'infrastructure_failed' END END FROM kb.benchmark_case_attempts WHERE id=$2 AND case_run_id=$1 AND lifecycle IN ('succeeded','failed','canceled')) WHERE id=$1 AND selected_attempt_id IS NULL AND EXISTS (SELECT 1 FROM kb.benchmark_case_attempts WHERE id=$2 AND case_run_id=$1 AND lifecycle IN ('succeeded','failed','canceled'))`, caseRunID, attemptID)
 	if e != nil {
 		return e
 	}
