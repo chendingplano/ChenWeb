@@ -1,0 +1,18 @@
+{
+  "chunking": {
+    "chunks": [
+      {
+        "normal_lines": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "overlap_lines": [],
+        "sequence": 1
+      }
+    ],
+    "protected_groups": []
+  },
+  "schema_version": 1
+}

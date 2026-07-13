@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "dataset_id": "doc-processors-synthetic-core",
+  "dataset_version": "1.0.0",
+  "generator_version": "1.0.0",
+  "seed": 20260713,
+  "cases": [
+    {
+      "case_id": "toc-boundary-001",
+      "expected": "cases/toc-boundary-001/expected.json",
+      "input": "cases/toc-boundary-001/input.lines.txt",
+      "processors": [
+        "chunking"
+      ],
+      "tags": [
+        "toc",
+        "boundary"
+      ]
+    },
+    {
+      "case_id": "long-list-overlap-001",
+      "expected": "cases/long-list-overlap-001/expected.json",
+      "input": "cases/long-list-overlap-001/input.lines.txt",
+      "processors": [
+        "chunking"
+      ],
+      "tags": [
+        "long-list",
+        "overlap",
+        "final-small-chunk"
+      ]
+    },
+    {
+      "case_id": "reordered-lines-001",
+      "expected": "cases/reordered-lines-001/expected.json",
+      "input": "cases/reordered-lines-001/input.lines.txt",
+      "processors": [
+        "chunking"
+      ],
+      "tags": [
+        "reordered-lines"
+      ]
+    },
+    {
+      "case_id": "metric-multiple-units-001",
+      "expected": "cases/metric-multiple-units-001/expected.json",
+      "input": "cases/metric-multiple-units-001/input.lines.txt",
+      "processors": [
+        "extract_metrics"
+      ],
+      "tags": [
+        "multiple-metrics",
+        "multiple-units",
+        "negative-metric"
+      ]
+    },
+    {
+      "case_id": "metric-implicit-multilingual-001",
+      "expected": "cases/metric-implicit-multilingual-001/expected.json",
+      "input": "cases/metric-implicit-multilingual-001/input.lines.txt",
+      "processors": [
+        "extract_metrics"
+      ],
+      "tags": [
+        "implicit-metric",
+        "multilingual",
+        "multiple-units"
+      ]
+    },
+    {
+      "case_id": "metric-no-metric-001",
+      "expected": "cases/metric-no-metric-001/expected.json",
+      "input": "cases/metric-no-metric-001/input.lines.txt",
+      "processors": [
+        "extract_metrics"
+      ],
+      "tags": [
+        "no-metric"
+      ]
+    },
+    {
+      "case_id": "pipeline-unicode-001",
+      "expected": "cases/pipeline-unicode-001/expected.json",
+      "input": "cases/pipeline-unicode-001/input.lines.txt",
+      "processors": [
+        "chunking",
+        "extract_metrics"
+      ],
+      "tags": [
+        "multilingual",
+        "multiple-units",
+        "boundary"
+      ]
+    }
+  ]
+}

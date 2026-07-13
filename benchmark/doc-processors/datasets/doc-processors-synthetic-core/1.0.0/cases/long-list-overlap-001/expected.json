@@ -1,0 +1,32 @@
+{
+  "chunking": {
+    "chunks": [
+      {
+        "normal_lines": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "overlap_lines": [],
+        "sequence": 1
+      }
+    ],
+    "protected_groups": [
+      {
+        "group_id": "list-1",
+        "kind": "non_numeric_list",
+        "lines": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "split_policy": "never"
+      }
+    ]
+  },
+  "schema_version": 1
+}

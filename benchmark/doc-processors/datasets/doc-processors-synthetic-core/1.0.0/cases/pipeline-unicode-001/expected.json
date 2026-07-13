@@ -1,0 +1,38 @@
+{
+  "chunking": {
+    "chunks": [
+      {
+        "normal_lines": [
+          1,
+          2
+        ],
+        "overlap_lines": [],
+        "sequence": 1
+      }
+    ],
+    "protected_groups": []
+  },
+  "extract_metrics": {
+    "metrics": [
+      {
+        "gold_id": "m1",
+        "metric_name": "output",
+        "metric_unit": "kg",
+        "metric_value": "3.50",
+        "source_lines": [
+          1
+        ]
+      },
+      {
+        "gold_id": "m2",
+        "metric_name": "温度",
+        "metric_unit": "°C",
+        "metric_value": "20",
+        "source_lines": [
+          2
+        ]
+      }
+    ]
+  },
+  "schema_version": 1
+}

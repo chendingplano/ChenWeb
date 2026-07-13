@@ -1,0 +1,26 @@
+{
+  "extract_metrics": {
+    "metrics": [
+      {
+        "gold_id": "m1",
+        "is_explicit_metric": false,
+        "metric_name": "增长率",
+        "metric_unit": "percent",
+        "metric_value": "8",
+        "source_lines": [
+          1
+        ]
+      },
+      {
+        "gold_id": "m2",
+        "is_explicit_metric": false,
+        "metric_name": "Satisfaction",
+        "metric_value": "0.80",
+        "source_lines": [
+          2
+        ]
+      }
+    ]
+  },
+  "schema_version": 1
+}

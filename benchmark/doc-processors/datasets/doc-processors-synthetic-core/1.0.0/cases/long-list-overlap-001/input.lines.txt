@@ -1,0 +1,6 @@
+1	Items	-	-	-	-	-
+2	Alpha	-	-	-	-	-
+3	Beta	-	-	-	-	-
+4	Gamma	-	-	-	-	-
+5	Delta	-	-	-	-	-
+6	Epsilon	-	-	-	-	-
