@@ -239,7 +239,18 @@ func makeResolvedConfig(c *ControlService, services map[string]any) ResolvedConf
 		v["services"] = services
 		for name, raw := range services {
 			if cfg, ok := raw.(map[string]any); ok {
+				if name == "chunking" {
+					if n, ok := cfg["chunk_size"].(int); ok {
+						v["chunk_size"] = n
+					}
+					if n, ok := cfg["overlap_percent"].(int); ok {
+						v["chunk_overlap_percent"] = n
+					}
+				}
 				for k, x := range cfg {
+					if strings.Contains(k, "model") {
+						v["model_references"].(map[string]any)[name+"."+k] = x
+					}
 					if strings.Contains(k, "prompt") {
 						if m, ok := x.(map[string]any); ok {
 							if h, ok := m["content_sha256"].(string); ok && h != "" {

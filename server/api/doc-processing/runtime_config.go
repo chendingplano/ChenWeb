@@ -33,11 +33,14 @@ func modelConfig(ref, path, name string, c structureModelConfig) map[string]any 
 // RuntimeConfig returns the effective non-secret chunking settings.
 func (s *FixedSizeChunkingService) RuntimeConfig() map[string]any {
 	return map[string]any{"chunk_size": s.ChunkSize, "overlap_percent": s.OverlapPercent,
-		"model":          modelConfig(s.ModelRef, s.ModelCfgPath, s.ModelName, s.ModelCfg),
-		"summary_model":  modelConfig(s.SummaryModelRef, s.SummaryModelCfgPath, s.SummaryModelName, s.SummaryModelCfg),
-		"prompt":         promptConfig(s.PromptPath, s.PromptRef, s.PromptText),
-		"summary_prompt": promptConfig(s.SummaryPromptPath, s.SummaryPromptRef, s.SummaryPromptText),
-		"concurrency":    map[string]any{"summary_max_tasks": s.GenerateSummaryMaxTasks, "topics_max_tasks": s.ExtractTopicsMaxTasks}}
+		"model":                   modelConfig(s.ModelRef, s.ModelCfgPath, s.ModelName, s.ModelCfg),
+		"summary_model":           modelConfig(s.SummaryModelRef, s.SummaryModelCfgPath, s.SummaryModelName, s.SummaryModelCfg),
+		"translation_model":       map[string]any{"ref": s.TranslationModelRef, "path": s.TranslationModelCfgPath, "name": s.TranslationModelName, "definition_sha256": hashOrEmpty(s.TranslationModelCfgPath)},
+		"topic_embedding_model":   map[string]any{"name": s.TopicEmbeddingModelName},
+		"summary_embedding_model": map[string]any{"name": s.SummaryEmbeddingModelName},
+		"prompt":                  promptConfig(s.PromptPath, s.PromptRef, s.PromptText),
+		"summary_prompt":          promptConfig(s.SummaryPromptPath, s.SummaryPromptRef, s.SummaryPromptText),
+		"concurrency":             map[string]any{"summary_max_tasks": s.GenerateSummaryMaxTasks, "topics_max_tasks": s.ExtractTopicsMaxTasks}}
 }
 
 // RuntimeConfig returns effective metric prompts and model references while
