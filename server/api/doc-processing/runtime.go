@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,9 +38,13 @@ type ResolvedConfigSnapshot struct {
 // value to keep this seam convenient for command and worker callers.
 func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	var logger ApiTypes.JimoLogger
+	var overrides map[string]string
 	for _, arg := range args {
 		if l, ok := arg.(ApiTypes.JimoLogger); ok {
 			logger = l
+		}
+		if m, ok := arg.(map[string]string); ok {
+			overrides = m
 		}
 	}
 	newClient := func() *llmclients.OpenAIJSONClient {
@@ -46,6 +52,9 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	}
 	inputStore := DocMetadataSQLStore{DB: ApiTypes.ProjectDBHandle}
 	fixed := NewFixedSizeChunkingService(SQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger)
+	if err := applyRuntimeOverrides(fixed, overrides); err != nil {
+		return nil, err
+	}
 	phase := []Processor{NewChunkingProcessor(inputStore, fixed, logger), NewGenerateSummariesProcessor(inputStore, fixed, logger), NewGenerateTopicsProcessor(inputStore, fixed, logger)}
 	all := []Processor{
 		NewStaticAnalyzerProcessor(inputStore, newClient(), logger), phase[0], phase[1], phase[2],
@@ -68,6 +77,28 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	}
 	r.config = makeResolvedConfig(control, r.services)
 	return r, nil
+}
+
+func applyRuntimeOverrides(f *FixedSizeChunkingService, o map[string]string) error {
+	for k, v := range o {
+		switch strings.ToUpper(k) {
+		case "CHUNK_SIZE":
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				return fmt.Errorf("invalid CHUNK_SIZE")
+			}
+			f.ChunkSize = n
+		case "CHUNK_OVERLAP_PERCENT":
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				return fmt.Errorf("invalid CHUNK_OVERLAP_PERCENT")
+			}
+			f.OverlapPercent = n
+		default:
+			return fmt.Errorf("unsupported runtime override %q", k)
+		}
+	}
+	return nil
 }
 
 func configuredNames() []string { return viper.GetStringSlice("doc-processing.required_processors") }
@@ -103,6 +134,9 @@ func (r *ProductionRuntime) AllowedOverrides() map[string][]string {
 }
 
 func (r *ProductionRuntime) ResolvedConfig() ResolvedConfigSnapshot {
+	if r == nil || r.Control == nil {
+		return ResolvedConfigSnapshot{}
+	}
 	if r.config.Hash == "" {
 		r.config = makeResolvedConfig(r.Control, r.services)
 	}
@@ -123,6 +157,19 @@ func makeResolvedConfig(c *ControlService, services map[string]any) ResolvedConf
 	v["seed_support"] = false
 	if services != nil {
 		v["services"] = services
+		for name, raw := range services {
+			if cfg, ok := raw.(map[string]any); ok {
+				for k, x := range cfg {
+					if strings.Contains(k, "prompt") {
+						if m, ok := x.(map[string]any); ok {
+							if h, ok := m["content_sha256"].(string); ok && h != "" {
+								v["prompt_hashes"].(map[string]string)[name+"."+k] = h
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 	if c != nil {
 		v["max_doc_process_pipelines"] = c.MaxDocProcessPipelines
