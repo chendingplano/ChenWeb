@@ -74,41 +74,47 @@ func TestScoreChunksMutationsDetectOnlyRelevantQualitySignals(t *testing.T) {
 		check  func(*testing.T, ChunkScore)
 	}{
 		{"shift boundary", func(in *ChunkScoreInput) {
-			in.ActualChunks = []ScoredChunk{{Sequence: 1, NormalLines: []int{10}}, {Sequence: 2, OverlapLines: []int{10}, NormalLines: []int{30, 40}}}
+			in.ResolvedChunkSize = 50
+			in.ExpectedChunks[1].OverlapLines = nil
+			in.ActualChunks = []ScoredChunk{{Sequence: 1, NormalLines: []int{10}}, {Sequence: 2, NormalLines: []int{30, 40}}}
 		}, func(t *testing.T, s ChunkScore) {
-			if value(s.BoundaryF1) == 1 || value(s.OverlapF1) == 1 || value(s.NormalCoverage) != 1 || value(s.DuplicateRate) != 0 || value(s.ExtraRate) != 0 {
+			if value(s.BoundaryF1) == 1 || value(s.ExactSequenceMatch) != 0 || value(s.OverlapF1) != 1 || value(s.NormalCoverage) != 1 || value(s.DuplicateRate) != 0 || value(s.ExtraRate) != 0 || s.HardViolationCount != 0 {
 				t.Fatalf("wrong shifted scores: %#v", s)
 			}
 		}},
-		{"remove", func(in *ChunkScoreInput) { in.ActualChunks[0].NormalLines = []int{10} }, func(t *testing.T, s ChunkScore) {
-			if value(s.MissingRate) <= 0 || s.RuleCounts[RuleEligibleExactlyOnce] == 0 || value(s.ExtraRate) != 0 || value(s.DuplicateRate) != 0 || value(s.OverlapF1) != 1 {
+		{"remove", func(in *ChunkScoreInput) { in.ActualChunks[1].NormalLines = nil }, func(t *testing.T, s ChunkScore) {
+			if value(s.MissingRate) <= 0 || s.RuleCounts[RuleEligibleExactlyOnce] == 0 || value(s.ExtraRate) != 0 || value(s.DuplicateRate) != 0 || value(s.OverlapF1) != 1 || value(s.BoundaryF1) != 1 || s.RuleCounts[RuleMinimumPayloadBytes] != 0 || s.RuleCounts[RuleOverlapPreviousChunk] != 0 || s.HardViolationCount != s.RuleCounts[RuleEligibleExactlyOnce] {
 				t.Fatalf("wrong missing scores: %#v", s)
 			}
 		}},
 		{"add ineligible", func(in *ChunkScoreInput) {
 			in.ActualChunks[0].NormalLines = append(in.ActualChunks[0].NormalLines, 999)
 		}, func(t *testing.T, s ChunkScore) {
-			if value(s.ExtraRate) <= 0 || s.RuleCounts[RuleIneligibleNormal] == 0 || value(s.NormalCoverage) != 1 || value(s.BoundaryF1) != 1 || value(s.OverlapF1) != 1 {
+			if value(s.ExtraRate) <= 0 || s.RuleCounts[RuleIneligibleNormal] == 0 || value(s.NormalCoverage) != 1 || value(s.BoundaryF1) != 1 || value(s.OverlapF1) != 1 || s.HardViolationCount != s.RuleCounts[RuleIneligibleNormal] {
 				t.Fatalf("wrong extra scores: %#v", s)
 			}
 		}},
 		{"duplicate", func(in *ChunkScoreInput) { in.ActualChunks[1].NormalLines = append(in.ActualChunks[1].NormalLines, 40) }, func(t *testing.T, s ChunkScore) {
-			if value(s.DuplicateRate) <= 0 || s.RuleCounts[RuleEligibleExactlyOnce] == 0 || value(s.ReorderedRate) != 0 || value(s.BoundaryF1) != 1 || value(s.OverlapF1) != 1 {
+			if value(s.DuplicateRate) <= 0 || s.RuleCounts[RuleEligibleExactlyOnce] == 0 || value(s.ReorderedRate) != 0 || value(s.BoundaryF1) != 1 || value(s.OverlapF1) != 1 || s.HardViolationCount != s.RuleCounts[RuleEligibleExactlyOnce] {
 				t.Fatalf("wrong duplicate scores: %#v", s)
 			}
 		}},
 		{"reorder", func(in *ChunkScoreInput) { in.ActualChunks[0].NormalLines = []int{30, 10} }, func(t *testing.T, s ChunkScore) {
-			if value(s.ReorderedRate) <= 0 || s.RuleCounts[RuleSourceOrder] == 0 || value(s.BoundaryF1) != 1 || value(s.ExactSequenceMatch) != 1 || value(s.NormalCoverage) != 1 || value(s.OverlapF1) != 1 {
+			if value(s.ReorderedRate) <= 0 || s.RuleCounts[RuleSourceOrder] == 0 || value(s.BoundaryF1) != 1 || value(s.ExactSequenceMatch) != 1 || value(s.NormalCoverage) != 1 || value(s.OverlapF1) != 1 || s.HardViolationCount != s.RuleCounts[RuleSourceOrder] {
 				t.Fatalf("wrong reorder scores: %#v", s)
 			}
 		}},
 		{"corrupt overlap", func(in *ChunkScoreInput) { in.ActualChunks[1].OverlapLines = []int{10} }, func(t *testing.T, s ChunkScore) {
-			if value(s.OverlapF1) == 1 || value(s.NormalCoverage) != 1 || value(s.BoundaryF1) != 1 || value(s.DuplicateRate) != 0 || value(s.ReorderedRate) != 0 {
+			if value(s.OverlapF1) == 1 || value(s.NormalCoverage) != 1 || value(s.BoundaryF1) != 1 || value(s.DuplicateRate) != 0 || value(s.ReorderedRate) != 0 || s.HardViolationCount != 0 {
 				t.Fatalf("wrong overlap scores: %#v", s)
 			}
 		}},
-		{"sequence gap", func(in *ChunkScoreInput) { in.ActualChunks[1].Sequence = 3 }, func(t *testing.T, s ChunkScore) {
-			if s.RuleCounts[RuleChunkSequence] == 0 || value(s.NormalCoverage) != 1 || value(s.BoundaryF1) != 1 || value(s.DuplicateRate) != 0 || value(s.ReorderedRate) != 0 {
+		{"sequence gap", func(in *ChunkScoreInput) {
+			in.ExpectedChunks[1].OverlapLines = nil
+			in.ActualChunks[1].OverlapLines = nil
+			in.ActualChunks[1].Sequence = 3
+		}, func(t *testing.T, s ChunkScore) {
+			if s.RuleCounts[RuleChunkSequence] == 0 || value(s.NormalCoverage) != 1 || value(s.BoundaryF1) != 1 || value(s.DuplicateRate) != 0 || value(s.ReorderedRate) != 0 || value(s.OverlapF1) != 1 || s.HardViolationCount != s.RuleCounts[RuleChunkSequence] {
 				t.Fatalf("wrong gap scores: %#v", s)
 			}
 		}},
@@ -116,11 +122,29 @@ func TestScoreChunksMutationsDetectOnlyRelevantQualitySignals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			in := base
+			in.ExpectedChunks = cloneExpectedChunks(base.ExpectedChunks)
 			in.ActualChunks = cloneChunks(base.ActualChunks)
 			tt.mutate(&in)
 			tt.check(t, ScoreChunks(in))
 		})
 	}
+}
+
+func TestScoreChunksZeroDenominatorRates(t *testing.T) {
+	actualEmpty := ScoreChunks(ChunkScoreInput{
+		SourceLines:    []docprocessing.Line{{LineNo: 1, LineType: "paragraph"}},
+		ExpectedChunks: []ExpectedChunk{{Sequence: 1, NormalLines: []int{1}}},
+	})
+	assertMetric(t, "empty actual extra", actualEmpty.ExtraRate, 0, 0, 0)
+	assertMetric(t, "empty actual duplicate", actualEmpty.DuplicateRate, 0, 0, 0)
+	assertMetric(t, "empty actual reordered", actualEmpty.ReorderedRate, 0, 0, 0)
+
+	noEligibleAssignment := ScoreChunks(ChunkScoreInput{
+		SourceLines:  []docprocessing.Line{{LineNo: 5, LineType: "toc"}},
+		ActualChunks: []ScoredChunk{{Sequence: 1, NormalLines: []int{5}}},
+	})
+	assertMetric(t, "zero eligible denominator duplicate", noEligibleAssignment.DuplicateRate, 0, 0, 0)
+	assertMetric(t, "fewer than two assignments reordered", noEligibleAssignment.ReorderedRate, 0, 0, 0)
 }
 
 func TestScoreChunksEmptySetRules(t *testing.T) {
@@ -190,6 +214,29 @@ func TestScoreChunksOverlapOwnershipMinimumBytesAndFixedCap(t *testing.T) {
 	}
 }
 
+func TestScoreChunksOneLineOverlapMayExceedSafetyCap(t *testing.T) {
+	line := docprocessing.Line{LineNo: 1, PageNo: 1, LineType: "paragraph", Content: "this single overlap line is deliberately much larger than the cap"}
+	in := ChunkScoreInput{
+		SourceLines: []docprocessing.Line{line, {LineNo: 2, PageNo: 1, LineType: "paragraph", Content: "final"}},
+		ExpectedChunks: []ExpectedChunk{
+			{Sequence: 1, NormalLines: []int{1}},
+			{Sequence: 2, OverlapLines: []int{1}, NormalLines: []int{2}},
+		},
+		ActualChunks: []ScoredChunk{
+			{Sequence: 1, NormalLines: []int{1}},
+			{Sequence: 2, OverlapLines: []int{1}, NormalLines: []int{2}},
+		},
+		ResolvedChunkSize: 50,
+	}
+	if bytes := docprocessing.ChunkLineRawByteSize(line); bytes <= in.ResolvedChunkSize*20/100 {
+		t.Fatalf("test setup: line bytes %d do not exceed cap", bytes)
+	}
+	s := ScoreChunks(in)
+	if s.RuleCounts[RuleOverlapSafetyCap] != 0 || value(s.ExactCasePass) != 1 {
+		t.Fatalf("one-line overlap exception rejected: %#v", s)
+	}
+}
+
 func TestScoreChunksAdjacentDuplicateIsNotReordering(t *testing.T) {
 	in := scoreFixture()
 	in.ActualChunks[0].NormalLines = []int{10, 30, 30}
@@ -210,6 +257,7 @@ func TestScoreChunksProtectedPolicySeesDuplicateCrossChunkAssignment(t *testing.
 
 func TestScoreChunksProtectedListSplitMutation(t *testing.T) {
 	in := scoreFixture()
+	in.ResolvedChunkSize = 50
 	in.ExpectedChunks[1].OverlapLines = nil
 	in.ActualChunks[1].OverlapLines = nil
 	in.ProtectedGroups = []ProtectedGroup{{GroupID: "long-list", Kind: "list", SplitPolicy: "never", Lines: []int{10, 30}}}
@@ -219,11 +267,16 @@ func TestScoreChunksProtectedListSplitMutation(t *testing.T) {
 	in.ActualChunks[0].NormalLines = []int{10}
 	in.ActualChunks[1].NormalLines = []int{30, 40}
 	s := ScoreChunks(in)
-	if s.RuleCounts[RuleProtectedNever] != 1 || value(s.BoundaryF1) == 1 {
+	if s.RuleCounts[RuleProtectedNever] != 1 || value(s.BoundaryF1) == 1 || s.HardViolationCount != 1 {
 		t.Fatalf("true protected-list split not detected: %#v", s)
 	}
 	if value(s.NormalCoverage) != 1 || value(s.MissingRate) != 0 || value(s.ExtraRate) != 0 || value(s.DuplicateRate) != 0 || value(s.ReorderedRate) != 0 || value(s.OverlapF1) != 1 {
 		t.Fatalf("protected-list mutation changed unrelated metrics: %#v", s)
+	}
+	for _, ruleID := range []string{RuleMinimumPayloadBytes, RuleEligibleExactlyOnce, RuleIneligibleNormal, RuleSourceOrder, RuleOverlapFirstChunk, RuleOverlapPreviousChunk, RuleOverlapSafetyCap} {
+		if s.RuleCounts[ruleID] != 0 {
+			t.Fatalf("protected-list mutation also triggered %s: %#v", ruleID, s)
+		}
 	}
 }
 
@@ -281,6 +334,14 @@ func cloneChunks(in []ScoredChunk) []ScoredChunk {
 	out := make([]ScoredChunk, len(in))
 	for i, c := range in {
 		out[i] = ScoredChunk{Sequence: c.Sequence, NormalLines: append([]int(nil), c.NormalLines...), OverlapLines: append([]int(nil), c.OverlapLines...)}
+	}
+	return out
+}
+
+func cloneExpectedChunks(in []ExpectedChunk) []ExpectedChunk {
+	out := make([]ExpectedChunk, len(in))
+	for i, c := range in {
+		out[i] = ExpectedChunk{Sequence: c.Sequence, NormalLines: append([]int(nil), c.NormalLines...), OverlapLines: append([]int(nil), c.OverlapLines...)}
 	}
 	return out
 }
