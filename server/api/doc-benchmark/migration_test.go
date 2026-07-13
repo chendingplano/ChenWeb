@@ -139,6 +139,14 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	if _, err = db.Exec(`DELETE FROM kb.benchmark_scores WHERE attempt_id=$1`, at); err == nil {
 		t.Fatal("selected score delete accepted")
 	}
+	prod := map[string]bool{}
+	for _, tbl := range []string{"inputs", "chunks", "metrics", "doc_proc_logs", "logs", "objects"} {
+		var v sql.NullString
+		if err = db.QueryRow(`SELECT to_regclass('kb.'||$1)`, tbl).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		prod[tbl] = v.Valid
+	}
 	if err = goose.Down(db, dir); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +161,14 @@ func TestBenchmarkMigrationIntegration(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatal("down migration removed production kb.inputs")
+	}
+	for tbl, existed := range prod {
+		if existed {
+			var v sql.NullString
+			if err = db.QueryRow(`SELECT to_regclass('kb.'||$1)`, tbl).Scan(&v); err != nil || !v.Valid {
+				t.Fatalf("down removed production %s", tbl)
+			}
+		}
 	}
 	for _, tbl := range []string{"metrics", "logs", "objects"} {
 		var exists sql.NullString
