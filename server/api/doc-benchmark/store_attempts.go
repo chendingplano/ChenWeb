@@ -120,9 +120,16 @@ func (s SQLStore) FinishAttempt(ctx context.Context, id, owner, lifecycle, failu
 	return nil
 }
 func (s SQLStore) SelectAttempt(ctx context.Context, caseRunID, attemptID string) error {
-	res, e := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_runs SET selected_attempt_id=$2,lifecycle=(SELECT CASE WHEN lifecycle='succeeded' THEN 'success' ELSE lifecycle END FROM kb.benchmark_case_attempts WHERE id=$2) WHERE id=$1 AND selected_attempt_id IS NULL`, caseRunID, attemptID)
+	res, e := s.DB.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_runs SET selected_attempt_id=$2,lifecycle=(SELECT CASE WHEN lifecycle='succeeded' THEN 'success' WHEN lifecycle='failed' THEN CASE failure_kind WHEN 'processor_failed' THEN 'processor_failed' WHEN 'timed_out' THEN 'timed_out' WHEN 'invalid_output' THEN 'invalid_output' WHEN 'scorer_failed' THEN 'scorer_failed' WHEN 'canceled' THEN 'canceled' ELSE 'infrastructure_failed' END ELSE lifecycle END FROM kb.benchmark_case_attempts WHERE id=$2 AND case_run_id=$1 AND lifecycle IN ('succeeded','failed','cancelled')) WHERE id=$1 AND selected_attempt_id IS NULL AND EXISTS (SELECT 1 FROM kb.benchmark_case_attempts WHERE id=$2 AND case_run_id=$1 AND lifecycle IN ('succeeded','failed','cancelled'))`, caseRunID, attemptID)
 	if e != nil {
 		return e
 	}
-	return affected(res)
+	if err := affected(res); err != nil {
+		var cur sql.NullString
+		if s.DB.QueryRowContext(txctx(ctx), `SELECT selected_attempt_id FROM kb.benchmark_case_runs WHERE id=$1`, caseRunID).Scan(&cur) == nil && cur.Valid && cur.String == attemptID {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
