@@ -97,7 +97,8 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 				if x.Metric != k.m || x.Component != k.c {
 					continue
 				}
-				switch r.AggregationKind {
+				kind := canonicalAggregationKind(r.AggregationKind)
+				switch kind {
 				case "count_derived_micro":
 					tp += x.TP
 					fp += x.FP
@@ -132,7 +133,8 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		a.CasesWithAny = any
 		a.Count = len(vals)
 		a.Sum = sum
-		switch r.AggregationKind {
+		kind := canonicalAggregationKind(r.AggregationKind)
+		switch kind {
 		case "count_derived_micro":
 			a.Numerator = tp
 			a.Denominator = fp + tp
@@ -156,7 +158,7 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		default:
 			setDistribution(&a, vals)
 		}
-		if r.AggregationKind == "binary_rate_macro" || r.AggregationKind == "rate_macro" {
+		if kind == "binary_rate_macro" {
 			a.Denominator = len(vals)
 			for _, v := range vals {
 				if v == 1 {
@@ -167,6 +169,19 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+func canonicalAggregationKind(kind string) string {
+	switch kind {
+	case "binary_macro", "rate_macro", "binary_rate":
+		return "binary_rate_macro"
+	case "raw_failure_count", "rule_count", "raw_counts":
+		return "raw_count"
+	case "latency", "tokens", "cache_hit", "cache_miss", "cost", "operational_measure":
+		return "operational"
+	default:
+		return kind
+	}
 }
 func microValue(metric string, tp, fp, fn int) *float64 {
 	den := tp + fp
