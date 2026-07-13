@@ -1,0 +1,46 @@
+-- +goose Up
+CREATE SCHEMA IF NOT EXISTS kb;
+CREATE TABLE kb.benchmark_experiments (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL, dataset_id text NOT NULL, dataset_version text NOT NULL, dataset_hash text NOT NULL, raw_request_toml text NOT NULL, raw_request_hash text NOT NULL, resolved_experiment_json jsonb NOT NULL, resolved_file_hashes_json jsonb NOT NULL, resolved_case_set_json jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT uq_benchmark_experiments_request_hash UNIQUE(raw_request_hash));
+CREATE TABLE kb.benchmark_runs (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), experiment_id uuid NOT NULL REFERENCES kb.benchmark_experiments(id) ON DELETE CASCADE, variant_name text NOT NULL, lifecycle text NOT NULL DEFAULT 'queued' CHECK (lifecycle IN ('queued','running','succeeded','failed','cancelled')), requested_json jsonb NOT NULL DEFAULT '{}', resolved_json jsonb NOT NULL DEFAULT '{}', config_json jsonb NOT NULL DEFAULT '{}', prompt_json jsonb NOT NULL DEFAULT '{}', scorer_json jsonb NOT NULL DEFAULT '{}', pricing_json jsonb NOT NULL DEFAULT '{}', requested_hash text, resolved_hash text, config_hash text, prompt_hash text, scorer_hash text, pricing_hash text, git_commit text, jj_change text, executable text, executable_hash text, dirty boolean NOT NULL DEFAULT false, concurrency integer, usage_json jsonb NOT NULL DEFAULT '{}', runtime_json jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), started_at timestamptz, finished_at timestamptz, CONSTRAINT uq_benchmark_runs_variant UNIQUE(experiment_id,variant_name));
+CREATE TABLE kb.benchmark_case_runs (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), run_id uuid NOT NULL REFERENCES kb.benchmark_runs(id) ON DELETE CASCADE, case_id text NOT NULL, repetition integer NOT NULL CHECK(repetition > 0), applicability text NOT NULL DEFAULT 'applicable' CHECK(applicability IN ('applicable','inapplicable','skipped')), tags_json jsonb NOT NULL DEFAULT '{}', upstream_hash text, lifecycle text NOT NULL DEFAULT 'queued' CHECK(lifecycle IN ('queued','running','succeeded','failed','cancelled')), selected_attempt_id uuid, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT uq_benchmark_case_runs UNIQUE(run_id,case_id,repetition));
+CREATE TABLE kb.benchmark_case_attempts (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), case_run_id uuid NOT NULL REFERENCES kb.benchmark_case_runs(id) ON DELETE CASCADE, attempt_number integer NOT NULL CHECK(attempt_number > 0), kind text NOT NULL CHECK(kind IN ('execution','rescore')), source_execution_attempt_id uuid, input_record_id_snapshot bigint, lifecycle text NOT NULL DEFAULT 'queued' CHECK(lifecycle IN ('queued','leased','running','succeeded','failed','cancelled')), failure_kind text, lease_owner text, lease_expires_at timestamptz, heartbeat_at timestamptz, started_at timestamptz, finished_at timestamptz, runtime_ms bigint, telemetry_json jsonb NOT NULL DEFAULT '{}', provider text, model text, capture_verified boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT uq_benchmark_case_attempts UNIQUE(case_run_id,attempt_number), CONSTRAINT uq_benchmark_case_attempt_owner UNIQUE(id,case_run_id), CONSTRAINT ck_rescore_source CHECK((kind='execution' AND source_execution_attempt_id IS NULL) OR (kind='rescore' AND source_execution_attempt_id IS NOT NULL)), CONSTRAINT ck_failure_kind CHECK((lifecycle NOT IN ('failed') AND failure_kind IS NULL) OR lifecycle='failed'));
+ALTER TABLE kb.benchmark_case_runs ADD CONSTRAINT fk_case_runs_selected_attempt FOREIGN KEY(selected_attempt_id,id) REFERENCES kb.benchmark_case_attempts(id,case_run_id) DEFERRABLE INITIALLY DEFERRED;
+CREATE TABLE kb.benchmark_workspaces (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), execution_attempt_id uuid NOT NULL UNIQUE REFERENCES kb.benchmark_case_attempts(id) ON DELETE CASCADE, input_record_id bigint UNIQUE REFERENCES kb.inputs(id) ON DELETE SET NULL, canonical_dir text NOT NULL, nonce text NOT NULL, cleanup_state text NOT NULL DEFAULT 'pending' CHECK(cleanup_state IN ('pending','cleaned','failed')), cleanup_error text, created_at timestamptz NOT NULL DEFAULT now(), cleaned_at timestamptz);
+CREATE TABLE kb.benchmark_scores (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), attempt_id uuid REFERENCES kb.benchmark_case_attempts(id) ON DELETE CASCADE, run_id uuid REFERENCES kb.benchmark_runs(id) ON DELETE CASCADE, processor text NOT NULL, scorer text NOT NULL, scorer_version text NOT NULL, metric text NOT NULL, slice text NOT NULL DEFAULT 'all', direction text NOT NULL CHECK(direction IN ('higher','lower')), aggregation_kind text NOT NULL, value numeric, additive_component numeric, numerator numeric, denominator numeric, non_null boolean NOT NULL DEFAULT false, applicable boolean NOT NULL DEFAULT true, metadata_json jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT ck_score_owner_xor CHECK((attempt_id IS NOT NULL) <> (run_id IS NOT NULL)));
+CREATE UNIQUE INDEX uq_benchmark_scores_owner_metric ON kb.benchmark_scores (COALESCE(attempt_id,run_id), (attempt_id IS NULL), metric, slice, aggregation_kind);
+CREATE TABLE kb.benchmark_artifacts (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), attempt_id uuid REFERENCES kb.benchmark_case_attempts(id) ON DELETE CASCADE, run_id uuid REFERENCES kb.benchmark_runs(id) ON DELETE CASCADE, kind text NOT NULL, path text NOT NULL, sha256 text NOT NULL, size_bytes bigint NOT NULL CHECK(size_bytes >= 0), verified boolean NOT NULL DEFAULT false, metadata_json jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT ck_artifact_owner_xor CHECK((attempt_id IS NOT NULL) <> (run_id IS NOT NULL)));
+CREATE UNIQUE INDEX uq_benchmark_artifacts_owner_kind_path ON kb.benchmark_artifacts (COALESCE(attempt_id,run_id),(attempt_id IS NULL),kind,path);
+
+CREATE OR REPLACE FUNCTION kb.benchmark_terminal_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.lifecycle IN ('succeeded','failed','cancelled') AND (NEW IS DISTINCT FROM OLD) THEN RAISE EXCEPTION 'terminal benchmark row is immutable'; END IF; RETURN NEW; END $$;
+CREATE TRIGGER trg_benchmark_attempt_terminal BEFORE UPDATE ON kb.benchmark_case_attempts FOR EACH ROW EXECUTE FUNCTION kb.benchmark_terminal_guard();
+CREATE TRIGGER trg_benchmark_run_terminal BEFORE UPDATE ON kb.benchmark_runs FOR EACH ROW EXECUTE FUNCTION kb.benchmark_terminal_guard();
+CREATE TRIGGER trg_benchmark_case_run_terminal BEFORE UPDATE ON kb.benchmark_case_runs FOR EACH ROW EXECUTE FUNCTION kb.benchmark_terminal_guard();
+CREATE OR REPLACE FUNCTION kb.benchmark_score_guard() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE l text; BEGIN IF OLD.attempt_id IS NOT NULL THEN SELECT lifecycle INTO l FROM kb.benchmark_case_attempts WHERE id=OLD.attempt_id; ELSE SELECT lifecycle INTO l FROM kb.benchmark_runs WHERE id=OLD.run_id; END IF; IF l IN ('succeeded','failed','cancelled') THEN RAISE EXCEPTION 'scores immutable after terminal owner'; END IF; IF TG_OP='DELETE' THEN RETURN OLD; END IF; RETURN NEW; END $$;
+CREATE TRIGGER trg_benchmark_scores_guard BEFORE UPDATE OR DELETE ON kb.benchmark_scores FOR EACH ROW EXECUTE FUNCTION kb.benchmark_score_guard();
+CREATE OR REPLACE FUNCTION kb.benchmark_artifact_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.verified THEN RAISE EXCEPTION 'verified artifact immutable'; END IF; RETURN COALESCE(NEW,OLD); END $$;
+CREATE TRIGGER trg_benchmark_artifacts_guard BEFORE UPDATE OR DELETE ON kb.benchmark_artifacts FOR EACH ROW EXECUTE FUNCTION kb.benchmark_artifact_guard();
+CREATE INDEX idx_benchmark_case_runs_selected ON kb.benchmark_case_runs(selected_attempt_id);
+CREATE INDEX idx_benchmark_attempts_lifecycle_lease ON kb.benchmark_case_attempts(lifecycle,lease_expires_at);
+CREATE INDEX idx_benchmark_attempts_diagnostics ON kb.benchmark_case_attempts(failure_kind,provider,model);
+CREATE INDEX idx_benchmark_runs_comparisons ON kb.benchmark_runs(experiment_id,lifecycle,variant_name);
+CREATE INDEX idx_benchmark_workspaces_cleanup ON kb.benchmark_workspaces(cleanup_state,cleaned_at);
+CREATE INDEX idx_benchmark_scores_attempt ON kb.benchmark_scores(attempt_id);
+CREATE INDEX idx_benchmark_scores_run ON kb.benchmark_scores(run_id);
+CREATE INDEX idx_benchmark_artifacts_attempt ON kb.benchmark_artifacts(attempt_id);
+CREATE INDEX idx_benchmark_artifacts_run ON kb.benchmark_artifacts(run_id);
+
+-- +goose Down
+DROP TRIGGER IF EXISTS trg_benchmark_artifacts_guard ON kb.benchmark_artifacts;
+DROP TRIGGER IF EXISTS trg_benchmark_scores_guard ON kb.benchmark_scores;
+DROP TRIGGER IF EXISTS trg_benchmark_case_run_terminal ON kb.benchmark_case_runs;
+DROP TRIGGER IF EXISTS trg_benchmark_attempt_terminal ON kb.benchmark_case_attempts;
+DROP TRIGGER IF EXISTS trg_benchmark_run_terminal ON kb.benchmark_runs;
+DROP FUNCTION IF EXISTS kb.benchmark_artifact_guard(); DROP FUNCTION IF EXISTS kb.benchmark_score_guard(); DROP FUNCTION IF EXISTS kb.benchmark_terminal_guard();
+DROP TABLE IF EXISTS kb.benchmark_artifacts, kb.benchmark_scores, kb.benchmark_workspaces, kb.benchmark_case_attempts, kb.benchmark_case_runs, kb.benchmark_runs, kb.benchmark_experiments CASCADE;
