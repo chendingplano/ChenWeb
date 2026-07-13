@@ -128,6 +128,49 @@ func TestCaptureFailurePointsLeaveRetryableEvidence(t *testing.T) {
 	}
 }
 
+func TestRestartDiscardUnverifiedRemovesPersistedArtifactAndPartial(t *testing.T) {
+	d := t.TempDir()
+	st := &testOwnershipStore{}
+	cfg := testConfig(d, st)
+	a, err := AllocateWorkspace(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.CaptureWithOptions(strings.NewReader("payload"), "result.json", CaptureOptions{Failure: FailAfterRename}); err == nil {
+		t.Fatal("expected interrupted capture")
+	}
+	partial := filepath.Join(a.EvidencePath, "."+cfg.AttemptID+".result.json.partial")
+	if err = os.WriteFile(partial, []byte("partial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(a.EvidencePath, "other.json")
+	if err = os.WriteFile(other, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh allocation object models a process restart; it must recover the
+	// marker's artifact name so discard can remove both exact paths.
+	a2, err := AllocateWorkspace(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a2.Marker.ArtifactName != "result.json" || a2.lastArtifact != "result.json" {
+		t.Fatalf("persisted artifact not restored: marker=%q last=%q", a2.Marker.ArtifactName, a2.lastArtifact)
+	}
+	if err = a2.Cleanup(CleanupOptions{DiscardUnverified: true, Cleanup: func(CleanupTx) error { return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(filepath.Join(a2.EvidencePath, "result.json")); !os.IsNotExist(err) {
+		t.Fatalf("final evidence remains: %v", err)
+	}
+	if _, err = os.Stat(partial); !os.IsNotExist(err) {
+		t.Fatalf("partial evidence remains: %v", err)
+	}
+	if _, err = os.Stat(other); err != nil {
+		t.Fatalf("unrelated evidence removed: %v", err)
+	}
+}
+
 func TestCleanupPersistsPendingAndRejectsVerifiedDiscard(t *testing.T) {
 	d := t.TempDir()
 	st := &testOwnershipStore{}

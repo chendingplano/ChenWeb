@@ -248,6 +248,7 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 	if wr == er || strictDesc(wr, er) || strictDesc(er, wr) {
 		return nil, fmt.Errorf("%w: roots overlap", ErrUnsafePath)
 	}
+	providedNonce := c.Nonce != ""
 	nonce := c.Nonce
 	if nonce == "" {
 		b := make([]byte, 16)
@@ -272,21 +273,42 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 	}
 	m := AllocationMarker{AttemptID: c.AttemptID, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, Workspace: wp, EvidencePath: ep, CreatedAt: time.Now().UTC(), WorkIdentity: rootIdentity(wr), EvidenceIdentity: rootIdentity(er)}
 	mp := filepath.Join(wp, ".allocation.json")
-	f, err := os.OpenFile(mp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
+	created := false
+	if b, err := os.ReadFile(mp); err == nil {
+		if err := json.Unmarshal(b, &m); err != nil {
+			return nil, err
+		}
+		// Reuse the durable allocation after a process restart. The marker is
+		// authoritative for the nonce and in-flight artifact name.
+		if m.AttemptID != c.AttemptID || m.Nonce == "" || (providedNonce && c.Nonce != m.Nonce) || m.WorkRoot != wr || m.EvidenceRoot != er || m.Workspace != wp || m.EvidencePath != ep {
+			return nil, ErrUnsafePath
+		}
+		if m.WorkIdentity != "" && (m.WorkIdentity != rootIdentity(wr) || m.EvidenceIdentity != rootIdentity(er)) {
+			return nil, ErrUnsafePath
+		}
+		c.Nonce = m.Nonce
+	} else if errors.Is(err, os.ErrNotExist) {
+		f, err := os.OpenFile(mp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return nil, err
+		}
+		b, _ := json.Marshal(m)
+		if _, err = f.Write(b); err == nil {
+			err = f.Sync()
+		}
+		f.Close()
+		if err != nil {
+			return nil, err
+		}
+		created = true
+	} else {
 		return nil, err
 	}
-	b, _ := json.Marshal(m)
-	if _, err = f.Write(b); err == nil {
-		err = f.Sync()
-	}
-	f.Close()
-	if err != nil {
-		return nil, err
-	}
-	o := &WorkspaceAllocation{Config: c, WorkPath: wp, EvidencePath: ep, MarkerPath: mp, Marker: m}
-	if err := c.Store.SaveOwnership(Ownership{AttemptID: c.AttemptID, Workspace: wp, EvidencePath: ep, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, CleanupState: "active"}); err != nil {
-		return nil, err
+	o := &WorkspaceAllocation{Config: c, WorkPath: wp, EvidencePath: ep, MarkerPath: mp, Marker: m, lastArtifact: m.ArtifactName}
+	if created {
+		if err := c.Store.SaveOwnership(Ownership{AttemptID: c.AttemptID, Workspace: wp, EvidencePath: ep, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, CleanupState: "active"}); err != nil {
+			return nil, err
+		}
 	}
 	return o, nil
 }
