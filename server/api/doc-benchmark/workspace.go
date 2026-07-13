@@ -36,6 +36,7 @@ type AllocationMarker struct {
 	CreatedAt        time.Time `json:"created_at"`
 	WorkIdentity     string    `json:"work_identity"`
 	EvidenceIdentity string    `json:"evidence_identity"`
+	ArtifactName     string    `json:"artifact_name,omitempty"`
 }
 type WorkspaceAllocation struct {
 	Config                             WorkspaceConfig
@@ -249,6 +250,10 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 		return Artifact{}, fmt.Errorf("%w: artifact name", ErrUnsafePath)
 	}
 	a.lastArtifact = name
+	a.Marker.ArtifactName = name
+	if mb, me := json.Marshal(a.Marker); me == nil {
+		_ = os.WriteFile(a.MarkerPath, mb, 0600)
+	}
 	if err := a.validate(); err != nil {
 		return Artifact{}, err
 	}
