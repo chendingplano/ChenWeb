@@ -246,6 +246,33 @@ func TestScoreChunksAdjacentDuplicateIsNotReordering(t *testing.T) {
 	}
 }
 
+func TestScoreChunksSourceOrderTracksAcrossIneligibleAssignments(t *testing.T) {
+	in := ChunkScoreInput{
+		SourceLines: []docprocessing.Line{
+			{LineNo: 10, LineType: "paragraph"},
+			{LineNo: 30, LineType: "paragraph"},
+			{LineNo: 40, LineType: "paragraph"},
+		},
+		ExpectedChunks: []ExpectedChunk{{Sequence: 1, NormalLines: []int{10, 30, 40}}},
+		ActualChunks:   []ScoredChunk{{Sequence: 1, NormalLines: []int{30, 999, 10, 40}}},
+		ArtifactHashes: map[string]string{"actual": "actual-hash", "expected": "expected-hash"},
+	}
+	s := ScoreChunks(in)
+	if s.RuleCounts[RuleIneligibleNormal] != 1 || s.RuleCounts[RuleSourceOrder] != 1 {
+		t.Fatalf("hard rules = %#v, want one ineligible and one source-order violation", s.RuleCounts)
+	}
+	if value(s.ReorderedRate) != 0 || s.ReorderedRate.Numerator != 0 || s.ReorderedRate.Denominator != 3 {
+		t.Fatalf("adjacent reordered rate conflated with eligible-subsequence invariant: %#v", s.ReorderedRate)
+	}
+	if len(s.Diagnostics) != 1 || !reflect.DeepEqual(s.Diagnostics[0].ReorderedPairs, [][2]int{{30, 10}}) ||
+		!containsString(s.Diagnostics[0].RuleIDs, RuleSourceOrder) {
+		t.Fatalf("deterministic source-order diagnostic missing: %#v", s.Diagnostics)
+	}
+	if !reflect.DeepEqual(s, ScoreChunks(in)) {
+		t.Fatal("source-order scoring is not deterministic")
+	}
+}
+
 func TestScoreChunksProtectedPolicySeesDuplicateCrossChunkAssignment(t *testing.T) {
 	in := scoreFixture()
 	in.ProtectedGroups = []ProtectedGroup{{GroupID: "list", SplitPolicy: "never", Lines: []int{10, 30}}}

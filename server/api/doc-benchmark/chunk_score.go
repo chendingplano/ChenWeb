@@ -27,11 +27,14 @@ type ScoredChunk struct {
 }
 
 type ChunkScoreInput struct {
-	SourceLines           []docprocessing.Line
-	ExpectedChunks        []ExpectedChunk
-	ProtectedGroups       []ProtectedGroup
-	ActualChunks          []ScoredChunk
-	ResolvedChunkSize     int
+	SourceLines       []docprocessing.Line
+	ExpectedChunks    []ExpectedChunk
+	ProtectedGroups   []ProtectedGroup
+	ActualChunks      []ScoredChunk
+	ResolvedChunkSize int
+	// DesiredOverlapPercent records resolved run provenance. Scoring deliberately
+	// does not use it for the fixed production safety cap, which is always 20% of
+	// ResolvedChunkSize with the one-line exception.
 	DesiredOverlapPercent int
 	ArtifactHashes        map[string]string
 }
@@ -154,16 +157,31 @@ func ScoreChunks(in ChunkScoreInput) ChunkScore {
 	s.ExtraRate = ratioMetric(len(extra), len(actualNormal))
 	s.DuplicateRate = ratioMetric(excess, eligibleAssignments)
 
-	reordered := make([][2]int, 0)
+	adjacentReordered := make([][2]int, 0)
 	for i := 1; i < len(actualNormal); i++ {
 		left, lok := sourcePos[actualNormal[i-1]]
 		right, rok := sourcePos[actualNormal[i]]
 		if lok && rok && left > right {
-			reordered = append(reordered, [2]int{actualNormal[i-1], actualNormal[i]})
-			s.RuleCounts[RuleSourceOrder]++
+			adjacentReordered = append(adjacentReordered, [2]int{actualNormal[i-1], actualNormal[i]})
 		}
 	}
-	s.ReorderedRate = ratioMetric(len(reordered), maxInt(0, len(actualNormal)-1))
+	s.ReorderedRate = ratioMetric(len(adjacentReordered), maxInt(0, len(actualNormal)-1))
+
+	sourceOrderViolations := make([][2]int, 0)
+	previousLine, previousPosition, havePrevious := 0, 0, false
+	for _, line := range actualNormal {
+		position, eligible := sourcePos[line]
+		if !eligible {
+			continue
+		}
+		if havePrevious && previousPosition > position {
+			sourceOrderViolations = append(sourceOrderViolations, [2]int{previousLine, line})
+		}
+		previousLine, previousPosition, havePrevious = line, position, true
+	}
+	if len(sourceOrderViolations) > 0 {
+		s.RuleCounts[RuleSourceOrder] = len(sourceOrderViolations)
+	}
 
 	for i, chunk := range in.ActualChunks {
 		if chunk.Sequence != i+1 {
@@ -202,7 +220,7 @@ func ScoreChunks(in ChunkScoreInput) ChunkScore {
 		d := ChunkDiagnostic{
 			ExpectedSequence: expectedSequences(in.ExpectedChunks), ActualSequence: actualSequences(in.ActualChunks),
 			ExpectedBoundary: sortedInts(expectedBoundaries), ActualBoundary: sortedInts(actualBoundaries),
-			MissingLines: missing, ExtraLines: extra, DuplicateLines: duplicate, ReorderedPairs: reordered,
+			MissingLines: missing, ExtraLines: extra, DuplicateLines: duplicate, ReorderedPairs: sourceOrderViolations,
 			MissingOverlap: assignmentDifference(expectedOverlap, actualOverlap), ExtraOverlap: assignmentDifference(actualOverlap, expectedOverlap),
 			RuleIDs: ruleIDs, ArtifactHashes: sortedHashes(in.ArtifactHashes),
 		}
