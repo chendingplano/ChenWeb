@@ -437,12 +437,11 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 			return err
 		}
 		for _, e := range ents {
-			if strings.HasSuffix(e.Name(), ".partial") {
-				if !strings.HasPrefix(e.Name(), "."+a.Config.AttemptID+".") {
-					continue
-				}
+			// Unverified evidence is disposable only when the filename is
+			// attempt-scoped (partial or final names carrying the attempt id).
+			if strings.HasSuffix(e.Name(), ".partial") && strings.HasPrefix(e.Name(), "."+a.Config.AttemptID+".") {
 				if err := os.Remove(filepath.Join(a.EvidencePath, e.Name())); err != nil {
-					return err
+					return fail(err)
 				}
 			}
 		}
