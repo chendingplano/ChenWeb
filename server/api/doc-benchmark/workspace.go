@@ -24,12 +24,14 @@ type WorkspaceConfig struct {
 	Store                                            OwnershipStore
 }
 type AllocationMarker struct {
-	AttemptID    string    `json:"attempt_id"`
-	Nonce        string    `json:"nonce"`
-	WorkRoot     string    `json:"work_root"`
-	EvidenceRoot string    `json:"evidence_root"`
-	Workspace    string    `json:"workspace"`
-	CreatedAt    time.Time `json:"created_at"`
+	AttemptID        string    `json:"attempt_id"`
+	Nonce            string    `json:"nonce"`
+	WorkRoot         string    `json:"work_root"`
+	EvidenceRoot     string    `json:"evidence_root"`
+	Workspace        string    `json:"workspace"`
+	CreatedAt        time.Time `json:"created_at"`
+	WorkIdentity     string    `json:"work_identity"`
+	EvidenceIdentity string    `json:"evidence_identity"`
 }
 type WorkspaceAllocation struct {
 	Config                             WorkspaceConfig
@@ -97,6 +99,13 @@ func canonicalRoot(p string) (string, error) {
 	}
 	return filepath.Clean(abs), nil
 }
+func rootIdentity(p string) string {
+	i, e := os.Stat(p)
+	if e != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d:%d", i.ModTime().UnixNano(), i.Size(), i.Mode())
+}
 func strictDesc(path, root string) bool {
 	rel, err := filepath.Rel(root, path)
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
@@ -153,7 +162,7 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 	if err := noSymlinks(ep, er); err != nil {
 		return nil, err
 	}
-	m := AllocationMarker{AttemptID: c.AttemptID, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, Workspace: wp, CreatedAt: time.Now().UTC()}
+	m := AllocationMarker{AttemptID: c.AttemptID, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, Workspace: wp, CreatedAt: time.Now().UTC(), WorkIdentity: rootIdentity(wr), EvidenceIdentity: rootIdentity(er)}
 	mp := filepath.Join(wp, ".allocation.json")
 	b, _ := json.Marshal(m)
 	f, err := os.OpenFile(mp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -270,6 +279,9 @@ func (a *WorkspaceAllocation) validate() error {
 		return e
 	}
 	if m.AttemptID != a.Config.AttemptID || m.Nonce != a.Config.Nonce || m.WorkRoot != a.Config.WorkRoot || m.EvidenceRoot != a.Config.EvidenceRoot {
+		return ErrUnsafePath
+	}
+	if m.WorkIdentity != "" && (m.WorkIdentity != rootIdentity(a.Config.WorkRoot) || m.EvidenceIdentity != rootIdentity(a.Config.EvidenceRoot)) {
 		return ErrUnsafePath
 	}
 	return nil
