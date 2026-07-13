@@ -3,6 +3,7 @@ package docbenchmark
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -26,6 +27,9 @@ type BenchmarkReport struct {
 	PricingSnapshot      map[string]string         `json:"pricing_snapshot,omitempty"`
 	EstimatedCost        *float64                  `json:"estimated_cost,omitempty"`
 	Pareto               []ParetoPoint             `json:"pareto,omitempty"`
+	Incomplete           bool                      `json:"incomplete,omitempty"`
+	Incompatible         bool                      `json:"incompatible,omitempty"`
+	NonGating            bool                      `json:"non_gating,omitempty"`
 }
 
 type ReportCase struct {
@@ -83,6 +87,19 @@ func RenderMarkdown(r BenchmarkReport) string {
 	r = r.canonical()
 	var b bytes.Buffer
 	b.WriteString("# Benchmark report\n\n")
+	if r.Incomplete || r.Incompatible || r.NonGating {
+		b.WriteString("## Status\n\n")
+		if r.Incomplete {
+			b.WriteString("- incomplete comparison\n")
+		}
+		if r.Incompatible {
+			b.WriteString("- incompatible comparison; winner language suppressed\n")
+		}
+		if r.NonGating {
+			b.WriteString("- non-gating evaluation; no automatic winner\n")
+		}
+		b.WriteString("\n")
+	}
 	if r.ID != "" {
 		b.WriteString("Report: " + mdEscape(r.ID) + "\n\n")
 	}
@@ -90,6 +107,28 @@ func RenderMarkdown(r BenchmarkReport) string {
 		b.WriteString("## Warnings\n\n")
 		for _, w := range r.Warnings {
 			b.WriteString("- " + mdEscape(w) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	if len(r.Provenance) > 0 {
+		b.WriteString("## Provenance\n\n")
+		keys := make([]string, 0, len(r.Provenance))
+		for k := range r.Provenance {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString("- " + mdEscape(k) + ": " + mdEscape(r.Provenance[k]) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	if len(r.Completion) > 0 {
+		b.WriteString("## Completion and failures\n\n")
+		for k, v := range r.Completion {
+			b.WriteString("- " + mdEscape(k) + ": " + fmt.Sprint(v) + "\n")
+		}
+		for k, v := range r.Failures {
+			b.WriteString("- failure " + mdEscape(k) + ": " + fmt.Sprint(v) + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -101,7 +140,53 @@ func RenderMarkdown(r BenchmarkReport) string {
 		}
 		b.WriteString("| " + mdEscape(a.Metric) + " | " + v + " | " + mdEscape(a.AggregationKind) + " |\n")
 	}
+	if len(r.Slices) > 0 {
+		b.WriteString("\n## Slices\n\n")
+		keys := make([]string, 0, len(r.Slices))
+		for k := range r.Slices {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString("### " + mdEscape(k) + "\n\n")
+			for _, a := range r.Slices[k] {
+				b.WriteString("- " + mdEscape(a.Metric) + ": " + fmtFloatPtr(a.Value) + " (n=" + fmt.Sprint(a.ApplicableTotal) + ")\n")
+			}
+		}
+	}
+	if len(r.PairedDeltas) > 0 {
+		b.WriteString("\n## Paired deltas\n\n")
+		for _, d := range r.PairedDeltas {
+			b.WriteString("- " + mdEscape(d.Metric) + ": " + fmtFloatPtr(d.Delta) + " (" + mdEscape(d.AggregationKind) + ")\n")
+		}
+	}
+	if len(r.LowestCases) > 0 {
+		b.WriteString("\n## Lowest-scoring cases\n\n")
+		for _, c := range r.LowestCases {
+			b.WriteString("- " + mdEscape(c.CaseID) + ": " + fmtFloatPtr(c.Score) + " artifacts=" + mdEscape(strings.Join(c.ArtifactLinks, ", ")) + " diagnostics=" + mdEscape(strings.Join(c.DiagnosticLinks, ", ")) + "\n")
+		}
+	}
+	if len(r.Telemetry) > 0 {
+		b.WriteString("\n## Telemetry and cost\n\n")
+		keys := make([]string, 0, len(r.Telemetry))
+		for k := range r.Telemetry {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString("- " + mdEscape(k) + ": " + fmtFloatPtr(r.Telemetry[k].Value) + "\n")
+		}
+		if r.EstimatedCost != nil {
+			b.WriteString("- estimated cost: " + fmtFloat(*r.EstimatedCost) + "\n")
+		}
+	}
 	return b.String()
+}
+func fmtFloatPtr(v *float64) string {
+	if v == nil {
+		return "null"
+	}
+	return fmtFloat(*v)
 }
 func mdEscape(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")

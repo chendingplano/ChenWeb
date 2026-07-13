@@ -113,7 +113,8 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 	for _, k := range keys {
 		r := defs[k]
 		us := groups[k]
-		a := AggregateRow{Metric: k.m, Component: k.c, Slice: slice, Direction: r.Direction, AggregationKind: r.AggregationKind, ApplicableTotal: applicableTotal}
+		kind := canonicalAggregationKind(r.AggregationKind)
+		a := AggregateRow{Metric: k.m, Component: k.c, Slice: slice, Direction: r.Direction, AggregationKind: kind, ApplicableTotal: applicableTotal}
 		vals := []float64{}
 		tp, fp, fn := 0, 0, 0
 		num, den := 0, 0
@@ -169,9 +170,9 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		a.CasesWithAny = any
 		a.Count = len(vals)
 		a.Sum = sum
-		kind := canonicalAggregationKind(r.AggregationKind)
 		switch kind {
 		case "count_derived_micro":
+			a.NonNullUnits = len(us)
 			a.TP, a.FP, a.FN = tp, fp, fn
 			a.Numerator = tp
 			a.Denominator = fp + tp
@@ -184,10 +185,14 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 			}
 		case "matched_field_micro":
 			if den > 0 {
+				a.NonNullUnits = len(us)
+			}
+			if den > 0 {
 				v := float64(num) / float64(den)
 				a.Value = &v
 			}
 		case "raw_count":
+			a.NonNullUnits = len(us)
 			v := float64(num)
 			a.Value = &v
 		case "operational":
@@ -341,10 +346,23 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 	applicable := 0
 	for _, u := range c.Candidate {
 		if x, ok := b[fmt.Sprintf("%s/%d", u.CaseID, u.Repetition)]; ok {
-			applicable++
+			if !u.Applicable || !x.Applicable {
+				continue
+			}
+			pairApplicable := false
 			for _, r := range u.Scores {
 				for _, br := range x.Scores {
-					if r.AggregationKind == "count_derived_micro" {
+					if r.Metric != br.Metric || r.Component != br.Component {
+						continue
+					}
+					if canonicalAggregationKind(r.AggregationKind) == "count_derived_micro" && canonicalAggregationKind(br.AggregationKind) == "count_derived_micro" {
+						if u.UpstreamInvalid && r.ConditionalAttribution {
+							continue
+						}
+						if x.UpstreamInvalid && br.ConditionalAttribution {
+							continue
+						}
+						pairApplicable = true
 						a := pooledA[r.Metric]
 						a[0] += br.TP
 						a[1] += br.FP
@@ -356,10 +374,14 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 						q[2] += r.FN
 						pooledB[r.Metric] = q
 					}
-					if r.Metric == br.Metric && r.Value != nil && br.Value != nil {
+					if r.Value != nil && br.Value != nil && !(u.UpstreamInvalid && r.ConditionalAttribution) && !(x.UpstreamInvalid && br.ConditionalAttribution) {
+						pairApplicable = true
 						pairs[r.Metric] = append(pairs[r.Metric], *r.Value-*br.Value)
 					}
 				}
+			}
+			if pairApplicable {
+				applicable++
 			}
 		}
 	}
