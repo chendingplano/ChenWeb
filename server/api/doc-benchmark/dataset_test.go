@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -131,6 +132,48 @@ func TestLoadDatasetRejectsManifestAndFilesystemViolations(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoadDatasetRootDescriptorSurvivesPathReplacement(t *testing.T) {
+	parent := t.TempDir()
+	original := filepath.Join(parent, "dataset")
+	mustWrite(t, filepath.Join(original, "safe.txt"), []byte("inside"))
+	root, err := os.OpenRoot(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	moved := filepath.Join(parent, "moved")
+	if err := os.Rename(original, moved); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	mustWrite(t, filepath.Join(outside, "safe.txt"), []byte("outside"))
+	if err := os.Symlink(outside, original); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := readRegularFile(root, "safe.txt")
+	if err != nil {
+		t.Fatalf("descriptor-rooted read: %v", err)
+	}
+	if string(got) != "inside" {
+		t.Fatalf("read %q after root path replacement, want original descriptor content", got)
+	}
+}
+
+func TestValidationErrorsErrorDoesNotMutateAndIsDeterministic(t *testing.T) {
+	problems := validationErrors{"z-field", "a-field"}
+	wantBacking := append(validationErrors(nil), problems...)
+	first := problems.Error()
+	second := problems.Error()
+	if !reflect.DeepEqual(problems, wantBacking) {
+		t.Fatalf("Error mutated receiver: got %v want %v", problems, wantBacking)
+	}
+	if first != second || strings.Index(first, "a-field") > strings.Index(first, "z-field") {
+		t.Fatalf("nondeterministic or unsorted error: first=%q second=%q", first, second)
 	}
 }
 
@@ -308,6 +351,41 @@ func TestCaseSetHashSortsUnitsAndReflectsFiltersAndRepetitions(t *testing.T) {
 	}
 }
 
+func TestCaseSetHashSortsReverseManifestCasesAndMatchesExactFrames(t *testing.T) {
+	forward := loadTwoCaseDataset(t, false)
+	reverse := loadTwoCaseDataset(t, true)
+	gotForward, err := forward.CaseSetHash(ProcessorChunking, nil, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotReverse, err := reverse.CaseSetHash(ProcessorChunking, nil, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotForward != gotReverse {
+		t.Fatalf("manifest order changed case-set hash: %s != %s", gotForward, gotReverse)
+	}
+	var framed bytes.Buffer
+	binary.Write(&framed, binary.BigEndian, uint64(4))
+	for _, unit := range []struct{ id, repetition string }{{"metric-001", "1"}, {"metric-001", "2"}, {"metric-002", "1"}, {"metric-002", "2"}} {
+		writeFrame(&framed, unit.id, []byte(unit.repetition))
+	}
+	want := sha256.Sum256(framed.Bytes())
+	if gotForward != hex.EncodeToString(want[:]) {
+		t.Fatalf("hash=%s want=%x", gotForward, want)
+	}
+}
+
+func TestCaseSetHashRejectsExcessiveRepetitions(t *testing.T) {
+	ds, err := LoadDataset(writeDataset(t, validManifest(), validInput(), validExpected()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.CaseSetHash(ProcessorChunking, nil, MaxRepetitions+1); err == nil || !strings.Contains(err.Error(), "repetitions") {
+		t.Fatalf("error=%v, want repetitions limit", err)
+	}
+}
+
 func validManifest() []byte {
 	return []byte(`{"schema_version":1,"dataset_id":"doc-processors-synthetic-core","dataset_version":"1.0.0","generator_version":"1.0.0","seed":20260713,"cases":[{"case_id":"metric-001","input":"cases/metric-001/input.lines.txt","expected":"cases/metric-001/expected.json","processors":["chunking","extract_metrics"],"tags":["overlap","multiple-units"]}]}`)
 }
@@ -348,4 +426,28 @@ func loadHash(t *testing.T, m, i, e []byte) string {
 		t.Fatal(err)
 	}
 	return ds.Hash
+}
+
+func loadTwoCaseDataset(t *testing.T, reverse bool) *Dataset {
+	t.Helper()
+	var manifest map[string]any
+	json.Unmarshal(validManifest(), &manifest)
+	second := cloneCase(manifest)
+	second["case_id"] = "metric-002"
+	second["input"] = "cases/metric-002/input.lines.txt"
+	second["expected"] = "cases/metric-002/expected.json"
+	cases := []any{firstCase(manifest), second}
+	if reverse {
+		cases[0], cases[1] = cases[1], cases[0]
+	}
+	manifest["cases"] = cases
+	raw, _ := json.Marshal(manifest)
+	root := writeDataset(t, raw, validInput(), validExpected())
+	mustWrite(t, filepath.Join(root, "cases/metric-002/input.lines.txt"), validInput())
+	mustWrite(t, filepath.Join(root, "cases/metric-002/expected.json"), validExpected())
+	ds, err := LoadDataset(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ds
 }

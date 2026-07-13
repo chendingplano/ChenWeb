@@ -27,8 +27,9 @@ var allowedTags = map[string]struct{}{
 type validationErrors []string
 
 func (v validationErrors) Error() string {
-	sort.Strings(v)
-	return "dataset validation failed:\n" + strings.Join(v, "\n")
+	sorted := append(validationErrors(nil), v...)
+	sort.Strings(sorted)
+	return "dataset validation failed:\n" + strings.Join(sorted, "\n")
 }
 
 func LoadDataset(root string) (*Dataset, error) {
@@ -36,14 +37,12 @@ func LoadDataset(root string) (*Dataset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dataset root: %w", err)
 	}
-	info, err := os.Stat(canonicalRoot)
-	if err != nil || !info.IsDir() {
-		if err == nil {
-			err = errors.New("not a directory")
-		}
+	datasetRoot, err := os.OpenRoot(canonicalRoot)
+	if err != nil {
 		return nil, fmt.Errorf("dataset root: %w", err)
 	}
-	manifestBytes, err := readRegularFile(canonicalRoot, "manifest.json")
+	defer datasetRoot.Close()
+	manifestBytes, err := readRegularFile(datasetRoot, "manifest.json")
 	if err != nil {
 		return nil, fmt.Errorf("manifest.json: %w", err)
 	}
@@ -75,12 +74,12 @@ func LoadDataset(root string) (*Dataset, error) {
 		if !inputOK || !expectedOK {
 			continue
 		}
-		inputBytes, inputErr := readRegularFile(canonicalRoot, inputPath)
+		inputBytes, inputErr := readRegularFile(datasetRoot, inputPath)
 		if inputErr != nil {
 			problems = append(problems, fieldError(caseID, fmt.Sprintf("cases[%d].input", i), inputErr.Error()))
 			continue
 		}
-		expectedBytes, expectedErr := readRegularFile(canonicalRoot, expectedPath)
+		expectedBytes, expectedErr := readRegularFile(datasetRoot, expectedPath)
 		if expectedErr != nil {
 			problems = append(problems, fieldError(caseID, fmt.Sprintf("cases[%d].expected", i), expectedErr.Error()))
 			continue
@@ -214,12 +213,12 @@ func validateReference(root, raw, field, caseID string, refs map[string]string, 
 	return clean, true
 }
 
-func readRegularFile(root, rel string) ([]byte, error) {
-	cur := root
-	parts := strings.Split(filepath.FromSlash(rel), string(filepath.Separator))
-	for _, part := range parts {
+func readRegularFile(root *os.Root, rel string) ([]byte, error) {
+	name := filepath.FromSlash(rel)
+	cur := ""
+	for _, part := range strings.Split(name, string(filepath.Separator)) {
 		cur = filepath.Join(cur, part)
-		info, err := os.Lstat(cur)
+		info, err := root.Lstat(cur)
 		if err != nil {
 			return nil, err
 		}
@@ -227,14 +226,23 @@ func readRegularFile(root, rel string) ([]byte, error) {
 			return nil, fmt.Errorf("symlink component %q is forbidden", part)
 		}
 	}
-	info, err := os.Stat(cur)
+	// Root.Open resolves every component relative to the already-open directory
+	// descriptor and refuses escapes. The Lstat checks preserve the stricter
+	// dataset rule forbidding symlinks; even if a writable tree changes after a
+	// check, the descriptor-rooted open cannot be redirected outside the root.
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("referenced path is not a regular file")
 	}
-	return os.ReadFile(cur)
+	return io.ReadAll(f)
 }
 
 func canonicalLineNumbers(raw []byte) ([]int, error) {

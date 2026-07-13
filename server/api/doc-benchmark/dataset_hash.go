@@ -12,6 +12,10 @@ import (
 
 const datasetHashPrefix = "chenweb-doc-benchmark-dataset-v1\n"
 
+// MaxRepetitions bounds experiment sampling expansion. CaseSetHash streams at
+// most selected-cases*MaxRepetitions frames without materializing sampling units.
+const MaxRepetitions = 10_000
+
 type hashEntry struct {
 	path string
 	body []byte
@@ -66,6 +70,9 @@ func (d *Dataset) CaseSetHash(processor Processor, caseTags []string, repetition
 	if repetitions < 1 {
 		return "", fmt.Errorf("repetitions must be positive")
 	}
+	if repetitions > MaxRepetitions {
+		return "", fmt.Errorf("repetitions must not exceed %d", MaxRepetitions)
+	}
 	tags := map[string]struct{}{}
 	for _, tag := range caseTags {
 		if _, ok := allowedTags[tag]; !ok {
@@ -73,29 +80,25 @@ func (d *Dataset) CaseSetHash(processor Processor, caseTags []string, repetition
 		}
 		tags[tag] = struct{}{}
 	}
-	type unit struct {
-		id         string
-		repetition int
-	}
-	var units []unit
+	selectedCaseIDs := make([]string, 0, len(d.Cases))
 	for _, c := range d.Cases {
 		if !hasProcessor(c.Processors, processor) || !hasAllTags(c.Tags, tags) {
 			continue
 		}
-		for r := 1; r <= repetitions; r++ {
-			units = append(units, unit{c.CaseID, r})
-		}
+		selectedCaseIDs = append(selectedCaseIDs, c.CaseID)
 	}
-	sort.Slice(units, func(i, j int) bool {
-		if units[i].id != units[j].id {
-			return units[i].id < units[j].id
-		}
-		return units[i].repetition < units[j].repetition
-	})
+	sort.Strings(selectedCaseIDs)
+	caseCount := uint64(len(selectedCaseIDs))
+	repetitionCount := uint64(repetitions)
+	if caseCount != 0 && repetitionCount > ^uint64(0)/caseCount {
+		return "", fmt.Errorf("case-set sampling unit count overflows uint64")
+	}
 	h := sha256.New()
-	writeUint64(h, uint64(len(units)))
-	for _, u := range units {
-		writeFrame(h, u.id, []byte(strconv.Itoa(u.repetition)))
+	writeUint64(h, caseCount*repetitionCount)
+	for _, caseID := range selectedCaseIDs {
+		for repetition := 1; repetition <= repetitions; repetition++ {
+			writeFrame(h, caseID, []byte(strconv.Itoa(repetition)))
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
