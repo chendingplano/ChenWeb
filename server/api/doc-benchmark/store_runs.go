@@ -92,11 +92,17 @@ func (s SQLStore) CreateCaseRun(ctx context.Context, runID, caseID string, repet
 	return id, err
 }
 func (s SQLStore) GetRun(ctx context.Context, id string) (RunRecord, error) {
+	if err := checkDB(s); err != nil {
+		return RunRecord{}, err
+	}
 	var r RunRecord
 	err := s.DB.QueryRowContext(txctx(ctx), `SELECT id,experiment_id,variant_name,lifecycle,requested_json,resolved_json,config_json,prompt_json,scorer_json,pricing_json,requested_hash,resolved_hash,config_hash,prompt_hash,scorer_hash,pricing_hash,created_at,updated_at,started_at,finished_at FROM kb.benchmark_runs WHERE id=$1`, id).Scan(&r.ID, &r.ExperimentID, &r.VariantName, &r.Lifecycle, &r.Requested, &r.Resolved, &r.Config, &r.Prompt, &r.Scorer, &r.Pricing, &r.RequestedHash, &r.ResolvedHash, &r.ConfigHash, &r.PromptHash, &r.ScorerHash, &r.PricingHash, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt)
 	return r, err
 }
 func (s SQLStore) ListCaseRuns(ctx context.Context, runID string) ([]CaseRunRecord, error) {
+	if err := checkDB(s); err != nil {
+		return nil, err
+	}
 	rows, e := s.DB.QueryContext(txctx(ctx), `SELECT id,run_id,case_id,repetition,applicability,lifecycle,tags_json,upstream_hash,selected_attempt_id,created_at,updated_at FROM kb.benchmark_case_runs WHERE run_id=$1 ORDER BY case_id,repetition`, runID)
 	if e != nil {
 		return nil, e
