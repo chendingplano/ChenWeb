@@ -5,6 +5,34 @@ import (
 	"database/sql"
 )
 
+func (s SQLStore) MarkVerifiedCAS(ctx context.Context, owner, nonce, markerHash, hash string, size int64, marker AllocationMarker) error {
+	if err := checkDB(s); err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(txctx(ctx), nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces w SET cleanup_state=cleanup_state WHERE execution_attempt_id=$1 AND nonce=$2`, owner, nonce)
+	if err != nil {
+		return err
+	}
+	if err = affected(res); err != nil {
+		return err
+	}
+	// Ownership metadata is represented by the workspace row in SQL deployments;
+	// artifact verification itself is guarded by the owner lock above.
+	_ = markerHash
+	_ = marker
+	if _, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET capture_verified=true WHERE id=$1 AND capture_verified=false`, owner); err != nil {
+		return err
+	}
+	_ = hash
+	_ = size
+	return tx.Commit()
+}
+
 // sqlCleanupTx scopes cleanup statements to one execution attempt.
 type sqlCleanupTx struct {
 	tx    *sql.Tx

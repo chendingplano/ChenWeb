@@ -34,6 +34,12 @@ func (s *testOwnershipStore) MarkVerified(_ string, hash string, size int64, m A
 	s.own.VerifiedMarker = markerDigest(m)
 	return nil
 }
+func (s *testOwnershipStore) MarkVerifiedCAS(_ context.Context, _ string, nonce, markerHash, hash string, size int64, m AllocationMarker) error {
+	if s.own.Verified || s.own.Nonce != "" && s.own.Nonce != nonce || s.own.VerifiedMarker != "" && s.own.VerifiedMarker != markerHash {
+		return errors.New("capture: ownership CAS failed")
+	}
+	return s.MarkVerified("", hash, size, m)
+}
 func (s *testOwnershipStore) MarkCleanupState(_ string, state string, cause error) error {
 	s.states = append(s.states, state)
 	if cause != nil {

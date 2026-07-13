@@ -84,8 +84,41 @@ type OwnershipStore interface {
 	SaveOwnership(Ownership) error
 	LockOwnership(attemptID string) (Ownership, error)
 	MarkVerified(attemptID, hash string, size int64, marker AllocationMarker) error
+	MarkVerifiedCAS(ctx context.Context, owner, expectedNonce, expectedMarkerHash, hash string, size int64, marker AllocationMarker) error
 	MarkCleanupState(attemptID, state string, cause error) error
 	CleanupTransaction(ctx context.Context, owner string, fn func(CleanupTx) error) error
+}
+
+func writeMarkerAtomic(path string, m AllocationMarker) error {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync()
+	}
+	if e := f.Close(); err == nil {
+		err = e
+	}
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err = os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	d, err := os.Open(filepath.Dir(path))
+	if err == nil {
+		err = d.Sync()
+		d.Close()
+	}
+	return err
 }
 
 // CleanupTx is the transaction-scoped cleanup capability for an attempt.
@@ -239,11 +272,11 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 	}
 	m := AllocationMarker{AttemptID: c.AttemptID, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, Workspace: wp, EvidencePath: ep, CreatedAt: time.Now().UTC(), WorkIdentity: rootIdentity(wr), EvidenceIdentity: rootIdentity(er)}
 	mp := filepath.Join(wp, ".allocation.json")
-	b, _ := json.Marshal(m)
 	f, err := os.OpenFile(mp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return nil, err
 	}
+	b, _ := json.Marshal(m)
 	if _, err = f.Write(b); err == nil {
 		err = f.Sync()
 	}
@@ -267,8 +300,8 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 	}
 	a.lastArtifact = name
 	a.Marker.ArtifactName = name
-	if mb, me := json.Marshal(a.Marker); me == nil {
-		_ = os.WriteFile(a.MarkerPath, mb, 0600)
+	if err := writeMarkerAtomic(a.MarkerPath, a.Marker); err != nil {
+		return Artifact{}, err
 	}
 	if err := a.validate(); err != nil {
 		return Artifact{}, err
@@ -363,14 +396,7 @@ func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt
 		return Artifact{}, err
 	}
 	artifact := Artifact{Path: final, SHA256: hex.EncodeToString(h.Sum(nil)), SizeBytes: st.Size(), Verified: true, Metadata: map[string]string{"attempt_id": a.Config.AttemptID}}
-	locked, err := a.Config.Store.LockOwnership(a.Config.AttemptID)
-	if err != nil || locked.Verified || locked.Nonce != a.Config.Nonce {
-		if err == nil {
-			err = errors.New("capture: ownership CAS failed")
-		}
-		return Artifact{}, err
-	}
-	if err := a.Config.Store.MarkVerified(a.Config.AttemptID, artifact.SHA256, artifact.SizeBytes, a.Marker); err != nil {
+	if err := a.Config.Store.MarkVerifiedCAS(context.Background(), a.Config.AttemptID, a.Config.Nonce, markerDigest(a.Marker), artifact.SHA256, artifact.SizeBytes, a.Marker); err != nil {
 		return Artifact{}, err
 	}
 	return artifact, nil
@@ -435,14 +461,7 @@ func (a *WorkspaceAllocation) Reverify(name string) (Artifact, error) {
 		return Artifact{}, se
 	}
 	art := Artifact{Path: filepath.Join(a.EvidencePath, name), SHA256: hex.EncodeToString(h.Sum(nil)), SizeBytes: st.Size(), Verified: true, Metadata: map[string]string{"attempt_id": a.Config.AttemptID}}
-	locked, err := a.Config.Store.LockOwnership(a.Config.AttemptID)
-	if err != nil || locked.Verified || locked.VerifiedMarker != "" {
-		if err == nil {
-			err = errors.New("reverify: ownership CAS failed")
-		}
-		return Artifact{}, err
-	}
-	if err := a.Config.Store.MarkVerified(a.Config.AttemptID, art.SHA256, art.SizeBytes, a.Marker); err != nil {
+	if err := a.Config.Store.MarkVerifiedCAS(context.Background(), a.Config.AttemptID, a.Config.Nonce, markerDigest(a.Marker), art.SHA256, art.SizeBytes, a.Marker); err != nil {
 		return Artifact{}, err
 	}
 	return art, nil
