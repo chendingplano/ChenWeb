@@ -48,6 +48,23 @@ func TestSQLStoreOwnerXOR(t *testing.T) {
 	_ = m
 }
 
+func TestSQLStoreMarkVerifiedCASRejectsVerifiedMutation(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	marker := AllocationMarker{AttemptID: "a", Nonce: "n"}
+	mh := markerDigest(marker)
+	m.ExpectBegin()
+	m.ExpectExec("UPDATE kb\\.benchmark_workspaces SET verified=true").WithArgs("a", "n", "new", int64(2), mh, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
+	m.ExpectRollback()
+	err := (SQLStore{DB: db}).MarkVerifiedCAS(context.Background(), "a", "n", mh, "new", 2, marker)
+	if err == nil {
+		t.Fatal("expected CAS mutation rejection")
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLStoreInsertScoreIdempotent(t *testing.T) {
 	db, m, _ := sqlmock.New()
 	defer db.Close()

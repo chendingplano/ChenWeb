@@ -18,7 +18,7 @@ func (s SQLStore) MarkVerifiedCAS(ctx context.Context, owner, nonce, markerHash,
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces SET verified=true,verified_hash=$3,verified_size=$4,verified_marker_hash=$5,verified_marker=$6 WHERE execution_attempt_id=$1 AND nonce=$2 AND (verified_marker_hash IS NULL OR verified_marker_hash=$5)`, owner, nonce, hash, size, markerHash, markerJSON(marker))
+	res, err := tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_workspaces SET verified=true,verified_hash=$3,verified_size=$4,verified_marker_hash=$5,verified_marker=$6 WHERE execution_attempt_id=$1 AND nonce=$2 AND ((verified=false AND verified_marker_hash IS NULL) OR (verified=true AND verified_hash=$3 AND verified_size=$4 AND verified_marker_hash=$5))`, owner, nonce, hash, size, markerHash, markerJSON(marker))
 	if err != nil {
 		return err
 	}
