@@ -414,16 +414,13 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 	if own.Nonce != a.Config.Nonce || own.Workspace != a.WorkPath || own.WorkRoot != a.Config.WorkRoot || own.EvidenceRoot != a.Config.EvidenceRoot {
 		return ErrUnsafePath
 	}
-	if own.Verified && !o.DiscardUnverified {
+	if own.Verified && o.DiscardUnverified {
 		return ErrVerifiedImmutable
 	}
-	if own.Verified {
-		return ErrVerifiedImmutable
-	}
-	if !o.DiscardUnverified {
+	if !own.Verified && !o.DiscardUnverified {
 		return errors.New("cleanup requires verified evidence or explicit discard")
 	}
-	if o.DiscardUnverified {
+	if !own.Verified && o.DiscardUnverified {
 		ents, err := os.ReadDir(a.EvidencePath)
 		if err != nil {
 			return err
