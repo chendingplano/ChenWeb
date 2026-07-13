@@ -3,9 +3,13 @@ package docbenchmark
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
 
 func (s SQLStore) MarkVerifiedCAS(ctx context.Context, owner, nonce, markerHash, hash string, size int64, marker AllocationMarker) error {
+	if owner == "" || nonce == "" || hash == "" || size < 0 || marker.AttemptID != owner || marker.Nonce != nonce || markerHash != markerDigest(marker) {
+		return errors.New("benchmark: verification metadata mismatch")
+	}
 	if err := checkDB(s); err != nil {
 		return err
 	}
@@ -23,13 +27,9 @@ func (s SQLStore) MarkVerifiedCAS(ctx context.Context, owner, nonce, markerHash,
 	}
 	// Ownership metadata is represented by the workspace row in SQL deployments;
 	// artifact verification itself is guarded by the owner lock above.
-	_ = markerHash
-	_ = marker
 	if _, err = tx.ExecContext(txctx(ctx), `UPDATE kb.benchmark_case_attempts SET capture_verified=true WHERE id=$1 AND capture_verified=false`, owner); err != nil {
 		return err
 	}
-	_ = hash
-	_ = size
 	return tx.Commit()
 }
 

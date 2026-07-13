@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -46,6 +47,8 @@ type WorkspaceAllocation struct {
 	workRootFD, evidenceRootFD         *os.Root
 	workDirFD, evidenceDirFD           *os.Root
 	lastArtifact                       string
+	mu                                 sync.Mutex
+	closed                             bool
 }
 
 func relToRoot(root, path string) (string, error) {
@@ -87,7 +90,13 @@ func writeMarkerAtomicRoot(root *os.Root, rel string, m AllocationMarker) error 
 		_ = root.Remove(tmp)
 		return err
 	}
-	return nil
+	if d, e := root.Open(filepath.Dir(rel)); e == nil {
+		e = d.Sync()
+		_ = d.Close()
+		return e
+	} else {
+		return e
+	}
 }
 
 type Artifact struct {
@@ -312,6 +321,13 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 		_ = wrFD.Close()
 		return nil, err
 	}
+	closeRoots := true
+	defer func() {
+		if closeRoots {
+			_ = wrFD.Close()
+			_ = erFD.Close()
+		}
+	}()
 	wp := filepath.Join(wr, c.RunID, c.CaseID, c.AttemptID)
 	ep := filepath.Join(er, c.RunID, c.CaseID, c.AttemptID)
 	for _, p := range []string{filepath.Join(wr, c.RunID), filepath.Join(wr, c.RunID, c.CaseID), wp, filepath.Join(er, c.RunID), filepath.Join(er, c.RunID, c.CaseID), ep} {
@@ -355,6 +371,15 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 		if err != nil {
 			return nil, err
 		}
+		if d, e := wrFD.Open(filepath.Dir(mpRel)); e == nil {
+			e = d.Sync()
+			_ = d.Close()
+			if e != nil {
+				return nil, e
+			}
+		} else {
+			return nil, e
+		}
 		created = true
 	} else {
 		return nil, err
@@ -375,18 +400,55 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 		return nil, err
 	}
 	o := &WorkspaceAllocation{Config: c, WorkPath: wp, EvidencePath: ep, MarkerPath: mp, Marker: m, lastArtifact: m.ArtifactName, workRootFD: wrFD, evidenceRootFD: erFD, workDirFD: workFD, evidenceDirFD: evidenceFD}
+	closeRoots = false
 	if created {
 		if err := c.Store.SaveOwnership(Ownership{AttemptID: c.AttemptID, Workspace: wp, EvidencePath: ep, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, CleanupState: "active"}); err != nil {
+			_ = o.Close()
 			return nil, err
 		}
 	}
 	return o, nil
 }
 
+// Close releases the descriptor roots. It is safe to call repeatedly.
+func (a *WorkspaceAllocation) Close() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.closeLocked()
+}
+func (a *WorkspaceAllocation) closeLocked() error {
+	if a.closed {
+		return nil
+	}
+	a.closed = true
+	var err error
+	if a.workDirFD != nil {
+		err = a.workDirFD.Close()
+	}
+	if a.evidenceDirFD != nil {
+		if e := a.evidenceDirFD.Close(); err == nil {
+			err = e
+		}
+	}
+	if a.workRootFD != nil {
+		if e := a.workRootFD.Close(); err == nil {
+			err = e
+		}
+	}
+	if a.evidenceRootFD != nil {
+		if e := a.evidenceRootFD.Close(); err == nil {
+			err = e
+		}
+	}
+	return err
+}
+
 func (a *WorkspaceAllocation) Capture(src io.Reader, name string) (Artifact, error) {
 	return a.CaptureWithOptions(src, name, CaptureOptions{})
 }
 func (a *WorkspaceAllocation) CaptureWithOptions(src io.Reader, name string, opt CaptureOptions) (Artifact, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if !safeComponent(name) {
 		return Artifact{}, fmt.Errorf("%w: artifact name", ErrUnsafePath)
 	}
@@ -507,7 +569,7 @@ func (a *WorkspaceAllocation) validate() error {
 		return err
 	}
 	var m AllocationMarker
-	b, e := os.ReadFile(a.MarkerPath)
+	b, e := a.workRootFD.ReadFile(mustRel(a.Config.WorkRoot, a.MarkerPath))
 	if e != nil {
 		return e
 	}
@@ -525,6 +587,8 @@ func (a *WorkspaceAllocation) validate() error {
 
 // Reverify performs the only permitted recovery after a post-rename interruption.
 func (a *WorkspaceAllocation) Reverify(name string) (Artifact, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if !safeComponent(name) {
 		return Artifact{}, ErrUnsafePath
 	}
@@ -559,6 +623,8 @@ func (a *WorkspaceAllocation) Reverify(name string) (Artifact, error) {
 	return art, nil
 }
 func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	fail := func(err error) error {
 		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "error", err)
 		return err
@@ -587,7 +653,7 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 			_ = dir.Close()
 		}
 		if err != nil {
-			return err
+			return fail(err)
 		}
 		for _, e := range ents {
 			// Unverified evidence is disposable only when the filename is
@@ -621,5 +687,7 @@ func (a *WorkspaceAllocation) Cleanup(o CleanupOptions) error {
 		_ = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "files_pending", err)
 		return err
 	}
-	return a.Config.Store.MarkCleanupState(a.Config.AttemptID, "cleaned", nil)
+	err = a.Config.Store.MarkCleanupState(a.Config.AttemptID, "cleaned", nil)
+	_ = a.closeLocked()
+	return err
 }
