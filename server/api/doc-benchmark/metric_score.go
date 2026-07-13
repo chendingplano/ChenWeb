@@ -32,6 +32,9 @@ type ScoreRow struct {
 	AggregationKind                    string   `json:"aggregation_kind"`
 	Value                              *float64 `json:"value"`
 	Numerator, Denominator, TP, FP, FN int
+	// ConditionalAttribution rows are excluded only when the upstream dependency
+	// was invalid; end-to-end rows remain visible.
+	ConditionalAttribution bool `json:"conditional_attribution,omitempty"`
 }
 
 type AcceptedMetricDiagnostic struct {

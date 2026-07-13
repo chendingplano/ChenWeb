@@ -35,12 +35,15 @@ type AggregateRow struct {
 	PopulationSD    *float64 `json:"population_sd,omitempty"`
 	CasesWithAny    int      `json:"cases_with_any,omitempty"`
 	Count           int      `json:"count,omitempty"`
+	TP              int      `json:"tp,omitempty"`
+	FP              int      `json:"fp,omitempty"`
+	FN              int      `json:"fn,omitempty"`
 }
 
 func AggregateScores(units []ScoreUnit, applicableTotal int) ([]AggregateRow, error) {
 	return aggregate(units, applicableTotal, "")
 }
-func AggregateSlices(units []ScoreUnit, applicableTotal int) map[string][]AggregateRow {
+func AggregateSlices(units []ScoreUnit, applicableTotal int) (map[string][]AggregateRow, error) {
 	tags := map[string][]ScoreUnit{}
 	for _, u := range units {
 		for _, tag := range u.Tags {
@@ -54,9 +57,19 @@ func AggregateSlices(units []ScoreUnit, applicableTotal int) map[string][]Aggreg
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		out[k], _ = aggregate(tags[k], applicableTotal, k)
+		pop := 0
+		for _, u := range tags[k] {
+			if u.Applicable {
+				pop++
+			}
+		}
+		var err error
+		out[k], err = aggregate(tags[k], pop, k)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return out
+	return out, nil
 }
 func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]AggregateRow, error) {
 	type key struct{ m, c string }
@@ -66,8 +79,22 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		if !u.Applicable {
 			continue
 		}
+		if len(u.Operational) > 0 {
+			for name, value := range u.Operational {
+				v := value
+				u.Scores = append(u.Scores, ScoreRow{Metric: name, Direction: "lower", AggregationKind: "operational", Value: &v})
+			}
+		}
+		seen := map[key]bool{}
 		for _, r := range u.Scores {
+			if u.UpstreamInvalid && r.ConditionalAttribution {
+				continue
+			}
 			k := key{r.Metric, r.Component}
+			if seen[k] {
+				return nil, fmt.Errorf("duplicate score row %s/%s in %s", r.Metric, r.Component, u.CaseID)
+			}
+			seen[k] = true
 			groups[k] = append(groups[k], u)
 			defs[k] = r
 		}
@@ -94,6 +121,12 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		any := 0
 		for _, u := range us {
 			for _, x := range u.Scores {
+				if u.UpstreamInvalid && x.ConditionalAttribution {
+					continue
+				}
+				if x.Value != nil && (math.IsNaN(*x.Value) || math.IsInf(*x.Value, 0)) {
+					return nil, fmt.Errorf("metric %s has non-finite value", x.Metric)
+				}
 				if x.Metric != k.m || x.Component != k.c {
 					continue
 				}
@@ -139,6 +172,7 @@ func aggregate(units []ScoreUnit, applicableTotal int, slice string) ([]Aggregat
 		kind := canonicalAggregationKind(r.AggregationKind)
 		switch kind {
 		case "count_derived_micro":
+			a.TP, a.FP, a.FN = tp, fp, fn
 			a.Numerator = tp
 			a.Denominator = fp + tp
 			a.Value = microValue(k.m, tp, fp, fn)
@@ -187,6 +221,9 @@ func canonicalAggregationKind(kind string) string {
 	}
 }
 func microValue(metric string, tp, fp, fn int) *float64 {
+	if (metric == "grounding_precision" || metric == "grounding_recall" || metric == "grounding_f1") && tp+fp+fn == 0 {
+		return nil
+	}
 	den := tp + fp
 	if metric == "detection_recall" || metric == "grounding_recall" {
 		den = tp + fn
@@ -245,18 +282,45 @@ func setDistribution(a *AggregateRow, vals []float64) {
 type VariantComparison struct {
 	Baseline, Candidate                                                                         []ScoreUnit
 	DatasetHash, BaselineCaseSetHash, CandidateCaseSetHash, ScorerVersion, NormalizationVersion string
+	BaselineDatasetHash, CandidateDatasetHash, BaselineScorerVersion, CandidateScorerVersion    string
+	BaselineNormalizationVersion, CandidateNormalizationVersion                                 string
 	BaselineUpstreamHash, CandidateUpstreamHash                                                 string
 	AllowUpstreamVariation, AllowIncompatible                                                   bool
 }
 type PairedDelta struct {
-	Metric                       string   `json:"metric"`
-	Delta                        *float64 `json:"delta"`
-	PairedUnits, ApplicableUnits int      `json:"paired_units"`
+	Metric          string   `json:"metric"`
+	Delta           *float64 `json:"delta"`
+	PairedUnits     int      `json:"paired_units"`
+	ApplicableUnits int      `json:"applicable_units"`
+	AggregationKind string   `json:"aggregation_kind,omitempty"`
+	Median          *float64 `json:"median,omitempty"`
+	PopulationSD    *float64 `json:"population_sd,omitempty"`
 }
 
 func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 	warnings := []string{}
-	if c.DatasetHash == "" || c.BaselineCaseSetHash != c.CandidateCaseSetHash || c.ScorerVersion == "" || c.NormalizationVersion == "" {
+	datasetA, datasetB := c.BaselineDatasetHash, c.CandidateDatasetHash
+	if datasetA == "" {
+		datasetA = c.DatasetHash
+	}
+	if datasetB == "" {
+		datasetB = c.DatasetHash
+	}
+	scorerA, scorerB := c.BaselineScorerVersion, c.CandidateScorerVersion
+	if scorerA == "" {
+		scorerA = c.ScorerVersion
+	}
+	if scorerB == "" {
+		scorerB = c.ScorerVersion
+	}
+	normA, normB := c.BaselineNormalizationVersion, c.CandidateNormalizationVersion
+	if normA == "" {
+		normA = c.NormalizationVersion
+	}
+	if normB == "" {
+		normB = c.NormalizationVersion
+	}
+	if datasetA == "" || datasetB == "" || datasetA != datasetB || c.BaselineCaseSetHash == "" || c.CandidateCaseSetHash == "" || c.BaselineCaseSetHash != c.CandidateCaseSetHash || scorerA == "" || scorerB == "" || scorerA != scorerB || normA == "" || normB == "" || normA != normB {
 		if !c.AllowIncompatible {
 			return nil, nil, fmt.Errorf("incompatible comparison")
 		}
@@ -273,10 +337,25 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 		b[fmt.Sprintf("%s/%d", u.CaseID, u.Repetition)] = u
 	}
 	pairs := map[string][]float64{}
+	pooledA, pooledB := map[string][3]int{}, map[string][3]int{}
+	applicable := 0
 	for _, u := range c.Candidate {
 		if x, ok := b[fmt.Sprintf("%s/%d", u.CaseID, u.Repetition)]; ok {
+			applicable++
 			for _, r := range u.Scores {
 				for _, br := range x.Scores {
+					if r.AggregationKind == "count_derived_micro" {
+						a := pooledA[r.Metric]
+						a[0] += br.TP
+						a[1] += br.FP
+						a[2] += br.FN
+						pooledA[r.Metric] = a
+						q := pooledB[r.Metric]
+						q[0] += r.TP
+						q[1] += r.FP
+						q[2] += r.FN
+						pooledB[r.Metric] = q
+					}
 					if r.Metric == br.Metric && r.Value != nil && br.Value != nil {
 						pairs[r.Metric] = append(pairs[r.Metric], *r.Value-*br.Value)
 					}
@@ -291,8 +370,41 @@ func CompareVariants(c VariantComparison) ([]PairedDelta, []string, error) {
 			mean += x
 		}
 		mean /= float64(len(v))
-		out = append(out, PairedDelta{Metric: m, Delta: &mean, PairedUnits: len(v), ApplicableUnits: len(c.Candidate)})
+		med, sd := distribution(v)
+		out = append(out, PairedDelta{Metric: m, Delta: &mean, Median: med, PopulationSD: sd, AggregationKind: "paired_macro_diagnostic", PairedUnits: len(v), ApplicableUnits: applicable})
+	}
+	for m, a := range pooledA {
+		q := pooledB[m]
+		va := microValue(m, a[0], a[1], a[2])
+		vb := microValue(m, q[0], q[1], q[2])
+		if va != nil && vb != nil {
+			d := *vb - *va
+			out = append(out, PairedDelta{Metric: m, Delta: &d, AggregationKind: "count_derived_micro", PairedUnits: applicable, ApplicableUnits: applicable})
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Metric < out[j].Metric })
 	return out, warnings, nil
+}
+
+func distribution(v []float64) (*float64, *float64) {
+	if len(v) == 0 {
+		return nil, nil
+	}
+	s := append([]float64(nil), v...)
+	sort.Float64s(s)
+	m := 0.
+	for _, x := range s {
+		m += x
+	}
+	m /= float64(len(s))
+	md := s[len(s)/2]
+	if len(s)%2 == 0 {
+		md = (md + s[len(s)/2-1]) / 2
+	}
+	sd := 0.
+	for _, x := range s {
+		sd += (x - m) * (x - m)
+	}
+	sd = math.Sqrt(sd / float64(len(s)))
+	return &md, &sd
 }

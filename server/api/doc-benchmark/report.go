@@ -3,8 +3,8 @@ package docbenchmark
 import (
 	"bytes"
 	"encoding/json"
-	"html"
 	"sort"
+	"strings"
 )
 
 type BenchmarkReport struct {
@@ -18,6 +18,27 @@ type BenchmarkReport struct {
 	PairedDeltas         []PairedDelta             `json:"paired_deltas,omitempty"`
 	Warnings             []string                  `json:"warnings,omitempty"`
 	Provenance           map[string]string         `json:"provenance,omitempty"`
+	Completion           map[string]int            `json:"completion,omitempty"`
+	Failures             map[string]int            `json:"failures,omitempty"`
+	PrimaryVectors       map[string][]AggregateRow `json:"primary_vectors,omitempty"`
+	LowestCases          []ReportCase              `json:"lowest_cases,omitempty"`
+	Telemetry            map[string]AggregateRow   `json:"telemetry,omitempty"`
+	PricingSnapshot      map[string]string         `json:"pricing_snapshot,omitempty"`
+	EstimatedCost        *float64                  `json:"estimated_cost,omitempty"`
+	Pareto               []ParetoPoint             `json:"pareto,omitempty"`
+}
+
+type ReportCase struct {
+	CaseID          string   `json:"case_id"`
+	Score           *float64 `json:"score"`
+	ArtifactLinks   []string `json:"artifact_links,omitempty"`
+	DiagnosticLinks []string `json:"diagnostic_links,omitempty"`
+}
+type ParetoPoint struct {
+	Variant string   `json:"variant"`
+	Quality *float64 `json:"quality"`
+	Latency *float64 `json:"latency,omitempty"`
+	Cost    *float64 `json:"cost,omitempty"`
 }
 
 func (r BenchmarkReport) canonical() BenchmarkReport {
@@ -41,6 +62,14 @@ func (r BenchmarkReport) canonical() BenchmarkReport {
 			out.Provenance[k] = v
 		}
 	}
+	if r.LowestCases != nil {
+		out.LowestCases = append([]ReportCase(nil), r.LowestCases...)
+		sort.Slice(out.LowestCases, func(i, j int) bool { return out.LowestCases[i].CaseID < out.LowestCases[j].CaseID })
+	}
+	if r.Pareto != nil {
+		out.Pareto = append([]ParetoPoint(nil), r.Pareto...)
+		sort.Slice(out.Pareto, func(i, j int) bool { return out.Pareto[i].Variant < out.Pareto[j].Variant })
+	}
 	return out
 }
 func RenderJSON(r BenchmarkReport) ([]byte, error) {
@@ -55,12 +84,12 @@ func RenderMarkdown(r BenchmarkReport) string {
 	var b bytes.Buffer
 	b.WriteString("# Benchmark report\n\n")
 	if r.ID != "" {
-		b.WriteString("Report: `" + html.EscapeString(r.ID) + "`\n\n")
+		b.WriteString("Report: " + mdEscape(r.ID) + "\n\n")
 	}
 	if len(r.Warnings) > 0 {
 		b.WriteString("## Warnings\n\n")
 		for _, w := range r.Warnings {
-			b.WriteString("- " + html.EscapeString(w) + "\n")
+			b.WriteString("- " + mdEscape(w) + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -70,9 +99,16 @@ func RenderMarkdown(r BenchmarkReport) string {
 		if a.Value != nil {
 			v = fmtFloat(*a.Value)
 		}
-		b.WriteString("| " + html.EscapeString(a.Metric) + " | " + v + " | " + html.EscapeString(a.AggregationKind) + " |\n")
+		b.WriteString("| " + mdEscape(a.Metric) + " | " + v + " | " + mdEscape(a.AggregationKind) + " |\n")
 	}
 	return b.String()
+}
+func mdEscape(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }
 func fmtFloat(v float64) string    { return json.Number(formatFloat(v)).String() }
 func formatFloat(v float64) string { b, _ := json.Marshal(v); return string(b) }
