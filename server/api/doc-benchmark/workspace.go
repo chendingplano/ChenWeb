@@ -1,6 +1,7 @@
 package docbenchmark
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -29,6 +31,7 @@ type AllocationMarker struct {
 	WorkRoot         string    `json:"work_root"`
 	EvidenceRoot     string    `json:"evidence_root"`
 	Workspace        string    `json:"workspace"`
+	EvidencePath     string    `json:"evidence_path"`
 	CreatedAt        time.Time `json:"created_at"`
 	WorkIdentity     string    `json:"work_identity"`
 	EvidenceIdentity string    `json:"evidence_identity"`
@@ -87,24 +90,48 @@ func canonicalRoot(p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(abs, 0700); err != nil {
+	if err := mkdirNoSymlink(abs); err != nil {
 		return "", err
 	}
-	li, err := os.Lstat(abs)
+	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return "", err
 	}
-	if li.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("%w: symlink root", ErrUnsafePath)
+	return filepath.Clean(resolved), nil
+}
+func mkdirNoSymlink(p string) error {
+	abs, _ := filepath.Abs(p)
+	if i, e := os.Lstat(abs); e == nil {
+		if i.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: symlink", ErrUnsafePath)
+		}
+		return nil
 	}
-	return filepath.Clean(abs), nil
+	parent := filepath.Dir(abs)
+	if err := mkdirNoSymlink(parent); err != nil {
+		return err
+	}
+	if err := os.Mkdir(abs, 0700); err != nil && !os.IsExist(err) {
+		return err
+	}
+	i, e := os.Lstat(abs)
+	if e != nil {
+		return e
+	}
+	if i.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: symlink", ErrUnsafePath)
+	}
+	return nil
 }
 func rootIdentity(p string) string {
 	i, e := os.Stat(p)
 	if e != nil {
 		return ""
 	}
-	return fmt.Sprintf("%d:%d:%d", i.ModTime().UnixNano(), i.Size(), i.Mode())
+	if s, ok := i.Sys().(*syscall.Stat_t); ok {
+		return fmt.Sprintf("%d:%d:%d", s.Dev, s.Ino, i.Mode().Type())
+	}
+	return fmt.Sprintf("%d:%d", i.Size(), i.Mode().Type())
 }
 func strictDesc(path, root string) bool {
 	rel, err := filepath.Rel(root, path)
@@ -146,13 +173,17 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 	}
 	nonce := c.Nonce
 	if nonce == "" {
-		nonce = fmt.Sprintf("%d", time.Now().UnixNano())
+		b := make([]byte, 16)
+		if _, e := rand.Read(b); e != nil {
+			return nil, e
+		}
+		nonce = hex.EncodeToString(b)
 	}
 	c.WorkRoot, c.EvidenceRoot, c.Nonce = wr, er, nonce
 	wp := filepath.Join(wr, c.RunID, c.CaseID, c.AttemptID)
 	ep := filepath.Join(er, c.RunID, c.CaseID, c.AttemptID)
 	for _, p := range []string{filepath.Join(wr, c.RunID), filepath.Join(wr, c.RunID, c.CaseID), wp, filepath.Join(er, c.RunID), filepath.Join(er, c.RunID, c.CaseID), ep} {
-		if err := os.MkdirAll(p, 0700); err != nil {
+		if err := mkdirNoSymlink(p); err != nil {
 			return nil, err
 		}
 	}
@@ -162,7 +193,7 @@ func AllocateWorkspace(c WorkspaceConfig) (*WorkspaceAllocation, error) {
 	if err := noSymlinks(ep, er); err != nil {
 		return nil, err
 	}
-	m := AllocationMarker{AttemptID: c.AttemptID, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, Workspace: wp, CreatedAt: time.Now().UTC(), WorkIdentity: rootIdentity(wr), EvidenceIdentity: rootIdentity(er)}
+	m := AllocationMarker{AttemptID: c.AttemptID, Nonce: nonce, WorkRoot: wr, EvidenceRoot: er, Workspace: wp, EvidencePath: ep, CreatedAt: time.Now().UTC(), WorkIdentity: rootIdentity(wr), EvidenceIdentity: rootIdentity(er)}
 	mp := filepath.Join(wp, ".allocation.json")
 	b, _ := json.Marshal(m)
 	f, err := os.OpenFile(mp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -278,7 +309,7 @@ func (a *WorkspaceAllocation) validate() error {
 	if e = json.Unmarshal(b, &m); e != nil {
 		return e
 	}
-	if m.AttemptID != a.Config.AttemptID || m.Nonce != a.Config.Nonce || m.WorkRoot != a.Config.WorkRoot || m.EvidenceRoot != a.Config.EvidenceRoot {
+	if m.AttemptID != a.Config.AttemptID || m.Nonce == "" || m.Nonce != a.Config.Nonce || m.WorkRoot != a.Config.WorkRoot || m.EvidenceRoot != a.Config.EvidenceRoot || m.Workspace != a.WorkPath || m.EvidencePath != a.EvidencePath {
 		return ErrUnsafePath
 	}
 	if m.WorkIdentity != "" && (m.WorkIdentity != rootIdentity(a.Config.WorkRoot) || m.EvidenceIdentity != rootIdentity(a.Config.EvidenceRoot)) {
