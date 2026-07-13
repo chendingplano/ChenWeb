@@ -55,6 +55,11 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	if err := applyRuntimeOverrides(fixed, overrides); err != nil {
 		return nil, err
 	}
+	for _, e := range []error{fixed.PromptErr, fixed.ModelErr, fixed.SummaryPromptErr, fixed.SummaryModelErr, fixed.TranslationModelErr} {
+		if e != nil {
+			return nil, e
+		}
+	}
 	phase := []Processor{NewChunkingProcessor(inputStore, fixed, logger), NewGenerateSummariesProcessor(inputStore, fixed, logger), NewGenerateTopicsProcessor(inputStore, fixed, logger)}
 	all := []Processor{
 		NewStaticAnalyzerProcessor(inputStore, newClient(), logger), phase[0], phase[1], phase[2],
@@ -69,6 +74,18 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 		NewSceneBlocksProcessor(inputStore, SceneObjectsSQLStore{DB: ApiTypes.ProjectDBHandle}, newClient(), logger),
 	}
 	control := &ControlService{Logger: logger, InputStore: inputStore, EventStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, RunStore: SQLStore{DB: ApiTypes.ProjectDBHandle}, StopStore: StopRequestSQLStore{DB: ApiTypes.ProjectDBHandle}, Now: time.Now, MaxDocProcessPipelines: MaxDocProcessPipelinesFromEnv(), BlockingProcessor: NewBlockingProcessor(inputStore, logger), Processors: filterProcessors(all, configuredNames())}
+	for _, p := range control.Processors {
+		if err := processorInitError(p); err != nil {
+			return nil, err
+		}
+	}
+	for _, p := range control.Processors {
+		if m, ok := p.(*MetricsProcessor); ok {
+			if err := applyMetricsRuntimeOverrides(m, overrides); err != nil {
+				return nil, err
+			}
+		}
+	}
 	r := &ProductionRuntime{Control: control, Processors: control.Processors, services: map[string]any{"chunking": fixed.RuntimeConfig()}}
 	for _, p := range control.Processors {
 		if m, ok := p.(*MetricsProcessor); ok {
@@ -77,6 +94,64 @@ func NewProductionRuntime(args ...any) (*ProductionRuntime, error) {
 	}
 	r.config = makeResolvedConfig(control, r.services)
 	return r, nil
+}
+
+func processorInitError(p Processor) error {
+	switch x := p.(type) {
+	case *MetricsProcessor:
+		for _, e := range []error{x.MentionPromptErr, x.RelationPromptErr, x.MergeResolvePromptErr, x.MentionModelErr, x.RelationModelErr, x.MergeResolveModelErr, x.FallbackMentionModelErr, x.FallbackMergeResolveModelErr} {
+			if e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+
+func applyMetricsRuntimeOverrides(p *MetricsProcessor, o map[string]string) error {
+	for k, v := range o {
+		switch strings.ToUpper(k) {
+		case "EXTRACT_METRIC_CANDIDATES_PROMPT":
+			p.MentionPromptText, p.MentionPromptRef, p.MentionPromptPath, p.MentionPromptErr = loadPromptByRef(v)
+		case "ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT":
+			p.RelationPromptText, p.RelationPromptRef, p.RelationPromptPath, p.RelationPromptErr = loadPromptByRef(v)
+			p.PromptText, p.PromptRef, p.PromptPath, p.PromptErr = p.RelationPromptText, p.RelationPromptRef, p.RelationPromptPath, p.RelationPromptErr
+		case "METRIC_MERGE_RESOLVE_PROMPT":
+			p.MergeResolvePromptText, p.MergeResolvePromptRef, p.MergeResolvePromptPath, p.MergeResolvePromptErr = loadPromptByRef(v)
+		case "EXTRACT_METRIC_CANDIDATES_MODEL_NAME":
+			p.MentionModelRef, p.MentionModelCfgPath, p.MentionModelCfg, p.MentionModelErr = loadModelConfigByRef(v, "MODEL_DEF_FILE")
+			p.MentionModelName = p.MentionModelCfg.ModelName
+		case "ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME":
+			p.RelationModelRef, p.RelationModelCfgPath, p.RelationModelCfg, p.RelationModelErr = loadModelConfigByRef(v, "MODEL_DEF_FILE")
+			p.RelationModelName = p.RelationModelCfg.ModelName
+			p.ModelRef, p.ModelCfgPath, p.ModelName, p.ModelErr = p.RelationModelRef, p.RelationModelCfgPath, p.RelationModelName, p.RelationModelErr
+		case "METRIC_MERGE_RESOLVE_MODEL_NAME":
+			p.MergeResolveModelRef, p.MergeResolveModelCfgPath, p.MergeResolveModelCfg, p.MergeResolveModelErr = loadModelConfigByRef(v, "MODEL_DEF_FILE")
+			p.MergeResolveModelName = p.MergeResolveModelCfg.ModelName
+		case "EXTRACT_METRIC_CANDIDATES_MODEL_FALLBACK":
+			p.FallbackMentionModelRef, p.FallbackMentionModelCfgPath, p.FallbackMentionModelCfg, p.FallbackMentionModelErr = loadModelConfigByRef(v, "MODEL_DEF_FILE")
+			p.FallbackMentionModelName = p.FallbackMentionModelCfg.ModelName
+		case "METRIC_MERGE_RESOLVE_MODEL_FALLBACK":
+			p.FallbackMergeResolveModelRef, p.FallbackMergeResolveModelCfgPath, p.FallbackMergeResolveModelCfg, p.FallbackMergeResolveModelErr = loadModelConfigByRef(v, "MODEL_DEF_FILE")
+			p.FallbackMergeResolveModelName = p.FallbackMergeResolveModelCfg.ModelName
+		case "METRIC_ENRICH_GROUP_SIZE":
+			n, e := strconv.Atoi(v)
+			if e != nil || n < 1 {
+				return fmt.Errorf("invalid METRIC_ENRICH_GROUP_SIZE")
+			}
+			p.MetricEnrichGroupSize = n
+		case "EXTRACT_METRICS_MAX_TASKS":
+			n, e := strconv.Atoi(v)
+			if e != nil || n < 1 {
+				return fmt.Errorf("invalid EXTRACT_METRICS_MAX_TASKS")
+			}
+			p.MaxTasks = n
+		case "CHUNK_SIZE", "CHUNK_OVERLAP_PERCENT":
+		default:
+			continue
+		}
+	}
+	return nil
 }
 
 func applyRuntimeOverrides(f *FixedSizeChunkingService, o map[string]string) error {
@@ -94,6 +169,8 @@ func applyRuntimeOverrides(f *FixedSizeChunkingService, o map[string]string) err
 				return fmt.Errorf("invalid CHUNK_OVERLAP_PERCENT")
 			}
 			f.OverlapPercent = n
+		case "EXTRACT_METRIC_CANDIDATES_PROMPT", "ENRICH_METRICS_PROMPT", "EXTRACT_METRICS_PROMPT", "METRIC_MERGE_RESOLVE_PROMPT", "EXTRACT_METRIC_CANDIDATES_MODEL_NAME", "ENRICH_METRICS_MODEL_NAME", "EXTRACT_METRICS_MODEL_NAME", "METRIC_MERGE_RESOLVE_MODEL_NAME", "EXTRACT_METRIC_CANDIDATES_MODEL_FALLBACK", "METRIC_MERGE_RESOLVE_MODEL_FALLBACK", "METRIC_ENRICH_GROUP_SIZE", "EXTRACT_METRICS_MAX_TASKS":
+			// Applied after the metrics processor is initialized.
 		default:
 			return fmt.Errorf("unsupported runtime override %q", k)
 		}

@@ -80,6 +80,7 @@ type FixedSizeChunkingService struct {
 	OverlapPercent              int
 	ModelRef                    string
 	ModelCfgPath                string
+	ModelCfg                    structureModelConfig
 	ModelErr                    error
 	ModelName                   string
 	PromptText                  string
@@ -91,6 +92,7 @@ type FixedSizeChunkingService struct {
 	ExtractTopicsMaxTasks       int
 	SummaryModelRef             string
 	SummaryModelCfgPath         string
+	SummaryModelCfg             structureModelConfig
 	SummaryModelErr             error
 	SummaryModelName            string
 	SummaryPromptText           string
@@ -230,6 +232,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		OverlapPercent:             envInt("CHUNK_OVERLAP_PERCENT", DefaultOverlapPercent, 0),
 		ModelRef:                   modelRef,
 		ModelCfgPath:               modelCfgPath,
+		ModelCfg:                   modelCfg,
 		ModelErr:                   modelErr,
 		ModelName:                  modelCfg.ModelName,
 		PromptText:                 promptText,
@@ -241,6 +244,7 @@ func NewFixedSizeChunkingService(store Store, extractor LLMJSONExtractor, _ ApiT
 		ExtractTopicsMaxTasks:      envInt("EXTRACT_TOPICS_MAX_TASKS", 1, 1),
 		SummaryModelRef:            summaryModelRef,
 		SummaryModelCfgPath:        summaryModelCfgPath,
+		SummaryModelCfg:            summaryModelCfg,
 		SummaryModelErr:            summaryModelErr,
 		SummaryModelName:           summaryModelCfg.ModelName,
 		SummaryPromptText:          summaryPromptText,
